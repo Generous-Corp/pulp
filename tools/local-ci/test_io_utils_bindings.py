@@ -67,6 +67,19 @@ class IoUtilsBindingTests(unittest.TestCase):
             ],
         )
 
+    def test_install_io_utils_helpers_wires_named_exports(self) -> None:
+        fake = FakeIoUtils()
+        bindings = {"_io_utils": fake}
+        before = Path("before.png")
+        after = Path("after.png")
+
+        io_utils_bindings.install_io_utils_helpers(bindings, ("tail_lines", "image_change_summary"))
+
+        self.assertEqual(bindings["tail_lines"](before, 12), ["tail"])
+        self.assertEqual(bindings["image_change_summary"](before, after), {"changed": True})
+        self.assertEqual(bindings["tail_lines"].__name__, "tail_lines")
+        self.assertEqual([call[0] for call in fake.calls], ["tail_lines", "image_change_summary"])
+
 
 if __name__ == "__main__":
     unittest.main()

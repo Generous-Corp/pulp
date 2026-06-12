@@ -217,30 +217,7 @@ def probe_uploaded_bundle_size(host: str, remote_name: str, *, config: dict) -> 
 
 from io_utils import LockBusyError  # noqa: E402  -- re-exported for callers catching the facade class
 
-
-def tail_lines(path: Path, limit: int = 80) -> list[str]:
-    return _io_utils_bindings.tail_lines(globals(), path, limit)
-
-
-def trim_line(value: str, max_len: int = 160) -> str:
-    return _io_utils_bindings.trim_line(globals(), value, max_len)
-
-
-def atomic_write_text(path: Path, text: str) -> None:
-    return _io_utils_bindings.atomic_write_text(globals(), path, text)
-
-
-def image_change_summary(before_path: Path, after_path: Path, *, diff_output_path: Path | None = None) -> dict:
-    return _io_utils_bindings.image_change_summary(
-        globals(),
-        before_path,
-        after_path,
-        diff_output_path=diff_output_path,
-    )
-
-
-def file_lock(path: Path, *, blocking: bool):
-    return _io_utils_bindings.file_lock(globals(), path, blocking=blocking)
+_io_utils_bindings.install_io_utils_helpers(globals())
 
 
 _git_helpers_bindings.install_git_helpers(globals())
@@ -474,32 +451,14 @@ def save_config(config: dict) -> None:
     return _config_evidence_bindings.save_config(globals(), config)
 
 
-def normalize_job(job: dict) -> dict:
-    return _job_queue_bindings.normalize_job(globals(), job)
-
-
-def load_queue_unlocked() -> list[dict]:
-    return _job_queue_bindings.load_queue_unlocked(globals())
-
-
-def save_queue_unlocked(queue: list[dict]) -> None:
-    return _job_queue_bindings.save_queue_unlocked(globals(), queue)
+_job_queue_bindings.install_job_queue_helpers(globals())
 
 
 def load_queue() -> list[dict]:
     return _queue_bindings.load_queue(globals())
 
 
-def enabled_targets(config: dict) -> list[str]:
-    return _target_bindings.enabled_targets(globals(), config)
-
-
-def parse_targets_arg(value: str | None) -> list[str] | None:
-    return _target_bindings.parse_targets_arg(globals(), value)
-
-
-def resolve_targets(config: dict, requested: list[str] | None) -> list[str]:
-    return _target_bindings.resolve_targets(globals(), config, requested)
+_target_bindings.install_target_helpers(globals())
 
 
 _cloud_bindings.install_cloud_helpers(globals())

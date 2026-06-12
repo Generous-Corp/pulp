@@ -51,6 +51,30 @@ class TargetBindingsTests(unittest.TestCase):
         self.assertEqual(calls[1][1], ("mac,windows",))
         self.assertEqual(calls[2][1], (config, requested))
 
+    def test_install_target_helpers_wires_named_exports(self):
+        calls = []
+
+        def make_runner(name, value):
+            def runner(*args, **kwargs):
+                calls.append((name, args, kwargs))
+                return value
+
+            return runner
+
+        bindings = {
+            "_targets": types.SimpleNamespace(
+                enabled_targets=make_runner("enabled_targets", ["mac"]),
+                resolve_targets=make_runner("resolve_targets", ["mac"]),
+            )
+        }
+        config = {"targets": {"mac": {"enabled": True}}}
+        self.mod.install_target_helpers(bindings, ("enabled_targets", "resolve_targets"))
+
+        self.assertEqual(bindings["enabled_targets"](config), ["mac"])
+        self.assertEqual(bindings["resolve_targets"](config, ["mac"]), ["mac"])
+        self.assertEqual(bindings["enabled_targets"].__name__, "runner")
+        self.assertEqual([call[0] for call in calls], ["enabled_targets", "resolve_targets"])
+
 
 if __name__ == "__main__":
     unittest.main()

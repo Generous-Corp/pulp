@@ -7,6 +7,16 @@ from pathlib import Path
 from typing import Any
 
 from binding_utils import binding as _binding
+from binding_utils import install_module_attrs
+
+
+IO_UTILS_EXPORTS = (
+    "tail_lines",
+    "trim_line",
+    "atomic_write_text",
+    "image_change_summary",
+    "file_lock",
+)
 
 
 def tail_lines(bindings: Mapping[str, Any], path: Path, limit: int = 80) -> list[str]:
@@ -37,3 +47,7 @@ def image_change_summary(
 
 def file_lock(bindings: Mapping[str, Any], path: Path, *, blocking: bool):
     return _binding(bindings, "_io_utils").file_lock(path, blocking=blocking)
+
+
+def install_io_utils_helpers(bindings: dict[str, Any], names: tuple[str, ...] = IO_UTILS_EXPORTS) -> None:
+    install_module_attrs(bindings, "_io_utils", names)

@@ -6,6 +6,14 @@ from collections.abc import Mapping
 from typing import Any
 
 from binding_utils import binding as _binding
+from binding_utils import install_module_attrs
+
+
+TARGET_EXPORTS = (
+    "enabled_targets",
+    "parse_targets_arg",
+    "resolve_targets",
+)
 
 
 def enabled_targets(bindings: Mapping[str, Any], config: dict) -> list[str]:
@@ -18,3 +26,7 @@ def parse_targets_arg(bindings: Mapping[str, Any], value: str | None) -> list[st
 
 def resolve_targets(bindings: Mapping[str, Any], config: dict, requested: list[str] | None) -> list[str]:
     return _binding(bindings, "_targets").resolve_targets(config, requested)
+
+
+def install_target_helpers(bindings: dict[str, Any], names: tuple[str, ...] = TARGET_EXPORTS) -> None:
+    install_module_attrs(bindings, "_targets", names)

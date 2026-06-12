@@ -51,6 +51,29 @@ class JobQueueBindingsTests(unittest.TestCase):
         self.assertEqual(calls[1][1], ())
         self.assertEqual(calls[2][1], (queue,))
 
+    def test_install_job_queue_helpers_wires_named_exports(self):
+        calls = []
+
+        def make_runner(name, value):
+            def runner(*args, **kwargs):
+                calls.append((name, args, kwargs))
+                return value
+
+            return runner
+
+        bindings = {
+            "_job_queue": types.SimpleNamespace(
+                normalize_job=make_runner("normalize_job", {"id": "job-1"}),
+                load_queue_unlocked=make_runner("load_queue_unlocked", [{"id": "job-1"}]),
+            )
+        }
+        self.mod.install_job_queue_helpers(bindings, ("normalize_job", "load_queue_unlocked"))
+
+        self.assertEqual(bindings["normalize_job"]({"branch": "feature/x"}), {"id": "job-1"})
+        self.assertEqual(bindings["load_queue_unlocked"](), [{"id": "job-1"}])
+        self.assertEqual(bindings["normalize_job"].__name__, "runner")
+        self.assertEqual([call[0] for call in calls], ["normalize_job", "load_queue_unlocked"])
+
 
 if __name__ == "__main__":
     unittest.main()
