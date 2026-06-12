@@ -183,12 +183,20 @@ bool extract_archive(const fs::path& archive, const fs::path& dest,
 
 #ifdef _WIN32
     if (format == "zip") {
-        cmd = "powershell -Command \"Expand-Archive -Force -Path '"
-              + archive.string() + "' -DestinationPath '" + dest.string() + "'\"";
-    } else if (format == "tar.gz" || format == "tar.xz") {
-        cmd = "tar xf \"" + archive.string() + "\" -C \"" + dest.string() + "\"";
+        auto r = pulp::platform::exec(
+            "powershell",
+            {"-NoProfile", "-Command",
+             "Expand-Archive -Force -LiteralPath $args[0] -DestinationPath $args[1]",
+             archive.string(), dest.string()},
+            120000);
+        return r.exit_code == 0;
     }
-    auto r = pulp::platform::exec("cmd", {"/c", cmd}, 120000);
+    if (format == "tar.gz" || format == "tar.xz") {
+        auto r = pulp::platform::exec(
+            "tar", {"xf", archive.string(), "-C", dest.string()}, 120000);
+        return r.exit_code == 0;
+    }
+    return false;
 #else
     if (format == "zip") {
         cmd = "unzip -o -q '" + archive.string() + "' -d '" + dest.string() + "'";
@@ -196,11 +204,12 @@ bool extract_archive(const fs::path& archive, const fs::path& dest,
         cmd = "tar xzf '" + archive.string() + "' -C '" + dest.string() + "'";
     } else if (format == "tar.xz") {
         cmd = "tar xJf '" + archive.string() + "' -C '" + dest.string() + "'";
+    } else {
+        return false;
     }
     auto r = pulp::platform::exec("/bin/sh", {"-c", cmd}, 120000);
-#endif
-
     return r.exit_code == 0;
+#endif
 }
 
 // ── Tool Location ──
