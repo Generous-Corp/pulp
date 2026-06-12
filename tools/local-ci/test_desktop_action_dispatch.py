@@ -134,6 +134,76 @@ class DesktopActionDispatchTests(unittest.TestCase):
         self.assertIsNone(runner)
         self.assertIn("desktop click is not implemented", error)
 
+    def test_inspect_runner_selects_adapter_snapshot_policy(self):
+        runner, error = self.mod.desktop_inspect_runner(
+            args=self.args(bundle_id="com.example.App", launch_command=None),
+            target={"adapter": "macos-local"},
+            sys_platform="darwin",
+            **self.deps(),
+        )
+
+        self.assertIsNone(error)
+        self.assertEqual(runner(), {"label": "macos"})
+        self.assertEqual(self.calls[-1][0], "macos")
+        self.assertEqual(self.calls[-1][2]["action_name"], "inspect")
+        self.assertFalse(self.calls[-1][2]["capture_ui_snapshot"])
+        self.assertFalse(self.calls[-1][2]["capture_before"])
+        self.assertEqual(self.calls[-1][2]["settle_secs"], 0.0)
+
+        runner, error = self.mod.desktop_inspect_runner(
+            args=self.args(target="ubuntu", pulp_app_automation=True),
+            target={"adapter": "linux-xvfb"},
+            sys_platform="darwin",
+            **self.deps(),
+        )
+
+        self.assertIsNone(error)
+        self.assertEqual(runner(), {"label": "linux"})
+        self.assertEqual(self.calls[-1][0], "linux")
+        self.assertTrue(self.calls[-1][2]["capture_ui_snapshot"])
+        self.assertTrue(self.calls[-1][2]["pulp_app_automation"])
+
+        runner, error = self.mod.desktop_inspect_runner(
+            args=self.args(target="windows", pulp_app_automation=False),
+            target={"adapter": "windows-session-agent"},
+            sys_platform="darwin",
+            **self.deps(),
+        )
+
+        self.assertIsNone(error)
+        self.assertEqual(runner(), {"label": "windows"})
+        self.assertEqual(self.calls[-1][0], "windows")
+        self.assertFalse(self.calls[-1][2]["capture_ui_snapshot"])
+        self.assertFalse(self.calls[-1][2]["pulp_app_automation"])
+
+    def test_inspect_runner_reports_launch_mode_and_adapter_errors(self):
+        runner, error = self.mod.desktop_inspect_runner(
+            args=self.args(launch_command=None, bundle_id=None),
+            target={"adapter": "macos-local"},
+            sys_platform="darwin",
+            **self.deps(),
+        )
+        self.assertIsNone(runner)
+        self.assertEqual(error, "desktop inspect requires exactly one of --command or --bundle-id.")
+
+        runner, error = self.mod.desktop_inspect_runner(
+            args=self.args(target="ubuntu", bundle_id="com.example.App"),
+            target={"adapter": "linux-xvfb"},
+            sys_platform="darwin",
+            **self.deps(),
+        )
+        self.assertIsNone(runner)
+        self.assertEqual(error, "linux-xvfb desktop inspect currently supports --command only.")
+
+        runner, error = self.mod.desktop_inspect_runner(
+            args=self.args(target="other"),
+            target={"adapter": "remote-session-agent"},
+            sys_platform="darwin",
+            **self.deps(),
+        )
+        self.assertIsNone(runner)
+        self.assertIn("desktop inspect is not implemented", error)
+
 
 if __name__ == "__main__":
     unittest.main()
