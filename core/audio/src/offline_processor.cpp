@@ -3,6 +3,7 @@
 #include <vector>
 #include <algorithm>
 #include <cstring>
+#include <utility>
 
 namespace pulp::audio {
 
@@ -24,6 +25,22 @@ bool has_valid_block_schedule(const OfflineRenderOptions& options) {
     if (options.render_speed_ratio <= 0.0) return false;
     for (int block_size : options.block_size_schedule) {
         if (block_size <= 0) return false;
+    }
+    return true;
+}
+
+bool has_valid_stems(const std::vector<OfflineRenderStem>& stems,
+                     uint32_t channels) {
+    std::vector<bool> claimed(channels, false);
+    for (const auto& stem : stems) {
+        if (stem.name.empty() || stem.channel_count == 0) return false;
+        if (stem.first_channel >= channels) return false;
+        if (stem.channel_count > channels - stem.first_channel) return false;
+        for (uint32_t channel = stem.first_channel;
+             channel < stem.first_channel + stem.channel_count; ++channel) {
+            if (claimed[channel]) return false;
+            claimed[channel] = true;
+        }
     }
     return true;
 }
@@ -127,6 +144,40 @@ std::optional<AudioFileData> offline_render(
     }
 
     return output;
+}
+
+std::optional<OfflineRenderStemResult> offline_render_stems(
+    const AudioFileData& input,
+    OfflineRenderCallback render_fn,
+    const OfflineRenderOptions& options,
+    const std::vector<OfflineRenderStem>& stems)
+{
+    if (!has_consistent_channel_lengths(input)
+        || !has_valid_stems(stems, input.num_channels())) {
+        return std::nullopt;
+    }
+
+    auto mix = offline_render(input, std::move(render_fn), options);
+    if (!mix) return std::nullopt;
+
+    OfflineRenderStemResult result;
+    result.mix = std::move(*mix);
+    result.stems.reserve(stems.size());
+
+    for (const auto& stem : stems) {
+        OfflineRenderedStem rendered;
+        rendered.name = stem.name;
+        rendered.audio.sample_rate = result.mix.sample_rate;
+        rendered.audio.channels.reserve(stem.channel_count);
+        for (uint32_t channel = stem.first_channel;
+             channel < stem.first_channel + stem.channel_count; ++channel) {
+            rendered.audio.channels.push_back(
+                result.mix.channels[static_cast<size_t>(channel)]);
+        }
+        result.stems.push_back(std::move(rendered));
+    }
+
+    return result;
 }
 
 std::optional<AudioFileData> offline_process(
