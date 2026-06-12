@@ -4,6 +4,7 @@
 #include <pulp/format/headless.hpp>
 #include <pulp/format/registry.hpp>
 #include <cmath>
+#include <vector>
 
 // Simple test processor for headless testing
 namespace {
@@ -529,6 +530,48 @@ TEST_CASE("HeadlessHost renders deterministic offline AudioFileData blocks",
     REQUIRE_THAT(last_context.position_beats,
                  WithinAbs(4.0 + 2.0 / 48000.0 * 1.5, 1e-12));
     REQUIRE_THAT(last_context.tempo_bpm, WithinAbs(90.0, 1e-12));
+}
+
+TEST_CASE("HeadlessHost offline render matches direct process for stateless effects",
+          "[headless][offline][parity][advanced][phase3]") {
+    pulp::format::HeadlessHost direct_host(create_test_gain);
+    direct_host.prepare(48000.0, 4);
+    direct_host.state().set_value(1, -3.0f);
+
+    pulp::audio::Buffer<float> direct_in(2, 4), direct_out(2, 4);
+    for (std::size_t frame = 0; frame < 4; ++frame) {
+        direct_in.channel(0)[frame] = 0.25f * static_cast<float>(frame + 1);
+        direct_in.channel(1)[frame] = -0.5f * static_cast<float>(frame + 1);
+    }
+    const float* direct_in_ptrs[2] = {
+        direct_in.channel(0).data(),
+        direct_in.channel(1).data(),
+    };
+    pulp::audio::BufferView<const float> direct_in_view(
+        direct_in_ptrs, 2, 4);
+    auto direct_out_view = direct_out.view();
+    direct_host.process(direct_out_view, direct_in_view);
+
+    pulp::format::HeadlessHost offline_host(create_test_gain);
+    offline_host.prepare(48000.0, 4);
+    offline_host.state().set_value(1, -3.0f);
+    pulp::audio::AudioFileData offline_input;
+    offline_input.sample_rate = 48000;
+    offline_input.channels = {
+        {0.25f, 0.5f, 0.75f, 1.0f},
+        {-0.5f, -1.0f, -1.5f, -2.0f},
+    };
+    pulp::audio::OfflineRenderOptions options;
+    options.block_size_schedule = {2, 2};
+    auto offline_output = offline_host.render_offline(offline_input, options);
+
+    REQUIRE(offline_output.has_value());
+    REQUIRE(offline_output->channels[0]
+            == std::vector<float>(direct_out.channel(0).begin(),
+                                  direct_out.channel(0).end()));
+    REQUIRE(offline_output->channels[1]
+            == std::vector<float>(direct_out.channel(1).begin(),
+                                  direct_out.channel(1).end()));
 }
 
 TEST_CASE("HeadlessHost forwards explicit MIDI buffers",
