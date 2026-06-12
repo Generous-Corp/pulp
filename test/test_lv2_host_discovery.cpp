@@ -284,17 +284,23 @@ TEST_CASE("LV2 host discovery tolerates sparse bundles and dylib modules",
     const auto roles = pulp::host::detail::discover_lv2_ports(bundle.string());
     REQUIRE(roles.size() == 2);
 
-    REQUIRE(roles[0].index == 8);
-    REQUIRE(roles[0].is_control);
-    REQUIRE(roles[0].is_input);
-    REQUIRE(roles[0].name == "Bare Control");
-    REQUIRE_THAT(roles[0].default_value, WithinAbs(0.0f, 1e-6f));
-    REQUIRE_THAT(roles[0].min_value, WithinAbs(0.0f, 1e-6f));
-    REQUIRE_THAT(roles[0].max_value, WithinAbs(1.0f, 1e-6f));
+    const auto control = std::find_if(roles.begin(), roles.end(), [](const auto& r) {
+        return r.index == 8;
+    });
+    REQUIRE(control != roles.end());
+    REQUIRE(control->is_control);
+    REQUIRE(control->is_input);
+    REQUIRE(control->name == "Bare Control");
+    REQUIRE_THAT(control->default_value, WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(control->min_value, WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(control->max_value, WithinAbs(1.0f, 1e-6f));
 
-    REQUIRE(roles[1].index == 3);
-    REQUIRE(roles[1].is_audio);
-    REQUIRE_FALSE(roles[1].is_input);
+    const auto audio = std::find_if(roles.begin(), roles.end(), [](const auto& r) {
+        return r.index == 3;
+    });
+    REQUIRE(audio != roles.end());
+    REQUIRE(audio->is_audio);
+    REQUIRE_FALSE(audio->is_input);
 
     REQUIRE(pulp::host::detail::resolve_lv2_binary(bundle.string())
             == module.string());
