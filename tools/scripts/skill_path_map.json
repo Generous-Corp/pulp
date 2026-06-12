@@ -105,6 +105,26 @@
         ".claude/commands/**"
       ]
     },
+    "kits": {
+      "paths": [
+        "tools/kits/**",
+        "fixtures/packages/**",
+        "tools/cli/kit_commands.*",
+        "planning/2026-06-11-pulp-package-format-proposal.md",
+        "docs/reference/cli.md",
+        "docs/status/cli-commands.yaml"
+      ]
+    },
+    "content": {
+      "paths": [
+        "tools/kits/**",
+        "fixtures/packages/basic-content-pack/**",
+        "tools/cli/content_commands.*",
+        "planning/2026-06-11-pulp-package-format-proposal.md",
+        "docs/reference/cli.md",
+        "docs/status/cli-commands.yaml"
+      ]
+    },
     "cmajor-external": {
       "paths": [
         "tools/scripts/cmajor_external.py",

@@ -127,6 +127,9 @@ harness.process_blocks(10);
 harness.run_validator("pluginval", "build/VST3/MyPlugin.vst3");
 harness.run_validator("clap-validator", "build/CLAP/MyPlugin.clap");
 
+// Validate the plugin's embedded runtime/content manifest
+harness.validate_plugin_runtime_manifest("build/VST3/MyPlugin.vst3");
+
 // Record runtime load/xrun telemetry with the shared overload policy
 harness.record_runtime_overload(load_snapshot, xrun_count);
 
@@ -139,6 +142,16 @@ The report JSON is machine-readable and can be consumed by CI scripts or agents.
 Runtime overload entries include severity, shed/bypass recommendations, xrun
 counts, callback load, and validation-failure status so host-lab reports use the
 same policy as UI/diagnostic surfaces.
+
+Plugins that support installed content packs should embed
+`pulp.plugin-runtime.json` in bundle resources. `pulp_add_plugin()` writes
+desktop VST3/AU-style bundles to `Contents/Resources/`, AUv3/iOS flat bundles to
+`Resources/`, and LV2 bundles to the bundle root. `ValidationHarness` checks
+those locations in that order. Single-file plugin fixtures can use a sibling
+`<plugin-stem>.pulp.plugin-runtime.json` sidecar. The harness parses the same
+`pulp.plugin-runtime.v1` schema used by the runtime content registry and compares
+`pluginId` against the processor descriptor's `bundle_id` unless an explicit
+expected id is supplied.
 
 ## Sanitizer Builds
 

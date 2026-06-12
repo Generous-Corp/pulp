@@ -73,4 +73,16 @@ inline std::filesystem::path find_project_root() {
     return {};
 }
 
+inline std::filesystem::path resolve_cli_binary(const std::filesystem::path& root) {
+    const std::filesystem::path candidates[] = {
+        root / "build" / "pulp",
+        root / "build" / "tools" / "cli" / "pulp",
+        root / "build" / "tools" / "cli" / "pulp-cpp",
+    };
+    for (const auto& candidate : candidates) {
+        if (std::filesystem::exists(candidate)) return candidate;
+    }
+    return candidates[0];
+}
+
 }  // namespace pulp_mcp

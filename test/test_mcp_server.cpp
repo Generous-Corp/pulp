@@ -242,6 +242,40 @@ std::filesystem::path make_fake_pulp_cli(const std::filesystem::path& root) {
     return cli;
 }
 
+std::filesystem::path make_package_workflow_fake_pulp_cli(const std::filesystem::path& root,
+                                                          const std::filesystem::path& log_path) {
+    const auto cli = root / "build" / "tools" / "cli" / "pulp";
+    std::filesystem::create_directories(cli.parent_path());
+    std::ofstream script(cli);
+#if defined(_WIN32)
+    script << "@echo off\r\n"
+           << "echo package workflow fake CLI is POSIX-only";
+#else
+    script << "#!/bin/sh\n"
+           << "log=" << shell_quote(log_path.string()) << "\n"
+           << "printf '%s\\n' \"$*\" >> \"$log\"\n"
+           << "case \"$1 $2\" in\n"
+           << "  'kit search') echo '{\"ok\":true,\"lane\":\"kit\",\"results\":[{\"id\":\"dev.pulp.fixtures.basic-ui-kit\",\"lane\":\"kit\"}]}' ;;\n"
+           << "  'kit inspect') echo '{\"ok\":true,\"summary\":{\"id\":\"dev.pulp.fixtures.basic-ui-kit\"}}' ;;\n"
+           << "  'kit plan') echo '{\"ok\":true,\"actions\":[{\"kind\":\"lock-entry\"},{\"kind\":\"generated-cmake\"}]}' ;;\n"
+           << "  'kit apply') echo 'OK: Applied kit dev.pulp.fixtures.basic-ui-kit' ;;\n"
+           << "  'content validate') echo '{\"ok\":true,\"content\":{\"id\":\"dev.pulp.fixtures.basic-content-pack\"}}' ;;\n"
+           << "  'content preview') echo '{\"ok\":true,\"requires_restart\":false,\"install_policy\":[{\"kind\":\"presets\",\"policy\":\"manual-rescan\"}]}' ;;\n"
+           << "  'content install') echo 'OK: Installed content pack dev.pulp.fixtures.basic-content-pack' ;;\n"
+           << "  'validate --json') echo '{\"ok\":true,\"reports\":[]}' ;;\n"
+           << "  *) echo \"fake-pulp $*\" ;;\n"
+           << "esac\n";
+#endif
+    script.close();
+    std::filesystem::permissions(
+        cli,
+        std::filesystem::perms::owner_exec |
+            std::filesystem::perms::owner_read |
+            std::filesystem::perms::owner_write,
+        std::filesystem::perm_options::add);
+    return cli;
+}
+
 std::filesystem::path make_fake_command(const std::filesystem::path& dir,
                                         const std::string& name,
                                         const std::string& label) {
@@ -582,6 +616,27 @@ TEST_CASE("MCP tool listing and unknown dispatch stay stable", "[mcp][tools]") {
     require_contains(tools, R"JSON("name":"pulp_audio_excerpt_find")JSON");
     require_contains(tools, R"JSON("name":"pulp_docs_search")JSON");
     require_contains(tools, R"JSON("name":"pulp_inspect_audio")JSON");
+    require_contains(tools, R"JSON("name":"pulp_kit")JSON");
+    require_contains(tools, R"JSON("name":"pulp_kit_search")JSON");
+    require_contains(tools, R"JSON("name":"pulp_kit_validate")JSON");
+    require_contains(tools, "validation.generatedProjectDiffs review evidence");
+    require_contains(tools, R"JSON("name":"pulp_kit_plan")JSON");
+    require_contains(tools, R"JSON("name":"pulp_kit_verify")JSON");
+    require_contains(tools, "UI-kit integration preview artifacts");
+    require_contains(tools, R"JSON("name":"pulp_kit_apply")JSON");
+    require_contains(tools, R"JSON("name":"pulp_kit_remove")JSON");
+    require_contains(tools, "constrained lock-recorded kit paths");
+    require_contains(tools, R"JSON("name":"pulp_kit_pack")JSON");
+    require_contains(tools, R"JSON("name":"pulp_kit_publish_check")JSON");
+    require_contains(tools, R"JSON("name":"pulp_content")JSON");
+    require_contains(tools, R"JSON("name":"pulp_content_validate")JSON");
+    require_contains(tools, R"JSON("name":"pulp_content_preview")JSON");
+    require_contains(tools, R"JSON("name":"pulp_content_install")JSON");
+    require_contains(tools, R"JSON("name":"pulp_content_update")JSON");
+    require_contains(tools, R"JSON("name":"pulp_content_list")JSON");
+    require_contains(tools, R"JSON("name":"pulp_content_rescan")JSON");
+    require_contains(tools, R"JSON("name":"pulp_content_remove")JSON");
+    require_contains(tools, R"JSON("name":"pulp_content_reveal")JSON");
 
     auto unknown = handle_request(tool_call("5", "pulp_does_not_exist"));
     require_contains(unknown, R"JSON("id":5)JSON");
@@ -607,6 +662,15 @@ TEST_CASE("MCP tools/list advertises every tool the dispatcher handles",
         "pulp_audio_read_bundle",
         "pulp_build",
         "pulp_compat",
+        "pulp_content",
+        "pulp_content_install",
+        "pulp_content_list",
+        "pulp_content_preview",
+        "pulp_content_rescan",
+        "pulp_content_remove",
+        "pulp_content_reveal",
+        "pulp_content_update",
+        "pulp_content_validate",
         "pulp_create",
         "pulp_docs_check",
         "pulp_docs_search",
@@ -618,6 +682,17 @@ TEST_CASE("MCP tools/list advertises every tool the dispatcher handles",
         "pulp_inspect_performance",
         "pulp_inspect_screenshot",
         "pulp_inspect_set_param",
+        "pulp_kit",
+        "pulp_kit_apply",
+        "pulp_kit_init",
+        "pulp_kit_inspect",
+        "pulp_kit_plan",
+        "pulp_kit_search",
+        "pulp_kit_verify",
+        "pulp_kit_validate",
+        "pulp_kit_remove",
+        "pulp_kit_pack",
+        "pulp_kit_publish_check",
         // pulp #2153: pulp_motion_* wrappers expose the Motion.*
         // inspector protocol as first-class MCP tools so an LLM can
         // discover motion observability from tools/list without
@@ -654,6 +729,23 @@ TEST_CASE("MCP tools report required argument errors before side effects", "[mcp
         std::pair{"pulp_audio_read_bundle", "Error: bundle_path is required"},
         std::pair{"pulp_create", "Error: name is required"},
         std::pair{"pulp_docs_search", "Error: query is required"},
+        std::pair{"pulp_content", "Error: subcommand is required"},
+        std::pair{"pulp_content_validate", "Error: path is required"},
+        std::pair{"pulp_content_preview", "Error: path is required"},
+        std::pair{"pulp_content_install", "Error: path is required"},
+        std::pair{"pulp_content_update", "Error: path is required"},
+        std::pair{"pulp_content_remove", "Error: id is required"},
+        std::pair{"pulp_content_reveal", "Error: id is required"},
+        std::pair{"pulp_kit", "Error: subcommand is required"},
+        std::pair{"pulp_kit_validate", "Error: path is required"},
+        std::pair{"pulp_kit_inspect", "Error: path is required"},
+        std::pair{"pulp_kit_plan", "Error: path is required"},
+        std::pair{"pulp_kit_verify", "Error: path is required"},
+        std::pair{"pulp_kit_apply", "Error: path is required"},
+        std::pair{"pulp_kit_remove", "Error: id is required"},
+        std::pair{"pulp_kit_pack", "Error: path is required"},
+        std::pair{"pulp_kit_publish_check", "Error: path is required"},
+        std::pair{"pulp_kit_init", "Error: kind and id are required"},
     };
 
     int id = 10;
@@ -747,6 +839,167 @@ TEST_CASE("MCP docs_search and create quote user arguments",
     require_contains(docs_search, "fake-pulp [docs] [search] [gain staging's guide]");
     REQUIRE(docs_search.find("[gain] [staging") == std::string::npos);
 
+    auto kit_validate = handle_request(tool_call(
+        "45", "pulp_kit_validate", R"JSON({"path":"fixtures/packages/basic ui's kit","strict":true})JSON"));
+    require_contains(kit_validate, R"JSON("id":45)JSON");
+    require_contains(kit_validate, "fake-pulp [kit] [validate] [fixtures/packages/basic ui's kit] [--json] [--strict]");
+    REQUIRE(kit_validate.find("[fixtures/packages/basic] [ui") == std::string::npos);
+
+    auto kit_umbrella = handle_request(tool_call(
+        "48", "pulp_kit", R"JSON({"subcommand":"validate","path":"fixtures/packages/basic ui's kit"})JSON"));
+    require_contains(kit_umbrella, R"JSON("id":48)JSON");
+    require_contains(kit_umbrella, "fake-pulp [kit] [validate] [fixtures/packages/basic ui's kit] [--json]");
+
+    auto kit_inspect = handle_request(tool_call(
+        "46", "pulp_kit_inspect", R"JSON({"path":"fixtures/packages/basic ui's kit"})JSON"));
+    require_contains(kit_inspect, R"JSON("id":46)JSON");
+    require_contains(kit_inspect, "fake-pulp [kit] [inspect] [fixtures/packages/basic ui's kit] [--json]");
+
+    auto kit_plan = handle_request(tool_call(
+        "49", "pulp_kit_plan", R"JSON({"path":"fixtures/packages/basic ui's kit"})JSON"));
+    require_contains(kit_plan, R"JSON("id":49)JSON");
+    require_contains(kit_plan, "fake-pulp [kit] [plan] [fixtures/packages/basic ui's kit] [--project]");
+    require_contains(kit_plan, "[--json]");
+    REQUIRE(kit_plan.find("[fixtures/packages/basic] [ui") == std::string::npos);
+
+    auto kit_verify = handle_request(tool_call(
+        "50", "pulp_kit_verify", R"JSON({"path":"fixtures/packages/basic ui's kit"})JSON"));
+    require_contains(kit_verify, R"JSON("id":50)JSON");
+    require_contains(kit_verify, "fake-pulp [kit] [verify] [fixtures/packages/basic ui's kit] [--project]");
+    require_contains(kit_verify, "[--json]");
+    REQUIRE(kit_verify.find("[fixtures/packages/basic] [ui") == std::string::npos);
+
+    auto kit_verify_screenshots = handle_request(tool_call(
+        "51", "pulp_kit_verify",
+        R"JSON({"path":"fixtures/packages/basic ui's kit","execute_screenshots":true,"screenshot_backend":"skia","screenshot_output_dir":"artifacts/kit shots"})JSON"));
+    require_contains(kit_verify_screenshots, R"JSON("id":51)JSON");
+    require_contains(kit_verify_screenshots, "fake-pulp [kit] [verify] [fixtures/packages/basic ui's kit] [--project]");
+    require_contains(kit_verify_screenshots, "[--json] [--execute-screenshots] [--screenshot-backend] [skia] [--screenshot-output-dir] [artifacts/kit shots]");
+    REQUIRE(kit_verify_screenshots.find("[artifacts/kit] [shots]") == std::string::npos);
+
+    auto kit_apply_missing_yes = handle_request(tool_call(
+        "54", "pulp_kit_apply", R"JSON({"path":"fixtures/packages/basic ui's kit"})JSON"));
+    require_contains(kit_apply_missing_yes, R"JSON("id":54)JSON");
+    require_contains(kit_apply_missing_yes, "Error: yes=true is required");
+
+    auto kit_apply = handle_request(tool_call(
+        "55", "pulp_kit_apply", R"JSON({"path":"fixtures/packages/basic ui's kit","yes":true})JSON"));
+    require_contains(kit_apply, R"JSON("id":55)JSON");
+    require_contains(kit_apply, "fake-pulp [kit] [apply] [fixtures/packages/basic ui's kit] [--project]");
+    require_contains(kit_apply, "[--yes]");
+    REQUIRE(kit_apply.find("[fixtures/packages/basic] [ui") == std::string::npos);
+
+    auto kit_remove_missing_yes = handle_request(tool_call(
+        "56", "pulp_kit_remove", R"JSON({"id":"dev.pulp.fixture"})JSON"));
+    require_contains(kit_remove_missing_yes, R"JSON("id":56)JSON");
+    require_contains(kit_remove_missing_yes, "Error: yes=true is required");
+
+    auto kit_remove = handle_request(tool_call(
+        "57", "pulp_kit_remove", R"JSON({"id":"dev.pulp.fixture","yes":true})JSON"));
+    require_contains(kit_remove, R"JSON("id":57)JSON");
+    require_contains(kit_remove, "fake-pulp [kit] [remove] [dev.pulp.fixture] [--project]");
+    require_contains(kit_remove, "[--yes]");
+
+    auto kit_pack = handle_request(tool_call(
+        "58", "pulp_kit_pack",
+        R"JSON({"path":"fixtures/packages/basic ui's kit","output":"dist/basic ui's kit.pulpkit"})JSON"));
+    require_contains(kit_pack, R"JSON("id":58)JSON");
+    require_contains(kit_pack, "fake-pulp [kit] [pack] [fixtures/packages/basic ui's kit] [--json] [--output] [dist/basic ui's kit.pulpkit]");
+    REQUIRE(kit_pack.find("[dist/basic] [ui") == std::string::npos);
+
+    auto kit_publish = handle_request(tool_call(
+        "59", "pulp_kit_publish_check",
+        R"JSON({"path":"fixtures/packages/basic ui's kit","registry_manifest":"registry/signed manifest's.json"})JSON"));
+    require_contains(kit_publish, R"JSON("id":59)JSON");
+    require_contains(kit_publish, "fake-pulp [kit] [publish] [fixtures/packages/basic ui's kit] [--dry-run] [--json] [--registry-manifest] [registry/signed manifest's.json]");
+    REQUIRE(kit_publish.find("[fixtures/packages/basic] [ui") == std::string::npos);
+
+    auto kit_search = handle_request(tool_call(
+        "58", "pulp_kit_search",
+        R"JSON({"query":"basic ui","root":"fixtures/packages with spaces","kind":"ui-kit","lane":"kit"})JSON"));
+    require_contains(kit_search, R"JSON("id":58)JSON");
+    require_contains(kit_search, "fake-pulp [kit] [search] [basic ui] [--root] [fixtures/packages with spaces] [--kind] [ui-kit] [--lane] [kit] [--json]");
+    REQUIRE(kit_search.find("[basic] [ui]") == std::string::npos);
+
+    auto kit_init = handle_request(tool_call(
+        "47", "pulp_kit_init",
+        R"JSON({"kind":"ui-kit","id":"dev.pulp.fixture","name":"Fixture UI","dir":"tmp/kit dir","force":true})JSON"));
+    require_contains(kit_init, R"JSON("id":47)JSON");
+    require_contains(kit_init, "fake-pulp [kit] [init] [--kind] [ui-kit] [--id] [dev.pulp.fixture] [--name] [Fixture UI] [--dir] [tmp/kit dir] [--force]");
+    REQUIRE(kit_init.find("[Fixture] [UI]") == std::string::npos);
+
+    auto content_validate = handle_request(tool_call(
+        "59", "pulp_content_validate", R"JSON({"path":"packs/basic content's pack.pulpcontent"})JSON"));
+    require_contains(content_validate, R"JSON("id":59)JSON");
+    require_contains(content_validate, "fake-pulp [content] [validate] [packs/basic content's pack.pulpcontent] [--json]");
+    REQUIRE(content_validate.find("[packs/basic] [content") == std::string::npos);
+
+    auto content_umbrella = handle_request(tool_call(
+        "60", "pulp_content", R"JSON({"subcommand":"validate","path":"packs/basic content's pack.pulpcontent"})JSON"));
+    require_contains(content_umbrella, R"JSON("id":60)JSON");
+    require_contains(content_umbrella, "fake-pulp [content] [validate] [packs/basic content's pack.pulpcontent] [--json]");
+
+    auto content_preview = handle_request(tool_call(
+        "70", "pulp_content_preview",
+        R"JSON({"path":"packs/basic content's pack.pulpcontent","plugin_runtime":"bundles/My Plugin/pulp.plugin-runtime.json","plugin":"dev.pulp fixture"})JSON"));
+    require_contains(content_preview, R"JSON("id":70)JSON");
+    require_contains(content_preview, "fake-pulp [content] [preview] [packs/basic content's pack.pulpcontent] [--plugin-runtime] [bundles/My Plugin/pulp.plugin-runtime.json] [--json] [--plugin] [dev.pulp fixture]");
+    REQUIRE(content_preview.find("[My] [Plugin]") == std::string::npos);
+    REQUIRE(content_preview.find("[dev.pulp] [fixture]") == std::string::npos);
+
+    auto content_install_missing_yes = handle_request(tool_call(
+        "61", "pulp_content_install",
+        R"JSON({"path":"packs/basic content's pack.pulpcontent","plugin":"dev.pulp fixture"})JSON"));
+    require_contains(content_install_missing_yes, R"JSON("id":61)JSON");
+    require_contains(content_install_missing_yes, "Error: yes=true is required");
+
+    auto content_install = handle_request(tool_call(
+        "62", "pulp_content_install",
+        R"JSON({"path":"packs/basic content's pack.pulpcontent","plugin":"dev.pulp fixture","root":"tmp/content root","yes":true})JSON"));
+    require_contains(content_install, R"JSON("id":62)JSON");
+    require_contains(content_install, "fake-pulp [content] [install] [packs/basic content's pack.pulpcontent] [--plugin] [dev.pulp fixture] [--yes] [--root] [tmp/content root]");
+    REQUIRE(content_install.find("[dev.pulp] [fixture]") == std::string::npos);
+
+    auto content_update_missing_yes = handle_request(tool_call(
+        "68", "pulp_content_update",
+        R"JSON({"path":"packs/basic content's pack.pulpcontent","plugin":"dev.pulp fixture"})JSON"));
+    require_contains(content_update_missing_yes, R"JSON("id":68)JSON");
+    require_contains(content_update_missing_yes, "Error: yes=true is required");
+
+    auto content_update = handle_request(tool_call(
+        "69", "pulp_content_update",
+        R"JSON({"path":"packs/basic content's pack.pulpcontent","plugin":"dev.pulp fixture","root":"tmp/content root","yes":true})JSON"));
+    require_contains(content_update, R"JSON("id":69)JSON");
+    require_contains(content_update, "fake-pulp [content] [update] [packs/basic content's pack.pulpcontent] [--plugin] [dev.pulp fixture] [--yes] [--root] [tmp/content root]");
+    REQUIRE(content_update.find("[dev.pulp] [fixture]") == std::string::npos);
+
+    auto content_list = handle_request(tool_call(
+        "63", "pulp_content_list", R"JSON({"plugin":"dev.pulp fixture","root":"tmp/content root"})JSON"));
+    require_contains(content_list, R"JSON("id":63)JSON");
+    require_contains(content_list, "fake-pulp [content] [list] [--json] [--plugin] [dev.pulp fixture] [--root] [tmp/content root]");
+
+    auto content_rescan = handle_request(tool_call(
+        "67", "pulp_content_rescan", R"JSON({"root":"tmp/content root"})JSON"));
+    require_contains(content_rescan, R"JSON("id":67)JSON");
+    require_contains(content_rescan, "fake-pulp [content] [rescan] [--json] [--root] [tmp/content root]");
+
+    auto content_remove_missing_yes = handle_request(tool_call(
+        "64", "pulp_content_remove", R"JSON({"id":"dev.pulp.content","plugin":"dev.pulp fixture"})JSON"));
+    require_contains(content_remove_missing_yes, R"JSON("id":64)JSON");
+    require_contains(content_remove_missing_yes, "Error: yes=true is required");
+
+    auto content_remove = handle_request(tool_call(
+        "65", "pulp_content_remove",
+        R"JSON({"id":"dev.pulp.content","plugin":"dev.pulp fixture","version":"0.1.0","root":"tmp/content root","yes":true})JSON"));
+    require_contains(content_remove, R"JSON("id":65)JSON");
+    require_contains(content_remove, "fake-pulp [content] [remove] [dev.pulp.content] [--plugin] [dev.pulp fixture] [--yes] [--version] [0.1.0] [--root] [tmp/content root]");
+
+    auto content_reveal = handle_request(tool_call(
+        "66", "pulp_content_reveal",
+        R"JSON({"id":"dev.pulp.content","plugin":"dev.pulp fixture","version":"0.1.0","root":"tmp/content root"})JSON"));
+    require_contains(content_reveal, R"JSON("id":66)JSON");
+    require_contains(content_reveal, "fake-pulp [content] [reveal] [dev.pulp.content] [--plugin] [dev.pulp fixture] [--version] [0.1.0] [--root] [tmp/content root]");
+
     auto create = handle_request(tool_call(
         "44", "pulp_create",
         R"JSON({"name":"Tape Echo","type":"effect","manufacturer":"ACME Audio"})JSON"));
@@ -754,6 +1007,116 @@ TEST_CASE("MCP docs_search and create quote user arguments",
     require_contains(create, "fake-create [Tape Echo] [--type] [effect] [--manufacturer] [ACME Audio]");
     REQUIRE(create.find("[Tape] [Echo]") == std::string::npos);
     REQUIRE(create.find("[ACME] [Audio]") == std::string::npos);
+#endif
+}
+
+TEST_CASE("MCP package workflow preserves inspect plan approve apply gates",
+          "[mcp][tools][packages][workflow]") {
+#if defined(_WIN32)
+    SKIP("POSIX fake script assertions are only used on non-Windows");
+#else
+    TempDir scratch;
+    const auto project = scratch.path / "Project";
+    const auto bin = scratch.path / "bin";
+    const auto log = scratch.path / "package-workflow.log";
+    std::filesystem::create_directories(project / "core");
+    std::filesystem::create_directories(project / "build" / "tools" / "screenshot");
+    std::ofstream(project / "CMakeLists.txt") << "project(FakePulp VERSION 1.2.3)\n";
+    std::ofstream(project / "build" / "CMakeCache.txt") << "CMAKE_BUILD_TYPE:STRING=Release\n";
+    make_package_workflow_fake_pulp_cli(project, log);
+    make_fake_command(bin, "cmake", "fake-cmake");
+    {
+        const auto screenshot = project / "build" / "tools" / "screenshot" / "pulp-screenshot";
+        std::ofstream script(screenshot);
+        script << "#!/bin/sh\n"
+               << "printf 'iVBORfakePackageWorkflowPng'\n";
+        script.close();
+        std::filesystem::permissions(
+            screenshot,
+            std::filesystem::perms::owner_exec |
+                std::filesystem::perms::owner_read |
+                std::filesystem::perms::owner_write,
+            std::filesystem::perm_options::add);
+    }
+
+    const auto previous_path = std::getenv("PATH") ? std::string(std::getenv("PATH")) : std::string{};
+    ScopedEnvVar path_env("PATH", bin.string() + ":" + previous_path);
+    ScopedCurrentPath cwd(project);
+    const auto effective_project = std::filesystem::current_path().string();
+
+    auto search = handle_request(tool_call(
+        "101", "pulp_kit_search",
+        R"JSON({"query":"basic","root":"fixtures/packages","lane":"kit"})JSON"));
+    require_contains(search, R"JSON("id":101)JSON");
+    require_contains(search, "dev.pulp.fixtures.basic-ui-kit");
+
+    auto inspect = handle_request(tool_call(
+        "102", "pulp_kit_inspect",
+        R"JSON({"path":"fixtures/packages/basic-ui-kit"})JSON"));
+    require_contains(inspect, R"JSON("id":102)JSON");
+    require_contains(inspect, "dev.pulp.fixtures.basic-ui-kit");
+
+    auto plan = handle_request(tool_call(
+        "103", "pulp_kit_plan",
+        R"JSON({"path":"fixtures/packages/basic-ui-kit"})JSON"));
+    require_contains(plan, R"JSON("id":103)JSON");
+    require_contains(plan, R"JSON(\"kind\":\"lock-entry\")JSON");
+
+    auto apply_missing_yes = handle_request(tool_call(
+        "104", "pulp_kit_apply",
+        R"JSON({"path":"fixtures/packages/basic-ui-kit"})JSON"));
+    require_contains(apply_missing_yes, "Error: yes=true is required after reviewing the kit plan");
+
+    auto apply = handle_request(tool_call(
+        "105", "pulp_kit_apply",
+        R"JSON({"path":"fixtures/packages/basic-ui-kit","yes":true})JSON"));
+    require_contains(apply, "OK: Applied kit dev.pulp.fixtures.basic-ui-kit");
+
+    auto build = handle_request(tool_call("106", "pulp_build"));
+    require_contains(build, "fake-cmake [--build]");
+
+    auto validate = handle_request(tool_call("107", "pulp_validate"));
+    require_contains(validate, R"JSON(\"ok\":true)JSON");
+
+    auto screenshot = handle_request(tool_call(
+        "108", "pulp_screenshot", R"JSON({"demo":true})JSON"));
+    require_contains(screenshot, R"JSON("mimeType":"image/png")JSON");
+    require_contains(screenshot, "iVBORfakePackageWorkflowPng");
+
+    auto content_validate = handle_request(tool_call(
+        "109", "pulp_content_validate",
+        R"JSON({"path":"fixtures/packages/basic-content-pack"})JSON"));
+    require_contains(content_validate, "dev.pulp.fixtures.basic-content-pack");
+
+    auto content_preview = handle_request(tool_call(
+        "110", "pulp_content_preview",
+        R"JSON({"path":"fixtures/packages/basic-content-pack","plugin_runtime":"pulp.plugin-runtime.json","plugin":"dev.pulp.fixtures.content-target"})JSON"));
+    require_contains(content_preview, R"JSON(\"requires_restart\":false)JSON");
+
+    auto content_install_missing_yes = handle_request(tool_call(
+        "111", "pulp_content_install",
+        R"JSON({"path":"fixtures/packages/basic-content-pack","plugin":"dev.pulp.fixtures.content-target"})JSON"));
+    require_contains(content_install_missing_yes,
+                     "Error: yes=true is required after reviewing the content install target");
+
+    auto content_install = handle_request(tool_call(
+        "112", "pulp_content_install",
+        R"JSON({"path":"fixtures/packages/basic-content-pack","plugin":"dev.pulp.fixtures.content-target","root":"content-root","yes":true})JSON"));
+    require_contains(content_install, "OK: Installed content pack dev.pulp.fixtures.basic-content-pack");
+
+    std::ifstream log_stream(log);
+    const std::string log_text((std::istreambuf_iterator<char>(log_stream)),
+                               std::istreambuf_iterator<char>());
+    require_contains(log_text, "kit search basic --root fixtures/packages --lane kit --json");
+    require_contains(log_text, "kit inspect fixtures/packages/basic-ui-kit --json");
+    require_contains(log_text, "kit plan fixtures/packages/basic-ui-kit --project " + effective_project + " --json");
+    require_contains(log_text, "kit apply fixtures/packages/basic-ui-kit --project " + effective_project + " --yes");
+    require_contains(log_text, "validate --json");
+    require_contains(log_text, "content validate fixtures/packages/basic-content-pack --json");
+    require_contains(log_text, "content preview fixtures/packages/basic-content-pack --plugin-runtime pulp.plugin-runtime.json --json --plugin dev.pulp.fixtures.content-target");
+    require_contains(log_text, "content install fixtures/packages/basic-content-pack --plugin dev.pulp.fixtures.content-target --yes --root content-root");
+    REQUIRE(log_text.find("kit apply fixtures/packages/basic-ui-kit --project " + effective_project + " --json")
+            == std::string::npos);
 #endif
 }
 
@@ -1173,6 +1536,25 @@ TEST_CASE("MCP wrapper tools route to the correct handler arm (project-root gate
     const auto wrapper_tools = {
         "pulp_validate",
         "pulp_docs_check",
+        "pulp_content_validate",
+        "pulp_content_install",
+        "pulp_content_list",
+        "pulp_content_preview",
+        "pulp_content_rescan",
+        "pulp_content_remove",
+        "pulp_content_reveal",
+        "pulp_content_update",
+        "pulp_kit",
+        "pulp_kit_search",
+        "pulp_kit_validate",
+        "pulp_kit_inspect",
+        "pulp_kit_plan",
+        "pulp_kit_apply",
+        "pulp_kit_verify",
+        "pulp_kit_remove",
+        "pulp_kit_pack",
+        "pulp_kit_publish_check",
+        "pulp_kit_init",
         "pulp_screenshot",
         "pulp_simulate_click",
         "pulp_get_view_tree",

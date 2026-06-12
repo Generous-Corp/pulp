@@ -1,11 +1,16 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 #include "preset_test_sandbox.hpp"
+#include <pulp/runtime/crypto.hpp>
+#include <pulp/state/content_registry.hpp>
 #include <pulp/state/preset_manager.hpp>
+#include "../external/miniz/miniz.h"
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string_view>
+#include <vector>
 
 using namespace pulp::state;
 namespace fs = std::filesystem;
@@ -34,6 +39,120 @@ static PresetInfo require_user_preset(PresetManager& manager, const std::string&
     });
     REQUIRE(it != presets.end());
     return *it;
+}
+
+static fs::path write_content_pack(const fs::path& data_root,
+                                   const std::string& plugin_id,
+                                   const std::string& package_id,
+                                   const std::string& version,
+                                   std::string_view capabilities_json = R"json(["content.presets.v1","content.themes.v1","content.samples.v1","content.wavetables.v1"])json") {
+    const auto root = data_root / "Content" / plugin_id / package_id / version;
+    write_text_file(root / "pulp.package.json",
+                    std::string(R"json({
+  "schema": "pulp-package-v1",
+  "id": ")json") + package_id + R"json(",
+  "name": "Expansion One",
+  "version": ")json" + version + R"json(",
+  "license": "MIT",
+  "kind": ["content-pack"],
+  "capabilities": )json" + std::string(capabilities_json) + R"json(,
+  "exports": {
+    "presets": ["presets"],
+    "themes": ["themes"],
+    "samples": ["samples"],
+    "wavetables": ["wavetables"]
+  },
+  "dependencies": {"pulp": [], "packages": []},
+  "validation": {}
+})json");
+    write_text_file(root / "presets" / "ExpansionInit.json",
+                    R"json({"name":"Expansion Init","parameters":{"Gain":-12,"Mix":25}})json");
+    write_text_file(root / "themes" / "Dark.json", R"json({"name":"Dark"})json");
+    write_text_file(root / "samples" / "Kick.wav", "PULP fixture sample placeholder.");
+    write_text_file(root / "wavetables" / "Sine.wavetable.json",
+                    R"json({"name":"Sine","frames":1,"samples":[0,1,0,-1]})json");
+    return root;
+}
+
+static fs::path write_source_content_pack(const fs::path& root,
+                                          const std::string& package_id,
+                                          const std::string& version,
+                                          std::string_view capabilities_json = R"json(["content.presets.v1","content.themes.v1"])json") {
+    write_text_file(root / "pulp.package.json",
+                    std::string(R"json({
+  "schema": "pulp-package-v1",
+  "id": ")json") + package_id + R"json(",
+  "name": "Dropped Expansion",
+  "version": ")json" + version + R"json(",
+  "license": "MIT",
+  "kind": ["content-pack"],
+  "capabilities": )json" + std::string(capabilities_json) + R"json(,
+  "exports": {
+    "presets": ["presets"],
+    "themes": ["themes"]
+  },
+  "dependencies": {"pulp": [], "packages": []},
+  "validation": {}
+})json");
+    write_text_file(root / "presets" / "DropInit.json",
+                    R"json({"name":"Drop Init","parameters":{"Gain":-18,"Mix":30}})json");
+    write_text_file(root / "themes" / "DropDark.json", R"json({"name":"Drop Dark"})json");
+    return root;
+}
+
+static fs::path write_content_pack_archive(const fs::path& archive,
+                                           const fs::path& source_root,
+                                           bool add_unlisted_payload = false) {
+    mz_zip_archive zip{};
+    REQUIRE(mz_zip_writer_init_file(&zip, archive.string().c_str(), 0));
+    std::error_code ec;
+    std::vector<std::pair<std::string, std::string>> hashes;
+    for (fs::recursive_directory_iterator it(source_root, ec), end; !ec && it != end; it.increment(ec)) {
+        if (!it->is_regular_file(ec)) continue;
+        const auto rel = fs::relative(it->path(), source_root, ec).generic_string();
+        std::ifstream file(it->path(), std::ios::binary);
+        std::string body((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        REQUIRE(mz_zip_writer_add_mem(&zip, rel.c_str(), body.data(), body.size(),
+                                      MZ_DEFAULT_COMPRESSION));
+        hashes.push_back({rel, "sha256-" + pulp::runtime::sha256_hex(body)});
+    }
+    std::sort(hashes.begin(), hashes.end());
+    std::string sha_manifest = "{\n  \"schema\": \"pulp-files-sha256-v1\",\n  \"files\": {";
+    for (std::size_t i = 0; i < hashes.size(); ++i) {
+        sha_manifest += i == 0 ? "\n" : ",\n";
+        sha_manifest += "    \"" + hashes[i].first + "\": \"" + hashes[i].second + "\"";
+    }
+    sha_manifest += hashes.empty() ? "\n  }\n}\n" : "\n  }\n}\n";
+    REQUIRE(mz_zip_writer_add_mem(&zip, "files.sha256.json",
+                                  sha_manifest.data(), sha_manifest.size(),
+                                  MZ_DEFAULT_COMPRESSION));
+    if (add_unlisted_payload) {
+        const std::string extra = "not declared in files.sha256.json";
+        REQUIRE(mz_zip_writer_add_mem(&zip, "extras/unlisted.txt",
+                                      extra.data(), extra.size(),
+                                      MZ_DEFAULT_COMPRESSION));
+    }
+    REQUIRE(mz_zip_writer_finalize_archive(&zip));
+    mz_zip_writer_end(&zip);
+    return archive;
+}
+
+static fs::path write_content_pack_archive_without_hashes(const fs::path& archive,
+                                                          const fs::path& source_root) {
+    mz_zip_archive zip{};
+    REQUIRE(mz_zip_writer_init_file(&zip, archive.string().c_str(), 0));
+    std::error_code ec;
+    for (fs::recursive_directory_iterator it(source_root, ec), end; !ec && it != end; it.increment(ec)) {
+        if (!it->is_regular_file(ec)) continue;
+        const auto rel = fs::relative(it->path(), source_root, ec).generic_string();
+        std::ifstream file(it->path(), std::ios::binary);
+        std::string body((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        REQUIRE(mz_zip_writer_add_mem(&zip, rel.c_str(), body.data(), body.size(),
+                                      MZ_DEFAULT_COMPRESSION));
+    }
+    REQUIRE(mz_zip_writer_finalize_archive(&zip));
+    mz_zip_writer_end(&zip);
+    return archive;
 }
 
 TEST_CASE("PresetManager construction sets paths", "[state][preset]") {
@@ -664,4 +783,496 @@ TEST_CASE("PresetManager rename failure leaves current preset unchanged",
     REQUIRE_FALSE(pm.rename(missing, "Renamed"));
     REQUIRE(pm.current_preset_name() == "Current");
     REQUIRE_FALSE(fs::exists(sandbox.root / "Renamed.json"));
+}
+
+TEST_CASE("ContentRegistry enumerates installed content packs by plugin capability",
+          "[state][preset][content]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-content-registry");
+    const auto data_root = sandbox.root / "user-data";
+    const auto pack_root = write_content_pack(data_root,
+                                              "dev.pulp.test.plugin",
+                                              "dev.pulp.test.expansion",
+                                              "0.1.0");
+
+    ContentRegistry registry(data_root);
+
+    auto all = registry.packs_for_plugin("dev.pulp.test.plugin");
+    REQUIRE(all.size() == 1);
+    REQUIRE(all.front().id == "dev.pulp.test.expansion");
+    REQUIRE(all.front().root == pack_root);
+    REQUIRE(all.front().presets.size() == 1);
+    REQUIRE(all.front().themes.size() == 1);
+    REQUIRE(all.front().samples.size() == 1);
+    REQUIRE(all.front().wavetables.size() == 1);
+
+    ContentCapabilityManifest matching;
+    matching.plugin_id = "dev.pulp.test.plugin";
+    matching.capabilities = {"content.presets.v1"};
+    matching.content_kinds = {"presets"};
+    REQUIRE(registry.packs_for_plugin(matching).size() == 1);
+
+    matching.capabilities = {"content.samples.v1"};
+    matching.content_kinds = {"samples"};
+    auto sample_packs = registry.packs_for_plugin(matching);
+    REQUIRE(sample_packs.size() == 1);
+    REQUIRE(sample_packs.front().samples.front().filename() == "Kick.wav");
+    REQUIRE(registry.presets_for_plugin(matching).empty());
+
+    matching.capabilities = {"content.themes.v1"};
+    matching.content_kinds = {"themes"};
+    auto theme_packs = registry.packs_for_plugin(matching);
+    REQUIRE(theme_packs.size() == 1);
+    REQUIRE(theme_packs.front().themes.front().filename() == "Dark.json");
+    REQUIRE(registry.presets_for_plugin(matching).empty());
+
+    matching.capabilities = {"content.wavetables.v1"};
+    matching.content_kinds = {"wavetables"};
+    auto wavetable_packs = registry.packs_for_plugin(matching);
+    REQUIRE(wavetable_packs.size() == 1);
+    REQUIRE(wavetable_packs.front().wavetables.front().filename() == "Sine.wavetable.json");
+
+    matching.capabilities = {"content.ir.v1"};
+    matching.content_kinds = {"samples"};
+    REQUIRE(registry.packs_for_plugin(matching).empty());
+}
+
+TEST_CASE("ContentCapabilityManifest parses plugin runtime content opt-in",
+          "[state][preset][content]") {
+    std::string error;
+    auto manifest = parse_content_capability_manifest(R"json({
+  "schema": "pulp.plugin-runtime.v1",
+  "pluginId": "dev.pulp.test.plugin",
+  "content": {
+    "capabilities": ["content.presets.v1", "content.themes.hotReload.v1"],
+    "kinds": ["presets", "themes"],
+    "reload": {
+      "hotReloadKinds": ["themes"],
+      "manualRescanKinds": ["presets"]
+    }
+  }
+})json", &error);
+
+    REQUIRE(manifest.has_value());
+    REQUIRE(error.empty());
+    REQUIRE(manifest->schema == "pulp.plugin-runtime.v1");
+    REQUIRE(manifest->plugin_id == "dev.pulp.test.plugin");
+    REQUIRE(manifest->capabilities.size() == 2);
+    REQUIRE(manifest->content_kinds.size() == 2);
+    REQUIRE(manifest->hot_reload_kinds == std::vector<std::string>{"themes"});
+    REQUIRE(manifest->manual_rescan_kinds == std::vector<std::string>{"presets"});
+
+    const auto json = content_capability_manifest_to_json(*manifest);
+    auto round_trip = parse_content_capability_manifest(json, &error);
+    REQUIRE(round_trip.has_value());
+    REQUIRE(round_trip->plugin_id == manifest->plugin_id);
+    REQUIRE(round_trip->capabilities == manifest->capabilities);
+    REQUIRE(round_trip->content_kinds == manifest->content_kinds);
+    REQUIRE(round_trip->hot_reload_kinds == manifest->hot_reload_kinds);
+    REQUIRE(round_trip->manual_rescan_kinds == manifest->manual_rescan_kinds);
+
+    REQUIRE_FALSE(parse_content_capability_manifest(R"json({
+  "schema": "pulp.plugin-runtime.v1",
+  "pluginId": "dev.pulp.test.plugin",
+  "content": { "capabilities": [], "kinds": ["presets"] }
+})json", &error));
+    REQUIRE(error.find("content.capabilities") != std::string::npos);
+
+    REQUIRE_FALSE(parse_content_capability_manifest(R"json({
+  "schema": "pulp.plugin-runtime.v1",
+  "pluginId": "dev.pulp.test.plugin",
+  "content": {
+    "capabilities": ["content.presets.v1"],
+    "kinds": ["presets"],
+    "reload": { "hotReloadKinds": ["themes"] }
+  }
+})json", &error));
+    REQUIRE(error.find("hotReloadKinds") != std::string::npos);
+}
+
+TEST_CASE("ContentCapabilityManifest loads from disk and drives PresetManager content opt-in",
+          "[state][preset][content]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-content-manifest");
+    const auto data_root = sandbox.root / "user-data";
+    write_content_pack(data_root,
+                       "dev.pulp.test.plugin",
+                       "dev.pulp.test.expansion",
+                       "0.1.0");
+
+    const auto manifest_path = sandbox.root / "bundle" / "pulp.plugin-runtime.json";
+    write_text_file(manifest_path, R"json({
+  "schema": "pulp.plugin-runtime.v1",
+  "pluginId": "dev.pulp.test.plugin",
+  "content": {
+    "capabilities": ["content.presets.v1"],
+    "kinds": ["presets"]
+  }
+})json");
+
+    std::string error;
+    auto manifest = load_content_capability_manifest(manifest_path, &error);
+    REQUIRE(manifest.has_value());
+    REQUIRE(error.empty());
+
+    StateStore store;
+    setup_test_store(store);
+    PresetManager pm(store, "TestCo", "TestPlugin");
+    pm.set_content_data_root(data_root);
+    pm.set_content_manifest(*manifest);
+
+    auto content = pm.content_presets();
+    REQUIRE(content.size() == 1);
+    REQUIRE(content.front().name == "ExpansionInit");
+
+    manifest->content_kinds = {"samples"};
+    pm.set_content_manifest(*manifest);
+    REQUIRE(pm.content_presets().empty());
+}
+
+TEST_CASE("PresetManager exposes content-pack presets as read-only expansions",
+          "[state][preset][content]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-content-pack");
+    const auto data_root = sandbox.root / "user-data";
+    write_content_pack(data_root,
+                       "dev.pulp.test.plugin",
+                       "dev.pulp.test.expansion",
+                       "0.1.0");
+
+    StateStore store;
+    setup_test_store(store);
+    PresetManager pm(store, "TestCo", "TestPlugin");
+    pm.set_content_data_root(data_root);
+    pm.set_content_plugin_id("dev.pulp.test.plugin");
+    pm.set_content_capabilities({"content.presets.v1"});
+
+    auto content = pm.content_presets();
+    REQUIRE(content.size() == 1);
+    REQUIRE(content.front().name == "ExpansionInit");
+    REQUIRE(content.front().is_factory);
+    REQUIRE(content.front().folder == "Expansion One");
+    REQUIRE_FALSE(pm.delete_preset(content.front()));
+    REQUIRE_FALSE(pm.rename(content.front(), "RenamedExpansion"));
+
+    store.set_value(1, 0.0f);
+    store.set_value(2, 0.0f);
+    REQUIRE(pm.load(content.front()));
+    REQUIRE(store.get_value(1) == Catch::Approx(-12.0f));
+    REQUIRE(store.get_value(2) == Catch::Approx(25.0f));
+
+    auto all = pm.all_presets();
+    REQUIRE(std::any_of(all.begin(), all.end(), [](const PresetInfo& preset) {
+        return preset.name == "ExpansionInit" && preset.is_factory;
+    }));
+    REQUIRE(pm.user_presets().empty());
+
+    store.set_value(1, -3.0f);
+    REQUIRE(pm.save("Expansion Edit"));
+    auto user = require_user_preset(pm, "Expansion Edit");
+    REQUIRE_FALSE(user.is_factory);
+    REQUIRE(user.path.parent_path() == pm.user_presets_dir());
+
+    auto content_after_save = pm.content_presets();
+    REQUIRE(content_after_save.size() == 1);
+    REQUIRE(fs::exists(content_after_save.front().path));
+}
+
+TEST_CASE("runtime content installer previews and installs only after approval",
+          "[state][preset][content]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-content-runtime-install");
+    const auto data_root = sandbox.root / "user-data";
+    const auto source = write_source_content_pack(sandbox.root / "incoming",
+                                                  "dev.pulp.test.dropped-expansion",
+                                                  "0.1.0");
+
+    ContentCapabilityManifest manifest;
+    manifest.plugin_id = "dev.pulp.test.plugin";
+    manifest.capabilities = {"content.presets.v1", "content.themes.v1"};
+    manifest.content_kinds = {"presets", "themes"};
+    manifest.hot_reload_kinds = {"themes"};
+    manifest.manual_rescan_kinds = {"presets"};
+
+    auto preview = preview_content_pack_install(source, manifest, data_root);
+    REQUIRE(preview.ok);
+    REQUIRE(preview.pack.id == "dev.pulp.test.dropped-expansion");
+    REQUIRE(preview.install_root == data_root / "Content" / "dev.pulp.test.plugin" /
+                                      "dev.pulp.test.dropped-expansion" / "0.1.0");
+    REQUIRE(preview.policies.size() == 2);
+    REQUIRE_FALSE(fs::exists(preview.install_root));
+
+    auto refused = install_content_pack(source, manifest, data_root, false);
+    REQUIRE_FALSE(refused.ok);
+    REQUIRE_FALSE(fs::exists(preview.install_root));
+    REQUIRE(std::any_of(refused.issues.begin(), refused.issues.end(), [](const std::string& issue) {
+        return issue.find("approval-required") != std::string::npos;
+    }));
+
+    auto installed = install_content_pack(source, manifest, data_root, true);
+    REQUIRE(installed.ok);
+    REQUIRE(fs::exists(preview.install_root / "pulp.package.json"));
+    REQUIRE(fs::exists(preview.install_root / "presets" / "DropInit.json"));
+    REQUIRE(fs::exists(data_root / "Content" / "index.json"));
+
+    auto duplicate = install_content_pack(source, manifest, data_root, true);
+    REQUIRE_FALSE(duplicate.ok);
+    REQUIRE(std::any_of(duplicate.issues.begin(), duplicate.issues.end(), [](const std::string& issue) {
+        return issue.find("already-installed") != std::string::npos;
+    }));
+    REQUIRE(fs::exists(preview.install_root / "presets" / "DropInit.json"));
+
+    const auto index = [&] {
+        std::ifstream f(data_root / "Content" / "index.json");
+        return std::string(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+    }();
+    REQUIRE(index.find(R"("plugin_id":"dev.pulp.test.plugin")") != std::string::npos);
+
+    ContentRegistry registry(data_root);
+    auto packs = registry.packs_for_plugin(manifest);
+    REQUIRE(packs.size() == 1);
+    REQUIRE(packs.front().id == "dev.pulp.test.dropped-expansion");
+}
+
+TEST_CASE("runtime content installer rejects bare manifest files before copying parent directories",
+          "[state][preset][content][security]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-content-runtime-manifest-file");
+    const auto data_root = sandbox.root / "user-data";
+    const auto source = write_source_content_pack(sandbox.root / "incoming",
+                                                  "dev.pulp.test.manifest-file",
+                                                  "0.1.0");
+    write_text_file(source / "unrelated-secret.txt", "not content\n");
+
+    ContentCapabilityManifest manifest;
+    manifest.plugin_id = "dev.pulp.test.plugin";
+    manifest.capabilities = {"content.presets.v1", "content.themes.v1"};
+    manifest.content_kinds = {"presets", "themes"};
+
+    auto installed = install_content_pack(source / "pulp.package.json", manifest, data_root, true);
+    REQUIRE_FALSE(installed.ok);
+    REQUIRE(std::any_of(installed.issues.begin(), installed.issues.end(), [](const std::string& issue) {
+        return issue.find("bare manifest file") != std::string::npos;
+    }));
+    REQUIRE_FALSE(fs::exists(data_root / "Content"));
+}
+
+TEST_CASE("runtime content installer rejects incompatible drops before mutation",
+          "[state][preset][content]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-content-runtime-reject");
+    const auto data_root = sandbox.root / "user-data";
+    const auto source = write_source_content_pack(sandbox.root / "incoming",
+                                                  "dev.pulp.test.incompatible-expansion",
+                                                  "0.1.0",
+                                                  R"json(["content.themes.v1"])json");
+
+    ContentCapabilityManifest manifest;
+    manifest.plugin_id = "dev.pulp.test.plugin";
+    manifest.capabilities = {"content.presets.v1"};
+    manifest.content_kinds = {"presets"};
+
+    auto preview = preview_content_pack_install(source, manifest, data_root);
+    REQUIRE_FALSE(preview.ok);
+    REQUIRE(std::any_of(preview.issues.begin(), preview.issues.end(), [](const std::string& issue) {
+        return issue.find("capability-mismatch") != std::string::npos;
+    }));
+
+    auto installed = install_content_pack(source, manifest, data_root, true);
+    REQUIRE_FALSE(installed.ok);
+    REQUIRE_FALSE(fs::exists(data_root / "Content" / "dev.pulp.test.plugin" /
+                             "dev.pulp.test.incompatible-expansion"));
+}
+
+TEST_CASE("runtime content installer rejects unsafe manifest paths before mutation",
+          "[state][preset][content]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-content-runtime-unsafe");
+    const auto data_root = sandbox.root / "user-data";
+
+    ContentCapabilityManifest manifest;
+    manifest.plugin_id = "dev.pulp.test.plugin";
+    manifest.capabilities = {"content.presets.v1"};
+    manifest.content_kinds = {"presets"};
+
+    const auto unsafe_id = write_source_content_pack(sandbox.root / "unsafe-id",
+                                                     "../outside",
+                                                     "0.1.0");
+    auto preview = preview_content_pack_install(unsafe_id, manifest, data_root);
+    REQUIRE_FALSE(preview.ok);
+    REQUIRE(std::any_of(preview.issues.begin(), preview.issues.end(), [](const std::string& issue) {
+        return issue.find("invalid-id") != std::string::npos;
+    }));
+    REQUIRE_FALSE(fs::exists(data_root / "Content"));
+
+    const auto unsafe_export = sandbox.root / "unsafe-export";
+    write_text_file(unsafe_export / "pulp.package.json", R"json({
+  "schema": "pulp-package-v1",
+  "id": "dev.pulp.test.unsafe-export",
+  "name": "Unsafe Export",
+  "version": "0.1.0",
+  "license": "MIT",
+  "kind": ["content-pack"],
+  "capabilities": ["content.presets.v1"],
+  "exports": { "presets": ["../outside"] },
+  "dependencies": {"pulp": [], "packages": []},
+  "validation": {}
+})json");
+    write_text_file(unsafe_export / "presets" / "Safe.json", R"json({"name":"Safe"})json");
+    preview = preview_content_pack_install(unsafe_export, manifest, data_root);
+    REQUIRE_FALSE(preview.ok);
+    REQUIRE(std::any_of(preview.issues.begin(), preview.issues.end(), [](const std::string& issue) {
+        return issue.find("unsafe-export") != std::string::npos;
+    }));
+    REQUIRE_FALSE(fs::exists(data_root / "Content"));
+
+    ContentCapabilityManifest unsafe_plugin = manifest;
+    unsafe_plugin.plugin_id = "../plugin";
+    const auto source = write_source_content_pack(sandbox.root / "safe-source",
+                                                  "dev.pulp.test.safe-expansion",
+                                                  "0.1.0");
+    preview = preview_content_pack_install(source, unsafe_plugin, data_root);
+    REQUIRE_FALSE(preview.ok);
+    REQUIRE(std::any_of(preview.issues.begin(), preview.issues.end(), [](const std::string& issue) {
+        return issue.find("invalid-plugin-id") != std::string::npos;
+    }));
+    REQUIRE_FALSE(fs::exists(data_root / "Content"));
+}
+
+TEST_CASE("runtime content installer rejects directories missing declared exports",
+          "[state][preset][content][security]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-content-runtime-missing-export");
+    const auto data_root = sandbox.root / "user-data";
+    const auto source = write_source_content_pack(sandbox.root / "incoming",
+                                                  "dev.pulp.test.missing-export",
+                                                  "0.1.0");
+    fs::remove_all(source / "presets");
+
+    ContentCapabilityManifest manifest;
+    manifest.plugin_id = "dev.pulp.test.plugin";
+    manifest.capabilities = {"content.presets.v1"};
+    manifest.content_kinds = {"presets"};
+
+    auto preview = preview_content_pack_install(source, manifest, data_root);
+    REQUIRE_FALSE(preview.ok);
+    REQUIRE(std::any_of(preview.issues.begin(), preview.issues.end(), [](const std::string& issue) {
+        return issue.find("missing-path: `presets`") != std::string::npos;
+    }));
+
+    auto installed = install_content_pack(source, manifest, data_root, true);
+    REQUIRE_FALSE(installed.ok);
+    REQUIRE_FALSE(fs::exists(data_root / "Content"));
+}
+
+TEST_CASE("runtime content installer removes copied files when index write fails",
+          "[state][preset][content][security]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-content-runtime-index-rollback");
+    const auto data_root = sandbox.root / "user-data";
+    const auto source = write_source_content_pack(sandbox.root / "incoming",
+                                                  "dev.pulp.test.index-rollback",
+                                                  "0.1.0");
+
+    ContentCapabilityManifest manifest;
+    manifest.plugin_id = "dev.pulp.test.plugin";
+    manifest.capabilities = {"content.presets.v1"};
+    manifest.content_kinds = {"presets"};
+
+    const auto install_root = data_root / "Content" / manifest.plugin_id /
+                              "dev.pulp.test.index-rollback" / "0.1.0";
+    fs::create_directories(data_root / "Content" / "index.json");
+
+    auto installed = install_content_pack(source, manifest, data_root, true);
+    REQUIRE_FALSE(installed.ok);
+    REQUIRE(std::any_of(installed.issues.begin(), installed.issues.end(), [](const std::string& issue) {
+        return issue.find("index-write") != std::string::npos;
+    }));
+    REQUIRE_FALSE(fs::exists(install_root));
+}
+
+TEST_CASE("runtime content installer accepts packed pulpcontent archives",
+          "[state][preset][content]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-content-runtime-archive");
+    const auto data_root = sandbox.root / "user-data";
+    const auto source = write_source_content_pack(sandbox.root / "incoming",
+                                                  "dev.pulp.test.archive-expansion",
+                                                  "0.1.0");
+    const auto archive = write_content_pack_archive(sandbox.root / "archive.pulpcontent", source);
+
+    ContentCapabilityManifest manifest;
+    manifest.plugin_id = "dev.pulp.test.plugin";
+    manifest.capabilities = {"content.presets.v1"};
+    manifest.content_kinds = {"presets"};
+
+    auto preview = preview_content_pack_install(archive, manifest, data_root);
+    REQUIRE(preview.ok);
+    REQUIRE(preview.pack.id == "dev.pulp.test.archive-expansion");
+
+    auto installed = install_content_pack(archive, manifest, data_root, true);
+    REQUIRE(installed.ok);
+    REQUIRE(fs::exists(data_root / "Content" / "dev.pulp.test.plugin" /
+                       "dev.pulp.test.archive-expansion" / "0.1.0" /
+                       "presets" / "DropInit.json"));
+}
+
+TEST_CASE("runtime content installer rejects pulpcontent archives without hash manifests",
+          "[state][preset][content][security]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-content-runtime-archive-no-sha");
+    const auto data_root = sandbox.root / "user-data";
+    const auto source = write_source_content_pack(sandbox.root / "incoming",
+                                                  "dev.pulp.test.archive-no-sha",
+                                                  "0.1.0");
+    const auto archive = write_content_pack_archive_without_hashes(
+        sandbox.root / "archive-no-sha.pulpcontent", source);
+
+    ContentCapabilityManifest manifest;
+    manifest.plugin_id = "dev.pulp.test.plugin";
+    manifest.capabilities = {"content.presets.v1"};
+    manifest.content_kinds = {"presets"};
+
+    auto preview = preview_content_pack_install(archive, manifest, data_root);
+    REQUIRE_FALSE(preview.ok);
+    REQUIRE(std::any_of(preview.issues.begin(), preview.issues.end(), [](const std::string& issue) {
+        return issue.find("sha256: missing files.sha256.json") != std::string::npos;
+    }));
+    REQUIRE_FALSE(fs::exists(data_root / "Content"));
+}
+
+TEST_CASE("runtime content installer rejects pulpcontent archives with unlisted payload files",
+          "[state][preset][content][security]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-content-runtime-archive-unlisted");
+    const auto data_root = sandbox.root / "user-data";
+    const auto source = write_source_content_pack(sandbox.root / "incoming",
+                                                  "dev.pulp.test.archive-unlisted",
+                                                  "0.1.0");
+    const auto archive = write_content_pack_archive(
+        sandbox.root / "archive-unlisted.pulpcontent", source, true);
+
+    ContentCapabilityManifest manifest;
+    manifest.plugin_id = "dev.pulp.test.plugin";
+    manifest.capabilities = {"content.presets.v1"};
+    manifest.content_kinds = {"presets"};
+
+    auto preview = preview_content_pack_install(archive, manifest, data_root);
+    REQUIRE_FALSE(preview.ok);
+    REQUIRE(std::any_of(preview.issues.begin(), preview.issues.end(), [](const std::string& issue) {
+        return issue.find("sha256: unlisted archived file `extras/unlisted.txt`") != std::string::npos;
+    }));
+    REQUIRE_FALSE(fs::exists(data_root / "Content"));
+}
+
+TEST_CASE("runtime content installer rejects archives missing declared exports",
+          "[state][preset][content][security]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-content-runtime-archive-missing-export");
+    const auto data_root = sandbox.root / "user-data";
+    const auto source = write_source_content_pack(sandbox.root / "incoming",
+                                                  "dev.pulp.test.archive-missing-export",
+                                                  "0.1.0");
+    fs::remove_all(source / "presets");
+    const auto archive = write_content_pack_archive(
+        sandbox.root / "archive-missing-export.pulpcontent", source);
+
+    ContentCapabilityManifest manifest;
+    manifest.plugin_id = "dev.pulp.test.plugin";
+    manifest.capabilities = {"content.presets.v1"};
+    manifest.content_kinds = {"presets"};
+
+    auto preview = preview_content_pack_install(archive, manifest, data_root);
+    REQUIRE_FALSE(preview.ok);
+    REQUIRE(std::any_of(preview.issues.begin(), preview.issues.end(), [](const std::string& issue) {
+        return issue.find("missing-path: `presets`") != std::string::npos;
+    }));
+    REQUIRE_FALSE(fs::exists(data_root / "Content"));
 }

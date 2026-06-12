@@ -20,6 +20,8 @@ pulp_add_plugin(PulpSynth
     CATEGORY        Instrument
     PLUGIN_CODE     "PSyn"
     MANUFACTURER_CODE "Pulp"
+    CONTENT_CAPABILITIES content.presets.v1
+    CONTENT_KINDS presets
 )
 
 # PulpSynth uses DSP library headers — link signal to Core target

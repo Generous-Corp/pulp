@@ -904,6 +904,37 @@ TEST_CASE("cmd_add covers guarded installs and installed-version guards",
     REQUIRE(installed_old.stdout_text.find("Use 'pulp update' to upgrade") != std::string::npos);
 }
 
+TEST_CASE("cmd_add does not accept arbitrary external sources for dependency packages",
+          "[cli][package-commands][add-remove][trust-boundary]") {
+    TempDir tmp;
+    write_project_scaffold(tmp.path);
+    write_registry_fixture(tmp.path);
+    REQUIRE(write_project_targets(tmp.path, {PlatformTarget{"macOS", "arm64"}}));
+    REQUIRE(save_lock_file(tmp.path / "packages.lock.json", make_lock({})));
+
+    auto github_url = run_in_project(tmp.path, [&] {
+        return cmd_add({"https://github.com/example/random-package.git"});
+    });
+    REQUIRE(github_url.exit_code == 1);
+    REQUIRE(github_url.stderr_text.find("not found in registry") != std::string::npos);
+    REQUIRE(load_lock_file(tmp.path / "packages.lock.json").packages.empty());
+
+    auto gitlab_url = run_in_project(tmp.path, [&] {
+        return cmd_add({"https://gitlab.com/example/random-package.git"});
+    });
+    REQUIRE(gitlab_url.exit_code == 1);
+    REQUIRE(gitlab_url.stderr_text.find("not found in registry") != std::string::npos);
+    REQUIRE(load_lock_file(tmp.path / "packages.lock.json").packages.empty());
+
+    auto from_on_dependency = run_in_project(tmp.path, [&] {
+        return cmd_add({"signalsmith-dsp", "--from", "./local-package"});
+    });
+    REQUIRE(from_on_dependency.exit_code == 2);
+    REQUIRE(from_on_dependency.stderr_text.find(
+                "--from is only valid when adding a framework importer") != std::string::npos);
+    REQUIRE(load_lock_file(tmp.path / "packages.lock.json").packages.empty());
+}
+
 TEST_CASE("cmd_add accepts commercial override for proprietary packages",
           "[cli][package-commands][add-remove][coverage]") {
     TempDir tmp;

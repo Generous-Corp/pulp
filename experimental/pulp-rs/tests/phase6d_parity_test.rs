@@ -100,9 +100,7 @@ fn dev_outside_project_errors() {
 
 #[test]
 fn create_help_lists_all_options() {
-    // See `dev_help_lists_all_flags` — clap intercepts a bare `--help`
-    // at the subcommand boundary.
-    let output = run_anywhere(&["create", "-", "--help"]);
+    let output = run_anywhere(&["create", "--help"]);
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).expect("utf8");
     for flag in [
@@ -121,6 +119,10 @@ fn create_help_lists_all_options() {
             "create --help missing flag {flag}; got:\n{stdout}"
         );
     }
+    assert!(
+        stdout.contains("<name-or-kit-dir>") && stdout.contains("local template kit"),
+        "create --help should describe package-backed local template kits; got:\n{stdout}"
+    );
 }
 
 #[test]

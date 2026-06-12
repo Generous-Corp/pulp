@@ -24,11 +24,14 @@ pulp create "My Project" --type bare               # minimal skeleton
 pulp create "My FX" --manufacturer "Acme Audio"    # custom manufacturer
 pulp create "My FX" --output ~/projects/my-fx      # custom output directory
 pulp create "Debug Knob" --in-tree                 # add an example under examples/
+pulp create "Kit Gain" --template ./my-template-kit # scaffold from a local template kit
 pulp create "My FX" --no-build                     # scaffold only, skip build
 pulp create "My FX" --no-interactive               # CI/scripting mode (no prompts)
 ```
 
-Available types: `effect` (default), `instrument`, `app`, `bare`. Templates are in `tools/templates/<type>/`.
+Available types: `effect` (default), `instrument`, `app`, `bare`. Built-in templates are in `tools/templates/<type>/`.
+
+`--template <name-or-kit-dir>` accepts either a built-in template name or an explicit local template kit directory containing `pulp.package.json`. Local template kits are validated before scaffolding, must declare kind `template`, and must export exactly one safe template directory. They do not execute package CMake, JavaScript, scripts, or dynamic libraries. If a template kit declares dependency packages, install those curated dependencies explicitly with `pulp add <id>` first; `pulp create` will not widen the trust boundary by adding them implicitly. A template kit only builds format targets for entry templates it exports, so a small CLAP/Standalone starter does not pretend to support VST3/AU.
 
 Default output location resolution:
 1. `--output <dir>`
@@ -55,7 +58,7 @@ Mode truth:
 What it does:
 1. Runs `pulp doctor` checks (fails fast if environment is broken)
 2. In standalone product mode: if run from inside a Pulp checkout, prepares pinned dependencies from that checkout and caches a local SDK install; otherwise downloads and caches the SDK release
-3. Scaffolds source files from templates (processor, format entries, test, CMakeLists.txt)
+3. Scaffolds source files from built-in templates or an explicitly named local template kit (processor, format entries, test, CMakeLists.txt)
 4. In in-tree mode: adds the project to `examples/CMakeLists.txt`
 5. In standalone product mode: generates `pulp.toml` with pinned SDK version and local SDK hints when created from a checkout
 6. Configures, builds the generated test target plus the default platform outputs, and runs tests
@@ -574,6 +577,49 @@ Common flags (forwarded verbatim to `setup-ci-host.sh`):
 Runs from inside a Pulp checkout (it resolves `tools/ci/setup-ci-host.sh`). For the
 from-scratch host recipe and gotchas, see
 [mac-ci-host-setup.md](../guides/mac-ci-host-setup.md) and the `tart-ci` skill.
+
+### macos
+
+**Status**: experimental
+
+Retarget just the macOS leg of a PR without disturbing the Linux/Windows matrix.
+This is an operator command for cases where a PR should move between local,
+Namespace, or GitHub-hosted macOS capacity.
+
+```bash
+pulp macos status --pr 1910
+pulp macos retarget --pr 1910 --to local
+pulp macos retarget --pr 1910 --to namespace
+pulp macos retarget --pr 1910 --to github-hosted
+```
+
+`retarget` cancels in-flight macOS-bearing runs for that PR and dispatches
+`build-macos.yml` on the selected runner pool. Branch protection is satisfied by
+the latest workflow that publishes the required `macos` check. See
+[local-ci.md](../guides/local-ci.md#per-pr-macos-retargeting-pulp-macos) for the
+runner variables and operator workflow.
+
+### overflow
+
+**Status**: experimental
+
+Configure the macOS overflow routing variables read by `build.yml`. This is a
+repo-operator surface for deciding where new macOS jobs go when local capacity is
+busy; it does not cancel in-flight jobs.
+
+```bash
+pulp overflow status
+pulp overflow enable
+pulp overflow enable --to '"namespace-profile-generouscorp-macos"'
+pulp overflow disable
+pulp overflow threshold
+pulp overflow threshold 1
+```
+
+`enable` sets the overflow target, `disable` removes it for future dispatches,
+and `threshold` gets or sets the busy-run count that trips overflow. See
+[local-ci.md](../guides/local-ci.md#pulp-overflow--operator-surface) for the
+exact repository variables and rollback notes.
 
 ### ci-local
 
@@ -1554,11 +1600,159 @@ The `check` subcommand verifies:
 - AU Info.plist template uses a computed version integer (not hardcoded)
 - CHANGELOG latest heading matches CMakeLists.txt
 
+### kit
+
+**Status**: experimental
+
+Share reusable Pulp code, UI, and templates with a review step before they touch a project.
+
+Use `pulp kit` for Pulp-native building blocks: DSP source, UI widgets, design tokens, templates, validation fixtures, and graph/native components. The value is practical:
+
+- developers package real Pulp pieces once instead of copying example folders between projects;
+- users and reviewers see the files, licenses, capabilities, and project changes before approval;
+- agents can inspect structured metadata without running untrusted package code.
+
+This is intentionally separate from `pulp add`. `pulp add rubberband` means "add a curated dependency from Pulp registry metadata." `pulp kit validate ./thing` or `pulp kit validate ./thing.pulpkit` means "inspect this local artifact before trusting or applying it."
+
+The workflow is inspect, preview, verify, approve, apply:
+
+1. `validate` / `inspect` read `pulp.package.json` and declared files only.
+2. `plan` previews the project changes without writing files.
+3. `verify` runs declared validation-profile checks after the plan has been reviewed; optional screenshot execution requires an explicit flag.
+4. `apply --yes` writes only reviewed, owned project files and records the reviewed manifest digest.
+5. `remove --yes` deletes only constrained lock-recorded kit paths under `pulp-kits/<kit-id>/...` plus the known generated lock/CMake files.
+
+Trust rules:
+
+- metadata commands never run package CMake, JavaScript, shell scripts, dynamic libraries, remote search, or content installers;
+- `.pulpkit` and `.pulpcontent` archives must include `files.sha256.json`, and every payload file must be listed and hash-matched before the manifest is trusted;
+- validation checks manifest shape, licenses, `requires.pulp`, `requires.cpp`, known Pulp module dependencies, and declared evidence hashes before plan/apply;
+- `content-pack` manifests can be searched, validated, and inspected, but `pulp kit plan/apply/publish` rejects them; use `pulp content ...` for data-only packs;
+- dependency packages declared by a kit resolve only through the existing curated `pulp add <id>` machinery.
+
+```bash
+pulp kit search basic --root ./fixtures/packages --lane kit --json
+pulp kit search content --root ./fixtures/packages --lane content --json
+pulp kit validate ./fixtures/packages/gain-dsp-kit
+pulp kit validate ./fixtures/packages/basic-ui-kit --json
+pulp kit inspect ./fixtures/packages/simple-plugin-template --json
+pulp kit plan ./fixtures/packages/gain-dsp-kit --project .
+pulp kit verify ./fixtures/packages/basic-ui-kit --project . --json
+pulp kit verify ./fixtures/packages/basic-ui-kit --project . --execute-screenshots --json
+pulp kit apply ./fixtures/packages/basic-ui-kit --project . --yes
+pulp kit remove dev.pulp.fixtures.basic-ui-kit --project . --yes
+pulp kit pack ./fixtures/packages/basic-ui-kit --output ./dist/basic-ui-kit.pulpkit
+pulp kit publish ./fixtures/packages/basic-ui-kit --dry-run --json
+pulp kit publish ./fixtures/packages/basic-ui-kit --dry-run --registry-manifest ./registry/pulp-registry-manifest.json --json
+pulp kit init --kind source --id com.example.my-kit --dir ./my-kit
+pulp create "Kit Gain" --template ./fixtures/packages/simple-plugin-template --no-build --ci
+pulp create "Kit Gain" --template ./fixtures/packages/simple-plugin-template --ci
+```
+
+Package-backed templates can include generated-project tests, but those tests
+are optional in standalone SDK builds unless the generated project can find
+Catch2. The required review artifact is the declared generated-project diff;
+the required build proof is the exported plugin/app format targets.
+
+Subcommands:
+
+| Subcommand | What it does |
+|------------|--------------|
+| `search [query]` | Search local `pulp.package.json`, `.pulpkit`, and `.pulpcontent` artifacts without executing package code; archives must pass `files.sha256.json` checks before their manifest is indexed, and results are classified as `kit` or `content` lanes |
+| `validate <path>` | Validate a kit directory, content-pack directory, `pulp.package.json`, `.pulpkit`, or `.pulpcontent` archive without executing package code |
+| `inspect <path>` | Print the manifest summary, capabilities, dependency package ids, and validation issues |
+| `plan <path>` | Produce a reviewable project-mutation plan from a kit directory, manifest, or `.pulpkit` archive without writing files; rejects `content-pack` manifests, and dependency packages are resolved only by curated `pulp add <id>` ids |
+| `verify <path>` | Run declared validation-profile checks after plan review; default mode is metadata-only, and `--execute-screenshots` explicitly renders Pulp screenshot profiles through the project screenshot tool and compares `expectedImage` baselines when declared, honoring optional `visualToleranceBytes` |
+| `apply <path> --yes` | Apply a reviewed local kit plan from a kit directory, manifest, or `.pulpkit` archive: rejects `content-pack` manifests, writes `.pulp/kits.lock.json` with `manifest_sha256`, generated `cmake/pulp-kits.cmake`, declared copied files, and UI-kit interface metadata |
+| `remove <kit-id> --yes` | Remove an installed kit using only `.pulp/kits.lock.json` ownership records |
+| `pack <path>` | Create a `.pulpkit` or `.pulpcontent` archive with `files.sha256.json` |
+| `publish <path> --dry-run` | Run the metadata-only kit publish gate: rejects `content-pack` manifests, strict manifest validation, license inventory, NOTICE-compatible license files via `exports.licenses`, human review, validation profiles, kind-specific evidence, local quality badges, compatibility summary, and optional signed canonical registry-manifest verification. Remote publishing is still disabled. |
+| `init` | Scaffold a developer-oriented fixture manifest for `source`, `ui-kit`, or `template` |
+
+Developer notes:
+
+- `search` is local discovery only. It never fetches from a registry and never makes a result safe to apply.
+- Template kits can seed a project with `pulp create "<name>" --template <kit-dir>`. The template is validated, exported files are copied, and dependency packages are never installed implicitly.
+- UI kits copy scripts, tokens, and assets under `pulp-kits/<kit-id>/`. After review, attach one reviewed UI script and optional tokens/assets with `pulp_use_kit_ui(...)`; apply alone does not attach UI code.
+- Graph/native kits use the same inspect/plan/apply flow. Validation requires explicit realtime claims, and signed `node-pack` kits cannot claim iOS/AUv3 support.
+- Agent-authored kits need `authoring.humanReview.reviewed = true` before publish dry-run can pass.
+- `pulp kit publish --dry-run` is local readiness only. It checks NOTICE-compatible license exports, validation evidence, compatibility, local quality badges, and optional signed `pulp-registry-manifest-v1`; remote publishing is disabled.
+
+### content
+
+**Status**: experimental
+
+Validate and install data-only content packs for installed plugins.
+
+Use `pulp content` for end-user data such as presets, themes, samples, and wavetables. Plugin authors get a standard expansion-pack format instead of custom installers. Users get validation, an explicit install target, and removal that leaves their own presets alone. Agents can reject mismatched packs before install because plugins declare the content kinds they actually support.
+
+Keep the three lanes distinct:
+
+- `pulp add <name>` adds curated developer dependencies from the Pulp registry.
+- `pulp kit ...` reviews artifacts that may transform a project.
+- `pulp content ...` installs read-only data into a plugin-specific content directory.
+
+The workflow is validate, preview, approve, install/update. Install, update, and remove require `--yes`. `.pulpcontent` archives must include `files.sha256.json`; every payload file must be listed and hash-matched before preview, install, or update.
+
+`preview` reads the trusted `pulp.plugin-runtime.json` emitted by the plugin and reports compatibility, target plugin, accepted content kinds, and hot-reload/rescan/restart policy. `update` takes an explicit local path, not a registry name or URL, and rolls back a replaced version on failure. Content commands copy data only; they never run package CMake, JavaScript, scripts, dynamic libraries, or remote fetches. Removal deletes only the installed content-pack root, not user-created presets or edits.
+
+Plugins opt in with `ContentRegistry` or `PresetManager`. Prefer declaring content support in CMake with `pulp_add_plugin(... CONTENT_CAPABILITIES ... CONTENT_KINDS ...)`; that generates the `pulp.plugin-runtime.json` used by agents, previews, and `ValidationHarness::validate_plugin_runtime_manifest(...)`.
+
+```cmake
+pulp_add_plugin(MySynth
+    ...
+    CONTENT_CAPABILITIES content.presets.v1 content.samples.v1
+    CONTENT_KINDS presets samples
+    CONTENT_HOT_RELOAD_KINDS presets)
+```
+
+```json
+{
+  "schema": "pulp.plugin-runtime.v1",
+  "pluginId": "dev.example.synth",
+  "content": {
+    "capabilities": ["content.presets.v1", "content.samples.v1"],
+    "kinds": ["presets", "samples"],
+    "reload": {
+      "hotReloadKinds": ["presets"],
+      "manualRescanKinds": []
+    }
+  }
+}
+```
+
+```bash
+pulp content validate ./fixtures/packages/basic-content-pack --json
+pulp content preview ./fixtures/packages/basic-content-pack --plugin-runtime ./build/PulpSynth.pulp.plugin-runtime.json --plugin dev.example.synth --json
+pulp kit pack ./fixtures/packages/basic-content-pack --output ./dist/basic-content-pack.pulpcontent
+pulp content install ./dist/basic-content-pack.pulpcontent --plugin dev.example.synth --yes
+pulp content update ./dist/basic-content-pack.pulpcontent --plugin dev.example.synth --yes
+pulp content list --plugin dev.example.synth --json
+pulp content rescan --json
+pulp content reveal dev.pulp.fixtures.basic-content-pack --plugin dev.example.synth --version 0.1.0
+pulp content remove dev.pulp.fixtures.basic-content-pack --plugin dev.example.synth --version 0.1.0 --yes
+```
+
+Subcommands:
+
+| Subcommand | What it does |
+|------------|--------------|
+| `validate <path>` | Validate a `.pulpcontent` archive or `content-pack` directory without executing package code |
+| `preview <path> --plugin-runtime <manifest>` | Preview compatibility and reload/restart policy without installing anything |
+| `install <path> --plugin <id> --yes` | Copy a validated content pack into the plugin-specific user content root and update the content index with `plugin_id` and `manifest_sha256` |
+| `update <path> --plugin <id> --yes` | Replace or add a validated local content pack, write the target plugin id and new manifest digest, and roll back a replaced version on failure |
+| `list [--plugin <id>]` | List installed content packs |
+| `rescan` | Rebuild `Content/index.json` from installed local manifests without copying, deleting, fetching, or executing package code; index entries include `plugin_id` and `manifest_sha256` |
+| `reveal <package-id> --plugin <id>` | Print the installed content path |
+| `remove <package-id> --plugin <id> --yes` | Remove an installed content-pack root |
+
 ### add
 
 **Status**: usable
 
-Add a third-party package from the Pulp package registry.
+Add a curated third-party dependency from the Pulp package registry.
+
+`pulp add` is intentionally narrow. Package names resolve through Pulp-controlled registry metadata, not arbitrary GitHub/GitLab URLs or manifest-bearing local paths. Use `pulp kit validate/plan/apply` for local or external Pulp-native artifacts that can transform a project.
 
 ```bash
 pulp add signalsmith-stretch                       # add a package

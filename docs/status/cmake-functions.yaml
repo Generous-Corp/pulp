@@ -19,6 +19,11 @@ functions:
       - AAX_NATIVE_CODE
       - SOURCES
       - PROCESSOR_FACTORY
+      - UI_SCRIPT
+      - CONTENT_CAPABILITIES
+      - CONTENT_KINDS
+      - CONTENT_HOT_RELOAD_KINDS
+      - CONTENT_MANUAL_RESCAN_KINDS
     creates:
       - ${target}_Core
       - ${target}_VST3
@@ -37,6 +42,17 @@ functions:
       - BUNDLE_ID
       - VERSION
     docs: reference/cmake.md#pulp_add_app
+
+  - name: pulp_use_kit_ui
+    status: experimental
+    summary: Attach reviewed UI-kit script, optional token/theme file, and reviewed asset roots from a generated kit interface target to an existing plugin's format targets.
+    required:
+      - target
+      - kit_target
+    optional:
+      - SCRIPT
+      - TOKENS
+    docs: reference/cmake.md#pulp_add_plugin
 
   - name: pulp_faust_generate
     status: experimental

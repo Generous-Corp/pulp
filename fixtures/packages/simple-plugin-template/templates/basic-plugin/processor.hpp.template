@@ -1,0 +1,59 @@
+#pragma once
+
+#include <pulp/format/processor.hpp>
+#include <cmath>
+
+namespace {{NAMESPACE}} {
+
+enum ParamIDs : pulp::state::ParamID {
+    kGain = 1,
+};
+
+inline pulp::format::PluginDescriptor make_descriptor() {
+    return {
+        .name = "{{PLUGIN_NAME}}",
+        .manufacturer = "{{MANUFACTURER}}",
+        .bundle_id = "{{BUNDLE_ID}}",
+        .version = "{{VERSION}}",
+        .category = pulp::format::PluginCategory::Effect,
+    };
+}
+
+class {{CLASS_NAME}} : public pulp::format::Processor {
+public:
+    pulp::format::PluginDescriptor descriptor() const override {
+        return make_descriptor();
+    }
+
+    void define_parameters(pulp::state::StateStore& store) override {
+        store.add_parameter({
+            .id = kGain,
+            .name = "Gain",
+            .unit = "dB",
+            .range = {-60.0f, 12.0f, 0.0f},
+        });
+    }
+
+    void prepare(const pulp::format::PrepareContext&) override {}
+
+    void process(
+        pulp::audio::BufferView<float>& output,
+        const pulp::audio::BufferView<const float>& input,
+        pulp::midi::MidiBuffer& /*midi_in*/,
+        pulp::midi::MidiBuffer& /*midi_out*/,
+        const pulp::format::ProcessContext& /*ctx*/) override
+    {
+        const float gain = std::pow(10.0f, state().get_value(kGain) / 20.0f);
+        for (std::size_t ch = 0; ch < output.num_channels() && ch < input.num_channels(); ++ch) {
+            for (std::size_t i = 0; i < output.num_samples(); ++i) {
+                output.channel(ch)[i] = input.channel(ch)[i] * gain;
+            }
+        }
+    }
+};
+
+inline std::unique_ptr<pulp::format::Processor> create_{{FACTORY_NAME}}() {
+    return std::make_unique<{{CLASS_NAME}}>();
+}
+
+} // namespace {{NAMESPACE}}

@@ -63,6 +63,8 @@ This is not yet available because the Pulp repository is currently private. Thes
 | `/design [style]` | AI-driven design session with natural language |
 | `/ship` | Sign, notarize, and package for distribution |
 | `/import-design` | Import from Figma, Stitch, v0, Pencil, Claude Design, DESIGN.md, or React JSX |
+| `/kit` | Search, inspect, plan, apply, remove, pack, or scaffold Pulp kits |
+| `/content` | Validate, install, update, list, rescan, remove, or reveal data-only content packs |
 | `/version` | Show, bump, or check version consistency |
 
 ### Skills
@@ -74,6 +76,7 @@ Skills activate automatically based on context. You don't need to invoke them ex
 | **ci** | Say "ship this", "create a PR", "run CI", "merge to main" — uses `shipyard pr` for PR creation, tracking, cross-platform validation, and merge-on-green |
 | **engine** | Ask about JS engines, Three.js performance, switching to V8/JSC |
 | **import-design** | Want to import a design from Figma or other tools |
+| **content** | Want to validate or install preset/theme/sample/wavetable content packs |
 | **webview-ui** | Want to build a WebView-based UI panel |
 
 ### Hooks
@@ -87,7 +90,7 @@ The plugin includes hooks that run automatically:
 ### MCP server
 
 The plugin ships an MCP (Model Context Protocol) server — `pulp-mcp` — that
-exposes 18 Pulp operations as callable tools, so Claude Code (and other MCP
+exposes Pulp operations as callable tools, so Claude Code (and other MCP
 clients) can drive them in one turn instead of multiple shell calls.
 
 | Category | Tools |
@@ -96,6 +99,10 @@ clients) can drive them in one turn instead of multiple shell calls.
 | UI rendering + interaction | `pulp_screenshot` (render JS UI to PNG), `pulp_simulate_click`, `pulp_get_view_tree` |
 | Live plugin inspection (inspector protocol) | `pulp_inspect_dom`, `pulp_inspect_params`, `pulp_inspect_set_param` (gesture-wrapped numeric param write), `pulp_inspect_screenshot`, `pulp_inspect_evaluate` (JS expr), `pulp_inspect_performance`, `pulp_inspect_audio` |
 | Audio model / WAV-first excerpt-find | `pulp_audio_model_list`, `pulp_audio_model_status`, `pulp_audio_model_activate`, `pulp_audio_excerpt_find`, `pulp_audio_read_bundle` |
+| Kit manifests | `pulp_kit`, `pulp_kit_search`, `pulp_kit_validate`, `pulp_kit_inspect`, `pulp_kit_plan`, `pulp_kit_verify`, `pulp_kit_apply`, `pulp_kit_remove`, `pulp_kit_pack`, `pulp_kit_publish_check`, `pulp_kit_init` |
+| Content packs | `pulp_content`, `pulp_content_validate`, `pulp_content_preview`, `pulp_content_install`, `pulp_content_update`, `pulp_content_list`, `pulp_content_rescan`, `pulp_content_remove`, `pulp_content_reveal` |
+
+The kit and content MCP tools mirror the CLI trust model. `pulp_kit_*` tools inspect, plan, verify, and apply local project-transforming artifacts only after review; `pulp_content_*` tools validate, preview, and install data-only packs for an explicit plugin. Curated dependency packages stay on `pulp add <name>`.
 
 #### Setup
 
@@ -154,13 +161,17 @@ pulp/
 │   │   ├── validate.md
 │   │   ├── design.md
 │   │   ├── ship.md
-│   │   └── import-design.md
+│   │   ├── import-design.md
+│   │   ├── kit.md
+│   │   └── content.md
 │   └── settings.json         # Hook configuration
 ├── .agents/
 │   └── skills/               # Shared skills (Claude Code + Codex)
 │       ├── ci/
+│       ├── content/
 │       ├── engine/
 │       ├── import-design/
+│       ├── kits/
 │       └── webview-ui/
 └── hooks/
     ├── hooks.json             # Hook definitions
@@ -169,7 +180,87 @@ pulp/
         └── cli-plugin-sync.sh
 ```
 
-Skills live in `.agents/skills/` so they're shared between Claude Code and Codex CLI. Both agents read from the same location.
+Skills live in `.agents/skills/` so they're shared between Claude Code and Codex CLI. Both agents read from the same location, and the `/kit` and `/content` slash commands point agents at the same inspect/preview/approve/apply workflows documented here.
+
+### Kit Manifests
+
+The plugin includes a `kits` skill for reusable Pulp-native source, UI, template, validation, graph, and native-component artifacts.
+
+Why it matters:
+
+- developers can share real Pulp building blocks instead of copy-pasted examples;
+- users see capabilities, licenses, files, and project changes before approval;
+- agents can inspect and plan without running untrusted package code.
+
+```bash
+pulp kit validate <path>
+pulp kit search <query> --root <dir> --lane kit --json
+pulp kit search <query> --root <dir> --lane content --json
+pulp kit inspect <path> --json
+pulp kit plan <path> --json
+pulp kit verify <path> --json
+pulp kit verify <path> --execute-screenshots --json
+pulp kit apply <path> --yes
+pulp kit remove <kit-id> --yes
+pulp kit pack <path> --output <file>
+pulp kit publish <path> --dry-run --json
+pulp kit publish <path> --dry-run --registry-manifest <file> --json
+pulp kit init --kind source --id com.example.my-kit
+pulp create "Kit Gain" --template <template-kit-dir> --no-build --ci
+```
+
+Keep the trust boundary simple:
+
+- `pulp add <name>` is only for curated dependency packages from the Pulp registry.
+- `pulp kit ...` is for local or external artifacts that may transform a project.
+- `pulp kit search` is local discovery only. It does not fetch and does not make a result trusted.
+- `content-pack` manifests can be searched, validated, and inspected for classification, but `pulp kit plan/apply/publish` rejects them. Use `pulp content ...` for data-only packs.
+
+The agent workflow is inspect, plan, verify, approve, apply. Validate/inspect/plan/pack/publish dry-run are metadata-only: no package CMake, JavaScript, scripts, dynamic libraries, remote search, or content installers. `.pulpkit` and `.pulpcontent` archives must include `files.sha256.json`; every payload file must be listed and hash-matched before the manifest is trusted.
+
+Validation is valuable because it catches license, SDK, C++ standard, internal-module, tampered-evidence, and missing-review problems before any project CMake changes. `pulp kit apply --yes` writes only reviewed owned files (`.pulp/kits.lock.json`, generated CMake scaffolding, and declared files under `pulp-kits/<kit-id>/`). Dependency packages declared by a kit resolve only through the existing curated `pulp add <id>` path. `pulp create --template <template-kit-dir>` validates an explicit local template kit and never installs dependencies implicitly.
+
+Evidence rules to surface before apply:
+
+- Agent-authored kits need `authoring.humanReview.reviewed = true` before publish dry-run can pass.
+- Template kits need `validation.generatedProjectDiffs`.
+- UI kits need screenshot profiles/reports; run `pulp kit verify` after plan review, and use `--execute-screenshots` only when rendered artifacts are explicitly needed.
+- Graph/native kits need exported fixtures/files plus explicit realtime claims (`processSafe`, `allocatesInProcess`, `locksInProcess`); verification must not load dynamic libraries.
+
+### Content Packs
+
+The plugin includes a `content` skill for data-only packs installed into an existing plugin's user content directory.
+
+Why it matters:
+
+- plugin authors ship presets, themes, samples, and wavetables without custom installers;
+- users can validate, see reload/restart expectations, and remove packs without losing their own presets;
+- agents match packs to plugins through runtime capabilities before install.
+
+```bash
+pulp content validate <path> --json
+pulp content preview <path> --plugin-runtime <manifest> --json
+pulp content install <path> --plugin <plugin-id> --yes
+pulp content update <path> --plugin <plugin-id> --yes
+pulp content list --plugin <plugin-id> --json
+pulp content rescan --json
+pulp content reveal <package-id> --plugin <plugin-id> --version <version>
+pulp content remove <package-id> --plugin <plugin-id> --version <version> --yes
+```
+
+Content packs are not curated dependency packages and do not transform projects. The workflow is validate, preview compatibility and reload policy, approve, install or update. Install/update/remove require explicit approval and never execute package CMake, JavaScript, scripts, or dynamic libraries. `.pulpcontent` archives must include `files.sha256.json`; every payload file must be listed and hash-matched before preview, install, or update.
+
+The value for plugin authors is a standard expansion-pack path. Users see the target plugin, install location, and reload/rescan/restart expectation before approval, and removal deletes only the installed pack root. User-created presets remain in the plugin's normal user preset path.
+
+Runtime plugins opt in through `ContentRegistry` or `PresetManager`. Prefer `pulp_add_plugin(... CONTENT_CAPABILITIES ... CONTENT_KINDS ... CONTENT_HOT_RELOAD_KINDS ... CONTENT_MANUAL_RESCAN_KINDS ...)`, which generates `pulp.plugin-runtime.json` for agents, previews, and `ValidationHarness::validate_plugin_runtime_manifest(...)`.
+
+```cmake
+pulp_add_plugin(MySynth
+    ...
+    CONTENT_CAPABILITIES content.presets.v1
+    CONTENT_KINDS presets
+    CONTENT_HOT_RELOAD_KINDS presets)
+```
 
 ## Staying in Sync
 
