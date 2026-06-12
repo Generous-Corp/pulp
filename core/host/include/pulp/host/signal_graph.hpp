@@ -385,6 +385,17 @@ private:
         };
         std::vector<ParamBounds> param_bounds;
 
+        struct SparseAutomationAccum {
+            float v0 = 0.0f;
+            float vN = 0.0f;
+            float lo = 0.0f;
+            float hi = 1.0f;
+            bool has_add = false;
+            bool touched = false;
+        };
+        std::vector<uint32_t> sparse_automation_param_ids;
+        std::vector<SparseAutomationAccum> sparse_automation_accum;
+
         // MIDI scratch. Cleared at the start of each process() call except
         // for MidiInput nodes, whose midi_out is populated by inject_midi()
         // and must survive the process() entry-clear.
@@ -394,8 +405,15 @@ private:
         // Audio-rate modulation scratch. Each listed param gets one
         // max-block-sized slice in audio_rate_param_data, filled immediately
         // before the destination plugin processes.
+        struct DenseAutomationAccum {
+            float lo = 0.0f;
+            float hi = 1.0f;
+            bool has_replace = false;
+            bool has_add = false;
+        };
         std::vector<uint32_t> audio_rate_param_ids;
         std::vector<float> audio_rate_param_data;
+        std::vector<DenseAutomationAccum> audio_rate_accum;
     };
 
     // One delay line per graph connection, parallel to connections_. Used to
