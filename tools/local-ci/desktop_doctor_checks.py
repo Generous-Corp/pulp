@@ -5,7 +5,7 @@ from collections.abc import Callable
 import json
 import subprocess
 
-from normalize import normalize_desktop_optional_config
+from desktop_doctor_optional import optional_desktop_doctor_checks
 import linux_target
 import windows_target
 
@@ -244,70 +244,4 @@ def windows_session_doctor_checks(
             checks.append(desktop_check_fn("repo_checkout", False, str(exc), required=bootstrap_required))
     except (subprocess.SubprocessError, OSError, RuntimeError) as exc:
         checks.append(desktop_check_fn("scheduled_task", False, str(exc), required=bootstrap_required))
-    return checks
-
-
-def optional_desktop_doctor_checks(
-    target: dict,
-    *,
-    which_fn: Callable[[str], str | None],
-    probe_webdriver_endpoint_fn: Callable[..., dict],
-    desktop_check_fn: Callable[..., dict],
-) -> list[dict]:
-    checks: list[dict] = []
-    optional = normalize_desktop_optional_config(target.get("optional"))
-    if optional.get("webview_driver"):
-        webdriver_url = optional.get("webdriver_url")
-        if not webdriver_url:
-            checks.append(desktop_check_fn("webview_driver", False, "enabled but webdriver_url is not set", required=False))
-        else:
-            try:
-                probe = probe_webdriver_endpoint_fn(webdriver_url)
-                ready = probe.get("ready")
-                ready_text = "" if ready is None else f" (ready={str(ready).lower()})"
-                message = probe.get("message")
-                detail = f"reachable at {probe['status_url']}{ready_text}"
-                if message:
-                    detail = f"{detail}: {message}"
-                checks.append(desktop_check_fn("webview_driver", ready is not False, detail, required=False))
-            except (RuntimeError, ValueError) as exc:
-                checks.append(desktop_check_fn("webview_driver", False, str(exc), required=False))
-    if optional.get("debug_attach"):
-        debugger_command = optional.get("debugger_command")
-        if target["target_type"] == "local":
-            debugger = debugger_command or "lldb"
-            debugger_path = which_fn(debugger)
-            checks.append(
-                desktop_check_fn(
-                    "debug_attach",
-                    debugger_path is not None,
-                    debugger_path or f"{debugger} not found on PATH",
-                    required=False,
-                )
-            )
-        else:
-            detail = debugger_command or "enabled; remote debugger validation deferred to target tooling"
-            checks.append(desktop_check_fn("debug_attach", True, detail, required=False))
-    if optional.get("video_capture"):
-        if target["target_type"] == "local":
-            ffmpeg_path = which_fn("ffmpeg")
-            checks.append(
-                desktop_check_fn(
-                    "video_capture",
-                    ffmpeg_path is not None,
-                    ffmpeg_path or "ffmpeg not found on PATH",
-                    required=False,
-                )
-            )
-        else:
-            checks.append(
-                desktop_check_fn(
-                    "video_capture",
-                    True,
-                    "enabled; remote video tooling validation deferred to target tooling",
-                    required=False,
-                )
-            )
-    if optional.get("frame_stats"):
-        checks.append(desktop_check_fn("frame_stats", True, "enabled", required=False))
     return checks

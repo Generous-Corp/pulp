@@ -109,6 +109,87 @@ class DesktopDoctorOptionalTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "invalid JSON response"):
             self.mod.probe_webdriver_endpoint("http://driver", urlopen_fn=lambda *_args, **_kwargs: BadJson())
 
+    def test_optional_desktop_doctor_checks_local_features(self) -> None:
+        checks = self.mod.optional_desktop_doctor_checks(
+            {
+                "target_type": "local",
+                "optional": {
+                    "webview_driver": True,
+                    "webdriver_url": "http://driver",
+                    "debug_attach": True,
+                    "video_capture": True,
+                    "frame_stats": True,
+                },
+            },
+            which_fn=lambda name: {"lldb": "/usr/bin/lldb"}.get(name),
+            probe_webdriver_endpoint_fn=lambda _url: {
+                "status_url": "http://driver/status",
+                "ready": True,
+                "message": "ok",
+            },
+            desktop_check_fn=lambda name, ok, detail, required=True: {
+                "name": name,
+                "ok": ok,
+                "detail": detail,
+                "required": required,
+            },
+        )
+        by_name = {check["name"]: check for check in checks}
+
+        self.assertTrue(by_name["webview_driver"]["ok"])
+        self.assertEqual(by_name["webview_driver"]["detail"], "reachable at http://driver/status (ready=true): ok")
+        self.assertFalse(by_name["webview_driver"]["required"])
+        self.assertTrue(by_name["debug_attach"]["ok"])
+        self.assertEqual(by_name["debug_attach"]["detail"], "/usr/bin/lldb")
+        self.assertFalse(by_name["video_capture"]["ok"])
+        self.assertIn("ffmpeg not found", by_name["video_capture"]["detail"])
+        self.assertTrue(by_name["frame_stats"]["ok"])
+
+    def test_optional_desktop_doctor_checks_remote_and_error_edges(self) -> None:
+        remote = self.mod.optional_desktop_doctor_checks(
+            {
+                "target_type": "ssh",
+                "optional": {
+                    "webview_driver": True,
+                    "debug_attach": True,
+                    "debugger_command": "remote-debug",
+                    "video_capture": True,
+                },
+            },
+            which_fn=lambda _name: None,
+            probe_webdriver_endpoint_fn=lambda _url: self.fail("missing webdriver_url should not probe"),
+            desktop_check_fn=lambda name, ok, detail, required=True: {
+                "name": name,
+                "ok": ok,
+                "detail": detail,
+                "required": required,
+            },
+        )
+        by_name = {check["name"]: check for check in remote}
+        self.assertFalse(by_name["webview_driver"]["ok"])
+        self.assertIn("webdriver_url is not set", by_name["webview_driver"]["detail"])
+        self.assertTrue(by_name["debug_attach"]["ok"])
+        self.assertEqual(by_name["debug_attach"]["detail"], "remote-debug")
+        self.assertTrue(by_name["video_capture"]["ok"])
+
+        failed_probe = self.mod.optional_desktop_doctor_checks(
+            {
+                "target_type": "local",
+                "optional": {"webview_driver": True, "webdriver_url": "bad"},
+            },
+            which_fn=lambda _name: None,
+            probe_webdriver_endpoint_fn=lambda _url: (_ for _ in ()).throw(ValueError("bad url")),
+            desktop_check_fn=lambda name, ok, detail, required=True: {
+                "name": name,
+                "ok": ok,
+                "detail": detail,
+                "required": required,
+            },
+        )
+        self.assertEqual(failed_probe[0]["name"], "webview_driver")
+        self.assertFalse(failed_probe[0]["ok"])
+        self.assertEqual(failed_probe[0]["detail"], "bad url")
+
 
 if __name__ == "__main__":
     unittest.main()
