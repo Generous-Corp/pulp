@@ -344,6 +344,8 @@ which is a single acquire-load of the latest prepared pointer and does not
 allocate, lock, wait, or take ownership. Drain retired resources from the
 control side before the fixed reclaim queue fills; if it fills, publication
 fails or defers deletion rather than deleting memory a callback may still read.
+Track `retired_count_approx()` and `retire_overflow_count()` from the control
+side when resources can be regenerated faster than teardown drains them.
 
 Common recipes:
 
