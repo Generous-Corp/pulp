@@ -26,6 +26,18 @@ class LocalCiModuleMapTests(unittest.TestCase):
         self.assertEqual(sorted(production_modules - mapped_modules), [])
         self.assertEqual(sorted(mapped_modules - production_modules), [])
 
+    def test_every_binding_module_has_a_matching_test_file(self) -> None:
+        binding_modules = {
+            path.name
+            for path in LOCAL_CI_DIR.glob("*_bindings.py")
+            if not path.name.startswith("test_")
+        }
+        test_modules = {path.name for path in LOCAL_CI_DIR.glob("test_*_bindings.py")}
+
+        missing_tests = sorted(f"test_{module_name}" for module_name in binding_modules if f"test_{module_name}" not in test_modules)
+
+        self.assertEqual(missing_tests, [])
+
 
 if __name__ == "__main__":
     unittest.main()
