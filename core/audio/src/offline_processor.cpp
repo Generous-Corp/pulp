@@ -49,9 +49,14 @@ std::optional<AudioFileData> offline_render(
     }
 
     uint32_t channels = input.num_channels();
-    uint64_t total_frames = input.num_frames();
+    const uint64_t input_frames = input.num_frames();
+    const uint64_t total_frames =
+        input_frames
+        + (options.tail_policy == OfflineRenderTailPolicy::RenderTail
+            ? options.tail_frames
+            : 0);
     for (const auto& channel : input.channels)
-        if (channel.size() != static_cast<size_t>(total_frames))
+        if (channel.size() != static_cast<size_t>(input_frames))
             return std::nullopt;
 
     AudioFileData output;
@@ -72,10 +77,15 @@ std::optional<AudioFileData> offline_render(
             static_cast<size_t>(block_size) * channels, 0.0f);
 
         // Interleave input
-        for (int f = 0; f < frames_this_block; ++f)
-            for (uint32_t ch = 0; ch < channels; ++ch)
+        for (int f = 0; f < frames_this_block; ++f) {
+            const uint64_t source_frame = pos + static_cast<uint64_t>(f);
+            for (uint32_t ch = 0; ch < channels; ++ch) {
                 in_block[static_cast<size_t>(f) * channels + ch] =
-                    input.channels[ch][static_cast<size_t>(pos) + f];
+                    source_frame < input_frames
+                        ? input.channels[ch][static_cast<size_t>(source_frame)]
+                        : 0.0f;
+            }
+        }
 
         // Zero remaining samples in last block
         if (frames_this_block < block_size) {

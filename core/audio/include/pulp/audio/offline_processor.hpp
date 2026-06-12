@@ -30,6 +30,11 @@ struct OfflineRenderBlockContext {
     uint64_t deterministic_seed = 0;
 };
 
+enum class OfflineRenderTailPolicy : uint8_t {
+    Truncate = 0,
+    RenderTail,
+};
+
 /// Advanced offline render options. `block_size_schedule` is consumed in order;
 /// when the render is longer than the schedule, the final scheduled size
 /// repeats. Empty schedule falls back to `fallback_block_size`.
@@ -38,6 +43,8 @@ struct OfflineRenderOptions {
     std::vector<int> block_size_schedule;
     uint64_t start_sample_position = 0;
     uint64_t deterministic_seed = 0;
+    OfflineRenderTailPolicy tail_policy = OfflineRenderTailPolicy::Truncate;
+    uint64_t tail_frames = 0;
 };
 
 /// Callback for deterministic offline render blocks.
