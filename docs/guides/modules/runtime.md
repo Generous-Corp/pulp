@@ -163,6 +163,24 @@ shape counters: graph node/edge/port/block/buffer stats, or voice-pool
 polyphony/active/releasing counts. That makes CI fixtures portable while still
 pinning whether optional work runs, defers, sheds, or bypasses at scale.
 
+### Degraded Optional Work Contract
+
+The budget policy is a cooperative decision helper. It does not preempt running
+audio work, measure CPU cycles, move work to another thread, or automatically
+virtualize graph nodes or instrument voices. Callers must ask before starting
+optional work and honor the returned action:
+
+| Action | Caller behavior |
+|--------|-----------------|
+| `Run` | Execute the optional work inside the caller's prepared budget. |
+| `Defer` | Keep required or interactive work queued for a later frame/tick. |
+| `Shed` | Drop optional work for this frame/tick without producing stale output. |
+| `Bypass` | Use an existing cached/cheap fallback and skip the expensive path. |
+
+Critical audio rendering should not be gated through this helper. Use it for
+noncritical graph previews, diagnostics, per-voice analysis, background refresh,
+and validation helpers where a degraded result is acceptable and visible.
+
 ## ScopeGuard
 
 RAII cleanup — runs a callable on scope exit.
