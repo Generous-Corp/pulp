@@ -472,6 +472,18 @@ class QueueBindingsTests(unittest.TestCase):
         self.assertIs(captured["kwargs"]["trim_line_fn"], bindings["trim_line"])
         self.assertIs(captured["kwargs"]["reclaim_stale_remote_validator_candidates_fn"], cleanup.reclaim_stale_remote_validator_candidates)
 
+    def test_install_queue_helpers_wires_named_exports(self):
+        orchestrator = types.SimpleNamespace(
+            default_priority_for=lambda command, config: f"{command}:{config['priority']}",
+            summarize_job=lambda job: f"summary:{job['id']}",
+        )
+        bindings = self._bindings(orchestrator=orchestrator)
+
+        self.mod.install_queue_helpers(bindings, ("default_priority_for", "summarize_job"))
+
+        self.assertEqual(bindings["default_priority_for"]("ship", {"priority": "high"}), "ship:high")
+        self.assertEqual(bindings["summarize_job"]({"id": "job1"}), "summary:job1")
+
 
 if __name__ == "__main__":
     unittest.main()

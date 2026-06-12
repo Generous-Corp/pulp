@@ -6,6 +6,18 @@ from collections.abc import Mapping
 from typing import Any
 
 from binding_utils import binding as _binding
+from binding_utils import install_local_helpers
+
+
+CLEANUP_EXPORTS = (
+    "result_file_job_id",
+    "artifact_entry_sort_key",
+    "collect_local_ci_cleanup_plan",
+    "apply_local_ci_cleanup_plan",
+    "cleanup_plan_lines",
+    "collect_stale_windows_cleanup_candidates_unlocked",
+    "cleanup_stale_windows_validator",
+)
 
 
 def result_file_job_id(bindings: Mapping[str, Any], path: Any) -> str | None:
@@ -20,11 +32,15 @@ def collect_local_ci_cleanup_plan(
     bindings: Mapping[str, Any],
     queue: list[dict],
     *,
-    keep_results: int,
-    keep_logs: int,
-    keep_bundles: int,
-    include_prepared: bool,
+    keep_results: int | None = None,
+    keep_logs: int | None = None,
+    keep_bundles: int = 0,
+    include_prepared: bool = False,
 ) -> dict:
+    if keep_results is None:
+        keep_results = _binding(bindings, "KEEP_COMPLETED_JOBS")
+    if keep_logs is None:
+        keep_logs = _binding(bindings, "KEEP_COMPLETED_JOBS")
     return _binding(bindings, "_cleanup").collect_local_ci_cleanup_plan(
         queue,
         keep_results=keep_results,
@@ -78,3 +94,7 @@ def cleanup_stale_windows_validator(
         windows_ssh_powershell_command_fn=_binding(bindings, "windows_ssh_powershell_command"),
         trim_line_fn=_binding(bindings, "trim_line"),
     )
+
+
+def install_cleanup_helpers(bindings: dict[str, Any], names: tuple[str, ...] = CLEANUP_EXPORTS) -> None:
+    install_local_helpers(bindings, globals(), names)

@@ -112,6 +112,31 @@ class CleanupBindingTests(unittest.TestCase):
             trim_line_fn=self.bindings["trim_line"],
         )
 
+    def test_install_cleanup_helpers_wires_named_exports_and_default_retention(self) -> None:
+        self.cleanup.collect_local_ci_cleanup_plan.return_value = {"categories": {}}
+        self.cleanup.result_file_job_id.return_value = "job1"
+        self.bindings["KEEP_COMPLETED_JOBS"] = 17
+
+        self.mod.install_cleanup_helpers(
+            self.bindings,
+            ("collect_local_ci_cleanup_plan", "result_file_job_id"),
+        )
+
+        self.assertEqual(self.bindings["result_file_job_id"](pathlib.Path("/state/results/job1.json")), "job1")
+        self.assertEqual(self.bindings["collect_local_ci_cleanup_plan"]([{"id": "job1"}]), {"categories": {}})
+        self.cleanup.collect_local_ci_cleanup_plan.assert_called_once_with(
+            [{"id": "job1"}],
+            keep_results=17,
+            keep_logs=17,
+            keep_bundles=0,
+            include_prepared=False,
+            bundles_dir_fn=self.bindings["bundles_dir"],
+            logs_dir_fn=self.bindings["logs_dir"],
+            results_dir_fn=self.bindings["results_dir"],
+            prepared_dir_fn=self.bindings["prepared_dir"],
+            path_size_bytes_fn=self.bindings["path_size_bytes"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -8,6 +8,79 @@ from typing import Any
 
 from binding_utils import binding as _binding
 from binding_utils import binding_attr as _binding_attr
+from binding_utils import install_local_helpers
+
+
+QUEUE_EXPORTS = (
+    "supersede_job_unlocked",
+    "cancel_job_unlocked",
+    "load_queue",
+    "update_job_active_targets",
+    "enqueue_job",
+    "bump_queue_command_job",
+    "cancel_queue_command_job",
+    "default_priority_for",
+    "make_fingerprint",
+    "make_job",
+    "supersedence_result",
+    "cancellation_result",
+    "supersedence_key",
+    "supersedence_identity_key",
+    "jobs_share_supersedence_scope",
+    "job_has_narrower_same_identity_scope",
+    "supersedence_reason",
+    "summarize_job",
+    "bump_queue_command_result_line",
+    "cancel_queue_command_result_line",
+    "enqueue_command_result_line",
+    "drain_runner_active_line",
+    "summarize_active_targets",
+    "status_active_targets",
+    "status_target_states",
+    "status_submission_lines",
+    "target_state_detail_parts",
+    "status_target_detail_lines",
+    "initial_target_state",
+    "completed_target_state",
+    "upsert_job_active_targets_unlocked",
+    "updated_target_state",
+    "target_state_snapshot",
+    "status_runner_line",
+    "recent_completed_status_line",
+    "recent_completed_missing_result_line",
+    "result_validation_line",
+    "result_execution_line",
+    "target_result_line",
+    "result_target_lines",
+    "result_overall_line",
+    "missing_job_logs_line",
+    "missing_log_files_line",
+    "job_logs_header_line",
+    "log_section_header_line",
+    "empty_log_line",
+    "trim_completed_jobs_with_removed_ids",
+    "trim_completed_jobs",
+    "job_sort_key",
+    "queue_status_groups",
+    "recent_completed_jobs_for_status",
+    "find_job_unlocked",
+    "reconcile_running_jobs_unlocked",
+    "read_runner_info",
+    "pid_alive",
+    "current_runner_info",
+    "stale_running_jobs_unlocked",
+    "update_job_target_state",
+    "reclaim_stale_remote_validators",
+    "write_runner_info",
+    "update_runner_active_targets",
+    "clear_runner_info",
+    "validate_ci_branch_name",
+    "load_job",
+    "claim_next_job",
+    "finalize_job",
+    "wait_for_job",
+    "drain_pending_jobs",
+)
 
 
 def supersede_job_unlocked(bindings: Mapping[str, Any], job: dict, superseded_by: str, reason: str) -> None:
@@ -583,3 +656,7 @@ def drain_pending_jobs(bindings: Mapping[str, Any], config: dict, *, blocking: b
         now_fn=_binding(bindings, "now_iso"),
         pid_fn=_binding(bindings, "os").getpid,
     )
+
+
+def install_queue_helpers(bindings: dict[str, Any], names: tuple[str, ...] = QUEUE_EXPORTS) -> None:
+    install_local_helpers(bindings, globals(), names)
