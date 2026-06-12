@@ -803,6 +803,8 @@ static int32_t block_relative_sample_offset(AUEventSampleTime event_sample_time,
         pulp::format::ProcessContext ctx;
         ctx.sample_rate = bridge->sample_rate;
         ctx.num_samples = static_cast<int>(frameCount);
+        ctx.process_mode = pulp::format::ProcessMode::Realtime;
+        ctx.render_speed_hint = pulp::format::RenderSpeedHint::Realtime;
 
         // Item 1.3 — populate transport fields from the host blocks the
         // AUv3 host installed via the KVO-able properties on
