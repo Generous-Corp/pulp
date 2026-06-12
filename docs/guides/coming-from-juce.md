@@ -64,7 +64,7 @@ pulp ⏵  `pulp validate`. Discovers installed validators, reports
 the host environment and reports which validators ran, were missing,
 or were broken. There is also a *hard*
 "no install without validation" policy in `pulp ship` — see
-[plugin-install-policy](../../CLAUDE.md#plugin-install-policy).
+[Shipping Guide](shipping.md).
 
 If you were running pluginval manually and patching for `strictness=10`
 mismatches: that's `--strict` in Pulp.
