@@ -5731,7 +5731,7 @@ catch_discover_tests(pulp-test-host)
 # P11-5 (#2647): SignalGraph tests carved out of test_host.cpp to bring the
 # 2,190-line parent under 2,000 (now 852). No CLAP fixture needed — these
 # exercise pure graph routing/topology, not plugin loading.
-add_executable(pulp-test-host-signal-graph test_host_signal_graph.cpp harness/rt_allocation_probe.cpp)
+add_executable(pulp-test-host-signal-graph test_host_signal_graph.cpp)
 target_sources(pulp-test-host-signal-graph PRIVATE
     $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>)
 target_link_libraries(pulp-test-host-signal-graph PRIVATE pulp::host Catch2::Catch2WithMain)

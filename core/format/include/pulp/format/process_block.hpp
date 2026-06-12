@@ -1,7 +1,6 @@
 #pragma once
 
 #include <pulp/audio/buffer.hpp>
-#include <pulp/format/processor.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/mpe_buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
@@ -18,6 +17,8 @@
 #include <type_traits>
 
 namespace pulp::format {
+
+struct ProcessContext;
 
 /// Coarse processing mode for one block.
 ///
@@ -539,21 +540,6 @@ struct ProcessBlock {
         if (events) {
             for (const auto& lane : events->audio_rate_modulations) {
                 if (lane.values.size() != frame_count) return false;
-            }
-        }
-        if (transport) {
-            if (transport->num_samples != 0 &&
-                transport->num_samples != static_cast<int>(frame_count)) {
-                return false;
-            }
-            if (transport->sample_rate != 0.0) {
-                if (transport->sample_rate <= 0.0 || !std::isfinite(transport->sample_rate)) {
-                    return false;
-                }
-                const auto tolerance = sample_rate * 1.0e-9;
-                if (std::fabs(transport->sample_rate - sample_rate) > tolerance) {
-                    return false;
-                }
             }
         }
         return true;

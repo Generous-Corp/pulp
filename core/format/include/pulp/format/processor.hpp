@@ -8,7 +8,6 @@
 #include <pulp/runtime/node_abi.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
 #include <pulp/state/store.hpp>
-#include <pulp/view/view.hpp>
 #include <atomic>
 #include <cstddef>
 #include <memory>
@@ -16,7 +15,10 @@
 #include <string>
 #include <vector>
 
-namespace pulp::view { class ScriptedUiSession; }
+namespace pulp::view {
+class ScriptedUiSession;
+class View;
+}
 
 namespace pulp::format {
 
@@ -306,17 +308,6 @@ enum class FrameRate {
     fps_30,           ///< NTSC integer. VST3 `kFrameRate30fps`.
     fps_30_drop,      ///< 30 drop-frame. VST3 `kFrameRate30DropFps`.
     fps_60,           ///< High-rate. VST3 `kFrameRate60fps`.
-};
-
-/// Runtime process mode for the current block.
-///
-/// `Realtime` is the default so existing adapters that do not populate the
-/// field keep the historical live-audio contract. Offline hosts should set
-/// `Offline` explicitly for deterministic exports, analysis renders, and other
-/// non-realtime passes where processors may choose higher-quality bounded work.
-enum class ProcessMode {
-    Realtime = 0,
-    Offline,
 };
 
 /// Host render-speed hint for offline or constrained live rendering.

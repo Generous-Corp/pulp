@@ -19,6 +19,7 @@
 // operator-new override and a Rust #[global_allocator] in this executable.
 
 #include "rt_test_scope.hpp"
+#include "../harness/rt_allocation_probe.hpp"
 
 #include <pulp/native_components/native_core.h>
 #include <pulp/runtime/scoped_no_alloc.hpp>
@@ -44,6 +45,32 @@ RtNoAllocScope::~RtNoAllocScope() noexcept { --g_rt_test_depth; }
 bool rt_test_in_no_alloc_scope() noexcept { return g_rt_test_depth > 0; }
 
 }  // namespace pulp::native_components::test
+
+namespace pulp::test {
+namespace {
+thread_local RtAllocationProbe* g_current_probe = nullptr;
+}
+
+RtAllocationProbe::RtAllocationProbe() noexcept
+    : previous_(g_current_probe) {
+    g_current_probe = this;
+}
+
+RtAllocationProbe::~RtAllocationProbe() noexcept {
+    g_current_probe = previous_;
+}
+
+void rt_allocation_probe_record(std::size_t bytes) noexcept {
+    if (g_current_probe == nullptr) return;
+    ++g_current_probe->allocation_count_;
+    g_current_probe->allocated_bytes_ += bytes;
+}
+
+bool rt_allocation_probe_active() noexcept {
+    return g_current_probe != nullptr;
+}
+
+}  // namespace pulp::test
 
 namespace {
 
@@ -140,6 +167,7 @@ extern "C" int pthread_rwlock_wrlock(pthread_rwlock_t* lock) {
 // is forbidden in scope; deletion is always allowed.
 void* operator new(std::size_t n) {
     pulp_rt_trap_if_no_alloc_scope(0, n);
+    pulp::test::rt_allocation_probe_record(n);
     if (n == 0) {
         n = 1;
     }
@@ -154,6 +182,7 @@ void* operator new[](std::size_t n) { return operator new(n); }
 
 void* operator new(std::size_t n, const std::nothrow_t&) noexcept {
     pulp_rt_trap_if_no_alloc_scope(0, n);
+    pulp::test::rt_allocation_probe_record(n);
     if (n == 0) {
         n = 1;
     }

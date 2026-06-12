@@ -13,6 +13,7 @@
 #include <pulp/format/param_processing.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
+#include <pulp/view/view.hpp>
 
 #include <array>
 
@@ -251,7 +252,7 @@ TEST_CASE("PluginDescriptor bus helpers read only the first bus",
 
 TEST_CASE("ProcessBuffers treats inactive buses as disconnected",
           "[format][processor-defaults][process-buffers][phase2]") {
-    std::array<BusBufferView<const float>, 2> inputs{{
+    std::array<ProcessBusBufferView<const float>, 2> inputs{{
         {
             .info = {
                 .name = "Main In",
@@ -278,7 +279,7 @@ TEST_CASE("ProcessBuffers treats inactive buses as disconnected",
         },
     }};
 
-    std::array<BusBufferView<float>, 1> outputs{{
+    std::array<ProcessBusBufferView<float>, 1> outputs{{
         {
             .info = {
                 .name = "Main Out",
@@ -294,8 +295,8 @@ TEST_CASE("ProcessBuffers treats inactive buses as disconnected",
     }};
 
     ProcessBuffers buffers{
-        BusBufferSet<const float>{std::span(inputs)},
-        BusBufferSet<float>{std::span(outputs)},
+        ProcessBusBufferSet<const float>{std::span(inputs)},
+        ProcessBusBufferSet<float>{std::span(outputs)},
     };
 
     REQUIRE(buffers.inputs.size() == 2);
@@ -314,7 +315,7 @@ TEST_CASE("ProcessBuffers rejects active null channel pointers",
     std::array<float, 4> left{};
     const float* active_input_channels[] = {left.data(), nullptr};
 
-    BusBufferView<const float> active_input{
+    ProcessBusBufferView<const float> active_input{
         .info = {
             .name = "Main In",
             .index = 0,
@@ -331,11 +332,11 @@ TEST_CASE("ProcessBuffers rejects active null channel pointers",
     REQUIRE(active_input.matches_declared_layout());
     REQUIRE_FALSE(active_input.has_channel_storage());
 
-    std::array<BusBufferView<const float>, 1> inputs{{active_input}};
-    std::array<BusBufferView<float>, 0> outputs{};
+    std::array<ProcessBusBufferView<const float>, 1> inputs{{active_input}};
+    std::array<ProcessBusBufferView<float>, 0> outputs{};
     ProcessBuffers buffers{
-        BusBufferSet<const float>{std::span(inputs)},
-        BusBufferSet<float>{std::span(outputs)},
+        ProcessBusBufferSet<const float>{std::span(inputs)},
+        ProcessBusBufferSet<float>{std::span(outputs)},
     };
 
     REQUIRE(buffers.main_input() != nullptr);
@@ -348,7 +349,7 @@ TEST_CASE("ProcessBuffers requires inactive buses to carry empty views",
     std::array<float, 4> sidechain{};
     const float* sidechain_channels[] = {sidechain.data()};
 
-    BusBufferView<const float> inactive_sidechain_with_storage{
+    ProcessBusBufferView<const float> inactive_sidechain_with_storage{
         .info = {
             .name = "Sidechain",
             .index = 1,
@@ -365,13 +366,13 @@ TEST_CASE("ProcessBuffers requires inactive buses to carry empty views",
     REQUIRE_FALSE(inactive_sidechain_with_storage.matches_declared_layout());
     REQUIRE(inactive_sidechain_with_storage.has_channel_storage());
 
-    std::array<BusBufferView<const float>, 1> inputs{{
+    std::array<ProcessBusBufferView<const float>, 1> inputs{{
         inactive_sidechain_with_storage,
     }};
-    std::array<BusBufferView<float>, 0> outputs{};
+    std::array<ProcessBusBufferView<float>, 0> outputs{};
     ProcessBuffers buffers{
-        BusBufferSet<const float>{std::span(inputs)},
-        BusBufferSet<float>{std::span(outputs)},
+        ProcessBusBufferSet<const float>{std::span(inputs)},
+        ProcessBusBufferSet<float>{std::span(outputs)},
     };
 
     REQUIRE(buffers.sidechain_input() == nullptr);
@@ -399,8 +400,8 @@ TEST_CASE("ProcessBuffers models surround instruments with auxiliary outputs",
     };
     float* cue_channels[] = {cue_left.data(), cue_right.data()};
 
-    std::array<BusBufferView<const float>, 0> inputs{};
-    std::array<BusBufferView<float>, 3> outputs{{
+    std::array<ProcessBusBufferView<const float>, 0> inputs{};
+    std::array<ProcessBusBufferView<float>, 3> outputs{{
         {
             .info = {
                 .name = "Main 5.1 Out",
@@ -442,8 +443,8 @@ TEST_CASE("ProcessBuffers models surround instruments with auxiliary outputs",
     }};
 
     ProcessBuffers buffers{
-        BusBufferSet<const float>{std::span(inputs)},
-        BusBufferSet<float>{std::span(outputs)},
+        ProcessBusBufferSet<const float>{std::span(inputs)},
+        ProcessBusBufferSet<float>{std::span(outputs)},
     };
 
     REQUIRE(buffers.inputs.empty());
@@ -495,8 +496,8 @@ TEST_CASE("Processor rich process renders multi-output instrument buses",
     };
     float* cue_channels[] = {cue_left.data(), cue_right.data()};
 
-    std::array<BusBufferView<const float>, 0> inputs{};
-    std::array<BusBufferView<float>, 3> outputs{{
+    std::array<ProcessBusBufferView<const float>, 0> inputs{};
+    std::array<ProcessBusBufferView<float>, 3> outputs{{
         {
             .info = {
                 .name = "Main 5.1 Out",
@@ -538,8 +539,8 @@ TEST_CASE("Processor rich process renders multi-output instrument buses",
     }};
 
     ProcessBuffers buffers{
-        BusBufferSet<const float>{std::span(inputs)},
-        BusBufferSet<float>{std::span(outputs)},
+        ProcessBusBufferSet<const float>{std::span(inputs)},
+        ProcessBusBufferSet<float>{std::span(outputs)},
     };
     pulp::midi::MidiBuffer midi_in;
     pulp::midi::MidiBuffer midi_out;
