@@ -3,22 +3,19 @@
 
 from __future__ import annotations
 
-import importlib.util
 import json
 from pathlib import Path
 import tempfile
 import unittest
+
+from module_test_utils import load_module_from_path
 
 
 MODULE_PATH = Path(__file__).with_name("windows_desktop_action.py")
 
 
 def load_module():
-    spec = importlib.util.spec_from_file_location("windows_desktop_action_under_test", MODULE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    return load_module_from_path(MODULE_PATH)
 
 
 class WindowsDesktopActionTests(unittest.TestCase):
