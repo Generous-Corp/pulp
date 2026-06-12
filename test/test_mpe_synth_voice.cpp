@@ -60,6 +60,15 @@ bool has_note_id(const Alloc& alloc, uint32_t note_id) {
     return false;
 }
 
+template<typename Voice>
+Voice* find_voice_by_note_id(MpeVoiceAllocator<Voice>& alloc, uint32_t note_id) {
+    for (std::size_t i = 0; i < alloc.polyphony(); ++i) {
+        auto& voice = alloc.voice(i);
+        if (voice.active() && voice.note_id() == note_id) return &voice;
+    }
+    return nullptr;
+}
+
 } // namespace
 
 TEST_CASE("MpeSynthVoice smoothing ramps pressure toward target", "[midi][mpe]") {
@@ -158,6 +167,68 @@ TEST_CASE("MpeVoiceAllocator routes events to voices by note_id", "[midi][mpe]")
         if (alloc.voice(i).releasing()) releasing = true;
     }
     REQUIRE(releasing);
+}
+
+TEST_CASE("MpeVoiceAllocator per-note expression updates only the matching voice",
+          "[midi][mpe][expression][phase3]") {
+    MpeVoiceAllocator<TestVoice> alloc{4};
+
+    alloc.dispatch(note_on_event(1, 60, 100, 11));
+    alloc.dispatch(note_on_event(2, 64, 90, 12));
+
+    auto* expressed = find_voice_by_note_id(alloc, 11);
+    auto* untouched = find_voice_by_note_id(alloc, 12);
+    REQUIRE(expressed != nullptr);
+    REQUIRE(untouched != nullptr);
+    expressed->set_smoothing(0.0f);
+    untouched->set_smoothing(0.0f);
+
+    alloc.dispatch(pitch_bend_event(11, 7.0f));
+    alloc.dispatch(pressure_event(11, 0.8f));
+    alloc.dispatch(timbre_event(11, 0.25f));
+
+    expressed->advance_smoothers();
+    untouched->advance_smoothers();
+
+    REQUIRE(expressed->pitch_bend() == Approx(7.0f));
+    REQUIRE(expressed->pressure() == Approx(0.8f));
+    REQUIRE(expressed->timbre() == Approx(0.25f));
+    REQUIRE(untouched->pitch_bend() == Approx(0.0f));
+    REQUIRE(untouched->pressure() == Approx(0.0f));
+    REQUIRE(untouched->timbre() == Approx(0.0f));
+}
+
+TEST_CASE("MpeVoiceAllocator per-note expression dispatch allocates zero times",
+          "[midi][mpe][expression][rt-safety][phase3]") {
+    MpeVoiceAllocator<TestVoice> alloc{8};
+    MpeBuffer buf;
+    buf.add(note_on_event(1, 60, 100, 21));
+    buf.add(note_on_event(2, 64, 100, 22));
+    buf.add(pitch_bend_event(21, -3.0f));
+    buf.add(pressure_event(21, 0.5f));
+    buf.add(timbre_event(22, 0.75f));
+
+    {
+        pulp::test::RtAllocationProbe probe;
+        alloc.dispatch_all(buf);
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+
+    auto* left = find_voice_by_note_id(alloc, 21);
+    auto* right = find_voice_by_note_id(alloc, 22);
+    REQUIRE(left != nullptr);
+    REQUIRE(right != nullptr);
+    left->set_smoothing(0.0f);
+    right->set_smoothing(0.0f);
+    left->advance_smoothers();
+    right->advance_smoothers();
+
+    REQUIRE(left->pitch_bend() == Approx(-3.0f));
+    REQUIRE(left->pressure() == Approx(0.5f));
+    REQUIRE(left->timbre() == Approx(0.0f));
+    REQUIRE(right->pitch_bend() == Approx(0.0f));
+    REQUIRE(right->pressure() == Approx(0.0f));
+    REQUIRE(right->timbre() == Approx(0.75f));
 }
 
 TEST_CASE("MpeVoiceAllocator steals oldest when full", "[midi][mpe]") {
