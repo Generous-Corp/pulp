@@ -641,10 +641,11 @@ does not surface offline-bounce intent to `ProcessBufferLists()` / `Render()`;
 AU v3 mirrors that explicit realtime render-path contract. Bypass, tail-drain,
 reset, and transport-jump flags stay explicit `ProcessContext` metadata and
 should be covered where the host API can actually deliver them. VST3 process
-context sample-position discontinuities and CLAP beat-timeline discontinuities
-are diffed against the previous block and set `transport_jump`, so processors
-that use `should_reset_dsp_state()` can reset delay, lookahead, or oscillator
-state on host seeks.
+context sample-position discontinuities, AU v3 transport-state sample-position
+discontinuities, and CLAP beat-timeline discontinuities are diffed against the
+previous block and set `transport_jump`, so processors that use
+`should_reset_dsp_state()` can reset delay, lookahead, or oscillator state on
+host seeks.
 
 ---
 
