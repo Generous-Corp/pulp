@@ -202,6 +202,80 @@ TEST_CASE("Synthesiser sustain pedal release is channel-scoped",
     REQUIRE_FALSE(synth.voice(1).note().sustained);
 }
 
+TEST_CASE("Synthesiser sostenuto pedal captures only currently held notes",
+          "[midi][synth][sostenuto][phase3]") {
+    Synthesiser<TestVoice> synth(3);
+    synth.note_on(0, 60, 100);
+
+    synth.cc(0, 66, 127);
+    REQUIRE(synth.voice(0).cc_calls == 1);
+    REQUIRE(synth.voice(0).last_cc_number == 66);
+    REQUIRE(synth.voice(0).note().sostenuto);
+
+    synth.note_on(0, 64, 100);
+    REQUIRE_FALSE(synth.voice(1).note().sostenuto);
+
+    synth.note_off(0, 60);
+    synth.note_off(0, 64);
+
+    REQUIRE(synth.voice(0).active());
+    REQUIRE_FALSE(synth.voice(0).releasing());
+    REQUIRE(synth.voice(0).note().sostenuto);
+    REQUIRE(synth.voice(0).note_off_calls == 0);
+
+    REQUIRE(synth.voice(1).releasing());
+    REQUIRE(synth.voice(1).note_off_calls == 1);
+
+    synth.cc(0, 66, 0);
+    REQUIRE(synth.voice(0).releasing());
+    REQUIRE_FALSE(synth.voice(0).note().sostenuto);
+    REQUIRE(synth.voice(0).note_off_calls == 1);
+}
+
+TEST_CASE("Synthesiser sustain and sostenuto release independently",
+          "[midi][synth][sustain][sostenuto][phase3]") {
+    Synthesiser<TestVoice> synth(2);
+    synth.note_on(0, 60, 100);
+
+    synth.cc(0, 66, 127);
+    synth.cc(0, 64, 127);
+    synth.note_off(0, 60);
+
+    REQUIRE(synth.voice(0).note().sostenuto);
+    REQUIRE(synth.voice(0).note().sustained);
+    REQUIRE_FALSE(synth.voice(0).releasing());
+
+    synth.cc(0, 66, 0);
+    REQUIRE_FALSE(synth.voice(0).note().sostenuto);
+    REQUIRE(synth.voice(0).note().sustained);
+    REQUIRE_FALSE(synth.voice(0).releasing());
+
+    synth.cc(0, 64, 0);
+    REQUIRE_FALSE(synth.voice(0).note().sustained);
+    REQUIRE(synth.voice(0).releasing());
+    REQUIRE(synth.voice(0).note_off_calls == 1);
+}
+
+TEST_CASE("Synthesiser soft pedal metadata is channel-scoped",
+          "[midi][synth][soft-pedal][phase3]") {
+    Synthesiser<TestVoice> synth(3);
+    synth.cc(0, 67, 127);
+
+    synth.note_on(0, 60, 100);
+    synth.note_on(1, 64, 100);
+
+    REQUIRE(synth.voice(0).note().soft_pedal);
+    REQUIRE_FALSE(synth.voice(1).note().soft_pedal);
+
+    synth.cc(1, 67, 127);
+    REQUIRE(synth.voice(1).note().soft_pedal);
+    REQUIRE(synth.voice(0).note().soft_pedal);
+
+    synth.cc(0, 67, 0);
+    REQUIRE_FALSE(synth.voice(0).note().soft_pedal);
+    REQUIRE(synth.voice(1).note().soft_pedal);
+}
+
 TEST_CASE("Synthesiser allocates separate voices for distinct notes",
           "[midi][synth]") {
     Synthesiser<TestVoice> synth(4);
