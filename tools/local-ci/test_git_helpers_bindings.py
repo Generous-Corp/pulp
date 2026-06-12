@@ -4,15 +4,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-import sys
 import unittest
 
+from module_test_utils import load_module_from_path
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-if str(SCRIPT_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPT_DIR))
 
-import git_helpers_bindings  # noqa: E402
+MODULE_PATH = Path(__file__).with_name("git_helpers_bindings.py")
+git_helpers_bindings = load_module_from_path(MODULE_PATH, module_name="git_helpers_bindings", add_module_dir=True)
 
 
 class FakeGitHelpers:

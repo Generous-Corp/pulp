@@ -4,15 +4,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-import sys
 import unittest
 
+from module_test_utils import load_module_from_path
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-if str(SCRIPT_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPT_DIR))
 
-import io_utils_bindings  # noqa: E402
+MODULE_PATH = Path(__file__).with_name("io_utils_bindings.py")
+io_utils_bindings = load_module_from_path(MODULE_PATH, module_name="io_utils_bindings", add_module_dir=True)
 
 
 class FakeIoUtils:
