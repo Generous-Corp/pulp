@@ -4,6 +4,7 @@
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/mpe_buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
+#include <pulp/format/process_block.hpp>
 #include <pulp/runtime/node_abi.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
 #include <pulp/state/store.hpp>
@@ -676,6 +677,30 @@ public:
         midi::MidiBuffer& midi_in,
         midi::MidiBuffer& midi_out,
         const ProcessContext& context) = 0;
+
+    /// Additive multi-bus process entry point.
+    ///
+    /// The default implementation preserves the existing plugin-author
+    /// contract: it projects the active main output, optional main input, and
+    /// optional sidechain input from `ProcessBuffers`, then calls the original
+    /// main-in/main-out `process()` callback. Plugins that need direct access
+    /// to auxes, multi-output instruments, or surround buses can override this
+    /// method while older processors continue to work unchanged.
+    virtual void process(
+        ProcessBuffers& audio,
+        midi::MidiBuffer& midi_in,
+        midi::MidiBuffer& midi_out,
+        const ProcessContext& context) {
+        auto* output = audio.main_output();
+        if (!output) return;
+
+        audio::BufferView<const float> empty_input;
+        auto* input = audio.main_input();
+        auto* previous_sidechain = sidechain_;
+        sidechain_ = audio.sidechain_input();
+        process(*output, input ? *input : empty_input, midi_in, midi_out, context);
+        sidechain_ = previous_sidechain;
+    }
 
     /// Editor support. By default, all processors have an auto-generated editor
     /// built from their parameter definitions (using AutoUi). Override these to
