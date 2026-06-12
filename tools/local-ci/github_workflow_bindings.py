@@ -10,6 +10,18 @@ def _binding(bindings: Mapping[str, Any], name: str) -> Any:
     return bindings[name]
 
 
+def github_actions_defaults(bindings: Mapping[str, Any]) -> dict:
+    return _binding(bindings, "_github_workflows").GITHUB_ACTIONS_DEFAULTS
+
+
+def builtin_github_workflows(bindings: Mapping[str, Any]) -> dict:
+    return _binding(bindings, "_github_workflows").BUILTIN_GITHUB_WORKFLOWS
+
+
+def repo_variable_fallbacks(bindings: Mapping[str, Any]) -> dict:
+    return _binding(bindings, "_github_workflows").REPO_VARIABLE_FALLBACKS
+
+
 def github_actions_settings_for_display(bindings: Mapping[str, Any], config: dict | None) -> dict:
     return _binding(bindings, "_github_workflows").github_actions_settings_for_display(config)
 

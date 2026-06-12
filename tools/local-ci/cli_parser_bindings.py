@@ -10,8 +10,23 @@ def _binding(bindings: Mapping[str, Any], name: str) -> Any:
     return bindings[name]
 
 
+def build_local_ci_parser(
+    bindings: Mapping[str, Any],
+    *,
+    priority_values: dict,
+    keep_completed_jobs: int,
+    epilog: str | None,
+):
+    return _binding(bindings, "_cli_parser").build_local_ci_parser(
+        priority_values=priority_values,
+        keep_completed_jobs=keep_completed_jobs,
+        epilog=epilog,
+    )
+
+
 def build_parser(bindings: Mapping[str, Any]):
-    return _binding(bindings, "build_local_ci_parser")(
+    return build_local_ci_parser(
+        bindings,
         priority_values=_binding(bindings, "PRIORITY_VALUES"),
         keep_completed_jobs=_binding(bindings, "KEEP_COMPLETED_JOBS"),
         epilog=_binding(bindings, "__doc__"),

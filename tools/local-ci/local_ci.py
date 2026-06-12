@@ -367,9 +367,7 @@ def short_sha(sha: str) -> str:
     return _git_helpers_bindings.short_sha(globals(), sha)
 
 
-from normalize import (  # noqa: E402  -- re-exported for in-file consumers
-    PRIORITY_VALUES,
-)
+PRIORITY_VALUES = _normalize_bindings.priority_values(globals())
 
 
 def normalize_priority(priority: str | None) -> str:
@@ -419,7 +417,16 @@ def default_desktop_capability_tier(adapter: str) -> str:
 def normalize_desktop_config(config: dict) -> dict:
     return _normalize_bindings.normalize_desktop_config(globals(), config)
 
-from cli_parser import build_local_ci_parser  # noqa: E402
+import cli_parser as _cli_parser  # noqa: E402
+
+
+def build_local_ci_parser(*, priority_values: dict, keep_completed_jobs: int, epilog: str | None):
+    return _cli_parser_bindings.build_local_ci_parser(
+        globals(),
+        priority_values=priority_values,
+        keep_completed_jobs=keep_completed_jobs,
+        epilog=epilog,
+    )
 
 
 def load_config() -> dict:
@@ -434,11 +441,9 @@ def load_optional_config() -> dict | None:
     return _config_evidence_bindings.load_optional_config(globals())
 
 
-from github_workflows import (  # noqa: E402  -- re-exported for in-file consumers
-    GITHUB_ACTIONS_DEFAULTS,
-    BUILTIN_GITHUB_WORKFLOWS,
-    REPO_VARIABLE_FALLBACKS,
-)
+GITHUB_ACTIONS_DEFAULTS = _github_workflow_bindings.github_actions_defaults(globals())
+BUILTIN_GITHUB_WORKFLOWS = _github_workflow_bindings.builtin_github_workflows(globals())
+REPO_VARIABLE_FALLBACKS = _github_workflow_bindings.repo_variable_fallbacks(globals())
 
 
 def github_actions_settings_for_display(config: dict | None) -> dict:

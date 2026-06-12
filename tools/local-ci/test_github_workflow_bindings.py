@@ -33,6 +33,9 @@ class GithubWorkflowBindingsTests(unittest.TestCase):
             return runner
 
         workflows = types.SimpleNamespace(
+            GITHUB_ACTIONS_DEFAULTS={"provider": "github-hosted"},
+            BUILTIN_GITHUB_WORKFLOWS={"build": {"workflow_file": "build.yml"}},
+            REPO_VARIABLE_FALLBACKS={"PULP_VAR": "fallback"},
             github_actions_settings_for_display=make_runner("github_actions_settings_for_display", {"workflow": "build"}),
             resolve_github_actions_settings=make_runner("resolve_github_actions_settings", {"provider": "namespace"}),
             normalize_runs_on_json=make_runner("normalize_runs_on_json", '"macos-15"'),
@@ -46,6 +49,13 @@ class GithubWorkflowBindingsTests(unittest.TestCase):
             resolve_cli_dispatch_field_values=make_runner("resolve_cli_dispatch_field_values", {"field": "cli"}),
         )
         return {"_github_workflows": workflows}, calls
+
+    def test_constants_delegate_to_github_workflows_module(self):
+        bindings, _calls = self._bindings()
+
+        self.assertEqual(self.mod.github_actions_defaults(bindings), {"provider": "github-hosted"})
+        self.assertEqual(self.mod.builtin_github_workflows(bindings), {"build": {"workflow_file": "build.yml"}})
+        self.assertEqual(self.mod.repo_variable_fallbacks(bindings), {"PULP_VAR": "fallback"})
 
     def test_settings_helpers_delegate_to_github_workflows_module(self):
         bindings, calls = self._bindings()

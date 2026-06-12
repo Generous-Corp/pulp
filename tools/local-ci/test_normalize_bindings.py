@@ -33,6 +33,7 @@ class NormalizeBindingsTests(unittest.TestCase):
             return runner
 
         normalize = types.SimpleNamespace(
+            PRIORITY_VALUES={"normal": 50, "high": 75},
             normalize_priority=make_runner("normalize_priority", "normal"),
             priority_value=make_runner("priority_value", 50),
             normalize_validation_mode=make_runner("normalize_validation_mode", "full"),
@@ -47,6 +48,11 @@ class NormalizeBindingsTests(unittest.TestCase):
             normalize_desktop_config=make_runner("normalize_desktop_config", {"desktop_automation": {}}),
         )
         return {"_normalize": normalize}, calls
+
+    def test_priority_values_delegates_to_normalize_module(self):
+        bindings, _calls = self._bindings()
+
+        self.assertEqual(self.mod.priority_values(bindings), {"normal": 50, "high": 75})
 
     def test_scalar_normalizers_delegate_to_normalize_module(self):
         bindings, calls = self._bindings()

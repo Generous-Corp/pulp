@@ -11,6 +11,10 @@ def _binding(bindings: Mapping[str, Any], name: str) -> Any:
     return bindings[name]
 
 
+def priority_values(bindings: Mapping[str, Any]) -> dict:
+    return _binding(bindings, "_normalize").PRIORITY_VALUES
+
+
 def normalize_priority(bindings: Mapping[str, Any], priority: str | None) -> str:
     return _binding(bindings, "_normalize").normalize_priority(priority)
 
