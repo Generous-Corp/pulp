@@ -845,16 +845,10 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
         if (rt_it == cg->runtime.end()) continue;
         auto& rt = rt_it->second;
         if (c.automation) {
-            auto* existing = find_by_id(
-                rt.sparse_automation_accum,
-                c.automation_param_id,
-                [](const NodeRuntime::SparseAutomationAccum& entry) {
-                    return entry.id;
-                });
-            if (!existing) {
-                rt.sparse_automation_accum.push_back({
-                    c.automation_param_id,
-                });
+            auto& ids = rt.sparse_automation_param_ids;
+            if (std::find(ids.begin(), ids.end(), c.automation_param_id) == ids.end()) {
+                ids.push_back(c.automation_param_id);
+                rt.sparse_automation_accum.resize(ids.size());
             }
         }
         if (c.audio_rate_modulation) {
@@ -1226,12 +1220,7 @@ void SignalGraph::process(audio::BufferView<float>& output,
                     };
 
                     for (auto& a : rt.sparse_automation_accum) {
-                        a.v0 = 0.0f;
-                        a.vN = 0.0f;
-                        a.lo = 0.0f;
-                        a.hi = 1.0f;
-                        a.has_add = false;
-                        a.active = false;
+                        a = NodeRuntime::SparseAutomationAccum{};
                     }
                     const int last = num_samples - 1;
                     for (size_t ci = 0; ci < cg->connections.size(); ++ci) {
@@ -1307,30 +1296,31 @@ void SignalGraph::process(audio::BufferView<float>& output,
                             mN = new_vN;
                         }
 
-                        auto* a = find_by_id(
-                            rt.sparse_automation_accum,
-                            c.automation_param_id,
-                            [](const NodeRuntime::SparseAutomationAccum& entry) {
-                                return entry.id;
-                            });
-                        if (!a) continue;
+                        auto param_it = std::find(rt.sparse_automation_param_ids.begin(),
+                                                  rt.sparse_automation_param_ids.end(),
+                                                  c.automation_param_id);
+                        if (param_it == rt.sparse_automation_param_ids.end()) continue;
+                        auto& a = rt.sparse_automation_accum[static_cast<size_t>(
+                            std::distance(rt.sparse_automation_param_ids.begin(), param_it))];
                         const auto bounds = bounds_for_param(c.automation_param_id,
                                                              c.automation_range_lo,
                                                              c.automation_range_hi);
-                        a->lo = bounds.first;
-                        a->hi = bounds.second;
-                        a->active = true;
+                        a.lo = bounds.first;
+                        a.hi = bounds.second;
+                        a.touched = true;
                         if (c.automation_mix == AutomationMix::Replace) {
-                            a->v0 = m0;
-                            a->vN = mN;
+                            a.v0 = m0;
+                            a.vN = mN;
                         } else {
-                            a->v0 += m0;
-                            a->vN += mN;
-                            a->has_add = true;
+                            a.v0 += m0;
+                            a.vN += mN;
+                            a.has_add = true;
                         }
                     }
-                    for (auto& a : rt.sparse_automation_accum) {
-                        if (!a.active) continue;
+                    for (size_t pi = 0; pi < rt.sparse_automation_accum.size(); ++pi) {
+                        auto& a = rt.sparse_automation_accum[pi];
+                        if (!a.touched) continue;
+                        const uint32_t pid = rt.sparse_automation_param_ids[pi];
                         float v0 = a.v0, vN = a.vN;
                         if (a.has_add) {
                             const float lo = std::min(a.lo, a.hi);
@@ -1338,9 +1328,9 @@ void SignalGraph::process(audio::BufferView<float>& output,
                             v0 = std::clamp(v0, lo, hi);
                             vN = std::clamp(vN, lo, hi);
                         }
-                        if (!push_parameter_event(param_events, a.id, 0, v0)) break;
+                        if (!push_parameter_event(param_events, pid, 0, v0)) break;
                         if (last > 0
-                            && !push_parameter_event(param_events, a.id, last, vN)) {
+                            && !push_parameter_event(param_events, pid, last, vN)) {
                             break;
                         }
                     }
@@ -1352,10 +1342,7 @@ void SignalGraph::process(audio::BufferView<float>& output,
                                   0.0f);
 
                         for (auto& d : rt.audio_rate_accum) {
-                            d.lo = 0.0f;
-                            d.hi = 1.0f;
-                            d.has_replace = false;
-                            d.has_add = false;
+                            d = NodeRuntime::DenseAutomationAccum{};
                         }
 
                         for (size_t ci = 0; ci < cg->connections.size(); ++ci) {
@@ -1373,7 +1360,7 @@ void SignalGraph::process(audio::BufferView<float>& output,
                                                       rt.audio_rate_param_ids.end(),
                                                       c.automation_param_id);
                             if (param_it == rt.audio_rate_param_ids.end()) continue;
-                            const auto param_index = static_cast<size_t>(
+                            const size_t param_index = static_cast<size_t>(
                                 std::distance(rt.audio_rate_param_ids.begin(), param_it));
                             auto& dst = rt.audio_rate_accum[param_index];
                             float* dst_values =
@@ -1425,10 +1412,10 @@ void SignalGraph::process(audio::BufferView<float>& output,
                             const auto& d = rt.audio_rate_accum[pi];
                             if (!d.has_replace && !d.has_add) continue;
                             const uint32_t param_id = rt.audio_rate_param_ids[pi];
-                            const float lo = std::min(d.lo, d.hi);
-                            const float hi = std::max(d.lo, d.hi);
                             const float* values =
                                 rt.audio_rate_param_data.data() + pi * block;
+                            const float lo = std::min(d.lo, d.hi);
+                            const float hi = std::max(d.lo, d.hi);
                             for (int i = 0; i < num_samples; ++i) {
                                 float value = values[static_cast<size_t>(i)];
                                 if (d.has_add) value = std::clamp(value, lo, hi);
@@ -1441,7 +1428,7 @@ void SignalGraph::process(audio::BufferView<float>& output,
                     param_events.sort();
                 }
 
-                std::array<format::BusBufferView<const float>, 1> input_buses{{
+                std::array<format::ProcessBusBufferView<const float>, 1> input_buses{{
                     {
                         .info = {
                             .name = "Graph Plugin In",
@@ -1456,7 +1443,7 @@ void SignalGraph::process(audio::BufferView<float>& output,
                         .buffer = in_c,
                     },
                 }};
-                std::array<format::BusBufferView<float>, 1> output_buses{{
+                std::array<format::ProcessBusBufferView<float>, 1> output_buses{{
                     {
                         .info = {
                             .name = "Graph Plugin Out",
@@ -1472,8 +1459,8 @@ void SignalGraph::process(audio::BufferView<float>& output,
                     },
                 }};
                 format::ProcessBuffers process_buffers{
-                    format::BusBufferSet<const float>{std::span(input_buses)},
-                    format::BusBufferSet<float>{std::span(output_buses)},
+                    format::ProcessBusBufferSet<const float>{std::span(input_buses)},
+                    format::ProcessBusBufferSet<float>{std::span(output_buses)},
                 };
 
                 pit->second->process(process_buffers, rt.midi_in, rt.midi_out,

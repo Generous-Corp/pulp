@@ -10,6 +10,9 @@
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/midi/mpe_buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
+#if defined(__unix__) || defined(__APPLE__)
+#include "native_components/rt_test_scope.hpp"
+#endif
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -2174,6 +2177,67 @@ private:
     std::array<pulp::host::ParameterEvent, 16> received_{};
     std::size_t received_count_ = 0;
 };
+
+class FixedAutomationProbe final : public PluginSlot {
+public:
+    static constexpr uint32_t kParamId = 42;
+
+    const PluginInfo& info() const override { return info_; }
+    bool is_loaded() const override { return true; }
+    bool prepare(double, int) override { return true; }
+    void release() override {}
+
+    void process(pulp::audio::BufferView<float>& out,
+                 const pulp::audio::BufferView<const float>&,
+                 const pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&,
+                 const pulp::host::ParameterEventQueue& pe,
+                 int n) override {
+        received_count_ = 0;
+        for (const auto& e : pe) {
+            if (received_count_ < received_.size()) {
+                received_[received_count_] = e;
+                ++received_count_;
+            }
+        }
+        for (size_t c = 0; c < out.num_channels(); ++c)
+            std::memset(out.channel_ptr(c), 0, sizeof(float) * (size_t)n);
+    }
+
+    std::vector<HostParamInfo> parameters() const override {
+        HostParamInfo p;
+        p.id = kParamId;
+        p.name = "mod";
+        p.min_value = 0.0f;
+        p.max_value = 1.0f;
+        p.default_value = 0.0f;
+        p.flags.automatable = true;
+        p.rate = ParamRate::AudioRate;
+        return {p};
+    }
+    float get_parameter(uint32_t) const override { return 0.f; }
+    void set_parameter(uint32_t, float) override {}
+    void set_bypass(bool) override {}
+    bool is_bypassed() const override { return false; }
+    std::vector<uint8_t> save_state() const override { return {}; }
+    bool restore_state(const std::vector<uint8_t>&) override { return false; }
+    bool has_editor() const override { return false; }
+    void* create_editor_view() override { return nullptr; }
+    void destroy_editor_view() override {}
+    int latency_samples() const override { return 0; }
+    int tail_samples() const override { return 0; }
+
+    void clear_received() { received_count_ = 0; }
+    size_t received_count() const { return received_count_; }
+    const pulp::host::ParameterEvent& received(size_t index) const {
+        return received_[index];
+    }
+
+private:
+    PluginInfo info_ = make_plugin_info("FixedAutomationProbe", 1, 1);
+    std::array<pulp::host::ParameterEvent, 16> received_{};
+    size_t received_count_ = 0;
+};
 } // namespace
 
 TEST_CASE("SignalGraph connect_automation delivers two-point events per block",
@@ -2724,6 +2788,47 @@ TEST_CASE("SignalGraph audio-rate modulation fails closed when event capacity is
     REQUIRE_FALSE(graph.prepare(48000.0,
                                 static_cast<int>(ParameterEventQueue::kCapacity + 1)));
 }
+
+#if defined(__unix__) || defined(__APPLE__)
+TEST_CASE("SignalGraph plugin automation process uses prepared scratch without allocation",
+          "[host][graph][automation][rt-safety][phase2]") {
+    SignalGraph graph;
+    auto in_node = graph.add_input_node(1, "in");
+    auto slot = std::make_unique<FixedAutomationProbe>();
+    auto* slot_ptr = slot.get();
+    auto plug = graph.add_plugin_node(std::move(slot), 1, 1, "fixed-auto");
+    auto out_node = graph.add_output_node(1, "out");
+
+    REQUIRE(graph.connect(in_node, 0, plug, 0));
+    REQUIRE(graph.connect(plug, 0, out_node, 0));
+    REQUIRE(graph.connect_automation(
+        in_node, 0, plug, FixedAutomationProbe::kParamId, 0.0f, 1.0f));
+    REQUIRE(graph.connect_audio_rate_modulation(
+        in_node, 0, plug, FixedAutomationProbe::kParamId, 0.0f, 1.0f,
+        0.0f, AutomationMix::Add));
+    REQUIRE(graph.prepare(48000.0, 4));
+
+    std::vector<float> input_samples{0.25f, 0.5f, 0.75f, 1.0f};
+    std::vector<float> output_samples(4, 0.0f);
+    const float* in_ptrs[1] = {input_samples.data()};
+    float* out_ptrs[1] = {output_samples.data()};
+    pulp::audio::BufferView<const float> in_view(in_ptrs, 1, 4);
+    pulp::audio::BufferView<float> out_view(out_ptrs, 1, 4);
+
+    graph.process(out_view, in_view, 4);
+    slot_ptr->clear_received();
+
+    {
+        pulp::native_components::test::RtNoAllocScope no_alloc;
+        graph.process(out_view, in_view, 4);
+    }
+
+    REQUIRE(slot_ptr->received_count() == 6);
+    for (size_t i = 0; i < slot_ptr->received_count(); ++i) {
+        REQUIRE(slot_ptr->received(i).param_id == FixedAutomationProbe::kParamId);
+    }
+}
+#endif
 
 // ── Item 4.6 automation smoothing ──────────────────────────────────────
 
