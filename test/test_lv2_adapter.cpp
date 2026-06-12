@@ -212,6 +212,7 @@ struct Lv2ProbeCapture {
     bool param_event_overflowed = false;
     std::uint32_t param_event_drops = 0;
     float gain_seen_in_process = 0.0f;
+    bool state_store_wired_during_define = false;
 
     void reset() { *this = {}; }
 };
@@ -235,6 +236,7 @@ public:
     }
 
     void define_parameters(state::StateStore& store) override {
+        g_lv2_probe.state_store_wired_during_define = (&state() == &store);
         store.add_parameter({
             .id = kLv2ProbeGainParam,
             .name = "Gain",
@@ -396,6 +398,7 @@ TEST_CASE("LV2 generic entry wires ports, audio, control values, and MIDI",
     REQUIRE(inst->num_params == 1);
     REQUIRE(inst->param_ids.size() == 1);
     REQUIRE(inst->param_ids[0] == kLv2ProbeGainParam);
+    REQUIRE(g_lv2_probe.state_store_wired_during_define);
     REQUIRE(inst->accepts_midi);
     REQUIRE(inst->produces_midi);
     REQUIRE(inst->urid_midi_event != 0);

@@ -79,6 +79,7 @@ TEST_CASE("raw_midi_parser reserved feed path is allocation-free",
           "[midi][raw_midi_parser][rt-safety]") {
     RawMidiParserState state;
     state.reserve_sysex(RtRawMidiSink::kMaxSysexBytes);
+    REQUIRE(state.sysex_buffer.capacity() >= RtRawMidiSink::kMaxSysexBytes);
 
     RtRawMidiSink sink;
     RawMidiShortCallback on_short =
