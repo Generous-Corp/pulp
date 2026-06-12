@@ -13,10 +13,11 @@ queue_bindings.py preserving the historical local_ci.py facade exports.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-
-from git_helpers import now_iso
-from normalize import normalize_priority, normalize_validation_mode
+from normalize import normalize_validation_mode
+from queue_command_policy import (
+    find_queue_command_job_unlocked,
+    set_pending_job_priority_unlocked,
+)
 from provenance import provenance_summary
 from queue_completion import (
     cancellation_result,
@@ -92,21 +93,3 @@ from queue_target_state import (
     updated_target_state,
     upsert_job_active_targets_unlocked,
 )
-
-
-def find_queue_command_job_unlocked(queue: list[dict], job_ref: str) -> dict | None:
-    return find_job_unlocked(queue, job_ref, statuses={"pending", "running"})
-
-
-def set_pending_job_priority_unlocked(
-    job: dict,
-    requested_priority: str,
-    *,
-    now_iso_fn: Callable[[], str] = now_iso,
-) -> bool:
-    if job.get("status") != "pending":
-        return False
-
-    job["priority"] = normalize_priority(requested_priority)
-    job["bumped_at"] = now_iso_fn()
-    return True
