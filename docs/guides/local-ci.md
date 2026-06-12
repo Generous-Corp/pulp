@@ -719,11 +719,11 @@ one job. Nothing more.
 | `PULP_LOCAL_LINUX_RUNS_ON_JSON` | Local Linux ARM64 VM pool | `gh variable set PULP_LOCAL_LINUX_RUNS_ON_JSON --body '["self-hosted","Linux","ARM64","pulp-build-linux"]'` |
 | `PULP_LOCAL_WINDOWS_RUNS_ON_JSON` | Local Windows ARM64 QEMU pool | `gh variable set PULP_LOCAL_WINDOWS_RUNS_ON_JSON --body '["self-hosted","Windows","ARM64","pulp-build-windows"]'` |
 
-`.tartci/normal-local-fast.toml` is the repo-local profile that documents the
+`.shipyard/ci-profiles/normal-local-fast.toml` is the repo-local profile that documents the
 intended default policy: PR macOS, Linux, and Windows prefer local ARM64 VMs
 where available, while GitHub-hosted x64 Linux/Windows remains the scheduled
-compatibility safety net. Use `tartci profile plan normal-local-fast --repo
-danielraffel/pulp --json` from the tartci checkout to see the concrete variable
+compatibility safety net. Use `shipyard ci profile plan normal-local-fast --repo
+danielraffel/pulp --json` from the Pulp checkout to see the concrete variable
 values before changing repository variables.
 
 Do not put ordered fallback chains directly into GitHub Actions. GitHub receives
