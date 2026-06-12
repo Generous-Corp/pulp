@@ -248,6 +248,12 @@ fails or defers deletion rather than deleting memory a callback may still read.
 Track `retired_count_approx()` and `retire_overflow_count()` from the control
 side when resources can be regenerated faster than teardown drains them.
 
+For optional work that can degrade, use `runtime::evaluate_runtime_budget()` to
+make the run/defer/shed/bypass decision explicit. Critical audio work remains
+on the prepared path, interactive work can defer to preserve a reserve, and
+background/opportunistic analysis can be shed or bypassed during overload
+instead of competing with the callback.
+
 Common recipes:
 
 * IR load: decode and resample the impulse response in a background job, build

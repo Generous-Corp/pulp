@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <pulp/runtime/budget_policy.hpp>
 #include <pulp/runtime/dynamic_library.hpp>
 #include <pulp/runtime/high_resolution_timer.hpp>
 #include <pulp/runtime/range.hpp>
@@ -71,6 +72,87 @@ private:
 };
 
 } // namespace
+
+TEST_CASE("RuntimeBudgetPolicy keeps critical audio running",
+          "[runtime][budget-policy][phase4]") {
+    RuntimeBudgetRequest request;
+    request.lane = RuntimeWorkLane::CriticalAudio;
+    request.estimated_cost = 100;
+    request.remaining_budget = 0;
+    request.overload_active = true;
+
+    auto decision = evaluate_runtime_budget(request);
+
+    REQUIRE(decision.action == RuntimeBudgetAction::Run);
+    REQUIRE(decision.should_run());
+    REQUIRE(std::string(to_string(decision.action)) == "run");
+    REQUIRE(std::string(decision.reason) == "critical-audio");
+}
+
+TEST_CASE("RuntimeBudgetPolicy preserves reserve for interactive work",
+          "[runtime][budget-policy][phase4]") {
+    RuntimeBudgetPolicy policy;
+    policy.critical_audio_reserve = 128;
+
+    RuntimeBudgetRequest request;
+    request.lane = RuntimeWorkLane::Interactive;
+    request.estimated_cost = 64;
+    request.remaining_budget = 256;
+
+    auto decision = evaluate_runtime_budget(request, policy);
+    REQUIRE(decision.action == RuntimeBudgetAction::Run);
+
+    request.remaining_budget = 160;
+    decision = evaluate_runtime_budget(request, policy);
+    REQUIRE(decision.action == RuntimeBudgetAction::Defer);
+    REQUIRE_FALSE(decision.should_run());
+    REQUIRE(std::string(to_string(decision.action)) == "defer");
+    REQUIRE(std::string(decision.reason) == "interactive-defer");
+}
+
+TEST_CASE("RuntimeBudgetPolicy sheds opportunistic work under pressure",
+          "[runtime][budget-policy][phase4]") {
+    RuntimeBudgetRequest request;
+    request.lane = RuntimeWorkLane::Opportunistic;
+    request.estimated_cost = 8;
+    request.remaining_budget = 1024;
+    request.overload_active = true;
+
+    auto decision = evaluate_runtime_budget(request);
+
+    REQUIRE(decision.action == RuntimeBudgetAction::Shed);
+    REQUIRE_FALSE(decision.should_run());
+    REQUIRE(std::string(to_string(decision.action)) == "shed");
+    REQUIRE(std::string(decision.reason) == "overload-shed-opportunistic");
+}
+
+TEST_CASE("RuntimeBudgetPolicy makes background degradation explicit",
+          "[runtime][budget-policy][phase4]") {
+    RuntimeBudgetRequest request;
+    request.lane = RuntimeWorkLane::Background;
+    request.estimated_cost = 200;
+    request.remaining_budget = 100;
+
+    auto decision = evaluate_runtime_budget(request);
+    REQUIRE(decision.action == RuntimeBudgetAction::Bypass);
+    REQUIRE_FALSE(decision.should_run());
+    REQUIRE(std::string(to_string(decision.action)) == "bypass");
+    REQUIRE(std::string(decision.reason) == "budget-bypass-background");
+
+    request.required = true;
+    decision = evaluate_runtime_budget(request);
+    REQUIRE(decision.action == RuntimeBudgetAction::Defer);
+    REQUIRE(std::string(decision.reason) == "required-defer");
+
+    RuntimeBudgetPolicy policy;
+    policy.shed_background_on_overload = true;
+    request.required = false;
+    request.overload_active = true;
+    request.remaining_budget = 1000;
+    decision = evaluate_runtime_budget(request, policy);
+    REQUIRE(decision.action == RuntimeBudgetAction::Shed);
+    REQUIRE(std::string(decision.reason) == "overload-shed-background");
+}
 
 TEST_CASE("SpscQueue basic operations", "[runtime][spsc]") {
     SpscQueue<int, 16> q;
