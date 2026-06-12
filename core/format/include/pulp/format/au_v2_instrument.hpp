@@ -5,9 +5,10 @@
 #include <pulp/format/processor.hpp>
 #include <pulp/format/host_quirks.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
+#include <pulp/runtime/spsc_queue.hpp>
 
+#include <cstdint>
 #include <memory>
-#include <mutex>
 #include <vector>
 
 namespace pulp::format::au {
@@ -22,6 +23,15 @@ public:
     OSStatus GetParameterInfo(AudioUnitScope inScope,
                               AudioUnitParameterID inParameterID,
                               AudioUnitParameterInfo& outParameterInfo) override;
+
+    // Single source of truth: the host reads/writes the plugin's StateStore
+    // directly — no separate Globals copy to reconcile per block. Mirrors the
+    // effect adapter (see au_v2_adapter). See the auv2 skill.
+    OSStatus GetParameter(AudioUnitParameterID inID, AudioUnitScope inScope,
+                          AudioUnitElement inElement, Float32& outValue) override;
+    OSStatus SetParameter(AudioUnitParameterID inID, AudioUnitScope inScope,
+                          AudioUnitElement inElement, Float32 inValue,
+                          UInt32 inBufferOffsetInFrames) override;
 
     // Serve the Pulp editor-context property (so the Cocoa view factory can
     // reach this instance's Processor + StateStore) and advertise the Cocoa
@@ -63,8 +73,14 @@ private:
     // Host accommodations, resolved once at init (host-quirks plan, P3).
     HostQuirks host_quirks_{};
     std::vector<float*> output_ptrs_;
-    std::mutex midi_mutex_;
-    midi::MidiBuffer pending_midi_;
+
+    // Main-thread listener that pushes editor parameter edits to the host
+    // (never from the render thread). Kept alive for the adapter's lifetime.
+    state::ListenerToken ui_push_listener_;
+
+    // Lock-free MIDI note input (single producer = host MIDI/render thread via
+    // HandleNoteOn/Off; single consumer = Render). No audio-thread mutex.
+    runtime::SpscQueue<midi::MidiEvent, 1024> midi_in_queue_;
 
     // Item 1.3 — previous-block transport snapshot used to derive the
     // change flags on `ProcessContext`. Default-constructed so the

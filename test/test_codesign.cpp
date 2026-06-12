@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <vector>
 #ifdef __APPLE__
@@ -250,6 +251,58 @@ TEST_CASE("combined pkg rejects empty and missing component inputs",
     REQUIRE(components[0].install_location.find("Components") != std::string::npos);
     REQUIRE(components[1].install_location.find("VST3") != std::string::npos);
 }
+
+#ifdef __APPLE__
+// The combined installer is component-SELECTABLE by default: it ships a
+// distribution document with one user-toggleable choice per format (a
+// "Customize" pane), so a user can install only the formats they want.
+TEST_CASE("combined pkg is component-selectable with a choice per format",
+          "[ship][codesign]") {
+    ScopedTempDir temp("pulp-combined-pkg-choices");
+    // pkgbuild --component accepts any directory as a "bundle".
+    const auto au = temp.path / "Dummy.component";
+    const auto vst3 = temp.path / "Dummy.vst3";
+    fs::create_directories(au / "Contents/MacOS");
+    fs::create_directories(vst3 / "Contents/MacOS");
+    std::ofstream(au / "Contents/MacOS/Dummy") << "x";
+    std::ofstream(vst3 / "Contents/MacOS/Dummy") << "x";
+    // pkgbuild --component requires a bundle Info.plist.
+    const char* kPlist = "<?xml version=\"1.0\"?><plist version=\"1.0\"><dict>"
+        "<key>CFBundleIdentifier</key><string>dev.pulp.tests.dummy</string>"
+        "<key>CFBundleVersion</key><string>1</string></dict></plist>";
+    std::ofstream(au / "Contents/Info.plist") << kPlist;
+    std::ofstream(vst3 / "Contents/Info.plist") << kPlist;
+
+    const auto out = temp.path / "Combined.pkg";
+    std::vector<InstallComponent> components{
+        {au.string(), "/Library/Audio/Plug-Ins/Components", "Audio Unit (AU)"},
+        {vst3.string(), "/Library/Audio/Plug-Ins/VST3", "VST3"},
+    };
+    // Unsigned build (no signing identity) — pkgbuild/productbuild still run.
+    REQUIRE(create_combined_pkg(components, out.string(),
+                                "dev.pulp.tests.choices", "1.2.3"));
+    REQUIRE(fs::exists(out));
+
+    // Extract the Distribution and confirm both selectable choices are present.
+    const auto extract = temp.path / "x";
+    fs::create_directories(extract);
+    const std::string cmd = "xar -xf '" + out.string() + "' Distribution -C '" +
+                            extract.string() + "' 2>/dev/null";
+    REQUIRE(std::system(cmd.c_str()) == 0);
+    std::ifstream dist(extract / "Distribution");
+    std::stringstream ss;
+    ss << dist.rdbuf();
+    const std::string xml = ss.str();
+    REQUIRE(xml.find("choices-outline") != std::string::npos);
+    REQUIRE(xml.find("customize=\"allow\"") != std::string::npos);
+    REQUIRE(xml.find("Audio Unit (AU)") != std::string::npos);
+    REQUIRE(xml.find("VST3") != std::string::npos);
+    int choices = 0;
+    for (size_t p = 0; (p = xml.find("<choice ", p)) != std::string::npos; p += 8)
+        ++choices;
+    REQUIRE(choices == 2);
+}
+#endif
 
 #ifdef __APPLE__
 TEST_CASE("codesign parsers tolerate noisy command output",

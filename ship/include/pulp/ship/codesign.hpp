@@ -86,11 +86,15 @@ bool create_dmg(const std::string& source_path,
                 const std::string& output_path,
                 const std::string& volume_name);
 
-// Create a combined multi-format installer (.pkg) via productbuild
-// components: list of {path, install_location} pairs
+// Create a combined multi-format installer (.pkg) via productbuild.
+// The installer is COMPONENT-SELECTABLE by default: it ships a distribution
+// with one user-toggleable choice per component (all selected by default, a
+// "Customize" pane lets the user install only some formats).
 struct InstallComponent {
     std::string path;           // Path to .component, .vst3, .clap, or .app
     std::string install_location; // e.g. "/Library/Audio/Plug-Ins/VST3"
+    std::string title;          // Choice label in the installer (e.g. "VST3").
+                                // Empty → derived from the install_location.
 };
 
 bool create_combined_pkg(const std::vector<InstallComponent>& components,

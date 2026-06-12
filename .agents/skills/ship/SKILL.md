@@ -116,6 +116,19 @@ example plugins, appcast, downloads) runs through CI
 `stapler staple` and never calls these CLI subcommands. Changing the CLI
 ship subcommands cannot affect a regular release.
 
+### Combined installer is component-SELECTABLE by default
+
+`create_combined_pkg` (`ship/platform/mac/codesign_mac.mm`) builds one
+component `.pkg` per format and combines them with `productbuild
+--distribution`, emitting a distribution document with one user-toggleable
+`<choice>` per `InstallComponent` (all `start_selected`, `customize="allow"`).
+So a multi-format installer always offers a **Customize** pane to install only
+AU / VST3 / CLAP as desired — do NOT drop back to a flat
+`productbuild --package ...` archive (that installs everything with no choice).
+Set `InstallComponent::title` for the choice label, or leave it empty to derive
+from the install location ("Components" → "Audio Unit (AU)", etc.). Verified by
+`test_codesign.cpp` ("component-selectable with a choice per format").
+
 ### macOS one-command pipeline: `pulp ship release`
 
 ```bash

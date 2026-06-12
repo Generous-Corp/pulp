@@ -304,8 +304,9 @@ an Audio-thread store listener that notifies on the editing thread with a
 `HandleMIDIEvent`/`HandleSysEx` push to lock-free `SpscQueue<MidiEvent>` +
 bounded `SysexChunk` queues; `ProcessBufferLists` drains them wait-free. Don't
 add a `std::mutex` to the MIDI path — short messages stay allocation-free and
-the audio thread never blocks (the AU v2 *instrument* adapter still uses the old
-mutex/`pending_midi_` pattern and should be migrated to match).
+the audio thread never blocks. The AU v2 *instrument* adapter
+(`au_v2_instrument.cpp`) uses the same single-source params + `SpscQueue`
+note-input pattern (`HandleNoteOn`/`HandleNoteOff` → lock-free queue).
 
 ## Reference pointers
 

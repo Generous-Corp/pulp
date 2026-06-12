@@ -5,6 +5,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
 #include <sstream>
 #include <array>
 #include <filesystem>
@@ -284,35 +285,106 @@ bool create_dmg(const std::string& source_path,
     return create_dmg_image(source_path, output_path, volume_name);
 }
 
+// Derive a human choice title from an install location when none was given,
+// e.g. ".../Plug-Ins/VST3" -> "VST3", ".../Components" -> "Audio Unit".
+static std::string derive_choice_title(const std::string& install_location,
+                                       const std::string& path) {
+    auto ends_with = [](const std::string& s, const std::string& suf) {
+        return s.size() >= suf.size() && s.compare(s.size() - suf.size(), suf.size(), suf) == 0;
+    };
+    if (ends_with(install_location, "VST3")) return "VST3";
+    if (ends_with(install_location, "Components")) return "Audio Unit (AU)";
+    if (ends_with(install_location, "CLAP")) return "CLAP";
+    if (ends_with(install_location, "Applications") || ends_with(path, ".app")) return "Application";
+    // Fallback: last path component of the install location.
+    auto slash = install_location.find_last_of('/');
+    return slash == std::string::npos ? install_location : install_location.substr(slash + 1);
+}
+
+// Minimal XML escaping for titles embedded in the distribution document.
+static std::string xml_escape(const std::string& s) {
+    std::string out;
+    for (char c : s) {
+        switch (c) {
+            case '&': out += "&amp;"; break;
+            case '<': out += "&lt;"; break;
+            case '>': out += "&gt;"; break;
+            case '"': out += "&quot;"; break;
+            default: out += c;
+        }
+    }
+    return out;
+}
+
 bool create_combined_pkg(const std::vector<InstallComponent>& components,
                          const std::string& output_path,
                          const std::string& identifier,
                          const std::string& version,
                          const std::string& signing_identity) {
-    // Build individual component packages, then combine with productbuild
-    std::string tmp_dir = "/tmp/pulp-pkg-staging-" + std::to_string(getpid());
-    exec_status("mkdir -p \"" + tmp_dir + "\"");
+    if (components.empty()) return false;
 
-    std::vector<std::string> pkg_paths;
+    // Build one component package per format, then combine them with a
+    // distribution document that exposes each as a user-selectable choice
+    // (the "Customize" pane). This is Pulp's default installer shape — a user
+    // can install only the formats they want.
+    std::string tmp_dir = "/tmp/pulp-pkg-staging-" + std::to_string(getpid());
+    exec_status("rm -rf \"" + tmp_dir + "\"; mkdir -p \"" + tmp_dir + "\"");
+
+    std::string choices_outline;   // <line choice="..."/>
+    std::string choice_defs;       // <choice .../> with nested <pkg-ref/>
+    std::string pkg_refs;          // top-level <pkg-ref ...>file</pkg-ref>
+
     int idx = 0;
     for (const auto& comp : components) {
-        std::string pkg_name = tmp_dir + "/component_" + std::to_string(idx++) + ".pkg";
+        const int n = ++idx;
+        const std::string pkg_id = identifier + ".c" + std::to_string(n);
+        const std::string pkg_file = "component_" + std::to_string(n) + ".pkg";
+        const std::string pkg_path = tmp_dir + "/" + pkg_file;
+        const std::string choice_id = "choice" + std::to_string(n);
+        const std::string title = comp.title.empty()
+            ? derive_choice_title(comp.install_location, comp.path)
+            : comp.title;
+
         std::string cmd = "pkgbuild --component \"" + comp.path + "\""
-            " --identifier \"" + identifier + ".c" + std::to_string(idx) + "\""
+            " --identifier \"" + pkg_id + "\""
             " --version \"" + version + "\""
             " --install-location \"" + comp.install_location + "\""
-            " \"" + pkg_name + "\" 2>/dev/null";
+            " \"" + pkg_path + "\" 2>/dev/null";
         if (exec_status(cmd) != 0) {
             exec_status("rm -rf \"" + tmp_dir + "\"");
             return false;
         }
-        pkg_paths.push_back(pkg_name);
+
+        choices_outline += "    <line choice=\"" + choice_id + "\"/>\n";
+        choice_defs +=
+            "  <choice id=\"" + choice_id + "\" title=\"" + xml_escape(title) +
+            "\" visible=\"true\" start_selected=\"true\">\n"
+            "    <pkg-ref id=\"" + pkg_id + "\"/>\n"
+            "  </choice>\n";
+        pkg_refs +=
+            "  <pkg-ref id=\"" + pkg_id + "\" version=\"" + version +
+            "\" onConclusion=\"none\">" + pkg_file + "</pkg-ref>\n";
     }
 
-    // Combine with productbuild
-    std::string cmd = "productbuild";
-    for (const auto& p : pkg_paths)
-        cmd += " --package \"" + p + "\"";
+    const std::string dist =
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+        "<installer-gui-script minSpecVersion=\"2\">\n"
+        "  <title>" + xml_escape(identifier) + "</title>\n"
+        "  <options customize=\"allow\" require-scripts=\"false\""
+        " hostArchitectures=\"arm64,x86_64\"/>\n"
+        "  <choices-outline>\n" + choices_outline + "  </choices-outline>\n" +
+        choice_defs + pkg_refs +
+        "</installer-gui-script>\n";
+
+    const std::string dist_path = tmp_dir + "/distribution.xml";
+    {
+        std::ofstream f(dist_path);
+        if (!f) { exec_status("rm -rf \"" + tmp_dir + "\""); return false; }
+        f << dist;
+    }
+
+    std::string cmd = "productbuild --distribution \"" + dist_path + "\""
+        " --package-path \"" + tmp_dir + "\"";
     if (!signing_identity.empty())
         cmd += " --sign \"" + signing_identity + "\"";
     cmd += " \"" + output_path + "\" 2>/dev/null";

@@ -18,6 +18,10 @@
 
 namespace pulp::format::au {
 
+// Set while the HOST writes a parameter (SetParameter); the store's UI-push
+// listener (fires inline on the same thread) skips echoing it back.
+namespace { thread_local bool g_host_writing_param = false; }
+
 PulpAUInstrument::PulpAUInstrument(AudioComponentInstance ci)
     : MusicDeviceBase(ci, /*numInputs=*/0, /*numOutputs=*/1, /*numGroups=*/0)
 {
@@ -39,8 +43,55 @@ PulpAUInstrument::PulpAUInstrument(AudioComponentInstance ci)
                     static_cast<AudioUnitParameterID>(param.id),
                     param.range.default_value);
             }
+
+            // UI -> host parameter notification, on the editing (main) thread.
+            // An editor ParameterEdit fires this; it notifies the host so it
+            // re-reads via GetParameter and records automation. NOT
+            // AudioUnitSetParameter-on-self and NEVER from the render thread.
+            ui_push_listener_ = store_.add_listener(
+                [this](state::ParamID id, float /*value*/) {
+                    if (g_host_writing_param) return;
+                    AudioUnitEvent ev;
+                    std::memset(&ev, 0, sizeof(ev));
+                    ev.mEventType = kAudioUnitEvent_ParameterValueChange;
+                    ev.mArgument.mParameter.mAudioUnit = GetComponentInstance();
+                    ev.mArgument.mParameter.mParameterID =
+                        static_cast<AudioUnitParameterID>(id);
+                    ev.mArgument.mParameter.mScope = kAudioUnitScope_Global;
+                    ev.mArgument.mParameter.mElement = 0;
+                    AUEventListenerNotify(nullptr, nullptr, &ev);
+                },
+                state::ListenerThread::Audio);
         }
     }
+}
+
+OSStatus PulpAUInstrument::GetParameter(AudioUnitParameterID inID,
+                                        AudioUnitScope inScope,
+                                        AudioUnitElement inElement, Float32& outValue)
+{
+    if (inScope == kAudioUnitScope_Global &&
+        store_.info(static_cast<state::ParamID>(inID)) != nullptr) {
+        outValue = store_.get_value(static_cast<state::ParamID>(inID));
+        return noErr;
+    }
+    return MusicDeviceBase::GetParameter(inID, inScope, inElement, outValue);
+}
+
+OSStatus PulpAUInstrument::SetParameter(AudioUnitParameterID inID,
+                                        AudioUnitScope inScope,
+                                        AudioUnitElement inElement, Float32 inValue,
+                                        UInt32 inBufferOffsetInFrames)
+{
+    if (inScope == kAudioUnitScope_Global &&
+        store_.info(static_cast<state::ParamID>(inID)) != nullptr) {
+        g_host_writing_param = true;
+        store_.set_value_rt(static_cast<state::ParamID>(inID), inValue);
+        g_host_writing_param = false;
+        return noErr;
+    }
+    return MusicDeviceBase::SetParameter(inID, inScope, inElement, inValue,
+                                         inBufferOffsetInFrames);
 }
 
 OSStatus PulpAUInstrument::GetParameterList(AudioUnitScope inScope,
@@ -147,12 +198,9 @@ OSStatus PulpAUInstrument::Initialize()
         ctx.output_channels = static_cast<int>(
             GetOutput(0)->GetStreamFormat().mChannelsPerFrame);
         processor_->prepare(ctx);
-
-        for (const auto& param : store_.all_params()) {
-            auto au_id = static_cast<AudioUnitParameterID>(param.id);
-            float value = Globals()->GetParameter(au_id);
-            store_.set_value(param.id, value);
-        }
+        // No Globals->store pull: store_ is the single source of truth (already
+        // holds defaults or RestoreState's values). Pulling Globals here would
+        // clobber a restored preset with construction defaults.
     }
 
     runtime::log_info("AU v2 instrument: initialized at {} Hz",
@@ -180,20 +228,18 @@ bool PulpAUInstrument::CanScheduleParameters() const noexcept
 OSStatus PulpAUInstrument::HandleNoteOn(UInt8 inChannel, UInt8 inNoteNumber,
                                         UInt8 inVelocity, UInt32 inStartFrame)
 {
-    std::lock_guard lock(midi_mutex_);
     auto me = midi::MidiEvent::note_on(inChannel, inNoteNumber, inVelocity);
     me.sample_offset = static_cast<int32_t>(inStartFrame);
-    pending_midi_.add(me);
+    midi_in_queue_.try_push(me); // lock-free; dropped if full (flood backstop)
     return noErr;
 }
 
 OSStatus PulpAUInstrument::HandleNoteOff(UInt8 inChannel, UInt8 inNoteNumber,
                                          UInt8 inVelocity, UInt32 inStartFrame)
 {
-    std::lock_guard lock(midi_mutex_);
     auto me = midi::MidiEvent::note_off(inChannel, inNoteNumber, inVelocity);
     me.sample_offset = static_cast<int32_t>(inStartFrame);
-    pending_midi_.add(me);
+    midi_in_queue_.try_push(me);
     return noErr;
 }
 
@@ -206,17 +252,8 @@ OSStatus PulpAUInstrument::Render(AudioUnitRenderActionFlags& ioActionFlags,
 
     if (!processor_) return noErr;
 
-    for (const auto& param : store_.all_params()) {
-        // AudioUnitSDK 1.4 renamed the RT-safe parameter read to
-        // GetParameterRT; 1.3.0 uses GetParameter and is equivalent
-        // (inline atomic load of a float). We pin to 1.3.0 on this
-        // branch because AppleClang/libc++ on the GitHub-hosted macOS
-        // runner doesn't ship std::expected yet — see issue #155. Flip
-        // back to GetParameterRT when we can adopt 1.4+ again.
-        float value = Globals()->GetParameter(
-            static_cast<AudioUnitParameterID>(param.id));
-        store_.set_value(param.id, value);
-    }
+    // No Globals->store pull: GetParameter/SetParameter are store-backed, so
+    // host automation already landed in the store and process() reads it below.
 
     auto* output = GetOutput(0);
     AudioBufferList& outBL = output->PrepareBuffer(inNumberFrames);
@@ -232,11 +269,9 @@ OSStatus PulpAUInstrument::Render(AudioUnitRenderActionFlags& ioActionFlags,
     audio::BufferView<const float> input_view;
 
     midi::MidiBuffer midi_in, midi_out;
-    {
-        std::lock_guard lock(midi_mutex_);
-        midi_in = std::move(pending_midi_);
-        pending_midi_ = midi::MidiBuffer{};
-    }
+    while (auto ev = midi_in_queue_.try_pop())  // lock-free drain
+        midi_in.add(*ev);
+    midi_in.sort();
 
     ProcessContext ctx;
     ctx.sample_rate = GetOutput(0)->GetStreamFormat().mSampleRate;
@@ -352,12 +387,8 @@ OSStatus PulpAUInstrument::RestoreState(CFPropertyListRef plist)
                                               store_, *processor_)) {
                 return kAudioUnitErr_InvalidPropertyValue;
             }
-
-            for (const auto& param : store_.all_params()) {
-                Globals()->SetParameter(
-                    static_cast<AudioUnitParameterID>(param.id),
-                    store_.get_value(param.id));
-            }
+            // store_ is the source of truth (GetParameter reads it) — no Globals
+            // mirror to update.
         }
     }
     return noErr;
