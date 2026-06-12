@@ -3,15 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-import builtins
 from pathlib import Path
 from typing import Any
 
 from binding_utils import binding as _binding
-
-
-def _print_binding(bindings: Mapping[str, Any]) -> Any:
-    return bindings.get("print", builtins.print)
+from binding_utils import print_binding as _print_binding
 
 
 def heartbeat_interval_secs(bindings: Mapping[str, Any]) -> float:

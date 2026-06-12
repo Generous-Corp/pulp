@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 
+import builtins
 import importlib.util
 import pathlib
 
@@ -29,6 +30,14 @@ class BindingUtilsTests(unittest.TestCase):
     def test_binding_preserves_missing_key_errors(self) -> None:
         with self.assertRaises(KeyError):
             self.mod.binding({}, "missing")
+
+    def test_print_binding_returns_facade_print_when_present(self) -> None:
+        print_fn = object()
+
+        self.assertIs(self.mod.print_binding({"print": print_fn}), print_fn)
+
+    def test_print_binding_falls_back_to_builtin_print(self) -> None:
+        self.assertIs(self.mod.print_binding({}), builtins.print)
 
 
 if __name__ == "__main__":
