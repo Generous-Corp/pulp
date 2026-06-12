@@ -351,6 +351,53 @@ TEST_CASE("offline_render rejects invalid block schedules",
         options).has_value());
 }
 
+TEST_CASE("offline_render tail policy is explicit and deterministic",
+          "[audio][offline][advanced][tail][phase3]") {
+    AudioFileData input;
+    input.sample_rate = 48000;
+    input.channels = {{1.0f, 2.0f, 3.0f}};
+
+    OfflineRenderOptions truncate_options;
+    truncate_options.fallback_block_size = 2;
+    truncate_options.tail_frames = 3;
+    auto truncated = offline_render(
+        input,
+        [](const float* in, float* out, int, const OfflineRenderBlockContext& context) {
+            for (int frame = 0; frame < context.frames; ++frame)
+                out[frame] = in[frame];
+        },
+        truncate_options);
+
+    REQUIRE(truncated.has_value());
+    REQUIRE(truncated->channels[0] == std::vector<float>{1.0f, 2.0f, 3.0f});
+
+    OfflineRenderOptions tail_options = truncate_options;
+    tail_options.tail_policy = OfflineRenderTailPolicy::RenderTail;
+    tail_options.tail_frames = 3;
+
+    std::vector<int> frames_seen;
+    std::vector<uint64_t> positions_seen;
+    auto with_tail = offline_render(
+        input,
+        [&](const float* in, float* out, int, const OfflineRenderBlockContext& context) {
+            frames_seen.push_back(context.frames);
+            positions_seen.push_back(context.sample_position);
+            for (int frame = 0; frame < context.frames; ++frame) {
+                out[frame] = in[frame] == 0.0f
+                    ? 10.0f + static_cast<float>(context.sample_position
+                                                 + static_cast<uint64_t>(frame))
+                    : in[frame];
+            }
+        },
+        tail_options);
+
+    REQUIRE(with_tail.has_value());
+    REQUIRE(frames_seen == std::vector<int>{2, 2, 2});
+    REQUIRE(positions_seen == std::vector<uint64_t>{0, 2, 4});
+    REQUIRE(with_tail->channels[0]
+            == std::vector<float>{1.0f, 2.0f, 3.0f, 13.0f, 14.0f, 15.0f});
+}
+
 TEST_CASE("apply_gain preserves an empty audio container", "[audio][offline][processor-edges]") {
     AudioFileData input;
     input.sample_rate = 96000;
