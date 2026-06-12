@@ -206,14 +206,14 @@ inline void run(LV2_Handle handle, uint32_t n_samples) {
         static_cast<size_t>(inst->num_audio_inputs), n_samples);
     audio::BufferView<float> output(out_ptrs,
         static_cast<size_t>(inst->num_audio_outputs), n_samples);
-    std::array<BusBufferView<const float>, 1> input_buses{{
+    std::array<ProcessBusBufferView<const float>, 1> input_buses{{
         {
             .info = {"Main In", 0, BusDirection::Input, BusRole::Main,
                      inst->num_audio_inputs, false, inst->num_audio_inputs > 0},
             .buffer = input,
         },
     }};
-    std::array<BusBufferView<float>, 1> output_buses{{
+    std::array<ProcessBusBufferView<float>, 1> output_buses{{
         {
             .info = {"Main Out", 0, BusDirection::Output, BusRole::Main,
                      inst->num_audio_outputs, false, inst->num_audio_outputs > 0},
@@ -221,8 +221,8 @@ inline void run(LV2_Handle handle, uint32_t n_samples) {
         },
     }};
     ProcessBuffers process_buffers{
-        .inputs = BusBufferSet<const float>(input_buses),
-        .outputs = BusBufferSet<float>(output_buses),
+        .inputs = ProcessBusBufferSet<const float>(input_buses),
+        .outputs = ProcessBusBufferSet<float>(output_buses),
     };
 
     // MIDI: parse the connected LV2_Atom_Sequence (if any) and promote

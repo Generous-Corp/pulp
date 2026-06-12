@@ -299,7 +299,7 @@ OSStatus PulpAUInstrument::Render(AudioUnitRenderActionFlags& ioActionFlags,
     }
     pulp::format::detail::compute_playhead_changes(ctx, playhead_prev_);
 
-    std::array<BusBufferView<const float>, 1> input_buses{{
+    std::array<ProcessBusBufferView<const float>, 1> input_buses{{
         {
             .info = {
                 .name = "Audio In",
@@ -313,7 +313,7 @@ OSStatus PulpAUInstrument::Render(AudioUnitRenderActionFlags& ioActionFlags,
             .buffer = input_view,
         },
     }};
-    std::array<BusBufferView<float>, 1> output_buses{{
+    std::array<ProcessBusBufferView<float>, 1> output_buses{{
         {
             .info = {
                 .name = "Audio Out",
@@ -328,8 +328,8 @@ OSStatus PulpAUInstrument::Render(AudioUnitRenderActionFlags& ioActionFlags,
         },
     }};
     ProcessBuffers process_buffers{
-        BusBufferSet<const float>{std::span(input_buses)},
-        BusBufferSet<float>{std::span(output_buses)},
+        ProcessBusBufferSet<const float>{std::span(input_buses)},
+        ProcessBusBufferSet<float>{std::span(output_buses)},
     };
 
     processor_->process(process_buffers, midi_in, midi_out, ctx);

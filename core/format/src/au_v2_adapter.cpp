@@ -484,7 +484,7 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
     // (param snapshot, pointer-vector resizes) legitimately allocates.
     param_events_.clear();
     processor_->set_param_events(&param_events_);
-    std::array<BusBufferView<const float>, 1> input_buses{{
+    std::array<ProcessBusBufferView<const float>, 1> input_buses{{
         {
             .info = {
                 .name = "Audio In",
@@ -498,7 +498,7 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
             .buffer = input_view,
         },
     }};
-    std::array<BusBufferView<float>, 1> output_buses{{
+    std::array<ProcessBusBufferView<float>, 1> output_buses{{
         {
             .info = {
                 .name = "Audio Out",
@@ -513,8 +513,8 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
         },
     }};
     ProcessBuffers process_buffers{
-        BusBufferSet<const float>{std::span(input_buses)},
-        BusBufferSet<float>{std::span(output_buses)},
+        ProcessBusBufferSet<const float>{std::span(input_buses)},
+        ProcessBusBufferSet<float>{std::span(output_buses)},
     };
     {
         pulp::runtime::ScopedNoAlloc no_alloc_guard;

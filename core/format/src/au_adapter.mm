@@ -874,7 +874,7 @@ static int32_t block_relative_sample_offset(AUEventSampleTime event_sample_time,
         pulp::format::detail::derive_bar_from_beats(ctx);
         pulp::format::detail::compute_playhead_changes(ctx, bridge->playhead_prev);
 
-        std::array<pulp::format::BusBufferView<const float>, 2> input_buses{{
+        std::array<pulp::format::ProcessBusBufferView<const float>, 2> input_buses{{
             {
                 .info = {
                     .name = "Audio In",
@@ -900,7 +900,7 @@ static int32_t block_relative_sample_offset(AUEventSampleTime event_sample_time,
                 .buffer = sidechain_view,
             },
         }};
-        std::array<pulp::format::BusBufferView<float>, 1> output_buses{{
+        std::array<pulp::format::ProcessBusBufferView<float>, 1> output_buses{{
             {
                 .info = {
                     .name = "Audio Out",
@@ -915,8 +915,8 @@ static int32_t block_relative_sample_offset(AUEventSampleTime event_sample_time,
             },
         }};
         pulp::format::ProcessBuffers process_buffers{
-            pulp::format::BusBufferSet<const float>{std::span(input_buses)},
-            pulp::format::BusBufferSet<float>{std::span(output_buses)},
+            pulp::format::ProcessBusBufferSet<const float>{std::span(input_buses)},
+            pulp::format::ProcessBusBufferSet<float>{std::span(output_buses)},
         };
 
         bridge->processor->set_param_events(&bridge->param_events);

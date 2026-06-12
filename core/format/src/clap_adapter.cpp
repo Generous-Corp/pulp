@@ -291,7 +291,7 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
         self->output_ptrs, out_channels, num_samples);
     audio::BufferView<const float> sidechain_view(
         self->sidechain_ptrs, sc_channels, num_samples);
-    std::array<BusBufferView<const float>, 2> input_buses{{
+    std::array<ProcessBusBufferView<const float>, 2> input_buses{{
         {
             .info = {"Main In", 0, BusDirection::Input, BusRole::Main,
                      in_channels, false, process->audio_inputs_count > 0},
@@ -303,7 +303,7 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
             .buffer = sidechain_view,
         },
     }};
-    std::array<BusBufferView<float>, 1> output_buses{{
+    std::array<ProcessBusBufferView<float>, 1> output_buses{{
         {
             .info = {"Main Out", 0, BusDirection::Output, BusRole::Main,
                      out_channels, false, process->audio_outputs_count > 0},
@@ -311,8 +311,8 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
         },
     }};
     ProcessBuffers process_buffers{
-        .inputs = BusBufferSet<const float>(input_buses),
-        .outputs = BusBufferSet<float>(output_buses),
+        .inputs = ProcessBusBufferSet<const float>(input_buses),
+        .outputs = ProcessBusBufferSet<float>(output_buses),
     };
 
     // Build MIDI from CLAP note events

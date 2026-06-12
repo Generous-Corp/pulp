@@ -485,7 +485,7 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     audio::BufferView<const float> sidechain_view(
         const_cast<const float* const*>(sidechain_ptrs_.data()),
         sc_channels, num_samples);
-    std::array<BusBufferView<const float>, 2> input_buses{{
+    std::array<ProcessBusBufferView<const float>, 2> input_buses{{
         {
             .info = {"Main In", 0, BusDirection::Input, BusRole::Main,
                      proc_in, false, data.numInputs > 0},
@@ -497,7 +497,7 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
             .buffer = sidechain_view,
         },
     }};
-    std::array<BusBufferView<float>, 1> output_buses{{
+    std::array<ProcessBusBufferView<float>, 1> output_buses{{
         {
             .info = {"Main Out", 0, BusDirection::Output, BusRole::Main,
                      proc_out, false, data.numOutputs > 0},
@@ -505,8 +505,8 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
         },
     }};
     ProcessBuffers process_buffers{
-        .inputs = BusBufferSet<const float>(input_buses),
-        .outputs = BusBufferSet<float>(output_buses),
+        .inputs = ProcessBusBufferSet<const float>(input_buses),
+        .outputs = ProcessBusBufferSet<float>(output_buses),
     };
 
     // Item 3.2 — VST3 `processBlockBypassed` behaviour. When the plugin
