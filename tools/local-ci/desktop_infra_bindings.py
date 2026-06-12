@@ -8,6 +8,20 @@ from typing import Any
 
 from binding_utils import binding as _binding
 from binding_utils import binding_attr as _binding_attr
+from binding_utils import install_local_helpers
+
+
+DESKTOP_INFRA_EXPORTS = (
+    "normalize_git_remote_for_http",
+    "normalize_git_remote_for_clone",
+    "git_origin_http_url",
+    "git_origin_clone_url",
+    "clear_directory_contents",
+    "copy_directory_contents",
+    "run_git",
+    "slugify_token",
+    "wait_for_path",
+)
 
 
 def normalize_git_remote_for_http(bindings: Mapping[str, Any], remote_url: str | None) -> str | None:
@@ -55,3 +69,7 @@ def slugify_token(bindings: Mapping[str, Any], value: str, *, max_len: int = 48)
 
 def wait_for_path(bindings: Mapping[str, Any], path: Path, timeout_secs: float) -> Path:
     return _binding(bindings, "_io_utils").wait_for_path(path, timeout_secs)
+
+
+def install_desktop_infra_helpers(bindings: dict[str, Any], names: tuple[str, ...] = DESKTOP_INFRA_EXPORTS) -> None:
+    install_local_helpers(bindings, globals(), names)

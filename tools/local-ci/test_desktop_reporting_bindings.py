@@ -253,6 +253,29 @@ class DesktopReportingBindingsTests(unittest.TestCase):
         self.assertEqual(captured["args"], (config, "mac"))
         self.assertIs(captured["kwargs"]["desktop_artifact_root_fn"], bindings["desktop_artifact_root"])
 
+    def test_install_desktop_reporting_helpers_wires_named_exports(self):
+        captured = {}
+
+        def runner(*args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            return [{"target": "mac"}]
+
+        bindings = self._bindings("desktop_run_manifests", runner)
+        self.mod.install_desktop_reporting_helpers(bindings, ("desktop_run_manifests",))
+
+        result = bindings["desktop_run_manifests"](
+            {"desktop_automation": {}},
+            target_name="mac",
+            action="smoke",
+        )
+
+        self.assertEqual(result, [{"target": "mac"}])
+        self.assertEqual(captured["args"], ({"desktop_automation": {}},))
+        self.assertEqual(captured["kwargs"]["target_name"], "mac")
+        self.assertEqual(captured["kwargs"]["action"], "smoke")
+        self.assertIs(captured["kwargs"]["desktop_artifact_root_fn"], bindings["desktop_artifact_root"])
+
 
 if __name__ == "__main__":
     unittest.main()

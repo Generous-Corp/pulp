@@ -91,6 +91,23 @@ class DesktopInfraBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.wait_for_path(bindings, Path("/tmp/file"), 3.0), Path("/tmp/file"))
         self.assertEqual(captured["wait"][0], (Path("/tmp/file"), 3.0))
 
+    def test_install_desktop_infra_helpers_wires_named_exports(self) -> None:
+        git_helpers = types.SimpleNamespace(
+            normalize_git_remote_for_http=lambda remote_url: f"https:{remote_url}",
+        )
+        reporting = types.SimpleNamespace(
+            slugify_token=lambda value, *, max_len=48: value[:max_len].lower(),
+        )
+        bindings = self._bindings(git_helpers=git_helpers, reporting=reporting)
+
+        self.mod.install_desktop_infra_helpers(
+            bindings,
+            ("normalize_git_remote_for_http", "slugify_token"),
+        )
+
+        self.assertEqual(bindings["normalize_git_remote_for_http"]("example/repo"), "https:example/repo")
+        self.assertEqual(bindings["slugify_token"]("Demo Token", max_len=4), "demo")
+
 
 if __name__ == "__main__":
     unittest.main()

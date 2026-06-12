@@ -314,8 +314,13 @@ _target_bindings.install_target_helpers(globals())
 
 _cloud_bindings.install_cloud_helpers(globals())
 _desktop_support_bindings.install_desktop_support_helpers(globals())
+_desktop_infra_bindings.install_desktop_infra_helpers(globals())
+_desktop_reporting_bindings.install_desktop_reporting_helpers(globals())
 _desktop_check = desktop_check
 _check_writable_dir = check_writable_dir
+_clear_directory_contents = clear_directory_contents
+_copy_directory_contents = copy_directory_contents
+_run_git = run_git
 
 
 def probe_windows_repo_checkout(host: str, repo_path: str | None) -> dict:
@@ -380,38 +385,6 @@ def linux_remote_tooling_ready(probe: dict) -> bool:
     return _linux_target_bindings.linux_remote_tooling_ready(globals(), probe)
 
 
-def normalize_git_remote_for_http(remote_url: str | None) -> str | None:
-    return _desktop_infra_bindings.normalize_git_remote_for_http(globals(), remote_url)
-
-
-def normalize_git_remote_for_clone(remote_url: str | None) -> str | None:
-    return _desktop_infra_bindings.normalize_git_remote_for_clone(globals(), remote_url)
-
-
-def git_origin_http_url(repo_root: Path = ROOT) -> str | None:
-    return _desktop_infra_bindings.git_origin_http_url(globals(), repo_root)
-
-
-def git_origin_clone_url(repo_root: Path = ROOT) -> str | None:
-    return _desktop_infra_bindings.git_origin_clone_url(globals(), repo_root)
-
-
-def _clear_directory_contents(path: Path) -> None:
-    return _desktop_infra_bindings.clear_directory_contents(globals(), path)
-
-
-def _copy_directory_contents(src: Path, dest: Path) -> None:
-    return _desktop_infra_bindings.copy_directory_contents(globals(), src, dest)
-
-
-def _run_git(args: list[str], *, cwd: Path, check: bool = True) -> subprocess.CompletedProcess:
-    return _desktop_infra_bindings.run_git(globals(), args, cwd=cwd, check=check)
-
-
-def publish_report_to_branch(config: dict, report: dict) -> dict:
-    return _desktop_reporting_bindings.publish_report_to_branch(globals(), config, report)
-
-
 def make_desktop_source_request(args: argparse.Namespace) -> dict:
     return _source_prep_bindings.make_desktop_source_request(globals(), args)
 
@@ -456,123 +429,12 @@ def attach_desktop_source_to_manifest(manifest: dict, source_context: dict | Non
     return _source_prep_bindings.attach_desktop_source_to_manifest(globals(), manifest, source_context)
 
 
-def slugify_token(value: str, *, max_len: int = 48) -> str:
-    return _desktop_infra_bindings.slugify_token(globals(), value, max_len=max_len)
-
-
-def stage_desktop_publish_report(
-    config: dict,
-    manifests: list[dict],
-    *,
-    output_dir: Path | None = None,
-    label: str | None = None,
-) -> dict:
-    return _desktop_reporting_bindings.stage_desktop_publish_report(
-        globals(),
-        config,
-        manifests,
-        output_dir=output_dir,
-        label=label,
-    )
-
-
-def desktop_publish_reports(config: dict, *, limit: int | None = None) -> list[dict]:
-    return _desktop_reporting_bindings.desktop_publish_reports(globals(), config, limit=limit)
-
-
-def write_desktop_publish_rollups(config: dict) -> None:
-    return _desktop_reporting_bindings.write_desktop_publish_rollups(globals(), config)
-
-
-def wait_for_path(path: Path, timeout_secs: float) -> Path:
-    return _desktop_infra_bindings.wait_for_path(globals(), path, timeout_secs)
-
-
 def detect_macos_app_bundle(command: str | None) -> Path | None:
     return _macos_window_bindings.detect_macos_app_bundle(globals(), command)
 
 
 def macos_bundle_id_for_app_path(app_path: Path) -> str | None:
     return _macos_window_bindings.macos_bundle_id_for_app_path(globals(), app_path)
-
-
-def desktop_run_manifests(config: dict, *, target_name: str | None = None, action: str | None = None) -> list[dict]:
-    return _desktop_reporting_bindings.desktop_run_manifests(
-        globals(),
-        config,
-        target_name=target_name,
-        action=action,
-    )
-
-
-def normalize_desktop_proof_source_mode(mode: str | None) -> str:
-    return _desktop_reporting_bindings.normalize_desktop_proof_source_mode(globals(), mode)
-
-
-def desktop_manifest_adapter(config: dict, manifest: dict) -> str:
-    return _desktop_reporting_bindings.desktop_manifest_adapter(globals(), config, manifest)
-
-
-def desktop_manifest_run_status(manifest: dict) -> str:
-    return _desktop_reporting_bindings.desktop_manifest_run_status(globals(), manifest)
-
-
-def desktop_manifest_source(manifest: dict) -> dict:
-    return _desktop_reporting_bindings.desktop_manifest_source(globals(), manifest)
-
-
-def desktop_proof_scope_for_adapter(adapter: str) -> str:
-    return _desktop_reporting_bindings.desktop_proof_scope_for_adapter(globals(), adapter)
-
-
-def desktop_run_summary(config: dict, manifest: dict) -> dict:
-    return _desktop_reporting_bindings.desktop_run_summary(globals(), config, manifest)
-
-
-def desktop_proof_summaries(
-    config: dict,
-    *,
-    target_name: str | None = None,
-    action: str | None = None,
-    source_mode: str | None = None,
-    sha: str | None = None,
-    branch: str | None = None,
-    limit: int | None = None,
-) -> list[dict]:
-    return _desktop_reporting_bindings.desktop_proof_summaries(
-        globals(),
-        config,
-        target_name=target_name,
-        action=action,
-        source_mode=source_mode,
-        sha=sha,
-        branch=branch,
-        limit=limit,
-    )
-
-
-def desktop_rollup_dir(config: dict, target_name: str | None = None) -> Path:
-    return _desktop_reporting_bindings.desktop_rollup_dir(globals(), config, target_name)
-
-
-def write_desktop_run_rollups(config: dict, *, target_name: str | None = None) -> None:
-    return _desktop_reporting_bindings.write_desktop_run_rollups(globals(), config, target_name=target_name)
-
-
-def prune_desktop_run_manifests(
-    config: dict,
-    *,
-    target_name: str | None = None,
-    older_than_days: int | None = None,
-    keep_last: int | None = None,
-) -> list[Path]:
-    return _desktop_reporting_bindings.prune_desktop_run_manifests(
-        globals(),
-        config,
-        target_name=target_name,
-        older_than_days=older_than_days,
-        keep_last=keep_last,
-    )
 
 
 def macos_window_probe_path() -> Path:

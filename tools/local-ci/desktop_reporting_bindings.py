@@ -7,6 +7,26 @@ from pathlib import Path
 from typing import Any
 
 from binding_utils import binding as _binding
+from binding_utils import install_local_helpers
+
+
+DESKTOP_REPORTING_EXPORTS = (
+    "publish_report_to_branch",
+    "stage_desktop_publish_report",
+    "desktop_publish_reports",
+    "write_desktop_publish_rollups",
+    "desktop_run_manifests",
+    "normalize_desktop_proof_source_mode",
+    "desktop_manifest_adapter",
+    "desktop_manifest_run_status",
+    "desktop_manifest_source",
+    "desktop_proof_scope_for_adapter",
+    "desktop_run_summary",
+    "desktop_proof_summaries",
+    "desktop_rollup_dir",
+    "write_desktop_run_rollups",
+    "prune_desktop_run_manifests",
+)
 
 
 def publish_report_to_branch(bindings: Mapping[str, Any], config: dict, report: dict) -> dict:
@@ -162,3 +182,7 @@ def prune_desktop_run_manifests(
         keep_last=keep_last,
         desktop_run_manifests_fn=_binding(bindings, "desktop_run_manifests"),
     )
+
+
+def install_desktop_reporting_helpers(bindings: dict[str, Any], names: tuple[str, ...] = DESKTOP_REPORTING_EXPORTS) -> None:
+    install_local_helpers(bindings, globals(), names)
