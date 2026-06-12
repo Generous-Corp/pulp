@@ -164,6 +164,26 @@ class SshBundleBindingsTests(unittest.TestCase):
         )
         self.assertIsNone(self.mod.probe_uploaded_bundle_size(bindings, "ubuntu", "bundle.git", config={"targets": {}}))
 
+    def test_install_ssh_bundle_helpers_wires_named_exports(self) -> None:
+        captured = {}
+
+        def bundle_ref_name(job_id):
+            captured["job_id"] = job_id
+            return f"refs/pulp-ci-bundles/{job_id}"
+
+        ssh_bundle = types.SimpleNamespace(bundle_ref_name=bundle_ref_name)
+        bindings = self._bindings(ssh_bundle)
+
+        self.mod.install_ssh_bundle_helpers(bindings, ("bundle_ref_name", "ssh_host_uses_windows_shell"))
+
+        self.assertEqual(bindings["bundle_ref_name"]("job1"), "refs/pulp-ci-bundles/job1")
+        self.assertEqual(captured["job_id"], "job1")
+        self.assertEqual(bindings["bundle_ref_name"].__name__, "bundle_ref_name")
+
+        bindings["target_name_for_ssh_host"] = lambda _config, _host: "win-target"
+        config = {"targets": {"win-target": {"host": "builder", "repo_path": r"C:\Pulp"}}}
+        self.assertTrue(bindings["ssh_host_uses_windows_shell"](config, "builder"))
+
 
 if __name__ == "__main__":
     unittest.main()

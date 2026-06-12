@@ -155,44 +155,13 @@ import windows_target as _windows_target  # noqa: E402
 import windows_target_bindings as _windows_target_bindings  # noqa: E402
 
 _ssh_subprocess_bindings.install_ssh_subprocess_helpers(globals())
+_ssh_bundle_bindings.install_ssh_bundle_helpers(globals())
 
 WINDOWS_REQUIRED_REMOTE_TOOLS = _windows_target_bindings.windows_required_remote_tools(globals())
 WINDOWS_OPTIONAL_REMOTE_TOOLS = _windows_target_bindings.windows_optional_remote_tools(globals())
 WINDOWS_DEFAULT_REMOTE_REPO_DIRNAME = _windows_target_bindings.windows_default_remote_repo_dirname(globals())
 LINUX_REQUIRED_REMOTE_TOOLS = _linux_target_bindings.linux_required_remote_tools(globals())
 LINUX_OPTIONAL_REMOTE_TOOLS = _linux_target_bindings.linux_optional_remote_tools(globals())
-
-
-def bundle_ref_name(job_id: str) -> str:
-    return _ssh_bundle_bindings.bundle_ref_name(globals(), job_id)
-
-
-def remote_bundle_name(job_id: str) -> str:
-    return _ssh_bundle_bindings.remote_bundle_name(globals(), job_id)
-
-
-def create_job_bundle(job: dict) -> Path:
-    return _ssh_bundle_bindings.create_job_bundle(globals(), job)
-
-
-def config_for_bundle_probe(job: dict, config: dict | None = None) -> dict:
-    return _ssh_bundle_bindings.config_for_bundle_probe(globals(), job, config)
-
-
-def sync_job_bundle_to_ssh_host(host: str, job: dict, report_progress=None, config: dict | None = None) -> tuple[str, str]:
-    return _ssh_bundle_bindings.sync_job_bundle_to_ssh_host(globals(), host, job, report_progress, config)
-
-
-def target_name_for_ssh_host(config: dict, host: str) -> str | None:
-    return _ssh_bundle_bindings.target_name_for_ssh_host(globals(), config, host)
-
-
-def ssh_host_uses_windows_shell(config: dict, host: str) -> bool:
-    return _ssh_bundle_bindings.ssh_host_uses_windows_shell(globals(), config, host)
-
-
-def probe_uploaded_bundle_size(host: str, remote_name: str, *, config: dict) -> int | None:
-    return _ssh_bundle_bindings.probe_uploaded_bundle_size(globals(), host, remote_name, config=config)
 
 
 from io_utils import LockBusyError  # noqa: E402  -- re-exported for callers catching the facade class

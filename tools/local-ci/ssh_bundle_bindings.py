@@ -6,6 +6,19 @@ from pathlib import Path
 
 from binding_utils import binding as _binding
 from binding_utils import binding_attr as _binding_attr
+from binding_utils import install_local_helpers
+
+
+SSH_BUNDLE_EXPORTS = (
+    "bundle_ref_name",
+    "remote_bundle_name",
+    "create_job_bundle",
+    "config_for_bundle_probe",
+    "sync_job_bundle_to_ssh_host",
+    "target_name_for_ssh_host",
+    "ssh_host_uses_windows_shell",
+    "probe_uploaded_bundle_size",
+)
 
 
 def bundle_ref_name(bindings: dict, job_id: str) -> str:
@@ -108,3 +121,7 @@ def probe_uploaded_bundle_size(bindings: dict, host: str, remote_name: str, *, c
         return int(value)
     except ValueError:
         return None
+
+
+def install_ssh_bundle_helpers(bindings: dict, names: tuple[str, ...] = SSH_BUNDLE_EXPORTS) -> None:
+    install_local_helpers(bindings, globals(), names)
