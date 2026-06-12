@@ -866,6 +866,43 @@ TEST_CASE("CLAP transport state maps into ProcessContext",
     REQUIRE(g_capturing->captured_context.num_samples == static_cast<int>(Harness::kFrames));
 }
 
+TEST_CASE("CLAP transport jumps request processor reset through ProcessContext",
+          "[clap][transport][reset][phase2]") {
+    g_pending_opts_mpe = false;
+    g_pending_opts_ump = false;
+    Harness h(make_capturing);
+
+    clap_event_transport_t transport{};
+    transport.header = make_header(sizeof(transport), CLAP_EVENT_TRANSPORT, 0);
+    transport.flags = CLAP_TRANSPORT_IS_PLAYING
+                    | CLAP_TRANSPORT_HAS_TEMPO
+                    | CLAP_TRANSPORT_HAS_BEATS_TIMELINE;
+    transport.tempo = 87.890625;  // 64 frames at 48 kHz advances exactly 1/512 beat.
+
+    auto run_at_beats = [&](clap_beattime beat_position) {
+        transport.song_pos_beats = beat_position;
+        REQUIRE(h.run_custom(nullptr, nullptr,
+                             &h.audio_in, 1,
+                             &h.audio_out, 1,
+                             Harness::kFrames,
+                             &transport) == CLAP_PROCESS_CONTINUE);
+        return g_capturing->captured_context;
+    };
+
+    const auto first = run_at_beats(8 * CLAP_BEATTIME_FACTOR);
+    REQUIRE_FALSE(first.transport_jump);
+    REQUIRE_FALSE(first.should_reset_dsp_state());
+
+    const auto continuous =
+        run_at_beats(8 * CLAP_BEATTIME_FACTOR + CLAP_BEATTIME_FACTOR / 512);
+    REQUIRE_FALSE(continuous.transport_jump);
+    REQUIRE_FALSE(continuous.should_reset_dsp_state());
+
+    const auto jumped = run_at_beats(10 * CLAP_BEATTIME_FACTOR);
+    REQUIRE(jumped.transport_jump);
+    REQUIRE(jumped.should_reset_dsp_state());
+}
+
 TEST_CASE("CLAP item-1.3 transport extensions land on ProcessContext",
           "[clap][transport][item-13]") {
     g_pending_opts_mpe = false;
