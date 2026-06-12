@@ -49,15 +49,32 @@ HeadlessHost::HeadlessHost(ProcessorFactory factory) {
 
 void HeadlessHost::prepare(double sample_rate, int max_buffer_size,
                             int input_channels, int output_channels) {
-    if (!processor_) return;
+    static_cast<void>(try_prepare(
+        sample_rate, max_buffer_size, input_channels, output_channels, {}));
+}
 
-    sample_rate_ = sample_rate;
+bool HeadlessHost::try_prepare(double sample_rate, int max_buffer_size,
+                               int input_channels, int output_channels,
+                               PrepareResourceLimits resource_limits) {
+    last_prepare_limit_failure_ = PrepareResourceLimit::None;
+    if (!processor_) return false;
+
     PrepareContext ctx;
     ctx.sample_rate = sample_rate;
     ctx.max_buffer_size = max_buffer_size;
     ctx.input_channels = input_channels;
     ctx.output_channels = output_channels;
+    ctx.resource_limits = resource_limits;
+
+    const auto failure = processor_->check_prepare_resource_limits(ctx);
+    if (failure != PrepareResourceLimit::None) {
+        last_prepare_limit_failure_ = failure;
+        return false;
+    }
+
+    sample_rate_ = sample_rate;
     processor_->prepare(ctx);
+    return true;
 }
 
 void HeadlessHost::process(audio::BufferView<float>& output,

@@ -41,6 +41,20 @@ public:
         last_prepare_context = context;
     }
 
+    pulp::format::PrepareResourceUsage estimate_prepare_resources(
+        const pulp::format::PrepareContext& context) const override {
+        return {
+            .persistent_bytes = estimated_persistent_bytes,
+            .block_scratch_bytes = estimated_block_scratch_bytes,
+            .block_size = context.max_buffer_size,
+            .input_channels = context.input_channels,
+            .output_channels = context.output_channels,
+            .parameter_events = estimated_parameter_events,
+            .midi_events = estimated_midi_events,
+            .voices = estimated_voices,
+        };
+    }
+
     void release() override { ++release_calls; }
 
     void process(
@@ -99,6 +113,11 @@ public:
     }
 
     std::string plugin_state;
+    std::size_t estimated_persistent_bytes = 0;
+    std::size_t estimated_block_scratch_bytes = 0;
+    int estimated_parameter_events = 0;
+    int estimated_midi_events = 0;
+    int estimated_voices = 0;
     pulp::format::PrepareContext last_prepare_context{};
     int prepare_calls = 0;
     int release_calls = 0;
@@ -223,6 +242,64 @@ TEST_CASE("HeadlessHost forwards prepare context and release",
 
     host.release();
     REQUIRE(processor->release_calls == 1);
+}
+
+TEST_CASE("HeadlessHost try_prepare enforces processor resource budgets",
+          "[headless][prepare-budget][phase2]") {
+    pulp::format::HeadlessHost host(create_test_gain);
+    REQUIRE(last_processor != nullptr);
+    auto* processor = last_processor;
+    processor->estimated_persistent_bytes = 4096;
+    processor->estimated_block_scratch_bytes = 1024;
+    processor->estimated_parameter_events = 32;
+    processor->estimated_midi_events = 64;
+    processor->estimated_voices = 8;
+
+    pulp::format::PrepareResourceLimits limits;
+    limits.max_total_bytes = 8192;
+    limits.max_block_size = 512;
+    limits.max_input_channels = 2;
+    limits.max_output_channels = 2;
+    limits.max_parameter_events = 64;
+    limits.max_midi_events = 128;
+    limits.max_voices = 16;
+
+    REQUIRE(host.try_prepare(48000.0, 256, 2, 2, limits));
+    REQUIRE(host.last_prepare_limit_failure() ==
+            pulp::format::PrepareResourceLimit::None);
+    REQUIRE(processor->prepare_calls == 1);
+    REQUIRE(processor->last_prepare_context.resource_limits.max_total_bytes == 8192);
+
+    limits.max_total_bytes = 4096;
+    REQUIRE_FALSE(host.try_prepare(96000.0, 256, 2, 2, limits));
+    REQUIRE(host.last_prepare_limit_failure() ==
+            pulp::format::PrepareResourceLimit::TotalBytes);
+    REQUIRE(processor->prepare_calls == 1);
+    REQUIRE_THAT(processor->last_prepare_context.sample_rate,
+                 WithinAbs(48000.0, 0.001));
+}
+
+TEST_CASE("HeadlessHost try_prepare reports channel and voice budget failures",
+          "[headless][prepare-budget][phase2]") {
+    pulp::format::HeadlessHost host(create_test_gain);
+    REQUIRE(last_processor != nullptr);
+    auto* processor = last_processor;
+    processor->estimated_voices = 12;
+
+    pulp::format::PrepareResourceLimits limits;
+    limits.max_input_channels = 1;
+    limits.max_voices = 16;
+    REQUIRE_FALSE(host.try_prepare(48000.0, 128, 2, 2, limits));
+    REQUIRE(host.last_prepare_limit_failure() ==
+            pulp::format::PrepareResourceLimit::InputChannels);
+    REQUIRE(processor->prepare_calls == 0);
+
+    limits.max_input_channels = 2;
+    limits.max_voices = 8;
+    REQUIRE_FALSE(host.try_prepare(48000.0, 128, 2, 2, limits));
+    REQUIRE(host.last_prepare_limit_failure() ==
+            pulp::format::PrepareResourceLimit::Voices);
+    REQUIRE(processor->prepare_calls == 0);
 }
 
 TEST_CASE("HeadlessHost fills default process context",

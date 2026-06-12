@@ -37,8 +37,9 @@ Processors with large prepared storage can override
 `Processor::estimate_prepare_resources()` to report persistent bytes, fixed
 per-block scratch bytes, block size, channel counts, event capacities, and voice
 capacity. Hosts can call `Processor::check_prepare_resource_limits()` before
-`prepare()` and reject configurations that exceed a non-zero limit. This keeps
-oversized samplers, convolution IRs, analysis caches, and voice pools from
+`prepare()` and reject configurations that exceed a non-zero limit; the
+headless test/batch host exposes this as `HeadlessHost::try_prepare()`. This
+keeps oversized samplers, convolution IRs, analysis caches, and voice pools from
 discovering budget failure on the audio thread.
 
 ## Read parameters once per block, not per sample

@@ -26,6 +26,11 @@ host.process(out_view, in_view);
 REQUIRE(out.channel(0)[0] != 0.0f);
 ```
 
+For resource-budget tests, use `try_prepare()` with non-zero
+`PrepareResourceLimits`. It returns false before calling `Processor::prepare()`
+when the processor's `estimate_prepare_resources()` result exceeds a supplied
+limit.
+
 ### HeadlessHost with MIDI
 
 ```cpp

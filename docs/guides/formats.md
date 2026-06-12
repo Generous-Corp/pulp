@@ -570,6 +570,7 @@ Key methods:
 | Method | Description |
 |---|---|
 | `prepare(sample_rate, max_buffer_size, in_ch, out_ch)` | Initialize the processor |
+| `try_prepare(sample_rate, max_buffer_size, in_ch, out_ch, limits)` | Initialize only if the processor's prepare-resource estimate fits the supplied non-zero limits |
 | `process(output, input)` | Process audio (no MIDI) |
 | `process(output, input, midi_in, midi_out)` | Process audio with MIDI |
 | `release()` | Release processing resources |
@@ -577,6 +578,20 @@ Key methods:
 | `save_state()` | Serialize current plugin state to bytes |
 | `load_state(data)` | Restore parameter and plugin-owned state from bytes |
 | `descriptor()` | Read the plugin's `PluginDescriptor` |
+
+Use `try_prepare()` when a test, batch render, or benchmark needs to prove a
+plugin fails closed before allocating oversized prepare-time resources:
+
+```cpp
+pulp::format::PrepareResourceLimits limits;
+limits.max_total_bytes = 8 * 1024 * 1024;
+limits.max_voices = 64;
+
+if (!host.try_prepare(48000, 512, 2, 2, limits)) {
+    auto reason = host.last_prepare_limit_failure();
+    // Report or assert the first exceeded budget.
+}
+```
 
 Input and output views may alias for in-place processing.
 
