@@ -127,6 +127,22 @@ class GithubWorkflowBindingsTests(unittest.TestCase):
         self.assertEqual(calls[4][1], (config, repository_variables, "build", "namespace", "linux_runner_selector_json"))
         self.assertEqual(calls[7][1], (args, fields))
 
+    def test_install_github_workflow_helpers_wires_named_exports(self):
+        bindings, calls = self._bindings()
+
+        self.mod.install_github_workflow_helpers(
+            bindings,
+            ("resolve_github_actions_settings", "normalize_runs_on_json"),
+        )
+
+        self.assertEqual(bindings["resolve_github_actions_settings"]({"github_actions": {}}), {"provider": "namespace"})
+        self.assertEqual(bindings["normalize_runs_on_json"]("macos-15", setting_name="runner"), '"macos-15"')
+        self.assertEqual([call[0] for call in calls], [
+            "resolve_github_actions_settings",
+            "normalize_runs_on_json",
+        ])
+        self.assertEqual(calls[1][2], {"setting_name": "runner"})
+
 
 if __name__ == "__main__":
     unittest.main()
