@@ -285,28 +285,35 @@ void AudioDeviceManager::unsubscribe_midi(uint64_t id) noexcept {
 // ── CPU load ────────────────────────────────────────────────────────
 
 void AudioDeviceManager::begin_cpu_measure(int num_frames, float sample_rate) {
-    std::lock_guard<std::mutex> lk(load_mu_);
     load_.begin(num_frames, sample_rate);
 }
 
 void AudioDeviceManager::end_cpu_measure() {
-    std::lock_guard<std::mutex> lk(load_mu_);
     load_.end();
 }
 
 float AudioDeviceManager::cpu_load() const {
-    std::lock_guard<std::mutex> lk(load_mu_);
     return load_.load();
 }
 
 float AudioDeviceManager::peak_cpu_load() const {
-    std::lock_guard<std::mutex> lk(load_mu_);
     return load_.peak_load();
 }
 
+AudioProcessLoadSnapshot AudioDeviceManager::process_load_snapshot() const {
+    return load_.snapshot();
+}
+
 void AudioDeviceManager::reset_peak_cpu_load() {
-    std::lock_guard<std::mutex> lk(load_mu_);
     load_.reset_peak();
+}
+
+AudioDeviceManager::RuntimeTelemetrySnapshot
+AudioDeviceManager::runtime_telemetry_snapshot() const {
+    return RuntimeTelemetrySnapshot{
+        .process_load = load_.snapshot(),
+        .xrun_count = xrun_count(),
+    };
 }
 
 // ── Lifecycle / hotplug / recovery (1.2b) ───────────────────────────

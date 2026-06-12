@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/audio/load_measurer.hpp>
+#include "harness/rt_allocation_probe.hpp"
 #include <thread>
 #include <chrono>
 #include <cmath>
@@ -226,4 +227,67 @@ TEST_CASE("AudioProcessLoadMeasurer reset clears pending timing state", "[audio]
 
     REQUIRE_THAT(m.load(), WithinAbs(0.0f, 0.001f));
     REQUIRE_THAT(m.peak_load(), WithinAbs(0.0f, 0.001f));
+}
+
+TEST_CASE("AudioProcessLoadMeasurer publishes bounded overload telemetry",
+          "[audio][load][telemetry][phase2]") {
+    AudioProcessLoadMeasurer m;
+    m.set_smoothing(1.0f);
+    m.set_overload_threshold(0.05f);
+
+    m.begin(512, 48000.0f);
+    busy_wait_for(std::chrono::microseconds(1200));
+    m.end();
+
+    const auto first = m.snapshot();
+    REQUIRE(first.callback_count == 1);
+    REQUIRE(first.overload_count == 1);
+    REQUIRE(first.elapsed_ns > 0);
+    REQUIRE(first.available_ns > 0);
+    REQUIRE(first.last_load > 0.05f);
+    REQUIRE_THAT(first.load, WithinAbs(first.last_load, 0.001f));
+    REQUIRE_THAT(first.peak_load, WithinAbs(first.last_load, 0.001f));
+
+    m.set_overload_threshold(100.0f);
+    m.begin(512, 48000.0f);
+    busy_wait_for(std::chrono::microseconds(100));
+    m.end();
+
+    const auto second = m.snapshot();
+    REQUIRE(second.callback_count == 2);
+    REQUIRE(second.overload_count == 1);
+    REQUIRE(second.elapsed_ns > 0);
+    REQUIRE(second.available_ns == first.available_ns);
+
+    m.reset();
+    const auto reset = m.snapshot();
+    REQUIRE(reset.callback_count == 0);
+    REQUIRE(reset.overload_count == 0);
+    REQUIRE(reset.elapsed_ns == 0);
+    REQUIRE(reset.available_ns == 0);
+    REQUIRE_THAT(reset.load, WithinAbs(0.0f, 0.001f));
+    REQUIRE_THAT(reset.peak_load, WithinAbs(0.0f, 0.001f));
+}
+
+TEST_CASE("AudioProcessLoadMeasurer hot path and snapshot polling allocate zero times",
+          "[audio][load][telemetry][rt-safety][phase2]") {
+    AudioProcessLoadMeasurer m;
+    m.set_smoothing(1.0f);
+    m.set_overload_threshold(0.000001f);
+
+    pulp::test::RtAllocationProbe probe;
+
+    for (int i = 0; i < 8; ++i) {
+        m.begin(128, 48000.0f);
+        busy_wait_for(std::chrono::microseconds(50));
+        m.end();
+        (void)m.load();
+        (void)m.peak_load();
+        (void)m.last_load();
+        (void)m.callback_count();
+        (void)m.overload_count();
+        (void)m.snapshot();
+    }
+
+    REQUIRE_FALSE(probe.saw_allocation());
 }

@@ -5565,7 +5565,9 @@ pulp_add_test_suite(pulp-test-interpolator LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-midi-expansion LIBRARIES pulp::midi)
 
 # Audio process load measurer tests
-pulp_add_test_suite(pulp-test-load-measurer LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-load-measurer
+    SOURCES test_load_measurer.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::audio)
 
 # FilterDesign tests
 pulp_add_test_suite(pulp-test-filter-design LIBRARIES pulp::signal)
