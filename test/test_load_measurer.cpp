@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cmath>
 #include <limits>
+#include <string>
 
 using namespace pulp::audio;
 using Catch::Matchers::WithinAbs;
@@ -267,6 +268,118 @@ TEST_CASE("AudioProcessLoadMeasurer publishes bounded overload telemetry",
     REQUIRE(reset.available_ns == 0);
     REQUIRE_THAT(reset.load, WithinAbs(0.0f, 0.001f));
     REQUIRE_THAT(reset.peak_load, WithinAbs(0.0f, 0.001f));
+}
+
+TEST_CASE("Audio runtime overload policy classifies load severity",
+          "[audio][load][overload-policy][phase4]") {
+    AudioProcessLoadSnapshot snapshot;
+
+    auto report = evaluate_audio_runtime_overload(snapshot, 0);
+    REQUIRE(report.severity == AudioRuntimeOverloadSeverity::Nominal);
+    REQUIRE(std::string(to_string(report.severity)) == "nominal");
+    REQUIRE_FALSE(report.should_shed_optional_work);
+    REQUIRE_FALSE(report.validation_failure);
+    REQUIRE(std::string(report.action) == "normal");
+
+    snapshot.load = 0.80f;
+    report = evaluate_audio_runtime_overload(snapshot, 0);
+    REQUIRE(report.severity == AudioRuntimeOverloadSeverity::Watch);
+    REQUIRE(std::string(to_string(report.severity)) == "watch");
+    REQUIRE_FALSE(report.should_shed_optional_work);
+    REQUIRE(std::string(report.action) == "monitor");
+
+    snapshot.last_load = 1.05f;
+    report = evaluate_audio_runtime_overload(snapshot, 0);
+    REQUIRE(report.severity == AudioRuntimeOverloadSeverity::Overloaded);
+    REQUIRE(std::string(to_string(report.severity)) == "overloaded");
+    REQUIRE(report.should_shed_optional_work);
+    REQUIRE_FALSE(report.should_bypass_optional_work);
+    REQUIRE_FALSE(report.validation_failure);
+    REQUIRE(std::string(report.action) == "shed-optional-work");
+
+    snapshot.peak_load = 1.30f;
+    report = evaluate_audio_runtime_overload(snapshot, 0);
+    REQUIRE(report.severity == AudioRuntimeOverloadSeverity::Critical);
+    REQUIRE(std::string(to_string(report.severity)) == "critical");
+    REQUIRE(report.should_shed_optional_work);
+    REQUIRE(report.should_bypass_optional_work);
+    REQUIRE(report.validation_failure);
+    REQUIRE(std::string(report.action) == "bypass-optional-work");
+}
+
+TEST_CASE("Audio runtime overload policy escalates xrun and overload counters",
+          "[audio][load][overload-policy][phase4]") {
+    AudioProcessLoadSnapshot snapshot;
+
+    auto report = evaluate_audio_runtime_overload(snapshot, 1);
+    REQUIRE(report.severity == AudioRuntimeOverloadSeverity::Overloaded);
+    REQUIRE(report.should_shed_optional_work);
+    REQUIRE_FALSE(report.validation_failure);
+
+    report = evaluate_audio_runtime_overload(snapshot, 3);
+    REQUIRE(report.severity == AudioRuntimeOverloadSeverity::Critical);
+    REQUIRE(report.should_bypass_optional_work);
+    REQUIRE(report.validation_failure);
+
+    snapshot.overload_count = 1;
+    report = evaluate_audio_runtime_overload(snapshot, 0);
+    REQUIRE(report.severity == AudioRuntimeOverloadSeverity::Overloaded);
+
+    snapshot.overload_count = 3;
+    report = evaluate_audio_runtime_overload(snapshot, 0);
+    REQUIRE(report.severity == AudioRuntimeOverloadSeverity::Critical);
+}
+
+TEST_CASE("Audio runtime overload policy honors custom validation thresholds",
+          "[audio][load][overload-policy][phase4]") {
+    AudioProcessLoadSnapshot snapshot;
+    snapshot.peak_load = 0.70f;
+
+    AudioRuntimeOverloadPolicy policy;
+    policy.watch_load = 0.5f;
+    policy.overload_load = 0.65f;
+    policy.critical_load = 0.9f;
+    policy.watch_xruns = 2;
+    policy.critical_xruns = 4;
+    policy.watch_overloads = 2;
+    policy.critical_overloads = 4;
+
+    auto report = evaluate_audio_runtime_overload(snapshot, 0, policy);
+    REQUIRE(report.severity == AudioRuntimeOverloadSeverity::Overloaded);
+    REQUIRE(report.should_shed_optional_work);
+
+    snapshot.peak_load = 0.95f;
+    report = evaluate_audio_runtime_overload(snapshot, 0, policy);
+    REQUIRE(report.severity == AudioRuntimeOverloadSeverity::Critical);
+    REQUIRE(report.validation_failure);
+
+    snapshot = {};
+    report = evaluate_audio_runtime_overload(snapshot, 1, policy);
+    REQUIRE(report.severity == AudioRuntimeOverloadSeverity::Nominal);
+
+    report = evaluate_audio_runtime_overload(snapshot, 2, policy);
+    REQUIRE(report.severity == AudioRuntimeOverloadSeverity::Overloaded);
+}
+
+TEST_CASE("Audio runtime overload policy sanitizes invalid load thresholds",
+          "[audio][load][overload-policy][phase4]") {
+    AudioRuntimeOverloadPolicy policy;
+    policy.watch_load = -1.0f;
+    policy.overload_load = 0.25f;
+    policy.critical_load = 0.5f;
+
+    AudioProcessLoadSnapshot snapshot;
+    snapshot.last_load = 0.8f;
+    auto report = evaluate_audio_runtime_overload(snapshot, 0, policy);
+    REQUIRE(report.severity == AudioRuntimeOverloadSeverity::Watch);
+
+    snapshot.last_load = 1.05f;
+    report = evaluate_audio_runtime_overload(snapshot, 0, policy);
+    REQUIRE(report.severity == AudioRuntimeOverloadSeverity::Overloaded);
+
+    snapshot.last_load = 1.3f;
+    report = evaluate_audio_runtime_overload(snapshot, 0, policy);
+    REQUIRE(report.severity == AudioRuntimeOverloadSeverity::Critical);
 }
 
 TEST_CASE("AudioProcessLoadMeasurer hot path and snapshot polling allocate zero times",

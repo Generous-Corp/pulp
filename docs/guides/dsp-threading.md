@@ -309,6 +309,14 @@ validation polling. Polling `runtime_telemetry_snapshot()` is expected to stay
 allocation-free; it should aggregate already-published counters, not allocate
 or query the audio backend.
 
+Validation and UI surfaces should classify that snapshot with
+`audio::evaluate_audio_runtime_overload()` instead of inventing local
+thresholds. The shared policy reports nominal, watch, overloaded, and critical
+states, and distinguishes optional-work shedding from optional-work bypass and
+validation failure. This keeps the audio callback limited to publishing cheap
+counters while host-lab reports, agents, and inspector surfaces make consistent
+post-callback decisions.
+
 Audio Inspector is a consumer of these snapshots, not the producer. Feed its
 runtime telemetry bridge from `AudioDeviceManager::runtime_telemetry_snapshot()`
 or another bounded source so agents can inspect load/xrun state through the
