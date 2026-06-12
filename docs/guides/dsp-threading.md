@@ -42,6 +42,11 @@ headless test/batch host exposes this as `HeadlessHost::try_prepare()`. This
 keeps oversized samplers, convolution IRs, analysis caches, and voice pools from
 discovering budget failure on the audio thread.
 
+A failed `HeadlessHost::try_prepare()` is a preflight failure, not a partial
+reconfiguration. It does not call `Processor::prepare()` and does not replace
+the last successful prepared render context, so batch tools can probe tighter
+budgets without invalidating the processor that is already prepared.
+
 ## Read parameters once per block, not per sample
 
 `store.get_value(id)` is a `std::atomic<float>::load(relaxed)`. Cheap,

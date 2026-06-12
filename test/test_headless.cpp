@@ -279,6 +279,41 @@ TEST_CASE("HeadlessHost try_prepare enforces processor resource budgets",
                  WithinAbs(48000.0, 0.001));
 }
 
+TEST_CASE("HeadlessHost failed budget prepare preserves active render context",
+          "[headless][prepare-budget][phase2]") {
+    pulp::format::HeadlessHost host(create_test_gain);
+    REQUIRE(last_processor != nullptr);
+    auto* processor = last_processor;
+    processor->estimated_persistent_bytes = 4096;
+    processor->estimated_block_scratch_bytes = 1024;
+
+    pulp::format::PrepareResourceLimits limits;
+    limits.max_total_bytes = 8192;
+    REQUIRE(host.try_prepare(48000.0, 256, 2, 2, limits));
+
+    limits.max_total_bytes = 4096;
+    REQUIRE_FALSE(host.try_prepare(96000.0, 512, 2, 2, limits));
+    REQUIRE(host.last_prepare_limit_failure() ==
+            pulp::format::PrepareResourceLimit::TotalBytes);
+    REQUIRE(processor->prepare_calls == 1);
+
+    pulp::audio::Buffer<float> in(2, 32), out(2, 32);
+    for (std::size_t ch = 0; ch < 2; ++ch)
+        for (std::size_t i = 0; i < 32; ++i)
+            in.channel(ch)[i] = 0.25f;
+
+    const float* in_ptrs[2] = {in.channel(0).data(), in.channel(1).data()};
+    pulp::audio::BufferView<const float> in_view(in_ptrs, 2, 32);
+    auto out_view = out.view();
+
+    host.process(out_view, in_view);
+
+    REQUIRE(processor->process_calls == 1);
+    REQUIRE_THAT(last_context.sample_rate, WithinAbs(48000.0, 0.001));
+    REQUIRE(last_context.num_samples == 32);
+    REQUIRE_THAT(out.channel(0)[0], WithinAbs(0.25, 0.001));
+}
+
 TEST_CASE("HeadlessHost try_prepare reports channel and voice budget failures",
           "[headless][prepare-budget][phase2]") {
     pulp::format::HeadlessHost host(create_test_gain);
