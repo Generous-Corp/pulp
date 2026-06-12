@@ -59,8 +59,9 @@ public:
                  const pulp::audio::BufferView<const float>&,
                  pulp::midi::MidiBuffer&,
                  pulp::midi::MidiBuffer&,
-                 const pulp::format::ProcessContext&) override {
+                 const pulp::format::ProcessContext& context) override {
         ++process_count;
+        last_context = context;
         gain_seen_in_process = state().get_value(1);
         had_param_events = (param_events() != nullptr);
         last_param_events.clear();
@@ -105,6 +106,7 @@ public:
     std::string plugin_state;
     int process_count = 0;
     int process_buffers_count = 0;
+    pulp::format::ProcessContext last_context{};
     float gain_seen_in_process = 0.0f;
     bool had_param_events = false;
     bool last_process_buffers_layout_ok = false;
@@ -149,7 +151,9 @@ public:
                  const pulp::audio::BufferView<const float>&,
                  pulp::midi::MidiBuffer&,
                  pulp::midi::MidiBuffer&,
-                 const pulp::format::ProcessContext&) override {}
+                 const pulp::format::ProcessContext& context) override {
+        last_context = context;
+    }
 
     void process(pulp::format::ProcessBuffers& audio,
                  pulp::midi::MidiBuffer& midi_in,
@@ -181,6 +185,7 @@ public:
 
     std::string plugin_state;
     int process_buffers_count = 0;
+    pulp::format::ProcessContext last_context{};
     bool last_process_buffers_layout_ok = false;
     bool last_process_buffers_storage_ok = false;
     std::size_t last_process_buffers_input_count = 0;
@@ -421,6 +426,13 @@ TEST_CASE("AU v3 render events preserve parameter sample offsets and update Stat
 
         REQUIRE(processor->process_buffers_count == 1);
         REQUIRE(processor->process_count == 1);
+        REQUIRE(processor->last_context.process_mode ==
+                pulp::format::ProcessMode::Realtime);
+        REQUIRE(processor->last_context.render_speed_hint ==
+                pulp::format::RenderSpeedHint::Realtime);
+        REQUIRE_FALSE(processor->last_context.is_offline());
+        REQUIRE_FALSE(processor->last_context.allows_offline_quality_work());
+        REQUIRE_FALSE(processor->last_context.is_maintenance_render());
         REQUIRE(processor->last_process_buffers_layout_ok);
         REQUIRE(processor->last_process_buffers_storage_ok);
         REQUIRE(processor->last_process_buffers_input_count == 0);
