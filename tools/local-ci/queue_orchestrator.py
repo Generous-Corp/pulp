@@ -4,9 +4,8 @@ This module owns job identity, enqueue duplicate/priority policy, enqueue
 supersedence candidate selection, queue-command lookup and priority mutation,
 priority ordering, supersedence, cancellation result payloads, summaries,
 target-state status detail formatting, status active-target selection and
-recent-completed selection, stale-running job selection/replacement/requeue state,
-stale-running reconciliation action selection, completed-job state mutation,
-queue status grouping, and completed-queue retention.
+recent-completed selection, completed-job state mutation, queue status grouping,
+and completed-queue retention.
 Higher-level queue mutation, locking, runner liveness, result persistence, and
 drain orchestration live in queue_lifecycle.py and runner_state.py, with
 queue_bindings.py preserving the historical local_ci.py facade exports.
@@ -62,6 +61,12 @@ from queue_supersedence import (
     supersedence_identity_key,
     supersedence_key,
     supersedence_reason,
+)
+from queue_stale import (
+    find_stale_running_replacement_unlocked,
+    requeue_stale_running_job_unlocked,
+    stale_running_jobs_for_runner_unlocked,
+    stale_running_reconciliation_actions_unlocked,
 )
 from queue_target_state import (
     completed_target_state,
@@ -149,62 +154,6 @@ def complete_job_with_result_unlocked(job: dict, result: dict, result_path: Path
     job.pop("runner", None)
     job.pop("active_targets", None)
     job.pop("last_progress_at", None)
-
-
-def find_stale_running_replacement_unlocked(queue: list[dict], job: dict) -> tuple[dict | None, str | None]:
-    replacement = None
-    replacement_reason = None
-    for candidate in queue:
-        if candidate.get("status") not in {"pending", "running"}:
-            continue
-        reason = supersedence_reason(candidate, job)
-        if not reason:
-            continue
-        if replacement is None or candidate.get("queued_at", "") > replacement.get("queued_at", ""):
-            replacement = candidate
-            replacement_reason = reason
-    return replacement, replacement_reason
-
-
-def stale_running_reconciliation_actions_unlocked(queue: list[dict], stale_jobs: list[dict]) -> list[dict]:
-    actions: list[dict] = []
-    for job in stale_jobs:
-        replacement, reason = find_stale_running_replacement_unlocked(queue, job)
-        if replacement is not None:
-            actions.append(
-                {
-                    "action": "supersede",
-                    "job": job,
-                    "replacement": replacement,
-                    "reason": reason or "newer_sha_queued",
-                }
-            )
-        else:
-            actions.append({"action": "requeue", "job": job})
-    return actions
-
-
-def stale_running_jobs_for_runner_unlocked(queue: list[dict], runner_pid: int | None) -> list[dict]:
-    stale: list[dict] = []
-    for job in queue:
-        if job.get("status") != "running":
-            continue
-        job_runner = job.get("runner") or {}
-        if runner_pid and job_runner.get("pid") == runner_pid:
-            continue
-        stale.append(job)
-    return stale
-
-
-def requeue_stale_running_job_unlocked(
-    job: dict,
-    *,
-    now_iso_fn: Callable[[], str] = now_iso,
-) -> None:
-    job["status"] = "pending"
-    job["requeued_at"] = now_iso_fn()
-    job.pop("started_at", None)
-    job.pop("runner", None)
 
 
 def complete_job_unlocked(
