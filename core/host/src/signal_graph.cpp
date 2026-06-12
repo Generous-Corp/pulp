@@ -93,6 +93,16 @@ bool parameter_allows_modulation(const HostParamInfo& p,
         && !p.flags.stepped;
 }
 
+bool has_input_port(const GraphNode& node, PortIndex port) {
+    return node.num_input_ports > 0
+        && port < static_cast<PortIndex>(node.num_input_ports);
+}
+
+bool has_output_port(const GraphNode& node, PortIndex port) {
+    return node.num_output_ports > 0
+        && port < static_cast<PortIndex>(node.num_output_ports);
+}
+
 state::ModulationMixMode modulation_mix_for(AutomationMix mix) {
     switch (mix) {
         case AutomationMix::Replace: return state::ModulationMixMode::Replace;
@@ -400,7 +410,11 @@ bool SignalGraph::remove_node(NodeId id) {
 
 bool SignalGraph::connect(NodeId source, PortIndex source_port,
                           NodeId dest, PortIndex dest_port) {
-    if (!node(source) || !node(dest)) return false;
+    const GraphNode* src_n = node(source);
+    const GraphNode* dst_n = node(dest);
+    if (!src_n || !dst_n) return false;
+    if (!has_output_port(*src_n, source_port)) return false;
+    if (!has_input_port(*dst_n, dest_port)) return false;
     if (would_create_cycle(source, dest)) return false;
     Connection conn{source, source_port, dest, dest_port};
     for (auto& c : connections_) if (c == conn) return false;
@@ -429,8 +443,8 @@ bool SignalGraph::connect_sidechain(NodeId source, PortIndex source_port,
     const GraphNode* dst_n = node(dest);
     if (!src_n || !dst_n) return false;
     if (dst_n->type != NodeType::Plugin) return false;
-    if ((int)source_port >= src_n->num_output_ports) return false;
-    if ((int)dest_sidechain_port >= dst_n->num_input_ports) return false;
+    if (!has_output_port(*src_n, source_port)) return false;
+    if (!has_input_port(*dst_n, dest_sidechain_port)) return false;
     if (would_create_cycle(source, dest)) return false;
 
     Connection conn{};
@@ -454,7 +468,7 @@ bool SignalGraph::connect_automation(NodeId src, PortIndex src_audio_port,
     const GraphNode* dst_n = node(dest);
     if (!src_n || !dst_n) return false;
     if (dst_n->type != NodeType::Plugin || !dst_n->plugin) return false;
-    if ((int)src_audio_port >= src_n->num_output_ports) return false;
+    if (!has_output_port(*src_n, src_audio_port)) return false;
 
     // Reject automation edges that would introduce a cycle. Automation
     // edges contribute to topological order (the source must be processed
@@ -508,7 +522,7 @@ bool SignalGraph::connect_audio_rate_modulation(NodeId src, PortIndex src_audio_
     const GraphNode* dst_n = node(dest);
     if (!src_n || !dst_n) return false;
     if (dst_n->type != NodeType::Plugin || !dst_n->plugin) return false;
-    if ((int)src_audio_port >= src_n->num_output_ports) return false;
+    if (!has_output_port(*src_n, src_audio_port)) return false;
     if (would_create_cycle(src, dest)) return false;
 
     bool ok_param = false;
@@ -562,7 +576,7 @@ bool SignalGraph::audio_rate_modulation_lane(const Connection& connection,
     if (!src_n || !dst_n || dst_n->type != NodeType::Plugin || !dst_n->plugin) {
         return false;
     }
-    if (connection.source_port >= static_cast<PortIndex>(src_n->num_output_ports)) {
+    if (!has_output_port(*src_n, connection.source_port)) {
         return false;
     }
 
@@ -632,7 +646,11 @@ bool SignalGraph::extract_midi(NodeId id, midi::MidiBuffer& out) const {
 
 bool SignalGraph::connect_feedback(NodeId source, PortIndex source_port,
                                    NodeId dest, PortIndex dest_port) {
-    if (!node(source) || !node(dest)) return false;
+    const GraphNode* src_n = node(source);
+    const GraphNode* dst_n = node(dest);
+    if (!src_n || !dst_n) return false;
+    if (!has_output_port(*src_n, source_port)) return false;
+    if (!has_input_port(*dst_n, dest_port)) return false;
     Connection conn{source, source_port, dest, dest_port, true};
     for (auto& c : connections_) if (c == conn) return false;
     connections_.push_back(conn);

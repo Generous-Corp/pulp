@@ -1150,16 +1150,17 @@ TEST_CASE("SignalGraph disconnected output stays silent", "[host][graph][routing
     graph.release();
 }
 
-TEST_CASE("SignalGraph ignores stale audio connections with invalid ports",
+TEST_CASE("SignalGraph rejects audio connections with invalid ports",
           "[host][graph][routing][coverage][phase3]") {
     SignalGraph graph;
     auto input = graph.add_input_node(1, "in");
     auto gain = graph.add_gain_node("gain");
     auto output = graph.add_output_node(1, "out");
 
-    REQUIRE(graph.connect(input, 99, gain, 0));
-    REQUIRE(graph.connect(input, 0, gain, 99));
-    REQUIRE(graph.connect(gain, 42, output, 0));
+    REQUIRE_FALSE(graph.connect(input, 99, gain, 0));
+    REQUIRE_FALSE(graph.connect(input, 0, gain, 99));
+    REQUIRE_FALSE(graph.connect(gain, 42, output, 0));
+    REQUIRE(graph.connections().empty());
     REQUIRE(graph.prepare(48000.0, 8));
 
     std::vector<float> input_samples(8, 1.0f);

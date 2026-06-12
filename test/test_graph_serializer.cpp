@@ -648,6 +648,144 @@ TEST_CASE("GraphSerializer tolerates missing arrays and skips stale connection i
     REQUIRE_FALSE(dst.connections().front().automation);
 }
 
+TEST_CASE("GraphSerializer generated topology fuzz rejects unsafe imported edges",
+          "[host][serializer][generated][fuzz][phase3]") {
+    SignalGraph dst;
+    auto result = GraphSerializer::from_json(dst, R"({
+  "format_version": 1,
+  "nodes": [
+    {
+      "id": 10,
+      "type": "audio_in",
+      "name": "Input",
+      "num_input_ports": 0,
+      "num_output_ports": 1,
+      "gain": 1
+    },
+    {
+      "id": 11,
+      "type": "gain",
+      "name": "A",
+      "num_input_ports": 1,
+      "num_output_ports": 1,
+      "gain": 1
+    },
+    {
+      "id": 12,
+      "type": "gain",
+      "name": "B",
+      "num_input_ports": 1,
+      "num_output_ports": 1,
+      "gain": 1
+    },
+    {
+      "id": 13,
+      "type": "audio_out",
+      "name": "Output",
+      "num_input_ports": 1,
+      "num_output_ports": 0,
+      "gain": 1
+    }
+  ],
+  "connections": [
+    {
+      "source_node": 99,
+      "source_port": 0,
+      "dest_node": 11,
+      "dest_port": 0,
+      "feedback": false,
+      "midi": false,
+      "automation": false
+    },
+    {
+      "source_node": 10,
+      "source_port": 0,
+      "dest_node": 98,
+      "dest_port": 0,
+      "feedback": false,
+      "midi": false,
+      "automation": false
+    },
+    {
+      "source_node": 10,
+      "source_port": 1,
+      "dest_node": 11,
+      "dest_port": 0,
+      "feedback": false,
+      "midi": false,
+      "automation": false
+    },
+    {
+      "source_node": 10,
+      "source_port": 0,
+      "dest_node": 11,
+      "dest_port": 99,
+      "feedback": false,
+      "midi": false,
+      "automation": false
+    },
+    {
+      "source_node": 10,
+      "source_port": 0,
+      "dest_node": 11,
+      "dest_port": 0,
+      "feedback": false,
+      "midi": false,
+      "automation": false
+    },
+    {
+      "source_node": 11,
+      "source_port": 0,
+      "dest_node": 12,
+      "dest_port": 0,
+      "feedback": false,
+      "midi": false,
+      "automation": false
+    },
+    {
+      "source_node": 12,
+      "source_port": 0,
+      "dest_node": 11,
+      "dest_port": 0,
+      "feedback": false,
+      "midi": false,
+      "automation": false
+    },
+    {
+      "source_node": 12,
+      "source_port": 0,
+      "dest_node": 13,
+      "dest_port": 0,
+      "feedback": false,
+      "midi": false,
+      "automation": false
+    }
+  ]
+})");
+
+    REQUIRE(result.ok);
+    REQUIRE(dst.nodes().size() == 4);
+    REQUIRE(dst.connections().size() == 3);
+
+    const auto* a = find_node_named(dst, "A");
+    const auto* b = find_node_named(dst, "B");
+    REQUIRE(a != nullptr);
+    REQUIRE(b != nullptr);
+    REQUIRE_FALSE(dst.would_create_cycle(a->id, b->id));
+    REQUIRE(dst.would_create_cycle(b->id, a->id));
+
+    for (const auto& connection : dst.connections()) {
+        REQUIRE_FALSE((connection.source_node == b->id
+                       && connection.dest_node == a->id));
+        REQUIRE_FALSE(connection.feedback);
+        REQUIRE_FALSE(connection.midi);
+        REQUIRE_FALSE(connection.automation);
+    }
+
+    REQUIRE(dst.validate_generated_graph(16).accepted);
+    REQUIRE(dst.prepare(48000.0, 16));
+}
+
 TEST_CASE("GraphSerializer decodes fallback wire values deterministically",
           "[host][serializer][issue-493]") {
     SignalGraph dst;
