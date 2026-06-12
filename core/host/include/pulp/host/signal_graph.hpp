@@ -369,6 +369,10 @@ private:
         std::vector<float> input_data;
         std::vector<float*> input_ptrs;
         std::vector<const float*> input_const_ptrs;
+        std::vector<size_t> inbound_midi_edges;
+        std::vector<size_t> inbound_audio_edges;
+        std::vector<size_t> sparse_automation_edges;
+        std::vector<size_t> audio_rate_modulation_edges;
         float gain = 1.0f;
 
         // PDC: cumulative samples of latency from AudioInput to this node's
@@ -456,6 +460,7 @@ private:
     struct CompiledGraph {
         std::vector<NodeId> order;
         std::vector<Connection> connections;
+        std::vector<size_t> feedback_edges;
         std::vector<ConnectionDelay> connection_delays;  // parallel to connections
         // Runtime + plugin + node-info keyed by NodeId so we don't rely on
         // pointers into an outer container.
