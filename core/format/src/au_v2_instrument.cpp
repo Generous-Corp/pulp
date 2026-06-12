@@ -14,6 +14,7 @@
 #include <pulp/format/registry.hpp>
 #include <pulp/runtime/log.hpp>
 
+#include <array>
 #include <cstring>
 
 namespace pulp::format::au {
@@ -298,7 +299,40 @@ OSStatus PulpAUInstrument::Render(AudioUnitRenderActionFlags& ioActionFlags,
     }
     pulp::format::detail::compute_playhead_changes(ctx, playhead_prev_);
 
-    processor_->process(output_view, input_view, midi_in, midi_out, ctx);
+    std::array<BusBufferView<const float>, 1> input_buses{{
+        {
+            .info = {
+                .name = "Audio In",
+                .index = 0,
+                .direction = BusDirection::Input,
+                .role = BusRole::Main,
+                .declared_channels = 0,
+                .optional = true,
+                .active = false,
+            },
+            .buffer = input_view,
+        },
+    }};
+    std::array<BusBufferView<float>, 1> output_buses{{
+        {
+            .info = {
+                .name = "Audio Out",
+                .index = 0,
+                .direction = BusDirection::Output,
+                .role = BusRole::Main,
+                .declared_channels = static_cast<int>(out_channels),
+                .optional = false,
+                .active = output_view.num_channels() > 0,
+            },
+            .buffer = output_view,
+        },
+    }};
+    ProcessBuffers process_buffers{
+        BusBufferSet<const float>{std::span(input_buses)},
+        BusBufferSet<float>{std::span(output_buses)},
+    };
+
+    processor_->process(process_buffers, midi_in, midi_out, ctx);
 
     return noErr;
 }

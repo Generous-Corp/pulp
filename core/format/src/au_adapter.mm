@@ -874,8 +874,53 @@ static int32_t block_relative_sample_offset(AUEventSampleTime event_sample_time,
         pulp::format::detail::derive_bar_from_beats(ctx);
         pulp::format::detail::compute_playhead_changes(ctx, bridge->playhead_prev);
 
+        std::array<pulp::format::BusBufferView<const float>, 2> input_buses{{
+            {
+                .info = {
+                    .name = "Audio In",
+                    .index = 0,
+                    .direction = pulp::format::BusDirection::Input,
+                    .role = pulp::format::BusRole::Main,
+                    .declared_channels = bridge->input_channels,
+                    .optional = bridge->input_channels == 0,
+                    .active = input_view.num_channels() > 0,
+                },
+                .buffer = input_view,
+            },
+            {
+                .info = {
+                    .name = "Sidechain",
+                    .index = 1,
+                    .direction = pulp::format::BusDirection::Input,
+                    .role = pulp::format::BusRole::Sidechain,
+                    .declared_channels = bridge->sidechain_channels,
+                    .optional = true,
+                    .active = sidechain_view.num_channels() > 0,
+                },
+                .buffer = sidechain_view,
+            },
+        }};
+        std::array<pulp::format::BusBufferView<float>, 1> output_buses{{
+            {
+                .info = {
+                    .name = "Audio Out",
+                    .index = 0,
+                    .direction = pulp::format::BusDirection::Output,
+                    .role = pulp::format::BusRole::Main,
+                    .declared_channels = bridge->output_channels,
+                    .optional = false,
+                    .active = output_view.num_channels() > 0,
+                },
+                .buffer = output_view,
+            },
+        }};
+        pulp::format::ProcessBuffers process_buffers{
+            pulp::format::BusBufferSet<const float>{std::span(input_buses)},
+            pulp::format::BusBufferSet<float>{std::span(output_buses)},
+        };
+
         bridge->processor->set_param_events(&bridge->param_events);
-        bridge->processor->process(output_view, input_view, midi_in, midi_out, ctx);
+        bridge->processor->process(process_buffers, midi_in, midi_out, ctx);
 
         // Item 3.11 — drain RT-safe pending flags the processor may have
         // set during process() and publish them via KVO. AUAudioUnit
