@@ -52,6 +52,7 @@ enum class NodePackError {
     BadSignature,      // Ed25519 verification failed
     HashMismatch,      // binary's SHA-256 != manifest sha256_hex
     AbiMismatch,       // manifest or entry abi_major != PULP_NODE_V1_ABI_MAJOR
+    NodeMetadataMismatch, // manifest node declarations != loaded descriptor
     LoadFailed,        // dlopen/LoadLibrary failed
     SymbolMissing,     // no pulp_node_v1_entry export
 };
