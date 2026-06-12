@@ -144,6 +144,12 @@ before the adapter applies the block-local `StateStore` modulation offset.
 CLAP note identity fields (`note_id`, `port_index`, `channel`, `key`) are still
 accepted for compatibility but are not routed as per-note lanes yet.
 
+MPE expression events (`PitchBend`, `Pressure`, and `Timbre`) should be modeled
+as voice-scoped `state::ModulationLane` records when a synth turns them into a
+plugin-owned modulation matrix. Note on/off events are lifecycle events, not
+modulation lanes; expression events should use `Replace` because each event
+carries the current absolute per-voice expression value.
+
 ## Sample-Accurate Automation
 
 Format adapters preserve sparse host automation points in a per-block

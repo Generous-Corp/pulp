@@ -197,3 +197,34 @@ TEST_CASE("typed modulation lanes reject audio-rate sources for control-rate tar
     REQUIRE(result.accepted);
     REQUIRE(modulation_rate_for(lane.target.param_rate) == ModulationRate::Audio);
 }
+
+TEST_CASE("typed modulation lanes accept per-voice expression routes",
+          "[state][modulation][lane][voice][phase3]") {
+    ModulationLane lane{
+        .source = {
+            .id = 11,
+            .scope = ModulationScope::Voice,
+            .rate = ModulationRate::Control,
+            .units = "pressure",
+        },
+        .target = {
+            .param_id = 900,
+            .scope = ModulationScope::Voice,
+            .param_rate = ParamRate::ControlRate,
+            .units = "pressure",
+        },
+        .mix = ModulationMixMode::Replace,
+        .depth = 0.8f,
+    };
+
+    auto result = validate_modulation_lane(lane);
+    REQUIRE(result.accepted);
+    REQUIRE(result.reason == ModulationLaneRejectReason::None);
+    REQUIRE(lane.mix == ModulationMixMode::Replace);
+    REQUIRE(lane.depth == 0.8f);
+
+    lane.target.scope = ModulationScope::Global;
+    result = validate_modulation_lane(lane);
+    REQUIRE_FALSE(result.accepted);
+    REQUIRE(result.reason == ModulationLaneRejectReason::ScopeMismatch);
+}
