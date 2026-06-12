@@ -283,6 +283,90 @@ TEST_CASE("ProcessBuffers requires inactive buses to carry empty views",
     REQUIRE(buffers.active_buses_have_storage());
 }
 
+TEST_CASE("ProcessBuffers models surround instruments with auxiliary outputs",
+          "[format][processor-defaults][process-buffers][phase2][instrument][multi-output]") {
+    std::array<float, 8> main_front_left{};
+    std::array<float, 8> main_front_right{};
+    std::array<float, 8> main_center{};
+    std::array<float, 8> main_lfe{};
+    std::array<float, 8> main_surround_left{};
+    std::array<float, 8> main_surround_right{};
+    std::array<float, 8> cue_left{};
+    std::array<float, 8> cue_right{};
+    float* main_channels[] = {
+        main_front_left.data(),
+        main_front_right.data(),
+        main_center.data(),
+        main_lfe.data(),
+        main_surround_left.data(),
+        main_surround_right.data(),
+    };
+    float* cue_channels[] = {cue_left.data(), cue_right.data()};
+
+    std::array<BusBufferView<const float>, 0> inputs{};
+    std::array<BusBufferView<float>, 3> outputs{{
+        {
+            .info = {
+                .name = "Main 5.1 Out",
+                .index = 0,
+                .direction = BusDirection::Output,
+                .role = BusRole::Main,
+                .declared_channels = 6,
+                .optional = false,
+                .active = true,
+            },
+            .buffer = pulp::audio::BufferView<float>(
+                main_channels, 6, main_front_left.size()),
+        },
+        {
+            .info = {
+                .name = "Cue Out",
+                .index = 1,
+                .direction = BusDirection::Output,
+                .role = BusRole::Aux,
+                .declared_channels = 2,
+                .optional = true,
+                .active = true,
+            },
+            .buffer = pulp::audio::BufferView<float>(
+                cue_channels, 2, cue_left.size()),
+        },
+        {
+            .info = {
+                .name = "Stem Out",
+                .index = 2,
+                .direction = BusDirection::Output,
+                .role = BusRole::Aux,
+                .declared_channels = 2,
+                .optional = true,
+                .active = false,
+            },
+            .buffer = {},
+        },
+    }};
+
+    ProcessBuffers buffers{
+        BusBufferSet<const float>{std::span(inputs)},
+        BusBufferSet<float>{std::span(outputs)},
+    };
+
+    REQUIRE(buffers.inputs.empty());
+    REQUIRE(buffers.main_input() == nullptr);
+    REQUIRE(buffers.sidechain_input() == nullptr);
+    REQUIRE(buffers.outputs.size() == 3);
+    REQUIRE(buffers.outputs.count(BusRole::Main) == 1);
+    REQUIRE(buffers.outputs.count(BusRole::Aux) == 2);
+    REQUIRE(buffers.outputs.active_count(BusRole::Aux) == 1);
+    REQUIRE(buffers.main_output() == &outputs[0].buffer);
+    REQUIRE(buffers.main_output()->num_channels() == 6);
+    REQUIRE(buffers.outputs.find(BusRole::Aux, 0) == &outputs[1]);
+    REQUIRE(buffers.outputs.find(BusRole::Aux, 1) == &outputs[2]);
+    REQUIRE(buffers.outputs.find_by_name("Cue Out") == &outputs[1]);
+    REQUIRE(buffers.outputs.find_by_index(2) == &outputs[2]);
+    REQUIRE(buffers.layouts_match_descriptors());
+    REQUIRE(buffers.active_buses_have_storage());
+}
+
 TEST_CASE("PluginDescriptor carries MIDI, MPE, UMP, and mobile flags independently",
           "[format][processor-defaults][flags]") {
     PluginDescriptor d;
