@@ -1,0 +1,48 @@
+{
+  "schema": "pulp-package-v1",
+  "id": "dev.pulp.fixtures.basic-ui-kit",
+  "name": "Basic UI Kit",
+  "version": "0.1.0",
+  "license": "MIT",
+  "licenses": {
+    "code": "MIT",
+    "assets": "CC0-1.0"
+  },
+  "kind": ["ui-kit"],
+  "audience": ["developer", "agent"],
+  "description": "Tiny UI-only fixture with one script and token file.",
+  "requires": {
+    "pulp": ">=0.395.0",
+    "cpp": 20,
+    "platforms": ["macOS", "Windows", "Linux"]
+  },
+  "capabilities": ["ui.controls.basic"],
+  "exports": {
+    "pulpUiScripts": ["ui/index.js"],
+    "designTokens": ["ui/tokens.json"],
+    "assets": ["assets/"],
+    "licenses": ["licenses/LICENSE.txt"]
+  },
+  "dependencies": {
+    "pulp": ["pulp::view"],
+    "packages": []
+  },
+  "agent": {
+    "guidance": "AGENTS.md"
+  },
+  "authoring": {
+    "createdBy": "human",
+    "humanReviewed": true
+  },
+  "validation": {
+    "profiles": [
+      "validation/ui-smoke.json",
+      "validation/screenshots/basic-ui-kit.json"
+    ],
+    "reports": ["validation/reports/basic-ui-kit-screenshot.json"]
+  },
+  "evidence": {
+    "reports": ["validation/reports/basic-ui-kit-screenshot.json"],
+    "screenshots": ["validation/screenshots/basic-ui-kit.json"]
+  }
+}

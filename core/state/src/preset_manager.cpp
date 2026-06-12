@@ -1,8 +1,11 @@
 #include <pulp/state/preset_manager.hpp>
+#include <pulp/state/content_registry.hpp>
 #include <pulp/runtime/system.hpp>
 #include <fstream>
 #include <sstream>
 #include <algorithm>
+#include <string_view>
+#include <utility>
 
 namespace fs = std::filesystem;
 
@@ -12,6 +15,10 @@ namespace {
 
 bool has_only_trailing_space(const std::string& value, std::size_t pos) {
     return value.find_first_not_of(" \t\r\n", pos) == std::string::npos;
+}
+
+bool contains_string(const std::vector<std::string>& values, std::string_view needle) {
+    return std::find(values.begin(), values.end(), needle) != values.end();
 }
 
 } // namespace
@@ -237,6 +244,8 @@ void PresetManager::scan_directory(const fs::path& dir, bool is_factory,
 std::vector<PresetInfo> PresetManager::all_presets() const {
     std::vector<PresetInfo> result;
     scan_directory(factory_dir_, true, result);
+    auto content = content_presets();
+    result.insert(result.end(), content.begin(), content.end());
     scan_directory(user_dir_, false, result);
     std::sort(result.begin(), result.end(),
               [](const auto& a, const auto& b) { return a.name < b.name; });
@@ -257,6 +266,45 @@ std::vector<PresetInfo> PresetManager::user_presets() const {
     std::sort(result.begin(), result.end(),
               [](const auto& a, const auto& b) { return a.name < b.name; });
     return result;
+}
+
+std::vector<PresetInfo> PresetManager::content_presets() const {
+    if (content_plugin_id_.empty()) return {};
+    if (!content_kinds_.empty() && !contains_string(content_kinds_, "presets")) return {};
+
+    ContentCapabilityManifest manifest;
+    manifest.plugin_id = content_plugin_id_;
+    manifest.capabilities = content_capabilities_;
+    manifest.content_kinds = content_kinds_.empty() ? std::vector<std::string>{"presets"}
+                                                    : content_kinds_;
+
+    ContentRegistry registry(content_data_root_.empty()
+                                 ? ContentRegistry::platform_data_root()
+                                 : content_data_root_);
+    return registry.presets_for_plugin(manifest);
+}
+
+void PresetManager::set_content_plugin_id(std::string plugin_id) {
+    content_plugin_id_ = std::move(plugin_id);
+    cache_valid_ = false;
+}
+
+void PresetManager::set_content_capabilities(std::vector<std::string> capabilities) {
+    content_capabilities_ = std::move(capabilities);
+    content_kinds_.clear();
+    cache_valid_ = false;
+}
+
+void PresetManager::set_content_data_root(fs::path data_root) {
+    content_data_root_ = std::move(data_root);
+    cache_valid_ = false;
+}
+
+void PresetManager::set_content_manifest(const ContentCapabilityManifest& manifest) {
+    content_plugin_id_ = manifest.plugin_id;
+    content_capabilities_ = manifest.capabilities;
+    content_kinds_ = manifest.content_kinds;
+    cache_valid_ = false;
 }
 
 void PresetManager::refresh() { cache_valid_ = false; }

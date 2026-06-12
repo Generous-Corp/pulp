@@ -1,0 +1,43 @@
+{
+  "schema": "pulp-package-v1",
+  "id": "dev.pulp.fixtures.native-component-kit",
+  "name": "Native Component Kit",
+  "version": "0.1.0",
+  "license": "MIT",
+  "licenses": {
+    "code": "MIT"
+  },
+  "kind": ["native-component"],
+  "audience": ["developer", "agent"],
+  "description": "Source-built native-core fixture that uses the public native component ABI shape.",
+  "requires": {
+    "pulp": ">=0.395.0",
+    "cpp": 20,
+    "platforms": ["macOS", "Windows", "Linux", "Android"]
+  },
+  "capabilities": ["native.processor.core", "audio.effect.gain"],
+  "exports": {
+    "nativeComponentHeaders": ["include/gain_core.h"],
+    "nativeComponentSources": ["src/gain_core.cpp"]
+  },
+  "dependencies": {
+    "pulp": ["pulp::native-components"],
+    "packages": []
+  },
+  "realtime": {
+    "processSafe": true,
+    "allocatesInProcess": false,
+    "locksInProcess": false,
+    "notes": "Process borrows host buffers and keeps allocation in prepare/suspend paths."
+  },
+  "agent": {
+    "guidance": "AGENTS.md"
+  },
+  "authoring": {
+    "createdBy": "human",
+    "humanReviewed": true
+  },
+  "validation": {
+    "profiles": ["validation/native-component-smoke.json"]
+  }
+}

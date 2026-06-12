@@ -104,6 +104,7 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
             COMMENT "Writing PkgInfo into ${name}.vst3 bundle"
         )
     endif()
+    _pulp_attach_plugin_runtime_manifest(${target} ${target}_VST3)
 
     # Copy moduleinfo.json if available
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/moduleinfo.json")
@@ -170,6 +171,7 @@ function(_pulp_add_clap target name bundle_id version manufacturer category)
     if(COMMAND target_copy_webgpu_binaries)
         target_copy_webgpu_binaries(${target}_CLAP)
     endif()
+    _pulp_attach_plugin_runtime_manifest(${target} ${target}_CLAP)
 endfunction()
 
 # ── Internal: LV2 target ───────────────────────────────────────────────
@@ -201,6 +203,7 @@ function(_pulp_add_lv2 target name bundle_id version manufacturer category)
         LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/LV2/${name}.lv2"
         PREFIX ""
     )
+    _pulp_attach_plugin_runtime_manifest(${target} ${target}_LV2)
 endfunction()
 
 # ── Internal: AAX target ────────────────────────────────────────────────
@@ -281,6 +284,7 @@ function(_pulp_add_aax target name bundle_id version manufacturer category manuf
     if(COMMAND target_copy_webgpu_binaries)
         target_copy_webgpu_binaries(${target}_AAX)
     endif()
+    _pulp_attach_plugin_runtime_manifest(${target} ${target}_AAX)
 endfunction()
 
 # ── Internal: AU v2 target ──────────────────────────────────────────────
@@ -426,6 +430,7 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
     if(COMMAND target_copy_webgpu_binaries)
         target_copy_webgpu_binaries(${target}_AU)
     endif()
+    _pulp_attach_plugin_runtime_manifest(${target} ${target}_AU)
 endfunction()
 
 # ── Internal: AUv3 app extension target ────────────────────────────────

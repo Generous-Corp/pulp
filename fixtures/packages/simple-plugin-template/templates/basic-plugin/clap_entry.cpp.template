@@ -1,0 +1,4 @@
+#include "{{HEADER_NAME}}"
+#include <pulp/format/clap_entry.hpp>
+
+PULP_CLAP_PLUGIN({{NAMESPACE}}::create_{{FACTORY_NAME}})

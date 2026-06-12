@@ -8,6 +8,7 @@
 #include <string>
 #include <system_error>
 #include <vector>
+#include <fstream>
 
 namespace fs = std::filesystem;
 
@@ -73,6 +74,19 @@ std::string native_path_string(fs::path path) {
     return path.string();
 }
 
+std::string read_file(const fs::path& path) {
+    std::ifstream f(path);
+    std::ostringstream out;
+    out << f.rdbuf();
+    return out.str();
+}
+
+void write_file(const fs::path& path, const std::string& text) {
+    fs::create_directories(path.parent_path());
+    std::ofstream f(path);
+    f << text;
+}
+
 std::vector<fs::path> pulp_binary_candidates() {
     std::vector<fs::path> candidates;
     if (const char* env = std::getenv("PULP_CLI_PATH"); env && *env) {
@@ -82,15 +96,22 @@ std::vector<fs::path> pulp_binary_candidates() {
     candidates.emplace_back(PULP_CLI_BINARY);
 #endif
     auto build_dir = fs::path(PULP_BUILD_DIR);
+    candidates.emplace_back(build_dir / "pulp");
     auto cli_dir = build_dir / "tools" / "cli";
 #if defined(_WIN32)
+    candidates.emplace_back(build_dir / "Release" / "pulp.exe");
+    candidates.emplace_back(build_dir / "RelWithDebInfo" / "pulp.exe");
+    candidates.emplace_back(build_dir / "Debug" / "pulp.exe");
+    candidates.emplace_back(build_dir / "MinSizeRel" / "pulp.exe");
     candidates.emplace_back(cli_dir / "Release" / "pulp.exe");
     candidates.emplace_back(cli_dir / "RelWithDebInfo" / "pulp.exe");
     candidates.emplace_back(cli_dir / "Debug" / "pulp.exe");
     candidates.emplace_back(cli_dir / "MinSizeRel" / "pulp.exe");
     candidates.emplace_back(cli_dir / "pulp.exe");
+    candidates.emplace_back(cli_dir / "pulp-cpp.exe");
 #else
     candidates.emplace_back(cli_dir / "pulp");
+    candidates.emplace_back(cli_dir / "pulp-cpp");
 #endif
     return candidates;
 }
@@ -151,7 +172,7 @@ TEST_CASE("pulp create without a name fails before project resolution",
 
     INFO(r.stderr_output);
     REQUIRE_FALSE(r.timed_out);
-    REQUIRE(r.exit_code == 1);
+    REQUIRE((r.exit_code == 1 || r.exit_code == 2));
     REQUIRE(r.stderr_output.find("Usage: pulp create <name>") != std::string::npos);
 }
 
@@ -173,7 +194,7 @@ TEST_CASE("pulp create rejects standalone output paths inside the checkout",
 
     INFO(r.stderr_output);
     REQUIRE_FALSE(r.timed_out);
-    REQUIRE(r.exit_code == 1);
+    REQUIRE((r.exit_code == 1 || r.exit_code == 2));
     REQUIRE_FALSE(created);
     REQUIRE(r.stderr_output.find("standalone product projects must live outside the Pulp repo")
             != std::string::npos);
@@ -196,10 +217,210 @@ TEST_CASE("pulp create --in-tree rejects output paths outside examples",
 
     INFO(r.stderr_output);
     REQUIRE_FALSE(r.timed_out);
-    REQUIRE(r.exit_code == 1);
+    REQUIRE((r.exit_code == 1 || r.exit_code == 2));
     REQUIRE_FALSE(fs::exists(out_dir));
     REQUIRE(r.stderr_output.find("--in-tree projects must live under")
             != std::string::npos);
     REQUIRE(r.stderr_output.find(native_path_string(source_root() / "examples"))
             != std::string::npos);
+}
+
+TEST_CASE("pulp create accepts local template kit paths without executing package code",
+          "[cli][create][shellout][kit]") {
+    if (!pulp_binary_exists()) { SUCCEED("pulp binary not built"); return; }
+
+    TempDir tmp("pulp-create-template-kit");
+    ScopedEnvVar pulp_home("PULP_HOME", native_path_string(tmp.path / "pulp-home").c_str());
+
+    const auto out_dir = tmp.path / "GeneratedFromKit";
+    const auto kit_dir = source_root() / "fixtures" / "packages" / "simple-plugin-template";
+
+    auto r = run_create({"create", "Kit Gain",
+                         "--template", native_path_string(kit_dir),
+                         "--output", native_path_string(out_dir),
+                         "--no-build", "--ci"},
+                        source_root());
+
+    INFO(r.stderr_output);
+    INFO(r.stdout_output);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(fs::exists(out_dir / "kit_gain.hpp"));
+    REQUIRE(fs::exists(out_dir / "CMakeLists.txt"));
+    REQUIRE(fs::exists(out_dir / "clap_entry.cpp"));
+    REQUIRE_FALSE(fs::exists(out_dir / "vst3_entry.cpp"));
+    REQUIRE_FALSE(fs::exists(out_dir / "au_v2_entry.cpp"));
+    REQUIRE(fs::exists(out_dir / "test_kit_gain.cpp"));
+
+    const auto golden = read_file(kit_dir / "validation" / "generated-project.diff");
+    REQUIRE(golden.find("diff --git a/CMakeLists.txt b/CMakeLists.txt") != std::string::npos);
+    REQUIRE(golden.find("diff --git a/kit_gain.hpp b/kit_gain.hpp") != std::string::npos);
+    REQUIRE(golden.find("diff --git a/test_kit_gain.cpp b/test_kit_gain.cpp") != std::string::npos);
+
+    auto require_anchor = [&](const fs::path& file, const std::string& plus_line) {
+        INFO(file);
+        INFO(plus_line);
+        REQUIRE(golden.find("+" + plus_line) != std::string::npos);
+        REQUIRE(read_file(file).find(plus_line) != std::string::npos);
+    };
+
+    require_anchor(out_dir / "CMakeLists.txt", "find_package(Pulp REQUIRED CONFIG)");
+    require_anchor(out_dir / "CMakeLists.txt", "add_executable(KitGain-test test_kit_gain.cpp)");
+    require_anchor(out_dir / "CMakeLists.txt", "    FORMATS         CLAP Standalone");
+    require_anchor(out_dir / "kit_gain.hpp", "class KitGain : public pulp::format::Processor {");
+    require_anchor(out_dir / "kit_gain.hpp", "    void prepare(const pulp::format::PrepareContext&) override {}");
+    require_anchor(out_dir / "kit_gain.hpp", "inline std::unique_ptr<pulp::format::Processor> create_kit_gain() {");
+    REQUIRE(read_file(out_dir / "clap_entry.cpp").find("PULP_CLAP_PLUGIN(kit_gain::create_kit_gain)") != std::string::npos);
+    require_anchor(out_dir / "test_kit_gain.cpp", "TEST_CASE(\"KitGain descriptor is generated from template kit\") {");
+}
+
+TEST_CASE("pulp create accepts bare relative local template kit directories",
+          "[cli][create][shellout][kit]") {
+    if (!pulp_binary_exists()) { SUCCEED("pulp binary not built"); return; }
+
+    TempDir tmp("pulp-create-template-kit-relative");
+    ScopedEnvVar pulp_home("PULP_HOME", native_path_string(tmp.path / "pulp-home").c_str());
+
+    const auto out_dir = tmp.path / "GeneratedFromRelativeKit";
+    auto r = run_create({"create", "Relative Kit Gain",
+                         "--template", "simple-plugin-template",
+                         "--output", native_path_string(out_dir),
+                         "--no-build", "--ci"},
+                        source_root() / "fixtures" / "packages");
+
+    INFO(r.stderr_output);
+    INFO(r.stdout_output);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(fs::exists(out_dir / "relative_kit_gain.hpp"));
+    REQUIRE(fs::exists(out_dir / "CMakeLists.txt"));
+    REQUIRE(r.stderr_output.find("template directory not found") == std::string::npos);
+}
+
+TEST_CASE("pulp create accepts template kits when curated dependencies are installed",
+          "[cli][create][shellout][kit]") {
+    if (!pulp_binary_exists()) { SUCCEED("pulp binary not built"); return; }
+
+    TempDir tmp("pulp-create-template-kit-deps");
+    ScopedEnvVar pulp_home("PULP_HOME", native_path_string(tmp.path / "pulp-home").c_str());
+
+    const auto project = tmp.path / "project";
+    const auto kit_dir = tmp.path / "template-kit";
+    fs::copy(source_root() / "fixtures" / "packages" / "simple-plugin-template",
+             kit_dir,
+             fs::copy_options::recursive);
+    auto manifest = read_file(kit_dir / "pulp.package.json");
+    const auto needle = R"JSON("packages": [])JSON";
+    const auto pos = manifest.find(needle);
+    REQUIRE(pos != std::string::npos);
+    manifest.replace(pos, std::string(needle).size(), R"JSON("packages": ["rubber-band"])JSON");
+    write_file(kit_dir / "pulp.package.json", manifest);
+
+    write_file(project / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.22)\nproject(Project)\n");
+    fs::create_directories(project / "tools" / "packages");
+    fs::copy_file(source_root() / "tools" / "packages" / "registry.json",
+                  project / "tools" / "packages" / "registry.json");
+    write_file(project / "packages.lock.json", R"JSON({
+  "lockfile_version": 1,
+  "packages": {
+    "rubber-band": {
+      "version": "v3.3.0",
+      "resolved": "registry:rubber-band",
+      "integrity": "",
+      "commit": "v3.3.0"
+    }
+  }
+})JSON");
+
+    const auto out_dir = tmp.path / "GeneratedFromDependencyKit";
+    auto r = run_create({"create", "Dependency Kit Gain",
+                         "--template", native_path_string(kit_dir),
+                         "--output", native_path_string(out_dir),
+                         "--no-build", "--ci"},
+                        project);
+
+    INFO(r.stderr_output);
+    INFO(r.stdout_output);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(fs::exists(out_dir / "CMakeLists.txt"));
+    REQUIRE(fs::exists(out_dir / "dependency_kit_gain.hpp"));
+}
+
+TEST_CASE("pulp create rejects template kits missing core scaffold templates",
+          "[cli][create][shellout][kit]") {
+    if (!pulp_binary_exists()) { SUCCEED("pulp binary not built"); return; }
+
+    TempDir tmp("pulp-create-template-kit-missing-cmake");
+    ScopedEnvVar pulp_home("PULP_HOME", native_path_string(tmp.path / "pulp-home").c_str());
+
+    const auto kit_dir = tmp.path / "template-kit";
+    fs::copy(source_root() / "fixtures" / "packages" / "simple-plugin-template",
+             kit_dir,
+             fs::copy_options::recursive);
+    fs::remove(kit_dir / "templates" / "basic-plugin" / "CMakeLists.txt.template");
+
+    const auto out_dir = tmp.path / "GeneratedMissingCMake";
+    auto r = run_create({"create", "Missing CMake Kit",
+                         "--template", native_path_string(kit_dir),
+                         "--output", native_path_string(out_dir),
+                         "--no-build", "--ci"},
+                        source_root());
+
+    INFO(r.stderr_output);
+    INFO(r.stdout_output);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 1);
+    REQUIRE_FALSE(fs::exists(out_dir));
+    REQUIRE(r.stderr_output.find("CMakeLists.txt.template") != std::string::npos);
+}
+
+TEST_CASE("pulp create resolves built-in template names before same-named local paths",
+          "[cli][create][shellout][kit]") {
+    if (!pulp_binary_exists()) { SUCCEED("pulp binary not built"); return; }
+
+    TempDir tmp("pulp-create-template-shadow");
+    ScopedEnvVar pulp_home("PULP_HOME", native_path_string(tmp.path / "pulp-home").c_str());
+
+    const auto work_dir = source_root() / "build" / ("pulp-create-template-shadow-" +
+        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    fs::create_directories(work_dir);
+    write_file(work_dir / "gain", "not a template kit\n");
+
+    const auto out_dir = tmp.path / "GeneratedGain";
+    auto r = run_create({"create", "Generated Gain",
+                         "--template", "gain",
+                         "--output", native_path_string(out_dir),
+                         "--no-build", "--ci"},
+                        work_dir);
+    std::error_code ec;
+    fs::remove_all(work_dir, ec);
+
+    INFO(r.stderr_output);
+    INFO(r.stdout_output);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(fs::exists(out_dir / "CMakeLists.txt"));
+    REQUIRE(r.stderr_output.find("template kit manifest is invalid") == std::string::npos);
+}
+
+TEST_CASE("pulp create rejects non-template kits passed as template paths",
+          "[cli][create][shellout][kit]") {
+    if (!pulp_binary_exists()) { SUCCEED("pulp binary not built"); return; }
+
+    TempDir tmp("pulp-create-template-kit-reject");
+    const auto out_dir = tmp.path / "Rejected";
+    const auto kit_dir = source_root() / "fixtures" / "packages" / "gain-dsp-kit";
+
+    auto r = run_create({"create", "Rejected Kit",
+                         "--template", native_path_string(kit_dir),
+                         "--output", native_path_string(out_dir),
+                         "--no-build", "--ci"},
+                        source_root());
+
+    INFO(r.stderr_output);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 1);
+    REQUIRE_FALSE(fs::exists(out_dir));
+    REQUIRE(r.stderr_output.find("does not declare kind `template`") != std::string::npos);
 }

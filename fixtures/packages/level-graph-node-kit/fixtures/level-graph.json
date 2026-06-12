@@ -1,0 +1,12 @@
+{
+  "kind": "signal-graph-fixture",
+  "nodes": [
+    { "id": "input", "type": "audio-input" },
+    { "id": "level", "type": "dev.pulp.fixtures.level-node" },
+    { "id": "output", "type": "audio-output" }
+  ],
+  "connections": [
+    ["input", 0, "level", 0],
+    ["level", 0, "output", 0]
+  ]
+}

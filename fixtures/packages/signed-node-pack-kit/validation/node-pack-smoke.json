@@ -1,0 +1,11 @@
+{
+  "kind": "node-pack-validation-profile",
+  "checks": [
+    "manifest-shape",
+    "signature-before-load",
+    "hash-before-load",
+    "metadata-matches-loaded-descriptor"
+  ],
+  "manifest": "node-pack/manifest.json",
+  "executeDuringInspect": false
+}

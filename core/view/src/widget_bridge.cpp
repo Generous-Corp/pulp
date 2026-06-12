@@ -493,6 +493,18 @@ WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& 
     eval_or_throw(engine_, "kWindowListenerShim", kWindowListenerShim);
 }
 
+void WidgetBridge::set_asset_roots(std::vector<std::filesystem::path> roots) {
+    asset_roots_.clear();
+    asset_roots_.reserve(roots.size());
+    for (auto& root : roots) {
+        if (root.empty()) continue;
+        std::error_code ec;
+        auto abs = std::filesystem::absolute(root, ec).lexically_normal();
+        if (ec) abs = root.lexically_normal();
+        asset_roots_.push_back(std::move(abs));
+    }
+}
+
 WidgetBridge::~WidgetBridge() {
     {
         std::lock_guard<std::recursive_mutex> lock(all_bridges_mutex());

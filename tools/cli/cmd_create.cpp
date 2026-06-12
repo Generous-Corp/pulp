@@ -2,12 +2,18 @@
 
 #include "cli_common.hpp"
 #include "create_targets.hpp"
+#include "json_parser.hpp"
+#include "kit_commands.hpp"
+#include "package_registry.hpp"
 #include "projects_registry.hpp"
 
+#include <algorithm>
 #include <array>
+#include <cctype>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <optional>
 #include <random>
 #include <sstream>
 
@@ -96,6 +102,185 @@ static std::string expand_template_str(const std::string& tmpl,
     return result;
 }
 
+struct TemplateKitSelection {
+    fs::path root;
+    fs::path template_dir;
+    std::string id;
+    std::string name;
+    std::vector<std::string> dependency_packages;
+};
+
+static std::vector<std::string> json_string_array_field(const pulp::cli::pkg::JsonValue& value,
+                                                        const std::string& key) {
+    auto* field = value.get(key);
+    if (!field || field->type != pulp::cli::pkg::JsonValue::Array) return {};
+    return field->as_string_array();
+}
+
+static bool is_builtin_template_name(const std::string& template_arg) {
+    return template_arg == "effect"
+        || template_arg == "instrument"
+        || template_arg == "app"
+        || template_arg == "bare"
+        || template_arg == "gain"
+        || template_arg == "from-figma"
+        || template_arg == "from-v0";
+}
+
+static bool template_dependencies_available(
+    const fs::path& project_root,
+    const pulp::cli::kit::KitValidationResult& validation,
+    std::string& error) {
+    if (validation.summary.dependency_packages.empty()) return true;
+    if (project_root.empty()) {
+        error = "template kit `" + validation.summary.id
+            + "` declares dependency packages; run from a Pulp project and install curated dependencies with `pulp add` before using it";
+        return false;
+    }
+
+    auto registry_result = pulp::cli::pkg::load_registry(project_root / "tools" / "packages" / "registry.json");
+    if (!registry_result.error.empty()) {
+        error = "cannot resolve template kit dependency packages: " + registry_result.error;
+        return false;
+    }
+    auto installed = pulp::cli::pkg::load_lock_file(project_root / "packages.lock.json");
+    for (const auto& dep : validation.summary.dependency_packages) {
+        if (registry_result.registry.packages.find(dep)
+            == registry_result.registry.packages.end()) {
+            error = "template kit `" + validation.summary.id
+                + "` depends on unknown curated package `" + dep + "`";
+            return false;
+        }
+        if (installed.packages.find(dep) == installed.packages.end()) {
+            error = "template kit `" + validation.summary.id
+                + "` depends on `" + dep + "`; run `pulp add " + dep
+                + "` before using this template kit";
+            return false;
+        }
+    }
+    return true;
+}
+
+static fs::path find_package_dependency_root(fs::path dir) {
+    if (fs::is_regular_file(dir)) dir = dir.parent_path();
+    if (dir.empty()) dir = fs::current_path();
+    while (!dir.empty()) {
+        if (fs::exists(dir / "packages.lock.json")
+            || fs::exists(dir / "tools" / "packages" / "registry.json")) {
+            return dir;
+        }
+        auto parent = dir.parent_path();
+        if (parent == dir) break;
+        dir = parent;
+    }
+    return {};
+}
+
+static std::optional<TemplateKitSelection> resolve_template_kit(const std::string& template_arg,
+                                                                const fs::path& project_root,
+                                                                std::string& error) {
+    if (template_arg.empty()) return std::nullopt;
+
+    const bool path_like =
+        template_arg.find('/') != std::string::npos
+#if defined(_WIN32)
+        || template_arg.find('\\') != std::string::npos
+#endif
+        || fs::path(template_arg).is_absolute()
+        || template_arg == "."
+        || template_arg == ".."
+        || template_arg == "pulp.package.json";
+    if (!path_like && is_builtin_template_name(template_arg)) return std::nullopt;
+
+    fs::path input(template_arg);
+    if (!input.is_absolute()) input = fs::current_path() / input;
+
+    std::error_code ec;
+    if (!fs::exists(input, ec)) return std::nullopt;
+    if (!path_like && fs::is_directory(input, ec) && !fs::exists(input / "pulp.package.json", ec)) {
+        return std::nullopt;
+    }
+    ec.clear();
+    if (!path_like && fs::is_regular_file(input, ec) && input.filename() != "pulp.package.json") {
+        return std::nullopt;
+    }
+
+    auto validation = pulp::cli::kit::validate_manifest_path(input, true);
+    if (!validation.ok()) {
+        error = "template kit manifest is invalid; run `pulp kit validate --strict "
+            + template_arg + "`";
+        return std::nullopt;
+    }
+    if (std::find(validation.summary.kinds.begin(),
+                  validation.summary.kinds.end(),
+                  "template") == validation.summary.kinds.end()) {
+        error = "template kit `" + validation.summary.id + "` does not declare kind `template`";
+        return std::nullopt;
+    }
+    if (!template_dependencies_available(project_root, validation, error)) {
+        return std::nullopt;
+    }
+
+    auto manifest = validation.summary.manifest_path;
+    auto text = read_file_contents(manifest);
+    pulp::cli::pkg::JsonParser parser{text};
+    auto root = parser.parse();
+    auto* exports = root.get("exports");
+    if (!exports || exports->type != pulp::cli::pkg::JsonValue::Object) {
+        error = "template kit `" + validation.summary.id + "` has no exports object";
+        return std::nullopt;
+    }
+    auto templates = json_string_array_field(*exports, "templates");
+    if (templates.empty()) {
+        error = "template kit `" + validation.summary.id + "` has no exports.templates entry";
+        return std::nullopt;
+    }
+    if (templates.size() > 1) {
+        error = "template kit `" + validation.summary.id
+            + "` exports multiple templates; this CLI slice supports one template directory";
+        return std::nullopt;
+    }
+
+    fs::path rel(templates.front());
+    if (rel.empty() || rel.is_absolute()) {
+        error = "template kit `" + validation.summary.id
+            + "` exports an unsafe template path";
+        return std::nullopt;
+    }
+    for (const auto& part : rel) {
+        if (part == "." || part == "..") {
+            error = "template kit `" + validation.summary.id
+                + "` exports an unsafe template path";
+            return std::nullopt;
+        }
+    }
+
+    auto template_dir = validation.summary.root / rel;
+    auto root_canon = fs::weakly_canonical(validation.summary.root, ec);
+    if (ec) root_canon = validation.summary.root.lexically_normal();
+    auto template_canon = fs::weakly_canonical(template_dir, ec);
+    if (ec) template_canon = template_dir.lexically_normal();
+    if (!path_is_within(template_canon, root_canon) || !fs::is_directory(template_canon, ec)) {
+        error = "template kit `" + validation.summary.id
+            + "` exports a missing or unsafe template directory";
+        return std::nullopt;
+    }
+    if (!fs::exists(template_canon / "CMakeLists.txt.template")
+        || !fs::exists(template_canon / "processor.hpp.template")) {
+        error = "template kit `" + validation.summary.id
+            + "` must export CMakeLists.txt.template and processor.hpp.template";
+        return std::nullopt;
+    }
+
+    TemplateKitSelection selection;
+    selection.root = validation.summary.root;
+    selection.template_dir = template_canon;
+    selection.id = validation.summary.id;
+    selection.name = validation.summary.name;
+    selection.dependency_packages = validation.summary.dependency_packages;
+    return selection;
+}
+
 // ── cmd_create ──────────────────────────────────────────────────────────────
 
 int cmd_create(const std::vector<std::string>& args) {
@@ -155,7 +340,7 @@ int cmd_create(const std::vector<std::string>& args) {
             std::cout << "Options:\n";
             std::cout << "  --type <effect|instrument|app|bare>  Plugin type (default: effect)\n";
             std::cout << "  --mpe                                Opt into MPE (per-note expression) — only with --type instrument\n";
-            std::cout << "  --template <name>                    Use named template (e.g. gain)\n";
+            std::cout << "  --template <name-or-kit-dir>         Use named template (e.g. gain) or local template kit\n";
             std::cout << "  --manufacturer <name>                Manufacturer (default: Pulp)\n";
             std::cout << "  --output <dir>                       Override output directory\n";
             std::cout << "  --targets <list>                     Comma-separated extra targets (e.g. android)\n";
@@ -206,6 +391,18 @@ int cmd_create(const std::vector<std::string>& args) {
     if (name.empty()) {
         std::cerr << "Usage: pulp create <name> [--type effect|instrument|app|bare] [options]\n";
         return 1;
+    }
+
+    std::optional<TemplateKitSelection> template_kit;
+    if (!tmpl.empty()) {
+        std::string template_kit_error;
+        auto dependency_root = find_package_dependency_root(fs::current_path());
+        if (dependency_root.empty()) dependency_root = root;
+        template_kit = resolve_template_kit(tmpl, dependency_root, template_kit_error);
+        if (!template_kit_error.empty()) {
+            std::cerr << "Error: " << template_kit_error << "\n";
+            return 1;
+        }
     }
 
     std::string template_key = tmpl.empty() ? type : tmpl;
@@ -372,12 +569,15 @@ int cmd_create(const std::vector<std::string>& args) {
         {"SDK_VERSION", sdk_version},
     };
 
-    auto source_template_dir = templates_base / template_key;
+    auto source_template_dir = template_kit ? template_kit->template_dir
+                                            : templates_base / template_key;
     auto cmake_template_dir = standalone_mode
         ? templates_base / "standalone" / template_key
         : source_template_dir;
 
-    if (standalone_mode && !root.empty()) {
+    if (template_kit) {
+        cmake_template_dir = source_template_dir;
+    } else if (standalone_mode && !root.empty()) {
         auto local_templates_base = root / "tools" / "templates";
         if (!fs::exists(source_template_dir) && fs::exists(local_templates_base / template_key)) {
             source_template_dir = local_templates_base / template_key;
@@ -398,6 +598,43 @@ int cmd_create(const std::vector<std::string>& args) {
             std::cerr << "Available templates: effect, instrument, gain\n";
         return 1;
     }
+    if (template_kit) {
+        std::vector<std::pair<std::string, fs::path>> supported_format_files = {
+            {"VST3", source_template_dir / "vst3_entry.cpp.template"},
+            {"CLAP", source_template_dir / "clap_entry.cpp.template"},
+            {"AU", source_template_dir / "au_v2_entry.cpp.template"},
+            {"AUv3", source_template_dir / "au_v3_entry.cpp.template"},
+            {"LV2", source_template_dir / "lv2_entry.cpp.template"},
+            {"AAX", source_template_dir / "aax_entry.cpp.template"},
+            {"Standalone", source_template_dir / "CMakeLists.txt.template"},
+        };
+        std::string filtered_formats;
+        std::istringstream in(formats);
+        std::string token;
+        while (in >> token) {
+            auto it = std::find_if(
+                supported_format_files.begin(),
+                supported_format_files.end(),
+                [&](const auto& candidate) {
+                    return candidate.first == token && fs::exists(candidate.second);
+                });
+            if (it == supported_format_files.end()) continue;
+            if (!filtered_formats.empty()) filtered_formats += " ";
+            filtered_formats += token;
+        }
+        if (filtered_formats.empty()) {
+            std::cerr << "Error: template kit " << template_kit->id
+                      << " does not export any buildable format entry templates\n";
+            return 1;
+        }
+        formats = filtered_formats;
+        for (auto& [key, value] : vars) {
+            if (key == "FORMATS") {
+                value = formats;
+                break;
+            }
+        }
+    }
 
     fs::create_directories(out_dir);
     if (standalone_mode) {
@@ -409,6 +646,9 @@ int cmd_create(const std::vector<std::string>& args) {
     } else {
         log("Mode: in-tree example project\n");
         log("  Using the local checkout and adding the project to examples/.\n");
+    }
+    if (template_kit) {
+        log("Template kit: " + template_kit->id + " (" + template_kit->name + ")\n");
     }
     log("Creating " + name + " (" + type + ") at " + out_dir.string() + "\n\n");
 
@@ -618,7 +858,8 @@ int cmd_create(const std::vector<std::string>& args) {
         return 0;
     }
 
-    auto build_targets = pulp::cli::create_default_build_targets(class_name, type, formats);
+    auto build_targets = pulp::cli::create_default_build_targets(
+        class_name, type, formats, !template_kit.has_value());
     auto append_build_targets = [&](std::string& cmd) {
         cmd += " --target";
         for (const auto& target : build_targets) {

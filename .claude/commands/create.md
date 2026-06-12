@@ -7,6 +7,8 @@ Scaffold a new Pulp plugin project. $ARGUMENTS should be the plugin name.
 
 Run: `pulp create $ARGUMENTS` when the CLI is on PATH, or `./build/pulp create $ARGUMENTS` from a source build.
 
+`--template <name-or-kit-dir>` can use a built-in template name or an explicit local template kit. Template kits are useful for reusable plugin starters, but they are not curated dependency packages: inspect unfamiliar kits first, and do not use `pulp add` for arbitrary local or external kit sources. Local template kits build only the format entry templates they export, so small starters can honestly target CLAP/Standalone without claiming every desktop format.
+
 If no arguments provided, ask the user for:
 1. **Name** — the plugin name (e.g., "My Synth")
 2. **Type** — effect or instrument (default: effect)

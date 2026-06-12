@@ -1,0 +1,7 @@
+{
+  "name": "Init",
+  "parameters": {
+    "gain": 0.5,
+    "mix": 1.0
+  }
+}
