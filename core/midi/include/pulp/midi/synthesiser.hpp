@@ -39,6 +39,7 @@ struct SynthesiserNote {
     uint8_t note = 0;             ///< MIDI note number (0–127)
     uint8_t velocity = 0;         ///< Note-on velocity (1–127; 0 → note off)
     int8_t priority = 0;          ///< User-supplied priority for `Priority` steal
+    uint8_t voice_group = 0;      ///< Optional channel-scoped choke group (0 = none)
     uint32_t note_id = 0;         ///< Monotonic id; younger > older
     bool active = false;          ///< Voice is sounding (held or releasing)
     bool releasing = false;       ///< Note-off received; voice in release tail
@@ -221,16 +222,23 @@ public:
     /// Direct event entry points — usable when the caller wants to
     /// build a Synthesiser pipeline without a full MidiBuffer.
     void note_on(uint8_t channel, uint8_t note, uint8_t velocity,
-                 int8_t priority = 0) {
+                 int8_t priority = 0, uint8_t voice_group = 0,
+                 bool choke_group = false) {
         if (velocity == 0) { note_off(channel, note); return; }
+        const auto masked_channel = static_cast<uint8_t>(channel & 0x0F);
+        const auto masked_group = static_cast<uint8_t>(voice_group & 0x7F);
+        if (choke_group && masked_group != 0) {
+            choke_voice_group(masked_channel, masked_group);
+        }
         Voice* v = find_free_voice();
         if (!v) v = steal_voice();
         if (!v) return;
         SynthesiserNote n;
-        n.channel = static_cast<uint8_t>(channel & 0x0F);
+        n.channel = masked_channel;
         n.note = static_cast<uint8_t>(note & 0x7F);
         n.velocity = static_cast<uint8_t>(velocity & 0x7F);
         n.priority = priority;
+        n.voice_group = masked_group;
         n.note_id = ++next_id_;
         n.active = true;
         n.releasing = false;
@@ -531,6 +539,16 @@ private:
         for (auto& v : voices_) {
             if (v.active() && !v.releasing() && v.note().channel == channel) {
                 v.set_soft_pedal(down);
+            }
+        }
+    }
+
+    void choke_voice_group(uint8_t channel, uint8_t voice_group) {
+        for (auto& v : voices_) {
+            if (v.active() && !v.releasing()
+                && v.note().channel == channel
+                && v.note().voice_group == voice_group) {
+                v.on_note_off();
             }
         }
     }
