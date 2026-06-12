@@ -95,6 +95,15 @@ class StatePathBindingsTests(unittest.TestCase):
         self.assertEqual(calls[1][1], ("job-1", "mac"))
         self.assertEqual(calls[2][1], ("job-1", "mac"))
 
+    def test_install_state_path_helpers_wires_named_exports(self):
+        bindings, calls = self._bindings()
+        self.mod.install_state_path_helpers(bindings, ("state_dir", "prepare_target_log"))
+
+        self.assertEqual(bindings["state_dir"](), Path("/state"))
+        self.assertEqual(bindings["prepare_target_log"]("job-1", "mac"), Path("/state/logs/job-1/mac.log"))
+        self.assertEqual(bindings["state_dir"].__name__, "runner")
+        self.assertEqual([call[0] for call in calls], ["state_dir", "prepare_target_log"])
+
 
 if __name__ == "__main__":
     unittest.main()

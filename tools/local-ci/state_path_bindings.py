@@ -7,6 +7,32 @@ from pathlib import Path
 from typing import Any
 
 from binding_utils import binding as _binding
+from binding_utils import install_module_attrs
+
+
+STATE_PATH_EXPORTS = (
+    "state_dir",
+    "config_path",
+    "worktree_config_path",
+    "shared_config_path",
+    "queue_path",
+    "results_dir",
+    "cloud_runs_dir",
+    "evidence_path",
+    "logs_dir",
+    "bundles_dir",
+    "prepared_dir",
+    "desktop_state_dir",
+    "desktop_receipts_dir",
+    "queue_lock_path",
+    "evidence_lock_path",
+    "drain_lock_path",
+    "runner_info_path",
+    "ensure_state_dirs",
+    "job_logs_dir",
+    "target_log_path",
+    "prepare_target_log",
+)
 
 
 def state_dir(bindings: Mapping[str, Any]) -> Path:
@@ -91,3 +117,7 @@ def target_log_path(bindings: Mapping[str, Any], job_id: str, target_name: str) 
 
 def prepare_target_log(bindings: Mapping[str, Any], job_id: str, target_name: str) -> Path:
     return _binding(bindings, "_state_paths").prepare_target_log(job_id, target_name)
+
+
+def install_state_path_helpers(bindings: dict[str, Any], names: tuple[str, ...] = STATE_PATH_EXPORTS) -> None:
+    install_module_attrs(bindings, "_state_paths", names)
