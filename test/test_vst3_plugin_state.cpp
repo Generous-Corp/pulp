@@ -485,7 +485,7 @@ TEST_CASE("VST3 adapter process path maps host events, buses, and outputs",
             Steinberg::kResultTrue);
 
     Steinberg::Vst::ProcessSetup setup{};
-    setup.processMode = Steinberg::Vst::kRealtime;
+    setup.processMode = Steinberg::Vst::kOffline;
     setup.symbolicSampleSize = Steinberg::Vst::kSample32;
     setup.maxSamplesPerBlock = 8;
     setup.sampleRate = 44100.0;
@@ -598,6 +598,13 @@ TEST_CASE("VST3 adapter process path maps host events, buses, and outputs",
     REQUIRE(test_processor->last_sysex_payload == std::vector<uint8_t>(sysex.begin(), sysex.end()));
     REQUIRE_THAT(test_processor->gain_seen_in_process, WithinAbs(24.0f, 1e-5f));
     REQUIRE(test_processor->last_context.is_playing);
+    REQUIRE(test_processor->last_context.process_mode ==
+            pulp::format::ProcessMode::Offline);
+    REQUIRE(test_processor->last_context.render_speed_hint ==
+            pulp::format::RenderSpeedHint::FasterThanRealtime);
+    REQUIRE(test_processor->last_context.is_offline());
+    REQUIRE(test_processor->last_context.allows_offline_quality_work());
+    REQUIRE_FALSE(test_processor->last_context.is_maintenance_render());
     REQUIRE_THAT(test_processor->last_context.tempo_bpm, WithinAbs(137.5, 1e-6));
     REQUIRE(test_processor->last_context.position_samples == 12345);
     REQUIRE(test_processor->last_context.time_sig_numerator == 7);
