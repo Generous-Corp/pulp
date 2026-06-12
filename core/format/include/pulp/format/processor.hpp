@@ -799,12 +799,20 @@ public:
     /// closes. This method may be called multiple times during the lifetime
     /// of the processor (one per attached editor window).
     ///
-    virtual std::unique_ptr<view::View> create_view() { return nullptr; }
+    virtual std::unique_ptr<view::View> create_view();
 
     /// A custom settings tab this plugin contributes to the host's Settings UI.
     /// (The matching virtual `settings_sections()` is appended at the end of this class
     /// to preserve additive-only vtable ordering.)
     struct SettingsSection {
+        SettingsSection();
+        SettingsSection(std::string title, std::unique_ptr<view::View> view);
+        ~SettingsSection();
+        SettingsSection(SettingsSection&&) noexcept;
+        SettingsSection& operator=(SettingsSection&&) noexcept;
+        SettingsSection(const SettingsSection&) = delete;
+        SettingsSection& operator=(const SettingsSection&) = delete;
+
         std::string title;                 ///< Tab label, e.g. "Models".
         std::unique_ptr<view::View> view;  ///< Tab content (built by the plugin).
     };
