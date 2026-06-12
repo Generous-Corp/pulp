@@ -1,13 +1,18 @@
 #pragma once
 
 #include <pulp/audio/audio_file.hpp>
+#include <pulp/runtime/background_job.hpp>
 
 #include <cstdint>
+#include <functional>
 #include <list>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace pulp::audio {
 
@@ -289,6 +294,219 @@ private:
     std::list<std::string> lru_;
     std::unordered_map<std::string, Entry> entries_;
     SampleResourceCacheStats stats_{};
+};
+
+struct SampleResourceLoadOptions {
+    uint64_t memory_budget_bytes = 0;
+    runtime::BackgroundJobPriority priority = runtime::BackgroundJobPriority::normal;
+};
+
+struct SampleResourceServiceStats {
+    uint64_t submitted_loads = 0;
+    uint64_t submitted_prefetches = 0;
+    uint64_t cache_hits = 0;
+    uint64_t decode_successes = 0;
+    uint64_t decode_failures = 0;
+    uint64_t cancelled = 0;
+    uint64_t drained_completions = 0;
+};
+
+using SampleResourceDecodeFunction = std::function<std::optional<AudioFileData>(
+    const std::string& path,
+    runtime::BackgroundJobContext& context)>;
+
+/// Non-RT service for background sample decode and cache prefetch.
+///
+/// Worker jobs decode files and queue completions. Owners must call
+/// `drain_completions()` from a non-RT control thread to publish decoded data
+/// into `SampleResourceCache` and optional `SampleResourceHandle` instances.
+class SampleResourceService {
+public:
+    explicit SampleResourceService(
+        SampleResourceCacheLimits limits = {},
+        SampleResourceDecodeFunction decode = {})
+        : cache_(limits)
+        , decode_(std::move(decode)) {
+        if (!decode_) decode_ = default_decode;
+    }
+
+    ~SampleResourceService() {
+        jobs_.cancel_all();
+        jobs_.wait_all();
+        drain_completions();
+    }
+
+    SampleResourceService(const SampleResourceService&) = delete;
+    SampleResourceService& operator=(const SampleResourceService&) = delete;
+
+    runtime::BackgroundJobHandle load_async(std::string path,
+                                            SampleResourceHandle& target,
+                                            SampleResourceLoadOptions options = {}) {
+        {
+            std::lock_guard lock(mutex_);
+            ++stats_.submitted_loads;
+            if (auto cached = cache_.get(path)) {
+                ++stats_.cache_hits;
+                target.publish_loaded(std::move(cached),
+                                      std::move(path),
+                                      options.memory_budget_bytes);
+                return {};
+            }
+        }
+
+        return submit_decode(std::move(path), &target, options);
+    }
+
+    runtime::BackgroundJobHandle prefetch_async(std::string path,
+                                                SampleResourceLoadOptions options = {}) {
+        {
+            std::lock_guard lock(mutex_);
+            ++stats_.submitted_prefetches;
+            if (cache_.get(path)) {
+                ++stats_.cache_hits;
+                return {};
+            }
+        }
+
+        return submit_decode(std::move(path), nullptr, options);
+    }
+
+    std::size_t drain_completions() {
+        std::vector<Completion> completions;
+        {
+            std::lock_guard lock(mutex_);
+            completions.swap(completions_);
+
+            for (auto& completion : completions) {
+                if (completion.cancelled) {
+                    ++stats_.cancelled;
+                } else if (completion.data) {
+                    auto shared = std::make_shared<AudioFileData>(std::move(*completion.data));
+                    const auto cached = shared;
+                    cache_.put(completion.path, std::move(shared));
+                    if (completion.target) {
+                        completion.target->publish_loaded(std::move(cached),
+                                                           completion.path,
+                                                           completion.memory_budget_bytes);
+                    }
+                    ++stats_.decode_successes;
+                } else {
+                    if (completion.target) {
+                        completion.target->publish_missing(completion.path, completion.reason);
+                    }
+                    ++stats_.decode_failures;
+                }
+                ++stats_.drained_completions;
+            }
+        }
+
+        return completions.size();
+    }
+
+    bool publish_cached(const std::string& path,
+                        SampleResourceHandle& target,
+                        uint64_t memory_budget_bytes = 0) {
+        std::lock_guard lock(mutex_);
+        if (auto cached = cache_.get(path)) {
+            ++stats_.cache_hits;
+            target.publish_loaded(std::move(cached), path, memory_budget_bytes);
+            return true;
+        }
+        return false;
+    }
+
+    bool publish_cached(const std::string& path,
+                        SampleResourceHandle& target,
+                        SampleResourceLoadOptions options) {
+        return publish_cached(path, target, options.memory_budget_bytes);
+    }
+
+    SampleResourceCacheStats cache_stats() const {
+        std::lock_guard lock(mutex_);
+        return cache_.stats();
+    }
+
+    SampleResourceServiceStats stats() const {
+        std::lock_guard lock(mutex_);
+        return stats_;
+    }
+
+    std::size_t pending_count() const {
+        return jobs_.pending_count();
+    }
+
+    static std::optional<AudioFileData> default_decode(
+        const std::string& path,
+        runtime::BackgroundJobContext&) {
+        return read_audio_file(path);
+    }
+
+private:
+    struct Completion {
+        std::string path;
+        SampleResourceHandle* target = nullptr;
+        uint64_t memory_budget_bytes = 0;
+        std::optional<AudioFileData> data;
+        std::string reason;
+        bool cancelled = false;
+    };
+
+    runtime::BackgroundJobHandle submit_decode(std::string path,
+                                               SampleResourceHandle* target,
+                                               SampleResourceLoadOptions options) {
+        auto job_path = path;
+        return jobs_.submit(
+            {
+                .name = "sample-resource-decode:" + path,
+                .priority = options.priority,
+            },
+            [this,
+             path = std::move(job_path),
+             target,
+             memory_budget_bytes = options.memory_budget_bytes](
+                runtime::BackgroundJobContext& context) mutable {
+                if (context.is_cancelled()) {
+                    queue_completion({
+                        .path = std::move(path),
+                        .target = target,
+                        .memory_budget_bytes = memory_budget_bytes,
+                        .cancelled = true,
+                    });
+                    return;
+                }
+
+                auto decoded = decode_(path, context);
+                if (context.is_cancelled()) {
+                    queue_completion({
+                        .path = std::move(path),
+                        .target = target,
+                        .memory_budget_bytes = memory_budget_bytes,
+                        .cancelled = true,
+                    });
+                    return;
+                }
+
+                queue_completion({
+                    .path = std::move(path),
+                    .target = target,
+                    .memory_budget_bytes = memory_budget_bytes,
+                    .data = std::move(decoded),
+                    .reason = decoded ? std::string{} : "decode failed",
+                });
+            });
+    }
+
+    void queue_completion(Completion completion) {
+        std::lock_guard lock(mutex_);
+        completions_.push_back(std::move(completion));
+    }
+
+    mutable std::mutex mutex_;
+    runtime::BackgroundJobService jobs_;
+    SampleResourceCache cache_;
+    SampleResourceDecodeFunction decode_;
+    std::vector<Completion> completions_;
+    SampleResourceServiceStats stats_{};
 };
 
 } // namespace pulp::audio
