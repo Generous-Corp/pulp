@@ -19,6 +19,22 @@ def load_desktop_command_config(
         return None, 1
 
 
+def load_desktop_target_command_context(
+    target_name: str,
+    *,
+    load_config_fn: Callable[[], dict],
+    resolve_desktop_target_fn: Callable[[dict, str], dict],
+    print_fn: Callable[[str], None],
+) -> tuple[dict | None, dict | None, int | None]:
+    try:
+        config = load_config_fn()
+        target = resolve_desktop_target_fn(config, target_name)
+    except (FileNotFoundError, ValueError) as exc:
+        print_fn(f"Error: {exc}")
+        return None, None, 1
+    return config, target, None
+
+
 def run_desktop_command_step(
     step: Callable[[], Any],
     *,

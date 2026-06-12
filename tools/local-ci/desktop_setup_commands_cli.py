@@ -8,6 +8,82 @@ import json
 from pathlib import Path
 import subprocess
 
+from desktop_command_flow import (
+    emit_desktop_command_result,
+    load_desktop_target_command_context,
+    print_desktop_command_lines,
+)
+
+
+def _desktop_install_lines(
+    *,
+    target_name: str,
+    target: dict,
+    artifact_root: Path,
+    remote_bootstrap_ready: bool,
+    remote_tooling_ready: bool,
+    tooling_installed: list[str],
+    tooling_probe: dict | None,
+    repo_checkout_probe: dict | None,
+    contract: dict,
+    windows_tooling_detail_fn: Callable[..., str],
+) -> list[str]:
+    lines = [
+        f"Desktop target `{target_name}` prepared.",
+        f"  adapter: {target['adapter']}",
+        f"  bootstrap: {target['bootstrap']}",
+        f"  artifact_root: {artifact_root}",
+    ]
+    if target["target_type"] != "ssh":
+        return lines + ["  remote bootstrap: not required for local target"]
+
+    if remote_bootstrap_ready:
+        lines.append("  remote bootstrap: ready")
+    else:
+        lines.append("  remote bootstrap: pending; target profile recorded locally")
+    if target["adapter"] == "windows-session-agent":
+        if remote_tooling_ready:
+            git_detail = windows_tooling_detail_fn(tooling_probe or {}, "git") if tooling_probe else "git ready"
+            lines.append(f"  remote tooling: ready ({git_detail})")
+        else:
+            lines.append("  remote tooling: pending; run `pulp ci-local desktop doctor windows` for remediation")
+        if tooling_installed:
+            lines.append(f"  remote tooling installed: {', '.join(tooling_installed)}")
+        if repo_checkout_probe and repo_checkout_probe.get("repo_path"):
+            lines.append(f"  remote repo checkout: {repo_checkout_probe['repo_path']}")
+    if contract.get("task_name"):
+        lines.append(f"  task_name: {contract['task_name']}")
+    if contract.get("remote_root"):
+        lines.append(f"  remote_root: {contract['remote_root']}")
+    return lines
+
+
+def _desktop_doctor_payload(args: argparse.Namespace, *, target: dict, checks: list[dict], all_ok: bool) -> dict:
+    return {
+        "target": args.target,
+        "adapter": target["adapter"],
+        "bootstrap": target["bootstrap"],
+        "ok": all_ok,
+        "checks": checks,
+    }
+
+
+def _desktop_doctor_lines(args: argparse.Namespace, *, target: dict, checks: list[dict]) -> list[str]:
+    lines = [
+        f"Desktop doctor for `{args.target}`",
+        f"  adapter: {target['adapter']}",
+        f"  bootstrap: {target['bootstrap']}",
+    ]
+    for check in checks:
+        if check["ok"]:
+            status = "PASS"
+        elif not check.get("required", True):
+            status = "WARN"
+        else:
+            status = "FAIL"
+        lines.append(f"  {status:4s}  {check['name']}: {check['detail']}")
+    return lines
+
 
 def cmd_desktop_install(
     args: argparse.Namespace,
@@ -36,12 +112,14 @@ def cmd_desktop_install(
     windows_tooling_detail_fn: Callable[..., str],
     print_fn: Callable[[str], None] = print,
 ) -> int:
-    try:
-        config = load_config_fn()
-        target = resolve_desktop_target_fn(config, args.target)
-    except (FileNotFoundError, ValueError) as exc:
-        print_fn(f"Error: {exc}")
-        return 1
+    config, target, status = load_desktop_target_command_context(
+        args.target,
+        load_config_fn=load_config_fn,
+        resolve_desktop_target_fn=resolve_desktop_target_fn,
+        print_fn=print_fn,
+    )
+    if status is not None:
+        return status
 
     artifact_root = Path(config["desktop_automation"]["artifact_root"])
     ok, detail = check_writable_dir_fn(artifact_root)
@@ -132,31 +210,21 @@ def cmd_desktop_install(
         json.dumps(receipt, indent=2) + "\n",
     )
 
-    print_fn(f"Desktop target `{args.target}` prepared.")
-    print_fn(f"  adapter: {target['adapter']}")
-    print_fn(f"  bootstrap: {target['bootstrap']}")
-    print_fn(f"  artifact_root: {artifact_root}")
-    if target["target_type"] == "ssh":
-        if remote_bootstrap_ready:
-            print_fn("  remote bootstrap: ready")
-        else:
-            print_fn("  remote bootstrap: pending; target profile recorded locally")
-        if target["adapter"] == "windows-session-agent":
-            if remote_tooling_ready:
-                git_detail = windows_tooling_detail_fn(tooling_probe or {}, "git") if tooling_probe else "git ready"
-                print_fn(f"  remote tooling: ready ({git_detail})")
-            else:
-                print_fn("  remote tooling: pending; run `pulp ci-local desktop doctor windows` for remediation")
-            if tooling_installed:
-                print_fn(f"  remote tooling installed: {', '.join(tooling_installed)}")
-            if repo_checkout_probe and repo_checkout_probe.get("repo_path"):
-                print_fn(f"  remote repo checkout: {repo_checkout_probe['repo_path']}")
-        if contract.get("task_name"):
-            print_fn(f"  task_name: {contract['task_name']}")
-        if contract.get("remote_root"):
-            print_fn(f"  remote_root: {contract['remote_root']}")
-    else:
-        print_fn("  remote bootstrap: not required for local target")
+    print_desktop_command_lines(
+        _desktop_install_lines(
+            target_name=args.target,
+            target=target,
+            artifact_root=artifact_root,
+            remote_bootstrap_ready=remote_bootstrap_ready,
+            remote_tooling_ready=remote_tooling_ready,
+            tooling_installed=tooling_installed,
+            tooling_probe=tooling_probe,
+            repo_checkout_probe=repo_checkout_probe,
+            contract=contract,
+            windows_tooling_detail_fn=windows_tooling_detail_fn,
+        ),
+        print_fn=print_fn,
+    )
     return 0
 
 
@@ -168,37 +236,24 @@ def cmd_desktop_doctor(
     desktop_doctor_checks_fn: Callable[[dict, str], list[dict]],
     print_fn: Callable[[str], None] = print,
 ) -> int:
-    try:
-        config = load_config_fn()
-        target = resolve_desktop_target_fn(config, args.target)
-    except (FileNotFoundError, ValueError) as exc:
-        print_fn(f"Error: {exc}")
-        return 1
+    config, target, status = load_desktop_target_command_context(
+        args.target,
+        load_config_fn=load_config_fn,
+        resolve_desktop_target_fn=resolve_desktop_target_fn,
+        print_fn=print_fn,
+    )
+    if status is not None:
+        return status
 
     checks = desktop_doctor_checks_fn(config, args.target)
     all_ok = True
     for check in checks:
         if check.get("required", True):
             all_ok = all_ok and check["ok"]
-    if getattr(args, "json", False):
-        payload = {
-            "target": args.target,
-            "adapter": target["adapter"],
-            "bootstrap": target["bootstrap"],
-            "ok": all_ok,
-            "checks": checks,
-        }
-        print_fn(json.dumps(payload, indent=2))
-        return 0 if all_ok else 1
-    print_fn(f"Desktop doctor for `{args.target}`")
-    print_fn(f"  adapter: {target['adapter']}")
-    print_fn(f"  bootstrap: {target['bootstrap']}")
-    for check in checks:
-        if check["ok"]:
-            status = "PASS"
-        elif not check.get("required", True):
-            status = "WARN"
-        else:
-            status = "FAIL"
-        print_fn(f"  {status:4s}  {check['name']}: {check['detail']}")
+    emit_desktop_command_result(
+        payload=_desktop_doctor_payload(args, target=target, checks=checks, all_ok=all_ok),
+        json_output=getattr(args, "json", False),
+        text_lines=_desktop_doctor_lines(args, target=target, checks=checks),
+        print_fn=print_fn,
+    )
     return 0 if all_ok else 1

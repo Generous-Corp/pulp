@@ -39,6 +39,28 @@ class DesktopCommandFlowTests(unittest.TestCase):
         self.assertEqual(status, 1)
         self.assertEqual(self.printed[-1], "Error: missing config")
 
+    def test_load_target_context_success_and_errors(self) -> None:
+        config, target, status = self.mod.load_desktop_target_command_context(
+            "mac",
+            load_config_fn=lambda: {"desktop_automation": {}},
+            resolve_desktop_target_fn=lambda _config, name: {"name": name},
+            print_fn=self.print_line,
+        )
+        self.assertEqual(config, {"desktop_automation": {}})
+        self.assertEqual(target, {"name": "mac"})
+        self.assertIsNone(status)
+
+        config, target, status = self.mod.load_desktop_target_command_context(
+            "missing",
+            load_config_fn=lambda: {"desktop_automation": {}},
+            resolve_desktop_target_fn=lambda *_args: (_ for _ in ()).throw(ValueError("unknown target")),
+            print_fn=self.print_line,
+        )
+        self.assertIsNone(config)
+        self.assertIsNone(target)
+        self.assertEqual(status, 1)
+        self.assertEqual(self.printed[-1], "Error: unknown target")
+
     def test_run_step_success_and_error_prefix(self) -> None:
         payload, status = self.mod.run_desktop_command_step(lambda: {"ok": True}, print_fn=self.print_line)
         self.assertEqual(payload, {"ok": True})
