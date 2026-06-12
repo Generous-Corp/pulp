@@ -31,6 +31,7 @@ struct OfflineRenderBlockContext {
     double position_beats = 0.0;
     double tempo_bpm = 120.0;
     double render_speed_ratio = 1.0;
+    uint64_t state_generation = 0;
     uint64_t deterministic_seed = 0;
 };
 
@@ -49,6 +50,7 @@ struct OfflineRenderOptions {
     double start_position_beats = 0.0;
     double tempo_bpm = 120.0;
     double render_speed_ratio = 1.0;
+    uint64_t state_generation = 0;
     uint64_t deterministic_seed = 0;
     OfflineRenderTailPolicy tail_policy = OfflineRenderTailPolicy::Truncate;
     uint64_t tail_frames = 0;

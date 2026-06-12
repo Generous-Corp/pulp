@@ -110,6 +110,7 @@ std::optional<AudioFileData> offline_render(
             + (static_cast<double>(pos) / context.sample_rate)
                 * (options.tempo_bpm / 60.0);
         context.render_speed_ratio = options.render_speed_ratio;
+        context.state_generation = options.state_generation;
         context.deterministic_seed = options.deterministic_seed;
 
         render_fn(in_block.data(), out_block.data(), static_cast<int>(channels),
