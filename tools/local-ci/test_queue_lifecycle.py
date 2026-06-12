@@ -4,10 +4,10 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-import importlib.util
-import sys
 import unittest
 from pathlib import Path
+
+from module_test_utils import load_module_from_path
 
 
 MODULE_PATH = Path(__file__).with_name("queue_lifecycle.py")
@@ -15,25 +15,15 @@ ORCHESTRATOR_PATH = Path(__file__).with_name("queue_orchestrator.py")
 
 
 def load_module():
-    script_dir = str(MODULE_PATH.parent)
-    if script_dir not in sys.path:
-        sys.path.insert(0, script_dir)
-    spec = importlib.util.spec_from_file_location("pulp_queue_lifecycle", MODULE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    return load_module_from_path(MODULE_PATH, module_name="pulp_queue_lifecycle", add_module_dir=True)
 
 
 def load_orchestrator_module():
-    script_dir = str(ORCHESTRATOR_PATH.parent)
-    if script_dir not in sys.path:
-        sys.path.insert(0, script_dir)
-    spec = importlib.util.spec_from_file_location("pulp_queue_orchestrator_for_lifecycle_tests", ORCHESTRATOR_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    return load_module_from_path(
+        ORCHESTRATOR_PATH,
+        module_name="pulp_queue_orchestrator_for_lifecycle_tests",
+        add_module_dir=True,
+    )
 
 
 @contextmanager

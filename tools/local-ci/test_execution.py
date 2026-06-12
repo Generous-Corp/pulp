@@ -4,32 +4,23 @@
 from __future__ import annotations
 
 from datetime import datetime
-import importlib.util
 import json
 import os
 import subprocess
-import sys
 import tempfile
 import threading
 import unittest
 from pathlib import Path
 
+from module_test_utils import load_module_from_path
+
 
 MODULE_PATH = Path(__file__).with_name("execution.py")
 QUEUE_MODULE_PATH = Path(__file__).with_name("queue_orchestrator.py")
-MODULE_DIR = MODULE_PATH.parent
 
 
 def load_module(path: Path = MODULE_PATH, name: str = "pulp_local_ci_execution"):
-    sys.path.insert(0, str(MODULE_DIR))
-    try:
-        spec = importlib.util.spec_from_file_location(name, path)
-        module = importlib.util.module_from_spec(spec)
-        assert spec.loader is not None
-        spec.loader.exec_module(module)
-        return module
-    finally:
-        sys.path.pop(0)
+    return load_module_from_path(path, module_name=name, add_module_dir=True)
 
 
 class ExecutionTests(unittest.TestCase):

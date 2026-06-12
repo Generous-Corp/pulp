@@ -3,23 +3,20 @@
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import pathlib
 import subprocess
 import tempfile
 import unittest
 
+from module_test_utils import load_module_from_path
+
 
 MODULE_PATH = pathlib.Path(__file__).with_name("target_preflight.py")
 
 
 def load_module():
-    spec = importlib.util.spec_from_file_location("target_preflight_under_test", MODULE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    return load_module_from_path(MODULE_PATH)
 
 
 class TargetPreflightTests(unittest.TestCase):
