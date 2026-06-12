@@ -60,14 +60,15 @@ jobs:
           # Linux runner selection (highest precedence in the resolver):
           #   1. workflow_dispatch input (per-run override), else
           #   2. PULP_LOCAL_LINUX_RUNS_ON_JSON repo var — OPT-IN routing
-          #      to the self-hosted Linux pool (e.g. ["self-hosted","Linux",
-          #      "ARM64","pulp-build-linux"]); served by tools/ci/tart-runner-linux.sh
-          #      and toggled in the Shipyard GUI.
+          #      to the self-hosted Linux ARM64 pool (e.g. ["self-hosted","Linux",
+          #      "ARM64","pulp-build-linux"]); served by tools/ci/tart-runner-linux.sh,
+          #      toggled per-platform in the Shipyard GUI.
           #   3. unset → '' → resolver falls through to github-hosted (default).
-          # Windows is intentionally different: the required "Windows (x64)"
-          # gate must stay on real GitHub-hosted windows-latest until a local
-          # x64 lane exists. The current local Windows pool is ARM64/QEMU and
-          # may smoke WoA translation, but it is not the authoritative x64 gate.
+          # Windows is deliberately different: the required PR leg is the
+          # authoritative x64 gate and must stay on windows-latest by default.
+          # Local QEMU Windows is ARM64; it can smoke Windows-on-ARM behavior, but
+          # it is not an Intel Windows replacement. Use a workflow_dispatch input
+          # only for explicit one-off experiments.
           EXPLICIT_LINUX_RUNNER_SELECTOR_JSON: ${{ inputs.linux_runner_selector_json || vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || '' }}
           EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON: ${{ inputs.windows_runner_selector_json || '' }}
           # macOS routing has three layers, evaluated in order (highest
@@ -412,14 +413,11 @@ jobs:
               "--namespace-env", "NAMESPACE_LINUX_RUNS_ON_JSON",
               "--namespace-setting-name", "PULP_NAMESPACE_BUILD_LINUX_RUNS_ON_JSON",
           ])
-          # Windows routes through the same provider-resolver as Linux.
-          # Historical note: an earlier hardcoded override forced Windows to
-          # github-hosted on PR events because Namespace Windows capacity
-          # was intermittently unavailable. That override was removed on
-          # 2026-04-24 — Namespace is now the default for all three legs.
-          # If Namespace Windows capacity regresses and PRs start blocking,
-          # re-add the override here (track it via a temporary PR rather
-          # than leaving it in-tree) and revert once capacity is restored.
+          # Windows routes through the provider resolver, but it does NOT read
+          # PULP_LOCAL_WINDOWS_RUNS_ON_JSON on PRs. That local lane is currently
+          # Windows ARM64 on QEMU, useful as a smoke target but not an x64 gate.
+          # Keep windows-latest as the default authoritative x64 compatibility
+          # signal until a dedicated local x64 lane is proven.
           windows_runs_on = run([
               "--target-name", "Windows (x64)",
               "--mode", "provider",

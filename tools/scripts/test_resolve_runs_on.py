@@ -62,6 +62,13 @@ def _build_workflow_requested_provider_fallback() -> str:
     return match.group(1)
 
 
+def _build_workflow_env_value(name: str) -> str:
+    text = BUILD_WORKFLOW.read_text(encoding="utf-8")
+    match = re.search(rf"(?m)^\s+{re.escape(name)}:\s*(.+?)\s*$", text)
+    _assert(match is not None, f"build.yml missing {name}")
+    return match.group(1)
+
+
 def _run(args: list[str], env_extra: dict[str, str] | None = None,
          expect_error: bool = False) -> tuple[int, str, str]:
     env = os.environ.copy()
@@ -143,6 +150,15 @@ def test_build_workflow_pull_request_fallback_does_not_require_namespace() -> No
     ], env_extra={"REQUESTED_PROVIDER": provider})
     _assert(json.loads(out) == "ubuntu-latest",
             f"pull_request fallback unexpectedly required Namespace: {out!r}")
+
+
+def test_build_workflow_windows_does_not_read_local_arm64_selector_by_default() -> None:
+    """The required Windows PR leg is x64; local QEMU Windows is ARM64 smoke."""
+    env_value = _build_workflow_env_value("EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON")
+    _assert("PULP_LOCAL_WINDOWS_RUNS_ON_JSON" not in env_value,
+            f"Windows x64 leg must not read local ARM64 selector: {env_value!r}")
+    _assert("inputs.windows_runner_selector_json" in env_value,
+            f"manual Windows selector override should remain wired: {env_value!r}")
 
 
 def test_provider_namespace_with_env() -> None:

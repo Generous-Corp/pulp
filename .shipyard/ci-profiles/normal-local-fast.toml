@@ -26,9 +26,8 @@ targets = ["macstudio.linux-arm64-vm", "m5.linux-arm64-vm", "github.linux-x64"]
 github_variable = "PULP_LOCAL_LINUX_RUNS_ON_JSON"
 
 [repo."danielraffel/pulp".pr.windows]
-strategy = "ordered-fallback"
-targets = ["macstudio.windows-arm64-qemu", "github.windows-x64"]
-github_variable = "PULP_LOCAL_WINDOWS_RUNS_ON_JSON"
+strategy = "github-only"
+targets = ["github.windows-x64"]
 
 [repo."danielraffel/pulp".release.macos]
 strategy = "ordered-fallback"
@@ -67,6 +66,7 @@ runs_on_json = ["self-hosted", "Linux", "ARM64", "pulp-build-linux"]
 
 [targets."macstudio.windows-arm64-qemu"]
 runs_on_json = ["self-hosted", "Windows", "ARM64", "pulp-build-windows"]
+role = "windows-arm64-smoke"
 
 [targets."macstudio.macos-arm64-release-vm"]
 runs_on_json = ["self-hosted", "macOS", "ARM64", "pulp-build-vm-release"]
