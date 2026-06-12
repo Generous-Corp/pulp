@@ -316,6 +316,7 @@ _cloud_bindings.install_cloud_helpers(globals())
 _desktop_support_bindings.install_desktop_support_helpers(globals())
 _desktop_infra_bindings.install_desktop_infra_helpers(globals())
 _desktop_reporting_bindings.install_desktop_reporting_helpers(globals())
+_macos_window_bindings.install_macos_window_helpers(globals())
 _desktop_check = desktop_check
 _check_writable_dir = check_writable_dir
 _clear_directory_contents = clear_directory_contents
@@ -427,62 +428,6 @@ def validate_windows_prepare_commands(commands: list[str]) -> None:
 
 def attach_desktop_source_to_manifest(manifest: dict, source_context: dict | None) -> None:
     return _source_prep_bindings.attach_desktop_source_to_manifest(globals(), manifest, source_context)
-
-
-def detect_macos_app_bundle(command: str | None) -> Path | None:
-    return _macos_window_bindings.detect_macos_app_bundle(globals(), command)
-
-
-def macos_bundle_id_for_app_path(app_path: Path) -> str | None:
-    return _macos_window_bindings.macos_bundle_id_for_app_path(globals(), app_path)
-
-
-def macos_window_probe_path() -> Path:
-    return _macos_window_bindings.macos_window_probe_path(globals())
-
-
-def macos_window_info_for_pid(pid: int) -> dict:
-    return _macos_window_bindings.macos_window_info_for_pid(globals(), pid)
-
-
-def macos_window_info_for_bundle_id(bundle_id: str) -> dict:
-    return _macos_window_bindings.macos_window_info_for_bundle_id(globals(), bundle_id)
-
-
-def macos_accessibility_trusted() -> bool:
-    return _macos_window_bindings.macos_accessibility_trusted(globals())
-
-
-def wait_for_macos_window(pid: int, timeout_secs: float) -> dict:
-    return _macos_window_bindings.wait_for_macos_window(globals(), pid, timeout_secs)
-
-
-def wait_for_macos_bundle_window(bundle_id: str, timeout_secs: float) -> tuple[int, dict]:
-    return _macos_window_bindings.wait_for_macos_bundle_window(globals(), bundle_id, timeout_secs)
-
-
-def capture_macos_window(window_id: int, output_path: Path) -> None:
-    _macos_window_bindings.capture_macos_window(globals(), window_id, output_path)
-
-
-def activate_macos_pid(pid: int) -> dict:
-    return _macos_window_bindings.activate_macos_pid(globals(), pid)
-
-
-def activate_macos_bundle_id(bundle_id: str) -> dict:
-    return _macos_window_bindings.activate_macos_bundle_id(globals(), bundle_id)
-
-
-def dispatch_macos_click(screen_x: float, screen_y: float) -> dict:
-    return _macos_window_bindings.dispatch_macos_click(globals(), screen_x, screen_y)
-
-
-def terminate_process(proc: subprocess.Popen, timeout_secs: float = 5.0) -> None:
-    _macos_window_bindings.terminate_process(globals(), proc, timeout_secs=timeout_secs)
-
-
-def quit_macos_bundle_id(bundle_id: str) -> None:
-    _macos_window_bindings.quit_macos_bundle_id(globals(), bundle_id)
 
 
 def _local_worktree_matches(path: Path, sha: str) -> bool:

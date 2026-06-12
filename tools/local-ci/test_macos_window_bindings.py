@@ -116,6 +116,21 @@ class MacosWindowBindingsTests(unittest.TestCase):
         self.mod.quit_macos_bundle_id(bindings, "com.example.demo")
         self.assertIs(captured["quit"][1]["run_fn"], run_fn)
 
+    def test_install_macos_window_helpers_wires_named_exports(self) -> None:
+        macos_desktop = types.SimpleNamespace(
+            detect_macos_app_bundle=lambda command: Path("/Demo.app") if command else None,
+            macos_bundle_id_for_app_path=lambda app_path: f"id:{app_path.name}",
+        )
+        bindings = self._bindings(macos_desktop)
+
+        self.mod.install_macos_window_helpers(
+            bindings,
+            ("detect_macos_app_bundle", "macos_bundle_id_for_app_path"),
+        )
+
+        self.assertEqual(bindings["detect_macos_app_bundle"]("/Demo.app/Contents/MacOS/Demo"), Path("/Demo.app"))
+        self.assertEqual(bindings["macos_bundle_id_for_app_path"](Path("/Demo.app")), "id:Demo.app")
+
 
 if __name__ == "__main__":
     unittest.main()
