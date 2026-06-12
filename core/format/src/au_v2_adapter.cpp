@@ -16,6 +16,7 @@
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
 
+#include <array>
 #include <cstring>
 #include <limits>
 
@@ -483,9 +484,41 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
     // (param snapshot, pointer-vector resizes) legitimately allocates.
     param_events_.clear();
     processor_->set_param_events(&param_events_);
+    std::array<BusBufferView<const float>, 1> input_buses{{
+        {
+            .info = {
+                .name = "Audio In",
+                .index = 0,
+                .direction = BusDirection::Input,
+                .role = BusRole::Main,
+                .declared_channels = static_cast<int>(in_channels),
+                .optional = in_channels == 0,
+                .active = input_view.num_channels() > 0,
+            },
+            .buffer = input_view,
+        },
+    }};
+    std::array<BusBufferView<float>, 1> output_buses{{
+        {
+            .info = {
+                .name = "Audio Out",
+                .index = 0,
+                .direction = BusDirection::Output,
+                .role = BusRole::Main,
+                .declared_channels = static_cast<int>(out_channels),
+                .optional = false,
+                .active = output_view.num_channels() > 0,
+            },
+            .buffer = output_view,
+        },
+    }};
+    ProcessBuffers process_buffers{
+        BusBufferSet<const float>{std::span(input_buses)},
+        BusBufferSet<float>{std::span(output_buses)},
+    };
     {
         pulp::runtime::ScopedNoAlloc no_alloc_guard;
-        processor_->process(output_view, input_view, midi_in, midi_out, ctx);
+        processor_->process(process_buffers, midi_in, midi_out, ctx);
     }
 
     // Plugin → host: diff params against the pre-process snapshot and push

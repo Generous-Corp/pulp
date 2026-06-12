@@ -69,6 +69,30 @@ public:
         }
     }
 
+    void process(pulp::format::ProcessBuffers& audio,
+                 pulp::midi::MidiBuffer& midi_in,
+                 pulp::midi::MidiBuffer& midi_out,
+                 const pulp::format::ProcessContext& context) override {
+        ++process_buffers_count;
+        last_process_buffers_layout_ok = audio.layouts_match_descriptors();
+        last_process_buffers_storage_ok = audio.active_buses_have_storage();
+        last_process_buffers_input_count = audio.inputs.active_count();
+        last_process_buffers_output_count = audio.outputs.active_count();
+        last_process_buffers_main_input_channels =
+            audio.main_input() ? audio.main_input()->num_channels() : 0;
+        last_process_buffers_main_output_channels =
+            audio.main_output() ? audio.main_output()->num_channels() : 0;
+        last_process_buffers_sidechain_channels =
+            audio.sidechain_input() ? audio.sidechain_input()->num_channels() : 0;
+
+        auto* output = audio.main_output();
+        pulp::audio::BufferView<const float> empty_input;
+        auto* input = audio.main_input();
+        if (output) {
+            process(*output, input ? *input : empty_input, midi_in, midi_out, context);
+        }
+    }
+
     std::vector<uint8_t> serialize_plugin_state() const override {
         return std::vector<uint8_t>(plugin_state.begin(), plugin_state.end());
     }
@@ -80,8 +104,16 @@ public:
 
     std::string plugin_state;
     int process_count = 0;
+    int process_buffers_count = 0;
     float gain_seen_in_process = 0.0f;
     bool had_param_events = false;
+    bool last_process_buffers_layout_ok = false;
+    bool last_process_buffers_storage_ok = false;
+    std::size_t last_process_buffers_input_count = 0;
+    std::size_t last_process_buffers_output_count = 0;
+    std::size_t last_process_buffers_main_input_channels = 0;
+    std::size_t last_process_buffers_main_output_channels = 0;
+    std::size_t last_process_buffers_sidechain_channels = 0;
     std::vector<pulp::state::ParameterEvent> last_param_events;
 };
 
@@ -119,6 +151,25 @@ public:
                  pulp::midi::MidiBuffer&,
                  const pulp::format::ProcessContext&) override {}
 
+    void process(pulp::format::ProcessBuffers& audio,
+                 pulp::midi::MidiBuffer& midi_in,
+                 pulp::midi::MidiBuffer& midi_out,
+                 const pulp::format::ProcessContext& context) override {
+        ++process_buffers_count;
+        last_process_buffers_layout_ok = audio.layouts_match_descriptors();
+        last_process_buffers_storage_ok = audio.active_buses_have_storage();
+        last_process_buffers_input_count = audio.inputs.active_count();
+        last_process_buffers_output_count = audio.outputs.active_count();
+        last_process_buffers_main_output_channels =
+            audio.main_output() ? audio.main_output()->num_channels() : 0;
+
+        auto* output = audio.main_output();
+        pulp::audio::BufferView<const float> empty_input;
+        if (output) {
+            process(*output, empty_input, midi_in, midi_out, context);
+        }
+    }
+
     std::vector<uint8_t> serialize_plugin_state() const override {
         return std::vector<uint8_t>(plugin_state.begin(), plugin_state.end());
     }
@@ -129,6 +180,12 @@ public:
     }
 
     std::string plugin_state;
+    int process_buffers_count = 0;
+    bool last_process_buffers_layout_ok = false;
+    bool last_process_buffers_storage_ok = false;
+    std::size_t last_process_buffers_input_count = 0;
+    std::size_t last_process_buffers_output_count = 0;
+    std::size_t last_process_buffers_main_output_channels = 0;
 };
 
 class TestAUWideEditorProcessor : public TestAUEffectProcessor {
@@ -362,7 +419,15 @@ TEST_CASE("AU v3 render events preserve parameter sample offsets and update Stat
                             nil);
         REQUIRE(status == noErr);
 
+        REQUIRE(processor->process_buffers_count == 1);
         REQUIRE(processor->process_count == 1);
+        REQUIRE(processor->last_process_buffers_layout_ok);
+        REQUIRE(processor->last_process_buffers_storage_ok);
+        REQUIRE(processor->last_process_buffers_input_count == 0);
+        REQUIRE(processor->last_process_buffers_output_count == 1);
+        REQUIRE(processor->last_process_buffers_main_input_channels == 0);
+        REQUIRE(processor->last_process_buffers_main_output_channels == 2);
+        REQUIRE(processor->last_process_buffers_sidechain_channels == 0);
         REQUIRE_THAT(processor->gain_seen_in_process, WithinAbs(-12.0f, 1e-6f));
         REQUIRE(processor->had_param_events);
         REQUIRE(processor->last_param_events.size() == 2);
