@@ -221,6 +221,7 @@ import desktop_reporting_bindings as _desktop_reporting_bindings  # noqa: E402
 import desktop_setup_commands_cli as _desktop_setup_commands_cli  # noqa: E402
 import desktop_support_bindings as _desktop_support_bindings  # noqa: E402
 import evidence_cli as _evidence_cli  # noqa: E402
+import evidence_index_bindings as _evidence_index_bindings  # noqa: E402
 import git_helpers as _git_helpers  # noqa: E402
 import git_helpers_bindings as _git_helpers_bindings  # noqa: E402
 import github_workflows as _github_workflows  # noqa: E402
@@ -555,17 +556,52 @@ def normalize_result(result: dict) -> dict:
 
 
 import evidence_index as evidence_index_module  # noqa: E402
-from evidence_index import (  # noqa: E402  -- re-exported for tests and callers
-    collect_evidence_groups_from_index,
-    empty_evidence_index,
-    evidence_entry_key,
-    evidence_record_from_result,
-    load_evidence_index_unlocked,
-    merge_result_into_evidence_index,
-    normalize_evidence_index,
-    rebuild_evidence_index_unlocked,
-    save_evidence_index_unlocked,
-)
+
+
+def empty_evidence_index() -> dict:
+    return _evidence_index_bindings.empty_evidence_index(globals())
+
+
+def evidence_entry_key(branch: str, sha: str, target: str, validation: str) -> str:
+    return _evidence_index_bindings.evidence_entry_key(globals(), branch, sha, target, validation)
+
+
+def normalize_evidence_index(index: dict | None) -> dict:
+    return _evidence_index_bindings.normalize_evidence_index(globals(), index)
+
+
+def evidence_record_from_result(result: dict, item: dict, result_path: Path) -> dict:
+    return _evidence_index_bindings.evidence_record_from_result(globals(), result, item, result_path)
+
+
+def merge_result_into_evidence_index(index: dict, result: dict, result_path: Path) -> bool:
+    return _evidence_index_bindings.merge_result_into_evidence_index(globals(), index, result, result_path)
+
+
+def rebuild_evidence_index_unlocked() -> dict:
+    return _evidence_index_bindings.rebuild_evidence_index_unlocked(globals())
+
+
+def load_evidence_index_unlocked() -> tuple[dict, bool]:
+    return _evidence_index_bindings.load_evidence_index_unlocked(globals())
+
+
+def save_evidence_index_unlocked(index: dict) -> None:
+    return _evidence_index_bindings.save_evidence_index_unlocked(globals(), index)
+
+
+def collect_evidence_groups_from_index(
+    index: dict,
+    *,
+    branch: str | None = None,
+    sha: str | None = None,
+) -> dict[str, list[dict]]:
+    return _evidence_index_bindings.collect_evidence_groups_from_index(
+        globals(),
+        index,
+        branch=branch,
+        sha=sha,
+    )
 
 
 def load_evidence_index() -> dict:
