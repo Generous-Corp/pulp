@@ -74,7 +74,7 @@ WINDOWS_DEFAULT_REMOTE_REPO_DIRNAME = "pulp-validate"
 
 
 def is_transient_ssh_failure_detail(detail: str) -> bool:
-    return _ssh_subprocess.is_transient_ssh_failure_detail(detail)
+    return _ssh_subprocess_bindings.is_transient_ssh_failure_detail(globals(), detail)
 
 
 def run_ssh_subprocess(
@@ -85,14 +85,13 @@ def run_ssh_subprocess(
     retries: int = 3,
     retry_delay_secs: float = 2.0,
 ) -> subprocess.CompletedProcess[str]:
-    return _ssh_subprocess.run_ssh_subprocess(
+    return _ssh_subprocess_bindings.run_ssh_subprocess(
+        globals(),
         args,
         input=input,
         timeout=timeout,
         retries=retries,
         retry_delay_secs=retry_delay_secs,
-        run_fn=subprocess.run,
-        sleep_fn=time.sleep,
     )
 
 
@@ -177,6 +176,7 @@ import source_prep_bindings as _source_prep_bindings  # noqa: E402
 import ssh_bundle as _ssh_bundle  # noqa: E402
 import ssh_bundle_bindings as _ssh_bundle_bindings  # noqa: E402
 import ssh_subprocess as _ssh_subprocess  # noqa: E402
+import ssh_subprocess_bindings as _ssh_subprocess_bindings  # noqa: E402
 import target_preflight as _target_preflight  # noqa: E402
 import target_preflight_bindings as _target_preflight_bindings  # noqa: E402
 import utility_command_bindings as _utility_command_bindings  # noqa: E402
