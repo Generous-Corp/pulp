@@ -64,13 +64,6 @@ if str(SCRIPT_DIR) not in sys.path:
 WAIT_POLL_SECS = 3
 KEEP_COMPLETED_JOBS = 25
 _BUNDLE_BUILD_LOCK = threading.Lock()
-WINDOWS_REQUIRED_REMOTE_TOOLS = {
-    "git": {"winget_id": "Git.Git", "required": True},
-}
-WINDOWS_OPTIONAL_REMOTE_TOOLS = {
-    "gh": {"winget_id": "GitHub.cli", "required": False},
-}
-WINDOWS_DEFAULT_REMOTE_REPO_DIRNAME = "pulp-validate"
 
 
 def is_transient_ssh_failure_detail(detail: str) -> bool:
@@ -190,6 +183,9 @@ import windows_probe_bindings as _windows_probe_bindings  # noqa: E402
 import windows_target as _windows_target  # noqa: E402
 import windows_target_bindings as _windows_target_bindings  # noqa: E402
 
+WINDOWS_REQUIRED_REMOTE_TOOLS = _windows_target.WINDOWS_REQUIRED_REMOTE_TOOLS
+WINDOWS_OPTIONAL_REMOTE_TOOLS = _windows_target.WINDOWS_OPTIONAL_REMOTE_TOOLS
+WINDOWS_DEFAULT_REMOTE_REPO_DIRNAME = _windows_target.WINDOWS_DEFAULT_REMOTE_REPO_DIRNAME
 LINUX_REQUIRED_REMOTE_TOOLS = _linux_target.LINUX_REQUIRED_REMOTE_TOOLS
 LINUX_OPTIONAL_REMOTE_TOOLS = _linux_target.LINUX_OPTIONAL_REMOTE_TOOLS
 
