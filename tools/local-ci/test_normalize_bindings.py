@@ -94,6 +94,15 @@ class NormalizeBindingsTests(unittest.TestCase):
         self.assertEqual(calls[1][1], ("mac", target_cfg))
         self.assertEqual(calls[4][1], (config,))
 
+    def test_install_normalize_helpers_wires_named_exports(self):
+        bindings, calls = self._bindings()
+        self.mod.install_normalize_helpers(bindings, ("normalize_priority", "normalize_desktop_config"))
+
+        self.assertEqual(bindings["normalize_priority"]("NORMAL"), "normal")
+        self.assertEqual(bindings["normalize_desktop_config"]({"targets": {}}), {"desktop_automation": {}})
+        self.assertEqual(bindings["normalize_priority"].__name__, "runner")
+        self.assertEqual([call[0] for call in calls], ["normalize_priority", "normalize_desktop_config"])
+
 
 if __name__ == "__main__":
     unittest.main()

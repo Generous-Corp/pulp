@@ -7,6 +7,23 @@ from pathlib import Path
 from typing import Any
 
 from binding_utils import binding as _binding
+from binding_utils import install_module_attrs
+
+
+NORMALIZE_EXPORTS = (
+    "normalize_priority",
+    "priority_value",
+    "normalize_validation_mode",
+    "normalize_desktop_source_mode",
+    "default_desktop_artifact_root",
+    "normalize_publish_mode",
+    "parse_config_bool",
+    "normalize_desktop_optional_config",
+    "infer_desktop_adapter",
+    "default_desktop_bootstrap",
+    "default_desktop_capability_tier",
+    "normalize_desktop_config",
+)
 
 
 def priority_values(bindings: Mapping[str, Any]) -> dict:
@@ -59,3 +76,7 @@ def default_desktop_capability_tier(bindings: Mapping[str, Any], adapter: str) -
 
 def normalize_desktop_config(bindings: Mapping[str, Any], config: dict) -> dict:
     return _binding(bindings, "_normalize").normalize_desktop_config(config)
+
+
+def install_normalize_helpers(bindings: dict[str, Any], names: tuple[str, ...] = NORMALIZE_EXPORTS) -> None:
+    install_module_attrs(bindings, "_normalize", names)

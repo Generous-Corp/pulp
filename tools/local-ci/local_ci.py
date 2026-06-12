@@ -249,52 +249,7 @@ _git_helpers_bindings.install_git_helpers(globals())
 PRIORITY_VALUES = _normalize_bindings.priority_values(globals())
 
 
-def normalize_priority(priority: str | None) -> str:
-    return _normalize_bindings.normalize_priority(globals(), priority)
-
-
-def priority_value(priority: str | None) -> int:
-    return _normalize_bindings.priority_value(globals(), priority)
-
-
-def normalize_validation_mode(mode: str | None) -> str:
-    return _normalize_bindings.normalize_validation_mode(globals(), mode)
-
-
-def normalize_desktop_source_mode(mode: str | None) -> str:
-    return _normalize_bindings.normalize_desktop_source_mode(globals(), mode)
-
-
-def default_desktop_artifact_root() -> Path:
-    return _normalize_bindings.default_desktop_artifact_root(globals())
-
-
-def normalize_publish_mode(mode: str | None) -> str:
-    return _normalize_bindings.normalize_publish_mode(globals(), mode)
-
-
-def parse_config_bool(value: object) -> bool:
-    return _normalize_bindings.parse_config_bool(globals(), value)
-
-
-def normalize_desktop_optional_config(optional_cfg: dict | None) -> dict:
-    return _normalize_bindings.normalize_desktop_optional_config(globals(), optional_cfg)
-
-
-def infer_desktop_adapter(name: str, target_cfg: dict) -> str:
-    return _normalize_bindings.infer_desktop_adapter(globals(), name, target_cfg)
-
-
-def default_desktop_bootstrap(adapter: str) -> str:
-    return _normalize_bindings.default_desktop_bootstrap(globals(), adapter)
-
-
-def default_desktop_capability_tier(adapter: str) -> str:
-    return _normalize_bindings.default_desktop_capability_tier(globals(), adapter)
-
-
-def normalize_desktop_config(config: dict) -> dict:
-    return _normalize_bindings.normalize_desktop_config(globals(), config)
+_normalize_bindings.install_normalize_helpers(globals())
 
 import cli_parser as _cli_parser  # noqa: E402
 
