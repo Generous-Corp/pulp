@@ -358,6 +358,11 @@ allocates and an in-flight snapshot keeps its instance alive. `process_instance`
 runs on the audio thread and must be real-time-safe; `save_state` / `load_state`
 are non-RT control-path calls (use them while the graph is not live, or after an
 invalidate + re-prepare), the same expectation as plugin state.
+Generated or scripted graph flows must not expose `save_state`, `load_state`,
+graph import/serialization, registration, or `prepare`/`release` as audio-thread
+operations. Those APIs are explicitly denied from RT paths; changing custom
+state invalidates the live graph and requires a later successful `prepare()`
+before processing resumes.
 
 Opaque state is a `std::vector<uint8_t>` (mirroring `PluginSlot::save_state`),
 reachable via `SignalGraph::custom_node_state(NodeId)` /
