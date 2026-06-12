@@ -459,6 +459,9 @@ TEST_CASE("pulp run rejects invalid audio scope options and inspector contention
     REQUIRE_FALSE(parse_run_options({"--audio-scope-window=-1"}).error.empty());
     REQUIRE_FALSE(parse_run_options({"--audio-scope-trigger", "smooth"}).error.empty());
     REQUIRE_FALSE(parse_run_options({"--audio-scope-channel", "-1"}).error.empty());
+    REQUIRE_FALSE(parse_run_options({"--audio-scope-window", "128"}).error.empty());
+    REQUIRE_FALSE(parse_run_options({"--audio-scope-trigger=raw"}).error.empty());
+    REQUIRE_FALSE(parse_run_options({"--audio-scope-channel=1"}).error.empty());
 
     auto contention = parse_run_options({
         "--audio-inspector", "--audio-scope-json", "/tmp/scope.json",

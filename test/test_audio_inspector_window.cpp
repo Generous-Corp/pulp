@@ -365,6 +365,15 @@ TEST_CASE("AudioInspectorWindow applies display-only waveform env knobs",
     REQUIRE(waveform.horizontal_scale() == Catch::Approx(2.5f));
 }
 
+TEST_CASE("AudioInspectorWindow ignores non-finite waveform scale",
+          "[view][audio-inspector][audio-harness]") {
+    ScopedEnv scale("PULP_AUDIO_INSPECTOR_SCALE", "nan");
+
+    AudioInspectorWindow window;
+    const auto& waveform = window.panel().waveform();
+    REQUIRE(waveform.horizontal_scale() == Catch::Approx(1.0f));
+}
+
 TEST_CASE("AudioInspectorWindow remembers Signal and Scope mode preference",
           "[view][audio-inspector][audio-scope]") {
     pulp::state::PropertiesFile prefs;

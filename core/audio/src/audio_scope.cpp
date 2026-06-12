@@ -91,9 +91,11 @@ AudioScopeAcquisition acquire_audio_scope_window(
 
     if (config.trigger_mode == AudioScopeTriggerMode::kRisingZero &&
         frames >= 2 && window > 0) {
-        for (std::size_t i = latest_start; i > 0; --i) {
+        const std::size_t search_start =
+            latest_start > 0 ? latest_start : frames - 1;
+        for (std::size_t i = search_start; i > 0; --i) {
             if (is_rising_zero(samples[i - 1], samples[i])) {
-                start = i;
+                start = std::min(i, latest_start);
                 trigger_sample = i;
                 trigger_found = true;
                 break;

@@ -90,6 +90,7 @@ void AudioWaveformView::set_trigger_mode(TriggerMode mode) {
 }
 
 void AudioWaveformView::set_horizontal_scale(float scale) {
+    if (!std::isfinite(scale)) return;
     const float clamped = std::clamp(scale, 1.0f, 16.0f);
     if (horizontal_scale_ == clamped) return;
     horizontal_scale_ = clamped;

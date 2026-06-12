@@ -51,6 +51,7 @@ bool valid_scope_trigger(std::string value) {
 ParseRunResult parse_run_options(const std::vector<std::string>& args) {
     ParseRunResult r;
     bool after_separator = false;
+    bool audio_scope_acquisition_option_seen = false;
 
     for (size_t i = 0; i < args.size(); ++i) {
         const auto& a = args[i];
@@ -165,6 +166,7 @@ ParseRunResult parse_run_options(const std::vector<std::string>& args) {
             continue;
         }
         if (a == "--audio-scope-window") {
+            audio_scope_acquisition_option_seen = true;
             if (i + 1 >= args.size()
                 || !parse_frame_count(args[i + 1], r.audio_scope_window)) {
                 r.error = "--audio-scope-window requires an integer argument";
@@ -178,6 +180,7 @@ ParseRunResult parse_run_options(const std::vector<std::string>& args) {
             continue;
         }
         if (a.rfind("--audio-scope-window=", 0) == 0) {
+            audio_scope_acquisition_option_seen = true;
             if (!parse_frame_count(a.substr(std::string("--audio-scope-window=").size()),
                                    r.audio_scope_window)) {
                 r.error = "--audio-scope-window= requires an integer";
@@ -190,6 +193,7 @@ ParseRunResult parse_run_options(const std::vector<std::string>& args) {
             continue;
         }
         if (a == "--audio-scope-trigger") {
+            audio_scope_acquisition_option_seen = true;
             if (i + 1 >= args.size() || args[i + 1].empty()
                 || args[i + 1][0] == '-') {
                 r.error = "--audio-scope-trigger requires a value";
@@ -203,6 +207,7 @@ ParseRunResult parse_run_options(const std::vector<std::string>& args) {
             continue;
         }
         if (a.rfind("--audio-scope-trigger=", 0) == 0) {
+            audio_scope_acquisition_option_seen = true;
             r.audio_scope_trigger = a.substr(std::string("--audio-scope-trigger=").size());
             if (r.audio_scope_trigger.empty()) {
                 r.error = "--audio-scope-trigger= requires a non-empty value";
@@ -215,6 +220,7 @@ ParseRunResult parse_run_options(const std::vector<std::string>& args) {
             continue;
         }
         if (a == "--audio-scope-channel") {
+            audio_scope_acquisition_option_seen = true;
             if (i + 1 >= args.size()
                 || !parse_nonnegative_int(args[i + 1], r.audio_scope_channel)) {
                 r.error = "--audio-scope-channel requires a non-negative integer";
@@ -224,6 +230,7 @@ ParseRunResult parse_run_options(const std::vector<std::string>& args) {
             continue;
         }
         if (a.rfind("--audio-scope-channel=", 0) == 0) {
+            audio_scope_acquisition_option_seen = true;
             if (!parse_nonnegative_int(a.substr(std::string("--audio-scope-channel=").size()),
                                        r.audio_scope_channel)) {
                 r.error = "--audio-scope-channel requires a non-negative integer";
@@ -243,6 +250,10 @@ ParseRunResult parse_run_options(const std::vector<std::string>& args) {
     if (!r.audio_scope_json_path.empty() && r.audio_inspector) {
         r.error = "--audio-scope-json cannot be combined with --audio-inspector; "
                   "both consume the live capture FIFO";
+    }
+    if (audio_scope_acquisition_option_seen && r.audio_scope_json_path.empty()) {
+        r.error = "--audio-scope-window, --audio-scope-trigger, and "
+                  "--audio-scope-channel require --audio-scope-json";
     }
 
     return r;

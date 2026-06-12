@@ -652,6 +652,15 @@ TEST_CASE("AudioScope acquisition uses raw tail and rising-zero windows",
     REQUIRE(acq.trigger_sample == 2);
     REQUIRE(acq.window_start == 2);
     REQUIRE(acq.samples == std::vector<float>({0.25f, 0.5f, -0.25f}));
+
+    MonoView exact_window({-0.25f, 0.25f, 0.5f});
+    cfg.window_samples = 3;
+    acq = acquire_audio_scope_window(exact_window.view(), cfg, &snap);
+    REQUIRE(acq.ok);
+    REQUIRE(acq.trigger_found);
+    REQUIRE(acq.trigger_sample == 1);
+    REQUIRE(acq.window_start == 0);
+    REQUIRE(acq.samples == std::vector<float>({-0.25f, 0.25f, 0.5f}));
 }
 
 TEST_CASE("AudioScope acquisition reports edge cases honestly",

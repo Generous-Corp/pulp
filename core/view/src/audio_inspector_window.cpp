@@ -7,6 +7,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <cstring>
+#include <cmath>
 #include <string>
 #include <utility>
 
@@ -104,7 +105,7 @@ void AudioInspectorWindow::build_ui() {
     if (const char* scale = std::getenv("PULP_AUDIO_INSPECTOR_SCALE")) {
         char* end = nullptr;
         const float parsed = std::strtof(scale, &end);
-        if (end != scale)
+        if (end != scale && std::isfinite(parsed))
             panel_->set_waveform_horizontal_scale(parsed);
     }
 }

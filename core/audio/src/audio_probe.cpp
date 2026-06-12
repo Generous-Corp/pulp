@@ -24,8 +24,10 @@ void AudioProbe::prepare(int max_channels,
         // the worst-case queue depth is exactly `capture_frames_`.
         const int cap = capture_frames_ + 1;
         capture_storage_channels_ = std::max(1, max_channels_);
-        capture_storage_.assign(static_cast<std::size_t>(cap * capture_storage_channels_),
-                                0.0f);
+        const auto storage_frames = static_cast<std::size_t>(cap);
+        const auto storage_channels =
+            static_cast<std::size_t>(capture_storage_channels_);
+        capture_storage_.assign(storage_frames * storage_channels, 0.0f);
         capture_fifo_ = std::make_unique<runtime::AbstractFifo>(cap);
     }
 
@@ -109,7 +111,7 @@ void AudioProbe::analyze_output(const BufferView<const float>& output) noexcept 
         const int cap = capture_frames_ + 1;
         for (int ch = 0; ch < capture_storage_channels_; ++ch) {
             float* dst = capture_storage_.data() +
-                static_cast<std::size_t>(ch * cap);
+                static_cast<std::size_t>(ch) * static_cast<std::size_t>(cap);
             const float* src = (ch < channels) ? output.channel_ptr(ch) : nullptr;
             for (int i = 0; i < n1; ++i)
                 dst[s1 + i] = src ? src[i] : 0.0f;
@@ -178,7 +180,7 @@ int AudioProbe::read_capture(BufferView<float> dst, int max_frames) {
         float* out = dst.channel_ptr(ch);
         if (static_cast<int>(ch) < capture_storage_channels_) {
             const float* src = capture_storage_.data() +
-                static_cast<std::size_t>(static_cast<int>(ch) * cap);
+                ch * static_cast<std::size_t>(cap);
             for (int i = 0; i < n1; ++i)
                 out[i] = src[s1 + i];
             for (int i = 0; i < n2; ++i)
