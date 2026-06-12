@@ -50,7 +50,7 @@ The `params_flush()` extension callback handles the same events outside of `proc
 
 ### CLAP Modulation
 
-The adapter handles `CLAP_EVENT_PARAM_MOD` events. At the start of each process call, `store.reset_all_mod()` clears per-buffer modulation offsets. Incoming mod events write to `StateStore::set_mod_offset()`. Processors can call `store.get_modulated(id)` to read `base + mod_offset`.
+The adapter handles `CLAP_EVENT_PARAM_MOD` events. At the start of each process call, `store.reset_all_mod()` clears per-buffer modulation offsets. Incoming mod events are validated as global, control-rate `state::ModulationLane` routes before writing to `StateStore::set_mod_offset()`. Processors can call `store.get_modulated(id)` to read `base + mod_offset`.
 
 ### MIDI Routing
 

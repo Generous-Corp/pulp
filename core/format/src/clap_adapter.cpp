@@ -148,6 +148,36 @@ void clap_reset(const clap_plugin_t* plugin) {
     self->playhead_prev = {};
 }
 
+bool clap_param_modulation_lane(const PulpClapPlugin& self,
+                                const clap_event_param_mod_t& event,
+                                state::ModulationLane& lane) {
+    const auto param_id = static_cast<state::ParamID>(event.param_id);
+    const auto* info = self.store.info(param_id);
+    if (!info) {
+        return false;
+    }
+
+    lane = state::ModulationLane{
+        .source = {
+            .id = kClapHostModulationSourceId,
+            .scope = state::ModulationScope::Global,
+            .rate = state::ModulationRate::Control,
+            .units = "CLAP PARAM_MOD",
+        },
+        .target = {
+            .param_id = param_id,
+            .scope = state::ModulationScope::Global,
+            .param_rate = info->rate,
+            .modulatable = info->range.step <= 0.0f,
+            .writable = true,
+            .units = info->unit,
+        },
+        .mix = state::ModulationMixMode::Add,
+        .depth = static_cast<float>(event.amount),
+    };
+    return state::validate_modulation_lane(lane).accepted;
+}
+
 clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process_t* process) {
     auto* self = get_self(plugin);
     if (!self->processor) return CLAP_PROCESS_ERROR;
@@ -188,9 +218,12 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
                     static_cast<float>(ev.value));
             } else if (hdr->type == CLAP_EVENT_PARAM_MOD) {
                 const auto ev = load_event<clap_event_param_mod_t>(hdr);
-                self->store.set_mod_offset(
-                    static_cast<state::ParamID>(ev.param_id),
-                    static_cast<float>(ev.amount));
+                state::ModulationLane lane;
+                if (clap_param_modulation_lane(*self, ev, lane)) {
+                    self->store.set_mod_offset(
+                        static_cast<state::ParamID>(ev.param_id),
+                        static_cast<float>(ev.amount));
+                }
             } else if (hdr->type == CLAP_EVENT_PARAM_GESTURE_BEGIN) {
                 const auto ev = load_event<clap_event_param_gesture_t>(hdr);
                 self->store.begin_gesture(static_cast<state::ParamID>(ev.param_id));
