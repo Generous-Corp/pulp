@@ -180,6 +180,14 @@ from cloud_run_prepare import (  # noqa: E402  -- re-exported for in-file consum
     cloud_workflow_dispatch_fields,
 )
 from cloud_run_command import cmd_cloud_run as _cmd_cloud_run  # noqa: E402  -- re-exported for in-file consumers
+from cloud_reporting_commands import (  # noqa: E402  -- re-exported for in-file consumers
+    cmd_cloud_compare as _cmd_cloud_compare,
+    cmd_cloud_defaults as _cmd_cloud_defaults,
+    cmd_cloud_history as _cmd_cloud_history,
+    cmd_cloud_recommend as _cmd_cloud_recommend,
+    cmd_cloud_status as _cmd_cloud_status,
+    cmd_cloud_workflows as _cmd_cloud_workflows,
+)
 from cloud_github_billing import (  # noqa: E402  -- re-exported for in-file consumers
     fetch_github_repo_actions_billing_summary as _fetch_github_repo_actions_billing_summary,
 )
@@ -444,94 +452,64 @@ def refresh_cloud_record(record: dict, repository: str, *, require_snapshot: boo
 
 
 def cmd_cloud_history(args: argparse.Namespace) -> int:
-    config = _load_optional_config()
-    records = filter_cloud_records(
-        list_cloud_records(limit=None),
-        workflow_key=getattr(args, "workflow", None),
-        provider=getattr(args, "provider", None),
+    return _cmd_cloud_history(
+        args,
+        load_optional_config_fn=_load_optional_config,
+        filter_cloud_records_fn=filter_cloud_records,
+        list_cloud_records_fn=list_cloud_records,
+        cloud_history_lines_fn=cloud_history_lines,
+        cloud_record_summary_fn=cloud_record_summary,
+        print_billing_period_summary_fn=print_billing_period_summary,
+        estimate_billing_period_totals_fn=estimate_billing_period_totals,
+        resolve_github_actions_settings_fn=resolve_github_actions_settings,
+        resolve_github_repository_fn=resolve_github_repository,
+        fetch_github_repo_actions_billing_summary_fn=fetch_github_repo_actions_billing_summary,
+        print_github_repo_billing_summary_fn=print_github_repo_billing_summary,
     )
-    if not records:
-        print("No tracked cloud runs found.")
-        return 0
-
-    limit = max(1, int(getattr(args, "limit", 10)))
-    for line in cloud_history_lines(records, config, limit=limit, summary_fn=cloud_record_summary):
-        print(line)
-
-    print()
-    print_billing_period_summary(estimate_billing_period_totals(records, config))
-    if getattr(args, "provider", None) in (None, "github-hosted"):
-        try:
-            repository = resolve_github_repository(resolve_github_actions_settings(config))
-        except ValueError as exc:
-            print_github_repo_billing_summary({"status": "unavailable", "reason": str(exc)})
-        else:
-            print_github_repo_billing_summary(fetch_github_repo_actions_billing_summary(repository, config))
-    return 0
 
 
 def cmd_cloud_compare(args: argparse.Namespace) -> int:
-    config = _load_optional_config()
-    workflow_key = args.workflow or resolve_github_actions_settings(config).get("workflow", "build")
-    summaries = compare_cloud_providers(list_cloud_records(limit=None), config, workflow_key=workflow_key)
-    if not summaries:
-        print(f"No tracked cloud runs found for workflow '{workflow_key}'.")
-        return 0
-
-    print(f"Cloud compare: workflow={workflow_key}\n")
-    for summary in summaries:
-        print(cloud_compare_summary_line(summary))
-        print_billing_period_summary(summary.get("period") or {}, indent="    ")
-    print("\n  note: estimated; verify provider pricing")
-    return 0
+    return _cmd_cloud_compare(
+        args,
+        load_optional_config_fn=_load_optional_config,
+        resolve_github_actions_settings_fn=resolve_github_actions_settings,
+        compare_cloud_providers_fn=compare_cloud_providers,
+        list_cloud_records_fn=list_cloud_records,
+        cloud_compare_summary_line_fn=cloud_compare_summary_line,
+        print_billing_period_summary_fn=print_billing_period_summary,
+    )
 
 
 def cmd_cloud_recommend(args: argparse.Namespace) -> int:
-    config = _load_optional_config()
-    workflow_key = args.workflow or resolve_github_actions_settings(config).get("workflow", "build")
-    provider, reason = recommend_cloud_provider(list_cloud_records(limit=None), config, workflow_key=workflow_key)
-    for line in cloud_recommend_lines(workflow_key, provider, reason):
-        print(line)
-    return 0
+    return _cmd_cloud_recommend(
+        args,
+        load_optional_config_fn=_load_optional_config,
+        resolve_github_actions_settings_fn=resolve_github_actions_settings,
+        recommend_cloud_provider_fn=recommend_cloud_provider,
+        list_cloud_records_fn=list_cloud_records,
+        cloud_recommend_lines_fn=cloud_recommend_lines,
+    )
 
 
 def cmd_cloud_workflows(_args: argparse.Namespace) -> int:
-    for line in cloud_workflow_lines(BUILTIN_GITHUB_WORKFLOWS):
-        print(line)
-    return 0
+    return _cmd_cloud_workflows(
+        _args,
+        builtin_github_workflows=BUILTIN_GITHUB_WORKFLOWS,
+        cloud_workflow_lines_fn=cloud_workflow_lines,
+    )
 
 
 def cmd_cloud_defaults(_args: argparse.Namespace) -> int:
-    config = _load_optional_config()
-    settings = github_actions_settings_for_display(config)
-    repository = ""
-    repository_note = ""
-    repository_variables: dict[str, str] = {}
-    try:
-        resolved_settings = resolve_github_actions_settings(config)
-        settings = resolved_settings
-        repository = resolve_github_repository(resolved_settings)
-    except ValueError as exc:
-        repository_note = str(exc)
-        try:
-            repository = resolve_github_repository(settings)
-        except ValueError:
-            repository = ""
-    else:
-        if gh_available():
-            repository_variables = gh_repo_variables(repository)
-        else:
-            repository_note = "gh CLI unavailable; repo-variable fallbacks not inspected"
-
-    for line in cloud_defaults_lines(
-        config,
-        settings,
-        repository=repository,
-        repository_note=repository_note,
-        repository_variables=repository_variables,
-    ):
-        print(line)
-    return 0
+    return _cmd_cloud_defaults(
+        _args,
+        load_optional_config_fn=_load_optional_config,
+        github_actions_settings_for_display_fn=github_actions_settings_for_display,
+        resolve_github_actions_settings_fn=resolve_github_actions_settings,
+        resolve_github_repository_fn=resolve_github_repository,
+        gh_available_fn=gh_available,
+        gh_repo_variables_fn=gh_repo_variables,
+        cloud_defaults_lines_fn=cloud_defaults_lines,
+    )
 
 
 def cmd_cloud_run(args: argparse.Namespace) -> int:
@@ -566,51 +544,22 @@ def cmd_cloud_run(args: argparse.Namespace) -> int:
 
 
 def cmd_cloud_status(args: argparse.Namespace) -> int:
-    config = _load_optional_config()
-    if args.identifier is None:
-        records = list_cloud_records(limit=args.limit)
-        if not records:
-            print("No tracked cloud runs yet.")
-            return 0
-        for line in cloud_recent_status_lines(records, config, summary_fn=cloud_record_summary):
-            print(line)
-        print_billing_period_summary(estimate_billing_period_totals(list_cloud_records(limit=None), config))
-        return 0
-
-    try:
-        record = find_cloud_record(list_cloud_records(), args.identifier)
-    except ValueError as exc:
-        print(f"Error: {exc}")
-        return 1
-
-    if record is None:
-        print("No matching cloud runs found.")
-        return 1
-
-    if args.refresh:
-        if not gh_available():
-            print("Error: gh CLI not available or not authenticated. Run: gh auth login")
-            return 1
-        try:
-            repository = record.get("repository") or resolve_github_repository(
-                resolve_github_actions_settings(_load_optional_config())
-            )
-        except ValueError as exc:
-            print(f"Error: {exc}")
-            return 1
-        try:
-            record = refresh_cloud_record(record, repository, require_snapshot=True)
-        except RuntimeError as exc:
-            print(f"Error: {exc}")
-            return 1
-
-    rendered_record = normalize_cloud_record(record)
-    rendered_record["cost_summary"] = estimate_cloud_record_cost(rendered_record, config)
-    print(cloud_record_summary(rendered_record, config))
-    for line in cloud_status_detail_lines(record):
-        print(line)
-    print_namespace_usage_summary(rendered_record)
-    print_billing_period_summary(estimate_billing_period_totals(list_cloud_records(limit=None), config))
-    for line in cloud_status_job_lines(record):
-        print(line)
-    return 0
+    return _cmd_cloud_status(
+        args,
+        load_optional_config_fn=_load_optional_config,
+        list_cloud_records_fn=list_cloud_records,
+        cloud_recent_status_lines_fn=cloud_recent_status_lines,
+        cloud_record_summary_fn=cloud_record_summary,
+        print_billing_period_summary_fn=print_billing_period_summary,
+        estimate_billing_period_totals_fn=estimate_billing_period_totals,
+        find_cloud_record_fn=find_cloud_record,
+        gh_available_fn=gh_available,
+        resolve_github_repository_fn=resolve_github_repository,
+        resolve_github_actions_settings_fn=resolve_github_actions_settings,
+        refresh_cloud_record_fn=refresh_cloud_record,
+        normalize_cloud_record_fn=normalize_cloud_record,
+        estimate_cloud_record_cost_fn=estimate_cloud_record_cost,
+        cloud_status_detail_lines_fn=cloud_status_detail_lines,
+        print_namespace_usage_summary_fn=print_namespace_usage_summary,
+        cloud_status_job_lines_fn=cloud_status_job_lines,
+    )
