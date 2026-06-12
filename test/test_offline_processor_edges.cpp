@@ -978,6 +978,46 @@ TEST_CASE("offline render compute policy makes GPU fallback explicit",
     REQUIRE(std::string(decision.reason) == "gpu-unavailable");
 }
 
+TEST_CASE("offline render compute policy is deterministic for offline analysis",
+          "[audio][offline][gpu-boundary][determinism][phase4]") {
+    const std::vector<OfflineRenderComputePolicy> policies = {
+        {
+            .scope = OfflineRenderExecutionScope::OfflineAnalysis,
+            .requested_backend = OfflineRenderComputeBackend::Cpu,
+            .gpu_available = false,
+            .allow_cpu_fallback = false,
+        },
+        {
+            .scope = OfflineRenderExecutionScope::OfflineAnalysis,
+            .requested_backend = OfflineRenderComputeBackend::Gpu,
+            .gpu_available = true,
+            .allow_cpu_fallback = true,
+        },
+        {
+            .scope = OfflineRenderExecutionScope::BackgroundAnalysis,
+            .requested_backend = OfflineRenderComputeBackend::Gpu,
+            .gpu_available = false,
+            .allow_cpu_fallback = true,
+        },
+        {
+            .scope = OfflineRenderExecutionScope::BackgroundAnalysis,
+            .requested_backend = OfflineRenderComputeBackend::Gpu,
+            .gpu_available = false,
+            .allow_cpu_fallback = false,
+        },
+    };
+
+    for (const auto& policy : policies) {
+        const auto first = evaluate_offline_render_compute_policy(policy);
+        const auto second = evaluate_offline_render_compute_policy(policy);
+
+        REQUIRE(second.accepted == first.accepted);
+        REQUIRE(second.backend == first.backend);
+        REQUIRE(second.used_cpu_fallback == first.used_cpu_fallback);
+        REQUIRE(std::string(second.reason) == std::string(first.reason));
+    }
+}
+
 TEST_CASE("offline render compute policy always accepts CPU requests",
           "[audio][offline][gpu-boundary][phase4]") {
     OfflineRenderComputePolicy policy;
