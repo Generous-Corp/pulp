@@ -223,6 +223,32 @@ TEST_CASE("RealtimeResourceSlot publishes prepared resources with deferred recla
     REQUIRE(slot.retired_count_approx() == 0);
 }
 
+TEST_CASE("RealtimeResourceSlot reports retire queue pressure",
+          "[runtime][background-job][rt-handoff][telemetry][phase2]") {
+    struct PreparedResource {
+        int value = 0;
+    };
+
+    RealtimeResourceSlot<PreparedResource, 1> slot;
+
+    REQUIRE(slot.publish(std::make_unique<PreparedResource>(PreparedResource{1})));
+    REQUIRE(slot.publish(std::make_unique<PreparedResource>(PreparedResource{2})));
+    REQUIRE(slot.retired_count_approx() == 1);
+    REQUIRE(slot.retire_overflow_count() == 0);
+
+    REQUIRE_FALSE(slot.publish(std::make_unique<PreparedResource>(PreparedResource{3})));
+    REQUIRE(slot.get() != nullptr);
+    REQUIRE(slot.get()->value == 2);
+    REQUIRE(slot.retired_count_approx() == 1);
+    REQUIRE(slot.retire_overflow_count() == 1);
+
+    REQUIRE(slot.reclaim_retired() == 1);
+    REQUIRE(slot.publish(std::make_unique<PreparedResource>(PreparedResource{3})));
+    REQUIRE(slot.get() != nullptr);
+    REQUIRE(slot.get()->value == 3);
+    REQUIRE(slot.retire_overflow_count() == 1);
+}
+
 TEST_CASE("RealtimeResourceSlot audio read path allocates zero times",
           "[runtime][background-job][rt-handoff][rt-safety][phase2]") {
     struct PreparedResource {
