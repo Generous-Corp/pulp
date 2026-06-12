@@ -7,6 +7,72 @@ from functools import update_wrapper
 from typing import Any
 
 
+CLOUD_HELPER_EXPORTS = (
+    "billing_note_text",
+    "billing_period_window",
+    "cloud_record_sort_key",
+    "cloud_run_path",
+    "compare_cloud_providers",
+    "duration_between",
+    "enrich_cloud_record_provider_metadata",
+    "estimate_billing_period_totals",
+    "estimate_cloud_record_cost",
+    "estimate_github_hosted_cost",
+    "estimate_namespace_cost",
+    "fetch_github_repo_actions_billing_summary",
+    "filter_cloud_records",
+    "find_cloud_record",
+    "format_currency_amount",
+    "format_duration_secs",
+    "format_memory_megabytes",
+    "gh_api_json",
+    "gh_auth_status_text",
+    "gh_current_login",
+    "gh_find_dispatched_run",
+    "gh_repo_name",
+    "gh_repo_variables",
+    "gh_token_scopes",
+    "infer_job_os",
+    "iter_year_months",
+    "load_cloud_record",
+    "load_result",
+    "match_namespace_shape_rate",
+    "median_or_none",
+    "namespace_instance_duration_secs",
+    "namespace_instances_for_run",
+    "normalize_cloud_record",
+    "normalize_github_timestamp",
+    "normalize_namespace_instance",
+    "nsc_available",
+    "nsc_instance_history",
+    "nsc_logged_in",
+    "nsc_run",
+    "nsc_version",
+    "nsc_workspace_info",
+    "parse_colon_separated_fields",
+    "parse_iso_date",
+    "parse_iso_datetime",
+    "parse_optional_bool",
+    "parse_rate_value",
+    "print_billing_period_summary",
+    "print_cloud_field_detail",
+    "print_github_repo_billing_summary",
+    "print_namespace_setup_help",
+    "print_namespace_usage_summary",
+    "provider_billing_note_text",
+    "recommend_cloud_provider",
+    "refresh_cloud_record",
+    "render_selector_value",
+    "resolve_billing_settings",
+    "resolve_github_repository",
+    "save_cloud_record",
+    "summarize_cloud_timing",
+    "summarize_namespace_usage",
+    "summarize_runner_selector",
+    "update_cloud_record_from_run",
+)
+
+
 def _binding(bindings: Mapping[str, Any], name: str) -> Any:
     return bindings[name]
 
@@ -108,3 +174,8 @@ def bind_cloud_helper(bindings: Mapping[str, Any], name: str):
         return getattr(_binding(bindings, "_cloud"), name)(*args, **kwargs)
 
     return update_wrapper(_helper, helper)
+
+
+def install_cloud_helpers(bindings: dict[str, Any], names: tuple[str, ...] = CLOUD_HELPER_EXPORTS) -> None:
+    for name in names:
+        bindings[name] = bind_cloud_helper(bindings, name)

@@ -141,6 +141,14 @@ class CloudBindingsTests(unittest.TestCase):
         self.assertEqual(helper('"macos-15"'), "replacement")
         self.assertEqual(calls[-1], ("replacement", ('"macos-15"',), {}))
 
+    def test_install_cloud_helpers_wires_named_exports(self):
+        bindings, calls = self._bindings()
+        self.mod.install_cloud_helpers(bindings, ("summarize_runner_selector",))
+
+        self.assertIn("summarize_runner_selector", bindings)
+        self.assertEqual(bindings["summarize_runner_selector"]('["linux"]'), "linux,arm64")
+        self.assertEqual(calls, [("summarize_runner_selector", ('["linux"]',), {})])
+
 
 if __name__ == "__main__":
     unittest.main()
