@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 import builtins
-import importlib.util
+from module_test_utils import load_module_from_path
 import pathlib
 import types
 
@@ -12,11 +12,7 @@ MODULE_PATH = pathlib.Path(__file__).with_name("binding_utils.py")
 
 
 def load_module():
-    spec = importlib.util.spec_from_file_location("binding_utils_under_test", MODULE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    return load_module_from_path(MODULE_PATH)
 
 
 class BindingUtilsTests(unittest.TestCase):

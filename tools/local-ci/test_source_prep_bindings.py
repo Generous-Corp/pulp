@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tests for source-prep facade bindings."""
 
-import importlib.util
+from module_test_utils import load_module_from_path
 import types
 import unittest
 from pathlib import Path
@@ -11,11 +11,7 @@ MODULE_PATH = Path(__file__).with_name("source_prep_bindings.py")
 
 
 def load_module():
-    spec = importlib.util.spec_from_file_location("source_prep_bindings_under_test", MODULE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    return load_module_from_path(MODULE_PATH)
 
 
 class SourcePrepBindingsTests(unittest.TestCase):

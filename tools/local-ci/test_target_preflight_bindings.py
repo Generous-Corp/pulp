@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-import importlib.util
+from module_test_utils import load_module_from_path
 from pathlib import Path
 import types
 import unittest
@@ -13,11 +13,7 @@ MODULE_PATH = Path(__file__).with_name("target_preflight_bindings.py")
 
 
 def load_module():
-    spec = importlib.util.spec_from_file_location("target_preflight_bindings_under_test", MODULE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    return load_module_from_path(MODULE_PATH)
 
 
 class TargetPreflightBindingsTests(unittest.TestCase):
