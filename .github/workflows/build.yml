@@ -57,19 +57,19 @@ jobs:
       - id: resolve
         env:
           REQUESTED_PROVIDER: ${{ inputs.runner_provider || vars.PULP_DEFAULT_RUNNER_PROVIDER || 'github-hosted' }}
-          # Linux/Windows runner selection (highest precedence in the resolver):
+          # Linux runner selection (highest precedence in the resolver):
           #   1. workflow_dispatch input (per-run override), else
-          #   2. PULP_LOCAL_{LINUX,WINDOWS}_RUNS_ON_JSON repo var — OPT-IN routing
-          #      to the self-hosted blackbook pool (e.g. ["self-hosted","Linux",
+          #   2. PULP_LOCAL_LINUX_RUNS_ON_JSON repo var — OPT-IN routing
+          #      to the self-hosted Linux pool (e.g. ["self-hosted","Linux",
           #      "ARM64","pulp-build-linux"]); served by tools/ci/tart-runner-linux.sh
-          #      / qemu-runner-windows.sh, toggled per-platform in the Shipyard GUI.
+          #      and toggled in the Shipyard GUI.
           #   3. unset → '' → resolver falls through to github-hosted (default).
-          # Only set the repo var when blackbook is reliably serving that lane, or
-          # legs route to a label with no online runner and queue. The pilot labels
-          # (pulp-build-{linux,windows}) are non-required, so a stuck pilot can't
-          # block PRs.
+          # Windows is intentionally different: the required "Windows (x64)"
+          # gate must stay on real GitHub-hosted windows-latest until a local
+          # x64 lane exists. The current local Windows pool is ARM64/QEMU and
+          # may smoke WoA translation, but it is not the authoritative x64 gate.
           EXPLICIT_LINUX_RUNNER_SELECTOR_JSON: ${{ inputs.linux_runner_selector_json || vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || '' }}
-          EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON: ${{ inputs.windows_runner_selector_json || vars.PULP_LOCAL_WINDOWS_RUNS_ON_JSON || '' }}
+          EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON: ${{ inputs.windows_runner_selector_json || '' }}
           # macOS routing has three layers, evaluated in order (highest
           # precedence first). The Python block below composes
           # `EXPLICIT_MACOS_RUNNER_SELECTOR_JSON` from these inputs so the
