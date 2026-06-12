@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from functools import update_wrapper
 from typing import Any
 
 
@@ -98,3 +99,12 @@ def format_ci_comment(bindings: Mapping[str, Any], result: dict) -> str:
 
 def open_pr_list_lines(bindings: Mapping[str, Any], prs: list[dict]) -> list[str]:
     return _binding(bindings, "_cloud").open_pr_list_lines(prs)
+
+
+def bind_cloud_helper(bindings: Mapping[str, Any], name: str):
+    helper = getattr(_binding(bindings, "_cloud"), name)
+
+    def _helper(*args, **kwargs):
+        return getattr(_binding(bindings, "_cloud"), name)(*args, **kwargs)
+
+    return update_wrapper(_helper, helper)

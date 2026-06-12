@@ -54,6 +54,7 @@ class CloudBindingsTests(unittest.TestCase):
             cloud_record_summary=make_runner("cloud_record_summary", "summary"),
             format_ci_comment=make_runner("format_ci_comment", "comment"),
             open_pr_list_lines=make_runner("open_pr_list_lines", ["#42 feature/x"]),
+            summarize_runner_selector=make_runner("summarize_runner_selector", "linux,arm64"),
         )
         return {"_cloud": cloud}, calls
 
@@ -123,6 +124,22 @@ class CloudBindingsTests(unittest.TestCase):
         ])
         self.assertEqual(calls[0][2], {"limit": 5})
         self.assertEqual(calls[1][1], ({"id": 1}, {"cfg": True}))
+
+    def test_bind_cloud_helper_delegates_late_to_cloud_module(self):
+        bindings, calls = self._bindings()
+        helper = self.mod.bind_cloud_helper(bindings, "summarize_runner_selector")
+
+        self.assertEqual(helper('["linux", "arm64"]'), "linux,arm64")
+        self.assertEqual(helper.__name__, "runner")
+        self.assertEqual(calls, [("summarize_runner_selector", ('["linux", "arm64"]',), {})])
+
+        def replacement(value):
+            calls.append(("replacement", (value,), {}))
+            return "replacement"
+
+        bindings["_cloud"].summarize_runner_selector = replacement
+        self.assertEqual(helper('"macos-15"'), "replacement")
+        self.assertEqual(calls[-1], ("replacement", ('"macos-15"',), {}))
 
 
 if __name__ == "__main__":
