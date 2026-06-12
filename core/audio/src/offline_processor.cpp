@@ -20,6 +20,8 @@ bool has_consistent_channel_lengths(const AudioFileData& input) {
 
 bool has_valid_block_schedule(const OfflineRenderOptions& options) {
     if (options.fallback_block_size <= 0) return false;
+    if (options.tempo_bpm <= 0.0) return false;
+    if (options.render_speed_ratio <= 0.0) return false;
     for (int block_size : options.block_size_schedule) {
         if (block_size <= 0) return false;
     }
@@ -99,6 +101,15 @@ std::optional<AudioFileData> offline_render(
         context.frames = frames_this_block;
         context.scheduled_block_size = block_size;
         context.sample_rate = static_cast<double>(input.sample_rate);
+        context.time_seconds =
+            static_cast<double>(context.sample_position)
+            / context.sample_rate;
+        context.tempo_bpm = options.tempo_bpm;
+        context.position_beats =
+            options.start_position_beats
+            + (static_cast<double>(pos) / context.sample_rate)
+                * (options.tempo_bpm / 60.0);
+        context.render_speed_ratio = options.render_speed_ratio;
         context.deterministic_seed = options.deterministic_seed;
 
         render_fn(in_block.data(), out_block.data(), static_cast<int>(channels),
