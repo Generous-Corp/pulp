@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 from macos_desktop_action_env import apply_macos_direct_launch_env
+from macos_desktop_action_interaction import macos_desktop_event_interaction_summary
 from macos_desktop_action_manifest import build_macos_action_manifest
 
 
@@ -207,35 +208,23 @@ def run_macos_local_smoke(
                 capture_macos_window_fn(int(window["windowId"]), before_screenshot_path)
 
             if interaction_requested:
-                if click_point:
-                    content_point = parse_coordinate_pair_fn(click_point, flag_name="--click")
-                else:
-                    content_point = resolve_view_tree_click_point_fn(
-                        view_tree or {},
-                        view_id=click_view_id,
-                        view_type=click_view_type,
-                        view_text=click_view_text,
-                        view_label=click_view_label,
-                    )
-                screen_point = screen_point_for_content_point_fn(window, content_size, content_point)
-                activation_payload = activate_macos_pid_fn(int(pid or 0)) if pid else {"activated": False}
-                dispatch_payload = dispatch_macos_click_fn(*screen_point)
-                interaction_summary = {
-                    "mode": "desktop-event",
-                    "click": {
-                        "content_point": {"x": content_point[0], "y": content_point[1]},
-                        "screen_point": {"x": screen_point[0], "y": screen_point[1]},
-                        "selector": desktop_click_selector_fn(
-                            click_view_id=click_view_id,
-                            click_view_type=click_view_type,
-                            click_view_text=click_view_text,
-                            click_view_label=click_view_label,
-                            include_point=False,
-                        ),
-                        "activation": activation_payload,
-                        "dispatch": dispatch_payload,
-                    },
-                }
+                interaction_summary = macos_desktop_event_interaction_summary(
+                    window=window,
+                    content_size=content_size,
+                    pid=pid,
+                    click_point=click_point,
+                    click_view_id=click_view_id,
+                    click_view_type=click_view_type,
+                    click_view_text=click_view_text,
+                    click_view_label=click_view_label,
+                    view_tree=view_tree,
+                    parse_coordinate_pair_fn=parse_coordinate_pair_fn,
+                    resolve_view_tree_click_point_fn=resolve_view_tree_click_point_fn,
+                    screen_point_for_content_point_fn=screen_point_for_content_point_fn,
+                    activate_macos_pid_fn=activate_macos_pid_fn,
+                    dispatch_macos_click_fn=dispatch_macos_click_fn,
+                    desktop_click_selector_fn=desktop_click_selector_fn,
+                )
                 if settle_secs > 0:
                     sleep_fn(settle_secs)
 
