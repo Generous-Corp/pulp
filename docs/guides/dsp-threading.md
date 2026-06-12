@@ -296,6 +296,10 @@ notifications when UI polling falls behind.
 For ordered audio-thread/UI-thread event streams, `runtime::SpscQueue` exposes
 the same producer-side overflow count and telemetry snapshot.
 
+`midi::MidiMessageCollector` combines the producer queue snapshot with its
+consumer-owned pending-ring occupancy and future-event drop counter, making
+UI-to-audio MIDI back-pressure visible without inspecting the audio callback.
+
 Keep this path boring: write fixed-size counters, meter snapshots, and bounded
 queues from `process()`. Move FFTs, exported waveforms, parameter sweeps, and
 other expensive analysis to an offline command, frozen copy, or validation
