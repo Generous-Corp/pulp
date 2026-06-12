@@ -47,6 +47,11 @@ reconfiguration. It does not call `Processor::prepare()` and does not replace
 the last successful prepared render context, so batch tools can probe tighter
 budgets without invalidating the processor that is already prepared.
 
+Memory-pressure callbacks run on an owner thread and are allowed to drop
+rebuildable caches so a later prepare retry fits tighter limits. They must keep
+the prepared core state coherent, keep fixed per-block scratch accounted in
+`estimate_prepare_resources()`, and never perform audio-thread recovery work.
+
 ## Read parameters once per block, not per sample
 
 `store.get_value(id)` is a `std::atomic<float>::load(relaxed)`. Cheap,

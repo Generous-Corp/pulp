@@ -614,6 +614,9 @@ When `try_prepare()` fails a non-zero limit, it returns before
 `Processor::prepare()` and leaves the previous successful prepared render
 context intact. Use `last_prepare_limit_failure()` for diagnostics, then either
 continue rendering with the prior prepare or retry with adjusted limits.
+If the host also reports memory pressure, a processor may shed rebuildable
+owner-thread caches before the retry, but it must keep prepared core state and
+fixed per-block scratch accounting valid.
 
 Input and output views may alias for in-place processing.
 

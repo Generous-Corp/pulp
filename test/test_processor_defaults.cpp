@@ -143,6 +143,46 @@ public:
     int voices = 0;
 };
 
+class MemoryPressureReportingProcessor : public PlainProcessor {
+public:
+    void prepare(const PrepareContext&) override { prepared = true; }
+
+    PrepareResourceUsage estimate_prepare_resources(
+        const PrepareContext& context) const override {
+        return {
+            .persistent_bytes = prepared_core_bytes + advisory_cache_bytes +
+                                critical_cache_bytes,
+            .block_scratch_bytes = block_scratch_bytes,
+            .block_size = context.max_buffer_size,
+            .input_channels = context.input_channels,
+            .output_channels = context.output_channels,
+            .parameter_events = parameter_events,
+            .midi_events = midi_events,
+            .voices = voices,
+        };
+    }
+
+    void on_memory_pressure(MemoryPressure level) override {
+        ++memory_pressure_calls;
+        last_pressure = level;
+        advisory_cache_bytes = 0;
+        if (level == MemoryPressure::Critical) {
+            critical_cache_bytes = 0;
+        }
+    }
+
+    std::size_t prepared_core_bytes = 0;
+    std::size_t advisory_cache_bytes = 0;
+    std::size_t critical_cache_bytes = 0;
+    std::size_t block_scratch_bytes = 0;
+    int parameter_events = 0;
+    int midi_events = 0;
+    int voices = 0;
+    int memory_pressure_calls = 0;
+    MemoryPressure last_pressure = MemoryPressure::Advisory;
+    bool prepared = false;
+};
+
 } // namespace
 
 TEST_CASE("PluginDescriptor defaults to conservative stereo effect metadata",
@@ -715,6 +755,61 @@ TEST_CASE("Processor prepare resource estimates can be checked against host limi
     context.resource_limits.max_voices = 4;
     REQUIRE(p.check_prepare_resource_limits(context) ==
             PrepareResourceLimit::Voices);
+}
+
+TEST_CASE("Processor memory pressure can shrink rebuildable prepare caches",
+          "[format][processor-defaults][prepare-budget][memory-pressure][phase2]") {
+    MemoryPressureReportingProcessor p;
+    p.prepared_core_bytes = 4096;
+    p.advisory_cache_bytes = 2048;
+    p.critical_cache_bytes = 8192;
+    p.block_scratch_bytes = 1024;
+    p.parameter_events = 32;
+    p.midi_events = 64;
+    p.voices = 8;
+
+    PrepareContext context;
+    context.max_buffer_size = 256;
+    context.input_channels = 2;
+    context.output_channels = 2;
+    context.resource_limits.max_block_scratch_bytes = 1024;
+    context.resource_limits.max_total_bytes = 7000;
+    context.resource_limits.max_parameter_events = 32;
+    context.resource_limits.max_midi_events = 64;
+    context.resource_limits.max_voices = 8;
+
+    p.prepare(context);
+    REQUIRE(p.prepared);
+
+    auto estimate = p.estimate_prepare_resources(context);
+    REQUIRE(estimate.persistent_bytes == 14'336);
+    REQUIRE(estimate.block_scratch_bytes == 1024);
+    REQUIRE(estimate.total_bytes() == 15'360);
+    REQUIRE(p.check_prepare_resource_limits(context) ==
+            PrepareResourceLimit::TotalBytes);
+
+    p.on_memory_pressure(Processor::MemoryPressure::Advisory);
+    REQUIRE(p.memory_pressure_calls == 1);
+    REQUIRE(p.last_pressure == Processor::MemoryPressure::Advisory);
+    estimate = p.estimate_prepare_resources(context);
+    REQUIRE(estimate.persistent_bytes == 12'288);
+    REQUIRE(estimate.block_scratch_bytes == 1024);
+    REQUIRE(p.check_prepare_resource_limits(context) ==
+            PrepareResourceLimit::TotalBytes);
+    REQUIRE(p.prepared);
+
+    p.on_memory_pressure(Processor::MemoryPressure::Critical);
+    REQUIRE(p.memory_pressure_calls == 2);
+    REQUIRE(p.last_pressure == Processor::MemoryPressure::Critical);
+    estimate = p.estimate_prepare_resources(context);
+    REQUIRE(estimate.persistent_bytes == 4096);
+    REQUIRE(estimate.block_scratch_bytes == 1024);
+    REQUIRE(estimate.parameter_events == 32);
+    REQUIRE(estimate.midi_events == 64);
+    REQUIRE(estimate.voices == 8);
+    REQUIRE(p.check_prepare_resource_limits(context) ==
+            PrepareResourceLimit::None);
+    REQUIRE(p.prepared);
 }
 
 TEST_CASE("ProcessContext defaults represent stopped 4/4 playback at 120 BPM",
