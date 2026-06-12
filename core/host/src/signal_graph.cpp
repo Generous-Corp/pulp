@@ -869,38 +869,35 @@ bool SignalGraph::prepare(double sample_rate, int max_block_size) {
     total_latency_samples_.store(0, std::memory_order_relaxed);
     clear_prepared_stats_();
 
-    if (max_block_size <= 0) return false;
-    if (limits_.max_block_size > 0 && max_block_size > limits_.max_block_size) {
+    const auto generated_validation = validate_generated_graph(max_block_size);
+    switch (generated_validation.reason) {
+    case GeneratedGraphValidationRejectReason::None:
+        break;
+    case GeneratedGraphValidationRejectReason::InvalidBlockSize:
+        return false;
+    case GeneratedGraphValidationRejectReason::MaxBlockSizeExceeded:
         runtime::log_error(
             "SignalGraph: max block size {} exceeds configured limit {}",
-            max_block_size,
-            limits_.max_block_size);
+            generated_validation.actual,
+            generated_validation.limit);
         return false;
-    }
-    if (nodes_.size() > limits_.max_nodes) {
+    case GeneratedGraphValidationRejectReason::NodeLimitExceeded:
         runtime::log_error(
             "SignalGraph: node count {} exceeds configured limit {}",
-            nodes_.size(),
-            limits_.max_nodes);
+            generated_validation.actual,
+            generated_validation.limit);
         return false;
-    }
-    if (connections_.size() > limits_.max_connections) {
+    case GeneratedGraphValidationRejectReason::ConnectionLimitExceeded:
         runtime::log_error(
             "SignalGraph: connection count {} exceeds configured limit {}",
-            connections_.size(),
-            limits_.max_connections);
+            generated_validation.actual,
+            generated_validation.limit);
         return false;
-    }
-    std::size_t port_count = 0;
-    for (const auto& n : nodes_) {
-        port_count += static_cast<std::size_t>(std::max(0, n.num_input_ports));
-        port_count += static_cast<std::size_t>(std::max(0, n.num_output_ports));
-    }
-    if (port_count > limits_.max_ports) {
+    case GeneratedGraphValidationRejectReason::PortLimitExceeded:
         runtime::log_error(
             "SignalGraph: port count {} exceeds configured limit {}",
-            port_count,
-            limits_.max_ports);
+            generated_validation.actual,
+            generated_validation.limit);
         return false;
     }
 
@@ -982,6 +979,61 @@ bool SignalGraph::prepare(double sample_rate, int max_block_size) {
 void SignalGraph::set_limits(GraphLimits limits) {
     limits_ = limits;
     invalidate_live_();
+}
+
+std::size_t SignalGraph::total_declared_ports_() const {
+    std::size_t port_count = 0;
+    for (const auto& n : nodes_) {
+        port_count += static_cast<std::size_t>(std::max(0, n.num_input_ports));
+        port_count += static_cast<std::size_t>(std::max(0, n.num_output_ports));
+    }
+    return port_count;
+}
+
+SignalGraph::GeneratedGraphValidation
+SignalGraph::validate_generated_graph(int max_block_size) const {
+    if (max_block_size <= 0) {
+        return {
+            false,
+            GeneratedGraphValidationRejectReason::InvalidBlockSize,
+            max_block_size < 0 ? 0 : static_cast<std::size_t>(max_block_size),
+            1,
+        };
+    }
+    if (limits_.max_block_size > 0 && max_block_size > limits_.max_block_size) {
+        return {
+            false,
+            GeneratedGraphValidationRejectReason::MaxBlockSizeExceeded,
+            static_cast<std::size_t>(max_block_size),
+            static_cast<std::size_t>(limits_.max_block_size),
+        };
+    }
+    if (nodes_.size() > limits_.max_nodes) {
+        return {
+            false,
+            GeneratedGraphValidationRejectReason::NodeLimitExceeded,
+            nodes_.size(),
+            limits_.max_nodes,
+        };
+    }
+    if (connections_.size() > limits_.max_connections) {
+        return {
+            false,
+            GeneratedGraphValidationRejectReason::ConnectionLimitExceeded,
+            connections_.size(),
+            limits_.max_connections,
+        };
+    }
+    const std::size_t port_count = total_declared_ports_();
+    if (port_count > limits_.max_ports) {
+        return {
+            false,
+            GeneratedGraphValidationRejectReason::PortLimitExceeded,
+            port_count,
+            limits_.max_ports,
+        };
+    }
+    return {};
 }
 
 void SignalGraph::release() {

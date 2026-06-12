@@ -85,6 +85,14 @@ and maximum block size. Exceeding a limit fails `prepare()` before plugin
 prepare or compiled-snapshot allocation, leaving the graph silent until a
 valid prepare succeeds.
 
+Generated or scripted graph importers should call
+`validate_generated_graph(max_block_size)` after applying importer-specific
+limits and before calling `prepare()`. The validation result is a pure preflight
+check: it reports the first rejected budget as a stable reason plus actual and
+limit counts, and it does not clear or replace an already prepared snapshot.
+`prepare()` uses the same validation internally, but remains the mutating
+lifecycle step that drops any live snapshot before rebuilding a new one.
+
 After a successful `prepare()`, `SignalGraph::prepared_stats()` reports the
 compiled graph's node/order/connection/port counts, prepared maximum block
 size, and fixed audio, automation, and delay-line buffer bytes. The snapshot is

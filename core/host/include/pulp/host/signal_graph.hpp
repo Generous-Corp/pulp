@@ -179,6 +179,23 @@ public:
         int max_block_size = 16384;
     };
 
+    enum class GeneratedGraphValidationRejectReason : uint8_t {
+        None,
+        InvalidBlockSize,
+        MaxBlockSizeExceeded,
+        NodeLimitExceeded,
+        ConnectionLimitExceeded,
+        PortLimitExceeded,
+    };
+
+    struct GeneratedGraphValidation {
+        bool accepted = true;
+        GeneratedGraphValidationRejectReason reason =
+            GeneratedGraphValidationRejectReason::None;
+        std::size_t actual = 0;
+        std::size_t limit = 0;
+    };
+
     struct PreparedStats {
         std::size_t node_count = 0;
         std::size_t ordered_node_count = 0;
@@ -344,6 +361,7 @@ public:
     // snapshot allocation or plugin prepare.
     void set_limits(GraphLimits limits);
     GraphLimits limits() const { return limits_; }
+    GeneratedGraphValidation validate_generated_graph(int max_block_size) const;
     PreparedStats prepared_stats() const;
 
     // Process one block of audio through the graph
@@ -533,6 +551,7 @@ private:
     std::atomic<std::size_t> prepared_total_buffer_bytes_{0};
 
     bool has_path(NodeId from, NodeId to) const;
+    std::size_t total_declared_ports_() const;
     std::shared_ptr<CompiledGraph> compile_(double sample_rate, int max_block_size);
     void publish_prepared_stats_(const CompiledGraph& cg);
     void clear_prepared_stats_();
