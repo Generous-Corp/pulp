@@ -1,10 +1,9 @@
 """Cloud provider integration for local CI — GitHub Actions + Namespace.
 
-Extracted from local_ci.py (R2-1, #2645): Namespace plumbing (nsc_*),
-cloud-record / billing / provider-metadata helpers, provider
-comparison/recommendation, GitHub helper facade seams, and the cmd_cloud_*
-subcommands. Public symbols are re-exported into local_ci.py for the non-cloud
-commands + main() dispatch.
+Extracted from local_ci.py (R2-1, #2645): cloud billing /
+provider-metadata helpers, provider comparison/recommendation, GitHub and
+Namespace helper facade seams, and the cmd_cloud_* subcommands. Public symbols
+are re-exported into local_ci.py for the non-cloud commands + main() dispatch.
 
 load_optional_config is still reached through the local_ci.py facade for
 compatibility, but its default implementation is installed by
@@ -15,7 +14,6 @@ from __future__ import annotations
 
 import argparse
 import base64
-import json
 import os
 import re
 import shlex
@@ -109,9 +107,6 @@ from github_workflows import (  # noqa: E402  -- re-exported for in-file consume
     summarize_workflow_provider_defaults,
     resolve_cli_dispatch_field_values,
 )
-from provenance import (  # noqa: E402  -- re-exported for in-file consumers
-    normalize_result,
-)
 from job_queue import (  # noqa: E402  -- re-exported for in-file consumers
     normalize_job,
     load_queue_unlocked,
@@ -133,6 +128,14 @@ from cloud_records import (  # noqa: E402  -- re-exported for in-file consumers
     parse_iso_datetime,
     render_selector_value,
     summarize_runner_selector,
+)
+from cloud_record_store import (  # noqa: E402  -- re-exported for in-file consumers
+    cloud_record_summary as _cloud_record_summary,
+    cloud_run_path as _cloud_run_path,
+    list_cloud_records as _list_cloud_records,
+    load_cloud_record as _load_cloud_record,
+    load_result as _load_result,
+    save_cloud_record as _save_cloud_record,
 )
 from cloud_billing import (  # noqa: E402  -- re-exported for in-file consumers
     billing_note_text,
@@ -216,68 +219,42 @@ def _load_optional_config():
 
 
 def load_result(path: Path) -> dict:
-    return normalize_result(json.loads(path.read_text()))
+    return _load_result(path)
 
 
 def cloud_run_path(dispatch_id: str) -> Path:
-    return cloud_runs_dir() / f"{dispatch_id}.json"
+    return _cloud_run_path(dispatch_id)
 
 
 def save_cloud_record(record: dict) -> Path:
-    ensure_state_dirs()
-    normalized = normalize_cloud_record(record)
-    path = cloud_run_path(normalized["dispatch_id"])
-    atomic_write_text(path, json.dumps(normalized, indent=2) + "\n")
-    return path
+    return _save_cloud_record(
+        record,
+        ensure_state_dirs_fn=ensure_state_dirs,
+        cloud_run_path_fn=cloud_run_path,
+        atomic_write_text_fn=atomic_write_text,
+    )
 
 
 def load_cloud_record(path: Path) -> dict:
-    return normalize_cloud_record(json.loads(path.read_text()))
+    return _load_cloud_record(path)
 
 
 def list_cloud_records(limit: int | None = None) -> list[dict]:
-    ensure_state_dirs()
-    records: list[dict] = []
-    for path in cloud_runs_dir().glob("*.json"):
-        try:
-            records.append(load_cloud_record(path))
-        except (OSError, json.JSONDecodeError):
-            continue
-    records.sort(key=cloud_record_sort_key, reverse=True)
-    if limit is not None:
-        return records[:limit]
-    return records
+    return _list_cloud_records(
+        limit=limit,
+        ensure_state_dirs_fn=ensure_state_dirs,
+        cloud_runs_dir_fn=cloud_runs_dir,
+        load_cloud_record_fn=load_cloud_record,
+    )
 
 
 def cloud_record_summary(record: dict, config: dict | None = None) -> str:
-    record = normalize_cloud_record(record)
-    status = record.get("status", "unknown").upper()
-    conclusion = (record.get("conclusion") or "").upper()
-    state = status if not conclusion else f"{status}/{conclusion}"
-    provider = record.get("provider_resolved") or record.get("provider_requested") or "github-hosted"
-    ref = record.get("head_branch") or record.get("requested_ref") or "?"
-    summary = (
-        f"[{record.get('dispatch_id', '?')}] {record.get('workflow_key', '?')} "
-        f"ref={ref} provider={provider} {state}"
+    return _cloud_record_summary(
+        record,
+        config,
+        estimate_cloud_record_cost_fn=estimate_cloud_record_cost,
+        format_currency_amount_fn=format_currency_amount,
     )
-    selector = summarize_runner_selector(record.get("runner_selector_json", ""))
-    if selector:
-        summary += f" selector={selector}"
-    if record.get("run_id"):
-        summary += f" gha#{record['run_id']}"
-    duration = format_duration_secs(record.get("duration_secs"))
-    if duration:
-        summary += f" duration={duration}"
-    provider_runtime = format_duration_secs((record.get("usage_summary") or {}).get("provider_runtime_secs"))
-    if provider_runtime:
-        summary += f" provider_time={provider_runtime}"
-    if config is not None:
-        cost = estimate_cloud_record_cost(record, config)
-        if cost.get("status") == "estimated":
-            amount = format_currency_amount(cost.get("estimated_total"), cost.get("currency", "USD"))
-            if amount:
-                summary += f" cost=est {amount}"
-    return summary
 
 
 def estimate_billing_period_totals(
