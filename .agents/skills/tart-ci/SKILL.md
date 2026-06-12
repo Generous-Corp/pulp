@@ -21,7 +21,7 @@ Run every macOS build/validation in a **throwaway VM cloned from a versioned gol
 |---|---|
 | `setup-ci-host.sh` | **One-command host onboarding** (opinionated): install tart/sshpass, set `~/VMs` (no FDA), acquire the golden (`--copy-from` or bake), install the launchd runner agent with a `--class` label. Mirrors `docs/guides/mac-ci-host-setup.md`. |
 | `tart-provision.sh` | Build/refresh layered golden images; `verify`/`tag`/`resize`/`manifest` helpers. Subcommands: `base` → `apple-xcode` → `pulp` → `runner`. |
-| `tart-runner.sh` | **Ephemeral per-job GitHub Actions runner.** Mints a JIT (single-job) runner config, clones the runner golden, boots with host ccache mounted, runs one job, destroys the VM. `--loop` boots a fresh VM only when there's queued work AND a free VM slot (`running_macos_vms < cap`); `--once` for a pilot; `--cap N` overrides the per-host cap. Registers under a **static** name per (host, slot) — `pulp-<class>-<NN>`, derived from the `pulp-build-<class>` label (override with `--name` / `--name-prefix` / `--slot` or `PULP_RUNNER_NAME[_PREFIX]` / `PULP_RUNNER_SLOT`). `--print-name` echoes the derived name and exits (pure; no gh/tart — what `test_tart_runner.py` asserts). |
+| `tart-runner.sh` | **Ephemeral per-job GitHub Actions runner.** Mints a JIT (single-job) runner config, clones the runner golden, boots with host ccache mounted, runs one job, destroys the VM. `--loop` boots a fresh VM only when there's queued work for `--workflow-name` / `PULP_RUNNER_WORKFLOW_NAME` (default `Build and Test`) AND a free VM slot (`running_macos_vms < cap`); `--once` for a pilot; `--cap N` overrides the per-host cap. Registers under a **static** name per (host, slot) — `pulp-<class>-<NN>`, derived from the `pulp-build-<class>` label (override with `--name` / `--name-prefix` / `--slot` or `PULP_RUNNER_NAME[_PREFIX]` / `PULP_RUNNER_SLOT`). `--print-name` echoes the derived name and exits (pure; no gh/tart — what `test_tart_runner.py` asserts). |
 | `tart-run-job.sh` | **Direct** ephemeral build (no GitHub runner): clone golden → virtio-fs mount host caches → build+ctest in-guest → discard. Useful for Shipyard `backend` / manual builds. |
 | `pulp-worktree.sh` | Per-branch worktrees + shared ccache (host-side dev isolation; complements the VM lane). |
 | `.shipyard/vm-image.toml` | **The per-repo reuse unit** (see below). |
@@ -75,6 +75,7 @@ runner supervisor — the analog of `tart-runner.sh` for macOS:
 | Supervisor | VM | Golden | Labels (pilot) | LaunchAgent |
 |---|---|---|---|---|
 | `tools/ci/tart-runner.sh` | Tart macOS | `pulp-build-runner` | `…,pulp-build` | `com.danielraffel.pulp.tart-runner` |
+| `tools/ci/tart-runner.sh --workflow-name Coverage` | Tart macOS | `pulp-build-runner` | `…,pulp-coverage-vm-macos` | `com.danielraffel.pulp.tart-runner-coverage-macos` |
 | `tools/ci/tart-runner-linux.sh` | Tart Linux | `pulp-linux-build` | `…,Linux,ARM64,pulp-build-linux` | `com.danielraffel.pulp.tart-runner-linux` |
 | `tools/ci/qemu-runner-windows.sh` | QEMU Windows | `pulp-windows-build-*.qcow2` | `…,Windows,ARM64,pulp-build-windows` | `com.danielraffel.pulp.qemu-runner-windows` |
 
@@ -83,7 +84,15 @@ All three: mint a JIT (single-job) runner config → boot a throwaway clone
 baked `~/actions-runner` agent once → discard. The goldens carry the
 `actions-runner-{linux-arm64,win-arm64}` agent (Windows install-if-missing if a
 golden predates the bake). `--loop` only boots when there's queued
-`Build and Test` work.
+`Build and Test` work. The macOS coverage lane is the exception: it runs the
+same Tart supervisor with `--workflow-name Coverage` and a dedicated
+`pulp-coverage-vm-macos` label. Keep `--queue-match-labels` enabled for this
+lane so hosted Coverage jobs do not boot a local VM that cannot claim them.
+
+Coverage/sanitizer/release lanes must never reuse the warm macOS gate labels or
+the shared `pulp-build-vm` build-pilot label. Coverage routing belongs in
+`PULP_COVERAGE_MACOS_RUNS_ON_JSON` or a one-off `macos_runner_selector_json`
+dispatch, with a dedicated ephemeral label such as `pulp-coverage-vm-macos`.
 
 **Per-platform opt-in/out** is the Shipyard macOS GUI's "Serve CI builds from
 this Mac" switch: each lane is a `CIServingLane` toggled by `launchctl

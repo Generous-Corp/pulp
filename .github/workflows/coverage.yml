@@ -168,7 +168,9 @@ jobs:
   # No behavior change when the repo variables are unset — matches today's
   # single-job baseline on Linux and adds macOS/Windows on the standard
   # GitHub-hosted labels. Set PULP_COVERAGE_<OS>_RUNS_ON_JSON to route any
-  # one leg to Namespace without a code change.
+  # one leg without a code change. Coverage deliberately does not read the
+  # Namespace build variables because coverage/sanitizer/release lanes must
+  # not spill onto the warm macOS gate pool.
   resolve-runners:
     runs-on: ubuntu-latest
     outputs:
@@ -187,9 +189,9 @@ jobs:
           EXPLICIT_MACOS_RUNNER_SELECTOR_JSON: ${{ inputs.macos_runner_selector_json || '' }}
           EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON: ${{ inputs.windows_runner_selector_json || '' }}
           LINUX_RUNS_ON_JSON: ${{ vars.PULP_COVERAGE_LINUX_RUNS_ON_JSON }}
-          MACOS_RUNS_ON_JSON: ${{ vars.PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON || vars.PULP_COVERAGE_MACOS_RUNS_ON_JSON }}
+          MACOS_RUNS_ON_JSON: ${{ vars.PULP_COVERAGE_MACOS_RUNS_ON_JSON }}
           WINDOWS_RUNS_ON_JSON: ${{ vars.PULP_COVERAGE_WINDOWS_RUNS_ON_JSON }}
-          ANDROID_KOTLIN_RUNS_ON_JSON: ${{ vars.PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON || vars.PULP_COVERAGE_ANDROID_KOTLIN_RUNS_ON_JSON }}
+          ANDROID_KOTLIN_RUNS_ON_JSON: ${{ vars.PULP_COVERAGE_ANDROID_KOTLIN_RUNS_ON_JSON }}
         run: |
           set -euo pipefail
           resolve() {
@@ -334,11 +336,10 @@ jobs:
     # Hard backstop against a wedged matrix leg. A healthy coverage build
     # runs ~1h; 150 min leaves generous headroom for a slow self-hosted
     # runner without ever letting a leg squat for GitHub's 6h job limit.
-    # Critically, this also bounds the QUEUED state: when a self-hosted
-    # macOS runner pool (routed via PULP_COVERAGE_MACOS_RUNS_ON_JSON) is
-    # saturated, a leg that never gets a runner now fails on this timeout
-    # instead of hanging indefinitely — which previously kept the whole
-    # Coverage run `in_progress` for 4h+ and starved the downstream gate.
+    # This bounds the running state once a runner is assigned. Queued
+    # self-hosted legs are handled by the explicit queue watchdog below,
+    # because job-level timeouts do not start while GitHub is still waiting
+    # for a matching runner.
     timeout-minutes: 150
     strategy:
       # Don't cancel other OSes when one fails — coverage is advisory

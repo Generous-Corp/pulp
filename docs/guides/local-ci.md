@@ -650,6 +650,12 @@ hard-coded defaults they had before this mechanism was lifted into a
 shared resolver. Nothing changes by default.** Setting one variable moves
 one job. Nothing more.
 
+Coverage is stricter than the build matrix. It reads explicit
+`workflow_dispatch` inputs and `PULP_COVERAGE_*_RUNS_ON_JSON`, not
+`PULP_NAMESPACE_BUILD_*`. If coverage moves local, use a dedicated ephemeral
+label such as `pulp-coverage-vm-macos`; do not point coverage at `pulp-build`,
+`pulp-build-vm`, or the warm macOS gate pool.
+
 ### Global default (`build.yml` matrix only)
 
 | Variable | Effect | Example |
@@ -719,6 +725,20 @@ manual run:
 gh workflow run sanitizers.yml \
   -f tsan_runner_selector_json='["self-hosted","macos","arm64","sanitizer"]'
 ```
+
+`coverage.yml` accepts `linux_runner_selector_json`,
+`macos_runner_selector_json`, and `windows_runner_selector_json` inputs. The
+macOS Tart coverage proof path is:
+
+```bash
+gh workflow run coverage.yml \
+  -f macos_runner_selector_json='["self-hosted","macOS","ARM64","pulp-coverage-vm-macos"]'
+```
+
+Only set `PULP_COVERAGE_MACOS_RUNS_ON_JSON` to that selector after the proof
+run uploads the `os-macos` Codecov flag. The coverage LaunchAgent uses
+`--queue-match-labels` so existing hosted Coverage jobs do not accidentally
+boot a local coverage VM.
 
 `build.yml` has the equivalent `linux_runner_selector_json`,
 `windows_runner_selector_json`, and `macos_runner_selector_json` inputs.

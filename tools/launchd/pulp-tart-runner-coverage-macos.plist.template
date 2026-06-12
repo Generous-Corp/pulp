@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Dedicated Tart macOS Coverage supervisor.
+
+  This is intentionally separate from the build/gate Tart runner:
+  - labels use pulp-coverage-vm-macos, never pulp-build or pulp-build-vm
+  - the queue gate wakes for the Coverage workflow, not Build and Test
+  - repo routing uses PULP_COVERAGE_MACOS_RUNS_ON_JSON, not Namespace vars
+
+  Install like the build runner template, replacing $PULP_REPO and $HOME with
+  absolute paths because launchd does not expand shell variables:
+
+    sed -e "s|\$PULP_REPO|$PWD|g" -e "s|\$HOME|$HOME|g" \
+      tools/launchd/pulp-tart-runner-coverage-macos.plist.template \
+      > ~/Library/LaunchAgents/com.danielraffel.pulp.tart-runner-coverage-macos.plist
+
+  Load:
+    launchctl load ~/Library/LaunchAgents/com.danielraffel.pulp.tart-runner-coverage-macos.plist
+
+  Stop:
+    launchctl unload ~/Library/LaunchAgents/com.danielraffel.pulp.tart-runner-coverage-macos.plist
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.danielraffel.pulp.tart-runner-coverage-macos</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>$PULP_REPO/tools/ci/tart-runner.sh</string>
+        <string>--loop</string>
+        <string>--workflow-name</string>
+        <string>Coverage</string>
+        <string>--labels</string>
+        <string>self-hosted,macOS,ARM64,pulp-coverage-vm-macos</string>
+        <string>--queue-match-labels</string>
+        <string>--name-prefix</string>
+        <string>pulp-coverage-macos</string>
+        <string>--slot</string>
+        <string>1</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>$PULP_REPO</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>$HOME/Library/Logs/pulp/tart-runner-coverage-macos.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>$HOME/Library/Logs/pulp/tart-runner-coverage-macos.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:/usr/bin:/bin</string>
+        <key>TART_HOME</key>
+        <string>/Volumes/Workshop/VMs</string>
+    </dict>
+</dict>
+</plist>
