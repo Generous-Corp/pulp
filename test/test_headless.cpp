@@ -490,6 +490,47 @@ TEST_CASE("HeadlessHost forwards explicit runtime mode maintenance flags",
     REQUIRE(last_context.should_reset_dsp_state());
 }
 
+TEST_CASE("HeadlessHost renders deterministic offline AudioFileData blocks",
+          "[headless][offline][advanced][phase3]") {
+    pulp::format::HeadlessHost host(create_test_gain);
+    host.prepare(48000.0, 4);
+    host.state().set_value(1, 6.0f);
+
+    pulp::audio::AudioFileData input;
+    input.sample_rate = 48000;
+    input.channels = {
+        {0.25f, 0.5f, 0.75f},
+        {-0.25f, -0.5f, -0.75f},
+    };
+
+    pulp::audio::OfflineRenderOptions options;
+    options.block_size_schedule = {2, 1};
+    options.start_sample_position = 48000;
+    options.start_position_beats = 4.0;
+    options.tempo_bpm = 90.0;
+    options.render_speed_ratio = 2.0;
+
+    auto output = host.render_offline(input, options);
+
+    REQUIRE(output.has_value());
+    REQUIRE(output->sample_rate == input.sample_rate);
+    REQUIRE(output->num_channels() == 2);
+    REQUIRE(output->num_frames() == 3);
+    const float expected_gain = std::pow(10.0f, 6.0f / 20.0f);
+    REQUIRE_THAT(output->channels[0][0],
+                 Catch::Matchers::WithinRel(0.25f * expected_gain, 0.01f));
+    REQUIRE_THAT(output->channels[1][2],
+                 Catch::Matchers::WithinRel(-0.75f * expected_gain, 0.01f));
+    REQUIRE(last_context.process_mode == pulp::format::ProcessMode::Offline);
+    REQUIRE(last_context.render_speed_hint ==
+            pulp::format::RenderSpeedHint::FasterThanRealtime);
+    REQUIRE(last_context.num_samples == 1);
+    REQUIRE(last_context.position_samples == 48002);
+    REQUIRE_THAT(last_context.position_beats,
+                 WithinAbs(4.0 + 2.0 / 48000.0 * 1.5, 1e-12));
+    REQUIRE_THAT(last_context.tempo_bpm, WithinAbs(90.0, 1e-12));
+}
+
 TEST_CASE("HeadlessHost forwards explicit MIDI buffers",
           "[headless][coverage][issue-647]") {
     pulp::format::HeadlessHost host(create_test_gain);

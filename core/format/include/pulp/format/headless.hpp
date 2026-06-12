@@ -5,6 +5,7 @@
 /// audio device. Use cases: CI validation, batch rendering, golden-file
 /// tests, benchmarks.
 
+#include <pulp/audio/offline_processor.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
 
@@ -93,6 +94,14 @@ public:
                  midi::MidiBuffer& midi_out,
                  const state::ParameterEventQueue& param_events,
                  ProcessContext context);
+
+    /// Render an effect-shaped in-memory audio file through this processor.
+    ///
+    /// The host must already be prepared for at least the largest scheduled
+    /// block size. The rendered artifact has the same channel count as @p input.
+    std::optional<audio::AudioFileData> render_offline(
+        const audio::AudioFileData& input,
+        const audio::OfflineRenderOptions& options = {});
 
     /// Release processing resources. Safe to call multiple times.
     void release();

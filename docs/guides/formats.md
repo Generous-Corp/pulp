@@ -625,6 +625,7 @@ Key methods:
 | `try_prepare(sample_rate, max_buffer_size, in_ch, out_ch, limits)` | Initialize only if the processor's prepare-resource estimate fits the supplied non-zero limits |
 | `process(output, input)` | Process audio (no MIDI) |
 | `process(output, input, midi_in, midi_out)` | Process audio with MIDI |
+| `render_offline(input, options)` | Render effect-shaped `AudioFileData` through deterministic offline blocks |
 | `release()` | Release processing resources |
 | `state()` | Access the `StateStore` for parameter reads/writes |
 | `save_state()` | Serialize current plugin state to bytes |
@@ -651,6 +652,12 @@ context intact. Use `last_prepare_limit_failure()` for diagnostics, then either
 continue rendering with the prior prepare or retry with adjusted limits.
 
 Input and output views may alias for in-place processing.
+
+Use `render_offline()` when a batch/golden path already has an
+`AudioFileData` artifact and needs `OfflineRenderOptions` metadata forwarded to
+`ProcessContext`: scheduled block size, sample position, tempo, beat position,
+and render-speed hint. It is effect-shaped today, so the rendered artifact has
+the same channel count as the input.
 
 Format adapter runtime-mode tests should assert the adapter-owned source of
 truth rather than inferring mode from transport. VST3 maps
