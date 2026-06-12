@@ -997,9 +997,8 @@ void SignalGraph::process(audio::BufferView<float>& output,
                 audio::BufferView<float> out_view(
                     rt.output_ptrs.data(), rt.output_ptrs.size(),
                     static_cast<std::size_t>(num_samples));
-                std::vector<const float*> in_const(rt.input_ptrs.begin(), rt.input_ptrs.end());
                 audio::BufferView<const float> in_c(
-                    in_const.data(), in_const.size(),
+                    rt.input_const_ptrs.data(), rt.input_const_ptrs.size(),
                     static_cast<std::size_t>(num_samples));
                 rt.midi_out.clear();
 
