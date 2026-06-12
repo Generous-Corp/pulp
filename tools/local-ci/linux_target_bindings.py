@@ -9,6 +9,14 @@ def _binding(bindings: dict, name: str):
     return bindings[name]
 
 
+def linux_required_remote_tools(bindings: dict) -> dict:
+    return _binding(bindings, "_linux_target").LINUX_REQUIRED_REMOTE_TOOLS
+
+
+def linux_optional_remote_tools(bindings: dict) -> dict:
+    return _binding(bindings, "_linux_target").LINUX_OPTIONAL_REMOTE_TOOLS
+
+
 def probe_linux_launch_backend(bindings: dict, host: str) -> dict:
     return _binding(bindings, "_linux_target").probe_linux_launch_backend(
         host,

@@ -43,6 +43,8 @@ class LinuxTargetBindingsTests(unittest.TestCase):
             return inner
 
         linux_target = types.SimpleNamespace(
+            LINUX_REQUIRED_REMOTE_TOOLS={"git": {"required": True}},
+            LINUX_OPTIONAL_REMOTE_TOOLS={"xvfb": {"required": False}},
             probe_linux_launch_backend=capture("launch", {"mode": "xvfb"}),
             probe_linux_remote_tooling=capture("tooling", {"git_found": True}),
             linux_tooling_detail=capture("detail", "git version"),
@@ -51,6 +53,8 @@ class LinuxTargetBindingsTests(unittest.TestCase):
         bindings = self._bindings(linux_target)
         probe = {"git_found": True}
 
+        self.assertIs(self.mod.linux_required_remote_tools(bindings), linux_target.LINUX_REQUIRED_REMOTE_TOOLS)
+        self.assertIs(self.mod.linux_optional_remote_tools(bindings), linux_target.LINUX_OPTIONAL_REMOTE_TOOLS)
         self.assertEqual(self.mod.probe_linux_launch_backend(bindings, "ubuntu"), {"mode": "xvfb"})
         self.assertEqual(captured["launch"][0], ("ubuntu",))
         self.assertIs(captured["launch"][1]["ssh_command_result_fn"], bindings["ssh_command_result"])

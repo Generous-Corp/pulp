@@ -7,6 +7,18 @@ def _binding(bindings: dict, name: str):
     return bindings[name]
 
 
+def windows_required_remote_tools(bindings: dict) -> dict:
+    return _binding(bindings, "_windows_target").WINDOWS_REQUIRED_REMOTE_TOOLS
+
+
+def windows_optional_remote_tools(bindings: dict) -> dict:
+    return _binding(bindings, "_windows_target").WINDOWS_OPTIONAL_REMOTE_TOOLS
+
+
+def windows_default_remote_repo_dirname(bindings: dict) -> str:
+    return _binding(bindings, "_windows_target").WINDOWS_DEFAULT_REMOTE_REPO_DIRNAME
+
+
 def default_windows_session_task_name(bindings: dict, target_name: str) -> str:
     return _binding(bindings, "_windows_target").default_windows_session_task_name(target_name)
 

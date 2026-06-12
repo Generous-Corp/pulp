@@ -42,6 +42,9 @@ class WindowsTargetBindingsTests(unittest.TestCase):
             return inner
 
         windows_target = types.SimpleNamespace(
+            WINDOWS_REQUIRED_REMOTE_TOOLS={"git": {"required": True}},
+            WINDOWS_OPTIONAL_REMOTE_TOOLS={"gh": {"required": False}},
+            WINDOWS_DEFAULT_REMOTE_REPO_DIRNAME="pulp-validate",
             default_windows_session_task_name=capture("task", "Task-win"),
             desktop_target_contract=capture("contract", {"kind": "windows-session-agent"}),
             windows_path_join=capture("join", r"C:\Pulp"),
@@ -58,6 +61,9 @@ class WindowsTargetBindingsTests(unittest.TestCase):
         config = {}
         probe = {"git_found": True}
 
+        self.assertIs(self.mod.windows_required_remote_tools(bindings), windows_target.WINDOWS_REQUIRED_REMOTE_TOOLS)
+        self.assertIs(self.mod.windows_optional_remote_tools(bindings), windows_target.WINDOWS_OPTIONAL_REMOTE_TOOLS)
+        self.assertEqual(self.mod.windows_default_remote_repo_dirname(bindings), "pulp-validate")
         self.assertEqual(self.mod.default_windows_session_task_name(bindings, "win"), "Task-win")
         self.assertEqual(captured["task"][0], ("win",))
         self.assertEqual(self.mod.desktop_target_contract(bindings, "win", {"adapter": "windows-session-agent"}), {"kind": "windows-session-agent"})

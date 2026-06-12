@@ -26,6 +26,36 @@ class LocalCiFacadeBindingTests(unittest.TestCase):
 
         self.assertEqual(offenders, [])
 
+    def test_public_facade_constants_delegate_through_binding_modules(self) -> None:
+        tree = ast.parse(MODULE_PATH.read_text())
+        offenders: list[str] = []
+
+        for node in tree.body:
+            if not isinstance(node, ast.Assign):
+                continue
+            public_constant_targets = [
+                target.id
+                for target in node.targets
+                if isinstance(target, ast.Name)
+                and target.id.isupper()
+                and not target.id.startswith("_")
+            ]
+            if not public_constant_targets:
+                continue
+            for child in ast.walk(node.value):
+                if not isinstance(child, ast.Attribute):
+                    continue
+                value = child.value
+                if (
+                    isinstance(value, ast.Name)
+                    and value.id.startswith("_")
+                    and not value.id.endswith("_bindings")
+                ):
+                    offenders.extend(f"{target}:{node.lineno}" for target in public_constant_targets)
+                    break
+
+        self.assertEqual(offenders, [])
+
     @staticmethod
     def _references_binding_module(node: ast.FunctionDef) -> bool:
         for child in ast.walk(node):

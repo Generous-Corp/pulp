@@ -254,8 +254,8 @@ import queue_orchestrator as _queue_orchestrator  # noqa: E402
 import execution as _execution  # noqa: E402
 import execution_bindings as _execution_bindings  # noqa: E402
 
-HEARTBEAT_INTERVAL_SECS = _execution.HEARTBEAT_INTERVAL_SECS
-STUCK_IDLE_SECS = _execution.STUCK_IDLE_SECS
+HEARTBEAT_INTERVAL_SECS = _execution_bindings.heartbeat_interval_secs(globals())
+STUCK_IDLE_SECS = _execution_bindings.stuck_idle_secs(globals())
 import reporting as _reporting  # noqa: E402
 import runner_state as _runner_state  # noqa: E402
 import source_prep as _source_prep  # noqa: E402
@@ -276,11 +276,11 @@ import windows_probe_bindings as _windows_probe_bindings  # noqa: E402
 import windows_target as _windows_target  # noqa: E402
 import windows_target_bindings as _windows_target_bindings  # noqa: E402
 
-WINDOWS_REQUIRED_REMOTE_TOOLS = _windows_target.WINDOWS_REQUIRED_REMOTE_TOOLS
-WINDOWS_OPTIONAL_REMOTE_TOOLS = _windows_target.WINDOWS_OPTIONAL_REMOTE_TOOLS
-WINDOWS_DEFAULT_REMOTE_REPO_DIRNAME = _windows_target.WINDOWS_DEFAULT_REMOTE_REPO_DIRNAME
-LINUX_REQUIRED_REMOTE_TOOLS = _linux_target.LINUX_REQUIRED_REMOTE_TOOLS
-LINUX_OPTIONAL_REMOTE_TOOLS = _linux_target.LINUX_OPTIONAL_REMOTE_TOOLS
+WINDOWS_REQUIRED_REMOTE_TOOLS = _windows_target_bindings.windows_required_remote_tools(globals())
+WINDOWS_OPTIONAL_REMOTE_TOOLS = _windows_target_bindings.windows_optional_remote_tools(globals())
+WINDOWS_DEFAULT_REMOTE_REPO_DIRNAME = _windows_target_bindings.windows_default_remote_repo_dirname(globals())
+LINUX_REQUIRED_REMOTE_TOOLS = _linux_target_bindings.linux_required_remote_tools(globals())
+LINUX_OPTIONAL_REMOTE_TOOLS = _linux_target_bindings.linux_optional_remote_tools(globals())
 
 
 def bundle_ref_name(job_id: str) -> str:

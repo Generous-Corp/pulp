@@ -16,6 +16,14 @@ def _print_binding(bindings: Mapping[str, Any]) -> Any:
     return bindings.get("print", builtins.print)
 
 
+def heartbeat_interval_secs(bindings: Mapping[str, Any]) -> float:
+    return _binding(bindings, "_execution").HEARTBEAT_INTERVAL_SECS
+
+
+def stuck_idle_secs(bindings: Mapping[str, Any]) -> float:
+    return _binding(bindings, "_execution").STUCK_IDLE_SECS
+
+
 def remote_commit_error(bindings: Mapping[str, Any], target_name: str, host: str, job: dict) -> str:
     return _binding(bindings, "_execution").remote_commit_error(target_name, host, job)
 

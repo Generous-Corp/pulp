@@ -121,6 +121,8 @@ class ExecutionBindingsTests(unittest.TestCase):
         bindings["target_exception_result"] = object()
         bindings["ps_literal"] = object()
 
+        self.assertEqual(self.mod.heartbeat_interval_secs(bindings), 15.0)
+        self.assertEqual(self.mod.stuck_idle_secs(bindings), 90.0)
         self.assertEqual(self.mod.remote_commit_error(bindings, "mac", "host", {"id": "job"}), "mac:host:job")
         self.assertEqual(self.mod.parse_progress_marker(bindings, "line"), {"line": "line"})
         self.assertEqual(self.mod.prepared_state_root(bindings, "mac", "full"), Path("/prepared/mac/full"))
