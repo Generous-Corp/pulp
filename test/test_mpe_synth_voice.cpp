@@ -461,16 +461,58 @@ TEST_CASE("MpeVoiceAllocator exposes voice-count telemetry",
     REQUIRE(alloc.telemetry().steal_count == 0);
 }
 
+TEST_CASE("MpeVoiceAllocator evaluates optional runtime budget from voice telemetry",
+          "[midi][mpe][budget-policy][phase4]") {
+    MpeVoiceAllocator<TestVoice> alloc{2};
+    alloc.dispatch(note_on_event(1, 60, 100, 1));
+    alloc.dispatch(note_on_event(1, 62, 100, 2));
+    alloc.dispatch(note_off_event(1, 1));
+
+    REQUIRE(alloc.estimate_optional_runtime_cost() == 168);
+
+    pulp::runtime::RuntimeBudgetFrame exact(168);
+    auto report = alloc.evaluate_optional_runtime_budget(
+        exact, pulp::runtime::RuntimeWorkLane::Background);
+    REQUIRE(report.telemetry.polyphony == 2);
+    REQUIRE(report.telemetry.active_voice_count == 2);
+    REQUIRE(report.telemetry.releasing_voice_count == 1);
+    REQUIRE(report.telemetry.last_was_glide);
+    REQUIRE(report.estimated_cost == 168);
+    REQUIRE(report.decision.action == pulp::runtime::RuntimeBudgetAction::Run);
+    REQUIRE(report.should_run_optional_work());
+    REQUIRE(report.frame_stats.run_count == 1);
+    REQUIRE(report.frame_stats.remaining_budget == 0);
+
+    pulp::runtime::RuntimeBudgetFrame tight(167);
+    report = alloc.evaluate_optional_runtime_budget(
+        tight, pulp::runtime::RuntimeWorkLane::Background);
+    REQUIRE(report.decision.action == pulp::runtime::RuntimeBudgetAction::Bypass);
+    REQUIRE_FALSE(report.should_run_optional_work());
+    REQUIRE(report.frame_stats.bypass_count == 1);
+
+    pulp::runtime::RuntimeBudgetPolicy policy;
+    policy.shed_background_on_overload = true;
+    pulp::runtime::RuntimeBudgetFrame overloaded(1024, policy, true);
+    report = alloc.evaluate_optional_runtime_budget(
+        overloaded, pulp::runtime::RuntimeWorkLane::Background);
+    REQUIRE(report.decision.action == pulp::runtime::RuntimeBudgetAction::Shed);
+    REQUIRE(report.frame_stats.shed_count == 1);
+}
+
 TEST_CASE("MpeVoiceAllocator telemetry path allocates zero times",
           "[midi][mpe][telemetry][rt-safety][phase2]") {
     MpeVoiceAllocator<TestVoice> alloc{2};
     alloc.dispatch(note_on_event(1, 60, 100, 1));
     alloc.dispatch(note_on_event(1, 62, 100, 2));
     alloc.dispatch(note_off_event(1, 1));
+    pulp::runtime::RuntimeBudgetFrame frame(1024);
 
     pulp::test::RtAllocationProbe probe;
 
     (void)alloc.telemetry();
+    (void)alloc.estimate_optional_runtime_cost();
+    (void)alloc.evaluate_optional_runtime_budget(
+        frame, pulp::runtime::RuntimeWorkLane::Opportunistic);
     (void)alloc.active_count();
     (void)alloc.releasing_count();
     (void)alloc.steal_count();

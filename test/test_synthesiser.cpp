@@ -615,16 +615,57 @@ TEST_CASE("Synthesiser exposes voice-count telemetry",
     REQUIRE(synth.telemetry().steal_count == 0);
 }
 
+TEST_CASE("Synthesiser evaluates optional runtime budget from voice telemetry",
+          "[midi][synth][budget-policy][phase4]") {
+    Synthesiser<TestVoice> synth(2);
+    synth.note_on(0, 60, 100);
+    synth.note_on(0, 64, 100);
+    synth.note_off(0, 60);
+
+    REQUIRE(synth.estimate_optional_runtime_cost() == 168);
+
+    pulp::runtime::RuntimeBudgetFrame exact(168);
+    auto report = synth.evaluate_optional_runtime_budget(
+        exact, pulp::runtime::RuntimeWorkLane::Background);
+    REQUIRE(report.telemetry.polyphony == 2);
+    REQUIRE(report.telemetry.active_voice_count == 2);
+    REQUIRE(report.telemetry.releasing_voice_count == 1);
+    REQUIRE(report.estimated_cost == 168);
+    REQUIRE(report.decision.action == pulp::runtime::RuntimeBudgetAction::Run);
+    REQUIRE(report.should_run_optional_work());
+    REQUIRE(report.frame_stats.run_count == 1);
+    REQUIRE(report.frame_stats.remaining_budget == 0);
+
+    pulp::runtime::RuntimeBudgetFrame tight(167);
+    report = synth.evaluate_optional_runtime_budget(
+        tight, pulp::runtime::RuntimeWorkLane::Background);
+    REQUIRE(report.decision.action == pulp::runtime::RuntimeBudgetAction::Bypass);
+    REQUIRE_FALSE(report.should_run_optional_work());
+    REQUIRE(report.frame_stats.bypass_count == 1);
+
+    pulp::runtime::RuntimeBudgetPolicy policy;
+    policy.shed_background_on_overload = true;
+    pulp::runtime::RuntimeBudgetFrame overloaded(1024, policy, true);
+    report = synth.evaluate_optional_runtime_budget(
+        overloaded, pulp::runtime::RuntimeWorkLane::Background);
+    REQUIRE(report.decision.action == pulp::runtime::RuntimeBudgetAction::Shed);
+    REQUIRE(report.frame_stats.shed_count == 1);
+}
+
 TEST_CASE("Synthesiser voice telemetry path allocates zero times",
           "[midi][synth][telemetry][rt-safety][phase2]") {
     Synthesiser<TestVoice> synth(2);
     synth.note_on(0, 60, 100);
     synth.note_on(0, 64, 100);
     synth.note_off(0, 60);
+    pulp::runtime::RuntimeBudgetFrame frame(1024);
 
     pulp::test::RtAllocationProbe probe;
 
     (void)synth.telemetry();
+    (void)synth.estimate_optional_runtime_cost();
+    (void)synth.evaluate_optional_runtime_budget(
+        frame, pulp::runtime::RuntimeWorkLane::Opportunistic);
     (void)synth.active_count();
     (void)synth.releasing_count();
     (void)synth.steal_count();
