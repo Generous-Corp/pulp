@@ -78,8 +78,17 @@ session.
    git apply /tmp/promote.patch
    git diff core/format/include/pulp/format/host_quirks.hpp
    ```
-8. **Open a PR** that includes the patch plus the filled-in
-   scripts under `docs/validation/daw-bench/results/<date>/`.
+8. **Write the evidence manifest** beside the filled-in result
+   markdown. Use the schema in [`results/README.md`](results/README.md)
+   and validate it before promoting tiers:
+   ```bash
+   python3 tools/scripts/check_daw_bench_evidence.py \
+       docs/validation/daw-bench/results/<date> \
+       --require-any
+   ```
+9. **Open a PR** that includes the patch plus the filled-in
+   scripts and `.daw-bench.json` manifest under
+   `docs/validation/daw-bench/results/<date>/`.
 
 ## What the bench plugin logs
 
@@ -127,6 +136,10 @@ When a per-DAW session is complete:
    linked from a gist.
 3. Run the aggregator + include the resulting patch in the PR
    that promotes the tier flips.
+4. Run `tools/scripts/check_daw_bench_evidence.py` over the dated
+   results folder. The checker rejects placeholders, missing logs or
+   external log links, unknown observed statuses, bad dates, and manifests
+   that do not point back to a checked-in manual script.
 
 Where the catalog row says "Reference evidence" — that's a
 *study trail*, not a porting source. The Pulp bench reproduces the
