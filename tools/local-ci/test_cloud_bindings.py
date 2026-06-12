@@ -146,6 +146,29 @@ class CloudBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["summarize_runner_selector"]('["linux"]'), "linux,arm64")
         self.assertEqual(calls, [("summarize_runner_selector", ('["linux"]',), {})])
 
+    def test_install_cloud_helpers_wires_command_and_github_exports(self):
+        bindings, calls = self._bindings()
+
+        self.mod.install_cloud_helpers(
+            bindings,
+            (
+                "cmd_cloud_run",
+                "gh_available",
+                "list_cloud_records",
+                "open_pr_list_lines",
+            ),
+        )
+
+        args = object()
+        self.assertEqual(bindings["cmd_cloud_run"](args), 15)
+        self.assertTrue(bindings["gh_available"]())
+        self.assertEqual(bindings["list_cloud_records"](limit=5), [{"dispatch_id": "abc"}])
+        self.assertEqual(bindings["open_pr_list_lines"]([{"number": 42}]), ["#42 feature/x"])
+        self.assertEqual(
+            [call[0] for call in calls],
+            ["cmd_cloud_run", "gh_available", "list_cloud_records", "open_pr_list_lines"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
