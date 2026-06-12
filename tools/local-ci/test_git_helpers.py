@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import importlib.util
 import pathlib
 import subprocess
 import tempfile
@@ -11,16 +10,14 @@ import unittest
 from datetime import datetime
 from unittest import mock
 
+from module_test_utils import load_module_from_path
+
 
 MODULE_PATH = pathlib.Path(__file__).with_name("git_helpers.py")
 
 
 def load_module():
-    spec = importlib.util.spec_from_file_location("git_helpers_under_test", MODULE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    return load_module_from_path(MODULE_PATH)
 
 
 class GitHelpersTests(unittest.TestCase):
