@@ -97,6 +97,16 @@ set_tests_properties(cmake-pulp-add-binary-data-encoder PROPERTIES
     LABELS "cmake;binary-data;issue-898;slow"
     TIMEOUT 60)
 
+# Windows FetchContent base-dir smoke — guards the WebGPU prebuilt
+# subbuild path from exceeding MSBuild's MAX_PATH limit in deep Actions
+# workspaces. Runs under `cmake -P`, so it does not need a Windows host.
+add_test(NAME cmake-fetchcontent-base-dir
+    COMMAND ${CMAKE_COMMAND} -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_fetchcontent_base_dir.cmake)
+set_tests_properties(cmake-fetchcontent-base-dir PROPERTIES
+    LABELS "cmake;fetchcontent;windows;issue-4039"
+    TIMEOUT 30)
+
 # Install-layout regression for issue-905 follow-up: when the SDK is
 # installed via `cmake --install`, the Python encoder MUST be bundled
 # alongside PulpUtils.cmake so find_package(Pulp) consumers can call

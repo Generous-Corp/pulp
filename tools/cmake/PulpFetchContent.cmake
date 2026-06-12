@@ -30,6 +30,38 @@ function(pulp_default_fetchcontent_cache_root out_var)
     endif()
 endfunction()
 
+function(pulp_configure_fetchcontent_base_dir)
+    if(NOT WIN32)
+        return()
+    endif()
+
+    if(DEFINED FETCHCONTENT_BASE_DIR AND NOT "${FETCHCONTENT_BASE_DIR}" STREQUAL "")
+        return()
+    endif()
+
+    if(DEFINED ENV{PULP_FETCHCONTENT_BASE_DIR} AND NOT "$ENV{PULP_FETCHCONTENT_BASE_DIR}" STREQUAL "")
+        set(FETCHCONTENT_BASE_DIR "$ENV{PULP_FETCHCONTENT_BASE_DIR}" CACHE PATH
+            "Base directory for FetchContent dependency subbuilds" FORCE)
+        return()
+    endif()
+
+    if(DEFINED ENV{LOCALAPPDATA} AND NOT "$ENV{LOCALAPPDATA}" STREQUAL "")
+        set(_pulp_fetchcontent_base "$ENV{LOCALAPPDATA}/Pulp/fc")
+    elseif(DEFINED ENV{USERPROFILE} AND NOT "$ENV{USERPROFILE}" STREQUAL "")
+        set(_pulp_fetchcontent_base "$ENV{USERPROFILE}/AppData/Local/Pulp/fc")
+    else()
+        set(_pulp_fetchcontent_base "${CMAKE_BINARY_DIR}/fc")
+    endif()
+
+    # MSBuild still trips over MAX_PATH in generated FetchContent subbuilds.
+    # Keep transient dependency build trees out of deep Actions workspaces.
+    set(FETCHCONTENT_BASE_DIR "${_pulp_fetchcontent_base}" CACHE PATH
+        "Base directory for FetchContent dependency subbuilds" FORCE)
+    unset(_pulp_fetchcontent_base)
+endfunction()
+
+pulp_configure_fetchcontent_base_dir()
+
 function(pulp_sanitize_cache_suffix input out_var)
     string(REGEX REPLACE "[^A-Za-z0-9._-]+" "_" sanitized "${input}")
     string(REGEX REPLACE "_+" "_" sanitized "${sanitized}")
