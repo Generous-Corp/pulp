@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 from macos_desktop_action_env import apply_macos_direct_launch_env
+from macos_desktop_action_manifest import build_macos_action_manifest
 
 
 def run_macos_local_smoke(
@@ -247,38 +248,29 @@ def run_macos_local_smoke(
                 pid, window = wait_for_macos_bundle_window_fn(active_bundle_id, min(timeout_secs, 2.0))
                 capture_macos_window_fn(int(window["windowId"]), screenshot_path)
 
-        manifest = {
-            "target": "mac",
-            "adapter": "macos-local",
-            "action": action_name,
-            "label": label or (bundle_id or Path((launch_command or "").split()[0]).stem),
-            "pid": pid,
-            "started_at": started_at,
-            "completed_at": now_iso_fn(),
-            "window": window,
-            **launch_descriptor,
-            "artifacts": {
-                "bundle_dir": str(bundle_dir),
-                "screenshot": str(screenshot_path),
-                "stdout": str(log_path),
-                "stderr": str(err_path),
-            },
-        }
-        if capture_before and interaction_requested:
-            manifest["artifacts"]["before_screenshot"] = str(before_screenshot_path)
-            if before_screenshot_path.exists() and screenshot_path.exists():
-                manifest["artifacts"]["image_change"] = image_change_summary_fn(
-                    before_screenshot_path,
-                    screenshot_path,
-                    diff_output_path=diff_screenshot_path,
-                )
-                if diff_screenshot_path.exists():
-                    manifest["artifacts"]["diff_screenshot"] = str(diff_screenshot_path)
-        if inspector_summary is not None:
-            manifest["artifacts"]["ui_snapshot"] = str(ui_snapshot_path)
-            manifest["inspector"] = inspector_summary
-        if interaction_summary is not None:
-            manifest["interaction"] = interaction_summary
+        manifest = build_macos_action_manifest(
+            action_name=action_name,
+            label=label,
+            bundle_id=bundle_id,
+            launch_command=launch_command,
+            pid=pid,
+            started_at=started_at,
+            completed_at=now_iso_fn(),
+            window=window,
+            launch_descriptor=launch_descriptor,
+            bundle_dir=bundle_dir,
+            screenshot_path=screenshot_path,
+            before_screenshot_path=before_screenshot_path,
+            diff_screenshot_path=diff_screenshot_path,
+            ui_snapshot_path=ui_snapshot_path,
+            log_path=log_path,
+            err_path=err_path,
+            capture_before=capture_before,
+            interaction_requested=interaction_requested,
+            inspector_summary=inspector_summary,
+            interaction_summary=interaction_summary,
+            image_change_summary_fn=image_change_summary_fn,
+        )
         attach_desktop_source_to_manifest_fn(manifest, source_context or source_request)
         atomic_write_text_fn(bundle_dir / "manifest.json", json.dumps(manifest, indent=2) + "\n")
         write_desktop_run_rollups_fn(config, target_name="mac")
