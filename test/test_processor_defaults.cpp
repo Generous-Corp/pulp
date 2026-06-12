@@ -45,6 +45,58 @@ public:
     int process_calls = 0;
 };
 
+class MultiOutputInstrumentProcessor : public PlainProcessor {
+public:
+    using PlainProcessor::process;
+
+    PluginDescriptor descriptor() const override {
+        PluginDescriptor d;
+        d.category = PluginCategory::Instrument;
+        d.accepts_midi = true;
+        d.input_buses.clear();
+        d.output_buses = {
+            {"Main 5.1 Out", 6, false},
+            {"Cue Out", 2, true},
+            {"Stem Out", 2, true},
+        };
+        return d;
+    }
+
+    void process(ProcessBuffers& audio,
+                 pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&,
+                 const ProcessContext&) override {
+        ++process_buffer_calls;
+        saw_no_inputs = audio.inputs.empty() && audio.main_input() == nullptr;
+        saw_layout_ok = audio.layouts_match_descriptors();
+        saw_storage_ok = audio.active_buses_have_storage();
+
+        if (auto* main = audio.main_output()) {
+            for (std::size_t c = 0; c < main->num_channels(); ++c) {
+                float* dst = main->channel_ptr(c);
+                for (std::size_t i = 0; i < main->num_samples(); ++i) {
+                    dst[i] = 10.0f + static_cast<float>(c);
+                }
+            }
+        }
+
+        if (auto* cue = audio.outputs.find_by_name("Cue Out");
+            cue && cue->active()) {
+            for (std::size_t c = 0; c < cue->buffer.num_channels(); ++c) {
+                float* dst = cue->buffer.channel_ptr(c);
+                for (std::size_t i = 0; i < cue->buffer.num_samples(); ++i) {
+                    dst[i] = 20.0f + static_cast<float>(c);
+                }
+            }
+        }
+    }
+
+    int process_buffer_calls = 0;
+    bool saw_no_inputs = false;
+    bool saw_layout_ok = false;
+    bool saw_storage_ok = false;
+};
+
 class CustomEditorSizeProcessor : public PlainProcessor {
 public:
     std::pair<uint32_t, uint32_t> editor_size() const override {
@@ -369,6 +421,108 @@ TEST_CASE("ProcessBuffers models surround instruments with auxiliary outputs",
     REQUIRE(buffers.outputs.find_by_index(2) == &outputs[2]);
     REQUIRE(buffers.layouts_match_descriptors());
     REQUIRE(buffers.active_buses_have_storage());
+}
+
+TEST_CASE("Processor rich process renders multi-output instrument buses",
+          "[format][processor-defaults][process-buffers][phase3][instrument][multi-output]") {
+    MultiOutputInstrumentProcessor processor;
+    const auto desc = processor.descriptor();
+    REQUIRE(desc.category == PluginCategory::Instrument);
+    REQUIRE(desc.input_buses.empty());
+    REQUIRE(desc.output_buses.size() == 3);
+
+    constexpr std::size_t kFrames = 8;
+    std::array<float, kFrames> main_front_left{};
+    std::array<float, kFrames> main_front_right{};
+    std::array<float, kFrames> main_center{};
+    std::array<float, kFrames> main_lfe{};
+    std::array<float, kFrames> main_surround_left{};
+    std::array<float, kFrames> main_surround_right{};
+    std::array<float, kFrames> cue_left{};
+    std::array<float, kFrames> cue_right{};
+    std::array<float, kFrames> stem_left{};
+    std::array<float, kFrames> stem_right{};
+    stem_left.fill(-1.0f);
+    stem_right.fill(-2.0f);
+
+    float* main_channels[] = {
+        main_front_left.data(),
+        main_front_right.data(),
+        main_center.data(),
+        main_lfe.data(),
+        main_surround_left.data(),
+        main_surround_right.data(),
+    };
+    float* cue_channels[] = {cue_left.data(), cue_right.data()};
+
+    std::array<BusBufferView<const float>, 0> inputs{};
+    std::array<BusBufferView<float>, 3> outputs{{
+        {
+            .info = {
+                .name = "Main 5.1 Out",
+                .index = 0,
+                .direction = BusDirection::Output,
+                .role = BusRole::Main,
+                .declared_channels = 6,
+                .optional = false,
+                .active = true,
+            },
+            .buffer = pulp::audio::BufferView<float>(
+                main_channels, 6, kFrames),
+        },
+        {
+            .info = {
+                .name = "Cue Out",
+                .index = 1,
+                .direction = BusDirection::Output,
+                .role = BusRole::Aux,
+                .declared_channels = 2,
+                .optional = true,
+                .active = true,
+            },
+            .buffer = pulp::audio::BufferView<float>(
+                cue_channels, 2, kFrames),
+        },
+        {
+            .info = {
+                .name = "Stem Out",
+                .index = 2,
+                .direction = BusDirection::Output,
+                .role = BusRole::Aux,
+                .declared_channels = 2,
+                .optional = true,
+                .active = false,
+            },
+            .buffer = {},
+        },
+    }};
+
+    ProcessBuffers buffers{
+        BusBufferSet<const float>{std::span(inputs)},
+        BusBufferSet<float>{std::span(outputs)},
+    };
+    pulp::midi::MidiBuffer midi_in;
+    pulp::midi::MidiBuffer midi_out;
+    processor.process(buffers, midi_in, midi_out, ProcessContext{});
+
+    REQUIRE(processor.process_buffer_calls == 1);
+    REQUIRE(processor.process_calls == 0);
+    REQUIRE(processor.saw_no_inputs);
+    REQUIRE(processor.saw_layout_ok);
+    REQUIRE(processor.saw_storage_ok);
+
+    for (std::size_t i = 0; i < kFrames; ++i) {
+        REQUIRE(main_front_left[i] == 10.0f);
+        REQUIRE(main_front_right[i] == 11.0f);
+        REQUIRE(main_center[i] == 12.0f);
+        REQUIRE(main_lfe[i] == 13.0f);
+        REQUIRE(main_surround_left[i] == 14.0f);
+        REQUIRE(main_surround_right[i] == 15.0f);
+        REQUIRE(cue_left[i] == 20.0f);
+        REQUIRE(cue_right[i] == 21.0f);
+        REQUIRE(stem_left[i] == -1.0f);
+        REQUIRE(stem_right[i] == -2.0f);
+    }
 }
 
 TEST_CASE("PluginDescriptor carries MIDI, MPE, UMP, and mobile flags independently",
