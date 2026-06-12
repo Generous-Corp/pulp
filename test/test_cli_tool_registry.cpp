@@ -206,6 +206,7 @@ void require_exec_ok(const std::string& command,
     if (!cwd.empty()) options.working_directory = cwd.string();
     auto r = pulp::platform::ChildProcess::run(command, args, options);
     INFO(command);
+    INFO(r.stdout_output);
     INFO(r.stderr_output);
     REQUIRE(r.exit_code == 0);
 }
@@ -364,8 +365,9 @@ TEST_CASE("tool registry extracts zip archives with literal paths",
     require_exec_ok(
         "powershell",
         {"-NoProfile", "-Command",
-         "$items = Join-Path $args[0] '*'; "
-         "Compress-Archive -Force -Path $items -DestinationPath $args[1]",
+         "& { param($payload, $archive) "
+         "$nested = Join-Path $payload 'nested'; "
+         "Compress-Archive -Force -LiteralPath $nested -DestinationPath $archive }",
          payload.string(), archive.string()});
 #else
     require_exec_ok("zip", {"-q", "-r", archive.string(), "."}, payload);

@@ -186,7 +186,7 @@ bool extract_archive(const fs::path& archive, const fs::path& dest,
         auto r = pulp::platform::exec(
             "powershell",
             {"-NoProfile", "-Command",
-             "Expand-Archive -Force -LiteralPath $args[0] -DestinationPath $args[1]",
+             "& { param($archive, $dest) Expand-Archive -Force -LiteralPath $archive -DestinationPath $dest }",
              archive.string(), dest.string()},
             120000);
         return r.exit_code == 0;
