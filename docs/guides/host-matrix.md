@@ -39,7 +39,7 @@ clap-validator, or a successful build.
 |-----------------|---------|------|--------|------|-----------|-----------|-----|-------|
 | Cubase          | 13      | —    | —      | —    | —         | —         | —   | ARA validation target for 6.3 |
 | Studio One      | 7       | —    | —      | —    | —         | —         | —   | ARA validation target for 6.3 |
-| Reaper          | 7       | —    | —      | —    | —         | —         | —   | Also hosts CLAP natively |
+| Reaper          | 7.74    | 🟡   | 🟡     | —    | 🟡        | 🟡        | —   | VST3 bench evidence: `docs/validation/daw-bench/results/2026-06-12/` |
 | Live            | 12      | —    | —      | —    | —         | —         | n/a | Live doesn't support ARA |
 | FL Studio       | 21      | —    | —      | —    | —         | —         | n/a | |
 | Bitwig          | 5       | —    | —      | —    | —         | —         | n/a | Prefers CLAP path |
@@ -106,8 +106,9 @@ adapter/runtime issue. Keep this section scoped to behavior observed in a real
 host session; speculative accommodations belong in the host-quirks catalog until
 bench evidence exists.
 
-Current checked-in matrix state has no stable or usable host rows. Do not promote
-a row out of `—` until the matching evidence manifest validates.
+Current checked-in matrix state has one usable REAPER VST3 row backed by the
+dated DAW-bench evidence above. Do not promote any additional row out of `—`
+until the matching evidence manifest validates.
 
 ## See also
 

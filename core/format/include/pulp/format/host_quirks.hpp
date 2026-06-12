@@ -276,13 +276,12 @@ struct HostQuirksMeta {
 
     // Reaper rows now have a per-host header
     // (`host_quirks/reaper.hpp`, item 5.8) + per-symptom isolation
-    // tests pinning the dispatch. In-DAW bench evidence is still
-    // pending → Speculative. Promote to Validated when REAPER 7.x
-    // bench rows ship.
-    QuirkStatus reaper_vst3_gesture_ordering = QuirkStatus::Speculative;
-    QuirkStatus reaper_process_while_bypassed = QuirkStatus::Speculative;
+    // tests pinning the dispatch. Rows backed by checked-in REAPER 7.x
+    // DAW-bench evidence are Validated; the rest stay Speculative.
+    QuirkStatus reaper_vst3_gesture_ordering = QuirkStatus::Validated;
+    QuirkStatus reaper_process_while_bypassed = QuirkStatus::Validated;
     QuirkStatus reaper_keyboard_passthrough = QuirkStatus::Speculative;
-    QuirkStatus reaper_permissive_bus_arrangements = QuirkStatus::Speculative;
+    QuirkStatus reaper_permissive_bus_arrangements = QuirkStatus::Validated;
     QuirkStatus reaper_anticipative_fx_buffer_variability = QuirkStatus::Speculative;
     QuirkStatus reaper_midsession_setstate = QuirkStatus::Speculative;
     // iPlug2-audit lesson (2026-05-25): REAPER keyboard only-Space —

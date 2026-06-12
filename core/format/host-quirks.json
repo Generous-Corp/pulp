@@ -199,22 +199,22 @@
     },
     {
       "flag": "reaper_vst3_gesture_ordering",
-      "tier": "Speculative",
+      "tier": "Validated",
       "host": "REAPER",
       "symptom_area": "params",
-      "source_type": "repro",
-      "evidence": "macOS plan item 5.8 (DAW-quirks row 15); host-quirks-log.md 2026-05-26",
-      "last_verified": "2026-05-26",
+      "source_type": "in-DAW-bench",
+      "evidence": "docs/validation/daw-bench/results/2026-06-12/reaper-vst3.daw-bench.json",
+      "last_verified": "2026-06-12",
       "note": "VST3 parameter gesture ordering."
     },
     {
       "flag": "reaper_process_while_bypassed",
-      "tier": "Speculative",
+      "tier": "Validated",
       "host": "REAPER",
       "symptom_area": "bypass",
-      "source_type": "repro",
-      "evidence": "macOS plan item 5.8 (DAW-quirks row R1); host-quirks-log.md 2026-05-26",
-      "last_verified": "2026-05-26",
+      "source_type": "in-DAW-bench",
+      "evidence": "docs/validation/daw-bench/results/2026-06-12/reaper-vst3.daw-bench.json",
+      "last_verified": "2026-06-12",
       "note": "REAPER calls process() while bypassed."
     },
     {
@@ -229,12 +229,12 @@
     },
     {
       "flag": "reaper_permissive_bus_arrangements",
-      "tier": "Speculative",
+      "tier": "Validated",
       "host": "REAPER",
       "symptom_area": "bus-arrangement",
-      "source_type": "repro",
-      "evidence": "macOS plan item 5.8 (DAW-quirks row R3); host-quirks-log.md 2026-05-26",
-      "last_verified": "2026-05-26",
+      "source_type": "in-DAW-bench",
+      "evidence": "docs/validation/daw-bench/results/2026-06-12/reaper-vst3.daw-bench.json",
+      "last_verified": "2026-06-12",
       "note": "Permissive bus arrangements."
     },
     {
