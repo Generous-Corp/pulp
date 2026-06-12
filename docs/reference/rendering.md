@@ -112,6 +112,9 @@ mapping, and fallback behavior are not bounded enough for the audio callback.
 When the GPU is unavailable, callers must either take the explicit CPU fallback
 decision or fail the offline analysis request; silent live fallback is not part
 of the contract.
+For a fixed policy input, the decision is deterministic: repeated offline or
+background analysis evaluations return the same accepted/backend/fallback/reason
+tuple and do not inspect live render state.
 
 ## GPU Render Time
 
