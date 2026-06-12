@@ -221,8 +221,10 @@ Audio buses from `descriptor().input_buses` and `descriptor().output_buses` are 
 
 ### Latency and Tail
 
-- `getLatencySamples()` returns `processor->latency_samples()`
-- `getTailSamples()` returns `descriptor().tail_samples`, mapping `-1` to `kInfiniteTail`
+- `getLatencySamples()` returns `processor->latency_samples()` after host-quirk
+  clamping, so negative latency reports as 0 on the normal path.
+- `getTailSamples()` returns `descriptor().tail_samples`, mapping `-1` to
+  `kInfiniteTail`.
 
 ### Known Limitations
 
