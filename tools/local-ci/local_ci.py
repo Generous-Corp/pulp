@@ -2289,39 +2289,7 @@ def drain_pending_jobs(config: dict, *, blocking: bool) -> tuple[bool, bool]:
 _utility_command_bindings.install_utility_command_helpers(globals())
 
 
-def resolve_submission_options(
-    args: argparse.Namespace, command: str
-) -> tuple[dict, str, str, list[str], str, str, dict]:
-    return _local_ci_command_bindings.resolve_submission_options(globals(), args, command)
-
-
-def cmd_enqueue(args: argparse.Namespace) -> int:
-    return _local_ci_command_bindings.cmd_enqueue(globals(), args)
-
-
-def cmd_drain(_args: argparse.Namespace) -> int:
-    return _local_ci_command_bindings.cmd_drain(globals(), _args)
-
-
-def cmd_run(args: argparse.Namespace) -> int:
-    return _local_ci_command_bindings.cmd_run(globals(), args)
-
-
-def cmd_ship(args: argparse.Namespace) -> int:
-    return _local_ci_command_bindings.cmd_ship(globals(), args)
-
-
-def cmd_check(args: argparse.Namespace) -> int:
-    return _local_ci_command_bindings.cmd_check(globals(), args)
-
-
-def cmd_list(_args: argparse.Namespace) -> int:
-    return _local_ci_command_bindings.cmd_list(globals(), _args)
-
-
-def cmd_status(_args: argparse.Namespace) -> int:
-    return _local_ci_command_bindings.cmd_status(globals(), _args)
-
+_local_ci_command_bindings.install_local_ci_command_helpers(globals())
 
 _desktop_command_bindings.install_desktop_command_helpers(globals())
 

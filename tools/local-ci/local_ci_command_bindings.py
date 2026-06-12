@@ -3,10 +3,23 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from functools import update_wrapper
 from typing import Any
 
 from binding_utils import binding as _binding
 from binding_utils import binding_attr as _binding_attr
+
+
+LOCAL_CI_COMMAND_EXPORTS = (
+    "resolve_submission_options",
+    "cmd_enqueue",
+    "cmd_drain",
+    "cmd_run",
+    "cmd_ship",
+    "cmd_check",
+    "cmd_list",
+    "cmd_status",
+)
 
 
 def resolve_submission_options(bindings: Mapping[str, Any], args: Any, command: str) -> tuple[dict, str, str, list[str], str, str, dict]:
@@ -146,3 +159,20 @@ def cmd_status(bindings: Mapping[str, Any], args: Any) -> int:
         utmctl_vm_status_fn=_binding(bindings, "utmctl_vm_status"),
         ssh_reachable_fn=_binding(bindings, "ssh_reachable"),
     )
+
+
+def bind_local_ci_command(bindings: Mapping[str, Any], name: str):
+    target = globals()[name]
+
+    def facade(*args, **kwargs):
+        return target(bindings, *args, **kwargs)
+
+    return update_wrapper(facade, target)
+
+
+def install_local_ci_command_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = LOCAL_CI_COMMAND_EXPORTS,
+) -> None:
+    for name in names:
+        bindings[name] = bind_local_ci_command(bindings, name)

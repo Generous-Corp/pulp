@@ -268,6 +268,24 @@ class LocalCiCommandBindingsTests(unittest.TestCase):
             self.assertIs(captured["kwargs"][f"{name}_fn"], bindings[name])
         self.assertIs(captured["kwargs"]["print_state_footprint_fn"], bindings["print_local_ci_state_footprint"])
 
+    def test_install_local_ci_command_helpers_wires_named_exports(self):
+        captured = {}
+
+        def runner(*args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            return 12
+
+        bindings = self._bindings("cmd_list", runner)
+
+        self.mod.install_local_ci_command_helpers(bindings, names=("cmd_list",))
+
+        args_obj = object()
+        self.assertEqual(bindings["cmd_list"](args_obj), 12)
+        self.assertEqual(captured["args"], (args_obj,))
+        self.assertIs(captured["kwargs"]["gh_available_fn"], bindings["gh_available"])
+        self.assertEqual(bindings["cmd_list"].__name__, "cmd_list")
+
 
 if __name__ == "__main__":
     unittest.main()
