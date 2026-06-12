@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "host": "REAPER",
+  "format": "CLAP",
+  "daw_version": "7.74/macOS-arm64",
+  "os": "macOS 26.5.1 arm64",
+  "date": "2026-06-12",
+  "script": "07-reaper-clap.md",
+  "pulp_commit": "e941153f0e7e",
+  "plugin_version": "1.0.0",
+  "result_markdown": "07-reaper-clap.md",
+  "logs": ["logs/REAPER-CLAP-20260612T211307Z-pid73106.log"],
+  "quirks": [
+    {
+      "flag": "reaper_process_while_bypassed",
+      "row": "R1",
+      "observed": "Not Triggered",
+      "notes": "Bypass toggling was not exercised by this scripted CLAP evidence run."
+    },
+    {
+      "flag": "reaper_anticipative_fx_buffer_variability",
+      "row": "R4",
+      "observed": "Not Triggered",
+      "notes": "No process_buffer_overrun or process_sample_rate_drift event was observed in this run."
+    },
+    {
+      "flag": "reaper_midsession_setstate",
+      "row": "R6",
+      "observed": "Not Triggered",
+      "notes": "The checked-in log contains serialize_plugin_state, but no deserialize_plugin_state event."
+    },
+    {
+      "flag": "reaper_clap_transport_edges",
+      "row": "R7",
+      "observed": "Confirmed",
+      "notes": "The checked-in log contains process_is_playing_edge events for both play and stop."
+    }
+  ]
+}

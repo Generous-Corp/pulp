@@ -53,7 +53,7 @@ clap-validator, or a successful build.
 | Host            | Version | Load | Params | MIDI | Sidechain | Multi-bus | ARA | Notes |
 |-----------------|---------|------|--------|------|-----------|-----------|-----|-------|
 | Bitwig          | 5       | —    | —      | —    | —         | —         | —   | Bitwig's ARA extension for CLAP is in progress |
-| Reaper          | 7       | —    | —      | —    | —         | —         | —   | |
+| Reaper          | 7.74    | 🟡   | 🟡     | —    | 🟡        | —         | —   | CLAP bench evidence: `docs/validation/daw-bench/results/2026-06-12/` |
 | Studio One      | 7       | —    | —      | —    | —         | —         | —   | CLAP-ARA bridge available |
 
 ## AU (macOS)
