@@ -10,9 +10,10 @@ runner status line fragments, recent-completed result summaries,
 stale-running job selection/replacement/requeue state, stale-running
 reconciliation action selection, runner-info active-target mutation,
 initial/progress/completed target-state payloads, target-state snapshots,
-completed-job state mutation, queue status grouping, and completed-queue retention. Higher-level queue mutation, locking, runner
-liveness, result persistence, and drain orchestration remain in local_ci.py
-until later extraction slices.
+completed-job state mutation, queue status grouping, and completed-queue retention.
+Higher-level queue mutation, locking, runner liveness, result persistence, and
+drain orchestration live in queue_lifecycle.py and runner_state.py, with
+queue_bindings.py preserving the historical local_ci.py facade exports.
 """
 
 from __future__ import annotations

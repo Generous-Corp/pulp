@@ -1,8 +1,8 @@
 """Cleanup planning and deletion helpers for local CI state.
 
-This module owns the disk-artifact retention rules. The `local_ci.py` entrypoint
-keeps thin wrappers around these helpers so existing callers can keep using the
-historical `local_ci.*` names.
+This module owns the disk-artifact retention rules. cleanup_bindings.py installs
+the historical `local_ci.*` facade names so existing callers can keep using and
+monkey-patching those seams.
 """
 
 from __future__ import annotations

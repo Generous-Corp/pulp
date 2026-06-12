@@ -5,8 +5,10 @@ plumbing (nsc_*), cloud-record / billing / provider-metadata helpers, provider
 comparison/recommendation, and the cmd_cloud_* subcommands. Public symbols are
 re-exported into local_ci.py for the non-cloud commands + main() dispatch.
 
-load_optional_config stays in local_ci.py (shared by core + desktop) and is
-imported lazily here (_load_optional_config) to avoid an import cycle.
+load_optional_config is still reached through the local_ci.py facade for
+compatibility, but its default implementation is installed by
+config_evidence_bindings.py. Import it lazily here (_load_optional_config) to
+avoid an import cycle.
 """
 from __future__ import annotations
 
@@ -125,8 +127,8 @@ from targets import (  # noqa: E402  -- re-exported for in-file consumers
 
 def _load_optional_config():
     # Lazy import: local_ci imports this module at top level, so importing
-    # local_ci at module scope here would cycle. load_optional_config is a
-    # shared config helper that stays in local_ci.py.
+    # local_ci at module scope here would cycle. The facade export is installed
+    # by config_evidence_bindings.py.
     from local_ci import load_optional_config
     return load_optional_config()
 
@@ -2048,4 +2050,3 @@ def cmd_cloud_status(args: argparse.Namespace) -> int:
             detail = f" duration={job_duration}" if job_duration else ""
             print(f"    {job.get('name', '?')}: {status}{suffix}{detail}")
     return 0
-

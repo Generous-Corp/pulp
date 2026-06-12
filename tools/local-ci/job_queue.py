@@ -14,9 +14,9 @@ helpers here own:
   - `save_queue_unlocked` — write the queue back atomically. Same lock
     discipline.
 
-The higher-level `load_queue` (which acquires the queue lock and calls
-the reconcile-running-jobs cleanup) stays in local_ci.py because it
-pulls in the running-job state machine — not part of this seam.
+The higher-level `load_queue` facade export is installed by queue_bindings.py;
+it acquires the queue lock and delegates running-job reconciliation to the
+queue lifecycle / runner-state helpers.
 """
 
 from __future__ import annotations
