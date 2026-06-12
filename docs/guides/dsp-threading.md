@@ -159,7 +159,9 @@ The mode does not relax buffer ownership or lifetime rules. A realtime block
 with a slower-than-realtime hint is still an audio-thread callback. Bypass,
 tail-drain, reset, and transport-jump flags are block metadata for processors
 that need to distinguish those host states without inferring them from
-transport fields.
+transport fields. `HeadlessHost::process(..., ProcessContext)` forwards those
+flags unchanged, so tests can cover runtime-mode decisions without a plug-in
+format SDK.
 
 Prefer the `ProcessContext` predicates for common block-policy decisions:
 `should_reset_dsp_state()` covers explicit reset requests and derived transport
