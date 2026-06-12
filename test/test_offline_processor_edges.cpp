@@ -2,6 +2,8 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/audio/offline_processor.hpp>
 
+#include <cstdint>
+#include <utility>
 #include <vector>
 
 using namespace pulp::audio;
@@ -258,6 +260,95 @@ TEST_CASE("offline_process supports block size exactly equal to the input", "[au
     REQUIRE(output.has_value());
     REQUIRE(calls == 1);
     REQUIRE(output->channels == input.channels);
+}
+
+TEST_CASE("offline_render reports deterministic block schedule metadata",
+          "[audio][offline][advanced][phase3]") {
+    auto input = make_stereo_fixture();
+    OfflineRenderOptions options;
+    options.block_size_schedule = {2, 1};
+    options.start_sample_position = 100;
+    options.deterministic_seed = 0x1234;
+
+    std::vector<int> frames_seen;
+    std::vector<int> scheduled_seen;
+    std::vector<uint64_t> positions_seen;
+    std::vector<uint64_t> block_indices_seen;
+    std::vector<uint64_t> seeds_seen;
+
+    auto output = offline_render(
+        input,
+        [&](const float* in, float* out, int channels,
+            const OfflineRenderBlockContext& context) {
+            frames_seen.push_back(context.frames);
+            scheduled_seen.push_back(context.scheduled_block_size);
+            positions_seen.push_back(context.sample_position);
+            block_indices_seen.push_back(context.block_index);
+            seeds_seen.push_back(context.deterministic_seed);
+            for (int sample = 0; sample < channels * context.frames; ++sample)
+                out[sample] = in[sample];
+        },
+        options);
+
+    REQUIRE(output.has_value());
+    REQUIRE(output->channels == input.channels);
+    REQUIRE(frames_seen == std::vector<int>{2, 1, 1, 1});
+    REQUIRE(scheduled_seen == std::vector<int>{2, 1, 1, 1});
+    REQUIRE(positions_seen == std::vector<uint64_t>{100, 102, 103, 104});
+    REQUIRE(block_indices_seen == std::vector<uint64_t>{0, 1, 2, 3});
+    REQUIRE(seeds_seen == std::vector<uint64_t>{0x1234, 0x1234, 0x1234, 0x1234});
+}
+
+TEST_CASE("offline_render output can be deterministic across block schedules",
+          "[audio][offline][advanced][phase3]") {
+    auto input = make_stereo_fixture();
+
+    auto render_absolute_sample_index =
+        [](const AudioFileData& source, std::vector<int> schedule) {
+            OfflineRenderOptions options;
+            options.block_size_schedule = std::move(schedule);
+            options.start_sample_position = 7;
+            return offline_render(
+                source,
+                [](const float*, float* out, int channels,
+                   const OfflineRenderBlockContext& context) {
+                    for (int frame = 0; frame < context.frames; ++frame) {
+                        const float value = static_cast<float>(
+                            context.sample_position + static_cast<uint64_t>(frame));
+                        for (int channel = 0; channel < channels; ++channel) {
+                            out[frame * channels + channel] = value;
+                        }
+                    }
+                },
+                options);
+        };
+
+    auto one_block = render_absolute_sample_index(input, {5});
+    auto varied_blocks = render_absolute_sample_index(input, {2, 2, 1});
+
+    REQUIRE(one_block.has_value());
+    REQUIRE(varied_blocks.has_value());
+    REQUIRE(one_block->channels == varied_blocks->channels);
+    REQUIRE(one_block->channels[0] == std::vector<float>{7.0f, 8.0f, 9.0f, 10.0f, 11.0f});
+    REQUIRE(one_block->channels[1] == one_block->channels[0]);
+}
+
+TEST_CASE("offline_render rejects invalid block schedules",
+          "[audio][offline][advanced][phase3]") {
+    auto input = make_stereo_fixture();
+    OfflineRenderOptions options;
+    options.fallback_block_size = 0;
+    REQUIRE_FALSE(offline_render(
+        input,
+        [](const float*, float*, int, const OfflineRenderBlockContext&) {},
+        options).has_value());
+
+    options.fallback_block_size = 4;
+    options.block_size_schedule = {2, 0, 1};
+    REQUIRE_FALSE(offline_render(
+        input,
+        [](const float*, float*, int, const OfflineRenderBlockContext&) {},
+        options).has_value());
 }
 
 TEST_CASE("apply_gain preserves an empty audio container", "[audio][offline][processor-edges]") {
