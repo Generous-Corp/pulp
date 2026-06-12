@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstring>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace pulp::audio {
@@ -72,6 +73,15 @@ void append_i32(std::string& bytes, int value) {
     append_u32(bytes, static_cast<uint32_t>(value));
 }
 
+void append_bool(std::string& bytes, bool value) {
+    bytes.push_back(value ? '\1' : '\0');
+}
+
+void append_string(std::string& bytes, const std::string& value) {
+    append_u64(bytes, static_cast<uint64_t>(value.size()));
+    bytes.append(value);
+}
+
 void append_float(std::string& bytes, float value) {
     uint32_t bits = 0;
     std::memcpy(&bits, &value, sizeof(bits));
@@ -99,6 +109,51 @@ void append_options(std::string& bytes, const OfflineRenderOptions& options) {
     append_u64(bytes, options.tail_frames);
 }
 
+bool is_valid_resource_hash(const OfflineRenderResourceRef& resource) {
+    return resource.content_sha256.size() == 64;
+}
+
+std::optional<std::vector<OfflineRenderResourceRef>> normalized_resources(
+    const std::vector<OfflineRenderResourceRef>& resources) {
+    std::vector<OfflineRenderResourceRef> normalized = resources;
+    std::sort(normalized.begin(), normalized.end(),
+              [](const auto& a, const auto& b) {
+                  if (a.id != b.id) return a.id < b.id;
+                  if (a.cache_key != b.cache_key) return a.cache_key < b.cache_key;
+                  return a.path < b.path;
+              });
+
+    for (size_t i = 0; i < normalized.size(); ++i) {
+        const auto& resource = normalized[i];
+        if (resource.id.empty()) return std::nullopt;
+        if (i > 0 && normalized[i - 1].id == resource.id)
+            return std::nullopt;
+        if (resource.required && !resource.staged) return std::nullopt;
+        if (resource.staged && !is_valid_resource_hash(resource))
+            return std::nullopt;
+    }
+    return normalized;
+}
+
+std::string hash_resource_set(
+    const std::vector<OfflineRenderResourceRef>& resources) {
+    std::string bytes;
+    bytes.reserve(32 + resources.size() * 160);
+    append_u32(bytes, 1);
+    append_u64(bytes, static_cast<uint64_t>(resources.size()));
+    for (const auto& resource : resources) {
+        append_string(bytes, resource.id);
+        append_string(bytes, resource.path);
+        append_string(bytes, resource.content_sha256);
+        append_string(bytes, resource.cache_key);
+        append_u64(bytes, resource.generation);
+        append_u64(bytes, resource.decoded_bytes);
+        append_bool(bytes, resource.required);
+        append_bool(bytes, resource.staged);
+    }
+    return runtime::sha256_hex(bytes);
+}
+
 std::vector<OfflineRenderManifestChunk> build_manifest_chunks(
     uint64_t frames,
     const OfflineRenderOptions& options) {
@@ -118,7 +173,8 @@ std::vector<OfflineRenderManifestChunk> build_manifest_chunks(
 
 std::string hash_render_plan(const AudioFileData& audio,
                              const OfflineRenderOptions& options,
-                             const std::vector<OfflineRenderManifestChunk>& chunks) {
+                             const std::vector<OfflineRenderManifestChunk>& chunks,
+                             std::string_view resource_set_hash) {
     std::string bytes;
     bytes.reserve(128 + chunks.size() * 24);
     append_u32(bytes, 1);
@@ -126,6 +182,8 @@ std::string hash_render_plan(const AudioFileData& audio,
     append_u32(bytes, audio.num_channels());
     append_u64(bytes, audio.num_frames());
     append_options(bytes, options);
+    append_u64(bytes, static_cast<uint64_t>(resource_set_hash.size()));
+    bytes.append(resource_set_hash);
     append_u64(bytes, static_cast<uint64_t>(chunks.size()));
     for (const auto& chunk : chunks) {
         append_u64(bytes, chunk.start_frame);
@@ -340,6 +398,9 @@ std::optional<OfflineRenderArtifactManifest> create_offline_render_manifest(
         return std::nullopt;
     }
 
+    auto resources = normalized_resources(options.resources);
+    if (!resources) return std::nullopt;
+
     auto audio_hash = offline_render_audio_sha256(rendered_audio);
     if (!audio_hash) return std::nullopt;
 
@@ -357,9 +418,20 @@ std::optional<OfflineRenderArtifactManifest> create_offline_render_manifest(
     manifest.tail_policy = options.tail_policy;
     manifest.tail_frames = options.tail_frames;
     manifest.block_size_schedule = options.block_size_schedule;
+    manifest.resources = std::move(*resources);
     manifest.chunks = build_manifest_chunks(manifest.frames, options);
+    manifest.resource_set_sha256 = hash_resource_set(manifest.resources);
+    manifest.cache_reusable = true;
+    for (const auto& resource : manifest.resources) {
+        if (!resource.staged) ++manifest.missing_optional_resources;
+        if (!resource.staged || !is_valid_resource_hash(resource)
+            || resource.cache_key.empty()) {
+            manifest.cache_reusable = false;
+        }
+    }
     manifest.render_plan_sha256 =
-        hash_render_plan(rendered_audio, options, manifest.chunks);
+        hash_render_plan(rendered_audio, options, manifest.chunks,
+                         manifest.resource_set_sha256);
     return manifest;
 }
 
