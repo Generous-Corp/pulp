@@ -25,7 +25,6 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections import defaultdict
-from datetime import datetime, timezone
 from pathlib import Path
 
 # Repo root — same derivation as local_ci.py (both live in tools/local-ci/).
@@ -182,6 +181,12 @@ from cloud_run_prepare import (  # noqa: E402  -- re-exported for in-file consum
     cloud_run_record_payload,
     cloud_workflow_dispatch_fields,
 )
+from cloud_github_billing import (  # noqa: E402  -- re-exported for in-file consumers
+    fetch_github_repo_actions_billing_summary as _fetch_github_repo_actions_billing_summary,
+)
+from cloud_provider_metadata import (  # noqa: E402  -- re-exported for in-file consumers
+    enrich_cloud_record_provider_metadata as _enrich_cloud_record_provider_metadata,
+)
 from cloud_compare import (  # noqa: E402  -- re-exported for in-file consumers
     compare_cloud_providers,
     filter_cloud_records,
@@ -292,80 +297,18 @@ def estimate_billing_period_totals(
 
 
 def fetch_github_repo_actions_billing_summary(repository: str, config: dict | None) -> dict:
-    billing = resolve_billing_settings(config)
-    if not billing.get("enable_provider_reported_totals"):
-        return {"status": "disabled", "reason": "disabled (opt-in)"}
-    if not gh_available():
-        return {"status": "unavailable", "reason": "gh CLI unavailable"}
-
-    repo_payload, repo_error = gh_api_json(f"/repos/{repository}")
-    if not isinstance(repo_payload, dict):
-        return {
-            "status": "unavailable",
-            "reason": f"repo lookup failed ({repo_error or 'gh api failed'})",
-        }
-
-    owner = ((repo_payload.get("owner") or {}).get("login") or "").strip()
-    owner_type = ((repo_payload.get("owner") or {}).get("type") or "").strip().lower()
-    if not owner:
-        return {"status": "unavailable", "reason": "repo owner unknown"}
-
-    if owner_type == "organization":
-        endpoint = f"/organizations/{owner}/settings/billing/usage"
-    elif owner_type == "user":
-        endpoint = f"/users/{owner}/settings/billing/usage"
-    else:
-        return {"status": "unavailable", "reason": f"unsupported owner type '{owner_type or 'unknown'}'"}
-
-    period_start, period_end = billing_period_window(billing["billing_period_start_day"])
-    month_pairs = iter_year_months(period_start, period_end)
-    matched_items: list[dict] = []
-
-    for year, month in month_pairs:
-        payload, error = gh_api_json(endpoint, fields={"year": year, "month": month})
-        if not isinstance(payload, dict):
-            reason = "GitHub billing API unavailable; check auth/platform"
-            if owner_type == "user" and "user" not in gh_token_scopes():
-                reason = "GitHub billing API unavailable; check auth/platform"
-            return {
-                "status": "unavailable",
-                "reason": reason,
-                "detail": error,
-            }
-        for item in payload.get("usageItems") or []:
-            if str(item.get("product", "")).strip().lower() != "actions":
-                continue
-            if str(item.get("repositoryName", "")).strip() != repository:
-                continue
-            item_date = parse_iso_date(item.get("date"))
-            if not item_date:
-                continue
-            item_dt = datetime(item_date.year, item_date.month, item_date.day, tzinfo=timezone.utc)
-            if item_dt < period_start or item_dt >= period_end:
-                continue
-            matched_items.append(item)
-
-    total = 0.0
-    for item in matched_items:
-        amount = item.get("netAmount")
-        if amount in (None, ""):
-            amount = item.get("grossAmount")
-        try:
-            total += float(amount or 0.0)
-        except (TypeError, ValueError):
-            continue
-
-    return {
-        "status": "actual",
-        "provider": "github-hosted",
-        "scope": "repo current period",
-        "currency": "USD",
-        "period_start": period_start.isoformat(),
-        "period_end": period_end.isoformat(),
-        "matched_items": len(matched_items),
-        "actual_total": round(total, 4),
-        "reason": provider_billing_note_text(),
-    }
+    return _fetch_github_repo_actions_billing_summary(
+        repository,
+        config,
+        resolve_billing_settings_fn=resolve_billing_settings,
+        gh_available_fn=gh_available,
+        gh_api_json_fn=gh_api_json,
+        billing_period_window_fn=billing_period_window,
+        iter_year_months_fn=iter_year_months,
+        gh_token_scopes_fn=gh_token_scopes,
+        parse_iso_date_fn=parse_iso_date,
+        provider_billing_note_text_fn=provider_billing_note_text,
+    )
 
 
 def print_cloud_field_detail(
@@ -388,26 +331,13 @@ def normalize_namespace_instance(instance: dict) -> dict:
 
 
 def enrich_cloud_record_provider_metadata(record: dict) -> dict:
-    updated = normalize_cloud_record(record)
-    provider = updated.get("provider_resolved") or updated.get("provider_requested") or "github-hosted"
-    if provider != "namespace" or not updated.get("run_id") or not nsc_logged_in():
-        if provider != "namespace":
-            updated["provider_metadata"] = {}
-            updated["usage_summary"] = {}
-            updated["cost_summary"] = {}
-        return updated
-
-    instances = namespace_instances_for_run(updated.get("repository", ""), int(updated["run_id"]))
-    if not instances:
-        return updated
-
-    updated["provider_metadata"] = {"namespace_instances": instances}
-    updated["usage_summary"] = summarize_namespace_usage(instances)
-    updated["cost_summary"] = {
-        "status": "unavailable",
-        "reason": "Namespace CLI does not expose billing totals; provider runtime is shown instead.",
-    }
-    return updated
+    return _enrich_cloud_record_provider_metadata(
+        record,
+        normalize_cloud_record_fn=normalize_cloud_record,
+        nsc_logged_in_fn=nsc_logged_in,
+        namespace_instances_for_run_fn=namespace_instances_for_run,
+        summarize_namespace_usage_fn=summarize_namespace_usage,
+    )
 
 
 
