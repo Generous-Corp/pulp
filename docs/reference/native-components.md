@@ -177,9 +177,12 @@ major, the binary's SHA-256, the declared node type-ids/capabilities, and an
 (`core/host/node_pack.hpp`) verifies trust *before* it loads any code:
 
 1. the signer key must be in the host's trust set (drop a key to revoke it);
-2. the signature over `pack_id + abi_major + binary-hash` must be authentic;
+2. the signature over `pack_id + abi_major + binary-hash + declared node
+   type-ids/capabilities` must be authentic;
 3. the on-disk binary's SHA-256 must match the signed hash;
-4. the entry's `abi_major` must match the host's `pulp_node_v1` major.
+4. the entry's `abi_major` must match the host's `pulp_node_v1` major;
+5. the loaded descriptor's stable ID and capability flags must match one of the
+   signed node declarations.
 
 Any failure rejects the pack and loads nothing — untrusted, tampered, or
 ABI-mismatched packs never execute. This is the host-level integrity gate; OS
