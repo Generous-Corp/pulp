@@ -115,6 +115,17 @@ std::size_t saturating_mul(std::size_t a, std::size_t b) {
     return a > max / b ? max : a * b;
 }
 
+std::uint64_t saturating_add_u64(std::uint64_t a, std::uint64_t b) {
+    const auto max = std::numeric_limits<std::uint64_t>::max();
+    return b > max - a ? max : a + b;
+}
+
+std::uint64_t saturating_mul_u64(std::uint64_t a, std::uint64_t b) {
+    const auto max = std::numeric_limits<std::uint64_t>::max();
+    if (a == 0 || b == 0) return 0;
+    return a > max / b ? max : a * b;
+}
+
 state::ModulationMixMode modulation_mix_for(AutomationMix mix) {
     switch (mix) {
         case AutomationMix::Replace: return state::ModulationMixMode::Replace;
@@ -772,6 +783,40 @@ SignalGraph::PreparedStats SignalGraph::prepared_stats() const {
             prepared_delay_buffer_bytes_.load(std::memory_order_relaxed),
         .total_prepared_buffer_bytes =
             prepared_total_buffer_bytes_.load(std::memory_order_relaxed),
+    };
+}
+
+SignalGraph::RuntimeBudgetReport
+SignalGraph::evaluate_optional_runtime_budget(
+    runtime::RuntimeBudgetFrame& frame,
+    runtime::RuntimeWorkLane lane,
+    bool required) const noexcept {
+    const auto stats = prepared_stats();
+    std::uint64_t estimated = 0;
+    estimated = saturating_add_u64(
+        estimated,
+        saturating_mul_u64(static_cast<std::uint64_t>(stats.node_count), 16));
+    estimated = saturating_add_u64(
+        estimated,
+        saturating_mul_u64(static_cast<std::uint64_t>(stats.connection_count), 8));
+    if (stats.max_block_size > 0) {
+        estimated = saturating_add_u64(
+            estimated,
+            saturating_mul_u64(
+                static_cast<std::uint64_t>(stats.total_ports),
+                static_cast<std::uint64_t>(stats.max_block_size)));
+    }
+    estimated = saturating_add_u64(
+        estimated,
+        static_cast<std::uint64_t>(
+            stats.total_prepared_buffer_bytes / sizeof(float)));
+
+    const auto decision = frame.evaluate(lane, estimated, required);
+    return {
+        .decision = decision,
+        .frame_stats = frame.stats(),
+        .estimated_cost = estimated,
+        .prepared = stats.node_count != 0,
     };
 }
 
