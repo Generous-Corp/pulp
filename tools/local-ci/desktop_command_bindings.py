@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from functools import update_wrapper
 from typing import Any
 
 from binding_utils import binding as _binding
 from binding_utils import binding_attr as _binding_attr
+from binding_utils import install_local_helpers
 
 
 DESKTOP_COMMAND_EXPORTS = (
@@ -186,18 +186,8 @@ def cmd_desktop_inspect(bindings: Mapping[str, Any], args: Any) -> int:
     )
 
 
-def bind_desktop_command(bindings: Mapping[str, Any], name: str):
-    target = globals()[name]
-
-    def facade(*args, **kwargs):
-        return target(bindings, *args, **kwargs)
-
-    return update_wrapper(facade, target)
-
-
 def install_desktop_command_helpers(
     bindings: dict[str, Any],
     names: tuple[str, ...] = DESKTOP_COMMAND_EXPORTS,
 ) -> None:
-    for name in names:
-        bindings[name] = bind_desktop_command(bindings, name)
+    install_local_helpers(bindings, globals(), names)

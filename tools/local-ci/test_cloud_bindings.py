@@ -125,9 +125,10 @@ class CloudBindingsTests(unittest.TestCase):
         self.assertEqual(calls[0][2], {"limit": 5})
         self.assertEqual(calls[1][1], ({"id": 1}, {"cfg": True}))
 
-    def test_bind_cloud_helper_delegates_late_to_cloud_module(self):
+    def test_installed_cloud_helper_delegates_late_to_cloud_module(self):
         bindings, calls = self._bindings()
-        helper = self.mod.bind_cloud_helper(bindings, "summarize_runner_selector")
+        self.mod.install_cloud_helpers(bindings, ("summarize_runner_selector",))
+        helper = bindings["summarize_runner_selector"]
 
         self.assertEqual(helper('["linux", "arm64"]'), "linux,arm64")
         self.assertEqual(helper.__name__, "runner")

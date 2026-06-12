@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from functools import update_wrapper
 from typing import Any
 
 from binding_utils import binding as _binding
+from binding_utils import install_module_attrs
 
 
 CLOUD_HELPER_EXPORTS = (
@@ -165,15 +165,5 @@ def open_pr_list_lines(bindings: Mapping[str, Any], prs: list[dict]) -> list[str
     return _binding(bindings, "_cloud").open_pr_list_lines(prs)
 
 
-def bind_cloud_helper(bindings: Mapping[str, Any], name: str):
-    helper = getattr(_binding(bindings, "_cloud"), name)
-
-    def _helper(*args, **kwargs):
-        return getattr(_binding(bindings, "_cloud"), name)(*args, **kwargs)
-
-    return update_wrapper(_helper, helper)
-
-
 def install_cloud_helpers(bindings: dict[str, Any], names: tuple[str, ...] = CLOUD_HELPER_EXPORTS) -> None:
-    for name in names:
-        bindings[name] = bind_cloud_helper(bindings, name)
+    install_module_attrs(bindings, "_cloud", names)
