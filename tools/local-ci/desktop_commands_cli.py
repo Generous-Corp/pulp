@@ -60,6 +60,7 @@ def cmd_desktop_status(
         ),
         print_fn=print_fn,
         error_prefix="\nError: ",
+        handled_exceptions=(ValueError,),
     )
     if status is not None:
         return status

@@ -24,10 +24,11 @@ def run_desktop_command_step(
     *,
     print_fn: Callable[[str], None],
     error_prefix: str = "Error: ",
+    handled_exceptions: tuple[type[BaseException], ...] = (Exception,),
 ) -> tuple[Any | None, int | None]:
     try:
         return step(), None
-    except Exception as exc:
+    except handled_exceptions as exc:
         print_fn(f"{error_prefix}{exc}")
         return None, 1
 

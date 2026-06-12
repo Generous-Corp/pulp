@@ -53,6 +53,13 @@ class DesktopCommandFlowTests(unittest.TestCase):
         self.assertEqual(status, 1)
         self.assertEqual(self.printed[-1], "\nError: unknown target")
 
+        with self.assertRaises(RuntimeError):
+            self.mod.run_desktop_command_step(
+                lambda: (_ for _ in ()).throw(RuntimeError("bug")),
+                print_fn=self.print_line,
+                handled_exceptions=(ValueError,),
+            )
+
     def test_emit_result_json_and_text(self) -> None:
         status = self.mod.emit_desktop_command_result(
             payload={"runs": [{"label": "run"}]},
