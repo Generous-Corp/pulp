@@ -69,6 +69,17 @@ struct OfflineRenderComputeDecision {
     }
 };
 
+struct OfflineRenderResourceRef {
+    std::string id;
+    std::string path;
+    std::string content_sha256;
+    std::string cache_key;
+    uint64_t generation = 0;
+    uint64_t decoded_bytes = 0;
+    bool required = true;
+    bool staged = true;
+};
+
 /// Advanced offline render options. `block_size_schedule` is consumed in order;
 /// when the render is longer than the schedule, the final scheduled size
 /// repeats. Empty schedule falls back to `fallback_block_size`.
@@ -83,6 +94,7 @@ struct OfflineRenderOptions {
     uint64_t deterministic_seed = 0;
     OfflineRenderTailPolicy tail_policy = OfflineRenderTailPolicy::Truncate;
     uint64_t tail_frames = 0;
+    std::vector<OfflineRenderResourceRef> resources;
 };
 
 struct OfflineRenderStem {
@@ -132,7 +144,11 @@ struct OfflineRenderArtifactManifest {
     OfflineRenderTailPolicy tail_policy = OfflineRenderTailPolicy::Truncate;
     uint64_t tail_frames = 0;
     std::vector<int> block_size_schedule;
+    std::vector<OfflineRenderResourceRef> resources;
     std::vector<OfflineRenderManifestChunk> chunks;
+    std::string resource_set_sha256;
+    bool cache_reusable = true;
+    uint32_t missing_optional_resources = 0;
 
     bool matches_audio(const AudioFileData& audio) const noexcept;
 };

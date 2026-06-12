@@ -2,6 +2,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/audio/offline_processor.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <string>
@@ -739,6 +740,112 @@ TEST_CASE("offline render manifests separate audio and plan changes",
     REQUIRE(changed_chunks->audio_sha256 == baseline->audio_sha256);
     REQUIRE(changed_chunks->render_plan_sha256 != baseline->render_plan_sha256);
     REQUIRE(changed_chunks->chunks.size() == 3);
+}
+
+TEST_CASE("offline render manifests record staged resources for cache reuse",
+          "[audio][offline][manifest][resources][phase4]") {
+    auto audio = make_stereo_fixture();
+
+    const std::string sample_hash(64, 'a');
+    const std::string ir_hash(64, 'b');
+
+    OfflineRenderOptions options;
+    options.resources = {
+        {
+            .id = "ir.main",
+            .path = "irs/hall.wav",
+            .content_sha256 = ir_hash,
+            .cache_key = "sha256:" + ir_hash,
+            .generation = 7,
+            .decoded_bytes = 4096,
+        },
+        {
+            .id = "sample.kick",
+            .path = "samples/kick.wav",
+            .content_sha256 = sample_hash,
+            .cache_key = "sha256:" + sample_hash,
+            .generation = 3,
+            .decoded_bytes = 2048,
+        },
+    };
+
+    auto manifest = create_offline_render_manifest(audio, options);
+    REQUIRE(manifest.has_value());
+    REQUIRE(manifest->resource_set_sha256.size() == 64);
+    REQUIRE(manifest->cache_reusable);
+    REQUIRE(manifest->missing_optional_resources == 0);
+    REQUIRE(manifest->resources.size() == 2);
+    REQUIRE(manifest->resources[0].id == "ir.main");
+    REQUIRE(manifest->resources[1].id == "sample.kick");
+
+    std::reverse(options.resources.begin(), options.resources.end());
+    auto reordered = create_offline_render_manifest(audio, options);
+    REQUIRE(reordered.has_value());
+    REQUIRE(reordered->resource_set_sha256 == manifest->resource_set_sha256);
+    REQUIRE(reordered->render_plan_sha256 == manifest->render_plan_sha256);
+
+    options.resources[0].content_sha256 = std::string(64, 'c');
+    options.resources[0].cache_key = "sha256:" + options.resources[0].content_sha256;
+    auto changed_resource = create_offline_render_manifest(audio, options);
+    REQUIRE(changed_resource.has_value());
+    REQUIRE(changed_resource->audio_sha256 == manifest->audio_sha256);
+    REQUIRE(changed_resource->resource_set_sha256 != manifest->resource_set_sha256);
+    REQUIRE(changed_resource->render_plan_sha256 != manifest->render_plan_sha256);
+}
+
+TEST_CASE("offline render manifests expose missing optional resources",
+          "[audio][offline][manifest][resources][phase4]") {
+    auto audio = make_stereo_fixture();
+
+    OfflineRenderOptions options;
+    options.resources = {
+        {
+            .id = "optional.texture",
+            .path = "missing.wav",
+            .required = false,
+            .staged = false,
+        },
+    };
+
+    auto manifest = create_offline_render_manifest(audio, options);
+    REQUIRE(manifest.has_value());
+    REQUIRE_FALSE(manifest->cache_reusable);
+    REQUIRE(manifest->missing_optional_resources == 1);
+    REQUIRE(manifest->resources[0].id == "optional.texture");
+    REQUIRE_FALSE(manifest->resources[0].staged);
+    REQUIRE(manifest->resource_set_sha256.size() == 64);
+}
+
+TEST_CASE("offline render manifests reject invalid staged resources",
+          "[audio][offline][manifest][resources][phase4]") {
+    auto audio = make_stereo_fixture();
+
+    OfflineRenderOptions options;
+    options.resources = {
+        {
+            .id = "required.sample",
+            .path = "missing.wav",
+            .required = true,
+            .staged = false,
+        },
+    };
+    REQUIRE_FALSE(create_offline_render_manifest(audio, options).has_value());
+
+    options.resources = {
+        {
+            .id = "sample",
+            .path = "sample.wav",
+            .content_sha256 = "not-a-sha",
+            .cache_key = "sample",
+        },
+    };
+    REQUIRE_FALSE(create_offline_render_manifest(audio, options).has_value());
+
+    options.resources = {
+        {.id = "dup", .content_sha256 = std::string(64, 'a'), .cache_key = "a"},
+        {.id = "dup", .content_sha256 = std::string(64, 'b'), .cache_key = "b"},
+    };
+    REQUIRE_FALSE(create_offline_render_manifest(audio, options).has_value());
 }
 
 TEST_CASE("offline render manifests reject invalid artifacts and options",
