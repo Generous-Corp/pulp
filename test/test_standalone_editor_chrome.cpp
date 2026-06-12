@@ -2,6 +2,7 @@
 #include <catch2/catch_approx.hpp>
 #include <pulp/format/detail/delayed_action.hpp>
 #include <pulp/format/detail/standalone_editor_chrome.hpp>
+#include <pulp/format/standalone_settings.hpp>
 #include <pulp/format/detail/standalone_audio_probe_json.hpp>
 
 #include <choc/text/choc_JSON.h>
@@ -872,6 +873,34 @@ TEST_CASE("Standalone editor chrome fills the editor tab to the design area "
     const auto bounds = editor_ptr->local_bounds();
     REQUIRE(bounds.width == Catch::Approx(760.0f).margin(1.0f));
     REQUIRE(bounds.height == Catch::Approx(560.0f).margin(1.0f));
+}
+
+TEST_CASE("Standalone settings chrome: an editor can detect and open the Settings tab",
+          "[standalone][chrome][issue-45]") {
+    // The editor-side mirror of the Settings panel's Done button: a plugin
+    // editor nested in the standalone chrome can show its own gear and open the
+    // Audio/MIDI Settings tab. In a DAW there is no chrome, so the helpers
+    // report "unavailable" and opening is a safe no-op (the gear stays hidden).
+    auto editor_root = std::make_unique<View>();
+    auto* editor_ptr = editor_root.get();
+    StandaloneConfig config;
+    config.show_settings_tab = true;
+    auto chrome = make_standalone_editor_chrome(
+        std::move(editor_root), config, nullptr, nullptr, nullptr, {});
+
+    // Inside the chrome: settings are available and the editor tab is active.
+    REQUIRE(pulp::format::standalone_settings_available(editor_ptr));
+    REQUIRE(chrome.tab_panel()->active_tab() == 0);
+
+    // Opening settings switches the chrome to the Settings tab (index 1).
+    pulp::format::open_standalone_settings(editor_ptr);
+    REQUIRE(chrome.tab_panel()->active_tab() == 1);
+
+    // A loose view with no chrome ancestor (the plugin case): unavailable, and
+    // open is a no-op that must not crash.
+    auto loose = std::make_unique<View>();
+    REQUIRE_FALSE(pulp::format::standalone_settings_available(loose.get()));
+    pulp::format::open_standalone_settings(loose.get());
 }
 
 TEST_CASE("Standalone idle callback polls scripted UI before settings",
