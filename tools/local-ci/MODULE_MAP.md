@@ -93,20 +93,32 @@ and the matching contract tests in the same change.
 | `windows_validation_script.py` | Windows PowerShell validation script construction: host mutex acquisition, bundle fetch, prepared-state reuse/cleanup, CMake configure/build/install/smoke/test phases, and progress marker emission. | Windows checkout/probe helpers, PowerShell transport execution, queue mutation, result policy, or desktop automation adapters. |
 | `execution.py` | Subprocess output capture, progress marker parsing, heartbeat updates, optional command log writing, local/POSIX validation command construction and local/POSIX/Windows runner orchestration, job/target result construction and ordering, result file persistence/rendering, target task construction/execution/result collection, submission config resolution, SSH target execution planning, cross-target validation/status orchestration, and target-neutral validation helper policy. | Windows validation script text, Windows checkout/probe helper internals, queue mutation, runner-info persistence, or desktop automation adapters. |
 
-## Remaining `local_ci.py` Facade Clusters
+## `local_ci.py` Facade Contract
 
-`local_ci.py` remains the compatibility entry point for tests, scripts, and
-callers that import helpers directly. Public functions in the facade should be
-thin delegates through the matching `*_bindings.py` module so monkeypatch seams
-remain stable while ownership continues to move into focused modules. The
-facade-binding contract is pinned by `test_local_ci_facade_bindings.py`.
+`local_ci.py` is now a compatibility entry point for tests, scripts, and callers
+that import helpers directly. Its remaining responsibility is import-time
+dependency assembly: it imports focused implementation modules, lets the matching
+`*_bindings.py` modules install facade-level exports, preserves a small set of
+private aliases required by existing tests/callers, and keeps `main()` as the
+CLI entrypoint.
 
-| Cluster | Current responsibility | Extraction target |
+Future extraction PRs should not add new behavior to `local_ci.py`. Move behavior
+into a focused implementation module, add or update the matching binding module,
+install the facade export there, and update the module ownership row above. The
+facade-binding contract is pinned by `test_local_ci_facade_bindings.py`:
+
+- public facade functions must reference a binding module;
+- public facade constants must delegate through binding modules;
+- private implementation imports must be consumed only by binding modules.
+
+The installed exports currently cover these ownership groups:
+
+| Group | Binding modules | Implementation modules |
 | --- | --- | --- |
-| Desktop action orchestration | Facade delegates local/remote launch/action helpers through desktop binding modules. Shared action helper policy is isolated in `desktop_actions.py`; install/doctor command wrappers live in `desktop_setup_commands_cli.py`; smoke/click/inspect command wrappers live in `desktop_action_commands_cli.py`; desktop management command wrappers live in `desktop_commands_cli.py`; platform action execution lives in `macos_desktop_action.py`, `linux_desktop_action.py`, and `windows_desktop_action.py`; dependency wiring lives in the desktop `*_bindings.py` modules. | Retain as facade delegates until direct imports can move to focused desktop modules. |
-| Queue orchestration | Facade delegates queue policy/display, lifecycle persistence, runner-info, stale-running reconciliation, stale-validator reclaim, and command wrappers through `queue_bindings.py`, `queue_lifecycle.py`, `queue_orchestrator.py`, `runner_state.py`, and queue CLI modules. | Retain as facade delegates until callers import queue modules directly. |
-| Validation execution | Facade delegates execution helper policy, runner calls, command/result construction, Windows validation script construction, and job-processing wiring through `execution_bindings.py`, `execution.py`, and `windows_validation_script.py`. | Retain as facade delegates until callers import execution modules directly. |
-| CLI dispatch | Facade delegates parser construction, parsed-command selection, command-handler maps, utility commands, desktop commands, cloud commands, notifications, and top-level local-CI command output through the CLI and command binding modules. Cloud/GitHub command helpers now delegate through `cloud_bindings.py`; cloud behavior remains in `cloud.py`. | Retain as thin entrypoint or replace with a smaller `cli.py` after import compatibility is audited. |
+| Desktop action orchestration | `desktop_support_bindings.py`, `desktop_infra_bindings.py`, `desktop_reporting_bindings.py`, `desktop_probe_bindings.py`, `desktop_command_bindings.py`, `macos_window_bindings.py`, `macos_desktop_bindings.py`, `linux_desktop_bindings.py`, `windows_desktop_bindings.py` | `desktop_actions.py`, `desktop_artifacts.py`, `desktop_doctor.py`, `desktop_cli.py`, `desktop_commands_cli.py`, `desktop_setup_commands_cli.py`, `desktop_action_commands_cli.py`, `reporting.py`, `source_prep.py`, `macos_desktop.py`, `macos_desktop_action.py`, `linux_desktop_action.py`, `windows_desktop_action.py` |
+| Queue orchestration | `job_queue_bindings.py`, `queue_bindings.py`, `cleanup_bindings.py`, `utility_command_bindings.py`, `local_ci_command_bindings.py` | `job_queue.py`, `queue_lifecycle.py`, `queue_orchestrator.py`, `runner_state.py`, `cleanup.py`, `cleanup_cli.py`, `logs_cli.py`, `evidence_cli.py`, `queue_commands_cli.py`, `local_ci_commands_cli.py` |
+| Validation execution | `execution_bindings.py`, `target_bindings.py`, `target_preflight_bindings.py`, `ssh_subprocess_bindings.py`, `ssh_bundle_bindings.py`, `linux_target_bindings.py`, `windows_target_bindings.py`, `windows_probe_bindings.py` | `execution.py`, `windows_validation_script.py`, `targets.py`, `target_preflight.py`, `ssh_subprocess.py`, `ssh_bundle.py`, `linux_target.py`, `windows_target.py`, `windows_probe.py` |
+| CLI dispatch and shared helpers | `cli_parser_bindings.py`, `cli_dispatch_bindings.py`, `cloud_bindings.py`, `config_evidence_bindings.py`, `evidence_index_bindings.py`, `github_workflow_bindings.py`, `notification_bindings.py`, `normalize_bindings.py`, `provenance_bindings.py`, `git_helpers_bindings.py`, `io_utils_bindings.py`, `footprint_bindings.py`, `state_path_bindings.py` | `cli_parser.py`, `cli_dispatch.py`, `cloud.py`, `evidence_index.py`, `github_workflows.py`, `notifications.py`, `normalize.py`, `provenance.py`, `git_helpers.py`, `io_utils.py`, `footprint.py`, `state_paths.py` |
 
 ## Behavior Contracts
 
