@@ -194,6 +194,26 @@ from cloud_github_billing import (  # noqa: E402  -- re-exported for in-file con
 from cloud_provider_metadata import (  # noqa: E402  -- re-exported for in-file consumers
     enrich_cloud_record_provider_metadata as _enrich_cloud_record_provider_metadata,
 )
+from cloud_facade_helpers import (  # noqa: E402
+    cloud_record_summary_with_deps as _cloud_record_summary_with_deps,
+    enrich_cloud_record_provider_metadata_with_deps as _enrich_cloud_record_provider_metadata_with_deps,
+    estimate_billing_period_totals_with_deps as _estimate_billing_period_totals_with_deps,
+    fetch_github_repo_actions_billing_summary_with_deps as _fetch_github_repo_actions_billing_summary_with_deps,
+    list_cloud_records_with_deps as _list_cloud_records_with_deps,
+    save_cloud_record_with_deps as _save_cloud_record_with_deps,
+    update_cloud_record_from_run_with_deps as _update_cloud_record_from_run_with_deps,
+)
+from cloud_facade_commands import (  # noqa: E402
+    cmd_cloud_compare_with_deps as _cmd_cloud_compare_with_deps,
+    cmd_cloud_defaults_with_deps as _cmd_cloud_defaults_with_deps,
+    cmd_cloud_history_with_deps as _cmd_cloud_history_with_deps,
+    cmd_cloud_namespace_doctor_with_deps as _cmd_cloud_namespace_doctor_with_deps,
+    cmd_cloud_namespace_setup_with_deps as _cmd_cloud_namespace_setup_with_deps,
+    cmd_cloud_recommend_with_deps as _cmd_cloud_recommend_with_deps,
+    cmd_cloud_run_with_deps as _cmd_cloud_run_with_deps,
+    cmd_cloud_status_with_deps as _cmd_cloud_status_with_deps,
+    cmd_cloud_workflows_with_deps as _cmd_cloud_workflows_with_deps,
+)
 from cloud_compare import (  # noqa: E402  -- re-exported for in-file consumers
     compare_cloud_providers,
     filter_cloud_records,
@@ -259,8 +279,9 @@ def cloud_run_path(dispatch_id: str) -> Path:
 
 
 def save_cloud_record(record: dict) -> Path:
-    return _save_cloud_record(
+    return _save_cloud_record_with_deps(
         record,
+        save_cloud_record_fn=_save_cloud_record,
         ensure_state_dirs_fn=ensure_state_dirs,
         cloud_run_path_fn=cloud_run_path,
         atomic_write_text_fn=atomic_write_text,
@@ -272,8 +293,9 @@ def load_cloud_record(path: Path) -> dict:
 
 
 def list_cloud_records(limit: int | None = None) -> list[dict]:
-    return _list_cloud_records(
+    return _list_cloud_records_with_deps(
         limit=limit,
+        list_cloud_records_fn=_list_cloud_records,
         ensure_state_dirs_fn=ensure_state_dirs,
         cloud_runs_dir_fn=cloud_runs_dir,
         load_cloud_record_fn=load_cloud_record,
@@ -281,9 +303,10 @@ def list_cloud_records(limit: int | None = None) -> list[dict]:
 
 
 def cloud_record_summary(record: dict, config: dict | None = None) -> str:
-    return _cloud_record_summary(
+    return _cloud_record_summary_with_deps(
         record,
         config,
+        cloud_record_summary_fn=_cloud_record_summary,
         estimate_cloud_record_cost_fn=estimate_cloud_record_cost,
         format_currency_amount_fn=format_currency_amount,
     )
@@ -295,18 +318,20 @@ def estimate_billing_period_totals(
     *,
     provider: str | None = None,
 ) -> dict:
-    return _estimate_billing_period_totals(
+    return _estimate_billing_period_totals_with_deps(
         records,
         config,
         provider=provider,
-        period_window_func=billing_period_window,
+        estimate_billing_period_totals_fn=_estimate_billing_period_totals,
+        billing_period_window_fn=billing_period_window,
     )
 
 
 def fetch_github_repo_actions_billing_summary(repository: str, config: dict | None) -> dict:
-    return _fetch_github_repo_actions_billing_summary(
+    return _fetch_github_repo_actions_billing_summary_with_deps(
         repository,
         config,
+        fetch_github_repo_actions_billing_summary_fn=_fetch_github_repo_actions_billing_summary,
         resolve_billing_settings_fn=resolve_billing_settings,
         gh_available_fn=gh_available,
         gh_api_json_fn=gh_api_json,
@@ -338,8 +363,9 @@ def normalize_namespace_instance(instance: dict) -> dict:
 
 
 def enrich_cloud_record_provider_metadata(record: dict) -> dict:
-    return _enrich_cloud_record_provider_metadata(
+    return _enrich_cloud_record_provider_metadata_with_deps(
         record,
+        enrich_cloud_record_provider_metadata_fn=_enrich_cloud_record_provider_metadata,
         normalize_cloud_record_fn=normalize_cloud_record,
         nsc_logged_in_fn=nsc_logged_in,
         namespace_instances_for_run_fn=namespace_instances_for_run,
@@ -386,24 +412,11 @@ def namespace_instances_for_run(repository: str, run_id: int) -> list[dict]:
 
 
 def cmd_cloud_namespace_doctor(_args: argparse.Namespace) -> int:
-    return _cmd_cloud_namespace_doctor(
-        _args,
-        nsc_version_fn=nsc_version,
-        nsc_logged_in_fn=nsc_logged_in,
-        nsc_workspace_info_fn=nsc_workspace_info,
-        print_namespace_setup_help_fn=print_namespace_setup_help,
-    )
+    return _cmd_cloud_namespace_doctor_with_deps(_args, globals())
 
 
 def cmd_cloud_namespace_setup(_args: argparse.Namespace) -> int:
-    return _cmd_cloud_namespace_setup(
-        _args,
-        nsc_available_fn=nsc_available,
-        nsc_logged_in_fn=nsc_logged_in,
-        nsc_run_fn=nsc_run,
-        cmd_cloud_namespace_doctor_fn=cmd_cloud_namespace_doctor,
-        print_namespace_setup_help_fn=print_namespace_setup_help,
-    )
+    return _cmd_cloud_namespace_setup_with_deps(_args, globals())
 
 
 def resolve_github_repository(settings: dict) -> str:
@@ -427,10 +440,11 @@ def gh_pr_head(pr_ref: str) -> tuple[int, str, str] | None:
 
 
 def update_cloud_record_from_run(record: dict, snapshot: dict, *, provider_resolved: str | None = None) -> dict:
-    return _update_cloud_record_from_run(
+    return _update_cloud_record_from_run_with_deps(
         record,
         snapshot,
         provider_resolved=provider_resolved,
+        update_cloud_record_from_run_fn=_update_cloud_record_from_run,
         now_iso_fn=now_iso,
     )
 
@@ -452,114 +466,28 @@ def refresh_cloud_record(record: dict, repository: str, *, require_snapshot: boo
 
 
 def cmd_cloud_history(args: argparse.Namespace) -> int:
-    return _cmd_cloud_history(
-        args,
-        load_optional_config_fn=_load_optional_config,
-        filter_cloud_records_fn=filter_cloud_records,
-        list_cloud_records_fn=list_cloud_records,
-        cloud_history_lines_fn=cloud_history_lines,
-        cloud_record_summary_fn=cloud_record_summary,
-        print_billing_period_summary_fn=print_billing_period_summary,
-        estimate_billing_period_totals_fn=estimate_billing_period_totals,
-        resolve_github_actions_settings_fn=resolve_github_actions_settings,
-        resolve_github_repository_fn=resolve_github_repository,
-        fetch_github_repo_actions_billing_summary_fn=fetch_github_repo_actions_billing_summary,
-        print_github_repo_billing_summary_fn=print_github_repo_billing_summary,
-    )
+    return _cmd_cloud_history_with_deps(args, globals())
 
 
 def cmd_cloud_compare(args: argparse.Namespace) -> int:
-    return _cmd_cloud_compare(
-        args,
-        load_optional_config_fn=_load_optional_config,
-        resolve_github_actions_settings_fn=resolve_github_actions_settings,
-        compare_cloud_providers_fn=compare_cloud_providers,
-        list_cloud_records_fn=list_cloud_records,
-        cloud_compare_summary_line_fn=cloud_compare_summary_line,
-        print_billing_period_summary_fn=print_billing_period_summary,
-    )
+    return _cmd_cloud_compare_with_deps(args, globals())
 
 
 def cmd_cloud_recommend(args: argparse.Namespace) -> int:
-    return _cmd_cloud_recommend(
-        args,
-        load_optional_config_fn=_load_optional_config,
-        resolve_github_actions_settings_fn=resolve_github_actions_settings,
-        recommend_cloud_provider_fn=recommend_cloud_provider,
-        list_cloud_records_fn=list_cloud_records,
-        cloud_recommend_lines_fn=cloud_recommend_lines,
-    )
+    return _cmd_cloud_recommend_with_deps(args, globals())
 
 
 def cmd_cloud_workflows(_args: argparse.Namespace) -> int:
-    return _cmd_cloud_workflows(
-        _args,
-        builtin_github_workflows=BUILTIN_GITHUB_WORKFLOWS,
-        cloud_workflow_lines_fn=cloud_workflow_lines,
-    )
+    return _cmd_cloud_workflows_with_deps(_args, globals())
 
 
 def cmd_cloud_defaults(_args: argparse.Namespace) -> int:
-    return _cmd_cloud_defaults(
-        _args,
-        load_optional_config_fn=_load_optional_config,
-        github_actions_settings_for_display_fn=github_actions_settings_for_display,
-        resolve_github_actions_settings_fn=resolve_github_actions_settings,
-        resolve_github_repository_fn=resolve_github_repository,
-        gh_available_fn=gh_available,
-        gh_repo_variables_fn=gh_repo_variables,
-        cloud_defaults_lines_fn=cloud_defaults_lines,
-    )
+    return _cmd_cloud_defaults_with_deps(_args, globals())
 
 
 def cmd_cloud_run(args: argparse.Namespace) -> int:
-    return _cmd_cloud_run(
-        args,
-        gh_available_fn=gh_available,
-        load_optional_config_fn=_load_optional_config,
-        resolve_github_actions_settings_fn=resolve_github_actions_settings,
-        resolve_github_repository_fn=resolve_github_repository,
-        builtin_github_workflows=BUILTIN_GITHUB_WORKFLOWS,
-        current_branch_fn=current_branch,
-        resolve_default_provider_for_workflow_fn=resolve_default_provider_for_workflow,
-        gh_repo_variables_fn=gh_repo_variables,
-        resolve_workflow_dispatch_defaults_fn=resolve_workflow_dispatch_defaults,
-        resolve_cli_dispatch_field_values_fn=resolve_cli_dispatch_field_values,
-        normalize_runs_on_json_fn=normalize_runs_on_json,
-        resolve_workflow_field_value_and_source_fn=resolve_workflow_field_value_and_source,
-        now_iso_fn=now_iso,
-        normalize_cloud_record_fn=normalize_cloud_record,
-        cloud_run_record_payload_fn=cloud_run_record_payload,
-        gh_current_login_fn=gh_current_login,
-        save_cloud_record_fn=save_cloud_record,
-        cloud_workflow_dispatch_fields_fn=cloud_workflow_dispatch_fields,
-        gh_workflow_dispatch_fn=gh_workflow_dispatch,
-        gh_find_dispatched_run_fn=gh_find_dispatched_run,
-        enrich_cloud_record_provider_metadata_fn=enrich_cloud_record_provider_metadata,
-        update_cloud_record_from_run_fn=update_cloud_record_from_run,
-        cloud_dispatch_lines_fn=cloud_dispatch_lines,
-        refresh_cloud_record_fn=refresh_cloud_record,
-        cloud_final_status_line_fn=cloud_final_status_line,
-    )
+    return _cmd_cloud_run_with_deps(args, globals())
 
 
 def cmd_cloud_status(args: argparse.Namespace) -> int:
-    return _cmd_cloud_status(
-        args,
-        load_optional_config_fn=_load_optional_config,
-        list_cloud_records_fn=list_cloud_records,
-        cloud_recent_status_lines_fn=cloud_recent_status_lines,
-        cloud_record_summary_fn=cloud_record_summary,
-        print_billing_period_summary_fn=print_billing_period_summary,
-        estimate_billing_period_totals_fn=estimate_billing_period_totals,
-        find_cloud_record_fn=find_cloud_record,
-        gh_available_fn=gh_available,
-        resolve_github_repository_fn=resolve_github_repository,
-        resolve_github_actions_settings_fn=resolve_github_actions_settings,
-        refresh_cloud_record_fn=refresh_cloud_record,
-        normalize_cloud_record_fn=normalize_cloud_record,
-        estimate_cloud_record_cost_fn=estimate_cloud_record_cost,
-        cloud_status_detail_lines_fn=cloud_status_detail_lines,
-        print_namespace_usage_summary_fn=print_namespace_usage_summary,
-        cloud_status_job_lines_fn=cloud_status_job_lines,
-    )
+    return _cmd_cloud_status_with_deps(args, globals())
