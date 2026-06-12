@@ -108,6 +108,26 @@ class ConfigEvidenceBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.evidence_scope_header_line(bindings, "feature/a", None), "feature/a:None")
         self.assertEqual(self.mod.evidence_empty_line(bindings, has_header=True), "empty-with-header")
 
+    def test_install_config_evidence_helpers_wires_named_exports(self) -> None:
+        self.config_path.write_text('{"desktop_automation": {"targets": {}}}')
+        calls = {}
+
+        def evidence_empty_line(*, has_header):
+            calls["has_header"] = has_header
+            return "empty-with-header" if has_header else "empty"
+
+        evidence_module = types.SimpleNamespace(
+            evidence_empty_line=evidence_empty_line,
+        )
+        bindings = self._bindings(evidence_index_module=evidence_module)
+
+        self.mod.install_config_evidence_helpers(bindings, ("load_config", "evidence_empty_line"))
+
+        self.assertTrue(bindings["load_config"]()["normalized"])
+        self.assertEqual(bindings["evidence_empty_line"](has_header=True), "empty-with-header")
+        self.assertEqual(calls["has_header"], True)
+        self.assertEqual(bindings["load_config"].__name__, "load_config")
+
 
 if __name__ == "__main__":
     unittest.main()

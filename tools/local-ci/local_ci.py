@@ -183,16 +183,7 @@ import cli_parser as _cli_parser  # noqa: E402
 _cli_parser_bindings.install_cli_parser_helpers(globals())
 
 
-def load_config() -> dict:
-    return _config_evidence_bindings.load_config(globals())
-
-
-def load_config_file(path: str | os.PathLike[str]) -> dict:
-    return _config_evidence_bindings.load_config_file(globals(), path)
-
-
-def load_optional_config() -> dict | None:
-    return _config_evidence_bindings.load_optional_config(globals())
+_config_evidence_bindings.install_config_evidence_helpers(globals())
 
 
 GITHUB_ACTIONS_DEFAULTS = _github_workflow_bindings.github_actions_defaults(globals())
@@ -308,46 +299,6 @@ _provenance_bindings.install_provenance_helpers(globals())
 import evidence_index as evidence_index_module  # noqa: E402
 
 _evidence_index_bindings.install_evidence_index_helpers(globals())
-
-
-def load_evidence_index() -> dict:
-    return _config_evidence_bindings.load_evidence_index(globals())
-
-
-def update_evidence_index(result: dict, result_path: Path) -> None:
-    return _config_evidence_bindings.update_evidence_index(globals(), result, result_path)
-
-
-def collect_evidence_groups(branch: str | None = None, sha: str | None = None) -> dict[str, list[dict]]:
-    return _config_evidence_bindings.collect_evidence_groups(globals(), branch=branch, sha=sha)
-
-
-def print_evidence_summary(
-    *,
-    branch: str | None = None,
-    sha: str | None = None,
-    limit: int = 3,
-    indent: str = "",
-) -> bool:
-    return _config_evidence_bindings.print_evidence_summary(
-        globals(),
-        branch=branch,
-        sha=sha,
-        limit=limit,
-        indent=indent,
-    )
-
-
-def evidence_scope_header_line(branch: str | None, sha: str | None) -> str | None:
-    return _config_evidence_bindings.evidence_scope_header_line(globals(), branch, sha)
-
-
-def evidence_empty_line(*, has_header: bool) -> str:
-    return _config_evidence_bindings.evidence_empty_line(globals(), has_header=has_header)
-
-
-def save_config(config: dict) -> None:
-    return _config_evidence_bindings.save_config(globals(), config)
 
 
 _job_queue_bindings.install_job_queue_helpers(globals())

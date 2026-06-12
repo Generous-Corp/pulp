@@ -8,6 +8,21 @@ from pathlib import Path
 from typing import Any
 
 from binding_utils import binding as _binding
+from binding_utils import install_local_helpers
+
+
+CONFIG_EVIDENCE_EXPORTS = (
+    "load_config",
+    "load_config_file",
+    "load_optional_config",
+    "load_evidence_index",
+    "update_evidence_index",
+    "collect_evidence_groups",
+    "print_evidence_summary",
+    "evidence_scope_header_line",
+    "evidence_empty_line",
+    "save_config",
+)
 
 
 def load_config(bindings: Mapping[str, Any]) -> dict:
@@ -80,3 +95,10 @@ def save_config(bindings: Mapping[str, Any], config: dict) -> None:
         _binding(bindings, "config_path")(),
         _binding(bindings, "json").dumps(config, indent=2) + "\n",
     )
+
+
+def install_config_evidence_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = CONFIG_EVIDENCE_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)
