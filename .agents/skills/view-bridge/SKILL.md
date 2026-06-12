@@ -724,8 +724,22 @@ Contract (`core/view/platform/mac/plugin_view_host_mac.mm`, both the CPU
 - `acceptsFirstResponder` returns true **only while** `View::focused_input_`
   is set (a widget is in active text input), not unconditionally.
 - After every `mouseDown:`/`mouseUp:`/`keyDown:`, call `syncKeyFocus`:
-  `makeFirstResponder:self` when a widget wants keys, `makeFirstResponder:nil`
-  the instant it doesn't — handing the keyboard back to the host.
+  `makeFirstResponder:self` when a widget wants keys; the instant it doesn't,
+  **restore the host's PRIOR first responder** (saved at claim time), not
+  nil — handing nil leaves Logic's key routing dead (Musical Typing stays
+  silent after a type-in commit until the user resets the track). The saved
+  pointer is never dereferenced: it is re-found *by identity* in the window's
+  live view tree (`pulp_plugin_live_prior_responder`), so a freed responder
+  degrades to nil instead of a dangling send (the file builds without ARC).
+- **The host's grab wins**: `resignFirstResponder` must end the focused
+  widget's text input (`pulp_plugin_end_text_input`: clear the slot, then
+  `on_focus_changed(false)` so the widget commits/closes its type-in).
+  Otherwise a type-in left open when the user clicks a host control keeps
+  `acceptsFirstResponder` true and re-steals the keyboard on the next event.
+  Widgets with type-in UIs should override `on_focus_changed(false)` to
+  commit, exactly like a click-away inside the plugin. All three contracts
+  are pinned by `test_plugin_view_host_key_focus.mm` (real `NSWindow` +
+  responder dance, CPU host).
 - Editors must NOT set a focusable ROOT. Claim focus per-field:
   `claim_input_focus()` in `enter_typein()`, `release_input_focus()` in
   `commit_typein()`/`cancel_typein()`. This is the JUCE default

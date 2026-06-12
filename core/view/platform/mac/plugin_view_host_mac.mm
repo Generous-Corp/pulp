@@ -294,10 +294,48 @@ bool pulp_plugin_key_down(pulp::view::View* root, NSEvent* event) {
   }
 }
 
+// The host window's previous first responder, restored when a pulp widget
+// releases text-input focus. Built without ARC and holding NO ownership: the
+// saved pointer is NEVER dereferenced — it is re-found BY IDENTITY in the
+// window's current view tree before use, so a responder freed while we held
+// the keyboard degrades to nil (the window) instead of a dangling send. The
+// restore matters: handing focus to nil instead of back to the host's own
+// view leaves hosts like Logic with dead keyboard routing (Musical Typing
+// stays silent after a type-in commit until the user resets the track).
+static NSResponder* pulp_plugin_live_prior_responder(NSResponder* saved, NSWindow* win) {
+    if (saved == nil || saved == (NSResponder*)win || win.contentView == nil) return nil;
+    NSMutableArray<NSView*>* stack = [NSMutableArray arrayWithObject:win.contentView];
+    while (stack.count > 0) {
+        NSView* v = stack.lastObject;
+        [stack removeLastObject];
+        if (v == (NSView*)saved) return saved;
+        [stack addObjectsFromArray:v.subviews];
+    }
+    return nil;
+}
+
+// End the focused widget's text input because the HOST moved the keyboard
+// away (the user clicked a host control while a type-in was open). Clearing
+// the slot first makes the widget's own release_input_focus() a no-op, so
+// the on_focus_changed notification can commit/close its editing UI without
+// recursing. Returns true when a widget was actually ended (repaint needed).
+static bool pulp_plugin_end_text_input() {
+    auto* fv = pulp::view::View::focused_input_;
+    if (!fv) return false;
+    fv->release_input_focus();
+    try {
+        fv->on_focus_changed(false);
+    } catch (...) {
+        std::fprintf(stderr, "[plugin-view-host] on_focus_changed(false) threw\n");
+    }
+    return true;
+}
+
 } // namespace
 
 @implementation PulpPluginView {
     pulp::view::View* _dragTarget;  // captured at mouseDown, re-validated each event
+    NSResponder* _priorResponder;   // identity-validated before use, never deref'd
 }
 
 - (BOOL)isFlipped { return NO; }
@@ -316,10 +354,27 @@ bool pulp_plugin_key_down(pulp::view::View* root, NSEvent* event) {
     NSWindow* win = self.window;
     if (!win) return;
     const bool wants = pulp::view::View::focused_input_ != nullptr;
-    if (wants && win.firstResponder != self)
+    if (wants && win.firstResponder != self) {
+        _priorResponder = win.firstResponder;  // remember whose keyboard we take
         [win makeFirstResponder:self];
-    else if (!wants && win.firstResponder == self)
-        [win makeFirstResponder:nil];  // return keys to the host (Musical Typing)
+    } else if (!wants && win.firstResponder == self) {
+        // Return keys to the host's OWN view, not nil: Logic's Musical Typing
+        // routing dies if the responder it had is not restored.
+        NSResponder* prior = pulp_plugin_live_prior_responder(_priorResponder, win);
+        _priorResponder = nil;
+        [win makeFirstResponder:prior];
+    }
+}
+// The host moved the keyboard elsewhere (click on a host control, window
+// switching) while a widget still held text-input focus: close that text
+// input instead of silently re-claiming on the next event — the host's grab
+// wins. Without this an open type-in left behind keeps acceptsFirstResponder
+// true and steals the keyboard back, which reads as "the plugin killed
+// Musical Typing again".
+- (BOOL)resignFirstResponder {
+    _priorResponder = nil;  // the host chose a new responder; nothing to restore
+    if (pulp_plugin_end_text_input()) [self setNeedsDisplay:YES];
+    return [super resignFirstResponder];
 }
 - (void)keyDown:(NSEvent*)event {
     if (!pulp_plugin_key_down(self.rootView, event)) [super keyDown:event];
@@ -892,6 +947,7 @@ private:
 
 @implementation PulpGpuPluginView {
     pulp::view::View* _dragTarget;  // captured at mouseDown, re-validated each event
+    NSResponder* _priorResponder;   // identity-validated before use, never deref'd
 }
 
 // Keyboard-focus contract — see PulpPluginView::acceptsFirstResponder above:
@@ -905,10 +961,23 @@ private:
     NSWindow* win = self.window;
     if (!win) return;
     const bool wants = pulp::view::View::focused_input_ != nullptr;
-    if (wants && win.firstResponder != self)
+    if (wants && win.firstResponder != self) {
+        _priorResponder = win.firstResponder;  // remember whose keyboard we take
         [win makeFirstResponder:self];
-    else if (!wants && win.firstResponder == self)
-        [win makeFirstResponder:nil];
+    } else if (!wants && win.firstResponder == self) {
+        // Return keys to the host's OWN view, not nil — see PulpPluginView.
+        NSResponder* prior = pulp_plugin_live_prior_responder(_priorResponder, win);
+        _priorResponder = nil;
+        [win makeFirstResponder:prior];
+    }
+}
+// Host took the keyboard while a type-in was open: close it, don't re-claim.
+// See PulpPluginView::resignFirstResponder.
+- (BOOL)resignFirstResponder {
+    _priorResponder = nil;
+    if (pulp_plugin_end_text_input() && self.rootView)
+        self.rootView->request_repaint();
+    return [super resignFirstResponder];
 }
 - (void)keyDown:(NSEvent*)event {
     if (!pulp_plugin_key_down(self.rootView, event)) [super keyDown:event];
