@@ -50,6 +50,10 @@ NodePackManifest signed_manifest(const pulp::runtime::Ed25519KeyPair& kp,
     const auto bytes = read_bytes(module_path);
     m.sha256_hex = pulp::runtime::sha256_hex(bytes.data(), bytes.size());
     m.signer_public_key = kp.public_key;
+    m.nodes.push_back({
+        .type_id = "pulp.test.pack.gain",
+        .capabilities = PULP_NODE_CAP_STATE_V1,
+    });
     const auto msg = node_pack_signed_message(m);
     auto sig = pulp::runtime::ed25519_sign(kp.private_key.data(),
                                            kp.private_key.size(), msg.data(),
@@ -78,6 +82,8 @@ TEST_CASE("node pack: a trusted, intact, signed pack loads and runs",
     const pulp_node_descriptor_v1* d = r.entry->descriptor();
     REQUIRE(std::string_view(d->stable_id, d->stable_id_len) ==
             "pulp.test.pack.gain");
+    REQUIRE(manifest.nodes.size() == 1);
+    REQUIRE(manifest.nodes[0].capabilities == d->capability_flags);
 
     pulp_node_host_services_v1 host{};
     host.size = sizeof(host);
@@ -129,6 +135,25 @@ TEST_CASE("node pack: rejection paths never load untrusted or tampered code",
         REQUIRE(load_node_pack(dir, m, trust).error ==
                 NodePackError::BadSignature);
     }
+    SECTION("tampered node metadata is covered by the signature") {
+        NodePackTrust trust;
+        trust.trusted_public_keys.push_back(kp.public_key);
+        NodePackManifest m = good;
+        m.nodes[0].capabilities = PULP_NODE_CAP_RESET_V1;
+        REQUIRE(load_node_pack(dir, m, trust).error ==
+                NodePackError::BadSignature);
+    }
+    SECTION("honestly signed wrong node metadata still rejects after load") {
+        NodePackTrust trust;
+        trust.trusted_public_keys.push_back(kp.public_key);
+        NodePackManifest m = good;
+        m.nodes[0].capabilities = PULP_NODE_CAP_RESET_V1;
+        const auto msg = node_pack_signed_message(m);
+        m.signature = *pulp::runtime::ed25519_sign(
+            kp.private_key.data(), kp.private_key.size(), msg.data(), msg.size());
+        REQUIRE(load_node_pack(dir, m, trust).error ==
+                NodePackError::NodeMetadataMismatch);
+    }
     SECTION("hash mismatch") {
         NodePackTrust trust;
         trust.trusted_public_keys.push_back(kp.public_key);
@@ -169,9 +194,14 @@ TEST_CASE("node pack: manifest parse validates required fields + key sizes",
     NodePackManifest m;
     REQUIRE_FALSE(parse_node_pack_manifest("not json", m));
     REQUIRE_FALSE(parse_node_pack_manifest("{}", m));
-    // Valid shape with 32-byte key + 64-byte signature (hex).
     const std::string key(64, 'a');   // 32 bytes
     const std::string sig(128, 'b');  // 64 bytes
+    const std::string no_nodes =
+        "{\"pack_id\":\"p\",\"abi_major\":1,\"binary\":\"b.so\","
+        "\"sha256\":\"deadbeef\",\"signer_public_key\":\"" + key +
+        "\",\"signature\":\"" + sig + "\"}";
+    REQUIRE_FALSE(parse_node_pack_manifest(no_nodes, m));
+    // Valid shape with 32-byte key + 64-byte signature (hex).
     const std::string json = "{\"pack_id\":\"p\",\"abi_major\":1,\"binary\":"
                              "\"b.so\",\"sha256\":\"deadbeef\",\"signer_public_"
                              "key\":\"" + key + "\",\"signature\":\"" + sig +
