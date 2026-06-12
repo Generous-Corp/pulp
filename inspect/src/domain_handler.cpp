@@ -802,6 +802,31 @@ InspectorMessage DomainHandler::handle_audio(const InspectorMessage& req) {
         }
         return make_response(req.id, choc::json::toString(arr, false));
     }
+    if (req.method == methods::kAudioRuntimeTelemetry) {
+        const auto telemetry = audio_->runtime_telemetry();
+        auto obj = choc::value::createObject("");
+        obj.addMember("available", choc::value::createBool(telemetry.available));
+        obj.addMember("xrun_count", choc::value::createInt64(
+            static_cast<int64_t>(telemetry.xrun_count)));
+
+        auto load = choc::value::createObject("");
+        load.addMember("load", choc::value::createFloat64(telemetry.process_load.load));
+        load.addMember("peak_load",
+                       choc::value::createFloat64(telemetry.process_load.peak_load));
+        load.addMember("last_load",
+                       choc::value::createFloat64(telemetry.process_load.last_load));
+        load.addMember("elapsed_ns", choc::value::createInt64(
+            telemetry.process_load.elapsed_ns));
+        load.addMember("available_ns", choc::value::createInt64(
+            telemetry.process_load.available_ns));
+        load.addMember("callback_count", choc::value::createInt64(
+            static_cast<int64_t>(telemetry.process_load.callback_count)));
+        load.addMember("overload_count", choc::value::createInt64(
+            static_cast<int64_t>(telemetry.process_load.overload_count)));
+        obj.addMember("process_load", load);
+
+        return make_response(req.id, choc::json::toString(obj, false));
+    }
     return make_error(req.id, "Unknown Audio method: " + req.method);
 }
 

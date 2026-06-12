@@ -179,6 +179,12 @@ peak load, and overload count. `audio::AudioDeviceManager` combines that
 process-load snapshot with its xrun counter for UI, Audio Inspector, and
 validation polling.
 
+Audio Inspector is a consumer of these snapshots, not the producer. Feed its
+runtime telemetry bridge from `AudioDeviceManager::runtime_telemetry_snapshot()`
+or another bounded source so agents can inspect load/xrun state through the
+inspector protocol without adding locks, allocations, or analysis work to
+`process()`.
+
 `state::ParameterEventQueue` also exposes fixed-size queue telemetry, including
 its monotonic overflow count, so automation drops are visible instead of only
 being implied by a failed `push()`.

@@ -2,6 +2,9 @@
 // Buffer underrun detection, per-channel metering, MIDI event logging.
 #pragma once
 
+#include <pulp/audio/load_measurer.hpp>
+
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <mutex>
@@ -42,6 +45,14 @@ struct ChannelLevels {
     float rms = 0;
 };
 
+/// Cheap runtime telemetry bridge for agent/UI polling. This mirrors the
+/// core audio runtime snapshot without making AudioInspector the producer.
+struct AudioRuntimeTelemetry {
+    pulp::audio::AudioProcessLoadSnapshot process_load;
+    uint64_t xrun_count = 0;
+    bool available = false;
+};
+
 /// Monitors audio thread performance and state for the inspector.
 /// All methods are thread-safe (called from audio thread, read from UI thread).
 class AudioInspector {
@@ -64,6 +75,13 @@ public:
     // ── MIDI logging (call from audio thread) ───────────────────────
     void log_midi(uint8_t status, uint8_t data1, uint8_t data2,
                   const std::string& description = {});
+
+    // ── Runtime telemetry bridge (call from owner/control thread) ───
+    void set_runtime_telemetry(
+        const pulp::audio::AudioProcessLoadSnapshot& process_load,
+        uint64_t xrun_count);
+    void clear_runtime_telemetry();
+    AudioRuntimeTelemetry runtime_telemetry() const;
 
     // ── Queries (call from any thread) ──────────────────────────────
     std::vector<BufferUnderrun> recent_underruns() const;
@@ -90,6 +108,16 @@ private:
 
     // Latest levels
     std::vector<ChannelLevels> levels_;
+
+    std::atomic<float> telemetry_load_{0.0f};
+    std::atomic<float> telemetry_peak_load_{0.0f};
+    std::atomic<float> telemetry_last_load_{0.0f};
+    std::atomic<int64_t> telemetry_elapsed_ns_{0};
+    std::atomic<int64_t> telemetry_available_ns_{0};
+    std::atomic<uint64_t> telemetry_callback_count_{0};
+    std::atomic<uint64_t> telemetry_overload_count_{0};
+    std::atomic<uint64_t> telemetry_xrun_count_{0};
+    std::atomic<bool> telemetry_available_{false};
 };
 
 } // namespace pulp::inspect
