@@ -153,6 +153,37 @@ class DawBenchEvidenceTests(unittest.TestCase):
             errors = checker.validate_manifest(path, repo_root=root).errors
             self.assertTrue(any("process_without_prepare" in error for error in errors))
 
+    def test_reaper_clap_transport_edges_requires_playing_edge(self) -> None:
+        tmp_ctx, root, result_dir = self._repo()
+        with tmp_ctx:
+            _write(
+                result_dir / "logs" / "Reaper-CLAP-20260612T120000Z-pid43.log",
+                "2026-06-12T12:00:00Z\tprocess_is_playing_edge\tis_playing=true\n",
+            )
+            _write(root / "docs" / "validation" / "daw-bench" / "07-reaper-clap.md",
+                   "# REAPER CLAP script\n")
+            _write(result_dir / "07-reaper-clap.md",
+                   "# Filled REAPER CLAP result\n")
+            path = result_dir / "reaper-clap.daw-bench.json"
+            path.write_text(
+                json.dumps(_manifest(
+                    format="CLAP",
+                    script="07-reaper-clap.md",
+                    result_markdown="07-reaper-clap.md",
+                    logs=["logs/Reaper-CLAP-20260612T120000Z-pid43.log"],
+                    quirks=[
+                        {
+                            "flag": "reaper_clap_transport_edges",
+                            "row": "R7",
+                            "observed": "Confirmed",
+                            "notes": "Transport edge was observed in REAPER CLAP.",
+                        }
+                    ],
+                )),
+                encoding="utf-8",
+            )
+            self.assertEqual(checker.validate_manifest(path, repo_root=root).errors, ())
+
     def test_directory_scan_finds_only_manifest_suffix(self) -> None:
         tmp_ctx, _root, result_dir = self._repo()
         with tmp_ctx:

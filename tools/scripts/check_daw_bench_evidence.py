@@ -52,6 +52,7 @@ FLAG_LOG_EVENTS: dict[str, tuple[str, ...]] = {
     "reaper_vst3_gesture_ordering": ("process_is_playing_edge",),
     "reaper_process_while_bypassed": ("process_without_prepare",),
     "reaper_permissive_bus_arrangements": ("bus_layout_proposal",),
+    "reaper_clap_transport_edges": ("process_is_playing_edge",),
     "reaper_anticipative_fx_buffer_variability": (
         "process_buffer_overrun",
         "process_sample_rate_drift",
