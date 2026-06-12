@@ -894,6 +894,124 @@ TEST_CASE("SignalGraph prepare rejects graphs beyond configured limits",
     }
 }
 
+TEST_CASE("SignalGraph generated graph validation reports limit reasons",
+          "[host][graph][generated][limits][phase3]") {
+    SECTION("valid graph") {
+        SignalGraph graph;
+        auto input = graph.add_input_node(1, "in");
+        auto output = graph.add_output_node(1, "out");
+        REQUIRE(graph.connect(input, 0, output, 0));
+
+        const auto validation = graph.validate_generated_graph(16);
+        REQUIRE(validation.accepted);
+        REQUIRE(validation.reason
+                == SignalGraph::GeneratedGraphValidationRejectReason::None);
+    }
+
+    SECTION("invalid block size") {
+        SignalGraph graph;
+        const auto validation = graph.validate_generated_graph(0);
+        REQUIRE_FALSE(validation.accepted);
+        REQUIRE(validation.reason
+                == SignalGraph::GeneratedGraphValidationRejectReason::InvalidBlockSize);
+        REQUIRE(validation.actual == 0);
+        REQUIRE(validation.limit == 1);
+    }
+
+    SECTION("block size budget") {
+        SignalGraph graph;
+        auto limits = graph.limits();
+        limits.max_block_size = 8;
+        graph.set_limits(limits);
+
+        const auto validation = graph.validate_generated_graph(16);
+        REQUIRE_FALSE(validation.accepted);
+        REQUIRE(validation.reason
+                == SignalGraph::GeneratedGraphValidationRejectReason::MaxBlockSizeExceeded);
+        REQUIRE(validation.actual == 16);
+        REQUIRE(validation.limit == 8);
+    }
+
+    SECTION("node budget") {
+        SignalGraph graph;
+        auto limits = graph.limits();
+        limits.max_nodes = 2;
+        graph.set_limits(limits);
+
+        auto input = graph.add_input_node(1, "in");
+        auto gain = graph.add_gain_node("gain");
+        auto output = graph.add_output_node(1, "out");
+        REQUIRE(graph.connect(input, 0, gain, 0));
+        REQUIRE(graph.connect(gain, 0, output, 0));
+
+        const auto validation = graph.validate_generated_graph(16);
+        REQUIRE_FALSE(validation.accepted);
+        REQUIRE(validation.reason
+                == SignalGraph::GeneratedGraphValidationRejectReason::NodeLimitExceeded);
+        REQUIRE(validation.actual == 3);
+        REQUIRE(validation.limit == 2);
+    }
+
+    SECTION("connection budget") {
+        SignalGraph graph;
+        auto limits = graph.limits();
+        limits.max_connections = 1;
+        graph.set_limits(limits);
+
+        auto input = graph.add_input_node(1, "in");
+        auto gain = graph.add_gain_node("gain");
+        auto output = graph.add_output_node(1, "out");
+        REQUIRE(graph.connect(input, 0, gain, 0));
+        REQUIRE(graph.connect(gain, 0, output, 0));
+
+        const auto validation = graph.validate_generated_graph(16);
+        REQUIRE_FALSE(validation.accepted);
+        REQUIRE(validation.reason
+                == SignalGraph::GeneratedGraphValidationRejectReason::ConnectionLimitExceeded);
+        REQUIRE(validation.actual == 2);
+        REQUIRE(validation.limit == 1);
+    }
+
+    SECTION("port budget") {
+        SignalGraph graph;
+        auto limits = graph.limits();
+        limits.max_ports = 3;
+        graph.set_limits(limits);
+
+        auto input = graph.add_input_node(2, "in");
+        auto output = graph.add_output_node(2, "out");
+        REQUIRE(graph.connect(input, 0, output, 0));
+        REQUIRE(graph.connect(input, 1, output, 1));
+
+        const auto validation = graph.validate_generated_graph(16);
+        REQUIRE_FALSE(validation.accepted);
+        REQUIRE(validation.reason
+                == SignalGraph::GeneratedGraphValidationRejectReason::PortLimitExceeded);
+        REQUIRE(validation.actual == 4);
+        REQUIRE(validation.limit == 3);
+    }
+
+    SECTION("preflight does not clear the prepared snapshot") {
+        SignalGraph graph;
+        auto input = graph.add_input_node(1, "in");
+        auto output = graph.add_output_node(1, "out");
+        REQUIRE(graph.connect(input, 0, output, 0));
+        REQUIRE(graph.prepare(48000.0, 8));
+        const auto prepared = graph.prepared_stats();
+        REQUIRE(prepared.node_count == 2);
+        REQUIRE(prepared.max_block_size == 8);
+
+        const auto validation = graph.validate_generated_graph(0);
+        REQUIRE_FALSE(validation.accepted);
+        REQUIRE(validation.reason
+                == SignalGraph::GeneratedGraphValidationRejectReason::InvalidBlockSize);
+        REQUIRE(graph.prepared_stats().node_count == 2);
+
+        REQUIRE_FALSE(graph.prepare(48000.0, 0));
+        REQUIRE(graph.prepared_stats().node_count == 0);
+    }
+}
+
 TEST_CASE("SignalGraph prepares and routes a large graph at configured limits",
           "[host][graph][limits][scale][phase2]") {
     SignalGraph graph;
