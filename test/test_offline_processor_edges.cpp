@@ -4,6 +4,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -760,6 +761,80 @@ TEST_CASE("offline render manifests reject invalid artifacts and options",
     bad_options = {};
     bad_options.tempo_bpm = 0.0;
     REQUIRE_FALSE(create_offline_render_manifest(audio, bad_options).has_value());
+}
+
+TEST_CASE("offline render compute policy rejects live audio-thread GPU work",
+          "[audio][offline][gpu-boundary][phase4]") {
+    OfflineRenderComputePolicy policy;
+    policy.scope = OfflineRenderExecutionScope::RealtimeAudioThread;
+    policy.requested_backend = OfflineRenderComputeBackend::Gpu;
+    policy.gpu_available = true;
+
+    auto decision = evaluate_offline_render_compute_policy(policy);
+
+    REQUIRE_FALSE(decision.accepted);
+    REQUIRE_FALSE(decision.uses_gpu());
+    REQUIRE(decision.backend == OfflineRenderComputeBackend::Cpu);
+    REQUIRE(std::string(decision.reason) == "gpu-not-allowed-on-realtime-audio-thread");
+}
+
+TEST_CASE("offline render compute policy accepts GPU only for offline scopes",
+          "[audio][offline][gpu-boundary][phase4]") {
+    OfflineRenderComputePolicy policy;
+    policy.scope = OfflineRenderExecutionScope::OfflineAnalysis;
+    policy.requested_backend = OfflineRenderComputeBackend::Gpu;
+    policy.gpu_available = true;
+
+    auto decision = evaluate_offline_render_compute_policy(policy);
+
+    REQUIRE(decision.accepted);
+    REQUIRE(decision.uses_gpu());
+    REQUIRE(decision.backend == OfflineRenderComputeBackend::Gpu);
+    REQUIRE_FALSE(decision.used_cpu_fallback);
+
+    policy.scope = OfflineRenderExecutionScope::BackgroundAnalysis;
+    decision = evaluate_offline_render_compute_policy(policy);
+    REQUIRE(decision.accepted);
+    REQUIRE(decision.uses_gpu());
+}
+
+TEST_CASE("offline render compute policy makes GPU fallback explicit",
+          "[audio][offline][gpu-boundary][phase4]") {
+    OfflineRenderComputePolicy policy;
+    policy.scope = OfflineRenderExecutionScope::OfflineAnalysis;
+    policy.requested_backend = OfflineRenderComputeBackend::Gpu;
+    policy.gpu_available = false;
+    policy.allow_cpu_fallback = true;
+
+    auto decision = evaluate_offline_render_compute_policy(policy);
+
+    REQUIRE(decision.accepted);
+    REQUIRE_FALSE(decision.uses_gpu());
+    REQUIRE(decision.backend == OfflineRenderComputeBackend::Cpu);
+    REQUIRE(decision.used_cpu_fallback);
+    REQUIRE(std::string(decision.reason) == "gpu-unavailable-cpu-fallback");
+
+    policy.allow_cpu_fallback = false;
+    decision = evaluate_offline_render_compute_policy(policy);
+    REQUIRE_FALSE(decision.accepted);
+    REQUIRE_FALSE(decision.uses_gpu());
+    REQUIRE(std::string(decision.reason) == "gpu-unavailable");
+}
+
+TEST_CASE("offline render compute policy always accepts CPU requests",
+          "[audio][offline][gpu-boundary][phase4]") {
+    OfflineRenderComputePolicy policy;
+    policy.scope = OfflineRenderExecutionScope::RealtimeAudioThread;
+    policy.requested_backend = OfflineRenderComputeBackend::Cpu;
+    policy.gpu_available = false;
+    policy.allow_cpu_fallback = false;
+
+    auto decision = evaluate_offline_render_compute_policy(policy);
+
+    REQUIRE(decision.accepted);
+    REQUIRE_FALSE(decision.uses_gpu());
+    REQUIRE(decision.backend == OfflineRenderComputeBackend::Cpu);
+    REQUIRE_FALSE(decision.used_cpu_fallback);
 }
 
 TEST_CASE("apply_gain preserves an empty audio container", "[audio][offline][processor-edges]") {
