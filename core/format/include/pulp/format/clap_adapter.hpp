@@ -71,8 +71,8 @@ struct PulpClapPlugin {
     state::ParameterEventQueue param_events;
 
     // Reused per-block MIDI buffers. Reserved and capacity-limited during
-    // activate() so processors can append outbound MIDI while the process
-    // no-allocation guard is active.
+    // activate() so capacity survives warmup and processors can append
+    // outbound MIDI while the process no-allocation guard is active.
     midi::MidiBuffer midi_in;
     midi::MidiBuffer midi_out;
 

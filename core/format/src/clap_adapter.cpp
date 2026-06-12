@@ -348,7 +348,8 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
         .outputs = ProcessBusBufferSet<float>(output_buses),
     };
 
-    // Build MIDI from CLAP note events
+    // Build MIDI from CLAP note events. Reuse per-instance scratch buffers so
+    // capacity survives warmup and the steady-state process path stays RT-safe.
     auto& midi_in = self->midi_in;
     auto& midi_out = self->midi_out;
     clear_midi_event_buffers(*self);
