@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from binding_utils import binding as _binding
+from binding_utils import binding_attr as _binding_attr
 
 
 def probe_windows_repo_checkout(bindings: Mapping[str, Any], host: str, repo_path: str | None) -> dict:
@@ -99,7 +100,7 @@ def desktop_doctor_checks(bindings: Mapping[str, Any], config: dict, target_name
         probe_windows_session_agent_fn=_binding(bindings, "probe_windows_session_agent"),
         probe_windows_remote_tooling_fn=_binding(bindings, "probe_windows_remote_tooling"),
         probe_windows_repo_checkout_fn=_binding(bindings, "probe_windows_repo_checkout"),
-        platform=_binding(bindings, "sys").platform,
+        platform=_binding_attr(bindings, "sys", "platform"),
         which_fn=_binding(bindings, "shutil").which,
         probe_webdriver_endpoint_fn=_binding(bindings, "probe_webdriver_endpoint"),
     )

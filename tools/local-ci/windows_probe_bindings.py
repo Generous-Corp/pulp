@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from binding_utils import binding as _binding
+from binding_utils import binding_attr as _binding_attr
 
 
 def ps_literal(bindings: Mapping[str, Any], value: str) -> str:
@@ -135,6 +136,6 @@ def probe_windows_ssh_cmake_settings(
         cmake_platform,
         cmake_generator_instance,
         windows_ssh_powershell_command_fn=_binding(bindings, "windows_ssh_powershell_command"),
-        run_fn=_binding(bindings, "subprocess").run,
+        run_fn=_binding_attr(bindings, "subprocess", "run"),
         ps_literal_fn=_binding(bindings, "ps_literal"),
     )

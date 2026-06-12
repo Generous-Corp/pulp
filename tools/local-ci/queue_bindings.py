@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from binding_utils import binding as _binding
+from binding_utils import binding_attr as _binding_attr
 
 
 def supersede_job_unlocked(bindings: Mapping[str, Any], job: dict, superseded_by: str, reason: str) -> None:
@@ -160,7 +161,7 @@ def make_job(
         validation,
         submission=submission,
         now_iso_fn=_binding(bindings, "now_iso"),
-        uuid_hex_fn=lambda: _binding(bindings, "uuid").uuid4().hex,
+        uuid_hex_fn=lambda: _binding_attr(bindings, "uuid", "uuid4")().hex,
         root=_binding(bindings, "ROOT"),
         validate_branch_fn=_binding(bindings, "validate_ci_branch_name"),
     )
@@ -558,7 +559,7 @@ def wait_for_job(bindings: Mapping[str, Any], job_id: str, config: dict) -> tupl
         load_result_fn=_binding(bindings, "load_result"),
         drain_pending_jobs_fn=_binding(bindings, "drain_pending_jobs"),
         current_runner_info_fn=_binding(bindings, "current_runner_info"),
-        sleep_fn=_binding(bindings, "time").sleep,
+        sleep_fn=_binding_attr(bindings, "time", "sleep"),
         poll_secs=_binding(bindings, "WAIT_POLL_SECS"),
     )
 

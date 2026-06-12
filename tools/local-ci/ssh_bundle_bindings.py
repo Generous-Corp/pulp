@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from binding_utils import binding as _binding
+from binding_utils import binding_attr as _binding_attr
 
 
 def bundle_ref_name(bindings: dict, job_id: str) -> str:
@@ -22,7 +23,7 @@ def create_job_bundle(bindings: dict, job: dict) -> Path:
         bundles_dir_fn=_binding(bindings, "bundles_dir"),
         bundle_build_lock=_binding(bindings, "_BUNDLE_BUILD_LOCK"),
         root=_binding(bindings, "ROOT"),
-        run_fn=_binding(bindings, "subprocess").run,
+        run_fn=_binding_attr(bindings, "subprocess", "run"),
     )
 
 
@@ -58,7 +59,7 @@ def sync_job_bundle_to_ssh_host(
         stdout_pipe=subprocess_module.PIPE,
         stderr_pipe=subprocess_module.PIPE,
         timeout_expired_type=subprocess_module.TimeoutExpired,
-        time_fn=_binding(bindings, "time").time,
+        time_fn=_binding_attr(bindings, "time", "time"),
     )
 
 
@@ -96,7 +97,7 @@ def probe_uploaded_bundle_size(bindings: dict, host: str, remote_name: str, *, c
             host,
             f"sh -lc 'f=\"$HOME/{remote_name}\"; if [ -f \"$f\" ]; then wc -c < \"$f\"; fi'",
         ]
-    result = _binding(bindings, "subprocess").run(cmd, capture_output=True, text=True, timeout=15)
+    result = _binding_attr(bindings, "subprocess", "run")(cmd, capture_output=True, text=True, timeout=15)
     if result.returncode != 0:
         return None
     output = (result.stdout or "").strip().splitlines()

@@ -7,6 +7,7 @@ import subprocess
 from typing import Any
 
 from binding_utils import binding as _binding
+from binding_utils import binding_attr as _binding_attr
 
 
 def is_transient_ssh_failure_detail(bindings: Mapping[str, Any], detail: str) -> bool:
@@ -28,6 +29,6 @@ def run_ssh_subprocess(
         timeout=timeout,
         retries=retries,
         retry_delay_secs=retry_delay_secs,
-        run_fn=_binding(bindings, "subprocess").run,
-        sleep_fn=_binding(bindings, "time").sleep,
+        run_fn=_binding_attr(bindings, "subprocess", "run"),
+        sleep_fn=_binding_attr(bindings, "time", "sleep"),
     )

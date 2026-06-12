@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from binding_utils import binding as _binding
+from binding_utils import binding_attr as _binding_attr
 from binding_utils import print_binding as _print_binding
 
 
@@ -46,14 +47,14 @@ def ssh_command_result(bindings: Mapping[str, Any], host: str, remote_cmd: str, 
 def utmctl_vm_status(bindings: Mapping[str, Any], vm_name: str) -> str | None:
     return _binding(bindings, "_target_preflight").utmctl_vm_status(
         vm_name,
-        run_fn=_binding(bindings, "subprocess").run,
+        run_fn=_binding_attr(bindings, "subprocess", "run"),
     )
 
 
 def utmctl_start(bindings: Mapping[str, Any], vm_name: str) -> bool:
     return _binding(bindings, "_target_preflight").utmctl_start(
         vm_name,
-        run_fn=_binding(bindings, "subprocess").run,
+        run_fn=_binding_attr(bindings, "subprocess", "run"),
     )
 
 
@@ -65,8 +66,8 @@ def ensure_host_reachable(bindings: Mapping[str, Any], target_name: str, target_
         ssh_reachable_fn=_binding(bindings, "ssh_reachable"),
         utmctl_vm_status_fn=_binding(bindings, "utmctl_vm_status"),
         utmctl_start_fn=_binding(bindings, "utmctl_start"),
-        time_fn=_binding(bindings, "time").time,
-        sleep_fn=_binding(bindings, "time").sleep,
+        time_fn=_binding_attr(bindings, "time", "time"),
+        sleep_fn=_binding_attr(bindings, "time", "sleep"),
         print_fn=_print_binding(bindings),
     )
 

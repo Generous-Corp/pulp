@@ -11,5 +11,9 @@ def binding(bindings: Mapping[str, Any], name: str) -> Any:
     return bindings[name]
 
 
+def binding_attr(bindings: Mapping[str, Any], name: str, attribute: str) -> Any:
+    return getattr(binding(bindings, name), attribute)
+
+
 def print_binding(bindings: Mapping[str, Any]) -> Any:
     return bindings.get("print", builtins.print)

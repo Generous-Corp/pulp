@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from binding_utils import binding as _binding
+from binding_utils import binding_attr as _binding_attr
 
 
 def resolve_submission_options(bindings: Mapping[str, Any], args: Any, command: str) -> tuple[dict, str, str, list[str], str, str, dict]:
@@ -68,7 +69,7 @@ def cmd_ship(bindings: Mapping[str, Any], args: Any) -> int:
         gh_available_fn=_binding(bindings, "gh_available"),
         print_submission_metadata_fn=_binding(bindings, "print_submission_metadata"),
         root=_binding(bindings, "ROOT"),
-        run_fn=_binding(bindings, "subprocess").run,
+        run_fn=_binding_attr(bindings, "subprocess", "run"),
         gh_pr_create_fn=_binding(bindings, "gh_pr_create"),
         enqueue_job_fn=_binding(bindings, "enqueue_job"),
         summarize_job_fn=_binding(bindings, "summarize_job"),

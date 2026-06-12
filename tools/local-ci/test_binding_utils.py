@@ -31,6 +31,16 @@ class BindingUtilsTests(unittest.TestCase):
         with self.assertRaises(KeyError):
             self.mod.binding({}, "missing")
 
+    def test_binding_attr_returns_named_attribute(self) -> None:
+        class Dependency:
+            value = object()
+
+        self.assertIs(self.mod.binding_attr({"dependency": Dependency}, "dependency", "value"), Dependency.value)
+
+    def test_binding_attr_preserves_missing_attribute_errors(self) -> None:
+        with self.assertRaises(AttributeError):
+            self.mod.binding_attr({"dependency": object()}, "dependency", "missing")
+
     def test_print_binding_returns_facade_print_when_present(self) -> None:
         print_fn = object()
 

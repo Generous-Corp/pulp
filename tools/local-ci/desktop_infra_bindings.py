@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from binding_utils import binding as _binding
+from binding_utils import binding_attr as _binding_attr
 
 
 def normalize_git_remote_for_http(bindings: Mapping[str, Any], remote_url: str | None) -> str | None:
@@ -20,14 +21,14 @@ def normalize_git_remote_for_clone(bindings: Mapping[str, Any], remote_url: str 
 def git_origin_http_url(bindings: Mapping[str, Any], repo_root: Path) -> str | None:
     return _binding(bindings, "_git_helpers").git_origin_http_url(
         repo_root,
-        run_fn=_binding(bindings, "subprocess").run,
+        run_fn=_binding_attr(bindings, "subprocess", "run"),
     )
 
 
 def git_origin_clone_url(bindings: Mapping[str, Any], repo_root: Path) -> str | None:
     return _binding(bindings, "_git_helpers").git_origin_clone_url(
         repo_root,
-        run_fn=_binding(bindings, "subprocess").run,
+        run_fn=_binding_attr(bindings, "subprocess", "run"),
     )
 
 
@@ -44,7 +45,7 @@ def run_git(bindings: Mapping[str, Any], args: list[str], *, cwd: Path, check: b
         args,
         cwd=cwd,
         check=check,
-        run_fn=_binding(bindings, "subprocess").run,
+        run_fn=_binding_attr(bindings, "subprocess", "run"),
     )
 
 
