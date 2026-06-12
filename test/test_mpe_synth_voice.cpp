@@ -499,6 +499,36 @@ TEST_CASE("MpeVoiceAllocator evaluates optional runtime budget from voice teleme
     REQUIRE(report.frame_stats.shed_count == 1);
 }
 
+TEST_CASE("MpeVoiceAllocator optional runtime budget has deterministic large-voice cost",
+          "[midi][mpe][budget-policy][scale][phase4]") {
+    constexpr std::size_t kVoices = 128;
+    MpeVoiceAllocator<TestVoice> alloc{kVoices};
+    for (std::size_t i = 0; i < kVoices; ++i) {
+        alloc.dispatch(note_on_event(static_cast<uint8_t>(1 + (i % 15)),
+                                     static_cast<uint8_t>(i % 128),
+                                     100,
+                                     static_cast<uint32_t>(i + 1)));
+    }
+
+    const auto expected_cost =
+        static_cast<std::uint64_t>(kVoices) * 4u
+        + static_cast<std::uint64_t>(kVoices) * 64u;
+    REQUIRE(alloc.estimate_optional_runtime_cost() == expected_cost);
+
+    pulp::runtime::RuntimeBudgetFrame exact(expected_cost);
+    auto report = alloc.evaluate_optional_runtime_budget(
+        exact, pulp::runtime::RuntimeWorkLane::Background);
+    REQUIRE(report.telemetry.polyphony == kVoices);
+    REQUIRE(report.telemetry.active_voice_count == kVoices);
+    REQUIRE(report.estimated_cost == expected_cost);
+    REQUIRE(report.decision.action == pulp::runtime::RuntimeBudgetAction::Run);
+
+    pulp::runtime::RuntimeBudgetFrame tight(expected_cost - 1);
+    report = alloc.evaluate_optional_runtime_budget(
+        tight, pulp::runtime::RuntimeWorkLane::Background);
+    REQUIRE(report.decision.action == pulp::runtime::RuntimeBudgetAction::Bypass);
+}
+
 TEST_CASE("MpeVoiceAllocator telemetry path allocates zero times",
           "[midi][mpe][telemetry][rt-safety][phase2]") {
     MpeVoiceAllocator<TestVoice> alloc{2};
