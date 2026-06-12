@@ -284,9 +284,8 @@ TEST_CASE("LV2 host discovery tolerates sparse bundles and dylib modules",
     const auto roles = pulp::host::detail::discover_lv2_ports(bundle.string());
     REQUIRE(roles.size() == 2);
 
-    const auto control = std::find_if(roles.begin(), roles.end(), [](const auto& r) {
-        return r.index == 8;
-    });
+    const auto control = std::find_if(roles.begin(), roles.end(),
+                                      [](const auto& role) { return role.index == 8; });
     REQUIRE(control != roles.end());
     REQUIRE(control->is_control);
     REQUIRE(control->is_input);
@@ -295,9 +294,8 @@ TEST_CASE("LV2 host discovery tolerates sparse bundles and dylib modules",
     REQUIRE_THAT(control->min_value, WithinAbs(0.0f, 1e-6f));
     REQUIRE_THAT(control->max_value, WithinAbs(1.0f, 1e-6f));
 
-    const auto audio = std::find_if(roles.begin(), roles.end(), [](const auto& r) {
-        return r.index == 3;
-    });
+    const auto audio = std::find_if(roles.begin(), roles.end(),
+                                    [](const auto& role) { return role.index == 3; });
     REQUIRE(audio != roles.end());
     REQUIRE(audio->is_audio);
     REQUIRE_FALSE(audio->is_input);
