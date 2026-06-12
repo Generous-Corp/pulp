@@ -3,6 +3,7 @@
 #include <miniz.h>
 
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -106,6 +107,24 @@ size_t count_occurrences(std::string_view haystack, std::string_view needle) {
         pos += needle.size();
     }
     return count;
+}
+
+bool has_float_call_argument_near(std::string_view haystack,
+                                  std::string_view call,
+                                  float expected,
+                                  float tolerance) {
+    size_t start = 0;
+    while ((start = haystack.find(call, start)) != std::string_view::npos) {
+        const auto value_start = start + call.size();
+        const auto value_end = haystack.find("f);", value_start);
+        if (value_end == std::string_view::npos) return false;
+        const auto value = std::stof(std::string(haystack.substr(
+            value_start, value_end - value_start)));
+        if (std::fabs(value - expected) <= tolerance)
+            return true;
+        start = value_end + 3;
+    }
+    return false;
 }
 
 std::optional<std::string> read_env_var(const char* name) {
@@ -1613,9 +1632,8 @@ TEST_CASE("pulp-import-design enriches .pulp.zip image metadata before baked C++
     REQUIRE(cpp.find("_image_flex.preferred_height = 13.33333f;") != std::string::npos);
     REQUIRE(cpp.find("_image_flex.dim_height = {13.33333f, pulp::view::DimensionUnit::px};")
             != std::string::npos);
-    REQUIRE(cpp.find("->set_left(-1.666667f);") != std::string::npos);
-    REQUIRE(cpp.find("->set_top(10.33333f);")
-            != std::string::npos);
+    REQUIRE(has_float_call_argument_near(cpp, "->set_left(", -1.666667f, 1e-5f));
+    REQUIRE(has_float_call_argument_near(cpp, "->set_top(", 10.33333f, 1e-5f));
 }
 
 TEST_CASE("pulp-import-design rejects .pulp.zip with no scene.pulp.json",
