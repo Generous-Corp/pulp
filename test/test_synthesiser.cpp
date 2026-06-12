@@ -351,6 +351,48 @@ TEST_CASE("Synthesiser Quietest steal evicts the lowest peak_level",
     REQUIRE(synth.voice(0).note().note == 60);
 }
 
+TEST_CASE("Synthesiser voice group choke releases matching held voices",
+          "[midi][synth][choke][phase3]") {
+    Synthesiser<TestVoice> synth(4);
+    synth.note_on(0, 42, 100, /*priority=*/0, /*voice_group=*/1);
+    synth.note_on(0, 46, 100, /*priority=*/0, /*voice_group=*/1,
+                  /*choke_group=*/true);
+
+    REQUIRE(synth.voice(0).releasing());
+    REQUIRE(synth.voice(0).note().voice_group == 1);
+    REQUIRE(synth.voice(0).note_off_calls == 1);
+
+    REQUIRE(synth.voice(1).active());
+    REQUIRE_FALSE(synth.voice(1).releasing());
+    REQUIRE(synth.voice(1).note().note == 46);
+    REQUIRE(synth.voice(1).note().voice_group == 1);
+}
+
+TEST_CASE("Synthesiser voice group choke is channel-scoped",
+          "[midi][synth][choke][phase3]") {
+    Synthesiser<TestVoice> synth(4);
+    synth.note_on(0, 42, 100, /*priority=*/0, /*voice_group=*/2);
+    synth.note_on(1, 42, 100, /*priority=*/0, /*voice_group=*/2);
+    synth.note_on(0, 46, 100, /*priority=*/0, /*voice_group=*/2,
+                  /*choke_group=*/true);
+
+    REQUIRE(synth.voice(0).releasing());
+    REQUIRE_FALSE(synth.voice(1).releasing());
+    REQUIRE(synth.voice(1).note().channel == 1);
+    REQUIRE(synth.voice(2).note().note == 46);
+}
+
+TEST_CASE("Synthesiser voice group without choke allows overlap",
+          "[midi][synth][choke][phase3]") {
+    Synthesiser<TestVoice> synth(4);
+    synth.note_on(0, 42, 100, /*priority=*/0, /*voice_group=*/3);
+    synth.note_on(0, 46, 100, /*priority=*/0, /*voice_group=*/3);
+
+    REQUIRE_FALSE(synth.voice(0).releasing());
+    REQUIRE_FALSE(synth.voice(1).releasing());
+    REQUIRE(synth.active_count() == 2);
+}
+
 TEST_CASE("Synthesiser channel-level pitch bend reaches every voice on that channel",
           "[midi][synth][controllers]") {
     Synthesiser<TestVoice> synth(4);
