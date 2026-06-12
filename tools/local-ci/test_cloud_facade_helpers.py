@@ -147,6 +147,91 @@ class CloudFacadeHelpersTests(unittest.TestCase):
         self.assertIn("estimate_cloud_record_cost_fn", calls[0][3])
         self.assertEqual(calls[1][3]["provider_resolved"], "namespace")
 
+    def test_resolve_github_repository_prefers_config_then_discovery(self):
+        self.assertEqual(
+            self.mod.resolve_github_repository_with_deps(
+                {"repository": "configured/repo"},
+                gh_repo_name_fn=lambda: "discovered/repo",
+            ),
+            "configured/repo",
+        )
+        self.assertEqual(
+            self.mod.resolve_github_repository_with_deps(
+                {"repository": "  "},
+                gh_repo_name_fn=lambda: "discovered/repo",
+            ),
+            "discovered/repo",
+        )
+        with self.assertRaises(ValueError):
+            self.mod.resolve_github_repository_with_deps({}, gh_repo_name_fn=lambda: None)
+
+    def test_refresh_cloud_record_with_deps_handles_missing_and_present_snapshots(self):
+        calls = []
+
+        self.assertEqual(
+            self.mod.refresh_cloud_record_with_deps(
+                {"dispatch_id": "no-run"},
+                "danielraffel/pulp",
+                require_snapshot=True,
+                normalize_cloud_record_fn=lambda record: {"normalized": record["dispatch_id"]},
+                gh_run_view_fn=lambda repository, run_id: None,
+                update_cloud_record_from_run_fn=lambda record, snapshot: {},
+                enrich_cloud_record_provider_metadata_fn=lambda record: record,
+                save_cloud_record_fn=lambda record: Path("unused"),
+            ),
+            {"normalized": "no-run"},
+        )
+        self.assertEqual(
+            self.mod.refresh_cloud_record_with_deps(
+                {"dispatch_id": "missing", "run_id": 42},
+                "danielraffel/pulp",
+                require_snapshot=False,
+                normalize_cloud_record_fn=lambda record: {"normalized": record["dispatch_id"]},
+                gh_run_view_fn=lambda repository, run_id: None,
+                update_cloud_record_from_run_fn=lambda record, snapshot: {},
+                enrich_cloud_record_provider_metadata_fn=lambda record: record,
+                save_cloud_record_fn=lambda record: Path("unused"),
+            ),
+            {"normalized": "missing"},
+        )
+        with self.assertRaises(RuntimeError):
+            self.mod.refresh_cloud_record_with_deps(
+                {"dispatch_id": "missing", "run_id": 42},
+                "danielraffel/pulp",
+                require_snapshot=True,
+                normalize_cloud_record_fn=lambda record: record,
+                gh_run_view_fn=lambda repository, run_id: None,
+                update_cloud_record_from_run_fn=lambda record, snapshot: {},
+                enrich_cloud_record_provider_metadata_fn=lambda record: record,
+                save_cloud_record_fn=lambda record: Path("unused"),
+            )
+
+        def update(record, snapshot):
+            calls.append(("update", record, snapshot))
+            return {"updated": record["dispatch_id"], "snapshot": snapshot["databaseId"]}
+
+        def enrich(record):
+            calls.append(("enrich", record))
+            return {"enriched": record["updated"]}
+
+        def save(record):
+            calls.append(("save", record))
+            return Path("stored.json")
+
+        refreshed = self.mod.refresh_cloud_record_with_deps(
+            {"dispatch_id": "abc", "run_id": 42},
+            "danielraffel/pulp",
+            require_snapshot=True,
+            normalize_cloud_record_fn=lambda record: record,
+            gh_run_view_fn=lambda repository, run_id: {"databaseId": run_id, "repo": repository},
+            update_cloud_record_from_run_fn=update,
+            enrich_cloud_record_provider_metadata_fn=enrich,
+            save_cloud_record_fn=save,
+        )
+
+        self.assertEqual(refreshed, {"enriched": "abc"})
+        self.assertEqual([call[0] for call in calls], ["update", "enrich", "save"])
+
 
 if __name__ == "__main__":
     unittest.main()

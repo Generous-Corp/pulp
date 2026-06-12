@@ -200,6 +200,8 @@ from cloud_facade_helpers import (  # noqa: E402
     estimate_billing_period_totals_with_deps as _estimate_billing_period_totals_with_deps,
     fetch_github_repo_actions_billing_summary_with_deps as _fetch_github_repo_actions_billing_summary_with_deps,
     list_cloud_records_with_deps as _list_cloud_records_with_deps,
+    refresh_cloud_record_with_deps as _refresh_cloud_record_with_deps,
+    resolve_github_repository_with_deps as _resolve_github_repository_with_deps,
     save_cloud_record_with_deps as _save_cloud_record_with_deps,
     update_cloud_record_from_run_with_deps as _update_cloud_record_from_run_with_deps,
 )
@@ -420,16 +422,7 @@ def cmd_cloud_namespace_setup(_args: argparse.Namespace) -> int:
 
 
 def resolve_github_repository(settings: dict) -> str:
-    repository = settings.get("repository", "").strip()
-    if repository:
-        return repository
-    discovered = gh_repo_name()
-    if discovered:
-        return discovered
-    raise ValueError(
-        "Could not determine GitHub repository. Set github_actions.repository in tools/local-ci/config.json "
-        "or make sure `gh repo view` works in this checkout."
-    )
+    return _resolve_github_repository_with_deps(settings, gh_repo_name_fn=gh_repo_name)
 
 
 def gh_pr_head(pr_ref: str) -> tuple[int, str, str] | None:
@@ -450,19 +443,16 @@ def update_cloud_record_from_run(record: dict, snapshot: dict, *, provider_resol
 
 
 def refresh_cloud_record(record: dict, repository: str, *, require_snapshot: bool = False) -> dict:
-    run_id = record.get("run_id")
-    if not run_id:
-        return normalize_cloud_record(record)
-    snapshot = gh_run_view(repository, int(run_id))
-    if not snapshot:
-        if require_snapshot:
-            raise RuntimeError(f"Failed to refresh GitHub run {run_id} from {repository}.")
-        return normalize_cloud_record(record)
-    refreshed = enrich_cloud_record_provider_metadata(
-        update_cloud_record_from_run(record, snapshot)
+    return _refresh_cloud_record_with_deps(
+        record,
+        repository,
+        require_snapshot=require_snapshot,
+        normalize_cloud_record_fn=normalize_cloud_record,
+        gh_run_view_fn=gh_run_view,
+        update_cloud_record_from_run_fn=update_cloud_record_from_run,
+        enrich_cloud_record_provider_metadata_fn=enrich_cloud_record_provider_metadata,
+        save_cloud_record_fn=save_cloud_record,
     )
-    save_cloud_record(refreshed)
-    return refreshed
 
 
 def cmd_cloud_history(args: argparse.Namespace) -> int:
