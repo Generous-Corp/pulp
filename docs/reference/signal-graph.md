@@ -50,9 +50,11 @@ Four connection variants cover the non-audio-passthrough cases:
   audio port at the start and end of the block and delivers sparse
   `ParameterEvent`s into `PluginSlot::process()`.
 - `connect_audio_rate_modulation(from, port, plugin, param, lo, hi)` declares
-  a dense per-sample modulation edge. It is accepted only for continuous,
-  automatable `HostParamInfo::rate == AudioRate` parameters, emits one
-  `ParameterEvent` per sample, and participates in latency alignment.
+  a dense per-sample modulation edge. It is accepted only when the graph edge
+  can be represented as a valid `state::ModulationLane` with `GraphNode` scope:
+  the destination parameter must be continuous, writable, automatable,
+  modulatable, and `HostParamInfo::rate == AudioRate`. Accepted edges emit one
+  `ParameterEvent` per sample and participate in latency alignment.
 - Sidechain is *not* a separate API: connect a secondary source to the
   plugin node's sidechain audio-port indices (e.g. `connect(side, 0, p,
   2)` when the plugin exposes ports 2/3 as its sidechain bus).
@@ -110,7 +112,8 @@ connection.
 plugin via `PluginSlot::set_parameter()`; `get_node_parameter(node, id)`
 reads back. `connect_automation()` delivers two sparse control points per
 block for control-rate movement. `connect_audio_rate_modulation()` delivers
-sample-by-sample events for parameters explicitly marked audio-rate.
+sample-by-sample events for parameters explicitly marked audio-rate and
+projects accepted edges through the typed modulation-lane contract.
 
 ## Persistence
 
