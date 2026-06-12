@@ -91,6 +91,16 @@ proven to load through the identical contract (`test_pulp_node_v1.cpp` +
 (signing / trust / per-platform packaging) now ships as a separate layer — see
 "Signed node packs" below.
 
+The ABI test suite pins the public struct contract with compile-time POD /
+trivial-copy assertions, leading `size` + `abi_major` offset checks for every
+boundary struct, same-major old/new entry negotiation, and rejection of entries
+that truncate the first required callback. The source-level compatibility path is
+covered separately by graph serializer tests: registered custom nodes resolve by
+exact `(type_id, version)`, newer registered versions do not replace saved older
+nodes, mismatched shapes remain unresolved placeholders, and unresolved nodes
+survive save-load-save-load cycles with identity, ports, connections, and opaque
+state intact.
+
 ## Signed node packs
 
 A precompiled `pulp_node_v1` node can be distributed as a **signed node pack**: a
