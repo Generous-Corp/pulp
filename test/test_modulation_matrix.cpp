@@ -1,8 +1,11 @@
 // ModulationMatrix data-model tests (workstream 07 slice 7.1).
 
 #include <catch2/catch_test_macros.hpp>
+#include <pulp/state/modulation_lane.hpp>
 #include <pulp/view/modulation_matrix.hpp>
 
+using namespace pulp;
+using namespace pulp::state;
 using namespace pulp::view;
 
 TEST_CASE("add/find/size", "[view][mod-matrix]") {
@@ -91,4 +94,106 @@ TEST_CASE("empty matrix round-trips", "[view][mod-matrix]") {
     b.add({99, 999, 0.1f});          // must be cleared by deserialize
     REQUIRE(b.deserialize(blob.data(), blob.size()));
     REQUIRE(b.empty());
+}
+
+TEST_CASE("typed modulation lanes accept compatible scoped routes",
+          "[state][modulation][lane][phase3]") {
+    ModulationLane lane{
+        .source = {
+            .id = 1,
+            .scope = ModulationScope::Voice,
+            .rate = ModulationRate::Control,
+            .units = "env",
+        },
+        .target = {
+            .param_id = 100,
+            .scope = ModulationScope::Voice,
+            .param_rate = ParamRate::ControlRate,
+            .units = "Hz",
+        },
+        .mix = ModulationMixMode::Add,
+        .depth = 0.5f,
+    };
+
+    const auto result = validate_modulation_lane(lane);
+    REQUIRE(result.accepted);
+    REQUIRE(result.reason == ModulationLaneRejectReason::None);
+}
+
+TEST_CASE("typed modulation lanes reject invalid source and target metadata",
+          "[state][modulation][lane][phase3]") {
+    ModulationLane lane{
+        .source = {.id = 1},
+        .target = {.param_id = 100},
+    };
+
+    lane.source.id = 0;
+    auto result = validate_modulation_lane(lane);
+    REQUIRE_FALSE(result.accepted);
+    REQUIRE(result.reason == ModulationLaneRejectReason::InvalidSource);
+
+    lane.source.id = 1;
+    lane.target.param_id = 0;
+    result = validate_modulation_lane(lane);
+    REQUIRE_FALSE(result.accepted);
+    REQUIRE(result.reason == ModulationLaneRejectReason::InvalidTarget);
+
+    lane.target.param_id = 100;
+    lane.target.writable = false;
+    result = validate_modulation_lane(lane);
+    REQUIRE_FALSE(result.accepted);
+    REQUIRE(result.reason == ModulationLaneRejectReason::TargetNotWritable);
+
+    lane.target.writable = true;
+    lane.target.modulatable = false;
+    result = validate_modulation_lane(lane);
+    REQUIRE_FALSE(result.accepted);
+    REQUIRE(result.reason == ModulationLaneRejectReason::TargetNotModulatable);
+}
+
+TEST_CASE("typed modulation lanes validate source and target scope",
+          "[state][modulation][lane][scope][phase3]") {
+    ModulationLane lane{
+        .source = {
+            .id = 10,
+            .scope = ModulationScope::Global,
+        },
+        .target = {
+            .param_id = 20,
+            .scope = ModulationScope::Note,
+        },
+    };
+    REQUIRE(validate_modulation_lane(lane).accepted);
+
+    lane.source.scope = ModulationScope::Voice;
+    auto result = validate_modulation_lane(lane);
+    REQUIRE_FALSE(result.accepted);
+    REQUIRE(result.reason == ModulationLaneRejectReason::ScopeMismatch);
+
+    lane.source.scope = ModulationScope::GraphNode;
+    lane.target.scope = ModulationScope::GraphNode;
+    REQUIRE(validate_modulation_lane(lane).accepted);
+}
+
+TEST_CASE("typed modulation lanes reject audio-rate sources for control-rate targets",
+          "[state][modulation][lane][rate][phase3]") {
+    ModulationLane lane{
+        .source = {
+            .id = 77,
+            .rate = ModulationRate::Audio,
+        },
+        .target = {
+            .param_id = 88,
+            .param_rate = ParamRate::ControlRate,
+        },
+    };
+
+    auto result = validate_modulation_lane(lane);
+    REQUIRE_FALSE(result.accepted);
+    REQUIRE(result.reason == ModulationLaneRejectReason::AudioSourceRequiresAudioTarget);
+
+    lane.target.param_rate = ParamRate::AudioRate;
+    result = validate_modulation_lane(lane);
+    REQUIRE(result.accepted);
+    REQUIRE(modulation_rate_for(lane.target.param_rate) == ModulationRate::Audio);
 }

@@ -131,6 +131,14 @@ block's absolute modulation amount with `set_mod_offset()` before process runs.
 `add_mod_offset()` remains available for code that intentionally stacks
 multiple modulation sources in its own processing layer.
 
+For plugin-owned modulation matrices, `state::ModulationLane` records source
+identity, target parameter, scope (`Global`, `Voice`, `Note`, or `GraphNode`),
+rate (`Control` or `Audio`), units, mix mode, and depth separately from the
+base parameter value. `validate_modulation_lane()` rejects invalid source/target
+IDs, non-writable or non-modulatable targets, incompatible scopes, and
+audio-rate sources aimed at control-rate parameters before the route reaches
+audio processing.
+
 ## Sample-Accurate Automation
 
 Format adapters preserve sparse host automation points in a per-block
