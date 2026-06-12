@@ -306,6 +306,11 @@ device->start([](const auto& input, auto& output, const auto& ctx) {
 | Subsection Reader | `subsection_reader.hpp` | Read frame range without copying — `reader.sample(ch, frame)` |
 | System Volume | `system_volume.hpp` | `get_system_volume()` / `set_system_volume(0.8f)` |
 
+Offline render manifests intentionally separate artifact identity from render
+plan identity. Equivalent renders with different chunk schedules can have the
+same `audio_sha256` and a zero residual while still carrying different
+`render_plan_sha256` values and chunk metadata for distributed reproduction.
+
 ---
 
 ## midi

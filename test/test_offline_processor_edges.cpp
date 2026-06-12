@@ -742,6 +742,56 @@ TEST_CASE("offline render manifests separate audio and plan changes",
     REQUIRE(changed_chunks->chunks.size() == 3);
 }
 
+TEST_CASE("offline render manifests prove chunked render equivalence",
+          "[audio][offline][manifest][chunks][phase4]") {
+    auto input = make_stereo_fixture();
+
+    auto render_absolute_position = [&](std::vector<int> schedule) {
+        OfflineRenderOptions options;
+        options.block_size_schedule = std::move(schedule);
+        options.start_sample_position = 2048;
+        options.state_generation = 11;
+        options.deterministic_seed = 99;
+        auto rendered = offline_render(
+            input,
+            [](const float*, float* out, int channels,
+               const OfflineRenderBlockContext& context) {
+                for (int frame = 0; frame < context.frames; ++frame) {
+                    const auto absolute =
+                        context.sample_position + static_cast<uint64_t>(frame);
+                    for (int channel = 0; channel < channels; ++channel) {
+                        out[frame * channels + channel] =
+                            static_cast<float>(absolute + static_cast<uint64_t>(channel));
+                    }
+                }
+            },
+            options);
+        REQUIRE(rendered.has_value());
+        auto manifest = create_offline_render_manifest(*rendered, options);
+        REQUIRE(manifest.has_value());
+        return std::pair<AudioFileData, OfflineRenderArtifactManifest>{
+            std::move(*rendered), std::move(*manifest)};
+    };
+
+    auto one_chunk = render_absolute_position({5});
+    auto many_chunks = render_absolute_position({2, 1, 2});
+
+    auto residual = compare_offline_render_audio(one_chunk.first, many_chunks.first);
+    REQUIRE(residual.has_value());
+    REQUIRE(residual->passes(0.0f, 0.0));
+
+    REQUIRE(one_chunk.second.matches_audio(one_chunk.first));
+    REQUIRE(many_chunks.second.matches_audio(many_chunks.first));
+    REQUIRE(one_chunk.second.audio_sha256 == many_chunks.second.audio_sha256);
+    REQUIRE(one_chunk.second.render_plan_sha256 !=
+            many_chunks.second.render_plan_sha256);
+    REQUIRE(one_chunk.second.chunks.size() == 1);
+    REQUIRE(many_chunks.second.chunks.size() == 3);
+    REQUIRE(many_chunks.second.chunks[0].frame_count == 2);
+    REQUIRE(many_chunks.second.chunks[1].frame_count == 1);
+    REQUIRE(many_chunks.second.chunks[2].frame_count == 2);
+}
+
 TEST_CASE("offline render manifests record staged resources for cache reuse",
           "[audio][offline][manifest][resources][phase4]") {
     auto audio = make_stereo_fixture();
