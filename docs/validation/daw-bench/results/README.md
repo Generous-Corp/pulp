@@ -23,6 +23,17 @@ python3 tools/scripts/check_daw_bench_evidence.py \
     --require-any
 ```
 
+Generate the recurring compatibility rollup after validation:
+
+```bash
+python3 tools/scripts/summarize_daw_bench_results.py \
+    docs/validation/daw-bench/results \
+    --require-any
+```
+
+Use `--format json` when a CI job or dashboard needs a machine-readable
+artifact.
+
 Large DAW logs may stay outside the repo, but the manifest must include an
 `external_log_url` when `logs` is empty. Do not use placeholders; unverified
 rows should be recorded as `Not Triggered` or left out of the promotion PR.
