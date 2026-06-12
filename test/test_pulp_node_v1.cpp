@@ -151,11 +151,21 @@ TEST_CASE("pulp_node_v1: version negotiation accepts same-major, rejects others"
     REQUIRE(node_is_compatible(&g_entry));
     REQUIRE_FALSE(node_is_compatible(nullptr));
 
-    // Additive evolution: an older, smaller `size` at the same major is accepted
-    // (the host only reads through the fields it knows).
+    // Additive evolution: an older, smaller `size` at the same major is
+    // accepted only when it still includes the first required callback.
     pulp_node_entry_v1 older = g_entry;
-    older.size = offsetof(pulp_node_entry_v1, descriptor);
+    older.size = static_cast<uint32_t>(kNodeEntryMinimumSize);
     REQUIRE(node_is_compatible(&older));
+
+    pulp_node_entry_v1 truncated = g_entry;
+    truncated.size = offsetof(pulp_node_entry_v1, descriptor);
+    REQUIRE_FALSE(node_is_compatible(&truncated));
+
+    // A future same-major entry with trailing fields remains loadable by an
+    // older host because known fields stay at stable offsets.
+    pulp_node_entry_v1 future = g_entry;
+    future.size = sizeof(pulp_node_entry_v1) + 64;
+    REQUIRE(node_is_compatible(&future));
 
     // A different major is rejected.
     pulp_node_entry_v1 wrong = g_entry;
