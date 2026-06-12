@@ -251,6 +251,47 @@ TEST_CASE("ProcessBuffers exposes main and sidechain buses without owning audio"
     REQUIRE(buffers.active_buses_have_storage());
 }
 
+TEST_CASE("BusBufferSet looks up indexed and named aux buses",
+          "[processor][process-buffers][phase2]") {
+    float main_l[4] = {};
+    float main_r[4] = {};
+    float cue_l[4] = {};
+    float* main_ptrs[2] = {main_l, main_r};
+    float* cue_ptrs[1] = {cue_l};
+
+    std::array<BusBufferView<float>, 3> outputs{{
+        {
+            .info = {"Main Out", 0, BusDirection::Output, BusRole::Main, 2, false, true},
+            .buffer = pulp::audio::BufferView<float>(main_ptrs, 2, 4),
+        },
+        {
+            .info = {"Cue", 1, BusDirection::Output, BusRole::Aux, 1, true, true},
+            .buffer = pulp::audio::BufferView<float>(cue_ptrs, 1, 4),
+        },
+        {
+            .info = {"Stem", 2, BusDirection::Output, BusRole::Aux, 2, true, false},
+            .buffer = {},
+        },
+    }};
+
+    BusBufferSet<float> buses(outputs);
+    const auto& const_buses = buses;
+
+    REQUIRE(buses.count(BusRole::Main) == 1);
+    REQUIRE(buses.count(BusRole::Aux) == 2);
+    REQUIRE(buses.active_count(BusRole::Aux) == 1);
+    REQUIRE(buses.find(BusRole::Aux, 0) == &outputs[1]);
+    REQUIRE(buses.find(BusRole::Aux, 1) == &outputs[2]);
+    REQUIRE(buses.find(BusRole::Aux, 2) == nullptr);
+    REQUIRE(buses.find_by_index(2) == &outputs[2]);
+    REQUIRE(buses.find_by_index(42) == nullptr);
+    REQUIRE(buses.find_by_name("Cue") == &outputs[1]);
+    REQUIRE(buses.find_by_name("Missing") == nullptr);
+    REQUIRE(const_buses.find(BusRole::Aux, 1) == &outputs[2]);
+    REQUIRE(const_buses.find_by_index(1) == &outputs[1]);
+    REQUIRE(const_buses.find_by_name("Stem") == &outputs[2]);
+}
+
 TEST_CASE("ProcessBuffers accepts inactive optional buses with empty views",
           "[processor][process-buffers][phase2]") {
     float main_in_l[4] = {};

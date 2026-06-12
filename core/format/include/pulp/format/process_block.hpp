@@ -88,15 +88,59 @@ public:
     }
 
     BusBufferView<SampleType>* find(BusRole role) noexcept {
+        return find(role, 0);
+    }
+
+    const BusBufferView<SampleType>* find(BusRole role) const noexcept {
+        return find(role, 0);
+    }
+
+    BusBufferView<SampleType>* find(BusRole role, std::size_t occurrence) noexcept {
+        std::size_t seen = 0;
         for (auto& bus : buses_) {
-            if (bus.info.role == role) return &bus;
+            if (bus.info.role != role) continue;
+            if (seen == occurrence) return &bus;
+            ++seen;
         }
         return nullptr;
     }
 
-    const BusBufferView<SampleType>* find(BusRole role) const noexcept {
+    const BusBufferView<SampleType>* find(
+        BusRole role,
+        std::size_t occurrence) const noexcept {
+        std::size_t seen = 0;
         for (const auto& bus : buses_) {
-            if (bus.info.role == role) return &bus;
+            if (bus.info.role != role) continue;
+            if (seen == occurrence) return &bus;
+            ++seen;
+        }
+        return nullptr;
+    }
+
+    BusBufferView<SampleType>* find_by_index(std::size_t index) noexcept {
+        for (auto& bus : buses_) {
+            if (bus.info.index == index) return &bus;
+        }
+        return nullptr;
+    }
+
+    const BusBufferView<SampleType>* find_by_index(std::size_t index) const noexcept {
+        for (const auto& bus : buses_) {
+            if (bus.info.index == index) return &bus;
+        }
+        return nullptr;
+    }
+
+    BusBufferView<SampleType>* find_by_name(std::string_view name) noexcept {
+        for (auto& bus : buses_) {
+            if (bus.info.name == name) return &bus;
+        }
+        return nullptr;
+    }
+
+    const BusBufferView<SampleType>* find_by_name(std::string_view name) const noexcept {
+        for (const auto& bus : buses_) {
+            if (bus.info.name == name) return &bus;
         }
         return nullptr;
     }
@@ -115,6 +159,22 @@ public:
             if (bus.active()) ++count;
         }
         return count;
+    }
+
+    std::size_t count(BusRole role) const noexcept {
+        std::size_t total = 0;
+        for (const auto& bus : buses_) {
+            if (bus.info.role == role) ++total;
+        }
+        return total;
+    }
+
+    std::size_t active_count(BusRole role) const noexcept {
+        std::size_t total = 0;
+        for (const auto& bus : buses_) {
+            if (bus.info.role == role && bus.active()) ++total;
+        }
+        return total;
     }
 
     bool layouts_match_descriptors() const noexcept {
