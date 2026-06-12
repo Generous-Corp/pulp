@@ -94,16 +94,20 @@ Single-producer, single-consumer lock-free FIFO. Uses CHOC's `SingleReaderSingle
 pulp::runtime::SpscQueue<MidiEvent, 256> midi_queue;
 
 // Producer (audio thread):
-midi_queue.push(event);
+if (!midi_queue.try_push(event)) {
+    // Queue full; overflow_count() / telemetry() make this visible.
+}
 
 // Consumer (UI thread):
-MidiEvent ev;
-while (midi_queue.pop(ev)) {
-    handle_event(ev);
+while (auto ev = midi_queue.try_pop()) {
+    handle_event(*ev);
 }
 ```
 
-Use SpscQueue for ordered event streams where every event matters (MIDI, parameter automation points, UI commands).
+Use SpscQueue for ordered event streams where every event matters (MIDI,
+parameter automation points, UI commands). If the consumer falls behind,
+producer-side failed pushes increment `overflow_count()` and appear in
+`telemetry()`.
 
 ## ScopeGuard
 

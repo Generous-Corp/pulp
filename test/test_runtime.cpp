@@ -4,6 +4,7 @@
 #include <pulp/runtime/range.hpp>
 #include <pulp/runtime/runtime.hpp>
 #include <pulp/runtime/temporary_file.hpp>
+#include "harness/rt_allocation_probe.hpp"
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -190,6 +191,51 @@ TEST_CASE("SpscQueue preserves moved string payload order",
     REQUIRE(q.try_pop().value() == "gamma");
     REQUIRE_FALSE(q.try_pop().has_value());
     REQUIRE(q.empty());
+}
+
+TEST_CASE("SpscQueue exposes producer overflow telemetry",
+          "[runtime][spsc][telemetry][phase2]") {
+    SpscQueue<int, 2> q;
+    REQUIRE(q.overflow_count() == 0);
+
+    REQUIRE(q.try_push(1));
+    REQUIRE(q.try_push(2));
+    REQUIRE_FALSE(q.try_push(3));
+    REQUIRE_FALSE(q.try_push(4));
+
+    REQUIRE(q.overflow_count() == 2);
+    const auto full = q.telemetry();
+    REQUIRE(full.size_approx == 2);
+    REQUIRE(full.capacity == 2);
+    REQUIRE(full.overflow_count == 2);
+
+    REQUIRE(q.try_pop().value() == 1);
+    REQUIRE(q.try_push(5));
+    REQUIRE(q.overflow_count() == 2);
+
+    q.reset_overflow_count();
+    REQUIRE(q.overflow_count() == 0);
+    const auto reset = q.telemetry();
+    REQUIRE(reset.size_approx == 2);
+    REQUIRE(reset.capacity == 2);
+    REQUIRE(reset.overflow_count == 0);
+}
+
+TEST_CASE("SpscQueue telemetry hot path allocates zero times",
+          "[runtime][spsc][telemetry][rt-safety][phase2]") {
+    SpscQueue<int, 2> q;
+
+    pulp::test::RtAllocationProbe probe;
+
+    REQUIRE(q.try_push(1));
+    REQUIRE(q.try_push(2));
+    REQUIRE_FALSE(q.try_push(3));
+    (void)q.telemetry();
+    q.reset_overflow_count();
+    REQUIRE(q.try_pop().value() == 1);
+    REQUIRE(q.try_push(4));
+
+    REQUIRE_FALSE(probe.saw_allocation());
 }
 
 TEST_CASE("ScopeGuard executes on exit", "[runtime][scope_guard]") {

@@ -289,6 +289,9 @@ validation polling.
 its monotonic overflow count, so automation drops are visible instead of only
 being implied by a failed `push()`.
 
+For ordered audio-thread/UI-thread event streams, `runtime::SpscQueue` exposes
+the same producer-side overflow count and telemetry snapshot.
+
 Keep this path boring: write fixed-size counters, meter snapshots, and bounded
 queues from `process()`. Move FFTs, exported waveforms, parameter sweeps, and
 other expensive analysis to an offline command, frozen copy, or validation

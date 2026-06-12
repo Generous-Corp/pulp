@@ -1942,7 +1942,9 @@ pulp_add_test_suite(pulp-test-permissions LIBRARIES pulp::platform)
 pulp_add_test_suite(pulp-test-environment LIBRARIES pulp::platform)
 
 # Runtime tests
-pulp_add_test_suite(pulp-test-runtime LIBRARIES pulp::runtime)
+pulp_add_test_suite(pulp-test-runtime
+    SOURCES test_runtime.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::runtime)
 
 # AbstractFifo (index-pair SPSC FIFO management)
 pulp_add_test_suite(pulp-test-abstract-fifo LIBRARIES pulp::runtime)
