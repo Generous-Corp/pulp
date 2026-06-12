@@ -1,0 +1,134 @@
+"""Desktop automation inspect command orchestration for pulp ci-local."""
+
+from __future__ import annotations
+
+import argparse
+from collections.abc import Callable
+import json
+
+
+def _print_lines(lines, *, print_fn: Callable[[str], None]) -> None:
+    for line in lines:
+        print_fn(line)
+
+
+def cmd_desktop_inspect(
+    args: argparse.Namespace,
+    *,
+    load_config_fn: Callable[[], dict],
+    resolve_desktop_target_fn: Callable[[dict, str], dict],
+    make_desktop_source_request_fn: Callable[[argparse.Namespace], dict],
+    run_macos_local_smoke_fn: Callable[..., dict],
+    run_linux_xvfb_remote_action_fn: Callable[..., dict],
+    run_windows_session_agent_action_fn: Callable[..., dict],
+    desktop_action_success_lines_fn: Callable[[str, str, dict], list[str]],
+    sys_platform: str,
+    print_fn: Callable[[str], None] = print,
+) -> int:
+    try:
+        config = load_config_fn()
+        target = resolve_desktop_target_fn(config, args.target)
+        source_request = make_desktop_source_request_fn(args)
+    except (FileNotFoundError, ValueError) as exc:
+        print_fn(f"Error: {exc}")
+        return 1
+
+    adapter = target["adapter"]
+    if adapter == "macos-local":
+        if sys_platform != "darwin":
+            print_fn(f"Error: macOS local desktop inspect must run on macOS (current platform: {sys_platform}).")
+            return 1
+        if bool(args.launch_command) == bool(args.bundle_id):
+            print_fn("Error: desktop inspect requires exactly one of --command or --bundle-id.")
+            return 1
+        capture_ui_snapshot = args.bundle_id is None
+        runner = lambda: run_macos_local_smoke_fn(
+            config,
+            args.launch_command,
+            action_name="inspect",
+            bundle_id=args.bundle_id,
+            label=args.label,
+            output_path=args.output,
+            capture_ui_snapshot=capture_ui_snapshot,
+            click_point=None,
+            click_view_id=None,
+            click_view_type=None,
+            click_view_text=None,
+            click_view_label=None,
+            pulp_app_automation=False,
+            capture_before=False,
+            settle_secs=0.0,
+            timeout_secs=args.timeout,
+            source_request=source_request,
+        )
+    elif adapter == "linux-xvfb":
+        if args.bundle_id:
+            print_fn("Error: linux-xvfb desktop inspect currently supports --command only.")
+            return 1
+        if not args.launch_command:
+            print_fn("Error: desktop inspect requires --command for linux-xvfb targets.")
+            return 1
+        runner = lambda: run_linux_xvfb_remote_action_fn(
+            config,
+            args.target,
+            target,
+            args.launch_command,
+            action_name="inspect",
+            label=args.label,
+            output_path=args.output,
+            pulp_app_automation=getattr(args, "pulp_app_automation", False),
+            capture_ui_snapshot=bool(getattr(args, "pulp_app_automation", False)),
+            click_point=None,
+            click_view_id=None,
+            click_view_type=None,
+            click_view_text=None,
+            click_view_label=None,
+            capture_before=False,
+            settle_secs=0.0,
+            timeout_secs=args.timeout,
+            source_request=source_request,
+        )
+    elif adapter == "windows-session-agent":
+        if args.bundle_id:
+            print_fn("Error: windows desktop inspect currently supports --command only.")
+            return 1
+        if not args.launch_command:
+            print_fn("Error: desktop inspect requires --command for windows targets.")
+            return 1
+        pulp_app_automation = bool(getattr(args, "pulp_app_automation", False))
+        runner = lambda: run_windows_session_agent_action_fn(
+            config,
+            args.target,
+            target,
+            args.launch_command,
+            action_name="inspect",
+            label=args.label,
+            output_path=args.output,
+            pulp_app_automation=pulp_app_automation,
+            capture_ui_snapshot=pulp_app_automation,
+            click_point=None,
+            click_view_id=None,
+            click_view_type=None,
+            click_view_text=None,
+            click_view_label=None,
+            capture_before=False,
+            settle_secs=0.0,
+            timeout_secs=args.timeout,
+            source_request=source_request,
+        )
+    else:
+        print_fn(f"Error: desktop inspect is not implemented for `{args.target}` yet; adapter `{adapter}` is still pending.")
+        return 1
+
+    try:
+        manifest = runner()
+    except Exception as exc:
+        print_fn(f"Error: {exc}")
+        return 1
+
+    if getattr(args, "json", False):
+        print_fn(json.dumps(manifest, indent=2))
+        return 0
+
+    _print_lines(desktop_action_success_lines_fn("inspect", args.target, manifest), print_fn=print_fn)
+    return 0
