@@ -3,9 +3,22 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from functools import update_wrapper
 from typing import Any
 
 from binding_utils import binding as _binding
+
+
+UTILITY_COMMAND_EXPORTS = (
+    "print_local_ci_state_footprint",
+    "print_local_ci_cleanup_plan",
+    "cmd_cleanup",
+    "cmd_bump",
+    "cmd_cancel",
+    "resolve_job_for_logs",
+    "cmd_logs",
+    "cmd_evidence",
+)
 
 
 def print_local_ci_state_footprint(bindings: Mapping[str, Any], *, indent: str = "") -> None:
@@ -86,3 +99,20 @@ def cmd_evidence(bindings: Mapping[str, Any], args: Any) -> int:
         print_evidence_summary_fn=_binding(bindings, "print_evidence_summary"),
         evidence_empty_line_fn=_binding(bindings, "evidence_empty_line"),
     )
+
+
+def bind_utility_command(bindings: Mapping[str, Any], name: str):
+    target = globals()[name]
+
+    def facade(*args, **kwargs):
+        return target(bindings, *args, **kwargs)
+
+    return update_wrapper(facade, target)
+
+
+def install_utility_command_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = UTILITY_COMMAND_EXPORTS,
+) -> None:
+    for name in names:
+        bindings[name] = bind_utility_command(bindings, name)

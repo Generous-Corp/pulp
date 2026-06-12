@@ -194,6 +194,24 @@ class UtilityCommandBindingsTests(unittest.TestCase):
         ]:
             self.assertIs(captured["kwargs"][f"{name}_fn"], bindings[name])
 
+    def test_install_utility_command_helpers_wires_named_exports(self):
+        captured = {}
+
+        def runner(*args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            return 8
+
+        bindings = self._bindings("_queue_commands_cli", "cmd_bump", runner)
+
+        self.mod.install_utility_command_helpers(bindings, names=("cmd_bump",))
+
+        args_obj = object()
+        self.assertEqual(bindings["cmd_bump"](args_obj), 8)
+        self.assertEqual(captured["args"], (args_obj,))
+        self.assertIs(captured["kwargs"]["normalize_priority_fn"], bindings["normalize_priority"])
+        self.assertEqual(bindings["cmd_bump"].__name__, "cmd_bump")
+
 
 if __name__ == "__main__":
     unittest.main()

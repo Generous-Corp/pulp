@@ -2286,16 +2286,7 @@ def drain_pending_jobs(config: dict, *, blocking: bool) -> tuple[bool, bool]:
 # ── GitHub Helpers ───────────────────────────────────────────────────────────
 
 
-def print_local_ci_state_footprint(*, indent: str = "") -> None:
-    return _utility_command_bindings.print_local_ci_state_footprint(globals(), indent=indent)
-
-
-def print_local_ci_cleanup_plan(plan: dict, *, dry_run: bool) -> None:
-    return _utility_command_bindings.print_local_ci_cleanup_plan(globals(), plan, dry_run=dry_run)
-
-
-def cmd_cleanup(args: argparse.Namespace) -> int:
-    return _utility_command_bindings.cmd_cleanup(globals(), args)
+_utility_command_bindings.install_utility_command_helpers(globals())
 
 
 def resolve_submission_options(
@@ -2324,28 +2315,8 @@ def cmd_check(args: argparse.Namespace) -> int:
     return _local_ci_command_bindings.cmd_check(globals(), args)
 
 
-def cmd_bump(args: argparse.Namespace) -> int:
-    return _utility_command_bindings.cmd_bump(globals(), args)
-
-
-def cmd_cancel(args: argparse.Namespace) -> int:
-    return _utility_command_bindings.cmd_cancel(globals(), args)
-
-
 def cmd_list(_args: argparse.Namespace) -> int:
     return _local_ci_command_bindings.cmd_list(globals(), _args)
-
-
-def resolve_job_for_logs(job_ref: str | None) -> dict | None:
-    return _utility_command_bindings.resolve_job_for_logs(globals(), job_ref)
-
-
-def cmd_logs(args: argparse.Namespace) -> int:
-    return _utility_command_bindings.cmd_logs(globals(), args)
-
-
-def cmd_evidence(args: argparse.Namespace) -> int:
-    return _utility_command_bindings.cmd_evidence(globals(), args)
 
 
 def cmd_status(_args: argparse.Namespace) -> int:
