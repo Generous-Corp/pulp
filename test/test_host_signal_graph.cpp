@@ -885,6 +885,57 @@ TEST_CASE("SignalGraph exposes prepared runtime stats",
     REQUIRE(invalidated.total_prepared_buffer_bytes == 0);
 }
 
+TEST_CASE("SignalGraph evaluates optional runtime budget from prepared stats",
+          "[host][graph][budget-policy][phase4]") {
+    SignalGraph graph;
+    auto input = graph.add_input_node(1, "in");
+    auto gain = graph.add_gain_node("gain");
+    auto output = graph.add_output_node(1, "out");
+    REQUIRE(graph.connect(input, 0, gain, 0));
+    REQUIRE(graph.connect(gain, 0, output, 0));
+    REQUIRE(graph.prepare(48000.0, 16));
+
+    pulp::runtime::RuntimeBudgetFrame exact(256);
+    auto report = graph.evaluate_optional_runtime_budget(
+        exact, pulp::runtime::RuntimeWorkLane::Background);
+    REQUIRE(report.prepared);
+    REQUIRE(report.estimated_cost == 256);
+    REQUIRE(report.decision.action == pulp::runtime::RuntimeBudgetAction::Run);
+    REQUIRE(report.should_run_optional_work());
+    REQUIRE(report.frame_stats.run_count == 1);
+    REQUIRE(report.frame_stats.remaining_budget == 0);
+
+    pulp::runtime::RuntimeBudgetFrame tight(255);
+    report = graph.evaluate_optional_runtime_budget(
+        tight, pulp::runtime::RuntimeWorkLane::Background);
+    REQUIRE(report.decision.action == pulp::runtime::RuntimeBudgetAction::Bypass);
+    REQUIRE_FALSE(report.should_run_optional_work());
+    REQUIRE(report.frame_stats.bypass_count == 1);
+    REQUIRE(report.frame_stats.remaining_budget == 255);
+
+    pulp::runtime::RuntimeBudgetPolicy policy;
+    policy.shed_background_on_overload = true;
+    pulp::runtime::RuntimeBudgetFrame overloaded(1024, policy, true);
+    report = graph.evaluate_optional_runtime_budget(
+        overloaded, pulp::runtime::RuntimeWorkLane::Background);
+    REQUIRE(report.decision.action == pulp::runtime::RuntimeBudgetAction::Shed);
+    REQUIRE(report.frame_stats.shed_count == 1);
+}
+
+TEST_CASE("SignalGraph optional runtime budget reports unprepared graphs",
+          "[host][graph][budget-policy][phase4]") {
+    SignalGraph graph;
+    pulp::runtime::RuntimeBudgetFrame frame(0);
+
+    const auto report = graph.evaluate_optional_runtime_budget(
+        frame, pulp::runtime::RuntimeWorkLane::Background);
+
+    REQUIRE_FALSE(report.prepared);
+    REQUIRE(report.estimated_cost == 0);
+    REQUIRE(report.decision.action == pulp::runtime::RuntimeBudgetAction::Run);
+    REQUIRE(report.frame_stats.run_count == 1);
+}
+
 TEST_CASE("SignalGraph clears prepared runtime stats after failed prepare",
           "[host][graph][stats][limits][phase2]") {
     SignalGraph graph;
@@ -906,6 +957,24 @@ TEST_CASE("SignalGraph clears prepared runtime stats after failed prepare",
 }
 
 #if defined(__unix__) || defined(__APPLE__)
+TEST_CASE("SignalGraph optional runtime budget path allocates zero times",
+          "[host][graph][budget-policy][rt-safety][phase4]") {
+    SignalGraph graph;
+    auto input = graph.add_input_node(1, "in");
+    auto output = graph.add_output_node(1, "out");
+    REQUIRE(graph.connect(input, 0, output, 0));
+    REQUIRE(graph.prepare(48000.0, 16));
+
+    pulp::runtime::RuntimeBudgetFrame frame(1024);
+    {
+        pulp::native_components::test::RtNoAllocScope no_alloc;
+        const auto report = graph.evaluate_optional_runtime_budget(
+            frame, pulp::runtime::RuntimeWorkLane::Opportunistic);
+        REQUIRE(report.prepared);
+        REQUIRE(report.should_run_optional_work());
+    }
+}
+
 TEST_CASE("SignalGraph prepared runtime stats path allocates zero times",
           "[host][graph][stats][rt-safety][phase2]") {
     SignalGraph graph;

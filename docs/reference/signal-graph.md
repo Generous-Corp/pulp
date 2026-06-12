@@ -123,6 +123,16 @@ cleared when topology or limits change, when `release()` runs, or when
 `prepare()` fails. Treat it as the host-facing budget/accounting view of the
 prepared runtime, not as an audio-thread routing API.
 
+Hosts that run optional graph-side work after prepare, such as preview
+rendering, analysis refresh, or noncritical diagnostics, can pass a
+`runtime::RuntimeBudgetFrame` to
+`SignalGraph::evaluate_optional_runtime_budget()`. The graph derives a stable
+cost from prepared stats, applies the shared runtime budget policy, and returns
+a report with the decision, estimated cost, prepared state, and updated frame
+counters. `Run` means the optional work can proceed; `Defer`, `Shed`, and
+`Bypass` are the explicit fallback states. Core graph audio processing remains
+on the prepared snapshot path and is not skipped by this optional-work helper.
+
 ## Latency & PDC
 
 Every `PluginSlot` reports `latency_samples()`. During `prepare()` the

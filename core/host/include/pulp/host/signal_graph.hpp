@@ -17,6 +17,7 @@
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/audio/buffer.hpp>
 #include <pulp/midi/buffer.hpp>
+#include <pulp/runtime/budget_policy.hpp>
 #include <pulp/state/modulation_lane.hpp>
 #include <atomic>
 #include <functional>
@@ -214,6 +215,17 @@ public:
         std::size_t total_prepared_buffer_bytes = 0;
     };
 
+    struct RuntimeBudgetReport {
+        runtime::RuntimeBudgetDecision decision{};
+        runtime::RuntimeBudgetFrameStats frame_stats{};
+        std::uint64_t estimated_cost = 0;
+        bool prepared = false;
+
+        bool should_run_optional_work() const noexcept {
+            return decision.should_run();
+        }
+    };
+
     SignalGraph() = default;
 
     // Add nodes — returns the node ID
@@ -370,6 +382,10 @@ public:
     std::size_t estimate_generated_graph_work_units(int max_block_size) const;
     GeneratedGraphValidation validate_generated_graph(int max_block_size) const;
     PreparedStats prepared_stats() const;
+    RuntimeBudgetReport evaluate_optional_runtime_budget(
+        runtime::RuntimeBudgetFrame& frame,
+        runtime::RuntimeWorkLane lane = runtime::RuntimeWorkLane::Background,
+        bool required = false) const noexcept;
 
     // Process one block of audio through the graph
     void process(audio::BufferView<float>& output,
