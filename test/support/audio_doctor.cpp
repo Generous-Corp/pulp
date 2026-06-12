@@ -7,6 +7,7 @@
 #include "audio_doctor.hpp"
 
 #include <algorithm>
+#include <utility>
 
 namespace pulp::test::audio {
 
