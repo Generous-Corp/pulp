@@ -648,6 +648,108 @@ TEST_CASE("AU v3 render events drop past realtime parameter capacity without gro
     }
 }
 
+TEST_CASE("AU v3 transport jumps request processor reset through ProcessContext",
+          "[au][auv3][transport][reset][phase2]") {
+    @autoreleasepool {
+        AudioComponentDescription desc{};
+        desc.componentType = kAudioUnitType_Effect;
+        desc.componentSubType = 'TTrJ';
+        desc.componentManufacturer = 'Plup';
+
+        ScopedFactoryRegistration registration(create_effect_processor);
+
+        NSError* error = nil;
+        PulpAudioUnit* unit =
+            [[PulpAudioUnit alloc] initWithComponentDescription:desc
+                                                       options:0
+                                                         error:&error];
+        REQUIRE(unit != nil);
+        REQUIRE(error == nil);
+
+        auto* processor = g_last_effect_processor;
+        REQUIRE(processor != nullptr);
+
+        NSError* allocate_error = nil;
+        REQUIRE([unit allocateRenderResourcesAndReturnError:&allocate_error]);
+        REQUIRE(allocate_error == nil);
+
+        constexpr UInt32 kFrames = 8;
+        float left[kFrames] = {};
+        float right[kFrames] = {};
+        struct StereoBufferList {
+            AudioBufferList list;
+            AudioBuffer extra[1];
+        } output{};
+        output.list.mNumberBuffers = 2;
+        output.list.mBuffers[0].mNumberChannels = 1;
+        output.list.mBuffers[0].mDataByteSize = kFrames * sizeof(float);
+        output.list.mBuffers[0].mData = left;
+        output.list.mBuffers[1].mNumberChannels = 1;
+        output.list.mBuffers[1].mDataByteSize = kFrames * sizeof(float);
+        output.list.mBuffers[1].mData = right;
+
+        __block double current_sample_position = 1000.0;
+        unit.transportStateBlock = ^BOOL(
+            AUHostTransportStateFlags* transport_flags,
+            double* sample_position,
+            double* cycle_start,
+            double* cycle_end) {
+            if (transport_flags) *transport_flags = AUHostTransportStateMoving;
+            if (sample_position) *sample_position = current_sample_position;
+            if (cycle_start) *cycle_start = 0.0;
+            if (cycle_end) *cycle_end = 0.0;
+            return YES;
+        };
+
+        AudioUnitRenderActionFlags flags = 0;
+        AudioTimeStamp timestamp{};
+        AUInternalRenderBlock block = [unit internalRenderBlock];
+        REQUIRE(block != nil);
+
+        current_sample_position = 1000.0;
+        auto status = block(&flags,
+                            &timestamp,
+                            kFrames,
+                            0,
+                            &output.list,
+                            nullptr,
+                            nil);
+        REQUIRE(status == noErr);
+        const auto first = processor->last_context;
+        REQUIRE_FALSE(first.transport_jump);
+        REQUIRE_FALSE(first.should_reset_dsp_state());
+
+        current_sample_position = 1008.0;
+        status = block(&flags,
+                       &timestamp,
+                       kFrames,
+                       0,
+                       &output.list,
+                       nullptr,
+                       nil);
+        REQUIRE(status == noErr);
+        const auto continuous = processor->last_context;
+        REQUIRE_FALSE(continuous.transport_jump);
+        REQUIRE_FALSE(continuous.should_reset_dsp_state());
+
+        current_sample_position = 4096.0;
+        status = block(&flags,
+                       &timestamp,
+                       kFrames,
+                       0,
+                       &output.list,
+                       nullptr,
+                       nil);
+        REQUIRE(status == noErr);
+        const auto jumped = processor->last_context;
+        REQUIRE(jumped.transport_jump);
+        REQUIRE(jumped.should_reset_dsp_state());
+
+        [unit deallocateRenderResources];
+        [unit release];
+    }
+}
+
 TEST_CASE("AU v3 render block rejects frame counts above maximumFramesToRender",
           "[au][auv3][render][bounds]") {
     @autoreleasepool {
