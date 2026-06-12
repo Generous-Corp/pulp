@@ -27,6 +27,20 @@ wraps `View::paint_all` and every adapter's call to
 shout when rule #1 is violated. Tooling can read
 `pulp::runtime::is_in_no_alloc_scope()` to detect the protected region.
 
+## Budget prepare-time resources
+
+`format::PrepareContext` carries optional `resource_limits` for hosts and test
+harnesses that need fail-closed behavior before large allocations happen. A zero
+limit means "unspecified/unlimited" for source compatibility.
+
+Processors with large prepared storage can override
+`Processor::estimate_prepare_resources()` to report persistent bytes, fixed
+per-block scratch bytes, block size, channel counts, event capacities, and voice
+capacity. Hosts can call `Processor::check_prepare_resource_limits()` before
+`prepare()` and reject configurations that exceed a non-zero limit. This keeps
+oversized samplers, convolution IRs, analysis caches, and voice pools from
+discovering budget failure on the audio thread.
+
 ## Read parameters once per block, not per sample
 
 `store.get_value(id)` is a `std::atomic<float>::load(relaxed)`. Cheap,

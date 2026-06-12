@@ -68,6 +68,29 @@ public:
     bool has_editor() const override { return false; }
 };
 
+class ResourceReportingProcessor : public PlainProcessor {
+public:
+    PrepareResourceUsage estimate_prepare_resources(
+        const PrepareContext& context) const override {
+        return {
+            .persistent_bytes = persistent_bytes,
+            .block_scratch_bytes = block_scratch_bytes,
+            .block_size = context.max_buffer_size,
+            .input_channels = context.input_channels,
+            .output_channels = context.output_channels,
+            .parameter_events = parameter_events,
+            .midi_events = midi_events,
+            .voices = voices,
+        };
+    }
+
+    std::size_t persistent_bytes = 0;
+    std::size_t block_scratch_bytes = 0;
+    int parameter_events = 0;
+    int midi_events = 0;
+    int voices = 0;
+};
+
 } // namespace
 
 TEST_CASE("PluginDescriptor defaults to conservative stereo effect metadata",
@@ -192,6 +215,138 @@ TEST_CASE("PrepareContext defaults match the headless stereo render path",
     REQUIRE(c.max_buffer_size == 512);
     REQUIRE(c.input_channels == 2);
     REQUIRE(c.output_channels == 2);
+    REQUIRE(c.resource_limits.max_persistent_bytes == 0);
+    REQUIRE(c.resource_limits.max_block_scratch_bytes == 0);
+    REQUIRE(c.resource_limits.max_total_bytes == 0);
+    REQUIRE(c.resource_limits.max_block_size == 0);
+    REQUIRE(c.resource_limits.max_input_channels == 0);
+    REQUIRE(c.resource_limits.max_output_channels == 0);
+    REQUIRE(c.resource_limits.max_parameter_events == 0);
+    REQUIRE(c.resource_limits.max_midi_events == 0);
+    REQUIRE(c.resource_limits.max_voices == 0);
+}
+
+TEST_CASE("Prepare resource usage totals persistent and block scratch bytes",
+          "[format][processor-defaults][prepare-budget][phase2]") {
+    PrepareResourceUsage usage;
+    usage.persistent_bytes = 1024;
+    usage.block_scratch_bytes = 256;
+
+    REQUIRE(usage.total_bytes() == 1280);
+}
+
+TEST_CASE("Prepare resource limits default to unlimited",
+          "[format][processor-defaults][prepare-budget][phase2]") {
+    PrepareResourceUsage usage;
+    usage.persistent_bytes = 1'000'000;
+    usage.block_scratch_bytes = 2'000'000;
+    usage.block_size = 8192;
+    usage.input_channels = 64;
+    usage.output_channels = 64;
+    usage.parameter_events = 4096;
+    usage.midi_events = 4096;
+    usage.voices = 512;
+
+    REQUIRE(first_exceeded_prepare_resource_limit(usage, {}) ==
+            PrepareResourceLimit::None);
+}
+
+TEST_CASE("Prepare resource helper reports the first exceeded budget",
+          "[format][processor-defaults][prepare-budget][phase2]") {
+    PrepareResourceUsage usage;
+    usage.persistent_bytes = 2048;
+    usage.block_scratch_bytes = 1024;
+    usage.block_size = 512;
+    usage.input_channels = 2;
+    usage.output_channels = 2;
+    usage.parameter_events = 128;
+    usage.midi_events = 256;
+    usage.voices = 16;
+
+    PrepareResourceLimits limits;
+    limits.max_persistent_bytes = 2047;
+    limits.max_block_scratch_bytes = 1;
+    REQUIRE(first_exceeded_prepare_resource_limit(usage, limits) ==
+            PrepareResourceLimit::PersistentBytes);
+
+    limits.max_persistent_bytes = 2048;
+    REQUIRE(first_exceeded_prepare_resource_limit(usage, limits) ==
+            PrepareResourceLimit::BlockScratchBytes);
+
+    limits.max_block_scratch_bytes = 1024;
+    limits.max_total_bytes = 3071;
+    REQUIRE(first_exceeded_prepare_resource_limit(usage, limits) ==
+            PrepareResourceLimit::TotalBytes);
+
+    limits.max_total_bytes = 3072;
+    limits.max_block_size = 511;
+    REQUIRE(first_exceeded_prepare_resource_limit(usage, limits) ==
+            PrepareResourceLimit::BlockSize);
+
+    limits.max_block_size = 512;
+    limits.max_input_channels = 1;
+    REQUIRE(first_exceeded_prepare_resource_limit(usage, limits) ==
+            PrepareResourceLimit::InputChannels);
+
+    limits.max_input_channels = 2;
+    limits.max_output_channels = 1;
+    REQUIRE(first_exceeded_prepare_resource_limit(usage, limits) ==
+            PrepareResourceLimit::OutputChannels);
+
+    limits.max_output_channels = 2;
+    limits.max_parameter_events = 127;
+    REQUIRE(first_exceeded_prepare_resource_limit(usage, limits) ==
+            PrepareResourceLimit::ParameterEvents);
+
+    limits.max_parameter_events = 128;
+    limits.max_midi_events = 255;
+    REQUIRE(first_exceeded_prepare_resource_limit(usage, limits) ==
+            PrepareResourceLimit::MidiEvents);
+
+    limits.max_midi_events = 256;
+    limits.max_voices = 15;
+    REQUIRE(first_exceeded_prepare_resource_limit(usage, limits) ==
+            PrepareResourceLimit::Voices);
+
+    limits.max_voices = 16;
+    REQUIRE(first_exceeded_prepare_resource_limit(usage, limits) ==
+            PrepareResourceLimit::None);
+}
+
+TEST_CASE("Processor prepare resource estimates can be checked against host limits",
+          "[format][processor-defaults][prepare-budget][phase2]") {
+    ResourceReportingProcessor p;
+    p.persistent_bytes = 4096;
+    p.block_scratch_bytes = 1024;
+    p.parameter_events = 32;
+    p.midi_events = 64;
+    p.voices = 8;
+
+    PrepareContext context;
+    context.max_buffer_size = 256;
+    context.input_channels = 2;
+    context.output_channels = 2;
+
+    const auto estimate = p.estimate_prepare_resources(context);
+    REQUIRE(estimate.persistent_bytes == 4096);
+    REQUIRE(estimate.block_scratch_bytes == 1024);
+    REQUIRE(estimate.block_size == 256);
+    REQUIRE(estimate.input_channels == 2);
+    REQUIRE(estimate.output_channels == 2);
+    REQUIRE(estimate.parameter_events == 32);
+    REQUIRE(estimate.midi_events == 64);
+    REQUIRE(estimate.voices == 8);
+
+    REQUIRE(p.check_prepare_resource_limits(context) == PrepareResourceLimit::None);
+
+    context.resource_limits.max_total_bytes = 4096;
+    REQUIRE(p.check_prepare_resource_limits(context) ==
+            PrepareResourceLimit::TotalBytes);
+
+    context.resource_limits.max_total_bytes = 8192;
+    context.resource_limits.max_voices = 4;
+    REQUIRE(p.check_prepare_resource_limits(context) ==
+            PrepareResourceLimit::Voices);
 }
 
 TEST_CASE("ProcessContext defaults represent stopped 4/4 playback at 120 BPM",
