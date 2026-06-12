@@ -991,6 +991,34 @@ TEST_CASE("SignalGraph generated graph validation reports limit reasons",
         REQUIRE(validation.limit == 3);
     }
 
+    SECTION("estimated work budget") {
+        SignalGraph graph;
+        auto input = graph.add_input_node(1, "in");
+        auto gain = graph.add_gain_node("gain");
+        auto output = graph.add_output_node(1, "out");
+        REQUIRE(graph.connect(input, 0, gain, 0));
+        REQUIRE(graph.connect(gain, 0, output, 0));
+
+        const std::size_t estimated =
+            graph.estimate_generated_graph_work_units(16);
+        REQUIRE(estimated == 160);
+
+        auto limits = graph.limits();
+        limits.max_estimated_work_units = estimated;
+        graph.set_limits(limits);
+        REQUIRE(graph.validate_generated_graph(16).accepted);
+
+        limits.max_estimated_work_units = estimated - 1;
+        graph.set_limits(limits);
+        const auto validation = graph.validate_generated_graph(16);
+        REQUIRE_FALSE(validation.accepted);
+        REQUIRE(validation.reason
+                == SignalGraph::GeneratedGraphValidationRejectReason::EstimatedWorkExceeded);
+        REQUIRE(validation.actual == estimated);
+        REQUIRE(validation.limit == estimated - 1);
+        REQUIRE_FALSE(graph.prepare(48000.0, 16));
+    }
+
     SECTION("preflight does not clear the prepared snapshot") {
         SignalGraph graph;
         auto input = graph.add_input_node(1, "in");
