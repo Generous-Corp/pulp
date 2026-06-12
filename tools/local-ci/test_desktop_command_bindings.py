@@ -272,6 +272,25 @@ class DesktopCommandBindingsTests(unittest.TestCase):
                 self.assertIs(captured["kwargs"]["desktop_action_success_lines_fn"], bindings["_desktop_cli"].desktop_action_success_lines)
                 self.assertEqual(captured["kwargs"]["sys_platform"], "darwin")
 
+    def test_install_desktop_command_helpers_wires_named_exports(self):
+        captured = {}
+
+        def runner(*args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            return 11
+
+        bindings = self._bindings("_desktop_commands_cli", "cmd_desktop_recent", runner)
+
+        self.mod.install_desktop_command_helpers(bindings, names=("cmd_desktop_recent",))
+
+        args_obj = object()
+        self.assertEqual(bindings["cmd_desktop_recent"](args_obj), 11)
+        self.assertEqual(captured["args"], (args_obj,))
+        self.assertIs(captured["kwargs"]["load_config_fn"], bindings["load_config"])
+        self.assertIs(captured["kwargs"]["desktop_recent_lines_fn"], bindings["_desktop_cli"].desktop_recent_lines)
+        self.assertEqual(bindings["cmd_desktop_recent"].__name__, "cmd_desktop_recent")
+
 
 if __name__ == "__main__":
     unittest.main()

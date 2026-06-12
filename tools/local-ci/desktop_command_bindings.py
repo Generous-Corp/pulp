@@ -3,10 +3,28 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from functools import update_wrapper
 from typing import Any
 
 from binding_utils import binding as _binding
 from binding_utils import binding_attr as _binding_attr
+
+
+DESKTOP_COMMAND_EXPORTS = (
+    "cmd_desktop_install",
+    "cmd_desktop_doctor",
+    "cmd_desktop_status",
+    "cmd_desktop_config_show",
+    "cmd_desktop_config_set",
+    "cmd_desktop_recent",
+    "cmd_desktop_proof",
+    "cmd_desktop_publish",
+    "cmd_desktop_cleanup",
+    "windows_requires_pulp_app_selectors",
+    "cmd_desktop_smoke",
+    "cmd_desktop_click",
+    "cmd_desktop_inspect",
+)
 
 
 def cmd_desktop_install(bindings: Mapping[str, Any], args: Any) -> int:
@@ -166,3 +184,20 @@ def cmd_desktop_inspect(bindings: Mapping[str, Any], args: Any) -> int:
         args,
         **_desktop_action_kwargs(bindings),
     )
+
+
+def bind_desktop_command(bindings: Mapping[str, Any], name: str):
+    target = globals()[name]
+
+    def facade(*args, **kwargs):
+        return target(bindings, *args, **kwargs)
+
+    return update_wrapper(facade, target)
+
+
+def install_desktop_command_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = DESKTOP_COMMAND_EXPORTS,
+) -> None:
+    for name in names:
+        bindings[name] = bind_desktop_command(bindings, name)

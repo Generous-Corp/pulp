@@ -2352,60 +2352,11 @@ def cmd_status(_args: argparse.Namespace) -> int:
     return _local_ci_command_bindings.cmd_status(globals(), _args)
 
 
-def cmd_desktop_install(args: argparse.Namespace) -> int:
-    return _desktop_command_bindings.cmd_desktop_install(globals(), args)
-
-
-def cmd_desktop_doctor(args: argparse.Namespace) -> int:
-    return _desktop_command_bindings.cmd_desktop_doctor(globals(), args)
-
-
-def cmd_desktop_status(args: argparse.Namespace) -> int:
-    return _desktop_command_bindings.cmd_desktop_status(globals(), args)
-
-
-def cmd_desktop_config_show(args: argparse.Namespace) -> int:
-    return _desktop_command_bindings.cmd_desktop_config_show(globals(), args)
-
-
-def cmd_desktop_config_set(args: argparse.Namespace) -> int:
-    return _desktop_command_bindings.cmd_desktop_config_set(globals(), args)
+_desktop_command_bindings.install_desktop_command_helpers(globals())
 
 
 def cmd_desktop_config(args: argparse.Namespace) -> int:
     return _cli_dispatch_bindings.cmd_desktop_config(globals(), args)
-
-
-def cmd_desktop_recent(args: argparse.Namespace) -> int:
-    return _desktop_command_bindings.cmd_desktop_recent(globals(), args)
-
-
-def cmd_desktop_proof(args: argparse.Namespace) -> int:
-    return _desktop_command_bindings.cmd_desktop_proof(globals(), args)
-
-
-def cmd_desktop_publish(args: argparse.Namespace) -> int:
-    return _desktop_command_bindings.cmd_desktop_publish(globals(), args)
-
-
-def cmd_desktop_cleanup(args: argparse.Namespace) -> int:
-    return _desktop_command_bindings.cmd_desktop_cleanup(globals(), args)
-
-
-def windows_requires_pulp_app_selectors(args: argparse.Namespace) -> bool:
-    return _desktop_command_bindings.windows_requires_pulp_app_selectors(globals(), args)
-
-
-def cmd_desktop_smoke(args: argparse.Namespace) -> int:
-    return _desktop_command_bindings.cmd_desktop_smoke(globals(), args)
-
-
-def cmd_desktop_click(args: argparse.Namespace) -> int:
-    return _desktop_command_bindings.cmd_desktop_click(globals(), args)
-
-
-def cmd_desktop_inspect(args: argparse.Namespace) -> int:
-    return _desktop_command_bindings.cmd_desktop_inspect(globals(), args)
 
 
 def cmd_desktop(args: argparse.Namespace) -> int:
