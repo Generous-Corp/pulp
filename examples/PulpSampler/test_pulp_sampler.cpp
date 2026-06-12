@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include "pulp_sampler.hpp"
+#include <pulp/format/plugin_state_io.hpp>
 #include <cmath>
 #include <vector>
 
@@ -176,4 +177,49 @@ TEST_CASE("PulpSampler state round-trip", "[sampler]") {
     f.store.reset_all_to_defaults();
     REQUIRE(f.store.deserialize(saved));
     REQUIRE(std::abs(f.store.get_value(kSamplerGain) - (-12.0f)) < 0.01f);
+}
+
+TEST_CASE("PulpSampler state restore preserves missing sample resource relink",
+          "[sampler][sample-resource][state][missing][phase3]") {
+    SamplerFixture source;
+    source.store.set_value(kSamplerGain, -12.0f);
+    source.proc->mark_sample_missing("samples/session-kick.wav", "file not found");
+
+    const auto blob = format::plugin_state_io::serialize(source.store, *source.proc);
+    REQUIRE_FALSE(blob.empty());
+
+    SamplerFixture restored;
+    REQUIRE(restored.proc->has_sample());
+    REQUIRE(format::plugin_state_io::deserialize(blob, restored.store, *restored.proc));
+
+    REQUIRE_FALSE(restored.proc->has_sample());
+    REQUIRE(restored.proc->sample_length() == 0);
+    REQUIRE(restored.proc->sample_diagnostics().path == "samples/session-kick.wav");
+    REQUIRE(restored.proc->sample_diagnostics().reason == "sample resource requires relink");
+    REQUIRE_THAT(restored.store.get_value(kSamplerGain), WithinAbs(-12.0f, 0.01f));
+
+    std::vector<float> out_l(32, 1.0f), out_r(32, -1.0f);
+    float* out_ptrs[] = {out_l.data(), out_r.data()};
+    audio::BufferView<float> out(out_ptrs, 2, 32);
+
+    const float* in_ptrs[] = {nullptr, nullptr};
+    audio::BufferView<const float> in(in_ptrs, 0, 32);
+
+    midi::MidiBuffer midi_in, midi_out;
+    midi_in.add(midi::MidiEvent::note_on(0, 60, 127));
+    format::ProcessContext ctx{44100, 32};
+
+    restored.proc->process(out, in, midi_in, midi_out, ctx);
+    for (int i = 0; i < 32; ++i) {
+        REQUIRE_THAT(out_l[static_cast<size_t>(i)], WithinAbs(0.0f, 1e-6f));
+        REQUIRE_THAT(out_r[static_cast<size_t>(i)], WithinAbs(0.0f, 1e-6f));
+    }
+}
+
+TEST_CASE("PulpSampler rejects malformed sample resource state",
+          "[sampler][sample-resource][state][phase3]") {
+    SamplerFixture f;
+    const std::vector<uint8_t> malformed{'P', 'M', 'S'};
+    REQUIRE_FALSE(f.proc->deserialize_plugin_state(malformed));
+    REQUIRE(f.proc->has_sample());
 }

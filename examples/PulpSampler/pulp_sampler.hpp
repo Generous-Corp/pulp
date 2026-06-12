@@ -9,6 +9,8 @@
 #include <pulp/signal/adsr.hpp>
 #include <pulp/signal/smoothed_value.hpp>
 #include <cmath>
+#include <cstdint>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -130,6 +132,45 @@ public:
         return sample_resource_.diagnostics();
     }
 
+    std::vector<uint8_t> serialize_plugin_state() const override {
+        const auto diag = sample_resource_.diagnostics();
+        if (diag.path.empty()) return {};
+
+        std::vector<uint8_t> out;
+        out.reserve(12 + diag.path.size());
+        append_u32(out, kSamplerStateMagic);
+        append_u32(out, kSamplerStateVersion);
+        append_u32(out, static_cast<uint32_t>(diag.path.size()));
+        out.insert(out.end(), diag.path.begin(), diag.path.end());
+        return out;
+    }
+
+    bool deserialize_plugin_state(std::span<const uint8_t> data) override {
+        if (data.empty()) {
+            sample_resource_.clear();
+            return true;
+        }
+        if (data.size() < 12) return false;
+
+        const auto magic = read_u32(data, 0);
+        const auto version = read_u32(data, 4);
+        const auto path_size = read_u32(data, 8);
+        if (magic != kSamplerStateMagic || version != kSamplerStateVersion) return false;
+        if (path_size > data.size() - 12) return false;
+        if (data.size() != 12 + static_cast<std::size_t>(path_size)) return false;
+
+        std::string path(reinterpret_cast<const char*>(data.data() + 12),
+                         static_cast<std::size_t>(path_size));
+        if (path.empty()) {
+            sample_resource_.clear();
+        } else {
+            sample_resource_.publish_missing(
+                std::move(path),
+                "sample resource requires relink");
+        }
+        return true;
+    }
+
     void prepare(const format::PrepareContext& ctx) override {
         host_sample_rate_ = static_cast<float>(ctx.sample_rate);
         for (auto& v : voices_) v = {};
@@ -232,9 +273,26 @@ public:
     }
 
 private:
+    static constexpr uint32_t kSamplerStateMagic = 0x52534D50u; // "PMSR" LE
+    static constexpr uint32_t kSamplerStateVersion = 1;
+
     audio::SampleResourceHandle sample_resource_;
     float host_sample_rate_ = 44100.0f;
     SamplerVoice voices_[kMaxVoices]{};
+
+    static void append_u32(std::vector<uint8_t>& out, uint32_t value) {
+        out.push_back(static_cast<uint8_t>(value & 0xFFu));
+        out.push_back(static_cast<uint8_t>((value >> 8) & 0xFFu));
+        out.push_back(static_cast<uint8_t>((value >> 16) & 0xFFu));
+        out.push_back(static_cast<uint8_t>((value >> 24) & 0xFFu));
+    }
+
+    static uint32_t read_u32(std::span<const uint8_t> data, std::size_t offset) {
+        return static_cast<uint32_t>(data[offset])
+            | (static_cast<uint32_t>(data[offset + 1]) << 8)
+            | (static_cast<uint32_t>(data[offset + 2]) << 16)
+            | (static_cast<uint32_t>(data[offset + 3]) << 24);
+    }
 
     void trigger_note(int note, float velocity) {
         // Find free voice or steal oldest
