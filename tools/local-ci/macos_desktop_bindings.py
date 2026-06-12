@@ -6,6 +6,12 @@ from collections.abc import Mapping
 from typing import Any
 
 from binding_utils import binding as _binding
+from binding_utils import install_local_helpers
+
+
+MACOS_DESKTOP_EXPORTS = (
+    "run_macos_local_smoke",
+)
 
 
 def run_macos_local_smoke(
@@ -88,3 +94,7 @@ def run_macos_local_smoke(
         write_desktop_run_rollups_fn=_binding(bindings, "write_desktop_run_rollups"),
         terminate_process_fn=_binding(bindings, "terminate_process"),
     )
+
+
+def install_macos_desktop_helpers(bindings: dict[str, Any], names: tuple[str, ...] = MACOS_DESKTOP_EXPORTS) -> None:
+    install_local_helpers(bindings, globals(), names)

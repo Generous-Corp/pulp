@@ -322,6 +322,8 @@ _linux_desktop_bindings.install_linux_desktop_helpers(globals())
 _source_prep_bindings.install_source_prep_helpers(globals())
 _windows_probe_bindings.install_windows_probe_helpers(globals())
 _desktop_probe_bindings.install_desktop_probe_helpers(globals())
+_macos_desktop_bindings.install_macos_desktop_helpers(globals())
+_windows_desktop_bindings.install_windows_desktop_helpers(globals())
 _desktop_check = desktop_check
 _check_writable_dir = check_writable_dir
 _clear_directory_contents = clear_directory_contents
@@ -331,92 +333,6 @@ _command_path_rewrite_candidate = command_path_rewrite_candidate
 _rewrite_launch_command_for_mapper = rewrite_launch_command_for_mapper
 _local_worktree_matches = local_worktree_matches
 _reset_local_worktree = reset_local_worktree
-
-
-def run_macos_local_smoke(
-    config: dict,
-    command: str | None,
-    *,
-    action_name: str = "smoke",
-    bundle_id: str | None,
-    label: str | None,
-    output_path: str | None,
-    capture_ui_snapshot: bool,
-    click_point: str | None,
-    click_view_id: str | None,
-    click_view_type: str | None,
-    click_view_text: str | None,
-    click_view_label: str | None,
-    pulp_app_automation: bool = False,
-    capture_before: bool,
-    settle_secs: float,
-    timeout_secs: float,
-    source_request: dict | None = None,
-) -> dict:
-    return _macos_desktop_bindings.run_macos_local_smoke(
-        globals(),
-        config,
-        command,
-        action_name=action_name,
-        bundle_id=bundle_id,
-        label=label,
-        output_path=output_path,
-        capture_ui_snapshot=capture_ui_snapshot,
-        click_point=click_point,
-        click_view_id=click_view_id,
-        click_view_type=click_view_type,
-        click_view_text=click_view_text,
-        click_view_label=click_view_label,
-        pulp_app_automation=pulp_app_automation,
-        capture_before=capture_before,
-        settle_secs=settle_secs,
-        timeout_secs=timeout_secs,
-        source_request=source_request,
-    )
-
-
-def run_windows_session_agent_action(
-    config: dict,
-    target_name: str,
-    target: dict,
-    command: str,
-    *,
-    action_name: str,
-    label: str | None,
-    output_path: str | None,
-    pulp_app_automation: bool,
-    capture_ui_snapshot: bool,
-    click_point: str | None,
-    click_view_id: str | None,
-    click_view_type: str | None,
-    click_view_text: str | None,
-    click_view_label: str | None,
-    capture_before: bool,
-    settle_secs: float,
-    timeout_secs: float,
-    source_request: dict | None = None,
-) -> dict:
-    return _windows_desktop_bindings.run_windows_session_agent_action(
-        globals(),
-        config,
-        target_name,
-        target,
-        command,
-        action_name=action_name,
-        label=label,
-        output_path=output_path,
-        pulp_app_automation=pulp_app_automation,
-        capture_ui_snapshot=capture_ui_snapshot,
-        click_point=click_point,
-        click_view_id=click_view_id,
-        click_view_type=click_view_type,
-        click_view_text=click_view_text,
-        click_view_label=click_view_label,
-        capture_before=capture_before,
-        settle_secs=settle_secs,
-        timeout_secs=timeout_secs,
-        source_request=source_request,
-    )
 
 
 def default_priority_for(command: str, config: dict) -> str:
