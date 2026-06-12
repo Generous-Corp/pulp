@@ -21,7 +21,21 @@ static_assert(pulp::native_components::kNodeAbiMajor == pulp::PULP_NODE_ABI_VERS
 #include <cstdint>
 #include <cstring>
 #include <string_view>
+#include <type_traits>
 #include <vector>
+
+static_assert(std::is_standard_layout_v<pulp_node_descriptor_v1>);
+static_assert(std::is_trivially_copyable_v<pulp_node_descriptor_v1>);
+static_assert(std::is_standard_layout_v<pulp_node_host_services_v1>);
+static_assert(std::is_trivially_copyable_v<pulp_node_host_services_v1>);
+static_assert(std::is_standard_layout_v<pulp_node_prepare_v1>);
+static_assert(std::is_trivially_copyable_v<pulp_node_prepare_v1>);
+static_assert(std::is_standard_layout_v<pulp_node_audio_v1>);
+static_assert(std::is_trivially_copyable_v<pulp_node_audio_v1>);
+static_assert(std::is_standard_layout_v<pulp_node_writer_v1>);
+static_assert(std::is_trivially_copyable_v<pulp_node_writer_v1>);
+static_assert(std::is_standard_layout_v<pulp_node_entry_v1>);
+static_assert(std::is_trivially_copyable_v<pulp_node_entry_v1>);
 
 using namespace pulp::native_components;
 
@@ -38,6 +52,16 @@ const char kName[] = "Gain Node";
 
 constexpr int node_test_popcount(uint32_t value) {
     return std::popcount(value);
+}
+
+template <typename T>
+constexpr bool has_leading_size_major() {
+    return offsetof(T, size) == 0 && offsetof(T, abi_major) == sizeof(uint32_t);
+}
+
+constexpr size_t end_of_entry_descriptor() {
+    return offsetof(pulp_node_entry_v1, descriptor) +
+           sizeof(((pulp_node_entry_v1*)nullptr)->descriptor);
 }
 
 pulp_node_descriptor_v1 g_desc = [] {
@@ -131,11 +155,37 @@ TEST_CASE("pulp_node_v1: ABI is POD-shaped with leading size/major",
     REQUIRE(PULP_NODE_V1_ABI_MAJOR == 1u);
     REQUIRE(kNodeAbiMajor == 1u);
     REQUIRE(pulp_node_v1_abi_major() == 1u);
-    REQUIRE(offsetof(pulp_node_entry_v1, size) == 0);
-    REQUIRE(offsetof(pulp_node_entry_v1, abi_major) == 4);
-    REQUIRE(offsetof(pulp_node_descriptor_v1, size) == 0);
+    REQUIRE(has_leading_size_major<pulp_node_descriptor_v1>());
+    REQUIRE(has_leading_size_major<pulp_node_host_services_v1>());
+    REQUIRE(has_leading_size_major<pulp_node_prepare_v1>());
+    REQUIRE(has_leading_size_major<pulp_node_audio_v1>());
+    REQUIRE(has_leading_size_major<pulp_node_writer_v1>());
+    REQUIRE(has_leading_size_major<pulp_node_entry_v1>());
     REQUIRE(std::is_standard_layout_v<pulp_node_entry_v1>);
     REQUIRE(std::is_trivially_copyable_v<pulp_node_descriptor_v1>);
+    REQUIRE(std::is_trivially_copyable_v<pulp_node_host_services_v1>);
+    REQUIRE(std::is_trivially_copyable_v<pulp_node_prepare_v1>);
+    REQUIRE(std::is_trivially_copyable_v<pulp_node_audio_v1>);
+    REQUIRE(std::is_trivially_copyable_v<pulp_node_writer_v1>);
+    REQUIRE(std::is_trivially_copyable_v<pulp_node_entry_v1>);
+    REQUIRE(sizeof(pulp_node_descriptor_v1) >=
+            offsetof(pulp_node_descriptor_v1, audio_output_count) +
+                sizeof(((pulp_node_descriptor_v1*)nullptr)->audio_output_count));
+    REQUIRE(sizeof(pulp_node_host_services_v1) >=
+            offsetof(pulp_node_host_services_v1, now_ns) +
+                sizeof(((pulp_node_host_services_v1*)nullptr)->now_ns));
+    REQUIRE(sizeof(pulp_node_prepare_v1) >=
+            offsetof(pulp_node_prepare_v1, reserved) +
+                sizeof(((pulp_node_prepare_v1*)nullptr)->reserved));
+    REQUIRE(sizeof(pulp_node_audio_v1) >=
+            offsetof(pulp_node_audio_v1, outputs) +
+                sizeof(((pulp_node_audio_v1*)nullptr)->outputs));
+    REQUIRE(sizeof(pulp_node_writer_v1) >=
+            offsetof(pulp_node_writer_v1, write) +
+                sizeof(((pulp_node_writer_v1*)nullptr)->write));
+    REQUIRE(sizeof(pulp_node_entry_v1) >=
+            offsetof(pulp_node_entry_v1, report_latency) +
+                sizeof(((pulp_node_entry_v1*)nullptr)->report_latency));
     // Status codes: OK is zero, errors distinct.
     REQUIRE(PULP_NODE_OK_V1 == 0);
     REQUIRE(PULP_NODE_ERR_MALFORMED_STATE_V1 != PULP_NODE_ERR_INVALID_STATE_V1);
@@ -156,10 +206,15 @@ TEST_CASE("pulp_node_v1: version negotiation accepts same-major, rejects others"
     pulp_node_entry_v1 older = g_entry;
     older.size = static_cast<uint32_t>(kNodeEntryMinimumSize);
     REQUIRE(node_is_compatible(&older));
+    REQUIRE(kNodeEntryMinimumSize == end_of_entry_descriptor());
 
     pulp_node_entry_v1 truncated = g_entry;
     truncated.size = offsetof(pulp_node_entry_v1, descriptor);
     REQUIRE_FALSE(node_is_compatible(&truncated));
+    pulp_node_entry_v1 missing_descriptor_callback = g_entry;
+    missing_descriptor_callback.size =
+        static_cast<uint32_t>(end_of_entry_descriptor() - 1);
+    REQUIRE_FALSE(node_is_compatible(&missing_descriptor_callback));
 
     // A future same-major entry with trailing fields remains loadable by an
     // older host because known fields stay at stable offsets.
@@ -171,6 +226,29 @@ TEST_CASE("pulp_node_v1: version negotiation accepts same-major, rejects others"
     pulp_node_entry_v1 wrong = g_entry;
     wrong.abi_major = PULP_NODE_V1_ABI_MAJOR + 1;
     REQUIRE_FALSE(node_is_compatible(&wrong));
+
+    // Struct-local size/major headers let newer callers append fields without
+    // moving fields the v1 host already knows.
+    pulp_node_host_services_v1 future_host{};
+    future_host.size = sizeof(pulp_node_host_services_v1) + 32;
+    future_host.abi_major = PULP_NODE_V1_ABI_MAJOR;
+    pulp_node_prepare_v1 future_prepare{};
+    future_prepare.size = sizeof(pulp_node_prepare_v1) + 32;
+    future_prepare.abi_major = PULP_NODE_V1_ABI_MAJOR;
+    pulp_node_audio_v1 future_audio{};
+    future_audio.size = sizeof(pulp_node_audio_v1) + 32;
+    future_audio.abi_major = PULP_NODE_V1_ABI_MAJOR;
+    pulp_node_writer_v1 future_writer{};
+    future_writer.size = sizeof(pulp_node_writer_v1) + 32;
+    future_writer.abi_major = PULP_NODE_V1_ABI_MAJOR;
+    REQUIRE(future_host.size > sizeof(pulp_node_host_services_v1));
+    REQUIRE(future_prepare.size > sizeof(pulp_node_prepare_v1));
+    REQUIRE(future_audio.size > sizeof(pulp_node_audio_v1));
+    REQUIRE(future_writer.size > sizeof(pulp_node_writer_v1));
+    REQUIRE(future_host.abi_major == PULP_NODE_V1_ABI_MAJOR);
+    REQUIRE(future_prepare.abi_major == PULP_NODE_V1_ABI_MAJOR);
+    REQUIRE(future_audio.abi_major == PULP_NODE_V1_ABI_MAJOR);
+    REQUIRE(future_writer.abi_major == PULP_NODE_V1_ABI_MAJOR);
 }
 
 TEST_CASE("pulp_node_v1: a C node drives the full lifecycle + state",

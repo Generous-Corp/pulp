@@ -968,6 +968,14 @@ TEST_CASE("GraphSerializer preserves opaque state for unresolved custom nodes",
     // Re-serializing preserves the blob (save-load-save keeps the state).
     const auto json2 = GraphSerializer::to_json(dst);
     REQUIRE(json2.find("\"state_b64\"") != std::string::npos);
+
+    SignalGraph reloaded;
+    auto reloaded_result = GraphSerializer::from_json(reloaded, json2);
+    REQUIRE(reloaded_result.ok);
+    REQUIRE(missing_custom_types_contain(reloaded_result, "pulp.test.level@1"));
+    REQUIRE(reloaded.nodes().size() == 1);
+    REQUIRE(reloaded.custom_node_state(reloaded.nodes().front().id) ==
+            ser_level_bytes(1.75f));
 }
 
 TEST_CASE("GraphSerializer generated custom-state fuzz validates state payloads",
@@ -1150,6 +1158,20 @@ TEST_CASE("GraphSerializer preserves unresolved custom node identity",
             std::string::npos);
     REQUIRE(second_json.find("\"version\": 4") != std::string::npos);
     REQUIRE(second_json.find("\"source_node\"") != std::string::npos);
+
+    SignalGraph reloaded;
+    auto reloaded_result = GraphSerializer::from_json(reloaded, second_json);
+    REQUIRE(reloaded_result.ok);
+    REQUIRE(missing_custom_types_contain(reloaded_result, "pulp.test.future-node@4"));
+    REQUIRE(reloaded.nodes().size() == 3);
+    REQUIRE(reloaded.connections().size() == 2);
+    const auto* reloaded_custom = find_node_named(reloaded, "Future Node");
+    REQUIRE(reloaded_custom != nullptr);
+    REQUIRE(reloaded_custom->type == NodeType::Custom);
+    REQUIRE(reloaded_custom->custom_type_id == "pulp.test.future-node");
+    REQUIRE(reloaded_custom->custom_type_version == 4);
+    REQUIRE(reloaded_custom->num_input_ports == 2);
+    REQUIRE(reloaded_custom->num_output_ports == 1);
 }
 
 TEST_CASE("GraphSerializer resolves custom nodes by exact registry version",

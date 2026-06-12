@@ -28,6 +28,10 @@ If the target graph has not registered the exact matching version and shape,
 the loader still creates a placeholder `Custom` node with the saved identity
 and port shape and reports the unresolved type in
 `LoadResult::missing_custom_node_types`.
+Serializer coverage pins this as a compatibility guarantee: unresolved custom
+nodes survive save-load-save-load cycles with their identity, port shape,
+connections, and opaque state preserved, while registered types resolve only by
+the exact saved `(type_id, version)` and matching shape.
 
 ## Connections
 
