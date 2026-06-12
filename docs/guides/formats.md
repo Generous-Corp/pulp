@@ -95,6 +95,12 @@ The process callback routes bus 0 as the main input/output and routes input bus
 secondary output buses require a richer process surface than the current simple
 `Processor::process()` signature.
 
+`format::ProcessBuffers` and `format::BusBufferSet` are the additive shared
+vocabulary for that richer surface. They are non-owning views over host-owned
+bus buffers and let adapters validate active buses, declared channel counts, and
+null channel pointers before projecting the current main-in/main-out/sidechain
+view into `Processor::process()`.
+
 ### Latency and Tail
 
 - **Latency:** `clap_plugin_latency_t::get` returns `processor->latency_samples()`.
