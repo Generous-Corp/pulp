@@ -14,6 +14,22 @@ in that host and exercised the capability.
 - 🟡 **usable** — loads and runs; at least one known quirk documented below
 - 🔴 **broken** — loads but produces incorrect results
 - — **unvalidated** — nobody has tried yet
+- n/a **unsupported by host or format** — the DAW or plug-in format does not
+  expose that capability
+
+Each non-placeholder update must cite durable evidence. For manual DAW sessions,
+store the filled-in script and `.daw-bench.json` manifest under
+`docs/validation/daw-bench/results/YYYY-MM-DD/` and run:
+
+```bash
+python3 tools/scripts/check_daw_bench_evidence.py \
+    docs/validation/daw-bench/results/YYYY-MM-DD \
+    --require-any
+```
+
+If a capability stays `n/a`, name the host or format reason in the Notes column.
+If it stays `—`, do not infer support from adapter unit tests, pluginval,
+clap-validator, or a successful build.
 
 ---
 
@@ -85,14 +101,22 @@ For a (host, format, capability) row:
 
 ## Known quirks
 
-*(populated as validation runs surface issues)*
+Quirk notes must point to the durable DAW-bench result folder or to a focused
+adapter/runtime issue. Keep this section scoped to behavior observed in a real
+host session; speculative accommodations belong in the host-quirks catalog until
+bench evidence exists.
 
-- **(placeholder)** — real quirks land here as we walk the matrix.
+Current checked-in matrix state has no stable or usable host rows. Do not promote
+a row out of `—` until the matching evidence manifest validates.
 
 ## See also
 
 - `planning/production-readiness/STATUS.md` — per-workstream rollup with
   `production_validated` flags that mirror this table's ✅ rows.
+- `docs/validation/daw-bench/README.md` — manual DAW-bench scripts and evidence
+  manifest workflow.
+- `docs/reference/host-quirks-policy.md` — runtime host-quirk policy, tiers,
+  and opt-in/opt-out controls.
 - `.agents/skills/ara/SKILL.md` — automation-side ARA usage recipes.
 - `docs/guides/ara.md` — Pulp's ARA integration overview.
 - `examples/ara-pitch-tracker/` — the canonical smoke-test plug-in for
