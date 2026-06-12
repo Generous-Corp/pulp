@@ -460,6 +460,33 @@ TEST_CASE("offline_render rejects invalid transport timeline hints",
         options).has_value());
 }
 
+TEST_CASE("offline_render propagates deterministic state generation metadata",
+          "[audio][offline][advanced][state][phase3]") {
+    auto input = make_stereo_fixture();
+    OfflineRenderOptions options;
+    options.block_size_schedule = {2, 3};
+    options.state_generation = 42;
+    options.deterministic_seed = 0x5441;
+
+    std::vector<uint64_t> generations_seen;
+    std::vector<uint64_t> seeds_seen;
+    auto output = offline_render(
+        input,
+        [&](const float* in, float* out, int channels,
+            const OfflineRenderBlockContext& context) {
+            generations_seen.push_back(context.state_generation);
+            seeds_seen.push_back(context.deterministic_seed);
+            for (int sample = 0; sample < channels * context.frames; ++sample)
+                out[sample] = in[sample];
+        },
+        options);
+
+    REQUIRE(output.has_value());
+    REQUIRE(output->channels == input.channels);
+    REQUIRE(generations_seen == std::vector<uint64_t>{42, 42});
+    REQUIRE(seeds_seen == std::vector<uint64_t>{0x5441, 0x5441});
+}
+
 TEST_CASE("apply_gain preserves an empty audio container", "[audio][offline][processor-edges]") {
     AudioFileData input;
     input.sample_rate = 96000;

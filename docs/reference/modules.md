@@ -310,7 +310,7 @@ Reusable low-level pieces for building samplers, generated-audio freeze/loop wor
 | Channel Sets | `channel_set.hpp` | `ChannelSet::surround_5_1()`, mono through 7.1.4 Atmos |
 | Load Measurer | `load_measurer.hpp` | Track CPU usage of your audio callback |
 | Memory-Mapped Reader | `mmap_reader.hpp` | Zero-copy access for large sample libraries |
-| Offline Processor | `offline_processor.hpp` | `offline_process(input, callback, 512)` for simple batch render; `offline_render(input, callback, options)` for deterministic block schedules, absolute sample positions, transport timeline, render-speed hints, render seeds, and explicit tail policy |
+| Offline Processor | `offline_processor.hpp` | `offline_process(input, callback, 512)` for simple batch render; `offline_render(input, callback, options)` for deterministic block schedules, absolute sample positions, transport timeline, state generation, render-speed hints, render seeds, and explicit tail policy |
 | Subsection Reader | `subsection_reader.hpp` | Read frame range without copying — `reader.sample(ch, frame)` |
 | System Volume | `system_volume.hpp` | `get_system_volume()` / `set_system_volume(0.8f)` |
 
