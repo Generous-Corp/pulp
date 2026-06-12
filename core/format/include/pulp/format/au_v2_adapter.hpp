@@ -1,6 +1,7 @@
 #pragma once
 
 #include <AudioUnitSDK/AUMIDIEffectBase.h>
+#include <mach/mach_time.h>
 
 #include <pulp/format/processor.hpp>
 #include <pulp/format/host_quirks.hpp>
@@ -86,6 +87,62 @@ inline ProcessContext make_render_process_context(double sample_rate,
     ctx.process_mode = ProcessMode::Realtime;
     ctx.render_speed_hint = RenderSpeedHint::Realtime;
     return ctx;
+}
+
+/// Populate AU v2 render-context transport metadata from host callbacks and
+/// derive per-block playhead change flags. The AU v2 SDK only exposes these
+/// callbacks through AUBase during render, but keeping the mapping here lets
+/// effect/instrument adapters share one contract and lets tests install
+/// HostCallbackInfo without constructing a full AudioComponentInstance.
+inline void apply_host_callbacks_to_process_context(
+    ProcessContext& ctx,
+    const ausdk::AUBase& unit,
+    detail::PlayheadSnapshot& previous) noexcept {
+    Float64 beat = 0.0;
+    Float64 tempo = 0.0;
+    if (unit.CallHostBeatAndTempo(&beat, &tempo) == noErr) {
+        ctx.position_beats = beat;
+        if (tempo > 0.0) ctx.tempo_bpm = tempo;
+    }
+
+    UInt32 delta_samples = 0;
+    Float32 ts_num = 0.0f;
+    UInt32 ts_denom = 0;
+    Float64 current_measure_downbeat = 0.0;
+    if (unit.CallHostMusicalTimeLocation(&delta_samples, &ts_num, &ts_denom,
+                                         &current_measure_downbeat) == noErr) {
+        if (ts_num > 0.0f) ctx.time_sig_numerator = static_cast<int>(ts_num);
+        if (ts_denom > 0) ctx.time_sig_denominator = static_cast<int>(ts_denom);
+    }
+
+    Boolean is_playing = false;
+    Boolean transport_state_changed = false;
+    Float64 current_sample_in_timeline = 0.0;
+    Boolean is_cycling = false;
+    Float64 cycle_start = 0.0;
+    Float64 cycle_end = 0.0;
+    if (unit.CallHostTransportState(&is_playing, &transport_state_changed,
+                                    &current_sample_in_timeline, &is_cycling,
+                                    &cycle_start, &cycle_end) == noErr) {
+        ctx.is_playing = (is_playing != 0);
+        ctx.position_samples = static_cast<int64_t>(current_sample_in_timeline);
+        ctx.is_looping = (is_cycling != 0);
+        if (ctx.is_looping) {
+            ctx.loop_start_beats = cycle_start;
+            ctx.loop_end_beats = cycle_end;
+        }
+    }
+
+    static mach_timebase_info_data_t timebase = {0, 0};
+    if (timebase.denom == 0) mach_timebase_info(&timebase);
+    if (timebase.denom != 0) {
+        const uint64_t now = mach_absolute_time();
+        ctx.host_time_ns = static_cast<int64_t>(
+            (now * timebase.numer) / timebase.denom);
+    }
+
+    detail::derive_bar_from_beats(ctx);
+    detail::compute_playhead_changes(ctx, previous);
 }
 
 inline Float64 tail_samples_to_seconds(int tail_samples,
