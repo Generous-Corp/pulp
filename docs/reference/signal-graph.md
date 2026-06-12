@@ -135,6 +135,9 @@ on the prepared snapshot path and is not skipped by this optional-work helper.
 The cost model is deterministic: node count, connection count, declared ports
 times prepared block size, and fixed prepared buffer bytes. It is a portable
 budget benchmark, not a hardware CPU-time estimate.
+Unsupported behavior is explicit: this helper does not skip graph audio nodes,
+change routing, or virtualize plugins. It only lets host-side optional work
+choose a degraded path before that work starts.
 
 ## Latency & PDC
 

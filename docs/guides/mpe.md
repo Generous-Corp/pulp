@@ -92,7 +92,9 @@ For optional per-voice analysis, preview, or diagnostics, pass a
 `runtime::RuntimeBudgetFrame` to
 `MpeVoiceAllocator<Voice>::evaluate_optional_runtime_budget()`. The allocator
 uses the same voice telemetry to return a run/defer/shed/bypass decision without
-changing the MPE voice render path.
+changing the MPE voice render path. Budget degradation does not disable active
+notes, change expression smoothing, or alter voice stealing; it is only for
+optional analysis, preview, or diagnostic work.
 
 ## Example
 
