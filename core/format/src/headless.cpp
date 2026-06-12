@@ -47,6 +47,8 @@ void HeadlessHost::process(audio::BufferView<float>& output,
                             midi::MidiBuffer& midi_in,
                             midi::MidiBuffer& midi_out) {
     ProcessContext ctx;
+    ctx.process_mode = ProcessMode::Offline;
+    ctx.render_speed_hint = RenderSpeedHint::FasterThanRealtime;
     process(output, input, midi_in, midi_out, std::move(ctx));
 }
 
@@ -55,6 +57,8 @@ void HeadlessHost::process(audio::BufferView<float>& output,
                             const state::ParameterEventQueue& param_events) {
     midi::MidiBuffer midi_in, midi_out;
     ProcessContext ctx;
+    ctx.process_mode = ProcessMode::Offline;
+    ctx.render_speed_hint = RenderSpeedHint::FasterThanRealtime;
     process(output, input, midi_in, midi_out, param_events, std::move(ctx));
 }
 

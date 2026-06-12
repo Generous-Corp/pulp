@@ -179,6 +179,32 @@ TEST_CASE("Processor::process is declared with float-precision BufferView. "
     SUCCEED("process() ran with float buffers");
 }
 
+// ── Phase 2 — runtime mode contract ───────────────────────────────────────
+
+TEST_CASE("ProcessContext defaults to realtime mode with explicit helper predicates",
+          "[processor][process-context][phase2]") {
+    ProcessContext ctx;
+
+    REQUIRE(ctx.process_mode == ProcessMode::Realtime);
+    REQUIRE(ctx.render_speed_hint == RenderSpeedHint::Unknown);
+    REQUIRE(ctx.is_realtime());
+    REQUIRE_FALSE(ctx.is_offline());
+    REQUIRE_FALSE(ctx.is_bypassed);
+    REQUIRE_FALSE(ctx.is_tail_drain);
+    REQUIRE_FALSE(ctx.reset_requested);
+    REQUIRE_FALSE(ctx.transport_jump);
+    REQUIRE_FALSE(ctx.allows_offline_quality_work());
+
+    ctx.process_mode = ProcessMode::Offline;
+    ctx.render_speed_hint = RenderSpeedHint::FasterThanRealtime;
+    REQUIRE_FALSE(ctx.is_realtime());
+    REQUIRE(ctx.is_offline());
+    REQUIRE(ctx.allows_offline_quality_work());
+
+    ctx.render_speed_hint = RenderSpeedHint::Realtime;
+    REQUIRE_FALSE(ctx.allows_offline_quality_work());
+}
+
 // ── Item 3.11 — latency / tail change notifications (RT-safe) ─────────────
 
 TEST_CASE("flag_latency_changed / consume_latency_changed_flag round-trip "

@@ -468,6 +468,8 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     pulp::format::ProcessContext ctx;
     ctx.sample_rate = self->sample_rate;
     ctx.num_samples = static_cast<int>(num_samples);
+    ctx.process_mode = pulp::format::ProcessMode::Realtime;
+    ctx.render_speed_hint = pulp::format::RenderSpeedHint::Realtime;
     if (process->transport) {
         const auto* tr = process->transport;
         const uint32_t flags = tr->flags;

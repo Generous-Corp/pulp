@@ -5,9 +5,8 @@ blocks it — a lock, an allocation, a system call — causes the
 listener to hear a dropout. This page covers the small set of rules
 that keep your `Processor::process()` callback safe.
 
-If you're coming from JUCE: the rules are almost identical (and the
-gotchas are the same). Pulp's API just makes the safe pattern the
-default.
+Pulp's API is shaped so the safe pattern is the default: allocate and prepare
+off the audio thread, then keep `process()` bounded and predictable.
 
 ## The three rules
 
@@ -114,6 +113,39 @@ instead of polling atomics inside the loop:
 * `format::ControlRateParamSmoother` follows the parameter's configured
   `smoothing_ramp_seconds` for control-rate smoothing.
 
+## Realtime vs offline process modes
+
+`ProcessContext::process_mode` tells a processor whether the current block is
+live realtime audio or an offline render. Existing adapters default to
+`ProcessMode::Realtime`; headless and export-style hosts should set
+`ProcessMode::Offline` explicitly when they drive deterministic non-live
+processing.
+
+Use the helper predicates instead of comparing raw enum values in hot code:
+
+```cpp
+void MyPlugin::process(audio::BufferView<float>& out,
+                       const audio::BufferView<const float>& in,
+                       midi::MidiBuffer& midi_in,
+                       midi::MidiBuffer& midi_out,
+                       const ProcessContext& ctx) {
+    if (ctx.is_realtime()) {
+        // Hard realtime: no allocation, no locks, no blocking work.
+    }
+
+    if (ctx.allows_offline_quality_work()) {
+        // Offline render: choose a bounded higher-quality path that was
+        // prepared ahead of time.
+    }
+}
+```
+
+The mode does not relax buffer ownership or lifetime rules. A realtime block
+with a slower-than-realtime hint is still an audio-thread callback. Bypass,
+tail-drain, reset, and transport-jump flags are block metadata for processors
+that need to distinguish those host states without inferring them from
+transport fields.
+
 ## See also
 
 * [`core/state/include/pulp/state/store.hpp`](../../core/state/include/pulp/state/store.hpp)
@@ -121,5 +153,3 @@ instead of polling atomics inside the loop:
   `pump_listeners()`.
 * [`core/runtime/include/pulp/runtime/scoped_no_alloc.hpp`](../../core/runtime/include/pulp/runtime/scoped_no_alloc.hpp)
   — the no-allocation contract.
-* sudara, *"Big List of JUCE Tips and Tricks"* #28 (paint = audio)
-  and #29 (don't deref atomics per sample).

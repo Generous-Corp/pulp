@@ -751,6 +751,8 @@ void AAX_CALLBACK process_callback(AlgorithmContext* const instances_begin[],
         ProcessContext process_context{
             .sample_rate = sample_rate,
             .num_samples = sample_count,
+            .process_mode = ProcessMode::Realtime,
+            .render_speed_hint = RenderSpeedHint::Realtime,
         };
         if (definition.uses_transport && context->transport_node) {
             read_transport(context->transport_node->GetTransport(), &process_context);
