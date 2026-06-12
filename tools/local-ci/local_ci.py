@@ -127,6 +127,8 @@ import cleanup_cli as _cleanup_cli  # noqa: E402
 import cli_dispatch as _cli_dispatch  # noqa: E402
 import cli_dispatch_bindings as _cli_dispatch_bindings  # noqa: E402
 import cli_parser_bindings as _cli_parser_bindings  # noqa: E402
+import cloud as _cloud  # noqa: E402
+import cloud_bindings as _cloud_bindings  # noqa: E402
 import config_evidence_bindings as _config_evidence_bindings  # noqa: E402
 import desktop_action_commands_cli as _desktop_action_commands_cli  # noqa: E402
 import desktop_actions as _desktop_actions  # noqa: E402
@@ -373,17 +375,7 @@ from cloud import (  # noqa: E402  -- re-exported for in-file consumers (R2-1 #2
     billing_note_text,
     billing_period_window,
     cloud_record_sort_key,
-    cloud_record_summary,
     cloud_run_path,
-    cmd_cloud_compare,
-    cmd_cloud_defaults,
-    cmd_cloud_history,
-    cmd_cloud_namespace_doctor,
-    cmd_cloud_namespace_setup,
-    cmd_cloud_recommend,
-    cmd_cloud_run,
-    cmd_cloud_status,
-    cmd_cloud_workflows,
     compare_cloud_providers,
     duration_between,
     enrich_cloud_record_provider_metadata,
@@ -394,28 +386,18 @@ from cloud import (  # noqa: E402  -- re-exported for in-file consumers (R2-1 #2
     fetch_github_repo_actions_billing_summary,
     filter_cloud_records,
     find_cloud_record,
-    format_ci_comment,
     format_currency_amount,
     format_duration_secs,
     format_memory_megabytes,
     gh_api_json,
     gh_auth_status_text,
-    gh_available,
     gh_current_login,
     gh_find_dispatched_run,
-    gh_pr_comment,
-    gh_pr_create,
-    gh_pr_head,
-    gh_pr_list_open,
-    gh_pr_merge,
     gh_repo_name,
     gh_repo_variables,
-    gh_run_view,
     gh_token_scopes,
-    gh_workflow_dispatch,
     infer_job_os,
     iter_year_months,
-    list_cloud_records,
     load_cloud_record,
     load_result,
     match_namespace_shape_rate,
@@ -452,8 +434,91 @@ from cloud import (  # noqa: E402  -- re-exported for in-file consumers (R2-1 #2
     summarize_namespace_usage,
     summarize_runner_selector,
     update_cloud_record_from_run,
-    open_pr_list_lines,
 )
+
+
+def cmd_cloud_workflows(args: argparse.Namespace) -> int:
+    return _cloud_bindings.cmd_cloud_workflows(globals(), args)
+
+
+def cmd_cloud_defaults(args: argparse.Namespace) -> int:
+    return _cloud_bindings.cmd_cloud_defaults(globals(), args)
+
+
+def cmd_cloud_history(args: argparse.Namespace) -> int:
+    return _cloud_bindings.cmd_cloud_history(globals(), args)
+
+
+def cmd_cloud_compare(args: argparse.Namespace) -> int:
+    return _cloud_bindings.cmd_cloud_compare(globals(), args)
+
+
+def cmd_cloud_recommend(args: argparse.Namespace) -> int:
+    return _cloud_bindings.cmd_cloud_recommend(globals(), args)
+
+
+def cmd_cloud_run(args: argparse.Namespace) -> int:
+    return _cloud_bindings.cmd_cloud_run(globals(), args)
+
+
+def cmd_cloud_status(args: argparse.Namespace) -> int:
+    return _cloud_bindings.cmd_cloud_status(globals(), args)
+
+
+def cmd_cloud_namespace_doctor(args: argparse.Namespace) -> int:
+    return _cloud_bindings.cmd_cloud_namespace_doctor(globals(), args)
+
+
+def cmd_cloud_namespace_setup(args: argparse.Namespace) -> int:
+    return _cloud_bindings.cmd_cloud_namespace_setup(globals(), args)
+
+
+def gh_available() -> bool:
+    return _cloud_bindings.gh_available(globals())
+
+
+def gh_workflow_dispatch(repository: str, workflow_file: str, ref: str, fields: dict[str, str]) -> None:
+    return _cloud_bindings.gh_workflow_dispatch(globals(), repository, workflow_file, ref, fields)
+
+
+def gh_run_view(repository: str, run_id: int) -> dict | None:
+    return _cloud_bindings.gh_run_view(globals(), repository, run_id)
+
+
+def gh_pr_create(branch: str, base: str = "main") -> int | None:
+    return _cloud_bindings.gh_pr_create(globals(), branch, base)
+
+
+def gh_pr_comment(pr_number: int, body: str) -> bool:
+    return _cloud_bindings.gh_pr_comment(globals(), pr_number, body)
+
+
+def gh_pr_merge(pr_number: int, method: str = "squash") -> bool:
+    return _cloud_bindings.gh_pr_merge(globals(), pr_number, method)
+
+
+def gh_pr_list_open() -> list[dict]:
+    return _cloud_bindings.gh_pr_list_open(globals())
+
+
+def gh_pr_head(pr_ref: str) -> tuple[int, str, str] | None:
+    return _cloud_bindings.gh_pr_head(globals(), pr_ref)
+
+
+def list_cloud_records(limit: int | None = None) -> list[dict]:
+    return _cloud_bindings.list_cloud_records(globals(), limit=limit)
+
+
+def cloud_record_summary(record: dict, config: dict | None = None) -> str:
+    return _cloud_bindings.cloud_record_summary(globals(), record, config)
+
+
+def format_ci_comment(result: dict) -> str:
+    return _cloud_bindings.format_ci_comment(globals(), result)
+
+
+def open_pr_list_lines(prs: list[dict]) -> list[str]:
+    return _cloud_bindings.open_pr_list_lines(globals(), prs)
 
 
 def desktop_target_receipt_path(target_name: str) -> Path:
