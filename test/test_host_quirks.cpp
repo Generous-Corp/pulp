@@ -820,21 +820,16 @@ TEST_CASE("kHostQuirksMeta tags every host-gated row as Speculative",
                    == QuirkStatus::Speculative);
 }
 
-TEST_CASE("kHostQuirksMeta tags Reaper / Pro Tools main rows as Speculative",
+TEST_CASE("kHostQuirksMeta tags Reaper bench-proven rows as Validated",
           "[format][host-quirks][tiers]") {
-    // After items 5.8 (Reaper) + 5.9 (Pro Tools AAX) extracted the
-    // per-host headers + per-symptom isolation tests, the main rows
-    // graduate from LessonOnly to Speculative. They stay Speculative
-    // until the in-DAW bench evidence ships (Reaper 7.x for 5.8;
-    // PULP_AAX_SDK + Pro Tools session for 5.9).
     STATIC_REQUIRE(kHostQuirksMeta.reaper_process_while_bypassed
-                   == QuirkStatus::Speculative);
+                   == QuirkStatus::Validated);
     STATIC_REQUIRE(kHostQuirksMeta.reaper_vst3_gesture_ordering
-                   == QuirkStatus::Speculative);
+                   == QuirkStatus::Validated);
     STATIC_REQUIRE(kHostQuirksMeta.reaper_keyboard_passthrough
                    == QuirkStatus::Speculative);
     STATIC_REQUIRE(kHostQuirksMeta.reaper_permissive_bus_arrangements
-                   == QuirkStatus::Speculative);
+                   == QuirkStatus::Validated);
     STATIC_REQUIRE(kHostQuirksMeta.reaper_anticipative_fx_buffer_variability
                    == QuirkStatus::Speculative);
     STATIC_REQUIRE(kHostQuirksMeta.reaper_midsession_setstate
@@ -1003,17 +998,16 @@ TEST_CASE("make_quirks_for_validated_only matches make_quirks_for + filter",
     REQUIRE(direct.logic_au_channel_probe_cap == factory.logic_au_channel_probe_cap);
 }
 
-TEST_CASE("make_quirks_for_validated_only on Reaper leaves only cheap defenses",
+TEST_CASE("make_quirks_for_validated_only on Reaper keeps DAW-bench validated rows",
           "[format][host-quirks][tiers]") {
     auto q = make_quirks_for_validated_only(HostType::Reaper, HostVersion{7, 20});
     REQUIRE(q.synthesize_bypass_parameter == true);
     REQUIRE(q.clamp_latency_to_nonneg == true);
     REQUIRE(q.silence_unsupported_bus_arrangements == true);
-    // Every Reaper row (currently LessonOnly) zeroed.
-    REQUIRE(q.reaper_process_while_bypassed == false);
-    REQUIRE(q.reaper_vst3_gesture_ordering == false);
+    REQUIRE(q.reaper_process_while_bypassed == true);
+    REQUIRE(q.reaper_vst3_gesture_ordering == true);
     REQUIRE(q.reaper_keyboard_passthrough == false);
-    REQUIRE(q.reaper_permissive_bus_arrangements == false);
+    REQUIRE(q.reaper_permissive_bus_arrangements == true);
     REQUIRE(q.reaper_anticipative_fx_buffer_variability == false);
     REQUIRE(q.reaper_midsession_setstate == false);
 }
@@ -1304,11 +1298,14 @@ TEST_CASE("resolved_quirks validated-only keeps cheap defenses, drops speculativ
     REQUIRE(q.synthesize_bypass_parameter == true);
     REQUIRE(q.clamp_latency_to_nonneg == true);
     REQUIRE(q.silence_unsupported_bus_arrangements == true);
-    // REAPER rows are Speculative/LessonOnly → filtered out, even though
-    // make_quirks_for(Reaper) would have set them.
+    // Bench-validated REAPER rows survive; still-speculative rows remain
+    // filtered out, even though make_quirks_for(Reaper) would have set them.
     REQUIRE(make_quirks_for(HostType::Reaper, HostVersion{7, 20})
                 .reaper_vst3_gesture_ordering == true);
-    REQUIRE(q.reaper_vst3_gesture_ordering == false);
+    REQUIRE(q.reaper_vst3_gesture_ordering == true);
+    REQUIRE(q.reaper_process_while_bypassed == true);
+    REQUIRE(q.reaper_permissive_bus_arrangements == true);
+    REQUIRE(q.reaper_keyboard_passthrough == false);
 }
 
 TEST_CASE("resolved_quirks off-policy zeroes everything including cheap defenses",
@@ -1333,8 +1330,8 @@ TEST_CASE("per-quirk override force-on exempts a tier-filtered flag",
     // ...but the author trusts this one specifically.
     pulp::format::set_quirk_override("reaper_keyboard_passthrough", true);
     auto q = pulp::format::resolved_quirks(HostType::Reaper, HostVersion{7, 20});
-    REQUIRE(q.reaper_keyboard_passthrough == true);   // forced on
-    REQUIRE(q.reaper_vst3_gesture_ordering == false);  // still filtered
+    REQUIRE(q.reaper_keyboard_passthrough == true);    // forced on
+    REQUIRE(q.reaper_midsession_setstate == false);    // still filtered
 }
 
 TEST_CASE("per-quirk override force-off beats an allowed flag (incl. int field)",
