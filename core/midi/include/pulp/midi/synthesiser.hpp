@@ -20,6 +20,7 @@
 
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/message.hpp>
+#include <pulp/runtime/budget_policy.hpp>
 
 #include <algorithm>
 #include <array>
@@ -73,6 +74,17 @@ struct SynthesiserTelemetry {
     std::size_t releasing_voice_count = 0;
     std::uint64_t steal_count = 0;
     VoiceStealStrategy steal_strategy = VoiceStealStrategy::Oldest;
+};
+
+struct SynthesiserRuntimeBudgetReport {
+    runtime::RuntimeBudgetDecision decision{};
+    runtime::RuntimeBudgetFrameStats frame_stats{};
+    SynthesiserTelemetry telemetry{};
+    std::uint64_t estimated_cost = 0;
+
+    bool should_run_optional_work() const noexcept {
+        return decision.should_run();
+    }
 };
 
 /// Abstract base for one synth voice. Subclasses implement `render`
@@ -375,6 +387,36 @@ public:
         };
     }
 
+    std::uint64_t estimate_optional_runtime_cost() const {
+        const auto t = telemetry();
+        std::uint64_t cost = 0;
+        cost = saturating_add_u64_(
+            cost, saturating_mul_u64_(
+                static_cast<std::uint64_t>(t.polyphony), 4));
+        cost = saturating_add_u64_(
+            cost, saturating_mul_u64_(
+                static_cast<std::uint64_t>(t.active_voice_count), 64));
+        cost = saturating_add_u64_(
+            cost, saturating_mul_u64_(
+                static_cast<std::uint64_t>(t.releasing_voice_count), 32));
+        return cost;
+    }
+
+    SynthesiserRuntimeBudgetReport evaluate_optional_runtime_budget(
+        runtime::RuntimeBudgetFrame& frame,
+        runtime::RuntimeWorkLane lane = runtime::RuntimeWorkLane::Background,
+        bool required = false) const {
+        const auto t = telemetry();
+        const auto cost = estimate_optional_runtime_cost();
+        const auto decision = frame.evaluate(lane, cost, required);
+        return {
+            .decision = decision,
+            .frame_stats = frame.stats(),
+            .telemetry = t,
+            .estimated_cost = cost,
+        };
+    }
+
     void reset() {
         for (auto& v : voices_) v.reset();
         sustain_down_.fill(false);
@@ -384,6 +426,19 @@ public:
     }
 
 private:
+    static std::uint64_t saturating_add_u64_(std::uint64_t a,
+                                             std::uint64_t b) {
+        const auto max = std::numeric_limits<std::uint64_t>::max();
+        return b > max - a ? max : a + b;
+    }
+
+    static std::uint64_t saturating_mul_u64_(std::uint64_t a,
+                                             std::uint64_t b) {
+        const auto max = std::numeric_limits<std::uint64_t>::max();
+        if (a == 0 || b == 0) return 0;
+        return a > max / b ? max : a * b;
+    }
+
     Voice* find_free_voice() {
         for (auto& v : voices_) if (!v.active()) return &v;
         return nullptr;

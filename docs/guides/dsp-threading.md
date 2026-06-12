@@ -342,7 +342,12 @@ UI-to-audio MIDI back-pressure visible without inspecting the audio callback.
 telemetry snapshots for polyphony, active/releasing voice counts, and steal
 counts. Read those snapshots from the processor/audio owner and publish the
 returned value through a lock-free latest-value channel when UI or tooling
-needs to observe it.
+needs to observe it. For optional instrument-side work such as per-voice
+analysis refresh, preview rendering, or diagnostics, call
+`evaluate_optional_runtime_budget()` with a `runtime::RuntimeBudgetFrame`.
+The helper uses voice-pool telemetry to produce the shared run/defer/shed/bypass
+decision while the actual voice render path stays on the normal prepared audio
+path.
 
 Keep this path boring: write fixed-size counters, meter snapshots, and bounded
 queues from `process()`. Move FFTs, exported waveforms, parameter sweeps, and

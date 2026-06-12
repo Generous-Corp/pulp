@@ -13,12 +13,14 @@
 
 #include <pulp/midi/mpe_buffer.hpp>
 #include <pulp/midi/mpe_voice_tracker.hpp>
+#include <pulp/runtime/budget_policy.hpp>
 #include <algorithm>
 #include <array>
 #include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 namespace pulp::midi {
@@ -120,6 +122,17 @@ struct MpeVoiceAllocatorTelemetry {
     std::uint64_t steal_count = 0;
     MpeVoiceStealMode steal_mode = MpeVoiceStealMode::Oldest;
     bool last_was_glide = false;
+};
+
+struct MpeVoiceAllocatorRuntimeBudgetReport {
+    runtime::RuntimeBudgetDecision decision{};
+    runtime::RuntimeBudgetFrameStats frame_stats{};
+    MpeVoiceAllocatorTelemetry telemetry{};
+    std::uint64_t estimated_cost = 0;
+
+    bool should_run_optional_work() const noexcept {
+        return decision.should_run();
+    }
 };
 
 /// Glide/legato detector — observes MPE note-on events and reports when
@@ -252,6 +265,36 @@ public:
         };
     }
 
+    std::uint64_t estimate_optional_runtime_cost() const {
+        const auto t = telemetry();
+        std::uint64_t cost = 0;
+        cost = saturating_add_u64_(
+            cost, saturating_mul_u64_(
+                static_cast<std::uint64_t>(t.polyphony), 4));
+        cost = saturating_add_u64_(
+            cost, saturating_mul_u64_(
+                static_cast<std::uint64_t>(t.active_voice_count), 64));
+        cost = saturating_add_u64_(
+            cost, saturating_mul_u64_(
+                static_cast<std::uint64_t>(t.releasing_voice_count), 32));
+        return cost;
+    }
+
+    MpeVoiceAllocatorRuntimeBudgetReport evaluate_optional_runtime_budget(
+        runtime::RuntimeBudgetFrame& frame,
+        runtime::RuntimeWorkLane lane = runtime::RuntimeWorkLane::Background,
+        bool required = false) const {
+        const auto t = telemetry();
+        const auto cost = estimate_optional_runtime_cost();
+        const auto decision = frame.evaluate(lane, cost, required);
+        return {
+            .decision = decision,
+            .frame_stats = frame.stats(),
+            .telemetry = t,
+            .estimated_cost = cost,
+        };
+    }
+
     bool last_was_glide() const { return last_was_glide_; }
 
     void reset_all() {
@@ -262,6 +305,19 @@ public:
     }
 
 private:
+    static std::uint64_t saturating_add_u64_(std::uint64_t a,
+                                             std::uint64_t b) {
+        const auto max = std::numeric_limits<std::uint64_t>::max();
+        return b > max - a ? max : a + b;
+    }
+
+    static std::uint64_t saturating_mul_u64_(std::uint64_t a,
+                                             std::uint64_t b) {
+        const auto max = std::numeric_limits<std::uint64_t>::max();
+        if (a == 0 || b == 0) return 0;
+        return a > max / b ? max : a * b;
+    }
+
     Voice* pick_free_voice() {
         for (auto& v : voices_) if (!v.active()) return &v;
         return nullptr;
