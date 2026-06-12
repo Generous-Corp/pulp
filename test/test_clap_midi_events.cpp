@@ -583,6 +583,30 @@ public:
     }
 };
 
+class LatencyTailProcessor : public Processor {
+public:
+    PluginDescriptor descriptor() const override {
+        PluginDescriptor d;
+        d.name = "LatencyTailCLAP";
+        d.manufacturer = "PulpTest";
+        d.bundle_id = "com.pulp.test.clap.latency-tail";
+        d.version = "1.0.0";
+        d.tail_samples = tail_samples;
+        return d;
+    }
+    void define_parameters(state::StateStore&) override {}
+    void prepare(const PrepareContext&) override {}
+    void process(audio::BufferView<float>&,
+                 const audio::BufferView<const float>&,
+                 midi::MidiBuffer&,
+                 midi::MidiBuffer&,
+                 const ProcessContext&) override {}
+    int latency_samples() const override { return latency; }
+
+    int latency = 0;
+    int tail_samples = 0;
+};
+
 // Processor factory hooks have to be raw function pointers. Route through
 // singletons so the tests can configure the active processor before the
 // adapter instantiates one.
@@ -594,6 +618,8 @@ ObservingParamIngressProcessor* g_observing_param_ingress = nullptr;
 ObservingSidecarProcessor* g_observing_sidecar = nullptr;
 OverflowingMidiOutProcessor* g_overflowing_midi_out = nullptr;
 ForwardingSysexProcessor* g_forwarding_sysex = nullptr;
+int g_pending_latency_samples = 0;
+int g_pending_tail_samples = 0;
 bool g_pending_opts_mpe = false;
 bool g_pending_opts_ump = false;
 bool g_pending_opts_node_mpe = false;
@@ -674,6 +700,15 @@ std::unique_ptr<Processor> make_overflowing_midi_out() {
 std::unique_ptr<Processor> make_forwarding_sysex() {
     auto up = std::make_unique<ForwardingSysexProcessor>();
     g_forwarding_sysex = up.get();
+    return up;
+}
+
+std::unique_ptr<Processor> make_latency_tail() {
+    auto up = std::make_unique<LatencyTailProcessor>();
+    up->latency = g_pending_latency_samples;
+    up->tail_samples = g_pending_tail_samples;
+    g_pending_latency_samples = 0;
+    g_pending_tail_samples = 0;
     return up;
 }
 
@@ -800,6 +835,23 @@ TEST_CASE("CLAP lifecycle forwards prepare/release and handles no-op callbacks",
     REQUIRE(clap_adapter::clap_init(&raw->plugin));
     clap_adapter::clap_destroy(&raw->plugin);
     g_capturing = nullptr;
+}
+
+TEST_CASE("CLAP latency and tail extensions report processor runtime contract",
+          "[clap][latency][tail][phase2]") {
+    g_pending_latency_samples = 256;
+    g_pending_tail_samples = 4096;
+    Harness finite(make_latency_tail);
+    REQUIRE(clap_generic::latency_get(&finite.plugin.plugin) == 256u);
+    REQUIRE(clap_generic::tail_get(&finite.plugin.plugin) == 4096u);
+
+    finite.deactivate();
+
+    g_pending_latency_samples = -128;
+    g_pending_tail_samples = -1;
+    Harness infinite(make_latency_tail);
+    REQUIRE(clap_generic::latency_get(&infinite.plugin.plugin) == 0u);
+    REQUIRE(clap_generic::tail_get(&infinite.plugin.plugin) == UINT32_MAX);
 }
 
 TEST_CASE("CLAP init and process fail cleanly without a processor",

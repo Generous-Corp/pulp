@@ -125,8 +125,11 @@ half-valid buffer.
 
 ### Latency and Tail
 
-- **Latency:** `clap_plugin_latency_t::get` returns `processor->latency_samples()`.
-- **Tail:** `clap_plugin_tail_t::get` returns `descriptor().tail_samples`. A value of `-1` (infinite tail) maps to `UINT32_MAX`.
+- **Latency:** `clap_plugin_latency_t::get` returns
+  `processor->latency_samples()` after host-quirk clamping, so negative
+  latency reports as 0 on the normal path.
+- **Tail:** `clap_plugin_tail_t::get` returns `descriptor().tail_samples`. A
+  value of `-1` (infinite tail) maps to `UINT32_MAX`.
 
 ### Known Limitations
 
