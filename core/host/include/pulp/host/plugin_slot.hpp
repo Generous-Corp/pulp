@@ -90,26 +90,6 @@ public:
                          const ParameterEventQueue& param_events,
                          int num_samples) = 0;
 
-    // Additive host-side multi-bus processing entry point.
-    //
-    // The default projection preserves the legacy PluginSlot contract by
-    // selecting the active main output and optional main input from
-    // ProcessBuffers, then calling the original main-in/main-out process()
-    // callback. Slot implementations that need direct access to sidechain,
-    // aux, surround, or multi-output host buses can override this method.
-    virtual void process(format::ProcessBuffers& audio,
-                         const midi::MidiBuffer& midi_in,
-                         midi::MidiBuffer& midi_out,
-                         const ParameterEventQueue& param_events,
-                         int num_samples) {
-        auto* output = audio.main_output();
-        audio::BufferView<float> empty_output;
-        audio::BufferView<const float> empty_input;
-        auto* input = audio.main_input();
-        process(output ? *output : empty_output, input ? *input : empty_input, midi_in, midi_out,
-                param_events, num_samples);
-    }
-
     // Parameters
     virtual std::vector<HostParamInfo> parameters() const = 0;
     virtual float get_parameter(uint32_t id) const = 0;
@@ -214,6 +194,27 @@ public:
     // gracefully without leaking a stale handle.
     virtual void accept(ExtensionsVisitor& visitor) const {
         visitor.visit_unknown(*this, ExtensionFormat::Unknown);
+    }
+
+    // Additive host-side multi-bus processing entry point. Keep appended to
+    // preserve the legacy PluginSlot virtual ordering.
+    //
+    // The default projection preserves the legacy PluginSlot contract by
+    // selecting the active main output and optional main input from
+    // ProcessBuffers, then calling the original main-in/main-out process()
+    // callback. Slot implementations that need direct access to sidechain,
+    // aux, surround, or multi-output host buses can override this method.
+    virtual void process(format::ProcessBuffers& audio,
+                         const midi::MidiBuffer& midi_in,
+                         midi::MidiBuffer& midi_out,
+                         const ParameterEventQueue& param_events,
+                         int num_samples) {
+        auto* output = audio.main_output();
+        audio::BufferView<float> empty_output;
+        audio::BufferView<const float> empty_input;
+        auto* input = audio.main_input();
+        process(output ? *output : empty_output, input ? *input : empty_input, midi_in, midi_out,
+                param_events, num_samples);
     }
 };
 

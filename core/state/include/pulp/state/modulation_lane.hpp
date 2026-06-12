@@ -3,7 +3,7 @@
 #include <pulp/state/parameter.hpp>
 
 #include <cstdint>
-#include <string_view>
+#include <string>
 
 namespace pulp::state {
 
@@ -31,7 +31,7 @@ struct ModulationSource {
     ModulationSourceId id = 0;
     ModulationScope scope = ModulationScope::Global;
     ModulationRate rate = ModulationRate::Control;
-    std::string_view units;
+    std::string units;
 };
 
 struct ModulationTarget {
@@ -40,7 +40,7 @@ struct ModulationTarget {
     ParamRate param_rate = ParamRate::ControlRate;
     bool modulatable = true;
     bool writable = true;
-    std::string_view units;
+    std::string units;
 };
 
 struct ModulationLane {
@@ -76,7 +76,7 @@ constexpr bool modulation_scopes_compatible(ModulationScope source,
     return source == target || source == ModulationScope::Global;
 }
 
-constexpr ModulationLaneValidation validate_modulation_lane(
+inline ModulationLaneValidation validate_modulation_lane(
     const ModulationLane& lane) noexcept {
     if (lane.source.id == 0) {
         return {false, ModulationLaneRejectReason::InvalidSource};

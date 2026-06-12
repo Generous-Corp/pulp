@@ -387,6 +387,27 @@ TEST_CASE("compute_playhead_changes: stopped sample-position change is a jump",
     REQUIRE_FALSE(next.transport_changed);
 }
 
+TEST_CASE("compute_playhead_changes: transport edge with continuous sample advance is not a jump",
+          "[format][playhead][phase2][transport-jump]") {
+    PlayheadSnapshot snapshot;
+    ProcessContext seed;
+    seed.sample_rate = 48000.0;
+    seed.num_samples = 256;
+    seed.position_samples = 1024;
+    seed.is_playing = true;
+    compute_playhead_changes(seed, snapshot);
+
+    ProcessContext stopped;
+    stopped.sample_rate = 48000.0;
+    stopped.num_samples = 256;
+    stopped.position_samples = 1280;
+    stopped.is_playing = false;
+    compute_playhead_changes(stopped, snapshot);
+
+    REQUIRE(stopped.transport_changed);
+    REQUIRE_FALSE(stopped.transport_jump);
+}
+
 TEST_CASE("compute_playhead_changes: beat-position fallback distinguishes continuous advance",
           "[format][playhead][phase2][transport-jump]") {
     PlayheadSnapshot snapshot;

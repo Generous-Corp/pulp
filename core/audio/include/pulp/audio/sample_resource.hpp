@@ -53,20 +53,28 @@ struct SampleResourceDiagnostics {
 
 class SampleResourceHandle {
 public:
-    SampleResourceSnapshot snapshot() const noexcept { return snapshot_; }
-    SampleResourceDiagnostics diagnostics() const { return diagnostics_; }
+    SampleResourceSnapshot snapshot() const {
+        auto current = std::atomic_load_explicit(&snapshot_, std::memory_order_acquire);
+        return current ? *current : SampleResourceSnapshot{};
+    }
+    SampleResourceDiagnostics diagnostics() const {
+        std::lock_guard lock(diagnostics_mutex_);
+        return diagnostics_;
+    }
 
     void clear() {
-        snapshot_ = {};
+        publish_snapshot({});
+        std::lock_guard lock(diagnostics_mutex_);
         diagnostics_ = {};
     }
 
     void publish_missing(std::string path, std::string reason) {
-        const auto next_generation = snapshot_.generation + 1;
-        snapshot_ = {
+        const auto next_generation = snapshot().generation + 1;
+        publish_snapshot({
             .status = SampleResourceStatus::Missing,
             .generation = next_generation,
-        };
+        });
+        std::lock_guard lock(diagnostics_mutex_);
         diagnostics_ = {
             .status = SampleResourceStatus::Missing,
             .generation = next_generation,
@@ -79,9 +87,9 @@ public:
                         std::string path,
                         uint64_t memory_budget_bytes = 0) {
         const auto byte_size = decoded_byte_size(data);
-        const auto next_generation = snapshot_.generation + 1;
+        const auto next_generation = snapshot().generation + 1;
         if (memory_budget_bytes != 0 && byte_size > memory_budget_bytes) {
-            snapshot_ = {
+            publish_snapshot({
                 .status = SampleResourceStatus::Oversized,
                 .generation = next_generation,
                 .frame_count = data.num_frames(),
@@ -89,7 +97,8 @@ public:
                 .sample_rate = data.sample_rate,
                 .byte_size = byte_size,
                 .memory_budget_bytes = memory_budget_bytes,
-            };
+            });
+            std::lock_guard lock(diagnostics_mutex_);
             diagnostics_ = {
                 .status = SampleResourceStatus::Oversized,
                 .generation = next_generation,
@@ -117,9 +126,9 @@ public:
         }
 
         const auto byte_size = decoded_byte_size(*data);
-        const auto next_generation = snapshot_.generation + 1;
+        const auto next_generation = snapshot().generation + 1;
         if (memory_budget_bytes != 0 && byte_size > memory_budget_bytes) {
-            snapshot_ = {
+            publish_snapshot({
                 .status = SampleResourceStatus::Oversized,
                 .generation = next_generation,
                 .frame_count = data->num_frames(),
@@ -127,7 +136,8 @@ public:
                 .sample_rate = data->sample_rate,
                 .byte_size = byte_size,
                 .memory_budget_bytes = memory_budget_bytes,
-            };
+            });
+            std::lock_guard lock(diagnostics_mutex_);
             diagnostics_ = {
                 .status = SampleResourceStatus::Oversized,
                 .generation = next_generation,
@@ -142,7 +152,7 @@ public:
             return false;
         }
 
-        snapshot_ = {
+        SampleResourceSnapshot next{
             .status = SampleResourceStatus::Loaded,
             .generation = next_generation,
             .frame_count = data->num_frames(),
@@ -152,14 +162,16 @@ public:
             .memory_budget_bytes = memory_budget_bytes,
             .data = std::move(data),
         };
+        publish_snapshot(next);
+        std::lock_guard lock(diagnostics_mutex_);
         diagnostics_ = {
             .status = SampleResourceStatus::Loaded,
             .generation = next_generation,
             .path = std::move(path),
-            .frame_count = snapshot_.frame_count,
-            .channel_count = snapshot_.channel_count,
-            .sample_rate = snapshot_.sample_rate,
-            .byte_size = snapshot_.byte_size,
+            .frame_count = next.frame_count,
+            .channel_count = next.channel_count,
+            .sample_rate = next.sample_rate,
+            .byte_size = next.byte_size,
             .memory_budget_bytes = memory_budget_bytes,
         };
         return true;
@@ -174,7 +186,15 @@ public:
     }
 
 private:
-    SampleResourceSnapshot snapshot_{};
+    void publish_snapshot(SampleResourceSnapshot snapshot) {
+        std::shared_ptr<const SampleResourceSnapshot> next =
+            std::make_shared<SampleResourceSnapshot>(std::move(snapshot));
+        std::atomic_store_explicit(&snapshot_, std::move(next), std::memory_order_release);
+    }
+
+    std::shared_ptr<const SampleResourceSnapshot> snapshot_ =
+        std::make_shared<SampleResourceSnapshot>();
+    mutable std::mutex diagnostics_mutex_;
     SampleResourceDiagnostics diagnostics_{};
 };
 
@@ -365,19 +385,20 @@ public:
     }
 
     void publish(std::shared_ptr<const SampleResourcePageWindow> window) {
-        window_ = std::move(window);
+        std::atomic_store_explicit(&window_, std::move(window), std::memory_order_release);
         page_misses_.store(0, std::memory_order_relaxed);
         last_miss_frame_.store(0, std::memory_order_relaxed);
     }
 
     void clear() {
-        window_.reset();
+        std::shared_ptr<const SampleResourcePageWindow> empty;
+        std::atomic_store_explicit(&window_, std::move(empty), std::memory_order_release);
         page_misses_.store(0, std::memory_order_relaxed);
         last_miss_frame_.store(0, std::memory_order_relaxed);
     }
 
-    std::shared_ptr<const SampleResourcePageWindow> snapshot() const noexcept {
-        return window_;
+    std::shared_ptr<const SampleResourcePageWindow> snapshot() const {
+        return std::atomic_load_explicit(&window_, std::memory_order_acquire);
     }
 
     float sample_or_zero(uint32_t channel, uint64_t frame) const noexcept {

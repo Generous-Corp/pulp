@@ -76,15 +76,15 @@ struct NodePackHostPolicy {
 
 enum class NodePackError {
     Ok = 0,
-    ManifestInvalid,   // unparseable / missing fields / wrong key sizes
-    UntrustedSigner,   // signer_public_key not in the trust set
-    BadSignature,      // Ed25519 verification failed
-    UnsupportedRequirements, // capabilities / RT / resource needs unsupported
-    HashMismatch,      // binary's SHA-256 != manifest sha256_hex
-    AbiMismatch,       // manifest or entry abi_major != PULP_NODE_V1_ABI_MAJOR
-    NodeMetadataMismatch, // manifest node declarations != loaded descriptor
-    LoadFailed,        // dlopen/LoadLibrary failed
-    SymbolMissing,     // no pulp_node_v1_entry export
+    ManifestInvalid = 1,   // unparseable / missing fields / wrong key sizes
+    UntrustedSigner = 2,   // signer_public_key not in the trust set
+    BadSignature = 3,      // Ed25519 verification failed
+    HashMismatch = 4,      // binary's SHA-256 != manifest sha256_hex
+    AbiMismatch = 5,       // manifest or entry abi_major != PULP_NODE_V1_ABI_MAJOR
+    LoadFailed = 6,        // dlopen/LoadLibrary failed
+    SymbolMissing = 7,     // no pulp_node_v1_entry export
+    UnsupportedRequirements = 8, // capabilities / RT / resource needs unsupported
+    NodeMetadataMismatch = 9, // manifest node declarations != loaded descriptor
 };
 
 struct NodePackLoadResult {

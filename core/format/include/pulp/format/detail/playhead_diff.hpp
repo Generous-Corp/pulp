@@ -98,21 +98,34 @@ inline void compute_playhead_changes(ProcessContext& ctx,
         const bool has_sample_position =
             ctx.position_samples != 0 || snapshot.position_samples != 0;
         if (has_sample_position) {
-            const int64_t expected = (ctx.is_playing && snapshot.is_playing)
-                ? snapshot.position_samples + static_cast<int64_t>(snapshot.num_samples)
-                : snapshot.position_samples;
-            ctx.transport_jump = ctx.position_samples != expected;
+            const int64_t held = snapshot.position_samples;
+            const int64_t advanced =
+                snapshot.position_samples + static_cast<int64_t>(snapshot.num_samples);
+            if (ctx.is_playing && snapshot.is_playing) {
+                ctx.transport_jump = ctx.position_samples != advanced;
+            } else if (ctx.transport_changed && (ctx.is_playing || snapshot.is_playing)) {
+                ctx.transport_jump = ctx.position_samples != held &&
+                                     ctx.position_samples != advanced;
+            } else {
+                ctx.transport_jump = ctx.position_samples != held;
+            }
         } else {
             const bool has_beat_position =
                 ctx.position_beats != 0.0 || snapshot.position_beats != 0.0;
-            if (has_beat_position && ctx.is_playing && snapshot.is_playing &&
+            if (has_beat_position && (ctx.is_playing || snapshot.is_playing) &&
                 snapshot.sample_rate > 0.0 && snapshot.num_samples > 0 &&
                 snapshot.tempo_bpm > 0.0) {
                 const double expected_delta =
                     (static_cast<double>(snapshot.num_samples) / snapshot.sample_rate) *
                     (snapshot.tempo_bpm / 60.0);
                 const double expected = snapshot.position_beats + expected_delta;
-                ctx.transport_jump = std::abs(ctx.position_beats - expected) > 1.0e-9;
+                const bool continuous =
+                    std::abs(ctx.position_beats - expected) <= 1.0e-9;
+                const bool held =
+                    std::abs(ctx.position_beats - snapshot.position_beats) <= 1.0e-9;
+                ctx.transport_jump = (ctx.is_playing && snapshot.is_playing)
+                    ? !continuous
+                    : !(continuous || held);
             } else if (has_beat_position) {
                 ctx.transport_jump = ctx.position_beats != snapshot.position_beats;
             } else {

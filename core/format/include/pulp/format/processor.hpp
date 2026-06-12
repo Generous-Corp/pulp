@@ -568,27 +568,6 @@ public:
     /// Called on the host thread with the audio thread stopped.
     virtual void prepare(const PrepareContext& context) = 0;
 
-    /// Estimate storage the next prepare() will allocate or reserve.
-    ///
-    /// Default is unknown/zero for source compatibility. Processors with large
-    /// prepared resources should override this so hosts and tests can reject
-    /// oversized configurations before allocation. Called on the host thread,
-    /// never from process().
-    virtual PrepareResourceUsage estimate_prepare_resources(
-        const PrepareContext&) const {
-        return {};
-    }
-
-    /// Check the processor's estimate against the host-supplied prepare limits.
-    ///
-    /// Returning `None` means the estimate fits every non-zero limit. Hosts that
-    /// want fail-closed prepare behavior can call this before `prepare()`.
-    virtual PrepareResourceLimit check_prepare_resource_limits(
-        const PrepareContext& context) const {
-        return first_exceeded_prepare_resource_limit(
-            estimate_prepare_resources(context), context.resource_limits);
-    }
-
     /// Release resources. Called on the host thread with audio stopped.
     virtual void release() {}
 
@@ -784,30 +763,6 @@ public:
         midi::MidiBuffer& midi_out,
         const ProcessContext& context) = 0;
 
-    /// Additive multi-bus process entry point.
-    ///
-    /// The default implementation preserves the existing plugin-author
-    /// contract: it projects the active main output, optional main input, and
-    /// optional sidechain input from `ProcessBuffers`, then calls the original
-    /// main-in/main-out `process()` callback. Plugins that need direct access
-    /// to auxes, multi-output instruments, or surround buses can override this
-    /// method while older processors continue to work unchanged.
-    virtual void process(
-        ProcessBuffers& audio,
-        midi::MidiBuffer& midi_in,
-        midi::MidiBuffer& midi_out,
-        const ProcessContext& context) {
-        auto* output = audio.main_output();
-        if (!output) return;
-
-        audio::BufferView<const float> empty_input;
-        auto* input = audio.main_input();
-        auto* previous_sidechain = sidechain_;
-        sidechain_ = audio.sidechain_input();
-        process(*output, input ? *input : empty_input, midi_in, midi_out, context);
-        sidechain_ = previous_sidechain;
-    }
-
     /// Editor support. By default, all processors have an auto-generated editor
     /// built from their parameter definitions (using AutoUi). Override these to
     /// customize or disable the editor.
@@ -913,6 +868,53 @@ public:
     /// one unified Settings panel. Called when the settings UI is built; may be called
     /// again if it is rebuilt. (Appended last to preserve additive-only vtable ordering.)
     virtual std::vector<SettingsSection> settings_sections() { return {}; }
+
+    /// Estimate storage the next prepare() will allocate or reserve.
+    ///
+    /// Default is unknown/zero for source compatibility. Processors with large
+    /// prepared resources should override this so hosts and tests can reject
+    /// oversized configurations before allocation. Called on the host thread,
+    /// never from process(). Appended to preserve additive-only vtable ordering.
+    virtual PrepareResourceUsage estimate_prepare_resources(
+        const PrepareContext&) const {
+        return {};
+    }
+
+    /// Check the processor's estimate against the host-supplied prepare limits.
+    ///
+    /// Returning `None` means the estimate fits every non-zero limit. Hosts that
+    /// want fail-closed prepare behavior can call this before `prepare()`.
+    /// Appended to preserve additive-only vtable ordering.
+    virtual PrepareResourceLimit check_prepare_resource_limits(
+        const PrepareContext& context) const {
+        return first_exceeded_prepare_resource_limit(
+            estimate_prepare_resources(context), context.resource_limits);
+    }
+
+    /// Additive multi-bus process entry point.
+    ///
+    /// The default implementation preserves the existing plugin-author
+    /// contract: it projects the active main output, optional main input, and
+    /// optional sidechain input from `ProcessBuffers`, then calls the original
+    /// main-in/main-out `process()` callback. Plugins that need direct access
+    /// to auxes, multi-output instruments, or surround buses can override this
+    /// method while older processors continue to work unchanged. Appended to
+    /// preserve additive-only vtable ordering.
+    virtual void process(
+        ProcessBuffers& audio,
+        midi::MidiBuffer& midi_in,
+        midi::MidiBuffer& midi_out,
+        const ProcessContext& context) {
+        auto* output = audio.main_output();
+        if (!output) return;
+
+        audio::BufferView<const float> empty_input;
+        auto* input = audio.main_input();
+        auto* previous_sidechain = sidechain_;
+        sidechain_ = audio.sidechain_input();
+        process(*output, input ? *input : empty_input, midi_in, midi_out, context);
+        sidechain_ = previous_sidechain;
+    }
 
     /// Access the parameter state store.
     /// Use state().get_value(id) to read parameter values in process().

@@ -77,6 +77,20 @@ NodePackManifest signed_manifest(const pulp::runtime::Ed25519KeyPair& kp,
 
 }  // namespace
 
+TEST_CASE("node pack: error codes keep stable numeric values",
+          "[host][node-pack][abi]") {
+    REQUIRE(static_cast<int>(NodePackError::Ok) == 0);
+    REQUIRE(static_cast<int>(NodePackError::ManifestInvalid) == 1);
+    REQUIRE(static_cast<int>(NodePackError::UntrustedSigner) == 2);
+    REQUIRE(static_cast<int>(NodePackError::BadSignature) == 3);
+    REQUIRE(static_cast<int>(NodePackError::HashMismatch) == 4);
+    REQUIRE(static_cast<int>(NodePackError::AbiMismatch) == 5);
+    REQUIRE(static_cast<int>(NodePackError::LoadFailed) == 6);
+    REQUIRE(static_cast<int>(NodePackError::SymbolMissing) == 7);
+    REQUIRE(static_cast<int>(NodePackError::UnsupportedRequirements) == 8);
+    REQUIRE(static_cast<int>(NodePackError::NodeMetadataMismatch) == 9);
+}
+
 TEST_CASE("node pack: a trusted, intact, signed pack loads and runs",
           "[host][node-pack]") {
     const std::string module_path = PULP_NODE_PACK_MODULE_PATH;

@@ -71,7 +71,7 @@ private:
 
     explicit BackgroundJobHandle(std::shared_ptr<State> state);
 
-    std::weak_ptr<State> state_;
+    std::shared_ptr<State> state_;
 
     friend class BackgroundJobService;
 };
@@ -104,6 +104,7 @@ private:
     };
 
     void worker_loop();
+    void prune_finished_jobs_locked();
     static bool has_higher_priority(const QueuedJob& a, const QueuedJob& b);
 
     mutable std::mutex mutex_;

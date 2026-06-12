@@ -21,24 +21,24 @@ BackgroundJobHandle::BackgroundJobHandle(std::shared_ptr<State> state)
     : state_(std::move(state)) {}
 
 void BackgroundJobHandle::cancel() const {
-    if (auto state = state_.lock()) {
+    if (auto state = state_) {
         state->token.cancel();
     }
 }
 
 bool BackgroundJobHandle::valid() const {
-    return !state_.expired();
+    return static_cast<bool>(state_);
 }
 
 bool BackgroundJobHandle::is_cancelled() const {
-    if (auto state = state_.lock()) {
+    if (auto state = state_) {
         return state->token.is_cancelled();
     }
     return false;
 }
 
 bool BackgroundJobHandle::is_finished() const {
-    if (auto state = state_.lock()) {
+    if (auto state = state_) {
         std::lock_guard lock(state->mutex);
         return state->finished;
     }
@@ -46,14 +46,14 @@ bool BackgroundJobHandle::is_finished() const {
 }
 
 void BackgroundJobHandle::wait() const {
-    if (auto state = state_.lock()) {
+    if (auto state = state_) {
         std::unique_lock lock(state->mutex);
         state->cv.wait(lock, [&] { return state->finished; });
     }
 }
 
 std::optional<BackgroundJobProgress> BackgroundJobHandle::latest_progress() const {
-    if (auto state = state_.lock()) {
+    if (auto state = state_) {
         std::lock_guard lock(state->mutex);
         return state->progress;
     }
@@ -81,6 +81,7 @@ BackgroundJobHandle BackgroundJobService::submit(BackgroundJobOptions options,
 
     {
         std::lock_guard lock(mutex_);
+        prune_finished_jobs_locked();
         queue_.push_back(QueuedJob{
             .options = std::move(options),
             .job = std::move(job),
@@ -118,6 +119,11 @@ void BackgroundJobService::wait_all() {
         if (!job) continue;
         std::unique_lock lock(job->mutex);
         job->cv.wait(lock, [&] { return job->finished; });
+    }
+
+    {
+        std::lock_guard lock(mutex_);
+        prune_finished_jobs_locked();
     }
 }
 
@@ -158,7 +164,23 @@ void BackgroundJobService::worker_loop() {
             item.state->finished = true;
         }
         item.state->cv.notify_all();
+
+        {
+            std::lock_guard lock(mutex_);
+            prune_finished_jobs_locked();
+        }
     }
+}
+
+void BackgroundJobService::prune_finished_jobs_locked() {
+    all_jobs_.erase(
+        std::remove_if(all_jobs_.begin(), all_jobs_.end(),
+                       [](const std::shared_ptr<BackgroundJobHandle::State>& state) {
+                           if (!state) return true;
+                           std::lock_guard lock(state->mutex);
+                           return state->finished;
+                       }),
+        all_jobs_.end());
 }
 
 bool BackgroundJobService::has_higher_priority(const QueuedJob& a, const QueuedJob& b) {
