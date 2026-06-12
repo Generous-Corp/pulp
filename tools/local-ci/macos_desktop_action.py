@@ -6,6 +6,8 @@ from collections.abc import Callable
 import json
 from pathlib import Path
 
+from macos_desktop_action_env import apply_macos_direct_launch_env
+
 
 def run_macos_local_smoke(
     config: dict,
@@ -143,25 +145,21 @@ def run_macos_local_smoke(
                 stdout_handle = log_path.open("w")
                 stderr_handle = err_path.open("w")
                 env = environ_copy_fn()
-                if capture_ui_snapshot:
-                    env["PULP_VIEW_TREE_OUT"] = str(ui_snapshot_path)
-                if use_pulp_app_automation:
-                    if click_point:
-                        env["PULP_AUTOMATION_CLICK_POINT"] = click_point
-                    if click_view_id:
-                        env["PULP_AUTOMATION_CLICK_VIEW_ID"] = click_view_id
-                    if click_view_type:
-                        env["PULP_AUTOMATION_CLICK_VIEW_TYPE"] = click_view_type
-                    if click_view_text:
-                        env["PULP_AUTOMATION_CLICK_VIEW_TEXT"] = click_view_text
-                    if click_view_label:
-                        env["PULP_AUTOMATION_CLICK_VIEW_LABEL"] = click_view_label
-                    if capture_before:
-                        env["PULP_AUTOMATION_BEFORE_OUT"] = str(before_screenshot_path)
-                    env["PULP_AUTOMATION_AFTER_OUT"] = str(screenshot_path)
-                    env["PULP_AUTOMATION_DELAY_MS"] = "1000"
-                    env["PULP_AUTOMATION_AFTER_DELAY_MS"] = str(max(0, int(settle_secs * 1000.0)))
-                    env["PULP_AUTOMATION_EXIT_AFTER"] = "1"
+                apply_macos_direct_launch_env(
+                    env,
+                    capture_ui_snapshot=capture_ui_snapshot,
+                    use_pulp_app_automation=use_pulp_app_automation,
+                    click_point=click_point,
+                    click_view_id=click_view_id,
+                    click_view_type=click_view_type,
+                    click_view_text=click_view_text,
+                    click_view_label=click_view_label,
+                    capture_before=capture_before,
+                    ui_snapshot_path=ui_snapshot_path,
+                    before_screenshot_path=before_screenshot_path,
+                    screenshot_path=screenshot_path,
+                    settle_secs=settle_secs,
+                )
                 try:
                     proc = popen_fn(
                         args,
