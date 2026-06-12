@@ -178,6 +178,10 @@ from cloud_run_snapshot import (  # noqa: E402  -- re-exported for in-file consu
     summarize_cloud_timing,
     update_cloud_record_from_run as _update_cloud_record_from_run,
 )
+from cloud_run_prepare import (  # noqa: E402  -- re-exported for in-file consumers
+    cloud_run_record_payload,
+    cloud_workflow_dispatch_fields,
+)
 from cloud_compare import (  # noqa: E402  -- re-exported for in-file consumers
     compare_cloud_providers,
     filter_cloud_records,
@@ -185,6 +189,14 @@ from cloud_compare import (  # noqa: E402  -- re-exported for in-file consumers
     recommend_cloud_provider,
 )
 from cloud_compare_format import cloud_compare_summary_line  # noqa: E402  -- re-exported for in-file consumers
+from cloud_command_format import (  # noqa: E402  -- re-exported for in-file consumers
+    cloud_dispatch_lines,
+    cloud_final_status_line,
+    cloud_history_lines,
+    cloud_recent_status_lines,
+    cloud_recommend_lines,
+    cloud_workflow_lines,
+)
 from cloud_pr_format import (  # noqa: E402  -- re-exported for in-file consumers
     format_ci_comment,
     no_open_prs_line,
@@ -514,9 +526,8 @@ def cmd_cloud_history(args: argparse.Namespace) -> int:
         return 0
 
     limit = max(1, int(getattr(args, "limit", 10)))
-    print("Cloud history:\n")
-    for record in records[:limit]:
-        print(f"  {cloud_record_summary(record, config)}")
+    for line in cloud_history_lines(records, config, limit=limit, summary_fn=cloud_record_summary):
+        print(line)
 
     print()
     print_billing_period_summary(estimate_billing_period_totals(records, config))
@@ -550,20 +561,14 @@ def cmd_cloud_recommend(args: argparse.Namespace) -> int:
     config = _load_optional_config()
     workflow_key = args.workflow or resolve_github_actions_settings(config).get("workflow", "build")
     provider, reason = recommend_cloud_provider(list_cloud_records(limit=None), config, workflow_key=workflow_key)
-    if not provider:
-        print(f"No recommendation for workflow '{workflow_key}': {reason}.")
-        return 0
-    print(f"Recommended provider for {workflow_key}: {provider} ({reason})")
-    print(f"  note: {billing_note_text()}")
+    for line in cloud_recommend_lines(workflow_key, provider, reason):
+        print(line)
     return 0
 
 
 def cmd_cloud_workflows(_args: argparse.Namespace) -> int:
-    print("GitHub Actions workflows:\n")
-    for key, info in BUILTIN_GITHUB_WORKFLOWS.items():
-        providers = ", ".join(info.get("providers", [])) or "github-hosted"
-        print(f"  {key:12s} {info['display_name']} ({info['file']})")
-        print(f"               providers: {providers}")
+    for line in cloud_workflow_lines(BUILTIN_GITHUB_WORKFLOWS):
+        print(line)
     return 0
 
 
@@ -668,32 +673,27 @@ def cmd_cloud_run(args: argparse.Namespace) -> int:
     dispatch_id = uuid.uuid4().hex[:12]
     dispatch_time = now_iso()
     record = normalize_cloud_record(
-        {
-            "dispatch_id": dispatch_id,
-            "repository": repository,
-            "workflow_key": workflow_key,
-            "workflow_file": workflow["file"],
-            "workflow_name": workflow["display_name"],
-            "requested_ref": branch,
-            "requested_by": gh_current_login() or "",
-            "provider_requested": provider,
-            "runner_selector_json": selector_json,
-            "dispatch_fields": config_dispatch_fields,
-            "status": "unresolved",
-            "dispatched_at": dispatch_time,
-            "updated_at": dispatch_time,
-            "match_strategy": "workflow+branch+created_at",
-        }
+        cloud_run_record_payload(
+            dispatch_id=dispatch_id,
+            repository=repository,
+            workflow_key=workflow_key,
+            workflow=workflow,
+            branch=branch,
+            requested_by=gh_current_login() or "",
+            provider=provider,
+            selector_json=selector_json,
+            dispatch_fields=config_dispatch_fields,
+            dispatch_time=dispatch_time,
+        )
     )
     save_cloud_record(record)
 
-    fields: dict[str, str] = {}
-    provider_input = workflow.get("provider_input")
-    if provider_input:
-        fields[provider_input] = provider
-    fields.update(config_dispatch_fields)
-    if selector_input and selector_json:
-        fields[selector_input] = selector_json
+    fields = cloud_workflow_dispatch_fields(
+        workflow,
+        provider=provider,
+        dispatch_fields=config_dispatch_fields,
+        selector_json=selector_json,
+    )
 
     try:
         gh_workflow_dispatch(repository, workflow["file"], branch, fields)
@@ -716,14 +716,8 @@ def cmd_cloud_run(args: argparse.Namespace) -> int:
         record["match_ambiguous"] = bool(matched.get("match_ambiguous"))
         save_cloud_record(record)
 
-    print(f"Dispatched: {workflow_key} ref={branch} provider={provider}")
-    print(f"  dispatch id: {dispatch_id}")
-    if record.get("run_id"):
-        print(f"  GitHub run: {record['run_id']}")
-        if record.get("url"):
-            print(f"  URL: {record['url']}")
-    else:
-        print("  warning: dispatched workflow could not be matched to a GitHub run yet")
+    for line in cloud_dispatch_lines(record, workflow_key=workflow_key, branch=branch, provider=provider):
+        print(line)
 
     if not args.wait:
         return 0
@@ -740,7 +734,7 @@ def cmd_cloud_run(args: argparse.Namespace) -> int:
             print(f"Error: {exc}")
             return 1
 
-    print(f"  final: {record.get('status', '?')}/{(record.get('conclusion') or 'unknown').upper()}")
+    print(cloud_final_status_line(record))
     return 0 if record.get("conclusion") == "success" else 1
 
 
@@ -751,10 +745,8 @@ def cmd_cloud_status(args: argparse.Namespace) -> int:
         if not records:
             print("No tracked cloud runs yet.")
             return 0
-        print("Recent cloud runs:\n")
-        for item in records:
-            print(f"  {cloud_record_summary(item, config)}")
-        print()
+        for line in cloud_recent_status_lines(records, config, summary_fn=cloud_record_summary):
+            print(line)
         print_billing_period_summary(estimate_billing_period_totals(list_cloud_records(limit=None), config))
         return 0
 
