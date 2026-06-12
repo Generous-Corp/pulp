@@ -416,6 +416,47 @@ TEST_CASE("VST3 adapter exposes parameter metadata and lifecycle values",
     REQUIRE(processor.terminate() == Steinberg::kResultOk);
 }
 
+TEST_CASE("VST3 latency and tail report processor runtime contract",
+          "[vst3][latency][tail][phase2]") {
+    HostApp host_app;
+
+    SECTION("finite latency and tail samples are reported directly") {
+        TestVst3Config config;
+        config.latency_samples = 192;
+        config.descriptor.tail_samples = 4096;
+        reset_test_processor(config);
+
+        pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+        REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+        REQUIRE(processor.getLatencySamples() == 192u);
+        REQUIRE(processor.getTailSamples() == 4096u);
+        REQUIRE(processor.terminate() == Steinberg::kResultOk);
+    }
+
+    SECTION("zero latency and tail remain zero") {
+        reset_test_processor();
+
+        pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+        REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+        REQUIRE(processor.getLatencySamples() == 0u);
+        REQUIRE(processor.getTailSamples() == 0u);
+        REQUIRE(processor.terminate() == Steinberg::kResultOk);
+    }
+
+    SECTION("negative latency clamps to zero and infinite tail maps to VST3 sentinel") {
+        TestVst3Config config;
+        config.latency_samples = -256;
+        config.descriptor.tail_samples = -1;
+        reset_test_processor(config);
+
+        pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+        REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+        REQUIRE(processor.getLatencySamples() == 0u);
+        REQUIRE(processor.getTailSamples() == Steinberg::Vst::kInfiniteTail);
+        REQUIRE(processor.terminate() == Steinberg::kResultOk);
+    }
+}
+
 TEST_CASE("VST3 editor creation is disabled by automation env",
           "[vst3][editor][issue-2515]") {
     ScopedEnv disable_editor("PULP_DISABLE_PLUGIN_EDITOR");
