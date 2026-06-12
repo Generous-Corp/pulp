@@ -3,6 +3,7 @@
 #include <pulp/audio/audio_file.hpp>
 #include <pulp/runtime/background_job.hpp>
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <list>
@@ -294,6 +295,137 @@ private:
     std::list<std::string> lru_;
     std::unordered_map<std::string, Entry> entries_;
     SampleResourceCacheStats stats_{};
+};
+
+struct SampleResourcePage {
+    uint64_t start_frame = 0;
+    AudioFileData data;
+
+    uint64_t end_frame() const noexcept { return start_frame + data.num_frames(); }
+
+    bool contains(uint64_t frame) const noexcept {
+        return frame >= start_frame && frame < end_frame();
+    }
+
+    float sample(uint32_t channel, uint64_t frame) const noexcept {
+        if (!contains(frame) || channel >= data.channels.size()) return 0.0f;
+        const auto& samples = data.channels[channel];
+        const auto local = frame - start_frame;
+        if (local >= samples.size()) return 0.0f;
+        return samples[static_cast<std::size_t>(local)];
+    }
+};
+
+struct SampleResourcePageWindow {
+    uint32_t sample_rate = 0;
+    uint32_t channel_count = 0;
+    uint64_t generation = 0;
+    std::vector<SampleResourcePage> pages;
+
+    uint64_t covered_frame_count() const noexcept {
+        uint64_t covered = 0;
+        for (const auto& page : pages) {
+            covered += page.data.num_frames();
+        }
+        return covered;
+    }
+
+    const SampleResourcePage* find_page(uint64_t frame) const noexcept {
+        for (const auto& page : pages) {
+            if (page.contains(frame)) return &page;
+        }
+        return nullptr;
+    }
+
+    float sample(uint32_t channel, uint64_t frame) const noexcept {
+        const auto* page = find_page(frame);
+        return page ? page->sample(channel, frame) : 0.0f;
+    }
+};
+
+struct SampleResourcePageHandoffDiagnostics {
+    uint64_t generation = 0;
+    std::size_t page_count = 0;
+    uint64_t covered_frame_count = 0;
+    uint64_t page_misses = 0;
+    uint64_t last_miss_frame = 0;
+};
+
+/// Render-thread view of immutable decoded sample pages.
+///
+/// Control/background code owns file I/O and decoding, then publishes a page
+/// window. The render path can only read resident pages; cache misses return
+/// silence and update atomic diagnostics, so this object cannot accidentally
+/// perform file I/O from the audio thread.
+class SampleResourcePageHandoff {
+public:
+    void publish(SampleResourcePageWindow window) {
+        auto shared = std::make_shared<SampleResourcePageWindow>(std::move(window));
+        publish(std::move(shared));
+    }
+
+    void publish(std::shared_ptr<const SampleResourcePageWindow> window) {
+        window_ = std::move(window);
+        page_misses_.store(0, std::memory_order_relaxed);
+        last_miss_frame_.store(0, std::memory_order_relaxed);
+    }
+
+    void clear() {
+        window_.reset();
+        page_misses_.store(0, std::memory_order_relaxed);
+        last_miss_frame_.store(0, std::memory_order_relaxed);
+    }
+
+    std::shared_ptr<const SampleResourcePageWindow> snapshot() const noexcept {
+        return window_;
+    }
+
+    float sample_or_zero(uint32_t channel, uint64_t frame) const noexcept {
+        const auto window = snapshot();
+        if (!window) {
+            record_miss(frame);
+            return 0.0f;
+        }
+
+        const auto* page = window->find_page(frame);
+        if (!page) {
+            record_miss(frame);
+            return 0.0f;
+        }
+
+        return page->sample(channel, frame);
+    }
+
+    void read_channel(float* dest,
+                      uint32_t channel,
+                      uint64_t start_frame,
+                      uint64_t frame_count) const noexcept {
+        if (!dest) return;
+        for (uint64_t i = 0; i < frame_count; ++i) {
+            dest[i] = sample_or_zero(channel, start_frame + i);
+        }
+    }
+
+    SampleResourcePageHandoffDiagnostics diagnostics() const {
+        const auto window = snapshot();
+        return {
+            .generation = window ? window->generation : 0,
+            .page_count = window ? window->pages.size() : 0,
+            .covered_frame_count = window ? window->covered_frame_count() : 0,
+            .page_misses = page_misses_.load(std::memory_order_relaxed),
+            .last_miss_frame = last_miss_frame_.load(std::memory_order_relaxed),
+        };
+    }
+
+private:
+    void record_miss(uint64_t frame) const noexcept {
+        page_misses_.fetch_add(1, std::memory_order_relaxed);
+        last_miss_frame_.store(frame, std::memory_order_relaxed);
+    }
+
+    std::shared_ptr<const SampleResourcePageWindow> window_;
+    mutable std::atomic<uint64_t> page_misses_{0};
+    mutable std::atomic<uint64_t> last_miss_frame_{0};
 };
 
 struct SampleResourceLoadOptions {
