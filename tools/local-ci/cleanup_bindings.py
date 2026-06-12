@@ -1,0 +1,82 @@
+"""Bindings from the local_ci facade to cleanup helpers."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import Any
+
+
+def _binding(bindings: Mapping[str, Any], name: str) -> Any:
+    return bindings[name]
+
+
+def result_file_job_id(bindings: Mapping[str, Any], path: Any) -> str | None:
+    return _binding(bindings, "_cleanup").result_file_job_id(path)
+
+
+def artifact_entry_sort_key(bindings: Mapping[str, Any], entry: dict) -> tuple[float, str]:
+    return _binding(bindings, "_cleanup").artifact_entry_sort_key(entry)
+
+
+def collect_local_ci_cleanup_plan(
+    bindings: Mapping[str, Any],
+    queue: list[dict],
+    *,
+    keep_results: int,
+    keep_logs: int,
+    keep_bundles: int,
+    include_prepared: bool,
+) -> dict:
+    return _binding(bindings, "_cleanup").collect_local_ci_cleanup_plan(
+        queue,
+        keep_results=keep_results,
+        keep_logs=keep_logs,
+        keep_bundles=keep_bundles,
+        include_prepared=include_prepared,
+        bundles_dir_fn=_binding(bindings, "bundles_dir"),
+        logs_dir_fn=_binding(bindings, "logs_dir"),
+        results_dir_fn=_binding(bindings, "results_dir"),
+        prepared_dir_fn=_binding(bindings, "prepared_dir"),
+        path_size_bytes_fn=_binding(bindings, "path_size_bytes"),
+    )
+
+
+def apply_local_ci_cleanup_plan(bindings: Mapping[str, Any], plan: dict) -> dict:
+    return _binding(bindings, "_cleanup").apply_local_ci_cleanup_plan(plan)
+
+
+def cleanup_plan_lines(bindings: Mapping[str, Any], plan: dict, *, dry_run: bool) -> list[str]:
+    return _binding(bindings, "_cleanup").cleanup_plan_lines(
+        plan,
+        dry_run=dry_run,
+        format_size_fn=_binding(bindings, "format_size_bytes"),
+        describe_path_fn=_binding(bindings, "describe_path_for_cleanup"),
+    )
+
+
+def collect_stale_windows_cleanup_candidates_unlocked(
+    bindings: Mapping[str, Any],
+    queue: list[dict],
+) -> list[dict]:
+    return _binding(bindings, "_cleanup").collect_stale_windows_cleanup_candidates_unlocked(
+        queue,
+        stale_running_jobs_fn=_binding(bindings, "stale_running_jobs_unlocked"),
+        now_fn=_binding(bindings, "now_iso"),
+    )
+
+
+def cleanup_stale_windows_validator(
+    bindings: Mapping[str, Any],
+    host: str,
+    pid: int,
+    started_at: str,
+) -> dict:
+    return _binding(bindings, "_cleanup").cleanup_stale_windows_validator(
+        host,
+        pid,
+        started_at,
+        ps_literal_fn=_binding(bindings, "ps_literal"),
+        run_logged_command_fn=_binding(bindings, "run_logged_command"),
+        windows_ssh_powershell_command_fn=_binding(bindings, "windows_ssh_powershell_command"),
+        trim_line_fn=_binding(bindings, "trim_line"),
+    )

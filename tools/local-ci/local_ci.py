@@ -129,6 +129,7 @@ from footprint import (  # noqa: E402  -- re-exported for in-file consumers
 )
 
 import cleanup as _cleanup  # noqa: E402
+import cleanup_bindings as _cleanup_bindings  # noqa: E402
 import cleanup_cli as _cleanup_cli  # noqa: E402
 import cli_dispatch as _cli_dispatch  # noqa: E402
 import cli_dispatch_bindings as _cli_dispatch_bindings  # noqa: E402
@@ -1442,11 +1443,11 @@ def cancel_queue_command_job(job_ref: str) -> dict:
 
 
 def result_file_job_id(path: Path) -> str | None:
-    return _cleanup.result_file_job_id(path)
+    return _cleanup_bindings.result_file_job_id(globals(), path)
 
 
 def artifact_entry_sort_key(entry: dict) -> tuple[float, str]:
-    return _cleanup.artifact_entry_sort_key(entry)
+    return _cleanup_bindings.artifact_entry_sort_key(globals(), entry)
 
 
 def collect_local_ci_cleanup_plan(
@@ -1457,31 +1458,22 @@ def collect_local_ci_cleanup_plan(
     keep_bundles: int = 0,
     include_prepared: bool = False,
 ) -> dict:
-    return _cleanup.collect_local_ci_cleanup_plan(
+    return _cleanup_bindings.collect_local_ci_cleanup_plan(
+        globals(),
         queue,
         keep_results=keep_results,
         keep_logs=keep_logs,
         keep_bundles=keep_bundles,
         include_prepared=include_prepared,
-        bundles_dir_fn=bundles_dir,
-        logs_dir_fn=logs_dir,
-        results_dir_fn=results_dir,
-        prepared_dir_fn=prepared_dir,
-        path_size_bytes_fn=path_size_bytes,
     )
 
 
 def apply_local_ci_cleanup_plan(plan: dict) -> dict:
-    return _cleanup.apply_local_ci_cleanup_plan(plan)
+    return _cleanup_bindings.apply_local_ci_cleanup_plan(globals(), plan)
 
 
 def cleanup_plan_lines(plan: dict, *, dry_run: bool) -> list[str]:
-    return _cleanup.cleanup_plan_lines(
-        plan,
-        dry_run=dry_run,
-        format_size_fn=format_size_bytes,
-        describe_path_fn=describe_path_for_cleanup,
-    )
+    return _cleanup_bindings.cleanup_plan_lines(globals(), plan, dry_run=dry_run)
 
 
 def job_sort_key(job: dict) -> tuple[int, str, str]:
@@ -1521,23 +1513,11 @@ def update_job_target_state(job_id: str, target_name: str, **fields) -> None:
 
 
 def collect_stale_windows_cleanup_candidates_unlocked(queue: list[dict]) -> list[dict]:
-    return _cleanup.collect_stale_windows_cleanup_candidates_unlocked(
-        queue,
-        stale_running_jobs_fn=stale_running_jobs_unlocked,
-        now_fn=now_iso,
-    )
+    return _cleanup_bindings.collect_stale_windows_cleanup_candidates_unlocked(globals(), queue)
 
 
 def cleanup_stale_windows_validator(host: str, pid: int, started_at: str) -> dict:
-    return _cleanup.cleanup_stale_windows_validator(
-        host,
-        pid,
-        started_at,
-        ps_literal_fn=ps_literal,
-        run_logged_command_fn=run_logged_command,
-        windows_ssh_powershell_command_fn=windows_ssh_powershell_command,
-        trim_line_fn=trim_line,
-    )
+    return _cleanup_bindings.cleanup_stale_windows_validator(globals(), host, pid, started_at)
 
 
 def reclaim_stale_remote_validators(_config: dict) -> int:
