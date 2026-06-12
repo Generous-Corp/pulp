@@ -1302,17 +1302,19 @@ TEST_CASE("Standalone audio scope JSON helper writes v1 scope captures",
     std::filesystem::remove(out_path);
     REQUIRE(write_audio_scope_json_file(out_path.string(), probe, config));
 
-    std::ifstream in(out_path, std::ios::binary);
-    std::stringstream buffer;
-    buffer << in.rdbuf();
-    const auto v = choc::json::parse(buffer.str());
-    REQUIRE(v["schema"].getString() == "pulp.audio.scope.v1");
-    REQUIRE(v["version"].get<std::int64_t>() == 1);
-    REQUIRE(v["source"]["stage"].getString() == "standalone_output_boundary");
-    REQUIRE(v["source"]["selected_channel"].get<std::int64_t>() == 0);
-    REQUIRE(v["acquisition"]["trigger_mode"].getString() == "rising_zero");
-    REQUIRE(v["acquisition"]["window_samples"].get<std::int64_t>() == 4);
-    REQUIRE(v["measurements"]["peak_to_peak"].get<double>() > 0.0);
+    {
+        std::ifstream in(out_path, std::ios::binary);
+        std::stringstream buffer;
+        buffer << in.rdbuf();
+        const auto v = choc::json::parse(buffer.str());
+        REQUIRE(v["schema"].getString() == "pulp.audio.scope.v1");
+        REQUIRE(v["version"].get<std::int64_t>() == 1);
+        REQUIRE(v["source"]["stage"].getString() == "standalone_output_boundary");
+        REQUIRE(v["source"]["selected_channel"].get<std::int64_t>() == 0);
+        REQUIRE(v["acquisition"]["trigger_mode"].getString() == "rising_zero");
+        REQUIRE(v["acquisition"]["window_samples"].get<std::int64_t>() == 4);
+        REQUIRE(v["measurements"]["peak_to_peak"].get<double>() > 0.0);
+    }
     std::filesystem::remove(out_path);
 }
 
