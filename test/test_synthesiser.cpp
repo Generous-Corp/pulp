@@ -468,6 +468,33 @@ TEST_CASE("Synthesiser 32-voice polyphony stress without dropouts",
     for (float s : out) REQUIRE_THAT(s, WithinAbs(16.0f, 1e-3f));
 }
 
+TEST_CASE("Synthesiser renders hundreds of voices without audio-thread allocation",
+          "[midi][synth][stress][rt-safety][phase3]") {
+    constexpr std::size_t kVoices = 256;
+    constexpr int kSamples = 128;
+    Synthesiser<TestVoice> synth(kVoices);
+
+    for (std::size_t i = 0; i < kVoices; ++i) {
+        synth.note_on(static_cast<uint8_t>(i % 16),
+                      static_cast<uint8_t>(i % 128),
+                      100);
+    }
+    REQUIRE(synth.active_count() == kVoices);
+
+    MidiBuffer empty;
+    std::vector<float> out(kSamples, 0.0f);
+
+    {
+        pulp::test::RtAllocationProbe probe;
+        synth.process(empty, out.data(), kSamples);
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+
+    for (float s : out) {
+        REQUIRE_THAT(s, WithinAbs(static_cast<float>(kVoices) * 0.5f, 1e-3f));
+    }
+}
+
 TEST_CASE("Synthesiser reset clears every voice", "[midi][synth]") {
     Synthesiser<TestVoice> synth(4);
     synth.note_on(0, 60, 100);
