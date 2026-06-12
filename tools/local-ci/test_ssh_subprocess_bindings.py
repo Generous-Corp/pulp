@@ -63,6 +63,33 @@ class SshSubprocessBindingsTests(unittest.TestCase):
         self.assertIs(captured["run"][1]["run_fn"], fake_subprocess.run)
         self.assertIs(captured["run"][1]["sleep_fn"], fake_time.sleep)
 
+    def test_install_ssh_subprocess_helpers_wires_named_exports(self) -> None:
+        captured = {}
+
+        def is_transient(detail):
+            captured["detail"] = detail
+            return True
+
+        def run_ssh_subprocess(args, **kwargs):
+            captured["run"] = (args, kwargs)
+            return subprocess.CompletedProcess(args, 0, stdout="ok", stderr="")
+
+        bindings = {
+            "_ssh_subprocess": types.SimpleNamespace(
+                is_transient_ssh_failure_detail=is_transient,
+                run_ssh_subprocess=run_ssh_subprocess,
+            ),
+            "subprocess": types.SimpleNamespace(run=object()),
+            "time": types.SimpleNamespace(sleep=object()),
+        }
+        self.mod.install_ssh_subprocess_helpers(bindings, ("is_transient_ssh_failure_detail", "run_ssh_subprocess"))
+
+        self.assertTrue(bindings["is_transient_ssh_failure_detail"]("reset"))
+        self.assertEqual(bindings["run_ssh_subprocess"](["ssh", "host"]).stdout, "ok")
+        self.assertEqual(bindings["is_transient_ssh_failure_detail"].__name__, "is_transient_ssh_failure_detail")
+        self.assertEqual(captured["detail"], "reset")
+        self.assertEqual(captured["run"][0], ["ssh", "host"])
+
 
 if __name__ == "__main__":
     unittest.main()

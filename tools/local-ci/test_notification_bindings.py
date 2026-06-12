@@ -37,6 +37,24 @@ class NotificationBindingTests(unittest.TestCase):
             run_fn=subprocess.run,
         )
 
+    def test_install_notification_helpers_wires_named_exports(self) -> None:
+        notifications = mock.Mock()
+        subprocess = mock.Mock()
+        bindings = {
+            "_notifications": notifications,
+            "print": mock.Mock(name="print"),
+            "subprocess": subprocess,
+        }
+
+        self.mod.install_notification_helpers(bindings, ("notify",))
+        bindings["notify"]("done")
+
+        notifications.notify.assert_called_once_with(
+            "done",
+            print_fn=bindings["print"],
+            run_fn=subprocess.run,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

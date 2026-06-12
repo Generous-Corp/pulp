@@ -51,7 +51,18 @@ class CliParserBindingTests(unittest.TestCase):
             epilog="docs",
         )
 
-        self.assertEqual(result, "parser")
+    def test_install_cli_parser_helpers_wires_named_exports(self) -> None:
+        build_local_ci_parser = mock.Mock(return_value="parser")
+        bindings = {
+            "_cli_parser": types.SimpleNamespace(build_local_ci_parser=build_local_ci_parser),
+            "PRIORITY_VALUES": {"normal"},
+            "KEEP_COMPLETED_JOBS": 9,
+            "__doc__": "docs",
+        }
+
+        self.mod.install_cli_parser_helpers(bindings, ("build_parser",))
+
+        self.assertEqual(bindings["build_parser"](), "parser")
         build_local_ci_parser.assert_called_once_with(
             priority_values={"normal"},
             keep_completed_jobs=9,

@@ -8,6 +8,13 @@ from typing import Any
 
 from binding_utils import binding as _binding
 from binding_utils import binding_attr as _binding_attr
+from binding_utils import install_local_helpers
+
+
+SSH_SUBPROCESS_EXPORTS = (
+    "is_transient_ssh_failure_detail",
+    "run_ssh_subprocess",
+)
 
 
 def is_transient_ssh_failure_detail(bindings: Mapping[str, Any], detail: str) -> bool:
@@ -32,3 +39,10 @@ def run_ssh_subprocess(
         run_fn=_binding_attr(bindings, "subprocess", "run"),
         sleep_fn=_binding_attr(bindings, "time", "sleep"),
     )
+
+
+def install_ssh_subprocess_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = SSH_SUBPROCESS_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)

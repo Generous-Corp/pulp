@@ -6,6 +6,13 @@ from collections.abc import Mapping
 from typing import Any
 
 from binding_utils import binding as _binding
+from binding_utils import install_local_helpers
+
+
+CLI_PARSER_EXPORTS = (
+    "build_local_ci_parser",
+    "build_parser",
+)
 
 
 def build_local_ci_parser(
@@ -29,3 +36,7 @@ def build_parser(bindings: Mapping[str, Any]):
         keep_completed_jobs=_binding(bindings, "KEEP_COMPLETED_JOBS"),
         epilog=_binding(bindings, "__doc__"),
     )
+
+
+def install_cli_parser_helpers(bindings: dict[str, Any], names: tuple[str, ...] = CLI_PARSER_EXPORTS) -> None:
+    install_local_helpers(bindings, globals(), names)

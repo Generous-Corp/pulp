@@ -66,28 +66,6 @@ KEEP_COMPLETED_JOBS = 25
 _BUNDLE_BUILD_LOCK = threading.Lock()
 
 
-def is_transient_ssh_failure_detail(detail: str) -> bool:
-    return _ssh_subprocess_bindings.is_transient_ssh_failure_detail(globals(), detail)
-
-
-def run_ssh_subprocess(
-    args: list[str],
-    *,
-    input: str | None = None,
-    timeout: int | None = None,
-    retries: int = 3,
-    retry_delay_secs: float = 2.0,
-) -> subprocess.CompletedProcess[str]:
-    return _ssh_subprocess_bindings.run_ssh_subprocess(
-        globals(),
-        args,
-        input=input,
-        timeout=timeout,
-        retries=retries,
-        retry_delay_secs=retry_delay_secs,
-    )
-
-
 import state_paths as _state_paths  # noqa: E402
 import state_path_bindings as _state_path_bindings  # noqa: E402
 
@@ -176,6 +154,8 @@ import windows_probe_bindings as _windows_probe_bindings  # noqa: E402
 import windows_target as _windows_target  # noqa: E402
 import windows_target_bindings as _windows_target_bindings  # noqa: E402
 
+_ssh_subprocess_bindings.install_ssh_subprocess_helpers(globals())
+
 WINDOWS_REQUIRED_REMOTE_TOOLS = _windows_target_bindings.windows_required_remote_tools(globals())
 WINDOWS_OPTIONAL_REMOTE_TOOLS = _windows_target_bindings.windows_optional_remote_tools(globals())
 WINDOWS_DEFAULT_REMOTE_REPO_DIRNAME = _windows_target_bindings.windows_default_remote_repo_dirname(globals())
@@ -231,13 +211,7 @@ _normalize_bindings.install_normalize_helpers(globals())
 import cli_parser as _cli_parser  # noqa: E402
 
 
-def build_local_ci_parser(*, priority_values: dict, keep_completed_jobs: int, epilog: str | None):
-    return _cli_parser_bindings.build_local_ci_parser(
-        globals(),
-        priority_values=priority_values,
-        keep_completed_jobs=keep_completed_jobs,
-        epilog=epilog,
-    )
+_cli_parser_bindings.install_cli_parser_helpers(globals())
 
 
 def load_config() -> dict:
@@ -1602,8 +1576,7 @@ def wait_for_job(job_id: str, config: dict) -> tuple[dict | None, int]:
     return _queue_bindings.wait_for_job(globals(), job_id, config)
 
 
-def notify(message: str) -> None:
-    _notification_bindings.notify(globals(), message)
+_notification_bindings.install_notification_helpers(globals())
 
 
 # ── VM Management ────────────────────────────────────────────────────────────
@@ -2040,10 +2013,6 @@ def cmd_desktop_config(args: argparse.Namespace) -> int:
 
 def cmd_desktop(args: argparse.Namespace) -> int:
     return _cli_dispatch_bindings.cmd_desktop(globals(), args)
-
-
-def build_parser() -> argparse.ArgumentParser:
-    return _cli_parser_bindings.build_parser(globals())
 
 
 def main() -> int:
