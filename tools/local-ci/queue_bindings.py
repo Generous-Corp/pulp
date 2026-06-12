@@ -38,6 +38,15 @@ def cancel_job_unlocked(bindings: Mapping[str, Any], job: dict, reason: str = "o
     )
 
 
+def load_queue(bindings: Mapping[str, Any]) -> list[dict]:
+    with _binding(bindings, "file_lock")(_binding(bindings, "queue_lock_path")(), blocking=True):
+        queue = _binding(bindings, "load_queue_unlocked")()
+        queue, changed = _binding(bindings, "reconcile_running_jobs_unlocked")(queue)
+        if changed:
+            _binding(bindings, "save_queue_unlocked")(queue)
+        return queue
+
+
 def update_job_active_targets(bindings: Mapping[str, Any], job_id: str, active_targets: dict | None) -> None:
     _binding(bindings, "_queue_lifecycle").update_job_active_targets_locked(
         job_id,

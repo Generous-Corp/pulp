@@ -132,6 +132,64 @@ class QueueBindingsTests(unittest.TestCase):
         self.assertEqual(bumped["priority"], "high")
         self.assertIs(bumped["now"], bindings["now_iso"])
 
+    def test_load_queue_locks_reconciles_and_saves_only_when_changed(self):
+        events = []
+        queue_path = Path("/state/queue.lock")
+        original_queue = [{"id": "job1", "status": "running"}]
+        reconciled_queue = [{"id": "job1", "status": "pending"}]
+
+        class Lock:
+            def __enter__(self):
+                events.append("enter")
+
+            def __exit__(self, exc_type, exc, tb):
+                events.append("exit")
+
+        def file_lock(path, *, blocking):
+            events.append(("lock", path, blocking))
+            return Lock()
+
+        def load_queue_unlocked():
+            events.append("load")
+            return original_queue
+
+        def reconcile(queue):
+            events.append(("reconcile", queue))
+            return reconciled_queue, True
+
+        def save(queue):
+            events.append(("save", queue))
+
+        bindings = self._bindings()
+        bindings.update(
+            {
+                "queue_lock_path": lambda: queue_path,
+                "file_lock": file_lock,
+                "load_queue_unlocked": load_queue_unlocked,
+                "reconcile_running_jobs_unlocked": reconcile,
+                "save_queue_unlocked": save,
+            }
+        )
+
+        self.assertEqual(self.mod.load_queue(bindings), reconciled_queue)
+        self.assertEqual(
+            events,
+            [
+                ("lock", queue_path, True),
+                "enter",
+                "load",
+                ("reconcile", original_queue),
+                ("save", reconciled_queue),
+                "exit",
+            ],
+        )
+
+        events.clear()
+        bindings["reconcile_running_jobs_unlocked"] = lambda queue: (queue, False)
+
+        self.assertEqual(self.mod.load_queue(bindings), original_queue)
+        self.assertNotIn(("save", original_queue), events)
+
     def test_active_target_and_runner_updates_bind_facade_dependencies(self):
         calls = {}
 

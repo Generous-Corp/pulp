@@ -361,12 +361,7 @@ from job_queue import (  # noqa: E402  -- re-exported for in-file consumers
 
 
 def load_queue() -> list[dict]:
-    with file_lock(queue_lock_path(), blocking=True):
-        queue = load_queue_unlocked()
-        queue, changed = reconcile_running_jobs_unlocked(queue)
-        if changed:
-            save_queue_unlocked(queue)
-        return queue
+    return _queue_bindings.load_queue(globals())
 
 
 from targets import (  # noqa: E402  -- re-exported for in-file consumers
