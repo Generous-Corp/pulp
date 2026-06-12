@@ -325,7 +325,9 @@ The AU adapter stores Pulp state alongside the standard AU state dictionary:
 
 **Effects:** `GetTailTime()` converts `descriptor().tail_samples` to seconds by dividing by sample rate. `GetLatency()` does the same for `latency_samples()`. A tail of `-1` maps to `infinity`.
 
-**Instruments:** Tail and latency return 0 (override in your processor if needed).
+**Instruments:** `GetTailTime()` and `GetLatency()` report the same processor
+runtime contract as effects, using the output stream sample rate. A tail of `-1`
+maps to `infinity`.
 
 ### auval Validation
 

@@ -628,9 +628,9 @@ bool PulpAUEffect::SupportsTail()
 Float64 PulpAUEffect::GetTailTime()
 {
     if (!processor_) return 0.0;
-    auto tail = processor_->descriptor().tail_samples;
-    if (tail < 0) return std::numeric_limits<Float64>::infinity();
-    return tail > 0 ? static_cast<Float64>(tail) / GetSampleRate() : 0.0;
+    const auto tail = processor_->descriptor().tail_samples;
+    if (tail <= 0) return tail_samples_to_seconds(tail, 0.0);
+    return tail_samples_to_seconds(tail, GetSampleRate());
 }
 
 Float64 PulpAUEffect::GetLatency()
