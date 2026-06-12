@@ -936,6 +936,51 @@ TEST_CASE("SignalGraph optional runtime budget reports unprepared graphs",
     REQUIRE(report.frame_stats.run_count == 1);
 }
 
+TEST_CASE("SignalGraph optional runtime budget has deterministic large-graph cost",
+          "[host][graph][budget-policy][scale][phase4]") {
+    SignalGraph graph;
+    constexpr int kGainNodes = 128;
+    constexpr int kBlock = 16;
+
+    auto input = graph.add_input_node(1, "in");
+    NodeId previous = input;
+    for (int i = 0; i < kGainNodes; ++i) {
+        auto gain = graph.add_gain_node("gain");
+        REQUIRE(graph.connect(previous, 0, gain, 0));
+        previous = gain;
+    }
+    auto output = graph.add_output_node(1, "out");
+    REQUIRE(graph.connect(previous, 0, output, 0));
+    REQUIRE(graph.prepare(48000.0, kBlock));
+
+    const auto stats = graph.prepared_stats();
+    REQUIRE(stats.node_count == static_cast<std::size_t>(kGainNodes + 2));
+    REQUIRE(stats.connection_count == static_cast<std::size_t>(kGainNodes + 1));
+    REQUIRE(stats.total_ports == static_cast<std::size_t>(kGainNodes * 4 + 2));
+    REQUIRE(stats.max_block_size == kBlock);
+
+    const auto expected_cost =
+        static_cast<std::uint64_t>(stats.node_count) * 16u
+        + static_cast<std::uint64_t>(stats.connection_count) * 8u
+        + static_cast<std::uint64_t>(stats.total_ports)
+              * static_cast<std::uint64_t>(stats.max_block_size)
+        + static_cast<std::uint64_t>(
+              stats.total_prepared_buffer_bytes / sizeof(float));
+
+    pulp::runtime::RuntimeBudgetFrame exact(expected_cost);
+    auto report = graph.evaluate_optional_runtime_budget(
+        exact, pulp::runtime::RuntimeWorkLane::Background);
+    REQUIRE(report.estimated_cost == expected_cost);
+    REQUIRE(report.decision.action == pulp::runtime::RuntimeBudgetAction::Run);
+    REQUIRE(report.frame_stats.remaining_budget == 0);
+
+    pulp::runtime::RuntimeBudgetFrame tight(expected_cost - 1);
+    report = graph.evaluate_optional_runtime_budget(
+        tight, pulp::runtime::RuntimeWorkLane::Background);
+    REQUIRE(report.estimated_cost == expected_cost);
+    REQUIRE(report.decision.action == pulp::runtime::RuntimeBudgetAction::Bypass);
+}
+
 TEST_CASE("SignalGraph clears prepared runtime stats after failed prepare",
           "[host][graph][stats][limits][phase2]") {
     SignalGraph graph;

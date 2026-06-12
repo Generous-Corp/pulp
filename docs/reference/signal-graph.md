@@ -132,6 +132,9 @@ a report with the decision, estimated cost, prepared state, and updated frame
 counters. `Run` means the optional work can proceed; `Defer`, `Shed`, and
 `Bypass` are the explicit fallback states. Core graph audio processing remains
 on the prepared snapshot path and is not skipped by this optional-work helper.
+The cost model is deterministic: node count, connection count, declared ports
+times prepared block size, and fixed prepared buffer bytes. It is a portable
+budget benchmark, not a hardware CPU-time estimate.
 
 ## Latency & PDC
 

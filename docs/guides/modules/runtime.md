@@ -157,6 +157,12 @@ This is the intended hook for large graph or instrument consumers: critical
 audio remains on the prepared path, while optional analysis, preview, and
 background refresh work degrades through the shared policy.
 
+Cost values passed to `RuntimeBudgetFrame` should be stable work units, not
+wall-clock timing. Current graph and instrument consumers use deterministic
+shape counters: graph node/edge/port/block/buffer stats, or voice-pool
+polyphony/active/releasing counts. That makes CI fixtures portable while still
+pinning whether optional work runs, defers, sheds, or bypasses at scale.
+
 ## ScopeGuard
 
 RAII cleanup — runs a callable on scope exit.

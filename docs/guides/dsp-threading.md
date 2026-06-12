@@ -224,7 +224,9 @@ analysis refresh, preview rendering, or diagnostics, call
 `evaluate_optional_runtime_budget()` with a `runtime::RuntimeBudgetFrame`.
 The helper uses voice-pool telemetry to produce the shared run/defer/shed/bypass
 decision while the actual voice render path stays on the normal prepared audio
-path.
+path. The voice cost model is deterministic: polyphony capacity, active voices,
+and releasing voices. It is meant for portable budget fixtures and optional-work
+fallbacks, not CPU timing.
 
 Keep this path boring: write fixed-size counters, meter snapshots, and bounded
 queues from `process()`. Move FFTs, exported waveforms, parameter sweeps, and
