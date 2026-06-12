@@ -476,6 +476,47 @@ TEST_CASE("ValidationHarness report includes sanitizer payloads",
     REQUIRE_THAT(report, ContainsSubstring("\"sanitizer\": {\"kind\":\"address\",\"reports\":1}"));
 }
 
+TEST_CASE("ValidationHarness records runtime overload report entries",
+          "[harness][overload-policy][phase4]") {
+    pulp::format::ValidationHarness harness(create_test_gain);
+    harness.configure({});
+
+    pulp::audio::AudioProcessLoadSnapshot load;
+    load.load = 0.5f;
+    load.callback_count = 12;
+
+    auto entry = harness.record_runtime_overload(load, 0);
+
+    REQUIRE(entry.type == "runtime_overload");
+    REQUIRE(entry.status == pulp::format::ValidationStatus::pass);
+    REQUIRE(entry.error_message.empty());
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"severity\": \"nominal\""));
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"callback_count\": 12"));
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"xrun_count\": 0"));
+
+    const auto report = harness.generate_report();
+    REQUIRE_THAT(report, ContainsSubstring("\"runtime_overload\""));
+    REQUIRE_THAT(report, ContainsSubstring("\"action\": \"normal\""));
+}
+
+TEST_CASE("ValidationHarness marks critical runtime overload as validation failure",
+          "[harness][overload-policy][phase4]") {
+    pulp::format::ValidationHarness harness(create_test_gain);
+    harness.configure({});
+
+    pulp::audio::AudioProcessLoadSnapshot load;
+    load.peak_load = 1.5f;
+    load.overload_count = 3;
+
+    auto entry = harness.record_runtime_overload(load, 3);
+
+    REQUIRE(entry.status == pulp::format::ValidationStatus::fail);
+    REQUIRE_THAT(entry.error_message, ContainsSubstring("critical"));
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"severity\": \"critical\""));
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"should_bypass_optional_work\": true"));
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"validation_failure\": true"));
+}
+
 TEST_CASE("ValidationHarness report escapes JSON metadata and entry strings",
           "[harness][phase2][coverage][issue-646]") {
     pulp::format::ValidationHarness harness(create_test_gain);
