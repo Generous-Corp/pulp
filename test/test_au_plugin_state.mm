@@ -284,6 +284,56 @@ struct ScopedFactoryRegistration {
     pulp::format::ProcessorFactory previous;
 };
 
+struct AUv2TransportCallbackState {
+    double beat = 0.0;
+    double tempo = 120.0;
+    UInt32 time_sig_denominator = 4;
+    double measure_downbeat = 0.0;
+    Boolean is_playing = true;
+    Float64 sample_position = 0.0;
+};
+
+OSStatus auv2_test_beat_and_tempo(void* user_data,
+                                  Float64* out_beat,
+                                  Float64* out_tempo) {
+    auto* state = static_cast<AUv2TransportCallbackState*>(user_data);
+    if (out_beat) *out_beat = state->beat;
+    if (out_tempo) *out_tempo = state->tempo;
+    return noErr;
+}
+
+OSStatus auv2_test_musical_time(void* user_data,
+                                UInt32* out_delta_samples,
+                                Float32* out_time_sig_numerator,
+                                UInt32* out_time_sig_denominator,
+                                Float64* out_measure_downbeat) {
+    auto* state = static_cast<AUv2TransportCallbackState*>(user_data);
+    if (out_delta_samples) *out_delta_samples = 0;
+    if (out_time_sig_numerator) *out_time_sig_numerator = 4.0f;
+    if (out_time_sig_denominator) {
+        *out_time_sig_denominator = state->time_sig_denominator;
+    }
+    if (out_measure_downbeat) *out_measure_downbeat = state->measure_downbeat;
+    return noErr;
+}
+
+OSStatus auv2_test_transport_state(void* user_data,
+                                   Boolean* out_is_playing,
+                                   Boolean* out_transport_state_changed,
+                                   Float64* out_current_sample,
+                                   Boolean* out_is_cycling,
+                                   Float64* out_cycle_start,
+                                   Float64* out_cycle_end) {
+    auto* state = static_cast<AUv2TransportCallbackState*>(user_data);
+    if (out_is_playing) *out_is_playing = state->is_playing;
+    if (out_transport_state_changed) *out_transport_state_changed = false;
+    if (out_current_sample) *out_current_sample = state->sample_position;
+    if (out_is_cycling) *out_is_cycling = false;
+    if (out_cycle_start) *out_cycle_start = 0.0;
+    if (out_cycle_end) *out_cycle_end = 0.0;
+    return noErr;
+}
+
 } // namespace
 
 TEST_CASE("AU v2 effect SaveState/RestoreState round-trips plugin-owned payload",
@@ -379,6 +429,56 @@ TEST_CASE("AU v2 latency and tail report processor runtime contract",
             REQUIRE(std::isinf(instrument.GetTailTime()));
         }
     }
+}
+
+TEST_CASE("AU v2 host callbacks mark transport jumps for processor reset",
+          "[au][auv2][transport][reset][phase2]") {
+    ScopedFactoryRegistration registration(create_effect_processor);
+
+    pulp::format::au::PulpAUEffect effect(nullptr);
+
+    AUv2TransportCallbackState transport;
+    HostCallbackInfo callbacks{};
+    callbacks.hostUserData = &transport;
+    callbacks.beatAndTempoProc = auv2_test_beat_and_tempo;
+    callbacks.musicalTimeLocationProc = auv2_test_musical_time;
+    callbacks.transportStateProc = auv2_test_transport_state;
+    REQUIRE(effect.DispatchSetProperty(kAudioUnitProperty_HostCallbacks,
+                                       kAudioUnitScope_Global,
+                                       0,
+                                       &callbacks,
+                                       sizeof(callbacks)) == noErr);
+
+    constexpr UInt32 kFrames = 8;
+    pulp::format::detail::PlayheadSnapshot previous;
+    auto first = pulp::format::au::make_render_process_context(48000.0, kFrames);
+    pulp::format::au::apply_host_callbacks_to_process_context(
+        first, effect, previous);
+    REQUIRE_FALSE(first.transport_jump);
+    REQUIRE_FALSE(first.should_reset_dsp_state());
+    REQUIRE(first.position_samples == 0);
+    REQUIRE(first.is_playing);
+    REQUIRE(first.process_mode == pulp::format::ProcessMode::Realtime);
+    REQUIRE(first.render_speed_hint == pulp::format::RenderSpeedHint::Realtime);
+
+    transport.sample_position = kFrames;
+    transport.beat = 1.0;
+    auto continuous =
+        pulp::format::au::make_render_process_context(48000.0, kFrames);
+    pulp::format::au::apply_host_callbacks_to_process_context(
+        continuous, effect, previous);
+    REQUIRE_FALSE(continuous.transport_jump);
+    REQUIRE_FALSE(continuous.should_reset_dsp_state());
+    REQUIRE(continuous.position_samples == kFrames);
+
+    transport.sample_position = 4096.0;
+    transport.beat = 64.0;
+    auto jumped = pulp::format::au::make_render_process_context(48000.0, kFrames);
+    pulp::format::au::apply_host_callbacks_to_process_context(
+        jumped, effect, previous);
+    REQUIRE(jumped.transport_jump);
+    REQUIRE(jumped.should_reset_dsp_state());
+    REQUIRE(jumped.position_samples == 4096);
 }
 
 TEST_CASE("AU v3 fullState round-trips plugin-owned payload",
