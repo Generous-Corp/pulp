@@ -2909,6 +2909,101 @@ TEST_CASE("SignalGraph dispatches plugin nodes through ProcessBuffers",
     }
 }
 
+namespace {
+class MultiOutputProcessBufferSlot final : public PluginSlot {
+public:
+    const PluginInfo& info() const override { return info_; }
+    bool is_loaded() const override { return true; }
+    bool prepare(double, int) override { return true; }
+    void release() override {}
+
+    void process(pulp::audio::BufferView<float>&,
+                 const pulp::audio::BufferView<const float>&,
+                 const pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&,
+                 const ParameterEventQueue&,
+                 int) override {
+        ++legacy_process_calls;
+    }
+
+    void process(pulp::format::ProcessBuffers& audio,
+                 const pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&,
+                 const ParameterEventQueue&,
+                 int n) override {
+        ++process_buffer_calls;
+        saw_output_channels = audio.main_output()
+            ? audio.main_output()->num_channels()
+            : 0;
+        auto* out = audio.main_output();
+        if (!out) return;
+
+        for (std::size_t c = 0; c < out->num_channels(); ++c) {
+            float* dst = out->channel_ptr(c);
+            const float value = 0.25f + static_cast<float>(c);
+            for (int i = 0; i < n; ++i) {
+                dst[static_cast<std::size_t>(i)] = value;
+            }
+        }
+    }
+
+    std::vector<HostParamInfo> parameters() const override { return {}; }
+    float get_parameter(uint32_t) const override { return 0.f; }
+    void set_parameter(uint32_t, float) override {}
+    void set_bypass(bool) override {}
+    bool is_bypassed() const override { return false; }
+    std::vector<uint8_t> save_state() const override { return {}; }
+    bool restore_state(const std::vector<uint8_t>&) override { return false; }
+    bool has_editor() const override { return false; }
+    void* create_editor_view() override { return nullptr; }
+    void destroy_editor_view() override {}
+    int latency_samples() const override { return 0; }
+    int tail_samples() const override { return 0; }
+
+    int legacy_process_calls = 0;
+    int process_buffer_calls = 0;
+    std::size_t saw_output_channels = 0;
+
+private:
+    PluginInfo info_ = make_plugin_info("MultiOut", 0, 4);
+};
+} // namespace
+
+TEST_CASE("SignalGraph routes multi-output plugin ProcessBuffers to AudioOutput",
+          "[host][graph][process-buffers][phase2][multi-output]") {
+    SignalGraph graph;
+    auto slot = std::make_unique<MultiOutputProcessBufferSlot>();
+    auto* slot_ptr = slot.get();
+    auto plugin = graph.add_plugin_node(std::move(slot), 0, 4, "multi");
+    auto out = graph.add_output_node(4, "out");
+
+    REQUIRE(graph.connect(plugin, 0, out, 0));
+    REQUIRE(graph.connect(plugin, 1, out, 1));
+    REQUIRE(graph.connect(plugin, 2, out, 2));
+    REQUIRE(graph.connect(plugin, 3, out, 3));
+    REQUIRE(graph.prepare(48000.0, 8));
+
+    std::vector<float> out0(8, 0.0f);
+    std::vector<float> out1(8, 0.0f);
+    std::vector<float> out2(8, 0.0f);
+    std::vector<float> out3(8, 0.0f);
+    float* out_ptrs[4] = {out0.data(), out1.data(), out2.data(), out3.data()};
+    pulp::audio::BufferView<const float> input;
+    pulp::audio::BufferView<float> output(out_ptrs, 4, 8);
+
+    graph.process(output, input, 8);
+
+    REQUIRE(slot_ptr->process_buffer_calls == 1);
+    REQUIRE(slot_ptr->legacy_process_calls == 0);
+    REQUIRE(slot_ptr->saw_output_channels == 4);
+    for (int i = 0; i < 8; ++i) {
+        REQUIRE_THAT(out0[static_cast<std::size_t>(i)], WithinAbs(0.25f, 1e-6f));
+        REQUIRE_THAT(out1[static_cast<std::size_t>(i)], WithinAbs(1.25f, 1e-6f));
+        REQUIRE_THAT(out2[static_cast<std::size_t>(i)], WithinAbs(2.25f, 1e-6f));
+        REQUIRE_THAT(out3[static_cast<std::size_t>(i)], WithinAbs(3.25f, 1e-6f));
+    }
+}
+
 // ── Item 4.7 sidechain routing ────────────────────────────────────────
 
 namespace {
