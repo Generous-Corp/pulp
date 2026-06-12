@@ -202,6 +202,62 @@ TEST_CASE("BackgroundJobService publishes progress and observes cancellation",
     REQUIRE(saw_cancel.load(std::memory_order_acquire));
 }
 
+TEST_CASE("BackgroundJobService cancels and drains queued work on teardown",
+          "[runtime][background-job][cancel][lifetime][phase2]") {
+    BackgroundJobService service;
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool first_started = false;
+    bool release_first = false;
+    std::atomic<bool> queued_ran{false};
+
+    auto first = service.submit(
+        {.name = "running", .priority = BackgroundJobPriority::normal},
+        [&](BackgroundJobContext& context) {
+            std::unique_lock lock(mutex);
+            first_started = true;
+            cv.notify_all();
+            cv.wait(lock, [&] {
+                return release_first || context.is_cancelled();
+            });
+        });
+
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, 2s, [&] { return first_started; }));
+    }
+
+    auto queued_low = service.submit(
+        {.name = "queued-low", .priority = BackgroundJobPriority::low},
+        [&](BackgroundJobContext&) {
+            queued_ran.store(true, std::memory_order_release);
+        });
+    auto queued_high = service.submit(
+        {.name = "queued-high", .priority = BackgroundJobPriority::high},
+        [&](BackgroundJobContext&) {
+            queued_ran.store(true, std::memory_order_release);
+        });
+
+    REQUIRE(service.pending_count() == 2);
+
+    service.cancel_all();
+    {
+        std::lock_guard lock(mutex);
+        release_first = true;
+    }
+    cv.notify_all();
+    service.wait_all();
+
+    REQUIRE(first.is_finished());
+    REQUIRE(first.is_cancelled());
+    REQUIRE(queued_low.is_finished());
+    REQUIRE(queued_low.is_cancelled());
+    REQUIRE(queued_high.is_finished());
+    REQUIRE(queued_high.is_cancelled());
+    REQUIRE_FALSE(queued_ran.load(std::memory_order_acquire));
+    REQUIRE(service.pending_count() == 0);
+}
+
 TEST_CASE("RealtimeResourceSlot publishes prepared resources with deferred reclaim",
           "[runtime][background-job][rt-handoff][phase2]") {
     struct PreparedResource {

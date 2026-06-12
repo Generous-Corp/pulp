@@ -219,6 +219,9 @@ that may allocate, block, report progress, or touch the filesystem. Jobs receive
 a `runtime::BackgroundJobContext` with a shared `CancellationToken` and a
 progress publisher. Call `BackgroundJobHandle::wait()` only from a control,
 test, or teardown thread; never wait from `process()`.
+For owner teardown, call `BackgroundJobService::cancel_all()` and then
+`wait_all()` from a non-RT thread so running jobs can observe cancellation and
+queued jobs can be drained without executing stale work.
 
 When a background job prepares a new immutable resource for the audio thread,
 publish it through `runtime::RealtimeResourceSlot<T, N>`. The control thread
