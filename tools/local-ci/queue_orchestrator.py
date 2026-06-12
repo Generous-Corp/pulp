@@ -4,10 +4,9 @@ This module owns job identity, enqueue duplicate/priority policy, enqueue
 supersedence candidate selection, queue-command lookup and priority mutation,
 priority ordering, supersedence, cancellation result payloads, summaries,
 target-state status detail formatting, status active-target selection and
-recent-completed selection, stale-running job selection/replacement/requeue state, stale-running
-reconciliation action selection, runner-info active-target mutation,
-initial/progress/completed target-state payloads, target-state snapshots,
-completed-job state mutation, queue status grouping, and completed-queue retention.
+recent-completed selection, stale-running job selection/replacement/requeue state,
+stale-running reconciliation action selection, completed-job state mutation,
+queue status grouping, and completed-queue retention.
 Higher-level queue mutation, locking, runner liveness, result persistence, and
 drain orchestration live in queue_lifecycle.py and runner_state.py, with
 queue_bindings.py preserving the historical local_ci.py facade exports.
@@ -63,6 +62,15 @@ from queue_supersedence import (
     supersedence_identity_key,
     supersedence_key,
     supersedence_reason,
+)
+from queue_target_state import (
+    completed_target_state,
+    initial_target_state,
+    target_state_snapshot,
+    update_job_target_state_unlocked,
+    update_runner_info_active_targets,
+    updated_target_state,
+    upsert_job_active_targets_unlocked,
 )
 
 
@@ -143,71 +151,6 @@ def complete_job_with_result_unlocked(job: dict, result: dict, result_path: Path
     job.pop("last_progress_at", None)
 
 
-def update_runner_info_active_targets(
-    info: dict,
-    job_id: str,
-    active_targets: dict | None,
-    *,
-    now_iso_fn: Callable[[], str] = now_iso,
-) -> bool:
-    if info.get("active_job_id") != job_id:
-        return False
-
-    if active_targets:
-        info["active_targets"] = active_targets
-    else:
-        info.pop("active_targets", None)
-    info["updated_at"] = now_iso_fn()
-    return True
-
-
-def initial_target_state(*, started_at: str, log_path: str) -> dict:
-    return {
-        "status": "running",
-        "started_at": started_at,
-        "phase": "starting",
-        "log_path": log_path,
-    }
-
-
-def updated_target_state(previous_state: dict | None, fields: dict) -> dict:
-    state = dict(previous_state or {})
-    for key, value in fields.items():
-        if value is None:
-            state.pop(key, None)
-        else:
-            state[key] = value
-    return state
-
-
-def completed_target_state(
-    result: dict,
-    previous_state: dict | None,
-    *,
-    completed_at: str,
-    default_log_path: str,
-) -> dict:
-    previous_state = previous_state or {}
-    return {
-        "status": result.get("status", "?"),
-        "exit_code": result.get("exit_code"),
-        "duration_secs": result.get("duration_secs"),
-        "completed_at": completed_at,
-        "phase": "done" if result.get("status") == "pass" else previous_state.get("phase", "done"),
-        "log_path": result.get("log_file", default_log_path),
-        "last_output_at": previous_state.get("last_output_at"),
-        "last_line": previous_state.get("last_line"),
-        "host": previous_state.get("host"),
-        "transport_mode": result.get("transport_mode", previous_state.get("transport_mode")),
-        "wait_reason": previous_state.get("wait_reason"),
-    }
-
-
-def target_state_snapshot(target_states: dict[str, dict]) -> dict | None:
-    snapshot = {name: dict(state) for name, state in target_states.items()}
-    return snapshot or None
-
-
 def find_stale_running_replacement_unlocked(queue: list[dict], job: dict) -> tuple[dict | None, str | None]:
     replacement = None
     replacement_reason = None
@@ -262,55 +205,6 @@ def requeue_stale_running_job_unlocked(
     job["requeued_at"] = now_iso_fn()
     job.pop("started_at", None)
     job.pop("runner", None)
-
-
-def upsert_job_active_targets_unlocked(
-    queue: list[dict],
-    job_id: str,
-    active_targets: dict | None,
-    *,
-    now_iso_fn: Callable[[], str] = now_iso,
-) -> bool:
-    for job in queue:
-        if job["id"] != job_id:
-            continue
-        if active_targets:
-            job["active_targets"] = active_targets
-            job["last_progress_at"] = now_iso_fn()
-        else:
-            job.pop("active_targets", None)
-            job.pop("last_progress_at", None)
-        return True
-    return False
-
-
-def update_job_target_state_unlocked(
-    queue: list[dict],
-    job_id: str,
-    target_name: str,
-    fields: dict,
-    *,
-    now_iso_fn: Callable[[], str] = now_iso,
-) -> bool:
-    job = find_job_unlocked(queue, job_id)
-    if job is None:
-        return False
-
-    active_targets = dict(job.get("active_targets") or {})
-    state = updated_target_state(active_targets.get(target_name), fields)
-
-    if state:
-        active_targets[target_name] = state
-    else:
-        active_targets.pop(target_name, None)
-
-    upsert_job_active_targets_unlocked(
-        queue,
-        job["id"],
-        active_targets if active_targets else None,
-        now_iso_fn=now_iso_fn,
-    )
-    return True
 
 
 def complete_job_unlocked(
