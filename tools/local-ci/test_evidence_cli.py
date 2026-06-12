@@ -1,21 +1,18 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import importlib.util
 from argparse import Namespace
 from pathlib import Path
 import unittest
+
+from module_test_utils import load_module_from_path
 
 
 MODULE_PATH = Path(__file__).resolve().with_name("evidence_cli.py")
 
 
 def load_evidence_cli_module():
-    spec = importlib.util.spec_from_file_location("evidence_cli_under_test", MODULE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    return load_module_from_path(MODULE_PATH)
 
 
 class EvidenceCliTests(unittest.TestCase):
