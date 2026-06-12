@@ -275,7 +275,7 @@ std::string b64_encode(const std::vector<uint8_t>& bytes) {
     return out;
 }
 
-std::vector<uint8_t> b64_decode(std::string_view s) {
+std::optional<std::vector<uint8_t>> b64_decode(std::string_view s) {
     static int8_t kT[256];
     static bool init = false;
     if (!init) {
@@ -284,19 +284,44 @@ std::vector<uint8_t> b64_decode(std::string_view s) {
         for (int i = 0; i < 64; ++i) kT[(unsigned char)a[i]] = (int8_t)i;
         init = true;
     }
-    std::vector<uint8_t> out;
-    out.reserve(s.size() * 3 / 4);
-    int v = 0, bits = 0;
+
+    std::string clean;
+    clean.reserve(s.size());
     for (char c : s) {
-        if (c == '=' || c == '\n' || c == '\r' || c == ' ') continue;
-        int8_t d = kT[(unsigned char)c];
-        if (d < 0) continue;
-        v = (v << 6) | d;
-        bits += 6;
-        if (bits >= 8) {
-            bits -= 8;
-            out.push_back((uint8_t)((v >> bits) & 0xff));
+        if (c == '\n' || c == '\r' || c == ' ' || c == '\t') continue;
+        clean.push_back(c);
+    }
+    if (clean.empty()) return std::vector<uint8_t>{};
+    if (clean.size() % 4 != 0) return std::nullopt;
+
+    std::vector<uint8_t> out;
+    out.reserve(clean.size() * 3 / 4);
+    for (size_t i = 0; i < clean.size(); i += 4) {
+        const bool final_quad = (i + 4 == clean.size());
+        int vals[4] = {0, 0, 0, 0};
+        int padding = 0;
+        for (int j = 0; j < 4; ++j) {
+            const char c = clean[i + static_cast<size_t>(j)];
+            if (c == '=') {
+                if (j < 2) return std::nullopt;
+                ++padding;
+                continue;
+            }
+            if (padding > 0) return std::nullopt;
+            const int8_t d = kT[static_cast<unsigned char>(c)];
+            if (d < 0) return std::nullopt;
+            vals[j] = d;
         }
+        if (padding > 2) return std::nullopt;
+        if (padding > 0 && !final_quad) return std::nullopt;
+
+        const uint32_t v = (static_cast<uint32_t>(vals[0]) << 18)
+                         | (static_cast<uint32_t>(vals[1]) << 12)
+                         | (static_cast<uint32_t>(vals[2]) << 6)
+                         | static_cast<uint32_t>(vals[3]);
+        out.push_back(static_cast<uint8_t>((v >> 16) & 0xff));
+        if (padding < 2) out.push_back(static_cast<uint8_t>((v >> 8) & 0xff));
+        if (padding < 1) out.push_back(static_cast<uint8_t>(v & 0xff));
     }
     return out;
 }
@@ -489,8 +514,14 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                     if (new_id != 0 && nv.hasObjectMember("custom")) {
                         const auto& cv2 = nv["custom"];
                         if (cv2.hasObjectMember("state_b64")) {
-                            graph.set_custom_node_state(
-                                new_id, b64_decode(cv2["state_b64"].getString()));
+                            auto blob = b64_decode(cv2["state_b64"].getString());
+                            if (!blob) {
+                                graph.clear();
+                                result.ok = false;
+                                result.error = "invalid custom state_b64";
+                                return result;
+                            }
+                            graph.set_custom_node_state(new_id, *blob);
                         }
                     }
                     break;
@@ -520,7 +551,13 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                     } else {
                         if (pv.hasObjectMember("state_b64")) {
                             auto blob = b64_decode(pv["state_b64"].getString());
-                            if (!blob.empty()) slot->restore_state(blob);
+                            if (!blob) {
+                                graph.clear();
+                                result.ok = false;
+                                result.error = "invalid plugin state_b64";
+                                return result;
+                            }
+                            if (!blob->empty()) slot->restore_state(*blob);
                         }
                         new_id = graph.add_plugin_node(std::move(slot), in_ch, out_ch, name);
                     }

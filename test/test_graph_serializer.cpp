@@ -970,6 +970,65 @@ TEST_CASE("GraphSerializer preserves opaque state for unresolved custom nodes",
     REQUIRE(json2.find("\"state_b64\"") != std::string::npos);
 }
 
+TEST_CASE("GraphSerializer generated custom-state fuzz validates state payloads",
+          "[host][serializer][generated][state][fuzz][phase3]") {
+    SECTION("malformed base64 fails closed") {
+        SignalGraph dst;
+        auto result = GraphSerializer::from_json(dst, R"({
+  "format_version": 1,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "custom",
+      "name": "GeneratedState",
+      "num_input_ports": 1,
+      "num_output_ports": 1,
+      "gain": 1,
+      "custom": {
+        "type_id": "pulp.generated.state",
+        "version": 1,
+        "state_b64": "AA#="
+      }
+    }
+  ],
+  "connections": []
+})");
+
+        REQUIRE_FALSE(result.ok);
+        REQUIRE(result.error == "invalid custom state_b64");
+        REQUIRE(dst.nodes().empty());
+        REQUIRE(dst.connections().empty());
+    }
+
+    SECTION("valid padded base64 tolerates whitespace") {
+        SignalGraph dst;
+        auto result = GraphSerializer::from_json(dst, R"({
+  "format_version": 1,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "custom",
+      "name": "GeneratedState",
+      "num_input_ports": 1,
+      "num_output_ports": 1,
+      "gain": 1,
+      "custom": {
+        "type_id": "pulp.generated.state",
+        "version": 1,
+        "state_b64": "AAEC/ w=="
+      }
+    }
+  ],
+  "connections": []
+})");
+
+        REQUIRE(result.ok);
+        REQUIRE(dst.nodes().size() == 1);
+        REQUIRE(dst.custom_node_state(dst.nodes().front().id)
+                == std::vector<uint8_t>{0x00, 0x01, 0x02, 0xff});
+    }
+}
+
 TEST_CASE("GraphSerializer preserves unresolved custom node identity",
           "[host][serializer][node-abi]") {
     SignalGraph src;
