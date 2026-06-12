@@ -62,6 +62,14 @@ async.on_data([](auto* data, auto n) { /* on worker thread */ });
 async.start();
 ```
 
+### Budget Policy — Graceful degradation
+
+`pulp::runtime::evaluate_runtime_budget()` gives background analysis, cache
+refresh, validation helpers, and game-audio-style optional work a shared
+run/defer/shed/bypass decision. Critical audio work always runs; interactive
+work can defer to preserve reserve; background and opportunistic work can shed
+or bypass when overload is active or budget is exhausted.
+
 ### HTTP — Network requests
 
 GET, POST, and file download via cpp-httplib (MIT). Use for license checks, cloud presets, update notifications.

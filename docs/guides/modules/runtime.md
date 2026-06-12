@@ -14,6 +14,7 @@ The runtime module provides lock-free primitives, logging, assertions, and scope
 | Multi-field coherent read | `SeqLock<T>` | Transport state (tempo + beat position + time sig) |
 | Large data swap | `TripleBuffer<T>` | Wavetables, IR buffers, meter data |
 | Ordered event stream | `SpscQueue<T>` | MIDI events, UI commands |
+| Budgeted optional work | `evaluate_runtime_budget()` | Background analysis, voice/cache refresh, validation helpers |
 
 **Never use on the audio thread**: `std::mutex`, `std::condition_variable`, heap allocation, I/O.
 
@@ -108,6 +109,31 @@ Use SpscQueue for ordered event streams where every event matters (MIDI,
 parameter automation points, UI commands). If the consumer falls behind,
 producer-side failed pushes increment `overflow_count()` and appear in
 `telemetry()`.
+
+## Budget Policy
+
+`budget_policy.hpp` provides a small, deterministic decision helper for
+runtime work that may need to degrade under load. Critical audio work always
+runs. Interactive work can defer to preserve an audio reserve. Background and
+opportunistic work can bypass or shed when budget is exhausted or overload is
+active.
+
+```cpp
+#include <pulp/runtime/budget_policy.hpp>
+
+RuntimeBudgetPolicy policy;
+policy.critical_audio_reserve = 128;
+
+RuntimeBudgetRequest request;
+request.lane = RuntimeWorkLane::Opportunistic;
+request.estimated_cost = 64;
+request.remaining_budget = 32;
+
+auto decision = evaluate_runtime_budget(request, policy);
+if (!decision.should_run()) {
+    // Upload telemetry or use a cheaper fallback; do not block process().
+}
+```
 
 ## ScopeGuard
 
