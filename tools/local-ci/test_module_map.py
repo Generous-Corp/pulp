@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 import re
 import unittest
@@ -37,6 +38,19 @@ class LocalCiModuleMapTests(unittest.TestCase):
         missing_tests = sorted(f"test_{module_name}" for module_name in binding_modules if f"test_{module_name}" not in test_modules)
 
         self.assertEqual(missing_tests, [])
+
+    def test_binding_modules_do_not_redefine_shared_lookup_helpers(self) -> None:
+        forbidden_names = {"_binding", "_print_binding"}
+        offenders: list[str] = []
+        for path in sorted(LOCAL_CI_DIR.glob("*_bindings.py")):
+            if path.name.startswith("test_"):
+                continue
+            tree = ast.parse(path.read_text(), filename=str(path))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef) and node.name in forbidden_names:
+                    offenders.append(f"{path.name}:{node.name}")
+
+        self.assertEqual(offenders, [])
 
 
 if __name__ == "__main__":
