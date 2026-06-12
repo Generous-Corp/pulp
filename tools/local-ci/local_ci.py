@@ -88,29 +88,92 @@ def run_ssh_subprocess(
     )
 
 
-from state_paths import (  # noqa: E402  -- re-exported for in-file consumers
-    state_dir,
-    config_path,
-    worktree_config_path,
-    shared_config_path,
-    queue_path,
-    results_dir,
-    cloud_runs_dir,
-    evidence_path,
-    logs_dir,
-    bundles_dir,
-    prepared_dir,
-    desktop_state_dir,
-    desktop_receipts_dir,
-    queue_lock_path,
-    evidence_lock_path,
-    drain_lock_path,
-    runner_info_path,
-    ensure_state_dirs,
-    job_logs_dir,
-    target_log_path,
-    prepare_target_log,
-)
+import state_paths as _state_paths  # noqa: E402
+import state_path_bindings as _state_path_bindings  # noqa: E402
+
+
+def state_dir() -> Path:
+    return _state_path_bindings.state_dir(globals())
+
+
+def config_path() -> Path:
+    return _state_path_bindings.config_path(globals())
+
+
+def worktree_config_path() -> Path:
+    return _state_path_bindings.worktree_config_path(globals())
+
+
+def shared_config_path() -> Path:
+    return _state_path_bindings.shared_config_path(globals())
+
+
+def queue_path() -> Path:
+    return _state_path_bindings.queue_path(globals())
+
+
+def results_dir() -> Path:
+    return _state_path_bindings.results_dir(globals())
+
+
+def cloud_runs_dir() -> Path:
+    return _state_path_bindings.cloud_runs_dir(globals())
+
+
+def evidence_path() -> Path:
+    return _state_path_bindings.evidence_path(globals())
+
+
+def logs_dir() -> Path:
+    return _state_path_bindings.logs_dir(globals())
+
+
+def bundles_dir() -> Path:
+    return _state_path_bindings.bundles_dir(globals())
+
+
+def prepared_dir() -> Path:
+    return _state_path_bindings.prepared_dir(globals())
+
+
+def desktop_state_dir() -> Path:
+    return _state_path_bindings.desktop_state_dir(globals())
+
+
+def desktop_receipts_dir() -> Path:
+    return _state_path_bindings.desktop_receipts_dir(globals())
+
+
+def queue_lock_path() -> Path:
+    return _state_path_bindings.queue_lock_path(globals())
+
+
+def evidence_lock_path() -> Path:
+    return _state_path_bindings.evidence_lock_path(globals())
+
+
+def drain_lock_path() -> Path:
+    return _state_path_bindings.drain_lock_path(globals())
+
+
+def runner_info_path() -> Path:
+    return _state_path_bindings.runner_info_path(globals())
+
+
+def ensure_state_dirs() -> None:
+    return _state_path_bindings.ensure_state_dirs(globals())
+
+
+def job_logs_dir(job_id: str) -> Path:
+    return _state_path_bindings.job_logs_dir(globals(), job_id)
+
+
+def target_log_path(job_id: str, target_name: str) -> Path:
+    return _state_path_bindings.target_log_path(globals(), job_id, target_name)
+
+
+def prepare_target_log(job_id: str, target_name: str) -> Path:
+    return _state_path_bindings.prepare_target_log(globals(), job_id, target_name)
 
 
 from footprint import (  # noqa: E402  -- re-exported for in-file consumers
@@ -147,6 +210,8 @@ import git_helpers as _git_helpers  # noqa: E402
 import github_workflows as _github_workflows  # noqa: E402
 import github_workflow_bindings as _github_workflow_bindings  # noqa: E402
 import io_utils as _io_utils  # noqa: E402
+import job_queue as _job_queue  # noqa: E402
+import job_queue_bindings as _job_queue_bindings  # noqa: E402
 import linux_desktop_action as _linux_desktop_action  # noqa: E402
 import linux_desktop_bindings as _linux_desktop_bindings  # noqa: E402
 import linux_target as _linux_target  # noqa: E402
@@ -183,6 +248,8 @@ import ssh_subprocess as _ssh_subprocess  # noqa: E402
 import ssh_subprocess_bindings as _ssh_subprocess_bindings  # noqa: E402
 import target_preflight as _target_preflight  # noqa: E402
 import target_preflight_bindings as _target_preflight_bindings  # noqa: E402
+import targets as _targets  # noqa: E402
+import target_bindings as _target_bindings  # noqa: E402
 import utility_command_bindings as _utility_command_bindings  # noqa: E402
 import windows_desktop_action as _windows_desktop_action  # noqa: E402
 import windows_desktop_bindings as _windows_desktop_bindings  # noqa: E402
@@ -492,22 +559,32 @@ def save_config(config: dict) -> None:
     return _config_evidence_bindings.save_config(globals(), config)
 
 
-from job_queue import (  # noqa: E402  -- re-exported for in-file consumers
-    normalize_job,
-    load_queue_unlocked,
-    save_queue_unlocked,
-)
+def normalize_job(job: dict) -> dict:
+    return _job_queue_bindings.normalize_job(globals(), job)
+
+
+def load_queue_unlocked() -> list[dict]:
+    return _job_queue_bindings.load_queue_unlocked(globals())
+
+
+def save_queue_unlocked(queue: list[dict]) -> None:
+    return _job_queue_bindings.save_queue_unlocked(globals(), queue)
 
 
 def load_queue() -> list[dict]:
     return _queue_bindings.load_queue(globals())
 
 
-from targets import (  # noqa: E402  -- re-exported for in-file consumers
-    enabled_targets,
-    parse_targets_arg,
-    resolve_targets,
-)
+def enabled_targets(config: dict) -> list[str]:
+    return _target_bindings.enabled_targets(globals(), config)
+
+
+def parse_targets_arg(value: str | None) -> list[str] | None:
+    return _target_bindings.parse_targets_arg(globals(), value)
+
+
+def resolve_targets(config: dict, requested: list[str] | None) -> list[str]:
+    return _target_bindings.resolve_targets(globals(), config, requested)
 
 from cloud import (  # noqa: E402  -- re-exported for in-file consumers (R2-1 #2645)
     billing_note_text,

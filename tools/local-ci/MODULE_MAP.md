@@ -10,6 +10,7 @@ and the matching contract tests in the same change.
 | Module | Owns | Must not own |
 | --- | --- | --- |
 | `state_paths.py` | State/config/log/bundle path resolution and state-directory creation. | Queue JSON contents, result schema, or target behavior. |
+| `state_path_bindings.py` | Dependency binding between the `local_ci.py` facade and state path helpers, preserving facade-level monkeypatch seams while moving path delegation out of the entrypoint. | State path behavior, queue JSON contents, result schema, or target behavior. |
 | `cli_parser.py` | Argument parser construction for top-level, cloud, cleanup, evidence, and desktop subcommands. | Command handler dispatch, command execution, or user-facing output side effects. |
 | `cli_parser_bindings.py` | Dependency binding between the `local_ci.py` facade and parser construction, preserving facade-level parser constants and epilog wiring while moving parser dependency assembly out of the entrypoint. | Parser behavior, command dispatch, command execution, or output formatting. |
 | `cli_dispatch.py` | Parsed command dispatch for top-level, cloud, cloud namespace, and desktop subcommands. | Argument parser construction, command handler side effects, or command output formatting. |
@@ -23,7 +24,9 @@ and the matching contract tests in the same change.
 | `provenance_bindings.py` | Dependency binding between the `local_ci.py` facade and provenance helpers, preserving facade-level monkeypatch seams while moving provenance delegation out of the entrypoint. | Provenance behavior, GitHub or Shipyard API calls, queue persistence, or result persistence. |
 | `git_helpers.py` | Git/time helper seam: current branch/SHA/ref resolution, git-root discovery, short SHA formatting, GitHub remote URL normalization, origin URL lookup, and generic git subprocess execution. | Local-CI queue state, target execution, desktop report publishing policy, or GitHub API calls. |
 | `job_queue.py` | Queue entry normalization and unlocked queue load/save. | Lock acquisition, stale-running reconciliation, supersedence side effects. |
+| `job_queue_bindings.py` | Dependency binding between the `local_ci.py` facade and job queue helpers, preserving facade-level monkeypatch seams while moving queue persistence delegation out of the entrypoint. | Queue persistence behavior, lock acquisition, stale-running reconciliation, or supersedence side effects. |
 | `targets.py` | Enabled-target discovery, `--targets` parsing, and configured target resolution. | Transport-specific preflight, SSH probes, fallback routing. |
+| `target_bindings.py` | Dependency binding between the `local_ci.py` facade and target selection helpers, preserving facade-level monkeypatch seams while moving target resolution delegation out of the entrypoint. | Target selection behavior, transport-specific preflight, SSH probes, or fallback routing. |
 | `github_workflows.py` | Pure GitHub Actions workflow/default/provider resolution. | `gh` subprocess calls, workflow dispatch, or polling. |
 | `github_workflow_bindings.py` | Dependency binding between the `local_ci.py` facade and GitHub workflow/default/provider resolvers, preserving facade-level monkeypatch seams while moving resolver delegation out of the entrypoint. | Workflow/default/provider resolution behavior, `gh` subprocess calls, workflow dispatch, or polling. |
 | `cloud.py` | GitHub/Namespace cloud-run records, cost/history helpers, dispatch wrappers, PR-list line fragments, and formatting. | Local/SSH validation execution. |
