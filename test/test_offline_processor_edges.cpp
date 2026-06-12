@@ -644,6 +644,124 @@ TEST_CASE("offline_render outputs null-test clean across block schedules",
     REQUIRE(residual->passes(0.0f, 0.0));
 }
 
+TEST_CASE("offline render manifests hash artifacts and deterministic plans",
+          "[audio][offline][manifest][phase4]") {
+    auto input = make_stereo_fixture();
+
+    OfflineRenderOptions options;
+    options.block_size_schedule = {2, 1, 4};
+    options.start_sample_position = 960;
+    options.start_position_beats = 12.0;
+    options.tempo_bpm = 96.0;
+    options.render_speed_ratio = 2.0;
+    options.state_generation = 44;
+    options.deterministic_seed = 1234;
+    options.tail_policy = OfflineRenderTailPolicy::RenderTail;
+    options.tail_frames = 2;
+
+    auto rendered = offline_render(
+        input,
+        [](const float* in, float* out, int channels,
+           const OfflineRenderBlockContext& context) {
+            for (int sample = 0; sample < channels * context.frames; ++sample)
+                out[sample] = in[sample] + 0.125f;
+        },
+        options);
+    REQUIRE(rendered.has_value());
+
+    auto manifest = create_offline_render_manifest(*rendered, options);
+    auto again = create_offline_render_manifest(*rendered, options);
+    REQUIRE(manifest.has_value());
+    REQUIRE(again.has_value());
+
+    REQUIRE(manifest->format_version == 1);
+    REQUIRE(manifest->sample_rate == 48000);
+    REQUIRE(manifest->channels == 2);
+    REQUIRE(manifest->frames == 7);
+    REQUIRE(manifest->audio_sha256.size() == 64);
+    REQUIRE(manifest->render_plan_sha256.size() == 64);
+    REQUIRE(manifest->audio_sha256 == again->audio_sha256);
+    REQUIRE(manifest->render_plan_sha256 == again->render_plan_sha256);
+    REQUIRE(manifest->matches_audio(*rendered));
+
+    REQUIRE(manifest->start_sample_position == 960);
+    REQUIRE(manifest->start_position_beats == 12.0);
+    REQUIRE(manifest->tempo_bpm == 96.0);
+    REQUIRE(manifest->render_speed_ratio == 2.0);
+    REQUIRE(manifest->state_generation == 44);
+    REQUIRE(manifest->deterministic_seed == 1234);
+    REQUIRE(manifest->tail_policy == OfflineRenderTailPolicy::RenderTail);
+    REQUIRE(manifest->tail_frames == 2);
+    REQUIRE(manifest->block_size_schedule == std::vector<int>{2, 1, 4});
+
+    REQUIRE(manifest->chunks.size() == 3);
+    REQUIRE(manifest->chunks[0].start_frame == 0);
+    REQUIRE(manifest->chunks[0].frame_count == 2);
+    REQUIRE(manifest->chunks[0].scheduled_block_size == 2);
+    REQUIRE(manifest->chunks[1].start_frame == 2);
+    REQUIRE(manifest->chunks[1].frame_count == 1);
+    REQUIRE(manifest->chunks[1].scheduled_block_size == 1);
+    REQUIRE(manifest->chunks[2].start_frame == 3);
+    REQUIRE(manifest->chunks[2].frame_count == 4);
+    REQUIRE(manifest->chunks[2].scheduled_block_size == 4);
+}
+
+TEST_CASE("offline render manifests separate audio and plan changes",
+          "[audio][offline][manifest][phase4]") {
+    auto audio = make_stereo_fixture();
+
+    OfflineRenderOptions options;
+    options.block_size_schedule = {3, 2};
+    options.state_generation = 1;
+
+    auto baseline = create_offline_render_manifest(audio, options);
+    REQUIRE(baseline.has_value());
+
+    auto changed_audio = audio;
+    changed_audio.channels[0][0] += 0.01f;
+    auto changed_artifact = create_offline_render_manifest(changed_audio, options);
+    REQUIRE(changed_artifact.has_value());
+    REQUIRE(changed_artifact->audio_sha256 != baseline->audio_sha256);
+    REQUIRE(changed_artifact->render_plan_sha256 == baseline->render_plan_sha256);
+
+    auto changed_options = options;
+    changed_options.state_generation = 2;
+    auto changed_plan = create_offline_render_manifest(audio, changed_options);
+    REQUIRE(changed_plan.has_value());
+    REQUIRE(changed_plan->audio_sha256 == baseline->audio_sha256);
+    REQUIRE(changed_plan->render_plan_sha256 != baseline->render_plan_sha256);
+
+    changed_options = options;
+    changed_options.block_size_schedule = {2, 2, 1};
+    auto changed_chunks = create_offline_render_manifest(audio, changed_options);
+    REQUIRE(changed_chunks.has_value());
+    REQUIRE(changed_chunks->audio_sha256 == baseline->audio_sha256);
+    REQUIRE(changed_chunks->render_plan_sha256 != baseline->render_plan_sha256);
+    REQUIRE(changed_chunks->chunks.size() == 3);
+}
+
+TEST_CASE("offline render manifests reject invalid artifacts and options",
+          "[audio][offline][manifest][phase4]") {
+    AudioFileData empty;
+    empty.sample_rate = 48000;
+    REQUIRE_FALSE(offline_render_audio_sha256(empty).has_value());
+
+    AudioFileData ragged;
+    ragged.sample_rate = 48000;
+    ragged.channels = {{1.0f, 2.0f}, {3.0f}};
+    REQUIRE_FALSE(offline_render_audio_sha256(ragged).has_value());
+    REQUIRE_FALSE(create_offline_render_manifest(ragged).has_value());
+
+    auto audio = make_stereo_fixture();
+    OfflineRenderOptions bad_options;
+    bad_options.block_size_schedule = {128, 0};
+    REQUIRE_FALSE(create_offline_render_manifest(audio, bad_options).has_value());
+
+    bad_options = {};
+    bad_options.tempo_bpm = 0.0;
+    REQUIRE_FALSE(create_offline_render_manifest(audio, bad_options).has_value());
+}
+
 TEST_CASE("apply_gain preserves an empty audio container", "[audio][offline][processor-edges]") {
     AudioFileData input;
     input.sample_rate = 96000;

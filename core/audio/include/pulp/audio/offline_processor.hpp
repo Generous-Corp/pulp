@@ -81,6 +81,33 @@ struct OfflineRenderComparison {
     bool passes(float peak_tolerance, double rms_tolerance) const noexcept;
 };
 
+struct OfflineRenderManifestChunk {
+    uint64_t start_frame = 0;
+    uint64_t frame_count = 0;
+    int scheduled_block_size = 0;
+};
+
+struct OfflineRenderArtifactManifest {
+    uint32_t format_version = 1;
+    uint32_t sample_rate = 0;
+    uint32_t channels = 0;
+    uint64_t frames = 0;
+    std::string audio_sha256;
+    std::string render_plan_sha256;
+    uint64_t start_sample_position = 0;
+    double start_position_beats = 0.0;
+    double tempo_bpm = 120.0;
+    double render_speed_ratio = 1.0;
+    uint64_t state_generation = 0;
+    uint64_t deterministic_seed = 0;
+    OfflineRenderTailPolicy tail_policy = OfflineRenderTailPolicy::Truncate;
+    uint64_t tail_frames = 0;
+    std::vector<int> block_size_schedule;
+    std::vector<OfflineRenderManifestChunk> chunks;
+
+    bool matches_audio(const AudioFileData& audio) const noexcept;
+};
+
 /// Callback for deterministic offline render blocks.
 using OfflineRenderCallback = std::function<void(
     const float* input, float* output,
@@ -106,6 +133,17 @@ std::optional<OfflineRenderStemResult> offline_render_stems(
 std::optional<OfflineRenderComparison> compare_offline_render_audio(
     const AudioFileData& actual,
     const AudioFileData& expected
+);
+
+/// Compute a canonical SHA-256 digest for rendered floating-point audio.
+std::optional<std::string> offline_render_audio_sha256(
+    const AudioFileData& audio
+);
+
+/// Build a deterministic manifest for a rendered offline audio artifact.
+std::optional<OfflineRenderArtifactManifest> create_offline_render_manifest(
+    const AudioFileData& rendered_audio,
+    const OfflineRenderOptions& options = {}
 );
 
 /// Process an entire audio file through a callback function.
