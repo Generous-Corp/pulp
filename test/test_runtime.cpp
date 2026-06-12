@@ -243,6 +243,97 @@ TEST_CASE("RealtimeResourceSlot audio read path allocates zero times",
     REQUIRE_FALSE(probe.saw_allocation());
 }
 
+TEST_CASE("Background resource job publishes immutable audio resource",
+          "[runtime][background-job][resource-recipe][phase2]") {
+    struct PreparedResource {
+        std::array<float, 4> values{};
+        std::string source_id;
+    };
+
+    BackgroundJobService service;
+    RealtimeResourceSlot<PreparedResource, 2> slot;
+    std::atomic<bool> publish_result{false};
+
+    auto handle = service.submit(
+        {.name = "prepare-ir", .priority = BackgroundJobPriority::normal},
+        [&](BackgroundJobContext& context) {
+            context.publish_progress({.completed = 1, .total = 2, .label = "decode"});
+
+            auto prepared = std::make_unique<PreparedResource>();
+            prepared->values = {0.25f, 0.5f, 0.125f, 0.0625f};
+            prepared->source_id = "factory-short-room";
+
+            context.publish_progress({.completed = 2, .total = 2, .label = "publish"});
+            if (!context.is_cancelled()) {
+                publish_result.store(slot.publish(std::move(prepared)),
+                                     std::memory_order_release);
+            }
+        });
+
+    handle.wait();
+    REQUIRE(publish_result.load(std::memory_order_acquire));
+
+    auto progress = handle.latest_progress();
+    REQUIRE(progress.has_value());
+    REQUIRE(progress->completed == 2);
+    REQUIRE(progress->total == 2);
+    REQUIRE(progress->label == "publish");
+
+    const PreparedResource* resource = nullptr;
+    {
+        pulp::test::RtAllocationProbe probe;
+        resource = slot.get();
+        REQUIRE(resource != nullptr);
+        REQUIRE(resource->values[0] == 0.25f);
+        REQUIRE(resource->values[1] == 0.5f);
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+
+    REQUIRE(resource->source_id == "factory-short-room");
+}
+
+TEST_CASE("Cancelled background resource job does not publish stale resource",
+          "[runtime][background-job][resource-recipe][cancel][phase2]") {
+    struct PreparedResource {
+        int revision = 0;
+    };
+
+    BackgroundJobService service;
+    RealtimeResourceSlot<PreparedResource, 2> slot;
+    std::atomic<bool> job_started{false};
+    std::atomic<bool> publish_attempted{false};
+
+    auto handle = service.submit(
+        {.name = "cancelled-sample-import", .priority = BackgroundJobPriority::normal},
+        [&](BackgroundJobContext& context) {
+            job_started.store(true, std::memory_order_release);
+            while (!context.is_cancelled()) {
+                std::this_thread::sleep_for(1ms);
+            }
+
+            auto prepared = std::make_unique<PreparedResource>();
+            prepared->revision = 7;
+            if (!context.is_cancelled()) {
+                publish_attempted.store(slot.publish(std::move(prepared)),
+                                        std::memory_order_release);
+            }
+        });
+
+    const auto deadline = std::chrono::steady_clock::now() + 2s;
+    while (!job_started.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(1ms);
+    }
+
+    REQUIRE(job_started.load(std::memory_order_acquire));
+    handle.cancel();
+    handle.wait();
+
+    REQUIRE(handle.is_cancelled());
+    REQUIRE_FALSE(publish_attempted.load(std::memory_order_acquire));
+    REQUIRE(slot.get() == nullptr);
+}
+
 TEST_CASE("SpscQueue reuses slots after wrap-around",
           "[runtime][spsc][coverage][issue-641]") {
     SpscQueue<int, 4> q;

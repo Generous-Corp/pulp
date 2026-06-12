@@ -345,6 +345,22 @@ allocate, lock, wait, or take ownership. Drain retired resources from the
 control side before the fixed reclaim queue fills; if it fills, publication
 fails or defers deletion rather than deleting memory a callback may still read.
 
+Common recipes:
+
+* IR load: decode and resample the impulse response in a background job, build
+  the immutable convolution resource there, then publish the prepared resource
+  to `RealtimeResourceSlot` after checking the job has not been cancelled.
+* Preset or resource restore: parse files, validate schema, and resolve missing
+  resource diagnostics off the audio thread. Publish only the final immutable
+  state snapshot; keep the old snapshot active if validation or cancellation
+  wins.
+* Waveform or analysis refresh: copy or freeze the input range first, run FFT,
+  thumbnail, or statistics work in the job, and publish a bounded UI snapshot
+  instead of reading editor data from `process()`.
+* Sample import: decode, normalize, build loop metadata, and prefetch pages in
+  the job. Publish a prepared sample-map revision atomically; treat cache misses
+  as control-thread work, not audio-thread file I/O.
+
 ## See also
 
 * [`core/state/include/pulp/state/store.hpp`](../../core/state/include/pulp/state/store.hpp)
