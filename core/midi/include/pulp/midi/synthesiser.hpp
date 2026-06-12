@@ -22,6 +22,7 @@
 #include <pulp/midi/message.hpp>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -41,6 +42,7 @@ struct SynthesiserNote {
     uint32_t note_id = 0;         ///< Monotonic id; younger > older
     bool active = false;          ///< Voice is sounding (held or releasing)
     bool releasing = false;       ///< Note-off received; voice in release tail
+    bool sustained = false;       ///< Note-off deferred by sustain pedal (CC64)
 };
 
 /// Voice-stealing strategy applied when `note_on` fires and no free
@@ -73,7 +75,9 @@ struct SynthesiserTelemetry {
 /// Abstract base for one synth voice. Subclasses implement `render`
 /// and may override `on_pitch_bend` / `on_aftertouch` / `on_cc` /
 /// `peak_level` to participate in channel-level controllers and
-/// voice-stealing.
+/// voice-stealing. The owning `Synthesiser` handles sustain pedal (CC64)
+/// before calling `on_note_off()`: note-off is deferred while sustain is down,
+/// then delivered through the normal note-off hook when the pedal lifts.
 class SynthesiserVoice {
 public:
     virtual ~SynthesiserVoice() = default;
@@ -86,6 +90,7 @@ public:
         note_ = note;
         active_ = true;
         releasing_ = false;
+        note_.sustained = false;
     }
 
     /// Begin release. Subclasses typically schedule envelope release
@@ -97,6 +102,7 @@ public:
     virtual void on_note_off() {
         releasing_ = true;
         note_.releasing = true;
+        note_.sustained = false;
     }
 
     /// Channel-level pitch bend (semitones, already scaled by the
@@ -134,6 +140,20 @@ public:
     bool active() const { return active_; }
     bool releasing() const { return releasing_; }
     const SynthesiserNote& note() const { return note_; }
+
+    /// Mark this voice as waiting for sustain-pedal release. The voice remains
+    /// active and non-releasing; `release_sustained_note()` later invokes the
+    /// normal note-off path when CC64 is lifted.
+    void defer_note_off_for_sustain() {
+        if (!active_ || releasing_) return;
+        note_.sustained = true;
+    }
+
+    /// Release a note whose note-off was deferred by CC64 sustain.
+    void release_sustained_note() {
+        if (!active_ || releasing_ || !note_.sustained) return;
+        on_note_off();
+    }
 
 protected:
     /// Subclasses call this from `render()` once their release tail
@@ -191,11 +211,16 @@ public:
     }
 
     void note_off(uint8_t channel, uint8_t note) {
+        const auto masked_channel = static_cast<uint8_t>(channel & 0x0F);
         for (auto& v : voices_) {
             if (v.active() && !v.releasing()
-                && v.note().channel == (channel & 0x0F)
+                && v.note().channel == masked_channel
                 && v.note().note == (note & 0x7F)) {
-                v.on_note_off();
+                if (sustain_down_[masked_channel]) {
+                    v.defer_note_off_for_sustain();
+                } else {
+                    v.on_note_off();
+                }
             }
         }
     }
@@ -217,9 +242,18 @@ public:
     }
 
     void cc(uint8_t channel, uint8_t cc_number, uint8_t value) {
+        const auto masked_channel = static_cast<uint8_t>(channel & 0x0F);
         for (auto& v : voices_) {
-            if (v.active() && v.note().channel == (channel & 0x0F)) {
+            if (v.active() && v.note().channel == masked_channel) {
                 v.on_cc(cc_number, value);
+            }
+        }
+        if ((cc_number & 0x7F) == 64) {
+            const bool was_down = sustain_down_[masked_channel];
+            const bool is_down = value >= 64;
+            sustain_down_[masked_channel] = is_down;
+            if (was_down && !is_down) {
+                release_sustained_notes(masked_channel);
             }
         }
     }
@@ -288,6 +322,7 @@ public:
 
     void reset() {
         for (auto& v : voices_) v.reset();
+        sustain_down_.fill(false);
         next_id_ = 0;
     }
 
@@ -415,7 +450,18 @@ private:
         }
     }
 
+    void release_sustained_notes(uint8_t channel) {
+        for (auto& v : voices_) {
+            if (v.active() && !v.releasing()
+                && v.note().channel == channel
+                && v.note().sustained) {
+                v.release_sustained_note();
+            }
+        }
+    }
+
     std::vector<Voice> voices_;
+    std::array<bool, 16> sustain_down_{};
     VoiceStealStrategy strategy_ = VoiceStealStrategy::Oldest;
     float bend_range_semi_ = 2.0f;
     uint32_t next_id_ = 0;
