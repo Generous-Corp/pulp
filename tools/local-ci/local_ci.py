@@ -317,6 +317,8 @@ _desktop_support_bindings.install_desktop_support_helpers(globals())
 _desktop_infra_bindings.install_desktop_infra_helpers(globals())
 _desktop_reporting_bindings.install_desktop_reporting_helpers(globals())
 _macos_window_bindings.install_macos_window_helpers(globals())
+_linux_target_bindings.install_linux_target_helpers(globals())
+_linux_desktop_bindings.install_linux_desktop_helpers(globals())
 _desktop_check = desktop_check
 _check_writable_dir = check_writable_dir
 _clear_directory_contents = clear_directory_contents
@@ -368,22 +370,6 @@ def desktop_doctor_checks(config: dict, target_name: str) -> list[dict]:
 
 def probe_webdriver_endpoint(base_url: str, *, timeout: float = 5.0) -> dict:
     return _desktop_probe_bindings.probe_webdriver_endpoint(globals(), base_url, timeout=timeout)
-
-
-def probe_linux_launch_backend(host: str) -> dict:
-    return _linux_target_bindings.probe_linux_launch_backend(globals(), host)
-
-
-def probe_linux_remote_tooling(host: str) -> dict:
-    return _linux_target_bindings.probe_linux_remote_tooling(globals(), host)
-
-
-def linux_tooling_detail(probe: dict, tool_name: str, *, missing_hint: str | None = None) -> str:
-    return _linux_target_bindings.linux_tooling_detail(globals(), probe, tool_name, missing_hint=missing_hint)
-
-
-def linux_remote_tooling_ready(probe: dict) -> bool:
-    return _linux_target_bindings.linux_remote_tooling_ready(globals(), probe)
 
 
 def make_desktop_source_request(args: argparse.Namespace) -> dict:
@@ -522,127 +508,6 @@ def run_macos_local_smoke(
         click_view_text=click_view_text,
         click_view_label=click_view_label,
         pulp_app_automation=pulp_app_automation,
-        capture_before=capture_before,
-        settle_secs=settle_secs,
-        timeout_secs=timeout_secs,
-        source_request=source_request,
-    )
-
-
-def remote_linux_bundle_relpath(target_name: str, action_name: str, bundle_dir: Path) -> str:
-    return _linux_target_bindings.remote_linux_bundle_relpath(globals(), target_name, action_name, bundle_dir)
-
-
-def fetch_ssh_artifact(host: str, remote_path: str, local_path: Path, *, optional: bool = False, timeout: int = 60) -> bool:
-    return _linux_desktop_bindings.fetch_ssh_artifact(
-        globals(),
-        host,
-        remote_path,
-        local_path,
-        optional=optional,
-        timeout=timeout,
-    )
-
-
-def cleanup_remote_ssh_dir(host: str, remote_dir_expr: str) -> None:
-    return _linux_desktop_bindings.cleanup_remote_ssh_dir(globals(), host, remote_dir_expr)
-
-
-def build_linux_xvfb_remote_command(
-    repo_path: str,
-    remote_bundle_relpath: str,
-    command: str,
-    *,
-    launch_backend: dict | None = None,
-    launch_cwd: str | None = None,
-    capture_ui_snapshot: bool,
-    click_point: str | None,
-    click_view_id: str | None,
-    click_view_type: str | None,
-    click_view_text: str | None,
-    click_view_label: str | None,
-    capture_before: bool,
-    settle_secs: float,
-) -> str:
-    return _linux_target_bindings.build_linux_xvfb_remote_command(
-        globals(),
-        repo_path,
-        remote_bundle_relpath,
-        command,
-        launch_backend=launch_backend,
-        launch_cwd=launch_cwd,
-        capture_ui_snapshot=capture_ui_snapshot,
-        click_point=click_point,
-        click_view_id=click_view_id,
-        click_view_type=click_view_type,
-        click_view_text=click_view_text,
-        click_view_label=click_view_label,
-        capture_before=capture_before,
-        settle_secs=settle_secs,
-    )
-
-
-def build_linux_window_driver_remote_command(
-    repo_path: str,
-    remote_bundle_relpath: str,
-    command: str,
-    *,
-    launch_backend: dict | None = None,
-    launch_cwd: str | None = None,
-    click_point: str | None,
-    capture_before: bool,
-    settle_secs: float,
-) -> str:
-    return _linux_target_bindings.build_linux_window_driver_remote_command(
-        globals(),
-        repo_path,
-        remote_bundle_relpath,
-        command,
-        launch_backend=launch_backend,
-        launch_cwd=launch_cwd,
-        click_point=click_point,
-        capture_before=capture_before,
-        settle_secs=settle_secs,
-    )
-
-
-def run_linux_xvfb_remote_action(
-    config: dict,
-    target_name: str,
-    target: dict,
-    command: str,
-    *,
-    action_name: str,
-    label: str | None,
-    output_path: str | None,
-    pulp_app_automation: bool,
-    capture_ui_snapshot: bool,
-    click_point: str | None,
-    click_view_id: str | None,
-    click_view_type: str | None,
-    click_view_text: str | None,
-    click_view_label: str | None,
-    capture_before: bool,
-    settle_secs: float,
-    timeout_secs: float,
-    source_request: dict | None = None,
-) -> dict:
-    return _linux_desktop_bindings.run_linux_xvfb_remote_action(
-        globals(),
-        config,
-        target_name,
-        target,
-        command,
-        action_name=action_name,
-        label=label,
-        output_path=output_path,
-        pulp_app_automation=pulp_app_automation,
-        capture_ui_snapshot=capture_ui_snapshot,
-        click_point=click_point,
-        click_view_id=click_view_id,
-        click_view_type=click_view_type,
-        click_view_text=click_view_text,
-        click_view_label=click_view_label,
         capture_before=capture_before,
         settle_secs=settle_secs,
         timeout_secs=timeout_secs,

@@ -7,6 +7,14 @@ from typing import Any
 
 from binding_utils import binding as _binding
 from binding_utils import binding_attr as _binding_attr
+from binding_utils import install_local_helpers
+
+
+LINUX_DESKTOP_EXPORTS = (
+    "fetch_ssh_artifact",
+    "cleanup_remote_ssh_dir",
+    "run_linux_xvfb_remote_action",
+)
 
 
 def fetch_ssh_artifact(
@@ -102,3 +110,7 @@ def run_linux_xvfb_remote_action(
         view_tree_inspector_summary_fn=desktop_actions.view_tree_inspector_summary,
         pulp_app_interaction_summary_fn=desktop_actions.pulp_app_interaction_summary,
     )
+
+
+def install_linux_desktop_helpers(bindings: dict[str, Any], names: tuple[str, ...] = LINUX_DESKTOP_EXPORTS) -> None:
+    install_local_helpers(bindings, globals(), names)

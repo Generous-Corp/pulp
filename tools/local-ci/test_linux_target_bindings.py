@@ -131,6 +131,27 @@ class LinuxTargetBindingsTests(unittest.TestCase):
         self.assertEqual(window_kwargs["launch_backend"], {"mode": "display", "display": ":99"})
         self.assertIs(window_kwargs["parse_coordinate_pair_fn"], bindings["parse_coordinate_pair"])
 
+    def test_install_linux_target_helpers_wires_named_exports(self) -> None:
+        linux_target = types.SimpleNamespace(
+            probe_linux_launch_backend=lambda host, *, ssh_command_result_fn: {"host": host, "ssh": ssh_command_result_fn},
+            remote_linux_bundle_relpath=lambda target_name, action_name, bundle_dir: f"{target_name}/{action_name}/{bundle_dir.name}",
+        )
+        bindings = self._bindings(linux_target)
+
+        self.mod.install_linux_target_helpers(
+            bindings,
+            ("probe_linux_launch_backend", "remote_linux_bundle_relpath"),
+        )
+
+        self.assertEqual(
+            bindings["probe_linux_launch_backend"]("ubuntu"),
+            {"host": "ubuntu", "ssh": bindings["ssh_command_result"]},
+        )
+        self.assertEqual(
+            bindings["remote_linux_bundle_relpath"]("ubuntu", "smoke", Path("/tmp/run")),
+            "ubuntu/smoke/run",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

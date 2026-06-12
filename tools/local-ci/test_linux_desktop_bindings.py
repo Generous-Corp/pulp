@@ -138,6 +138,26 @@ class LinuxDesktopBindingsTests(unittest.TestCase):
         self.assertEqual(captured["cleanup"][0], ("host", '"$HOME/bundle"'))
         self.assertIs(captured["cleanup"][1]["ssh_command_result_fn"], ssh_command_result)
 
+    def test_install_linux_desktop_helpers_wires_named_exports(self):
+        captured = {}
+
+        def fetch(*args, **kwargs):
+            captured["fetch"] = (args, kwargs)
+            return True
+
+        subprocess_mod = types.SimpleNamespace(run=object())
+        bindings = {
+            "_linux_desktop_action": types.SimpleNamespace(fetch_ssh_artifact=fetch),
+            "subprocess": subprocess_mod,
+        }
+
+        self.mod.install_linux_desktop_helpers(bindings, ("fetch_ssh_artifact",))
+
+        self.assertTrue(bindings["fetch_ssh_artifact"]("host", "/remote", Path("/local"), timeout=7))
+        self.assertEqual(captured["fetch"][0], ("host", "/remote", Path("/local")))
+        self.assertEqual(captured["fetch"][1]["timeout"], 7)
+        self.assertIs(captured["fetch"][1]["run_fn"], subprocess_mod.run)
+
 
 if __name__ == "__main__":
     unittest.main()

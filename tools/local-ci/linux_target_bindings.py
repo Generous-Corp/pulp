@@ -5,6 +5,18 @@ from __future__ import annotations
 from pathlib import Path
 
 from binding_utils import binding as _binding
+from binding_utils import install_local_helpers
+
+
+LINUX_TARGET_EXPORTS = (
+    "probe_linux_launch_backend",
+    "probe_linux_remote_tooling",
+    "linux_tooling_detail",
+    "linux_remote_tooling_ready",
+    "remote_linux_bundle_relpath",
+    "build_linux_xvfb_remote_command",
+    "build_linux_window_driver_remote_command",
+)
 
 
 def linux_required_remote_tools(bindings: dict) -> dict:
@@ -111,3 +123,7 @@ def build_linux_window_driver_remote_command(
         settle_secs=settle_secs,
         parse_coordinate_pair_fn=_binding(bindings, "parse_coordinate_pair"),
     )
+
+
+def install_linux_target_helpers(bindings: dict, names: tuple[str, ...] = LINUX_TARGET_EXPORTS) -> None:
+    install_local_helpers(bindings, globals(), names)
