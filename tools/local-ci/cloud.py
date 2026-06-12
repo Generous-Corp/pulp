@@ -184,6 +184,7 @@ from cloud_compare import (  # noqa: E402  -- re-exported for in-file consumers
     median_or_none,
     recommend_cloud_provider,
 )
+from cloud_compare_format import cloud_compare_summary_line  # noqa: E402  -- re-exported for in-file consumers
 from cloud_pr_format import (  # noqa: E402  -- re-exported for in-file consumers
     format_ci_comment,
     no_open_prs_line,
@@ -539,30 +540,7 @@ def cmd_cloud_compare(args: argparse.Namespace) -> int:
 
     print(f"Cloud compare: workflow={workflow_key}\n")
     for summary in summaries:
-        line = (
-            f"  {summary['provider']}: runs={summary['runs_count']} "
-            f"success={summary['success_count']}/{summary['completed_count'] or summary['runs_count']}"
-        )
-        duration = format_duration_secs(summary.get("median_duration_secs"))
-        if duration:
-            line += f" median_elapsed={duration}"
-        queue_delay = format_duration_secs(summary.get("median_queue_delay_secs"))
-        if queue_delay:
-            line += f" median_queue={queue_delay}"
-        provider_runtime = format_duration_secs(summary.get("median_provider_runtime_secs"))
-        if provider_runtime:
-            line += f" median_provider_time={provider_runtime}"
-        if summary.get("median_estimated_cost") is not None:
-            amount = format_currency_amount(summary.get("median_estimated_cost"), summary.get("currency", "USD"))
-            if amount:
-                line += f" median_cost=est {amount}"
-        latest_success = summary.get("latest_success_at") or ""
-        latest_completed = summary.get("latest_completed_at") or ""
-        if latest_success:
-            line += f" latest_success={latest_success}"
-        elif latest_completed:
-            line += f" latest={latest_completed}"
-        print(line)
+        print(cloud_compare_summary_line(summary))
         print_billing_period_summary(summary.get("period") or {}, indent="    ")
     print("\n  note: estimated; verify provider pricing")
     return 0
