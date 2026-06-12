@@ -841,6 +841,39 @@ TEST_CASE("Standalone editor chrome wraps editor and settings in a tab panel",
     REQUIRE(chrome.chrome_label() == std::string_view("tabs"));
 }
 
+TEST_CASE("Standalone editor chrome fills the editor tab to the design area "
+          "(a fill-based editor must not collapse)",
+          "[standalone][chrome][issue-45]") {
+    // Regression for the Bendr-tracker #45 standalone squish: a fill-based
+    // editor (a bare View has no intrinsic height and sets no flex on itself —
+    // exactly like Bendr's design-viewport editor, which lays out from
+    // local_bounds()) used to collapse to a thin strip inside the TabPanel.
+    // TabPanel::add_tab applies no flex to tab content and FlexStyle defaults to
+    // flex_grow=0 in a column, so the cross axis (width) stretched but the main
+    // axis (height) collapsed to the zero intrinsic content height. The chrome
+    // now sets flex_grow=1 on the editor root (mirroring SettingsPanel, which
+    // does the same for itself), so the editor fills the letterboxed design area.
+    auto editor_root = std::make_unique<View>();
+    auto* editor_ptr = editor_root.get();
+    StandaloneConfig config;
+    config.show_settings_tab = true;
+
+    auto chrome = make_standalone_editor_chrome(
+        std::move(editor_root), config, nullptr, nullptr, nullptr, {});
+
+    // Mimic the host's design-size layout pass: the GPU window host lays the
+    // window root out at the design-viewport size, then runs layout_children().
+    View& root = chrome.window_root();
+    root.set_bounds({0.0f, 0.0f, 760.0f, 560.0f});
+    root.layout_children();
+
+    // The visible editor tab must FILL the content area, not collapse to its
+    // (zero) intrinsic height. Without the flex_grow fix this height is ~0.
+    const auto bounds = editor_ptr->local_bounds();
+    REQUIRE(bounds.width == Catch::Approx(760.0f).margin(1.0f));
+    REQUIRE(bounds.height == Catch::Approx(560.0f).margin(1.0f));
+}
+
 TEST_CASE("Standalone idle callback polls scripted UI before settings",
           "[standalone][chrome]") {
     StubWindowHost window;
