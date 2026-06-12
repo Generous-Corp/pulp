@@ -965,6 +965,39 @@ TEST_CASE("CLAP parameter modulation applies for one block then resets",
     REQUIRE(g_capturing->captured_modulated_value == 0.0f);
 }
 
+TEST_CASE("CLAP parameter modulation projects to the typed global lane",
+          "[clap][params][modulation][lane][phase3]") {
+    g_pending_opts_mpe = false;
+    g_pending_opts_ump = false;
+    Harness h(make_capturing);
+
+    clap_event_param_mod_t mod{};
+    mod.header = make_header(sizeof(mod), CLAP_EVENT_PARAM_MOD, 5);
+    mod.param_id = CapturingProcessor::kParamId;
+    mod.note_id = 123;
+    mod.port_index = 0;
+    mod.channel = 2;
+    mod.key = 64;
+    mod.amount = 0.375;
+
+    state::ModulationLane lane;
+    REQUIRE(clap_adapter::clap_param_modulation_lane(h.plugin, mod, lane));
+    REQUIRE(lane.source.id == clap_adapter::kClapHostModulationSourceId);
+    REQUIRE(lane.source.scope == state::ModulationScope::Global);
+    REQUIRE(lane.source.rate == state::ModulationRate::Control);
+    REQUIRE(lane.target.param_id == CapturingProcessor::kParamId);
+    REQUIRE(lane.target.scope == state::ModulationScope::Global);
+    REQUIRE(lane.target.param_rate == state::ParamRate::ControlRate);
+    REQUIRE(lane.target.modulatable);
+    REQUIRE(lane.target.writable);
+    REQUIRE(lane.mix == state::ModulationMixMode::Add);
+    REQUIRE(lane.depth == 0.375f);
+    REQUIRE(state::validate_modulation_lane(lane).accepted);
+
+    mod.param_id = CapturingProcessor::kParamId + 1;
+    REQUIRE_FALSE(clap_adapter::clap_param_modulation_lane(h.plugin, mod, lane));
+}
+
 TEST_CASE("CLAP gesture events forward through StateStore callbacks",
           "[clap][params][gesture]") {
     g_pending_opts_mpe = false;

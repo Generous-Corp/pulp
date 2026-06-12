@@ -139,6 +139,11 @@ IDs, non-writable or non-modulatable targets, incompatible scopes, and
 audio-rate sources aimed at control-rate parameters before the route reaches
 audio processing.
 
+CLAP `PARAM_MOD` is represented as a global, control-rate host modulation lane
+before the adapter applies the block-local `StateStore` modulation offset.
+CLAP note identity fields (`note_id`, `port_index`, `channel`, `key`) are still
+accepted for compatibility but are not routed as per-note lanes yet.
+
 ## Sample-Accurate Automation
 
 Format adapters preserve sparse host automation points in a per-block
