@@ -4,6 +4,10 @@
 
 #include <pulp/audio/sample_resource.hpp>
 
+#include <atomic>
+#include <chrono>
+#include <thread>
+
 using namespace pulp::audio;
 
 namespace {
@@ -201,4 +205,163 @@ TEST_CASE("SampleResourceCache rejects oversized decoded samples without evictio
     REQUIRE(stats.entries == 1);
     REQUIRE(stats.rejections == 1);
     REQUIRE(stats.evictions == 0);
+}
+
+TEST_CASE("SampleResourceService loads decoded samples on a background job",
+          "[audio][sample-resource][service][background][phase3]") {
+    std::atomic<int> decode_count{0};
+    std::string decoded_path;
+    SampleResourceService service(
+        {},
+        [&](const std::string& path, pulp::runtime::BackgroundJobContext&) -> std::optional<AudioFileData> {
+            decoded_path = path;
+            ++decode_count;
+            return make_sample(2, 10, 44100);
+        });
+
+    SampleResourceHandle handle;
+    auto job = service.load_async("kick.wav", handle);
+    REQUIRE(job.valid());
+    job.wait();
+    REQUIRE(service.drain_completions() == 1);
+
+    const auto snap = handle.snapshot();
+    REQUIRE(snap.status == SampleResourceStatus::Loaded);
+    REQUIRE(snap.ready());
+    REQUIRE(snap.frame_count == 10);
+    REQUIRE(snap.channel_count == 2);
+    REQUIRE(snap.sample_rate == 44100);
+    REQUIRE(decoded_path == "kick.wav");
+    REQUIRE(decode_count.load() == 1);
+
+    const auto cache_stats = service.cache_stats();
+    REQUIRE(cache_stats.entries == 1);
+    REQUIRE(cache_stats.puts == 1);
+
+    const auto stats = service.stats();
+    REQUIRE(stats.submitted_loads == 1);
+    REQUIRE(stats.decode_successes == 1);
+    REQUIRE(stats.drained_completions == 1);
+}
+
+TEST_CASE("SampleResourceService prefetch caches decoded data for later publish",
+          "[audio][sample-resource][service][prefetch][cache][phase3]") {
+    std::atomic<int> decode_count{0};
+    std::string decoded_path;
+    SampleResourceService service(
+        {},
+        [&](const std::string& path, pulp::runtime::BackgroundJobContext&) -> std::optional<AudioFileData> {
+            decoded_path = path;
+            ++decode_count;
+            return make_sample(1, 6, 48000);
+        });
+
+    auto prefetch = service.prefetch_async("loop.wav");
+    REQUIRE(prefetch.valid());
+    prefetch.wait();
+    REQUIRE(service.drain_completions() == 1);
+
+    SampleResourceHandle handle;
+    REQUIRE(service.publish_cached("loop.wav", handle));
+
+    const auto snap = handle.snapshot();
+    REQUIRE(snap.status == SampleResourceStatus::Loaded);
+    REQUIRE(snap.ready());
+    REQUIRE(snap.frame_count == 6);
+    REQUIRE(snap.channel_count == 1);
+    REQUIRE(decoded_path == "loop.wav");
+    REQUIRE(decode_count.load() == 1);
+
+    SampleResourceHandle second;
+    auto cached = service.load_async("loop.wav", second);
+    REQUIRE_FALSE(cached.valid());
+    REQUIRE(second.snapshot().ready());
+    REQUIRE(decode_count.load() == 1);
+
+    const auto stats = service.stats();
+    REQUIRE(stats.submitted_prefetches == 1);
+    REQUIRE(stats.submitted_loads == 1);
+    REQUIRE(stats.cache_hits == 2);
+}
+
+TEST_CASE("SampleResourceService publishes missing diagnostics on decode failure",
+          "[audio][sample-resource][service][missing][phase3]") {
+    SampleResourceService service(
+        {},
+        [](const std::string&, pulp::runtime::BackgroundJobContext&) -> std::optional<AudioFileData> {
+            return std::nullopt;
+        });
+
+    SampleResourceHandle handle;
+    auto job = service.load_async("missing.wav", handle);
+    REQUIRE(job.valid());
+    job.wait();
+    REQUIRE(service.drain_completions() == 1);
+
+    const auto snap = handle.snapshot();
+    REQUIRE(snap.status == SampleResourceStatus::Missing);
+    REQUIRE_FALSE(snap.ready());
+
+    const auto diag = handle.diagnostics();
+    REQUIRE(diag.path == "missing.wav");
+    REQUIRE(diag.reason == "decode failed");
+
+    const auto stats = service.stats();
+    REQUIRE(stats.decode_failures == 1);
+    REQUIRE(stats.drained_completions == 1);
+}
+
+TEST_CASE("SampleResourceService cancellation avoids stale publication",
+          "[audio][sample-resource][service][cancel][phase3]") {
+    std::atomic<bool> started{false};
+    SampleResourceService service(
+        {},
+        [&](const std::string&, pulp::runtime::BackgroundJobContext& context) -> std::optional<AudioFileData> {
+            started.store(true);
+            while (!context.is_cancelled()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            return make_sample(1, 4);
+        });
+
+    SampleResourceHandle handle;
+    auto job = service.load_async("cancelled.wav", handle);
+    REQUIRE(job.valid());
+    for (int i = 0; i < 200 && !started.load(); ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    REQUIRE(started.load());
+
+    job.cancel();
+    job.wait();
+    REQUIRE(service.drain_completions() == 1);
+    REQUIRE_FALSE(handle.snapshot().ready());
+
+    const auto stats = service.stats();
+    REQUIRE(stats.cancelled == 1);
+    REQUIRE(stats.decode_successes == 0);
+}
+
+TEST_CASE("SampleResourceService applies handle memory budgets after decode",
+          "[audio][sample-resource][service][budget][phase3]") {
+    SampleResourceService service(
+        {},
+        [](const std::string&, pulp::runtime::BackgroundJobContext&) -> std::optional<AudioFileData> {
+            return make_sample(2, 16, 44100);
+        });
+
+    SampleResourceHandle handle;
+    auto job = service.load_async(
+        "oversized.wav",
+        handle,
+        {.memory_budget_bytes = sizeof(float)});
+    REQUIRE(job.valid());
+    job.wait();
+    REQUIRE(service.drain_completions() == 1);
+
+    const auto snap = handle.snapshot();
+    REQUIRE(snap.status == SampleResourceStatus::Oversized);
+    REQUIRE_FALSE(snap.ready());
+    REQUIRE(snap.byte_size == 2 * 16 * sizeof(float));
+    REQUIRE(snap.memory_budget_bytes == sizeof(float));
 }
