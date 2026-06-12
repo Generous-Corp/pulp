@@ -352,6 +352,7 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     auto& midi_in = self->midi_in;
     auto& midi_out = self->midi_out;
     clear_midi_event_buffers(*self);
+    const uint32_t event_count = in_events ? in_events->size(in_events) : 0;
     // Track whether any native CLAP_EVENT_MIDI2 packet was delivered so we
     // can skip the MIDI 1.0 → UMP synthesis path when the host is speaking
     // UMP natively. The host still sends CLAP_EVENT_NOTE_* in parallel for
@@ -367,7 +368,6 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     // note-expression event.
     bool note_expression_drop_logged = false;
     if (in_events) {
-        uint32_t event_count = in_events->size(in_events);
         for (uint32_t i = 0; i < event_count; ++i) {
             auto* hdr = in_events->get(in_events, i);
             // Same CLAP event-space gate as the param/gesture loop above.

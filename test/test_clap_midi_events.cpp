@@ -167,6 +167,21 @@ public:
 class CapturingProcessor : public Processor {
 public:
     static constexpr state::ParamID kParamId = 9001;
+    static constexpr std::size_t kMaxCapturedSysex = 8;
+    static constexpr std::size_t kMaxCapturedSysexBytes = 256;
+
+    struct CapturedSysex {
+        std::array<uint8_t, kMaxCapturedSysexBytes> data{};
+        std::size_t size = 0;
+        int32_t sample_offset = 0;
+        double timestamp = 0.0;
+    };
+
+    CapturingProcessor() {
+        captured_midi.reserve_events(32);
+        captured_ump.reserve(32);
+        captured_param_events.reserve(32);
+    }
 
     bool opts_mpe = false;
     bool opts_ump = false;
@@ -175,6 +190,8 @@ public:
 
     // Mutable state captured each time process() runs.
     mutable midi::MidiBuffer captured_midi;
+    mutable std::array<CapturedSysex, kMaxCapturedSysex> captured_sysex{};
+    mutable std::size_t captured_sysex_count = 0;
     mutable std::vector<midi::UmpEvent> captured_ump;
     mutable std::vector<state::ParameterEvent> captured_param_events;
     mutable bool had_mpe_input = false;
@@ -2051,7 +2068,7 @@ TEST_CASE("CLAP_EVENT_MIDI_SYSEX with empty payload is dropped",
     events.push(ev);
 
     REQUIRE(h.run(events) == CLAP_PROCESS_CONTINUE);
-    REQUIRE(g_capturing->captured_midi.sysex().empty());
+    REQUIRE(g_capturing->captured_sysex_count == 0);
     REQUIRE(g_capturing->captured_midi.empty());
 }
 
