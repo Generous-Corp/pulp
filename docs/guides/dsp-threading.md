@@ -146,6 +146,13 @@ tail-drain, reset, and transport-jump flags are block metadata for processors
 that need to distinguish those host states without inferring them from
 transport fields.
 
+Prefer the `ProcessContext` predicates for common block-policy decisions:
+`should_reset_dsp_state()` covers explicit reset requests and derived transport
+jumps, `is_maintenance_render()` covers bypass or tail-drain calls that are not
+normal input-driven renders, and `should_render_tail_only()` identifies blocks
+where the host wants existing delay/reverb/lookahead state to settle without
+starting new work.
+
 ## See also
 
 * [`core/state/include/pulp/state/store.hpp`](../../core/state/include/pulp/state/store.hpp)
