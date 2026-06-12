@@ -56,6 +56,22 @@ struct OfflineRenderOptions {
     uint64_t tail_frames = 0;
 };
 
+struct OfflineRenderStem {
+    std::string name;
+    uint32_t first_channel = 0;
+    uint32_t channel_count = 0;
+};
+
+struct OfflineRenderedStem {
+    std::string name;
+    AudioFileData audio;
+};
+
+struct OfflineRenderStemResult {
+    AudioFileData mix;
+    std::vector<OfflineRenderedStem> stems;
+};
+
 /// Callback for deterministic offline render blocks.
 using OfflineRenderCallback = std::function<void(
     const float* input, float* output,
@@ -67,6 +83,14 @@ std::optional<AudioFileData> offline_render(
     const AudioFileData& input,
     OfflineRenderCallback render_fn,
     const OfflineRenderOptions& options = {}
+);
+
+/// Render an in-memory file and extract named channel-range stems from the mix.
+std::optional<OfflineRenderStemResult> offline_render_stems(
+    const AudioFileData& input,
+    OfflineRenderCallback render_fn,
+    const OfflineRenderOptions& options,
+    const std::vector<OfflineRenderStem>& stems
 );
 
 /// Process an entire audio file through a callback function.

@@ -487,6 +487,91 @@ TEST_CASE("offline_render propagates deterministic state generation metadata",
     REQUIRE(seeds_seen == std::vector<uint64_t>{0x5441, 0x5441});
 }
 
+TEST_CASE("offline_render_stems extracts named channel groups from the mix",
+          "[audio][offline][advanced][stems][phase3]") {
+    AudioFileData input;
+    input.sample_rate = 48000;
+    input.channels = {
+        {1.0f, 2.0f},
+        {3.0f, 4.0f},
+        {5.0f, 6.0f},
+        {7.0f, 8.0f},
+    };
+
+    OfflineRenderOptions options;
+    options.fallback_block_size = 1;
+    options.state_generation = 99;
+    std::vector<uint64_t> generations_seen;
+
+    auto result = offline_render_stems(
+        input,
+        [&](const float* in, float* out, int channels,
+            const OfflineRenderBlockContext& context) {
+            generations_seen.push_back(context.state_generation);
+            for (int sample = 0; sample < channels * context.frames; ++sample)
+                out[sample] = in[sample] * 2.0f;
+        },
+        options,
+        {
+            {.name = "drums", .first_channel = 0, .channel_count = 2},
+            {.name = "fx", .first_channel = 2, .channel_count = 2},
+        });
+
+    REQUIRE(result.has_value());
+    REQUIRE(result->mix.num_channels() == 4);
+    REQUIRE(result->mix.channels[0] == std::vector<float>{2.0f, 4.0f});
+    REQUIRE(result->mix.channels[3] == std::vector<float>{14.0f, 16.0f});
+    REQUIRE(result->stems.size() == 2);
+    REQUIRE(result->stems[0].name == "drums");
+    REQUIRE(result->stems[0].audio.sample_rate == 48000);
+    REQUIRE(result->stems[0].audio.channels[0] == result->mix.channels[0]);
+    REQUIRE(result->stems[0].audio.channels[1] == result->mix.channels[1]);
+    REQUIRE(result->stems[1].name == "fx");
+    REQUIRE(result->stems[1].audio.channels[0] == result->mix.channels[2]);
+    REQUIRE(result->stems[1].audio.channels[1] == result->mix.channels[3]);
+    REQUIRE(generations_seen == std::vector<uint64_t>{99, 99});
+}
+
+TEST_CASE("offline_render_stems rejects malformed stem ranges before rendering",
+          "[audio][offline][advanced][stems][phase3]") {
+    auto input = make_stereo_fixture();
+    bool callback_called = false;
+    OfflineRenderOptions options;
+
+    auto missing_name = offline_render_stems(
+        input,
+        [&](const float*, float*, int, const OfflineRenderBlockContext&) {
+            callback_called = true;
+        },
+        options,
+        {{.name = "", .first_channel = 0, .channel_count = 1}});
+    REQUIRE_FALSE(missing_name.has_value());
+    REQUIRE_FALSE(callback_called);
+
+    auto out_of_range = offline_render_stems(
+        input,
+        [&](const float*, float*, int, const OfflineRenderBlockContext&) {
+            callback_called = true;
+        },
+        options,
+        {{.name = "wide", .first_channel = 1, .channel_count = 2}});
+    REQUIRE_FALSE(out_of_range.has_value());
+    REQUIRE_FALSE(callback_called);
+
+    auto overlapping = offline_render_stems(
+        input,
+        [&](const float*, float*, int, const OfflineRenderBlockContext&) {
+            callback_called = true;
+        },
+        options,
+        {
+            {.name = "left", .first_channel = 0, .channel_count = 1},
+            {.name = "both", .first_channel = 0, .channel_count = 2},
+        });
+    REQUIRE_FALSE(overlapping.has_value());
+    REQUIRE_FALSE(callback_called);
+}
+
 TEST_CASE("apply_gain preserves an empty audio container", "[audio][offline][processor-edges]") {
     AudioFileData input;
     input.sample_rate = 96000;
