@@ -700,6 +700,39 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
 
 bool SignalGraph::prepare(double sample_rate, int max_block_size) {
     if (max_block_size <= 0) return false;
+    if (limits_.max_block_size > 0 && max_block_size > limits_.max_block_size) {
+        runtime::log_error(
+            "SignalGraph: max block size {} exceeds configured limit {}",
+            max_block_size,
+            limits_.max_block_size);
+        return false;
+    }
+    if (nodes_.size() > limits_.max_nodes) {
+        runtime::log_error(
+            "SignalGraph: node count {} exceeds configured limit {}",
+            nodes_.size(),
+            limits_.max_nodes);
+        return false;
+    }
+    if (connections_.size() > limits_.max_connections) {
+        runtime::log_error(
+            "SignalGraph: connection count {} exceeds configured limit {}",
+            connections_.size(),
+            limits_.max_connections);
+        return false;
+    }
+    std::size_t port_count = 0;
+    for (const auto& n : nodes_) {
+        port_count += static_cast<std::size_t>(std::max(0, n.num_input_ports));
+        port_count += static_cast<std::size_t>(std::max(0, n.num_output_ports));
+    }
+    if (port_count > limits_.max_ports) {
+        runtime::log_error(
+            "SignalGraph: port count {} exceeds configured limit {}",
+            port_count,
+            limits_.max_ports);
+        return false;
+    }
 
     std::unordered_map<NodeId, std::vector<uint32_t>> sparse_params_by_node;
     std::unordered_map<NodeId, std::vector<uint32_t>> audio_rate_params_by_node;
@@ -773,6 +806,11 @@ bool SignalGraph::prepare(double sample_rate, int max_block_size) {
     total_latency_samples_.store(cg->total_latency_samples, std::memory_order_relaxed);
     std::atomic_store_explicit(&live_, std::move(cg), std::memory_order_release);
     return true;
+}
+
+void SignalGraph::set_limits(GraphLimits limits) {
+    limits_ = limits;
+    invalidate_live_();
 }
 
 void SignalGraph::release() {

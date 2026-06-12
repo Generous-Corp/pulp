@@ -25,6 +25,7 @@
 #include <string>
 #include <string_view>
 #include <cstdint>
+#include <cstddef>
 
 namespace pulp::host {
 
@@ -170,6 +171,13 @@ struct GraphNode {
 
 class SignalGraph {
 public:
+    struct GraphLimits {
+        std::size_t max_nodes = 4096;
+        std::size_t max_connections = 16384;
+        std::size_t max_ports = 32768;
+        int max_block_size = 16384;
+    };
+
     SignalGraph() = default;
 
     // Add nodes — returns the node ID
@@ -311,6 +319,12 @@ public:
     bool prepare(double sample_rate, int max_block_size);
     void release();
 
+    // Prepare-time topology bounds. Hosts that accept generated or user-built
+    // graphs can lower these before prepare() so oversized graphs fail before
+    // snapshot allocation or plugin prepare.
+    void set_limits(GraphLimits limits);
+    GraphLimits limits() const { return limits_; }
+
     // Process one block of audio through the graph
     void process(audio::BufferView<float>& output,
                  const audio::BufferView<const float>& input,
@@ -446,6 +460,7 @@ private:
     std::vector<Connection> connections_;
     std::unordered_map<std::string, CustomNodeType> custom_node_types_;
     NodeId next_id_ = 1;
+    GraphLimits limits_;
 
     // Audio-thread snapshot, published by prepare() / mutators. Uses the
     // deprecated-but-supported std::atomic_store/atomic_load free-function
