@@ -188,6 +188,23 @@ queues from `process()`. Move FFTs, exported waveforms, parameter sweeps, and
 other expensive analysis to an offline command, frozen copy, or validation
 artifact.
 
+## Run resource work off the audio thread
+
+Use `runtime::BackgroundJobService` for cancellable non-RT resource work such as
+IR loading, sample import, preset restore, waveform analysis, and other jobs
+that may allocate, block, report progress, or touch the filesystem. Jobs receive
+a `runtime::BackgroundJobContext` with a shared `CancellationToken` and a
+progress publisher. Call `BackgroundJobHandle::wait()` only from a control,
+test, or teardown thread; never wait from `process()`.
+
+When a background job prepares a new immutable resource for the audio thread,
+publish it through `runtime::RealtimeResourceSlot<T, N>`. The control thread
+owns `publish()` and `reclaim_retired()`. The audio thread only calls `get()`,
+which is a single acquire-load of the latest prepared pointer and does not
+allocate, lock, wait, or take ownership. Drain retired resources from the
+control side before the fixed reclaim queue fills; if it fills, publication
+fails or defers deletion rather than deleting memory a callback may still read.
+
 ## See also
 
 * [`core/state/include/pulp/state/store.hpp`](../../core/state/include/pulp/state/store.hpp)

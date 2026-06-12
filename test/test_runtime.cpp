@@ -8,15 +8,18 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdlib>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
 #include <utility>
+#include <vector>
 
 using namespace pulp::runtime;
 using namespace std::chrono_literals;
@@ -105,6 +108,139 @@ TEST_CASE("SpscQueue basic operations", "[runtime][spsc]") {
         }
         REQUIRE_FALSE(q.try_push(99));
     }
+}
+
+TEST_CASE("BackgroundJobService runs higher priority queued work first",
+          "[runtime][background-job][phase2]") {
+    BackgroundJobService service;
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool first_started = false;
+    bool release_first = false;
+    std::vector<std::string> order;
+
+    auto first = service.submit(
+        {.name = "first", .priority = BackgroundJobPriority::normal},
+        [&](BackgroundJobContext&) {
+            std::unique_lock lock(mutex);
+            first_started = true;
+            cv.notify_all();
+            cv.wait(lock, [&] { return release_first; });
+            order.push_back("first");
+        });
+
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, 2s, [&] { return first_started; }));
+    }
+
+    auto low = service.submit(
+        {.name = "low", .priority = BackgroundJobPriority::low},
+        [&](BackgroundJobContext&) {
+            std::lock_guard lock(mutex);
+            order.push_back("low");
+        });
+    auto high = service.submit(
+        {.name = "high", .priority = BackgroundJobPriority::high},
+        [&](BackgroundJobContext&) {
+            std::lock_guard lock(mutex);
+            order.push_back("high");
+        });
+
+    REQUIRE(service.pending_count() == 2);
+
+    {
+        std::lock_guard lock(mutex);
+        release_first = true;
+    }
+    cv.notify_all();
+
+    first.wait();
+    high.wait();
+    low.wait();
+
+    std::lock_guard lock(mutex);
+    REQUIRE(order.size() == 3);
+    REQUIRE(order[0] == "first");
+    REQUIRE(order[1] == "high");
+    REQUIRE(order[2] == "low");
+}
+
+TEST_CASE("BackgroundJobService publishes progress and observes cancellation",
+          "[runtime][background-job][cancel][phase2]") {
+    BackgroundJobService service;
+    std::atomic<bool> job_started{false};
+    std::atomic<bool> saw_cancel{false};
+
+    auto handle = service.submit(
+        {.name = "cancel", .priority = BackgroundJobPriority::normal},
+        [&](BackgroundJobContext& context) {
+            job_started.store(true, std::memory_order_release);
+            context.publish_progress({.completed = 1, .total = 4, .label = "loading"});
+            while (!context.is_cancelled()) {
+                std::this_thread::sleep_for(1ms);
+            }
+            saw_cancel.store(true, std::memory_order_release);
+        });
+
+    const auto deadline = std::chrono::steady_clock::now() + 2s;
+    std::optional<BackgroundJobProgress> progress;
+    while (std::chrono::steady_clock::now() < deadline) {
+        progress = handle.latest_progress();
+        if (job_started.load(std::memory_order_acquire) && progress.has_value()) break;
+        std::this_thread::sleep_for(1ms);
+    }
+    REQUIRE(job_started.load(std::memory_order_acquire));
+    REQUIRE(progress.has_value());
+    REQUIRE(progress->completed == 1);
+    REQUIRE(progress->total == 4);
+    REQUIRE(progress->label == "loading");
+
+    handle.cancel();
+    handle.wait();
+    REQUIRE(handle.is_cancelled());
+    REQUIRE(saw_cancel.load(std::memory_order_acquire));
+}
+
+TEST_CASE("RealtimeResourceSlot publishes prepared resources with deferred reclaim",
+          "[runtime][background-job][rt-handoff][phase2]") {
+    struct PreparedResource {
+        int value = 0;
+    };
+
+    RealtimeResourceSlot<PreparedResource, 4> slot;
+    REQUIRE(slot.get() == nullptr);
+
+    REQUIRE(slot.publish(std::make_unique<PreparedResource>(PreparedResource{1})));
+    REQUIRE(slot.get() != nullptr);
+    REQUIRE(slot.get()->value == 1);
+
+    REQUIRE(slot.publish(std::make_unique<PreparedResource>(PreparedResource{2})));
+    REQUIRE(slot.get() != nullptr);
+    REQUIRE(slot.get()->value == 2);
+    REQUIRE(slot.retired_count_approx() == 1);
+    REQUIRE(slot.reclaim_retired() == 1);
+    REQUIRE(slot.retired_count_approx() == 0);
+}
+
+TEST_CASE("RealtimeResourceSlot audio read path allocates zero times",
+          "[runtime][background-job][rt-handoff][rt-safety][phase2]") {
+    struct PreparedResource {
+        int value = 0;
+    };
+
+    RealtimeResourceSlot<PreparedResource, 2> slot;
+    REQUIRE(slot.publish(std::make_unique<PreparedResource>(PreparedResource{42})));
+
+    pulp::test::RtAllocationProbe probe;
+    const PreparedResource* resource = nullptr;
+    for (int i = 0; i < 256; ++i) {
+        resource = slot.get();
+        REQUIRE(resource != nullptr);
+        REQUIRE(resource->value == 42);
+    }
+
+    REQUIRE_FALSE(probe.saw_allocation());
 }
 
 TEST_CASE("SpscQueue reuses slots after wrap-around",
