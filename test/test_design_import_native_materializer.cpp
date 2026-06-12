@@ -114,6 +114,18 @@ public:
 #endif
     {
         args = {"-std=c++20"};
+#if defined(__APPLE__)
+        auto sdk = pulp::platform::exec("xcrun", {"--sdk", "macosx", "--show-sdk-path"}, 5000);
+        if (!sdk.timed_out && sdk.exit_code == 0) {
+            auto sdk_path = sdk.stdout_output;
+            while (!sdk_path.empty() && (sdk_path.back() == '\n' || sdk_path.back() == '\r'))
+                sdk_path.pop_back();
+            if (!sdk_path.empty()) {
+                args.push_back("-isysroot");
+                args.push_back(sdk_path);
+            }
+        }
+#endif
         for (const auto& dir : include_dirs) {
             args.push_back("-I");
             args.push_back(dir);

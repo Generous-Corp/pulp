@@ -26,6 +26,7 @@ REPORT_DIR="${BUILD_DIR}/coverage"
 JOBS=$(command -v nproc >/dev/null 2>&1 && nproc || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 TESTS_REGEX=""
 EXTRA_CMAKE_ARGS=()
+EXTRA_CTEST_ARGS=()
 
 # Canonical source-filter regex used by llvm-cov and by the
 # LCOV→Cobertura converter. Matches paths we explicitly DO NOT want in
@@ -66,6 +67,11 @@ if [[ -n "${PULP_COVERAGE_CMAKE_ARGS:-}" ]]; then
     # Linux lane) belong in the workflow, not hard-coded here. Split on
     # shell words so simple space-delimited CMake args pass through.
     read -r -a EXTRA_CMAKE_ARGS <<< "${PULP_COVERAGE_CMAKE_ARGS}"
+fi
+if [[ -n "${PULP_COVERAGE_CTEST_ARGS:-}" ]]; then
+    # Optional coverage-only CTest arguments. Keep policy in the workflow and
+    # let this script provide the shared execution/reporting mechanics.
+    read -r -a EXTRA_CTEST_ARGS <<< "${PULP_COVERAGE_CTEST_ARGS}"
 fi
 
 # Require Clang — llvm-cov reads Clang-specific .profdata format.
@@ -152,9 +158,9 @@ export LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%p-%m.profraw"
 # silently swallowing test failures hid real regressions.
 CTEST_RC=0
 if [[ -n "${TESTS_REGEX}" ]]; then
-    ctest -R "${TESTS_REGEX}" --output-on-failure --repeat until-pass:2 || CTEST_RC=$?
+    ctest -R "${TESTS_REGEX}" "${EXTRA_CTEST_ARGS[@]}" --output-on-failure --repeat until-pass:2 || CTEST_RC=$?
 else
-    ctest --output-on-failure --repeat until-pass:2 || CTEST_RC=$?
+    ctest "${EXTRA_CTEST_ARGS[@]}" --output-on-failure --repeat until-pass:2 || CTEST_RC=$?
 fi
 if [[ "${CTEST_RC}" -ne 0 ]]; then
     echo "=== ctest failed with exit ${CTEST_RC} — coverage report WILL be generated from partial profile data, then the script will exit with that code. ==="
