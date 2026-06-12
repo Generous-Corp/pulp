@@ -4795,6 +4795,9 @@ pulp_add_test_suite(pulp-test-input-events LIBRARIES pulp::view)
 
 # Text editor tests
 pulp_add_test_suite(pulp-test-text-editor LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-text-editor-mouse LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-text-editor-paint LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-text-editor-policy LIBRARIES pulp::view)
 
 # TextEditor multi-line coverage (audit P3: wrap, click-to-caret in
 # wrapped rows, caret_rect pixel positioning, single-vs-multi Enter

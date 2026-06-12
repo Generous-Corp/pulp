@@ -345,7 +345,11 @@ target_sources(pulp-view-core PRIVATE
     src/inspector.cpp
     src/sdl_window_host.cpp
     src/auto_ui.cpp
+    src/text_edit_model.cpp
     src/text_editor.cpp
+    src/text_editor_clipboard.cpp
+    src/text_editor_ime.cpp
+    src/text_editor_paint.cpp
     src/ui_components.cpp
     src/context_menu.cpp
     src/scroll_bar.cpp

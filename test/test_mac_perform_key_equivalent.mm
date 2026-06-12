@@ -27,9 +27,13 @@
 #import <AppKit/AppKit.h>
 #import <Foundation/Foundation.h>
 #include <catch2/catch_test_macros.hpp>
+#include <pulp/platform/clipboard.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/input_events.hpp>
 #include <pulp/view/script_event_dispatch.hpp>
+#include <pulp/view/text_editor.hpp>
+
+#include <memory>
 
 // PulpView interface — the Obj-C class window_host_mac.mm declares.
 // We don't link against it directly (it's bundled into pulp::view); the
@@ -66,6 +70,34 @@ NSEvent* make_cmd_comma_event() {
          charactersIgnoringModifiers:@","
                            isARepeat:NO
                              keyCode:43];
+}
+
+NSEvent* make_tab_event(NSUInteger modifier_flags = 0) {
+    return [NSEvent keyEventWithType:NSEventTypeKeyDown
+                            location:NSZeroPoint
+                       modifierFlags:modifier_flags
+                           timestamp:0
+                        windowNumber:0
+                             context:nil
+                          characters:@"\t"
+         charactersIgnoringModifiers:@"\t"
+                           isARepeat:NO
+                             keyCode:48];
+}
+
+NSEvent* make_cmd_shift_option_v_event() {
+    return [NSEvent keyEventWithType:NSEventTypeKeyDown
+                            location:NSZeroPoint
+                       modifierFlags:(NSEventModifierFlagCommand
+                                      | NSEventModifierFlagShift
+                                      | NSEventModifierFlagOption)
+                           timestamp:0
+                        windowNumber:0
+                             context:nil
+                          characters:@"V"
+         charactersIgnoringModifiers:@"v"
+                           isARepeat:NO
+                             keyCode:9];
 }
 
 PulpView* make_pulp_view(pulp::view::View* root) {
@@ -182,4 +214,97 @@ TEST_CASE("performKeyEquivalent: no-op when rootView->on_global_key is null",
     script_events::set_global_key_dispatcher(nullptr);
     REQUIRE(handled == NO);
     REQUIRE(g_script_hits == 1);
+}
+
+TEST_CASE("performKeyEquivalent: focused TextEditor handles paste-and-match-style before globals",
+          "[mac][platform][keyboard][text_editor][clipboard]") {
+    using namespace pulp::view;
+
+    TestRoot root;
+    root.set_bounds({0, 0, 320, 120});
+    int global_hits = 0;
+    root.on_global_key = [&](const KeyEvent&) {
+        ++global_hits;
+        return false;
+    };
+
+    auto editor_owned = std::make_unique<TextEditor>();
+    auto* editor = editor_owned.get();
+    editor->set_bounds({0, 0, 160, 32});
+    editor->set_text("a");
+    root.add_child(std::move(editor_owned));
+
+    editor->on_focus_changed(true);
+    editor->claim_input_focus();
+    pulp::platform::Clipboard::set_text("b");
+
+    PulpView* view = make_pulp_view(&root);
+    if (view == nil) return;
+
+    g_script_hits = 0;
+    script_events::set_global_key_dispatcher(&counting_script_dispatcher);
+    BOOL handled = [view performKeyEquivalent:make_cmd_shift_option_v_event()];
+    script_events::set_global_key_dispatcher(nullptr);
+
+    REQUIRE(handled == YES);
+    REQUIRE(editor->text() == "ab");
+    REQUIRE(global_hits == 0);
+    REQUIRE(g_script_hits == 0);
+}
+
+TEST_CASE("PulpView keyDown offers Tab to focused TextEditor before focus traversal",
+          "[mac][platform][keyboard][text_editor][tab]") {
+    using namespace pulp::view;
+
+    TestRoot root;
+    root.set_bounds({0, 0, 320, 120});
+
+    auto editor_owned = std::make_unique<TextEditor>();
+    auto* editor = editor_owned.get();
+    editor->set_bounds({0, 0, 160, 32});
+    editor->set_text("a");
+    editor->tab_behavior = TextEditor::TabBehavior::insert_tab;
+    root.add_child(std::move(editor_owned));
+
+    editor->on_focus_changed(true);
+    editor->claim_input_focus();
+
+    PulpView* view = make_pulp_view(&root);
+    if (view == nil) return;
+
+    [view keyDown:make_tab_event()];
+    REQUIRE(editor->text() == "a\t");
+    REQUIRE(editor->has_focus());
+}
+
+TEST_CASE("PulpView keyDown still traverses focus when TextEditor leaves Tab unhandled",
+          "[mac][platform][keyboard][text_editor][tab]") {
+    using namespace pulp::view;
+
+    TestRoot root;
+    root.set_bounds({0, 0, 320, 120});
+
+    auto first_owned = std::make_unique<TextEditor>();
+    auto* first = first_owned.get();
+    first->set_bounds({0, 0, 120, 32});
+    first->set_text("first");
+
+    auto second_owned = std::make_unique<TextEditor>();
+    auto* second = second_owned.get();
+    second->set_bounds({0, 40, 120, 32});
+    second->set_text("second");
+
+    root.add_child(std::move(first_owned));
+    root.add_child(std::move(second_owned));
+
+    first->on_focus_changed(true);
+    first->claim_input_focus();
+
+    PulpView* view = make_pulp_view(&root);
+    if (view == nil) return;
+
+    [view keyDown:make_tab_event()];
+    REQUIRE_FALSE(first->has_focus());
+    REQUIRE(second->has_focus());
+    REQUIRE(pulp::view::View::focused_input_ == second);
 }

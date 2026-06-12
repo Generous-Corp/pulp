@@ -1,4 +1,5 @@
 #include <pulp/canvas/cg_canvas.hpp>
+#include <pulp/canvas/text_utf8.hpp>
 #include <algorithm>
 #include <utility>
 
@@ -847,6 +848,12 @@ Canvas::TextMetrics CoreGraphicsCanvas::measure_text_full(const std::string& tex
         CFRelease(font);
         return m;
     }
+}
+
+float CoreGraphicsCanvas::text_x_for_byte(const std::string& text,
+                                          std::size_t byte_index) {
+    const auto prefix_len = safe_utf8_prefix_size(text, byte_index);
+    return measure_text(text.substr(0, prefix_len));
 }
 
 // ── Canvas2D path builder (pulp #1322) ───────────────────────────────────────

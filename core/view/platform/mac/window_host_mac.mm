@@ -7,6 +7,7 @@
 #include <pulp/view/modal.hpp>
 #include <pulp/view/script_event_dispatch.hpp>
 #include <pulp/events/main_thread_dispatcher.hpp>
+#include <pulp/canvas/text_utf8.hpp>
 
 #include "window_host_mac_capture.h"
 #include "window_host_mac_internal.hpp"
@@ -19,6 +20,7 @@
 #include <algorithm>
 #include <atomic>
 #include <iostream>
+#include <limits>
 #include <memory>   // pulp #2502 — shared_ptr liveness token for deferred clicks
 #include <mutex>
 #include <utility>
@@ -197,6 +199,18 @@ static void install_app_menu(NSString* appName) {
     [quitItem setTarget:[PulpAppTerminationHandler sharedHandler]];
     [appMenu addItem:quitItem];
     [appItem setSubmenu:appMenu];
+}
+
+static std::size_t nsrange_location_or_zero(NSRange range) noexcept {
+    return range.location == NSNotFound ? 0 : static_cast<std::size_t>(range.location);
+}
+
+static std::size_t nsrange_end_or_zero(NSRange range) noexcept {
+    if (range.location == NSNotFound) return 0;
+    const auto start = static_cast<std::size_t>(range.location);
+    const auto length = static_cast<std::size_t>(range.length);
+    const auto max = std::numeric_limits<std::size_t>::max();
+    return length > max - start ? max : start + length;
 }
 
 // ── PulpView: CoreGraphics NSView (CPU rendering path) ───────────────────────
@@ -898,6 +912,15 @@ static void install_app_menu(NSString* appName) {
     gke.modifiers = mods;
     gke.is_down = true;
     gke.is_repeat = event.isARepeat;
+
+    if (auto* fv = [self liveFocusedView]) {
+        if (fv->on_key_event(gke)) {
+            [self startAnimationTimerIfNeeded];
+            [self setNeedsDisplay:YES];
+            return YES;
+        }
+    }
+
     // Honor consumption: a chord the root hook claims (e.g. the shell's
     // CommandRegistry dispatch) returns YES — no menu fallthrough, and no
     // script fan-out so the command can't double-fire a JS 'keydown'.
@@ -943,6 +966,19 @@ static void install_app_menu(NSString* appName) {
         }
 
         if (key == pulp::view::KeyCode::tab && self.rootView) {
+            if (auto* fv = [self liveFocusedView]) {
+                pulp::view::KeyEvent ke;
+                ke.key = key;
+                ke.modifiers = mods;
+                ke.is_down = true;
+                ke.is_repeat = event.isARepeat;
+                if (fv->on_key_event(ke)) {
+                    [self startAnimationTimerIfNeeded];
+                    [self setNeedsDisplay:YES];
+                    return;
+                }
+            }
+
             // pulp #2088 — re-sync via liveFocusedView so a destroyed prior
             // focused view doesn't leak a dangling ivar into focus_next/prev
             // and the on_focus_changed/release_input_focus calls below.
@@ -1116,13 +1152,24 @@ static void install_app_menu(NSString* appName) {
     auto* te = [self focusedTextEditor];
     if (!te || !te->has_marked_text()) return NSMakeRange(NSNotFound, 0);
     auto [start, len] = te->marked_range();
-    return NSMakeRange(static_cast<NSUInteger>(start), static_cast<NSUInteger>(len));
+    const auto start16 = pulp::canvas::utf16_offset_for_utf8_offset(
+        te->text(), static_cast<std::size_t>(start));
+    const auto end16 = pulp::canvas::utf16_offset_for_utf8_offset(
+        te->text(), static_cast<std::size_t>(start + len));
+    return NSMakeRange(static_cast<NSUInteger>(start16),
+                       static_cast<NSUInteger>(end16 - start16));
 }
 
 - (NSRange)selectedRange {
     auto* te = [self focusedTextEditor];
     if (!te) return NSMakeRange(0, 0);
-    return NSMakeRange(static_cast<NSUInteger>(te->caret_pos()), 0);
+    auto [start, end] = te->selection_range();
+    const auto start16 = pulp::canvas::utf16_offset_for_utf8_offset(
+        te->text(), static_cast<std::size_t>(start));
+    const auto end16 = pulp::canvas::utf16_offset_for_utf8_offset(
+        te->text(), static_cast<std::size_t>(end));
+    return NSMakeRange(static_cast<NSUInteger>(start16),
+                       static_cast<NSUInteger>(end16 - start16));
 }
 
 - (void)setMarkedText:(id)string selectedRange:(NSRange)sel replacementRange:(NSRange)rep {
@@ -1131,9 +1178,17 @@ static void install_app_menu(NSString* appName) {
     if (!te) return;
     NSString* str = [string isKindOfClass:[NSAttributedString class]]
         ? [(NSAttributedString*)string string] : (NSString*)string;
-    te->set_marked_text([str UTF8String],
-                        static_cast<int>(sel.location),
-                        static_cast<int>(sel.length));
+    const char* utf8 = [str UTF8String];
+    std::string marked = utf8 ? utf8 : "";
+    const auto selected_start16 = nsrange_location_or_zero(sel);
+    const auto selected_end16 = nsrange_end_or_zero(sel);
+    const auto selected_start8 = pulp::canvas::utf8_offset_for_utf16_offset(marked, selected_start16);
+    const auto selected_end8 = pulp::canvas::utf8_offset_for_utf16_offset(marked, selected_end16);
+    te->set_marked_text(marked,
+                        static_cast<int>(std::min(selected_start8, selected_end8)),
+                        static_cast<int>(selected_end8 > selected_start8
+                            ? selected_end8 - selected_start8
+                            : selected_start8 - selected_end8));
     [self setNeedsDisplay:YES];
 }
 
@@ -1145,13 +1200,23 @@ static void install_app_menu(NSString* appName) {
 - (NSArray<NSAttributedStringKey>*)validAttributesForMarkedText { return @[]; }
 
 - (NSAttributedString*)attributedSubstringForProposedRange:(NSRange)r actualRange:(NSRangePointer)a {
-    (void)a;
     auto* te = [self focusedTextEditor];
     if (!te) return nil;
     auto& text = te->text();
-    if (r.location >= text.size()) return nil;
-    auto len = std::min(r.length, text.size() - r.location);
-    auto sub = text.substr(r.location, len);
+    if (r.location == NSNotFound) return nil;
+    const auto start8 = pulp::canvas::utf8_offset_for_utf16_offset(
+        text, nsrange_location_or_zero(r));
+    const auto end8 = pulp::canvas::utf8_offset_for_utf16_offset(
+        text, nsrange_end_or_zero(r));
+    if (start8 >= text.size()) return nil;
+    const auto clamped_end8 = std::min(end8, text.size());
+    auto sub = text.substr(start8, clamped_end8 - start8);
+    if (a) {
+        const auto actual_start16 = pulp::canvas::utf16_offset_for_utf8_offset(text, start8);
+        const auto actual_end16 = pulp::canvas::utf16_offset_for_utf8_offset(text, clamped_end8);
+        *a = NSMakeRange(static_cast<NSUInteger>(actual_start16),
+                         static_cast<NSUInteger>(actual_end16 - actual_start16));
+    }
     return [[NSAttributedString alloc] initWithString:[NSString stringWithUTF8String:sub.c_str()]];
 }
 
