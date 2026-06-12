@@ -9,6 +9,7 @@ and the matching contract tests in the same change.
 
 | Module | Owns | Must not own |
 | --- | --- | --- |
+| `android_target.py` | Android SDK/NDK discovery, Android Gradle prerequisite checks, and debug APK build invocation metadata. | Queue orchestration, desktop automation, GitHub Actions dispatch, or cross-target validation execution. |
 | `state_paths.py` | State/config/log/bundle path resolution and state-directory creation. | Queue JSON contents, result schema, or target behavior. |
 | `state_path_bindings.py` | Dependency binding between the `local_ci.py` facade and state path helpers, preserving facade-level monkeypatch seams while moving path delegation out of the entrypoint. | State path behavior, queue JSON contents, result schema, or target behavior. |
 | `cli_parser.py` | Argument parser construction for top-level, cloud, cleanup, evidence, and desktop subcommands. | Command handler dispatch, command execution, or user-facing output side effects. |
