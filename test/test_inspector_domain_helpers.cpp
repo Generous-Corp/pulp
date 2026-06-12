@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <pulp/audio/audio_device_manager.hpp>
 #include <pulp/inspect/audio_inspector.hpp>
 #include <pulp/inspect/console_capture.hpp>
 #include <pulp/inspect/editor_url.hpp>
@@ -145,6 +146,33 @@ TEST_CASE("AudioInspector stores runtime telemetry as latest-value snapshot",
     REQUIRE_FALSE(snapshot.available);
     REQUIRE(snapshot.xrun_count == 0);
     REQUIRE(snapshot.process_load.callback_count == 0);
+}
+
+TEST_CASE("AudioInspector consumes AudioDeviceManager runtime telemetry",
+          "[inspect][audio][telemetry][phase2]") {
+    pulp::audio::AudioDeviceManager manager;
+    AudioInspector audio;
+
+    manager.begin_cpu_measure(64, 48000.0f);
+    std::this_thread::sleep_for(std::chrono::microseconds(10));
+    manager.end_cpu_measure();
+    manager.bump_xrun_counter(5);
+
+    const auto manager_snapshot = manager.runtime_telemetry_snapshot();
+    audio.set_runtime_telemetry(manager_snapshot.process_load,
+                                manager_snapshot.xrun_count);
+
+    const auto inspector_snapshot = audio.runtime_telemetry();
+    REQUIRE(inspector_snapshot.available);
+    REQUIRE(inspector_snapshot.xrun_count == 5);
+    REQUIRE(inspector_snapshot.process_load.callback_count ==
+            manager_snapshot.process_load.callback_count);
+    REQUIRE(inspector_snapshot.process_load.overload_count ==
+            manager_snapshot.process_load.overload_count);
+    REQUIRE(inspector_snapshot.process_load.elapsed_ns ==
+            manager_snapshot.process_load.elapsed_ns);
+    REQUIRE(inspector_snapshot.process_load.available_ns ==
+            manager_snapshot.process_load.available_ns);
 }
 
 TEST_CASE("StateInspector snapshots metadata, display values, and modulation",

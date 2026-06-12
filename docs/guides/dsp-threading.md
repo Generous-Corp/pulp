@@ -322,6 +322,9 @@ runtime telemetry bridge from `AudioDeviceManager::runtime_telemetry_snapshot()`
 or another bounded source so agents can inspect load/xrun state through the
 inspector protocol without adding locks, allocations, or analysis work to
 `process()`.
+The non-GPU inspector-domain tests cover this owner-thread bridge explicitly:
+manager load/xrun snapshots are copied into `AudioInspector` as latest values
+for UI and agent polling.
 
 `state::ParameterEventQueue` also exposes fixed-size queue telemetry, including
 its monotonic overflow count, so automation drops are visible instead of only
