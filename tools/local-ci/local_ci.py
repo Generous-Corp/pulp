@@ -97,25 +97,7 @@ _state_path_bindings.install_state_path_helpers(globals())
 import footprint as _footprint  # noqa: E402
 import footprint_bindings as _footprint_bindings  # noqa: E402
 
-
-def format_size_bytes(value: int | float | None) -> str:
-    return _footprint_bindings.format_size_bytes(globals(), value)
-
-
-def path_size_bytes(path: Path) -> int:
-    return _footprint_bindings.path_size_bytes(globals(), path)
-
-
-def local_ci_state_footprint() -> dict:
-    return _footprint_bindings.local_ci_state_footprint(globals())
-
-
-def state_footprint_lines(footprint: dict, *, indent: str = "") -> list[str]:
-    return _footprint_bindings.state_footprint_lines(globals(), footprint, indent=indent)
-
-
-def describe_path_for_cleanup(path: Path) -> str:
-    return _footprint_bindings.describe_path_for_cleanup(globals(), path)
+_footprint_bindings.install_footprint_helpers(globals())
 
 import cleanup as _cleanup  # noqa: E402
 import cleanup_bindings as _cleanup_bindings  # noqa: E402
@@ -261,28 +243,7 @@ def file_lock(path: Path, *, blocking: bool):
     return _io_utils_bindings.file_lock(globals(), path, blocking=blocking)
 
 
-def now_iso() -> str:
-    return _git_helpers_bindings.now_iso(globals())
-
-
-def current_branch() -> str:
-    return _git_helpers_bindings.current_branch(globals())
-
-
-def current_sha() -> str:
-    return _git_helpers_bindings.current_sha(globals())
-
-
-def git_root_for(path: Path) -> Path | None:
-    return _git_helpers_bindings.git_root_for(globals(), path)
-
-
-def resolve_git_ref_sha(ref: str) -> str:
-    return _git_helpers_bindings.resolve_git_ref_sha(globals(), ref)
-
-
-def short_sha(sha: str) -> str:
-    return _git_helpers_bindings.short_sha(globals(), sha)
+_git_helpers_bindings.install_git_helpers(globals())
 
 
 PRIORITY_VALUES = _normalize_bindings.priority_values(globals())
@@ -466,16 +427,7 @@ def resolve_cli_dispatch_field_values(args: argparse.Namespace, field_names: lis
     return _github_workflow_bindings.resolve_cli_dispatch_field_values(globals(), args, field_names)
 
 
-def normalize_provenance(provenance: dict | None = None) -> dict:
-    return _provenance_bindings.normalize_provenance(globals(), provenance)
-
-
-def provenance_summary(provenance: dict | None) -> str:
-    return _provenance_bindings.provenance_summary(globals(), provenance)
-
-
-def normalize_result(result: dict) -> dict:
-    return _provenance_bindings.normalize_result(globals(), result)
+_provenance_bindings.install_provenance_helpers(globals())
 
 
 import evidence_index as evidence_index_module  # noqa: E402

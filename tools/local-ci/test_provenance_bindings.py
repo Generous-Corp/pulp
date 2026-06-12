@@ -51,6 +51,29 @@ class ProvenanceBindingsTests(unittest.TestCase):
         self.assertEqual(calls[1][1], (provenance,))
         self.assertEqual(calls[2][1], (result,))
 
+    def test_install_provenance_helpers_wires_named_exports(self):
+        calls = []
+
+        def make_runner(name, value):
+            def runner(*args, **kwargs):
+                calls.append((name, args, kwargs))
+                return value
+
+            return runner
+
+        bindings = {
+            "_provenance": types.SimpleNamespace(
+                normalize_provenance=make_runner("normalize_provenance", {"execution_kind": "direct"}),
+                normalize_result=make_runner("normalize_result", {"overall": "pass"}),
+            )
+        }
+        self.mod.install_provenance_helpers(bindings, ("normalize_provenance", "normalize_result"))
+
+        self.assertEqual(bindings["normalize_provenance"](), {"execution_kind": "direct"})
+        self.assertEqual(bindings["normalize_result"]({"overall": "pass"}), {"overall": "pass"})
+        self.assertEqual(bindings["normalize_provenance"].__name__, "runner")
+        self.assertEqual([call[0] for call in calls], ["normalize_provenance", "normalize_result"])
+
 
 if __name__ == "__main__":
     unittest.main()

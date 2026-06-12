@@ -7,6 +7,17 @@ from pathlib import Path
 from typing import Any
 
 from binding_utils import binding as _binding
+from binding_utils import install_module_attrs
+
+
+GIT_HELPER_EXPORTS = (
+    "now_iso",
+    "current_branch",
+    "current_sha",
+    "git_root_for",
+    "resolve_git_ref_sha",
+    "short_sha",
+)
 
 
 def now_iso(bindings: Mapping[str, Any]) -> str:
@@ -31,3 +42,7 @@ def resolve_git_ref_sha(bindings: Mapping[str, Any], ref: str) -> str:
 
 def short_sha(bindings: Mapping[str, Any], sha: str) -> str:
     return _binding(bindings, "_git_helpers").short_sha(sha)
+
+
+def install_git_helpers(bindings: dict[str, Any], names: tuple[str, ...] = GIT_HELPER_EXPORTS) -> None:
+    install_module_attrs(bindings, "_git_helpers", names)

@@ -7,6 +7,16 @@ from pathlib import Path
 from typing import Any
 
 from binding_utils import binding as _binding
+from binding_utils import install_module_attrs
+
+
+FOOTPRINT_EXPORTS = (
+    "format_size_bytes",
+    "path_size_bytes",
+    "local_ci_state_footprint",
+    "state_footprint_lines",
+    "describe_path_for_cleanup",
+)
 
 
 def format_size_bytes(bindings: Mapping[str, Any], value: int | float | None) -> str:
@@ -27,3 +37,7 @@ def state_footprint_lines(bindings: Mapping[str, Any], footprint: dict, *, inden
 
 def describe_path_for_cleanup(bindings: Mapping[str, Any], path: Path) -> str:
     return _binding(bindings, "_footprint").describe_path_for_cleanup(path)
+
+
+def install_footprint_helpers(bindings: dict[str, Any], names: tuple[str, ...] = FOOTPRINT_EXPORTS) -> None:
+    install_module_attrs(bindings, "_footprint", names)

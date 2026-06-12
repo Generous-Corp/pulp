@@ -68,6 +68,17 @@ class GitHelpersBindingTests(unittest.TestCase):
             ],
         )
 
+    def test_install_git_helpers_wires_named_exports(self) -> None:
+        fake = FakeGitHelpers()
+        bindings = {"_git_helpers": fake}
+
+        git_helpers_bindings.install_git_helpers(bindings, ("now_iso", "short_sha"))
+
+        self.assertEqual(bindings["now_iso"](), "now")
+        self.assertEqual(bindings["short_sha"]("abcdef"), "short")
+        self.assertEqual(bindings["now_iso"].__name__, "now_iso")
+        self.assertEqual([call[0] for call in fake.calls], ["now_iso", "short_sha"])
+
 
 if __name__ == "__main__":
     unittest.main()

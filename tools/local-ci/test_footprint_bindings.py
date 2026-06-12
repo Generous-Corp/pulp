@@ -63,6 +63,17 @@ class FootprintBindingTests(unittest.TestCase):
             ],
         )
 
+    def test_install_footprint_helpers_wires_named_exports(self) -> None:
+        fake = FakeFootprint()
+        bindings = {"_footprint": fake}
+
+        footprint_bindings.install_footprint_helpers(bindings, ("format_size_bytes", "path_size_bytes"))
+
+        self.assertEqual(bindings["format_size_bytes"](42), "formatted")
+        self.assertEqual(bindings["path_size_bytes"](Path("state")), 42)
+        self.assertEqual(bindings["format_size_bytes"].__name__, "format_size_bytes")
+        self.assertEqual([call[0] for call in fake.calls], ["format_size_bytes", "path_size_bytes"])
+
 
 if __name__ == "__main__":
     unittest.main()
