@@ -1,5 +1,11 @@
 #pragma once
 
+// The AU v2 effect adapter wraps Apple's AudioUnitSDK (Apple-only,
+// developer-supplied). The whole header is gated on __APPLE__ so it stays
+// self-contained — an empty no-op — on the Linux header-hygiene check and any
+// non-Apple TU.
+#if defined(__APPLE__)
+
 #include <AudioUnitSDK/AUMIDIEffectBase.h>
 
 #include <pulp/format/processor.hpp>
@@ -205,3 +211,5 @@ private:
 };
 
 } // namespace pulp::format::au
+
+#endif // defined(__APPLE__)

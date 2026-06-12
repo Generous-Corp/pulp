@@ -8,6 +8,10 @@
 //   #include <pulp/format/au_v2_instrument_entry.hpp>
 //   PULP_AU_INSTRUMENT(MySynthAU, my_namespace::create_my_synth)
 
+// Apple-only: wraps AudioUnitSDK. No-op on non-Apple so the header stays
+// self-contained on the Linux header-hygiene check.
+#if defined(__APPLE__)
+
 #include <pulp/format/au_v2_instrument.hpp>
 #include <pulp/format/registry.hpp>
 #include <AudioUnitSDK/AUPlugInDispatch.h>
@@ -23,3 +27,5 @@
         explicit ClassName(AudioComponentInstance ci) : PulpAUInstrument(ci) {} \
     }; \
     AUSDK_COMPONENT_ENTRY(ausdk::AUMusicDeviceFactory, ClassName)
+
+#endif // defined(__APPLE__)

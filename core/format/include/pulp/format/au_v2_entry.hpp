@@ -17,6 +17,10 @@
 //   - A factory function MyPluginAUFactory (for the Info.plist factoryFunction)
 //   - Plugin registration via PULP_REGISTER_PLUGIN
 
+// Apple-only: pulls in AudioUnitSDK. No-op on non-Apple so the header stays
+// self-contained on the Linux header-hygiene check.
+#if defined(__APPLE__)
+
 #include <pulp/format/au_v2_adapter.hpp>
 #include <pulp/format/registry.hpp>
 #include <AudioUnitSDK/AUPlugInDispatch.h>
@@ -61,3 +65,5 @@
         explicit ClassName(AudioComponentInstance ci) : PulpAUEffect(ci) {} \
     }; \
     AUSDK_COMPONENT_ENTRY(ausdk::AUMIDIEffectFactory, ClassName)
+
+#endif // defined(__APPLE__)
