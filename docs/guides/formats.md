@@ -110,6 +110,13 @@ host-owned bus buffers and let adapters validate active buses, declared channel
 counts, and null channel pointers before projecting the current
 main-in/main-out/sidechain view into `Processor::process()`.
 
+Processors that override the richer surface can inspect no-input instrument
+layouts, surround main outputs, and named auxiliary or stem outputs directly
+through `ProcessBuffers::inputs` and `ProcessBuffers::outputs`. Use
+`BusBufferSet::find()`, `find_by_index()`, or `find_by_name()` for secondary
+buses; `main_input()`, `main_output()`, and `sidechain_input()` remain the
+ergonomic compatibility helpers.
+
 Inactive buses are treated as disconnected and should carry empty buffer views.
 An active bus with any null channel pointer fails
 `active_buses_have_storage()`, even when its declared channel count matches, so
