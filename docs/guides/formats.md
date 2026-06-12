@@ -110,6 +110,12 @@ host-owned bus buffers and let adapters validate active buses, declared channel
 counts, and null channel pointers before projecting the current
 main-in/main-out/sidechain view into `Processor::process()`.
 
+Inactive buses are treated as disconnected and should carry empty buffer views.
+An active bus with any null channel pointer fails
+`active_buses_have_storage()`, even when its declared channel count matches, so
+adapters can fail closed or omit the bus instead of handing processors a
+half-valid buffer.
+
 ### Latency and Tail
 
 - **Latency:** `clap_plugin_latency_t::get` returns `processor->latency_samples()`.
