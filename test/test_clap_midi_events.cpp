@@ -1070,6 +1070,12 @@ TEST_CASE("CLAP transport state maps into ProcessContext",
                          &transport) == CLAP_PROCESS_CONTINUE);
 
     REQUIRE(g_capturing->captured_context.is_playing);
+    REQUIRE(g_capturing->captured_context.process_mode == ProcessMode::Realtime);
+    REQUIRE(g_capturing->captured_context.render_speed_hint ==
+            RenderSpeedHint::Realtime);
+    REQUIRE_FALSE(g_capturing->captured_context.is_offline());
+    REQUIRE_FALSE(g_capturing->captured_context.allows_offline_quality_work());
+    REQUIRE_FALSE(g_capturing->captured_context.is_maintenance_render());
     REQUIRE(g_capturing->captured_context.tempo_bpm == 132.25);
     REQUIRE(g_capturing->captured_context.position_beats == 12.5);
     REQUIRE(g_capturing->captured_context.time_sig_numerator == 7);

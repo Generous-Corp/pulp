@@ -631,6 +631,15 @@ if (!host.try_prepare(48000, 512, 2, 2, limits)) {
 
 Input and output views may alias for in-place processing.
 
+Format adapter runtime-mode tests should assert the adapter-owned source of
+truth rather than inferring mode from transport. VST3 maps
+`ProcessSetup::processMode == kOffline` to `ProcessMode::Offline` with a
+faster-than-realtime render hint. CLAP has no equivalent process-mode field, so
+its adapter reports realtime mode and realtime render speed unless a future CLAP
+extension exposes stronger host intent. Bypass, tail-drain, reset, and
+transport-jump flags stay explicit `ProcessContext` metadata and should be
+covered where the host API can actually deliver them.
+
 ---
 
 ## Choosing Which Formats to Build
