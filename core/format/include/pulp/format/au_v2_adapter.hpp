@@ -1,5 +1,7 @@
 #pragma once
 
+#if __has_include(<AudioUnitSDK/AUMIDIEffectBase.h>) && __has_include(<mach/mach_time.h>)
+
 #include <AudioUnitSDK/AUMIDIEffectBase.h>
 #include <mach/mach_time.h>
 
@@ -10,6 +12,7 @@
 #include <pulp/midi/message.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
 
+#include <cstdint>
 #include <memory>
 #include <limits>
 #include <mutex>
@@ -263,3 +266,5 @@ private:
 };
 
 } // namespace pulp::format::au
+
+#endif // AudioUnitSDK + mach_time availability
