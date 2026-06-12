@@ -4,8 +4,9 @@
 //
 // Each format adapter (VST3, AU v2, AU v3, CLAP, AAX) populates the
 // item-1.3 fields on `ProcessContext` from its host's playhead API. The
-// derived fields — bar index from beats + time signature, and the three
-// change-flags (tempo / time-sig / transport) computed against the
+// derived fields — bar index from beats + time signature, the three
+// change-flags (tempo / time-sig / transport), and transport-jump metadata
+// computed against the
 // previous block — are identical across adapters. This header factors
 // them out so each adapter just snapshots the previous block's
 // transport state and calls these helpers.
@@ -37,6 +38,10 @@ struct PlayheadSnapshot {
     bool is_playing = false;
     bool is_recording = false;
     bool is_looping = false;
+    int64_t position_samples = 0;
+    double position_beats = 0.0;
+    double sample_rate = 0.0;
+    int num_samples = 0;
 };
 
 /// Derive `ctx.bar` from `ctx.position_beats` + the active time
@@ -80,6 +85,7 @@ inline void compute_playhead_changes(ProcessContext& ctx,
         ctx.tempo_changed = false;
         ctx.time_sig_changed = false;
         ctx.transport_changed = false;
+        ctx.transport_jump = false;
     } else {
         ctx.tempo_changed = (ctx.tempo_bpm != snapshot.tempo_bpm);
         ctx.time_sig_changed =
@@ -89,6 +95,30 @@ inline void compute_playhead_changes(ProcessContext& ctx,
             (ctx.is_playing != snapshot.is_playing) ||
             (ctx.is_recording != snapshot.is_recording) ||
             (ctx.is_looping != snapshot.is_looping);
+        const bool has_sample_position =
+            ctx.position_samples != 0 || snapshot.position_samples != 0;
+        if (has_sample_position) {
+            const int64_t expected = (ctx.is_playing && snapshot.is_playing)
+                ? snapshot.position_samples + static_cast<int64_t>(snapshot.num_samples)
+                : snapshot.position_samples;
+            ctx.transport_jump = ctx.position_samples != expected;
+        } else {
+            const bool has_beat_position =
+                ctx.position_beats != 0.0 || snapshot.position_beats != 0.0;
+            if (has_beat_position && ctx.is_playing && snapshot.is_playing &&
+                snapshot.sample_rate > 0.0 && snapshot.num_samples > 0 &&
+                snapshot.tempo_bpm > 0.0) {
+                const double expected_delta =
+                    (static_cast<double>(snapshot.num_samples) / snapshot.sample_rate) *
+                    (snapshot.tempo_bpm / 60.0);
+                const double expected = snapshot.position_beats + expected_delta;
+                ctx.transport_jump = std::abs(ctx.position_beats - expected) > 1.0e-9;
+            } else if (has_beat_position) {
+                ctx.transport_jump = ctx.position_beats != snapshot.position_beats;
+            } else {
+                ctx.transport_jump = false;
+            }
+        }
     }
 
     snapshot.has_previous = true;
@@ -98,6 +128,10 @@ inline void compute_playhead_changes(ProcessContext& ctx,
     snapshot.is_playing = ctx.is_playing;
     snapshot.is_recording = ctx.is_recording;
     snapshot.is_looping = ctx.is_looping;
+    snapshot.position_samples = ctx.position_samples;
+    snapshot.position_beats = ctx.position_beats;
+    snapshot.sample_rate = ctx.sample_rate;
+    snapshot.num_samples = ctx.num_samples;
 }
 
 } // namespace pulp::format::detail
