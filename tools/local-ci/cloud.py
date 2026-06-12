@@ -195,6 +195,10 @@ from cloud_status_format import (  # noqa: E402  -- re-exported for in-file cons
     cloud_status_detail_lines,
     cloud_status_job_lines,
 )
+from cloud_defaults_format import (  # noqa: E402  -- re-exported for in-file consumers
+    cloud_defaults_lines,
+    cloud_field_detail_line,
+)
 from cloud_github import (  # noqa: E402  -- re-exported for in-file consumers
     gh_api_json,
     gh_auth_status_text,
@@ -359,15 +363,7 @@ def print_cloud_field_detail(
     indent: str = "    ",
     unset_note: str = "",
 ) -> None:
-    rendered = render_selector_value(value) if name.endswith("_selector_json") else str(value)
-    if rendered:
-        suffix = f" ({source})" if source else ""
-        print(f"{indent}{name}: {rendered}{suffix}")
-        return
-    if unset_note:
-        print(f"{indent}{name}: unset ({unset_note})")
-    else:
-        print(f"{indent}{name}: unset")
+    print(cloud_field_detail_line(name, value, source, indent=indent, unset_note=unset_note))
 
 
 def namespace_instance_duration_secs(instance: dict) -> float | None:
@@ -615,52 +611,14 @@ def cmd_cloud_defaults(_args: argparse.Namespace) -> int:
         else:
             repository_note = "gh CLI unavailable; repo-variable fallbacks not inspected"
 
-    print("Cloud defaults:\n")
-    if repository:
-        print(f"  repository: {repository}")
-    else:
-        print("  repository: unresolved")
-    if repository_note:
-        print(f"  note: {repository_note}")
-    print(f"  configured default workflow: {settings.get('workflow', 'build')}")
-    print(f"  configured default provider: {settings.get('provider', 'github-hosted')}")
-    billing = resolve_billing_settings(config)
-    print(
-        f"  billing estimates: {billing.get('currency', 'USD')} period-day={billing.get('billing_period_start_day', 1)} "
-        f"({billing_note_text()})"
-    )
-    provider_truth_state = "enabled (local opt-in)" if billing.get("enable_provider_reported_totals") else "disabled (opt-in; off by default)"
-    print(f"  provider billing truth: {provider_truth_state}")
-
-    for workflow_key, workflow in BUILTIN_GITHUB_WORKFLOWS.items():
-        summary = summarize_workflow_provider_defaults(
-            config,
-            repository_variables,
-            settings,
-            workflow_key,
-        )
-        print(f"\n  {workflow_key}: {workflow['display_name']} ({workflow['file']})")
-        print(f"    supported providers: {', '.join(workflow.get('providers', ['github-hosted']))}")
-        print(
-            f"    default provider: {summary['provider']} ({summary['provider_source']})"
-        )
-        selector_input = summary.get("selector_input") or ""
-        if selector_input:
-            print_cloud_field_detail(
-                selector_input,
-                summary.get("selector_value", ""),
-                summary.get("selector_source", ""),
-            )
-        for field_name in workflow.get("dispatch_fields") or []:
-            unset_note = ""
-            if workflow_key == "build" and field_name == "macos_runner_selector_json":
-                unset_note = "macOS stays local-first unless a config default or one-off override is set"
-            print_cloud_field_detail(
-                field_name,
-                (summary.get("dispatch_fields") or {}).get(field_name, ""),
-                (summary.get("dispatch_sources") or {}).get(field_name, ""),
-                unset_note=unset_note,
-            )
+    for line in cloud_defaults_lines(
+        config,
+        settings,
+        repository=repository,
+        repository_note=repository_note,
+        repository_variables=repository_variables,
+    ):
+        print(line)
     return 0
 
 
