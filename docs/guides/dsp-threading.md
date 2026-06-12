@@ -276,11 +276,27 @@ normal input-driven renders, and `should_render_tail_only()` identifies blocks
 where the host wants existing delay/reverb/lookahead state to settle without
 starting new work.
 
+## Publish cheap runtime telemetry
+
+Live tools should read bounded snapshots from the audio thread, not run
+analysis on it. `audio::AudioProcessLoadMeasurer` publishes relaxed latest-
+value telemetry for callback count, elapsed time, buffer budget, current load,
+peak load, and overload count. `audio::AudioDeviceManager` combines that
+process-load snapshot with its xrun counter for UI, Audio Inspector, and
+validation polling.
+
+Keep this path boring: write fixed-size counters, meter snapshots, and bounded
+queues from `process()`. Move FFTs, exported waveforms, parameter sweeps, and
+other expensive analysis to an offline command, frozen copy, or validation
+artifact.
+
 ## See also
 
 * [`core/state/include/pulp/state/store.hpp`](../../core/state/include/pulp/state/store.hpp)
   — `snapshot()`, `snapshot_modulated()`, `set_value_rt()`,
   `pump_listeners()`.
+* [`core/audio/include/pulp/audio/load_measurer.hpp`](../../core/audio/include/pulp/audio/load_measurer.hpp)
+  — load, peak-load, and overload-count snapshots.
 * [`core/runtime/include/pulp/runtime/scoped_no_alloc.hpp`](../../core/runtime/include/pulp/runtime/scoped_no_alloc.hpp)
 * [`core/format/include/pulp/format/process_block.hpp`](../../core/format/include/pulp/format/process_block.hpp)
 * [`core/audio/include/pulp/audio/instrument_envelope.hpp`](../../core/audio/include/pulp/audio/instrument_envelope.hpp)
