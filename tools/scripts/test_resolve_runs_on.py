@@ -179,6 +179,20 @@ def test_provider_namespace_with_env() -> None:
             f"unexpected namespace routing: {out!r}")
 
 
+def test_provider_namespace_accepts_legacy_bare_label() -> None:
+    _, out, _ = _run([
+        "--target-name", "macOS coverage",
+        "--mode", "provider",
+        "--github-hosted-label", "macos-latest",
+        "--namespace-env", "NAMESPACE_MACOS_RUNS_ON_JSON",
+    ], env_extra={
+        "REQUESTED_PROVIDER": "namespace",
+        "NAMESPACE_MACOS_RUNS_ON_JSON": "macos-15",
+    })
+    _assert(json.loads(out) == "macos-15",
+            f"legacy bare label was not accepted: {out!r}")
+
+
 def test_provider_namespace_missing_env_errors() -> None:
     code, _, err = _run([
         "--target-name", "Linux (x64)",
@@ -394,6 +408,17 @@ def test_default_mode_override_wins() -> None:
     })
     _assert(json.loads(out) == ["self-hosted", "macos", "arm64", "sanitizer"],
             f"override ignored: {out!r}")
+
+
+def test_default_mode_override_accepts_legacy_bare_label() -> None:
+    _, out, _ = _run([
+        "--target-name", "Coverage (macOS)",
+        "--mode", "default",
+        "--override-env", "MACOS_RUNS_ON_JSON",
+        "--default-label", "macos-latest",
+    ], env_extra={"MACOS_RUNS_ON_JSON": "macos-15"})
+    _assert(json.loads(out) == "macos-15",
+            f"legacy bare override label was not accepted: {out!r}")
 
 
 def test_default_mode_explicit_beats_override() -> None:
