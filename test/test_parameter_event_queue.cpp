@@ -110,3 +110,61 @@ TEST_CASE("ParameterEventQueue hot operations are allocation-free",
     REQUIRE(allocation_count == 0);
     REQUIRE(allocated_bytes == 0);
 }
+
+TEST_CASE("ParameterEventQueue exposes overflow telemetry",
+          "[host][parameter-event-queue][telemetry][phase2]") {
+    ParameterEventQueue q;
+    REQUIRE(q.overflow_count() == 0);
+
+    for (std::size_t i = 0; i < q.capacity(); ++i) {
+        REQUIRE(q.push(ParameterEvent{
+            .param_id = static_cast<uint32_t>(i + 1),
+            .sample_offset = static_cast<int32_t>(i),
+            .value = static_cast<float>(i),
+        }));
+    }
+
+    REQUIRE_FALSE(q.push(ParameterEvent{.param_id = 9999, .sample_offset = 0, .value = 1.0f}));
+    REQUIRE_FALSE(q.push(ParameterEvent{.param_id = 10000, .sample_offset = 1, .value = 2.0f}));
+    REQUIRE(q.overflow_count() == 2);
+
+    const auto full = q.telemetry();
+    REQUIRE(full.size == q.capacity());
+    REQUIRE(full.capacity == q.capacity());
+    REQUIRE(full.overflow_count == 2);
+
+    q.clear();
+    REQUIRE(q.empty());
+    REQUIRE(q.overflow_count() == 2);
+    REQUIRE_FALSE(q.overflowed());
+    REQUIRE(q.dropped_event_count() == 0);
+
+    q.reset_overflow_count();
+    REQUIRE(q.overflow_count() == 0);
+    const auto reset = q.telemetry();
+    REQUIRE(reset.size == 0);
+    REQUIRE(reset.capacity == q.capacity());
+    REQUIRE(reset.overflow_count == 0);
+}
+
+TEST_CASE("ParameterEventQueue telemetry path allocates zero times",
+          "[host][parameter-event-queue][telemetry][rt-safety][phase2]") {
+    ParameterEventQueue q;
+
+    pulp::test::RtAllocationProbe probe;
+
+    for (std::size_t i = 0; i < q.capacity(); ++i) {
+        REQUIRE(q.push(ParameterEvent{
+            .param_id = 1,
+            .sample_offset = static_cast<int32_t>(i),
+            .value = 0.5f,
+        }));
+    }
+
+    REQUIRE_FALSE(q.push(ParameterEvent{.param_id = 1, .sample_offset = 0, .value = 1.0f}));
+    (void)q.telemetry();
+    q.reset_overflow_count();
+    q.clear();
+
+    REQUIRE_FALSE(probe.saw_allocation());
+}

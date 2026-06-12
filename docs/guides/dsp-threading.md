@@ -285,6 +285,10 @@ peak load, and overload count. `audio::AudioDeviceManager` combines that
 process-load snapshot with its xrun counter for UI, Audio Inspector, and
 validation polling.
 
+`state::ParameterEventQueue` also exposes fixed-size queue telemetry, including
+its monotonic overflow count, so automation drops are visible instead of only
+being implied by a failed `push()`.
+
 Keep this path boring: write fixed-size counters, meter snapshots, and bounded
 queues from `process()`. Move FFTs, exported waveforms, parameter sweeps, and
 other expensive analysis to an offline command, frozen copy, or validation
