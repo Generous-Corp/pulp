@@ -9,6 +9,10 @@
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/window_host.hpp>  // compute_design_viewport_transform
 #import <Cocoa/Cocoa.h>
+// CoreVideo is used unconditionally now: the CPU (CoreGraphics, no-Skia)
+// plugin host also drives a CVDisplayLink for continuous frames + the idle
+// pump, not just the GPU host. Must be outside the PULP_HAS_SKIA guard.
+#import <CoreVideo/CVDisplayLink.h>
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -48,6 +52,9 @@ NSArray* pulp_text_accessibility_all_elements_macos();
 @interface PulpPluginView : NSView
 @property (nonatomic, assign) pulp::view::View* rootView;
 @property (nonatomic, copy) void (^onResize)(uint32_t, uint32_t);
+// Fired from -viewDidMoveToWindow so the host can start/stop its CPU frame
+// driver only while the view actually lives in a window.
+@property (nonatomic, copy) void (^onWindowChange)(void);
 // Inverse-design-viewport transform applied to every host-space input point
 // before hit_test, mirroring the standalone PulpView. nil = identity. Set
 // by MacPluginViewHost::set_design_viewport.
@@ -412,6 +419,7 @@ bool pulp_plugin_key_down(pulp::view::View* root, NSEvent* event) {
 
 - (void)viewDidMoveToWindow {
     [super viewDidMoveToWindow];
+    if (self.onWindowChange) self.onWindowChange();
     [self setNeedsDisplay:YES];
 }
 
@@ -506,6 +514,50 @@ static void detach_child_view_from_host(NSView* container, void* child_view_hand
 
 namespace pulp::view {
 
+// Shared frame-pump helpers used by BOTH the CPU and GPU plugin hosts so the
+// continuous-repaint + widget-animation behaviour is identical on either path.
+// Pure functions over the view tree (no host state).
+static bool view_needs_continuous_frames(View* view) {
+    if (!view) return false;
+    if (view->wants_continuous_repaint()) return true;
+    if (auto* k = dynamic_cast<Knob*>(view)) {
+        if ((k->hover_glow() > 0.01f && k->hover_glow() < 0.99f) || k->shader_uses_time())
+            return true;
+    }
+    if (auto* t = dynamic_cast<Toggle*>(view)) {
+        if ((t->thumb_position() > 0.01f && t->thumb_position() < 0.99f) || t->shader_uses_time())
+            return true;
+    }
+    if (auto* f = dynamic_cast<Fader*>(view)) {
+        if (f->hover_scale() > 1.01f || f->shader_uses_time())
+            return true;
+    }
+    if (auto* sv = dynamic_cast<ScrollView*>(view)) {
+        if (sv->scroll_animating()) return true;
+    }
+    if (view->animation_play_state() != "paused") {
+        for (const auto& a : view->active_animations()) {
+            if (a.active) return true;
+        }
+    }
+    for (size_t i = 0; i < view->child_count(); ++i) {
+        if (view_needs_continuous_frames(view->child_at(i))) return true;
+    }
+    return false;
+}
+
+static void advance_widget_animations(View* view, float dt) {
+    if (!view) return;
+    if (auto* k = dynamic_cast<Knob*>(view)) k->advance_animations(dt);
+    else if (auto* t = dynamic_cast<Toggle*>(view)) t->advance_animations(dt);
+    else if (auto* f = dynamic_cast<Fader*>(view)) f->advance_animations(dt);
+    else if (auto* sv = dynamic_cast<ScrollView*>(view)) sv->advance_animations(dt);
+    else if (auto* tip = dynamic_cast<Tooltip*>(view)) tip->advance_animations(dt);
+    view->tick_animations(dt);
+    for (size_t i = 0; i < view->child_count(); ++i)
+        advance_widget_animations(view->child_at(i), dt);
+}
+
 class MacPluginViewHost : public PluginViewHost {
 public:
     MacPluginViewHost(View& root, Size size)
@@ -518,10 +570,18 @@ public:
             view_.onResize = ^(uint32_t w, uint32_t h) {
                 this->on_native_frame_changed(w, h);
             };
+            // Start/stop the CPU frame driver as the view enters/leaves a
+            // window (cleared in the destructor before `this` is freed).
+            view_.onWindowChange = ^{ this->update_render_link(); };
         }
     }
 
     ~MacPluginViewHost() override {
+        // Stop the frame driver before anything it captures is freed. The
+        // shared token is flipped first so any block already in flight on the
+        // main queue (or a reentrant one) bails out before touching `this`.
+        link_state_->alive.store(false, std::memory_order_release);
+        stop_render_link();
         root_.set_plugin_view_host(nullptr);
         // CRITICAL: clear pointTransform BEFORE the host C++ object is freed.
         // The block captures `this` by raw pointer. If the DAW retains the
@@ -532,6 +592,7 @@ public:
         @autoreleasepool {
             view_.pointTransform = nil;
             view_.onResize = nil;
+            view_.onWindowChange = nil;
         }
         detach();
     }
@@ -563,12 +624,93 @@ public:
                 [view_ removeFromSuperview];
             }
         }
+        // Removed from its window → no more frames needed. (viewDidMoveToWindow
+        // also fires onWindowChange, but stop explicitly so a host that detaches
+        // without a window transition still releases the link.)
+        stop_render_link();
     }
 
     void repaint() override {
         @autoreleasepool {
             [view_ setNeedsDisplay:YES];
         }
+    }
+
+    // The CPU host repaints only on input (setNeedsDisplay) by default, which
+    // strands live content (a spectrum that animates, values that track host
+    // automation) and the idle callback that drains the store's automation
+    // listeners. So while the editor is in a window AND an idle pump is
+    // installed (every format adapter installs one), run a CVDisplayLink
+    // that — each vsync, on the main thread — runs the idle callback,
+    // advances widget/CSS animations, and marks the CPU view dirty if any
+    // view needs continuous frames. Lifecycle-tied + reentrancy-safe to
+    // match MacGpuPluginViewHost.
+    void set_idle_callback(std::function<void()> callback) override {
+        idle_cb_ = std::move(callback);
+        // The window-change hook starts the link on attach; if the view is
+        // already in a window (e.g. AU returned it then the DAW attached it
+        // before this call), reconcile now.
+        update_render_link();
+    }
+
+    // Start iff in a window with an idle pump; stop otherwise. Idempotent.
+    void update_render_link() {
+        const bool want = view_ != nil && view_.window != nil && (bool)idle_cb_;
+        if (want) start_render_link();
+        else stop_render_link();
+    }
+    void start_render_link() {
+        if (render_link_) return;
+        CVDisplayLinkCreateWithActiveCGDisplays(&render_link_);
+        if (!render_link_) return;
+        CVDisplayLinkSetOutputCallback(render_link_, &render_link_callback, this);
+        CVDisplayLinkStart(render_link_);
+    }
+    void stop_render_link() {
+        if (render_link_) {
+            CVDisplayLinkStop(render_link_);   // synchronous: no callback after this
+            CVDisplayLinkRelease(render_link_);
+            render_link_ = nullptr;
+        }
+    }
+
+    static CVReturn render_link_callback(CVDisplayLinkRef, const CVTimeStamp*,
+                                         const CVTimeStamp*, CVOptionFlags,
+                                         CVOptionFlags*, void* ctx) {
+        auto* self = static_cast<MacPluginViewHost*>(ctx);
+        // Capture the shared liveness/queue token: it outlives `self`, so the
+        // dispatched block never touches a freed host.
+        auto state = self->link_state_;
+        if (!state->alive.load(std::memory_order_acquire)) return kCVReturnSuccess;
+        bool expected = false;
+        if (!state->queued.compare_exchange_strong(
+                expected, true, std::memory_order_acq_rel, std::memory_order_relaxed))
+            return kCVReturnSuccess;  // a tick is already queued this vsync
+        dispatch_async(dispatch_get_main_queue(), ^{
+            @autoreleasepool {
+                if (!state->alive.load(std::memory_order_acquire)) {
+                    state->queued.store(false, std::memory_order_release);
+                    return;
+                }
+                // Copy the idle callback locally so running it can't free the
+                // std::function out from under its own call; then drain
+                // host-automation listeners to the UI (bind_parameter widgets
+                // repaint themselves via request_repaint on change).
+                std::function<void()> idle = self->idle_cb_;
+                if (idle) idle();
+                // Idle work (store pump / scripted poll) can reentrantly close
+                // the editor → ~host sets alive=false and frees `self`. Re-check
+                // before touching ANY self member; the queue flag lives on the
+                // shared state, so leaving it set after teardown is harmless
+                // (the link is already stopped, no further callbacks fire).
+                if (!state->alive.load(std::memory_order_acquire)) return;
+                advance_widget_animations(&self->root_, 1.0f / 60.0f);
+                if (self->view_ && view_needs_continuous_frames(&self->root_))
+                    [self->view_ setNeedsDisplay:YES];
+                state->queued.store(false, std::memory_order_release);
+            }
+        });
+        return kCVReturnSuccess;
     }
 
     void set_size(uint32_t width, uint32_t height) override {
@@ -656,6 +798,17 @@ private:
     Size size_;
     PulpPluginView* view_ = nil;
     std::function<void(uint32_t, uint32_t)> resize_cb_;
+    // Continuous-frame driver for the CPU (non-GPU) editor path.
+    std::function<void()> idle_cb_;
+    CVDisplayLinkRef render_link_ = nullptr;
+    // Shared liveness + per-vsync queue flag. Lives in a shared_ptr so the
+    // CVDisplayLink callback's main-queue block can outlive the host without
+    // touching freed memory.
+    struct FrameLink {
+        std::atomic<bool> alive{true};
+        std::atomic<bool> queued{false};
+    };
+    std::shared_ptr<FrameLink> link_state_ = std::make_shared<FrameLink>();
     // Design viewport: when (>0, >0) root paints at design size and the
     // canvas applies translate+scale to fit the host bounds. Mouse coords
     // are inverse-mapped via window_to_root_point().
@@ -1406,6 +1559,7 @@ private:
     // ── Continuous-frame / animation drivers (parity with MacGpuWindowHost) ──
     static bool view_needs_continuous_frames(View* view) {
         if (!view) return false;
+        if (view->wants_continuous_repaint()) return true;
         if (auto* k = dynamic_cast<Knob*>(view)) {
             if ((k->hover_glow() > 0.01f && k->hover_glow() < 0.99f) || k->shader_uses_time())
                 return true;

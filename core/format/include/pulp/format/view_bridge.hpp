@@ -94,6 +94,11 @@ public:
     ViewRole role() const { return options_.role; }
     view::View* view() { return view_raw_; }
     const view::View* view() const { return view_raw_; }
+
+    /// The processor's parameter store, used (e.g.) by the editor idle pump
+    /// to drain queued host-automation changes to Main-thread listeners so
+    /// parameter-bound widgets follow automation playback.
+    state::StateStore& store() { return store_; }
     bool uses_script_ui() const { return uses_script_ui_; }
 
     /// Access the scripted UI session, if the primary view was built from

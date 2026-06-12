@@ -149,9 +149,12 @@ import cli_dispatch_bindings as _cli_dispatch_bindings  # noqa: E402
 import desktop_action_commands_cli as _desktop_action_commands_cli  # noqa: E402
 import desktop_actions as _desktop_actions  # noqa: E402
 import desktop_artifacts as _desktop_artifacts  # noqa: E402
+import desktop_command_bindings as _desktop_command_bindings  # noqa: E402
 import desktop_commands_cli as _desktop_commands_cli  # noqa: E402
 import desktop_cli as _desktop_cli  # noqa: E402
 import desktop_doctor as _desktop_doctor  # noqa: E402
+import desktop_probe_bindings as _desktop_probe_bindings  # noqa: E402
+import desktop_reporting_bindings as _desktop_reporting_bindings  # noqa: E402
 import desktop_setup_commands_cli as _desktop_setup_commands_cli  # noqa: E402
 import evidence_cli as _evidence_cli  # noqa: E402
 import git_helpers as _git_helpers  # noqa: E402
@@ -180,6 +183,8 @@ import source_prep as _source_prep  # noqa: E402
 import source_prep_bindings as _source_prep_bindings  # noqa: E402
 import ssh_bundle as _ssh_bundle  # noqa: E402
 import target_preflight as _target_preflight  # noqa: E402
+import target_preflight_bindings as _target_preflight_bindings  # noqa: E402
+import utility_command_bindings as _utility_command_bindings  # noqa: E402
 import windows_desktop_action as _windows_desktop_action  # noqa: E402
 import windows_desktop_bindings as _windows_desktop_bindings  # noqa: E402
 import windows_probe as _windows_probe  # noqa: E402
@@ -569,14 +574,7 @@ def update_target_repo_path(config: dict, target_name: str, repo_path: str) -> N
 
 
 def probe_windows_repo_checkout(host: str, repo_path: str | None) -> dict:
-    return _windows_probe.probe_windows_repo_checkout(
-        host,
-        repo_path,
-        run_windows_ssh_powershell_fn=run_windows_ssh_powershell,
-        windows_repo_path_is_unsafe_fn=windows_repo_path_is_unsafe,
-        parse_windows_ssh_json_fn=parse_windows_ssh_json,
-        ps_literal_fn=ps_literal,
-    )
+    return _desktop_probe_bindings.probe_windows_repo_checkout(globals(), host, repo_path)
 
 
 def windows_repo_checkout_ready(probe: dict | None) -> bool:
@@ -591,19 +589,13 @@ def ensure_windows_remote_repo_checkout(
     bundle_name: str | None = None,
     bundle_ref: str | None = None,
 ) -> dict:
-    return _windows_probe.ensure_windows_remote_repo_checkout(
+    return _desktop_probe_bindings.ensure_windows_remote_repo_checkout(
+        globals(),
         host,
         repo_path,
         remote_url=remote_url,
         bundle_name=bundle_name,
         bundle_ref=bundle_ref,
-        probe_windows_repo_checkout_fn=probe_windows_repo_checkout,
-        windows_repo_path_is_unsafe_fn=windows_repo_path_is_unsafe,
-        windows_default_repo_checkout_path_fn=windows_default_repo_checkout_path,
-        run_windows_ssh_powershell_fn=run_windows_ssh_powershell,
-        parse_windows_ssh_json_fn=parse_windows_ssh_json,
-        windows_contract_expand_expression_fn=windows_contract_expand_expression,
-        ps_literal_fn=ps_literal,
     )
 
 
@@ -674,43 +666,19 @@ def _check_writable_dir(path: Path) -> tuple[bool, str]:
 
 
 def probe_windows_session_agent(host: str, contract: dict) -> dict:
-    return _windows_probe.probe_windows_session_agent(
-        host,
-        contract,
-        run_windows_ssh_powershell_fn=run_windows_ssh_powershell,
-        parse_windows_ssh_json_fn=parse_windows_ssh_json,
-        windows_contract_expand_expression_fn=windows_contract_expand_expression,
-        ps_literal_fn=ps_literal,
-    )
+    return _desktop_probe_bindings.probe_windows_session_agent(globals(), host, contract)
 
 
 def probe_windows_remote_tooling(host: str) -> dict:
-    return _windows_probe.probe_windows_remote_tooling(
-        host,
-        run_windows_ssh_powershell_fn=run_windows_ssh_powershell,
-        parse_windows_ssh_json_fn=parse_windows_ssh_json,
-    )
+    return _desktop_probe_bindings.probe_windows_remote_tooling(globals(), host)
 
 
 def install_windows_remote_tool(host: str, package_id: str, *, timeout: int = 900) -> None:
-    return _windows_probe.install_windows_remote_tool(
-        host,
-        package_id,
-        timeout=timeout,
-        run_windows_ssh_powershell_fn=run_windows_ssh_powershell,
-        ps_literal_fn=ps_literal,
-    )
+    return _desktop_probe_bindings.install_windows_remote_tool(globals(), host, package_id, timeout=timeout)
 
 
 def ensure_windows_remote_tooling(host: str, *, install_optional: bool = False) -> dict:
-    return _windows_probe.ensure_windows_remote_tooling(
-        host,
-        install_optional=install_optional,
-        required_tools=WINDOWS_REQUIRED_REMOTE_TOOLS,
-        optional_tools=WINDOWS_OPTIONAL_REMOTE_TOOLS,
-        probe_windows_remote_tooling_fn=probe_windows_remote_tooling,
-        install_windows_remote_tool_fn=install_windows_remote_tool,
-    )
+    return _desktop_probe_bindings.ensure_windows_remote_tooling(globals(), host, install_optional=install_optional)
 
 
 def windows_tooling_detail(probe: dict, tool_name: str, *, missing_hint: str | None = None) -> str:
@@ -722,24 +690,7 @@ def windows_remote_tooling_ready(probe: dict) -> bool:
 
 
 def desktop_doctor_checks(config: dict, target_name: str) -> list[dict]:
-    return _desktop_doctor.desktop_doctor_checks(
-        config,
-        target_name,
-        resolve_desktop_target_fn=resolve_desktop_target,
-        desktop_target_contract_fn=desktop_target_contract,
-        desktop_receipt_for_fn=desktop_receipt_for,
-        macos_accessibility_trusted_fn=macos_accessibility_trusted,
-        ssh_reachable_fn=ssh_reachable,
-        ssh_failure_detail_fn=ssh_failure_detail,
-        probe_linux_launch_backend_fn=probe_linux_launch_backend,
-        probe_linux_remote_tooling_fn=probe_linux_remote_tooling,
-        probe_windows_session_agent_fn=probe_windows_session_agent,
-        probe_windows_remote_tooling_fn=probe_windows_remote_tooling,
-        probe_windows_repo_checkout_fn=probe_windows_repo_checkout,
-        platform=sys.platform,
-        which_fn=shutil.which,
-        probe_webdriver_endpoint_fn=probe_webdriver_endpoint,
-    )
+    return _desktop_probe_bindings.desktop_doctor_checks(globals(), config, target_name)
 
 
 def webdriver_status_url(base_url: str) -> str:
@@ -747,12 +698,7 @@ def webdriver_status_url(base_url: str) -> str:
 
 
 def probe_webdriver_endpoint(base_url: str, *, timeout: float = 5.0) -> dict:
-    return _desktop_doctor.probe_webdriver_endpoint(
-        base_url,
-        timeout=timeout,
-        request_cls=urllib.request.Request,
-        urlopen_fn=urllib.request.urlopen,
-    )
+    return _desktop_probe_bindings.probe_webdriver_endpoint(globals(), base_url, timeout=timeout)
 
 
 def desktop_artifact_root(config: dict) -> Path:
@@ -834,49 +780,27 @@ def _run_git(args: list[str], *, cwd: Path, check: bool = True) -> subprocess.Co
 
 
 def publish_report_to_branch(config: dict, report: dict) -> dict:
-    return _reporting.publish_report_to_branch(
-        config,
-        report,
-        root=ROOT,
-        run_git_fn=_run_git,
-        reset_local_worktree_fn=_reset_local_worktree,
-        clear_directory_contents_fn=_clear_directory_contents,
-        git_origin_http_url_fn=git_origin_http_url,
-    )
+    return _desktop_reporting_bindings.publish_report_to_branch(globals(), config, report)
 
 
 def make_desktop_source_request(args: argparse.Namespace) -> dict:
-    return _source_prep.make_desktop_source_request(
-        args,
-        normalize_desktop_source_mode_fn=normalize_desktop_source_mode,
-        current_branch_fn=current_branch,
-        current_sha_fn=current_sha,
-    )
+    return _source_prep_bindings.make_desktop_source_request(globals(), args)
 
 
 def desktop_source_cache_key(source_request: dict) -> str:
-    return _source_prep.desktop_source_cache_key(source_request)
+    return _source_prep_bindings.desktop_source_cache_key(globals(), source_request)
 
 
 def desktop_source_root(target_name: str, source_request: dict) -> Path:
-    return _source_prep.desktop_source_root(
-        target_name,
-        source_request,
-        state_dir_fn=state_dir,
-    )
+    return _source_prep_bindings.desktop_source_root(globals(), target_name, source_request)
 
 
 def _command_path_rewrite_candidate(token: str) -> Path | None:
-    return _source_prep.command_path_rewrite_candidate(token, root=ROOT)
+    return _source_prep_bindings.command_path_rewrite_candidate(globals(), token)
 
 
 def _rewrite_launch_command_for_mapper(command: str | None, mapper, *, windows: bool = False) -> str | None:
-    return _source_prep.rewrite_launch_command_for_mapper(
-        command,
-        mapper,
-        root=ROOT,
-        windows=windows,
-    )
+    return _source_prep_bindings.rewrite_launch_command_for_mapper(globals(), command, mapper, windows=windows)
 
 
 def _windows_command_join(parts: list[str]) -> str:
@@ -884,32 +808,27 @@ def _windows_command_join(parts: list[str]) -> str:
 
 
 def rewrite_launch_command_for_source_root(command: str | None, source_root: Path) -> str | None:
-    return _source_prep.rewrite_launch_command_for_source_root(command, source_root, root=ROOT)
+    return _source_prep_bindings.rewrite_launch_command_for_source_root(globals(), command, source_root)
 
 
 def rewrite_launch_command_for_posix_root(command: str | None, remote_root: str) -> str | None:
-    return _source_prep.rewrite_launch_command_for_posix_root(command, remote_root, root=ROOT)
+    return _source_prep_bindings.rewrite_launch_command_for_posix_root(globals(), command, remote_root)
 
 
 def rewrite_launch_command_for_windows_root(command: str | None, remote_root: str) -> str | None:
-    return _source_prep.rewrite_launch_command_for_windows_root(
-        command,
-        remote_root,
-        root=ROOT,
-        windows_path_join_fn=windows_path_join,
-    )
+    return _source_prep_bindings.rewrite_launch_command_for_windows_root(globals(), command, remote_root)
 
 
 def split_windows_prepare_commands(command: str) -> list[str]:
-    return _source_prep.split_windows_prepare_commands(command)
+    return _source_prep_bindings.split_windows_prepare_commands(globals(), command)
 
 
 def validate_windows_prepare_commands(commands: list[str]) -> None:
-    return _source_prep.validate_windows_prepare_commands(commands)
+    return _source_prep_bindings.validate_windows_prepare_commands(globals(), commands)
 
 
 def attach_desktop_source_to_manifest(manifest: dict, source_context: dict | None) -> None:
-    return _source_prep.attach_desktop_source_to_manifest(manifest, source_context)
+    return _source_prep_bindings.attach_desktop_source_to_manifest(globals(), manifest, source_context)
 
 
 def slugify_token(value: str, *, max_len: int = 48) -> str:
@@ -923,34 +842,21 @@ def stage_desktop_publish_report(
     output_dir: Path | None = None,
     label: str | None = None,
 ) -> dict:
-    return _reporting.stage_desktop_publish_report(
+    return _desktop_reporting_bindings.stage_desktop_publish_report(
+        globals(),
         config,
         manifests,
         output_dir=output_dir,
         label=label,
-        create_desktop_publish_bundle_fn=create_desktop_publish_bundle,
-        now_iso_fn=now_iso,
-        atomic_write_text_fn=atomic_write_text,
-        write_desktop_publish_rollups_fn=write_desktop_publish_rollups,
-        publish_report_to_branch_fn=publish_report_to_branch,
     )
 
 
 def desktop_publish_reports(config: dict, *, limit: int | None = None) -> list[dict]:
-    return _reporting.desktop_publish_reports(
-        config,
-        limit=limit,
-        desktop_publish_root_fn=desktop_publish_root,
-    )
+    return _desktop_reporting_bindings.desktop_publish_reports(globals(), config, limit=limit)
 
 
 def write_desktop_publish_rollups(config: dict) -> None:
-    _reporting.write_desktop_publish_rollups(
-        config,
-        desktop_publish_root_fn=desktop_publish_root,
-        desktop_publish_reports_fn=desktop_publish_reports,
-        atomic_write_text_fn=atomic_write_text,
-    )
+    return _desktop_reporting_bindings.write_desktop_publish_rollups(globals(), config)
 
 
 def wait_for_path(path: Path, timeout_secs: float) -> Path:
@@ -970,11 +876,11 @@ def macos_bundle_id_for_app_path(app_path: Path) -> str | None:
 
 
 def desktop_run_manifests(config: dict, *, target_name: str | None = None, action: str | None = None) -> list[dict]:
-    return _reporting.desktop_run_manifests(
+    return _desktop_reporting_bindings.desktop_run_manifests(
+        globals(),
         config,
         target_name=target_name,
         action=action,
-        desktop_artifact_root_fn=desktop_artifact_root,
     )
 
 
@@ -1012,7 +918,8 @@ def desktop_proof_summaries(
     branch: str | None = None,
     limit: int | None = None,
 ) -> list[dict]:
-    return _reporting.desktop_proof_summaries(
+    return _desktop_reporting_bindings.desktop_proof_summaries(
+        globals(),
         config,
         target_name=target_name,
         action=action,
@@ -1020,29 +927,15 @@ def desktop_proof_summaries(
         sha=sha,
         branch=branch,
         limit=limit,
-        desktop_run_manifests_fn=desktop_run_manifests,
-        desktop_run_summary_fn=desktop_run_summary,
     )
 
 
 def desktop_rollup_dir(config: dict, target_name: str | None = None) -> Path:
-    return _reporting.desktop_rollup_dir(
-        config,
-        target_name,
-        desktop_artifact_root_fn=desktop_artifact_root,
-    )
+    return _desktop_reporting_bindings.desktop_rollup_dir(globals(), config, target_name)
 
 
 def write_desktop_run_rollups(config: dict, *, target_name: str | None = None) -> None:
-    _reporting.write_desktop_run_rollups(
-        config,
-        target_name=target_name,
-        desktop_rollup_dir_fn=desktop_rollup_dir,
-        desktop_run_manifests_fn=desktop_run_manifests,
-        desktop_run_summary_fn=desktop_run_summary,
-        desktop_proof_summaries_fn=desktop_proof_summaries,
-        atomic_write_text_fn=atomic_write_text,
-    )
+    return _desktop_reporting_bindings.write_desktop_run_rollups(globals(), config, target_name=target_name)
 
 
 def prune_desktop_run_manifests(
@@ -1052,12 +945,12 @@ def prune_desktop_run_manifests(
     older_than_days: int | None = None,
     keep_last: int | None = None,
 ) -> list[Path]:
-    return _reporting.prune_desktop_run_manifests(
+    return _desktop_reporting_bindings.prune_desktop_run_manifests(
+        globals(),
         config,
         target_name=target_name,
         older_than_days=older_than_days,
         keep_last=keep_last,
-        desktop_run_manifests_fn=desktop_run_manifests,
     )
 
 
@@ -1454,11 +1347,11 @@ def run_windows_session_agent_action(
 
 
 def default_priority_for(command: str, config: dict) -> str:
-    return _queue_orchestrator.default_priority_for(command, config)
+    return _queue_bindings.default_priority_for(globals(), command, config)
 
 
 def make_fingerprint(branch: str, sha: str, targets: list[str], validation: str) -> str:
-    return _queue_orchestrator.make_fingerprint(branch, sha, targets, validation)
+    return _queue_bindings.make_fingerprint(globals(), branch, sha, targets, validation)
 
 
 def make_job(
@@ -1470,7 +1363,8 @@ def make_job(
     validation: str,
     submission: dict | None = None,
 ) -> dict:
-    return _queue_orchestrator.make_job(
+    return _queue_bindings.make_job(
+        globals(),
         branch,
         sha,
         priority,
@@ -1478,35 +1372,31 @@ def make_job(
         mode,
         validation,
         submission=submission,
-        now_iso_fn=now_iso,
-        uuid_hex_fn=lambda: uuid.uuid4().hex,
-        root=ROOT,
-        validate_branch_fn=validate_ci_branch_name,
     )
 
 
 def supersedence_key(job: dict) -> tuple[str, tuple[str, ...], str]:
-    return _queue_orchestrator.supersedence_key(job)
+    return _queue_bindings.supersedence_key(globals(), job)
 
 
 def supersedence_identity_key(job: dict) -> tuple[str, str, str]:
-    return _queue_orchestrator.supersedence_identity_key(job)
+    return _queue_bindings.supersedence_identity_key(globals(), job)
 
 
 def jobs_share_supersedence_scope(newer_job: dict, older_job: dict) -> bool:
-    return _queue_orchestrator.jobs_share_supersedence_scope(newer_job, older_job)
+    return _queue_bindings.jobs_share_supersedence_scope(globals(), newer_job, older_job)
 
 
 def job_has_narrower_same_identity_scope(newer_job: dict, older_job: dict) -> bool:
-    return _queue_orchestrator.job_has_narrower_same_identity_scope(newer_job, older_job)
+    return _queue_bindings.job_has_narrower_same_identity_scope(globals(), newer_job, older_job)
 
 
 def supersedence_reason(newer_job: dict, older_job: dict) -> str | None:
-    return _queue_orchestrator.supersedence_reason(newer_job, older_job)
+    return _queue_bindings.supersedence_reason(globals(), newer_job, older_job)
 
 
 def supersedence_result(job: dict, superseded_by: str, reason: str) -> dict:
-    return _queue_orchestrator.supersedence_result(job, superseded_by, reason, now_iso_fn=now_iso)
+    return _queue_bindings.supersedence_result(globals(), job, superseded_by, reason)
 
 
 def supersede_job_unlocked(job: dict, superseded_by: str, reason: str) -> None:
@@ -1514,7 +1404,7 @@ def supersede_job_unlocked(job: dict, superseded_by: str, reason: str) -> None:
 
 
 def cancellation_result(job: dict, reason: str) -> dict:
-    return _queue_orchestrator.cancellation_result(job, reason, now_iso_fn=now_iso)
+    return _queue_bindings.cancellation_result(globals(), job, reason)
 
 
 def cancel_job_unlocked(job: dict, reason: str = "operator_canceled") -> None:
@@ -1522,58 +1412,55 @@ def cancel_job_unlocked(job: dict, reason: str = "operator_canceled") -> None:
 
 
 def summarize_job(job: dict) -> str:
-    return _queue_orchestrator.summarize_job(job)
+    return _queue_bindings.summarize_job(globals(), job)
 
 
 def bump_queue_command_result_line(result: dict, job_ref: str) -> tuple[int, str]:
-    return _queue_orchestrator.bump_queue_command_result_line(result, job_ref)
+    return _queue_bindings.bump_queue_command_result_line(globals(), result, job_ref)
 
 
 def cancel_queue_command_result_line(result: dict, job_ref: str) -> tuple[int, str]:
-    return _queue_orchestrator.cancel_queue_command_result_line(result, job_ref)
+    return _queue_bindings.cancel_queue_command_result_line(globals(), result, job_ref)
 
 
 def enqueue_command_result_line(job: dict, *, created: bool) -> str:
-    return _queue_orchestrator.enqueue_command_result_line(job, created=created)
+    return _queue_bindings.enqueue_command_result_line(globals(), job, created=created)
 
 
 def drain_runner_active_line(runner_info: dict | None) -> str:
-    return _queue_orchestrator.drain_runner_active_line(runner_info)
+    return _queue_bindings.drain_runner_active_line(globals(), runner_info)
 
 
 def summarize_active_targets(active_targets: dict | None, preferred_order: list[str] | None = None) -> str:
-    return _queue_orchestrator.summarize_active_targets(active_targets, preferred_order)
+    return _queue_bindings.summarize_active_targets(globals(), active_targets, preferred_order)
 
 
 def status_active_targets(job: dict, runner_info: dict | None = None) -> dict | None:
-    return _queue_orchestrator.status_active_targets(job, runner_info)
+    return _queue_bindings.status_active_targets(globals(), job, runner_info)
 
 
 def status_target_states(job: dict, active_targets: dict | None) -> list[tuple[str, dict]]:
-    return _queue_orchestrator.status_target_states(job, active_targets)
+    return _queue_bindings.status_target_states(globals(), job, active_targets)
 
 
 def status_submission_lines(job: dict) -> list[str]:
-    return _queue_orchestrator.status_submission_lines(job)
+    return _queue_bindings.status_submission_lines(globals(), job)
 
 
 def target_state_detail_parts(state: dict) -> list[str]:
-    return _queue_orchestrator.target_state_detail_parts(state)
+    return _queue_bindings.target_state_detail_parts(globals(), state)
 
 
 def status_target_detail_lines(job: dict, active_targets: dict | None) -> list[str]:
-    return _queue_orchestrator.status_target_detail_lines(job, active_targets)
+    return _queue_bindings.status_target_detail_lines(globals(), job, active_targets)
 
 
 def initial_target_state(job_id: str, target_name: str, *, started_at: str) -> dict:
-    return _queue_orchestrator.initial_target_state(
-        started_at=started_at,
-        log_path=str(target_log_path(job_id, target_name)),
-    )
+    return _queue_bindings.initial_target_state(globals(), job_id, target_name, started_at=started_at)
 
 
 def updated_target_state(previous_state: dict | None, fields: dict) -> dict:
-    return _queue_orchestrator.updated_target_state(previous_state, fields)
+    return _queue_bindings.updated_target_state(globals(), previous_state, fields)
 
 
 def completed_target_state(
@@ -1584,77 +1471,74 @@ def completed_target_state(
     *,
     completed_at: str,
 ) -> dict:
-    return _queue_orchestrator.completed_target_state(
+    return _queue_bindings.completed_target_state(
+        globals(),
+        job_id,
+        target_name,
         result,
         previous_state,
         completed_at=completed_at,
-        default_log_path=str(target_log_path(job_id, target_name)),
     )
 
 
 def target_state_snapshot(target_states: dict[str, dict]) -> dict | None:
-    return _queue_orchestrator.target_state_snapshot(target_states)
+    return _queue_bindings.target_state_snapshot(globals(), target_states)
 
 
 def status_runner_line(runner_info: dict | None) -> str:
-    return _queue_orchestrator.status_runner_line(runner_info)
+    return _queue_bindings.status_runner_line(globals(), runner_info)
 
 
 def recent_completed_status_line(job: dict, result: dict) -> str:
-    return _queue_orchestrator.recent_completed_status_line(job, result)
+    return _queue_bindings.recent_completed_status_line(globals(), job, result)
 
 
 def recent_completed_missing_result_line(job: dict) -> str:
-    return _queue_orchestrator.recent_completed_missing_result_line(job)
+    return _queue_bindings.recent_completed_missing_result_line(globals(), job)
 
 
 def result_validation_line(result: dict) -> str | None:
-    return _queue_orchestrator.result_validation_line(result)
+    return _queue_bindings.result_validation_line(globals(), result)
 
 
 def result_execution_line(result: dict) -> str:
-    return _queue_orchestrator.result_execution_line(result)
+    return _queue_bindings.result_execution_line(globals(), result)
 
 
 def target_result_line(item: dict) -> str:
-    return _queue_orchestrator.target_result_line(item)
+    return _queue_bindings.target_result_line(globals(), item)
 
 
 def result_target_lines(result: dict) -> list[str]:
-    return _queue_orchestrator.result_target_lines(result)
+    return _queue_bindings.result_target_lines(globals(), result)
 
 
 def result_overall_line(result: dict) -> str:
-    return _queue_orchestrator.result_overall_line(result)
+    return _queue_bindings.result_overall_line(globals(), result)
 
 
 def missing_job_logs_line() -> str:
-    return _queue_orchestrator.missing_job_logs_line()
+    return _queue_bindings.missing_job_logs_line(globals())
 
 
 def missing_log_files_line(job: dict) -> str:
-    return _queue_orchestrator.missing_log_files_line(job)
+    return _queue_bindings.missing_log_files_line(globals(), job)
 
 
 def job_logs_header_line(job: dict) -> str:
-    return _queue_orchestrator.job_logs_header_line(job)
+    return _queue_bindings.job_logs_header_line(globals(), job)
 
 
 def log_section_header_line(target: str) -> str:
-    return _queue_orchestrator.log_section_header_line(target)
+    return _queue_bindings.log_section_header_line(globals(), target)
 
 
 def empty_log_line() -> str:
-    return _queue_orchestrator.empty_log_line()
+    return _queue_bindings.empty_log_line(globals())
 
 
 def upsert_job_active_targets_unlocked(queue: list[dict], job_id: str, active_targets: dict | None) -> bool:
-    return _queue_orchestrator.upsert_job_active_targets_unlocked(
-        queue,
-        job_id,
-        active_targets,
-        now_iso_fn=now_iso,
-    )
+    return _queue_bindings.upsert_job_active_targets_unlocked(globals(), queue, job_id, active_targets)
 
 
 def update_job_active_targets(job_id: str, active_targets: dict | None) -> None:
@@ -1683,17 +1567,11 @@ def enqueue_job(
 
 
 def trim_completed_jobs_with_removed_ids(queue: list[dict]) -> tuple[list[dict], set[str]]:
-    return _queue_orchestrator.trim_completed_jobs_with_removed_ids(
-        queue,
-        keep_completed_jobs=KEEP_COMPLETED_JOBS,
-    )
+    return _queue_bindings.trim_completed_jobs_with_removed_ids(globals(), queue)
 
 
 def trim_completed_jobs(queue: list[dict]) -> list[dict]:
-    return _queue_orchestrator.trim_completed_jobs(
-        queue,
-        keep_completed_jobs=KEEP_COMPLETED_JOBS,
-    )
+    return _queue_bindings.trim_completed_jobs(globals(), queue)
 
 
 def bump_queue_command_job(job_ref: str, requested_priority: str) -> dict:
@@ -1748,66 +1626,39 @@ def cleanup_plan_lines(plan: dict, *, dry_run: bool) -> list[str]:
 
 
 def job_sort_key(job: dict) -> tuple[int, str, str]:
-    return _queue_orchestrator.job_sort_key(job)
+    return _queue_bindings.job_sort_key(globals(), job)
 
 
 def queue_status_groups(queue: list[dict]) -> tuple[list[dict], list[dict], list[dict]]:
-    return _queue_orchestrator.queue_status_groups(queue)
+    return _queue_bindings.queue_status_groups(globals(), queue)
 
 
 def recent_completed_jobs_for_status(completed_jobs: list[dict], *, limit: int = 5) -> list[dict]:
-    return _queue_orchestrator.recent_completed_jobs_for_status(completed_jobs, limit=limit)
+    return _queue_bindings.recent_completed_jobs_for_status(globals(), completed_jobs, limit=limit)
 
 
 def reconcile_running_jobs_unlocked(queue: list[dict]) -> tuple[list[dict], bool]:
-    return _queue_lifecycle.reconcile_running_jobs_unlocked(
-        queue,
-        stale_running_jobs_unlocked_fn=stale_running_jobs_unlocked,
-        stale_running_reconciliation_actions_unlocked_fn=_queue_orchestrator.stale_running_reconciliation_actions_unlocked,
-        supersede_job_unlocked_fn=supersede_job_unlocked,
-        requeue_stale_running_job_unlocked_fn=lambda job: _queue_orchestrator.requeue_stale_running_job_unlocked(
-            job,
-            now_iso_fn=now_iso,
-        ),
-    )
+    return _queue_bindings.reconcile_running_jobs_unlocked(globals(), queue)
 
 
 def read_runner_info() -> dict | None:
-    return _runner_state.read_runner_info()
+    return _queue_bindings.read_runner_info(globals())
 
 
 def pid_alive(pid: int | None) -> bool:
-    return _runner_state.pid_alive(pid)
+    return _queue_bindings.pid_alive(globals(), pid)
 
 
 def current_runner_info() -> dict | None:
-    return _runner_state.current_runner_info()
+    return _queue_bindings.current_runner_info(globals())
 
 
 def stale_running_jobs_unlocked(queue: list[dict]) -> list[dict]:
-    return _runner_state.stale_running_jobs_for_current_runner(
-        queue,
-        stale_running_jobs_for_runner_unlocked_fn=_queue_orchestrator.stale_running_jobs_for_runner_unlocked,
-    )
+    return _queue_bindings.stale_running_jobs_unlocked(globals(), queue)
 
 
 def update_job_target_state(job_id: str, target_name: str, **fields) -> None:
-    _queue_lifecycle.update_job_target_state_locked(
-        job_id,
-        target_name,
-        fields,
-        queue_lock_path_fn=queue_lock_path,
-        file_lock_fn=file_lock,
-        load_queue_unlocked_fn=load_queue_unlocked,
-        update_job_target_state_unlocked_fn=lambda queue, current_job_id, current_target_name, current_fields: _queue_orchestrator.update_job_target_state_unlocked(
-            queue,
-            current_job_id,
-            current_target_name,
-            current_fields,
-            now_iso_fn=now_iso,
-        ),
-        save_queue_unlocked_fn=save_queue_unlocked,
-    )
+    _queue_bindings.update_job_target_state(globals(), job_id, target_name, **fields)
 
 
 def collect_stale_windows_cleanup_candidates_unlocked(queue: list[dict]) -> list[dict]:
@@ -1831,22 +1682,11 @@ def cleanup_stale_windows_validator(host: str, pid: int, started_at: str) -> dic
 
 
 def reclaim_stale_remote_validators(_config: dict) -> int:
-    return _queue_lifecycle.reclaim_stale_remote_validators_locked(
-        queue_lock_path_fn=queue_lock_path,
-        file_lock_fn=file_lock,
-        load_queue_unlocked_fn=load_queue_unlocked,
-        collect_stale_windows_cleanup_candidates_unlocked_fn=collect_stale_windows_cleanup_candidates_unlocked,
-        save_queue_unlocked_fn=save_queue_unlocked,
-        reclaim_stale_remote_validator_candidates_fn=_cleanup.reclaim_stale_remote_validator_candidates,
-        cleanup_validator_fn=cleanup_stale_windows_validator,
-        update_job_target_state_fn=update_job_target_state,
-        now_fn=now_iso,
-        trim_line_fn=trim_line,
-    )
+    return _queue_bindings.reclaim_stale_remote_validators(globals(), _config)
 
 
 def write_runner_info(info: dict) -> None:
-    _runner_state.write_runner_info(info)
+    _queue_bindings.write_runner_info(globals(), info)
 
 
 def update_runner_active_targets(job_id: str, active_targets: dict | None) -> None:
@@ -1854,11 +1694,11 @@ def update_runner_active_targets(job_id: str, active_targets: dict | None) -> No
 
 
 def clear_runner_info() -> None:
-    _runner_state.clear_runner_info()
+    _queue_bindings.clear_runner_info(globals())
 
 
 def find_job_unlocked(queue: list[dict], job_ref: str, statuses: set[str] | None = None) -> dict | None:
-    return _queue_orchestrator.find_job_unlocked(queue, job_ref, statuses)
+    return _queue_bindings.find_job_unlocked(globals(), queue, job_ref, statuses)
 
 
 def load_job(job_id: str) -> dict | None:
@@ -1893,94 +1733,47 @@ def notify(message: str) -> None:
 
 
 def ssh_probe(host: str, timeout: int = 5) -> subprocess.CompletedProcess[str]:
-    return _target_preflight.ssh_probe(
-        host,
-        timeout,
-        run_ssh_subprocess_fn=run_ssh_subprocess,
-    )
+    return _target_preflight_bindings.ssh_probe(globals(), host, timeout)
 
 
 def ssh_reachable(host: str, timeout: int = 5) -> bool:
-    return _target_preflight.ssh_reachable(
-        host,
-        timeout,
-        ssh_probe_fn=ssh_probe,
-    )
+    return _target_preflight_bindings.ssh_reachable(globals(), host, timeout)
 
 
 def ssh_failure_detail(host: str, timeout: int = 5) -> str:
-    return _target_preflight.ssh_failure_detail(
-        host,
-        timeout,
-        ssh_probe_fn=ssh_probe,
-    )
+    return _target_preflight_bindings.ssh_failure_detail(globals(), host, timeout)
 
 
 def ssh_command_result(host: str, remote_cmd: str, *, timeout: int = 30) -> subprocess.CompletedProcess[str]:
-    return _target_preflight.ssh_command_result(
-        host,
-        remote_cmd,
-        timeout=timeout,
-        run_ssh_subprocess_fn=run_ssh_subprocess,
-    )
+    return _target_preflight_bindings.ssh_command_result(globals(), host, remote_cmd, timeout=timeout)
 
 
 def utmctl_vm_status(vm_name: str) -> str | None:
-    return _target_preflight.utmctl_vm_status(
-        vm_name,
-        run_fn=subprocess.run,
-    )
+    return _target_preflight_bindings.utmctl_vm_status(globals(), vm_name)
 
 
 def utmctl_start(vm_name: str) -> bool:
-    return _target_preflight.utmctl_start(
-        vm_name,
-        run_fn=subprocess.run,
-    )
+    return _target_preflight_bindings.utmctl_start(globals(), vm_name)
 
 
 def ensure_host_reachable(target_name: str, target_cfg: dict, defaults: dict) -> str | None:
-    return _target_preflight.ensure_host_reachable(
-        target_name,
-        target_cfg,
-        defaults,
-        ssh_reachable_fn=ssh_reachable,
-        utmctl_vm_status_fn=utmctl_vm_status,
-        utmctl_start_fn=utmctl_start,
-        time_fn=time.time,
-        sleep_fn=time.sleep,
-        print_fn=print,
-    )
+    return _target_preflight_bindings.ensure_host_reachable(globals(), target_name, target_cfg, defaults)
 
 
 def config_source_name(path: Path) -> str:
-    return _target_preflight.config_source_name(
-        path,
-        environ=os.environ,
-        shared_config_path_fn=shared_config_path,
-    )
+    return _target_preflight_bindings.config_source_name(globals(), path)
 
 
 def config_material_for_targets(config: dict, targets: list[str]) -> dict:
-    return _target_preflight.config_material_for_targets(config, targets)
+    return _target_preflight_bindings.config_material_for_targets(globals(), config, targets)
 
 
 def find_material_config_drift(targets: list[str]) -> list[str]:
-    return _target_preflight.find_material_config_drift(
-        targets,
-        shared_config_path_fn=shared_config_path,
-        worktree_config_path_fn=worktree_config_path,
-        config_material_for_targets_fn=config_material_for_targets,
-    )
+    return _target_preflight_bindings.find_material_config_drift(globals(), targets)
 
 
 def preflight_target_host_state(target_name: str, target_cfg: dict, defaults: dict) -> dict:
-    return _target_preflight.preflight_target_host_state(
-        target_name,
-        target_cfg,
-        defaults,
-        ssh_reachable_fn=ssh_reachable,
-    )
+    return _target_preflight_bindings.preflight_target_host_state(globals(), target_name, target_cfg, defaults)
 
 
 def build_submission_metadata(
@@ -1994,7 +1787,8 @@ def build_submission_metadata(
     allow_root_mismatch: bool,
     allow_unreachable_targets: bool,
 ) -> dict:
-    return _target_preflight.build_submission_metadata(
+    return _target_preflight_bindings.build_submission_metadata(
+        globals(),
         config,
         branch,
         sha,
@@ -2003,48 +1797,34 @@ def build_submission_metadata(
         validation,
         allow_root_mismatch=allow_root_mismatch,
         allow_unreachable_targets=allow_unreachable_targets,
-        root=ROOT,
-        cwd_fn=Path.cwd,
-        git_root_for_fn=git_root_for,
-        config_path_fn=config_path,
-        config_source_name_fn=config_source_name,
-        preflight_target_host_state_fn=preflight_target_host_state,
-        find_material_config_drift_fn=find_material_config_drift,
-        normalize_provenance_fn=normalize_provenance,
-        environ=os.environ,
     )
 
 
 def print_submission_metadata(metadata: dict) -> None:
-    return _target_preflight.print_submission_metadata(
-        metadata,
-        short_sha_fn=short_sha,
-        provenance_summary_fn=provenance_summary,
-        print_fn=print,
-    )
+    return _target_preflight_bindings.print_submission_metadata(globals(), metadata)
 
 
 # ── Validation Runners ───────────────────────────────────────────────────────
 
 
 def remote_commit_error(target_name: str, host: str, job: dict) -> str:
-    return _execution.remote_commit_error(target_name, host, job)
+    return _execution_bindings.remote_commit_error(globals(), target_name, host, job)
 
 
 def parse_progress_marker(line: str) -> dict:
-    return _execution.parse_progress_marker(line)
+    return _execution_bindings.parse_progress_marker(globals(), line)
 
 
 def prepared_state_root(target_name: str, validation: str) -> Path:
-    return _execution.prepared_state_root(target_name, validation)
+    return _execution_bindings.prepared_state_root(globals(), target_name, validation)
 
 
 def should_reuse_prepared_state(job: dict) -> bool:
-    return _execution.should_reuse_prepared_state(job)
+    return _execution_bindings.should_reuse_prepared_state(globals(), job)
 
 
 def local_validation_command(job: dict, exclude_tests: str = "") -> tuple[list[str], str]:
-    return _execution.local_validation_command(job, exclude_tests)
+    return _execution_bindings.local_validation_command(globals(), job, exclude_tests)
 
 
 def posix_ssh_validation_command(
@@ -2057,7 +1837,8 @@ def posix_ssh_validation_command(
     bundle_ref: str,
     exclude_tests: str = "",
 ) -> tuple[list[str], str]:
-    return _execution.posix_ssh_validation_command(
+    return _execution_bindings.posix_ssh_validation_command(
+        globals(),
         target_name,
         host,
         repo_path,
@@ -2077,7 +1858,8 @@ def validation_result_from_run(
     transport_mode: str,
     timeout_secs: int = 3600,
 ) -> dict:
-    return _execution.validation_result_from_run(
+    return _execution_bindings.validation_result_from_run(
+        globals(),
         target_name,
         run,
         log_path=log_path,
@@ -2094,7 +1876,8 @@ def validation_error_result(
     log_path: Path,
     transport_mode: str,
 ) -> dict:
-    return _execution.validation_error_result(
+    return _execution_bindings.validation_error_result(
+        globals(),
         target_name,
         detail,
         log_path=log_path,
@@ -2103,24 +1886,19 @@ def validation_error_result(
 
 
 def unreachable_target_result(target_name: str, detail: str = "Host unreachable") -> dict:
-    return _execution.unreachable_target_result(target_name, detail)
+    return _execution_bindings.unreachable_target_result(globals(), target_name, detail)
 
 
 def target_exception_result(target_name: str, exc: Exception) -> dict:
-    return _execution.target_exception_result(target_name, exc)
+    return _execution_bindings.target_exception_result(globals(), target_name, exc)
 
 
 def completed_job_result(job: dict, results: list[dict]) -> dict:
-    return _execution.completed_job_result(
-        job,
-        results,
-        completed_at=now_iso(),
-        provenance=normalize_provenance(job.get("provenance")),
-    )
+    return _execution_bindings.completed_job_result(globals(), job, results)
 
 
 def sorted_target_results(results: list[dict]) -> list[dict]:
-    return _execution.sorted_target_results(results)
+    return _execution_bindings.sorted_target_results(globals(), results)
 
 
 def run_target_tasks(
@@ -2128,11 +1906,7 @@ def run_target_tasks(
     *,
     on_target_complete: Callable[[str, dict], None],
 ) -> list[dict]:
-    return _execution.run_target_tasks(
-        tasks,
-        exception_result_fn=target_exception_result,
-        on_target_complete=on_target_complete,
-    )
+    return _execution_bindings.run_target_tasks(globals(), tasks, on_target_complete=on_target_complete)
 
 
 def run_logged_command(
@@ -2146,7 +1920,8 @@ def run_logged_command(
     heartbeat_interval_secs: float = HEARTBEAT_INTERVAL_SECS,
     stuck_idle_secs: float = STUCK_IDLE_SECS,
 ) -> dict:
-    return _execution.run_logged_command(
+    return _execution_bindings.run_logged_command(
+        globals(),
         cmd,
         cwd=cwd,
         input_text=input_text,
@@ -2205,7 +1980,8 @@ def windows_validation_script(
     resolved_platform: str,
     resolved_generator_instance: str,
 ) -> tuple[str, str]:
-    return _execution.windows_validation_script(
+    return _execution_bindings.windows_validation_script(
+        globals(),
         target_name,
         host,
         effective_repo_path,
@@ -2216,12 +1992,11 @@ def windows_validation_script(
         cmake_generator=cmake_generator,
         resolved_platform=resolved_platform,
         resolved_generator_instance=resolved_generator_instance,
-        ps_literal_fn=ps_literal,
     )
 
 
 def validate_ci_branch_name(branch: str) -> str:
-    return _queue_orchestrator.validate_ci_branch_name(branch)
+    return _queue_bindings.validate_ci_branch_name(globals(), branch)
 
 
 def windows_ssh_powershell_command(host: str) -> list[str]:
@@ -2381,7 +2156,7 @@ def config_for_job_execution(job: dict, config: dict) -> dict:
 
 
 def submission_target_state(job: dict, target_name: str) -> dict:
-    return _execution.submission_target_state(job, target_name)
+    return _execution_bindings.submission_target_state(globals(), job, target_name)
 
 
 def resolve_ssh_target_execution(job: dict, target_name: str, target_cfg: dict, defaults: dict) -> tuple[str | None, str | None]:
@@ -2412,32 +2187,15 @@ def drain_pending_jobs(config: dict, *, blocking: bool) -> tuple[bool, bool]:
 
 
 def print_local_ci_state_footprint(*, indent: str = "") -> None:
-    return _cleanup_cli.print_local_ci_state_footprint(
-        local_ci_state_footprint_fn=local_ci_state_footprint,
-        state_footprint_lines_fn=state_footprint_lines,
-        indent=indent,
-    )
+    return _utility_command_bindings.print_local_ci_state_footprint(globals(), indent=indent)
 
 
 def print_local_ci_cleanup_plan(plan: dict, *, dry_run: bool) -> None:
-    return _cleanup_cli.print_local_ci_cleanup_plan(
-        plan,
-        dry_run=dry_run,
-        cleanup_plan_lines_fn=cleanup_plan_lines,
-    )
+    return _utility_command_bindings.print_local_ci_cleanup_plan(globals(), plan, dry_run=dry_run)
 
 
 def cmd_cleanup(args: argparse.Namespace) -> int:
-    return _cleanup_cli.cmd_cleanup(
-        args,
-        load_queue_fn=load_queue,
-        collect_cleanup_plan_fn=collect_local_ci_cleanup_plan,
-        apply_cleanup_plan_fn=apply_local_ci_cleanup_plan,
-        print_cleanup_plan_fn=print_local_ci_cleanup_plan,
-        print_state_footprint_fn=print_local_ci_state_footprint,
-        format_size_fn=format_size_bytes,
-        describe_path_fn=describe_path_for_cleanup,
-    )
+    return _utility_command_bindings.cmd_cleanup(globals(), args)
 
 
 def resolve_submission_options(
@@ -2467,20 +2225,11 @@ def cmd_check(args: argparse.Namespace) -> int:
 
 
 def cmd_bump(args: argparse.Namespace) -> int:
-    return _queue_commands_cli.cmd_bump(
-        args,
-        normalize_priority_fn=normalize_priority,
-        bump_queue_command_job_fn=bump_queue_command_job,
-        bump_queue_command_result_line_fn=bump_queue_command_result_line,
-    )
+    return _utility_command_bindings.cmd_bump(globals(), args)
 
 
 def cmd_cancel(args: argparse.Namespace) -> int:
-    return _queue_commands_cli.cmd_cancel(
-        args,
-        cancel_queue_command_job_fn=cancel_queue_command_job,
-        cancel_queue_command_result_line_fn=cancel_queue_command_result_line,
-    )
+    return _utility_command_bindings.cmd_cancel(globals(), args)
 
 
 def cmd_list(_args: argparse.Namespace) -> int:
@@ -2488,37 +2237,15 @@ def cmd_list(_args: argparse.Namespace) -> int:
 
 
 def resolve_job_for_logs(job_ref: str | None) -> dict | None:
-    return _logs_cli.resolve_job_for_logs(
-        job_ref,
-        load_queue_fn=load_queue,
-        current_runner_info_fn=current_runner_info,
-        select_job_for_logs_fn=_queue_orchestrator.select_job_for_logs,
-    )
+    return _utility_command_bindings.resolve_job_for_logs(globals(), job_ref)
 
 
 def cmd_logs(args: argparse.Namespace) -> int:
-    return _logs_cli.cmd_logs(
-        args,
-        resolve_job_for_logs_fn=resolve_job_for_logs,
-        target_log_path_fn=target_log_path,
-        job_logs_dir_fn=job_logs_dir,
-        tail_lines_fn=tail_lines,
-        missing_job_logs_line_fn=missing_job_logs_line,
-        missing_log_files_line_fn=missing_log_files_line,
-        job_logs_header_line_fn=job_logs_header_line,
-        log_section_header_line_fn=log_section_header_line,
-        empty_log_line_fn=empty_log_line,
-    )
+    return _utility_command_bindings.cmd_logs(globals(), args)
 
 
 def cmd_evidence(args: argparse.Namespace) -> int:
-    return _evidence_cli.cmd_evidence(
-        args,
-        current_branch_fn=current_branch,
-        evidence_scope_header_line_fn=evidence_scope_header_line,
-        print_evidence_summary_fn=print_evidence_summary,
-        evidence_empty_line_fn=evidence_empty_line,
-    )
+    return _utility_command_bindings.cmd_evidence(globals(), args)
 
 
 def cmd_status(_args: argparse.Namespace) -> int:
@@ -2526,81 +2253,23 @@ def cmd_status(_args: argparse.Namespace) -> int:
 
 
 def cmd_desktop_install(args: argparse.Namespace) -> int:
-    return _desktop_setup_commands_cli.cmd_desktop_install(
-        args,
-        load_config_fn=load_config,
-        resolve_desktop_target_fn=resolve_desktop_target,
-        check_writable_dir_fn=_check_writable_dir,
-        desktop_target_contract_fn=desktop_target_contract,
-        ensure_host_reachable_fn=ensure_host_reachable,
-        bootstrap_windows_session_agent_fn=bootstrap_windows_session_agent,
-        probe_windows_session_agent_fn=probe_windows_session_agent,
-        subprocess_run_fn=subprocess.run,
-        root_path=ROOT,
-        new_install_job_id_fn=lambda: uuid.uuid4().hex[:12],
-        sync_job_bundle_to_ssh_host_fn=sync_job_bundle_to_ssh_host,
-        ensure_windows_remote_tooling_fn=ensure_windows_remote_tooling,
-        windows_remote_tooling_ready_fn=windows_remote_tooling_ready,
-        ensure_windows_remote_repo_checkout_fn=ensure_windows_remote_repo_checkout,
-        git_origin_clone_url_fn=git_origin_clone_url,
-        windows_repo_checkout_ready_fn=windows_repo_checkout_ready,
-        update_target_repo_path_fn=update_target_repo_path,
-        save_config_fn=save_config,
-        now_iso_fn=now_iso,
-        desktop_target_receipt_path_fn=desktop_target_receipt_path,
-        atomic_write_text_fn=atomic_write_text,
-        windows_tooling_detail_fn=windows_tooling_detail,
-    )
+    return _desktop_command_bindings.cmd_desktop_install(globals(), args)
 
 
 def cmd_desktop_doctor(args: argparse.Namespace) -> int:
-    return _desktop_setup_commands_cli.cmd_desktop_doctor(
-        args,
-        load_config_fn=load_config,
-        resolve_desktop_target_fn=resolve_desktop_target,
-        desktop_doctor_checks_fn=desktop_doctor_checks,
-    )
+    return _desktop_command_bindings.cmd_desktop_doctor(globals(), args)
 
 
 def cmd_desktop_status(args: argparse.Namespace) -> int:
-    return _desktop_commands_cli.cmd_desktop_status(
-        args,
-        load_config_fn=load_config,
-        desktop_receipt_for_fn=desktop_receipt_for,
-        desktop_capabilities_for_fn=desktop_capabilities_for,
-        desktop_optional_capabilities_fn=desktop_optional_capabilities,
-        desktop_run_manifests_fn=desktop_run_manifests,
-        desktop_run_summary_fn=desktop_run_summary,
-        desktop_proof_summaries_fn=desktop_proof_summaries,
-        normalize_desktop_optional_config_fn=normalize_desktop_optional_config,
-        desktop_target_contract_fn=desktop_target_contract,
-        desktop_publish_reports_fn=desktop_publish_reports,
-        desktop_status_lines_fn=_desktop_cli.desktop_status_lines,
-        short_sha_fn=short_sha,
-        windows_tooling_detail_fn=windows_tooling_detail,
-        windows_repo_checkout_detail_fn=windows_repo_checkout_detail,
-    )
+    return _desktop_command_bindings.cmd_desktop_status(globals(), args)
 
 
 def cmd_desktop_config_show(args: argparse.Namespace) -> int:
-    return _desktop_commands_cli.cmd_desktop_config_show(
-        args,
-        load_config_fn=load_config,
-        desktop_config_show_lines_fn=_desktop_cli.desktop_config_show_lines,
-    )
+    return _desktop_command_bindings.cmd_desktop_config_show(globals(), args)
 
 
 def cmd_desktop_config_set(args: argparse.Namespace) -> int:
-    return _desktop_commands_cli.cmd_desktop_config_set(
-        args,
-        load_config_fn=load_config,
-        save_config_fn=save_config,
-        config_path_fn=config_path,
-        normalize_publish_mode_fn=normalize_publish_mode,
-        parse_config_bool_fn=parse_config_bool,
-        normalize_desktop_config_fn=normalize_desktop_config,
-        desktop_config_update_lines_fn=_desktop_cli.desktop_config_update_lines,
-    )
+    return _desktop_command_bindings.cmd_desktop_config_set(globals(), args)
 
 
 def cmd_desktop_config(args: argparse.Namespace) -> int:
@@ -2608,92 +2277,35 @@ def cmd_desktop_config(args: argparse.Namespace) -> int:
 
 
 def cmd_desktop_recent(args: argparse.Namespace) -> int:
-    return _desktop_commands_cli.cmd_desktop_recent(
-        args,
-        load_config_fn=load_config,
-        desktop_run_manifests_fn=desktop_run_manifests,
-        desktop_run_summary_fn=desktop_run_summary,
-        desktop_recent_lines_fn=_desktop_cli.desktop_recent_lines,
-        short_sha_fn=short_sha,
-    )
+    return _desktop_command_bindings.cmd_desktop_recent(globals(), args)
 
 
 def cmd_desktop_proof(args: argparse.Namespace) -> int:
-    return _desktop_commands_cli.cmd_desktop_proof(
-        args,
-        load_config_fn=load_config,
-        desktop_proof_summaries_fn=desktop_proof_summaries,
-        desktop_proof_empty_line_fn=_desktop_cli.desktop_proof_empty_line,
-        desktop_proof_lines_fn=_desktop_cli.desktop_proof_lines,
-        short_sha_fn=short_sha,
-    )
+    return _desktop_command_bindings.cmd_desktop_proof(globals(), args)
 
 
 def cmd_desktop_publish(args: argparse.Namespace) -> int:
-    return _desktop_commands_cli.cmd_desktop_publish(
-        args,
-        load_config_fn=load_config,
-        desktop_run_manifests_fn=desktop_run_manifests,
-        stage_desktop_publish_report_fn=stage_desktop_publish_report,
-        desktop_publish_lines_fn=_desktop_cli.desktop_publish_lines,
-    )
+    return _desktop_command_bindings.cmd_desktop_publish(globals(), args)
 
 
 def cmd_desktop_cleanup(args: argparse.Namespace) -> int:
-    return _desktop_commands_cli.cmd_desktop_cleanup(
-        args,
-        load_config_fn=load_config,
-        prune_desktop_run_manifests_fn=prune_desktop_run_manifests,
-        write_desktop_run_rollups_fn=write_desktop_run_rollups,
-        desktop_cleanup_empty_line_fn=_desktop_cli.desktop_cleanup_empty_line,
-        desktop_cleanup_lines_fn=_desktop_cli.desktop_cleanup_lines,
-    )
+    return _desktop_command_bindings.cmd_desktop_cleanup(globals(), args)
 
 
 def windows_requires_pulp_app_selectors(args: argparse.Namespace) -> bool:
-    return _desktop_action_commands_cli.windows_requires_pulp_app_selectors(args)
+    return _desktop_command_bindings.windows_requires_pulp_app_selectors(globals(), args)
 
 
 def cmd_desktop_smoke(args: argparse.Namespace) -> int:
-    return _desktop_action_commands_cli.cmd_desktop_smoke(
-        args,
-        load_config_fn=load_config,
-        resolve_desktop_target_fn=resolve_desktop_target,
-        make_desktop_source_request_fn=make_desktop_source_request,
-        run_macos_local_smoke_fn=run_macos_local_smoke,
-        run_linux_xvfb_remote_action_fn=run_linux_xvfb_remote_action,
-        run_windows_session_agent_action_fn=run_windows_session_agent_action,
-        desktop_action_success_lines_fn=_desktop_cli.desktop_action_success_lines,
-        sys_platform=sys.platform,
-    )
+    return _desktop_command_bindings.cmd_desktop_smoke(globals(), args)
 
 
 def cmd_desktop_click(args: argparse.Namespace) -> int:
-    return _desktop_action_commands_cli.cmd_desktop_click(
-        args,
-        load_config_fn=load_config,
-        resolve_desktop_target_fn=resolve_desktop_target,
-        make_desktop_source_request_fn=make_desktop_source_request,
-        run_macos_local_smoke_fn=run_macos_local_smoke,
-        run_linux_xvfb_remote_action_fn=run_linux_xvfb_remote_action,
-        run_windows_session_agent_action_fn=run_windows_session_agent_action,
-        desktop_action_success_lines_fn=_desktop_cli.desktop_action_success_lines,
-        sys_platform=sys.platform,
-    )
+    return _desktop_command_bindings.cmd_desktop_click(globals(), args)
 
 
 def cmd_desktop_inspect(args: argparse.Namespace) -> int:
-    return _desktop_action_commands_cli.cmd_desktop_inspect(
-        args,
-        load_config_fn=load_config,
-        resolve_desktop_target_fn=resolve_desktop_target,
-        make_desktop_source_request_fn=make_desktop_source_request,
-        run_macos_local_smoke_fn=run_macos_local_smoke,
-        run_linux_xvfb_remote_action_fn=run_linux_xvfb_remote_action,
-        run_windows_session_agent_action_fn=run_windows_session_agent_action,
-        desktop_action_success_lines_fn=_desktop_cli.desktop_action_success_lines,
-        sys_platform=sys.platform,
-    )
+    return _desktop_command_bindings.cmd_desktop_inspect(globals(), args)
 
 
 def cmd_desktop(args: argparse.Namespace) -> int:

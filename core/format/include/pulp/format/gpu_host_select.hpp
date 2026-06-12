@@ -105,6 +105,12 @@ inline GpuHostDecision decide_gpu_host(const ViewBridge& bridge) {
 inline std::function<void()> make_scripted_idle_pump(ViewBridge& bridge) {
     auto* bridge_ptr = &bridge;
     return [bridge_ptr]() {
+        // Drain queued host-automation parameter changes to Main-thread
+        // listeners on the UI thread, so parameter-bound widgets
+        // (bind_parameter) follow automation playback / host edits: the
+        // adapter writes the store from the audio thread, this propagates it
+        // to the editor. Cheap when the queue is empty.
+        bridge_ptr->store().pump_listeners();
         if (auto* session = bridge_ptr->scripted_ui()) {
             session->poll();
         }

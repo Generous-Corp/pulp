@@ -49,3 +49,12 @@ TEST_CASE("view core classname extraction reads bundled template styles",
     REQUIRE(rules.at("panel").at("color") == "#abcdef");
     REQUIRE(rules.at("panel").at("backgroundColor") == "#123456");
 }
+
+TEST_CASE("view continuous-repaint opt-in round-trips", "[view][continuous-repaint]") {
+    View v;
+    REQUIRE_FALSE(v.wants_continuous_repaint());  // off by default — event-driven
+    v.set_continuous_repaint(true);
+    REQUIRE(v.wants_continuous_repaint());
+    v.set_continuous_repaint(false);
+    REQUIRE_FALSE(v.wants_continuous_repaint());
+}

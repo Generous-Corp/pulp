@@ -8,6 +8,33 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v04261"></a>
+## [0.426.1] - 2026-06-11
+
+- fix(view): CPU plugin-view host drives continuous frames + idle pump ([#4029](https://github.com/danielraffel/pulp/pull/4029))
+- refactor(local-ci): extract target preflight bindings ([#4026](https://github.com/danielraffel/pulp/pull/4026))
+- refactor(local-ci): expand execution helper bindings ([#4025](https://github.com/danielraffel/pulp/pull/4025))
+- refactor(local-ci): expand queue display bindings ([#4024](https://github.com/danielraffel/pulp/pull/4024))
+- refactor(local-ci): expand queue runner bindings ([#4023](https://github.com/danielraffel/pulp/pull/4023))
+- refactor(local-ci): expand source prep bindings ([#4022](https://github.com/danielraffel/pulp/pull/4022))
+- refactor(local-ci): extract desktop reporting bindings ([#4021](https://github.com/danielraffel/pulp/pull/4021))
+
+<a id="v04260"></a>
+## [0.426.0] - 2026-06-11
+
+- feat(view): per-view continuous-repaint opt-in for live custom views ([#4015](https://github.com/danielraffel/pulp/pull/4015))
+- refactor(local-ci): extract desktop probe bindings ([#4020](https://github.com/danielraffel/pulp/pull/4020))
+- refactor(local-ci): extract desktop command bindings ([#4019](https://github.com/danielraffel/pulp/pull/4019))
+- refactor(local-ci): extract utility command bindings ([#4018](https://github.com/danielraffel/pulp/pull/4018))
+- refactor(local-ci): extract command bindings ([#4017](https://github.com/danielraffel/pulp/pull/4017))
+- refactor(local-ci): extract dispatch bindings ([#4016](https://github.com/danielraffel/pulp/pull/4016))
+- refactor(local-ci): extract execution processing bindings ([#4014](https://github.com/danielraffel/pulp/pull/4014))
+- refactor(local-ci): extract queue lifecycle bindings ([#4013](https://github.com/danielraffel/pulp/pull/4013))
+- refactor(local-ci): extract validation execution bindings ([#4012](https://github.com/danielraffel/pulp/pull/4012))
+- refactor(local-ci): extract windows desktop facade bindings ([#4011](https://github.com/danielraffel/pulp/pull/4011))
+- refactor(local-ci): extract linux desktop facade bindings ([#4009](https://github.com/danielraffel/pulp/pull/4009))
+- refactor(local-ci): extract source prep facade bindings ([#4007](https://github.com/danielraffel/pulp/pull/4007))
+
 <a id="v04250"></a>
 ## [0.425.0] - 2026-06-11
 
@@ -4342,6 +4369,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.426.1]: https://github.com/danielraffel/pulp/releases/tag/v0.426.1
+[0.426.0]: https://github.com/danielraffel/pulp/releases/tag/v0.426.0
 [0.425.0]: https://github.com/danielraffel/pulp/releases/tag/v0.425.0
 [0.424.0]: https://github.com/danielraffel/pulp/releases/tag/v0.424.0
 [0.423.0]: https://github.com/danielraffel/pulp/releases/tag/v0.423.0

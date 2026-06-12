@@ -660,6 +660,10 @@ if(APPLE)
             "-framework Cocoa"
             "-framework ImageIO"
             "-framework UniformTypeIdentifiers"
+            # CVDisplayLink drives the continuous-frame / idle pump in BOTH the
+            # CPU (CoreGraphics) and GPU plugin hosts, so CoreVideo must link
+            # even when Skia is absent (the CG-only fallback build).
+            "-framework CoreVideo"
         )
         # GPU rendering: link render module and Metal for CAMetalLayer-backed window host
         if(PULP_HAS_SKIA)

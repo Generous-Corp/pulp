@@ -86,7 +86,7 @@
     },
     {
       "path": "core/view/platform/mac/window_host_mac.mm",
-      "max_loc": 2790,
+      "max_loc": 2791,
       "note": "Mac window host lifecycle/capture/geometry hotspot"
     },
     {
@@ -116,7 +116,7 @@
     },
     {
       "path": "core/view/include/pulp/view/view.hpp",
-      "max_loc": 1657,
+      "max_loc": 1663,
       "note": "public view header trim candidate"
     },
     {
