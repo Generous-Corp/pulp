@@ -11,10 +11,12 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/format/processor.hpp>
+#include <pulp/format/process_block.hpp>
 #include <pulp/audio/buffer.hpp>
 #include <pulp/midi/buffer.hpp>
 
 #include <atomic>
+#include <array>
 #include <thread>
 #include <type_traits>
 
@@ -177,6 +179,119 @@ TEST_CASE("Processor::process is declared with float-precision BufferView. "
     ProcessContext ctx; ctx.sample_rate = 48000.0; ctx.num_samples = 8;
     p.process(out_view, in_view, mi, mo, ctx);
     SUCCEED("process() ran with float buffers");
+}
+
+// ── Phase 2 — additive multi-bus process surface ──────────────────────────
+
+TEST_CASE("ProcessBuffers exposes main and sidechain buses without owning audio",
+          "[processor][process-buffers][phase2]") {
+    float main_in_l[8] = {};
+    float main_in_r[8] = {};
+    float sidechain_l[8] = {};
+    float sidechain_r[8] = {};
+    float main_out_l[8] = {};
+    float main_out_r[8] = {};
+
+    const float* main_in_ptrs[2] = {main_in_l, main_in_r};
+    const float* sidechain_ptrs[2] = {sidechain_l, sidechain_r};
+    float* main_out_ptrs[2] = {main_out_l, main_out_r};
+
+    std::array<ProcessBusBufferView<const float>, 2> inputs{{
+        {
+            .info = {"Main In", 0, BusDirection::Input, BusRole::Main, 2, false, true},
+            .buffer = pulp::audio::BufferView<const float>(main_in_ptrs, 2, 8),
+        },
+        {
+            .info = {"Sidechain", 1, BusDirection::Input, BusRole::Sidechain, 2, true, true},
+            .buffer = pulp::audio::BufferView<const float>(sidechain_ptrs, 2, 8),
+        },
+    }};
+    std::array<ProcessBusBufferView<float>, 1> outputs{{
+        {
+            .info = {"Main Out", 0, BusDirection::Output, BusRole::Main, 2, false, true},
+            .buffer = pulp::audio::BufferView<float>(main_out_ptrs, 2, 8),
+        },
+    }};
+
+    ProcessBuffers buffers{
+        .inputs = ProcessBusBufferSet<const float>(inputs),
+        .outputs = ProcessBusBufferSet<float>(outputs),
+    };
+
+    REQUIRE(buffers.inputs.size() == 2);
+    REQUIRE(buffers.inputs.active_count() == 2);
+    REQUIRE(buffers.outputs.active_count() == 1);
+    REQUIRE(buffers.main_input() == &inputs[0].buffer);
+    REQUIRE(buffers.sidechain_input() == &inputs[1].buffer);
+    REQUIRE(buffers.main_output() == &outputs[0].buffer);
+    REQUIRE(buffers.layouts_match_descriptors());
+    REQUIRE(buffers.active_buses_have_storage());
+}
+
+TEST_CASE("ProcessBuffers accepts inactive optional buses with empty views",
+          "[processor][process-buffers][phase2]") {
+    float main_in_l[4] = {};
+    float main_in_r[4] = {};
+    float main_out_l[4] = {};
+    float main_out_r[4] = {};
+    const float* main_in_ptrs[2] = {main_in_l, main_in_r};
+    float* main_out_ptrs[2] = {main_out_l, main_out_r};
+
+    std::array<ProcessBusBufferView<const float>, 2> inputs{{
+        {
+            .info = {"Main In", 0, BusDirection::Input, BusRole::Main, 2, false, true},
+            .buffer = pulp::audio::BufferView<const float>(main_in_ptrs, 2, 4),
+        },
+        {
+            .info = {"Sidechain", 1, BusDirection::Input, BusRole::Sidechain, 2, true, false},
+            .buffer = {},
+        },
+    }};
+    std::array<ProcessBusBufferView<float>, 1> outputs{{
+        {
+            .info = {"Main Out", 0, BusDirection::Output, BusRole::Main, 2, false, true},
+            .buffer = pulp::audio::BufferView<float>(main_out_ptrs, 2, 4),
+        },
+    }};
+
+    ProcessBuffers buffers{
+        .inputs = ProcessBusBufferSet<const float>(inputs),
+        .outputs = ProcessBusBufferSet<float>(outputs),
+    };
+
+    REQUIRE(buffers.inputs.active_count() == 1);
+    REQUIRE(buffers.sidechain_input() == nullptr);
+    REQUIRE(buffers.layouts_match_descriptors());
+    REQUIRE(buffers.active_buses_have_storage());
+}
+
+TEST_CASE("ProcessBuffers reports layout and storage mismatches before process",
+          "[processor][process-buffers][phase2]") {
+    float left[4] = {};
+    const float* missing_channel[2] = {left, nullptr};
+    std::array<ProcessBusBufferView<const float>, 1> inputs{{
+        {
+            .info = {"Main In", 0, BusDirection::Input, BusRole::Main, 2, false, true},
+            .buffer = pulp::audio::BufferView<const float>(missing_channel, 2, 4),
+        },
+    }};
+
+    float out_l[4] = {};
+    float* mono_out[1] = {out_l};
+    std::array<ProcessBusBufferView<float>, 1> outputs{{
+        {
+            .info = {"Main Out", 0, BusDirection::Output, BusRole::Main, 2, false, true},
+            .buffer = pulp::audio::BufferView<float>(mono_out, 1, 4),
+        },
+    }};
+
+    ProcessBuffers buffers{
+        .inputs = ProcessBusBufferSet<const float>(inputs),
+        .outputs = ProcessBusBufferSet<float>(outputs),
+    };
+
+    REQUIRE_FALSE(buffers.active_buses_have_storage());
+    REQUIRE_FALSE(buffers.layouts_match_descriptors());
 }
 
 // ── Phase 2 — runtime mode contract ───────────────────────────────────────
