@@ -69,7 +69,8 @@ struct NodePackLoadResult {
 bool parse_node_pack_manifest(const std::string& json, NodePackManifest& out);
 
 // The canonical byte string the manifest signature covers: binds pack identity,
-// ABI major, and the binary hash. Publishers sign exactly these bytes.
+// ABI major, binary hash, and declared node type-ids/capabilities. Publishers
+// sign exactly these bytes.
 std::vector<std::uint8_t> node_pack_signed_message(const NodePackManifest& m);
 
 // Verify trust + integrity, then load the binary and resolve the node entry.
