@@ -14,6 +14,7 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -152,6 +153,83 @@ TEST_CASE("RuntimeBudgetPolicy makes background degradation explicit",
     decision = evaluate_runtime_budget(request, policy);
     REQUIRE(decision.action == RuntimeBudgetAction::Shed);
     REQUIRE(std::string(decision.reason) == "overload-shed-background");
+}
+
+TEST_CASE("RuntimeBudgetFrame consumes budget and records degradation",
+          "[runtime][budget-policy][phase4][consumer]") {
+    RuntimeBudgetPolicy policy;
+    policy.critical_audio_reserve = 32;
+
+    RuntimeBudgetFrame frame(128, policy);
+
+    auto decision = frame.evaluate(RuntimeWorkLane::Interactive, 48);
+    REQUIRE(decision.action == RuntimeBudgetAction::Run);
+    REQUIRE(frame.remaining_budget() == 80);
+
+    decision = frame.evaluate(RuntimeWorkLane::Interactive, 64);
+    REQUIRE(decision.action == RuntimeBudgetAction::Defer);
+    REQUIRE(frame.remaining_budget() == 80);
+
+    decision = frame.evaluate(RuntimeWorkLane::Background, 96);
+    REQUIRE(decision.action == RuntimeBudgetAction::Bypass);
+
+    decision = frame.evaluate(RuntimeWorkLane::Opportunistic, 96);
+    REQUIRE(decision.action == RuntimeBudgetAction::Shed);
+
+    const auto& stats = frame.stats();
+    REQUIRE(stats.run_count == 1);
+    REQUIRE(stats.defer_count == 1);
+    REQUIRE(stats.bypass_count == 1);
+    REQUIRE(stats.shed_count == 1);
+    REQUIRE(stats.consumed_budget == 48);
+    REQUIRE(stats.remaining_budget == 80);
+}
+
+TEST_CASE("RuntimeBudgetFrame supports overload and refill hooks",
+          "[runtime][budget-policy][phase4][consumer]") {
+    RuntimeBudgetPolicy policy;
+    policy.shed_background_on_overload = true;
+
+    RuntimeBudgetFrame frame(16, policy);
+    frame.set_overload_active(true);
+
+    auto decision = frame.evaluate(RuntimeWorkLane::Background, 1);
+    REQUIRE(decision.action == RuntimeBudgetAction::Shed);
+    REQUIRE(std::string(decision.reason) == "overload-shed-background");
+
+    frame.set_overload_active(false);
+    frame.add_budget(32);
+    decision = frame.evaluate(RuntimeWorkLane::Background, 40);
+    REQUIRE(decision.action == RuntimeBudgetAction::Run);
+    REQUIRE(frame.remaining_budget() == 8);
+
+    frame.add_budget(std::numeric_limits<std::uint64_t>::max());
+    REQUIRE(frame.remaining_budget() == std::numeric_limits<std::uint64_t>::max());
+
+    RuntimeBudgetFrame saturating(0);
+    REQUIRE(saturating.evaluate(RuntimeWorkLane::CriticalAudio,
+                                std::numeric_limits<std::uint64_t>::max()).should_run());
+    REQUIRE(saturating.evaluate(RuntimeWorkLane::CriticalAudio, 1).should_run());
+    REQUIRE(saturating.stats().consumed_budget == std::numeric_limits<std::uint64_t>::max());
+}
+
+TEST_CASE("RuntimeBudgetFrame hot path is allocation-free",
+          "[runtime][budget-policy][phase4][consumer][rt]") {
+    RuntimeBudgetPolicy policy;
+    policy.critical_audio_reserve = 16;
+    RuntimeBudgetFrame frame(512, policy);
+
+    pulp::test::RtAllocationProbe probe;
+    for (int i = 0; i < 64; ++i) {
+        const auto decision = frame.evaluate(
+            i % 2 == 0 ? RuntimeWorkLane::Interactive : RuntimeWorkLane::Opportunistic,
+            4);
+        (void)decision;
+    }
+
+    REQUIRE_FALSE(probe.saw_allocation());
+    REQUIRE(probe.allocation_count() == 0);
+    REQUIRE(probe.allocated_bytes() == 0);
 }
 
 TEST_CASE("SpscQueue basic operations", "[runtime][spsc]") {

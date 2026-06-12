@@ -135,6 +135,28 @@ if (!decision.should_run()) {
 }
 ```
 
+For a group of optional tasks inside one callback or worker tick, use
+`RuntimeBudgetFrame`. It keeps the remaining budget and counts run/defer/shed/
+bypass decisions without allocating:
+
+```cpp
+RuntimeBudgetFrame frame(512, policy, overload_active);
+
+if (frame.evaluate(RuntimeWorkLane::Interactive, 64).should_run()) {
+    refresh_visible_analysis();
+}
+
+if (frame.evaluate(RuntimeWorkLane::Opportunistic, 256).should_run()) {
+    rebuild_noncritical_preview();
+}
+
+auto stats = frame.stats(); // publish off the audio thread if needed
+```
+
+This is the intended hook for large graph or instrument consumers: critical
+audio remains on the prepared path, while optional analysis, preview, and
+background refresh work degrades through the shared policy.
+
 ## ScopeGuard
 
 RAII cleanup — runs a callable on scope exit.

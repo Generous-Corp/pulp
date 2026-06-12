@@ -375,7 +375,9 @@ For optional work that can degrade, use `runtime::evaluate_runtime_budget()` to
 make the run/defer/shed/bypass decision explicit. Critical audio work remains
 on the prepared path, interactive work can defer to preserve a reserve, and
 background/opportunistic analysis can be shed or bypassed during overload
-instead of competing with the callback.
+instead of competing with the callback. For a group of optional tasks in one
+callback or worker tick, `runtime::RuntimeBudgetFrame` applies the same policy
+while tracking remaining budget and degradation counters without allocation.
 
 Common recipes:
 
