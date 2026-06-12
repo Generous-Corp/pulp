@@ -4454,7 +4454,9 @@ pulp_add_test_suite(pulp-test-resampler LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-halfband-iir LIBRARIES pulp::signal)
 
 # macOS plan Batch G — Generic Synthesiser polyphony (item 2.5)
-pulp_add_test_suite(pulp-test-synthesiser LIBRARIES pulp::midi)
+pulp_add_test_suite(pulp-test-synthesiser
+    SOURCES test_synthesiser.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::midi)
 
 # macOS plan Batch C — SampleConverter (item 1.5)
 pulp_add_test_suite(pulp-test-sample-converter LIBRARIES pulp::audio)
@@ -5707,7 +5709,9 @@ else()
 endif()
 
 # MPE synth voice helpers (voice, allocator, glide detector)
-pulp_add_test_suite(pulp-test-mpe-synth-voice LIBRARIES pulp::midi)
+pulp_add_test_suite(pulp-test-mpe-synth-voice
+    SOURCES test_mpe_synth_voice.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::midi)
 
 # Plugin hosting tests (scanner, signal graph)
 add_executable(pulp-test-host test_host.cpp)

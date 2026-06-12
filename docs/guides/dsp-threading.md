@@ -300,6 +300,12 @@ the same producer-side overflow count and telemetry snapshot.
 consumer-owned pending-ring occupancy and future-event drop counter, making
 UI-to-audio MIDI back-pressure visible without inspecting the audio callback.
 
+`midi::Synthesiser` and `midi::MpeVoiceAllocator` expose owner-thread voice
+telemetry snapshots for polyphony, active/releasing voice counts, and steal
+counts. Read those snapshots from the processor/audio owner and publish the
+returned value through a lock-free latest-value channel when UI or tooling
+needs to observe it.
+
 Keep this path boring: write fixed-size counters, meter snapshots, and bounded
 queues from `process()`. Move FFTs, exported waveforms, parameter sweeps, and
 other expensive analysis to an offline command, frozen copy, or validation

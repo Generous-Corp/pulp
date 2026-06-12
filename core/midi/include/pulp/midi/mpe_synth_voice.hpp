@@ -15,6 +15,7 @@
 #include <pulp/midi/mpe_voice_tracker.hpp>
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -110,6 +111,15 @@ enum class MpeVoiceStealMode {
     LowestVelocity, ///< Steal the quietest voice
     LowestPitch,    ///< Steal the lowest-note voice
     HighestPitch,   ///< Steal the highest-note voice
+};
+
+struct MpeVoiceAllocatorTelemetry {
+    std::size_t polyphony = 0;
+    std::size_t active_voice_count = 0;
+    std::size_t releasing_voice_count = 0;
+    std::uint64_t steal_count = 0;
+    MpeVoiceStealMode steal_mode = MpeVoiceStealMode::Oldest;
+    bool last_was_glide = false;
 };
 
 /// Glide/legato detector — observes MPE note-on events and reports when
@@ -213,6 +223,35 @@ public:
         return n;
     }
 
+    std::size_t releasing_count() const {
+        std::size_t n = 0;
+        for (const auto& v : voices_) if (v.active() && v.releasing()) ++n;
+        return n;
+    }
+
+    std::uint64_t steal_count() const {
+        return steal_count_.load(std::memory_order_relaxed);
+    }
+
+    void reset_steal_count() {
+        steal_count_.store(0, std::memory_order_relaxed);
+    }
+
+    /// Cheap owner-thread snapshot for voice-count telemetry. Call from
+    /// the allocator owner (normally the audio thread) and publish the
+    /// returned value through a lock-free latest-value channel if another
+    /// thread needs to observe it.
+    MpeVoiceAllocatorTelemetry telemetry() const {
+        return {
+            .polyphony = polyphony(),
+            .active_voice_count = active_count(),
+            .releasing_voice_count = releasing_count(),
+            .steal_count = steal_count(),
+            .steal_mode = steal_mode_,
+            .last_was_glide = last_was_glide_,
+        };
+    }
+
     bool last_was_glide() const { return last_was_glide_; }
 
     void reset_all() {
@@ -245,6 +284,7 @@ private:
         };
         Voice* target = &voices_[0];
         for (auto& v : voices_) if (cmp(v, *target)) target = &v;
+        steal_count_.fetch_add(1, std::memory_order_relaxed);
         return target;
     }
 
@@ -261,6 +301,7 @@ private:
     MpeVoiceStealMode steal_mode_ = MpeVoiceStealMode::Oldest;
     MpeGlideDetector glide_detector_;
     bool last_was_glide_ = false;
+    std::atomic<std::uint64_t> steal_count_{0};
 };
 
 } // namespace pulp::midi

@@ -1,3 +1,5 @@
+#include "harness/rt_allocation_probe.hpp"
+
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 
@@ -349,4 +351,59 @@ TEST_CASE("MpeVoiceAllocator steal path decrements glide refcount", "[midi][mpe]
     // Now a note on channel 3 should be fresh, not flagged as glide.
     alloc.dispatch(note_on_event(3, 67, 100, 3));
     REQUIRE_FALSE(alloc.last_was_glide());
+}
+
+TEST_CASE("MpeVoiceAllocator exposes voice-count telemetry",
+          "[midi][mpe][telemetry][phase2]") {
+    MpeVoiceAllocator<TestVoice> alloc{2};
+    alloc.set_steal_mode(MpeVoiceStealMode::Oldest);
+
+    const auto initial = alloc.telemetry();
+    REQUIRE(initial.polyphony == 2);
+    REQUIRE(initial.active_voice_count == 0);
+    REQUIRE(initial.releasing_voice_count == 0);
+    REQUIRE(initial.steal_count == 0);
+    REQUIRE(initial.steal_mode == MpeVoiceStealMode::Oldest);
+    REQUIRE_FALSE(initial.last_was_glide);
+
+    alloc.dispatch(note_on_event(1, 60, 100, 1));
+    alloc.dispatch(note_on_event(1, 62, 100, 2));
+    const auto active = alloc.telemetry();
+    REQUIRE(active.active_voice_count == 2);
+    REQUIRE(active.releasing_voice_count == 0);
+    REQUIRE(active.steal_count == 0);
+    REQUIRE(active.last_was_glide);
+
+    alloc.dispatch(note_off_event(1, 1));
+    const auto releasing = alloc.telemetry();
+    REQUIRE(releasing.active_voice_count == 2);
+    REQUIRE(releasing.releasing_voice_count == 1);
+
+    alloc.dispatch(note_on_event(2, 67, 100, 3));
+    const auto stolen = alloc.telemetry();
+    REQUIRE(stolen.active_voice_count == 2);
+    REQUIRE(stolen.releasing_voice_count == 0);
+    REQUIRE(stolen.steal_count == 1);
+    REQUIRE(alloc.steal_count() == 1);
+
+    alloc.reset_steal_count();
+    REQUIRE(alloc.telemetry().steal_count == 0);
+}
+
+TEST_CASE("MpeVoiceAllocator telemetry path allocates zero times",
+          "[midi][mpe][telemetry][rt-safety][phase2]") {
+    MpeVoiceAllocator<TestVoice> alloc{2};
+    alloc.dispatch(note_on_event(1, 60, 100, 1));
+    alloc.dispatch(note_on_event(1, 62, 100, 2));
+    alloc.dispatch(note_off_event(1, 1));
+
+    pulp::test::RtAllocationProbe probe;
+
+    (void)alloc.telemetry();
+    (void)alloc.active_count();
+    (void)alloc.releasing_count();
+    (void)alloc.steal_count();
+    alloc.reset_steal_count();
+
+    REQUIRE_FALSE(probe.saw_allocation());
 }

@@ -1,3 +1,5 @@
+#include "harness/rt_allocation_probe.hpp"
+
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/midi/synthesiser.hpp>
@@ -386,4 +388,57 @@ TEST_CASE("Synthesiser process clamps event sample_offset above block size",
     synth.process(buf, out.data(), 128);
     REQUIRE(synth.voice(0).rendered_samples == 128);
     REQUIRE(synth.voice(0).releasing());
+}
+
+TEST_CASE("Synthesiser exposes voice-count telemetry",
+          "[midi][synth][telemetry][phase2]") {
+    Synthesiser<TestVoice> synth(2);
+    synth.set_steal_strategy(VoiceStealStrategy::Oldest);
+
+    const auto initial = synth.telemetry();
+    REQUIRE(initial.polyphony == 2);
+    REQUIRE(initial.active_voice_count == 0);
+    REQUIRE(initial.releasing_voice_count == 0);
+    REQUIRE(initial.steal_count == 0);
+    REQUIRE(initial.steal_strategy == VoiceStealStrategy::Oldest);
+
+    synth.note_on(0, 60, 100);
+    synth.note_on(0, 64, 100);
+    const auto active = synth.telemetry();
+    REQUIRE(active.active_voice_count == 2);
+    REQUIRE(active.releasing_voice_count == 0);
+    REQUIRE(active.steal_count == 0);
+
+    synth.note_off(0, 60);
+    const auto releasing = synth.telemetry();
+    REQUIRE(releasing.active_voice_count == 2);
+    REQUIRE(releasing.releasing_voice_count == 1);
+
+    synth.note_on(0, 67, 100);
+    const auto stolen = synth.telemetry();
+    REQUIRE(stolen.active_voice_count == 2);
+    REQUIRE(stolen.releasing_voice_count == 0);
+    REQUIRE(stolen.steal_count == 1);
+    REQUIRE(synth.steal_count() == 1);
+
+    synth.reset_steal_count();
+    REQUIRE(synth.telemetry().steal_count == 0);
+}
+
+TEST_CASE("Synthesiser voice telemetry path allocates zero times",
+          "[midi][synth][telemetry][rt-safety][phase2]") {
+    Synthesiser<TestVoice> synth(2);
+    synth.note_on(0, 60, 100);
+    synth.note_on(0, 64, 100);
+    synth.note_off(0, 60);
+
+    pulp::test::RtAllocationProbe probe;
+
+    (void)synth.telemetry();
+    (void)synth.active_count();
+    (void)synth.releasing_count();
+    (void)synth.steal_count();
+    synth.reset_steal_count();
+
+    REQUIRE_FALSE(probe.saw_allocation());
 }
