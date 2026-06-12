@@ -172,16 +172,20 @@ separately gated. This mirrors the existing honest phrasing in
 Where the platform allows it, a precompiled `pulp_node_v1` node can ship as a
 **signed node pack**: a dynamic library (`.dylib` / `.so` / `.dll`) exporting
 `pulp_node_v1_entry`, plus a JSON manifest declaring the pack identity, ABI
-major, the binary's SHA-256, the declared node type-ids/capabilities, and an
-**Ed25519 signature** by a publisher key. The host loader
-(`core/host/node_pack.hpp`) verifies trust *before* it loads any code:
+major, the binary's SHA-256, declared node type-ids/capabilities, resource
+declarations, runtime requirements, and an **Ed25519 signature** by a publisher
+key. The host loader (`core/host/node_pack.hpp`) verifies trust and host policy
+*before* it loads any code:
 
 1. the signer key must be in the host's trust set (drop a key to revoke it);
 2. the signature over `pack_id + abi_major + binary-hash + declared node
-   type-ids/capabilities` must be authentic;
-3. the on-disk binary's SHA-256 must match the signed hash;
-4. the entry's `abi_major` must match the host's `pulp_node_v1` major;
-5. the loaded descriptor's stable ID and capability flags must match one of the
+   type-ids/capabilities + resources + runtime requirements` must be authentic;
+3. declared capabilities, realtime requirements, audio-thread allocation policy,
+   block size, and memory ceilings must fit the host's `NodePackHostPolicy`;
+4. required resource declarations must have stable IDs, kinds, and hashes;
+5. the on-disk binary's SHA-256 must match the signed hash;
+6. the entry's `abi_major` must match the host's `pulp_node_v1` major;
+7. the loaded descriptor's stable ID and capability flags must match one of the
    signed node declarations.
 
 Any failure rejects the pack and loads nothing — untrusted, tampered, or

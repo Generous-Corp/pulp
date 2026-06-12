@@ -54,6 +54,18 @@ NodePackManifest signed_manifest(const pulp::runtime::Ed25519KeyPair& kp,
         .type_id = "pulp.test.pack.gain",
         .capabilities = PULP_NODE_CAP_STATE_V1,
     });
+    m.resources.push_back({
+        .id = "impulse-main",
+        .kind = "impulse-response",
+        .sha256_hex =
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        .required = true,
+    });
+    m.requirements.realtime_safe = true;
+    m.requirements.audio_thread_allocations = false;
+    m.requirements.max_block_size = 512;
+    m.requirements.persistent_bytes = 4096;
+    m.requirements.scratch_bytes = 1024;
     const auto msg = node_pack_signed_message(m);
     auto sig = pulp::runtime::ed25519_sign(kp.private_key.data(),
                                            kp.private_key.size(), msg.data(),
@@ -74,10 +86,17 @@ TEST_CASE("node pack: a trusted, intact, signed pack loads and runs",
 
     NodePackTrust trust;
     trust.trusted_public_keys.push_back(kp.public_key);
+    NodePackHostPolicy policy;
+    policy.max_block_size = 1024;
+    policy.max_persistent_bytes = 8192;
+    policy.max_scratch_bytes = 2048;
 
-    auto r = load_node_pack(dir, manifest, trust);
+    auto r = load_node_pack(dir, manifest, trust, policy);
     REQUIRE(r.ok());
     REQUIRE(r.entry != nullptr);
+    REQUIRE(manifest.resources.size() == 1);
+    REQUIRE(manifest.resources[0].required);
+    REQUIRE(manifest.requirements.max_block_size == 512);
 
     const pulp_node_descriptor_v1* d = r.entry->descriptor();
     REQUIRE(std::string_view(d->stable_id, d->stable_id_len) ==
@@ -187,6 +206,41 @@ TEST_CASE("node pack: rejection paths never load untrusted or tampered code",
         REQUIRE(load_node_pack(dir, m, trust).error ==
                 NodePackError::LoadFailed);
     }
+    SECTION("unsupported capabilities reject before loading") {
+        NodePackTrust trust;
+        trust.trusted_public_keys.push_back(kp.public_key);
+        NodePackHostPolicy policy;
+        policy.supported_capabilities = 0;
+        NodePackManifest m = good;
+        const auto msg = node_pack_signed_message(m);
+        m.signature = *pulp::runtime::ed25519_sign(
+            kp.private_key.data(), kp.private_key.size(), msg.data(), msg.size());
+        REQUIRE(load_node_pack(dir, m, trust, policy).error ==
+                NodePackError::UnsupportedRequirements);
+    }
+    SECTION("unsupported realtime and resource requirements reject before loading") {
+        NodePackTrust trust;
+        trust.trusted_public_keys.push_back(kp.public_key);
+        NodePackHostPolicy policy;
+        policy.max_block_size = 128;
+        policy.max_persistent_bytes = 1024;
+        policy.max_scratch_bytes = 512;
+        NodePackManifest m = good;
+        m.requirements.audio_thread_allocations = true;
+        const auto msg = node_pack_signed_message(m);
+        m.signature = *pulp::runtime::ed25519_sign(
+            kp.private_key.data(), kp.private_key.size(), msg.data(), msg.size());
+        REQUIRE(load_node_pack(dir, m, trust, policy).error ==
+                NodePackError::UnsupportedRequirements);
+    }
+    SECTION("resource declarations are covered by the signature") {
+        NodePackTrust trust;
+        trust.trusted_public_keys.push_back(kp.public_key);
+        NodePackManifest m = good;
+        m.resources[0].sha256_hex[0] = 'f';
+        REQUIRE(load_node_pack(dir, m, trust).error ==
+                NodePackError::BadSignature);
+    }
 }
 
 TEST_CASE("node pack: manifest parse validates required fields + key sizes",
@@ -205,7 +259,14 @@ TEST_CASE("node pack: manifest parse validates required fields + key sizes",
     const std::string json = "{\"pack_id\":\"p\",\"abi_major\":1,\"binary\":"
                              "\"b.so\",\"sha256\":\"deadbeef\",\"signer_public_"
                              "key\":\"" + key + "\",\"signature\":\"" + sig +
-                             "\",\"nodes\":[{\"type_id\":\"t\",\"capabilities\":1}]}";
+                             "\",\"nodes\":[{\"type_id\":\"t\",\"capabilities\":1}],"
+                             "\"resources\":[{\"id\":\"ir\",\"kind\":\"impulse\","
+                             "\"sha256\":\"abcd\",\"required\":true}],"
+                             "\"requirements\":{\"realtime_safe\":true,"
+                             "\"audio_thread_allocations\":false,"
+                             "\"max_block_size\":512,"
+                             "\"persistent_bytes\":4096,"
+                             "\"scratch_bytes\":1024}}";
     REQUIRE(parse_node_pack_manifest(json, m));
     REQUIRE(m.pack_id == "p");
     REQUIRE(m.abi_major == 1);
@@ -213,4 +274,20 @@ TEST_CASE("node pack: manifest parse validates required fields + key sizes",
     REQUIRE(m.signature.size() == 64);
     REQUIRE(m.nodes.size() == 1);
     REQUIRE(m.nodes[0].type_id == "t");
+    REQUIRE(m.resources.size() == 1);
+    REQUIRE(m.resources[0].id == "ir");
+    REQUIRE(m.resources[0].required);
+    REQUIRE(m.requirements.realtime_safe);
+    REQUIRE_FALSE(m.requirements.audio_thread_allocations);
+    REQUIRE(m.requirements.max_block_size == 512);
+    REQUIRE(m.requirements.persistent_bytes == 4096);
+    REQUIRE(m.requirements.scratch_bytes == 1024);
+
+    const std::string missing_required_hash =
+        "{\"pack_id\":\"p\",\"abi_major\":1,\"binary\":\"b.so\","
+        "\"sha256\":\"deadbeef\",\"signer_public_key\":\"" + key +
+        "\",\"signature\":\"" + sig +
+        "\",\"nodes\":[{\"type_id\":\"t\",\"capabilities\":1}],"
+        "\"resources\":[{\"id\":\"ir\",\"kind\":\"impulse\",\"required\":true}]}";
+    REQUIRE_FALSE(parse_node_pack_manifest(missing_required_hash, m));
 }
