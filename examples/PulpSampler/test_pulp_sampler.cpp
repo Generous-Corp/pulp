@@ -104,6 +104,66 @@ TEST_CASE("PulpSampler produces audio on note-on", "[sampler]") {
     REQUIRE(peak > 0.01f);
 }
 
+TEST_CASE("PulpSampler missing sample resource stays silent with diagnostics",
+          "[sampler][sample-resource][missing][phase3]") {
+    SamplerFixture f;
+    f.proc->mark_sample_missing("samples/missing.wav", "file not found");
+    REQUIRE_FALSE(f.proc->has_sample());
+    REQUIRE(f.proc->sample_length() == 0);
+    REQUIRE(f.proc->sample_diagnostics().path == "samples/missing.wav");
+    REQUIRE(f.proc->sample_diagnostics().reason == "file not found");
+
+    std::vector<float> out_l(64, 1.0f), out_r(64, -1.0f);
+    float* out_ptrs[] = {out_l.data(), out_r.data()};
+    audio::BufferView<float> out(out_ptrs, 2, 64);
+
+    const float* in_ptrs[] = {nullptr, nullptr};
+    audio::BufferView<const float> in(in_ptrs, 0, 64);
+
+    midi::MidiBuffer midi_in, midi_out;
+    midi_in.add(midi::MidiEvent::note_on(0, 60, 127));
+    format::ProcessContext ctx{44100, 64};
+
+    f.proc->process(out, in, midi_in, midi_out, ctx);
+
+    for (int i = 0; i < 64; ++i) {
+        REQUIRE_THAT(out_l[static_cast<size_t>(i)], WithinAbs(0.0f, 1e-6f));
+        REQUIRE_THAT(out_r[static_cast<size_t>(i)], WithinAbs(0.0f, 1e-6f));
+    }
+}
+
+TEST_CASE("PulpSampler renders deterministic sample-resource fixture",
+          "[sampler][sample-resource][render][phase3]") {
+    SamplerFixture f;
+    f.store.set_value(kSamplerAttack, 0.0f);
+    f.store.set_value(kSamplerDecay, 0.0f);
+    f.store.set_value(kSamplerSustain, 100.0f);
+    f.store.set_value(kSamplerRelease, 0.0f);
+    f.store.set_value(kSamplerGain, 0.0f);
+    f.store.set_value(kSamplerPitch, 0.0f);
+
+    const float sample[] = {0.25f, 0.5f, -0.25f, -0.5f};
+    f.proc->load_sample(sample, 4, 44100.0f);
+
+    std::vector<float> out_l(4, 0.0f), out_r(4, 0.0f);
+    float* out_ptrs[] = {out_l.data(), out_r.data()};
+    audio::BufferView<float> out(out_ptrs, 2, 4);
+
+    const float* in_ptrs[] = {nullptr, nullptr};
+    audio::BufferView<const float> in(in_ptrs, 0, 4);
+
+    midi::MidiBuffer midi_in, midi_out;
+    midi_in.add(midi::MidiEvent::note_on(0, 60, 127));
+    format::ProcessContext ctx{44100, 4};
+
+    f.proc->process(out, in, midi_in, midi_out, ctx);
+
+    for (int i = 0; i < 4; ++i) {
+        REQUIRE_THAT(out_l[static_cast<size_t>(i)], WithinAbs(sample[i], 1e-6f));
+        REQUIRE_THAT(out_r[static_cast<size_t>(i)], WithinAbs(sample[i], 1e-6f));
+    }
+}
+
 TEST_CASE("PulpSampler state round-trip", "[sampler]") {
     SamplerFixture f;
 

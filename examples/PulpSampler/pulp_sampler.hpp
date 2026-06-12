@@ -4,11 +4,13 @@
 /// Demonstrates: audio file loading, sample playback, ADSR, pitch shifting,
 /// waveform editor integration, PresetManager.
 
+#include <pulp/audio/sample_resource.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/signal/adsr.hpp>
 #include <pulp/signal/smoothed_value.hpp>
-#include <vector>
 #include <cmath>
+#include <string>
+#include <vector>
 
 namespace pulp::examples {
 
@@ -89,21 +91,44 @@ public:
 
     /// Load a mono sample buffer. Call from the main thread.
     void load_sample(const float* data, int num_samples, float sample_rate) {
-        sample_data_.assign(data, data + num_samples);
-        sample_rate_ = sample_rate;
+        if (!data || num_samples <= 0) {
+            sample_resource_.publish_missing({}, "empty sample buffer");
+            return;
+        }
+        audio::AudioFileData sample;
+        sample.sample_rate = static_cast<uint32_t>(sample_rate);
+        sample.channels.resize(1);
+        sample.channels[0].assign(data, data + num_samples);
+        sample_resource_.publish_loaded(std::move(sample), "memory://mono");
     }
 
     /// Load a sample from interleaved stereo (takes left channel).
     void load_sample_stereo(const float* interleaved, int num_frames, float sample_rate) {
-        sample_data_.resize(static_cast<size_t>(num_frames));
-        for (int i = 0; i < num_frames; ++i) {
-            sample_data_[static_cast<size_t>(i)] = interleaved[i * 2]; // left channel
+        if (!interleaved || num_frames <= 0) {
+            sample_resource_.publish_missing({}, "empty stereo sample buffer");
+            return;
         }
-        sample_rate_ = sample_rate;
+        audio::AudioFileData sample;
+        sample.sample_rate = static_cast<uint32_t>(sample_rate);
+        sample.channels.resize(1);
+        sample.channels[0].resize(static_cast<size_t>(num_frames));
+        for (int i = 0; i < num_frames; ++i) {
+            sample.channels[0][static_cast<size_t>(i)] = interleaved[i * 2]; // left channel
+        }
+        sample_resource_.publish_loaded(std::move(sample), "memory://stereo-left");
     }
 
-    bool has_sample() const { return !sample_data_.empty(); }
-    int sample_length() const { return static_cast<int>(sample_data_.size()); }
+    void mark_sample_missing(std::string path, std::string reason) {
+        sample_resource_.publish_missing(std::move(path), std::move(reason));
+    }
+
+    bool has_sample() const { return sample_resource_.snapshot().ready(); }
+    int sample_length() const {
+        return static_cast<int>(sample_resource_.snapshot().frame_count);
+    }
+    audio::SampleResourceDiagnostics sample_diagnostics() const {
+        return sample_resource_.diagnostics();
+    }
 
     void prepare(const format::PrepareContext& ctx) override {
         host_sample_rate_ = static_cast<float>(ctx.sample_rate);
@@ -123,7 +148,10 @@ public:
             for (std::size_t i = 0; i < output.num_samples(); ++i) out[i] = 0;
         }
 
-        if (sample_data_.empty()) return;
+        const auto sample_snapshot = sample_resource_.snapshot();
+        if (!sample_snapshot.ready() || sample_snapshot.data->channels.empty()) return;
+        const auto& sample_data = sample_snapshot.data->channels[0];
+        if (sample_data.empty()) return;
 
         // Process MIDI
         for (std::size_t i = 0; i < midi_in.size(); ++i) {
@@ -147,7 +175,7 @@ public:
         bool loop = state().get_value(kSamplerLoop) >= 0.5f;
 
         int num_samples = static_cast<int>(output.num_samples());
-        int sample_len = static_cast<int>(sample_data_.size());
+        int sample_len = static_cast<int>(sample_data.size());
 
         for (auto& voice : voices_) {
             if (!voice.active) continue;
@@ -163,7 +191,7 @@ public:
             // Pitch: note offset + pitch param
             float note_offset = static_cast<float>(voice.note - kRootNote) + pitch_st;
             double speed = std::pow(2.0, note_offset / 12.0)
-                         * (static_cast<double>(sample_rate_) / static_cast<double>(host_sample_rate_));
+                         * (static_cast<double>(sample_snapshot.sample_rate) / static_cast<double>(host_sample_rate_));
             voice.speed = speed;
 
             for (int i = 0; i < num_samples; ++i) {
@@ -187,8 +215,8 @@ public:
 
                 // Linear interpolation
                 float frac = static_cast<float>(voice.position - static_cast<double>(pos));
-                float s0 = sample_data_[static_cast<size_t>(pos)];
-                float s1 = (pos + 1 < sample_len) ? sample_data_[static_cast<size_t>(pos + 1)] : s0;
+                float s0 = sample_data[static_cast<size_t>(pos)];
+                float s1 = (pos + 1 < sample_len) ? sample_data[static_cast<size_t>(pos + 1)] : s0;
                 float sample = s0 + frac * (s1 - s0);
 
                 float out = sample * env * voice.velocity * gain;
@@ -204,8 +232,7 @@ public:
     }
 
 private:
-    std::vector<float> sample_data_;
-    float sample_rate_ = 44100.0f;
+    audio::SampleResourceHandle sample_resource_;
     float host_sample_rate_ = 44100.0f;
     SamplerVoice voices_[kMaxVoices]{};
 
@@ -218,9 +245,13 @@ private:
         if (!target) target = &voices_[0]; // steal first voice
 
         float pitch_st = state().get_value(kSamplerPitch);
+        const auto sample_snapshot = sample_resource_.snapshot();
+        const auto sample_rate = sample_snapshot.sample_rate != 0
+            ? static_cast<float>(sample_snapshot.sample_rate)
+            : host_sample_rate_;
         float note_offset = static_cast<float>(note - kRootNote) + pitch_st;
         double speed = std::pow(2.0, note_offset / 12.0)
-                     * (static_cast<double>(sample_rate_) / static_cast<double>(host_sample_rate_));
+                     * (static_cast<double>(sample_rate) / static_cast<double>(host_sample_rate_));
         target->start(note, velocity, speed, host_sample_rate_);
     }
 
