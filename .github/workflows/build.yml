@@ -846,6 +846,7 @@ jobs:
           path: |
             ~/Library/Caches/Pulp/fetchcontent-src
             ~/.cache/Pulp/fetchcontent-src
+            ~/AppData/Local/Pulp/fetchcontent-src
             ~/AppData/Local/Pulp/Cache/fetchcontent-src
           key: ${{ runner.os }}-${{ matrix.key || 'build' }}-fetchcontent-${{ hashFiles('setup.sh') }}
           restore-keys: |
@@ -876,6 +877,7 @@ jobs:
           path: |
             ~/Library/Caches/Pulp/fetchcontent-src
             ~/.cache/Pulp/fetchcontent-src
+            ~/AppData/Local/Pulp/fetchcontent-src
             ~/AppData/Local/Pulp/Cache/fetchcontent-src
           key: ${{ steps.fetchcontent-cache.outputs.cache-primary-key }}
 
