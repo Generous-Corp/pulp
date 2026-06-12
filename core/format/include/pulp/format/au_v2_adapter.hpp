@@ -10,6 +10,7 @@
 #include <pulp/state/parameter_event_queue.hpp>
 
 #include <memory>
+#include <limits>
 #include <mutex>
 #include <vector>
 
@@ -85,6 +86,13 @@ inline ProcessContext make_render_process_context(double sample_rate,
     ctx.process_mode = ProcessMode::Realtime;
     ctx.render_speed_hint = RenderSpeedHint::Realtime;
     return ctx;
+}
+
+inline Float64 tail_samples_to_seconds(int tail_samples,
+                                       double sample_rate) noexcept {
+    if (tail_samples < 0) return std::numeric_limits<Float64>::infinity();
+    if (tail_samples == 0 || sample_rate <= 0.0) return 0.0;
+    return static_cast<Float64>(tail_samples) / sample_rate;
 }
 
 class PulpAUEffect : public ausdk::AUMIDIEffectBase {

@@ -404,7 +404,17 @@ bool PulpAUInstrument::SupportsTail()
 
 Float64 PulpAUInstrument::GetTailTime()
 {
-    return 0.0;
+    if (!processor_) return 0.0;
+    const auto tail = processor_->descriptor().tail_samples;
+    if (tail <= 0) return tail_samples_to_seconds(tail, 0.0);
+
+    double sr = 0.0;
+    try {
+        sr = GetOutput(0)->GetStreamFormat().mSampleRate;
+    } catch (...) {
+        sr = 0.0;
+    }
+    return tail_samples_to_seconds(tail, sr);
 }
 
 Float64 PulpAUInstrument::GetLatency()

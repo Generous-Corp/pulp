@@ -17,6 +17,7 @@
 
 #include <string>
 #include <vector>
+#include <cmath>
 
 using Catch::Matchers::WithinAbs;
 
@@ -27,6 +28,8 @@ class TestAUInstrumentProcessor;
 
 TestAUEffectProcessor* g_last_effect_processor = nullptr;
 TestAUInstrumentProcessor* g_last_instrument_processor = nullptr;
+int g_pending_au_latency_samples = 0;
+int g_pending_au_tail_samples = 0;
 
 class TestAUEffectProcessor : public pulp::format::Processor {
 public:
@@ -200,6 +203,44 @@ public:
     }
 };
 
+class TestAULatencyTailEffectProcessor : public TestAUEffectProcessor {
+public:
+    TestAULatencyTailEffectProcessor()
+        : latency_samples_(g_pending_au_latency_samples)
+        , tail_samples_(g_pending_au_tail_samples) {}
+
+    pulp::format::PluginDescriptor descriptor() const override {
+        auto d = TestAUEffectProcessor::descriptor();
+        d.tail_samples = tail_samples_;
+        return d;
+    }
+
+    int latency_samples() const override { return latency_samples_; }
+
+private:
+    int latency_samples_ = 0;
+    int tail_samples_ = 0;
+};
+
+class TestAULatencyTailInstrumentProcessor : public TestAUInstrumentProcessor {
+public:
+    TestAULatencyTailInstrumentProcessor()
+        : latency_samples_(g_pending_au_latency_samples)
+        , tail_samples_(g_pending_au_tail_samples) {}
+
+    pulp::format::PluginDescriptor descriptor() const override {
+        auto d = TestAUInstrumentProcessor::descriptor();
+        d.tail_samples = tail_samples_;
+        return d;
+    }
+
+    int latency_samples() const override { return latency_samples_; }
+
+private:
+    int latency_samples_ = 0;
+    int tail_samples_ = 0;
+};
+
 std::unique_ptr<pulp::format::Processor> create_effect_processor() {
     return std::make_unique<TestAUEffectProcessor>();
 }
@@ -210,6 +251,14 @@ std::unique_ptr<pulp::format::Processor> create_instrument_processor() {
 
 std::unique_ptr<pulp::format::Processor> create_wide_editor_processor() {
     return std::make_unique<TestAUWideEditorProcessor>();
+}
+
+std::unique_ptr<pulp::format::Processor> create_latency_tail_effect_processor() {
+    return std::make_unique<TestAULatencyTailEffectProcessor>();
+}
+
+std::unique_ptr<pulp::format::Processor> create_latency_tail_instrument_processor() {
+    return std::make_unique<TestAULatencyTailInstrumentProcessor>();
 }
 
 void require_plst_blob(const uint8_t* bytes, std::size_t size) {
@@ -301,6 +350,33 @@ TEST_CASE("AU v2 instrument SaveState/RestoreState round-trips plugin-owned payl
     REQUIRE(loader_processor->plugin_state == "snapshot=B");
 
     CFRelease(saved);
+}
+
+TEST_CASE("AU v2 latency and tail report processor runtime contract",
+          "[au][auv2][latency][tail][phase2]") {
+    constexpr int kTailSamples = 24000;
+
+    REQUIRE_THAT(pulp::format::au::tail_samples_to_seconds(kTailSamples, 48000.0),
+                 WithinAbs(0.5, 1e-9));
+    REQUIRE(pulp::format::au::tail_samples_to_seconds(0, 48000.0) == 0.0);
+    REQUIRE(pulp::format::au::tail_samples_to_seconds(kTailSamples, 0.0) == 0.0);
+
+    SECTION("effect and instrument map infinite tail to infinity") {
+        g_pending_au_latency_samples = 0;
+        g_pending_au_tail_samples = -1;
+        {
+            ScopedFactoryRegistration registration(create_latency_tail_effect_processor);
+            pulp::format::au::PulpAUEffect effect(nullptr);
+            REQUIRE(effect.SupportsTail());
+            REQUIRE(std::isinf(effect.GetTailTime()));
+        }
+        {
+            ScopedFactoryRegistration registration(create_latency_tail_instrument_processor);
+            pulp::format::au::PulpAUInstrument instrument(nullptr);
+            REQUIRE(instrument.SupportsTail());
+            REQUIRE(std::isinf(instrument.GetTailTime()));
+        }
+    }
 }
 
 TEST_CASE("AU v3 fullState round-trips plugin-owned payload",
