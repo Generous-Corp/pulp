@@ -109,8 +109,6 @@ from github_workflows import (  # noqa: E402  -- re-exported for in-file consume
     resolve_cli_dispatch_field_values,
 )
 from provenance import (  # noqa: E402  -- re-exported for in-file consumers
-    normalize_provenance,
-    provenance_summary,
     normalize_result,
 )
 from job_queue import (  # noqa: E402  -- re-exported for in-file consumers
@@ -169,6 +167,13 @@ from cloud_compare import (  # noqa: E402  -- re-exported for in-file consumers
     filter_cloud_records,
     median_or_none,
     recommend_cloud_provider,
+)
+from cloud_pr_format import (  # noqa: E402  -- re-exported for in-file consumers
+    format_ci_comment,
+    no_open_prs_line,
+    open_pr_list_entry_lines,
+    open_pr_list_lines,
+    open_prs_header_line,
 )
 
 def _load_optional_config():
@@ -782,34 +787,6 @@ def gh_pr_list_open() -> list[dict]:
     return json.loads(result.stdout)
 
 
-def no_open_prs_line() -> str:
-    return "No open PRs."
-
-
-def open_prs_header_line(count: int) -> str:
-    return f"Open PRs ({count}):"
-
-
-def open_pr_list_entry_lines(pr: dict) -> list[str]:
-    author = pr.get("author", {}).get("login", "?")
-    labels = ", ".join(label.get("name", "") for label in pr.get("labels", []))
-    label_str = f" [{labels}]" if labels else ""
-    return [
-        f"  #{pr['number']:4d}  {pr['title']}",
-        f"         {pr['headRefName']} by {author}{label_str}",
-    ]
-
-
-def open_pr_list_lines(prs: list[dict]) -> list[str]:
-    if not prs:
-        return [no_open_prs_line()]
-
-    lines = [open_prs_header_line(len(prs)), ""]
-    for pr in prs:
-        lines.extend(open_pr_list_entry_lines(pr))
-    return lines
-
-
 def gh_pr_head(pr_ref: str) -> tuple[int, str, str] | None:
     if pr_ref == "latest":
         prs = gh_pr_list_open()
@@ -830,43 +807,6 @@ def gh_pr_head(pr_ref: str) -> tuple[int, str, str] | None:
 
     data = json.loads(result.stdout)
     return data["number"], data["headRefName"], data["headRefOid"]
-
-
-def format_ci_comment(result: dict) -> str:
-    result = normalize_result(result)
-    validation = result.get("validation", "full")
-    title = "Local CI Smoke Results" if validation == "smoke" else "Local CI Results"
-    lines = [f"## {title}\n"]
-    overall = result["overall"].upper()
-    icon = "white_check_mark" if overall == "PASS" else "x"
-    lines.append(f":{icon}: **Overall: {overall}**\n")
-    lines.append(f"Job: `{result.get('job_id', '?')}`  Commit: `{short_sha(result.get('sha', ''))}`\n")
-    lines.append(f"Execution: `{provenance_summary(result.get('provenance'))}`\n")
-    if result.get("provenance", {}).get("run_url"):
-        lines.append(f"Run URL: {result['provenance']['run_url']}\n")
-    if validation != "full":
-        lines.append(f"Validation: `{validation}`\n")
-        lines.append("_Smoke mode is a fast clean install/export preflight and does not run the full test suite._\n")
-    lines.append("| Target | Status | Duration |")
-    lines.append("|--------|--------|----------|")
-    for item in result["results"]:
-        status = item["status"].upper()
-        s_icon = "white_check_mark" if status == "PASS" else "x"
-        lines.append(f"| {item['target']} | :{s_icon}: {status} | {item.get('duration_secs', 0)}s |")
-
-    if any(item["status"] != "pass" for item in result["results"]):
-        lines.append("\n<details><summary>Failure details</summary>\n")
-        for item in result["results"]:
-            if item["status"] == "pass":
-                continue
-            lines.append(f"### {item['target']} (exit {item.get('exit_code', '?')})")
-            stderr = item.get("stderr_tail", "")
-            if stderr:
-                lines.append(f"```\n{stderr[-500:]}\n```")
-        lines.append("</details>")
-
-    lines.append(f"\n*Run at {result.get('completed_at', 'unknown')}*")
-    return "\n".join(lines)
 
 
 # ── CLI Commands ─────────────────────────────────────────────────────────────
