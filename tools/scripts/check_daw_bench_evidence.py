@@ -45,6 +45,28 @@ REQUIRED_STRING_FIELDS = (
 PLACEHOLDER_RE = re.compile(r"(?:^|\b)(?:TBD|TODO|FIXME|<[^>]+>|paste here)(?:\b|$)", re.I)
 COMMIT_RE = re.compile(r"^[0-9a-f]{7,40}$")
 FLAG_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+LOG_LINE_RE = re.compile(r"^[^\t]+\t(?P<event>[A-Za-z_][A-Za-z0-9_]*)")
+
+FLAG_LOG_EVENTS: dict[str, tuple[str, ...]] = {
+    "clamp_latency_to_nonneg": ("prepare",),
+    "reaper_vst3_gesture_ordering": ("process_is_playing_edge",),
+    "reaper_process_while_bypassed": ("process_without_prepare",),
+    "reaper_permissive_bus_arrangements": ("bus_layout_proposal",),
+    "reaper_anticipative_fx_buffer_variability": (
+        "process_buffer_overrun",
+        "process_sample_rate_drift",
+    ),
+    "reaper_midsession_setstate": ("deserialize_plugin_state",),
+    "fl_studio_setactive_process_mutex": ("process_without_prepare",),
+    "fl_studio_state_reader_skip": ("deserialize_plugin_state",),
+    "cubase9_state_blob_size_validation": ("deserialize_plugin_state",),
+    "cubase10_async_view_resize_queue": ("view_resized",),
+    "live_vst3_canresize_ignore": ("view_resized",),
+    "bitwig_vst3_setbusarrangements_while_active": ("bus_layout_proposal",),
+    "wavelab_state_blob_fallback": ("deserialize_plugin_state",),
+    "wavelab_vst3_defer_activation": ("bus_layout_proposal",),
+    "logic_au_tail_time_conversion": ("prepare",),
+}
 
 
 @dataclass(frozen=True)
@@ -125,6 +147,60 @@ def _validate_quirks(data: dict[str, Any]) -> list[str]:
     return errors
 
 
+def _events_in_log(path: pathlib.Path) -> set[str]:
+    events: set[str] = set()
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                match = LOG_LINE_RE.match(line)
+                if match:
+                    events.add(match.group("event"))
+    except OSError:
+        return events
+    return events
+
+
+def _validate_claimed_log_events(
+    data: dict[str, Any],
+    log_paths: list[pathlib.Path],
+) -> list[str]:
+    if not log_paths:
+        return []
+
+    observed_events: set[str] = set()
+    for path in log_paths:
+        observed_events.update(_events_in_log(path))
+
+    errors: list[str] = []
+    quirks = data.get("quirks")
+    if not isinstance(quirks, list):
+        return errors
+
+    for index, quirk in enumerate(quirks):
+        if not isinstance(quirk, dict):
+            continue
+        flag = quirk.get("flag")
+        observed = quirk.get("observed")
+        if not isinstance(flag, str):
+            continue
+        expected_events = FLAG_LOG_EVENTS.get(flag)
+        if not expected_events:
+            continue
+        found = sorted(set(expected_events).intersection(observed_events))
+        expected = ", ".join(expected_events)
+        if observed == "Confirmed" and not found:
+            errors.append(
+                f"quirks[{index}] {flag} is Confirmed but checked-in logs "
+                f"do not contain expected event(s): {expected}"
+            )
+        elif observed == "Not Triggered" and found:
+            errors.append(
+                f"quirks[{index}] {flag} is Not Triggered but checked-in logs "
+                f"contain expected event(s): {', '.join(found)}"
+            )
+    return errors
+
+
 def validate_manifest(path: pathlib.Path, *, repo_root: pathlib.Path = REPO_ROOT) -> ValidationResult:
     data, errors = _load_json(path)
     if data is None:
@@ -171,6 +247,7 @@ def validate_manifest(path: pathlib.Path, *, repo_root: pathlib.Path = REPO_ROOT
             errors.append("result_markdown must reference a checked-in result markdown file")
 
     logs = data.get("logs", [])
+    log_paths: list[pathlib.Path] = []
     external_log_url = data.get("external_log_url")
     if logs is None:
         logs = []
@@ -180,8 +257,12 @@ def validate_manifest(path: pathlib.Path, *, repo_root: pathlib.Path = REPO_ROOT
         for index, log in enumerate(logs):
             if not isinstance(log, str) or not log.strip() or _is_placeholder(log):
                 errors.append(f"logs[{index}] must be a non-placeholder path")
-            elif _relative_existing_file(base, log, repo_root=repo_root) is None:
-                errors.append(f"logs[{index}] must reference a checked-in log file")
+            else:
+                log_path = _relative_existing_file(base, log, repo_root=repo_root)
+                if log_path is None:
+                    errors.append(f"logs[{index}] must reference a checked-in log file")
+                else:
+                    log_paths.append(log_path)
     if external_log_url is not None:
         if not isinstance(external_log_url, str) or not external_log_url.startswith(("https://", "http://")):
             errors.append("external_log_url must be an http(s) URL when present")
@@ -189,6 +270,7 @@ def validate_manifest(path: pathlib.Path, *, repo_root: pathlib.Path = REPO_ROOT
         errors.append("provide at least one checked-in log or external_log_url")
 
     errors.extend(_validate_quirks(data))
+    errors.extend(_validate_claimed_log_events(data, log_paths))
     return ValidationResult(path, tuple(errors))
 
 

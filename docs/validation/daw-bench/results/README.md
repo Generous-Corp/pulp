@@ -26,6 +26,10 @@ python3 tools/scripts/check_daw_bench_evidence.py \
 Large DAW logs may stay outside the repo, but the manifest must include an
 `external_log_url` when `logs` is empty. Do not use placeholders; unverified
 rows should be recorded as `Not Triggered` or left out of the promotion PR.
+For known log-backed quirk flags, the validator also cross-checks the observed
+status against the checked-in log events. A `Confirmed` row must include the
+expected event in at least one listed log, and a `Not Triggered` row must not
+contradict the listed logs.
 
 ## Manifest Schema
 

@@ -113,6 +113,46 @@ class DawBenchEvidenceTests(unittest.TestCase):
             result = checker.validate_manifest(path, repo_root=root)
             self.assertEqual(result.errors, ())
 
+    def test_confirmed_known_flag_requires_matching_log_event(self) -> None:
+        tmp_ctx, root, result_dir = self._repo()
+        with tmp_ctx:
+            path = result_dir / "missing-event.daw-bench.json"
+            path.write_text(
+                json.dumps(_manifest(
+                    quirks=[
+                        {
+                            "flag": "reaper_midsession_setstate",
+                            "row": "R6",
+                            "observed": "Confirmed",
+                            "notes": "State load was claimed but the log lacks the event.",
+                        }
+                    ]
+                )),
+                encoding="utf-8",
+            )
+            errors = checker.validate_manifest(path, repo_root=root).errors
+            self.assertTrue(any("deserialize_plugin_state" in error for error in errors))
+
+    def test_not_triggered_known_flag_rejects_matching_log_event(self) -> None:
+        tmp_ctx, root, result_dir = self._repo()
+        with tmp_ctx:
+            path = result_dir / "stale-not-triggered.daw-bench.json"
+            path.write_text(
+                json.dumps(_manifest(
+                    quirks=[
+                        {
+                            "flag": "reaper_process_while_bypassed",
+                            "row": "R1",
+                            "observed": "Not Triggered",
+                            "notes": "This stale table contradicts the checked-in log.",
+                        }
+                    ]
+                )),
+                encoding="utf-8",
+            )
+            errors = checker.validate_manifest(path, repo_root=root).errors
+            self.assertTrue(any("process_without_prepare" in error for error in errors))
+
     def test_directory_scan_finds_only_manifest_suffix(self) -> None:
         tmp_ctx, _root, result_dir = self._repo()
         with tmp_ctx:
