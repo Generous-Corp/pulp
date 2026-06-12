@@ -200,6 +200,14 @@ from cloud_facade_helpers import (  # noqa: E402
     estimate_billing_period_totals_with_deps as _estimate_billing_period_totals_with_deps,
     fetch_github_repo_actions_billing_summary_with_deps as _fetch_github_repo_actions_billing_summary_with_deps,
     list_cloud_records_with_deps as _list_cloud_records_with_deps,
+    namespace_instance_duration_secs_with_deps as _namespace_instance_duration_secs_with_deps,
+    namespace_instances_for_run_with_deps as _namespace_instances_for_run_with_deps,
+    normalize_namespace_instance_with_deps as _normalize_namespace_instance_with_deps,
+    nsc_available_with_deps as _nsc_available_with_deps,
+    nsc_instance_history_with_deps as _nsc_instance_history_with_deps,
+    nsc_logged_in_with_deps as _nsc_logged_in_with_deps,
+    nsc_version_with_deps as _nsc_version_with_deps,
+    nsc_workspace_info_with_deps as _nsc_workspace_info_with_deps,
     refresh_cloud_record_with_deps as _refresh_cloud_record_with_deps,
     resolve_github_repository_with_deps as _resolve_github_repository_with_deps,
     save_cloud_record_with_deps as _save_cloud_record_with_deps,
@@ -357,11 +365,19 @@ def print_cloud_field_detail(
 
 
 def namespace_instance_duration_secs(instance: dict) -> float | None:
-    return _namespace_instance_duration_secs(instance, now_iso_fn=now_iso)
+    return _namespace_instance_duration_secs_with_deps(
+        instance,
+        namespace_instance_duration_secs_fn=_namespace_instance_duration_secs,
+        now_iso_fn=now_iso,
+    )
 
 
 def normalize_namespace_instance(instance: dict) -> dict:
-    return _normalize_namespace_instance(instance, now_iso_fn=now_iso)
+    return _normalize_namespace_instance_with_deps(
+        instance,
+        normalize_namespace_instance_fn=_normalize_namespace_instance,
+        now_iso_fn=now_iso,
+    )
 
 
 def enrich_cloud_record_provider_metadata(record: dict) -> dict:
@@ -385,29 +401,37 @@ def nsc_run(args: list[str], *, capture_output: bool = True) -> subprocess.Compl
 
 
 def nsc_available() -> bool:
-    return _nsc_available(nsc_run_fn=nsc_run)
+    return _nsc_available_with_deps(nsc_available_fn=_nsc_available, nsc_run_fn=nsc_run)
 
 
 def nsc_version() -> str | None:
-    return _nsc_version(nsc_run_fn=nsc_run)
+    return _nsc_version_with_deps(nsc_version_fn=_nsc_version, nsc_run_fn=nsc_run)
 
 
 def nsc_logged_in() -> bool:
-    return _nsc_logged_in(nsc_run_fn=nsc_run)
+    return _nsc_logged_in_with_deps(nsc_logged_in_fn=_nsc_logged_in, nsc_run_fn=nsc_run)
 
 
 def nsc_workspace_info() -> dict[str, str] | None:
-    return _nsc_workspace_info(nsc_run_fn=nsc_run)
+    return _nsc_workspace_info_with_deps(
+        nsc_workspace_info_fn=_nsc_workspace_info,
+        nsc_run_fn=nsc_run,
+    )
 
 
 def nsc_instance_history(max_entries: int = 100) -> list[dict]:
-    return _nsc_instance_history(max_entries=max_entries, nsc_run_fn=nsc_run)
+    return _nsc_instance_history_with_deps(
+        max_entries,
+        nsc_instance_history_fn=_nsc_instance_history,
+        nsc_run_fn=nsc_run,
+    )
 
 
 def namespace_instances_for_run(repository: str, run_id: int) -> list[dict]:
-    return _namespace_instances_for_run(
+    return _namespace_instances_for_run_with_deps(
         repository,
         run_id,
+        namespace_instances_for_run_fn=_namespace_instances_for_run,
         nsc_instance_history_fn=nsc_instance_history,
         normalize_namespace_instance_fn=normalize_namespace_instance,
     )
