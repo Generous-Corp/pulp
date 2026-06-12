@@ -840,11 +840,19 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
         }
     }
 
-    for (const auto& c : cg->connections) {
+    for (size_t ci = 0; ci < cg->connections.size(); ++ci) {
+        const auto& c = cg->connections[ci];
         auto rt_it = cg->runtime.find(c.dest_node);
         if (rt_it == cg->runtime.end()) continue;
         auto& rt = rt_it->second;
+        if (c.feedback) cg->feedback_edges.push_back(ci);
+        if (c.midi && !c.feedback) {
+            rt.inbound_midi_edges.push_back(ci);
+        } else if (!c.midi && !c.automation && !c.audio_rate_modulation) {
+            rt.inbound_audio_edges.push_back(ci);
+        }
         if (c.automation) {
+            rt.sparse_automation_edges.push_back(ci);
             auto& ids = rt.sparse_automation_param_ids;
             if (std::find(ids.begin(), ids.end(), c.automation_param_id) == ids.end()) {
                 ids.push_back(c.automation_param_id);
@@ -852,6 +860,7 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
             }
         }
         if (c.audio_rate_modulation) {
+            rt.audio_rate_modulation_edges.push_back(ci);
             auto& ids = rt.audio_rate_param_ids;
             if (std::find(ids.begin(), ids.end(), c.automation_param_id) == ids.end()) {
                 ids.push_back(c.automation_param_id);
@@ -1101,8 +1110,8 @@ void SignalGraph::process(audio::BufferView<float>& output,
         }
 
         // 1b. Gather MIDI from MIDI-flagged inbound connections.
-        for (const auto& c : cg->connections) {
-            if (c.dest_node != id || !c.midi || c.feedback) continue;
+        for (const size_t ci : rt.inbound_midi_edges) {
+            const auto& c = cg->connections[ci];
             auto src_it = cg->runtime.find(c.source_node);
             if (src_it == cg->runtime.end()) continue;
             if (!copy_midi_block(src_it->second.midi_out, rt.midi_in)
@@ -1112,12 +1121,8 @@ void SignalGraph::process(audio::BufferView<float>& output,
         }
 
         // 2. Gather audio inbound with PDC/feedback delay lines.
-        for (size_t ci = 0; ci < cg->connections.size(); ++ci) {
+        for (const size_t ci : rt.inbound_audio_edges) {
             const auto& c = cg->connections[ci];
-            if (c.dest_node != id) continue;
-            if (c.midi) continue;
-            if (c.automation) continue;  // dispatched in the Plugin branch
-            if (c.audio_rate_modulation) continue;  // dense path is built separately
             const int dport = static_cast<int>(c.dest_port);
             if (dport < 0 || dport >= static_cast<int>(rt.input_ptrs.size())) continue;
             if (c.source_node == 0) continue;
@@ -1223,9 +1228,8 @@ void SignalGraph::process(audio::BufferView<float>& output,
                         a = NodeRuntime::SparseAutomationAccum{};
                     }
                     const int last = num_samples - 1;
-                    for (size_t ci = 0; ci < cg->connections.size(); ++ci) {
+                    for (const size_t ci : rt.sparse_automation_edges) {
                         const auto& c = cg->connections[ci];
-                        if (!c.automation || c.dest_node != id) continue;
                         auto src_it = cg->runtime.find(c.source_node);
                         if (src_it == cg->runtime.end()) continue;
                         const int sport = static_cast<int>(c.source_port);
@@ -1345,9 +1349,8 @@ void SignalGraph::process(audio::BufferView<float>& output,
                             d = NodeRuntime::DenseAutomationAccum{};
                         }
 
-                        for (size_t ci = 0; ci < cg->connections.size(); ++ci) {
+                        for (const size_t ci : rt.audio_rate_modulation_edges) {
                             const auto& c = cg->connections[ci];
-                            if (!c.audio_rate_modulation || c.dest_node != id) continue;
                             auto src_it = cg->runtime.find(c.source_node);
                             if (src_it == cg->runtime.end()) continue;
                             const int sport = static_cast<int>(c.source_port);
@@ -1523,9 +1526,8 @@ void SignalGraph::process(audio::BufferView<float>& output,
     }
 
     // Capture each feedback source's current block for the *next* block.
-    for (size_t ci = 0; ci < cg->connections.size(); ++ci) {
+    for (const size_t ci : cg->feedback_edges) {
         const auto& c = cg->connections[ci];
-        if (!c.feedback) continue;
         auto src_it = cg->runtime.find(c.source_node);
         if (src_it == cg->runtime.end()) continue;
         const auto& src_rt = src_it->second;
