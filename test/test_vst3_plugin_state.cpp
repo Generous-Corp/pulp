@@ -489,6 +489,78 @@ TEST_CASE("VST3 latency and tail report processor runtime contract",
     }
 }
 
+TEST_CASE("VST3 transport jumps request processor reset through ProcessContext",
+          "[vst3][transport][reset][phase2]") {
+    reset_test_processor();
+
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    auto* test_processor = TestVst3Processor::g_last_processor;
+    REQUIRE(test_processor != nullptr);
+
+    Steinberg::Vst::ProcessSetup setup{};
+    setup.processMode = Steinberg::Vst::kRealtime;
+    setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+    setup.maxSamplesPerBlock = 8;
+    setup.sampleRate = 48000.0;
+    REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+
+    constexpr int kFrames = 8;
+    std::array<float, kFrames> in_l{};
+    std::array<float, kFrames> in_r{};
+    std::array<float, kFrames> out_l{};
+    std::array<float, kFrames> out_r{};
+    float* main_inputs[2] = {in_l.data(), in_r.data()};
+    float* main_outputs[2] = {out_l.data(), out_r.data()};
+
+    Steinberg::Vst::AudioBusBuffers audio_inputs[1]{};
+    audio_inputs[0].numChannels = 2;
+    audio_inputs[0].channelBuffers32 = main_inputs;
+    Steinberg::Vst::AudioBusBuffers audio_outputs[1]{};
+    audio_outputs[0].numChannels = 2;
+    audio_outputs[0].channelBuffers32 = main_outputs;
+
+    Steinberg::Vst::ParameterChanges input_params;
+    Steinberg::Vst::ParameterChanges output_params;
+    Steinberg::Vst::EventList input_events(1);
+    Steinberg::Vst::EventList output_events(1);
+    Steinberg::Vst::ProcessContext process_context{};
+    process_context.state = Steinberg::Vst::ProcessContext::kPlaying;
+
+    Steinberg::Vst::ProcessData data{};
+    data.numSamples = kFrames;
+    data.numInputs = 1;
+    data.numOutputs = 1;
+    data.inputs = audio_inputs;
+    data.outputs = audio_outputs;
+    data.inputParameterChanges = &input_params;
+    data.outputParameterChanges = &output_params;
+    data.inputEvents = &input_events;
+    data.outputEvents = &output_events;
+    data.processContext = &process_context;
+
+    auto run_at = [&](Steinberg::int64 sample_position) {
+        process_context.projectTimeSamples = sample_position;
+        REQUIRE(processor.process(data) == Steinberg::kResultOk);
+        return test_processor->last_context;
+    };
+
+    const auto first = run_at(1000);
+    REQUIRE_FALSE(first.transport_jump);
+    REQUIRE_FALSE(first.should_reset_dsp_state());
+
+    const auto continuous = run_at(1008);
+    REQUIRE_FALSE(continuous.transport_jump);
+    REQUIRE_FALSE(continuous.should_reset_dsp_state());
+
+    const auto jumped = run_at(4096);
+    REQUIRE(jumped.transport_jump);
+    REQUIRE(jumped.should_reset_dsp_state());
+
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
 TEST_CASE("VST3 editor creation is disabled by automation env",
           "[vst3][editor][issue-2515]") {
     ScopedEnv disable_editor("PULP_DISABLE_PLUGIN_EDITOR");
