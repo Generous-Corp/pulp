@@ -84,6 +84,11 @@ The tracker normalises expressions so voices see consistent units:
 `pitch_bend()`, `pressure()`, `timbre()` directly without fighting
 zipper noise.
 
+`MpeVoiceAllocator<Voice>::telemetry()` returns an owner-thread snapshot with
+polyphony, active/releasing voice counts, steal count, steal mode, and the
+latest glide flag. If UI or tooling needs that data, call it from the processor
+owner and publish the returned value through a lock-free latest-value channel.
+
 ## Example
 
 `examples/mpe-synth/` ships an MPE-aware sine synth that demonstrates

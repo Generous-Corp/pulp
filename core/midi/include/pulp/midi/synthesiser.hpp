@@ -22,6 +22,7 @@
 #include <pulp/midi/message.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -59,6 +60,14 @@ enum class VoiceStealStrategy : uint8_t {
     /// Steal the voice with the lowest `priority`. Ties broken by
     /// oldest-first.
     Priority,
+};
+
+struct SynthesiserTelemetry {
+    std::size_t polyphony = 0;
+    std::size_t active_voice_count = 0;
+    std::size_t releasing_voice_count = 0;
+    std::uint64_t steal_count = 0;
+    VoiceStealStrategy steal_strategy = VoiceStealStrategy::Oldest;
 };
 
 /// Abstract base for one synth voice. Subclasses implement `render`
@@ -249,6 +258,34 @@ public:
         return n;
     }
 
+    std::size_t releasing_count() const {
+        std::size_t n = 0;
+        for (const auto& v : voices_) if (v.active() && v.releasing()) ++n;
+        return n;
+    }
+
+    std::uint64_t steal_count() const {
+        return steal_count_.load(std::memory_order_relaxed);
+    }
+
+    void reset_steal_count() {
+        steal_count_.store(0, std::memory_order_relaxed);
+    }
+
+    /// Cheap owner-thread snapshot for voice-count telemetry. Call from
+    /// the synth owner (normally the audio thread) and publish the returned
+    /// value through a lock-free latest-value channel if another thread
+    /// needs to observe it.
+    SynthesiserTelemetry telemetry() const {
+        return {
+            .polyphony = polyphony(),
+            .active_voice_count = active_count(),
+            .releasing_voice_count = releasing_count(),
+            .steal_count = steal_count(),
+            .steal_strategy = strategy_,
+        };
+    }
+
     void reset() {
         for (auto& v : voices_) v.reset();
         next_id_ = 0;
@@ -334,7 +371,10 @@ private:
                 break;
             }
         }
-        if (chosen) chosen->reset();
+        if (chosen) {
+            steal_count_.fetch_add(1, std::memory_order_relaxed);
+            chosen->reset();
+        }
         return chosen;
     }
 
@@ -379,6 +419,7 @@ private:
     VoiceStealStrategy strategy_ = VoiceStealStrategy::Oldest;
     float bend_range_semi_ = 2.0f;
     uint32_t next_id_ = 0;
+    std::atomic<std::uint64_t> steal_count_{0};
 };
 
 } // namespace pulp::midi
