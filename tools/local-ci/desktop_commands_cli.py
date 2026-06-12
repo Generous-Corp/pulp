@@ -4,21 +4,21 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Callable
-import json
 from pathlib import Path
 import shutil
 
+from desktop_command_flow import (
+    emit_desktop_command_result,
+    load_desktop_command_config,
+    require_desktop_run_manifests,
+    run_desktop_command_step,
+)
 from desktop_config_commands_cli import (
     cmd_desktop_config,
     cmd_desktop_config_set,
     cmd_desktop_config_show,
 )
 from desktop_status_payload import desktop_status_payload
-
-
-def _print_lines(lines, *, print_fn: Callable[[str], None]) -> None:
-    for line in lines:
-        print_fn(line)
 
 
 def cmd_desktop_status(
@@ -40,14 +40,12 @@ def cmd_desktop_status(
     windows_repo_checkout_detail_fn: Callable[..., str],
     print_fn: Callable[[str], None] = print,
 ) -> int:
-    try:
-        config = load_config_fn()
-    except FileNotFoundError as exc:
-        print_fn(f"Error: {exc}")
-        return 1
+    config, status = load_desktop_command_config(load_config_fn=load_config_fn, print_fn=print_fn)
+    if status is not None:
+        return status
 
-    try:
-        payload = desktop_status_payload(
+    payload, status = run_desktop_command_step(
+        lambda: desktop_status_payload(
             config,
             target_name=args.target,
             desktop_receipt_for_fn=desktop_receipt_for_fn,
@@ -59,17 +57,17 @@ def cmd_desktop_status(
             normalize_desktop_optional_config_fn=normalize_desktop_optional_config_fn,
             desktop_target_contract_fn=desktop_target_contract_fn,
             desktop_publish_reports_fn=desktop_publish_reports_fn,
-        )
-    except ValueError as exc:
-        print_fn(f"\nError: {exc}")
-        return 1
+        ),
+        print_fn=print_fn,
+        error_prefix="\nError: ",
+    )
+    if status is not None:
+        return status
 
-    if getattr(args, "json", False):
-        print_fn(json.dumps(payload, indent=2))
-        return 0
-
-    _print_lines(
-        desktop_status_lines_fn(
+    return emit_desktop_command_result(
+        payload=payload,
+        json_output=getattr(args, "json", False),
+        text_lines=desktop_status_lines_fn(
             config["desktop_automation"],
             payload["targets"],
             latest_publish=payload["latest_publish"],
@@ -79,7 +77,6 @@ def cmd_desktop_status(
         ),
         print_fn=print_fn,
     )
-    return 0
 
 
 def cmd_desktop_recent(
@@ -92,24 +89,26 @@ def cmd_desktop_recent(
     short_sha_fn: Callable[[str], str],
     print_fn: Callable[[str], None] = print,
 ) -> int:
-    try:
-        config = load_config_fn()
-    except FileNotFoundError as exc:
-        print_fn(f"Error: {exc}")
-        return 1
+    config, status = load_desktop_command_config(load_config_fn=load_config_fn, print_fn=print_fn)
+    if status is not None:
+        return status
 
     manifests = desktop_run_manifests_fn(config, target_name=args.target, action=args.action)
-    if not manifests:
-        print_fn("No desktop automation runs found.")
+    if not require_desktop_run_manifests(
+        manifests,
+        empty_line="No desktop automation runs found.",
+        print_fn=print_fn,
+    ):
         return 0
     manifests = manifests[: args.limit]
-    if getattr(args, "json", False):
-        print_fn(json.dumps({"runs": manifests}, indent=2))
-        return 0
 
     run_summaries = [desktop_run_summary_fn(config, manifest) for manifest in manifests]
-    _print_lines(desktop_recent_lines_fn(run_summaries, short_sha_fn=short_sha_fn), print_fn=print_fn)
-    return 0
+    return emit_desktop_command_result(
+        payload={"runs": manifests},
+        json_output=getattr(args, "json", False),
+        text_lines=desktop_recent_lines_fn(run_summaries, short_sha_fn=short_sha_fn),
+        print_fn=print_fn,
+    )
 
 
 def cmd_desktop_proof(
@@ -122,14 +121,12 @@ def cmd_desktop_proof(
     short_sha_fn: Callable[[str], str],
     print_fn: Callable[[str], None] = print,
 ) -> int:
-    try:
-        config = load_config_fn()
-    except FileNotFoundError as exc:
-        print_fn(f"Error: {exc}")
-        return 1
+    config, status = load_desktop_command_config(load_config_fn=load_config_fn, print_fn=print_fn)
+    if status is not None:
+        return status
 
-    try:
-        proofs = desktop_proof_summaries_fn(
+    proofs, status = run_desktop_command_step(
+        lambda: desktop_proof_summaries_fn(
             config,
             target_name=args.target,
             action=args.action,
@@ -137,14 +134,11 @@ def cmd_desktop_proof(
             sha=args.sha,
             branch=args.branch,
             limit=args.limit,
-        )
-    except ValueError as exc:
-        print_fn(f"Error: {exc}")
-        return 1
-
-    if getattr(args, "json", False):
-        print_fn(json.dumps({"proofs": proofs}, indent=2))
-        return 0
+        ),
+        print_fn=print_fn,
+    )
+    if status is not None:
+        return status
 
     if not proofs:
         print_fn(
@@ -159,8 +153,12 @@ def cmd_desktop_proof(
         )
         return 0
 
-    _print_lines(desktop_proof_lines_fn(proofs, short_sha_fn=short_sha_fn), print_fn=print_fn)
-    return 0
+    return emit_desktop_command_result(
+        payload={"proofs": proofs},
+        json_output=getattr(args, "json", False),
+        text_lines=desktop_proof_lines_fn(proofs, short_sha_fn=short_sha_fn),
+        print_fn=print_fn,
+    )
 
 
 def cmd_desktop_publish(
@@ -172,31 +170,34 @@ def cmd_desktop_publish(
     desktop_publish_lines_fn: Callable[[dict], list[str]],
     print_fn: Callable[[str], None] = print,
 ) -> int:
-    try:
-        config = load_config_fn()
-    except FileNotFoundError as exc:
-        print_fn(f"Error: {exc}")
-        return 1
+    config, status = load_desktop_command_config(load_config_fn=load_config_fn, print_fn=print_fn)
+    if status is not None:
+        return status
 
     manifests = desktop_run_manifests_fn(config, target_name=args.target, action=args.action)
-    if not manifests:
-        print_fn("No desktop automation runs found.")
+    if not require_desktop_run_manifests(
+        manifests,
+        empty_line="No desktop automation runs found.",
+        print_fn=print_fn,
+    ):
         return 0
 
     manifests = manifests[: args.limit]
     output_dir = Path(args.output).expanduser() if args.output else None
-    try:
-        report = stage_desktop_publish_report_fn(config, manifests, output_dir=output_dir, label=args.label)
-    except Exception as exc:
-        print_fn(f"Error: {exc}")
-        return 1
 
-    if getattr(args, "json", False):
-        print_fn(json.dumps(report, indent=2))
-        return 0
+    report, status = run_desktop_command_step(
+        lambda: stage_desktop_publish_report_fn(config, manifests, output_dir=output_dir, label=args.label),
+        print_fn=print_fn,
+    )
+    if status is not None:
+        return status
 
-    _print_lines(desktop_publish_lines_fn(report), print_fn=print_fn)
-    return 0
+    return emit_desktop_command_result(
+        payload=report,
+        json_output=getattr(args, "json", False),
+        text_lines=desktop_publish_lines_fn(report),
+        print_fn=print_fn,
+    )
 
 
 def cmd_desktop_cleanup(
@@ -210,11 +211,9 @@ def cmd_desktop_cleanup(
     remove_tree_fn: Callable[..., None] = shutil.rmtree,
     print_fn: Callable[[str], None] = print,
 ) -> int:
-    try:
-        config = load_config_fn()
-    except FileNotFoundError as exc:
-        print_fn(f"Error: {exc}")
-        return 1
+    config, status = load_desktop_command_config(load_config_fn=load_config_fn, print_fn=print_fn)
+    if status is not None:
+        return status
 
     older_than = args.older_than_days if args.older_than_days is not None else config["desktop_automation"]["retention_days"]
     paths = prune_desktop_run_manifests_fn(
@@ -234,9 +233,9 @@ def cmd_desktop_cleanup(
     if args.target is not None:
         write_desktop_run_rollups_fn(config)
 
-    if getattr(args, "json", False):
-        print_fn(json.dumps({"removed": [str(path) for path in paths]}, indent=2))
-        return 0
-
-    _print_lines(desktop_cleanup_lines_fn(paths), print_fn=print_fn)
-    return 0
+    return emit_desktop_command_result(
+        payload={"removed": [str(path) for path in paths]},
+        json_output=getattr(args, "json", False),
+        text_lines=desktop_cleanup_lines_fn(paths),
+        print_fn=print_fn,
+    )
