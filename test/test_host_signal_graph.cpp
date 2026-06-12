@@ -894,6 +894,51 @@ TEST_CASE("SignalGraph prepare rejects graphs beyond configured limits",
     }
 }
 
+TEST_CASE("SignalGraph prepares and routes a large graph at configured limits",
+          "[host][graph][limits][scale][phase2]") {
+    SignalGraph graph;
+    constexpr int kGainNodes = 128;
+    constexpr int kBlock = 16;
+
+    auto limits = graph.limits();
+    limits.max_nodes = static_cast<size_t>(kGainNodes + 2);
+    limits.max_connections = static_cast<size_t>(kGainNodes + 1);
+    limits.max_ports = static_cast<size_t>(kGainNodes * 4 + 2);
+    limits.max_block_size = kBlock;
+    graph.set_limits(limits);
+
+    auto input = graph.add_input_node(1, "in");
+    NodeId previous = input;
+    for (int i = 0; i < kGainNodes; ++i) {
+        auto gain = graph.add_gain_node("gain");
+        REQUIRE(graph.connect(previous, 0, gain, 0));
+        previous = gain;
+    }
+    auto output = graph.add_output_node(1, "out");
+    REQUIRE(graph.connect(previous, 0, output, 0));
+
+    REQUIRE(graph.nodes().size() == limits.max_nodes);
+    REQUIRE(graph.connections().size() == limits.max_connections);
+    REQUIRE(graph.prepare(48000.0, kBlock));
+
+    std::vector<float> input_samples(kBlock, 0.0f);
+    std::vector<float> output_samples(kBlock, -1.0f);
+    for (int i = 0; i < kBlock; ++i) {
+        input_samples[static_cast<size_t>(i)] = static_cast<float>(i) / 16.0f;
+    }
+    const float* in_ptrs[1] = {input_samples.data()};
+    float* out_ptrs[1] = {output_samples.data()};
+    pulp::audio::BufferView<const float> in_view(in_ptrs, 1, kBlock);
+    pulp::audio::BufferView<float> out_view(out_ptrs, 1, kBlock);
+
+    graph.process(out_view, in_view, kBlock);
+
+    for (int i = 0; i < kBlock; ++i) {
+        REQUIRE_THAT(output_samples[static_cast<size_t>(i)],
+                     WithinAbs(input_samples[static_cast<size_t>(i)], 1e-6f));
+    }
+}
+
 TEST_CASE("SignalGraph disconnected output stays silent", "[host][graph][routing]") {
     // If no node connects to the AudioOutput, process() must leave the
     // output silent regardless of input content.
