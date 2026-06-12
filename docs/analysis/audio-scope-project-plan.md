@@ -2,21 +2,69 @@
 
 ## Status
 
-Implementation-ready phased plan, hardened against the code at
+Implementation plan and progress log, hardened against the code at
 `fix/audio-run-audible-notice` (which includes the Audio Inspector waveform
-polish). Reviewed with RepoPrompt context-building on 2026-06-12. Each phase is
-one independently shippable PR with its own tests and acceptance criteria. The
-"Decision criteria" section at the end remains the go/no-go gate: Phases 1–2
-alone must demonstrate the value or the later phases do not get built.
+polish). Reviewed with RepoPrompt context-building on 2026-06-12. The plan was
+originally shaped as five independently shippable phases; the implementation
+branch is intentionally carrying the slices together so CLI/MCP/UI/offline
+behavior can be reviewed as one coherent Audio Scope surface.
+
+## Progress
+
+- 2026-06-12: Preserved this hardened plan in the `pulp-planning` repo on
+  `main` as `2026-06-12-audio-scope-project-plan.md` (`92e1960`).
+- 2026-06-12: Started Phase 1 in `core/audio`: added shared scope acquisition,
+  trigger, measurement, and JSON primitives plus tests in the existing
+  `pulp-test-audio-probe` binary. Validated in the Release
+  `build-audio-scope` tree with
+  `cmake --build build-audio-scope --target pulp-test-audio-probe -j8` and
+  `build-audio-scope/test/pulp-test-audio-probe "[audio][scope]"`.
+- 2026-06-12: Implemented Phase 2 plumbing for live one-shot scope JSON:
+  low-level `pulp run --audio-scope-json`, standalone scope JSON helper,
+  `pulp audio scope`, and MCP `pulp_audio_scope`. Focused validation passed in
+  `build-audio-scope` with parser, MCP, scope-core, and non-audible standalone
+  helper tests. The existing `build`/`build-cov` trees currently reconfigure
+  with `PULP_ENABLE_GPU=ON` and fail before compile because local Skia is
+  missing; validation is therefore using the dedicated GPU-off Release tree.
+- 2026-06-12: Implemented Phase 3 Signal/Scope mode in the existing Audio
+  Inspector window. Signal remains the default diagnostic view; Scope uses the
+  shared `core/audio` acquisition/measurement helpers on copied samples and
+  persists `audio_inspector.mode` through `ApplicationProperties` /
+  `PropertiesFile`.
+- 2026-06-12: Implemented Phase 4 multichannel capture in `AudioProbe` while
+  preserving the legacy channel-0 reader. The new multichannel reader drains the
+  same single-consumer FIFO and feeds live Scope JSON/MCP acquisition without a
+  second trigger implementation.
+- 2026-06-12: Implemented Phase 5 speakerless offline source for
+  `pulp audio scope --input-wav`, plus optional offline `--png` trace artifact.
+  MCP `pulp_audio_scope` mirrors the live/offline split with `target` and
+  `input_wav` kept mutually exclusive.
+- 2026-06-12: Focused headless validation passed in `build-audio-scope`:
+  `pulp-test-audio-probe "[audio][scope]"`,
+  `pulp-test-audio-probe "[audio-probe][audio-scope]"`,
+  `pulp-test-audio-inspector-window "[audio-scope]"`,
+  `pulp-test-mcp-server "[scope]"`,
+  `pulp-test-cli-run-options "[audio-scope]"`, and
+  `pulp-test-standalone-editor-chrome "[audio-scope]"`. Remaining local caveat:
+  `cmd_audio.cpp` is still not compiled by the GPU-off tree because `pulp-cli`
+  is only added when `PULP_ENABLE_GPU=ON`; the local GPU-on trees are blocked by
+  the missing Skia bundle before the CLI target can compile.
 
 ## Where this plan lives
 
-This file lives in `docs/analysis/` because this work is a product and
-architecture proposal that benefits from review in the public repo: it can be
-linked from PRs, issues, MCP guidance, and agent skills without depending on a
-separate planning checkout. If the planning submodule later becomes the
-preferred durable roadmap location, copy this document there as the canonical
-plan and reduce this file to a pointer.
+This file intentionally lives in two places:
+
+- `docs/analysis/audio-scope-project-plan.md` in the main repo is the public
+  technical proposal tied to the code under review. It can be linked from PRs,
+  issues, docs, CLI/MCP guidance, and skills without requiring a separate
+  planning checkout.
+- `planning/2026-06-12-audio-scope-project-plan.md` in the planning repo is the
+  durable roadmap/handoff copy. It protects the idea if the implementation
+  branch is rewritten and gives future agents a stable planning-repo anchor.
+
+The main-repo copy should stay close to the implementation while this branch is
+active. The planning copy should be kept in sync at handoff/commit points, not
+used as a divergent spec.
 
 ## Relationship to the audio observability roadmap
 

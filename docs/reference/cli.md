@@ -209,6 +209,7 @@ pulp run --headless --screenshot ui.png --frames 60 # render N frames before cap
 pulp run --watch                                    # re-launch on source-file changes
 pulp run --audio-inspector                          # open the live Audio Inspector window
 pulp run --audio-probe-json probe.json              # dump live probe metrics as JSON, then exit
+pulp run --audio-scope-json scope.json              # dump live scope acquisition/measurements JSON
 ```
 
 Searches the active project's build output:
@@ -262,6 +263,16 @@ dev-on/ship-off `PULP_ENABLE_AUDIO_PROBES` gating.
   may open the live audio device. It is distinct from the offline
   `pulp audio validate` Doctor: the Inspector reads *live* metrics from a
   running host, the Doctor analyses a rendered WAV offline without speakers.
+- `--audio-scope-json <file>` — the programmatic Scope readout: after the
+  frame delay, write versioned `pulp.audio.scope.v1` JSON containing a copied
+  sample-window acquisition plus measurements such as peak-to-peak, RMS, DC
+  offset, crest factor, and conservative rising-zero frequency. Implies
+  `--headless`, but still launches the standalone host and may open the live
+  audio device. It cannot be combined with `--audio-inspector` because both are
+  single consumers of the live capture FIFO.
+- `--audio-scope-window <samples>` / `--audio-scope-trigger <none|raw|off|rising-zero>` /
+  `--audio-scope-channel <index>` — acquisition controls for
+  `--audio-scope-json`.
 
 Display-only waveform controls:
 
@@ -1221,6 +1232,8 @@ pulp audio model status [--json]                # Show configured + resolved mod
 pulp audio model activate <model-id> [--json]   # Pick the active model
 pulp audio excerpt-find --text "warm analog pad" --input /path/to/corpus [options]
 pulp audio read-bundle <path-to-bundle> [--json]
+pulp audio scope [target] --window 2048 --trigger rising-zero --channel 0 [--json scope.json]
+pulp audio scope --input-wav tone.wav --window 2048 [--json scope.json] [--png scope.png]
 pulp audio validate summarize <file.wav> [--json]
 pulp audio validate doctor <file.wav> [--thd] [--response f1,f2,...] [--fundamental <hz>]
 pulp audio validate compare <a.wav> <b.wav> [--mode null|spectral] [--tolerance <dbfs>]
@@ -1236,6 +1249,7 @@ pulp audio validate assert <audio-run-dir-or-assertions.json>
 | `model activate <id>` | Select the active model and persist the state file |
 | `excerpt-find` | Score audio files (or a directory) against a text query and emit an excerpt bundle |
 | `read-bundle` | Pretty-print a previously emitted excerpt bundle |
+| `scope` | Capture `pulp.audio.scope.v1` JSON from a live standalone target or a speakerless offline WAV; offline mode can also write a PNG trace artifact |
 | `validate summarize` | Decode a WAV and print an agent-readable signal summary (peak/RMS/DC/dominant pitch); `--json` for machine output |
 | `validate doctor` | Offline Audio Doctor over a WAV: THD/THD+N (`--thd`) and/or spectrum magnitude at checkpoints (`--response`); writes a JSON curve artifact |
 | `validate compare` | Sample-residual (null) verdict between two WAVs; exits nonzero past tolerance. `--mode spectral` currently applies a looser default tolerance to the same residual (a true spectral-distance metric is a later slice) |
@@ -1244,6 +1258,14 @@ pulp audio validate assert <audio-run-dir-or-assertions.json>
 Useful `excerpt-find` flags: `--text`, `--input`, `--model`, `--recursive`, `--top`, `--window-ms`, `--hop-ms`, `--min-score`, `--max-candidates-per-file`, `--bundle-out`, `--dry-run`. The `model`/`excerpt-find`/`read-bundle` subcommands accept `--json` for machine-readable output.
 
 The `validate` subcommands are the offline harness CLI over captured audio (Phase 7). They analyze WAVs and stored artifact bundles with the reusable `pulp::audio-analysis` library — they do **not** instantiate a plugin (the generic CLI is not tied to a `Processor`; controlled-stimulus render is the test-side `RenderScenario`). The `assertions.json` schema is a `{"schema_version", "assertions": [...]}` document where each entry names a `check` (`not_silent`, `silent`, `no_nan_inf`, `peak_below`, `frequency_near`), a `file` (relative to the JSON), and the check's named tolerance.
+
+`pulp audio scope` is the lower-level sample-window view. Live mode wraps
+`pulp run --audio-scope-json` and may open the audio device; use
+`--input-wav <path>` for speakerless offline analysis. Both paths emit the same
+versioned JSON schema so CLI, MCP, and plugin agents can compare live and
+offline captures without duplicating trigger or measurement logic. `--png` is
+offline-only and writes a deterministic trace image of the acquired real
+samples.
 
 ### sdk
 

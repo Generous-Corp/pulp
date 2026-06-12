@@ -397,6 +397,18 @@ commands:
       - name: --audio-probe-json
         kind: option
         description: Write the live probe metrics as JSON to <file> after rendering, then exit; implies --headless for UI but still launches the live standalone audio device. Forwarded as --audio-probe-json <file> and PULP_AUDIO_PROBE_JSON=<file> env var.
+      - name: --audio-scope-json
+        kind: option
+        description: Write versioned live Audio Scope JSON to <file> after rendering, then exit; implies --headless for UI but still launches the live standalone audio device. Cannot be combined with --audio-inspector because both consume the capture FIFO.
+      - name: --audio-scope-window
+        kind: option
+        description: Acquisition window in samples for --audio-scope-json.
+      - name: --audio-scope-trigger
+        kind: option
+        description: Scope trigger mode for --audio-scope-json (none/raw/off/rising-zero).
+      - name: --audio-scope-channel
+        kind: option
+        description: Source channel index for --audio-scope-json.
       - name: PULP_RUN_AUDIO_NOTICE
         kind: environment
         description: Set to 0/false/off/no to suppress the pre-launch notice that pulp run may activate system audio output.
@@ -1008,7 +1020,7 @@ commands:
 
   - name: audio
     status: experimental
-    summary: Repo-level audio analysis tooling. Manage offline audio models (text-to-audio retrieval) and read reproducible excerpt bundles.
+    summary: Repo-level audio analysis tooling. Manage offline audio models (text-to-audio retrieval), read reproducible excerpt bundles, and run live/offline Audio Scope analysis.
     subcommands:
       - name: model list
         summary: List registered audio models with backend and tags
@@ -1043,6 +1055,33 @@ commands:
             kind: flag
       - name: read-bundle
         summary: Pretty-print a previously emitted excerpt bundle
+      - name: scope
+        summary: Capture Audio Scope JSON from a live standalone target or speakerless offline WAV input; offline mode can also emit a PNG trace artifact.
+        args:
+          - name: target
+            kind: positional
+            required: false
+          - name: --input-wav
+            kind: option
+            required: false
+          - name: --json
+            kind: option
+            required: false
+          - name: --png
+            kind: option
+            required: false
+          - name: --frames
+            kind: option
+            required: false
+          - name: --window
+            kind: option
+            required: false
+          - name: --trigger
+            kind: option
+            required: false
+          - name: --channel
+            kind: option
+            required: false
       - name: validate summarize
         summary: Decode a WAV and print an agent-readable signal summary (peak/RMS/DC/pitch); --json emits machine output
         args:

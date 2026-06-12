@@ -24,6 +24,10 @@ constexpr const char* kScreenshotEnv     = "PULP_SCREENSHOT";
 constexpr const char* kFramesEnv         = "PULP_FRAMES";
 constexpr const char* kAudioInspectorEnv = "PULP_AUDIO_INSPECTOR";
 constexpr const char* kAudioProbeJsonEnv = "PULP_AUDIO_PROBE_JSON";
+constexpr const char* kAudioScopeJsonEnv = "PULP_AUDIO_SCOPE_JSON";
+constexpr const char* kAudioScopeWindowEnv = "PULP_AUDIO_SCOPE_WINDOW";
+constexpr const char* kAudioScopeTriggerEnv = "PULP_AUDIO_SCOPE_TRIGGER";
+constexpr const char* kAudioScopeChannelEnv = "PULP_AUDIO_SCOPE_CHANNEL";
 constexpr const char* kAudioNoticeEnv    = "PULP_RUN_AUDIO_NOTICE";
 
 void print_help() {
@@ -54,6 +58,12 @@ void print_help() {
            "                          --audio-probe-json <file> and\n"
            "                          PULP_AUDIO_PROBE_JSON=<file>. Implies --headless,\n"
            "                          but still uses the live audio device.)\n"
+           "  --audio-scope-json <file>\n"
+           "                          Write a live scope capture JSON file after\n"
+           "                          rendering, then exit. Use --audio-scope-window,\n"
+           "                          --audio-scope-trigger, and --audio-scope-channel\n"
+           "                          to control acquisition. Implies --headless but\n"
+           "                          still uses the live audio device.\n"
            "  PULP_RUN_AUDIO_NOTICE=0\n"
            "                          Suppress the pre-launch notice that the\n"
            "                          standalone may activate system audio output.\n"
@@ -64,7 +74,8 @@ void print_help() {
            "  pulp run --headless --screenshot ui.png  # CI-friendly headless render\n"
            "  pulp run --watch                         # re-launch on file change\n"
            "  pulp run --audio-inspector               # open the live Audio Inspector\n"
-           "  pulp run --audio-probe-json probe.json   # dump live probe metrics + exit\n";
+           "  pulp run --audio-probe-json probe.json   # dump live probe metrics + exit\n"
+           "  pulp run --audio-scope-json scope.json --frames 90\n";
 }
 
 // Set or clear an env var portably. value="" clears it.
@@ -138,7 +149,8 @@ int cmd_run(const std::vector<std::string>& args) {
     // something useful in CI. A bare --audio-probe-json run is headless but
     // only wants the JSON dump, so don't force a PNG capture in that case.
     if (opts.headless && opts.screenshot_path.empty()
-        && opts.audio_probe_json_path.empty()) {
+        && opts.audio_probe_json_path.empty()
+        && opts.audio_scope_json_path.empty()) {
         std::string base = opts.target_name.empty() ? "pulp-run" : opts.target_name;
         opts.screenshot_path = (build_dir / (base + ".png")).string();
     }
@@ -268,6 +280,12 @@ int cmd_run(const std::vector<std::string>& args) {
     if (opts.audio_inspector) set_env(kAudioInspectorEnv, "1");
     if (!opts.audio_probe_json_path.empty())
         set_env(kAudioProbeJsonEnv, opts.audio_probe_json_path);
+    if (!opts.audio_scope_json_path.empty()) {
+        set_env(kAudioScopeJsonEnv, opts.audio_scope_json_path);
+        set_env(kAudioScopeWindowEnv, std::to_string(opts.audio_scope_window));
+        set_env(kAudioScopeTriggerEnv, opts.audio_scope_trigger);
+        set_env(kAudioScopeChannelEnv, std::to_string(opts.audio_scope_channel));
+    }
 
     auto launch_args = assemble_launch_args(opts);
     print_live_audio_notice(opts);

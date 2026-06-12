@@ -13,6 +13,8 @@
 #include <pulp/audio/audio_probe.hpp>
 #include <pulp/audio/audio_probe_json.hpp>
 #include <pulp/audio/audio_probe_snapshot.hpp>
+#include <pulp/audio/audio_scope.hpp>
+#include <pulp/audio/audio_scope_json.hpp>
 #include <pulp/audio/audio_stats.hpp>
 #include <pulp/audio/buffer.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
@@ -24,7 +26,10 @@
 #include <choc/text/choc_JSON.h>
 
 #include <cmath>
+#include <cstdint>
 #include <limits>
+#include <string>
+#include <utility>
 #include <vector>
 
 using Catch::Matchers::WithinAbs;
@@ -53,6 +58,47 @@ struct StereoBlock {
         std::fill(right.begin(), right.end(), r);
     }
 };
+
+struct MonoView {
+    std::vector<float> samples;
+    std::vector<const float*> ptrs;
+
+    explicit MonoView(std::vector<float> in)
+        : samples(std::move(in)) {
+        ptrs = {samples.data()};
+    }
+
+    BufferView<const float> view() const {
+        return BufferView<const float>(ptrs.data(), 1, samples.size());
+    }
+};
+
+struct MultiView {
+    std::vector<std::vector<float>> channels;
+    std::vector<const float*> ptrs;
+
+    explicit MultiView(std::vector<std::vector<float>> in)
+        : channels(std::move(in)) {
+        for (const auto& channel : channels)
+            ptrs.push_back(channel.data());
+    }
+
+    BufferView<const float> view() const {
+        return BufferView<const float>(ptrs.data(), ptrs.size(),
+                                       channels.empty() ? 0 : channels.front().size());
+    }
+};
+
+std::vector<float> sine_wave(double hz, double sample_rate, int samples) {
+    std::vector<float> out(static_cast<std::size_t>(samples), 0.0f);
+    constexpr double kPi = 3.14159265358979323846;
+    for (int i = 0; i < samples; ++i) {
+        out[static_cast<std::size_t>(i)] =
+            static_cast<float>(std::sin(2.0 * kPi * hz
+                                        * static_cast<double>(i) / sample_rate));
+    }
+    return out;
+}
 
 }  // namespace
 
@@ -249,6 +295,41 @@ TEST_CASE("AudioProbe capture ring drains and accounts for drops",
     // After draining, new writes fit again.
     probe.analyze_output(block.view());
     REQUIRE(probe.latest().dropped_capture_frames == 28);  // unchanged: this block fit
+}
+
+TEST_CASE("AudioProbe multichannel capture preserves per-channel samples",
+          "[audio-probe][audio-scope]") {
+    AudioProbe probe;
+    AudioProbe::CaptureConfig cap;
+    cap.capture_frames = 8;
+    probe.prepare(2, 8, 48000.0, AudioProbeStage::kStandaloneOutputBoundary, cap);
+
+    StereoBlock block(8);
+    for (std::size_t i = 0; i < block.left.size(); ++i) {
+        block.left[i] = static_cast<float>(i);
+        block.right[i] = 100.0f + static_cast<float>(i);
+    }
+    probe.analyze_output(block.view());
+
+    Buffer<float> captured(2, 8);
+    const int frames = probe.read_capture(captured.view(), 8);
+    REQUIRE(frames == 8);
+    for (int i = 0; i < frames; ++i) {
+        REQUIRE_THAT(captured.channel(0)[static_cast<std::size_t>(i)],
+                     WithinAbs(static_cast<float>(i), 1e-6f));
+        REQUIRE_THAT(captured.channel(1)[static_cast<std::size_t>(i)],
+                     WithinAbs(100.0f + static_cast<float>(i), 1e-6f));
+    }
+
+    // The legacy channel-0 reader still drains the same FIFO and reports the
+    // first channel only.
+    probe.analyze_output(block.view());
+    std::vector<float> ch0(8, -1.0f);
+    const int legacy_frames = probe.read_capture(ch0.data(), 8);
+    REQUIRE(legacy_frames == 8);
+    for (int i = 0; i < legacy_frames; ++i)
+        REQUIRE_THAT(ch0[static_cast<std::size_t>(i)],
+                     WithinAbs(static_cast<float>(i), 1e-6f));
 }
 
 TEST_CASE("AudioStats mirrors device counters without shadowing",
@@ -530,4 +611,229 @@ TEST_CASE("audio_probe_snapshot_to_json reports silence as null dBFS",
     REQUIRE(v["peak_dbfs"].isVoid());
     REQUIRE(v["rms_dbfs"].isVoid());
     REQUIRE(v["stage"].getString() == "unknown");
+}
+
+TEST_CASE("audio_probe_snapshot_to_json compact output is a frozen schema golden",
+          "[audio][probe][json][audio-inspector][audio-scope]") {
+    AudioProbeSnapshot snap;
+    snap.stage_id = AudioProbeStage::kStandaloneOutputBoundary;
+    snap.sample_rate = 48000.0;
+    snap.block_size = 256;
+    snap.channel_count = 2;
+    snap.sequence_number = 42;
+    snap.callbacks = 3;
+
+    AudioStats stats;
+    const auto json = audio_probe_snapshot_to_json(snap, stats, false);
+    REQUIRE(json ==
+            R"({"stage": "standalone_output_boundary", "sample_rate": 48000, "block_size": 256, "channel_count": 2, "sequence_number": 42, "peak_max": 0.0, "rms_max": 0.0, "peak_dbfs": null, "rms_dbfs": null, "clip_count": 0, "nan_inf_count": 0, "clipped_blocks": 0, "nan_blocks": 0, "silence_run_blocks": 0, "callbacks": 3, "underruns": 0, "device_xruns": 0, "cpu_overloads": 0})");
+}
+
+TEST_CASE("AudioScope acquisition uses raw tail and rising-zero windows",
+          "[audio][scope]") {
+    MonoView raw({-1.0f, -0.5f, 0.25f, 0.5f, -0.25f, 0.75f, 1.0f});
+    AudioProbeSnapshot snap;
+    snap.sample_rate = 48000.0;
+    snap.sequence_number = 9;
+
+    AudioScopeAcquisitionConfig cfg;
+    cfg.window_samples = 3;
+    cfg.trigger_mode = AudioScopeTriggerMode::kNone;
+    auto acq = acquire_audio_scope_window(raw.view(), cfg, &snap);
+    REQUIRE(acq.ok);
+    REQUIRE(acq.window_start == 4);
+    REQUIRE(acq.samples == std::vector<float>({-0.25f, 0.75f, 1.0f}));
+    REQUIRE(acq.source_sequence_number == 9);
+
+    cfg.trigger_mode = AudioScopeTriggerMode::kRisingZero;
+    acq = acquire_audio_scope_window(raw.view(), cfg, &snap);
+    REQUIRE(acq.ok);
+    REQUIRE(acq.trigger_found);
+    REQUIRE(acq.trigger_sample == 2);
+    REQUIRE(acq.window_start == 2);
+    REQUIRE(acq.samples == std::vector<float>({0.25f, 0.5f, -0.25f}));
+}
+
+TEST_CASE("AudioScope acquisition reports edge cases honestly",
+          "[audio][scope]") {
+    AudioScopeAcquisitionConfig cfg;
+    cfg.window_samples = 0;
+    MonoView source({0.0f, 1.0f});
+    auto acq = acquire_audio_scope_window(source.view(), cfg);
+    REQUIRE_FALSE(acq.ok);
+    REQUIRE(acq.warnings == std::vector<std::string>{"window_samples_must_be_positive"});
+
+    cfg.window_samples = 4;
+    MonoView empty({});
+    acq = acquire_audio_scope_window(empty.view(), cfg);
+    REQUIRE_FALSE(acq.ok);
+    REQUIRE(acq.warnings == std::vector<std::string>{"empty_source"});
+
+    MonoView short_source({0.25f, 0.5f});
+    acq = acquire_audio_scope_window(short_source.view(), cfg);
+    REQUIRE(acq.ok);
+    REQUIRE(acq.window_samples == 2);
+    REQUIRE(acq.warnings == std::vector<std::string>{"window_truncated_to_source",
+                                                     "trigger_not_found"});
+
+    MultiView multi({{1.0f, 2.0f, 3.0f}, {-1.0f, -2.0f, -3.0f}});
+    cfg.window_samples = 2;
+    cfg.selected_channel = 99;
+    cfg.trigger_mode = AudioScopeTriggerMode::kNone;
+    acq = acquire_audio_scope_window(multi.view(), cfg);
+    REQUIRE(acq.ok);
+    REQUIRE(acq.selected_channel == 0);
+    REQUIRE(acq.source_channel_count == 2);
+    REQUIRE(acq.samples == std::vector<float>({2.0f, 3.0f}));
+    REQUIRE(acq.warnings == std::vector<std::string>{"selected_channel_out_of_range"});
+
+    MonoView no_crossing({0.1f, 0.2f, 0.3f, 0.4f});
+    cfg.selected_channel = 0;
+    cfg.trigger_mode = AudioScopeTriggerMode::kRisingZero;
+    acq = acquire_audio_scope_window(no_crossing.view(), cfg);
+    REQUIRE(acq.ok);
+    REQUIRE_FALSE(acq.trigger_found);
+    REQUIRE(acq.window_start == 2);
+    REQUIRE(acq.samples == std::vector<float>({0.3f, 0.4f}));
+    REQUIRE(acq.warnings == std::vector<std::string>{"trigger_not_found"});
+}
+
+TEST_CASE("AudioScope measurements cover silence DC periodic and nonfinite cases",
+          "[audio][scope]") {
+    AudioProbeSnapshot snap;
+    snap.sample_rate = 48000.0;
+
+    SECTION("silence has scalar measurements but no frequency") {
+        MonoView silent({0.0f, 0.0f, 0.0f, 0.0f});
+        AudioScopeAcquisitionConfig cfg;
+        cfg.window_samples = 4;
+        cfg.trigger_mode = AudioScopeTriggerMode::kNone;
+        const auto acq = acquire_audio_scope_window(silent.view(), cfg, &snap);
+        const auto m = measure_audio_scope_window(acq);
+        REQUIRE(m.peak_to_peak_available);
+        REQUIRE(m.peak_to_peak == Catch::Approx(0.0));
+        REQUIRE(m.rms_available);
+        REQUIRE(m.rms == Catch::Approx(0.0));
+        REQUIRE(m.dc_offset_available);
+        REQUIRE(m.dc_offset == Catch::Approx(0.0));
+        REQUIRE_FALSE(m.crest_factor_available);
+        REQUIRE_FALSE(m.frequency_available);
+        REQUIRE(m.warnings == std::vector<std::string>{"frequency_unavailable_silence"});
+    }
+
+    SECTION("pure DC reports offset and unavailable frequency") {
+        MonoView dc({0.5f, 0.5f, 0.5f, 0.5f});
+        AudioScopeAcquisitionConfig cfg;
+        cfg.window_samples = 4;
+        cfg.trigger_mode = AudioScopeTriggerMode::kNone;
+        const auto acq = acquire_audio_scope_window(dc.view(), cfg, &snap);
+        const auto m = measure_audio_scope_window(acq);
+        REQUIRE(m.dc_offset == Catch::Approx(0.5));
+        REQUIRE(m.rms == Catch::Approx(0.5));
+        REQUIRE_FALSE(m.frequency_available);
+    }
+
+    SECTION("440 Hz sine estimates frequency conservatively") {
+        MonoView sine(sine_wave(440.0, 48000.0, 4096));
+        AudioScopeAcquisitionConfig cfg;
+        cfg.window_samples = 4096;
+        cfg.trigger_mode = AudioScopeTriggerMode::kNone;
+        const auto acq = acquire_audio_scope_window(sine.view(), cfg, &snap);
+        const auto m = measure_audio_scope_window(acq);
+        REQUIRE(m.frequency_available);
+        REQUIRE(m.frequency_hz == Catch::Approx(440.0).margin(6.0));
+        REQUIRE(m.period_samples == Catch::Approx(48000.0 / 440.0).margin(1.5));
+    }
+
+    SECTION("clipped square exposes peak-to-peak and crest factor") {
+        MonoView square({-1.0f, -1.0f, 1.0f, 1.0f,
+                         -1.0f, -1.0f, 1.0f, 1.0f,
+                         -1.0f, -1.0f, 1.0f, 1.0f});
+        AudioScopeAcquisitionConfig cfg;
+        cfg.window_samples = 12;
+        cfg.trigger_mode = AudioScopeTriggerMode::kNone;
+        const auto acq = acquire_audio_scope_window(square.view(), cfg, &snap);
+        const auto m = measure_audio_scope_window(acq);
+        REQUIRE(m.peak_to_peak == Catch::Approx(2.0));
+        REQUIRE(m.rms == Catch::Approx(1.0));
+        REQUIRE(m.crest_factor_available);
+        REQUIRE(m.crest_factor == Catch::Approx(1.0));
+    }
+
+    SECTION("nonfinite samples are ignored") {
+        MonoView dirty({-1.0f, std::numeric_limits<float>::quiet_NaN(),
+                        1.0f, std::numeric_limits<float>::infinity()});
+        AudioScopeAcquisitionConfig cfg;
+        cfg.window_samples = 4;
+        cfg.trigger_mode = AudioScopeTriggerMode::kNone;
+        const auto acq = acquire_audio_scope_window(dirty.view(), cfg, &snap);
+        const auto m = measure_audio_scope_window(acq);
+        REQUIRE(m.peak_to_peak == Catch::Approx(2.0));
+        REQUIRE(m.warnings.size() >= 1);
+        REQUIRE(m.warnings.front() == "nonfinite_samples_ignored:2");
+    }
+
+    SECTION("nonperiodic crossings do not guess frequency") {
+        MonoView nonperiodic({-1.0f, 1.0f, 1.0f, -1.0f, 1.0f,
+                              1.0f, 1.0f, 1.0f, -1.0f, 1.0f,
+                              1.0f, 1.0f, 1.0f, 1.0f, 1.0f,
+                              -1.0f, 1.0f});
+        AudioScopeAcquisitionConfig cfg;
+        cfg.window_samples = 17;
+        cfg.trigger_mode = AudioScopeTriggerMode::kNone;
+        const auto acq = acquire_audio_scope_window(nonperiodic.view(), cfg, &snap);
+        const auto m = measure_audio_scope_window(acq);
+        REQUIRE_FALSE(m.frequency_available);
+        REQUIRE(m.warnings.back() == "frequency_unavailable_nonperiodic");
+    }
+}
+
+TEST_CASE("AudioScope JSON v1 exposes schema and null unavailable measurements",
+          "[audio][scope][json]") {
+    AudioScopeResult result;
+    result.stage = AudioProbeStage::kStandaloneOutputBoundary;
+    result.trigger_mode = AudioScopeTriggerMode::kRisingZero;
+    result.acquisition.ok = true;
+    result.acquisition.sample_rate = 48000.0;
+    result.acquisition.source_channel_count = 1;
+    result.acquisition.selected_channel = 0;
+    result.acquisition.source_frames = 4;
+    result.acquisition.window_start = 0;
+    result.acquisition.window_samples = 4;
+    result.acquisition.trigger_found = false;
+    result.acquisition.source_sequence_number = 42;
+    result.acquisition.warnings.push_back("trigger_not_found");
+    result.measurements.peak_to_peak_available = true;
+    result.measurements.peak_to_peak = 0.0;
+    result.measurements.rms_available = true;
+    result.measurements.rms = 0.0;
+    result.measurements.dc_offset_available = true;
+    result.measurements.dc_offset = 0.0;
+    result.measurements.warnings.push_back("frequency_unavailable_silence");
+
+    const auto json = audio_scope_result_to_json(result);
+    const auto v = choc::json::parse(json);
+    REQUIRE(v["schema"].getString() == std::string(kAudioScopeJsonSchema));
+    REQUIRE(v["version"].get<std::int64_t>() == kAudioScopeJsonVersion);
+    REQUIRE(v["source"]["kind"].getString() == "live_probe");
+    REQUIRE(v["source"]["stage"].getString() == "standalone_output_boundary");
+    REQUIRE(v["source"]["selected_channel"].get<std::int64_t>() == 0);
+    REQUIRE(v["acquisition"]["trigger_mode"].getString() == "rising_zero");
+    REQUIRE_FALSE(v["acquisition"]["trigger_found"].get<bool>());
+    REQUIRE(v["measurements"]["peak_to_peak"].get<double>() == Catch::Approx(0.0));
+    REQUIRE(v["measurements"]["frequency_hz"].isVoid());
+    REQUIRE(json.find("\"trigger_not_found\"") != std::string::npos);
+    REQUIRE(json.find("\"frequency_unavailable_silence\"") != std::string::npos);
+}
+
+TEST_CASE("AudioScope trigger mode parser covers CLI spellings",
+          "[audio][scope]") {
+    AudioScopeTriggerMode mode = AudioScopeTriggerMode::kRisingZero;
+    REQUIRE(parse_audio_scope_trigger_mode("none", mode));
+    REQUIRE(mode == AudioScopeTriggerMode::kNone);
+    REQUIRE(parse_audio_scope_trigger_mode("rising-zero", mode));
+    REQUIRE(mode == AudioScopeTriggerMode::kRisingZero);
+    REQUIRE(parse_audio_scope_trigger_mode("rising_zero", mode));
+    REQUIRE(mode == AudioScopeTriggerMode::kRisingZero);
+    REQUIRE_FALSE(parse_audio_scope_trigger_mode("spectral", mode));
 }

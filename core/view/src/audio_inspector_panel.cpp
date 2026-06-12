@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <sstream>
 #include <string>
 
 namespace pulp::view {
@@ -29,6 +30,22 @@ const char* stage_name(audio::AudioProbeStage stage) {
         case audio::AudioProbeStage::kUnknown:                  break;
     }
     return "Unknown stage";
+}
+
+const char* mode_name(AudioInspectorMode mode) {
+    switch (mode) {
+        case AudioInspectorMode::kSignal: return "Signal";
+        case AudioInspectorMode::kScope: return "Scope";
+    }
+    return "Signal";
+}
+
+std::string format_measurement(double value, const char* suffix, int precision = 3) {
+    std::ostringstream out;
+    out.setf(std::ios::fixed, std::ios::floatfield);
+    out.precision(precision);
+    out << value << suffix;
+    return out.str();
 }
 
 }  // namespace
@@ -198,6 +215,45 @@ void AudioInspectorPanel::build_ui() {
         status_label_ = l.get();
         add_child(std::move(l));
     }
+    // Mode selector: Signal is raw diagnostic observability; Scope is measured
+    // acquisition over the same copied samples.
+    {
+        auto row = std::make_unique<View>();
+        row->flex().direction = FlexDirection::row;
+        row->flex().preferred_height = 28;
+        row->flex().gap = 6;
+
+        auto signal = std::make_unique<ToggleButton>();
+        signal->set_label("Signal");
+        signal->set_font_size(11.0f);
+        signal->set_corner_radius(5.0f);
+        signal->set_on(true);
+        signal->flex().flex_grow = 1;
+        signal->on_toggle = [this](bool on) {
+            if (on || mode_ != AudioInspectorMode::kSignal)
+                set_mode(AudioInspectorMode::kSignal);
+            else if (signal_button_)
+                signal_button_->set_on(true);
+        };
+        signal_button_ = signal.get();
+        row->add_child(std::move(signal));
+
+        auto scope = std::make_unique<ToggleButton>();
+        scope->set_label("Scope");
+        scope->set_font_size(11.0f);
+        scope->set_corner_radius(5.0f);
+        scope->flex().flex_grow = 1;
+        scope->on_toggle = [this](bool on) {
+            if (on || mode_ != AudioInspectorMode::kScope)
+                set_mode(AudioInspectorMode::kScope);
+            else if (scope_button_)
+                scope_button_->set_on(true);
+        };
+        scope_button_ = scope.get();
+        row->add_child(std::move(scope));
+
+        add_child(std::move(row));
+    }
     // Observed probe stage.
     {
         auto l = make_label("", 12.0f, 500, body);
@@ -278,6 +334,7 @@ void AudioInspectorPanel::update(Status status,
     if (status == Status::kNoProbe) {
         // Drop any stale numbers — show an empty, honest state.
         snapshot_ = audio::AudioProbeSnapshot{};
+        has_scope_result_ = false;
         lr_match_ = 0.0f;
         balance_ = 0.0f;
         if (waveform_view_) waveform_view_->clear_samples();
@@ -333,6 +390,31 @@ void AudioInspectorPanel::update(Status status,
     refresh_labels();
 }
 
+void AudioInspectorPanel::set_mode(AudioInspectorMode mode) {
+    if (mode_ == mode) {
+        if (signal_button_) signal_button_->set_on(mode == AudioInspectorMode::kSignal);
+        if (scope_button_) scope_button_->set_on(mode == AudioInspectorMode::kScope);
+        return;
+    }
+    mode_ = mode;
+    if (signal_button_) signal_button_->set_on(mode_ == AudioInspectorMode::kSignal);
+    if (scope_button_) scope_button_->set_on(mode_ == AudioInspectorMode::kScope);
+    refresh_labels();
+    if (on_mode_changed) on_mode_changed(mode_);
+}
+
+void AudioInspectorPanel::set_scope_result(const audio::AudioScopeResult& result) {
+    scope_result_ = result;
+    has_scope_result_ = true;
+    refresh_labels();
+}
+
+void AudioInspectorPanel::clear_scope_result() {
+    has_scope_result_ = false;
+    scope_result_ = audio::AudioScopeResult{};
+    refresh_labels();
+}
+
 void AudioInspectorPanel::set_waveform_grid_visible(bool visible) {
     if (waveform_view_) waveform_view_->set_show_grid(visible);
 }
@@ -359,17 +441,18 @@ float AudioInspectorPanel::rms_meter_held_peak() const {
 
 void AudioInspectorPanel::refresh_labels() {
     if (status_label_) {
+        std::string prefix = std::string("Audio Inspector - ") + mode_name(mode_);
         switch (status_) {
             case Status::kNoProbe:
-                status_label_->set_text("Audio Inspector — no probe");
+                status_label_->set_text(prefix + " - no probe");
                 status_label_->set_text_color(canvas::Color::rgba8(200, 150, 90, 255));
                 break;
             case Status::kStale:
-                status_label_->set_text("Audio Inspector — stale (probe idle)");
+                status_label_->set_text(prefix + " - stale (probe idle)");
                 status_label_->set_text_color(canvas::Color::rgba8(200, 150, 90, 255));
                 break;
             case Status::kLive:
-                status_label_->set_text("Audio Inspector — live");
+                status_label_->set_text(prefix + " - live");
                 status_label_->set_text_color(canvas::Color::rgba8(120, 200, 150, 255));
                 break;
         }
@@ -387,6 +470,19 @@ void AudioInspectorPanel::refresh_labels() {
     if (level_label_) {
         if (status_ == Status::kNoProbe) {
             level_label_->set_text("Peak: —\nRMS: —");
+        } else if (mode_ == AudioInspectorMode::kScope && has_scope_result_) {
+            const auto& m = scope_result_.measurements;
+            std::string p2p = m.peak_to_peak_available
+                ? format_measurement(m.peak_to_peak, "", 3)
+                : "—";
+            std::string rms = m.rms_available
+                ? format_measurement(m.rms, "", 3)
+                : "—";
+            std::string freq = m.frequency_available
+                ? format_measurement(m.frequency_hz, " Hz", 1)
+                : "—";
+            level_label_->set_text("P-P: " + p2p + "\nRMS: " + rms +
+                                   "\nFreq: " + freq);
         } else {
             level_label_->set_text(
                 "Peak: " + format_dbfs(snapshot_.peak_max) + " dBFS\n" +
@@ -397,6 +493,16 @@ void AudioInspectorPanel::refresh_labels() {
     if (content_label_) {
         if (status_ == Status::kNoProbe) {
             content_label_->set_text("Clip: —   NaN/Inf: —\nSilence: —");
+        } else if (mode_ == AudioInspectorMode::kScope && has_scope_result_) {
+            const auto& a = scope_result_.acquisition;
+            const std::string trigger = scope_result_.trigger_mode ==
+                    audio::AudioScopeTriggerMode::kRisingZero
+                ? "rising-zero" : "off";
+            content_label_->set_text(
+                "Trigger: " + trigger +
+                (a.trigger_found ? " (locked)" : " (raw)") + "\n" +
+                "Window: " + std::to_string(a.window_samples) +
+                " / Ch " + std::to_string(a.selected_channel));
         } else {
             content_label_->set_text(
                 "Clip: " + std::to_string(snapshot_.clip_count) +
@@ -407,7 +513,18 @@ void AudioInspectorPanel::refresh_labels() {
     }
 
     if (phase_label_) {
-        if (status_ == Status::kNoProbe || snapshot_.channel_count < 2) {
+        if (status_ == Status::kNoProbe) {
+            phase_label_->set_text("L/R match: —   Balance: —");
+        } else if (mode_ == AudioInspectorMode::kScope && has_scope_result_) {
+            const auto& m = scope_result_.measurements;
+            const std::string dc = m.dc_offset_available
+                ? format_measurement(m.dc_offset, "", 4)
+                : "—";
+            const std::string crest = m.crest_factor_available
+                ? format_measurement(m.crest_factor, "", 2)
+                : "—";
+            phase_label_->set_text("DC: " + dc + "   Crest: " + crest);
+        } else if (snapshot_.channel_count < 2) {
             phase_label_->set_text("L/R match: —   Balance: —");
         } else {
             char buf[64];

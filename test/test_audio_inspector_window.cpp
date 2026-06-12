@@ -29,6 +29,7 @@
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/screenshot_compare.hpp>
 #include <pulp/view/view.hpp>
+#include <pulp/state/properties_file.hpp>
 
 #include <cstdlib>
 #include <cmath>
@@ -362,6 +363,70 @@ TEST_CASE("AudioInspectorWindow applies display-only waveform env knobs",
     REQUIRE(waveform.trigger_mode() == AudioWaveformView::TriggerMode::kRisingZero);
     REQUIRE_FALSE(waveform.show_grid());
     REQUIRE(waveform.horizontal_scale() == Catch::Approx(2.5f));
+}
+
+TEST_CASE("AudioInspectorWindow remembers Signal and Scope mode preference",
+          "[view][audio-inspector][audio-scope]") {
+    pulp::state::PropertiesFile prefs;
+
+    AudioInspectorWindow first;
+    first.set_preferences(&prefs);
+    REQUIRE(first.mode() == AudioInspectorMode::kSignal);
+    REQUIRE(first.panel().mode() == AudioInspectorMode::kSignal);
+
+    first.set_mode(AudioInspectorMode::kScope);
+    REQUIRE(first.mode() == AudioInspectorMode::kScope);
+    REQUIRE(first.panel().mode() == AudioInspectorMode::kScope);
+    REQUIRE(prefs.get_string("audio_inspector.mode").value_or("") == "scope");
+
+    AudioInspectorWindow second;
+    second.set_preferences(&prefs);
+    REQUIRE(second.mode() == AudioInspectorMode::kScope);
+    REQUIRE(second.panel().mode() == AudioInspectorMode::kScope);
+
+    second.set_mode(AudioInspectorMode::kSignal);
+    REQUIRE(prefs.get_string("audio_inspector.mode").value_or("") == "signal");
+}
+
+TEST_CASE("AudioInspectorPanel distinguishes Scope measurements from Signal readout",
+          "[view][audio-inspector][audio-scope]") {
+    AudioInspectorPanel panel;
+    panel.set_mode(AudioInspectorMode::kScope);
+
+    pulp::audio::AudioProbeSnapshot snap{};
+    snap.stage_id = AudioProbeStage::kStandaloneOutputBoundary;
+    snap.channel_count = 1;
+    snap.sample_rate = 48000.0;
+    snap.block_size = 64;
+    snap.sequence_number = 1;
+    snap.peak_max = 0.5f;
+    snap.rms_max = 0.25f;
+
+    pulp::audio::AudioScopeResult scope;
+    scope.stage = AudioProbeStage::kStandaloneOutputBoundary;
+    scope.trigger_mode = pulp::audio::AudioScopeTriggerMode::kRisingZero;
+    scope.acquisition.ok = true;
+    scope.acquisition.window_samples = 64;
+    scope.acquisition.selected_channel = 0;
+    scope.acquisition.trigger_found = true;
+    scope.measurements.peak_to_peak_available = true;
+    scope.measurements.peak_to_peak = 1.0;
+    scope.measurements.rms_available = true;
+    scope.measurements.rms = 0.353553;
+    scope.measurements.frequency_available = true;
+    scope.measurements.frequency_hz = 440.0;
+    scope.measurements.dc_offset_available = true;
+    scope.measurements.dc_offset = 0.0;
+    scope.measurements.crest_factor_available = true;
+    scope.measurements.crest_factor = 1.414;
+
+    panel.update(AudioInspectorPanel::Status::kLive, snap, {}, nullptr, 0);
+    panel.set_scope_result(scope);
+
+    REQUIRE(panel.status_text().find("Scope") != std::string::npos);
+    REQUIRE(panel.level_text().find("Freq: 440.0 Hz") != std::string::npos);
+    REQUIRE(panel.content_text().find("Trigger: rising-zero (locked)") !=
+            std::string::npos);
 }
 
 TEST_CASE("AudioInspectorPanel keeps a peak hold while live level falls",

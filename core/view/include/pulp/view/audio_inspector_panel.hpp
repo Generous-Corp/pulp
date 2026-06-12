@@ -18,6 +18,7 @@
 /// never fakes zeros that look like a live-but-silent signal.
 
 #include <pulp/audio/audio_probe_snapshot.hpp>
+#include <pulp/audio/audio_scope.hpp>
 #include <pulp/audio/audio_stats.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>
@@ -28,6 +29,11 @@
 #include <vector>
 
 namespace pulp::view {
+
+enum class AudioInspectorMode {
+    kSignal,
+    kScope,
+};
 
 /// Time-domain waveform plot over a copied, fixed-capacity sample buffer.
 /// The window copies channel-0 history out of the probe (a non-RT read) and
@@ -125,6 +131,14 @@ public:
                 const float* waveform,
                 int waveform_count);
 
+    void set_mode(AudioInspectorMode mode);
+    AudioInspectorMode mode() const { return mode_; }
+
+    void set_scope_result(const audio::AudioScopeResult& result);
+    void clear_scope_result();
+
+    std::function<void(AudioInspectorMode)> on_mode_changed;
+
     // ── State accessors (for headless tests; no GPU/window needed) ──────────
 
     Status status() const { return status_; }
@@ -166,6 +180,7 @@ public:
     // only by eye.
     const std::string& status_text() const { return status_label_->text(); }
     const std::string& level_text() const { return level_label_->text(); }
+    const std::string& content_text() const { return content_label_->text(); }
     /// Color the status heading paints with. A test can assert its channels
     /// are in the valid [0,1] range — the white-on-white regression that hid
     /// every label came from feeding 0-255 values into the [0,1] Color ctor,
@@ -177,14 +192,19 @@ private:
     void refresh_labels();
 
     Status status_ = Status::kNoProbe;
+    AudioInspectorMode mode_ = AudioInspectorMode::kSignal;
     audio::AudioProbeSnapshot snapshot_{};
     audio::AudioStats stats_{};
+    audio::AudioScopeResult scope_result_{};
+    bool has_scope_result_ = false;
     float lr_match_ = 0.0f;
     float balance_ = 0.0f;
     float meter_dt_seconds_ = 1.0f / 60.0f;
 
     // Widget pointers (owned by the view tree).
     Label* status_label_ = nullptr;
+    ToggleButton* signal_button_ = nullptr;
+    ToggleButton* scope_button_ = nullptr;
     Label* stage_label_ = nullptr;
     Meter* peak_meter_ = nullptr;
     Meter* rms_meter_ = nullptr;

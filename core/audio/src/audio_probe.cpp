@@ -16,13 +16,16 @@ void AudioProbe::prepare(int max_channels,
     stage_ = stage;
 
     capture_frames_ = capture.capture_frames < 0 ? 0 : capture.capture_frames;
+    capture_storage_channels_ = 0;
     capture_storage_.clear();
     capture_fifo_.reset();
     if (capture_frames_ > 0) {
         // AbstractFifo reserves one sentinel slot, so allocate capacity+1 so
         // the worst-case queue depth is exactly `capture_frames_`.
         const int cap = capture_frames_ + 1;
-        capture_storage_.assign(static_cast<std::size_t>(cap), 0.0f);
+        capture_storage_channels_ = std::max(1, max_channels_);
+        capture_storage_.assign(static_cast<std::size_t>(cap * capture_storage_channels_),
+                                0.0f);
         capture_fifo_ = std::make_unique<runtime::AbstractFifo>(cap);
     }
 
@@ -96,18 +99,23 @@ void AudioProbe::analyze_output(const BufferView<const float>& output) noexcept 
         silence_run_blocks_ = 0;
     }
 
-    // Optional last-N channel-0 capture. SPSC: producer (here) only writes; the
-    // consumer drains via read_capture(). When the ring is full, frames that do
-    // not fit are dropped and counted — never silently lost.
+    // Optional last-N multichannel capture. SPSC: producer (here) only writes;
+    // the consumer drains via read_capture(). When the ring is full, frames
+    // that do not fit are dropped and counted — never silently lost.
     if (capture_fifo_ && channels > 0 && frames > 0) {
-        const float* ch0 = output.channel_ptr(0);
         int s1 = 0, n1 = 0, s2 = 0, n2 = 0;
         capture_fifo_->prepare_to_write(frames, s1, n1, s2, n2);
         const int written = n1 + n2;
-        for (int i = 0; i < n1; ++i)
-            capture_storage_[static_cast<std::size_t>(s1 + i)] = ch0[i];
-        for (int i = 0; i < n2; ++i)
-            capture_storage_[static_cast<std::size_t>(s2 + i)] = ch0[n1 + i];
+        const int cap = capture_frames_ + 1;
+        for (int ch = 0; ch < capture_storage_channels_; ++ch) {
+            float* dst = capture_storage_.data() +
+                static_cast<std::size_t>(ch * cap);
+            const float* src = (ch < channels) ? output.channel_ptr(ch) : nullptr;
+            for (int i = 0; i < n1; ++i)
+                dst[s1 + i] = src ? src[i] : 0.0f;
+            for (int i = 0; i < n2; ++i)
+                dst[s2 + i] = src ? src[n1 + i] : 0.0f;
+        }
         capture_fifo_->finish_write(written);
         if (written < frames) {
             dropped_capture_frames_ +=
@@ -148,10 +156,37 @@ int AudioProbe::read_capture(float* dst, int max_frames) {
     int s1 = 0, n1 = 0, s2 = 0, n2 = 0;
     capture_fifo_->prepare_to_read(max_frames, s1, n1, s2, n2);
     const int total = n1 + n2;
+    const float* ch0 = capture_storage_.data();
     for (int i = 0; i < n1; ++i)
-        dst[i] = capture_storage_[static_cast<std::size_t>(s1 + i)];
+        dst[i] = ch0[s1 + i];
     for (int i = 0; i < n2; ++i)
-        dst[n1 + i] = capture_storage_[static_cast<std::size_t>(s2 + i)];
+        dst[n1 + i] = ch0[s2 + i];
+    capture_fifo_->finish_read(total);
+    return total;
+}
+
+int AudioProbe::read_capture(BufferView<float> dst, int max_frames) {
+    if (!capture_fifo_ || max_frames <= 0 || dst.empty()) return 0;
+    const int wanted = std::min(max_frames, static_cast<int>(dst.num_samples()));
+    if (wanted <= 0) return 0;
+
+    const int cap = capture_frames_ + 1;
+    int s1 = 0, n1 = 0, s2 = 0, n2 = 0;
+    capture_fifo_->prepare_to_read(wanted, s1, n1, s2, n2);
+    const int total = n1 + n2;
+    for (std::size_t ch = 0; ch < dst.num_channels(); ++ch) {
+        float* out = dst.channel_ptr(ch);
+        if (static_cast<int>(ch) < capture_storage_channels_) {
+            const float* src = capture_storage_.data() +
+                static_cast<std::size_t>(static_cast<int>(ch) * cap);
+            for (int i = 0; i < n1; ++i)
+                out[i] = src[s1 + i];
+            for (int i = 0; i < n2; ++i)
+                out[n1 + i] = src[s2 + i];
+        } else {
+            std::fill_n(out, static_cast<std::size_t>(total), 0.0f);
+        }
+    }
     capture_fifo_->finish_read(total);
     return total;
 }

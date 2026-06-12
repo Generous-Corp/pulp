@@ -414,6 +414,58 @@ TEST_CASE("pulp run --audio-probe-json without a path is a parse error",
     REQUIRE_FALSE(parse_run_options({"--audio-probe-json="}).error.empty());
 }
 
+TEST_CASE("pulp run --audio-scope-json implies headless and forwards acquisition flags",
+          "[cli][run][audio-scope]") {
+    auto r = parse_run_options({
+        "--audio-scope-json", "/tmp/scope.json",
+        "--audio-scope-window", "4096",
+        "--audio-scope-trigger", "rising-zero",
+        "--audio-scope-channel", "0",
+    });
+    REQUIRE(r.error.empty());
+    REQUIRE(r.audio_scope_json_path == "/tmp/scope.json");
+    REQUIRE(r.audio_scope_window == 4096);
+    REQUIRE(r.audio_scope_trigger == "rising-zero");
+    REQUIRE(r.audio_scope_channel == 0);
+    REQUIRE(r.headless);
+
+    auto args = assemble_launch_args(r);
+    REQUIRE(args == std::vector<std::string>{
+        "--headless",
+        "--audio-scope-json", "/tmp/scope.json",
+        "--audio-scope-window", "4096",
+        "--audio-scope-trigger", "rising-zero",
+        "--audio-scope-channel", "0",
+    });
+
+    auto eq = parse_run_options({
+        "--audio-scope-json=/tmp/scope2.json",
+        "--audio-scope-window=128",
+        "--audio-scope-trigger=raw",
+        "--audio-scope-channel=1",
+    });
+    REQUIRE(eq.error.empty());
+    REQUIRE(eq.audio_scope_json_path == "/tmp/scope2.json");
+    REQUIRE(eq.audio_scope_window == 128);
+    REQUIRE(eq.audio_scope_trigger == "raw");
+    REQUIRE(eq.audio_scope_channel == 1);
+}
+
+TEST_CASE("pulp run rejects invalid audio scope options and inspector contention",
+          "[cli][run][audio-scope]") {
+    REQUIRE_FALSE(parse_run_options({"--audio-scope-json"}).error.empty());
+    REQUIRE_FALSE(parse_run_options({"--audio-scope-json="}).error.empty());
+    REQUIRE_FALSE(parse_run_options({"--audio-scope-window", "0"}).error.empty());
+    REQUIRE_FALSE(parse_run_options({"--audio-scope-window=-1"}).error.empty());
+    REQUIRE_FALSE(parse_run_options({"--audio-scope-trigger", "smooth"}).error.empty());
+    REQUIRE_FALSE(parse_run_options({"--audio-scope-channel", "-1"}).error.empty());
+
+    auto contention = parse_run_options({
+        "--audio-inspector", "--audio-scope-json", "/tmp/scope.json",
+    });
+    REQUIRE_FALSE(contention.error.empty());
+}
+
 TEST_CASE("pulp run treats negative-looking targets as pass-through flags",
           "[cli][run][coverage]") {
     auto r = parse_run_options({"--standalone", "demo"});
