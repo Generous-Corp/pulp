@@ -8,6 +8,7 @@ import shutil
 import tempfile
 from typing import Callable
 
+from reporting_publish_branch import desktop_branch_publish_metadata
 from reporting_publish_html import desktop_publish_index_html
 
 
@@ -83,33 +84,7 @@ def publish_report_to_branch(
             run_git_fn(["commit", "-m", f"Publish desktop automation report {report_name}"], cwd=worktree)
             run_git_fn(["push", "origin", f"HEAD:{branch}"], cwd=worktree)
         remote_base = git_origin_http_url_fn(root)
-        published = {
-            "mode": "branch",
-            "branch": branch,
-            "report_path": f"desktop-automation/reports/{report_name}",
-            "latest_path": "desktop-automation/latest",
-        }
-        if remote_base:
-            published["branch_url"] = f"{remote_base}/tree/{branch}"
-            published["report_url"] = f"{remote_base}/tree/{branch}/desktop-automation/reports/{report_name}"
-            published["latest_url"] = f"{remote_base}/tree/{branch}/desktop-automation/latest"
-            published["latest_index_json_url"] = f"{remote_base}/blob/{branch}/desktop-automation/latest/index.json"
-            published_runs = []
-            for run in report.get("runs", []):
-                artifact_urls = {}
-                for key, value in (run.get("artifacts") or {}).items():
-                    if isinstance(value, str):
-                        artifact_urls[key] = f"{remote_base}/blob/{branch}/desktop-automation/latest/{value}"
-                published_runs.append(
-                    {
-                        "label": run.get("label"),
-                        "target": run.get("target"),
-                        "action": run.get("action"),
-                        "artifact_urls": artifact_urls,
-                    }
-                )
-            published["runs"] = published_runs
-        return published
+        return desktop_branch_publish_metadata(report, branch=branch, report_name=report_name, remote_base=remote_base)
     finally:
         reset_local_worktree_fn(worktree)
         shutil.rmtree(publish_root, ignore_errors=True)
