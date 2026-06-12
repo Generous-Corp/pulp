@@ -98,6 +98,21 @@ style.line_thickness = 2.0f;
 canvas.draw_waveform(samples, count, x, y, w, h, style);
 ```
 
+## GPU-Assisted Audio Analysis
+
+GPU-assisted audio work is an offline/background analysis capability, not a
+live audio-thread DSP primitive. Any path that wants a GPU backend for offline
+render analysis should first call
+`audio::evaluate_offline_render_compute_policy()`.
+
+That policy helper accepts GPU work only from `OfflineAnalysis` or
+`BackgroundAnalysis` scopes. `RealtimeAudioThread` requests are rejected even
+when a GPU is available, because GPU submission, queue progress, resource
+mapping, and fallback behavior are not bounded enough for the audio callback.
+When the GPU is unavailable, callers must either take the explicit CPU fallback
+decision or fail the offline analysis request; silent live fallback is not part
+of the contract.
+
 ## GPU Render Time
 
 Pulp can report **true GPU-side render time** alongside the CPU wall-time the

@@ -40,6 +40,35 @@ enum class OfflineRenderTailPolicy : uint8_t {
     RenderTail,
 };
 
+enum class OfflineRenderExecutionScope : uint8_t {
+    RealtimeAudioThread = 0,
+    OfflineAnalysis,
+    BackgroundAnalysis,
+};
+
+enum class OfflineRenderComputeBackend : uint8_t {
+    Cpu = 0,
+    Gpu,
+};
+
+struct OfflineRenderComputePolicy {
+    OfflineRenderExecutionScope scope = OfflineRenderExecutionScope::OfflineAnalysis;
+    OfflineRenderComputeBackend requested_backend = OfflineRenderComputeBackend::Cpu;
+    bool gpu_available = false;
+    bool allow_cpu_fallback = true;
+};
+
+struct OfflineRenderComputeDecision {
+    bool accepted = false;
+    OfflineRenderComputeBackend backend = OfflineRenderComputeBackend::Cpu;
+    bool used_cpu_fallback = false;
+    const char* reason = "";
+
+    bool uses_gpu() const noexcept {
+        return accepted && backend == OfflineRenderComputeBackend::Gpu;
+    }
+};
+
 /// Advanced offline render options. `block_size_schedule` is consumed in order;
 /// when the render is longer than the schedule, the final scheduled size
 /// repeats. Empty schedule falls back to `fallback_block_size`.
@@ -144,6 +173,11 @@ std::optional<std::string> offline_render_audio_sha256(
 std::optional<OfflineRenderArtifactManifest> create_offline_render_manifest(
     const AudioFileData& rendered_audio,
     const OfflineRenderOptions& options = {}
+);
+
+/// Decide whether a GPU-assisted offline analysis request is allowed.
+OfflineRenderComputeDecision evaluate_offline_render_compute_policy(
+    const OfflineRenderComputePolicy& policy
 );
 
 /// Process an entire audio file through a callback function.

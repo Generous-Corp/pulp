@@ -363,6 +363,43 @@ std::optional<OfflineRenderArtifactManifest> create_offline_render_manifest(
     return manifest;
 }
 
+OfflineRenderComputeDecision evaluate_offline_render_compute_policy(
+    const OfflineRenderComputePolicy& policy)
+{
+    if (policy.requested_backend == OfflineRenderComputeBackend::Cpu) {
+        return {true, OfflineRenderComputeBackend::Cpu, false, "cpu"};
+    }
+
+    if (policy.scope == OfflineRenderExecutionScope::RealtimeAudioThread) {
+        return {
+            false,
+            OfflineRenderComputeBackend::Cpu,
+            false,
+            "gpu-not-allowed-on-realtime-audio-thread",
+        };
+    }
+
+    if (policy.gpu_available) {
+        return {true, OfflineRenderComputeBackend::Gpu, false, "gpu"};
+    }
+
+    if (policy.allow_cpu_fallback) {
+        return {
+            true,
+            OfflineRenderComputeBackend::Cpu,
+            true,
+            "gpu-unavailable-cpu-fallback",
+        };
+    }
+
+    return {
+        false,
+        OfflineRenderComputeBackend::Cpu,
+        false,
+        "gpu-unavailable",
+    };
+}
+
 std::optional<AudioFileData> offline_process(
     const AudioFileData& input,
     OfflineProcessCallback process_fn,
