@@ -26,6 +26,19 @@ AudioFileData make_sample(uint32_t channels, uint64_t frames, uint32_t sample_ra
     return data;
 }
 
+SampleResourcePage make_page(uint64_t start_frame,
+                             std::initializer_list<float> samples,
+                             uint32_t sample_rate = 48000) {
+    AudioFileData data;
+    data.sample_rate = sample_rate;
+    data.channels.resize(1);
+    data.channels[0].assign(samples.begin(), samples.end());
+    return {
+        .start_frame = start_frame,
+        .data = std::move(data),
+    };
+}
+
 } // namespace
 
 TEST_CASE("SampleResourceHandle publishes loaded sample snapshots",
@@ -205,6 +218,98 @@ TEST_CASE("SampleResourceCache rejects oversized decoded samples without evictio
     REQUIRE(stats.entries == 1);
     REQUIRE(stats.rejections == 1);
     REQUIRE(stats.evictions == 0);
+}
+
+TEST_CASE("SampleResourcePageHandoff reads resident pages without file callbacks",
+          "[audio][sample-resource][page-handoff][rt-safety][phase3]") {
+    std::atomic<int> file_reads{0};
+    auto decode_page = [&](uint64_t start_frame) {
+        ++file_reads;
+        return make_page(start_frame, {1.0f, 2.0f, 3.0f, 4.0f});
+    };
+
+    SampleResourcePageWindow window;
+    window.sample_rate = 48000;
+    window.channel_count = 1;
+    window.generation = 7;
+    window.pages.push_back(decode_page(8));
+    REQUIRE(file_reads.load() == 1);
+
+    SampleResourcePageHandoff handoff;
+    handoff.publish(std::move(window));
+
+    float out[4]{};
+    {
+        pulp::test::RtAllocationProbe probe;
+        handoff.read_channel(out, 0, 8, 4);
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+
+    REQUIRE(out[0] == 1.0f);
+    REQUIRE(out[1] == 2.0f);
+    REQUIRE(out[2] == 3.0f);
+    REQUIRE(out[3] == 4.0f);
+    REQUIRE(file_reads.load() == 1);
+
+    const auto diag = handoff.diagnostics();
+    REQUIRE(diag.generation == 7);
+    REQUIRE(diag.page_count == 1);
+    REQUIRE(diag.covered_frame_count == 4);
+    REQUIRE(diag.page_misses == 0);
+}
+
+TEST_CASE("SampleResourcePageHandoff reports cache misses as silence",
+          "[audio][sample-resource][page-handoff][miss][phase3]") {
+    SampleResourcePageWindow window;
+    window.sample_rate = 48000;
+    window.channel_count = 1;
+    window.generation = 2;
+    window.pages.push_back(make_page(16, {0.25f, 0.5f}));
+
+    SampleResourcePageHandoff handoff;
+    handoff.publish(std::move(window));
+
+    float out[4]{1.0f, 1.0f, 1.0f, 1.0f};
+    handoff.read_channel(out, 0, 14, 4);
+
+    REQUIRE(out[0] == 0.0f);
+    REQUIRE(out[1] == 0.0f);
+    REQUIRE(out[2] == 0.25f);
+    REQUIRE(out[3] == 0.5f);
+
+    const auto diag = handoff.diagnostics();
+    REQUIRE(diag.page_misses == 2);
+    REQUIRE(diag.last_miss_frame == 15);
+}
+
+TEST_CASE("SampleResourcePageHandoff window replacement resets page misses",
+          "[audio][sample-resource][page-handoff][phase3]") {
+    SampleResourcePageHandoff handoff;
+    REQUIRE(handoff.sample_or_zero(0, 99) == 0.0f);
+    REQUIRE(handoff.diagnostics().page_misses == 1);
+
+    SampleResourcePageWindow first;
+    first.generation = 1;
+    first.channel_count = 1;
+    first.sample_rate = 48000;
+    first.pages.push_back(make_page(0, {0.1f}));
+    handoff.publish(std::move(first));
+    REQUIRE(handoff.diagnostics().page_misses == 0);
+    REQUIRE(handoff.sample_or_zero(0, 0) == 0.1f);
+
+    SampleResourcePageWindow second;
+    second.generation = 2;
+    second.channel_count = 1;
+    second.sample_rate = 48000;
+    second.pages.push_back(make_page(4, {0.4f}));
+    handoff.publish(std::move(second));
+
+    REQUIRE(handoff.sample_or_zero(0, 0) == 0.0f);
+    REQUIRE(handoff.sample_or_zero(0, 4) == 0.4f);
+    const auto diag = handoff.diagnostics();
+    REQUIRE(diag.generation == 2);
+    REQUIRE(diag.page_misses == 1);
+    REQUIRE(diag.last_miss_frame == 0);
 }
 
 TEST_CASE("SampleResourceService loads decoded samples on a background job",
