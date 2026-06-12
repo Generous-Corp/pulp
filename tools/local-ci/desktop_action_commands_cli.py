@@ -6,16 +6,18 @@ import argparse
 from collections.abc import Callable
 import json
 
+from desktop_action_dispatch import (
+    desktop_click_has_target,
+    desktop_click_runner,
+    desktop_smoke_runner,
+    windows_requires_pulp_app_selectors,
+)
 from desktop_inspect_commands_cli import cmd_desktop_inspect
 
 
 def _print_lines(lines, *, print_fn: Callable[[str], None]) -> None:
     for line in lines:
         print_fn(line)
-
-
-def windows_requires_pulp_app_selectors(args: argparse.Namespace) -> bool:
-    return any([args.click_view_id, args.click_view_type, args.click_view_text, args.click_view_label])
 
 
 def cmd_desktop_smoke(
@@ -39,96 +41,18 @@ def cmd_desktop_smoke(
         print_fn(f"Error: {exc}")
         return 1
 
-    adapter = target["adapter"]
-    if adapter == "macos-local":
-        if sys_platform != "darwin":
-            print_fn(f"Error: macOS local desktop smoke must run on macOS (current platform: {sys_platform}).")
-            return 1
-        if not args.launch_command and not args.bundle_id:
-            print_fn("Error: desktop smoke requires either --command or --bundle-id.")
-            return 1
-        runner = lambda: run_macos_local_smoke_fn(
-            config,
-            args.launch_command,
-            action_name="smoke",
-            bundle_id=args.bundle_id,
-            label=args.label,
-            output_path=args.output,
-            capture_ui_snapshot=args.capture_ui_snapshot,
-            click_point=args.click,
-            click_view_id=args.click_view_id,
-            click_view_type=args.click_view_type,
-            click_view_text=args.click_view_text,
-            click_view_label=args.click_view_label,
-            pulp_app_automation=getattr(args, "pulp_app_automation", False),
-            capture_before=args.capture_before,
-            settle_secs=args.settle_secs,
-            timeout_secs=args.timeout,
-            source_request=source_request,
-        )
-    elif adapter == "linux-xvfb":
-        if args.bundle_id:
-            print_fn("Error: linux-xvfb desktop smoke currently supports --command only.")
-            return 1
-        if not args.launch_command:
-            print_fn("Error: desktop smoke requires --command for linux-xvfb targets.")
-            return 1
-        runner = lambda: run_linux_xvfb_remote_action_fn(
-            config,
-            args.target,
-            target,
-            args.launch_command,
-            action_name="smoke",
-            label=args.label,
-            output_path=args.output,
-            pulp_app_automation=getattr(args, "pulp_app_automation", False),
-            capture_ui_snapshot=args.capture_ui_snapshot,
-            click_point=args.click,
-            click_view_id=args.click_view_id,
-            click_view_type=args.click_view_type,
-            click_view_text=args.click_view_text,
-            click_view_label=args.click_view_label,
-            capture_before=args.capture_before,
-            settle_secs=args.settle_secs,
-            timeout_secs=args.timeout,
-            source_request=source_request,
-        )
-    elif adapter == "windows-session-agent":
-        if args.bundle_id:
-            print_fn("Error: windows desktop smoke currently supports --command only.")
-            return 1
-        if not args.launch_command:
-            print_fn("Error: desktop smoke requires --command for windows targets.")
-            return 1
-        pulp_app_automation = bool(getattr(args, "pulp_app_automation", False))
-        if args.capture_ui_snapshot and not pulp_app_automation:
-            print_fn("Error: windows desktop smoke currently supports --capture-ui-snapshot only with --pulp-app-automation.")
-            return 1
-        if windows_requires_pulp_app_selectors(args) and not pulp_app_automation:
-            print_fn("Error: windows desktop smoke currently supports view-target selectors only with --pulp-app-automation.")
-            return 1
-        runner = lambda: run_windows_session_agent_action_fn(
-            config,
-            args.target,
-            target,
-            args.launch_command,
-            action_name="smoke",
-            label=args.label,
-            output_path=args.output,
-            pulp_app_automation=pulp_app_automation,
-            capture_ui_snapshot=args.capture_ui_snapshot,
-            click_point=args.click,
-            click_view_id=args.click_view_id,
-            click_view_type=args.click_view_type,
-            click_view_text=args.click_view_text,
-            click_view_label=args.click_view_label,
-            capture_before=args.capture_before,
-            settle_secs=args.settle_secs,
-            timeout_secs=args.timeout,
-            source_request=source_request,
-        )
-    else:
-        print_fn(f"Error: desktop smoke is not implemented for `{args.target}` yet; adapter `{adapter}` is still pending.")
+    runner, error = desktop_smoke_runner(
+        args=args,
+        config=config,
+        target=target,
+        source_request=source_request,
+        run_macos_local_smoke_fn=run_macos_local_smoke_fn,
+        run_linux_xvfb_remote_action_fn=run_linux_xvfb_remote_action_fn,
+        run_windows_session_agent_action_fn=run_windows_session_agent_action_fn,
+        sys_platform=sys_platform,
+    )
+    if error:
+        print_fn(f"Error: {error}")
         return 1
 
     try:
@@ -166,98 +90,20 @@ def cmd_desktop_click(
         print_fn(f"Error: {exc}")
         return 1
 
-    adapter = target["adapter"]
-    if adapter == "macos-local":
-        if sys_platform != "darwin":
-            print_fn(f"Error: macOS local desktop click must run on macOS (current platform: {sys_platform}).")
-            return 1
-        if bool(args.launch_command) == bool(args.bundle_id):
-            print_fn("Error: desktop click requires exactly one of --command or --bundle-id.")
-            return 1
-        runner = lambda: run_macos_local_smoke_fn(
-            config,
-            args.launch_command,
-            action_name="click",
-            bundle_id=args.bundle_id,
-            label=args.label,
-            output_path=args.output,
-            capture_ui_snapshot=args.capture_ui_snapshot,
-            click_point=args.click,
-            click_view_id=args.click_view_id,
-            click_view_type=args.click_view_type,
-            click_view_text=args.click_view_text,
-            click_view_label=args.click_view_label,
-            pulp_app_automation=getattr(args, "pulp_app_automation", False),
-            capture_before=True,
-            settle_secs=args.settle_secs,
-            timeout_secs=args.timeout,
-            source_request=source_request,
-        )
-    elif adapter == "linux-xvfb":
-        if args.bundle_id:
-            print_fn("Error: linux-xvfb desktop click currently supports --command only.")
-            return 1
-        if not args.launch_command:
-            print_fn("Error: desktop click requires --command for linux-xvfb targets.")
-            return 1
-        runner = lambda: run_linux_xvfb_remote_action_fn(
-            config,
-            args.target,
-            target,
-            args.launch_command,
-            action_name="click",
-            label=args.label,
-            output_path=args.output,
-            pulp_app_automation=getattr(args, "pulp_app_automation", False),
-            capture_ui_snapshot=args.capture_ui_snapshot,
-            click_point=args.click,
-            click_view_id=args.click_view_id,
-            click_view_type=args.click_view_type,
-            click_view_text=args.click_view_text,
-            click_view_label=args.click_view_label,
-            capture_before=True,
-            settle_secs=args.settle_secs,
-            timeout_secs=args.timeout,
-            source_request=source_request,
-        )
-    elif adapter == "windows-session-agent":
-        if args.bundle_id:
-            print_fn("Error: windows desktop click currently supports --command only.")
-            return 1
-        if not args.launch_command:
-            print_fn("Error: desktop click requires --command for windows targets.")
-            return 1
-        pulp_app_automation = bool(getattr(args, "pulp_app_automation", False))
-        if args.capture_ui_snapshot and not pulp_app_automation:
-            print_fn("Error: windows desktop click currently supports --capture-ui-snapshot only with --pulp-app-automation.")
-            return 1
-        if windows_requires_pulp_app_selectors(args) and not pulp_app_automation:
-            print_fn("Error: windows desktop click currently supports view-target selectors only with --pulp-app-automation.")
-            return 1
-        runner = lambda: run_windows_session_agent_action_fn(
-            config,
-            args.target,
-            target,
-            args.launch_command,
-            action_name="click",
-            label=args.label,
-            output_path=args.output,
-            pulp_app_automation=pulp_app_automation,
-            capture_ui_snapshot=args.capture_ui_snapshot,
-            click_point=args.click,
-            click_view_id=args.click_view_id,
-            click_view_type=args.click_view_type,
-            click_view_text=args.click_view_text,
-            click_view_label=args.click_view_label,
-            capture_before=True,
-            settle_secs=args.settle_secs,
-            timeout_secs=args.timeout,
-            source_request=source_request,
-        )
-    else:
-        print_fn(f"Error: desktop click is not implemented for `{args.target}` yet; adapter `{adapter}` is still pending.")
+    runner, error = desktop_click_runner(
+        args=args,
+        config=config,
+        target=target,
+        source_request=source_request,
+        run_macos_local_smoke_fn=run_macos_local_smoke_fn,
+        run_linux_xvfb_remote_action_fn=run_linux_xvfb_remote_action_fn,
+        run_windows_session_agent_action_fn=run_windows_session_agent_action_fn,
+        sys_platform=sys_platform,
+    )
+    if error:
+        print_fn(f"Error: {error}")
         return 1
-    if not any([args.click, args.click_view_id, args.click_view_type, args.click_view_text, args.click_view_label]):
+    if not desktop_click_has_target(args):
         print_fn("Error: desktop click requires --click or one view-target selector.")
         return 1
 
