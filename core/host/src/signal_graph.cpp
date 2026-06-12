@@ -10,6 +10,7 @@
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/runtime/log.hpp>
 #include <algorithm>
+#include <array>
 #include <queue>
 #include <unordered_set>
 #include <unordered_map>
@@ -1402,7 +1403,42 @@ void SignalGraph::process(audio::BufferView<float>& output,
                     param_events.sort();
                 }
 
-                pit->second->process(out_view, in_c, rt.midi_in, rt.midi_out,
+                std::array<format::BusBufferView<const float>, 1> input_buses{{
+                    {
+                        .info = {
+                            .name = "Graph Plugin In",
+                            .index = 0,
+                            .direction = format::BusDirection::Input,
+                            .role = format::BusRole::Main,
+                            .declared_channels =
+                                static_cast<int>(in_c.num_channels()),
+                            .optional = in_c.num_channels() == 0,
+                            .active = in_c.num_channels() > 0,
+                        },
+                        .buffer = in_c,
+                    },
+                }};
+                std::array<format::BusBufferView<float>, 1> output_buses{{
+                    {
+                        .info = {
+                            .name = "Graph Plugin Out",
+                            .index = 0,
+                            .direction = format::BusDirection::Output,
+                            .role = format::BusRole::Main,
+                            .declared_channels =
+                                static_cast<int>(out_view.num_channels()),
+                            .optional = false,
+                            .active = out_view.num_channels() > 0,
+                        },
+                        .buffer = out_view,
+                    },
+                }};
+                format::ProcessBuffers process_buffers{
+                    format::BusBufferSet<const float>{std::span(input_buses)},
+                    format::BusBufferSet<float>{std::span(output_buses)},
+                };
+
+                pit->second->process(process_buffers, rt.midi_in, rt.midi_out,
                                      param_events, num_samples);
                 rt.midi_out_incomplete =
                     rt.midi_in_incomplete || midi_block_has_drops(rt.midi_out);

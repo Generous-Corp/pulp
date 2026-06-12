@@ -2795,6 +2795,120 @@ TEST_CASE("SignalGraph automation smoothing eventually reaches the target",
     REQUIRE(reached);
 }
 
+namespace {
+class ProcessBufferAwareSlot final : public PluginSlot {
+public:
+    const PluginInfo& info() const override { return info_; }
+    bool is_loaded() const override { return true; }
+    bool prepare(double, int) override { return true; }
+    void release() override {}
+
+    void process(pulp::audio::BufferView<float>& out,
+                 const pulp::audio::BufferView<const float>& in,
+                 const pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&,
+                 const ParameterEventQueue&,
+                 int n) override {
+        ++legacy_process_calls;
+        for (std::size_t c = 0; c < out.num_channels(); ++c) {
+            float* dst = out.channel_ptr(c);
+            const float* src = c < in.num_channels() ? in.channel_ptr(c) : nullptr;
+            for (int i = 0; i < n; ++i) {
+                dst[i] = src ? src[i] : 0.0f;
+            }
+        }
+    }
+
+    void process(pulp::format::ProcessBuffers& audio,
+                 const pulp::midi::MidiBuffer& midi_in,
+                 pulp::midi::MidiBuffer& midi_out,
+                 const ParameterEventQueue& param_events,
+                 int n) override {
+        ++process_buffer_calls;
+        saw_layout_ok = audio.layouts_match_descriptors();
+        saw_storage_ok = audio.active_buses_have_storage();
+        saw_input_count = audio.inputs.active_count();
+        saw_output_count = audio.outputs.active_count();
+        saw_main_input_channels =
+            audio.main_input() ? audio.main_input()->num_channels() : 0;
+        saw_main_output_channels =
+            audio.main_output() ? audio.main_output()->num_channels() : 0;
+
+        auto* out = audio.main_output();
+        pulp::audio::BufferView<const float> empty;
+        auto* in = audio.main_input();
+        if (out) {
+            process(*out, in ? *in : empty, midi_in, midi_out, param_events, n);
+        }
+    }
+
+    std::vector<HostParamInfo> parameters() const override { return {}; }
+    float get_parameter(uint32_t) const override { return 0.f; }
+    void set_parameter(uint32_t, float) override {}
+    void set_bypass(bool) override {}
+    bool is_bypassed() const override { return false; }
+    std::vector<uint8_t> save_state() const override { return {}; }
+    bool restore_state(const std::vector<uint8_t>&) override { return false; }
+    bool has_editor() const override { return false; }
+    void* create_editor_view() override { return nullptr; }
+    void destroy_editor_view() override {}
+    int latency_samples() const override { return 0; }
+    int tail_samples() const override { return 0; }
+
+    int legacy_process_calls = 0;
+    int process_buffer_calls = 0;
+    bool saw_layout_ok = false;
+    bool saw_storage_ok = false;
+    std::size_t saw_input_count = 0;
+    std::size_t saw_output_count = 0;
+    std::size_t saw_main_input_channels = 0;
+    std::size_t saw_main_output_channels = 0;
+
+private:
+    PluginInfo info_ = make_plugin_info("ProcessBufferAware", 2, 2);
+};
+} // namespace
+
+TEST_CASE("SignalGraph dispatches plugin nodes through ProcessBuffers",
+          "[host][graph][process-buffers][phase2]") {
+    SignalGraph graph;
+    auto in = graph.add_input_node(2, "in");
+    auto slot = std::make_unique<ProcessBufferAwareSlot>();
+    auto* slot_ptr = slot.get();
+    auto plugin = graph.add_plugin_node(std::move(slot), 2, 2, "slot");
+    auto out = graph.add_output_node(2, "out");
+
+    REQUIRE(graph.connect(in, 0, plugin, 0));
+    REQUIRE(graph.connect(in, 1, plugin, 1));
+    REQUIRE(graph.connect(plugin, 0, out, 0));
+    REQUIRE(graph.connect(plugin, 1, out, 1));
+    REQUIRE(graph.prepare(48000.0, 8));
+
+    std::vector<float> in_l(8, 0.25f);
+    std::vector<float> in_r(8, 0.75f);
+    std::vector<float> out_l(8, 0.0f);
+    std::vector<float> out_r(8, 0.0f);
+    const float* in_ptrs[2] = {in_l.data(), in_r.data()};
+    float* out_ptrs[2] = {out_l.data(), out_r.data()};
+    pulp::audio::BufferView<const float> input(in_ptrs, 2, 8);
+    pulp::audio::BufferView<float> output(out_ptrs, 2, 8);
+
+    graph.process(output, input, 8);
+
+    REQUIRE(slot_ptr->process_buffer_calls == 1);
+    REQUIRE(slot_ptr->legacy_process_calls == 1);
+    REQUIRE(slot_ptr->saw_layout_ok);
+    REQUIRE(slot_ptr->saw_storage_ok);
+    REQUIRE(slot_ptr->saw_input_count == 1);
+    REQUIRE(slot_ptr->saw_output_count == 1);
+    REQUIRE(slot_ptr->saw_main_input_channels == 2);
+    REQUIRE(slot_ptr->saw_main_output_channels == 2);
+    for (int i = 0; i < 8; ++i) {
+        REQUIRE_THAT(out_l[static_cast<std::size_t>(i)], WithinAbs(0.25f, 1e-6f));
+        REQUIRE_THAT(out_r[static_cast<std::size_t>(i)], WithinAbs(0.75f, 1e-6f));
+    }
+}
+
 // ── Item 4.7 sidechain routing ────────────────────────────────────────
 
 namespace {
