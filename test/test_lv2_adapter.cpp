@@ -197,9 +197,16 @@ constexpr state::ParamID kLv2ProbeGainParam = 7;
 struct Lv2ProbeCapture {
     int prepare_calls = 0;
     int process_calls = 0;
+    int process_buffer_calls = 0;
     int release_calls = 0;
     int last_num_samples = 0;
     double last_sample_rate = 0.0;
+    std::size_t process_buffer_input_buses = 0;
+    std::size_t process_buffer_output_buses = 0;
+    std::size_t process_buffer_active_inputs = 0;
+    std::size_t process_buffer_active_outputs = 0;
+    bool process_buffer_layouts_match = false;
+    bool process_buffer_storage_valid = false;
     std::size_t last_midi_count = 0;
     uint8_t first_status = 0;
     uint8_t first_note = 0;
@@ -273,6 +280,21 @@ public:
         auto out = midi::MidiEvent::note_on(0, 65, 110);
         out.sample_offset = 7;
         midi_out.add(out);
+    }
+
+    void process(ProcessBuffers& audio,
+                 midi::MidiBuffer& midi_in,
+                 midi::MidiBuffer& midi_out,
+                 const ProcessContext& context) override {
+        ++g_lv2_probe.process_buffer_calls;
+        g_lv2_probe.process_buffer_input_buses = audio.inputs.size();
+        g_lv2_probe.process_buffer_output_buses = audio.outputs.size();
+        g_lv2_probe.process_buffer_active_inputs = audio.inputs.active_count();
+        g_lv2_probe.process_buffer_active_outputs = audio.outputs.active_count();
+        g_lv2_probe.process_buffer_layouts_match = audio.layouts_match_descriptors();
+        g_lv2_probe.process_buffer_storage_valid = audio.active_buses_have_storage();
+
+        Processor::process(audio, midi_in, midi_out, context);
     }
 };
 
@@ -415,6 +437,13 @@ TEST_CASE("LV2 generic entry wires ports, audio, control values, and MIDI",
 
     REQUIRE(inst->store.get_value(kLv2ProbeGainParam) == 0.5f);
     REQUIRE(g_lv2_probe.process_calls == 1);
+    REQUIRE(g_lv2_probe.process_buffer_calls == 1);
+    REQUIRE(g_lv2_probe.process_buffer_input_buses == 1);
+    REQUIRE(g_lv2_probe.process_buffer_output_buses == 1);
+    REQUIRE(g_lv2_probe.process_buffer_active_inputs == 1);
+    REQUIRE(g_lv2_probe.process_buffer_active_outputs == 1);
+    REQUIRE(g_lv2_probe.process_buffer_layouts_match);
+    REQUIRE(g_lv2_probe.process_buffer_storage_valid);
     // Phase 3 — the LV2 run path provides a uniform (non-null) param-events
     // queue to the Processor, matching VST3/CLAP/AUv3.
     REQUIRE(g_lv2_probe.param_events_non_null);
