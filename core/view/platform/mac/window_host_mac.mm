@@ -257,14 +257,14 @@ static void install_app_menu(NSString* appName) {
     return self;
 }
 
-// pulp #2502 — invalidate every queued deferred-click block. After this
-// returns, any deferred-click block that later drains is a guaranteed no-op,
-// so it is safe for the owning View tree / WidgetBridge / ScriptEngine to be
-// destroyed. Invoked from the host destructors (`~MacWindowHost`,
-// `~MacGpuWindowHost`) which run synchronously in the same teardown step —
-// between a test's bridge going out of scope and the next run-loop pump — so
-// flipping the token here reliably defuses every block before it can fault.
+// pulp #2502 — invalidate queued callbacks before the owning C++ host and View
+// tree can be destroyed. After this returns, deferred click blocks are
+// guaranteed no-ops and the AppKit animation timer can no longer tick the host's
+// FrameClock after it is freed.
 - (void)prepareForTeardown {
+    [self.animationTimer invalidate];
+    self.animationTimer = nil;
+    self.frameClock = nullptr;
     self.rootView = nullptr;
     _dragTarget = nullptr;
     _relativeMouseMode = NO;
