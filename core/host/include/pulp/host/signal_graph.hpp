@@ -20,6 +20,7 @@
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
 #include <pulp/runtime/triple_buffer.hpp>
+#include <pulp/state/modulation_lane.hpp>
 #include <atomic>
 #include <functional>
 #include <memory>
@@ -296,13 +297,20 @@ public:
 
     // Audio-rate modulation connection: source audio samples drive every
     // sample of an AudioRate destination parameter. This edge is distinct
-    // from sparse automation above; it is accepted only for continuous
-    // automatable parameters whose HostParamInfo::rate is AudioRate.
+    // from sparse automation above; it is accepted only when the edge can be
+    // represented as a valid GraphNode-scoped state::ModulationLane targeting
+    // a continuous AudioRate destination parameter.
     bool connect_audio_rate_modulation(NodeId src, PortIndex src_audio_port,
                                        NodeId dest, uint32_t dest_param_id,
                                        float range_lo, float range_hi,
                                        float smoothing_ms = 0.0f,
                                        AutomationMix mix = AutomationMix::Replace);
+
+    // Project an accepted graph audio-rate modulation edge into the typed
+    // modulation-lane contract used by instruments, adapters, and generated
+    // graphs. Returns false for non-modulation edges or unresolved metadata.
+    bool audio_rate_modulation_lane(const Connection& connection,
+                                    state::ModulationLane& lane) const;
 
     // Inject a MIDI buffer into a MidiInput source node. Call before
     // process(); the events become that node's MIDI output this block.

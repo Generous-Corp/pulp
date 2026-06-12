@@ -57,9 +57,11 @@ Four connection variants cover the non-audio-passthrough cases:
   graph automation uses two events per automated parameter, so large host
   blocks such as 2048 or 4096 samples do not consume one queue slot per sample.
 - `connect_audio_rate_modulation(from, port, plugin, param, lo, hi)` declares
-  a dense per-sample modulation edge. It is accepted only for continuous,
-  automatable `HostParamInfo::rate == AudioRate` parameters, emits one
-  `ParameterEvent` per sample, and participates in latency alignment. While the
+  a dense per-sample modulation edge. It is accepted only when the graph edge
+  can be represented as a valid `state::ModulationLane` with `GraphNode` scope:
+  the destination parameter must be continuous, writable, automatable,
+  modulatable, and `HostParamInfo::rate == AudioRate`. Accepted edges emit one
+  `ParameterEvent` per sample and participate in latency alignment. While the
   plugin ABI still carries dense modulation through the fixed 1024-slot
   `ParameterEventQueue`, `prepare()` fails closed when
   `audio_rate_params * max_block_size + sparse_params * 2` would exceed that
@@ -133,7 +135,8 @@ reads back. `connect_automation()` delivers two sparse control points per
 block for control-rate movement; processors that need a smooth value between
 those points should use their normal parameter-ramp or subblock helpers.
 `connect_audio_rate_modulation()` delivers sample-by-sample events for
-parameters explicitly marked audio-rate.
+parameters explicitly marked audio-rate and projects accepted edges through the
+typed modulation-lane contract.
 
 ## Persistence
 

@@ -2172,13 +2172,15 @@ public:
                              bool automatable = true,
                              bool read_only = false,
                              float min_value = 0.0f,
-                             float max_value = 1.0f)
+                             float max_value = 1.0f,
+                             bool modulatable = true)
         : rate_(rate),
           stepped_(stepped),
           automatable_(automatable),
           read_only_(read_only),
           min_value_(min_value),
-          max_value_(max_value) {}
+          max_value_(max_value),
+          modulatable_(modulatable) {}
 
     const PluginInfo& info() const override { return info_; }
     bool is_loaded() const override { return true; }
@@ -2206,6 +2208,7 @@ public:
         p.flags.automatable = automatable_;
         p.flags.read_only = read_only_;
         p.flags.stepped = stepped_;
+        p.flags.modulatable = modulatable_;
         p.rate = rate_;
         return {p};
     }
@@ -2231,6 +2234,7 @@ private:
     bool read_only_ = false;
     float min_value_ = 0.0f;
     float max_value_ = 1.0f;
+    bool modulatable_ = true;
     std::vector<pulp::host::ParameterEvent> received_;
 };
 
@@ -2610,6 +2614,20 @@ TEST_CASE("SignalGraph connect_audio_rate_modulation gates on audio-rate params"
     REQUIRE(edge.automation_smoothing_ms == 0.0f);
     REQUIRE(edge.automation_mix == AutomationMix::Replace);
 
+    pulp::state::ModulationLane lane;
+    REQUIRE(graph.audio_rate_modulation_lane(edge, lane));
+    REQUIRE(lane.source.id == in_node);
+    REQUIRE(lane.source.scope == pulp::state::ModulationScope::GraphNode);
+    REQUIRE(lane.source.rate == pulp::state::ModulationRate::Audio);
+    REQUIRE(lane.target.param_id == MockAutomatable::kParamId);
+    REQUIRE(lane.target.scope == pulp::state::ModulationScope::GraphNode);
+    REQUIRE(lane.target.param_rate == ParamRate::AudioRate);
+    REQUIRE(lane.target.modulatable);
+    REQUIRE(lane.target.writable);
+    REQUIRE(lane.mix == pulp::state::ModulationMixMode::Replace);
+    REQUIRE_THAT(lane.depth, WithinAbs(2.0f, 1e-6f));
+    REQUIRE(pulp::state::validate_modulation_lane(lane).accepted);
+
     REQUIRE_FALSE(graph.connect_audio_rate_modulation(
         in_node, 0, audio, MockAutomatable::kParamId, 0.0f, 1.0f));
     REQUIRE(graph.connect_audio_rate_modulation(
@@ -2628,6 +2646,10 @@ TEST_CASE("SignalGraph audio-rate modulation rejects non-writable params and cyc
     auto not_automatable = graph.add_plugin_node(
         std::make_unique<MockAutomatable>(ParamRate::AudioRate, false, false),
         0, 1, "not-automatable");
+    auto not_modulatable = graph.add_plugin_node(
+        std::make_unique<MockAutomatable>(
+            ParamRate::AudioRate, false, true, false, 0.0f, 1.0f, false),
+        0, 1, "not-modulatable");
     auto unresolved = graph.add_unresolved_plugin_node(
         make_plugin_info("missing", 0, 1),
         0, 1, "missing");
@@ -2643,6 +2665,8 @@ TEST_CASE("SignalGraph audio-rate modulation rejects non-writable params and cyc
         source, 0, read_only, MockAutomatable::kParamId, 0.0f, 1.0f));
     REQUIRE_FALSE(graph.connect_audio_rate_modulation(
         source, 0, not_automatable, MockAutomatable::kParamId, 0.0f, 1.0f));
+    REQUIRE_FALSE(graph.connect_audio_rate_modulation(
+        source, 0, not_modulatable, MockAutomatable::kParamId, 0.0f, 1.0f));
     REQUIRE_FALSE(graph.connect_audio_rate_modulation(
         source, 0, unresolved, MockAutomatable::kParamId, 0.0f, 1.0f));
 

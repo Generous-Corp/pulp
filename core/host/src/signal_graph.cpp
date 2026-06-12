@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <array>
 #include <queue>
+#include <cmath>
 #include <unordered_set>
 #include <unordered_map>
 #include <cstring>
@@ -82,12 +83,22 @@ bool copy_midi_block(const midi::MidiBuffer& src, midi::MidiBuffer& dst) {
 
 bool parameter_allows_modulation(const HostParamInfo& p,
                                  uint32_t param_id,
-                                 state::ParamRate required_rate) {
+                                 state::ParamRate required_rate,
+                                 bool require_modulatable = false) {
     return p.id == param_id
         && p.rate == required_rate
         && p.flags.automatable
+        && (!require_modulatable || p.flags.modulatable)
         && !p.flags.read_only
         && !p.flags.stepped;
+}
+
+state::ModulationMixMode modulation_mix_for(AutomationMix mix) {
+    switch (mix) {
+        case AutomationMix::Replace: return state::ModulationMixMode::Replace;
+        case AutomationMix::Add: return state::ModulationMixMode::Add;
+    }
+    return state::ModulationMixMode::Add;
 }
 
 float map_modulation_sample(const Connection& c, float sample) {
@@ -503,7 +514,8 @@ bool SignalGraph::connect_audio_rate_modulation(NodeId src, PortIndex src_audio_
     bool ok_param = false;
     for (const auto& pi : dst_n->plugin->parameters()) {
         if (pi.id != dest_param_id) continue;
-        if (!parameter_allows_modulation(pi, dest_param_id, state::ParamRate::AudioRate)) {
+        if (!parameter_allows_modulation(
+                pi, dest_param_id, state::ParamRate::AudioRate, true)) {
             return false;
         }
         ok_param = true;
@@ -532,9 +544,54 @@ bool SignalGraph::connect_audio_rate_modulation(NodeId src, PortIndex src_audio_
     conn.automation_range_hi      = range_hi;
     conn.automation_smoothing_ms  = std::max(0.0f, smoothing_ms);
     conn.automation_mix           = mix;
+    state::ModulationLane lane;
+    if (!audio_rate_modulation_lane(conn, lane)) return false;
     connections_.push_back(conn);
     invalidate_live_();
     return true;
+}
+
+bool SignalGraph::audio_rate_modulation_lane(const Connection& connection,
+                                             state::ModulationLane& lane) const {
+    if (!connection.audio_rate_modulation || connection.automation) {
+        return false;
+    }
+
+    const GraphNode* src_n = node(connection.source_node);
+    const GraphNode* dst_n = node(connection.dest_node);
+    if (!src_n || !dst_n || dst_n->type != NodeType::Plugin || !dst_n->plugin) {
+        return false;
+    }
+    if (connection.source_port >= static_cast<PortIndex>(src_n->num_output_ports)) {
+        return false;
+    }
+
+    for (const auto& pi : dst_n->plugin->parameters()) {
+        if (pi.id != connection.automation_param_id) continue;
+
+        lane = state::ModulationLane{
+            .source = {
+                .id = static_cast<state::ModulationSourceId>(connection.source_node),
+                .scope = state::ModulationScope::GraphNode,
+                .rate = state::ModulationRate::Audio,
+            },
+            .target = {
+                .param_id = pi.id,
+                .scope = state::ModulationScope::GraphNode,
+                .param_rate = pi.rate,
+                .modulatable = pi.flags.modulatable
+                    && pi.flags.automatable
+                    && !pi.flags.stepped,
+                .writable = !pi.flags.read_only,
+            },
+            .mix = modulation_mix_for(connection.automation_mix),
+            .depth = std::abs(connection.automation_range_hi
+                              - connection.automation_range_lo),
+        };
+        return state::validate_modulation_lane(lane).accepted;
+    }
+
+    return false;
 }
 
 bool SignalGraph::inject_midi(NodeId id, const midi::MidiBuffer& events) {
