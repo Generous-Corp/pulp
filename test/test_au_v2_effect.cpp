@@ -163,3 +163,18 @@ TEST_CASE("AU v2 effect: sysex routing lands in MidiBuffer's sysex sidecar",
     REQUIRE(buf.sysex()[0].data == payload);
     REQUIRE(buf.sysex()[0].sample_offset == 0);
 }
+
+TEST_CASE("AU v2 render context is explicit realtime for effects and instruments",
+          "[au][au-v2][runtime-mode][phase2]")
+{
+    const auto ctx = pulp::format::au::make_render_process_context(
+        /*sample_rate=*/48000.0, /*num_samples=*/128);
+
+    REQUIRE(ctx.sample_rate == 48000.0);
+    REQUIRE(ctx.num_samples == 128);
+    REQUIRE(ctx.process_mode == pulp::format::ProcessMode::Realtime);
+    REQUIRE(ctx.render_speed_hint == pulp::format::RenderSpeedHint::Realtime);
+    REQUIRE_FALSE(ctx.is_offline());
+    REQUIRE_FALSE(ctx.allows_offline_quality_work());
+    REQUIRE_FALSE(ctx.is_maintenance_render());
+}
