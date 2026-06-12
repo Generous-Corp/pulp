@@ -81,9 +81,12 @@ resulting order is deterministic, so routing is reproducible across runs.
 `SignalGraph::GraphLimits` bounds the graph shape accepted by `prepare()`.
 Hosts can call `set_limits()` before preparing generated, scripted, or
 user-built graphs to cap node count, connection count, total declared ports,
-and maximum block size. Exceeding a limit fails `prepare()` before plugin
-prepare or compiled-snapshot allocation, leaving the graph silent until a
-valid prepare succeeds.
+maximum block size, and deterministic work units. Work units are a stable
+shape/block-size score for importers, not hardware cycle counts: the estimate
+combines node count, connection count, declared ports multiplied by block size,
+dense audio-rate modulation lanes, and sparse automation edges. Exceeding a
+limit fails `prepare()` before plugin prepare or compiled-snapshot allocation,
+leaving the graph silent until a valid prepare succeeds.
 
 Generated or scripted graph importers should call
 `validate_generated_graph(max_block_size)` after applying importer-specific
@@ -92,6 +95,9 @@ check: it reports the first rejected budget as a stable reason plus actual and
 limit counts, and it does not clear or replace an already prepared snapshot.
 `prepare()` uses the same validation internally, but remains the mutating
 lifecycle step that drops any live snapshot before rebuilding a new one.
+Importers can call `estimate_generated_graph_work_units(max_block_size)` first
+when they need to present or tune a CPU/work budget before enforcing
+`GraphLimits::max_estimated_work_units`.
 
 `.pulpgraph` import also validates generated node shapes before materializing
 the graph. Built-in node types must declare the shape their runtime actually

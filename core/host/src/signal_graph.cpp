@@ -13,6 +13,7 @@
 #include <array>
 #include <queue>
 #include <cmath>
+#include <limits>
 #include <unordered_set>
 #include <unordered_map>
 #include <cstring>
@@ -41,6 +42,17 @@ bool has_input_port(const GraphNode& node, PortIndex port) {
 bool has_output_port(const GraphNode& node, PortIndex port) {
     return node.num_output_ports > 0
         && port < static_cast<PortIndex>(node.num_output_ports);
+}
+
+std::size_t saturating_add(std::size_t a, std::size_t b) {
+    const auto max = std::numeric_limits<std::size_t>::max();
+    return b > max - a ? max : a + b;
+}
+
+std::size_t saturating_mul(std::size_t a, std::size_t b) {
+    const auto max = std::numeric_limits<std::size_t>::max();
+    if (a == 0 || b == 0) return 0;
+    return a > max / b ? max : a * b;
 }
 
 state::ModulationMixMode modulation_mix_for(AutomationMix mix) {
@@ -917,6 +929,12 @@ bool SignalGraph::prepare(double sample_rate, int max_block_size) {
             generated_validation.actual,
             generated_validation.limit);
         return false;
+    case GeneratedGraphValidationRejectReason::EstimatedWorkExceeded:
+        runtime::log_error(
+            "SignalGraph: estimated work units {} exceed configured limit {}",
+            generated_validation.actual,
+            generated_validation.limit);
+        return false;
     }
 
     std::unordered_map<NodeId, std::vector<uint32_t>> sparse_params_by_node;
@@ -1008,6 +1026,29 @@ std::size_t SignalGraph::total_declared_ports_() const {
     return port_count;
 }
 
+std::size_t
+SignalGraph::estimate_generated_graph_work_units(int max_block_size) const {
+    if (max_block_size <= 0) return 0;
+
+    const std::size_t block =
+        static_cast<std::size_t>(max_block_size);
+    const std::size_t port_count = total_declared_ports_();
+    std::size_t dense_edges = 0;
+    std::size_t sparse_edges = 0;
+    for (const auto& c : connections_) {
+        if (c.audio_rate_modulation) ++dense_edges;
+        if (c.automation && !c.audio_rate_modulation) ++sparse_edges;
+    }
+
+    std::size_t work = 0;
+    work = saturating_add(work, saturating_mul(nodes_.size(), 16));
+    work = saturating_add(work, saturating_mul(connections_.size(), 8));
+    work = saturating_add(work, saturating_mul(port_count, block));
+    work = saturating_add(work, saturating_mul(dense_edges, block));
+    work = saturating_add(work, saturating_mul(sparse_edges, 2));
+    return work;
+}
+
 SignalGraph::GeneratedGraphValidation
 SignalGraph::validate_generated_graph(int max_block_size) const {
     if (max_block_size <= 0) {
@@ -1049,6 +1090,17 @@ SignalGraph::validate_generated_graph(int max_block_size) const {
             GeneratedGraphValidationRejectReason::PortLimitExceeded,
             port_count,
             limits_.max_ports,
+        };
+    }
+    const std::size_t estimated_work =
+        estimate_generated_graph_work_units(max_block_size);
+    if (limits_.max_estimated_work_units > 0
+        && estimated_work > limits_.max_estimated_work_units) {
+        return {
+            false,
+            GeneratedGraphValidationRejectReason::EstimatedWorkExceeded,
+            estimated_work,
+            limits_.max_estimated_work_units,
         };
     }
     return {};

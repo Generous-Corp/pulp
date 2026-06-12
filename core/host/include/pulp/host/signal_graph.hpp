@@ -177,6 +177,11 @@ public:
         std::size_t max_connections = 16384;
         std::size_t max_ports = 32768;
         int max_block_size = 16384;
+        // Deterministic generated-graph work-unit budget. This is not a
+        // hardware CPU-cycle estimate; it is a stable shape/block-size score
+        // for importers that need to reject expensive generated graphs before
+        // prepare(). Zero disables the budget.
+        std::size_t max_estimated_work_units = 0;
     };
 
     enum class GeneratedGraphValidationRejectReason : uint8_t {
@@ -186,6 +191,7 @@ public:
         NodeLimitExceeded,
         ConnectionLimitExceeded,
         PortLimitExceeded,
+        EstimatedWorkExceeded,
     };
 
     struct GeneratedGraphValidation {
@@ -361,6 +367,7 @@ public:
     // snapshot allocation or plugin prepare.
     void set_limits(GraphLimits limits);
     GraphLimits limits() const { return limits_; }
+    std::size_t estimate_generated_graph_work_units(int max_block_size) const;
     GeneratedGraphValidation validate_generated_graph(int max_block_size) const;
     PreparedStats prepared_stats() const;
 
