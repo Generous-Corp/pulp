@@ -144,6 +144,8 @@ import desktop_setup_commands_cli as _desktop_setup_commands_cli  # noqa: E402
 import desktop_support_bindings as _desktop_support_bindings  # noqa: E402
 import evidence_cli as _evidence_cli  # noqa: E402
 import git_helpers as _git_helpers  # noqa: E402
+import github_workflows as _github_workflows  # noqa: E402
+import github_workflow_bindings as _github_workflow_bindings  # noqa: E402
 import io_utils as _io_utils  # noqa: E402
 import linux_desktop_action as _linux_desktop_action  # noqa: E402
 import linux_desktop_bindings as _linux_desktop_bindings  # noqa: E402
@@ -279,18 +281,109 @@ from github_workflows import (  # noqa: E402  -- re-exported for in-file consume
     GITHUB_ACTIONS_DEFAULTS,
     BUILTIN_GITHUB_WORKFLOWS,
     REPO_VARIABLE_FALLBACKS,
-    github_actions_settings_for_display,
-    resolve_github_actions_settings,
-    normalize_runs_on_json,
-    resolve_workflow_runner_selector_json,
-    resolve_workflow_dispatch_field_values,
-    repo_variable_name_for_workflow_field,
-    resolve_default_provider_for_workflow,
-    resolve_workflow_field_value_and_source,
-    resolve_workflow_dispatch_defaults,
-    summarize_workflow_provider_defaults,
-    resolve_cli_dispatch_field_values,
 )
+
+
+def github_actions_settings_for_display(config: dict | None) -> dict:
+    return _github_workflow_bindings.github_actions_settings_for_display(globals(), config)
+
+
+def resolve_github_actions_settings(config: dict | None) -> dict:
+    return _github_workflow_bindings.resolve_github_actions_settings(globals(), config)
+
+
+def normalize_runs_on_json(raw: str, *, setting_name: str) -> str:
+    return _github_workflow_bindings.normalize_runs_on_json(globals(), raw, setting_name=setting_name)
+
+
+def resolve_workflow_runner_selector_json(config: dict | None, workflow_key: str, provider: str) -> str:
+    return _github_workflow_bindings.resolve_workflow_runner_selector_json(globals(), config, workflow_key, provider)
+
+
+def resolve_workflow_dispatch_field_values(
+    config: dict | None,
+    workflow_key: str,
+    provider: str,
+    field_names: list[str] | tuple[str, ...] | None,
+) -> dict[str, str]:
+    return _github_workflow_bindings.resolve_workflow_dispatch_field_values(
+        globals(),
+        config,
+        workflow_key,
+        provider,
+        field_names,
+    )
+
+
+def repo_variable_name_for_workflow_field(workflow_key: str, provider: str, field_name: str) -> str:
+    return _github_workflow_bindings.repo_variable_name_for_workflow_field(globals(), workflow_key, provider, field_name)
+
+
+def resolve_default_provider_for_workflow(
+    settings: dict,
+    workflow_key: str,
+    *,
+    explicit_provider: str | None = None,
+) -> tuple[str, str]:
+    return _github_workflow_bindings.resolve_default_provider_for_workflow(
+        globals(),
+        settings,
+        workflow_key,
+        explicit_provider=explicit_provider,
+    )
+
+
+def resolve_workflow_field_value_and_source(
+    config: dict | None,
+    repository_variables: dict[str, str],
+    workflow_key: str,
+    provider: str,
+    field_name: str,
+) -> tuple[str, str]:
+    return _github_workflow_bindings.resolve_workflow_field_value_and_source(
+        globals(),
+        config,
+        repository_variables,
+        workflow_key,
+        provider,
+        field_name,
+    )
+
+
+def resolve_workflow_dispatch_defaults(
+    config: dict | None,
+    repository_variables: dict[str, str],
+    workflow_key: str,
+    provider: str,
+    field_names: list[str] | tuple[str, ...] | None,
+) -> tuple[dict[str, str], dict[str, str]]:
+    return _github_workflow_bindings.resolve_workflow_dispatch_defaults(
+        globals(),
+        config,
+        repository_variables,
+        workflow_key,
+        provider,
+        field_names,
+    )
+
+
+def summarize_workflow_provider_defaults(
+    config: dict | None,
+    repository_variables: dict[str, str],
+    settings: dict,
+    workflow_key: str,
+) -> dict:
+    return _github_workflow_bindings.summarize_workflow_provider_defaults(
+        globals(),
+        config,
+        repository_variables,
+        settings,
+        workflow_key,
+    )
+
+
+def resolve_cli_dispatch_field_values(args: argparse.Namespace, field_names: list[str] | tuple[str, ...] | None) -> dict[str, str]:
+    return _github_workflow_bindings.resolve_cli_dispatch_field_values(globals(), args, field_names)
 
 
 from provenance import (  # noqa: E402  -- re-exported for in-file consumers
