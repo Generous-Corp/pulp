@@ -125,3 +125,80 @@ TEST_CASE("SampleResourceHandle snapshot is allocation-free after publish",
     REQUIRE(snap.data != nullptr);
     REQUIRE(snap.frame_count == 32);
 }
+
+TEST_CASE("SampleResourceCache records cache misses without publishing data",
+          "[audio][sample-resource][cache][miss][phase3]") {
+    SampleResourceCache cache({.max_entries = 2});
+    REQUIRE(cache.get("missing.wav") == nullptr);
+
+    const auto stats = cache.stats();
+    REQUIRE(stats.entries == 0);
+    REQUIRE(stats.hits == 0);
+    REQUIRE(stats.misses == 1);
+    REQUIRE(stats.evictions == 0);
+}
+
+TEST_CASE("SampleResourceCache publishes cached sample data to a resource handle",
+          "[audio][sample-resource][cache][phase3]") {
+    SampleResourceCache cache({.max_entries = 2});
+    auto data = make_sample(2, 12, 44100);
+    REQUIRE(cache.put("loop.wav", std::move(data)));
+
+    auto cached = cache.get("loop.wav");
+    REQUIRE(cached != nullptr);
+
+    SampleResourceHandle handle;
+    REQUIRE(handle.publish_loaded(cached, "loop.wav"));
+
+    const auto snap = handle.snapshot();
+    REQUIRE(snap.status == SampleResourceStatus::Loaded);
+    REQUIRE(snap.ready());
+    REQUIRE(snap.data == cached);
+    REQUIRE(snap.frame_count == 12);
+    REQUIRE(snap.channel_count == 2);
+    REQUIRE(snap.sample_rate == 44100);
+
+    const auto stats = cache.stats();
+    REQUIRE(stats.entries == 1);
+    REQUIRE(stats.hits == 1);
+    REQUIRE(stats.misses == 0);
+}
+
+TEST_CASE("SampleResourceCache evicts least recently used decoded samples",
+          "[audio][sample-resource][cache][eviction][phase3]") {
+    SampleResourceCache cache({.max_entries = 2});
+    REQUIRE(cache.put("a.wav", make_sample(1, 4)));
+    REQUIRE(cache.put("b.wav", make_sample(1, 4)));
+    REQUIRE(cache.get("a.wav") != nullptr);
+
+    REQUIRE(cache.put("c.wav", make_sample(1, 4)));
+    REQUIRE(cache.get("b.wav") == nullptr);
+    REQUIRE(cache.get("a.wav") != nullptr);
+    REQUIRE(cache.get("c.wav") != nullptr);
+
+    const auto stats = cache.stats();
+    REQUIRE(stats.entries == 2);
+    REQUIRE(stats.evictions == 1);
+    REQUIRE(stats.misses == 1);
+}
+
+TEST_CASE("SampleResourceCache rejects oversized decoded samples without eviction",
+          "[audio][sample-resource][cache][budget][phase3]") {
+    auto small = make_sample(1, 4);
+    const auto small_bytes = SampleResourceHandle::decoded_byte_size(small);
+    SampleResourceCache cache({
+        .max_entries = 2,
+        .max_decoded_bytes = small_bytes * 2,
+    });
+
+    REQUIRE(cache.put("small.wav", std::move(small)));
+    REQUIRE_FALSE(cache.put("too-large.wav", make_sample(2, 16)));
+
+    REQUIRE(cache.get("small.wav") != nullptr);
+    REQUIRE(cache.get("too-large.wav") == nullptr);
+
+    const auto stats = cache.stats();
+    REQUIRE(stats.entries == 1);
+    REQUIRE(stats.rejections == 1);
+    REQUIRE(stats.evictions == 0);
+}
