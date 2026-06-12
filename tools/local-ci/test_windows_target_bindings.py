@@ -132,6 +132,21 @@ class WindowsTargetBindingsTests(unittest.TestCase):
         self.assertEqual(captured["ready"][0], ({"git_found": True},))
         self.assertIs(captured["ready"][1]["required_tools"], bindings["WINDOWS_REQUIRED_REMOTE_TOOLS"])
 
+    def test_install_windows_target_helpers_wires_named_exports(self) -> None:
+        windows_target = types.SimpleNamespace(
+            default_windows_session_task_name=lambda target_name: f"Task-{target_name}",
+            windows_path_join=lambda *parts: "\\".join(parts),
+        )
+        bindings = self._bindings(windows_target)
+
+        self.mod.install_windows_target_helpers(
+            bindings,
+            ("default_windows_session_task_name", "windows_path_join"),
+        )
+
+        self.assertEqual(bindings["default_windows_session_task_name"]("win"), "Task-win")
+        self.assertEqual(bindings["windows_path_join"]("C:", "Pulp"), r"C:\Pulp")
+
 
 if __name__ == "__main__":
     unittest.main()

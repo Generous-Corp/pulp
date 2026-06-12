@@ -141,6 +141,26 @@ class DesktopSupportBindingsTests(unittest.TestCase):
         self.assertEqual(captured["label"][0], ("./Demo",))
         self.assertEqual(captured["label"][1], {"bundle_id": "com.example.Demo"})
 
+    def test_install_desktop_support_helpers_wires_named_exports(self) -> None:
+        artifacts = types.SimpleNamespace(
+            desktop_artifact_root=lambda config: Path(config["artifact_root"]),
+        )
+        actions = types.SimpleNamespace(
+            default_desktop_label=lambda command, *, bundle_id=None: bundle_id or command,
+        )
+        bindings = self._bindings(artifacts=artifacts, actions=actions)
+
+        self.mod.install_desktop_support_helpers(
+            bindings,
+            ("desktop_artifact_root", "default_desktop_label"),
+        )
+
+        self.assertEqual(bindings["desktop_artifact_root"]({"artifact_root": "/tmp/artifacts"}), Path("/tmp/artifacts"))
+        self.assertEqual(
+            bindings["default_desktop_label"]("./Demo", bundle_id="com.example.Demo"),
+            "com.example.Demo",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

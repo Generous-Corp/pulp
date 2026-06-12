@@ -162,6 +162,7 @@ WINDOWS_OPTIONAL_REMOTE_TOOLS = _windows_target_bindings.windows_optional_remote
 WINDOWS_DEFAULT_REMOTE_REPO_DIRNAME = _windows_target_bindings.windows_default_remote_repo_dirname(globals())
 LINUX_REQUIRED_REMOTE_TOOLS = _linux_target_bindings.linux_required_remote_tools(globals())
 LINUX_OPTIONAL_REMOTE_TOOLS = _linux_target_bindings.linux_optional_remote_tools(globals())
+_windows_target_bindings.install_windows_target_helpers(globals())
 
 
 from io_utils import LockBusyError  # noqa: E402  -- re-exported for callers catching the facade class
@@ -312,46 +313,13 @@ _target_bindings.install_target_helpers(globals())
 
 
 _cloud_bindings.install_cloud_helpers(globals())
-
-
-def desktop_target_receipt_path(target_name: str) -> Path:
-    return _desktop_support_bindings.desktop_target_receipt_path(globals(), target_name)
-
-
-def desktop_receipt_for(target_name: str) -> dict | None:
-    return _desktop_support_bindings.desktop_receipt_for(globals(), target_name)
-
-
-def default_windows_session_task_name(target_name: str) -> str:
-    return _windows_target_bindings.default_windows_session_task_name(globals(), target_name)
-
-
-def desktop_target_contract(target_name: str, target: dict) -> dict:
-    return _windows_target_bindings.desktop_target_contract(globals(), target_name, target)
-
-
-def windows_path_join(*parts: str) -> str:
-    return _windows_target_bindings.windows_path_join(globals(), *parts)
-
-
-def windows_default_repo_checkout_path(home_dir: str | None) -> str:
-    return _windows_target_bindings.windows_default_repo_checkout_path(globals(), home_dir)
-
-
-def windows_repo_path_is_unsafe(repo_path: str | None, home_dir: str | None = None) -> bool:
-    return _windows_target_bindings.windows_repo_path_is_unsafe(globals(), repo_path, home_dir)
-
-
-def update_target_repo_path(config: dict, target_name: str, repo_path: str) -> None:
-    return _windows_target_bindings.update_target_repo_path(globals(), config, target_name, repo_path)
+_desktop_support_bindings.install_desktop_support_helpers(globals())
+_desktop_check = desktop_check
+_check_writable_dir = check_writable_dir
 
 
 def probe_windows_repo_checkout(host: str, repo_path: str | None) -> dict:
     return _desktop_probe_bindings.probe_windows_repo_checkout(globals(), host, repo_path)
-
-
-def windows_repo_checkout_ready(probe: dict | None) -> bool:
-    return _windows_target_bindings.windows_repo_checkout_ready(globals(), probe)
 
 
 def ensure_windows_remote_repo_checkout(
@@ -372,66 +340,6 @@ def ensure_windows_remote_repo_checkout(
     )
 
 
-def build_windows_session_agent_request(
-    target_name: str,
-    contract: dict,
-    command: str,
-    *,
-    repo_path: str,
-    action_name: str,
-    label: str | None,
-    pulp_app_automation: bool,
-    capture_ui_snapshot: bool,
-    click_point: str | None,
-    click_view_id: str | None,
-    click_view_type: str | None,
-    click_view_text: str | None,
-    click_view_label: str | None,
-    capture_before: bool,
-    settle_secs: float,
-    timeout_secs: float,
-) -> dict:
-    return _windows_target_bindings.build_windows_session_agent_request(
-        globals(),
-        target_name,
-        contract,
-        command,
-        repo_path=repo_path,
-        action_name=action_name,
-        label=label,
-        pulp_app_automation=pulp_app_automation,
-        capture_ui_snapshot=capture_ui_snapshot,
-        click_point=click_point,
-        click_view_id=click_view_id,
-        click_view_type=click_view_type,
-        click_view_text=click_view_text,
-        click_view_label=click_view_label,
-        capture_before=capture_before,
-        settle_secs=settle_secs,
-        timeout_secs=timeout_secs,
-    )
-
-
-def resolve_desktop_target(config: dict, target_name: str) -> dict:
-    return _desktop_support_bindings.resolve_desktop_target(globals(), config, target_name)
-
-
-def desktop_optional_capabilities(optional_cfg: dict | None) -> list[str]:
-    return _desktop_support_bindings.desktop_optional_capabilities(globals(), optional_cfg)
-
-
-def desktop_capabilities_for(adapter: str, tier: str, optional_cfg: dict | None = None) -> list[str]:
-    return _desktop_support_bindings.desktop_capabilities_for(globals(), adapter, tier, optional_cfg)
-
-
-def _desktop_check(name: str, ok: bool, detail: str, *, required: bool = True) -> dict:
-    return _desktop_support_bindings.desktop_check(globals(), name, ok, detail, required=required)
-
-
-def _check_writable_dir(path: Path) -> tuple[bool, str]:
-    return _desktop_support_bindings.check_writable_dir(globals(), path)
-
-
 def probe_windows_session_agent(host: str, contract: dict) -> dict:
     return _desktop_probe_bindings.probe_windows_session_agent(globals(), host, contract)
 
@@ -448,52 +356,12 @@ def ensure_windows_remote_tooling(host: str, *, install_optional: bool = False) 
     return _desktop_probe_bindings.ensure_windows_remote_tooling(globals(), host, install_optional=install_optional)
 
 
-def windows_tooling_detail(probe: dict, tool_name: str, *, missing_hint: str | None = None) -> str:
-    return _windows_target_bindings.windows_tooling_detail(globals(), probe, tool_name, missing_hint=missing_hint)
-
-
-def windows_remote_tooling_ready(probe: dict) -> bool:
-    return _windows_target_bindings.windows_remote_tooling_ready(globals(), probe)
-
-
 def desktop_doctor_checks(config: dict, target_name: str) -> list[dict]:
     return _desktop_probe_bindings.desktop_doctor_checks(globals(), config, target_name)
 
 
-def webdriver_status_url(base_url: str) -> str:
-    return _desktop_support_bindings.webdriver_status_url(globals(), base_url)
-
-
 def probe_webdriver_endpoint(base_url: str, *, timeout: float = 5.0) -> dict:
     return _desktop_probe_bindings.probe_webdriver_endpoint(globals(), base_url, timeout=timeout)
-
-
-def desktop_artifact_root(config: dict) -> Path:
-    return _desktop_support_bindings.desktop_artifact_root(globals(), config)
-
-
-def windows_desktop_session_user(probe: dict | None) -> str:
-    return _windows_target_bindings.windows_desktop_session_user(globals(), probe)
-
-
-def windows_desktop_session_state(probe: dict | None) -> str:
-    return _windows_target_bindings.windows_desktop_session_state(globals(), probe)
-
-
-def windows_repo_checkout_detail(probe: dict | None, *, fallback_path: str | None = None) -> str:
-    return _windows_target_bindings.windows_repo_checkout_detail(globals(), probe, fallback_path=fallback_path)
-
-
-def create_desktop_run_bundle(config: dict, target_name: str, action: str) -> Path:
-    return _desktop_support_bindings.create_desktop_run_bundle(globals(), config, target_name, action)
-
-
-def desktop_publish_root(config: dict) -> Path:
-    return _desktop_support_bindings.desktop_publish_root(globals(), config)
-
-
-def create_desktop_publish_bundle(config: dict) -> Path:
-    return _desktop_support_bindings.create_desktop_publish_bundle(globals(), config)
 
 
 def probe_linux_launch_backend(host: str) -> dict:
@@ -620,10 +488,6 @@ def wait_for_path(path: Path, timeout_secs: float) -> Path:
     return _desktop_infra_bindings.wait_for_path(globals(), path, timeout_secs)
 
 
-def count_view_tree_nodes(node: object) -> int:
-    return _desktop_support_bindings.count_view_tree_nodes(globals(), node)
-
-
 def detect_macos_app_bundle(command: str | None) -> Path | None:
     return _macos_window_bindings.detect_macos_app_bundle(globals(), command)
 
@@ -737,41 +601,6 @@ def wait_for_macos_bundle_window(bundle_id: str, timeout_secs: float) -> tuple[i
 
 def capture_macos_window(window_id: int, output_path: Path) -> None:
     _macos_window_bindings.capture_macos_window(globals(), window_id, output_path)
-
-
-def parse_coordinate_pair(value: str, *, flag_name: str) -> tuple[float, float]:
-    return _desktop_support_bindings.parse_coordinate_pair(globals(), value, flag_name=flag_name)
-
-
-def iter_view_tree_nodes(node: object, *, offset_x: float = 0.0, offset_y: float = 0.0):
-    yield from _desktop_support_bindings.iter_view_tree_nodes(
-        globals(),
-        node,
-        offset_x=offset_x,
-        offset_y=offset_y,
-    )
-
-
-def resolve_view_tree_click_point(
-    view_tree: dict,
-    *,
-    view_id: str | None,
-    view_type: str | None,
-    view_text: str | None,
-    view_label: str | None,
-) -> tuple[float, float]:
-    return _desktop_support_bindings.resolve_view_tree_click_point(
-        globals(),
-        view_tree,
-        view_id=view_id,
-        view_type=view_type,
-        view_text=view_text,
-        view_label=view_label,
-    )
-
-
-def screen_point_for_content_point(window: dict, content_size: tuple[float, float], content_point: tuple[float, float]) -> tuple[float, float]:
-    return _desktop_support_bindings.screen_point_for_content_point(globals(), window, content_size, content_point)
 
 
 def activate_macos_pid(pid: int) -> dict:
@@ -891,10 +720,6 @@ def run_macos_local_smoke(
         timeout_secs=timeout_secs,
         source_request=source_request,
     )
-
-
-def default_desktop_label(command: str | None, *, bundle_id: str | None = None) -> str:
-    return _desktop_support_bindings.default_desktop_label(globals(), command, bundle_id=bundle_id)
 
 
 def remote_linux_bundle_relpath(target_name: str, action_name: str, bundle_dir: Path) -> str:

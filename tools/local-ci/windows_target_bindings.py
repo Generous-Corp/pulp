@@ -3,6 +3,24 @@
 from __future__ import annotations
 
 from binding_utils import binding as _binding
+from binding_utils import install_local_helpers
+
+
+WINDOWS_TARGET_EXPORTS = (
+    "default_windows_session_task_name",
+    "desktop_target_contract",
+    "windows_path_join",
+    "windows_default_repo_checkout_path",
+    "windows_repo_path_is_unsafe",
+    "update_target_repo_path",
+    "windows_repo_checkout_ready",
+    "build_windows_session_agent_request",
+    "windows_tooling_detail",
+    "windows_remote_tooling_ready",
+    "windows_desktop_session_user",
+    "windows_desktop_session_state",
+    "windows_repo_checkout_detail",
+)
 
 
 def windows_required_remote_tools(bindings: dict) -> dict:
@@ -125,3 +143,7 @@ def windows_repo_checkout_detail(
         probe,
         fallback_path=fallback_path,
     )
+
+
+def install_windows_target_helpers(bindings: dict, names: tuple[str, ...] = WINDOWS_TARGET_EXPORTS) -> None:
+    install_local_helpers(bindings, globals(), names)

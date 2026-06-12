@@ -5,6 +5,29 @@ from __future__ import annotations
 from pathlib import Path
 
 from binding_utils import binding as _binding
+from binding_utils import install_local_helpers
+
+
+DESKTOP_SUPPORT_EXPORTS = (
+    "desktop_target_receipt_path",
+    "desktop_receipt_for",
+    "desktop_artifact_root",
+    "create_desktop_run_bundle",
+    "desktop_publish_root",
+    "create_desktop_publish_bundle",
+    "resolve_desktop_target",
+    "desktop_optional_capabilities",
+    "desktop_capabilities_for",
+    "desktop_check",
+    "check_writable_dir",
+    "webdriver_status_url",
+    "count_view_tree_nodes",
+    "parse_coordinate_pair",
+    "iter_view_tree_nodes",
+    "resolve_view_tree_click_point",
+    "screen_point_for_content_point",
+    "default_desktop_label",
+)
 
 
 def desktop_target_receipt_path(bindings: dict, target_name: str) -> Path:
@@ -116,3 +139,7 @@ def screen_point_for_content_point(
 
 def default_desktop_label(bindings: dict, command: str | None, *, bundle_id: str | None = None) -> str:
     return _binding(bindings, "_desktop_actions").default_desktop_label(command, bundle_id=bundle_id)
+
+
+def install_desktop_support_helpers(bindings: dict, names: tuple[str, ...] = DESKTOP_SUPPORT_EXPORTS) -> None:
+    install_local_helpers(bindings, globals(), names)
