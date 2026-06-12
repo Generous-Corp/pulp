@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-import json
 from pathlib import Path
 import shutil
 import subprocess
 import sys
 import uuid
 
+from desktop_doctor_checks import (
+    macos_local_doctor_checks,
+    optional_desktop_doctor_checks,
+)
 from desktop_doctor_optional import (
     desktop_capabilities_for,
     desktop_optional_capabilities,
@@ -17,7 +20,6 @@ from desktop_doctor_optional import (
     webdriver_status_url,
 )
 import linux_target
-from normalize import normalize_desktop_optional_config
 import windows_target
 
 
@@ -82,33 +84,14 @@ def desktop_doctor_checks(
 
     adapter = target["adapter"]
     if adapter == "macos-local":
-        checks.append(desktop_check("platform", platform == "darwin", f"running on {platform}"))
-        checks.append(
-            desktop_check(
-                "screencapture",
-                which_fn("screencapture") is not None,
-                which_fn("screencapture") or "missing",
+        checks.extend(
+            macos_local_doctor_checks(
+                platform=platform,
+                which_fn=which_fn,
+                macos_accessibility_trusted_fn=macos_accessibility_trusted_fn,
+                desktop_check_fn=desktop_check,
             )
         )
-        checks.append(
-            desktop_check(
-                "osascript",
-                which_fn("osascript") is not None,
-                which_fn("osascript") or "missing",
-            )
-        )
-        try:
-            trusted = macos_accessibility_trusted_fn()
-            checks.append(
-                desktop_check(
-                    "accessibility",
-                    trusted,
-                    "trusted" if trusted else "not trusted; desktop-event click is unavailable but Pulp app automation still works",
-                    required=False,
-                )
-            )
-        except (subprocess.SubprocessError, json.JSONDecodeError) as exc:
-            checks.append(desktop_check("accessibility", False, str(exc), required=False))
     elif target["target_type"] == "ssh":
         host = target.get("host")
         checks.append(desktop_check("host", bool(host), host or "missing"))
@@ -248,60 +231,13 @@ def desktop_doctor_checks(
         checks.append(desktop_check("adapter", adapter != "unknown", adapter))
 
     probe_webdriver_endpoint_fn = probe_webdriver_endpoint_fn or probe_webdriver_endpoint
-    optional = normalize_desktop_optional_config(target.get("optional"))
-    if optional.get("webview_driver"):
-        webdriver_url = optional.get("webdriver_url")
-        if not webdriver_url:
-            checks.append(desktop_check("webview_driver", False, "enabled but webdriver_url is not set", required=False))
-        else:
-            try:
-                probe = probe_webdriver_endpoint_fn(webdriver_url)
-                ready = probe.get("ready")
-                ready_text = "" if ready is None else f" (ready={str(ready).lower()})"
-                message = probe.get("message")
-                detail = f"reachable at {probe['status_url']}{ready_text}"
-                if message:
-                    detail = f"{detail}: {message}"
-                checks.append(desktop_check("webview_driver", ready is not False, detail, required=False))
-            except (RuntimeError, ValueError) as exc:
-                checks.append(desktop_check("webview_driver", False, str(exc), required=False))
-    if optional.get("debug_attach"):
-        debugger_command = optional.get("debugger_command")
-        if target["target_type"] == "local":
-            debugger = debugger_command or "lldb"
-            debugger_path = which_fn(debugger)
-            checks.append(
-                desktop_check(
-                    "debug_attach",
-                    debugger_path is not None,
-                    debugger_path or f"{debugger} not found on PATH",
-                    required=False,
-                )
-            )
-        else:
-            detail = debugger_command or "enabled; remote debugger validation deferred to target tooling"
-            checks.append(desktop_check("debug_attach", True, detail, required=False))
-    if optional.get("video_capture"):
-        if target["target_type"] == "local":
-            ffmpeg_path = which_fn("ffmpeg")
-            checks.append(
-                desktop_check(
-                    "video_capture",
-                    ffmpeg_path is not None,
-                    ffmpeg_path or "ffmpeg not found on PATH",
-                    required=False,
-                )
-            )
-        else:
-            checks.append(
-                desktop_check(
-                    "video_capture",
-                    True,
-                    "enabled; remote video tooling validation deferred to target tooling",
-                    required=False,
-                )
-            )
-    if optional.get("frame_stats"):
-        checks.append(desktop_check("frame_stats", True, "enabled", required=False))
+    checks.extend(
+        optional_desktop_doctor_checks(
+            target,
+            which_fn=which_fn,
+            probe_webdriver_endpoint_fn=probe_webdriver_endpoint_fn,
+            desktop_check_fn=desktop_check,
+        )
+    )
 
     return checks
