@@ -664,7 +664,9 @@ Use `render_offline()` when a batch/golden path already has an
 `AudioFileData` artifact and needs `OfflineRenderOptions` metadata forwarded to
 `ProcessContext`: scheduled block size, sample position, tempo, beat position,
 and render-speed hint. It is effect-shaped today, so the rendered artifact has
-the same channel count as the input.
+the same channel count as the input. Parity fixtures should compare both the
+rendered samples and the per-block `ProcessContext` metadata against direct
+stepped processing for the same schedule.
 
 Format adapter runtime-mode tests should assert the adapter-owned source of
 truth rather than inferring mode from transport. VST3 maps
