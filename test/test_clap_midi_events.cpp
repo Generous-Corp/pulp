@@ -279,6 +279,37 @@ public:
     }
 };
 
+class ProcessBuffersCapturingProcessor : public CapturingProcessor {
+public:
+    using CapturingProcessor::process;
+
+    void process(ProcessBuffers& audio,
+                 midi::MidiBuffer& midi_in,
+                 midi::MidiBuffer& midi_out,
+                 const ProcessContext& context) override {
+        ++process_buffer_calls;
+        captured_input_bus_count = static_cast<int>(audio.inputs.size());
+        captured_output_bus_count = static_cast<int>(audio.outputs.size());
+        captured_active_input_bus_count = static_cast<int>(audio.inputs.active_count());
+        captured_active_output_bus_count = static_cast<int>(audio.outputs.active_count());
+        saw_process_buffer_sidechain =
+            audio.inputs.sidechain() != nullptr && audio.inputs.sidechain()->active();
+        process_buffer_layouts_match = audio.layouts_match_descriptors();
+        process_buffer_storage_valid = audio.active_buses_have_storage();
+
+        Processor::process(audio, midi_in, midi_out, context);
+    }
+
+    int process_buffer_calls = 0;
+    int captured_input_bus_count = 0;
+    int captured_output_bus_count = 0;
+    int captured_active_input_bus_count = 0;
+    int captured_active_output_bus_count = 0;
+    bool saw_process_buffer_sidechain = false;
+    bool process_buffer_layouts_match = false;
+    bool process_buffer_storage_valid = false;
+};
+
 // Emits a pre-programmed set of MIDI events on midi_out so we can test
 // the outbound bridge.
 class EmittingProcessor : public Processor {
@@ -556,6 +587,7 @@ public:
 // singletons so the tests can configure the active processor before the
 // adapter instantiates one.
 CapturingProcessor* g_capturing = nullptr;
+ProcessBuffersCapturingProcessor* g_process_buffers_capturing = nullptr;
 EmittingProcessor*  g_emitting  = nullptr;
 ObservingMidiInProcessor* g_observing_midi_in = nullptr;
 ObservingParamIngressProcessor* g_observing_param_ingress = nullptr;
@@ -573,6 +605,21 @@ std::vector<midi::MidiBuffer::SysexEvent> g_pending_sysex;
 std::unique_ptr<Processor> make_capturing() {
     auto up = std::make_unique<CapturingProcessor>();
     g_capturing = up.get();
+    if (g_pending_opts_mpe) up->opts_mpe = true;
+    if (g_pending_opts_ump) up->opts_ump = true;
+    if (g_pending_opts_node_mpe) up->opts_node_mpe = true;
+    if (g_pending_opts_node_ump) up->opts_node_ump = true;
+    g_pending_opts_mpe = false;
+    g_pending_opts_ump = false;
+    g_pending_opts_node_mpe = false;
+    g_pending_opts_node_ump = false;
+    return up;
+}
+
+std::unique_ptr<Processor> make_process_buffers_capturing() {
+    auto up = std::make_unique<ProcessBuffersCapturingProcessor>();
+    g_capturing = up.get();
+    g_process_buffers_capturing = up.get();
     if (g_pending_opts_mpe) up->opts_mpe = true;
     if (g_pending_opts_ump) up->opts_ump = true;
     if (g_pending_opts_node_mpe) up->opts_node_mpe = true;
@@ -930,6 +977,42 @@ TEST_CASE("CLAP routes sidechain input and clears secondary output buses",
     REQUIRE(g_capturing->captured_output_channels == 2);
     REQUIRE(std::all_of(aux_left.begin(), aux_left.end(), [](float v) { return v == 0.0f; }));
     REQUIRE(std::all_of(aux_right.begin(), aux_right.end(), [](float v) { return v == 0.0f; }));
+}
+
+TEST_CASE("CLAP supplies ProcessBuffers to processors that override the richer surface",
+          "[clap][audio][process-buffers][phase2]") {
+    g_pending_opts_mpe = false;
+    g_pending_opts_ump = false;
+    Harness h(make_process_buffers_capturing);
+
+    std::vector<float> sc_left(Harness::kFrames, 0.25f);
+    std::vector<float> sc_right(Harness::kFrames, -0.5f);
+    float* sc_ptrs[2] = {sc_left.data(), sc_right.data()};
+    clap_audio_buffer_t sidechain{};
+    sidechain.data32 = sc_ptrs;
+    sidechain.channel_count = 2;
+
+    clap_audio_buffer_t inputs[2] = {h.audio_in, sidechain};
+    REQUIRE(h.run_custom(nullptr, nullptr,
+                         inputs, 2,
+                         &h.audio_out, 1) == CLAP_PROCESS_CONTINUE);
+
+    REQUIRE(g_process_buffers_capturing != nullptr);
+    REQUIRE(g_process_buffers_capturing->process_buffer_calls == 1);
+    REQUIRE(g_process_buffers_capturing->captured_input_bus_count == 2);
+    REQUIRE(g_process_buffers_capturing->captured_output_bus_count == 1);
+    REQUIRE(g_process_buffers_capturing->captured_active_input_bus_count == 2);
+    REQUIRE(g_process_buffers_capturing->captured_active_output_bus_count == 1);
+    REQUIRE(g_process_buffers_capturing->saw_process_buffer_sidechain);
+    REQUIRE(g_process_buffers_capturing->process_buffer_layouts_match);
+    REQUIRE(g_process_buffers_capturing->process_buffer_storage_valid);
+
+    REQUIRE(g_capturing->process_count == 1);
+    REQUIRE(g_capturing->had_sidechain_input);
+    REQUIRE(g_capturing->captured_sidechain_channels == 2);
+    REQUIRE(g_capturing->captured_sidechain_first_sample == 0.25f);
+    REQUIRE(g_capturing->captured_sidechain_second_sample == -0.5f);
+    REQUIRE(g_capturing->sidechain_input() == nullptr);
 }
 
 TEST_CASE("CLAP treats inactive or partial sidechain buses as disconnected",

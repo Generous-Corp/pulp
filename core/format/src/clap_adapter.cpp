@@ -10,6 +10,7 @@
 #include <pulp/runtime/scoped_no_alloc.hpp>
 #include <clap/ext/preset-load.h>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
@@ -290,7 +291,29 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
         self->output_ptrs, out_channels, num_samples);
     audio::BufferView<const float> sidechain_view(
         self->sidechain_ptrs, sc_channels, num_samples);
-    self->processor->set_sidechain(sc_channels > 0 ? &sidechain_view : nullptr);
+    std::array<BusBufferView<const float>, 2> input_buses{{
+        {
+            .info = {"Main In", 0, BusDirection::Input, BusRole::Main,
+                     in_channels, false, process->audio_inputs_count > 0},
+            .buffer = input_view,
+        },
+        {
+            .info = {"Sidechain", 1, BusDirection::Input, BusRole::Sidechain,
+                     sc_channels, true, sc_channels > 0},
+            .buffer = sidechain_view,
+        },
+    }};
+    std::array<BusBufferView<float>, 1> output_buses{{
+        {
+            .info = {"Main Out", 0, BusDirection::Output, BusRole::Main,
+                     out_channels, false, process->audio_outputs_count > 0},
+            .buffer = output_view,
+        },
+    }};
+    ProcessBuffers process_buffers{
+        .inputs = BusBufferSet<const float>(input_buses),
+        .outputs = BusBufferSet<float>(output_buses),
+    };
 
     // Build MIDI from CLAP note events
     auto& midi_in = self->midi_in;
@@ -632,7 +655,7 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
         self->processor->set_sidechain(nullptr);
     } else {
         pulp::runtime::ScopedNoAlloc no_alloc_guard;
-        self->processor->process(output_view, input_view, midi_in, midi_out, ctx);
+        self->processor->process(process_buffers, midi_in, midi_out, ctx);
     }
 
     // Emit output parameter events for any values the plugin changed,
