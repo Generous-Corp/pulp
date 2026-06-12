@@ -393,11 +393,15 @@ private:
         std::vector<float> input_data;
         std::vector<float*> input_ptrs;
         std::vector<const float*> input_const_ptrs;
+        struct EdgeRef {
+            size_t connection_index = 0;
+            NodeRuntime* source_runtime = nullptr;
+        };
         std::unique_ptr<std::atomic<float>> gain;
-        std::vector<size_t> inbound_midi_edges;
-        std::vector<size_t> inbound_audio_edges;
-        std::vector<size_t> sparse_automation_edges;
-        std::vector<size_t> audio_rate_modulation_edges;
+        std::vector<EdgeRef> inbound_midi_edges;
+        std::vector<EdgeRef> inbound_audio_edges;
+        std::vector<EdgeRef> sparse_automation_edges;
+        std::vector<EdgeRef> audio_rate_modulation_edges;
 
         // PDC: cumulative samples of latency from AudioInput to this node's
         // input ports (input_latency) and output ports (output_latency).
@@ -491,7 +495,7 @@ private:
     struct CompiledGraph {
         std::vector<NodeId> order;
         std::vector<Connection> connections;
-        std::vector<size_t> feedback_edges;
+        std::vector<NodeRuntime::EdgeRef> feedback_edges;
         std::vector<ConnectionDelay> connection_delays;  // parallel to connections
         // Runtime + plugin + node-info keyed by NodeId so we don't rely on
         // pointers into an outer container.
