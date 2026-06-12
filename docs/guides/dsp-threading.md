@@ -174,7 +174,9 @@ processing. Use the helper predicates instead of comparing raw enum values in
 hot code. A realtime block with a slower-than-realtime hint is still an
 audio-thread callback. Bypass, tail-drain, reset, and transport-jump flags are
 block metadata for processors that need to distinguish those host states
-without inferring them from transport fields.
+without inferring them from transport fields. `HeadlessHost::process(...,
+ProcessContext)` forwards those flags unchanged, so tests can cover
+runtime-mode decisions without a plug-in format SDK.
 
 The contract is deliberately non-owning: bus audio is borrowed from the
 host or renderer, event containers are owned by adapters, and scratch

@@ -31,6 +31,12 @@ For resource-budget tests, use `try_prepare()` with non-zero
 when the processor's `estimate_prepare_resources()` result exceeds a supplied
 limit.
 
+Headless tests can also drive the unified runtime-mode contract by passing an
+explicit `ProcessContext` to `process()`. Set `process_mode`,
+`render_speed_hint`, `is_bypassed`, `is_tail_drain`, `reset_requested`, or
+`transport_jump` to exercise the same block-level decisions a format adapter
+would deliver.
+
 ### HeadlessHost with MIDI
 
 ```cpp

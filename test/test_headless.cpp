@@ -418,6 +418,43 @@ TEST_CASE("HeadlessHost accepts explicit transport context for offline stepping"
     REQUIRE(last_context.time_sig_denominator == 8);
 }
 
+TEST_CASE("HeadlessHost forwards explicit runtime mode maintenance flags",
+          "[headless][runtime-mode][phase2]") {
+    pulp::format::HeadlessHost host(create_test_gain);
+    host.prepare(48000.0, 256);
+
+    pulp::audio::Buffer<float> in(2, 64), out(2, 64);
+    const float* in_ptrs[2] = {in.channel(0).data(), in.channel(1).data()};
+    pulp::audio::BufferView<const float> in_view(in_ptrs, 2, 64);
+    auto out_view = out.view();
+
+    pulp::format::ProcessContext ctx;
+    ctx.sample_rate = 48000.0;
+    ctx.num_samples = 64;
+    ctx.process_mode = pulp::format::ProcessMode::Offline;
+    ctx.render_speed_hint = pulp::format::RenderSpeedHint::SlowerThanRealtime;
+    ctx.is_bypassed = true;
+    ctx.is_tail_drain = true;
+    ctx.reset_requested = true;
+    ctx.transport_jump = true;
+
+    last_context = {};
+    host.process(out_view, in_view, ctx);
+
+    REQUIRE(last_context.process_mode == pulp::format::ProcessMode::Offline);
+    REQUIRE(last_context.render_speed_hint ==
+            pulp::format::RenderSpeedHint::SlowerThanRealtime);
+    REQUIRE(last_context.is_bypassed);
+    REQUIRE(last_context.is_tail_drain);
+    REQUIRE(last_context.reset_requested);
+    REQUIRE(last_context.transport_jump);
+    REQUIRE(last_context.is_offline());
+    REQUIRE(last_context.allows_offline_quality_work());
+    REQUIRE(last_context.is_maintenance_render());
+    REQUIRE(last_context.should_render_tail_only());
+    REQUIRE(last_context.should_reset_dsp_state());
+}
+
 TEST_CASE("HeadlessHost forwards explicit MIDI buffers",
           "[headless][coverage][issue-647]") {
     pulp::format::HeadlessHost host(create_test_gain);
