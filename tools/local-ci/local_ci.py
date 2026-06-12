@@ -160,6 +160,7 @@ import macos_desktop as _macos_desktop  # noqa: E402
 import macos_desktop_action as _macos_desktop_action  # noqa: E402
 import macos_desktop_bindings as _macos_desktop_bindings  # noqa: E402
 import macos_window_bindings as _macos_window_bindings  # noqa: E402
+import notifications as _notifications  # noqa: E402
 import queue_commands_cli as _queue_commands_cli  # noqa: E402
 import queue_bindings as _queue_bindings  # noqa: E402
 import queue_lifecycle as _queue_lifecycle  # noqa: E402
@@ -1581,15 +1582,7 @@ def wait_for_job(job_id: str, config: dict) -> tuple[dict | None, int]:
 
 
 def notify(message: str) -> None:
-    print("\a", end="", flush=True)
-    try:
-        subprocess.run(
-            ["osascript", "-e", f'display notification "{message}" with title "Pulp CI"'],
-            capture_output=True,
-            timeout=5,
-        )
-    except Exception:
-        pass
+    _notifications.notify(message, print_fn=print, run_fn=subprocess.run)
 
 
 # ── VM Management ────────────────────────────────────────────────────────────
