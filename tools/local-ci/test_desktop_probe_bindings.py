@@ -224,6 +224,38 @@ class DesktopProbeBindingsTests(unittest.TestCase):
         self.assertIs(captured["webdriver_kwargs"]["request_cls"], bindings["urllib"].request.Request)
         self.assertIs(captured["webdriver_kwargs"]["urlopen_fn"], bindings["urllib"].request.urlopen)
 
+    def test_install_desktop_probe_helpers_wires_named_exports(self):
+        captured = {}
+
+        def repo_probe(host, repo_path, **kwargs):
+            captured["repo"] = (host, repo_path, kwargs)
+            return {"checkout": repo_path}
+
+        def webdriver_probe(base_url, **kwargs):
+            captured["webdriver"] = (base_url, kwargs)
+            return {"base_url": base_url}
+
+        bindings = self._bindings()
+        bindings["_windows_probe"].probe_windows_repo_checkout = repo_probe
+        bindings["_desktop_doctor"].probe_webdriver_endpoint = webdriver_probe
+        for name in [
+            "run_windows_ssh_powershell",
+            "windows_repo_path_is_unsafe",
+            "parse_windows_ssh_json",
+            "ps_literal",
+        ]:
+            bindings[name] = object()
+
+        self.mod.install_desktop_probe_helpers(
+            bindings,
+            ("probe_windows_repo_checkout", "probe_webdriver_endpoint"),
+        )
+
+        self.assertEqual(bindings["probe_windows_repo_checkout"]("win", r"C:\Pulp"), {"checkout": r"C:\Pulp"})
+        self.assertEqual(bindings["probe_webdriver_endpoint"]("http://driver"), {"base_url": "http://driver"})
+        self.assertEqual(captured["repo"][0:2], ("win", r"C:\Pulp"))
+        self.assertEqual(captured["webdriver"][0], "http://driver")
+
 
 if __name__ == "__main__":
     unittest.main()

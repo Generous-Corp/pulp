@@ -7,6 +7,19 @@ from typing import Any
 
 from binding_utils import binding as _binding
 from binding_utils import binding_attr as _binding_attr
+from binding_utils import install_local_helpers
+
+
+DESKTOP_PROBE_EXPORTS = (
+    "probe_windows_repo_checkout",
+    "ensure_windows_remote_repo_checkout",
+    "probe_windows_session_agent",
+    "probe_windows_remote_tooling",
+    "install_windows_remote_tool",
+    "ensure_windows_remote_tooling",
+    "desktop_doctor_checks",
+    "probe_webdriver_endpoint",
+)
 
 
 def probe_windows_repo_checkout(bindings: Mapping[str, Any], host: str, repo_path: str | None) -> dict:
@@ -113,3 +126,7 @@ def probe_webdriver_endpoint(bindings: Mapping[str, Any], base_url: str, *, time
         request_cls=_binding(bindings, "urllib").request.Request,
         urlopen_fn=_binding(bindings, "urllib").request.urlopen,
     )
+
+
+def install_desktop_probe_helpers(bindings: dict[str, Any], names: tuple[str, ...] = DESKTOP_PROBE_EXPORTS) -> None:
+    install_local_helpers(bindings, globals(), names)

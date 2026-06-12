@@ -320,6 +320,7 @@ _macos_window_bindings.install_macos_window_helpers(globals())
 _linux_target_bindings.install_linux_target_helpers(globals())
 _linux_desktop_bindings.install_linux_desktop_helpers(globals())
 _source_prep_bindings.install_source_prep_helpers(globals())
+_desktop_probe_bindings.install_desktop_probe_helpers(globals())
 _desktop_check = desktop_check
 _check_writable_dir = check_writable_dir
 _clear_directory_contents = clear_directory_contents
@@ -329,52 +330,6 @@ _command_path_rewrite_candidate = command_path_rewrite_candidate
 _rewrite_launch_command_for_mapper = rewrite_launch_command_for_mapper
 _local_worktree_matches = local_worktree_matches
 _reset_local_worktree = reset_local_worktree
-
-
-def probe_windows_repo_checkout(host: str, repo_path: str | None) -> dict:
-    return _desktop_probe_bindings.probe_windows_repo_checkout(globals(), host, repo_path)
-
-
-def ensure_windows_remote_repo_checkout(
-    host: str,
-    repo_path: str | None,
-    *,
-    remote_url: str | None = None,
-    bundle_name: str | None = None,
-    bundle_ref: str | None = None,
-) -> dict:
-    return _desktop_probe_bindings.ensure_windows_remote_repo_checkout(
-        globals(),
-        host,
-        repo_path,
-        remote_url=remote_url,
-        bundle_name=bundle_name,
-        bundle_ref=bundle_ref,
-    )
-
-
-def probe_windows_session_agent(host: str, contract: dict) -> dict:
-    return _desktop_probe_bindings.probe_windows_session_agent(globals(), host, contract)
-
-
-def probe_windows_remote_tooling(host: str) -> dict:
-    return _desktop_probe_bindings.probe_windows_remote_tooling(globals(), host)
-
-
-def install_windows_remote_tool(host: str, package_id: str, *, timeout: int = 900) -> None:
-    return _desktop_probe_bindings.install_windows_remote_tool(globals(), host, package_id, timeout=timeout)
-
-
-def ensure_windows_remote_tooling(host: str, *, install_optional: bool = False) -> dict:
-    return _desktop_probe_bindings.ensure_windows_remote_tooling(globals(), host, install_optional=install_optional)
-
-
-def desktop_doctor_checks(config: dict, target_name: str) -> list[dict]:
-    return _desktop_probe_bindings.desktop_doctor_checks(globals(), config, target_name)
-
-
-def probe_webdriver_endpoint(base_url: str, *, timeout: float = 5.0) -> dict:
-    return _desktop_probe_bindings.probe_webdriver_endpoint(globals(), base_url, timeout=timeout)
 
 
 def run_macos_local_smoke(
