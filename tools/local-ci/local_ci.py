@@ -133,6 +133,7 @@ import cleanup_bindings as _cleanup_bindings  # noqa: E402
 import cleanup_cli as _cleanup_cli  # noqa: E402
 import cli_dispatch as _cli_dispatch  # noqa: E402
 import cli_dispatch_bindings as _cli_dispatch_bindings  # noqa: E402
+import cli_parser_bindings as _cli_parser_bindings  # noqa: E402
 import config_evidence_bindings as _config_evidence_bindings  # noqa: E402
 import desktop_action_commands_cli as _desktop_action_commands_cli  # noqa: E402
 import desktop_actions as _desktop_actions  # noqa: E402
@@ -161,6 +162,7 @@ import macos_desktop_action as _macos_desktop_action  # noqa: E402
 import macos_desktop_bindings as _macos_desktop_bindings  # noqa: E402
 import macos_window_bindings as _macos_window_bindings  # noqa: E402
 import notifications as _notifications  # noqa: E402
+import notification_bindings as _notification_bindings  # noqa: E402
 import queue_commands_cli as _queue_commands_cli  # noqa: E402
 import queue_bindings as _queue_bindings  # noqa: E402
 import queue_lifecycle as _queue_lifecycle  # noqa: E402
@@ -1557,7 +1559,7 @@ def wait_for_job(job_id: str, config: dict) -> tuple[dict | None, int]:
 
 
 def notify(message: str) -> None:
-    _notifications.notify(message, print_fn=print, run_fn=subprocess.run)
+    _notification_bindings.notify(globals(), message)
 
 
 # ── VM Management ────────────────────────────────────────────────────────────
@@ -2107,11 +2109,7 @@ def cmd_desktop(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    return build_local_ci_parser(
-        priority_values=PRIORITY_VALUES,
-        keep_completed_jobs=KEEP_COMPLETED_JOBS,
-        epilog=__doc__,
-    )
+    return _cli_parser_bindings.build_parser(globals())
 
 
 def main() -> int:
