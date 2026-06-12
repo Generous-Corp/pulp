@@ -160,6 +160,10 @@ import macos_desktop_bindings as _macos_desktop_bindings  # noqa: E402
 import macos_window_bindings as _macos_window_bindings  # noqa: E402
 import notifications as _notifications  # noqa: E402
 import notification_bindings as _notification_bindings  # noqa: E402
+import normalize as _normalize  # noqa: E402
+import normalize_bindings as _normalize_bindings  # noqa: E402
+import provenance as _provenance  # noqa: E402
+import provenance_bindings as _provenance_bindings  # noqa: E402
 import queue_commands_cli as _queue_commands_cli  # noqa: E402
 import queue_bindings as _queue_bindings  # noqa: E402
 import queue_lifecycle as _queue_lifecycle  # noqa: E402
@@ -248,19 +252,55 @@ from git_helpers import (  # noqa: E402  -- re-exported for in-file consumers
 
 from normalize import (  # noqa: E402  -- re-exported for in-file consumers
     PRIORITY_VALUES,
-    normalize_priority,
-    priority_value,
-    normalize_validation_mode,
-    normalize_desktop_source_mode,
-    default_desktop_artifact_root,
-    normalize_publish_mode,
-    parse_config_bool,
-    normalize_desktop_optional_config,
-    infer_desktop_adapter,
-    default_desktop_bootstrap,
-    default_desktop_capability_tier,
-    normalize_desktop_config,
 )
+
+
+def normalize_priority(priority: str | None) -> str:
+    return _normalize_bindings.normalize_priority(globals(), priority)
+
+
+def priority_value(priority: str | None) -> int:
+    return _normalize_bindings.priority_value(globals(), priority)
+
+
+def normalize_validation_mode(mode: str | None) -> str:
+    return _normalize_bindings.normalize_validation_mode(globals(), mode)
+
+
+def normalize_desktop_source_mode(mode: str | None) -> str:
+    return _normalize_bindings.normalize_desktop_source_mode(globals(), mode)
+
+
+def default_desktop_artifact_root() -> Path:
+    return _normalize_bindings.default_desktop_artifact_root(globals())
+
+
+def normalize_publish_mode(mode: str | None) -> str:
+    return _normalize_bindings.normalize_publish_mode(globals(), mode)
+
+
+def parse_config_bool(value: object) -> bool:
+    return _normalize_bindings.parse_config_bool(globals(), value)
+
+
+def normalize_desktop_optional_config(optional_cfg: dict | None) -> dict:
+    return _normalize_bindings.normalize_desktop_optional_config(globals(), optional_cfg)
+
+
+def infer_desktop_adapter(name: str, target_cfg: dict) -> str:
+    return _normalize_bindings.infer_desktop_adapter(globals(), name, target_cfg)
+
+
+def default_desktop_bootstrap(adapter: str) -> str:
+    return _normalize_bindings.default_desktop_bootstrap(globals(), adapter)
+
+
+def default_desktop_capability_tier(adapter: str) -> str:
+    return _normalize_bindings.default_desktop_capability_tier(globals(), adapter)
+
+
+def normalize_desktop_config(config: dict) -> dict:
+    return _normalize_bindings.normalize_desktop_config(globals(), config)
 
 from cli_parser import build_local_ci_parser  # noqa: E402
 
@@ -386,11 +426,16 @@ def resolve_cli_dispatch_field_values(args: argparse.Namespace, field_names: lis
     return _github_workflow_bindings.resolve_cli_dispatch_field_values(globals(), args, field_names)
 
 
-from provenance import (  # noqa: E402  -- re-exported for in-file consumers
-    normalize_provenance,
-    provenance_summary,
-    normalize_result,
-)
+def normalize_provenance(provenance: dict | None = None) -> dict:
+    return _provenance_bindings.normalize_provenance(globals(), provenance)
+
+
+def provenance_summary(provenance: dict | None) -> str:
+    return _provenance_bindings.provenance_summary(globals(), provenance)
+
+
+def normalize_result(result: dict) -> dict:
+    return _provenance_bindings.normalize_result(globals(), result)
 
 
 import evidence_index as evidence_index_module  # noqa: E402
