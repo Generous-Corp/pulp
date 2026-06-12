@@ -7,7 +7,37 @@ from pathlib import Path
 from typing import Any
 
 from binding_utils import binding as _binding
+from binding_utils import install_local_helpers
 from binding_utils import print_binding as _print_binding
+
+
+EXECUTION_EXPORTS = (
+    "remote_commit_error",
+    "parse_progress_marker",
+    "prepared_state_root",
+    "should_reuse_prepared_state",
+    "local_validation_command",
+    "posix_ssh_validation_command",
+    "validation_result_from_run",
+    "validation_error_result",
+    "unreachable_target_result",
+    "target_exception_result",
+    "completed_job_result",
+    "sorted_target_results",
+    "run_target_tasks",
+    "run_logged_command",
+    "run_local_validation",
+    "run_posix_ssh_validation",
+    "run_windows_ssh_validation",
+    "windows_validation_script",
+    "config_for_job_execution",
+    "submission_target_state",
+    "resolve_ssh_target_execution",
+    "build_target_tasks",
+    "process_job",
+    "save_result",
+    "print_result",
+)
 
 
 def heartbeat_interval_secs(bindings: Mapping[str, Any]) -> float:
@@ -362,3 +392,7 @@ def print_result(bindings: Mapping[str, Any], result: dict, result_path=None) ->
         result_overall_line_fn=_binding(bindings, "result_overall_line"),
         print_fn=_print_binding(bindings),
     )
+
+
+def install_execution_helpers(bindings: dict[str, Any], names: tuple[str, ...] = EXECUTION_EXPORTS) -> None:
+    install_local_helpers(bindings, globals(), names)

@@ -416,6 +416,19 @@ class ExecutionBindingsTests(unittest.TestCase):
         self.assertIs(captured["kwargs"]["result_overall_line_fn"], bindings["result_overall_line"])
         self.assertIs(captured["kwargs"]["print_fn"], bindings["print"])
 
+    def test_install_execution_helpers_wires_named_exports(self):
+        execution = types.SimpleNamespace(
+            remote_commit_error=lambda target, host, job: f"{target}:{host}:{job['id']}",
+            parse_progress_marker=lambda line: {"line": line},
+        )
+        bindings = self._bindings("unused", lambda: None)
+        bindings["_execution"] = execution
+
+        self.mod.install_execution_helpers(bindings, ("remote_commit_error", "parse_progress_marker"))
+
+        self.assertEqual(bindings["remote_commit_error"]("mac", "host", {"id": "job"}), "mac:host:job")
+        self.assertEqual(bindings["parse_progress_marker"]("::pulp::target=mac"), {"line": "::pulp::target=mac"})
+
 
 if __name__ == "__main__":
     unittest.main()
