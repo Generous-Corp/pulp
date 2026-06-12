@@ -155,6 +155,53 @@ TEST_CASE("Synthesiser note_on velocity 0 is a note-off", "[midi][synth]") {
     REQUIRE(synth.voice(0).releasing());
 }
 
+TEST_CASE("Synthesiser sustain pedal defers note-off until CC64 is lifted",
+          "[midi][synth][sustain][phase3]") {
+    Synthesiser<TestVoice> synth(2);
+    synth.note_on(0, 60, 100);
+
+    synth.cc(0, 64, 127);
+    REQUIRE(synth.voice(0).cc_calls == 1);
+    REQUIRE(synth.voice(0).last_cc_number == 64);
+    REQUIRE(synth.voice(0).last_cc_value == 127);
+
+    synth.note_off(0, 60);
+    REQUIRE(synth.voice(0).active());
+    REQUIRE_FALSE(synth.voice(0).releasing());
+    REQUIRE(synth.voice(0).note().sustained);
+    REQUIRE(synth.voice(0).note_off_calls == 0);
+
+    synth.cc(0, 64, 0);
+    REQUIRE(synth.voice(0).releasing());
+    REQUIRE_FALSE(synth.voice(0).note().sustained);
+    REQUIRE(synth.voice(0).note_off_calls == 1);
+}
+
+TEST_CASE("Synthesiser sustain pedal release is channel-scoped",
+          "[midi][synth][sustain][phase3]") {
+    Synthesiser<TestVoice> synth(2);
+    synth.note_on(0, 60, 100);
+    synth.note_on(1, 64, 100);
+
+    synth.cc(0, 64, 127);
+    synth.cc(1, 64, 127);
+    synth.note_off(0, 60);
+    synth.note_off(1, 64);
+
+    REQUIRE(synth.voice(0).note().sustained);
+    REQUIRE(synth.voice(1).note().sustained);
+
+    synth.cc(0, 64, 0);
+    REQUIRE(synth.voice(0).releasing());
+    REQUIRE_FALSE(synth.voice(0).note().sustained);
+    REQUIRE_FALSE(synth.voice(1).releasing());
+    REQUIRE(synth.voice(1).note().sustained);
+
+    synth.cc(1, 64, 0);
+    REQUIRE(synth.voice(1).releasing());
+    REQUIRE_FALSE(synth.voice(1).note().sustained);
+}
+
 TEST_CASE("Synthesiser allocates separate voices for distinct notes",
           "[midi][synth]") {
     Synthesiser<TestVoice> synth(4);
