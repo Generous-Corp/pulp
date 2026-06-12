@@ -182,7 +182,9 @@ analysis on it. `audio::AudioProcessLoadMeasurer` publishes relaxed latest-
 value telemetry for callback count, elapsed time, buffer budget, current load,
 peak load, and overload count. `audio::AudioDeviceManager` combines that
 process-load snapshot with its xrun counter for UI, Audio Inspector, and
-validation polling.
+validation polling. Polling `runtime_telemetry_snapshot()` is expected to stay
+allocation-free; it should aggregate already-published counters, not allocate
+or query the audio backend.
 
 Audio Inspector is a consumer of these snapshots, not the producer. Feed its
 runtime telemetry bridge from `AudioDeviceManager::runtime_telemetry_snapshot()`

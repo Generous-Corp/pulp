@@ -1806,7 +1806,7 @@ pulp_add_test_suite(pulp-test-properties SOURCES test_properties_file.cpp LIBRAR
 
 # AudioDeviceManager — persistence + MIDI hub (macOS plan item 1.2a)
 pulp_add_test_suite(pulp-test-audio-device-manager
-    SOURCES test_audio_device_manager.cpp
+    SOURCES test_audio_device_manager.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::audio pulp::midi pulp::state pulp::runtime)
 
 # DSP enhancement tests (dry/wet mixer, processor duplicator, matrix, special functions)
