@@ -871,6 +871,18 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
         }
     }
 
+    cg->ordered_runtime.reserve(cg->order.size());
+    for (NodeId id : cg->order) {
+        auto rt_it = cg->runtime.find(id);
+        auto shape_it = cg->shapes.find(id);
+        if (rt_it == cg->runtime.end() || shape_it == cg->shapes.end()) continue;
+        cg->ordered_runtime.push_back({
+            id,
+            shape_it->second,
+            &rt_it->second,
+        });
+    }
+
     compute_latencies_for_(*cg, connections_);
     return cg;
 }
@@ -1082,13 +1094,10 @@ void SignalGraph::process(audio::BufferView<float>& output,
         }
     };
 
-    for (NodeId id : cg->order) {
-        auto shape_it = cg->shapes.find(id);
-        if (shape_it == cg->shapes.end()) continue;
-        const auto& shape = shape_it->second;
-        auto rt_it = cg->runtime.find(id);
-        if (rt_it == cg->runtime.end()) continue;
-        auto& rt = rt_it->second;
+    for (const auto& ordered : cg->ordered_runtime) {
+        const NodeId id = ordered.id;
+        const auto& shape = ordered.shape;
+        auto& rt = *ordered.runtime;
 
         // 1. Zero input scratch.
         if (!rt.input_data.empty()) {
@@ -1543,11 +1552,10 @@ void SignalGraph::process(audio::BufferView<float>& output,
     // Drain MidiInput nodes' audio-thread scratch so events consumed for THIS
     // block never carry over. inject_midi() publishes into the mailbox; the
     // next process() call copies a new, unseen snapshot back into midi_out.
-    for (auto& [nid, rt] : cg->runtime) {
-        auto sit = cg->shapes.find(nid);
-        if (sit != cg->shapes.end() && sit->second.type == NodeType::MidiInput) {
-            clear_midi_block(rt.midi_out);
-            rt.midi_out_incomplete = false;
+    for (const auto& ordered : cg->ordered_runtime) {
+        if (ordered.shape.type == NodeType::MidiInput) {
+            clear_midi_block(ordered.runtime->midi_out);
+            ordered.runtime->midi_out_incomplete = false;
         }
     }
 }
