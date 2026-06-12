@@ -87,6 +87,15 @@ walks this vector once per block:
 Topological sort is stable: for a given set of nodes and connections, the
 resulting order is deterministic, so routing is reproducible across runs.
 
+## Prepare Limits
+
+`SignalGraph::GraphLimits` bounds the graph shape accepted by `prepare()`.
+Hosts can call `set_limits()` before preparing generated, scripted, or
+user-built graphs to cap node count, connection count, total declared ports,
+and maximum block size. Exceeding a limit fails `prepare()` before plugin
+prepare or compiled-snapshot allocation, leaving the graph silent until a
+valid prepare succeeds.
+
 ## Latency & PDC
 
 Every `PluginSlot` reports `latency_samples()`. During `prepare()` the

@@ -827,6 +827,70 @@ TEST_CASE("SignalGraph query helpers handle non-plugin and cleared nodes",
     REQUIRE(graph.node_gain(gain) == 1.0f);
 }
 
+TEST_CASE("SignalGraph prepare rejects graphs beyond configured limits",
+          "[host][graph][limits][phase2]") {
+    SECTION("node count") {
+        SignalGraph graph;
+        auto limits = graph.limits();
+        limits.max_nodes = 2;
+        graph.set_limits(limits);
+
+        auto input = graph.add_input_node(1, "in");
+        auto gain = graph.add_gain_node("gain");
+        auto output = graph.add_output_node(1, "out");
+        REQUIRE(graph.connect(input, 0, gain, 0));
+        REQUIRE(graph.connect(gain, 0, output, 0));
+
+        REQUIRE_FALSE(graph.prepare(48000.0, 16));
+        REQUIRE(graph.latency_samples() == 0);
+    }
+
+    SECTION("connection count") {
+        SignalGraph graph;
+        auto limits = graph.limits();
+        limits.max_connections = 1;
+        graph.set_limits(limits);
+
+        auto input = graph.add_input_node(1, "in");
+        auto gain = graph.add_gain_node("gain");
+        auto output = graph.add_output_node(1, "out");
+        REQUIRE(graph.connect(input, 0, gain, 0));
+        REQUIRE(graph.connect(gain, 0, output, 0));
+
+        REQUIRE_FALSE(graph.prepare(48000.0, 16));
+        REQUIRE(graph.latency_samples() == 0);
+    }
+
+    SECTION("port count") {
+        SignalGraph graph;
+        auto limits = graph.limits();
+        limits.max_ports = 3;
+        graph.set_limits(limits);
+
+        auto input = graph.add_input_node(2, "in");
+        auto output = graph.add_output_node(2, "out");
+        REQUIRE(graph.connect(input, 0, output, 0));
+        REQUIRE(graph.connect(input, 1, output, 1));
+
+        REQUIRE_FALSE(graph.prepare(48000.0, 16));
+        REQUIRE(graph.latency_samples() == 0);
+    }
+
+    SECTION("block size") {
+        SignalGraph graph;
+        auto limits = graph.limits();
+        limits.max_block_size = 8;
+        graph.set_limits(limits);
+
+        auto input = graph.add_input_node(1, "in");
+        auto output = graph.add_output_node(1, "out");
+        REQUIRE(graph.connect(input, 0, output, 0));
+
+        REQUIRE_FALSE(graph.prepare(48000.0, 16));
+        REQUIRE(graph.prepare(48000.0, 8));
+    }
+}
+
 TEST_CASE("SignalGraph disconnected output stays silent", "[host][graph][routing]") {
     // If no node connects to the AudioOutput, process() must leave the
     // output silent regardless of input content.
