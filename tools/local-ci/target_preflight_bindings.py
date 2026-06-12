@@ -8,7 +8,25 @@ from typing import Any
 
 from binding_utils import binding as _binding
 from binding_utils import binding_attr as _binding_attr
+from binding_utils import install_local_helpers
 from binding_utils import print_binding as _print_binding
+
+
+TARGET_PREFLIGHT_EXPORTS = (
+    "ssh_probe",
+    "ssh_reachable",
+    "ssh_failure_detail",
+    "ssh_command_result",
+    "utmctl_vm_status",
+    "utmctl_start",
+    "ensure_host_reachable",
+    "config_source_name",
+    "config_material_for_targets",
+    "find_material_config_drift",
+    "preflight_target_host_state",
+    "build_submission_metadata",
+    "print_submission_metadata",
+)
 
 
 def ssh_probe(bindings: Mapping[str, Any], host: str, timeout: int = 5) -> Any:
@@ -142,3 +160,10 @@ def print_submission_metadata(bindings: Mapping[str, Any], metadata: dict) -> No
         provenance_summary_fn=_binding(bindings, "provenance_summary"),
         print_fn=_print_binding(bindings),
     )
+
+
+def install_target_preflight_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = TARGET_PREFLIGHT_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)

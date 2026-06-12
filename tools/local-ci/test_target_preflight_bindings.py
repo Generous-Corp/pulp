@@ -145,6 +145,32 @@ class TargetPreflightBindingsTests(unittest.TestCase):
         self.assertIs(captured["print"][1]["provenance_summary_fn"], bindings["provenance_summary"])
         self.assertIs(captured["print"][1]["print_fn"], bindings["print"])
 
+    def test_install_target_preflight_helpers_wires_named_exports(self) -> None:
+        captured = {}
+
+        def ssh_probe(host, timeout, **kwargs):
+            captured["ssh_probe"] = (host, timeout, kwargs)
+            return {"host": host}
+
+        def source_name(path, **kwargs):
+            captured["source_name"] = (path, kwargs)
+            return "shared"
+
+        preflight = types.SimpleNamespace(
+            ssh_probe=ssh_probe,
+            config_source_name=source_name,
+        )
+        bindings = self._bindings(preflight)
+
+        self.mod.install_target_preflight_helpers(bindings, ("ssh_probe", "config_source_name"))
+
+        self.assertEqual(bindings["ssh_probe"]("ubuntu", 9), {"host": "ubuntu"})
+        self.assertEqual(bindings["config_source_name"](Path("/config")), "shared")
+        self.assertEqual(captured["ssh_probe"][0:2], ("ubuntu", 9))
+        self.assertIs(captured["ssh_probe"][2]["run_ssh_subprocess_fn"], bindings["run_ssh_subprocess"])
+        self.assertEqual(captured["source_name"][0], Path("/config"))
+        self.assertIs(captured["source_name"][1]["shared_config_path_fn"], bindings["shared_config_path"])
+
 
 if __name__ == "__main__":
     unittest.main()

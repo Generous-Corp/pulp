@@ -769,82 +769,11 @@ def wait_for_job(job_id: str, config: dict) -> tuple[dict | None, int]:
     return _queue_bindings.wait_for_job(globals(), job_id, config)
 
 
+_target_preflight_bindings.install_target_preflight_helpers(globals())
 _notification_bindings.install_notification_helpers(globals())
 
 
 # ── VM Management ────────────────────────────────────────────────────────────
-
-
-def ssh_probe(host: str, timeout: int = 5) -> subprocess.CompletedProcess[str]:
-    return _target_preflight_bindings.ssh_probe(globals(), host, timeout)
-
-
-def ssh_reachable(host: str, timeout: int = 5) -> bool:
-    return _target_preflight_bindings.ssh_reachable(globals(), host, timeout)
-
-
-def ssh_failure_detail(host: str, timeout: int = 5) -> str:
-    return _target_preflight_bindings.ssh_failure_detail(globals(), host, timeout)
-
-
-def ssh_command_result(host: str, remote_cmd: str, *, timeout: int = 30) -> subprocess.CompletedProcess[str]:
-    return _target_preflight_bindings.ssh_command_result(globals(), host, remote_cmd, timeout=timeout)
-
-
-def utmctl_vm_status(vm_name: str) -> str | None:
-    return _target_preflight_bindings.utmctl_vm_status(globals(), vm_name)
-
-
-def utmctl_start(vm_name: str) -> bool:
-    return _target_preflight_bindings.utmctl_start(globals(), vm_name)
-
-
-def ensure_host_reachable(target_name: str, target_cfg: dict, defaults: dict) -> str | None:
-    return _target_preflight_bindings.ensure_host_reachable(globals(), target_name, target_cfg, defaults)
-
-
-def config_source_name(path: Path) -> str:
-    return _target_preflight_bindings.config_source_name(globals(), path)
-
-
-def config_material_for_targets(config: dict, targets: list[str]) -> dict:
-    return _target_preflight_bindings.config_material_for_targets(globals(), config, targets)
-
-
-def find_material_config_drift(targets: list[str]) -> list[str]:
-    return _target_preflight_bindings.find_material_config_drift(globals(), targets)
-
-
-def preflight_target_host_state(target_name: str, target_cfg: dict, defaults: dict) -> dict:
-    return _target_preflight_bindings.preflight_target_host_state(globals(), target_name, target_cfg, defaults)
-
-
-def build_submission_metadata(
-    config: dict,
-    branch: str,
-    sha: str,
-    targets: list[str],
-    priority: str,
-    validation: str,
-    *,
-    allow_root_mismatch: bool,
-    allow_unreachable_targets: bool,
-) -> dict:
-    return _target_preflight_bindings.build_submission_metadata(
-        globals(),
-        config,
-        branch,
-        sha,
-        targets,
-        priority,
-        validation,
-        allow_root_mismatch=allow_root_mismatch,
-        allow_unreachable_targets=allow_unreachable_targets,
-    )
-
-
-def print_submission_metadata(metadata: dict) -> None:
-    return _target_preflight_bindings.print_submission_metadata(globals(), metadata)
 
 
 # ── Validation Runners ───────────────────────────────────────────────────────
