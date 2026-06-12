@@ -231,6 +231,13 @@ if (data.numInputs > 1 &&
 sidechain routing` and the `#178` review.) Secondary **output** buses
 are zero-filled every block — identical rationale to CLAP.
 
+The process callback now builds a stack-owned `ProcessBuffers` block
+for the active main input, optional sidechain input, and main output,
+then dispatches through `Processor::process(ProcessBuffers&, ...)`.
+Processors that only override the legacy main-in/main-out callback
+still run through the base projection; processors that override the
+richer surface can inspect the VST3 bus set directly.
+
 ### Transport context
 
 `ProcessContext` is populated from `data.processContext`:

@@ -131,6 +131,10 @@ public:
                  pulp::midi::MidiBuffer&,
                  pulp::midi::MidiBuffer&,
                  const pulp::format::ProcessContext&) override;
+    void process(pulp::format::ProcessBuffers& audio,
+                 pulp::midi::MidiBuffer& midi_in,
+                 pulp::midi::MidiBuffer& midi_out,
+                 const pulp::format::ProcessContext& context) override;
 
     int latency_samples() const override { return config_.latency_samples; }
 
@@ -147,11 +151,19 @@ public:
     int prepare_count = 0;
     int release_count = 0;
     int process_count = 0;
+    int process_buffer_count = 0;
     pulp::format::PrepareContext last_prepare;
     pulp::format::ProcessContext last_context;
     std::size_t last_input_channels = 0;
     std::size_t last_output_channels = 0;
     std::size_t last_sidechain_channels = 0;
+    std::size_t last_process_buffer_input_buses = 0;
+    std::size_t last_process_buffer_output_buses = 0;
+    std::size_t last_process_buffer_active_inputs = 0;
+    std::size_t last_process_buffer_active_outputs = 0;
+    bool last_process_buffer_had_sidechain = false;
+    bool last_process_buffer_layouts_match = false;
+    bool last_process_buffer_storage_valid = false;
     std::size_t last_midi_in_size = 0;
     std::size_t last_sysex_size = 0;
     std::vector<uint8_t> last_sysex_payload;
@@ -240,6 +252,24 @@ void TestVst3Processor::process(
         note.sample_offset = 7;
         midi_out.add(note);
     }
+}
+
+void TestVst3Processor::process(
+    pulp::format::ProcessBuffers& audio,
+    pulp::midi::MidiBuffer& midi_in,
+    pulp::midi::MidiBuffer& midi_out,
+    const pulp::format::ProcessContext& context) {
+    ++process_buffer_count;
+    last_process_buffer_input_buses = audio.inputs.size();
+    last_process_buffer_output_buses = audio.outputs.size();
+    last_process_buffer_active_inputs = audio.inputs.active_count();
+    last_process_buffer_active_outputs = audio.outputs.active_count();
+    last_process_buffer_had_sidechain =
+        audio.inputs.sidechain() != nullptr && audio.inputs.sidechain()->active();
+    last_process_buffer_layouts_match = audio.layouts_match_descriptors();
+    last_process_buffer_storage_valid = audio.active_buses_have_storage();
+
+    pulp::format::Processor::process(audio, midi_in, midi_out, context);
 }
 
 std::unique_ptr<pulp::format::Processor> create_test_processor() {
@@ -584,6 +614,14 @@ TEST_CASE("VST3 adapter process path maps host events, buses, and outputs",
     REQUIRE(processor.process(data) == Steinberg::kResultOk);
 
     REQUIRE(test_processor->process_count == 1);
+    REQUIRE(test_processor->process_buffer_count == 1);
+    REQUIRE(test_processor->last_process_buffer_input_buses == 2);
+    REQUIRE(test_processor->last_process_buffer_output_buses == 1);
+    REQUIRE(test_processor->last_process_buffer_active_inputs == 2);
+    REQUIRE(test_processor->last_process_buffer_active_outputs == 1);
+    REQUIRE(test_processor->last_process_buffer_had_sidechain);
+    REQUIRE(test_processor->last_process_buffer_layouts_match);
+    REQUIRE(test_processor->last_process_buffer_storage_valid);
     REQUIRE(test_processor->last_input_channels == 2);
     REQUIRE(test_processor->last_output_channels == 2);
     REQUIRE(test_processor->last_sidechain_channels == 1);
