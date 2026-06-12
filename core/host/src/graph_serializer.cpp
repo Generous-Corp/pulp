@@ -249,6 +249,40 @@ std::string custom_type_label(std::string_view type_id, int version) {
     return oss.str();
 }
 
+bool validate_generated_node_shape(NodeType type,
+                                   std::string_view type_name,
+                                   int inputs,
+                                   int outputs,
+                                   std::string& error) {
+    if (inputs < 0 || outputs < 0) {
+        error = "invalid generated node port count for "
+              + std::string(type_name);
+        return false;
+    }
+
+    auto fail_shape = [&] {
+        error = "invalid generated node shape for " + std::string(type_name);
+        return false;
+    };
+
+    switch (type) {
+        case NodeType::AudioInput:
+            return inputs == 0 && outputs > 0 ? true : fail_shape();
+        case NodeType::AudioOutput:
+            return inputs > 0 && outputs == 0 ? true : fail_shape();
+        case NodeType::Gain:
+            return inputs == 2 && outputs == 2 ? true : fail_shape();
+        case NodeType::MidiInput:
+            return inputs == 0 && outputs == 1 ? true : fail_shape();
+        case NodeType::MidiOutput:
+            return inputs == 1 && outputs == 0 ? true : fail_shape();
+        case NodeType::Plugin:
+        case NodeType::Custom:
+            return true;
+    }
+    return fail_shape();
+}
+
 // Minimal base64 encoder (no padding stripping), good enough for state
 // blobs in JSON — choc::json escapes inline strings already.
 std::string b64_encode(const std::vector<uint8_t>& bytes) {
@@ -477,6 +511,14 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
             const int in_ch  = (int)nv["num_input_ports"].getInt64();
             const int out_ch = (int)nv["num_output_ports"].getInt64();
             const float gain = nv.hasObjectMember("gain") ? (float)get_double(nv["gain"]) : 1.0f;
+            std::string node_shape_error;
+            if (!validate_generated_node_shape(
+                    t, type_s, in_ch, out_ch, node_shape_error)) {
+                graph.clear();
+                result.ok = false;
+                result.error = node_shape_error;
+                return result;
+            }
 
             NodeId new_id = 0;
             switch (t) {

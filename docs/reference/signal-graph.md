@@ -106,6 +106,15 @@ limit counts, and it does not clear or replace an already prepared snapshot.
 `prepare()` uses the same validation internally, but remains the mutating
 lifecycle step that drops any live snapshot before rebuilding a new one.
 
+`.pulpgraph` import also validates generated node shapes before materializing
+the graph. Built-in node types must declare the shape their runtime actually
+uses: audio inputs have only outputs, audio outputs have only inputs, gain nodes
+are the built-in stereo utility, and MIDI source/sink nodes use one MIDI edge.
+Plugin and custom nodes may declare their own non-negative port counts. Invalid
+shapes, negative port counts, malformed state blobs, stale connection IDs,
+invalid ports, and non-feedback cycles fail closed or are skipped before
+`prepare()` publishes a runtime snapshot.
+
 After a successful `prepare()`, `SignalGraph::prepared_stats()` reports the
 compiled graph's node/order/connection/port counts, prepared maximum block
 size, and fixed audio, automation, and delay-line buffer bytes. The snapshot is

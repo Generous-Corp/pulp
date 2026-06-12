@@ -666,16 +666,16 @@ TEST_CASE("GraphSerializer generated topology fuzz rejects unsafe imported edges
       "id": 11,
       "type": "gain",
       "name": "A",
-      "num_input_ports": 1,
-      "num_output_ports": 1,
+      "num_input_ports": 2,
+      "num_output_ports": 2,
       "gain": 1
     },
     {
       "id": 12,
       "type": "gain",
       "name": "B",
-      "num_input_ports": 1,
-      "num_output_ports": 1,
+      "num_input_ports": 2,
+      "num_output_ports": 2,
       "gain": 1
     },
     {
@@ -1026,6 +1026,80 @@ TEST_CASE("GraphSerializer generated custom-state fuzz validates state payloads"
         REQUIRE(dst.nodes().size() == 1);
         REQUIRE(dst.custom_node_state(dst.nodes().front().id)
                 == std::vector<uint8_t>{0x00, 0x01, 0x02, 0xff});
+    }
+}
+
+TEST_CASE("GraphSerializer generated node type validation rejects invalid shapes",
+          "[host][serializer][generated][type][phase3]") {
+    SECTION("audio input cannot declare input ports") {
+        SignalGraph dst;
+        auto result = GraphSerializer::from_json(dst, R"({
+  "format_version": 1,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "audio_in",
+      "name": "BadInput",
+      "num_input_ports": 1,
+      "num_output_ports": 1,
+      "gain": 1
+    }
+  ],
+  "connections": []
+})");
+
+        REQUIRE_FALSE(result.ok);
+        REQUIRE(result.error == "invalid generated node shape for audio_in");
+        REQUIRE(dst.nodes().empty());
+    }
+
+    SECTION("gain nodes must use the built-in stereo utility shape") {
+        SignalGraph dst;
+        auto result = GraphSerializer::from_json(dst, R"({
+  "format_version": 1,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "gain",
+      "name": "BadGain",
+      "num_input_ports": 1,
+      "num_output_ports": 1,
+      "gain": 1
+    }
+  ],
+  "connections": []
+})");
+
+        REQUIRE_FALSE(result.ok);
+        REQUIRE(result.error == "invalid generated node shape for gain");
+        REQUIRE(dst.nodes().empty());
+    }
+
+    SECTION("generated custom nodes cannot declare negative ports") {
+        SignalGraph dst;
+        auto result = GraphSerializer::from_json(dst, R"({
+  "format_version": 1,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "custom",
+      "name": "BadCustom",
+      "num_input_ports": -1,
+      "num_output_ports": 1,
+      "gain": 1,
+      "custom": {
+        "type_id": "pulp.generated.bad",
+        "version": 1
+      }
+    }
+  ],
+  "connections": []
+})");
+
+        REQUIRE_FALSE(result.ok);
+        REQUIRE(result.error
+                == "invalid generated node port count for custom");
+        REQUIRE(dst.nodes().empty());
     }
 }
 
