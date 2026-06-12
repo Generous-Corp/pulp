@@ -37,6 +37,29 @@ Shipyard is missing; contributors who prefer their own PR flow can set
 `gh` directly and requires it to be installed and authenticated. Run
 `pulp status` to see the effective workflow and local tool health.
 
+### Optional local VM routing
+
+Core Pulp development can also use local, disposable VMs through
+[tartci](https://github.com/danielraffel/tartci). This is optional: a normal
+contributor can open a PR and let GitHub Actions run on hosted runners. The
+value of the local VM setup is faster feedback on trusted Apple Silicon
+hardware while keeping every job clean-per-run.
+
+The current Pulp routing policy is intentionally kept in parseable TOML at
+[`.shipyard/ci-profiles/normal-local-fast.toml`](../../.shipyard/ci-profiles/normal-local-fast.toml)
+instead of copied into this guide. It names the PR, release, coverage,
+scheduled, and issue-on-failure policies and maps stable target IDs to concrete
+GitHub `runs-on` selectors. Shipyard owns orchestration and profile selection;
+tartci owns the local VM providers, goldens, host caches, and per-host status.
+Use the upstream docs for details:
+
+- [Shipyard profiles](https://github.com/danielraffel/Shipyard/blob/main/docs/profiles.md)
+  explain how profiles and fallback resolution work.
+- [tartci](https://github.com/danielraffel/tartci) explains the Tart/QEMU VM
+  lanes, `tartci status --json`, and `tartci profile explain|plan`.
+- [mac-ci-host-setup.md](mac-ci-host-setup.md) is the Pulp-specific host setup
+  guide for joining the macOS VM pool.
+
 ### Shipping a PR: `shipyard pr`
 
 `shipyard pr` is the single "ship this" orchestrator. Agents and humans should

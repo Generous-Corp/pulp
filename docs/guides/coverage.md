@@ -568,6 +568,9 @@ Coverage workflow reads only explicit `workflow_dispatch` inputs and the
 `PULP_COVERAGE_*_RUNS_ON_JSON` repo variables; it does not read
 `PULP_NAMESPACE_BUILD_*`. Long-running coverage jobs must not use the warm
 macOS gate pool or the shared `pulp-build-vm` build-pilot label.
+The local VM routing profile in
+`.shipyard/ci-profiles/normal-local-fast.toml` records the current coverage
+policy without making this guide a second routing table.
 
 The dedicated local macOS coverage lane uses an ephemeral Tart runner with
 the `pulp-coverage-vm-macos` label:
