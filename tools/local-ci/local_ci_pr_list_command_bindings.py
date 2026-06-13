@@ -27,4 +27,10 @@ def install_local_ci_pr_list_command_helpers(
     bindings: dict[str, Any],
     names: tuple[str, ...] = LOCAL_CI_PR_LIST_COMMAND_EXPORTS,
 ) -> None:
-    install_local_helpers(bindings, globals(), names)
+    known_names = set(LOCAL_CI_PR_LIST_COMMAND_EXPORTS)
+    command_names = tuple(name for name in names if name in known_names)
+    unknown_names = tuple(name for name in names if name not in known_names)
+
+    install_local_helpers(bindings, globals(), command_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)

@@ -95,6 +95,14 @@ class LocalCiPrCheckCommandBindingsTests(unittest.TestCase):
         self.assertEqual(calls[0][0], (args_obj,))
         self.assertEqual(bindings["cmd_check"].__name__, "cmd_check")
 
+    def test_install_local_ci_pr_check_command_helpers_keeps_unknown_local_fallback(self):
+        bindings = {}
+        self.mod.future_local_ci_pr_check_command_helper = lambda _bindings: "future"
+
+        self.mod.install_local_ci_pr_check_command_helpers(bindings, ("future_local_ci_pr_check_command_helper",))
+
+        self.assertEqual(bindings["future_local_ci_pr_check_command_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()
