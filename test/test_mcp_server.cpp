@@ -942,7 +942,7 @@ TEST_CASE("MCP docs_search and create quote user arguments",
     auto kit_preview_alias = handle_request(tool_call(
         "52", "pulp_kit", R"JSON({"subcommand":"preview","path":"fixtures/packages/basic ui's kit"})JSON"));
     require_contains(kit_preview_alias, R"JSON("id":52)JSON");
-    require_contains(kit_preview_alias, "Error: unsupported kit subcommand");
+    require_contains(kit_preview_alias, "Error: use kit plan; preview is reserved for content compatibility checks");
     REQUIRE(kit_preview_alias.find("[kit] [plan]") == std::string::npos);
 
     auto kit_inspect = handle_request(tool_call(

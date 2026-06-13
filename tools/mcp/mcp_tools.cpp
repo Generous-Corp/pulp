@@ -394,6 +394,9 @@ std::string handle_kit(const std::string& params_json) {
     if (subcommand == "validate") return handle_kit_validate(params_json);
     if (subcommand == "inspect" || subcommand == "show") return handle_kit_inspect(params_json);
     if (subcommand == "plan") return handle_kit_plan(params_json);
+    if (subcommand == "preview") {
+        return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: use kit plan; preview is reserved for content compatibility checks\"}]}";
+    }
     if (subcommand == "verify") return handle_kit_verify(params_json);
     if (subcommand == "apply") return handle_kit_apply(params_json);
     if (subcommand == "remove" || subcommand == "uninstall") return handle_kit_remove(params_json);
