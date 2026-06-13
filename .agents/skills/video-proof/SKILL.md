@@ -430,13 +430,14 @@ python3 tools/local-ci/local_ci.py simulator video \
   --app build/ios/PulpDemo.app \
   --bundle-id com.pulp.demo \
   --label ios-simulator-launch-proof \
-  --duration 8
+  --duration 8 \
+  --video-fps 10
 ```
 
 This writes `video/proof.mp4` and `manifest.json` under the simulator run
-directory using `xcrun simctl io recordVideo`. This lane currently proves
-simulator capture/install/launch; tap driving and tap markers belong to the next
-mobile automation slice.
+directory using `xcrun simctl io screenshot` frames encoded with ffmpeg. This
+lane currently proves simulator capture/install/launch; tap driving and tap
+markers belong to the next mobile automation slice.
 
 Publish the latest runs:
 

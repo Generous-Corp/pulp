@@ -192,7 +192,7 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
         "command": (
             "python3 tools/local-ci/local_ci.py simulator video "
             "--app build/ios/PulpDemo.app --bundle-id com.pulp.demo "
-            "--label ios-simulator-launch-proof --duration 8"
+            "--label ios-simulator-launch-proof --duration 8 --video-fps 10"
         ),
         "doctor": "python3 tools/local-ci/local_ci.py simulator video-doctor",
         "watch_for": [
