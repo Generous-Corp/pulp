@@ -1,75 +1,40 @@
-"""Bindings from the local_ci facade to Windows SSH remote file helpers."""
+"""Compatibility facade for Windows SSH remote file dependency bindings."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Any
 
-from binding_utils import binding as _binding
-
-
-WINDOWS_REMOTE_FILE_EXPORTS = (
-    "windows_ssh_write_text",
-    "windows_ssh_fetch_file",
-    "windows_ssh_read_json",
-    "windows_ssh_remove_path",
+from binding_utils import install_local_helpers
+from windows_remote_file_transfer_bindings import (
+    WINDOWS_REMOTE_FILE_TRANSFER_EXPORTS,
+    install_windows_remote_file_transfer_helpers,
+    windows_ssh_fetch_file,
+    windows_ssh_read_json,
+    windows_ssh_remove_path,
+)
+from windows_remote_file_write_bindings import (
+    WINDOWS_REMOTE_FILE_WRITE_EXPORTS,
+    install_windows_remote_file_write_helpers,
+    windows_ssh_write_text,
 )
 
 
-def windows_ssh_write_text(bindings: Mapping[str, Any], host: str, remote_path: str, content: str) -> None:
-    return _binding(bindings, "_windows_probe").windows_ssh_write_text(
-        host,
-        remote_path,
-        content,
-        run_windows_ssh_powershell_fn=_binding(bindings, "run_windows_ssh_powershell"),
-        parse_windows_ssh_json_fn=_binding(bindings, "parse_windows_ssh_json"),
-        windows_contract_expand_expression_fn=_binding(bindings, "windows_contract_expand_expression"),
-        ps_literal_fn=_binding(bindings, "ps_literal"),
-    )
+WINDOWS_REMOTE_FILE_EXPORTS = (
+    *WINDOWS_REMOTE_FILE_WRITE_EXPORTS,
+    *WINDOWS_REMOTE_FILE_TRANSFER_EXPORTS,
+)
 
 
-def windows_ssh_fetch_file(
-    bindings: Mapping[str, Any],
-    host: str,
-    remote_path: str,
-    local_path,
-    *,
-    optional: bool = False,
-    timeout: int = 60,
-) -> bool:
-    return _binding(bindings, "_windows_probe").windows_ssh_fetch_file(
-        host,
-        remote_path,
-        local_path,
-        optional=optional,
-        timeout=timeout,
-        run_windows_ssh_powershell_fn=_binding(bindings, "run_windows_ssh_powershell"),
-        windows_contract_expand_expression_fn=_binding(bindings, "windows_contract_expand_expression"),
-    )
+def install_windows_remote_file_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = WINDOWS_REMOTE_FILE_EXPORTS,
+) -> None:
+    write_names = tuple(name for name in names if name in WINDOWS_REMOTE_FILE_WRITE_EXPORTS)
+    transfer_names = tuple(name for name in names if name in WINDOWS_REMOTE_FILE_TRANSFER_EXPORTS)
+    known_names = set(WINDOWS_REMOTE_FILE_EXPORTS)
+    unknown_names = tuple(name for name in names if name not in known_names)
 
-
-def windows_ssh_read_json(
-    bindings: Mapping[str, Any],
-    host: str,
-    remote_path: str,
-    *,
-    timeout: int = 30,
-    optional: bool = False,
-) -> dict | None:
-    return _binding(bindings, "_windows_probe").windows_ssh_read_json(
-        host,
-        remote_path,
-        timeout=timeout,
-        optional=optional,
-        run_windows_ssh_powershell_fn=_binding(bindings, "run_windows_ssh_powershell"),
-        windows_contract_expand_expression_fn=_binding(bindings, "windows_contract_expand_expression"),
-    )
-
-
-def windows_ssh_remove_path(bindings: Mapping[str, Any], host: str, remote_path: str) -> None:
-    return _binding(bindings, "_windows_probe").windows_ssh_remove_path(
-        host,
-        remote_path,
-        run_windows_ssh_powershell_fn=_binding(bindings, "run_windows_ssh_powershell"),
-        windows_contract_expand_expression_fn=_binding(bindings, "windows_contract_expand_expression"),
-    )
+    install_windows_remote_file_write_helpers(bindings, write_names)
+    install_windows_remote_file_transfer_helpers(bindings, transfer_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)
