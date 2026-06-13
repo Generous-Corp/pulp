@@ -46,6 +46,30 @@ def installed_clap_bundle_status(plugin: str, *, home: str | Path | None = None)
     return True, f"CLAP bundle executable found at `{executable}`."
 
 
+def reaper_clap_cache_status(plugin: str, *, home: str | Path | None = None) -> tuple[bool, str]:
+    home_path = Path(home).expanduser() if home is not None else Path.home()
+    cache = home_path / "Library" / "Application Support" / "REAPER" / "reaper-clap-macos-aarch64.ini"
+    if not cache.exists():
+        return True, f"REAPER CLAP cache is not present at `{cache}`; REAPER should scan installed CLAP bundles on launch."
+    text = cache.read_text(errors="replace")
+    header = f"[{plugin}.clap]"
+    start = text.find(header)
+    if start < 0:
+        return True, f"REAPER CLAP cache has not indexed `{plugin}.clap` yet; REAPER should scan it on launch."
+    next_header = text.find("\n[", start + len(header))
+    section = text[start:] if next_header < 0 else text[start:next_header]
+    for line in section.splitlines()[1:]:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("_="):
+            continue
+        if "|" in stripped:
+            return True, f"REAPER CLAP cache contains descriptor `{stripped}` for `{plugin}.clap`."
+    return False, (
+        f"REAPER CLAP cache at `{cache}` has a `{plugin}.clap` stanza but no plugin descriptor line. "
+        "REAPER will not find this plugin until the CLAP cache is refreshed."
+    )
+
+
 def write_reaper_plugin_editor_recipe(
     *,
     plugin: str,

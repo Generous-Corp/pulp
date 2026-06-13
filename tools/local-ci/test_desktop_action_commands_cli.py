@@ -421,6 +421,28 @@ class DesktopActionCommandsCliTests(unittest.TestCase):
         self.assertIn("requires an installed DefinitelyMissingPulpPlugin CLAP bundle", self.printed[-1])
         self.assertIn("~/Library/Audio/Plug-Ins/CLAP", self.printed[-1])
 
+    def test_video_command_reaper_recipe_reports_stale_clap_cache(self):
+        self.mod.reaper_video_recipe.installed_clap_bundle_status = lambda _plugin: (True, "installed")
+        self.mod.reaper_video_recipe.reaper_clap_cache_status = lambda _plugin: (False, "cache stanza exists but no plugin descriptor")
+
+        result = self.mod.cmd_desktop_video(
+            self.args(
+                recipe="reaper-plugin-editor",
+                launch_command=None,
+                label=None,
+                plugin="PulpSynth",
+                plugin_format="clap",
+            ),
+            cmd_desktop_smoke_fn=lambda _args: self.fail("smoke should not run"),
+            cmd_desktop_click_fn=lambda _args: self.fail("click should not run"),
+            cmd_desktop_inspect_fn=lambda _args: self.fail("inspect should not run"),
+            print_fn=self.print_line,
+        )
+
+        self.assertEqual(result, 1)
+        self.assertIn("requires REAPER to have a valid PulpSynth CLAP cache entry", self.printed[-1])
+        self.assertIn("rescan", self.printed[-1])
+
     def test_video_command_reaper_recipe_keeps_explicit_command(self):
         result = self.mod.cmd_desktop_video(
             self.args(

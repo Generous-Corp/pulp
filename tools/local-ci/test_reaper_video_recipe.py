@@ -45,6 +45,24 @@ class ReaperVideoRecipeTests(unittest.TestCase):
             self.assertTrue(ok)
             self.assertIn("CLAP bundle executable found", detail)
 
+    def test_reaper_clap_cache_status_detects_stale_stanza(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ok, detail = self.mod.reaper_clap_cache_status("PulpSynth", home=temp_dir)
+            self.assertTrue(ok)
+            self.assertIn("not present", detail)
+
+            cache = Path(temp_dir) / "Library" / "Application Support" / "REAPER" / "reaper-clap-macos-aarch64.ini"
+            cache.parent.mkdir(parents=True)
+            cache.write_text("[PulpSynth.clap]\n_=0068FDF5FCFADC010068FDF5FCFADC01\n")
+            ok, detail = self.mod.reaper_clap_cache_status("PulpSynth", home=temp_dir)
+            self.assertFalse(ok)
+            self.assertIn("no plugin descriptor", detail)
+
+            cache.write_text("[PulpSynth.clap]\n_=0068FDF5FCFADC010068FDF5FCFADC01\ncom.pulp.synth=1|PulpSynth (Pulp)\n")
+            ok, detail = self.mod.reaper_clap_cache_status("PulpSynth", home=temp_dir)
+            self.assertTrue(ok)
+            self.assertIn("com.pulp.synth", detail)
+
     def test_writes_wrapper_and_lua_script(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             files = self.mod.write_reaper_plugin_editor_recipe(

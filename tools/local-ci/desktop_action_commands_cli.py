@@ -79,6 +79,12 @@ def _apply_desktop_video_recipe(args: argparse.Namespace) -> None:
                         f"recipe `reaper-plugin-editor` requires an installed {plugin} CLAP bundle: {detail} "
                         f"Build `PulpSynth_CLAP`/the requested CLAP target and install or symlink it under ~/Library/Audio/Plug-Ins/CLAP."
                     )
+                ok, detail = reaper_video_recipe.reaper_clap_cache_status(plugin)
+                if not ok:
+                    raise ValueError(
+                        f"recipe `reaper-plugin-editor` requires REAPER to have a valid {plugin} CLAP cache entry: {detail} "
+                        "Open REAPER's Preferences > Plug-ins > CLAP and rescan, or remove the stale REAPER CLAP cache entry and relaunch REAPER."
+                    )
             recipe_files = reaper_video_recipe.write_reaper_plugin_editor_recipe(
                 plugin=plugin,
                 plugin_format=plugin_format,

@@ -269,6 +269,14 @@ ln -sfn "$(pwd)/build-video-nogpu/CLAP/PulpSynth.clap" \
   "$HOME/Library/Audio/Plug-Ins/CLAP/PulpSynth.clap"
 ```
 
+If REAPER previously scanned a partial CLAP bundle, its cache can contain a
+`[<Plugin>.clap]` stanza without a plugin descriptor such as
+`com.pulp.synth=1|PulpSynth (Pulp)`. Generated CLAP recipes fail early in this
+state because REAPER will not find the plugin during the proof. Open REAPER's
+Preferences > Plug-ins > CLAP and rescan, or remove the stale stanza from
+`~/Library/Application Support/REAPER/reaper-clap-macos-aarch64.ini` and relaunch
+REAPER.
+
 Recipes select Remotion templates and write structured setup context into
 `video_proof_composition.context`. The composed video, `index.html`, and
 `review.md` display that context, including recipe, host, plugin, format,
