@@ -81,6 +81,17 @@ class DesktopSourceRewriteRootBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["rewrite_launch_command_for_posix_root"]("./tool", "/remote"), "posix-root")
         self.assertNotIn("rewrite_launch_command_for_windows_root", bindings)
 
+    def test_root_rewrite_installer_keeps_unknown_local_fallback(self):
+        bindings = {}
+        self.mod.future_desktop_source_rewrite_root_helper = lambda _bindings: "future"
+
+        self.mod.install_desktop_source_rewrite_root_helpers(
+            bindings,
+            ("future_desktop_source_rewrite_root_helper",),
+        )
+
+        self.assertEqual(bindings["future_desktop_source_rewrite_root_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()
