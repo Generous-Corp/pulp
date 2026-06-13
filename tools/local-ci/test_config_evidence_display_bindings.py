@@ -70,6 +70,14 @@ class ConfigEvidenceDisplayBindingsTests(unittest.TestCase):
         self.assertEqual(calls["has_header"], True)
         self.assertEqual(bindings["evidence_empty_line"].__name__, "evidence_empty_line")
 
+    def test_install_config_evidence_display_helpers_keeps_unknown_local_fallback(self) -> None:
+        bindings = {}
+        self.mod.future_config_evidence_display_helper = lambda _bindings: "future"
+
+        self.mod.install_config_evidence_display_helpers(bindings, ("future_config_evidence_display_helper",))
+
+        self.assertEqual(bindings["future_config_evidence_display_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()

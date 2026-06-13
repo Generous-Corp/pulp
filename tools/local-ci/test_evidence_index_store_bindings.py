@@ -70,6 +70,17 @@ class EvidenceIndexStoreBindingTests(unittest.TestCase):
         self.assertEqual(bindings["load_evidence_index_unlocked"].__name__, "load_evidence_index_unlocked")
         self.assertNotIn("save_evidence_index_unlocked", bindings)
 
+    def test_install_evidence_index_store_helpers_keeps_unknown_local_fallback(self) -> None:
+        bindings = {}
+        evidence_index_store_bindings.future_evidence_index_store_helper = lambda _bindings: "future"
+
+        evidence_index_store_bindings.install_evidence_index_store_helpers(
+            bindings,
+            ("future_evidence_index_store_helper",),
+        )
+
+        self.assertEqual(bindings["future_evidence_index_store_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -88,6 +88,17 @@ class EvidenceIndexCoreBindingTests(unittest.TestCase):
         self.assertEqual(bindings["empty_evidence_index"].__name__, "empty_evidence_index")
         self.assertNotIn("normalize_evidence_index", bindings)
 
+    def test_install_evidence_index_core_helpers_keeps_unknown_local_fallback(self) -> None:
+        bindings = {}
+        evidence_index_core_bindings.future_evidence_index_core_helper = lambda _bindings: "future"
+
+        evidence_index_core_bindings.install_evidence_index_core_helpers(
+            bindings,
+            ("future_evidence_index_core_helper",),
+        )
+
+        self.assertEqual(bindings["future_evidence_index_core_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()
