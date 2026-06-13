@@ -42,6 +42,12 @@ regress?", "which lane should I monitor next?", and "is this worth
 investigating or just within the usual range?" Humans can use the same commands
 for high-level platform comparisons, but no observability service is required.
 
+The `shipyard metrics` commands require a Shipyard build that includes the
+metrics subcommand. Pulp's current pinned source-checkout version in
+`tools/shipyard.toml` is `v0.68.0`, which does not include that surface yet. Use
+a newer Shipyard binary or source checkout for this optional metrics workflow
+until the Pulp pin is bumped.
+
 ```bash
 # Enable VM runtime records on tartci hosts or LaunchAgents.
 export TARTCI_RUNTIME_MEASURE=1
