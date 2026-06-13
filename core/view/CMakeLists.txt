@@ -399,6 +399,7 @@ target_sources(pulp-view-core PRIVATE
     src/breadcrumb.cpp
     src/buttons.cpp
     src/gap_widgets.cpp
+    src/widget_gallery.cpp
     src/file_browser.cpp
     src/file_chooser.cpp
     src/code_editor.cpp
