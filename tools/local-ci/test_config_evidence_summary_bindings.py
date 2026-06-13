@@ -20,6 +20,15 @@ class ConfigEvidenceSummaryBindingsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
 
+    def test_summary_exports_are_composed_from_focused_groups(self) -> None:
+        expected = (
+            *self.mod.CONFIG_EVIDENCE_INDEX_EXPORTS,
+            *self.mod.CONFIG_EVIDENCE_DISPLAY_EXPORTS,
+        )
+
+        self.assertEqual(self.mod.CONFIG_EVIDENCE_SUMMARY_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def _bindings(self, **overrides):
         bindings = {
             "evidence_index_module": types.SimpleNamespace(),
@@ -84,6 +93,25 @@ class ConfigEvidenceSummaryBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["evidence_empty_line"](has_header=True), "empty-with-header")
         self.assertEqual(calls["has_header"], True)
         self.assertEqual(bindings["evidence_empty_line"].__name__, "evidence_empty_line")
+
+    def test_install_config_evidence_summary_helpers_routes_focused_exports(self) -> None:
+        calls = {}
+
+        def evidence_empty_line(*, has_header):
+            calls["has_header"] = has_header
+            return "empty-with-header" if has_header else "empty"
+
+        evidence_module = types.SimpleNamespace(
+            load_evidence_index=lambda: {"loaded": True},
+            evidence_empty_line=evidence_empty_line,
+        )
+        bindings = self._bindings(evidence_index_module=evidence_module)
+
+        self.mod.install_config_evidence_summary_helpers(bindings, ("load_evidence_index", "evidence_empty_line"))
+
+        self.assertEqual(bindings["load_evidence_index"](), {"loaded": True})
+        self.assertEqual(bindings["evidence_empty_line"](has_header=False), "empty")
+        self.assertEqual(calls["has_header"], False)
 
 
 if __name__ == "__main__":
