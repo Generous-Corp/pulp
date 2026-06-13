@@ -18,6 +18,16 @@ class LinuxTargetCommandBindingsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
 
+    def test_command_exports_are_composed_from_focused_groups(self) -> None:
+        expected = (
+            *self.mod.LINUX_TARGET_BUNDLE_EXPORTS,
+            *self.mod.LINUX_TARGET_XVFB_COMMAND_EXPORTS,
+            *self.mod.LINUX_TARGET_WINDOW_COMMAND_EXPORTS,
+        )
+
+        self.assertEqual(self.mod.LINUX_TARGET_COMMAND_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def test_path_and_command_builders_delegate_with_parse_coordinate_seam(self) -> None:
         captured = {}
 
