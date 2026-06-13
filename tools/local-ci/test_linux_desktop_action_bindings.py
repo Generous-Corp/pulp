@@ -170,6 +170,14 @@ class LinuxDesktopActionBindingsTests(unittest.TestCase):
         )
         self.assertEqual(captured["args"], ({"defaults": {}}, "ubuntu", {"adapter": "linux-xvfb"}, "./tool"))
 
+    def test_install_linux_desktop_action_helpers_keeps_unknown_local_fallback(self) -> None:
+        bindings = {}
+        self.mod.future_linux_desktop_action_helper = lambda _bindings: "future"
+
+        self.mod.install_linux_desktop_action_helpers(bindings, ("future_linux_desktop_action_helper",))
+
+        self.assertEqual(bindings["future_linux_desktop_action_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()

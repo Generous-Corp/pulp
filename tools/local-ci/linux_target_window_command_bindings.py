@@ -38,4 +38,10 @@ def install_linux_target_window_command_helpers(
     bindings: dict,
     names: tuple[str, ...] = LINUX_TARGET_WINDOW_COMMAND_EXPORTS,
 ) -> None:
-    install_local_helpers(bindings, globals(), names)
+    known_names = set(LINUX_TARGET_WINDOW_COMMAND_EXPORTS)
+    command_names = tuple(name for name in names if name in known_names)
+    unknown_names = tuple(name for name in names if name not in known_names)
+
+    install_local_helpers(bindings, globals(), command_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)

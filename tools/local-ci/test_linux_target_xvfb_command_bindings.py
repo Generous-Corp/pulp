@@ -84,6 +84,14 @@ class LinuxTargetXvfbCommandBindingsTests(unittest.TestCase):
             "xvfb-cmd",
         )
 
+    def test_install_linux_target_xvfb_command_helpers_keeps_unknown_local_fallback(self) -> None:
+        bindings = {}
+        self.mod.future_linux_xvfb_command_helper = lambda _bindings: "future"
+
+        self.mod.install_linux_target_xvfb_command_helpers(bindings, ("future_linux_xvfb_command_helper",))
+
+        self.assertEqual(bindings["future_linux_xvfb_command_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()

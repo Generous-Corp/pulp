@@ -82,6 +82,14 @@ class LinuxTargetProbeBindingsTests(unittest.TestCase):
 
         self.assertIs(bindings["linux_required_remote_tools"](), linux_target.LINUX_REQUIRED_REMOTE_TOOLS)
 
+    def test_install_linux_target_constant_helpers_keeps_unknown_local_fallback(self) -> None:
+        bindings = {}
+        self.mod.future_linux_constant_helper = lambda _bindings: "future"
+
+        self.mod.install_linux_target_constant_helpers(bindings, ("future_linux_constant_helper",))
+
+        self.assertEqual(bindings["future_linux_constant_helper"](), "future")
+
     def test_install_linux_target_probe_helpers_wires_named_exports(self) -> None:
         linux_target = types.SimpleNamespace(
             linux_tooling_detail=lambda probe, tool_name, *, missing_hint=None: missing_hint,
@@ -94,6 +102,14 @@ class LinuxTargetProbeBindingsTests(unittest.TestCase):
             bindings["linux_tooling_detail"]({"git_found": False}, "git", missing_hint="install git"),
             "install git",
         )
+
+    def test_install_linux_target_probe_helpers_keeps_unknown_local_fallback(self) -> None:
+        bindings = {}
+        self.mod.future_linux_probe_helper = lambda _bindings: "future"
+
+        self.mod.install_linux_target_probe_helpers(bindings, ("future_linux_probe_helper",))
+
+        self.assertEqual(bindings["future_linux_probe_helper"](), "future")
 
 
 if __name__ == "__main__":
