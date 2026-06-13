@@ -125,9 +125,16 @@ def write_reaper_plugin_editor_recipe(
             SCRIPT_STDOUT={shlex.quote(str(script_stdout_path))}
             SCRIPT_STDERR={shlex.quote(str(script_stderr_path))}
 
+            quit_reaper_best_effort() {{
+              /usr/bin/osascript -e 'tell application "REAPER" to quit' >/dev/null 2>&1 &
+              local quit_pid=$!
+              sleep 2
+              kill "$quit_pid" >/dev/null 2>&1 || true
+              wait "$quit_pid" >/dev/null 2>&1 || true
+            }}
+
             rm -f "$STATUS" "$REAPER_STDOUT" "$REAPER_STDERR" "$SCRIPT_STDOUT" "$SCRIPT_STDERR"
-            osascript -e 'tell application "REAPER" to quit' >/dev/null 2>&1 || true
-            sleep 2
+            quit_reaper_best_effort
 
             "$REAPER_APP" -newinst -nosplash -new >"$REAPER_STDOUT" 2>"$REAPER_STDERR" &
             reaper_pid=$!
@@ -140,7 +147,7 @@ def write_reaper_plugin_editor_recipe(
 
             sleep 30
             kill "$reaper_pid" >/dev/null 2>&1 || true
-            osascript -e 'tell application "REAPER" to quit' >/dev/null 2>&1 || true
+            quit_reaper_best_effort
             """
         )
     )
