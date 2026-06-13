@@ -31,8 +31,11 @@ python3 tools/scripts/summarize_daw_bench_results.py \
     --require-any
 ```
 
-Use `--format json` when a CI job or dashboard needs a machine-readable
-artifact.
+The rollup includes confirmed runs and a "scripted lanes without checked-in
+manifests" backlog derived from the manual scripts in
+`docs/validation/daw-bench/`. That backlog is not support evidence; it is the
+remaining host-lab work queue. Use `--format json` when a CI job or dashboard
+needs a machine-readable artifact.
 
 Large DAW logs may stay outside the repo, but the manifest must include an
 `external_log_url` when `logs` is empty. Do not use placeholders; unverified

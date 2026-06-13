@@ -89,6 +89,10 @@ class DawBenchSummaryTests(unittest.TestCase):
         result_dir = root / "docs" / "validation" / "daw-bench" / "results" / "2026-06-12"
         _write(root / "docs" / "validation" / "daw-bench" / "06-reaper-vst3.md",
                "# REAPER script\n")
+        _write(root / "docs" / "validation" / "daw-bench" / "01-logic-pro-au.md",
+               "# 01 — Logic Pro (AU v2)\n")
+        _write(root / "docs" / "validation" / "daw-bench" / "08-aum-auv3.md",
+               "# 08 — AUM (iOS, AU v3)\n")
         _write(result_dir / "06-reaper-vst3.md",
                "# Filled REAPER result\n")
         _write(result_dir / "logs" / "Reaper-VST3-20260612T120000Z-pid42.log",
@@ -112,19 +116,48 @@ class DawBenchSummaryTests(unittest.TestCase):
             self.assertEqual(summaries[0].not_triggered, ("reaper_midsession_setstate",))
             self.assertEqual(summaries[0].confirmed_capabilities, ("load", "params"))
 
+    def test_load_scripted_lanes_normalizes_script_headings(self) -> None:
+        tmp_ctx, root, _result_dir = self._repo()
+        with tmp_ctx:
+            lanes = summary.load_scripted_lanes(
+                root / "docs" / "validation" / "daw-bench",
+                repo_root=root,
+            )
+            self.assertIn(summary.PlannedLane(
+                host="Logic Pro",
+                format="AU",
+                script=pathlib.Path("docs/validation/daw-bench/01-logic-pro-au.md"),
+            ), lanes)
+            self.assertIn(summary.PlannedLane(
+                host="AUM",
+                format="AUv3",
+                script=pathlib.Path("docs/validation/daw-bench/08-aum-auv3.md"),
+            ), lanes)
+
     def test_markdown_report_includes_run_and_confirmed_quirk_table(self) -> None:
         tmp_ctx, root, result_dir = self._repo()
         with tmp_ctx:
             path = result_dir / "reaper-vst3.daw-bench.json"
             path.write_text(json.dumps(_manifest()), encoding="utf-8")
             summaries, _results = summary.load_summaries([result_dir], repo_root=root)
-            markdown = summary.render_markdown(summaries, repo_root=root)
+            planned_lanes = summary.load_scripted_lanes(
+                root / "docs" / "validation" / "daw-bench",
+                repo_root=root,
+            )
+            markdown = summary.render_markdown(
+                summaries,
+                repo_root=root,
+                planned_lanes=planned_lanes,
+            )
             self.assertIn("- Manifests: 1", markdown)
             self.assertIn("- Confirmed capability observations: 2", markdown)
             self.assertIn("| 2026-06-12 | REAPER | VST3 |", markdown)
             self.assertIn("`load`, `params`", markdown)
             self.assertIn("`reaper_process_while_bypassed`", markdown)
             self.assertIn("docs/validation/daw-bench/results/2026-06-12/reaper-vst3.daw-bench.json", markdown)
+            self.assertIn("## Scripted Lanes Without Checked-In Manifests", markdown)
+            self.assertIn("| Logic Pro | AU | `docs/validation/daw-bench/01-logic-pro-au.md` |", markdown)
+            self.assertIn("| AUM | AUv3 | `docs/validation/daw-bench/08-aum-auv3.md` |", markdown)
 
     def test_json_report_is_machine_readable(self) -> None:
         tmp_ctx, root, result_dir = self._repo()
@@ -132,7 +165,15 @@ class DawBenchSummaryTests(unittest.TestCase):
             path = result_dir / "reaper-vst3.daw-bench.json"
             path.write_text(json.dumps(_manifest()), encoding="utf-8")
             summaries, _results = summary.load_summaries([result_dir], repo_root=root)
-            data = json.loads(summary.render_json(summaries, repo_root=root))
+            planned_lanes = summary.load_scripted_lanes(
+                root / "docs" / "validation" / "daw-bench",
+                repo_root=root,
+            )
+            data = json.loads(summary.render_json(
+                summaries,
+                repo_root=root,
+                planned_lanes=planned_lanes,
+            ))
             self.assertEqual(data["manifest_count"], 1)
             self.assertEqual(data["host_format_count"], 1)
             self.assertEqual(data["latest_result_date"], "2026-06-12")
@@ -140,6 +181,18 @@ class DawBenchSummaryTests(unittest.TestCase):
             self.assertEqual(data["confirmed_capability_observations"], 2)
             self.assertEqual(data["runs"][0]["confirmed"], ["reaper_process_while_bypassed"])
             self.assertEqual(data["runs"][0]["confirmed_capabilities"], ["load", "params"])
+            self.assertEqual(data["scripted_lanes_without_manifests"], [
+                {
+                    "format": "AU",
+                    "host": "Logic Pro",
+                    "script": "docs/validation/daw-bench/01-logic-pro-au.md",
+                },
+                {
+                    "format": "AUv3",
+                    "host": "AUM",
+                    "script": "docs/validation/daw-bench/08-aum-auv3.md",
+                },
+            ])
 
     def test_invalid_manifest_blocks_summary(self) -> None:
         tmp_ctx, root, result_dir = self._repo()

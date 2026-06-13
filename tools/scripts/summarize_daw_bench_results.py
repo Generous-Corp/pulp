@@ -21,6 +21,7 @@ import check_daw_bench_evidence as evidence
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 DEFAULT_RESULTS_DIR = evidence.DEFAULT_RESULTS_DIR
+DEFAULT_SCRIPTS_DIR = REPO_ROOT / "docs" / "validation" / "daw-bench"
 
 
 @dataclass(frozen=True)
@@ -36,6 +37,13 @@ class ResultSummary:
     refuted: tuple[str, ...]
     not_triggered: tuple[str, ...]
     confirmed_capabilities: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class PlannedLane:
+    host: str
+    format: str
+    script: pathlib.Path
 
 
 def _load_manifest(path: pathlib.Path) -> dict[str, Any]:
@@ -73,6 +81,45 @@ def _capability_names(data: dict[str, Any], observed: str) -> tuple[str, ...]:
             if isinstance(name, str):
                 out.append(name)
     return tuple(sorted(out))
+
+
+def _normalize_format(value: str) -> str:
+    normalized = value.rsplit(",", 1)[-1].strip()
+    compact = normalized.casefold().replace(" ", "")
+    aliases = {
+        "auv2": "AU",
+        "au": "AU",
+        "auv3": "AUv3",
+        "clap": "CLAP",
+        "standalone": "Standalone",
+        "vst3": "VST3",
+    }
+    return aliases.get(compact, normalized)
+
+
+def load_scripted_lanes(
+    scripts_dir: pathlib.Path = DEFAULT_SCRIPTS_DIR,
+    *,
+    repo_root: pathlib.Path = REPO_ROOT,
+) -> list[PlannedLane]:
+    lanes: list[PlannedLane] = []
+    for path in sorted(scripts_dir.glob("[0-9][0-9]-*.md")):
+        first_line = path.read_text(encoding="utf-8").splitlines()[0].strip()
+        if not first_line.startswith("# "):
+            continue
+        title = first_line[2:].strip()
+        if "—" not in title or "(" not in title or ")" not in title:
+            continue
+        host_part = title.split("—", 1)[1].strip()
+        host = host_part.split("(", 1)[0].strip()
+        fmt = host_part.rsplit("(", 1)[1].rsplit(")", 1)[0]
+        lanes.append(PlannedLane(
+            host=host,
+            format=_normalize_format(fmt),
+            script=path.resolve().relative_to(repo_root.resolve()),
+        ))
+    lanes.sort(key=lambda item: (item.format.casefold(), item.host.casefold(), item.script.as_posix()))
+    return lanes
 
 
 def load_summaries(
@@ -115,7 +162,26 @@ def _join_flags(flags: tuple[str, ...]) -> str:
     return ", ".join(f"`{flag}`" for flag in flags) if flags else "-"
 
 
-def render_markdown(summaries: list[ResultSummary], *, repo_root: pathlib.Path = REPO_ROOT) -> str:
+def missing_scripted_lanes(
+    summaries: list[ResultSummary],
+    planned_lanes: list[PlannedLane],
+) -> list[PlannedLane]:
+    covered = {
+        (item.host.casefold(), item.format.casefold())
+        for item in summaries
+    }
+    return [
+        lane for lane in planned_lanes
+        if (lane.host.casefold(), lane.format.casefold()) not in covered
+    ]
+
+
+def render_markdown(
+    summaries: list[ResultSummary],
+    *,
+    repo_root: pathlib.Path = REPO_ROOT,
+    planned_lanes: list[PlannedLane] | None = None,
+) -> str:
     lines: list[str] = ["# DAW Bench Compatibility Summary", ""]
     if not summaries:
         lines.extend(["No checked-in DAW-bench manifests found.", ""])
@@ -165,11 +231,31 @@ def render_markdown(summaries: list[ResultSummary], *, repo_root: pathlib.Path =
                 f"| `{flag}` | {item.host} | {item.format} | {item.date} | `{manifest}` |"
             )
 
+    missing_lanes = missing_scripted_lanes(summaries, planned_lanes or [])
+    if missing_lanes:
+        lines.extend([
+            "",
+            "## Scripted Lanes Without Checked-In Manifests",
+            "",
+            "These rows are manual bench scripts that still need real result evidence.",
+            "",
+            "| Host | Format | Script |",
+            "|------|--------|--------|",
+        ])
+        for lane in missing_lanes:
+            lines.append(f"| {lane.host} | {lane.format} | `{lane.script.as_posix()}` |")
+
     lines.append("")
     return "\n".join(lines)
 
 
-def render_json(summaries: list[ResultSummary], *, repo_root: pathlib.Path = REPO_ROOT) -> str:
+def render_json(
+    summaries: list[ResultSummary],
+    *,
+    repo_root: pathlib.Path = REPO_ROOT,
+    planned_lanes: list[PlannedLane] | None = None,
+) -> str:
+    missing_lanes = missing_scripted_lanes(summaries, planned_lanes or [])
     data = {
         "manifest_count": len(summaries),
         "host_format_count": len({(item.host, item.format) for item in summaries}),
@@ -194,6 +280,14 @@ def render_json(summaries: list[ResultSummary], *, repo_root: pathlib.Path = REP
             }
             for item in summaries
         ],
+        "scripted_lanes_without_manifests": [
+            {
+                "host": lane.host,
+                "format": lane.format,
+                "script": lane.script.as_posix(),
+            }
+            for lane in missing_lanes
+        ],
     }
     return json.dumps(data, indent=2, sort_keys=True) + "\n"
 
@@ -207,6 +301,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     summaries, results = load_summaries(args.paths)
+    planned_lanes = load_scripted_lanes()
     if any(not result.ok for result in results):
         print(evidence.render_results(results, scanned=len(args.paths)), file=sys.stderr)
         return 1
@@ -215,9 +310,9 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     if args.format == "json":
-        print(render_json(summaries), end="")
+        print(render_json(summaries, planned_lanes=planned_lanes), end="")
     else:
-        print(render_markdown(summaries), end="")
+        print(render_markdown(summaries, planned_lanes=planned_lanes), end="")
     return 0
 
 
