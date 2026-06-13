@@ -23,8 +23,8 @@ class ExecutionRunnerWindowsBindingsTests(unittest.TestCase):
 
     def test_windows_runner_exports_match_wrappers(self) -> None:
         expected = (
-            "run_windows_ssh_validation",
-            "windows_validation_script",
+            *self.mod.EXECUTION_RUNNER_WINDOWS_RUN_EXPORTS,
+            *self.mod.EXECUTION_RUNNER_WINDOWS_SCRIPT_EXPORTS,
         )
 
         self.assertEqual(self.mod.EXECUTION_RUNNER_WINDOWS_EXPORTS, expected)
@@ -142,6 +142,43 @@ class ExecutionRunnerWindowsBindingsTests(unittest.TestCase):
             bindings["run_windows_ssh_validation"]("windows", "host", r"C:\Repo", {"id": "job"}),
             {"target": "windows"},
         )
+        self.assertEqual(
+            bindings["windows_validation_script"](
+                "windows",
+                "host",
+                r"C:\Repo",
+                {"id": "job"},
+                bundle_name="bundle",
+                bundle_ref="ref",
+                exclude_tests="",
+                cmake_generator="Ninja",
+                resolved_platform="ARM64",
+                resolved_generator_instance="",
+            ),
+            ("script", "full"),
+        )
+        self.assertEqual(captured["runner"][0][0:4], ("windows", "host", r"C:\Repo", {"id": "job"}))
+        self.assertIs(captured["script"][1]["ps_literal_fn"], bindings["ps_literal"])
+
+    def test_install_execution_runner_windows_helpers_routes_focused_exports(self) -> None:
+        captured = {}
+
+        def runner(*args, **kwargs):
+            captured["runner"] = (args, kwargs)
+            return {"target": "windows"}
+
+        def script_runner(*args, **kwargs):
+            captured["script"] = (args, kwargs)
+            return "script", "full"
+
+        bindings = self._bindings(runner, script_runner)
+
+        self.mod.install_execution_runner_windows_helpers(
+            bindings,
+            ("run_windows_ssh_validation", "windows_validation_script"),
+        )
+
+        self.assertEqual(bindings["run_windows_ssh_validation"]("windows", "host", r"C:\Repo", {"id": "job"}), {"target": "windows"})
         self.assertEqual(
             bindings["windows_validation_script"](
                 "windows",
