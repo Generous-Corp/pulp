@@ -75,6 +75,7 @@ def _apply_desktop_video_recipe(args: argparse.Namespace) -> None:
             raise ValueError("recipe `component-zoom` requires --component-id or a click selector.")
         args.capture_ui_snapshot = True
         args.capture_before = True
+        _set_default(args, "video_template", "component-zoom")
         _set_default(args, "label", f"component-{args.click_view_id or component_id or 'zoom'}-proof")
         _set_default(args, "video_title", "Component validation")
         return

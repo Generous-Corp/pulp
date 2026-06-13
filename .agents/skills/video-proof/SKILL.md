@@ -243,6 +243,12 @@ rather than the wrapper process window. The `audio-inspector-demo` recipe is a s
 built standalone demo binary; pass the command path for the build directory you
 want to validate.
 
+The `component-zoom` recipe selects the Remotion `component-zoom` template. It
+stores `video_proof_composition.focus` from the click selector and resolved
+content point, so the composed proof shows a component label, focus rectangle,
+and zoom detail inset. Use it when the reviewer should inspect one specific
+control instead of hunting through the full app window.
+
 The same recorder can be enabled on lower-level desktop actions:
 
 ```bash

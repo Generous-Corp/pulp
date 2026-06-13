@@ -306,6 +306,7 @@ class DesktopActionCommandsCliTests(unittest.TestCase):
         self.assertEqual(call["click_view_id"], "threshold")
         self.assertTrue(call["capture_ui_snapshot"])
         self.assertTrue(call["capture_before"])
+        self.assertEqual(call["video_template"], "component-zoom")
         self.assertEqual(call["label"], "component-threshold-proof")
         self.assertEqual(call["video_title"], "Component validation")
 

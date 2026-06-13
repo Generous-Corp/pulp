@@ -8,6 +8,47 @@ from pathlib import Path
 import uuid
 
 
+def _component_focus_summary(
+    *,
+    video_template: str | None,
+    interaction_summary: dict | None,
+    content_size: tuple[float, float],
+) -> dict | None:
+    if video_template != "component-zoom" or not interaction_summary:
+        return None
+    click = interaction_summary.get("click") if isinstance(interaction_summary.get("click"), dict) else {}
+    selector = click.get("selector") if isinstance(click.get("selector"), dict) else {}
+    content_point = click.get("content_point") if isinstance(click.get("content_point"), dict) else None
+    focus: dict = {
+        "kind": "component",
+        "selector": selector,
+    }
+    label = (
+        selector.get("click_view_id")
+        or selector.get("id")
+        or selector.get("click_view_label")
+        or selector.get("label")
+        or selector.get("click_view_text")
+        or selector.get("text")
+        or selector.get("click_view_type")
+        or selector.get("type")
+    )
+    if label:
+        focus["label"] = str(label)
+    if content_point:
+        width, height = content_size
+        x = float(content_point.get("x", 0.0))
+        y = float(content_point.get("y", 0.0))
+        focus["content_point"] = {"x": x, "y": y}
+        if width > 0 and height > 0:
+            focus["normalized_center"] = {
+                "x": max(0.0, min(1.0, x / width)),
+                "y": max(0.0, min(1.0, y / height)),
+            }
+            focus["normalized_size"] = {"width": 0.26, "height": 0.24}
+    return focus
+
+
 def run_macos_local_smoke(
     config: dict,
     command: str | None,
@@ -383,6 +424,15 @@ def run_macos_local_smoke(
             manifest["inspector"] = inspector_summary
         if interaction_summary is not None:
             manifest["interaction"] = interaction_summary
+        focus_summary = _component_focus_summary(
+            video_template=video_template,
+            interaction_summary=interaction_summary,
+            content_size=content_size,
+        )
+        if focus_summary is not None:
+            composition = manifest.setdefault("video_proof_composition", {})
+            composition["template"] = video_template or composition.get("template") or "component-zoom"
+            composition["focus"] = focus_summary
         if video_capture_target == "terminal":
             manifest["terminal"] = {
                 "returncode": terminal_returncode,

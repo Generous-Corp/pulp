@@ -64,7 +64,7 @@ const firstPresentSelector = (selector) => {
 	if (!selector || typeof selector !== 'object') {
 		return null;
 	}
-	for (const key of ['id', 'label', 'text', 'type', 'point']) {
+	for (const key of ['id', 'label', 'text', 'type', 'click_view_id', 'click_view_label', 'click_view_text', 'click_view_type', 'point']) {
 		if (selector[key]) {
 			return `${key}: ${selector[key]}`;
 		}
@@ -75,6 +75,7 @@ const firstPresentSelector = (selector) => {
 const stepItemsFor = (manifest, videoMeta, issueMeta, proofNotes = []) => {
 	const interaction = manifest.interaction || {};
 	const selectorLabel = firstPresentSelector(interaction.click?.selector);
+	const focusLabel = manifest.video_proof_composition?.focus?.label;
 	const clickPoint = interaction.click?.content_point || interaction.click?.screen_point;
 	const clickDetail = selectorLabel || (clickPoint ? `point: ${Math.round(clickPoint.x)},${Math.round(clickPoint.y)}` : null);
 	const actionDetail = interaction.mode
@@ -82,6 +83,38 @@ const stepItemsFor = (manifest, videoMeta, issueMeta, proofNotes = []) => {
 		: proofNotes.length
 			? proofNotes.slice(0, 2).join(' ')
 			: 'no interaction recorded';
+	const captureDetail = [
+		videoMeta.mode || 'video proof',
+		videoMeta.duration_secs ? `${videoMeta.duration_secs}s` : null,
+		videoMeta.fps ? `${Math.round(videoMeta.fps)} fps` : null,
+	]
+		.filter(Boolean)
+		.join(' / ');
+	const reviewDetail = issueMeta.status
+		? `${issueMeta.status}${issueMeta.selected_attempt ? ` (${issueMeta.selected_attempt})` : ''}`
+		: videoMeta.size?.fits_attachment_budget === false
+			? 'needs hosted fallback'
+			: 'issue attachment ready';
+	if (focusLabel) {
+		return [
+			{
+				label: 'Launch',
+				detail: `${manifest.target || 'target'}/${manifest.action || 'run'}`,
+			},
+			{
+				label: 'Focus',
+				detail: `${focusLabel}${clickDetail ? ` via ${clickDetail}` : ''}`,
+			},
+			{
+				label: 'Action',
+				detail: `${actionDetail}${captureDetail ? ` / ${captureDetail}` : ''}`,
+			},
+			{
+				label: 'Review',
+				detail: reviewDetail,
+			},
+		];
+	}
 	return [
 		{
 			label: 'Launch',
@@ -93,21 +126,11 @@ const stepItemsFor = (manifest, videoMeta, issueMeta, proofNotes = []) => {
 		},
 		{
 			label: 'Capture',
-			detail: [
-				videoMeta.mode || 'video proof',
-				videoMeta.duration_secs ? `${videoMeta.duration_secs}s` : null,
-				videoMeta.fps ? `${Math.round(videoMeta.fps)} fps` : null,
-			]
-				.filter(Boolean)
-				.join(' / '),
+			detail: captureDetail,
 		},
 		{
 			label: 'Review',
-			detail: issueMeta.status
-				? `${issueMeta.status}${issueMeta.selected_attempt ? ` (${issueMeta.selected_attempt})` : ''}`
-				: videoMeta.size?.fits_attachment_budget === false
-					? 'needs hosted fallback'
-					: 'issue attachment ready',
+			detail: reviewDetail,
 		},
 	];
 };
@@ -180,6 +203,7 @@ const main = async () => {
 				issueStatus: issueMeta.status || null,
 				issueSelectedAttempt: issueMeta.selected_attempt || null,
 				imageChanged: artifacts.image_change?.changed ?? null,
+				focus: manifest.video_proof_composition?.focus || null,
 				stepItems: stepItemsFor(manifest, videoMeta, issueMeta, proofNotes),
 				notes: [
 					...proofNotes,

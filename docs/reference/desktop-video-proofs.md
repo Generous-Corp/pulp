@@ -198,7 +198,10 @@ python3 tools/local-ci/local_ci.py desktop video mac \
 
 `component-zoom` enables ViewInspector capture and before/diff capture, then
 uses `--component-id` as the click target when no explicit click selector was
-provided. `audio-inspector-demo` records a smoke proof of a built standalone
+provided. It also selects the Remotion `component-zoom` template and records
+`video_proof_composition.focus` metadata so the composed proof can show a
+component label, focus rectangle, and zoom detail inset. `audio-inspector-demo`
+records a smoke proof of a built standalone
 Audio Inspector demo window without requiring a UI snapshot artifact.
 `design-parity` records an inspect proof and composes it with the Remotion
 `design-parity` template directly during capture.

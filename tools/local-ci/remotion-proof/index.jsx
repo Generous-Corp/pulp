@@ -27,6 +27,7 @@ const defaultProps = {
 	issueStatus: null,
 	issueSelectedAttempt: null,
 	imageChanged: null,
+	focus: null,
 	stepItems: [],
 	notes: [],
 };

@@ -408,6 +408,27 @@ class MacosDesktopActionTests(unittest.TestCase):
         self.assertEqual(manifest["video_proof_composition"]["source_image"], str(reference.resolve()))
         self.assertEqual(manifest["video_proof_composition"]["notes"], ["Reference matches implementation"])
 
+    def test_run_macos_local_smoke_adds_component_zoom_focus_context(self) -> None:
+        manifest, _launched, _terminated, _waited_paths, _rollups = self.run_action(
+            action_name="click",
+            record_video=True,
+            compose_video_proof=True,
+            capture_ui_snapshot=True,
+            capture_before=True,
+            click_view_id="bypass-toggle",
+            video_template="component-zoom",
+            video_title="Component validation",
+        )
+
+        composition = manifest["video_proof_composition"]
+        self.assertEqual(composition["template"], "component-zoom")
+        self.assertEqual(composition["focus"]["label"], "bypass-toggle")
+        self.assertEqual(composition["focus"]["selector"]["click_view_id"], "bypass-toggle")
+        self.assertEqual(composition["focus"]["content_point"], {"x": 12.0, "y": 24.0})
+        self.assertAlmostEqual(composition["focus"]["normalized_center"]["x"], 12.0 / 320.0)
+        self.assertAlmostEqual(composition["focus"]["normalized_center"]["y"], 24.0 / 200.0)
+        self.assertEqual(manifest["video_composed"]["kwargs"]["template"], "component-zoom")
+
     def test_run_macos_local_smoke_rejects_view_click_without_snapshot(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "View-targeted click requires"):
             self.run_action(

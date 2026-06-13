@@ -45,6 +45,8 @@ const pillText = (value) => {
 	return 'Size pending';
 };
 
+const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+
 const proofStyle = {
 	fontFamily:
 		'-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
@@ -78,6 +80,7 @@ export const ValidationProof = ({
 	issueStatus,
 	issueSelectedAttempt,
 	imageChanged,
+	focus,
 	stepItems,
 	notes,
 }) => {
@@ -93,6 +96,24 @@ export const ValidationProof = ({
 	const noteItems = Array.isArray(notes) ? notes.slice(0, 4) : [];
 	const steps = Array.isArray(stepItems) ? stepItems.slice(0, 4) : [];
 	const designParity = template === 'design-parity' && sourceImageFileName;
+	const componentZoom = template === 'component-zoom';
+	const focusCenter = focus?.normalized_center || {x: 0.5, y: 0.5};
+	const focusSize = focus?.normalized_size || {width: 0.26, height: 0.24};
+	const focusBox = {
+		left: `${clamp((focusCenter.x || 0.5) - (focusSize.width || 0.26) / 2, 0.04, 0.86) * 100}%`,
+		top: `${clamp((focusCenter.y || 0.5) - (focusSize.height || 0.24) / 2, 0.06, 0.82) * 100}%`,
+		width: `${clamp(focusSize.width || 0.26, 0.14, 0.48) * 100}%`,
+		height: `${clamp(focusSize.height || 0.24, 0.12, 0.42) * 100}%`,
+	};
+	const focusLabel = focus?.label || 'Selected component';
+	const focusPulse = interpolate(frame, [70, 92, 116, 138], [0.85, 1, 0.88, 1], {
+		extrapolateLeft: 'clamp',
+		extrapolateRight: 'clamp',
+	});
+	const focusScale = interpolate(frame, [64, 100, 170], [1, 1.18, 1.18], {
+		extrapolateLeft: 'clamp',
+		extrapolateRight: 'clamp',
+	});
 	const issueText = issueStatus
 		? `${issueStatus}${issueSelectedAttempt ? ` (${issueSelectedAttempt})` : ''}`
 		: pillText(fitsAttachmentBudget);
@@ -227,6 +248,82 @@ export const ValidationProof = ({
 						>
 							{imageChanged ? 'Visual change detected' : 'No visual diff'}
 						</div>
+					) : null}
+					{componentZoom ? (
+						<>
+							<div
+								style={{
+									position: 'absolute',
+									...focusBox,
+									border: '4px solid #2dd4bf',
+									borderRadius: 18,
+									boxShadow: `0 0 0 ${10 * focusPulse}px rgba(45, 212, 191, 0.18), 0 18px 42px rgba(15, 23, 42, 0.28)`,
+								}}
+							/>
+							<div
+								style={{
+									position: 'absolute',
+									left: 22,
+									top: 22,
+									padding: '10px 14px',
+									borderRadius: 12,
+									background: 'rgba(15, 118, 110, 0.88)',
+									color: '#f8fafc',
+									fontSize: 19,
+									fontWeight: 780,
+								}}
+							>
+								Focus: {focusLabel}
+							</div>
+							<div
+								style={{
+									position: 'absolute',
+									right: 20,
+									bottom: 20,
+									width: 284,
+									height: 166,
+									border: '3px solid rgba(255,255,255,0.92)',
+									borderRadius: 16,
+									background: '#020617',
+									boxShadow: '0 20px 54px rgba(2, 6, 23, 0.48)',
+									overflow: 'hidden',
+								}}
+							>
+								<div
+									style={{
+										position: 'absolute',
+										inset: 0,
+										transform: `scale(${focusScale})`,
+										transformOrigin: `${clamp(focusCenter.x || 0.5, 0.05, 0.95) * 100}% ${clamp(focusCenter.y || 0.5, 0.05, 0.95) * 100}%`,
+									}}
+								>
+									{videoFileName ? (
+										<Video
+											src={staticFile(videoFileName)}
+											style={{width: '100%', height: '100%', objectFit: 'contain'}}
+										/>
+									) : posterFileName ? (
+										<Img
+											src={staticFile(posterFileName)}
+											style={{width: '100%', height: '100%', objectFit: 'contain'}}
+										/>
+									) : null}
+								</div>
+								<div
+									style={{
+										position: 'absolute',
+										left: 12,
+										top: 10,
+										color: '#f8fafc',
+										fontSize: 16,
+										fontWeight: 760,
+										textShadow: '0 1px 6px rgba(2, 6, 23, 0.8)',
+									}}
+								>
+									zoom detail
+								</div>
+							</div>
+						</>
 					) : null}
 				</div>
 				<div
