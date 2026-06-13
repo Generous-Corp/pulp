@@ -18,6 +18,16 @@ class LinuxDesktopBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
 
+    def test_linux_desktop_exports_include_action_exports(self):
+        self.assertEqual(
+            self.mod.LINUX_DESKTOP_EXPORTS,
+            (
+                "fetch_ssh_artifact",
+                "cleanup_remote_ssh_dir",
+                *self.mod.LINUX_DESKTOP_ACTION_EXPORTS,
+            ),
+        )
+
     def test_run_linux_xvfb_remote_action_binds_facade_dependencies(self):
         captured = {}
 

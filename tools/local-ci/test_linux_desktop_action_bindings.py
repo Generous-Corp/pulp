@@ -20,6 +20,13 @@ class LinuxDesktopActionBindingsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
 
+    def test_action_exports_match_wrappers(self) -> None:
+        expected = ("run_linux_xvfb_remote_action",)
+
+        self.assertEqual(self.mod.LINUX_DESKTOP_ACTION_EXPORTS, expected)
+        for name in expected:
+            self.assertTrue(callable(getattr(self.mod, name)))
+
     def test_run_linux_xvfb_remote_action_binds_facade_dependencies(self) -> None:
         captured = {}
 
@@ -98,6 +105,70 @@ class LinuxDesktopActionBindingsTests(unittest.TestCase):
         self.assertIs(captured["kwargs"]["cleanup_remote_ssh_dir_fn"], bindings["cleanup_remote_ssh_dir"])
         self.assertIs(captured["kwargs"]["write_desktop_run_rollups_fn"], bindings["write_desktop_run_rollups"])
         self.assertIs(captured["kwargs"]["view_tree_inspector_summary_fn"], desktop_actions.view_tree_inspector_summary)
+
+    def test_install_linux_desktop_action_helpers_wires_named_exports(self) -> None:
+        captured = {}
+
+        def action_runner(*args, **kwargs):
+            captured["args"] = args
+            return {"installed": True}
+
+        desktop_actions = types.SimpleNamespace(
+            desktop_action_artifact_paths=object(),
+            desktop_interaction_requested=object(),
+            view_tree_inspector_summary=object(),
+            pulp_app_interaction_summary=object(),
+        )
+        bindings = {
+            "_desktop_actions": desktop_actions,
+            "_linux_desktop_action": types.SimpleNamespace(run_linux_xvfb_remote_action=action_runner),
+            "subprocess": types.SimpleNamespace(run=object()),
+        }
+        for name in [
+            "ensure_host_reachable",
+            "probe_linux_launch_backend",
+            "create_desktop_run_bundle",
+            "prepare_linux_exact_sha_source",
+            "remote_linux_bundle_relpath",
+            "build_linux_xvfb_remote_command",
+            "build_linux_window_driver_remote_command",
+            "fetch_ssh_artifact",
+            "cleanup_remote_ssh_dir",
+            "default_desktop_label",
+            "image_change_summary",
+            "parse_coordinate_pair",
+            "attach_desktop_source_to_manifest",
+            "atomic_write_text",
+            "write_desktop_run_rollups",
+            "now_iso",
+        ]:
+            bindings[name] = object()
+
+        self.mod.install_linux_desktop_action_helpers(bindings)
+
+        self.assertEqual(
+            bindings["run_linux_xvfb_remote_action"](
+                {"defaults": {}},
+                "ubuntu",
+                {"adapter": "linux-xvfb"},
+                "./tool",
+                action_name="smoke",
+                label=None,
+                output_path=None,
+                pulp_app_automation=False,
+                capture_ui_snapshot=False,
+                click_point=None,
+                click_view_id=None,
+                click_view_type=None,
+                click_view_text=None,
+                click_view_label=None,
+                capture_before=False,
+                settle_secs=0.0,
+                timeout_secs=1.0,
+            ),
+            {"installed": True},
+        )
+        self.assertEqual(captured["args"], ({"defaults": {}}, "ubuntu", {"adapter": "linux-xvfb"}, "./tool"))
 
 
 if __name__ == "__main__":

@@ -18,6 +18,9 @@ class WindowsDesktopBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
 
+    def test_windows_desktop_exports_are_composed_from_action_exports(self):
+        self.assertEqual(self.mod.WINDOWS_DESKTOP_EXPORTS, self.mod.WINDOWS_DESKTOP_ACTION_EXPORTS)
+
     def test_run_windows_session_agent_action_binds_facade_dependencies(self):
         captured = {}
 

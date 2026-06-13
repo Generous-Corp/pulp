@@ -6,6 +6,10 @@ from collections.abc import Mapping
 from typing import Any
 
 from binding_utils import binding as _binding
+from binding_utils import install_local_helpers
+
+
+WINDOWS_DESKTOP_ACTION_EXPORTS = ("run_windows_session_agent_action",)
 
 
 def run_windows_session_agent_action(
@@ -79,3 +83,10 @@ def run_windows_session_agent_action(
         write_desktop_run_rollups_fn=_binding(bindings, "write_desktop_run_rollups"),
         now_iso_fn=_binding(bindings, "now_iso"),
     )
+
+
+def install_windows_desktop_action_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = WINDOWS_DESKTOP_ACTION_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)

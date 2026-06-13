@@ -18,6 +18,9 @@ class MacosDesktopBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
 
+    def test_macos_desktop_exports_are_composed_from_smoke_exports(self):
+        self.assertEqual(self.mod.MACOS_DESKTOP_EXPORTS, self.mod.MACOS_DESKTOP_SMOKE_EXPORTS)
+
     def test_run_macos_local_smoke_binds_facade_dependencies(self):
         captured = {}
 

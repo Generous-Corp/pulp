@@ -6,6 +6,10 @@ from collections.abc import Mapping
 from typing import Any
 
 from binding_utils import binding as _binding
+from binding_utils import install_local_helpers
+
+
+LINUX_DESKTOP_ACTION_EXPORTS = ("run_linux_xvfb_remote_action",)
 
 
 def run_linux_xvfb_remote_action(
@@ -74,3 +78,10 @@ def run_linux_xvfb_remote_action(
         view_tree_inspector_summary_fn=desktop_actions.view_tree_inspector_summary,
         pulp_app_interaction_summary_fn=desktop_actions.pulp_app_interaction_summary,
     )
+
+
+def install_linux_desktop_action_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = LINUX_DESKTOP_ACTION_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)
