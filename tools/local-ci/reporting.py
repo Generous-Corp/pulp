@@ -416,6 +416,108 @@ def desktop_review_package(index_payload: dict, *, publish_dir: Path) -> dict:
     }
 
 
+def desktop_review_issue_draft(
+    review_package: dict,
+    *,
+    package_path: Path,
+    title: str | None = None,
+    repo: str | None = None,
+) -> dict:
+    package_dir = package_path.parent
+    issue_title = title or f"Review desktop validation video proof: {review_package.get('label') or package_dir.name}"
+    attachments: list[dict] = []
+    fallback_links: list[dict] = []
+    body_lines = [
+        f"# {issue_title}",
+        "",
+        "Desktop validation video proof is ready for human review.",
+        "",
+        "## What to review",
+        "",
+        "- Watch the attached MP4 when an attachment is listed below.",
+        "- If the MP4 is too large or unavailable, use the served report link from the fallback section.",
+        "- Comment `looks good to me` when the proof is accepted. The local verdict command can then mark the run approved and the review issue can be closed.",
+        "",
+        "## Report",
+        "",
+        f"- Local report: `{review_package.get('index_html') or package_dir / 'index.html'}`",
+        f"- Review markdown: `{review_package.get('review_markdown') or package_dir / 'review.md'}`",
+    ]
+    serve_command = review_package.get("serve_command")
+    if serve_command:
+        body_lines.append(f"- Serve command: `{serve_command}`")
+    body_lines.extend(["", "## Runs", ""])
+    for index, run in enumerate(review_package.get("runs") or [], start=1):
+        attachment = run.get("attachment") if isinstance(run.get("attachment"), dict) else {}
+        fallback = run.get("fallback") if isinstance(run.get("fallback"), dict) else {}
+        context = run.get("context") if isinstance(run.get("context"), dict) else {}
+        status = attachment.get("status") or "fallback-link"
+        attach_path = attachment.get("path") if isinstance(attachment.get("path"), str) else None
+        body_lines.extend(
+            [
+                f"### {index}. {run.get('target') or '?'}/{run.get('action') or '?'} - {run.get('label') or '?'}",
+                "",
+                f"- Template: `{run.get('template') or 'not recorded'}`",
+                f"- Attachment decision: `{status}`",
+                f"- Attachment reason: {attachment.get('reason') or 'not recorded'}",
+            ]
+        )
+        for key, value in list(context.items())[:8]:
+            body_lines.append(f"- Context {key}: `{value}`")
+        for note in (run.get("notes") or [])[:5]:
+            body_lines.append(f"- Proof note: {note}")
+        if attach_path and status in {"attach-primary", "attach-small"}:
+            item = {
+                "run_index": index,
+                "status": status,
+                "path": attach_path,
+                "relative_path": attachment.get("relative_path"),
+                "size_bytes": attachment.get("size_bytes"),
+                "budget_bytes": attachment.get("budget_bytes"),
+                "reason": attachment.get("reason"),
+            }
+            attachments.append(item)
+            body_lines.append(f"- Attach MP4: `{attach_path}`")
+        else:
+            fallback_item = {
+                "run_index": index,
+                "status": status,
+                "report_path": fallback.get("report_path") or review_package.get("index_html"),
+                "review_markdown": fallback.get("review_markdown") or review_package.get("review_markdown"),
+                "serve_command": fallback.get("serve_command") or serve_command,
+                "internal_ephemeral": bool(fallback.get("internal_ephemeral", True)),
+                "reason": attachment.get("reason"),
+            }
+            fallback_links.append(fallback_item)
+            body_lines.append("- Attach MP4: not available within budget; use the served report link.")
+        body_lines.append("")
+    body_lines.extend(
+        [
+            "## Closeout",
+            "",
+            "After a reviewer comments `looks good to me`, run the matching `desktop verdict ... --approved --issue-url <issue-url>` command from `review.md`, then close this review issue.",
+            "",
+        ]
+    )
+    draft: dict = {
+        "kind": "desktop-video-proof-github-issue-draft",
+        "title": issue_title,
+        "body": "\n".join(body_lines),
+        "body_file": str(package_dir / "github-issue.md"),
+        "json_file": str(package_dir / "github-issue.json"),
+        "review_package": str(package_path),
+        "attachments": attachments,
+        "fallback_links": fallback_links,
+        "close_trigger": "looks good to me",
+    }
+    if repo:
+        draft["repo"] = repo
+        draft["create_command"] = f"gh issue create --repo {repo} --title {json.dumps(issue_title)} --body-file {draft['body_file']}"
+    else:
+        draft["create_command"] = f"gh issue create --title {json.dumps(issue_title)} --body-file {draft['body_file']}"
+    return draft
+
+
 def stage_desktop_publish_report(
     config: dict,
     manifests: list[dict],

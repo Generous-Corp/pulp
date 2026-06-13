@@ -853,6 +853,10 @@ def stage_desktop_publish_report(
     )
 
 
+def desktop_review_issue_draft(review_package: dict, *, package_path: Path, title: str | None = None, repo: str | None = None) -> dict:
+    return _reporting.desktop_review_issue_draft(review_package, package_path=package_path, title=title, repo=repo)
+
+
 def desktop_publish_reports(config: dict, *, limit: int | None = None) -> list[dict]:
     return _desktop_reporting_bindings.desktop_publish_reports(globals(), config, limit=limit)
 
@@ -2531,6 +2535,10 @@ def cmd_desktop_publish(args: argparse.Namespace) -> int:
 
 def cmd_desktop_verdict(args: argparse.Namespace) -> int:
     return _desktop_command_bindings.cmd_desktop_verdict(globals(), args)
+
+
+def cmd_desktop_review_issue(args: argparse.Namespace) -> int:
+    return _desktop_command_bindings.cmd_desktop_review_issue(globals(), args)
 
 
 def cmd_desktop_compose_video(args: argparse.Namespace) -> int:

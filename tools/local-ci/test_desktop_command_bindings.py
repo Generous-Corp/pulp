@@ -86,6 +86,7 @@ class DesktopCommandBindingsTests(unittest.TestCase):
             "parse_config_bool",
             "normalize_desktop_config",
             "stage_desktop_publish_report",
+            "desktop_review_issue_draft",
             "prune_desktop_run_manifests",
             "write_desktop_run_rollups",
             "make_desktop_source_request",
@@ -230,6 +231,12 @@ class DesktopCommandBindingsTests(unittest.TestCase):
                 "cmd_desktop_verdict",
                 self.mod.cmd_desktop_verdict,
                 ["now_iso", "atomic_write_text"],
+                {},
+            ),
+            (
+                "cmd_desktop_review_issue",
+                self.mod.cmd_desktop_review_issue,
+                ["desktop_review_issue_draft", "atomic_write_text"],
                 {},
             ),
             (

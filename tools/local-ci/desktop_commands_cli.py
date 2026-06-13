@@ -504,6 +504,54 @@ def cmd_desktop_verdict(
     return 0
 
 
+def _review_package_path(path_value: str) -> Path:
+    path = Path(path_value).expanduser().resolve()
+    if path.is_dir():
+        path = path / "review-package.json"
+    return path
+
+
+def cmd_desktop_review_issue(
+    args: argparse.Namespace,
+    *,
+    desktop_review_issue_draft_fn: Callable[..., dict],
+    atomic_write_text_fn: Callable[[Path, str], None],
+    print_fn: Callable[[str], None] = print,
+) -> int:
+    package_path = _review_package_path(args.path)
+    if not package_path.exists():
+        print_fn(f"Error: review package not found: {package_path}")
+        return 1
+    try:
+        review_package = json.loads(package_path.read_text())
+    except json.JSONDecodeError as exc:
+        print_fn(f"Error: invalid review package JSON: {exc}")
+        return 1
+    draft = desktop_review_issue_draft_fn(
+        review_package,
+        package_path=package_path,
+        title=args.title,
+        repo=args.repo,
+    )
+    body_path = Path(args.body_output).expanduser().resolve() if args.body_output else Path(draft["body_file"])
+    json_path = Path(args.json_output).expanduser().resolve() if args.json_output else Path(draft["json_file"])
+    draft["body_file"] = str(body_path)
+    draft["json_file"] = str(json_path)
+    atomic_write_text_fn(body_path, draft["body"])
+    atomic_write_text_fn(json_path, json.dumps(draft, indent=2) + "\n")
+    if args.json:
+        print_fn(json.dumps(draft, indent=2))
+    else:
+        print_fn("Desktop video review issue draft ready:")
+        print_fn(f"  title: {draft['title']}")
+        print_fn(f"  body_file: {draft['body_file']}")
+        print_fn(f"  json_file: {draft['json_file']}")
+        print_fn(f"  attachments: {len(draft.get('attachments') or [])}")
+        print_fn(f"  fallback_links: {len(draft.get('fallback_links') or [])}")
+        print_fn(f"  create_command: {draft['create_command']}")
+    return 0
+
+
 def cmd_desktop_compose_video(
     args: argparse.Namespace,
     *,

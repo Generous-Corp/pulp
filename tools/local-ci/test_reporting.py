@@ -258,6 +258,69 @@ class ReportingTests(unittest.TestCase):
         self.assertIn("Source reference: `", review_text)
         self.assertIn("Proof note: Source import matches the native render.", review_text)
 
+    def test_desktop_review_issue_draft_lists_attachments_and_fallbacks(self) -> None:
+        package_path = self.root / "report" / "review-package.json"
+        package_path.parent.mkdir(parents=True)
+        review_package = {
+            "label": "Video Proof",
+            "index_html": str(package_path.parent / "index.html"),
+            "review_markdown": str(package_path.parent / "review.md"),
+            "serve_command": "python3 tools/local-ci/local_ci.py desktop serve /tmp/report --host 0.0.0.0 --port 8765",
+            "runs": [
+                {
+                    "target": "mac",
+                    "action": "click",
+                    "label": "component",
+                    "template": "component-zoom",
+                    "context": {"component": "bypass-toggle"},
+                    "notes": ["Toggle changes state."],
+                    "attachment": {
+                        "status": "attach-primary",
+                        "path": str(package_path.parent / "proof.issue.mp4"),
+                        "relative_path": "assets/proof.issue.mp4",
+                        "size_bytes": 250000,
+                        "budget_bytes": 100000000,
+                        "reason": "primary issue MP4 fits the configured attachment budget",
+                    },
+                },
+                {
+                    "target": "mac",
+                    "action": "smoke",
+                    "label": "large-proof",
+                    "template": "plugin-host",
+                    "attachment": {
+                        "status": "fallback-link",
+                        "reason": "no issue-ready MP4 fits the configured attachment budget",
+                    },
+                    "fallback": {
+                        "report_path": str(package_path.parent / "index.html"),
+                        "review_markdown": str(package_path.parent / "review.md"),
+                        "serve_command": "python3 tools/local-ci/local_ci.py desktop serve /tmp/report --host 0.0.0.0 --port 8765",
+                        "internal_ephemeral": True,
+                    },
+                },
+            ],
+        }
+
+        draft = self.mod.desktop_review_issue_draft(
+            review_package,
+            package_path=package_path,
+            title="Review proof",
+            repo="danielraffel/pulp",
+        )
+
+        self.assertEqual(draft["kind"], "desktop-video-proof-github-issue-draft")
+        self.assertEqual(draft["title"], "Review proof")
+        self.assertEqual(len(draft["attachments"]), 1)
+        self.assertEqual(draft["attachments"][0]["relative_path"], "assets/proof.issue.mp4")
+        self.assertEqual(len(draft["fallback_links"]), 1)
+        self.assertTrue(draft["fallback_links"][0]["internal_ephemeral"])
+        self.assertIn("gh issue create --repo danielraffel/pulp", draft["create_command"])
+        self.assertIn("looks good to me", draft["body"])
+        self.assertIn("Attach MP4: `", draft["body"])
+        self.assertIn("Context component: `bypass-toggle`", draft["body"])
+        self.assertIn("use the served report link", draft["body"])
+
     def test_manifest_scanning_and_run_rollups_use_latest_passing_proof(self) -> None:
         root = self.artifact_root(self.config)
         old_bundle = root / "mac" / "smoke" / "20260522-old"

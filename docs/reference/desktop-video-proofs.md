@@ -389,8 +389,8 @@ is available. Set `PULP_DESKTOP_SERVE_HOSTS=blackbook.tailnet-name.ts.net` when
 you already know the friendly Tailnet DNS name you want reviewers to tap.
 
 `desktop publish` also writes `review.md` and `review-package.json` next to
-`index.html`. Use `review.md` as the GitHub issue body. It includes the local
-report path, a Tailscale/local serve command, each run's video artifact,
+`index.html`. `review.md` is the human issue body. It includes the local report
+path, a Tailscale/local serve command, each run's video artifact,
 attachment-budget status, and the expected reviewer response.
 `review-package.json` is the machine-readable handoff for future upload
 automation: it records each run's primary or small attachment decision, absolute
@@ -402,14 +402,31 @@ concrete attach/do-not-attach decision and `desktop verdict` commands for
 approval or follow-up. GitHub's
 current hosted attachment policy is 100 MB for paid-plan video uploads when the
 uploader is eligible; otherwise plan for the 10 MB video cap and use the served
-report link. The intended review loop is:
+report link.
+
+Generate a local GitHub issue draft from the review package before opening the
+issue:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop review-issue /path/to/published-report \
+  --repo owner/repo
+```
+
+The command accepts either the report directory or its `review-package.json`.
+It writes `github-issue.md` and `github-issue.json` next to the report without
+calling GitHub. The JSON draft lists attachable MP4 paths, fallback links,
+the close trigger (`looks good to me`), and a suggested `gh issue create`
+command.
+
+The intended review loop is:
 
 1. Publish the report.
-2. Open a GitHub issue with the generated `review.md` body.
-3. Attach the MP4 manually when it fits the configured budget, or use the served
+2. Generate `github-issue.md` / `github-issue.json` with `desktop review-issue`.
+3. Open a GitHub issue with `github-issue.md`.
+4. Attach the MP4 manually when it fits the configured budget, or use the served
    report link when it does not.
-4. Record the review verdict in the run manifest once the reviewer responds.
-5. Close the issue once the reviewer comments `looks good to me`.
+5. Record the review verdict in the run manifest once the reviewer responds.
+6. Close the issue once the reviewer comments `looks good to me`.
 
 ```bash
 python3 tools/local-ci/local_ci.py desktop verdict /path/to/run/manifest.json \

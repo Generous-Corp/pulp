@@ -219,6 +219,32 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(args.manifest, ["/tmp/run-a/manifest.json", "/tmp/run-b/manifest.json"])
         self.assertEqual(args.label, "video-review")
 
+    def test_desktop_review_issue_parses_package_and_outputs(self):
+        parser = self.build_parser()
+
+        args = parser.parse_args([
+            "desktop",
+            "review-issue",
+            "/tmp/report/review-package.json",
+            "--title",
+            "Review proof",
+            "--repo",
+            "danielraffel/pulp",
+            "--body-output",
+            "/tmp/body.md",
+            "--json-output",
+            "/tmp/body.json",
+            "--json",
+        ])
+
+        self.assertEqual(args.desktop_command, "review-issue")
+        self.assertEqual(args.path, "/tmp/report/review-package.json")
+        self.assertEqual(args.title, "Review proof")
+        self.assertEqual(args.repo, "danielraffel/pulp")
+        self.assertEqual(args.body_output, "/tmp/body.md")
+        self.assertEqual(args.json_output, "/tmp/body.json")
+        self.assertTrue(args.json)
+
     def test_desktop_video_doctor_defaults_to_mac(self):
         parser = self.build_parser()
 

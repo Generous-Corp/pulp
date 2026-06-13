@@ -397,6 +397,14 @@ def build_local_ci_parser(
     p_desktop_verdict.add_argument("--issue-url", default="", help="Optional GitHub review issue URL")
     p_desktop_verdict.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 
+    p_desktop_review_issue = desktop_sub.add_parser("review-issue", help="Create a local GitHub issue draft from a video review package")
+    p_desktop_review_issue.add_argument("path", help="Path to review-package.json or a published report directory")
+    p_desktop_review_issue.add_argument("--title", help="Optional issue title override")
+    p_desktop_review_issue.add_argument("--repo", help="Optional GitHub repo for the suggested gh issue create command")
+    p_desktop_review_issue.add_argument("--body-output", help="Optional markdown body output path")
+    p_desktop_review_issue.add_argument("--json-output", help="Optional JSON draft output path")
+    p_desktop_review_issue.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+
     p_desktop_compose_video = desktop_sub.add_parser("compose-video", help="Render or rerender a Remotion proof for an existing desktop run manifest")
     p_desktop_compose_video.add_argument("manifest", help="Path to the run manifest.json to compose")
     p_desktop_compose_video.add_argument("--output", help="Output composed MP4 path (default: <run>/video/proof-composed.mp4)")

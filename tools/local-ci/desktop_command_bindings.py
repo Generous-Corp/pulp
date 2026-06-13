@@ -186,6 +186,14 @@ def cmd_desktop_verdict(bindings: Mapping[str, Any], args: Any) -> int:
     )
 
 
+def cmd_desktop_review_issue(bindings: Mapping[str, Any], args: Any) -> int:
+    return _binding(bindings, "_desktop_commands_cli").cmd_desktop_review_issue(
+        args,
+        desktop_review_issue_draft_fn=_binding(bindings, "desktop_review_issue_draft"),
+        atomic_write_text_fn=_binding(bindings, "atomic_write_text"),
+    )
+
+
 def cmd_desktop_compose_video(bindings: Mapping[str, Any], args: Any) -> int:
     return _binding(bindings, "_desktop_commands_cli").cmd_desktop_compose_video(
         args,

@@ -525,6 +525,69 @@ class DesktopCommandsCliTests(unittest.TestCase):
             self.assertTrue(updated["review"]["close_review_issue"])
             self.assertEqual(writes[0][0], manifest_path)
 
+    def test_review_issue_writes_local_draft_from_report_directory(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            report_dir = Path(tmpdir) / "report"
+            report_dir.mkdir()
+            package_path = report_dir / "review-package.json"
+            package_path.write_text(json.dumps({"label": "Video Proof", "runs": []}) + "\n")
+            writes = []
+
+            def draft(review_package: dict, **kwargs):
+                self.assertEqual(review_package["label"], "Video Proof")
+                self.assertEqual(kwargs["package_path"], package_path.resolve())
+                self.assertEqual(kwargs["title"], "Review video")
+                self.assertEqual(kwargs["repo"], "danielraffel/pulp")
+                return {
+                    "kind": "desktop-video-proof-github-issue-draft",
+                    "title": "Review video",
+                    "body": "# Review video\n",
+                    "body_file": str(report_dir / "github-issue.md"),
+                    "json_file": str(report_dir / "github-issue.json"),
+                    "attachments": [{"path": str(report_dir / "proof.issue.mp4")}],
+                    "fallback_links": [],
+                    "create_command": "gh issue create --repo danielraffel/pulp --title Review --body-file github-issue.md",
+                }
+
+            result = self.mod.cmd_desktop_review_issue(
+                Namespace(
+                    path=str(report_dir),
+                    title="Review video",
+                    repo="danielraffel/pulp",
+                    body_output=None,
+                    json_output=None,
+                    json=False,
+                ),
+                desktop_review_issue_draft_fn=draft,
+                atomic_write_text_fn=lambda path, text: writes.append((path, text)) or path.write_text(text),
+                print_fn=self.print_line,
+            )
+
+            self.assertEqual(result, 0)
+            self.assertEqual(writes[0][0], report_dir / "github-issue.md")
+            self.assertEqual(writes[1][0], report_dir / "github-issue.json")
+            self.assertIn("review issue draft ready", self.printed[0])
+            self.assertIn("attachments: 1", self.printed[-3])
+
+    def test_review_issue_reports_missing_package(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = self.mod.cmd_desktop_review_issue(
+                Namespace(
+                    path=str(Path(tmpdir) / "missing"),
+                    title=None,
+                    repo=None,
+                    body_output=None,
+                    json_output=None,
+                    json=True,
+                ),
+                desktop_review_issue_draft_fn=lambda *_args, **_kwargs: self.fail("draft should not run"),
+                atomic_write_text_fn=lambda path, text: path.write_text(text),
+                print_fn=self.print_line,
+            )
+
+        self.assertEqual(result, 1)
+        self.assertIn("review package not found", self.printed[-1])
+
     def test_verdict_records_needs_work_and_missing_manifest_error(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / "manifest.json"

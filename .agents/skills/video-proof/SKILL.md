@@ -426,16 +426,28 @@ PULP_DESKTOP_SERVE_HOSTS=blackbook.tailnet-name.ts.net \
   python3 tools/local-ci/local_ci.py desktop serve --host 0.0.0.0 --port 8765
 ```
 
-`desktop publish` writes `review.md` next to `index.html`. Use `review.md` as
-the GitHub issue body. GitHub supports `.mp4`, `.mov`, and `.webm` attachments
+`desktop publish` writes `review.md` and `review-package.json` next to
+`index.html`. Generate an offline GitHub issue draft from that package before
+opening the issue:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop review-issue /path/to/published-report \
+  --repo owner/repo
+```
+
+The command accepts either the report directory or `review-package.json`, then
+writes `github-issue.md` and `github-issue.json` next to the report without
+calling GitHub. Use `github-issue.md` as the issue body. Use
+`github-issue.json` to see which MP4s should be attached and which runs need the
+served fallback link. GitHub supports `.mp4`, `.mov`, and `.webm` attachments
 and currently recommends H.264 for compatibility; paid-plan eligible uploaders
 can use the 100 MB video budget, while others should assume 10 MB. Attach
 `proof.issue.mp4` manually when it fits the chosen budget; attach
-`proof.small.mp4` when the normal issue video is too large but the small fallback
-fits. Otherwise include the served report URL. The review issue can be closed
-when the reviewer comments `looks good to me`. The generated review body also
-records the attach/do-not-attach decision and the `desktop verdict` commands for
-approval or follow-up.
+`proof.small.mp4` when the normal issue video is too large but the small
+fallback fits. Otherwise include the served report URL. The review issue can be
+closed when the reviewer comments `looks good to me`. The generated review body
+also records the attach/do-not-attach decision and the `desktop verdict`
+commands for approval or follow-up.
 
 Record that review state back into the run manifest:
 
