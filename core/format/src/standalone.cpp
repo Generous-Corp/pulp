@@ -248,6 +248,14 @@ bool StandaloneApp::start() {
                     "emitting silence (report this device)",
                     ctx.buffer_size, max_callback_block_);
             }
+            // Keep the transport clock monotonic across the dropped block.
+            // The normal path advances by ctx.buffer_size after process();
+            // skipping it here would lag transport position (and the MIDI
+            // timeline derived from it) by exactly the silenced frames.
+            if (config_.transport_playing) {
+                transport_position_samples_.fetch_add(
+                    ctx.buffer_size, std::memory_order_relaxed);
+            }
             return;
         }
 

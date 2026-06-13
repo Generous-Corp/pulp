@@ -1005,6 +1005,11 @@ The contract (`core/format/src/standalone.cpp`, `start()` + the audio lambda):
   over-max block reach `process()`. A backend that ignores
   `MaximumFramesPerSlice` degrades to a one-time warning, not a crash on a real
   user's machine.
+- The silence early-return must STILL advance the transport clock
+  (`transport_position_samples_.fetch_add(ctx.buffer_size, ...)` when
+  `transport_playing`) before returning. The normal path advances after
+  `process()`; an early `return` that skips it lags the transport position —
+  and the MIDI timeline derived from it — by exactly the dropped frames.
 - The member lives in `standalone.hpp` (`int max_callback_block_`). The audio
   device's `CallbackContext::buffer_size` is the *actual* frames this block
   (it can exceed the nominal), so the guard compares against it, not
