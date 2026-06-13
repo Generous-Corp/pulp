@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from binding_utils import install_local_helpers
 from binding_utils import binding as _binding
 
 
@@ -48,3 +49,10 @@ def windows_contract_expand_expression(bindings: Mapping[str, Any], raw_value: s
 
 def windows_session_agent_template_path(bindings: Mapping[str, Any]):
     return _binding(bindings, "_windows_probe").windows_session_agent_template_path(_binding(bindings, "SCRIPT_DIR"))
+
+
+def install_windows_probe_core_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = WINDOWS_PROBE_CORE_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)

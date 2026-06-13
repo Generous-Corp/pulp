@@ -20,6 +20,16 @@ class WindowsProbeBindingsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
 
+    def test_windows_probe_exports_are_composed_from_focused_groups(self) -> None:
+        expected = (
+            *self.mod.WINDOWS_PROBE_CORE_EXPORTS,
+            *self.mod.WINDOWS_REMOTE_FILE_EXPORTS,
+            *self.mod.WINDOWS_SESSION_PROBE_EXPORTS,
+        )
+
+        self.assertEqual(self.mod.WINDOWS_PROBE_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def _bindings(self, windows_probe):
         return {
             "_windows_probe": windows_probe,
@@ -239,6 +249,47 @@ class WindowsProbeBindingsTests(unittest.TestCase):
         self.assertEqual(captured["run"][0:2], ("win", "Get-Date"))
         self.assertEqual(captured["run"][2]["timeout"], 42)
         self.assertEqual(captured["expand"][0], "%TEMP%")
+
+    def test_install_windows_probe_helpers_routes_each_group(self) -> None:
+        captured = {}
+
+        def run_powershell(host, script, **kwargs):
+            captured["run"] = (host, script, kwargs)
+            return "completed"
+
+        def write_text(host, remote_path, text, **kwargs):
+            captured["write"] = (host, remote_path, text, kwargs)
+            return {"wrote": True}
+
+        def start_agent(host, target, **kwargs):
+            captured["start"] = (host, target, kwargs)
+            return {"started": True}
+
+        windows_probe = types.SimpleNamespace(
+            run_windows_ssh_powershell=run_powershell,
+            windows_ssh_write_text=write_text,
+            start_windows_session_agent_task=start_agent,
+        )
+        bindings = self._bindings(windows_probe)
+        for name in [
+            "run_ssh_subprocess",
+            "run_windows_ssh_powershell",
+            "parse_windows_ssh_json",
+            "windows_contract_expand_expression",
+            "ps_literal",
+        ]:
+            bindings[name] = object()
+
+        self.mod.install_windows_probe_helpers(
+            bindings,
+            ("run_windows_ssh_powershell", "windows_ssh_write_text", "start_windows_session_agent_task"),
+        )
+
+        self.assertEqual(bindings["run_windows_ssh_powershell"]("win", "Get-Date"), "completed")
+        self.assertEqual(bindings["windows_ssh_write_text"]("win", r"%TEMP%\a.txt", "hello"), {"wrote": True})
+        self.assertEqual(bindings["start_windows_session_agent_task"]("win", {"task_name": "Pulp"}), {"started": True})
+        self.assertNotIn("windows_ssh_fetch_file", bindings)
+        self.assertNotIn("probe_windows_ssh_cmake_settings", bindings)
 
 
 if __name__ == "__main__":

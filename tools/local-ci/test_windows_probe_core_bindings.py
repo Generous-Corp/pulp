@@ -20,6 +20,19 @@ class WindowsProbeCoreBindingsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
 
+    def test_probe_core_exports_are_declared(self) -> None:
+        self.assertEqual(
+            self.mod.WINDOWS_PROBE_CORE_EXPORTS,
+            (
+                "ps_literal",
+                "windows_ssh_powershell_command",
+                "run_windows_ssh_powershell",
+                "parse_windows_ssh_json",
+                "windows_contract_expand_expression",
+                "windows_session_agent_template_path",
+            ),
+        )
+
     def _bindings(self, windows_probe):
         return {
             "_windows_probe": windows_probe,
@@ -88,6 +101,23 @@ class WindowsProbeCoreBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.windows_contract_expand_expression(bindings, "%TEMP%"), "$env:TEMP")
         self.assertEqual(captured["args"], ("%TEMP%",))
         self.assertIs(captured["kwargs"]["ps_literal_fn"], bindings["ps_literal"])
+
+    def test_install_windows_probe_core_helpers_wires_named_exports(self) -> None:
+        captured = {}
+
+        def run_powershell(host, script, **kwargs):
+            captured["run"] = (host, script, kwargs)
+            return "completed"
+
+        bindings = self._bindings(types.SimpleNamespace(run_windows_ssh_powershell=run_powershell))
+        bindings["run_ssh_subprocess"] = object()
+
+        self.mod.install_windows_probe_core_helpers(bindings, ("run_windows_ssh_powershell",))
+
+        self.assertEqual(bindings["run_windows_ssh_powershell"]("win", "Get-Date", timeout=42), "completed")
+        self.assertEqual(captured["run"][0:2], ("win", "Get-Date"))
+        self.assertEqual(captured["run"][2]["timeout"], 42)
+        self.assertNotIn("ps_literal", bindings)
 
 
 if __name__ == "__main__":
