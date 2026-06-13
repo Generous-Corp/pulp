@@ -3,6 +3,7 @@
 #include <miniz.h>
 
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -33,6 +34,23 @@ fs::path tool_binary() {
 bool binary_exists() {
     const auto bin = tool_binary();
     return !bin.empty() && fs::exists(bin);
+}
+
+bool contains_float_arg_near(const std::string& source,
+                             const std::string& marker,
+                             float expected,
+                             float tolerance) {
+    std::size_t pos = 0;
+    while ((pos = source.find(marker, pos)) != std::string::npos) {
+        const char* start = source.c_str() + pos + marker.size();
+        char* end = nullptr;
+        const float value = std::strtof(start, &end);
+        if (end != start && std::abs(value - expected) <= tolerance) {
+            return true;
+        }
+        pos += marker.size();
+    }
+    return false;
 }
 
 ProcessResult run_import_design(const std::vector<std::string>& args, int timeout_ms = 30000) {
@@ -1613,10 +1631,8 @@ TEST_CASE("pulp-import-design enriches .pulp.zip image metadata before baked C++
     REQUIRE(cpp.find("_image_flex.preferred_height = 13.33333f;") != std::string::npos);
     REQUIRE(cpp.find("_image_flex.dim_height = {13.33333f, pulp::view::DimensionUnit::px};")
             != std::string::npos);
-    REQUIRE((cpp.find("->set_left(-1.666667f);") != std::string::npos
-             || cpp.find("->set_left(-1.666666f);") != std::string::npos));
-    REQUIRE(cpp.find("->set_top(10.33333f);")
-            != std::string::npos);
+    REQUIRE(contains_float_arg_near(cpp, "->set_left(", -1.666667f, 0.00001f));
+    REQUIRE(contains_float_arg_near(cpp, "->set_top(", 10.33333f, 0.00001f));
 }
 
 TEST_CASE("pulp-import-design rejects .pulp.zip with no scene.pulp.json",
