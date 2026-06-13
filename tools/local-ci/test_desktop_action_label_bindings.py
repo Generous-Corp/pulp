@@ -20,6 +20,12 @@ class DesktopActionLabelBindingsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
 
+    def test_label_exports_match_wrappers(self) -> None:
+        expected = ("default_desktop_label",)
+
+        self.assertEqual(self.mod.DESKTOP_ACTION_LABEL_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def test_label_wrapper_delegates_arguments(self) -> None:
         captured = {}
 
@@ -33,6 +39,17 @@ class DesktopActionLabelBindingsTests(unittest.TestCase):
 
         self.assertEqual(self.mod.default_desktop_label(bindings, "./Demo", bundle_id="com.example.Demo"), "Demo")
         self.assertEqual(captured["label"], (("./Demo",), {"bundle_id": "com.example.Demo"}))
+
+    def test_install_label_helpers_wires_named_exports(self) -> None:
+        bindings = {
+            "_desktop_actions": types.SimpleNamespace(
+                default_desktop_label=lambda command, *, bundle_id=None: "Demo",
+            ),
+        }
+
+        self.mod.install_desktop_action_label_helpers(bindings)
+
+        self.assertEqual(bindings["default_desktop_label"]("./Demo"), "Demo")
 
 
 if __name__ == "__main__":

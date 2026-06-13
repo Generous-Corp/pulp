@@ -20,6 +20,15 @@ class DesktopActionSupportBindingsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
 
+    def test_support_exports_are_composed_from_focused_groups(self) -> None:
+        expected = (
+            *self.mod.DESKTOP_TARGET_SELECTION_EXPORTS,
+            *self.mod.DESKTOP_VIEW_ACTION_EXPORTS,
+        )
+
+        self.assertEqual(self.mod.DESKTOP_ACTION_SUPPORT_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def test_resolve_desktop_target_preserves_selection_errors(self) -> None:
         config = {
             "desktop_automation": {
@@ -82,6 +91,23 @@ class DesktopActionSupportBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.default_desktop_label(bindings, "./Demo", bundle_id="com.example.Demo"), "Demo")
         self.assertEqual(captured["label"][0], ("./Demo",))
         self.assertEqual(captured["label"][1], {"bundle_id": "com.example.Demo"})
+
+    def test_install_support_helpers_routes_each_group(self) -> None:
+        actions = types.SimpleNamespace(
+            count_view_tree_nodes=lambda node: 3,
+            parse_coordinate_pair=lambda value, *, flag_name: (1.0, 2.0),
+        )
+        bindings = {"_desktop_actions": actions}
+        config = {"desktop_automation": {"targets": {"mac": {"adapter": "macos-local"}}}}
+
+        self.mod.install_desktop_action_support_helpers(
+            bindings,
+            ("resolve_desktop_target", "count_view_tree_nodes", "parse_coordinate_pair"),
+        )
+
+        self.assertEqual(bindings["resolve_desktop_target"](config, "mac"), {"adapter": "macos-local"})
+        self.assertEqual(bindings["count_view_tree_nodes"]({"children": []}), 3)
+        self.assertEqual(bindings["parse_coordinate_pair"]("1,2", flag_name="--click"), (1.0, 2.0))
 
 
 if __name__ == "__main__":

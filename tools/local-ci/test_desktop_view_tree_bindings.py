@@ -20,6 +20,16 @@ class DesktopViewTreeBindingsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
 
+    def test_view_tree_exports_match_wrappers(self) -> None:
+        expected = (
+            "count_view_tree_nodes",
+            "iter_view_tree_nodes",
+            "resolve_view_tree_click_point",
+        )
+
+        self.assertEqual(self.mod.DESKTOP_VIEW_TREE_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def test_view_tree_wrappers_delegate_arguments(self) -> None:
         captured = {}
 
@@ -54,6 +64,14 @@ class DesktopViewTreeBindingsTests(unittest.TestCase):
             (10.0, 20.0),
         )
         self.assertEqual(captured["resolve"][1]["view_label"], "Gain slider")
+
+    def test_install_view_tree_helpers_wires_named_exports(self) -> None:
+        actions = types.SimpleNamespace(count_view_tree_nodes=lambda node: 3)
+        bindings = {"_desktop_actions": actions}
+
+        self.mod.install_desktop_view_tree_helpers(bindings, ("count_view_tree_nodes",))
+
+        self.assertEqual(bindings["count_view_tree_nodes"]({"children": []}), 3)
 
 
 if __name__ == "__main__":

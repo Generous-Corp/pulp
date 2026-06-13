@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
+from binding_utils import install_local_helpers
 from binding_utils import binding as _binding
+
+
+DESKTOP_ACTION_GEOMETRY_EXPORTS = (
+    "parse_coordinate_pair",
+    "screen_point_for_content_point",
+)
 
 
 def parse_coordinate_pair(bindings: dict, value: str, *, flag_name: str) -> tuple[float, float]:
@@ -20,3 +27,10 @@ def screen_point_for_content_point(
         content_size,
         content_point,
     )
+
+
+def install_desktop_action_geometry_helpers(
+    bindings: dict,
+    names: tuple[str, ...] = DESKTOP_ACTION_GEOMETRY_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)

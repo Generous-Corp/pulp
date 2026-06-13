@@ -19,6 +19,12 @@ class DesktopTargetSelectionBindingsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
 
+    def test_target_selection_exports_match_wrappers(self) -> None:
+        expected = ("resolve_desktop_target",)
+
+        self.assertEqual(self.mod.DESKTOP_TARGET_SELECTION_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def test_resolve_desktop_target_preserves_selection_errors(self) -> None:
         config = {
             "desktop_automation": {
@@ -37,6 +43,14 @@ class DesktopTargetSelectionBindingsTests(unittest.TestCase):
             self.mod.resolve_desktop_target({}, config, "windows")
         with self.assertRaisesRegex(ValueError, "Desktop target 'linux' is disabled"):
             self.mod.resolve_desktop_target({}, config, "linux")
+
+    def test_install_target_selection_helpers_wires_named_exports(self) -> None:
+        config = {"desktop_automation": {"targets": {"mac": {"adapter": "macos-local"}}}}
+        bindings = {}
+
+        self.mod.install_desktop_target_selection_helpers(bindings)
+
+        self.assertEqual(bindings["resolve_desktop_target"](config, "mac"), {"adapter": "macos-local"})
 
 
 if __name__ == "__main__":

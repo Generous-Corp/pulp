@@ -20,6 +20,16 @@ class DesktopViewActionBindingsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
 
+    def test_view_action_exports_are_composed_from_focused_groups(self) -> None:
+        expected = (
+            *self.mod.DESKTOP_VIEW_TREE_EXPORTS,
+            *self.mod.DESKTOP_ACTION_GEOMETRY_EXPORTS,
+            *self.mod.DESKTOP_ACTION_LABEL_EXPORTS,
+        )
+
+        self.assertEqual(self.mod.DESKTOP_VIEW_ACTION_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def test_action_wrappers_delegate_arguments(self) -> None:
         captured = {}
 
@@ -63,6 +73,23 @@ class DesktopViewActionBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.default_desktop_label(bindings, "./Demo", bundle_id="com.example.Demo"), "Demo")
         self.assertEqual(captured["label"][0], ("./Demo",))
         self.assertEqual(captured["label"][1], {"bundle_id": "com.example.Demo"})
+
+    def test_install_view_action_helpers_routes_each_group(self) -> None:
+        actions = types.SimpleNamespace(
+            count_view_tree_nodes=lambda node: 3,
+            parse_coordinate_pair=lambda value, *, flag_name: (1.0, 2.0),
+            default_desktop_label=lambda command, *, bundle_id=None: "Demo",
+        )
+        bindings = {"_desktop_actions": actions}
+
+        self.mod.install_desktop_view_action_helpers(
+            bindings,
+            ("count_view_tree_nodes", "parse_coordinate_pair", "default_desktop_label"),
+        )
+
+        self.assertEqual(bindings["count_view_tree_nodes"]({"children": []}), 3)
+        self.assertEqual(bindings["parse_coordinate_pair"]("1,2", flag_name="--click"), (1.0, 2.0))
+        self.assertEqual(bindings["default_desktop_label"]("./Demo"), "Demo")
 
 
 if __name__ == "__main__":

@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
+from binding_utils import install_local_helpers
 from binding_utils import binding as _binding
+
+
+DESKTOP_VIEW_TREE_EXPORTS = (
+    "count_view_tree_nodes",
+    "iter_view_tree_nodes",
+    "resolve_view_tree_click_point",
+)
 
 
 def count_view_tree_nodes(bindings: dict, node: object) -> int:
@@ -33,3 +41,10 @@ def resolve_view_tree_click_point(
         view_text=view_text,
         view_label=view_label,
     )
+
+
+def install_desktop_view_tree_helpers(
+    bindings: dict,
+    names: tuple[str, ...] = DESKTOP_VIEW_TREE_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)
