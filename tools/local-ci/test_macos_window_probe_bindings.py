@@ -71,6 +71,16 @@ class MacosWindowProbeBindingsTests(unittest.TestCase):
         self.assertIs(captured["capture"][1]["run_fn"], run_fn)
         self.assertIs(captured["capture"][1]["sleep_fn"], sleep_fn)
 
+    def test_probe_exports_compose_focused_groups(self) -> None:
+        expected = (
+            *self.mod.MACOS_WINDOW_INFO_EXPORTS,
+            *self.mod.MACOS_WINDOW_WAIT_EXPORTS,
+            *self.mod.MACOS_WINDOW_CAPTURE_EXPORTS,
+        )
+
+        self.assertEqual(self.mod.MACOS_WINDOW_PROBE_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
 
 if __name__ == "__main__":
     unittest.main()
