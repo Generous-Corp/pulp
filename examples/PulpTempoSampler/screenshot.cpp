@@ -37,7 +37,7 @@ int main(int argc, char** argv) {
 
     auto v = proc.create_view();
     const char* out = (argc > 1) ? argv[1] : "/tmp/pulp_tempo_sampler_ui.png";
-    const bool ok = view::render_to_file(*v, 720, 240, out, 2.0f, view::ScreenshotBackend::skia);
+    const bool ok = view::render_to_file(*v, 760, 372, out, 2.0f, view::ScreenshotBackend::skia);
     std::printf("PulpTempoSampler editor screenshot: %s (bpm=%.1f, slices=%zu) -> %s\n",
                 ok ? "OK" : "FAILED", proc.detected_bpm(), proc.num_slices(), out);
     return ok ? 0 : 1;

@@ -23,6 +23,7 @@
 #include <pulp/view/theme.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/waveform_editor.hpp>
+#include <pulp/view/widgets.hpp>
 
 #include <algorithm>
 #include <array>
@@ -180,30 +181,103 @@ public:
     /// Phase-5 waveform-editor pilot for the Ink & Signal design language.
     std::unique_ptr<view::View> create_view() override {
         using namespace pulp::view;
-        auto wf = std::make_unique<WaveformEditor>();
-        wf->set_bounds({0, 0, 720, 240});
+        using canvas::Color;
+
+        // Ink & Signal palette.
+        const Color bg900   = Color::rgba8(0x16, 0x1A, 0x20);
+        const Color panel   = Color::rgba8(0x1E, 0x25, 0x30);
+        const Color raised  = Color::rgba8(0x28, 0x30, 0x3C);
+        const Color teal    = Color::rgba8(0x16, 0xDA, 0xC2);
+        const Color tealSoft= Color::rgba8(0x16, 0xDA, 0xC2, 0x28);
+        const Color textStr = Color::rgba8(0xF3, 0xF6, 0xF9);
+        const Color text    = Color::rgba8(0xD6, 0xDC, 0xE4);
+        const Color muted   = Color::rgba8(0x93, 0x9C, 0xA9);
+        const Color faint   = Color::rgba8(0x64, 0x6D, 0x7A);
+        const char* mono    = "JetBrains Mono";
+
+        auto root = std::make_unique<View>();
+        root->set_bounds({0, 0, 760, 372});
+        root->set_background_color(bg900);
 
         Theme theme = Theme::dark();
-        theme.colors["waveform"]        = canvas::Color::rgba8(0x16, 0xDA, 0xC2);     // signal teal
-        theme.colors["waveform_bg"]     = canvas::Color::rgba8(0x12, 0x16, 0x1D);     // graphite sunken
-        theme.colors["waveform_center"] = canvas::Color::rgba8(0x39, 0x41, 0x4A);     // graphite line
-        theme.colors["playhead"]        = canvas::Color::rgba8(0x46, 0xF0, 0xDB);     // signal bright
-        theme.colors["selection"]       = canvas::Color::rgba8(0x16, 0xDA, 0xC2, 36);
-        wf->set_theme(theme);
+        theme.colors["waveform"]        = teal;
+        theme.colors["waveform_bg"]     = Color::rgba8(0x0F, 0x12, 0x17);
+        theme.colors["waveform_center"] = Color::rgba8(0x39, 0x41, 0x4A);
+        theme.colors["playhead"]        = Color::rgba8(0x46, 0xF0, 0xDB);
+        theme.colors["selection"]       = tealSoft;
+        root->set_theme(theme);
 
-        std::lock_guard<std::mutex> lock(raw_mutex_);
-        if (raw_frames_ > 0)
-            wf->set_audio_data(raw_[0].data(), static_cast<int>(raw_frames_),
-                               static_cast<float>(raw_sr_));
-        for (std::size_t i = 0; i + 1 < slices_orig_.size(); ++i) {
-            WaveformRegion r;
-            r.start_sample = static_cast<int>(slices_orig_[i]);
-            r.end_sample = static_cast<int>(slices_orig_[i + 1]);
-            const std::uint8_t a = (i % 2) ? 60 : 26; // alternating slice shade
-            r.color = canvas::Color::rgba8(0x16, 0xDA, 0xC2, a);
-            wf->add_region(r);
+        auto place = [](View& v, float x, float y, float w, float h) {
+            v.set_position(View::Position::absolute);
+            v.set_left(x); v.set_top(y);
+            v.flex().dim_width = {w, DimensionUnit::px};
+            v.flex().dim_height = {h, DimensionUnit::px};
+        };
+        auto rect = [&](float x, float y, float w, float h, Color c) {
+            auto v = std::make_unique<View>(); place(*v, x, y, w, h);
+            v->set_background_color(c); root->add_child(std::move(v));
+        };
+        auto label = [&](float x, float y, float w, float h, std::string t, Color c,
+                         float size, int weight, LabelAlign al, bool monofont = false) {
+            auto l = std::make_unique<Label>(std::move(t)); place(*l, x, y, w, h);
+            l->set_text_color(c); l->set_font_size(size); l->set_font_weight(weight);
+            l->set_text_align(al);
+            if (monofont) l->set_font_family(mono);
+            root->add_child(std::move(l));
+        };
+
+        // ── Header ──
+        label(20, 14, 320, 24, "Waveform editor", textStr, 17, 600, LabelAlign::left);
+        label(182, 18, 280, 18, "trim  fades  slice  zoom  record", faint, 11, 400, LabelAlign::left);
+        rect(560, 14, 54, 24, tealSoft);   label(560, 17, 54, 18, "4.20 S", teal, 11, 600, LabelAlign::center, true);
+        rect(620, 14, 58, 24, raised);     label(620, 17, 58, 18, "96 KHZ", muted, 10, 600, LabelAlign::center, true);
+        label(684, 17, 40, 18, "SNAP", faint, 10, 600, LabelAlign::left, true);
+        label(720, 17, 40, 18, "ZERO-X", teal, 10, 600, LabelAlign::left, true);
+
+        // ── Tab + transport row ──
+        rect(20, 50, 260, 32, panel);
+        rect(24, 54, 86, 24, raised);  label(24, 58, 86, 18, "One Shot", textStr, 12, 600, LabelAlign::center);
+        label(110, 58, 78, 18, "Slice", muted, 12, 500, LabelAlign::center);
+        label(188, 58, 88, 18, "Recorder", muted, 12, 500, LabelAlign::center);
+        rect(516, 50, 78, 32, tealSoft); label(516, 58, 78, 18, "Loop", teal, 12, 600, LabelAlign::center);
+        rect(600, 50, 56, 32, raised);   label(600, 58, 56, 18, "Fwd", text, 12, 500, LabelAlign::center);
+        label(662, 58, 38, 18, "ZOOM", faint, 10, 600, LabelAlign::left, true);
+        rect(702, 50, 26, 32, panel);    label(702, 55, 26, 22, "-", text, 16, 500, LabelAlign::center);
+        rect(732, 50, 26, 32, panel);    label(732, 55, 26, 22, "+", text, 16, 500, LabelAlign::center);
+
+        // ── Waveform ──
+        auto wf = std::make_unique<WaveformEditor>();
+        WaveformEditor* wfp = wf.get();
+        place(*wf, 20, 92, 738, 222);
+        {
+            std::lock_guard<std::mutex> lock(raw_mutex_);
+            if (raw_frames_ > 0)
+                wf->set_audio_data(raw_[0].data(), static_cast<int>(raw_frames_),
+                                   static_cast<float>(raw_sr_));
+            for (std::size_t i = 0; i + 1 < slices_orig_.size(); ++i) {
+                WaveformRegion r;
+                r.start_sample = static_cast<int>(slices_orig_[i]);
+                r.end_sample = static_cast<int>(slices_orig_[i + 1]);
+                r.color = Color::rgba8(0x16, 0xDA, 0xC2, (i % 2) ? 0x3C : 0x1A);
+                wf->add_region(r);
+            }
         }
-        return wf;
+        root->add_child(std::move(wf));
+
+        // ── Footer readout ──
+        const std::size_t slices = num_slices();
+        label(20, 326, 120, 18, "IN  0:00.00", text, 11, 500, LabelAlign::left, true);
+        label(150, 326, 130, 18, "OUT  0:02.00", text, 11, 500, LabelAlign::left, true);
+        label(290, 326, 150, 18, "FADE  12 / 80 MS", muted, 11, 500, LabelAlign::left, true);
+        label(440, 326, 120, 18, "SLICES  " + std::to_string(slices), muted, 11, 500, LabelAlign::left, true);
+        rect(596, 320, 60, 28, panel);   label(596, 325, 60, 18, "Snap", text, 12, 500, LabelAlign::center);
+        rect(662, 320, 96, 28, tealSoft); label(662, 325, 96, 18, "Auto-slice", teal, 12, 600, LabelAlign::center);
+
+        root->layout_children();
+        // The waveform paints from its own frame; pin it AFTER layout so the
+        // absolute-leaf frame isn't left collapsed.
+        wfp->set_bounds({20, 92, 738, 222});
+        return root;
     }
 
     // ── Audio thread ───────────────────────────────────────────────────────
