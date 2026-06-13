@@ -65,6 +65,32 @@ class DesktopExactSourceWindowsBindingsTests(unittest.TestCase):
         self.assertIs(captured["kwargs"]["windows_ssh_fetch_file_fn"], bindings["windows_ssh_fetch_file"])
         self.assertIs(captured["kwargs"]["rewrite_launch_command_for_windows_root_fn"], bindings["rewrite_launch_command_for_windows_root"])
 
+    def test_windows_exports_and_installer_wire_named_helper(self):
+        expected = ("prepare_windows_exact_sha_source",)
+        self.assertEqual(self.mod.DESKTOP_EXACT_SOURCE_WINDOWS_EXPORTS, expected)
+
+        bindings = {
+            "_source_prep": types.SimpleNamespace(prepare_windows_exact_sha_source=lambda *args, **kwargs: {"platform": "windows"}),
+            "ROOT": self.root,
+            "sync_job_bundle_to_ssh_host": object(),
+            "git_origin_clone_url": object(),
+            "desktop_source_cache_key": object(),
+            "ps_literal": object(),
+            "windows_contract_expand_expression": object(),
+            "split_windows_prepare_commands": object(),
+            "validate_windows_prepare_commands": object(),
+            "run_windows_ssh_powershell": object(),
+            "windows_ssh_fetch_file": object(),
+            "rewrite_launch_command_for_windows_root": object(),
+        }
+
+        self.mod.install_desktop_exact_source_windows_helpers(bindings)
+
+        self.assertEqual(
+            bindings["prepare_windows_exact_sha_source"](Path("/bundle"), "windows", "host", r".\tool.exe", {"sha": "abc123"}),
+            {"platform": "windows"},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -8,6 +8,10 @@ from typing import Any
 
 from binding_utils import binding as _binding
 from binding_utils import binding_attr as _binding_attr
+from binding_utils import install_local_helpers
+
+
+DESKTOP_EXACT_SOURCE_LINUX_EXPORTS = ("prepare_linux_exact_sha_source",)
 
 
 def prepare_linux_exact_sha_source(
@@ -32,3 +36,10 @@ def prepare_linux_exact_sha_source(
         fetch_ssh_artifact_fn=_binding(bindings, "fetch_ssh_artifact"),
         rewrite_launch_command_for_posix_root_fn=_binding(bindings, "rewrite_launch_command_for_posix_root"),
     )
+
+
+def install_desktop_exact_source_linux_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = DESKTOP_EXACT_SOURCE_LINUX_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)

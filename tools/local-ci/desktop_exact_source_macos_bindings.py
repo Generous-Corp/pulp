@@ -8,6 +8,10 @@ from typing import Any
 
 from binding_utils import binding as _binding
 from binding_utils import binding_attr as _binding_attr
+from binding_utils import install_local_helpers
+
+
+DESKTOP_EXACT_SOURCE_MACOS_EXPORTS = ("prepare_macos_exact_sha_source",)
 
 
 def prepare_macos_exact_sha_source(
@@ -31,3 +35,10 @@ def prepare_macos_exact_sha_source(
         tail_lines_fn=_binding(bindings, "tail_lines"),
         rewrite_launch_command_for_source_root_fn=_binding(bindings, "rewrite_launch_command_for_source_root"),
     )
+
+
+def install_desktop_exact_source_macos_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = DESKTOP_EXACT_SOURCE_MACOS_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)

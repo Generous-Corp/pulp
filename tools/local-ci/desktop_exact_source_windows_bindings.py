@@ -7,6 +7,10 @@ from pathlib import Path
 from typing import Any
 
 from binding_utils import binding as _binding
+from binding_utils import install_local_helpers
+
+
+DESKTOP_EXACT_SOURCE_WINDOWS_EXPORTS = ("prepare_windows_exact_sha_source",)
 
 
 def prepare_windows_exact_sha_source(
@@ -35,3 +39,10 @@ def prepare_windows_exact_sha_source(
         windows_ssh_fetch_file_fn=_binding(bindings, "windows_ssh_fetch_file"),
         rewrite_launch_command_for_windows_root_fn=_binding(bindings, "rewrite_launch_command_for_windows_root"),
     )
+
+
+def install_desktop_exact_source_windows_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = DESKTOP_EXACT_SOURCE_WINDOWS_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)

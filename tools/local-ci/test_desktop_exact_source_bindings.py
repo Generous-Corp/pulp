@@ -163,6 +163,47 @@ class DesktopExactSourceBindingsTests(unittest.TestCase):
         self.assertIs(captured["kwargs"]["run_windows_ssh_powershell_fn"], bindings["run_windows_ssh_powershell"])
         self.assertIs(captured["kwargs"]["windows_ssh_fetch_file_fn"], bindings["windows_ssh_fetch_file"])
 
+    def test_exact_source_exports_compose_focused_groups(self):
+        expected = (
+            *self.mod.DESKTOP_EXACT_SOURCE_LOCAL_EXPORTS,
+            *self.mod.DESKTOP_EXACT_SOURCE_MACOS_EXPORTS,
+            *self.mod.DESKTOP_EXACT_SOURCE_REMOTE_EXPORTS,
+        )
+
+        self.assertEqual(self.mod.DESKTOP_EXACT_SOURCE_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
+    def test_exact_source_installer_routes_selected_groups(self):
+        bindings = self._bindings(
+            _source_prep=types.SimpleNamespace(
+                local_worktree_matches=lambda path, sha, **kwargs: True,
+                prepare_macos_exact_sha_source=lambda *args, **kwargs: {"platform": "mac"},
+                prepare_linux_exact_sha_source=lambda *args, **kwargs: {"platform": "linux"},
+            ),
+            desktop_source_root=object(),
+            _local_worktree_matches=object(),
+            _reset_local_worktree=object(),
+            run_logged_command=object(),
+            tail_lines=object(),
+            rewrite_launch_command_for_source_root=object(),
+            sync_job_bundle_to_ssh_host=object(),
+            git_origin_clone_url=object(),
+            desktop_source_cache_key=object(),
+            fetch_ssh_artifact=object(),
+            rewrite_launch_command_for_posix_root=object(),
+        )
+
+        self.mod.install_desktop_exact_source_helpers(
+            bindings,
+            ("local_worktree_matches", "prepare_macos_exact_sha_source", "prepare_linux_exact_sha_source"),
+        )
+
+        self.assertTrue(bindings["local_worktree_matches"](Path("/tmp/wt"), "abc123"))
+        self.assertEqual(bindings["prepare_macos_exact_sha_source"](Path("/bundle"), "mac", "./tool", {"sha": "abc123"}), {"platform": "mac"})
+        self.assertEqual(bindings["prepare_linux_exact_sha_source"](Path("/bundle"), "ubuntu", "host", "./tool", {"sha": "abc123"}), {"platform": "linux"})
+        self.assertNotIn("reset_local_worktree", bindings)
+        self.assertNotIn("prepare_windows_exact_sha_source", bindings)
+
 
 if __name__ == "__main__":
     unittest.main()

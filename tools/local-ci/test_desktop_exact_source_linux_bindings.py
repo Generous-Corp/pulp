@@ -58,6 +58,28 @@ class DesktopExactSourceLinuxBindingsTests(unittest.TestCase):
         self.assertIs(captured["kwargs"]["fetch_ssh_artifact_fn"], bindings["fetch_ssh_artifact"])
         self.assertIs(captured["kwargs"]["rewrite_launch_command_for_posix_root_fn"], bindings["rewrite_launch_command_for_posix_root"])
 
+    def test_linux_exports_and_installer_wire_named_helper(self):
+        expected = ("prepare_linux_exact_sha_source",)
+        self.assertEqual(self.mod.DESKTOP_EXACT_SOURCE_LINUX_EXPORTS, expected)
+
+        bindings = {
+            "_source_prep": types.SimpleNamespace(prepare_linux_exact_sha_source=lambda *args, **kwargs: {"platform": "linux"}),
+            "ROOT": self.root,
+            "subprocess": types.SimpleNamespace(run=self.run_fn),
+            "sync_job_bundle_to_ssh_host": object(),
+            "git_origin_clone_url": object(),
+            "desktop_source_cache_key": object(),
+            "fetch_ssh_artifact": object(),
+            "rewrite_launch_command_for_posix_root": object(),
+        }
+
+        self.mod.install_desktop_exact_source_linux_helpers(bindings)
+
+        self.assertEqual(
+            bindings["prepare_linux_exact_sha_source"](Path("/bundle"), "ubuntu", "host", "./tool", {"sha": "abc123"}),
+            {"platform": "linux"},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

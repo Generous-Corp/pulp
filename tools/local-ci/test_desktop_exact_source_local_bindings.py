@@ -50,6 +50,24 @@ class DesktopExactSourceLocalBindingsTests(unittest.TestCase):
         self.assertIs(captured["reset"][1]["run_fn"], self.run_fn)
         self.assertEqual(captured["reset"][1]["root"], self.root)
 
+    def test_local_exports_and_installer_wire_selected_helpers(self):
+        expected = (
+            "local_worktree_matches",
+            "reset_local_worktree",
+        )
+        self.assertEqual(self.mod.DESKTOP_EXACT_SOURCE_LOCAL_EXPORTS, expected)
+
+        source_prep = types.SimpleNamespace(local_worktree_matches=lambda path, sha, **kwargs: True)
+        bindings = {
+            "_source_prep": source_prep,
+            "subprocess": types.SimpleNamespace(run=self.run_fn),
+        }
+
+        self.mod.install_desktop_exact_source_local_helpers(bindings, ("local_worktree_matches",))
+
+        self.assertTrue(bindings["local_worktree_matches"](Path("/tmp/wt"), "abc123"))
+        self.assertNotIn("reset_local_worktree", bindings)
+
 
 if __name__ == "__main__":
     unittest.main()

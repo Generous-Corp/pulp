@@ -57,6 +57,29 @@ class DesktopExactSourceMacosBindingsTests(unittest.TestCase):
         self.assertIs(captured["kwargs"]["reset_local_worktree_fn"], bindings["_reset_local_worktree"])
         self.assertIs(captured["kwargs"]["rewrite_launch_command_for_source_root_fn"], bindings["rewrite_launch_command_for_source_root"])
 
+    def test_macos_exports_and_installer_wire_named_helper(self):
+        expected = ("prepare_macos_exact_sha_source",)
+        self.assertEqual(self.mod.DESKTOP_EXACT_SOURCE_MACOS_EXPORTS, expected)
+
+        bindings = {
+            "_source_prep": types.SimpleNamespace(prepare_macos_exact_sha_source=lambda *args, **kwargs: {"platform": "mac"}),
+            "ROOT": self.root,
+            "subprocess": types.SimpleNamespace(run=self.run_fn),
+            "desktop_source_root": object(),
+            "_local_worktree_matches": object(),
+            "_reset_local_worktree": object(),
+            "run_logged_command": object(),
+            "tail_lines": object(),
+            "rewrite_launch_command_for_source_root": object(),
+        }
+
+        self.mod.install_desktop_exact_source_macos_helpers(bindings)
+
+        self.assertEqual(
+            bindings["prepare_macos_exact_sha_source"](Path("/bundle"), "mac", "./tool", {"sha": "abc123"}),
+            {"platform": "mac"},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
