@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 import json
 from pathlib import Path
+import uuid
 
 
 def run_macos_local_smoke(
@@ -37,10 +38,13 @@ def run_macos_local_smoke(
     run_fn: Callable[..., object],
     activate_macos_bundle_id_fn: Callable[[str], None],
     wait_for_macos_bundle_window_fn: Callable[[str, float], tuple[int, dict]],
+    wait_for_macos_bundle_window_title_fn: Callable[[str, str, float], tuple[int, dict]],
     split_command_fn: Callable[[str], list[str]],
     detect_macos_app_bundle_fn: Callable[[str | None], Path | None],
     macos_bundle_id_for_app_path_fn: Callable[[Path], str | None],
     environ_copy_fn: Callable[[], dict[str, str]],
+    cwd_path_fn: Callable[[], Path],
+    launch_macos_terminal_proof_command_fn: Callable[..., dict],
     popen_fn: Callable[..., object],
     wait_for_macos_window_fn: Callable[[int, float], dict],
     content_size_from_window_fn: Callable[[dict], tuple[float, float]],
@@ -67,6 +71,7 @@ def run_macos_local_smoke(
     record_video: bool = False,
     video_duration_secs: float = 8.0,
     video_fps: float = 30.0,
+    video_capture_target: str = "app",
     video_attachment_budget_bytes: int = 100_000_000,
     compose_video_proof: bool = False,
     video_template: str | None = None,
@@ -87,6 +92,7 @@ def run_macos_local_smoke(
     video_composed_metadata_path = action_paths["video_composed_metadata"]
     video_issue_metadata_path = action_paths["video_issue_metadata"]
     video_poster_path = action_paths["video_poster"]
+    terminal_returncode_path = bundle_dir / "terminal-returncode.txt"
     log_path = action_paths["stdout"]
     err_path = action_paths["stderr"]
 
@@ -100,6 +106,17 @@ def run_macos_local_smoke(
     use_pulp_app_automation = bool(pulp_app_automation and interaction_requested)
     if use_pulp_app_automation and bundle_id:
         raise RuntimeError("Pulp app automation requires a direct --command launch so automation env vars can be injected.")
+    if video_capture_target not in {"app", "terminal"}:
+        raise RuntimeError(f"Unknown video capture target `{video_capture_target}`.")
+    if video_capture_target == "terminal":
+        if not record_video:
+            raise RuntimeError("Terminal capture requires --record-video.")
+        if bundle_id:
+            raise RuntimeError("Terminal capture requires --command, not --bundle-id.")
+        if capture_ui_snapshot:
+            raise RuntimeError("Terminal capture cannot collect a Pulp ViewInspector UI snapshot.")
+        if interaction_requested:
+            raise RuntimeError("Terminal capture currently supports smoke actions only; use app capture for clicks.")
     if interaction_requested and not use_pulp_app_automation and not macos_accessibility_trusted_fn():
         raise RuntimeError("macOS desktop interaction requires Accessibility access for the terminal/runner.")
     if (click_view_id or click_view_type or click_view_text or click_view_label) and not capture_ui_snapshot and not use_pulp_app_automation:
@@ -142,62 +159,77 @@ def run_macos_local_smoke(
             args = split_command_fn(launch_command or "")
             if not args:
                 raise ValueError("Desktop smoke requires either --command or --bundle-id.")
-            app_bundle = detect_macos_app_bundle_fn(launch_command)
-            if app_bundle is not None:
-                if capture_ui_snapshot:
-                    raise RuntimeError(
-                        "UI snapshot capture currently requires a direct launch command so PULP_VIEW_TREE_OUT can be injected."
-                    )
-                inferred_bundle_id = macos_bundle_id_for_app_path_fn(app_bundle)
-                if not inferred_bundle_id:
-                    raise RuntimeError(f"Could not determine bundle id for app bundle `{app_bundle}`")
-                log_path.write_text("")
-                err_path.write_text("")
-                quit_macos_bundle_id_fn(inferred_bundle_id)
-                sleep_fn(0.2)
-                run_fn(["open", "-a", str(app_bundle)], capture_output=True, text=True, check=True)
+            if video_capture_target == "terminal":
+                terminal_title = f"Pulp Video Proof {uuid.uuid4().hex[:8]}"
+                terminal_session = launch_macos_terminal_proof_command_fn(
+                    args,
+                    cwd=Path(launch_cwd) if launch_cwd else cwd_path_fn(),
+                    title=terminal_title,
+                    stdout_path=log_path,
+                    stderr_path=err_path,
+                    returncode_path=terminal_returncode_path,
+                    keepalive_secs=max(video_duration_secs + 2.0, settle_secs + 2.0),
+                )
                 sleep_fn(0.75)
-                activate_macos_bundle_id_fn(inferred_bundle_id)
-                sleep_fn(0.75)
-                pid, window = wait_for_macos_bundle_window_fn(inferred_bundle_id, timeout_secs)
-                launch_descriptor = {"bundle_id": inferred_bundle_id, "app_path": str(app_bundle)}
+                pid, window = wait_for_macos_bundle_window_title_fn("com.apple.Terminal", terminal_title, timeout_secs)
+                launch_descriptor = {"command": args, "terminal": terminal_session}
             else:
-                stdout_handle = log_path.open("w")
-                stderr_handle = err_path.open("w")
-                env = environ_copy_fn()
-                if capture_ui_snapshot:
-                    env["PULP_VIEW_TREE_OUT"] = str(ui_snapshot_path)
-                if use_pulp_app_automation:
-                    if click_point:
-                        env["PULP_AUTOMATION_CLICK_POINT"] = click_point
-                    if click_view_id:
-                        env["PULP_AUTOMATION_CLICK_VIEW_ID"] = click_view_id
-                    if click_view_type:
-                        env["PULP_AUTOMATION_CLICK_VIEW_TYPE"] = click_view_type
-                    if click_view_text:
-                        env["PULP_AUTOMATION_CLICK_VIEW_TEXT"] = click_view_text
-                    if click_view_label:
-                        env["PULP_AUTOMATION_CLICK_VIEW_LABEL"] = click_view_label
-                    if capture_before:
-                        env["PULP_AUTOMATION_BEFORE_OUT"] = str(before_screenshot_path)
-                    env["PULP_AUTOMATION_AFTER_OUT"] = str(screenshot_path)
-                    env["PULP_AUTOMATION_DELAY_MS"] = "1000"
-                    env["PULP_AUTOMATION_AFTER_DELAY_MS"] = str(max(0, int(settle_secs * 1000.0)))
-                    env["PULP_AUTOMATION_EXIT_AFTER"] = "1"
-                try:
-                    proc = popen_fn(
-                        args,
-                        stdout=stdout_handle,
-                        stderr=stderr_handle,
-                        env=env,
-                        cwd=launch_cwd,
-                    )
-                finally:
-                    stdout_handle.close()
-                    stderr_handle.close()
-                pid = proc.pid
-                window = wait_for_macos_window_fn(proc.pid, timeout_secs)
-                launch_descriptor = {"command": args}
+                app_bundle = detect_macos_app_bundle_fn(launch_command)
+                if app_bundle is not None:
+                    if capture_ui_snapshot:
+                        raise RuntimeError(
+                            "UI snapshot capture currently requires a direct launch command so PULP_VIEW_TREE_OUT can be injected."
+                        )
+                    inferred_bundle_id = macos_bundle_id_for_app_path_fn(app_bundle)
+                    if not inferred_bundle_id:
+                        raise RuntimeError(f"Could not determine bundle id for app bundle `{app_bundle}`")
+                    log_path.write_text("")
+                    err_path.write_text("")
+                    quit_macos_bundle_id_fn(inferred_bundle_id)
+                    sleep_fn(0.2)
+                    run_fn(["open", "-a", str(app_bundle)], capture_output=True, text=True, check=True)
+                    sleep_fn(0.75)
+                    activate_macos_bundle_id_fn(inferred_bundle_id)
+                    sleep_fn(0.75)
+                    pid, window = wait_for_macos_bundle_window_fn(inferred_bundle_id, timeout_secs)
+                    launch_descriptor = {"bundle_id": inferred_bundle_id, "app_path": str(app_bundle)}
+                else:
+                    stdout_handle = log_path.open("w")
+                    stderr_handle = err_path.open("w")
+                    env = environ_copy_fn()
+                    if capture_ui_snapshot:
+                        env["PULP_VIEW_TREE_OUT"] = str(ui_snapshot_path)
+                    if use_pulp_app_automation:
+                        if click_point:
+                            env["PULP_AUTOMATION_CLICK_POINT"] = click_point
+                        if click_view_id:
+                            env["PULP_AUTOMATION_CLICK_VIEW_ID"] = click_view_id
+                        if click_view_type:
+                            env["PULP_AUTOMATION_CLICK_VIEW_TYPE"] = click_view_type
+                        if click_view_text:
+                            env["PULP_AUTOMATION_CLICK_VIEW_TEXT"] = click_view_text
+                        if click_view_label:
+                            env["PULP_AUTOMATION_CLICK_VIEW_LABEL"] = click_view_label
+                        if capture_before:
+                            env["PULP_AUTOMATION_BEFORE_OUT"] = str(before_screenshot_path)
+                        env["PULP_AUTOMATION_AFTER_OUT"] = str(screenshot_path)
+                        env["PULP_AUTOMATION_DELAY_MS"] = "1000"
+                        env["PULP_AUTOMATION_AFTER_DELAY_MS"] = str(max(0, int(settle_secs * 1000.0)))
+                        env["PULP_AUTOMATION_EXIT_AFTER"] = "1"
+                    try:
+                        proc = popen_fn(
+                            args,
+                            stdout=stdout_handle,
+                            stderr=stderr_handle,
+                            env=env,
+                            cwd=launch_cwd,
+                        )
+                    finally:
+                        stdout_handle.close()
+                        stderr_handle.close()
+                    pid = proc.pid
+                    window = wait_for_macos_window_fn(proc.pid, timeout_secs)
+                    launch_descriptor = {"command": args}
 
         inspector_summary = None
         view_tree = None
@@ -290,6 +322,14 @@ def run_macos_local_smoke(
             )
             video_recording = None
 
+        terminal_returncode = None
+        if video_capture_target == "terminal":
+            try:
+                wait_for_path_fn(terminal_returncode_path, max(2.0, min(timeout_secs, video_duration_secs + 4.0)))
+                terminal_returncode = int(terminal_returncode_path.read_text().strip())
+            except (OSError, ValueError, RuntimeError):
+                terminal_returncode = None
+
         manifest = {
             "target": "mac",
             "adapter": "macos-local",
@@ -322,6 +362,12 @@ def run_macos_local_smoke(
             manifest["inspector"] = inspector_summary
         if interaction_summary is not None:
             manifest["interaction"] = interaction_summary
+        if video_capture_target == "terminal":
+            manifest["terminal"] = {
+                "returncode": terminal_returncode,
+                "returncode_path": str(terminal_returncode_path),
+            }
+            manifest["artifacts"]["terminal_returncode"] = str(terminal_returncode_path)
         if video_summary is not None:
             manifest["video"] = video_summary
             if video_path.exists():

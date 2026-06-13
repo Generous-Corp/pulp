@@ -96,6 +96,7 @@ def _video_kwargs(args: argparse.Namespace) -> dict:
         "record_video": bool(getattr(args, "record_video", False)),
         "video_duration_secs": float(getattr(args, "video_duration", 8.0)),
         "video_fps": float(getattr(args, "video_fps", 30.0)),
+        "video_capture_target": getattr(args, "video_capture_target", "app"),
         "video_attachment_budget_bytes": int(float(getattr(args, "video_attachment_budget_mb", 100.0)) * 1_000_000),
         "compose_video_proof": bool(getattr(args, "compose_video_proof", False)),
         "video_template": getattr(args, "video_template", None),

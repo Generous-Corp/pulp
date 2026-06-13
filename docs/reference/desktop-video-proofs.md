@@ -113,6 +113,23 @@ Linux and Windows fail explicitly rather than producing a run bundle without a
 video artifact. Use `--run-in-terminal` on macOS when Terminal is the process
 with Screen Recording permission.
 
+For console-style standalone apps that do not create their own GUI window, ask
+the harness to record a titled Terminal.app window instead of waiting for the
+child process to expose a window:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop video mac \
+  --run-in-terminal \
+  --action smoke \
+  --video-capture-target terminal \
+  --command ./build/examples/pulp-tone/PulpTone.app/Contents/MacOS/PulpTone \
+  --duration 5
+```
+
+Terminal capture is for smoke proofs only. It tees the command output into the
+normal run logs, keeps the Terminal window open for the capture duration, then
+signals the child process and records the command return code in the manifest.
+
 Named recipes apply reviewer-friendly defaults for common proof scenarios:
 
 ```bash

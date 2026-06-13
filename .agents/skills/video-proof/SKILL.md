@@ -159,6 +159,24 @@ underlying desktop action. Today, recording is implemented for macOS only;
 Linux/Windows video requests fail explicitly until their recorder backends are
 wired.
 
+For a console-style standalone app with no GUI window, record a titled
+Terminal.app window instead of waiting for the child process to expose a
+capturable window:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop video mac \
+  --run-in-terminal \
+  --action smoke \
+  --video-capture-target terminal \
+  --command ./build/examples/pulp-tone/PulpTone.app/Contents/MacOS/PulpTone \
+  --duration 5
+```
+
+Use terminal capture for smoke proofs only. It tees command output into the run
+logs, captures the Terminal window, and records the command return code in the
+manifest. Use normal app-window capture for clicks, ViewInspector snapshots, and
+Pulp app automation.
+
 Use named recipes when the user asks for one of the high-value demos:
 
 ```bash

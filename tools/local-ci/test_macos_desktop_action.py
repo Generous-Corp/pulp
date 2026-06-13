@@ -74,6 +74,8 @@ class MacosDesktopActionTests(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             if path.name == "ui-tree.json":
                 path.write_text(json.dumps({"id": "root", "type": "Window"}))
+            elif path.name == "terminal-returncode.txt" and path.exists():
+                return
             else:
                 path.write_bytes(b"png")
 
@@ -162,10 +164,18 @@ class MacosDesktopActionTests(unittest.TestCase):
             "run_fn": lambda *_args, **_kwargs: None,
             "activate_macos_bundle_id_fn": lambda _bundle_id: None,
             "wait_for_macos_bundle_window_fn": lambda _bundle_id, _timeout: (5151, window),
+            "wait_for_macos_bundle_window_title_fn": lambda _bundle_id, _title, _timeout: (5151, window),
             "split_command_fn": lambda command: command.split(),
             "detect_macos_app_bundle_fn": lambda _command: None,
             "macos_bundle_id_for_app_path_fn": lambda _path: None,
             "environ_copy_fn": lambda: {},
+            "cwd_path_fn": lambda: self.root,
+            "launch_macos_terminal_proof_command_fn": lambda args, **kwargs: {
+                "bundle_id": "com.apple.Terminal",
+                "title": kwargs["title"],
+                "command": args,
+                "returncode": str(kwargs["returncode_path"]),
+            },
             "popen_fn": popen,
             "wait_for_macos_window_fn": lambda _pid, _timeout: window,
             "content_size_from_window_fn": lambda _window: (320.0, 200.0),
@@ -280,6 +290,40 @@ class MacosDesktopActionTests(unittest.TestCase):
         self.assertTrue(manifest["artifacts"]["video_issue_metadata"].endswith("/video/issue-metadata.json"))
         self.assertEqual(manifest["video_issue"]["status"], "copied")
         self.assertTrue(manifest["video_issue"]["source"].endswith("/video/proof-composed.mp4"))
+
+    def test_run_macos_local_smoke_records_terminal_capture(self) -> None:
+        terminal_launches = []
+
+        def launch_terminal(args, **kwargs):
+            terminal_launches.append((args, kwargs))
+            kwargs["returncode_path"].write_text("143\n")
+            return {
+                "bundle_id": "com.apple.Terminal",
+                "title": kwargs["title"],
+                "command": args,
+                "returncode": str(kwargs["returncode_path"]),
+            }
+
+        window = {"windowId": 99, "title": "Pulp Video Proof abcd1234", "bounds": {"width": 640, "height": 360}}
+        manifest, launched, terminated, _waited_paths, _rollups = self.run_action(
+            window=window,
+            capture_ui_snapshot=False,
+            record_video=True,
+            video_capture_target="terminal",
+            video_duration_secs=3.0,
+            launch_macos_terminal_proof_command_fn=launch_terminal,
+        )
+
+        self.assertEqual(launched, [])
+        self.assertEqual(terminated, [])
+        self.assertEqual(terminal_launches[0][0], ["/repo/build/ui-preview"])
+        self.assertEqual(terminal_launches[0][1]["cwd"], self.root)
+        self.assertEqual(terminal_launches[0][1]["keepalive_secs"], 5.0)
+        self.assertEqual(manifest["terminal"]["returncode"], 143)
+        self.assertEqual(manifest["terminal"]["returncode_path"], str(self.bundle_dir / "terminal-returncode.txt"))
+        self.assertTrue(manifest["artifacts"]["terminal_returncode"].endswith("/terminal-returncode.txt"))
+        self.assertEqual(manifest["window"], window)
+        self.assertIn("terminal", manifest)
 
     def test_run_macos_local_smoke_passes_video_composition_context(self) -> None:
         reference = self.root / "reference.png"

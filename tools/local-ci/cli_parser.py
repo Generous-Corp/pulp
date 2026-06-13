@@ -98,6 +98,12 @@ def build_local_ci_parser(
             help="Frames per second for --record-video captures (default: 30)",
         )
         command_parser.add_argument(
+            "--video-capture-target",
+            choices=["app", "terminal"],
+            default="app",
+            help="Capture the launched app window (default) or a Terminal.app window running the command.",
+        )
+        command_parser.add_argument(
             "--video-attachment-budget-mb",
             type=float,
             default=100.0,

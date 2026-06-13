@@ -1004,6 +1004,40 @@ def wait_for_macos_bundle_window(bundle_id: str, timeout_secs: float) -> tuple[i
     )
 
 
+def wait_for_macos_bundle_window_title(bundle_id: str, title_contains: str, timeout_secs: float) -> tuple[int, dict]:
+    return _macos_desktop.wait_for_macos_bundle_window_title(
+        bundle_id,
+        title_contains,
+        timeout_secs,
+        macos_window_info_for_bundle_id_fn=macos_window_info_for_bundle_id,
+        activate_macos_bundle_id_fn=activate_macos_bundle_id,
+        time_fn=time.time,
+        sleep_fn=time.sleep,
+    )
+
+
+def launch_macos_terminal_proof_command(
+    command_args: list[str],
+    *,
+    cwd: Path,
+    title: str,
+    stdout_path: Path,
+    stderr_path: Path,
+    returncode_path: Path,
+    keepalive_secs: float,
+) -> dict:
+    return _macos_desktop.launch_macos_terminal_proof_command(
+        command_args,
+        cwd=cwd,
+        title=title,
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
+        returncode_path=returncode_path,
+        keepalive_secs=keepalive_secs,
+        run_fn=subprocess.run,
+    )
+
+
 def capture_macos_window(window_id: int, output_path: Path) -> None:
     _macos_desktop.capture_macos_window(
         window_id,
@@ -1293,6 +1327,7 @@ def run_macos_local_smoke(
     record_video: bool = False,
     video_duration_secs: float = 8.0,
     video_fps: float = 30.0,
+    video_capture_target: str = "app",
     video_attachment_budget_bytes: int = _video_artifacts.DEFAULT_VIDEO_ATTACHMENT_BUDGET_BYTES,
     compose_video_proof: bool = False,
     video_template: str | None = None,
@@ -1322,6 +1357,7 @@ def run_macos_local_smoke(
         record_video=record_video,
         video_duration_secs=video_duration_secs,
         video_fps=video_fps,
+        video_capture_target=video_capture_target,
         video_attachment_budget_bytes=video_attachment_budget_bytes,
         compose_video_proof=compose_video_proof,
         video_template=video_template,

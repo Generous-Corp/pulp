@@ -154,6 +154,44 @@ class MacOSDesktopTests(unittest.TestCase):
         )
         self.assertEqual(activations, ["com.example.demo"])
 
+    def test_wait_for_bundle_window_title_filters_terminal_window(self) -> None:
+        now = [0.0]
+        payloads = [
+            {"pid": 456, "windows": [{"title": "Other", "windowId": 1}]},
+            {"pid": 456, "windows": [{"title": "Pulp Video Proof abcd1234", "windowId": 2}]},
+        ]
+
+        result = self.mod.wait_for_macos_bundle_window_title(
+            "com.apple.Terminal",
+            "Pulp Video Proof abcd1234",
+            1.0,
+            macos_window_info_for_bundle_id_fn=lambda _bundle_id: payloads.pop(0),
+            activate_macos_bundle_id_fn=lambda _bundle_id: {"activated": True, "stderr": ""},
+            time_fn=lambda: now[0],
+            sleep_fn=lambda amount: now.__setitem__(0, now[0] + amount),
+        )
+
+        self.assertEqual(result, (456, {"title": "Pulp Video Proof abcd1234", "windowId": 2}))
+
+    def test_terminal_proof_shell_script_sets_title_and_teed_logs(self) -> None:
+        script = self.mod.terminal_proof_shell_script(
+            cwd=Path("/repo path"),
+            command_args=["/tmp/Pulp Tone", "--flag", "two words"],
+            title="Pulp Video Proof abcd1234",
+            stdout_path=Path("/tmp/std out.log"),
+            stderr_path=Path("/tmp/std err.log"),
+            returncode_path=Path("/tmp/rc file"),
+            keepalive_secs=3.0,
+        )
+
+        self.assertIn("cd '/repo path'", script)
+        self.assertIn("Pulp Video Proof abcd1234", script)
+        self.assertIn("tee -a '/tmp/std out.log'", script)
+        self.assertIn("tee -a '/tmp/std err.log'", script)
+        self.assertIn("'/tmp/Pulp Tone' --flag 'two words' &", script)
+        self.assertIn("sleep 3.000", script)
+        self.assertIn("'/tmp/rc file'", script)
+
     def test_capture_retry_and_process_termination(self) -> None:
         output_path = self.root / "screens" / "window.png"
         calls = [0]

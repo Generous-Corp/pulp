@@ -50,6 +50,7 @@ class MacosDesktopBindingsTests(unittest.TestCase):
             "time": time_mod,
             "shlex": shlex_mod,
             "os": os_mod,
+            "Path": Path,
         }
         for name in [
             "create_desktop_run_bundle",
@@ -59,8 +60,10 @@ class MacosDesktopBindingsTests(unittest.TestCase):
             "quit_macos_bundle_id",
             "activate_macos_bundle_id",
             "wait_for_macos_bundle_window",
+            "wait_for_macos_bundle_window_title",
             "detect_macos_app_bundle",
             "macos_bundle_id_for_app_path",
+            "launch_macos_terminal_proof_command",
             "wait_for_macos_window",
             "wait_for_path",
             "capture_macos_window",
@@ -103,6 +106,7 @@ class MacosDesktopBindingsTests(unittest.TestCase):
             record_video=True,
             video_duration_secs=2.0,
             video_fps=15.0,
+            video_capture_target="terminal",
             video_attachment_budget_bytes=50,
             compose_video_proof=True,
             video_template="design-parity",
@@ -122,6 +126,9 @@ class MacosDesktopBindingsTests(unittest.TestCase):
         self.assertIs(captured["kwargs"]["split_command_fn"], shlex_mod.split)
         self.assertIs(captured["kwargs"]["environ_copy_fn"], os_mod.environ.copy)
         self.assertIs(captured["kwargs"]["wait_for_macos_window_fn"], bindings["wait_for_macos_window"])
+        self.assertIs(captured["kwargs"]["wait_for_macos_bundle_window_title_fn"], bindings["wait_for_macos_bundle_window_title"])
+        self.assertIs(captured["kwargs"]["launch_macos_terminal_proof_command_fn"], bindings["launch_macos_terminal_proof_command"])
+        self.assertTrue(callable(captured["kwargs"]["cwd_path_fn"]))
         self.assertIs(captured["kwargs"]["capture_macos_window_fn"], bindings["capture_macos_window"])
         self.assertIs(captured["kwargs"]["start_macos_window_video_recording_fn"], bindings["start_macos_window_video_recording"])
         self.assertIs(captured["kwargs"]["stop_macos_window_video_recording_fn"], bindings["stop_macos_window_video_recording"])
@@ -131,6 +138,7 @@ class MacosDesktopBindingsTests(unittest.TestCase):
         self.assertTrue(captured["kwargs"]["compose_video_proof"])
         self.assertEqual(captured["kwargs"]["video_duration_secs"], 2.0)
         self.assertEqual(captured["kwargs"]["video_fps"], 15.0)
+        self.assertEqual(captured["kwargs"]["video_capture_target"], "terminal")
         self.assertEqual(captured["kwargs"]["video_attachment_budget_bytes"], 50)
         self.assertEqual(captured["kwargs"]["video_template"], "design-parity")
         self.assertEqual(captured["kwargs"]["video_source_image"], "/tmp/reference.png")

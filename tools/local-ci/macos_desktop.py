@@ -147,6 +147,127 @@ def wait_for_macos_bundle_window(
     raise RuntimeError(last_error or f"timed out waiting for a visible window for bundle id {bundle_id}")
 
 
+def wait_for_macos_bundle_window_title(
+    bundle_id: str,
+    title_contains: str,
+    timeout_secs: float,
+    *,
+    macos_window_info_for_bundle_id_fn: Callable[[str], dict],
+    activate_macos_bundle_id_fn: Callable[[str], dict],
+    time_fn: Callable[[], float] = time.time,
+    sleep_fn: Callable[[float], None] = time.sleep,
+) -> tuple[int, dict]:
+    deadline = time_fn() + timeout_secs
+    last_error = ""
+    while time_fn() < deadline:
+        try:
+            payload = macos_window_info_for_bundle_id_fn(bundle_id)
+        except (subprocess.SubprocessError, json.JSONDecodeError) as exc:
+            last_error = str(exc)
+            sleep_fn(0.2)
+            continue
+        windows = payload.get("windows", [])
+        pid = payload.get("pid")
+        for window in windows:
+            title = str(window.get("title") or "")
+            if title_contains in title and isinstance(pid, int):
+                return pid, window
+        activation_payload = activate_macos_bundle_id_fn(bundle_id)
+        if activation_payload.get("stderr"):
+            last_error = activation_payload["stderr"]
+        sleep_fn(0.2)
+    raise RuntimeError(last_error or f"timed out waiting for Terminal window titled `{title_contains}`")
+
+
+def terminal_proof_shell_script(
+    *,
+    cwd: Path,
+    command_args: list[str],
+    title: str,
+    stdout_path: Path,
+    stderr_path: Path,
+    returncode_path: Path,
+    keepalive_secs: float,
+) -> str:
+    command = " ".join(shlex.quote(part) for part in command_args)
+    return "\n".join(
+        [
+            f"cd {shlex.quote(str(cwd))}",
+            f"printf '\\033]0;%s\\007' {shlex.quote(title)}",
+            f"exec > >(tee -a {shlex.quote(str(stdout_path))}) 2> >(tee -a {shlex.quote(str(stderr_path))} >&2)",
+            "printf '%s\\n' 'Pulp validation video proof'",
+            f"printf '%s\\n' {shlex.quote('$ ' + command)}",
+            f"{command} &",
+            "pulp_child_pid=$!",
+            f"sleep {max(0.5, keepalive_secs):.3f}",
+            "if kill -0 \"$pulp_child_pid\" >/dev/null 2>&1; then",
+            "  printf '\\n%s\\n' '[pulp video proof] stopping command after capture window'",
+            "  kill -INT \"$pulp_child_pid\" >/dev/null 2>&1 || true",
+            "  for _pulp_wait in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do",
+            "    kill -0 \"$pulp_child_pid\" >/dev/null 2>&1 || break",
+            "    sleep 0.1",
+            "  done",
+            "  if kill -0 \"$pulp_child_pid\" >/dev/null 2>&1; then",
+            "    kill -TERM \"$pulp_child_pid\" >/dev/null 2>&1 || true",
+            "    sleep 0.5",
+            "  fi",
+            "  if kill -0 \"$pulp_child_pid\" >/dev/null 2>&1; then",
+            "    kill -KILL \"$pulp_child_pid\" >/dev/null 2>&1 || true",
+            "  fi",
+            "fi",
+            "wait \"$pulp_child_pid\"",
+            "pulp_rc=$?",
+            f"printf '%s\\n' \"$pulp_rc\" > {shlex.quote(str(returncode_path))}",
+            "printf '\\n[pulp video proof] command exit: %s\\n' \"$pulp_rc\"",
+        ]
+    )
+
+
+def launch_macos_terminal_proof_command(
+    command_args: list[str],
+    *,
+    cwd: Path,
+    title: str,
+    stdout_path: Path,
+    stderr_path: Path,
+    returncode_path: Path,
+    keepalive_secs: float,
+    run_fn: Callable[..., subprocess.CompletedProcess[str]],
+) -> dict:
+    stdout_path.parent.mkdir(parents=True, exist_ok=True)
+    stderr_path.parent.mkdir(parents=True, exist_ok=True)
+    returncode_path.parent.mkdir(parents=True, exist_ok=True)
+    shell_script = terminal_proof_shell_script(
+        cwd=cwd,
+        command_args=command_args,
+        title=title,
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
+        returncode_path=returncode_path,
+        keepalive_secs=keepalive_secs,
+    )
+    result = run_fn(
+        ["osascript", "-e", f'tell application "Terminal" to do script {json.dumps(shell_script)}'],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip() or f"osascript exited {result.returncode}"
+        raise RuntimeError(f"Could not launch Terminal proof command: {detail}")
+    return {
+        "bundle_id": "com.apple.Terminal",
+        "title": title,
+        "command": command_args,
+        "cwd": str(cwd),
+        "stdout": str(stdout_path),
+        "stderr": str(stderr_path),
+        "returncode": str(returncode_path),
+        "keepalive_secs": keepalive_secs,
+        "osascript_stdout": result.stdout.strip(),
+        "osascript_stderr": result.stderr.strip(),
+    }
+
+
 def capture_macos_window(
     window_id: int,
     output_path: Path,
