@@ -164,6 +164,9 @@ class DesktopCommandsCliTests(unittest.TestCase):
         self.assertIn("Desktop validation video proof demo matrix:", text)
         self.assertIn("component-zoom [ready]", text)
         self.assertIn("--recipe component-zoom", text)
+        self.assertIn("build-desktop-automation/examples/ui-preview/pulp-ui-preview", text)
+        self.assertIn("prepare: cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release", text)
+        self.assertIn("--prepare-command 'cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release", text)
         self.assertIn("publish:", text)
         self.assertIn("review issue:", text)
         self.assertIn("--background --label component-zoom-review --json", text)
@@ -183,8 +186,22 @@ class DesktopCommandsCliTests(unittest.TestCase):
         self.assertIn("desktop publish --manifest /path/to/run/manifest.json", reaper["publish_command"])
         self.assertIn("desktop review-issue /path/to/published-reports/reaper-plugin-editor", reaper["review_issue_command"])
         self.assertIn("--background --label reaper-plugin-editor-review --json", reaper["serve_background_command"])
-        self.assertEqual(reaper["review_workflow"][0]["step"], "doctor")
+        self.assertIn("PulpSynth_CLAP", reaper["prepare_command"])
+        self.assertIn("Plug-Ins/CLAP/PulpSynth.clap", reaper["command"])
+        self.assertEqual(reaper["review_workflow"][0]["step"], "prepare")
+        self.assertEqual(reaper["review_workflow"][1]["step"], "doctor")
         self.assertEqual(reaper["review_workflow"][-1]["step"], "stop_server")
+        standalone = next(item for item in payload["scenarios"] if item["id"] == "standalone-interaction")
+        self.assertEqual(
+            standalone["prepare_command"],
+            "cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release && "
+            "cmake --build build-desktop-automation --target pulp-ui-preview -j$(sysctl -n hw.ncpu)",
+        )
+        self.assertIn("--prepare-command", standalone["command"])
+        self.assertIn("./build-desktop-automation/examples/ui-preview/pulp-ui-preview", standalone["command"])
+        inspector = next(item for item in payload["scenarios"] if item["id"] == "inspector-workflow")
+        self.assertIn("-DPULP_ENABLE_GPU=OFF", inspector["prepare_command"])
+        self.assertIn("./build-video-nogpu/examples/audio-inspector-demo/pulp-audio-inspector-demo", inspector["command"])
 
         self.printed.clear()
         result = self.mod.cmd_desktop_video_matrix(
@@ -195,6 +212,7 @@ class DesktopCommandsCliTests(unittest.TestCase):
         markdown = self.printed[0]
         self.assertIn("# Desktop Validation Video Proof Demo Matrix", markdown)
         self.assertIn("iOS Simulator interaction", markdown)
+        self.assertIn("- Prepare: `none`", markdown)
         self.assertIn("Publish, draft, and serve:", markdown)
         self.assertIn("python3 tools/local-ci/local_ci.py simulator video", markdown)
         self.assertIn("python3 tools/local-ci/local_ci.py simulator video-doctor", markdown)

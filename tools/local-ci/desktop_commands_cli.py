@@ -225,9 +225,16 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
         "status": "ready",
         "template": "standalone",
         "proves": "A Pulp standalone launches, accepts a click, and visibly changes state.",
+        "prepare_command": (
+            "cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release && "
+            "cmake --build build-desktop-automation --target pulp-ui-preview -j$(sysctl -n hw.ncpu)"
+        ),
         "command": (
             "python3 tools/local-ci/local_ci.py desktop video mac "
-            "--recipe standalone-interaction --command './build/examples/ui-preview/pulp-ui-preview' "
+            "--recipe standalone-interaction "
+            "--command './build-desktop-automation/examples/ui-preview/pulp-ui-preview' "
+            "--prepare-command 'cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release && "
+            "cmake --build build-desktop-automation --target pulp-ui-preview -j$(sysctl -n hw.ncpu)' "
             "--capture-ui-snapshot --click-view-id bypass-toggle "
             "--label standalone-bypass-toggle --compose-video-proof"
         ),
@@ -245,9 +252,21 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
         "status": "partial",
         "template": "plugin-host",
         "proves": "A real host loads a Pulp plugin and records host/editor context.",
+        "prepare_command": (
+            "cmake -S . -B build-video-nogpu -DCMAKE_BUILD_TYPE=Release -DPULP_ENABLE_GPU=OFF && "
+            "cmake --build build-video-nogpu --target PulpSynth_CLAP -j$(sysctl -n hw.ncpu) && "
+            'mkdir -p "$HOME/Library/Audio/Plug-Ins/CLAP" && '
+            'ln -sfn "$(pwd)/build-video-nogpu/CLAP/PulpSynth.clap" '
+            '"$HOME/Library/Audio/Plug-Ins/CLAP/PulpSynth.clap"'
+        ),
         "command": (
             "python3 tools/local-ci/local_ci.py desktop video mac "
             "--recipe reaper-plugin-editor --plugin PulpSynth --plugin-format clap "
+            "--prepare-command 'cmake -S . -B build-video-nogpu -DCMAKE_BUILD_TYPE=Release -DPULP_ENABLE_GPU=OFF && "
+            "cmake --build build-video-nogpu --target PulpSynth_CLAP -j$(sysctl -n hw.ncpu) && "
+            "mkdir -p \"$HOME/Library/Audio/Plug-Ins/CLAP\" && "
+            "ln -sfn \"$(pwd)/build-video-nogpu/CLAP/PulpSynth.clap\" "
+            "\"$HOME/Library/Audio/Plug-Ins/CLAP/PulpSynth.clap\"' "
             "--label reaper-clap-pulpsynth --compose-video-proof"
         ),
         "doctor": (
@@ -267,9 +286,16 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
         "status": "ready",
         "template": "inspector-workflow",
         "proves": "A developer build exposes inspector/audio-inspector state during a visible workflow.",
+        "prepare_command": (
+            "cmake -S . -B build-video-nogpu -DCMAKE_BUILD_TYPE=Release -DPULP_ENABLE_GPU=OFF && "
+            "cmake --build build-video-nogpu --target pulp-audio-inspector-demo -j$(sysctl -n hw.ncpu)"
+        ),
         "command": (
             "python3 tools/local-ci/local_ci.py desktop video mac "
-            "--recipe inspector-workflow --command './build/pulp-audio-inspector-demo' "
+            "--recipe inspector-workflow "
+            "--command './build-video-nogpu/examples/audio-inspector-demo/pulp-audio-inspector-demo' "
+            "--prepare-command 'cmake -S . -B build-video-nogpu -DCMAKE_BUILD_TYPE=Release -DPULP_ENABLE_GPU=OFF && "
+            "cmake --build build-video-nogpu --target pulp-audio-inspector-demo -j$(sysctl -n hw.ncpu)' "
             "--capture-ui-snapshot --label inspector-open-and-select --compose-video-proof"
         ),
         "doctor": "python3 tools/local-ci/local_ci.py desktop video-doctor mac",
@@ -286,9 +312,16 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
         "status": "ready",
         "template": "component-zoom",
         "proves": "The proof highlights one component so the reviewer does not hunt through the full window.",
+        "prepare_command": (
+            "cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release && "
+            "cmake --build build-desktop-automation --target pulp-ui-preview -j$(sysctl -n hw.ncpu)"
+        ),
         "command": (
             "python3 tools/local-ci/local_ci.py desktop video mac "
-            "--recipe component-zoom --command './build/examples/ui-preview/pulp-ui-preview' "
+            "--recipe component-zoom "
+            "--command './build-desktop-automation/examples/ui-preview/pulp-ui-preview' "
+            "--prepare-command 'cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release && "
+            "cmake --build build-desktop-automation --target pulp-ui-preview -j$(sysctl -n hw.ncpu)' "
             "--capture-ui-snapshot --component-id compressor-threshold "
             "--click-view-id compressor-threshold --label component-threshold-control "
             "--compose-video-proof"
@@ -397,6 +430,7 @@ def desktop_video_matrix_payload(*, target: str | None = None, scenario: str | N
             f"python3 tools/local-ci/local_ci.py desktop serve --stop --label {label}-review --json"
         )
         row["review_workflow"] = [
+            {"step": "prepare", "command": row.get("prepare_command") or "not required"},
             {"step": "doctor", "command": row["doctor"]},
             {"step": "record_or_compose", "command": row["command"]},
             {"step": "publish", "command": row["publish_command"]},
@@ -431,6 +465,7 @@ def desktop_video_matrix_lines(payload: dict) -> list[str]:
                 f"  template: {item['template']}",
                 f"  proves: {item['proves']}",
                 f"  doctor: {item['doctor']}",
+                f"  prepare: {item.get('prepare_command') or '(none)'}",
                 f"  command: {item['command']}",
                 f"  publish: {item['publish_command']}",
                 f"  review issue: {item['review_issue_command']}",
@@ -463,6 +498,7 @@ def desktop_video_matrix_markdown(payload: dict) -> str:
                 f"- Remotion template: `{item['template']}`",
                 f"- Proves: {item['proves']}",
                 f"- Doctor: `{item['doctor']}`",
+                f"- Prepare: `{item.get('prepare_command') or 'none'}`",
                 "",
                 "Record or compose:",
                 "",

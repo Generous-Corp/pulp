@@ -217,7 +217,8 @@ python3 tools/local-ci/local_ci.py desktop video mac \
 ```bash
 python3 tools/local-ci/local_ci.py desktop video mac \
   --recipe standalone-interaction \
-  --command ./build/pulp \
+  --command ./build-desktop-automation/examples/ui-preview/pulp-ui-preview \
+  --prepare-command 'cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release && cmake --build build-desktop-automation --target pulp-ui-preview -j$(sysctl -n hw.ncpu)' \
   --click 120,80 \
   --duration 8
 ```
@@ -233,14 +234,16 @@ python3 tools/local-ci/local_ci.py desktop video mac \
 ```bash
 python3 tools/local-ci/local_ci.py desktop video mac \
   --recipe inspector-workflow \
-  --command ./build/pulp \
+  --command ./build-video-nogpu/examples/audio-inspector-demo/pulp-audio-inspector-demo \
+  --prepare-command 'cmake -S . -B build-video-nogpu -DCMAKE_BUILD_TYPE=Release -DPULP_ENABLE_GPU=OFF && cmake --build build-video-nogpu --target pulp-audio-inspector-demo -j$(sysctl -n hw.ncpu)' \
   --duration 8
 ```
 
 ```bash
 python3 tools/local-ci/local_ci.py desktop video mac \
   --recipe component-zoom \
-  --command ./build/pulp \
+  --command ./build-desktop-automation/examples/ui-preview/pulp-ui-preview \
+  --prepare-command 'cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release && cmake --build build-desktop-automation --target pulp-ui-preview -j$(sysctl -n hw.ncpu)' \
   --component-id compressor-threshold \
   --duration 8
 ```
@@ -412,10 +415,10 @@ the current macOS lane, `--target ios-simulator` narrows to simulator capture,
 `--target android-emulator` narrows to Android capture, `--scenario
 component-zoom` prints one row, and `--json` is suitable for
 automation. The matrix carries readiness status, Remotion template, doctor
-command, recording/compose command, publish/review-issue commands, background
-serve/status/stop commands, and reviewer watch-points for standalone,
-REAPER/plugin-host, inspector, component-zoom, design-parity, iOS Simulator,
-and Android Emulator proofs.
+command, concrete Release prepare command, recording/compose command,
+publish/review-issue commands, background serve/status/stop commands, and
+reviewer watch-points for standalone, REAPER/plugin-host, inspector,
+component-zoom, design-parity, iOS Simulator, and Android Emulator proofs.
 
 ## iOS Simulator capture
 
