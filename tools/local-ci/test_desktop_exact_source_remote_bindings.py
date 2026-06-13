@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""Tests for remote exact-source preparation dependency bindings."""
+"""Tests for remote exact-source preparation compatibility bindings."""
 
 from module_test_utils import load_module_from_path
-import types
 import unittest
 from pathlib import Path
 
@@ -17,88 +16,10 @@ def load_module():
 class DesktopExactSourceRemoteBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
-        self.root = Path("/repo")
-        self.run_fn = object()
 
-    def bindings(self, runner_name: str, runner):
-        bindings = {
-            "_source_prep": types.SimpleNamespace(**{runner_name: runner}),
-            "ROOT": self.root,
-            "subprocess": types.SimpleNamespace(run=self.run_fn),
-            "sync_job_bundle_to_ssh_host": object(),
-            "git_origin_clone_url": object(),
-            "desktop_source_cache_key": object(),
-            "fetch_ssh_artifact": object(),
-            "rewrite_launch_command_for_posix_root": object(),
-            "ps_literal": object(),
-            "windows_contract_expand_expression": object(),
-            "split_windows_prepare_commands": object(),
-            "validate_windows_prepare_commands": object(),
-            "run_windows_ssh_powershell": object(),
-            "windows_ssh_fetch_file": object(),
-            "rewrite_launch_command_for_windows_root": object(),
-        }
-        return bindings
-
-    def test_prepare_linux_exact_sha_source_binds_facade_dependencies(self):
-        captured = {}
-
-        def prepare(*args, **kwargs):
-            captured["args"] = args
-            captured["kwargs"] = kwargs
-            return {"platform": "linux"}
-
-        bindings = self.bindings("prepare_linux_exact_sha_source", prepare)
-
-        result = self.mod.prepare_linux_exact_sha_source(
-            bindings,
-            Path("/bundle"),
-            "ubuntu",
-            "host",
-            "./tool",
-            {"sha": "abc123"},
-        )
-
-        self.assertEqual(result, {"platform": "linux"})
-        self.assertEqual(captured["args"], (Path("/bundle"), "ubuntu", "host", "./tool", {"sha": "abc123"}))
-        self.assertIs(captured["kwargs"]["sync_job_bundle_to_ssh_host_fn"], bindings["sync_job_bundle_to_ssh_host"])
-        self.assertIs(captured["kwargs"]["git_origin_clone_url_fn"], bindings["git_origin_clone_url"])
-        self.assertIs(captured["kwargs"]["desktop_source_cache_key_fn"], bindings["desktop_source_cache_key"])
-        self.assertIs(captured["kwargs"]["run_fn"], self.run_fn)
-        self.assertIs(captured["kwargs"]["fetch_ssh_artifact_fn"], bindings["fetch_ssh_artifact"])
-        self.assertIs(captured["kwargs"]["rewrite_launch_command_for_posix_root_fn"], bindings["rewrite_launch_command_for_posix_root"])
-
-    def test_prepare_windows_exact_sha_source_binds_facade_dependencies(self):
-        captured = {}
-
-        def prepare(*args, **kwargs):
-            captured["args"] = args
-            captured["kwargs"] = kwargs
-            return {"platform": "windows"}
-
-        bindings = self.bindings("prepare_windows_exact_sha_source", prepare)
-
-        result = self.mod.prepare_windows_exact_sha_source(
-            bindings,
-            Path("/bundle"),
-            "windows",
-            "host",
-            r".\tool.exe",
-            {"sha": "abc123"},
-        )
-
-        self.assertEqual(result, {"platform": "windows"})
-        self.assertEqual(captured["args"], (Path("/bundle"), "windows", "host", r".\tool.exe", {"sha": "abc123"}))
-        self.assertIs(captured["kwargs"]["sync_job_bundle_to_ssh_host_fn"], bindings["sync_job_bundle_to_ssh_host"])
-        self.assertIs(captured["kwargs"]["git_origin_clone_url_fn"], bindings["git_origin_clone_url"])
-        self.assertIs(captured["kwargs"]["desktop_source_cache_key_fn"], bindings["desktop_source_cache_key"])
-        self.assertIs(captured["kwargs"]["ps_literal_fn"], bindings["ps_literal"])
-        self.assertIs(captured["kwargs"]["windows_contract_expand_expression_fn"], bindings["windows_contract_expand_expression"])
-        self.assertIs(captured["kwargs"]["split_windows_prepare_commands_fn"], bindings["split_windows_prepare_commands"])
-        self.assertIs(captured["kwargs"]["validate_windows_prepare_commands_fn"], bindings["validate_windows_prepare_commands"])
-        self.assertIs(captured["kwargs"]["run_windows_ssh_powershell_fn"], bindings["run_windows_ssh_powershell"])
-        self.assertIs(captured["kwargs"]["windows_ssh_fetch_file_fn"], bindings["windows_ssh_fetch_file"])
-        self.assertIs(captured["kwargs"]["rewrite_launch_command_for_windows_root_fn"], bindings["rewrite_launch_command_for_windows_root"])
+    def test_remote_facade_reexports_focused_helpers(self):
+        self.assertEqual(self.mod.prepare_linux_exact_sha_source.__module__, "desktop_exact_source_linux_bindings")
+        self.assertEqual(self.mod.prepare_windows_exact_sha_source.__module__, "desktop_exact_source_windows_bindings")
 
 
 if __name__ == "__main__":
