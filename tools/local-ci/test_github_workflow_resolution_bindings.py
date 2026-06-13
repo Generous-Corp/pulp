@@ -157,6 +157,14 @@ class GithubWorkflowResolutionBindingsTests(unittest.TestCase):
             ],
         )
 
+    def test_install_github_workflow_resolution_helpers_keeps_unknown_local_fallback(self):
+        bindings = {}
+        self.mod.future_github_workflow_resolution_helper = lambda _bindings: "future"
+
+        self.mod.install_github_workflow_resolution_helpers(bindings, ("future_github_workflow_resolution_helper",))
+
+        self.assertEqual(bindings["future_github_workflow_resolution_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()

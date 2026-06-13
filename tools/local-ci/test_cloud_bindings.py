@@ -202,6 +202,15 @@ class CloudBindingsTests(unittest.TestCase):
             ["summarize_runner_selector", "cmd_cloud_status", "gh_pr_head", "format_ci_comment"],
         )
 
+    def test_install_cloud_helpers_keeps_unknown_local_fallback(self):
+        bindings = {
+            "_cloud": types.SimpleNamespace(future_cloud_helper=lambda: "future"),
+        }
+
+        self.mod.install_cloud_helpers(bindings, ("future_cloud_helper",))
+
+        self.assertEqual(bindings["future_cloud_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()
