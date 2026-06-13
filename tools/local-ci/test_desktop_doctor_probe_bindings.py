@@ -88,10 +88,11 @@ class DesktopDoctorProbeBindingsTests(unittest.TestCase):
 
     def test_doctor_probe_exports_and_installer_wire_named_helpers(self):
         expected = (
-            "desktop_doctor_checks",
-            "probe_webdriver_endpoint",
+            *self.mod.DESKTOP_DOCTOR_CHECK_EXPORTS,
+            *self.mod.DESKTOP_DOCTOR_WEBDRIVER_PROBE_EXPORTS,
         )
         self.assertEqual(self.mod.DESKTOP_DOCTOR_PROBE_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
 
         captured = {}
 
@@ -107,6 +108,34 @@ class DesktopDoctorProbeBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["probe_webdriver_endpoint"]("http://driver"), {"ready": True})
         self.assertNotIn("desktop_doctor_checks", bindings)
         self.assertEqual(captured["webdriver"][0], ("http://driver",))
+
+    def test_doctor_probe_installer_routes_selected_groups(self):
+        bindings = self._bindings()
+        bindings["_desktop_doctor"].desktop_doctor_checks = lambda *args, **kwargs: [{"name": "ok"}]
+        bindings["_desktop_doctor"].probe_webdriver_endpoint = lambda *args, **kwargs: {"ready": True}
+        for name in [
+            "resolve_desktop_target",
+            "desktop_target_contract",
+            "desktop_receipt_for",
+            "macos_accessibility_trusted",
+            "ssh_reachable",
+            "ssh_failure_detail",
+            "probe_linux_launch_backend",
+            "probe_linux_remote_tooling",
+            "probe_windows_session_agent",
+            "probe_windows_remote_tooling",
+            "probe_windows_repo_checkout",
+            "probe_webdriver_endpoint",
+        ]:
+            bindings[name] = object()
+
+        self.mod.install_desktop_doctor_probe_helpers(
+            bindings,
+            ("desktop_doctor_checks", "probe_webdriver_endpoint"),
+        )
+
+        self.assertEqual(bindings["desktop_doctor_checks"]({}, "mac"), [{"name": "ok"}])
+        self.assertEqual(bindings["probe_webdriver_endpoint"]("http://driver"), {"ready": True})
 
 
 if __name__ == "__main__":
