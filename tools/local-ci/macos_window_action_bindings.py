@@ -6,6 +6,16 @@ import subprocess
 
 from binding_utils import binding as _binding
 from binding_utils import binding_attr as _binding_attr
+from binding_utils import install_local_helpers
+
+
+MACOS_WINDOW_ACTION_EXPORTS = (
+    "activate_macos_pid",
+    "activate_macos_bundle_id",
+    "dispatch_macos_click",
+    "terminate_process",
+    "quit_macos_bundle_id",
+)
 
 
 def activate_macos_pid(bindings: dict, pid: int) -> dict:
@@ -41,3 +51,10 @@ def quit_macos_bundle_id(bindings: dict, bundle_id: str) -> None:
         bundle_id,
         run_fn=_binding_attr(bindings, "subprocess", "run"),
     )
+
+
+def install_macos_window_action_helpers(
+    bindings: dict,
+    names: tuple[str, ...] = MACOS_WINDOW_ACTION_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)

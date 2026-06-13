@@ -131,6 +131,36 @@ class MacosWindowBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["detect_macos_app_bundle"]("/Demo.app/Contents/MacOS/Demo"), Path("/Demo.app"))
         self.assertEqual(bindings["macos_bundle_id_for_app_path"](Path("/Demo.app")), "id:Demo.app")
 
+    def test_window_exports_compose_focused_groups(self) -> None:
+        expected = (
+            *self.mod.MACOS_WINDOW_APP_EXPORTS,
+            *self.mod.MACOS_WINDOW_PROBE_EXPORTS,
+            *self.mod.MACOS_WINDOW_ACTION_EXPORTS,
+        )
+
+        self.assertEqual(self.mod.MACOS_WINDOW_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
+    def test_install_macos_window_helpers_routes_selected_groups(self) -> None:
+        macos_desktop = types.SimpleNamespace(
+            detect_macos_app_bundle=lambda command: Path("/Demo.app") if command else None,
+            macos_accessibility_trusted=lambda **kwargs: True,
+            activate_macos_bundle_id=lambda bundle_id, **kwargs: {"bundle_id": bundle_id},
+        )
+        bindings = self._bindings(macos_desktop)
+
+        self.mod.install_macos_window_helpers(
+            bindings,
+            ("detect_macos_app_bundle", "macos_accessibility_trusted", "activate_macos_bundle_id"),
+        )
+
+        self.assertEqual(bindings["detect_macos_app_bundle"]("/Demo.app/Contents/MacOS/Demo"), Path("/Demo.app"))
+        self.assertTrue(bindings["macos_accessibility_trusted"]())
+        self.assertEqual(bindings["activate_macos_bundle_id"]("com.example.demo"), {"bundle_id": "com.example.demo"})
+        self.assertNotIn("macos_bundle_id_for_app_path", bindings)
+        self.assertNotIn("wait_for_macos_window", bindings)
+        self.assertNotIn("dispatch_macos_click", bindings)
+
 
 if __name__ == "__main__":
     unittest.main()

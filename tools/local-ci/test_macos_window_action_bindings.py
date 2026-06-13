@@ -55,6 +55,31 @@ class MacosWindowActionBindingsTests(unittest.TestCase):
         self.mod.quit_macos_bundle_id(bindings, "com.example.demo")
         self.assertIs(captured["quit"][1]["run_fn"], run_fn)
 
+    def test_action_exports_and_installer_wire_named_helpers(self) -> None:
+        expected = (
+            "activate_macos_pid",
+            "activate_macos_bundle_id",
+            "dispatch_macos_click",
+            "terminate_process",
+            "quit_macos_bundle_id",
+        )
+        self.assertEqual(self.mod.MACOS_WINDOW_ACTION_EXPORTS, expected)
+
+        macos_desktop = types.SimpleNamespace(
+            activate_macos_bundle_id=lambda bundle_id, **kwargs: {"bundle_id": bundle_id},
+            terminate_process=lambda proc, timeout_secs=5.0: None,
+        )
+        bindings = {
+            "_macos_desktop": macos_desktop,
+            "subprocess": types.SimpleNamespace(run=object()),
+        }
+
+        self.mod.install_macos_window_action_helpers(bindings, ("activate_macos_bundle_id", "terminate_process"))
+
+        self.assertEqual(bindings["activate_macos_bundle_id"]("com.example.demo"), {"bundle_id": "com.example.demo"})
+        self.assertIsNone(bindings["terminate_process"](object()))
+        self.assertNotIn("dispatch_macos_click", bindings)
+
 
 if __name__ == "__main__":
     unittest.main()

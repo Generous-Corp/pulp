@@ -81,6 +81,19 @@ class MacosWindowProbeBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.MACOS_WINDOW_PROBE_EXPORTS, expected)
         self.assertEqual(len(expected), len(set(expected)))
 
+    def test_probe_installer_wires_selected_helpers(self) -> None:
+        macos_desktop = types.SimpleNamespace(
+            macos_accessibility_trusted=lambda **kwargs: True,
+            capture_macos_window=lambda window_id, output_path, **kwargs: None,
+        )
+        bindings = self._bindings(macos_desktop)
+
+        self.mod.install_macos_window_probe_helpers(bindings, ("macos_accessibility_trusted", "capture_macos_window"))
+
+        self.assertTrue(bindings["macos_accessibility_trusted"]())
+        self.assertIsNone(bindings["capture_macos_window"](7, Path("/tmp/window.png")))
+        self.assertNotIn("wait_for_macos_window", bindings)
+
 
 if __name__ == "__main__":
     unittest.main()
