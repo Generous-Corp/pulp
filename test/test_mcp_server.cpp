@@ -450,6 +450,16 @@ TEST_CASE("MCP shell_quote keeps shell arguments atomic",
 #endif
 }
 
+TEST_CASE("MCP CLI resolver finds Windows multi-config delegates",
+          "[mcp][shell][coverage]") {
+    TempDir project;
+    const auto cli = project.path / "build" / "tools" / "cli" / "Release" / "pulp-cpp.exe";
+    std::filesystem::create_directories(cli.parent_path());
+    std::ofstream(cli) << "fake";
+
+    REQUIRE(pulp_mcp::resolve_cli_binary(project.path) == cli);
+}
+
 TEST_CASE("MCP shell exec returns stdout and failure diagnostics",
           "[mcp][shell][coverage][requested]") {
 #if defined(_WIN32)

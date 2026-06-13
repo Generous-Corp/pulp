@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <string>
+#include <vector>
 
 namespace pulp_mcp {
 
@@ -74,15 +75,37 @@ inline std::filesystem::path find_project_root() {
 }
 
 inline std::filesystem::path resolve_cli_binary(const std::filesystem::path& root) {
-    const std::filesystem::path candidates[] = {
-        root / "build" / "pulp",
-        root / "build" / "tools" / "cli" / "pulp",
-        root / "build" / "tools" / "cli" / "pulp-cpp",
+    const auto build_dir = root / "build";
+    const auto cli_dir = build_dir / "tools" / "cli";
+    std::vector<std::filesystem::path> candidates;
+
+    auto add_pulp_binary_candidates = [&](const std::filesystem::path& dir) {
+        candidates.push_back(dir / "pulp");
+        candidates.push_back(dir / "pulp.exe");
     };
+    auto add_delegate_candidates = [&](const std::filesystem::path& dir) {
+        candidates.push_back(dir / "pulp");
+        candidates.push_back(dir / "pulp.exe");
+        candidates.push_back(dir / "pulp-cpp");
+        candidates.push_back(dir / "pulp-cpp.exe");
+    };
+
+    add_pulp_binary_candidates(build_dir);
+    for (const char* config : {"Release", "RelWithDebInfo", "Debug", "MinSizeRel"})
+        add_pulp_binary_candidates(build_dir / config);
+
+    add_delegate_candidates(cli_dir);
+    for (const char* config : {"Release", "RelWithDebInfo", "Debug", "MinSizeRel"})
+        add_delegate_candidates(cli_dir / config);
+
     for (const auto& candidate : candidates) {
         if (std::filesystem::exists(candidate)) return candidate;
     }
-    return candidates[0];
+#if defined(_WIN32)
+    return build_dir / "pulp.exe";
+#else
+    return build_dir / "pulp";
+#endif
 }
 
 }  // namespace pulp_mcp
