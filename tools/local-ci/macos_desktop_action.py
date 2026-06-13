@@ -583,4 +583,7 @@ def run_macos_local_smoke(
         if not active_bundle_id and "launch_descriptor" in locals():
             active_bundle_id = launch_descriptor.get("capture_bundle_id") or launch_descriptor.get("bundle_id")
         if active_bundle_id:
-            quit_macos_bundle_id_fn(active_bundle_id)
+            try:
+                quit_macos_bundle_id_fn(active_bundle_id)
+            except Exception:
+                pass

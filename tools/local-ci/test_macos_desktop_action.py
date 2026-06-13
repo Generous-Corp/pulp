@@ -376,6 +376,21 @@ class MacosDesktopActionTests(unittest.TestCase):
         self.assertEqual(terminated, [4242])
         self.assertEqual(quits, ["com.cockos.reaper"])
 
+    def test_run_macos_local_smoke_ignores_cleanup_quit_failures(self) -> None:
+        host_window = {"windowId": 120, "title": "REAPER", "bounds": {"width": 900, "height": 520}}
+
+        manifest, _launched, terminated, _waited_paths, _rollups = self.run_action(
+            window=host_window,
+            capture_ui_snapshot=False,
+            capture_bundle_id="com.cockos.reaper",
+            record_video=True,
+            wait_for_macos_bundle_window_fn=lambda _bundle_id, _timeout: (9090, host_window),
+            quit_macos_bundle_id_fn=lambda _bundle_id: (_ for _ in ()).throw(RuntimeError("connection invalid")),
+        )
+
+        self.assertEqual(manifest["window"], host_window)
+        self.assertEqual(terminated, [4242])
+
     def test_run_macos_local_smoke_rejects_capture_bundle_id_combinations(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "only valid with --command"):
             self.run_action(
