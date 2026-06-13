@@ -70,7 +70,7 @@ public:
 
     // ── Theme ────────────────────────────────────────────────────────────
 
-    void set_theme(const Theme& theme) { theme_ = theme; }
+    void set_theme(const Theme& theme) { theme_ = theme; request_repaint(); }
     const Theme& theme() const { return theme_; }
 
     // Resolve a color: check own theme first, then walk up to parent
