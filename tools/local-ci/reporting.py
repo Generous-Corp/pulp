@@ -283,6 +283,7 @@ def _source_summary(source: dict) -> str | None:
 
 def desktop_review_issue_body(index_payload: dict, *, publish_dir: Path) -> str:
     serve_command = f"python3 tools/local-ci/local_ci.py desktop serve {publish_dir} --host 0.0.0.0 --port 8765"
+    serve_urls = [str(url) for url in index_payload.get("serve_urls", []) if url]
     lines = [
         f"# {index_payload['label']}",
         "",
@@ -295,10 +296,10 @@ def desktop_review_issue_body(index_payload: dict, *, publish_dir: Path) -> str:
         "- Served URL: `desktop serve` prints candidate URLs, including localhost, configured public hosts, and Tailscale IPs when available.",
         "- Friendly Tailnet name: set `PULP_DESKTOP_SERVE_HOSTS=<name-or-ip>` before running `desktop serve` if reviewers should tap a stable host name.",
         "- Reviewer verdict: comment `looks good to me` when the proof is accepted, or describe the mismatch and run label when changes are needed.",
-        "",
-        "## Runs",
-        "",
     ]
+    for url in serve_urls:
+        lines.append(f"- Candidate watch URL: `{url}`")
+    lines.extend(["", "## Runs", ""])
     for run in index_payload.get("runs", []):
         artifacts = run.get("artifacts") or {}
         proof_notes = run.get("video_proof_notes") if isinstance(run.get("video_proof_notes"), list) else []
@@ -384,6 +385,7 @@ def desktop_review_issue_body(index_payload: dict, *, publish_dir: Path) -> str:
 
 def desktop_review_package(index_payload: dict, *, publish_dir: Path) -> dict:
     serve_command = f"python3 tools/local-ci/local_ci.py desktop serve {publish_dir} --host 0.0.0.0 --port 8765"
+    serve_urls = [str(url) for url in index_payload.get("serve_urls", []) if url]
     runs: list[dict] = []
     for run in index_payload.get("runs", []):
         artifacts = run.get("artifacts") or {}
@@ -451,6 +453,7 @@ def desktop_review_package(index_payload: dict, *, publish_dir: Path) -> dict:
                     "report_path": str(publish_dir / "index.html"),
                     "review_markdown": str(publish_dir / "review.md"),
                     "serve_command": serve_command,
+                    "serve_urls": serve_urls,
                     "internal_ephemeral": True,
                 },
             }
@@ -466,6 +469,7 @@ def desktop_review_package(index_payload: dict, *, publish_dir: Path) -> dict:
         "index_json": str(publish_dir / "index.json"),
         "review_markdown": str(publish_dir / "review.md"),
         "serve_command": serve_command,
+        "serve_urls": serve_urls,
         "runs": runs,
     }
 
@@ -503,6 +507,9 @@ def desktop_review_issue_draft(
     serve_command = review_package.get("serve_command")
     if serve_command:
         body_lines.append(f"- Serve command: `{serve_command}`")
+    serve_urls = [str(url) for url in review_package.get("serve_urls", []) if url]
+    for url in serve_urls:
+        body_lines.append(f"- Candidate watch URL: `{url}`")
     body_lines.extend(["", "## Runs", ""])
     for index, run in enumerate(review_package.get("runs") or [], start=1):
         attachment = run.get("attachment") if isinstance(run.get("attachment"), dict) else {}
@@ -573,6 +580,7 @@ def desktop_review_issue_draft(
                 "report_path": fallback.get("report_path") or review_package.get("index_html"),
                 "review_markdown": fallback.get("review_markdown") or review_package.get("review_markdown"),
                 "serve_command": fallback.get("serve_command") or serve_command,
+                "serve_urls": fallback.get("serve_urls") or serve_urls,
                 "internal_ephemeral": bool(fallback.get("internal_ephemeral", True)),
                 "reason": attachment.get("reason"),
             }
@@ -598,6 +606,7 @@ def desktop_review_issue_draft(
         "review_package": str(package_path),
         "attachments": attachments,
         "fallback_links": fallback_links,
+        "serve_urls": serve_urls,
         "close_trigger": "looks good to me",
     }
     if check_files:
@@ -616,6 +625,7 @@ def stage_desktop_publish_report(
     *,
     output_dir: Path | None = None,
     label: str | None = None,
+    serve_urls: list[str] | None = None,
     create_desktop_publish_bundle_fn: Callable[[dict], Path],
     now_iso_fn: Callable[[], str],
     atomic_write_text_fn: Callable[[Path, str], None],
@@ -695,6 +705,7 @@ def stage_desktop_publish_report(
         "publish_mode": config["desktop_automation"]["publish_mode"],
         "publish_branch": config["desktop_automation"]["publish_branch"],
         "run_count": len(published_runs),
+        "serve_urls": [str(url) for url in (serve_urls or []) if url],
         "runs": published_runs,
     }
 
@@ -833,6 +844,7 @@ def stage_desktop_publish_report(
         "index_json": str(index_json),
         "review_markdown": str(review_markdown),
         "review_package": str(review_package),
+        "serve_urls": index_payload["serve_urls"],
         "run_count": len(published_runs),
         "runs": published_runs,
     }

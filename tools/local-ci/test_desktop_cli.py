@@ -373,6 +373,7 @@ class DesktopCliTests(unittest.TestCase):
             "index_json": "/tmp/publish/index.json",
             "review_markdown": "/tmp/publish/review.md",
             "review_package": "/tmp/publish/review-package.json",
+            "serve_urls": ["http://127.0.0.1:8765/", "http://100.64.0.10:8765/"],
         }
 
         self.assertEqual(
@@ -385,6 +386,8 @@ class DesktopCliTests(unittest.TestCase):
                 "  index_json: /tmp/publish/index.json",
                 "  review_markdown: /tmp/publish/review.md",
                 "  review_package: /tmp/publish/review-package.json",
+                "  candidate_url: http://127.0.0.1:8765/",
+                "  candidate_url: http://100.64.0.10:8765/",
             ],
         )
 

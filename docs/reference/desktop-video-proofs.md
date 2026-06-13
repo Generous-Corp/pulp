@@ -389,9 +389,12 @@ is available. Set `PULP_DESKTOP_SERVE_HOSTS=blackbook.tailnet-name.ts.net` when
 you already know the friendly Tailnet DNS name you want reviewers to tap.
 
 `desktop publish` also writes `review.md` and `review-package.json` next to
-`index.html`. `review.md` is the human issue body. It includes the local report
-path, a Tailscale/local serve command, each run's video artifact,
-attachment-budget status, and the expected reviewer response.
+`index.html`. The publish step records the same candidate watch URLs in
+`index.json`, `review.md`, and `review-package.json`; start `desktop serve` for
+that report directory to make those URLs live. `review.md` is the human issue
+body. It includes the local report path, a Tailscale/local serve command, each
+run's video artifact, attachment-budget status, and the expected reviewer
+response.
 `review-package.json` is the machine-readable handoff for future upload
 automation: it records each run's primary or small attachment decision, absolute
 MP4 path when a file should be attached, size/budget fields, and the served

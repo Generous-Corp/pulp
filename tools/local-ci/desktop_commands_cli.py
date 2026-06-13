@@ -410,6 +410,7 @@ def cmd_desktop_publish(
     desktop_run_manifests_fn: Callable[..., list[dict]],
     stage_desktop_publish_report_fn: Callable[..., dict],
     desktop_publish_lines_fn: Callable[[dict], list[str]],
+    desktop_serve_candidate_urls_fn: Callable[[str, int], list[str]] = lambda _host, _port: [],
     print_fn: Callable[[str], None] = print,
 ) -> int:
     try:
@@ -442,8 +443,15 @@ def cmd_desktop_publish(
     if not manifest_paths:
         manifests = manifests[: args.limit]
     output_dir = Path(args.output).expanduser() if args.output else None
+    serve_urls = desktop_serve_candidate_urls_fn("0.0.0.0", 8765)
     try:
-        report = stage_desktop_publish_report_fn(config, manifests, output_dir=output_dir, label=args.label)
+        report = stage_desktop_publish_report_fn(
+            config,
+            manifests,
+            output_dir=output_dir,
+            label=args.label,
+            serve_urls=serve_urls,
+        )
     except Exception as exc:
         print_fn(f"Error: {exc}")
         return 1

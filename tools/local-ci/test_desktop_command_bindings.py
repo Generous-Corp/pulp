@@ -79,6 +79,7 @@ class DesktopCommandBindingsTests(unittest.TestCase):
             "desktop_proof_summaries",
             "normalize_desktop_optional_config",
             "desktop_publish_reports",
+            "desktop_serve_candidate_urls",
             "short_sha",
             "windows_repo_checkout_detail",
             "config_path",
@@ -224,7 +225,7 @@ class DesktopCommandBindingsTests(unittest.TestCase):
             (
                 "cmd_desktop_publish",
                 self.mod.cmd_desktop_publish,
-                ["load_config", "desktop_run_manifests", "stage_desktop_publish_report"],
+                ["load_config", "desktop_run_manifests", "stage_desktop_publish_report", "desktop_serve_candidate_urls"],
                 {"desktop_publish_lines_fn": "desktop_publish_lines"},
             ),
             (

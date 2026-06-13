@@ -30,12 +30,14 @@ def stage_desktop_publish_report(
     *,
     output_dir: Path | None = None,
     label: str | None = None,
+    serve_urls: list[str] | None = None,
 ) -> dict:
     return _binding(bindings, "_reporting").stage_desktop_publish_report(
         config,
         manifests,
         output_dir=output_dir,
         label=label,
+        serve_urls=serve_urls,
         create_desktop_publish_bundle_fn=_binding(bindings, "create_desktop_publish_bundle"),
         now_iso_fn=_binding(bindings, "now_iso"),
         atomic_write_text_fn=_binding(bindings, "atomic_write_text"),

@@ -238,7 +238,7 @@ def desktop_recent_lines(run_summaries: list[dict], *, short_sha_fn) -> list[str
 
 
 def desktop_publish_lines(report: dict) -> list[str]:
-    return [
+    lines = [
         "Desktop publish report ready:",
         f"  runs: {report['run_count']}",
         f"  output_dir: {report['output_dir']}",
@@ -247,6 +247,9 @@ def desktop_publish_lines(report: dict) -> list[str]:
         f"  review_markdown: {report['review_markdown']}",
         f"  review_package: {report['review_package']}",
     ]
+    for url in report.get("serve_urls") or []:
+        lines.append(f"  candidate_url: {url}")
+    return lines
 
 
 def desktop_cleanup_empty_line() -> str:

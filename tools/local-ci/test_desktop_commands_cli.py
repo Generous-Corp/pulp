@@ -237,8 +237,9 @@ class DesktopCommandsCliTests(unittest.TestCase):
             Namespace(target="mac", action="smoke", limit=1, output=None, label="gallery", json=False),
             load_config_fn=lambda: config,
             desktop_run_manifests_fn=lambda *_args, **_kwargs: [run_manifest],
-            stage_desktop_publish_report_fn=lambda *_args, **_kwargs: {"run_count": 1},
+            stage_desktop_publish_report_fn=lambda *_args, **kwargs: {"run_count": 1, "serve_urls": kwargs["serve_urls"]},
             desktop_publish_lines_fn=lambda report: [f"published {report['run_count']}"],
+            desktop_serve_candidate_urls_fn=lambda host, port: [f"http://127.0.0.1:{port}/", f"http://100.64.0.10:{port}/"],
             print_fn=self.print_line,
         )
         self.assertEqual(result, 0)
@@ -254,12 +255,14 @@ class DesktopCommandsCliTests(unittest.TestCase):
                 desktop_run_manifests_fn=lambda *_args, **_kwargs: self.fail("explicit manifest should skip discovery"),
                 stage_desktop_publish_report_fn=lambda _config, manifests, **kwargs: captured.append((manifests, kwargs)) or {"run_count": len(manifests)},
                 desktop_publish_lines_fn=lambda report: [f"published {report['run_count']}"],
+                desktop_serve_candidate_urls_fn=lambda host, port: [f"http://127.0.0.1:{port}/"],
                 print_fn=self.print_line,
             )
             self.assertEqual(result, 0)
             self.assertEqual(captured[0][0][0]["label"], "explicit")
             self.assertEqual(captured[0][0][0]["artifacts"]["bundle_dir"], str(Path(tmpdir)))
             self.assertEqual(captured[0][1]["label"], "explicit-gallery")
+            self.assertEqual(captured[0][1]["serve_urls"], ["http://127.0.0.1:8765/"])
 
         served = []
         with tempfile.TemporaryDirectory() as tmpdir:

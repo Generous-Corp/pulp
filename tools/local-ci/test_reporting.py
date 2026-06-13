@@ -182,6 +182,7 @@ class ReportingTests(unittest.TestCase):
             [manifest],
             output_dir=output_dir,
             label="Gallery <One>",
+            serve_urls=["http://127.0.0.1:8765/", "http://100.64.0.10:8765/"],
             create_desktop_publish_bundle_fn=lambda _config: output_dir,
             now_iso_fn=lambda: "2026-05-22T12:01:00+00:00",
             atomic_write_text_fn=self.atomic_write,
@@ -191,10 +192,12 @@ class ReportingTests(unittest.TestCase):
 
         self.assertEqual(report["label"], "Gallery <One>")
         self.assertEqual(report["run_count"], 1)
+        self.assertEqual(report["serve_urls"], ["http://127.0.0.1:8765/", "http://100.64.0.10:8765/"])
         self.assertEqual(len(rollups), 1)
         payload = json.loads((output_dir / "index.json").read_text())
         published_run = payload["runs"][0]
         self.assertEqual(payload["publish_mode"], "local")
+        self.assertEqual(payload["serve_urls"], ["http://127.0.0.1:8765/", "http://100.64.0.10:8765/"])
         self.assertEqual(published_run["target"], "mac<>")
         self.assertEqual(published_run["adapter"], "macos-local")
         self.assertEqual(published_run["host"], "macstudio")
@@ -248,6 +251,7 @@ class ReportingTests(unittest.TestCase):
         review_package = json.loads((output_dir / "review-package.json").read_text())
         self.assertEqual(report["review_package"], str(output_dir / "review-package.json"))
         self.assertEqual(review_package["kind"], "desktop-video-proof-review-package")
+        self.assertEqual(review_package["serve_urls"], ["http://127.0.0.1:8765/", "http://100.64.0.10:8765/"])
         self.assertEqual(review_package["runs"][0]["attachment"]["status"], "attach-primary")
         self.assertTrue(review_package["runs"][0]["attachment"]["path"].endswith("proof.issue.mp4"))
         self.assertEqual(review_package["runs"][0]["attachment"]["size_bytes"], 90000)
@@ -259,11 +263,13 @@ class ReportingTests(unittest.TestCase):
         self.assertTrue(review_package["runs"][0]["manifest"]["path"].endswith("manifest.json"))
         self.assertEqual(review_package["runs"][0]["context"]["plugin"], "PulpSynth")
         self.assertTrue(review_package["runs"][0]["fallback"]["internal_ephemeral"])
+        self.assertEqual(review_package["runs"][0]["fallback"]["serve_urls"], ["http://127.0.0.1:8765/", "http://100.64.0.10:8765/"])
         self.assertIn("desktop serve", review_package["runs"][0]["fallback"]["serve_command"])
         self.assertIn("# Gallery <One>", review_text)
         self.assertIn("looks good to me", review_text)
         self.assertIn("desktop serve` prints candidate URLs", review_text)
         self.assertIn("PULP_DESKTOP_SERVE_HOSTS", review_text)
+        self.assertIn("Candidate watch URL: `http://100.64.0.10:8765/`", review_text)
         self.assertIn("proof.issue.mp4", review_text)
         self.assertIn("proof.small.mp4", review_text)
         self.assertIn("proof-composed.mp4", review_text)
@@ -299,6 +305,7 @@ class ReportingTests(unittest.TestCase):
             "index_html": str(package_path.parent / "index.html"),
             "review_markdown": str(package_path.parent / "review.md"),
             "serve_command": "python3 tools/local-ci/local_ci.py desktop serve /tmp/report --host 0.0.0.0 --port 8765",
+            "serve_urls": ["http://127.0.0.1:8765/", "http://100.64.0.10:8765/"],
             "runs": [
                 {
                     "target": "mac",
@@ -334,6 +341,7 @@ class ReportingTests(unittest.TestCase):
                         "report_path": str(package_path.parent / "index.html"),
                         "review_markdown": str(package_path.parent / "review.md"),
                         "serve_command": "python3 tools/local-ci/local_ci.py desktop serve /tmp/report --host 0.0.0.0 --port 8765",
+                        "serve_urls": ["http://127.0.0.1:8765/", "http://100.64.0.10:8765/"],
                         "internal_ephemeral": True,
                     },
                 },
@@ -354,7 +362,9 @@ class ReportingTests(unittest.TestCase):
         self.assertEqual(draft["attachments"][0]["relative_path"], "assets/proof.issue.mp4")
         self.assertEqual(draft["attachment_checks"][0]["path"], str(issue_video))
         self.assertTrue(draft["attachment_checks"][0]["fits_attachment_budget"])
+        self.assertEqual(draft["serve_urls"], ["http://127.0.0.1:8765/", "http://100.64.0.10:8765/"])
         self.assertEqual(len(draft["fallback_links"]), 1)
+        self.assertEqual(draft["fallback_links"][0]["serve_urls"], ["http://127.0.0.1:8765/", "http://100.64.0.10:8765/"])
         self.assertTrue(draft["fallback_links"][0]["internal_ephemeral"])
         self.assertIn("gh issue create --repo danielraffel/pulp", draft["create_command"])
         self.assertIn("looks good to me", draft["body"])
@@ -364,6 +374,7 @@ class ReportingTests(unittest.TestCase):
         self.assertIn("Host: `macstudio`", draft["body"])
         self.assertIn("Adapter: `macos-local`", draft["body"])
         self.assertIn("Manifest: `", draft["body"])
+        self.assertIn("Candidate watch URL: `http://100.64.0.10:8765/`", draft["body"])
         self.assertIn("Context component: `bypass-toggle`", draft["body"])
         self.assertIn("use the served report link", draft["body"])
 

@@ -427,8 +427,10 @@ PULP_DESKTOP_SERVE_HOSTS=blackbook.tailnet-name.ts.net \
 ```
 
 `desktop publish` writes `review.md` and `review-package.json` next to
-`index.html`. Generate an offline GitHub issue draft from that package before
-opening the issue:
+`index.html`, including candidate watch URLs from localhost, configured
+`PULP_DESKTOP_SERVE_HOSTS`, and Tailscale when available. Start `desktop serve`
+for the report directory to make those URLs live. Generate an offline GitHub
+issue draft from that package before opening the issue:
 
 ```bash
 python3 tools/local-ci/local_ci.py desktop review-issue /path/to/published-report \

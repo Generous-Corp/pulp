@@ -175,6 +175,7 @@ def cmd_desktop_publish(bindings: Mapping[str, Any], args: Any) -> int:
         desktop_run_manifests_fn=_binding(bindings, "desktop_run_manifests"),
         stage_desktop_publish_report_fn=_binding(bindings, "stage_desktop_publish_report"),
         desktop_publish_lines_fn=_binding(bindings, "_desktop_cli").desktop_publish_lines,
+        desktop_serve_candidate_urls_fn=_binding(bindings, "desktop_serve_candidate_urls"),
     )
 
 

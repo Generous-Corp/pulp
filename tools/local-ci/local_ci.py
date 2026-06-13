@@ -843,6 +843,7 @@ def stage_desktop_publish_report(
     *,
     output_dir: Path | None = None,
     label: str | None = None,
+    serve_urls: list[str] | None = None,
 ) -> dict:
     return _desktop_reporting_bindings.stage_desktop_publish_report(
         globals(),
@@ -850,6 +851,7 @@ def stage_desktop_publish_report(
         manifests,
         output_dir=output_dir,
         label=label,
+        serve_urls=serve_urls,
     )
 
 
@@ -872,6 +874,10 @@ def desktop_review_issue_draft(
 
 def desktop_publish_reports(config: dict, *, limit: int | None = None) -> list[dict]:
     return _desktop_reporting_bindings.desktop_publish_reports(globals(), config, limit=limit)
+
+
+def desktop_serve_candidate_urls(bind_host: str, port: int) -> list[str]:
+    return _desktop_commands_cli.desktop_serve_candidate_urls(bind_host, port)
 
 
 def write_desktop_publish_rollups(config: dict) -> None:
