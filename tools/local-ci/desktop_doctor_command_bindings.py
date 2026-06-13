@@ -25,4 +25,10 @@ def install_desktop_doctor_command_helpers(
     bindings: dict[str, Any],
     names: tuple[str, ...] = DESKTOP_DOCTOR_COMMAND_EXPORTS,
 ) -> None:
-    install_local_helpers(bindings, globals(), names)
+    known_names = set(DESKTOP_DOCTOR_COMMAND_EXPORTS)
+    command_names = tuple(name for name in names if name in known_names)
+    unknown_names = tuple(name for name in names if name not in known_names)
+
+    install_local_helpers(bindings, globals(), command_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)

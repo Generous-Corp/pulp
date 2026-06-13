@@ -84,6 +84,14 @@ class DesktopDoctorCheckBindingsTests(unittest.TestCase):
 
         self.assertEqual(bindings["desktop_doctor_checks"]({}, "mac"), [{"name": "ok"}])
 
+    def test_install_desktop_doctor_check_helpers_keeps_unknown_local_fallback(self):
+        bindings = {}
+        self.mod.future_desktop_doctor_check_helper = lambda _bindings: "future"
+
+        self.mod.install_desktop_doctor_check_helpers(bindings, ("future_desktop_doctor_check_helper",))
+
+        self.assertEqual(bindings["future_desktop_doctor_check_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()
