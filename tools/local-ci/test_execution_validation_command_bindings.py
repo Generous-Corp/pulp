@@ -79,6 +79,16 @@ class ExecutionValidationCommandBindingsTests(unittest.TestCase):
         self.assertEqual(captured["windows"][1]["resolved_generator_instance"], r"C:\VS")
         self.assertIs(captured["windows"][1]["ps_literal_fn"], ps_literal)
 
+    def test_validation_command_exports_are_composed_from_focused_groups(self):
+        expected = (
+            *self.mod.EXECUTION_LOCAL_COMMAND_EXPORTS,
+            *self.mod.EXECUTION_POSIX_COMMAND_EXPORTS,
+            *self.mod.EXECUTION_WINDOWS_COMMAND_EXPORTS,
+        )
+
+        self.assertEqual(self.mod.EXECUTION_VALIDATION_COMMAND_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
 
 if __name__ == "__main__":
     unittest.main()
