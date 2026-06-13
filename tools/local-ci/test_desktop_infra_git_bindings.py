@@ -22,14 +22,13 @@ class DesktopInfraGitBindingsTests(unittest.TestCase):
 
     def test_git_exports_match_wrappers(self) -> None:
         expected = (
-            "normalize_git_remote_for_http",
-            "normalize_git_remote_for_clone",
-            "git_origin_http_url",
-            "git_origin_clone_url",
-            "run_git",
+            *self.mod.DESKTOP_INFRA_GIT_REMOTE_EXPORTS,
+            *self.mod.DESKTOP_INFRA_GIT_ORIGIN_EXPORTS,
+            *self.mod.DESKTOP_INFRA_GIT_RUN_EXPORTS,
         )
 
         self.assertEqual(self.mod.DESKTOP_INFRA_GIT_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
         for name in expected:
             self.assertTrue(callable(getattr(self.mod, name)))
 
@@ -70,18 +69,25 @@ class DesktopInfraGitBindingsTests(unittest.TestCase):
         self.assertEqual(captured["run_git"][1]["check"], False)
         self.assertIs(captured["run_git"][1]["run_fn"], bindings["subprocess"].run)
 
-    def test_install_desktop_infra_git_helpers_wires_named_exports(self) -> None:
+    def test_install_desktop_infra_git_helpers_routes_named_exports_by_group(self) -> None:
         git_helpers = types.SimpleNamespace(
             normalize_git_remote_for_http=lambda remote_url: f"https:{remote_url}",
+            git_origin_http_url=lambda repo_root, *, run_fn: f"origin:{repo_root}",
+            run_git=lambda args, *, cwd, check=True, run_fn: types.SimpleNamespace(args=args, cwd=cwd, check=check),
         )
         bindings = {
             "_git_helpers": git_helpers,
             "subprocess": types.SimpleNamespace(run=object()),
         }
 
-        self.mod.install_desktop_infra_git_helpers(bindings, ("normalize_git_remote_for_http",))
+        self.mod.install_desktop_infra_git_helpers(
+            bindings,
+            ("normalize_git_remote_for_http", "git_origin_http_url", "run_git"),
+        )
 
         self.assertEqual(bindings["normalize_git_remote_for_http"]("example/repo"), "https:example/repo")
+        self.assertEqual(bindings["git_origin_http_url"](Path("/repo")), "origin:/repo")
+        self.assertEqual(bindings["run_git"](["status"], cwd=Path("/repo"), check=False).args, ["status"])
 
 
 if __name__ == "__main__":

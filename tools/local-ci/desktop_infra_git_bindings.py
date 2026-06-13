@@ -1,58 +1,48 @@
-"""Bindings from the local_ci facade to desktop git infrastructure helpers."""
+"""Compatibility facade for desktop git infrastructure bindings."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from pathlib import Path
 from typing import Any
 
-from binding_utils import binding as _binding
-from binding_utils import binding_attr as _binding_attr
 from binding_utils import install_local_helpers
-
-
-DESKTOP_INFRA_GIT_EXPORTS = (
-    "normalize_git_remote_for_http",
-    "normalize_git_remote_for_clone",
-    "git_origin_http_url",
-    "git_origin_clone_url",
-    "run_git",
+from desktop_infra_git_origin_bindings import (
+    DESKTOP_INFRA_GIT_ORIGIN_EXPORTS,
+    git_origin_clone_url,
+    git_origin_http_url,
+    install_desktop_infra_git_origin_helpers,
+)
+from desktop_infra_git_remote_bindings import (
+    DESKTOP_INFRA_GIT_REMOTE_EXPORTS,
+    install_desktop_infra_git_remote_helpers,
+    normalize_git_remote_for_clone,
+    normalize_git_remote_for_http,
+)
+from desktop_infra_git_run_bindings import (
+    DESKTOP_INFRA_GIT_RUN_EXPORTS,
+    install_desktop_infra_git_run_helpers,
+    run_git,
 )
 
 
-def normalize_git_remote_for_http(bindings: Mapping[str, Any], remote_url: str | None) -> str | None:
-    return _binding(bindings, "_git_helpers").normalize_git_remote_for_http(remote_url)
-
-
-def normalize_git_remote_for_clone(bindings: Mapping[str, Any], remote_url: str | None) -> str | None:
-    return _binding(bindings, "_git_helpers").normalize_git_remote_for_clone(remote_url)
-
-
-def git_origin_http_url(bindings: Mapping[str, Any], repo_root: Path) -> str | None:
-    return _binding(bindings, "_git_helpers").git_origin_http_url(
-        repo_root,
-        run_fn=_binding_attr(bindings, "subprocess", "run"),
-    )
-
-
-def git_origin_clone_url(bindings: Mapping[str, Any], repo_root: Path) -> str | None:
-    return _binding(bindings, "_git_helpers").git_origin_clone_url(
-        repo_root,
-        run_fn=_binding_attr(bindings, "subprocess", "run"),
-    )
-
-
-def run_git(bindings: Mapping[str, Any], args: list[str], *, cwd: Path, check: bool = True):
-    return _binding(bindings, "_git_helpers").run_git(
-        args,
-        cwd=cwd,
-        check=check,
-        run_fn=_binding_attr(bindings, "subprocess", "run"),
-    )
+DESKTOP_INFRA_GIT_EXPORTS = (
+    *DESKTOP_INFRA_GIT_REMOTE_EXPORTS,
+    *DESKTOP_INFRA_GIT_ORIGIN_EXPORTS,
+    *DESKTOP_INFRA_GIT_RUN_EXPORTS,
+)
 
 
 def install_desktop_infra_git_helpers(
     bindings: dict[str, Any],
     names: tuple[str, ...] = DESKTOP_INFRA_GIT_EXPORTS,
 ) -> None:
-    install_local_helpers(bindings, globals(), names)
+    remote_names = tuple(name for name in names if name in DESKTOP_INFRA_GIT_REMOTE_EXPORTS)
+    origin_names = tuple(name for name in names if name in DESKTOP_INFRA_GIT_ORIGIN_EXPORTS)
+    run_names = tuple(name for name in names if name in DESKTOP_INFRA_GIT_RUN_EXPORTS)
+    known_names = set(DESKTOP_INFRA_GIT_EXPORTS)
+    unknown_names = tuple(name for name in names if name not in known_names)
+
+    install_desktop_infra_git_remote_helpers(bindings, remote_names)
+    install_desktop_infra_git_origin_helpers(bindings, origin_names)
+    install_desktop_infra_git_run_helpers(bindings, run_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)
