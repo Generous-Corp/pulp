@@ -216,6 +216,17 @@ TEST_CASE("performKeyEquivalent: no-op when rootView->on_global_key is null",
     REQUIRE(g_script_hits == 1);
 }
 
+TEST_CASE("PulpView advertises NSTextInputClient protocol conformance",
+          "[mac][platform][keyboard][text_input]") {
+    using namespace pulp::view;
+
+    TestRoot root;
+    PulpView* view = make_pulp_view(&root);
+    if (view == nil) return;
+
+    REQUIRE([view conformsToProtocol:@protocol(NSTextInputClient)] == YES);
+}
+
 TEST_CASE("performKeyEquivalent: focused TextEditor handles paste-and-match-style before globals",
           "[mac][platform][keyboard][text_editor][clipboard]") {
     using namespace pulp::view;
@@ -232,6 +243,7 @@ TEST_CASE("performKeyEquivalent: focused TextEditor handles paste-and-match-styl
     auto* editor = editor_owned.get();
     editor->set_bounds({0, 0, 160, 32});
     editor->set_text("a");
+    editor->set_caret_pos(static_cast<int>(editor->text().size()));
     root.add_child(std::move(editor_owned));
 
     editor->on_focus_changed(true);
@@ -263,6 +275,7 @@ TEST_CASE("PulpView keyDown offers Tab to focused TextEditor before focus traver
     auto* editor = editor_owned.get();
     editor->set_bounds({0, 0, 160, 32});
     editor->set_text("a");
+    editor->set_caret_pos(static_cast<int>(editor->text().size()));
     editor->tab_behavior = TextEditor::TabBehavior::insert_tab;
     root.add_child(std::move(editor_owned));
 

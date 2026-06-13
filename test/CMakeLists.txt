@@ -6014,11 +6014,11 @@ if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA)
         Catch2::Catch2WithMain
     )
     catch_discover_tests(pulp-test-mac-mousedown-stale-focus)
+endif()
 
-    # pulp #2128 follow-up — pin the macOS performKeyEquivalent: route that
-    # delivers Cmd-modified chords into rootView->on_global_key. Without
-    # the override, every auto-bound default chord (Cmd+, Cmd+? Cmd+S) is
-    # silently consumed by NSResponder's first-responder chain.
+if(APPLE AND NOT PULP_IOS)
+    # pulp #2128 — pin macOS performKeyEquivalent routing, text-input
+    # protocol conformance, and TextEditor-specific command priority.
     add_executable(pulp-test-mac-perform-key-equivalent
         test_mac_perform_key_equivalent.mm
     )
@@ -6027,11 +6027,8 @@ if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA)
         Catch2::Catch2WithMain
         "-framework AppKit"
     )
-    # PulpView's Obj-C class metadata only registers when the linker keeps
-    # window_host_mac.mm.o — but no C++ symbol the test references lives in
-    # that .o, so static-lib pruning drops it. Force-load the one specific
-    # object to register the class without dragging in every other .mm
-    # (which would duplicate-symbol on PulpAccessibilityElement).
+    # Force-load the view object so static-lib pruning does not drop Obj-C
+    # class registration; window_host_mac.mm anchors the text-input category.
     target_link_options(pulp-test-mac-perform-key-equivalent PRIVATE
         "LINKER:-force_load,${CMAKE_BINARY_DIR}/core/view/CMakeFiles/pulp-view-core.dir/platform/mac/window_host_mac.mm.o"
     )

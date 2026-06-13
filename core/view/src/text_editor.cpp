@@ -868,7 +868,8 @@ bool TextEditor::on_key_event(const KeyEvent& event) {
         case KeyCode::tab:
             switch (tab_behavior) {
                 case TabBehavior::insert_tab:
-                    return replace_selection_or_insert("\t");
+                    (void)replace_selection_or_insert("\t");
+                    return true;
                 case TabBehavior::commit:
                     break_undo_coalescing();
                     if (on_tab_commit) on_tab_commit(text_);

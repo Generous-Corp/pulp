@@ -5,10 +5,13 @@
 
 #include <pulp/canvas/text_utf8.hpp>
 #include <pulp/view/text_editor.hpp>
+#include <pulp/view/view.hpp>
 
 #include <algorithm>
 #include <limits>
 #include <string>
+
+extern "C" void pulp_mac_text_input_client_category_anchor() {}
 
 static std::size_t nsrange_location_or_zero(NSRange range) noexcept {
     return range.location == NSNotFound ? 0 : static_cast<std::size_t>(range.location);
@@ -22,7 +25,7 @@ static std::size_t nsrange_end_or_zero(NSRange range) noexcept {
     return length > max - start ? max : start + length;
 }
 
-@interface PulpView (TextInputClientProtocol) <NSTextInputClient>
+@interface PulpView (TextInputClient) <NSTextInputClient>
 @end
 
 @implementation PulpView (TextInputClient)
@@ -36,6 +39,33 @@ static std::size_t nsrange_end_or_zero(NSRange range) noexcept {
     auto* fv = pulp::view::View::focused_input_;
     auto* te = dynamic_cast<pulp::view::TextEditor*>(fv);
     return te;
+}
+
+- (void)insertText:(id)string replacementRange:(NSRange)range {
+    (void)range;
+    NSString* in_str = [string isKindOfClass:[NSAttributedString class]]
+        ? [(NSAttributedString*)string string] : (NSString*)string;
+
+    // Inspector inline text-tool edits consume character input before it
+    // reaches the focused widget, scoped to this host's root view.
+    {
+        pulp::view::TextInputEvent ite;
+        ite.text = [in_str UTF8String];
+        if (pulp::view::View::call_inspector_text_hook(ite, self.rootView)) {
+            [self setNeedsDisplay:YES];
+            return;
+        }
+    }
+
+    auto* fv = pulp::view::View::focused_input_;
+    if (fv) {
+        NSString* str = [string isKindOfClass:[NSAttributedString class]]
+            ? [(NSAttributedString*)string string] : (NSString*)string;
+        pulp::view::TextInputEvent te;
+        te.text = [str UTF8String];
+        fv->on_text_input(te);
+        [self setNeedsDisplay:YES];
+    }
 }
 
 - (BOOL)hasMarkedText {

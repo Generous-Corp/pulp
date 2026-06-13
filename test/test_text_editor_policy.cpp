@@ -64,6 +64,19 @@ TEST_CASE("TextEditor Tab commit callback may destroy the editor",
     REQUIRE(committed == "commit me");
 }
 
+TEST_CASE("TextEditor insert-tab policy consumes rejected tab edits",
+          "[view][text_editor][keyboard][policy][validation]") {
+    TextEditor editor;
+    editor.on_focus_changed(true);
+    editor.set_text("abcd");
+    editor.set_caret_pos(static_cast<int>(editor.text().size()));
+    editor.max_length = 4;
+    editor.tab_behavior = TextEditor::TabBehavior::insert_tab;
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::tab)));
+    REQUIRE(editor.text() == "abcd");
+}
+
 TEST_CASE("TextEditor input filter max length and validator gate edits",
           "[view][text_editor][validation]") {
     TextEditor editor;

@@ -164,6 +164,36 @@ static void request_hidden_cocoa_window_close(NSWindow* window) {
 // the `pulp::view::mac_geometry` namespace.
 using namespace pulp::view::mac_geometry;
 
+extern "C" void pulp_mac_text_input_client_category_anchor();
+
+static bool dispatch_mouse_down_if_live(PulpView* host,
+                                        pulp::view::View*& target,
+                                        const pulp::view::MouseEvent& event,
+                                        pulp::view::Point local) {
+    if (!host || !target) return false;
+    auto* root = [host rootView];
+    if (!root) {
+        target = nullptr;
+        return false;
+    }
+
+    target->on_mouse_event(event);
+    root = [host rootView];
+    if (!view_is_in_tree(target, root)) {
+        target = nullptr;
+        return false;
+    }
+
+    target->on_mouse_down(local);
+    root = [host rootView];
+    if (!view_is_in_tree(target, root)) {
+        target = nullptr;
+        return false;
+    }
+
+    return true;
+}
+
 static pulp::events::MainThreadDispatcher::Backend make_cocoa_main_thread_backend(
     std::shared_ptr<std::atomic<bool>> alive) {
     return {
@@ -229,6 +259,7 @@ static void install_app_menu(NSString* appName) {
 - (instancetype)initWithFrame:(NSRect)frame {
     self = [super initWithFrame:frame];
     if (self) {
+        pulp_mac_text_input_client_category_anchor();
         // pulp #1321: ensure the content view tracks the window's content rect
         // so AppKit resizes our frame when the user drags the window edge.
         // Without this, the view's bounds stay at the original frame and Yoga
@@ -541,8 +572,7 @@ static void install_app_menu(NSString* appName) {
                     me.modifiers = modifiers_from_ns_flags(event.modifierFlags);
                     me.is_down = true;
                     me.click_count = static_cast<int>(event.clickCount);
-                    _dragTarget->on_mouse_event(me);
-                    _dragTarget->on_mouse_down(local);
+                    (void)dispatch_mouse_down_if_live(self, _dragTarget, me, local);
                     [self setNeedsDisplay:YES];
                     return;
                 }
@@ -592,8 +622,7 @@ static void install_app_menu(NSString* appName) {
             me.modifiers = modifiers_from_ns_flags(event.modifierFlags);
             me.is_down = true;
             me.click_count = static_cast<int>(event.clickCount);
-            _dragTarget->on_mouse_event(me);
-            _dragTarget->on_mouse_down(local);
+            const bool target_alive = dispatch_mouse_down_if_live(self, _dragTarget, me, local);
 
             // Bubble pointerdown through ancestors that subscribed via
             // registerPointer. on_mouse_event is the W3C bubbling
@@ -602,11 +631,13 @@ static void install_app_menu(NSString* appName) {
             // band-drawer is this exact pattern) never sees the down
             // event because the canvas child wins hit_test. Recompute
             // each ancestor's local-coord position by re-toLocal'ing.
-            for (auto* bubble = _dragTarget->parent(); bubble; bubble = bubble->parent()) {
-                if (!bubble->on_pointer_event) continue;
-                pulp::view::MouseEvent bme = me;
-                bme.position = to_local(pt, bubble, self.rootView);
-                bubble->on_pointer_event(bme);
+            if (target_alive) {
+                for (auto* bubble = _dragTarget->parent(); bubble; bubble = bubble->parent()) {
+                    if (!bubble->on_pointer_event) continue;
+                    pulp::view::MouseEvent bme = me;
+                    bme.position = to_local(pt, bubble, self.rootView);
+                    bubble->on_pointer_event(bme);
+                }
             }
         }
             [self setNeedsDisplay:YES];
@@ -1063,41 +1094,6 @@ static void install_app_menu(NSString* appName) {
         std::cerr << "MacWindowHost keyDown NSException: "
                   << [[exception name] UTF8String] << " - "
                   << [[exception reason] UTF8String] << "\n";
-    }
-}
-
-- (void)insertText:(id)string replacementRange:(NSRange)range {
-    (void)range;
-    NSString* in_str = [string isKindOfClass:[NSAttributedString class]]
-        ? [(NSAttributedString*)string string] : (NSString*)string;
-
-    // WYSIWYG P3 — inspector inline Text-tool edit intercepts character
-    // input BEFORE the focused widget. When the inspector consumes it (an
-    // inline text edit is in progress), the keystroke must NOT also reach
-    // a focused widget. Checked before the focused-view delivery below.
-    {
-        pulp::view::TextInputEvent ite;
-        ite.text = [in_str UTF8String];
-        // WYSIWYG P4 FIX 1 — gate to this window's root so text typed into a
-        // secondary window doesn't drive the canvas overlay's inline edit.
-        if (pulp::view::View::call_inspector_text_hook(ite, self.rootView)) {
-            [self setNeedsDisplay:YES];
-            return;
-        }
-    }
-
-    // pulp #1708 — read from View::focused_input_ rather than the raw
-    // _focusedView ivar. The static is auto-cleared by ~View() when the
-    // focused widget is destroyed (e.g., React unmount of an open modal),
-    // so we never dispatch text-input on freed memory.
-    auto* fv = pulp::view::View::focused_input_;
-    if (fv) {
-        NSString* str = [string isKindOfClass:[NSAttributedString class]]
-            ? [(NSAttributedString*)string string] : (NSString*)string;
-        pulp::view::TextInputEvent te;
-        te.text = [str UTF8String];
-        fv->on_text_input(te);
-        [self setNeedsDisplay:YES];
     }
 }
 
