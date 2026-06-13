@@ -241,6 +241,10 @@ class SourcePrepTests(unittest.TestCase):
         local_skia = self.repo / "external" / "skia-build"
         local_skia.mkdir(parents=True)
         (local_skia / "VERSION.md").write_text("skia\n")
+        (local_skia / "libskia.a").write_bytes(b"skia")
+        prepared_metadata = prepared_root / "external" / "skia-build"
+        prepared_metadata.mkdir(parents=True)
+        (prepared_metadata / "VERSION.md").write_text("metadata only\n")
         source_request = self.request()
 
         context = self.mod.prepare_macos_exact_sha_source(
@@ -262,6 +266,34 @@ class SourcePrepTests(unittest.TestCase):
         self.assertTrue(prepared_skia.is_symlink())
         self.assertEqual(prepared_skia.resolve(), local_skia.resolve())
         self.assertEqual(context["linked_skia_build"], str(prepared_skia))
+
+    def test_prepare_macos_exact_sha_source_skips_metadata_only_skia_build(self) -> None:
+        bundle_dir = self.root / "bundle-mac-skia-metadata"
+        bundle_dir.mkdir()
+        prepared_root = self.root / "prepared-mac-skia-metadata"
+        prepared_root.mkdir()
+        local_skia = self.repo / "external" / "skia-build"
+        local_skia.mkdir(parents=True)
+        (local_skia / "VERSION.md").write_text("metadata only\n")
+        source_request = self.request()
+
+        context = self.mod.prepare_macos_exact_sha_source(
+            bundle_dir,
+            "mac",
+            "./tool",
+            source_request,
+            root=self.repo,
+            desktop_source_root_fn=lambda _target, _request: prepared_root,
+            local_worktree_matches_fn=lambda _path, _sha: True,
+            reset_local_worktree_fn=lambda _path: self.fail("reset should not run for a reused worktree"),
+            run_fn=lambda command, **kwargs: subprocess.CompletedProcess(command, 0, stdout="", stderr=""),
+            run_logged_command_fn=lambda *args, **kwargs: self.fail("prepare should not run without a command"),
+            tail_lines_fn=lambda _path, limit=40: ["tail"],
+            rewrite_launch_command_for_source_root_fn=lambda command, root: f"{root}:{command}",
+        )
+
+        self.assertIsNone(context["linked_skia_build"])
+        self.assertFalse((prepared_root / "external" / "skia-build").exists())
 
     def test_prepare_linux_exact_sha_source_builds_remote_script_and_context(self) -> None:
         bundle_dir = self.root / "bundle-linux"
