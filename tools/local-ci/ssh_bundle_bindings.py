@@ -16,19 +16,19 @@ from ssh_bundle_probe_bindings import (
     ssh_host_uses_windows_shell,
     target_name_for_ssh_host,
 )
-from ssh_bundle_sync_bindings import sync_job_bundle_to_ssh_host
+from ssh_bundle_sync_bindings import SSH_BUNDLE_SYNC_EXPORTS, sync_job_bundle_to_ssh_host
 
 
 SSH_BUNDLE_EXPORTS = (
     *SSH_BUNDLE_NAME_EXPORTS,
     *SSH_BUNDLE_BUILD_EXPORTS,
-    "sync_job_bundle_to_ssh_host",
+    *SSH_BUNDLE_SYNC_EXPORTS,
     *SSH_BUNDLE_PROBE_EXPORTS,
 )
 SSH_BUNDLE_LOCAL_EXPORTS = (
     *SSH_BUNDLE_NAME_EXPORTS,
     *SSH_BUNDLE_BUILD_EXPORTS,
-    "sync_job_bundle_to_ssh_host",
+    *SSH_BUNDLE_SYNC_EXPORTS,
 )
 
 

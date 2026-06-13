@@ -20,6 +20,10 @@ class SshBundleSyncBindingsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
 
+    def test_exports_match_sync_helpers(self) -> None:
+        self.assertEqual(self.mod.SSH_BUNDLE_SYNC_EXPORTS, ("sync_job_bundle_to_ssh_host",))
+        self.assertEqual(len(self.mod.SSH_BUNDLE_SYNC_EXPORTS), len(set(self.mod.SSH_BUNDLE_SYNC_EXPORTS)))
+
     def test_sync_job_bundle_binds_upload_dependencies(self) -> None:
         captured = {}
 

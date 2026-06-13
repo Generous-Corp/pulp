@@ -26,7 +26,7 @@ class SshBundleBindingsTests(unittest.TestCase):
             (
                 *self.mod.SSH_BUNDLE_NAME_EXPORTS,
                 *self.mod.SSH_BUNDLE_BUILD_EXPORTS,
-                "sync_job_bundle_to_ssh_host",
+                *self.mod.SSH_BUNDLE_SYNC_EXPORTS,
             ),
         )
         self.assertEqual(

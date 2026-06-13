@@ -58,6 +58,14 @@ class SshBundleHostBindingsTests(unittest.TestCase):
             "linux",
         )
 
+    def test_install_host_helpers_keeps_unknown_local_fallback(self) -> None:
+        bindings = {}
+        self.mod.future_ssh_bundle_host_helper = lambda _bindings: "future"
+
+        self.mod.install_ssh_bundle_host_helpers(bindings, ("future_ssh_bundle_host_helper",))
+
+        self.assertEqual(bindings["future_ssh_bundle_host_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()

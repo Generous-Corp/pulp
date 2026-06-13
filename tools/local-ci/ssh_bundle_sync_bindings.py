@@ -6,6 +6,9 @@ from binding_utils import binding as _binding
 from binding_utils import binding_attr as _binding_attr
 
 
+SSH_BUNDLE_SYNC_EXPORTS = ("sync_job_bundle_to_ssh_host",)
+
+
 def sync_job_bundle_to_ssh_host(
     bindings: dict,
     host: str,
