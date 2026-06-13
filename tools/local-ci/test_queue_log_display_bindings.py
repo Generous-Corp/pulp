@@ -18,6 +18,18 @@ class QueueLogDisplayBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
 
+    def test_log_display_exports_match_facade_helpers(self):
+        expected = (
+            "missing_job_logs_line",
+            "missing_log_files_line",
+            "job_logs_header_line",
+            "log_section_header_line",
+            "empty_log_line",
+        )
+
+        self.assertEqual(self.mod.QUEUE_LOG_DISPLAY_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def test_log_display_bindings_delegate_to_orchestrator(self):
         orchestrator = types.SimpleNamespace(
             missing_job_logs_line=lambda: "missing logs",

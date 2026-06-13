@@ -8,6 +8,15 @@ from typing import Any
 from binding_utils import binding as _binding
 
 
+QUEUE_LOG_DISPLAY_EXPORTS = (
+    "missing_job_logs_line",
+    "missing_log_files_line",
+    "job_logs_header_line",
+    "log_section_header_line",
+    "empty_log_line",
+)
+
+
 def missing_job_logs_line(bindings: Mapping[str, Any]) -> str:
     return _binding(bindings, "_queue_orchestrator").missing_job_logs_line()
 

@@ -18,6 +18,18 @@ class QueueResultDisplayBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
 
+    def test_result_display_exports_match_facade_helpers(self):
+        expected = (
+            "result_validation_line",
+            "result_execution_line",
+            "target_result_line",
+            "result_target_lines",
+            "result_overall_line",
+        )
+
+        self.assertEqual(self.mod.QUEUE_RESULT_DISPLAY_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def test_result_display_bindings_delegate_to_orchestrator(self):
         orchestrator = types.SimpleNamespace(
             result_validation_line=lambda result: "validation",

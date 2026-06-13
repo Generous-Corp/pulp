@@ -8,6 +8,19 @@ from typing import Any
 from binding_utils import binding as _binding
 
 
+QUEUE_STATUS_DISPLAY_EXPORTS = (
+    "summarize_active_targets",
+    "status_active_targets",
+    "status_target_states",
+    "status_submission_lines",
+    "target_state_detail_parts",
+    "status_target_detail_lines",
+    "status_runner_line",
+    "recent_completed_status_line",
+    "recent_completed_missing_result_line",
+)
+
+
 def summarize_active_targets(
     bindings: Mapping[str, Any],
     active_targets: dict | None,

@@ -20,30 +20,10 @@ class QueueDisplayBindingsTests(unittest.TestCase):
 
     def test_queue_display_exports_match_focused_facade_helpers(self):
         expected = (
-            "summarize_job",
-            "bump_queue_command_result_line",
-            "cancel_queue_command_result_line",
-            "enqueue_command_result_line",
-            "drain_runner_active_line",
-            "summarize_active_targets",
-            "status_active_targets",
-            "status_target_states",
-            "status_submission_lines",
-            "target_state_detail_parts",
-            "status_target_detail_lines",
-            "status_runner_line",
-            "recent_completed_status_line",
-            "recent_completed_missing_result_line",
-            "result_validation_line",
-            "result_execution_line",
-            "target_result_line",
-            "result_target_lines",
-            "result_overall_line",
-            "missing_job_logs_line",
-            "missing_log_files_line",
-            "job_logs_header_line",
-            "log_section_header_line",
-            "empty_log_line",
+            *self.mod.QUEUE_COMMAND_DISPLAY_EXPORTS,
+            *self.mod.QUEUE_STATUS_DISPLAY_EXPORTS,
+            *self.mod.QUEUE_RESULT_DISPLAY_EXPORTS,
+            *self.mod.QUEUE_LOG_DISPLAY_EXPORTS,
         )
 
         self.assertEqual(self.mod.QUEUE_DISPLAY_EXPORTS, expected)

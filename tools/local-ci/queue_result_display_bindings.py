@@ -8,6 +8,15 @@ from typing import Any
 from binding_utils import binding as _binding
 
 
+QUEUE_RESULT_DISPLAY_EXPORTS = (
+    "result_validation_line",
+    "result_execution_line",
+    "target_result_line",
+    "result_target_lines",
+    "result_overall_line",
+)
+
+
 def result_validation_line(bindings: Mapping[str, Any], result: dict) -> str | None:
     return _binding(bindings, "_queue_orchestrator").result_validation_line(result)
 

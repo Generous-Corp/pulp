@@ -18,6 +18,22 @@ class QueueStatusDisplayBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
 
+    def test_status_display_exports_match_facade_helpers(self):
+        expected = (
+            "summarize_active_targets",
+            "status_active_targets",
+            "status_target_states",
+            "status_submission_lines",
+            "target_state_detail_parts",
+            "status_target_detail_lines",
+            "status_runner_line",
+            "recent_completed_status_line",
+            "recent_completed_missing_result_line",
+        )
+
+        self.assertEqual(self.mod.QUEUE_STATUS_DISPLAY_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def test_status_display_bindings_delegate_to_orchestrator(self):
         calls = []
 

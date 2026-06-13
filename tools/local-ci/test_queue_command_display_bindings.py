@@ -18,6 +18,18 @@ class QueueCommandDisplayBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
 
+    def test_command_display_exports_match_facade_helpers(self):
+        expected = (
+            "summarize_job",
+            "bump_queue_command_result_line",
+            "cancel_queue_command_result_line",
+            "enqueue_command_result_line",
+            "drain_runner_active_line",
+        )
+
+        self.assertEqual(self.mod.QUEUE_COMMAND_DISPLAY_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def test_command_display_bindings_delegate_to_orchestrator(self):
         calls = []
 

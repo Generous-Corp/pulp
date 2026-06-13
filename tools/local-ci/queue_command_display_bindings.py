@@ -8,6 +8,15 @@ from typing import Any
 from binding_utils import binding as _binding
 
 
+QUEUE_COMMAND_DISPLAY_EXPORTS = (
+    "summarize_job",
+    "bump_queue_command_result_line",
+    "cancel_queue_command_result_line",
+    "enqueue_command_result_line",
+    "drain_runner_active_line",
+)
+
+
 def summarize_job(bindings: Mapping[str, Any], job: dict) -> str:
     return _binding(bindings, "_queue_orchestrator").summarize_job(job)
 
