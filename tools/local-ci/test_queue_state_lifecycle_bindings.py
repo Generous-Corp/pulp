@@ -30,6 +30,15 @@ class QueueStateLifecycleBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.QUEUE_STATE_LIFECYCLE_EXPORTS, expected)
         self.assertEqual(len(expected), len(set(expected)))
 
+    def test_install_state_lifecycle_helpers_installs_requested_facades(self):
+        bindings = self._bindings()
+
+        self.mod.install_queue_state_lifecycle_helpers(bindings, ("load_job",))
+
+        self.assertIn("load_job", bindings)
+        self.assertNotIn("update_job_active_targets", bindings)
+        self.assertEqual(bindings["load_job"].__name__, "load_job")
+
     def _bindings(self, lifecycle=None, orchestrator=None):
         bindings = {
             "_queue_lifecycle": lifecycle or types.SimpleNamespace(),

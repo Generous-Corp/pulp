@@ -18,6 +18,24 @@ class QueueClaimFinalizeBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
 
+    def test_claim_finalize_exports_match_facade_helpers(self):
+        expected = (
+            "claim_next_job",
+            "finalize_job",
+        )
+
+        self.assertEqual(self.mod.QUEUE_CLAIM_FINALIZE_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
+    def test_install_claim_finalize_helpers_installs_requested_facades(self):
+        bindings = self._bindings()
+
+        self.mod.install_queue_claim_finalize_helpers(bindings, ("claim_next_job",))
+
+        self.assertIn("claim_next_job", bindings)
+        self.assertNotIn("finalize_job", bindings)
+        self.assertEqual(bindings["claim_next_job"].__name__, "claim_next_job")
+
     def _bindings(self, lifecycle=None, orchestrator=None):
         bindings = {
             "_queue_lifecycle": lifecycle or types.SimpleNamespace(),

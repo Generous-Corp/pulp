@@ -18,6 +18,24 @@ class QueueWaitDrainBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
 
+    def test_wait_drain_exports_match_facade_helpers(self):
+        expected = (
+            "wait_for_job",
+            "drain_pending_jobs",
+        )
+
+        self.assertEqual(self.mod.QUEUE_WAIT_DRAIN_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
+    def test_install_wait_drain_helpers_installs_requested_facades(self):
+        bindings = self._bindings()
+
+        self.mod.install_queue_wait_drain_helpers(bindings, ("wait_for_job",))
+
+        self.assertIn("wait_for_job", bindings)
+        self.assertIsNot(bindings["drain_pending_jobs"], self.mod.drain_pending_jobs)
+        self.assertEqual(bindings["wait_for_job"].__name__, "wait_for_job")
+
     def _bindings(self, lifecycle=None):
         bindings = {
             "_queue_lifecycle": lifecycle or types.SimpleNamespace(),

@@ -7,6 +7,7 @@ from typing import Any
 
 from binding_utils import binding as _binding
 from binding_utils import binding_attr as _binding_attr
+from binding_utils import install_local_helpers
 
 
 QUEUE_WAIT_DRAIN_EXPORTS = (
@@ -47,3 +48,10 @@ def drain_pending_jobs(bindings: Mapping[str, Any], config: dict, *, blocking: b
         now_fn=_binding(bindings, "now_iso"),
         pid_fn=_binding(bindings, "os").getpid,
     )
+
+
+def install_queue_wait_drain_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = QUEUE_WAIT_DRAIN_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)

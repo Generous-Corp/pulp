@@ -27,6 +27,28 @@ class QueueDrainBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.QUEUE_DRAIN_EXPORTS, expected)
         self.assertEqual(len(expected), len(set(expected)))
 
+    def test_install_drain_helpers_routes_focused_groups(self):
+        calls = []
+
+        def claim_install(bindings, names):
+            calls.append(("claim", names))
+
+        def wait_install(bindings, names):
+            calls.append(("wait", names))
+
+        self.mod.install_queue_claim_finalize_helpers = claim_install
+        self.mod.install_queue_wait_drain_helpers = wait_install
+
+        self.mod.install_queue_drain_helpers({}, ("claim_next_job", "wait_for_job"))
+
+        self.assertEqual(
+            calls,
+            [
+                ("claim", ("claim_next_job",)),
+                ("wait", ("wait_for_job",)),
+            ],
+        )
+
     def _bindings(self, lifecycle=None, orchestrator=None):
         bindings = {
             "_queue_lifecycle": lifecycle or types.SimpleNamespace(),
