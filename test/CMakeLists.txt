@@ -5928,6 +5928,9 @@ pulp_add_test_suite(pulp-test-theme-presets LIBRARIES pulp::view)
 # Button widgets — theme-token wiring + rgba()-clamp bug-fix regression guard
 pulp_add_test_suite(pulp-test-buttons LIBRARIES pulp::view)
 
+# Gap widgets (Phase 4) — Badge/Banner/Toast/EmptyState/Stepper/Pan/Popover/Dialog/ChannelStrip
+pulp_add_test_suite(pulp-test-gap-widgets LIBRARIES pulp::view)
+
 # OS appearance tracking
 pulp_add_test_suite(pulp-test-appearance SOURCES test_appearance_tracker.cpp LIBRARIES pulp::view)
 
