@@ -86,6 +86,24 @@ const actionMarkerLabel = (marker) => {
 	return marker.kind || null;
 };
 
+const issueStatusLabel = (status, selectedAttempt) => {
+	if (!status) {
+		return null;
+	}
+	if (status === 'copied') {
+		return 'issue attachment ready';
+	}
+	if (status === 'transcoded') {
+		return selectedAttempt
+			? `issue attachment ready (${selectedAttempt})`
+			: 'issue attachment ready';
+	}
+	if (status === 'oversized') {
+		return 'needs hosted fallback';
+	}
+	return `${status}${selectedAttempt ? ` (${selectedAttempt})` : ''}`;
+};
+
 const contextItemsFor = (context) => {
 	if (!context || typeof context !== 'object') {
 		return [];
@@ -94,6 +112,30 @@ const contextItemsFor = (context) => {
 		.filter(([, value]) => value !== null && value !== undefined && `${value}`.trim())
 		.map(([key, value]) => ({key, value: `${value}`}))
 		.slice(0, 8);
+};
+
+const videoSizeFor = (manifest, videoMeta) => {
+	const metaSize = videoMeta.size && typeof videoMeta.size === 'object' ? videoMeta.size : {};
+	const manifestVideo = manifest.video && typeof manifest.video === 'object' ? manifest.video : {};
+	const sizeBytes =
+		typeof metaSize.size_bytes === 'number'
+			? metaSize.size_bytes
+			: typeof manifestVideo.size_bytes === 'number'
+				? manifestVideo.size_bytes
+				: null;
+	const attachmentBudgetBytes =
+		typeof metaSize.attachment_budget_bytes === 'number'
+			? metaSize.attachment_budget_bytes
+			: typeof manifestVideo.attachment_budget_bytes === 'number'
+				? manifestVideo.attachment_budget_bytes
+				: 100_000_000;
+	const fitsAttachmentBudget =
+		typeof metaSize.fits_attachment_budget === 'boolean'
+			? metaSize.fits_attachment_budget
+			: typeof sizeBytes === 'number'
+				? sizeBytes <= attachmentBudgetBytes
+				: null;
+	return {sizeBytes, attachmentBudgetBytes, fitsAttachmentBudget};
 };
 
 const storyboardFor = ({inputProps, proofNotes, videoMeta, issueMeta}) => {
@@ -157,11 +199,10 @@ const stepItemsFor = (manifest, videoMeta, issueMeta, proofNotes = []) => {
 	]
 		.filter(Boolean)
 		.join(' / ');
-	const reviewDetail = issueMeta.status
-		? `${issueMeta.status}${issueMeta.selected_attempt ? ` (${issueMeta.selected_attempt})` : ''}`
-		: videoMeta.size?.fits_attachment_budget === false
+	const reviewDetail = issueStatusLabel(issueMeta.status, issueMeta.selected_attempt)
+		|| (videoMeta.size?.fits_attachment_budget === false
 			? 'needs hosted fallback'
-			: 'issue attachment ready';
+			: 'issue attachment ready');
 	if (focusLabel) {
 		return [
 			{
@@ -225,6 +266,7 @@ const main = async () => {
 	const videoMetaPath = artifacts.video_metadata;
 	const videoMeta = await readJsonIfPresent(videoMetaPath);
 	const issueMeta = await readJsonIfPresent(artifacts.video_issue_metadata);
+	const videoSize = videoSizeFor(manifest, videoMeta);
 	const videoHasAudio = videoMeta.has_audio === true && videoMeta.audio_source && videoMeta.audio_source !== 'none';
 	const proofNotes = [
 		...(Array.isArray(manifest.video_proof_notes) ? manifest.video_proof_notes : []),
@@ -274,10 +316,9 @@ const main = async () => {
 				captureMode: videoMeta.mode || null,
 				durationSecs: videoMeta.duration_secs ?? null,
 				fps: videoMeta.fps ?? null,
-				sizeBytes: videoMeta.size?.size_bytes ?? null,
-				attachmentBudgetBytes: videoMeta.size?.attachment_budget_bytes ?? null,
-				fitsAttachmentBudget:
-					videoMeta.size?.fits_attachment_budget ?? null,
+				sizeBytes: videoSize.sizeBytes,
+				attachmentBudgetBytes: videoSize.attachmentBudgetBytes,
+				fitsAttachmentBudget: videoSize.fitsAttachmentBudget,
 				issueStatus: issueMeta.status || null,
 				issueSelectedAttempt: issueMeta.selected_attempt || null,
 				imageChanged: artifacts.image_change?.changed ?? null,

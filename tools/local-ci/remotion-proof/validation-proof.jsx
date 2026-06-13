@@ -35,14 +35,32 @@ const shortSha = (sha) => {
 	return sha.slice(0, 12);
 };
 
-const pillText = (value) => {
+const pillText = (value, hasMeasuredSize = false) => {
 	if (value === true) {
-		return 'Issue attachment ready';
+		return hasMeasuredSize ? 'Source clip under budget' : 'Issue attachment ready';
 	}
 	if (value === false) {
 		return 'Needs hosted fallback';
 	}
-	return 'Size pending';
+	return hasMeasuredSize ? 'Source clip measured' : 'Attachment check pending';
+};
+
+const issueStatusLabel = (status, selectedAttempt) => {
+	if (!status) {
+		return null;
+	}
+	if (status === 'copied') {
+		return 'Issue attachment ready';
+	}
+	if (status === 'transcoded') {
+		return selectedAttempt
+			? `Issue attachment ready (${selectedAttempt})`
+			: 'Issue attachment ready';
+	}
+	if (status === 'oversized') {
+		return 'Needs hosted fallback';
+	}
+	return `${status}${selectedAttempt ? ` (${selectedAttempt})` : ''}`;
 };
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
@@ -127,9 +145,9 @@ export const ValidationProof = ({
 		extrapolateLeft: 'clamp',
 		extrapolateRight: 'clamp',
 	});
-	const issueText = issueStatus
-		? `${issueStatus}${issueSelectedAttempt ? ` (${issueSelectedAttempt})` : ''}`
-		: pillText(fitsAttachmentBudget);
+	const issueText =
+		issueStatusLabel(issueStatus, issueSelectedAttempt) ||
+		pillText(fitsAttachmentBudget, typeof sizeBytes === 'number');
 	const sourceText = [sourceMode, shortSha(sourceSha), sourceBranch]
 		.filter(Boolean)
 		.join(' / ');
