@@ -366,6 +366,19 @@ npm --prefix tools/local-ci run compose-video-proof -- \
 
 ## Local Review
 
+Before recording a demo batch, print the curated proof matrix:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop video-matrix --markdown
+```
+
+The matrix lists the full-service proof scenarios, current readiness, Remotion
+template, doctor command, concrete recording command, and what a reviewer should
+look for. Use `--target mac`, `--scenario component-zoom`, or `--json` when an
+agent needs a narrower machine-readable plan. The matrix intentionally includes
+planned iOS Simulator and Android Emulator rows so the branch keeps the broader
+cross-platform goal visible even while macOS is the first working lane.
+
 Stage a local report after one or more desktop runs:
 
 ```bash

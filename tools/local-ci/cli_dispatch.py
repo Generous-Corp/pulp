@@ -17,7 +17,7 @@ def dispatch_desktop_command(
 ) -> int:
     handler = commands.get(args.desktop_command)
     if handler is None:
-        print_fn("Error: desktop subcommand required (install, doctor, video-doctor, video-setup, status, config, recent, proof, publish, verdict, review-issue, compose-video, serve, video, cleanup, smoke, click, inspect)")
+        print_fn("Error: desktop subcommand required (install, doctor, video-doctor, video-setup, status, config, recent, proof, publish, verdict, review-issue, compose-video, video-matrix, serve, video, cleanup, smoke, click, inspect)")
         return 1
     return handler(args)
 

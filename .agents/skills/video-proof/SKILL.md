@@ -401,6 +401,19 @@ This renders the source/reference image beside the captured proof and records a
 
 ## Publish and serve for review
 
+Before recording a batch of examples, print the demo matrix:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop video-matrix --markdown
+```
+
+Use it to choose the smallest useful proof scenario. `--target mac` narrows to
+the current macOS lane, `--scenario component-zoom` prints one row, and `--json`
+is suitable for automation. The matrix carries readiness status, Remotion
+template, doctor command, recording command, and reviewer watch-points for
+standalone, REAPER/plugin-host, inspector, component-zoom, design-parity, iOS
+Simulator, and Android Emulator proofs.
+
 Publish the latest runs:
 
 ```bash

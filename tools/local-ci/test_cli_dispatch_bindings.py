@@ -62,6 +62,7 @@ class CliDispatchBindingsTests(unittest.TestCase):
             "cmd_desktop_verdict",
             "cmd_desktop_review_issue",
             "cmd_desktop_compose_video",
+            "cmd_desktop_video_matrix",
             "cmd_desktop_serve",
             "cmd_desktop_video",
             "cmd_desktop_cleanup",
@@ -116,7 +117,7 @@ class CliDispatchBindingsTests(unittest.TestCase):
         self.assertIs(captured["desktop_args"], args)
         self.assertEqual(
             set(captured["desktop_commands"]),
-            {"install", "doctor", "video-doctor", "video-setup", "status", "config", "recent", "proof", "publish", "verdict", "review-issue", "compose-video", "serve", "video", "cleanup", "smoke", "click", "inspect"},
+            {"install", "doctor", "video-doctor", "video-setup", "status", "config", "recent", "proof", "publish", "verdict", "review-issue", "compose-video", "video-matrix", "serve", "video", "cleanup", "smoke", "click", "inspect"},
         )
         self.assertIs(captured["desktop_commands"]["install"], bindings["cmd_desktop_install"])
         self.assertIs(captured["desktop_commands"]["video-doctor"], bindings["cmd_desktop_video_doctor"])
@@ -124,6 +125,7 @@ class CliDispatchBindingsTests(unittest.TestCase):
         self.assertIs(captured["desktop_commands"]["verdict"], bindings["cmd_desktop_verdict"])
         self.assertIs(captured["desktop_commands"]["review-issue"], bindings["cmd_desktop_review_issue"])
         self.assertIs(captured["desktop_commands"]["compose-video"], bindings["cmd_desktop_compose_video"])
+        self.assertIs(captured["desktop_commands"]["video-matrix"], bindings["cmd_desktop_video_matrix"])
         self.assertIs(captured["desktop_commands"]["serve"], bindings["cmd_desktop_serve"])
         self.assertIs(captured["desktop_commands"]["video"], bindings["cmd_desktop_video"])
         self.assertIs(captured["desktop_commands"]["inspect"], bindings["cmd_desktop_inspect"])

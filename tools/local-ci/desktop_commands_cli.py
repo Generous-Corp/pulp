@@ -79,6 +79,241 @@ def desktop_serve_candidate_urls(bind_host: str, port: int, **kwargs) -> list[st
     return [f"http://{host}:{port}/" for host in desktop_serve_candidate_hosts(bind_host, **kwargs)]
 
 
+VIDEO_PROOF_DEMO_SCENARIOS = (
+    {
+        "id": "standalone-interaction",
+        "title": "Standalone app interaction",
+        "platform": "mac",
+        "status": "ready",
+        "template": "standalone",
+        "proves": "A Pulp standalone launches, accepts a click, and visibly changes state.",
+        "command": (
+            "python3 tools/local-ci/local_ci.py desktop video mac "
+            "--recipe standalone-interaction --command './build/examples/ui-preview/pulp-ui-preview' "
+            "--capture-ui-snapshot --click-view-id bypass-toggle "
+            "--label standalone-bypass-toggle --compose-video-proof"
+        ),
+        "doctor": "python3 tools/local-ci/local_ci.py desktop video-doctor mac",
+        "watch_for": [
+            "app window is visible",
+            "click marker lands on the intended control",
+            "after state or diff proves the response",
+        ],
+    },
+    {
+        "id": "reaper-plugin-editor",
+        "title": "Plugin editor in REAPER",
+        "platform": "mac",
+        "status": "partial",
+        "template": "plugin-host",
+        "proves": "A real host loads a Pulp plugin and records host/editor context.",
+        "command": (
+            "python3 tools/local-ci/local_ci.py desktop video mac "
+            "--recipe reaper-plugin-editor --plugin PulpSynth --plugin-format clap "
+            "--label reaper-clap-pulpsynth --compose-video-proof"
+        ),
+        "doctor": (
+            "python3 tools/local-ci/local_ci.py desktop video-doctor mac "
+            "--recipe reaper-plugin-editor --plugin PulpSynth --plugin-format clap"
+        ),
+        "watch_for": [
+            "REAPER chrome proves real host context",
+            "plugin is inserted rather than only opening a blank project",
+            "future slice should pop/focus the floating plugin editor reliably",
+        ],
+    },
+    {
+        "id": "inspector-workflow",
+        "title": "Developer inspector workflow",
+        "platform": "mac",
+        "status": "ready",
+        "template": "inspector-workflow",
+        "proves": "A developer build exposes inspector/audio-inspector state during a visible workflow.",
+        "command": (
+            "python3 tools/local-ci/local_ci.py desktop video mac "
+            "--recipe inspector-workflow --command './build/pulp-audio-inspector-demo' "
+            "--capture-ui-snapshot --label inspector-open-and-select --compose-video-proof"
+        ),
+        "doctor": "python3 tools/local-ci/local_ci.py desktop video-doctor mac",
+        "watch_for": [
+            "inspector or audio-inspector pane is visible",
+            "selected node/probe/meter state is readable",
+            "storyboard explains what the viewer should verify",
+        ],
+    },
+    {
+        "id": "component-zoom",
+        "title": "Component zoom validation",
+        "platform": "mac",
+        "status": "ready",
+        "template": "component-zoom",
+        "proves": "The proof highlights one component so the reviewer does not hunt through the full window.",
+        "command": (
+            "python3 tools/local-ci/local_ci.py desktop video mac "
+            "--recipe component-zoom --command './build/examples/ui-preview/pulp-ui-preview' "
+            "--capture-ui-snapshot --component-id compressor-threshold "
+            "--click-view-id compressor-threshold --label component-threshold-control "
+            "--compose-video-proof"
+        ),
+        "doctor": "python3 tools/local-ci/local_ci.py desktop video-doctor mac",
+        "watch_for": [
+            "full-window context appears first",
+            "focus box and zoom inset identify the component",
+            "action marker aligns with the focused component",
+        ],
+    },
+    {
+        "id": "design-parity",
+        "title": "Design/source parity",
+        "platform": "mac",
+        "status": "ready",
+        "template": "design-parity",
+        "proves": "Source material and the native render are shown side by side for visual review.",
+        "command": (
+            "python3 tools/local-ci/local_ci.py desktop compose-video /path/to/run/manifest.json "
+            "--template design-parity --source-image planning/screenshots/reference.png "
+            "--source-label 'Figma reference' --title 'Design parity proof' "
+            "--small-video --small-video-budget-mb 10"
+        ),
+        "doctor": "python3 tools/local-ci/local_ci.py desktop video-doctor mac",
+        "watch_for": [
+            "source image and native proof are both readable",
+            "critical component/region is explained by notes or storyboard",
+            "issue-ready and small fallback videos fit the intended budgets",
+        ],
+    },
+    {
+        "id": "ios-simulator",
+        "title": "iOS Simulator interaction",
+        "platform": "ios-simulator",
+        "status": "planned",
+        "template": "mobile-simulator",
+        "proves": "A simulator app/AUv3 workflow responds to a tap or host action.",
+        "command": (
+            "future: python3 tools/local-ci/local_ci.py simulator video "
+            "--app build/ios/PulpDemo.app --tap accessibility-id:play-toggle "
+            "--label ios-simulator-play-toggle"
+        ),
+        "doctor": "future: simulator video-doctor",
+        "watch_for": [
+            "device/runtime is identified",
+            "tap marker is visible",
+            "app state, meter, or log assertion changes after the tap",
+        ],
+    },
+    {
+        "id": "android-emulator",
+        "title": "Android emulator interaction",
+        "platform": "android-emulator",
+        "status": "planned",
+        "template": "mobile-emulator",
+        "proves": "An Android build responds visibly in an emulator proof.",
+        "command": (
+            "future: python3 tools/local-ci/local_ci.py android video "
+            "--app build/android/app-debug.apk --tap text:Play --label android-play-toggle"
+        ),
+        "doctor": "future: android video-doctor",
+        "watch_for": [
+            "AVD/GPU/audio backend setup is identified",
+            "tap marker is visible",
+            "UI/audio lifecycle marker changes after the tap",
+        ],
+    },
+)
+
+
+def desktop_video_matrix_payload(*, target: str | None = None, scenario: str | None = None) -> dict:
+    scenarios: list[dict] = []
+    for item in VIDEO_PROOF_DEMO_SCENARIOS:
+        if target and item["platform"] != target:
+            continue
+        if scenario and item["id"] != scenario:
+            continue
+        scenarios.append({key: value for key, value in item.items()})
+    return {
+        "kind": "desktop-video-proof-demo-matrix",
+        "target": target or "all",
+        "scenario": scenario or "all",
+        "scenario_count": len(scenarios),
+        "scenarios": scenarios,
+    }
+
+
+def desktop_video_matrix_lines(payload: dict) -> list[str]:
+    lines = [
+        "Desktop validation video proof demo matrix:",
+        f"  target: {payload.get('target')}",
+        f"  scenarios: {payload.get('scenario_count')}",
+    ]
+    for item in payload.get("scenarios", []):
+        lines.extend(
+            [
+                "",
+                f"- {item['id']} [{item['status']}]",
+                f"  title: {item['title']}",
+                f"  platform: {item['platform']}",
+                f"  template: {item['template']}",
+                f"  proves: {item['proves']}",
+                f"  doctor: {item['doctor']}",
+                f"  command: {item['command']}",
+                "  watch for:",
+            ]
+        )
+        lines.extend(f"    - {value}" for value in item.get("watch_for", []))
+    return lines
+
+
+def desktop_video_matrix_markdown(payload: dict) -> str:
+    lines = [
+        "# Desktop Validation Video Proof Demo Matrix",
+        "",
+        f"- Target: `{payload.get('target')}`",
+        f"- Scenarios: `{payload.get('scenario_count')}`",
+        "",
+    ]
+    for item in payload.get("scenarios", []):
+        lines.extend(
+            [
+                f"## {item['title']}",
+                "",
+                f"- Scenario: `{item['id']}`",
+                f"- Status: `{item['status']}`",
+                f"- Platform: `{item['platform']}`",
+                f"- Remotion template: `{item['template']}`",
+                f"- Proves: {item['proves']}",
+                f"- Doctor: `{item['doctor']}`",
+                "",
+                "```bash",
+                item["command"],
+                "```",
+                "",
+                "Watch for:",
+            ]
+        )
+        lines.extend(f"- {value}" for value in item.get("watch_for", []))
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def cmd_desktop_video_matrix(
+    args: argparse.Namespace,
+    *,
+    print_fn: Callable[[str], None] = print,
+) -> int:
+    payload = desktop_video_matrix_payload(
+        target=getattr(args, "target", None) or None,
+        scenario=getattr(args, "scenario", None) or None,
+    )
+    if getattr(args, "json", False):
+        print_fn(json.dumps(payload, indent=2))
+        return 0
+    if getattr(args, "markdown", False):
+        print_fn(desktop_video_matrix_markdown(payload).rstrip())
+        return 0
+    _print_lines(desktop_video_matrix_lines(payload), print_fn=print_fn)
+    return 0
+
+
 def cmd_desktop_status(
     args: argparse.Namespace,
     *,

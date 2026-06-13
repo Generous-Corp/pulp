@@ -247,6 +247,25 @@ class CliParserTests(unittest.TestCase):
         self.assertTrue(args.check_files)
         self.assertTrue(args.json)
 
+    def test_desktop_video_matrix_parses_filters_and_formats(self):
+        parser = self.build_parser()
+
+        args = parser.parse_args([
+            "desktop",
+            "video-matrix",
+            "--target",
+            "mac",
+            "--scenario",
+            "component-zoom",
+            "--markdown",
+        ])
+
+        self.assertEqual(args.desktop_command, "video-matrix")
+        self.assertEqual(args.target, "mac")
+        self.assertEqual(args.scenario, "component-zoom")
+        self.assertTrue(args.markdown)
+        self.assertFalse(args.json)
+
     def test_desktop_video_doctor_defaults_to_mac(self):
         parser = self.build_parser()
 

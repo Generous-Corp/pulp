@@ -424,6 +424,28 @@ def build_local_ci_parser(
     p_desktop_compose_video.add_argument("--video-attachment-budget-mb", type=float, default=100.0, help="Attachment budget in decimal MB for the issue video (default: 100)")
     p_desktop_compose_video.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 
+    p_desktop_video_matrix = desktop_sub.add_parser("video-matrix", help="Show the curated validation video proof demo matrix")
+    p_desktop_video_matrix.add_argument(
+        "--target",
+        choices=["mac", "ios-simulator", "android-emulator"],
+        help="Filter matrix to one platform target.",
+    )
+    p_desktop_video_matrix.add_argument(
+        "--scenario",
+        choices=[
+            "standalone-interaction",
+            "reaper-plugin-editor",
+            "inspector-workflow",
+            "component-zoom",
+            "design-parity",
+            "ios-simulator",
+            "android-emulator",
+        ],
+        help="Filter matrix to one named scenario.",
+    )
+    p_desktop_video_matrix.add_argument("--markdown", action="store_true", help="Emit markdown suitable for a handoff or review issue")
+    p_desktop_video_matrix.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+
     p_desktop_video_doctor = desktop_sub.add_parser("video-doctor", help="Run video proof setup/readiness checks for one desktop target")
     p_desktop_video_doctor.add_argument("target", nargs="?", default="mac", help="Desktop target name (default: mac)")
     p_desktop_video_doctor.add_argument(

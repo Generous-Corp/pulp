@@ -2564,6 +2564,10 @@ def cmd_desktop_compose_video(args: argparse.Namespace) -> int:
     return _desktop_command_bindings.cmd_desktop_compose_video(globals(), args)
 
 
+def cmd_desktop_video_matrix(args: argparse.Namespace) -> int:
+    return _desktop_command_bindings.cmd_desktop_video_matrix(globals(), args)
+
+
 def cmd_desktop_video(args: argparse.Namespace) -> int:
     return _desktop_command_bindings.cmd_desktop_video(globals(), args)
 

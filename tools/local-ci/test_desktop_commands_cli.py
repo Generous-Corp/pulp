@@ -154,6 +154,41 @@ class DesktopCommandsCliTests(unittest.TestCase):
         self.assertEqual(result, 1)
         self.assertIn("unknown desktop target", self.printed[0])
 
+    def test_desktop_video_matrix_outputs_text_json_and_markdown(self):
+        result = self.mod.cmd_desktop_video_matrix(
+            Namespace(target="mac", scenario="component-zoom", json=False, markdown=False),
+            print_fn=self.print_line,
+        )
+        self.assertEqual(result, 0)
+        text = "\n".join(self.printed)
+        self.assertIn("Desktop validation video proof demo matrix:", text)
+        self.assertIn("component-zoom [ready]", text)
+        self.assertIn("--recipe component-zoom", text)
+        self.assertNotIn("ios-simulator", text)
+
+        self.printed.clear()
+        result = self.mod.cmd_desktop_video_matrix(
+            Namespace(target=None, scenario=None, json=True, markdown=False),
+            print_fn=self.print_line,
+        )
+        self.assertEqual(result, 0)
+        payload = json.loads(self.printed[0])
+        self.assertEqual(payload["kind"], "desktop-video-proof-demo-matrix")
+        self.assertEqual(payload["scenario_count"], 7)
+        self.assertIn("reaper-plugin-editor", {item["id"] for item in payload["scenarios"]})
+
+        self.printed.clear()
+        result = self.mod.cmd_desktop_video_matrix(
+            Namespace(target="ios-simulator", scenario=None, json=False, markdown=True),
+            print_fn=self.print_line,
+        )
+        self.assertEqual(result, 0)
+        markdown = self.printed[0]
+        self.assertIn("# Desktop Validation Video Proof Demo Matrix", markdown)
+        self.assertIn("iOS Simulator interaction", markdown)
+        self.assertIn("future: python3 tools/local-ci/local_ci.py simulator video", markdown)
+        self.assertNotIn("Standalone app interaction", markdown)
+
     def test_desktop_config_show_set_and_dispatch(self):
         result = self.mod.cmd_desktop_config_show(
             Namespace(json=False),

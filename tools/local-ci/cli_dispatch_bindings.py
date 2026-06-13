@@ -36,6 +36,7 @@ def cmd_desktop(bindings: Mapping[str, Any], args: Any) -> int:
             "verdict": _binding(bindings, "cmd_desktop_verdict"),
             "review-issue": _binding(bindings, "cmd_desktop_review_issue"),
             "compose-video": _binding(bindings, "cmd_desktop_compose_video"),
+            "video-matrix": _binding(bindings, "cmd_desktop_video_matrix"),
             "serve": _binding(bindings, "cmd_desktop_serve"),
             "video": _binding(bindings, "cmd_desktop_video"),
             "cleanup": _binding(bindings, "cmd_desktop_cleanup"),
