@@ -391,6 +391,19 @@ class MacosDesktopActionTests(unittest.TestCase):
         self.assertEqual(manifest["window"], host_window)
         self.assertEqual(terminated, [4242])
 
+    def test_generated_reaper_recipe_status_requires_opened_plugin(self) -> None:
+        log_path = self.root / "stdout.log"
+        log_path.write_text("TrackFX_AddByName PulpSynth -> 0\nfx name ok=true name=CLAPi: PulpSynth (Pulp)\n")
+        self.mod._validate_generated_reaper_recipe_status({"reaper_recipe": "generated"}, log_path)
+
+        log_path.write_text("TrackFX_AddByName PulpSynth -> -1\nplugin not found\n")
+        with self.assertRaisesRegex(RuntimeError, "did not find the requested plugin"):
+            self.mod._validate_generated_reaper_recipe_status({"reaper_recipe": "generated"}, log_path)
+
+        log_path.write_text("starting\n")
+        with self.assertRaisesRegex(RuntimeError, "did not confirm"):
+            self.mod._validate_generated_reaper_recipe_status({"reaper_recipe": "generated"}, log_path)
+
     def test_run_macos_local_smoke_rejects_capture_bundle_id_combinations(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "only valid with --command"):
             self.run_action(

@@ -88,6 +88,19 @@ def _action_marker_summary(
     return marker
 
 
+def _validate_generated_reaper_recipe_status(video_context: dict | None, log_path: Path) -> None:
+    if not video_context or video_context.get("reaper_recipe") != "generated":
+        return
+    try:
+        text = log_path.read_text()
+    except OSError as exc:
+        raise RuntimeError("Generated REAPER proof recipe did not write a status log.") from exc
+    if "plugin not found" in text:
+        raise RuntimeError("Generated REAPER proof recipe did not find the requested plugin.")
+    if "fx name ok=true" not in text:
+        raise RuntimeError("Generated REAPER proof recipe did not confirm that the plugin editor opened.")
+
+
 def run_macos_local_smoke(
     config: dict,
     command: str | None,
@@ -425,6 +438,7 @@ def run_macos_local_smoke(
                 attachment_budget_bytes=video_attachment_budget_bytes,
             )
             video_recording = None
+        _validate_generated_reaper_recipe_status(video_context, log_path)
 
         terminal_returncode = None
         if video_capture_target == "terminal":
