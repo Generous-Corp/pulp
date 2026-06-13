@@ -143,6 +143,12 @@ class ReportingTests(unittest.TestCase):
                 "template": "design-parity",
                 "source_image": str(source_reference),
                 "source_label": "Figma source",
+                "focus": {
+                    "label": "bypass-toggle",
+                    "selector": {"click_view_id": "bypass-toggle"},
+                    "content_point": {"x": 12.0, "y": 24.0},
+                    "normalized_center": {"x": 0.25, "y": 0.5},
+                },
                 "notes": ["Critical control remains legible."],
             },
         }
@@ -183,6 +189,7 @@ class ReportingTests(unittest.TestCase):
         self.assertNotIn("screenshot", published_run["artifacts"])
         self.assertEqual(published_run["artifacts"]["image_change"], {"changed": False})
         self.assertEqual(published_run["video_proof_composition"]["template"], "design-parity")
+        self.assertEqual(published_run["video_proof_composition"]["focus"]["label"], "bypass-toggle")
         self.assertEqual(
             published_run["video_proof_notes"],
             ["Source import matches the native render.", "Critical control remains legible."],
@@ -194,6 +201,8 @@ class ReportingTests(unittest.TestCase):
         self.assertIn("video metadata", html_text)
         self.assertIn("template: design-parity", html_text)
         self.assertIn("source: Figma source", html_text)
+        self.assertIn("focus: bypass-toggle", html_text)
+        self.assertIn("focus_point:", html_text)
         self.assertIn("Source import matches the native render.", html_text)
         self.assertIn("source reference", html_text)
         review_text = (output_dir / "review.md").read_text()
@@ -214,6 +223,7 @@ class ReportingTests(unittest.TestCase):
         self.assertIn("--approved --issue-url <issue-url>", review_text)
         self.assertIn("--needs-work --notes", review_text)
         self.assertIn("Proof template: `design-parity`", review_text)
+        self.assertIn("Focus component: `bypass-toggle`", review_text)
         self.assertIn("Source reference: `", review_text)
         self.assertIn("Proof note: Source import matches the native render.", review_text)
 

@@ -364,6 +364,10 @@ class DesktopCommandsCliTests(unittest.TestCase):
                         "artifacts": {
                             "video": str(raw_video),
                         },
+                        "video_proof_composition": {
+                            "template": "component-zoom",
+                            "focus": {"label": "bypass-toggle", "selector": {"click_view_id": "bypass-toggle"}},
+                        },
                     }
                 )
                 + "\n"
@@ -429,6 +433,7 @@ class DesktopCommandsCliTests(unittest.TestCase):
             self.assertEqual(updated["video_proof_composition"]["source_label"], "Figma reference")
             self.assertEqual(updated["video_proof_composition"]["title"], "Design parity")
             self.assertEqual(updated["video_proof_composition"]["notes"], ["Reference matches implementation"])
+            self.assertEqual(updated["video_proof_composition"]["focus"]["label"], "bypass-toggle")
             self.assertEqual(updated["video_proof_notes"], ["Reference matches implementation"])
             self.assertTrue(updated["artifacts"]["video_composed"].endswith("/video/proof-composed.mp4"))
             self.assertTrue(updated["artifacts"]["video_composed_metadata"].endswith("/video/composed-metadata.json"))

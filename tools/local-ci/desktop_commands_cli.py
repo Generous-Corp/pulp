@@ -587,13 +587,19 @@ def cmd_desktop_compose_video(
     if notes:
         manifest["video_proof_notes"] = notes
     if template or source_image or source_label or title or notes:
-        manifest["video_proof_composition"] = {
-            "template": template or "validation-proof",
-            "source_image": str(source_image) if source_image else None,
-            "source_label": source_label,
-            "title": title,
-            "notes": notes,
-        }
+        composition = manifest.setdefault("video_proof_composition", {})
+        if not isinstance(composition, dict):
+            composition = {}
+            manifest["video_proof_composition"] = composition
+        composition.update(
+            {
+                "template": template or composition.get("template") or "validation-proof",
+                "source_image": str(source_image) if source_image else composition.get("source_image"),
+                "source_label": source_label if source_label is not None else composition.get("source_label"),
+                "title": title if title is not None else composition.get("title"),
+                "notes": notes if notes else composition.get("notes", []),
+            }
+        )
     if output_path.exists():
         artifacts["video_composed"] = str(output_path)
     if metadata_path.exists():

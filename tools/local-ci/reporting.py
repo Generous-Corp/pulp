@@ -180,6 +180,37 @@ def _format_bytes(value: object) -> str:
     return f"{max(1, round(value / 1000))} KB"
 
 
+def _proof_focus_summary(proof_composition: dict) -> dict:
+    focus = proof_composition.get("focus") if isinstance(proof_composition, dict) else None
+    if not isinstance(focus, dict):
+        return {}
+    selector = focus.get("selector") if isinstance(focus.get("selector"), dict) else {}
+    content_point = focus.get("content_point") if isinstance(focus.get("content_point"), dict) else {}
+    normalized_center = focus.get("normalized_center") if isinstance(focus.get("normalized_center"), dict) else {}
+    label = focus.get("label")
+    if not label:
+        for key in ("click_view_id", "id", "click_view_label", "label", "click_view_text", "text", "click_view_type", "type"):
+            if selector.get(key):
+                label = selector[key]
+                break
+    summary: dict = {}
+    if label:
+        summary["label"] = str(label)
+    if selector:
+        summary["selector"] = selector
+    if content_point:
+        summary["content_point"] = content_point
+    if normalized_center:
+        summary["normalized_center"] = normalized_center
+    return summary
+
+
+def _proof_focus_label(proof_composition: dict) -> str | None:
+    focus = _proof_focus_summary(proof_composition)
+    label = focus.get("label")
+    return str(label) if label else None
+
+
 def desktop_review_issue_body(index_payload: dict, *, publish_dir: Path) -> str:
     serve_command = f"python3 tools/local-ci/local_ci.py desktop serve {publish_dir} --host 0.0.0.0 --port 8765"
     lines = [
@@ -202,6 +233,7 @@ def desktop_review_issue_body(index_payload: dict, *, publish_dir: Path) -> str:
         artifacts = run.get("artifacts") or {}
         proof_notes = run.get("video_proof_notes") if isinstance(run.get("video_proof_notes"), list) else []
         proof_composition = run.get("video_proof_composition") if isinstance(run.get("video_proof_composition"), dict) else {}
+        focus_label = _proof_focus_label(proof_composition)
         video = artifacts.get("video_issue") or artifacts.get("video_composed") or artifacts.get("video")
         metadata_path = artifacts.get("video_issue_metadata") or artifacts.get("video_composed_metadata") or artifacts.get("video_metadata")
         metadata = _artifact_metadata(publish_dir, metadata_path)
@@ -235,6 +267,7 @@ def desktop_review_issue_body(index_payload: dict, *, publish_dir: Path) -> str:
                 f"- Completed: {run.get('completed_at') or '?'}",
                 f"- Interaction: {run.get('interaction_mode') or 'not recorded'}",
                 f"- Proof template: `{proof_composition.get('template')}`" if proof_composition.get("template") else "- Proof template: not recorded",
+                f"- Focus component: `{focus_label}`" if focus_label else "- Focus component: not recorded",
                 f"- Source reference: `{artifacts['video_source_image']}`" if artifacts.get("video_source_image") else "- Source reference: not attached",
                 f"- Issue video: `{artifacts['video_issue']}`" if artifacts.get("video_issue") else "- Issue video: not generated",
                 f"- Small video: `{artifacts['video_small']}`" if artifacts.get("video_small") else "- Small video: not generated",
@@ -364,6 +397,7 @@ def stage_desktop_publish_report(
         video_metadata = artifacts.get("video_issue_metadata") or artifacts.get("video_composed_metadata") or artifacts.get("video_metadata")
         proof_notes = run.get("video_proof_notes") if isinstance(run.get("video_proof_notes"), list) else []
         proof_composition = run.get("video_proof_composition") if isinstance(run.get("video_proof_composition"), dict) else {}
+        proof_focus = _proof_focus_summary(proof_composition)
         meta_lines = [
             f"<div><strong>{html.escape(str(run.get('target') or '?'))}/{html.escape(str(run.get('action') or '?'))}</strong></div>",
             f"<div>{html.escape(str(run.get('label') or '?'))}</div>",
@@ -382,6 +416,10 @@ def stage_desktop_publish_report(
             meta_lines.append(f"<div>template: {html.escape(str(proof_composition.get('template')))}</div>")
         if proof_composition.get("source_label"):
             meta_lines.append(f"<div>source: {html.escape(str(proof_composition.get('source_label')))}</div>")
+        if proof_focus.get("label"):
+            meta_lines.append(f"<div>focus: {html.escape(str(proof_focus['label']))}</div>")
+        if proof_focus.get("content_point"):
+            meta_lines.append(f"<div>focus_point: {html.escape(json.dumps(proof_focus['content_point'], sort_keys=True))}</div>")
         if proof_notes:
             meta_lines.append(
                 "<ul class=\"proof-notes\">"
