@@ -41,6 +41,24 @@ class ExecutionBindingsTests(unittest.TestCase):
             self.mod.EXECUTION_JOB_EXPORTS,
         )
 
+    def test_install_execution_helpers_routes_focused_export_groups(self):
+        execution = types.SimpleNamespace(
+            parse_progress_marker=lambda line: {"line": line},
+            unreachable_target_result=lambda target, detail="Host unreachable": {"target": target, "detail": detail},
+            local_validation_command=lambda job, exclude_tests="": ([job["id"]], exclude_tests),
+        )
+        bindings = {"_execution": execution}
+
+        self.mod.install_execution_helpers(
+            bindings,
+            ("local_validation_command", "unreachable_target_result", "parse_progress_marker"),
+        )
+
+        self.assertEqual(bindings["local_validation_command"]({"id": "job"}, "slow"), (["job"], "slow"))
+        self.assertEqual(bindings["unreachable_target_result"]("linux"), {"target": "linux", "detail": "Host unreachable"})
+        self.assertEqual(bindings["parse_progress_marker"]("line"), {"line": "line"})
+        self.assertNotIn("run_local_validation", bindings)
+
     def _bindings(self, runner_name: str, runner):
         execution = types.SimpleNamespace(**{runner_name: runner})
         bindings = {"_execution": execution, "ROOT": Path("/repo"), "print": object()}

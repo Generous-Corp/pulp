@@ -31,6 +31,23 @@ class ExecutionCommandBindingsTests(unittest.TestCase):
         for name in expected_exports:
             self.assertTrue(callable(getattr(self.mod, name)))
 
+    def test_command_installer_wires_selected_exports(self):
+        execution = type(
+            "Execution",
+            (),
+            {
+                "remote_commit_error": staticmethod(lambda target, host, job: f"{target}:{host}:{job['id']}"),
+                "local_validation_command": staticmethod(lambda job, exclude_tests="": ([job["id"]], exclude_tests)),
+            },
+        )
+        bindings = {"_execution": execution}
+
+        self.mod.install_execution_command_helpers(bindings, ("remote_commit_error", "local_validation_command"))
+
+        self.assertEqual(bindings["remote_commit_error"]("mac", "host", {"id": "job"}), "mac:host:job")
+        self.assertEqual(bindings["local_validation_command"]({"id": "job"}, "slow"), (["job"], "slow"))
+        self.assertNotIn("windows_validation_script", bindings)
+
 
 if __name__ == "__main__":
     unittest.main()

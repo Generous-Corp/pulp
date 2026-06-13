@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from binding_utils import install_local_helpers
 from execution_completed_result_bindings import (
     completed_job_result,
     sorted_target_results,
@@ -25,3 +26,9 @@ EXECUTION_RESULT_EXPORTS = (
     "run_target_tasks",
 )
 
+
+def install_execution_result_helpers(
+    bindings: dict,
+    names: tuple[str, ...] = EXECUTION_RESULT_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)

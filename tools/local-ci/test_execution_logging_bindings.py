@@ -46,6 +46,19 @@ class ExecutionLoggingBindingsTests(unittest.TestCase):
         self.assertEqual(captured["logged"][1]["heartbeat_interval_secs"], 1.5)
         self.assertEqual(captured["logged"][1]["stuck_idle_secs"], 2.5)
 
+    def test_logging_installer_wires_selected_exports(self):
+        execution = types.SimpleNamespace(
+            HEARTBEAT_INTERVAL_SECS=15.0,
+            STUCK_IDLE_SECS=90.0,
+            parse_progress_marker=lambda line: {"line": line},
+        )
+        bindings = {"_execution": execution}
+
+        self.mod.install_execution_logging_helpers(bindings, ("parse_progress_marker",))
+
+        self.assertEqual(bindings["parse_progress_marker"]("line"), {"line": "line"})
+        self.assertNotIn("run_logged_command", bindings)
+
 
 if __name__ == "__main__":
     unittest.main()
