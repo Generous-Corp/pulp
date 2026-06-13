@@ -38,6 +38,13 @@ def _manifest(**overrides: object) -> dict[str, object]:
         "plugin_version": "0.395.0",
         "result_markdown": "06-reaper-vst3.md",
         "logs": ["logs/Reaper-VST3-20260612T120000Z-pid42.log"],
+        "capabilities": [
+            {
+                "capability": "load",
+                "observed": "Confirmed",
+                "notes": "session_start appeared in the checked-in log.",
+            }
+        ],
         "quirks": [
             {
                 "flag": "reaper_process_while_bypassed",
@@ -61,6 +68,7 @@ class DawBenchEvidenceTests(unittest.TestCase):
         _write(result_dir / "06-reaper-vst3.md",
                "# Filled REAPER result\n")
         _write(result_dir / "logs" / "Reaper-VST3-20260612T120000Z-pid42.log",
+               "2026-06-12T12:00:00Z\tsession_start\n"
                "2026-06-12T12:00:00Z\tprocess_without_prepare\n")
         return tmp_ctx, root, result_dir
 
@@ -158,6 +166,7 @@ class DawBenchEvidenceTests(unittest.TestCase):
         with tmp_ctx:
             _write(
                 result_dir / "logs" / "Reaper-CLAP-20260612T120000Z-pid43.log",
+                "2026-06-12T12:00:00Z\tsession_start\n"
                 "2026-06-12T12:00:00Z\tprocess_is_playing_edge\tis_playing=true\n",
             )
             _write(root / "docs" / "validation" / "daw-bench" / "07-reaper-clap.md",
@@ -183,6 +192,25 @@ class DawBenchEvidenceTests(unittest.TestCase):
                 encoding="utf-8",
             )
             self.assertEqual(checker.validate_manifest(path, repo_root=root).errors, ())
+
+    def test_confirmed_capability_requires_matching_log_event(self) -> None:
+        tmp_ctx, root, result_dir = self._repo()
+        with tmp_ctx:
+            path = result_dir / "bad-capability.daw-bench.json"
+            path.write_text(
+                json.dumps(_manifest(
+                    capabilities=[
+                        {
+                            "capability": "midi",
+                            "observed": "Confirmed",
+                            "notes": "MIDI was claimed but no midi_in event exists.",
+                        }
+                    ]
+                )),
+                encoding="utf-8",
+            )
+            errors = checker.validate_manifest(path, repo_root=root).errors
+            self.assertTrue(any("midi is Confirmed" in error for error in errors))
 
     def test_directory_scan_finds_only_manifest_suffix(self) -> None:
         tmp_ctx, _root, result_dir = self._repo()

@@ -52,6 +52,18 @@ def _manifest(*, host: str = "REAPER", fmt: str = "VST3") -> dict[str, object]:
         "plugin_version": "1.0.0",
         "result_markdown": "06-reaper-vst3.md",
         "logs": ["logs/Reaper-VST3-20260612T120000Z-pid42.log"],
+        "capabilities": [
+            {
+                "capability": "load",
+                "observed": "Confirmed",
+                "notes": "session_start appeared in the checked-in log.",
+            },
+            {
+                "capability": "params",
+                "observed": "Confirmed",
+                "notes": "define_parameters appeared in the checked-in log.",
+            },
+        ],
         "quirks": [
             {
                 "flag": "reaper_process_while_bypassed",
@@ -73,6 +85,8 @@ class HostMatrixEvidenceTests(unittest.TestCase):
         _write(result_dir / "06-reaper-vst3.md",
                "# Filled REAPER result\n")
         _write(result_dir / "logs" / "Reaper-VST3-20260612T120000Z-pid42.log",
+               "2026-06-12T12:00:00Z\tsession_start\n"
+               "2026-06-12T12:00:00Z\tdefine_parameters\n"
                "2026-06-12T12:00:00Z\tprocess_without_prepare\n")
         (result_dir / "reaper-vst3.daw-bench.json").write_text(
             json.dumps(_manifest()),
@@ -131,6 +145,21 @@ class HostMatrixEvidenceTests(unittest.TestCase):
                 """))
             errors = matrix_checker.validate_matrix(matrix, repo_root=root).errors
             self.assertTrue(any("no valid DAW-bench manifest matches VST3/Reaper" in error for error in errors))
+
+    def test_promoted_cell_requires_matching_capability_evidence(self) -> None:
+        tmp_ctx, root, matrix = self._repo()
+        with tmp_ctx:
+            _write(matrix, textwrap.dedent("""\
+                # Host Compatibility Matrix
+
+                ## VST3
+
+                | Host | Version | Load | Params | MIDI | Notes |
+                |------|---------|------|--------|------|-------|
+                | Reaper | 7.74 | 🟡 | 🟡 | 🟡 | VST3 bench evidence: `docs/validation/daw-bench/results/2026-06-12/` |
+                """))
+            errors = matrix_checker.validate_matrix(matrix, repo_root=root).errors
+            self.assertTrue(any("capability MIDI" in error for error in errors))
 
 
 if __name__ == "__main__":

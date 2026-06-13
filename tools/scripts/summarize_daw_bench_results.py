@@ -35,6 +35,7 @@ class ResultSummary:
     confirmed: tuple[str, ...]
     refuted: tuple[str, ...]
     not_triggered: tuple[str, ...]
+    confirmed_capabilities: tuple[str, ...]
 
 
 def _load_manifest(path: pathlib.Path) -> dict[str, Any]:
@@ -58,6 +59,19 @@ def _quirk_flags(data: dict[str, Any], observed: str) -> tuple[str, ...]:
             flag = quirk.get("flag")
             if isinstance(flag, str):
                 out.append(flag)
+    return tuple(sorted(out))
+
+
+def _capability_names(data: dict[str, Any], observed: str) -> tuple[str, ...]:
+    capabilities = data.get("capabilities")
+    if not isinstance(capabilities, list):
+        return ()
+    out: list[str] = []
+    for capability in capabilities:
+        if isinstance(capability, dict) and capability.get("observed") == observed:
+            name = capability.get("capability")
+            if isinstance(name, str):
+                out.append(name)
     return tuple(sorted(out))
 
 
@@ -90,6 +104,7 @@ def load_summaries(
             confirmed=_quirk_flags(data, "Confirmed"),
             refuted=_quirk_flags(data, "Refuted"),
             not_triggered=_quirk_flags(data, "Not Triggered"),
+            confirmed_capabilities=_capability_names(data, "Confirmed"),
         ))
 
     summaries.sort(key=lambda item: (item.date, item.host.casefold(), item.format.casefold()))
@@ -109,22 +124,25 @@ def render_markdown(summaries: list[ResultSummary], *, repo_root: pathlib.Path =
     hosts = sorted({f"{item.host} {item.format}" for item in summaries})
     latest = max(item.date for item in summaries)
     confirmed_total = sum(len(item.confirmed) for item in summaries)
+    capability_total = sum(len(item.confirmed_capabilities) for item in summaries)
     lines.extend([
         f"- Manifests: {len(summaries)}",
         f"- Host/format lanes: {len(hosts)}",
         f"- Latest result date: {latest}",
         f"- Confirmed quirk observations: {confirmed_total}",
+        f"- Confirmed capability observations: {capability_total}",
         "",
         "## Runs",
         "",
-        "| Date | Host | Format | DAW Version | OS | Confirmed | Refuted | Not Triggered | Evidence |",
-        "|------|------|--------|-------------|----|-----------|---------|---------------|----------|",
+        "| Date | Host | Format | DAW Version | OS | Capabilities | Confirmed | Refuted | Not Triggered | Evidence |",
+        "|------|------|--------|-------------|----|--------------|-----------|---------|---------------|----------|",
     ])
 
     for item in summaries:
         lines.append(
             f"| {item.date} | {item.host} | {item.format} | {item.daw_version} | "
-            f"{item.os} | {_join_flags(item.confirmed)} | {_join_flags(item.refuted)} | "
+            f"{item.os} | {_join_flags(item.confirmed_capabilities)} | "
+            f"{_join_flags(item.confirmed)} | {_join_flags(item.refuted)} | "
             f"{_join_flags(item.not_triggered)} | `{item.result_markdown}` |"
         )
 
@@ -157,6 +175,9 @@ def render_json(summaries: list[ResultSummary], *, repo_root: pathlib.Path = REP
         "host_format_count": len({(item.host, item.format) for item in summaries}),
         "latest_result_date": max((item.date for item in summaries), default=None),
         "confirmed_quirk_observations": sum(len(item.confirmed) for item in summaries),
+        "confirmed_capability_observations": sum(
+            len(item.confirmed_capabilities) for item in summaries
+        ),
         "runs": [
             {
                 "date": item.date,
@@ -165,6 +186,7 @@ def render_json(summaries: list[ResultSummary], *, repo_root: pathlib.Path = REP
                 "daw_version": item.daw_version,
                 "os": item.os,
                 "confirmed": list(item.confirmed),
+                "confirmed_capabilities": list(item.confirmed_capabilities),
                 "refuted": list(item.refuted),
                 "not_triggered": list(item.not_triggered),
                 "manifest": _relative(item.manifest, repo_root=repo_root),

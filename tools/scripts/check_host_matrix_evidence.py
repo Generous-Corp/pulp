@@ -26,12 +26,12 @@ class MatrixRow:
     line: int
     format: str
     host: str
-    statuses: tuple[str, ...]
+    capabilities: dict[str, str]
     notes: str
 
     @property
     def promoted(self) -> bool:
-        return any(status in PROMOTED_STATUSES for status in self.statuses)
+        return any(status in PROMOTED_STATUSES for status in self.capabilities.values())
 
 
 @dataclass(frozen=True)
@@ -89,16 +89,16 @@ def parse_matrix(path: pathlib.Path = DEFAULT_MATRIX) -> list[MatrixRow]:
         row = dict(zip(headers, cells))
         host = row.get("Host", "")
         notes = row.get("Notes", "")
-        statuses = tuple(
-            value
+        capabilities = {
+            key: value
             for key, value in row.items()
             if key not in {"Host", "Version", "Notes"} and value not in UNVALIDATED_STATUSES
-        )
+        }
         rows.append(MatrixRow(
             line=lineno,
             format=current_format,
             host=host,
-            statuses=statuses,
+            capabilities=capabilities,
             notes=notes,
         ))
 
@@ -117,6 +117,25 @@ def _manifest_matches_lane(path: pathlib.Path, *, host: str, fmt: str) -> bool:
     return _normalize(str(data.get("host", ""))) == _normalize(host) and (
         _normalize(str(data.get("format", ""))) == _normalize(fmt)
     )
+
+
+def _manifest_confirms_capability(path: pathlib.Path, capability: str) -> bool:
+    try:
+        data: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    capabilities = data.get("capabilities")
+    if not isinstance(capabilities, list):
+        return False
+    expected = _normalize(capability)
+    for item in capabilities:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("capability")
+        observed = item.get("observed")
+        if isinstance(name, str) and _normalize(name) == expected:
+            return observed == "Confirmed"
+    return False
 
 
 def validate_matrix(
@@ -138,7 +157,7 @@ def validate_matrix(
             )
             continue
 
-        lane_matched = False
+        matching_manifests: list[pathlib.Path] = []
         for citation in citations:
             result_dir = (repo_root / citation).resolve()
             if not result_dir.is_dir():
@@ -159,14 +178,26 @@ def validate_matrix(
                     errors.append(f"{matrix_path}:{row.line} invalid evidence {result.path}: {rendered}")
             if any(not result.ok for result in results):
                 continue
-            if any(_manifest_matches_lane(path, host=row.host, fmt=row.format) for path in manifests):
-                lane_matched = True
+            matching_manifests.extend(
+                path for path in manifests
+                if _manifest_matches_lane(path, host=row.host, fmt=row.format)
+            )
 
-        if not lane_matched:
+        if not matching_manifests:
             errors.append(
                 f"{matrix_path}:{row.line} no valid DAW-bench manifest matches "
                 f"{row.format}/{row.host}"
             )
+            continue
+
+        for capability, status in row.capabilities.items():
+            if status not in PROMOTED_STATUSES:
+                continue
+            if not any(_manifest_confirms_capability(path, capability) for path in matching_manifests):
+                errors.append(
+                    f"{matrix_path}:{row.line} no valid DAW-bench manifest confirms "
+                    f"{row.format}/{row.host} capability {capability}"
+                )
 
     return MatrixCheck(matrix_path, tuple(errors))
 

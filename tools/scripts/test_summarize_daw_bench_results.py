@@ -51,6 +51,18 @@ def _manifest(**overrides: object) -> dict[str, object]:
         "plugin_version": "1.0.0",
         "result_markdown": "06-reaper-vst3.md",
         "logs": ["logs/Reaper-VST3-20260612T120000Z-pid42.log"],
+        "capabilities": [
+            {
+                "capability": "load",
+                "observed": "Confirmed",
+                "notes": "session_start appeared in the checked-in log.",
+            },
+            {
+                "capability": "params",
+                "observed": "Confirmed",
+                "notes": "define_parameters appeared in the checked-in log.",
+            },
+        ],
         "quirks": [
             {
                 "flag": "reaper_process_while_bypassed",
@@ -80,6 +92,8 @@ class DawBenchSummaryTests(unittest.TestCase):
         _write(result_dir / "06-reaper-vst3.md",
                "# Filled REAPER result\n")
         _write(result_dir / "logs" / "Reaper-VST3-20260612T120000Z-pid42.log",
+               "2026-06-12T12:00:00Z\tsession_start\n"
+               "2026-06-12T12:00:00Z\tdefine_parameters\n"
                "2026-06-12T12:00:00Z\tprocess_without_prepare\n")
         return tmp_ctx, root, result_dir
 
@@ -95,6 +109,7 @@ class DawBenchSummaryTests(unittest.TestCase):
             self.assertEqual(summaries[0].format, "VST3")
             self.assertEqual(summaries[0].confirmed, ("reaper_process_while_bypassed",))
             self.assertEqual(summaries[0].not_triggered, ("reaper_midsession_setstate",))
+            self.assertEqual(summaries[0].confirmed_capabilities, ("load", "params"))
 
     def test_markdown_report_includes_run_and_confirmed_quirk_table(self) -> None:
         tmp_ctx, root, result_dir = self._repo()
@@ -104,7 +119,9 @@ class DawBenchSummaryTests(unittest.TestCase):
             summaries, _results = summary.load_summaries([result_dir], repo_root=root)
             markdown = summary.render_markdown(summaries, repo_root=root)
             self.assertIn("- Manifests: 1", markdown)
+            self.assertIn("- Confirmed capability observations: 2", markdown)
             self.assertIn("| 2026-06-12 | REAPER | VST3 |", markdown)
+            self.assertIn("`load`, `params`", markdown)
             self.assertIn("`reaper_process_while_bypassed`", markdown)
             self.assertIn("docs/validation/daw-bench/results/2026-06-12/reaper-vst3.daw-bench.json", markdown)
 
@@ -119,7 +136,9 @@ class DawBenchSummaryTests(unittest.TestCase):
             self.assertEqual(data["host_format_count"], 1)
             self.assertEqual(data["latest_result_date"], "2026-06-12")
             self.assertEqual(data["confirmed_quirk_observations"], 1)
+            self.assertEqual(data["confirmed_capability_observations"], 2)
             self.assertEqual(data["runs"][0]["confirmed"], ["reaper_process_while_bypassed"])
+            self.assertEqual(data["runs"][0]["confirmed_capabilities"], ["load", "params"])
 
     def test_invalid_manifest_blocks_summary(self) -> None:
         tmp_ctx, root, result_dir = self._repo()

@@ -10,6 +10,23 @@
   "plugin_version": "1.0.0",
   "result_markdown": "07-reaper-clap.md",
   "logs": ["logs/REAPER-CLAP-20260612T211307Z-pid73106.log"],
+  "capabilities": [
+    {
+      "capability": "load",
+      "observed": "Confirmed",
+      "notes": "The checked-in log contains session_start, define_parameters, and prepare events for the CLAP instance."
+    },
+    {
+      "capability": "params",
+      "observed": "Confirmed",
+      "notes": "The checked-in log contains define_parameters and serialize_plugin_state events."
+    },
+    {
+      "capability": "sidechain",
+      "observed": "Confirmed",
+      "notes": "The checked-in log contains a sidechain_edge event."
+    }
+  ],
   "quirks": [
     {
       "flag": "reaper_process_while_bypassed",

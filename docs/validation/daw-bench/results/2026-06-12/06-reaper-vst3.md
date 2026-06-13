@@ -20,6 +20,15 @@ The run produced `session_start`, `define_parameters`, repeated
 `process_without_prepare`, `sidechain_edge`, `view_opened`, `view_resized`, and
 `serialize_plugin_state` events.
 
+## Capability Evidence
+
+| Capability | Observed | Notes |
+|------------|----------|-------|
+| Load | Confirmed | Log contains `session_start`, `define_parameters`, and `prepare` events. |
+| Params | Confirmed | Log contains `define_parameters` and `serialize_plugin_state` events. |
+| Sidechain | Confirmed | Log contains a `sidechain_edge` event. |
+| Multi-bus | Confirmed | Log contains repeated `bus_layout_proposal` events with a multi-input arrangement. |
+
 ## Result
 
 | Quirk flag | Row | Observed | Notes |

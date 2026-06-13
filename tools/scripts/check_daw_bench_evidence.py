@@ -69,6 +69,16 @@ FLAG_LOG_EVENTS: dict[str, tuple[str, ...]] = {
     "logic_au_tail_time_conversion": ("prepare",),
 }
 
+CAPABILITY_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
+CAPABILITY_LOG_EVENTS: dict[str, tuple[str, ...]] = {
+    "ara": ("begin_editing",),
+    "load": ("session_start", "prepare"),
+    "midi": ("midi_in",),
+    "multi-bus": ("bus_layout_proposal",),
+    "params": ("define_parameters", "serialize_plugin_state"),
+    "sidechain": ("sidechain_edge",),
+}
+
 
 @dataclass(frozen=True)
 class ValidationResult:
@@ -148,6 +158,38 @@ def _validate_quirks(data: dict[str, Any]) -> list[str]:
     return errors
 
 
+def _validate_capabilities(data: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    capabilities = data.get("capabilities")
+    if capabilities is None:
+        return []
+    if not isinstance(capabilities, list):
+        return ["capabilities must be an array when present"]
+
+    seen: set[str] = set()
+    for index, capability in enumerate(capabilities):
+        prefix = f"capabilities[{index}]"
+        if not isinstance(capability, dict):
+            errors.append(f"{prefix} must be an object")
+            continue
+        name = capability.get("capability")
+        observed = capability.get("observed")
+        notes = capability.get("notes")
+        if not isinstance(name, str) or not CAPABILITY_RE.match(name):
+            errors.append(f"{prefix}.capability must be a capability identifier")
+        elif name in seen:
+            errors.append(f"{prefix}.capability duplicates {name}")
+        else:
+            seen.add(name)
+        if observed not in ALLOWED_RESULTS:
+            errors.append(
+                f"{prefix}.observed must be one of: {', '.join(sorted(ALLOWED_RESULTS))}"
+            )
+        if not isinstance(notes, str) or not notes.strip() or _is_placeholder(notes):
+            errors.append(f"{prefix}.notes must describe the observed evidence")
+    return errors
+
+
 def _events_in_log(path: pathlib.Path) -> set[str]:
     events: set[str] = set()
     try:
@@ -197,6 +239,33 @@ def _validate_claimed_log_events(
         elif observed == "Not Triggered" and found:
             errors.append(
                 f"quirks[{index}] {flag} is Not Triggered but checked-in logs "
+                f"contain expected event(s): {', '.join(found)}"
+            )
+
+    capabilities = data.get("capabilities")
+    if not isinstance(capabilities, list):
+        return errors
+
+    for index, capability in enumerate(capabilities):
+        if not isinstance(capability, dict):
+            continue
+        name = capability.get("capability")
+        observed = capability.get("observed")
+        if not isinstance(name, str):
+            continue
+        expected_events = CAPABILITY_LOG_EVENTS.get(name)
+        if not expected_events:
+            continue
+        found = sorted(set(expected_events).intersection(observed_events))
+        expected = ", ".join(expected_events)
+        if observed == "Confirmed" and not found:
+            errors.append(
+                f"capabilities[{index}] {name} is Confirmed but checked-in logs "
+                f"do not contain expected event(s): {expected}"
+            )
+        elif observed == "Not Triggered" and found:
+            errors.append(
+                f"capabilities[{index}] {name} is Not Triggered but checked-in logs "
                 f"contain expected event(s): {', '.join(found)}"
             )
     return errors
@@ -271,6 +340,7 @@ def validate_manifest(path: pathlib.Path, *, repo_root: pathlib.Path = REPO_ROOT
         errors.append("provide at least one checked-in log or external_log_url")
 
     errors.extend(_validate_quirks(data))
+    errors.extend(_validate_capabilities(data))
     errors.extend(_validate_claimed_log_events(data, log_paths))
     return ValidationResult(path, tuple(errors))
 

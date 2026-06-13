@@ -57,6 +57,13 @@ contradict the listed logs.
   "plugin_version": "0.395.0",
   "result_markdown": "06-reaper-vst3.md",
   "logs": ["logs/Reaper-VST3-20260612T120000Z-pid42.log"],
+  "capabilities": [
+    {
+      "capability": "load",
+      "observed": "Confirmed",
+      "notes": "session_start and prepare events appeared in the checked-in log"
+    }
+  ],
   "quirks": [
     {
       "flag": "reaper_process_while_bypassed",
@@ -71,3 +78,11 @@ contradict the listed logs.
 Allowed `format` values: `AU`, `AUv3`, `CLAP`, `Standalone`, `VST3`.
 
 Allowed `quirks[].observed` values: `Confirmed`, `Refuted`, `Not Triggered`.
+
+`capabilities` is optional for historical manifests but required for any
+host-matrix cell promotion. Use lowercase capability identifiers matching the
+matrix column names after normalization, such as `load`, `params`, `midi`,
+`sidechain`, `multi-bus`, and `ara`. A promoted matrix cell must have a matching
+manifest for the host/format lane and a `Confirmed` capability entry. The
+validator cross-checks known capabilities against checked-in log events when
+logs are present.

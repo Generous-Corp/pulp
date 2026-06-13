@@ -22,6 +22,14 @@ The run produced `session_start`, `define_parameters`, `prepare`,
 sample-rate-drift rendering, FX-chain reload/deserialization, MIDI input, or
 editor UI behavior.
 
+## Capability Evidence
+
+| Capability | Observed | Notes |
+|------------|----------|-------|
+| Load | Confirmed | Log contains `session_start`, `define_parameters`, and `prepare` events. |
+| Params | Confirmed | Log contains `define_parameters` and `serialize_plugin_state` events. |
+| Sidechain | Confirmed | Log contains a `sidechain_edge` event. |
+
 ## Result
 
 | Quirk flag | Row | Observed | Notes |

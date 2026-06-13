@@ -111,8 +111,10 @@ host session; speculative accommodations belong in the host-quirks catalog until
 bench evidence exists.
 
 Current checked-in matrix state has one usable REAPER VST3 row backed by the
-dated DAW-bench evidence above. Do not promote any additional row out of `—`
-until the matching evidence manifest validates.
+dated DAW-bench evidence above and one usable REAPER CLAP row backed by the
+same dated evidence folder. Do not promote any additional row or capability
+cell out of `—` until the matching evidence manifest validates and confirms
+that capability.
 
 ## See also
 

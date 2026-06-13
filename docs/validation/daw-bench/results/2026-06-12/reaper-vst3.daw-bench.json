@@ -10,6 +10,28 @@
   "plugin_version": "1.0.0",
   "result_markdown": "06-reaper-vst3.md",
   "logs": ["logs/REAPER-VST3-20260612T172051Z-pid5104.log"],
+  "capabilities": [
+    {
+      "capability": "load",
+      "observed": "Confirmed",
+      "notes": "The checked-in log contains session_start, define_parameters, and prepare events for the VST3 instance."
+    },
+    {
+      "capability": "params",
+      "observed": "Confirmed",
+      "notes": "The checked-in log contains define_parameters and serialize_plugin_state events."
+    },
+    {
+      "capability": "sidechain",
+      "observed": "Confirmed",
+      "notes": "The checked-in log contains a sidechain_edge event."
+    },
+    {
+      "capability": "multi-bus",
+      "observed": "Confirmed",
+      "notes": "The checked-in log contains repeated bus_layout_proposal events with a multi-input arrangement."
+    }
+  ],
   "quirks": [
     {
       "flag": "reaper_vst3_gesture_ordering",
