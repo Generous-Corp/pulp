@@ -348,7 +348,7 @@ def _desktop_report_serve_commands(index_payload: dict, publish_dir: Path) -> di
         "serve_command": f"python3 tools/local-ci/local_ci.py desktop serve {quoted_dir} --host 0.0.0.0 --port 8765",
         "serve_background_command": (
             f"python3 tools/local-ci/local_ci.py desktop serve {quoted_dir} "
-            f"--host 0.0.0.0 --port 8765 --background --label {shlex.quote(label)} --json"
+            f"--host 0.0.0.0 --port 8765 --auto-port --background --label {shlex.quote(label)} --json"
         ),
         "serve_status_command": (
             f"python3 tools/local-ci/local_ci.py desktop serve --status "

@@ -520,6 +520,7 @@ def build_local_ci_parser(
     p_desktop_serve.add_argument("path", nargs="?", help="Optional report directory (default: latest published report)")
     p_desktop_serve.add_argument("--host", default="127.0.0.1", help="Host/interface to bind (default: 127.0.0.1)")
     p_desktop_serve.add_argument("--port", type=int, default=8765, help="Port to bind (default: 8765)")
+    p_desktop_serve.add_argument("--auto-port", action="store_true", help="Use the first available port at or above --port")
     p_desktop_serve.add_argument("--background", action="store_true", help="Start a detached static report server and return immediately")
     p_desktop_serve.add_argument("--label", default="desktop-proof", help="Background server label for --background, --status, and --stop")
     p_desktop_serve.add_argument("--status", action="store_true", help="Show background server status for --label")

@@ -103,6 +103,19 @@ def desktop_serve_candidate_urls(bind_host: str, port: int, **kwargs) -> list[st
     return [f"http://{host}:{port}/" for host in desktop_serve_candidate_hosts(bind_host, **kwargs)]
 
 
+def find_available_desktop_serve_port(host: str, preferred_port: int, *, attempts: int = 100) -> int:
+    start = max(1, int(preferred_port or 8765))
+    for offset in range(max(1, attempts)):
+        candidate = start + offset
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.bind((host, candidate))
+            return candidate
+        except OSError:
+            continue
+    raise RuntimeError(f"no free desktop proof serve port found starting at {start}")
+
+
 def _write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2) + "\n")
@@ -488,7 +501,7 @@ def desktop_video_matrix_payload(*, target: str | None = None, scenario: str | N
         )
         row["serve_background_command"] = (
             f"python3 tools/local-ci/local_ci.py desktop serve {report_placeholder} "
-            f"--host 0.0.0.0 --port 8765 --background --label {label}-review --json"
+            f"--host 0.0.0.0 --port 8765 --auto-port --background --label {label}-review --json"
         )
         row["serve_status_command"] = (
             f"python3 tools/local-ci/local_ci.py desktop serve --status --label {label}-review --json"
@@ -1315,6 +1328,7 @@ def cmd_desktop_serve(
     read_serve_state_fn: Callable[[Path, str], dict | None] = read_desktop_serve_state,
     stop_serve_process_fn: Callable[..., dict] = stop_desktop_serve_process,
     is_running_fn: Callable[[int], bool] = process_is_running,
+    find_available_port_fn: Callable[[str, int], int] = find_available_desktop_serve_port,
     print_fn: Callable[[str], None] = print,
 ) -> int:
     try:
@@ -1381,13 +1395,21 @@ def cmd_desktop_serve(
         print_fn(f"Error: desktop report index.html not found: {serve_dir / 'index.html'}")
         return 1
 
-    urls = desktop_serve_candidate_urls_fn(args.host, args.port)
-    primary_url = urls[0] if urls else f"http://{args.host}:{args.port}/"
+    port = int(getattr(args, "port", 8765) or 8765)
+    if getattr(args, "auto_port", False):
+        try:
+            port = int(find_available_port_fn(args.host, port))
+        except Exception as exc:
+            print_fn(f"Error: {exc}")
+            return 1
+
+    urls = desktop_serve_candidate_urls_fn(args.host, port)
+    primary_url = urls[0] if urls else f"http://{args.host}:{port}/"
     if getattr(args, "background", False):
         state = start_serve_process_fn(
             resolved_serve_dir,
             host=args.host,
-            port=args.port,
+            port=port,
             label=label,
             publish_root=publish_root,
             urls=urls,
@@ -1413,13 +1435,15 @@ def cmd_desktop_serve(
             print_fn(f"  directory: {serve_dir}")
             print_fn(f"  background: {label}")
             print_fn(f"  pid: {state['pid']}")
+            if port != int(getattr(args, "port", 8765) or 8765):
+                print_fn(f"  auto_port: {port}")
             print_fn(f"  stop: python3 tools/local-ci/local_ci.py desktop serve --stop --label {label}")
         return 0
     print_fn(f"Serving desktop report: {primary_url}")
     for url in urls[1:]:
         print_fn(f"  also: {url}")
     print_fn(f"  directory: {serve_dir}")
-    serve_directory_fn(serve_dir, host=args.host, port=args.port)
+    serve_directory_fn(serve_dir, host=args.host, port=port)
     return 0
 
 

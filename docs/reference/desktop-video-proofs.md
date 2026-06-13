@@ -499,6 +499,7 @@ the link needs to stay alive after the agent response:
 python3 tools/local-ci/local_ci.py desktop serve /path/to/published-report \
   --host 0.0.0.0 \
   --port 8765 \
+  --auto-port \
   --background \
   --label validation-video-proof \
   --json
@@ -517,9 +518,12 @@ python3 tools/local-ci/local_ci.py desktop serve --status --label validation-vid
 python3 tools/local-ci/local_ci.py desktop serve --stop --label validation-video-proof --json
 ```
 
-If background startup returns `status: failed`, the URL is not live. Check the
-JSON `stderr_tail` for bind errors such as `Address already in use`, then stop
-the conflicting labeled server or choose another port before sharing the link.
+Use `--auto-port` for shared review links so a stale server on `8765` does not
+produce a dead URL; the JSON response records the actual port and candidate
+watch URLs. If background startup returns `status: failed`, the URL is not live.
+Check the JSON `stderr_tail` for bind errors such as `Address already in use`,
+then stop the conflicting labeled server or choose another port before sharing
+the link.
 
 `desktop publish` also writes `review.md` and `review-package.json` next to
 `index.html`. The publish step records the same candidate watch URLs in

@@ -526,6 +526,7 @@ when the link needs to stay alive after the agent response:
 python3 tools/local-ci/local_ci.py desktop serve /path/to/published-report \
   --host 0.0.0.0 \
   --port 8765 \
+  --auto-port \
   --background \
   --label validation-video-proof \
   --json
@@ -541,6 +542,7 @@ PULP_DESKTOP_SERVE_HOSTS=blackbook.tailnet-name.ts.net \
   python3 tools/local-ci/local_ci.py desktop serve /path/to/published-report \
     --host 0.0.0.0 \
     --port 8765 \
+    --auto-port \
     --background \
     --label validation-video-proof \
     --json
@@ -553,6 +555,8 @@ python3 tools/local-ci/local_ci.py desktop serve --status --label validation-vid
 python3 tools/local-ci/local_ci.py desktop serve --stop --label validation-video-proof --json
 ```
 
+Use `--auto-port` for review links so a stale server on `8765` does not produce
+a dead URL; the JSON response records the actual port and candidate watch URLs.
 If background startup returns `status: failed`, treat the watch link as dead.
 Inspect `stderr_tail` for bind errors such as `Address already in use`, then
 stop the conflicting labeled server or rerun `desktop serve` with a different

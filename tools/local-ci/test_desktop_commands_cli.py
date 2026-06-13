@@ -190,6 +190,7 @@ class DesktopCommandsCliTests(unittest.TestCase):
         reaper = next(item for item in payload["scenarios"] if item["id"] == "reaper-plugin-editor")
         self.assertIn("desktop publish --manifest /path/to/run/manifest.json", reaper["publish_command"])
         self.assertIn("desktop review-issue /path/to/published-reports/reaper-plugin-editor", reaper["review_issue_command"])
+        self.assertIn("--auto-port", reaper["serve_background_command"])
         self.assertIn("--background --label reaper-plugin-editor-review --json", reaper["serve_background_command"])
         self.assertIn("PulpSynth_CLAP", reaper["prepare_command"])
         self.assertIn("Plug-Ins/CLAP/PulpSynth.clap", reaper["command"])
@@ -463,6 +464,47 @@ class DesktopCommandsCliTests(unittest.TestCase):
         self.assertEqual(background_payload["status"], "started")
         self.assertEqual(background_payload["pid"], 4243)
         self.assertEqual(background_payload["urls"][1], "http://100.64.0.10:8768/")
+
+        self.printed.clear()
+        started.clear()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            artifact_root = Path(tmpdir) / "runs"
+            report_dir = artifact_root / "_published" / "report"
+            report_dir.mkdir(parents=True)
+            (report_dir / "index.html").write_text("<html></html>")
+            serve_config = self.desktop_config()
+            serve_config["desktop_automation"]["artifact_root"] = str(artifact_root)
+
+            def start_process_auto(path, **kwargs):
+                started.append((path, kwargs))
+                return {
+                    "label": kwargs["label"],
+                    "pid": 4246,
+                    "port": kwargs["port"],
+                    "directory": str(path),
+                    "urls": kwargs["urls"],
+                    "state_path": str(artifact_root / "_published" / "_serve" / "ios-proof.json"),
+                }
+
+            result = self.mod.cmd_desktop_serve(
+                Namespace(path=str(report_dir), host="0.0.0.0", port=8765, auto_port=True, background=True, label="ios-proof", json=True),
+                load_config_fn=lambda: serve_config,
+                desktop_publish_reports_fn=lambda *_args, **_kwargs: [],
+                desktop_serve_candidate_urls_fn=lambda host, port: [
+                    f"http://127.0.0.1:{port}/",
+                    f"http://100.64.0.10:{port}/",
+                ],
+                start_serve_process_fn=start_process_auto,
+                find_available_port_fn=lambda host, port: 8771,
+                serve_directory_fn=lambda *_args, **_kwargs: self.fail("background serve should not block"),
+                print_fn=self.print_line,
+            )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(started[0][1]["port"], 8771)
+        auto_payload = json.loads(self.printed[0])
+        self.assertEqual(auto_payload["port"], 8771)
+        self.assertEqual(auto_payload["urls"][0], "http://127.0.0.1:8771/")
 
         self.printed.clear()
         started.clear()
