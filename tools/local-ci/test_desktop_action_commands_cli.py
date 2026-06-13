@@ -63,6 +63,7 @@ class DesktopActionCommandsCliTests(unittest.TestCase):
             "source_image": None,
             "source_label": None,
             "video_title": None,
+            "video_note": [],
             "recipe": None,
             "plugin": None,
             "plugin_format": None,
@@ -129,13 +130,14 @@ class DesktopActionCommandsCliTests(unittest.TestCase):
 
     def test_smoke_forwards_capture_bundle_id(self):
         result = self.mod.cmd_desktop_smoke(
-            self.args(capture_bundle_id="com.cockos.reaper", record_video=True),
+            self.args(capture_bundle_id="com.cockos.reaper", record_video=True, video_note=["PulpSynth inserted"]),
             **self.deps(),
         )
 
         self.assertEqual(result, 0)
         self.assertEqual(self.calls[0][2]["capture_bundle_id"], "com.cockos.reaper")
         self.assertEqual(self.calls[0][2]["video_capture_target"], "app")
+        self.assertEqual(self.calls[0][2]["video_notes"], ["PulpSynth inserted"])
 
     def test_smoke_json_and_error_paths(self):
         result = self.mod.cmd_desktop_smoke(

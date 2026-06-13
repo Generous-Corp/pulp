@@ -376,6 +376,7 @@ class DesktopCommandsCliTests(unittest.TestCase):
                 self.assertEqual(kwargs["source_image"], (run_dir / "reference.png").resolve())
                 self.assertEqual(kwargs["source_label"], "Figma reference")
                 self.assertEqual(kwargs["title"], "Design parity")
+                self.assertEqual(kwargs["notes"], ["Reference matches implementation"])
                 output_path.write_bytes(b"composed")
                 return {"output": str(output_path), "composer": "remotion"}
 
@@ -404,6 +405,7 @@ class DesktopCommandsCliTests(unittest.TestCase):
                     source_image=str(run_dir / "reference.png"),
                     source_label="Figma reference",
                     title="Design parity",
+                    note=["Reference matches implementation"],
                     video_attachment_budget_mb=40.0,
                     json=True,
                 ),
@@ -426,6 +428,8 @@ class DesktopCommandsCliTests(unittest.TestCase):
             self.assertTrue(updated["video_proof_composition"]["source_image"].endswith("/reference.png"))
             self.assertEqual(updated["video_proof_composition"]["source_label"], "Figma reference")
             self.assertEqual(updated["video_proof_composition"]["title"], "Design parity")
+            self.assertEqual(updated["video_proof_composition"]["notes"], ["Reference matches implementation"])
+            self.assertEqual(updated["video_proof_notes"], ["Reference matches implementation"])
             self.assertTrue(updated["artifacts"]["video_composed"].endswith("/video/proof-composed.mp4"))
             self.assertTrue(updated["artifacts"]["video_composed_metadata"].endswith("/video/composed-metadata.json"))
             self.assertTrue(updated["artifacts"]["video_issue"].endswith("/video/proof.issue.mp4"))

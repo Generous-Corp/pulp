@@ -107,6 +107,7 @@ def compose_desktop_video_proof(
     source_image: Path | None = None,
     source_label: str | None = None,
     title: str | None = None,
+    notes: list[str] | None = None,
     node_path: str = "node",
     run_fn: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
 ) -> dict:
@@ -127,6 +128,9 @@ def compose_desktop_video_proof(
         command.extend(["--source-label", source_label])
     if title:
         command.extend(["--title", title])
+    for note in notes or []:
+        if note:
+            command.extend(["--note", note])
     result = run_fn(
         command,
         capture_output=True,

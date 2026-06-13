@@ -112,6 +112,7 @@ def _video_kwargs(args: argparse.Namespace) -> dict:
         "video_source_image": getattr(args, "source_image", None),
         "video_source_label": getattr(args, "source_label", None),
         "video_title": getattr(args, "video_title", None),
+        "video_notes": getattr(args, "video_note", None) or [],
     }
 
 

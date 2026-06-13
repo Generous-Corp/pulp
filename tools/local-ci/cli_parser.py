@@ -127,6 +127,12 @@ def build_local_ci_parser(
         command_parser.add_argument("--source-label", help="Label for --source-image (default: Source reference)")
         command_parser.add_argument("--video-title", help="Override the composed proof video title")
         command_parser.add_argument(
+            "--video-note",
+            action="append",
+            default=[],
+            help="Short note to show in the composed proof video; may be repeated.",
+        )
+        command_parser.add_argument(
             "--video-audio",
             choices=["none", "plugin", "system"],
             default="none",
@@ -401,6 +407,7 @@ def build_local_ci_parser(
     p_desktop_compose_video.add_argument("--source-image", help="Optional source/reference image for design-parity proofs")
     p_desktop_compose_video.add_argument("--source-label", help="Label for --source-image (default: Source reference)")
     p_desktop_compose_video.add_argument("--title", help="Override the composed video title")
+    p_desktop_compose_video.add_argument("--note", action="append", default=[], help="Short note to show in the composed proof video; may be repeated")
     p_desktop_compose_video.add_argument("--video-attachment-budget-mb", type=float, default=100.0, help="Attachment budget in decimal MB for the issue video (default: 100)")
     p_desktop_compose_video.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 

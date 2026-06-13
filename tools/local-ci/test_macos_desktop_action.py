@@ -388,14 +388,18 @@ class MacosDesktopActionTests(unittest.TestCase):
             video_source_image=str(reference),
             video_source_label="Figma reference",
             video_title="Design parity proof",
+            video_notes=["Reference matches implementation"],
         )
 
         self.assertEqual(manifest["video_composed"]["kwargs"]["template"], "design-parity")
         self.assertEqual(manifest["video_composed"]["kwargs"]["source_image"], str(reference.resolve()))
         self.assertEqual(manifest["video_composed"]["kwargs"]["source_label"], "Figma reference")
         self.assertEqual(manifest["video_composed"]["kwargs"]["title"], "Design parity proof")
+        self.assertEqual(manifest["video_composed"]["kwargs"]["notes"], ["Reference matches implementation"])
+        self.assertEqual(manifest["video_proof_notes"], ["Reference matches implementation"])
         self.assertEqual(manifest["video_proof_composition"]["template"], "design-parity")
         self.assertEqual(manifest["video_proof_composition"]["source_image"], str(reference.resolve()))
+        self.assertEqual(manifest["video_proof_composition"]["notes"], ["Reference matches implementation"])
 
     def test_run_macos_local_smoke_rejects_view_click_without_snapshot(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "View-targeted click requires"):

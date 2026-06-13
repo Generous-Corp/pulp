@@ -538,6 +538,7 @@ def cmd_desktop_compose_video(
     source_image = Path(args.source_image).expanduser().resolve() if getattr(args, "source_image", None) else None
     source_label = getattr(args, "source_label", None) or None
     title = getattr(args, "title", None) or None
+    notes = [note for note in (getattr(args, "note", None) or []) if note]
     if source_image and not source_image.is_file():
         print_fn(f"Error: source image not found: {source_image}")
         return 1
@@ -557,6 +558,7 @@ def cmd_desktop_compose_video(
             source_image=source_image,
             source_label=source_label,
             title=title,
+            notes=notes,
         )
         atomic_write_text_fn(metadata_path, json.dumps(composed_summary, indent=2) + "\n")
         issue_summary = create_issue_video_variant_fn(
@@ -582,12 +584,15 @@ def cmd_desktop_compose_video(
     manifest["video_issue"] = issue_summary
     if small_summary is not None:
         manifest["video_small"] = small_summary
-    if template or source_image or source_label or title:
+    if notes:
+        manifest["video_proof_notes"] = notes
+    if template or source_image or source_label or title or notes:
         manifest["video_proof_composition"] = {
             "template": template or "validation-proof",
             "source_image": str(source_image) if source_image else None,
             "source_label": source_label,
             "title": title,
+            "notes": notes,
         }
     if output_path.exists():
         artifacts["video_composed"] = str(output_path)

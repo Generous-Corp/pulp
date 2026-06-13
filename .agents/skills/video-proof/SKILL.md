@@ -148,6 +148,7 @@ python3 tools/local-ci/local_ci.py desktop video mac \
   --run-in-terminal \
   --command ./build/pulp \
   --click 120,80 \
+  --video-note "Clicked the bypass control and verified the meter stayed visible." \
   --duration 8 \
   --video-fps 30 \
   --video-audio none \
@@ -158,6 +159,10 @@ Use `--action smoke`, `--action click`, or `--action inspect` to choose the
 underlying desktop action. Today, recording is implemented for macOS only;
 Linux/Windows video requests fail explicitly until their recorder backends are
 wired.
+
+Use repeatable `--video-note` flags for short proof points that should be
+visible in the Remotion step list. This is especially useful for host/plugin
+proofs where the video shows the host window and logs prove what was loaded.
 
 For a console-style standalone app with no GUI window, record a titled
 Terminal.app window instead of waiting for the child process to expose a
@@ -200,6 +205,7 @@ python3 tools/local-ci/local_ci.py desktop video mac \
   --recipe reaper-plugin-editor \
   --plugin PulpEffect \
   --plugin-format vst3 \
+  --video-note "The wrapper opened the host and inserted the target plugin." \
   --click-view-id drive-knob \
   --duration 10
 ```
@@ -231,7 +237,9 @@ python3 tools/local-ci/local_ci.py desktop video mac \
 The REAPER recipe defaults to bundle id `com.cockos.reaper` when no explicit
 launch target is supplied, but it does not create a DAW project or insert the
 plugin. Prepare the host session first, then use the recipe to capture and label
-the proof consistently. The `audio-inspector-demo` recipe is a smoke proof for a
+the proof consistently. If a wrapper command launches or prepares REAPER, add
+`--capture-bundle-id com.cockos.reaper` so the harness records the REAPER window
+rather than the wrapper process window. The `audio-inspector-demo` recipe is a smoke proof for a
 built standalone demo binary; pass the command path for the build directory you
 want to validate.
 
@@ -303,7 +311,8 @@ python3 tools/local-ci/local_ci.py desktop compose-video /path/to/run/manifest.j
   --template design-parity \
   --source-image planning/screenshots/reference.png \
   --source-label "Figma reference" \
-  --title "Design parity proof"
+  --title "Design parity proof" \
+  --note "The imported layout keeps the same primary control grouping."
 ```
 
 This renders the source/reference image beside the captured proof and records a

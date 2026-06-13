@@ -101,6 +101,7 @@ python3 tools/local-ci/local_ci.py desktop video mac \
   --run-in-terminal \
   --command ./build/pulp \
   --click 120,80 \
+  --video-note "Clicked the bypass control and verified the meter stayed visible." \
   --duration 8 \
   --video-fps 30 \
   --video-audio none \
@@ -112,6 +113,11 @@ underlying desktop action. The command currently records video on macOS only;
 Linux and Windows fail explicitly rather than producing a run bundle without a
 video artifact. Use `--run-in-terminal` on macOS when Terminal is the process
 with Screen Recording permission.
+
+Use repeatable `--video-note` flags to add short reviewer-facing proof points to
+the Remotion composition. Notes are most useful for host/plugin workflows where
+the video shows the host window while logs or setup prove what was inserted,
+loaded, or compared.
 
 For console-style standalone apps that do not create their own GUI window, ask
 the harness to record a titled Terminal.app window instead of waiting for the
@@ -153,6 +159,7 @@ python3 tools/local-ci/local_ci.py desktop video mac \
   --recipe reaper-plugin-editor \
   --plugin PulpEffect \
   --plugin-format vst3 \
+  --video-note "The wrapper opened the host and inserted the target plugin." \
   --click-view-id drive-knob \
   --duration 10
 ```
@@ -161,6 +168,9 @@ The REAPER recipe defaults to launching bundle id `com.cockos.reaper` when no
 explicit `--command` or `--bundle-id` is supplied. It still needs a prepared host
 session/project that opens the target plugin editor; the recipe supplies proof
 metadata, labels, and composition title defaults, not DAW project automation.
+When a wrapper command launches or prepares REAPER, use
+`--capture-bundle-id com.cockos.reaper` so the harness records the REAPER window
+rather than the wrapper process window.
 
 ```bash
 python3 tools/local-ci/local_ci.py desktop video mac \
@@ -254,7 +264,9 @@ python3 tools/local-ci/local_ci.py desktop compose-video /path/to/run/manifest.j
 
 That command writes `video/proof-composed.mp4`, `video/composed-metadata.json`,
 `video/proof.issue.mp4`, and `video/issue-metadata.json`, then updates the run
-manifest. The lower-level npm script is still available for template iteration:
+manifest. Add repeatable `--note` flags when an existing raw capture needs more
+reviewer context in the visible proof steps. The lower-level npm script is still
+available for template iteration:
 
 For source/design comparison reviews, pass a reference image and the
 `design-parity` template:
@@ -265,6 +277,7 @@ python3 tools/local-ci/local_ci.py desktop compose-video /path/to/run/manifest.j
   --source-image planning/screenshots/reference.png \
   --source-label "Figma reference" \
   --title "Design parity proof" \
+  --note "The imported layout keeps the same primary control grouping." \
   --video-attachment-budget-mb 100 \
   --small-video \
   --small-video-budget-mb 10

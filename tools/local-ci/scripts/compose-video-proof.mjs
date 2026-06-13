@@ -11,7 +11,7 @@ const toolDir = path.resolve(scriptDir, '..');
 const entryPoint = path.join(toolDir, 'remotion-proof', 'index.jsx');
 
 const usage = () => {
-	console.error(`usage: compose-video-proof.mjs --manifest <manifest.json> --output <proof.mp4> [--video <raw.mp4>] [--title <title>] [--template validation-proof|design-parity] [--source-image <png>] [--source-label <label>]`);
+	console.error(`usage: compose-video-proof.mjs --manifest <manifest.json> --output <proof.mp4> [--video <raw.mp4>] [--title <title>] [--template validation-proof|design-parity] [--source-image <png>] [--source-label <label>] [--note <text>]...`);
 	process.exit(2);
 };
 
@@ -27,7 +27,11 @@ const parseArgs = (argv) => {
 		if (!value || value.startsWith('--')) {
 			usage();
 		}
-		args[key] = value;
+		if (key === 'note') {
+			args.note = [...(args.note || []), value];
+		} else {
+			args[key] = value;
+		}
 		index += 1;
 	}
 	return args;
@@ -68,19 +72,24 @@ const firstPresentSelector = (selector) => {
 	return null;
 };
 
-const stepItemsFor = (manifest, videoMeta, issueMeta) => {
+const stepItemsFor = (manifest, videoMeta, issueMeta, proofNotes = []) => {
 	const interaction = manifest.interaction || {};
 	const selectorLabel = firstPresentSelector(interaction.click?.selector);
 	const clickPoint = interaction.click?.content_point || interaction.click?.screen_point;
 	const clickDetail = selectorLabel || (clickPoint ? `point: ${Math.round(clickPoint.x)},${Math.round(clickPoint.y)}` : null);
+	const actionDetail = interaction.mode
+		? `${interaction.mode}${clickDetail ? ` -> ${clickDetail}` : ''}`
+		: proofNotes.length
+			? proofNotes.slice(0, 2).join(' ')
+			: 'no interaction recorded';
 	return [
 		{
 			label: 'Launch',
 			detail: `${manifest.target || 'target'}/${manifest.action || 'run'}`,
 		},
 		{
-			label: 'Action',
-			detail: interaction.mode ? `${interaction.mode}${clickDetail ? ` -> ${clickDetail}` : ''}` : 'no interaction recorded',
+			label: proofNotes.length && !interaction.mode ? 'Evidence' : 'Action',
+			detail: actionDetail,
 		},
 		{
 			label: 'Capture',
@@ -126,6 +135,14 @@ const main = async () => {
 	const videoMetaPath = artifacts.video_metadata;
 	const videoMeta = await readJsonIfPresent(videoMetaPath);
 	const issueMeta = await readJsonIfPresent(artifacts.video_issue_metadata);
+	const proofNotes = [
+		...(Array.isArray(manifest.video_proof_notes) ? manifest.video_proof_notes : []),
+		...(Array.isArray(manifest.video_proof_composition?.notes) ? manifest.video_proof_composition.notes : []),
+		...(Array.isArray(args.note) ? args.note : []),
+	]
+		.filter((note) => typeof note === 'string' && note.trim())
+		.map((note) => note.trim())
+		.filter((note, index, notes) => notes.indexOf(note) === index);
 
 	const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'pulp-remotion-proof-'));
 	const publicDir = path.join(tempRoot, 'public');
@@ -163,8 +180,9 @@ const main = async () => {
 				issueStatus: issueMeta.status || null,
 				issueSelectedAttempt: issueMeta.selected_attempt || null,
 				imageChanged: artifacts.image_change?.changed ?? null,
-				stepItems: stepItemsFor(manifest, videoMeta, issueMeta),
+				stepItems: stepItemsFor(manifest, videoMeta, issueMeta, proofNotes),
 				notes: [
+					...proofNotes,
 					manifest.source?.mode ? `source: ${manifest.source.mode}` : null,
 					manifest.source?.sha ? `sha: ${manifest.source.sha.slice(0, 12)}` : null,
 					videoMeta.mode ? `capture: ${videoMeta.mode}` : null,
@@ -213,6 +231,7 @@ const main = async () => {
 							target: inputProps.target,
 							action: inputProps.action,
 							step_count: inputProps.stepItems.length,
+							note_count: proofNotes.length,
 							issue_status: inputProps.issueStatus,
 						},
 					},

@@ -110,6 +110,10 @@ class CliParserTests(unittest.TestCase):
             "validation-proof",
             "--video-title",
             "Bypass proof",
+            "--video-note",
+            "Click bypass",
+            "--video-note",
+            "Meter changed",
             "--video-audio",
             "none",
             "--capture-bundle-id",
@@ -130,6 +134,7 @@ class CliParserTests(unittest.TestCase):
         self.assertFalse(args.compose_video_proof)
         self.assertEqual(args.video_template, "validation-proof")
         self.assertEqual(args.video_title, "Bypass proof")
+        self.assertEqual(args.video_note, ["Click bypass", "Meter changed"])
         self.assertEqual(args.video_duration, 6.0)
         self.assertEqual(args.video_fps, 24.0)
         self.assertEqual(args.video_audio, "none")
@@ -273,6 +278,8 @@ class CliParserTests(unittest.TestCase):
             "Figma reference",
             "--title",
             "Design parity",
+            "--note",
+            "Reference matches implementation",
             "--video-attachment-budget-mb",
             "40",
             "--json",
@@ -290,6 +297,7 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(args.source_image, "/tmp/source.png")
         self.assertEqual(args.source_label, "Figma reference")
         self.assertEqual(args.title, "Design parity")
+        self.assertEqual(args.note, ["Reference matches implementation"])
         self.assertEqual(args.video_attachment_budget_mb, 40.0)
         self.assertTrue(args.json)
 

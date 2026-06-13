@@ -79,6 +79,7 @@ def run_macos_local_smoke(
     video_source_image: str | None = None,
     video_source_label: str | None = None,
     video_title: str | None = None,
+    video_notes: list[str] | None = None,
 ) -> dict:
     bundle_dir = create_desktop_run_bundle_fn(config, "mac", action_name)
     action_paths = desktop_action_artifact_paths_fn(bundle_dir, output_path)
@@ -394,6 +395,11 @@ def run_macos_local_smoke(
         attach_desktop_source_to_manifest_fn(manifest, source_context or source_request)
         if compose_video_proof and video_path.exists():
             source_manifest_path = bundle_dir / "manifest.video-source.json"
+            cleaned_video_notes = [note for note in (video_notes or []) if note]
+            if cleaned_video_notes:
+                manifest["video_proof_notes"] = cleaned_video_notes
+                composition = manifest.setdefault("video_proof_composition", {})
+                composition["notes"] = cleaned_video_notes
             atomic_write_text_fn(source_manifest_path, json.dumps(manifest, indent=2) + "\n")
             source_image_path = Path(video_source_image).expanduser().resolve() if video_source_image else None
             composed_summary = compose_desktop_video_proof_fn(
@@ -403,15 +409,21 @@ def run_macos_local_smoke(
                 source_image=source_image_path,
                 source_label=video_source_label,
                 title=video_title,
+                notes=cleaned_video_notes,
             )
             manifest["video_composed"] = composed_summary
-            if any([video_template, source_image_path, video_source_label, video_title]):
-                manifest["video_proof_composition"] = {
-                    "template": video_template or "validation-proof",
-                    "source_image": str(source_image_path) if source_image_path else None,
-                    "source_label": video_source_label,
-                    "title": video_title,
-                }
+            if any([video_template, source_image_path, video_source_label, video_title, cleaned_video_notes]):
+                composition = manifest.setdefault("video_proof_composition", {})
+                composition.update(
+                    {
+                        "template": video_template or composition.get("template") or "validation-proof",
+                        "source_image": str(source_image_path) if source_image_path else composition.get("source_image"),
+                        "source_label": video_source_label,
+                        "title": video_title,
+                    }
+                )
+                if cleaned_video_notes:
+                    composition["notes"] = cleaned_video_notes
             if video_composed_path.exists():
                 manifest["artifacts"]["video_composed"] = str(video_composed_path)
             atomic_write_text_fn(video_composed_metadata_path, json.dumps(composed_summary, indent=2) + "\n")

@@ -1078,6 +1078,7 @@ def compose_desktop_video_proof(
     source_image: Path | None = None,
     source_label: str | None = None,
     title: str | None = None,
+    notes: list[str] | None = None,
 ) -> dict:
     return _video_artifacts.compose_desktop_video_proof(
         manifest_path,
@@ -1087,6 +1088,7 @@ def compose_desktop_video_proof(
         source_image=source_image,
         source_label=source_label,
         title=title,
+        notes=notes,
         run_fn=subprocess.run,
     )
 
@@ -1337,6 +1339,7 @@ def run_macos_local_smoke(
     video_source_image: str | None = None,
     video_source_label: str | None = None,
     video_title: str | None = None,
+    video_notes: list[str] | None = None,
 ) -> dict:
     return _macos_desktop_bindings.run_macos_local_smoke(
         globals(),
@@ -1368,6 +1371,7 @@ def run_macos_local_smoke(
         video_source_image=video_source_image,
         video_source_label=video_source_label,
         video_title=video_title,
+        video_notes=video_notes,
     )
 
 
