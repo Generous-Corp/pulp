@@ -10,6 +10,7 @@ from queue_command_lifecycle_bindings import (
     bump_queue_command_job,
     cancel_job_unlocked,
     cancel_queue_command_job,
+    install_queue_command_lifecycle_helpers,
     supersede_job_unlocked,
 )
 from queue_drain_bindings import (
@@ -56,9 +57,11 @@ def install_queue_lifecycle_helpers(
 ) -> None:
     load_names = tuple(name for name in names if name in QUEUE_LOAD_EXPORTS)
     enqueue_names = tuple(name for name in names if name in QUEUE_ENQUEUE_EXPORTS)
-    known_focused_names = set(QUEUE_LOAD_EXPORTS + QUEUE_ENQUEUE_EXPORTS)
+    command_names = tuple(name for name in names if name in QUEUE_COMMAND_LIFECYCLE_EXPORTS)
+    known_focused_names = set(QUEUE_LOAD_EXPORTS + QUEUE_ENQUEUE_EXPORTS + QUEUE_COMMAND_LIFECYCLE_EXPORTS)
     remaining_names = tuple(name for name in names if name not in known_focused_names)
 
     install_queue_load_helpers(bindings, load_names)
     install_queue_enqueue_helpers(bindings, enqueue_names)
+    install_queue_command_lifecycle_helpers(bindings, command_names)
     install_local_helpers(bindings, globals(), remaining_names)

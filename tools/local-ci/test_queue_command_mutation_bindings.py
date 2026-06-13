@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for queue command lifecycle facade bindings."""
+"""Tests for queue command mutation facade bindings."""
 
 from module_test_utils import load_module_from_path
 import types
@@ -7,50 +7,25 @@ import unittest
 from pathlib import Path
 
 
-MODULE_PATH = Path(__file__).with_name("queue_command_lifecycle_bindings.py")
+MODULE_PATH = Path(__file__).with_name("queue_command_mutation_bindings.py")
 
 
 def load_module():
     return load_module_from_path(MODULE_PATH)
 
 
-class QueueCommandLifecycleBindingsTests(unittest.TestCase):
+class QueueCommandMutationBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
 
-    def test_command_lifecycle_exports_match_facade_helpers(self):
+    def test_command_mutation_exports_match_facade_helpers(self):
         expected = (
-            *self.mod.QUEUE_TERMINAL_RESULT_EXPORTS,
-            *self.mod.QUEUE_COMMAND_MUTATION_EXPORTS,
+            "bump_queue_command_job",
+            "cancel_queue_command_job",
         )
 
-        self.assertEqual(self.mod.QUEUE_COMMAND_LIFECYCLE_EXPORTS, expected)
+        self.assertEqual(self.mod.QUEUE_COMMAND_MUTATION_EXPORTS, expected)
         self.assertEqual(len(expected), len(set(expected)))
-
-    def test_install_queue_command_lifecycle_helpers_routes_focused_groups(self):
-        calls = []
-
-        def terminal_install(bindings, names):
-            calls.append(("terminal", names))
-
-        def command_install(bindings, names):
-            calls.append(("command", names))
-
-        self.mod.install_queue_terminal_result_helpers = terminal_install
-        self.mod.install_queue_command_mutation_helpers = command_install
-
-        self.mod.install_queue_command_lifecycle_helpers(
-            {},
-            ("cancel_job_unlocked", "bump_queue_command_job"),
-        )
-
-        self.assertEqual(
-            calls,
-            [
-                ("terminal", ("cancel_job_unlocked",)),
-                ("command", ("bump_queue_command_job",)),
-            ],
-        )
 
     def _bindings(self, lifecycle=None, orchestrator=None):
         bindings = {
@@ -62,9 +37,6 @@ class QueueCommandLifecycleBindingsTests(unittest.TestCase):
             "file_lock",
             "load_queue_unlocked",
             "save_queue_unlocked",
-            "supersedence_result",
-            "cancellation_result",
-            "save_result",
             "cancel_job_unlocked",
             "trim_completed_jobs",
             "summarize_job",
@@ -72,41 +44,6 @@ class QueueCommandLifecycleBindingsTests(unittest.TestCase):
         ]:
             bindings[name] = object()
         return bindings
-
-    def test_supersede_and_cancel_job_bind_completion_dependencies(self):
-        captured = {}
-
-        def complete_superseded_job_unlocked(*args, **kwargs):
-            captured["supersede"] = (args, kwargs)
-
-        def complete_canceled_job_unlocked(*args, **kwargs):
-            captured["cancel"] = (args, kwargs)
-
-        lifecycle = types.SimpleNamespace(
-            complete_superseded_job_unlocked=complete_superseded_job_unlocked,
-            complete_canceled_job_unlocked=complete_canceled_job_unlocked,
-        )
-        orchestrator = types.SimpleNamespace(complete_job_with_result_unlocked=object())
-        bindings = self._bindings(lifecycle=lifecycle, orchestrator=orchestrator)
-
-        self.mod.supersede_job_unlocked(bindings, {"id": "old"}, "new", "newer_sha")
-        self.mod.cancel_job_unlocked(bindings, {"id": "old"}, "operator")
-
-        self.assertEqual(captured["supersede"][0], ({"id": "old"}, "new", "newer_sha"))
-        self.assertIs(captured["supersede"][1]["supersedence_result_fn"], bindings["supersedence_result"])
-        self.assertIs(captured["supersede"][1]["save_result_fn"], bindings["save_result"])
-        self.assertIs(
-            captured["supersede"][1]["complete_job_with_result_unlocked_fn"],
-            orchestrator.complete_job_with_result_unlocked,
-        )
-
-        self.assertEqual(captured["cancel"][0], ({"id": "old"}, "operator"))
-        self.assertIs(captured["cancel"][1]["cancellation_result_fn"], bindings["cancellation_result"])
-        self.assertIs(captured["cancel"][1]["save_result_fn"], bindings["save_result"])
-        self.assertIs(
-            captured["cancel"][1]["complete_job_with_result_unlocked_fn"],
-            orchestrator.complete_job_with_result_unlocked,
-        )
 
     def test_queue_command_mutation_binds_lock_and_now_dependencies(self):
         captured = {}
@@ -152,6 +89,15 @@ class QueueCommandLifecycleBindingsTests(unittest.TestCase):
         self.assertIs(captured["cancel"][1]["cancel_job_unlocked_fn"], bindings["cancel_job_unlocked"])
         self.assertIs(captured["cancel"][1]["trim_completed_jobs_fn"], bindings["trim_completed_jobs"])
         self.assertIs(captured["cancel"][1]["summarize_job_fn"], bindings["summarize_job"])
+
+    def test_install_queue_command_mutation_helpers_installs_requested_facades(self):
+        bindings = self._bindings()
+
+        self.mod.install_queue_command_mutation_helpers(bindings, ("bump_queue_command_job",))
+
+        self.assertIn("bump_queue_command_job", bindings)
+        self.assertNotIn("cancel_queue_command_job", bindings)
+        self.assertEqual(bindings["bump_queue_command_job"].__name__, "bump_queue_command_job")
 
 
 if __name__ == "__main__":

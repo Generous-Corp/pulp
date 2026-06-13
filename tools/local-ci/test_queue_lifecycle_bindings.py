@@ -32,6 +32,36 @@ class QueueLifecycleBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.QUEUE_LIFECYCLE_EXPORTS, expected)
         self.assertEqual(len(expected), len(set(expected)))
 
+    def test_install_queue_lifecycle_helpers_routes_command_exports(self):
+        calls = []
+
+        def load_install(bindings, names):
+            calls.append(("load", names))
+
+        def enqueue_install(bindings, names):
+            calls.append(("enqueue", names))
+
+        def command_install(bindings, names):
+            calls.append(("command", names))
+
+        self.mod.install_queue_load_helpers = load_install
+        self.mod.install_queue_enqueue_helpers = enqueue_install
+        self.mod.install_queue_command_lifecycle_helpers = command_install
+
+        self.mod.install_queue_lifecycle_helpers(
+            {},
+            ("load_queue", "enqueue_job", "cancel_queue_command_job"),
+        )
+
+        self.assertEqual(
+            calls,
+            [
+                ("load", ("load_queue",)),
+                ("enqueue", ("enqueue_job",)),
+                ("command", ("cancel_queue_command_job",)),
+            ],
+        )
+
     def _bindings(self, lifecycle=None, orchestrator=None):
         bindings = {
             "_queue_lifecycle": lifecycle or types.SimpleNamespace(),

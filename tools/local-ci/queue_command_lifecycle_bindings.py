@@ -1,77 +1,40 @@
-"""Bindings from the local_ci facade to locked queue command lifecycle helpers."""
+"""Compatibility composer for queue command lifecycle bindings."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Any
 
-from binding_utils import binding as _binding
-
-
-QUEUE_COMMAND_LIFECYCLE_EXPORTS = (
-    "supersede_job_unlocked",
-    "cancel_job_unlocked",
-    "bump_queue_command_job",
-    "cancel_queue_command_job",
+from binding_utils import install_local_helpers
+from queue_command_mutation_bindings import (
+    QUEUE_COMMAND_MUTATION_EXPORTS,
+    bump_queue_command_job,
+    cancel_queue_command_job,
+    install_queue_command_mutation_helpers,
+)
+from queue_terminal_result_bindings import (
+    QUEUE_TERMINAL_RESULT_EXPORTS,
+    cancel_job_unlocked,
+    install_queue_terminal_result_helpers,
+    supersede_job_unlocked,
 )
 
 
-def supersede_job_unlocked(bindings: Mapping[str, Any], job: dict, superseded_by: str, reason: str) -> None:
-    _binding(bindings, "_queue_lifecycle").complete_superseded_job_unlocked(
-        job,
-        superseded_by,
-        reason,
-        supersedence_result_fn=_binding(bindings, "supersedence_result"),
-        save_result_fn=_binding(bindings, "save_result"),
-        complete_job_with_result_unlocked_fn=_binding(
-            bindings,
-            "_queue_orchestrator",
-        ).complete_job_with_result_unlocked,
-    )
+QUEUE_COMMAND_LIFECYCLE_EXPORTS = (
+    *QUEUE_TERMINAL_RESULT_EXPORTS,
+    *QUEUE_COMMAND_MUTATION_EXPORTS,
+)
 
 
-def cancel_job_unlocked(bindings: Mapping[str, Any], job: dict, reason: str = "operator_canceled") -> None:
-    _binding(bindings, "_queue_lifecycle").complete_canceled_job_unlocked(
-        job,
-        reason,
-        cancellation_result_fn=_binding(bindings, "cancellation_result"),
-        save_result_fn=_binding(bindings, "save_result"),
-        complete_job_with_result_unlocked_fn=_binding(
-            bindings,
-            "_queue_orchestrator",
-        ).complete_job_with_result_unlocked,
-    )
+def install_queue_command_lifecycle_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = QUEUE_COMMAND_LIFECYCLE_EXPORTS,
+) -> None:
+    terminal_names = tuple(name for name in names if name in QUEUE_TERMINAL_RESULT_EXPORTS)
+    command_names = tuple(name for name in names if name in QUEUE_COMMAND_MUTATION_EXPORTS)
+    known_names = set(QUEUE_COMMAND_LIFECYCLE_EXPORTS)
+    unknown_names = tuple(name for name in names if name not in known_names)
 
-
-def bump_queue_command_job(bindings: Mapping[str, Any], job_ref: str, requested_priority: str) -> dict:
-    queue_orchestrator = _binding(bindings, "_queue_orchestrator")
-
-    return _binding(bindings, "_queue_lifecycle").bump_queue_command_job_locked(
-        job_ref,
-        requested_priority,
-        queue_lock_path_fn=_binding(bindings, "queue_lock_path"),
-        file_lock_fn=_binding(bindings, "file_lock"),
-        load_queue_unlocked_fn=_binding(bindings, "load_queue_unlocked"),
-        find_queue_command_job_unlocked_fn=queue_orchestrator.find_queue_command_job_unlocked,
-        set_pending_job_priority_unlocked_fn=lambda job, priority: queue_orchestrator.set_pending_job_priority_unlocked(
-            job,
-            priority,
-            now_iso_fn=_binding(bindings, "now_iso"),
-        ),
-        save_queue_unlocked_fn=_binding(bindings, "save_queue_unlocked"),
-        summarize_job_fn=_binding(bindings, "summarize_job"),
-    )
-
-
-def cancel_queue_command_job(bindings: Mapping[str, Any], job_ref: str) -> dict:
-    return _binding(bindings, "_queue_lifecycle").cancel_queue_command_job_locked(
-        job_ref,
-        queue_lock_path_fn=_binding(bindings, "queue_lock_path"),
-        file_lock_fn=_binding(bindings, "file_lock"),
-        load_queue_unlocked_fn=_binding(bindings, "load_queue_unlocked"),
-        find_queue_command_job_unlocked_fn=_binding(bindings, "_queue_orchestrator").find_queue_command_job_unlocked,
-        cancel_job_unlocked_fn=_binding(bindings, "cancel_job_unlocked"),
-        trim_completed_jobs_fn=_binding(bindings, "trim_completed_jobs"),
-        save_queue_unlocked_fn=_binding(bindings, "save_queue_unlocked"),
-        summarize_job_fn=_binding(bindings, "summarize_job"),
-    )
+    install_queue_terminal_result_helpers(bindings, terminal_names)
+    install_queue_command_mutation_helpers(bindings, command_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)
