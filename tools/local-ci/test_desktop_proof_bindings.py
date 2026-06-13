@@ -110,6 +110,14 @@ class DesktopProofBindingsTests(unittest.TestCase):
         self.assertEqual(captured["args"], ({"desktop_automation": {}},))
         self.assertEqual(captured["kwargs"]["target_name"], "mac")
 
+    def test_install_desktop_proof_helpers_keeps_unknown_local_fallback(self):
+        bindings = {}
+        self.mod.future_desktop_proof_helper = lambda _bindings: "future"
+
+        self.mod.install_desktop_proof_helpers(bindings, ("future_desktop_proof_helper",))
+
+        self.assertEqual(bindings["future_desktop_proof_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()

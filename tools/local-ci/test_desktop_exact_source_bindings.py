@@ -204,6 +204,14 @@ class DesktopExactSourceBindingsTests(unittest.TestCase):
         self.assertNotIn("reset_local_worktree", bindings)
         self.assertNotIn("prepare_windows_exact_sha_source", bindings)
 
+    def test_install_desktop_exact_source_helpers_keeps_unknown_local_fallback(self):
+        bindings = {}
+        self.mod.future_desktop_exact_source_helper = lambda _bindings: "future"
+
+        self.mod.install_desktop_exact_source_helpers(bindings, ("future_desktop_exact_source_helper",))
+
+        self.assertEqual(bindings["future_desktop_exact_source_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()
