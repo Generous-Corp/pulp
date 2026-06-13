@@ -26,9 +26,12 @@
 /// ─────────────────────────────────────────────────────────────────────────
 
 #include <pulp/signal/interpolator.hpp>
+#include <pulp/signal/realtime_pitch_time_processor.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <string>
+#include <vector>
 
 namespace pulp::signal {
 
@@ -101,9 +104,21 @@ public:
         max_pitch_semitones_ = sizing.max_pitch_semitones >= 0.0
                                    ? sizing.max_pitch_semitones : 0.0;
         prepared_ = (sample_rate > 0.0) && (channels >= 1);
-        // TODO(phase1): size SpectralFrameEngine / RealtimePitchTimeProcessor /
-        // SpectralEnvelopeShifter / Resampler scratch for the prepared geometry
-        // and the prepared max ranges above.
+        if (prepared_) {
+            // Size the tempo-only engine FROM the prepared bound — not the
+            // engine's default 2.0x — so host_bpm/loop_bpm ratios up to
+            // max_time_ratio_ render without silent clamping.
+            RealtimePitchTimeConfig cfg;
+            cfg.mode = PitchTimeMode::time_stretch;
+            cfg.quality = PitchTimeQuality::quality;
+            cfg.channels = channels_;
+            cfg.max_block = kBlock;
+            cfg.max_time_ratio = static_cast<float>(max_time_ratio_);
+            cfg.max_pitch_semitones = 0.0f; // pitch is fixed in time_stretch mode
+            cfg.transient_preservation = true;
+            engine_.prepare(sample_rate, cfg);
+            latency_anchor_ = calibrate_anchor();
+        }
     }
 
     int channels() const noexcept { return channels_; }
@@ -151,14 +166,19 @@ public:
             return true;
         }
 
-        // TODO(phase1): tempo-only spectral path -> RealtimePitchTimeProcessor
-        //               whole-file + distributed time-warp length-lock.
+        // Pitch shifting / formant / STN are Phase 2. Route pitch==0 through the
+        // tempo-only spectral path; ratio==1 is the exact identity fast path.
+        const bool pitch_off = std::abs(opts.pitch_semitones) < 1e-12;
+        if (pitch_off && opts.time_ratio == 1.0) {
+            for (int c = 0; c < channels_; ++c)
+                for (long i = 0; i < out_frames; ++i) out[c][i] = in[c][i];
+            return true;
+        }
+        if (pitch_off)
+            return tempo_stretch(in, in_frames, out, out_frames, opts.time_ratio);
+
         // TODO(phase2): pitch / formant / single-pass R+S / STN routing.
-        // TODO(phase3): non-causal transient handling, verbatim relocation.
-        //
-        // Until the spectral path lands, the non-repitch path is a length-correct
-        // pass-through: exact identity at ratio == 1 (null test), else copy the
-        // overlapping span and zero-pad — an honest placeholder, NOT a stretch.
+        // Placeholder until P2: length-correct copy + zero-pad (NOT a stretch).
         for (int c = 0; c < channels_; ++c) {
             float* dst = out[c];
             const float* src = in[c];
@@ -181,11 +201,130 @@ private:
                                    at(i0 + 1), at(i0 + 2), at(i0 + 3));
     }
 
+    // Measure the engine's input-domain time-stretch anchor L: an impulse at P
+    // synthesizes its peak at (P - L)*r + L, so L = (P*r - peak)/(r - 1). Done
+    // once at prepare() so alignment is correct regardless of quality geometry
+    // (fft/hop), instead of hardcoding a magic latency constant.
+    double calibrate_anchor() {
+        const int ch = channels_;
+        const int blk = kBlock;
+        const int fft = engine_.fft_size();
+        const float r = 2.0f;
+        const long P = static_cast<long>(fft) * 2;
+        const long N = P + static_cast<long>(fft) * 6;
+        engine_.reset();
+        engine_.set_time_ratio(r);
+
+        std::vector<std::vector<float>> in(static_cast<size_t>(ch),
+                                           std::vector<float>(static_cast<size_t>(N), 0.0f));
+        std::vector<std::vector<float>> sil(static_cast<size_t>(ch),
+                                            std::vector<float>(static_cast<size_t>(blk), 0.0f));
+        std::vector<std::vector<float>> ob(static_cast<size_t>(ch),
+                                           std::vector<float>(static_cast<size_t>(blk)));
+        for (int c = 0; c < ch; ++c) in[static_cast<size_t>(c)][static_cast<size_t>(P)] = 1.0f;
+        std::vector<const float*> ip(static_cast<size_t>(ch));
+        std::vector<const float*> sp(static_cast<size_t>(ch));
+        std::vector<float*> op(static_cast<size_t>(ch));
+        for (int c = 0; c < ch; ++c) { sp[c] = sil[c].data(); op[c] = ob[c].data(); }
+
+        std::vector<float> acc; // channel 0 only
+        auto drain = [&]() {
+            while (engine_.available_stretched() > 0) {
+                const int t = std::min(engine_.available_stretched(), blk);
+                engine_.read_stretched(op.data(), t);
+                for (int i = 0; i < t; ++i) acc.push_back(ob[0][static_cast<size_t>(i)]);
+            }
+        };
+        for (long i = 0; i < N; i += blk) {
+            for (int c = 0; c < ch; ++c) ip[c] = in[static_cast<size_t>(c)].data() + i;
+            engine_.feed(ip.data(), static_cast<int>(std::min<long>(blk, N - i)));
+            drain();
+        }
+        for (int k = 0; k < 8; ++k) { engine_.feed(sp.data(), blk); drain(); }
+
+        long pk = 0; float mx = 0.0f;
+        for (long i = 0; i < static_cast<long>(acc.size()); ++i)
+            if (std::fabs(acc[static_cast<size_t>(i)]) > mx) { mx = std::fabs(acc[static_cast<size_t>(i)]); pk = i; }
+        engine_.reset();
+        if (mx <= 0.0f) return 0.0; // degenerate; no anchor shift
+        return (static_cast<double>(P) * r - static_cast<double>(pk)) / (static_cast<double>(r) - 1.0);
+    }
+
+    // Whole-file tempo-only stretch via the time_stretch engine. Front-pads with
+    // silence so the real content sees full WOLA overlap, drains the stretched
+    // stream, trims the stretched pad (content alignment), then copies EXACTLY
+    // out_frames from the aligned start (a continuous stream => clean truncation,
+    // exact length, no boundary click). Offline: allocates scratch per call. The
+    // residual sub-hop coverage error vs a true distributed-hop scheduler is the
+    // documented Phase-1 limitation (plan §4.1 / P1.4).
+    bool tempo_stretch(const float* const* in, long in_frames,
+                       float* const* out, long out_frames, double ratio) {
+        const int ch = channels_;
+        const int blk = kBlock;
+        const int fft = engine_.fft_size();
+        engine_.reset();
+        engine_.set_time_ratio(static_cast<float>(ratio));
+
+        const long pad = static_cast<long>(std::ceil(static_cast<double>(fft) / ratio)) + fft;
+        // Output index j must read real-input position j/ratio. The engine maps
+        // absolute input X to stretched position (X - L)*ratio + L, where L is
+        // the calibrated anchor (calibrate_anchor()); trimming this many leading
+        // samples aligns real-input 0 to output 0 at every ratio.
+        const long lead = static_cast<long>(std::llround(
+            (static_cast<double>(pad) - latency_anchor_) * ratio + latency_anchor_));
+
+        std::vector<std::vector<float>> accum(static_cast<size_t>(ch));
+        std::vector<std::vector<float>> outblk(static_cast<size_t>(ch),
+                                               std::vector<float>(static_cast<size_t>(blk)));
+        std::vector<std::vector<float>> silblk(static_cast<size_t>(ch),
+                                               std::vector<float>(static_cast<size_t>(blk), 0.0f));
+        std::vector<const float*> inp(static_cast<size_t>(ch));
+        std::vector<const float*> silp(static_cast<size_t>(ch));
+        std::vector<float*> outp(static_cast<size_t>(ch));
+        for (int c = 0; c < ch; ++c) { silp[c] = silblk[c].data(); outp[c] = outblk[c].data(); }
+
+        auto drain = [&]() {
+            while (engine_.available_stretched() > 0) {
+                const int take = std::min(engine_.available_stretched(), blk);
+                engine_.read_stretched(outp.data(), take);
+                for (int c = 0; c < ch; ++c)
+                    accum[static_cast<size_t>(c)].insert(
+                        accum[static_cast<size_t>(c)].end(),
+                        outblk[static_cast<size_t>(c)].begin(),
+                        outblk[static_cast<size_t>(c)].begin() + take);
+            }
+        };
+        auto feed = [&](const float* const* src, int n) { engine_.feed(src, n); drain(); };
+
+        for (long p = 0; p < pad; p += blk)
+            feed(silp.data(), static_cast<int>(std::min<long>(blk, pad - p)));
+        for (long i = 0; i < in_frames; i += blk) {
+            for (int c = 0; c < ch; ++c) inp[c] = in[c] + i;
+            feed(inp.data(), static_cast<int>(std::min<long>(blk, in_frames - i)));
+        }
+        const long need = lead + out_frames + fft;
+        const long cap = 2 * (in_frames + pad) + 64L * blk;
+        for (long g = 0; static_cast<long>(accum[0].size()) < need && g < cap; g += blk)
+            feed(silp.data(), blk);
+
+        for (int c = 0; c < ch; ++c)
+            for (long i = 0; i < out_frames; ++i) {
+                const long idx = lead + i;
+                out[c][i] = (idx >= 0 && idx < static_cast<long>(accum[static_cast<size_t>(c)].size()))
+                                ? accum[static_cast<size_t>(c)][static_cast<size_t>(idx)]
+                                : 0.0f;
+            }
+        return true;
+    }
+
     static bool fail(std::string* err, const char* msg) {
         if (err) *err = msg;
         return false;
     }
 
+    static constexpr int kBlock = 4096;
+    RealtimePitchTimeProcessor engine_;
+    double latency_anchor_ = 0.0;
     double sample_rate_ = 0.0;
     int channels_ = 1;
     double max_time_ratio_ = 4.0;

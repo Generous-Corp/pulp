@@ -205,3 +205,56 @@ TEST_CASE("repitch_linked: exact length, R=1 identity, sine tracks i/ratio", "[o
         CHECK(std::sqrt(e / cnt) < 2.5e-3);
     }
 }
+
+TEST_CASE("tempo-only: exact length, pitch preserved (sine stays ~1 kHz)", "[offline-stretch]") {
+    constexpr double pi = 3.14159265358979323846;
+    const double sr = 48000.0, f = 1000.0, w = 2.0 * pi * f / sr;
+    const long n = 48000; // 1 second
+    std::vector<float> in(static_cast<size_t>(n));
+    for (long i = 0; i < n; ++i) in[static_cast<size_t>(i)] = 0.5f * std::sin(w * i);
+    const float* inp[1] = {in.data()};
+
+    OfflineStretch s;
+    s.prepare(sr, 1);
+    OfflineStretchOptions o; o.time_ratio = 1.5; // tempo only, pitch 0
+    const long m = offline_stretch_output_frames(n, 1.5);
+    REQUIRE(m == 72000);
+    std::vector<float> out(static_cast<size_t>(m));
+    float* outp[1] = {out.data()};
+    std::string err;
+    REQUIRE(s.process(inp, n, outp, m, o, &err));
+
+    // Zero-crossing rate over the interior -> frequency. Tempo-stretch PRESERVES
+    // pitch (~1 kHz); repitch would have dropped it to 1000/1.5 = 667 Hz.
+    long zc = 0;
+    const long lo = 4800, hi = m - 4800;
+    for (long i = lo + 1; i < hi; ++i)
+        if ((out[static_cast<size_t>(i - 1)] <= 0.0f) != (out[static_cast<size_t>(i)] <= 0.0f)) ++zc;
+    const double dur = static_cast<double>(hi - lo - 1) / sr;
+    const double freq = zc / (2.0 * dur);
+    CHECK(std::abs(freq - 1000.0) < 40.0); // pitch preserved within ~4%
+    CHECK(freq > 850.0);                    // definitely not the repitched 667 Hz
+}
+
+TEST_CASE("tempo-only: stereo channel coherence (identical L/R stay identical)", "[offline-stretch]") {
+    constexpr double pi = 3.14159265358979323846;
+    const double sr = 48000.0, w = 2.0 * pi * 1000.0 / sr;
+    const long n = 24000;
+    std::vector<float> a(static_cast<size_t>(n));
+    for (long i = 0; i < n; ++i) a[static_cast<size_t>(i)] = 0.5f * std::sin(w * i);
+    std::vector<float> b = a; // identical L and R
+    const float* inp[2] = {a.data(), b.data()};
+
+    OfflineStretch s;
+    s.prepare(sr, 2);
+    OfflineStretchOptions o; o.time_ratio = 1.3;
+    const long m = offline_stretch_output_frames(n, 1.3);
+    std::vector<float> ol(static_cast<size_t>(m)), orr(static_cast<size_t>(m));
+    float* outp[2] = {ol.data(), orr.data()};
+    std::string err;
+    REQUIRE(s.process(inp, n, outp, m, o, &err));
+
+    // Coherent multichannel processing: identical inputs -> identical outputs.
+    double e = 0; for (long i = 0; i < m; ++i) { double d = ol[i] - orr[i]; e += d * d; }
+    CHECK(std::sqrt(e / m) < 1e-7);
+}
