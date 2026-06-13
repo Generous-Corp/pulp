@@ -136,7 +136,11 @@ def build_local_ci_parser(
             "--video-audio",
             choices=["none", "plugin", "system"],
             default="none",
-            help="Audio source for the proof video. Only 'none' is implemented in the MVP; plugin/system are reserved.",
+            help="Audio source for the proof video. 'system' records an explicit AVFoundation audio device; plugin is reserved.",
+        )
+        command_parser.add_argument(
+            "--video-audio-device",
+            help="AVFoundation audio device index or name for --video-audio system. Can also be set with PULP_VIDEO_AUDIO_DEVICE.",
         )
 
     p_enqueue = sub.add_parser("enqueue", help="Queue a branch for validation")

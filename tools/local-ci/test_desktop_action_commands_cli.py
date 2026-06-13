@@ -56,6 +56,7 @@ class DesktopActionCommandsCliTests(unittest.TestCase):
             "video_fps": 30.0,
             "video_attachment_budget_mb": 100.0,
             "video_audio": "none",
+            "video_audio_device": None,
             "video_capture_target": "app",
             "capture_bundle_id": None,
             "compose_video_proof": False,
@@ -289,7 +290,7 @@ class DesktopActionCommandsCliTests(unittest.TestCase):
         self.assertTrue(self.calls[0][2]["record_video"])
         self.assertTrue(self.calls[0][2]["compose_video_proof"])
 
-    def test_video_command_dispatches_action_and_rejects_audio_modes(self):
+    def test_video_command_dispatches_action_and_rejects_plugin_audio_mode(self):
         result = self.mod.cmd_desktop_video(
             self.args(action="inspect"),
             cmd_desktop_smoke_fn=lambda _args: self.fail("smoke should not run"),
@@ -300,16 +301,28 @@ class DesktopActionCommandsCliTests(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertEqual(self.calls[0][0], "inspect-wrapper")
 
+        self.calls.clear()
+        result = self.mod.cmd_desktop_video(
+            self.args(action="smoke", video_audio="system", video_audio_device="2"),
+            cmd_desktop_smoke_fn=lambda args: self.calls.append(("smoke-wrapper", (), vars(args).copy())) or 0,
+            cmd_desktop_click_fn=lambda _args: self.fail("click should not run"),
+            cmd_desktop_inspect_fn=lambda _args: self.fail("inspect should not run"),
+            print_fn=self.print_line,
+        )
+        self.assertEqual(result, 0)
+        self.assertEqual(self.calls[0][2]["video_audio"], "system")
+        self.assertEqual(self.calls[0][2]["video_audio_device"], "2")
+
         self.printed.clear()
         result = self.mod.cmd_desktop_video(
-            self.args(video_audio="system"),
+            self.args(video_audio="plugin"),
             cmd_desktop_smoke_fn=lambda _args: self.fail("smoke should not run"),
             cmd_desktop_click_fn=lambda _args: self.fail("click should not run"),
             cmd_desktop_inspect_fn=lambda _args: self.fail("inspect should not run"),
             print_fn=self.print_line,
         )
         self.assertEqual(result, 1)
-        self.assertIn("video audio source `system` is not implemented yet", self.printed[-1])
+        self.assertIn("video audio source `plugin` is not implemented yet", self.printed[-1])
 
     def test_video_command_applies_component_recipe(self):
         result = self.mod.cmd_desktop_video(

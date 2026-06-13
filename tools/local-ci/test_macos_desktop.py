@@ -355,6 +355,14 @@ class MacOSDesktopTests(unittest.TestCase):
 
         self.assertEqual(self.mod.macos_avfoundation_screen_input_device(run_fn=run_devices), "3:")
 
+    def test_avfoundation_audio_input_device_uses_explicit_or_env(self) -> None:
+        self.assertEqual(self.mod.macos_avfoundation_audio_input_device(":2"), "2")
+        self.assertEqual(
+            self.mod.macos_avfoundation_audio_input_device(env={"PULP_VIDEO_AUDIO_DEVICE": "BlackHole 2ch"}),
+            "BlackHole 2ch",
+        )
+        self.assertIsNone(self.mod.macos_avfoundation_audio_input_device("", env={}))
+
     def test_png_visual_stats_detects_blank_and_nonblank_posters(self) -> None:
         blank = self.root / "blank.png"
         nonblank = self.root / "nonblank.png"
@@ -394,6 +402,18 @@ class MacOSDesktopTests(unittest.TestCase):
             ffmpeg_path="/opt/ffmpeg",
         )
         time.sleep(0.25)
+        def video_metadata(path: Path, **kwargs):
+            metadata_kwargs["kwargs"] = kwargs
+            return {
+                "path": str(path),
+                "fps": kwargs["fps"],
+                "command": kwargs["command"],
+                "encoder": kwargs["encoder"],
+                "has_audio": kwargs["has_audio"],
+                "audio_source": kwargs["audio_source"],
+                "size": {"fits_attachment_budget": True},
+            }
+
         metadata = self.mod.stop_macos_window_video_recording(
             recording,
             output_path=output_path,
@@ -615,6 +635,112 @@ class MacOSDesktopTests(unittest.TestCase):
         self.assertEqual(metadata["encoder"]["version"], "ffmpeg version 6.0")
         self.assertTrue(poster_path.exists())
         self.assertIn(["/opt/ffmpeg", "-hide_banner", "-version"], run_calls)
+
+    def test_window_video_recording_can_include_system_audio_device(self) -> None:
+        output_path = self.root / "video" / "proof.mp4"
+        metadata_path = self.root / "video" / "metadata.json"
+        poster_path = self.root / "video" / "poster.png"
+        popen_calls: list[list[str]] = []
+        metadata_kwargs: dict = {}
+
+        class FakeProc:
+            returncode = None
+
+            def poll(self):
+                return None
+
+            def communicate(self, timeout=None):
+                self.returncode = 0
+                output_path.write_bytes(b"mp4")
+                return "", "recorded"
+
+        def fake_popen(cmd: list[str], **_kwargs):
+            popen_calls.append(cmd)
+            return FakeProc()
+
+        def run_metadata_or_poster(cmd: list[str], **_kwargs):
+            if cmd[1:] == ["-hide_banner", "-version"]:
+                return subprocess.CompletedProcess(cmd, 0, stdout="ffmpeg version 6.0\n", stderr="")
+            if "-frames:v" in cmd:
+                poster_path.write_bytes(b"poster")
+                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        def video_metadata(path: Path, **kwargs):
+            metadata_kwargs["kwargs"] = kwargs
+            return {
+                "path": str(path),
+                "fps": kwargs["fps"],
+                "command": kwargs["command"],
+                "encoder": kwargs["encoder"],
+                "has_audio": kwargs["has_audio"],
+                "audio_source": kwargs["audio_source"],
+                "size": {"fits_attachment_budget": True},
+            }
+
+        recording = self.mod.start_macos_window_video_recording(
+            {"windowId": 88, "bounds": {"x": 10, "y": 20, "width": 320, "height": 200}},
+            output_path,
+            duration_secs=0.2,
+            fps=5.0,
+            popen_fn=fake_popen,
+            run_fn=run_metadata_or_poster,
+            ffmpeg_path="/opt/ffmpeg",
+            input_device_fn=lambda **_kwargs: "3:",
+            audio_input_device_fn=lambda _device: "2",
+            audio_source="system",
+            audio_device="2",
+            startup_grace_secs=0,
+        )
+        metadata = self.mod.stop_macos_window_video_recording(
+            recording,
+            output_path=output_path,
+            metadata_path=metadata_path,
+            poster_path=poster_path,
+            duration_secs=0.2,
+            fps=5.0,
+            attachment_budget_bytes=1_000_000,
+            desktop_video_metadata_fn=video_metadata,
+            write_desktop_video_metadata_fn=lambda path, payload: path.write_text(json.dumps(payload)),
+        )
+
+        self.assertIn("3:2", popen_calls[0])
+        self.assertNotIn("-an", popen_calls[0])
+        self.assertIn("-c:a", popen_calls[0])
+        self.assertIn("aac", popen_calls[0])
+        self.assertTrue(metadata_kwargs["kwargs"]["has_audio"])
+        self.assertEqual(metadata_kwargs["kwargs"]["audio_source"], "system")
+        self.assertEqual(metadata["audio_device"], "2")
+
+    def test_system_audio_requires_explicit_device_and_no_frame_sequence_fallback(self) -> None:
+        output_path = self.root / "video" / "proof.mp4"
+        window = {"windowId": 88, "bounds": {"x": 10, "y": 20, "width": 320, "height": 200}}
+
+        with self.assertRaisesRegex(RuntimeError, "requires an AVFoundation audio device"):
+            self.mod.start_macos_window_video_recording(
+                window,
+                output_path,
+                duration_secs=0.2,
+                fps=5.0,
+                popen_fn=lambda *_args, **_kwargs: self.fail("ffmpeg should not launch"),
+                run_fn=lambda *_args, **_kwargs: subprocess.CompletedProcess([], 0, stdout="", stderr=""),
+                ffmpeg_path="/opt/ffmpeg",
+                input_device_fn=lambda **_kwargs: "3:",
+                audio_input_device_fn=lambda _device: None,
+                audio_source="system",
+                startup_grace_secs=0,
+            )
+
+        with self.assertRaisesRegex(RuntimeError, "cannot use frame-sequence fallback"):
+            self.mod.start_macos_window_video_recording(
+                window,
+                output_path,
+                duration_secs=0.2,
+                fps=5.0,
+                audio_source="system",
+                audio_device="2",
+                prefer_frame_sequence=True,
+            )
 
     def test_window_video_recording_rejects_blank_ffmpeg_poster(self) -> None:
         output_path = self.root / "video" / "proof.mp4"

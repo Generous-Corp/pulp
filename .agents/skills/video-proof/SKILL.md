@@ -274,11 +274,13 @@ python3 tools/local-ci/local_ci.py desktop click mac \
 Adjust `--command`, `--click`, duration, and fps for the actual scenario. Keep
 fps at 30 unless there is a motion-specific reason to go higher.
 
-Keep `--video-audio none` unless audio support has landed. The reserved
-`plugin` and `system` modes fail fast so the proof never implies silent,
-implicit microphone/system capture. Remotion composition is intentionally muted
-in the MVP; a composed proof should not contain an audio stream unless a future
-explicit audio mode records one in the manifest.
+Keep `--video-audio none` unless the proof genuinely needs audio. Use
+`--video-audio system --video-audio-device <index-or-name>` only when a known
+macOS AVFoundation audio input or loopback device should be recorded; the same
+device can be supplied with `PULP_VIDEO_AUDIO_DEVICE`. Do not guess a
+microphone/system device. Audio-requested captures must fail rather than fall
+back to a no-audio frame sequence. `--video-audio plugin` is still reserved
+until plugin-origin audio capture exists.
 
 Each run bundle should contain:
 

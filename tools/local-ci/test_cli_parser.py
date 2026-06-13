@@ -115,7 +115,9 @@ class CliParserTests(unittest.TestCase):
             "--video-note",
             "Meter changed",
             "--video-audio",
-            "none",
+            "system",
+            "--video-audio-device",
+            "BlackHole 2ch",
             "--capture-bundle-id",
             "com.cockos.reaper",
             "--label",
@@ -137,7 +139,8 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(args.video_note, ["Click bypass", "Meter changed"])
         self.assertEqual(args.video_duration, 6.0)
         self.assertEqual(args.video_fps, 24.0)
-        self.assertEqual(args.video_audio, "none")
+        self.assertEqual(args.video_audio, "system")
+        self.assertEqual(args.video_audio_device, "BlackHole 2ch")
         self.assertEqual(args.capture_bundle_id, "com.cockos.reaper")
         self.assertEqual(args.video_attachment_budget_mb, 100.0)
         self.assertEqual(args.label, "standalone-bypass-toggle")

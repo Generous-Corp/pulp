@@ -167,6 +167,9 @@ class VideoArtifactsTests(unittest.TestCase):
         self.assertEqual(payload["selected_attempt"], "balanced-720p")
         self.assertEqual(calls[0][0][0], "/opt/ffmpeg")
         self.assertIn("-crf", calls[0][0])
+        self.assertIn("0:a?", calls[0][0])
+        self.assertIn("-c:a", calls[0][0])
+        self.assertNotIn("-an", calls[0][0])
         self.assertEqual(len(payload["attempts"]), 1)
         self.assertTrue(payload["size"]["fits_attachment_budget"])
 

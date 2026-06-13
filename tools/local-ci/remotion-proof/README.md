@@ -61,9 +61,9 @@ The composer reads the run manifest, copies the raw video/poster into a temp
 Remotion public directory, renders `ValidationProof`, and writes a compact H.264
 MP4. The proof includes a title card, raw capture, source identity, a
 launch/action/capture/review timeline, attachment-size status, and concise notes
-from the run metadata. Composition is intentionally muted in the MVP; audio
-modes must be explicit in the run manifest before composed proofs include an
-audio stream.
+from the run metadata. Composition stays muted unless the run metadata explicitly
+records `has_audio=true` with a non-`none` audio source; system-audio proofs pass
+that audio through as AAC.
 
 Screen Recording permission is only required for real desktop capture, not for
 the Remotion smoke render.

@@ -187,6 +187,7 @@ const main = async () => {
 	const videoMetaPath = artifacts.video_metadata;
 	const videoMeta = await readJsonIfPresent(videoMetaPath);
 	const issueMeta = await readJsonIfPresent(artifacts.video_issue_metadata);
+	const videoHasAudio = videoMeta.has_audio === true && videoMeta.audio_source && videoMeta.audio_source !== 'none';
 	const proofNotes = [
 		...(Array.isArray(manifest.video_proof_notes) ? manifest.video_proof_notes : []),
 		...(Array.isArray(manifest.video_proof_composition?.notes) ? manifest.video_proof_composition.notes : []),
@@ -220,6 +221,7 @@ const main = async () => {
 									: 'Desktop automation proof',
 				template,
 				videoFileName,
+				videoHasAudio,
 				posterFileName,
 				sourceImageFileName,
 				sourceLabel,
@@ -276,8 +278,8 @@ const main = async () => {
 			outputLocation: outputPath,
 			inputProps,
 			overwrite: true,
-			muted: true,
-			audioCodec: null,
+			muted: !videoHasAudio,
+			audioCodec: videoHasAudio ? 'aac' : null,
 			crf: 23,
 			x264Preset: 'veryfast',
 			logLevel: 'warn',
@@ -298,6 +300,7 @@ const main = async () => {
 							step_count: inputProps.stepItems.length,
 							note_count: proofNotes.length,
 							issue_status: inputProps.issueStatus,
+							has_audio: videoHasAudio,
 						},
 					},
 					null,

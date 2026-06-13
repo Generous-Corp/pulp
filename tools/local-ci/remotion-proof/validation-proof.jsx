@@ -60,6 +60,7 @@ export const ValidationProof = ({
 	subtitle,
 	template,
 	videoFileName,
+	videoHasAudio,
 	posterFileName,
 	sourceImageFileName,
 	sourceLabel,
@@ -199,6 +200,7 @@ export const ValidationProof = ({
 					{videoFileName ? (
 						<Video
 							src={staticFile(videoFileName)}
+							muted={!videoHasAudio}
 							style={{
 								width: '100%',
 								height: '100%',
@@ -312,6 +314,7 @@ export const ValidationProof = ({
 									{videoFileName ? (
 										<Video
 											src={staticFile(videoFileName)}
+											muted
 											style={{width: '100%', height: '100%', objectFit: 'contain'}}
 										/>
 									) : posterFileName ? (

@@ -7,6 +7,7 @@ const defaultProps = {
 	subtitle: 'Desktop automation',
 	template: 'validation-proof',
 	videoFileName: null,
+	videoHasAudio: false,
 	posterFileName: null,
 	sourceImageFileName: null,
 	sourceLabel: 'Source reference',

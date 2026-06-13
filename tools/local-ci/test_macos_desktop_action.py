@@ -95,12 +95,23 @@ class MacosDesktopActionTests(unittest.TestCase):
                 diff_output_path.write_bytes(b"diff")
             return {"changed": True}
 
-        def start_video(window_payload, output_path, *, duration_secs, fps, prefer_frame_sequence=False):
+        def start_video(
+            window_payload,
+            output_path,
+            *,
+            duration_secs,
+            fps,
+            audio_source="none",
+            audio_device=None,
+            prefer_frame_sequence=False,
+        ):
             self.assertEqual(window_payload, window)
             return {
                 "path": str(output_path),
                 "duration_secs": duration_secs,
                 "fps": fps,
+                "audio_source": audio_source,
+                "audio_device": audio_device,
                 "prefer_frame_sequence": prefer_frame_sequence,
             }
 

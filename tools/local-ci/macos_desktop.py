@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 import math
+import os
 import struct
 import json
 import plistlib
@@ -433,9 +434,23 @@ def macos_window_video_command(
     fps: float,
     ffmpeg_path: str = "ffmpeg",
     input_device: str = "1:",
+    audio_source: str = "none",
+    audio_device: str | None = None,
 ) -> list[str]:
     bounds = macos_window_video_bounds(window)
     video_filter = f"crop={bounds['width']}:{bounds['height']}:{bounds['x']}:{bounds['y']},fps={fps}"
+    input_spec = input_device
+    audio_args = ["-an"]
+    if audio_source == "system":
+        if not audio_device:
+            raise RuntimeError(
+                "Video audio source `system` requires an AVFoundation audio device; "
+                "pass --video-audio-device <index-or-name> or set PULP_VIDEO_AUDIO_DEVICE."
+            )
+        input_spec = f"{input_device}{audio_device}"
+        audio_args = ["-c:a", "aac", "-b:a", "128k", "-shortest"]
+    elif audio_source != "none":
+        raise RuntimeError(f"Unsupported video audio source `{audio_source}`.")
     return [
         ffmpeg_path,
         "-y",
@@ -448,12 +463,12 @@ def macos_window_video_command(
         "-capture_cursor",
         "1",
         "-i",
-        input_device,
+        input_spec,
         "-t",
         str(duration_secs),
         "-vf",
         video_filter,
-        "-an",
+        *audio_args,
         "-c:v",
         "libx264",
         "-preset",
@@ -490,6 +505,22 @@ def macos_avfoundation_screen_input_device(
         if match:
             return f"{match.group(1)}:"
     raise RuntimeError("Could not find AVFoundation device `Capture screen 0` in ffmpeg device list.")
+
+
+def macos_avfoundation_audio_input_device(
+    explicit_device: str | None = None,
+    *,
+    env: dict[str, str] | None = None,
+) -> str | None:
+    device = explicit_device or (env or os.environ).get("PULP_VIDEO_AUDIO_DEVICE")
+    if device is None:
+        return None
+    device = str(device).strip()
+    if not device:
+        return None
+    if device.startswith(":"):
+        device = device[1:]
+    return device
 
 
 def ffmpeg_encoder_identity(
@@ -620,11 +651,18 @@ def start_macos_window_video_recording(
     run_fn: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
     ffmpeg_path: str = "ffmpeg",
     input_device_fn: Callable[..., str] = macos_avfoundation_screen_input_device,
+    audio_input_device_fn: Callable[..., str | None] = macos_avfoundation_audio_input_device,
     fallback_to_frame_sequence: bool = True,
     startup_grace_secs: float = 0.25,
     prefer_frame_sequence: bool = False,
+    audio_source: str = "none",
+    audio_device: str | None = None,
 ) -> dict:
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    if audio_source not in {"none", "system"}:
+        raise RuntimeError(f"Unsupported video audio source `{audio_source}`.")
+    if audio_source == "system" and prefer_frame_sequence:
+        raise RuntimeError("--video-audio system requires ffmpeg/AVFoundation capture and cannot use frame-sequence fallback.")
     if prefer_frame_sequence:
         return start_macos_window_frame_sequence_recording(
             window,
@@ -637,6 +675,7 @@ def start_macos_window_video_recording(
         )
     try:
         input_device = input_device_fn(ffmpeg_path=ffmpeg_path, run_fn=run_fn)
+        resolved_audio_device = audio_input_device_fn(audio_device) if audio_source == "system" else None
         command = macos_window_video_command(
             window,
             output_path,
@@ -644,6 +683,8 @@ def start_macos_window_video_recording(
             fps=fps,
             ffmpeg_path=ffmpeg_path,
             input_device=input_device,
+            audio_source=audio_source,
+            audio_device=resolved_audio_device,
         )
         proc = popen_fn(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         if startup_grace_secs > 0:
@@ -658,6 +699,8 @@ def start_macos_window_video_recording(
                 "path": str(output_path),
                 "duration_secs": duration_secs,
                 "requested_fps": fps,
+                "audio_source": audio_source,
+                "audio_device": resolved_audio_device,
                 "bounds": macos_window_video_bounds(window),
                 "window_id": int(window["windowId"]),
                 "started_at": time.monotonic(),
@@ -668,6 +711,8 @@ def start_macos_window_video_recording(
             raise RuntimeError(f"Video proof recording failed: {detail[-1000:]}")
         fallback_reason = (stderr or stdout or f"ffmpeg exited {proc.returncode}").strip()
     except (OSError, RuntimeError) as exc:
+        if audio_source == "system":
+            raise
         if not fallback_to_frame_sequence:
             raise
         fallback_reason = str(exc)
@@ -933,9 +978,13 @@ def stop_macos_window_ffmpeg_recording(
         bounds=recording.get("bounds"),
         command=recording.get("command"),
         encoder=encoder,
+        has_audio=recording.get("audio_source") == "system",
+        audio_source=recording.get("audio_source") or "none",
     )
     metadata["mode"] = recording.get("mode")
     metadata["requested_fps"] = fps
+    if recording.get("audio_device"):
+        metadata["audio_device"] = recording["audio_device"]
     metadata["returncode"] = proc.returncode
     metadata["terminated"] = terminated
     if stdout:

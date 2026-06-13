@@ -122,14 +122,16 @@ def windows_requires_pulp_app_selectors(args: argparse.Namespace) -> bool:
 
 def _video_kwargs(args: argparse.Namespace) -> dict:
     audio_source = getattr(args, "video_audio", "none")
-    if audio_source != "none":
+    if audio_source == "plugin":
         raise ValueError(
-            f"video audio source `{audio_source}` is not implemented yet; use --video-audio none."
+            "video audio source `plugin` is not implemented yet; use --video-audio none or --video-audio system."
         )
     return {
         "record_video": bool(getattr(args, "record_video", False)),
         "video_duration_secs": float(getattr(args, "video_duration", 8.0)),
         "video_fps": float(getattr(args, "video_fps", 30.0)),
+        "video_audio_source": audio_source,
+        "video_audio_device": getattr(args, "video_audio_device", None),
         "video_capture_target": getattr(args, "video_capture_target", "app"),
         "capture_bundle_id": getattr(args, "capture_bundle_id", None),
         "video_attachment_budget_bytes": int(float(getattr(args, "video_attachment_budget_mb", 100.0)) * 1_000_000),
@@ -158,8 +160,8 @@ def cmd_desktop_video(
         return 1
 
     audio_source = getattr(args, "video_audio", "none")
-    if audio_source != "none":
-        print_fn(f"Error: video audio source `{audio_source}` is not implemented yet; use --video-audio none.")
+    if audio_source == "plugin":
+        print_fn("Error: video audio source `plugin` is not implemented yet; use --video-audio none or --video-audio system.")
         return 1
 
     args.record_video = True

@@ -152,6 +152,8 @@ def run_macos_local_smoke(
     record_video: bool = False,
     video_duration_secs: float = 8.0,
     video_fps: float = 30.0,
+    video_audio_source: str = "none",
+    video_audio_device: str | None = None,
     video_capture_target: str = "app",
     capture_bundle_id: str | None = None,
     video_attachment_budget_bytes: int = 100_000_000,
@@ -339,6 +341,8 @@ def run_macos_local_smoke(
                 video_path,
                 duration_secs=video_duration_secs,
                 fps=video_fps,
+                audio_source=video_audio_source,
+                audio_device=video_audio_device,
                 prefer_frame_sequence=bool(capture_bundle_id),
             )
         if capture_ui_snapshot and not use_pulp_app_automation:

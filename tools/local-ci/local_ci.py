@@ -1158,6 +1158,8 @@ def start_macos_window_video_recording(
     *,
     duration_secs: float,
     fps: float,
+    audio_source: str = "none",
+    audio_device: str | None = None,
     prefer_frame_sequence: bool = False,
 ) -> dict:
     return _macos_desktop.start_macos_window_video_recording(
@@ -1165,6 +1167,8 @@ def start_macos_window_video_recording(
         output_path,
         duration_secs=duration_secs,
         fps=fps,
+        audio_source=audio_source,
+        audio_device=audio_device,
         popen_fn=subprocess.Popen,
         run_fn=subprocess.run,
         ffmpeg_path=resolve_ffmpeg_path(),

@@ -245,17 +245,22 @@ recommends H.264 for compatibility.
 When the review source is already under budget, `proof.issue.mp4` is a copy of
 that source. When it is over budget, the tool runs a bounded H.264 retry ladder:
 balanced 720p at 24 fps, compact 720p at 15 fps, then compact 540p at 15 fps.
+The transcode ladder maps optional audio and writes AAC when the source has an
+audio stream.
 `issue-metadata.json` records each attempt, the selected attempt when one fits,
 and final `status=transcoded`, `exceeds-budget`, or `transcode-failed`.
 For review lanes that should always prepare a 10 MB fallback, rerender with
 `--small-video`; this writes `proof.small.mp4` and `small-metadata.json` using
 `--small-video-budget-mb` independently from the pro-account issue budget.
 
-`--video-audio none` is the only implemented audio mode in the MVP. Reserved
-values `plugin` and `system` fail fast so the tool never silently records
-microphone or system audio. Remotion composition is rendered muted until an
-explicit audio source lands, so `proof-composed.mp4` and `proof.issue.mp4` do
-not imply audio validation.
+`--video-audio none` remains the default. `--video-audio system` records an
+explicit macOS AVFoundation audio input into the raw MP4 and resulting
+issue-ready clip. Pass `--video-audio-device <index-or-name>` or set
+`PULP_VIDEO_AUDIO_DEVICE`; common loopback setups use a device such as
+`BlackHole 2ch`. The harness does not guess a microphone/system device, and an
+audio-requested capture will not silently fall back to a no-audio frame
+sequence. `--video-audio plugin` is still reserved until a plugin-origin audio
+source is available.
 
 ## Remotion Composition
 
@@ -373,14 +378,16 @@ timestamp, optional reviewer notes, and whether the review issue can be closed.
 
 ## Current Scope
 
-This first lane records the target window region on macOS with H.264 video and
-no audio. It uses ffmpeg/AVFoundation screen capture as the primary recorder
-and falls back to a short sequence of trusted `screencapture -l` window frames
-when the ffmpeg recorder cannot start. If macOS refuses window-ID capture but
-allows full-screen capture, the fallback captures full-screen frames and crops
-them to the target window bounds during encoding. Final still screenshots use a
-last-resort full-screen fallback for the same TCC edge case.
+This first lane records the target window region on macOS with H.264 video, and
+can include AAC audio when `--video-audio system` is paired with an explicit
+AVFoundation audio device. It uses ffmpeg/AVFoundation screen capture as the
+primary recorder and falls back to a short sequence of trusted
+`screencapture -l` window frames when the ffmpeg recorder cannot start and no
+audio was requested. If macOS refuses window-ID capture but allows full-screen
+capture, the fallback captures full-screen frames and crops them to the target
+window bounds during encoding. Final still screenshots use a last-resort
+full-screen fallback for the same TCC edge case.
 
 Remotion composition and local review artifacts are implemented in this branch.
-Audio capture, iOS Simulator, Android, full REAPER project/plugin automation,
+Plugin-origin audio capture, iOS Simulator, Android, full REAPER project/plugin automation,
 and GitHub issue automation are planned follow-on layers.
