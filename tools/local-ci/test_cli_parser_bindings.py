@@ -69,6 +69,14 @@ class CliParserBindingTests(unittest.TestCase):
             epilog="docs",
         )
 
+    def test_install_cli_parser_helpers_keeps_unknown_local_fallback(self) -> None:
+        bindings = {}
+        self.mod.future_cli_parser_helper = lambda _bindings: "future"
+
+        self.mod.install_cli_parser_helpers(bindings, ("future_cli_parser_helper",))
+
+        self.assertEqual(bindings["future_cli_parser_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()

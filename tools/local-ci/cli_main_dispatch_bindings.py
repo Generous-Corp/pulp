@@ -51,4 +51,10 @@ def install_cli_main_dispatch_helpers(
     bindings: dict[str, Any],
     names: tuple[str, ...] = CLI_MAIN_DISPATCH_EXPORTS,
 ) -> None:
-    install_local_helpers(bindings, globals(), names)
+    known_names = set(CLI_MAIN_DISPATCH_EXPORTS)
+    dispatch_names = tuple(name for name in names if name in known_names)
+    unknown_names = tuple(name for name in names if name not in known_names)
+
+    install_local_helpers(bindings, globals(), dispatch_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)
