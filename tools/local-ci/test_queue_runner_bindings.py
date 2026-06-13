@@ -20,13 +20,9 @@ class QueueRunnerBindingsTests(unittest.TestCase):
 
     def test_queue_runner_exports_match_facade_helpers(self):
         expected = (
-            "read_runner_info",
-            "pid_alive",
-            "current_runner_info",
-            "stale_running_jobs_unlocked",
-            "write_runner_info",
-            "update_runner_active_targets",
-            "clear_runner_info",
+            *self.mod.QUEUE_RUNNER_INFO_EXPORTS,
+            *self.mod.QUEUE_RUNNER_STALE_EXPORTS,
+            *self.mod.QUEUE_RUNNER_ACTIVE_EXPORTS,
         )
 
         self.assertEqual(self.mod.QUEUE_RUNNER_EXPORTS, expected)
