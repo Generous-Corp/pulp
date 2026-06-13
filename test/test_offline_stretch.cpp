@@ -162,3 +162,46 @@ TEST_CASE("process rejects ratios/pitch outside the prepared range", "[offline-s
         CHECK(err.find("pitch") != std::string::npos);
     }
 }
+
+TEST_CASE("repitch_linked: exact length, R=1 identity, sine tracks i/ratio", "[offline-stretch]") {
+    constexpr double pi = 3.14159265358979323846;
+    const double sr = 48000.0, f = 1000.0, w = 2.0 * pi * f / sr;
+    const long n = 8192;
+    std::vector<float> in(static_cast<size_t>(n));
+    for (long i = 0; i < n; ++i) in[static_cast<size_t>(i)] = 0.5f * std::sin(w * i);
+    const float* inp[1] = {in.data()};
+
+    OfflineStretch s;
+    s.prepare(sr, 1);
+
+    SECTION("R=1 is an exact identity") {
+        OfflineStretchOptions o; o.repitch_linked = true;
+        std::vector<float> out(static_cast<size_t>(n));
+        float* outp[1] = {out.data()};
+        std::string err;
+        REQUIRE(s.process(inp, n, outp, n, o, &err));
+        double e = 0; for (long i = 0; i < n; ++i) { double d = out[i] - in[i]; e += d * d; }
+        CHECK(std::sqrt(e / n) < 1e-6);
+    }
+
+    SECTION("R=1.5 reads a continuous sine at position i/ratio") {
+        OfflineStretchOptions o; o.repitch_linked = true; o.time_ratio = 1.5;
+        const long m = offline_stretch_output_frames(n, 1.5);
+        REQUIRE(m == 12288);
+        std::vector<float> out(static_cast<size_t>(m));
+        float* outp[1] = {out.data()};
+        std::string err;
+        REQUIRE(s.process(inp, n, outp, m, o, &err));
+        // Interior only — edges read zero-padded taps and bias sinc6.
+        double e = 0; long cnt = 0;
+        for (long i = 64; i < m - 64; ++i) {
+            const double ref = 0.5 * std::sin(w * (static_cast<double>(i) / 1.5));
+            const double d = out[static_cast<size_t>(i)] - ref;
+            e += d * d; ++cnt;
+        }
+        // sinc6 is a 6-tap windowed sinc: ~-48 dB passband accuracy on a 1 kHz
+        // tone. Confirms repitch reads the correct positions; a Kaiser-sinc
+        // (Resampler, 96 dB) upgrade for repitch is a P6 quality item.
+        CHECK(std::sqrt(e / cnt) < 2.5e-3);
+    }
+}

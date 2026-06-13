@@ -25,6 +25,8 @@
 /// Each unimplemented path is marked `// TODO(phaseN)`.
 /// ─────────────────────────────────────────────────────────────────────────
 
+#include <pulp/signal/interpolator.hpp>
+
 #include <cmath>
 #include <string>
 
@@ -136,15 +138,27 @@ public:
         if (out_frames != expected)
             return fail(err, "out_frames must equal round(in_frames * time_ratio)");
 
-        // TODO(phase1): repitch_linked -> Resampler.
-        // TODO(phase1): spectral path -> RealtimePitchTimeProcessor whole-file +
-        //               distributed time-warp length-lock to `expected`.
+        // Linked / vinyl mode: pure high-quality resample. Output sample i reads
+        // input position i/ratio at a constant rate, so pitch tracks tempo
+        // exactly (factor 1/ratio) and the output is exactly `expected` frames by
+        // construction. sinc6 (6-point Blackman-Harris windowed sinc) is
+        // mastering-grade and is an exact identity at ratio == 1.
+        if (opts.repitch_linked) {
+            for (int c = 0; c < channels_; ++c)
+                for (long i = 0; i < out_frames; ++i)
+                    out[c][i] = sample_sinc6(in[c], in_frames,
+                                             static_cast<double>(i) / opts.time_ratio);
+            return true;
+        }
+
+        // TODO(phase1): tempo-only spectral path -> RealtimePitchTimeProcessor
+        //               whole-file + distributed time-warp length-lock.
         // TODO(phase2): pitch / formant / single-pass R+S / STN routing.
         // TODO(phase3): non-causal transient handling, verbatim relocation.
         //
-        // PHASE 0: length-correct pass-through. Exact identity at time_ratio==1
-        // (null test passes); otherwise copy the overlapping span and zero-pad,
-        // which is an honest placeholder — NOT yet a stretch.
+        // Until the spectral path lands, the non-repitch path is a length-correct
+        // pass-through: exact identity at ratio == 1 (null test), else copy the
+        // overlapping span and zero-pad — an honest placeholder, NOT a stretch.
         for (int c = 0; c < channels_; ++c) {
             float* dst = out[c];
             const float* src = in[c];
@@ -156,6 +170,17 @@ public:
     }
 
 private:
+    // 6-point Blackman-Harris windowed-sinc read of `x` at fractional position
+    // `pos`; out-of-range taps read as silence (edge zero-pad). Exact identity
+    // when pos is integral.
+    static float sample_sinc6(const float* x, long n, double pos) {
+        const long i0 = static_cast<long>(std::floor(pos));
+        const float frac = static_cast<float>(pos - static_cast<double>(i0));
+        auto at = [&](long k) -> float { return (k >= 0 && k < n) ? x[k] : 0.0f; };
+        return Interpolator::sinc6(frac, at(i0 - 2), at(i0 - 1), at(i0),
+                                   at(i0 + 1), at(i0 + 2), at(i0 + 3));
+    }
+
     static bool fail(std::string* err, const char* msg) {
         if (err) *err = msg;
         return false;
