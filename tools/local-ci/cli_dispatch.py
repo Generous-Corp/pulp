@@ -27,6 +27,7 @@ def dispatch_main_command(
     *,
     commands: Mapping[str, CommandHandler],
     simulator_commands: Mapping[str, CommandHandler],
+    android_commands: Mapping[str, CommandHandler] | None = None,
     cloud_commands: Mapping[str, CommandHandler],
     cloud_namespace_commands: Mapping[str, CommandHandler],
     print_help: Callable[[], None],
@@ -52,6 +53,13 @@ def dispatch_main_command(
             print_fn("Error: missing simulator subcommand. Use `pulp ci-local simulator video-doctor`.")
             return 1
         return simulator_handler(args)
+
+    if args.command == "android":
+        android_handler = (android_commands or {}).get(args.android_command)
+        if android_handler is None:
+            print_fn("Error: missing android subcommand. Use `pulp ci-local android video-doctor`.")
+            return 1
+        return android_handler(args)
 
     handler = commands.get(args.command)
     if handler is not None:

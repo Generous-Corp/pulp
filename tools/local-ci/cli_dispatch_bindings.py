@@ -69,6 +69,10 @@ def dispatch_main_command(bindings: Mapping[str, Any], args: Any, print_help: Ca
             "video-doctor": _binding(bindings, "cmd_simulator_video_doctor"),
             "video": _binding(bindings, "cmd_simulator_video"),
         },
+        android_commands={
+            "video-doctor": bindings.get("cmd_android_video_doctor"),
+            "video": bindings.get("cmd_android_video"),
+        },
         cloud_commands={
             "workflows": _binding(bindings, "cmd_cloud_workflows"),
             "defaults": _binding(bindings, "cmd_cloud_defaults"),

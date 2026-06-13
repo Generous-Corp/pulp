@@ -377,9 +377,9 @@ template, doctor command, concrete recording command, and what a reviewer should
 look for. Use `--target mac`, `--target ios-simulator`,
 `--scenario component-zoom`, or `--json` when an agent needs a narrower
 machine-readable plan. The iOS Simulator row uses the working `simulator video`
-recorder; Android remains a planned row so the branch keeps the broader
-cross-platform goal visible while macOS and iOS Simulator are the first working
-lanes.
+recorder. The Android row uses the working `android video` command for
+adb-connected emulators/devices with `screenrecord` and timed open-url/deep-link
+actions.
 
 ## iOS Simulator Video Proofs
 
@@ -423,6 +423,49 @@ python3 tools/local-ci/local_ci.py desktop compose-video /path/to/manifest.json 
 
 This adds `video/proof-composed.mp4`, `video/proof.issue.mp4`, optional
 `video/proof.small.mp4`, composition metadata, and a storyboard to the simulator
+manifest before publishing.
+
+## Android Emulator Video Proofs
+
+For Android validation, start the emulator or connect a device first, then run:
+
+```bash
+python3 tools/local-ci/local_ci.py android video-doctor
+```
+
+Record a bounded MP4 proof with optional APK install, package/activity launch,
+and a timed URL/deep-link action:
+
+```bash
+python3 tools/local-ci/local_ci.py android video \
+  --apk android/app/build/outputs/apk/debug/app-debug.apk \
+  --package com.pulp.demo \
+  --activity .MainActivity \
+  --open-url pulp-demo://validate \
+  --action-label "open validation deep link" \
+  --label android-emulator-proof \
+  --duration 8
+```
+
+The command writes `video/proof.mp4` and `manifest.json` under the Android run
+directory using `adb shell screenrecord`. With `--open-url`, the command starts
+the URL/deep link during capture and stores a `mobile-emulator` action marker for
+reports and Remotion composition. Coordinate tap driving still needs a future
+automation backend; for now, use package launch and open-url actions for
+portable Android proof clips.
+
+Render the Android run through Remotion for an annotated reviewer-facing clip:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop compose-video /path/to/manifest.json \
+  --template mobile-emulator \
+  --title "Android emulator deep-link proof" \
+  --note "The emulator opens the validation deep link during recording." \
+  --small-video
+```
+
+This adds `video/proof-composed.mp4`, `video/proof.issue.mp4`, optional
+`video/proof.small.mp4`, composition metadata, and a storyboard to the Android
 manifest before publishing.
 
 Stage a local report after one or more desktop runs:

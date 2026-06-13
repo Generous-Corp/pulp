@@ -409,7 +409,8 @@ python3 tools/local-ci/local_ci.py desktop video-matrix --markdown
 
 Use it to choose the smallest useful proof scenario. `--target mac` narrows to
 the current macOS lane, `--target ios-simulator` narrows to simulator capture,
-`--scenario component-zoom` prints one row, and `--json` is suitable for
+`--target android-emulator` narrows to Android capture, `--scenario
+component-zoom` prints one row, and `--json` is suitable for
 automation. The matrix carries readiness status, Remotion template, doctor
 command, recording command, and reviewer watch-points for standalone,
 REAPER/plugin-host, inspector, component-zoom, design-parity, iOS Simulator,
@@ -456,6 +457,48 @@ python3 tools/local-ci/local_ci.py desktop compose-video /path/to/manifest.json 
 This writes `video/proof-composed.mp4`, `video/proof.issue.mp4`, optional
 `video/proof.small.mp4`, composition metadata, and a storyboard into the
 simulator run manifest.
+
+## Android Emulator capture
+
+Start the emulator or connect a device first, then check readiness:
+
+```bash
+python3 tools/local-ci/local_ci.py android video-doctor
+```
+
+Record a short Android MP4 with optional install/launch context:
+
+```bash
+python3 tools/local-ci/local_ci.py android video \
+  --apk android/app/build/outputs/apk/debug/app-debug.apk \
+  --package com.pulp.demo \
+  --activity .MainActivity \
+  --open-url pulp-demo://validate \
+  --action-label "open validation deep link" \
+  --label android-emulator-proof \
+  --duration 8
+```
+
+This writes `video/proof.mp4` and `manifest.json` under the Android run
+directory using `adb shell screenrecord`. With `--open-url`, the command opens
+the URL/deep link during capture and stores a `mobile-emulator` action marker.
+Coordinate tap driving still needs a future automation backend; use package
+launch and open-url/deep-link actions for portable Android proof clips today.
+
+Render the Android run through Remotion before publishing when you want the same
+annotated proof treatment as desktop and simulator clips:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop compose-video /path/to/manifest.json \
+  --template mobile-emulator \
+  --title "Android emulator deep-link proof" \
+  --note "The emulator opens the validation deep link during recording." \
+  --small-video
+```
+
+This writes `video/proof-composed.mp4`, `video/proof.issue.mp4`, optional
+`video/proof.small.mp4`, composition metadata, and a storyboard into the Android
+run manifest.
 
 Publish the latest runs:
 

@@ -206,18 +206,20 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
         "id": "android-emulator",
         "title": "Android emulator interaction",
         "platform": "android-emulator",
-        "status": "planned",
+        "status": "partial",
         "template": "mobile-emulator",
         "proves": "An Android build responds visibly in an emulator proof.",
         "command": (
-            "future: python3 tools/local-ci/local_ci.py android video "
-            "--app build/android/app-debug.apk --tap text:Play --label android-play-toggle"
+            "python3 tools/local-ci/local_ci.py android video "
+            "--apk android/app/build/outputs/apk/debug/app-debug.apk --package com.pulp.demo "
+            "--open-url pulp-demo://validate --action-label 'open validation deep link' "
+            "--label android-emulator-proof --duration 8"
         ),
-        "doctor": "future: android video-doctor",
+        "doctor": "python3 tools/local-ci/local_ci.py android video-doctor",
         "watch_for": [
-            "AVD/GPU/audio backend setup is identified",
-            "tap marker is visible",
-            "UI/audio lifecycle marker changes after the tap",
+            "adb serial/model and screenrecord readiness are identified",
+            "app launch or current emulator state is visible",
+            "open-url action is marked in the proof; coordinate taps need a future automation backend",
         ],
     },
 )

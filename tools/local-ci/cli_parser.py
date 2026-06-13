@@ -653,4 +653,24 @@ def build_local_ci_parser(
     p_simulator_video.add_argument("--label", help="Proof label stored in the manifest and default output path")
     p_simulator_video.add_argument("--output", help="Optional output run directory (default: Application Support/Pulp/.../ios-simulator)")
     p_simulator_video.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+
+    p_android = sub.add_parser("android", help="Android emulator validation video proof helpers")
+    android_sub = p_android.add_subparsers(dest="android_command")
+
+    p_android_video_doctor = android_sub.add_parser("video-doctor", help="Check Android emulator video recording readiness")
+    p_android_video_doctor.add_argument("--device", help="adb serial, model, or device name to require")
+    p_android_video_doctor.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+
+    p_android_video = android_sub.add_parser("video", help="Record a short Android emulator MP4 proof")
+    p_android_video.add_argument("--device", help="adb serial, model, or device name to record (default: first connected device)")
+    p_android_video.add_argument("--apk", help="Optional APK to install before recording")
+    p_android_video.add_argument("--package", help="Optional package name to launch before recording")
+    p_android_video.add_argument("--activity", help="Optional activity to launch with --package before recording")
+    p_android_video.add_argument("--open-url", help="Optional URL/deep link to open during recording")
+    p_android_video.add_argument("--action-after", type=float, default=0.5, help="Seconds after capture start before running the Android action (default: 0.5)")
+    p_android_video.add_argument("--action-label", help="Reviewer-facing label for the Android action marker")
+    p_android_video.add_argument("--duration", type=float, default=8.0, help="Seconds to record, rounded for adb screenrecord (default: 8)")
+    p_android_video.add_argument("--label", help="Proof label stored in the manifest and default output path")
+    p_android_video.add_argument("--output", help="Optional output run directory (default: Application Support/Pulp/.../android-emulator)")
+    p_android_video.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
     return parser
