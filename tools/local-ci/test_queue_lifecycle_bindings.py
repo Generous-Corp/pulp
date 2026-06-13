@@ -18,6 +18,28 @@ class QueueLifecycleBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
 
+    def test_queue_lifecycle_exports_match_facade_helpers(self):
+        expected = (
+            "supersede_job_unlocked",
+            "cancel_job_unlocked",
+            "load_queue",
+            "update_job_active_targets",
+            "enqueue_job",
+            "bump_queue_command_job",
+            "cancel_queue_command_job",
+            "reconcile_running_jobs_unlocked",
+            "update_job_target_state",
+            "reclaim_stale_remote_validators",
+            "load_job",
+            "claim_next_job",
+            "finalize_job",
+            "wait_for_job",
+            "drain_pending_jobs",
+        )
+
+        self.assertEqual(self.mod.QUEUE_LIFECYCLE_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def _bindings(self, lifecycle=None, orchestrator=None):
         bindings = {
             "_queue_lifecycle": lifecycle or types.SimpleNamespace(),
@@ -244,6 +266,31 @@ class QueueLifecycleBindingsTests(unittest.TestCase):
         self.assertIs(captured["reclaim"]["now_fn"], bindings["now_iso"])
         self.assertIs(captured["reclaim"]["trim_line_fn"], bindings["trim_line"])
         self.assertIs(captured["reclaim"]["reclaim_stale_remote_validator_candidates_fn"], cleanup.reclaim_stale_remote_validator_candidates)
+
+    def test_install_queue_lifecycle_helpers_wires_named_exports(self):
+        events = []
+
+        class Lock:
+            def __enter__(self):
+                events.append("enter")
+
+            def __exit__(self, exc_type, exc, tb):
+                events.append("exit")
+
+        bindings = self._bindings()
+        bindings.update(
+            {
+                "queue_lock_path": lambda: Path("/state/queue.lock"),
+                "file_lock": lambda path, *, blocking: events.append(("lock", path, blocking)) or Lock(),
+                "load_queue_unlocked": lambda: events.append("load") or [],
+                "reconcile_running_jobs_unlocked": lambda queue: (queue, False),
+            }
+        )
+
+        self.mod.install_queue_lifecycle_helpers(bindings, ("load_queue",))
+
+        self.assertEqual(bindings["load_queue"](), [])
+        self.assertEqual(events, [("lock", Path("/state/queue.lock"), True), "enter", "load", "exit"])
 
 
 if __name__ == "__main__":

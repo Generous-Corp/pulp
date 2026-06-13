@@ -18,6 +18,30 @@ class QueuePolicyBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
 
+    def test_queue_policy_exports_match_focused_facade_helpers(self):
+        expected = (
+            "default_priority_for",
+            "make_fingerprint",
+            "make_job",
+            "supersedence_result",
+            "cancellation_result",
+            "supersedence_key",
+            "supersedence_identity_key",
+            "jobs_share_supersedence_scope",
+            "job_has_narrower_same_identity_scope",
+            "supersedence_reason",
+            "trim_completed_jobs_with_removed_ids",
+            "trim_completed_jobs",
+            "job_sort_key",
+            "queue_status_groups",
+            "recent_completed_jobs_for_status",
+            "find_job_unlocked",
+            "validate_ci_branch_name",
+        )
+
+        self.assertEqual(self.mod.QUEUE_POLICY_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def test_queue_policy_bindings_delegate_to_orchestrator(self):
         captured = {}
 
@@ -94,6 +118,18 @@ class QueuePolicyBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.recent_completed_jobs_for_status(bindings, [{"id": "a"}, {"id": "b"}], limit=1), [{"id": "a"}])
         self.assertEqual(self.mod.find_job_unlocked(bindings, [{"id": "a"}], "a", {"pending"}), {"id": "a"})
         self.assertEqual(self.mod.validate_ci_branch_name(bindings, " branch "), "branch")
+
+    def test_install_queue_policy_helpers_wires_named_exports(self):
+        orchestrator = types.SimpleNamespace(
+            default_priority_for=lambda command, config: f"{command}:{config['priority']}",
+            validate_ci_branch_name=lambda branch: branch.strip(),
+        )
+        bindings = {"_queue_orchestrator": orchestrator}
+
+        self.mod.install_queue_policy_helpers(bindings, ("default_priority_for", "validate_ci_branch_name"))
+
+        self.assertEqual(bindings["default_priority_for"]("ship", {"priority": "high"}), "ship:high")
+        self.assertEqual(bindings["validate_ci_branch_name"](" branch "), "branch")
 
 
 if __name__ == "__main__":

@@ -18,6 +18,20 @@ class QueueRunnerBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
 
+    def test_queue_runner_exports_match_facade_helpers(self):
+        expected = (
+            "read_runner_info",
+            "pid_alive",
+            "current_runner_info",
+            "stale_running_jobs_unlocked",
+            "write_runner_info",
+            "update_runner_active_targets",
+            "clear_runner_info",
+        )
+
+        self.assertEqual(self.mod.QUEUE_RUNNER_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def test_queue_runner_bindings_delegate_to_runner_state(self):
         calls = []
 
@@ -69,6 +83,21 @@ class QueueRunnerBindingsTests(unittest.TestCase):
         update_info = captured["runner"][1]["update_runner_info_active_targets_fn"]
         self.assertTrue(update_info({"pid": 1}, "job1", {"mac": {"status": "pass"}}))
         self.assertIs(captured["mutate"][3], bindings["now_iso"])
+
+    def test_install_queue_runner_helpers_wires_named_exports(self):
+        calls = []
+        bindings = {
+            "_runner_state": types.SimpleNamespace(
+                read_runner_info=lambda: calls.append("read") or {"pid": 1},
+                clear_runner_info=lambda: calls.append("clear"),
+            ),
+        }
+
+        self.mod.install_queue_runner_helpers(bindings, ("read_runner_info", "clear_runner_info"))
+
+        self.assertEqual(bindings["read_runner_info"](), {"pid": 1})
+        bindings["clear_runner_info"]()
+        self.assertEqual(calls, ["read", "clear"])
 
 
 if __name__ == "__main__":

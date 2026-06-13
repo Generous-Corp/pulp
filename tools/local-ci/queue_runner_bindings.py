@@ -6,6 +6,18 @@ from collections.abc import Mapping
 from typing import Any
 
 from binding_utils import binding as _binding
+from binding_utils import install_local_helpers
+
+
+QUEUE_RUNNER_EXPORTS = (
+    "read_runner_info",
+    "pid_alive",
+    "current_runner_info",
+    "stale_running_jobs_unlocked",
+    "write_runner_info",
+    "update_runner_active_targets",
+    "clear_runner_info",
+)
 
 
 def read_runner_info(bindings: Mapping[str, Any]) -> dict | None:
@@ -52,3 +64,7 @@ def update_runner_active_targets(bindings: Mapping[str, Any], job_id: str, activ
 
 def clear_runner_info(bindings: Mapping[str, Any]) -> None:
     _binding(bindings, "_runner_state").clear_runner_info()
+
+
+def install_queue_runner_helpers(bindings: dict[str, Any], names: tuple[str, ...] = QUEUE_RUNNER_EXPORTS) -> None:
+    install_local_helpers(bindings, globals(), names)

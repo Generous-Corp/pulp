@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from binding_utils import binding as _binding
+from binding_utils import install_local_helpers
 from queue_command_lifecycle_bindings import (
     bump_queue_command_job,
     cancel_job_unlocked,
@@ -24,6 +25,25 @@ from queue_state_lifecycle_bindings import (
     reconcile_running_jobs_unlocked,
     update_job_active_targets,
     update_job_target_state,
+)
+
+
+QUEUE_LIFECYCLE_EXPORTS = (
+    "supersede_job_unlocked",
+    "cancel_job_unlocked",
+    "load_queue",
+    "update_job_active_targets",
+    "enqueue_job",
+    "bump_queue_command_job",
+    "cancel_queue_command_job",
+    "reconcile_running_jobs_unlocked",
+    "update_job_target_state",
+    "reclaim_stale_remote_validators",
+    "load_job",
+    "claim_next_job",
+    "finalize_job",
+    "wait_for_job",
+    "drain_pending_jobs",
 )
 
 
@@ -76,3 +96,10 @@ def enqueue_job(
         trim_completed_jobs_fn=_binding(bindings, "trim_completed_jobs"),
         normalize_job_fn=_binding(bindings, "normalize_job"),
     )
+
+
+def install_queue_lifecycle_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = QUEUE_LIFECYCLE_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)

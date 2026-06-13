@@ -18,6 +18,37 @@ class QueueDisplayBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
 
+    def test_queue_display_exports_match_focused_facade_helpers(self):
+        expected = (
+            "summarize_job",
+            "bump_queue_command_result_line",
+            "cancel_queue_command_result_line",
+            "enqueue_command_result_line",
+            "drain_runner_active_line",
+            "summarize_active_targets",
+            "status_active_targets",
+            "status_target_states",
+            "status_submission_lines",
+            "target_state_detail_parts",
+            "status_target_detail_lines",
+            "status_runner_line",
+            "recent_completed_status_line",
+            "recent_completed_missing_result_line",
+            "result_validation_line",
+            "result_execution_line",
+            "target_result_line",
+            "result_target_lines",
+            "result_overall_line",
+            "missing_job_logs_line",
+            "missing_log_files_line",
+            "job_logs_header_line",
+            "log_section_header_line",
+            "empty_log_line",
+        )
+
+        self.assertEqual(self.mod.QUEUE_DISPLAY_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def test_queue_display_bindings_delegate_to_orchestrator(self):
         calls = []
 
@@ -84,6 +115,18 @@ class QueueDisplayBindingsTests(unittest.TestCase):
         self.assertEqual(calls[0], ("summarize_job", ({"id": "job"},), {}))
         self.assertEqual(calls[3], ("enqueue_command_result_line", ({"id": "job"},), {"created": True}))
         self.assertEqual(calls[5], ("summarize_active_targets", ({"mac": {}}, ["mac"]), {}))
+
+    def test_install_queue_display_helpers_wires_named_exports(self):
+        orchestrator = types.SimpleNamespace(
+            summarize_job=lambda job: f"summary:{job['id']}",
+            empty_log_line=lambda: "empty",
+        )
+        bindings = {"_queue_orchestrator": orchestrator}
+
+        self.mod.install_queue_display_helpers(bindings, ("summarize_job", "empty_log_line"))
+
+        self.assertEqual(bindings["summarize_job"]({"id": "job1"}), "summary:job1")
+        self.assertEqual(bindings["empty_log_line"](), "empty")
 
 
 if __name__ == "__main__":

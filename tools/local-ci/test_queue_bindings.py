@@ -18,6 +18,18 @@ class QueueBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
 
+    def test_queue_exports_are_composed_from_focused_groups(self):
+        expected = (
+            *self.mod.QUEUE_LIFECYCLE_EXPORTS,
+            *self.mod.QUEUE_POLICY_EXPORTS,
+            *self.mod.QUEUE_DISPLAY_EXPORTS,
+            *self.mod.QUEUE_TARGET_STATE_EXPORTS,
+            *self.mod.QUEUE_RUNNER_EXPORTS,
+        )
+
+        self.assertEqual(self.mod.QUEUE_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def _bindings(self, lifecycle=None, orchestrator=None):
         bindings = {
             "_queue_lifecycle": lifecycle or types.SimpleNamespace(),
@@ -483,6 +495,61 @@ class QueueBindingsTests(unittest.TestCase):
 
         self.assertEqual(bindings["default_priority_for"]("ship", {"priority": "high"}), "ship:high")
         self.assertEqual(bindings["summarize_job"]({"id": "job1"}), "summary:job1")
+
+    def test_install_queue_helpers_routes_each_group(self):
+        events = []
+
+        class Lock:
+            def __enter__(self):
+                events.append("enter")
+
+            def __exit__(self, exc_type, exc, tb):
+                events.append("exit")
+
+        orchestrator = types.SimpleNamespace(
+            default_priority_for=lambda command, config: f"{command}:{config['priority']}",
+            summarize_job=lambda job: f"summary:{job['id']}",
+            updated_target_state=lambda previous, fields: {"previous": previous, **fields},
+        )
+        runner_state = types.SimpleNamespace(read_runner_info=lambda: {"pid": 1})
+        bindings = self._bindings(orchestrator=orchestrator)
+        bindings["_runner_state"] = runner_state
+        bindings.update(
+            {
+                "queue_lock_path": lambda: Path("/state/queue.lock"),
+                "file_lock": lambda path, *, blocking: events.append(("lock", path, blocking)) or Lock(),
+                "load_queue_unlocked": lambda: events.append("load") or [],
+                "reconcile_running_jobs_unlocked": lambda queue: (queue, False),
+            }
+        )
+
+        self.mod.install_queue_helpers(
+            bindings,
+            (
+                "load_queue",
+                "default_priority_for",
+                "summarize_job",
+                "updated_target_state",
+                "read_runner_info",
+            ),
+        )
+
+        self.assertEqual(bindings["load_queue"](), [])
+        self.assertEqual(bindings["default_priority_for"]("ship", {"priority": "high"}), "ship:high")
+        self.assertEqual(bindings["summarize_job"]({"id": "job1"}), "summary:job1")
+        self.assertEqual(
+            bindings["updated_target_state"]({"status": "pending"}, {"status": "running"}),
+            {"previous": {"status": "pending"}, "status": "running"},
+        )
+        self.assertEqual(bindings["read_runner_info"](), {"pid": 1})
+        self.assertEqual(events, [("lock", Path("/state/queue.lock"), True), "enter", "load", "exit"])
+
+    def test_install_queue_helpers_keeps_unknown_imported_name_support(self):
+        bindings = self._bindings()
+
+        self.mod.install_queue_helpers(bindings, ("install_queue_display_helpers",))
+
+        self.assertEqual(bindings["install_queue_display_helpers"].__name__, "install_queue_display_helpers")
 
 
 if __name__ == "__main__":

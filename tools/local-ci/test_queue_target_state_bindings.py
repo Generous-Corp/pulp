@@ -2,6 +2,7 @@
 """Tests for queue target-state facade bindings."""
 
 from module_test_utils import load_module_from_path
+import types
 import unittest
 from pathlib import Path
 
@@ -16,6 +17,18 @@ def load_module():
 class QueueTargetStateBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
+
+    def test_queue_target_state_exports_match_facade_helpers(self):
+        expected = (
+            "initial_target_state",
+            "completed_target_state",
+            "upsert_job_active_targets_unlocked",
+            "updated_target_state",
+            "target_state_snapshot",
+        )
+
+        self.assertEqual(self.mod.QUEUE_TARGET_STATE_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
 
     def test_queue_target_state_bindings_delegate_to_orchestrator(self):
         captured = {}
@@ -70,6 +83,22 @@ class QueueTargetStateBindingsTests(unittest.TestCase):
         self.assertEqual(captured["updated"], ({"status": "pending"}, {"status": "running"}))
         self.assertEqual(self.mod.target_state_snapshot(bindings, {"mac": {"status": "pass"}}), {"mac": {"status": "pass"}})
         self.assertEqual(captured["snapshot"], {"mac": {"status": "pass"}})
+
+    def test_install_queue_target_state_helpers_wires_named_exports(self):
+        bindings = {
+            "_queue_orchestrator": types.SimpleNamespace(
+                updated_target_state=lambda previous, fields: {"previous": previous, **fields},
+                target_state_snapshot=lambda states: {"snapshot": states},
+            ),
+        }
+
+        self.mod.install_queue_target_state_helpers(bindings, ("updated_target_state", "target_state_snapshot"))
+
+        self.assertEqual(
+            bindings["updated_target_state"]({"status": "pending"}, {"status": "running"}),
+            {"previous": {"status": "pending"}, "status": "running"},
+        )
+        self.assertEqual(bindings["target_state_snapshot"]({"mac": {}}), {"snapshot": {"mac": {}}})
 
 
 if __name__ == "__main__":
