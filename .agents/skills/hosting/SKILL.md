@@ -194,14 +194,17 @@ predictable output, no MIDI.
   pack (a `.dylib`/`.so`/`.dll` exporting `pulp_node_v1_entry` + a JSON manifest).
   It verifies trust BEFORE any `dlopen`: the signer key must be in the
   `NodePackTrust` set, the Ed25519 signature over `node_pack_signed_message()`
-  (pack_id + abi_major + binary SHA-256) must be authentic, the on-disk binary's
-  SHA-256 must match the signed hash, and the entry's `abi_major` must match —
-  any failure returns a `NodePackError` and loads nothing. Revocation = drop a
-  key from the trust set. Desktop + Android only; `pulp-host` (and this loader)
-  is compiled out on iOS, where native components are static-bundled + signed
-  with the app. The crypto comes from `pulp::runtime` (`ed25519_verify`,
-  `sha256_hex`); OS codesign/notarization is a separate, additional distribution
-  step on top of the manifest signature.
+  (pack_id + abi_major + binary SHA-256 + declared nodes/resources/requirements)
+  must be authentic, the on-disk binary's SHA-256 must match the signed hash,
+  and the entry's `abi_major` must match — any failure returns a
+  `NodePackError` and loads nothing. Revocation = drop a key from the trust set.
+  Desktop + Android only; `pulp-host` (and this loader) is compiled out on iOS,
+  where native components are static-bundled + signed with the app. The crypto
+  comes from `pulp::runtime` (`ed25519_verify`, `sha256_hex`); OS
+  codesign/notarization is a separate, additional distribution step on top of
+  the manifest signature. Registry/package discovery metadata still needs its
+  own signed canonical manifest; do not treat screenshots, validation reports,
+  licenses, or provenance as covered by the node-pack loader signature.
 
 ## Common tripwires
 

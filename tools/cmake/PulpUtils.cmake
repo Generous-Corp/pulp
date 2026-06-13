@@ -412,7 +412,7 @@ function(_pulp_attach_plugin_runtime_manifest target format_target)
             COMMENT "Embedding pulp.plugin-runtime.json into ${format_target} LV2 bundle"
             VERBATIM
         )
-    elseif(APPLE AND ("${format_target}" MATCHES "_AUv3$" OR PULP_IOS))
+    elseif(APPLE AND PULP_IOS)
         add_custom_command(TARGET ${format_target} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E make_directory
                 "$<TARGET_BUNDLE_DIR:${format_target}>/Resources"
