@@ -102,6 +102,17 @@ class MacOSDesktopTests(unittest.TestCase):
         self.assertEqual(activation["bundle_id"], "com.example.demo")
         self.assertEqual(activation["stdout"], "out")
         self.assertEqual(activation["stderr"], "err")
+        self.assertEqual(activation["returncode"], 7)
+
+        def run_osascript_timeout(cmd: list[str], **kwargs):
+            self.assertEqual(kwargs["timeout"], 0.25)
+            raise subprocess.TimeoutExpired(cmd, 0.25, output="partial\n", stderr="")
+
+        activation = self.mod.activate_macos_bundle_id("com.example.demo", run_fn=run_osascript_timeout, timeout_secs=0.25)
+        self.assertFalse(activation["activated"])
+        self.assertTrue(activation["timed_out"])
+        self.assertEqual(activation["stdout"], "partial")
+        self.assertIn("timed out", activation["stderr"])
 
         quit_calls: list[list[str]] = []
 
@@ -111,6 +122,12 @@ class MacOSDesktopTests(unittest.TestCase):
 
         self.mod.quit_macos_bundle_id("com.example.demo", run_fn=run_quit)
         self.assertEqual(quit_calls[0], ["osascript", "-e", 'tell application id "com.example.demo" to quit'])
+
+        def run_quit_timeout(cmd: list[str], **kwargs):
+            self.assertEqual(kwargs["timeout"], 0.1)
+            raise subprocess.TimeoutExpired(cmd, 0.1)
+
+        self.mod.quit_macos_bundle_id("com.example.demo", run_fn=run_quit_timeout, timeout_secs=0.1)
 
     def test_wait_helpers_retry_until_windows_are_visible(self) -> None:
         now = [0.0]

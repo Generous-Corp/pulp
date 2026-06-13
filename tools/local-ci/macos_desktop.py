@@ -1099,12 +1099,26 @@ def activate_macos_bundle_id(
     bundle_id: str,
     *,
     run_fn: Callable[..., subprocess.CompletedProcess[str]],
+    timeout_secs: float = 5.0,
 ) -> dict:
-    result = run_fn(
-        ["osascript", "-e", f'tell application id "{bundle_id}" to activate'],
-        capture_output=True,
-        text=True,
-    )
+    cmd = ["osascript", "-e", f'tell application id "{bundle_id}" to activate']
+    try:
+        result = run_fn(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout_secs,
+        )
+    except subprocess.TimeoutExpired as exc:
+        stderr = (exc.stderr or "").strip() if isinstance(exc.stderr, str) else ""
+        return {
+            "activated": False,
+            "bundle_id": bundle_id,
+            "stdout": (exc.stdout or "").strip() if isinstance(exc.stdout, str) else "",
+            "stderr": stderr or f"activation timed out after {timeout_secs:.1f}s",
+            "returncode": None,
+            "timed_out": True,
+        }
     return {
         "activated": result.returncode == 0,
         "bundle_id": bundle_id,
@@ -1153,10 +1167,15 @@ def quit_macos_bundle_id(
     bundle_id: str,
     *,
     run_fn: Callable[..., subprocess.CompletedProcess[str]],
+    timeout_secs: float = 5.0,
 ) -> None:
-    run_fn(
-        ["osascript", "-e", f'tell application id "{bundle_id}" to quit'],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        run_fn(
+            ["osascript", "-e", f'tell application id "{bundle_id}" to quit'],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout_secs,
+        )
+    except subprocess.TimeoutExpired:
+        return
