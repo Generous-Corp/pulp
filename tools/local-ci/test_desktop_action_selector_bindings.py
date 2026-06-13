@@ -52,6 +52,14 @@ class DesktopActionSelectorBindingsTests(unittest.TestCase):
 
         self.assertTrue(bindings["windows_requires_pulp_app_selectors"](object()))
 
+    def test_install_desktop_action_selector_helpers_keeps_unknown_local_fallback(self) -> None:
+        bindings = {}
+        self.mod.future_desktop_action_selector_helper = lambda _bindings: "future"
+
+        self.mod.install_desktop_action_selector_helpers(bindings, ("future_desktop_action_selector_helper",))
+
+        self.assertEqual(bindings["future_desktop_action_selector_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()

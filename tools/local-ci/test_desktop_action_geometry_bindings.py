@@ -63,6 +63,14 @@ class DesktopActionGeometryBindingsTests(unittest.TestCase):
 
         self.assertEqual(bindings["parse_coordinate_pair"]("1,2", flag_name="--click"), (1.0, 2.0))
 
+    def test_install_desktop_action_geometry_helpers_keeps_unknown_local_fallback(self) -> None:
+        bindings = {}
+        self.mod.future_desktop_action_geometry_helper = lambda _bindings: "future"
+
+        self.mod.install_desktop_action_geometry_helpers(bindings, ("future_desktop_action_geometry_helper",))
+
+        self.assertEqual(bindings["future_desktop_action_geometry_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()

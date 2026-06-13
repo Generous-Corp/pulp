@@ -20,4 +20,10 @@ def install_desktop_action_selector_helpers(
     bindings: dict[str, Any],
     names: tuple[str, ...] = DESKTOP_ACTION_SELECTOR_EXPORTS,
 ) -> None:
-    install_local_helpers(bindings, globals(), names)
+    known_names = set(DESKTOP_ACTION_SELECTOR_EXPORTS)
+    selector_names = tuple(name for name in names if name in known_names)
+    unknown_names = tuple(name for name in names if name not in known_names)
+
+    install_local_helpers(bindings, globals(), selector_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)

@@ -33,4 +33,10 @@ def install_desktop_action_geometry_helpers(
     bindings: dict,
     names: tuple[str, ...] = DESKTOP_ACTION_GEOMETRY_EXPORTS,
 ) -> None:
-    install_local_helpers(bindings, globals(), names)
+    known_names = set(DESKTOP_ACTION_GEOMETRY_EXPORTS)
+    geometry_names = tuple(name for name in names if name in known_names)
+    unknown_names = tuple(name for name in names if name not in known_names)
+
+    install_local_helpers(bindings, globals(), geometry_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)
