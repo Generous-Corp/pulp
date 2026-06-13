@@ -9,7 +9,7 @@ requires:
 
 # Tart golden-VM CI lane
 
-Run every macOS build/validation in a **throwaway VM cloned from a versioned golden image** so the host stays responsive and builds are reproducible. Generalizes to any repo via one `vm-image` manifest. Born from Pulp `planning/2026-06-01-macos-ci-isolation-plan.md`; the scripts live in `tools/ci/`.
+Run every macOS build/validation in a **throwaway VM cloned from a versioned golden image** so the host stays responsive and builds are reproducible. Generalizes to any repo via one `vm-image` manifest. Born from Pulp `planning/2026-06-01-macos-ci-isolation-plan.md`; the reusable macOS provider now lives in the sibling `/Volumes/Workshop/Code/tartci` repo. Pulp's `tools/ci/tart-runner.sh` / `tart-run-job.sh` scripts are the legacy/precursor shape and should stay as compatibility wrappers once the tartci lane graduates.
 
 ## Why (the failure modes this fixes)
 - **Build-dir churn → ODR heap corruption.** One `build/` reconfigured across branches/build-types mixes object layouts → `malloc: error for object 0x3f800000` (that's `1.0f` freed as a pointer) aborting in e.g. `Theme::~Theme`. Every job in a *pristine* clone makes this impossible.
@@ -25,6 +25,14 @@ Run every macOS build/validation in a **throwaway VM cloned from a versioned gol
 | `tart-run-job.sh` | **Direct** ephemeral build (no GitHub runner): clone golden → virtio-fs mount host caches → build+ctest in-guest → discard. Useful for Shipyard `backend` / manual builds. |
 | `pulp-worktree.sh` | Per-branch worktrees + shared ccache (host-side dev isolation; complements the VM lane). |
 | `.shipyard/vm-image.toml` | **The per-repo reuse unit** (see below). |
+
+The reusable runner path is now the sibling `tartci` repo:
+- `tartci serve macos --once|--loop --labels ...` owns ephemeral JIT runners.
+- `tartci observe macos --json [--runner <name>]` ties GitHub job, local VM,
+  guest process, ctest tail, and runner log together.
+- `tartci doctor --reap --json` is the local cleanup/health digest.
+- `shipyard --json runner fleet-status --target macos` is the cross-host pool
+  view for macOS VM slots and supervisor freshness.
 
 ## The vm-image manifest (the unit of reuse)
 A new repo adds one `.shipyard/vm-image.toml` and the same `tart-provision.sh manifest <path>` bakes it — no hand-provisioning. Two strategies:
@@ -55,7 +63,9 @@ Skia/Dawn are pinned in `tools/deps/manifest.json` (release-asset URL + sha256 p
 ## Concurrency & hosts
 - **macOS caps 2 concurrent running VMs PER HOST** (kernel quota; booting a 3rd throws "number of VMs exceeds the system limit"). For ≥3 concurrent, **distribute runners across multiple Macs** (e.g. Mac Studio + MacBook Pro M5 → 2+2 = 4) — each runs `tart-runner.sh`; new hosts inherit the host-class label (`*-studio`, `*-m1`, `*-m5`) and cap=2. A dedicated Studio *can* raise the cap via the kernel-quota override (plan Appendix D; SIP off + dev kernel — last resort).
 - A persistent operator VM (e.g. `pulp-vm`) on a host consumes 1 of its 2 slots.
-- **Capacity-aware cloud→local queue draining is implemented and VM-slot-aware.** Two cooperating pieces share one rule — a host has free macOS capacity when `running_macos_vms < cap` (cap = 2/host, Linux/Windows guests don't count): (1) `tart-runner.sh --loop` boots a VM only when there's queued `Build and Test` work AND a free slot (`PULP_VM_CAP`, default 2; `--cap N` to override); (2) `tools/scripts/macos_reroute_watcher.py`'s `free_macos_slots(hosts)` sums free slots across hosts (`--hosts-config` JSON, `tart list` locally or over SSH) and reclaims a still-queued cloud job into a freed slot. Default (no hosts-config) = a single local bare-metal slot, i.e. the pre-#3299 single-runner behavior — safe to run before the cutover. The two never double-book a host because they evaluate the same `running_macos_vms < cap` predicate.
+- **Capacity-aware local queue draining is implemented and VM-slot-aware.** The current tartci/Shipyard path shares one rule: a host has free macOS capacity when `running_macos_vms < cap` (cap = 2/host), and only macOS/Darwin guests consume the `macos` VM slot. Linux Tart and Windows QEMU lanes use their own labels, supervisors, and caps; they do not reduce macOS free slots, though CPU/RAM can still need route weights or reservations.
+- **Local-first policy:** Pulp's automatic macOS overflow is disabled with `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON=local-only`. Do not point full-local saturation at GitHub-hosted `macos-15`; let jobs queue for the next local Mac slot. Hosted macOS is an explicit operator fallback for a local fleet outage/unhealthy fleet or a workflow that intentionally wants hosted coverage. Rollback for the old behavior: `gh variable set -R danielraffel/pulp PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON --body '["macos-15"]'`.
+- **Production required macOS route is VM-first (2026-06-10):** `PULP_LOCAL_MACOS_RUNS_ON_JSON=["self-hosted","macOS","ARM64","pulp-build","pulp-build-vm"]` and `PULP_LOCAL_MAC_RUNNER_LABEL=pulp-build-vm`. The VM supervisors advertise both `pulp-build` and `pulp-build-vm`; bare-metal `pulp-build` runners stay online but are excluded from the default route by the extra `pulp-build-vm` label. Full rollback: restore `PULP_LOCAL_MACOS_RUNS_ON_JSON` to `["self-hosted","pulp-build"]`, restore `PULP_LOCAL_MAC_RUNNER_LABEL=pulp-build`, and unload the VM LaunchAgents if the VM pool itself is unhealthy.
 
 ## Linux + Windows pool runners (join the Actions pool like macOS)
 
@@ -156,8 +166,19 @@ real failing test, don't chase your own diff. (Found 2026-06-03: #3386's
 main, reddening every PR's macOS gate.)
 
 ## Rollout: pilot → graduate
-1. **Additive pilot (safe):** run `tart-runner.sh --once` with a **non-required** label (`pulp-build-vm`). Trigger a real job without touching required routing: `gh workflow run build.yml -f macos_runner_selector_json='["self-hosted","pulp-build-vm"]'`. Confirm green.
-2. **Graduate:** add the runner to the required `pulp-build` pool (or stage replacing bare-metal), distributed across hosts. Never point a required check at an empty label; preflight that the label has online runners.
+1. **Additive pilot (safe):** run `tartci serve macos --once` with a **non-required** label (`pulp-build-vm`). Trigger a real job without touching required routing: `gh workflow run build.yml -f macos_runner_selector_json='["self-hosted","pulp-build-vm"]'`. Confirm green.
+2. **Required-label prevalidation (safe):** run a one-shot VM with `pulp-build` **plus a unique proof label**, then dispatch `Build and Test` with `macos_runner_selector_json` requiring both labels. This proves a VM can satisfy the required label while bare-metal `pulp-build` remains online. Verified 2026-06-10: run `27250564395`, runner `tartci-phase6-pulp-build-proof-r2-20260610`, `macOS (ARM64) [operator]` success, `macos` alias success, VM/JIT runner cleaned up. Cancel unrelated Linux/Windows legs after `macos` is green.
+3. **Graduated production default route (active 2026-06-10):** persistent VM supervisors now advertise `self-hosted,macOS,ARM64,pulp-build,pulp-build-vm`, and Pulp's default required macOS selector requires that full set. Real `Build and Test` jobs have drained on both the controller VM runner and the secondary-host VM runner:
+   - run `27251134234`: default dispatch, no selector override, `pulp-vm-01`, `macOS (ARM64) [local]` success, `macos` alias success; hosted leftovers canceled after `macos` went green.
+   - run `27251378268`: real PR, secondary-host `pulp-vm-m5-pilot-01`, `macOS (ARM64) [local]` success, `macos` alias success.
+   - run `27251442228`: real PR, controller `pulp-vm-01`, `macOS (ARM64) [local]` success, `macos` alias success.
+4. **Rollback path:** keep bare-metal fallback online. To route back to bare-metal:
+   ```bash
+   gh variable set -R danielraffel/pulp PULP_LOCAL_MACOS_RUNS_ON_JSON --body '["self-hosted","pulp-build"]'
+   gh variable set -R danielraffel/pulp PULP_LOCAL_MAC_RUNNER_LABEL --body 'pulp-build'
+   launchctl bootout "gui/$(id -u)/com.danielraffel.pulp.tart-runner"
+   ssh <secondary-host> 'launchctl bootout "gui/$(id -u)/com.danielraffel.pulp.tart-runner-macos-pilot"'
+   ```
 
 ## Gotchas (hard-won)
 - **NEVER run signing/keychain tests on a non-VM host.** `check_notarization`/codesign tests call `security`/`codesign`/`notarytool`, which on an interactive host pop GUI keychain dialogs and can disrupt the default keychain. Run them **only in the disposable VM**. Never click "Reset To Defaults" on a keychain prompt on a real Mac; never wipe a host keychain.
@@ -165,7 +186,7 @@ main, reddening every PR's macOS gate.)
 - **Clean the build dir on build-type flips.** Shipyard `backend=local` reconfiguring Debug over a Release `build/` reproduces the ODR churn → false test failures. `rm -rf build` first, or (better) validate in the VM, not the editing checkout.
 - **Disk: sparse + CoW.** Each `disk.img` is a sparse 150 GB file (~45 GB real); `du`/Finder show apparent size (N×150 GB) but `df` shows the truth (CoW clones share blocks — e.g. 13 VMs ≈ 313 GB real). Don't panic at apparent size; prune redundant bare working VMs (tags retain shared blocks).
 - **First key injection needs `sshpass`** (password auth once); afterward everything uses the injected `id_ed25519`. `tart ip` can take ~10–120 s after boot — poll, don't fixed-sleep.
-- **A missing `--dir` mount target reads as a fake "no IP".** `tart-runner.sh` boots each VM with `--dir="ccache:$PULP_CI_CACHE/ccache"` (default `$HOME/.cache/pulp-ci/ccache`). If that host dir doesn't exist — the common case on a **fresh CI host** — `tart run` exits *immediately* with `VZErrorDomain Code=2 "directory sharing device configuration is invalid"`, so the VM never boots and the runner times out 120 s later reporting **"no IP"** — pointing you at networking when the real cause is a missing directory. `setup-ci-host.sh` now pre-creates it and `tart-runner.sh` both `mkdir -p`s it and prints the `tart run` boot log on failure. If you ever see "no IP", read the boot log it now emits before suspecting vmnet/DHCP. (Diagnosed on the blackbook/M5 bring-up, 2026-06-01: a no-`--dir` boot got an IP in 0 s while a `--dir`-to-missing-path boot died instantly — the mount, not the network.)
+- **A missing `--dir` mount target reads as a fake "no IP".** `tart-runner.sh` boots each VM with `--dir="ccache:$PULP_CI_CACHE/ccache"` (default `$HOME/.cache/pulp-ci/ccache`). If that host dir doesn't exist — the common case on a **fresh CI host** — `tart run` exits *immediately* with `VZErrorDomain Code=2 "directory sharing device configuration is invalid"`, so the VM never boots and the runner times out 120 s later reporting **"no IP"** — pointing you at networking when the real cause is a missing directory. `setup-ci-host.sh` now pre-creates it and `tart-runner.sh` both `mkdir -p`s it and prints the `tart run` boot log on failure. If you ever see "no IP", read the boot log it now emits before suspecting vmnet/DHCP. (Diagnosed on the secondary M-series host bring-up, 2026-06-01: a no-`--dir` boot got an IP in 0 s while a `--dir`-to-missing-path boot died instantly — the mount, not the network.)
 - **Use shipyard (its own higher-quota auth) over raw `gh`** for GitHub ops to avoid rate limits; `gh`'s token lives in the login keychain (or `~/.config/gh/hosts.yml` with config storage).
 - **Persistent runner via launchd: Full Disk Access + absolute paths.** Run the supervisor as a LaunchAgent (`tools/launchd/pulp-tart-runner.plist.template`) so it survives reboot. Two traps: (1) launchd does NOT expand `$HOME`/`$PULP_REPO` in plist values — the install `sed` must write absolute paths (a literal `$HOME` log path → exit 78); (2) a LaunchAgent can't read a `/Volumes` external VM store without **Full Disk Access** (exit 126 "Operation not permitted") — grant it in System Settings → Privacy & Security → Full Disk Access. The interactive shell has this access; the agent does not.
 - **Every per-job step in a `set -euo pipefail` supervisor must clean up on its own failure.** The runner supervisors (`tools/ci/qemu-runner-windows.sh`, `tart-runner-linux.sh`) boot a VM/overlay, then run several SSH/QEMU steps. Any *unguarded* command that can fail (a dropped SSH, a PowerShell error streaming the JIT blob to a file) will abort the whole script under `set -e` **before** the trailing `kill "$qpid"; rm -rf "$jobdir"` cleanup — leaking a live QEMU process + overlay dir that a launchd `--loop` runner then trips over on KeepAlive restart. Mirror the surrounding steps: append `|| { note …; kill "$qpid" 2>/dev/null||true; rm -rf "$jobdir"; return 1; }` to each fallible per-job command, including pipelines (the JIT-config stdin→file upload was the one that slipped through). Caught by Codex review on tartci#10, fixed in both the tartci port and this original.

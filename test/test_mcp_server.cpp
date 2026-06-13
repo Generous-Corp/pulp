@@ -581,6 +581,7 @@ TEST_CASE("MCP tool listing and unknown dispatch stay stable", "[mcp][tools]") {
     require_contains(tools, R"JSON("name":"pulp_audio_model_status")JSON");
     require_contains(tools, R"JSON("name":"pulp_audio_excerpt_find")JSON");
     require_contains(tools, R"JSON("name":"pulp_audio_probe_json")JSON");
+    require_contains(tools, R"JSON("name":"pulp_audio_scope")JSON");
     require_contains(tools, R"JSON("name":"pulp_docs_search")JSON");
     require_contains(tools, R"JSON("name":"pulp_inspect_audio")JSON");
 
@@ -607,6 +608,7 @@ TEST_CASE("MCP tools/list advertises every tool the dispatcher handles",
         "pulp_audio_model_status",
         "pulp_audio_probe_json",
         "pulp_audio_read_bundle",
+        "pulp_audio_scope",
         "pulp_build",
         "pulp_compat",
         "pulp_create",
@@ -719,6 +721,46 @@ TEST_CASE("MCP audio probe JSON reports missing project roots",
     require_contains(response, R"JSON("id":54)JSON");
     require_contains(response, "Error: not in a Pulp project");
     REQUIRE(response.find("Unknown tool") == std::string::npos);
+}
+
+TEST_CASE("MCP audio scope validates parameters before shelling out",
+          "[mcp][tools][audio][scope]") {
+    ScopedCurrentPath cwd(repo_root_path());
+
+    auto zero_frames = handle_request(tool_call(
+        "61", "pulp_audio_scope", R"JSON({"frames":0})JSON"));
+    require_contains(zero_frames, R"JSON("id":61)JSON");
+    require_contains(zero_frames, "Error: frames must be a positive integer");
+
+    auto zero_window = handle_request(tool_call(
+        "62", "pulp_audio_scope", R"JSON({"window":0})JSON"));
+    require_contains(zero_window, "Error: window must be a positive integer");
+
+    auto bad_channel = handle_request(tool_call(
+        "63", "pulp_audio_scope", R"JSON({"channel":-1})JSON"));
+    require_contains(bad_channel, "Error: channel must be a non-negative integer");
+
+    auto bad_trigger = handle_request(tool_call(
+        "64", "pulp_audio_scope", R"JSON({"trigger":"smooth"})JSON"));
+    require_contains(bad_trigger,
+                     "Error: trigger must be one of none, raw, off, rising-zero");
+
+    auto option_target = handle_request(tool_call(
+        "65", "pulp_audio_scope", R"JSON({"target":"--watch"})JSON"));
+    require_contains(option_target,
+                     "Error: target must be a standalone target name, not an option");
+
+    auto live_and_offline = handle_request(tool_call(
+        "67", "pulp_audio_scope",
+        R"JSON({"target":"Demo","input_wav":"in.wav"})JSON"));
+    require_contains(live_and_offline,
+                     "Error: target and input_wav are mutually exclusive");
+
+    auto png_without_offline = handle_request(tool_call(
+        "68", "pulp_audio_scope", R"JSON({"png_path":"scope.png"})JSON"));
+    require_contains(png_without_offline,
+                     "Error: png_path is only supported with input_wav");
+    REQUIRE(option_target.find("Unknown tool") == std::string::npos);
 }
 
 TEST_CASE("MCP build and test handlers quote project paths and filters",
@@ -1304,6 +1346,79 @@ TEST_CASE("MCP audio probe JSON wraps pulp run and returns structured content",
     require_contains(response, R"JSON("target_seen": true)JSON");
     require_contains(response, R"JSON("callbacks": 7)JSON");
     REQUIRE(response.find("Error:") == std::string::npos);
+#endif
+}
+
+TEST_CASE("MCP audio scope wraps pulp audio scope and returns structured content",
+          "[mcp][tools][audio][scope]") {
+#if defined(_WIN32)
+    SKIP("POSIX fake script assertions are only used on non-Windows");
+#else
+    TempDir project;
+    std::filesystem::create_directories(project.path / "core");
+    std::filesystem::create_directories(project.path / "build");
+    std::ofstream(project.path / "CMakeLists.txt") << "project(FakePulp VERSION 1.2.3)\n";
+
+    const auto cli = project.path / "build" / "tools" / "cli" / "Release" / "pulp-cpp.exe";
+    std::filesystem::create_directories(cli.parent_path());
+    {
+        std::ofstream script(cli);
+        script << "#!/bin/sh\n"
+               << "out=''\n"
+               << "frames=''\n"
+               << "window=''\n"
+               << "trigger=''\n"
+               << "channel=''\n"
+               << "input_wav=''\n"
+               << "png_path=''\n"
+               << "target_seen=false\n"
+               << "while [ \"$#\" -gt 0 ]; do\n"
+               << "  case \"$1\" in\n"
+               << "    audio|scope) ;;\n"
+               << "    \"Special Target\") target_seen=true ;;\n"
+               << "    --input-wav) shift; input_wav=\"$1\" ;;\n"
+               << "    --png) shift; png_path=\"$1\"; printf 'PNG' > \"$png_path\" ;;\n"
+               << "    --json) shift; out=\"$1\" ;;\n"
+               << "    --frames) shift; frames=\"$1\" ;;\n"
+               << "    --window) shift; window=\"$1\" ;;\n"
+               << "    --trigger) shift; trigger=\"$1\" ;;\n"
+               << "    --channel) shift; channel=\"$1\" ;;\n"
+               << "  esac\n"
+               << "  shift\n"
+               << "done\n"
+               << "printf '{\"schema\":\"pulp.audio.scope.v1\",\"frames\":%s,\"window\":%s,\"trigger\":\"%s\",\"channel\":%s,\"target_seen\":%s,\"input_wav\":\"%s\",\"png_path\":\"%s\"}' \"$frames\" \"$window\" \"$trigger\" \"$channel\" \"$target_seen\" \"$input_wav\" \"$png_path\" > \"$out\"\n";
+    }
+    std::filesystem::permissions(
+        cli,
+        std::filesystem::perms::owner_exec |
+            std::filesystem::perms::owner_read |
+            std::filesystem::perms::owner_write,
+        std::filesystem::perm_options::add);
+
+    ScopedCurrentPath cwd(project.path);
+    auto response = handle_request(tool_call(
+        "66", "pulp_audio_scope",
+        R"JSON({"target":"Special Target","frames":42,"window":512,"trigger":"raw","channel":0})JSON"));
+    require_contains(response, R"JSON("id":66)JSON");
+    require_contains(response, R"JSON("structuredContent")JSON");
+    require_contains(response, R"JSON("schema": "pulp.audio.scope.v1")JSON");
+    require_contains(response, R"JSON("frames": 42)JSON");
+    require_contains(response, R"JSON("window": 512)JSON");
+    require_contains(response, R"JSON("trigger": "raw")JSON");
+    require_contains(response, R"JSON("channel": 0)JSON");
+    require_contains(response, R"JSON("target_seen": true)JSON");
+    REQUIRE(response.find("Error:") == std::string::npos);
+
+    const auto png = project.path / "scope.png";
+    auto offline = handle_request(tool_call(
+        "69", "pulp_audio_scope",
+        std::string(R"JSON({"input_wav":"tone.wav","window":256,"trigger":"rising-zero","channel":1,"png_path":")JSON") +
+            png.string() + R"JSON("})JSON"));
+    require_contains(offline, R"JSON("id":69)JSON");
+    require_contains(offline, R"JSON("input_wav": "tone.wav")JSON");
+    require_contains(offline, std::string(R"JSON("png_path": ")JSON") +
+                                  png.string());
+    REQUIRE(std::filesystem::exists(png));
 #endif
 }
 

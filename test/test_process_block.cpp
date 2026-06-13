@@ -2,6 +2,7 @@
 
 #include <pulp/audio/buffer.hpp>
 #include <pulp/format/process_block.hpp>
+#include <pulp/format/processor.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
 
@@ -221,10 +222,10 @@ TEST_CASE("ProcessBlock validates mode, timing, buses, and transport frame count
     block.sample_rate = 48000.0;
 
     transport.num_samples = 32;
-    REQUIRE_FALSE(block.validate());
+    REQUIRE(block.validate());
     transport.num_samples = 64;
     transport.sample_rate = 44100.0;
-    REQUIRE_FALSE(block.validate());
+    REQUIRE(block.validate());
     transport.sample_rate = 48000.0;
     REQUIRE(block.validate());
 

@@ -28,6 +28,20 @@ inline bool parse_positive_frame_delay(std::string_view value, int& frames) {
     return true;
 }
 
+inline bool parse_nonnegative_int(std::string_view value, int& out) {
+    if (value.empty() || value.front() == '+') return false;
+
+    int parsed = 0;
+    const char* first = value.data();
+    const char* last = first + value.size();
+    auto result = std::from_chars(first, last, parsed);
+    if (result.ec != std::errc{} || result.ptr != last || parsed < 0)
+        return false;
+
+    out = parsed;
+    return true;
+}
+
 inline StandaloneConfig standalone_config_from_environment(StandaloneConfig config) {
     if (standalone_env_truthy("PULP_HEADLESS")
         || standalone_env_truthy("PULP_TEST_MODE")
@@ -57,6 +71,27 @@ inline StandaloneConfig standalone_config_from_environment(StandaloneConfig conf
     if (!config.audio_probe_json_path.empty())
         config.headless = true;
 
+    if (auto scope_json = runtime::get_env("PULP_AUDIO_SCOPE_JSON");
+        scope_json && config.audio_scope_json_path.empty()) {
+        config.audio_scope_json_path = *scope_json;
+    }
+    if (auto window = runtime::get_env("PULP_AUDIO_SCOPE_WINDOW")) {
+        int parsed = 0;
+        if (parse_positive_frame_delay(*window, parsed))
+            config.audio_scope_window_samples = parsed;
+    }
+    if (auto trigger = runtime::get_env("PULP_AUDIO_SCOPE_TRIGGER");
+        trigger && !trigger->empty()) {
+        config.audio_scope_trigger = *trigger;
+    }
+    if (auto channel = runtime::get_env("PULP_AUDIO_SCOPE_CHANNEL")) {
+        int parsed = 0;
+        if (parse_nonnegative_int(*channel, parsed))
+            config.audio_scope_channel = parsed;
+    }
+    if (!config.audio_scope_json_path.empty())
+        config.headless = true;
+
     if (!config.screenshot_path.empty())
         config.headless = true;
 
@@ -68,6 +103,7 @@ inline bool standalone_headless_requires_screenshot(const StandaloneConfig& conf
     if (!config.screenshot_path.empty()) return false;
 #if PULP_ENABLE_AUDIO_PROBES
     if (!config.audio_probe_json_path.empty()) return false;
+    if (!config.audio_scope_json_path.empty()) return false;
 #endif
     return true;
 }
@@ -78,7 +114,8 @@ inline bool standalone_probe_json_requested_but_disabled(
     (void)config;
     return false;
 #else
-    return !config.audio_probe_json_path.empty();
+    return !config.audio_probe_json_path.empty()
+        || !config.audio_scope_json_path.empty();
 #endif
 }
 

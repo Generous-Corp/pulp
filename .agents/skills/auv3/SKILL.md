@@ -176,8 +176,11 @@ not apply — `_bridge` is a C++ struct). The block:
    The sorted `param_events` queue is attached to the processor via
    `set_param_events(&param_events)` before render, so
    `Processor::param_events()` exposes the same sample offsets.
-6. Calls `processor->process(output_view, input_view, midi_in,
-   midi_out, ctx)`.
+6. Wraps the current main input, optional sidechain, and main output in a
+   stack-owned `ProcessBuffers` block, then calls the additive
+   `processor->process(process_buffers, midi_in, midi_out, ctx)` overload.
+   Legacy processors still run through the default projection; processors that
+   override the richer overload can inspect AUv3 bus metadata directly.
 7. Forwards any `midi_out` events back to the host via
    `self.MIDIOutputEventBlock` (AU v3.1+). Each event's
    `sample_offset` is added to `timestamp->mSampleTime`.

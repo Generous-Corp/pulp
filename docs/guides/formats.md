@@ -56,7 +56,7 @@ The `params_flush()` extension callback handles the same events outside of `proc
 
 ### CLAP Modulation
 
-The adapter handles `CLAP_EVENT_PARAM_MOD` events. At the start of each process call, `store.reset_all_mod()` clears per-buffer modulation offsets. Incoming mod events write to `StateStore::set_mod_offset()`. Processors can call `store.get_modulated(id)` to read `base + mod_offset`.
+The adapter handles `CLAP_EVENT_PARAM_MOD` events. At the start of each process call, `store.reset_all_mod()` clears per-buffer modulation offsets. Incoming mod events are validated as global, control-rate `state::ModulationLane` routes before writing to `StateStore::set_mod_offset()`. Processors can call `store.get_modulated(id)` to read `base + mod_offset`.
 
 ### MIDI Routing
 
@@ -104,10 +104,32 @@ The process callback routes bus 0 as the main input/output and routes input bus
 secondary output buses require a richer process surface than the current simple
 `Processor::process()` signature.
 
+`format::ProcessBuffers` and `format::ProcessBusBufferSet` are the additive
+shared vocabulary for that richer surface. They are non-owning views over
+host-owned bus buffers and let adapters validate active buses, declared channel
+counts, and null channel pointers before projecting the current
+main-in/main-out/sidechain view into `Processor::process()`.
+
+Processors that override the richer surface can inspect no-input instrument
+layouts, surround main outputs, and named auxiliary or stem outputs directly
+through `ProcessBuffers::inputs` and `ProcessBuffers::outputs`. Use
+`BusBufferSet::find()`, `find_by_index()`, or `find_by_name()` for secondary
+buses; `main_input()`, `main_output()`, and `sidechain_input()` remain the
+ergonomic compatibility helpers.
+
+Inactive buses are treated as disconnected and should carry empty buffer views.
+An active bus with any null channel pointer fails
+`active_buses_have_storage()`, even when its declared channel count matches, so
+adapters can fail closed or omit the bus instead of handing processors a
+half-valid buffer.
+
 ### Latency and Tail
 
-- **Latency:** `clap_plugin_latency_t::get` returns `processor->latency_samples()`.
-- **Tail:** `clap_plugin_tail_t::get` returns `descriptor().tail_samples`. A value of `-1` (infinite tail) maps to `UINT32_MAX`.
+- **Latency:** `clap_plugin_latency_t::get` returns
+  `processor->latency_samples()` after host-quirk clamping, so negative
+  latency reports as 0 on the normal path.
+- **Tail:** `clap_plugin_tail_t::get` returns `descriptor().tail_samples`. A
+  value of `-1` (infinite tail) maps to `UINT32_MAX`.
 
 ### Known Limitations
 
@@ -199,8 +221,10 @@ Audio buses from `descriptor().input_buses` and `descriptor().output_buses` are 
 
 ### Latency and Tail
 
-- `getLatencySamples()` returns `processor->latency_samples()`
-- `getTailSamples()` returns `descriptor().tail_samples`, mapping `-1` to `kInfiniteTail`
+- `getLatencySamples()` returns `processor->latency_samples()` after host-quirk
+  clamping, so negative latency reports as 0 on the normal path.
+- `getTailSamples()` returns `descriptor().tail_samples`, mapping `-1` to
+  `kInfiniteTail`.
 
 ### Known Limitations
 
@@ -303,7 +327,9 @@ The AU adapter stores Pulp state alongside the standard AU state dictionary:
 
 **Effects:** `GetTailTime()` converts `descriptor().tail_samples` to seconds by dividing by sample rate. `GetLatency()` does the same for `latency_samples()`. A tail of `-1` maps to `infinity`.
 
-**Instruments:** Tail and latency return 0 (override in your processor if needed).
+**Instruments:** `GetTailTime()` and `GetLatency()` report the same processor
+runtime contract as effects, using the output stream sample rate. A tail of `-1`
+maps to `infinity`.
 
 ### auval Validation
 
@@ -600,15 +626,64 @@ Key methods:
 | Method | Description |
 |---|---|
 | `prepare(sample_rate, max_buffer_size, in_ch, out_ch)` | Initialize the processor |
+| `try_prepare(sample_rate, max_buffer_size, in_ch, out_ch, limits)` | Initialize only if the processor's prepare-resource estimate fits the supplied non-zero limits |
 | `process(output, input)` | Process audio (no MIDI) |
 | `process(output, input, midi_in, midi_out)` | Process audio with MIDI |
+| `render_offline(input, options)` | Render effect-shaped `AudioFileData` through deterministic offline blocks |
 | `release()` | Release processing resources |
 | `state()` | Access the `StateStore` for parameter reads/writes |
 | `save_state()` | Serialize current plugin state to bytes |
 | `load_state(data)` | Restore parameter and plugin-owned state from bytes |
 | `descriptor()` | Read the plugin's `PluginDescriptor` |
 
+Use `try_prepare()` when a test, batch render, or benchmark needs to prove a
+plugin fails closed before allocating oversized prepare-time resources:
+
+```cpp
+pulp::format::PrepareResourceLimits limits;
+limits.max_total_bytes = 8 * 1024 * 1024;
+limits.max_voices = 64;
+
+if (!host.try_prepare(48000, 512, 2, 2, limits)) {
+    auto reason = host.last_prepare_limit_failure();
+    // Report or assert the first exceeded budget.
+}
+```
+
+When `try_prepare()` fails a non-zero limit, it returns before
+`Processor::prepare()` and leaves the previous successful prepared render
+context intact. Use `last_prepare_limit_failure()` for diagnostics, then either
+continue rendering with the prior prepare or retry with adjusted limits.
+If the host also reports memory pressure, a processor may shed rebuildable
+owner-thread caches before the retry, but it must keep prepared core state and
+fixed per-block scratch accounting valid.
+
 Input and output views may alias for in-place processing.
+
+Use `render_offline()` when a batch/golden path already has an
+`AudioFileData` artifact and needs `OfflineRenderOptions` metadata forwarded to
+`ProcessContext`: scheduled block size, sample position, tempo, beat position,
+and render-speed hint. It is effect-shaped today, so the rendered artifact has
+the same channel count as the input. Parity fixtures should compare both the
+rendered samples and the per-block `ProcessContext` metadata against direct
+stepped processing for the same schedule.
+
+Format adapter runtime-mode tests should assert the adapter-owned source of
+truth rather than inferring mode from transport. VST3 maps
+`ProcessSetup::processMode == kOffline` to `ProcessMode::Offline` with a
+faster-than-realtime render hint. CLAP has no equivalent process-mode field, so
+its adapter reports realtime mode and realtime render speed unless a future CLAP
+extension exposes stronger host intent. AU v2 effect and instrument render
+callbacks also report realtime mode and realtime render speed because the v2 SDK
+does not surface offline-bounce intent to `ProcessBufferLists()` / `Render()`;
+AU v3 mirrors that explicit realtime render-path contract. Bypass, tail-drain,
+reset, and transport-jump flags stay explicit `ProcessContext` metadata and
+should be covered where the host API can actually deliver them. VST3 process
+context sample-position discontinuities, AU v2 host-callback sample-position
+discontinuities, AU v3 transport-state sample-position discontinuities, and
+CLAP beat-timeline discontinuities are diffed against the previous block and set
+`transport_jump`, so processors that use `should_reset_dsp_state()` can reset
+delay, lookahead, or oscillator state on host seeks.
 
 ---
 

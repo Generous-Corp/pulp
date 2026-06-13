@@ -470,6 +470,47 @@ ReportEntry ValidationHarness::run_validator(
     return entry;
 }
 
+ReportEntry ValidationHarness::record_runtime_overload(
+    const audio::AudioProcessLoadSnapshot& load,
+    std::uint64_t xrun_count,
+    const audio::AudioRuntimeOverloadPolicy& policy)
+{
+    const auto report =
+        audio::evaluate_audio_runtime_overload(load, xrun_count, policy);
+
+    ReportEntry entry;
+    entry.type = "runtime_overload";
+    entry.target = descriptor().name;
+    entry.status = report.validation_failure
+        ? ValidationStatus::fail
+        : ValidationStatus::pass;
+    if (report.validation_failure) {
+        entry.error_message = "Runtime overload policy reached critical severity";
+    }
+
+    std::ostringstream payload;
+    payload << "{"
+            << "\"severity\": \"" << audio::to_string(report.severity) << "\","
+            << "\"action\": \"" << report.action << "\","
+            << "\"load\": " << load.load << ","
+            << "\"peak_load\": " << load.peak_load << ","
+            << "\"last_load\": " << load.last_load << ","
+            << "\"callback_count\": " << load.callback_count << ","
+            << "\"overload_count\": " << load.overload_count << ","
+            << "\"xrun_count\": " << xrun_count << ","
+            << "\"should_shed_optional_work\": "
+            << (report.should_shed_optional_work ? "true" : "false") << ","
+            << "\"should_bypass_optional_work\": "
+            << (report.should_bypass_optional_work ? "true" : "false") << ","
+            << "\"validation_failure\": "
+            << (report.validation_failure ? "true" : "false")
+            << "}";
+    entry.payload_json = payload.str();
+
+    entries_.push_back(entry);
+    return entry;
+}
+
 // ── Report generation ───────────────────────────────────────────────────────
 
 void ValidationHarness::add_entry(ReportEntry entry) {
@@ -515,6 +556,7 @@ std::string ValidationHarness::generate_report() const {
             else if (e.type == "validator")   payload_key = "validator";
             else if (e.type == "sanitizer")   payload_key = "sanitizer";
             else if (e.type == "test_suite")  payload_key = "test_suite";
+            else if (e.type == "runtime_overload") payload_key = "runtime_overload";
 
             if (!payload_key.empty())
                 ss << ",\n      \"" << payload_key << "\": " << e.payload_json;

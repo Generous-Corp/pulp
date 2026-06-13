@@ -81,6 +81,14 @@ struct StandaloneConfig {
     // editor so callers do not mistake an unsupported binary for silence.
     std::string audio_probe_json_path;
 
+    // Programmatic live scope capture over the output-boundary probe's copied
+    // capture ring. Like audio_probe_json_path, this is a dev/agent readout and
+    // is only meaningful when PULP_ENABLE_AUDIO_PROBES is ON.
+    std::string audio_scope_json_path;
+    int audio_scope_window_samples = 2048;
+    std::string audio_scope_trigger = "rising-zero";
+    int audio_scope_channel = 0;
+
     // Item 3.5 (macOS plan) — built-in tempo source. The standalone host has
     // no DAW providing transport, so it acts as one: it surfaces
     // `tempo_bpm` / time signature on every ProcessContext block, and
@@ -202,10 +210,6 @@ private:
     // is set in the environment.
     std::unique_ptr<view::CommandRegistry> command_registry_;
     std::unique_ptr<view::AudioInspectorWindow> audio_inspector_;
-    // True when the probe was prepared with a capture ring (so the inspector
-    // can show a waveform, not just meters). Enabled when PULP_AUDIO_INSPECTOR
-    // is set at start() time.
-    bool audio_inspector_capture_ = false;
 #endif
     audio::Buffer<float> test_buffer_;        // Pre-allocated for audio callback
     audio::Buffer<float> silence_buffer_;    // Pre-allocated silence for missing input

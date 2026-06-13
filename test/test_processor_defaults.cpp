@@ -13,6 +13,7 @@
 #include <pulp/format/param_processing.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
+#include <pulp/view/view.hpp>
 
 #include <array>
 
@@ -45,6 +46,58 @@ public:
     int process_calls = 0;
 };
 
+class MultiOutputInstrumentProcessor : public PlainProcessor {
+public:
+    using PlainProcessor::process;
+
+    PluginDescriptor descriptor() const override {
+        PluginDescriptor d;
+        d.category = PluginCategory::Instrument;
+        d.accepts_midi = true;
+        d.input_buses.clear();
+        d.output_buses = {
+            {"Main 5.1 Out", 6, false},
+            {"Cue Out", 2, true},
+            {"Stem Out", 2, true},
+        };
+        return d;
+    }
+
+    void process(ProcessBuffers& audio,
+                 pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&,
+                 const ProcessContext&) override {
+        ++process_buffer_calls;
+        saw_no_inputs = audio.inputs.empty() && audio.main_input() == nullptr;
+        saw_layout_ok = audio.layouts_match_descriptors();
+        saw_storage_ok = audio.active_buses_have_storage();
+
+        if (auto* main = audio.main_output()) {
+            for (std::size_t c = 0; c < main->num_channels(); ++c) {
+                float* dst = main->channel_ptr(c);
+                for (std::size_t i = 0; i < main->num_samples(); ++i) {
+                    dst[i] = 10.0f + static_cast<float>(c);
+                }
+            }
+        }
+
+        if (auto* cue = audio.outputs.find_by_name("Cue Out");
+            cue && cue->active()) {
+            for (std::size_t c = 0; c < cue->buffer.num_channels(); ++c) {
+                float* dst = cue->buffer.channel_ptr(c);
+                for (std::size_t i = 0; i < cue->buffer.num_samples(); ++i) {
+                    dst[i] = 20.0f + static_cast<float>(c);
+                }
+            }
+        }
+    }
+
+    int process_buffer_calls = 0;
+    bool saw_no_inputs = false;
+    bool saw_layout_ok = false;
+    bool saw_storage_ok = false;
+};
+
 class CustomEditorSizeProcessor : public PlainProcessor {
 public:
     std::pair<uint32_t, uint32_t> editor_size() const override {
@@ -70,6 +123,69 @@ public:
 class EditorlessProcessor : public PlainProcessor {
 public:
     bool has_editor() const override { return false; }
+};
+
+class ResourceReportingProcessor : public PlainProcessor {
+public:
+    PrepareResourceUsage estimate_prepare_resources(
+        const PrepareContext& context) const override {
+        return {
+            .persistent_bytes = persistent_bytes,
+            .block_scratch_bytes = block_scratch_bytes,
+            .block_size = context.max_buffer_size,
+            .input_channels = context.input_channels,
+            .output_channels = context.output_channels,
+            .parameter_events = parameter_events,
+            .midi_events = midi_events,
+            .voices = voices,
+        };
+    }
+
+    std::size_t persistent_bytes = 0;
+    std::size_t block_scratch_bytes = 0;
+    int parameter_events = 0;
+    int midi_events = 0;
+    int voices = 0;
+};
+
+class MemoryPressureReportingProcessor : public PlainProcessor {
+public:
+    void prepare(const PrepareContext&) override { prepared = true; }
+
+    PrepareResourceUsage estimate_prepare_resources(
+        const PrepareContext& context) const override {
+        return {
+            .persistent_bytes = prepared_core_bytes + advisory_cache_bytes +
+                                critical_cache_bytes,
+            .block_scratch_bytes = block_scratch_bytes,
+            .block_size = context.max_buffer_size,
+            .input_channels = context.input_channels,
+            .output_channels = context.output_channels,
+            .parameter_events = parameter_events,
+            .midi_events = midi_events,
+            .voices = voices,
+        };
+    }
+
+    void on_memory_pressure(MemoryPressure level) override {
+        ++memory_pressure_calls;
+        last_pressure = level;
+        advisory_cache_bytes = 0;
+        if (level == MemoryPressure::Critical) {
+            critical_cache_bytes = 0;
+        }
+    }
+
+    std::size_t prepared_core_bytes = 0;
+    std::size_t advisory_cache_bytes = 0;
+    std::size_t critical_cache_bytes = 0;
+    std::size_t block_scratch_bytes = 0;
+    int parameter_events = 0;
+    int midi_events = 0;
+    int voices = 0;
+    int memory_pressure_calls = 0;
+    MemoryPressure last_pressure = MemoryPressure::Advisory;
+    bool prepared = false;
 };
 
 } // namespace
@@ -134,6 +250,322 @@ TEST_CASE("PluginDescriptor bus helpers read only the first bus",
     REQUIRE(d.output_buses[1].optional);
 }
 
+TEST_CASE("ProcessBuffers treats inactive buses as disconnected",
+          "[format][processor-defaults][process-buffers][phase2]") {
+    std::array<ProcessBusBufferView<const float>, 2> inputs{{
+        {
+            .info = {
+                .name = "Main In",
+                .index = 0,
+                .direction = BusDirection::Input,
+                .role = BusRole::Main,
+                .declared_channels = 2,
+                .optional = false,
+                .active = false,
+            },
+            .buffer = {},
+        },
+        {
+            .info = {
+                .name = "Sidechain",
+                .index = 1,
+                .direction = BusDirection::Input,
+                .role = BusRole::Sidechain,
+                .declared_channels = 1,
+                .optional = true,
+                .active = false,
+            },
+            .buffer = {},
+        },
+    }};
+
+    std::array<ProcessBusBufferView<float>, 1> outputs{{
+        {
+            .info = {
+                .name = "Main Out",
+                .index = 0,
+                .direction = BusDirection::Output,
+                .role = BusRole::Main,
+                .declared_channels = 2,
+                .optional = false,
+                .active = false,
+            },
+            .buffer = {},
+        },
+    }};
+
+    ProcessBuffers buffers{
+        ProcessBusBufferSet<const float>{std::span(inputs)},
+        ProcessBusBufferSet<float>{std::span(outputs)},
+    };
+
+    REQUIRE(buffers.inputs.size() == 2);
+    REQUIRE(buffers.inputs.count(BusRole::Sidechain) == 1);
+    REQUIRE(buffers.inputs.active_count() == 0);
+    REQUIRE(buffers.outputs.active_count() == 0);
+    REQUIRE(buffers.main_input() == nullptr);
+    REQUIRE(buffers.sidechain_input() == nullptr);
+    REQUIRE(buffers.main_output() == nullptr);
+    REQUIRE(buffers.layouts_match_descriptors());
+    REQUIRE(buffers.active_buses_have_storage());
+}
+
+TEST_CASE("ProcessBuffers rejects active null channel pointers",
+          "[format][processor-defaults][process-buffers][phase2]") {
+    std::array<float, 4> left{};
+    const float* active_input_channels[] = {left.data(), nullptr};
+
+    ProcessBusBufferView<const float> active_input{
+        .info = {
+            .name = "Main In",
+            .index = 0,
+            .direction = BusDirection::Input,
+            .role = BusRole::Main,
+            .declared_channels = 2,
+            .optional = false,
+            .active = true,
+        },
+        .buffer = pulp::audio::BufferView<const float>(
+            active_input_channels, 2, left.size()),
+    };
+
+    REQUIRE(active_input.matches_declared_layout());
+    REQUIRE_FALSE(active_input.has_channel_storage());
+
+    std::array<ProcessBusBufferView<const float>, 1> inputs{{active_input}};
+    std::array<ProcessBusBufferView<float>, 0> outputs{};
+    ProcessBuffers buffers{
+        ProcessBusBufferSet<const float>{std::span(inputs)},
+        ProcessBusBufferSet<float>{std::span(outputs)},
+    };
+
+    REQUIRE(buffers.main_input() != nullptr);
+    REQUIRE(buffers.layouts_match_descriptors());
+    REQUIRE_FALSE(buffers.active_buses_have_storage());
+}
+
+TEST_CASE("ProcessBuffers requires inactive buses to carry empty views",
+          "[format][processor-defaults][process-buffers][phase2]") {
+    std::array<float, 4> sidechain{};
+    const float* sidechain_channels[] = {sidechain.data()};
+
+    ProcessBusBufferView<const float> inactive_sidechain_with_storage{
+        .info = {
+            .name = "Sidechain",
+            .index = 1,
+            .direction = BusDirection::Input,
+            .role = BusRole::Sidechain,
+            .declared_channels = 1,
+            .optional = true,
+            .active = false,
+        },
+        .buffer = pulp::audio::BufferView<const float>(
+            sidechain_channels, 1, sidechain.size()),
+    };
+
+    REQUIRE_FALSE(inactive_sidechain_with_storage.matches_declared_layout());
+    REQUIRE(inactive_sidechain_with_storage.has_channel_storage());
+
+    std::array<ProcessBusBufferView<const float>, 1> inputs{{
+        inactive_sidechain_with_storage,
+    }};
+    std::array<ProcessBusBufferView<float>, 0> outputs{};
+    ProcessBuffers buffers{
+        ProcessBusBufferSet<const float>{std::span(inputs)},
+        ProcessBusBufferSet<float>{std::span(outputs)},
+    };
+
+    REQUIRE(buffers.sidechain_input() == nullptr);
+    REQUIRE_FALSE(buffers.layouts_match_descriptors());
+    REQUIRE(buffers.active_buses_have_storage());
+}
+
+TEST_CASE("ProcessBuffers models surround instruments with auxiliary outputs",
+          "[format][processor-defaults][process-buffers][phase2][instrument][multi-output]") {
+    std::array<float, 8> main_front_left{};
+    std::array<float, 8> main_front_right{};
+    std::array<float, 8> main_center{};
+    std::array<float, 8> main_lfe{};
+    std::array<float, 8> main_surround_left{};
+    std::array<float, 8> main_surround_right{};
+    std::array<float, 8> cue_left{};
+    std::array<float, 8> cue_right{};
+    float* main_channels[] = {
+        main_front_left.data(),
+        main_front_right.data(),
+        main_center.data(),
+        main_lfe.data(),
+        main_surround_left.data(),
+        main_surround_right.data(),
+    };
+    float* cue_channels[] = {cue_left.data(), cue_right.data()};
+
+    std::array<ProcessBusBufferView<const float>, 0> inputs{};
+    std::array<ProcessBusBufferView<float>, 3> outputs{{
+        {
+            .info = {
+                .name = "Main 5.1 Out",
+                .index = 0,
+                .direction = BusDirection::Output,
+                .role = BusRole::Main,
+                .declared_channels = 6,
+                .optional = false,
+                .active = true,
+            },
+            .buffer = pulp::audio::BufferView<float>(
+                main_channels, 6, main_front_left.size()),
+        },
+        {
+            .info = {
+                .name = "Cue Out",
+                .index = 1,
+                .direction = BusDirection::Output,
+                .role = BusRole::Aux,
+                .declared_channels = 2,
+                .optional = true,
+                .active = true,
+            },
+            .buffer = pulp::audio::BufferView<float>(
+                cue_channels, 2, cue_left.size()),
+        },
+        {
+            .info = {
+                .name = "Stem Out",
+                .index = 2,
+                .direction = BusDirection::Output,
+                .role = BusRole::Aux,
+                .declared_channels = 2,
+                .optional = true,
+                .active = false,
+            },
+            .buffer = {},
+        },
+    }};
+
+    ProcessBuffers buffers{
+        ProcessBusBufferSet<const float>{std::span(inputs)},
+        ProcessBusBufferSet<float>{std::span(outputs)},
+    };
+
+    REQUIRE(buffers.inputs.empty());
+    REQUIRE(buffers.main_input() == nullptr);
+    REQUIRE(buffers.sidechain_input() == nullptr);
+    REQUIRE(buffers.outputs.size() == 3);
+    REQUIRE(buffers.outputs.count(BusRole::Main) == 1);
+    REQUIRE(buffers.outputs.count(BusRole::Aux) == 2);
+    REQUIRE(buffers.outputs.active_count(BusRole::Aux) == 1);
+    REQUIRE(buffers.main_output() == &outputs[0].buffer);
+    REQUIRE(buffers.main_output()->num_channels() == 6);
+    REQUIRE(buffers.outputs.find(BusRole::Aux, 0) == &outputs[1]);
+    REQUIRE(buffers.outputs.find(BusRole::Aux, 1) == &outputs[2]);
+    REQUIRE(buffers.outputs.find_by_name("Cue Out") == &outputs[1]);
+    REQUIRE(buffers.outputs.find_by_index(2) == &outputs[2]);
+    REQUIRE(buffers.layouts_match_descriptors());
+    REQUIRE(buffers.active_buses_have_storage());
+}
+
+TEST_CASE("Processor rich process renders multi-output instrument buses",
+          "[format][processor-defaults][process-buffers][phase3][instrument][multi-output]") {
+    MultiOutputInstrumentProcessor processor;
+    const auto desc = processor.descriptor();
+    REQUIRE(desc.category == PluginCategory::Instrument);
+    REQUIRE(desc.input_buses.empty());
+    REQUIRE(desc.output_buses.size() == 3);
+
+    constexpr std::size_t kFrames = 8;
+    std::array<float, kFrames> main_front_left{};
+    std::array<float, kFrames> main_front_right{};
+    std::array<float, kFrames> main_center{};
+    std::array<float, kFrames> main_lfe{};
+    std::array<float, kFrames> main_surround_left{};
+    std::array<float, kFrames> main_surround_right{};
+    std::array<float, kFrames> cue_left{};
+    std::array<float, kFrames> cue_right{};
+    std::array<float, kFrames> stem_left{};
+    std::array<float, kFrames> stem_right{};
+    stem_left.fill(-1.0f);
+    stem_right.fill(-2.0f);
+
+    float* main_channels[] = {
+        main_front_left.data(),
+        main_front_right.data(),
+        main_center.data(),
+        main_lfe.data(),
+        main_surround_left.data(),
+        main_surround_right.data(),
+    };
+    float* cue_channels[] = {cue_left.data(), cue_right.data()};
+
+    std::array<ProcessBusBufferView<const float>, 0> inputs{};
+    std::array<ProcessBusBufferView<float>, 3> outputs{{
+        {
+            .info = {
+                .name = "Main 5.1 Out",
+                .index = 0,
+                .direction = BusDirection::Output,
+                .role = BusRole::Main,
+                .declared_channels = 6,
+                .optional = false,
+                .active = true,
+            },
+            .buffer = pulp::audio::BufferView<float>(
+                main_channels, 6, kFrames),
+        },
+        {
+            .info = {
+                .name = "Cue Out",
+                .index = 1,
+                .direction = BusDirection::Output,
+                .role = BusRole::Aux,
+                .declared_channels = 2,
+                .optional = true,
+                .active = true,
+            },
+            .buffer = pulp::audio::BufferView<float>(
+                cue_channels, 2, kFrames),
+        },
+        {
+            .info = {
+                .name = "Stem Out",
+                .index = 2,
+                .direction = BusDirection::Output,
+                .role = BusRole::Aux,
+                .declared_channels = 2,
+                .optional = true,
+                .active = false,
+            },
+            .buffer = {},
+        },
+    }};
+
+    ProcessBuffers buffers{
+        ProcessBusBufferSet<const float>{std::span(inputs)},
+        ProcessBusBufferSet<float>{std::span(outputs)},
+    };
+    pulp::midi::MidiBuffer midi_in;
+    pulp::midi::MidiBuffer midi_out;
+    processor.process(buffers, midi_in, midi_out, ProcessContext{});
+
+    REQUIRE(processor.process_buffer_calls == 1);
+    REQUIRE(processor.process_calls == 0);
+    REQUIRE(processor.saw_no_inputs);
+    REQUIRE(processor.saw_layout_ok);
+    REQUIRE(processor.saw_storage_ok);
+
+    for (std::size_t i = 0; i < kFrames; ++i) {
+        REQUIRE(main_front_left[i] == 10.0f);
+        REQUIRE(main_front_right[i] == 11.0f);
+        REQUIRE(main_center[i] == 12.0f);
+        REQUIRE(main_lfe[i] == 13.0f);
+        REQUIRE(main_surround_left[i] == 14.0f);
+        REQUIRE(main_surround_right[i] == 15.0f);
+        REQUIRE(cue_left[i] == 20.0f);
+        REQUIRE(cue_right[i] == 21.0f);
+        REQUIRE(stem_left[i] == -1.0f);
+        REQUIRE(stem_right[i] == -2.0f);
+    }
+}
+
 TEST_CASE("PluginDescriptor carries MIDI, MPE, UMP, and mobile flags independently",
           "[format][processor-defaults][flags]") {
     PluginDescriptor d;
@@ -196,6 +628,193 @@ TEST_CASE("PrepareContext defaults match the headless stereo render path",
     REQUIRE(c.max_buffer_size == 512);
     REQUIRE(c.input_channels == 2);
     REQUIRE(c.output_channels == 2);
+    REQUIRE(c.resource_limits.max_persistent_bytes == 0);
+    REQUIRE(c.resource_limits.max_block_scratch_bytes == 0);
+    REQUIRE(c.resource_limits.max_total_bytes == 0);
+    REQUIRE(c.resource_limits.max_block_size == 0);
+    REQUIRE(c.resource_limits.max_input_channels == 0);
+    REQUIRE(c.resource_limits.max_output_channels == 0);
+    REQUIRE(c.resource_limits.max_parameter_events == 0);
+    REQUIRE(c.resource_limits.max_midi_events == 0);
+    REQUIRE(c.resource_limits.max_voices == 0);
+}
+
+TEST_CASE("Prepare resource usage totals persistent and block scratch bytes",
+          "[format][processor-defaults][prepare-budget][phase2]") {
+    PrepareResourceUsage usage;
+    usage.persistent_bytes = 1024;
+    usage.block_scratch_bytes = 256;
+
+    REQUIRE(usage.total_bytes() == 1280);
+}
+
+TEST_CASE("Prepare resource limits default to unlimited",
+          "[format][processor-defaults][prepare-budget][phase2]") {
+    PrepareResourceUsage usage;
+    usage.persistent_bytes = 1'000'000;
+    usage.block_scratch_bytes = 2'000'000;
+    usage.block_size = 8192;
+    usage.input_channels = 64;
+    usage.output_channels = 64;
+    usage.parameter_events = 4096;
+    usage.midi_events = 4096;
+    usage.voices = 512;
+
+    REQUIRE(first_exceeded_prepare_resource_limit(usage, {}) ==
+            PrepareResourceLimit::None);
+}
+
+TEST_CASE("Prepare resource helper reports the first exceeded budget",
+          "[format][processor-defaults][prepare-budget][phase2]") {
+    PrepareResourceUsage usage;
+    usage.persistent_bytes = 2048;
+    usage.block_scratch_bytes = 1024;
+    usage.block_size = 512;
+    usage.input_channels = 2;
+    usage.output_channels = 2;
+    usage.parameter_events = 128;
+    usage.midi_events = 256;
+    usage.voices = 16;
+
+    PrepareResourceLimits limits;
+    limits.max_persistent_bytes = 2047;
+    limits.max_block_scratch_bytes = 1;
+    REQUIRE(first_exceeded_prepare_resource_limit(usage, limits) ==
+            PrepareResourceLimit::PersistentBytes);
+
+    limits.max_persistent_bytes = 2048;
+    REQUIRE(first_exceeded_prepare_resource_limit(usage, limits) ==
+            PrepareResourceLimit::BlockScratchBytes);
+
+    limits.max_block_scratch_bytes = 1024;
+    limits.max_total_bytes = 3071;
+    REQUIRE(first_exceeded_prepare_resource_limit(usage, limits) ==
+            PrepareResourceLimit::TotalBytes);
+
+    limits.max_total_bytes = 3072;
+    limits.max_block_size = 511;
+    REQUIRE(first_exceeded_prepare_resource_limit(usage, limits) ==
+            PrepareResourceLimit::BlockSize);
+
+    limits.max_block_size = 512;
+    limits.max_input_channels = 1;
+    REQUIRE(first_exceeded_prepare_resource_limit(usage, limits) ==
+            PrepareResourceLimit::InputChannels);
+
+    limits.max_input_channels = 2;
+    limits.max_output_channels = 1;
+    REQUIRE(first_exceeded_prepare_resource_limit(usage, limits) ==
+            PrepareResourceLimit::OutputChannels);
+
+    limits.max_output_channels = 2;
+    limits.max_parameter_events = 127;
+    REQUIRE(first_exceeded_prepare_resource_limit(usage, limits) ==
+            PrepareResourceLimit::ParameterEvents);
+
+    limits.max_parameter_events = 128;
+    limits.max_midi_events = 255;
+    REQUIRE(first_exceeded_prepare_resource_limit(usage, limits) ==
+            PrepareResourceLimit::MidiEvents);
+
+    limits.max_midi_events = 256;
+    limits.max_voices = 15;
+    REQUIRE(first_exceeded_prepare_resource_limit(usage, limits) ==
+            PrepareResourceLimit::Voices);
+
+    limits.max_voices = 16;
+    REQUIRE(first_exceeded_prepare_resource_limit(usage, limits) ==
+            PrepareResourceLimit::None);
+}
+
+TEST_CASE("Processor prepare resource estimates can be checked against host limits",
+          "[format][processor-defaults][prepare-budget][phase2]") {
+    ResourceReportingProcessor p;
+    p.persistent_bytes = 4096;
+    p.block_scratch_bytes = 1024;
+    p.parameter_events = 32;
+    p.midi_events = 64;
+    p.voices = 8;
+
+    PrepareContext context;
+    context.max_buffer_size = 256;
+    context.input_channels = 2;
+    context.output_channels = 2;
+
+    const auto estimate = p.estimate_prepare_resources(context);
+    REQUIRE(estimate.persistent_bytes == 4096);
+    REQUIRE(estimate.block_scratch_bytes == 1024);
+    REQUIRE(estimate.block_size == 256);
+    REQUIRE(estimate.input_channels == 2);
+    REQUIRE(estimate.output_channels == 2);
+    REQUIRE(estimate.parameter_events == 32);
+    REQUIRE(estimate.midi_events == 64);
+    REQUIRE(estimate.voices == 8);
+
+    REQUIRE(p.check_prepare_resource_limits(context) == PrepareResourceLimit::None);
+
+    context.resource_limits.max_total_bytes = 4096;
+    REQUIRE(p.check_prepare_resource_limits(context) ==
+            PrepareResourceLimit::TotalBytes);
+
+    context.resource_limits.max_total_bytes = 8192;
+    context.resource_limits.max_voices = 4;
+    REQUIRE(p.check_prepare_resource_limits(context) ==
+            PrepareResourceLimit::Voices);
+}
+
+TEST_CASE("Processor memory pressure can shrink rebuildable prepare caches",
+          "[format][processor-defaults][prepare-budget][memory-pressure][phase2]") {
+    MemoryPressureReportingProcessor p;
+    p.prepared_core_bytes = 4096;
+    p.advisory_cache_bytes = 2048;
+    p.critical_cache_bytes = 8192;
+    p.block_scratch_bytes = 1024;
+    p.parameter_events = 32;
+    p.midi_events = 64;
+    p.voices = 8;
+
+    PrepareContext context;
+    context.max_buffer_size = 256;
+    context.input_channels = 2;
+    context.output_channels = 2;
+    context.resource_limits.max_block_scratch_bytes = 1024;
+    context.resource_limits.max_total_bytes = 7000;
+    context.resource_limits.max_parameter_events = 32;
+    context.resource_limits.max_midi_events = 64;
+    context.resource_limits.max_voices = 8;
+
+    p.prepare(context);
+    REQUIRE(p.prepared);
+
+    auto estimate = p.estimate_prepare_resources(context);
+    REQUIRE(estimate.persistent_bytes == 14'336);
+    REQUIRE(estimate.block_scratch_bytes == 1024);
+    REQUIRE(estimate.total_bytes() == 15'360);
+    REQUIRE(p.check_prepare_resource_limits(context) ==
+            PrepareResourceLimit::TotalBytes);
+
+    p.on_memory_pressure(Processor::MemoryPressure::Advisory);
+    REQUIRE(p.memory_pressure_calls == 1);
+    REQUIRE(p.last_pressure == Processor::MemoryPressure::Advisory);
+    estimate = p.estimate_prepare_resources(context);
+    REQUIRE(estimate.persistent_bytes == 12'288);
+    REQUIRE(estimate.block_scratch_bytes == 1024);
+    REQUIRE(p.check_prepare_resource_limits(context) ==
+            PrepareResourceLimit::TotalBytes);
+    REQUIRE(p.prepared);
+
+    p.on_memory_pressure(Processor::MemoryPressure::Critical);
+    REQUIRE(p.memory_pressure_calls == 2);
+    REQUIRE(p.last_pressure == Processor::MemoryPressure::Critical);
+    estimate = p.estimate_prepare_resources(context);
+    REQUIRE(estimate.persistent_bytes == 4096);
+    REQUIRE(estimate.block_scratch_bytes == 1024);
+    REQUIRE(estimate.parameter_events == 32);
+    REQUIRE(estimate.midi_events == 64);
+    REQUIRE(estimate.voices == 8);
+    REQUIRE(p.check_prepare_resource_limits(context) ==
+            PrepareResourceLimit::None);
+    REQUIRE(p.prepared);
 }
 
 TEST_CASE("ProcessContext defaults represent stopped 4/4 playback at 120 BPM",

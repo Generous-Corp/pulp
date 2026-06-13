@@ -13,6 +13,7 @@
 // | Large data swap            | TripleBuffer<T>  | Wavetables, IR buffers       |
 // | Ordered event stream       | SPSC FIFO        | MIDI events, UI commands     |
 // | Latest-value metering      | TripleBuffer<T>  | Audio→UI meter data          |
+// | Prepared resource handoff  | RealtimeResourceSlot<T,N> | IR/sample swaps |
 //
 // NEVER use on the audio thread:
 //   std::mutex, std::condition_variable, heap allocation, I/O
@@ -23,8 +24,11 @@
 //   - SeqLock uses acquire/release (ensures coherent multi-field snapshots)
 //   - TripleBuffer uses acquire/release on the flag word
 //   - EventLoop uses acquire/release + condition_variable (UI thread only)
+//   - RealtimeResourceSlot publishes a prepared pointer with release/acquire;
+//     reclaim retired resources away from the audio thread
 
 #include <pulp/runtime/assert.hpp>
+#include <pulp/runtime/background_job.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/node_abi.hpp>
 #include <pulp/runtime/scope_guard.hpp>

@@ -13,11 +13,14 @@
 
 #include <pulp/midi/mpe_buffer.hpp>
 #include <pulp/midi/mpe_voice_tracker.hpp>
+#include <pulp/runtime/budget_policy.hpp>
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 namespace pulp::midi {
@@ -110,6 +113,26 @@ enum class MpeVoiceStealMode {
     LowestVelocity, ///< Steal the quietest voice
     LowestPitch,    ///< Steal the lowest-note voice
     HighestPitch,   ///< Steal the highest-note voice
+};
+
+struct MpeVoiceAllocatorTelemetry {
+    std::size_t polyphony = 0;
+    std::size_t active_voice_count = 0;
+    std::size_t releasing_voice_count = 0;
+    std::uint64_t steal_count = 0;
+    MpeVoiceStealMode steal_mode = MpeVoiceStealMode::Oldest;
+    bool last_was_glide = false;
+};
+
+struct MpeVoiceAllocatorRuntimeBudgetReport {
+    runtime::RuntimeBudgetDecision decision{};
+    runtime::RuntimeBudgetFrameStats frame_stats{};
+    MpeVoiceAllocatorTelemetry telemetry{};
+    std::uint64_t estimated_cost = 0;
+
+    bool should_run_optional_work() const noexcept {
+        return decision.should_run();
+    }
 };
 
 /// Glide/legato detector — observes MPE note-on events and reports when
@@ -213,6 +236,65 @@ public:
         return n;
     }
 
+    std::size_t releasing_count() const {
+        std::size_t n = 0;
+        for (const auto& v : voices_) if (v.active() && v.releasing()) ++n;
+        return n;
+    }
+
+    std::uint64_t steal_count() const {
+        return steal_count_.load(std::memory_order_relaxed);
+    }
+
+    void reset_steal_count() {
+        steal_count_.store(0, std::memory_order_relaxed);
+    }
+
+    /// Cheap owner-thread snapshot for voice-count telemetry. Call from
+    /// the allocator owner (normally the audio thread) and publish the
+    /// returned value through a lock-free latest-value channel if another
+    /// thread needs to observe it.
+    MpeVoiceAllocatorTelemetry telemetry() const {
+        return {
+            .polyphony = polyphony(),
+            .active_voice_count = active_count(),
+            .releasing_voice_count = releasing_count(),
+            .steal_count = steal_count(),
+            .steal_mode = steal_mode_,
+            .last_was_glide = last_was_glide_,
+        };
+    }
+
+    std::uint64_t estimate_optional_runtime_cost() const {
+        const auto t = telemetry();
+        std::uint64_t cost = 0;
+        cost = saturating_add_u64_(
+            cost, saturating_mul_u64_(
+                static_cast<std::uint64_t>(t.polyphony), 4));
+        cost = saturating_add_u64_(
+            cost, saturating_mul_u64_(
+                static_cast<std::uint64_t>(t.active_voice_count), 64));
+        cost = saturating_add_u64_(
+            cost, saturating_mul_u64_(
+                static_cast<std::uint64_t>(t.releasing_voice_count), 32));
+        return cost;
+    }
+
+    MpeVoiceAllocatorRuntimeBudgetReport evaluate_optional_runtime_budget(
+        runtime::RuntimeBudgetFrame& frame,
+        runtime::RuntimeWorkLane lane = runtime::RuntimeWorkLane::Background,
+        bool required = false) const {
+        const auto t = telemetry();
+        const auto cost = estimate_optional_runtime_cost();
+        const auto decision = frame.evaluate(lane, cost, required);
+        return {
+            .decision = decision,
+            .frame_stats = frame.stats(),
+            .telemetry = t,
+            .estimated_cost = cost,
+        };
+    }
+
     bool last_was_glide() const { return last_was_glide_; }
 
     void reset_all() {
@@ -223,6 +305,19 @@ public:
     }
 
 private:
+    static std::uint64_t saturating_add_u64_(std::uint64_t a,
+                                             std::uint64_t b) {
+        const auto max = std::numeric_limits<std::uint64_t>::max();
+        return b > max - a ? max : a + b;
+    }
+
+    static std::uint64_t saturating_mul_u64_(std::uint64_t a,
+                                             std::uint64_t b) {
+        const auto max = std::numeric_limits<std::uint64_t>::max();
+        if (a == 0 || b == 0) return 0;
+        return a > max / b ? max : a * b;
+    }
+
     Voice* pick_free_voice() {
         for (auto& v : voices_) if (!v.active()) return &v;
         return nullptr;
@@ -245,6 +340,7 @@ private:
         };
         Voice* target = &voices_[0];
         for (auto& v : voices_) if (cmp(v, *target)) target = &v;
+        steal_count_.fetch_add(1, std::memory_order_relaxed);
         return target;
     }
 
@@ -261,6 +357,7 @@ private:
     MpeVoiceStealMode steal_mode_ = MpeVoiceStealMode::Oldest;
     MpeGlideDetector glide_detector_;
     bool last_was_glide_ = false;
+    std::atomic<std::uint64_t> steal_count_{0};
 };
 
 } // namespace pulp::midi

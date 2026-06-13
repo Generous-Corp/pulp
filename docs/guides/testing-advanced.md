@@ -26,6 +26,17 @@ host.process(out_view, in_view);
 REQUIRE(out.channel(0)[0] != 0.0f);
 ```
 
+For resource-budget tests, use `try_prepare()` with non-zero
+`PrepareResourceLimits`. It returns false before calling `Processor::prepare()`
+when the processor's `estimate_prepare_resources()` result exceeds a supplied
+limit.
+
+Headless tests can also drive the unified runtime-mode contract by passing an
+explicit `ProcessContext` to `process()`. Set `process_mode`,
+`render_speed_hint`, `is_bypassed`, `is_tail_drain`, `reset_requested`, or
+`transport_jump` to exercise the same block-level decisions a format adapter
+would deliver.
+
 ### HeadlessHost with MIDI
 
 ```cpp
@@ -116,12 +127,18 @@ harness.process_blocks(10);
 harness.run_validator("pluginval", "build/VST3/MyPlugin.vst3");
 harness.run_validator("clap-validator", "build/CLAP/MyPlugin.clap");
 
+// Record runtime load/xrun telemetry with the shared overload policy
+harness.record_runtime_overload(load_snapshot, xrun_count);
+
 // Generate JSON report (conforms to validation-report-v1.schema.json)
 auto report = harness.generate_report();
 harness.write_report("/tmp/validation/report.json");
 ```
 
 The report JSON is machine-readable and can be consumed by CI scripts or agents.
+Runtime overload entries include severity, shed/bypass recommendations, xrun
+counts, callback load, and validation-failure status so host-lab reports use the
+same policy as UI/diagnostic surfaces.
 
 ## Sanitizer Builds
 

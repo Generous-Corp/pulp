@@ -35,6 +35,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 
 namespace pulp::midi {
@@ -45,6 +46,15 @@ namespace pulp::midi {
 struct TimestampedShortMessage {
     choc::midi::ShortMessage message{};
     double timestamp_seconds = 0.0;
+};
+
+struct MidiMessageCollectorTelemetry {
+    std::size_t queue_size_approx = 0;
+    std::size_t queue_capacity = 0;
+    std::uint64_t queue_overflow_count = 0;
+    std::size_t pending_size_approx = 0;
+    std::size_t pending_capacity = 0;
+    std::size_t dropped_future = 0;
 };
 
 template<std::size_t Capacity = 256>
@@ -158,6 +168,35 @@ public:
         return dropped_future_.load(std::memory_order_relaxed);
     }
 
+    /// Producer-side queue overflow count from failed `push_now()`
+    /// attempts. Monotonic until reset explicitly by a non-audio
+    /// observer.
+    std::uint64_t queue_overflow_count() const {
+        return queue_.overflow_count();
+    }
+
+    /// Reset only the producer queue overflow counter. This deliberately
+    /// does not reset `dropped_future()`, whose existing contract is
+    /// monotonic for consumer-side future-event loss.
+    void reset_queue_overflow_count() {
+        queue_.reset_overflow_count();
+    }
+
+    /// Cheap snapshot for UI, validation, and inspector polling. Counts
+    /// the producer queue, consumer-owned pending ring, queue overflow,
+    /// and future-event drops without allocating.
+    MidiMessageCollectorTelemetry telemetry() const {
+        const auto queue = queue_.telemetry();
+        return {
+            .queue_size_approx = queue.size_approx,
+            .queue_capacity = queue.capacity,
+            .queue_overflow_count = queue.overflow_count,
+            .pending_size_approx = pending_size_approx(),
+            .pending_capacity = pending_capacity(),
+            .dropped_future = dropped_future(),
+        };
+    }
+
     /// Approximate number of events currently queued (does NOT count
     /// the deferred-future entries in the pending ring or the
     /// consumer-side overflow slot).
@@ -184,6 +223,14 @@ private:
     /// realistic scripting / playback bursts without consumer-side drops.
     std::array<std::optional<TimestampedShortMessage>, kPendingSlots> pending_{};
     std::atomic<std::size_t> dropped_future_{0};
+
+    std::size_t pending_size_approx() const {
+        std::size_t count = 0;
+        for (const auto& slot : pending_) {
+            if (slot.has_value()) ++count;
+        }
+        return count;
+    }
 
     /// Place @p entry in an empty pending slot. Returns true if
     /// @p entry was stored, false if all slots are occupied. Eviction

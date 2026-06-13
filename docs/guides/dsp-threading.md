@@ -5,9 +5,8 @@ blocks it — a lock, an allocation, a system call — causes the
 listener to hear a dropout. This page covers the small set of rules
 that keep your `Processor::process()` callback safe.
 
-If you're coming from JUCE: the rules are almost identical (and the
-gotchas are the same). Pulp's API just makes the safe pattern the
-default.
+Pulp's API is shaped so the safe pattern is the default: allocate and prepare
+off the audio thread, then keep `process()` bounded and predictable.
 
 ## The three rules
 
@@ -27,6 +26,31 @@ wraps `View::paint_all` and every adapter's call to
 `Processor::process()` in one, so opt-in debug-allocator hooks can
 shout when rule #1 is violated. Tooling can read
 `pulp::runtime::is_in_no_alloc_scope()` to detect the protected region.
+
+## Budget prepare-time resources
+
+`format::PrepareContext` carries optional `resource_limits` for hosts and test
+harnesses that need fail-closed behavior before large allocations happen. A zero
+limit means "unspecified/unlimited" for source compatibility.
+
+Processors with large prepared storage can override
+`Processor::estimate_prepare_resources()` to report persistent bytes, fixed
+per-block scratch bytes, block size, channel counts, event capacities, and voice
+capacity. Hosts can call `Processor::check_prepare_resource_limits()` before
+`prepare()` and reject configurations that exceed a non-zero limit; the
+headless test/batch host exposes this as `HeadlessHost::try_prepare()`. This
+keeps oversized samplers, convolution IRs, analysis caches, and voice pools from
+discovering budget failure on the audio thread.
+
+A failed `HeadlessHost::try_prepare()` is a preflight failure, not a partial
+reconfiguration. It does not call `Processor::prepare()` and does not replace
+the last successful prepared render context, so batch tools can probe tighter
+budgets without invalidating the processor that is already prepared.
+
+Memory-pressure callbacks run on an owner thread and are allowed to drop
+rebuildable caches so a later prepare retry fits tighter limits. They must keep
+the prepared core state coherent, keep fixed per-block scratch accounted in
+`estimate_prepare_resources()`, and never perform audio-thread recovery work.
 
 ## Read parameters once per block, not per sample
 
@@ -152,6 +176,18 @@ render speed, and reset/bypass/tail/transport-jump flags. `EventBlock`
 keeps sparse `ParameterEventQueue` automation and dense
 `AudioRateModulationView` lanes as separate borrowed views.
 
+`ProcessContext::process_mode` tells a processor whether the current block is
+live realtime audio or an offline render. Existing adapters default to
+`ProcessMode::Realtime`; headless and export-style hosts should set
+`ProcessMode::Offline` explicitly when they drive deterministic non-live
+processing. Use the helper predicates instead of comparing raw enum values in
+hot code. A realtime block with a slower-than-realtime hint is still an
+audio-thread callback. Bypass, tail-drain, reset, and transport-jump flags are
+block metadata for processors that need to distinguish those host states
+without inferring them from transport fields. `HeadlessHost::process(...,
+ProcessContext)` forwards those flags unchanged, so tests can cover
+runtime-mode decisions without a plug-in format SDK.
+
 The contract is deliberately non-owning: bus audio is borrowed from the
 host or renderer, event containers are owned by adapters, and scratch
 memory is provided before the callback. This keeps the same hard
@@ -260,11 +296,129 @@ an optional per-voice `AhdsrEnvelope`. It can accumulate into an output buffer
 or clear/overwrite the requested span. Looping, streaming, interpolation policy,
 modulation, and SIMD voice summing remain separate slices.
 
+Prefer the `ProcessContext` predicates for common block-policy decisions:
+`should_reset_dsp_state()` covers explicit reset requests and derived transport
+jumps, `is_maintenance_render()` covers bypass or tail-drain calls that are not
+normal input-driven renders, and `should_render_tail_only()` identifies blocks
+where the host wants existing delay/reverb/lookahead state to settle without
+starting new work.
+
+## Publish cheap runtime telemetry
+
+Live tools should read bounded snapshots from the audio thread, not run
+analysis on it. `audio::AudioProcessLoadMeasurer` publishes relaxed latest-
+value telemetry for callback count, elapsed time, buffer budget, current load,
+peak load, and overload count. `audio::AudioDeviceManager` combines that
+process-load snapshot with its xrun counter for UI, Audio Inspector, and
+validation polling. Polling `runtime_telemetry_snapshot()` is expected to stay
+allocation-free; it should aggregate already-published counters, not allocate
+or query the audio backend.
+
+Validation and UI surfaces should classify that snapshot with
+`audio::evaluate_audio_runtime_overload()` instead of inventing local
+thresholds. The shared policy reports nominal, watch, overloaded, and critical
+states, and distinguishes optional-work shedding from optional-work bypass and
+validation failure. This keeps the audio callback limited to publishing cheap
+counters while host-lab reports, agents, and inspector surfaces make consistent
+post-callback decisions.
+
+Audio Inspector is a consumer of these snapshots, not the producer. Feed its
+runtime telemetry bridge from `AudioDeviceManager::runtime_telemetry_snapshot()`
+or another bounded source so agents can inspect load/xrun state through the
+inspector protocol without adding locks, allocations, or analysis work to
+`process()`.
+The non-GPU inspector-domain tests cover this owner-thread bridge explicitly:
+manager load/xrun snapshots are copied into `AudioInspector` as latest values
+for UI and agent polling.
+
+`state::ParameterEventQueue` also exposes fixed-size queue telemetry, including
+its monotonic overflow count, so automation drops are visible instead of only
+being implied by a failed `push()`.
+
+`state::StateStore::rt_listener_queue_telemetry()` reports pressure on the
+`set_value_rt()` to `pump_listeners()` queue, including skipped Main-listener
+notifications when UI polling falls behind.
+
+For ordered audio-thread/UI-thread event streams, `runtime::SpscQueue` exposes
+the same producer-side overflow count and telemetry snapshot.
+
+`midi::MidiMessageCollector` combines the producer queue snapshot with its
+consumer-owned pending-ring occupancy and future-event drop counter, making
+UI-to-audio MIDI back-pressure visible without inspecting the audio callback.
+
+`midi::Synthesiser` and `midi::MpeVoiceAllocator` expose owner-thread voice
+telemetry snapshots for polyphony, active/releasing voice counts, and steal
+counts. Read those snapshots from the processor/audio owner and publish the
+returned value through a lock-free latest-value channel when UI or tooling
+needs to observe it. For optional instrument-side work such as per-voice
+analysis refresh, preview rendering, or diagnostics, call
+`evaluate_optional_runtime_budget()` with a `runtime::RuntimeBudgetFrame`.
+The helper uses voice-pool telemetry to produce the shared run/defer/shed/bypass
+decision while the actual voice render path stays on the normal prepared audio
+path. The voice cost model is deterministic: polyphony capacity, active voices,
+and releasing voices. It is meant for portable budget fixtures and optional-work
+fallbacks, not CPU timing. The helper does not drop active notes, preempt voice
+rendering, or change voice-stealing policy; it only tells optional work whether
+to run, defer, shed, or bypass.
+
+Keep this path boring: write fixed-size counters, meter snapshots, and bounded
+queues from `process()`. Move FFTs, exported waveforms, parameter sweeps, and
+other expensive analysis to an offline command, frozen copy, or validation
+artifact.
+
+## Run resource work off the audio thread
+
+Use `runtime::BackgroundJobService` for cancellable non-RT resource work such as
+IR loading, sample import, preset restore, waveform analysis, and other jobs
+that may allocate, block, report progress, or touch the filesystem. Jobs receive
+a `runtime::BackgroundJobContext` with a shared `CancellationToken` and a
+progress publisher. Call `BackgroundJobHandle::wait()` only from a control,
+test, or teardown thread; never wait from `process()`.
+For owner teardown, call `BackgroundJobService::cancel_all()` and then
+`wait_all()` from a non-RT thread so running jobs can observe cancellation and
+queued jobs can be drained without executing stale work.
+
+When a background job prepares a new immutable resource for the audio thread,
+publish it through `runtime::RealtimeResourceSlot<T, N>`. The control thread
+owns `publish()` and `reclaim_retired()`. The audio thread only calls `get()`,
+which is a single acquire-load of the latest prepared pointer and does not
+allocate, lock, wait, or take ownership. Drain retired resources from the
+control side before the fixed reclaim queue fills; if it fills, publication
+fails or defers deletion rather than deleting memory a callback may still read.
+Track `retired_count_approx()` and `retire_overflow_count()` from the control
+side when resources can be regenerated faster than teardown drains them.
+
+For optional work that can degrade, use `runtime::evaluate_runtime_budget()` to
+make the run/defer/shed/bypass decision explicit. Critical audio work remains
+on the prepared path, interactive work can defer to preserve a reserve, and
+background/opportunistic analysis can be shed or bypassed during overload
+instead of competing with the callback. For a group of optional tasks in one
+callback or worker tick, `runtime::RuntimeBudgetFrame` applies the same policy
+while tracking remaining budget and degradation counters without allocation.
+
+Common recipes:
+
+* IR load: decode and resample the impulse response in a background job, build
+  the immutable convolution resource there, then publish the prepared resource
+  to `RealtimeResourceSlot` after checking the job has not been cancelled.
+* Preset or resource restore: parse files, validate schema, and resolve missing
+  resource diagnostics off the audio thread. Publish only the final immutable
+  state snapshot; keep the old snapshot active if validation or cancellation
+  wins.
+* Waveform or analysis refresh: copy or freeze the input range first, run FFT,
+  thumbnail, or statistics work in the job, and publish a bounded UI snapshot
+  instead of reading editor data from `process()`.
+* Sample import: decode, normalize, build loop metadata, and prefetch pages in
+  the job. Publish a prepared sample-map revision atomically; treat cache misses
+  as control-thread work, not audio-thread file I/O.
+
 ## See also
 
 * [`core/state/include/pulp/state/store.hpp`](../../core/state/include/pulp/state/store.hpp)
   — `snapshot()`, `snapshot_modulated()`, `set_value_rt()`,
   `pump_listeners()`.
+* [`core/audio/include/pulp/audio/load_measurer.hpp`](../../core/audio/include/pulp/audio/load_measurer.hpp)
+  — load, peak-load, and overload-count snapshots.
 * [`core/runtime/include/pulp/runtime/scoped_no_alloc.hpp`](../../core/runtime/include/pulp/runtime/scoped_no_alloc.hpp)
 * [`core/format/include/pulp/format/process_block.hpp`](../../core/format/include/pulp/format/process_block.hpp)
 * [`core/audio/include/pulp/audio/instrument_envelope.hpp`](../../core/audio/include/pulp/audio/instrument_envelope.hpp)

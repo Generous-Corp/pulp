@@ -10,6 +10,9 @@
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/midi/mpe_buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
+#if defined(__unix__) || defined(__APPLE__)
+#include "native_components/rt_test_scope.hpp"
+#endif
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -202,6 +205,41 @@ TEST_CASE("SignalGraph stateful custom node: lifecycle + state round-trip",
     REQUIRE(graph.prepare(48000.0, 4));
     graph.process(out_view, in_view, 4);
     for (int i = 0; i < 4; ++i) REQUIRE(out_s[i] == in_s[i] * 3.0f);
+}
+
+TEST_CASE("SignalGraph generated custom state changes require re-prepare",
+          "[host][graph][generated][rt-safety][phase3]") {
+    SignalGraph graph;
+    REQUIRE(graph.register_custom_node_type(make_level_type()));
+
+    auto input = graph.add_input_node(1, "Input");
+    auto node = graph.add_custom_node("pulp.test.level", "Level A");
+    auto output = graph.add_output_node(1, "Output");
+    REQUIRE(node != 0);
+    REQUIRE(graph.connect(input, 0, node, 0));
+    REQUIRE(graph.connect(node, 0, output, 0));
+    REQUIRE(graph.set_custom_node_state(node, level_bytes(3.0f)));
+    REQUIRE(graph.prepare(48000.0, 4));
+
+    float in_s[4] = {0.25f, 0.5f, 0.75f, 1.0f};
+    float out_s[4] = {-1, -1, -1, -1};
+    const float* in_p[1] = {in_s};
+    float* out_p[1] = {out_s};
+    pulp::audio::BufferView<const float> in_view(in_p, 1, 4);
+    pulp::audio::BufferView<float> out_view(out_p, 1, 4);
+
+    graph.process(out_view, in_view, 4);
+    for (int i = 0; i < 4; ++i) REQUIRE(out_s[i] == in_s[i] * 3.0f);
+
+    REQUIRE(graph.set_custom_node_state(node, level_bytes(2.0f)));
+    std::fill(std::begin(out_s), std::end(out_s), -1.0f);
+    graph.process(out_view, in_view, 4);
+    for (float sample : out_s) REQUIRE(sample == 0.0f);
+
+    REQUIRE(graph.prepare(48000.0, 4));
+    std::fill(std::begin(out_s), std::end(out_s), -1.0f);
+    graph.process(out_view, in_view, 4);
+    for (int i = 0; i < 4; ++i) REQUIRE(out_s[i] == in_s[i] * 2.0f);
 }
 
 TEST_CASE("SignalGraph custom node registry keeps versions distinct",
@@ -827,6 +865,457 @@ TEST_CASE("SignalGraph query helpers handle non-plugin and cleared nodes",
     REQUIRE(graph.node_gain(gain) == 1.0f);
 }
 
+TEST_CASE("SignalGraph prepare rejects graphs beyond configured limits",
+          "[host][graph][limits][phase2]") {
+    SECTION("node count") {
+        SignalGraph graph;
+        auto limits = graph.limits();
+        limits.max_nodes = 2;
+        graph.set_limits(limits);
+
+        auto input = graph.add_input_node(1, "in");
+        auto gain = graph.add_gain_node("gain");
+        auto output = graph.add_output_node(1, "out");
+        REQUIRE(graph.connect(input, 0, gain, 0));
+        REQUIRE(graph.connect(gain, 0, output, 0));
+
+        REQUIRE_FALSE(graph.prepare(48000.0, 16));
+        REQUIRE(graph.latency_samples() == 0);
+    }
+
+    SECTION("connection count") {
+        SignalGraph graph;
+        auto limits = graph.limits();
+        limits.max_connections = 1;
+        graph.set_limits(limits);
+
+        auto input = graph.add_input_node(1, "in");
+        auto gain = graph.add_gain_node("gain");
+        auto output = graph.add_output_node(1, "out");
+        REQUIRE(graph.connect(input, 0, gain, 0));
+        REQUIRE(graph.connect(gain, 0, output, 0));
+
+        REQUIRE_FALSE(graph.prepare(48000.0, 16));
+        REQUIRE(graph.latency_samples() == 0);
+    }
+
+    SECTION("port count") {
+        SignalGraph graph;
+        auto limits = graph.limits();
+        limits.max_ports = 3;
+        graph.set_limits(limits);
+
+        auto input = graph.add_input_node(2, "in");
+        auto output = graph.add_output_node(2, "out");
+        REQUIRE(graph.connect(input, 0, output, 0));
+        REQUIRE(graph.connect(input, 1, output, 1));
+
+        REQUIRE_FALSE(graph.prepare(48000.0, 16));
+        REQUIRE(graph.latency_samples() == 0);
+    }
+
+    SECTION("block size") {
+        SignalGraph graph;
+        auto limits = graph.limits();
+        limits.max_block_size = 8;
+        graph.set_limits(limits);
+
+        auto input = graph.add_input_node(1, "in");
+        auto output = graph.add_output_node(1, "out");
+        REQUIRE(graph.connect(input, 0, output, 0));
+
+        REQUIRE_FALSE(graph.prepare(48000.0, 16));
+        REQUIRE(graph.prepare(48000.0, 8));
+    }
+}
+
+TEST_CASE("SignalGraph generated graph validation reports limit reasons",
+          "[host][graph][generated][limits][phase3]") {
+    SECTION("valid graph") {
+        SignalGraph graph;
+        auto input = graph.add_input_node(1, "in");
+        auto output = graph.add_output_node(1, "out");
+        REQUIRE(graph.connect(input, 0, output, 0));
+
+        const auto validation = graph.validate_generated_graph(16);
+        REQUIRE(validation.accepted);
+        REQUIRE(validation.reason
+                == SignalGraph::GeneratedGraphValidationRejectReason::None);
+    }
+
+    SECTION("invalid block size") {
+        SignalGraph graph;
+        const auto validation = graph.validate_generated_graph(0);
+        REQUIRE_FALSE(validation.accepted);
+        REQUIRE(validation.reason
+                == SignalGraph::GeneratedGraphValidationRejectReason::InvalidBlockSize);
+        REQUIRE(validation.actual == 0);
+        REQUIRE(validation.limit == 1);
+    }
+
+    SECTION("block size budget") {
+        SignalGraph graph;
+        auto limits = graph.limits();
+        limits.max_block_size = 8;
+        graph.set_limits(limits);
+
+        const auto validation = graph.validate_generated_graph(16);
+        REQUIRE_FALSE(validation.accepted);
+        REQUIRE(validation.reason
+                == SignalGraph::GeneratedGraphValidationRejectReason::MaxBlockSizeExceeded);
+        REQUIRE(validation.actual == 16);
+        REQUIRE(validation.limit == 8);
+    }
+
+    SECTION("node budget") {
+        SignalGraph graph;
+        auto limits = graph.limits();
+        limits.max_nodes = 2;
+        graph.set_limits(limits);
+
+        auto input = graph.add_input_node(1, "in");
+        auto gain = graph.add_gain_node("gain");
+        auto output = graph.add_output_node(1, "out");
+        REQUIRE(graph.connect(input, 0, gain, 0));
+        REQUIRE(graph.connect(gain, 0, output, 0));
+
+        const auto validation = graph.validate_generated_graph(16);
+        REQUIRE_FALSE(validation.accepted);
+        REQUIRE(validation.reason
+                == SignalGraph::GeneratedGraphValidationRejectReason::NodeLimitExceeded);
+        REQUIRE(validation.actual == 3);
+        REQUIRE(validation.limit == 2);
+    }
+
+    SECTION("connection budget") {
+        SignalGraph graph;
+        auto limits = graph.limits();
+        limits.max_connections = 1;
+        graph.set_limits(limits);
+
+        auto input = graph.add_input_node(1, "in");
+        auto gain = graph.add_gain_node("gain");
+        auto output = graph.add_output_node(1, "out");
+        REQUIRE(graph.connect(input, 0, gain, 0));
+        REQUIRE(graph.connect(gain, 0, output, 0));
+
+        const auto validation = graph.validate_generated_graph(16);
+        REQUIRE_FALSE(validation.accepted);
+        REQUIRE(validation.reason
+                == SignalGraph::GeneratedGraphValidationRejectReason::ConnectionLimitExceeded);
+        REQUIRE(validation.actual == 2);
+        REQUIRE(validation.limit == 1);
+    }
+
+    SECTION("port budget") {
+        SignalGraph graph;
+        auto limits = graph.limits();
+        limits.max_ports = 3;
+        graph.set_limits(limits);
+
+        auto input = graph.add_input_node(2, "in");
+        auto output = graph.add_output_node(2, "out");
+        REQUIRE(graph.connect(input, 0, output, 0));
+        REQUIRE(graph.connect(input, 1, output, 1));
+
+        const auto validation = graph.validate_generated_graph(16);
+        REQUIRE_FALSE(validation.accepted);
+        REQUIRE(validation.reason
+                == SignalGraph::GeneratedGraphValidationRejectReason::PortLimitExceeded);
+        REQUIRE(validation.actual == 4);
+        REQUIRE(validation.limit == 3);
+    }
+
+    SECTION("estimated work budget") {
+        SignalGraph graph;
+        auto input = graph.add_input_node(1, "in");
+        auto gain = graph.add_gain_node("gain");
+        auto output = graph.add_output_node(1, "out");
+        REQUIRE(graph.connect(input, 0, gain, 0));
+        REQUIRE(graph.connect(gain, 0, output, 0));
+
+        const std::size_t estimated =
+            graph.estimate_generated_graph_work_units(16);
+        REQUIRE(estimated == 160);
+
+        auto limits = graph.limits();
+        limits.max_estimated_work_units = estimated;
+        graph.set_limits(limits);
+        REQUIRE(graph.validate_generated_graph(16).accepted);
+
+        limits.max_estimated_work_units = estimated - 1;
+        graph.set_limits(limits);
+        const auto validation = graph.validate_generated_graph(16);
+        REQUIRE_FALSE(validation.accepted);
+        REQUIRE(validation.reason
+                == SignalGraph::GeneratedGraphValidationRejectReason::EstimatedWorkExceeded);
+        REQUIRE(validation.actual == estimated);
+        REQUIRE(validation.limit == estimated - 1);
+        REQUIRE_FALSE(graph.prepare(48000.0, 16));
+    }
+
+    SECTION("preflight does not clear the prepared snapshot") {
+        SignalGraph graph;
+        auto input = graph.add_input_node(1, "in");
+        auto output = graph.add_output_node(1, "out");
+        REQUIRE(graph.connect(input, 0, output, 0));
+        REQUIRE(graph.prepare(48000.0, 8));
+        const auto prepared = graph.prepared_stats();
+        REQUIRE(prepared.node_count == 2);
+        REQUIRE(prepared.max_block_size == 8);
+
+        const auto validation = graph.validate_generated_graph(0);
+        REQUIRE_FALSE(validation.accepted);
+        REQUIRE(validation.reason
+                == SignalGraph::GeneratedGraphValidationRejectReason::InvalidBlockSize);
+        REQUIRE(graph.prepared_stats().node_count == 2);
+
+        REQUIRE_FALSE(graph.prepare(48000.0, 0));
+        REQUIRE(graph.prepared_stats().node_count == 0);
+    }
+}
+
+TEST_CASE("SignalGraph prepares and routes a large graph at configured limits",
+          "[host][graph][limits][scale][phase2]") {
+    SignalGraph graph;
+    constexpr int kGainNodes = 128;
+    constexpr int kBlock = 16;
+
+    auto limits = graph.limits();
+    limits.max_nodes = static_cast<size_t>(kGainNodes + 2);
+    limits.max_connections = static_cast<size_t>(kGainNodes + 1);
+    limits.max_ports = static_cast<size_t>(kGainNodes * 4 + 2);
+    limits.max_block_size = kBlock;
+    graph.set_limits(limits);
+
+    auto input = graph.add_input_node(1, "in");
+    NodeId previous = input;
+    for (int i = 0; i < kGainNodes; ++i) {
+        auto gain = graph.add_gain_node("gain");
+        REQUIRE(graph.connect(previous, 0, gain, 0));
+        previous = gain;
+    }
+    auto output = graph.add_output_node(1, "out");
+    REQUIRE(graph.connect(previous, 0, output, 0));
+
+    REQUIRE(graph.nodes().size() == limits.max_nodes);
+    REQUIRE(graph.connections().size() == limits.max_connections);
+    REQUIRE(graph.prepare(48000.0, kBlock));
+
+    std::vector<float> input_samples(kBlock, 0.0f);
+    std::vector<float> output_samples(kBlock, -1.0f);
+    for (int i = 0; i < kBlock; ++i) {
+        input_samples[static_cast<size_t>(i)] = static_cast<float>(i) / 16.0f;
+    }
+    const float* in_ptrs[1] = {input_samples.data()};
+    float* out_ptrs[1] = {output_samples.data()};
+    pulp::audio::BufferView<const float> in_view(in_ptrs, 1, kBlock);
+    pulp::audio::BufferView<float> out_view(out_ptrs, 1, kBlock);
+
+    graph.process(out_view, in_view, kBlock);
+
+    for (int i = 0; i < kBlock; ++i) {
+        REQUIRE_THAT(output_samples[static_cast<size_t>(i)],
+                     WithinAbs(input_samples[static_cast<size_t>(i)], 1e-6f));
+    }
+
+#if defined(__unix__) || defined(__APPLE__)
+    std::fill(output_samples.begin(), output_samples.end(), -1.0f);
+    {
+        pulp::native_components::test::RtNoAllocScope no_alloc;
+        graph.process(out_view, in_view, kBlock);
+    }
+
+    for (int i = 0; i < kBlock; ++i) {
+        REQUIRE_THAT(output_samples[static_cast<size_t>(i)],
+                     WithinAbs(input_samples[static_cast<size_t>(i)], 1e-6f));
+    }
+#endif
+}
+
+TEST_CASE("SignalGraph exposes prepared runtime stats",
+          "[host][graph][stats][phase2]") {
+    SignalGraph graph;
+    REQUIRE(graph.prepared_stats().node_count == 0);
+
+    auto input = graph.add_input_node(1, "in");
+    auto gain = graph.add_gain_node("gain");
+    auto output = graph.add_output_node(1, "out");
+    REQUIRE(graph.connect(input, 0, gain, 0));
+    REQUIRE(graph.connect(gain, 0, output, 0));
+
+    constexpr int kBlock = 16;
+    REQUIRE(graph.prepare(48000.0, kBlock));
+
+    const auto stats = graph.prepared_stats();
+    REQUIRE(stats.node_count == 3);
+    REQUIRE(stats.ordered_node_count == 3);
+    REQUIRE(stats.connection_count == 2);
+    REQUIRE(stats.total_ports == 6);
+    REQUIRE(stats.max_block_size == kBlock);
+    REQUIRE(stats.node_audio_buffer_bytes == 384);
+    REQUIRE(stats.automation_buffer_bytes == 0);
+    REQUIRE(stats.delay_buffer_bytes == 0);
+    REQUIRE(stats.total_prepared_buffer_bytes == stats.node_audio_buffer_bytes);
+
+    graph.add_gain_node("later");
+    const auto invalidated = graph.prepared_stats();
+    REQUIRE(invalidated.node_count == 0);
+    REQUIRE(invalidated.total_prepared_buffer_bytes == 0);
+}
+
+TEST_CASE("SignalGraph evaluates optional runtime budget from prepared stats",
+          "[host][graph][budget-policy][phase4]") {
+    SignalGraph graph;
+    auto input = graph.add_input_node(1, "in");
+    auto gain = graph.add_gain_node("gain");
+    auto output = graph.add_output_node(1, "out");
+    REQUIRE(graph.connect(input, 0, gain, 0));
+    REQUIRE(graph.connect(gain, 0, output, 0));
+    REQUIRE(graph.prepare(48000.0, 16));
+
+    pulp::runtime::RuntimeBudgetFrame exact(256);
+    auto report = graph.evaluate_optional_runtime_budget(
+        exact, pulp::runtime::RuntimeWorkLane::Background);
+    REQUIRE(report.prepared);
+    REQUIRE(report.estimated_cost == 256);
+    REQUIRE(report.decision.action == pulp::runtime::RuntimeBudgetAction::Run);
+    REQUIRE(report.should_run_optional_work());
+    REQUIRE(report.frame_stats.run_count == 1);
+    REQUIRE(report.frame_stats.remaining_budget == 0);
+
+    pulp::runtime::RuntimeBudgetFrame tight(255);
+    report = graph.evaluate_optional_runtime_budget(
+        tight, pulp::runtime::RuntimeWorkLane::Background);
+    REQUIRE(report.decision.action == pulp::runtime::RuntimeBudgetAction::Bypass);
+    REQUIRE_FALSE(report.should_run_optional_work());
+    REQUIRE(report.frame_stats.bypass_count == 1);
+    REQUIRE(report.frame_stats.remaining_budget == 255);
+
+    pulp::runtime::RuntimeBudgetPolicy policy;
+    policy.shed_background_on_overload = true;
+    pulp::runtime::RuntimeBudgetFrame overloaded(1024, policy, true);
+    report = graph.evaluate_optional_runtime_budget(
+        overloaded, pulp::runtime::RuntimeWorkLane::Background);
+    REQUIRE(report.decision.action == pulp::runtime::RuntimeBudgetAction::Shed);
+    REQUIRE(report.frame_stats.shed_count == 1);
+}
+
+TEST_CASE("SignalGraph optional runtime budget reports unprepared graphs",
+          "[host][graph][budget-policy][phase4]") {
+    SignalGraph graph;
+    pulp::runtime::RuntimeBudgetFrame frame(0);
+
+    const auto report = graph.evaluate_optional_runtime_budget(
+        frame, pulp::runtime::RuntimeWorkLane::Background);
+
+    REQUIRE_FALSE(report.prepared);
+    REQUIRE(report.estimated_cost == 0);
+    REQUIRE(report.decision.action == pulp::runtime::RuntimeBudgetAction::Run);
+    REQUIRE(report.frame_stats.run_count == 1);
+}
+
+TEST_CASE("SignalGraph optional runtime budget has deterministic large-graph cost",
+          "[host][graph][budget-policy][scale][phase4]") {
+    SignalGraph graph;
+    constexpr int kGainNodes = 128;
+    constexpr int kBlock = 16;
+
+    auto input = graph.add_input_node(1, "in");
+    NodeId previous = input;
+    for (int i = 0; i < kGainNodes; ++i) {
+        auto gain = graph.add_gain_node("gain");
+        REQUIRE(graph.connect(previous, 0, gain, 0));
+        previous = gain;
+    }
+    auto output = graph.add_output_node(1, "out");
+    REQUIRE(graph.connect(previous, 0, output, 0));
+    REQUIRE(graph.prepare(48000.0, kBlock));
+
+    const auto stats = graph.prepared_stats();
+    REQUIRE(stats.node_count == static_cast<std::size_t>(kGainNodes + 2));
+    REQUIRE(stats.connection_count == static_cast<std::size_t>(kGainNodes + 1));
+    REQUIRE(stats.total_ports == static_cast<std::size_t>(kGainNodes * 4 + 2));
+    REQUIRE(stats.max_block_size == kBlock);
+
+    const auto expected_cost =
+        static_cast<std::uint64_t>(stats.node_count) * 16u
+        + static_cast<std::uint64_t>(stats.connection_count) * 8u
+        + static_cast<std::uint64_t>(stats.total_ports)
+              * static_cast<std::uint64_t>(stats.max_block_size)
+        + static_cast<std::uint64_t>(
+              stats.total_prepared_buffer_bytes / sizeof(float));
+
+    pulp::runtime::RuntimeBudgetFrame exact(expected_cost);
+    auto report = graph.evaluate_optional_runtime_budget(
+        exact, pulp::runtime::RuntimeWorkLane::Background);
+    REQUIRE(report.estimated_cost == expected_cost);
+    REQUIRE(report.decision.action == pulp::runtime::RuntimeBudgetAction::Run);
+    REQUIRE(report.frame_stats.remaining_budget == 0);
+
+    pulp::runtime::RuntimeBudgetFrame tight(expected_cost - 1);
+    report = graph.evaluate_optional_runtime_budget(
+        tight, pulp::runtime::RuntimeWorkLane::Background);
+    REQUIRE(report.estimated_cost == expected_cost);
+    REQUIRE(report.decision.action == pulp::runtime::RuntimeBudgetAction::Bypass);
+}
+
+TEST_CASE("SignalGraph clears prepared runtime stats after failed prepare",
+          "[host][graph][stats][limits][phase2]") {
+    SignalGraph graph;
+    auto input = graph.add_input_node(1, "in");
+    auto output = graph.add_output_node(1, "out");
+    REQUIRE(graph.connect(input, 0, output, 0));
+    REQUIRE(graph.prepare(48000.0, 16));
+    REQUIRE(graph.prepared_stats().node_count == 2);
+
+    auto limits = graph.limits();
+    limits.max_nodes = 1;
+    graph.set_limits(limits);
+    REQUIRE_FALSE(graph.prepare(48000.0, 16));
+
+    const auto stats = graph.prepared_stats();
+    REQUIRE(stats.node_count == 0);
+    REQUIRE(stats.connection_count == 0);
+    REQUIRE(stats.total_prepared_buffer_bytes == 0);
+}
+
+#if defined(__unix__) || defined(__APPLE__)
+TEST_CASE("SignalGraph optional runtime budget path allocates zero times",
+          "[host][graph][budget-policy][rt-safety][phase4]") {
+    SignalGraph graph;
+    auto input = graph.add_input_node(1, "in");
+    auto output = graph.add_output_node(1, "out");
+    REQUIRE(graph.connect(input, 0, output, 0));
+    REQUIRE(graph.prepare(48000.0, 16));
+
+    pulp::runtime::RuntimeBudgetFrame frame(1024);
+    {
+        pulp::native_components::test::RtNoAllocScope no_alloc;
+        const auto report = graph.evaluate_optional_runtime_budget(
+            frame, pulp::runtime::RuntimeWorkLane::Opportunistic);
+        REQUIRE(report.prepared);
+        REQUIRE(report.should_run_optional_work());
+    }
+}
+
+TEST_CASE("SignalGraph prepared runtime stats path allocates zero times",
+          "[host][graph][stats][rt-safety][phase2]") {
+    SignalGraph graph;
+    auto input = graph.add_input_node(1, "in");
+    auto output = graph.add_output_node(1, "out");
+    REQUIRE(graph.connect(input, 0, output, 0));
+    REQUIRE(graph.prepare(48000.0, 16));
+
+    {
+        pulp::native_components::test::RtNoAllocScope no_alloc;
+        const auto stats = graph.prepared_stats();
+        REQUIRE(stats.node_count == 2);
+        REQUIRE(stats.total_prepared_buffer_bytes > 0);
+    }
+}
+#endif
+
 TEST_CASE("SignalGraph disconnected output stays silent", "[host][graph][routing]") {
     // If no node connects to the AudioOutput, process() must leave the
     // output silent regardless of input content.
@@ -851,16 +1340,17 @@ TEST_CASE("SignalGraph disconnected output stays silent", "[host][graph][routing
     graph.release();
 }
 
-TEST_CASE("SignalGraph ignores stale audio connections with invalid ports",
+TEST_CASE("SignalGraph rejects audio connections with invalid ports",
           "[host][graph][routing][coverage][phase3]") {
     SignalGraph graph;
     auto input = graph.add_input_node(1, "in");
     auto gain = graph.add_gain_node("gain");
     auto output = graph.add_output_node(1, "out");
 
-    REQUIRE(graph.connect(input, 99, gain, 0));
-    REQUIRE(graph.connect(input, 0, gain, 99));
-    REQUIRE(graph.connect(gain, 42, output, 0));
+    REQUIRE_FALSE(graph.connect(input, 99, gain, 0));
+    REQUIRE_FALSE(graph.connect(input, 0, gain, 99));
+    REQUIRE_FALSE(graph.connect(gain, 42, output, 0));
+    REQUIRE(graph.connections().empty());
     REQUIRE(graph.prepare(48000.0, 8));
 
     std::vector<float> input_samples(8, 1.0f);
@@ -1991,13 +2481,15 @@ public:
                              bool automatable = true,
                              bool read_only = false,
                              float min_value = 0.0f,
-                             float max_value = 1.0f)
+                             float max_value = 1.0f,
+                             bool modulatable = true)
         : rate_(rate),
           stepped_(stepped),
           automatable_(automatable),
           read_only_(read_only),
           min_value_(min_value),
-          max_value_(max_value) {}
+          max_value_(max_value),
+          modulatable_(modulatable) {}
 
     const PluginInfo& info() const override { return info_; }
     bool is_loaded() const override { return true; }
@@ -2025,6 +2517,7 @@ public:
         p.flags.automatable = automatable_;
         p.flags.read_only = read_only_;
         p.flags.stepped = stepped_;
+        p.flags.modulatable = modulatable_;
         p.rate = rate_;
         return {p};
     }
@@ -2050,6 +2543,7 @@ private:
     bool read_only_ = false;
     float min_value_ = 0.0f;
     float max_value_ = 1.0f;
+    bool modulatable_ = true;
     std::vector<pulp::host::ParameterEvent> received_;
 };
 
@@ -2109,6 +2603,67 @@ private:
     PluginInfo info_ = make_plugin_info("FixedStorageAuto", 0, 1);
     std::array<pulp::host::ParameterEvent, 16> received_{};
     std::size_t received_count_ = 0;
+};
+
+class FixedAutomationProbe final : public PluginSlot {
+public:
+    static constexpr uint32_t kParamId = 42;
+
+    const PluginInfo& info() const override { return info_; }
+    bool is_loaded() const override { return true; }
+    bool prepare(double, int) override { return true; }
+    void release() override {}
+
+    void process(pulp::audio::BufferView<float>& out,
+                 const pulp::audio::BufferView<const float>&,
+                 const pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&,
+                 const pulp::host::ParameterEventQueue& pe,
+                 int n) override {
+        received_count_ = 0;
+        for (const auto& e : pe) {
+            if (received_count_ < received_.size()) {
+                received_[received_count_] = e;
+                ++received_count_;
+            }
+        }
+        for (size_t c = 0; c < out.num_channels(); ++c)
+            std::memset(out.channel_ptr(c), 0, sizeof(float) * (size_t)n);
+    }
+
+    std::vector<HostParamInfo> parameters() const override {
+        HostParamInfo p;
+        p.id = kParamId;
+        p.name = "mod";
+        p.min_value = 0.0f;
+        p.max_value = 1.0f;
+        p.default_value = 0.0f;
+        p.flags.automatable = true;
+        p.rate = ParamRate::AudioRate;
+        return {p};
+    }
+    float get_parameter(uint32_t) const override { return 0.f; }
+    void set_parameter(uint32_t, float) override {}
+    void set_bypass(bool) override {}
+    bool is_bypassed() const override { return false; }
+    std::vector<uint8_t> save_state() const override { return {}; }
+    bool restore_state(const std::vector<uint8_t>&) override { return false; }
+    bool has_editor() const override { return false; }
+    void* create_editor_view() override { return nullptr; }
+    void destroy_editor_view() override {}
+    int latency_samples() const override { return 0; }
+    int tail_samples() const override { return 0; }
+
+    void clear_received() { received_count_ = 0; }
+    size_t received_count() const { return received_count_; }
+    const pulp::host::ParameterEvent& received(size_t index) const {
+        return received_[index];
+    }
+
+private:
+    PluginInfo info_ = make_plugin_info("FixedAutomationProbe", 1, 1);
+    std::array<pulp::host::ParameterEvent, 16> received_{};
+    size_t received_count_ = 0;
 };
 } // namespace
 
@@ -2368,6 +2923,20 @@ TEST_CASE("SignalGraph connect_audio_rate_modulation gates on audio-rate params"
     REQUIRE(edge.automation_smoothing_ms == 0.0f);
     REQUIRE(edge.automation_mix == AutomationMix::Replace);
 
+    pulp::state::ModulationLane lane;
+    REQUIRE(graph.audio_rate_modulation_lane(edge, lane));
+    REQUIRE(lane.source.id == in_node);
+    REQUIRE(lane.source.scope == pulp::state::ModulationScope::GraphNode);
+    REQUIRE(lane.source.rate == pulp::state::ModulationRate::Audio);
+    REQUIRE(lane.target.param_id == MockAutomatable::kParamId);
+    REQUIRE(lane.target.scope == pulp::state::ModulationScope::GraphNode);
+    REQUIRE(lane.target.param_rate == ParamRate::AudioRate);
+    REQUIRE(lane.target.modulatable);
+    REQUIRE(lane.target.writable);
+    REQUIRE(lane.mix == pulp::state::ModulationMixMode::Replace);
+    REQUIRE_THAT(lane.depth, WithinAbs(2.0f, 1e-6f));
+    REQUIRE(pulp::state::validate_modulation_lane(lane).accepted);
+
     REQUIRE_FALSE(graph.connect_audio_rate_modulation(
         in_node, 0, audio, MockAutomatable::kParamId, 0.0f, 1.0f));
     REQUIRE(graph.connect_audio_rate_modulation(
@@ -2386,6 +2955,10 @@ TEST_CASE("SignalGraph audio-rate modulation rejects non-writable params and cyc
     auto not_automatable = graph.add_plugin_node(
         std::make_unique<MockAutomatable>(ParamRate::AudioRate, false, false),
         0, 1, "not-automatable");
+    auto not_modulatable = graph.add_plugin_node(
+        std::make_unique<MockAutomatable>(
+            ParamRate::AudioRate, false, true, false, 0.0f, 1.0f, false),
+        0, 1, "not-modulatable");
     auto unresolved = graph.add_unresolved_plugin_node(
         make_plugin_info("missing", 0, 1),
         0, 1, "missing");
@@ -2401,6 +2974,8 @@ TEST_CASE("SignalGraph audio-rate modulation rejects non-writable params and cyc
         source, 0, read_only, MockAutomatable::kParamId, 0.0f, 1.0f));
     REQUIRE_FALSE(graph.connect_audio_rate_modulation(
         source, 0, not_automatable, MockAutomatable::kParamId, 0.0f, 1.0f));
+    REQUIRE_FALSE(graph.connect_audio_rate_modulation(
+        source, 0, not_modulatable, MockAutomatable::kParamId, 0.0f, 1.0f));
     REQUIRE_FALSE(graph.connect_audio_rate_modulation(
         source, 0, unresolved, MockAutomatable::kParamId, 0.0f, 1.0f));
 
@@ -2661,6 +3236,47 @@ TEST_CASE("SignalGraph audio-rate modulation fails closed when event capacity is
                                 static_cast<int>(ParameterEventQueue::kCapacity + 1)));
 }
 
+#if defined(__unix__) || defined(__APPLE__)
+TEST_CASE("SignalGraph plugin automation process uses prepared scratch without allocation",
+          "[host][graph][automation][rt-safety][phase2]") {
+    SignalGraph graph;
+    auto in_node = graph.add_input_node(1, "in");
+    auto slot = std::make_unique<FixedAutomationProbe>();
+    auto* slot_ptr = slot.get();
+    auto plug = graph.add_plugin_node(std::move(slot), 1, 1, "fixed-auto");
+    auto out_node = graph.add_output_node(1, "out");
+
+    REQUIRE(graph.connect(in_node, 0, plug, 0));
+    REQUIRE(graph.connect(plug, 0, out_node, 0));
+    REQUIRE(graph.connect_automation(
+        in_node, 0, plug, FixedAutomationProbe::kParamId, 0.0f, 1.0f));
+    REQUIRE(graph.connect_audio_rate_modulation(
+        in_node, 0, plug, FixedAutomationProbe::kParamId, 0.0f, 1.0f,
+        0.0f, AutomationMix::Add));
+    REQUIRE(graph.prepare(48000.0, 4));
+
+    std::vector<float> input_samples{0.25f, 0.5f, 0.75f, 1.0f};
+    std::vector<float> output_samples(4, 0.0f);
+    const float* in_ptrs[1] = {input_samples.data()};
+    float* out_ptrs[1] = {output_samples.data()};
+    pulp::audio::BufferView<const float> in_view(in_ptrs, 1, 4);
+    pulp::audio::BufferView<float> out_view(out_ptrs, 1, 4);
+
+    graph.process(out_view, in_view, 4);
+    slot_ptr->clear_received();
+
+    {
+        pulp::native_components::test::RtNoAllocScope no_alloc;
+        graph.process(out_view, in_view, 4);
+    }
+
+    REQUIRE(slot_ptr->received_count() == 6);
+    for (size_t i = 0; i < slot_ptr->received_count(); ++i) {
+        REQUIRE(slot_ptr->received(i).param_id == FixedAutomationProbe::kParamId);
+    }
+}
+#endif
+
 // ── Item 4.6 automation smoothing ──────────────────────────────────────
 
 TEST_CASE("SignalGraph automation smoothing slews step input over the declared time",
@@ -2793,6 +3409,215 @@ TEST_CASE("SignalGraph automation smoothing eventually reaches the target",
         if (v < 1e-3f) { reached = true; break; }
     }
     REQUIRE(reached);
+}
+
+namespace {
+class ProcessBufferAwareSlot final : public PluginSlot {
+public:
+    const PluginInfo& info() const override { return info_; }
+    bool is_loaded() const override { return true; }
+    bool prepare(double, int) override { return true; }
+    void release() override {}
+
+    void process(pulp::audio::BufferView<float>& out,
+                 const pulp::audio::BufferView<const float>& in,
+                 const pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&,
+                 const ParameterEventQueue&,
+                 int n) override {
+        ++legacy_process_calls;
+        for (std::size_t c = 0; c < out.num_channels(); ++c) {
+            float* dst = out.channel_ptr(c);
+            const float* src = c < in.num_channels() ? in.channel_ptr(c) : nullptr;
+            for (int i = 0; i < n; ++i) {
+                dst[i] = src ? src[i] : 0.0f;
+            }
+        }
+    }
+
+    void process(pulp::format::ProcessBuffers& audio,
+                 const pulp::midi::MidiBuffer& midi_in,
+                 pulp::midi::MidiBuffer& midi_out,
+                 const ParameterEventQueue& param_events,
+                 int n) override {
+        ++process_buffer_calls;
+        saw_layout_ok = audio.layouts_match_descriptors();
+        saw_storage_ok = audio.active_buses_have_storage();
+        saw_input_count = audio.inputs.active_count();
+        saw_output_count = audio.outputs.active_count();
+        saw_main_input_channels =
+            audio.main_input() ? audio.main_input()->num_channels() : 0;
+        saw_main_output_channels =
+            audio.main_output() ? audio.main_output()->num_channels() : 0;
+
+        auto* out = audio.main_output();
+        pulp::audio::BufferView<const float> empty;
+        auto* in = audio.main_input();
+        if (out) {
+            process(*out, in ? *in : empty, midi_in, midi_out, param_events, n);
+        }
+    }
+
+    std::vector<HostParamInfo> parameters() const override { return {}; }
+    float get_parameter(uint32_t) const override { return 0.f; }
+    void set_parameter(uint32_t, float) override {}
+    void set_bypass(bool) override {}
+    bool is_bypassed() const override { return false; }
+    std::vector<uint8_t> save_state() const override { return {}; }
+    bool restore_state(const std::vector<uint8_t>&) override { return false; }
+    bool has_editor() const override { return false; }
+    void* create_editor_view() override { return nullptr; }
+    void destroy_editor_view() override {}
+    int latency_samples() const override { return 0; }
+    int tail_samples() const override { return 0; }
+
+    int legacy_process_calls = 0;
+    int process_buffer_calls = 0;
+    bool saw_layout_ok = false;
+    bool saw_storage_ok = false;
+    std::size_t saw_input_count = 0;
+    std::size_t saw_output_count = 0;
+    std::size_t saw_main_input_channels = 0;
+    std::size_t saw_main_output_channels = 0;
+
+private:
+    PluginInfo info_ = make_plugin_info("ProcessBufferAware", 2, 2);
+};
+} // namespace
+
+TEST_CASE("SignalGraph dispatches plugin nodes through ProcessBuffers",
+          "[host][graph][process-buffers][phase2]") {
+    SignalGraph graph;
+    auto in = graph.add_input_node(2, "in");
+    auto slot = std::make_unique<ProcessBufferAwareSlot>();
+    auto* slot_ptr = slot.get();
+    auto plugin = graph.add_plugin_node(std::move(slot), 2, 2, "slot");
+    auto out = graph.add_output_node(2, "out");
+
+    REQUIRE(graph.connect(in, 0, plugin, 0));
+    REQUIRE(graph.connect(in, 1, plugin, 1));
+    REQUIRE(graph.connect(plugin, 0, out, 0));
+    REQUIRE(graph.connect(plugin, 1, out, 1));
+    REQUIRE(graph.prepare(48000.0, 8));
+
+    std::vector<float> in_l(8, 0.25f);
+    std::vector<float> in_r(8, 0.75f);
+    std::vector<float> out_l(8, 0.0f);
+    std::vector<float> out_r(8, 0.0f);
+    const float* in_ptrs[2] = {in_l.data(), in_r.data()};
+    float* out_ptrs[2] = {out_l.data(), out_r.data()};
+    pulp::audio::BufferView<const float> input(in_ptrs, 2, 8);
+    pulp::audio::BufferView<float> output(out_ptrs, 2, 8);
+
+    graph.process(output, input, 8);
+
+    REQUIRE(slot_ptr->process_buffer_calls == 1);
+    REQUIRE(slot_ptr->legacy_process_calls == 1);
+    REQUIRE(slot_ptr->saw_layout_ok);
+    REQUIRE(slot_ptr->saw_storage_ok);
+    REQUIRE(slot_ptr->saw_input_count == 1);
+    REQUIRE(slot_ptr->saw_output_count == 1);
+    REQUIRE(slot_ptr->saw_main_input_channels == 2);
+    REQUIRE(slot_ptr->saw_main_output_channels == 2);
+    for (int i = 0; i < 8; ++i) {
+        REQUIRE_THAT(out_l[static_cast<std::size_t>(i)], WithinAbs(0.25f, 1e-6f));
+        REQUIRE_THAT(out_r[static_cast<std::size_t>(i)], WithinAbs(0.75f, 1e-6f));
+    }
+}
+
+namespace {
+class MultiOutputProcessBufferSlot final : public PluginSlot {
+public:
+    const PluginInfo& info() const override { return info_; }
+    bool is_loaded() const override { return true; }
+    bool prepare(double, int) override { return true; }
+    void release() override {}
+
+    void process(pulp::audio::BufferView<float>&,
+                 const pulp::audio::BufferView<const float>&,
+                 const pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&,
+                 const ParameterEventQueue&,
+                 int) override {
+        ++legacy_process_calls;
+    }
+
+    void process(pulp::format::ProcessBuffers& audio,
+                 const pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&,
+                 const ParameterEventQueue&,
+                 int n) override {
+        ++process_buffer_calls;
+        saw_output_channels = audio.main_output()
+            ? audio.main_output()->num_channels()
+            : 0;
+        auto* out = audio.main_output();
+        if (!out) return;
+
+        for (std::size_t c = 0; c < out->num_channels(); ++c) {
+            float* dst = out->channel_ptr(c);
+            const float value = 0.25f + static_cast<float>(c);
+            for (int i = 0; i < n; ++i) {
+                dst[static_cast<std::size_t>(i)] = value;
+            }
+        }
+    }
+
+    std::vector<HostParamInfo> parameters() const override { return {}; }
+    float get_parameter(uint32_t) const override { return 0.f; }
+    void set_parameter(uint32_t, float) override {}
+    void set_bypass(bool) override {}
+    bool is_bypassed() const override { return false; }
+    std::vector<uint8_t> save_state() const override { return {}; }
+    bool restore_state(const std::vector<uint8_t>&) override { return false; }
+    bool has_editor() const override { return false; }
+    void* create_editor_view() override { return nullptr; }
+    void destroy_editor_view() override {}
+    int latency_samples() const override { return 0; }
+    int tail_samples() const override { return 0; }
+
+    int legacy_process_calls = 0;
+    int process_buffer_calls = 0;
+    std::size_t saw_output_channels = 0;
+
+private:
+    PluginInfo info_ = make_plugin_info("MultiOut", 0, 4);
+};
+} // namespace
+
+TEST_CASE("SignalGraph routes multi-output plugin ProcessBuffers to AudioOutput",
+          "[host][graph][process-buffers][phase2][multi-output]") {
+    SignalGraph graph;
+    auto slot = std::make_unique<MultiOutputProcessBufferSlot>();
+    auto* slot_ptr = slot.get();
+    auto plugin = graph.add_plugin_node(std::move(slot), 0, 4, "multi");
+    auto out = graph.add_output_node(4, "out");
+
+    REQUIRE(graph.connect(plugin, 0, out, 0));
+    REQUIRE(graph.connect(plugin, 1, out, 1));
+    REQUIRE(graph.connect(plugin, 2, out, 2));
+    REQUIRE(graph.connect(plugin, 3, out, 3));
+    REQUIRE(graph.prepare(48000.0, 8));
+
+    std::vector<float> out0(8, 0.0f);
+    std::vector<float> out1(8, 0.0f);
+    std::vector<float> out2(8, 0.0f);
+    std::vector<float> out3(8, 0.0f);
+    float* out_ptrs[4] = {out0.data(), out1.data(), out2.data(), out3.data()};
+    pulp::audio::BufferView<const float> input;
+    pulp::audio::BufferView<float> output(out_ptrs, 4, 8);
+
+    graph.process(output, input, 8);
+
+    REQUIRE(slot_ptr->process_buffer_calls == 1);
+    REQUIRE(slot_ptr->legacy_process_calls == 0);
+    REQUIRE(slot_ptr->saw_output_channels == 4);
+    for (int i = 0; i < 8; ++i) {
+        REQUIRE_THAT(out0[static_cast<std::size_t>(i)], WithinAbs(0.25f, 1e-6f));
+        REQUIRE_THAT(out1[static_cast<std::size_t>(i)], WithinAbs(1.25f, 1e-6f));
+        REQUIRE_THAT(out2[static_cast<std::size_t>(i)], WithinAbs(2.25f, 1e-6f));
+        REQUIRE_THAT(out3[static_cast<std::size_t>(i)], WithinAbs(3.25f, 1e-6f));
+    }
 }
 
 // ── Item 4.7 sidechain routing ────────────────────────────────────────

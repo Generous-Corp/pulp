@@ -2,7 +2,9 @@
 #include <catch2/catch_approx.hpp>
 #include <pulp/format/detail/delayed_action.hpp>
 #include <pulp/format/detail/standalone_editor_chrome.hpp>
+#include <pulp/format/standalone_settings.hpp>
 #include <pulp/format/detail/standalone_audio_probe_json.hpp>
+#include <pulp/format/detail/standalone_audio_scope_json.hpp>
 
 #include <choc/text/choc_JSON.h>
 
@@ -841,6 +843,67 @@ TEST_CASE("Standalone editor chrome wraps editor and settings in a tab panel",
     REQUIRE(chrome.chrome_label() == std::string_view("tabs"));
 }
 
+TEST_CASE("Standalone editor chrome fills the editor tab to the design area "
+          "(a fill-based editor must not collapse)",
+          "[standalone][chrome][issue-45]") {
+    // Regression for the Bendr-tracker #45 standalone squish: a fill-based
+    // editor (a bare View has no intrinsic height and sets no flex on itself —
+    // exactly like Bendr's design-viewport editor, which lays out from
+    // local_bounds()) used to collapse to a thin strip inside the TabPanel.
+    // TabPanel::add_tab applies no flex to tab content and FlexStyle defaults to
+    // flex_grow=0 in a column, so the cross axis (width) stretched but the main
+    // axis (height) collapsed to the zero intrinsic content height. The chrome
+    // now sets flex_grow=1 on the editor root (mirroring SettingsPanel, which
+    // does the same for itself), so the editor fills the letterboxed design area.
+    auto editor_root = std::make_unique<View>();
+    auto* editor_ptr = editor_root.get();
+    StandaloneConfig config;
+    config.show_settings_tab = true;
+
+    auto chrome = make_standalone_editor_chrome(
+        std::move(editor_root), config, nullptr, nullptr, nullptr, {});
+
+    // Mimic the host's design-size layout pass: the GPU window host lays the
+    // window root out at the design-viewport size, then runs layout_children().
+    View& root = chrome.window_root();
+    root.set_bounds({0.0f, 0.0f, 760.0f, 560.0f});
+    root.layout_children();
+
+    // The visible editor tab must FILL the content area, not collapse to its
+    // (zero) intrinsic height. Without the flex_grow fix this height is ~0.
+    const auto bounds = editor_ptr->local_bounds();
+    REQUIRE(bounds.width == Catch::Approx(760.0f).margin(1.0f));
+    REQUIRE(bounds.height == Catch::Approx(560.0f).margin(1.0f));
+}
+
+TEST_CASE("Standalone settings chrome: an editor can detect and open the Settings tab",
+          "[standalone][chrome][issue-45]") {
+    // The editor-side mirror of the Settings panel's Done button: a plugin
+    // editor nested in the standalone chrome can show its own gear and open the
+    // Audio/MIDI Settings tab. In a DAW there is no chrome, so the helpers
+    // report "unavailable" and opening is a safe no-op (the gear stays hidden).
+    auto editor_root = std::make_unique<View>();
+    auto* editor_ptr = editor_root.get();
+    StandaloneConfig config;
+    config.show_settings_tab = true;
+    auto chrome = make_standalone_editor_chrome(
+        std::move(editor_root), config, nullptr, nullptr, nullptr, {});
+
+    // Inside the chrome: settings are available and the editor tab is active.
+    REQUIRE(pulp::format::standalone_settings_available(editor_ptr));
+    REQUIRE(chrome.tab_panel()->active_tab() == 0);
+
+    // Opening settings switches the chrome to the Settings tab (index 1).
+    pulp::format::open_standalone_settings(editor_ptr);
+    REQUIRE(chrome.tab_panel()->active_tab() == 1);
+
+    // A loose view with no chrome ancestor (the plugin case): unavailable, and
+    // open is a no-op that must not crash.
+    auto loose = std::make_unique<View>();
+    REQUIRE_FALSE(pulp::format::standalone_settings_available(loose.get()));
+    pulp::format::open_standalone_settings(loose.get());
+}
+
 TEST_CASE("Standalone idle callback polls scripted UI before settings",
           "[standalone][chrome]") {
     StubWindowHost window;
@@ -1214,6 +1277,47 @@ TEST_CASE("Standalone audio probe JSON helpers write normalized snapshot files",
     std::filesystem::remove(wrapper_path);
 }
 
+TEST_CASE("Standalone audio scope JSON helper writes v1 scope captures",
+          "[standalone][chrome][audio-scope]") {
+    pulp::audio::AudioProbe probe;
+    pulp::audio::AudioProbe::CaptureConfig cap;
+    cap.capture_frames = 16;
+    probe.prepare(1, 8, 48000.0,
+                  pulp::audio::AudioProbeStage::kStandaloneOutputBoundary, cap);
+
+    std::vector<float> samples{
+        -0.5f, -0.25f, 0.25f, 0.5f, -0.25f, 0.25f, 0.5f, -0.5f,
+    };
+    const float* ptrs[] = {samples.data()};
+    pulp::audio::BufferView<const float> view(ptrs, 1, samples.size());
+    probe.analyze_output(view);
+
+    StandaloneConfig config;
+    config.audio_scope_window_samples = 4;
+    config.audio_scope_trigger = "rising-zero";
+    config.audio_scope_channel = 0;
+
+    const auto out_path = std::filesystem::temp_directory_path() /
+                          "pulp-audio-scope-helper.json";
+    std::filesystem::remove(out_path);
+    REQUIRE(write_audio_scope_json_file(out_path.string(), probe, config));
+
+    {
+        std::ifstream in(out_path, std::ios::binary);
+        std::stringstream buffer;
+        buffer << in.rdbuf();
+        const auto v = choc::json::parse(buffer.str());
+        REQUIRE(v["schema"].getString() == "pulp.audio.scope.v1");
+        REQUIRE(v["version"].get<std::int64_t>() == 1);
+        REQUIRE(v["source"]["stage"].getString() == "standalone_output_boundary");
+        REQUIRE(v["source"]["selected_channel"].get<std::int64_t>() == 0);
+        REQUIRE(v["acquisition"]["trigger_mode"].getString() == "rising_zero");
+        REQUIRE(v["acquisition"]["window_samples"].get<std::int64_t>() == 4);
+        REQUIRE(v["measurements"]["peak_to_peak"].get<double>() > 0.0);
+    }
+    std::filesystem::remove(out_path);
+}
+
 TEST_CASE("Standalone PULP_AUDIO_PROBE_JSON env arms a headless probe dump",
           "[standalone][chrome][audio-inspector]") {
     ScopedEnv headless("PULP_HEADLESS");
@@ -1228,6 +1332,32 @@ TEST_CASE("Standalone PULP_AUDIO_PROBE_JSON env arms a headless probe dump",
     // The dump is a headless one-shot like --screenshot, so it implies
     // headless — but with an EMPTY screenshot path (no PNG forced).
     REQUIRE(config.audio_probe_json_path == "/tmp/pulp-standalone-probe.json");
+    REQUIRE(config.headless);
+    REQUIRE(config.screenshot_path.empty());
+    REQUIRE_FALSE(standalone_headless_requires_screenshot(config));
+    REQUIRE_FALSE(standalone_probe_json_requested_but_disabled(config));
+}
+
+TEST_CASE("Standalone PULP_AUDIO_SCOPE_JSON env arms a headless scope dump",
+          "[standalone][chrome][audio-scope]") {
+    ScopedEnv headless("PULP_HEADLESS");
+    ScopedEnv screenshot("PULP_SCREENSHOT");
+    ScopedEnv scope_json("PULP_AUDIO_SCOPE_JSON");
+    ScopedEnv scope_window("PULP_AUDIO_SCOPE_WINDOW");
+    ScopedEnv scope_trigger("PULP_AUDIO_SCOPE_TRIGGER");
+    ScopedEnv scope_channel("PULP_AUDIO_SCOPE_CHANNEL");
+    headless.unset();
+    screenshot.unset();
+    scope_json.set("/tmp/pulp-standalone-scope.json");
+    scope_window.set("4096");
+    scope_trigger.set("raw");
+    scope_channel.set("0");
+
+    auto config = standalone_config_from_environment(StandaloneConfig{});
+    REQUIRE(config.audio_scope_json_path == "/tmp/pulp-standalone-scope.json");
+    REQUIRE(config.audio_scope_window_samples == 4096);
+    REQUIRE(config.audio_scope_trigger == "raw");
+    REQUIRE(config.audio_scope_channel == 0);
     REQUIRE(config.headless);
     REQUIRE(config.screenshot_path.empty());
     REQUIRE_FALSE(standalone_headless_requires_screenshot(config));

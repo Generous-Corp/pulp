@@ -37,6 +37,11 @@ MCP clients can call the existing `pulp-mcp` server tool
 `pulp run --audio-probe-json`, accepts optional `target` and `frames`
 arguments, and returns the probe object as `structuredContent`.
 
+`--audio-probe-json` is UI-headless, not guaranteed silent: it launches the live
+standalone host and may activate the system audio output. Announce before using
+it locally, cap the run, and use `/audio-harness` / Audio Doctor for no-speaker
+offline checks.
+
 Use this as the first live-health check for audio-dev work. A useful result has
 advancing `callbacks`; non-zero `peak_max` / `rms_max` when audio is expected;
 and zero clip/NaN counters. `callbacks > 0` with zero levels means the observed
@@ -44,6 +49,12 @@ output boundary is silent, not that the probe is broken. Escalate to offline
 Audio Doctor or a scenario render when the live probe is healthy but the sound
 is still wrong, because this snapshot cannot prove response, THD, phase,
 latency, or tuning.
+
+The live waveform is diagnostic by default: it draws the copied buffer as-is.
+For visual readability only, launch with
+`PULP_AUDIO_INSPECTOR_TRIGGER=rising-zero`, `PULP_AUDIO_INSPECTOR_GRID=0`, or
+`PULP_AUDIO_INSPECTOR_SCALE=<n>`. These do not affect the probe JSON or the
+underlying audio.
 
 This writes `output_probe().latest()` (+ the `AudioStats` subset) as a flat
 JSON object — `stage`, `sample_rate`, `block_size`, `channel_count`,

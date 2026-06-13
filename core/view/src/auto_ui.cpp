@@ -104,6 +104,9 @@ std::unique_ptr<View> AutoUi::build(state::StateStore& store) {
             toggle->set_id(param.name);
             toggle->set_label(param.name);
             toggle->set_on(store.get_normalized(param.id) > 0.5f);
+            toggle->on_toggle = [&store, id = param.id](bool on) {
+                store.set_normalized(id, on ? 1.0f : 0.0f);
+            };
             toggle->flex().preferred_height = 30;
             toggle->flex().preferred_width = 54;
             tile->add_child(std::move(toggle));
@@ -112,6 +115,9 @@ std::unique_ptr<View> AutoUi::build(state::StateStore& store) {
             knob->set_id(param.name);
             knob->set_label(param.name);
             knob->set_value(store.get_normalized(param.id));
+            knob->on_change = [&store, id = param.id](float norm) {
+                store.set_normalized(id, norm);
+            };
             // Capture the per-param formatter by value so each knob owns
             // its own closure (params is a temporary).
             knob->set_format([param, format_value](float norm) {

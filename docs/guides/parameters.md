@@ -131,6 +131,25 @@ block's absolute modulation amount with `set_mod_offset()` before process runs.
 `add_mod_offset()` remains available for code that intentionally stacks
 multiple modulation sources in its own processing layer.
 
+For plugin-owned modulation matrices, `state::ModulationLane` records source
+identity, target parameter, scope (`Global`, `Voice`, `Note`, or `GraphNode`),
+rate (`Control` or `Audio`), units, mix mode, and depth separately from the
+base parameter value. `validate_modulation_lane()` rejects invalid source/target
+IDs, non-writable or non-modulatable targets, incompatible scopes, and
+audio-rate sources aimed at control-rate parameters before the route reaches
+audio processing.
+
+CLAP `PARAM_MOD` is represented as a global, control-rate host modulation lane
+before the adapter applies the block-local `StateStore` modulation offset.
+CLAP note identity fields (`note_id`, `port_index`, `channel`, `key`) are still
+accepted for compatibility but are not routed as per-note lanes yet.
+
+MPE expression events (`PitchBend`, `Pressure`, and `Timbre`) should be modeled
+as voice-scoped `state::ModulationLane` records when a synth turns them into a
+plugin-owned modulation matrix. Note on/off events are lifecycle events, not
+modulation lanes; expression events should use `Replace` because each event
+carries the current absolute per-voice expression value.
+
 ## Sample-Accurate Automation
 
 Format adapters preserve sparse host automation points in a per-block

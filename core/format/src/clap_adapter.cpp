@@ -10,6 +10,7 @@
 #include <pulp/runtime/scoped_no_alloc.hpp>
 #include <clap/ext/preset-load.h>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
@@ -176,6 +177,36 @@ void clap_reset(const clap_plugin_t* plugin) {
     self->playhead_prev = {};
 }
 
+bool clap_param_modulation_lane(const PulpClapPlugin& self,
+                                const clap_event_param_mod_t& event,
+                                state::ModulationLane& lane) {
+    const auto param_id = static_cast<state::ParamID>(event.param_id);
+    const auto* info = self.store.info(param_id);
+    if (!info) {
+        return false;
+    }
+
+    lane = state::ModulationLane{
+        .source = {
+            .id = kClapHostModulationSourceId,
+            .scope = state::ModulationScope::Global,
+            .rate = state::ModulationRate::Control,
+            .units = "CLAP PARAM_MOD",
+        },
+        .target = {
+            .param_id = param_id,
+            .scope = state::ModulationScope::Global,
+            .param_rate = info->rate,
+            .modulatable = info->range.step <= 0.0f,
+            .writable = true,
+            .units = info->unit,
+        },
+        .mix = state::ModulationMixMode::Add,
+        .depth = static_cast<float>(event.amount),
+    };
+    return state::validate_modulation_lane(lane).accepted;
+}
+
 clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process_t* process) {
     auto* self = get_self(plugin);
     if (!self->processor) return CLAP_PROCESS_ERROR;
@@ -216,9 +247,12 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
                     static_cast<float>(ev.value));
             } else if (hdr->type == CLAP_EVENT_PARAM_MOD) {
                 const auto ev = load_event<clap_event_param_mod_t>(hdr);
-                self->store.set_mod_offset(
-                    static_cast<state::ParamID>(ev.param_id),
-                    static_cast<float>(ev.amount));
+                state::ModulationLane lane;
+                if (clap_param_modulation_lane(*self, ev, lane)) {
+                    self->store.set_mod_offset(
+                        static_cast<state::ParamID>(ev.param_id),
+                        static_cast<float>(ev.amount));
+                }
             } else if (hdr->type == CLAP_EVENT_PARAM_GESTURE_BEGIN) {
                 const auto ev = load_event<clap_event_param_gesture_t>(hdr);
                 self->store.begin_gesture(static_cast<state::ParamID>(ev.param_id));
@@ -290,12 +324,36 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
         self->output_ptrs, out_channels, num_samples);
     audio::BufferView<const float> sidechain_view(
         self->sidechain_ptrs, sc_channels, num_samples);
-    self->processor->set_sidechain(sc_channels > 0 ? &sidechain_view : nullptr);
+    std::array<ProcessBusBufferView<const float>, 2> input_buses{{
+        {
+            .info = {"Main In", 0, BusDirection::Input, BusRole::Main,
+                     in_channels, false, process->audio_inputs_count > 0},
+            .buffer = input_view,
+        },
+        {
+            .info = {"Sidechain", 1, BusDirection::Input, BusRole::Sidechain,
+                     sc_channels, true, sc_channels > 0},
+            .buffer = sidechain_view,
+        },
+    }};
+    std::array<ProcessBusBufferView<float>, 1> output_buses{{
+        {
+            .info = {"Main Out", 0, BusDirection::Output, BusRole::Main,
+                     out_channels, false, process->audio_outputs_count > 0},
+            .buffer = output_view,
+        },
+    }};
+    ProcessBuffers process_buffers{
+        .inputs = ProcessBusBufferSet<const float>(input_buses),
+        .outputs = ProcessBusBufferSet<float>(output_buses),
+    };
 
-    // Build MIDI from CLAP note events
+    // Build MIDI from CLAP note events. Reuse per-instance scratch buffers so
+    // capacity survives warmup and the steady-state process path stays RT-safe.
     auto& midi_in = self->midi_in;
     auto& midi_out = self->midi_out;
     clear_midi_event_buffers(*self);
+    const uint32_t event_count = in_events ? in_events->size(in_events) : 0;
     // Track whether any native CLAP_EVENT_MIDI2 packet was delivered so we
     // can skip the MIDI 1.0 → UMP synthesis path when the host is speaking
     // UMP natively. The host still sends CLAP_EVENT_NOTE_* in parallel for
@@ -311,7 +369,6 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     // note-expression event.
     bool note_expression_drop_logged = false;
     if (in_events) {
-        uint32_t event_count = in_events->size(in_events);
         for (uint32_t i = 0; i < event_count; ++i) {
             auto* hdr = in_events->get(in_events, i);
             // Same CLAP event-space gate as the param/gesture loop above.
@@ -501,6 +558,8 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     pulp::format::ProcessContext ctx;
     ctx.sample_rate = self->sample_rate;
     ctx.num_samples = static_cast<int>(num_samples);
+    ctx.process_mode = pulp::format::ProcessMode::Realtime;
+    ctx.render_speed_hint = pulp::format::RenderSpeedHint::Realtime;
     if (process->transport) {
         const auto* tr = process->transport;
         const uint32_t flags = tr->flags;
@@ -630,7 +689,7 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
         self->processor->set_sidechain(nullptr);
     } else {
         pulp::runtime::ScopedNoAlloc no_alloc_guard;
-        self->processor->process(output_view, input_view, midi_in, midi_out, ctx);
+        self->processor->process(process_buffers, midi_in, midi_out, ctx);
     }
 
     // Emit output parameter events for any values the plugin changed,

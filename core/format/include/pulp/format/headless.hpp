@@ -5,6 +5,7 @@
 /// audio device. Use cases: CI validation, batch rendering, golden-file
 /// tests, benchmarks.
 
+#include <pulp/audio/offline_processor.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
 
@@ -37,6 +38,23 @@ public:
     /// @param output_channels   Number of output audio channels.
     void prepare(double sample_rate, int max_buffer_size,
                  int input_channels = 2, int output_channels = 2);
+
+    /// Prepare with explicit resource limits.
+    ///
+    /// Returns false without calling Processor::prepare() when the processor's
+    /// estimate exceeds any non-zero limit. This is the fail-closed test and
+    /// batch-render path; the legacy prepare() overload remains source
+    /// compatible and uses unlimited limits.
+    [[nodiscard]] bool try_prepare(
+        double sample_rate, int max_buffer_size,
+        int input_channels = 2, int output_channels = 2,
+        PrepareResourceLimits resource_limits = {});
+
+    /// Last prepare-limit failure from try_prepare(). None means the last
+    /// checked prepare either fit the limits or no processor exists.
+    PrepareResourceLimit last_prepare_limit_failure() const {
+        return last_prepare_limit_failure_;
+    }
 
     /// Process a block of audio (no MIDI).
     /// @p input and @p output may alias for in-place processing.
@@ -77,6 +95,14 @@ public:
                  const state::ParameterEventQueue& param_events,
                  ProcessContext context);
 
+    /// Render an effect-shaped in-memory audio file through this processor.
+    ///
+    /// The host must already be prepared for at least the largest scheduled
+    /// block size. The rendered artifact has the same channel count as @p input.
+    std::optional<audio::AudioFileData> render_offline(
+        const audio::AudioFileData& input,
+        const audio::OfflineRenderOptions& options = {});
+
     /// Release processing resources. Safe to call multiple times.
     void release();
 
@@ -106,6 +132,7 @@ private:
     state::StateStore store_;
     PluginDescriptor descriptor_;
     double sample_rate_ = 48000.0;
+    PrepareResourceLimit last_prepare_limit_failure_ = PrepareResourceLimit::None;
 };
 
 } // namespace pulp::format

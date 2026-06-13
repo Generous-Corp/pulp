@@ -91,19 +91,36 @@ proven to load through the identical contract (`test_pulp_node_v1.cpp` +
 (signing / trust / per-platform packaging) now ships as a separate layer — see
 "Signed node packs" below.
 
+The ABI test suite pins the public struct contract with compile-time POD /
+trivial-copy assertions, leading `size` + `abi_major` offset checks for every
+boundary struct, same-major old/new entry negotiation, and rejection of entries
+that truncate the first required callback. The source-level compatibility path is
+covered separately by graph serializer tests: registered custom nodes resolve by
+exact `(type_id, version)`, newer registered versions do not replace saved older
+nodes, mismatched shapes remain unresolved placeholders, and unresolved nodes
+survive save-load-save-load cycles with identity, ports, connections, and opaque
+state intact.
+
 ## Signed node packs
 
 A precompiled `pulp_node_v1` node can be distributed as a **signed node pack**: a
 dynamic library (`.dylib` / `.so` / `.dll`) exporting `pulp_node_v1_entry`, plus a
-JSON manifest declaring the pack identity, ABI major, the binary's SHA-256, the
-declared node type-ids/capabilities, and an **Ed25519 signature**. The host loader
-`core/host/node_pack.hpp` (`load_node_pack(dir, manifest, trust)`) verifies trust
-*before* it `dlopen`s anything:
+JSON manifest declaring the pack identity, ABI major, the binary's SHA-256,
+declared node type-ids/capabilities, resource declarations, runtime
+requirements, and an **Ed25519 signature**. The host loader
+`core/host/node_pack.hpp` (`load_node_pack(dir, manifest, trust, policy)`)
+verifies trust and host policy *before* it `dlopen`s anything:
 
 1. the signer key must be in the host's trust set (drop a key to revoke it);
-2. the signature over `pack_id + abi_major + binary-hash` must be authentic;
-3. the on-disk binary's SHA-256 must match the signed hash;
-4. the entry's `abi_major` must match the host's `pulp_node_v1` major.
+2. the signature over `pack_id + abi_major + binary-hash + declared node
+   type-ids/capabilities + resources + runtime requirements` must be authentic;
+3. declared capabilities, realtime requirements, audio-thread allocation policy,
+   block size, and memory ceilings must fit the host's `NodePackHostPolicy`;
+4. required resource declarations must have stable IDs, kinds, and hashes;
+5. the on-disk binary's SHA-256 must match the signed hash;
+6. the entry's `abi_major` must match the host's `pulp_node_v1` major;
+7. the loaded descriptor's stable ID and capability flags must match one of the
+   signed node declarations.
 
 Any failure rejects the pack and loads no code. This is the host-level integrity
 gate; OS code-signing / notarization (Gatekeeper, Authenticode) is an additional,
@@ -358,6 +375,11 @@ allocates and an in-flight snapshot keeps its instance alive. `process_instance`
 runs on the audio thread and must be real-time-safe; `save_state` / `load_state`
 are non-RT control-path calls (use them while the graph is not live, or after an
 invalidate + re-prepare), the same expectation as plugin state.
+Generated or scripted graph flows must not expose `save_state`, `load_state`,
+graph import/serialization, registration, or `prepare`/`release` as audio-thread
+operations. Those APIs are explicitly denied from RT paths; changing custom
+state invalidates the live graph and requires a later successful `prepare()`
+before processing resumes.
 
 Opaque state is a `std::vector<uint8_t>` (mirroring `PluginSlot::save_state`),
 reachable via `SignalGraph::custom_node_state(NodeId)` /

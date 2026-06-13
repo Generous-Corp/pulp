@@ -62,6 +62,14 @@ async.on_data([](auto* data, auto n) { /* on worker thread */ });
 async.start();
 ```
 
+### Budget Policy — Graceful degradation
+
+`pulp::runtime::evaluate_runtime_budget()` gives background analysis, cache
+refresh, validation helpers, and game-audio-style optional work a shared
+run/defer/shed/bypass decision. Critical audio work always runs; interactive
+work can defer to preserve reserve; background and opportunistic work can shed
+or bypass when overload is active or budget is exhausted.
+
 ### HTTP — Network requests
 
 GET, POST, and file download via cpp-httplib (MIT). Use for license checks, cloud presets, update notifications.
@@ -308,11 +316,16 @@ Reusable low-level pieces for building samplers, generated-audio freeze/loop wor
 |---------|--------|-------------|
 | Buffering Reader | `buffering_reader.hpp` | Ring buffer with background read thread for streaming |
 | Channel Sets | `channel_set.hpp` | `ChannelSet::surround_5_1()`, mono through 7.1.4 Atmos |
-| Load Measurer | `load_measurer.hpp` | Track CPU usage of your audio callback |
+| Load Measurer | `load_measurer.hpp` | Track CPU usage of your audio callback; `evaluate_audio_runtime_overload()` classifies process-load/xrun telemetry into nominal, watch, overloaded, or critical validation states with explicit shed/bypass guidance |
 | Memory-Mapped Reader | `mmap_reader.hpp` | Zero-copy access for large sample libraries |
-| Offline Processor | `offline_processor.hpp` | `offline_process(input, callback, 512)` — batch render |
+| Offline Processor | `offline_processor.hpp` | `offline_process(input, callback, 512)` for simple batch render; `offline_render(input, callback, options)` for deterministic block schedules, absolute sample positions, transport timeline, state generation, render-speed hints, render seeds, and explicit tail policy; `offline_render_stems()` extracts named channel groups; `compare_offline_render_audio()` reports golden/null residuals; `create_offline_render_manifest()` records artifact hashes, render-plan hashes, chunk boundaries, staged resource hashes, and cache-reuse metadata for reproducible offline/distributed renders; `evaluate_offline_render_compute_policy()` keeps GPU-assisted analysis out of live audio-thread scopes and makes CPU fallback explicit |
 | Subsection Reader | `subsection_reader.hpp` | Read frame range without copying — `reader.sample(ch, frame)` |
 | System Volume | `system_volume.hpp` | `get_system_volume()` / `set_system_volume(0.8f)` |
+
+Offline render manifests intentionally separate artifact identity from render
+plan identity. Equivalent renders with different chunk schedules can have the
+same `audio_sha256` and a zero residual while still carrying different
+`render_plan_sha256` values and chunk metadata for distributed reproduction.
 
 ---
 

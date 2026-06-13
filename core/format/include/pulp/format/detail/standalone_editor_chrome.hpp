@@ -120,6 +120,15 @@ inline StandaloneEditorChrome make_standalone_editor_chrome(
 
     auto tab_panel = std::make_unique<view::TabPanel>();
     tab_panel->flex().flex_grow = 1.0f;
+    // Make the editor tab FILL the (letterboxed) design area. TabPanel::add_tab
+    // applies no flex to tab content, and FlexStyle defaults to flex_grow=0 in a
+    // column, so a fill-based editor (one with no intrinsic height — e.g. a
+    // design-viewport editor that lays out from local_bounds()) collapses to a
+    // thin strip while the cross axis stretches. SettingsPanel avoids this by
+    // setting flex_grow=1 on itself in its own ctor; do the same for the editor
+    // root here. Harmless for editors that already size themselves (flex_grow
+    // only claims remaining space). Fixes the Bendr-tracker #45 standalone squish.
+    chrome.editor_root_->flex().flex_grow = 1.0f;
     tab_panel->add_tab("Editor", std::move(chrome.editor_root_));
     tab_panel->add_tab("Settings", std::move(settings_panel));
     // No outer [Editor][Settings] tab bar — the editor reaches Settings via its own

@@ -25,7 +25,10 @@
 /// guarantees that, and this window only consumes the published summary.
 
 #include <pulp/audio/audio_probe.hpp>
+#include <pulp/audio/audio_scope.hpp>
 #include <pulp/audio/audio_stats.hpp>
+#include <pulp/audio/buffer.hpp>
+#include <pulp/state/properties_file.hpp>
 #include <pulp/view/audio_inspector_panel.hpp>
 #include <pulp/view/command_registry.hpp>
 #include <pulp/view/view.hpp>
@@ -35,6 +38,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <string>
 
 namespace pulp::view {
 
@@ -56,7 +60,8 @@ public:
     /// @param host_factory Optional host creation override for tests / embedders.
     explicit AudioInspectorWindow(WindowManager* mgr = nullptr,
                                   WindowHost* parent = nullptr,
-                                  HostFactory host_factory = {});
+                                  HostFactory host_factory = {},
+                                  std::string app_name = "Pulp");
     ~AudioInspectorWindow();
 
     AudioInspectorWindow(const AudioInspectorWindow&) = delete;
@@ -98,6 +103,14 @@ public:
     /// Panel accessor — for headless state assertions.
     const AudioInspectorPanel& panel() const { return *panel_; }
 
+    void set_mode(AudioInspectorMode mode);
+    AudioInspectorMode mode() const { return mode_; }
+
+    /// Optional test/embedding hook. Production windows use
+    /// ApplicationProperties, but tests can inject an in-memory PropertiesFile
+    /// to assert persistence without touching user preference paths.
+    void set_preferences(state::PropertiesFile* preferences);
+
     /// The window's own `WindowHost`, or null until `show()` has created one
     /// (and after a host_factory that returned null). Exposed so a headless
     /// host can `capture_png()` the inspector's surface for a screenshot proof,
@@ -112,11 +125,23 @@ private:
     bool perform_command(CommandID id) override;
 
     void build_ui();
+    void load_mode_preference();
+    void save_mode_preference();
+    void apply_mode(AudioInspectorMode mode, bool persist);
+    audio::AudioScopeResult build_scope_result(
+        const audio::AudioProbeSnapshot& snap,
+        audio::Buffer<float>& capture,
+        int frames) const;
 
     WindowManager* manager_ = nullptr;
     WindowHost* parent_host_ = nullptr;
     HostFactory host_factory_;
     CommandRegistry* registry_ = nullptr;
+    std::string app_name_;
+    std::unique_ptr<state::ApplicationProperties> app_properties_;
+    state::PropertiesFile* preferences_ = nullptr;
+    AudioInspectorMode mode_ = AudioInspectorMode::kSignal;
+    bool applying_mode_ = false;
 
     audio::AudioProbe* probe_ = nullptr;
     audio::AudioStats device_stats_{};
@@ -128,6 +153,7 @@ private:
 
     // Copied waveform scratch (non-RT; sized to the panel's display capacity).
     std::vector<float> waveform_scratch_;
+    audio::Buffer<float> scope_capture_;
 
     std::unique_ptr<View> root_;
     AudioInspectorPanel* panel_ = nullptr;

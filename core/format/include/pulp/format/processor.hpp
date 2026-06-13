@@ -4,17 +4,21 @@
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/mpe_buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
+#include <pulp/format/process_block.hpp>
 #include <pulp/runtime/node_abi.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
 #include <pulp/state/store.hpp>
-#include <pulp/view/view.hpp>
 #include <atomic>
+#include <cstddef>
 #include <memory>
 #include <span>
 #include <string>
 #include <vector>
 
-namespace pulp::view { class ScriptedUiSession; }
+namespace pulp::view {
+class ScriptedUiSession;
+class View;
+}
 
 namespace pulp::format {
 
@@ -194,11 +198,95 @@ struct PluginDescriptor {
 ///
 /// Contains the host's audio configuration. Use this to allocate
 /// buffers, initialize filters at the correct sample rate, etc.
+enum class PrepareResourceLimit {
+    None = 0,
+    PersistentBytes,
+    BlockScratchBytes,
+    TotalBytes,
+    BlockSize,
+    InputChannels,
+    OutputChannels,
+    ParameterEvents,
+    MidiEvents,
+    Voices,
+};
+
+/// Optional prepare-time resource caps supplied by a host or test harness.
+///
+/// A zero field means "unlimited/unspecified" so existing hosts preserve their
+/// historical behavior. Processors that know their prepared working set can use
+/// these caps to fail closed before allocating oversized scratch, sample caches,
+/// event rings, or voice pools.
+struct PrepareResourceLimits {
+    std::size_t max_persistent_bytes = 0;
+    std::size_t max_block_scratch_bytes = 0;
+    std::size_t max_total_bytes = 0;
+    int max_block_size = 0;
+    int max_input_channels = 0;
+    int max_output_channels = 0;
+    int max_parameter_events = 0;
+    int max_midi_events = 0;
+    int max_voices = 0;
+};
+
+/// Processor-reported prepared resource usage estimate.
+///
+/// This is a preflight/accounting surface, not an allocator. Values should
+/// represent storage that will be allocated or reserved during prepare(), plus
+/// fixed per-block scratch required by process(). Hosts can compare this with
+/// `PrepareResourceLimits` before committing a large prepare.
+struct PrepareResourceUsage {
+    std::size_t persistent_bytes = 0;
+    std::size_t block_scratch_bytes = 0;
+    int block_size = 0;
+    int input_channels = 0;
+    int output_channels = 0;
+    int parameter_events = 0;
+    int midi_events = 0;
+    int voices = 0;
+
+    std::size_t total_bytes() const noexcept {
+        return persistent_bytes + block_scratch_bytes;
+    }
+};
+
+inline PrepareResourceLimit first_exceeded_prepare_resource_limit(
+    const PrepareResourceUsage& usage,
+    const PrepareResourceLimits& limits) noexcept {
+    auto over_size = [](std::size_t value, std::size_t limit) {
+        return limit > 0 && value > limit;
+    };
+    auto over_int = [](int value, int limit) {
+        return limit > 0 && value > limit;
+    };
+
+    if (over_size(usage.persistent_bytes, limits.max_persistent_bytes))
+        return PrepareResourceLimit::PersistentBytes;
+    if (over_size(usage.block_scratch_bytes, limits.max_block_scratch_bytes))
+        return PrepareResourceLimit::BlockScratchBytes;
+    if (over_size(usage.total_bytes(), limits.max_total_bytes))
+        return PrepareResourceLimit::TotalBytes;
+    if (over_int(usage.block_size, limits.max_block_size))
+        return PrepareResourceLimit::BlockSize;
+    if (over_int(usage.input_channels, limits.max_input_channels))
+        return PrepareResourceLimit::InputChannels;
+    if (over_int(usage.output_channels, limits.max_output_channels))
+        return PrepareResourceLimit::OutputChannels;
+    if (over_int(usage.parameter_events, limits.max_parameter_events))
+        return PrepareResourceLimit::ParameterEvents;
+    if (over_int(usage.midi_events, limits.max_midi_events))
+        return PrepareResourceLimit::MidiEvents;
+    if (over_int(usage.voices, limits.max_voices))
+        return PrepareResourceLimit::Voices;
+    return PrepareResourceLimit::None;
+}
+
 struct PrepareContext {
     double sample_rate = 48000.0;
     int max_buffer_size = 512;
     int input_channels = 2;
     int output_channels = 2;
+    PrepareResourceLimits resource_limits;
 };
 
 /// SMPTE video frame rate (item 1.3 macOS plan).
@@ -220,6 +308,18 @@ enum class FrameRate {
     fps_30,           ///< NTSC integer. VST3 `kFrameRate30fps`.
     fps_30_drop,      ///< 30 drop-frame. VST3 `kFrameRate30DropFps`.
     fps_60,           ///< High-rate. VST3 `kFrameRate60fps`.
+};
+
+/// Host render-speed hint for offline or constrained live rendering.
+///
+/// This is advisory. Processors must still obey the thread contract implied by
+/// `ProcessContext::process_mode`; for example, a realtime block with
+/// `SlowerThanRealtime` is still an audio-thread callback.
+enum class RenderSpeedHint {
+    Unknown = 0,
+    Realtime,
+    FasterThanRealtime,
+    SlowerThanRealtime,
 };
 
 /// Process context — passed every audio callback with transport state.
@@ -259,6 +359,37 @@ enum class FrameRate {
 struct ProcessContext {
     double sample_rate = 0;
     int num_samples = 0;
+
+    /// Runtime mode for this block. Defaults to live realtime processing for
+    /// source compatibility; offline/headless/render hosts should set
+    /// `ProcessMode::Offline` explicitly.
+    ProcessMode process_mode = ProcessMode::Realtime;
+
+    /// True when the host is rendering the plugin's bypass path for this block.
+    /// Most current adapters short-circuit before calling `process()` while
+    /// bypassed, so the default remains false and this flag is only meaningful
+    /// on hosts that intentionally process while bypassed to drain tails.
+    bool is_bypassed = false;
+
+    /// True when the host is asking a processor to continue rendering after
+    /// input/transport stop so delay, reverb, or lookahead state can settle.
+    bool is_tail_drain = false;
+
+    /// True for the first block after a transport jump, seek, or explicit DSP
+    /// reset boundary. Processors can use this to clear tempo-synced phase or
+    /// delay history without guessing from position discontinuities.
+    bool reset_requested = false;
+
+    /// True when the host observed a discontinuous timeline move since the
+    /// previous block. This is narrower than `transport_changed`: play/stop
+    /// transitions do not imply a jump unless position also changed
+    /// discontinuously.
+    bool transport_jump = false;
+
+    /// Advisory render-speed category for hosts that know whether the current
+    /// pass is live, faster-than-realtime export, or slower/constrained render.
+    RenderSpeedHint render_speed_hint = RenderSpeedHint::Unknown;
+
     bool is_playing = false;
     bool is_recording = false;
     double tempo_bpm = 120.0;
@@ -342,6 +473,43 @@ struct ProcessContext {
     /// flush a reverb tail when transport stops) on transitions only.
     /// Default false.
     bool transport_changed = false;
+
+    bool is_realtime() const noexcept {
+        return process_mode == ProcessMode::Realtime;
+    }
+
+    bool is_offline() const noexcept {
+        return process_mode == ProcessMode::Offline;
+    }
+
+    bool allows_offline_quality_work() const noexcept {
+        return is_offline() &&
+               render_speed_hint != RenderSpeedHint::Realtime;
+    }
+
+    /// True when DSP state should treat this block as a discontinuity boundary.
+    /// Hosts can request this explicitly, and adapters can derive it from a
+    /// transport seek/jump. Processors commonly use this to clear synced phase,
+    /// delay history, or tempo-grid caches before rendering the block.
+    bool should_reset_dsp_state() const noexcept {
+        return reset_requested || transport_jump;
+    }
+
+    /// True when this block is not a normal input-driven render but the host is
+    /// still calling `process()` so a processor can settle internal state,
+    /// drain a tail, or maintain bypass-aware state. Processors must still obey
+    /// the realtime/offline contract for the block.
+    bool is_maintenance_render() const noexcept {
+        return is_bypassed || is_tail_drain;
+    }
+
+    /// True when the host is asking the processor to render only existing tail
+    /// state. This is intentionally separate from bypass: some hosts bypass by
+    /// short-circuiting process(), while others continue calling process() to
+    /// let tails settle.
+    bool should_render_tail_only() const noexcept {
+        return is_tail_drain;
+    }
 };
 
 /// The plugin processor interface.
@@ -633,12 +801,20 @@ public:
     /// closes. This method may be called multiple times during the lifetime
     /// of the processor (one per attached editor window).
     ///
-    virtual std::unique_ptr<view::View> create_view() { return nullptr; }
+    virtual std::unique_ptr<view::View> create_view();
 
     /// A custom settings tab this plugin contributes to the host's Settings UI.
     /// (The matching virtual `settings_sections()` is appended at the end of this class
     /// to preserve additive-only vtable ordering.)
     struct SettingsSection {
+        SettingsSection();
+        SettingsSection(std::string title, std::unique_ptr<view::View> view);
+        ~SettingsSection();
+        SettingsSection(SettingsSection&&) noexcept;
+        SettingsSection& operator=(SettingsSection&&) noexcept;
+        SettingsSection(const SettingsSection&) = delete;
+        SettingsSection& operator=(const SettingsSection&) = delete;
+
         std::string title;                 ///< Tab label, e.g. "Models".
         std::unique_ptr<view::View> view;  ///< Tab content (built by the plugin).
     };
@@ -693,6 +869,53 @@ public:
     /// one unified Settings panel. Called when the settings UI is built; may be called
     /// again if it is rebuilt. (Appended last to preserve additive-only vtable ordering.)
     virtual std::vector<SettingsSection> settings_sections() { return {}; }
+
+    /// Estimate storage the next prepare() will allocate or reserve.
+    ///
+    /// Default is unknown/zero for source compatibility. Processors with large
+    /// prepared resources should override this so hosts and tests can reject
+    /// oversized configurations before allocation. Called on the host thread,
+    /// never from process(). Appended to preserve additive-only vtable ordering.
+    virtual PrepareResourceUsage estimate_prepare_resources(
+        const PrepareContext&) const {
+        return {};
+    }
+
+    /// Check the processor's estimate against the host-supplied prepare limits.
+    ///
+    /// Returning `None` means the estimate fits every non-zero limit. Hosts that
+    /// want fail-closed prepare behavior can call this before `prepare()`.
+    /// Appended to preserve additive-only vtable ordering.
+    virtual PrepareResourceLimit check_prepare_resource_limits(
+        const PrepareContext& context) const {
+        return first_exceeded_prepare_resource_limit(
+            estimate_prepare_resources(context), context.resource_limits);
+    }
+
+    /// Additive multi-bus process entry point.
+    ///
+    /// The default implementation preserves the existing plugin-author
+    /// contract: it projects the active main output, optional main input, and
+    /// optional sidechain input from `ProcessBuffers`, then calls the original
+    /// main-in/main-out `process()` callback. Plugins that need direct access
+    /// to auxes, multi-output instruments, or surround buses can override this
+    /// method while older processors continue to work unchanged. Appended to
+    /// preserve additive-only vtable ordering.
+    virtual void process(
+        ProcessBuffers& audio,
+        midi::MidiBuffer& midi_in,
+        midi::MidiBuffer& midi_out,
+        const ProcessContext& context) {
+        auto* output = audio.main_output();
+        if (!output) return;
+
+        audio::BufferView<const float> empty_input;
+        auto* input = audio.main_input();
+        auto* previous_sidechain = sidechain_;
+        sidechain_ = audio.sidechain_input();
+        process(*output, input ? *input : empty_input, midi_in, midi_out, context);
+        sidechain_ = previous_sidechain;
+    }
 
     /// Access the parameter state store.
     /// Use state().get_value(id) to read parameter values in process().

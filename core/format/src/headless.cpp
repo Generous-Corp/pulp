@@ -5,6 +5,10 @@
 #include <pulp/format/plugin_state_io.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
 
+#include <array>
+#include <utility>
+#include <vector>
+
 namespace pulp::format {
 namespace {
 
@@ -26,6 +30,41 @@ private:
 
 } // namespace
 
+namespace {
+
+ProcessBuffers make_process_buffers(
+    audio::BufferView<float>& output,
+    const audio::BufferView<const float>& input,
+    std::array<ProcessBusBufferView<const float>, 1>& input_buses,
+    std::array<ProcessBusBufferView<float>, 1>& output_buses) {
+    input_buses = {{
+        {
+            .info = {"Main In", 0, BusDirection::Input, BusRole::Main,
+                     static_cast<int>(input.num_channels()), false, !input.empty()},
+            .buffer = input,
+        },
+    }};
+    output_buses = {{
+        {
+            .info = {"Main Out", 0, BusDirection::Output, BusRole::Main,
+                     static_cast<int>(output.num_channels()), false, !output.empty()},
+            .buffer = output,
+        },
+    }};
+    return {
+        .inputs = ProcessBusBufferSet<const float>(input_buses),
+        .outputs = ProcessBusBufferSet<float>(output_buses),
+    };
+}
+
+} // namespace
+
+RenderSpeedHint render_speed_hint_for(double ratio) {
+    if (ratio > 1.0) return RenderSpeedHint::FasterThanRealtime;
+    if (ratio < 1.0) return RenderSpeedHint::SlowerThanRealtime;
+    return RenderSpeedHint::Unknown;
+}
+
 HeadlessHost::HeadlessHost(ProcessorFactory factory) {
     if (!factory) return;
     processor_ = factory();
@@ -38,15 +77,32 @@ HeadlessHost::HeadlessHost(ProcessorFactory factory) {
 
 void HeadlessHost::prepare(double sample_rate, int max_buffer_size,
                             int input_channels, int output_channels) {
-    if (!processor_) return;
+    static_cast<void>(try_prepare(
+        sample_rate, max_buffer_size, input_channels, output_channels, {}));
+}
 
-    sample_rate_ = sample_rate;
+bool HeadlessHost::try_prepare(double sample_rate, int max_buffer_size,
+                               int input_channels, int output_channels,
+                               PrepareResourceLimits resource_limits) {
+    last_prepare_limit_failure_ = PrepareResourceLimit::None;
+    if (!processor_) return false;
+
     PrepareContext ctx;
     ctx.sample_rate = sample_rate;
     ctx.max_buffer_size = max_buffer_size;
     ctx.input_channels = input_channels;
     ctx.output_channels = output_channels;
+    ctx.resource_limits = resource_limits;
+
+    const auto failure = processor_->check_prepare_resource_limits(ctx);
+    if (failure != PrepareResourceLimit::None) {
+        last_prepare_limit_failure_ = failure;
+        return false;
+    }
+
+    sample_rate_ = sample_rate;
     processor_->prepare(ctx);
+    return true;
 }
 
 void HeadlessHost::process(audio::BufferView<float>& output,
@@ -67,6 +123,8 @@ void HeadlessHost::process(audio::BufferView<float>& output,
                             midi::MidiBuffer& midi_in,
                             midi::MidiBuffer& midi_out) {
     ProcessContext ctx;
+    ctx.process_mode = ProcessMode::Offline;
+    ctx.render_speed_hint = RenderSpeedHint::FasterThanRealtime;
     process(output, input, midi_in, midi_out, std::move(ctx));
 }
 
@@ -75,6 +133,8 @@ void HeadlessHost::process(audio::BufferView<float>& output,
                             const state::ParameterEventQueue& param_events) {
     midi::MidiBuffer midi_in, midi_out;
     ProcessContext ctx;
+    ctx.process_mode = ProcessMode::Offline;
+    ctx.render_speed_hint = RenderSpeedHint::FasterThanRealtime;
     process(output, input, midi_in, midi_out, param_events, std::move(ctx));
 }
 
@@ -90,8 +150,12 @@ void HeadlessHost::process(audio::BufferView<float>& output,
         context.num_samples = static_cast<int>(output.num_samples());
     }
     processor_->set_param_events(nullptr);
+    std::array<ProcessBusBufferView<const float>, 1> input_buses;
+    std::array<ProcessBusBufferView<float>, 1> output_buses;
+    auto process_buffers =
+        make_process_buffers(output, input, input_buses, output_buses);
     pulp::runtime::ScopedNoAlloc no_alloc_guard;
-    processor_->process(output, input, midi_in, midi_out, context);
+    processor_->process(process_buffers, midi_in, midi_out, context);
 }
 
 void HeadlessHost::process(audio::BufferView<float>& output,
@@ -107,8 +171,78 @@ void HeadlessHost::process(audio::BufferView<float>& output,
         context.num_samples = static_cast<int>(output.num_samples());
     }
     ScopedProcessorParamEvents scoped_param_events(*processor_, param_events);
+    std::array<ProcessBusBufferView<const float>, 1> input_buses;
+    std::array<ProcessBusBufferView<float>, 1> output_buses;
+    auto process_buffers =
+        make_process_buffers(output, input, input_buses, output_buses);
     pulp::runtime::ScopedNoAlloc no_alloc_guard;
-    processor_->process(output, input, midi_in, midi_out, context);
+    processor_->process(process_buffers, midi_in, midi_out, context);
+}
+
+std::optional<audio::AudioFileData> HeadlessHost::render_offline(
+    const audio::AudioFileData& input,
+    const audio::OfflineRenderOptions& options) {
+    if (!processor_) return std::nullopt;
+
+    return audio::offline_render(
+        input,
+        [&](const float* in, float* out, int channels,
+            const audio::OfflineRenderBlockContext& context) {
+            audio::Buffer<float> input_block(
+                static_cast<std::size_t>(channels),
+                static_cast<std::size_t>(context.frames));
+            audio::Buffer<float> output_block(
+                static_cast<std::size_t>(channels),
+                static_cast<std::size_t>(context.frames));
+
+            for (int frame = 0; frame < context.frames; ++frame) {
+                for (int channel = 0; channel < channels; ++channel) {
+                    input_block.channel(static_cast<std::size_t>(channel))
+                        [static_cast<std::size_t>(frame)] =
+                            in[static_cast<std::size_t>(frame)
+                               * static_cast<std::size_t>(channels)
+                               + static_cast<std::size_t>(channel)];
+                }
+            }
+
+            std::vector<const float*> input_ptrs(
+                static_cast<std::size_t>(channels), nullptr);
+            for (int channel = 0; channel < channels; ++channel) {
+                input_ptrs[static_cast<std::size_t>(channel)] =
+                    input_block.channel(static_cast<std::size_t>(channel)).data();
+            }
+            audio::BufferView<const float> input_view(
+                input_ptrs.data(),
+                static_cast<std::size_t>(channels),
+                static_cast<std::size_t>(context.frames));
+            auto output_view = output_block.view();
+
+            midi::MidiBuffer midi_in, midi_out;
+            ProcessContext process_context;
+            process_context.sample_rate = context.sample_rate;
+            process_context.num_samples = context.frames;
+            process_context.process_mode = ProcessMode::Offline;
+            process_context.render_speed_hint =
+                render_speed_hint_for(context.render_speed_ratio);
+            process_context.tempo_bpm = context.tempo_bpm;
+            process_context.position_beats = context.position_beats;
+            process_context.position_samples =
+                static_cast<int64_t>(context.sample_position);
+
+            process(output_view, input_view, midi_in, midi_out,
+                    std::move(process_context));
+
+            for (int frame = 0; frame < context.frames; ++frame) {
+                for (int channel = 0; channel < channels; ++channel) {
+                    out[static_cast<std::size_t>(frame)
+                        * static_cast<std::size_t>(channels)
+                        + static_cast<std::size_t>(channel)] =
+                        output_block.channel(static_cast<std::size_t>(channel))
+                            [static_cast<std::size_t>(frame)];
+                }
+            }
+        },
+        options);
 }
 
 void HeadlessHost::release() {

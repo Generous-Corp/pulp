@@ -24,6 +24,13 @@ struct ParamGroup {
     int parent_id = 0; ///< 0 = root-level group.
 };
 
+/// Snapshot of StateStore's real-time listener queue.
+struct RtListenerQueueTelemetry {
+    std::size_t size_approx = 0;
+    std::size_t capacity = 0;
+    std::uint64_t overflow_count = 0;
+};
+
 /// Centralized parameter storage with lock-free value access.
 ///
 /// StateStore is the single source of truth for all plugin parameters.
@@ -85,7 +92,8 @@ public:
     /// @note The pending-changes queue is bounded; if @c pump_listeners()
     ///       is not called fast enough the oldest queued events are
     ///       dropped (the atomic value is still up-to-date, so the UI
-    ///       picks up the latest on its next pump).
+    ///       picks up the latest on its next pump). Use
+    ///       @c rt_listener_queue_telemetry() to inspect this pressure.
     void set_value_rt(ParamID id, float value);
 
     /// Real-time-safe normalized-value write. Denormalizes through the
@@ -129,9 +137,8 @@ public:
     /// top of @c process() and read from the returned array inside
     /// the per-sample loop, instead of calling @c get_value() per
     /// sample (each per-sample atomic load is a memory fence and
-    /// fans out across cores). Mirrors the "snapshot the world
-    /// before you start" pattern called out in sudara "Big List of
-    /// JUCE Tips" #29.
+    /// fans out across cores). Mirrors the usual audio-thread pattern:
+    /// snapshot the values you need before entering the inner loop.
     ///
     /// @tparam N  Compile-time count of parameter IDs to read.
     /// @param ids  Parameter IDs to snapshot, in the desired output
@@ -215,6 +222,14 @@ public:
     ///
     /// @return Number of changes drained from the queue.
     std::size_t pump_listeners();
+
+    /// Latest telemetry for the RT-to-main listener queue used by
+    /// @c set_value_rt() / @c pump_listeners().
+    RtListenerQueueTelemetry rt_listener_queue_telemetry() const;
+
+    /// Reset only the RT listener queue overflow counter. Queued events are
+    /// untouched.
+    void reset_rt_listener_queue_overflow_count();
 
     /// Legacy permanent-listener registration. Prefer the
     /// @c ListenerToken-returning overload above for new code.

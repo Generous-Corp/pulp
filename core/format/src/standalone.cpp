@@ -39,6 +39,7 @@
 #if PULP_ENABLE_AUDIO_PROBES
 #include <pulp/audio/audio_probe_json.hpp>
 #include <pulp/format/detail/standalone_audio_probe_json.hpp>
+#include <pulp/format/detail/standalone_audio_scope_json.hpp>
 #include <pulp/view/audio_inspector_window.hpp>
 #include <pulp/view/command_registry.hpp>
 #endif
@@ -170,15 +171,18 @@ bool StandaloneApp::start() {
 
 #if PULP_ENABLE_AUDIO_PROBES
     // Phase 5 — prepare the realtime output-boundary probe BEFORE the audio
-    // callback starts. This is the only place it allocates. Capture is left
-    // off by default (latest-summary only); the Phase 6 Audio Inspector window
-    // (PULP_AUDIO_INSPECTOR) and debug/support builds opt into the last-N ring
-    // so the inspector can paint a live waveform, not just meters. The ring is
-    // sized to the panel's display capacity so a tick fills the trace.
+    // callback starts. This is the only place it allocates. Probe-enabled
+    // standalone builds keep a small last-N channel-0 ring so the developer
+    // Audio Inspector can paint a live waveform whether it was opened from
+    // PULP_AUDIO_INSPECTOR at launch or toggled later by command. The ring is
+    // sized to the panel's display capacity so one UI tick fills the trace.
     audio::AudioProbe::CaptureConfig probe_capture;
-    audio_inspector_capture_ = runtime::get_env("PULP_AUDIO_INSPECTOR").has_value();
-    if (audio_inspector_capture_)
-        probe_capture.capture_frames = view::AudioWaveformView::kCapacity;
+    constexpr int kMaxScopeWindowSamples = 16384;
+    const int scope_capture_frames = config_.audio_scope_json_path.empty()
+        ? 0
+        : std::clamp(config_.audio_scope_window_samples, 1, kMaxScopeWindowSamples);
+    probe_capture.capture_frames = std::max(view::AudioWaveformView::kCapacity,
+                                            scope_capture_frames);
     output_probe_.prepare(config_.output_channels, config_.buffer_size,
                           config_.sample_rate,
                           audio::AudioProbeStage::kStandaloneOutputBoundary,
@@ -316,6 +320,8 @@ bool StandaloneApp::start() {
         ProcessContext proc_ctx;
         proc_ctx.sample_rate = ctx.sample_rate;
         proc_ctx.num_samples = ctx.buffer_size;
+        proc_ctx.process_mode = ProcessMode::Realtime;
+        proc_ctx.render_speed_hint = RenderSpeedHint::Realtime;
         proc_ctx.position_samples = block_start_samples;
         proc_ctx.is_playing = config_.transport_playing;
         proc_ctx.is_recording = false;
@@ -410,7 +416,7 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
 #if !PULP_ENABLE_AUDIO_PROBES
     if (detail::standalone_probe_json_requested_but_disabled(effective_config)) {
         runtime::log_error(
-            "Standalone: audio probe JSON requested but "
+            "Standalone: audio probe/scope JSON requested but "
             "PULP_ENABLE_AUDIO_PROBES=OFF");
         return false;
     }
@@ -422,6 +428,7 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
         return false;
     }
 
+    config_ = effective_config;
     if (!start()) return false;
 
     if (!processor_ || !processor_->has_editor()) {
@@ -544,7 +551,8 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
         audio_inspector_.reset();
         command_registry_ = std::make_unique<view::CommandRegistry>();
         audio_inspector_ = std::make_unique<view::AudioInspectorWindow>(
-            nullptr, window.get());
+            nullptr, window.get(), view::AudioInspectorWindow::HostFactory{},
+            desc.name);
         audio_inspector_->set_probe(&output_probe_);
         audio_inspector_->register_command_handler(*command_registry_);
         view::route_global_keys(window_root, *command_registry_);
@@ -649,6 +657,9 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     auto write_probe_json = [this](const std::string& path) {
         detail::write_audio_probe_json_file(path, output_probe_);
     };
+    auto write_scope_json = [this, effective_config](const std::string& path) {
+        detail::write_audio_scope_json_file(path, output_probe_, effective_config);
+    };
 #endif
 
     // ── Headless one-shot screenshot (SDK-codified, pulp #468 follow-up) ──
@@ -679,8 +690,9 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
         cap.capture_fn = [host, editor_view, w, h
 #if PULP_ENABLE_AUDIO_PROBES
                           , audio_inspector_ptr, inspector_png_path,
-                          write_probe_json,
-                          probe_json_path = effective_config.audio_probe_json_path
+                          write_probe_json, write_scope_json,
+                          probe_json_path = effective_config.audio_probe_json_path,
+                          scope_json_path = effective_config.audio_scope_json_path
 #endif
         ] {
 #if PULP_ENABLE_AUDIO_PROBES
@@ -688,6 +700,7 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
             // frame the screenshot is taken (composes --screenshot with
             // --audio-probe-json in a single headless run). No-op when unset.
             write_probe_json(probe_json_path);
+            write_scope_json(scope_json_path);
             // Side-effect: capture the inspector window's own surface at the
             // same frame, before the main window closes. capture_png() returns
             // empty on hosts without GPU capture — skip the write in that case.
@@ -758,6 +771,25 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
         runtime::log_info(
             "Standalone: audio-probe-json mode armed — will dump to {} after {} frames",
             effective_config.audio_probe_json_path, cap.delay);
+    }
+    else if (!effective_config.audio_scope_json_path.empty()) {
+        auto* host = window.get();
+        detail::DelayedAction cap;
+        cap.delay = effective_config.screenshot_frame_delay > 0
+            ? effective_config.screenshot_frame_delay : 30;
+        cap.action_fn = [write_scope_json,
+                         path = effective_config.audio_scope_json_path]() {
+            write_scope_json(path);
+        };
+        cap.close_fn = [host] { host->request_close(); };
+        auto prior = pre_screenshot_idle;
+        host->set_idle_callback([prior, cap = std::move(cap)]() mutable {
+            if (prior) prior();
+            cap();
+        });
+        runtime::log_info(
+            "Standalone: audio-scope-json mode armed — will dump to {} after {} frames",
+            effective_config.audio_scope_json_path, cap.delay);
     }
 #endif
 

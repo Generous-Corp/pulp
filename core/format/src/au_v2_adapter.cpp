@@ -17,6 +17,7 @@
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
 
+#include <array>
 #include <cstring>
 #include <limits>
 
@@ -467,83 +468,10 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
             /*sample_offset=*/0);
     midi_in.sort();
 
-    ProcessContext ctx;
-    ctx.sample_rate = GetSampleRate();
-    ctx.num_samples = static_cast<int>(inFramesToProcess);
+    ProcessContext ctx = make_render_process_context(
+        GetSampleRate(), static_cast<int>(inFramesToProcess));
 
-    // Item 1.3 — populate transport fields from the host callbacks the
-    // host installed via kAudioUnitProperty_HostCallbacks. The
-    // AudioUnitSDK wraps these as `CallHostBeatAndTempo` /
-    // `CallHostMusicalTimeLocation` / `CallHostTransportState`. They
-    // are render-thread-only; calling outside ProcessBufferLists
-    // returns `kAudioUnitErr_CannotDoInCurrentContext`. AU has no
-    // dedicated frame-rate or loop callback — `frame_rate` stays
-    // `FrameRate::unknown` and the loop range falls back to the
-    // transport callback's outCycleStartBeat / outCycleEndBeat (only
-    // valid when outIsCycling is true).
-    {
-        Float64 beat = 0.0;
-        Float64 tempo = 0.0;
-        if (CallHostBeatAndTempo(&beat, &tempo) == noErr) {
-            ctx.position_beats = beat;
-            if (tempo > 0.0) ctx.tempo_bpm = tempo;
-        }
-
-        UInt32 delta_samples = 0;
-        Float32 ts_num = 0.0f;
-        UInt32 ts_denom = 0;
-        Float64 current_measure_downbeat = 0.0;
-        if (CallHostMusicalTimeLocation(&delta_samples, &ts_num, &ts_denom,
-                                        &current_measure_downbeat) == noErr) {
-            if (ts_num > 0.0f) {
-                ctx.time_sig_numerator = static_cast<int>(ts_num);
-            }
-            if (ts_denom > 0) {
-                ctx.time_sig_denominator = static_cast<int>(ts_denom);
-            }
-        }
-
-        Boolean is_playing = false;
-        Boolean transport_state_changed = false;
-        Float64 current_sample_in_timeline = 0.0;
-        Boolean is_cycling = false;
-        Float64 cycle_start = 0.0;
-        Float64 cycle_end = 0.0;
-        if (CallHostTransportState(&is_playing, &transport_state_changed,
-                                   &current_sample_in_timeline, &is_cycling,
-                                   &cycle_start, &cycle_end) == noErr) {
-            ctx.is_playing = (is_playing != 0);
-            ctx.position_samples =
-                static_cast<int64_t>(current_sample_in_timeline);
-            ctx.is_looping = (is_cycling != 0);
-            if (ctx.is_looping) {
-                ctx.loop_start_beats = cycle_start;
-                ctx.loop_end_beats = cycle_end;
-            }
-            // `is_recording` is not exposed by HostCallback_GetTransportState;
-            // the v2 GetTransportState2 callback adds it but AUBase's
-            // CallHostTransportState wrapper only calls the v1 proc. Leave
-            // `is_recording` at the default false sentinel — plug-ins that
-            // need recording state must use AU v3 today.
-        }
-
-        // Host clock for video sync. AU doesn't surface a "host time"
-        // callback, but `mach_absolute_time` ticks the same monotonic
-        // clock the host renders against on Apple platforms, so it is
-        // the closest analogue. Convert ticks to nanoseconds via
-        // `mach_timebase_info` (cached on first use).
-        static mach_timebase_info_data_t timebase = {0, 0};
-        if (timebase.denom == 0) mach_timebase_info(&timebase);
-        if (timebase.denom != 0) {
-            const uint64_t now = mach_absolute_time();
-            ctx.host_time_ns = static_cast<int64_t>(
-                (now * timebase.numer) / timebase.denom);
-        }
-
-        pulp::format::detail::derive_bar_from_beats(ctx);
-    }
-
-    pulp::format::detail::compute_playhead_changes(ctx, playhead_prev_);
+    apply_host_callbacks_to_process_context(ctx, *this, playhead_prev_);
 
     // Phase 3 — uniform param-events contract + RT-safety guard. AU v2 has no
     // scheduled-parameter event source, so the queue is empty (host params flow
@@ -552,9 +480,41 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
     // (param snapshot, pointer-vector resizes) legitimately allocates.
     param_events_.clear();
     processor_->set_param_events(&param_events_);
+    std::array<ProcessBusBufferView<const float>, 1> input_buses{{
+        {
+            .info = {
+                .name = "Audio In",
+                .index = 0,
+                .direction = BusDirection::Input,
+                .role = BusRole::Main,
+                .declared_channels = static_cast<int>(in_channels),
+                .optional = in_channels == 0,
+                .active = input_view.num_channels() > 0,
+            },
+            .buffer = input_view,
+        },
+    }};
+    std::array<ProcessBusBufferView<float>, 1> output_buses{{
+        {
+            .info = {
+                .name = "Audio Out",
+                .index = 0,
+                .direction = BusDirection::Output,
+                .role = BusRole::Main,
+                .declared_channels = static_cast<int>(out_channels),
+                .optional = false,
+                .active = output_view.num_channels() > 0,
+            },
+            .buffer = output_view,
+        },
+    }};
+    ProcessBuffers process_buffers{
+        ProcessBusBufferSet<const float>{std::span(input_buses)},
+        ProcessBusBufferSet<float>{std::span(output_buses)},
+    };
     {
         pulp::runtime::ScopedNoAlloc no_alloc_guard;
-        processor_->process(output_view, input_view, midi_in, midi_out, ctx);
+        processor_->process(process_buffers, midi_in, midi_out, ctx);
     }
 
     // No plugin→host parameter diff/push here. Because GetParameter reads the
@@ -652,9 +612,9 @@ bool PulpAUEffect::SupportsTail()
 Float64 PulpAUEffect::GetTailTime()
 {
     if (!processor_) return 0.0;
-    auto tail = processor_->descriptor().tail_samples;
-    if (tail < 0) return std::numeric_limits<Float64>::infinity();
-    return tail > 0 ? static_cast<Float64>(tail) / GetSampleRate() : 0.0;
+    const auto tail = processor_->descriptor().tail_samples;
+    if (tail <= 0) return tail_samples_to_seconds(tail, 0.0);
+    return tail_samples_to_seconds(tail, GetSampleRate());
 }
 
 Float64 PulpAUEffect::GetLatency()

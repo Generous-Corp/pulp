@@ -2414,11 +2414,36 @@ TEST_CASE("pulp run --headless --screenshot --frames writes a PNG",
     INFO("stdout: " << r.stdout_output);
     INFO("stderr: " << r.stderr_output);
     REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stderr_output.find("may activate the system audio output")
+            != std::string::npos);
+    REQUIRE(r.stderr_output.find("headless hides UI but does not guarantee silence")
+            != std::string::npos);
 
     // Fixture echoes its resolved options — verify the CLI forwarded
     // both the args (preferred) AND the env vars (fallback).
     REQUIRE(r.stdout_output.find("fixture: headless=1") != std::string::npos);
     REQUIRE(r.stdout_output.find(screenshot.string())   != std::string::npos);
+
+    {
+        ScopedEnvVar notice("PULP_RUN_AUDIO_NOTICE");
+        notice.set("0");
+        auto quiet_screenshot = base / "quiet-shot.png";
+        fs::current_path(base);
+        auto quiet = exec(bin.string(),
+                          {"run", "pulpcliruntarget",
+                           "--headless", "--screenshot", quiet_screenshot.string(),
+                           "--frames", "1"},
+                          20000);
+        fs::current_path(cwd_saver);
+
+        REQUIRE_FALSE(quiet.timed_out);
+        INFO("quiet stdout: " << quiet.stdout_output);
+        INFO("quiet stderr: " << quiet.stderr_output);
+        REQUIRE(quiet.exit_code == 0);
+        REQUIRE(quiet.stderr_output.find("may activate the system audio output")
+                == std::string::npos);
+        REQUIRE(fs::exists(quiet_screenshot));
+    }
 
     // The PNG itself must exist and start with the standard signature.
     REQUIRE(fs::exists(screenshot));

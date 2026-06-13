@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v04290"></a>
+## [0.429.0] - 2026-06-12
+
+- feature/standalone chrome editor fill ([#4041](https://github.com/danielraffel/pulp/pull/4041))
+- docs: link public shipping guide from migration notes ([#4033](https://github.com/danielraffel/pulp/pull/4033))
+
 <a id="v04280"></a>
 ## [0.428.0] - 2026-06-11
 
@@ -4379,6 +4385,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.429.0]: https://github.com/danielraffel/pulp/releases/tag/v0.429.0
 [0.428.0]: https://github.com/danielraffel/pulp/releases/tag/v0.428.0
 [0.427.0]: https://github.com/danielraffel/pulp/releases/tag/v0.427.0
 [0.426.1]: https://github.com/danielraffel/pulp/releases/tag/v0.426.1

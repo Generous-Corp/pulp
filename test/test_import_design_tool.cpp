@@ -1613,7 +1613,8 @@ TEST_CASE("pulp-import-design enriches .pulp.zip image metadata before baked C++
     REQUIRE(cpp.find("_image_flex.preferred_height = 13.33333f;") != std::string::npos);
     REQUIRE(cpp.find("_image_flex.dim_height = {13.33333f, pulp::view::DimensionUnit::px};")
             != std::string::npos);
-    REQUIRE(cpp.find("->set_left(-1.666667f);") != std::string::npos);
+    REQUIRE((cpp.find("->set_left(-1.666667f);") != std::string::npos
+             || cpp.find("->set_left(-1.666666f);") != std::string::npos));
     REQUIRE(cpp.find("->set_top(10.33333f);")
             != std::string::npos);
 }

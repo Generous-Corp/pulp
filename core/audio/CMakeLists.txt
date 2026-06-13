@@ -12,6 +12,8 @@ target_sources(pulp-audio PRIVATE
     src/audio_file.cpp
     src/audio_focus.cpp
     src/audio_probe_json.cpp
+    src/audio_scope.cpp
+    src/audio_scope_json.cpp
     src/window_enumerator.cpp
     src/format_registry.cpp
     src/codecs.c

@@ -71,6 +71,22 @@ block it publishes an `AudioProbeSnapshot` (see
 - Content events: `clip_count`, `nan_inf_count`, `clipped_blocks`,
   `nan_blocks`, `silence_run_blocks`, `callbacks`.
 
+The waveform is a diagnostic signal inspector, not a full oscilloscope. By
+default it draws the copied buffer exactly as received, with no invented
+samples, interpolation, smoothing, or persistence. That makes it useful for
+spotting silence, clipping, discontinuities, DC offsets, and dropouts. It is
+not meant to provide cursors, phosphor persistence, triggered measurements, or
+frequency-domain analysis; use Audio Doctor or a purpose-built render for those.
+
+For readability during live visual checks, the window supports display-only
+environment knobs:
+
+- `PULP_AUDIO_INSPECTOR_TRIGGER=rising-zero` starts the visible trace at the
+  first rising zero crossing when one exists and leaves raw mode otherwise.
+- `PULP_AUDIO_INSPECTOR_GRID=0` hides the subtle waveform grid.
+- `PULP_AUDIO_INSPECTOR_SCALE=<n>` zooms the horizontal view over the copied
+  real samples (`1.0` shows the full captured buffer).
+
 ## Opening it
 
 There are three ways to open the live Inspector:
@@ -131,6 +147,13 @@ cat /tmp/probe.json
 `--screenshot`). It is forwarded as `--audio-probe-json <file>` and via
 `PULP_AUDIO_PROBE_JSON=<file>`. The frame delay reuses the same
 `--frames` / `PULP_FRAMES` mechanism as the screenshot capture.
+
+Headless here means no visible UI, not no audio device. The standalone host
+still runs live so the output-boundary probe can observe real callback/device
+state, and that may make audible sound if the target emits signal through the
+default output. Agents and scripts should announce before using this live path
+locally, cap the run duration, and prefer Audio Doctor / `HeadlessHost` when the
+question can be answered offline without speakers.
 
 The JSON shape:
 
@@ -195,6 +218,9 @@ flow and receive the probe object as `structuredContent`:
 defaults to 90. This is not a second MCP server and not the future persistent
 live socket; it is the agent-friendly wrapper for the JSON dump that exists
 today.
+
+The MCP JSON path reports scalar probe facts only. It does not return waveform
+pixels or apply the live window's trigger/grid/scale controls.
 
 ### Agent workflow
 

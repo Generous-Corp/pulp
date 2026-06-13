@@ -1,7 +1,6 @@
 #pragma once
 
 #include <pulp/audio/buffer.hpp>
-#include <pulp/format/processor.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/mpe_buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
@@ -18,6 +17,8 @@
 #include <type_traits>
 
 namespace pulp::format {
+
+struct ProcessContext;
 
 /// Coarse processing mode for one block.
 ///
@@ -219,6 +220,209 @@ private:
     std::size_t size_ = 0;
 };
 
+/// Metadata that travels with a non-owning richer-surface process bus view.
+struct ProcessBusBufferInfo {
+    std::string_view name;
+    std::size_t index = 0;
+    BusDirection direction = BusDirection::Input;
+    BusRole role = BusRole::Main;
+    int declared_channels = 0;
+    bool optional = false;
+    bool active = true;
+};
+
+/// Non-owning view of one richer-surface process bus.
+template <typename SampleType>
+struct ProcessBusBufferView {
+    ProcessBusBufferInfo info;
+    audio::BufferView<SampleType> buffer;
+
+    bool active() const noexcept { return info.active; }
+    bool optional() const noexcept { return info.optional; }
+    bool main() const noexcept { return info.role == BusRole::Main; }
+    bool sidechain() const noexcept { return info.role == BusRole::Sidechain; }
+    std::size_t num_channels() const noexcept { return buffer.num_channels(); }
+    std::size_t num_samples() const noexcept { return buffer.num_samples(); }
+
+    bool matches_declared_layout() const noexcept {
+        if (!active()) return buffer.empty();
+        return info.declared_channels >= 0 &&
+               num_channels() == static_cast<std::size_t>(info.declared_channels);
+    }
+
+    bool has_channel_storage() const noexcept {
+        if (!active() || buffer.num_channels() == 0) return true;
+        for (std::size_t ch = 0; ch < buffer.num_channels(); ++ch) {
+            if (buffer.channel_ptr(ch) == nullptr) return false;
+        }
+        return true;
+    }
+};
+
+/// Non-owning span of richer-surface process buses for one direction.
+template <typename SampleType>
+class ProcessBusBufferSet {
+public:
+    ProcessBusBufferSet() = default;
+    explicit ProcessBusBufferSet(std::span<ProcessBusBufferView<SampleType>> buses)
+        : buses_(buses) {}
+
+    std::size_t size() const noexcept { return buses_.size(); }
+    bool empty() const noexcept { return buses_.empty(); }
+
+    ProcessBusBufferView<SampleType>& operator[](std::size_t index) noexcept {
+        return buses_[index];
+    }
+    const ProcessBusBufferView<SampleType>& operator[](std::size_t index) const noexcept {
+        return buses_[index];
+    }
+
+    ProcessBusBufferView<SampleType>* find(BusRole role) noexcept {
+        return find(role, 0);
+    }
+
+    const ProcessBusBufferView<SampleType>* find(BusRole role) const noexcept {
+        return find(role, 0);
+    }
+
+    ProcessBusBufferView<SampleType>* find(BusRole role,
+                                           std::size_t occurrence) noexcept {
+        std::size_t seen = 0;
+        for (auto& bus : buses_) {
+            if (bus.info.role != role) continue;
+            if (seen == occurrence) return &bus;
+            ++seen;
+        }
+        return nullptr;
+    }
+
+    const ProcessBusBufferView<SampleType>* find(
+        BusRole role,
+        std::size_t occurrence) const noexcept {
+        std::size_t seen = 0;
+        for (const auto& bus : buses_) {
+            if (bus.info.role != role) continue;
+            if (seen == occurrence) return &bus;
+            ++seen;
+        }
+        return nullptr;
+    }
+
+    ProcessBusBufferView<SampleType>* find_by_index(std::size_t index) noexcept {
+        for (auto& bus : buses_) {
+            if (bus.info.index == index) return &bus;
+        }
+        return nullptr;
+    }
+
+    const ProcessBusBufferView<SampleType>* find_by_index(
+        std::size_t index) const noexcept {
+        for (const auto& bus : buses_) {
+            if (bus.info.index == index) return &bus;
+        }
+        return nullptr;
+    }
+
+    ProcessBusBufferView<SampleType>* find_by_name(std::string_view name) noexcept {
+        for (auto& bus : buses_) {
+            if (bus.info.name == name) return &bus;
+        }
+        return nullptr;
+    }
+
+    const ProcessBusBufferView<SampleType>* find_by_name(
+        std::string_view name) const noexcept {
+        for (const auto& bus : buses_) {
+            if (bus.info.name == name) return &bus;
+        }
+        return nullptr;
+    }
+
+    ProcessBusBufferView<SampleType>* main() noexcept { return find(BusRole::Main); }
+    const ProcessBusBufferView<SampleType>* main() const noexcept {
+        return find(BusRole::Main);
+    }
+
+    ProcessBusBufferView<SampleType>* sidechain() noexcept {
+        return find(BusRole::Sidechain);
+    }
+    const ProcessBusBufferView<SampleType>* sidechain() const noexcept {
+        return find(BusRole::Sidechain);
+    }
+
+    std::size_t active_count() const noexcept {
+        std::size_t count = 0;
+        for (const auto& bus : buses_) {
+            if (bus.active()) ++count;
+        }
+        return count;
+    }
+
+    std::size_t count(BusRole role) const noexcept {
+        std::size_t total = 0;
+        for (const auto& bus : buses_) {
+            if (bus.info.role == role) ++total;
+        }
+        return total;
+    }
+
+    std::size_t active_count(BusRole role) const noexcept {
+        std::size_t total = 0;
+        for (const auto& bus : buses_) {
+            if (bus.info.role == role && bus.active()) ++total;
+        }
+        return total;
+    }
+
+    bool layouts_match_descriptors() const noexcept {
+        for (const auto& bus : buses_) {
+            if (!bus.matches_declared_layout()) return false;
+        }
+        return true;
+    }
+
+    bool active_buses_have_storage() const noexcept {
+        for (const auto& bus : buses_) {
+            if (!bus.has_channel_storage()) return false;
+        }
+        return true;
+    }
+
+private:
+    std::span<ProcessBusBufferView<SampleType>> buses_;
+};
+
+/// Additive richer-surface process-buffer view. It is intentionally non-owning.
+struct ProcessBuffers {
+    ProcessBusBufferSet<const float> inputs;
+    ProcessBusBufferSet<float> outputs;
+
+    const audio::BufferView<const float>* main_input() const noexcept {
+        if (auto* bus = inputs.main(); bus && bus->active()) return &bus->buffer;
+        return nullptr;
+    }
+
+    audio::BufferView<float>* main_output() noexcept {
+        if (auto* bus = outputs.main(); bus && bus->active()) return &bus->buffer;
+        return nullptr;
+    }
+
+    const audio::BufferView<const float>* sidechain_input() const noexcept {
+        if (auto* bus = inputs.sidechain(); bus && bus->active()) return &bus->buffer;
+        return nullptr;
+    }
+
+    bool layouts_match_descriptors() const noexcept {
+        return inputs.layouts_match_descriptors() &&
+               outputs.layouts_match_descriptors();
+    }
+
+    bool active_buses_have_storage() const noexcept {
+        return inputs.active_buses_have_storage() &&
+               outputs.active_buses_have_storage();
+    }
+};
+
 struct EventDropCounters {
     std::uint32_t parameter_events = 0;
     std::uint32_t midi_events = 0;
@@ -336,21 +540,6 @@ struct ProcessBlock {
         if (events) {
             for (const auto& lane : events->audio_rate_modulations) {
                 if (lane.values.size() != frame_count) return false;
-            }
-        }
-        if (transport) {
-            if (transport->num_samples != 0 &&
-                transport->num_samples != static_cast<int>(frame_count)) {
-                return false;
-            }
-            if (transport->sample_rate != 0.0) {
-                if (transport->sample_rate <= 0.0 || !std::isfinite(transport->sample_rate)) {
-                    return false;
-                }
-                const auto tolerance = sample_rate * 1.0e-9;
-                if (std::fabs(transport->sample_rate - sample_rate) > tolerance) {
-                    return false;
-                }
             }
         }
         return true;

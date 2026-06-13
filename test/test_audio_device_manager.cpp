@@ -13,6 +13,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include "harness/rt_allocation_probe.hpp"
+
 #include <pulp/audio/audio_device_manager.hpp>
 #include <pulp/state/properties_file.hpp>
 #include <pulp/runtime/temporary_file.hpp>
@@ -302,6 +304,47 @@ TEST_CASE("AudioDeviceManager CPU-load tracks work performed in the audio window
 
     mgr.reset_peak_cpu_load();
     REQUIRE(mgr.peak_cpu_load() == 0.0f);
+}
+
+TEST_CASE("AudioDeviceManager exposes load and xrun runtime telemetry snapshot",
+          "[audio][audio-device-manager][telemetry][phase2]") {
+    AudioDeviceManager mgr;
+
+    mgr.bump_xrun_counter(3);
+    mgr.begin_cpu_measure(512, 48000.0f);
+    std::this_thread::sleep_for(std::chrono::microseconds(1200));
+    mgr.end_cpu_measure();
+
+    const auto snapshot = mgr.runtime_telemetry_snapshot();
+    REQUIRE(snapshot.xrun_count == 3);
+    REQUIRE(snapshot.process_load.callback_count == 1);
+    REQUIRE(snapshot.process_load.elapsed_ns > 0);
+    REQUIRE(snapshot.process_load.available_ns > 0);
+    REQUIRE(snapshot.process_load.last_load > 0.0f);
+    REQUIRE(std::isfinite(snapshot.process_load.last_load));
+
+    mgr.reset_xrun_counter();
+    REQUIRE(mgr.runtime_telemetry_snapshot().xrun_count == 0);
+}
+
+TEST_CASE("AudioDeviceManager runtime telemetry polling allocates zero times",
+          "[audio][audio-device-manager][telemetry][rt-safety][phase2]") {
+    AudioDeviceManager mgr;
+    mgr.bump_xrun_counter(2);
+
+    mgr.begin_cpu_measure(128, 48000.0f);
+    std::this_thread::sleep_for(std::chrono::microseconds(100));
+    mgr.end_cpu_measure();
+
+    pulp::test::RtAllocationProbe probe;
+
+    for (int i = 0; i < 16; ++i) {
+        const auto snapshot = mgr.runtime_telemetry_snapshot();
+        REQUIRE(snapshot.xrun_count == 2);
+        REQUIRE(snapshot.process_load.callback_count == 1);
+    }
+
+    REQUIRE_FALSE(probe.saw_allocation());
 }
 
 // ── 1.2b — Lifecycle / hotplug / recovery ──────────────────────────
