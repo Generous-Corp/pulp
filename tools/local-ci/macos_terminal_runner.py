@@ -283,8 +283,12 @@ def run_local_ci_in_terminal(
             returncode_path=returncode_path,
             title=terminal_title,
         )
+        wrapper_path = tmp_path / "terminal-command.sh"
+        wrapper_path.write_text(f"#!/bin/zsh\n{shell_script}\n")
+        wrapper_path.chmod(0o700)
+        terminal_command = f"/bin/zsh {shlex.quote(str(wrapper_path))}"
         result = run_fn(
-            ["osascript", "-e", f'tell application "Terminal" to do script {json.dumps(shell_script)}'],
+            ["osascript", "-e", f'tell application "Terminal" to do script {json.dumps(terminal_command)}'],
             capture_output=True,
             text=True,
         )

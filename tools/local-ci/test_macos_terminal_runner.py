@@ -101,11 +101,17 @@ class MacOSTerminalRunnerTests(unittest.TestCase):
                     self.assertIn("exists process", cmd[-1])
                     return subprocess.CompletedProcess(cmd, 0, "false\n", "")
                 if "do script" in cmd[-1]:
+                    wrapper = tmp_path / "terminal-command.sh"
+                    self.assertTrue(wrapper.exists())
+                    wrapper_text = wrapper.read_text()
+                    self.assertIn("Pulp Video Proof local-ci", wrapper_text)
+                    self.assertIn("desktop video mac", wrapper_text)
+                    self.assertIn("/bin/zsh", cmd[-1])
+                    self.assertIn("terminal-command.sh", cmd[-1])
                     (tmp_path / "stdout.txt").write_text("child stdout\n")
                     (tmp_path / "stderr.txt").write_text("child stderr\n")
                     (tmp_path / "returncode.txt").write_text("9\n")
                     self.assertIn("Terminal", cmd[-1])
-                    self.assertIn("Pulp Video Proof local-ci", cmd[-1])
                     return subprocess.CompletedProcess(cmd, 0, "", "")
                 self.assertIn("close w saving no", cmd[-1])
                 self.assertIn("Pulp Video Proof local-ci", cmd[-1])
@@ -131,6 +137,67 @@ class MacOSTerminalRunnerTests(unittest.TestCase):
         self.assertEqual(result["terminal_cleanup"]["closed_count"], 1)
         self.assertEqual(result["terminal_cleanup"]["remaining_proof_count"], 0)
         self.assertEqual(len(calls), 4)
+
+    def test_run_local_ci_in_terminal_preserves_long_shell_operator_argument_in_wrapper(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            captured_wrapper = {}
+
+            class FixedTemporaryDirectory:
+                def __init__(self, *_args, **_kwargs):
+                    pass
+
+                def __enter__(self):
+                    return str(tmp_path)
+
+                def __exit__(self, *_args):
+                    return False
+
+            def fake_run(cmd, **_kwargs):
+                if "exists process" in cmd[-1]:
+                    return subprocess.CompletedProcess(cmd, 0, "true\n", "")
+                if "do script" in cmd[-1]:
+                    captured_wrapper["text"] = (tmp_path / "terminal-command.sh").read_text()
+                    (tmp_path / "stdout.txt").write_text("")
+                    (tmp_path / "stderr.txt").write_text("")
+                    (tmp_path / "returncode.txt").write_text("0\n")
+                    self.assertIn("/bin/zsh", cmd[-1])
+                    self.assertIn("terminal-command.sh", cmd[-1])
+                    self.assertNotIn("cmake --build", cmd[-1])
+                    return subprocess.CompletedProcess(cmd, 0, "", "")
+                if "set proofCount" in cmd[-1]:
+                    return subprocess.CompletedProcess(cmd, 0, "0\t0\t0", "")
+                return subprocess.CompletedProcess(cmd, 0, "0\n", "")
+
+            argv = [
+                "desktop",
+                "video",
+                "mac",
+                "--run-in-terminal",
+                "--prepare-command",
+                "cmake -S . -B build-desktop-automation && cmake --build build-desktop-automation --target pulp-ui-preview",
+                "--video-title",
+                "Component zoom bypass proof",
+            ]
+            with mock.patch.object(self.mod.tempfile, "TemporaryDirectory", FixedTemporaryDirectory):
+                result = self.mod.run_local_ci_in_terminal(
+                    argv,
+                    cwd=Path("/repo"),
+                    python_executable="/usr/bin/python3",
+                    script_path=Path("/repo/tools/local-ci/local_ci.py"),
+                    timeout_secs=1,
+                    run_fn=fake_run,
+                    monotonic_fn=lambda: 0,
+                    sleep_fn=lambda _secs: None,
+                )
+
+        self.assertEqual(result["returncode"], 0)
+        wrapper_text = captured_wrapper["text"]
+        self.assertIn(
+            "--prepare-command 'cmake -S . -B build-desktop-automation && cmake --build build-desktop-automation --target pulp-ui-preview'",
+            wrapper_text,
+        )
+        self.assertIn("--video-title 'Component zoom bypass proof'", wrapper_text)
 
     def test_run_local_ci_in_terminal_reports_osascript_failure(self):
         result = self.mod.run_local_ci_in_terminal(
