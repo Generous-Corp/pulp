@@ -235,7 +235,7 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
             "--command './build-desktop-automation/examples/ui-preview/pulp-ui-preview' "
             "--prepare-command 'cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release && "
             "cmake --build build-desktop-automation --target pulp-ui-preview -j$(sysctl -n hw.ncpu)' "
-            "--capture-ui-snapshot --click-view-id bypass-toggle "
+            "--pulp-app-automation --capture-ui-snapshot --click-view-id bypass-toggle "
             "--label standalone-bypass-toggle --compose-video-proof"
         ),
         "doctor": "python3 tools/local-ci/local_ci.py desktop video-doctor mac",
@@ -322,7 +322,7 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
             "--command './build-desktop-automation/examples/ui-preview/pulp-ui-preview' "
             "--prepare-command 'cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release && "
             "cmake --build build-desktop-automation --target pulp-ui-preview -j$(sysctl -n hw.ncpu)' "
-            "--capture-ui-snapshot --component-id bypass-toggle "
+            "--pulp-app-automation --capture-ui-snapshot --component-id bypass-toggle "
             "--click-view-id bypass-toggle --label component-bypass-toggle "
             "--compose-video-proof"
         ),

@@ -219,6 +219,7 @@ python3 tools/local-ci/local_ci.py desktop video mac \
   --recipe standalone-interaction \
   --command ./build-desktop-automation/examples/ui-preview/pulp-ui-preview \
   --prepare-command 'cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release && cmake --build build-desktop-automation --target pulp-ui-preview -j$(sysctl -n hw.ncpu)' \
+  --pulp-app-automation \
   --click 120,80 \
   --duration 8
 ```
@@ -244,6 +245,7 @@ python3 tools/local-ci/local_ci.py desktop video mac \
   --recipe component-zoom \
   --command ./build-desktop-automation/examples/ui-preview/pulp-ui-preview \
   --prepare-command 'cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release && cmake --build build-desktop-automation --target pulp-ui-preview -j$(sysctl -n hw.ncpu)' \
+  --pulp-app-automation \
   --component-id bypass-toggle \
   --duration 8
 ```
