@@ -28,6 +28,15 @@ TEST_CASE("TextEditor Tab and multiline Return policies are configurable",
     REQUIRE(tab_committed == "a\t");
     REQUIRE(editor.text() == "a\t");
 
+    TextEditor return_fallback;
+    return_fallback.on_focus_changed(true);
+    return_fallback.set_text("fallback");
+    return_fallback.tab_behavior = TextEditor::TabBehavior::commit;
+    std::string fallback_returned;
+    return_fallback.on_return = [&](const std::string& text) { fallback_returned = text; };
+    REQUIRE(return_fallback.on_key_event(key_event(KeyCode::tab)));
+    REQUIRE(fallback_returned == "fallback");
+
     editor.tab_behavior = TextEditor::TabBehavior::ignore;
     REQUIRE(editor.on_key_event(key_event(KeyCode::tab)));
     REQUIRE(editor.text() == "a\t");
@@ -159,6 +168,13 @@ TEST_CASE("TextEditor line ending policy applies to input paste and IME",
     } else {
         SUCCEED("platform clipboard text backend unavailable");
     }
+
+    TextEditor strip_ime;
+    strip_ime.on_focus_changed(true);
+    strip_ime.multi_line = true;
+    strip_ime.line_ending_policy = TextEditor::LineEndingPolicy::strip;
+    strip_ime.set_marked_text("p\r\nq", 0, 0);
+    REQUIRE(strip_ime.text() == "pq");
 
     editor.select_all();
     editor.line_ending_policy = TextEditor::LineEndingPolicy::normalize;

@@ -37,6 +37,14 @@ inline uint16_t word_modifier() {
 #endif
 }
 
+inline uint16_t paragraph_modifier() {
+#ifdef __APPLE__
+    return view::kModAlt;
+#else
+    return view::kModCtrl;
+#endif
+}
+
 inline bool seed_system_clipboard_text(std::string_view text) {
     std::string value(text);
     if (!platform::Clipboard::set_text(value)) return false;

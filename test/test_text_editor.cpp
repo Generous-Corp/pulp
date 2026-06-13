@@ -817,10 +817,28 @@ TEST_CASE("TextEditor word and line delete shortcuts follow platform conventions
     REQUIRE(editor.on_key_event(key_event(KeyCode::u, kModCtrl)));
 #endif
     REQUIRE(editor.text() == "one\n");
+
+    editor.set_text("alpha beta\ngamma");
+    editor.set_caret_pos(2);
+    REQUIRE(editor.on_key_event(key_event(KeyCode::k, kModCtrl)));
+    REQUIRE(editor.text() == "al\ngamma");
+    REQUIRE(editor.caret_pos() == 2);
 }
 
 TEST_CASE("TextEditor Page Up and Page Down move multiline caret by visible pages",
           "[view][text_editor][keyboard][page]") {
+    TextEditor single_line;
+    single_line.on_focus_changed(true);
+    single_line.set_text("single line");
+    single_line.set_caret_pos(6);
+
+    REQUIRE(single_line.on_key_event(key_event(KeyCode::page_up)));
+    REQUIRE(single_line.caret_pos() == 0);
+
+    single_line.set_caret_pos(2);
+    REQUIRE(single_line.on_key_event(key_event(KeyCode::page_down, kModShift)));
+    REQUIRE(single_line.selection_range() == std::pair<int, int>{2, 11});
+
     TextEditor editor;
     editor.multi_line = true;
     editor.on_focus_changed(true);
@@ -832,6 +850,24 @@ TEST_CASE("TextEditor Page Up and Page Down move multiline caret by visible page
 
     REQUIRE(editor.on_key_event(key_event(KeyCode::page_down, kModShift)));
     REQUIRE(editor.has_selection());
+}
+
+TEST_CASE("TextEditor paragraph shortcuts move and extend to line boundaries",
+          "[view][text_editor][keyboard][paragraph]") {
+    TextEditor editor;
+    editor.multi_line = true;
+    editor.on_focus_changed(true);
+    editor.set_text("alpha beta\ngamma delta");
+    editor.set_caret_pos(8);
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::up, paragraph_modifier())));
+    REQUIRE(editor.caret_pos() == 0);
+    REQUIRE_FALSE(editor.has_selection());
+
+    editor.set_caret_pos(8);
+    REQUIRE(editor.on_key_event(key_event(KeyCode::down, paragraph_modifier() | kModShift)));
+    REQUIRE(editor.selection_range() == std::pair<int, int>{8, 10});
+    REQUIRE(editor.caret_pos() == 10);
 }
 
 TEST_CASE("TextEditor marked text replacement tracks the active range",
