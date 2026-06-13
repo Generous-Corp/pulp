@@ -243,6 +243,60 @@ def _proof_context_items(proof_composition: dict) -> list[tuple[str, str]]:
     return items
 
 
+def _proof_storyboard_from_metadata(metadata: dict) -> dict:
+    storyboard = metadata.get("review_storyboard") if isinstance(metadata, dict) else None
+    if not isinstance(storyboard, dict):
+        return {}
+    steps: list[dict] = []
+    for index, step in enumerate(storyboard.get("steps") or [], start=1):
+        if not isinstance(step, dict):
+            continue
+        label = str(step.get("label") or f"Step {index}").strip()
+        detail = str(step.get("detail") or "").strip()
+        if not label and not detail:
+            continue
+        steps.append(
+            {
+                "index": int(step.get("index") or index),
+                "label": label,
+                "detail": detail,
+            }
+        )
+    summary: dict = {
+        "title": str(storyboard.get("title") or "").strip(),
+        "subtitle": str(storyboard.get("subtitle") or "").strip(),
+        "template": str(storyboard.get("template") or "").strip(),
+        "steps": steps,
+    }
+    notes = [str(note).strip() for note in storyboard.get("notes") or [] if str(note).strip()]
+    if notes:
+        summary["notes"] = notes[:5]
+    for key in ("source", "capture", "issue"):
+        value = storyboard.get(key)
+        if isinstance(value, dict):
+            summary[key] = {str(k): v for k, v in value.items() if v is not None}
+    return {key: value for key, value in summary.items() if value}
+
+
+def _proof_storyboard_lines(storyboard: dict) -> list[str]:
+    steps = storyboard.get("steps") if isinstance(storyboard, dict) else None
+    if not isinstance(steps, list):
+        return []
+    lines = []
+    for step in steps[:6]:
+        if not isinstance(step, dict):
+            continue
+        label = str(step.get("label") or "").strip()
+        detail = str(step.get("detail") or "").strip()
+        if label and detail:
+            lines.append(f"{label}: {detail}")
+        elif label:
+            lines.append(label)
+        elif detail:
+            lines.append(detail)
+    return lines
+
+
 def _manifest_command_text(manifest: dict) -> str | None:
     command = manifest.get("command")
     if isinstance(command, list):
@@ -312,6 +366,9 @@ def desktop_review_issue_body(index_payload: dict, *, publish_dir: Path) -> str:
         video = artifacts.get("video_issue") or artifacts.get("video_composed") or artifacts.get("video")
         metadata_path = artifacts.get("video_issue_metadata") or artifacts.get("video_composed_metadata") or artifacts.get("video_metadata")
         metadata = _artifact_metadata(publish_dir, metadata_path)
+        composed_metadata = _artifact_metadata(publish_dir, artifacts.get("video_composed_metadata"))
+        storyboard = _proof_storyboard_from_metadata(composed_metadata)
+        storyboard_lines = _proof_storyboard_lines(storyboard)
         small_metadata = _artifact_metadata(publish_dir, artifacts.get("video_small_metadata"))
         size = metadata.get("size") if isinstance(metadata.get("size"), dict) else {}
         small_size = small_metadata.get("size") if isinstance(small_metadata.get("size"), dict) else {}
@@ -363,6 +420,10 @@ def desktop_review_issue_body(index_payload: dict, *, publish_dir: Path) -> str:
                 f"- Needs-work command: `python3 tools/local-ci/local_ci.py desktop verdict {verdict_manifest} --needs-work --notes \"<what to change>\" --issue-url <issue-url>`",
             ]
         )
+        if storyboard_lines:
+            lines.append("- Storyboard:")
+            for story_line in storyboard_lines:
+                lines.append(f"  - {story_line}")
         for key, value in context_items[:8]:
             lines.append(f"- Context {key}: `{value}`")
         for note in proof_notes[:5]:
@@ -392,6 +453,8 @@ def desktop_review_package(index_payload: dict, *, publish_dir: Path) -> dict:
         metadata_path = artifacts.get("video_issue_metadata") or artifacts.get("video_composed_metadata") or artifacts.get("video_metadata")
         small_metadata_path = artifacts.get("video_small_metadata")
         metadata = _artifact_metadata(publish_dir, metadata_path)
+        composed_metadata = _artifact_metadata(publish_dir, artifacts.get("video_composed_metadata"))
+        storyboard = _proof_storyboard_from_metadata(composed_metadata)
         small_metadata = _artifact_metadata(publish_dir, small_metadata_path)
         size = metadata.get("size") if isinstance(metadata.get("size"), dict) else {}
         small_size = small_metadata.get("size") if isinstance(small_metadata.get("size"), dict) else {}
@@ -442,6 +505,7 @@ def desktop_review_package(index_payload: dict, *, publish_dir: Path) -> dict:
                 "command": run.get("command"),
                 "source": run.get("source") if isinstance(run.get("source"), dict) else {},
                 "template": proof_composition.get("template"),
+                "storyboard": storyboard,
                 "context": proof_composition.get("context") if isinstance(proof_composition.get("context"), dict) else {},
                 "notes": run.get("video_proof_notes") if isinstance(run.get("video_proof_notes"), list) else [],
                 "manifest": {
@@ -515,6 +579,8 @@ def desktop_review_issue_draft(
         attachment = run.get("attachment") if isinstance(run.get("attachment"), dict) else {}
         fallback = run.get("fallback") if isinstance(run.get("fallback"), dict) else {}
         context = run.get("context") if isinstance(run.get("context"), dict) else {}
+        storyboard = run.get("storyboard") if isinstance(run.get("storyboard"), dict) else {}
+        storyboard_lines = _proof_storyboard_lines(storyboard)
         source = run.get("source") if isinstance(run.get("source"), dict) else {}
         manifest_info = run.get("manifest") if isinstance(run.get("manifest"), dict) else {}
         source_text = _source_summary(source)
@@ -534,6 +600,10 @@ def desktop_review_issue_draft(
                 f"- Attachment reason: {attachment.get('reason') or 'not recorded'}",
             ]
         )
+        if storyboard_lines:
+            body_lines.append("- Storyboard:")
+            for story_line in storyboard_lines:
+                body_lines.append(f"  - {story_line}")
         for key, value in list(context.items())[:8]:
             body_lines.append(f"- Context {key}: `{value}`")
         for note in (run.get("notes") or [])[:5]:
@@ -725,6 +795,9 @@ def stage_desktop_publish_report(
         diff = artifacts.get("diff_screenshot")
         video = artifacts.get("video_composed") or artifacts.get("video")
         video_metadata = artifacts.get("video_issue_metadata") or artifacts.get("video_composed_metadata") or artifacts.get("video_metadata")
+        composed_metadata = _artifact_metadata(publish_dir, artifacts.get("video_composed_metadata"))
+        storyboard = _proof_storyboard_from_metadata(composed_metadata)
+        storyboard_lines = _proof_storyboard_lines(storyboard)
         proof_notes = run.get("video_proof_notes") if isinstance(run.get("video_proof_notes"), list) else []
         proof_composition = run.get("video_proof_composition") if isinstance(run.get("video_proof_composition"), dict) else {}
         proof_focus = _proof_focus_summary(proof_composition)
@@ -774,6 +847,12 @@ def stage_desktop_publish_report(
                 + "".join(f"<li>{html.escape(str(note))}</li>" for note in proof_notes[:5])
                 + "</ul>"
             )
+        if storyboard_lines:
+            meta_lines.append(
+                "<ol class=\"proof-storyboard\">"
+                + "".join(f"<li>{html.escape(story_line)}</li>" for story_line in storyboard_lines)
+                + "</ol>"
+            )
         video_block = ""
         if video:
             video_block = (
@@ -821,6 +900,8 @@ def stage_desktop_publish_report(
                 " .run-card{border:1px solid #374151;border-radius:12px;padding:16px;margin:0 0 16px;background:#1f2937}"
                 " .images{display:flex;gap:16px;flex-wrap:wrap;margin-top:12px}"
                 " .proof-notes{margin:12px 0 0;padding-left:20px;color:#d1d5db}"
+                " .proof-storyboard{margin:12px 0 0;padding-left:24px;color:#f8fafc}"
+                " .proof-storyboard li{margin:4px 0}"
                 " figure{margin:12px 0 0} figcaption{margin-bottom:8px;color:#9ca3af}"
                 " img{max-width:320px;border-radius:8px;border:1px solid #374151;background:#000}"
                 " video{max-width:min(960px,100%);border-radius:8px;border:1px solid #374151;background:#000}</style>",

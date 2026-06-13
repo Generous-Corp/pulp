@@ -371,6 +371,11 @@ This rerenders `video/proof-composed.mp4`, refreshes composed metadata, creates
 or refreshes `video/proof.issue.mp4`, writes issue metadata, and updates the run
 manifest.
 
+`video/composed-metadata.json` includes `review_storyboard`: a concise
+launch/action/capture/review step list plus source, capture, and issue-variant
+context. Published reports and generated issue drafts surface those steps, so a
+reviewer can understand the proof before opening the MP4.
+
 To create both the pro-account issue target and a 10 MB fallback:
 
 ```bash
@@ -443,7 +448,8 @@ writes `github-issue.md` and `github-issue.json` next to the report without
 calling GitHub. Use `github-issue.md` as the issue body. Use
 `github-issue.json` to see which MP4s should be attached and which runs need the
 served fallback link. The draft also includes launch command, source branch/SHA,
-host/adapter, and copied manifest path when the manifest recorded them.
+host/adapter, copied manifest path, and the Remotion `review_storyboard` steps
+when composition metadata recorded them.
 `--check-files` verifies that every attachable MP4 still exists and fits its
 recorded attachment budget before writing the draft; fallback-link runs remain
 valid. GitHub supports `.mp4`, `.mov`, and `.webm` attachments and currently

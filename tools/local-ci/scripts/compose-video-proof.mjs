@@ -96,6 +96,44 @@ const contextItemsFor = (context) => {
 		.slice(0, 8);
 };
 
+const storyboardFor = ({inputProps, proofNotes, videoMeta, issueMeta}) => {
+	const steps = Array.isArray(inputProps.stepItems)
+		? inputProps.stepItems
+				.filter((step) => step && (step.label || step.detail))
+				.map((step, index) => ({
+					index: index + 1,
+					label: `${step.label || `Step ${index + 1}`}`.trim(),
+					detail: `${step.detail || ''}`.trim(),
+				}))
+		: [];
+	return {
+		title: inputProps.title,
+		subtitle: inputProps.subtitle,
+		template: inputProps.template,
+		target: inputProps.target,
+		action: inputProps.action,
+		label: inputProps.label,
+		steps,
+		notes: proofNotes.slice(0, 5),
+		source: {
+			mode: inputProps.sourceMode || null,
+			branch: inputProps.sourceBranch || null,
+			sha: inputProps.sourceSha || null,
+		},
+		capture: {
+			mode: videoMeta.mode || null,
+			duration_secs: videoMeta.duration_secs ?? null,
+			fps: videoMeta.fps ?? null,
+			has_audio: inputProps.videoHasAudio === true,
+		},
+		issue: {
+			status: issueMeta.status || null,
+			selected_attempt: issueMeta.selected_attempt || null,
+			fits_attachment_budget: inputProps.fitsAttachmentBudget ?? null,
+		},
+	};
+};
+
 const stepItemsFor = (manifest, videoMeta, issueMeta, proofNotes = []) => {
 	const interaction = manifest.interaction || {};
 	const selectorLabel = firstPresentSelector(interaction.click?.selector);
@@ -258,6 +296,7 @@ const main = async () => {
 				].filter(Boolean),
 			};
 
+		const reviewStoryboard = storyboardFor({inputProps, proofNotes, videoMeta, issueMeta});
 		const serveUrl = await bundle({
 			entryPoint,
 			outDir: bundleDir,
@@ -302,6 +341,7 @@ const main = async () => {
 							issue_status: inputProps.issueStatus,
 							has_audio: videoHasAudio,
 						},
+						review_storyboard: reviewStoryboard,
 					},
 					null,
 					2,

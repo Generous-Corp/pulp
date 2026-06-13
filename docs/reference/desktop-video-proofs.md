@@ -333,6 +333,13 @@ manifest. Add repeatable `--note` flags when an existing raw capture needs more
 reviewer context in the visible proof steps. The lower-level npm script is still
 available for template iteration:
 
+`composed-metadata.json` includes a `review_storyboard` block with the title,
+template, launch/action/capture/review steps, selected source identity, capture
+details, and issue-variant state. `desktop publish` carries that storyboard into
+`index.html`, `review.md`, `review-package.json`, and generated
+`github-issue.md`, so reviewers can understand what the clip is proving before
+they open the MP4.
+
 For source/design comparison reviews, pass a reference image and the
 `design-parity` template:
 
@@ -400,7 +407,9 @@ automation: it records each run's primary or small attachment decision, absolute
 MP4 path when a file should be attached, size/budget fields, and the served
 report fallback. It also preserves review context from the run manifest: exact
 launch command when available, source branch/SHA/mode, host, adapter, and copied
-manifest path. When a small fallback exists, the markdown also lists
+manifest path. When Remotion composition metadata is available, it also preserves
+the `review_storyboard` steps so issue automation can show what launched, what
+action happened, what changed, and what the reviewer should verify. When a small fallback exists, the markdown also lists
 `proof.small.mp4`, its 10 MB budget status, and whether that smaller file should
 be attached instead of the pro-account issue video. Both files include the
 concrete attach/do-not-attach decision and `desktop verdict` commands for

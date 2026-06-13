@@ -110,7 +110,28 @@ class ReportingTests(unittest.TestCase):
         video_metadata = bundle / "metadata.json"
         video_metadata.write_text('{"size":{"fits_attachment_budget":true}}\n')
         video_composed_metadata = bundle / "composed-metadata.json"
-        video_composed_metadata.write_text('{"composer":"remotion","size":{"size_bytes":120000,"fits_attachment_budget":true}}\n')
+        video_composed_metadata.write_text(
+            json.dumps(
+                {
+                    "composer": "remotion",
+                    "size": {"size_bytes": 120000, "fits_attachment_budget": True},
+                    "review_storyboard": {
+                        "title": "Design parity proof",
+                        "subtitle": "Design parity proof",
+                        "template": "design-parity",
+                        "steps": [
+                            {"index": 1, "label": "Launch", "detail": "REAPER / PulpSynth / clap"},
+                            {"index": 2, "label": "Focus", "detail": "bypass-toggle via id: bypass-toggle"},
+                            {"index": 3, "label": "Action", "detail": "click: bypass-toggle / video proof / 4s / 30 fps"},
+                            {"index": 4, "label": "Review", "detail": "transcoded (balanced-720p)"},
+                        ],
+                        "notes": ["Source import matches the native render."],
+                    },
+                },
+                indent=2,
+            )
+            + "\n"
+        )
         video_issue_metadata = bundle / "issue-metadata.json"
         video_issue_metadata.write_text('{"status":"transcoded","selected_attempt":"balanced-720p","size":{"size_bytes":90000,"fits_attachment_budget":true}}\n')
         video_small_metadata = bundle / "small-metadata.json"
@@ -244,6 +265,9 @@ class ReportingTests(unittest.TestCase):
         self.assertIn("action_point:", html_text)
         self.assertIn("context.plugin: PulpSynth", html_text)
         self.assertIn("context.format: clap", html_text)
+        self.assertIn("Launch: REAPER / PulpSynth / clap", html_text)
+        self.assertIn("Focus: bypass-toggle via id: bypass-toggle", html_text)
+        self.assertIn("Action: click: bypass-toggle / video proof / 4s / 30 fps", html_text)
         self.assertIn("Source import matches the native render.", html_text)
         self.assertIn("source reference", html_text)
         review_text = (output_dir / "review.md").read_text()
@@ -261,6 +285,8 @@ class ReportingTests(unittest.TestCase):
         self.assertEqual(review_package["runs"][0]["command"], "./build/pulp --inspect")
         self.assertEqual(review_package["runs"][0]["source"]["branch"], "feat/validation-video-proof")
         self.assertTrue(review_package["runs"][0]["manifest"]["path"].endswith("manifest.json"))
+        self.assertEqual(review_package["runs"][0]["storyboard"]["title"], "Design parity proof")
+        self.assertEqual(review_package["runs"][0]["storyboard"]["steps"][0]["label"], "Launch")
         self.assertEqual(review_package["runs"][0]["context"]["plugin"], "PulpSynth")
         self.assertTrue(review_package["runs"][0]["fallback"]["internal_ephemeral"])
         self.assertEqual(review_package["runs"][0]["fallback"]["serve_urls"], ["http://127.0.0.1:8765/", "http://100.64.0.10:8765/"])
@@ -290,6 +316,9 @@ class ReportingTests(unittest.TestCase):
         self.assertIn("Focus component: `bypass-toggle`", review_text)
         self.assertIn("Action marker: `bypass-toggle`", review_text)
         self.assertIn("Action point: `", review_text)
+        self.assertIn("Storyboard:", review_text)
+        self.assertIn("Launch: REAPER / PulpSynth / clap", review_text)
+        self.assertIn("Focus: bypass-toggle via id: bypass-toggle", review_text)
         self.assertIn("Context plugin: `PulpSynth`", review_text)
         self.assertIn("Context format: `clap`", review_text)
         self.assertIn("Source reference: `", review_text)
@@ -317,6 +346,14 @@ class ReportingTests(unittest.TestCase):
                     "source": {"mode": "exact-sha", "branch": "feature/video", "sha": "abc123"},
                     "manifest": {"path": str(package_path.parent / "assets/run/manifest.json"), "relative_path": "assets/run/manifest.json"},
                     "template": "component-zoom",
+                    "storyboard": {
+                        "title": "Component zoom proof",
+                        "steps": [
+                            {"index": 1, "label": "Launch", "detail": "mac/click"},
+                            {"index": 2, "label": "Action", "detail": "click: bypass-toggle"},
+                            {"index": 3, "label": "Review", "detail": "issue attachment ready"},
+                        ],
+                    },
                     "context": {"component": "bypass-toggle"},
                     "notes": ["Toggle changes state."],
                     "attachment": {
@@ -374,6 +411,9 @@ class ReportingTests(unittest.TestCase):
         self.assertIn("Host: `macstudio`", draft["body"])
         self.assertIn("Adapter: `macos-local`", draft["body"])
         self.assertIn("Manifest: `", draft["body"])
+        self.assertIn("Storyboard:", draft["body"])
+        self.assertIn("Launch: mac/click", draft["body"])
+        self.assertIn("Action: click: bypass-toggle", draft["body"])
         self.assertIn("Candidate watch URL: `http://100.64.0.10:8765/`", draft["body"])
         self.assertIn("Context component: `bypass-toggle`", draft["body"])
         self.assertIn("use the served report link", draft["body"])
