@@ -9,17 +9,20 @@
 ///
 /// Reuses PulpSampler's SamplerVoice + SamplerSampleStore + voice-render path.
 
-#include "sampler_components.hpp" // from examples/PulpSampler (added to include path)
-
 #include <pulp/audio/built_in_key_tempo_analyzer.hpp>
 #include <pulp/audio/buffer.hpp>
 #include <pulp/audio/loop_renderer.hpp>
 #include <pulp/audio/loop_types.hpp>
 #include <pulp/audio/onset_detector.hpp>
+#include <pulp/audio/published_sample_store.hpp>
 #include <pulp/audio/sample_key_map.hpp>
+#include <pulp/audio/sample_slot_bank.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/signal/adsr.hpp>
 #include <pulp/signal/offline_stretch.hpp>
+#include <pulp/view/theme.hpp>
+#include <pulp/view/view.hpp>
+#include <pulp/view/waveform_editor.hpp>
 
 #include <algorithm>
 #include <array>
@@ -27,11 +30,52 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <thread>
 #include <vector>
 
 namespace pulp::examples {
+
+// Inlined from PulpSampler's sampler_components.hpp so this example is
+// self-contained — pulp_add_plugin compiles the format entries without an
+// extra cross-example include path.
+struct SamplerVoice {
+    bool active = false;
+    int note = -1;
+    float velocity = 0.0f;
+    signal::Adsr adsr;
+    audio::LoopRenderer renderer;
+    audio::PublishedSampleView sample;
+    bool released = false;
+
+    void reset() {
+        active = false; note = -1; velocity = 0.0f; sample = {}; released = false;
+        adsr.reset(); renderer.reset();
+    }
+    bool start(int n, float vel, double speed, float host_sample_rate,
+               const audio::PublishedSampleView& sample_view,
+               const audio::LoopRegion& region, std::uint64_t source_frames) {
+        reset();
+        if (!renderer.set_region(region, source_frames)) return false;
+        note = n; velocity = vel; sample = sample_view; active = true;
+        adsr.set_sample_rate(host_sample_rate); adsr.note_on();
+        renderer.set_playback_rate(speed); renderer.start();
+        return true;
+    }
+    void release() { adsr.note_off(); released = true; }
+};
+
+class SamplerSampleStore : public audio::PublishedSampleStore {
+public:
+    static constexpr std::uint32_t kSlotCount = 2;
+    static constexpr std::uint32_t kMaxChannels = 2;
+    static constexpr std::uint64_t kMaxFrames = 48000ull * 60ull;
+    bool prepare() {
+        return audio::PublishedSampleStore::prepare(
+            audio::PublishedSampleStoreConfig{kSlotCount, kMaxChannels, kMaxFrames});
+    }
+};
 
 enum TempoSamplerParams : state::ParamID {
     kTempoGain    = 1,
@@ -129,6 +173,38 @@ public:
 
     /// Render synchronously (tests/headless). Real hosts use the worker.
     void render_now(double host_bpm) { render_to_tempo(host_bpm); }
+
+    // ── Editor UI (Ink & Signal) ─────────────────────────────────────────
+    /// Build the plugin editor: a graphite panel with a signal-teal waveform
+    /// view of the loaded loop, slice regions shaded per onset. This is the
+    /// Phase-5 waveform-editor pilot for the Ink & Signal design language.
+    std::unique_ptr<view::View> create_view() override {
+        using namespace pulp::view;
+        auto wf = std::make_unique<WaveformEditor>();
+        wf->set_bounds({0, 0, 720, 240});
+
+        Theme theme = Theme::dark();
+        theme.colors["waveform"]        = canvas::Color::rgba8(0x16, 0xDA, 0xC2);     // signal teal
+        theme.colors["waveform_bg"]     = canvas::Color::rgba8(0x12, 0x16, 0x1D);     // graphite sunken
+        theme.colors["waveform_center"] = canvas::Color::rgba8(0x39, 0x41, 0x4A);     // graphite line
+        theme.colors["playhead"]        = canvas::Color::rgba8(0x46, 0xF0, 0xDB);     // signal bright
+        theme.colors["selection"]       = canvas::Color::rgba8(0x16, 0xDA, 0xC2, 36);
+        wf->set_theme(theme);
+
+        std::lock_guard<std::mutex> lock(raw_mutex_);
+        if (raw_frames_ > 0)
+            wf->set_audio_data(raw_[0].data(), static_cast<int>(raw_frames_),
+                               static_cast<float>(raw_sr_));
+        for (std::size_t i = 0; i + 1 < slices_orig_.size(); ++i) {
+            WaveformRegion r;
+            r.start_sample = static_cast<int>(slices_orig_[i]);
+            r.end_sample = static_cast<int>(slices_orig_[i + 1]);
+            const std::uint8_t a = (i % 2) ? 60 : 26; // alternating slice shade
+            r.color = canvas::Color::rgba8(0x16, 0xDA, 0xC2, a);
+            wf->add_region(r);
+        }
+        return wf;
+    }
 
     // ── Audio thread ───────────────────────────────────────────────────────
 
