@@ -18,6 +18,16 @@ class WindowsTargetSessionBindingsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
 
+    def test_exports_are_named_session_helpers(self) -> None:
+        expected = (
+            "default_windows_session_task_name",
+            "desktop_target_contract",
+            "build_windows_session_agent_request",
+        )
+
+        self.assertEqual(self.mod.WINDOWS_TARGET_SESSION_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def test_session_wrappers_delegate_and_bind_desktop_label(self) -> None:
         captured = {}
 
@@ -68,6 +78,24 @@ class WindowsTargetSessionBindingsTests(unittest.TestCase):
         self.assertEqual(captured["build"][0], ("win", {"results_dir": r"C:\Results"}, "build.bat"))
         self.assertEqual(captured["build"][1]["repo_path"], r"C:\Pulp")
         self.assertIs(captured["build"][1]["default_desktop_label_fn"], bindings["default_desktop_label"])
+
+    def test_install_windows_target_session_helpers_wires_named_exports(self) -> None:
+        windows_target = types.SimpleNamespace(
+            default_windows_session_task_name=lambda target_name: f"Task-{target_name}",
+            desktop_target_contract=lambda target_name, target: {"target": target_name, **target},
+        )
+        bindings = {"_windows_target": windows_target}
+
+        self.mod.install_windows_target_session_helpers(
+            bindings,
+            ("default_windows_session_task_name", "desktop_target_contract"),
+        )
+
+        self.assertEqual(bindings["default_windows_session_task_name"]("win"), "Task-win")
+        self.assertEqual(
+            bindings["desktop_target_contract"]("win", {"adapter": "windows-session-agent"}),
+            {"target": "win", "adapter": "windows-session-agent"},
+        )
 
 
 if __name__ == "__main__":

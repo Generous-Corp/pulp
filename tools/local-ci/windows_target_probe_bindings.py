@@ -2,7 +2,17 @@
 
 from __future__ import annotations
 
+from binding_utils import install_local_helpers
 from binding_utils import binding as _binding
+
+
+WINDOWS_TARGET_PROBE_EXPORTS = (
+    "windows_tooling_detail",
+    "windows_remote_tooling_ready",
+    "windows_desktop_session_user",
+    "windows_desktop_session_state",
+    "windows_repo_checkout_detail",
+)
 
 
 def windows_tooling_detail(
@@ -44,3 +54,10 @@ def windows_repo_checkout_detail(
         probe,
         fallback_path=fallback_path,
     )
+
+
+def install_windows_target_probe_helpers(
+    bindings: dict,
+    names: tuple[str, ...] = WINDOWS_TARGET_PROBE_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)

@@ -18,6 +18,18 @@ class WindowsTargetProbeBindingsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
 
+    def test_exports_are_named_probe_helpers(self) -> None:
+        expected = (
+            "windows_tooling_detail",
+            "windows_remote_tooling_ready",
+            "windows_desktop_session_user",
+            "windows_desktop_session_state",
+            "windows_repo_checkout_detail",
+        )
+
+        self.assertEqual(self.mod.WINDOWS_TARGET_PROBE_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def test_probe_wrappers_delegate_to_windows_target_module(self) -> None:
         captured = {}
 
@@ -54,6 +66,21 @@ class WindowsTargetProbeBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.windows_repo_checkout_detail(bindings, probe, fallback_path=r"C:\Fallback"), r"C:\Pulp")
         self.assertEqual(captured["checkout_detail"][0], (probe,))
         self.assertEqual(captured["checkout_detail"][1], {"fallback_path": r"C:\Fallback"})
+
+    def test_install_windows_target_probe_helpers_wires_named_exports(self) -> None:
+        windows_target = types.SimpleNamespace(
+            windows_desktop_session_user=lambda probe: "dev",
+            windows_repo_checkout_detail=lambda probe, *, fallback_path=None: fallback_path,
+        )
+        bindings = {"_windows_target": windows_target}
+
+        self.mod.install_windows_target_probe_helpers(
+            bindings,
+            ("windows_desktop_session_user", "windows_repo_checkout_detail"),
+        )
+
+        self.assertEqual(bindings["windows_desktop_session_user"]({"session": "ok"}), "dev")
+        self.assertEqual(bindings["windows_repo_checkout_detail"](None, fallback_path=r"C:\Fallback"), r"C:\Fallback")
 
 
 if __name__ == "__main__":

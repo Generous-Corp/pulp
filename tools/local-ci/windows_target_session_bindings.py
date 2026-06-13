@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
+from binding_utils import install_local_helpers
 from binding_utils import binding as _binding
+
+
+WINDOWS_TARGET_SESSION_EXPORTS = (
+    "default_windows_session_task_name",
+    "desktop_target_contract",
+    "build_windows_session_agent_request",
+)
 
 
 def default_windows_session_task_name(bindings: dict, target_name: str) -> str:
@@ -52,3 +60,10 @@ def build_windows_session_agent_request(
         timeout_secs=timeout_secs,
         default_desktop_label_fn=_binding(bindings, "default_desktop_label"),
     )
+
+
+def install_windows_target_session_helpers(
+    bindings: dict,
+    names: tuple[str, ...] = WINDOWS_TARGET_SESSION_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)

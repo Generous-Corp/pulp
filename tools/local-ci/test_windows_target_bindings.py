@@ -20,6 +20,24 @@ class WindowsTargetBindingsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
 
+    def test_windows_target_exports_are_composed_from_focused_groups(self) -> None:
+        expected = (
+            *self.mod.WINDOWS_TARGET_SESSION_EXPORTS,
+            *self.mod.WINDOWS_TARGET_PATH_EXPORTS,
+            *self.mod.WINDOWS_TARGET_PROBE_EXPORTS,
+        )
+
+        self.assertEqual(self.mod.WINDOWS_TARGET_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+        self.assertEqual(
+            self.mod.WINDOWS_TARGET_CONSTANT_EXPORTS,
+            (
+                "windows_required_remote_tools",
+                "windows_optional_remote_tools",
+                "windows_default_remote_repo_dirname",
+            ),
+        )
+
     def _bindings(self, windows_target):
         return {
             "_windows_target": windows_target,
@@ -146,6 +164,30 @@ class WindowsTargetBindingsTests(unittest.TestCase):
 
         self.assertEqual(bindings["default_windows_session_task_name"]("win"), "Task-win")
         self.assertEqual(bindings["windows_path_join"]("C:", "Pulp"), r"C:\Pulp")
+
+    def test_install_windows_target_helpers_routes_each_group(self) -> None:
+        windows_target = types.SimpleNamespace(
+            WINDOWS_REQUIRED_REMOTE_TOOLS={"git": {"required": True}},
+            default_windows_session_task_name=lambda target_name: f"Task-{target_name}",
+            windows_path_join=lambda *parts: "\\".join(parts),
+            windows_desktop_session_user=lambda probe: "dev",
+        )
+        bindings = self._bindings(windows_target)
+
+        self.mod.install_windows_target_helpers(
+            bindings,
+            (
+                "windows_required_remote_tools",
+                "default_windows_session_task_name",
+                "windows_path_join",
+                "windows_desktop_session_user",
+            ),
+        )
+
+        self.assertIs(bindings["windows_required_remote_tools"](), windows_target.WINDOWS_REQUIRED_REMOTE_TOOLS)
+        self.assertEqual(bindings["default_windows_session_task_name"]("win"), "Task-win")
+        self.assertEqual(bindings["windows_path_join"]("C:", "Pulp"), r"C:\Pulp")
+        self.assertEqual(bindings["windows_desktop_session_user"]({"session": "ok"}), "dev")
 
 
 if __name__ == "__main__":
