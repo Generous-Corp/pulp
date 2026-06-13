@@ -349,11 +349,17 @@ class DesktopCommandBindingsTests(unittest.TestCase):
 
         def run_terminal(*args, **kwargs):
             captured["terminal"] = (args, kwargs)
-            return {"returncode": 17, "stdout": "child stdout\n", "stderr": "child stderr\n"}
+            return {
+                "returncode": 17,
+                "stdout": "child stdout\n",
+                "stderr": "child stderr\n",
+                "terminal_title": "Pulp Video Proof local-ci test1234",
+            }
 
         terminal_runner = types.SimpleNamespace(
             should_reinvoke_in_terminal=lambda **_kwargs: True,
             run_local_ci_in_terminal=run_terminal,
+            close_terminal_windows_with_title=lambda title: captured.setdefault("cleanup_title", title),
         )
         bindings = self._bindings("_desktop_setup_commands_cli", "cmd_desktop_video_doctor", runner)
         bindings["_macos_terminal_runner"] = terminal_runner
@@ -376,6 +382,7 @@ class DesktopCommandBindingsTests(unittest.TestCase):
         self.assertEqual(kwargs["cwd"], Path("/repo"))
         self.assertEqual(kwargs["python_executable"], "/usr/bin/python3")
         self.assertEqual(kwargs["script_path"], Path("/repo/tools/local-ci/local_ci.py"))
+        self.assertEqual(captured["cleanup_title"], "Pulp Video Proof local-ci test1234")
 
     def test_video_setup_can_reinvoke_through_terminal(self):
         captured = {}

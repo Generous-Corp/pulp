@@ -59,6 +59,7 @@ class MacosDesktopActionTests(unittest.TestCase):
         launched = overrides.pop("launched", [])
         terminated = overrides.pop("terminated", [])
         waited_paths = overrides.pop("waited_paths", [])
+        terminal_cleanups = overrides.pop("terminal_cleanups", [])
         source_context = overrides.pop("source_context", None)
         window = overrides.pop(
             "window",
@@ -181,6 +182,8 @@ class MacosDesktopActionTests(unittest.TestCase):
                 "command": args,
                 "returncode": str(kwargs["returncode_path"]),
             },
+            "close_macos_terminal_windows_with_title_fn": lambda title: terminal_cleanups.append(title)
+            or {"title_contains": title, "closed_count": 1, "returncode": 0},
             "popen_fn": popen,
             "wait_for_macos_window_fn": lambda _pid, _timeout: window,
             "content_size_from_window_fn": lambda _window: (320.0, 200.0),
@@ -298,6 +301,7 @@ class MacosDesktopActionTests(unittest.TestCase):
 
     def test_run_macos_local_smoke_records_terminal_capture(self) -> None:
         terminal_launches = []
+        terminal_cleanups = []
 
         def launch_terminal(args, **kwargs):
             terminal_launches.append((args, kwargs))
@@ -317,6 +321,7 @@ class MacosDesktopActionTests(unittest.TestCase):
             video_capture_target="terminal",
             video_duration_secs=3.0,
             launch_macos_terminal_proof_command_fn=launch_terminal,
+            terminal_cleanups=terminal_cleanups,
         )
 
         self.assertEqual(launched, [])
@@ -325,6 +330,8 @@ class MacosDesktopActionTests(unittest.TestCase):
         self.assertEqual(terminal_launches[0][1]["cwd"], self.root)
         self.assertEqual(terminal_launches[0][1]["keepalive_secs"], 5.0)
         self.assertEqual(manifest["terminal"]["returncode"], 143)
+        self.assertEqual(terminal_cleanups, [terminal_launches[0][1]["title"]])
+        self.assertEqual(manifest["terminal"]["cleanup"]["closed_count"], 1)
         self.assertEqual(manifest["terminal"]["returncode_path"], str(self.bundle_dir / "terminal-returncode.txt"))
         self.assertTrue(manifest["artifacts"]["terminal_returncode"].endswith("/terminal-returncode.txt"))
         self.assertEqual(manifest["window"], window)

@@ -10,6 +10,7 @@ import shlex
 import subprocess
 import tempfile
 import time
+import uuid
 
 
 TERMINAL_REENTRY_ENV = "PULP_LOCAL_CI_TERMINAL_REENTRY"
@@ -38,6 +39,7 @@ def terminal_shell_script(
     stdout_path: Path,
     stderr_path: Path,
     returncode_path: Path,
+    title: str | None = None,
 ) -> str:
     command = [
         "env",
@@ -46,14 +48,142 @@ def terminal_shell_script(
         str(script_path),
         *strip_run_in_terminal_args(argv),
     ]
-    return (
-        f"cd {shlex.quote(str(cwd))}; "
-        f"(/usr/bin/caffeinate -u -t 60 >/dev/null 2>&1 &); "
+    close_script = (
+        f'tell application "Terminal" to close (first window whose name contains {json.dumps(title)})'
+        if title
+        else None
+    )
+    parts = [
+        f"cd {shlex.quote(str(cwd))}",
+        f"printf '\\033]0;%s\\007' {shlex.quote(title)}" if title else None,
+        "(/usr/bin/caffeinate -u -t 60 >/dev/null 2>&1 &)",
         f"{' '.join(shlex.quote(part) for part in command)} "
         f"> {shlex.quote(str(stdout_path))} "
-        f"2> {shlex.quote(str(stderr_path))}; "
-        f"printf '%s\\n' \"$?\" > {shlex.quote(str(returncode_path))}"
+        f"2> {shlex.quote(str(stderr_path))}",
+        f"printf '%s\\n' \"$?\" > {shlex.quote(str(returncode_path))}",
+        f"(sleep 0.2; /usr/bin/osascript -e {shlex.quote(close_script)} >/dev/null 2>&1) &" if close_script else None,
+        "exit",
+    ]
+    return "; ".join(part for part in parts if part)
+
+
+def close_terminal_windows_with_title(
+    title_contains: str,
+    *,
+    run_fn: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+    sleep_fn: Callable[[float], None] = time.sleep,
+    attempts: int = 5,
+    allow_terminate_with_nonproof_windows: bool = False,
+) -> dict:
+    script = "\n".join(
+        [
+            'tell application "Terminal"',
+            "    set closedCount to 0",
+            "    set otherCount to 0",
+            "    set otherProofCount to 0",
+            "    repeat with w in (every window)",
+            "        set windowName to name of w",
+            f"        if windowName contains {json.dumps(title_contains)} then",
+            "            close w",
+            "            set closedCount to closedCount + 1",
+            '        else if windowName contains "Pulp Video Proof" then',
+            "            set otherProofCount to otherProofCount + 1",
+            "        else",
+            "            set otherCount to otherCount + 1",
+            "        end if",
+            "    end repeat",
+            "    if closedCount > 0 and otherCount = 0 then",
+            "        quit",
+            "    end if",
+            "    return closedCount",
+            "end tell",
+        ]
     )
+    result = subprocess.CompletedProcess(["osascript", "-e", script], 1, "", "")
+    closed_count = 0
+    terminated_terminal = False
+    terminate_returncode: int | None = None
+    for attempt in range(max(1, attempts)):
+        if attempt:
+            sleep_fn(0.2)
+        result = run_fn(["osascript", "-e", script], capture_output=True, text=True)
+        if result.returncode == 0:
+            try:
+                attempt_closed_count = int((result.stdout or "0").strip())
+            except ValueError:
+                attempt_closed_count = 0
+            closed_count += attempt_closed_count
+            if attempt_closed_count == 0:
+                break
+    if result.returncode != 0 or closed_count > 0 or allow_terminate_with_nonproof_windows:
+        state_script = "\n".join(
+            [
+                'tell application "System Events"',
+                '    if not (exists process "Terminal") then',
+                '        return "0\t0\t0"',
+                "    end if",
+                '    set terminalPid to unix id of process "Terminal"',
+                "end tell",
+                'tell application "Terminal"',
+                "    set proofCount to 0",
+                "    set otherProofCount to 0",
+                "    set otherCount to 0",
+                "    repeat with w in (every window)",
+                "        set windowName to name of w",
+                f"        if windowName contains {json.dumps(title_contains)} then",
+                "            set proofCount to proofCount + 1",
+                '        else if windowName contains "Pulp Video Proof" then',
+                "            set otherProofCount to otherProofCount + 1",
+                "        else",
+                "            set otherCount to otherCount + 1",
+                "        end if",
+                "    end repeat",
+                '    return (terminalPid as text) & "\t" & (proofCount as text) & "\t" & (otherCount as text)',
+                "end tell",
+            ]
+        )
+        state_result = run_fn(["osascript", "-e", state_script], capture_output=True, text=True)
+        if state_result.returncode == 0:
+            state_fields = (state_result.stdout or "").strip().split("\t")
+            if len(state_fields) == 3:
+                try:
+                    terminal_pid = int(state_fields[0])
+                    proof_count = int(state_fields[1])
+                    other_count = int(state_fields[2])
+                except ValueError:
+                    terminal_pid = 0
+                    proof_count = 0
+                    other_count = 0
+                if terminal_pid > 0 and (
+                    (proof_count > 0 and other_count == 0) or allow_terminate_with_nonproof_windows
+                ):
+                    terminate_result = run_fn(["kill", "-TERM", str(terminal_pid)], capture_output=True, text=True)
+                    terminate_returncode = terminate_result.returncode
+                    terminated_terminal = terminate_result.returncode == 0
+    return {
+        "title_contains": title_contains,
+        "closed_count": closed_count,
+        "terminated_terminal": terminated_terminal,
+        "terminate_returncode": terminate_returncode,
+        "returncode": result.returncode,
+        "stdout": (result.stdout or "").strip(),
+        "stderr": (result.stderr or "").strip(),
+    }
+
+
+def terminal_app_running(
+    *,
+    run_fn: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+) -> bool:
+    script = "\n".join(
+        [
+            'tell application "System Events"',
+            '    return exists process "Terminal"',
+            "end tell",
+        ]
+    )
+    result = run_fn(["osascript", "-e", script], capture_output=True, text=True)
+    return result.returncode == 0 and (result.stdout or "").strip().lower() == "true"
 
 
 def run_local_ci_in_terminal(
@@ -72,6 +202,8 @@ def run_local_ci_in_terminal(
         stdout_path = tmp_path / "stdout.txt"
         stderr_path = tmp_path / "stderr.txt"
         returncode_path = tmp_path / "returncode.txt"
+        terminal_title = f"Pulp Video Proof local-ci {uuid.uuid4().hex[:8]}"
+        terminal_was_running = terminal_app_running(run_fn=run_fn)
         shell_script = terminal_shell_script(
             cwd=cwd,
             python_executable=python_executable,
@@ -80,6 +212,7 @@ def run_local_ci_in_terminal(
             stdout_path=stdout_path,
             stderr_path=stderr_path,
             returncode_path=returncode_path,
+            title=terminal_title,
         )
         result = run_fn(
             ["osascript", "-e", f'tell application "Terminal" to do script {json.dumps(shell_script)}'],
@@ -109,6 +242,13 @@ def run_local_ci_in_terminal(
                     "stdout": stdout,
                     "stderr": stderr,
                     "timed_out": False,
+                    "terminal_title": terminal_title,
+                    "terminal_cleanup": close_terminal_windows_with_title(
+                        terminal_title,
+                        run_fn=run_fn,
+                        sleep_fn=sleep_fn,
+                        allow_terminate_with_nonproof_windows=not terminal_was_running,
+                    ),
                 }
             sleep_fn(0.5)
 
@@ -117,4 +257,5 @@ def run_local_ci_in_terminal(
             "stdout": stdout_path.read_text() if stdout_path.exists() else "",
             "stderr": f"Timed out waiting for Terminal-launched local-ci command after {timeout_secs:g}s.\n",
             "timed_out": True,
+            "terminal_title": terminal_title,
         }

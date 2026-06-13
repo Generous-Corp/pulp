@@ -97,6 +97,7 @@ def run_macos_local_smoke(
         environ_copy_fn=os_mod.environ.copy,
         cwd_path_fn=_binding(bindings, "Path").cwd,
         launch_macos_terminal_proof_command_fn=_binding(bindings, "launch_macos_terminal_proof_command"),
+        close_macos_terminal_windows_with_title_fn=_binding(bindings, "close_macos_terminal_windows_with_title"),
         popen_fn=subprocess_mod.Popen,
         wait_for_macos_window_fn=_binding(bindings, "wait_for_macos_window"),
         content_size_from_window_fn=desktop_actions.content_size_from_window,

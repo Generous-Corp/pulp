@@ -192,6 +192,66 @@ class MacOSDesktopTests(unittest.TestCase):
         self.assertIn("sleep 3.000", script)
         self.assertIn("'/tmp/rc file'", script)
 
+    def test_close_terminal_windows_with_title_uses_scoped_title(self) -> None:
+        calls = []
+        stdout_values = ["2\n", "0\n"]
+
+        def run_osascript(cmd: list[str], **_kwargs):
+            calls.append(cmd)
+            return subprocess.CompletedProcess(cmd, 0, stdout=stdout_values.pop(0), stderr="")
+
+        result = self.mod.close_macos_terminal_windows_with_title(
+            "Pulp Video Proof abcd1234",
+            run_fn=run_osascript,
+        )
+
+        self.assertEqual(result["closed_count"], 2)
+        self.assertEqual(result["returncode"], 0)
+        self.assertEqual(calls[0][0], "osascript")
+        self.assertIn("Pulp Video Proof abcd1234", calls[0][-1])
+        self.assertIn("close w", calls[0][-1])
+        self.assertEqual(len(calls), 2)
+
+    def test_close_terminal_windows_terminates_only_scoped_proof_terminal(self) -> None:
+        calls = []
+
+        def run_osascript(cmd: list[str], **_kwargs):
+            calls.append(cmd)
+            if cmd[0] == "osascript" and "set closedCount" in cmd[-1]:
+                return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="User canceled")
+            if cmd[0] == "osascript":
+                self.assertIn("Pulp Video Proof abcd1234", cmd[-1])
+                return subprocess.CompletedProcess(cmd, 0, stdout="1234\t1\t0", stderr="")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        result = self.mod.close_macos_terminal_windows_with_title(
+            "Pulp Video Proof abcd1234",
+            run_fn=run_osascript,
+            attempts=1,
+        )
+
+        self.assertTrue(result["terminated_terminal"])
+        self.assertEqual(result["terminate_returncode"], 0)
+        self.assertEqual(calls[-1], ["kill", "-TERM", "1234"])
+
+    def test_close_terminal_windows_does_not_terminate_with_other_windows(self) -> None:
+        calls = []
+
+        def run_osascript(cmd: list[str], **_kwargs):
+            calls.append(cmd)
+            if cmd[0] == "osascript" and "set closedCount" in cmd[-1]:
+                return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="User canceled")
+            return subprocess.CompletedProcess(cmd, 0, stdout="1234\t1\t1", stderr="")
+
+        result = self.mod.close_macos_terminal_windows_with_title(
+            "Pulp Video Proof abcd1234",
+            run_fn=run_osascript,
+            attempts=1,
+        )
+
+        self.assertFalse(result["terminated_terminal"])
+        self.assertNotIn(["kill", "-TERM", "1234"], calls)
+
     def test_capture_retry_and_process_termination(self) -> None:
         output_path = self.root / "screens" / "window.png"
         calls = [0]

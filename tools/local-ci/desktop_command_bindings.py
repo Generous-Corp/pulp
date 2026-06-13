@@ -32,6 +32,9 @@ def _maybe_run_local_ci_in_terminal(bindings: Mapping[str, Any], args: Any) -> i
         sys_mod.stdout.write(result["stdout"])
     if result.get("stderr"):
         sys_mod.stderr.write(result["stderr"])
+    terminal_title = result.get("terminal_title")
+    if terminal_title and not result.get("terminal_cleanup"):
+        terminal_runner.close_terminal_windows_with_title(terminal_title)
     return int(result["returncode"])
 
 

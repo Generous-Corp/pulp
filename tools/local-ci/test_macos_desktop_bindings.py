@@ -64,6 +64,7 @@ class MacosDesktopBindingsTests(unittest.TestCase):
             "detect_macos_app_bundle",
             "macos_bundle_id_for_app_path",
             "launch_macos_terminal_proof_command",
+            "close_macos_terminal_windows_with_title",
             "wait_for_macos_window",
             "wait_for_path",
             "capture_macos_window",
@@ -130,6 +131,10 @@ class MacosDesktopBindingsTests(unittest.TestCase):
         self.assertIs(captured["kwargs"]["wait_for_macos_window_fn"], bindings["wait_for_macos_window"])
         self.assertIs(captured["kwargs"]["wait_for_macos_bundle_window_title_fn"], bindings["wait_for_macos_bundle_window_title"])
         self.assertIs(captured["kwargs"]["launch_macos_terminal_proof_command_fn"], bindings["launch_macos_terminal_proof_command"])
+        self.assertIs(
+            captured["kwargs"]["close_macos_terminal_windows_with_title_fn"],
+            bindings["close_macos_terminal_windows_with_title"],
+        )
         self.assertTrue(callable(captured["kwargs"]["cwd_path_fn"]))
         self.assertIs(captured["kwargs"]["capture_macos_window_fn"], bindings["capture_macos_window"])
         self.assertIs(captured["kwargs"]["start_macos_window_video_recording_fn"], bindings["start_macos_window_video_recording"])

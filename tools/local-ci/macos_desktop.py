@@ -268,6 +268,107 @@ def launch_macos_terminal_proof_command(
     }
 
 
+def close_macos_terminal_windows_with_title(
+    title_contains: str,
+    *,
+    run_fn: Callable[..., subprocess.CompletedProcess[str]],
+    sleep_fn: Callable[[float], None] = time.sleep,
+    attempts: int = 5,
+) -> dict:
+    script = "\n".join(
+        [
+            'tell application "Terminal"',
+            "    set closedCount to 0",
+            "    set otherCount to 0",
+            "    set otherProofCount to 0",
+            "    repeat with w in (every window)",
+            "        set windowName to name of w",
+            f"        if windowName contains {json.dumps(title_contains)} then",
+            "            close w",
+            "            set closedCount to closedCount + 1",
+            '        else if windowName contains "Pulp Video Proof" then',
+            "            set otherProofCount to otherProofCount + 1",
+            "        else",
+            "            set otherCount to otherCount + 1",
+            "        end if",
+            "    end repeat",
+            "    if closedCount > 0 and otherCount = 0 then",
+            "        quit",
+            "    end if",
+            "    return closedCount",
+            "end tell",
+        ]
+    )
+    result = subprocess.CompletedProcess(["osascript", "-e", script], 1, "", "")
+    closed_count = 0
+    terminated_terminal = False
+    terminate_returncode: int | None = None
+    for attempt in range(max(1, attempts)):
+        if attempt:
+            sleep_fn(0.2)
+        result = run_fn(["osascript", "-e", script], capture_output=True, text=True)
+        if result.returncode == 0:
+            try:
+                attempt_closed_count = int((result.stdout or "0").strip())
+            except ValueError:
+                attempt_closed_count = 0
+            closed_count += attempt_closed_count
+            if attempt_closed_count == 0:
+                break
+    if result.returncode != 0:
+        state_script = "\n".join(
+            [
+                'tell application "System Events"',
+                '    if not (exists process "Terminal") then',
+                '        return "0\t0\t0"',
+                "    end if",
+                '    set terminalPid to unix id of process "Terminal"',
+                "end tell",
+                'tell application "Terminal"',
+                "    set proofCount to 0",
+                "    set otherProofCount to 0",
+                "    set otherCount to 0",
+                "    repeat with w in (every window)",
+                "        set windowName to name of w",
+                f"        if windowName contains {json.dumps(title_contains)} then",
+                "            set proofCount to proofCount + 1",
+                '        else if windowName contains "Pulp Video Proof" then',
+                "            set otherProofCount to otherProofCount + 1",
+                "        else",
+                "            set otherCount to otherCount + 1",
+                "        end if",
+                "    end repeat",
+                '    return (terminalPid as text) & "\t" & (proofCount as text) & "\t" & (otherCount as text)',
+                "end tell",
+            ]
+        )
+        state_result = run_fn(["osascript", "-e", state_script], capture_output=True, text=True)
+        if state_result.returncode == 0:
+            state_fields = (state_result.stdout or "").strip().split("\t")
+            if len(state_fields) == 3:
+                try:
+                    terminal_pid = int(state_fields[0])
+                    proof_count = int(state_fields[1])
+                    other_count = int(state_fields[2])
+                except ValueError:
+                    terminal_pid = 0
+                    proof_count = 0
+                    other_count = 0
+                if terminal_pid > 0 and proof_count > 0 and other_count == 0:
+                    terminate_result = run_fn(["kill", "-TERM", str(terminal_pid)], capture_output=True, text=True)
+                    terminate_returncode = terminate_result.returncode
+                    terminated_terminal = terminate_result.returncode == 0
+    return {
+        "title_contains": title_contains,
+        "closed_count": closed_count,
+        "terminated_terminal": terminated_terminal,
+        "terminate_returncode": terminate_returncode,
+        "returncode": result.returncode,
+        "stdout": result.stdout.strip(),
+        "stderr": result.stderr.strip(),
+    }
+
+
 def capture_macos_window(
     window_id: int,
     output_path: Path,

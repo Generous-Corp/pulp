@@ -45,6 +45,7 @@ def run_macos_local_smoke(
     environ_copy_fn: Callable[[], dict[str, str]],
     cwd_path_fn: Callable[[], Path],
     launch_macos_terminal_proof_command_fn: Callable[..., dict],
+    close_macos_terminal_windows_with_title_fn: Callable[[str], dict],
     popen_fn: Callable[..., object],
     wait_for_macos_window_fn: Callable[[int, float], dict],
     content_size_from_window_fn: Callable[[dict], tuple[float, float]],
@@ -147,6 +148,8 @@ def run_macos_local_smoke(
     pid = None
     video_recording = None
     video_summary = None
+    terminal_title: str | None = None
+    terminal_cleanup: dict | None = None
     try:
         if bundle_id:
             if capture_ui_snapshot:
@@ -345,6 +348,8 @@ def run_macos_local_smoke(
                 terminal_returncode = int(terminal_returncode_path.read_text().strip())
             except (OSError, ValueError, RuntimeError):
                 terminal_returncode = None
+            if terminal_title:
+                terminal_cleanup = close_macos_terminal_windows_with_title_fn(terminal_title)
 
         manifest = {
             "target": "mac",
@@ -383,6 +388,8 @@ def run_macos_local_smoke(
                 "returncode": terminal_returncode,
                 "returncode_path": str(terminal_returncode_path),
             }
+            if terminal_cleanup is not None:
+                manifest["terminal"]["cleanup"] = terminal_cleanup
             manifest["artifacts"]["terminal_returncode"] = str(terminal_returncode_path)
         if video_summary is not None:
             manifest["video"] = video_summary

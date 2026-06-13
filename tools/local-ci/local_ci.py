@@ -1038,6 +1038,13 @@ def launch_macos_terminal_proof_command(
     )
 
 
+def close_macos_terminal_windows_with_title(title_contains: str) -> dict:
+    return _macos_desktop.close_macos_terminal_windows_with_title(
+        title_contains,
+        run_fn=subprocess.run,
+    )
+
+
 def capture_macos_window(window_id: int, output_path: Path) -> None:
     _macos_desktop.capture_macos_window(
         window_id,
