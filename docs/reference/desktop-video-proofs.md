@@ -185,6 +185,18 @@ ViewInspector target. Pass an explicit `--command` to keep a
 prepared-session workflow; in that mode, add `--capture-bundle-id
 com.cockos.reaper` yourself if the command is only a wrapper process.
 
+For generated CLAP recipes, build and install the plugin bundle before
+recording. The recipe checks that
+`~/Library/Audio/Plug-Ins/CLAP/<Plugin>.clap/Contents/MacOS/<Plugin>` exists and
+fails early if the bundle is only a partial package:
+
+```bash
+cmake --build build-video-nogpu --target PulpSynth_CLAP -j$(sysctl -n hw.ncpu)
+mkdir -p "$HOME/Library/Audio/Plug-Ins/CLAP"
+ln -sfn "$(pwd)/build-video-nogpu/CLAP/PulpSynth.clap" \
+  "$HOME/Library/Audio/Plug-Ins/CLAP/PulpSynth.clap"
+```
+
 ```bash
 python3 tools/local-ci/local_ci.py desktop video mac \
   --recipe inspector-workflow \

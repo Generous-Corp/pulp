@@ -257,6 +257,18 @@ com.cockos.reaper` yourself if the command is only a wrapper process. The
 `audio-inspector-demo` recipe is a smoke proof for a built standalone demo
 binary; pass the command path for the build directory you want to validate.
 
+For generated CLAP recipes, build and install the plugin bundle before
+recording. The recipe checks that
+`~/Library/Audio/Plug-Ins/CLAP/<Plugin>.clap/Contents/MacOS/<Plugin>` exists and
+fails early if the bundle is only a partial package:
+
+```bash
+cmake --build build-video-nogpu --target PulpSynth_CLAP -j$(sysctl -n hw.ncpu)
+mkdir -p "$HOME/Library/Audio/Plug-Ins/CLAP"
+ln -sfn "$(pwd)/build-video-nogpu/CLAP/PulpSynth.clap" \
+  "$HOME/Library/Audio/Plug-Ins/CLAP/PulpSynth.clap"
+```
+
 Recipes select Remotion templates and write structured setup context into
 `video_proof_composition.context`. The composed video, `index.html`, and
 `review.md` display that context, including recipe, host, plugin, format,

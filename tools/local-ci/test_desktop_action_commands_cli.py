@@ -402,6 +402,25 @@ class DesktopActionCommandsCliTests(unittest.TestCase):
         self.assertEqual(result, 1)
         self.assertIn("use --click X,Y instead of ViewInspector selectors", self.printed[-1])
 
+    def test_video_command_reaper_recipe_reports_missing_clap_bundle(self):
+        result = self.mod.cmd_desktop_video(
+            self.args(
+                recipe="reaper-plugin-editor",
+                launch_command=None,
+                label=None,
+                plugin="DefinitelyMissingPulpPlugin",
+                plugin_format="clap",
+            ),
+            cmd_desktop_smoke_fn=lambda _args: self.fail("smoke should not run"),
+            cmd_desktop_click_fn=lambda _args: self.fail("click should not run"),
+            cmd_desktop_inspect_fn=lambda _args: self.fail("inspect should not run"),
+            print_fn=self.print_line,
+        )
+
+        self.assertEqual(result, 1)
+        self.assertIn("requires an installed DefinitelyMissingPulpPlugin CLAP bundle", self.printed[-1])
+        self.assertIn("~/Library/Audio/Plug-Ins/CLAP", self.printed[-1])
+
     def test_video_command_reaper_recipe_keeps_explicit_command(self):
         result = self.mod.cmd_desktop_video(
             self.args(

@@ -72,6 +72,13 @@ def _apply_desktop_video_recipe(args: argparse.Namespace) -> None:
             raise ValueError("recipe `reaper-plugin-editor` records a host window; use --click X,Y instead of ViewInspector selectors.")
         _set_default(args, "host_app", "REAPER")
         if not getattr(args, "launch_command", None):
+            if plugin_format == "clap":
+                ok, detail = reaper_video_recipe.installed_clap_bundle_status(plugin)
+                if not ok:
+                    raise ValueError(
+                        f"recipe `reaper-plugin-editor` requires an installed {plugin} CLAP bundle: {detail} "
+                        f"Build `PulpSynth_CLAP`/the requested CLAP target and install or symlink it under ~/Library/Audio/Plug-Ins/CLAP."
+                    )
             recipe_files = reaper_video_recipe.write_reaper_plugin_editor_recipe(
                 plugin=plugin,
                 plugin_format=plugin_format,

@@ -32,6 +32,19 @@ class ReaperVideoRecipeTests(unittest.TestCase):
             ["PulpEffect", "VST3: PulpEffect", "VST3i: PulpEffect"],
         )
 
+    def test_installed_clap_bundle_status_checks_executable(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ok, detail = self.mod.installed_clap_bundle_status("PulpSynth", home=temp_dir)
+            self.assertFalse(ok)
+            self.assertIn("not installed", detail)
+
+            executable = Path(temp_dir) / "Library" / "Audio" / "Plug-Ins" / "CLAP" / "PulpSynth.clap" / "Contents" / "MacOS" / "PulpSynth"
+            executable.parent.mkdir(parents=True)
+            executable.write_bytes(b"binary")
+            ok, detail = self.mod.installed_clap_bundle_status("PulpSynth", home=temp_dir)
+            self.assertTrue(ok)
+            self.assertIn("CLAP bundle executable found", detail)
+
     def test_writes_wrapper_and_lua_script(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             files = self.mod.write_reaper_plugin_editor_recipe(

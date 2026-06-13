@@ -33,6 +33,19 @@ def reaper_plugin_candidates(plugin: str, plugin_format: str) -> list[str]:
     return candidates
 
 
+def installed_clap_bundle_status(plugin: str, *, home: str | Path | None = None) -> tuple[bool, str]:
+    home_path = Path(home).expanduser() if home is not None else Path.home()
+    bundle = home_path / "Library" / "Audio" / "Plug-Ins" / "CLAP" / f"{plugin}.clap"
+    executable = bundle / "Contents" / "MacOS" / plugin
+    if not bundle.exists():
+        return False, f"CLAP bundle is not installed at `{bundle}`."
+    if not executable.exists():
+        return False, f"CLAP bundle exists but missing executable `{executable}`."
+    if not executable.is_file():
+        return False, f"CLAP executable path is not a file: `{executable}`."
+    return True, f"CLAP bundle executable found at `{executable}`."
+
+
 def write_reaper_plugin_editor_recipe(
     *,
     plugin: str,
