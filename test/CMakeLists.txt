@@ -4970,6 +4970,7 @@ target_link_libraries(pulp-test-design-import-native-materializer
     PRIVATE pulp::view Catch2::Catch2WithMain)
 target_compile_definitions(pulp-test-design-import-native-materializer PRIVATE
     PULP_TEST_CXX_COMPILER="${CMAKE_CXX_COMPILER}"
+    PULP_TEST_OSX_SYSROOT="${CMAKE_OSX_SYSROOT}"
     PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")
 catch_discover_tests(pulp-test-design-import-native-materializer
     PROPERTIES LABELS "parser-import")
