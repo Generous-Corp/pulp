@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for SSH bundle host/probe facade bindings."""
+"""Tests for SSH uploaded bundle size probe bindings."""
 
 from __future__ import annotations
 
@@ -9,46 +9,23 @@ import types
 import unittest
 
 
-MODULE_PATH = Path(__file__).with_name("ssh_bundle_probe_bindings.py")
+MODULE_PATH = Path(__file__).with_name("ssh_bundle_size_probe_bindings.py")
 
 
 def load_module():
     return load_module_from_path(MODULE_PATH)
 
 
-class SshBundleProbeBindingsTests(unittest.TestCase):
+class SshBundleSizeProbeBindingsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
 
-    def test_probe_exports_are_composed_from_focused_groups(self) -> None:
-        expected = (
-            *self.mod.SSH_BUNDLE_HOST_EXPORTS,
-            *self.mod.SSH_BUNDLE_SIZE_PROBE_EXPORTS,
-        )
+    def test_size_probe_exports_match_wrappers(self) -> None:
+        expected = ("probe_uploaded_bundle_size",)
 
-        self.assertEqual(self.mod.SSH_BUNDLE_PROBE_EXPORTS, expected)
-        self.assertEqual(len(expected), len(set(expected)))
+        self.assertEqual(self.mod.SSH_BUNDLE_SIZE_PROBE_EXPORTS, expected)
         for name in expected:
             self.assertTrue(callable(getattr(self.mod, name)))
-
-    def test_target_lookup_and_shell_detection_preserve_facade_target_name_seam(self) -> None:
-        bindings = {}
-        config = {
-            "targets": {
-                "custom": {"host": "ssh-host", "repo_path": r"C:\Pulp"},
-                "ubuntu": {"host": "ubuntu", "repo_path": "/tmp/pulp"},
-            }
-        }
-
-        self.assertEqual(self.mod.target_name_for_ssh_host(bindings, config, "ssh-host"), "custom")
-        self.assertIsNone(self.mod.target_name_for_ssh_host(bindings, {"targets": {}}, "missing"))
-
-        bindings["target_name_for_ssh_host"] = lambda _config, _host: "custom"
-        self.assertTrue(self.mod.ssh_host_uses_windows_shell(bindings, config, "ssh-host"))
-        bindings["target_name_for_ssh_host"] = lambda _config, _host: "ubuntu"
-        self.assertFalse(self.mod.ssh_host_uses_windows_shell(bindings, config, "ubuntu"))
-        bindings["target_name_for_ssh_host"] = lambda _config, _host: None
-        self.assertTrue(self.mod.ssh_host_uses_windows_shell(bindings, config, "win-builder"))
 
     def test_probe_uploaded_bundle_size_uses_platform_command_and_last_numeric_line(self) -> None:
         calls = []
@@ -95,24 +72,17 @@ class SshBundleProbeBindingsTests(unittest.TestCase):
             )
         )
 
-    def test_install_probe_helpers_routes_named_exports_by_group(self) -> None:
+    def test_install_size_probe_helpers_wires_named_exports(self) -> None:
         bindings = {
             "subprocess": types.SimpleNamespace(
-                run=lambda *_args, **_kwargs: types.SimpleNamespace(returncode=0, stdout="9\n")
+                run=lambda *_args, **_kwargs: types.SimpleNamespace(returncode=0, stdout="7\n")
             ),
             "ssh_host_uses_windows_shell": lambda _config, _host: False,
         }
 
-        self.mod.install_ssh_bundle_probe_helpers(
-            bindings,
-            ("target_name_for_ssh_host", "probe_uploaded_bundle_size"),
-        )
+        self.mod.install_ssh_bundle_size_probe_helpers(bindings, ("probe_uploaded_bundle_size",))
 
-        self.assertEqual(
-            bindings["target_name_for_ssh_host"]({"targets": {"linux": {"host": "ubuntu"}}}, "ubuntu"),
-            "linux",
-        )
-        self.assertEqual(bindings["probe_uploaded_bundle_size"]("ubuntu", "bundle.git", config={"targets": {}}), 9)
+        self.assertEqual(bindings["probe_uploaded_bundle_size"]("ubuntu", "bundle.git", config={"targets": {}}), 7)
 
 
 if __name__ == "__main__":
