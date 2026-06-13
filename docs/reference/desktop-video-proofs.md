@@ -374,10 +374,36 @@ python3 tools/local-ci/local_ci.py desktop video-matrix --markdown
 
 The matrix lists the full-service proof scenarios, current readiness, Remotion
 template, doctor command, concrete recording command, and what a reviewer should
-look for. Use `--target mac`, `--scenario component-zoom`, or `--json` when an
-agent needs a narrower machine-readable plan. The matrix intentionally includes
-planned iOS Simulator and Android Emulator rows so the branch keeps the broader
-cross-platform goal visible even while macOS is the first working lane.
+look for. Use `--target mac`, `--target ios-simulator`,
+`--scenario component-zoom`, or `--json` when an agent needs a narrower
+machine-readable plan. The iOS Simulator row uses the working `simulator video`
+recorder; Android remains a planned row so the branch keeps the broader
+cross-platform goal visible while macOS and iOS Simulator are the first working
+lanes.
+
+## iOS Simulator Video Proofs
+
+For simulator validation, boot the target simulator first, then run:
+
+```bash
+python3 tools/local-ci/local_ci.py simulator video-doctor
+```
+
+Record a bounded MP4 proof of the booted simulator with optional app install and
+launch:
+
+```bash
+python3 tools/local-ci/local_ci.py simulator video \
+  --app build/ios/PulpDemo.app \
+  --bundle-id com.pulp.demo \
+  --label ios-simulator-launch-proof \
+  --duration 8
+```
+
+The command writes `video/proof.mp4` and `manifest.json` under the simulator run
+directory. This first simulator lane proves capture/install/launch plumbing via
+`xcrun simctl io recordVideo`; tap driving and visible tap markers are a later
+mobile automation slice.
 
 Stage a local report after one or more desktop runs:
 

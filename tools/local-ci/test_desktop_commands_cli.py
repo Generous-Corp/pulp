@@ -186,7 +186,8 @@ class DesktopCommandsCliTests(unittest.TestCase):
         markdown = self.printed[0]
         self.assertIn("# Desktop Validation Video Proof Demo Matrix", markdown)
         self.assertIn("iOS Simulator interaction", markdown)
-        self.assertIn("future: python3 tools/local-ci/local_ci.py simulator video", markdown)
+        self.assertIn("python3 tools/local-ci/local_ci.py simulator video", markdown)
+        self.assertIn("python3 tools/local-ci/local_ci.py simulator video-doctor", markdown)
         self.assertNotIn("Standalone app interaction", markdown)
 
     def test_desktop_config_show_set_and_dispatch(self):

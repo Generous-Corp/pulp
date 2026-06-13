@@ -176,6 +176,7 @@ import queue_lifecycle as _queue_lifecycle  # noqa: E402
 import queue_orchestrator as _queue_orchestrator  # noqa: E402
 import execution as _execution  # noqa: E402
 import execution_bindings as _execution_bindings  # noqa: E402
+import simulator_video_commands_cli as _simulator_video_commands_cli  # noqa: E402
 
 HEARTBEAT_INTERVAL_SECS = _execution.HEARTBEAT_INTERVAL_SECS
 STUCK_IDLE_SECS = _execution.STUCK_IDLE_SECS
@@ -2594,6 +2595,14 @@ def cmd_desktop_inspect(args: argparse.Namespace) -> int:
 
 def cmd_desktop(args: argparse.Namespace) -> int:
     return _cli_dispatch_bindings.cmd_desktop(globals(), args)
+
+
+def cmd_simulator_video_doctor(args: argparse.Namespace) -> int:
+    return _simulator_video_commands_cli.cmd_simulator_video_doctor(args)
+
+
+def cmd_simulator_video(args: argparse.Namespace) -> int:
+    return _simulator_video_commands_cli.cmd_simulator_video(args)
 
 
 def build_parser() -> argparse.ArgumentParser:

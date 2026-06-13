@@ -177,6 +177,42 @@ class CliParserTests(unittest.TestCase):
         ])
         self.assertTrue(args.run_in_terminal)
 
+    def test_simulator_video_commands_parse(self):
+        parser = self.build_parser()
+
+        doctor = parser.parse_args(["simulator", "video-doctor", "--device", "iPhone 16", "--json"])
+        self.assertEqual(doctor.command, "simulator")
+        self.assertEqual(doctor.simulator_command, "video-doctor")
+        self.assertEqual(doctor.device, "iPhone 16")
+        self.assertTrue(doctor.json)
+
+        video = parser.parse_args([
+            "simulator",
+            "video",
+            "--device",
+            "A-UDID",
+            "--app",
+            "build/ios/PulpDemo.app",
+            "--bundle-id",
+            "com.pulp.demo",
+            "--duration",
+            "6",
+            "--label",
+            "ios-launch-proof",
+            "--output",
+            "/tmp/ios-proof",
+            "--json",
+        ])
+        self.assertEqual(video.command, "simulator")
+        self.assertEqual(video.simulator_command, "video")
+        self.assertEqual(video.device, "A-UDID")
+        self.assertEqual(video.app, "build/ios/PulpDemo.app")
+        self.assertEqual(video.bundle_id, "com.pulp.demo")
+        self.assertEqual(video.duration, 6.0)
+        self.assertEqual(video.label, "ios-launch-proof")
+        self.assertEqual(video.output, "/tmp/ios-proof")
+        self.assertTrue(video.json)
+
     def test_desktop_verdict_command_requires_explicit_status(self):
         parser = self.build_parser()
 

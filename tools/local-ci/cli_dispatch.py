@@ -26,6 +26,7 @@ def dispatch_main_command(
     args: argparse.Namespace,
     *,
     commands: Mapping[str, CommandHandler],
+    simulator_commands: Mapping[str, CommandHandler],
     cloud_commands: Mapping[str, CommandHandler],
     cloud_namespace_commands: Mapping[str, CommandHandler],
     print_help: Callable[[], None],
@@ -44,6 +45,13 @@ def dispatch_main_command(
             print_fn("Error: missing cloud subcommand. Use `pulp ci-local cloud workflows`.")
             return 1
         return cloud_handler(args)
+
+    if args.command == "simulator":
+        simulator_handler = simulator_commands.get(args.simulator_command)
+        if simulator_handler is None:
+            print_fn("Error: missing simulator subcommand. Use `pulp ci-local simulator video-doctor`.")
+            return 1
+        return simulator_handler(args)
 
     handler = commands.get(args.command)
     if handler is not None:

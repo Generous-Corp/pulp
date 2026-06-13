@@ -408,11 +408,35 @@ python3 tools/local-ci/local_ci.py desktop video-matrix --markdown
 ```
 
 Use it to choose the smallest useful proof scenario. `--target mac` narrows to
-the current macOS lane, `--scenario component-zoom` prints one row, and `--json`
-is suitable for automation. The matrix carries readiness status, Remotion
-template, doctor command, recording command, and reviewer watch-points for
-standalone, REAPER/plugin-host, inspector, component-zoom, design-parity, iOS
-Simulator, and Android Emulator proofs.
+the current macOS lane, `--target ios-simulator` narrows to simulator capture,
+`--scenario component-zoom` prints one row, and `--json` is suitable for
+automation. The matrix carries readiness status, Remotion template, doctor
+command, recording command, and reviewer watch-points for standalone,
+REAPER/plugin-host, inspector, component-zoom, design-parity, iOS Simulator,
+and Android Emulator proofs.
+
+## iOS Simulator capture
+
+Boot the target simulator first, then check readiness:
+
+```bash
+python3 tools/local-ci/local_ci.py simulator video-doctor
+```
+
+Record a short simulator MP4 with optional install/launch context:
+
+```bash
+python3 tools/local-ci/local_ci.py simulator video \
+  --app build/ios/PulpDemo.app \
+  --bundle-id com.pulp.demo \
+  --label ios-simulator-launch-proof \
+  --duration 8
+```
+
+This writes `video/proof.mp4` and `manifest.json` under the simulator run
+directory using `xcrun simctl io recordVideo`. This lane currently proves
+simulator capture/install/launch; tap driving and tap markers belong to the next
+mobile automation slice.
 
 Publish the latest runs:
 

@@ -82,6 +82,8 @@ class CliDispatchBindingsTests(unittest.TestCase):
             "cmd_evidence",
             "cmd_status",
             "cmd_desktop",
+            "cmd_simulator_video_doctor",
+            "cmd_simulator_video",
             "cmd_cloud_workflows",
             "cmd_cloud_defaults",
             "cmd_cloud_history",
@@ -144,12 +146,15 @@ class CliDispatchBindingsTests(unittest.TestCase):
             set(captured["main_kwargs"]["commands"]),
             {"enqueue", "drain", "run", "ship", "check", "list", "bump", "cancel", "logs", "cleanup", "evidence", "status", "desktop"},
         )
+        self.assertEqual(set(captured["main_kwargs"]["simulator_commands"]), {"video-doctor", "video"})
         self.assertEqual(
             set(captured["main_kwargs"]["cloud_commands"]),
             {"workflows", "defaults", "history", "compare", "recommend", "run", "status"},
         )
         self.assertEqual(set(captured["main_kwargs"]["cloud_namespace_commands"]), {"doctor", "setup"})
         self.assertIs(captured["main_kwargs"]["commands"]["enqueue"], bindings["cmd_enqueue"])
+        self.assertIs(captured["main_kwargs"]["simulator_commands"]["video"], bindings["cmd_simulator_video"])
+        self.assertIs(captured["main_kwargs"]["simulator_commands"]["video-doctor"], bindings["cmd_simulator_video_doctor"])
         self.assertIs(captured["main_kwargs"]["cloud_commands"]["run"], bindings["cmd_cloud_run"])
         self.assertIs(captured["main_kwargs"]["cloud_namespace_commands"]["doctor"], bindings["cmd_cloud_namespace_doctor"])
 

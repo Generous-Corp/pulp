@@ -621,4 +621,20 @@ def build_local_ci_parser(
     p_desktop_inspect.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
     add_desktop_video_args(p_desktop_inspect)
     add_desktop_source_args(p_desktop_inspect)
+
+    p_simulator = sub.add_parser("simulator", help="iOS Simulator validation video proof helpers")
+    simulator_sub = p_simulator.add_subparsers(dest="simulator_command")
+
+    p_simulator_video_doctor = simulator_sub.add_parser("video-doctor", help="Check iOS Simulator video recording readiness")
+    p_simulator_video_doctor.add_argument("--device", help="Booted simulator name or UDID to require")
+    p_simulator_video_doctor.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+
+    p_simulator_video = simulator_sub.add_parser("video", help="Record a short iOS Simulator MP4 proof")
+    p_simulator_video.add_argument("--device", help="Booted simulator name or UDID to record (default: first booted simulator)")
+    p_simulator_video.add_argument("--app", help="Optional .app bundle to install before recording")
+    p_simulator_video.add_argument("--bundle-id", help="Optional bundle identifier to launch before recording")
+    p_simulator_video.add_argument("--duration", type=float, default=8.0, help="Seconds to record (default: 8)")
+    p_simulator_video.add_argument("--label", help="Proof label stored in the manifest and default output path")
+    p_simulator_video.add_argument("--output", help="Optional output run directory (default: Application Support/Pulp/.../ios-simulator)")
+    p_simulator_video.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
     return parser

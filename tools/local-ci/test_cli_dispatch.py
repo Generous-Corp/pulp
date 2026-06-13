@@ -43,6 +43,7 @@ class CliDispatchTests(unittest.TestCase):
         result = self.mod.dispatch_main_command(
             args,
             commands={"status": self.handler(7)},
+            simulator_commands={},
             cloud_commands={},
             cloud_namespace_commands={},
             print_help=self.record_help,
@@ -59,6 +60,7 @@ class CliDispatchTests(unittest.TestCase):
         result = self.mod.dispatch_main_command(
             args,
             commands={},
+            simulator_commands={},
             cloud_commands={"history": self.handler(8)},
             cloud_namespace_commands={},
             print_help=self.record_help,
@@ -75,6 +77,7 @@ class CliDispatchTests(unittest.TestCase):
         result = self.mod.dispatch_main_command(
             args,
             commands={},
+            simulator_commands={},
             cloud_commands={},
             cloud_namespace_commands={"doctor": self.handler(9)},
             print_help=self.record_help,
@@ -85,6 +88,34 @@ class CliDispatchTests(unittest.TestCase):
         self.assertEqual(self.printed, [])
         self.assertEqual(self.help_calls, 0)
 
+    def test_dispatch_main_simulator_command_and_missing_subcommand(self):
+        ok_args = Namespace(command="simulator", simulator_command="video-doctor")
+        missing_args = Namespace(command="simulator", simulator_command=None)
+
+        ok_result = self.mod.dispatch_main_command(
+            ok_args,
+            commands={},
+            simulator_commands={"video-doctor": self.handler(10)},
+            cloud_commands={},
+            cloud_namespace_commands={},
+            print_help=self.record_help,
+            print_fn=self.record_print,
+        )
+        missing_result = self.mod.dispatch_main_command(
+            missing_args,
+            commands={},
+            simulator_commands={"video-doctor": self.handler(10)},
+            cloud_commands={},
+            cloud_namespace_commands={},
+            print_help=self.record_help,
+            print_fn=self.record_print,
+        )
+
+        self.assertEqual(ok_result, 10)
+        self.assertEqual(missing_result, 1)
+        self.assertIn("missing simulator subcommand", self.printed[0])
+        self.assertEqual(self.help_calls, 0)
+
     def test_dispatch_main_cloud_missing_subcommands(self):
         namespace_args = Namespace(command="cloud", cloud_command="namespace", cloud_namespace_command=None)
         cloud_args = Namespace(command="cloud", cloud_command=None, cloud_namespace_command=None)
@@ -92,6 +123,7 @@ class CliDispatchTests(unittest.TestCase):
         namespace_result = self.mod.dispatch_main_command(
             namespace_args,
             commands={},
+            simulator_commands={},
             cloud_commands={},
             cloud_namespace_commands={},
             print_help=self.record_help,
@@ -100,6 +132,7 @@ class CliDispatchTests(unittest.TestCase):
         cloud_result = self.mod.dispatch_main_command(
             cloud_args,
             commands={},
+            simulator_commands={},
             cloud_commands={},
             cloud_namespace_commands={},
             print_help=self.record_help,
@@ -118,6 +151,7 @@ class CliDispatchTests(unittest.TestCase):
         result = self.mod.dispatch_main_command(
             args,
             commands={},
+            simulator_commands={},
             cloud_commands={},
             cloud_namespace_commands={},
             print_help=self.record_help,

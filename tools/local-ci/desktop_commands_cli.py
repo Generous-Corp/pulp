@@ -186,19 +186,19 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
         "id": "ios-simulator",
         "title": "iOS Simulator interaction",
         "platform": "ios-simulator",
-        "status": "planned",
+        "status": "partial",
         "template": "mobile-simulator",
-        "proves": "A simulator app/AUv3 workflow responds to a tap or host action.",
+        "proves": "A booted iOS Simulator can launch an app and produce a bounded MP4 proof clip.",
         "command": (
-            "future: python3 tools/local-ci/local_ci.py simulator video "
-            "--app build/ios/PulpDemo.app --tap accessibility-id:play-toggle "
-            "--label ios-simulator-play-toggle"
+            "python3 tools/local-ci/local_ci.py simulator video "
+            "--app build/ios/PulpDemo.app --bundle-id com.pulp.demo "
+            "--label ios-simulator-launch-proof --duration 8"
         ),
-        "doctor": "future: simulator video-doctor",
+        "doctor": "python3 tools/local-ci/local_ci.py simulator video-doctor",
         "watch_for": [
             "device/runtime is identified",
-            "tap marker is visible",
-            "app state, meter, or log assertion changes after the tap",
+            "app launch or host setup is visible",
+            "future slice should drive and mark taps through an automation layer",
         ],
     },
     {
