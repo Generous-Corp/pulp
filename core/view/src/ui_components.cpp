@@ -409,13 +409,13 @@ void ProgressBar::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
 
     // Track
-    canvas.set_fill_color(resolve_color("progress_track", canvas::Color::hex(0x2a2a4a)));
+    canvas.set_fill_color(resolve_color("progress.track", canvas::Color::hex(0x2a2a4a)));
     canvas.fill_rounded_rect(b.x, b.y, b.width, b.height, b.height / 2);
 
     // Fill
     if (progress_ >= 0) {
         float fill_w = b.width * std::clamp(progress_, 0.0f, 1.0f);
-        canvas.set_fill_color(resolve_color("accent", canvas::Color::hex(0xe94560)));
+        canvas.set_fill_color(resolve_color("progress.fill", canvas::Color::hex(0xe94560)));
         canvas.fill_rounded_rect(b.x, b.y, fill_w, b.height, b.height / 2);
     }
 
@@ -423,7 +423,7 @@ void ProgressBar::paint(canvas::Canvas& canvas) {
     if (!label_.empty()) {
         canvas.set_font("system", 10);
         canvas.set_text_align(canvas::TextAlign::center);
-        canvas.set_fill_color(resolve_color("text", canvas::Color::hex(0xe0e0e0)));
+        canvas.set_fill_color(resolve_color("text.primary", canvas::Color::hex(0xe0e0e0)));
         canvas.fill_text_anchored(label_, b.x + b.width / 2, b.y + b.height / 2,
                                   canvas::Canvas::TextAnchor::GlyphCenter);
     }
@@ -523,24 +523,23 @@ void TabPanel::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
 
     // Tab bar background
-    canvas.set_fill_color(resolve_color("tab_bar_bg", canvas::Color::hex(0x16213e)));
+    canvas.set_fill_color(resolve_color("bg.secondary", canvas::Color::hex(0x16213e)));
     canvas.fill_rect(b.x, b.y, b.width, tab_height_);
 
-    // Draw tabs
+    // Draw tabs — active tab is marked by a teal underline only (matching the
+    // Ink & Signal design language; no filled active block).
     float tab_w = tabs_.empty() ? 0 : b.width / static_cast<float>(tabs_.size());
     for (int i = 0; i < static_cast<int>(tabs_.size()); ++i) {
         float tx = b.x + static_cast<float>(i) * tab_w;
         if (i == active_) {
-            canvas.set_fill_color(resolve_color("tab_active_bg", canvas::Color::hex(0x1a1a2e)));
-            canvas.fill_rect(tx, b.y, tab_w, tab_height_);
-            canvas.set_fill_color(resolve_color("accent", canvas::Color::hex(0xe94560)));
+            canvas.set_fill_color(resolve_color("tab.active", canvas::Color::hex(0x14b8a6)));
             canvas.fill_rect(tx, b.y + tab_height_ - 2, tab_w, 2);
         }
         canvas.set_font("system", 12);
         canvas.set_text_align(canvas::TextAlign::center);
         auto text_color = i == active_
-            ? resolve_color("text", canvas::Color::hex(0xe0e0e0))
-            : resolve_color("text_muted", canvas::Color::hex(0x808090));
+            ? resolve_color("text.primary", canvas::Color::hex(0xe0e0e0))
+            : resolve_color("tab.inactive", canvas::Color::hex(0x808090));
         canvas.set_fill_color(text_color);
         canvas.fill_text(tabs_[static_cast<size_t>(i)].title,
                          tx + tab_w / 2, b.y + tab_height_ / 2 + 4);

@@ -19,27 +19,36 @@ void TextButton::paint(canvas::Canvas& canvas) {
     // neutral appearance when no theme tokens are present; hover/pressed/
     // disabled are derived from the resolved base so state feedback tracks the
     // active theme instead of being frozen to hardcoded greys (#3.3 reskin gap).
-    auto base = resolve_color("bg.elevated", canvas::Color::rgba8(60, 60, 70));
+    // Base face per variant. `primary` is accent-filled; `secondary` is the
+    // neutral elevated face + border; `ghost` is transparent.
+    bool filled = style_ != Style::ghost;
+    auto base = (style_ == Style::primary)
+        ? resolve_color("accent.primary", canvas::Color::rgba8(20, 184, 166))
+        : resolve_color("bg.elevated", canvas::Color::rgba8(60, 60, 70));
     auto bg = base;
     if (hovered_) bg = adjust_lightness(base, 0.06f);
     if (pressed_) bg = adjust_lightness(base, 0.12f);
     if (!enabled_) bg = adjust_lightness(base, -0.04f);
-    canvas.set_fill_color(bg);
-    canvas.fill_rounded_rect(0, 0, w, h, r);
+    if (filled) {
+        canvas.set_fill_color(bg);
+        canvas.fill_rounded_rect(0, 0, w, h, r);
+    }
 
-    // Border — rounded to match the filled background above (a square
-    // stroke_rect over a rounded fill left visible 90° corners, e.g. the
-    // standalone Settings/Done buttons looked square next to rounded controls).
-    canvas.set_stroke_color(resolve_color("control.border", canvas::Color::rgba8(100, 100, 110)));
-    canvas.set_line_width(1.0f);
-    canvas.stroke_rounded_rect(0, 0, w, h, r);
+    // Border — secondary only (primary is borderless accent fill; ghost is
+    // bare). Rounded to match the filled background.
+    if (style_ == Style::secondary) {
+        canvas.set_stroke_color(resolve_color("control.border", canvas::Color::rgba8(100, 100, 110)));
+        canvas.set_line_width(1.0f);
+        canvas.stroke_rounded_rect(0, 0, w, h, r);
+    }
 
-    // Label — pulp #1407 honors CSS text-overflow: ellipsis when set on
-    // the button via setTextOverflow(id, "ellipsis"). Reserves a small
-    // horizontal padding so the ellipsis doesn't touch the rounded edge.
-    auto text_color = enabled_
-        ? resolve_color("text.primary", canvas::Color::rgba8(220, 220, 230))
-        : resolve_color("text.disabled", canvas::Color::rgba8(120, 120, 130));
+    // Label colour per variant: primary uses on-accent (ink) text; ghost uses
+    // accent text; secondary uses the standard primary text.
+    auto text_color =
+        !enabled_ ? resolve_color("text.disabled", canvas::Color::rgba8(120, 120, 130))
+        : style_ == Style::primary ? resolve_color("accent.text", canvas::Color::rgba8(18, 22, 28))
+        : style_ == Style::ghost ? resolve_color("accent.primary", canvas::Color::rgba8(20, 184, 166))
+        : resolve_color("text.primary", canvas::Color::rgba8(220, 220, 230));
     canvas.set_fill_color(text_color);
     canvas.set_font("system", 14.0f);
     constexpr float kButtonHPad = 8.0f;

@@ -613,40 +613,51 @@ void Knob::paint(canvas::Canvas& canvas) {
         //    stroke widths scale from the chrome body radius.
         draw_knob_indicator_notch(canvas, cx, cy, inner_r, body_r, value_);
     } else {
-        // ── Default C++ paint path ──────────────────────────────────────
+        // ── Default C++ paint path — Ink & Signal knob ───────────────────
+        // Solid raised body disc + full track ring + thick value arc + a
+        // white dot pointer on the dial face, matching the Figma design
+        // language (not a thin needle on a bare arc).
+        float full_r = std::min(cx, cy) - 3.0f;
+        float arc_w  = std::max(3.0f, full_r * 0.13f);   // thick ring
+        float ring_r = full_r - arc_w * 0.5f;            // ring centerline
+        float body_r = ring_r - arc_w * 0.5f - 2.0f;     // disc inside the ring
+        float value_angle = start_angle + value_ * (end_angle - start_angle);
 
         // Hover glow ring (drawn behind everything)
         float glow = hover_glow_.value();
         if (glow > 0.01f) {
             auto accent = resolve_color("accent.primary", canvas::Color::rgba8(100, 150, 255));
             canvas.set_stroke_color(canvas::Color::rgba(accent.r, accent.g, accent.b,
-                                    static_cast<uint8_t>(40 * glow)));
-            canvas.set_line_width(6.0f);
-            canvas.stroke_arc(cx, cy, radius + 2.0f, start_angle, end_angle);
+                                    0.16f * glow));
+            canvas.set_line_width(arc_w + 6.0f);
+            canvas.stroke_arc(cx, cy, ring_r, start_angle, end_angle);
         }
 
-        // Track (background arc)
-        auto track_color = resolve_color("control.track", canvas::Color::rgba8(60, 60, 60));
-        canvas.set_stroke_color({track_color.r, track_color.g, track_color.b, track_color.a});
-        canvas.set_line_width(3.0f);
+        // Raised body disc
+        auto body_color = resolve_color("bg.elevated", canvas::Color::rgba8(38, 44, 54));
+        canvas.set_fill_color(body_color);
+        canvas.fill_circle(cx, cy, body_r);
+
+        // Full track ring (background arc)
+        auto track_color = resolve_color("knob.arc.bg", canvas::Color::rgba8(60, 66, 78));
+        canvas.set_stroke_color(track_color);
+        canvas.set_line_width(arc_w);
         canvas.set_line_cap(canvas::LineCap::round);
-        canvas.stroke_arc(cx, cy, radius, start_angle, end_angle);
+        canvas.stroke_arc(cx, cy, ring_r, start_angle, end_angle);
 
-        // Value arc
-        float value_angle = start_angle + value_ * (end_angle - start_angle);
-        auto fill_color = resolve_color("control.fill", canvas::Color::rgba8(100, 150, 255));
-        canvas.set_stroke_color({fill_color.r, fill_color.g, fill_color.b, fill_color.a});
-        canvas.stroke_arc(cx, cy, radius, start_angle, value_angle);
+        // Value arc (accent)
+        auto fill_color = resolve_color("knob.arc", canvas::Color::rgba8(100, 150, 255));
+        canvas.set_stroke_color(fill_color);
+        canvas.stroke_arc(cx, cy, ring_r, start_angle, value_angle);
 
-        // Thumb indicator line
-        float thumb_x = cx + radius * 0.6f * std::cos(value_angle);
-        float thumb_y = cy + radius * 0.6f * std::sin(value_angle);
-        float inner_x = cx + radius * 0.3f * std::cos(value_angle);
-        float inner_y = cy + radius * 0.3f * std::sin(value_angle);
-        auto thumb_color = resolve_color("control.thumb", canvas::Color::rgba8(220, 220, 220));
-        canvas.set_stroke_color({thumb_color.r, thumb_color.g, thumb_color.b, thumb_color.a});
-        canvas.set_line_width(2.0f);
-        canvas.stroke_line(inner_x, inner_y, thumb_x, thumb_y);
+        // White dot pointer on the dial face near the rim
+        float dot_r = std::max(2.0f, full_r * 0.075f);
+        float dot_rad = body_r - dot_r - 2.0f;
+        float dot_x = cx + dot_rad * std::cos(value_angle);
+        float dot_y = cy + dot_rad * std::sin(value_angle);
+        auto thumb_color = resolve_color("knob.thumb", canvas::Color::rgba8(230, 230, 230));
+        canvas.set_fill_color(thumb_color);
+        canvas.fill_circle(dot_x, dot_y, dot_r);
     }
 
     // Label below (always drawn, even with shader)
@@ -1081,22 +1092,24 @@ void Checkbox::paint(canvas::Canvas& canvas) {
     float cy = b.height * 0.5f;
     float r = size * 0.35f;  // smaller radius to avoid clipping at bounds edge
 
+    // Rounded SQUARE (matches the Figma design language — not a circle).
+    float corner = r * 0.35f;
     if (checked_) {
-        // Filled circle
+        // Filled rounded square
         auto fill = resolve_color("control.fill", canvas::Color::rgba8(100, 150, 255));
         canvas.set_fill_color(fill);
-        canvas.fill_rounded_rect(cx - r, cy - r, r * 2, r * 2, r);
+        canvas.fill_rounded_rect(cx - r, cy - r, r * 2, r * 2, corner);
         // Check glyph (simple checkmark using lines)
         canvas.set_stroke_color(canvas::Color::rgba8(30, 30, 40));
         canvas.set_line_width(2.0f);
         canvas.stroke_line(cx - r * 0.35f, cy, cx - r * 0.05f, cy + r * 0.3f);
         canvas.stroke_line(cx - r * 0.05f, cy + r * 0.3f, cx + r * 0.4f, cy - r * 0.3f);
     } else {
-        // Stroked circle
+        // Stroked rounded square
         auto border = resolve_color("control.border", canvas::Color::rgba8(80, 80, 100));
         canvas.set_stroke_color(border);
         canvas.set_line_width(1.5f);
-        canvas.stroke_rounded_rect(cx - r, cy - r, r * 2, r * 2, r);
+        canvas.stroke_rounded_rect(cx - r, cy - r, r * 2, r * 2, corner);
     }
 }
 

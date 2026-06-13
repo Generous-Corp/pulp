@@ -548,7 +548,9 @@ public:
 private:
     float value_ = 0.0f;
     Orientation orientation_ = Orientation::vertical;
-    ThumbShape thumb_shape_ = ThumbShape::circle;
+    // Ink & Signal faders use a slab/handle thumb by default (matches the Figma
+    // design language); callers can opt back to a circle per-widget.
+    ThumbShape thumb_shape_ = ThumbShape::rectangle;
     float thumb_width_ = 0.0f;
     float thumb_height_ = 0.0f;
     float thumb_corner_radius_ = 0.0f;
