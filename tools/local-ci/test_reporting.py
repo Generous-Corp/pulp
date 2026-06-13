@@ -115,6 +115,8 @@ class ReportingTests(unittest.TestCase):
         video_issue_metadata.write_text('{"status":"transcoded","selected_attempt":"balanced-720p","size":{"size_bytes":90000,"fits_attachment_budget":true}}\n')
         video_small_metadata = bundle / "small-metadata.json"
         video_small_metadata.write_text('{"status":"transcoded","selected_attempt":"compact-540p","size":{"size_bytes":8000000,"fits_attachment_budget":true}}\n')
+        source_reference = bundle / "source-reference.png"
+        source_reference.write_bytes(b"png")
         (bundle / "manifest.json").write_text('{"label":"bundle-copy"}\n')
         manifest = {
             "target": "mac<>",
@@ -136,6 +138,13 @@ class ReportingTests(unittest.TestCase):
                 "image_change": {"changed": False},
             },
             "interaction": {"mode": "dom"},
+            "video_proof_notes": ["Source import matches the native render.", "Critical control remains legible."],
+            "video_proof_composition": {
+                "template": "design-parity",
+                "source_image": str(source_reference),
+                "source_label": "Figma source",
+                "notes": ["Critical control remains legible."],
+            },
         }
         output_dir = self.publish_root(self.config) / "20260522-gallery"
         rollups: list[dict] = []
@@ -169,14 +178,24 @@ class ReportingTests(unittest.TestCase):
         self.assertIn("video_composed_metadata", published_run["artifacts"])
         self.assertIn("video_issue_metadata", published_run["artifacts"])
         self.assertIn("video_small_metadata", published_run["artifacts"])
+        self.assertIn("video_source_image", published_run["artifacts"])
         self.assertIn("manifest", published_run["artifacts"])
         self.assertNotIn("screenshot", published_run["artifacts"])
         self.assertEqual(published_run["artifacts"]["image_change"], {"changed": False})
+        self.assertEqual(published_run["video_proof_composition"]["template"], "design-parity")
+        self.assertEqual(
+            published_run["video_proof_notes"],
+            ["Source import matches the native render.", "Critical control remains legible."],
+        )
         html_text = (output_dir / "index.html").read_text()
         self.assertIn("Gallery &lt;One&gt;", html_text)
         self.assertIn("mac&lt;&gt;/inspect", html_text)
         self.assertIn("<video controls", html_text)
         self.assertIn("video metadata", html_text)
+        self.assertIn("template: design-parity", html_text)
+        self.assertIn("source: Figma source", html_text)
+        self.assertIn("Source import matches the native render.", html_text)
+        self.assertIn("source reference", html_text)
         review_text = (output_dir / "review.md").read_text()
         self.assertEqual(report["review_markdown"], str(output_dir / "review.md"))
         self.assertIn("# Gallery <One>", review_text)
@@ -194,6 +213,9 @@ class ReportingTests(unittest.TestCase):
         self.assertIn("desktop verdict", review_text)
         self.assertIn("--approved --issue-url <issue-url>", review_text)
         self.assertIn("--needs-work --notes", review_text)
+        self.assertIn("Proof template: `design-parity`", review_text)
+        self.assertIn("Source reference: `", review_text)
+        self.assertIn("Proof note: Source import matches the native render.", review_text)
 
     def test_manifest_scanning_and_run_rollups_use_latest_passing_proof(self) -> None:
         root = self.artifact_root(self.config)

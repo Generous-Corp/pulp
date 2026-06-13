@@ -31,6 +31,31 @@ ARTIFACT_KEYS = (
 )
 
 
+def _proof_notes_from_manifest(manifest: dict) -> list[str]:
+    notes: list[str] = []
+    for source in (
+        manifest.get("video_proof_notes"),
+        (manifest.get("video_proof_composition") or {}).get("notes"),
+    ):
+        if not isinstance(source, list):
+            continue
+        for note in source:
+            if isinstance(note, str) and note.strip() and note.strip() not in notes:
+                notes.append(note.strip())
+    return notes
+
+
+def _copy_optional_file(path_value: object, destination: Path) -> bool:
+    if not isinstance(path_value, str) or not path_value:
+        return False
+    source = Path(path_value).expanduser()
+    if not source.exists() or not source.is_file():
+        return False
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, destination)
+    return True
+
+
 def clear_directory_contents(path: Path) -> None:
     if not path.exists():
         return
@@ -175,6 +200,8 @@ def desktop_review_issue_body(index_payload: dict, *, publish_dir: Path) -> str:
     ]
     for run in index_payload.get("runs", []):
         artifacts = run.get("artifacts") or {}
+        proof_notes = run.get("video_proof_notes") if isinstance(run.get("video_proof_notes"), list) else []
+        proof_composition = run.get("video_proof_composition") if isinstance(run.get("video_proof_composition"), dict) else {}
         video = artifacts.get("video_issue") or artifacts.get("video_composed") or artifacts.get("video")
         metadata_path = artifacts.get("video_issue_metadata") or artifacts.get("video_composed_metadata") or artifacts.get("video_metadata")
         metadata = _artifact_metadata(publish_dir, metadata_path)
@@ -207,6 +234,8 @@ def desktop_review_issue_body(index_payload: dict, *, publish_dir: Path) -> str:
                 "",
                 f"- Completed: {run.get('completed_at') or '?'}",
                 f"- Interaction: {run.get('interaction_mode') or 'not recorded'}",
+                f"- Proof template: `{proof_composition.get('template')}`" if proof_composition.get("template") else "- Proof template: not recorded",
+                f"- Source reference: `{artifacts['video_source_image']}`" if artifacts.get("video_source_image") else "- Source reference: not attached",
                 f"- Issue video: `{artifacts['video_issue']}`" if artifacts.get("video_issue") else "- Issue video: not generated",
                 f"- Small video: `{artifacts['video_small']}`" if artifacts.get("video_small") else "- Small video: not generated",
                 f"- Review video: `{artifacts.get('video_composed') or artifacts.get('video')}`" if artifacts.get("video_composed") or artifacts.get("video") else "- Review video: not recorded",
@@ -219,6 +248,8 @@ def desktop_review_issue_body(index_payload: dict, *, publish_dir: Path) -> str:
                 f"- Needs-work command: `python3 tools/local-ci/local_ci.py desktop verdict {verdict_manifest} --needs-work --notes \"<what to change>\" --issue-url <issue-url>`",
             ]
         )
+        for note in proof_notes[:5]:
+            lines.append(f"- Proof note: {note}")
         if artifacts.get("screenshot"):
             lines.append(f"- Screenshot: `{artifacts['screenshot']}`")
         if artifacts.get("diff_screenshot"):
@@ -290,6 +321,11 @@ def stage_desktop_publish_report(
         if manifest.get("artifacts", {}).get("image_change"):
             copied_artifacts["image_change"] = manifest["artifacts"]["image_change"]
 
+        video_proof_composition = manifest.get("video_proof_composition") if isinstance(manifest.get("video_proof_composition"), dict) else {}
+        source_image = video_proof_composition.get("source_image") if video_proof_composition else None
+        if _copy_optional_file(source_image, run_dir / "source-reference" / Path(str(source_image)).name):
+            copied_artifacts["video_source_image"] = str((run_dir / "source-reference" / Path(str(source_image)).name).relative_to(publish_dir))
+
         published_runs.append(
             {
                 "target": manifest.get("target"),
@@ -298,6 +334,8 @@ def stage_desktop_publish_report(
                 "completed_at": manifest.get("completed_at"),
                 "bundle_dir": manifest.get("artifacts", {}).get("bundle_dir"),
                 "interaction_mode": (manifest.get("interaction") or {}).get("mode"),
+                "video_proof_notes": _proof_notes_from_manifest(manifest),
+                "video_proof_composition": video_proof_composition,
                 "artifacts": copied_artifacts,
             }
         )
@@ -324,6 +362,8 @@ def stage_desktop_publish_report(
         diff = artifacts.get("diff_screenshot")
         video = artifacts.get("video_composed") or artifacts.get("video")
         video_metadata = artifacts.get("video_issue_metadata") or artifacts.get("video_composed_metadata") or artifacts.get("video_metadata")
+        proof_notes = run.get("video_proof_notes") if isinstance(run.get("video_proof_notes"), list) else []
+        proof_composition = run.get("video_proof_composition") if isinstance(run.get("video_proof_composition"), dict) else {}
         meta_lines = [
             f"<div><strong>{html.escape(str(run.get('target') or '?'))}/{html.escape(str(run.get('action') or '?'))}</strong></div>",
             f"<div>{html.escape(str(run.get('label') or '?'))}</div>",
@@ -338,12 +378,30 @@ def stage_desktop_publish_report(
             )
         if video_metadata:
             meta_lines.append(f"<div><a href=\"{html.escape(str(video_metadata))}\">video metadata</a></div>")
+        if proof_composition.get("template"):
+            meta_lines.append(f"<div>template: {html.escape(str(proof_composition.get('template')))}</div>")
+        if proof_composition.get("source_label"):
+            meta_lines.append(f"<div>source: {html.escape(str(proof_composition.get('source_label')))}</div>")
+        if proof_notes:
+            meta_lines.append(
+                "<ul class=\"proof-notes\">"
+                + "".join(f"<li>{html.escape(str(note))}</li>" for note in proof_notes[:5])
+                + "</ul>"
+            )
         video_block = ""
         if video:
             video_block = (
                 "<figure class=\"video-proof\">"
                 "<figcaption>video proof</figcaption>"
                 f"<video controls preload=\"metadata\" src=\"{html.escape(str(video))}\"></video>"
+                "</figure>"
+            )
+        source_block = ""
+        if artifacts.get("video_source_image"):
+            source_block = (
+                "<figure>"
+                "<figcaption>source reference</figcaption>"
+                f"<img src=\"{html.escape(str(artifacts['video_source_image']))}\" alt=\"source reference\" />"
                 "</figure>"
             )
         image_blocks: list[str] = []
@@ -361,6 +419,7 @@ def stage_desktop_publish_report(
             + "".join(meta_lines)
             + video_block
             + "<div class=\"images\">"
+            + source_block
             + "".join(image_blocks)
             + "</div></section>"
         )
@@ -375,6 +434,7 @@ def stage_desktop_publish_report(
                 "<style>body{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;margin:24px;background:#111827;color:#e5e7eb}"
                 " .run-card{border:1px solid #374151;border-radius:12px;padding:16px;margin:0 0 16px;background:#1f2937}"
                 " .images{display:flex;gap:16px;flex-wrap:wrap;margin-top:12px}"
+                " .proof-notes{margin:12px 0 0;padding-left:20px;color:#d1d5db}"
                 " figure{margin:12px 0 0} figcaption{margin-bottom:8px;color:#9ca3af}"
                 " img{max-width:320px;border-radius:8px;border:1px solid #374151;background:#000}"
                 " video{max-width:min(960px,100%);border-radius:8px;border:1px solid #374151;background:#000}</style>",
