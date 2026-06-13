@@ -20,6 +20,18 @@ class DesktopDoctorBindingsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
 
+    def test_doctor_exports_are_declared(self) -> None:
+        self.assertEqual(
+            self.mod.DESKTOP_DOCTOR_EXPORTS,
+            (
+                "desktop_optional_capabilities",
+                "desktop_capabilities_for",
+                "desktop_check",
+                "check_writable_dir",
+                "webdriver_status_url",
+            ),
+        )
+
     def test_doctor_wrappers_delegate_arguments(self) -> None:
         captured = {}
 
@@ -48,6 +60,25 @@ class DesktopDoctorBindingsTests(unittest.TestCase):
         self.assertEqual(captured["check"][1], {"required": False})
         self.assertEqual(self.mod.check_writable_dir(bindings, Path("/tmp")), (True, "/tmp"))
         self.assertEqual(self.mod.webdriver_status_url(bindings, "http://host"), "http://host/status")
+
+    def test_install_desktop_doctor_helpers_wires_named_exports(self) -> None:
+        doctor = types.SimpleNamespace(
+            desktop_check=lambda name, ok, detail, *, required=True: {
+                "name": name,
+                "ok": ok,
+                "detail": detail,
+                "required": required,
+            },
+        )
+        bindings = {"_desktop_doctor": doctor}
+
+        self.mod.install_desktop_doctor_helpers(bindings, ("desktop_check",))
+
+        self.assertEqual(
+            bindings["desktop_check"]("ssh", False, "missing", required=False),
+            {"name": "ssh", "ok": False, "detail": "missing", "required": False},
+        )
+        self.assertNotIn("webdriver_status_url", bindings)
 
 
 if __name__ == "__main__":

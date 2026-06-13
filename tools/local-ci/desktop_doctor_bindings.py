@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
+from binding_utils import install_local_helpers
 from binding_utils import binding as _binding
 
 
@@ -34,3 +36,10 @@ def check_writable_dir(bindings: dict, path: Path) -> tuple[bool, str]:
 
 def webdriver_status_url(bindings: dict, base_url: str) -> str:
     return _binding(bindings, "_desktop_doctor").webdriver_status_url(base_url)
+
+
+def install_desktop_doctor_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = DESKTOP_DOCTOR_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)

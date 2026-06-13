@@ -18,6 +18,16 @@ class DesktopReportingBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
 
+    def test_reporting_exports_are_composed_from_focused_groups(self):
+        expected = (
+            *self.mod.DESKTOP_PUBLISH_EXPORTS,
+            *self.mod.DESKTOP_RUN_ROLLUP_EXPORTS,
+            *self.mod.DESKTOP_PROOF_EXPORTS,
+        )
+
+        self.assertEqual(self.mod.DESKTOP_REPORTING_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def _bindings(self, runner_name: str, runner):
         bindings = {
             "_reporting": types.SimpleNamespace(**{runner_name: runner}),
@@ -253,7 +263,7 @@ class DesktopReportingBindingsTests(unittest.TestCase):
         self.assertEqual(captured["args"], (config, "mac"))
         self.assertIs(captured["kwargs"]["desktop_artifact_root_fn"], bindings["desktop_artifact_root"])
 
-    def test_install_desktop_reporting_helpers_wires_named_exports(self):
+    def test_install_desktop_reporting_helpers_routes_run_rollup_exports(self):
         captured = {}
 
         def runner(*args, **kwargs):
@@ -275,6 +285,22 @@ class DesktopReportingBindingsTests(unittest.TestCase):
         self.assertEqual(captured["kwargs"]["target_name"], "mac")
         self.assertEqual(captured["kwargs"]["action"], "smoke")
         self.assertIs(captured["kwargs"]["desktop_artifact_root_fn"], bindings["desktop_artifact_root"])
+
+    def test_install_desktop_reporting_helpers_routes_each_group(self):
+        bindings = self._bindings("desktop_publish_reports", lambda *args, **kwargs: [{"publish": True}])
+        bindings["_reporting"].desktop_run_manifests = lambda *args, **kwargs: [{"run": True}]
+        bindings["_reporting"].desktop_proof_summaries = lambda *args, **kwargs: [{"proof": True}]
+
+        self.mod.install_desktop_reporting_helpers(
+            bindings,
+            ("desktop_publish_reports", "desktop_run_manifests", "desktop_proof_summaries"),
+        )
+
+        self.assertEqual(bindings["desktop_publish_reports"]({"desktop_automation": {}}), [{"publish": True}])
+        self.assertEqual(bindings["desktop_run_manifests"]({"desktop_automation": {}}), [{"run": True}])
+        self.assertEqual(bindings["desktop_proof_summaries"]({"desktop_automation": {}}), [{"proof": True}])
+        self.assertNotIn("stage_desktop_publish_report", bindings)
+        self.assertNotIn("write_desktop_run_rollups", bindings)
 
     def test_install_desktop_reporting_helpers_routes_publish_exports(self):
         captured = {}

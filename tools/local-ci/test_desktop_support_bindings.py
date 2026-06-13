@@ -20,6 +20,16 @@ class DesktopSupportBindingsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
 
+    def test_support_exports_are_composed_from_focused_groups(self) -> None:
+        expected = (
+            *self.mod.DESKTOP_ARTIFACT_EXPORTS,
+            *self.mod.DESKTOP_DOCTOR_EXPORTS,
+            *self.mod.DESKTOP_ACTION_SUPPORT_EXPORTS,
+        )
+
+        self.assertEqual(self.mod.DESKTOP_SUPPORT_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def _bindings(self, *, artifacts=None, doctor=None, actions=None):
         return {
             "_desktop_artifacts": artifacts or types.SimpleNamespace(),
@@ -160,6 +170,24 @@ class DesktopSupportBindingsTests(unittest.TestCase):
             bindings["default_desktop_label"]("./Demo", bundle_id="com.example.Demo"),
             "com.example.Demo",
         )
+
+    def test_install_desktop_support_helpers_routes_each_group(self) -> None:
+        artifacts = types.SimpleNamespace(desktop_artifact_root=lambda config: Path("/artifacts"))
+        doctor = types.SimpleNamespace(webdriver_status_url=lambda base_url: f"{base_url}/status")
+        actions = types.SimpleNamespace(default_desktop_label=lambda command, *, bundle_id=None: bundle_id or command)
+        bindings = self._bindings(artifacts=artifacts, doctor=doctor, actions=actions)
+
+        self.mod.install_desktop_support_helpers(
+            bindings,
+            ("desktop_artifact_root", "webdriver_status_url", "default_desktop_label"),
+        )
+
+        self.assertEqual(bindings["desktop_artifact_root"]({}), Path("/artifacts"))
+        self.assertEqual(bindings["webdriver_status_url"]("http://host"), "http://host/status")
+        self.assertEqual(bindings["default_desktop_label"]("./Demo"), "./Demo")
+        self.assertNotIn("desktop_receipt_for", bindings)
+        self.assertNotIn("desktop_check", bindings)
+        self.assertNotIn("count_view_tree_nodes", bindings)
 
 
 if __name__ == "__main__":
