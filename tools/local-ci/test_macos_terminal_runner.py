@@ -95,6 +95,8 @@ class MacOSTerminalRunnerTests(unittest.TestCase):
             def fake_run(cmd, **_kwargs):
                 calls.append(cmd)
                 self.assertEqual(cmd[0], "osascript")
+                if "set proofCount" in cmd[-1]:
+                    return subprocess.CompletedProcess(cmd, 0, "0\t0\t0", "")
                 if "exists process" in cmd[-1]:
                     self.assertIn("exists process", cmd[-1])
                     return subprocess.CompletedProcess(cmd, 0, "false\n", "")
@@ -105,8 +107,6 @@ class MacOSTerminalRunnerTests(unittest.TestCase):
                     self.assertIn("Terminal", cmd[-1])
                     self.assertIn("Pulp Video Proof local-ci", cmd[-1])
                     return subprocess.CompletedProcess(cmd, 0, "", "")
-                if "set proofCount" in cmd[-1]:
-                    return subprocess.CompletedProcess(cmd, 0, "0\t0\t0", "")
                 self.assertIn("close w saving no", cmd[-1])
                 self.assertIn("Pulp Video Proof local-ci", cmd[-1])
                 return subprocess.CompletedProcess(cmd, 0, cleanup_stdout.pop(0), "")
@@ -129,7 +129,8 @@ class MacOSTerminalRunnerTests(unittest.TestCase):
         self.assertFalse(result["timed_out"])
         self.assertEqual(result["terminal_cleanup"]["returncode"], 0)
         self.assertEqual(result["terminal_cleanup"]["closed_count"], 1)
-        self.assertEqual(len(calls), 5)
+        self.assertEqual(result["terminal_cleanup"]["remaining_proof_count"], 0)
+        self.assertEqual(len(calls), 4)
 
     def test_run_local_ci_in_terminal_reports_osascript_failure(self):
         result = self.mod.run_local_ci_in_terminal(
@@ -175,6 +176,8 @@ class MacOSTerminalRunnerTests(unittest.TestCase):
             calls.append(cmd)
             if cmd[0] == "osascript" and "set closedCount" in cmd[-1]:
                 return subprocess.CompletedProcess(cmd, 1, "", "User canceled")
+            if cmd[0] == "osascript" and "miniaturizedCount" in cmd[-1]:
+                return subprocess.CompletedProcess(cmd, 0, "1\n", "")
             return subprocess.CompletedProcess(cmd, 0, "1234\t1\t1", "")
 
         result = self.mod.close_terminal_windows_with_title(
@@ -185,6 +188,7 @@ class MacOSTerminalRunnerTests(unittest.TestCase):
         )
 
         self.assertFalse(result["terminated_terminal"])
+        self.assertEqual(result["miniaturized_count"], 1)
         self.assertEqual(result["remaining_proof_count"], 1)
         self.assertEqual(result["other_window_count"], 1)
         self.assertNotIn(["kill", "-TERM", "1234"], calls)
@@ -211,7 +215,7 @@ class MacOSTerminalRunnerTests(unittest.TestCase):
         self.assertTrue(result["terminated_terminal"])
         self.assertEqual(calls[-1], ["kill", "-TERM", "1234"])
 
-    def test_close_terminal_windows_can_terminate_restored_terminal_session(self):
+    def test_close_terminal_windows_does_not_terminate_when_proof_window_is_gone(self):
         calls = []
 
         def fake_run(cmd, **_kwargs):
@@ -230,8 +234,9 @@ class MacOSTerminalRunnerTests(unittest.TestCase):
             allow_terminate_with_nonproof_windows=True,
         )
 
-        self.assertTrue(result["terminated_terminal"])
-        self.assertEqual(calls[-1], ["kill", "-TERM", "1234"])
+        self.assertFalse(result["terminated_terminal"])
+        self.assertEqual(result["remaining_proof_count"], 0)
+        self.assertNotIn(["kill", "-TERM", "1234"], calls)
 
     def test_terminal_app_running(self):
         result = self.mod.terminal_app_running(
