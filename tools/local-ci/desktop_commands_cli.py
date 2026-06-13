@@ -322,8 +322,8 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
             "--command './build-desktop-automation/examples/ui-preview/pulp-ui-preview' "
             "--prepare-command 'cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release && "
             "cmake --build build-desktop-automation --target pulp-ui-preview -j$(sysctl -n hw.ncpu)' "
-            "--capture-ui-snapshot --component-id compressor-threshold "
-            "--click-view-id compressor-threshold --label component-threshold-control "
+            "--capture-ui-snapshot --component-id bypass-toggle "
+            "--click-view-id bypass-toggle --label component-bypass-toggle "
             "--compose-video-proof"
         ),
         "doctor": "python3 tools/local-ci/local_ci.py desktop video-doctor mac",

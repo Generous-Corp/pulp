@@ -244,7 +244,7 @@ python3 tools/local-ci/local_ci.py desktop video mac \
   --recipe component-zoom \
   --command ./build-desktop-automation/examples/ui-preview/pulp-ui-preview \
   --prepare-command 'cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release && cmake --build build-desktop-automation --target pulp-ui-preview -j$(sysctl -n hw.ncpu)' \
-  --component-id compressor-threshold \
+  --component-id bypass-toggle \
   --duration 8
 ```
 

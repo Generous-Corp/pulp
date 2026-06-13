@@ -238,7 +238,7 @@ python3 tools/local-ci/local_ci.py desktop video mac \
   --recipe component-zoom \
   --command ./build-desktop-automation/examples/ui-preview/pulp-ui-preview \
   --prepare-command 'cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release && cmake --build build-desktop-automation --target pulp-ui-preview -j$(sysctl -n hw.ncpu)' \
-  --component-id compressor-threshold \
+  --component-id bypass-toggle \
   --duration 8
 ```
 
@@ -253,7 +253,8 @@ python3 tools/local-ci/local_ci.py desktop video mac \
 
 `component-zoom` enables ViewInspector capture and before/diff capture, then
 uses `--component-id` as the click target when no explicit click selector was
-provided. It also selects the Remotion `component-zoom` template and records
+provided. The `ui-preview` matrix demo uses the real `bypass-toggle` selector.
+It also selects the Remotion `component-zoom` template and records
 `video_proof_composition.focus` metadata so the composed proof can show a
 component label, focus rectangle, and zoom detail inset. Recipes also write
 `video_proof_composition.context`, which the composed video, `index.html`, and
