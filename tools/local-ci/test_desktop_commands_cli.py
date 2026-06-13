@@ -164,6 +164,9 @@ class DesktopCommandsCliTests(unittest.TestCase):
         self.assertIn("Desktop validation video proof demo matrix:", text)
         self.assertIn("component-zoom [ready]", text)
         self.assertIn("--recipe component-zoom", text)
+        self.assertIn("publish:", text)
+        self.assertIn("review issue:", text)
+        self.assertIn("--background --label component-zoom-review --json", text)
         self.assertNotIn("ios-simulator", text)
 
         self.printed.clear()
@@ -176,6 +179,12 @@ class DesktopCommandsCliTests(unittest.TestCase):
         self.assertEqual(payload["kind"], "desktop-video-proof-demo-matrix")
         self.assertEqual(payload["scenario_count"], 7)
         self.assertIn("reaper-plugin-editor", {item["id"] for item in payload["scenarios"]})
+        reaper = next(item for item in payload["scenarios"] if item["id"] == "reaper-plugin-editor")
+        self.assertIn("desktop publish --manifest /path/to/run/manifest.json", reaper["publish_command"])
+        self.assertIn("desktop review-issue /path/to/published-reports/reaper-plugin-editor", reaper["review_issue_command"])
+        self.assertIn("--background --label reaper-plugin-editor-review --json", reaper["serve_background_command"])
+        self.assertEqual(reaper["review_workflow"][0]["step"], "doctor")
+        self.assertEqual(reaper["review_workflow"][-1]["step"], "stop_server")
 
         self.printed.clear()
         result = self.mod.cmd_desktop_video_matrix(
@@ -186,8 +195,10 @@ class DesktopCommandsCliTests(unittest.TestCase):
         markdown = self.printed[0]
         self.assertIn("# Desktop Validation Video Proof Demo Matrix", markdown)
         self.assertIn("iOS Simulator interaction", markdown)
+        self.assertIn("Publish, draft, and serve:", markdown)
         self.assertIn("python3 tools/local-ci/local_ci.py simulator video", markdown)
         self.assertIn("python3 tools/local-ci/local_ci.py simulator video-doctor", markdown)
+        self.assertIn("--background --label ios-simulator-review --json", markdown)
         self.assertNotIn("Standalone app interaction", markdown)
 
     def test_desktop_config_show_set_and_dispatch(self):

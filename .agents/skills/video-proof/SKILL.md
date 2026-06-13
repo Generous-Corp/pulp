@@ -412,7 +412,8 @@ the current macOS lane, `--target ios-simulator` narrows to simulator capture,
 `--target android-emulator` narrows to Android capture, `--scenario
 component-zoom` prints one row, and `--json` is suitable for
 automation. The matrix carries readiness status, Remotion template, doctor
-command, recording command, and reviewer watch-points for standalone,
+command, recording/compose command, publish/review-issue commands, background
+serve/status/stop commands, and reviewer watch-points for standalone,
 REAPER/plugin-host, inspector, component-zoom, design-parity, iOS Simulator,
 and Android Emulator proofs.
 

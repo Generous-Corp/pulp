@@ -373,8 +373,9 @@ python3 tools/local-ci/local_ci.py desktop video-matrix --markdown
 ```
 
 The matrix lists the full-service proof scenarios, current readiness, Remotion
-template, doctor command, concrete recording command, and what a reviewer should
-look for. Use `--target mac`, `--target ios-simulator`,
+template, doctor command, concrete recording/compose command, publish command,
+review-issue command, background serve/status/stop commands, and what a
+reviewer should look for. Use `--target mac`, `--target ios-simulator`,
 `--scenario component-zoom`, or `--json` when an agent needs a narrower
 machine-readable plan. The iOS Simulator row uses the working `simulator video`
 recorder. The Android row uses the working `android video` command for

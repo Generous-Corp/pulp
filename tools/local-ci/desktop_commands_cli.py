@@ -370,7 +370,38 @@ def desktop_video_matrix_payload(*, target: str | None = None, scenario: str | N
             continue
         if scenario and item["id"] != scenario:
             continue
-        scenarios.append({key: value for key, value in item.items()})
+        row = {key: value for key, value in item.items()}
+        label = row["id"]
+        report_placeholder = f"/path/to/published-reports/{label}"
+        manifest_placeholder = "/path/to/run/manifest.json"
+        row["publish_command"] = (
+            f"python3 tools/local-ci/local_ci.py desktop publish --manifest {manifest_placeholder} "
+            f"--label {label}-review"
+        )
+        row["review_issue_command"] = (
+            f"python3 tools/local-ci/local_ci.py desktop review-issue {report_placeholder} "
+            "--repo owner/repo --check-files"
+        )
+        row["serve_background_command"] = (
+            f"python3 tools/local-ci/local_ci.py desktop serve {report_placeholder} "
+            f"--host 0.0.0.0 --port 8765 --background --label {label}-review --json"
+        )
+        row["serve_status_command"] = (
+            f"python3 tools/local-ci/local_ci.py desktop serve --status --label {label}-review --json"
+        )
+        row["serve_stop_command"] = (
+            f"python3 tools/local-ci/local_ci.py desktop serve --stop --label {label}-review --json"
+        )
+        row["review_workflow"] = [
+            {"step": "doctor", "command": row["doctor"]},
+            {"step": "record_or_compose", "command": row["command"]},
+            {"step": "publish", "command": row["publish_command"]},
+            {"step": "draft_issue", "command": row["review_issue_command"]},
+            {"step": "serve_background", "command": row["serve_background_command"]},
+            {"step": "check_server", "command": row["serve_status_command"]},
+            {"step": "stop_server", "command": row["serve_stop_command"]},
+        ]
+        scenarios.append(row)
     return {
         "kind": "desktop-video-proof-demo-matrix",
         "target": target or "all",
@@ -397,6 +428,11 @@ def desktop_video_matrix_lines(payload: dict) -> list[str]:
                 f"  proves: {item['proves']}",
                 f"  doctor: {item['doctor']}",
                 f"  command: {item['command']}",
+                f"  publish: {item['publish_command']}",
+                f"  review issue: {item['review_issue_command']}",
+                f"  serve background: {item['serve_background_command']}",
+                f"  serve status: {item['serve_status_command']}",
+                f"  serve stop: {item['serve_stop_command']}",
                 "  watch for:",
             ]
         )
@@ -424,8 +460,20 @@ def desktop_video_matrix_markdown(payload: dict) -> str:
                 f"- Proves: {item['proves']}",
                 f"- Doctor: `{item['doctor']}`",
                 "",
+                "Record or compose:",
+                "",
                 "```bash",
                 item["command"],
+                "```",
+                "",
+                "Publish, draft, and serve:",
+                "",
+                "```bash",
+                item["publish_command"],
+                item["review_issue_command"],
+                item["serve_background_command"],
+                item["serve_status_command"],
+                item["serve_stop_command"],
                 "```",
                 "",
                 "Watch for:",
