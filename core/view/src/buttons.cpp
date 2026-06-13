@@ -20,10 +20,12 @@ void TextButton::paint(canvas::Canvas& canvas) {
     canvas.set_fill_color(bg);
     canvas.fill_rounded_rect(0, 0, w, h, r);
 
-    // Border
+    // Border — rounded to match the filled background above (a square
+    // stroke_rect over a rounded fill left visible 90° corners, e.g. the
+    // standalone Settings/Done buttons looked square next to rounded controls).
     canvas.set_stroke_color(canvas::Color::rgba8(100, 100, 110));
     canvas.set_line_width(1.0f);
-    canvas.stroke_rect(0, 0, w, h);
+    canvas.stroke_rounded_rect(0, 0, w, h, r);
 
     // Label — pulp #1407 honors CSS text-overflow: ellipsis when set on
     // the button via setTextOverflow(id, "ellipsis"). Reserves a small

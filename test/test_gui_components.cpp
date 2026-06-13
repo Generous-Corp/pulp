@@ -453,7 +453,7 @@ TEST_CASE("TextButton disabled state suppresses click and still paints",
     RecordingCanvas canvas;
     button.paint(canvas);
     REQUIRE(canvas.count(DrawCommand::Type::fill_rounded_rect) == 1);
-    REQUIRE(canvas.count(DrawCommand::Type::stroke_rect) == 1);
+    REQUIRE(canvas.count(DrawCommand::Type::stroke_rounded_rect) == 1);
     REQUIRE(canvas.count(DrawCommand::Type::fill_text) == 1);
 }
 
@@ -933,7 +933,7 @@ TEST_CASE("TextButton paint covers enabled hover and disabled states",
     RecordingCanvas canvas;
     btn.paint(canvas);
     REQUIRE(canvas.count(DrawCommand::Type::fill_rounded_rect) == 1);
-    REQUIRE(canvas.count(DrawCommand::Type::stroke_rect) == 1);
+    REQUIRE(canvas.count(DrawCommand::Type::stroke_rounded_rect) == 1);
     REQUIRE(canvas.count(DrawCommand::Type::fill_text) == 1);
 
     canvas.clear();
