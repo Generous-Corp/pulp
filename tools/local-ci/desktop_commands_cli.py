@@ -226,7 +226,7 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
         "template": "standalone",
         "proves": "A Pulp standalone launches, accepts a click, and visibly changes state.",
         "prepare_command": (
-            "cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release && "
+            "cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF && "
             "cmake --build build-desktop-automation --target pulp-ui-preview -j$(sysctl -n hw.ncpu)"
         ),
         "command": (
@@ -234,7 +234,7 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
             "--recipe standalone-interaction "
             "--source-mode exact-sha "
             "--command './build-desktop-automation/examples/ui-preview/pulp-ui-preview' "
-            "--prepare-command 'cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release && "
+            "--prepare-command 'cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF && "
             "cmake --build build-desktop-automation --target pulp-ui-preview -j$(sysctl -n hw.ncpu)' "
             "--pulp-app-automation --capture-ui-snapshot --click-view-id bypass-toggle "
             "--label standalone-bypass-toggle --compose-video-proof"
@@ -254,7 +254,7 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
         "template": "plugin-host",
         "proves": "A real host loads a Pulp plugin and records host/editor context.",
         "prepare_command": (
-            "cmake -S . -B build-video-nogpu -DCMAKE_BUILD_TYPE=Release -DPULP_ENABLE_GPU=OFF && "
+            "cmake -S . -B build-video-nogpu -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF -DPULP_ENABLE_GPU=OFF && "
             "cmake --build build-video-nogpu --target PulpSynth_CLAP -j$(sysctl -n hw.ncpu) && "
             'mkdir -p "$HOME/Library/Audio/Plug-Ins/CLAP" && '
             'ln -sfn "$(pwd)/build-video-nogpu/CLAP/PulpSynth.clap" '
@@ -264,7 +264,7 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
             "python3 tools/local-ci/local_ci.py desktop video mac "
             "--recipe reaper-plugin-editor --plugin PulpSynth --plugin-format clap "
             "--source-mode exact-sha "
-            "--prepare-command 'cmake -S . -B build-video-nogpu -DCMAKE_BUILD_TYPE=Release -DPULP_ENABLE_GPU=OFF && "
+            "--prepare-command 'cmake -S . -B build-video-nogpu -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF -DPULP_ENABLE_GPU=OFF && "
             "cmake --build build-video-nogpu --target PulpSynth_CLAP -j$(sysctl -n hw.ncpu) && "
             "mkdir -p \"$HOME/Library/Audio/Plug-Ins/CLAP\" && "
             "ln -sfn \"$(pwd)/build-video-nogpu/CLAP/PulpSynth.clap\" "
@@ -289,7 +289,7 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
         "template": "inspector-workflow",
         "proves": "A developer build exposes inspector/audio-inspector state during a visible workflow.",
         "prepare_command": (
-            "cmake -S . -B build-video-nogpu -DCMAKE_BUILD_TYPE=Release -DPULP_ENABLE_GPU=OFF && "
+            "cmake -S . -B build-video-nogpu -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF -DPULP_ENABLE_GPU=OFF && "
             "cmake --build build-video-nogpu --target pulp-audio-inspector-demo -j$(sysctl -n hw.ncpu)"
         ),
         "command": (
@@ -297,7 +297,7 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
             "--recipe inspector-workflow "
             "--source-mode exact-sha "
             "--command './build-video-nogpu/examples/audio-inspector-demo/pulp-audio-inspector-demo' "
-            "--prepare-command 'cmake -S . -B build-video-nogpu -DCMAKE_BUILD_TYPE=Release -DPULP_ENABLE_GPU=OFF && "
+            "--prepare-command 'cmake -S . -B build-video-nogpu -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF -DPULP_ENABLE_GPU=OFF && "
             "cmake --build build-video-nogpu --target pulp-audio-inspector-demo -j$(sysctl -n hw.ncpu)' "
             "--capture-ui-snapshot --label inspector-open-and-select --compose-video-proof"
         ),
@@ -316,7 +316,7 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
         "template": "component-zoom",
         "proves": "The proof highlights one component so the reviewer does not hunt through the full window.",
         "prepare_command": (
-            "cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release && "
+            "cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF && "
             "cmake --build build-desktop-automation --target pulp-ui-preview -j$(sysctl -n hw.ncpu)"
         ),
         "command": (
@@ -324,7 +324,7 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
             "--recipe component-zoom "
             "--source-mode exact-sha "
             "--command './build-desktop-automation/examples/ui-preview/pulp-ui-preview' "
-            "--prepare-command 'cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release && "
+            "--prepare-command 'cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF && "
             "cmake --build build-desktop-automation --target pulp-ui-preview -j$(sysctl -n hw.ncpu)' "
             "--pulp-app-automation --capture-ui-snapshot --component-id bypass-toggle "
             "--click-view-id bypass-toggle --label component-bypass-toggle "

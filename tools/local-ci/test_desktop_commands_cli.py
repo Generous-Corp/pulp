@@ -165,9 +165,9 @@ class DesktopCommandsCliTests(unittest.TestCase):
         self.assertIn("component-zoom [ready]", text)
         self.assertIn("--recipe component-zoom", text)
         self.assertIn("build-desktop-automation/examples/ui-preview/pulp-ui-preview", text)
-        self.assertIn("prepare: cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release", text)
+        self.assertIn("prepare: cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF", text)
         self.assertIn("--source-mode exact-sha", text)
-        self.assertIn("--prepare-command 'cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release", text)
+        self.assertIn("--prepare-command 'cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF", text)
         self.assertIn("--pulp-app-automation", text)
         self.assertIn("--component-id bypass-toggle", text)
         self.assertIn("--click-view-id bypass-toggle", text)
@@ -199,7 +199,7 @@ class DesktopCommandsCliTests(unittest.TestCase):
         standalone = next(item for item in payload["scenarios"] if item["id"] == "standalone-interaction")
         self.assertEqual(
             standalone["prepare_command"],
-            "cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release && "
+            "cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF && "
             "cmake --build build-desktop-automation --target pulp-ui-preview -j$(sysctl -n hw.ncpu)",
         )
         self.assertIn("--prepare-command", standalone["command"])
