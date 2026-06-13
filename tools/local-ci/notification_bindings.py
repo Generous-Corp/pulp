@@ -24,4 +24,10 @@ def notify(bindings: Mapping[str, Any], message: str) -> None:
 
 
 def install_notification_helpers(bindings: dict[str, Any], names: tuple[str, ...] = NOTIFICATION_EXPORTS) -> None:
-    install_local_helpers(bindings, globals(), names)
+    known_names = set(NOTIFICATION_EXPORTS)
+    notification_names = tuple(name for name in names if name in known_names)
+    unknown_names = tuple(name for name in names if name not in known_names)
+
+    install_local_helpers(bindings, globals(), notification_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)

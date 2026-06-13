@@ -50,4 +50,10 @@ def file_lock(bindings: Mapping[str, Any], path: Path, *, blocking: bool):
 
 
 def install_io_utils_helpers(bindings: dict[str, Any], names: tuple[str, ...] = IO_UTILS_EXPORTS) -> None:
-    install_local_helpers(bindings, globals(), names)
+    known_names = set(IO_UTILS_EXPORTS)
+    io_names = tuple(name for name in names if name in known_names)
+    unknown_names = tuple(name for name in names if name not in known_names)
+
+    install_local_helpers(bindings, globals(), io_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)

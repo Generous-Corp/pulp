@@ -29,4 +29,10 @@ def normalize_result(bindings: Mapping[str, Any], result: dict) -> dict:
 
 
 def install_provenance_helpers(bindings: dict[str, Any], names: tuple[str, ...] = PROVENANCE_EXPORTS) -> None:
-    install_local_helpers(bindings, globals(), names)
+    known_names = set(PROVENANCE_EXPORTS)
+    provenance_names = tuple(name for name in names if name in known_names)
+    unknown_names = tuple(name for name in names if name not in known_names)
+
+    install_local_helpers(bindings, globals(), provenance_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)

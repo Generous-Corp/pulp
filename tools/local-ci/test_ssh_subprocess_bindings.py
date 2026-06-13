@@ -90,6 +90,14 @@ class SshSubprocessBindingsTests(unittest.TestCase):
         self.assertEqual(captured["detail"], "reset")
         self.assertEqual(captured["run"][0], ["ssh", "host"])
 
+    def test_install_ssh_subprocess_helpers_keeps_unknown_local_fallback(self) -> None:
+        bindings = {}
+        self.mod.future_ssh_subprocess_helper = lambda _bindings: "future"
+
+        self.mod.install_ssh_subprocess_helpers(bindings, ("future_ssh_subprocess_helper",))
+
+        self.assertEqual(bindings["future_ssh_subprocess_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()

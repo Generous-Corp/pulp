@@ -45,4 +45,10 @@ def install_ssh_subprocess_helpers(
     bindings: dict[str, Any],
     names: tuple[str, ...] = SSH_SUBPROCESS_EXPORTS,
 ) -> None:
-    install_local_helpers(bindings, globals(), names)
+    known_names = set(SSH_SUBPROCESS_EXPORTS)
+    subprocess_names = tuple(name for name in names if name in known_names)
+    unknown_names = tuple(name for name in names if name not in known_names)
+
+    install_local_helpers(bindings, globals(), subprocess_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)

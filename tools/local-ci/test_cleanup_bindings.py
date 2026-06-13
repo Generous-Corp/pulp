@@ -146,6 +146,13 @@ class CleanupBindingTests(unittest.TestCase):
             path_size_bytes_fn=self.bindings["path_size_bytes"],
         )
 
+    def test_install_cleanup_helpers_keeps_unknown_local_fallback(self) -> None:
+        self.mod.future_cleanup_helper = lambda _bindings: "future"
+
+        self.mod.install_cleanup_helpers(self.bindings, ("future_cleanup_helper",))
+
+        self.assertEqual(self.bindings["future_cleanup_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()

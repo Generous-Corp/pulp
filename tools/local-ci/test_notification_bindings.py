@@ -55,6 +55,14 @@ class NotificationBindingTests(unittest.TestCase):
             run_fn=subprocess.run,
         )
 
+    def test_install_notification_helpers_keeps_unknown_local_fallback(self) -> None:
+        bindings = {}
+        self.mod.future_notification_helper = lambda _bindings: "future"
+
+        self.mod.install_notification_helpers(bindings, ("future_notification_helper",))
+
+        self.assertEqual(bindings["future_notification_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()

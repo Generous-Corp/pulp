@@ -77,6 +77,14 @@ class GitHelpersBindingTests(unittest.TestCase):
         self.assertEqual(bindings["now_iso"].__name__, "now_iso")
         self.assertEqual([call[0] for call in fake.calls], ["now_iso", "short_sha"])
 
+    def test_install_git_helpers_keeps_unknown_local_fallback(self) -> None:
+        bindings = {}
+        git_helpers_bindings.future_git_helper = lambda _bindings: "future"
+
+        git_helpers_bindings.install_git_helpers(bindings, ("future_git_helper",))
+
+        self.assertEqual(bindings["future_git_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()

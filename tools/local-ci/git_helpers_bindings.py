@@ -45,4 +45,10 @@ def short_sha(bindings: Mapping[str, Any], sha: str) -> str:
 
 
 def install_git_helpers(bindings: dict[str, Any], names: tuple[str, ...] = GIT_HELPER_EXPORTS) -> None:
-    install_local_helpers(bindings, globals(), names)
+    known_names = set(GIT_HELPER_EXPORTS)
+    git_names = tuple(name for name in names if name in known_names)
+    unknown_names = tuple(name for name in names if name not in known_names)
+
+    install_local_helpers(bindings, globals(), git_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)

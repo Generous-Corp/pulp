@@ -78,6 +78,14 @@ class IoUtilsBindingTests(unittest.TestCase):
         self.assertEqual(bindings["tail_lines"].__name__, "tail_lines")
         self.assertEqual([call[0] for call in fake.calls], ["tail_lines", "image_change_summary"])
 
+    def test_install_io_utils_helpers_keeps_unknown_local_fallback(self) -> None:
+        bindings = {}
+        io_utils_bindings.future_io_helper = lambda _bindings: "future"
+
+        io_utils_bindings.install_io_utils_helpers(bindings, ("future_io_helper",))
+
+        self.assertEqual(bindings["future_io_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()
