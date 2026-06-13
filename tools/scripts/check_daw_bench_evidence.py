@@ -78,6 +78,7 @@ CAPABILITY_LOG_EVENTS: dict[str, tuple[str, ...]] = {
     "params": ("define_parameters", "serialize_plugin_state"),
     "sidechain": ("sidechain_edge",),
 }
+CAPABILITY_EVENT_MATCH_ALL = {"params"}
 
 
 @dataclass(frozen=True)
@@ -258,11 +259,19 @@ def _validate_claimed_log_events(
             continue
         found = sorted(set(expected_events).intersection(observed_events))
         expected = ", ".join(expected_events)
-        if observed == "Confirmed" and not found:
-            errors.append(
-                f"capabilities[{index}] {name} is Confirmed but checked-in logs "
-                f"do not contain expected event(s): {expected}"
-            )
+        if observed == "Confirmed":
+            if name in CAPABILITY_EVENT_MATCH_ALL:
+                missing = [event for event in expected_events if event not in observed_events]
+                if missing:
+                    errors.append(
+                        f"capabilities[{index}] {name} is Confirmed but checked-in logs "
+                        f"do not contain required event(s): {', '.join(missing)}"
+                    )
+            elif not found:
+                errors.append(
+                    f"capabilities[{index}] {name} is Confirmed but checked-in logs "
+                    f"do not contain expected event(s): {expected}"
+                )
         elif observed == "Not Triggered" and found:
             errors.append(
                 f"capabilities[{index}] {name} is Not Triggered but checked-in logs "

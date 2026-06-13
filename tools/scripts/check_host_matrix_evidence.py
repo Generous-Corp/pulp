@@ -119,7 +119,7 @@ def _manifest_matches_lane(path: pathlib.Path, *, host: str, fmt: str) -> bool:
     )
 
 
-def _manifest_confirms_capability(path: pathlib.Path, capability: str) -> bool:
+def _manifest_observes_capability(path: pathlib.Path, capability: str, observed: str) -> bool:
     try:
         data: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -132,9 +132,9 @@ def _manifest_confirms_capability(path: pathlib.Path, capability: str) -> bool:
         if not isinstance(item, dict):
             continue
         name = item.get("capability")
-        observed = item.get("observed")
+        actual = item.get("observed")
         if isinstance(name, str) and _normalize(name) == expected:
-            return observed == "Confirmed"
+            return actual == observed
     return False
 
 
@@ -193,10 +193,14 @@ def validate_matrix(
         for capability, status in row.capabilities.items():
             if status not in PROMOTED_STATUSES:
                 continue
-            if not any(_manifest_confirms_capability(path, capability) for path in matching_manifests):
+            required_observed = "Refuted" if status == "🔴" else "Confirmed"
+            if not any(
+                _manifest_observes_capability(path, capability, required_observed)
+                for path in matching_manifests
+            ):
                 errors.append(
                     f"{matrix_path}:{row.line} no valid DAW-bench manifest confirms "
-                    f"{row.format}/{row.host} capability {capability}"
+                    f"{row.format}/{row.host} capability {capability} as {required_observed}"
                 )
 
     return MatrixCheck(matrix_path, tuple(errors))

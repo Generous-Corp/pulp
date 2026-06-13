@@ -87,6 +87,7 @@ class HostMatrixEvidenceTests(unittest.TestCase):
         _write(result_dir / "logs" / "Reaper-VST3-20260612T120000Z-pid42.log",
                "2026-06-12T12:00:00Z\tsession_start\n"
                "2026-06-12T12:00:00Z\tdefine_parameters\n"
+               "2026-06-12T12:00:00Z\tserialize_plugin_state\n"
                "2026-06-12T12:00:00Z\tprocess_without_prepare\n")
         (result_dir / "reaper-vst3.daw-bench.json").write_text(
             json.dumps(_manifest()),
@@ -160,6 +161,34 @@ class HostMatrixEvidenceTests(unittest.TestCase):
                 """))
             errors = matrix_checker.validate_matrix(matrix, repo_root=root).errors
             self.assertTrue(any("capability MIDI" in error for error in errors))
+
+    def test_broken_promoted_cell_accepts_refuted_capability_evidence(self) -> None:
+        tmp_ctx, root, matrix = self._repo()
+        with tmp_ctx:
+            result_dir = root / "docs" / "validation" / "daw-bench" / "results" / "2026-06-12"
+            manifest = _manifest()
+            manifest["capabilities"] = [
+                {
+                    "capability": "midi",
+                    "observed": "Refuted",
+                    "notes": "MIDI was exercised but did not reach the plugin.",
+                }
+            ]
+            (result_dir / "reaper-vst3.daw-bench.json").write_text(
+                json.dumps(manifest),
+                encoding="utf-8",
+            )
+            _write(matrix, textwrap.dedent("""\
+                # Host Compatibility Matrix
+
+                ## VST3
+
+                | Host | Version | MIDI | Notes |
+                |------|---------|------|-------|
+                | Reaper | 7.74 | 🔴 | VST3 bench evidence: `docs/validation/daw-bench/results/2026-06-12/` |
+                """))
+            check = matrix_checker.validate_matrix(matrix, repo_root=root)
+            self.assertEqual(check.errors, ())
 
 
 if __name__ == "__main__":

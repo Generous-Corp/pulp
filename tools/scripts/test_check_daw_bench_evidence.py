@@ -69,6 +69,7 @@ class DawBenchEvidenceTests(unittest.TestCase):
                "# Filled REAPER result\n")
         _write(result_dir / "logs" / "Reaper-VST3-20260612T120000Z-pid42.log",
                "2026-06-12T12:00:00Z\tsession_start\n"
+               "2026-06-12T12:00:00Z\tserialize_plugin_state\n"
                "2026-06-12T12:00:00Z\tprocess_without_prepare\n")
         return tmp_ctx, root, result_dir
 
@@ -211,6 +212,31 @@ class DawBenchEvidenceTests(unittest.TestCase):
             )
             errors = checker.validate_manifest(path, repo_root=root).errors
             self.assertTrue(any("midi is Confirmed" in error for error in errors))
+
+    def test_params_capability_requires_definition_and_state_events(self) -> None:
+        tmp_ctx, root, result_dir = self._repo()
+        with tmp_ctx:
+            _write(
+                result_dir / "logs" / "Reaper-VST3-20260612T120000Z-pid42.log",
+                "2026-06-12T12:00:00Z\tsession_start\n"
+                "2026-06-12T12:00:00Z\tdefine_parameters\n"
+                "2026-06-12T12:00:00Z\tprocess_without_prepare\n",
+            )
+            path = result_dir / "params-missing-state.daw-bench.json"
+            path.write_text(
+                json.dumps(_manifest(
+                    capabilities=[
+                        {
+                            "capability": "params",
+                            "observed": "Confirmed",
+                            "notes": "Parameter list alone is not enough for params coverage.",
+                        }
+                    ]
+                )),
+                encoding="utf-8",
+            )
+            errors = checker.validate_manifest(path, repo_root=root).errors
+            self.assertTrue(any("serialize_plugin_state" in error for error in errors))
 
     def test_directory_scan_finds_only_manifest_suffix(self) -> None:
         tmp_ctx, _root, result_dir = self._repo()

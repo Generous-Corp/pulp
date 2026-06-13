@@ -94,6 +94,7 @@ class DawBenchSummaryTests(unittest.TestCase):
         _write(result_dir / "logs" / "Reaper-VST3-20260612T120000Z-pid42.log",
                "2026-06-12T12:00:00Z\tsession_start\n"
                "2026-06-12T12:00:00Z\tdefine_parameters\n"
+               "2026-06-12T12:00:00Z\tserialize_plugin_state\n"
                "2026-06-12T12:00:00Z\tprocess_without_prepare\n")
         return tmp_ctx, root, result_dir
 
