@@ -188,7 +188,7 @@ class MacOSDesktopTests(unittest.TestCase):
         self.assertEqual(command[0], "/opt/ffmpeg")
         self.assertIn("5:", command)
         self.assertIn("nv12", command)
-        self.assertIn("crop=320:200:10:21", command)
+        self.assertIn("crop=320:200:10:21,fps=15.0", command)
         self.assertIn("libx264", command)
         self.assertEqual(command[command.index("-frames:v") + 1], "60")
         self.assertEqual(command[-1], str(output_path))
@@ -285,6 +285,8 @@ class MacOSDesktopTests(unittest.TestCase):
                 self.returncode = -9
 
             def communicate(self, timeout=None):
+                self.returncode = 0
+                output_path.write_bytes(b"mp4")
                 return "", "recorded"
 
         fake_proc_holder = {}
@@ -335,10 +337,10 @@ class MacOSDesktopTests(unittest.TestCase):
         self.assertEqual(recording["mode"], "ffmpeg-avfoundation")
         self.assertEqual(popen_calls[0][0], "/opt/ffmpeg")
         self.assertIn("avfoundation", popen_calls[0])
-        self.assertIn("crop=320:200:10:20", popen_calls[0])
+        self.assertIn("crop=320:200:10:20,fps=5.0", popen_calls[0])
         self.assertEqual(metadata["mode"], "ffmpeg-avfoundation")
-        self.assertEqual(metadata["returncode"], 255)
-        self.assertTrue(metadata["terminated"])
+        self.assertEqual(metadata["returncode"], 0)
+        self.assertFalse(metadata["terminated"])
         self.assertEqual(metadata["encoder"]["version"], "ffmpeg version 6.0")
         self.assertTrue(poster_path.exists())
         self.assertIn(["/opt/ffmpeg", "-hide_banner", "-version"], run_calls)

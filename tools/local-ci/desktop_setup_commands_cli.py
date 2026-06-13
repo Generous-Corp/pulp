@@ -212,6 +212,62 @@ def _desktop_check_status(check: dict) -> str:
     return "FAIL"
 
 
+def desktop_video_doctor_remediations(checks: list[dict], *, target_name: str) -> list[dict]:
+    checks_by_name = {check.get("name"): check for check in checks}
+    remediations: list[dict] = []
+    screencapture = checks_by_name.get("screencapture")
+    if screencapture and not screencapture.get("ok"):
+        remediations.append(
+            {
+                "check": "screencapture",
+                "title": "Grant macOS Screen Recording permission",
+                "detail": "Open System Settings > Privacy & Security > Screen Recording, enable the terminal/agent app running local CI, then restart that app.",
+                "command": "open 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'",
+            }
+        )
+    target_video = checks_by_name.get("target.video_capture")
+    if target_video and not target_video.get("ok"):
+        remediations.append(
+            {
+                "check": "target.video_capture",
+                "title": "Enable video capture for this desktop target",
+                "detail": f"Set the optional video_capture capability before recording proof videos for `{target_name}`.",
+                "command": f"python3 tools/local-ci/local_ci.py desktop config set target.{target_name}.video_capture true",
+            }
+        )
+    video_capture = checks_by_name.get("video_capture")
+    if video_capture and not video_capture.get("ok"):
+        remediations.append(
+            {
+                "check": "video_capture",
+                "title": "Install the repo-local video tooling",
+                "detail": "Install pinned npm developer tools so ffmpeg-static and Remotion are available.",
+                "command": "npm --prefix tools/local-ci install",
+            }
+        )
+    avfoundation = checks_by_name.get("avfoundation_screen")
+    if avfoundation and not avfoundation.get("ok"):
+        remediations.append(
+            {
+                "check": "avfoundation_screen",
+                "title": "Confirm ffmpeg can enumerate the macOS screen input",
+                "detail": "The recorder expects AVFoundation input `Capture screen 0`; rerun video-doctor after ffmpeg is installed and Screen Recording is granted.",
+                "command": "python3 tools/local-ci/local_ci.py desktop video-doctor mac --json",
+            }
+        )
+    remotion = checks_by_name.get("remotion_smoke")
+    if remotion and not remotion.get("ok"):
+        remediations.append(
+            {
+                "check": "remotion_smoke",
+                "title": "Run the Remotion proof smoke test",
+                "detail": "This verifies the local Remotion package and ffmpeg render path without needing Screen Recording.",
+                "command": "npm --prefix tools/local-ci run smoke-video-proof",
+            }
+        )
+    return remediations
+
+
 def cmd_desktop_video_doctor(
     args: argparse.Namespace,
     *,
@@ -277,6 +333,7 @@ def cmd_desktop_video_doctor(
             )
 
     all_ok = all(check["ok"] for check in checks if check.get("required", True))
+    remediations = desktop_video_doctor_remediations(checks, target_name=args.target)
     if getattr(args, "json", False):
         payload = {
             "target": args.target,
@@ -284,6 +341,7 @@ def cmd_desktop_video_doctor(
             "bootstrap": target["bootstrap"],
             "ok": all_ok,
             "checks": checks,
+            "remediations": remediations,
         }
         print_fn(json.dumps(payload, indent=2))
         return 0 if all_ok else 1
@@ -293,4 +351,11 @@ def cmd_desktop_video_doctor(
     print_fn(f"  bootstrap: {target['bootstrap']}")
     for check in checks:
         print_fn(f"  {_desktop_check_status(check):4s}  {check['name']}: {check['detail']}")
+    if remediations:
+        print_fn("")
+        print_fn("Remediation:")
+        for item in remediations:
+            print_fn(f"  - {item['title']}: {item['detail']}")
+            if item.get("command"):
+                print_fn(f"    command: {item['command']}")
     return 0 if all_ok else 1

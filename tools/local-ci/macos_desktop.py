@@ -203,7 +203,7 @@ def macos_window_video_command(
     input_device: str = "1:",
 ) -> list[str]:
     bounds = macos_window_video_bounds(window)
-    crop = f"crop={bounds['width']}:{bounds['height']}:{bounds['x']}:{bounds['y']}"
+    video_filter = f"crop={bounds['width']}:{bounds['height']}:{bounds['x']}:{bounds['y']},fps={fps}"
     return [
         ffmpeg_path,
         "-y",
@@ -220,7 +220,7 @@ def macos_window_video_command(
         "-t",
         str(duration_secs),
         "-vf",
-        crop,
+        video_filter,
         "-an",
         "-c:v",
         "libx264",
@@ -518,14 +518,19 @@ def stop_macos_window_ffmpeg_recording(
 ) -> dict:
     proc = recording["process"]
     terminated = False
-    if proc.poll() is None:
-        proc.terminate()
-        terminated = True
+    elapsed_secs = max(0.0, time.monotonic() - float(recording.get("started_at") or time.monotonic()))
+    remaining_secs = max(0.0, duration_secs - elapsed_secs)
     try:
-        stdout, stderr = proc.communicate(timeout=wait_timeout_secs)
+        stdout, stderr = proc.communicate(timeout=max(wait_timeout_secs, remaining_secs + 2.0))
     except subprocess.TimeoutExpired:
-        proc.kill()
-        stdout, stderr = proc.communicate()
+        if proc.poll() is None:
+            proc.terminate()
+            terminated = True
+        try:
+            stdout, stderr = proc.communicate(timeout=wait_timeout_secs)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            stdout, stderr = proc.communicate()
 
     encoder = ffmpeg_encoder_identity(recording["ffmpeg_path"], run_fn=recording["run_fn"])
     metadata = desktop_video_metadata_fn(
@@ -568,7 +573,7 @@ def stop_macos_window_ffmpeg_recording(
         metadata["poster"] = {"path": str(poster_path), "exists": False}
 
     write_desktop_video_metadata_fn(metadata_path, metadata)
-    if not output_path.exists() or (proc.returncode != 0 and not terminated):
+    if not output_path.exists() or proc.returncode != 0:
         detail = (stderr or stdout or f"ffmpeg exited {proc.returncode}").strip()
         raise RuntimeError(f"Video proof recording failed: {detail[-1000:]}")
     return metadata

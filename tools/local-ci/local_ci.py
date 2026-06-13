@@ -1294,6 +1294,10 @@ def run_macos_local_smoke(
     video_fps: float = 30.0,
     video_attachment_budget_bytes: int = _video_artifacts.DEFAULT_VIDEO_ATTACHMENT_BUDGET_BYTES,
     compose_video_proof: bool = False,
+    video_template: str | None = None,
+    video_source_image: str | None = None,
+    video_source_label: str | None = None,
+    video_title: str | None = None,
 ) -> dict:
     return _macos_desktop_bindings.run_macos_local_smoke(
         globals(),
@@ -1319,6 +1323,10 @@ def run_macos_local_smoke(
         video_fps=video_fps,
         video_attachment_budget_bytes=video_attachment_budget_bytes,
         compose_video_proof=compose_video_proof,
+        video_template=video_template,
+        video_source_image=video_source_image,
+        video_source_label=video_source_label,
+        video_title=video_title,
     )
 
 
