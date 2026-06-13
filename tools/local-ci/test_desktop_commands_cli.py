@@ -166,6 +166,7 @@ class DesktopCommandsCliTests(unittest.TestCase):
         self.assertIn("--recipe component-zoom", text)
         self.assertIn("build-desktop-automation/examples/ui-preview/pulp-ui-preview", text)
         self.assertIn("prepare: cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release", text)
+        self.assertIn("--source-mode exact-sha", text)
         self.assertIn("--prepare-command 'cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release", text)
         self.assertIn("--pulp-app-automation", text)
         self.assertIn("--component-id bypass-toggle", text)
@@ -202,6 +203,7 @@ class DesktopCommandsCliTests(unittest.TestCase):
             "cmake --build build-desktop-automation --target pulp-ui-preview -j$(sysctl -n hw.ncpu)",
         )
         self.assertIn("--prepare-command", standalone["command"])
+        self.assertIn("--source-mode exact-sha", standalone["command"])
         self.assertIn("--pulp-app-automation", standalone["command"])
         self.assertIn("./build-desktop-automation/examples/ui-preview/pulp-ui-preview", standalone["command"])
         inspector = next(item for item in payload["scenarios"] if item["id"] == "inspector-workflow")

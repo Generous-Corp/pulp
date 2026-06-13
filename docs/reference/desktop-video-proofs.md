@@ -171,6 +171,7 @@ python3 tools/local-ci/local_ci.py desktop video mac \
 ```bash
 python3 tools/local-ci/local_ci.py desktop video mac \
   --recipe standalone-interaction \
+  --source-mode exact-sha \
   --command ./build-desktop-automation/examples/ui-preview/pulp-ui-preview \
   --prepare-command 'cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release && cmake --build build-desktop-automation --target pulp-ui-preview -j$(sysctl -n hw.ncpu)' \
   --pulp-app-automation \
@@ -229,6 +230,7 @@ python3 tools/local-ci/local_ci.py desktop video-doctor mac \
 ```bash
 python3 tools/local-ci/local_ci.py desktop video mac \
   --recipe inspector-workflow \
+  --source-mode exact-sha \
   --command ./build-video-nogpu/examples/audio-inspector-demo/pulp-audio-inspector-demo \
   --prepare-command 'cmake -S . -B build-video-nogpu -DCMAKE_BUILD_TYPE=Release -DPULP_ENABLE_GPU=OFF && cmake --build build-video-nogpu --target pulp-audio-inspector-demo -j$(sysctl -n hw.ncpu)' \
   --duration 8
@@ -237,6 +239,7 @@ python3 tools/local-ci/local_ci.py desktop video mac \
 ```bash
 python3 tools/local-ci/local_ci.py desktop video mac \
   --recipe component-zoom \
+  --source-mode exact-sha \
   --command ./build-desktop-automation/examples/ui-preview/pulp-ui-preview \
   --prepare-command 'cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release && cmake --build build-desktop-automation --target pulp-ui-preview -j$(sysctl -n hw.ncpu)' \
   --pulp-app-automation \
