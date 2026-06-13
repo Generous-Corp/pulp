@@ -1,0 +1,33 @@
+"""Bindings from the local_ci facade to active-target queue mutation helpers."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import Any
+
+from binding_utils import binding as _binding
+from binding_utils import install_local_helpers
+
+
+QUEUE_ACTIVE_TARGET_EXPORTS = ("upsert_job_active_targets_unlocked",)
+
+
+def upsert_job_active_targets_unlocked(
+    bindings: Mapping[str, Any],
+    queue: list[dict],
+    job_id: str,
+    active_targets: dict | None,
+) -> bool:
+    return _binding(bindings, "_queue_orchestrator").upsert_job_active_targets_unlocked(
+        queue,
+        job_id,
+        active_targets,
+        now_iso_fn=_binding(bindings, "now_iso"),
+    )
+
+
+def install_queue_active_target_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = QUEUE_ACTIVE_TARGET_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)
