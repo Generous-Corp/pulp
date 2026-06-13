@@ -488,10 +488,21 @@ std::optional<ContentPackInfo> load_pack(const fs::path& root) {
 
         auto exports = json["exports"];
         if (exports.isObject()) {
-            append_files_under(root, string_array_member(exports, "presets"), pack.presets);
-            append_files_under(root, string_array_member(exports, "themes"), pack.themes);
-            append_files_under(root, string_array_member(exports, "samples"), pack.samples);
-            append_files_under(root, string_array_member(exports, "wavetables"), pack.wavetables);
+            const auto presets = string_array_member(exports, "presets");
+            const auto themes = string_array_member(exports, "themes");
+            const auto samples = string_array_member(exports, "samples");
+            const auto wavetables = string_array_member(exports, "wavetables");
+            std::vector<std::string> issues;
+            validate_export_paths_exist(root, presets, issues);
+            validate_export_paths_exist(root, themes, issues);
+            validate_export_paths_exist(root, samples, issues);
+            validate_export_paths_exist(root, wavetables, issues);
+            if (!issues.empty()) return std::nullopt;
+
+            append_files_under(root, presets, pack.presets);
+            append_files_under(root, themes, pack.themes);
+            append_files_under(root, samples, pack.samples);
+            append_files_under(root, wavetables, pack.wavetables);
         }
 
         if (pack.id.empty() || pack.version.empty()) return std::nullopt;

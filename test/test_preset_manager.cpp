@@ -840,6 +840,36 @@ TEST_CASE("ContentRegistry enumerates installed content packs by plugin capabili
     REQUIRE(registry.packs_for_plugin(matching).empty());
 }
 
+TEST_CASE("ContentRegistry ignores installed packs with unsafe export paths",
+          "[state][preset][content][security]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-content-registry-unsafe-export");
+    const auto data_root = sandbox.root / "user-data";
+    const auto pack_root = write_content_pack(data_root,
+                                              "dev.pulp.test.plugin",
+                                              "dev.pulp.test.unsafe",
+                                              "0.1.0");
+    write_text_file(pack_root / "pulp.package.json", R"json({
+  "schema": "pulp-package-v1",
+  "id": "dev.pulp.test.unsafe",
+  "name": "Unsafe",
+  "version": "0.1.0",
+  "kind": ["content-pack"],
+  "capabilities": ["content.presets.v1"],
+  "exports": {
+    "presets": ["../../Documents"]
+  }
+})json");
+
+    ContentRegistry registry(data_root);
+    REQUIRE(registry.packs_for_plugin("dev.pulp.test.plugin").empty());
+
+    ContentCapabilityManifest manifest;
+    manifest.plugin_id = "dev.pulp.test.plugin";
+    manifest.capabilities = {"content.presets.v1"};
+    manifest.content_kinds = {"presets"};
+    REQUIRE(registry.presets_for_plugin(manifest).empty());
+}
+
 TEST_CASE("ContentCapabilityManifest parses plugin runtime content opt-in",
           "[state][preset][content]") {
     std::string error;
