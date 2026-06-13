@@ -4,7 +4,21 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Callable
+import importlib.util
 import json
+from pathlib import Path
+
+try:
+    import reaper_video_recipe
+except ModuleNotFoundError:
+    _reaper_recipe_spec = importlib.util.spec_from_file_location(
+        "reaper_video_recipe",
+        Path(__file__).resolve().with_name("reaper_video_recipe.py"),
+    )
+    if _reaper_recipe_spec is None or _reaper_recipe_spec.loader is None:
+        raise
+    reaper_video_recipe = importlib.util.module_from_spec(_reaper_recipe_spec)
+    _reaper_recipe_spec.loader.exec_module(reaper_video_recipe)
 
 
 VIDEO_PROOF_RECIPES = {
@@ -54,12 +68,26 @@ def _apply_desktop_video_recipe(args: argparse.Namespace) -> None:
         plugin_format = getattr(args, "plugin_format", None)
         if not plugin or not plugin_format:
             raise ValueError("recipe `reaper-plugin-editor` requires --plugin and --plugin-format.")
+        if any([args.click_view_id, args.click_view_type, args.click_view_text, args.click_view_label]):
+            raise ValueError("recipe `reaper-plugin-editor` records a host window; use --click X,Y instead of ViewInspector selectors.")
         _set_default(args, "host_app", "REAPER")
         if not getattr(args, "launch_command", None):
-            _set_default(args, "bundle_id", "com.cockos.reaper")
+            recipe_files = reaper_video_recipe.write_reaper_plugin_editor_recipe(
+                plugin=plugin,
+                plugin_format=plugin_format,
+            )
+            args.launch_command = recipe_files["command"]
+            args.capture_bundle_id = "com.cockos.reaper"
+            args.reaper_recipe_files = recipe_files
         _set_default(args, "label", f"reaper-{plugin_format}-{plugin}-proof")
         _set_default(args, "video_title", f"{plugin} {plugin_format.upper()} editor in {args.host_app}")
         _set_default(args, "video_template", "plugin-host")
+        if getattr(args, "reaper_recipe_files", None):
+            if getattr(args, "video_note", None) is None:
+                args.video_note = []
+            args.video_note.append(f"REAPER launched from a generated wrapper and opened {plugin} as {plugin_format.upper()}.")
+        if not getattr(args, "click", None):
+            args.action = "smoke"
         args.capture_before = True
         return
 
@@ -113,6 +141,8 @@ def _video_context(args: argparse.Namespace) -> dict:
         context["bundle_id"] = str(args.bundle_id)
     if getattr(args, "launch_command", None) and not context.get("bundle_id"):
         context["launch"] = "command"
+    if getattr(args, "reaper_recipe_files", None):
+        context["reaper_recipe"] = "generated"
     return context
 
 

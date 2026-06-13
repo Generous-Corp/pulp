@@ -217,8 +217,6 @@ python3 tools/local-ci/local_ci.py desktop video mac \
   --recipe reaper-plugin-editor \
   --plugin PulpEffect \
   --plugin-format vst3 \
-  --video-note "The wrapper opened the host and inserted the target plugin." \
-  --click-view-id drive-knob \
   --duration 10
 ```
 
@@ -246,14 +244,18 @@ python3 tools/local-ci/local_ci.py desktop video mac \
   --duration 8
 ```
 
-The REAPER recipe defaults to bundle id `com.cockos.reaper` when no explicit
-launch target is supplied, but it does not create a DAW project or insert the
-plugin. Prepare the host session first, then use the recipe to capture and label
-the proof consistently. If a wrapper command launches or prepares REAPER, add
-`--capture-bundle-id com.cockos.reaper` so the harness records the REAPER window
-rather than the wrapper process window. The `audio-inspector-demo` recipe is a smoke proof for a
-built standalone demo binary; pass the command path for the build directory you
-want to validate.
+The REAPER recipe generates a temporary wrapper command and ReaScript when no
+explicit `--command` is supplied. The wrapper launches a fresh REAPER instance,
+adds a track, tries common REAPER plugin-name prefixes for the requested format,
+opens the matching plugin editor, and records the REAPER window via
+`--capture-bundle-id com.cockos.reaper`. The default action is a smoke proof;
+use `--click X,Y` for coordinate clicks in the host window. ViewInspector
+selectors such as `--click-view-id` are rejected because REAPER is not a Pulp
+ViewInspector target. Pass an explicit `--command` to keep a
+prepared-session workflow; in that mode, add `--capture-bundle-id
+com.cockos.reaper` yourself if the command is only a wrapper process. The
+`audio-inspector-demo` recipe is a smoke proof for a built standalone demo
+binary; pass the command path for the build directory you want to validate.
 
 Recipes select Remotion templates and write structured setup context into
 `video_proof_composition.context`. The composed video, `index.html`, and

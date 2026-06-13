@@ -171,18 +171,19 @@ python3 tools/local-ci/local_ci.py desktop video mac \
   --recipe reaper-plugin-editor \
   --plugin PulpEffect \
   --plugin-format vst3 \
-  --video-note "The wrapper opened the host and inserted the target plugin." \
-  --click-view-id drive-knob \
   --duration 10
 ```
 
-The REAPER recipe defaults to launching bundle id `com.cockos.reaper` when no
-explicit `--command` or `--bundle-id` is supplied. It still needs a prepared host
-session/project that opens the target plugin editor; the recipe supplies proof
-metadata, labels, and composition title defaults, not DAW project automation.
-When a wrapper command launches or prepares REAPER, use
-`--capture-bundle-id com.cockos.reaper` so the harness records the REAPER window
-rather than the wrapper process window.
+The REAPER recipe generates a temporary wrapper command and ReaScript when no
+explicit `--command` is supplied. The wrapper launches a fresh REAPER instance,
+adds a track, tries common REAPER plugin-name prefixes for the requested format,
+opens the matching plugin editor, and records the REAPER window via
+`--capture-bundle-id com.cockos.reaper`. The default action is a smoke proof;
+use `--click X,Y` for coordinate clicks in the host window. ViewInspector
+selectors such as `--click-view-id` are rejected because REAPER is not a Pulp
+ViewInspector target. Pass an explicit `--command` to keep a
+prepared-session workflow; in that mode, add `--capture-bundle-id
+com.cockos.reaper` yourself if the command is only a wrapper process.
 
 ```bash
 python3 tools/local-ci/local_ci.py desktop video mac \
@@ -401,5 +402,6 @@ window bounds during encoding. Final still screenshots use a last-resort
 full-screen fallback for the same TCC edge case.
 
 Remotion composition and local review artifacts are implemented in this branch.
-Plugin-origin audio capture, iOS Simulator, Android, full REAPER project/plugin automation,
-and GitHub issue automation are planned follow-on layers.
+Plugin-origin audio capture, iOS Simulator, Android, richer REAPER plugin
+interaction automation, and GitHub issue automation are planned follow-on
+layers.

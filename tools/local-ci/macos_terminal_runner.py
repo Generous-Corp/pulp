@@ -49,7 +49,7 @@ def terminal_shell_script(
         *strip_run_in_terminal_args(argv),
     ]
     close_script = (
-        f'tell application "Terminal" to close (first window whose name contains {json.dumps(title)})'
+        f'tell application "Terminal" to close (first window whose name contains {json.dumps(title)}) saving no'
         if title
         else None
     )
@@ -84,7 +84,7 @@ def close_terminal_windows_with_title(
             "    repeat with w in (every window)",
             "        set windowName to name of w",
             f"        if windowName contains {json.dumps(title_contains)} then",
-            "            close w",
+            "            close w saving no",
             "            set closedCount to closedCount + 1",
             '        else if windowName contains "Pulp Video Proof" then',
             "            set otherProofCount to otherProofCount + 1",
@@ -103,6 +103,8 @@ def close_terminal_windows_with_title(
     closed_count = 0
     terminated_terminal = False
     terminate_returncode: int | None = None
+    remaining_proof_count: int | None = None
+    other_window_count: int | None = None
     for attempt in range(max(1, attempts)):
         if attempt:
             sleep_fn(0.2)
@@ -160,9 +162,13 @@ def close_terminal_windows_with_title(
                     terminate_result = run_fn(["kill", "-TERM", str(terminal_pid)], capture_output=True, text=True)
                     terminate_returncode = terminate_result.returncode
                     terminated_terminal = terminate_result.returncode == 0
+                remaining_proof_count = proof_count
+                other_window_count = other_count
     return {
         "title_contains": title_contains,
         "closed_count": closed_count,
+        "remaining_proof_count": remaining_proof_count,
+        "other_window_count": other_window_count,
         "terminated_terminal": terminated_terminal,
         "terminate_returncode": terminate_returncode,
         "returncode": result.returncode,

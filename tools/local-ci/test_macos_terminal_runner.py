@@ -73,6 +73,7 @@ class MacOSTerminalRunnerTests(unittest.TestCase):
         self.assertIn("'/tmp/rc file'", script)
         self.assertIn("/usr/bin/osascript", script)
         self.assertIn("first window whose name contains", script)
+        self.assertIn("saving no", script)
         self.assertIn("; exit", script)
 
     def test_run_local_ci_in_terminal_replays_output_and_returncode(self):
@@ -106,7 +107,7 @@ class MacOSTerminalRunnerTests(unittest.TestCase):
                     return subprocess.CompletedProcess(cmd, 0, "", "")
                 if "set proofCount" in cmd[-1]:
                     return subprocess.CompletedProcess(cmd, 0, "0\t0\t0", "")
-                self.assertIn("close w", cmd[-1])
+                self.assertIn("close w saving no", cmd[-1])
                 self.assertIn("Pulp Video Proof local-ci", cmd[-1])
                 return subprocess.CompletedProcess(cmd, 0, cleanup_stdout.pop(0), "")
 
@@ -163,6 +164,8 @@ class MacOSTerminalRunnerTests(unittest.TestCase):
 
         self.assertTrue(result["terminated_terminal"])
         self.assertEqual(result["terminate_returncode"], 0)
+        self.assertEqual(result["remaining_proof_count"], 1)
+        self.assertEqual(result["other_window_count"], 0)
         self.assertEqual(calls[-1], ["kill", "-TERM", "1234"])
 
     def test_close_terminal_windows_does_not_terminate_with_other_windows(self):
@@ -182,6 +185,8 @@ class MacOSTerminalRunnerTests(unittest.TestCase):
         )
 
         self.assertFalse(result["terminated_terminal"])
+        self.assertEqual(result["remaining_proof_count"], 1)
+        self.assertEqual(result["other_window_count"], 1)
         self.assertNotIn(["kill", "-TERM", "1234"], calls)
 
     def test_close_terminal_windows_can_terminate_new_terminal_session(self):

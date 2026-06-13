@@ -362,19 +362,45 @@ class DesktopActionCommandsCliTests(unittest.TestCase):
     def test_video_command_applies_reaper_recipe(self):
         result = self.mod.cmd_desktop_video(
             self.args(recipe="reaper-plugin-editor", launch_command=None, label=None, plugin="PulpEffect", plugin_format="vst3"),
-            cmd_desktop_smoke_fn=lambda _args: self.fail("smoke should not run"),
+            cmd_desktop_smoke_fn=lambda args: self.calls.append(("smoke-wrapper", (), vars(args).copy())) or 0,
             cmd_desktop_click_fn=lambda args: self.calls.append(("click-wrapper", (), vars(args).copy())) or 0,
             cmd_desktop_inspect_fn=lambda _args: self.fail("inspect should not run"),
             print_fn=self.print_line,
         )
 
         self.assertEqual(result, 0)
+        self.assertEqual(self.calls[0][0], "smoke-wrapper")
         call = self.calls[0][2]
-        self.assertEqual(call["bundle_id"], "com.cockos.reaper")
+        self.assertEqual(call["action"], "smoke")
+        self.assertIsNone(call["bundle_id"])
+        self.assertTrue(call["launch_command"].endswith("run-reaper-proof.zsh"))
+        self.assertEqual(call["capture_bundle_id"], "com.cockos.reaper")
         self.assertEqual(call["host_app"], "REAPER")
         self.assertEqual(call["label"], "reaper-vst3-PulpEffect-proof")
         self.assertEqual(call["video_title"], "PulpEffect VST3 editor in REAPER")
         self.assertEqual(call["video_template"], "plugin-host")
+        self.assertIn("REAPER launched from a generated wrapper", call["video_note"][0])
+        self.assertEqual(call["reaper_recipe_files"]["command"], call["launch_command"])
+        self.assertTrue(Path(call["reaper_recipe_files"]["lua_script"]).exists())
+
+    def test_video_command_reaper_recipe_rejects_view_selectors(self):
+        result = self.mod.cmd_desktop_video(
+            self.args(
+                recipe="reaper-plugin-editor",
+                launch_command=None,
+                label=None,
+                plugin="PulpEffect",
+                plugin_format="vst3",
+                click_view_id="drive-knob",
+            ),
+            cmd_desktop_smoke_fn=lambda _args: self.fail("smoke should not run"),
+            cmd_desktop_click_fn=lambda _args: self.fail("click should not run"),
+            cmd_desktop_inspect_fn=lambda _args: self.fail("inspect should not run"),
+            print_fn=self.print_line,
+        )
+
+        self.assertEqual(result, 1)
+        self.assertIn("use --click X,Y instead of ViewInspector selectors", self.printed[-1])
 
     def test_video_command_reaper_recipe_keeps_explicit_command(self):
         result = self.mod.cmd_desktop_video(
@@ -385,14 +411,16 @@ class DesktopActionCommandsCliTests(unittest.TestCase):
                 plugin="PulpSynth",
                 plugin_format="clap",
             ),
-            cmd_desktop_smoke_fn=lambda _args: self.fail("smoke should not run"),
+            cmd_desktop_smoke_fn=lambda args: self.calls.append(("smoke-wrapper", (), vars(args).copy())) or 0,
             cmd_desktop_click_fn=lambda args: self.calls.append(("click-wrapper", (), vars(args).copy())) or 0,
             cmd_desktop_inspect_fn=lambda _args: self.fail("inspect should not run"),
             print_fn=self.print_line,
         )
 
         self.assertEqual(result, 0)
+        self.assertEqual(self.calls[0][0], "smoke-wrapper")
         call = self.calls[0][2]
+        self.assertEqual(call["action"], "smoke")
         self.assertEqual(call["launch_command"], "/Applications/REAPER.app/Contents/MacOS/REAPER -new script.lua")
         self.assertIsNone(call["bundle_id"])
         self.assertEqual(call["label"], "reaper-clap-PulpSynth-proof")
