@@ -170,7 +170,7 @@ TEST_CASE("repitch_linked: exact length, R=1 identity, sine tracks i/ratio", "[o
     const double sr = 48000.0, f = 1000.0, w = 2.0 * pi * f / sr;
     const long n = 8192;
     std::vector<float> in(static_cast<size_t>(n));
-    for (long i = 0; i < n; ++i) in[static_cast<size_t>(i)] = 0.5f * std::sin(w * i);
+    for (long i = 0; i < n; ++i) in[static_cast<size_t>(i)] = static_cast<float>(0.5 * std::sin(w * i));
     const float* inp[1] = {in.data()};
 
     OfflineStretch s;
@@ -213,7 +213,7 @@ TEST_CASE("tempo-only: exact length, pitch preserved (sine stays ~1 kHz)", "[off
     const double sr = 48000.0, f = 1000.0, w = 2.0 * pi * f / sr;
     const long n = 48000; // 1 second
     std::vector<float> in(static_cast<size_t>(n));
-    for (long i = 0; i < n; ++i) in[static_cast<size_t>(i)] = 0.5f * std::sin(w * i);
+    for (long i = 0; i < n; ++i) in[static_cast<size_t>(i)] = static_cast<float>(0.5 * std::sin(w * i));
     const float* inp[1] = {in.data()};
 
     OfflineStretch s;
@@ -243,7 +243,7 @@ TEST_CASE("tempo-only: stereo channel coherence (identical L/R stay identical)",
     const double sr = 48000.0, w = 2.0 * pi * 1000.0 / sr;
     const long n = 24000;
     std::vector<float> a(static_cast<size_t>(n));
-    for (long i = 0; i < n; ++i) a[static_cast<size_t>(i)] = 0.5f * std::sin(w * i);
+    for (long i = 0; i < n; ++i) a[static_cast<size_t>(i)] = static_cast<float>(0.5 * std::sin(w * i));
     std::vector<float> b = a; // identical L and R
     const float* inp[2] = {a.data(), b.data()};
 
@@ -295,7 +295,7 @@ TEST_CASE("Phase 1 safety + determinism (tempo path)", "[offline-stretch]") {
     SECTION("deterministic: two independent runs are byte-identical") {
         const long n = 12000;
         std::vector<float> in(static_cast<size_t>(n));
-        for (long i = 0; i < n; ++i) in[static_cast<size_t>(i)] = 0.4f * std::sin(0.05 * i);
+        for (long i = 0; i < n; ++i) in[static_cast<size_t>(i)] = static_cast<float>(0.4 * std::sin(0.05 * i));
         const float* ip[1] = {in.data()};
         OfflineStretchOptions o; o.time_ratio = 1.25;
         const long m = offline_stretch_output_frames(n, 1.25);
@@ -312,7 +312,7 @@ TEST_CASE("Phase 1 safety + determinism (tempo path)", "[offline-stretch]") {
             OfflineStretch s; s.prepare(rate, 1);
             const long n = 8000;
             std::vector<float> in(static_cast<size_t>(n));
-            for (long i = 0; i < n; ++i) in[static_cast<size_t>(i)] = 0.3f * std::sin(0.03 * i);
+            for (long i = 0; i < n; ++i) in[static_cast<size_t>(i)] = static_cast<float>(0.3 * std::sin(0.03 * i));
             const float* ip[1] = {in.data()};
             OfflineStretchOptions o; o.time_ratio = 1.5;
             const long m = offline_stretch_output_frames(n, 1.5);
@@ -330,7 +330,7 @@ TEST_CASE("pitch-only: duration preserved, pitch shifts by semitones", "[offline
     const double sr = 48000.0, f0 = 500.0, w = 2.0 * pi * f0 / sr;
     const long n = 48000;
     std::vector<float> in(static_cast<size_t>(n));
-    for (long i = 0; i < n; ++i) in[static_cast<size_t>(i)] = 0.5f * std::sin(w * i);
+    for (long i = 0; i < n; ++i) in[static_cast<size_t>(i)] = static_cast<float>(0.5 * std::sin(w * i));
     const float* ip[1] = {in.data()};
 
     OfflineStretch s; s.prepare(sr, 1);
@@ -362,7 +362,7 @@ TEST_CASE("independent R+S: exact length and shifted pitch", "[offline-stretch]"
     const double sr = 48000.0, f0 = 500.0, w = 2.0 * pi * f0 / sr;
     const long n = 48000;
     std::vector<float> in(static_cast<size_t>(n));
-    for (long i = 0; i < n; ++i) in[static_cast<size_t>(i)] = 0.5f * std::sin(w * i);
+    for (long i = 0; i < n; ++i) in[static_cast<size_t>(i)] = static_cast<float>(0.5 * std::sin(w * i));
     const float* ip[1] = {in.data()};
 
     OfflineStretch s; s.prepare(sr, 1);
@@ -422,7 +422,7 @@ TEST_CASE("draft quality=0: fast OLA tempo, exact length, pitch preserved", "[of
     const double sr = 48000.0, f = 1000.0, w = 2.0 * pi * f / sr;
     const long n = 48000;
     std::vector<float> in(static_cast<size_t>(n));
-    for (long i = 0; i < n; ++i) in[static_cast<size_t>(i)] = 0.5f * std::sin(w * i);
+    for (long i = 0; i < n; ++i) in[static_cast<size_t>(i)] = static_cast<float>(0.5 * std::sin(w * i));
     const float* ip[1] = {in.data()};
 
     OfflineStretch s; s.prepare(sr, 1);
