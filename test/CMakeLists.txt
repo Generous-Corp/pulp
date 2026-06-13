@@ -5945,6 +5945,9 @@ pulp_add_test_suite(pulp-test-gap-widgets LIBRARIES pulp::view)
 # Widget gallery (Phase 5) — themed board of every primitive; builds + renders
 pulp_add_test_suite(pulp-test-widget-gallery LIBRARIES pulp::view)
 
+# Design system (Phase 8a) — pulp::design umbrella module + component catalog
+pulp_add_test_suite(pulp-test-design-system LIBRARIES pulp::view)
+
 # OS appearance tracking
 pulp_add_test_suite(pulp-test-appearance SOURCES test_appearance_tracker.cpp LIBRARIES pulp::view)
 
