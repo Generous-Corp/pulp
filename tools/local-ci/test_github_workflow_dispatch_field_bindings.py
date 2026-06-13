@@ -96,6 +96,14 @@ class GithubWorkflowDispatchFieldBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["repo_variable_name_for_workflow_field"]("build", "namespace", "linux_runner_selector_json"), "PULP_VAR")
         self.assertEqual(calls, [("build", "namespace", "linux_runner_selector_json")])
 
+    def test_install_field_helpers_keeps_unknown_local_fallback(self):
+        bindings = {}
+        self.mod.future_github_workflow_dispatch_field_helper = lambda _bindings: "future"
+
+        self.mod.install_github_workflow_dispatch_field_helpers(bindings, ("future_github_workflow_dispatch_field_helper",))
+
+        self.assertEqual(bindings["future_github_workflow_dispatch_field_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()

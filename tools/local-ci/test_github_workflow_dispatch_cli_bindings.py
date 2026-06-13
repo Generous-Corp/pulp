@@ -55,6 +55,14 @@ class GithubWorkflowDispatchCliBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["resolve_cli_dispatch_field_values"](args, ("field",)), {"field": "cli"})
         self.assertEqual(calls, [(args, ("field",))])
 
+    def test_install_cli_helpers_keeps_unknown_local_fallback(self):
+        bindings = {}
+        self.mod.future_github_workflow_dispatch_cli_helper = lambda _bindings: "future"
+
+        self.mod.install_github_workflow_dispatch_cli_helpers(bindings, ("future_github_workflow_dispatch_cli_helper",))
+
+        self.assertEqual(bindings["future_github_workflow_dispatch_cli_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()

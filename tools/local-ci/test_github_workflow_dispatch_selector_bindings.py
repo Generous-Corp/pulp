@@ -57,6 +57,14 @@ class GithubWorkflowDispatchSelectorBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["resolve_workflow_runner_selector_json"]({}, "build", "github-hosted"), '"macos-15"')
         self.assertEqual(calls, [({}, "build", "github-hosted")])
 
+    def test_install_selector_helpers_keeps_unknown_local_fallback(self):
+        bindings = {}
+        self.mod.future_github_workflow_dispatch_selector_helper = lambda _bindings: "future"
+
+        self.mod.install_github_workflow_dispatch_selector_helpers(bindings, ("future_github_workflow_dispatch_selector_helper",))
+
+        self.assertEqual(bindings["future_github_workflow_dispatch_selector_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()

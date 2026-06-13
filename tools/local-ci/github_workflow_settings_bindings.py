@@ -32,4 +32,10 @@ def install_github_workflow_settings_helpers(
     bindings: dict[str, Any],
     names: tuple[str, ...] = GITHUB_WORKFLOW_SETTINGS_EXPORTS,
 ) -> None:
-    install_local_helpers(bindings, globals(), names)
+    known_names = set(GITHUB_WORKFLOW_SETTINGS_EXPORTS)
+    settings_names = tuple(name for name in names if name in known_names)
+    unknown_names = tuple(name for name in names if name not in known_names)
+
+    install_local_helpers(bindings, globals(), settings_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)

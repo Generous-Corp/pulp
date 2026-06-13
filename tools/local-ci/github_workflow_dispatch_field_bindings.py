@@ -65,4 +65,10 @@ def install_github_workflow_dispatch_field_helpers(
     bindings: dict[str, Any],
     names: tuple[str, ...] = GITHUB_WORKFLOW_DISPATCH_FIELD_EXPORTS,
 ) -> None:
-    install_local_helpers(bindings, globals(), names)
+    known_names = set(GITHUB_WORKFLOW_DISPATCH_FIELD_EXPORTS)
+    field_names = tuple(name for name in names if name in known_names)
+    unknown_names = tuple(name for name in names if name not in known_names)
+
+    install_local_helpers(bindings, globals(), field_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)
