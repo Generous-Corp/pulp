@@ -180,6 +180,14 @@ class MacosDesktopSmokeBindingsTests(unittest.TestCase):
         )
         self.assertEqual(captured["args"], ({"desktop_automation": {}}, "/tmp/app"))
 
+    def test_install_macos_desktop_smoke_helpers_keeps_unknown_local_fallback(self):
+        bindings = {}
+        self.mod.future_macos_desktop_smoke_helper = lambda _bindings: "future"
+
+        self.mod.install_macos_desktop_smoke_helpers(bindings, ("future_macos_desktop_smoke_helper",))
+
+        self.assertEqual(bindings["future_macos_desktop_smoke_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()

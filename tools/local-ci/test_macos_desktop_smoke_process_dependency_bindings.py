@@ -70,6 +70,17 @@ class MacosDesktopSmokeProcessDependencyBindingsTests(unittest.TestCase):
             bindings["terminate_process"],
         )
 
+    def test_install_process_dependency_helpers_keeps_unknown_local_fallback(self) -> None:
+        bindings = {}
+        self.mod.future_macos_desktop_smoke_process_helper = lambda _bindings: "future"
+
+        self.mod.install_macos_desktop_smoke_process_dependency_helpers(
+            bindings,
+            ("future_macos_desktop_smoke_process_helper",),
+        )
+
+        self.assertEqual(bindings["future_macos_desktop_smoke_process_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()

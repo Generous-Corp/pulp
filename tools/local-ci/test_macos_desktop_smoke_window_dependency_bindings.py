@@ -65,6 +65,17 @@ class MacosDesktopSmokeWindowDependencyBindingsTests(unittest.TestCase):
             bindings["capture_macos_window"],
         )
 
+    def test_install_window_dependency_helpers_keeps_unknown_local_fallback(self) -> None:
+        bindings = {}
+        self.mod.future_macos_desktop_smoke_window_helper = lambda _bindings: "future"
+
+        self.mod.install_macos_desktop_smoke_window_dependency_helpers(
+            bindings,
+            ("future_macos_desktop_smoke_window_helper",),
+        )
+
+        self.assertEqual(bindings["future_macos_desktop_smoke_window_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()

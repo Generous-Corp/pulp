@@ -32,4 +32,10 @@ def install_macos_desktop_smoke_artifact_dependency_helpers(
     bindings: dict[str, Any],
     names: tuple[str, ...] = MACOS_DESKTOP_SMOKE_ARTIFACT_DEPENDENCY_EXPORTS,
 ) -> None:
-    install_local_helpers(bindings, globals(), names)
+    known_names = set(MACOS_DESKTOP_SMOKE_ARTIFACT_DEPENDENCY_EXPORTS)
+    artifact_names = tuple(name for name in names if name in known_names)
+    unknown_names = tuple(name for name in names if name not in known_names)
+
+    install_local_helpers(bindings, globals(), artifact_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)
