@@ -18,6 +18,9 @@ class CliDesktopDispatchBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
 
+    def test_desktop_dispatch_exports_are_declared(self):
+        self.assertEqual(self.mod.CLI_DESKTOP_DISPATCH_EXPORTS, ("cmd_desktop_config", "cmd_desktop"))
+
     def _bindings(self):
         captured = {}
 
@@ -79,6 +82,15 @@ class CliDesktopDispatchBindingsTests(unittest.TestCase):
         )
         self.assertIs(captured["desktop_commands"]["install"], bindings["cmd_desktop_install"])
         self.assertIs(captured["desktop_commands"]["inspect"], bindings["cmd_desktop_inspect"])
+
+    def test_install_cli_desktop_dispatch_helpers_wires_named_exports(self):
+        bindings, captured = self._bindings()
+        self.mod.install_cli_desktop_dispatch_helpers(bindings, ("cmd_desktop",))
+
+        args = object()
+        self.assertEqual(bindings["cmd_desktop"](args), 22)
+        self.assertIs(captured["desktop_args"], args)
+        self.assertEqual(bindings["cmd_desktop"].__name__, "cmd_desktop")
 
 
 if __name__ == "__main__":

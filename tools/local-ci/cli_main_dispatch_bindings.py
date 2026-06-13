@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import Any
 
+from binding_utils import install_local_helpers
 from binding_utils import binding as _binding
 
 
@@ -44,3 +45,10 @@ def dispatch_main_command(bindings: Mapping[str, Any], args: Any, print_help: Ca
         },
         print_help=print_help,
     )
+
+
+def install_cli_main_dispatch_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = CLI_MAIN_DISPATCH_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)

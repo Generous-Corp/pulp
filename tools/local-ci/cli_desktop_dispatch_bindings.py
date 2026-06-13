@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from binding_utils import install_local_helpers
 from binding_utils import binding as _binding
 
 
@@ -41,3 +42,10 @@ def cmd_desktop(bindings: Mapping[str, Any], args: Any) -> int:
             "inspect": _binding(bindings, "cmd_desktop_inspect"),
         },
     )
+
+
+def install_cli_desktop_dispatch_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = CLI_DESKTOP_DISPATCH_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)

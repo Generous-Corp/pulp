@@ -19,7 +19,13 @@ class CliDispatchBindingsTests(unittest.TestCase):
         self.mod = load_module()
 
     def test_facade_reexports_desktop_and_main_dispatch_helpers(self):
-        self.assertEqual(self.mod.CLI_DISPATCH_EXPORTS, ("cmd_desktop_config", "cmd_desktop", "dispatch_main_command"))
+        expected = (
+            *self.mod.CLI_DESKTOP_DISPATCH_EXPORTS,
+            *self.mod.CLI_MAIN_DISPATCH_EXPORTS,
+        )
+
+        self.assertEqual(self.mod.CLI_DISPATCH_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
         for name in self.mod.CLI_DISPATCH_EXPORTS:
             self.assertTrue(callable(getattr(self.mod, name)))
 
@@ -85,6 +91,69 @@ class CliDispatchBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["dispatch_main_command"](args, lambda: None), 33)
         self.assertIs(captured["desktop_args"], args)
         self.assertIs(captured["main_args"], args)
+
+    def test_install_cli_dispatch_helpers_routes_each_group(self):
+        captured = {}
+        args = object()
+
+        def dispatch_desktop_command(value, *, commands):
+            captured["desktop_args"] = value
+            captured["desktop_commands"] = commands
+            return 44
+
+        def dispatch_main_command(value, **kwargs):
+            captured["main_args"] = value
+            captured["main_kwargs"] = kwargs
+            return 55
+
+        bindings = {
+            "_cli_dispatch": types.SimpleNamespace(
+                dispatch_desktop_command=dispatch_desktop_command,
+                dispatch_main_command=dispatch_main_command,
+            ),
+        }
+        for name in [
+            "cmd_desktop_install",
+            "cmd_desktop_doctor",
+            "cmd_desktop_status",
+            "cmd_desktop_config",
+            "cmd_desktop_recent",
+            "cmd_desktop_proof",
+            "cmd_desktop_publish",
+            "cmd_desktop_cleanup",
+            "cmd_desktop_smoke",
+            "cmd_desktop_click",
+            "cmd_desktop_inspect",
+            "cmd_enqueue",
+            "cmd_drain",
+            "cmd_run",
+            "cmd_ship",
+            "cmd_check",
+            "cmd_list",
+            "cmd_bump",
+            "cmd_cancel",
+            "cmd_logs",
+            "cmd_cleanup",
+            "cmd_evidence",
+            "cmd_status",
+            "cmd_cloud_workflows",
+            "cmd_cloud_defaults",
+            "cmd_cloud_history",
+            "cmd_cloud_compare",
+            "cmd_cloud_recommend",
+            "cmd_cloud_run",
+            "cmd_cloud_status",
+            "cmd_cloud_namespace_doctor",
+            "cmd_cloud_namespace_setup",
+        ]:
+            bindings[name] = object()
+
+        self.mod.install_cli_dispatch_helpers(bindings, ("cmd_desktop", "dispatch_main_command"))
+
+        self.assertEqual(bindings["cmd_desktop"](args), 44)
+        self.assertEqual(bindings["dispatch_main_command"](args, lambda: None), 55)
+        self.assertEqual(bindings["cmd_desktop"].__name__, "cmd_desktop")
+        self.assertEqual(bindings["dispatch_main_command"].__name__, "dispatch_main_command")
 
 
 if __name__ == "__main__":

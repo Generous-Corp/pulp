@@ -18,6 +18,9 @@ class CliMainDispatchBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
 
+    def test_main_dispatch_exports_are_declared(self):
+        self.assertEqual(self.mod.CLI_MAIN_DISPATCH_EXPORTS, ("dispatch_main_command",))
+
     def _bindings(self):
         captured = {}
 
@@ -76,6 +79,16 @@ class CliMainDispatchBindingsTests(unittest.TestCase):
         self.assertIs(captured["main_kwargs"]["commands"]["enqueue"], bindings["cmd_enqueue"])
         self.assertIs(captured["main_kwargs"]["cloud_commands"]["run"], bindings["cmd_cloud_run"])
         self.assertIs(captured["main_kwargs"]["cloud_namespace_commands"]["doctor"], bindings["cmd_cloud_namespace_doctor"])
+
+    def test_install_cli_main_dispatch_helpers_wires_named_exports(self):
+        bindings, captured = self._bindings()
+        self.mod.install_cli_main_dispatch_helpers(bindings, ("dispatch_main_command",))
+
+        args = object()
+        print_help = object()
+        self.assertEqual(bindings["dispatch_main_command"](args, print_help), 33)
+        self.assertIs(captured["main_args"], args)
+        self.assertIs(captured["main_kwargs"]["print_help"], print_help)
 
 
 if __name__ == "__main__":
