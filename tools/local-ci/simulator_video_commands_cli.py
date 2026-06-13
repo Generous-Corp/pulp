@@ -35,6 +35,15 @@ def _json_tail(text: str, limit: int = 4000) -> str:
     return text[-limit:] if len(text) > limit else text
 
 
+def _simulator_action_marker(*, kind: str, label: str, command: list[str], at_secs: float) -> dict:
+    return {
+        "kind": kind,
+        "label": label,
+        "at_secs": at_secs,
+        "command": command,
+    }
+
+
 def _simctl_json(
     args: list[str],
     *,
@@ -200,6 +209,8 @@ def record_ios_simulator_video(
     video_fps: float = 10.0,
     xcrun_path: str = "xcrun",
     ffmpeg_path: str = "ffmpeg",
+    action_command: list[str] | None = None,
+    action_after_secs: float = 0.5,
     run_fn: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
     time_sleep_fn: Callable[[float], None] = time.sleep,
     monotonic_fn: Callable[[], float] = time.monotonic,
@@ -214,6 +225,8 @@ def record_ios_simulator_video(
     screenshot_commands: list[dict] = []
     captured = 0
     next_frame_at = monotonic_fn()
+    start_time = next_frame_at
+    action_result: dict | None = None
     for index in range(1, frame_count + 1):
         frame_path = frames_dir / f"frame-{index:06d}.png"
         command = [xcrun_path, "simctl", "io", device_udid, "screenshot", "--type=png", str(frame_path)]
@@ -230,10 +243,30 @@ def record_ios_simulator_video(
             break
         if frame_path.exists() and frame_path.stat().st_size > 0:
             captured += 1
+        elapsed = max(0.0, monotonic_fn() - start_time)
+        if action_command is not None and action_result is None and elapsed >= max(0.0, action_after_secs):
+            action = run_fn(action_command, capture_output=True, text=True, timeout=30)
+            action_result = {
+                "command": action_command,
+                "returncode": action.returncode,
+                "at_secs": elapsed,
+                "stdout_tail": _json_tail(action.stdout or ""),
+                "stderr_tail": _json_tail(action.stderr or ""),
+            }
         next_frame_at += interval
         sleep_for = next_frame_at - monotonic_fn()
         if sleep_for > 0 and index < frame_count:
             time_sleep_fn(sleep_for)
+    if action_command is not None and action_result is None:
+        elapsed = max(0.0, monotonic_fn() - start_time)
+        action = run_fn(action_command, capture_output=True, text=True, timeout=30)
+        action_result = {
+            "command": action_command,
+            "returncode": action.returncode,
+            "at_secs": elapsed,
+            "stdout_tail": _json_tail(action.stdout or ""),
+            "stderr_tail": _json_tail(action.stderr or ""),
+        }
     frame_pattern = str(frames_dir / "frame-%06d.png")
     encode_command = [
         ffmpeg_path,
@@ -265,6 +298,7 @@ def record_ios_simulator_video(
         "frame_pattern": frame_pattern,
         "video_fps": fps,
         "screenshot_commands": screenshot_commands[-5:],
+        "action": action_result,
     }
 
 
@@ -343,6 +377,9 @@ def cmd_simulator_video(
 
     duration = float(getattr(args, "duration", 8.0) or 8.0)
     video_fps = max(1.0, float(getattr(args, "video_fps", 10.0) or 10.0))
+    action_after_secs = max(0.0, float(getattr(args, "action_after", 0.5) or 0.0))
+    open_url = getattr(args, "open_url", None) or None
+    action_command = [xcrun_path, "simctl", "openurl", selected["udid"], open_url] if open_url else None
     try:
         ffmpeg_path = resolve_ffmpeg_path(which_fn=which_fn, tool_dir=Path(__file__).resolve().parent)
     except RuntimeError as exc:
@@ -355,10 +392,17 @@ def cmd_simulator_video(
         video_fps=video_fps,
         xcrun_path=xcrun_path,
         ffmpeg_path=ffmpeg_path,
+        action_command=action_command,
+        action_after_secs=action_after_secs,
         run_fn=run_fn,
         time_sleep_fn=time_sleep_fn,
     )
     commands.append({"step": "record-video", **record})
+    if record.get("action"):
+        commands.append({"step": "action", **record["action"]})
+        if record["action"].get("returncode") != 0:
+            print_fn(f"Error: simulator action failed: {(record['action'].get('stderr_tail') or record['action'].get('stdout_tail') or '').strip()}")
+            return 1
     if not video_path.exists() or video_path.stat().st_size <= 0:
         print_fn(f"Error: simulator video was not written: {video_path}")
         return 1
@@ -378,6 +422,15 @@ def cmd_simulator_video(
             "state": selected.get("state"),
         },
         "app": {"path": str(app_path) if app_path else None, "bundle_id": bundle_id},
+        "interaction": {"mode": "open-url", "url": open_url, "label": getattr(args, "action_label", None) or f"open-url: {open_url}"} if open_url else None,
+        "simulator_action": {
+            "kind": "open-url",
+            "url": open_url,
+            "label": getattr(args, "action_label", None) or (f"open-url: {open_url}" if open_url else None),
+            "after_secs": action_after_secs,
+        }
+        if open_url
+        else None,
         "video": {
             "path": str(video_path),
             "duration_secs": duration,
@@ -389,6 +442,18 @@ def cmd_simulator_video(
         "artifacts": {"video": str(video_path), "bundle_dir": str(run_dir), "manifest": str(run_dir / "manifest.json")},
         "commands": commands,
     }
+    if open_url:
+        label = getattr(args, "action_label", None) or f"open-url: {open_url}"
+        manifest["video_proof_composition"] = {
+            "template": "mobile-simulator",
+            "action_marker": _simulator_action_marker(
+                kind="open-url",
+                label=label,
+                command=action_command or [],
+                at_secs=float((record.get("action") or {}).get("at_secs") or action_after_secs),
+            ),
+            "context": {"target": "ios-simulator", "action": "open-url", "url": open_url},
+        }
     manifest_path = run_dir / "manifest.json"
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")

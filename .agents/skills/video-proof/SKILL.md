@@ -429,15 +429,18 @@ Record a short simulator MP4 with optional install/launch context:
 python3 tools/local-ci/local_ci.py simulator video \
   --app build/ios/PulpDemo.app \
   --bundle-id com.pulp.demo \
+  --open-url https://example.com \
+  --action-label "open validation URL" \
   --label ios-simulator-launch-proof \
   --duration 8 \
   --video-fps 10
 ```
 
 This writes `video/proof.mp4` and `manifest.json` under the simulator run
-directory using `xcrun simctl io screenshot` frames encoded with ffmpeg. This
-lane currently proves simulator capture/install/launch; tap driving and tap
-markers belong to the next mobile automation slice.
+directory using `xcrun simctl io screenshot` frames encoded with ffmpeg. With
+`--open-url`, the command opens the URL during capture and stores a
+`mobile-simulator` action marker. Coordinate tap driving still needs a future
+automation backend because this Xcode's `simctl` does not expose a tap command.
 
 Publish the latest runs:
 

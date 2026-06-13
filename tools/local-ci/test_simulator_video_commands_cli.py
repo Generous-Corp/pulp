@@ -53,6 +53,8 @@ class SimulatorVideoCommandsTests(unittest.TestCase):
             return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
         if command[:3] == ["/usr/bin/xcrun", "simctl", "launch"]:
             return subprocess.CompletedProcess(command, 0, stdout="com.pulp.demo: 1234", stderr="")
+        if command[:3] == ["/usr/bin/xcrun", "simctl", "openurl"]:
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
         if command[:5] == ["/usr/bin/xcrun", "simctl", "io", "A-UDID", "screenshot"]:
             Path(command[-1]).write_bytes(b"fake simulator png")
             return subprocess.CompletedProcess(command, 0, stdout="", stderr="Wrote screenshot")
@@ -65,7 +67,7 @@ class SimulatorVideoCommandsTests(unittest.TestCase):
         result = self.mod.cmd_simulator_video_doctor(
             Namespace(device="iPhone 16", json=True),
             print_fn=self.print_line,
-            which_fn=lambda name: "/usr/bin/xcrun" if name == "xcrun" else None,
+            which_fn=lambda name: f"/usr/bin/{name}" if name in {"xcrun", "ffmpeg"} else None,
             run_fn=self.run_fn,
         )
 
@@ -99,7 +101,19 @@ class SimulatorVideoCommandsTests(unittest.TestCase):
             output = Path(tmp) / "run"
 
             result = self.mod.cmd_simulator_video(
-                Namespace(device=None, app=str(app), bundle_id=None, duration=0.1, video_fps=5.0, label="ios-proof", output=str(output), json=True),
+                Namespace(
+                    device=None,
+                    app=str(app),
+                    bundle_id=None,
+                    open_url="pulp-demo://toggle",
+                    action_after=0.0,
+                    action_label="toggle deep link",
+                    duration=0.1,
+                    video_fps=5.0,
+                    label="ios-proof",
+                    output=str(output),
+                    json=True,
+                ),
                 print_fn=self.print_line,
                 which_fn=lambda name: f"/usr/bin/{name}" if name in {"xcrun", "ffmpeg"} else None,
                 run_fn=self.run_fn,
@@ -115,11 +129,20 @@ class SimulatorVideoCommandsTests(unittest.TestCase):
             self.assertEqual(manifest["video"]["template"], "mobile-simulator")
             self.assertEqual(manifest["video"]["fps"], 5.0)
             self.assertEqual(manifest["video"]["recorder"], "xcrun simctl io screenshot + ffmpeg")
-            self.assertIn("-framerate", manifest["commands"][-1]["command"])
-            self.assertIn("frame-%06d.png", manifest["commands"][-1]["frame_pattern"])
-            self.assertEqual(manifest["commands"][-1]["frame_count"], 1)
+            record_step = next(item for item in manifest["commands"] if item["step"] == "record-video")
+            self.assertIn("-framerate", record_step["command"])
+            self.assertIn("frame-%06d.png", record_step["frame_pattern"])
+            self.assertEqual(record_step["frame_count"], 1)
+            self.assertEqual(manifest["simulator_action"]["kind"], "open-url")
+            self.assertEqual(manifest["simulator_action"]["url"], "pulp-demo://toggle")
+            self.assertEqual(manifest["interaction"]["mode"], "open-url")
+            self.assertEqual(manifest["interaction"]["label"], "toggle deep link")
+            self.assertEqual(manifest["video_proof_composition"]["template"], "mobile-simulator")
+            self.assertEqual(manifest["video_proof_composition"]["action_marker"]["kind"], "open-url")
+            self.assertEqual(manifest["video_proof_composition"]["action_marker"]["label"], "toggle deep link")
             self.assertTrue(Path(payload["video"]).exists())
             self.assertIn(["/usr/bin/xcrun", "simctl", "launch", "A-UDID", "com.pulp.demo"], self.commands)
+            self.assertIn(["/usr/bin/xcrun", "simctl", "openurl", "A-UDID", "pulp-demo://toggle"], self.commands)
 
 
 if __name__ == "__main__":

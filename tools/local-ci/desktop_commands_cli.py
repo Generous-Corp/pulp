@@ -192,13 +192,14 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
         "command": (
             "python3 tools/local-ci/local_ci.py simulator video "
             "--app build/ios/PulpDemo.app --bundle-id com.pulp.demo "
+            "--open-url https://example.com --action-label 'open validation URL' "
             "--label ios-simulator-launch-proof --duration 8 --video-fps 10"
         ),
         "doctor": "python3 tools/local-ci/local_ci.py simulator video-doctor",
         "watch_for": [
             "device/runtime is identified",
             "app launch or host setup is visible",
-            "future slice should drive and mark taps through an automation layer",
+            "open-url action is marked in the proof; coordinate taps need a future automation backend",
         ],
     },
     {
