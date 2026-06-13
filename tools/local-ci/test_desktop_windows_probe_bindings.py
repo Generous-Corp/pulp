@@ -160,6 +160,47 @@ class DesktopWindowsProbeBindingsTests(unittest.TestCase):
         self.assertIs(captured["kwargs"]["probe_windows_remote_tooling_fn"], bindings["probe_windows_remote_tooling"])
         self.assertIs(captured["kwargs"]["install_windows_remote_tool_fn"], bindings["install_windows_remote_tool"])
 
+    def test_windows_probe_exports_compose_focused_groups(self):
+        expected = (
+            *self.mod.DESKTOP_WINDOWS_REPO_PROBE_EXPORTS,
+            *self.mod.DESKTOP_WINDOWS_TOOLING_PROBE_EXPORTS,
+        )
+
+        self.assertEqual(self.mod.DESKTOP_WINDOWS_PROBE_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
+    def test_install_desktop_windows_probe_helpers_routes_selected_groups(self):
+        captured = {}
+
+        def repo_runner(*args, **kwargs):
+            captured["repo"] = (args, kwargs)
+            return {"repo": True}
+
+        def tooling_runner(*args, **kwargs):
+            captured["tooling"] = (args, kwargs)
+            return {"tooling": True}
+
+        bindings = self._bindings()
+        bindings["_windows_probe"].probe_windows_repo_checkout = repo_runner
+        bindings["_windows_probe"].probe_windows_remote_tooling = tooling_runner
+        for name in [
+            "run_windows_ssh_powershell",
+            "windows_repo_path_is_unsafe",
+            "parse_windows_ssh_json",
+            "ps_literal",
+        ]:
+            bindings[name] = object()
+
+        self.mod.install_desktop_windows_probe_helpers(
+            bindings,
+            ("probe_windows_repo_checkout", "probe_windows_remote_tooling"),
+        )
+
+        self.assertEqual(bindings["probe_windows_repo_checkout"]("win", r"C:\Pulp"), {"repo": True})
+        self.assertEqual(bindings["probe_windows_remote_tooling"]("win"), {"tooling": True})
+        self.assertNotIn("ensure_windows_remote_repo_checkout", bindings)
+        self.assertNotIn("probe_windows_session_agent", bindings)
+
 
 if __name__ == "__main__":
     unittest.main()

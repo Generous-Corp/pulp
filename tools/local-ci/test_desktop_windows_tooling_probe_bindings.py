@@ -89,6 +89,32 @@ class DesktopWindowsToolingProbeBindingsTests(unittest.TestCase):
         self.assertIs(captured["kwargs"]["probe_windows_remote_tooling_fn"], bindings["probe_windows_remote_tooling"])
         self.assertIs(captured["kwargs"]["install_windows_remote_tool_fn"], bindings["install_windows_remote_tool"])
 
+    def test_tooling_probe_exports_and_installer_wire_named_helpers(self):
+        expected = (
+            "probe_windows_session_agent",
+            "probe_windows_remote_tooling",
+            "install_windows_remote_tool",
+            "ensure_windows_remote_tooling",
+        )
+        self.assertEqual(self.mod.DESKTOP_WINDOWS_TOOLING_PROBE_EXPORTS, expected)
+
+        captured = {}
+
+        def runner(*args, **kwargs):
+            captured["tooling"] = (args, kwargs)
+            return {"ok": True}
+
+        bindings = self._bindings()
+        bindings["_windows_probe"].probe_windows_remote_tooling = runner
+        for name in ["run_windows_ssh_powershell", "parse_windows_ssh_json"]:
+            bindings[name] = object()
+
+        self.mod.install_desktop_windows_tooling_probe_helpers(bindings, ("probe_windows_remote_tooling",))
+
+        self.assertEqual(bindings["probe_windows_remote_tooling"]("win"), {"ok": True})
+        self.assertNotIn("probe_windows_session_agent", bindings)
+        self.assertEqual(captured["tooling"][0], ("win",))
+
 
 if __name__ == "__main__":
     unittest.main()

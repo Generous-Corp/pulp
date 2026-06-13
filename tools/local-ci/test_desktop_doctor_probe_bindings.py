@@ -86,6 +86,28 @@ class DesktopDoctorProbeBindingsTests(unittest.TestCase):
         self.assertIs(captured["webdriver_kwargs"]["request_cls"], bindings["urllib"].request.Request)
         self.assertIs(captured["webdriver_kwargs"]["urlopen_fn"], bindings["urllib"].request.urlopen)
 
+    def test_doctor_probe_exports_and_installer_wire_named_helpers(self):
+        expected = (
+            "desktop_doctor_checks",
+            "probe_webdriver_endpoint",
+        )
+        self.assertEqual(self.mod.DESKTOP_DOCTOR_PROBE_EXPORTS, expected)
+
+        captured = {}
+
+        def webdriver_runner(*args, **kwargs):
+            captured["webdriver"] = (args, kwargs)
+            return {"ready": True}
+
+        bindings = self._bindings()
+        bindings["_desktop_doctor"].probe_webdriver_endpoint = webdriver_runner
+
+        self.mod.install_desktop_doctor_probe_helpers(bindings, ("probe_webdriver_endpoint",))
+
+        self.assertEqual(bindings["probe_webdriver_endpoint"]("http://driver"), {"ready": True})
+        self.assertNotIn("desktop_doctor_checks", bindings)
+        self.assertEqual(captured["webdriver"][0], ("http://driver",))
+
 
 if __name__ == "__main__":
     unittest.main()

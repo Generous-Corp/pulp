@@ -85,6 +85,30 @@ class DesktopWindowsRepoProbeBindingsTests(unittest.TestCase):
         ]:
             self.assertIs(captured["kwargs"][f"{name}_fn"], bindings[name])
 
+    def test_repo_probe_exports_and_installer_wire_named_helpers(self):
+        expected = (
+            "probe_windows_repo_checkout",
+            "ensure_windows_remote_repo_checkout",
+        )
+        self.assertEqual(self.mod.DESKTOP_WINDOWS_REPO_PROBE_EXPORTS, expected)
+
+        captured = {}
+
+        def runner(*args, **kwargs):
+            captured["probe"] = (args, kwargs)
+            return {"ok": True}
+
+        bindings = self._bindings()
+        bindings["_windows_probe"].probe_windows_repo_checkout = runner
+        for name in ["run_windows_ssh_powershell", "windows_repo_path_is_unsafe", "parse_windows_ssh_json", "ps_literal"]:
+            bindings[name] = object()
+
+        self.mod.install_desktop_windows_repo_probe_helpers(bindings, ("probe_windows_repo_checkout",))
+
+        self.assertEqual(bindings["probe_windows_repo_checkout"]("win", r"C:\Pulp"), {"ok": True})
+        self.assertNotIn("ensure_windows_remote_repo_checkout", bindings)
+        self.assertEqual(captured["probe"][0], ("win", r"C:\Pulp"))
+
 
 if __name__ == "__main__":
     unittest.main()
