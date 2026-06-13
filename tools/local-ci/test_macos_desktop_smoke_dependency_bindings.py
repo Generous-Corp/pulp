@@ -74,6 +74,45 @@ class MacosDesktopSmokeDependencyBindingsTests(unittest.TestCase):
 
         deps = self.mod.macos_desktop_smoke_dependencies(bindings)
 
+        self.assertEqual(
+            set(deps),
+            {
+                "create_desktop_run_bundle_fn",
+                "desktop_action_artifact_paths_fn",
+                "desktop_interaction_requested_fn",
+                "macos_accessibility_trusted_fn",
+                "now_iso_fn",
+                "prepare_macos_exact_sha_source_fn",
+                "quit_macos_bundle_id_fn",
+                "sleep_fn",
+                "run_fn",
+                "activate_macos_bundle_id_fn",
+                "wait_for_macos_bundle_window_fn",
+                "split_command_fn",
+                "detect_macos_app_bundle_fn",
+                "macos_bundle_id_for_app_path_fn",
+                "environ_copy_fn",
+                "popen_fn",
+                "wait_for_macos_window_fn",
+                "content_size_from_window_fn",
+                "wait_for_path_fn",
+                "content_size_from_view_tree_fn",
+                "view_tree_inspector_summary_fn",
+                "pulp_app_interaction_summary_fn",
+                "capture_macos_window_fn",
+                "parse_coordinate_pair_fn",
+                "resolve_view_tree_click_point_fn",
+                "screen_point_for_content_point_fn",
+                "activate_macos_pid_fn",
+                "dispatch_macos_click_fn",
+                "desktop_click_selector_fn",
+                "image_change_summary_fn",
+                "attach_desktop_source_to_manifest_fn",
+                "atomic_write_text_fn",
+                "write_desktop_run_rollups_fn",
+                "terminate_process_fn",
+            },
+        )
         self.assertIs(deps["create_desktop_run_bundle_fn"], bindings["create_desktop_run_bundle"])
         self.assertIs(deps["desktop_action_artifact_paths_fn"], desktop_actions.desktop_action_artifact_paths)
         self.assertIs(deps["desktop_interaction_requested_fn"], desktop_actions.desktop_interaction_requested)
