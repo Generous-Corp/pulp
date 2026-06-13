@@ -44,6 +44,9 @@ add_subdirectory(mpe-synth)
 # Phase 17: PulpSampler (audio file sampler with MIDI + ADSR)
 add_subdirectory(PulpSampler)
 
+# OfflineStretch dev harness: stretchcli (file in -> render -> file out, --analyze)
+add_subdirectory(offline-stretch)
+
 # Phase 18: PulpPluck (Karplus-Strong synth — same code runs native + WASM)
 add_subdirectory(pulp-pluck)
 
