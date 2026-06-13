@@ -427,6 +427,11 @@ class MacosDesktopActionTests(unittest.TestCase):
         self.assertEqual(composition["focus"]["content_point"], {"x": 12.0, "y": 24.0})
         self.assertAlmostEqual(composition["focus"]["normalized_center"]["x"], 12.0 / 320.0)
         self.assertAlmostEqual(composition["focus"]["normalized_center"]["y"], 24.0 / 200.0)
+        self.assertEqual(composition["action_marker"]["kind"], "click")
+        self.assertEqual(composition["action_marker"]["label"], "bypass-toggle")
+        self.assertEqual(composition["action_marker"]["content_point"], {"x": 12.0, "y": 24.0})
+        self.assertAlmostEqual(composition["action_marker"]["normalized_point"]["x"], 12.0 / 320.0)
+        self.assertAlmostEqual(composition["action_marker"]["normalized_point"]["y"], 24.0 / 200.0)
         self.assertEqual(manifest["video_composed"]["kwargs"]["template"], "component-zoom")
 
     def test_run_macos_local_smoke_rejects_view_click_without_snapshot(self) -> None:

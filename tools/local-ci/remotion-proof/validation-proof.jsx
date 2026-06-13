@@ -81,6 +81,7 @@ export const ValidationProof = ({
 	issueSelectedAttempt,
 	imageChanged,
 	focus,
+	actionMarker,
 	stepItems,
 	notes,
 }) => {
@@ -107,6 +108,15 @@ export const ValidationProof = ({
 	};
 	const focusLabel = focus?.label || 'Selected component';
 	const focusPulse = interpolate(frame, [70, 92, 116, 138], [0.85, 1, 0.88, 1], {
+		extrapolateLeft: 'clamp',
+		extrapolateRight: 'clamp',
+	});
+	const markerPoint = actionMarker?.normalized_point || null;
+	const markerPulse = interpolate(frame, [74, 88, 112, 138], [0, 1, 0.35, 0], {
+		extrapolateLeft: 'clamp',
+		extrapolateRight: 'clamp',
+	});
+	const markerScale = interpolate(frame, [74, 92, 138], [0.62, 1.18, 1], {
 		extrapolateLeft: 'clamp',
 		extrapolateRight: 'clamp',
 	});
@@ -324,6 +334,36 @@ export const ValidationProof = ({
 								</div>
 							</div>
 						</>
+					) : null}
+					{markerPoint ? (
+						<div
+							style={{
+								position: 'absolute',
+								left: `${clamp(markerPoint.x, 0.03, 0.97) * 100}%`,
+								top: `${clamp(markerPoint.y, 0.04, 0.96) * 100}%`,
+								transform: `translate(-50%, -50%) scale(${markerScale})`,
+								opacity: 0.2 + markerPulse * 0.8,
+								width: 54,
+								height: 54,
+								borderRadius: 999,
+								border: '5px solid #f97316',
+								boxShadow: `0 0 0 ${22 * markerPulse}px rgba(249, 115, 22, 0.24), 0 10px 28px rgba(15, 23, 42, 0.32)`,
+								background: 'rgba(255, 247, 237, 0.72)',
+							}}
+						>
+							<div
+								style={{
+									position: 'absolute',
+									left: '50%',
+									top: '50%',
+									width: 12,
+									height: 12,
+									borderRadius: 999,
+									background: '#ea580c',
+									transform: 'translate(-50%, -50%)',
+								}}
+							/>
+						</div>
 					) : null}
 				</div>
 				<div

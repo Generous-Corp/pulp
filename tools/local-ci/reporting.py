@@ -211,6 +211,23 @@ def _proof_focus_label(proof_composition: dict) -> str | None:
     return str(label) if label else None
 
 
+def _proof_action_marker_summary(proof_composition: dict) -> dict:
+    marker = proof_composition.get("action_marker") if isinstance(proof_composition, dict) else None
+    if not isinstance(marker, dict):
+        return {}
+    summary: dict = {}
+    for key in ("kind", "label"):
+        if marker.get(key):
+            summary[key] = str(marker[key])
+    content_point = marker.get("content_point") if isinstance(marker.get("content_point"), dict) else {}
+    normalized_point = marker.get("normalized_point") if isinstance(marker.get("normalized_point"), dict) else {}
+    if content_point:
+        summary["content_point"] = content_point
+    if normalized_point:
+        summary["normalized_point"] = normalized_point
+    return summary
+
+
 def desktop_review_issue_body(index_payload: dict, *, publish_dir: Path) -> str:
     serve_command = f"python3 tools/local-ci/local_ci.py desktop serve {publish_dir} --host 0.0.0.0 --port 8765"
     lines = [
@@ -234,6 +251,8 @@ def desktop_review_issue_body(index_payload: dict, *, publish_dir: Path) -> str:
         proof_notes = run.get("video_proof_notes") if isinstance(run.get("video_proof_notes"), list) else []
         proof_composition = run.get("video_proof_composition") if isinstance(run.get("video_proof_composition"), dict) else {}
         focus_label = _proof_focus_label(proof_composition)
+        action_marker = _proof_action_marker_summary(proof_composition)
+        action_label = action_marker.get("label") or action_marker.get("kind")
         video = artifacts.get("video_issue") or artifacts.get("video_composed") or artifacts.get("video")
         metadata_path = artifacts.get("video_issue_metadata") or artifacts.get("video_composed_metadata") or artifacts.get("video_metadata")
         metadata = _artifact_metadata(publish_dir, metadata_path)
@@ -268,6 +287,8 @@ def desktop_review_issue_body(index_payload: dict, *, publish_dir: Path) -> str:
                 f"- Interaction: {run.get('interaction_mode') or 'not recorded'}",
                 f"- Proof template: `{proof_composition.get('template')}`" if proof_composition.get("template") else "- Proof template: not recorded",
                 f"- Focus component: `{focus_label}`" if focus_label else "- Focus component: not recorded",
+                f"- Action marker: `{action_label}`" if action_label else "- Action marker: not recorded",
+                f"- Action point: `{json.dumps(action_marker['content_point'], sort_keys=True)}`" if action_marker.get("content_point") else "- Action point: not recorded",
                 f"- Source reference: `{artifacts['video_source_image']}`" if artifacts.get("video_source_image") else "- Source reference: not attached",
                 f"- Issue video: `{artifacts['video_issue']}`" if artifacts.get("video_issue") else "- Issue video: not generated",
                 f"- Small video: `{artifacts['video_small']}`" if artifacts.get("video_small") else "- Small video: not generated",
@@ -398,6 +419,7 @@ def stage_desktop_publish_report(
         proof_notes = run.get("video_proof_notes") if isinstance(run.get("video_proof_notes"), list) else []
         proof_composition = run.get("video_proof_composition") if isinstance(run.get("video_proof_composition"), dict) else {}
         proof_focus = _proof_focus_summary(proof_composition)
+        action_marker = _proof_action_marker_summary(proof_composition)
         meta_lines = [
             f"<div><strong>{html.escape(str(run.get('target') or '?'))}/{html.escape(str(run.get('action') or '?'))}</strong></div>",
             f"<div>{html.escape(str(run.get('label') or '?'))}</div>",
@@ -420,6 +442,11 @@ def stage_desktop_publish_report(
             meta_lines.append(f"<div>focus: {html.escape(str(proof_focus['label']))}</div>")
         if proof_focus.get("content_point"):
             meta_lines.append(f"<div>focus_point: {html.escape(json.dumps(proof_focus['content_point'], sort_keys=True))}</div>")
+        if action_marker:
+            action_label = action_marker.get("label") or action_marker.get("kind") or "action"
+            meta_lines.append(f"<div>action: {html.escape(str(action_label))}</div>")
+        if action_marker.get("content_point"):
+            meta_lines.append(f"<div>action_point: {html.escape(json.dumps(action_marker['content_point'], sort_keys=True))}</div>")
         if proof_notes:
             meta_lines.append(
                 "<ul class=\"proof-notes\">"

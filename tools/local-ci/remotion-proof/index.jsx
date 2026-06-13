@@ -28,6 +28,7 @@ const defaultProps = {
 	issueSelectedAttempt: null,
 	imageChanged: null,
 	focus: null,
+	actionMarker: null,
 	stepItems: [],
 	notes: [],
 };

@@ -72,10 +72,25 @@ const firstPresentSelector = (selector) => {
 	return null;
 };
 
+const actionMarkerLabel = (marker) => {
+	if (!marker || typeof marker !== 'object') {
+		return null;
+	}
+	if (marker.label) {
+		return `${marker.kind || 'action'}: ${marker.label}`;
+	}
+	const point = marker.content_point || marker.normalized_point;
+	if (point && typeof point === 'object') {
+		return `${marker.kind || 'action'} at ${Math.round(point.x)},${Math.round(point.y)}`;
+	}
+	return marker.kind || null;
+};
+
 const stepItemsFor = (manifest, videoMeta, issueMeta, proofNotes = []) => {
 	const interaction = manifest.interaction || {};
 	const selectorLabel = firstPresentSelector(interaction.click?.selector);
 	const focusLabel = manifest.video_proof_composition?.focus?.label;
+	const markerLabel = actionMarkerLabel(manifest.video_proof_composition?.action_marker);
 	const clickPoint = interaction.click?.content_point || interaction.click?.screen_point;
 	const clickDetail = selectorLabel || (clickPoint ? `point: ${Math.round(clickPoint.x)},${Math.round(clickPoint.y)}` : null);
 	const actionDetail = interaction.mode
@@ -107,7 +122,7 @@ const stepItemsFor = (manifest, videoMeta, issueMeta, proofNotes = []) => {
 			},
 			{
 				label: 'Action',
-				detail: `${actionDetail}${captureDetail ? ` / ${captureDetail}` : ''}`,
+				detail: `${markerLabel || actionDetail}${captureDetail ? ` / ${captureDetail}` : ''}`,
 			},
 			{
 				label: 'Review',
@@ -122,7 +137,7 @@ const stepItemsFor = (manifest, videoMeta, issueMeta, proofNotes = []) => {
 		},
 		{
 			label: proofNotes.length && !interaction.mode ? 'Evidence' : 'Action',
-			detail: actionDetail,
+			detail: markerLabel || actionDetail,
 		},
 		{
 			label: 'Capture',
@@ -204,6 +219,7 @@ const main = async () => {
 				issueSelectedAttempt: issueMeta.selected_attempt || null,
 				imageChanged: artifacts.image_change?.changed ?? null,
 				focus: manifest.video_proof_composition?.focus || null,
+				actionMarker: manifest.video_proof_composition?.action_marker || null,
 				stepItems: stepItemsFor(manifest, videoMeta, issueMeta, proofNotes),
 				notes: [
 					...proofNotes,

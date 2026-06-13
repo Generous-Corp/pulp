@@ -49,6 +49,45 @@ def _component_focus_summary(
     return focus
 
 
+def _action_marker_summary(
+    *,
+    interaction_summary: dict | None,
+    content_size: tuple[float, float],
+) -> dict | None:
+    if not interaction_summary:
+        return None
+    click = interaction_summary.get("click") if isinstance(interaction_summary.get("click"), dict) else {}
+    content_point = click.get("content_point") if isinstance(click.get("content_point"), dict) else None
+    if not content_point:
+        return None
+    width, height = content_size
+    x = float(content_point.get("x", 0.0))
+    y = float(content_point.get("y", 0.0))
+    marker = {
+        "kind": "click",
+        "content_point": {"x": x, "y": y},
+    }
+    selector = click.get("selector") if isinstance(click.get("selector"), dict) else {}
+    label = (
+        selector.get("click_view_id")
+        or selector.get("id")
+        or selector.get("click_view_label")
+        or selector.get("label")
+        or selector.get("click_view_text")
+        or selector.get("text")
+        or selector.get("click_view_type")
+        or selector.get("type")
+    )
+    if label:
+        marker["label"] = str(label)
+    if width > 0 and height > 0:
+        marker["normalized_point"] = {
+            "x": max(0.0, min(1.0, x / width)),
+            "y": max(0.0, min(1.0, y / height)),
+        }
+    return marker
+
+
 def run_macos_local_smoke(
     config: dict,
     command: str | None,
@@ -429,10 +468,17 @@ def run_macos_local_smoke(
             interaction_summary=interaction_summary,
             content_size=content_size,
         )
+        action_marker = _action_marker_summary(
+            interaction_summary=interaction_summary,
+            content_size=content_size,
+        )
         if focus_summary is not None:
             composition = manifest.setdefault("video_proof_composition", {})
             composition["template"] = video_template or composition.get("template") or "component-zoom"
             composition["focus"] = focus_summary
+        if action_marker is not None:
+            composition = manifest.setdefault("video_proof_composition", {})
+            composition["action_marker"] = action_marker
         if video_capture_target == "terminal":
             manifest["terminal"] = {
                 "returncode": terminal_returncode,

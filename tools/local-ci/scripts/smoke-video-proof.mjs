@@ -168,6 +168,14 @@ const main = async () => {
 							content_point: {x: 480, y: 270},
 						},
 					},
+					video_proof_composition: {
+						action_marker: {
+							kind: 'click',
+							label: 'proof-toggle',
+							content_point: {x: 480, y: 270},
+							normalized_point: {x: 0.5, y: 0.5},
+						},
+					},
 					source: {
 						mode: 'local-ci-video-smoke',
 						sha: '0123456789abcdef0123456789abcdef01234567',
