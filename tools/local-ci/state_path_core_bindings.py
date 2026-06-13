@@ -1,71 +1,46 @@
-"""Bindings from the local_ci facade to core state path helpers."""
+"""Compatibility facade for core state path dependency bindings."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from pathlib import Path
 from typing import Any
 
-from binding_utils import binding as _binding
-from binding_utils import install_module_attrs
-
-
-STATE_PATH_CORE_EXPORTS = (
-    "state_dir",
-    "config_path",
-    "worktree_config_path",
-    "shared_config_path",
-    "queue_path",
-    "results_dir",
-    "cloud_runs_dir",
-    "evidence_path",
-    "logs_dir",
-    "ensure_state_dirs",
+from binding_utils import install_local_helpers
+from state_path_config_bindings import (
+    STATE_PATH_CONFIG_EXPORTS,
+    config_path,
+    install_state_path_config_helpers,
+    shared_config_path,
+    state_dir,
+    worktree_config_path,
+)
+from state_path_store_bindings import (
+    STATE_PATH_STORE_EXPORTS,
+    cloud_runs_dir,
+    ensure_state_dirs,
+    evidence_path,
+    install_state_path_store_helpers,
+    logs_dir,
+    queue_path,
+    results_dir,
 )
 
 
-def state_dir(bindings: Mapping[str, Any]) -> Path:
-    return _binding(bindings, "_state_paths").state_dir()
-
-
-def config_path(bindings: Mapping[str, Any]) -> Path:
-    return _binding(bindings, "_state_paths").config_path()
-
-
-def worktree_config_path(bindings: Mapping[str, Any]) -> Path:
-    return _binding(bindings, "_state_paths").worktree_config_path()
-
-
-def shared_config_path(bindings: Mapping[str, Any]) -> Path:
-    return _binding(bindings, "_state_paths").shared_config_path()
-
-
-def queue_path(bindings: Mapping[str, Any]) -> Path:
-    return _binding(bindings, "_state_paths").queue_path()
-
-
-def results_dir(bindings: Mapping[str, Any]) -> Path:
-    return _binding(bindings, "_state_paths").results_dir()
-
-
-def cloud_runs_dir(bindings: Mapping[str, Any]) -> Path:
-    return _binding(bindings, "_state_paths").cloud_runs_dir()
-
-
-def evidence_path(bindings: Mapping[str, Any]) -> Path:
-    return _binding(bindings, "_state_paths").evidence_path()
-
-
-def logs_dir(bindings: Mapping[str, Any]) -> Path:
-    return _binding(bindings, "_state_paths").logs_dir()
-
-
-def ensure_state_dirs(bindings: Mapping[str, Any]) -> None:
-    return _binding(bindings, "_state_paths").ensure_state_dirs()
+STATE_PATH_CORE_EXPORTS = (
+    *STATE_PATH_CONFIG_EXPORTS,
+    *STATE_PATH_STORE_EXPORTS,
+)
 
 
 def install_state_path_core_helpers(
     bindings: dict[str, Any],
     names: tuple[str, ...] = STATE_PATH_CORE_EXPORTS,
 ) -> None:
-    install_module_attrs(bindings, "_state_paths", names)
+    config_names = tuple(name for name in names if name in STATE_PATH_CONFIG_EXPORTS)
+    store_names = tuple(name for name in names if name in STATE_PATH_STORE_EXPORTS)
+    known_names = set(STATE_PATH_CORE_EXPORTS)
+    unknown_names = tuple(name for name in names if name not in known_names)
+
+    install_state_path_config_helpers(bindings, config_names)
+    install_state_path_store_helpers(bindings, store_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)

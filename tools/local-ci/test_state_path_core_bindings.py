@@ -66,6 +66,15 @@ class StatePathCoreBindingsTests(unittest.TestCase):
         self.assertEqual([call[0] for call in calls], [*helpers, "ensure_state_dirs"])
         self.assertTrue(all(call[1] == () and call[2] == {} for call in calls))
 
+    def test_core_exports_are_composed_from_focused_groups(self) -> None:
+        expected = (
+            *self.mod.STATE_PATH_CONFIG_EXPORTS,
+            *self.mod.STATE_PATH_STORE_EXPORTS,
+        )
+
+        self.assertEqual(self.mod.STATE_PATH_CORE_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def test_install_state_path_core_helpers_wires_named_exports(self) -> None:
         bindings, calls = self._bindings()
 
@@ -75,6 +84,15 @@ class StatePathCoreBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["logs_dir"](), Path("/state/logs"))
         self.assertEqual(bindings["state_dir"].__name__, "runner")
         self.assertEqual([call[0] for call in calls], ["state_dir", "logs_dir"])
+
+    def test_install_state_path_core_helpers_routes_focused_exports(self) -> None:
+        bindings, calls = self._bindings()
+
+        self.mod.install_state_path_core_helpers(bindings, ("config_path", "queue_path"))
+
+        self.assertEqual(bindings["config_path"](), Path("/state/config.json"))
+        self.assertEqual(bindings["queue_path"](), Path("/state/queue.json"))
+        self.assertEqual([call[0] for call in calls], ["config_path", "queue_path"])
 
 
 if __name__ == "__main__":
