@@ -1683,7 +1683,7 @@ KitValidationResult validate_kit_input(KitInputWorkspace& input, bool strict) {
 
 std::string kit_source_label(const KitInputWorkspace& input,
                              const KitValidationResult& result) {
-    return input.archive ? input.original.string() : result.summary.root.string();
+    return input.archive ? input.original.generic_string() : result.summary.root.generic_string();
 }
 
 bool collect_pack_files(const fs::path& root,
@@ -2323,6 +2323,11 @@ void maybe_execute_screenshot_profile(KitProfileResult& profile,
         + " --scale " + std::to_string(scale)
         + " --backend " + shell_quote_local(fs::path(options.screenshot_backend))
         + " > " + shell_quote_local(log) + " 2>&1";
+#ifdef _WIN32
+    const auto screenshot_ext = screenshot_tool.extension().string();
+    if (screenshot_ext == ".cmd" || screenshot_ext == ".bat")
+        command = "call " + command;
+#endif
     const int rc = std::system(command.c_str());
     profile.artifacts.push_back({"render-log", log.string()});
     if (rc != 0 || !fs::exists(output) || fs::file_size(output, ec) == 0 || ec) {

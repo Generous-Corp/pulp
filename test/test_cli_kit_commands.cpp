@@ -48,7 +48,7 @@ struct TempDir {
 
 void write_file(const fs::path& path, const std::string& body) {
     fs::create_directories(path.parent_path());
-    std::ofstream f(path);
+    std::ofstream f(path, std::ios::binary);
     f << body;
 }
 
@@ -67,7 +67,7 @@ fs::path repo_root() {
 }
 
 std::string read_file(const fs::path& path) {
-    std::ifstream f(path);
+    std::ifstream f(path, std::ios::binary);
     if (!f.is_open()) return {};
     return {std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
 }
@@ -2482,7 +2482,7 @@ TEST_CASE("pulp kit accepts packed pulpkit archives for validate, plan, and appl
     REQUIRE(fs::exists(project.path / "pulp-kits" /
                        "dev.pulp.fixtures.basic-ui-kit" / "ui" / "index.js"));
     const auto lock = read_file(project.path / ".pulp" / "kits.lock.json");
-    REQUIRE(lock.find(archive.string()) != std::string::npos);
+    REQUIRE(lock.find(archive.generic_string()) != std::string::npos);
 }
 
 TEST_CASE("pulp kit rejects pulpkit archives without hash manifests",
