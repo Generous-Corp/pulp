@@ -35,7 +35,24 @@ The rollup includes confirmed runs and a "scripted lanes without checked-in
 manifests" backlog derived from the manual scripts in
 `docs/validation/daw-bench/`. That backlog is not support evidence; it is the
 remaining host-lab work queue. Use `--format json` when a CI job or dashboard
-needs a machine-readable artifact.
+needs a machine-readable artifact. The JSON report includes
+`scripted_lane_count`, `covered_scripted_lane_count`, and
+`missing_scripted_lane_count` so CI can track host-lab coverage without
+scraping markdown.
+
+Use the stricter completion gate only when a branch is claiming that the
+scripted host-lab backlog is closed:
+
+```bash
+python3 tools/scripts/summarize_daw_bench_results.py \
+    docs/validation/daw-bench/results \
+    --require-any \
+    --require-complete-scripted-lanes
+```
+
+That command fails while any manual DAW-bench script lacks a matching
+checked-in manifest. A failing result is expected on branches that only add
+partial coverage.
 
 Large DAW logs may stay outside the repo, but the manifest must include an
 `external_log_url` when `logs` is empty. Do not use placeholders; unverified

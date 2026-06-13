@@ -187,6 +187,8 @@ def render_markdown(
         lines.extend(["No checked-in DAW-bench manifests found.", ""])
         return "\n".join(lines)
 
+    planned_lanes = planned_lanes or []
+    missing_lanes = missing_scripted_lanes(summaries, planned_lanes)
     hosts = sorted({f"{item.host} {item.format}" for item in summaries})
     latest = max(item.date for item in summaries)
     confirmed_total = sum(len(item.confirmed) for item in summaries)
@@ -194,6 +196,8 @@ def render_markdown(
     lines.extend([
         f"- Manifests: {len(summaries)}",
         f"- Host/format lanes: {len(hosts)}",
+        f"- Scripted lanes covered: {len(planned_lanes) - len(missing_lanes)} / {len(planned_lanes)}",
+        f"- Scripted lanes missing manifests: {len(missing_lanes)}",
         f"- Latest result date: {latest}",
         f"- Confirmed quirk observations: {confirmed_total}",
         f"- Confirmed capability observations: {capability_total}",
@@ -231,7 +235,6 @@ def render_markdown(
                 f"| `{flag}` | {item.host} | {item.format} | {item.date} | `{manifest}` |"
             )
 
-    missing_lanes = missing_scripted_lanes(summaries, planned_lanes or [])
     if missing_lanes:
         lines.extend([
             "",
@@ -255,10 +258,14 @@ def render_json(
     repo_root: pathlib.Path = REPO_ROOT,
     planned_lanes: list[PlannedLane] | None = None,
 ) -> str:
-    missing_lanes = missing_scripted_lanes(summaries, planned_lanes or [])
+    planned_lanes = planned_lanes or []
+    missing_lanes = missing_scripted_lanes(summaries, planned_lanes)
     data = {
         "manifest_count": len(summaries),
         "host_format_count": len({(item.host, item.format) for item in summaries}),
+        "scripted_lane_count": len(planned_lanes),
+        "covered_scripted_lane_count": len(planned_lanes) - len(missing_lanes),
+        "missing_scripted_lane_count": len(missing_lanes),
         "latest_result_date": max((item.date for item in summaries), default=None),
         "confirmed_quirk_observations": sum(len(item.confirmed) for item in summaries),
         "confirmed_capability_observations": sum(
@@ -298,21 +305,40 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--format", choices=("markdown", "json"), default="markdown")
     parser.add_argument("--require-any", action="store_true",
                         help="fail if no manifests are found")
+    parser.add_argument("--require-complete-scripted-lanes", action="store_true",
+                        help="fail if any manual DAW-bench script lacks a matching manifest")
+    parser.add_argument("--repo-root", type=pathlib.Path, default=REPO_ROOT,
+                        help="repository root used to render relative evidence paths")
+    parser.add_argument("--scripts-dir", type=pathlib.Path, default=DEFAULT_SCRIPTS_DIR,
+                        help="manual DAW-bench scripts directory used to compute lane coverage")
     args = parser.parse_args(argv)
 
-    summaries, results = load_summaries(args.paths)
-    planned_lanes = load_scripted_lanes()
+    summaries, results = load_summaries(args.paths, repo_root=args.repo_root)
+    planned_lanes = load_scripted_lanes(args.scripts_dir, repo_root=args.repo_root)
+    missing_lanes = missing_scripted_lanes(summaries, planned_lanes)
     if any(not result.ok for result in results):
         print(evidence.render_results(results, scanned=len(args.paths)), file=sys.stderr)
         return 1
     if not summaries and args.require_any:
         print(evidence.render_results([], scanned=len(args.paths)), file=sys.stderr)
         return 1
+    if args.require_complete_scripted_lanes and missing_lanes:
+        print(
+            "DAW-bench scripted lane coverage incomplete: "
+            f"{len(missing_lanes)} of {len(planned_lanes)} scripted lanes lack checked-in manifests.",
+            file=sys.stderr,
+        )
+        for lane in missing_lanes:
+            print(
+                f"  - {lane.host} {lane.format}: {lane.script.as_posix()}",
+                file=sys.stderr,
+            )
+        return 1
 
     if args.format == "json":
-        print(render_json(summaries, planned_lanes=planned_lanes), end="")
+        print(render_json(summaries, repo_root=args.repo_root, planned_lanes=planned_lanes), end="")
     else:
-        print(render_markdown(summaries, planned_lanes=planned_lanes), end="")
+        print(render_markdown(summaries, repo_root=args.repo_root, planned_lanes=planned_lanes), end="")
     return 0
 
 

@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import importlib.util
+import contextlib
+import io
 import json
 import pathlib
 import sys
@@ -88,7 +90,7 @@ class DawBenchSummaryTests(unittest.TestCase):
         root = pathlib.Path(tmp_ctx.name)
         result_dir = root / "docs" / "validation" / "daw-bench" / "results" / "2026-06-12"
         _write(root / "docs" / "validation" / "daw-bench" / "06-reaper-vst3.md",
-               "# REAPER script\n")
+               "# 06 — REAPER (VST3)\n")
         _write(root / "docs" / "validation" / "daw-bench" / "01-logic-pro-au.md",
                "# 01 — Logic Pro (AU v2)\n")
         _write(root / "docs" / "validation" / "daw-bench" / "08-aum-auv3.md",
@@ -176,6 +178,9 @@ class DawBenchSummaryTests(unittest.TestCase):
             ))
             self.assertEqual(data["manifest_count"], 1)
             self.assertEqual(data["host_format_count"], 1)
+            self.assertEqual(data["scripted_lane_count"], 3)
+            self.assertEqual(data["covered_scripted_lane_count"], 1)
+            self.assertEqual(data["missing_scripted_lane_count"], 2)
             self.assertEqual(data["latest_result_date"], "2026-06-12")
             self.assertEqual(data["confirmed_quirk_observations"], 1)
             self.assertEqual(data["confirmed_capability_observations"], 2)
@@ -202,6 +207,95 @@ class DawBenchSummaryTests(unittest.TestCase):
             summaries, results = summary.load_summaries([result_dir], repo_root=root)
             self.assertEqual(summaries, [])
             self.assertTrue(any(not result.ok for result in results))
+
+    def test_require_complete_scripted_lanes_fails_when_backlog_remains(self) -> None:
+        tmp_ctx, root, result_dir = self._repo()
+        with tmp_ctx:
+            path = result_dir / "reaper-vst3.daw-bench.json"
+            path.write_text(json.dumps(_manifest()), encoding="utf-8")
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                rc = summary.main([
+                    str(result_dir),
+                    "--repo-root", str(root),
+                    "--scripts-dir", str(root / "docs" / "validation" / "daw-bench"),
+                    "--require-any",
+                    "--require-complete-scripted-lanes",
+                ])
+            self.assertEqual(rc, 1)
+
+    def test_require_complete_scripted_lanes_passes_when_all_scripts_have_manifests(self) -> None:
+        tmp_ctx, root, result_dir = self._repo()
+        with tmp_ctx:
+            (result_dir / "reaper-vst3.daw-bench.json").write_text(
+                json.dumps(_manifest()),
+                encoding="utf-8",
+            )
+            _write(result_dir / "01-logic-pro-au.md", "# Filled Logic result\n")
+            _write(result_dir / "logs" / "LogicPro-AU-20260612T120000Z-pid43.log",
+                   "2026-06-12T12:00:00Z\tsession_start\n"
+                   "2026-06-12T12:00:00Z\tprepare\n")
+            (result_dir / "logic-pro-au.daw-bench.json").write_text(
+                json.dumps(_manifest(
+                    host="Logic Pro",
+                    format="AU",
+                    script="01-logic-pro-au.md",
+                    result_markdown="01-logic-pro-au.md",
+                    logs=["logs/LogicPro-AU-20260612T120000Z-pid43.log"],
+                    capabilities=[
+                        {
+                            "capability": "load",
+                            "observed": "Confirmed",
+                            "notes": "session_start appeared in the checked-in log.",
+                        }
+                    ],
+                    quirks=[
+                        {
+                            "flag": "logic_au_tail_time_conversion",
+                            "row": "L1",
+                            "observed": "Confirmed",
+                            "notes": "prepare appeared in the checked-in log.",
+                        }
+                    ],
+                )),
+                encoding="utf-8",
+            )
+            _write(result_dir / "08-aum-auv3.md", "# Filled AUM result\n")
+            _write(result_dir / "logs" / "AUM-AUv3-20260612T120000Z-pid44.log",
+                   "2026-06-12T12:00:00Z\tsession_start\n")
+            (result_dir / "aum-auv3.daw-bench.json").write_text(
+                json.dumps(_manifest(
+                    host="AUM",
+                    format="AUv3",
+                    script="08-aum-auv3.md",
+                    result_markdown="08-aum-auv3.md",
+                    logs=["logs/AUM-AUv3-20260612T120000Z-pid44.log"],
+                    capabilities=[
+                        {
+                            "capability": "load",
+                            "observed": "Confirmed",
+                            "notes": "session_start appeared in the checked-in log.",
+                        }
+                    ],
+                    quirks=[
+                        {
+                            "flag": "aum_auv3_load",
+                            "row": "A1",
+                            "observed": "Confirmed",
+                            "notes": "session_start appeared in the checked-in log.",
+                        }
+                    ],
+                )),
+                encoding="utf-8",
+            )
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                rc = summary.main([
+                    str(result_dir),
+                    "--repo-root", str(root),
+                    "--scripts-dir", str(root / "docs" / "validation" / "daw-bench"),
+                    "--require-any",
+                    "--require-complete-scripted-lanes",
+                ])
+            self.assertEqual(rc, 0)
 
 
 if __name__ == "__main__":
