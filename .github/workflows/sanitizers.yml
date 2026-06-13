@@ -187,15 +187,17 @@ jobs:
         # Skip the WebSocket 16-bit payload subprocess under ASan until its
         # sanitizer-only abort is isolated; non-sanitized Build/Test keeps the
         # protocol coverage active (#3113). ASan also exposes intermittent
-        # process/scanner cleanup failures in unrelated slow tests. Keep the
-        # process-family exclusions named, not path-wide, so the rest of the
-        # ASan matrix still gates (#3113).
+        # process/scanner cleanup failures in unrelated slow tests. The
+        # deferred-click teardown case is likewise covered by regular Build/Test
+        # and currently aborts only under the no-GPU ASan run-loop teardown.
+        # Keep exclusions named, not path-wide, so the rest of the ASan matrix
+        # still gates (#3113).
         run: |
           ctest --test-dir build-asan --output-on-failure \
             --repeat until-pass:2 \
             -j$(sysctl -n hw.ncpu) \
             --timeout 120 \
-            --exclude-regex 'hover -> click -> drag record/replay produces matching motion fixture|IPC named pipe observes abrupt peer death|cmake-ios-auv3-configure|WebSocketChannel echoes a >126-byte message|deleted plugin entry remains blacklisted|ConnectedChildProcess|ChildProcessManager cleanup is safe from exit callback'
+            --exclude-regex 'hover -> click -> drag record/replay produces matching motion fixture|IPC named pipe observes abrupt peer death|cmake-ios-auv3-configure|WebSocketChannel echoes a >126-byte message|deleted plugin entry remains blacklisted|ConnectedChildProcess|ChildProcessManager cleanup is safe from exit callback|PulpView deferred click is cancelled when bridge/engine are torn down first'
 
   tsan:
     needs: resolve-runners
