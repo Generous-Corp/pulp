@@ -30,10 +30,16 @@
 
 namespace pulp::signal {
 
-/// Formant behaviour for the spectral modes (maps to SpectralEnvelopeShifter
-/// warp at wiring time). `independent` decouples the formant scale from the
-/// pitch shift via `formant_semitones`.
-enum class OfflineFormantMode { shifted, preserved, independent };
+/// Formant behaviour for the spectral modes. signal::FormantMode on main is
+/// only {follow, preserve} and cannot express the three-way behaviour we need,
+/// so this is an offline-specific enum (plan §5). Each value maps to a concrete
+/// SpectralEnvelopeShifter `warp` at wiring time (the shifter exposes a single
+/// warp knob, not a mode enum):
+///   follow_pitch        -> warp = 1                       (formants ride the shift)
+///   preserve_original   -> warp = pitch_ratio             (formants held at source)
+///   shift_independently -> warp = pitch_ratio/formant_ratio (decoupled via
+///                          `formant_semitones`)
+enum class OfflineFormantMode { follow_pitch, preserve_original, shift_independently };
 
 /// Transient strategy. `phase_reset` uses the (causal) TransientPhasePolicy
 /// Röbel reset; `verbatim_relocate` is the offline-only copy-through path,
@@ -44,13 +50,22 @@ enum class StretchTransientMode { phase_reset, verbatim_relocate };
 struct OfflineStretchOptions {
     double time_ratio = 1.0;        ///< output duration / input duration
     double pitch_semitones = 0.0;   ///< fractional allowed
-    OfflineFormantMode formant_mode = OfflineFormantMode::preserved;
-    double formant_semitones = 0.0; ///< used only when formant_mode==independent
+    OfflineFormantMode formant_mode = OfflineFormantMode::preserve_original;
+    double formant_semitones = 0.0; ///< used only when formant_mode==shift_independently
     bool repitch_linked = false;    ///< true => pure resample (vinyl); pitch
                                     ///< follows time_ratio, spectral path skipped
     bool route_noise_stn = true;    ///< route noise/residual through NoiseMorpher
     StretchTransientMode transient_mode = StretchTransientMode::phase_reset;
     int quality = 2;                ///< 0 draft (fast preview) .. 2 best
+
+    // Range MUST be sized up-front (plan §3.6 / §5): the underlying
+    // RealtimePitchTimeProcessor clamps to [1/max, max] and allocates from these
+    // bounds at prepare(). The sampler's tempo ratios (host_bpm/loop_bpm)
+    // routinely exceed 0.5–2×, so the defaults are wider than the realtime
+    // engine's. A process() ratio beyond the PREPARED bounds is REJECTED, never
+    // silently clamped — so a mis-sized render is a loud error, not a wrong result.
+    double max_time_ratio = 4.0;      ///< supported stretch span is [1/max, max]
+    double max_pitch_semitones = 24.0;
 };
 
 /// The exact, sample-accurate output length for an input of `in_frames` frames
@@ -71,17 +86,28 @@ inline long offline_stretch_output_frames(long in_frames, double time_ratio) noe
 class OfflineStretch {
 public:
     /// Size internal state for `channels` at `sample_rate`. Must be called
-    /// before process(). Allocation happens here, not in process().
-    void prepare(double sample_rate, int channels) {
+    /// before process(). Allocation happens here, not in process(). `sizing`
+    /// fixes the supported range: process() ratios must stay within
+    /// [1/max_time_ratio, max_time_ratio] and |pitch| within max_pitch_semitones
+    /// (plan §3.6). Defaults give a [0.25×, 4×] / ±24 st envelope; pass wider
+    /// bounds before rendering extreme tempo matches.
+    void prepare(double sample_rate, int channels,
+                 const OfflineStretchOptions& sizing = {}) {
         sample_rate_ = sample_rate;
         channels_ = channels < 1 ? 1 : channels;
+        max_time_ratio_ = sizing.max_time_ratio >= 1.0 ? sizing.max_time_ratio : 1.0;
+        max_pitch_semitones_ = sizing.max_pitch_semitones >= 0.0
+                                   ? sizing.max_pitch_semitones : 0.0;
         prepared_ = (sample_rate > 0.0) && (channels >= 1);
         // TODO(phase1): size SpectralFrameEngine / RealtimePitchTimeProcessor /
-        // SpectralEnvelopeShifter / Resampler scratch for the prepared geometry.
+        // SpectralEnvelopeShifter / Resampler scratch for the prepared geometry
+        // and the prepared max ranges above.
     }
 
     int channels() const noexcept { return channels_; }
     double sample_rate() const noexcept { return sample_rate_; }
+    double max_time_ratio() const noexcept { return max_time_ratio_; }
+    double max_pitch_semitones() const noexcept { return max_pitch_semitones_; }
 
     /// Render the whole input into the caller-allocated output. `out_frames`
     /// MUST equal offline_stretch_output_frames(in_frames, opts.time_ratio).
@@ -97,6 +123,14 @@ public:
         if (in == nullptr && in_frames > 0)   return fail(err, "null input");
         if (out == nullptr && out_frames > 0) return fail(err, "null output");
         if (!(opts.time_ratio > 0.0))         return fail(err, "time_ratio must be > 0");
+
+        // Range is fixed at prepare() — reject, never silently clamp (plan §3.6).
+        if (opts.time_ratio > max_time_ratio_ || opts.time_ratio < 1.0 / max_time_ratio_)
+            return fail(err, "time_ratio outside the prepared range [1/max, max]; "
+                             "widen OfflineStretchOptions::max_time_ratio at prepare()");
+        if (std::abs(opts.pitch_semitones) > max_pitch_semitones_)
+            return fail(err, "pitch_semitones outside the prepared range; widen "
+                             "OfflineStretchOptions::max_pitch_semitones at prepare()");
 
         const long expected = offline_stretch_output_frames(in_frames, opts.time_ratio);
         if (out_frames != expected)
@@ -129,6 +163,8 @@ private:
 
     double sample_rate_ = 0.0;
     int channels_ = 1;
+    double max_time_ratio_ = 4.0;
+    double max_pitch_semitones_ = 24.0;
     bool prepared_ = false;
 };
 

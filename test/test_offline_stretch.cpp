@@ -117,3 +117,48 @@ TEST_CASE("process rejects contract violations", "[offline-stretch]") {
         CHECK_FALSE(s.process(inp, n, outp, 0, opts, &err));
     }
 }
+
+TEST_CASE("process rejects ratios/pitch outside the prepared range", "[offline-stretch]") {
+    const long n = 256;
+    std::vector<float> in = ramp(n);
+    const float* inp[1] = {in.data()};
+
+    SECTION("default range rejects > max_time_ratio, never silently clamps") {
+        OfflineStretch s;
+        s.prepare(48000.0, 1); // default sizing: max_time_ratio 4.0
+        OfflineStretchOptions opts;
+        opts.time_ratio = 5.0; // beyond 4×
+        const long expected = offline_stretch_output_frames(n, opts.time_ratio);
+        std::vector<float> out(static_cast<size_t>(expected));
+        float* outp[1] = {out.data()};
+        std::string err;
+        CHECK_FALSE(s.process(inp, n, outp, expected, opts, &err));
+        CHECK(err.find("time_ratio") != std::string::npos);
+    }
+
+    SECTION("widening max_time_ratio at prepare() admits the same ratio") {
+        OfflineStretch s;
+        OfflineStretchOptions sizing;
+        sizing.max_time_ratio = 8.0;
+        s.prepare(48000.0, 1, sizing);
+        OfflineStretchOptions opts;
+        opts.time_ratio = 5.0;
+        const long expected = offline_stretch_output_frames(n, opts.time_ratio);
+        std::vector<float> out(static_cast<size_t>(expected));
+        float* outp[1] = {out.data()};
+        std::string err;
+        REQUIRE(s.process(inp, n, outp, expected, opts, &err));
+    }
+
+    SECTION("pitch beyond prepared max is rejected") {
+        OfflineStretch s;
+        s.prepare(48000.0, 1); // default max_pitch_semitones 24
+        OfflineStretchOptions opts;
+        opts.pitch_semitones = 36.0;
+        std::vector<float> out(n);
+        float* outp[1] = {out.data()};
+        std::string err;
+        CHECK_FALSE(s.process(inp, n, outp, n, opts, &err));
+        CHECK(err.find("pitch") != std::string::npos);
+    }
+}
