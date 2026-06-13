@@ -33,6 +33,14 @@ class ExecutionBindingsTests(unittest.TestCase):
             self.mod.EXECUTION_RUNNER_INSTALL_EXPORTS,
         )
 
+    def test_execution_exports_include_job_exports(self):
+        start = self.mod.EXECUTION_EXPORTS.index(self.mod.EXECUTION_JOB_EXPORTS[0])
+
+        self.assertEqual(
+            self.mod.EXECUTION_EXPORTS[start : start + len(self.mod.EXECUTION_JOB_EXPORTS)],
+            self.mod.EXECUTION_JOB_EXPORTS,
+        )
+
     def _bindings(self, runner_name: str, runner):
         execution = types.SimpleNamespace(**{runner_name: runner})
         bindings = {"_execution": execution, "ROOT": Path("/repo"), "print": object()}
@@ -456,6 +464,21 @@ class ExecutionBindingsTests(unittest.TestCase):
 
         self.assertEqual(bindings["run_local_validation"]({"id": "job"}), {"target": "mac"})
         self.assertIs(captured["local"][1]["root"], bindings["ROOT"])
+
+    def test_install_execution_helpers_routes_job_exports(self):
+        captured = {}
+
+        def runner(*args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            return {"targets": {}}
+
+        bindings = self._bindings("config_for_job_execution", runner)
+
+        self.mod.install_execution_helpers(bindings, ("config_for_job_execution",))
+
+        self.assertEqual(bindings["config_for_job_execution"]({"id": "job"}, {"targets": {}}), {"targets": {}})
+        self.assertIs(captured["kwargs"]["load_config_file_fn"], bindings["load_config_file"])
 
 
 if __name__ == "__main__":

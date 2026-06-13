@@ -15,8 +15,10 @@ from execution_command_bindings import (
     windows_validation_script,
 )
 from execution_job_bindings import (
+    EXECUTION_JOB_EXPORTS,
     build_target_tasks,
     config_for_job_execution,
+    install_execution_job_helpers,
     print_result,
     process_job,
     resolve_ssh_target_execution,
@@ -60,19 +62,16 @@ EXECUTION_EXPORTS = (
     *EXECUTION_RESULT_EXPORTS,
     *EXECUTION_LOGGING_EXPORTS,
     *EXECUTION_RUNNER_INSTALL_EXPORTS,
-    "config_for_job_execution",
-    "submission_target_state",
-    "resolve_ssh_target_execution",
-    "build_target_tasks",
-    "process_job",
-    "save_result",
-    "print_result",
+    *EXECUTION_JOB_EXPORTS,
 )
 
 
 def install_execution_helpers(bindings: dict[str, Any], names: tuple[str, ...] = EXECUTION_EXPORTS) -> None:
     runner_names = tuple(name for name in names if name in EXECUTION_RUNNER_INSTALL_EXPORTS)
-    non_runner_names = tuple(name for name in names if name not in EXECUTION_RUNNER_INSTALL_EXPORTS)
+    job_names = tuple(name for name in names if name in EXECUTION_JOB_EXPORTS)
+    delegated_names = set(EXECUTION_RUNNER_INSTALL_EXPORTS) | set(EXECUTION_JOB_EXPORTS)
+    remaining_names = tuple(name for name in names if name not in delegated_names)
 
     install_execution_runner_helpers(bindings, runner_names)
-    install_local_helpers(bindings, globals(), non_runner_names)
+    install_execution_job_helpers(bindings, job_names)
+    install_local_helpers(bindings, globals(), remaining_names)

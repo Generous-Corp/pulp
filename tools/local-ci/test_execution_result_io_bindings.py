@@ -67,6 +67,36 @@ class ExecutionResultIoBindingsTests(unittest.TestCase):
         self.assertIs(captured["print"][1]["result_overall_line_fn"], bindings["result_overall_line"])
         self.assertIs(captured["print"][1]["print_fn"], bindings["print"])
 
+    def test_result_io_exports_match_wrappers(self) -> None:
+        expected = (
+            "save_result",
+            "print_result",
+        )
+
+        self.assertEqual(self.mod.EXECUTION_RESULT_IO_EXPORTS, expected)
+        for name in expected:
+            self.assertTrue(callable(getattr(self.mod, name)))
+
+    def test_install_result_io_helpers_wires_named_exports(self) -> None:
+        captured = {}
+
+        def save_runner(*args, **kwargs):
+            captured["save"] = (args, kwargs)
+            return Path("/state/result.json")
+
+        bindings = {
+            "_execution": types.SimpleNamespace(save_result=save_runner),
+            "datetime": types.SimpleNamespace(now=object()),
+            "ensure_state_dirs": object(),
+            "results_dir": object(),
+            "update_evidence_index": object(),
+        }
+        self.mod.install_execution_result_io_helpers(bindings, ("save_result",))
+
+        self.assertEqual(bindings["save_result"]({"job_id": "job"}), Path("/state/result.json"))
+        self.assertIs(captured["save"][1]["results_dir_fn"], bindings["results_dir"])
+        self.assertEqual(bindings["save_result"].__name__, "save_result")
+
 
 if __name__ == "__main__":
     unittest.main()

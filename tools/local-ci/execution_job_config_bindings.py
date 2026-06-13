@@ -6,7 +6,15 @@ from collections.abc import Mapping
 from typing import Any
 
 from binding_utils import binding as _binding
+from binding_utils import install_local_helpers
 from binding_utils import print_binding as _print_binding
+
+
+EXECUTION_JOB_CONFIG_EXPORTS = (
+    "config_for_job_execution",
+    "submission_target_state",
+    "resolve_ssh_target_execution",
+)
 
 
 def config_for_job_execution(bindings: Mapping[str, Any], job: dict, config: dict) -> dict:
@@ -36,3 +44,10 @@ def resolve_ssh_target_execution(
         defaults,
         ensure_host_reachable_fn=_binding(bindings, "ensure_host_reachable"),
     )
+
+
+def install_execution_job_config_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = EXECUTION_JOB_CONFIG_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)

@@ -6,7 +6,14 @@ from collections.abc import Mapping
 from typing import Any
 
 from binding_utils import binding as _binding
+from binding_utils import install_local_helpers
 from binding_utils import print_binding as _print_binding
+
+
+EXECUTION_RESULT_IO_EXPORTS = (
+    "save_result",
+    "print_result",
+)
 
 
 def save_result(bindings: Mapping[str, Any], result: dict) -> Any:
@@ -30,3 +37,10 @@ def print_result(bindings: Mapping[str, Any], result: dict, result_path=None) ->
         result_overall_line_fn=_binding(bindings, "result_overall_line"),
         print_fn=_print_binding(bindings),
     )
+
+
+def install_execution_result_io_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = EXECUTION_RESULT_IO_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)

@@ -6,7 +6,14 @@ from collections.abc import Mapping
 from typing import Any
 
 from binding_utils import binding as _binding
+from binding_utils import install_local_helpers
 from binding_utils import print_binding as _print_binding
+
+
+EXECUTION_TARGET_TASK_EXPORTS = (
+    "build_target_tasks",
+    "process_job",
+)
 
 
 def build_target_tasks(bindings: Mapping[str, Any], job: dict, config: dict, progress_factory=None) -> list[tuple[str, Any]]:
@@ -41,3 +48,10 @@ def process_job(bindings: Mapping[str, Any], job: dict, config: dict) -> dict:
         completed_job_result_fn=_binding(bindings, "completed_job_result"),
         sorted_target_results_fn=_binding(bindings, "sorted_target_results"),
     )
+
+
+def install_execution_target_task_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = EXECUTION_TARGET_TASK_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)

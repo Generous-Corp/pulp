@@ -84,6 +84,16 @@ class ExecutionJobBindingsTests(unittest.TestCase):
         self.assertEqual(captured["resolve"][0], ({"id": "job"}, "ubuntu", {"host": "u"}, {}))
         self.assertIs(captured["resolve"][1]["ensure_host_reachable_fn"], bindings["ensure_host_reachable"])
 
+    def test_execution_job_exports_are_composed_from_focused_groups(self) -> None:
+        expected = (
+            *self.mod.EXECUTION_JOB_CONFIG_EXPORTS,
+            *self.mod.EXECUTION_TARGET_TASK_EXPORTS,
+            *self.mod.EXECUTION_RESULT_IO_EXPORTS,
+        )
+
+        self.assertEqual(self.mod.EXECUTION_JOB_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def test_build_target_tasks_and_process_job_bind_facade_dependencies(self) -> None:
         captured = {}
 
@@ -148,6 +158,39 @@ class ExecutionJobBindingsTests(unittest.TestCase):
         self.assertIs(captured["print"][1]["result_target_lines_fn"], bindings["result_target_lines"])
         self.assertIs(captured["print"][1]["result_overall_line_fn"], bindings["result_overall_line"])
         self.assertIs(captured["print"][1]["print_fn"], bindings["print"])
+
+    def test_install_execution_job_helpers_routes_each_group(self) -> None:
+        captured = {}
+
+        def config_runner(*args, **kwargs):
+            captured["config"] = (args, kwargs)
+            return {"targets": {}}
+
+        def process_runner(*args, **kwargs):
+            captured["process"] = (args, kwargs)
+            return {"overall": "pass"}
+
+        def save_runner(*args, **kwargs):
+            captured["save"] = (args, kwargs)
+            return Path("/state/result.json")
+
+        bindings = self._bindings("config_for_job_execution", config_runner)
+        bindings["_execution"].process_job = process_runner
+        bindings["_execution"].save_result = save_runner
+
+        self.mod.install_execution_job_helpers(
+            bindings,
+            (
+                "config_for_job_execution",
+                "process_job",
+                "save_result",
+            ),
+        )
+
+        self.assertEqual(bindings["config_for_job_execution"]({"id": "job"}, {"targets": {}}), {"targets": {}})
+        self.assertEqual(bindings["process_job"]({"id": "job"}, {"targets": {}}), {"overall": "pass"})
+        self.assertEqual(bindings["save_result"]({"job_id": "job"}), Path("/state/result.json"))
+        self.assertEqual(list(captured), ["config", "process", "save"])
 
 
 if __name__ == "__main__":
