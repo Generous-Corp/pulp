@@ -21,6 +21,12 @@ class DesktopActionSelectorBindingsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
 
+    def test_selector_exports_match_wrappers(self) -> None:
+        expected = ("windows_requires_pulp_app_selectors",)
+
+        self.assertEqual(self.mod.DESKTOP_ACTION_SELECTOR_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def test_windows_selector_binds_facade_dependency(self) -> None:
         captured = {}
 
@@ -34,6 +40,17 @@ class DesktopActionSelectorBindingsTests(unittest.TestCase):
         args_obj = object()
         self.assertTrue(self.mod.windows_requires_pulp_app_selectors(bindings, args_obj))
         self.assertIs(captured["args"], args_obj)
+
+    def test_install_desktop_action_selector_helpers_wires_named_exports(self) -> None:
+        bindings = {
+            "_desktop_action_commands_cli": types.SimpleNamespace(
+                windows_requires_pulp_app_selectors=lambda args: True,
+            ),
+        }
+
+        self.mod.install_desktop_action_selector_helpers(bindings)
+
+        self.assertTrue(bindings["windows_requires_pulp_app_selectors"](object()))
 
 
 if __name__ == "__main__":

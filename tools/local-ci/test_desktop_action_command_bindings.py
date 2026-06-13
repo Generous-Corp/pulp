@@ -21,6 +21,15 @@ class DesktopActionCommandBindingsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
 
+    def test_command_exports_are_composed_from_focused_groups(self) -> None:
+        expected = (
+            *self.mod.DESKTOP_ACTION_SELECTOR_EXPORTS,
+            *self.mod.DESKTOP_ACTION_RUN_COMMAND_EXPORTS,
+        )
+
+        self.assertEqual(self.mod.DESKTOP_ACTION_COMMAND_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def bindings(self, runner_name: str, runner):
         desktop_cli = types.SimpleNamespace(desktop_action_success_lines=object())
         bindings = {
@@ -55,6 +64,22 @@ class DesktopActionCommandBindingsTests(unittest.TestCase):
         self.assertIs(captured["kwargs"]["run_windows_session_agent_action_fn"], bindings["run_windows_session_agent_action"])
         self.assertIs(captured["kwargs"]["desktop_action_success_lines_fn"], bindings["_desktop_cli"].desktop_action_success_lines)
         self.assertEqual(captured["kwargs"]["sys_platform"], "darwin")
+
+    def test_install_desktop_action_command_helpers_routes_each_group(self) -> None:
+        def smoke_runner(*args, **kwargs):
+            return 5
+
+        bindings = self.bindings("cmd_desktop_smoke", smoke_runner)
+        bindings["_desktop_action_commands_cli"].windows_requires_pulp_app_selectors = lambda args: True
+
+        self.mod.install_desktop_action_command_helpers(
+            bindings,
+            ("windows_requires_pulp_app_selectors", "cmd_desktop_smoke"),
+        )
+
+        self.assertTrue(bindings["windows_requires_pulp_app_selectors"](object()))
+        self.assertEqual(bindings["cmd_desktop_smoke"](object()), 5)
+        self.assertNotIn("cmd_desktop_click", bindings)
 
 
 if __name__ == "__main__":

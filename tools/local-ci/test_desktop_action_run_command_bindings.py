@@ -21,6 +21,16 @@ class DesktopActionRunCommandBindingsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
 
+    def test_run_command_exports_match_wrappers(self) -> None:
+        expected = (
+            "cmd_desktop_smoke",
+            "cmd_desktop_click",
+            "cmd_desktop_inspect",
+        )
+
+        self.assertEqual(self.mod.DESKTOP_ACTION_RUN_COMMAND_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def bindings(self, runner_name: str, runner):
         bindings = {
             "_desktop_action_commands_cli": types.SimpleNamespace(**{runner_name: runner}),
@@ -71,6 +81,17 @@ class DesktopActionRunCommandBindingsTests(unittest.TestCase):
                     bindings["_desktop_cli"].desktop_action_success_lines,
                 )
                 self.assertEqual(captured["kwargs"]["sys_platform"], "darwin")
+
+    def test_install_desktop_action_run_command_helpers_wires_named_exports(self) -> None:
+        def runner(*args, **kwargs):
+            return 5
+
+        bindings = self.bindings("cmd_desktop_click", runner)
+
+        self.mod.install_desktop_action_run_command_helpers(bindings, ("cmd_desktop_click",))
+
+        self.assertEqual(bindings["cmd_desktop_click"](object()), 5)
+        self.assertNotIn("cmd_desktop_smoke", bindings)
 
 
 if __name__ == "__main__":
