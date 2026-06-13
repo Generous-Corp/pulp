@@ -47,10 +47,29 @@ struct Theme {
     // Merge another theme on top (overrides values)
     void apply_overrides(const Theme& overrides);
 
-    // Load from JSON string (choc::json format)
+    // ── Token-schema versioning ──────────────────────────────────────────────
+    // Bumped when the *shape* of the token set changes in a non-additive way
+    // (a token is renamed or made required), so saved themes / user reskins can
+    // be migrated instead of silently breaking. Adding a new optional token is
+    // additive and does NOT need a bump. to_json() stamps this; from_json()
+    // reads it (a version-less document is treated as the current schema for
+    // backward compatibility) and runs migrate_json() for older versions.
+    static constexpr int kSchemaVersion = 1;
+
+    // Reads the "schema_version" field from a theme document, or kSchemaVersion
+    // when absent (legacy version-less themes are treated as current).
+    static int schema_version_of(const std::string& json);
+
+    // Forward-migrates an older theme document to the current schema. v1 is the
+    // first versioned schema, so this is currently identity; future schema
+    // changes add their migration step here. Unknown-future versions are
+    // returned unchanged (parsed leniently — only known tokens are read).
+    static std::string migrate_json(const std::string& json, int from_version);
+
+    // Load from JSON string (choc::json format). Applies migrate_json() first.
     static Theme from_json(const std::string& json);
 
-    // Serialize to JSON string
+    // Serialize to JSON string (stamped with schema_version = kSchemaVersion).
     std::string to_json() const;
 
     // Built-in themes

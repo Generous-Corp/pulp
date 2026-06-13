@@ -117,6 +117,28 @@ TEST_CASE("Theme JSON round-trip", "[view][theme]") {
     REQUIRE(orig_font == rest_font);
 }
 
+TEST_CASE("Theme stamps and reads the token-schema version",
+          "[view][theme][reskin]") {
+    auto json = Theme::dark().to_json();
+    // to_json() stamps the current schema version.
+    REQUIRE(json.find("\"schema_version\"") != std::string::npos);
+    REQUIRE(Theme::schema_version_of(json) == Theme::kSchemaVersion);
+
+    // A legacy, version-less document is treated as the current schema and
+    // still parses its tokens (backward compatibility).
+    auto legacy = R"({"colors":{"accent.primary":"#16dac2"},"dimensions":{},"strings":{}})";
+    REQUIRE(Theme::schema_version_of(legacy) == Theme::kSchemaVersion);
+    auto from_legacy = Theme::from_json(legacy);
+    REQUIRE(from_legacy.color("accent.primary").has_value());
+    REQUIRE(from_legacy.color("accent.primary").value() == color_from_hex(0x16DAC2));
+
+    // Malformed input doesn't throw out of schema_version_of.
+    REQUIRE(Theme::schema_version_of("not json") == Theme::kSchemaVersion);
+
+    // migrate_json is identity at v1 (the first versioned schema).
+    REQUIRE(Theme::migrate_json(legacy, Theme::kSchemaVersion) == legacy);
+}
+
 TEST_CASE("Theme missing token returns nullopt", "[view][theme]") {
     Theme empty;
     REQUIRE_FALSE(empty.color("nonexistent").has_value());
