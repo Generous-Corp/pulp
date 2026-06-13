@@ -87,10 +87,11 @@ class DesktopWindowsRepoProbeBindingsTests(unittest.TestCase):
 
     def test_repo_probe_exports_and_installer_wire_named_helpers(self):
         expected = (
-            "probe_windows_repo_checkout",
-            "ensure_windows_remote_repo_checkout",
+            *self.mod.DESKTOP_WINDOWS_REPO_CHECKOUT_PROBE_EXPORTS,
+            *self.mod.DESKTOP_WINDOWS_REPO_CHECKOUT_ENSURE_EXPORTS,
         )
         self.assertEqual(self.mod.DESKTOP_WINDOWS_REPO_PROBE_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
 
         captured = {}
 
@@ -108,6 +109,29 @@ class DesktopWindowsRepoProbeBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["probe_windows_repo_checkout"]("win", r"C:\Pulp"), {"ok": True})
         self.assertNotIn("ensure_windows_remote_repo_checkout", bindings)
         self.assertEqual(captured["probe"][0], ("win", r"C:\Pulp"))
+
+    def test_repo_probe_installer_routes_selected_groups(self):
+        bindings = self._bindings()
+        bindings["_windows_probe"].probe_windows_repo_checkout = lambda *args, **kwargs: {"ok": True}
+        bindings["_windows_probe"].ensure_windows_remote_repo_checkout = lambda *args, **kwargs: {"ready": True}
+        for name in [
+            "run_windows_ssh_powershell",
+            "windows_repo_path_is_unsafe",
+            "parse_windows_ssh_json",
+            "ps_literal",
+            "probe_windows_repo_checkout",
+            "windows_default_repo_checkout_path",
+            "windows_contract_expand_expression",
+        ]:
+            bindings[name] = object()
+
+        self.mod.install_desktop_windows_repo_probe_helpers(
+            bindings,
+            ("probe_windows_repo_checkout", "ensure_windows_remote_repo_checkout"),
+        )
+
+        self.assertEqual(bindings["probe_windows_repo_checkout"]("win", r"C:\Pulp"), {"ok": True})
+        self.assertEqual(bindings["ensure_windows_remote_repo_checkout"]("win", r"C:\Pulp"), {"ready": True})
 
 
 if __name__ == "__main__":
