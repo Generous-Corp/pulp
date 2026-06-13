@@ -6,6 +6,19 @@ from collections.abc import Mapping
 from typing import Any
 
 from binding_utils import binding as _binding
+from binding_utils import install_local_helpers
+
+
+CLOUD_GITHUB_EXPORTS = (
+    "gh_available",
+    "gh_workflow_dispatch",
+    "gh_run_view",
+    "gh_pr_create",
+    "gh_pr_comment",
+    "gh_pr_merge",
+    "gh_pr_list_open",
+    "gh_pr_head",
+)
 
 
 def gh_available(bindings: Mapping[str, Any]) -> bool:
@@ -44,3 +57,10 @@ def gh_pr_list_open(bindings: Mapping[str, Any]) -> list[dict]:
 
 def gh_pr_head(bindings: Mapping[str, Any], pr_ref: str) -> tuple[int, str, str] | None:
     return _binding(bindings, "_cloud").gh_pr_head(pr_ref)
+
+
+def install_cloud_github_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = CLOUD_GITHUB_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)

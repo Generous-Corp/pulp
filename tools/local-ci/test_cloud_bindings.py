@@ -18,6 +18,17 @@ class CloudBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
 
+    def test_cloud_helper_exports_are_composed_from_focused_groups(self):
+        expected = (
+            *self.mod.CLOUD_MODULE_ATTR_EXPORTS,
+            *self.mod.CLOUD_COMMAND_EXPORTS,
+            *self.mod.CLOUD_GITHUB_EXPORTS,
+            *self.mod.CLOUD_RECORD_EXPORTS,
+        )
+
+        self.assertEqual(self.mod.CLOUD_HELPER_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def _bindings(self):
         calls = []
 
@@ -167,6 +178,28 @@ class CloudBindingsTests(unittest.TestCase):
         self.assertEqual(
             [call[0] for call in calls],
             ["cmd_cloud_run", "gh_available", "list_cloud_records", "open_pr_list_lines"],
+        )
+
+    def test_install_cloud_helpers_routes_each_group(self):
+        bindings, calls = self._bindings()
+
+        self.mod.install_cloud_helpers(
+            bindings,
+            (
+                "summarize_runner_selector",
+                "cmd_cloud_status",
+                "gh_pr_head",
+                "format_ci_comment",
+            ),
+        )
+
+        self.assertEqual(bindings["summarize_runner_selector"]("selector"), "linux,arm64")
+        self.assertEqual(bindings["cmd_cloud_status"](object()), 16)
+        self.assertEqual(bindings["gh_pr_head"]("latest"), (42, "feature/x", "abc123"))
+        self.assertEqual(bindings["format_ci_comment"]({"overall": "pass"}), "comment")
+        self.assertEqual(
+            [call[0] for call in calls],
+            ["summarize_runner_selector", "cmd_cloud_status", "gh_pr_head", "format_ci_comment"],
         )
 
 

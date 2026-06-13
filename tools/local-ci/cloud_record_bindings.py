@@ -6,6 +6,15 @@ from collections.abc import Mapping
 from typing import Any
 
 from binding_utils import binding as _binding
+from binding_utils import install_local_helpers
+
+
+CLOUD_RECORD_EXPORTS = (
+    "list_cloud_records",
+    "cloud_record_summary",
+    "format_ci_comment",
+    "open_pr_list_lines",
+)
 
 
 def list_cloud_records(bindings: Mapping[str, Any], limit: int | None = None) -> list[dict]:
@@ -22,3 +31,10 @@ def format_ci_comment(bindings: Mapping[str, Any], result: dict) -> str:
 
 def open_pr_list_lines(bindings: Mapping[str, Any], prs: list[dict]) -> list[str]:
     return _binding(bindings, "_cloud").open_pr_list_lines(prs)
+
+
+def install_cloud_record_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = CLOUD_RECORD_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)

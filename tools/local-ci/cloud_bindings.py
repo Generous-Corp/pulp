@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from binding_utils import install_module_attrs
 from cloud_command_bindings import (
+    CLOUD_COMMAND_EXPORTS,
     cmd_cloud_compare,
     cmd_cloud_defaults,
     cmd_cloud_history,
@@ -15,8 +15,10 @@ from cloud_command_bindings import (
     cmd_cloud_run,
     cmd_cloud_status,
     cmd_cloud_workflows,
+    install_cloud_command_helpers,
 )
 from cloud_github_bindings import (
+    CLOUD_GITHUB_EXPORTS,
     gh_available,
     gh_pr_comment,
     gh_pr_create,
@@ -25,101 +27,41 @@ from cloud_github_bindings import (
     gh_pr_merge,
     gh_run_view,
     gh_workflow_dispatch,
+    install_cloud_github_helpers,
+)
+from cloud_module_attr_bindings import (
+    CLOUD_MODULE_ATTR_EXPORTS,
+    install_cloud_module_attr_helpers,
 )
 from cloud_record_bindings import (
+    CLOUD_RECORD_EXPORTS,
     cloud_record_summary,
     format_ci_comment,
+    install_cloud_record_helpers,
     list_cloud_records,
     open_pr_list_lines,
 )
 
 
 CLOUD_HELPER_EXPORTS = (
-    "billing_note_text",
-    "billing_period_window",
-    "cloud_record_sort_key",
-    "cloud_run_path",
-    "compare_cloud_providers",
-    "duration_between",
-    "enrich_cloud_record_provider_metadata",
-    "estimate_billing_period_totals",
-    "estimate_cloud_record_cost",
-    "estimate_github_hosted_cost",
-    "estimate_namespace_cost",
-    "fetch_github_repo_actions_billing_summary",
-    "filter_cloud_records",
-    "find_cloud_record",
-    "format_currency_amount",
-    "format_duration_secs",
-    "format_memory_megabytes",
-    "gh_api_json",
-    "gh_auth_status_text",
-    "gh_current_login",
-    "gh_find_dispatched_run",
-    "gh_repo_name",
-    "gh_repo_variables",
-    "gh_token_scopes",
-    "infer_job_os",
-    "iter_year_months",
-    "load_cloud_record",
-    "load_result",
-    "match_namespace_shape_rate",
-    "median_or_none",
-    "namespace_instance_duration_secs",
-    "namespace_instances_for_run",
-    "normalize_cloud_record",
-    "normalize_github_timestamp",
-    "normalize_namespace_instance",
-    "nsc_available",
-    "nsc_instance_history",
-    "nsc_logged_in",
-    "nsc_run",
-    "nsc_version",
-    "nsc_workspace_info",
-    "parse_colon_separated_fields",
-    "parse_iso_date",
-    "parse_iso_datetime",
-    "parse_optional_bool",
-    "parse_rate_value",
-    "cmd_cloud_workflows",
-    "cmd_cloud_defaults",
-    "cmd_cloud_history",
-    "cmd_cloud_compare",
-    "cmd_cloud_recommend",
-    "cmd_cloud_run",
-    "cmd_cloud_status",
-    "cmd_cloud_namespace_doctor",
-    "cmd_cloud_namespace_setup",
-    "gh_available",
-    "gh_workflow_dispatch",
-    "gh_run_view",
-    "gh_pr_create",
-    "gh_pr_comment",
-    "gh_pr_merge",
-    "gh_pr_list_open",
-    "gh_pr_head",
-    "list_cloud_records",
-    "cloud_record_summary",
-    "format_ci_comment",
-    "open_pr_list_lines",
-    "print_billing_period_summary",
-    "print_cloud_field_detail",
-    "print_github_repo_billing_summary",
-    "print_namespace_setup_help",
-    "print_namespace_usage_summary",
-    "provider_billing_note_text",
-    "recommend_cloud_provider",
-    "refresh_cloud_record",
-    "render_selector_value",
-    "resolve_billing_settings",
-    "resolve_github_repository",
-    "save_cloud_record",
-    "summarize_cloud_timing",
-    "summarize_namespace_usage",
-    "summarize_runner_selector",
-    "update_cloud_record_from_run",
+    *CLOUD_MODULE_ATTR_EXPORTS,
+    *CLOUD_COMMAND_EXPORTS,
+    *CLOUD_GITHUB_EXPORTS,
+    *CLOUD_RECORD_EXPORTS,
 )
 
 
 def install_cloud_helpers(bindings: dict[str, Any], names: tuple[str, ...] = CLOUD_HELPER_EXPORTS) -> None:
-    install_module_attrs(bindings, "_cloud", names)
+    module_attr_names = tuple(name for name in names if name in CLOUD_MODULE_ATTR_EXPORTS)
+    command_names = tuple(name for name in names if name in CLOUD_COMMAND_EXPORTS)
+    github_names = tuple(name for name in names if name in CLOUD_GITHUB_EXPORTS)
+    record_names = tuple(name for name in names if name in CLOUD_RECORD_EXPORTS)
+    known_names = set(CLOUD_HELPER_EXPORTS)
+    unknown_names = tuple(name for name in names if name not in known_names)
+
+    install_cloud_module_attr_helpers(bindings, module_attr_names)
+    install_cloud_command_helpers(bindings, command_names)
+    install_cloud_github_helpers(bindings, github_names)
+    install_cloud_record_helpers(bindings, record_names)
+    if unknown_names:
+        install_cloud_module_attr_helpers(bindings, unknown_names)

@@ -18,6 +18,22 @@ class CloudGithubBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
 
+    def test_github_exports_match_wrappers(self):
+        expected = (
+            "gh_available",
+            "gh_workflow_dispatch",
+            "gh_run_view",
+            "gh_pr_create",
+            "gh_pr_comment",
+            "gh_pr_merge",
+            "gh_pr_list_open",
+            "gh_pr_head",
+        )
+
+        self.assertEqual(self.mod.CLOUD_GITHUB_EXPORTS, expected)
+        for name in expected:
+            self.assertTrue(callable(getattr(self.mod, name)))
+
     def test_github_helpers_delegate_to_cloud_module(self):
         calls = []
 
@@ -65,6 +81,16 @@ class CloudGithubBindingsTests(unittest.TestCase):
         self.assertEqual(calls[1][1], ("repo", "build.yml", "main", {"k": "v"}))
         self.assertEqual(calls[3][1], ("feature/x", "main"))
         self.assertEqual(calls[5][1], (42, "squash"))
+
+    def test_install_cloud_github_helpers_wires_named_exports(self):
+        calls = []
+        cloud = types.SimpleNamespace(gh_available=lambda: calls.append(("gh_available",)) or True)
+        bindings = {"_cloud": cloud}
+
+        self.mod.install_cloud_github_helpers(bindings, ("gh_available",))
+
+        self.assertTrue(bindings["gh_available"]())
+        self.assertEqual(calls, [("gh_available",)])
 
 
 if __name__ == "__main__":

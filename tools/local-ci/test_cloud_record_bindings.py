@@ -18,6 +18,18 @@ class CloudRecordBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
 
+    def test_record_exports_match_wrappers(self):
+        expected = (
+            "list_cloud_records",
+            "cloud_record_summary",
+            "format_ci_comment",
+            "open_pr_list_lines",
+        )
+
+        self.assertEqual(self.mod.CLOUD_RECORD_EXPORTS, expected)
+        for name in expected:
+            self.assertTrue(callable(getattr(self.mod, name)))
+
     def test_status_and_formatting_helpers_delegate_to_cloud_module(self):
         calls = []
 
@@ -47,6 +59,16 @@ class CloudRecordBindingsTests(unittest.TestCase):
         )
         self.assertEqual(calls[0][2], {"limit": 5})
         self.assertEqual(calls[1][1], ({"id": 1}, {"cfg": True}))
+
+    def test_install_cloud_record_helpers_wires_named_exports(self):
+        calls = []
+        cloud = types.SimpleNamespace(list_cloud_records=lambda limit=None: calls.append(("list_cloud_records", limit)) or [])
+        bindings = {"_cloud": cloud}
+
+        self.mod.install_cloud_record_helpers(bindings, ("list_cloud_records",))
+
+        self.assertEqual(bindings["list_cloud_records"](limit=2), [])
+        self.assertEqual(calls, [("list_cloud_records", 2)])
 
 
 if __name__ == "__main__":
