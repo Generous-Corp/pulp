@@ -853,8 +853,21 @@ def stage_desktop_publish_report(
     )
 
 
-def desktop_review_issue_draft(review_package: dict, *, package_path: Path, title: str | None = None, repo: str | None = None) -> dict:
-    return _reporting.desktop_review_issue_draft(review_package, package_path=package_path, title=title, repo=repo)
+def desktop_review_issue_draft(
+    review_package: dict,
+    *,
+    package_path: Path,
+    title: str | None = None,
+    repo: str | None = None,
+    check_files: bool = False,
+) -> dict:
+    return _reporting.desktop_review_issue_draft(
+        review_package,
+        package_path=package_path,
+        title=title,
+        repo=repo,
+        check_files=check_files,
+    )
 
 
 def desktop_publish_reports(config: dict, *, limit: int | None = None) -> list[dict]:

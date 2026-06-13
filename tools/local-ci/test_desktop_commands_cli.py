@@ -538,6 +538,7 @@ class DesktopCommandsCliTests(unittest.TestCase):
                 self.assertEqual(kwargs["package_path"], package_path.resolve())
                 self.assertEqual(kwargs["title"], "Review video")
                 self.assertEqual(kwargs["repo"], "danielraffel/pulp")
+                self.assertTrue(kwargs["check_files"])
                 return {
                     "kind": "desktop-video-proof-github-issue-draft",
                     "title": "Review video",
@@ -556,6 +557,7 @@ class DesktopCommandsCliTests(unittest.TestCase):
                     repo="danielraffel/pulp",
                     body_output=None,
                     json_output=None,
+                    check_files=True,
                     json=False,
                 ),
                 desktop_review_issue_draft_fn=draft,
@@ -578,6 +580,7 @@ class DesktopCommandsCliTests(unittest.TestCase):
                     repo=None,
                     body_output=None,
                     json_output=None,
+                    check_files=False,
                     json=True,
                 ),
                 desktop_review_issue_draft_fn=lambda *_args, **_kwargs: self.fail("draft should not run"),
@@ -587,6 +590,34 @@ class DesktopCommandsCliTests(unittest.TestCase):
 
         self.assertEqual(result, 1)
         self.assertIn("review package not found", self.printed[-1])
+
+    def test_review_issue_reports_file_check_errors(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            report_dir = Path(tmpdir) / "report"
+            report_dir.mkdir()
+            package_path = report_dir / "review-package.json"
+            package_path.write_text(json.dumps({"label": "Video Proof", "runs": []}) + "\n")
+
+            def fail_file_check(*_args, **_kwargs):
+                raise ValueError("run 1 attachment missing: proof.issue.mp4")
+
+            result = self.mod.cmd_desktop_review_issue(
+                Namespace(
+                    path=str(report_dir),
+                    title=None,
+                    repo=None,
+                    body_output=None,
+                    json_output=None,
+                    check_files=True,
+                    json=True,
+                ),
+                desktop_review_issue_draft_fn=fail_file_check,
+                atomic_write_text_fn=lambda path, text: self.fail("draft should not be written"),
+                print_fn=self.print_line,
+            )
+
+        self.assertEqual(result, 1)
+        self.assertEqual(self.printed[-1], "Error: run 1 attachment missing: proof.issue.mp4")
 
     def test_verdict_records_needs_work_and_missing_manifest_error(self):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -403,6 +403,7 @@ def build_local_ci_parser(
     p_desktop_review_issue.add_argument("--repo", help="Optional GitHub repo for the suggested gh issue create command")
     p_desktop_review_issue.add_argument("--body-output", help="Optional markdown body output path")
     p_desktop_review_issue.add_argument("--json-output", help="Optional JSON draft output path")
+    p_desktop_review_issue.add_argument("--check-files", action="store_true", help="Verify attachable MP4 files still exist and fit their recorded budget")
     p_desktop_review_issue.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 
     p_desktop_compose_video = desktop_sub.add_parser("compose-video", help="Render or rerender a Remotion proof for an existing desktop run manifest")

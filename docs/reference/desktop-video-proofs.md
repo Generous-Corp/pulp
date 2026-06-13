@@ -411,19 +411,24 @@ issue:
 
 ```bash
 python3 tools/local-ci/local_ci.py desktop review-issue /path/to/published-report \
-  --repo owner/repo
+  --repo owner/repo \
+  --check-files
 ```
 
 The command accepts either the report directory or its `review-package.json`.
 It writes `github-issue.md` and `github-issue.json` next to the report without
 calling GitHub. The JSON draft lists attachable MP4 paths, fallback links,
 source/command/manifest context for each run, the close trigger (`looks good to
-me`), and a suggested `gh issue create` command.
+me`), and a suggested `gh issue create` command. `--check-files` verifies that
+every attachable MP4 still exists and fits its recorded attachment budget before
+writing the draft; runs that already use the served-report fallback remain
+valid.
 
 The intended review loop is:
 
 1. Publish the report.
-2. Generate `github-issue.md` / `github-issue.json` with `desktop review-issue`.
+2. Generate `github-issue.md` / `github-issue.json` with
+   `desktop review-issue --check-files`.
 3. Open a GitHub issue with `github-issue.md`.
 4. Attach the MP4 manually when it fits the configured budget, or use the served
    report link when it does not.

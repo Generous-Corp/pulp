@@ -234,6 +234,7 @@ class CliParserTests(unittest.TestCase):
             "/tmp/body.md",
             "--json-output",
             "/tmp/body.json",
+            "--check-files",
             "--json",
         ])
 
@@ -243,6 +244,7 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(args.repo, "danielraffel/pulp")
         self.assertEqual(args.body_output, "/tmp/body.md")
         self.assertEqual(args.json_output, "/tmp/body.json")
+        self.assertTrue(args.check_files)
         self.assertTrue(args.json)
 
     def test_desktop_video_doctor_defaults_to_mac(self):

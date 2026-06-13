@@ -292,6 +292,8 @@ class ReportingTests(unittest.TestCase):
     def test_desktop_review_issue_draft_lists_attachments_and_fallbacks(self) -> None:
         package_path = self.root / "report" / "review-package.json"
         package_path.parent.mkdir(parents=True)
+        issue_video = package_path.parent / "proof.issue.mp4"
+        issue_video.write_bytes(b"issue")
         review_package = {
             "label": "Video Proof",
             "index_html": str(package_path.parent / "index.html"),
@@ -312,9 +314,9 @@ class ReportingTests(unittest.TestCase):
                     "notes": ["Toggle changes state."],
                     "attachment": {
                         "status": "attach-primary",
-                        "path": str(package_path.parent / "proof.issue.mp4"),
+                        "path": str(issue_video),
                         "relative_path": "assets/proof.issue.mp4",
-                        "size_bytes": 250000,
+                        "size_bytes": issue_video.stat().st_size,
                         "budget_bytes": 100000000,
                         "reason": "primary issue MP4 fits the configured attachment budget",
                     },
@@ -343,12 +345,15 @@ class ReportingTests(unittest.TestCase):
             package_path=package_path,
             title="Review proof",
             repo="danielraffel/pulp",
+            check_files=True,
         )
 
         self.assertEqual(draft["kind"], "desktop-video-proof-github-issue-draft")
         self.assertEqual(draft["title"], "Review proof")
         self.assertEqual(len(draft["attachments"]), 1)
         self.assertEqual(draft["attachments"][0]["relative_path"], "assets/proof.issue.mp4")
+        self.assertEqual(draft["attachment_checks"][0]["path"], str(issue_video))
+        self.assertTrue(draft["attachment_checks"][0]["fits_attachment_budget"])
         self.assertEqual(len(draft["fallback_links"]), 1)
         self.assertTrue(draft["fallback_links"][0]["internal_ephemeral"])
         self.assertIn("gh issue create --repo danielraffel/pulp", draft["create_command"])
@@ -361,6 +366,67 @@ class ReportingTests(unittest.TestCase):
         self.assertIn("Manifest: `", draft["body"])
         self.assertIn("Context component: `bypass-toggle`", draft["body"])
         self.assertIn("use the served report link", draft["body"])
+
+    def test_desktop_review_issue_draft_check_files_rejects_missing_attachment(self) -> None:
+        package_path = self.root / "report" / "review-package.json"
+        package_path.parent.mkdir(parents=True)
+        missing_video = package_path.parent / "missing.issue.mp4"
+        review_package = {
+            "label": "Video Proof",
+            "runs": [
+                {
+                    "target": "mac",
+                    "action": "click",
+                    "label": "component",
+                    "attachment": {
+                        "status": "attach-primary",
+                        "path": str(missing_video),
+                        "relative_path": "assets/missing.issue.mp4",
+                        "size_bytes": 250000,
+                        "budget_bytes": 100000000,
+                        "reason": "primary issue MP4 fits the configured attachment budget",
+                    },
+                }
+            ],
+        }
+
+        with self.assertRaisesRegex(ValueError, "run 1 attachment missing"):
+            self.mod.desktop_review_issue_draft(
+                review_package,
+                package_path=package_path,
+                check_files=True,
+            )
+
+    def test_desktop_review_issue_draft_check_files_rejects_over_budget_attachment(self) -> None:
+        package_path = self.root / "report" / "review-package.json"
+        package_path.parent.mkdir(parents=True)
+        issue_video = package_path.parent / "proof.issue.mp4"
+        issue_video.write_bytes(b"issue")
+        review_package = {
+            "label": "Video Proof",
+            "runs": [
+                {
+                    "target": "mac",
+                    "action": "click",
+                    "label": "component",
+                    "attachment": {
+                        "status": "attach-primary",
+                        "path": str(issue_video),
+                        "relative_path": "assets/proof.issue.mp4",
+                        "size_bytes": 5,
+                        "budget_bytes": 4,
+                        "reason": "primary issue MP4 fits the configured attachment budget",
+                    },
+                }
+            ],
+        }
+
+        with self.assertRaisesRegex(ValueError, "attachment exceeds budget"):
+            self.mod.desktop_review_issue_draft(
+                review_package,
+                package_path=package_path,
+                check_files=True,
+            )
 
     def test_manifest_scanning_and_run_rollups_use_latest_passing_proof(self) -> None:
         root = self.artifact_root(self.config)

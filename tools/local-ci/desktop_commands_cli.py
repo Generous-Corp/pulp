@@ -527,12 +527,17 @@ def cmd_desktop_review_issue(
     except json.JSONDecodeError as exc:
         print_fn(f"Error: invalid review package JSON: {exc}")
         return 1
-    draft = desktop_review_issue_draft_fn(
-        review_package,
-        package_path=package_path,
-        title=args.title,
-        repo=args.repo,
-    )
+    try:
+        draft = desktop_review_issue_draft_fn(
+            review_package,
+            package_path=package_path,
+            title=args.title,
+            repo=args.repo,
+            check_files=getattr(args, "check_files", False),
+        )
+    except ValueError as exc:
+        print_fn(f"Error: {exc}")
+        return 1
     body_path = Path(args.body_output).expanduser().resolve() if args.body_output else Path(draft["body_file"])
     json_path = Path(args.json_output).expanduser().resolve() if args.json_output else Path(draft["json_file"])
     draft["body_file"] = str(body_path)

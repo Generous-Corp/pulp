@@ -432,7 +432,8 @@ opening the issue:
 
 ```bash
 python3 tools/local-ci/local_ci.py desktop review-issue /path/to/published-report \
-  --repo owner/repo
+  --repo owner/repo \
+  --check-files
 ```
 
 The command accepts either the report directory or `review-package.json`, then
@@ -440,10 +441,12 @@ writes `github-issue.md` and `github-issue.json` next to the report without
 calling GitHub. Use `github-issue.md` as the issue body. Use
 `github-issue.json` to see which MP4s should be attached and which runs need the
 served fallback link. The draft also includes launch command, source branch/SHA,
-host/adapter, and copied manifest path when the manifest recorded them. GitHub
-supports `.mp4`, `.mov`, and `.webm` attachments and currently recommends H.264
-for compatibility; paid-plan eligible uploaders can use the 100 MB video budget,
-while others should assume 10 MB. Attach
+host/adapter, and copied manifest path when the manifest recorded them.
+`--check-files` verifies that every attachable MP4 still exists and fits its
+recorded attachment budget before writing the draft; fallback-link runs remain
+valid. GitHub supports `.mp4`, `.mov`, and `.webm` attachments and currently
+recommends H.264 for compatibility; paid-plan eligible uploaders can use the
+100 MB video budget, while others should assume 10 MB. Attach
 `proof.issue.mp4` manually when it fits the chosen budget; attach
 `proof.small.mp4` when the normal issue video is too large but the small
 fallback fits. Otherwise include the served report URL. The review issue can be

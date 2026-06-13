@@ -476,11 +476,14 @@ def desktop_review_issue_draft(
     package_path: Path,
     title: str | None = None,
     repo: str | None = None,
+    check_files: bool = False,
 ) -> dict:
     package_dir = package_path.parent
     issue_title = title or f"Review desktop validation video proof: {review_package.get('label') or package_dir.name}"
     attachments: list[dict] = []
     fallback_links: list[dict] = []
+    attachment_checks: list[dict] = []
+    attachment_errors: list[str] = []
     body_lines = [
         f"# {issue_title}",
         "",
@@ -529,6 +532,29 @@ def desktop_review_issue_draft(
         for note in (run.get("notes") or [])[:5]:
             body_lines.append(f"- Proof note: {note}")
         if attach_path and status in {"attach-primary", "attach-small"}:
+            if check_files:
+                attachment_path = Path(attach_path).expanduser()
+                exists = attachment_path.is_file()
+                actual_size = attachment_path.stat().st_size if exists else None
+                budget_bytes = attachment.get("budget_bytes")
+                over_budget = isinstance(budget_bytes, int) and actual_size is not None and actual_size > budget_bytes
+                check = {
+                    "run_index": index,
+                    "status": status,
+                    "path": attach_path,
+                    "exists": exists,
+                    "size_bytes": actual_size,
+                    "budget_bytes": budget_bytes,
+                    "fits_attachment_budget": bool(exists and not over_budget),
+                }
+                attachment_checks.append(check)
+                if not exists:
+                    attachment_errors.append(f"run {index} attachment missing: {attach_path}")
+                elif over_budget:
+                    attachment_errors.append(
+                        f"run {index} attachment exceeds budget: {attach_path} "
+                        f"({actual_size} bytes > {budget_bytes} bytes)"
+                    )
             item = {
                 "run_index": index,
                 "status": status,
@@ -553,6 +579,8 @@ def desktop_review_issue_draft(
             fallback_links.append(fallback_item)
             body_lines.append("- Attach MP4: not available within budget; use the served report link.")
         body_lines.append("")
+    if attachment_errors:
+        raise ValueError("; ".join(attachment_errors))
     body_lines.extend(
         [
             "## Closeout",
@@ -572,6 +600,8 @@ def desktop_review_issue_draft(
         "fallback_links": fallback_links,
         "close_trigger": "looks good to me",
     }
+    if check_files:
+        draft["attachment_checks"] = attachment_checks
     if repo:
         draft["repo"] = repo
         draft["create_command"] = f"gh issue create --repo {repo} --title {json.dumps(issue_title)} --body-file {draft['body_file']}"
