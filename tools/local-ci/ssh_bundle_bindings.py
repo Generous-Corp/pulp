@@ -3,18 +3,14 @@
 from __future__ import annotations
 
 from binding_utils import install_local_helpers
-from ssh_bundle_core_bindings import (
-    bundle_ref_name,
-    config_for_bundle_probe,
-    create_job_bundle,
-    remote_bundle_name,
-    sync_job_bundle_to_ssh_host,
-)
+from ssh_bundle_build_bindings import config_for_bundle_probe, create_job_bundle
+from ssh_bundle_name_bindings import bundle_ref_name, remote_bundle_name
 from ssh_bundle_probe_bindings import (
     probe_uploaded_bundle_size,
     ssh_host_uses_windows_shell,
     target_name_for_ssh_host,
 )
+from ssh_bundle_sync_bindings import sync_job_bundle_to_ssh_host
 
 
 SSH_BUNDLE_EXPORTS = (
