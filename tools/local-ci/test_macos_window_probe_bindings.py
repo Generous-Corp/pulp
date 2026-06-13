@@ -94,6 +94,26 @@ class MacosWindowProbeBindingsTests(unittest.TestCase):
         self.assertIsNone(bindings["capture_macos_window"](7, Path("/tmp/window.png")))
         self.assertNotIn("wait_for_macos_window", bindings)
 
+    def test_probe_installer_routes_selected_groups(self) -> None:
+        macos_desktop = types.SimpleNamespace(
+            macos_accessibility_trusted=lambda **kwargs: True,
+            wait_for_macos_window=lambda pid, timeout_secs, **kwargs: {"pid": pid},
+            capture_macos_window=lambda window_id, output_path, **kwargs: None,
+        )
+        bindings = self._bindings(macos_desktop)
+        existing_pid_info = bindings["macos_window_info_for_pid"]
+
+        self.mod.install_macos_window_probe_helpers(
+            bindings,
+            ("macos_accessibility_trusted", "wait_for_macos_window", "capture_macos_window"),
+        )
+
+        self.assertTrue(bindings["macos_accessibility_trusted"]())
+        self.assertEqual(bindings["wait_for_macos_window"](123, 2.0), {"pid": 123})
+        self.assertIsNone(bindings["capture_macos_window"](7, Path("/tmp/window.png")))
+        self.assertIs(bindings["macos_window_info_for_pid"], existing_pid_info)
+        self.assertNotIn("wait_for_macos_bundle_window", bindings)
+
 
 if __name__ == "__main__":
     unittest.main()

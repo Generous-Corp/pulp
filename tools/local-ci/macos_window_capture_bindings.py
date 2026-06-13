@@ -6,6 +6,7 @@ from pathlib import Path
 
 from binding_utils import binding as _binding
 from binding_utils import binding_attr as _binding_attr
+from binding_utils import install_local_helpers
 
 
 MACOS_WINDOW_CAPTURE_EXPORTS = ("capture_macos_window",)
@@ -18,3 +19,10 @@ def capture_macos_window(bindings: dict, window_id: int, output_path: Path) -> N
         run_fn=_binding_attr(bindings, "subprocess", "run"),
         sleep_fn=_binding_attr(bindings, "time", "sleep"),
     )
+
+
+def install_macos_window_capture_helpers(
+    bindings: dict,
+    names: tuple[str, ...] = MACOS_WINDOW_CAPTURE_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)

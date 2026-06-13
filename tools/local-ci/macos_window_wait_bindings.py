@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from binding_utils import binding as _binding
 from binding_utils import binding_attr as _binding_attr
+from binding_utils import install_local_helpers
 
 
 MACOS_WINDOW_WAIT_EXPORTS = (
@@ -31,3 +32,10 @@ def wait_for_macos_bundle_window(bindings: dict, bundle_id: str, timeout_secs: f
         time_fn=_binding_attr(bindings, "time", "time"),
         sleep_fn=_binding_attr(bindings, "time", "sleep"),
     )
+
+
+def install_macos_window_wait_helpers(
+    bindings: dict,
+    names: tuple[str, ...] = MACOS_WINDOW_WAIT_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)

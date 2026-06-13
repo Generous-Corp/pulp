@@ -65,6 +65,22 @@ class MacosWindowInfoBindingsTests(unittest.TestCase):
         self.assertIs(captured["trusted"][1]["probe_path_fn"], bindings["macos_window_probe_path"])
         self.assertIs(captured["trusted"][1]["run_fn"], run_fn)
 
+    def test_info_installer_wires_selected_helpers(self) -> None:
+        captured = {}
+
+        def runner(*args, **kwargs):
+            captured["trusted"] = (args, kwargs)
+            return True
+
+        macos_desktop = types.SimpleNamespace(macos_accessibility_trusted=runner)
+        bindings = self._bindings(macos_desktop)
+
+        self.mod.install_macos_window_info_helpers(bindings, ("macos_accessibility_trusted",))
+
+        self.assertTrue(bindings["macos_accessibility_trusted"]())
+        self.assertNotIn("macos_window_info_for_pid", bindings)
+        self.assertEqual(captured["trusted"][0], ())
+
 
 if __name__ == "__main__":
     unittest.main()

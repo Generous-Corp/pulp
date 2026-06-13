@@ -66,6 +66,22 @@ class MacosWindowWaitBindingsTests(unittest.TestCase):
         self.assertIs(captured["wait_bundle"][1]["time_fn"], time_fn)
         self.assertIs(captured["wait_bundle"][1]["sleep_fn"], sleep_fn)
 
+    def test_wait_installer_wires_selected_helpers(self) -> None:
+        captured = {}
+
+        def runner(*args, **kwargs):
+            captured["wait"] = (args, kwargs)
+            return {"id": 7}
+
+        macos_desktop = types.SimpleNamespace(wait_for_macos_window=runner)
+        bindings = self._bindings(macos_desktop)
+
+        self.mod.install_macos_window_wait_helpers(bindings, ("wait_for_macos_window",))
+
+        self.assertEqual(bindings["wait_for_macos_window"](123, 2.0), {"id": 7})
+        self.assertNotIn("wait_for_macos_bundle_window", bindings)
+        self.assertEqual(captured["wait"][0], (123, 2.0))
+
 
 if __name__ == "__main__":
     unittest.main()

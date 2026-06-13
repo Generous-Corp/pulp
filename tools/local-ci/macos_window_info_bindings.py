@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from binding_utils import binding as _binding
 from binding_utils import binding_attr as _binding_attr
+from binding_utils import install_local_helpers
 
 
 MACOS_WINDOW_INFO_EXPORTS = (
@@ -34,3 +35,10 @@ def macos_accessibility_trusted(bindings: dict) -> bool:
         probe_path_fn=_binding(bindings, "macos_window_probe_path"),
         run_fn=_binding_attr(bindings, "subprocess", "run"),
     )
+
+
+def install_macos_window_info_helpers(
+    bindings: dict,
+    names: tuple[str, ...] = MACOS_WINDOW_INFO_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)

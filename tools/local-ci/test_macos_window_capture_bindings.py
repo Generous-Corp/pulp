@@ -44,6 +44,25 @@ class MacosWindowCaptureBindingsTests(unittest.TestCase):
         self.assertIs(captured["capture"][1]["run_fn"], run_fn)
         self.assertIs(captured["capture"][1]["sleep_fn"], sleep_fn)
 
+    def test_capture_installer_wires_named_helper(self) -> None:
+        captured = {}
+
+        def capture_macos_window(*args, **kwargs):
+            captured["capture"] = (args, kwargs)
+
+        macos_desktop = types.SimpleNamespace(capture_macos_window=capture_macos_window)
+        bindings = {
+            "_macos_desktop": macos_desktop,
+            "subprocess": types.SimpleNamespace(run=object()),
+            "time": types.SimpleNamespace(sleep=object()),
+        }
+
+        self.mod.install_macos_window_capture_helpers(bindings)
+
+        self.mod.capture_macos_window(bindings, 7, Path("/tmp/window.png"))
+        bindings["capture_macos_window"](7, Path("/tmp/window.png"))
+        self.assertEqual(captured["capture"][0], (7, Path("/tmp/window.png")))
+
 
 if __name__ == "__main__":
     unittest.main()
