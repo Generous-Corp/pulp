@@ -3893,7 +3893,7 @@ int cmd_kit(const std::vector<std::string>& args) {
     if (args[0] == "search") return cmd_search(tail);
     if (args[0] == "validate") return cmd_validate(tail);
     if (args[0] == "inspect" || args[0] == "show") return cmd_inspect(tail);
-    if (args[0] == "plan" || args[0] == "preview") return cmd_plan(tail);
+    if (args[0] == "plan") return cmd_plan(tail);
     if (args[0] == "verify") return cmd_verify(tail);
     if (args[0] == "apply") return cmd_apply(tail);
     if (args[0] == "remove" || args[0] == "uninstall") return cmd_remove(tail);

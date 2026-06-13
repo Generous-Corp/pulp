@@ -1013,7 +1013,7 @@ commands:
 
   - name: kit
     status: experimental
-    summary: Search, inspect, preview, approve, apply, remove, pack, and scaffold local Pulp package manifests. Kits are the trust-reviewed lane for local or external Pulp-native artifacts; curated dependency packages remain on `pulp add`.
+    summary: Search, inspect, plan, approve, apply, remove, pack, and scaffold local Pulp package manifests. Kits are the trust-reviewed lane for local or external Pulp-native artifacts; curated dependency packages remain on `pulp add`.
     subcommands:
       - name: search
         summary: Search local Pulp package manifests and verified local package archives without executing package code, classifying results into kit or content lanes.

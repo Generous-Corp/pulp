@@ -2035,6 +2035,11 @@ TEST_CASE("pulp kit plan previews project mutations without writing files",
     REQUIRE(fs::exists(project.path / "cmake" / "pulp-kits.cmake") == before_cmake_exists);
 }
 
+TEST_CASE("pulp kit rejects preview alias to preserve plan/apply trust wording",
+          "[cli][kit][trust]") {
+    REQUIRE(cmd_kit({"preview", "fixtures/packages/basic-ui-kit"}) == 2);
+}
+
 TEST_CASE("pulp kit plan resolves dependency packages only through curated registry",
           "[cli][kit][phase2]") {
     TempDir project;

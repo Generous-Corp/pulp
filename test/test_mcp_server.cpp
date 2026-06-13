@@ -939,6 +939,12 @@ TEST_CASE("MCP docs_search and create quote user arguments",
     require_contains(kit_umbrella, R"JSON("id":48)JSON");
     require_contains(kit_umbrella, "fake-pulp [kit] [validate] [fixtures/packages/basic ui's kit] [--json]");
 
+    auto kit_preview_alias = handle_request(tool_call(
+        "52", "pulp_kit", R"JSON({"subcommand":"preview","path":"fixtures/packages/basic ui's kit"})JSON"));
+    require_contains(kit_preview_alias, R"JSON("id":52)JSON");
+    require_contains(kit_preview_alias, "Error: unsupported kit subcommand");
+    REQUIRE(kit_preview_alias.find("[kit] [plan]") == std::string::npos);
+
     auto kit_inspect = handle_request(tool_call(
         "46", "pulp_kit_inspect", R"JSON({"path":"fixtures/packages/basic ui's kit"})JSON"));
     require_contains(kit_inspect, R"JSON("id":46)JSON");

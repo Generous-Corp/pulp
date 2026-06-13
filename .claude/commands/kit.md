@@ -1,6 +1,6 @@
 # /kit
 
-Search, inspect, preview, approve, and apply local Pulp kit manifests or `.pulpkit` archives.
+Search, inspect, plan, approve, and apply local Pulp kit manifests or `.pulpkit` archives.
 
 Use this for Pulp-native source, UI, template, validation, graph, and native-component artifacts that should be reviewed before project mutation.
 

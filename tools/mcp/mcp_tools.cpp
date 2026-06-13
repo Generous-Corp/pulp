@@ -393,7 +393,7 @@ std::string handle_kit(const std::string& params_json) {
     if (subcommand == "search") return handle_kit_search(params_json);
     if (subcommand == "validate") return handle_kit_validate(params_json);
     if (subcommand == "inspect" || subcommand == "show") return handle_kit_inspect(params_json);
-    if (subcommand == "plan" || subcommand == "preview") return handle_kit_plan(params_json);
+    if (subcommand == "plan") return handle_kit_plan(params_json);
     if (subcommand == "verify") return handle_kit_verify(params_json);
     if (subcommand == "apply") return handle_kit_apply(params_json);
     if (subcommand == "remove" || subcommand == "uninstall") return handle_kit_remove(params_json);

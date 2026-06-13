@@ -1685,7 +1685,7 @@ Use `pulp kit` for Pulp-native building blocks: DSP source, UI widgets, design t
 
 This is intentionally separate from `pulp add`. `pulp add rubberband` means "add a curated dependency from Pulp registry metadata." `pulp kit validate ./thing` or `pulp kit validate ./thing.pulpkit` means "inspect this local artifact before trusting or applying it."
 
-The workflow is inspect, preview, verify, approve, apply:
+The workflow is inspect, plan, verify, approve, apply:
 
 1. `validate` / `inspect` read `pulp.package.json` and declared files only.
 2. `plan` previews the project changes without writing files.
