@@ -6,6 +6,17 @@ from collections.abc import Mapping
 from typing import Any
 
 from binding_utils import binding as _binding
+from binding_utils import install_local_helpers
+
+
+GITHUB_WORKFLOW_DISPATCH_EXPORTS = (
+    "resolve_workflow_runner_selector_json",
+    "resolve_workflow_dispatch_field_values",
+    "repo_variable_name_for_workflow_field",
+    "resolve_workflow_field_value_and_source",
+    "resolve_workflow_dispatch_defaults",
+    "resolve_cli_dispatch_field_values",
+)
 
 
 def resolve_workflow_runner_selector_json(
@@ -88,3 +99,10 @@ def resolve_cli_dispatch_field_values(
         args,
         field_names,
     )
+
+
+def install_github_workflow_dispatch_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = GITHUB_WORKFLOW_DISPATCH_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)

@@ -18,6 +18,16 @@ class GithubWorkflowBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
 
+    def test_github_workflow_exports_are_composed_from_focused_groups(self):
+        expected = (
+            *self.mod.GITHUB_WORKFLOW_SETTINGS_EXPORTS,
+            *self.mod.GITHUB_WORKFLOW_DISPATCH_EXPORTS,
+            *self.mod.GITHUB_WORKFLOW_PROVIDER_EXPORTS,
+        )
+
+        self.assertEqual(self.mod.GITHUB_WORKFLOW_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def _bindings(self):
         calls = []
 
@@ -142,6 +152,41 @@ class GithubWorkflowBindingsTests(unittest.TestCase):
             "normalize_runs_on_json",
         ])
         self.assertEqual(calls[1][2], {"setting_name": "runner"})
+
+    def test_install_github_workflow_helpers_routes_each_group(self):
+        bindings, calls = self._bindings()
+
+        self.mod.install_github_workflow_helpers(
+            bindings,
+            (
+                "resolve_github_actions_settings",
+                "resolve_cli_dispatch_field_values",
+                "resolve_default_provider_for_workflow",
+            ),
+        )
+
+        args = types.SimpleNamespace(linux_runner_selector_json=None)
+        self.assertEqual(bindings["resolve_github_actions_settings"]({"github_actions": {}}), {"provider": "namespace"})
+        self.assertEqual(bindings["resolve_cli_dispatch_field_values"](args, ("field",)), {"field": "cli"})
+        self.assertEqual(
+            bindings["resolve_default_provider_for_workflow"]({"provider": "namespace"}, "build"),
+            ("github-hosted", "builtin"),
+        )
+        self.assertEqual(
+            [call[0] for call in calls],
+            [
+                "resolve_github_actions_settings",
+                "resolve_cli_dispatch_field_values",
+                "resolve_default_provider_for_workflow",
+            ],
+        )
+
+    def test_install_github_workflow_helpers_keeps_unknown_imported_name_support(self):
+        bindings, _calls = self._bindings()
+
+        self.mod.install_github_workflow_helpers(bindings, ("github_actions_defaults",))
+
+        self.assertEqual(bindings["github_actions_defaults"](), {"provider": "github-hosted"})
 
 
 if __name__ == "__main__":

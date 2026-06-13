@@ -18,6 +18,17 @@ class GithubWorkflowSettingsBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
 
+    def test_settings_exports_match_wrappers(self):
+        expected = (
+            "github_actions_settings_for_display",
+            "resolve_github_actions_settings",
+            "normalize_runs_on_json",
+        )
+
+        self.assertEqual(self.mod.GITHUB_WORKFLOW_SETTINGS_EXPORTS, expected)
+        for name in expected:
+            self.assertTrue(callable(getattr(self.mod, name)))
+
     def test_settings_bindings_delegate_to_github_workflows_module(self):
         calls = []
 
@@ -46,6 +57,21 @@ class GithubWorkflowSettingsBindingsTests(unittest.TestCase):
         )
         self.assertEqual(calls[2][1], ("macos-15",))
         self.assertEqual(calls[2][2], {"setting_name": "setting"})
+
+    def test_install_github_workflow_settings_helpers_wires_named_exports(self):
+        calls = []
+
+        def resolve_settings(config):
+            calls.append(("resolve_github_actions_settings", config))
+            return {"provider": "github-hosted"}
+
+        workflows = types.SimpleNamespace(resolve_github_actions_settings=resolve_settings)
+        bindings = {"_github_workflows": workflows}
+
+        self.mod.install_github_workflow_settings_helpers(bindings, ("resolve_github_actions_settings",))
+
+        self.assertEqual(bindings["resolve_github_actions_settings"]({"github_actions": {}}), {"provider": "github-hosted"})
+        self.assertEqual(calls, [("resolve_github_actions_settings", {"github_actions": {}})])
 
 
 if __name__ == "__main__":

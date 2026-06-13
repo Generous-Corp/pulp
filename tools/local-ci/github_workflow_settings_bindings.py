@@ -6,6 +6,14 @@ from collections.abc import Mapping
 from typing import Any
 
 from binding_utils import binding as _binding
+from binding_utils import install_local_helpers
+
+
+GITHUB_WORKFLOW_SETTINGS_EXPORTS = (
+    "github_actions_settings_for_display",
+    "resolve_github_actions_settings",
+    "normalize_runs_on_json",
+)
 
 
 def github_actions_settings_for_display(bindings: Mapping[str, Any], config: dict | None) -> dict:
@@ -18,3 +26,10 @@ def resolve_github_actions_settings(bindings: Mapping[str, Any], config: dict | 
 
 def normalize_runs_on_json(bindings: Mapping[str, Any], raw: str, *, setting_name: str) -> str:
     return _binding(bindings, "_github_workflows").normalize_runs_on_json(raw, setting_name=setting_name)
+
+
+def install_github_workflow_settings_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = GITHUB_WORKFLOW_SETTINGS_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)

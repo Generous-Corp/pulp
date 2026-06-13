@@ -18,6 +18,20 @@ class GithubWorkflowDispatchBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
 
+    def test_dispatch_exports_match_wrappers(self):
+        expected = (
+            "resolve_workflow_runner_selector_json",
+            "resolve_workflow_dispatch_field_values",
+            "repo_variable_name_for_workflow_field",
+            "resolve_workflow_field_value_and_source",
+            "resolve_workflow_dispatch_defaults",
+            "resolve_cli_dispatch_field_values",
+        )
+
+        self.assertEqual(self.mod.GITHUB_WORKFLOW_DISPATCH_EXPORTS, expected)
+        for name in expected:
+            self.assertTrue(callable(getattr(self.mod, name)))
+
     def test_dispatch_bindings_delegate_to_github_workflows_module(self):
         calls = []
 
@@ -87,6 +101,22 @@ class GithubWorkflowDispatchBindingsTests(unittest.TestCase):
         )
         self.assertEqual(calls[3][1], (config, repository_variables, "build", "namespace", "linux_runner_selector_json"))
         self.assertEqual(calls[5][1], (args, fields))
+
+    def test_install_github_workflow_dispatch_helpers_wires_named_exports(self):
+        calls = []
+
+        def resolve_cli(args, field_names):
+            calls.append(("resolve_cli_dispatch_field_values", args, field_names))
+            return {"field": "cli"}
+
+        workflows = types.SimpleNamespace(resolve_cli_dispatch_field_values=resolve_cli)
+        bindings = {"_github_workflows": workflows}
+
+        self.mod.install_github_workflow_dispatch_helpers(bindings, ("resolve_cli_dispatch_field_values",))
+
+        args = types.SimpleNamespace(linux_runner_selector_json=None)
+        self.assertEqual(bindings["resolve_cli_dispatch_field_values"](args, ("field",)), {"field": "cli"})
+        self.assertEqual(calls, [("resolve_cli_dispatch_field_values", args, ("field",))])
 
 
 if __name__ == "__main__":
