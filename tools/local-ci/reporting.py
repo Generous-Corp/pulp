@@ -335,8 +335,38 @@ def _source_summary(source: dict) -> str | None:
     return ", ".join(parts) if parts else None
 
 
+def _desktop_report_serve_label(index_payload: dict, publish_dir: Path) -> str:
+    label = slugify_token(str(index_payload.get("label") or publish_dir.name))
+    return label or "desktop-proof-report"
+
+
+def _desktop_report_serve_commands(index_payload: dict, publish_dir: Path) -> dict:
+    quoted_dir = shlex.quote(str(publish_dir))
+    label = _desktop_report_serve_label(index_payload, publish_dir)
+    return {
+        "serve_label": label,
+        "serve_command": f"python3 tools/local-ci/local_ci.py desktop serve {quoted_dir} --host 0.0.0.0 --port 8765",
+        "serve_background_command": (
+            f"python3 tools/local-ci/local_ci.py desktop serve {quoted_dir} "
+            f"--host 0.0.0.0 --port 8765 --background --label {shlex.quote(label)} --json"
+        ),
+        "serve_status_command": (
+            f"python3 tools/local-ci/local_ci.py desktop serve --status "
+            f"--label {shlex.quote(label)} --json"
+        ),
+        "serve_stop_command": (
+            f"python3 tools/local-ci/local_ci.py desktop serve --stop "
+            f"--label {shlex.quote(label)} --json"
+        ),
+    }
+
+
 def desktop_review_issue_body(index_payload: dict, *, publish_dir: Path) -> str:
-    serve_command = f"python3 tools/local-ci/local_ci.py desktop serve {publish_dir} --host 0.0.0.0 --port 8765"
+    serve_commands = _desktop_report_serve_commands(index_payload, publish_dir)
+    serve_command = serve_commands["serve_command"]
+    serve_background_command = serve_commands["serve_background_command"]
+    serve_status_command = serve_commands["serve_status_command"]
+    serve_stop_command = serve_commands["serve_stop_command"]
     serve_urls = [str(url) for url in index_payload.get("serve_urls", []) if url]
     lines = [
         f"# {index_payload['label']}",
@@ -347,6 +377,9 @@ def desktop_review_issue_body(index_payload: dict, *, publish_dir: Path) -> str:
         "",
         f"- Open local report: `{publish_dir / 'index.html'}`",
         f"- Serve over local/Tailscale HTTP: `{serve_command}`",
+        f"- Start background server: `{serve_background_command}`",
+        f"- Check server: `{serve_status_command}`",
+        f"- Stop server: `{serve_stop_command}`",
         "- Served URL: `desktop serve` prints candidate URLs, including localhost, configured public hosts, and Tailscale IPs when available.",
         "- Friendly Tailnet name: set `PULP_DESKTOP_SERVE_HOSTS=<name-or-ip>` before running `desktop serve` if reviewers should tap a stable host name.",
         "- Reviewer verdict: comment `looks good to me` when the proof is accepted, or describe the mismatch and run label when changes are needed.",
@@ -445,7 +478,12 @@ def desktop_review_issue_body(index_payload: dict, *, publish_dir: Path) -> str:
 
 
 def desktop_review_package(index_payload: dict, *, publish_dir: Path) -> dict:
-    serve_command = f"python3 tools/local-ci/local_ci.py desktop serve {publish_dir} --host 0.0.0.0 --port 8765"
+    serve_commands = _desktop_report_serve_commands(index_payload, publish_dir)
+    serve_label = serve_commands["serve_label"]
+    serve_command = serve_commands["serve_command"]
+    serve_background_command = serve_commands["serve_background_command"]
+    serve_status_command = serve_commands["serve_status_command"]
+    serve_stop_command = serve_commands["serve_stop_command"]
     serve_urls = [str(url) for url in index_payload.get("serve_urls", []) if url]
     runs: list[dict] = []
     for run in index_payload.get("runs", []):
@@ -516,7 +554,11 @@ def desktop_review_package(index_payload: dict, *, publish_dir: Path) -> dict:
                 "fallback": {
                     "report_path": str(publish_dir / "index.html"),
                     "review_markdown": str(publish_dir / "review.md"),
+                    "serve_label": serve_label,
                     "serve_command": serve_command,
+                    "serve_background_command": serve_background_command,
+                    "serve_status_command": serve_status_command,
+                    "serve_stop_command": serve_stop_command,
                     "serve_urls": serve_urls,
                     "internal_ephemeral": True,
                 },
@@ -532,7 +574,11 @@ def desktop_review_package(index_payload: dict, *, publish_dir: Path) -> dict:
         "index_html": str(publish_dir / "index.html"),
         "index_json": str(publish_dir / "index.json"),
         "review_markdown": str(publish_dir / "review.md"),
+        "serve_label": serve_label,
         "serve_command": serve_command,
+        "serve_background_command": serve_background_command,
+        "serve_status_command": serve_status_command,
+        "serve_stop_command": serve_stop_command,
         "serve_urls": serve_urls,
         "runs": runs,
     }
@@ -571,6 +617,15 @@ def desktop_review_issue_draft(
     serve_command = review_package.get("serve_command")
     if serve_command:
         body_lines.append(f"- Serve command: `{serve_command}`")
+    serve_background_command = review_package.get("serve_background_command")
+    if serve_background_command:
+        body_lines.append(f"- Background serve command: `{serve_background_command}`")
+    serve_status_command = review_package.get("serve_status_command")
+    if serve_status_command:
+        body_lines.append(f"- Status command: `{serve_status_command}`")
+    serve_stop_command = review_package.get("serve_stop_command")
+    if serve_stop_command:
+        body_lines.append(f"- Stop command: `{serve_stop_command}`")
     serve_urls = [str(url) for url in review_package.get("serve_urls", []) if url]
     for url in serve_urls:
         body_lines.append(f"- Candidate watch URL: `{url}`")
@@ -649,7 +704,11 @@ def desktop_review_issue_draft(
                 "status": status,
                 "report_path": fallback.get("report_path") or review_package.get("index_html"),
                 "review_markdown": fallback.get("review_markdown") or review_package.get("review_markdown"),
+                "serve_label": fallback.get("serve_label") or review_package.get("serve_label"),
                 "serve_command": fallback.get("serve_command") or serve_command,
+                "serve_background_command": fallback.get("serve_background_command") or serve_background_command,
+                "serve_status_command": fallback.get("serve_status_command") or serve_status_command,
+                "serve_stop_command": fallback.get("serve_stop_command") or serve_stop_command,
                 "serve_urls": fallback.get("serve_urls") or serve_urls,
                 "internal_ephemeral": bool(fallback.get("internal_ephemeral", True)),
                 "reason": attachment.get("reason"),

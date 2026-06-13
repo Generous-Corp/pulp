@@ -514,10 +514,16 @@ python3 tools/local-ci/local_ci.py desktop publish \
   --label validation-video-proof
 ```
 
-Serve the latest published report on a Tailscale-visible machine:
+Serve a published report on a Tailscale-visible machine. Use background mode
+when the link needs to stay alive after the agent response:
 
 ```bash
-python3 tools/local-ci/local_ci.py desktop serve --host 0.0.0.0 --port 8765
+python3 tools/local-ci/local_ci.py desktop serve /path/to/published-report \
+  --host 0.0.0.0 \
+  --port 8765 \
+  --background \
+  --label validation-video-proof \
+  --json
 ```
 
 When bound to `0.0.0.0`, `desktop serve` prints candidate watch URLs:
@@ -527,13 +533,27 @@ reviewer should use a friendly Tailnet DNS name, run with:
 
 ```bash
 PULP_DESKTOP_SERVE_HOSTS=blackbook.tailnet-name.ts.net \
-  python3 tools/local-ci/local_ci.py desktop serve --host 0.0.0.0 --port 8765
+  python3 tools/local-ci/local_ci.py desktop serve /path/to/published-report \
+    --host 0.0.0.0 \
+    --port 8765 \
+    --background \
+    --label validation-video-proof \
+    --json
+```
+
+Check and stop the background server with the same label:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop serve --status --label validation-video-proof --json
+python3 tools/local-ci/local_ci.py desktop serve --stop --label validation-video-proof --json
 ```
 
 `desktop publish` writes `review.md` and `review-package.json` next to
 `index.html`, including candidate watch URLs from localhost, configured
 `PULP_DESKTOP_SERVE_HOSTS`, and Tailscale when available. Start `desktop serve`
-for the report directory to make those URLs live. Generate an offline GitHub
+for the report directory to make those URLs live. The review package includes
+foreground/background serve commands plus status/stop commands for cleanup.
+Generate an offline GitHub
 issue draft from that package before opening the issue:
 
 ```bash

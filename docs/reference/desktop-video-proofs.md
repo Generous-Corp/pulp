@@ -484,10 +484,16 @@ python3 tools/local-ci/local_ci.py desktop publish \
 
 The generated `index.html` renders videos with native browser controls. To
 share from a Tailscale-visible machine, serve the publish directory with a local
-static server and link that URL in the review issue:
+static server and link that URL in the review issue. Use background mode when
+the link needs to stay alive after the agent response:
 
 ```bash
-python3 tools/local-ci/local_ci.py desktop serve --host 0.0.0.0 --port 8765
+python3 tools/local-ci/local_ci.py desktop serve /path/to/published-report \
+  --host 0.0.0.0 \
+  --port 8765 \
+  --background \
+  --label validation-video-proof \
+  --json
 ```
 
 `desktop serve` serves the latest published desktop report unless a report
@@ -496,18 +502,25 @@ watch URLs: localhost, this machine's hostname, any comma-separated
 `PULP_DESKTOP_SERVE_HOSTS`, and `tailscale ip -4` results when the Tailscale CLI
 is available. Set `PULP_DESKTOP_SERVE_HOSTS=blackbook.tailnet-name.ts.net` when
 you already know the friendly Tailnet DNS name you want reviewers to tap.
+Manage a background server with the same label:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop serve --status --label validation-video-proof --json
+python3 tools/local-ci/local_ci.py desktop serve --stop --label validation-video-proof --json
+```
 
 `desktop publish` also writes `review.md` and `review-package.json` next to
 `index.html`. The publish step records the same candidate watch URLs in
 `index.json`, `review.md`, and `review-package.json`; start `desktop serve` for
 that report directory to make those URLs live. `review.md` is the human issue
-body. It includes the local report path, a Tailscale/local serve command, each
-run's video artifact, attachment-budget status, and the expected reviewer
-response.
+body. It includes the local report path, foreground and background
+Tailscale/local serve commands, status/stop commands for cleanup, each run's
+video artifact, attachment-budget status, and the expected reviewer response.
 `review-package.json` is the machine-readable handoff for future upload
 automation: it records each run's primary or small attachment decision, absolute
 MP4 path when a file should be attached, size/budget fields, and the served
-report fallback. It also preserves review context from the run manifest: exact
+report fallback including background/status/stop commands. It also preserves
+review context from the run manifest: exact
 launch command when available, source branch/SHA/mode, host, adapter, and copied
 manifest path. When Remotion composition metadata is available, it also preserves
 the `review_storyboard` steps so issue automation can show what launched, what

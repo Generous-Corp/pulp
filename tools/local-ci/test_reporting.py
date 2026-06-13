@@ -276,6 +276,12 @@ class ReportingTests(unittest.TestCase):
         self.assertEqual(report["review_package"], str(output_dir / "review-package.json"))
         self.assertEqual(review_package["kind"], "desktop-video-proof-review-package")
         self.assertEqual(review_package["serve_urls"], ["http://127.0.0.1:8765/", "http://100.64.0.10:8765/"])
+        self.assertEqual(review_package["serve_label"], "gallery-one")
+        self.assertIn("desktop serve", review_package["serve_command"])
+        self.assertIn(str(output_dir), review_package["serve_command"])
+        self.assertIn("--background --label gallery-one --json", review_package["serve_background_command"])
+        self.assertIn("--status --label gallery-one --json", review_package["serve_status_command"])
+        self.assertIn("--stop --label gallery-one --json", review_package["serve_stop_command"])
         self.assertEqual(review_package["runs"][0]["attachment"]["status"], "attach-primary")
         self.assertTrue(review_package["runs"][0]["attachment"]["path"].endswith("proof.issue.mp4"))
         self.assertEqual(review_package["runs"][0]["attachment"]["size_bytes"], 90000)
@@ -290,10 +296,18 @@ class ReportingTests(unittest.TestCase):
         self.assertEqual(review_package["runs"][0]["context"]["plugin"], "PulpSynth")
         self.assertTrue(review_package["runs"][0]["fallback"]["internal_ephemeral"])
         self.assertEqual(review_package["runs"][0]["fallback"]["serve_urls"], ["http://127.0.0.1:8765/", "http://100.64.0.10:8765/"])
+        self.assertEqual(review_package["runs"][0]["fallback"]["serve_label"], "gallery-one")
         self.assertIn("desktop serve", review_package["runs"][0]["fallback"]["serve_command"])
+        self.assertIn("--background --label gallery-one --json", review_package["runs"][0]["fallback"]["serve_background_command"])
+        self.assertIn("--status --label gallery-one --json", review_package["runs"][0]["fallback"]["serve_status_command"])
+        self.assertIn("--stop --label gallery-one --json", review_package["runs"][0]["fallback"]["serve_stop_command"])
         self.assertIn("# Gallery <One>", review_text)
         self.assertIn("looks good to me", review_text)
         self.assertIn("desktop serve` prints candidate URLs", review_text)
+        self.assertIn("Start background server: `", review_text)
+        self.assertIn("--background --label gallery-one --json", review_text)
+        self.assertIn("Check server: `", review_text)
+        self.assertIn("Stop server: `", review_text)
         self.assertIn("PULP_DESKTOP_SERVE_HOSTS", review_text)
         self.assertIn("Candidate watch URL: `http://100.64.0.10:8765/`", review_text)
         self.assertIn("proof.issue.mp4", review_text)
@@ -334,6 +348,10 @@ class ReportingTests(unittest.TestCase):
             "index_html": str(package_path.parent / "index.html"),
             "review_markdown": str(package_path.parent / "review.md"),
             "serve_command": "python3 tools/local-ci/local_ci.py desktop serve /tmp/report --host 0.0.0.0 --port 8765",
+            "serve_label": "video-proof",
+            "serve_background_command": "python3 tools/local-ci/local_ci.py desktop serve /tmp/report --host 0.0.0.0 --port 8765 --background --label video-proof --json",
+            "serve_status_command": "python3 tools/local-ci/local_ci.py desktop serve --status --label video-proof --json",
+            "serve_stop_command": "python3 tools/local-ci/local_ci.py desktop serve --stop --label video-proof --json",
             "serve_urls": ["http://127.0.0.1:8765/", "http://100.64.0.10:8765/"],
             "runs": [
                 {
@@ -378,6 +396,10 @@ class ReportingTests(unittest.TestCase):
                         "report_path": str(package_path.parent / "index.html"),
                         "review_markdown": str(package_path.parent / "review.md"),
                         "serve_command": "python3 tools/local-ci/local_ci.py desktop serve /tmp/report --host 0.0.0.0 --port 8765",
+                        "serve_label": "large-proof",
+                        "serve_background_command": "python3 tools/local-ci/local_ci.py desktop serve /tmp/report --host 0.0.0.0 --port 8765 --background --label large-proof --json",
+                        "serve_status_command": "python3 tools/local-ci/local_ci.py desktop serve --status --label large-proof --json",
+                        "serve_stop_command": "python3 tools/local-ci/local_ci.py desktop serve --stop --label large-proof --json",
                         "serve_urls": ["http://127.0.0.1:8765/", "http://100.64.0.10:8765/"],
                         "internal_ephemeral": True,
                     },
@@ -402,6 +424,10 @@ class ReportingTests(unittest.TestCase):
         self.assertEqual(draft["serve_urls"], ["http://127.0.0.1:8765/", "http://100.64.0.10:8765/"])
         self.assertEqual(len(draft["fallback_links"]), 1)
         self.assertEqual(draft["fallback_links"][0]["serve_urls"], ["http://127.0.0.1:8765/", "http://100.64.0.10:8765/"])
+        self.assertEqual(draft["fallback_links"][0]["serve_label"], "large-proof")
+        self.assertIn("--background --label large-proof --json", draft["fallback_links"][0]["serve_background_command"])
+        self.assertIn("--status --label large-proof --json", draft["fallback_links"][0]["serve_status_command"])
+        self.assertIn("--stop --label large-proof --json", draft["fallback_links"][0]["serve_stop_command"])
         self.assertTrue(draft["fallback_links"][0]["internal_ephemeral"])
         self.assertIn("gh issue create --repo danielraffel/pulp", draft["create_command"])
         self.assertIn("looks good to me", draft["body"])
@@ -415,8 +441,32 @@ class ReportingTests(unittest.TestCase):
         self.assertIn("Launch: mac/click", draft["body"])
         self.assertIn("Action: click: bypass-toggle", draft["body"])
         self.assertIn("Candidate watch URL: `http://100.64.0.10:8765/`", draft["body"])
+        self.assertIn("Background serve command: `", draft["body"])
+        self.assertIn("--background --label video-proof --json", draft["body"])
+        self.assertIn("Status command: `", draft["body"])
+        self.assertIn("Stop command: `", draft["body"])
         self.assertIn("Context component: `bypass-toggle`", draft["body"])
         self.assertIn("use the served report link", draft["body"])
+
+    def test_desktop_review_package_quotes_report_paths_with_spaces(self) -> None:
+        publish_dir = self.root / "Application Support" / "Pulp" / "runs" / "_published" / "report one"
+        package = self.mod.desktop_review_package(
+            {
+                "generated_at": "2026-06-13T12:00:00+00:00",
+                "label": "Report One",
+                "publish_mode": "local",
+                "publish_branch": "desktop-artifacts",
+                "serve_urls": ["http://127.0.0.1:8765/"],
+                "runs": [],
+            },
+            publish_dir=publish_dir,
+        )
+
+        self.assertEqual(package["serve_label"], "report-one")
+        self.assertIn(f"desktop serve '{publish_dir}' --host", package["serve_command"])
+        self.assertIn("--background --label report-one --json", package["serve_background_command"])
+        self.assertIn("--status --label report-one --json", package["serve_status_command"])
+        self.assertIn("--stop --label report-one --json", package["serve_stop_command"])
 
     def test_desktop_review_issue_draft_check_files_rejects_missing_attachment(self) -> None:
         package_path = self.root / "report" / "review-package.json"
