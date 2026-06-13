@@ -12,6 +12,37 @@ requires:
 
 Validate branches and ship code safely. This skill handles all CI workflows for Pulp across local machines and VMs.
 
+## Runner timing metrics
+
+When asked whether Pulp's local runners are fast, stuck, regressing, or worth
+monitoring, query Shipyard's metrics surface before guessing. Pulp does not
+mirror these records into `pulp` CLI or `pulp-mcp`; Shipyard is the metrics
+store and tartci is an optional VM runtime emitter.
+
+This metrics surface requires a Shipyard build that includes the
+`shipyard metrics` subcommand. Pulp's current pinned source-checkout Shipyard in
+`tools/shipyard.toml` is `v0.68.0`, which does not include it yet. If a checkout
+only has the pinned binary, use a newer Shipyard binary or source checkout for
+the optional metrics workflow, or skip metrics and inspect live jobs directly.
+
+Use these commands as the normal agent loop:
+
+```bash
+shipyard metrics import github --repo danielraffel/pulp --limit 50 --json
+tartci runtime export --repo danielraffel/pulp --since-days 14 \
+  | shipyard metrics import tartci --json
+shipyard metrics summary --project pulp --json
+shipyard metrics watch --project pulp --since 14d --json
+shipyard metrics advise --project pulp --json
+```
+
+Read `watch` as a triage signal, not as a hard failure. `insufficient_samples`
+means the lane does not have enough history yet; drift, failure-rate, or slowest
+findings are the useful prompts to inspect runner logs, VM boot behavior, cache
+state, or GitHub queue time. If tartci is not installed for a repo, skip the
+`tartci runtime export` import and still use the GitHub import plus Shipyard
+summary/watch commands.
+
 > **If a PR's required `macos` check has been queued >30 min** or the
 > repo's PRs are all in `mergeable_state=blocked` with no movement,
 > jump to **"Self-hosted runner ops"** near the end of this file.
