@@ -10,8 +10,11 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import socket
 import subprocess
+import sys
+import time
 
 
 def _print_lines(lines, *, print_fn: Callable[[str], None]) -> None:
@@ -35,6 +38,27 @@ def _path_is_relative_to(path: Path, root: Path) -> bool:
 
 def desktop_publish_root_from_config(config: dict) -> Path:
     return Path(config["desktop_automation"]["artifact_root"]).expanduser().resolve() / "_published"
+
+
+def desktop_serve_state_dir(publish_root: Path) -> Path:
+    return publish_root / "_serve"
+
+
+def desktop_serve_state_path(publish_root: Path, label: str) -> Path:
+    safe_label = "".join(ch if ch.isalnum() or ch in {"-", "_", "."} else "-" for ch in label.strip())
+    return desktop_serve_state_dir(publish_root) / f"{safe_label or 'desktop-proof'}.json"
+
+
+def process_is_running(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
 
 
 def _append_unique(items: list[str], value: str | None) -> None:
@@ -77,6 +101,120 @@ def desktop_serve_candidate_hosts(
 
 def desktop_serve_candidate_urls(bind_host: str, port: int, **kwargs) -> list[str]:
     return [f"http://{host}:{port}/" for host in desktop_serve_candidate_hosts(bind_host, **kwargs)]
+
+
+def _write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2) + "\n")
+
+
+def start_desktop_serve_process(
+    serve_dir: Path,
+    *,
+    host: str,
+    port: int,
+    label: str,
+    publish_root: Path,
+    urls: list[str],
+    popen_fn: Callable[..., subprocess.Popen] = subprocess.Popen,
+    now_fn: Callable[[], float] = time.time,
+) -> dict:
+    state_path = desktop_serve_state_path(publish_root, label)
+    log_dir = desktop_serve_state_dir(publish_root)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    stdout_path = log_dir / f"{state_path.stem}.out"
+    stderr_path = log_dir / f"{state_path.stem}.err"
+    stdout_handle = stdout_path.open("a")
+    stderr_handle = stderr_path.open("a")
+    try:
+        process = popen_fn(
+            [
+                sys.executable,
+                "-u",
+                "-m",
+                "http.server",
+                str(port),
+                "--bind",
+                host,
+                "--directory",
+                str(serve_dir),
+            ],
+            stdout=stdout_handle,
+            stderr=stderr_handle,
+            start_new_session=True,
+        )
+    finally:
+        stdout_handle.close()
+        stderr_handle.close()
+
+    payload = {
+        "kind": "desktop-proof-serve-process",
+        "label": label,
+        "pid": int(process.pid),
+        "host": host,
+        "port": port,
+        "directory": str(serve_dir),
+        "urls": urls,
+        "state_path": str(state_path),
+        "stdout": str(stdout_path),
+        "stderr": str(stderr_path),
+        "started_at_epoch": now_fn(),
+        "command": [
+            sys.executable,
+            "-u",
+            "-m",
+            "http.server",
+            str(port),
+            "--bind",
+            host,
+            "--directory",
+            str(serve_dir),
+        ],
+    }
+    _write_json(state_path, payload)
+    return payload
+
+
+def read_desktop_serve_state(publish_root: Path, label: str) -> dict | None:
+    state_path = desktop_serve_state_path(publish_root, label)
+    if not state_path.exists():
+        return None
+    try:
+        return json.loads(state_path.read_text())
+    except json.JSONDecodeError:
+        return {"kind": "desktop-proof-serve-process", "label": label, "state_path": str(state_path), "invalid": True}
+
+
+def stop_desktop_serve_process(
+    publish_root: Path,
+    label: str,
+    *,
+    is_running_fn: Callable[[int], bool] = process_is_running,
+    kill_fn: Callable[[int, int], None] = os.kill,
+    sleep_fn: Callable[[float], None] = time.sleep,
+) -> dict:
+    state_path = desktop_serve_state_path(publish_root, label)
+    state = read_desktop_serve_state(publish_root, label)
+    if not state:
+        return {"status": "missing", "label": label, "state_path": str(state_path)}
+    pid = int(state.get("pid") or 0)
+    was_running = is_running_fn(pid)
+    if was_running:
+        kill_fn(pid, signal.SIGTERM)
+        for _ in range(10):
+            sleep_fn(0.1)
+            if not is_running_fn(pid):
+                break
+    stopped = not is_running_fn(pid)
+    if stopped:
+        state_path.unlink(missing_ok=True)
+    return {
+        "status": "stopped" if stopped else "still-running",
+        "label": label,
+        "pid": pid,
+        "was_running": was_running,
+        "state_path": str(state_path),
+    }
 
 
 VIDEO_PROOF_DEMO_SCENARIOS = (
@@ -1018,6 +1156,10 @@ def cmd_desktop_serve(
     desktop_publish_reports_fn: Callable[..., list[dict]],
     desktop_serve_candidate_urls_fn: Callable[[str, int], list[str]] = desktop_serve_candidate_urls,
     serve_directory_fn: Callable[..., None] = serve_directory,
+    start_serve_process_fn: Callable[..., dict] = start_desktop_serve_process,
+    read_serve_state_fn: Callable[[Path, str], dict | None] = read_desktop_serve_state,
+    stop_serve_process_fn: Callable[..., dict] = stop_desktop_serve_process,
+    is_running_fn: Callable[[int], bool] = process_is_running,
     print_fn: Callable[[str], None] = print,
 ) -> int:
     try:
@@ -1025,6 +1167,38 @@ def cmd_desktop_serve(
     except FileNotFoundError as exc:
         print_fn(f"Error: {exc}")
         return 1
+
+    publish_root = desktop_publish_root_from_config(config)
+    label = getattr(args, "label", None) or "desktop-proof"
+
+    if getattr(args, "stop", False):
+        result = stop_serve_process_fn(publish_root, label)
+        if getattr(args, "json", False):
+            print_fn(json.dumps(result, indent=2))
+        else:
+            print_fn(f"Desktop proof server {result['status']}: {label}")
+            if result.get("pid"):
+                print_fn(f"  pid: {result['pid']}")
+        return 0 if result.get("status") in {"stopped", "missing"} else 1
+
+    if getattr(args, "status", False):
+        state = read_serve_state_fn(publish_root, label)
+        if not state:
+            result = {"status": "missing", "label": label, "state_path": str(desktop_serve_state_path(publish_root, label))}
+        else:
+            pid = int(state.get("pid") or 0)
+            result = {**state, "status": "running" if is_running_fn(pid) else "stale"}
+        if getattr(args, "json", False):
+            print_fn(json.dumps(result, indent=2))
+        else:
+            print_fn(f"Desktop proof server {result['status']}: {label}")
+            if result.get("pid"):
+                print_fn(f"  pid: {result['pid']}")
+            for url in result.get("urls") or []:
+                print_fn(f"  url: {url}")
+            if result.get("directory"):
+                print_fn(f"  directory: {result['directory']}")
+        return 0 if result.get("status") in {"running", "missing", "stale"} else 1
 
     if args.path:
         serve_dir = Path(args.path).expanduser()
@@ -1035,7 +1209,6 @@ def cmd_desktop_serve(
             return 1
         serve_dir = Path(reports[0]["output_dir"]).expanduser()
 
-    publish_root = desktop_publish_root_from_config(config)
     resolved_serve_dir = serve_dir.resolve()
     if not _path_is_relative_to(resolved_serve_dir, publish_root):
         print_fn(f"Error: desktop serve only serves reports under configured publish root: {publish_root}")
@@ -1049,6 +1222,26 @@ def cmd_desktop_serve(
 
     urls = desktop_serve_candidate_urls_fn(args.host, args.port)
     primary_url = urls[0] if urls else f"http://{args.host}:{args.port}/"
+    if getattr(args, "background", False):
+        state = start_serve_process_fn(
+            resolved_serve_dir,
+            host=args.host,
+            port=args.port,
+            label=label,
+            publish_root=publish_root,
+            urls=urls,
+        )
+        if getattr(args, "json", False):
+            print_fn(json.dumps({**state, "status": "started"}, indent=2))
+        else:
+            print_fn(f"Serving desktop report: {primary_url}")
+            for url in urls[1:]:
+                print_fn(f"  also: {url}")
+            print_fn(f"  directory: {serve_dir}")
+            print_fn(f"  background: {label}")
+            print_fn(f"  pid: {state['pid']}")
+            print_fn(f"  stop: python3 tools/local-ci/local_ci.py desktop serve --stop --label {label}")
+        return 0
     print_fn(f"Serving desktop report: {primary_url}")
     for url in urls[1:]:
         print_fn(f"  also: {url}")

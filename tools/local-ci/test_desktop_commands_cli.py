@@ -327,6 +327,128 @@ class DesktopCommandsCliTests(unittest.TestCase):
         self.assertIn("http://100.64.0.10:8765/", self.printed[-2])
 
         self.printed.clear()
+        started = []
+        with tempfile.TemporaryDirectory() as tmpdir:
+            artifact_root = Path(tmpdir) / "runs"
+            report_dir = artifact_root / "_published" / "report"
+            report_dir.mkdir(parents=True)
+            (report_dir / "index.html").write_text("<html></html>")
+            serve_config = self.desktop_config()
+            serve_config["desktop_automation"]["artifact_root"] = str(artifact_root)
+
+            def start_process(path, **kwargs):
+                started.append((path, kwargs))
+                return {
+                    "label": kwargs["label"],
+                    "pid": 4242,
+                    "directory": str(path),
+                    "urls": kwargs["urls"],
+                    "state_path": str(artifact_root / "_published" / "_serve" / "ios-proof.json"),
+                }
+
+            result = self.mod.cmd_desktop_serve(
+                Namespace(path=str(report_dir), host="0.0.0.0", port=8768, background=True, label="ios-proof", json=False),
+                load_config_fn=lambda: serve_config,
+                desktop_publish_reports_fn=lambda *_args, **_kwargs: [],
+                desktop_serve_candidate_urls_fn=lambda host, port: [
+                    f"http://127.0.0.1:{port}/",
+                    f"http://100.64.0.10:{port}/",
+                ],
+                start_serve_process_fn=start_process,
+                serve_directory_fn=lambda *_args, **_kwargs: self.fail("background serve should not block"),
+                print_fn=self.print_line,
+            )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(started[0][0], report_dir.resolve())
+        self.assertEqual(started[0][1]["label"], "ios-proof")
+        self.assertIn("background: ios-proof", self.printed[-3])
+        self.assertIn("pid: 4242", self.printed[-2])
+
+        self.printed.clear()
+        started.clear()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            artifact_root = Path(tmpdir) / "runs"
+            report_dir = artifact_root / "_published" / "report"
+            report_dir.mkdir(parents=True)
+            (report_dir / "index.html").write_text("<html></html>")
+            serve_config = self.desktop_config()
+            serve_config["desktop_automation"]["artifact_root"] = str(artifact_root)
+
+            def start_process_json(path, **kwargs):
+                started.append((path, kwargs))
+                return {
+                    "label": kwargs["label"],
+                    "pid": 4243,
+                    "directory": str(path),
+                    "urls": kwargs["urls"],
+                    "state_path": str(artifact_root / "_published" / "_serve" / "ios-proof.json"),
+                }
+
+            result = self.mod.cmd_desktop_serve(
+                Namespace(path=str(report_dir), host="0.0.0.0", port=8768, background=True, label="ios-proof", json=True),
+                load_config_fn=lambda: serve_config,
+                desktop_publish_reports_fn=lambda *_args, **_kwargs: [],
+                desktop_serve_candidate_urls_fn=lambda host, port: [
+                    f"http://127.0.0.1:{port}/",
+                    f"http://100.64.0.10:{port}/",
+                ],
+                start_serve_process_fn=start_process_json,
+                serve_directory_fn=lambda *_args, **_kwargs: self.fail("background serve should not block"),
+                print_fn=self.print_line,
+            )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(len(self.printed), 1)
+        background_payload = json.loads(self.printed[0])
+        self.assertEqual(background_payload["status"], "started")
+        self.assertEqual(background_payload["pid"], 4243)
+        self.assertEqual(background_payload["urls"][1], "http://100.64.0.10:8768/")
+
+        self.printed.clear()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            artifact_root = Path(tmpdir) / "runs"
+            serve_config = self.desktop_config()
+            serve_config["desktop_automation"]["artifact_root"] = str(artifact_root)
+            state = {
+                "label": "ios-proof",
+                "pid": 4242,
+                "directory": str(artifact_root / "_published" / "report"),
+                "urls": ["http://127.0.0.1:8768/"],
+            }
+            result = self.mod.cmd_desktop_serve(
+                Namespace(path=None, host="127.0.0.1", port=8765, background=False, label="ios-proof", status=True, stop=False, json=True),
+                load_config_fn=lambda: serve_config,
+                desktop_publish_reports_fn=lambda *_args, **_kwargs: self.fail("status should not inspect reports"),
+                read_serve_state_fn=lambda _root, _label: state,
+                is_running_fn=lambda pid: pid == 4242,
+                print_fn=self.print_line,
+            )
+
+        self.assertEqual(result, 0)
+        status_payload = json.loads(self.printed[-1])
+        self.assertEqual(status_payload["status"], "running")
+        self.assertEqual(status_payload["pid"], 4242)
+
+        self.printed.clear()
+        stopped = []
+        with tempfile.TemporaryDirectory() as tmpdir:
+            artifact_root = Path(tmpdir) / "runs"
+            serve_config = self.desktop_config()
+            serve_config["desktop_automation"]["artifact_root"] = str(artifact_root)
+            result = self.mod.cmd_desktop_serve(
+                Namespace(path=None, host="127.0.0.1", port=8765, background=False, label="ios-proof", status=False, stop=True, json=False),
+                load_config_fn=lambda: serve_config,
+                desktop_publish_reports_fn=lambda *_args, **_kwargs: self.fail("stop should not inspect reports"),
+                stop_serve_process_fn=lambda root, label: stopped.append((root, label)) or {"status": "stopped", "label": label, "pid": 4242},
+                print_fn=self.print_line,
+            )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(stopped[0][1], "ios-proof")
+        self.assertIn("Desktop proof server stopped: ios-proof", self.printed[0])
+
+        self.printed.clear()
         served.clear()
         with tempfile.TemporaryDirectory() as tmpdir:
             artifact_root = Path(tmpdir) / "runs"

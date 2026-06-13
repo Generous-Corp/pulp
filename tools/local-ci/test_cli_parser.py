@@ -165,6 +165,9 @@ class CliParserTests(unittest.TestCase):
         )
         self.assertFalse(args.run_in_terminal)
 
+    def test_desktop_video_command_accepts_terminal_reentry(self):
+        parser = self.build_parser()
+
         args = parser.parse_args([
             "desktop",
             "video",
@@ -176,6 +179,41 @@ class CliParserTests(unittest.TestCase):
             "--run-in-terminal",
         ])
         self.assertTrue(args.run_in_terminal)
+
+    def test_desktop_serve_accepts_background_status_and_stop_flags(self):
+        parser = self.build_parser()
+
+        args = parser.parse_args([
+            "desktop",
+            "serve",
+            "/tmp/report",
+            "--host",
+            "0.0.0.0",
+            "--port",
+            "8768",
+            "--background",
+            "--label",
+            "ios-proof",
+            "--json",
+        ])
+
+        self.assertEqual(args.command, "desktop")
+        self.assertEqual(args.desktop_command, "serve")
+        self.assertEqual(args.path, "/tmp/report")
+        self.assertEqual(args.host, "0.0.0.0")
+        self.assertEqual(args.port, 8768)
+        self.assertTrue(args.background)
+        self.assertEqual(args.label, "ios-proof")
+        self.assertTrue(args.json)
+
+        args = parser.parse_args(["desktop", "serve", "--status", "--label", "ios-proof"])
+        self.assertTrue(args.status)
+        self.assertFalse(args.stop)
+        self.assertEqual(args.label, "ios-proof")
+
+        args = parser.parse_args(["desktop", "serve", "--stop", "--label", "ios-proof"])
+        self.assertTrue(args.stop)
+        self.assertFalse(args.status)
 
     def test_simulator_video_commands_parse(self):
         parser = self.build_parser()
