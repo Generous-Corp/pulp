@@ -8,3 +8,12 @@ from queue_stale_state_bindings import (
     reconcile_running_jobs_unlocked,
     update_job_target_state,
 )
+
+
+QUEUE_STATE_LIFECYCLE_EXPORTS = (
+    "update_job_active_targets",
+    "reconcile_running_jobs_unlocked",
+    "update_job_target_state",
+    "reclaim_stale_remote_validators",
+    "load_job",
+)

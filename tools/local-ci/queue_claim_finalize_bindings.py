@@ -9,6 +9,12 @@ from typing import Any
 from binding_utils import binding as _binding
 
 
+QUEUE_CLAIM_FINALIZE_EXPORTS = (
+    "claim_next_job",
+    "finalize_job",
+)
+
+
 def claim_next_job(bindings: Mapping[str, Any]) -> dict | None:
     queue_orchestrator = _binding(bindings, "_queue_orchestrator")
 

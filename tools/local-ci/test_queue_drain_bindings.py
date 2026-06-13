@@ -18,6 +18,15 @@ class QueueDrainBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
 
+    def test_drain_exports_are_composed_from_focused_groups(self):
+        expected = (
+            *self.mod.QUEUE_CLAIM_FINALIZE_EXPORTS,
+            *self.mod.QUEUE_WAIT_DRAIN_EXPORTS,
+        )
+
+        self.assertEqual(self.mod.QUEUE_DRAIN_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def _bindings(self, lifecycle=None, orchestrator=None):
         bindings = {
             "_queue_lifecycle": lifecycle or types.SimpleNamespace(),

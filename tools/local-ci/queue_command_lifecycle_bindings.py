@@ -8,6 +8,14 @@ from typing import Any
 from binding_utils import binding as _binding
 
 
+QUEUE_COMMAND_LIFECYCLE_EXPORTS = (
+    "supersede_job_unlocked",
+    "cancel_job_unlocked",
+    "bump_queue_command_job",
+    "cancel_queue_command_job",
+)
+
+
 def supersede_job_unlocked(bindings: Mapping[str, Any], job: dict, superseded_by: str, reason: str) -> None:
     _binding(bindings, "_queue_lifecycle").complete_superseded_job_unlocked(
         job,

@@ -6,12 +6,14 @@ from typing import Any
 
 from binding_utils import install_local_helpers
 from queue_command_lifecycle_bindings import (
+    QUEUE_COMMAND_LIFECYCLE_EXPORTS,
     bump_queue_command_job,
     cancel_job_unlocked,
     cancel_queue_command_job,
     supersede_job_unlocked,
 )
 from queue_drain_bindings import (
+    QUEUE_DRAIN_EXPORTS,
     claim_next_job,
     drain_pending_jobs,
     finalize_job,
@@ -28,6 +30,7 @@ from queue_load_bindings import (
     load_queue,
 )
 from queue_state_lifecycle_bindings import (
+    QUEUE_STATE_LIFECYCLE_EXPORTS,
     load_job,
     reclaim_stale_remote_validators,
     reconcile_running_jobs_unlocked,
@@ -37,21 +40,13 @@ from queue_state_lifecycle_bindings import (
 
 
 QUEUE_LIFECYCLE_EXPORTS = (
-    "supersede_job_unlocked",
-    "cancel_job_unlocked",
+    *QUEUE_COMMAND_LIFECYCLE_EXPORTS[:2],
     *QUEUE_LOAD_EXPORTS,
-    "update_job_active_targets",
+    QUEUE_STATE_LIFECYCLE_EXPORTS[0],
     *QUEUE_ENQUEUE_EXPORTS,
-    "bump_queue_command_job",
-    "cancel_queue_command_job",
-    "reconcile_running_jobs_unlocked",
-    "update_job_target_state",
-    "reclaim_stale_remote_validators",
-    "load_job",
-    "claim_next_job",
-    "finalize_job",
-    "wait_for_job",
-    "drain_pending_jobs",
+    *QUEUE_COMMAND_LIFECYCLE_EXPORTS[2:],
+    *QUEUE_STATE_LIFECYCLE_EXPORTS[1:],
+    *QUEUE_DRAIN_EXPORTS,
 )
 
 

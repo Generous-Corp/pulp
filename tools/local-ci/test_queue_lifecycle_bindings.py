@@ -20,21 +20,13 @@ class QueueLifecycleBindingsTests(unittest.TestCase):
 
     def test_queue_lifecycle_exports_match_facade_helpers(self):
         expected = (
-            "supersede_job_unlocked",
-            "cancel_job_unlocked",
+            *self.mod.QUEUE_COMMAND_LIFECYCLE_EXPORTS[:2],
             *self.mod.QUEUE_LOAD_EXPORTS,
-            "update_job_active_targets",
+            self.mod.QUEUE_STATE_LIFECYCLE_EXPORTS[0],
             *self.mod.QUEUE_ENQUEUE_EXPORTS,
-            "bump_queue_command_job",
-            "cancel_queue_command_job",
-            "reconcile_running_jobs_unlocked",
-            "update_job_target_state",
-            "reclaim_stale_remote_validators",
-            "load_job",
-            "claim_next_job",
-            "finalize_job",
-            "wait_for_job",
-            "drain_pending_jobs",
+            *self.mod.QUEUE_COMMAND_LIFECYCLE_EXPORTS[2:],
+            *self.mod.QUEUE_STATE_LIFECYCLE_EXPORTS[1:],
+            *self.mod.QUEUE_DRAIN_EXPORTS,
         )
 
         self.assertEqual(self.mod.QUEUE_LIFECYCLE_EXPORTS, expected)

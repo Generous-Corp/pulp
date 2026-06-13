@@ -18,6 +18,17 @@ class QueueCommandLifecycleBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
 
+    def test_command_lifecycle_exports_match_facade_helpers(self):
+        expected = (
+            "supersede_job_unlocked",
+            "cancel_job_unlocked",
+            "bump_queue_command_job",
+            "cancel_queue_command_job",
+        )
+
+        self.assertEqual(self.mod.QUEUE_COMMAND_LIFECYCLE_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def _bindings(self, lifecycle=None, orchestrator=None):
         bindings = {
             "_queue_lifecycle": lifecycle or types.SimpleNamespace(),

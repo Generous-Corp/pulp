@@ -18,6 +18,18 @@ class QueueStateLifecycleBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
 
+    def test_state_lifecycle_exports_match_facade_helpers(self):
+        expected = (
+            "update_job_active_targets",
+            "reconcile_running_jobs_unlocked",
+            "update_job_target_state",
+            "reclaim_stale_remote_validators",
+            "load_job",
+        )
+
+        self.assertEqual(self.mod.QUEUE_STATE_LIFECYCLE_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def _bindings(self, lifecycle=None, orchestrator=None):
         bindings = {
             "_queue_lifecycle": lifecycle or types.SimpleNamespace(),

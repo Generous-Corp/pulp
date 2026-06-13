@@ -9,6 +9,12 @@ from binding_utils import binding as _binding
 from binding_utils import binding_attr as _binding_attr
 
 
+QUEUE_WAIT_DRAIN_EXPORTS = (
+    "wait_for_job",
+    "drain_pending_jobs",
+)
+
+
 def wait_for_job(bindings: Mapping[str, Any], job_id: str, config: dict) -> tuple[dict | None, int]:
     return _binding(bindings, "_queue_lifecycle").wait_for_job_completion(
         job_id,
