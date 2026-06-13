@@ -27,12 +27,13 @@ was checked against that policy:
   Mono** (values/code) *by family name only*. No font binaries are vendored here.
   Both are SIL OFL 1.1 (MIT-compatible); if/when binaries are bundled for
   shipping, add an OFL `NOTICE.md` entry at that time.
-- **Icons** — the export's `readme.md` flags the icon set as **Lucide** (ISC
-  license) stand-ins, to be swapped for Pulp's own in-engine SDF set in
-  production. ISC is MIT-compatible, but to keep provenance crisp the icons are
-  **intentionally NOT vendored in Phase 0**. They are brought in at Phase 3
-  (Figma component library) together with a `NOTICE.md` / `DEPENDENCIES.md`
-  Lucide (ISC) attribution entry, or replaced with original SDF glyphs.
+- **Icons** — vendored at Phase 3 under `icons/` (66 line-style 24×24 SVGs,
+  signal-teal stroke). The generic glyphs are **Lucide**-derived (ISC); the
+  audio glyphs (compressor, delay, distortion, eq, filter, fader, envelope,
+  reverb, …) are original Pulp work. ISC is MIT-compatible; attribution is
+  recorded in `NOTICE.md` and `DEPENDENCIES.md` (Lucide, ISC). These are
+  reference assets only — not compiled into or shipped in plugin/app binaries.
+  They may later be replaced with Pulp's own in-engine SDF glyph set.
 
 No reviewed input is copyleft or otherwise incompatible with the MIT release.
 

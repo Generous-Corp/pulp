@@ -31,6 +31,7 @@ Entries are sorted alphabetically (case-insensitive) by name.
 | JetBrains Mono | 2.304 | SIL OFL 1.1 | Embedded monospace font (JetBrainsMono-Regular.ttf, SHA-256 `a0bf60ef0f83c5ed4d7a75d45838548b1f6873372dfac88f71804491898d138f`) | pulp-view | 2026-04-21 |
 | Khronos Box Textured fixture | b510eca2e2ef33f62f9ed57d6e7ce2d10ebb2bdebc4a8e59d347719ba81abdf4 | LicenseRef-CC-BY-TM + LicenseRef-LegalMark-Cesium | Official glTF Sample Assets `BoxTextured.glb` redistributed as a Scene3D native loader/render test fixture | test fixture | 2026-06-03 |
 | lcov_cobertura | 2.1.2 | Apache-2.0 | LCOV→Cobertura converter; vendored as `tools/scripts/lcov_cobertura.py` for the coverage pipeline (single-file Python script, no pip dependency in CI) | tooling | 2026-04-21 |
+| Lucide | 0.x (Ink & Signal reference set) | ISC | Line-style icon SVGs under `assets/design-system/ink-signal/icons/`. Generic glyphs (chevrons, check, clock, copy, eye, …) are Lucide-derived; the audio glyphs (compressor, delay, distortion, eq, filter, fader, envelope, reverb, …) are original Pulp work. Design-system reference assets only — not compiled into or shipped in plugin/app binaries. | design-system | 2026-06-13 |
 | LV2 | 1.18.10 | ISC | LV2 plugin format headers | pulp-format | 2026-03-30 |
 | Material Design Icons | bundled-with-mkdocs-material | Apache-2.0 | Icon set bundled inside mkdocs-material and redistributed as SVG assets in the generated docs site | docs | 2026-04-22 |
 | Mbed TLS | 3.6.2 | Apache-2.0 | Cryptographic primitives (SHA-256, RSA, AES) | pulp-runtime | 2026-04-21 |
