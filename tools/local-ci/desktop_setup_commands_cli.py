@@ -225,6 +225,16 @@ def desktop_video_doctor_remediations(checks: list[dict], *, target_name: str) -
                 "command": "open 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'",
             }
         )
+    receipt = checks_by_name.get("receipt")
+    if receipt and not receipt.get("ok"):
+        remediations.append(
+            {
+                "check": "receipt",
+                "title": "Prepare the desktop target",
+                "detail": f"Install the local desktop target receipt before running video proof checks for `{target_name}`.",
+                "command": f"python3 tools/local-ci/local_ci.py desktop install {target_name}",
+            }
+        )
     target_video = checks_by_name.get("target.video_capture")
     if target_video and not target_video.get("ok"):
         remediations.append(
@@ -289,6 +299,12 @@ def desktop_video_setup_steps(target_name: str, *, machine_label: str | None = N
             "title": "Enable video capture for the desktop target",
             "command": f"python3 tools/local-ci/local_ci.py desktop config set target.{target_name}.video_capture true",
             "detail": "Records the opt-in video_capture capability in the local desktop target config.",
+        },
+        {
+            "name": "prepare_target",
+            "title": "Prepare the desktop target",
+            "command": f"python3 tools/local-ci/local_ci.py desktop install {target_name}",
+            "detail": "Writes the local desktop automation receipt used by readiness checks and artifact reporting.",
         },
         {
             "name": "grant_screen_recording",

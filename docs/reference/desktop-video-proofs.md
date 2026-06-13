@@ -52,6 +52,12 @@ Enable video capture for the mac target:
 python3 tools/local-ci/local_ci.py desktop config set target.mac.video_capture true
 ```
 
+Prepare the mac desktop target receipt:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop install mac
+```
+
 Run the video-specific readiness gate:
 
 ```bash

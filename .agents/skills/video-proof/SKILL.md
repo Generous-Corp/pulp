@@ -77,6 +77,12 @@ Enable optional video capture for the mac desktop target:
 python3 tools/local-ci/local_ci.py desktop config set target.mac.video_capture true
 ```
 
+Prepare the mac desktop target receipt:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop install mac
+```
+
 Run the doctor before recording:
 
 ```bash
