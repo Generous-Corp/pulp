@@ -1,0 +1,56 @@
+/* ============================================================
+   PULP · COLOR PRIMITIVES
+   Mode-independent raw values. Cool graphite neutrals + luminous
+   screenprint "inks". Primary is SIGNAL TEAL — rich, waveform-bright,
+   glows on GPU. Coral/red is reserved for peaking & danger.
+   Semantic mapping lives in semantic.css.
+   ============================================================ */
+:root {
+  /* --- Graphite: cool neutral ramp (the ink & the paper) --- */
+  --stone-50:  #F5F7F8;
+  --stone-100: #EBEEF1;
+  --stone-150: #E1E5E9;
+  --stone-200: #D0D6DD;
+  --stone-300: #B5BDC7;
+  --stone-400: #9099A5;
+  --stone-500: #6C7682;
+  --stone-600: #505964;
+  --stone-700: #39414A;
+  --stone-800: #272C33;
+  --stone-850: #1E232A;
+  --stone-900: #161A20;
+  --stone-950: #0F1217;
+  --stone-990: #0A0C10;
+
+  /* --- Inks: luminous screenprint accents --- */
+  --ink-signal:  #16DAC2;   /* primary — signal teal */
+  --ink-signal-deep: #10B6A3;
+  --ink-signal-bright: #46F0DB;  /* glow / highlight */
+  --ink-violet:  #8B6CF5;
+  --ink-violet-deep: #6F4DE8;
+  --ink-indigo:  #5E78FF;
+  --ink-indigo-deep: #4760E6;
+  --ink-amber:   #F6B847;
+  --ink-amber-deep: #E09E2A;
+  --ink-leaf:    #3FCF77;
+  --ink-pink:    #FF7AA8;
+  --ink-coral:   #FF5C4D;   /* PEAK / danger only */
+  --ink-coral-deep: #F23B33;
+
+  /* Text colour that sits ON a bright ink fill (screenprint look) */
+  --on-ink: #052320;
+
+  /* --- Data / visualization sequence (vibrant, glow-friendly) --- */
+  --data-1: var(--ink-signal);
+  --data-2: var(--ink-violet);
+  --data-3: var(--ink-amber);
+  --data-4: var(--ink-indigo);
+  --data-5: var(--ink-pink);
+  --data-6: var(--ink-leaf);
+
+  /* --- Meters & signal (level-dependent: safe → hot) --- */
+  --signal-low:  var(--ink-signal);
+  --signal-mid:  var(--ink-amber);
+  --signal-high: var(--ink-coral);
+  --signal-wave: var(--ink-signal);
+}

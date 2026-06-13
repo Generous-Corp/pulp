@@ -1,0 +1,147 @@
+{
+  "$metadata": {
+    "tokenSetOrder": ["core", "dark", "light"]
+  },
+  "$themes": [
+    {
+      "id": "dark",
+      "name": "Pulp Dark",
+      "selectedTokenSets": { "core": "source", "dark": "enabled" }
+    },
+    {
+      "id": "light",
+      "name": "Pulp Light",
+      "selectedTokenSets": { "core": "source", "light": "enabled" }
+    }
+  ],
+  "core": {
+    "ink": {
+      "signal":      { "value": "#16DAC2", "type": "color", "description": "Primary — signal teal" },
+      "signal-deep": { "value": "#10B6A3", "type": "color" },
+      "violet":      { "value": "#8B6CF5", "type": "color" },
+      "indigo":      { "value": "#5E78FF", "type": "color" },
+      "amber":       { "value": "#F6B847", "type": "color" },
+      "leaf":        { "value": "#3FCF77", "type": "color" },
+      "pink":        { "value": "#FF7AA8", "type": "color" },
+      "coral":       { "value": "#FF5C4D", "type": "color", "description": "Peak / danger only" },
+      "on-ink":      { "value": "#052320", "type": "color", "description": "Text on bright fills" }
+    },
+    "graphite": {
+      "50":  { "value": "#F5F7F8", "type": "color" },
+      "100": { "value": "#EBEEF1", "type": "color" },
+      "200": { "value": "#D0D6DD", "type": "color" },
+      "300": { "value": "#B5BDC7", "type": "color" },
+      "400": { "value": "#9099A5", "type": "color" },
+      "500": { "value": "#6C7682", "type": "color" },
+      "600": { "value": "#505964", "type": "color" },
+      "700": { "value": "#39414A", "type": "color" },
+      "800": { "value": "#272C33", "type": "color" },
+      "900": { "value": "#161A20", "type": "color" },
+      "950": { "value": "#0F1217", "type": "color" }
+    },
+    "radius": {
+      "xs":   { "value": "4",  "type": "borderRadius" },
+      "sm":   { "value": "6",  "type": "borderRadius" },
+      "md":   { "value": "10", "type": "borderRadius" },
+      "lg":   { "value": "14", "type": "borderRadius" },
+      "xl":   { "value": "20", "type": "borderRadius" },
+      "2xl":  { "value": "28", "type": "borderRadius" },
+      "pill": { "value": "999","type": "borderRadius" }
+    },
+    "spacing": {
+      "1":  { "value": "4",  "type": "spacing" },
+      "2":  { "value": "8",  "type": "spacing" },
+      "3":  { "value": "12", "type": "spacing" },
+      "4":  { "value": "16", "type": "spacing" },
+      "5":  { "value": "20", "type": "spacing" },
+      "6":  { "value": "24", "type": "spacing" },
+      "8":  { "value": "32", "type": "spacing" },
+      "10": { "value": "40", "type": "spacing" },
+      "12": { "value": "48", "type": "spacing" },
+      "16": { "value": "64", "type": "spacing" }
+    },
+    "font": {
+      "display": { "value": "Jost", "type": "fontFamilies" },
+      "sans":    { "value": "Jost", "type": "fontFamilies" },
+      "mono":    { "value": "JetBrains Mono", "type": "fontFamilies" }
+    },
+    "fontSize": {
+      "2xs":  { "value": "11", "type": "fontSizes" },
+      "xs":   { "value": "12", "type": "fontSizes" },
+      "sm":   { "value": "13", "type": "fontSizes" },
+      "base": { "value": "15", "type": "fontSizes" },
+      "lg":   { "value": "18", "type": "fontSizes" },
+      "xl":   { "value": "22", "type": "fontSizes" },
+      "2xl":  { "value": "28", "type": "fontSizes" },
+      "3xl":  { "value": "36", "type": "fontSizes" },
+      "4xl":  { "value": "48", "type": "fontSizes" }
+    },
+    "fontWeight": {
+      "regular":  { "value": "400", "type": "fontWeights" },
+      "medium":   { "value": "500", "type": "fontWeights" },
+      "semibold": { "value": "600", "type": "fontWeights" },
+      "bold":     { "value": "700", "type": "fontWeights" },
+      "display":  { "value": "800", "type": "fontWeights" }
+    }
+  },
+  "dark": {
+    "surface": {
+      "app":     { "value": "#161A21", "type": "color" },
+      "sunken":  { "value": "#0E1116", "type": "color" },
+      "panel":   { "value": "#1E2530", "type": "color" },
+      "raised":  { "value": "#28303C", "type": "color" },
+      "overlay": { "value": "#2F3743", "type": "color" },
+      "inset":   { "value": "#0C0F14", "type": "color" }
+    },
+    "text": {
+      "strong": { "value": "#F3F6F9", "type": "color" },
+      "default":{ "value": "#D6DCE4", "type": "color" },
+      "muted":  { "value": "#939CA9", "type": "color" },
+      "faint":  { "value": "#646D7A", "type": "color" }
+    },
+    "line": {
+      "soft":   { "value": "rgba(220,232,250,0.07)", "type": "color" },
+      "default":{ "value": "rgba(220,232,250,0.12)", "type": "color" },
+      "strong": { "value": "rgba(220,232,250,0.22)", "type": "color" }
+    },
+    "accent":       { "value": "{ink.signal}", "type": "color" },
+    "accent-text":  { "value": "{ink.on-ink}", "type": "color" },
+    "control":      { "value": "#2A323D", "type": "color" },
+    "status": {
+      "info":    { "value": "{ink.indigo}", "type": "color" },
+      "success": { "value": "{ink.leaf}",   "type": "color" },
+      "warning": { "value": "{ink.amber}",  "type": "color" },
+      "danger":  { "value": "{ink.coral}",  "type": "color" }
+    }
+  },
+  "light": {
+    "surface": {
+      "app":     { "value": "#EDEFF2", "type": "color" },
+      "sunken":  { "value": "#E0E4E9", "type": "color" },
+      "panel":   { "value": "#FAFBFC", "type": "color" },
+      "raised":  { "value": "#FFFFFF", "type": "color" },
+      "overlay": { "value": "#FFFFFF", "type": "color" },
+      "inset":   { "value": "#E6E9EE", "type": "color" }
+    },
+    "text": {
+      "strong": { "value": "#14171C", "type": "color" },
+      "default":{ "value": "#2C313A", "type": "color" },
+      "muted":  { "value": "#5A636F", "type": "color" },
+      "faint":  { "value": "#939BA8", "type": "color" }
+    },
+    "line": {
+      "soft":   { "value": "rgba(20,28,40,0.06)", "type": "color" },
+      "default":{ "value": "rgba(20,28,40,0.12)", "type": "color" },
+      "strong": { "value": "rgba(20,28,40,0.22)", "type": "color" }
+    },
+    "accent":       { "value": "{ink.signal-deep}", "type": "color" },
+    "accent-text":  { "value": "#042420", "type": "color" },
+    "control":      { "value": "#FFFFFF", "type": "color" },
+    "status": {
+      "info":    { "value": "{ink.indigo}", "type": "color" },
+      "success": { "value": "#2BA85E",      "type": "color" },
+      "warning": { "value": "{ink.amber}",  "type": "color" },
+      "danger":  { "value": "{ink.coral}",  "type": "color" }
+    }
+  }
+}

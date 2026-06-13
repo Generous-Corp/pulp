@@ -1,0 +1,39 @@
+/* ============================================================
+   PULP · MOTION
+   Springy & playful — a little overshoot, never sluggish.
+   "Instrument-grade": fast to respond, soft to settle.
+   ============================================================ */
+:root {
+  /* Easing */
+  --ease-spring:  cubic-bezier(.34, 1.56, .64, 1);   /* overshoot — press release, popovers */
+  --ease-out:     cubic-bezier(.22, 1, .36, 1);      /* entrances, hover lift */
+  --ease-in-out:  cubic-bezier(.65, 0, .35, 1);      /* moves, reorders */
+  --ease-linear:  linear;                            /* meters, playheads */
+
+  /* Durations */
+  --dur-1: 80ms;    /* tap feedback */
+  --dur-2: 140ms;   /* hover, small state */
+  --dur-3: 220ms;   /* default transition */
+  --dur-4: 320ms;   /* panels, popovers */
+  --dur-5: 480ms;   /* dialogs, large entrances */
+
+  /* Common composed transitions */
+  --t-control: transform var(--dur-2) var(--ease-spring),
+               background var(--dur-2) var(--ease-out),
+               box-shadow var(--dur-2) var(--ease-out),
+               border-color var(--dur-2) var(--ease-out),
+               color var(--dur-2) var(--ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --ease-spring: ease;
+    --dur-1: 0ms; --dur-2: 0ms; --dur-3: 0ms; --dur-4: 0ms; --dur-5: 0ms;
+  }
+}
+
+@keyframes pulp-spin   { to { transform: rotate(360deg); } }
+@keyframes pulp-pulse  { 0%,100% { opacity:1 } 50% { opacity:.4 } }
+@keyframes pulp-pop    { 0% { transform: scale(.96); opacity:0 } 60% { transform: scale(1.01) } 100% { transform: scale(1); opacity:1 } }
+@keyframes pulp-rise   { 0% { transform: translateY(6px); opacity:0 } 100% { transform: translateY(0); opacity:1 } }
+@keyframes pulp-shimmer{ 0% { background-position: -120% 0 } 100% { background-position: 220% 0 } }
