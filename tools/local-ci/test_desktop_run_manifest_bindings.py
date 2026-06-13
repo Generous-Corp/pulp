@@ -89,6 +89,14 @@ class DesktopRunManifestBindingsTests(unittest.TestCase):
         )
         self.assertEqual(bindings["desktop_rollup_dir"]({"desktop_automation": {}}, "mac"), Path("/rollups/mac"))
 
+    def test_install_desktop_run_manifest_helpers_keeps_unknown_local_fallback(self):
+        bindings = {}
+        self.mod.future_desktop_run_manifest_helper = lambda _bindings: "future"
+
+        self.mod.install_desktop_run_manifest_helpers(bindings, ("future_desktop_run_manifest_helper",))
+
+        self.assertEqual(bindings["future_desktop_run_manifest_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()

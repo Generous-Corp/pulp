@@ -74,6 +74,14 @@ class DesktopRunRollupWriteBindingsTests(unittest.TestCase):
         self.assertIsNone(bindings["write_desktop_run_rollups"]({"desktop_automation": {}}, target_name="mac"))
         self.assertEqual(captured["write"][0], ({"desktop_automation": {}},))
 
+    def test_install_desktop_run_rollup_write_helpers_keeps_unknown_local_fallback(self):
+        bindings = {}
+        self.mod.future_desktop_run_rollup_write_helper = lambda _bindings: "future"
+
+        self.mod.install_desktop_run_rollup_write_helpers(bindings, ("future_desktop_run_rollup_write_helper",))
+
+        self.assertEqual(bindings["future_desktop_run_rollup_write_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()

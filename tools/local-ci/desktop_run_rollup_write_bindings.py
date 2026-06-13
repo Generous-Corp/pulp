@@ -33,4 +33,10 @@ def install_desktop_run_rollup_write_helpers(
     bindings: dict[str, Any],
     names: tuple[str, ...] = DESKTOP_RUN_ROLLUP_WRITE_EXPORTS,
 ) -> None:
-    install_local_helpers(bindings, globals(), names)
+    known_names = set(DESKTOP_RUN_ROLLUP_WRITE_EXPORTS)
+    write_names = tuple(name for name in names if name in known_names)
+    unknown_names = tuple(name for name in names if name not in known_names)
+
+    install_local_helpers(bindings, globals(), write_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)
