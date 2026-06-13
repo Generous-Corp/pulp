@@ -6,6 +6,7 @@ import json
 from argparse import Namespace
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -14,27 +15,12 @@ MODULE_PATH = Path(__file__).resolve().with_name("simulator_video_commands_cli.p
 
 
 def load_module():
+    sys.path.insert(0, str(MODULE_PATH.parent))
     spec = importlib.util.spec_from_file_location("simulator_video_commands_cli_under_test", MODULE_PATH)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)
     return module
-
-
-class FakeRecorderProcess:
-    def __init__(self, command):
-        self.command = command
-        self.returncode = None
-
-    def terminate(self):
-        Path(self.command[-1]).write_bytes(b"fake simulator mp4")
-        self.returncode = 0
-
-    def kill(self):
-        self.returncode = -9
-
-    def communicate(self, timeout=None):
-        return ("", "recorded")
 
 
 class SimulatorVideoCommandsTests(unittest.TestCase):
@@ -67,6 +53,12 @@ class SimulatorVideoCommandsTests(unittest.TestCase):
             return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
         if command[:3] == ["/usr/bin/xcrun", "simctl", "launch"]:
             return subprocess.CompletedProcess(command, 0, stdout="com.pulp.demo: 1234", stderr="")
+        if command[:5] == ["/usr/bin/xcrun", "simctl", "io", "A-UDID", "screenshot"]:
+            Path(command[-1]).write_bytes(b"fake simulator png")
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="Wrote screenshot")
+        if command and command[0] == "/usr/bin/ffmpeg":
+            Path(command[-1]).write_bytes(b"fake simulator mp4")
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
         return subprocess.CompletedProcess(command, 1, stdout="", stderr="unexpected command")
 
     def test_video_doctor_reports_booted_simulator(self):
@@ -107,11 +99,10 @@ class SimulatorVideoCommandsTests(unittest.TestCase):
             output = Path(tmp) / "run"
 
             result = self.mod.cmd_simulator_video(
-                Namespace(device=None, app=str(app), bundle_id=None, duration=0.1, label="ios-proof", output=str(output), json=True),
+                Namespace(device=None, app=str(app), bundle_id=None, duration=0.1, video_fps=5.0, label="ios-proof", output=str(output), json=True),
                 print_fn=self.print_line,
-                which_fn=lambda name: "/usr/bin/xcrun" if name == "xcrun" else None,
+                which_fn=lambda name: f"/usr/bin/{name}" if name in {"xcrun", "ffmpeg"} else None,
                 run_fn=self.run_fn,
-                popen_fn=lambda command, **_kwargs: FakeRecorderProcess(command),
                 time_sleep_fn=lambda _secs: None,
             )
 
@@ -122,6 +113,11 @@ class SimulatorVideoCommandsTests(unittest.TestCase):
             self.assertEqual(manifest["simulator"]["udid"], "A-UDID")
             self.assertEqual(manifest["app"]["bundle_id"], "com.pulp.demo")
             self.assertEqual(manifest["video"]["template"], "mobile-simulator")
+            self.assertEqual(manifest["video"]["fps"], 5.0)
+            self.assertEqual(manifest["video"]["recorder"], "xcrun simctl io screenshot + ffmpeg")
+            self.assertIn("-framerate", manifest["commands"][-1]["command"])
+            self.assertIn("frame-%06d.png", manifest["commands"][-1]["frame_pattern"])
+            self.assertEqual(manifest["commands"][-1]["frame_count"], 1)
             self.assertTrue(Path(payload["video"]).exists())
             self.assertIn(["/usr/bin/xcrun", "simctl", "launch", "A-UDID", "com.pulp.demo"], self.commands)
 

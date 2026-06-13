@@ -634,6 +634,7 @@ def build_local_ci_parser(
     p_simulator_video.add_argument("--app", help="Optional .app bundle to install before recording")
     p_simulator_video.add_argument("--bundle-id", help="Optional bundle identifier to launch before recording")
     p_simulator_video.add_argument("--duration", type=float, default=8.0, help="Seconds to record (default: 8)")
+    p_simulator_video.add_argument("--video-fps", type=float, default=10.0, help="Screenshot frames per second for encoded proof videos (default: 10)")
     p_simulator_video.add_argument("--label", help="Proof label stored in the manifest and default output path")
     p_simulator_video.add_argument("--output", help="Optional output run directory (default: Application Support/Pulp/.../ios-simulator)")
     p_simulator_video.add_argument("--json", action="store_true", help="Emit machine-readable JSON")

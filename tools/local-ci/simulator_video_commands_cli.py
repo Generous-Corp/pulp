@@ -14,6 +14,8 @@ import subprocess
 import time
 import uuid
 
+from video_artifacts import resolve_ffmpeg_path
+
 
 DEFAULT_SIMULATOR_VIDEO_ROOT = (
     Path.home() / "Library" / "Application Support" / "Pulp" / "desktop-automation" / "runs" / "ios-simulator"
@@ -81,6 +83,12 @@ def simulator_video_doctor_payload(
             "detail": xcrun_path or "xcrun not found on PATH",
         }
     )
+    ffmpeg_path = None
+    try:
+        ffmpeg_path = resolve_ffmpeg_path(which_fn=which_fn, tool_dir=Path(__file__).resolve().parent)
+        checks.append({"name": "ffmpeg", "ok": True, "detail": ffmpeg_path})
+    except RuntimeError as exc:
+        checks.append({"name": "ffmpeg", "ok": False, "detail": str(exc)})
     booted: list[dict] = []
     if xcrun_path:
         try:
@@ -110,6 +118,14 @@ def simulator_video_doctor_payload(
                 "command": "xcode-select --install",
             }
         )
+    if not ffmpeg_path:
+        remediations.append(
+            {
+                "check": "ffmpeg",
+                "detail": "Install the local video tooling before recording simulator proof MP4s.",
+                "command": "npm --prefix tools/local-ci install",
+            }
+        )
     if selected is None:
         remediations.append(
             {
@@ -122,7 +138,7 @@ def simulator_video_doctor_payload(
         "kind": "simulator-video-doctor",
         "target": "ios-simulator",
         "device": device,
-        "ok": bool(xcrun_path) and selected is not None,
+        "ok": bool(xcrun_path) and bool(ffmpeg_path) and selected is not None,
         "checks": checks,
         "booted_devices": booted,
         "remediations": remediations,
@@ -181,25 +197,74 @@ def record_ios_simulator_video(
     device_udid: str,
     output_path: Path,
     duration_secs: float,
+    video_fps: float = 10.0,
     xcrun_path: str = "xcrun",
-    popen_fn: Callable[..., subprocess.Popen] = subprocess.Popen,
+    ffmpeg_path: str = "ffmpeg",
+    run_fn: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
     time_sleep_fn: Callable[[float], None] = time.sleep,
+    monotonic_fn: Callable[[], float] = time.monotonic,
 ) -> dict:
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    command = [xcrun_path, "simctl", "io", device_udid, "recordVideo", "--type=h264", str(output_path)]
-    proc = popen_fn(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    time_sleep_fn(max(0.1, duration_secs))
-    proc.terminate()
-    try:
-        stdout, stderr = proc.communicate(timeout=10)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        stdout, stderr = proc.communicate(timeout=10)
+    frames_dir = output_path.parent / "frames"
+    frames_dir.mkdir(parents=True, exist_ok=True)
+    fps = max(1.0, float(video_fps or 10.0))
+    duration = max(0.1, float(duration_secs or 0.1))
+    frame_count = max(1, int(round(duration * fps)))
+    interval = 1.0 / fps
+    screenshot_commands: list[dict] = []
+    captured = 0
+    next_frame_at = monotonic_fn()
+    for index in range(1, frame_count + 1):
+        frame_path = frames_dir / f"frame-{index:06d}.png"
+        command = [xcrun_path, "simctl", "io", device_udid, "screenshot", "--type=png", str(frame_path)]
+        result = run_fn(command, capture_output=True, text=True, timeout=10)
+        screenshot_commands.append(
+            {
+                "command": command,
+                "returncode": result.returncode,
+                "stdout_tail": _json_tail(result.stdout or ""),
+                "stderr_tail": _json_tail(result.stderr or ""),
+            }
+        )
+        if result.returncode != 0:
+            break
+        if frame_path.exists() and frame_path.stat().st_size > 0:
+            captured += 1
+        next_frame_at += interval
+        sleep_for = next_frame_at - monotonic_fn()
+        if sleep_for > 0 and index < frame_count:
+            time_sleep_fn(sleep_for)
+    frame_pattern = str(frames_dir / "frame-%06d.png")
+    encode_command = [
+        ffmpeg_path,
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-framerate",
+        f"{fps:g}",
+        "-i",
+        frame_pattern,
+        "-vf",
+        f"fps={fps:g},format=yuv420p",
+        "-c:v",
+        "libx264",
+        "-movflags",
+        "+faststart",
+        str(output_path),
+    ]
+    encode = run_fn(encode_command, capture_output=True, text=True, timeout=max(30, int(duration) + 30))
     return {
-        "command": command,
-        "returncode": proc.returncode,
-        "stdout_tail": _json_tail(stdout or ""),
-        "stderr_tail": _json_tail(stderr or ""),
+        "command": encode_command,
+        "returncode": encode.returncode,
+        "stdout_tail": _json_tail(encode.stdout or ""),
+        "stderr_tail": _json_tail(encode.stderr or ""),
+        "frame_count": captured,
+        "requested_frame_count": frame_count,
+        "frames_dir": str(frames_dir),
+        "frame_pattern": frame_pattern,
+        "video_fps": fps,
+        "screenshot_commands": screenshot_commands[-5:],
     }
 
 
@@ -235,7 +300,6 @@ def cmd_simulator_video(
     print_fn: Callable[[str], None] = print,
     which_fn: Callable[[str], str | None] = shutil.which,
     run_fn: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
-    popen_fn: Callable[..., subprocess.Popen] = subprocess.Popen,
     time_sleep_fn: Callable[[float], None] = time.sleep,
 ) -> int:
     xcrun_path = which_fn("xcrun")
@@ -278,12 +342,20 @@ def cmd_simulator_video(
             return 1
 
     duration = float(getattr(args, "duration", 8.0) or 8.0)
+    video_fps = max(1.0, float(getattr(args, "video_fps", 10.0) or 10.0))
+    try:
+        ffmpeg_path = resolve_ffmpeg_path(which_fn=which_fn, tool_dir=Path(__file__).resolve().parent)
+    except RuntimeError as exc:
+        print_fn(f"Error: {exc}")
+        return 1
     record = record_ios_simulator_video(
         device_udid=selected["udid"],
         output_path=video_path,
         duration_secs=duration,
+        video_fps=video_fps,
         xcrun_path=xcrun_path,
-        popen_fn=popen_fn,
+        ffmpeg_path=ffmpeg_path,
+        run_fn=run_fn,
         time_sleep_fn=time_sleep_fn,
     )
     commands.append({"step": "record-video", **record})
@@ -309,8 +381,9 @@ def cmd_simulator_video(
         "video": {
             "path": str(video_path),
             "duration_secs": duration,
+            "fps": video_fps,
             "size_bytes": video_path.stat().st_size,
-            "recorder": "xcrun simctl io recordVideo",
+            "recorder": "xcrun simctl io screenshot + ffmpeg",
             "template": "mobile-simulator",
         },
         "artifacts": {"video": str(video_path), "bundle_dir": str(run_dir), "manifest": str(run_dir / "manifest.json")},
