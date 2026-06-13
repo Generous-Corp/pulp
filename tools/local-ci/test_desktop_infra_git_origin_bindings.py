@@ -70,6 +70,14 @@ class DesktopInfraGitOriginBindingsTests(unittest.TestCase):
 
         self.assertEqual(bindings["git_origin_http_url"](Path("/repo")), "https:/repo")
 
+    def test_install_origin_helpers_keeps_unknown_local_fallback(self) -> None:
+        bindings = {}
+        self.mod.future_origin_helper = lambda _bindings: "future"
+
+        self.mod.install_desktop_infra_git_origin_helpers(bindings, ("future_origin_helper",))
+
+        self.assertEqual(bindings["future_origin_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()

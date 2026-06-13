@@ -47,6 +47,14 @@ class DesktopInfraWaitBindingsTests(unittest.TestCase):
 
         self.assertEqual(bindings["wait_for_path"](Path("/tmp/file"), 3.0), Path("/tmp/file"))
 
+    def test_install_desktop_infra_wait_helpers_keeps_unknown_local_fallback(self) -> None:
+        bindings = {}
+        self.mod.future_wait_helper = lambda _bindings: "future"
+
+        self.mod.install_desktop_infra_wait_helpers(bindings, ("future_wait_helper",))
+
+        self.assertEqual(bindings["future_wait_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -61,6 +61,14 @@ class DesktopInfraGitRemoteBindingsTests(unittest.TestCase):
 
         self.assertEqual(bindings["normalize_git_remote_for_http"]("example/repo"), "https:example/repo")
 
+    def test_install_remote_helpers_keeps_unknown_local_fallback(self) -> None:
+        bindings = {}
+        self.mod.future_remote_helper = lambda _bindings: "future"
+
+        self.mod.install_desktop_infra_git_remote_helpers(bindings, ("future_remote_helper",))
+
+        self.assertEqual(bindings["future_remote_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()
