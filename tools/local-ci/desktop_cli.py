@@ -245,6 +245,7 @@ def desktop_publish_lines(report: dict) -> list[str]:
         f"  index_html: {report['index_html']}",
         f"  index_json: {report['index_json']}",
         f"  review_markdown: {report['review_markdown']}",
+        f"  review_package: {report['review_package']}",
     ]
 
 

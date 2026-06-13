@@ -331,14 +331,18 @@ watch URLs: localhost, this machine's hostname, any comma-separated
 is available. Set `PULP_DESKTOP_SERVE_HOSTS=blackbook.tailnet-name.ts.net` when
 you already know the friendly Tailnet DNS name you want reviewers to tap.
 
-`desktop publish` also writes `review.md` next to `index.html`. Use that file
-as the GitHub issue body. It includes the local report path, a Tailscale/local
-serve command, each run's video artifact, attachment-budget status, and the
-expected reviewer response. When a small fallback exists, it also lists
+`desktop publish` also writes `review.md` and `review-package.json` next to
+`index.html`. Use `review.md` as the GitHub issue body. It includes the local
+report path, a Tailscale/local serve command, each run's video artifact,
+attachment-budget status, and the expected reviewer response.
+`review-package.json` is the machine-readable handoff for future upload
+automation: it records each run's primary or small attachment decision, absolute
+MP4 path when a file should be attached, size/budget fields, and the served
+report fallback. When a small fallback exists, the markdown also lists
 `proof.small.mp4`, its 10 MB budget status, and whether that smaller file should
-be attached instead of the pro-account issue video. It includes the concrete
-attach/do-not-attach decision and `desktop verdict` commands for approval or
-follow-up. GitHub's
+be attached instead of the pro-account issue video. Both files include the
+concrete attach/do-not-attach decision and `desktop verdict` commands for
+approval or follow-up. GitHub's
 current hosted attachment policy is 100 MB for paid-plan video uploads when the
 uploader is eligible; otherwise plan for the 10 MB video cap and use the served
 report link. The intended review loop is:

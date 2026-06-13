@@ -337,6 +337,85 @@ def desktop_review_issue_body(index_payload: dict, *, publish_dir: Path) -> str:
     return "\n".join(lines)
 
 
+def desktop_review_package(index_payload: dict, *, publish_dir: Path) -> dict:
+    serve_command = f"python3 tools/local-ci/local_ci.py desktop serve {publish_dir} --host 0.0.0.0 --port 8765"
+    runs: list[dict] = []
+    for run in index_payload.get("runs", []):
+        artifacts = run.get("artifacts") or {}
+        metadata_path = artifacts.get("video_issue_metadata") or artifacts.get("video_composed_metadata") or artifacts.get("video_metadata")
+        small_metadata_path = artifacts.get("video_small_metadata")
+        metadata = _artifact_metadata(publish_dir, metadata_path)
+        small_metadata = _artifact_metadata(publish_dir, small_metadata_path)
+        size = metadata.get("size") if isinstance(metadata.get("size"), dict) else {}
+        small_size = small_metadata.get("size") if isinstance(small_metadata.get("size"), dict) else {}
+        primary_fits = size.get("fits_attachment_budget")
+        small_fits = small_size.get("fits_attachment_budget")
+        primary_path = artifacts.get("video_issue")
+        small_path = artifacts.get("video_small")
+        attachment: dict = {
+            "status": "fallback-link",
+            "path": None,
+            "size_bytes": size.get("size_bytes") or metadata.get("size_bytes"),
+            "fits_attachment_budget": primary_fits,
+            "budget_bytes": size.get("attachment_budget_bytes") or metadata.get("attachment_budget_bytes"),
+            "reason": "no issue-ready MP4 fits the configured attachment budget",
+        }
+        if primary_path and primary_fits is True:
+            attachment.update(
+                {
+                    "status": "attach-primary",
+                    "path": str(publish_dir / str(primary_path)),
+                    "relative_path": primary_path,
+                    "reason": "primary issue MP4 fits the configured attachment budget",
+                }
+            )
+        elif small_path and small_fits is True:
+            attachment.update(
+                {
+                    "status": "attach-small",
+                    "path": str(publish_dir / str(small_path)),
+                    "relative_path": small_path,
+                    "size_bytes": small_size.get("size_bytes") or small_metadata.get("size_bytes"),
+                    "fits_attachment_budget": small_fits,
+                    "budget_bytes": small_size.get("attachment_budget_bytes") or small_metadata.get("attachment_budget_bytes"),
+                    "reason": "primary issue MP4 is unavailable or over budget; small fallback fits",
+                }
+            )
+        proof_composition = run.get("video_proof_composition") if isinstance(run.get("video_proof_composition"), dict) else {}
+        runs.append(
+            {
+                "target": run.get("target"),
+                "action": run.get("action"),
+                "label": run.get("label"),
+                "completed_at": run.get("completed_at"),
+                "bundle_dir": run.get("bundle_dir"),
+                "template": proof_composition.get("template"),
+                "context": proof_composition.get("context") if isinstance(proof_composition.get("context"), dict) else {},
+                "notes": run.get("video_proof_notes") if isinstance(run.get("video_proof_notes"), list) else [],
+                "attachment": attachment,
+                "fallback": {
+                    "report_path": str(publish_dir / "index.html"),
+                    "review_markdown": str(publish_dir / "review.md"),
+                    "serve_command": serve_command,
+                    "internal_ephemeral": True,
+                },
+            }
+        )
+    return {
+        "kind": "desktop-video-proof-review-package",
+        "generated_at": index_payload.get("generated_at"),
+        "label": index_payload.get("label"),
+        "publish_mode": index_payload.get("publish_mode"),
+        "publish_branch": index_payload.get("publish_branch"),
+        "output_dir": str(publish_dir),
+        "index_html": str(publish_dir / "index.html"),
+        "index_json": str(publish_dir / "index.json"),
+        "review_markdown": str(publish_dir / "review.md"),
+        "serve_command": serve_command,
+        "runs": runs,
+    }
+
+
 def stage_desktop_publish_report(
     config: dict,
     manifests: list[dict],
@@ -424,6 +503,9 @@ def stage_desktop_publish_report(
     atomic_write_text_fn(index_json, json.dumps(index_payload, indent=2) + "\n")
     review_markdown = publish_dir / "review.md"
     atomic_write_text_fn(review_markdown, desktop_review_issue_body(index_payload, publish_dir=publish_dir))
+    review_package = publish_dir / "review-package.json"
+    review_package_payload = desktop_review_package(index_payload, publish_dir=publish_dir)
+    atomic_write_text_fn(review_package, json.dumps(review_package_payload, indent=2) + "\n")
 
     cards: list[str] = []
     for run in published_runs:
@@ -542,6 +624,7 @@ def stage_desktop_publish_report(
         "index_html": str(index_html),
         "index_json": str(index_json),
         "review_markdown": str(review_markdown),
+        "review_package": str(review_package),
         "run_count": len(published_runs),
         "runs": published_runs,
     }
@@ -574,6 +657,9 @@ def desktop_publish_reports(
         review_markdown = publish_dir / "review.md"
         if review_markdown.exists():
             payload.setdefault("review_markdown", str(review_markdown))
+        review_package = publish_dir / "review-package.json"
+        if review_package.exists():
+            payload.setdefault("review_package", str(review_package))
         reports.append(payload)
     reports.sort(key=lambda item: item.get("generated_at") or "", reverse=True)
     if limit is not None:

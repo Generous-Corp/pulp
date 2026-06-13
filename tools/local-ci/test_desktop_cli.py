@@ -372,6 +372,7 @@ class DesktopCliTests(unittest.TestCase):
             "index_html": "/tmp/publish/index.html",
             "index_json": "/tmp/publish/index.json",
             "review_markdown": "/tmp/publish/review.md",
+            "review_package": "/tmp/publish/review-package.json",
         }
 
         self.assertEqual(
@@ -383,6 +384,7 @@ class DesktopCliTests(unittest.TestCase):
                 "  index_html: /tmp/publish/index.html",
                 "  index_json: /tmp/publish/index.json",
                 "  review_markdown: /tmp/publish/review.md",
+                "  review_package: /tmp/publish/review-package.json",
             ],
         )
 

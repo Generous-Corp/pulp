@@ -299,6 +299,13 @@ retry ladder: balanced 720p at 24 fps, compact 720p at 15 fps, then compact
 `transcoded`, `exceeds-budget`, or `transcode-failed` status; use the served
 report link when the issue variant still does not fit.
 
+Published reports should contain both `review.md` and `review-package.json`.
+Use `review.md` as the human GitHub issue body. Use `review-package.json` as the
+structured source of truth for automation: it records whether to attach the
+primary issue MP4, attach the small fallback, or use the served/local report
+link, along with absolute attachment paths, size/budget fields, and fallback
+serve commands.
+
 To recompose an existing raw proof:
 
 ```bash
