@@ -9,6 +9,14 @@ from binding_utils import binding as _binding
 from binding_utils import binding_attr as _binding_attr
 
 
+QUEUE_JOB_POLICY_EXPORTS = (
+    "default_priority_for",
+    "make_fingerprint",
+    "make_job",
+    "validate_ci_branch_name",
+)
+
+
 def default_priority_for(bindings: Mapping[str, Any], command: str, config: dict) -> str:
     return _binding(bindings, "_queue_orchestrator").default_priority_for(command, config)
 

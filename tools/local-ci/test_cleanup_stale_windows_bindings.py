@@ -30,6 +30,15 @@ class CleanupStaleWindowsBindingTests(unittest.TestCase):
             "trim_line": mock.Mock(name="trim_line"),
         }
 
+    def test_cleanup_stale_windows_exports_match_facade_helpers(self) -> None:
+        expected = (
+            "collect_stale_windows_cleanup_candidates_unlocked",
+            "cleanup_stale_windows_validator",
+        )
+
+        self.assertEqual(self.mod.CLEANUP_STALE_WINDOWS_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def test_stale_windows_candidate_wiring_preserves_facade_seams(self) -> None:
         self.cleanup.collect_stale_windows_cleanup_candidates_unlocked.return_value = [{"job_id": "job1"}]
         queue = [{"id": "job1"}]

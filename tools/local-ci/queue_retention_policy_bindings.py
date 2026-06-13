@@ -8,6 +8,16 @@ from typing import Any
 from binding_utils import binding as _binding
 
 
+QUEUE_RETENTION_POLICY_EXPORTS = (
+    "trim_completed_jobs_with_removed_ids",
+    "trim_completed_jobs",
+    "job_sort_key",
+    "queue_status_groups",
+    "recent_completed_jobs_for_status",
+    "find_job_unlocked",
+)
+
+
 def trim_completed_jobs_with_removed_ids(bindings: Mapping[str, Any], queue: list[dict]) -> tuple[list[dict], set[str]]:
     return _binding(bindings, "_queue_orchestrator").trim_completed_jobs_with_removed_ids(
         queue,

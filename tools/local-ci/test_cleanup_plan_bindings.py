@@ -31,6 +31,18 @@ class CleanupPlanBindingTests(unittest.TestCase):
             "describe_path_for_cleanup": mock.Mock(name="describe_path_for_cleanup"),
         }
 
+    def test_cleanup_plan_exports_match_facade_helpers(self) -> None:
+        expected = (
+            "result_file_job_id",
+            "artifact_entry_sort_key",
+            "collect_local_ci_cleanup_plan",
+            "apply_local_ci_cleanup_plan",
+            "cleanup_plan_lines",
+        )
+
+        self.assertEqual(self.mod.CLEANUP_PLAN_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def test_simple_cleanup_helpers_delegate_to_cleanup_module(self) -> None:
         path = pathlib.Path("/state/results/job1.json")
         entry = {"mtime": 1.0}

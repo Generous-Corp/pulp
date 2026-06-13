@@ -112,6 +112,15 @@ class CleanupBindingTests(unittest.TestCase):
             trim_line_fn=self.bindings["trim_line"],
         )
 
+    def test_cleanup_exports_are_composed_from_focused_groups(self) -> None:
+        expected = (
+            *self.mod.CLEANUP_PLAN_EXPORTS,
+            *self.mod.CLEANUP_STALE_WINDOWS_EXPORTS,
+        )
+
+        self.assertEqual(self.mod.CLEANUP_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def test_install_cleanup_helpers_wires_named_exports_and_default_retention(self) -> None:
         self.cleanup.collect_local_ci_cleanup_plan.return_value = {"categories": {}}
         self.cleanup.result_file_job_id.return_value = "job1"

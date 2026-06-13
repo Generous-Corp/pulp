@@ -20,6 +20,20 @@ class QueueSupersedencePolicyBindingsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
 
+    def test_queue_supersedence_policy_exports_match_facade_helpers(self) -> None:
+        expected = (
+            "supersedence_result",
+            "cancellation_result",
+            "supersedence_key",
+            "supersedence_identity_key",
+            "jobs_share_supersedence_scope",
+            "job_has_narrower_same_identity_scope",
+            "supersedence_reason",
+        )
+
+        self.assertEqual(self.mod.QUEUE_SUPERSEDENCE_POLICY_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def test_queue_supersedence_policy_bindings_delegate_to_orchestrator(self) -> None:
         captured = {}
 

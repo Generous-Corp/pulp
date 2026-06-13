@@ -6,12 +6,14 @@ from typing import Any
 
 from binding_utils import install_local_helpers
 from queue_job_policy_bindings import (
+    QUEUE_JOB_POLICY_EXPORTS,
     default_priority_for,
     make_fingerprint,
     make_job,
     validate_ci_branch_name,
 )
 from queue_retention_policy_bindings import (
+    QUEUE_RETENTION_POLICY_EXPORTS,
     find_job_unlocked,
     job_sort_key,
     queue_status_groups,
@@ -20,6 +22,7 @@ from queue_retention_policy_bindings import (
     trim_completed_jobs_with_removed_ids,
 )
 from queue_supersedence_policy_bindings import (
+    QUEUE_SUPERSEDENCE_POLICY_EXPORTS,
     cancellation_result,
     job_has_narrower_same_identity_scope,
     jobs_share_supersedence_scope,
@@ -31,23 +34,10 @@ from queue_supersedence_policy_bindings import (
 
 
 QUEUE_POLICY_EXPORTS = (
-    "default_priority_for",
-    "make_fingerprint",
-    "make_job",
-    "supersedence_result",
-    "cancellation_result",
-    "supersedence_key",
-    "supersedence_identity_key",
-    "jobs_share_supersedence_scope",
-    "job_has_narrower_same_identity_scope",
-    "supersedence_reason",
-    "trim_completed_jobs_with_removed_ids",
-    "trim_completed_jobs",
-    "job_sort_key",
-    "queue_status_groups",
-    "recent_completed_jobs_for_status",
-    "find_job_unlocked",
-    "validate_ci_branch_name",
+    *QUEUE_JOB_POLICY_EXPORTS[:3],
+    *QUEUE_SUPERSEDENCE_POLICY_EXPORTS,
+    *QUEUE_RETENTION_POLICY_EXPORTS,
+    QUEUE_JOB_POLICY_EXPORTS[3],
 )
 
 

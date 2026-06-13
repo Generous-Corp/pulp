@@ -20,6 +20,17 @@ class QueueJobPolicyBindingsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
 
+    def test_queue_job_policy_exports_match_facade_helpers(self) -> None:
+        expected = (
+            "default_priority_for",
+            "make_fingerprint",
+            "make_job",
+            "validate_ci_branch_name",
+        )
+
+        self.assertEqual(self.mod.QUEUE_JOB_POLICY_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def test_queue_job_policy_bindings_delegate_to_orchestrator(self) -> None:
         captured = {}
 

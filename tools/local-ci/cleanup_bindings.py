@@ -6,6 +6,7 @@ from typing import Any
 
 from binding_utils import install_local_helpers
 from cleanup_plan_bindings import (
+    CLEANUP_PLAN_EXPORTS,
     apply_local_ci_cleanup_plan,
     artifact_entry_sort_key,
     cleanup_plan_lines,
@@ -13,19 +14,15 @@ from cleanup_plan_bindings import (
     result_file_job_id,
 )
 from cleanup_stale_windows_bindings import (
+    CLEANUP_STALE_WINDOWS_EXPORTS,
     cleanup_stale_windows_validator,
     collect_stale_windows_cleanup_candidates_unlocked,
 )
 
 
 CLEANUP_EXPORTS = (
-    "result_file_job_id",
-    "artifact_entry_sort_key",
-    "collect_local_ci_cleanup_plan",
-    "apply_local_ci_cleanup_plan",
-    "cleanup_plan_lines",
-    "collect_stale_windows_cleanup_candidates_unlocked",
-    "cleanup_stale_windows_validator",
+    *CLEANUP_PLAN_EXPORTS,
+    *CLEANUP_STALE_WINDOWS_EXPORTS,
 )
 
 

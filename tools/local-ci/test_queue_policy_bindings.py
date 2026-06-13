@@ -20,23 +20,10 @@ class QueuePolicyBindingsTests(unittest.TestCase):
 
     def test_queue_policy_exports_match_focused_facade_helpers(self):
         expected = (
-            "default_priority_for",
-            "make_fingerprint",
-            "make_job",
-            "supersedence_result",
-            "cancellation_result",
-            "supersedence_key",
-            "supersedence_identity_key",
-            "jobs_share_supersedence_scope",
-            "job_has_narrower_same_identity_scope",
-            "supersedence_reason",
-            "trim_completed_jobs_with_removed_ids",
-            "trim_completed_jobs",
-            "job_sort_key",
-            "queue_status_groups",
-            "recent_completed_jobs_for_status",
-            "find_job_unlocked",
-            "validate_ci_branch_name",
+            *self.mod.QUEUE_JOB_POLICY_EXPORTS[:3],
+            *self.mod.QUEUE_SUPERSEDENCE_POLICY_EXPORTS,
+            *self.mod.QUEUE_RETENTION_POLICY_EXPORTS,
+            self.mod.QUEUE_JOB_POLICY_EXPORTS[3],
         )
 
         self.assertEqual(self.mod.QUEUE_POLICY_EXPORTS, expected)

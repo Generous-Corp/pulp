@@ -8,6 +8,17 @@ from typing import Any
 from binding_utils import binding as _binding
 
 
+QUEUE_SUPERSEDENCE_POLICY_EXPORTS = (
+    "supersedence_result",
+    "cancellation_result",
+    "supersedence_key",
+    "supersedence_identity_key",
+    "jobs_share_supersedence_scope",
+    "job_has_narrower_same_identity_scope",
+    "supersedence_reason",
+)
+
+
 def supersedence_result(bindings: Mapping[str, Any], job: dict, superseded_by: str, reason: str) -> dict:
     return _binding(bindings, "_queue_orchestrator").supersedence_result(
         job,

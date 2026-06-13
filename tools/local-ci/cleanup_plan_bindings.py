@@ -8,6 +8,15 @@ from typing import Any
 from binding_utils import binding as _binding
 
 
+CLEANUP_PLAN_EXPORTS = (
+    "result_file_job_id",
+    "artifact_entry_sort_key",
+    "collect_local_ci_cleanup_plan",
+    "apply_local_ci_cleanup_plan",
+    "cleanup_plan_lines",
+)
+
+
 def result_file_job_id(bindings: Mapping[str, Any], path: Any) -> str | None:
     return _binding(bindings, "_cleanup").result_file_job_id(path)
 

@@ -20,6 +20,19 @@ class QueueRetentionPolicyBindingsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
 
+    def test_queue_retention_policy_exports_match_facade_helpers(self) -> None:
+        expected = (
+            "trim_completed_jobs_with_removed_ids",
+            "trim_completed_jobs",
+            "job_sort_key",
+            "queue_status_groups",
+            "recent_completed_jobs_for_status",
+            "find_job_unlocked",
+        )
+
+        self.assertEqual(self.mod.QUEUE_RETENTION_POLICY_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def test_queue_retention_policy_bindings_delegate_to_orchestrator(self) -> None:
         captured = {}
 

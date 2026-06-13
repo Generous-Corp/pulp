@@ -8,6 +8,12 @@ from typing import Any
 from binding_utils import binding as _binding
 
 
+CLEANUP_STALE_WINDOWS_EXPORTS = (
+    "collect_stale_windows_cleanup_candidates_unlocked",
+    "cleanup_stale_windows_validator",
+)
+
+
 def collect_stale_windows_cleanup_candidates_unlocked(
     bindings: Mapping[str, Any],
     queue: list[dict],
