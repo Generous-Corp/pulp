@@ -53,6 +53,11 @@ std::vector<uint8_t> read_bytes(const fs::path& path) {
     return {std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
 }
 
+std::string file_sha256(const fs::path& path) {
+    const auto bytes = read_bytes(path);
+    return pulp::runtime::sha256_hex(bytes.data(), bytes.size());
+}
+
 bool write_text(const fs::path& path, const std::string& body) {
     std::error_code ec;
     fs::create_directories(path.parent_path(), ec);
@@ -968,7 +973,7 @@ std::string registry_manifest_signed_message(const KitSummary& summary,
 
 void validate_registry_manifest(KitValidationResult& result,
                                 const JsonValue& registry_manifest,
-                                const std::string& manifest_text) {
+                                const std::string& expected_sha) {
     if (registry_manifest.type != JsonValue::Object) {
         add_publish_issue(result, "error", "invalid-registry-manifest",
                           "registry manifest must be a JSON object");
@@ -987,7 +992,6 @@ void validate_registry_manifest(KitValidationResult& result,
                           "registry manifest version must match pulp.package.json");
     }
 
-    const auto expected_sha = "sha256-" + pulp::runtime::sha256_hex(manifest_text);
     const auto canonical_sha = string_field(registry_manifest, "canonicalManifestSha256");
     if (canonical_sha != expected_sha) {
         add_publish_issue(result, "error", "registry-manifest-digest-mismatch",
@@ -2906,8 +2910,7 @@ int cmd_plan(const std::vector<std::string>& args) {
 
     if (result.ok()) {
         auto manifest = parse_manifest_json(result.summary.manifest_path);
-        const auto manifest_sha256 =
-            "sha256-" + pulp::runtime::sha256_hex(read_text(result.summary.manifest_path));
+        const auto manifest_sha256 = "sha256-" + file_sha256(result.summary.manifest_path);
         const auto cmake_targets = object_string_array_field(manifest, "exports", "cmakeTargets");
         const auto ui_scripts = object_string_array_field(manifest, "exports", "pulpUiScripts");
         const auto design_tokens = object_string_array_field(manifest, "exports", "designTokens");
@@ -3254,8 +3257,7 @@ int cmd_apply(const std::vector<std::string>& args) {
     }), entries.end());
 
     auto manifest = parse_manifest_json(result.summary.manifest_path);
-    const auto manifest_sha256 =
-        "sha256-" + pulp::runtime::sha256_hex(read_text(result.summary.manifest_path));
+    const auto manifest_sha256 = "sha256-" + file_sha256(result.summary.manifest_path);
     const auto cmake_targets = object_string_array_field(manifest, "exports", "cmakeTargets");
     const auto ui_scripts = object_string_array_field(manifest, "exports", "pulpUiScripts");
     const auto design_tokens = object_string_array_field(manifest, "exports", "designTokens");
@@ -3682,7 +3684,6 @@ int cmd_publish(const std::vector<std::string>& args) {
     auto result = validate_kit_input(input, true);
     JsonValue manifest;
     if (fs::exists(result.summary.manifest_path)) {
-        const auto manifest_text = read_text(result.summary.manifest_path);
         manifest = parse_manifest_json(result.summary.manifest_path);
         if (is_content_pack_result(result)) {
             add_content_pack_kit_lane_issue(result, "publish");
@@ -3695,7 +3696,8 @@ int cmd_publish(const std::vector<std::string>& args) {
                                       + registry_manifest_path.string());
             } else {
                 auto registry_manifest = parse_manifest_json(registry_manifest_path);
-                validate_registry_manifest(result, registry_manifest, manifest_text);
+                validate_registry_manifest(result, registry_manifest,
+                                           "sha256-" + file_sha256(result.summary.manifest_path));
             }
         }
     }

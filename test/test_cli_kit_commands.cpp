@@ -72,6 +72,17 @@ std::string read_file(const fs::path& path) {
     return {std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
 }
 
+std::string replace_all(std::string value,
+                        const std::string& from,
+                        const std::string& to) {
+    std::size_t pos = 0;
+    while ((pos = value.find(from, pos)) != std::string::npos) {
+        value.replace(pos, from.size(), to);
+        pos += to.size();
+    }
+    return value;
+}
+
 std::string read_zip_entry(const fs::path& zip_path, const std::string& entry) {
     mz_zip_archive zip{};
     if (!mz_zip_reader_init_file(&zip, zip_path.string().c_str(), 0)) return {};
@@ -204,20 +215,23 @@ fs::path screenshot_tool_path_for_test(const fs::path& project_root) {
 void write_fake_screenshot_tool(const fs::path& project_root, const std::string& bytes) {
     const auto screenshot_tool = screenshot_tool_path_for_test(project_root);
 #ifdef _WIN32
-    write_file(screenshot_tool, std::string(R"BAT(@echo off
+    auto script = std::string(R"BAT(@echo off
+setlocal
 set "out="
 :loop
 if "%~1"=="" goto done
-if "%~1"=="--output" (
+if /I "%~1"=="--output" (
   shift
   set "out=%~1"
 )
 shift
 goto loop
 :done
-> "%out%" <nul set /p dummy=)BAT") + bytes + R"BAT(
-exit /b 0
-)BAT");
+if not defined out exit /b 2
+powershell -NoProfile -ExecutionPolicy Bypass -Command "[IO.File]::WriteAllText($env:out, ')BAT") + bytes + R"BAT(', [Text.UTF8Encoding]::new($false))"
+exit /b %ERRORLEVEL%
+)BAT";
+    write_file(screenshot_tool, replace_all(script, "\n", "\r\n"));
 #else
     write_file(screenshot_tool, std::string(R"SH(#!/bin/sh
 out=""
@@ -235,6 +249,10 @@ exit 0
                     fs::perms::owner_exec | fs::perms::owner_read | fs::perms::owner_write,
                     fs::perm_options::add);
 #endif
+}
+
+std::string fake_screenshot_bytes(std::string bytes) {
+    return bytes;
 }
 
 int run_success_command(const std::string& cmd) {
@@ -768,8 +786,9 @@ TEST_CASE("pulp package JSON Schema carries kind-specific review evidence rules"
     REQUIRE(schema.find(R"("allOf")") != std::string::npos);
     REQUIRE(schema.find(R"("contains": { "const": "template" })") != std::string::npos);
     REQUIRE(schema.find(R"("required": ["generatedProjectDiffs"])") != std::string::npos);
-    REQUIRE(schema.find(R"("generatedProjectDiffs": {
-                "minItems": 1)") != std::string::npos);
+    const auto generated_diffs = schema.find(R"("generatedProjectDiffs")");
+    REQUIRE(generated_diffs != std::string::npos);
+    REQUIRE(schema.find(R"("minItems": 1)", generated_diffs) != std::string::npos);
     REQUIRE(schema.find(R"("contains": { "const": "ui-kit" })") != std::string::npos);
     REQUIRE(schema.find(R"("anyOf")") != std::string::npos);
     REQUIRE(schema.find(R"("required": ["screenshots"])") != std::string::npos);
@@ -1118,6 +1137,7 @@ TEST_CASE("pulp kit verify can explicitly execute screenshot profiles after revi
                         "--screenshot-backend", "skia",
                         "--json"});
     }, exit_code);
+    INFO(output);
     REQUIRE(exit_code == 0);
     REQUIRE(output.find(R"("kind":"rendered-screenshot")") != std::string::npos);
     REQUIRE(output.find(R"("kind":"render-log")") != std::string::npos);
@@ -1162,7 +1182,8 @@ TEST_CASE("pulp kit verify writes visual diff reports for explicit screenshot ba
     "scale": 1
   }
 })JSON");
-    write_file(kit.path / "validation" / "goldens" / "visual.png", "fake png bytes");
+    write_file(kit.path / "validation" / "goldens" / "visual.png",
+               fake_screenshot_bytes("fake png bytes"));
     write_file(kit.path / "pulp.package.json", R"JSON({
   "schema": "pulp-package-v1",
   "id": "dev.pulp.tests.visual-diff-kit",
@@ -1213,6 +1234,7 @@ TEST_CASE("pulp kit verify writes visual diff reports for explicit screenshot ba
                         "--execute-screenshots",
                         "--json"});
     }, exit_code);
+    INFO(output);
     REQUIRE(exit_code == 0);
     REQUIRE(output.find(R"("kind":"visual-diff-report")") != std::string::npos);
     const auto report = project.path / ".pulp" / "kit-validation" /
@@ -1309,6 +1331,7 @@ TEST_CASE("pulp kit verify fails explicit screenshot baselines on visual mismatc
                         "--execute-screenshots",
                         "--json"});
     }, exit_code);
+    INFO(output);
     REQUIRE(exit_code == 1);
     REQUIRE(output.find("screenshot-visual-diff-mismatch") != std::string::npos);
     const auto report = project.path / ".pulp" / "kit-validation" /
@@ -1406,6 +1429,7 @@ TEST_CASE("pulp kit verify allows visual diffs within declared byte tolerance",
                         "--execute-screenshots",
                         "--json"});
     }, exit_code);
+    INFO(output);
     REQUIRE(exit_code == 0);
     REQUIRE(output.find(R"("kind":"visual-diff-report")") != std::string::npos);
     const auto report = project.path / ".pulp" / "kit-validation" /
@@ -2300,9 +2324,10 @@ TEST_CASE("pulp kit apply builds, tests, and removes cleanly from a CMake projec
     REQUIRE(run_success_command("cmake -S " + quote_for_shell(project.path)
                                 + " -B " + quote_for_shell(project.path / "build")
                                 + " -DCMAKE_BUILD_TYPE=Release") == 0);
-    REQUIRE(run_success_command("cmake --build " + quote_for_shell(project.path / "build")) == 0);
+    REQUIRE(run_success_command("cmake --build " + quote_for_shell(project.path / "build")
+                                + " --config Release") == 0);
     REQUIRE(run_success_command("ctest --test-dir " + quote_for_shell(project.path / "build")
-                                + " --output-on-failure") == 0);
+                                + " -C Release --output-on-failure") == 0);
 
     REQUIRE(cmd_kit({"remove", "dev.pulp.fixtures.basic-ui-kit",
                      "--project", project.path.string(), "--yes"}) == 0);
@@ -2310,10 +2335,11 @@ TEST_CASE("pulp kit apply builds, tests, and removes cleanly from a CMake projec
                                 + " -B " + quote_for_shell(project.path / "build-after-remove")
                                 + " -DCMAKE_BUILD_TYPE=Release") == 0);
     REQUIRE(run_success_command("cmake --build "
-                                + quote_for_shell(project.path / "build-after-remove")) == 0);
+                                + quote_for_shell(project.path / "build-after-remove")
+                                + " --config Release") == 0);
     REQUIRE(run_success_command("ctest --test-dir "
                                 + quote_for_shell(project.path / "build-after-remove")
-                                + " --output-on-failure") == 0);
+                                + " -C Release --output-on-failure") == 0);
 }
 
 TEST_CASE("pulp kit remove rejects tampered lock paths outside the kit-owned tree",
@@ -2571,10 +2597,13 @@ TEST_CASE("pulp kit publish dry-run requires NOTICE-compatible license files",
     fs::copy(repo_root() / "fixtures/packages/basic-ui-kit", fixture,
              fs::copy_options::recursive | fs::copy_options::overwrite_existing);
     auto manifest = read_file(fixture / "pulp.package.json");
-    const std::string licenses_line = ",\n    \"licenses\": [\"licenses/LICENSE.txt\"]";
+    manifest = replace_all(manifest, "\r\n", "\n");
+    const std::string licenses_line = "    \"licenses\": [\"licenses/LICENSE.txt\"]\n";
     const auto pos = manifest.find(licenses_line);
     REQUIRE(pos != std::string::npos);
     manifest.erase(pos, licenses_line.size());
+    manifest = replace_all(manifest, "    \"assets\": [\"assets/\"],\n  }",
+                           "    \"assets\": [\"assets/\"]\n  }");
     write_file(fixture / "pulp.package.json", manifest);
 
     int exit_code = -1;
