@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from binding_utils import binding as _binding
+from binding_utils import install_local_helpers
 
 
 DESKTOP_SOURCE_REWRITE_ROOT_EXPORTS = (
@@ -51,3 +52,10 @@ def rewrite_launch_command_for_windows_root(
         root=_binding(bindings, "ROOT"),
         windows_path_join_fn=_binding(bindings, "windows_path_join"),
     )
+
+
+def install_desktop_source_rewrite_root_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = DESKTOP_SOURCE_REWRITE_ROOT_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)

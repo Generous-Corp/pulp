@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from binding_utils import binding as _binding
+from binding_utils import install_local_helpers
 
 
 DESKTOP_SOURCE_REWRITE_COMMAND_EXPORTS = (
@@ -35,3 +36,10 @@ def rewrite_launch_command_for_mapper(
         root=_binding(bindings, "ROOT"),
         windows=windows,
     )
+
+
+def install_desktop_source_rewrite_command_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = DESKTOP_SOURCE_REWRITE_COMMAND_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)
