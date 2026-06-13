@@ -18,6 +18,10 @@ import uuid
 DEFAULT_ANDROID_VIDEO_ROOT = (
     Path.home() / "Library" / "Application Support" / "Pulp" / "desktop-automation" / "runs" / "android-emulator"
 )
+ANDROID_PROOF_NOTES = [
+    "Watch for the adb device identity, app launch or current emulator state, and the timed open-url/deep-link action.",
+    "Coordinate taps need a future automation backend; this proof uses Android's public activity/deep-link tools.",
+]
 
 
 def _now_stamp() -> str:
@@ -438,6 +442,7 @@ def cmd_android_video(
         "commands": commands,
     }
     if open_url:
+        manifest["video_proof_notes"] = ANDROID_PROOF_NOTES
         manifest["video_proof_composition"] = {
             "template": "mobile-emulator",
             "action_marker": _android_action_marker(
@@ -447,6 +452,7 @@ def cmd_android_video(
                 at_secs=float((record.get("action") or {}).get("at_secs") or action_after_secs),
             ),
             "context": {"target": "android-emulator", "action": "open-url", "url": open_url},
+            "notes": ANDROID_PROOF_NOTES,
         }
     manifest_path = run_dir / "manifest.json"
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
@@ -464,4 +470,3 @@ def cmd_android_video(
             print_fn=print_fn,
         )
     return 0
-

@@ -20,6 +20,10 @@ from video_artifacts import resolve_ffmpeg_path
 DEFAULT_SIMULATOR_VIDEO_ROOT = (
     Path.home() / "Library" / "Application Support" / "Pulp" / "desktop-automation" / "runs" / "ios-simulator"
 )
+SIMULATOR_PROOF_NOTES = [
+    "Watch for the simulator device/runtime, app launch or current host setup, and the timed open-url action.",
+    "Coordinate taps need a future automation backend; this proof uses a public simctl open-url action.",
+]
 
 
 def _now_stamp() -> str:
@@ -444,6 +448,7 @@ def cmd_simulator_video(
     }
     if open_url:
         label = getattr(args, "action_label", None) or f"open-url: {open_url}"
+        manifest["video_proof_notes"] = SIMULATOR_PROOF_NOTES
         manifest["video_proof_composition"] = {
             "template": "mobile-simulator",
             "action_marker": _simulator_action_marker(
@@ -453,6 +458,7 @@ def cmd_simulator_video(
                 at_secs=float((record.get("action") or {}).get("at_secs") or action_after_secs),
             ),
             "context": {"target": "ios-simulator", "action": "open-url", "url": open_url},
+            "notes": SIMULATOR_PROOF_NOTES,
         }
     manifest_path = run_dir / "manifest.json"
     manifest_path.parent.mkdir(parents=True, exist_ok=True)

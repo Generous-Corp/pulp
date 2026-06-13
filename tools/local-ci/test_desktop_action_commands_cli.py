@@ -341,6 +341,8 @@ class DesktopActionCommandsCliTests(unittest.TestCase):
         self.assertEqual(call["video_template"], "component-zoom")
         self.assertEqual(call["label"], "component-threshold-proof")
         self.assertEqual(call["video_title"], "Component validation")
+        self.assertIn("full-window context", call["video_note"][0])
+        self.assertIn("focus box", call["video_note"][1])
 
     def test_video_command_applies_audio_inspector_recipe(self):
         result = self.mod.cmd_desktop_video(
@@ -358,6 +360,8 @@ class DesktopActionCommandsCliTests(unittest.TestCase):
         self.assertFalse(call["capture_ui_snapshot"])
         self.assertEqual(call["label"], "audio-inspector-demo-proof")
         self.assertEqual(call["video_title"], "Standalone Audio Inspector Demo")
+        self.assertIn("audio-inspector surface", call["video_note"][0])
+        self.assertIn("storyboard", call["video_note"][1])
 
     def test_video_command_applies_reaper_recipe(self):
         result = self.mod.cmd_desktop_video(
@@ -380,6 +384,8 @@ class DesktopActionCommandsCliTests(unittest.TestCase):
         self.assertEqual(call["video_title"], "PulpEffect VST3 editor in REAPER")
         self.assertEqual(call["video_template"], "plugin-host")
         self.assertIn("REAPER launched from a generated wrapper", call["video_note"][0])
+        self.assertIn("REAPER host chrome", call["video_note"][1])
+        self.assertIn("blank project window", call["video_note"][2])
         self.assertEqual(call["reaper_recipe_files"]["command"], call["launch_command"])
         self.assertTrue(Path(call["reaper_recipe_files"]["lua_script"]).exists())
 
@@ -466,6 +472,7 @@ class DesktopActionCommandsCliTests(unittest.TestCase):
         self.assertIsNone(call["bundle_id"])
         self.assertEqual(call["label"], "reaper-clap-PulpSynth-proof")
         self.assertEqual(call["video_title"], "PulpSynth CLAP editor in REAPER")
+        self.assertIn("REAPER host chrome", call["video_note"][0])
 
     def test_video_command_validates_recipe_requirements(self):
         result = self.mod.cmd_desktop_video(

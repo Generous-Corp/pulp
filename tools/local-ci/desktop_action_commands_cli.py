@@ -30,6 +30,33 @@ VIDEO_PROOF_RECIPES = {
     "design-parity",
 }
 
+RECIPE_PROOF_NOTES = {
+    "standalone-interaction": [
+        "Watch for the app window, the click marker, and a visible after-state or diff.",
+        "This proof is useful only if the control response is readable without rerunning the app.",
+    ],
+    "audio-inspector-demo": [
+        "Watch for the inspector or audio-inspector surface and readable probe/meter state.",
+        "The storyboard should make the inspected state understandable without opening the manifest.",
+    ],
+    "reaper-plugin-editor": [
+        "Watch for REAPER host chrome plus a real inserted plugin/editor context.",
+        "A useful host proof must show more than a blank project window.",
+    ],
+    "inspector-workflow": [
+        "Watch for the inspector pane and the selected node, probe, or meter state.",
+        "The proof should demonstrate the developer workflow, not just app launch.",
+    ],
+    "component-zoom": [
+        "Watch for full-window context before the zoomed component detail.",
+        "The focus box, zoom inset, and action marker should agree on the same component.",
+    ],
+    "design-parity": [
+        "Watch for readable source and native render panes side by side.",
+        "The notes or storyboard should identify the critical region being compared.",
+    ],
+}
+
 
 def _print_lines(lines, *, print_fn: Callable[[str], None]) -> None:
     for line in lines:
@@ -39,6 +66,14 @@ def _print_lines(lines, *, print_fn: Callable[[str], None]) -> None:
 def _set_default(args: argparse.Namespace, name: str, value) -> None:
     if getattr(args, name, None) in {None, ""}:
         setattr(args, name, value)
+
+
+def _append_recipe_proof_notes(args: argparse.Namespace, recipe: str) -> None:
+    notes = list(getattr(args, "video_note", None) or [])
+    for note in RECIPE_PROOF_NOTES.get(recipe, []):
+        if note not in notes:
+            notes.append(note)
+    args.video_note = notes
 
 
 def _apply_desktop_video_recipe(args: argparse.Namespace) -> None:
@@ -54,6 +89,7 @@ def _apply_desktop_video_recipe(args: argparse.Namespace) -> None:
         _set_default(args, "video_template", "standalone")
         if any([args.click, args.click_view_id, args.click_view_type, args.click_view_text, args.click_view_label]):
             args.capture_before = True
+        _append_recipe_proof_notes(args, recipe)
         return
 
     if recipe == "audio-inspector-demo":
@@ -61,6 +97,7 @@ def _apply_desktop_video_recipe(args: argparse.Namespace) -> None:
         _set_default(args, "label", "audio-inspector-demo-proof")
         _set_default(args, "video_title", "Standalone Audio Inspector Demo")
         _set_default(args, "video_template", "inspector-workflow")
+        _append_recipe_proof_notes(args, recipe)
         return
 
     if recipe == "reaper-plugin-editor":
@@ -102,6 +139,7 @@ def _apply_desktop_video_recipe(args: argparse.Namespace) -> None:
         if not getattr(args, "click", None):
             args.action = "smoke"
         args.capture_before = True
+        _append_recipe_proof_notes(args, recipe)
         return
 
     if recipe == "inspector-workflow":
@@ -110,6 +148,7 @@ def _apply_desktop_video_recipe(args: argparse.Namespace) -> None:
         _set_default(args, "label", "inspector-workflow-proof")
         _set_default(args, "video_title", "Inspector workflow proof")
         _set_default(args, "video_template", "inspector-workflow")
+        _append_recipe_proof_notes(args, recipe)
         return
 
     if recipe == "component-zoom":
@@ -123,6 +162,7 @@ def _apply_desktop_video_recipe(args: argparse.Namespace) -> None:
         _set_default(args, "video_template", "component-zoom")
         _set_default(args, "label", f"component-{args.click_view_id or component_id or 'zoom'}-proof")
         _set_default(args, "video_title", "Component validation")
+        _append_recipe_proof_notes(args, recipe)
         return
 
     if recipe == "design-parity":
@@ -134,6 +174,7 @@ def _apply_desktop_video_recipe(args: argparse.Namespace) -> None:
         _set_default(args, "source_label", "Source reference")
         _set_default(args, "label", "design-parity-proof")
         _set_default(args, "video_title", "Design import parity")
+        _append_recipe_proof_notes(args, recipe)
 
 
 def _video_context(args: argparse.Namespace) -> dict:

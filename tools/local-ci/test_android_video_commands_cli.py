@@ -141,6 +141,8 @@ class AndroidVideoCommandsTests(unittest.TestCase):
             self.assertEqual(manifest["android_action"]["url"], "pulp-demo://toggle")
             self.assertEqual(manifest["video_proof_composition"]["template"], "mobile-emulator")
             self.assertEqual(manifest["video_proof_composition"]["action_marker"]["kind"], "open-url")
+            self.assertIn("adb device identity", manifest["video_proof_notes"][0])
+            self.assertIn("deep-link tools", manifest["video_proof_composition"]["notes"][1])
             record_step = next(item for item in manifest["commands"] if item["step"] == "record-video")
             self.assertEqual(record_step["time_limit_secs"], 1)
             self.assertTrue(Path(payload["video"]).exists())

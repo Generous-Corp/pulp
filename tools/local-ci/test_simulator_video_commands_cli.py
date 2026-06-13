@@ -140,6 +140,8 @@ class SimulatorVideoCommandsTests(unittest.TestCase):
             self.assertEqual(manifest["video_proof_composition"]["template"], "mobile-simulator")
             self.assertEqual(manifest["video_proof_composition"]["action_marker"]["kind"], "open-url")
             self.assertEqual(manifest["video_proof_composition"]["action_marker"]["label"], "toggle deep link")
+            self.assertIn("simulator device/runtime", manifest["video_proof_notes"][0])
+            self.assertIn("simctl open-url", manifest["video_proof_composition"]["notes"][1])
             self.assertTrue(Path(payload["video"]).exists())
             self.assertIn(["/usr/bin/xcrun", "simctl", "launch", "A-UDID", "com.pulp.demo"], self.commands)
             self.assertIn(["/usr/bin/xcrun", "simctl", "openurl", "A-UDID", "pulp-demo://toggle"], self.commands)
