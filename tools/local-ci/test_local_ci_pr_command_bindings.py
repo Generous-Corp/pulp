@@ -118,6 +118,34 @@ class LocalCiPrCommandBindingsTests(unittest.TestCase):
         self.assertIs(captured["kwargs"]["gh_pr_list_open_fn"], bindings["gh_pr_list_open"])
         self.assertIs(captured["kwargs"]["open_pr_list_lines_fn"], bindings["open_pr_list_lines"])
 
+    def test_pr_command_exports_are_composed_from_focused_groups(self):
+        expected = (
+            *self.mod.LOCAL_CI_PR_SHIP_COMMAND_EXPORTS,
+            *self.mod.LOCAL_CI_PR_CHECK_COMMAND_EXPORTS,
+            *self.mod.LOCAL_CI_PR_LIST_COMMAND_EXPORTS,
+        )
+
+        self.assertEqual(self.mod.LOCAL_CI_PR_COMMAND_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
+    def test_install_pr_command_helpers_routes_named_exports(self):
+        captured = {}
+
+        def runner(*args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            return 11
+
+        bindings = self._bindings("cmd_list", runner)
+        args_obj = object()
+        self.mod.install_local_ci_pr_command_helpers(bindings, ("cmd_list",))
+
+        self.assertEqual(bindings["cmd_list"](args_obj), 11)
+        self.assertEqual(captured["args"], (args_obj,))
+        self.assertIs(captured["kwargs"]["gh_available_fn"], bindings["gh_available"])
+        self.assertIs(captured["kwargs"]["gh_pr_list_open_fn"], bindings["gh_pr_list_open"])
+        self.assertIs(captured["kwargs"]["open_pr_list_lines_fn"], bindings["open_pr_list_lines"])
+
 
 if __name__ == "__main__":
     unittest.main()

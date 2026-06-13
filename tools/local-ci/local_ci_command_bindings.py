@@ -10,6 +10,7 @@ from local_ci_pr_command_bindings import (
     cmd_check,
     cmd_list,
     cmd_ship,
+    install_local_ci_pr_command_helpers,
 )
 from local_ci_queue_command_bindings import (
     LOCAL_CI_QUEUE_COMMAND_EXPORTS,
@@ -39,4 +40,8 @@ def install_local_ci_command_helpers(
     bindings: dict[str, Any],
     names: tuple[str, ...] = LOCAL_CI_COMMAND_EXPORTS,
 ) -> None:
-    install_local_helpers(bindings, globals(), names)
+    pr_names = tuple(name for name in names if name in LOCAL_CI_PR_COMMAND_EXPORTS)
+    non_pr_names = tuple(name for name in names if name not in LOCAL_CI_PR_COMMAND_EXPORTS)
+
+    install_local_ci_pr_command_helpers(bindings, pr_names)
+    install_local_helpers(bindings, globals(), non_pr_names)
