@@ -549,6 +549,11 @@ python3 tools/local-ci/local_ci.py desktop serve --status --label validation-vid
 python3 tools/local-ci/local_ci.py desktop serve --stop --label validation-video-proof --json
 ```
 
+If background startup returns `status: failed`, treat the watch link as dead.
+Inspect `stderr_tail` for bind errors such as `Address already in use`, then
+stop the conflicting labeled server or rerun `desktop serve` with a different
+port before sharing the URL.
+
 `desktop publish` writes `review.md` and `review-package.json` next to
 `index.html`, including candidate watch URLs from localhost, configured
 `PULP_DESKTOP_SERVE_HOSTS`, and Tailscale when available. Start `desktop serve`

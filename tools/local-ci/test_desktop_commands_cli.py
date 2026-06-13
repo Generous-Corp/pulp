@@ -442,6 +442,48 @@ class DesktopCommandsCliTests(unittest.TestCase):
         self.assertEqual(background_payload["urls"][1], "http://100.64.0.10:8768/")
 
         self.printed.clear()
+        started.clear()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            artifact_root = Path(tmpdir) / "runs"
+            report_dir = artifact_root / "_published" / "report"
+            report_dir.mkdir(parents=True)
+            (report_dir / "index.html").write_text("<html></html>")
+            serve_config = self.desktop_config()
+            serve_config["desktop_automation"]["artifact_root"] = str(artifact_root)
+
+            def start_process_failed(path, **kwargs):
+                started.append((path, kwargs))
+                return {
+                    "status": "failed",
+                    "label": kwargs["label"],
+                    "pid": 4244,
+                    "directory": str(path),
+                    "urls": kwargs["urls"],
+                    "exit_code": 1,
+                    "stderr_tail": "OSError: [Errno 48] Address already in use\n",
+                    "state_path": str(artifact_root / "_published" / "_serve" / "ios-proof.json"),
+                }
+
+            result = self.mod.cmd_desktop_serve(
+                Namespace(path=str(report_dir), host="0.0.0.0", port=8768, background=True, label="ios-proof", json=False),
+                load_config_fn=lambda: serve_config,
+                desktop_publish_reports_fn=lambda *_args, **_kwargs: [],
+                desktop_serve_candidate_urls_fn=lambda host, port: [
+                    f"http://127.0.0.1:{port}/",
+                    f"http://100.64.0.10:{port}/",
+                ],
+                start_serve_process_fn=start_process_failed,
+                serve_directory_fn=lambda *_args, **_kwargs: self.fail("background serve should not block"),
+                print_fn=self.print_line,
+            )
+
+        self.assertEqual(result, 1)
+        self.assertEqual(started[0][0], report_dir.resolve())
+        self.assertIn("failed to start", self.printed[0])
+        self.assertIn("exit_code: 1", self.printed[1])
+        self.assertIn("Address already in use", self.printed[2])
+
+        self.printed.clear()
         with tempfile.TemporaryDirectory() as tmpdir:
             artifact_root = Path(tmpdir) / "runs"
             serve_config = self.desktop_config()
@@ -504,6 +546,44 @@ class DesktopCommandsCliTests(unittest.TestCase):
         self.assertEqual(result, 1)
         self.assertEqual(served, [])
         self.assertIn("only serves reports under configured publish root", self.printed[-1])
+
+    def test_start_desktop_serve_process_records_immediate_startup_failure(self):
+        class ExitedProcess:
+            pid = 4245
+
+            def poll(self):
+                return 48
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            publish_root = Path(tmpdir) / "_published"
+            serve_dir = publish_root / "report"
+            serve_dir.mkdir(parents=True)
+            (serve_dir / "index.html").write_text("<html></html>")
+
+            def popen_fn(_command, *, stdout, stderr, **_kwargs):
+                stdout.write("server stdout before exit\n")
+                stderr.write("OSError: [Errno 48] Address already in use\n")
+                return ExitedProcess()
+
+            state = self.mod.start_desktop_serve_process(
+                serve_dir,
+                host="0.0.0.0",
+                port=8768,
+                label="ios-proof",
+                publish_root=publish_root,
+                urls=["http://127.0.0.1:8768/"],
+                popen_fn=popen_fn,
+                sleep_fn=lambda _seconds: None,
+            )
+
+            persisted = json.loads(Path(state["state_path"]).read_text())
+
+        self.assertEqual(state["status"], "failed")
+        self.assertEqual(state["exit_code"], 48)
+        self.assertIn("Address already in use", state["stderr_tail"])
+        self.assertIn("server stdout before exit", state["stdout_tail"])
+        self.assertEqual(persisted["status"], "failed")
+        self.assertEqual(persisted["exit_code"], 48)
 
     def test_desktop_serve_candidate_urls_include_tailscale_and_configured_hosts(self):
         calls = []

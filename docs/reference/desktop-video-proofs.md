@@ -513,6 +513,10 @@ python3 tools/local-ci/local_ci.py desktop serve --status --label validation-vid
 python3 tools/local-ci/local_ci.py desktop serve --stop --label validation-video-proof --json
 ```
 
+If background startup returns `status: failed`, the URL is not live. Check the
+JSON `stderr_tail` for bind errors such as `Address already in use`, then stop
+the conflicting labeled server or choose another port before sharing the link.
+
 `desktop publish` also writes `review.md` and `review-package.json` next to
 `index.html`. The publish step records the same candidate watch URLs in
 `index.json`, `review.md`, and `review-package.json`; start `desktop serve` for

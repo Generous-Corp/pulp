@@ -108,6 +108,16 @@ def _write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, indent=2) + "\n")
 
 
+def _read_text_tail(path: Path, *, max_chars: int = 4000) -> str:
+    try:
+        text = path.read_text(errors="replace")
+    except OSError:
+        return ""
+    if len(text) <= max_chars:
+        return text
+    return text[-max_chars:]
+
+
 def start_desktop_serve_process(
     serve_dir: Path,
     *,
@@ -118,6 +128,8 @@ def start_desktop_serve_process(
     urls: list[str],
     popen_fn: Callable[..., subprocess.Popen] = subprocess.Popen,
     now_fn: Callable[[], float] = time.time,
+    sleep_fn: Callable[[float], None] = time.sleep,
+    startup_grace_seconds: float = 0.2,
 ) -> dict:
     state_path = desktop_serve_state_path(publish_root, label)
     log_dir = desktop_serve_state_dir(publish_root)
@@ -171,6 +183,19 @@ def start_desktop_serve_process(
             str(serve_dir),
         ],
     }
+    if startup_grace_seconds > 0:
+        sleep_fn(startup_grace_seconds)
+    exit_code = process.poll()
+    if exit_code is not None:
+        payload.update(
+            {
+                "status": "failed",
+                "exit_code": int(exit_code),
+                "error": "desktop proof server exited during startup",
+                "stdout_tail": _read_text_tail(stdout_path),
+                "stderr_tail": _read_text_tail(stderr_path),
+            }
+        )
     _write_json(state_path, payload)
     return payload
 
@@ -1279,7 +1304,13 @@ def cmd_desktop_serve(
             result = {"status": "missing", "label": label, "state_path": str(desktop_serve_state_path(publish_root, label))}
         else:
             pid = int(state.get("pid") or 0)
-            result = {**state, "status": "running" if is_running_fn(pid) else "stale"}
+            if is_running_fn(pid):
+                status = "running"
+            elif state.get("status") == "failed":
+                status = "failed"
+            else:
+                status = "stale"
+            result = {**state, "status": status}
         if getattr(args, "json", False):
             print_fn(json.dumps(result, indent=2))
         else:
@@ -1323,6 +1354,18 @@ def cmd_desktop_serve(
             publish_root=publish_root,
             urls=urls,
         )
+        if state.get("status") == "failed":
+            if getattr(args, "json", False):
+                print_fn(json.dumps(state, indent=2))
+            else:
+                print_fn(f"Error: desktop proof server failed to start: {label}")
+                if state.get("exit_code") is not None:
+                    print_fn(f"  exit_code: {state['exit_code']}")
+                if state.get("stderr_tail"):
+                    print_fn(f"  stderr: {state['stderr_tail'].strip()}")
+                if state.get("stdout_tail"):
+                    print_fn(f"  stdout: {state['stdout_tail'].strip()}")
+            return 1
         if getattr(args, "json", False):
             print_fn(json.dumps({**state, "status": "started"}, indent=2))
         else:
