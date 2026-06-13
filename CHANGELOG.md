@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v04310"></a>
+## [0.431.0] - 2026-06-12
+
+- feature/standalone callback max block ([#4049](https://github.com/danielraffel/pulp/pull/4049))
+- Fix Audio Scope follow-up CI failures ([#4046](https://github.com/danielraffel/pulp/pull/4046))
+
 <a id="v04300"></a>
 ## [0.430.0] - 2026-06-12
 
@@ -4391,6 +4397,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.431.0]: https://github.com/danielraffel/pulp/releases/tag/v0.431.0
 [0.430.0]: https://github.com/danielraffel/pulp/releases/tag/v0.430.0
 [0.429.0]: https://github.com/danielraffel/pulp/releases/tag/v0.429.0
 [0.428.0]: https://github.com/danielraffel/pulp/releases/tag/v0.428.0
