@@ -181,6 +181,14 @@ Use named recipes when the user asks for one of the high-value demos:
 
 ```bash
 python3 tools/local-ci/local_ci.py desktop video mac \
+  --recipe audio-inspector-demo \
+  --command ./build-video-nogpu/examples/audio-inspector-demo/pulp-audio-inspector-demo \
+  --duration 4 \
+  --video-fps 4
+```
+
+```bash
+python3 tools/local-ci/local_ci.py desktop video mac \
   --recipe standalone-interaction \
   --command ./build/pulp \
   --click 120,80 \
@@ -223,7 +231,9 @@ python3 tools/local-ci/local_ci.py desktop video mac \
 The REAPER recipe defaults to bundle id `com.cockos.reaper` when no explicit
 launch target is supplied, but it does not create a DAW project or insert the
 plugin. Prepare the host session first, then use the recipe to capture and label
-the proof consistently.
+the proof consistently. The `audio-inspector-demo` recipe is a smoke proof for a
+built standalone demo binary; pass the command path for the build directory you
+want to validate.
 
 The same recorder can be enabled on lower-level desktop actions:
 

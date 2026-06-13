@@ -133,6 +133,25 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(args.video_audio, "none")
         self.assertEqual(args.video_attachment_budget_mb, 100.0)
         self.assertEqual(args.label, "standalone-bypass-toggle")
+
+    def test_desktop_video_command_accepts_audio_inspector_recipe(self):
+        parser = self.build_parser()
+
+        args = parser.parse_args([
+            "desktop",
+            "video",
+            "mac",
+            "--recipe",
+            "audio-inspector-demo",
+            "--command",
+            "./build-video-nogpu/examples/audio-inspector-demo/pulp-audio-inspector-demo",
+        ])
+
+        self.assertEqual(args.recipe, "audio-inspector-demo")
+        self.assertEqual(
+            args.launch_command,
+            "./build-video-nogpu/examples/audio-inspector-demo/pulp-audio-inspector-demo",
+        )
         self.assertFalse(args.run_in_terminal)
 
         args = parser.parse_args([

@@ -8,6 +8,7 @@ import json
 
 
 VIDEO_PROOF_RECIPES = {
+    "audio-inspector-demo",
     "standalone-interaction",
     "reaper-plugin-editor",
     "inspector-workflow",
@@ -38,6 +39,12 @@ def _apply_desktop_video_recipe(args: argparse.Namespace) -> None:
         _set_default(args, "video_title", "Standalone UI interaction")
         if any([args.click, args.click_view_id, args.click_view_type, args.click_view_text, args.click_view_label]):
             args.capture_before = True
+        return
+
+    if recipe == "audio-inspector-demo":
+        args.action = "smoke"
+        _set_default(args, "label", "audio-inspector-demo-proof")
+        _set_default(args, "video_title", "Standalone Audio Inspector Demo")
         return
 
     if recipe == "reaper-plugin-editor":

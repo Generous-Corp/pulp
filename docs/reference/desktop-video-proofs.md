@@ -134,6 +134,14 @@ Named recipes apply reviewer-friendly defaults for common proof scenarios:
 
 ```bash
 python3 tools/local-ci/local_ci.py desktop video mac \
+  --recipe audio-inspector-demo \
+  --command ./build-video-nogpu/examples/audio-inspector-demo/pulp-audio-inspector-demo \
+  --duration 4 \
+  --video-fps 4
+```
+
+```bash
+python3 tools/local-ci/local_ci.py desktop video mac \
   --recipe standalone-interaction \
   --command ./build/pulp \
   --click 120,80 \
@@ -180,8 +188,10 @@ python3 tools/local-ci/local_ci.py desktop video mac \
 
 `component-zoom` enables ViewInspector capture and before/diff capture, then
 uses `--component-id` as the click target when no explicit click selector was
-provided. `design-parity` records an inspect proof and composes it with the
-Remotion `design-parity` template directly during capture.
+provided. `audio-inspector-demo` records a smoke proof of a built standalone
+Audio Inspector demo window without requiring a UI snapshot artifact.
+`design-parity` records an inspect proof and composes it with the Remotion
+`design-parity` template directly during capture.
 
 The same recorder can be enabled on lower-level desktop actions:
 

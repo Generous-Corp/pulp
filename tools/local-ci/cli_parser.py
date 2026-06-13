@@ -441,7 +441,14 @@ def build_local_ci_parser(
     p_desktop_video.add_argument("--bundle-id", help="macOS bundle identifier to launch via `open -b`")
     p_desktop_video.add_argument(
         "--recipe",
-        choices=["standalone-interaction", "reaper-plugin-editor", "inspector-workflow", "component-zoom", "design-parity"],
+        choices=[
+            "audio-inspector-demo",
+            "standalone-interaction",
+            "reaper-plugin-editor",
+            "inspector-workflow",
+            "component-zoom",
+            "design-parity",
+        ],
         help="Apply a named high-value proof recipe before running the desktop video action.",
     )
     p_desktop_video.add_argument("--plugin", help="Plugin name for plugin-host proof recipes")

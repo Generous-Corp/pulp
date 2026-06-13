@@ -295,6 +295,23 @@ class DesktopActionCommandsCliTests(unittest.TestCase):
         self.assertEqual(call["label"], "component-threshold-proof")
         self.assertEqual(call["video_title"], "Component validation")
 
+    def test_video_command_applies_audio_inspector_recipe(self):
+        result = self.mod.cmd_desktop_video(
+            self.args(recipe="audio-inspector-demo", label=None),
+            cmd_desktop_smoke_fn=lambda args: self.calls.append(("smoke-wrapper", (), vars(args).copy())) or 0,
+            cmd_desktop_click_fn=lambda _args: self.fail("click should not run"),
+            cmd_desktop_inspect_fn=lambda _args: self.fail("inspect should not run"),
+            print_fn=self.print_line,
+        )
+
+        self.assertEqual(result, 0)
+        call = self.calls[0][2]
+        self.assertEqual(self.calls[0][0], "smoke-wrapper")
+        self.assertEqual(call["action"], "smoke")
+        self.assertFalse(call["capture_ui_snapshot"])
+        self.assertEqual(call["label"], "audio-inspector-demo-proof")
+        self.assertEqual(call["video_title"], "Standalone Audio Inspector Demo")
+
     def test_video_command_applies_reaper_recipe(self):
         result = self.mod.cmd_desktop_video(
             self.args(recipe="reaper-plugin-editor", launch_command=None, label=None, plugin="PulpEffect", plugin_format="vst3"),
