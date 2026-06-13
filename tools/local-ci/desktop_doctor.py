@@ -76,6 +76,7 @@ def desktop_doctor_checks(
     desktop_target_contract_fn: Callable[[str, dict], dict],
     desktop_receipt_for_fn: Callable[[str], dict | None],
     macos_accessibility_trusted_fn: Callable[[], bool],
+    probe_macos_screencapture_fn: Callable[[], tuple[bool, str]] | None,
     ssh_reachable_fn: Callable[[str, int], bool],
     ssh_failure_detail_fn: Callable[[str, int], str],
     probe_linux_launch_backend_fn: Callable[[str], dict],
@@ -85,6 +86,8 @@ def desktop_doctor_checks(
     probe_windows_repo_checkout_fn: Callable[[str, str | None], dict],
     platform: str | None = None,
     which_fn: Callable[[str], str | None] | None = None,
+    resolve_ffmpeg_path_fn: Callable[[], str] | None = None,
+    probe_macos_avfoundation_screen_fn: Callable[[str], tuple[bool, str]] | None = None,
     probe_webdriver_endpoint_fn: Callable[..., dict] | None = None,
 ) -> list[dict]:
     platform = platform or sys.platform
@@ -109,13 +112,14 @@ def desktop_doctor_checks(
     adapter = target["adapter"]
     if adapter == "macos-local":
         checks.append(desktop_check("platform", platform == "darwin", f"running on {platform}"))
-        checks.append(
-            desktop_check(
-                "screencapture",
-                which_fn("screencapture") is not None,
-                which_fn("screencapture") or "missing",
-            )
-        )
+        screencapture_path = which_fn("screencapture")
+        if not screencapture_path:
+            checks.append(desktop_check("screencapture", False, "missing"))
+        elif platform == "darwin" and probe_macos_screencapture_fn is not None:
+            ok, detail = probe_macos_screencapture_fn()
+            checks.append(desktop_check("screencapture", ok, screencapture_path if ok else detail))
+        else:
+            checks.append(desktop_check("screencapture", True, screencapture_path))
         checks.append(
             desktop_check(
                 "osascript",
@@ -309,15 +313,22 @@ def desktop_doctor_checks(
             checks.append(desktop_check("debug_attach", True, detail, required=False))
     if optional.get("video_capture"):
         if target["target_type"] == "local":
-            ffmpeg_path = which_fn("ffmpeg")
-            checks.append(
-                desktop_check(
-                    "video_capture",
-                    ffmpeg_path is not None,
-                    ffmpeg_path or "ffmpeg not found on PATH",
-                    required=False,
+            ffmpeg_path = None
+            try:
+                ffmpeg_path = resolve_ffmpeg_path_fn() if resolve_ffmpeg_path_fn else which_fn("ffmpeg")
+                checks.append(
+                    desktop_check(
+                        "video_capture",
+                        ffmpeg_path is not None,
+                        ffmpeg_path or "ffmpeg not found",
+                        required=False,
+                    )
                 )
-            )
+            except RuntimeError as exc:
+                checks.append(desktop_check("video_capture", False, str(exc), required=False))
+            if platform == "darwin" and ffmpeg_path and probe_macos_avfoundation_screen_fn is not None:
+                ok, detail = probe_macos_avfoundation_screen_fn(ffmpeg_path)
+                checks.append(desktop_check("avfoundation_screen", ok, detail, required=False))
         else:
             checks.append(
                 desktop_check(

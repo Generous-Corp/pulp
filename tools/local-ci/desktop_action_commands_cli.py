@@ -16,6 +16,49 @@ def windows_requires_pulp_app_selectors(args: argparse.Namespace) -> bool:
     return any([args.click_view_id, args.click_view_type, args.click_view_text, args.click_view_label])
 
 
+def _video_kwargs(args: argparse.Namespace) -> dict:
+    audio_source = getattr(args, "video_audio", "none")
+    if audio_source != "none":
+        raise ValueError(
+            f"video audio source `{audio_source}` is not implemented yet; use --video-audio none."
+        )
+    return {
+        "record_video": bool(getattr(args, "record_video", False)),
+        "video_duration_secs": float(getattr(args, "video_duration", 8.0)),
+        "video_fps": float(getattr(args, "video_fps", 30.0)),
+        "video_attachment_budget_bytes": int(float(getattr(args, "video_attachment_budget_mb", 100.0)) * 1_000_000),
+        "compose_video_proof": bool(getattr(args, "compose_video_proof", False)),
+    }
+
+
+def cmd_desktop_video(
+    args: argparse.Namespace,
+    *,
+    cmd_desktop_smoke_fn: Callable[[argparse.Namespace], int],
+    cmd_desktop_click_fn: Callable[[argparse.Namespace], int],
+    cmd_desktop_inspect_fn: Callable[[argparse.Namespace], int],
+    print_fn: Callable[[str], None] = print,
+) -> int:
+    audio_source = getattr(args, "video_audio", "none")
+    if audio_source != "none":
+        print_fn(f"Error: video audio source `{audio_source}` is not implemented yet; use --video-audio none.")
+        return 1
+
+    args.record_video = True
+    if not getattr(args, "compose_video_proof", False):
+        args.compose_video_proof = True
+
+    action = getattr(args, "action", "click")
+    if action == "smoke":
+        return cmd_desktop_smoke_fn(args)
+    if action == "click":
+        return cmd_desktop_click_fn(args)
+    if action == "inspect":
+        return cmd_desktop_inspect_fn(args)
+    print_fn(f"Error: unsupported desktop video action `{action}`.")
+    return 1
+
+
 def cmd_desktop_smoke(
     args: argparse.Namespace,
     *,
@@ -63,8 +106,12 @@ def cmd_desktop_smoke(
             settle_secs=args.settle_secs,
             timeout_secs=args.timeout,
             source_request=source_request,
+            **_video_kwargs(args),
         )
     elif adapter == "linux-xvfb":
+        if getattr(args, "record_video", False):
+            print_fn("Error: desktop video recording is not implemented for linux-xvfb targets yet.")
+            return 1
         if args.bundle_id:
             print_fn("Error: linux-xvfb desktop smoke currently supports --command only.")
             return 1
@@ -92,6 +139,9 @@ def cmd_desktop_smoke(
             source_request=source_request,
         )
     elif adapter == "windows-session-agent":
+        if getattr(args, "record_video", False):
+            print_fn("Error: desktop video recording is not implemented for windows-session-agent targets yet.")
+            return 1
         if args.bundle_id:
             print_fn("Error: windows desktop smoke currently supports --command only.")
             return 1
@@ -190,8 +240,12 @@ def cmd_desktop_click(
             settle_secs=args.settle_secs,
             timeout_secs=args.timeout,
             source_request=source_request,
+            **_video_kwargs(args),
         )
     elif adapter == "linux-xvfb":
+        if getattr(args, "record_video", False):
+            print_fn("Error: desktop video recording is not implemented for linux-xvfb targets yet.")
+            return 1
         if args.bundle_id:
             print_fn("Error: linux-xvfb desktop click currently supports --command only.")
             return 1
@@ -219,6 +273,9 @@ def cmd_desktop_click(
             source_request=source_request,
         )
     elif adapter == "windows-session-agent":
+        if getattr(args, "record_video", False):
+            print_fn("Error: desktop video recording is not implemented for windows-session-agent targets yet.")
+            return 1
         if args.bundle_id:
             print_fn("Error: windows desktop click currently supports --command only.")
             return 1
@@ -321,8 +378,12 @@ def cmd_desktop_inspect(
             settle_secs=0.0,
             timeout_secs=args.timeout,
             source_request=source_request,
+            **_video_kwargs(args),
         )
     elif adapter == "linux-xvfb":
+        if getattr(args, "record_video", False):
+            print_fn("Error: desktop video recording is not implemented for linux-xvfb targets yet.")
+            return 1
         if args.bundle_id:
             print_fn("Error: linux-xvfb desktop inspect currently supports --command only.")
             return 1
@@ -350,6 +411,9 @@ def cmd_desktop_inspect(
             source_request=source_request,
         )
     elif adapter == "windows-session-agent":
+        if getattr(args, "record_video", False):
+            print_fn("Error: desktop video recording is not implemented for windows-session-agent targets yet.")
+            return 1
         if args.bundle_id:
             print_fn("Error: windows desktop inspect currently supports --command only.")
             return 1

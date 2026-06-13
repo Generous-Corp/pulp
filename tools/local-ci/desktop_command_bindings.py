@@ -47,6 +47,17 @@ def cmd_desktop_doctor(bindings: Mapping[str, Any], args: Any) -> int:
     )
 
 
+def cmd_desktop_video_doctor(bindings: Mapping[str, Any], args: Any) -> int:
+    return _binding(bindings, "_desktop_setup_commands_cli").cmd_desktop_video_doctor(
+        args,
+        load_config_fn=_binding(bindings, "load_config"),
+        resolve_desktop_target_fn=_binding(bindings, "resolve_desktop_target"),
+        desktop_doctor_checks_fn=_binding(bindings, "desktop_doctor_checks"),
+        normalize_desktop_optional_config_fn=_binding(bindings, "normalize_desktop_optional_config"),
+        video_proof_smoke_fn=_binding(bindings, "video_proof_smoke"),
+    )
+
+
 def cmd_desktop_status(bindings: Mapping[str, Any], args: Any) -> int:
     return _binding(bindings, "_desktop_commands_cli").cmd_desktop_status(
         args,
@@ -120,6 +131,31 @@ def cmd_desktop_publish(bindings: Mapping[str, Any], args: Any) -> int:
     )
 
 
+def cmd_desktop_verdict(bindings: Mapping[str, Any], args: Any) -> int:
+    return _binding(bindings, "_desktop_commands_cli").cmd_desktop_verdict(
+        args,
+        now_iso_fn=_binding(bindings, "now_iso"),
+        atomic_write_text_fn=_binding(bindings, "atomic_write_text"),
+    )
+
+
+def cmd_desktop_compose_video(bindings: Mapping[str, Any], args: Any) -> int:
+    return _binding(bindings, "_desktop_commands_cli").cmd_desktop_compose_video(
+        args,
+        compose_desktop_video_proof_fn=_binding(bindings, "compose_desktop_video_proof"),
+        create_issue_video_variant_fn=_binding(bindings, "create_issue_video_variant"),
+        atomic_write_text_fn=_binding(bindings, "atomic_write_text"),
+    )
+
+
+def cmd_desktop_serve(bindings: Mapping[str, Any], args: Any) -> int:
+    return _binding(bindings, "_desktop_commands_cli").cmd_desktop_serve(
+        args,
+        load_config_fn=_binding(bindings, "load_config"),
+        desktop_publish_reports_fn=_binding(bindings, "desktop_publish_reports"),
+    )
+
+
 def cmd_desktop_cleanup(bindings: Mapping[str, Any], args: Any) -> int:
     return _binding(bindings, "_desktop_commands_cli").cmd_desktop_cleanup(
         args,
@@ -128,6 +164,15 @@ def cmd_desktop_cleanup(bindings: Mapping[str, Any], args: Any) -> int:
         write_desktop_run_rollups_fn=_binding(bindings, "write_desktop_run_rollups"),
         desktop_cleanup_empty_line_fn=_binding(bindings, "_desktop_cli").desktop_cleanup_empty_line,
         desktop_cleanup_lines_fn=_binding(bindings, "_desktop_cli").desktop_cleanup_lines,
+    )
+
+
+def cmd_desktop_video(bindings: Mapping[str, Any], args: Any) -> int:
+    return _binding(bindings, "_desktop_action_commands_cli").cmd_desktop_video(
+        args,
+        cmd_desktop_smoke_fn=lambda video_args: cmd_desktop_smoke(bindings, video_args),
+        cmd_desktop_click_fn=lambda video_args: cmd_desktop_click(bindings, video_args),
+        cmd_desktop_inspect_fn=lambda video_args: cmd_desktop_inspect(bindings, video_args),
     )
 
 

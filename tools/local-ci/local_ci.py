@@ -168,6 +168,7 @@ import logs_cli as _logs_cli  # noqa: E402
 import macos_desktop as _macos_desktop  # noqa: E402
 import macos_desktop_action as _macos_desktop_action  # noqa: E402
 import macos_desktop_bindings as _macos_desktop_bindings  # noqa: E402
+import video_artifacts as _video_artifacts  # noqa: E402
 import queue_commands_cli as _queue_commands_cli  # noqa: E402
 import queue_bindings as _queue_bindings  # noqa: E402
 import queue_lifecycle as _queue_lifecycle  # noqa: E402
@@ -1011,6 +1012,143 @@ def capture_macos_window(window_id: int, output_path: Path) -> None:
     )
 
 
+def probe_macos_screencapture() -> tuple[bool, str]:
+    return _macos_desktop.probe_macos_screencapture(run_fn=subprocess.run)
+
+
+def probe_macos_avfoundation_screen(ffmpeg_path: str | None = None) -> tuple[bool, str]:
+    try:
+        device = _macos_desktop.macos_avfoundation_screen_input_device(
+            ffmpeg_path=ffmpeg_path or resolve_ffmpeg_path(),
+            run_fn=subprocess.run,
+        )
+        return True, f"Capture screen 0 ({device})"
+    except RuntimeError as exc:
+        return False, str(exc)
+
+
+def desktop_video_metadata(path: Path, **kwargs) -> dict:
+    return _video_artifacts.desktop_video_metadata(path, **kwargs)
+
+
+def write_desktop_video_metadata(path: Path, metadata: dict) -> None:
+    _video_artifacts.write_desktop_video_metadata(path, metadata)
+
+
+def compose_desktop_video_proof(
+    manifest_path: Path,
+    output_path: Path,
+    *,
+    template: str | None = None,
+    source_image: Path | None = None,
+    source_label: str | None = None,
+    title: str | None = None,
+) -> dict:
+    return _video_artifacts.compose_desktop_video_proof(
+        manifest_path,
+        output_path,
+        script_path=SCRIPT_DIR / "scripts" / "compose-video-proof.mjs",
+        template=template,
+        source_image=source_image,
+        source_label=source_label,
+        title=title,
+        run_fn=subprocess.run,
+    )
+
+
+def video_proof_smoke() -> dict:
+    command = ["npm", "--prefix", str(SCRIPT_DIR), "run", "smoke-video-proof"]
+    try:
+        result = subprocess.run(command, capture_output=True, text=True)
+    except OSError as exc:
+        return {"ok": False, "command": command, "detail": str(exc)}
+    payload: dict = {}
+    if result.stdout:
+        json_start = result.stdout.find("{")
+        try:
+            payload = json.loads(result.stdout[json_start:]) if json_start >= 0 else {}
+        except (ValueError, json.JSONDecodeError):
+            payload = {}
+    payload.update(
+        {
+            "ok": result.returncode == 0,
+            "command": command,
+            "returncode": result.returncode,
+        }
+    )
+    if result.stdout:
+        payload["stdout_tail"] = result.stdout[-4000:]
+    if result.stderr:
+        payload["stderr_tail"] = result.stderr[-4000:]
+    if result.returncode == 0:
+        payload["detail"] = payload.get("output") or "Remotion smoke render passed"
+    else:
+        payload["detail"] = (result.stderr or result.stdout or f"smoke exited {result.returncode}")[-1000:].strip()
+    return payload
+
+
+def create_issue_video_variant(
+    source_path: Path,
+    output_path: Path,
+    metadata_path: Path,
+    *,
+    attachment_budget_bytes: int,
+) -> dict:
+    return _video_artifacts.create_issue_video_variant(
+        source_path,
+        output_path,
+        metadata_path,
+        attachment_budget_bytes=attachment_budget_bytes,
+        ffmpeg_path=resolve_ffmpeg_path(),
+        run_fn=subprocess.run,
+    )
+
+
+def resolve_ffmpeg_path() -> str:
+    return _video_artifacts.resolve_ffmpeg_path(tool_dir=SCRIPT_DIR)
+
+
+def start_macos_window_video_recording(
+    window: dict,
+    output_path: Path,
+    *,
+    duration_secs: float,
+    fps: float,
+) -> dict:
+    return _macos_desktop.start_macos_window_video_recording(
+        window,
+        output_path,
+        duration_secs=duration_secs,
+        fps=fps,
+        popen_fn=subprocess.Popen,
+        run_fn=subprocess.run,
+        ffmpeg_path=resolve_ffmpeg_path(),
+    )
+
+
+def stop_macos_window_video_recording(
+    recording: dict,
+    *,
+    output_path: Path,
+    metadata_path: Path,
+    poster_path: Path | None = None,
+    duration_secs: float,
+    fps: float,
+    attachment_budget_bytes: int,
+) -> dict:
+    return _macos_desktop.stop_macos_window_video_recording(
+        recording,
+        output_path=output_path,
+        metadata_path=metadata_path,
+        poster_path=poster_path,
+        duration_secs=duration_secs,
+        fps=fps,
+        attachment_budget_bytes=attachment_budget_bytes,
+        desktop_video_metadata_fn=desktop_video_metadata,
+        write_desktop_video_metadata_fn=write_desktop_video_metadata,
+    )
+
+
 def parse_coordinate_pair(value: str, *, flag_name: str) -> tuple[float, float]:
     return _desktop_actions.parse_coordinate_pair(value, flag_name=flag_name)
 
@@ -1151,6 +1289,11 @@ def run_macos_local_smoke(
     settle_secs: float,
     timeout_secs: float,
     source_request: dict | None = None,
+    record_video: bool = False,
+    video_duration_secs: float = 8.0,
+    video_fps: float = 30.0,
+    video_attachment_budget_bytes: int = _video_artifacts.DEFAULT_VIDEO_ATTACHMENT_BUDGET_BYTES,
+    compose_video_proof: bool = False,
 ) -> dict:
     return _macos_desktop_bindings.run_macos_local_smoke(
         globals(),
@@ -1171,6 +1314,11 @@ def run_macos_local_smoke(
         settle_secs=settle_secs,
         timeout_secs=timeout_secs,
         source_request=source_request,
+        record_video=record_video,
+        video_duration_secs=video_duration_secs,
+        video_fps=video_fps,
+        video_attachment_budget_bytes=video_attachment_budget_bytes,
+        compose_video_proof=compose_video_proof,
     )
 
 
@@ -2260,6 +2408,10 @@ def cmd_desktop_doctor(args: argparse.Namespace) -> int:
     return _desktop_command_bindings.cmd_desktop_doctor(globals(), args)
 
 
+def cmd_desktop_video_doctor(args: argparse.Namespace) -> int:
+    return _desktop_command_bindings.cmd_desktop_video_doctor(globals(), args)
+
+
 def cmd_desktop_status(args: argparse.Namespace) -> int:
     return _desktop_command_bindings.cmd_desktop_status(globals(), args)
 
@@ -2276,6 +2428,10 @@ def cmd_desktop_config(args: argparse.Namespace) -> int:
     return _cli_dispatch_bindings.cmd_desktop_config(globals(), args)
 
 
+def cmd_desktop_serve(args: argparse.Namespace) -> int:
+    return _desktop_command_bindings.cmd_desktop_serve(globals(), args)
+
+
 def cmd_desktop_recent(args: argparse.Namespace) -> int:
     return _desktop_command_bindings.cmd_desktop_recent(globals(), args)
 
@@ -2286,6 +2442,18 @@ def cmd_desktop_proof(args: argparse.Namespace) -> int:
 
 def cmd_desktop_publish(args: argparse.Namespace) -> int:
     return _desktop_command_bindings.cmd_desktop_publish(globals(), args)
+
+
+def cmd_desktop_verdict(args: argparse.Namespace) -> int:
+    return _desktop_command_bindings.cmd_desktop_verdict(globals(), args)
+
+
+def cmd_desktop_compose_video(args: argparse.Namespace) -> int:
+    return _desktop_command_bindings.cmd_desktop_compose_video(globals(), args)
+
+
+def cmd_desktop_video(args: argparse.Namespace) -> int:
+    return _desktop_command_bindings.cmd_desktop_video(globals(), args)
 
 
 def cmd_desktop_cleanup(args: argparse.Namespace) -> int:

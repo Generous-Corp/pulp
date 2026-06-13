@@ -191,6 +191,7 @@ class DesktopProbeBindingsTests(unittest.TestCase):
             "desktop_target_contract",
             "desktop_receipt_for",
             "macos_accessibility_trusted",
+            "probe_macos_screencapture",
             "ssh_reachable",
             "ssh_failure_detail",
             "probe_linux_launch_backend",
@@ -199,6 +200,8 @@ class DesktopProbeBindingsTests(unittest.TestCase):
             "probe_windows_remote_tooling",
             "probe_windows_repo_checkout",
             "probe_webdriver_endpoint",
+            "resolve_ffmpeg_path",
+            "probe_macos_avfoundation_screen",
         ]:
             bindings[name] = object()
 
@@ -209,6 +212,7 @@ class DesktopProbeBindingsTests(unittest.TestCase):
             "desktop_target_contract",
             "desktop_receipt_for",
             "macos_accessibility_trusted",
+            "probe_macos_screencapture",
             "ssh_reachable",
             "ssh_failure_detail",
             "probe_linux_launch_backend",
@@ -219,6 +223,8 @@ class DesktopProbeBindingsTests(unittest.TestCase):
             "probe_webdriver_endpoint",
         ]:
             self.assertIs(captured["doctor_kwargs"][f"{name}_fn"], bindings[name])
+        self.assertIs(captured["doctor_kwargs"]["resolve_ffmpeg_path_fn"], bindings["resolve_ffmpeg_path"])
+        self.assertIs(captured["doctor_kwargs"]["probe_macos_avfoundation_screen_fn"], bindings["probe_macos_avfoundation_screen"])
         self.assertEqual(captured["doctor_kwargs"]["platform"], "darwin")
         self.assertIs(captured["doctor_kwargs"]["which_fn"], bindings["shutil"].which)
 

@@ -72,6 +72,44 @@ def build_local_ci_parser(
             help="Seconds to allow the optional prepare command to run (default: 900)",
         )
 
+    def add_desktop_video_args(command_parser: argparse.ArgumentParser) -> None:
+        command_parser.add_argument(
+            "--record-video",
+            action="store_true",
+            help="Record a short window-region MP4 proof while the desktop action runs.",
+        )
+        command_parser.add_argument(
+            "--duration",
+            "--video-duration",
+            dest="video_duration",
+            type=float,
+            default=8.0,
+            help="Seconds of video to record when --record-video is set (default: 8)",
+        )
+        command_parser.add_argument(
+            "--video-fps",
+            type=float,
+            default=30.0,
+            help="Frames per second for --record-video captures (default: 30)",
+        )
+        command_parser.add_argument(
+            "--video-attachment-budget-mb",
+            type=float,
+            default=100.0,
+            help="Attachment budget in decimal MB for issue-ready video metadata (default: 100)",
+        )
+        command_parser.add_argument(
+            "--compose-video-proof",
+            action="store_true",
+            help="Use Remotion to render an annotated proof video from the raw recording.",
+        )
+        command_parser.add_argument(
+            "--video-audio",
+            choices=["none", "plugin", "system"],
+            default="none",
+            help="Audio source for the proof video. Only 'none' is implemented in the MVP; plugin/system are reserved.",
+        )
+
     p_enqueue = sub.add_parser("enqueue", help="Queue a branch for validation")
     add_submission_args(p_enqueue, include_sha=True, allow_smoke=True)
 
@@ -315,6 +353,77 @@ def build_local_ci_parser(
     p_desktop_publish.add_argument("--output", help="Optional report output directory")
     p_desktop_publish.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 
+    p_desktop_verdict = desktop_sub.add_parser("verdict", help="Record a human review verdict on a desktop run manifest")
+    p_desktop_verdict.add_argument("manifest", help="Path to the run manifest.json to update")
+    verdict_group = p_desktop_verdict.add_mutually_exclusive_group(required=True)
+    verdict_group.add_argument("--approved", action="store_true", help="Mark the proof as approved")
+    verdict_group.add_argument("--needs-work", action="store_true", help="Mark the proof as needing work")
+    p_desktop_verdict.add_argument("--notes", default="", help="Optional reviewer notes")
+    p_desktop_verdict.add_argument("--reviewer", default="", help="Optional reviewer identity")
+    p_desktop_verdict.add_argument("--issue-url", default="", help="Optional GitHub review issue URL")
+    p_desktop_verdict.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+
+    p_desktop_compose_video = desktop_sub.add_parser("compose-video", help="Render or rerender a Remotion proof for an existing desktop run manifest")
+    p_desktop_compose_video.add_argument("manifest", help="Path to the run manifest.json to compose")
+    p_desktop_compose_video.add_argument("--output", help="Output composed MP4 path (default: <run>/video/proof-composed.mp4)")
+    p_desktop_compose_video.add_argument("--metadata", help="Output composed metadata JSON path (default: <run>/video/composed-metadata.json)")
+    p_desktop_compose_video.add_argument("--issue-output", help="Output issue-ready MP4 path (default: <run>/video/proof.issue.mp4)")
+    p_desktop_compose_video.add_argument("--issue-metadata", help="Output issue metadata JSON path (default: <run>/video/issue-metadata.json)")
+    p_desktop_compose_video.add_argument("--small-video", action="store_true", help="Also create a <=10 MB convenience encode when possible")
+    p_desktop_compose_video.add_argument("--small-output", help="Output small MP4 path (default: <run>/video/proof.small.mp4)")
+    p_desktop_compose_video.add_argument("--small-metadata", help="Output small metadata JSON path (default: <run>/video/small-metadata.json)")
+    p_desktop_compose_video.add_argument("--small-video-budget-mb", type=float, default=10.0, help="Attachment budget in decimal MB for the small video (default: 10)")
+    p_desktop_compose_video.add_argument("--template", choices=["validation-proof", "design-parity"], help="Remotion proof template variant")
+    p_desktop_compose_video.add_argument("--source-image", help="Optional source/reference image for design-parity proofs")
+    p_desktop_compose_video.add_argument("--source-label", help="Label for --source-image (default: Source reference)")
+    p_desktop_compose_video.add_argument("--title", help="Override the composed video title")
+    p_desktop_compose_video.add_argument("--video-attachment-budget-mb", type=float, default=100.0, help="Attachment budget in decimal MB for the issue video (default: 100)")
+    p_desktop_compose_video.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+
+    p_desktop_video_doctor = desktop_sub.add_parser("video-doctor", help="Run video proof setup/readiness checks for one desktop target")
+    p_desktop_video_doctor.add_argument("target", nargs="?", default="mac", help="Desktop target name (default: mac)")
+    p_desktop_video_doctor.add_argument(
+        "--skip-remotion-smoke",
+        action="store_true",
+        help="Skip the Remotion smoke render check and only report local tooling/config readiness.",
+    )
+    p_desktop_video_doctor.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+
+    p_desktop_serve = desktop_sub.add_parser("serve", help="Serve a desktop publish report over local HTTP")
+    p_desktop_serve.add_argument("path", nargs="?", help="Optional report directory (default: latest published report)")
+    p_desktop_serve.add_argument("--host", default="127.0.0.1", help="Host/interface to bind (default: 127.0.0.1)")
+    p_desktop_serve.add_argument("--port", type=int, default=8765, help="Port to bind (default: 8765)")
+
+    p_desktop_video = desktop_sub.add_parser("video", help="Run a desktop action with video proof recording enabled")
+    p_desktop_video.add_argument("target", help="Desktop target name")
+    p_desktop_video.add_argument("--command", dest="launch_command", help="Quoted command to launch in the GUI session")
+    p_desktop_video.add_argument("--bundle-id", help="macOS bundle identifier to launch via `open -b`")
+    p_desktop_video.add_argument("--label", help="Optional artifact label")
+    p_desktop_video.add_argument("--output", help="Optional screenshot output path")
+    p_desktop_video.add_argument(
+        "--action",
+        choices=["smoke", "click", "inspect"],
+        default="click",
+        help="Desktop action to record (default: click)",
+    )
+    p_desktop_video.add_argument(
+        "--capture-ui-snapshot",
+        action="store_true",
+        help="Request a Pulp-owned ViewInspector dump when supported by the action/target.",
+    )
+    p_desktop_video.add_argument("--click", help="Click at content-relative X,Y after launch")
+    p_desktop_video.add_argument("--click-view-id", help="Click the center of the first visible ViewInspector node with this id")
+    p_desktop_video.add_argument("--click-view-type", help="Click the center of the first visible ViewInspector node with this type")
+    p_desktop_video.add_argument("--click-view-text", help="Click the center of the first visible ViewInspector node with this text")
+    p_desktop_video.add_argument("--click-view-label", help="Click the center of the first visible ViewInspector node with this label")
+    p_desktop_video.add_argument("--pulp-app-automation", action="store_true", help="Prefer a Pulp-owned in-app automation path when supported")
+    p_desktop_video.add_argument("--capture-before", action="store_true", help="Capture a before screenshot for smoke actions with interaction")
+    p_desktop_video.add_argument("--settle-secs", type=float, default=0.5, help="Seconds to wait after an interaction before the final screenshot (default: 0.5)")
+    p_desktop_video.add_argument("--timeout", type=float, default=15.0, help="Wait timeout in seconds (default: 15)")
+    p_desktop_video.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+    add_desktop_video_args(p_desktop_video)
+    add_desktop_source_args(p_desktop_video)
+
     p_desktop_cleanup = desktop_sub.add_parser("cleanup", help="Prune old desktop automation bundles")
     p_desktop_cleanup.add_argument("target", nargs="?", help="Optional one-target filter")
     p_desktop_cleanup.add_argument(
@@ -346,6 +455,7 @@ def build_local_ci_parser(
     p_desktop_smoke.add_argument("--settle-secs", type=float, default=0.5, help="Seconds to wait after an interaction before the final screenshot (default: 0.5)")
     p_desktop_smoke.add_argument("--timeout", type=float, default=15.0, help="Wait timeout in seconds (default: 15)")
     p_desktop_smoke.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+    add_desktop_video_args(p_desktop_smoke)
     add_desktop_source_args(p_desktop_smoke)
 
     p_desktop_click = desktop_sub.add_parser("click", help="Launch an app, perform one click interaction, and capture before/after evidence")
@@ -368,6 +478,7 @@ def build_local_ci_parser(
     p_desktop_click.add_argument("--settle-secs", type=float, default=0.5, help="Seconds to wait after the interaction before the final screenshot (default: 0.5)")
     p_desktop_click.add_argument("--timeout", type=float, default=15.0, help="Wait timeout in seconds (default: 15)")
     p_desktop_click.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+    add_desktop_video_args(p_desktop_click)
     add_desktop_source_args(p_desktop_click)
 
     p_desktop_inspect = desktop_sub.add_parser("inspect", help="Launch an app and capture screenshot + available UI state")
@@ -379,5 +490,6 @@ def build_local_ci_parser(
     p_desktop_inspect.add_argument("--pulp-app-automation", action="store_true", help="Use the Pulp-owned in-app automation path when the target adapter requires it")
     p_desktop_inspect.add_argument("--timeout", type=float, default=15.0, help="Wait timeout in seconds (default: 15)")
     p_desktop_inspect.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+    add_desktop_video_args(p_desktop_inspect)
     add_desktop_source_args(p_desktop_inspect)
     return parser

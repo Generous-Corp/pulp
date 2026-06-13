@@ -29,6 +29,17 @@ def desktop_action_success_lines(action: str, target_name: str, manifest: dict) 
     lines.append(f"  screenshot: {artifacts['screenshot']}")
     if artifacts.get("ui_snapshot"):
         lines.append(f"  ui_snapshot: {artifacts['ui_snapshot']}")
+    if artifacts.get("video"):
+        lines.append(f"  video: {artifacts['video']}")
+    if artifacts.get("video_metadata"):
+        lines.append(f"  video_metadata: {artifacts['video_metadata']}")
+    if manifest.get("video", {}).get("size"):
+        size = manifest["video"]["size"]
+        lines.append(
+            "  video_size: "
+            f"{size.get('size_bytes')} bytes "
+            f"(fits_attachment_budget={size.get('fits_attachment_budget')})"
+        )
     if action in {"smoke", "click"} and manifest.get("interaction"):
         interaction = manifest["interaction"]
         if interaction.get("mode"):
@@ -212,6 +223,14 @@ def desktop_recent_lines(run_summaries: list[dict], *, short_sha_fn) -> list[str
         screenshot = artifacts.get("screenshot")
         if screenshot:
             lines.append(f"    screenshot: {screenshot}")
+        video_issue = artifacts.get("video_issue")
+        if video_issue:
+            lines.append(f"    video_issue: {video_issue}")
+        video_composed = artifacts.get("video_composed")
+        if video_composed:
+            lines.append(f"    video_composed: {video_composed}")
+        elif artifacts.get("video"):
+            lines.append(f"    video: {artifacts['video']}")
         ui_snapshot = artifacts.get("ui_snapshot")
         if ui_snapshot:
             lines.append(f"    ui_snapshot: {ui_snapshot}")
@@ -225,6 +244,7 @@ def desktop_publish_lines(report: dict) -> list[str]:
         f"  output_dir: {report['output_dir']}",
         f"  index_html: {report['index_html']}",
         f"  index_json: {report['index_json']}",
+        f"  review_markdown: {report['review_markdown']}",
     ]
 
 

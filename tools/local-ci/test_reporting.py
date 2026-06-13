@@ -94,6 +94,22 @@ class ReportingTests(unittest.TestCase):
         bundle.mkdir()
         stdout_log = bundle / "stdout.log"
         stdout_log.write_text("hello\n")
+        video = bundle / "proof.mp4"
+        video.write_bytes(b"mp4")
+        video_composed = bundle / "proof-composed.mp4"
+        video_composed.write_bytes(b"composed")
+        video_issue = bundle / "proof.issue.mp4"
+        video_issue.write_bytes(b"issue")
+        video_small = bundle / "proof.small.mp4"
+        video_small.write_bytes(b"small")
+        video_metadata = bundle / "metadata.json"
+        video_metadata.write_text('{"size":{"fits_attachment_budget":true}}\n')
+        video_composed_metadata = bundle / "composed-metadata.json"
+        video_composed_metadata.write_text('{"composer":"remotion","size":{"size_bytes":120000,"fits_attachment_budget":true}}\n')
+        video_issue_metadata = bundle / "issue-metadata.json"
+        video_issue_metadata.write_text('{"status":"transcoded","selected_attempt":"balanced-720p","size":{"size_bytes":90000,"fits_attachment_budget":true}}\n')
+        video_small_metadata = bundle / "small-metadata.json"
+        video_small_metadata.write_text('{"status":"transcoded","selected_attempt":"compact-540p","size":{"size_bytes":8000000,"fits_attachment_budget":true}}\n')
         (bundle / "manifest.json").write_text('{"label":"bundle-copy"}\n')
         manifest = {
             "target": "mac<>",
@@ -103,6 +119,14 @@ class ReportingTests(unittest.TestCase):
             "artifacts": {
                 "bundle_dir": str(bundle),
                 "stdout": str(stdout_log),
+                "video": str(video),
+                "video_composed": str(video_composed),
+                "video_issue": str(video_issue),
+                "video_small": str(video_small),
+                "video_metadata": str(video_metadata),
+                "video_composed_metadata": str(video_composed_metadata),
+                "video_issue_metadata": str(video_issue_metadata),
+                "video_small_metadata": str(video_small_metadata),
                 "screenshot": str(bundle / "missing.png"),
                 "image_change": {"changed": False},
             },
@@ -132,12 +156,39 @@ class ReportingTests(unittest.TestCase):
         self.assertEqual(published_run["target"], "mac<>")
         self.assertEqual(published_run["interaction_mode"], "dom")
         self.assertIn("stdout", published_run["artifacts"])
+        self.assertIn("video", published_run["artifacts"])
+        self.assertIn("video_composed", published_run["artifacts"])
+        self.assertIn("video_issue", published_run["artifacts"])
+        self.assertIn("video_small", published_run["artifacts"])
+        self.assertIn("video_metadata", published_run["artifacts"])
+        self.assertIn("video_composed_metadata", published_run["artifacts"])
+        self.assertIn("video_issue_metadata", published_run["artifacts"])
+        self.assertIn("video_small_metadata", published_run["artifacts"])
         self.assertIn("manifest", published_run["artifacts"])
         self.assertNotIn("screenshot", published_run["artifacts"])
         self.assertEqual(published_run["artifacts"]["image_change"], {"changed": False})
         html_text = (output_dir / "index.html").read_text()
         self.assertIn("Gallery &lt;One&gt;", html_text)
         self.assertIn("mac&lt;&gt;/inspect", html_text)
+        self.assertIn("<video controls", html_text)
+        self.assertIn("video metadata", html_text)
+        review_text = (output_dir / "review.md").read_text()
+        self.assertEqual(report["review_markdown"], str(output_dir / "review.md"))
+        self.assertIn("# Gallery <One>", review_text)
+        self.assertIn("looks good to me", review_text)
+        self.assertIn("desktop serve` prints candidate URLs", review_text)
+        self.assertIn("PULP_DESKTOP_SERVE_HOSTS", review_text)
+        self.assertIn("proof.issue.mp4", review_text)
+        self.assertIn("proof.small.mp4", review_text)
+        self.assertIn("proof-composed.mp4", review_text)
+        self.assertIn("fits configured attachment budget", review_text)
+        self.assertIn("Issue variant: `transcoded` via `balanced-720p`", review_text)
+        self.assertIn("Small video size: 8.0 MB (fits 10 MB budget)", review_text)
+        self.assertIn("Small variant: `transcoded` via `compact-540p`", review_text)
+        self.assertIn("Attachment action: Attach `", review_text)
+        self.assertIn("desktop verdict", review_text)
+        self.assertIn("--approved --issue-url <issue-url>", review_text)
+        self.assertIn("--needs-work --notes", review_text)
 
     def test_manifest_scanning_and_run_rollups_use_latest_passing_proof(self) -> None:
         root = self.artifact_root(self.config)

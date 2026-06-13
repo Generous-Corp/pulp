@@ -1315,7 +1315,8 @@ class LocalCiPureHelperTests(unittest.TestCase):
         with mock.patch.object(self.mod.sys, "platform", "linux"):
             with mock.patch.object(self.mod, "desktop_receipt_for", return_value=None):
                 with mock.patch.object(self.mod.shutil, "which", side_effect=lambda name: which_values.get(name)):
-                    with mock.patch.object(self.mod, "macos_accessibility_trusted", side_effect=json.JSONDecodeError("bad", "", 0)):
+                    with mock.patch.object(self.mod, "macos_accessibility_trusted", side_effect=json.JSONDecodeError("bad", "", 0)), \
+                         mock.patch.object(self.mod, "resolve_ffmpeg_path", side_effect=RuntimeError("ffmpeg not found")):
                         checks = {check["name"]: check for check in self.mod.desktop_doctor_checks(config, "mac")}
 
         self.assertTrue(checks["artifact_root"]["ok"])
@@ -1334,7 +1335,37 @@ class LocalCiPureHelperTests(unittest.TestCase):
         self.assertEqual(checks["debug_attach"]["detail"], "/usr/bin/lldb")
         self.assertFalse(checks["video_capture"]["ok"])
         self.assertIn("ffmpeg not found", checks["video_capture"]["detail"])
+        self.assertNotIn("avfoundation_screen", checks)
         self.assertTrue(checks["frame_stats"]["ok"])
+
+    def test_desktop_doctor_reports_macos_avfoundation_screen_for_video_capture(self) -> None:
+        config = {
+            "desktop_automation": {
+                "artifact_root": str(self.root / "artifacts"),
+                "targets": {
+                    "mac": {
+                        "adapter": "macos-local",
+                        "target_type": "local",
+                        "optional": {"video_capture": True},
+                    }
+                },
+            }
+        }
+
+        with mock.patch.object(self.mod.sys, "platform", "darwin"):
+            with mock.patch.object(self.mod, "desktop_receipt_for", return_value={"installed": True}):
+                with mock.patch.object(self.mod.shutil, "which", side_effect=lambda name: f"/usr/bin/{name}"):
+                    with mock.patch.object(self.mod, "macos_accessibility_trusted", return_value=True), \
+                         mock.patch.object(self.mod, "probe_macos_screencapture", return_value=(True, "ok")), \
+                         mock.patch.object(self.mod, "resolve_ffmpeg_path", return_value="/repo/tools/local-ci/node_modules/ffmpeg-static/ffmpeg"), \
+                         mock.patch.object(self.mod, "probe_macos_avfoundation_screen", return_value=(False, "Could not find AVFoundation device `Capture screen 0`")) as av_probe:
+                        checks = {check["name"]: check for check in self.mod.desktop_doctor_checks(config, "mac")}
+
+        av_probe.assert_called_once_with("/repo/tools/local-ci/node_modules/ffmpeg-static/ffmpeg")
+        self.assertTrue(checks["video_capture"]["ok"])
+        self.assertFalse(checks["avfoundation_screen"]["ok"])
+        self.assertFalse(checks["avfoundation_screen"]["required"])
+        self.assertEqual(checks["avfoundation_screen"]["detail"], "Could not find AVFoundation device `Capture screen 0`")
 
     def test_desktop_doctor_remote_linux_and_windows_edges(self) -> None:
         config = {

@@ -62,8 +62,11 @@ class DesktopCommandBindingsTests(unittest.TestCase):
             "now_iso",
             "desktop_target_receipt_path",
             "atomic_write_text",
+            "compose_desktop_video_proof",
+            "create_issue_video_variant",
             "windows_tooling_detail",
             "desktop_doctor_checks",
+            "video_proof_smoke",
             "desktop_receipt_for",
             "desktop_capabilities_for",
             "desktop_optional_capabilities",
@@ -134,6 +137,12 @@ class DesktopCommandBindingsTests(unittest.TestCase):
                 "cmd_desktop_doctor",
                 self.mod.cmd_desktop_doctor,
                 ["load_config", "resolve_desktop_target", "desktop_doctor_checks"],
+            ),
+            (
+                "_desktop_setup_commands_cli",
+                "cmd_desktop_video_doctor",
+                self.mod.cmd_desktop_video_doctor,
+                ["load_config", "resolve_desktop_target", "desktop_doctor_checks", "normalize_desktop_optional_config", "video_proof_smoke"],
             ),
             (
                 "_desktop_commands_cli",
@@ -207,6 +216,24 @@ class DesktopCommandBindingsTests(unittest.TestCase):
                 {"desktop_publish_lines_fn": "desktop_publish_lines"},
             ),
             (
+                "cmd_desktop_verdict",
+                self.mod.cmd_desktop_verdict,
+                ["now_iso", "atomic_write_text"],
+                {},
+            ),
+            (
+                "cmd_desktop_compose_video",
+                self.mod.cmd_desktop_compose_video,
+                ["compose_desktop_video_proof", "create_issue_video_variant", "atomic_write_text"],
+                {},
+            ),
+            (
+                "cmd_desktop_serve",
+                self.mod.cmd_desktop_serve,
+                ["load_config", "desktop_publish_reports"],
+                {},
+            ),
+            (
                 "cmd_desktop_cleanup",
                 self.mod.cmd_desktop_cleanup,
                 ["load_config", "prune_desktop_run_manifests", "write_desktop_run_rollups"],
@@ -271,6 +298,22 @@ class DesktopCommandBindingsTests(unittest.TestCase):
                     self.assertIs(captured["kwargs"][f"{name}_fn"], bindings[name])
                 self.assertIs(captured["kwargs"]["desktop_action_success_lines_fn"], bindings["_desktop_cli"].desktop_action_success_lines)
                 self.assertEqual(captured["kwargs"]["sys_platform"], "darwin")
+
+    def test_video_command_binds_action_wrappers(self):
+        captured = {}
+
+        def runner(*args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            return 6
+
+        bindings = self._bindings("_desktop_action_commands_cli", "cmd_desktop_video", runner)
+        args_obj = object()
+        self.assertEqual(self.mod.cmd_desktop_video(bindings, args_obj), 6)
+        self.assertEqual(captured["args"], (args_obj,))
+        self.assertTrue(callable(captured["kwargs"]["cmd_desktop_smoke_fn"]))
+        self.assertTrue(callable(captured["kwargs"]["cmd_desktop_click_fn"]))
+        self.assertTrue(callable(captured["kwargs"]["cmd_desktop_inspect_fn"]))
 
 
 if __name__ == "__main__":

@@ -46,6 +46,7 @@ def create_desktop_run_bundle(
     run_id = (uuid_hex_fn or (lambda: uuid.uuid4().hex))()[:8]
     path = desktop_artifact_root(config) / target_name / action / f"{ts}-{run_id}"
     (path / "screenshots").mkdir(parents=True, exist_ok=True)
+    (path / "video").mkdir(parents=True, exist_ok=True)
     return path
 
 

@@ -94,6 +94,7 @@ def desktop_doctor_checks(bindings: Mapping[str, Any], config: dict, target_name
         desktop_target_contract_fn=_binding(bindings, "desktop_target_contract"),
         desktop_receipt_for_fn=_binding(bindings, "desktop_receipt_for"),
         macos_accessibility_trusted_fn=_binding(bindings, "macos_accessibility_trusted"),
+        probe_macos_screencapture_fn=_binding(bindings, "probe_macos_screencapture"),
         ssh_reachable_fn=_binding(bindings, "ssh_reachable"),
         ssh_failure_detail_fn=_binding(bindings, "ssh_failure_detail"),
         probe_linux_launch_backend_fn=_binding(bindings, "probe_linux_launch_backend"),
@@ -103,6 +104,8 @@ def desktop_doctor_checks(bindings: Mapping[str, Any], config: dict, target_name
         probe_windows_repo_checkout_fn=_binding(bindings, "probe_windows_repo_checkout"),
         platform=_binding(bindings, "sys").platform,
         which_fn=_binding(bindings, "shutil").which,
+        resolve_ffmpeg_path_fn=_binding(bindings, "resolve_ffmpeg_path"),
+        probe_macos_avfoundation_screen_fn=_binding(bindings, "probe_macos_avfoundation_screen"),
         probe_webdriver_endpoint_fn=_binding(bindings, "probe_webdriver_endpoint"),
     )
 

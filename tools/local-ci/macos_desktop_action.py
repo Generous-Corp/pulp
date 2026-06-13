@@ -56,10 +56,19 @@ def run_macos_local_smoke(
     dispatch_macos_click_fn: Callable[[float, float], dict],
     desktop_click_selector_fn: Callable[..., dict],
     image_change_summary_fn: Callable[..., dict],
+    start_macos_window_video_recording_fn: Callable[..., dict],
+    stop_macos_window_video_recording_fn: Callable[..., dict],
+    compose_desktop_video_proof_fn: Callable[[Path, Path], dict],
+    create_issue_video_variant_fn: Callable[..., dict],
     attach_desktop_source_to_manifest_fn: Callable[[dict, dict | None], None],
     atomic_write_text_fn: Callable[[Path, str], None],
     write_desktop_run_rollups_fn: Callable[..., None],
     terminate_process_fn: Callable[[object], None],
+    record_video: bool = False,
+    video_duration_secs: float = 8.0,
+    video_fps: float = 30.0,
+    video_attachment_budget_bytes: int = 100_000_000,
+    compose_video_proof: bool = False,
 ) -> dict:
     bundle_dir = create_desktop_run_bundle_fn(config, "mac", action_name)
     action_paths = desktop_action_artifact_paths_fn(bundle_dir, output_path)
@@ -67,6 +76,13 @@ def run_macos_local_smoke(
     before_screenshot_path = action_paths["before_screenshot"]
     diff_screenshot_path = action_paths["diff_screenshot"]
     ui_snapshot_path = action_paths["ui_snapshot"]
+    video_path = action_paths["video"]
+    video_composed_path = action_paths["video_composed"]
+    video_issue_path = action_paths["video_issue"]
+    video_metadata_path = action_paths["video_metadata"]
+    video_composed_metadata_path = action_paths["video_composed_metadata"]
+    video_issue_metadata_path = action_paths["video_issue_metadata"]
+    video_poster_path = action_paths["video_poster"]
     log_path = action_paths["stdout"]
     err_path = action_paths["stderr"]
 
@@ -100,6 +116,8 @@ def run_macos_local_smoke(
 
     proc = None
     pid = None
+    video_recording = None
+    video_summary = None
     try:
         if bundle_id:
             if capture_ui_snapshot:
@@ -180,6 +198,13 @@ def run_macos_local_smoke(
         inspector_summary = None
         view_tree = None
         content_size = content_size_from_window_fn(window)
+        if record_video:
+            video_recording = start_macos_window_video_recording_fn(
+                window,
+                video_path,
+                duration_secs=video_duration_secs,
+                fps=video_fps,
+            )
         if capture_ui_snapshot and not use_pulp_app_automation:
             wait_for_path_fn(ui_snapshot_path, timeout_secs)
             view_tree = json.loads(ui_snapshot_path.read_text())
@@ -249,6 +274,18 @@ def run_macos_local_smoke(
                 pid, window = wait_for_macos_bundle_window_fn(active_bundle_id, min(timeout_secs, 2.0))
                 capture_macos_window_fn(int(window["windowId"]), screenshot_path)
 
+        if video_recording is not None:
+            video_summary = stop_macos_window_video_recording_fn(
+                video_recording,
+                output_path=video_path,
+                metadata_path=video_metadata_path,
+                poster_path=video_poster_path,
+                duration_secs=video_duration_secs,
+                fps=video_fps,
+                attachment_budget_bytes=video_attachment_budget_bytes,
+            )
+            video_recording = None
+
         manifest = {
             "target": "mac",
             "adapter": "macos-local",
@@ -281,12 +318,55 @@ def run_macos_local_smoke(
             manifest["inspector"] = inspector_summary
         if interaction_summary is not None:
             manifest["interaction"] = interaction_summary
+        if video_summary is not None:
+            manifest["video"] = video_summary
+            if video_path.exists():
+                manifest["artifacts"]["video"] = str(video_path)
+            if video_metadata_path.exists():
+                manifest["artifacts"]["video_metadata"] = str(video_metadata_path)
+            if video_poster_path.exists():
+                manifest["artifacts"]["video_poster"] = str(video_poster_path)
         attach_desktop_source_to_manifest_fn(manifest, source_context or source_request)
+        if compose_video_proof and video_path.exists():
+            source_manifest_path = bundle_dir / "manifest.video-source.json"
+            atomic_write_text_fn(source_manifest_path, json.dumps(manifest, indent=2) + "\n")
+            composed_summary = compose_desktop_video_proof_fn(source_manifest_path, video_composed_path)
+            manifest["video_composed"] = composed_summary
+            if video_composed_path.exists():
+                manifest["artifacts"]["video_composed"] = str(video_composed_path)
+            atomic_write_text_fn(video_composed_metadata_path, json.dumps(composed_summary, indent=2) + "\n")
+            manifest["artifacts"]["video_composed_metadata"] = str(video_composed_metadata_path)
+        if video_summary is not None:
+            issue_source_path = video_composed_path if video_composed_path.exists() else video_path
+            issue_summary = create_issue_video_variant_fn(
+                issue_source_path,
+                video_issue_path,
+                video_issue_metadata_path,
+                attachment_budget_bytes=video_attachment_budget_bytes,
+            )
+            manifest["video_issue"] = issue_summary
+            if video_issue_path.exists():
+                manifest["artifacts"]["video_issue"] = str(video_issue_path)
+            if video_issue_metadata_path.exists():
+                manifest["artifacts"]["video_issue_metadata"] = str(video_issue_metadata_path)
         atomic_write_text_fn(bundle_dir / "manifest.json", json.dumps(manifest, indent=2) + "\n")
         write_desktop_run_rollups_fn(config, target_name="mac")
         write_desktop_run_rollups_fn(config)
         return manifest
     finally:
+        if video_recording is not None:
+            try:
+                stop_macos_window_video_recording_fn(
+                    video_recording,
+                    output_path=video_path,
+                    metadata_path=video_metadata_path,
+                    poster_path=video_poster_path,
+                    duration_secs=video_duration_secs,
+                    fps=video_fps,
+                    attachment_budget_bytes=video_attachment_budget_bytes,
+                )
+            except RuntimeError:
+                pass
         if proc is not None:
             terminate_process_fn(proc)
         else:

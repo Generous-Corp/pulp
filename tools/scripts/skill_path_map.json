@@ -316,6 +316,19 @@
         ".claude/commands/upgrade.md"
       ]
     },
+    "video-proof": {
+      "paths": [
+        "docs/reference/desktop-video-proofs.md",
+        "tools/local-ci/desktop_artifacts.py",
+        "tools/local-ci/video_artifacts.py",
+        "tools/local-ci/remotion-proof/**",
+        "tools/local-ci/scripts/compose-video-proof.mjs",
+        "tools/local-ci/scripts/smoke-video-proof.mjs",
+        "tools/local-ci/package.json",
+        "tools/local-ci/package-lock.json",
+        "tools/local-ci/test_video_artifacts.py"
+      ]
+    },
     "view-bridge": {
       "paths": [
         "core/format/src/view_bridge.cpp",

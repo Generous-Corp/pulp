@@ -8,6 +8,7 @@ from pathlib import Path
 import plistlib
 import subprocess
 import tempfile
+import time
 import unittest
 
 
@@ -169,6 +170,178 @@ class MacOSDesktopTests(unittest.TestCase):
         self.mod.terminate_process(proc, timeout_secs=0.01)
         self.assertTrue(proc.terminated)
         self.assertTrue(proc.killed)
+
+    def test_window_video_command_crops_window_region_for_h264_mp4(self) -> None:
+        window = {"bounds": {"x": 10.4, "y": 20.6, "width": 321, "height": 201}}
+        output_path = self.root / "video" / "proof.mp4"
+
+        command = self.mod.macos_window_video_command(
+            window,
+            output_path,
+            duration_secs=4.0,
+            fps=15.0,
+            ffmpeg_path="/opt/ffmpeg",
+            input_device="5:",
+        )
+
+        self.assertEqual(self.mod.macos_window_video_bounds(window), {"x": 10, "y": 21, "width": 320, "height": 200})
+        self.assertEqual(command[0], "/opt/ffmpeg")
+        self.assertIn("5:", command)
+        self.assertIn("nv12", command)
+        self.assertIn("crop=320:200:10:21", command)
+        self.assertIn("libx264", command)
+        self.assertEqual(command[command.index("-frames:v") + 1], "60")
+        self.assertEqual(command[-1], str(output_path))
+
+    def test_avfoundation_screen_input_device_uses_listed_capture_screen_index(self) -> None:
+        def run_devices(cmd: list[str], **_kwargs):
+            self.assertIn("-list_devices", cmd)
+            return subprocess.CompletedProcess(
+                cmd,
+                1,
+                stdout="",
+                stderr="[AVFoundation indev @ 0x1] [3] Capture screen 0\n",
+            )
+
+        self.assertEqual(self.mod.macos_avfoundation_screen_input_device(run_fn=run_devices), "3:")
+
+    def test_window_video_recording_encodes_screencapture_frame_sequence(self) -> None:
+        output_path = self.root / "video" / "proof.mp4"
+        metadata_path = self.root / "video" / "metadata.json"
+        poster_path = self.root / "video" / "poster.png"
+        calls: list[list[str]] = []
+
+        def run_capture_or_encode(cmd: list[str], **_kwargs):
+            calls.append(cmd)
+            if cmd[0] == "screencapture":
+                Path(cmd[-1]).write_bytes(b"png")
+                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+            if cmd[1:] == ["-hide_banner", "-version"]:
+                return subprocess.CompletedProcess(cmd, 0, stdout="ffmpeg version 6.0\n", stderr="")
+            output_path.write_bytes(b"mp4")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="encoded")
+
+        recording = self.mod.start_macos_window_video_recording(
+            {"windowId": 88, "bounds": {"x": 0, "y": 0, "width": 320, "height": 200}},
+            output_path,
+            duration_secs=0.2,
+            fps=5.0,
+            run_fn=run_capture_or_encode,
+            ffmpeg_path="/opt/ffmpeg",
+        )
+        time.sleep(0.25)
+        metadata = self.mod.stop_macos_window_video_recording(
+            recording,
+            output_path=output_path,
+            metadata_path=metadata_path,
+            poster_path=poster_path,
+            duration_secs=0.2,
+            fps=5.0,
+            attachment_budget_bytes=1_000_000,
+            desktop_video_metadata_fn=lambda path, **kwargs: {
+                "path": str(path),
+                "fps": kwargs["fps"],
+                "encoder": kwargs["encoder"],
+                "size": {"fits_attachment_budget": True},
+            },
+            write_desktop_video_metadata_fn=lambda path, payload: path.write_text(str(payload)),
+        )
+
+        self.assertTrue(output_path.exists())
+        self.assertTrue(metadata_path.exists())
+        self.assertTrue(poster_path.exists())
+        self.assertEqual(poster_path.read_bytes(), b"png")
+        self.assertGreaterEqual(metadata["frame_count"], 1)
+        self.assertTrue(metadata["poster"]["exists"])
+        self.assertEqual(calls[-1][0], "/opt/ffmpeg")
+        self.assertIn(["/opt/ffmpeg", "-hide_banner", "-version"], calls)
+        self.assertEqual(metadata["encoder"]["version"], "ffmpeg version 6.0")
+        self.assertIn("Could not find AVFoundation device", metadata["fallback_reason"])
+
+    def test_window_video_recording_uses_ffmpeg_avfoundation_primary_path(self) -> None:
+        output_path = self.root / "video" / "proof.mp4"
+        metadata_path = self.root / "video" / "metadata.json"
+        poster_path = self.root / "video" / "poster.png"
+        popen_calls: list[list[str]] = []
+        run_calls: list[list[str]] = []
+
+        class FakeProc:
+            def __init__(self, cmd: list[str]):
+                self.cmd = cmd
+                self.returncode = None
+                self.terminated = False
+                self.killed = False
+
+            def poll(self):
+                return self.returncode
+
+            def terminate(self) -> None:
+                self.terminated = True
+                self.returncode = 255
+                output_path.write_bytes(b"mp4")
+
+            def kill(self) -> None:
+                self.killed = True
+                self.returncode = -9
+
+            def communicate(self, timeout=None):
+                return "", "recorded"
+
+        fake_proc_holder = {}
+
+        def fake_popen(cmd: list[str], **kwargs):
+            popen_calls.append(cmd)
+            fake_proc_holder["proc"] = FakeProc(cmd)
+            return fake_proc_holder["proc"]
+
+        def run_metadata_or_poster(cmd: list[str], **_kwargs):
+            run_calls.append(cmd)
+            if cmd[1:] == ["-hide_banner", "-version"]:
+                return subprocess.CompletedProcess(cmd, 0, stdout="ffmpeg version 6.0\n", stderr="")
+            if "-frames:v" in cmd:
+                poster_path.write_bytes(b"poster")
+                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        recording = self.mod.start_macos_window_video_recording(
+            {"windowId": 88, "bounds": {"x": 10, "y": 20, "width": 320, "height": 200}},
+            output_path,
+            duration_secs=0.2,
+            fps=5.0,
+            popen_fn=fake_popen,
+            run_fn=run_metadata_or_poster,
+            ffmpeg_path="/opt/ffmpeg",
+            input_device_fn=lambda **_kwargs: "3:",
+            startup_grace_secs=0,
+        )
+        metadata = self.mod.stop_macos_window_video_recording(
+            recording,
+            output_path=output_path,
+            metadata_path=metadata_path,
+            poster_path=poster_path,
+            duration_secs=0.2,
+            fps=5.0,
+            attachment_budget_bytes=1_000_000,
+            desktop_video_metadata_fn=lambda path, **kwargs: {
+                "path": str(path),
+                "fps": kwargs["fps"],
+                "command": kwargs["command"],
+                "encoder": kwargs["encoder"],
+                "size": {"fits_attachment_budget": True},
+            },
+            write_desktop_video_metadata_fn=lambda path, payload: path.write_text(str(payload)),
+        )
+
+        self.assertEqual(recording["mode"], "ffmpeg-avfoundation")
+        self.assertEqual(popen_calls[0][0], "/opt/ffmpeg")
+        self.assertIn("avfoundation", popen_calls[0])
+        self.assertIn("crop=320:200:10:20", popen_calls[0])
+        self.assertEqual(metadata["mode"], "ffmpeg-avfoundation")
+        self.assertEqual(metadata["returncode"], 255)
+        self.assertTrue(metadata["terminated"])
+        self.assertEqual(metadata["encoder"]["version"], "ffmpeg version 6.0")
+        self.assertTrue(poster_path.exists())
+        self.assertIn(["/opt/ffmpeg", "-hide_banner", "-version"], run_calls)
 
 
 if __name__ == "__main__":

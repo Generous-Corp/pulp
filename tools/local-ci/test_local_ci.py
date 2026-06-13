@@ -1571,7 +1571,9 @@ class LocalCiTests(unittest.TestCase):
     def test_cmd_desktop_doctor_treats_macos_accessibility_as_optional(self):
         self.mod.cmd_desktop_install(SimpleNamespace(target="mac"))
 
-        with mock.patch.object(self.mod, "macos_accessibility_trusted", return_value=False):
+        with mock.patch.object(self.mod, "macos_accessibility_trusted", return_value=False), \
+             mock.patch.object(self.mod, "probe_macos_screencapture", return_value=(True, "ok")), \
+             mock.patch.object(self.mod, "probe_macos_avfoundation_screen", return_value=(True, "Capture screen 0 (3:)")):
             buf = io.StringIO()
             with redirect_stdout(buf):
                 exit_code = self.mod.cmd_desktop_doctor(SimpleNamespace(target="mac"))
@@ -1870,13 +1872,16 @@ class LocalCiTests(unittest.TestCase):
         config["desktop_automation"]["targets"]["mac"]["optional"]["webdriver_url"] = "http://127.0.0.1:4444"
         config["desktop_automation"]["targets"]["mac"]["optional"]["debug_attach"] = True
         config["desktop_automation"]["targets"]["mac"]["optional"]["debugger_command"] = "lldb"
+        config["desktop_automation"]["targets"]["mac"]["optional"]["video_capture"] = True
         original_platform = self.mod.sys.platform
         self.mod.sys.platform = "darwin"
         try:
             with mock.patch.object(self.mod, "macos_accessibility_trusted", return_value=True):
                 with mock.patch.object(self.mod, "probe_webdriver_endpoint", return_value={"status_url": "http://127.0.0.1:4444/status", "ready": True, "message": "ok"}):
                     with mock.patch.object(self.mod.shutil, "which", side_effect=lambda cmd: f"/usr/bin/{cmd}"):
-                        checks = self.mod.desktop_doctor_checks(config, "mac")
+                        with mock.patch.object(self.mod, "probe_macos_screencapture", return_value=(True, "ok")):
+                            with mock.patch.object(self.mod, "probe_macos_avfoundation_screen", return_value=(True, "Capture screen 0 (3:)")):
+                                checks = self.mod.desktop_doctor_checks(config, "mac")
         finally:
             self.mod.sys.platform = original_platform
 
@@ -1884,6 +1889,8 @@ class LocalCiTests(unittest.TestCase):
         self.assertEqual(names["webview_driver"]["detail"], "reachable at http://127.0.0.1:4444/status (ready=true): ok")
         self.assertTrue(names["webview_driver"]["ok"])
         self.assertTrue(names["debug_attach"]["ok"])
+        self.assertTrue(names["avfoundation_screen"]["ok"])
+        self.assertEqual(names["avfoundation_screen"]["detail"], "Capture screen 0 (3:)")
 
     def test_cmd_desktop_recent_lists_recent_manifests(self):
         config = self.mod.load_config()

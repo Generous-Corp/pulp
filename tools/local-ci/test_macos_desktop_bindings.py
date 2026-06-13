@@ -70,6 +70,10 @@ class MacosDesktopBindingsTests(unittest.TestCase):
             "activate_macos_pid",
             "dispatch_macos_click",
             "image_change_summary",
+            "start_macos_window_video_recording",
+            "stop_macos_window_video_recording",
+            "compose_desktop_video_proof",
+            "create_issue_video_variant",
             "attach_desktop_source_to_manifest",
             "atomic_write_text",
             "write_desktop_run_rollups",
@@ -96,6 +100,11 @@ class MacosDesktopBindingsTests(unittest.TestCase):
             settle_secs=0.25,
             timeout_secs=1.0,
             source_request={"mode": "current"},
+            record_video=True,
+            video_duration_secs=2.0,
+            video_fps=15.0,
+            video_attachment_budget_bytes=50,
+            compose_video_proof=True,
         )
 
         self.assertEqual(result, {"ok": True})
@@ -110,6 +119,15 @@ class MacosDesktopBindingsTests(unittest.TestCase):
         self.assertIs(captured["kwargs"]["environ_copy_fn"], os_mod.environ.copy)
         self.assertIs(captured["kwargs"]["wait_for_macos_window_fn"], bindings["wait_for_macos_window"])
         self.assertIs(captured["kwargs"]["capture_macos_window_fn"], bindings["capture_macos_window"])
+        self.assertIs(captured["kwargs"]["start_macos_window_video_recording_fn"], bindings["start_macos_window_video_recording"])
+        self.assertIs(captured["kwargs"]["stop_macos_window_video_recording_fn"], bindings["stop_macos_window_video_recording"])
+        self.assertIs(captured["kwargs"]["compose_desktop_video_proof_fn"], bindings["compose_desktop_video_proof"])
+        self.assertIs(captured["kwargs"]["create_issue_video_variant_fn"], bindings["create_issue_video_variant"])
+        self.assertTrue(captured["kwargs"]["record_video"])
+        self.assertTrue(captured["kwargs"]["compose_video_proof"])
+        self.assertEqual(captured["kwargs"]["video_duration_secs"], 2.0)
+        self.assertEqual(captured["kwargs"]["video_fps"], 15.0)
+        self.assertEqual(captured["kwargs"]["video_attachment_budget_bytes"], 50)
         self.assertIs(captured["kwargs"]["terminate_process_fn"], bindings["terminate_process"])
 
 

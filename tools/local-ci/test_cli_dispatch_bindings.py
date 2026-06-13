@@ -52,11 +52,16 @@ class CliDispatchBindingsTests(unittest.TestCase):
             "cmd_desktop_config_set",
             "cmd_desktop_install",
             "cmd_desktop_doctor",
+            "cmd_desktop_video_doctor",
             "cmd_desktop_status",
             "cmd_desktop_config",
             "cmd_desktop_recent",
             "cmd_desktop_proof",
             "cmd_desktop_publish",
+            "cmd_desktop_verdict",
+            "cmd_desktop_compose_video",
+            "cmd_desktop_serve",
+            "cmd_desktop_video",
             "cmd_desktop_cleanup",
             "cmd_desktop_smoke",
             "cmd_desktop_click",
@@ -109,9 +114,14 @@ class CliDispatchBindingsTests(unittest.TestCase):
         self.assertIs(captured["desktop_args"], args)
         self.assertEqual(
             set(captured["desktop_commands"]),
-            {"install", "doctor", "status", "config", "recent", "proof", "publish", "cleanup", "smoke", "click", "inspect"},
+            {"install", "doctor", "video-doctor", "status", "config", "recent", "proof", "publish", "verdict", "compose-video", "serve", "video", "cleanup", "smoke", "click", "inspect"},
         )
         self.assertIs(captured["desktop_commands"]["install"], bindings["cmd_desktop_install"])
+        self.assertIs(captured["desktop_commands"]["video-doctor"], bindings["cmd_desktop_video_doctor"])
+        self.assertIs(captured["desktop_commands"]["verdict"], bindings["cmd_desktop_verdict"])
+        self.assertIs(captured["desktop_commands"]["compose-video"], bindings["cmd_desktop_compose_video"])
+        self.assertIs(captured["desktop_commands"]["serve"], bindings["cmd_desktop_serve"])
+        self.assertIs(captured["desktop_commands"]["video"], bindings["cmd_desktop_video"])
         self.assertIs(captured["desktop_commands"]["inspect"], bindings["cmd_desktop_inspect"])
 
     def test_dispatch_main_command_binds_top_level_cloud_and_namespace_commands(self):

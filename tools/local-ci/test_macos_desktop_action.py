@@ -43,6 +43,13 @@ class MacosDesktopActionTests(unittest.TestCase):
             "before_screenshot": current_bundle / "screenshots" / "before.png",
             "diff_screenshot": current_bundle / "screenshots" / "diff.png",
             "ui_snapshot": current_bundle / "ui-tree.json",
+            "video": current_bundle / "video" / "proof.mp4",
+            "video_composed": current_bundle / "video" / "proof-composed.mp4",
+            "video_issue": current_bundle / "video" / "proof.issue.mp4",
+            "video_metadata": current_bundle / "video" / "metadata.json",
+            "video_composed_metadata": current_bundle / "video" / "composed-metadata.json",
+            "video_issue_metadata": current_bundle / "video" / "issue-metadata.json",
+            "video_poster": current_bundle / "video" / "poster.png",
             "stdout": current_bundle / "stdout.log",
             "stderr": current_bundle / "stderr.log",
         }
@@ -84,6 +91,46 @@ class MacosDesktopActionTests(unittest.TestCase):
                 diff_output_path.parent.mkdir(parents=True, exist_ok=True)
                 diff_output_path.write_bytes(b"diff")
             return {"changed": True}
+
+        def start_video(window_payload, output_path, *, duration_secs, fps):
+            self.assertEqual(window_payload, window)
+            return {"path": str(output_path), "duration_secs": duration_secs, "fps": fps}
+
+        def stop_video(recording, *, output_path, metadata_path, poster_path, duration_secs, fps, attachment_budget_bytes):
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_bytes(b"mp4")
+            poster_path.write_bytes(b"poster")
+            metadata = {
+                "path": str(output_path),
+                "duration_secs": duration_secs,
+                "fps": fps,
+                "poster": {"path": str(poster_path), "exists": True},
+                "size": {
+                    "size_bytes": output_path.stat().st_size,
+                    "attachment_budget_bytes": attachment_budget_bytes,
+                    "fits_attachment_budget": True,
+                },
+                "recording": recording,
+            }
+            metadata_path.write_text(json.dumps(metadata, indent=2) + "\n")
+            return metadata
+
+        def compose_video(manifest_path: Path, output_path: Path):
+            self.assertTrue(manifest_path.exists())
+            output_path.write_bytes(b"composed")
+            return {"output": str(output_path), "composer": "remotion", "size": {"fits_attachment_budget": True}}
+
+        def issue_video(source_path: Path, output_path: Path, metadata_path: Path, *, attachment_budget_bytes: int):
+            self.assertTrue(source_path.exists())
+            output_path.write_bytes(source_path.read_bytes())
+            payload = {
+                "output": str(output_path),
+                "source": str(source_path),
+                "status": "copied",
+                "size": {"fits_attachment_budget": True, "attachment_budget_bytes": attachment_budget_bytes},
+            }
+            metadata_path.write_text(json.dumps(payload, indent=2) + "\n")
+            return payload
 
         kwargs = {
             "action_name": "inspect",
@@ -131,6 +178,10 @@ class MacosDesktopActionTests(unittest.TestCase):
             "dispatch_macos_click_fn": lambda x, y: {"clicked": True, "x": x, "y": y},
             "desktop_click_selector_fn": lambda **kwargs: kwargs,
             "image_change_summary_fn": image_change_summary,
+            "start_macos_window_video_recording_fn": start_video,
+            "stop_macos_window_video_recording_fn": stop_video,
+            "compose_desktop_video_proof_fn": compose_video,
+            "create_issue_video_variant_fn": issue_video,
             "attach_desktop_source_to_manifest_fn": lambda payload, context: payload.setdefault("source", context) if context else None,
             "atomic_write_text_fn": lambda path, text: path.write_text(text),
             "write_desktop_run_rollups_fn": lambda *args, **kwargs: rollups.append((args, kwargs)),
@@ -202,6 +253,30 @@ class MacosDesktopActionTests(unittest.TestCase):
         self.assertEqual(manifest["interaction"]["click"]["screen_point"], {"x": 30.0, "y": 50.0})
         self.assertIn("before_screenshot", manifest["artifacts"])
         self.assertTrue(manifest["artifacts"]["diff_screenshot"].endswith("/screenshots/diff.png"))
+
+    def test_run_macos_local_smoke_records_video_manifest_artifacts(self) -> None:
+        manifest, _launched, _terminated, _waited_paths, _rollups = self.run_action(
+            record_video=True,
+            video_duration_secs=3.0,
+            video_fps=12.0,
+            video_attachment_budget_bytes=4_000_000,
+            compose_video_proof=True,
+            capture_ui_snapshot=False,
+        )
+
+        self.assertTrue(manifest["artifacts"]["video"].endswith("/video/proof.mp4"))
+        self.assertTrue(manifest["artifacts"]["video_metadata"].endswith("/video/metadata.json"))
+        self.assertTrue(manifest["artifacts"]["video_poster"].endswith("/video/poster.png"))
+        self.assertEqual(manifest["video"]["duration_secs"], 3.0)
+        self.assertEqual(manifest["video"]["fps"], 12.0)
+        self.assertTrue(manifest["video"]["size"]["fits_attachment_budget"])
+        self.assertTrue(manifest["artifacts"]["video_composed"].endswith("/video/proof-composed.mp4"))
+        self.assertTrue(manifest["artifacts"]["video_composed_metadata"].endswith("/video/composed-metadata.json"))
+        self.assertEqual(manifest["video_composed"]["composer"], "remotion")
+        self.assertTrue(manifest["artifacts"]["video_issue"].endswith("/video/proof.issue.mp4"))
+        self.assertTrue(manifest["artifacts"]["video_issue_metadata"].endswith("/video/issue-metadata.json"))
+        self.assertEqual(manifest["video_issue"]["status"], "copied")
+        self.assertTrue(manifest["video_issue"]["source"].endswith("/video/proof-composed.mp4"))
 
     def test_run_macos_local_smoke_rejects_view_click_without_snapshot(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "View-targeted click requires"):

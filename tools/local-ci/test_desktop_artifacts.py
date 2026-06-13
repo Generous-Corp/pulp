@@ -77,6 +77,7 @@ class DesktopArtifactsTests(unittest.TestCase):
             self.root / "desktop-artifacts" / "mac" / "smoke" / "20260609-120000-abcdef12",
         )
         self.assertTrue((bundle / "screenshots").is_dir())
+        self.assertTrue((bundle / "video").is_dir())
 
     def test_create_desktop_publish_bundle_uses_stable_layout(self) -> None:
         bundle = self.mod.create_desktop_publish_bundle(

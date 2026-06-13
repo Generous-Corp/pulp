@@ -208,6 +208,68 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["checks"], checks)
 
+    def test_video_doctor_requires_video_capture_and_can_skip_remotion_smoke(self):
+        self.targets["mac"]["optional"] = {"video_capture": True}
+        checks = [
+            {"name": "receipt", "ok": True, "detail": "installed"},
+            {"name": "screencapture", "ok": True, "detail": "/usr/sbin/screencapture"},
+            {"name": "video_capture", "ok": True, "detail": "/repo/node_modules/ffmpeg-static/ffmpeg", "required": False},
+            {"name": "avfoundation_screen", "ok": True, "detail": "Capture screen 0 (3:)", "required": False},
+        ]
+        deps = {
+            "load_config_fn": self.config,
+            "resolve_desktop_target_fn": lambda _config, name: self.targets[name],
+            "desktop_doctor_checks_fn": lambda _config, _name: [dict(check) for check in checks],
+            "normalize_desktop_optional_config_fn": lambda optional: {"video_capture": bool((optional or {}).get("video_capture"))},
+            "video_proof_smoke_fn": lambda: self.fail("smoke should be skipped"),
+            "print_fn": self.print_line,
+        }
+
+        result = self.mod.cmd_desktop_video_doctor(
+            Namespace(target="mac", json=False, skip_remotion_smoke=True),
+            **deps,
+        )
+
+        self.assertEqual(result, 0)
+        self.assertIn("Desktop video doctor for `mac`", self.printed)
+        self.assertIn("  PASS  video_capture: /repo/node_modules/ffmpeg-static/ffmpeg", self.printed)
+        self.assertIn("  PASS  avfoundation_screen: Capture screen 0 (3:)", self.printed)
+        self.assertIn("  PASS  target.video_capture: enabled", self.printed)
+        self.assertIn("  PASS  remotion_smoke: skipped by --skip-remotion-smoke", self.printed)
+
+    def test_video_doctor_reports_config_and_remotion_failures(self):
+        checks = [
+            {"name": "receipt", "ok": True, "detail": "installed"},
+            {"name": "video_capture", "ok": False, "detail": "ffmpeg not found", "required": False},
+            {"name": "avfoundation_screen", "ok": False, "detail": "Could not find AVFoundation device `Capture screen 0`", "required": False},
+        ]
+        deps = {
+            "load_config_fn": self.config,
+            "resolve_desktop_target_fn": lambda _config, name: self.targets[name],
+            "desktop_doctor_checks_fn": lambda _config, _name: [dict(check) for check in checks],
+            "normalize_desktop_optional_config_fn": lambda optional: {"video_capture": bool((optional or {}).get("video_capture"))},
+            "video_proof_smoke_fn": lambda: {"ok": False, "detail": "npm install required"},
+            "print_fn": self.print_line,
+        }
+
+        result = self.mod.cmd_desktop_video_doctor(
+            Namespace(target="mac", json=True, skip_remotion_smoke=False),
+            **deps,
+        )
+
+        self.assertEqual(result, 1)
+        payload = json.loads(self.printed[0])
+        checks_by_name = {check["name"]: check for check in payload["checks"]}
+        self.assertFalse(payload["ok"])
+        self.assertFalse(checks_by_name["target.video_capture"]["ok"])
+        self.assertTrue(checks_by_name["target.video_capture"]["required"])
+        self.assertFalse(checks_by_name["video_capture"]["ok"])
+        self.assertTrue(checks_by_name["video_capture"]["required"])
+        self.assertFalse(checks_by_name["avfoundation_screen"]["ok"])
+        self.assertTrue(checks_by_name["avfoundation_screen"]["required"])
+        self.assertFalse(checks_by_name["remotion_smoke"]["ok"])
+        self.assertEqual(checks_by_name["remotion_smoke"]["detail"], "npm install required")
+
 
 if __name__ == "__main__":
     unittest.main()

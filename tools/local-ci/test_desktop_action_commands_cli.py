@@ -51,6 +51,13 @@ class DesktopActionCommandsCliTests(unittest.TestCase):
             "settle_secs": 0.5,
             "timeout": 5.0,
             "pulp_app_automation": False,
+            "record_video": False,
+            "video_duration": 8.0,
+            "video_fps": 30.0,
+            "video_attachment_budget_mb": 100.0,
+            "video_audio": "none",
+            "compose_video_proof": False,
+            "action": "click",
             "json": False,
         }
         values.update(overrides)
@@ -106,6 +113,7 @@ class DesktopActionCommandsCliTests(unittest.TestCase):
         self.assertTrue(self.calls[0][2]["capture_ui_snapshot"])
         self.assertEqual(self.calls[0][2]["click_view_text"], "Bypass")
         self.assertTrue(self.calls[0][2]["capture_before"])
+        self.assertFalse(self.calls[0][2]["record_video"])
         self.assertEqual(self.calls[0][2]["source_request"], {"target": "mac", "command": "app"})
 
     def test_smoke_json_and_error_paths(self):
@@ -127,6 +135,11 @@ class DesktopActionCommandsCliTests(unittest.TestCase):
         result = self.mod.cmd_desktop_smoke(self.args(target="ubuntu", launch_command=None), **self.deps())
         self.assertEqual(result, 1)
         self.assertIn("requires --command for linux-xvfb", self.printed[-1])
+
+        self.printed.clear()
+        result = self.mod.cmd_desktop_smoke(self.args(target="ubuntu", record_video=True), **self.deps())
+        self.assertEqual(result, 1)
+        self.assertIn("video recording is not implemented for linux-xvfb", self.printed[-1])
 
         result = self.mod.cmd_desktop_smoke(
             self.args(target="windows", capture_ui_snapshot=True, pulp_app_automation=False),
@@ -176,6 +189,14 @@ class DesktopActionCommandsCliTests(unittest.TestCase):
         self.assertFalse(self.calls[-1][2]["pulp_app_automation"])
         self.assertEqual(self.calls[-1][2]["click_point"], "10,20")
 
+        self.printed.clear()
+        result = self.mod.cmd_desktop_click(
+            self.args(target="windows", click="10,20", record_video=True),
+            **self.deps(),
+        )
+        self.assertEqual(result, 1)
+        self.assertIn("video recording is not implemented for windows-session-agent", self.printed[-1])
+
     def test_inspect_dispatches_adapter_specific_snapshot_policy(self):
         result = self.mod.cmd_desktop_inspect(self.args(bundle_id="com.example.App", launch_command=None), **self.deps())
         self.assertEqual(result, 0)
@@ -211,6 +232,50 @@ class DesktopActionCommandsCliTests(unittest.TestCase):
         result = self.mod.cmd_desktop_inspect(self.args(target="other"), **self.deps())
         self.assertEqual(result, 1)
         self.assertIn("desktop inspect is not implemented", self.printed[-1])
+
+    def test_video_command_forces_recording_and_composition(self):
+        result = self.mod.cmd_desktop_video(
+            self.args(click_view_id="root", label="video-proof"),
+            cmd_desktop_smoke_fn=lambda _args: self.fail("smoke should not run"),
+            cmd_desktop_click_fn=lambda args: self.calls.append(("click-wrapper", (), vars(args).copy())) or 0,
+            cmd_desktop_inspect_fn=lambda _args: self.fail("inspect should not run"),
+            print_fn=self.print_line,
+        )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(self.calls[0][0], "click-wrapper")
+        self.assertTrue(self.calls[0][2]["record_video"])
+        self.assertTrue(self.calls[0][2]["compose_video_proof"])
+
+    def test_video_command_dispatches_action_and_rejects_audio_modes(self):
+        result = self.mod.cmd_desktop_video(
+            self.args(action="inspect"),
+            cmd_desktop_smoke_fn=lambda _args: self.fail("smoke should not run"),
+            cmd_desktop_click_fn=lambda _args: self.fail("click should not run"),
+            cmd_desktop_inspect_fn=lambda args: self.calls.append(("inspect-wrapper", (), vars(args).copy())) or 0,
+            print_fn=self.print_line,
+        )
+        self.assertEqual(result, 0)
+        self.assertEqual(self.calls[0][0], "inspect-wrapper")
+
+        self.printed.clear()
+        result = self.mod.cmd_desktop_video(
+            self.args(video_audio="system"),
+            cmd_desktop_smoke_fn=lambda _args: self.fail("smoke should not run"),
+            cmd_desktop_click_fn=lambda _args: self.fail("click should not run"),
+            cmd_desktop_inspect_fn=lambda _args: self.fail("inspect should not run"),
+            print_fn=self.print_line,
+        )
+        self.assertEqual(result, 1)
+        self.assertIn("video audio source `system` is not implemented yet", self.printed[-1])
+
+    def test_record_video_rejects_reserved_audio_modes(self):
+        result = self.mod.cmd_desktop_click(
+            self.args(click_view_id="root", record_video=True, video_audio="plugin"),
+            **self.deps(),
+        )
+        self.assertEqual(result, 1)
+        self.assertIn("video audio source `plugin` is not implemented yet", self.printed[-1])
 
 
 if __name__ == "__main__":

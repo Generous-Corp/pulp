@@ -1,0 +1,258 @@
+---
+name: video-proof
+description: Record, compose, publish, serve, and review short desktop validation video proofs for Pulp UX/test-harness work. Use when the user asks to "show me it working", record a validation video, prove a click/interaction, share a local proof link, attach a video to a review issue, or compare an implemented UI against source material. Covers macOS desktop capture, Remotion proof composition, attachment budgets, local/Tailscale serving, and review closure.
+requires:
+  scripts:
+    - tools/local-ci/local_ci.py
+    - tools/local-ci/scripts/compose-video-proof.mjs
+  tools:
+    - node
+    - npm
+---
+
+# Validation video proofs
+
+Use this skill when a screenshot is not enough to prove a UX interaction:
+clicking a control, opening an inspector, checking a standalone/plugin host flow,
+or showing an implementation next to source material. Default to still captures
+for static assertions; record video only when motion, timing, audio/visual state,
+or reviewer comprehension matters.
+
+## Rules of engagement
+
+- Work on a feature branch or dedicated worktree until humans have reviewed the
+  proof workflow. Do not merge generated videos or local config.
+- Prefer short clips: 5-12 seconds is the normal range. Keep the recording
+  focused on the window or component under test.
+- Prefer `video/proof-composed.mp4` for review. Keep `video/proof.mp4` as the
+  raw debugging artifact.
+- Treat size as a test result. Use `--video-attachment-budget-mb 100` for
+  paid/pro GitHub issue attachment planning only when the uploader is eligible
+  for videos above 10 MB. Otherwise use a 10 MB budget or publish a local report
+  and link the served report instead of attaching the MP4.
+- For review issues that may be handled by a non-pro uploader, rerender with
+  `desktop compose-video --small-video --small-video-budget-mb 10` so
+  `video/proof.small.mp4` is available as a convenience attachment.
+- Never commit `tools/local-ci/config.json`, `tools/local-ci/node_modules/`,
+  `.remotion/`, or generated desktop artifact bundles.
+
+## First-time setup on a Mac
+
+Install the repo-local developer ffmpeg and Remotion tooling:
+
+```bash
+npm --prefix tools/local-ci install
+```
+
+Smoke-test Remotion composition without requiring macOS Screen Recording:
+
+```bash
+npm --prefix tools/local-ci run smoke-video-proof
+```
+
+Enable optional video capture for the mac desktop target:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop config set target.mac.video_capture true
+```
+
+Run the doctor before recording:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop video-doctor mac
+```
+
+Required gates for video:
+
+- `PASS screencapture`
+- `PASS video_capture`
+- `PASS avfoundation_screen`
+- `PASS target.video_capture`
+- `PASS remotion_smoke`
+
+Use `--skip-remotion-smoke` for a faster config/tooling check when you do not
+need to rerender the synthetic Remotion smoke proof:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop video-doctor mac --skip-remotion-smoke
+```
+
+If `avfoundation_screen` fails, ffmpeg cannot enumerate the primary macOS input
+`Capture screen 0`; confirm the configured ffmpeg can run from the invoking
+terminal and rerun the doctor.
+
+If `screencapture` fails with `could not create image from display`, macOS has
+not granted Screen Recording to the terminal or agent app. Ask the user to grant
+Screen Recording, restart that app, then rerun the doctor. You can still update
+docs/tests while waiting, but do not claim live capture has been validated.
+
+The macOS recorder uses ffmpeg/AVFoundation first and falls back to a
+`screencapture -l` frame sequence only when ffmpeg capture cannot start. Both
+paths still require Screen Recording permission for the invoking app.
+
+## Capture a proof
+
+Record a short click proof and render the Remotion composition with the
+dedicated video entry point:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop video mac \
+  --command ./build/pulp \
+  --click 120,80 \
+  --duration 8 \
+  --video-fps 30 \
+  --video-audio none \
+  --video-attachment-budget-mb 100
+```
+
+Use `--action smoke`, `--action click`, or `--action inspect` to choose the
+underlying desktop action. Today, recording is implemented for macOS only;
+Linux/Windows video requests fail explicitly until their recorder backends are
+wired.
+
+The same recorder can be enabled on lower-level desktop actions:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop click mac \
+  --command ./build/pulp \
+  --click 120,80 \
+  --capture-before \
+  --record-video \
+  --compose-video-proof \
+  --video-duration 8 \
+  --video-fps 30 \
+  --video-attachment-budget-mb 100
+```
+
+Adjust `--command`, `--click`, duration, and fps for the actual scenario. Keep
+fps at 30 unless there is a motion-specific reason to go higher.
+
+Keep `--video-audio none` unless audio support has landed. The reserved
+`plugin` and `system` modes fail fast so the proof never implies silent,
+implicit microphone/system capture. Remotion composition is intentionally muted
+in the MVP; a composed proof should not contain an audio stream unless a future
+explicit audio mode records one in the manifest.
+
+Each run bundle should contain:
+
+- `video/proof.mp4`
+- `video/proof-composed.mp4` when `--compose-video-proof` is set
+- `video/proof.issue.mp4` for GitHub/pro-account attachment review
+- `video/proof.small.mp4` when `desktop compose-video --small-video` is used
+- `video/metadata.json` with `size_bytes`, budget, and
+  `fits_attachment_budget`
+- `video/issue-metadata.json` with copy/transcode/budget status
+- `video/small-metadata.json` with the 10 MB fallback status when requested
+- screenshots, logs, and `manifest.json`
+
+`proof.issue.mp4` is copied from the review source when it already fits the
+configured budget. If the source is too large, the tool runs a bounded H.264
+retry ladder: balanced 720p at 24 fps, compact 720p at 15 fps, then compact
+540p at 15 fps. `issue-metadata.json` records every attempt and the final
+`transcoded`, `exceeds-budget`, or `transcode-failed` status; use the served
+report link when the issue variant still does not fit.
+
+To recompose an existing raw proof:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop compose-video /path/to/run/manifest.json
+```
+
+This rerenders `video/proof-composed.mp4`, refreshes composed metadata, creates
+or refreshes `video/proof.issue.mp4`, writes issue metadata, and updates the run
+manifest.
+
+To create both the pro-account issue target and a 10 MB fallback:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop compose-video /path/to/run/manifest.json \
+  --video-attachment-budget-mb 100 \
+  --small-video \
+  --small-video-budget-mb 10
+```
+
+For a design/source comparison proof, use the Remotion design-parity template:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop compose-video /path/to/run/manifest.json \
+  --template design-parity \
+  --source-image planning/screenshots/reference.png \
+  --source-label "Figma reference" \
+  --title "Design parity proof"
+```
+
+This renders the source/reference image beside the captured proof and records a
+`video_proof_composition` block in the manifest.
+
+## Publish and serve for review
+
+Publish the latest runs:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop publish mac --limit 3 --label validation-video-proof
+```
+
+Serve the latest published report on a Tailscale-visible machine:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop serve --host 0.0.0.0 --port 8765
+```
+
+When bound to `0.0.0.0`, `desktop serve` prints candidate watch URLs:
+localhost, the machine hostname, any comma-separated `PULP_DESKTOP_SERVE_HOSTS`,
+and `tailscale ip -4` results when the Tailscale CLI is installed. If the
+reviewer should use a friendly Tailnet DNS name, run with:
+
+```bash
+PULP_DESKTOP_SERVE_HOSTS=blackbook.tailnet-name.ts.net \
+  python3 tools/local-ci/local_ci.py desktop serve --host 0.0.0.0 --port 8765
+```
+
+`desktop publish` writes `review.md` next to `index.html`. Use `review.md` as
+the GitHub issue body. GitHub supports `.mp4`, `.mov`, and `.webm` attachments
+and currently recommends H.264 for compatibility; paid-plan eligible uploaders
+can use the 100 MB video budget, while others should assume 10 MB. Attach
+`proof.issue.mp4` manually when it fits the chosen budget; attach
+`proof.small.mp4` when the normal issue video is too large but the small fallback
+fits. Otherwise include the served report URL. The review issue can be closed
+when the reviewer comments `looks good to me`. The generated review body also
+records the attach/do-not-attach decision and the `desktop verdict` commands for
+approval or follow-up.
+
+Record that review state back into the run manifest:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop verdict /path/to/run/manifest.json \
+  --approved \
+  --issue-url https://github.com/owner/repo/issues/123
+```
+
+For another iteration, keep the issue open and capture the reason:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop verdict /path/to/run/manifest.json \
+  --needs-work \
+  --notes "Zoom starts too late; recapture with the component centered."
+```
+
+`desktop verdict` writes a manifest `review` block with status, timestamp,
+optional reviewer notes, and whether the review issue can be closed.
+
+## High-value demo scenarios
+
+- Standalone app: launch a built standalone, perform one visible interaction,
+  and show the inspector or normal UI state changing.
+- Plugin host: run a Pulp plugin in a host such as REAPER, click a meaningful
+  control, and show host/plugin state updating.
+- Audio Inspector: open the Audio Inspector during a running app and show live
+  meters or probe state after a stimulus.
+- Component zoom: focus on a specific implemented component and prove the
+  interaction or visual state that was just changed.
+- Design validation: show source material, the implemented UI, and a small
+  comparison/diff frame so a reviewer can understand alignment without knowing
+  the feature.
+
+Use Remotion to make these clips reviewer-friendly: title card, scenario label,
+run metadata, source identity, launch/action/capture timeline, size/budget
+status, and short explanatory captions. Keep the composition factual and
+concise; the video should explain the proof, not become a long demo reel.

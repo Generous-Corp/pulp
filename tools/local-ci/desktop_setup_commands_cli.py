@@ -202,3 +202,95 @@ def cmd_desktop_doctor(
             status = "FAIL"
         print_fn(f"  {status:4s}  {check['name']}: {check['detail']}")
     return 0 if all_ok else 1
+
+
+def _desktop_check_status(check: dict) -> str:
+    if check["ok"]:
+        return "PASS"
+    if not check.get("required", True):
+        return "WARN"
+    return "FAIL"
+
+
+def cmd_desktop_video_doctor(
+    args: argparse.Namespace,
+    *,
+    load_config_fn: Callable[[], dict],
+    resolve_desktop_target_fn: Callable[[dict, str], dict],
+    desktop_doctor_checks_fn: Callable[[dict, str], list[dict]],
+    normalize_desktop_optional_config_fn: Callable[[dict | None], dict],
+    video_proof_smoke_fn: Callable[[], dict],
+    print_fn: Callable[[str], None] = print,
+) -> int:
+    try:
+        config = load_config_fn()
+        target = resolve_desktop_target_fn(config, args.target)
+    except (FileNotFoundError, ValueError) as exc:
+        print_fn(f"Error: {exc}")
+        return 1
+
+    checks = desktop_doctor_checks_fn(config, args.target)
+    optional = normalize_desktop_optional_config_fn(target.get("optional"))
+    checks.append(
+        {
+            "name": "target.video_capture",
+            "ok": bool(optional.get("video_capture")),
+            "detail": "enabled"
+            if optional.get("video_capture")
+            else f"disabled; run `python3 tools/local-ci/local_ci.py desktop config set target.{args.target}.video_capture true`",
+            "required": True,
+        }
+    )
+    for check in checks:
+        if check.get("name") in {"video_capture", "avfoundation_screen"}:
+            check["required"] = True
+
+    if getattr(args, "skip_remotion_smoke", False):
+        checks.append(
+            {
+                "name": "remotion_smoke",
+                "ok": True,
+                "detail": "skipped by --skip-remotion-smoke",
+                "required": False,
+            }
+        )
+    else:
+        try:
+            smoke = video_proof_smoke_fn()
+            checks.append(
+                {
+                    "name": "remotion_smoke",
+                    "ok": bool(smoke.get("ok")),
+                    "detail": smoke.get("detail") or smoke.get("output") or "ok",
+                    "required": True,
+                    "payload": smoke,
+                }
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            checks.append(
+                {
+                    "name": "remotion_smoke",
+                    "ok": False,
+                    "detail": str(exc),
+                    "required": True,
+                }
+            )
+
+    all_ok = all(check["ok"] for check in checks if check.get("required", True))
+    if getattr(args, "json", False):
+        payload = {
+            "target": args.target,
+            "adapter": target["adapter"],
+            "bootstrap": target["bootstrap"],
+            "ok": all_ok,
+            "checks": checks,
+        }
+        print_fn(json.dumps(payload, indent=2))
+        return 0 if all_ok else 1
+
+    print_fn(f"Desktop video doctor for `{args.target}`")
+    print_fn(f"  adapter: {target['adapter']}")
+    print_fn(f"  bootstrap: {target['bootstrap']}")
+    for check in checks:
+        print_fn(f"  {_desktop_check_status(check):4s}  {check['name']}: {check['detail']}")
+    return 0 if all_ok else 1

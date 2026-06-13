@@ -87,6 +87,121 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(args.prepare_timeout, 900.0)
         self.assertEqual(args.click, "12,34")
 
+    def test_desktop_video_command_defaults_to_click_proof(self):
+        parser = self.build_parser()
+
+        args = parser.parse_args([
+            "desktop",
+            "video",
+            "mac",
+            "--command",
+            "./build/pulp",
+            "--click-view-id",
+            "bypass-toggle",
+            "--duration",
+            "6",
+            "--video-fps",
+            "24",
+            "--video-audio",
+            "none",
+            "--label",
+            "standalone-bypass-toggle",
+        ])
+
+        self.assertEqual(args.command, "desktop")
+        self.assertEqual(args.desktop_command, "video")
+        self.assertEqual(args.target, "mac")
+        self.assertEqual(args.action, "click")
+        self.assertEqual(args.launch_command, "./build/pulp")
+        self.assertEqual(args.click_view_id, "bypass-toggle")
+        self.assertFalse(args.record_video)
+        self.assertFalse(args.compose_video_proof)
+        self.assertEqual(args.video_duration, 6.0)
+        self.assertEqual(args.video_fps, 24.0)
+        self.assertEqual(args.video_audio, "none")
+        self.assertEqual(args.video_attachment_budget_mb, 100.0)
+        self.assertEqual(args.label, "standalone-bypass-toggle")
+
+    def test_desktop_verdict_command_requires_explicit_status(self):
+        parser = self.build_parser()
+
+        args = parser.parse_args([
+            "desktop",
+            "verdict",
+            "/tmp/run/manifest.json",
+            "--approved",
+            "--reviewer",
+            "daniel",
+            "--issue-url",
+            "https://github.com/example/repo/issues/1",
+            "--json",
+        ])
+
+        self.assertEqual(args.desktop_command, "verdict")
+        self.assertEqual(args.manifest, "/tmp/run/manifest.json")
+        self.assertTrue(args.approved)
+        self.assertFalse(args.needs_work)
+        self.assertEqual(args.reviewer, "daniel")
+        self.assertEqual(args.issue_url, "https://github.com/example/repo/issues/1")
+        self.assertTrue(args.json)
+
+    def test_desktop_video_doctor_defaults_to_mac(self):
+        parser = self.build_parser()
+
+        args = parser.parse_args(["desktop", "video-doctor", "--skip-remotion-smoke", "--json"])
+
+        self.assertEqual(args.command, "desktop")
+        self.assertEqual(args.desktop_command, "video-doctor")
+        self.assertEqual(args.target, "mac")
+        self.assertTrue(args.skip_remotion_smoke)
+        self.assertTrue(args.json)
+
+    def test_desktop_compose_video_command_parses_outputs(self):
+        parser = self.build_parser()
+
+        args = parser.parse_args([
+            "desktop",
+            "compose-video",
+            "/tmp/run/manifest.json",
+            "--output",
+            "/tmp/run/video/custom.mp4",
+            "--issue-output",
+            "/tmp/run/video/custom.issue.mp4",
+            "--small-video",
+            "--small-output",
+            "/tmp/run/video/custom.small.mp4",
+            "--small-metadata",
+            "/tmp/run/video/custom-small.json",
+            "--small-video-budget-mb",
+            "10",
+            "--template",
+            "design-parity",
+            "--source-image",
+            "/tmp/source.png",
+            "--source-label",
+            "Figma reference",
+            "--title",
+            "Design parity",
+            "--video-attachment-budget-mb",
+            "40",
+            "--json",
+        ])
+
+        self.assertEqual(args.desktop_command, "compose-video")
+        self.assertEqual(args.manifest, "/tmp/run/manifest.json")
+        self.assertEqual(args.output, "/tmp/run/video/custom.mp4")
+        self.assertEqual(args.issue_output, "/tmp/run/video/custom.issue.mp4")
+        self.assertTrue(args.small_video)
+        self.assertEqual(args.small_output, "/tmp/run/video/custom.small.mp4")
+        self.assertEqual(args.small_metadata, "/tmp/run/video/custom-small.json")
+        self.assertEqual(args.small_video_budget_mb, 10.0)
+        self.assertEqual(args.template, "design-parity")
+        self.assertEqual(args.source_image, "/tmp/source.png")
+        self.assertEqual(args.source_label, "Figma reference")
+        self.assertEqual(args.title, "Design parity")
+        self.assertEqual(args.video_attachment_budget_mb, 40.0)
+        self.assertTrue(args.json)
+
     def test_cleanup_defaults_use_injected_retention(self):
         parser = self.build_parser(keep_completed_jobs=7)
 

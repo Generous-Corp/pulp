@@ -371,6 +371,7 @@ class DesktopCliTests(unittest.TestCase):
             "output_dir": "/tmp/publish",
             "index_html": "/tmp/publish/index.html",
             "index_json": "/tmp/publish/index.json",
+            "review_markdown": "/tmp/publish/review.md",
         }
 
         self.assertEqual(
@@ -381,6 +382,7 @@ class DesktopCliTests(unittest.TestCase):
                 "  output_dir: /tmp/publish",
                 "  index_html: /tmp/publish/index.html",
                 "  index_json: /tmp/publish/index.json",
+                "  review_markdown: /tmp/publish/review.md",
             ],
         )
 

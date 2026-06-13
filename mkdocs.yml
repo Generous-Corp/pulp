@@ -134,6 +134,7 @@ nav:
   - Support:
       - Capabilities: reference/capabilities.md
       - Host Compatibility Matrix: guides/host-matrix.md
+      - Desktop Video Proofs: reference/desktop-video-proofs.md
   - Modules:
       - Module Reference: reference/modules.md
   - Examples:

@@ -17,6 +17,15 @@ ARTIFACT_KEYS = (
     "before_screenshot",
     "diff_screenshot",
     "ui_snapshot",
+    "video",
+    "video_composed",
+    "video_issue",
+    "video_small",
+    "video_metadata",
+    "video_composed_metadata",
+    "video_issue_metadata",
+    "video_small_metadata",
+    "video_poster",
     "stdout",
     "stderr",
 )
@@ -126,6 +135,106 @@ def slugify_token(value: str, *, max_len: int = 48) -> str:
     return cleaned[:max_len]
 
 
+def _artifact_metadata(publish_dir: Path, rel_path: str | None) -> dict:
+    if not rel_path:
+        return {}
+    path = publish_dir / rel_path
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _format_bytes(value: object) -> str:
+    if not isinstance(value, int | float):
+        return "unknown"
+    if value >= 1_000_000:
+        return f"{value / 1_000_000:.1f} MB"
+    return f"{max(1, round(value / 1000))} KB"
+
+
+def desktop_review_issue_body(index_payload: dict, *, publish_dir: Path) -> str:
+    serve_command = f"python3 tools/local-ci/local_ci.py desktop serve {publish_dir} --host 0.0.0.0 --port 8765"
+    lines = [
+        f"# {index_payload['label']}",
+        "",
+        "Desktop validation proof report is ready for review.",
+        "",
+        "## Review",
+        "",
+        f"- Open local report: `{publish_dir / 'index.html'}`",
+        f"- Serve over local/Tailscale HTTP: `{serve_command}`",
+        "- Served URL: `desktop serve` prints candidate URLs, including localhost, configured public hosts, and Tailscale IPs when available.",
+        "- Friendly Tailnet name: set `PULP_DESKTOP_SERVE_HOSTS=<name-or-ip>` before running `desktop serve` if reviewers should tap a stable host name.",
+        "- Reviewer verdict: comment `looks good to me` when the proof is accepted, or describe the mismatch and run label when changes are needed.",
+        "",
+        "## Runs",
+        "",
+    ]
+    for run in index_payload.get("runs", []):
+        artifacts = run.get("artifacts") or {}
+        video = artifacts.get("video_issue") or artifacts.get("video_composed") or artifacts.get("video")
+        metadata_path = artifacts.get("video_issue_metadata") or artifacts.get("video_composed_metadata") or artifacts.get("video_metadata")
+        metadata = _artifact_metadata(publish_dir, metadata_path)
+        small_metadata = _artifact_metadata(publish_dir, artifacts.get("video_small_metadata"))
+        size = metadata.get("size") if isinstance(metadata.get("size"), dict) else {}
+        small_size = small_metadata.get("size") if isinstance(small_metadata.get("size"), dict) else {}
+        size_bytes = size.get("size_bytes") or metadata.get("size_bytes")
+        small_size_bytes = small_size.get("size_bytes") or small_metadata.get("size_bytes")
+        fits = size.get("fits_attachment_budget")
+        small_fits = small_size.get("fits_attachment_budget")
+        issue_status = metadata.get("status")
+        selected_attempt = metadata.get("selected_attempt")
+        small_status = small_metadata.get("status")
+        small_selected_attempt = small_metadata.get("selected_attempt")
+        attach_status = "unknown"
+        attach_action = "Attachment decision unknown; use the served report link if upload fails."
+        if fits is True:
+            attach_status = "fits configured attachment budget"
+            if artifacts.get("video_issue"):
+                attach_action = f"Attach `{publish_dir / artifacts['video_issue']}` to the issue."
+        elif fits is False:
+            attach_status = "exceeds configured attachment budget; use served/local link"
+            attach_action = "Do not attach the MP4; use the served report link."
+            if small_fits is True and artifacts.get("video_small"):
+                attach_action = f"Attach small fallback `{publish_dir / artifacts['video_small']}` or use the served report link for the full proof."
+        verdict_manifest = Path(str(run.get("bundle_dir") or "")) / "manifest.json"
+        lines.extend(
+            [
+                f"### {run.get('target') or '?'}/{run.get('action') or '?'} - {run.get('label') or '?'}",
+                "",
+                f"- Completed: {run.get('completed_at') or '?'}",
+                f"- Interaction: {run.get('interaction_mode') or 'not recorded'}",
+                f"- Issue video: `{artifacts['video_issue']}`" if artifacts.get("video_issue") else "- Issue video: not generated",
+                f"- Small video: `{artifacts['video_small']}`" if artifacts.get("video_small") else "- Small video: not generated",
+                f"- Review video: `{artifacts.get('video_composed') or artifacts.get('video')}`" if artifacts.get("video_composed") or artifacts.get("video") else "- Review video: not recorded",
+                f"- Video size: {_format_bytes(size_bytes)} ({attach_status})",
+                f"- Small video size: {_format_bytes(small_size_bytes)}" + (" (fits 10 MB budget)" if small_fits is True else " (over 10 MB budget)" if small_fits is False else "") if artifacts.get("video_small") else "- Small video size: not recorded",
+                f"- Issue variant: `{issue_status}`" + (f" via `{selected_attempt}`" if selected_attempt else "") if issue_status else "- Issue variant: not recorded",
+                f"- Small variant: `{small_status}`" + (f" via `{small_selected_attempt}`" if small_selected_attempt else "") if small_status else "- Small variant: not recorded",
+                f"- Attachment action: {attach_action}",
+                f"- Approve command: `python3 tools/local-ci/local_ci.py desktop verdict {verdict_manifest} --approved --issue-url <issue-url>`",
+                f"- Needs-work command: `python3 tools/local-ci/local_ci.py desktop verdict {verdict_manifest} --needs-work --notes \"<what to change>\" --issue-url <issue-url>`",
+            ]
+        )
+        if artifacts.get("screenshot"):
+            lines.append(f"- Screenshot: `{artifacts['screenshot']}`")
+        if artifacts.get("diff_screenshot"):
+            lines.append(f"- Diff screenshot: `{artifacts['diff_screenshot']}`")
+        lines.append("")
+    lines.extend(
+        [
+            "## Closeout",
+            "",
+            "When the reviewer confirms the proof, close the review issue. Keep this branch/worktree open until the broader validation-video-proof feature is accepted.",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def stage_desktop_publish_report(
     config: dict,
     manifests: list[dict],
@@ -204,6 +313,8 @@ def stage_desktop_publish_report(
 
     index_json = publish_dir / "index.json"
     atomic_write_text_fn(index_json, json.dumps(index_payload, indent=2) + "\n")
+    review_markdown = publish_dir / "review.md"
+    atomic_write_text_fn(review_markdown, desktop_review_issue_body(index_payload, publish_dir=publish_dir))
 
     cards: list[str] = []
     for run in published_runs:
@@ -211,6 +322,8 @@ def stage_desktop_publish_report(
         screenshot = artifacts.get("screenshot")
         before = artifacts.get("before_screenshot")
         diff = artifacts.get("diff_screenshot")
+        video = artifacts.get("video_composed") or artifacts.get("video")
+        video_metadata = artifacts.get("video_issue_metadata") or artifacts.get("video_composed_metadata") or artifacts.get("video_metadata")
         meta_lines = [
             f"<div><strong>{html.escape(str(run.get('target') or '?'))}/{html.escape(str(run.get('action') or '?'))}</strong></div>",
             f"<div>{html.escape(str(run.get('label') or '?'))}</div>",
@@ -222,6 +335,16 @@ def stage_desktop_publish_report(
         if artifacts.get("image_change"):
             meta_lines.append(
                 f"<div>image_change: {html.escape(json.dumps(artifacts['image_change'], sort_keys=True))}</div>"
+            )
+        if video_metadata:
+            meta_lines.append(f"<div><a href=\"{html.escape(str(video_metadata))}\">video metadata</a></div>")
+        video_block = ""
+        if video:
+            video_block = (
+                "<figure class=\"video-proof\">"
+                "<figcaption>video proof</figcaption>"
+                f"<video controls preload=\"metadata\" src=\"{html.escape(str(video))}\"></video>"
+                "</figure>"
             )
         image_blocks: list[str] = []
         for title, rel_path in (("before", before), ("after", screenshot), ("diff", diff)):
@@ -236,6 +359,7 @@ def stage_desktop_publish_report(
         cards.append(
             "<section class=\"run-card\">"
             + "".join(meta_lines)
+            + video_block
             + "<div class=\"images\">"
             + "".join(image_blocks)
             + "</div></section>"
@@ -251,7 +375,9 @@ def stage_desktop_publish_report(
                 "<style>body{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;margin:24px;background:#111827;color:#e5e7eb}"
                 " .run-card{border:1px solid #374151;border-radius:12px;padding:16px;margin:0 0 16px;background:#1f2937}"
                 " .images{display:flex;gap:16px;flex-wrap:wrap;margin-top:12px}"
-                " figure{margin:0} figcaption{margin-bottom:8px;color:#9ca3af} img{max-width:320px;border-radius:8px;border:1px solid #374151;background:#000}</style>",
+                " figure{margin:12px 0 0} figcaption{margin-bottom:8px;color:#9ca3af}"
+                " img{max-width:320px;border-radius:8px;border:1px solid #374151;background:#000}"
+                " video{max-width:min(960px,100%);border-radius:8px;border:1px solid #374151;background:#000}</style>",
                 "</head><body>",
                 f"<h1>{html.escape(index_payload['label'])}</h1>",
                 f"<p>Generated at {html.escape(index_payload['generated_at'])} \u00b7 runs: {len(published_runs)}</p>",
@@ -270,6 +396,7 @@ def stage_desktop_publish_report(
         "output_dir": str(publish_dir),
         "index_html": str(index_html),
         "index_json": str(index_json),
+        "review_markdown": str(review_markdown),
         "run_count": len(published_runs),
         "runs": published_runs,
     }
@@ -299,6 +426,9 @@ def desktop_publish_reports(
         payload["output_dir"] = str(publish_dir)
         payload.setdefault("index_json", str(index_json))
         payload.setdefault("index_html", str(index_html))
+        review_markdown = publish_dir / "review.md"
+        if review_markdown.exists():
+            payload.setdefault("review_markdown", str(review_markdown))
         reports.append(payload)
     reports.sort(key=lambda item: item.get("generated_at") or "", reverse=True)
     if limit is not None:
@@ -439,6 +569,15 @@ def desktop_run_summary(config: dict, manifest: dict) -> dict:
             "before_screenshot": artifacts.get("before_screenshot"),
             "diff_screenshot": artifacts.get("diff_screenshot"),
             "ui_snapshot": artifacts.get("ui_snapshot"),
+            "video": artifacts.get("video"),
+            "video_composed": artifacts.get("video_composed"),
+            "video_issue": artifacts.get("video_issue"),
+            "video_small": artifacts.get("video_small"),
+            "video_metadata": artifacts.get("video_metadata"),
+            "video_composed_metadata": artifacts.get("video_composed_metadata"),
+            "video_issue_metadata": artifacts.get("video_issue_metadata"),
+            "video_small_metadata": artifacts.get("video_small_metadata"),
+            "video_poster": artifacts.get("video_poster"),
             "stdout": artifacts.get("stdout"),
             "stderr": artifacts.get("stderr"),
             "agent_manifest": artifacts.get("agent_manifest"),
