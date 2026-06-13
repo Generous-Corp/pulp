@@ -5524,7 +5524,7 @@ if(APPLE)
     add_executable(pulp-test-screenshot-compare test_screenshot_compare.cpp)
     target_link_libraries(pulp-test-screenshot-compare PRIVATE pulp::view Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-screenshot-compare
-        PROPERTIES LABELS "parser-import")
+        PROPERTIES LABELS "parser-import" TIMEOUT 120)
 endif()
 
 # Parameter attachment tests
