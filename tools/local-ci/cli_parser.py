@@ -6,6 +6,18 @@ import argparse
 from collections.abc import Iterable
 
 
+VIDEO_PROOF_TEMPLATE_CHOICES = [
+    "validation-proof",
+    "design-parity",
+    "component-zoom",
+    "plugin-host",
+    "inspector-workflow",
+    "standalone",
+    "mobile-simulator",
+    "mobile-emulator",
+]
+
+
 def build_local_ci_parser(
     *,
     priority_values: Iterable[str],
@@ -120,7 +132,7 @@ def build_local_ci_parser(
         )
         command_parser.add_argument(
             "--video-template",
-            choices=["validation-proof", "design-parity", "component-zoom", "plugin-host", "inspector-workflow", "standalone"],
+            choices=VIDEO_PROOF_TEMPLATE_CHOICES,
             help="Remotion proof template for direct --record-video composition.",
         )
         command_parser.add_argument("--source-image", help="Optional source/reference image for design-parity proof composition")
@@ -416,7 +428,7 @@ def build_local_ci_parser(
     p_desktop_compose_video.add_argument("--small-output", help="Output small MP4 path (default: <run>/video/proof.small.mp4)")
     p_desktop_compose_video.add_argument("--small-metadata", help="Output small metadata JSON path (default: <run>/video/small-metadata.json)")
     p_desktop_compose_video.add_argument("--small-video-budget-mb", type=float, default=10.0, help="Attachment budget in decimal MB for the small video (default: 10)")
-    p_desktop_compose_video.add_argument("--template", choices=["validation-proof", "design-parity", "component-zoom", "plugin-host", "inspector-workflow", "standalone"], help="Remotion proof template variant")
+    p_desktop_compose_video.add_argument("--template", choices=VIDEO_PROOF_TEMPLATE_CHOICES, help="Remotion proof template variant")
     p_desktop_compose_video.add_argument("--source-image", help="Optional source/reference image for design-parity proofs")
     p_desktop_compose_video.add_argument("--source-label", help="Label for --source-image (default: Source reference)")
     p_desktop_compose_video.add_argument("--title", help="Override the composed video title")

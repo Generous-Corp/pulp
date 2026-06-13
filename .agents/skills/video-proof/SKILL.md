@@ -442,6 +442,21 @@ directory using `xcrun simctl io screenshot` frames encoded with ffmpeg. With
 `mobile-simulator` action marker. Coordinate tap driving still needs a future
 automation backend because this Xcode's `simctl` does not expose a tap command.
 
+Render the simulator run through Remotion before publishing when you want the
+same annotated proof treatment as desktop clips:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop compose-video /path/to/manifest.json \
+  --template mobile-simulator \
+  --title "iOS Simulator open URL proof" \
+  --note "Simulator opens the validation URL during recording." \
+  --small-video
+```
+
+This writes `video/proof-composed.mp4`, `video/proof.issue.mp4`, optional
+`video/proof.small.mp4`, composition metadata, and a storyboard into the
+simulator run manifest.
+
 Publish the latest runs:
 
 ```bash

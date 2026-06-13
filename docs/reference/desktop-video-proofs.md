@@ -411,6 +411,20 @@ provided, the URL opens during capture and the manifest stores a
 tap driving still needs a future automation backend because this Xcode's
 `simctl` does not expose a tap command.
 
+Render the simulator run through Remotion for an annotated reviewer-facing clip:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop compose-video /path/to/manifest.json \
+  --template mobile-simulator \
+  --title "iOS Simulator open URL proof" \
+  --note "Simulator opens the validation URL during recording." \
+  --small-video
+```
+
+This adds `video/proof-composed.mp4`, `video/proof.issue.mp4`, optional
+`video/proof.small.mp4`, composition metadata, and a storyboard to the simulator
+manifest before publishing.
+
 Stage a local report after one or more desktop runs:
 
 ```bash

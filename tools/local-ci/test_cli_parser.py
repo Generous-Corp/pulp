@@ -107,7 +107,7 @@ class CliParserTests(unittest.TestCase):
             "--component-id",
             "bypass-toggle",
             "--video-template",
-            "validation-proof",
+            "mobile-simulator",
             "--video-title",
             "Bypass proof",
             "--video-note",
@@ -134,7 +134,7 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(args.click_view_id, "bypass-toggle")
         self.assertFalse(args.record_video)
         self.assertFalse(args.compose_video_proof)
-        self.assertEqual(args.video_template, "validation-proof")
+        self.assertEqual(args.video_template, "mobile-simulator")
         self.assertEqual(args.video_title, "Bypass proof")
         self.assertEqual(args.video_note, ["Click bypass", "Meter changed"])
         self.assertEqual(args.video_duration, 6.0)
@@ -413,6 +413,20 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(args.note, ["Reference matches implementation"])
         self.assertEqual(args.video_attachment_budget_mb, 40.0)
         self.assertTrue(args.json)
+
+    def test_desktop_compose_video_accepts_mobile_template(self):
+        parser = self.build_parser()
+
+        args = parser.parse_args([
+            "desktop",
+            "compose-video",
+            "/tmp/run/manifest.json",
+            "--template",
+            "mobile-simulator",
+        ])
+
+        self.assertEqual(args.desktop_command, "compose-video")
+        self.assertEqual(args.template, "mobile-simulator")
 
     def test_cleanup_defaults_use_injected_retention(self):
         parser = self.build_parser(keep_completed_jobs=7)

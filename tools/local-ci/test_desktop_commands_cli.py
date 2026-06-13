@@ -482,6 +482,79 @@ class DesktopCommandsCliTests(unittest.TestCase):
             self.assertTrue(updated["artifacts"]["video_small_metadata"].endswith("/video/small-metadata.json"))
             self.assertIn(manifest_path.resolve(), [path for path, _text in writes])
 
+    def test_compose_video_accepts_mobile_simulator_template(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            video_dir = run_dir / "video"
+            video_dir.mkdir()
+            raw_video = video_dir / "proof.mp4"
+            raw_video.write_bytes(b"raw")
+            manifest_path = run_dir / "manifest.json"
+            manifest_path.write_text(
+                json.dumps(
+                    {
+                        "target": "ios-simulator",
+                        "action": "video",
+                        "label": "ios-simulator-openurl",
+                        "interaction": {"mode": "open-url", "label": "open example.com"},
+                        "artifacts": {"video": str(raw_video)},
+                        "video_proof_composition": {
+                            "template": "mobile-simulator",
+                            "action_marker": {"kind": "open-url", "label": "open example.com"},
+                        },
+                    }
+                )
+                + "\n"
+            )
+
+            def compose(_manifest_path: Path, output_path: Path, **kwargs):
+                self.assertEqual(kwargs["template"], "mobile-simulator")
+                self.assertEqual(kwargs["title"], "Simulator proof")
+                self.assertEqual(kwargs["notes"], ["URL opened during capture"])
+                output_path.write_bytes(b"composed")
+                return {"output": str(output_path), "composer": "remotion"}
+
+            def issue(_source_path: Path, output_path: Path, metadata_path: Path, *, attachment_budget_bytes: int):
+                output_path.write_bytes(b"issue")
+                payload = {"status": "copied", "output": str(output_path), "budget": attachment_budget_bytes}
+                metadata_path.write_text(json.dumps(payload) + "\n")
+                return payload
+
+            result = self.mod.cmd_desktop_compose_video(
+                Namespace(
+                    manifest=str(manifest_path),
+                    output=None,
+                    metadata=None,
+                    issue_output=None,
+                    issue_metadata=None,
+                    small_video=True,
+                    small_output=None,
+                    small_metadata=None,
+                    small_video_budget_mb=10.0,
+                    template="mobile-simulator",
+                    source_image=None,
+                    source_label=None,
+                    title="Simulator proof",
+                    note=["URL opened during capture"],
+                    video_attachment_budget_mb=100.0,
+                    json=True,
+                ),
+                compose_desktop_video_proof_fn=compose,
+                create_issue_video_variant_fn=issue,
+                atomic_write_text_fn=lambda path, text: path.write_text(text),
+                print_fn=self.print_line,
+            )
+
+            self.assertEqual(result, 0)
+            updated = json.loads(manifest_path.read_text())
+            self.assertEqual(updated["video_proof_composition"]["template"], "mobile-simulator")
+            self.assertEqual(updated["video_proof_composition"]["action_marker"]["label"], "open example.com")
+            self.assertEqual(updated["video_proof_composition"]["title"], "Simulator proof")
+            self.assertEqual(updated["video_proof_composition"]["notes"], ["URL opened during capture"])
+            self.assertTrue(updated["artifacts"]["video_composed"].endswith("/video/proof-composed.mp4"))
+            self.assertTrue(updated["artifacts"]["video_issue"].endswith("/video/proof.issue.mp4"))
+            self.assertTrue(updated["artifacts"]["video_small"].endswith("/video/proof.small.mp4"))
+
     def test_compose_video_reports_missing_manifest(self):
         result = self.mod.cmd_desktop_compose_video(
             Namespace(
