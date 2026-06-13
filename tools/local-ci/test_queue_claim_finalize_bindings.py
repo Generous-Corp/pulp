@@ -20,12 +20,16 @@ class QueueClaimFinalizeBindingsTests(unittest.TestCase):
 
     def test_claim_finalize_exports_match_facade_helpers(self):
         expected = (
-            "claim_next_job",
-            "finalize_job",
+            *self.mod.QUEUE_CLAIM_EXPORTS,
+            *self.mod.QUEUE_FINALIZE_EXPORTS,
         )
 
         self.assertEqual(self.mod.QUEUE_CLAIM_FINALIZE_EXPORTS, expected)
         self.assertEqual(len(expected), len(set(expected)))
+
+    def test_claim_finalize_facade_reexports_focused_bindings(self):
+        self.assertEqual(self.mod.claim_next_job.__module__, "queue_claim_bindings")
+        self.assertEqual(self.mod.finalize_job.__module__, "queue_finalize_bindings")
 
     def test_install_claim_finalize_helpers_installs_requested_facades(self):
         bindings = self._bindings()

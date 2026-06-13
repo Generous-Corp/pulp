@@ -20,7 +20,8 @@ class QueueDrainBindingsTests(unittest.TestCase):
 
     def test_drain_exports_are_composed_from_focused_groups(self):
         expected = (
-            *self.mod.QUEUE_CLAIM_FINALIZE_EXPORTS,
+            *self.mod.QUEUE_CLAIM_EXPORTS,
+            *self.mod.QUEUE_FINALIZE_EXPORTS,
             *self.mod.QUEUE_WAIT_DRAIN_EXPORTS,
         )
 
@@ -33,18 +34,23 @@ class QueueDrainBindingsTests(unittest.TestCase):
         def claim_install(bindings, names):
             calls.append(("claim", names))
 
+        def finalize_install(bindings, names):
+            calls.append(("finalize", names))
+
         def wait_install(bindings, names):
             calls.append(("wait", names))
 
-        self.mod.install_queue_claim_finalize_helpers = claim_install
+        self.mod.install_queue_claim_helpers = claim_install
+        self.mod.install_queue_finalize_helpers = finalize_install
         self.mod.install_queue_wait_drain_helpers = wait_install
 
-        self.mod.install_queue_drain_helpers({}, ("claim_next_job", "wait_for_job"))
+        self.mod.install_queue_drain_helpers({}, ("claim_next_job", "finalize_job", "wait_for_job"))
 
         self.assertEqual(
             calls,
             [
                 ("claim", ("claim_next_job",)),
+                ("finalize", ("finalize_job",)),
                 ("wait", ("wait_for_job",)),
             ],
         )
