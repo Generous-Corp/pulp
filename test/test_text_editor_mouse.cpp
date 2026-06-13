@@ -370,6 +370,8 @@ TEST_CASE("TextEditor multiline drag autoscroll keeps y-aware hit testing",
 
 TEST_CASE("TextEditor default context menu routes standard edit commands",
           "[view][text_editor][context-menu]") {
+    require_system_clipboard_text("text-editor-context-menu");
+
     View::focused_input_ = nullptr;
     auto root = std::make_unique<View>();
     root->set_bounds({0, 0, 400, 300});
@@ -415,7 +417,7 @@ TEST_CASE("TextEditor default context menu routes standard edit commands",
     REQUIRE(cut_text.has_value());
     REQUIRE(*cut_text == "alpha");
 
-    pulp::platform::Clipboard::set_text("beta");
+    require_system_clipboard_text("beta");
     editor->on_context_menu({10.0f, 10.0f});
     REQUIRE(root->child_count() == 2);
     menu = dynamic_cast<ContextMenu*>(root->child_at(1));

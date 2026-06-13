@@ -135,7 +135,7 @@ TEST_CASE("TextEditor paste sanitizer is separate from typed input filter",
     editor.on_text_input(input);
     REQUIRE(editor.text() == "A-B");
 
-    pulp::platform::Clipboard::set_text("c-d");
+    require_system_clipboard_text("c-d");
     REQUIRE(editor.paste_from_clipboard());
     REQUIRE(editor.text() == "A-BCD");
 }
@@ -152,10 +152,13 @@ TEST_CASE("TextEditor line ending policy applies to input paste and IME",
     editor.on_text_input(input);
     REQUIRE(editor.text() == "abcd");
 
-    editor.select_all();
-    pulp::platform::Clipboard::set_text("x\r\ny");
-    REQUIRE(editor.paste_from_clipboard());
-    REQUIRE(editor.text() == "xy");
+    if (seed_system_clipboard_text("x\r\ny")) {
+        editor.select_all();
+        REQUIRE(editor.paste_from_clipboard());
+        REQUIRE(editor.text() == "xy");
+    } else {
+        SUCCEED("platform clipboard text backend unavailable");
+    }
 
     editor.select_all();
     editor.line_ending_policy = TextEditor::LineEndingPolicy::normalize;
@@ -183,7 +186,7 @@ TEST_CASE("TextEditor paste-and-match-style uses the paste path",
     TextEditor editor;
     editor.on_focus_changed(true);
     editor.set_text("a");
-    pulp::platform::Clipboard::set_text("b");
+    require_system_clipboard_text("b");
 
 #ifdef __APPLE__
     REQUIRE(editor.on_key_event(key_event(KeyCode::v, kModCmd | kModShift | kModAlt)));

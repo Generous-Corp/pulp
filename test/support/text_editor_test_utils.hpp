@@ -3,10 +3,13 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/canvas/text_utf8.hpp>
+#include <pulp/platform/clipboard.hpp>
 #include <pulp/view/text_editor.hpp>
 
 #include <algorithm>
 #include <cmath>
+#include <string>
+#include <string_view>
 
 namespace pulp::test {
 
@@ -32,6 +35,19 @@ inline uint16_t word_modifier() {
 #else
     return view::kModCtrl;
 #endif
+}
+
+inline bool seed_system_clipboard_text(std::string_view text) {
+    std::string value(text);
+    if (!platform::Clipboard::set_text(value)) return false;
+    auto roundtrip = platform::Clipboard::get_text();
+    return roundtrip.has_value() && *roundtrip == value;
+}
+
+inline void require_system_clipboard_text(std::string_view text) {
+    if (!seed_system_clipboard_text(text)) {
+        SKIP("platform clipboard text backend unavailable");
+    }
 }
 
 // A canvas whose shaped text_x_for_byte() deliberately diverges from the sum of
