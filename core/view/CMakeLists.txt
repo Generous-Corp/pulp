@@ -401,6 +401,7 @@ target_sources(pulp-view-core PRIVATE
     src/gap_widgets.cpp
     src/widget_gallery.cpp
     src/design_system.cpp
+    src/sampler_starter.cpp
     src/file_browser.cpp
     src/file_chooser.cpp
     src/code_editor.cpp

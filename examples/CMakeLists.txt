@@ -32,6 +32,7 @@ add_subdirectory(pulp-compressor)
 # Phase 6: UI Preview (validates rendering pipeline)
 add_subdirectory(ui-preview)
 add_subdirectory(widget-gallery)
+add_subdirectory(ink-signal-sampler)
 
 # Phase 6: PulpDrums (generative drum sequencer MIDI effect)
 add_subdirectory(PulpDrums)

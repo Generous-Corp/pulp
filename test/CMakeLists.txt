@@ -5948,6 +5948,9 @@ pulp_add_test_suite(pulp-test-widget-gallery LIBRARIES pulp::view)
 # Design system (Phase 8a) — pulp::design umbrella module + component catalog
 pulp_add_test_suite(pulp-test-design-system LIBRARIES pulp::view)
 
+# Sampler starter (Phase 8d) — real sampler UI built from the design catalog
+pulp_add_test_suite(pulp-test-sampler-starter LIBRARIES pulp::view)
+
 # OS appearance tracking
 pulp_add_test_suite(pulp-test-appearance SOURCES test_appearance_tracker.cpp LIBRARIES pulp::view)
 
