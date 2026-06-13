@@ -28,6 +28,58 @@ class LinuxTargetCommandBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.LINUX_TARGET_COMMAND_EXPORTS, expected)
         self.assertEqual(len(expected), len(set(expected)))
 
+    def test_install_linux_target_command_helpers_routes_each_group(self) -> None:
+        linux_target = types.SimpleNamespace(
+            remote_linux_bundle_relpath=lambda target_name, action_name, bundle_dir: f"{target_name}/{action_name}/{bundle_dir.name}",
+            build_linux_xvfb_remote_command=lambda *args, **kwargs: "xvfb-cmd",
+            build_linux_window_driver_remote_command=lambda *args, **kwargs: "window-cmd",
+        )
+        bindings = {
+            "_linux_target": linux_target,
+            "parse_coordinate_pair": object(),
+        }
+
+        self.mod.install_linux_target_command_helpers(
+            bindings,
+            (
+                "remote_linux_bundle_relpath",
+                "build_linux_xvfb_remote_command",
+                "build_linux_window_driver_remote_command",
+            ),
+        )
+
+        self.assertEqual(
+            bindings["remote_linux_bundle_relpath"]("ubuntu", "smoke", Path("/tmp/run")),
+            "ubuntu/smoke/run",
+        )
+        self.assertEqual(
+            bindings["build_linux_xvfb_remote_command"](
+                "/repo",
+                ".local/run",
+                "./app",
+                capture_ui_snapshot=False,
+                click_point=None,
+                click_view_id=None,
+                click_view_type=None,
+                click_view_text=None,
+                click_view_label=None,
+                capture_before=False,
+                settle_secs=0.0,
+            ),
+            "xvfb-cmd",
+        )
+        self.assertEqual(
+            bindings["build_linux_window_driver_remote_command"](
+                "/repo",
+                ".local/run",
+                "./app",
+                click_point=None,
+                capture_before=False,
+                settle_secs=0.0,
+            ),
+            "window-cmd",
+        )
+
     def test_path_and_command_builders_delegate_with_parse_coordinate_seam(self) -> None:
         captured = {}
 

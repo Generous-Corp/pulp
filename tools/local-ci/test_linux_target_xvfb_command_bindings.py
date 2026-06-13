@@ -59,6 +59,31 @@ class LinuxTargetXvfbCommandBindingsTests(unittest.TestCase):
         self.assertEqual(captured["xvfb"][1]["click_view_label"], "Gain slider")
         self.assertTrue(captured["xvfb"][1]["capture_ui_snapshot"])
 
+    def test_install_linux_target_xvfb_command_helpers_wires_named_exports(self) -> None:
+        linux_target = types.SimpleNamespace(
+            build_linux_xvfb_remote_command=lambda *args, **kwargs: "xvfb-cmd",
+        )
+        bindings = {"_linux_target": linux_target}
+
+        self.mod.install_linux_target_xvfb_command_helpers(bindings, ("build_linux_xvfb_remote_command",))
+
+        self.assertEqual(
+            bindings["build_linux_xvfb_remote_command"](
+                "/repo",
+                ".local/run",
+                "./app",
+                capture_ui_snapshot=False,
+                click_point=None,
+                click_view_id=None,
+                click_view_type=None,
+                click_view_text=None,
+                click_view_label=None,
+                capture_before=False,
+                settle_secs=0.0,
+            ),
+            "xvfb-cmd",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

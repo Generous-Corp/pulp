@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from binding_utils import install_local_helpers
 from binding_utils import binding as _binding
 
 
@@ -31,3 +32,10 @@ def build_linux_window_driver_remote_command(
         settle_secs=settle_secs,
         parse_coordinate_pair_fn=_binding(bindings, "parse_coordinate_pair"),
     )
+
+
+def install_linux_target_window_command_helpers(
+    bindings: dict,
+    names: tuple[str, ...] = LINUX_TARGET_WINDOW_COMMAND_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)

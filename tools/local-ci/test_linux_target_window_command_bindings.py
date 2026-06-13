@@ -57,6 +57,32 @@ class LinuxTargetWindowCommandBindingsTests(unittest.TestCase):
         self.assertEqual(captured["window"][1]["launch_backend"], {"mode": "display", "display": ":99"})
         self.assertIs(captured["window"][1]["parse_coordinate_pair_fn"], parse_coordinate_pair)
 
+    def test_install_linux_target_window_command_helpers_wires_named_exports(self) -> None:
+        linux_target = types.SimpleNamespace(
+            build_linux_window_driver_remote_command=lambda *args, **kwargs: "window-cmd",
+        )
+        bindings = {
+            "_linux_target": linux_target,
+            "parse_coordinate_pair": object(),
+        }
+
+        self.mod.install_linux_target_window_command_helpers(
+            bindings,
+            ("build_linux_window_driver_remote_command",),
+        )
+
+        self.assertEqual(
+            bindings["build_linux_window_driver_remote_command"](
+                "/repo",
+                ".local/run",
+                "./app",
+                click_point=None,
+                capture_before=False,
+                settle_secs=0.0,
+            ),
+            "window-cmd",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

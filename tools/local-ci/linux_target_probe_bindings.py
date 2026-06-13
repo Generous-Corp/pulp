@@ -2,7 +2,21 @@
 
 from __future__ import annotations
 
+from binding_utils import install_local_helpers
 from binding_utils import binding as _binding
+
+
+LINUX_TARGET_CONSTANT_EXPORTS = (
+    "linux_required_remote_tools",
+    "linux_optional_remote_tools",
+)
+
+LINUX_TARGET_PROBE_EXPORTS = (
+    "probe_linux_launch_backend",
+    "probe_linux_remote_tooling",
+    "linux_tooling_detail",
+    "linux_remote_tooling_ready",
+)
 
 
 def linux_required_remote_tools(bindings: dict) -> dict:
@@ -46,3 +60,17 @@ def linux_remote_tooling_ready(bindings: dict, probe: dict) -> bool:
         probe,
         required_tools=_binding(bindings, "LINUX_REQUIRED_REMOTE_TOOLS"),
     )
+
+
+def install_linux_target_constant_helpers(
+    bindings: dict,
+    names: tuple[str, ...] = LINUX_TARGET_CONSTANT_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)
+
+
+def install_linux_target_probe_helpers(
+    bindings: dict,
+    names: tuple[str, ...] = LINUX_TARGET_PROBE_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)

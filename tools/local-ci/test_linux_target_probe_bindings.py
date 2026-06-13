@@ -18,6 +18,23 @@ class LinuxTargetProbeBindingsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
 
+    def test_exports_are_named_constant_and_probe_helpers(self) -> None:
+        constant_expected = (
+            "linux_required_remote_tools",
+            "linux_optional_remote_tools",
+        )
+        probe_expected = (
+            "probe_linux_launch_backend",
+            "probe_linux_remote_tooling",
+            "linux_tooling_detail",
+            "linux_remote_tooling_ready",
+        )
+
+        self.assertEqual(self.mod.LINUX_TARGET_CONSTANT_EXPORTS, constant_expected)
+        self.assertEqual(self.mod.LINUX_TARGET_PROBE_EXPORTS, probe_expected)
+        self.assertEqual(len(constant_expected), len(set(constant_expected)))
+        self.assertEqual(len(probe_expected), len(set(probe_expected)))
+
     def test_probe_and_tooling_bind_facade_dependencies(self) -> None:
         captured = {}
 
@@ -53,6 +70,30 @@ class LinuxTargetProbeBindingsTests(unittest.TestCase):
         self.assertEqual(captured["detail"][1], {"missing_hint": "install git"})
         self.assertTrue(self.mod.linux_remote_tooling_ready(bindings, probe))
         self.assertIs(captured["ready"][1]["required_tools"], bindings["LINUX_REQUIRED_REMOTE_TOOLS"])
+
+    def test_install_linux_target_constant_helpers_wires_named_exports(self) -> None:
+        linux_target = types.SimpleNamespace(
+            LINUX_REQUIRED_REMOTE_TOOLS={"git": {"required": True}},
+            LINUX_OPTIONAL_REMOTE_TOOLS={"xvfb": {"required": False}},
+        )
+        bindings = {"_linux_target": linux_target}
+
+        self.mod.install_linux_target_constant_helpers(bindings, ("linux_required_remote_tools",))
+
+        self.assertIs(bindings["linux_required_remote_tools"](), linux_target.LINUX_REQUIRED_REMOTE_TOOLS)
+
+    def test_install_linux_target_probe_helpers_wires_named_exports(self) -> None:
+        linux_target = types.SimpleNamespace(
+            linux_tooling_detail=lambda probe, tool_name, *, missing_hint=None: missing_hint,
+        )
+        bindings = {"_linux_target": linux_target}
+
+        self.mod.install_linux_target_probe_helpers(bindings, ("linux_tooling_detail",))
+
+        self.assertEqual(
+            bindings["linux_tooling_detail"]({"git_found": False}, "git", missing_hint="install git"),
+            "install git",
+        )
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from binding_utils import install_local_helpers
 from binding_utils import binding as _binding
 
 
@@ -40,3 +41,10 @@ def build_linux_xvfb_remote_command(
         capture_before=capture_before,
         settle_secs=settle_secs,
     )
+
+
+def install_linux_target_xvfb_command_helpers(
+    bindings: dict,
+    names: tuple[str, ...] = LINUX_TARGET_XVFB_COMMAND_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)

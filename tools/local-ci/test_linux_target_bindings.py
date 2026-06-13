@@ -20,6 +20,22 @@ class LinuxTargetBindingsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
 
+    def test_linux_target_exports_are_composed_from_focused_groups(self) -> None:
+        expected = (
+            *self.mod.LINUX_TARGET_PROBE_EXPORTS,
+            *self.mod.LINUX_TARGET_COMMAND_EXPORTS,
+        )
+
+        self.assertEqual(self.mod.LINUX_TARGET_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+        self.assertEqual(
+            self.mod.LINUX_TARGET_CONSTANT_EXPORTS,
+            (
+                "linux_required_remote_tools",
+                "linux_optional_remote_tools",
+            ),
+        )
+
     def _bindings(self, linux_target):
         return {
             "_linux_target": linux_target,
@@ -143,6 +159,33 @@ class LinuxTargetBindingsTests(unittest.TestCase):
             ("probe_linux_launch_backend", "remote_linux_bundle_relpath"),
         )
 
+        self.assertEqual(
+            bindings["probe_linux_launch_backend"]("ubuntu"),
+            {"host": "ubuntu", "ssh": bindings["ssh_command_result"]},
+        )
+        self.assertEqual(
+            bindings["remote_linux_bundle_relpath"]("ubuntu", "smoke", Path("/tmp/run")),
+            "ubuntu/smoke/run",
+        )
+
+    def test_install_linux_target_helpers_routes_each_group(self) -> None:
+        linux_target = types.SimpleNamespace(
+            LINUX_REQUIRED_REMOTE_TOOLS={"git": {"required": True}},
+            probe_linux_launch_backend=lambda host, *, ssh_command_result_fn: {"host": host, "ssh": ssh_command_result_fn},
+            remote_linux_bundle_relpath=lambda target_name, action_name, bundle_dir: f"{target_name}/{action_name}/{bundle_dir.name}",
+        )
+        bindings = self._bindings(linux_target)
+
+        self.mod.install_linux_target_helpers(
+            bindings,
+            (
+                "linux_required_remote_tools",
+                "probe_linux_launch_backend",
+                "remote_linux_bundle_relpath",
+            ),
+        )
+
+        self.assertIs(bindings["linux_required_remote_tools"](), linux_target.LINUX_REQUIRED_REMOTE_TOOLS)
         self.assertEqual(
             bindings["probe_linux_launch_backend"]("ubuntu"),
             {"host": "ubuntu", "ssh": bindings["ssh_command_result"]},

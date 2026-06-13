@@ -40,6 +40,19 @@ class LinuxTargetBundleBindingsTests(unittest.TestCase):
         )
         self.assertEqual(captured["relpath"], ("ubuntu", "smoke", bundle_dir))
 
+    def test_install_linux_target_bundle_helpers_wires_named_exports(self) -> None:
+        linux_target = types.SimpleNamespace(
+            remote_linux_bundle_relpath=lambda target_name, action_name, bundle_dir: f"{target_name}/{action_name}/{bundle_dir.name}",
+        )
+        bindings = {"_linux_target": linux_target}
+
+        self.mod.install_linux_target_bundle_helpers(bindings, ("remote_linux_bundle_relpath",))
+
+        self.assertEqual(
+            bindings["remote_linux_bundle_relpath"]("ubuntu", "smoke", Path("/tmp/run")),
+            "ubuntu/smoke/run",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
