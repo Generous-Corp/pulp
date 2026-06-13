@@ -68,6 +68,17 @@ class DesktopExactSourceLocalBindingsTests(unittest.TestCase):
         self.assertTrue(bindings["local_worktree_matches"](Path("/tmp/wt"), "abc123"))
         self.assertNotIn("reset_local_worktree", bindings)
 
+    def test_local_installer_keeps_unknown_local_fallback(self):
+        bindings = {}
+        self.mod.future_desktop_exact_source_local_helper = lambda _bindings: "future"
+
+        self.mod.install_desktop_exact_source_local_helpers(
+            bindings,
+            ("future_desktop_exact_source_local_helper",),
+        )
+
+        self.assertEqual(bindings["future_desktop_exact_source_local_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()
