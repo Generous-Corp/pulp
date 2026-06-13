@@ -12,6 +12,7 @@
 
 #include <pulp/signal/offline_stretch.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <vector>
 
@@ -257,4 +258,68 @@ TEST_CASE("tempo-only: stereo channel coherence (identical L/R stay identical)",
     // Coherent multichannel processing: identical inputs -> identical outputs.
     double e = 0; for (long i = 0; i < m; ++i) { double d = ol[i] - orr[i]; e += d * d; }
     CHECK(std::sqrt(e / m) < 1e-7);
+}
+
+TEST_CASE("Phase 1 safety + determinism (tempo path)", "[offline-stretch]") {
+    const double sr = 48000.0;
+
+    SECTION("silence in -> silence out") {
+        OfflineStretch s; s.prepare(sr, 1);
+        const long n = 20000;
+        std::vector<float> in(static_cast<size_t>(n), 0.0f);
+        const float* ip[1] = {in.data()};
+        OfflineStretchOptions o; o.time_ratio = 1.4;
+        const long m = offline_stretch_output_frames(n, 1.4);
+        std::vector<float> out(static_cast<size_t>(m), 1.0f);
+        float* op[1] = {out.data()};
+        std::string e; REQUIRE(s.process(ip, n, op, m, o, &e));
+        float peak = 0.0f; for (float v : out) peak = std::max(peak, std::fabs(v));
+        CHECK(peak < 1e-6f);
+    }
+
+    SECTION("full-scale input -> finite output (no NaN/Inf)") {
+        OfflineStretch s; s.prepare(sr, 1);
+        const long n = 16000;
+        std::vector<float> in(static_cast<size_t>(n));
+        for (long i = 0; i < n; ++i) in[static_cast<size_t>(i)] = (i % 2) ? 1.0f : -1.0f;
+        const float* ip[1] = {in.data()};
+        OfflineStretchOptions o; o.time_ratio = 1.7;
+        const long m = offline_stretch_output_frames(n, 1.7);
+        std::vector<float> out(static_cast<size_t>(m));
+        float* op[1] = {out.data()};
+        std::string e; REQUIRE(s.process(ip, n, op, m, o, &e));
+        for (float v : out) REQUIRE(std::isfinite(v));
+    }
+
+    SECTION("deterministic: two independent runs are byte-identical") {
+        const long n = 12000;
+        std::vector<float> in(static_cast<size_t>(n));
+        for (long i = 0; i < n; ++i) in[static_cast<size_t>(i)] = 0.4f * std::sin(0.05 * i);
+        const float* ip[1] = {in.data()};
+        OfflineStretchOptions o; o.time_ratio = 1.25;
+        const long m = offline_stretch_output_frames(n, 1.25);
+        std::vector<float> a(static_cast<size_t>(m)), b(static_cast<size_t>(m));
+        float* pa[1] = {a.data()}; float* pb[1] = {b.data()};
+        std::string e;
+        OfflineStretch s1; s1.prepare(sr, 1); REQUIRE(s1.process(ip, n, pa, m, o, &e));
+        OfflineStretch s2; s2.prepare(sr, 1); REQUIRE(s2.process(ip, n, pb, m, o, &e));
+        CHECK(a == b);
+    }
+
+    SECTION("supported sample rates render at exact length") {
+        for (double rate : {44100.0, 48000.0, 96000.0, 192000.0}) {
+            OfflineStretch s; s.prepare(rate, 1);
+            const long n = 8000;
+            std::vector<float> in(static_cast<size_t>(n));
+            for (long i = 0; i < n; ++i) in[static_cast<size_t>(i)] = 0.3f * std::sin(0.03 * i);
+            const float* ip[1] = {in.data()};
+            OfflineStretchOptions o; o.time_ratio = 1.5;
+            const long m = offline_stretch_output_frames(n, 1.5);
+            std::vector<float> out(static_cast<size_t>(m));
+            float* op[1] = {out.data()};
+            std::string e;
+            REQUIRE(s.process(ip, n, op, m, o, &e));
+            for (float v : out) REQUIRE(std::isfinite(v));
+        }
+    }
 }
