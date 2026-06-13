@@ -67,6 +67,14 @@ class MacosWindowProcessBindingsTests(unittest.TestCase):
         self.assertIsNone(bindings["terminate_process"](object()))
         self.assertIsNone(bindings["quit_macos_bundle_id"]("com.example.demo"))
 
+    def test_process_installer_keeps_unknown_local_fallback(self) -> None:
+        bindings = {}
+        self.mod.future_macos_window_process_helper = lambda _bindings: "future"
+
+        self.mod.install_macos_window_process_helpers(bindings, ("future_macos_window_process_helper",))
+
+        self.assertEqual(bindings["future_macos_window_process_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()

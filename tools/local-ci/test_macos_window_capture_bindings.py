@@ -63,6 +63,14 @@ class MacosWindowCaptureBindingsTests(unittest.TestCase):
         bindings["capture_macos_window"](7, Path("/tmp/window.png"))
         self.assertEqual(captured["capture"][0], (7, Path("/tmp/window.png")))
 
+    def test_capture_installer_keeps_unknown_local_fallback(self) -> None:
+        bindings = {}
+        self.mod.future_macos_window_capture_helper = lambda _bindings: "future"
+
+        self.mod.install_macos_window_capture_helpers(bindings, ("future_macos_window_capture_helper",))
+
+        self.assertEqual(bindings["future_macos_window_capture_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()

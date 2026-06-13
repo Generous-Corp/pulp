@@ -82,6 +82,14 @@ class MacosWindowWaitBindingsTests(unittest.TestCase):
         self.assertNotIn("wait_for_macos_bundle_window", bindings)
         self.assertEqual(captured["wait"][0], (123, 2.0))
 
+    def test_wait_installer_keeps_unknown_local_fallback(self) -> None:
+        bindings = {}
+        self.mod.future_macos_window_wait_helper = lambda _bindings: "future"
+
+        self.mod.install_macos_window_wait_helpers(bindings, ("future_macos_window_wait_helper",))
+
+        self.assertEqual(bindings["future_macos_window_wait_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()

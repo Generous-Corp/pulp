@@ -25,4 +25,10 @@ def install_macos_window_capture_helpers(
     bindings: dict,
     names: tuple[str, ...] = MACOS_WINDOW_CAPTURE_EXPORTS,
 ) -> None:
-    install_local_helpers(bindings, globals(), names)
+    known_names = set(MACOS_WINDOW_CAPTURE_EXPORTS)
+    capture_names = tuple(name for name in names if name in known_names)
+    unknown_names = tuple(name for name in names if name not in known_names)
+
+    install_local_helpers(bindings, globals(), capture_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)

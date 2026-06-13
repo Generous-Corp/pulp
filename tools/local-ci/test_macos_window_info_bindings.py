@@ -81,6 +81,14 @@ class MacosWindowInfoBindingsTests(unittest.TestCase):
         self.assertNotIn("macos_window_info_for_pid", bindings)
         self.assertEqual(captured["trusted"][0], ())
 
+    def test_info_installer_keeps_unknown_local_fallback(self) -> None:
+        bindings = {}
+        self.mod.future_macos_window_info_helper = lambda _bindings: "future"
+
+        self.mod.install_macos_window_info_helpers(bindings, ("future_macos_window_info_helper",))
+
+        self.assertEqual(bindings["future_macos_window_info_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()
