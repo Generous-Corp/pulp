@@ -19,6 +19,20 @@ class ExecutionBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
 
+    def test_execution_exports_include_runner_install_exports(self):
+        self.assertIn("run_local_validation", self.mod.EXECUTION_EXPORTS)
+        self.assertIn("run_posix_ssh_validation", self.mod.EXECUTION_EXPORTS)
+        self.assertIn("run_windows_ssh_validation", self.mod.EXECUTION_EXPORTS)
+        self.assertIn("windows_validation_script", self.mod.EXECUTION_EXPORTS)
+        self.assertEqual(
+            self.mod.EXECUTION_EXPORTS[
+                self.mod.EXECUTION_EXPORTS.index(self.mod.EXECUTION_RUNNER_INSTALL_EXPORTS[0]) :
+                self.mod.EXECUTION_EXPORTS.index(self.mod.EXECUTION_RUNNER_INSTALL_EXPORTS[0])
+                + len(self.mod.EXECUTION_RUNNER_INSTALL_EXPORTS)
+            ],
+            self.mod.EXECUTION_RUNNER_INSTALL_EXPORTS,
+        )
+
     def _bindings(self, runner_name: str, runner):
         execution = types.SimpleNamespace(**{runner_name: runner})
         bindings = {"_execution": execution, "ROOT": Path("/repo"), "print": object()}
@@ -428,6 +442,20 @@ class ExecutionBindingsTests(unittest.TestCase):
 
         self.assertEqual(bindings["remote_commit_error"]("mac", "host", {"id": "job"}), "mac:host:job")
         self.assertEqual(bindings["parse_progress_marker"]("::pulp::target=mac"), {"line": "::pulp::target=mac"})
+
+    def test_install_execution_helpers_routes_runner_exports(self):
+        captured = {}
+
+        def local_runner(*args, **kwargs):
+            captured["local"] = (args, kwargs)
+            return {"target": "mac"}
+
+        bindings = self._bindings("run_local_validation", local_runner)
+
+        self.mod.install_execution_helpers(bindings, ("run_local_validation",))
+
+        self.assertEqual(bindings["run_local_validation"]({"id": "job"}), {"target": "mac"})
+        self.assertIs(captured["local"][1]["root"], bindings["ROOT"])
 
 
 if __name__ == "__main__":

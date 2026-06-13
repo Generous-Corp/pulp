@@ -22,6 +22,16 @@ class ExecutionRunnerBindingsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
 
+    def test_runner_exports_are_composed_from_focused_groups(self) -> None:
+        expected = (
+            *self.mod.EXECUTION_RUNNER_LOCAL_EXPORTS,
+            *self.mod.EXECUTION_RUNNER_SSH_EXPORTS,
+            *self.mod.EXECUTION_RUNNER_WINDOWS_EXPORTS,
+        )
+
+        self.assertEqual(self.mod.EXECUTION_RUNNER_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def _bindings(self, runner_name: str, runner):
         execution = types.SimpleNamespace(**{runner_name: runner})
         bindings = {"_execution": execution, "ROOT": Path("/repo"), "print": object()}
@@ -170,6 +180,73 @@ class ExecutionRunnerBindingsTests(unittest.TestCase):
 
         self.assertEqual(script, ("script", "full"))
         self.assertIs(captured["script"][1]["ps_literal_fn"], bindings["ps_literal"])
+
+    def test_install_execution_runner_helpers_routes_each_group(self) -> None:
+        captured = {}
+
+        def local_runner(*args, **kwargs):
+            captured["local"] = (args, kwargs)
+            return {"target": "mac"}
+
+        def ssh_runner(*args, **kwargs):
+            captured["ssh"] = (args, kwargs)
+            return {"target": "ubuntu"}
+
+        def windows_runner(*args, **kwargs):
+            captured["windows"] = (args, kwargs)
+            return {"target": "windows"}
+
+        def script_runner(*args, **kwargs):
+            captured["script"] = (args, kwargs)
+            return "script", "full"
+
+        bindings = self._bindings("run_local_validation", local_runner)
+        bindings["_execution"].run_posix_ssh_validation = ssh_runner
+        bindings["_execution"].run_windows_ssh_validation = windows_runner
+        bindings["_execution"].windows_validation_script = script_runner
+
+        self.mod.install_execution_runner_helpers(
+            bindings,
+            (
+                "run_local_validation",
+                "run_posix_ssh_validation",
+                "run_windows_ssh_validation",
+                "windows_validation_script",
+            ),
+        )
+
+        self.assertEqual(bindings["run_local_validation"]({"id": "job"}), {"target": "mac"})
+        self.assertEqual(bindings["run_posix_ssh_validation"]("ubuntu", "host", "/repo", {"id": "job"}), {"target": "ubuntu"})
+        self.assertEqual(bindings["run_windows_ssh_validation"]("windows", "host", r"C:\Repo", {"id": "job"}), {"target": "windows"})
+        self.assertEqual(
+            bindings["windows_validation_script"](
+                "windows",
+                "host",
+                r"C:\Repo",
+                {"id": "job"},
+                bundle_name="bundle",
+                bundle_ref="ref",
+                exclude_tests="",
+                cmake_generator="Ninja",
+                resolved_platform="ARM64",
+                resolved_generator_instance="",
+            ),
+            ("script", "full"),
+        )
+        self.assertIn("local", captured)
+        self.assertIn("ssh", captured)
+        self.assertIn("windows", captured)
+        self.assertIs(captured["script"][1]["ps_literal_fn"], bindings["ps_literal"])
+
+    def test_install_execution_runner_helpers_keeps_unknown_imported_name_support(self) -> None:
+        bindings = self._bindings("run_local_validation", lambda *_args, **_kwargs: {"target": "mac"})
+
+        self.mod.install_execution_runner_helpers(bindings, ("install_execution_runner_local_helpers",))
+
+        self.assertEqual(
+            bindings["install_execution_runner_local_helpers"].__name__,
+            "install_execution_runner_local_helpers",
+        )
 
 
 if __name__ == "__main__":

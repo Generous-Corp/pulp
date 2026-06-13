@@ -21,6 +21,12 @@ class ExecutionRunnerSshBindingsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
 
+    def test_ssh_runner_exports_match_wrappers(self) -> None:
+        expected = ("run_posix_ssh_validation",)
+
+        self.assertEqual(self.mod.EXECUTION_RUNNER_SSH_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def _bindings(self, runner):
         execution = types.SimpleNamespace(run_posix_ssh_validation=runner)
         bindings = {"_execution": execution, "print": object()}
@@ -67,6 +73,24 @@ class ExecutionRunnerSshBindingsTests(unittest.TestCase):
         self.assertIs(captured["kwargs"]["posix_ssh_validation_command_fn"], bindings["posix_ssh_validation_command"])
         self.assertIs(captured["kwargs"]["run_logged_command_fn"], bindings["run_logged_command"])
         self.assertIs(captured["kwargs"]["validation_error_result_fn"], bindings["validation_error_result"])
+
+    def test_install_execution_runner_ssh_helpers_wires_named_exports(self) -> None:
+        captured = {}
+
+        def runner(*args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            return {"target": "ubuntu"}
+
+        bindings = self._bindings(runner)
+        self.mod.install_execution_runner_ssh_helpers(bindings)
+
+        self.assertEqual(
+            bindings["run_posix_ssh_validation"]("ubuntu", "host", "/repo", {"id": "job"}),
+            {"target": "ubuntu"},
+        )
+        self.assertEqual(captured["args"], ("ubuntu", "host", "/repo", {"id": "job"}, "", None, None))
+        self.assertIs(captured["kwargs"]["print_fn"], bindings["print"])
 
 
 if __name__ == "__main__":

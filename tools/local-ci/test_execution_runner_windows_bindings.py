@@ -21,6 +21,15 @@ class ExecutionRunnerWindowsBindingsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
 
+    def test_windows_runner_exports_match_wrappers(self) -> None:
+        expected = (
+            "run_windows_ssh_validation",
+            "windows_validation_script",
+        )
+
+        self.assertEqual(self.mod.EXECUTION_RUNNER_WINDOWS_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def _bindings(self, runner, script_runner):
         execution = types.SimpleNamespace(
             run_windows_ssh_validation=runner,
@@ -113,6 +122,42 @@ class ExecutionRunnerWindowsBindingsTests(unittest.TestCase):
         )
 
         self.assertEqual(script, ("script", "full"))
+        self.assertIs(captured["script"][1]["ps_literal_fn"], bindings["ps_literal"])
+
+    def test_install_execution_runner_windows_helpers_wires_named_exports(self) -> None:
+        captured = {}
+
+        def runner(*args, **kwargs):
+            captured["runner"] = (args, kwargs)
+            return {"target": "windows"}
+
+        def script_runner(*args, **kwargs):
+            captured["script"] = (args, kwargs)
+            return "script", "full"
+
+        bindings = self._bindings(runner, script_runner)
+        self.mod.install_execution_runner_windows_helpers(bindings)
+
+        self.assertEqual(
+            bindings["run_windows_ssh_validation"]("windows", "host", r"C:\Repo", {"id": "job"}),
+            {"target": "windows"},
+        )
+        self.assertEqual(
+            bindings["windows_validation_script"](
+                "windows",
+                "host",
+                r"C:\Repo",
+                {"id": "job"},
+                bundle_name="bundle",
+                bundle_ref="ref",
+                exclude_tests="",
+                cmake_generator="Ninja",
+                resolved_platform="ARM64",
+                resolved_generator_instance="",
+            ),
+            ("script", "full"),
+        )
+        self.assertEqual(captured["runner"][0][0:4], ("windows", "host", r"C:\Repo", {"id": "job"}))
         self.assertIs(captured["script"][1]["ps_literal_fn"], bindings["ps_literal"])
 
 

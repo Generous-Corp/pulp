@@ -41,19 +41,25 @@ from execution_result_bindings import (
     validation_result_from_run,
 )
 from execution_runner_bindings import (
+    EXECUTION_RUNNER_EXPORTS,
+    install_execution_runner_helpers,
     run_local_validation,
     run_posix_ssh_validation,
     run_windows_ssh_validation,
 )
 
 
+EXECUTION_RUNNER_INSTALL_EXPORTS = (
+    "run_local_validation",
+    "run_posix_ssh_validation",
+    "run_windows_ssh_validation",
+)
+
 EXECUTION_EXPORTS = (
     *EXECUTION_COMMAND_EXPORTS,
     *EXECUTION_RESULT_EXPORTS,
     *EXECUTION_LOGGING_EXPORTS,
-    "run_local_validation",
-    "run_posix_ssh_validation",
-    "run_windows_ssh_validation",
+    *EXECUTION_RUNNER_INSTALL_EXPORTS,
     "config_for_job_execution",
     "submission_target_state",
     "resolve_ssh_target_execution",
@@ -65,4 +71,8 @@ EXECUTION_EXPORTS = (
 
 
 def install_execution_helpers(bindings: dict[str, Any], names: tuple[str, ...] = EXECUTION_EXPORTS) -> None:
-    install_local_helpers(bindings, globals(), names)
+    runner_names = tuple(name for name in names if name in EXECUTION_RUNNER_INSTALL_EXPORTS)
+    non_runner_names = tuple(name for name in names if name not in EXECUTION_RUNNER_INSTALL_EXPORTS)
+
+    install_execution_runner_helpers(bindings, runner_names)
+    install_local_helpers(bindings, globals(), non_runner_names)
