@@ -426,6 +426,44 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
             "open-url action is marked in the proof; coordinate taps need a future automation backend",
         ],
     },
+    {
+        "id": "linux-xvfb-desktop",
+        "title": "Linux/Xvfb desktop proof",
+        "platform": "ubuntu",
+        "status": "planned",
+        "template": "standalone",
+        "proves": "A Linux desktop target can record a bounded proof video from the Xvfb display.",
+        "command": (
+            "python3 tools/local-ci/local_ci.py desktop video ubuntu "
+            "--command './build/examples/ui-preview/pulp-ui-preview' "
+            "--label linux-xvfb-video-proof --compose-video-proof"
+        ),
+        "doctor": "python3 tools/local-ci/local_ci.py desktop video-doctor ubuntu",
+        "watch_for": [
+            "video-doctor currently fails backend.recorder until the Linux ffmpeg x11grab backend lands",
+            "future proof should identify display, window bounds, and x11grab capture settings",
+            "use still screenshots on linux-xvfb until video recording is implemented",
+        ],
+    },
+    {
+        "id": "windows-session-agent-desktop",
+        "title": "Windows session-agent desktop proof",
+        "platform": "windows",
+        "status": "planned",
+        "template": "standalone",
+        "proves": "A Windows desktop target can record a bounded proof video from the interactive session.",
+        "command": (
+            "python3 tools/local-ci/local_ci.py desktop video windows "
+            "--command 'build\\\\examples\\\\ui-preview\\\\pulp-ui-preview.exe' "
+            "--label windows-session-video-proof --compose-video-proof"
+        ),
+        "doctor": "python3 tools/local-ci/local_ci.py desktop video-doctor windows",
+        "watch_for": [
+            "video-doctor currently fails backend.recorder until the Windows ffmpeg ddagrab/gdigrab backend lands",
+            "future proof should identify session, display, and capture backend",
+            "use still screenshots through the session agent until video recording is implemented",
+        ],
+    },
 )
 
 

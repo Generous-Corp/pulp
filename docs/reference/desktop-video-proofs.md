@@ -80,11 +80,12 @@ python3 tools/local-ci/local_ci.py desktop video-doctor mac \
   --plugin-format clap
 ```
 
-`video-doctor` should show `PASS screencapture`, `PASS video_capture`,
-`PASS target.video_capture`, and `PASS remotion_smoke` before `--record-video`
-can produce a composed clip. `PASS avfoundation_screen` is preferred because it
-uses the primary ffmpeg/AVFoundation path; if it fails while `screencapture`
-passes, the recorder can still use the screencapture fallback. If
+`video-doctor` should show `PASS backend.recorder`, `PASS screencapture`,
+`PASS video_capture`, `PASS target.video_capture`, and `PASS remotion_smoke`
+before `--record-video` can produce a composed clip. `PASS avfoundation_screen`
+is preferred because it uses the primary ffmpeg/AVFoundation path; if it fails
+while `screencapture` passes, the recorder can still use the screencapture
+fallback. If
 `screencapture` reports
 `could not create image from display`, grant Screen Recording permission to the
 terminal/agent app that runs local CI, then restart that app.
@@ -385,11 +386,14 @@ The matrix lists the full-service proof scenarios, current readiness, Remotion
 template, doctor command, concrete Release prepare command, recording/compose
 command, publish command, review-issue command, background serve/status/stop
 commands, and what a reviewer should look for. Use `--target mac`, `--target
-ios-simulator`, `--scenario component-zoom`, or `--json` when an agent needs a
-narrower machine-readable plan. The iOS Simulator row uses the working
-`simulator video` recorder. The Android row uses the working `android video`
-command for adb-connected emulators/devices with `screenrecord` and timed
-open-url/deep-link actions.
+ubuntu`, `--target windows`, `--target ios-simulator`, `--scenario
+component-zoom`, or `--json` when an agent needs a narrower machine-readable
+plan. The iOS Simulator row uses the working `simulator video` recorder. The
+Android row uses the working `android video` command for adb-connected
+emulators/devices with `screenrecord` and timed open-url/deep-link actions. The
+Linux/Xvfb and Windows/session-agent rows are marked `planned`; their
+`desktop video-doctor` checks fail `backend.recorder` until the ffmpeg
+`x11grab` and `ddagrab`/`gdigrab` backends land.
 
 ## iOS Simulator Video Proofs
 

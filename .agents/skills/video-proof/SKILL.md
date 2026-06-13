@@ -417,13 +417,17 @@ python3 tools/local-ci/local_ci.py desktop video-matrix --markdown
 
 Use it to choose the smallest useful proof scenario. `--target mac` narrows to
 the current macOS lane, `--target ios-simulator` narrows to simulator capture,
-`--target android-emulator` narrows to Android capture, `--scenario
-component-zoom` prints one row, and `--json` is suitable for
+`--target android-emulator` narrows to Android capture, `--target ubuntu` and
+`--target windows` show the planned Linux/Xvfb and Windows/session-agent rows,
+`--scenario component-zoom` prints one row, and `--json` is suitable for
 automation. The matrix carries readiness status, Remotion template, doctor
 command, concrete Release prepare command, recording/compose command,
 publish/review-issue commands, background serve/status/stop commands, and
 reviewer watch-points for standalone, REAPER/plugin-host, inspector,
-component-zoom, design-parity, iOS Simulator, and Android Emulator proofs.
+component-zoom, design-parity, iOS Simulator, Android Emulator, Linux, and
+Windows proofs. Linux/Windows `desktop video-doctor` must fail
+`backend.recorder` until their ffmpeg `x11grab` and `ddagrab`/`gdigrab`
+backends land.
 
 ## iOS Simulator capture
 

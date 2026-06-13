@@ -439,7 +439,7 @@ def build_local_ci_parser(
     p_desktop_video_matrix = desktop_sub.add_parser("video-matrix", help="Show the curated validation video proof demo matrix")
     p_desktop_video_matrix.add_argument(
         "--target",
-        choices=["mac", "ios-simulator", "android-emulator"],
+        choices=["mac", "ubuntu", "windows", "ios-simulator", "android-emulator"],
         help="Filter matrix to one platform target.",
     )
     p_desktop_video_matrix.add_argument(
@@ -452,6 +452,8 @@ def build_local_ci_parser(
             "design-parity",
             "ios-simulator",
             "android-emulator",
+            "linux-xvfb-desktop",
+            "windows-session-agent-desktop",
         ],
         help="Filter matrix to one named scenario.",
     )

@@ -235,9 +235,41 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
         self.assertIn("Desktop video doctor for `mac`", self.printed)
         self.assertIn("  PASS  video_capture: /repo/node_modules/ffmpeg-static/ffmpeg", self.printed)
         self.assertIn("  PASS  avfoundation_screen: Capture screen 0 (3:)", self.printed)
+        self.assertIn("  PASS  backend.recorder: macOS ffmpeg/AVFoundation recorder with screencapture fallback", self.printed)
         self.assertIn("  PASS  target.video_capture: enabled", self.printed)
         self.assertIn("  PASS  remotion_smoke: skipped by --skip-remotion-smoke", self.printed)
         self.assertNotIn("Remediation:", self.printed)
+
+    def test_video_doctor_fails_unsupported_desktop_recorder_backend(self):
+        self.targets["windows"]["optional"] = {"video_capture": True}
+        checks = [
+            {"name": "receipt", "ok": True, "detail": "installed"},
+            {"name": "video_capture", "ok": True, "detail": "/repo/node_modules/ffmpeg-static/ffmpeg", "required": False},
+        ]
+        deps = {
+            "load_config_fn": self.config,
+            "resolve_desktop_target_fn": lambda _config, name: self.targets[name],
+            "desktop_doctor_checks_fn": lambda _config, _name: [dict(check) for check in checks],
+            "normalize_desktop_optional_config_fn": lambda optional: {"video_capture": bool((optional or {}).get("video_capture"))},
+            "video_proof_smoke_fn": lambda: {"ok": True, "detail": "ok"},
+            "probe_macos_avfoundation_audio_fn": lambda _device: self.fail("audio probe should not run"),
+            "print_fn": self.print_line,
+        }
+
+        result = self.mod.cmd_desktop_video_doctor(
+            Namespace(target="windows", json=True, skip_remotion_smoke=False, video_audio="none", video_audio_device=None),
+            **deps,
+        )
+
+        self.assertEqual(result, 1)
+        payload = json.loads(self.printed[0])
+        checks_by_name = {check["name"]: check for check in payload["checks"]}
+        self.assertFalse(payload["ok"])
+        self.assertFalse(checks_by_name["backend.recorder"]["ok"])
+        self.assertTrue(checks_by_name["backend.recorder"]["required"])
+        self.assertIn("ffmpeg ddagrab/gdigrab", checks_by_name["backend.recorder"]["detail"])
+        remediations_by_check = {item["check"]: item for item in payload["remediations"]}
+        self.assertIn("not implemented yet", remediations_by_check["backend.recorder"]["detail"])
 
     def test_video_doctor_reports_config_and_remotion_failures(self):
         checks = [

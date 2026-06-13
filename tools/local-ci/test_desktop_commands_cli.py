@@ -185,7 +185,7 @@ class DesktopCommandsCliTests(unittest.TestCase):
         self.assertEqual(result, 0)
         payload = json.loads(self.printed[0])
         self.assertEqual(payload["kind"], "desktop-video-proof-demo-matrix")
-        self.assertEqual(payload["scenario_count"], 7)
+        self.assertEqual(payload["scenario_count"], 9)
         self.assertIn("reaper-plugin-editor", {item["id"] for item in payload["scenarios"]})
         reaper = next(item for item in payload["scenarios"] if item["id"] == "reaper-plugin-editor")
         self.assertIn("desktop publish --manifest /path/to/run/manifest.json", reaper["publish_command"])
@@ -209,6 +209,16 @@ class DesktopCommandsCliTests(unittest.TestCase):
         inspector = next(item for item in payload["scenarios"] if item["id"] == "inspector-workflow")
         self.assertIn("-DPULP_ENABLE_GPU=OFF", inspector["prepare_command"])
         self.assertIn("./build-video-nogpu/examples/audio-inspector-demo/pulp-audio-inspector-demo", inspector["command"])
+        linux = next(item for item in payload["scenarios"] if item["id"] == "linux-xvfb-desktop")
+        self.assertEqual(linux["platform"], "ubuntu")
+        self.assertEqual(linux["status"], "planned")
+        self.assertIn("video-doctor ubuntu", linux["doctor"])
+        self.assertIn("x11grab", " ".join(linux["watch_for"]))
+        windows = next(item for item in payload["scenarios"] if item["id"] == "windows-session-agent-desktop")
+        self.assertEqual(windows["platform"], "windows")
+        self.assertEqual(windows["status"], "planned")
+        self.assertIn("video-doctor windows", windows["doctor"])
+        self.assertIn("ddagrab/gdigrab", " ".join(windows["watch_for"]))
 
         self.printed.clear()
         result = self.mod.cmd_desktop_video_matrix(
@@ -225,6 +235,19 @@ class DesktopCommandsCliTests(unittest.TestCase):
         self.assertIn("python3 tools/local-ci/local_ci.py simulator video-doctor", markdown)
         self.assertIn("--background --label ios-simulator-review --json", markdown)
         self.assertNotIn("Standalone app interaction", markdown)
+
+        self.printed.clear()
+        result = self.mod.cmd_desktop_video_matrix(
+            Namespace(target="windows", scenario=None, json=False, markdown=True),
+            print_fn=self.print_line,
+        )
+        self.assertEqual(result, 0)
+        windows_markdown = self.printed[0]
+        self.assertIn("Windows session-agent desktop proof", windows_markdown)
+        self.assertIn("Status: `planned`", windows_markdown)
+        self.assertIn("desktop video-doctor windows", windows_markdown)
+        self.assertIn("ddagrab/gdigrab", windows_markdown)
+        self.assertNotIn("iOS Simulator interaction", windows_markdown)
 
     def test_desktop_config_show_set_and_dispatch(self):
         result = self.mod.cmd_desktop_config_show(

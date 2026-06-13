@@ -225,9 +225,49 @@ def _desktop_check_status(check: dict) -> str:
     return "FAIL"
 
 
+def desktop_video_recorder_backend_check(target: dict) -> dict:
+    adapter = target.get("adapter")
+    if adapter == "macos-local":
+        return {
+            "name": "backend.recorder",
+            "ok": True,
+            "detail": "macOS ffmpeg/AVFoundation recorder with screencapture fallback",
+            "required": True,
+        }
+    if adapter == "linux-xvfb":
+        return {
+            "name": "backend.recorder",
+            "ok": False,
+            "detail": "Linux/Xvfb video recorder is not implemented yet; planned backend is ffmpeg x11grab against the target display",
+            "required": True,
+        }
+    if adapter == "windows-session-agent":
+        return {
+            "name": "backend.recorder",
+            "ok": False,
+            "detail": "Windows session-agent video recorder is not implemented yet; planned backend is ffmpeg ddagrab/gdigrab from the interactive session",
+            "required": True,
+        }
+    return {
+        "name": "backend.recorder",
+        "ok": False,
+        "detail": f"video recorder is not implemented for desktop adapter `{adapter}`",
+        "required": True,
+    }
+
+
 def desktop_video_doctor_remediations(checks: list[dict], *, target_name: str) -> list[dict]:
     checks_by_name = {check.get("name"): check for check in checks}
     remediations: list[dict] = []
+    backend = checks_by_name.get("backend.recorder")
+    if backend and not backend.get("ok"):
+        remediations.append(
+            {
+                "check": "backend.recorder",
+                "title": "Use a supported video recorder backend",
+                "detail": f"Desktop video recording for `{target_name}` is not implemented yet. Use macOS video proofs, iOS Simulator, Android emulator, or still screenshots until this backend lands.",
+            }
+        )
     screencapture = checks_by_name.get("screencapture")
     if screencapture and not screencapture.get("ok"):
         remediations.append(
@@ -518,6 +558,7 @@ def desktop_video_doctor_payload(
     target = resolve_desktop_target_fn(config, args.target)
 
     checks = desktop_doctor_checks_fn(config, args.target)
+    checks.append(desktop_video_recorder_backend_check(target))
     optional = normalize_desktop_optional_config_fn(target.get("optional"))
     checks.append(
         {

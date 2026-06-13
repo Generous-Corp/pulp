@@ -423,6 +423,20 @@ class CliParserTests(unittest.TestCase):
         self.assertTrue(args.markdown)
         self.assertFalse(args.json)
 
+        args = parser.parse_args([
+            "desktop",
+            "video-matrix",
+            "--target",
+            "windows",
+            "--scenario",
+            "windows-session-agent-desktop",
+            "--json",
+        ])
+
+        self.assertEqual(args.target, "windows")
+        self.assertEqual(args.scenario, "windows-session-agent-desktop")
+        self.assertTrue(args.json)
+
     def test_desktop_video_doctor_defaults_to_mac(self):
         parser = self.build_parser()
 
