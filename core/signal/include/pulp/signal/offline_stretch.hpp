@@ -113,9 +113,14 @@ public:
             cfg.quality = PitchTimeQuality::quality;
             cfg.channels = channels_;
             cfg.max_block = kBlock;
-            cfg.max_time_ratio = static_cast<float>(max_time_ratio_);
+            // Size for the R*P product so the single-pass independent path
+            // (stretch by R*P, then resample by P) stays within engine bounds.
+            const double max_pitch_ratio =
+                std::exp2((max_pitch_semitones_ > 0.0 ? max_pitch_semitones_ : 0.0) / 12.0);
+            cfg.max_time_ratio = static_cast<float>(max_time_ratio_ * max_pitch_ratio);
             cfg.max_pitch_semitones = 0.0f; // pitch is fixed in time_stretch mode
             cfg.transient_preservation = true;
+            cfg.noise_morphing = sizing.route_noise_stn; // STN noise path (plan §4 routing)
             engine_.prepare(sample_rate, cfg);
             latency_anchor_ = calibrate_anchor();
 
@@ -131,6 +136,7 @@ public:
             pcfg.formant_mode = FormantMode::follow;
             pcfg.true_envelope_iterations = 3;
             pcfg.transient_preservation = true;
+            pcfg.noise_morphing = sizing.route_noise_stn;
             pitch_engine_.prepare(sample_rate, pcfg);
         }
     }
@@ -196,15 +202,43 @@ public:
             return pitch_shift(in, in_frames, out, out_frames,
                                opts.pitch_semitones, opts.formant_mode, opts.formant_semitones);
 
-        // TODO(phase2.4): independent R+S single-pass. Placeholder until P2.4.
-        for (int c = 0; c < channels_; ++c) {
-            float* dst = out[c];
-            const float* src = in[c];
-            const long n = (in_frames < out_frames) ? in_frames : out_frames;
-            for (long i = 0; i < n; ++i) dst[i] = src[i];
-            for (long i = n; i < out_frames; ++i) dst[i] = 0.0f;
+        // Independent R+S (time_ratio != 1 AND pitch != 0).
+        const int ch = channels_;
+        const double P = std::exp2(opts.pitch_semitones / 12.0);
+        if (opts.formant_mode == OfflineFormantMode::follow_pitch) {
+            // Single spectral pass (plan §4.2): stretch by R*P with pitch
+            // preserved, then resample reading at step P — which shifts pitch by
+            // +S, drags formants along (follow), and lands at duration R. One
+            // phase-vocoder pass + one interpolation, not two cascaded PV passes.
+            const double eff = opts.time_ratio * P;
+            const long inter_len = offline_stretch_output_frames(in_frames, eff);
+            std::vector<std::vector<float>> inter(static_cast<size_t>(ch),
+                                                  std::vector<float>(static_cast<size_t>(inter_len)));
+            std::vector<float*> ip(static_cast<size_t>(ch));
+            for (int c = 0; c < ch; ++c) ip[c] = inter[static_cast<size_t>(c)].data();
+            if (!tempo_stretch(in, in_frames, ip.data(), inter_len, eff)) return fail(err, "stretch failed");
+            for (int c = 0; c < ch; ++c)
+                for (long j = 0; j < out_frames; ++j)
+                    out[c][j] = sample_sinc6(inter[static_cast<size_t>(c)].data(), inter_len,
+                                             static_cast<double>(j) * P);
+            return true;
         }
-        return true;
+
+        // Formant preserve / independent: cascade pitch (formant-correct, via the
+        // SpectralEnvelopeShifter) then tempo. Two phase-vocoder passes — the
+        // honest cost of keeping formants fixed while both R and S change with
+        // the current per-mode engine API (a true single-pass R+P needs the
+        // engine-internal combination — plan §4 escape hatch).
+        std::vector<std::vector<float>> inter(static_cast<size_t>(ch),
+                                              std::vector<float>(static_cast<size_t>(in_frames)));
+        std::vector<float*> pp(static_cast<size_t>(ch));
+        for (int c = 0; c < ch; ++c) pp[c] = inter[static_cast<size_t>(c)].data();
+        if (!pitch_shift(in, in_frames, pp.data(), in_frames,
+                         opts.pitch_semitones, opts.formant_mode, opts.formant_semitones))
+            return fail(err, "pitch stage failed");
+        std::vector<const float*> cp(static_cast<size_t>(ch));
+        for (int c = 0; c < ch; ++c) cp[c] = inter[static_cast<size_t>(c)].data();
+        return tempo_stretch(cp.data(), in_frames, out, out_frames, opts.time_ratio);
     }
 
 private:

@@ -16,6 +16,7 @@
 #include <cmath>
 #include <vector>
 
+using pulp::signal::OfflineFormantMode;
 using pulp::signal::OfflineStretch;
 using pulp::signal::OfflineStretchOptions;
 using pulp::signal::offline_stretch_output_frames;
@@ -354,4 +355,64 @@ TEST_CASE("pitch-only: duration preserved, pitch shifts by semitones", "[offline
         std::string e; REQUIRE(s.process(ip, n, op, n, o, &e));
         CHECK(std::abs(dominant_freq(out) - 250.0) < 20.0); // 500 -> 250
     }
+}
+
+TEST_CASE("independent R+S: exact length and shifted pitch", "[offline-stretch]") {
+    constexpr double pi = 3.14159265358979323846;
+    const double sr = 48000.0, f0 = 500.0, w = 2.0 * pi * f0 / sr;
+    const long n = 48000;
+    std::vector<float> in(static_cast<size_t>(n));
+    for (long i = 0; i < n; ++i) in[static_cast<size_t>(i)] = 0.5f * std::sin(w * i);
+    const float* ip[1] = {in.data()};
+
+    OfflineStretch s; s.prepare(sr, 1);
+    auto dom = [&](const std::vector<float>& x) {
+        long zc = 0; const long lo = 8000, hi = static_cast<long>(x.size()) - 8000;
+        for (long i = lo + 1; i < hi; ++i)
+            if ((x[static_cast<size_t>(i - 1)] <= 0.0f) != (x[static_cast<size_t>(i)] <= 0.0f)) ++zc;
+        return zc / (2.0 * (static_cast<double>(hi - lo - 1) / sr));
+    };
+
+    SECTION("follow formant: R=1.5, +12 st (single-pass)") {
+        OfflineStretchOptions o; o.time_ratio = 1.5; o.pitch_semitones = 12.0;
+        o.formant_mode = OfflineFormantMode::follow_pitch;
+        const long m = offline_stretch_output_frames(n, 1.5);
+        REQUIRE(m == 72000);
+        std::vector<float> out(static_cast<size_t>(m));
+        float* op[1] = {out.data()};
+        std::string e; REQUIRE(s.process(ip, n, op, m, o, &e));
+        CHECK(std::abs(dom(out) - 1000.0) < 40.0); // pitch 500 -> 1000
+    }
+
+    SECTION("preserve formant: R=0.75, +7 st (cascade)") {
+        OfflineStretchOptions o; o.time_ratio = 0.75; o.pitch_semitones = 7.0;
+        o.formant_mode = OfflineFormantMode::preserve_original;
+        const long m = offline_stretch_output_frames(n, 0.75);
+        REQUIRE(m == 36000);
+        std::vector<float> out(static_cast<size_t>(m));
+        float* op[1] = {out.data()};
+        std::string e; REQUIRE(s.process(ip, n, op, m, o, &e));
+        const double target = 500.0 * std::exp2(7.0 / 12.0); // ~749 Hz
+        CHECK(std::abs(dom(out) - target) < 40.0);
+    }
+}
+
+TEST_CASE("STN noise routing: noisy input stretches finite + deterministic", "[offline-stretch]") {
+    const long n = 24000;
+    std::vector<float> in(static_cast<size_t>(n));
+    unsigned long st = 12345UL; // deterministic LCG pseudo-noise
+    auto rnd = [&]() { st = st * 1103515245UL + 12345UL; return (static_cast<double>((st >> 16) & 0x7fff) / 16384.0) - 1.0; };
+    for (long i = 0; i < n; ++i) in[static_cast<size_t>(i)] = 0.3f * static_cast<float>(rnd());
+    const float* ip[1] = {in.data()};
+
+    const double sr = 48000.0;
+    OfflineStretchOptions o; o.time_ratio = 1.4; o.route_noise_stn = true; // STN path on
+    const long m = offline_stretch_output_frames(n, 1.4);
+    std::vector<float> a(static_cast<size_t>(m)), b(static_cast<size_t>(m));
+    float* pa[1] = {a.data()}; float* pb[1] = {b.data()};
+    std::string e;
+    OfflineStretch s1; s1.prepare(sr, 1, o); REQUIRE(s1.process(ip, n, pa, m, o, &e));
+    OfflineStretch s2; s2.prepare(sr, 1, o); REQUIRE(s2.process(ip, n, pb, m, o, &e));
+    for (float v : a) REQUIRE(std::isfinite(v));
+    CHECK(a == b); // STN morphing stays deterministic
 }
