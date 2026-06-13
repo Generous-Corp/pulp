@@ -27,6 +27,7 @@ def cmd_desktop(bindings: Mapping[str, Any], args: Any) -> int:
             "install": _binding(bindings, "cmd_desktop_install"),
             "doctor": _binding(bindings, "cmd_desktop_doctor"),
             "video-doctor": _binding(bindings, "cmd_desktop_video_doctor"),
+            "video-setup": _binding(bindings, "cmd_desktop_video_setup"),
             "status": _binding(bindings, "cmd_desktop_status"),
             "config": _binding(bindings, "cmd_desktop_config"),
             "recent": _binding(bindings, "cmd_desktop_recent"),

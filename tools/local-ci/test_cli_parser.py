@@ -201,6 +201,30 @@ class CliParserTests(unittest.TestCase):
         self.assertTrue(args.json)
         self.assertTrue(args.run_in_terminal)
 
+    def test_desktop_video_setup_command(self):
+        parser = self.build_parser()
+
+        args = parser.parse_args([
+            "desktop",
+            "video-setup",
+            "mac",
+            "--machine",
+            "blackbook",
+            "--check",
+            "--run-in-terminal",
+            "--skip-remotion-smoke",
+            "--json",
+        ])
+
+        self.assertEqual(args.command, "desktop")
+        self.assertEqual(args.desktop_command, "video-setup")
+        self.assertEqual(args.target, "mac")
+        self.assertEqual(args.machine, "blackbook")
+        self.assertTrue(args.check)
+        self.assertTrue(args.run_in_terminal)
+        self.assertTrue(args.skip_remotion_smoke)
+        self.assertTrue(args.json)
+
     def test_desktop_compose_video_command_parses_outputs(self):
         parser = self.build_parser()
 

@@ -268,7 +268,59 @@ def desktop_video_doctor_remediations(checks: list[dict], *, target_name: str) -
     return remediations
 
 
-def cmd_desktop_video_doctor(
+def desktop_video_setup_steps(target_name: str, *, machine_label: str | None = None) -> list[dict]:
+    label = (machine_label or target_name).strip() or target_name
+    smoke_label = f"{label}-video-setup-smoke"
+    return [
+        {
+            "name": "install_tools",
+            "title": "Install repo-local video tools",
+            "command": "npm --prefix tools/local-ci install",
+            "detail": "Installs pinned developer-only ffmpeg-static and Remotion packages.",
+        },
+        {
+            "name": "enable_target_capability",
+            "title": "Enable video capture for the desktop target",
+            "command": f"python3 tools/local-ci/local_ci.py desktop config set target.{target_name}.video_capture true",
+            "detail": "Records the opt-in video_capture capability in the local desktop target config.",
+        },
+        {
+            "name": "grant_screen_recording",
+            "title": "Grant Screen Recording to Terminal.app",
+            "command": "open 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'",
+            "detail": "Enable Terminal.app in System Settings > Privacy & Security > Screen Recording, then restart Terminal.",
+        },
+        {
+            "name": "doctor",
+            "title": "Run video-doctor through Terminal",
+            "command": f"python3 tools/local-ci/local_ci.py desktop video-doctor {target_name} --run-in-terminal",
+            "detail": "Verifies screencapture, ffmpeg, Remotion, AVFoundation/fallback capture, and target config.",
+        },
+        {
+            "name": "smoke_proof",
+            "title": "Record a short TextEdit proof",
+            "command": (
+                f"python3 tools/local-ci/local_ci.py desktop video {target_name} --run-in-terminal "
+                f"--action smoke --bundle-id com.apple.TextEdit --duration 2 --video-fps 4 --label {smoke_label} --json"
+            ),
+            "detail": "Produces a small local MP4 proof bundle tied to the current source commit.",
+        },
+        {
+            "name": "publish",
+            "title": "Publish the smoke proof for review",
+            "command": "python3 tools/local-ci/local_ci.py desktop publish --manifest <run-bundle>/manifest.json --label video-setup-review --json",
+            "detail": "Stages an HTML report with watchable video controls.",
+        },
+        {
+            "name": "serve",
+            "title": "Serve the report locally or over Tailscale",
+            "command": "python3 tools/local-ci/local_ci.py desktop serve <published-report-dir> --host 0.0.0.0 --port 8765",
+            "detail": "Prints localhost, hostname, configured public hosts, and Tailscale candidate URLs.",
+        },
+    ]
+
+
+def desktop_video_doctor_payload(
     args: argparse.Namespace,
     *,
     load_config_fn: Callable[[], dict],
@@ -276,14 +328,9 @@ def cmd_desktop_video_doctor(
     desktop_doctor_checks_fn: Callable[[dict, str], list[dict]],
     normalize_desktop_optional_config_fn: Callable[[dict | None], dict],
     video_proof_smoke_fn: Callable[[], dict],
-    print_fn: Callable[[str], None] = print,
-) -> int:
-    try:
-        config = load_config_fn()
-        target = resolve_desktop_target_fn(config, args.target)
-    except (FileNotFoundError, ValueError) as exc:
-        print_fn(f"Error: {exc}")
-        return 1
+) -> tuple[int, dict]:
+    config = load_config_fn()
+    target = resolve_desktop_target_fn(config, args.target)
 
     checks = desktop_doctor_checks_fn(config, args.target)
     optional = normalize_desktop_optional_config_fn(target.get("optional"))
@@ -339,29 +386,124 @@ def cmd_desktop_video_doctor(
             )
 
     all_ok = all(check["ok"] for check in checks if check.get("required", True))
-    remediations = desktop_video_doctor_remediations(checks, target_name=args.target)
+    payload = {
+        "target": args.target,
+        "adapter": target["adapter"],
+        "bootstrap": target["bootstrap"],
+        "ok": all_ok,
+        "checks": checks,
+        "remediations": desktop_video_doctor_remediations(checks, target_name=args.target),
+    }
+    return (0 if all_ok else 1), payload
+
+
+def cmd_desktop_video_doctor(
+    args: argparse.Namespace,
+    *,
+    load_config_fn: Callable[[], dict],
+    resolve_desktop_target_fn: Callable[[dict, str], dict],
+    desktop_doctor_checks_fn: Callable[[dict, str], list[dict]],
+    normalize_desktop_optional_config_fn: Callable[[dict | None], dict],
+    video_proof_smoke_fn: Callable[[], dict],
+    print_fn: Callable[[str], None] = print,
+) -> int:
+    try:
+        exit_code, payload = desktop_video_doctor_payload(
+            args,
+            load_config_fn=load_config_fn,
+            resolve_desktop_target_fn=resolve_desktop_target_fn,
+            desktop_doctor_checks_fn=desktop_doctor_checks_fn,
+            normalize_desktop_optional_config_fn=normalize_desktop_optional_config_fn,
+            video_proof_smoke_fn=video_proof_smoke_fn,
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        print_fn(f"Error: {exc}")
+        return 1
     if getattr(args, "json", False):
-        payload = {
-            "target": args.target,
-            "adapter": target["adapter"],
-            "bootstrap": target["bootstrap"],
-            "ok": all_ok,
-            "checks": checks,
-            "remediations": remediations,
-        }
         print_fn(json.dumps(payload, indent=2))
-        return 0 if all_ok else 1
+        return exit_code
 
     print_fn(f"Desktop video doctor for `{args.target}`")
-    print_fn(f"  adapter: {target['adapter']}")
-    print_fn(f"  bootstrap: {target['bootstrap']}")
-    for check in checks:
+    print_fn(f"  adapter: {payload['adapter']}")
+    print_fn(f"  bootstrap: {payload['bootstrap']}")
+    for check in payload["checks"]:
         print_fn(f"  {_desktop_check_status(check):4s}  {check['name']}: {check['detail']}")
-    if remediations:
+    if payload["remediations"]:
         print_fn("")
         print_fn("Remediation:")
-        for item in remediations:
+        for item in payload["remediations"]:
             print_fn(f"  - {item['title']}: {item['detail']}")
             if item.get("command"):
                 print_fn(f"    command: {item['command']}")
-    return 0 if all_ok else 1
+    return exit_code
+
+
+def cmd_desktop_video_setup(
+    args: argparse.Namespace,
+    *,
+    load_config_fn: Callable[[], dict],
+    resolve_desktop_target_fn: Callable[[dict, str], dict],
+    desktop_doctor_checks_fn: Callable[[dict, str], list[dict]],
+    normalize_desktop_optional_config_fn: Callable[[dict | None], dict],
+    video_proof_smoke_fn: Callable[[], dict],
+    print_fn: Callable[[str], None] = print,
+) -> int:
+    try:
+        config = load_config_fn()
+        target = resolve_desktop_target_fn(config, args.target)
+    except (FileNotFoundError, ValueError) as exc:
+        print_fn(f"Error: {exc}")
+        return 1
+
+    steps = desktop_video_setup_steps(args.target, machine_label=getattr(args, "machine", None))
+    payload = {
+        "target": args.target,
+        "machine": getattr(args, "machine", None) or args.target,
+        "adapter": target["adapter"],
+        "bootstrap": target["bootstrap"],
+        "steps": steps,
+        "check": None,
+    }
+    exit_code = 0
+    if getattr(args, "check", False):
+        doctor_args = argparse.Namespace(
+            target=args.target,
+            skip_remotion_smoke=getattr(args, "skip_remotion_smoke", False),
+        )
+        exit_code, doctor_payload = desktop_video_doctor_payload(
+            doctor_args,
+            load_config_fn=lambda: config,
+            resolve_desktop_target_fn=resolve_desktop_target_fn,
+            desktop_doctor_checks_fn=desktop_doctor_checks_fn,
+            normalize_desktop_optional_config_fn=normalize_desktop_optional_config_fn,
+            video_proof_smoke_fn=video_proof_smoke_fn,
+        )
+        payload["check"] = doctor_payload
+
+    if getattr(args, "json", False):
+        print_fn(json.dumps(payload, indent=2))
+        return exit_code
+
+    print_fn(f"Desktop video setup for `{args.target}`")
+    print_fn(f"  machine: {payload['machine']}")
+    print_fn(f"  adapter: {target['adapter']}")
+    print_fn(f"  bootstrap: {target['bootstrap']}")
+    print_fn("")
+    print_fn("Steps:")
+    for index, step in enumerate(steps, start=1):
+        print_fn(f"  {index}. {step['title']}")
+        print_fn(f"     {step['detail']}")
+        print_fn(f"     command: {step['command']}")
+    if payload["check"] is not None:
+        print_fn("")
+        print_fn(f"Current check: {'PASS' if payload['check']['ok'] else 'FAIL'}")
+        for check in payload["check"]["checks"]:
+            print_fn(f"  {_desktop_check_status(check):4s}  {check['name']}: {check['detail']}")
+        if payload["check"]["remediations"]:
+            print_fn("")
+            print_fn("Remediation:")
+            for item in payload["check"]["remediations"]:
+                print_fn(f"  - {item['title']}: {item['detail']}")
+                if item.get("command"):
+                    print_fn(f"    command: {item['command']}")
+    return exit_code

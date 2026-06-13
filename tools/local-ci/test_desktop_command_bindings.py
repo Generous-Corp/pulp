@@ -318,6 +318,27 @@ class DesktopCommandBindingsTests(unittest.TestCase):
         self.assertTrue(callable(captured["kwargs"]["cmd_desktop_click_fn"]))
         self.assertTrue(callable(captured["kwargs"]["cmd_desktop_inspect_fn"]))
 
+    def test_video_setup_binds_doctor_dependencies(self):
+        captured = {}
+
+        def runner(*args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            return 8
+
+        bindings = self._bindings("_desktop_setup_commands_cli", "cmd_desktop_video_setup", runner)
+        args_obj = object()
+        self.assertEqual(self.mod.cmd_desktop_video_setup(bindings, args_obj), 8)
+        self.assertEqual(captured["args"], (args_obj,))
+        for name in [
+            "load_config",
+            "resolve_desktop_target",
+            "desktop_doctor_checks",
+            "normalize_desktop_optional_config",
+            "video_proof_smoke",
+        ]:
+            self.assertIs(captured["kwargs"][f"{name}_fn"], bindings[name])
+
     def test_video_doctor_can_reinvoke_through_terminal(self):
         captured = {}
         stdout = io.StringIO()
@@ -355,6 +376,41 @@ class DesktopCommandBindingsTests(unittest.TestCase):
         self.assertEqual(kwargs["cwd"], Path("/repo"))
         self.assertEqual(kwargs["python_executable"], "/usr/bin/python3")
         self.assertEqual(kwargs["script_path"], Path("/repo/tools/local-ci/local_ci.py"))
+
+    def test_video_setup_can_reinvoke_through_terminal(self):
+        captured = {}
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+
+        def runner(*_args, **_kwargs):
+            self.fail("direct video-setup should not run")
+
+        def run_terminal(*args, **kwargs):
+            captured["terminal"] = (args, kwargs)
+            return {"returncode": 0, "stdout": "setup stdout\n", "stderr": ""}
+
+        terminal_runner = types.SimpleNamespace(
+            should_reinvoke_in_terminal=lambda **_kwargs: True,
+            run_local_ci_in_terminal=run_terminal,
+        )
+        bindings = self._bindings("_desktop_setup_commands_cli", "cmd_desktop_video_setup", runner)
+        bindings["_macos_terminal_runner"] = terminal_runner
+        bindings["sys"] = types.SimpleNamespace(
+            platform="darwin",
+            argv=["local_ci.py", "desktop", "video-setup", "mac", "--check", "--run-in-terminal"],
+            executable="/usr/bin/python3",
+            stdout=stdout,
+            stderr=stderr,
+        )
+        bindings["os"] = types.SimpleNamespace(environ={})
+
+        result = self.mod.cmd_desktop_video_setup(bindings, Namespace(run_in_terminal=True))
+
+        self.assertEqual(result, 0)
+        self.assertEqual(stdout.getvalue(), "setup stdout\n")
+        args, kwargs = captured["terminal"]
+        self.assertEqual(args[0], ["desktop", "video-setup", "mac", "--check", "--run-in-terminal"])
+        self.assertEqual(kwargs["cwd"], Path("/repo"))
 
     def test_terminal_reentry_guard_allows_direct_command(self):
         captured = {}

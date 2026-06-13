@@ -13,6 +13,20 @@ diff does not explain enough.
 - `pulp ci-local desktop doctor mac` reports Screen Recording, ffmpeg, and
   AVFoundation screen-input state.
 
+Print the portable first-run checklist for another Mac, such as blackbook:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop video-setup mac --machine blackbook
+```
+
+Use `--json` for a handoff artifact and `--check --run-in-terminal` to include
+the current `video-doctor` readiness payload via Terminal.app's Screen Recording
+grant:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop video-setup mac --machine blackbook --check --run-in-terminal --json
+```
+
 Install the repo-local developer ffmpeg on a new Mac:
 
 ```bash

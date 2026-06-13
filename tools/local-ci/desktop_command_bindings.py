@@ -86,6 +86,20 @@ def cmd_desktop_video_doctor(bindings: Mapping[str, Any], args: Any) -> int:
     )
 
 
+def cmd_desktop_video_setup(bindings: Mapping[str, Any], args: Any) -> int:
+    terminal_result = _maybe_run_local_ci_in_terminal(bindings, args)
+    if terminal_result is not None:
+        return terminal_result
+    return _binding(bindings, "_desktop_setup_commands_cli").cmd_desktop_video_setup(
+        args,
+        load_config_fn=_binding(bindings, "load_config"),
+        resolve_desktop_target_fn=_binding(bindings, "resolve_desktop_target"),
+        desktop_doctor_checks_fn=_binding(bindings, "desktop_doctor_checks"),
+        normalize_desktop_optional_config_fn=_binding(bindings, "normalize_desktop_optional_config"),
+        video_proof_smoke_fn=_binding(bindings, "video_proof_smoke"),
+    )
+
+
 def cmd_desktop_status(bindings: Mapping[str, Any], args: Any) -> int:
     return _binding(bindings, "_desktop_commands_cli").cmd_desktop_status(
         args,

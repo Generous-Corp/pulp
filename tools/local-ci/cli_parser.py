@@ -408,6 +408,22 @@ def build_local_ci_parser(
     )
     p_desktop_video_doctor.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 
+    p_desktop_video_setup = desktop_sub.add_parser("video-setup", help="Print first-run video proof setup steps for one desktop target")
+    p_desktop_video_setup.add_argument("target", nargs="?", default="mac", help="Desktop target name (default: mac)")
+    p_desktop_video_setup.add_argument("--machine", help="Human-readable machine label to include in generated smoke labels")
+    p_desktop_video_setup.add_argument("--check", action="store_true", help="Also run the video-doctor checks and include current readiness")
+    p_desktop_video_setup.add_argument(
+        "--run-in-terminal",
+        action="store_true",
+        help="On macOS, re-run video-setup inside Terminal.app when using --check so Screen Recording permission follows Terminal's TCC grant.",
+    )
+    p_desktop_video_setup.add_argument(
+        "--skip-remotion-smoke",
+        action="store_true",
+        help="When using --check, skip the Remotion smoke render check.",
+    )
+    p_desktop_video_setup.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+
     p_desktop_serve = desktop_sub.add_parser("serve", help="Serve a desktop publish report over local HTTP")
     p_desktop_serve.add_argument("path", nargs="?", help="Optional report directory (default: latest published report)")
     p_desktop_serve.add_argument("--host", default="127.0.0.1", help="Host/interface to bind (default: 127.0.0.1)")

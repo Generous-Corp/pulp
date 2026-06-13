@@ -38,6 +38,21 @@ or reviewer comprehension matters.
 
 ## First-time setup on a Mac
 
+Start by printing the portable setup checklist. Use the machine label when you
+are preparing another Mac, such as blackbook:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop video-setup mac --machine blackbook
+```
+
+For a JSON handoff artifact that includes current readiness, add
+`--check --run-in-terminal` so the readiness check uses Terminal.app's Screen
+Recording grant:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop video-setup mac --machine blackbook --check --run-in-terminal --json
+```
+
 Install the repo-local developer ffmpeg and Remotion tooling:
 
 ```bash
