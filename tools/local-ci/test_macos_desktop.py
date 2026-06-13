@@ -4,12 +4,15 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 import plistlib
 import subprocess
+import struct
 import tempfile
 import time
 import unittest
+import zlib
 
 
 MODULE_PATH = Path(__file__).with_name("macos_desktop.py")
@@ -21,6 +24,27 @@ def load_module():
     assert spec.loader is not None
     spec.loader.exec_module(module)
     return module
+
+
+def write_rgb_png(path: Path, width: int, height: int, pixels: list[tuple[int, int, int]]) -> None:
+    rows = []
+    for y in range(height):
+        row = bytearray([0])
+        for x in range(width):
+            row.extend(pixels[y * width + x])
+        rows.append(bytes(row))
+    raw = zlib.compress(b"".join(rows))
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+        + chunk(b"IDAT", raw)
+        + chunk(b"IEND", b"")
+    )
 
 
 class MacOSDesktopTests(unittest.TestCase):
@@ -233,6 +257,20 @@ class MacOSDesktopTests(unittest.TestCase):
 
         self.assertEqual(self.mod.macos_avfoundation_screen_input_device(run_fn=run_devices), "3:")
 
+    def test_png_visual_stats_detects_blank_and_nonblank_posters(self) -> None:
+        blank = self.root / "blank.png"
+        nonblank = self.root / "nonblank.png"
+        write_rgb_png(blank, 2, 2, [(0, 0, 0)] * 4)
+        write_rgb_png(nonblank, 2, 2, [(0, 0, 0), (255, 64, 32), (0, 0, 0), (32, 64, 255)])
+
+        blank_stats = self.mod.png_visual_stats(blank)
+        nonblank_stats = self.mod.png_visual_stats(nonblank)
+
+        self.assertTrue(blank_stats["ok"])
+        self.assertTrue(blank_stats["appears_blank"])
+        self.assertTrue(nonblank_stats["ok"])
+        self.assertFalse(nonblank_stats["appears_blank"])
+
     def test_window_video_recording_encodes_screencapture_frame_sequence(self) -> None:
         output_path = self.root / "video" / "proof.mp4"
         metadata_path = self.root / "video" / "metadata.json"
@@ -430,6 +468,72 @@ class MacOSDesktopTests(unittest.TestCase):
         self.assertEqual(metadata["encoder"]["version"], "ffmpeg version 6.0")
         self.assertTrue(poster_path.exists())
         self.assertIn(["/opt/ffmpeg", "-hide_banner", "-version"], run_calls)
+
+    def test_window_video_recording_rejects_blank_ffmpeg_poster(self) -> None:
+        output_path = self.root / "video" / "proof.mp4"
+        metadata_path = self.root / "video" / "metadata.json"
+        poster_path = self.root / "video" / "poster.png"
+        written: dict = {}
+
+        class FakeProc:
+            returncode = None
+
+            def poll(self):
+                return None
+
+            def communicate(self, timeout=None):
+                self.returncode = 0
+                output_path.write_bytes(b"mp4")
+                return "", "recorded"
+
+        def fake_popen(cmd: list[str], **kwargs):
+            return FakeProc()
+
+        def run_metadata_or_poster(cmd: list[str], **_kwargs):
+            if cmd[1:] == ["-hide_banner", "-version"]:
+                return subprocess.CompletedProcess(cmd, 0, stdout="ffmpeg version 6.0\n", stderr="")
+            if "-frames:v" in cmd:
+                write_rgb_png(poster_path, 2, 2, [(0, 0, 0)] * 4)
+                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        def write_metadata(path: Path, payload: dict) -> None:
+            written.update(payload)
+            path.write_text(json.dumps(payload))
+
+        recording = self.mod.start_macos_window_video_recording(
+            {"windowId": 88, "bounds": {"x": 10, "y": 20, "width": 320, "height": 200}},
+            output_path,
+            duration_secs=0.2,
+            fps=5.0,
+            popen_fn=fake_popen,
+            run_fn=run_metadata_or_poster,
+            ffmpeg_path="/opt/ffmpeg",
+            input_device_fn=lambda **_kwargs: "3:",
+            startup_grace_secs=0,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "poster appears blank"):
+            self.mod.stop_macos_window_video_recording(
+                recording,
+                output_path=output_path,
+                metadata_path=metadata_path,
+                poster_path=poster_path,
+                duration_secs=0.2,
+                fps=5.0,
+                attachment_budget_bytes=1_000_000,
+                desktop_video_metadata_fn=lambda path, **kwargs: {
+                    "path": str(path),
+                    "fps": kwargs["fps"],
+                    "command": kwargs["command"],
+                    "encoder": kwargs["encoder"],
+                    "size": {"fits_attachment_budget": True},
+                },
+                write_desktop_video_metadata_fn=write_metadata,
+            )
+
+        self.assertTrue(metadata_path.exists())
+        self.assertTrue(written["poster"]["visual"]["appears_blank"])
 
 
 if __name__ == "__main__":

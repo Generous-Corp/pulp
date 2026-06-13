@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import math
+import struct
 import json
 import plistlib
 from pathlib import Path
@@ -14,6 +16,7 @@ import tempfile
 import threading
 import time
 from typing import Any
+import zlib
 
 
 def detect_macos_app_bundle(command: str | None) -> Path | None:
@@ -288,6 +291,103 @@ def ffmpeg_encoder_identity(
     }
 
 
+def png_visual_stats(path: Path) -> dict:
+    """Return simple RGB stats for non-interlaced 8-bit PNGs."""
+    try:
+        payload = path.read_bytes()
+        if not payload.startswith(b"\x89PNG\r\n\x1a\n"):
+            raise ValueError("not a png")
+        offset = 8
+        width = height = bit_depth = color_type = None
+        compressed = bytearray()
+        while offset + 8 <= len(payload):
+            length = struct.unpack(">I", payload[offset : offset + 4])[0]
+            chunk_type = payload[offset + 4 : offset + 8]
+            chunk_data = payload[offset + 8 : offset + 8 + length]
+            offset += 12 + length
+            if chunk_type == b"IHDR":
+                width, height, bit_depth, color_type, _compression, _filter, interlace = struct.unpack(">IIBBBBB", chunk_data)
+                if interlace != 0:
+                    raise ValueError("interlaced png unsupported")
+            elif chunk_type == b"IDAT":
+                compressed.extend(chunk_data)
+            elif chunk_type == b"IEND":
+                break
+        if width is None or height is None or bit_depth != 8 or color_type not in {0, 2, 6}:
+            raise ValueError("unsupported png format")
+        channels = {0: 1, 2: 3, 6: 4}[color_type]
+        stride = width * channels
+        raw = zlib.decompress(bytes(compressed))
+        rows: list[bytearray] = []
+        pos = 0
+        previous = bytearray(stride)
+        for _row in range(height):
+            filter_type = raw[pos]
+            pos += 1
+            scanline = bytearray(raw[pos : pos + stride])
+            pos += stride
+            for i, value in enumerate(scanline):
+                left = scanline[i - channels] if i >= channels else 0
+                up = previous[i]
+                up_left = previous[i - channels] if i >= channels else 0
+                if filter_type == 1:
+                    scanline[i] = (value + left) & 0xFF
+                elif filter_type == 2:
+                    scanline[i] = (value + up) & 0xFF
+                elif filter_type == 3:
+                    scanline[i] = (value + ((left + up) // 2)) & 0xFF
+                elif filter_type == 4:
+                    p = left + up - up_left
+                    pa = abs(p - left)
+                    pb = abs(p - up)
+                    pc = abs(p - up_left)
+                    predictor = left if pa <= pb and pa <= pc else up if pb <= pc else up_left
+                    scanline[i] = (value + predictor) & 0xFF
+                elif filter_type != 0:
+                    raise ValueError(f"unsupported png filter {filter_type}")
+            rows.append(scanline)
+            previous = scanline
+
+        count = width * height
+        sums = [0.0, 0.0, 0.0]
+        sums_sq = [0.0, 0.0, 0.0]
+        for row in rows:
+            for x in range(width):
+                base = x * channels
+                if color_type == 0:
+                    rgb = (row[base], row[base], row[base])
+                else:
+                    rgb = (row[base], row[base + 1], row[base + 2])
+                for channel, value in enumerate(rgb):
+                    sums[channel] += value
+                    sums_sq[channel] += value * value
+        mean = [value / count for value in sums]
+        stddev = [math.sqrt(max(0.0, (sums_sq[i] / count) - (mean[i] * mean[i]))) for i in range(3)]
+        return {
+            "ok": True,
+            "width": width,
+            "height": height,
+            "mean": [round(value, 2) for value in mean],
+            "stddev": [round(value, 2) for value in stddev],
+            "appears_blank": max(mean) < 2.0 and max(stddev) < 2.0,
+        }
+    except (OSError, ValueError, zlib.error, struct.error, IndexError) as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+def annotate_poster_visual_check(metadata: dict, poster_path: Path | None) -> str | None:
+    if poster_path is None:
+        return None
+    poster = metadata.setdefault("poster", {"path": str(poster_path), "exists": poster_path.exists()})
+    if not poster_path.exists():
+        return None
+    visual = png_visual_stats(poster_path)
+    poster["visual"] = visual
+    if visual.get("ok") and visual.get("appears_blank"):
+        return f"Video proof recording failed: poster appears blank ({poster_path}); wake the display and retry capture."
+    return None
+
+
 def start_macos_window_video_recording(
     window: dict,
     output_path: Path,
@@ -547,10 +647,13 @@ def stop_macos_window_video_recording(
             "path": str(poster_path),
             "exists": poster_path.exists(),
         }
+    blank_error = annotate_poster_visual_check(metadata, poster_path)
     write_desktop_video_metadata_fn(metadata_path, metadata)
     if result.returncode != 0 or not output_path.exists():
         detail = (result.stderr or result.stdout or f"ffmpeg exited {result.returncode}").strip()
         raise RuntimeError(f"Video proof recording failed: {detail[-1000:]}")
+    if blank_error:
+        raise RuntimeError(blank_error)
     return metadata
 
 
@@ -623,10 +726,13 @@ def stop_macos_window_ffmpeg_recording(
     elif poster_path is not None:
         metadata["poster"] = {"path": str(poster_path), "exists": False}
 
+    blank_error = annotate_poster_visual_check(metadata, poster_path)
     write_desktop_video_metadata_fn(metadata_path, metadata)
     if not output_path.exists() or proc.returncode != 0:
         detail = (stderr or stdout or f"ffmpeg exited {proc.returncode}").strip()
         raise RuntimeError(f"Video proof recording failed: {detail[-1000:]}")
+    if blank_error:
+        raise RuntimeError(blank_error)
     return metadata
 
 
