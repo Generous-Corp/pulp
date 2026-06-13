@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from binding_utils import binding as _binding
+from binding_utils import install_local_helpers
 
 
 EXECUTION_WINDOWS_COMMAND_EXPORTS = ("windows_validation_script",)
@@ -38,3 +39,10 @@ def windows_validation_script(
         resolved_generator_instance=resolved_generator_instance,
         ps_literal_fn=_binding(bindings, "ps_literal"),
     )
+
+
+def install_execution_windows_command_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = EXECUTION_WINDOWS_COMMAND_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)

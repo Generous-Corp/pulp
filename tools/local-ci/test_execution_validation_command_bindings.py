@@ -89,6 +89,33 @@ class ExecutionValidationCommandBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.EXECUTION_VALIDATION_COMMAND_EXPORTS, expected)
         self.assertEqual(len(expected), len(set(expected)))
 
+    def test_validation_command_installer_routes_focused_groups(self):
+        execution = types.SimpleNamespace(
+            local_validation_command=lambda job, exclude_tests="": ([job["id"], exclude_tests], job.get("validation", "full")),
+            posix_ssh_validation_command=lambda *args, **kwargs: (list(args), kwargs["exclude_tests"]),
+        )
+        bindings = {"_execution": execution}
+
+        self.mod.install_execution_validation_command_helpers(
+            bindings,
+            ("local_validation_command", "posix_ssh_validation_command"),
+        )
+
+        self.assertEqual(bindings["local_validation_command"]({"id": "job"}, "slow"), (["job", "slow"], "full"))
+        self.assertEqual(
+            bindings["posix_ssh_validation_command"](
+                "ubuntu",
+                "host",
+                "/repo",
+                {"id": "job"},
+                bundle_name="bundle",
+                bundle_ref="ref",
+                exclude_tests="slow",
+            ),
+            (["ubuntu", "host", "/repo", {"id": "job"}], "slow"),
+        )
+        self.assertNotIn("windows_validation_script", bindings)
+
 
 if __name__ == "__main__":
     unittest.main()

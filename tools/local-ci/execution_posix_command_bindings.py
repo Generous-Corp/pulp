@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from binding_utils import binding as _binding
+from binding_utils import install_local_helpers
 
 
 EXECUTION_POSIX_COMMAND_EXPORTS = ("posix_ssh_validation_command",)
@@ -31,3 +32,10 @@ def posix_ssh_validation_command(
         bundle_ref=bundle_ref,
         exclude_tests=exclude_tests,
     )
+
+
+def install_execution_posix_command_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = EXECUTION_POSIX_COMMAND_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)

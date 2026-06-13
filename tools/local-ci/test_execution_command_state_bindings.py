@@ -31,6 +31,17 @@ class ExecutionCommandStateBindingsTests(unittest.TestCase):
         self.assertTrue(self.mod.should_reuse_prepared_state(bindings, {"reuse": True}))
         self.assertFalse(self.mod.should_reuse_prepared_state(bindings, {}))
 
+    def test_command_state_installer_wires_selected_exports(self):
+        execution = types.SimpleNamespace(
+            remote_commit_error=lambda target, host, job: f"{target}:{host}:{job['id']}",
+        )
+        bindings = {"_execution": execution}
+
+        self.mod.install_execution_command_state_helpers(bindings, ("remote_commit_error",))
+
+        self.assertEqual(bindings["remote_commit_error"]("mac", "host", {"id": "job"}), "mac:host:job")
+        self.assertNotIn("prepared_state_root", bindings)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -47,6 +47,7 @@ class ExecutionCommandBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["remote_commit_error"]("mac", "host", {"id": "job"}), "mac:host:job")
         self.assertEqual(bindings["local_validation_command"]({"id": "job"}, "slow"), (["job"], "slow"))
         self.assertNotIn("windows_validation_script", bindings)
+        self.assertNotIn("prepared_state_root", bindings)
 
 
 if __name__ == "__main__":
