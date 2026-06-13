@@ -194,8 +194,13 @@ public:
                 for (long i = 0; i < out_frames; ++i) out[c][i] = in[c][i];
             return true;
         }
-        if (pitch_off)
+        if (pitch_off) {
+            if (opts.quality <= 0) { // draft: fast OLA preview
+                ola_tempo(in, in_frames, out, out_frames, opts.time_ratio);
+                return true;
+            }
             return tempo_stretch(in, in_frames, out, out_frames, opts.time_ratio);
+        }
 
         // Pitch-only (duration preserved): realtime_pitch engine + formant mode.
         if (opts.time_ratio == 1.0)
@@ -300,6 +305,36 @@ private:
         engine_.reset();
         if (mx <= 0.0f) return 0.0; // degenerate; no anchor shift
         return (static_cast<double>(P) * r - static_cast<double>(pk)) / (static_cast<double>(r) - 1.0);
+    }
+
+    // Fast draft (quality 0): plain Hann-windowed overlap-add tempo change.
+    // Phase-incoherent (some smear) but quick and inoffensive — the sampler
+    // shows this instantly on a tempo change and swaps in the full-quality
+    // render when ready. 50%-overlap Hann is COLA (interior sums to 1), so no
+    // renormalization; exact out_frames by construction; pitch preserved.
+    void ola_tempo(const float* const* in, long in_frames,
+                   float* const* out, long out_frames, double ratio) {
+        const int ch = channels_;
+        constexpr int W = 1024;
+        constexpr int Hs = W / 2;
+        constexpr float kTwoPi = 6.28318530717958647692f;
+        const double Ha = static_cast<double>(Hs) / ratio;
+        for (int c = 0; c < ch; ++c)
+            std::fill(out[c], out[c] + out_frames, 0.0f);
+        for (long k = 0;; ++k) {
+            const long sp = k * Hs;
+            if (sp >= out_frames) break;
+            const long ap = static_cast<long>(std::llround(static_cast<double>(k) * Ha));
+            for (int j = 0; j < W; ++j) {
+                const long so = sp + j;
+                if (so >= out_frames) break;
+                const long ii = ap + j;
+                if (ii < 0 || ii >= in_frames) continue;
+                const float wnd = 0.5f * (1.0f - std::cos(kTwoPi * static_cast<float>(j)
+                                                          / static_cast<float>(W)));
+                for (int c = 0; c < ch; ++c) out[c][so] += in[c][ii] * wnd;
+            }
+        }
     }
 
     // Whole-file tempo-only stretch via the time_stretch engine. Front-pads with

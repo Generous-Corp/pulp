@@ -416,3 +416,30 @@ TEST_CASE("STN noise routing: noisy input stretches finite + deterministic", "[o
     for (float v : a) REQUIRE(std::isfinite(v));
     CHECK(a == b); // STN morphing stays deterministic
 }
+
+TEST_CASE("draft quality=0: fast OLA tempo, exact length, pitch preserved", "[offline-stretch]") {
+    constexpr double pi = 3.14159265358979323846;
+    const double sr = 48000.0, f = 1000.0, w = 2.0 * pi * f / sr;
+    const long n = 48000;
+    std::vector<float> in(static_cast<size_t>(n));
+    for (long i = 0; i < n; ++i) in[static_cast<size_t>(i)] = 0.5f * std::sin(w * i);
+    const float* ip[1] = {in.data()};
+
+    OfflineStretch s; s.prepare(sr, 1);
+    OfflineStretchOptions o; o.time_ratio = 1.5; o.quality = 0; // draft
+    const long m = offline_stretch_output_frames(n, 1.5);
+    REQUIRE(m == 72000);
+    std::vector<float> out(static_cast<size_t>(m));
+    float* op[1] = {out.data()};
+    std::string e; REQUIRE(s.process(ip, n, op, m, o, &e));
+    for (float v : out) REQUIRE(std::isfinite(v));
+    long zc = 0; const long lo = 6000, hi = m - 6000;
+    for (long i = lo + 1; i < hi; ++i)
+        if ((out[static_cast<size_t>(i - 1)] <= 0.0f) != (out[static_cast<size_t>(i)] <= 0.0f)) ++zc;
+    const double fr = zc / (2.0 * (static_cast<double>(hi - lo - 1) / sr));
+    // Plain OLA is phase-incoherent: ZCR jitters a few % from boundary
+    // discontinuities. The point is pitch is PRESERVED (near 1 kHz), not
+    // repitched down to 667 Hz — a generous band confirms that for a draft.
+    CHECK(fr > 880.0);
+    CHECK(fr < 1120.0);
+}
