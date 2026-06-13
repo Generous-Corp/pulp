@@ -7,6 +7,15 @@ from pathlib import Path
 from typing import Any
 
 from binding_utils import binding as _binding
+from binding_utils import install_local_helpers
+
+
+EXECUTION_TARGET_RESULT_EXPORTS = (
+    "validation_result_from_run",
+    "validation_error_result",
+    "unreachable_target_result",
+    "target_exception_result",
+)
 
 
 def validation_result_from_run(
@@ -51,3 +60,10 @@ def unreachable_target_result(bindings: Mapping[str, Any], target_name: str, det
 
 def target_exception_result(bindings: Mapping[str, Any], target_name: str, exc: Exception) -> dict:
     return _binding(bindings, "_execution").target_exception_result(target_name, exc)
+
+
+def install_execution_target_result_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = EXECUTION_TARGET_RESULT_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)

@@ -90,6 +90,16 @@ class ExecutionResultBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["sorted_target_results"]([1, 2]), [2, 1])
         self.assertNotIn("validation_result_from_run", bindings)
 
+    def test_result_exports_are_composed_from_focused_groups(self):
+        expected = (
+            *self.mod.EXECUTION_TARGET_RESULT_EXPORTS,
+            *self.mod.EXECUTION_COMPLETED_RESULT_EXPORTS,
+            *self.mod.EXECUTION_TASK_RESULT_EXPORTS,
+        )
+
+        self.assertEqual(self.mod.EXECUTION_RESULT_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
 
 if __name__ == "__main__":
     unittest.main()
