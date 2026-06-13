@@ -427,6 +427,16 @@ def build_local_ci_parser(
         action="store_true",
         help="On macOS, re-run video-doctor inside Terminal.app so Screen Recording permission follows Terminal's TCC grant.",
     )
+    p_desktop_video_doctor.add_argument(
+        "--video-audio",
+        choices=["none", "system", "plugin"],
+        default="none",
+        help="Also validate readiness for an audio-bearing proof. system requires an explicit AVFoundation audio device; plugin is reserved.",
+    )
+    p_desktop_video_doctor.add_argument(
+        "--video-audio-device",
+        help="AVFoundation audio device index or name for --video-audio system. Can also be set with PULP_VIDEO_AUDIO_DEVICE.",
+    )
     p_desktop_video_doctor.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 
     p_desktop_video_setup = desktop_sub.add_parser("video-setup", help="Print first-run video proof setup steps for one desktop target")
@@ -442,6 +452,16 @@ def build_local_ci_parser(
         "--skip-remotion-smoke",
         action="store_true",
         help="When using --check, skip the Remotion smoke render check.",
+    )
+    p_desktop_video_setup.add_argument(
+        "--video-audio",
+        choices=["none", "system", "plugin"],
+        default="none",
+        help="When using --check, also validate readiness for an audio-bearing proof.",
+    )
+    p_desktop_video_setup.add_argument(
+        "--video-audio-device",
+        help="AVFoundation audio device index or name for --video-audio system. Can also be set with PULP_VIDEO_AUDIO_DEVICE.",
     )
     p_desktop_video_setup.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 

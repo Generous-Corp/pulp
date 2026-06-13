@@ -70,6 +70,7 @@ class DesktopCommandBindingsTests(unittest.TestCase):
             "windows_tooling_detail",
             "desktop_doctor_checks",
             "video_proof_smoke",
+            "probe_macos_avfoundation_audio",
             "desktop_receipt_for",
             "desktop_capabilities_for",
             "desktop_optional_capabilities",
@@ -145,7 +146,14 @@ class DesktopCommandBindingsTests(unittest.TestCase):
                 "_desktop_setup_commands_cli",
                 "cmd_desktop_video_doctor",
                 self.mod.cmd_desktop_video_doctor,
-                ["load_config", "resolve_desktop_target", "desktop_doctor_checks", "normalize_desktop_optional_config", "video_proof_smoke"],
+                [
+                    "load_config",
+                    "resolve_desktop_target",
+                    "desktop_doctor_checks",
+                    "normalize_desktop_optional_config",
+                    "video_proof_smoke",
+                    "probe_macos_avfoundation_audio",
+                ],
             ),
             (
                 "_desktop_commands_cli",
@@ -336,6 +344,7 @@ class DesktopCommandBindingsTests(unittest.TestCase):
             "desktop_doctor_checks",
             "normalize_desktop_optional_config",
             "video_proof_smoke",
+            "probe_macos_avfoundation_audio",
         ]:
             self.assertIs(captured["kwargs"][f"{name}_fn"], bindings[name])
 

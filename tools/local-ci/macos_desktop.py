@@ -507,6 +507,41 @@ def macos_avfoundation_screen_input_device(
     raise RuntimeError("Could not find AVFoundation device `Capture screen 0` in ffmpeg device list.")
 
 
+def macos_avfoundation_device_listing(
+    *,
+    ffmpeg_path: str = "ffmpeg",
+    run_fn: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+) -> str:
+    try:
+        result = run_fn(
+            [ffmpeg_path, "-hide_banner", "-f", "avfoundation", "-list_devices", "true", "-i", ""],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError(f"{ffmpeg_path} not found on PATH; install ffmpeg or disable --record-video.") from exc
+    return "\n".join([result.stderr or "", result.stdout or ""])
+
+
+def macos_avfoundation_audio_devices_from_listing(output: str) -> list[dict[str, str]]:
+    devices: list[dict[str, str]] = []
+    in_audio = False
+    for line in output.splitlines():
+        if "AVFoundation video devices" in line:
+            in_audio = False
+            continue
+        if "AVFoundation audio devices" in line:
+            in_audio = True
+            continue
+        if not in_audio:
+            continue
+        match = re.search(r"\[(\d+)\]\s+(.+?)\s*$", line)
+        if match:
+            devices.append({"index": match.group(1), "name": match.group(2).strip()})
+    return devices
+
+
 def macos_avfoundation_audio_input_device(
     explicit_device: str | None = None,
     *,
@@ -521,6 +556,28 @@ def macos_avfoundation_audio_input_device(
     if device.startswith(":"):
         device = device[1:]
     return device
+
+
+def macos_avfoundation_audio_device_detail(
+    explicit_device: str | None = None,
+    *,
+    env: dict[str, str] | None = None,
+    ffmpeg_path: str = "ffmpeg",
+    run_fn: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+) -> tuple[bool, str]:
+    device = macos_avfoundation_audio_input_device(explicit_device, env=env)
+    if not device:
+        return (
+            False,
+            "No AVFoundation audio device configured; pass --video-audio-device <index-or-name> or set PULP_VIDEO_AUDIO_DEVICE.",
+        )
+    output = macos_avfoundation_device_listing(ffmpeg_path=ffmpeg_path, run_fn=run_fn)
+    devices = macos_avfoundation_audio_devices_from_listing(output)
+    for item in devices:
+        if device == item["index"] or device == item["name"]:
+            return True, f"{item['name']} ({item['index']})"
+    available = ", ".join(f"{item['name']} ({item['index']})" for item in devices) or "none listed"
+    return False, f"AVFoundation audio device `{device}` not found; available audio devices: {available}"
 
 
 def ffmpeg_encoder_identity(

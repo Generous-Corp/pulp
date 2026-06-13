@@ -363,6 +363,38 @@ class MacOSDesktopTests(unittest.TestCase):
         )
         self.assertIsNone(self.mod.macos_avfoundation_audio_input_device("", env={}))
 
+    def test_avfoundation_audio_device_detail_matches_index_or_name(self) -> None:
+        listing = """
+[AVFoundation indev @ 0x1] AVFoundation video devices:
+[AVFoundation indev @ 0x1] [3] Capture screen 0
+[AVFoundation indev @ 0x1] AVFoundation audio devices:
+[AVFoundation indev @ 0x1] [0] MacBook Pro Microphone
+[AVFoundation indev @ 0x1] [2] BlackHole 2ch
+"""
+
+        def run_devices(cmd: list[str], **_kwargs):
+            self.assertIn("-list_devices", cmd)
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr=listing)
+
+        self.assertEqual(
+            self.mod.macos_avfoundation_audio_devices_from_listing(listing),
+            [
+                {"index": "0", "name": "MacBook Pro Microphone"},
+                {"index": "2", "name": "BlackHole 2ch"},
+            ],
+        )
+        self.assertEqual(
+            self.mod.macos_avfoundation_audio_device_detail("2", run_fn=run_devices),
+            (True, "BlackHole 2ch (2)"),
+        )
+        self.assertEqual(
+            self.mod.macos_avfoundation_audio_device_detail("BlackHole 2ch", run_fn=run_devices),
+            (True, "BlackHole 2ch (2)"),
+        )
+        ok, detail = self.mod.macos_avfoundation_audio_device_detail("Missing Device", run_fn=run_devices)
+        self.assertFalse(ok)
+        self.assertIn("available audio devices: MacBook Pro Microphone (0), BlackHole 2ch (2)", detail)
+
     def test_png_visual_stats_detects_blank_and_nonblank_posters(self) -> None:
         blank = self.root / "blank.png"
         nonblank = self.root / "nonblank.png"

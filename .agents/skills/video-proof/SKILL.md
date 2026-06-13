@@ -112,6 +112,18 @@ If `avfoundation_screen` fails, ffmpeg cannot enumerate the primary macOS input
 terminal and rerun the doctor. This is a warning, not a hard failure, when
 `screencapture` passes.
 
+For audio-bearing proofs, validate the explicit AVFoundation audio device before
+recording:
+
+```bash
+PULP_VIDEO_AUDIO_DEVICE="BlackHole 2ch" \
+  python3 tools/local-ci/local_ci.py desktop video-doctor mac \
+    --run-in-terminal \
+    --video-audio system
+```
+
+Require `PASS avfoundation_audio`; do not guess a microphone or system input.
+
 If `screencapture` fails with `could not create image from display`, macOS has
 not granted Screen Recording to the terminal or agent app. Ask the user to grant
 Screen Recording, restart that app, then rerun the doctor. You can still update

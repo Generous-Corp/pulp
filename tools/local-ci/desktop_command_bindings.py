@@ -86,6 +86,7 @@ def cmd_desktop_video_doctor(bindings: Mapping[str, Any], args: Any) -> int:
         desktop_doctor_checks_fn=_binding(bindings, "desktop_doctor_checks"),
         normalize_desktop_optional_config_fn=_binding(bindings, "normalize_desktop_optional_config"),
         video_proof_smoke_fn=_binding(bindings, "video_proof_smoke"),
+        probe_macos_avfoundation_audio_fn=_binding(bindings, "probe_macos_avfoundation_audio"),
     )
 
 
@@ -100,6 +101,7 @@ def cmd_desktop_video_setup(bindings: Mapping[str, Any], args: Any) -> int:
         desktop_doctor_checks_fn=_binding(bindings, "desktop_doctor_checks"),
         normalize_desktop_optional_config_fn=_binding(bindings, "normalize_desktop_optional_config"),
         video_proof_smoke_fn=_binding(bindings, "video_proof_smoke"),
+        probe_macos_avfoundation_audio_fn=_binding(bindings, "probe_macos_avfoundation_audio"),
     )
 
 

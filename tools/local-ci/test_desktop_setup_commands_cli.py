@@ -222,11 +222,12 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
             "desktop_doctor_checks_fn": lambda _config, _name: [dict(check) for check in checks],
             "normalize_desktop_optional_config_fn": lambda optional: {"video_capture": bool((optional or {}).get("video_capture"))},
             "video_proof_smoke_fn": lambda: self.fail("smoke should be skipped"),
+            "probe_macos_avfoundation_audio_fn": lambda _device: self.fail("audio probe should not run"),
             "print_fn": self.print_line,
         }
 
         result = self.mod.cmd_desktop_video_doctor(
-            Namespace(target="mac", json=False, skip_remotion_smoke=True),
+            Namespace(target="mac", json=False, skip_remotion_smoke=True, video_audio="none", video_audio_device=None),
             **deps,
         )
 
@@ -250,11 +251,12 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
             "desktop_doctor_checks_fn": lambda _config, _name: [dict(check) for check in checks],
             "normalize_desktop_optional_config_fn": lambda optional: {"video_capture": bool((optional or {}).get("video_capture"))},
             "video_proof_smoke_fn": lambda: {"ok": False, "detail": "npm install required"},
+            "probe_macos_avfoundation_audio_fn": lambda _device: self.fail("audio probe should not run"),
             "print_fn": self.print_line,
         }
 
         result = self.mod.cmd_desktop_video_doctor(
-            Namespace(target="mac", json=True, skip_remotion_smoke=False),
+            Namespace(target="mac", json=True, skip_remotion_smoke=False, video_audio="none", video_audio_device=None),
             **deps,
         )
 
@@ -290,11 +292,12 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
             "desktop_doctor_checks_fn": lambda _config, _name: [dict(check) for check in checks],
             "normalize_desktop_optional_config_fn": lambda optional: {"video_capture": bool((optional or {}).get("video_capture"))},
             "video_proof_smoke_fn": lambda: {"ok": True, "detail": "smoke ok"},
+            "probe_macos_avfoundation_audio_fn": lambda _device: self.fail("audio probe should not run"),
             "print_fn": self.print_line,
         }
 
         result = self.mod.cmd_desktop_video_doctor(
-            Namespace(target="mac", json=False, skip_remotion_smoke=False),
+            Namespace(target="mac", json=False, skip_remotion_smoke=False, video_audio="none", video_audio_device=None),
             **deps,
         )
 
@@ -318,11 +321,12 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
             "desktop_doctor_checks_fn": lambda _config, _name: [dict(check) for check in checks],
             "normalize_desktop_optional_config_fn": lambda optional: {"video_capture": bool((optional or {}).get("video_capture"))},
             "video_proof_smoke_fn": lambda: {"ok": True, "detail": "smoke ok"},
+            "probe_macos_avfoundation_audio_fn": lambda _device: self.fail("audio probe should not run"),
             "print_fn": self.print_line,
         }
 
         result = self.mod.cmd_desktop_video_doctor(
-            Namespace(target="mac", json=True, skip_remotion_smoke=False),
+            Namespace(target="mac", json=True, skip_remotion_smoke=False, video_audio="none", video_audio_device=None),
             **deps,
         )
 
@@ -345,11 +349,12 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
             "desktop_doctor_checks_fn": lambda _config, _name: [dict(check) for check in checks],
             "normalize_desktop_optional_config_fn": lambda optional: {"video_capture": bool((optional or {}).get("video_capture"))},
             "video_proof_smoke_fn": lambda: {"ok": True, "detail": "smoke ok"},
+            "probe_macos_avfoundation_audio_fn": lambda _device: self.fail("audio probe should not run"),
             "print_fn": self.print_line,
         }
 
         result = self.mod.cmd_desktop_video_doctor(
-            Namespace(target="mac", json=True, skip_remotion_smoke=False),
+            Namespace(target="mac", json=True, skip_remotion_smoke=False, video_audio="none", video_audio_device=None),
             **deps,
         )
 
@@ -361,6 +366,68 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
         self.assertFalse(checks_by_name["avfoundation_screen"]["required"])
         self.assertIn("screencapture fallback available", checks_by_name["avfoundation_screen"]["detail"])
 
+    def test_video_doctor_can_validate_system_audio_device(self):
+        self.targets["mac"]["optional"] = {"video_capture": True}
+        audio_devices: list[str | None] = []
+        checks = [
+            {"name": "receipt", "ok": True, "detail": "installed"},
+            {"name": "screencapture", "ok": True, "detail": "/usr/sbin/screencapture"},
+            {"name": "video_capture", "ok": True, "detail": "/repo/node_modules/ffmpeg-static/ffmpeg", "required": False},
+            {"name": "avfoundation_screen", "ok": True, "detail": "Capture screen 0 (3:)", "required": False},
+        ]
+        deps = {
+            "load_config_fn": self.config,
+            "resolve_desktop_target_fn": lambda _config, name: self.targets[name],
+            "desktop_doctor_checks_fn": lambda _config, _name: [dict(check) for check in checks],
+            "normalize_desktop_optional_config_fn": lambda optional: {"video_capture": bool((optional or {}).get("video_capture"))},
+            "video_proof_smoke_fn": lambda: {"ok": True, "detail": "smoke ok"},
+            "probe_macos_avfoundation_audio_fn": lambda device: audio_devices.append(device) or (True, "BlackHole 2ch (2)"),
+            "print_fn": self.print_line,
+        }
+
+        result = self.mod.cmd_desktop_video_doctor(
+            Namespace(target="mac", json=True, skip_remotion_smoke=False, video_audio="system", video_audio_device="2"),
+            **deps,
+        )
+
+        self.assertEqual(result, 0)
+        payload = json.loads(self.printed[0])
+        checks_by_name = {check["name"]: check for check in payload["checks"]}
+        self.assertEqual(audio_devices, ["2"])
+        self.assertTrue(checks_by_name["avfoundation_audio"]["ok"])
+        self.assertEqual(checks_by_name["avfoundation_audio"]["detail"], "BlackHole 2ch (2)")
+
+    def test_video_doctor_reports_system_audio_device_remediation(self):
+        self.targets["mac"]["optional"] = {"video_capture": True}
+        checks = [
+            {"name": "receipt", "ok": True, "detail": "installed"},
+            {"name": "screencapture", "ok": True, "detail": "/usr/sbin/screencapture"},
+            {"name": "video_capture", "ok": True, "detail": "/repo/node_modules/ffmpeg-static/ffmpeg", "required": False},
+            {"name": "avfoundation_screen", "ok": True, "detail": "Capture screen 0 (3:)", "required": False},
+        ]
+        deps = {
+            "load_config_fn": self.config,
+            "resolve_desktop_target_fn": lambda _config, name: self.targets[name],
+            "desktop_doctor_checks_fn": lambda _config, _name: [dict(check) for check in checks],
+            "normalize_desktop_optional_config_fn": lambda optional: {"video_capture": bool((optional or {}).get("video_capture"))},
+            "video_proof_smoke_fn": lambda: {"ok": True, "detail": "smoke ok"},
+            "probe_macos_avfoundation_audio_fn": lambda _device: (False, "No AVFoundation audio device configured"),
+            "print_fn": self.print_line,
+        }
+
+        result = self.mod.cmd_desktop_video_doctor(
+            Namespace(target="mac", json=True, skip_remotion_smoke=False, video_audio="system", video_audio_device=None),
+            **deps,
+        )
+
+        self.assertEqual(result, 1)
+        payload = json.loads(self.printed[0])
+        checks_by_name = {check["name"]: check for check in payload["checks"]}
+        remediations_by_check = {item["check"]: item for item in payload["remediations"]}
+        self.assertFalse(checks_by_name["avfoundation_audio"]["ok"])
+        self.assertEqual(remediations_by_check["avfoundation_audio"]["check"], "avfoundation_audio")
+        self.assertIn("PULP_VIDEO_AUDIO_DEVICE", remediations_by_check["avfoundation_audio"]["command"])
+
     def test_video_setup_prints_portable_first_run_steps(self):
         deps = {
             "load_config_fn": self.config,
@@ -368,11 +435,12 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
             "desktop_doctor_checks_fn": lambda *_args: self.fail("doctor should not run without --check"),
             "normalize_desktop_optional_config_fn": lambda optional: {"video_capture": bool((optional or {}).get("video_capture"))},
             "video_proof_smoke_fn": lambda: self.fail("smoke should not run without --check"),
+            "probe_macos_avfoundation_audio_fn": lambda _device: self.fail("audio probe should not run without --check"),
             "print_fn": self.print_line,
         }
 
         result = self.mod.cmd_desktop_video_setup(
-            Namespace(target="mac", machine="blackbook", check=False, skip_remotion_smoke=False, json=False),
+            Namespace(target="mac", machine="blackbook", check=False, skip_remotion_smoke=False, video_audio="none", video_audio_device=None, json=False),
             **deps,
         )
 
@@ -382,6 +450,7 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
         self.assertTrue(any("cp tools/local-ci/config.example.json tools/local-ci/config.json" in line for line in self.printed))
         self.assertTrue(any("npm --prefix tools/local-ci install" in line for line in self.printed))
         self.assertTrue(any("target.mac.video_capture true" in line for line in self.printed))
+        self.assertTrue(any("--video-audio system" in line for line in self.printed))
         self.assertTrue(any("--label blackbook-video-setup-smoke" in line for line in self.printed))
 
     def test_video_setup_prints_first_run_steps_without_config(self):
@@ -391,11 +460,12 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
             "desktop_doctor_checks_fn": lambda *_args: self.fail("doctor should not run without --check"),
             "normalize_desktop_optional_config_fn": lambda optional: {"video_capture": bool((optional or {}).get("video_capture"))},
             "video_proof_smoke_fn": lambda: self.fail("smoke should not run without --check"),
+            "probe_macos_avfoundation_audio_fn": lambda _device: self.fail("audio probe should not run without --check"),
             "print_fn": self.print_line,
         }
 
         result = self.mod.cmd_desktop_video_setup(
-            Namespace(target="mac", machine="blackbook", check=False, skip_remotion_smoke=False, json=False),
+            Namespace(target="mac", machine="blackbook", check=False, skip_remotion_smoke=False, video_audio="none", video_audio_device=None, json=False),
             **deps,
         )
 
@@ -410,11 +480,12 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
             "desktop_doctor_checks_fn": lambda *_args: self.fail("doctor should not run without config"),
             "normalize_desktop_optional_config_fn": lambda optional: {"video_capture": bool((optional or {}).get("video_capture"))},
             "video_proof_smoke_fn": lambda: self.fail("smoke should not run without config"),
+            "probe_macos_avfoundation_audio_fn": lambda _device: self.fail("audio probe should not run without config"),
             "print_fn": self.print_line,
         }
 
         result = self.mod.cmd_desktop_video_setup(
-            Namespace(target="mac", machine="blackbook", check=True, skip_remotion_smoke=False, json=True),
+            Namespace(target="mac", machine="blackbook", check=True, skip_remotion_smoke=False, video_audio="none", video_audio_device=None, json=True),
             **deps,
         )
 
@@ -439,11 +510,12 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
             "desktop_doctor_checks_fn": lambda _config, _name: [dict(check) for check in checks],
             "normalize_desktop_optional_config_fn": lambda optional: {"video_capture": bool((optional or {}).get("video_capture"))},
             "video_proof_smoke_fn": lambda: {"ok": True, "detail": "smoke ok"},
+            "probe_macos_avfoundation_audio_fn": lambda device: (device == "2", "BlackHole 2ch (2)" if device == "2" else "missing"),
             "print_fn": self.print_line,
         }
 
         result = self.mod.cmd_desktop_video_setup(
-            Namespace(target="mac", machine="blackbook", check=True, skip_remotion_smoke=False, json=True),
+            Namespace(target="mac", machine="blackbook", check=True, skip_remotion_smoke=False, video_audio="system", video_audio_device="2", json=True),
             **deps,
         )
 
@@ -452,7 +524,10 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
         self.assertEqual(payload["machine"], "blackbook")
         self.assertTrue(payload["check"]["ok"])
         self.assertEqual(payload["check"]["target"], "mac")
-        self.assertEqual(payload["steps"][6]["name"], "smoke_proof")
+        checks_by_name = {check["name"]: check for check in payload["check"]["checks"]}
+        self.assertTrue(checks_by_name["avfoundation_audio"]["ok"])
+        self.assertEqual(payload["steps"][6]["name"], "audio_doctor")
+        self.assertEqual(payload["steps"][7]["name"], "smoke_proof")
         self.assertIn("--run-in-terminal", payload["steps"][5]["command"])
 
 

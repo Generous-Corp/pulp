@@ -222,7 +222,17 @@ class CliParserTests(unittest.TestCase):
     def test_desktop_video_doctor_defaults_to_mac(self):
         parser = self.build_parser()
 
-        args = parser.parse_args(["desktop", "video-doctor", "--skip-remotion-smoke", "--json", "--run-in-terminal"])
+        args = parser.parse_args([
+            "desktop",
+            "video-doctor",
+            "--skip-remotion-smoke",
+            "--json",
+            "--run-in-terminal",
+            "--video-audio",
+            "system",
+            "--video-audio-device",
+            "BlackHole 2ch",
+        ])
 
         self.assertEqual(args.command, "desktop")
         self.assertEqual(args.desktop_command, "video-doctor")
@@ -230,6 +240,8 @@ class CliParserTests(unittest.TestCase):
         self.assertTrue(args.skip_remotion_smoke)
         self.assertTrue(args.json)
         self.assertTrue(args.run_in_terminal)
+        self.assertEqual(args.video_audio, "system")
+        self.assertEqual(args.video_audio_device, "BlackHole 2ch")
 
     def test_desktop_video_setup_command(self):
         parser = self.build_parser()
@@ -243,6 +255,10 @@ class CliParserTests(unittest.TestCase):
             "--check",
             "--run-in-terminal",
             "--skip-remotion-smoke",
+            "--video-audio",
+            "system",
+            "--video-audio-device",
+            "BlackHole 2ch",
             "--json",
         ])
 
@@ -253,6 +269,8 @@ class CliParserTests(unittest.TestCase):
         self.assertTrue(args.check)
         self.assertTrue(args.run_in_terminal)
         self.assertTrue(args.skip_remotion_smoke)
+        self.assertEqual(args.video_audio, "system")
+        self.assertEqual(args.video_audio_device, "BlackHole 2ch")
         self.assertTrue(args.json)
 
     def test_desktop_compose_video_command_parses_outputs(self):

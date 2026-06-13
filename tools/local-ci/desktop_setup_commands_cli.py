@@ -265,6 +265,16 @@ def desktop_video_doctor_remediations(checks: list[dict], *, target_name: str) -
                 "command": "python3 tools/local-ci/local_ci.py desktop video-doctor mac --json",
             }
         )
+    avfoundation_audio = checks_by_name.get("avfoundation_audio")
+    if avfoundation_audio and not avfoundation_audio.get("ok") and avfoundation_audio.get("required", True):
+        remediations.append(
+            {
+                "check": "avfoundation_audio",
+                "title": "Configure an explicit macOS audio input",
+                "detail": "Install/select a loopback audio device, then pass --video-audio-device or set PULP_VIDEO_AUDIO_DEVICE before recording system-audio proofs.",
+                "command": f"PULP_VIDEO_AUDIO_DEVICE=\"BlackHole 2ch\" python3 tools/local-ci/local_ci.py desktop video-doctor {target_name} --video-audio system --json",
+            }
+        )
     remotion = checks_by_name.get("remotion_smoke")
     if remotion and not remotion.get("ok"):
         remediations.append(
@@ -317,6 +327,15 @@ def desktop_video_setup_steps(target_name: str, *, machine_label: str | None = N
             "title": "Run video-doctor through Terminal",
             "command": f"python3 tools/local-ci/local_ci.py desktop video-doctor {target_name} --run-in-terminal",
             "detail": "Verifies screencapture, ffmpeg, Remotion, AVFoundation/fallback capture, and target config.",
+        },
+        {
+            "name": "audio_doctor",
+            "title": "Optional: validate system-audio input",
+            "command": (
+                f"PULP_VIDEO_AUDIO_DEVICE=\"BlackHole 2ch\" python3 tools/local-ci/local_ci.py desktop "
+                f"video-doctor {target_name} --run-in-terminal --video-audio system"
+            ),
+            "detail": "Only needed for audio-bearing proofs. Select an explicit AVFoundation loopback/input device; the harness will not guess one.",
         },
         {
             "name": "smoke_proof",
@@ -395,6 +414,7 @@ def desktop_video_doctor_payload(
     desktop_doctor_checks_fn: Callable[[dict, str], list[dict]],
     normalize_desktop_optional_config_fn: Callable[[dict | None], dict],
     video_proof_smoke_fn: Callable[[], dict],
+    probe_macos_avfoundation_audio_fn: Callable[[str | None], tuple[bool, str]] | None = None,
 ) -> tuple[int, dict]:
     config = load_config_fn()
     target = resolve_desktop_target_fn(config, args.target)
@@ -420,6 +440,39 @@ def desktop_video_doctor_payload(
             check["required"] = not screencapture_ok
             if not check.get("ok") and screencapture_ok:
                 check["detail"] = f"{check['detail']} (screencapture fallback available)"
+
+    video_audio = getattr(args, "video_audio", "none")
+    if video_audio == "plugin":
+        checks.append(
+            {
+                "name": "video_audio",
+                "ok": False,
+                "detail": "plugin audio proof capture is reserved and not implemented yet",
+                "required": True,
+            }
+        )
+    elif video_audio == "system":
+        if target.get("adapter") != "macos-local":
+            checks.append(
+                {
+                    "name": "avfoundation_audio",
+                    "ok": False,
+                    "detail": "--video-audio system is currently implemented only for macOS AVFoundation capture",
+                    "required": True,
+                }
+            )
+        elif probe_macos_avfoundation_audio_fn is None:
+            checks.append(
+                {
+                    "name": "avfoundation_audio",
+                    "ok": False,
+                    "detail": "AVFoundation audio probe is not available in this runner",
+                    "required": True,
+                }
+            )
+        else:
+            ok, detail = probe_macos_avfoundation_audio_fn(getattr(args, "video_audio_device", None))
+            checks.append({"name": "avfoundation_audio", "ok": ok, "detail": detail, "required": True})
 
     if getattr(args, "skip_remotion_smoke", False):
         checks.append(
@@ -472,6 +525,7 @@ def cmd_desktop_video_doctor(
     desktop_doctor_checks_fn: Callable[[dict, str], list[dict]],
     normalize_desktop_optional_config_fn: Callable[[dict | None], dict],
     video_proof_smoke_fn: Callable[[], dict],
+    probe_macos_avfoundation_audio_fn: Callable[[str | None], tuple[bool, str]] | None = None,
     print_fn: Callable[[str], None] = print,
 ) -> int:
     try:
@@ -482,6 +536,7 @@ def cmd_desktop_video_doctor(
             desktop_doctor_checks_fn=desktop_doctor_checks_fn,
             normalize_desktop_optional_config_fn=normalize_desktop_optional_config_fn,
             video_proof_smoke_fn=video_proof_smoke_fn,
+            probe_macos_avfoundation_audio_fn=probe_macos_avfoundation_audio_fn,
         )
     except (FileNotFoundError, ValueError) as exc:
         print_fn(f"Error: {exc}")
@@ -513,6 +568,7 @@ def cmd_desktop_video_setup(
     desktop_doctor_checks_fn: Callable[[dict, str], list[dict]],
     normalize_desktop_optional_config_fn: Callable[[dict | None], dict],
     video_proof_smoke_fn: Callable[[], dict],
+    probe_macos_avfoundation_audio_fn: Callable[[str | None], tuple[bool, str]] | None = None,
     print_fn: Callable[[str], None] = print,
 ) -> int:
     steps = desktop_video_setup_steps(args.target, machine_label=getattr(args, "machine", None))
@@ -563,6 +619,8 @@ def cmd_desktop_video_setup(
         doctor_args = argparse.Namespace(
             target=args.target,
             skip_remotion_smoke=getattr(args, "skip_remotion_smoke", False),
+            video_audio=getattr(args, "video_audio", "none"),
+            video_audio_device=getattr(args, "video_audio_device", None),
         )
         exit_code, doctor_payload = desktop_video_doctor_payload(
             doctor_args,
@@ -571,6 +629,7 @@ def cmd_desktop_video_setup(
             desktop_doctor_checks_fn=desktop_doctor_checks_fn,
             normalize_desktop_optional_config_fn=normalize_desktop_optional_config_fn,
             video_proof_smoke_fn=video_proof_smoke_fn,
+            probe_macos_avfoundation_audio_fn=probe_macos_avfoundation_audio_fn,
         )
         payload["check"] = doctor_payload
 

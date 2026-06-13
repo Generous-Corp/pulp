@@ -1069,6 +1069,17 @@ def probe_macos_avfoundation_screen(ffmpeg_path: str | None = None) -> tuple[boo
         return False, str(exc)
 
 
+def probe_macos_avfoundation_audio(audio_device: str | None = None, ffmpeg_path: str | None = None) -> tuple[bool, str]:
+    try:
+        return _macos_desktop.macos_avfoundation_audio_device_detail(
+            audio_device,
+            ffmpeg_path=ffmpeg_path or resolve_ffmpeg_path(),
+            run_fn=subprocess.run,
+        )
+    except RuntimeError as exc:
+        return False, str(exc)
+
+
 def desktop_video_metadata(path: Path, **kwargs) -> dict:
     return _video_artifacts.desktop_video_metadata(path, **kwargs)
 

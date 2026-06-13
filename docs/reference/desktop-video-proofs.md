@@ -91,6 +91,18 @@ removes the flag for the child process, and relays the child stdout/stderr and
 exit code. It also sends a short `caffeinate -u` display-wake pulse before the
 child command so idle/remote displays do not produce black captures.
 
+For audio-bearing proofs, validate the explicit AVFoundation audio device too:
+
+```bash
+PULP_VIDEO_AUDIO_DEVICE="BlackHole 2ch" \
+  python3 tools/local-ci/local_ci.py desktop video-doctor mac \
+    --run-in-terminal \
+    --video-audio system
+```
+
+The audio check should show `PASS avfoundation_audio`. The harness does not
+guess an input device; use a loopback device when recording app/system output.
+
 ## Capture
 
 The dedicated entry point records video by default and renders the Remotion
