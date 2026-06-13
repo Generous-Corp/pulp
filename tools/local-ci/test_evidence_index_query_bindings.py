@@ -23,6 +23,12 @@ class FakeEvidenceIndexQuery:
 
 
 class EvidenceIndexQueryBindingTests(unittest.TestCase):
+    def test_query_exports_are_declared(self) -> None:
+        self.assertEqual(
+            evidence_index_query_bindings.EVIDENCE_INDEX_QUERY_EXPORTS,
+            ("collect_evidence_groups_from_index",),
+        )
+
     def test_query_bindings_delegate_to_bound_module(self) -> None:
         fake = FakeEvidenceIndexQuery()
         bindings = {"evidence_index_module": fake}
@@ -33,6 +39,22 @@ class EvidenceIndexQueryBindingTests(unittest.TestCase):
             {"full": []},
         )
         self.assertEqual(fake.calls, [("collect_evidence_groups_from_index", index, "b", "s")])
+
+    def test_install_evidence_index_query_helpers_wires_named_exports(self) -> None:
+        fake = FakeEvidenceIndexQuery()
+        bindings = {"evidence_index_module": fake}
+        index = {"entries": {}}
+
+        evidence_index_query_bindings.install_evidence_index_query_helpers(
+            bindings,
+            ("collect_evidence_groups_from_index",),
+        )
+
+        self.assertEqual(
+            bindings["collect_evidence_groups_from_index"](index, branch="b", sha="s"),
+            {"full": []},
+        )
+        self.assertEqual(bindings["collect_evidence_groups_from_index"].__name__, "collect_evidence_groups_from_index")
 
 
 if __name__ == "__main__":

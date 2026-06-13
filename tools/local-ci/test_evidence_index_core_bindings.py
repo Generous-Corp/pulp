@@ -39,6 +39,18 @@ class FakeEvidenceIndexCore:
 
 
 class EvidenceIndexCoreBindingTests(unittest.TestCase):
+    def test_core_exports_are_declared(self) -> None:
+        self.assertEqual(
+            evidence_index_core_bindings.EVIDENCE_INDEX_CORE_EXPORTS,
+            (
+                "empty_evidence_index",
+                "evidence_entry_key",
+                "normalize_evidence_index",
+                "evidence_record_from_result",
+                "merge_result_into_evidence_index",
+            ),
+        )
+
     def test_core_bindings_delegate_to_bound_module(self) -> None:
         fake = FakeEvidenceIndexCore()
         bindings = {"evidence_index_module": fake}
@@ -65,6 +77,16 @@ class EvidenceIndexCoreBindingTests(unittest.TestCase):
                 ("merge_result_into_evidence_index", index, result, path),
             ],
         )
+
+    def test_install_evidence_index_core_helpers_wires_named_exports(self) -> None:
+        fake = FakeEvidenceIndexCore()
+        bindings = {"evidence_index_module": fake}
+
+        evidence_index_core_bindings.install_evidence_index_core_helpers(bindings, ("empty_evidence_index",))
+
+        self.assertEqual(bindings["empty_evidence_index"](), {"version": 3, "entries": {}})
+        self.assertEqual(bindings["empty_evidence_index"].__name__, "empty_evidence_index")
+        self.assertNotIn("normalize_evidence_index", bindings)
 
 
 if __name__ == "__main__":

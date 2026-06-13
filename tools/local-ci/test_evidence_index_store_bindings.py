@@ -30,6 +30,16 @@ class FakeEvidenceIndexStore:
 
 
 class EvidenceIndexStoreBindingTests(unittest.TestCase):
+    def test_store_exports_are_declared(self) -> None:
+        self.assertEqual(
+            evidence_index_store_bindings.EVIDENCE_INDEX_STORE_EXPORTS,
+            (
+                "rebuild_evidence_index_unlocked",
+                "load_evidence_index_unlocked",
+                "save_evidence_index_unlocked",
+            ),
+        )
+
     def test_store_bindings_delegate_to_bound_module(self) -> None:
         fake = FakeEvidenceIndexStore()
         bindings = {"evidence_index_module": fake}
@@ -46,6 +56,19 @@ class EvidenceIndexStoreBindingTests(unittest.TestCase):
                 ("save_evidence_index_unlocked", index),
             ],
         )
+
+    def test_install_evidence_index_store_helpers_wires_named_exports(self) -> None:
+        fake = FakeEvidenceIndexStore()
+        bindings = {"evidence_index_module": fake}
+
+        evidence_index_store_bindings.install_evidence_index_store_helpers(
+            bindings,
+            ("load_evidence_index_unlocked",),
+        )
+
+        self.assertEqual(bindings["load_evidence_index_unlocked"](), ({"loaded": True}, False))
+        self.assertEqual(bindings["load_evidence_index_unlocked"].__name__, "load_evidence_index_unlocked")
+        self.assertNotIn("save_evidence_index_unlocked", bindings)
 
 
 if __name__ == "__main__":

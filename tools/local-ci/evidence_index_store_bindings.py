@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from binding_utils import install_local_helpers
 from binding_utils import binding as _binding
 
 
@@ -25,3 +26,10 @@ def load_evidence_index_unlocked(bindings: Mapping[str, Any]) -> tuple[dict, boo
 
 def save_evidence_index_unlocked(bindings: Mapping[str, Any], index: dict) -> None:
     return _binding(bindings, "evidence_index_module").save_evidence_index_unlocked(index)
+
+
+def install_evidence_index_store_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = EVIDENCE_INDEX_STORE_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)

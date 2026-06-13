@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from binding_utils import install_local_helpers
 from binding_utils import binding as _binding
 
 
@@ -36,3 +37,10 @@ def evidence_record_from_result(bindings: Mapping[str, Any], result: dict, item:
 
 def merge_result_into_evidence_index(bindings: Mapping[str, Any], index: dict, result: dict, result_path: Path) -> bool:
     return _binding(bindings, "evidence_index_module").merge_result_into_evidence_index(index, result, result_path)
+
+
+def install_evidence_index_core_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = EVIDENCE_INDEX_CORE_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)
