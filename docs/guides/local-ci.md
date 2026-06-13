@@ -22,6 +22,52 @@ shipyard runner watch --kill-hung-workers # prevent self-hosted runner wedges
 shipyard update --check --json            # report installed vs latest
 ```
 
+### Runner timing metrics
+
+Pulp does not store CI timing history in the Pulp CLI or MCP server. When a
+checkout uses Shipyard, and optionally tartci for disposable local VMs,
+Shipyard owns the timing database and query surface:
+
+- Shipyard can import GitHub Actions job timings and local command evidence.
+- tartci can optionally emit per-VM runtime records for macOS, Linux, and
+  Windows VM lanes: boot/setup/run/cleanup durations, labels, host, provider,
+  golden/cache hints, outcome, and failure class.
+- Shipyard imports those tartci records into its local metrics store and exposes
+  agent-readable summaries, slowest lanes, trend/drift checks, comparisons, and
+  placement advice.
+
+This is mainly for agents watching Pulp CI over time. It gives them enough
+history to answer "is this runner behaving normally?", "did boot/build time
+regress?", "which lane should I monitor next?", and "is this worth
+investigating or just within the usual range?" Humans can use the same commands
+for high-level platform comparisons, but no observability service is required.
+
+```bash
+# Enable VM runtime records on tartci hosts or LaunchAgents.
+export TARTCI_RUNTIME_MEASURE=1
+export TARTCI_RUNTIME_GH_ENRICH=1
+
+# Inspect tartci's local VM timing records.
+tartci runtime recent --repo danielraffel/pulp --limit 20 --json
+tartci runtime summary --repo danielraffel/pulp --json
+
+# Import both GitHub Actions and tartci VM timing into Shipyard's metrics store.
+shipyard metrics import github --repo danielraffel/pulp --limit 50 --json
+tartci runtime export --repo danielraffel/pulp --since-days 14 \
+  | shipyard metrics import tartci --json
+
+# Agent-friendly queries.
+shipyard metrics summary --project pulp --json
+shipyard metrics slowest --project pulp --limit 20 --json
+shipyard metrics watch --project pulp --since 14d --json
+shipyard metrics advise --project pulp --json
+```
+
+Use the Shipyard and tartci docs for setup details; this guide only records how
+Pulp expects agents and contributors to consume the optional integration.
+Without tartci, `shipyard metrics import github` and manual/command metrics
+still work for GitHub-hosted or SSH-backed CI lanes.
+
 Pulp intentionally pins Shipyard in `tools/shipyard.toml` even if your daily
 global `shipyard` is newer. Use `shipyard pin bump --to vX.Y.Z` for pin
 updates instead of hand-editing the file; newer Rust Shipyard releases changed
