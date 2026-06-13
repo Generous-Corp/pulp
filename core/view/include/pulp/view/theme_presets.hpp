@@ -45,7 +45,8 @@ struct ThemePreset {
     Theme dark_overrides;
 };
 
-/// Get all built-in theme presets (38 tweakcn-sourced + 3 Pulp-native).
+/// Get all built-in theme presets (37 tweakcn-sourced + "Ink & Signal",
+/// Pulp's flagship design language = 38 total).
 const std::vector<ThemePreset>& all_presets();
 
 /// Look up a preset by id. Returns nullptr if not found.

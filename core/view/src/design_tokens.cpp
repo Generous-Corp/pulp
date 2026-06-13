@@ -277,78 +277,62 @@ Theme parse_w3c_tokens(const std::string& json) {
 }
 
 std::string export_w3c_tokens(const Theme& theme) {
-    std::ostringstream ss;
-    ss << "{\n";
-
-    // Group tokens by prefix (before the dot)
-    std::map<std::string, std::vector<std::pair<std::string, std::string>>> color_groups;
-    for (auto& [name, color] : theme.colors) {
+    // Group every token by its top-level prefix (text before the first dot).
+    // Colors, dimensions, and strings that share a prefix MUST land in one
+    // group object: e.g. every derived theme has both `control.*` colors and
+    // `control.*` dimensions, and emitting "control" twice produced a duplicate
+    // JSON member that parse_w3c_tokens (choc::json) rejects with
+    // "object already contains a member". One ordered map, emitted once, fixes
+    // the round-trip for full themes.
+    auto split = [](const std::string& name, const char* fallback)
+        -> std::pair<std::string, std::string> {
         auto dot = name.find('.');
-        std::string group = dot != std::string::npos ? name.substr(0, dot) : "color";
-        std::string key = dot != std::string::npos ? name.substr(dot + 1) : name;
+        if (dot == std::string::npos) return {fallback, name};
+        return {name.substr(0, dot), name.substr(dot + 1)};
+    };
 
+    std::map<std::string, std::vector<std::string>> groups;
+
+    for (auto& [name, color] : theme.colors) {
+        auto [group, key] = split(name, "color");
         char buf[10];
         if (color.a8() == 255)
             snprintf(buf, sizeof(buf), "#%02x%02x%02x", color.r8(), color.g8(), color.b8());
         else
             snprintf(buf, sizeof(buf), "#%02x%02x%02x%02x", color.r8(), color.g8(), color.b8(), color.a8());
-
-        color_groups[group].emplace_back(key, buf);
+        std::ostringstream e;
+        e << "    \"" << key << "\": { \"$value\": \"" << buf << "\", \"$type\": \"color\" }";
+        groups[group].push_back(e.str());
     }
 
-    std::map<std::string, std::vector<std::pair<std::string, float>>> dim_groups;
     for (auto& [name, value] : theme.dimensions) {
-        auto dot = name.find('.');
-        std::string group = dot != std::string::npos ? name.substr(0, dot) : "dimension";
-        std::string key = dot != std::string::npos ? name.substr(dot + 1) : name;
-        dim_groups[group].emplace_back(key, value);
+        auto [group, key] = split(name, "dimension");
+        std::ostringstream e;
+        e << "    \"" << key << "\": { \"$value\": \"" << value << "\", \"$type\": \"dimension\" }";
+        groups[group].push_back(e.str());
     }
 
+    for (auto& [name, value] : theme.strings) {
+        auto [group, key] = split(name, "string");
+        std::ostringstream e;
+        e << "    \"" << key << "\": { \"$value\": \"" << value << "\", \"$type\": \"string\" }";
+        groups[group].push_back(e.str());
+    }
+
+    std::ostringstream ss;
+    ss << "{\n";
     bool first_group = true;
-
-    // Colors
-    for (auto& [group, entries] : color_groups) {
+    for (auto& [group, entries] : groups) {
         if (!first_group) ss << ",\n";
         first_group = false;
         ss << "  \"" << group << "\": {\n";
-        bool first = true;
-        for (auto& [key, hex] : entries) {
-            if (!first) ss << ",\n";
-            first = false;
-            ss << "    \"" << key << "\": { \"$value\": \"" << hex << "\", \"$type\": \"color\" }";
+        for (size_t i = 0; i < entries.size(); ++i) {
+            ss << entries[i];
+            if (i + 1 < entries.size()) ss << ",";
+            ss << "\n";
         }
-        ss << "\n  }";
+        ss << "  }";
     }
-
-    // Dimensions
-    for (auto& [group, entries] : dim_groups) {
-        if (!first_group) ss << ",\n";
-        first_group = false;
-        ss << "  \"" << group << "\": {\n";
-        bool first = true;
-        for (auto& [key, val] : entries) {
-            if (!first) ss << ",\n";
-            first = false;
-            ss << "    \"" << key << "\": { \"$value\": \"" << val << "\", \"$type\": \"dimension\" }";
-        }
-        ss << "\n  }";
-    }
-
-    // Strings
-    if (!theme.strings.empty()) {
-        if (!first_group) ss << ",\n";
-        ss << "  \"string\": {\n";
-        bool first = true;
-        for (auto& [name, value] : theme.strings) {
-            if (!first) ss << ",\n";
-            first = false;
-            auto dot = name.find('.');
-            std::string key = dot != std::string::npos ? name.substr(dot + 1) : name;
-            ss << "    \"" << key << "\": { \"$value\": \"" << value << "\", \"$type\": \"string\" }";
-        }
-        ss << "\n  }";
-    }
-
     ss << "\n}\n";
     return ss.str();
 }
