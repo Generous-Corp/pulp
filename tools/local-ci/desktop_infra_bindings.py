@@ -1,75 +1,49 @@
-"""Facade dependency bindings for desktop infrastructure helpers."""
+"""Compatibility facade for desktop infrastructure dependency bindings."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from pathlib import Path
 from typing import Any
 
-from binding_utils import binding as _binding
-from binding_utils import binding_attr as _binding_attr
 from binding_utils import install_local_helpers
-
-
-DESKTOP_INFRA_EXPORTS = (
-    "normalize_git_remote_for_http",
-    "normalize_git_remote_for_clone",
-    "git_origin_http_url",
-    "git_origin_clone_url",
-    "clear_directory_contents",
-    "copy_directory_contents",
-    "run_git",
-    "slugify_token",
-    "wait_for_path",
+from desktop_infra_git_bindings import (
+    DESKTOP_INFRA_GIT_EXPORTS,
+    git_origin_clone_url,
+    git_origin_http_url,
+    install_desktop_infra_git_helpers,
+    normalize_git_remote_for_clone,
+    normalize_git_remote_for_http,
+    run_git,
+)
+from desktop_infra_reporting_bindings import (
+    DESKTOP_INFRA_REPORTING_EXPORTS,
+    clear_directory_contents,
+    copy_directory_contents,
+    install_desktop_infra_reporting_helpers,
+    slugify_token,
+)
+from desktop_infra_wait_bindings import (
+    DESKTOP_INFRA_WAIT_EXPORTS,
+    install_desktop_infra_wait_helpers,
+    wait_for_path,
 )
 
 
-def normalize_git_remote_for_http(bindings: Mapping[str, Any], remote_url: str | None) -> str | None:
-    return _binding(bindings, "_git_helpers").normalize_git_remote_for_http(remote_url)
-
-
-def normalize_git_remote_for_clone(bindings: Mapping[str, Any], remote_url: str | None) -> str | None:
-    return _binding(bindings, "_git_helpers").normalize_git_remote_for_clone(remote_url)
-
-
-def git_origin_http_url(bindings: Mapping[str, Any], repo_root: Path) -> str | None:
-    return _binding(bindings, "_git_helpers").git_origin_http_url(
-        repo_root,
-        run_fn=_binding_attr(bindings, "subprocess", "run"),
-    )
-
-
-def git_origin_clone_url(bindings: Mapping[str, Any], repo_root: Path) -> str | None:
-    return _binding(bindings, "_git_helpers").git_origin_clone_url(
-        repo_root,
-        run_fn=_binding_attr(bindings, "subprocess", "run"),
-    )
-
-
-def clear_directory_contents(bindings: Mapping[str, Any], path: Path) -> None:
-    return _binding(bindings, "_reporting").clear_directory_contents(path)
-
-
-def copy_directory_contents(bindings: Mapping[str, Any], src: Path, dest: Path) -> None:
-    return _binding(bindings, "_reporting").copy_directory_contents(src, dest)
-
-
-def run_git(bindings: Mapping[str, Any], args: list[str], *, cwd: Path, check: bool = True):
-    return _binding(bindings, "_git_helpers").run_git(
-        args,
-        cwd=cwd,
-        check=check,
-        run_fn=_binding_attr(bindings, "subprocess", "run"),
-    )
-
-
-def slugify_token(bindings: Mapping[str, Any], value: str, *, max_len: int = 48) -> str:
-    return _binding(bindings, "_reporting").slugify_token(value, max_len=max_len)
-
-
-def wait_for_path(bindings: Mapping[str, Any], path: Path, timeout_secs: float) -> Path:
-    return _binding(bindings, "_io_utils").wait_for_path(path, timeout_secs)
+DESKTOP_INFRA_EXPORTS = (
+    *DESKTOP_INFRA_GIT_EXPORTS,
+    *DESKTOP_INFRA_REPORTING_EXPORTS,
+    *DESKTOP_INFRA_WAIT_EXPORTS,
+)
 
 
 def install_desktop_infra_helpers(bindings: dict[str, Any], names: tuple[str, ...] = DESKTOP_INFRA_EXPORTS) -> None:
-    install_local_helpers(bindings, globals(), names)
+    git_names = tuple(name for name in names if name in DESKTOP_INFRA_GIT_EXPORTS)
+    reporting_names = tuple(name for name in names if name in DESKTOP_INFRA_REPORTING_EXPORTS)
+    wait_names = tuple(name for name in names if name in DESKTOP_INFRA_WAIT_EXPORTS)
+    known_names = set(DESKTOP_INFRA_EXPORTS)
+    unknown_names = tuple(name for name in names if name not in known_names)
+
+    install_desktop_infra_git_helpers(bindings, git_names)
+    install_desktop_infra_reporting_helpers(bindings, reporting_names)
+    install_desktop_infra_wait_helpers(bindings, wait_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)

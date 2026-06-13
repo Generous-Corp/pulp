@@ -28,6 +28,16 @@ class DesktopInfraBindingsTests(unittest.TestCase):
             "subprocess": types.SimpleNamespace(run=object()),
         }
 
+    def test_desktop_infra_exports_are_composed_from_focused_groups(self) -> None:
+        expected = (
+            *self.mod.DESKTOP_INFRA_GIT_EXPORTS,
+            *self.mod.DESKTOP_INFRA_REPORTING_EXPORTS,
+            *self.mod.DESKTOP_INFRA_WAIT_EXPORTS,
+        )
+
+        self.assertEqual(self.mod.DESKTOP_INFRA_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def test_git_wrappers_bind_subprocess_runner(self) -> None:
         captured = {}
 
@@ -98,15 +108,17 @@ class DesktopInfraBindingsTests(unittest.TestCase):
         reporting = types.SimpleNamespace(
             slugify_token=lambda value, *, max_len=48: value[:max_len].lower(),
         )
-        bindings = self._bindings(git_helpers=git_helpers, reporting=reporting)
+        io_utils = types.SimpleNamespace(wait_for_path=lambda path, timeout_secs: path)
+        bindings = self._bindings(git_helpers=git_helpers, reporting=reporting, io_utils=io_utils)
 
         self.mod.install_desktop_infra_helpers(
             bindings,
-            ("normalize_git_remote_for_http", "slugify_token"),
+            ("normalize_git_remote_for_http", "slugify_token", "wait_for_path"),
         )
 
         self.assertEqual(bindings["normalize_git_remote_for_http"]("example/repo"), "https:example/repo")
         self.assertEqual(bindings["slugify_token"]("Demo Token", max_len=4), "demo")
+        self.assertEqual(bindings["wait_for_path"](Path("/tmp/file"), 3.0), Path("/tmp/file"))
 
 
 if __name__ == "__main__":
