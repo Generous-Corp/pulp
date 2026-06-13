@@ -41,7 +41,16 @@ def install_local_ci_command_helpers(
     names: tuple[str, ...] = LOCAL_CI_COMMAND_EXPORTS,
 ) -> None:
     pr_names = tuple(name for name in names if name in LOCAL_CI_PR_COMMAND_EXPORTS)
-    non_pr_names = tuple(name for name in names if name not in LOCAL_CI_PR_COMMAND_EXPORTS)
+    local_export_names = (
+        LOCAL_CI_SUBMISSION_EXPORTS
+        + LOCAL_CI_QUEUE_COMMAND_EXPORTS
+        + LOCAL_CI_STATUS_COMMAND_EXPORTS
+    )
+    local_names = tuple(name for name in names if name in local_export_names)
+    known_names = set(LOCAL_CI_COMMAND_EXPORTS)
+    unknown_names = tuple(name for name in names if name not in known_names)
 
     install_local_ci_pr_command_helpers(bindings, pr_names)
-    install_local_helpers(bindings, globals(), non_pr_names)
+    install_local_helpers(bindings, globals(), local_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)

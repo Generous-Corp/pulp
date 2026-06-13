@@ -62,18 +62,19 @@ def install_queue_lifecycle_helpers(
     command_names = tuple(name for name in names if name in QUEUE_COMMAND_LIFECYCLE_EXPORTS)
     state_names = tuple(name for name in names if name in QUEUE_STATE_LIFECYCLE_EXPORTS)
     drain_names = tuple(name for name in names if name in QUEUE_DRAIN_EXPORTS)
-    known_focused_names = set(
+    known_names = set(
         QUEUE_LOAD_EXPORTS
         + QUEUE_ENQUEUE_EXPORTS
         + QUEUE_COMMAND_LIFECYCLE_EXPORTS
         + QUEUE_STATE_LIFECYCLE_EXPORTS
         + QUEUE_DRAIN_EXPORTS
     )
-    remaining_names = tuple(name for name in names if name not in known_focused_names)
+    unknown_names = tuple(name for name in names if name not in known_names)
 
     install_queue_load_helpers(bindings, load_names)
     install_queue_enqueue_helpers(bindings, enqueue_names)
     install_queue_command_lifecycle_helpers(bindings, command_names)
     install_queue_state_lifecycle_helpers(bindings, state_names)
     install_queue_drain_helpers(bindings, drain_names)
-    install_local_helpers(bindings, globals(), remaining_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)

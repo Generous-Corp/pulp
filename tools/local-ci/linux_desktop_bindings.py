@@ -18,10 +18,19 @@ LINUX_DESKTOP_EXPORTS = (
     "cleanup_remote_ssh_dir",
     *LINUX_DESKTOP_ACTION_EXPORTS,
 )
+LINUX_DESKTOP_ARTIFACT_EXPORTS = (
+    "fetch_ssh_artifact",
+    "cleanup_remote_ssh_dir",
+)
 
 
 def install_linux_desktop_helpers(bindings: dict[str, Any], names: tuple[str, ...] = LINUX_DESKTOP_EXPORTS) -> None:
     action_names = tuple(name for name in names if name in LINUX_DESKTOP_ACTION_EXPORTS)
-    artifact_names = tuple(name for name in names if name not in LINUX_DESKTOP_ACTION_EXPORTS)
+    artifact_names = tuple(name for name in names if name in LINUX_DESKTOP_ARTIFACT_EXPORTS)
+    known_names = set(LINUX_DESKTOP_EXPORTS)
+    unknown_names = tuple(name for name in names if name not in known_names)
+
     install_local_helpers(bindings, globals(), artifact_names)
     install_linux_desktop_action_helpers(bindings, action_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)

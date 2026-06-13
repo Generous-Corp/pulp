@@ -59,6 +59,14 @@ class ExecutionBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["parse_progress_marker"]("line"), {"line": "line"})
         self.assertNotIn("run_local_validation", bindings)
 
+    def test_install_execution_helpers_keeps_unknown_local_fallback(self):
+        bindings = self._bindings("unused", lambda: None)
+        self.mod.future_execution_helper = lambda _bindings: "future"
+
+        self.mod.install_execution_helpers(bindings, ("future_execution_helper",))
+
+        self.assertEqual(bindings["future_execution_helper"](), "future")
+
     def _bindings(self, runner_name: str, runner):
         execution = types.SimpleNamespace(**{runner_name: runner})
         bindings = {"_execution": execution, "ROOT": Path("/repo"), "print": object()}

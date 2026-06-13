@@ -23,11 +23,22 @@ SSH_BUNDLE_EXPORTS = (
     "sync_job_bundle_to_ssh_host",
     *SSH_BUNDLE_PROBE_EXPORTS,
 )
+SSH_BUNDLE_LOCAL_EXPORTS = (
+    "bundle_ref_name",
+    "remote_bundle_name",
+    "create_job_bundle",
+    "config_for_bundle_probe",
+    "sync_job_bundle_to_ssh_host",
+)
 
 
 def install_ssh_bundle_helpers(bindings: dict, names: tuple[str, ...] = SSH_BUNDLE_EXPORTS) -> None:
     probe_names = tuple(name for name in names if name in SSH_BUNDLE_PROBE_EXPORTS)
-    other_names = tuple(name for name in names if name not in SSH_BUNDLE_PROBE_EXPORTS)
+    local_names = tuple(name for name in names if name in SSH_BUNDLE_LOCAL_EXPORTS)
+    known_names = set(SSH_BUNDLE_EXPORTS)
+    unknown_names = tuple(name for name in names if name not in known_names)
 
-    install_local_helpers(bindings, globals(), other_names)
+    install_local_helpers(bindings, globals(), local_names)
     install_ssh_bundle_probe_helpers(bindings, probe_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)

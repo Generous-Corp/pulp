@@ -75,18 +75,19 @@ def install_execution_helpers(bindings: dict[str, Any], names: tuple[str, ...] =
     logging_names = tuple(name for name in names if name in EXECUTION_LOGGING_EXPORTS)
     runner_names = tuple(name for name in names if name in EXECUTION_RUNNER_INSTALL_EXPORTS)
     job_names = tuple(name for name in names if name in EXECUTION_JOB_EXPORTS)
-    delegated_names = (
+    known_names = (
         set(EXECUTION_COMMAND_EXPORTS)
         | set(EXECUTION_RESULT_EXPORTS)
         | set(EXECUTION_LOGGING_EXPORTS)
         | set(EXECUTION_RUNNER_INSTALL_EXPORTS)
         | set(EXECUTION_JOB_EXPORTS)
     )
-    remaining_names = tuple(name for name in names if name not in delegated_names)
+    unknown_names = tuple(name for name in names if name not in known_names)
 
     install_execution_command_helpers(bindings, command_names)
     install_execution_result_helpers(bindings, result_names)
     install_execution_logging_helpers(bindings, logging_names)
     install_execution_runner_helpers(bindings, runner_names)
     install_execution_job_helpers(bindings, job_names)
-    install_local_helpers(bindings, globals(), remaining_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)
