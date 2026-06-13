@@ -20,19 +20,35 @@ class CloudGithubBindingsTests(unittest.TestCase):
 
     def test_github_exports_match_wrappers(self):
         expected = (
-            "gh_available",
-            "gh_workflow_dispatch",
-            "gh_run_view",
-            "gh_pr_create",
-            "gh_pr_comment",
-            "gh_pr_merge",
-            "gh_pr_list_open",
-            "gh_pr_head",
+            *self.mod.CLOUD_GITHUB_WORKFLOW_EXPORTS,
+            *self.mod.CLOUD_GITHUB_PR_EXPORTS,
         )
 
         self.assertEqual(self.mod.CLOUD_GITHUB_EXPORTS, expected)
         for name in expected:
             self.assertTrue(callable(getattr(self.mod, name)))
+
+    def test_install_cloud_github_helpers_routes_focused_groups(self):
+        calls = []
+
+        def workflow_install(bindings, names):
+            calls.append(("workflow", names))
+
+        def pr_install(bindings, names):
+            calls.append(("pr", names))
+
+        self.mod.install_cloud_github_workflow_helpers = workflow_install
+        self.mod.install_cloud_github_pr_helpers = pr_install
+
+        self.mod.install_cloud_github_helpers({}, ("gh_available", "gh_pr_head"))
+
+        self.assertEqual(
+            calls,
+            [
+                ("workflow", ("gh_available",)),
+                ("pr", ("gh_pr_head",)),
+            ],
+        )
 
     def test_github_helpers_delegate_to_cloud_module(self):
         calls = []

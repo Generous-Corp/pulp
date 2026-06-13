@@ -1,66 +1,44 @@
-"""Bindings from the local_ci facade to cloud GitHub helpers."""
+"""Compatibility composer for cloud GitHub facade bindings."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Any
 
-from binding_utils import binding as _binding
 from binding_utils import install_local_helpers
-
-
-CLOUD_GITHUB_EXPORTS = (
-    "gh_available",
-    "gh_workflow_dispatch",
-    "gh_run_view",
-    "gh_pr_create",
-    "gh_pr_comment",
-    "gh_pr_merge",
-    "gh_pr_list_open",
-    "gh_pr_head",
+from cloud_github_pr_bindings import (
+    CLOUD_GITHUB_PR_EXPORTS,
+    gh_pr_comment,
+    gh_pr_create,
+    gh_pr_head,
+    gh_pr_list_open,
+    gh_pr_merge,
+    install_cloud_github_pr_helpers,
+)
+from cloud_github_workflow_bindings import (
+    CLOUD_GITHUB_WORKFLOW_EXPORTS,
+    gh_available,
+    gh_run_view,
+    gh_workflow_dispatch,
+    install_cloud_github_workflow_helpers,
 )
 
 
-def gh_available(bindings: Mapping[str, Any]) -> bool:
-    return _binding(bindings, "_cloud").gh_available()
-
-
-def gh_workflow_dispatch(
-    bindings: Mapping[str, Any],
-    repository: str,
-    workflow_file: str,
-    ref: str,
-    fields: dict[str, str],
-) -> None:
-    return _binding(bindings, "_cloud").gh_workflow_dispatch(repository, workflow_file, ref, fields)
-
-
-def gh_run_view(bindings: Mapping[str, Any], repository: str, run_id: int) -> dict | None:
-    return _binding(bindings, "_cloud").gh_run_view(repository, run_id)
-
-
-def gh_pr_create(bindings: Mapping[str, Any], branch: str, base: str = "main") -> int | None:
-    return _binding(bindings, "_cloud").gh_pr_create(branch, base)
-
-
-def gh_pr_comment(bindings: Mapping[str, Any], pr_number: int, body: str) -> bool:
-    return _binding(bindings, "_cloud").gh_pr_comment(pr_number, body)
-
-
-def gh_pr_merge(bindings: Mapping[str, Any], pr_number: int, method: str = "squash") -> bool:
-    return _binding(bindings, "_cloud").gh_pr_merge(pr_number, method)
-
-
-def gh_pr_list_open(bindings: Mapping[str, Any]) -> list[dict]:
-    return _binding(bindings, "_cloud").gh_pr_list_open()
-
-
-def gh_pr_head(bindings: Mapping[str, Any], pr_ref: str) -> tuple[int, str, str] | None:
-    return _binding(bindings, "_cloud").gh_pr_head(pr_ref)
+CLOUD_GITHUB_EXPORTS = (
+    *CLOUD_GITHUB_WORKFLOW_EXPORTS,
+    *CLOUD_GITHUB_PR_EXPORTS,
+)
 
 
 def install_cloud_github_helpers(
     bindings: dict[str, Any],
     names: tuple[str, ...] = CLOUD_GITHUB_EXPORTS,
 ) -> None:
-    install_local_helpers(bindings, globals(), names)
+    workflow_names = tuple(name for name in names if name in CLOUD_GITHUB_WORKFLOW_EXPORTS)
+    pr_names = tuple(name for name in names if name in CLOUD_GITHUB_PR_EXPORTS)
+    known_names = set(CLOUD_GITHUB_EXPORTS)
+    unknown_names = tuple(name for name in names if name not in known_names)
+
+    install_cloud_github_workflow_helpers(bindings, workflow_names)
+    install_cloud_github_pr_helpers(bindings, pr_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)
