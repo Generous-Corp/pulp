@@ -7,9 +7,79 @@ from collections.abc import Callable
 import json
 
 
+VIDEO_PROOF_RECIPES = {
+    "standalone-interaction",
+    "reaper-plugin-editor",
+    "inspector-workflow",
+    "component-zoom",
+    "design-parity",
+}
+
+
 def _print_lines(lines, *, print_fn: Callable[[str], None]) -> None:
     for line in lines:
         print_fn(line)
+
+
+def _set_default(args: argparse.Namespace, name: str, value) -> None:
+    if getattr(args, name, None) in {None, ""}:
+        setattr(args, name, value)
+
+
+def _apply_desktop_video_recipe(args: argparse.Namespace) -> None:
+    recipe = getattr(args, "recipe", None)
+    if not recipe:
+        return
+    if recipe not in VIDEO_PROOF_RECIPES:
+        raise ValueError(f"unknown desktop video recipe `{recipe}`.")
+
+    if recipe == "standalone-interaction":
+        _set_default(args, "label", "standalone-interaction-proof")
+        _set_default(args, "video_title", "Standalone UI interaction")
+        if any([args.click, args.click_view_id, args.click_view_type, args.click_view_text, args.click_view_label]):
+            args.capture_before = True
+        return
+
+    if recipe == "reaper-plugin-editor":
+        plugin = getattr(args, "plugin", None)
+        plugin_format = getattr(args, "plugin_format", None)
+        if not plugin or not plugin_format:
+            raise ValueError("recipe `reaper-plugin-editor` requires --plugin and --plugin-format.")
+        _set_default(args, "host_app", "REAPER")
+        _set_default(args, "bundle_id", "com.cockos.reaper")
+        _set_default(args, "label", f"reaper-{plugin_format}-{plugin}-proof")
+        _set_default(args, "video_title", f"{plugin} {plugin_format.upper()} editor in {args.host_app}")
+        args.capture_before = True
+        return
+
+    if recipe == "inspector-workflow":
+        args.action = "inspect"
+        args.capture_ui_snapshot = True
+        _set_default(args, "label", "inspector-workflow-proof")
+        _set_default(args, "video_title", "Inspector workflow proof")
+        return
+
+    if recipe == "component-zoom":
+        component_id = getattr(args, "component_id", None)
+        if component_id and not getattr(args, "click_view_id", None):
+            args.click_view_id = component_id
+        if not any([args.click, args.click_view_id, args.click_view_type, args.click_view_text, args.click_view_label]):
+            raise ValueError("recipe `component-zoom` requires --component-id or a click selector.")
+        args.capture_ui_snapshot = True
+        args.capture_before = True
+        _set_default(args, "label", f"component-{args.click_view_id or component_id or 'zoom'}-proof")
+        _set_default(args, "video_title", "Component validation")
+        return
+
+    if recipe == "design-parity":
+        if not getattr(args, "source_image", None):
+            raise ValueError("recipe `design-parity` requires --source-image.")
+        args.action = "inspect"
+        args.capture_ui_snapshot = True
+        _set_default(args, "video_template", "design-parity")
+        _set_default(args, "source_label", "Source reference")
+        _set_default(args, "label", "design-parity-proof")
+        _set_default(args, "video_title", "Design import parity")
 
 
 def windows_requires_pulp_app_selectors(args: argparse.Namespace) -> bool:
@@ -28,6 +98,10 @@ def _video_kwargs(args: argparse.Namespace) -> dict:
         "video_fps": float(getattr(args, "video_fps", 30.0)),
         "video_attachment_budget_bytes": int(float(getattr(args, "video_attachment_budget_mb", 100.0)) * 1_000_000),
         "compose_video_proof": bool(getattr(args, "compose_video_proof", False)),
+        "video_template": getattr(args, "video_template", None),
+        "video_source_image": getattr(args, "source_image", None),
+        "video_source_label": getattr(args, "source_label", None),
+        "video_title": getattr(args, "video_title", None),
     }
 
 
@@ -39,6 +113,12 @@ def cmd_desktop_video(
     cmd_desktop_inspect_fn: Callable[[argparse.Namespace], int],
     print_fn: Callable[[str], None] = print,
 ) -> int:
+    try:
+        _apply_desktop_video_recipe(args)
+    except ValueError as exc:
+        print_fn(f"Error: {exc}")
+        return 1
+
     audio_source = getattr(args, "video_audio", "none")
     if audio_source != "none":
         print_fn(f"Error: video audio source `{audio_source}` is not implemented yet; use --video-audio none.")

@@ -35,6 +35,10 @@ def run_macos_local_smoke(
     video_fps: float = 30.0,
     video_attachment_budget_bytes: int = 100_000_000,
     compose_video_proof: bool = False,
+    video_template: str | None = None,
+    video_source_image: str | None = None,
+    video_source_label: str | None = None,
+    video_title: str | None = None,
 ) -> dict:
     desktop_actions = _binding(bindings, "_desktop_actions")
     subprocess_mod = _binding(bindings, "subprocess")
@@ -65,6 +69,10 @@ def run_macos_local_smoke(
         video_fps=video_fps,
         video_attachment_budget_bytes=video_attachment_budget_bytes,
         compose_video_proof=compose_video_proof,
+        video_template=video_template,
+        video_source_image=video_source_image,
+        video_source_label=video_source_label,
+        video_title=video_title,
         create_desktop_run_bundle_fn=_binding(bindings, "create_desktop_run_bundle"),
         desktop_action_artifact_paths_fn=desktop_actions.desktop_action_artifact_paths,
         desktop_interaction_requested_fn=desktop_actions.desktop_interaction_requested,

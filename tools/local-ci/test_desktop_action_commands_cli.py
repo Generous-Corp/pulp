@@ -57,6 +57,15 @@ class DesktopActionCommandsCliTests(unittest.TestCase):
             "video_attachment_budget_mb": 100.0,
             "video_audio": "none",
             "compose_video_proof": False,
+            "video_template": None,
+            "source_image": None,
+            "source_label": None,
+            "video_title": None,
+            "recipe": None,
+            "plugin": None,
+            "plugin_format": None,
+            "host_app": None,
+            "component_id": None,
             "action": "click",
             "json": False,
         }
@@ -268,6 +277,51 @@ class DesktopActionCommandsCliTests(unittest.TestCase):
         )
         self.assertEqual(result, 1)
         self.assertIn("video audio source `system` is not implemented yet", self.printed[-1])
+
+    def test_video_command_applies_component_recipe(self):
+        result = self.mod.cmd_desktop_video(
+            self.args(recipe="component-zoom", component_id="threshold", label=None),
+            cmd_desktop_smoke_fn=lambda _args: self.fail("smoke should not run"),
+            cmd_desktop_click_fn=lambda args: self.calls.append(("click-wrapper", (), vars(args).copy())) or 0,
+            cmd_desktop_inspect_fn=lambda _args: self.fail("inspect should not run"),
+            print_fn=self.print_line,
+        )
+
+        self.assertEqual(result, 0)
+        call = self.calls[0][2]
+        self.assertEqual(call["click_view_id"], "threshold")
+        self.assertTrue(call["capture_ui_snapshot"])
+        self.assertTrue(call["capture_before"])
+        self.assertEqual(call["label"], "component-threshold-proof")
+        self.assertEqual(call["video_title"], "Component validation")
+
+    def test_video_command_applies_reaper_recipe(self):
+        result = self.mod.cmd_desktop_video(
+            self.args(recipe="reaper-plugin-editor", launch_command=None, label=None, plugin="PulpEffect", plugin_format="vst3"),
+            cmd_desktop_smoke_fn=lambda _args: self.fail("smoke should not run"),
+            cmd_desktop_click_fn=lambda args: self.calls.append(("click-wrapper", (), vars(args).copy())) or 0,
+            cmd_desktop_inspect_fn=lambda _args: self.fail("inspect should not run"),
+            print_fn=self.print_line,
+        )
+
+        self.assertEqual(result, 0)
+        call = self.calls[0][2]
+        self.assertEqual(call["bundle_id"], "com.cockos.reaper")
+        self.assertEqual(call["host_app"], "REAPER")
+        self.assertEqual(call["label"], "reaper-vst3-PulpEffect-proof")
+        self.assertEqual(call["video_title"], "PulpEffect VST3 editor in REAPER")
+
+    def test_video_command_validates_recipe_requirements(self):
+        result = self.mod.cmd_desktop_video(
+            self.args(recipe="design-parity"),
+            cmd_desktop_smoke_fn=lambda _args: self.fail("smoke should not run"),
+            cmd_desktop_click_fn=lambda _args: self.fail("click should not run"),
+            cmd_desktop_inspect_fn=lambda _args: self.fail("inspect should not run"),
+            print_fn=self.print_line,
+        )
+
+        self.assertEqual(result, 1)
+        self.assertIn("recipe `design-parity` requires --source-image", self.printed[-1])
 
     def test_record_video_rejects_reserved_audio_modes(self):
         result = self.mod.cmd_desktop_click(

@@ -110,6 +110,54 @@ underlying desktop action. Today, recording is implemented for macOS only;
 Linux/Windows video requests fail explicitly until their recorder backends are
 wired.
 
+Use named recipes when the user asks for one of the high-value demos:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop video mac \
+  --recipe standalone-interaction \
+  --command ./build/pulp \
+  --click 120,80 \
+  --duration 8
+```
+
+```bash
+python3 tools/local-ci/local_ci.py desktop video mac \
+  --recipe reaper-plugin-editor \
+  --plugin PulpEffect \
+  --plugin-format vst3 \
+  --click-view-id drive-knob \
+  --duration 10
+```
+
+```bash
+python3 tools/local-ci/local_ci.py desktop video mac \
+  --recipe inspector-workflow \
+  --command ./build/pulp \
+  --duration 8
+```
+
+```bash
+python3 tools/local-ci/local_ci.py desktop video mac \
+  --recipe component-zoom \
+  --command ./build/pulp \
+  --component-id compressor-threshold \
+  --duration 8
+```
+
+```bash
+python3 tools/local-ci/local_ci.py desktop video mac \
+  --recipe design-parity \
+  --command ./build/pulp \
+  --source-image planning/screenshots/reference.png \
+  --source-label "Figma reference" \
+  --duration 8
+```
+
+The REAPER recipe defaults to bundle id `com.cockos.reaper` when no explicit
+launch target is supplied, but it does not create a DAW project or insert the
+plugin. Prepare the host session first, then use the recipe to capture and label
+the proof consistently.
+
 The same recorder can be enabled on lower-level desktop actions:
 
 ```bash

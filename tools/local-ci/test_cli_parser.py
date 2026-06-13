@@ -102,6 +102,14 @@ class CliParserTests(unittest.TestCase):
             "6",
             "--video-fps",
             "24",
+            "--recipe",
+            "component-zoom",
+            "--component-id",
+            "bypass-toggle",
+            "--video-template",
+            "validation-proof",
+            "--video-title",
+            "Bypass proof",
             "--video-audio",
             "none",
             "--label",
@@ -112,10 +120,14 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(args.desktop_command, "video")
         self.assertEqual(args.target, "mac")
         self.assertEqual(args.action, "click")
+        self.assertEqual(args.recipe, "component-zoom")
+        self.assertEqual(args.component_id, "bypass-toggle")
         self.assertEqual(args.launch_command, "./build/pulp")
         self.assertEqual(args.click_view_id, "bypass-toggle")
         self.assertFalse(args.record_video)
         self.assertFalse(args.compose_video_proof)
+        self.assertEqual(args.video_template, "validation-proof")
+        self.assertEqual(args.video_title, "Bypass proof")
         self.assertEqual(args.video_duration, 6.0)
         self.assertEqual(args.video_fps, 24.0)
         self.assertEqual(args.video_audio, "none")

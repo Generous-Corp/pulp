@@ -69,6 +69,10 @@ def run_macos_local_smoke(
     video_fps: float = 30.0,
     video_attachment_budget_bytes: int = 100_000_000,
     compose_video_proof: bool = False,
+    video_template: str | None = None,
+    video_source_image: str | None = None,
+    video_source_label: str | None = None,
+    video_title: str | None = None,
 ) -> dict:
     bundle_dir = create_desktop_run_bundle_fn(config, "mac", action_name)
     action_paths = desktop_action_artifact_paths_fn(bundle_dir, output_path)
@@ -330,8 +334,23 @@ def run_macos_local_smoke(
         if compose_video_proof and video_path.exists():
             source_manifest_path = bundle_dir / "manifest.video-source.json"
             atomic_write_text_fn(source_manifest_path, json.dumps(manifest, indent=2) + "\n")
-            composed_summary = compose_desktop_video_proof_fn(source_manifest_path, video_composed_path)
+            source_image_path = Path(video_source_image).expanduser().resolve() if video_source_image else None
+            composed_summary = compose_desktop_video_proof_fn(
+                source_manifest_path,
+                video_composed_path,
+                template=video_template,
+                source_image=source_image_path,
+                source_label=video_source_label,
+                title=video_title,
+            )
             manifest["video_composed"] = composed_summary
+            if any([video_template, source_image_path, video_source_label, video_title]):
+                manifest["video_proof_composition"] = {
+                    "template": video_template or "validation-proof",
+                    "source_image": str(source_image_path) if source_image_path else None,
+                    "source_label": video_source_label,
+                    "title": video_title,
+                }
             if video_composed_path.exists():
                 manifest["artifacts"]["video_composed"] = str(video_composed_path)
             atomic_write_text_fn(video_composed_metadata_path, json.dumps(composed_summary, indent=2) + "\n")

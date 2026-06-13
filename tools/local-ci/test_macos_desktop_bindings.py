@@ -105,6 +105,10 @@ class MacosDesktopBindingsTests(unittest.TestCase):
             video_fps=15.0,
             video_attachment_budget_bytes=50,
             compose_video_proof=True,
+            video_template="design-parity",
+            video_source_image="/tmp/reference.png",
+            video_source_label="Figma reference",
+            video_title="Design parity proof",
         )
 
         self.assertEqual(result, {"ok": True})
@@ -128,6 +132,10 @@ class MacosDesktopBindingsTests(unittest.TestCase):
         self.assertEqual(captured["kwargs"]["video_duration_secs"], 2.0)
         self.assertEqual(captured["kwargs"]["video_fps"], 15.0)
         self.assertEqual(captured["kwargs"]["video_attachment_budget_bytes"], 50)
+        self.assertEqual(captured["kwargs"]["video_template"], "design-parity")
+        self.assertEqual(captured["kwargs"]["video_source_image"], "/tmp/reference.png")
+        self.assertEqual(captured["kwargs"]["video_source_label"], "Figma reference")
+        self.assertEqual(captured["kwargs"]["video_title"], "Design parity proof")
         self.assertIs(captured["kwargs"]["terminate_process_fn"], bindings["terminate_process"])
 
 

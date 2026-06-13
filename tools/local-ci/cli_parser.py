@@ -104,6 +104,14 @@ def build_local_ci_parser(
             help="Use Remotion to render an annotated proof video from the raw recording.",
         )
         command_parser.add_argument(
+            "--video-template",
+            choices=["validation-proof", "design-parity"],
+            help="Remotion proof template for direct --record-video composition.",
+        )
+        command_parser.add_argument("--source-image", help="Optional source/reference image for design-parity proof composition")
+        command_parser.add_argument("--source-label", help="Label for --source-image (default: Source reference)")
+        command_parser.add_argument("--video-title", help="Override the composed proof video title")
+        command_parser.add_argument(
             "--video-audio",
             choices=["none", "plugin", "system"],
             default="none",
@@ -399,6 +407,15 @@ def build_local_ci_parser(
     p_desktop_video.add_argument("target", help="Desktop target name")
     p_desktop_video.add_argument("--command", dest="launch_command", help="Quoted command to launch in the GUI session")
     p_desktop_video.add_argument("--bundle-id", help="macOS bundle identifier to launch via `open -b`")
+    p_desktop_video.add_argument(
+        "--recipe",
+        choices=["standalone-interaction", "reaper-plugin-editor", "inspector-workflow", "component-zoom", "design-parity"],
+        help="Apply a named high-value proof recipe before running the desktop video action.",
+    )
+    p_desktop_video.add_argument("--plugin", help="Plugin name for plugin-host proof recipes")
+    p_desktop_video.add_argument("--plugin-format", choices=["vst3", "auv2", "auv3", "clap", "lv2"], help="Plugin format for plugin-host proof recipes")
+    p_desktop_video.add_argument("--host-app", help="Host application label for plugin-host proof recipes")
+    p_desktop_video.add_argument("--component-id", help="Component/view id for component-zoom proof recipes")
     p_desktop_video.add_argument("--label", help="Optional artifact label")
     p_desktop_video.add_argument("--output", help="Optional screenshot output path")
     p_desktop_video.add_argument(

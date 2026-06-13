@@ -73,6 +73,59 @@ underlying desktop action. The command currently records video on macOS only;
 Linux and Windows fail explicitly rather than producing a run bundle without a
 video artifact.
 
+Named recipes apply reviewer-friendly defaults for common proof scenarios:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop video mac \
+  --recipe standalone-interaction \
+  --command ./build/pulp \
+  --click 120,80 \
+  --duration 8
+```
+
+```bash
+python3 tools/local-ci/local_ci.py desktop video mac \
+  --recipe reaper-plugin-editor \
+  --plugin PulpEffect \
+  --plugin-format vst3 \
+  --click-view-id drive-knob \
+  --duration 10
+```
+
+The REAPER recipe defaults to launching bundle id `com.cockos.reaper` when no
+explicit `--command` or `--bundle-id` is supplied. It still needs a prepared host
+session/project that opens the target plugin editor; the recipe supplies proof
+metadata, labels, and composition title defaults, not DAW project automation.
+
+```bash
+python3 tools/local-ci/local_ci.py desktop video mac \
+  --recipe inspector-workflow \
+  --command ./build/pulp \
+  --duration 8
+```
+
+```bash
+python3 tools/local-ci/local_ci.py desktop video mac \
+  --recipe component-zoom \
+  --command ./build/pulp \
+  --component-id compressor-threshold \
+  --duration 8
+```
+
+```bash
+python3 tools/local-ci/local_ci.py desktop video mac \
+  --recipe design-parity \
+  --command ./build/pulp \
+  --source-image planning/screenshots/reference.png \
+  --source-label "Figma reference" \
+  --duration 8
+```
+
+`component-zoom` enables ViewInspector capture and before/diff capture, then
+uses `--component-id` as the click target when no explicit click selector was
+provided. `design-parity` records an inspect proof and composes it with the
+Remotion `design-parity` template directly during capture.
+
 The same recorder can be enabled on lower-level desktop actions:
 
 ```bash

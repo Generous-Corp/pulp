@@ -115,10 +115,13 @@ class MacosDesktopActionTests(unittest.TestCase):
             metadata_path.write_text(json.dumps(metadata, indent=2) + "\n")
             return metadata
 
-        def compose_video(manifest_path: Path, output_path: Path):
+        def compose_video(manifest_path: Path, output_path: Path, **kwargs):
             self.assertTrue(manifest_path.exists())
             output_path.write_bytes(b"composed")
-            return {"output": str(output_path), "composer": "remotion", "size": {"fits_attachment_budget": True}}
+            serializable_kwargs = dict(kwargs)
+            if serializable_kwargs.get("source_image") is not None:
+                serializable_kwargs["source_image"] = str(serializable_kwargs["source_image"])
+            return {"output": str(output_path), "composer": "remotion", "size": {"fits_attachment_budget": True}, "kwargs": serializable_kwargs}
 
         def issue_video(source_path: Path, output_path: Path, metadata_path: Path, *, attachment_budget_bytes: int):
             self.assertTrue(source_path.exists())
@@ -277,6 +280,27 @@ class MacosDesktopActionTests(unittest.TestCase):
         self.assertTrue(manifest["artifacts"]["video_issue_metadata"].endswith("/video/issue-metadata.json"))
         self.assertEqual(manifest["video_issue"]["status"], "copied")
         self.assertTrue(manifest["video_issue"]["source"].endswith("/video/proof-composed.mp4"))
+
+    def test_run_macos_local_smoke_passes_video_composition_context(self) -> None:
+        reference = self.root / "reference.png"
+        reference.write_bytes(b"png")
+
+        manifest, _launched, _terminated, _waited_paths, _rollups = self.run_action(
+            record_video=True,
+            compose_video_proof=True,
+            capture_ui_snapshot=False,
+            video_template="design-parity",
+            video_source_image=str(reference),
+            video_source_label="Figma reference",
+            video_title="Design parity proof",
+        )
+
+        self.assertEqual(manifest["video_composed"]["kwargs"]["template"], "design-parity")
+        self.assertEqual(manifest["video_composed"]["kwargs"]["source_image"], str(reference.resolve()))
+        self.assertEqual(manifest["video_composed"]["kwargs"]["source_label"], "Figma reference")
+        self.assertEqual(manifest["video_composed"]["kwargs"]["title"], "Design parity proof")
+        self.assertEqual(manifest["video_proof_composition"]["template"], "design-parity")
+        self.assertEqual(manifest["video_proof_composition"]["source_image"], str(reference.resolve()))
 
     def test_run_macos_local_smoke_rejects_view_click_without_snapshot(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "View-targeted click requires"):
