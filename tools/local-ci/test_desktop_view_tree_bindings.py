@@ -73,6 +73,14 @@ class DesktopViewTreeBindingsTests(unittest.TestCase):
 
         self.assertEqual(bindings["count_view_tree_nodes"]({"children": []}), 3)
 
+    def test_install_desktop_view_tree_helpers_keeps_unknown_local_fallback(self) -> None:
+        bindings = {}
+        self.mod.future_desktop_view_tree_helper = lambda _bindings: "future"
+
+        self.mod.install_desktop_view_tree_helpers(bindings, ("future_desktop_view_tree_helper",))
+
+        self.assertEqual(bindings["future_desktop_view_tree_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()

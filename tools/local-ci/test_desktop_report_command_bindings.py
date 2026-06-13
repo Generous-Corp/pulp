@@ -135,6 +135,14 @@ class DesktopReportCommandBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["cmd_desktop_recent"](object()), 19)
         self.assertNotIn("cmd_desktop_cleanup", bindings)
 
+    def test_install_desktop_report_command_helpers_keeps_unknown_local_fallback(self) -> None:
+        bindings = {}
+        self.mod.future_desktop_report_command_helper = lambda _bindings: "future"
+
+        self.mod.install_desktop_report_command_helpers(bindings, ("future_desktop_report_command_helper",))
+
+        self.assertEqual(bindings["future_desktop_report_command_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()

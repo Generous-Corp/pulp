@@ -104,6 +104,14 @@ class DesktopConfigCommandBindingsTests(unittest.TestCase):
         self.assertIs(captured["kwargs"]["load_config_fn"], bindings["load_config"])
         self.assertNotIn("cmd_desktop_config_set", bindings)
 
+    def test_install_desktop_config_command_helpers_keeps_unknown_local_fallback(self) -> None:
+        bindings = {}
+        self.mod.future_desktop_config_command_helper = lambda _bindings: "future"
+
+        self.mod.install_desktop_config_command_helpers(bindings, ("future_desktop_config_command_helper",))
+
+        self.assertEqual(bindings["future_desktop_config_command_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()
