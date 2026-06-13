@@ -5921,6 +5921,9 @@ pulp_add_test_suite(pulp-test-theme-contrast LIBRARIES pulp::view)
 # Theme preset library (38 tweakcn + derivation)
 pulp_add_test_suite(pulp-test-theme-presets LIBRARIES pulp::view)
 
+# Button widgets — theme-token wiring + rgba()-clamp bug-fix regression guard
+pulp_add_test_suite(pulp-test-buttons LIBRARIES pulp::view)
+
 # OS appearance tracking
 pulp_add_test_suite(pulp-test-appearance SOURCES test_appearance_tracker.cpp LIBRARIES pulp::view)
 
