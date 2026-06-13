@@ -118,6 +118,20 @@ public:
             cfg.transient_preservation = true;
             engine_.prepare(sample_rate, cfg);
             latency_anchor_ = calibrate_anchor();
+
+            // Separate engine in realtime_pitch mode for the pitch path (formant
+            // preserve/shift/independent live here, in the SpectralEnvelopeShifter).
+            RealtimePitchTimeConfig pcfg;
+            pcfg.mode = PitchTimeMode::realtime_pitch;
+            pcfg.quality = PitchTimeQuality::quality;
+            pcfg.channels = channels_;
+            pcfg.max_block = kBlock;
+            pcfg.max_pitch_semitones =
+                static_cast<float>(max_pitch_semitones_ > 0.0 ? max_pitch_semitones_ : 1.0);
+            pcfg.formant_mode = FormantMode::follow;
+            pcfg.true_envelope_iterations = 3;
+            pcfg.transient_preservation = true;
+            pitch_engine_.prepare(sample_rate, pcfg);
         }
     }
 
@@ -177,8 +191,12 @@ public:
         if (pitch_off)
             return tempo_stretch(in, in_frames, out, out_frames, opts.time_ratio);
 
-        // TODO(phase2): pitch / formant / single-pass R+S / STN routing.
-        // Placeholder until P2: length-correct copy + zero-pad (NOT a stretch).
+        // Pitch-only (duration preserved): realtime_pitch engine + formant mode.
+        if (opts.time_ratio == 1.0)
+            return pitch_shift(in, in_frames, out, out_frames,
+                               opts.pitch_semitones, opts.formant_mode, opts.formant_semitones);
+
+        // TODO(phase2.4): independent R+S single-pass. Placeholder until P2.4.
         for (int c = 0; c < channels_; ++c) {
             float* dst = out[c];
             const float* src = in[c];
@@ -317,6 +335,66 @@ private:
         return true;
     }
 
+    // Duration-preserving pitch shift via the realtime_pitch engine. Pitch and
+    // formant targets are set BEFORE reset() so the control smoothers latch
+    // immediately (no 30 ms pitch ramp at the start). process() is equal-length
+    // with a fixed leading latency, so feed input + latency silence and trim the
+    // leading latency to recover exactly out_frames (== in_frames) aligned samples.
+    bool pitch_shift(const float* const* in, long in_frames,
+                     float* const* out, long out_frames,
+                     double semitones, OfflineFormantMode fmode, double fsemis) {
+        const int ch = channels_;
+        const int blk = kBlock;
+        pitch_engine_.set_pitch_semitones(static_cast<float>(semitones));
+        switch (fmode) {
+            case OfflineFormantMode::follow_pitch:
+                pitch_engine_.set_formant_mode(FormantMode::follow);
+                pitch_engine_.set_formant_semitones(0.0f); break;
+            case OfflineFormantMode::preserve_original:
+                pitch_engine_.set_formant_mode(FormantMode::preserve);
+                pitch_engine_.set_formant_semitones(0.0f); break;
+            case OfflineFormantMode::shift_independently:
+                pitch_engine_.set_formant_mode(FormantMode::preserve);
+                pitch_engine_.set_formant_semitones(static_cast<float>(fsemis)); break;
+        }
+        pitch_engine_.reset(); // latches the pitch/formant smoothers to the targets above
+
+        const long lat = pitch_engine_.latency_samples();
+        std::vector<std::vector<float>> accum(static_cast<size_t>(ch));
+        std::vector<std::vector<float>> ob(static_cast<size_t>(ch),
+                                           std::vector<float>(static_cast<size_t>(blk)));
+        std::vector<std::vector<float>> sil(static_cast<size_t>(ch),
+                                            std::vector<float>(static_cast<size_t>(blk), 0.0f));
+        std::vector<const float*> ip(static_cast<size_t>(ch));
+        std::vector<const float*> sp(static_cast<size_t>(ch));
+        std::vector<float*> op(static_cast<size_t>(ch));
+        for (int c = 0; c < ch; ++c) { sp[c] = sil[c].data(); op[c] = ob[c].data(); }
+
+        auto pump = [&](const float* const* src, int nn) {
+            pitch_engine_.process(src, op.data(), nn);
+            for (int c = 0; c < ch; ++c)
+                accum[static_cast<size_t>(c)].insert(
+                    accum[static_cast<size_t>(c)].end(),
+                    ob[static_cast<size_t>(c)].begin(),
+                    ob[static_cast<size_t>(c)].begin() + nn);
+        };
+        for (long i = 0; i < in_frames; i += blk) {
+            for (int c = 0; c < ch; ++c) ip[c] = in[c] + i;
+            pump(ip.data(), static_cast<int>(std::min<long>(blk, in_frames - i)));
+        }
+        for (long f = 0; f < lat; f += blk)
+            pump(sp.data(), static_cast<int>(std::min<long>(blk, lat - f)));
+
+        for (int c = 0; c < ch; ++c)
+            for (long i = 0; i < out_frames; ++i) {
+                const long idx = lat + i;
+                out[c][i] = (idx >= 0 && idx < static_cast<long>(accum[static_cast<size_t>(c)].size()))
+                                ? accum[static_cast<size_t>(c)][static_cast<size_t>(idx)]
+                                : 0.0f;
+            }
+        return true;
+    }
+
     static bool fail(std::string* err, const char* msg) {
         if (err) *err = msg;
         return false;
@@ -324,6 +402,7 @@ private:
 
     static constexpr int kBlock = 4096;
     RealtimePitchTimeProcessor engine_;
+    RealtimePitchTimeProcessor pitch_engine_;
     double latency_anchor_ = 0.0;
     double sample_rate_ = 0.0;
     int channels_ = 1;

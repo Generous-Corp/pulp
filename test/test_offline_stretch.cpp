@@ -323,3 +323,35 @@ TEST_CASE("Phase 1 safety + determinism (tempo path)", "[offline-stretch]") {
         }
     }
 }
+
+TEST_CASE("pitch-only: duration preserved, pitch shifts by semitones", "[offline-stretch]") {
+    constexpr double pi = 3.14159265358979323846;
+    const double sr = 48000.0, f0 = 500.0, w = 2.0 * pi * f0 / sr;
+    const long n = 48000;
+    std::vector<float> in(static_cast<size_t>(n));
+    for (long i = 0; i < n; ++i) in[static_cast<size_t>(i)] = 0.5f * std::sin(w * i);
+    const float* ip[1] = {in.data()};
+
+    OfflineStretch s; s.prepare(sr, 1);
+    auto dominant_freq = [&](const std::vector<float>& x) {
+        long zc = 0; const long lo = 6000, hi = static_cast<long>(x.size()) - 6000;
+        for (long i = lo + 1; i < hi; ++i)
+            if ((x[static_cast<size_t>(i - 1)] <= 0.0f) != (x[static_cast<size_t>(i)] <= 0.0f)) ++zc;
+        return zc / (2.0 * (static_cast<double>(hi - lo - 1) / sr));
+    };
+
+    SECTION("+12 semitones doubles the frequency, length unchanged") {
+        OfflineStretchOptions o; o.pitch_semitones = 12.0; // time_ratio 1
+        std::vector<float> out(static_cast<size_t>(n));
+        float* op[1] = {out.data()};
+        std::string e; REQUIRE(s.process(ip, n, op, n, o, &e));
+        CHECK(std::abs(dominant_freq(out) - 1000.0) < 40.0); // 500 -> 1000
+    }
+    SECTION("-12 semitones halves the frequency") {
+        OfflineStretchOptions o; o.pitch_semitones = -12.0;
+        std::vector<float> out(static_cast<size_t>(n));
+        float* op[1] = {out.data()};
+        std::string e; REQUIRE(s.process(ip, n, op, n, o, &e));
+        CHECK(std::abs(dominant_freq(out) - 250.0) < 20.0); // 500 -> 250
+    }
+}
