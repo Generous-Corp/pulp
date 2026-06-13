@@ -19,11 +19,7 @@ class GithubWorkflowBindingsTests(unittest.TestCase):
         self.mod = load_module()
 
     def test_github_workflow_exports_are_composed_from_focused_groups(self):
-        expected = (
-            *self.mod.GITHUB_WORKFLOW_SETTINGS_EXPORTS,
-            *self.mod.GITHUB_WORKFLOW_DISPATCH_EXPORTS,
-            *self.mod.GITHUB_WORKFLOW_PROVIDER_EXPORTS,
-        )
+        expected = self.mod.GITHUB_WORKFLOW_RESOLUTION_EXPORTS
 
         self.assertEqual(self.mod.GITHUB_WORKFLOW_EXPORTS, expected)
         self.assertEqual(len(expected), len(set(expected)))

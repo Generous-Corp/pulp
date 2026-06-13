@@ -119,6 +119,44 @@ class GithubWorkflowResolutionBindingsTests(unittest.TestCase):
         self.assertEqual(calls[4][1], (config, repository_variables, "build", "namespace", "linux_runner_selector_json"))
         self.assertEqual(calls[7][1], (args, fields))
 
+    def test_resolution_exports_are_composed_from_focused_groups(self):
+        expected = (
+            *self.mod.GITHUB_WORKFLOW_SETTINGS_EXPORTS,
+            *self.mod.GITHUB_WORKFLOW_DISPATCH_EXPORTS,
+            *self.mod.GITHUB_WORKFLOW_PROVIDER_EXPORTS,
+        )
+
+        self.assertEqual(self.mod.GITHUB_WORKFLOW_RESOLUTION_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
+    def test_install_resolution_helpers_routes_each_group(self):
+        bindings, calls = self._bindings()
+
+        self.mod.install_github_workflow_resolution_helpers(
+            bindings,
+            (
+                "resolve_github_actions_settings",
+                "resolve_cli_dispatch_field_values",
+                "resolve_default_provider_for_workflow",
+            ),
+        )
+
+        args = types.SimpleNamespace(linux_runner_selector_json=None)
+        self.assertEqual(bindings["resolve_github_actions_settings"]({"github_actions": {}}), {"provider": "namespace"})
+        self.assertEqual(bindings["resolve_cli_dispatch_field_values"](args, ("field",)), {"field": "cli"})
+        self.assertEqual(
+            bindings["resolve_default_provider_for_workflow"]({"provider": "namespace"}, "build"),
+            ("github-hosted", "builtin"),
+        )
+        self.assertEqual(
+            [call[0] for call in calls],
+            [
+                "resolve_github_actions_settings",
+                "resolve_cli_dispatch_field_values",
+                "resolve_default_provider_for_workflow",
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
