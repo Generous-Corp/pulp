@@ -76,6 +76,14 @@ class DesktopPublishBranchBindingsTests(unittest.TestCase):
         )
         self.assertEqual(captured["args"], ({"desktop_automation": {}}, {"output_dir": "/tmp/report"}))
 
+    def test_install_desktop_publish_branch_helpers_keeps_unknown_local_fallback(self):
+        bindings = {}
+        self.mod.future_desktop_publish_branch_helper = lambda _bindings: "future"
+
+        self.mod.install_desktop_publish_branch_helpers(bindings, ("future_desktop_publish_branch_helper",))
+
+        self.assertEqual(bindings["future_desktop_publish_branch_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()

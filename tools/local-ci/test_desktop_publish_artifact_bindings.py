@@ -62,6 +62,14 @@ class DesktopPublishArtifactBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["desktop_publish_root"]({}), Path("/published"))
         self.assertNotIn("create_desktop_publish_bundle", bindings)
 
+    def test_publish_installer_keeps_unknown_local_fallback(self) -> None:
+        bindings = {}
+        self.mod.future_desktop_publish_artifact_helper = lambda _bindings: "future"
+
+        self.mod.install_desktop_publish_artifact_helpers(bindings, ("future_desktop_publish_artifact_helper",))
+
+        self.assertEqual(bindings["future_desktop_publish_artifact_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()
