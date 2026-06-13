@@ -431,6 +431,21 @@ class TargetedCtestTests(unittest.TestCase):
             "the regex selector and default full-suite path share the same call.",
         )
 
+    def test_profraw_cleanup_does_not_expand_a_large_glob(self) -> None:
+        text = SCRIPT.read_text()
+        self.assertIn(
+            'find "${PROFRAW_DIR}" -name \'*.profraw\' -type f -delete',
+            text,
+            "local_diff_cover.sh must delete stale profraw files via find so "
+            "a previous full run with thousands of profiles cannot hit ARG_MAX.",
+        )
+        self.assertNotIn(
+            'rm -f "${PROFRAW_DIR}"/*.profraw',
+            text,
+            "rm over a profraw glob fails with 'Argument list too long' after "
+            "large full-suite coverage runs.",
+        )
+
 
 class CoverageConfigureTests(unittest.TestCase):
     """Coverage configure should stay headless-safe on non-Skia worktrees."""

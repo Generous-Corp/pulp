@@ -277,7 +277,7 @@ fi
 # ── Run tests with profile output ───────────────────────────────────────────
 PROFRAW_DIR="${BUILD_DIR}/profraw"
 mkdir -p "${PROFRAW_DIR}"
-rm -f "${PROFRAW_DIR}"/*.profraw
+find "${PROFRAW_DIR}" -name '*.profraw' -type f -delete
 export LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%p-%m.profraw"
 
 echo "=== Running tests ==="
