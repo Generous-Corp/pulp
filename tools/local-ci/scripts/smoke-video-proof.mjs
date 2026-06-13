@@ -169,6 +169,11 @@ const main = async () => {
 						},
 					},
 					video_proof_composition: {
+						context: {
+							recipe: 'synthetic-smoke',
+							host: 'local-ci',
+							component: 'proof-toggle',
+						},
 						action_marker: {
 							kind: 'click',
 							label: 'proof-toggle',

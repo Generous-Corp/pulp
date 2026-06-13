@@ -155,6 +155,12 @@ class ReportingTests(unittest.TestCase):
                     "content_point": {"x": 12.0, "y": 24.0},
                     "normalized_point": {"x": 0.25, "y": 0.5},
                 },
+                "context": {
+                    "recipe": "design-parity",
+                    "host": "REAPER",
+                    "plugin": "PulpSynth",
+                    "format": "clap",
+                },
                 "notes": ["Critical control remains legible."],
             },
         }
@@ -197,6 +203,7 @@ class ReportingTests(unittest.TestCase):
         self.assertEqual(published_run["video_proof_composition"]["template"], "design-parity")
         self.assertEqual(published_run["video_proof_composition"]["focus"]["label"], "bypass-toggle")
         self.assertEqual(published_run["video_proof_composition"]["action_marker"]["label"], "bypass-toggle")
+        self.assertEqual(published_run["video_proof_composition"]["context"]["plugin"], "PulpSynth")
         self.assertEqual(
             published_run["video_proof_notes"],
             ["Source import matches the native render.", "Critical control remains legible."],
@@ -212,6 +219,8 @@ class ReportingTests(unittest.TestCase):
         self.assertIn("focus_point:", html_text)
         self.assertIn("action: bypass-toggle", html_text)
         self.assertIn("action_point:", html_text)
+        self.assertIn("context.plugin: PulpSynth", html_text)
+        self.assertIn("context.format: clap", html_text)
         self.assertIn("Source import matches the native render.", html_text)
         self.assertIn("source reference", html_text)
         review_text = (output_dir / "review.md").read_text()
@@ -235,6 +244,8 @@ class ReportingTests(unittest.TestCase):
         self.assertIn("Focus component: `bypass-toggle`", review_text)
         self.assertIn("Action marker: `bypass-toggle`", review_text)
         self.assertIn("Action point: `", review_text)
+        self.assertIn("Context plugin: `PulpSynth`", review_text)
+        self.assertIn("Context format: `clap`", review_text)
         self.assertIn("Source reference: `", review_text)
         self.assertIn("Proof note: Source import matches the native render.", review_text)
 

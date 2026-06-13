@@ -116,6 +116,7 @@ class MacosDesktopBindingsTests(unittest.TestCase):
             video_source_label="Figma reference",
             video_title="Design parity proof",
             video_notes=["Reference matches implementation"],
+            video_context={"recipe": "design-parity"},
         )
 
         self.assertEqual(result, {"ok": True})
@@ -153,6 +154,7 @@ class MacosDesktopBindingsTests(unittest.TestCase):
         self.assertEqual(captured["kwargs"]["video_source_label"], "Figma reference")
         self.assertEqual(captured["kwargs"]["video_title"], "Design parity proof")
         self.assertEqual(captured["kwargs"]["video_notes"], ["Reference matches implementation"])
+        self.assertEqual(captured["kwargs"]["video_context"], {"recipe": "design-parity"})
         self.assertIs(captured["kwargs"]["terminate_process_fn"], bindings["terminate_process"])
 
 

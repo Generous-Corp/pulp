@@ -396,6 +396,7 @@ class MacosDesktopActionTests(unittest.TestCase):
             video_source_label="Figma reference",
             video_title="Design parity proof",
             video_notes=["Reference matches implementation"],
+            video_context={"recipe": "design-parity", "source": "figma"},
         )
 
         self.assertEqual(manifest["video_composed"]["kwargs"]["template"], "design-parity")
@@ -407,6 +408,7 @@ class MacosDesktopActionTests(unittest.TestCase):
         self.assertEqual(manifest["video_proof_composition"]["template"], "design-parity")
         self.assertEqual(manifest["video_proof_composition"]["source_image"], str(reference.resolve()))
         self.assertEqual(manifest["video_proof_composition"]["notes"], ["Reference matches implementation"])
+        self.assertEqual(manifest["video_proof_composition"]["context"], {"recipe": "design-parity", "source": "figma"})
 
     def test_run_macos_local_smoke_adds_component_zoom_focus_context(self) -> None:
         manifest, _launched, _terminated, _waited_paths, _rollups = self.run_action(

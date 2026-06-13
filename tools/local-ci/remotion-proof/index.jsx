@@ -29,6 +29,8 @@ const defaultProps = {
 	imageChanged: null,
 	focus: null,
 	actionMarker: null,
+	proofContext: {},
+	contextItems: [],
 	stepItems: [],
 	notes: [],
 };

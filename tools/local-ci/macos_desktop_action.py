@@ -161,6 +161,7 @@ def run_macos_local_smoke(
     video_source_label: str | None = None,
     video_title: str | None = None,
     video_notes: list[str] | None = None,
+    video_context: dict | None = None,
 ) -> dict:
     bundle_dir = create_desktop_run_bundle_fn(config, "mac", action_name)
     action_paths = desktop_action_artifact_paths_fn(bundle_dir, output_path)
@@ -479,6 +480,14 @@ def run_macos_local_smoke(
         if action_marker is not None:
             composition = manifest.setdefault("video_proof_composition", {})
             composition["action_marker"] = action_marker
+        cleaned_video_context = {
+            str(key): str(value)
+            for key, value in (video_context or {}).items()
+            if key and value is not None and str(value)
+        }
+        if cleaned_video_context:
+            composition = manifest.setdefault("video_proof_composition", {})
+            composition["context"] = cleaned_video_context
         if video_capture_target == "terminal":
             manifest["terminal"] = {
                 "returncode": terminal_returncode,
@@ -515,7 +524,7 @@ def run_macos_local_smoke(
                 notes=cleaned_video_notes,
             )
             manifest["video_composed"] = composed_summary
-            if any([video_template, source_image_path, video_source_label, video_title, cleaned_video_notes]):
+            if any([video_template, source_image_path, video_source_label, video_title, cleaned_video_notes, cleaned_video_context]):
                 composition = manifest.setdefault("video_proof_composition", {})
                 composition.update(
                     {
@@ -527,6 +536,8 @@ def run_macos_local_smoke(
                 )
                 if cleaned_video_notes:
                     composition["notes"] = cleaned_video_notes
+                if cleaned_video_context:
+                    composition["context"] = cleaned_video_context
             if video_composed_path.exists():
                 manifest["artifacts"]["video_composed"] = str(video_composed_path)
             atomic_write_text_fn(video_composed_metadata_path, json.dumps(composed_summary, indent=2) + "\n")

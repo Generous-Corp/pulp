@@ -37,6 +37,7 @@ def _apply_desktop_video_recipe(args: argparse.Namespace) -> None:
     if recipe == "standalone-interaction":
         _set_default(args, "label", "standalone-interaction-proof")
         _set_default(args, "video_title", "Standalone UI interaction")
+        _set_default(args, "video_template", "standalone")
         if any([args.click, args.click_view_id, args.click_view_type, args.click_view_text, args.click_view_label]):
             args.capture_before = True
         return
@@ -45,6 +46,7 @@ def _apply_desktop_video_recipe(args: argparse.Namespace) -> None:
         args.action = "smoke"
         _set_default(args, "label", "audio-inspector-demo-proof")
         _set_default(args, "video_title", "Standalone Audio Inspector Demo")
+        _set_default(args, "video_template", "inspector-workflow")
         return
 
     if recipe == "reaper-plugin-editor":
@@ -57,6 +59,7 @@ def _apply_desktop_video_recipe(args: argparse.Namespace) -> None:
             _set_default(args, "bundle_id", "com.cockos.reaper")
         _set_default(args, "label", f"reaper-{plugin_format}-{plugin}-proof")
         _set_default(args, "video_title", f"{plugin} {plugin_format.upper()} editor in {args.host_app}")
+        _set_default(args, "video_template", "plugin-host")
         args.capture_before = True
         return
 
@@ -65,6 +68,7 @@ def _apply_desktop_video_recipe(args: argparse.Namespace) -> None:
         args.capture_ui_snapshot = True
         _set_default(args, "label", "inspector-workflow-proof")
         _set_default(args, "video_title", "Inspector workflow proof")
+        _set_default(args, "video_template", "inspector-workflow")
         return
 
     if recipe == "component-zoom":
@@ -91,6 +95,27 @@ def _apply_desktop_video_recipe(args: argparse.Namespace) -> None:
         _set_default(args, "video_title", "Design import parity")
 
 
+def _video_context(args: argparse.Namespace) -> dict:
+    context: dict[str, str] = {}
+    for attr, key in [
+        ("recipe", "recipe"),
+        ("host_app", "host"),
+        ("plugin", "plugin"),
+        ("plugin_format", "format"),
+        ("component_id", "component"),
+    ]:
+        value = getattr(args, attr, None)
+        if value:
+            context[key] = str(value)
+    if getattr(args, "capture_bundle_id", None):
+        context["capture_bundle_id"] = str(args.capture_bundle_id)
+    if getattr(args, "bundle_id", None):
+        context["bundle_id"] = str(args.bundle_id)
+    if getattr(args, "launch_command", None) and not context.get("bundle_id"):
+        context["launch"] = "command"
+    return context
+
+
 def windows_requires_pulp_app_selectors(args: argparse.Namespace) -> bool:
     return any([args.click_view_id, args.click_view_type, args.click_view_text, args.click_view_label])
 
@@ -114,6 +139,7 @@ def _video_kwargs(args: argparse.Namespace) -> dict:
         "video_source_label": getattr(args, "source_label", None),
         "video_title": getattr(args, "video_title", None),
         "video_notes": getattr(args, "video_note", None) or [],
+        "video_context": _video_context(args),
     }
 
 

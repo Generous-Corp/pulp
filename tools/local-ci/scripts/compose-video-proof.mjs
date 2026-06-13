@@ -86,11 +86,25 @@ const actionMarkerLabel = (marker) => {
 	return marker.kind || null;
 };
 
+const contextItemsFor = (context) => {
+	if (!context || typeof context !== 'object') {
+		return [];
+	}
+	return Object.entries(context)
+		.filter(([, value]) => value !== null && value !== undefined && `${value}`.trim())
+		.map(([key, value]) => ({key, value: `${value}`}))
+		.slice(0, 8);
+};
+
 const stepItemsFor = (manifest, videoMeta, issueMeta, proofNotes = []) => {
 	const interaction = manifest.interaction || {};
 	const selectorLabel = firstPresentSelector(interaction.click?.selector);
 	const focusLabel = manifest.video_proof_composition?.focus?.label;
 	const markerLabel = actionMarkerLabel(manifest.video_proof_composition?.action_marker);
+	const proofContext = manifest.video_proof_composition?.context || {};
+	const pluginHost = [proofContext.host, proofContext.plugin, proofContext.format]
+		.filter(Boolean)
+		.join(' / ');
 	const clickPoint = interaction.click?.content_point || interaction.click?.screen_point;
 	const clickDetail = selectorLabel || (clickPoint ? `point: ${Math.round(clickPoint.x)},${Math.round(clickPoint.y)}` : null);
 	const actionDetail = interaction.mode
@@ -114,7 +128,7 @@ const stepItemsFor = (manifest, videoMeta, issueMeta, proofNotes = []) => {
 		return [
 			{
 				label: 'Launch',
-				detail: `${manifest.target || 'target'}/${manifest.action || 'run'}`,
+				detail: pluginHost || `${manifest.target || 'target'}/${manifest.action || 'run'}`,
 			},
 			{
 				label: 'Focus',
@@ -133,7 +147,7 @@ const stepItemsFor = (manifest, videoMeta, issueMeta, proofNotes = []) => {
 	return [
 		{
 			label: 'Launch',
-			detail: `${manifest.target || 'target'}/${manifest.action || 'run'}`,
+			detail: pluginHost || `${manifest.target || 'target'}/${manifest.action || 'run'}`,
 		},
 		{
 			label: proofNotes.length && !interaction.mode ? 'Evidence' : 'Action',
@@ -194,7 +208,16 @@ const main = async () => {
 			const sourceImageFileName = await copyIfPresent(sourceImage, publicDir, 'source-reference.png');
 			const inputProps = {
 				title: args.title || manifest.video_proof_composition?.title || manifest.label || 'Validation Proof',
-				subtitle: template === 'design-parity' ? 'Design parity proof' : 'Desktop automation proof',
+				subtitle:
+					template === 'design-parity'
+						? 'Design parity proof'
+						: template === 'plugin-host'
+							? 'Plugin host proof'
+							: template === 'inspector-workflow'
+								? 'Inspector workflow proof'
+								: template === 'standalone'
+									? 'Standalone app proof'
+									: 'Desktop automation proof',
 				template,
 				videoFileName,
 				posterFileName,
@@ -220,6 +243,8 @@ const main = async () => {
 				imageChanged: artifacts.image_change?.changed ?? null,
 				focus: manifest.video_proof_composition?.focus || null,
 				actionMarker: manifest.video_proof_composition?.action_marker || null,
+				proofContext: manifest.video_proof_composition?.context || {},
+				contextItems: contextItemsFor(manifest.video_proof_composition?.context),
 				stepItems: stepItemsFor(manifest, videoMeta, issueMeta, proofNotes),
 				notes: [
 					...proofNotes,

@@ -243,6 +243,14 @@ rather than the wrapper process window. The `audio-inspector-demo` recipe is a s
 built standalone demo binary; pass the command path for the build directory you
 want to validate.
 
+Recipes select Remotion templates and write structured setup context into
+`video_proof_composition.context`. The composed video, `index.html`, and
+`review.md` display that context, including recipe, host, plugin, format,
+component, bundle id, and launch mode when available. `reaper-plugin-editor`
+uses the `plugin-host` template, inspector recipes use `inspector-workflow`,
+standalone interaction uses `standalone`, component proofs use
+`component-zoom`, and source comparisons use `design-parity`.
+
 The `component-zoom` recipe selects the Remotion `component-zoom` template. It
 stores `video_proof_composition.focus` from the click selector and resolved
 content point, so the composed proof shows a component label, focus rectangle,

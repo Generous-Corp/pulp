@@ -200,7 +200,12 @@ python3 tools/local-ci/local_ci.py desktop video mac \
 uses `--component-id` as the click target when no explicit click selector was
 provided. It also selects the Remotion `component-zoom` template and records
 `video_proof_composition.focus` metadata so the composed proof can show a
-component label, focus rectangle, and zoom detail inset. `audio-inspector-demo`
+component label, focus rectangle, and zoom detail inset. Recipes also write
+`video_proof_composition.context`, which the composed video, `index.html`, and
+`review.md` display as setup context such as recipe, host, plugin, format,
+component, bundle id, or launch mode. `reaper-plugin-editor` selects the
+`plugin-host` template, inspector recipes select `inspector-workflow`, and
+standalone interaction proofs select `standalone`. `audio-inspector-demo`
 records a smoke proof of a built standalone
 Audio Inspector demo window without requiring a UI snapshot artifact.
 `design-parity` records an inspect proof and composes it with the Remotion

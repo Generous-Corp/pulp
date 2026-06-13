@@ -130,7 +130,15 @@ class DesktopActionCommandsCliTests(unittest.TestCase):
 
     def test_smoke_forwards_capture_bundle_id(self):
         result = self.mod.cmd_desktop_smoke(
-            self.args(capture_bundle_id="com.cockos.reaper", record_video=True, video_note=["PulpSynth inserted"]),
+            self.args(
+                capture_bundle_id="com.cockos.reaper",
+                record_video=True,
+                video_note=["PulpSynth inserted"],
+                recipe="reaper-plugin-editor",
+                host_app="REAPER",
+                plugin="PulpSynth",
+                plugin_format="clap",
+            ),
             **self.deps(),
         )
 
@@ -138,6 +146,17 @@ class DesktopActionCommandsCliTests(unittest.TestCase):
         self.assertEqual(self.calls[0][2]["capture_bundle_id"], "com.cockos.reaper")
         self.assertEqual(self.calls[0][2]["video_capture_target"], "app")
         self.assertEqual(self.calls[0][2]["video_notes"], ["PulpSynth inserted"])
+        self.assertEqual(
+            self.calls[0][2]["video_context"],
+            {
+                "recipe": "reaper-plugin-editor",
+                "host": "REAPER",
+                "plugin": "PulpSynth",
+                "format": "clap",
+                "capture_bundle_id": "com.cockos.reaper",
+                "launch": "command",
+            },
+        )
 
     def test_smoke_json_and_error_paths(self):
         result = self.mod.cmd_desktop_smoke(
@@ -342,6 +361,7 @@ class DesktopActionCommandsCliTests(unittest.TestCase):
         self.assertEqual(call["host_app"], "REAPER")
         self.assertEqual(call["label"], "reaper-vst3-PulpEffect-proof")
         self.assertEqual(call["video_title"], "PulpEffect VST3 editor in REAPER")
+        self.assertEqual(call["video_template"], "plugin-host")
 
     def test_video_command_reaper_recipe_keeps_explicit_command(self):
         result = self.mod.cmd_desktop_video(

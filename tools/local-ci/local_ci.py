@@ -1347,6 +1347,7 @@ def run_macos_local_smoke(
     video_source_label: str | None = None,
     video_title: str | None = None,
     video_notes: list[str] | None = None,
+    video_context: dict | None = None,
 ) -> dict:
     return _macos_desktop_bindings.run_macos_local_smoke(
         globals(),
@@ -1379,6 +1380,7 @@ def run_macos_local_smoke(
         video_source_label=video_source_label,
         video_title=video_title,
         video_notes=video_notes,
+        video_context=video_context,
     )
 
 

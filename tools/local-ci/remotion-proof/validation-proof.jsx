@@ -82,6 +82,7 @@ export const ValidationProof = ({
 	imageChanged,
 	focus,
 	actionMarker,
+	contextItems,
 	stepItems,
 	notes,
 }) => {
@@ -96,6 +97,7 @@ export const ValidationProof = ({
 	});
 	const noteItems = Array.isArray(notes) ? notes.slice(0, 4) : [];
 	const steps = Array.isArray(stepItems) ? stepItems.slice(0, 4) : [];
+	const contextRows = Array.isArray(contextItems) ? contextItems.slice(0, 6) : [];
 	const designParity = template === 'design-parity' && sourceImageFileName;
 	const componentZoom = template === 'component-zoom';
 	const focusCenter = focus?.normalized_center || {x: 0.5, y: 0.5};
@@ -454,6 +456,28 @@ export const ValidationProof = ({
 								<strong>Interaction</strong>
 								<br />
 								{interactionMode}
+							</div>
+						) : null}
+						{contextRows.length ? (
+							<div>
+								<strong>Context</strong>
+								<br />
+								<div style={{display: 'grid', gap: 4, marginTop: 4}}>
+									{contextRows.map((item) => (
+										<div
+											key={item.key}
+											style={{
+												display: 'grid',
+												gridTemplateColumns: '92px 1fr',
+												gap: 8,
+												alignItems: 'baseline',
+											}}
+										>
+											<span style={{color: colors.muted}}>{item.key}</span>
+											<span>{item.value}</span>
+										</div>
+									))}
+								</div>
 							</div>
 						) : null}
 						{sourceText ? (

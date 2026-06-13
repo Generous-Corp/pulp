@@ -228,6 +228,20 @@ def _proof_action_marker_summary(proof_composition: dict) -> dict:
     return summary
 
 
+def _proof_context_items(proof_composition: dict) -> list[tuple[str, str]]:
+    context = proof_composition.get("context") if isinstance(proof_composition, dict) else None
+    if not isinstance(context, dict):
+        return []
+    items: list[tuple[str, str]] = []
+    for key, value in context.items():
+        if value is None:
+            continue
+        text = str(value)
+        if text:
+            items.append((str(key), text))
+    return items
+
+
 def desktop_review_issue_body(index_payload: dict, *, publish_dir: Path) -> str:
     serve_command = f"python3 tools/local-ci/local_ci.py desktop serve {publish_dir} --host 0.0.0.0 --port 8765"
     lines = [
@@ -253,6 +267,7 @@ def desktop_review_issue_body(index_payload: dict, *, publish_dir: Path) -> str:
         focus_label = _proof_focus_label(proof_composition)
         action_marker = _proof_action_marker_summary(proof_composition)
         action_label = action_marker.get("label") or action_marker.get("kind")
+        context_items = _proof_context_items(proof_composition)
         video = artifacts.get("video_issue") or artifacts.get("video_composed") or artifacts.get("video")
         metadata_path = artifacts.get("video_issue_metadata") or artifacts.get("video_composed_metadata") or artifacts.get("video_metadata")
         metadata = _artifact_metadata(publish_dir, metadata_path)
@@ -302,6 +317,8 @@ def desktop_review_issue_body(index_payload: dict, *, publish_dir: Path) -> str:
                 f"- Needs-work command: `python3 tools/local-ci/local_ci.py desktop verdict {verdict_manifest} --needs-work --notes \"<what to change>\" --issue-url <issue-url>`",
             ]
         )
+        for key, value in context_items[:8]:
+            lines.append(f"- Context {key}: `{value}`")
         for note in proof_notes[:5]:
             lines.append(f"- Proof note: {note}")
         if artifacts.get("screenshot"):
@@ -420,6 +437,7 @@ def stage_desktop_publish_report(
         proof_composition = run.get("video_proof_composition") if isinstance(run.get("video_proof_composition"), dict) else {}
         proof_focus = _proof_focus_summary(proof_composition)
         action_marker = _proof_action_marker_summary(proof_composition)
+        context_items = _proof_context_items(proof_composition)
         meta_lines = [
             f"<div><strong>{html.escape(str(run.get('target') or '?'))}/{html.escape(str(run.get('action') or '?'))}</strong></div>",
             f"<div>{html.escape(str(run.get('label') or '?'))}</div>",
@@ -447,6 +465,8 @@ def stage_desktop_publish_report(
             meta_lines.append(f"<div>action: {html.escape(str(action_label))}</div>")
         if action_marker.get("content_point"):
             meta_lines.append(f"<div>action_point: {html.escape(json.dumps(action_marker['content_point'], sort_keys=True))}</div>")
+        for key, value in context_items[:8]:
+            meta_lines.append(f"<div>context.{html.escape(key)}: {html.escape(value)}</div>")
         if proof_notes:
             meta_lines.append(
                 "<ul class=\"proof-notes\">"
