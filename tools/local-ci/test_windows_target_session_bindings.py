@@ -97,6 +97,14 @@ class WindowsTargetSessionBindingsTests(unittest.TestCase):
             {"target": "win", "adapter": "windows-session-agent"},
         )
 
+    def test_install_windows_target_session_helpers_keeps_unknown_local_fallback(self) -> None:
+        bindings = {}
+        self.mod.future_windows_session_helper = lambda _bindings: "future"
+
+        self.mod.install_windows_target_session_helpers(bindings, ("future_windows_session_helper",))
+
+        self.assertEqual(bindings["future_windows_session_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()

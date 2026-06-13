@@ -66,4 +66,10 @@ def install_windows_target_session_helpers(
     bindings: dict,
     names: tuple[str, ...] = WINDOWS_TARGET_SESSION_EXPORTS,
 ) -> None:
-    install_local_helpers(bindings, globals(), names)
+    known_names = set(WINDOWS_TARGET_SESSION_EXPORTS)
+    session_names = tuple(name for name in names if name in known_names)
+    unknown_names = tuple(name for name in names if name not in known_names)
+
+    install_local_helpers(bindings, globals(), session_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)

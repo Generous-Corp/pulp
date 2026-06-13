@@ -169,6 +169,14 @@ class WindowsDesktopActionBindingsTests(unittest.TestCase):
         )
         self.assertEqual(captured["args"], ({"defaults": {}}, "windows", {"adapter": "windows-session-agent"}, r".\tool.exe"))
 
+    def test_install_windows_desktop_action_helpers_keeps_unknown_local_fallback(self):
+        bindings = {}
+        self.mod.future_windows_desktop_action_helper = lambda _bindings: "future"
+
+        self.mod.install_windows_desktop_action_helpers(bindings, ("future_windows_desktop_action_helper",))
+
+        self.assertEqual(bindings["future_windows_desktop_action_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()

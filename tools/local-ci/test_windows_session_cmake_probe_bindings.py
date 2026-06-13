@@ -68,6 +68,14 @@ class WindowsSessionCmakeProbeBindingsTests(unittest.TestCase):
             ("ARM64", "C:/VS"),
         )
 
+    def test_install_cmake_probe_helpers_keeps_unknown_local_fallback(self) -> None:
+        bindings = {}
+        self.mod.future_windows_cmake_probe_helper = lambda _bindings: "future"
+
+        self.mod.install_windows_session_cmake_probe_helpers(bindings, ("future_windows_cmake_probe_helper",))
+
+        self.assertEqual(bindings["future_windows_cmake_probe_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()
