@@ -85,6 +85,50 @@ class DesktopSourceRequestBindingsTests(unittest.TestCase):
         self.mod.attach_desktop_source_to_manifest(bindings, manifest, source_context)
         self.assertEqual(captured["attach"], (manifest, source_context))
 
+    def test_source_request_exports_are_composed_from_focused_groups(self):
+        expected = (
+            *self.mod.DESKTOP_SOURCE_REQUEST_CORE_EXPORTS,
+            *self.mod.DESKTOP_SOURCE_REQUEST_PATH_EXPORTS,
+            *self.mod.DESKTOP_SOURCE_REQUEST_WINDOWS_EXPORTS,
+            *self.mod.DESKTOP_SOURCE_REQUEST_MANIFEST_EXPORTS,
+        )
+
+        self.assertEqual(self.mod.DESKTOP_SOURCE_REQUEST_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
+    def test_source_request_installer_routes_selected_groups(self):
+        source_prep = types.SimpleNamespace(
+            make_desktop_source_request=lambda args, **kwargs: {"mode": "live"},
+            desktop_source_cache_key=lambda source_request: "abc123",
+            split_windows_prepare_commands=lambda command: ["one", "two"],
+            attach_desktop_source_to_manifest=lambda manifest, source_context: manifest.update({"source": source_context}),
+        )
+        bindings = {
+            "_source_prep": source_prep,
+            "normalize_desktop_source_mode": object(),
+            "current_branch": object(),
+            "current_sha": object(),
+        }
+
+        self.mod.install_desktop_source_request_helpers(
+            bindings,
+            (
+                "make_desktop_source_request",
+                "desktop_source_cache_key",
+                "split_windows_prepare_commands",
+                "attach_desktop_source_to_manifest",
+            ),
+        )
+
+        manifest = {}
+        self.assertEqual(bindings["make_desktop_source_request"](object()), {"mode": "live"})
+        self.assertEqual(bindings["desktop_source_cache_key"]({"sha": "abc"}), "abc123")
+        self.assertEqual(bindings["split_windows_prepare_commands"]("one;two"), ["one", "two"])
+        bindings["attach_desktop_source_to_manifest"](manifest, {"mode": "live"})
+        self.assertEqual(manifest, {"source": {"mode": "live"}})
+        self.assertNotIn("desktop_source_root", bindings)
+        self.assertNotIn("validate_windows_prepare_commands", bindings)
+
 
 if __name__ == "__main__":
     unittest.main()

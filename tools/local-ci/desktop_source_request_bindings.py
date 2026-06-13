@@ -1,56 +1,56 @@
-"""Bindings from the local_ci facade to desktop source request helpers."""
+"""Compatibility facade for desktop source request dependency bindings."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from pathlib import Path
 from typing import Any
 
-from binding_utils import binding as _binding
-
-
-DESKTOP_SOURCE_REQUEST_EXPORTS = (
-    "make_desktop_source_request",
-    "desktop_source_cache_key",
-    "desktop_source_root",
-    "split_windows_prepare_commands",
-    "validate_windows_prepare_commands",
-    "attach_desktop_source_to_manifest",
+from binding_utils import install_local_helpers
+from desktop_source_request_core_bindings import (
+    DESKTOP_SOURCE_REQUEST_CORE_EXPORTS,
+    install_desktop_source_request_core_helpers,
+    make_desktop_source_request,
+)
+from desktop_source_request_manifest_bindings import (
+    DESKTOP_SOURCE_REQUEST_MANIFEST_EXPORTS,
+    attach_desktop_source_to_manifest,
+    install_desktop_source_request_manifest_helpers,
+)
+from desktop_source_request_path_bindings import (
+    DESKTOP_SOURCE_REQUEST_PATH_EXPORTS,
+    desktop_source_cache_key,
+    desktop_source_root,
+    install_desktop_source_request_path_helpers,
+)
+from desktop_source_request_windows_bindings import (
+    DESKTOP_SOURCE_REQUEST_WINDOWS_EXPORTS,
+    install_desktop_source_request_windows_helpers,
+    split_windows_prepare_commands,
+    validate_windows_prepare_commands,
 )
 
 
-def make_desktop_source_request(bindings: Mapping[str, Any], args: Any) -> dict:
-    return _binding(bindings, "_source_prep").make_desktop_source_request(
-        args,
-        normalize_desktop_source_mode_fn=_binding(bindings, "normalize_desktop_source_mode"),
-        current_branch_fn=_binding(bindings, "current_branch"),
-        current_sha_fn=_binding(bindings, "current_sha"),
-    )
+DESKTOP_SOURCE_REQUEST_EXPORTS = (
+    *DESKTOP_SOURCE_REQUEST_CORE_EXPORTS,
+    *DESKTOP_SOURCE_REQUEST_PATH_EXPORTS,
+    *DESKTOP_SOURCE_REQUEST_WINDOWS_EXPORTS,
+    *DESKTOP_SOURCE_REQUEST_MANIFEST_EXPORTS,
+)
 
 
-def desktop_source_cache_key(bindings: Mapping[str, Any], source_request: dict) -> str:
-    return _binding(bindings, "_source_prep").desktop_source_cache_key(source_request)
-
-
-def desktop_source_root(bindings: Mapping[str, Any], target_name: str, source_request: dict) -> Path:
-    return _binding(bindings, "_source_prep").desktop_source_root(
-        target_name,
-        source_request,
-        state_dir_fn=_binding(bindings, "state_dir"),
-    )
-
-
-def split_windows_prepare_commands(bindings: Mapping[str, Any], command: str) -> list[str]:
-    return _binding(bindings, "_source_prep").split_windows_prepare_commands(command)
-
-
-def validate_windows_prepare_commands(bindings: Mapping[str, Any], commands: list[str]) -> None:
-    return _binding(bindings, "_source_prep").validate_windows_prepare_commands(commands)
-
-
-def attach_desktop_source_to_manifest(
-    bindings: Mapping[str, Any],
-    manifest: dict,
-    source_context: dict | None,
+def install_desktop_source_request_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = DESKTOP_SOURCE_REQUEST_EXPORTS,
 ) -> None:
-    return _binding(bindings, "_source_prep").attach_desktop_source_to_manifest(manifest, source_context)
+    core_names = tuple(name for name in names if name in DESKTOP_SOURCE_REQUEST_CORE_EXPORTS)
+    path_names = tuple(name for name in names if name in DESKTOP_SOURCE_REQUEST_PATH_EXPORTS)
+    windows_names = tuple(name for name in names if name in DESKTOP_SOURCE_REQUEST_WINDOWS_EXPORTS)
+    manifest_names = tuple(name for name in names if name in DESKTOP_SOURCE_REQUEST_MANIFEST_EXPORTS)
+    known_names = set(DESKTOP_SOURCE_REQUEST_EXPORTS)
+    unknown_names = tuple(name for name in names if name not in known_names)
+
+    install_desktop_source_request_core_helpers(bindings, core_names)
+    install_desktop_source_request_path_helpers(bindings, path_names)
+    install_desktop_source_request_windows_helpers(bindings, windows_names)
+    install_desktop_source_request_manifest_helpers(bindings, manifest_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)
