@@ -6,6 +6,7 @@ from datetime import datetime
 import html
 import json
 from pathlib import Path
+import shlex
 import shutil
 import tempfile
 import time
@@ -242,6 +243,44 @@ def _proof_context_items(proof_composition: dict) -> list[tuple[str, str]]:
     return items
 
 
+def _manifest_command_text(manifest: dict) -> str | None:
+    command = manifest.get("command")
+    if isinstance(command, list):
+        return shlex.join(str(part) for part in command)
+    if isinstance(command, str) and command.strip():
+        return command.strip()
+    bundle_id = manifest.get("bundle_id")
+    if isinstance(bundle_id, str) and bundle_id.strip():
+        return f"open -b {shlex.quote(bundle_id.strip())}"
+    app_path = manifest.get("app_path")
+    if isinstance(app_path, str) and app_path.strip():
+        return f"open {shlex.quote(app_path.strip())}"
+    return None
+
+
+def _manifest_source_context(manifest: dict) -> dict:
+    source = manifest.get("source")
+    if not isinstance(source, dict):
+        return {}
+    context = {}
+    for key in ("mode", "branch", "sha", "prepare_command", "prepared_root", "launch_cwd", "launch_command"):
+        value = source.get(key)
+        if value is not None:
+            context[key] = value
+    return context
+
+
+def _source_summary(source: dict) -> str | None:
+    if not isinstance(source, dict) or not source:
+        return None
+    parts = []
+    for key in ("mode", "branch", "sha"):
+        value = source.get(key)
+        if value:
+            parts.append(f"{key}={value}")
+    return ", ".join(parts) if parts else None
+
+
 def desktop_review_issue_body(index_payload: dict, *, publish_dir: Path) -> str:
     serve_command = f"python3 tools/local-ci/local_ci.py desktop serve {publish_dir} --host 0.0.0.0 --port 8765"
     lines = [
@@ -268,6 +307,7 @@ def desktop_review_issue_body(index_payload: dict, *, publish_dir: Path) -> str:
         action_marker = _proof_action_marker_summary(proof_composition)
         action_label = action_marker.get("label") or action_marker.get("kind")
         context_items = _proof_context_items(proof_composition)
+        source_summary = _source_summary(run.get("source") if isinstance(run.get("source"), dict) else {})
         video = artifacts.get("video_issue") or artifacts.get("video_composed") or artifacts.get("video")
         metadata_path = artifacts.get("video_issue_metadata") or artifacts.get("video_composed_metadata") or artifacts.get("video_metadata")
         metadata = _artifact_metadata(publish_dir, metadata_path)
@@ -299,6 +339,10 @@ def desktop_review_issue_body(index_payload: dict, *, publish_dir: Path) -> str:
                 f"### {run.get('target') or '?'}/{run.get('action') or '?'} - {run.get('label') or '?'}",
                 "",
                 f"- Completed: {run.get('completed_at') or '?'}",
+                f"- Command: `{run.get('command')}`" if run.get("command") else "- Command: not recorded",
+                f"- Source: `{source_summary}`" if source_summary else "- Source: not recorded",
+                f"- Host: `{run.get('host')}`" if run.get("host") else "- Host: local/default",
+                f"- Adapter: `{run.get('adapter')}`" if run.get("adapter") else "- Adapter: not recorded",
                 f"- Interaction: {run.get('interaction_mode') or 'not recorded'}",
                 f"- Proof template: `{proof_composition.get('template')}`" if proof_composition.get("template") else "- Proof template: not recorded",
                 f"- Focus component: `{focus_label}`" if focus_label else "- Focus component: not recorded",
@@ -313,6 +357,7 @@ def desktop_review_issue_body(index_payload: dict, *, publish_dir: Path) -> str:
                 f"- Issue variant: `{issue_status}`" + (f" via `{selected_attempt}`" if selected_attempt else "") if issue_status else "- Issue variant: not recorded",
                 f"- Small variant: `{small_status}`" + (f" via `{small_selected_attempt}`" if small_selected_attempt else "") if small_status else "- Small variant: not recorded",
                 f"- Attachment action: {attach_action}",
+                f"- Manifest: `{artifacts['manifest']}`" if artifacts.get("manifest") else "- Manifest: not copied",
                 f"- Approve command: `python3 tools/local-ci/local_ci.py desktop verdict {verdict_manifest} --approved --issue-url <issue-url>`",
                 f"- Needs-work command: `python3 tools/local-ci/local_ci.py desktop verdict {verdict_manifest} --needs-work --notes \"<what to change>\" --issue-url <issue-url>`",
             ]
@@ -389,9 +434,18 @@ def desktop_review_package(index_payload: dict, *, publish_dir: Path) -> dict:
                 "label": run.get("label"),
                 "completed_at": run.get("completed_at"),
                 "bundle_dir": run.get("bundle_dir"),
+                "adapter": run.get("adapter"),
+                "host": run.get("host"),
+                "repo_path": run.get("repo_path"),
+                "command": run.get("command"),
+                "source": run.get("source") if isinstance(run.get("source"), dict) else {},
                 "template": proof_composition.get("template"),
                 "context": proof_composition.get("context") if isinstance(proof_composition.get("context"), dict) else {},
                 "notes": run.get("video_proof_notes") if isinstance(run.get("video_proof_notes"), list) else [],
+                "manifest": {
+                    "path": str(publish_dir / str(artifacts["manifest"])) if artifacts.get("manifest") else None,
+                    "relative_path": artifacts.get("manifest"),
+                },
                 "attachment": attachment,
                 "fallback": {
                     "report_path": str(publish_dir / "index.html"),
@@ -451,6 +505,9 @@ def desktop_review_issue_draft(
         attachment = run.get("attachment") if isinstance(run.get("attachment"), dict) else {}
         fallback = run.get("fallback") if isinstance(run.get("fallback"), dict) else {}
         context = run.get("context") if isinstance(run.get("context"), dict) else {}
+        source = run.get("source") if isinstance(run.get("source"), dict) else {}
+        manifest_info = run.get("manifest") if isinstance(run.get("manifest"), dict) else {}
+        source_text = _source_summary(source)
         status = attachment.get("status") or "fallback-link"
         attach_path = attachment.get("path") if isinstance(attachment.get("path"), str) else None
         body_lines.extend(
@@ -458,6 +515,11 @@ def desktop_review_issue_draft(
                 f"### {index}. {run.get('target') or '?'}/{run.get('action') or '?'} - {run.get('label') or '?'}",
                 "",
                 f"- Template: `{run.get('template') or 'not recorded'}`",
+                f"- Command: `{run.get('command')}`" if run.get("command") else "- Command: not recorded",
+                f"- Source: `{source_text}`" if source_text else "- Source: not recorded",
+                f"- Host: `{run.get('host')}`" if run.get("host") else "- Host: local/default",
+                f"- Adapter: `{run.get('adapter')}`" if run.get("adapter") else "- Adapter: not recorded",
+                f"- Manifest: `{manifest_info.get('path')}`" if manifest_info.get("path") else "- Manifest: not recorded",
                 f"- Attachment decision: `{status}`",
                 f"- Attachment reason: {attachment.get('reason') or 'not recorded'}",
             ]
@@ -585,6 +647,11 @@ def stage_desktop_publish_report(
                 "label": manifest.get("label"),
                 "completed_at": manifest.get("completed_at"),
                 "bundle_dir": manifest.get("artifacts", {}).get("bundle_dir"),
+                "adapter": manifest.get("adapter"),
+                "host": manifest.get("host"),
+                "repo_path": manifest.get("repo_path"),
+                "command": _manifest_command_text(manifest),
+                "source": _manifest_source_context(manifest),
                 "interaction_mode": (manifest.get("interaction") or {}).get("mode"),
                 "video_proof_notes": _proof_notes_from_manifest(manifest),
                 "video_proof_composition": video_proof_composition,
@@ -628,6 +695,15 @@ def stage_desktop_publish_report(
         ]
         if run.get("completed_at"):
             meta_lines.append(f"<div>{html.escape(str(run['completed_at']))}</div>")
+        if run.get("command"):
+            meta_lines.append(f"<div>command: {html.escape(str(run['command']))}</div>")
+        source_summary = _source_summary(run.get("source") if isinstance(run.get("source"), dict) else {})
+        if source_summary:
+            meta_lines.append(f"<div>source: {html.escape(source_summary)}</div>")
+        if run.get("adapter"):
+            meta_lines.append(f"<div>adapter: {html.escape(str(run['adapter']))}</div>")
+        if run.get("host"):
+            meta_lines.append(f"<div>host: {html.escape(str(run['host']))}</div>")
         if run.get("interaction_mode"):
             meta_lines.append(f"<div>interaction: {html.escape(str(run['interaction_mode']))}</div>")
         if artifacts.get("image_change"):

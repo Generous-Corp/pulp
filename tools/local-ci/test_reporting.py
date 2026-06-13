@@ -120,9 +120,19 @@ class ReportingTests(unittest.TestCase):
         (bundle / "manifest.json").write_text('{"label":"bundle-copy"}\n')
         manifest = {
             "target": "mac<>",
+            "adapter": "macos-local",
             "action": "inspect",
             "label": "UI & Smoke",
             "completed_at": "2026-05-22T12:00:00+00:00",
+            "host": "macstudio",
+            "repo_path": "/repo/pulp",
+            "command": ["./build/pulp", "--inspect"],
+            "source": {
+                "mode": "exact-sha",
+                "branch": "feat/validation-video-proof",
+                "sha": "abc123",
+                "launch_cwd": "/repo/pulp",
+            },
             "artifacts": {
                 "bundle_dir": str(bundle),
                 "stdout": str(stdout_log),
@@ -186,6 +196,12 @@ class ReportingTests(unittest.TestCase):
         published_run = payload["runs"][0]
         self.assertEqual(payload["publish_mode"], "local")
         self.assertEqual(published_run["target"], "mac<>")
+        self.assertEqual(published_run["adapter"], "macos-local")
+        self.assertEqual(published_run["host"], "macstudio")
+        self.assertEqual(published_run["repo_path"], "/repo/pulp")
+        self.assertEqual(published_run["command"], "./build/pulp --inspect")
+        self.assertEqual(published_run["source"]["mode"], "exact-sha")
+        self.assertEqual(published_run["source"]["sha"], "abc123")
         self.assertEqual(published_run["interaction_mode"], "dom")
         self.assertIn("stdout", published_run["artifacts"])
         self.assertIn("video", published_run["artifacts"])
@@ -214,6 +230,10 @@ class ReportingTests(unittest.TestCase):
         self.assertIn("<video controls", html_text)
         self.assertIn("video metadata", html_text)
         self.assertIn("template: design-parity", html_text)
+        self.assertIn("command: ./build/pulp --inspect", html_text)
+        self.assertIn("source: mode=exact-sha, branch=feat/validation-video-proof, sha=abc123", html_text)
+        self.assertIn("adapter: macos-local", html_text)
+        self.assertIn("host: macstudio", html_text)
         self.assertIn("source: Figma source", html_text)
         self.assertIn("focus: bypass-toggle", html_text)
         self.assertIn("focus_point:", html_text)
@@ -231,6 +251,12 @@ class ReportingTests(unittest.TestCase):
         self.assertEqual(review_package["runs"][0]["attachment"]["status"], "attach-primary")
         self.assertTrue(review_package["runs"][0]["attachment"]["path"].endswith("proof.issue.mp4"))
         self.assertEqual(review_package["runs"][0]["attachment"]["size_bytes"], 90000)
+        self.assertEqual(review_package["runs"][0]["adapter"], "macos-local")
+        self.assertEqual(review_package["runs"][0]["host"], "macstudio")
+        self.assertEqual(review_package["runs"][0]["repo_path"], "/repo/pulp")
+        self.assertEqual(review_package["runs"][0]["command"], "./build/pulp --inspect")
+        self.assertEqual(review_package["runs"][0]["source"]["branch"], "feat/validation-video-proof")
+        self.assertTrue(review_package["runs"][0]["manifest"]["path"].endswith("manifest.json"))
         self.assertEqual(review_package["runs"][0]["context"]["plugin"], "PulpSynth")
         self.assertTrue(review_package["runs"][0]["fallback"]["internal_ephemeral"])
         self.assertIn("desktop serve", review_package["runs"][0]["fallback"]["serve_command"])
@@ -250,6 +276,11 @@ class ReportingTests(unittest.TestCase):
         self.assertIn("--approved --issue-url <issue-url>", review_text)
         self.assertIn("--needs-work --notes", review_text)
         self.assertIn("Proof template: `design-parity`", review_text)
+        self.assertIn("Command: `./build/pulp --inspect`", review_text)
+        self.assertIn("Source: `mode=exact-sha, branch=feat/validation-video-proof, sha=abc123`", review_text)
+        self.assertIn("Host: `macstudio`", review_text)
+        self.assertIn("Adapter: `macos-local`", review_text)
+        self.assertIn("Manifest: `", review_text)
         self.assertIn("Focus component: `bypass-toggle`", review_text)
         self.assertIn("Action marker: `bypass-toggle`", review_text)
         self.assertIn("Action point: `", review_text)
@@ -269,8 +300,13 @@ class ReportingTests(unittest.TestCase):
             "runs": [
                 {
                     "target": "mac",
+                    "adapter": "macos-local",
                     "action": "click",
                     "label": "component",
+                    "host": "macstudio",
+                    "command": "./build/pulp --inspect",
+                    "source": {"mode": "exact-sha", "branch": "feature/video", "sha": "abc123"},
+                    "manifest": {"path": str(package_path.parent / "assets/run/manifest.json"), "relative_path": "assets/run/manifest.json"},
                     "template": "component-zoom",
                     "context": {"component": "bypass-toggle"},
                     "notes": ["Toggle changes state."],
@@ -318,6 +354,11 @@ class ReportingTests(unittest.TestCase):
         self.assertIn("gh issue create --repo danielraffel/pulp", draft["create_command"])
         self.assertIn("looks good to me", draft["body"])
         self.assertIn("Attach MP4: `", draft["body"])
+        self.assertIn("Command: `./build/pulp --inspect`", draft["body"])
+        self.assertIn("Source: `mode=exact-sha, branch=feature/video, sha=abc123`", draft["body"])
+        self.assertIn("Host: `macstudio`", draft["body"])
+        self.assertIn("Adapter: `macos-local`", draft["body"])
+        self.assertIn("Manifest: `", draft["body"])
         self.assertIn("Context component: `bypass-toggle`", draft["body"])
         self.assertIn("use the served report link", draft["body"])
 

@@ -395,7 +395,9 @@ attachment-budget status, and the expected reviewer response.
 `review-package.json` is the machine-readable handoff for future upload
 automation: it records each run's primary or small attachment decision, absolute
 MP4 path when a file should be attached, size/budget fields, and the served
-report fallback. When a small fallback exists, the markdown also lists
+report fallback. It also preserves review context from the run manifest: exact
+launch command when available, source branch/SHA/mode, host, adapter, and copied
+manifest path. When a small fallback exists, the markdown also lists
 `proof.small.mp4`, its 10 MB budget status, and whether that smaller file should
 be attached instead of the pro-account issue video. Both files include the
 concrete attach/do-not-attach decision and `desktop verdict` commands for
@@ -415,8 +417,8 @@ python3 tools/local-ci/local_ci.py desktop review-issue /path/to/published-repor
 The command accepts either the report directory or its `review-package.json`.
 It writes `github-issue.md` and `github-issue.json` next to the report without
 calling GitHub. The JSON draft lists attachable MP4 paths, fallback links,
-the close trigger (`looks good to me`), and a suggested `gh issue create`
-command.
+source/command/manifest context for each run, the close trigger (`looks good to
+me`), and a suggested `gh issue create` command.
 
 The intended review loop is:
 

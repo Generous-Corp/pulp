@@ -358,8 +358,8 @@ Published reports should contain both `review.md` and `review-package.json`.
 Use `review.md` as the human GitHub issue body. Use `review-package.json` as the
 structured source of truth for automation: it records whether to attach the
 primary issue MP4, attach the small fallback, or use the served/local report
-link, along with absolute attachment paths, size/budget fields, and fallback
-serve commands.
+link, along with absolute attachment paths, size/budget fields, fallback serve
+commands, and source/command/manifest context from the run.
 
 To recompose an existing raw proof:
 
@@ -439,9 +439,11 @@ The command accepts either the report directory or `review-package.json`, then
 writes `github-issue.md` and `github-issue.json` next to the report without
 calling GitHub. Use `github-issue.md` as the issue body. Use
 `github-issue.json` to see which MP4s should be attached and which runs need the
-served fallback link. GitHub supports `.mp4`, `.mov`, and `.webm` attachments
-and currently recommends H.264 for compatibility; paid-plan eligible uploaders
-can use the 100 MB video budget, while others should assume 10 MB. Attach
+served fallback link. The draft also includes launch command, source branch/SHA,
+host/adapter, and copied manifest path when the manifest recorded them. GitHub
+supports `.mp4`, `.mov`, and `.webm` attachments and currently recommends H.264
+for compatibility; paid-plan eligible uploaders can use the 100 MB video budget,
+while others should assume 10 MB. Attach
 `proof.issue.mp4` manually when it fits the chosen budget; attach
 `proof.small.mp4` when the normal issue video is too large but the small
 fallback fits. Otherwise include the served report URL. The review issue can be
