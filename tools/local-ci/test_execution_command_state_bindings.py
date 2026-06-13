@@ -42,6 +42,14 @@ class ExecutionCommandStateBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["remote_commit_error"]("mac", "host", {"id": "job"}), "mac:host:job")
         self.assertNotIn("prepared_state_root", bindings)
 
+    def test_install_execution_command_state_helpers_keeps_unknown_local_fallback(self):
+        bindings = {}
+        self.mod.future_execution_command_state_helper = lambda _bindings: "future"
+
+        self.mod.install_execution_command_state_helpers(bindings, ("future_execution_command_state_helper",))
+
+        self.assertEqual(bindings["future_execution_command_state_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()

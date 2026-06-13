@@ -33,4 +33,10 @@ def install_execution_command_state_helpers(
     bindings: dict[str, Any],
     names: tuple[str, ...] = EXECUTION_COMMAND_STATE_EXPORTS,
 ) -> None:
-    install_local_helpers(bindings, globals(), names)
+    known_names = set(EXECUTION_COMMAND_STATE_EXPORTS)
+    state_names = tuple(name for name in names if name in known_names)
+    unknown_names = tuple(name for name in names if name not in known_names)
+
+    install_local_helpers(bindings, globals(), state_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)

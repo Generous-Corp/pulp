@@ -47,4 +47,10 @@ def install_execution_runner_ssh_helpers(
     bindings: dict[str, Any],
     names: tuple[str, ...] = EXECUTION_RUNNER_SSH_EXPORTS,
 ) -> None:
-    install_local_helpers(bindings, globals(), names)
+    known_names = set(EXECUTION_RUNNER_SSH_EXPORTS)
+    runner_names = tuple(name for name in names if name in known_names)
+    unknown_names = tuple(name for name in names if name not in known_names)
+
+    install_local_helpers(bindings, globals(), runner_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)
