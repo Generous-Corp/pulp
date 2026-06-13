@@ -100,6 +100,14 @@ class ExecutionResultBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.EXECUTION_RESULT_EXPORTS, expected)
         self.assertEqual(len(expected), len(set(expected)))
 
+    def test_install_execution_result_helpers_keeps_unknown_local_fallback(self):
+        bindings = {}
+        self.mod.future_execution_result_helper = lambda _bindings: "future"
+
+        self.mod.install_execution_result_helpers(bindings, ("future_execution_result_helper",))
+
+        self.assertEqual(bindings["future_execution_result_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()

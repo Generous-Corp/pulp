@@ -49,6 +49,14 @@ class ExecutionCommandBindingsTests(unittest.TestCase):
         self.assertNotIn("windows_validation_script", bindings)
         self.assertNotIn("prepared_state_root", bindings)
 
+    def test_install_execution_command_helpers_keeps_unknown_local_fallback(self):
+        bindings = {}
+        self.mod.future_execution_command_helper = lambda _bindings: "future"
+
+        self.mod.install_execution_command_helpers(bindings, ("future_execution_command_helper",))
+
+        self.assertEqual(bindings["future_execution_command_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()
