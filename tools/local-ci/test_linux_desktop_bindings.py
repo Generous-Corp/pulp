@@ -22,11 +22,11 @@ class LinuxDesktopBindingsTests(unittest.TestCase):
         self.assertEqual(
             self.mod.LINUX_DESKTOP_EXPORTS,
             (
-                "fetch_ssh_artifact",
-                "cleanup_remote_ssh_dir",
+                *self.mod.LINUX_DESKTOP_ARTIFACT_EXPORTS,
                 *self.mod.LINUX_DESKTOP_ACTION_EXPORTS,
             ),
         )
+        self.assertEqual(len(self.mod.LINUX_DESKTOP_EXPORTS), len(set(self.mod.LINUX_DESKTOP_EXPORTS)))
 
     def test_run_linux_xvfb_remote_action_binds_facade_dependencies(self):
         captured = {}

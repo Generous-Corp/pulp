@@ -5,8 +5,9 @@ from __future__ import annotations
 from typing import Any
 
 from binding_utils import install_local_helpers
-from queue_active_load_bindings import load_job, update_job_active_targets
+from queue_active_load_bindings import QUEUE_ACTIVE_LOAD_EXPORTS, load_job, update_job_active_targets
 from queue_stale_state_bindings import (
+    QUEUE_STALE_STATE_EXPORTS,
     reclaim_stale_remote_validators,
     reconcile_running_jobs_unlocked,
     update_job_target_state,
@@ -14,11 +15,9 @@ from queue_stale_state_bindings import (
 
 
 QUEUE_STATE_LIFECYCLE_EXPORTS = (
-    "update_job_active_targets",
-    "reconcile_running_jobs_unlocked",
-    "update_job_target_state",
-    "reclaim_stale_remote_validators",
-    "load_job",
+    *QUEUE_ACTIVE_LOAD_EXPORTS[:1],
+    *QUEUE_STALE_STATE_EXPORTS,
+    *QUEUE_ACTIVE_LOAD_EXPORTS[1:],
 )
 
 

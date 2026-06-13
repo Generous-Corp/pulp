@@ -20,6 +20,16 @@ class SshBundleNameBindingsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
 
+    def test_exports_match_name_helpers(self) -> None:
+        self.assertEqual(
+            self.mod.SSH_BUNDLE_NAME_EXPORTS,
+            (
+                "bundle_ref_name",
+                "remote_bundle_name",
+            ),
+        )
+        self.assertEqual(len(self.mod.SSH_BUNDLE_NAME_EXPORTS), len(set(self.mod.SSH_BUNDLE_NAME_EXPORTS)))
+
     def test_bundle_names_delegate_to_ssh_bundle_module(self) -> None:
         captured = {}
 

@@ -18,6 +18,16 @@ class LogsCommandBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
 
+    def test_exports_match_logs_command_helpers(self):
+        self.assertEqual(
+            self.mod.LOGS_COMMAND_EXPORTS,
+            (
+                "resolve_job_for_logs",
+                "cmd_logs",
+            ),
+        )
+        self.assertEqual(len(self.mod.LOGS_COMMAND_EXPORTS), len(set(self.mod.LOGS_COMMAND_EXPORTS)))
+
     def _bindings(self, runner_name: str, runner):
         bindings = {
             "_logs_cli": types.SimpleNamespace(**{runner_name: runner}),

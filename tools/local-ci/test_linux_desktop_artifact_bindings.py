@@ -20,6 +20,16 @@ class LinuxDesktopArtifactBindingsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
 
+    def test_exports_match_artifact_helpers(self) -> None:
+        self.assertEqual(
+            self.mod.LINUX_DESKTOP_ARTIFACT_EXPORTS,
+            (
+                "fetch_ssh_artifact",
+                "cleanup_remote_ssh_dir",
+            ),
+        )
+        self.assertEqual(len(self.mod.LINUX_DESKTOP_ARTIFACT_EXPORTS), len(set(self.mod.LINUX_DESKTOP_ARTIFACT_EXPORTS)))
+
     def test_ssh_artifact_helpers_bind_facade_dependencies(self) -> None:
         captured = {}
 

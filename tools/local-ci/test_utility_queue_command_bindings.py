@@ -18,6 +18,16 @@ class UtilityQueueCommandBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
 
+    def test_exports_match_queue_command_helpers(self):
+        self.assertEqual(
+            self.mod.UTILITY_QUEUE_COMMAND_EXPORTS,
+            (
+                "cmd_bump",
+                "cmd_cancel",
+            ),
+        )
+        self.assertEqual(len(self.mod.UTILITY_QUEUE_COMMAND_EXPORTS), len(set(self.mod.UTILITY_QUEUE_COMMAND_EXPORTS)))
+
     def _bindings(self, runner_name: str, runner):
         bindings = {"_queue_commands_cli": types.SimpleNamespace(**{runner_name: runner})}
         for name in [

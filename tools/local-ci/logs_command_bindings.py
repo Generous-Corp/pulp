@@ -8,6 +8,12 @@ from typing import Any
 from binding_utils import binding as _binding
 
 
+LOGS_COMMAND_EXPORTS = (
+    "resolve_job_for_logs",
+    "cmd_logs",
+)
+
+
 def resolve_job_for_logs(bindings: Mapping[str, Any], job_ref: str | None) -> dict | None:
     return _binding(bindings, "_logs_cli").resolve_job_for_logs(
         job_ref,

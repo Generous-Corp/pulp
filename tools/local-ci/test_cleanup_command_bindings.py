@@ -18,6 +18,17 @@ class CleanupCommandBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
 
+    def test_exports_match_cleanup_command_helpers(self):
+        self.assertEqual(
+            self.mod.CLEANUP_COMMAND_EXPORTS,
+            (
+                "print_local_ci_state_footprint",
+                "print_local_ci_cleanup_plan",
+                "cmd_cleanup",
+            ),
+        )
+        self.assertEqual(len(self.mod.CLEANUP_COMMAND_EXPORTS), len(set(self.mod.CLEANUP_COMMAND_EXPORTS)))
+
     def _bindings(self, runner_name: str, runner):
         bindings = {"_cleanup_cli": types.SimpleNamespace(**{runner_name: runner})}
         for name in [

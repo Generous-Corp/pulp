@@ -19,6 +19,16 @@ class QueueActiveLoadBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
 
+    def test_exports_match_active_load_helpers(self):
+        self.assertEqual(
+            self.mod.QUEUE_ACTIVE_LOAD_EXPORTS,
+            (
+                "update_job_active_targets",
+                "load_job",
+            ),
+        )
+        self.assertEqual(len(self.mod.QUEUE_ACTIVE_LOAD_EXPORTS), len(set(self.mod.QUEUE_ACTIVE_LOAD_EXPORTS)))
+
     def _bindings(self, lifecycle=None):
         bindings = {"_queue_lifecycle": lifecycle or types.SimpleNamespace()}
         for name in [

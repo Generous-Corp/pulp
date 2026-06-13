@@ -8,6 +8,12 @@ from typing import Any
 from binding_utils import binding as _binding
 
 
+QUEUE_ACTIVE_LOAD_EXPORTS = (
+    "update_job_active_targets",
+    "load_job",
+)
+
+
 def update_job_active_targets(bindings: Mapping[str, Any], job_id: str, active_targets: dict | None) -> None:
     _binding(bindings, "_queue_lifecycle").update_job_active_targets_locked(
         job_id,

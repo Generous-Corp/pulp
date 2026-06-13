@@ -20,6 +20,24 @@ class SshBundleBindingsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
 
+    def test_exports_compose_focused_export_groups(self) -> None:
+        self.assertEqual(
+            self.mod.SSH_BUNDLE_LOCAL_EXPORTS,
+            (
+                *self.mod.SSH_BUNDLE_NAME_EXPORTS,
+                *self.mod.SSH_BUNDLE_BUILD_EXPORTS,
+                "sync_job_bundle_to_ssh_host",
+            ),
+        )
+        self.assertEqual(
+            self.mod.SSH_BUNDLE_EXPORTS,
+            (
+                *self.mod.SSH_BUNDLE_LOCAL_EXPORTS,
+                *self.mod.SSH_BUNDLE_PROBE_EXPORTS,
+            ),
+        )
+        self.assertEqual(len(self.mod.SSH_BUNDLE_EXPORTS), len(set(self.mod.SSH_BUNDLE_EXPORTS)))
+
     def _bindings(self, ssh_bundle, **overrides):
         bindings = {
             "_ssh_bundle": ssh_bundle,

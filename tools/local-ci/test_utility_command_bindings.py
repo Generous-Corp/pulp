@@ -18,6 +18,18 @@ class UtilityCommandBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
 
+    def test_exports_compose_focused_command_groups(self):
+        self.assertEqual(
+            self.mod.UTILITY_COMMAND_EXPORTS,
+            (
+                *self.mod.CLEANUP_COMMAND_EXPORTS,
+                *self.mod.UTILITY_QUEUE_COMMAND_EXPORTS,
+                *self.mod.LOGS_COMMAND_EXPORTS,
+                *self.mod.EVIDENCE_COMMAND_EXPORTS,
+            ),
+        )
+        self.assertEqual(len(self.mod.UTILITY_COMMAND_EXPORTS), len(set(self.mod.UTILITY_COMMAND_EXPORTS)))
+
     def _bindings(self, module_name: str, runner_name: str, runner):
         bindings = {
             module_name: types.SimpleNamespace(**{runner_name: runner}),

@@ -8,6 +8,12 @@ from binding_utils import binding as _binding
 from binding_utils import binding_attr as _binding_attr
 
 
+SSH_BUNDLE_BUILD_EXPORTS = (
+    "create_job_bundle",
+    "config_for_bundle_probe",
+)
+
+
 def create_job_bundle(bindings: dict, job: dict) -> Path:
     return _binding(bindings, "_ssh_bundle").create_job_bundle(
         job,

@@ -20,6 +20,16 @@ class SshBundleBuildBindingsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
 
+    def test_exports_match_build_helpers(self) -> None:
+        self.assertEqual(
+            self.mod.SSH_BUNDLE_BUILD_EXPORTS,
+            (
+                "create_job_bundle",
+                "config_for_bundle_probe",
+            ),
+        )
+        self.assertEqual(len(self.mod.SSH_BUNDLE_BUILD_EXPORTS), len(set(self.mod.SSH_BUNDLE_BUILD_EXPORTS)))
+
     def test_create_job_bundle_binds_build_dependencies(self) -> None:
         captured = {}
 

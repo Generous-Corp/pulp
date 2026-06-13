@@ -8,6 +8,9 @@ from typing import Any
 from binding_utils import binding as _binding
 
 
+EVIDENCE_COMMAND_EXPORTS = ("cmd_evidence",)
+
+
 def cmd_evidence(bindings: Mapping[str, Any], args: Any) -> int:
     return _binding(bindings, "_evidence_cli").cmd_evidence(
         args,

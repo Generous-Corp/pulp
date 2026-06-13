@@ -10,17 +10,16 @@ from linux_desktop_action_bindings import (
     install_linux_desktop_action_helpers,
     run_linux_xvfb_remote_action,
 )
-from linux_desktop_artifact_bindings import cleanup_remote_ssh_dir, fetch_ssh_artifact
+from linux_desktop_artifact_bindings import (
+    LINUX_DESKTOP_ARTIFACT_EXPORTS,
+    cleanup_remote_ssh_dir,
+    fetch_ssh_artifact,
+)
 
 
 LINUX_DESKTOP_EXPORTS = (
-    "fetch_ssh_artifact",
-    "cleanup_remote_ssh_dir",
+    *LINUX_DESKTOP_ARTIFACT_EXPORTS,
     *LINUX_DESKTOP_ACTION_EXPORTS,
-)
-LINUX_DESKTOP_ARTIFACT_EXPORTS = (
-    "fetch_ssh_artifact",
-    "cleanup_remote_ssh_dir",
 )
 
 

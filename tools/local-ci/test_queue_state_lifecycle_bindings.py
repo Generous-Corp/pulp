@@ -20,11 +20,9 @@ class QueueStateLifecycleBindingsTests(unittest.TestCase):
 
     def test_state_lifecycle_exports_match_facade_helpers(self):
         expected = (
-            "update_job_active_targets",
-            "reconcile_running_jobs_unlocked",
-            "update_job_target_state",
-            "reclaim_stale_remote_validators",
-            "load_job",
+            *self.mod.QUEUE_ACTIVE_LOAD_EXPORTS[:1],
+            *self.mod.QUEUE_STALE_STATE_EXPORTS,
+            *self.mod.QUEUE_ACTIVE_LOAD_EXPORTS[1:],
         )
 
         self.assertEqual(self.mod.QUEUE_STATE_LIFECYCLE_EXPORTS, expected)

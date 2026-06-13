@@ -9,6 +9,12 @@ from binding_utils import binding as _binding
 from binding_utils import binding_attr as _binding_attr
 
 
+LINUX_DESKTOP_ARTIFACT_EXPORTS = (
+    "fetch_ssh_artifact",
+    "cleanup_remote_ssh_dir",
+)
+
+
 def fetch_ssh_artifact(
     bindings: Mapping[str, Any],
     host: str,

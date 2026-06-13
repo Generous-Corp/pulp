@@ -8,6 +8,13 @@ from typing import Any
 from binding_utils import binding as _binding
 
 
+CLEANUP_COMMAND_EXPORTS = (
+    "print_local_ci_state_footprint",
+    "print_local_ci_cleanup_plan",
+    "cmd_cleanup",
+)
+
+
 def print_local_ci_state_footprint(bindings: Mapping[str, Any], *, indent: str = "") -> None:
     return _binding(bindings, "_cleanup_cli").print_local_ci_state_footprint(
         local_ci_state_footprint_fn=_binding(bindings, "local_ci_state_footprint"),

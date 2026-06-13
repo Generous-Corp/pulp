@@ -8,6 +8,12 @@ from typing import Any
 from binding_utils import binding as _binding
 
 
+UTILITY_QUEUE_COMMAND_EXPORTS = (
+    "cmd_bump",
+    "cmd_cancel",
+)
+
+
 def cmd_bump(bindings: Mapping[str, Any], args: Any) -> int:
     return _binding(bindings, "_queue_commands_cli").cmd_bump(
         args,
