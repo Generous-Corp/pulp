@@ -27,4 +27,10 @@ def install_desktop_windows_session_agent_probe_helpers(
     bindings: dict[str, Any],
     names: tuple[str, ...] = DESKTOP_WINDOWS_SESSION_AGENT_PROBE_EXPORTS,
 ) -> None:
-    install_local_helpers(bindings, globals(), names)
+    known_names = set(DESKTOP_WINDOWS_SESSION_AGENT_PROBE_EXPORTS)
+    probe_names = tuple(name for name in names if name in known_names)
+    unknown_names = tuple(name for name in names if name not in known_names)
+
+    install_local_helpers(bindings, globals(), probe_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)

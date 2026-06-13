@@ -41,4 +41,10 @@ def install_desktop_windows_repo_checkout_ensure_helpers(
     bindings: dict[str, Any],
     names: tuple[str, ...] = DESKTOP_WINDOWS_REPO_CHECKOUT_ENSURE_EXPORTS,
 ) -> None:
-    install_local_helpers(bindings, globals(), names)
+    known_names = set(DESKTOP_WINDOWS_REPO_CHECKOUT_ENSURE_EXPORTS)
+    ensure_names = tuple(name for name in names if name in known_names)
+    unknown_names = tuple(name for name in names if name not in known_names)
+
+    install_local_helpers(bindings, globals(), ensure_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)

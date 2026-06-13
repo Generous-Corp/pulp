@@ -85,6 +85,17 @@ class DesktopWindowsRepoCheckoutEnsureBindingsTests(unittest.TestCase):
 
         self.assertEqual(bindings["ensure_windows_remote_repo_checkout"]("win", r"C:\Pulp"), {"ready": True})
 
+    def test_install_desktop_windows_repo_checkout_ensure_helpers_keeps_unknown_local_fallback(self):
+        bindings = {}
+        self.mod.future_desktop_windows_repo_checkout_ensure_helper = lambda _bindings: "future"
+
+        self.mod.install_desktop_windows_repo_checkout_ensure_helpers(
+            bindings,
+            ("future_desktop_windows_repo_checkout_ensure_helper",),
+        )
+
+        self.assertEqual(bindings["future_desktop_windows_repo_checkout_ensure_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()
