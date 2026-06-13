@@ -27,6 +27,12 @@ grant:
 python3 tools/local-ci/local_ci.py desktop video-setup mac --machine blackbook --check --run-in-terminal --json
 ```
 
+Create the machine-local config on a new checkout:
+
+```bash
+cp tools/local-ci/config.example.json tools/local-ci/config.json
+```
+
 Install the repo-local developer ffmpeg on a new Mac:
 
 ```bash

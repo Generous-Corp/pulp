@@ -352,9 +352,51 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertIn("Desktop video setup for `mac`", self.printed)
         self.assertIn("  machine: blackbook", self.printed)
+        self.assertTrue(any("cp tools/local-ci/config.example.json tools/local-ci/config.json" in line for line in self.printed))
         self.assertTrue(any("npm --prefix tools/local-ci install" in line for line in self.printed))
         self.assertTrue(any("target.mac.video_capture true" in line for line in self.printed))
         self.assertTrue(any("--label blackbook-video-setup-smoke" in line for line in self.printed))
+
+    def test_video_setup_prints_first_run_steps_without_config(self):
+        deps = {
+            "load_config_fn": lambda: (_ for _ in ()).throw(FileNotFoundError("Local CI config not found at /repo/tools/local-ci/config.json")),
+            "resolve_desktop_target_fn": lambda *_args: self.fail("target should not be resolved without config"),
+            "desktop_doctor_checks_fn": lambda *_args: self.fail("doctor should not run without --check"),
+            "normalize_desktop_optional_config_fn": lambda optional: {"video_capture": bool((optional or {}).get("video_capture"))},
+            "video_proof_smoke_fn": lambda: self.fail("smoke should not run without --check"),
+            "print_fn": self.print_line,
+        }
+
+        result = self.mod.cmd_desktop_video_setup(
+            Namespace(target="mac", machine="blackbook", check=False, skip_remotion_smoke=False, json=False),
+            **deps,
+        )
+
+        self.assertEqual(result, 0)
+        self.assertIn("  adapter: macos-local", self.printed)
+        self.assertTrue(any("cp tools/local-ci/config.example.json tools/local-ci/config.json" in line for line in self.printed))
+
+    def test_video_setup_json_reports_missing_config_during_check(self):
+        deps = {
+            "load_config_fn": lambda: (_ for _ in ()).throw(FileNotFoundError("Local CI config not found at /repo/tools/local-ci/config.json")),
+            "resolve_desktop_target_fn": lambda *_args: self.fail("target should not be resolved without config"),
+            "desktop_doctor_checks_fn": lambda *_args: self.fail("doctor should not run without config"),
+            "normalize_desktop_optional_config_fn": lambda optional: {"video_capture": bool((optional or {}).get("video_capture"))},
+            "video_proof_smoke_fn": lambda: self.fail("smoke should not run without config"),
+            "print_fn": self.print_line,
+        }
+
+        result = self.mod.cmd_desktop_video_setup(
+            Namespace(target="mac", machine="blackbook", check=True, skip_remotion_smoke=False, json=True),
+            **deps,
+        )
+
+        self.assertEqual(result, 1)
+        payload = json.loads(self.printed[0])
+        self.assertFalse(payload["check"]["ok"])
+        self.assertEqual(payload["check"]["checks"][0]["name"], "config")
+        self.assertEqual(payload["check"]["remediations"][0]["command"], "cp tools/local-ci/config.example.json tools/local-ci/config.json")
+        self.assertEqual(payload["steps"][0]["name"], "create_config")
 
     def test_video_setup_json_can_include_current_doctor_check(self):
         self.targets["mac"]["optional"] = {"video_capture": True}
@@ -383,8 +425,8 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
         self.assertEqual(payload["machine"], "blackbook")
         self.assertTrue(payload["check"]["ok"])
         self.assertEqual(payload["check"]["target"], "mac")
-        self.assertEqual(payload["steps"][4]["name"], "smoke_proof")
-        self.assertIn("--run-in-terminal", payload["steps"][3]["command"])
+        self.assertEqual(payload["steps"][5]["name"], "smoke_proof")
+        self.assertIn("--run-in-terminal", payload["steps"][4]["command"])
 
 
 if __name__ == "__main__":

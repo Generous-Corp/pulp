@@ -273,6 +273,12 @@ def desktop_video_setup_steps(target_name: str, *, machine_label: str | None = N
     smoke_label = f"{label}-video-setup-smoke"
     return [
         {
+            "name": "create_config",
+            "title": "Create the local CI config",
+            "command": "cp tools/local-ci/config.example.json tools/local-ci/config.json",
+            "detail": "Creates the machine-local config file used by desktop target checks and artifact paths.",
+        },
+        {
             "name": "install_tools",
             "title": "Install repo-local video tools",
             "command": "npm --prefix tools/local-ci install",
@@ -318,6 +324,51 @@ def desktop_video_setup_steps(target_name: str, *, machine_label: str | None = N
             "detail": "Prints localhost, hostname, configured public hosts, and Tailscale candidate URLs.",
         },
     ]
+
+
+def _default_video_setup_target(target_name: str) -> dict:
+    if target_name == "mac":
+        return {"adapter": "macos-local", "bootstrap": "launchagent"}
+    return {"adapter": "unknown", "bootstrap": "unknown"}
+
+
+def _missing_video_setup_config_payload(args: argparse.Namespace, error: Exception, steps: list[dict]) -> tuple[int, dict]:
+    target = _default_video_setup_target(args.target)
+    check = None
+    exit_code = 0
+    if getattr(args, "check", False):
+        detail = str(error)
+        check = {
+            "target": args.target,
+            "adapter": target["adapter"],
+            "bootstrap": target["bootstrap"],
+            "ok": False,
+            "checks": [
+                {
+                    "name": "config",
+                    "ok": False,
+                    "detail": detail,
+                    "required": True,
+                }
+            ],
+            "remediations": [
+                {
+                    "check": "config",
+                    "title": "Create the local CI config",
+                    "detail": "Copy the example config, then enable the desktop video capture capability for this machine.",
+                    "command": "cp tools/local-ci/config.example.json tools/local-ci/config.json",
+                }
+            ],
+        }
+        exit_code = 1
+    return exit_code, {
+        "target": args.target,
+        "machine": getattr(args, "machine", None) or args.target,
+        "adapter": target["adapter"],
+        "bootstrap": target["bootstrap"],
+        "steps": steps,
+        "check": check,
+    }
 
 
 def desktop_video_doctor_payload(
@@ -448,14 +499,41 @@ def cmd_desktop_video_setup(
     video_proof_smoke_fn: Callable[[], dict],
     print_fn: Callable[[str], None] = print,
 ) -> int:
+    steps = desktop_video_setup_steps(args.target, machine_label=getattr(args, "machine", None))
     try:
         config = load_config_fn()
         target = resolve_desktop_target_fn(config, args.target)
-    except (FileNotFoundError, ValueError) as exc:
+    except FileNotFoundError as exc:
+        exit_code, payload = _missing_video_setup_config_payload(args, exc, steps)
+        if getattr(args, "json", False):
+            print_fn(json.dumps(payload, indent=2))
+            return exit_code
+        print_fn(f"Desktop video setup for `{args.target}`")
+        print_fn(f"  machine: {payload['machine']}")
+        print_fn(f"  adapter: {payload['adapter']}")
+        print_fn(f"  bootstrap: {payload['bootstrap']}")
+        print_fn("")
+        print_fn("Steps:")
+        for index, step in enumerate(steps, start=1):
+            print_fn(f"  {index}. {step['title']}")
+            print_fn(f"     {step['detail']}")
+            print_fn(f"     command: {step['command']}")
+        if payload["check"] is not None:
+            print_fn("")
+            print_fn("Current check: FAIL")
+            for check in payload["check"]["checks"]:
+                print_fn(f"  {_desktop_check_status(check):4s}  {check['name']}: {check['detail']}")
+            print_fn("")
+            print_fn("Remediation:")
+            for item in payload["check"]["remediations"]:
+                print_fn(f"  - {item['title']}: {item['detail']}")
+                if item.get("command"):
+                    print_fn(f"    command: {item['command']}")
+        return exit_code
+    except ValueError as exc:
         print_fn(f"Error: {exc}")
         return 1
 
-    steps = desktop_video_setup_steps(args.target, machine_label=getattr(args, "machine", None))
     payload = {
         "target": args.target,
         "machine": getattr(args, "machine", None) or args.target,
