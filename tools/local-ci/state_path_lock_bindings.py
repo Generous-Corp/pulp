@@ -38,4 +38,10 @@ def install_state_path_lock_helpers(
     bindings: dict[str, Any],
     names: tuple[str, ...] = STATE_PATH_LOCK_EXPORTS,
 ) -> None:
-    install_local_helpers(bindings, globals(), names)
+    known_names = set(STATE_PATH_LOCK_EXPORTS)
+    lock_names = tuple(name for name in names if name in known_names)
+    unknown_names = tuple(name for name in names if name not in known_names)
+
+    install_local_helpers(bindings, globals(), lock_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)
