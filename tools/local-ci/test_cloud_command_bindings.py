@@ -20,18 +20,13 @@ class CloudCommandBindingsTests(unittest.TestCase):
 
     def test_command_exports_match_wrappers(self):
         expected = (
-            "cmd_cloud_workflows",
-            "cmd_cloud_defaults",
-            "cmd_cloud_history",
-            "cmd_cloud_compare",
-            "cmd_cloud_recommend",
-            "cmd_cloud_run",
-            "cmd_cloud_status",
-            "cmd_cloud_namespace_doctor",
-            "cmd_cloud_namespace_setup",
+            *self.mod.CLOUD_REPORTING_COMMAND_EXPORTS,
+            *self.mod.CLOUD_RUN_COMMAND_EXPORTS,
+            *self.mod.CLOUD_NAMESPACE_COMMAND_EXPORTS,
         )
 
         self.assertEqual(self.mod.CLOUD_COMMAND_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
         for name in expected:
             self.assertTrue(callable(getattr(self.mod, name)))
 
@@ -89,6 +84,41 @@ class CloudCommandBindingsTests(unittest.TestCase):
         args = object()
         self.assertEqual(bindings["cmd_cloud_run"](args), 15)
         self.assertEqual(calls, [("cmd_cloud_run", args)])
+
+    def test_install_cloud_command_helpers_routes_each_group(self):
+        calls = []
+
+        def make_runner(name, value):
+            def runner(*args, **kwargs):
+                calls.append((name, args, kwargs))
+                return value
+
+            return runner
+
+        cloud = types.SimpleNamespace(
+            cmd_cloud_history=make_runner("cmd_cloud_history", 12),
+            cmd_cloud_status=make_runner("cmd_cloud_status", 16),
+            cmd_cloud_namespace_setup=make_runner("cmd_cloud_namespace_setup", 18),
+        )
+        bindings = {"_cloud": cloud}
+
+        self.mod.install_cloud_command_helpers(
+            bindings,
+            (
+                "cmd_cloud_history",
+                "cmd_cloud_status",
+                "cmd_cloud_namespace_setup",
+            ),
+        )
+        args = object()
+
+        self.assertEqual(bindings["cmd_cloud_history"](args), 12)
+        self.assertEqual(bindings["cmd_cloud_status"](args), 16)
+        self.assertEqual(bindings["cmd_cloud_namespace_setup"](args), 18)
+        self.assertEqual(
+            [call[0] for call in calls],
+            ["cmd_cloud_history", "cmd_cloud_status", "cmd_cloud_namespace_setup"],
+        )
 
 
 if __name__ == "__main__":
