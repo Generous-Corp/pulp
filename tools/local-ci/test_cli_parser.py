@@ -233,8 +233,22 @@ class CliParserTests(unittest.TestCase):
             "build/ios/PulpDemo.app",
             "--bundle-id",
             "com.pulp.demo",
+            "--open-url",
+            "https://example.com",
+            "--action-label",
+            "open example.com",
             "--duration",
             "6",
+            "--compose-video-proof",
+            "--video-title",
+            "Simulator proof",
+            "--video-note",
+            "URL opened",
+            "--small-video",
+            "--small-video-budget-mb",
+            "8",
+            "--video-attachment-budget-mb",
+            "25",
             "--label",
             "ios-launch-proof",
             "--output",
@@ -246,9 +260,78 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(video.device, "A-UDID")
         self.assertEqual(video.app, "build/ios/PulpDemo.app")
         self.assertEqual(video.bundle_id, "com.pulp.demo")
+        self.assertEqual(video.open_url, "https://example.com")
+        self.assertEqual(video.action_label, "open example.com")
         self.assertEqual(video.duration, 6.0)
+        self.assertTrue(video.compose_video_proof)
+        self.assertEqual(video.video_title, "Simulator proof")
+        self.assertEqual(video.video_note, ["URL opened"])
+        self.assertTrue(video.small_video)
+        self.assertEqual(video.small_video_budget_mb, 8.0)
+        self.assertEqual(video.video_attachment_budget_mb, 25.0)
         self.assertEqual(video.label, "ios-launch-proof")
         self.assertEqual(video.output, "/tmp/ios-proof")
+        self.assertTrue(video.json)
+
+    def test_android_video_commands_parse(self):
+        parser = self.build_parser()
+
+        doctor = parser.parse_args(["android", "video-doctor", "--device", "emulator-5554", "--json"])
+        self.assertEqual(doctor.command, "android")
+        self.assertEqual(doctor.android_command, "video-doctor")
+        self.assertEqual(doctor.device, "emulator-5554")
+        self.assertTrue(doctor.json)
+
+        video = parser.parse_args([
+            "android",
+            "video",
+            "--device",
+            "emulator-5554",
+            "--apk",
+            "android/app/build/outputs/apk/debug/app-debug.apk",
+            "--package",
+            "com.pulp.demo",
+            "--activity",
+            ".MainActivity",
+            "--open-url",
+            "pulp-demo://validate",
+            "--action-label",
+            "open validation deep link",
+            "--duration",
+            "6",
+            "--compose-video-proof",
+            "--video-title",
+            "Android proof",
+            "--video-note",
+            "Deep link opened",
+            "--small-video",
+            "--small-video-budget-mb",
+            "8",
+            "--video-attachment-budget-mb",
+            "25",
+            "--label",
+            "android-proof",
+            "--output",
+            "/tmp/android-proof",
+            "--json",
+        ])
+        self.assertEqual(video.command, "android")
+        self.assertEqual(video.android_command, "video")
+        self.assertEqual(video.device, "emulator-5554")
+        self.assertEqual(video.apk, "android/app/build/outputs/apk/debug/app-debug.apk")
+        self.assertEqual(video.package, "com.pulp.demo")
+        self.assertEqual(video.activity, ".MainActivity")
+        self.assertEqual(video.open_url, "pulp-demo://validate")
+        self.assertEqual(video.action_label, "open validation deep link")
+        self.assertEqual(video.duration, 6.0)
+        self.assertTrue(video.compose_video_proof)
+        self.assertEqual(video.video_title, "Android proof")
+        self.assertEqual(video.video_note, ["Deep link opened"])
+        self.assertTrue(video.small_video)
+        self.assertEqual(video.small_video_budget_mb, 8.0)
+        self.assertEqual(video.video_attachment_budget_mb, 25.0)
+        self.assertEqual(video.label, "android-proof")
+        self.assertEqual(video.output, "/tmp/android-proof")
         self.assertTrue(video.json)
 
     def test_desktop_verdict_command_requires_explicit_status(self):

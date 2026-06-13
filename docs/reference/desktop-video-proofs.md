@@ -401,30 +401,27 @@ python3 tools/local-ci/local_ci.py simulator video \
   --action-label "open validation URL" \
   --label ios-simulator-launch-proof \
   --duration 8 \
-  --video-fps 10
-```
-
-The command writes `video/proof.mp4` and `manifest.json` under the simulator run
-directory. This first simulator lane proves capture/install/launch plumbing via
-`xcrun simctl io screenshot` frames encoded with ffmpeg. When `--open-url` is
-provided, the URL opens during capture and the manifest stores a
-`mobile-simulator` action marker for reports and Remotion composition. Coordinate
-tap driving still needs a future automation backend because this Xcode's
-`simctl` does not expose a tap command.
-
-Render the simulator run through Remotion for an annotated reviewer-facing clip:
-
-```bash
-python3 tools/local-ci/local_ci.py desktop compose-video /path/to/manifest.json \
-  --template mobile-simulator \
-  --title "iOS Simulator open URL proof" \
-  --note "Simulator opens the validation URL during recording." \
+  --video-fps 10 \
+  --compose-video-proof \
+  --video-title "iOS Simulator open URL proof" \
+  --video-note "Simulator opens the validation URL during recording." \
   --small-video
 ```
 
-This adds `video/proof-composed.mp4`, `video/proof.issue.mp4`, optional
-`video/proof.small.mp4`, composition metadata, and a storyboard to the simulator
-manifest before publishing.
+The command writes `video/proof.mp4` and `manifest.json` under the simulator run
+directory. With `--compose-video-proof`, it immediately renders the
+`mobile-simulator` Remotion proof and adds `video/proof-composed.mp4`,
+`video/proof.issue.mp4`, optional `video/proof.small.mp4`, composition metadata,
+and a storyboard to the simulator manifest before publishing. This first
+simulator lane proves capture/install/launch plumbing via `xcrun simctl io
+screenshot` frames encoded with ffmpeg. When `--open-url` is provided, the URL
+opens during capture and the manifest stores a `mobile-simulator` action marker.
+Coordinate tap driving still needs a future automation backend because this
+Xcode's `simctl` does not expose a tap command.
+
+You can still rerender an existing simulator run with
+`desktop compose-video --template mobile-simulator` when only the title, notes,
+or size budget need to change.
 
 ## Android Emulator Video Proofs
 
@@ -445,29 +442,26 @@ python3 tools/local-ci/local_ci.py android video \
   --open-url pulp-demo://validate \
   --action-label "open validation deep link" \
   --label android-emulator-proof \
-  --duration 8
-```
-
-The command writes `video/proof.mp4` and `manifest.json` under the Android run
-directory using `adb shell screenrecord`. With `--open-url`, the command starts
-the URL/deep link during capture and stores a `mobile-emulator` action marker for
-reports and Remotion composition. Coordinate tap driving still needs a future
-automation backend; for now, use package launch and open-url actions for
-portable Android proof clips.
-
-Render the Android run through Remotion for an annotated reviewer-facing clip:
-
-```bash
-python3 tools/local-ci/local_ci.py desktop compose-video /path/to/manifest.json \
-  --template mobile-emulator \
-  --title "Android emulator deep-link proof" \
-  --note "The emulator opens the validation deep link during recording." \
+  --duration 8 \
+  --compose-video-proof \
+  --video-title "Android emulator deep-link proof" \
+  --video-note "The emulator opens the validation deep link during recording." \
   --small-video
 ```
 
-This adds `video/proof-composed.mp4`, `video/proof.issue.mp4`, optional
+The command writes `video/proof.mp4` and `manifest.json` under the Android run
+directory using `adb shell screenrecord`. With `--compose-video-proof`, it
+immediately renders the `mobile-emulator` Remotion proof and adds
+`video/proof-composed.mp4`, `video/proof.issue.mp4`, optional
 `video/proof.small.mp4`, composition metadata, and a storyboard to the Android
-manifest before publishing.
+manifest before publishing. With `--open-url`, the command starts the URL/deep
+link during capture and stores a `mobile-emulator` action marker. Coordinate tap
+driving still needs a future automation backend; for now, use package launch and
+open-url actions for portable Android proof clips.
+
+You can still rerender an existing Android run with
+`desktop compose-video --template mobile-emulator` when only the title, notes,
+or size budget need to change.
 
 Stage a local report after one or more desktop runs:
 

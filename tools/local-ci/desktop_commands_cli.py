@@ -331,7 +331,9 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
             "python3 tools/local-ci/local_ci.py simulator video "
             "--app build/ios/PulpDemo.app --bundle-id com.pulp.demo "
             "--open-url https://example.com --action-label 'open validation URL' "
-            "--label ios-simulator-launch-proof --duration 8 --video-fps 10"
+            "--label ios-simulator-launch-proof --duration 8 --video-fps 10 "
+            "--compose-video-proof --video-title 'iOS Simulator open URL proof' "
+            "--video-note 'Simulator opens the validation URL during recording.' --small-video"
         ),
         "doctor": "python3 tools/local-ci/local_ci.py simulator video-doctor",
         "watch_for": [
@@ -351,7 +353,9 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
             "python3 tools/local-ci/local_ci.py android video "
             "--apk android/app/build/outputs/apk/debug/app-debug.apk --package com.pulp.demo "
             "--open-url pulp-demo://validate --action-label 'open validation deep link' "
-            "--label android-emulator-proof --duration 8"
+            "--label android-emulator-proof --duration 8 "
+            "--compose-video-proof --video-title 'Android emulator deep-link proof' "
+            "--video-note 'The emulator opens the validation deep link during recording.' --small-video"
         ),
         "doctor": "python3 tools/local-ci/local_ci.py android video-doctor",
         "watch_for": [

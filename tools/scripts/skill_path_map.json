@@ -324,6 +324,7 @@
         "tools/local-ci/desktop_action_commands_cli.py",
         "tools/local-ci/desktop_artifacts.py",
         "tools/local-ci/desktop_commands_cli.py",
+        "tools/local-ci/mobile_video_composition.py",
         "tools/local-ci/reporting.py",
         "tools/local-ci/video_artifacts.py",
         "tools/local-ci/remotion-proof/**",
@@ -336,6 +337,7 @@
         "tools/local-ci/test_cli_parser.py",
         "tools/local-ci/test_desktop_action_commands_cli.py",
         "tools/local-ci/test_desktop_commands_cli.py",
+        "tools/local-ci/test_mobile_video_composition.py",
         "tools/local-ci/test_reporting.py",
         "tools/local-ci/test_simulator_video_commands_cli.py",
         "tools/local-ci/test_video_artifacts.py"

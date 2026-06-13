@@ -14,6 +14,8 @@ import time
 from typing import Any
 import uuid
 
+from mobile_video_composition import compose_mobile_video_proof
+
 
 DEFAULT_ANDROID_VIDEO_ROOT = (
     Path.home() / "Library" / "Application Support" / "Pulp" / "desktop-automation" / "runs" / "android-emulator"
@@ -321,6 +323,7 @@ def cmd_android_video(
     run_fn: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
     popen_fn: Callable[..., Any] = subprocess.Popen,
     time_sleep_fn: Callable[[float], None] = time.sleep,
+    compose_mobile_video_proof_fn: Callable[..., dict] = compose_mobile_video_proof,
 ) -> int:
     adb_path = resolve_adb_path(which_fn=which_fn)
     if not adb_path:
@@ -457,8 +460,28 @@ def cmd_android_video(
     manifest_path = run_dir / "manifest.json"
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+    composition_payload = None
+    if getattr(args, "compose_video_proof", False):
+        try:
+            composition_payload = compose_mobile_video_proof_fn(
+                manifest_path,
+                template="mobile-emulator",
+                title=getattr(args, "video_title", None) or None,
+                notes=getattr(args, "video_note", None) or [],
+                video_attachment_budget_mb=float(getattr(args, "video_attachment_budget_mb", 100.0) or 100.0),
+                small_video=bool(getattr(args, "small_video", False)),
+                small_video_budget_mb=float(getattr(args, "small_video_budget_mb", 10.0) or 10.0),
+                tool_dir=Path(__file__).resolve().parent,
+                run_fn=run_fn,
+            )
+        except Exception as exc:
+            print_fn(f"Error: Android video composition failed: {exc}")
+            return 1
     if getattr(args, "json", False):
-        print_fn(json.dumps({"manifest": str(manifest_path), "video": str(video_path), "run_dir": str(run_dir)}, indent=2))
+        payload = {"manifest": str(manifest_path), "video": str(video_path), "run_dir": str(run_dir)}
+        if composition_payload is not None:
+            payload["composition"] = composition_payload
+        print_fn(json.dumps(payload, indent=2))
     else:
         _print_lines(
             [
@@ -469,4 +492,7 @@ def cmd_android_video(
             ],
             print_fn=print_fn,
         )
+        if composition_payload is not None:
+            print_fn(f"  video_composed: {composition_payload['artifacts'].get('video_composed')}")
+            print_fn(f"  video_issue: {composition_payload['artifacts'].get('video_issue')}")
     return 0

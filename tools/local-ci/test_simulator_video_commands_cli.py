@@ -146,6 +146,68 @@ class SimulatorVideoCommandsTests(unittest.TestCase):
             self.assertIn(["/usr/bin/xcrun", "simctl", "launch", "A-UDID", "com.pulp.demo"], self.commands)
             self.assertIn(["/usr/bin/xcrun", "simctl", "openurl", "A-UDID", "pulp-demo://toggle"], self.commands)
 
+    def test_simulator_video_can_compose_issue_ready_proof(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "run"
+            compose_calls: list[dict] = []
+
+            def compose(manifest_path: Path, **kwargs):
+                compose_calls.append({"manifest": manifest_path, **kwargs})
+                video_dir = manifest_path.parent / "video"
+                composed = video_dir / "proof-composed.mp4"
+                issue = video_dir / "proof.issue.mp4"
+                small = video_dir / "proof.small.mp4"
+                composed.write_bytes(b"composed")
+                issue.write_bytes(b"issue")
+                small.write_bytes(b"small")
+                return {
+                    "manifest": str(manifest_path),
+                    "artifacts": {
+                        "video_composed": str(composed),
+                        "video_issue": str(issue),
+                        "video_small": str(small),
+                    },
+                }
+
+            result = self.mod.cmd_simulator_video(
+                Namespace(
+                    device=None,
+                    app=None,
+                    bundle_id=None,
+                    open_url="https://example.com",
+                    action_after=0.0,
+                    action_label="open example.com",
+                    duration=0.1,
+                    video_fps=5.0,
+                    compose_video_proof=True,
+                    video_title="Simulator proof",
+                    video_note=["URL opened during capture"],
+                    video_attachment_budget_mb=25.0,
+                    small_video=True,
+                    small_video_budget_mb=8.0,
+                    label="ios-proof",
+                    output=str(output),
+                    json=True,
+                ),
+                print_fn=self.print_line,
+                which_fn=lambda name: f"/usr/bin/{name}" if name in {"xcrun", "ffmpeg"} else None,
+                run_fn=self.run_fn,
+                time_sleep_fn=lambda _secs: None,
+                compose_mobile_video_proof_fn=compose,
+            )
+
+            self.assertEqual(result, 0)
+            payload = json.loads(self.printed[0])
+            manifest = json.loads(Path(payload["manifest"]).read_text())
+            self.assertEqual(payload["composition"]["artifacts"]["video_issue"], str(output / "video" / "proof.issue.mp4"))
+            self.assertEqual(compose_calls[0]["template"], "mobile-simulator")
+            self.assertEqual(compose_calls[0]["title"], "Simulator proof")
+            self.assertEqual(compose_calls[0]["notes"], ["URL opened during capture"])
+            self.assertEqual(compose_calls[0]["video_attachment_budget_mb"], 25.0)
+            self.assertTrue(compose_calls[0]["small_video"])
+            self.assertEqual(compose_calls[0]["small_video_budget_mb"], 8.0)
+            self.assertEqual(manifest["video_proof_composition"]["template"], "mobile-simulator")
+
 
 if __name__ == "__main__":
     unittest.main()

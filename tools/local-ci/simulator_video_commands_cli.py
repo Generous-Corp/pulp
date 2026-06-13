@@ -15,6 +15,7 @@ import time
 import uuid
 
 from video_artifacts import resolve_ffmpeg_path
+from mobile_video_composition import compose_mobile_video_proof
 
 
 DEFAULT_SIMULATOR_VIDEO_ROOT = (
@@ -339,6 +340,7 @@ def cmd_simulator_video(
     which_fn: Callable[[str], str | None] = shutil.which,
     run_fn: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
     time_sleep_fn: Callable[[float], None] = time.sleep,
+    compose_mobile_video_proof_fn: Callable[..., dict] = compose_mobile_video_proof,
 ) -> int:
     xcrun_path = which_fn("xcrun")
     if not xcrun_path:
@@ -463,8 +465,28 @@ def cmd_simulator_video(
     manifest_path = run_dir / "manifest.json"
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+    composition_payload = None
+    if getattr(args, "compose_video_proof", False):
+        try:
+            composition_payload = compose_mobile_video_proof_fn(
+                manifest_path,
+                template="mobile-simulator",
+                title=getattr(args, "video_title", None) or None,
+                notes=getattr(args, "video_note", None) or [],
+                video_attachment_budget_mb=float(getattr(args, "video_attachment_budget_mb", 100.0) or 100.0),
+                small_video=bool(getattr(args, "small_video", False)),
+                small_video_budget_mb=float(getattr(args, "small_video_budget_mb", 10.0) or 10.0),
+                tool_dir=Path(__file__).resolve().parent,
+                run_fn=run_fn,
+            )
+        except Exception as exc:
+            print_fn(f"Error: simulator video composition failed: {exc}")
+            return 1
     if getattr(args, "json", False):
-        print_fn(json.dumps({"manifest": str(manifest_path), "video": str(video_path), "run_dir": str(run_dir)}, indent=2))
+        payload = {"manifest": str(manifest_path), "video": str(video_path), "run_dir": str(run_dir)}
+        if composition_payload is not None:
+            payload["composition"] = composition_payload
+        print_fn(json.dumps(payload, indent=2))
     else:
         _print_lines(
             [
@@ -475,6 +497,9 @@ def cmd_simulator_video(
             ],
             print_fn=print_fn,
         )
+        if composition_payload is not None:
+            print_fn(f"  video_composed: {composition_payload['artifacts'].get('video_composed')}")
+            print_fn(f"  video_issue: {composition_payload['artifacts'].get('video_issue')}")
     return 0
 
 
