@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from binding_utils import install_local_helpers
 from state_path_artifact_bindings import (
     STATE_PATH_ARTIFACT_EXPORTS,
     bundles_dir,
@@ -53,7 +54,12 @@ def install_state_path_helpers(bindings: dict[str, Any], names: tuple[str, ...] 
     artifact_names = tuple(name for name in names if name in STATE_PATH_ARTIFACT_EXPORTS)
     lock_names = tuple(name for name in names if name in STATE_PATH_LOCK_EXPORTS)
     log_names = tuple(name for name in names if name in STATE_PATH_LOG_EXPORTS)
+    known_names = set(STATE_PATH_EXPORTS)
+    unknown_names = tuple(name for name in names if name not in known_names)
+
     install_state_path_core_helpers(bindings, core_names)
     install_state_path_artifact_helpers(bindings, artifact_names)
     install_state_path_lock_helpers(bindings, lock_names)
     install_state_path_log_helpers(bindings, log_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)

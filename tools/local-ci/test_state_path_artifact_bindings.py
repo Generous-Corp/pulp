@@ -61,7 +61,7 @@ class StatePathArtifactBindingsTests(unittest.TestCase):
 
         self.assertEqual(bindings["bundles_dir"](), Path("/state/bundles"))
         self.assertEqual(bindings["prepared_dir"](), Path("/state/prepared"))
-        self.assertEqual(bindings["bundles_dir"].__name__, "runner")
+        self.assertEqual(bindings["bundles_dir"].__name__, "bundles_dir")
         self.assertEqual([call[0] for call in calls], ["bundles_dir", "prepared_dir"])
 
 

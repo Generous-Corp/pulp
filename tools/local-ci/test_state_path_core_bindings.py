@@ -82,7 +82,8 @@ class StatePathCoreBindingsTests(unittest.TestCase):
 
         self.assertEqual(bindings["state_dir"](), Path("/state"))
         self.assertEqual(bindings["logs_dir"](), Path("/state/logs"))
-        self.assertEqual(bindings["state_dir"].__name__, "runner")
+        self.assertEqual(bindings["state_dir"].__name__, "state_dir")
+        self.assertEqual(bindings["logs_dir"].__name__, "logs_dir")
         self.assertEqual([call[0] for call in calls], ["state_dir", "logs_dir"])
 
     def test_install_state_path_core_helpers_routes_focused_exports(self) -> None:

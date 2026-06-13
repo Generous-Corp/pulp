@@ -76,7 +76,7 @@ class StatePathStoreBindingsTests(unittest.TestCase):
 
         self.assertEqual(bindings["queue_path"](), Path("/state/queue.json"))
         self.assertEqual(bindings["logs_dir"](), Path("/state/logs"))
-        self.assertEqual(bindings["queue_path"].__name__, "runner")
+        self.assertEqual(bindings["queue_path"].__name__, "queue_path")
         self.assertEqual([call[0] for call in calls], ["queue_path", "logs_dir"])
 
 

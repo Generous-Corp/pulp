@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from binding_utils import binding as _binding
-from binding_utils import install_module_attrs
+from binding_utils import install_local_helpers
 
 
 STATE_PATH_CONFIG_EXPORTS = (
@@ -38,4 +38,4 @@ def install_state_path_config_helpers(
     bindings: dict[str, Any],
     names: tuple[str, ...] = STATE_PATH_CONFIG_EXPORTS,
 ) -> None:
-    install_module_attrs(bindings, "_state_paths", names)
+    install_local_helpers(bindings, globals(), names)

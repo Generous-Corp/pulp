@@ -56,7 +56,7 @@ class StatePathLogBindingsTests(unittest.TestCase):
 
         self.assertEqual(bindings["job_logs_dir"]("job-1"), Path("/state/logs/job-1"))
         self.assertEqual(bindings["prepare_target_log"]("job-1", "mac"), Path("/state/logs/job-1/mac.log"))
-        self.assertEqual(bindings["job_logs_dir"].__name__, "runner")
+        self.assertEqual(bindings["job_logs_dir"].__name__, "job_logs_dir")
         self.assertEqual([call[0] for call in calls], ["job_logs_dir", "prepare_target_log"])
 
 

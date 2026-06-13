@@ -61,7 +61,7 @@ class StatePathLockBindingsTests(unittest.TestCase):
 
         self.assertEqual(bindings["queue_lock_path"](), Path("/state/queue.lock"))
         self.assertEqual(bindings["runner_info_path"](), Path("/state/runner.json"))
-        self.assertEqual(bindings["queue_lock_path"].__name__, "runner")
+        self.assertEqual(bindings["queue_lock_path"].__name__, "queue_lock_path")
         self.assertEqual([call[0] for call in calls], ["queue_lock_path", "runner_info_path"])
 
 

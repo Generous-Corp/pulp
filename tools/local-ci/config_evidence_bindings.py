@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from binding_utils import install_local_helpers
 from config_evidence_summary_bindings import (
     CONFIG_EVIDENCE_SUMMARY_EXPORTS,
     collect_evidence_groups,
@@ -33,5 +34,10 @@ def install_config_evidence_helpers(
 ) -> None:
     config_names = tuple(name for name in names if name in CONFIG_FILE_EXPORTS)
     evidence_names = tuple(name for name in names if name in CONFIG_EVIDENCE_SUMMARY_EXPORTS)
+    known_names = set(CONFIG_EVIDENCE_EXPORTS)
+    unknown_names = tuple(name for name in names if name not in known_names)
+
     install_config_file_helpers(bindings, config_names)
     install_config_evidence_summary_helpers(bindings, evidence_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)

@@ -70,7 +70,7 @@ class StatePathConfigBindingsTests(unittest.TestCase):
 
         self.assertEqual(bindings["state_dir"](), Path("/state"))
         self.assertEqual(bindings["shared_config_path"](), Path("/state/config.json"))
-        self.assertEqual(bindings["state_dir"].__name__, "runner")
+        self.assertEqual(bindings["state_dir"].__name__, "state_dir")
         self.assertEqual([call[0] for call in calls], ["state_dir", "shared_config_path"])
 
 
