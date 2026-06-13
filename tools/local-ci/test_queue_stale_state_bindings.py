@@ -83,6 +83,16 @@ class QueueStaleStateBindingsTests(unittest.TestCase):
         captured["target_state"][1]["update_job_target_state_unlocked_fn"]([], "job1", "mac", {"status": "fail"})
         self.assertEqual(captured["target_unlocked"], ([], "job1", "mac", {"status": "fail"}, bindings["now_iso"]))
 
+    def test_stale_state_exports_compose_focused_groups(self):
+        expected = (
+            *self.mod.QUEUE_STALE_RECONCILE_EXPORTS,
+            *self.mod.QUEUE_TARGET_UPDATE_EXPORTS,
+            *self.mod.QUEUE_STALE_RECLAIM_EXPORTS,
+        )
+
+        self.assertEqual(self.mod.QUEUE_STALE_STATE_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def test_reclaim_stale_remote_validators_binds_cleanup_dependencies(self):
         captured = {}
 
