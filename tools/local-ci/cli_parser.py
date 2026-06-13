@@ -351,6 +351,7 @@ def build_local_ci_parser(
     p_desktop_publish.add_argument("--limit", type=int, default=5, help="Number of runs to include (default: 5)")
     p_desktop_publish.add_argument("--label", help="Optional report label")
     p_desktop_publish.add_argument("--output", help="Optional report output directory")
+    p_desktop_publish.add_argument("--manifest", action="append", help="Explicit run manifest.json to publish; may be passed more than once")
     p_desktop_publish.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 
     p_desktop_verdict = desktop_sub.add_parser("verdict", help="Record a human review verdict on a desktop run manifest")

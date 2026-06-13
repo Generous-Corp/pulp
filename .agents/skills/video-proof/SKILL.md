@@ -192,6 +192,14 @@ Publish the latest runs:
 python3 tools/local-ci/local_ci.py desktop publish mac --limit 3 --label validation-video-proof
 ```
 
+Publish a specific run or generated demo manifest when discovery is not enough:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop publish \
+  --manifest /path/to/run/manifest.json \
+  --label validation-video-proof
+```
+
 Serve the latest published report on a Tailscale-visible machine:
 
 ```bash

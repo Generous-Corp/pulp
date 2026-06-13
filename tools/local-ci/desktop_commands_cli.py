@@ -418,12 +418,29 @@ def cmd_desktop_publish(
         print_fn(f"Error: {exc}")
         return 1
 
-    manifests = desktop_run_manifests_fn(config, target_name=args.target, action=args.action)
+    manifest_paths = getattr(args, "manifest", None) or []
+    manifests = []
+    for manifest_arg in manifest_paths:
+        manifest_path = Path(manifest_arg).expanduser()
+        if not manifest_path.is_file():
+            print_fn(f"Error: desktop run manifest not found: {manifest_path}")
+            return 1
+        try:
+            manifest = json.loads(manifest_path.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            print_fn(f"Error: could not read desktop run manifest: {exc}")
+            return 1
+        artifacts = manifest.setdefault("artifacts", {})
+        artifacts.setdefault("bundle_dir", str(manifest_path.parent))
+        manifests.append(manifest)
+    if not manifests:
+        manifests = desktop_run_manifests_fn(config, target_name=args.target, action=args.action)
     if not manifests:
         print_fn("No desktop automation runs found.")
         return 0
 
-    manifests = manifests[: args.limit]
+    if not manifest_paths:
+        manifests = manifests[: args.limit]
     output_dir = Path(args.output).expanduser() if args.output else None
     try:
         report = stage_desktop_publish_report_fn(config, manifests, output_dir=output_dir, label=args.label)

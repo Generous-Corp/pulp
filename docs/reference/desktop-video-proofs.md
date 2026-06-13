@@ -167,6 +167,14 @@ Stage a local report after one or more desktop runs:
 ./tools/local-ci/local_ci.py desktop publish mac --limit 3 --label validation-video-proof
 ```
 
+To stage a specific run or generated demo manifest, pass it explicitly:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop publish \
+  --manifest /path/to/run/manifest.json \
+  --label validation-video-proof
+```
+
 The generated `index.html` renders videos with native browser controls. To
 share from a Tailscale-visible machine, serve the publish directory with a local
 static server and link that URL in the review issue:

@@ -145,6 +145,25 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(args.issue_url, "https://github.com/example/repo/issues/1")
         self.assertTrue(args.json)
 
+    def test_desktop_publish_parses_explicit_manifests(self):
+        parser = self.build_parser()
+
+        args = parser.parse_args([
+            "desktop",
+            "publish",
+            "--manifest",
+            "/tmp/run-a/manifest.json",
+            "--manifest",
+            "/tmp/run-b/manifest.json",
+            "--label",
+            "video-review",
+        ])
+
+        self.assertEqual(args.desktop_command, "publish")
+        self.assertIsNone(args.target)
+        self.assertEqual(args.manifest, ["/tmp/run-a/manifest.json", "/tmp/run-b/manifest.json"])
+        self.assertEqual(args.label, "video-review")
+
     def test_desktop_video_doctor_defaults_to_mac(self):
         parser = self.build_parser()
 

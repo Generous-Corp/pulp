@@ -244,6 +244,23 @@ class DesktopCommandsCliTests(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertEqual(self.printed[-1], "published 1")
 
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / "manifest.json"
+            manifest_path.write_text(json.dumps({"label": "explicit", "artifacts": {}}) + "\n")
+            captured = []
+            result = self.mod.cmd_desktop_publish(
+                Namespace(target=None, action=None, limit=5, output=None, label="explicit-gallery", manifest=[str(manifest_path)], json=True),
+                load_config_fn=lambda: config,
+                desktop_run_manifests_fn=lambda *_args, **_kwargs: self.fail("explicit manifest should skip discovery"),
+                stage_desktop_publish_report_fn=lambda _config, manifests, **kwargs: captured.append((manifests, kwargs)) or {"run_count": len(manifests)},
+                desktop_publish_lines_fn=lambda report: [f"published {report['run_count']}"],
+                print_fn=self.print_line,
+            )
+            self.assertEqual(result, 0)
+            self.assertEqual(captured[0][0][0]["label"], "explicit")
+            self.assertEqual(captured[0][0][0]["artifacts"]["bundle_dir"], str(Path(tmpdir)))
+            self.assertEqual(captured[0][1]["label"], "explicit-gallery")
+
         served = []
         with tempfile.TemporaryDirectory() as tmpdir:
             artifact_root = Path(tmpdir) / "runs"
