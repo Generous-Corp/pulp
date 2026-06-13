@@ -793,6 +793,10 @@ TEST_CASE("ContentRegistry enumerates installed content packs by plugin capabili
                                               "dev.pulp.test.plugin",
                                               "dev.pulp.test.expansion",
                                               "0.1.0");
+    const auto backup_root =
+        pack_root.parent_path() / ".pulp-content-update-backup-dev.pulp.test.expansion-0.1.0";
+    fs::copy(pack_root, backup_root,
+             fs::copy_options::recursive | fs::copy_options::overwrite_existing);
 
     ContentRegistry registry(data_root);
 

@@ -211,6 +211,32 @@ bool valid_semverish(const std::string& version) {
     });
 }
 
+bool valid_cmake_target_name(std::string_view name) {
+    if (name.empty()) return false;
+    if (name.find(":::") != std::string_view::npos) return false;
+    if (name.starts_with(':') || name.ends_with(':')) return false;
+
+    bool previous_was_colon = false;
+    for (char c : name) {
+        const auto u = static_cast<unsigned char>(c);
+        if (std::isalnum(u) || c == '_' || c == '-' || c == '.' || c == '+') {
+            previous_was_colon = false;
+            continue;
+        }
+        if (c == ':') {
+            if (previous_was_colon) {
+                previous_was_colon = false;
+                continue;
+            }
+            previous_was_colon = true;
+            continue;
+        }
+        return false;
+    }
+
+    return !previous_was_colon;
+}
+
 struct SemverTriple {
     int major = 0;
     int minor = 0;
@@ -778,6 +804,12 @@ void validate_declared_paths(KitValidationResult& result,
                                 "nativeComponentHeaders", "nativeComponentSources",
                                 "nodePackManifests", "graphFixtures", "stateFixtures"}) {
             validate_path_array(result, root, *exports, key);
+        }
+        for (const auto& target : string_array_field(*exports, "cmakeTargets")) {
+            if (!valid_cmake_target_name(target)) {
+                add_issue(result, "error", "invalid-cmake-target",
+                          "`exports.cmakeTargets` contains unsafe target name `" + target + "`");
+            }
         }
     }
     if (auto* validation = object_field(manifest, "validation")) {

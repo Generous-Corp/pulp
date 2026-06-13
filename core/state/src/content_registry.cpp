@@ -647,6 +647,10 @@ bool matches_manifest(const ContentPackInfo& pack, const ContentCapabilityManife
     return intersects(pack.capabilities, manifest.capabilities);
 }
 
+bool is_content_update_backup_dir(const fs::path& path) {
+    return path.filename().string().starts_with(".pulp-content-update-backup-");
+}
+
 ContentReloadPolicy reload_policy_for_kind(const ContentCapabilityManifest& manifest,
                                            const std::string& kind) {
     if (contains(manifest.hot_reload_kinds, kind)) return ContentReloadPolicy::hot_reload;
@@ -666,7 +670,7 @@ std::vector<LocalContentManifest> installed_content(const fs::path& data_root) {
             if (!ids->is_directory(ec)) continue;
             for (fs::directory_iterator versions(ids->path(), ec), versions_end; !ec && versions != versions_end; versions.increment(ec)) {
                 if (!versions->is_directory(ec)) continue;
-                if (versions->path().filename().string().starts_with(".pulp-content-update-backup-")) continue;
+                if (is_content_update_backup_dir(versions->path())) continue;
                 std::vector<std::string> issues;
                 if (auto manifest = load_local_content_manifest(versions->path(), issues)) {
                     manifest->root = versions->path();
@@ -849,6 +853,7 @@ std::vector<ContentPackInfo> ContentRegistry::packs_for_plugin(const std::string
              !ec && version_it != version_end;
              version_it.increment(ec)) {
             if (!version_it->is_directory(ec)) continue;
+            if (is_content_update_backup_dir(version_it->path())) continue;
             if (auto pack = load_pack(version_it->path())) packs.push_back(std::move(*pack));
         }
     }

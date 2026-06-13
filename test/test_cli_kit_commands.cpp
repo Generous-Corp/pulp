@@ -2093,6 +2093,63 @@ TEST_CASE("pulp kit plan resolves dependency packages only through curated regis
     REQUIRE_FALSE(fs::exists(project.path / "cmake" / "pulp-kits.cmake"));
 }
 
+TEST_CASE("pulp kit rejects unsafe CMake target metadata before generated files",
+          "[cli][kit][security]") {
+    TempDir project;
+    write_file(project.path / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\nproject(KitUnsafeTarget)\n");
+
+    TempDir kit;
+    write_file(kit.path / "validation" / "smoke.json", "{}\n");
+    write_file(kit.path / "AGENTS.md", "# Unsafe target kit\n");
+    write_file(kit.path / "pulp.package.json", R"JSON({
+  "schema": "pulp-package-v1",
+  "id": "dev.pulp.tests.unsafe-target-kit",
+  "name": "Unsafe Target Kit",
+  "version": "0.1.0",
+  "license": "MIT",
+  "licenses": {
+    "code": "MIT"
+  },
+  "kind": ["source"],
+  "audience": ["developer", "agent"],
+  "description": "Unsafe target fixture.",
+  "requires": {
+    "pulp": ">=0.395.0",
+    "platforms": ["macOS", "Windows", "Linux"]
+  },
+  "capabilities": ["audio.effect.test"],
+  "exports": {
+    "cmakeTargets": ["safe::target\nmessage(FATAL_ERROR injected)"]
+  },
+  "dependencies": {
+    "pulp": ["pulp::signal"],
+    "packages": []
+  },
+  "realtime": {
+    "processSafe": true,
+    "allocatesInProcess": false,
+    "locksInProcess": false
+  },
+  "agent": {
+    "guidance": "AGENTS.md"
+  },
+  "authoring": {
+    "createdBy": "human",
+    "humanReviewed": true
+  },
+  "validation": {
+    "profiles": ["validation/smoke.json"]
+  }
+})JSON");
+
+    REQUIRE(cmd_kit({"plan", kit.path.string(), "--project", project.path.string(), "--json"}) == 1);
+    REQUIRE_FALSE(fs::exists(project.path / ".pulp" / "kits.lock.json"));
+    REQUIRE_FALSE(fs::exists(project.path / "cmake" / "pulp-kits.cmake"));
+    REQUIRE(cmd_kit({"apply", kit.path.string(), "--project", project.path.string(), "--yes"}) == 1);
+    REQUIRE_FALSE(fs::exists(project.path / ".pulp" / "kits.lock.json"));
+    REQUIRE_FALSE(fs::exists(project.path / "cmake" / "pulp-kits.cmake"));
+}
+
 TEST_CASE("pulp kit apply writes owned lock, CMake include, and declared UI files",
           "[cli][kit][phase2]") {
     TempDir project;
