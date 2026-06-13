@@ -29,6 +29,7 @@ pulp_add_plugin(PulpHostBench
     CATEGORY        Effect
     PLUGIN_CODE     "PHBn"
     MANUFACTURER_CODE "Pulp"
+    ACCEPTS_MIDI
 )
 
 # CLAP dlopen smoke (parity with PulpGain).

@@ -84,7 +84,11 @@ struct BenchFixture {
     }
 
     void prepare(double sr = 48000.0, int n = 512) {
-        format::PrepareContext ctx{sr, n, 2, 2};
+        format::PrepareContext ctx;
+        ctx.sample_rate = sr;
+        ctx.max_buffer_size = n;
+        ctx.input_channels = 2;
+        ctx.output_channels = 2;
         processor->prepare(ctx);
     }
     void process(int n = 256) {
@@ -107,6 +111,12 @@ struct BenchFixture {
 
 TEST_CASE("HostBench AU v2 package matches MIDI descriptor", "[bench][au]") {
     const auto source_dir = std::filesystem::path(__FILE__).parent_path();
+
+    std::ifstream cmake_file(source_dir / "CMakeLists.txt");
+    REQUIRE(cmake_file.good());
+    const std::string cmake((std::istreambuf_iterator<char>(cmake_file)),
+                            std::istreambuf_iterator<char>());
+    REQUIRE(cmake.find("ACCEPTS_MIDI") != std::string::npos);
 
     std::ifstream entry_file(source_dir / "au_v2_entry.cpp");
     REQUIRE(entry_file.good());
