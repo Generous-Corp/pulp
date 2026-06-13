@@ -26,6 +26,17 @@ class WindowsSessionProbeBindingsTests(unittest.TestCase):
             "subprocess": types.SimpleNamespace(run=object()),
         }
 
+    def test_session_probe_exports_are_composed_from_focused_groups(self) -> None:
+        expected = (
+            *self.mod.WINDOWS_SESSION_AGENT_EXPORTS,
+            *self.mod.WINDOWS_SESSION_CMAKE_PROBE_EXPORTS,
+        )
+
+        self.assertEqual(self.mod.WINDOWS_SESSION_PROBE_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+        for name in expected:
+            self.assertTrue(callable(getattr(self.mod, name)))
+
     def test_session_agent_helpers_bind_facade_dependencies(self) -> None:
         cases = [
             (
@@ -86,6 +97,44 @@ class WindowsSessionProbeBindingsTests(unittest.TestCase):
         self.assertIs(captured["kwargs"]["windows_ssh_powershell_command_fn"], bindings["windows_ssh_powershell_command"])
         self.assertIs(captured["kwargs"]["run_fn"], bindings["subprocess"].run)
         self.assertIs(captured["kwargs"]["ps_literal_fn"], bindings["ps_literal"])
+
+    def test_install_session_probe_helpers_routes_named_exports_by_group(self) -> None:
+        captured = {}
+
+        def start_runner(*args, **kwargs):
+            captured["start"] = (args, kwargs)
+            return {"started": True}
+
+        def cmake_runner(*args, **kwargs):
+            captured["cmake"] = (args, kwargs)
+            return ("ARM64", "C:/VS")
+
+        bindings = self._bindings(
+            types.SimpleNamespace(
+                start_windows_session_agent_task=start_runner,
+                probe_windows_ssh_cmake_settings=cmake_runner,
+            )
+        )
+        for name in [
+            "run_windows_ssh_powershell",
+            "parse_windows_ssh_json",
+            "ps_literal",
+            "windows_ssh_powershell_command",
+        ]:
+            bindings[name] = object()
+
+        self.mod.install_windows_session_probe_helpers(
+            bindings,
+            ("start_windows_session_agent_task", "probe_windows_ssh_cmake_settings"),
+        )
+
+        self.assertEqual(bindings["start_windows_session_agent_task"]("win", {"task_name": "Pulp"}), {"started": True})
+        self.assertEqual(
+            bindings["probe_windows_ssh_cmake_settings"]("win", "Visual Studio 17 2022", "", ""),
+            ("ARM64", "C:/VS"),
+        )
+        self.assertEqual(captured["start"][0], ("win", {"task_name": "Pulp"}))
+        self.assertEqual(captured["cmake"][0], ("win", "Visual Studio 17 2022", "", ""))
 
 
 if __name__ == "__main__":
