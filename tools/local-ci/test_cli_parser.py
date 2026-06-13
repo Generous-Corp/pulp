@@ -112,6 +112,8 @@ class CliParserTests(unittest.TestCase):
             "Bypass proof",
             "--video-audio",
             "none",
+            "--capture-bundle-id",
+            "com.cockos.reaper",
             "--label",
             "standalone-bypass-toggle",
         ])
@@ -131,6 +133,7 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(args.video_duration, 6.0)
         self.assertEqual(args.video_fps, 24.0)
         self.assertEqual(args.video_audio, "none")
+        self.assertEqual(args.capture_bundle_id, "com.cockos.reaper")
         self.assertEqual(args.video_attachment_budget_mb, 100.0)
         self.assertEqual(args.label, "standalone-bypass-toggle")
 

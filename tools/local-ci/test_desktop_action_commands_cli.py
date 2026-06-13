@@ -56,6 +56,8 @@ class DesktopActionCommandsCliTests(unittest.TestCase):
             "video_fps": 30.0,
             "video_attachment_budget_mb": 100.0,
             "video_audio": "none",
+            "video_capture_target": "app",
+            "capture_bundle_id": None,
             "compose_video_proof": False,
             "video_template": None,
             "source_image": None,
@@ -124,6 +126,16 @@ class DesktopActionCommandsCliTests(unittest.TestCase):
         self.assertTrue(self.calls[0][2]["capture_before"])
         self.assertFalse(self.calls[0][2]["record_video"])
         self.assertEqual(self.calls[0][2]["source_request"], {"target": "mac", "command": "app"})
+
+    def test_smoke_forwards_capture_bundle_id(self):
+        result = self.mod.cmd_desktop_smoke(
+            self.args(capture_bundle_id="com.cockos.reaper", record_video=True),
+            **self.deps(),
+        )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(self.calls[0][2]["capture_bundle_id"], "com.cockos.reaper")
+        self.assertEqual(self.calls[0][2]["video_capture_target"], "app")
 
     def test_smoke_json_and_error_paths(self):
         result = self.mod.cmd_desktop_smoke(
@@ -327,6 +339,28 @@ class DesktopActionCommandsCliTests(unittest.TestCase):
         self.assertEqual(call["host_app"], "REAPER")
         self.assertEqual(call["label"], "reaper-vst3-PulpEffect-proof")
         self.assertEqual(call["video_title"], "PulpEffect VST3 editor in REAPER")
+
+    def test_video_command_reaper_recipe_keeps_explicit_command(self):
+        result = self.mod.cmd_desktop_video(
+            self.args(
+                recipe="reaper-plugin-editor",
+                launch_command="/Applications/REAPER.app/Contents/MacOS/REAPER -new script.lua",
+                label=None,
+                plugin="PulpSynth",
+                plugin_format="clap",
+            ),
+            cmd_desktop_smoke_fn=lambda _args: self.fail("smoke should not run"),
+            cmd_desktop_click_fn=lambda args: self.calls.append(("click-wrapper", (), vars(args).copy())) or 0,
+            cmd_desktop_inspect_fn=lambda _args: self.fail("inspect should not run"),
+            print_fn=self.print_line,
+        )
+
+        self.assertEqual(result, 0)
+        call = self.calls[0][2]
+        self.assertEqual(call["launch_command"], "/Applications/REAPER.app/Contents/MacOS/REAPER -new script.lua")
+        self.assertIsNone(call["bundle_id"])
+        self.assertEqual(call["label"], "reaper-clap-PulpSynth-proof")
+        self.assertEqual(call["video_title"], "PulpSynth CLAP editor in REAPER")
 
     def test_video_command_validates_recipe_requirements(self):
         result = self.mod.cmd_desktop_video(

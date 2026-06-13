@@ -1149,6 +1149,7 @@ def start_macos_window_video_recording(
     *,
     duration_secs: float,
     fps: float,
+    prefer_frame_sequence: bool = False,
 ) -> dict:
     return _macos_desktop.start_macos_window_video_recording(
         window,
@@ -1158,6 +1159,7 @@ def start_macos_window_video_recording(
         popen_fn=subprocess.Popen,
         run_fn=subprocess.run,
         ffmpeg_path=resolve_ffmpeg_path(),
+        prefer_frame_sequence=prefer_frame_sequence,
     )
 
 
@@ -1328,6 +1330,7 @@ def run_macos_local_smoke(
     video_duration_secs: float = 8.0,
     video_fps: float = 30.0,
     video_capture_target: str = "app",
+    capture_bundle_id: str | None = None,
     video_attachment_budget_bytes: int = _video_artifacts.DEFAULT_VIDEO_ATTACHMENT_BUDGET_BYTES,
     compose_video_proof: bool = False,
     video_template: str | None = None,
@@ -1358,6 +1361,7 @@ def run_macos_local_smoke(
         video_duration_secs=video_duration_secs,
         video_fps=video_fps,
         video_capture_target=video_capture_target,
+        capture_bundle_id=capture_bundle_id,
         video_attachment_budget_bytes=video_attachment_budget_bytes,
         compose_video_proof=compose_video_proof,
         video_template=video_template,

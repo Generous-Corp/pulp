@@ -94,9 +94,14 @@ class MacosDesktopActionTests(unittest.TestCase):
                 diff_output_path.write_bytes(b"diff")
             return {"changed": True}
 
-        def start_video(window_payload, output_path, *, duration_secs, fps):
+        def start_video(window_payload, output_path, *, duration_secs, fps, prefer_frame_sequence=False):
             self.assertEqual(window_payload, window)
-            return {"path": str(output_path), "duration_secs": duration_secs, "fps": fps}
+            return {
+                "path": str(output_path),
+                "duration_secs": duration_secs,
+                "fps": fps,
+                "prefer_frame_sequence": prefer_frame_sequence,
+            }
 
         def stop_video(recording, *, output_path, metadata_path, poster_path, duration_secs, fps, attachment_budget_bytes):
             output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -324,6 +329,52 @@ class MacosDesktopActionTests(unittest.TestCase):
         self.assertTrue(manifest["artifacts"]["terminal_returncode"].endswith("/terminal-returncode.txt"))
         self.assertEqual(manifest["window"], window)
         self.assertIn("terminal", manifest)
+
+    def test_run_macos_local_smoke_captures_wrapper_spawned_bundle_window(self) -> None:
+        activated = []
+        bundle_waits = []
+        quits = []
+        host_window = {"windowId": 120, "title": "REAPER", "bounds": {"width": 900, "height": 520}}
+
+        def wait_for_bundle(bundle_id, timeout):
+            bundle_waits.append((bundle_id, timeout))
+            return (9090, host_window)
+
+        manifest, launched, terminated, _waited_paths, _rollups = self.run_action(
+            window=host_window,
+            capture_ui_snapshot=False,
+            capture_bundle_id="com.cockos.reaper",
+            record_video=True,
+            wait_for_macos_bundle_window_fn=wait_for_bundle,
+            activate_macos_bundle_id_fn=lambda bundle_id: activated.append(bundle_id),
+            quit_macos_bundle_id_fn=lambda bundle_id: quits.append(bundle_id),
+        )
+
+        self.assertEqual(launched[0][0], ["/repo/build/ui-preview"])
+        self.assertEqual(bundle_waits, [("com.cockos.reaper", 5.0)])
+        self.assertEqual(activated, ["com.cockos.reaper"])
+        self.assertEqual(manifest["window"], host_window)
+        self.assertTrue(manifest["video"]["recording"]["prefer_frame_sequence"])
+        self.assertEqual(terminated, [4242])
+        self.assertEqual(quits, ["com.cockos.reaper"])
+
+    def test_run_macos_local_smoke_rejects_capture_bundle_id_combinations(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "only valid with --command"):
+            self.run_action(
+                bundle_id="com.cockos.reaper",
+                capture_bundle_id="com.cockos.reaper",
+                capture_ui_snapshot=False,
+            )
+
+        with self.assertRaisesRegex(RuntimeError, "cannot be combined with --video-capture-target terminal"):
+            self.run_action(
+                capture_bundle_id="com.cockos.reaper",
+                capture_ui_snapshot=False,
+                video_capture_target="terminal",
+            )
+
+        with self.assertRaisesRegex(RuntimeError, "cannot inject UI snapshot"):
+            self.run_action(capture_bundle_id="com.cockos.reaper")
 
     def test_run_macos_local_smoke_passes_video_composition_context(self) -> None:
         reference = self.root / "reference.png"

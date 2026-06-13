@@ -420,6 +420,55 @@ class MacOSDesktopTests(unittest.TestCase):
         self.assertEqual(poster_path.read_bytes(), b"cropped-poster")
         self.assertTrue(any("window capture failed" in error for error in metadata["capture_errors"]))
 
+    def test_window_video_recording_can_prefer_screencapture_frame_sequence(self) -> None:
+        output_path = self.root / "video" / "proof.mp4"
+        metadata_path = self.root / "video" / "metadata.json"
+        calls: list[list[str]] = []
+
+        def run_capture_or_encode(cmd: list[str], **_kwargs):
+            calls.append(cmd)
+            if cmd[0] == "screencapture":
+                Path(cmd[-1]).write_bytes(b"png")
+                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+            if cmd[1:] == ["-hide_banner", "-version"]:
+                return subprocess.CompletedProcess(cmd, 0, stdout="ffmpeg version 6.0\n", stderr="")
+            output_path.write_bytes(b"mp4")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="encoded")
+
+        recording = self.mod.start_macos_window_video_recording(
+            {"windowId": 88, "bounds": {"x": 10, "y": 20, "width": 320, "height": 200}},
+            output_path,
+            duration_secs=0.2,
+            fps=5.0,
+            run_fn=run_capture_or_encode,
+            ffmpeg_path="/opt/ffmpeg",
+            input_device_fn=lambda **_kwargs: self.fail("AVFoundation should not be probed"),
+            prefer_frame_sequence=True,
+        )
+        time.sleep(0.25)
+        metadata = self.mod.stop_macos_window_video_recording(
+            recording,
+            output_path=output_path,
+            metadata_path=metadata_path,
+            poster_path=None,
+            duration_secs=0.2,
+            fps=5.0,
+            attachment_budget_bytes=1_000_000,
+            desktop_video_metadata_fn=lambda path, **kwargs: {
+                "path": str(path),
+                "fps": kwargs["fps"],
+                "encoder": kwargs["encoder"],
+                "size": {"fits_attachment_budget": True},
+            },
+            write_desktop_video_metadata_fn=lambda path, payload: path.write_text(str(payload)),
+        )
+
+        self.assertEqual(recording["mode"], "screencapture-sequence")
+        self.assertEqual(metadata["mode"], "screencapture-sequence")
+        self.assertEqual(metadata["fallback_reason"], "window-id frame capture preferred")
+        self.assertTrue(any(cmd[:3] == ["screencapture", "-x", "-l"] for cmd in calls))
+        self.assertFalse(any("avfoundation" in cmd for cmd in calls))
+
     def test_window_video_recording_uses_ffmpeg_avfoundation_primary_path(self) -> None:
         output_path = self.root / "video" / "proof.mp4"
         metadata_path = self.root / "video" / "metadata.json"

@@ -53,7 +53,8 @@ def _apply_desktop_video_recipe(args: argparse.Namespace) -> None:
         if not plugin or not plugin_format:
             raise ValueError("recipe `reaper-plugin-editor` requires --plugin and --plugin-format.")
         _set_default(args, "host_app", "REAPER")
-        _set_default(args, "bundle_id", "com.cockos.reaper")
+        if not getattr(args, "launch_command", None):
+            _set_default(args, "bundle_id", "com.cockos.reaper")
         _set_default(args, "label", f"reaper-{plugin_format}-{plugin}-proof")
         _set_default(args, "video_title", f"{plugin} {plugin_format.upper()} editor in {args.host_app}")
         args.capture_before = True
@@ -104,6 +105,7 @@ def _video_kwargs(args: argparse.Namespace) -> dict:
         "video_duration_secs": float(getattr(args, "video_duration", 8.0)),
         "video_fps": float(getattr(args, "video_fps", 30.0)),
         "video_capture_target": getattr(args, "video_capture_target", "app"),
+        "capture_bundle_id": getattr(args, "capture_bundle_id", None),
         "video_attachment_budget_bytes": int(float(getattr(args, "video_attachment_budget_mb", 100.0)) * 1_000_000),
         "compose_video_proof": bool(getattr(args, "compose_video_proof", False)),
         "video_template": getattr(args, "video_template", None),

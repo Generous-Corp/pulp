@@ -107,6 +107,7 @@ class MacosDesktopBindingsTests(unittest.TestCase):
             video_duration_secs=2.0,
             video_fps=15.0,
             video_capture_target="terminal",
+            capture_bundle_id="com.cockos.reaper",
             video_attachment_budget_bytes=50,
             compose_video_proof=True,
             video_template="design-parity",
@@ -139,6 +140,7 @@ class MacosDesktopBindingsTests(unittest.TestCase):
         self.assertEqual(captured["kwargs"]["video_duration_secs"], 2.0)
         self.assertEqual(captured["kwargs"]["video_fps"], 15.0)
         self.assertEqual(captured["kwargs"]["video_capture_target"], "terminal")
+        self.assertEqual(captured["kwargs"]["capture_bundle_id"], "com.cockos.reaper")
         self.assertEqual(captured["kwargs"]["video_attachment_budget_bytes"], 50)
         self.assertEqual(captured["kwargs"]["video_template"], "design-parity")
         self.assertEqual(captured["kwargs"]["video_source_image"], "/tmp/reference.png")

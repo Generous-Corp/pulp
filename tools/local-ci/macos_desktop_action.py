@@ -72,6 +72,7 @@ def run_macos_local_smoke(
     video_duration_secs: float = 8.0,
     video_fps: float = 30.0,
     video_capture_target: str = "app",
+    capture_bundle_id: str | None = None,
     video_attachment_budget_bytes: int = 100_000_000,
     compose_video_proof: bool = False,
     video_template: str | None = None,
@@ -108,6 +109,12 @@ def run_macos_local_smoke(
         raise RuntimeError("Pulp app automation requires a direct --command launch so automation env vars can be injected.")
     if video_capture_target not in {"app", "terminal"}:
         raise RuntimeError(f"Unknown video capture target `{video_capture_target}`.")
+    if capture_bundle_id and bundle_id:
+        raise RuntimeError("--capture-bundle-id is only valid with --command.")
+    if capture_bundle_id and video_capture_target == "terminal":
+        raise RuntimeError("--capture-bundle-id cannot be combined with --video-capture-target terminal.")
+    if capture_bundle_id and capture_ui_snapshot:
+        raise RuntimeError("--capture-bundle-id cannot inject UI snapshot environment into the captured app.")
     if video_capture_target == "terminal":
         if not record_video:
             raise RuntimeError("Terminal capture requires --record-video.")
@@ -228,8 +235,15 @@ def run_macos_local_smoke(
                         stdout_handle.close()
                         stderr_handle.close()
                     pid = proc.pid
-                    window = wait_for_macos_window_fn(proc.pid, timeout_secs)
-                    launch_descriptor = {"command": args}
+                    if capture_bundle_id:
+                        sleep_fn(0.75)
+                        activate_macos_bundle_id_fn(capture_bundle_id)
+                        sleep_fn(0.75)
+                        pid, window = wait_for_macos_bundle_window_fn(capture_bundle_id, timeout_secs)
+                        launch_descriptor = {"command": args, "capture_bundle_id": capture_bundle_id}
+                    else:
+                        window = wait_for_macos_window_fn(proc.pid, timeout_secs)
+                        launch_descriptor = {"command": args}
 
         inspector_summary = None
         view_tree = None
@@ -240,6 +254,7 @@ def run_macos_local_smoke(
                 video_path,
                 duration_secs=video_duration_secs,
                 fps=video_fps,
+                prefer_frame_sequence=bool(capture_bundle_id),
             )
         if capture_ui_snapshot and not use_pulp_app_automation:
             wait_for_path_fn(ui_snapshot_path, timeout_secs)
@@ -304,7 +319,7 @@ def run_macos_local_smoke(
             try:
                 capture_macos_window_fn(int(window["windowId"]), screenshot_path)
             except RuntimeError:
-                active_bundle_id = bundle_id or launch_descriptor.get("bundle_id")
+                active_bundle_id = bundle_id or launch_descriptor.get("capture_bundle_id") or launch_descriptor.get("bundle_id")
                 if not active_bundle_id:
                     raise
                 pid, window = wait_for_macos_bundle_window_fn(active_bundle_id, min(timeout_secs, 2.0))
@@ -434,9 +449,8 @@ def run_macos_local_smoke(
                 pass
         if proc is not None:
             terminate_process_fn(proc)
-        else:
-            active_bundle_id = bundle_id
-            if not active_bundle_id and "launch_descriptor" in locals():
-                active_bundle_id = launch_descriptor.get("bundle_id")
-            if active_bundle_id:
-                quit_macos_bundle_id_fn(active_bundle_id)
+        active_bundle_id = bundle_id
+        if not active_bundle_id and "launch_descriptor" in locals():
+            active_bundle_id = launch_descriptor.get("capture_bundle_id") or launch_descriptor.get("bundle_id")
+        if active_bundle_id:
+            quit_macos_bundle_id_fn(active_bundle_id)

@@ -521,8 +521,19 @@ def start_macos_window_video_recording(
     input_device_fn: Callable[..., str] = macos_avfoundation_screen_input_device,
     fallback_to_frame_sequence: bool = True,
     startup_grace_secs: float = 0.25,
+    prefer_frame_sequence: bool = False,
 ) -> dict:
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    if prefer_frame_sequence:
+        return start_macos_window_frame_sequence_recording(
+            window,
+            output_path,
+            duration_secs=duration_secs,
+            fps=fps,
+            run_fn=run_fn,
+            ffmpeg_path=ffmpeg_path,
+            fallback_reason="window-id frame capture preferred",
+        )
     try:
         input_device = input_device_fn(ffmpeg_path=ffmpeg_path, run_fn=run_fn)
         command = macos_window_video_command(
@@ -671,8 +682,13 @@ def stop_macos_window_video_recording(
 
     stop_event = recording["stop_event"]
     thread = recording["thread"]
-    stop_event.set()
-    thread.join(timeout=wait_timeout_secs)
+    elapsed_secs = max(0.0, time.monotonic() - float(recording.get("started_at") or time.monotonic()))
+    remaining_secs = max(0.0, duration_secs - elapsed_secs)
+    if remaining_secs > 0:
+        thread.join(timeout=remaining_secs + wait_timeout_secs)
+    if thread.is_alive():
+        stop_event.set()
+        thread.join(timeout=wait_timeout_secs)
     if thread.is_alive():
         raise RuntimeError("Video proof recording failed: screencapture thread did not stop.")
     state = recording["state"]
