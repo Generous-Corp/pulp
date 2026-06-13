@@ -22,6 +22,13 @@ if(PULP_HAS_CLAP)
     endif()
 endif()
 
+# Standalone desktop app (audio host). Builds when the standalone shell exists.
+if(TARGET pulp::standalone)
+    add_executable(pulp-tempo-sampler main.cpp)
+    target_link_libraries(pulp-tempo-sampler PRIVATE pulp::standalone pulp::audio pulp::signal)
+    target_include_directories(pulp-tempo-sampler PRIVATE ${TEMPO_SAMPLER_INCLUDES})
+endif()
+
 if(PULP_BUILD_TESTS)
     add_executable(pulp-tempo-sampler-test test_pulp_tempo_sampler.cpp)
     target_link_libraries(pulp-tempo-sampler-test PRIVATE
