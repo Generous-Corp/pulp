@@ -96,6 +96,14 @@ class QueueWaitDrainBindingsTests(unittest.TestCase):
         self.assertIs(captured["drain"][1]["claim_next_job_fn"], bindings["claim_next_job"])
         self.assertIs(captured["drain"][1]["pid_fn"], bindings["os"].getpid)
 
+    def test_install_queue_wait_drain_helpers_keeps_unknown_local_fallback(self):
+        bindings = {}
+        self.mod.future_queue_wait_drain_helper = lambda _bindings: "future"
+
+        self.mod.install_queue_wait_drain_helpers(bindings, ("future_queue_wait_drain_helper",))
+
+        self.assertEqual(bindings["future_queue_wait_drain_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()

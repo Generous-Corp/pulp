@@ -80,6 +80,14 @@ class QueueTerminalResultBindingsTests(unittest.TestCase):
         self.assertNotIn("supersede_job_unlocked", bindings)
         self.assertEqual(bindings["cancel_job_unlocked"].__name__, "cancel_job_unlocked")
 
+    def test_install_queue_terminal_result_helpers_keeps_unknown_local_fallback(self):
+        bindings = {}
+        self.mod.future_queue_terminal_result_helper = lambda _bindings: "future"
+
+        self.mod.install_queue_terminal_result_helpers(bindings, ("future_queue_terminal_result_helper",))
+
+        self.assertEqual(bindings["future_queue_terminal_result_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()

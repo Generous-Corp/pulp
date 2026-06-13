@@ -84,6 +84,14 @@ class QueueFinalizeBindingsTests(unittest.TestCase):
         self.assertIn("finalize_job", bindings)
         self.assertEqual(bindings["finalize_job"].__name__, "finalize_job")
 
+    def test_install_queue_finalize_helpers_keeps_unknown_local_fallback(self) -> None:
+        bindings = {}
+        self.mod.future_queue_finalize_helper = lambda _bindings: "future"
+
+        self.mod.install_queue_finalize_helpers(bindings, ("future_queue_finalize_helper",))
+
+        self.assertEqual(bindings["future_queue_finalize_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()

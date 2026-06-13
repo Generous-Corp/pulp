@@ -30,4 +30,10 @@ def install_queue_active_target_helpers(
     bindings: dict[str, Any],
     names: tuple[str, ...] = QUEUE_ACTIVE_TARGET_EXPORTS,
 ) -> None:
-    install_local_helpers(bindings, globals(), names)
+    known_names = set(QUEUE_ACTIVE_TARGET_EXPORTS)
+    active_target_names = tuple(name for name in names if name in known_names)
+    unknown_names = tuple(name for name in names if name not in known_names)
+
+    install_local_helpers(bindings, globals(), active_target_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)
