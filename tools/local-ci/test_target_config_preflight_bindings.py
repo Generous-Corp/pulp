@@ -20,6 +20,16 @@ class TargetConfigPreflightBindingsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
 
+    def test_config_preflight_exports_are_declared(self) -> None:
+        self.assertEqual(
+            self.mod.TARGET_CONFIG_PREFLIGHT_EXPORTS,
+            (
+                "config_source_name",
+                "config_material_for_targets",
+                "find_material_config_drift",
+            ),
+        )
+
     def test_config_helpers_delegate_facade_dependencies(self) -> None:
         captured = {}
 
@@ -52,6 +62,16 @@ class TargetConfigPreflightBindingsTests(unittest.TestCase):
         self.assertIs(captured["drift"][1]["shared_config_path_fn"], bindings["shared_config_path"])
         self.assertIs(captured["drift"][1]["worktree_config_path_fn"], bindings["worktree_config_path"])
         self.assertIs(captured["drift"][1]["config_material_for_targets_fn"], bindings["config_material_for_targets"])
+
+    def test_install_target_config_preflight_helpers_wires_named_exports(self) -> None:
+        preflight = types.SimpleNamespace(config_material_for_targets=lambda config, targets: {"targets": targets})
+        bindings = {"_target_preflight": preflight}
+
+        self.mod.install_target_config_preflight_helpers(bindings, ("config_material_for_targets",))
+
+        self.assertEqual(bindings["config_material_for_targets"]({}, ["mac"]), {"targets": ["mac"]})
+        self.assertEqual(bindings["config_material_for_targets"].__name__, "config_material_for_targets")
+        self.assertNotIn("config_source_name", bindings)
 
 
 if __name__ == "__main__":

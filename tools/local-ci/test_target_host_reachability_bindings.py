@@ -20,6 +20,12 @@ class TargetHostReachabilityBindingsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
 
+    def test_host_reachability_exports_are_declared(self) -> None:
+        self.assertEqual(
+            self.mod.TARGET_HOST_REACHABILITY_EXPORTS,
+            ("ensure_host_reachable", "preflight_target_host_state"),
+        )
+
     def test_host_reachability_bindings_delegate_facade_dependencies(self) -> None:
         captured = {}
 
@@ -53,6 +59,21 @@ class TargetHostReachabilityBindingsTests(unittest.TestCase):
 
         self.assertEqual(self.mod.preflight_target_host_state(bindings, "mac", {"type": "local"}, {}), {"status": "local"})
         self.assertIs(captured["host_state"][1]["ssh_reachable_fn"], bindings["ssh_reachable"])
+
+    def test_install_target_host_reachability_helpers_wires_named_exports(self) -> None:
+        preflight = types.SimpleNamespace(
+            preflight_target_host_state=lambda target_name, target_cfg, defaults, **kwargs: {"target": target_name}
+        )
+        bindings = {
+            "_target_preflight": preflight,
+            "ssh_reachable": object(),
+        }
+
+        self.mod.install_target_host_reachability_helpers(bindings, ("preflight_target_host_state",))
+
+        self.assertEqual(bindings["preflight_target_host_state"]("mac", {}, {}), {"target": "mac"})
+        self.assertEqual(bindings["preflight_target_host_state"].__name__, "preflight_target_host_state")
+        self.assertNotIn("ensure_host_reachable", bindings)
 
 
 if __name__ == "__main__":

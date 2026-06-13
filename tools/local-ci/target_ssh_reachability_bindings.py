@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from binding_utils import install_local_helpers
 from binding_utils import binding as _binding
 
 
@@ -47,3 +48,10 @@ def ssh_command_result(bindings: Mapping[str, Any], host: str, remote_cmd: str, 
         timeout=timeout,
         run_ssh_subprocess_fn=_binding(bindings, "run_ssh_subprocess"),
     )
+
+
+def install_target_ssh_reachability_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = TARGET_SSH_REACHABILITY_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)

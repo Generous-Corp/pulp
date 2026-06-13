@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from binding_utils import install_local_helpers
 from binding_utils import binding as _binding
 from binding_utils import binding_attr as _binding_attr
 
@@ -27,3 +28,10 @@ def utmctl_start(bindings: Mapping[str, Any], vm_name: str) -> bool:
         vm_name,
         run_fn=_binding_attr(bindings, "subprocess", "run"),
     )
+
+
+def install_target_utm_reachability_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = TARGET_UTM_REACHABILITY_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)

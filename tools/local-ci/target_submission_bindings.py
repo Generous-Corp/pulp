@@ -6,8 +6,15 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from binding_utils import install_local_helpers
 from binding_utils import binding as _binding
 from binding_utils import print_binding as _print_binding
+
+
+TARGET_SUBMISSION_EXPORTS = (
+    "build_submission_metadata",
+    "print_submission_metadata",
+)
 
 
 def build_submission_metadata(
@@ -50,3 +57,10 @@ def print_submission_metadata(bindings: Mapping[str, Any], metadata: dict) -> No
         provenance_summary_fn=_binding(bindings, "provenance_summary"),
         print_fn=_print_binding(bindings),
     )
+
+
+def install_target_submission_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = TARGET_SUBMISSION_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)

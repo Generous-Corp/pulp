@@ -20,6 +20,12 @@ class TargetSubmissionBindingsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
 
+    def test_submission_exports_are_declared(self) -> None:
+        self.assertEqual(
+            self.mod.TARGET_SUBMISSION_EXPORTS,
+            ("build_submission_metadata", "print_submission_metadata"),
+        )
+
     def _bindings(self, preflight):
         bindings = {
             "_target_preflight": preflight,
@@ -84,6 +90,16 @@ class TargetSubmissionBindingsTests(unittest.TestCase):
         self.assertIs(captured["print"][1]["short_sha_fn"], bindings["short_sha"])
         self.assertIs(captured["print"][1]["provenance_summary_fn"], bindings["provenance_summary"])
         self.assertIs(captured["print"][1]["print_fn"], bindings["print"])
+
+    def test_install_target_submission_helpers_wires_named_exports(self) -> None:
+        preflight = types.SimpleNamespace(print_submission_metadata=lambda metadata, **kwargs: None)
+        bindings = self._bindings(preflight)
+
+        self.mod.install_target_submission_helpers(bindings, ("print_submission_metadata",))
+
+        self.assertIsNone(bindings["print_submission_metadata"]({"branch": "feature/topic"}))
+        self.assertEqual(bindings["print_submission_metadata"].__name__, "print_submission_metadata")
+        self.assertNotIn("build_submission_metadata", bindings)
 
 
 if __name__ == "__main__":
