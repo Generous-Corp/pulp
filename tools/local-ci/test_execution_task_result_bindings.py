@@ -54,6 +54,14 @@ class ExecutionTaskResultBindingsTests(unittest.TestCase):
 
         self.assertEqual(bindings["run_target_tasks"]([("mac", lambda: {})], on_target_complete=object()), [{"target": "mac"}])
 
+    def test_install_execution_task_result_helpers_keeps_unknown_local_fallback(self):
+        bindings = {}
+        self.mod.future_execution_task_result_helper = lambda _bindings: "future"
+
+        self.mod.install_execution_task_result_helpers(bindings, ("future_execution_task_result_helper",))
+
+        self.assertEqual(bindings["future_execution_task_result_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()

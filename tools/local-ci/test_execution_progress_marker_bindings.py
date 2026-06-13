@@ -40,6 +40,14 @@ class ExecutionProgressMarkerBindingsTests(unittest.TestCase):
 
         self.assertEqual(bindings["parse_progress_marker"]("line"), {"line": "line"})
 
+    def test_install_execution_progress_marker_helpers_keeps_unknown_local_fallback(self):
+        bindings = {}
+        self.mod.future_execution_progress_marker_helper = lambda _bindings: "future"
+
+        self.mod.install_execution_progress_marker_helpers(bindings, ("future_execution_progress_marker_helper",))
+
+        self.assertEqual(bindings["future_execution_progress_marker_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()

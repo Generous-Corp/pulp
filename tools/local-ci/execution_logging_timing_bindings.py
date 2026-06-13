@@ -27,4 +27,10 @@ def install_execution_logging_timing_helpers(
     bindings: dict[str, Any],
     names: tuple[str, ...] = EXECUTION_LOGGING_TIMING_EXPORTS,
 ) -> None:
-    install_local_helpers(bindings, globals(), names)
+    known_names = set(EXECUTION_LOGGING_TIMING_EXPORTS)
+    timing_names = tuple(name for name in names if name in known_names)
+    unknown_names = tuple(name for name in names if name not in known_names)
+
+    install_local_helpers(bindings, globals(), timing_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)
