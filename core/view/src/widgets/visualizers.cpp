@@ -572,20 +572,19 @@ void XYPad::paint(canvas::Canvas& canvas) {
     }
 
     // Crosshair position — inset by dot radius so it doesn't clip at edges
-    float dot_r = 5.0f;
+    float dot_r = 4.0f;
     float cx = dot_r + x_ * (b.width - 2.0f * dot_r);
     float cy = dot_r + (1.0f - y_) * (b.height - 2.0f * dot_r);
 
-    // Crosshair lines
-    auto hair_color = resolve_color("control.fill", canvas::Color::rgba8(100, 150, 255));
+    // Crosshair lines (accent)
+    auto hair_color = resolve_color("accent.primary", canvas::Color::rgba8(100, 150, 255));
     canvas.set_stroke_color(hair_color);
     canvas.set_line_width(1.0f);
     canvas.stroke_line(cx, 0, cx, b.height);
     canvas.stroke_line(0, cy, b.width, cy);
 
-    // Thumb dot
-    auto thumb = resolve_color("control.thumb", canvas::Color::rgba8(220, 220, 220));
-    canvas.set_fill_color(thumb);
+    // Thumb dot — teal/accent, matching the Figma XY pad (was a white dot).
+    canvas.set_fill_color(hair_color);
     canvas.fill_circle(cx, cy, dot_r);
 
     // Labels

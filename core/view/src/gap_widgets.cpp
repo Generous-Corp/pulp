@@ -136,15 +136,23 @@ void Stepper::paint(canvas::Canvas& canvas) {
     const float w = bounds().width, h = bounds().height, btn = h;
     canvas.set_fill_color(resolve_color("bg.elevated", Color::rgba8(30, 37, 48)));
     canvas.fill_rounded_rect(0, 0, w, h, 10.0f);
+    // Darker center value cell + segment dividers (matches the Figma stepper's
+    // segmented [-] value [+] look).
+    canvas.set_fill_color(resolve_color("bg.surface", Color::rgba8(20, 25, 33)));
+    canvas.fill_rect(btn, 1.0f, std::max(0.0f, w - 2.0f * btn), h - 2.0f);
     canvas.set_stroke_color(resolve_color("control.border", Color::rgba8(80, 80, 100)));
     canvas.set_line_width(1.0f);
     canvas.stroke_rounded_rect(0, 0, w, h, 10.0f);
+    canvas.stroke_line(btn, 4.0f, btn, h - 4.0f);
+    canvas.stroke_line(w - btn, 4.0f, w - btn, h - 4.0f);
     canvas.set_font("system", 16.0f);
     canvas.set_fill_color(resolve_color("text.secondary", Color::rgba8(150, 150, 160)));
     canvas.fill_text("-", btn * 0.4f, h * 0.62f);
     canvas.fill_text("+", w - btn * 0.55f, h * 0.62f);
     char buf[32];
-    std::snprintf(buf, sizeof(buf), "%g%s%s", value_, suffix_.empty() ? "" : " ", suffix_.c_str());
+    const char* sign = value_ > 0 ? "+" : "";
+    std::snprintf(buf, sizeof(buf), "%s%g%s%s", sign, value_,
+                  suffix_.empty() ? "" : " ", suffix_.c_str());
     canvas.set_font("system", 14.0f);
     canvas.set_fill_color(resolve_color("text.primary", Color::rgba8(220, 220, 230)));
     const std::string s(buf);

@@ -638,6 +638,13 @@ void Knob::paint(canvas::Canvas& canvas) {
         canvas.set_fill_color(body_color);
         canvas.fill_circle(cx, cy, body_r);
 
+        // Subtle bevel ring framing the disc edge (matches the Figma knob's
+        // lighter rim between the body and the arc).
+        auto bevel = resolve_color("control.border", canvas::Color::rgba8(70, 78, 92));
+        canvas.set_stroke_color(canvas::Color::rgba(bevel.r, bevel.g, bevel.b, 0.6f));  // token-lint:allow (alpha blend of resolved token)
+        canvas.set_line_width(1.0f);
+        canvas.stroke_circle(cx, cy, body_r - 0.5f);
+
         // Full track ring (background arc)
         auto track_color = resolve_color("knob.arc.bg", canvas::Color::rgba8(60, 66, 78));
         canvas.set_stroke_color(track_color);
@@ -651,7 +658,7 @@ void Knob::paint(canvas::Canvas& canvas) {
         canvas.stroke_arc(cx, cy, ring_r, start_angle, value_angle);
 
         // White dot pointer on the dial face near the rim
-        float dot_r = std::max(2.0f, full_r * 0.075f);
+        float dot_r = std::max(2.0f, full_r * 0.06f);
         float dot_rad = body_r - dot_r - 2.0f;
         float dot_x = cx + dot_rad * std::cos(value_angle);
         float dot_y = cy + dot_rad * std::sin(value_angle);
@@ -822,8 +829,8 @@ void Fader::paint(canvas::Canvas& canvas) {
             // is wide & short, so its height ≈ half its width.)
             const float skin_default_h = vert ? std::max(8.0f, skin_default_w * 0.5f)
                                               : std::min(b.height, track_width) * 0.62f;
-            const float default_w = skinned ? skin_default_w : (vert ? std::min(b.width, track_width) : 8.0f);
-            const float default_h = skinned ? skin_default_h : (vert ? 5.0f : std::min(b.height, track_width));
+            const float default_w = skinned ? skin_default_w : (vert ? std::min(b.width, track_width) : 10.0f);
+            const float default_h = skinned ? skin_default_h : (vert ? 9.0f : std::min(b.height, track_width));
             const float thumb_w = std::max(1.0f, (thumb_width_ > 0.0f ? thumb_width_ : default_w) * scale);
             const float thumb_h = std::max(1.0f, (thumb_height_ > 0.0f ? thumb_height_ : default_h) * scale);
             const float axis_half = (vert ? thumb_h : thumb_w) * 0.5f;
@@ -834,7 +841,7 @@ void Fader::paint(canvas::Canvas& canvas) {
             const float skin_radius = std::min(thumb_w, thumb_h) * 0.5f;
             const float radius = thumb_corner_radius_ > 0.0f
                 ? std::min(thumb_corner_radius_, std::min(thumb_w, thumb_h) * 0.5f)
-                : (skinned ? skin_radius : 0.0f);
+                : skin_radius;  // pill ends by default (matches the Figma fader handle)
             float thumb_x, thumb_y;
             if (vert) {
                 thumb_x = (b.width - thumb_w) * 0.5f;
@@ -1063,8 +1070,12 @@ void Toggle::paint(canvas::Canvas& canvas) {
             canvas.fill_rounded_rect(sx, sy, switch_w, switch_h, switch_h * 0.5f);
         }
 
-        // Thumb circle — position animated between off and on
-        auto thumb_color = resolve_color("control.thumb", canvas::Color::rgba8(220, 220, 220));
+        // Thumb circle — position animated between off and on. The Ink & Signal
+        // toggle uses a dark ink knob on the teal track (Figma), not a white
+        // thumb; interpolate from the neutral off-thumb to dark ink as it turns on.
+        auto off_thumb = resolve_color("control.thumb", canvas::Color::rgba8(220, 220, 220));
+        auto on_thumb = resolve_color("accent.text", canvas::Color::rgba8(12, 20, 24));
+        auto thumb_color = off_thumb.interpolate(on_thumb, t);
         canvas.set_fill_color({thumb_color.r, thumb_color.g, thumb_color.b, thumb_color.a});
         float thumb_r = switch_h * 0.4f;
         float off_x = sx + switch_h * 0.5f;
