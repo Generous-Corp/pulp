@@ -148,7 +148,7 @@ def _artifact_metadata(publish_dir: Path, rel_path: str | None) -> dict:
 
 
 def _format_bytes(value: object) -> str:
-    if not isinstance(value, int | float):
+    if not isinstance(value, (int, float)):
         return "unknown"
     if value >= 1_000_000:
         return f"{value / 1_000_000:.1f} MB"

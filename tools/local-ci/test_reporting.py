@@ -56,6 +56,11 @@ class ReportingTests(unittest.TestCase):
         self.assertEqual(self.mod.slugify_token("!!!"), "run")
         self.assertEqual(len(self.mod.slugify_token("x" * 80, max_len=12)), 12)
 
+    def test_format_bytes_uses_python39_compatible_type_check(self) -> None:
+        self.assertEqual(self.mod._format_bytes("120000"), "unknown")
+        self.assertEqual(self.mod._format_bytes(120000), "120 KB")
+        self.assertEqual(self.mod._format_bytes(1_200_000), "1.2 MB")
+
     def test_directory_copy_and_clear_helpers_preserve_git_directory(self) -> None:
         src = self.root / "src"
         dest = self.root / "dest"
