@@ -6,8 +6,10 @@ from typing import Any
 
 from binding_utils import install_local_helpers
 from github_workflow_constant_bindings import (
+    GITHUB_WORKFLOW_CONSTANT_EXPORTS,
     builtin_github_workflows,
     github_actions_defaults,
+    install_github_workflow_constant_helpers,
     repo_variable_fallbacks,
 )
 from github_workflow_resolution_bindings import (
@@ -37,10 +39,12 @@ def install_github_workflow_helpers(
     bindings: dict[str, Any],
     names: tuple[str, ...] = GITHUB_WORKFLOW_EXPORTS,
 ) -> None:
-    known_names = set(GITHUB_WORKFLOW_EXPORTS)
-    resolution_names = tuple(name for name in names if name in known_names)
+    known_names = set(GITHUB_WORKFLOW_EXPORTS) | set(GITHUB_WORKFLOW_CONSTANT_EXPORTS)
+    constant_names = tuple(name for name in names if name in GITHUB_WORKFLOW_CONSTANT_EXPORTS)
+    resolution_names = tuple(name for name in names if name in GITHUB_WORKFLOW_EXPORTS)
     unknown_names = tuple(name for name in names if name not in known_names)
 
+    install_github_workflow_constant_helpers(bindings, constant_names)
     install_github_workflow_resolution_helpers(bindings, resolution_names)
     if unknown_names:
         install_local_helpers(bindings, globals(), unknown_names)

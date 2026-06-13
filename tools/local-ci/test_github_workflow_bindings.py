@@ -23,6 +23,14 @@ class GithubWorkflowBindingsTests(unittest.TestCase):
 
         self.assertEqual(self.mod.GITHUB_WORKFLOW_EXPORTS, expected)
         self.assertEqual(len(expected), len(set(expected)))
+        self.assertEqual(
+            self.mod.GITHUB_WORKFLOW_CONSTANT_EXPORTS,
+            (
+                "github_actions_defaults",
+                "builtin_github_workflows",
+                "repo_variable_fallbacks",
+            ),
+        )
 
     def _bindings(self):
         calls = []
@@ -177,7 +185,7 @@ class GithubWorkflowBindingsTests(unittest.TestCase):
             ],
         )
 
-    def test_install_github_workflow_helpers_keeps_unknown_imported_name_support(self):
+    def test_install_github_workflow_helpers_routes_explicit_constant_exports(self):
         bindings, _calls = self._bindings()
 
         self.mod.install_github_workflow_helpers(bindings, ("github_actions_defaults",))
