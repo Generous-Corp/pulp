@@ -106,7 +106,7 @@
     },
     {
       "path": "core/view/src/design_import_native_common.cpp",
-      "max_loc": 1998,
+      "max_loc": 2016,
       "note": "native materialization/import boundary hotspot"
     },
     {

@@ -944,6 +944,23 @@ parity fixture, mirror the detection in the codegen (same lesson as the text
 vertical-centering split). Tests: `[combo-box]`, `[text-editor]` in
 `pulp-test-design-import-native-materializer`.
 
+#### `kind_from_type` Ink & Signal vocabulary (type-string aliases)
+
+`kind_from_type` (the `type`-string fallback, after `kind_from_name`) also
+recognizes the design-system / common-web component names so imported designs
+map onto native widgets instead of falling through to `native-unsupported-node`:
+`toggle`/`switch`→`toggle_button`; `combobox`/`combo_box`/`dropdown`/`select`→
+`combo_box` (note: before this, `combo_box` had a `kind` but **no** type string
+resolved to it — only the layer-NAME path above could reach it); `pan`/`panner`→
+`fader` (1-D linear control); `badge`/`chip`/`tag`/`pill`→`label`;
+`panel`/`sidebar`/`side_panel`/`toolbar`/`channel_strip`/`card`→`view`. Faithful
+dedicated `NativeWidgetKind`s for the remaining gap widgets (Stepper, Toast,
+InlineBanner, Dialog, Popover, EmptyState, Tab, ProgressBar) need new codegen
+emitters across the C++/Swift backends — a follow-up, not these aliases. Test:
+`[design-system]` in `pulp-test-design-import-native-common`. The `pulp::design`
+catalog (`pulp/design/design_system.hpp`) is the authoritative component→native
+mapping these aliases mirror.
+
 ### Value-driven silhouette fill (illustration shapes — item 3)
 
 A captured illustration PNG (ELYSIUM's prism / cylinder / pentagon / cube) can
