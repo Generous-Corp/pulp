@@ -5,8 +5,12 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from binding_utils import install_local_helpers
 from binding_utils import binding as _binding
 from binding_utils import binding_attr as _binding_attr
+
+
+DESKTOP_INSTALL_COMMAND_EXPORTS = ("cmd_desktop_install",)
 
 
 def cmd_desktop_install(bindings: Mapping[str, Any], args: Any) -> int:
@@ -35,3 +39,10 @@ def cmd_desktop_install(bindings: Mapping[str, Any], args: Any) -> int:
         atomic_write_text_fn=_binding(bindings, "atomic_write_text"),
         windows_tooling_detail_fn=_binding(bindings, "windows_tooling_detail"),
     )
+
+
+def install_desktop_install_command_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = DESKTOP_INSTALL_COMMAND_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)

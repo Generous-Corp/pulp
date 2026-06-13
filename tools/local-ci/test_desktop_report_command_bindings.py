@@ -21,6 +21,17 @@ class DesktopReportCommandBindingsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
 
+    def test_command_exports_are_declared(self) -> None:
+        self.assertEqual(
+            self.mod.DESKTOP_REPORT_COMMAND_EXPORTS,
+            (
+                "cmd_desktop_recent",
+                "cmd_desktop_proof",
+                "cmd_desktop_publish",
+                "cmd_desktop_cleanup",
+            ),
+        )
+
     def bindings(self, runner_name: str, runner):
         return {
             "_desktop_commands_cli": types.SimpleNamespace(**{runner_name: runner}),
@@ -112,6 +123,17 @@ class DesktopReportCommandBindingsTests(unittest.TestCase):
         self.assertIs(captured["kwargs"]["write_desktop_run_rollups_fn"], bindings["write_desktop_run_rollups"])
         self.assertIs(captured["kwargs"]["desktop_cleanup_empty_line_fn"], bindings["_desktop_cli"].desktop_cleanup_empty_line)
         self.assertIs(captured["kwargs"]["desktop_cleanup_lines_fn"], bindings["_desktop_cli"].desktop_cleanup_lines)
+
+    def test_install_desktop_report_command_helpers_wires_named_exports(self) -> None:
+        def runner(*args, **kwargs):
+            return 19
+
+        bindings = self.bindings("cmd_desktop_recent", runner)
+
+        self.mod.install_desktop_report_command_helpers(bindings, ("cmd_desktop_recent",))
+
+        self.assertEqual(bindings["cmd_desktop_recent"](object()), 19)
+        self.assertNotIn("cmd_desktop_cleanup", bindings)
 
 
 if __name__ == "__main__":

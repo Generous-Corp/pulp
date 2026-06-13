@@ -18,6 +18,16 @@ class DesktopCommandBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
 
+    def test_command_exports_are_composed_from_focused_groups(self):
+        expected = (
+            *self.mod.DESKTOP_SETUP_COMMAND_EXPORTS,
+            *self.mod.DESKTOP_MANAGEMENT_COMMAND_EXPORTS,
+            *self.mod.DESKTOP_ACTION_COMMAND_EXPORTS,
+        )
+
+        self.assertEqual(self.mod.DESKTOP_COMMAND_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def _bindings(self, module_name: str, runner_name: str, runner):
         desktop_cli = types.SimpleNamespace(
             desktop_status_lines=object(),
@@ -286,6 +296,21 @@ class DesktopCommandBindingsTests(unittest.TestCase):
         self.assertIs(captured["kwargs"]["load_config_fn"], bindings["load_config"])
         self.assertIs(captured["kwargs"]["desktop_recent_lines_fn"], bindings["_desktop_cli"].desktop_recent_lines)
         self.assertEqual(bindings["cmd_desktop_recent"].__name__, "cmd_desktop_recent")
+
+    def test_install_desktop_command_helpers_routes_each_group(self):
+        bindings = self._bindings("_desktop_setup_commands_cli", "cmd_desktop_install", lambda *args, **kwargs: 53)
+        bindings["_desktop_commands_cli"] = types.SimpleNamespace(cmd_desktop_status=lambda *args, **kwargs: 59)
+        bindings["_desktop_action_commands_cli"] = types.SimpleNamespace(cmd_desktop_smoke=lambda *args, **kwargs: 61)
+
+        self.mod.install_desktop_command_helpers(
+            bindings,
+            ("cmd_desktop_install", "cmd_desktop_status", "cmd_desktop_smoke"),
+        )
+
+        self.assertEqual(bindings["cmd_desktop_install"](object()), 53)
+        self.assertEqual(bindings["cmd_desktop_status"](object()), 59)
+        self.assertEqual(bindings["cmd_desktop_smoke"](object()), 61)
+        self.assertNotIn("cmd_desktop_cleanup", bindings)
 
 
 if __name__ == "__main__":

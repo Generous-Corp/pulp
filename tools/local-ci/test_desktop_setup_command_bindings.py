@@ -21,6 +21,15 @@ class DesktopSetupCommandBindingsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
 
+    def test_command_exports_are_composed_from_focused_groups(self) -> None:
+        expected = (
+            *self.mod.DESKTOP_INSTALL_COMMAND_EXPORTS,
+            *self.mod.DESKTOP_DOCTOR_COMMAND_EXPORTS,
+        )
+
+        self.assertEqual(self.mod.DESKTOP_SETUP_COMMAND_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def bindings(self, runner_name: str, runner):
         bindings = {
             "_desktop_setup_commands_cli": types.SimpleNamespace(**{runner_name: runner}),
@@ -48,6 +57,7 @@ class DesktopSetupCommandBindingsTests(unittest.TestCase):
             "desktop_target_receipt_path",
             "atomic_write_text",
             "windows_tooling_detail",
+            "desktop_doctor_checks",
         ]:
             bindings[name] = object()
         return bindings
@@ -68,6 +78,18 @@ class DesktopSetupCommandBindingsTests(unittest.TestCase):
         self.assertIs(captured["kwargs"]["check_writable_dir_fn"], bindings["_check_writable_dir"])
         self.assertIs(captured["kwargs"]["subprocess_run_fn"], bindings["subprocess"].run)
         self.assertEqual(captured["kwargs"]["new_install_job_id_fn"](), "abcdef123456")
+
+    def test_install_desktop_setup_command_helpers_routes_each_group(self) -> None:
+        bindings = self.bindings("cmd_desktop_install", lambda *args, **kwargs: 31)
+        bindings["_desktop_setup_commands_cli"].cmd_desktop_doctor = lambda *args, **kwargs: 37
+
+        self.mod.install_desktop_setup_command_helpers(
+            bindings,
+            ("cmd_desktop_install", "cmd_desktop_doctor"),
+        )
+
+        self.assertEqual(bindings["cmd_desktop_install"](object()), 31)
+        self.assertEqual(bindings["cmd_desktop_doctor"](object()), 37)
 
 
 if __name__ == "__main__":
