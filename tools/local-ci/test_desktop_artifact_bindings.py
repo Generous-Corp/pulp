@@ -59,6 +59,36 @@ class DesktopArtifactBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.desktop_publish_root(bindings, config), Path("/artifacts/_published"))
         self.assertEqual(self.mod.create_desktop_publish_bundle(bindings, config), Path("/artifacts/_published/run"))
 
+    def test_artifact_exports_are_composed_from_focused_groups(self) -> None:
+        expected = (
+            *self.mod.DESKTOP_RECEIPT_ARTIFACT_EXPORTS,
+            *self.mod.DESKTOP_RUN_ARTIFACT_EXPORTS,
+            *self.mod.DESKTOP_PUBLISH_ARTIFACT_EXPORTS,
+        )
+
+        self.assertEqual(self.mod.DESKTOP_ARTIFACT_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
+    def test_artifact_installer_routes_selected_groups(self) -> None:
+        artifacts = types.SimpleNamespace(
+            desktop_target_receipt_path=lambda target_name, **kwargs: Path(f"/receipts/{target_name}.json"),
+            desktop_artifact_root=lambda config: Path("/artifacts"),
+            desktop_publish_root=lambda config: Path("/published"),
+        )
+        bindings = self._bindings(artifacts=artifacts)
+
+        self.mod.install_desktop_artifact_helpers(
+            bindings,
+            ("desktop_target_receipt_path", "desktop_artifact_root", "desktop_publish_root"),
+        )
+
+        self.assertEqual(bindings["desktop_target_receipt_path"]("mac"), Path("/receipts/mac.json"))
+        self.assertEqual(bindings["desktop_artifact_root"]({}), Path("/artifacts"))
+        self.assertEqual(bindings["desktop_publish_root"]({}), Path("/published"))
+        self.assertNotIn("desktop_receipt_for", bindings)
+        self.assertNotIn("create_desktop_run_bundle", bindings)
+        self.assertNotIn("create_desktop_publish_bundle", bindings)
+
 
 if __name__ == "__main__":
     unittest.main()
