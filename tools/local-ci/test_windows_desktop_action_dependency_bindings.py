@@ -86,6 +86,17 @@ class WindowsDesktopActionDependencyBindingsTests(unittest.TestCase):
             bindings["windows_path_join"],
         )
 
+    def test_install_dependency_helpers_keeps_unknown_local_fallback(self):
+        bindings = {}
+        self.mod.future_windows_desktop_action_dependency_helper = lambda _bindings: "future"
+
+        self.mod.install_windows_desktop_action_dependency_helpers(
+            bindings,
+            ("future_windows_desktop_action_dependency_helper",),
+        )
+
+        self.assertEqual(bindings["future_windows_desktop_action_dependency_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()

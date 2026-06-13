@@ -50,6 +50,17 @@ class LinuxDesktopActionHostDependencyBindingsTests(unittest.TestCase):
 
         self.assertIs(bindings["linux_desktop_action_host_dependencies"]()["run_fn"], bindings["subprocess"].run)
 
+    def test_host_dependency_installer_keeps_unknown_local_fallback(self) -> None:
+        bindings = {}
+        self.mod.future_linux_desktop_action_host_helper = lambda _bindings: "future"
+
+        self.mod.install_linux_desktop_action_host_dependency_helpers(
+            bindings,
+            ("future_linux_desktop_action_host_helper",),
+        )
+
+        self.assertEqual(bindings["future_linux_desktop_action_host_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()

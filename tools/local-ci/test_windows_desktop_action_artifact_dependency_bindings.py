@@ -59,6 +59,17 @@ class WindowsDesktopActionArtifactDependencyBindingsTests(unittest.TestCase):
             desktop_actions.desktop_action_artifact_paths,
         )
 
+    def test_artifact_dependency_installer_keeps_unknown_local_fallback(self):
+        bindings = {}
+        self.mod.future_windows_desktop_action_artifact_helper = lambda _bindings: "future"
+
+        self.mod.install_windows_desktop_action_artifact_dependency_helpers(
+            bindings,
+            ("future_windows_desktop_action_artifact_helper",),
+        )
+
+        self.assertEqual(bindings["future_windows_desktop_action_artifact_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()
