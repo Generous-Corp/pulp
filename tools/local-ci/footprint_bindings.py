@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from binding_utils import binding as _binding
-from binding_utils import install_module_attrs
+from binding_utils import install_local_helpers
 
 
 FOOTPRINT_EXPORTS = (
@@ -40,4 +40,4 @@ def describe_path_for_cleanup(bindings: Mapping[str, Any], path: Path) -> str:
 
 
 def install_footprint_helpers(bindings: dict[str, Any], names: tuple[str, ...] = FOOTPRINT_EXPORTS) -> None:
-    install_module_attrs(bindings, "_footprint", names)
+    install_local_helpers(bindings, globals(), names)

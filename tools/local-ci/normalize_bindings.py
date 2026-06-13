@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from binding_utils import install_module_attrs
+from binding_utils import install_local_helpers
 from normalize_desktop_config_bindings import (
     NORMALIZE_DESKTOP_CONFIG_EXPORTS,
     default_desktop_bootstrap,
@@ -33,4 +33,4 @@ NORMALIZE_EXPORTS = (
 
 
 def install_normalize_helpers(bindings: dict[str, Any], names: tuple[str, ...] = NORMALIZE_EXPORTS) -> None:
-    install_module_attrs(bindings, "_normalize", names)
+    install_local_helpers(bindings, globals(), names)

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from binding_utils import binding as _binding
-from binding_utils import install_module_attrs
+from binding_utils import install_local_helpers
 
 
 GIT_HELPER_EXPORTS = (
@@ -45,4 +45,4 @@ def short_sha(bindings: Mapping[str, Any], sha: str) -> str:
 
 
 def install_git_helpers(bindings: dict[str, Any], names: tuple[str, ...] = GIT_HELPER_EXPORTS) -> None:
-    install_module_attrs(bindings, "_git_helpers", names)
+    install_local_helpers(bindings, globals(), names)

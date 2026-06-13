@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from binding_utils import binding as _binding
-from binding_utils import install_module_attrs
+from binding_utils import install_local_helpers
 
 
 PROVENANCE_EXPORTS = (
@@ -29,4 +29,4 @@ def normalize_result(bindings: Mapping[str, Any], result: dict) -> dict:
 
 
 def install_provenance_helpers(bindings: dict[str, Any], names: tuple[str, ...] = PROVENANCE_EXPORTS) -> None:
-    install_module_attrs(bindings, "_provenance", names)
+    install_local_helpers(bindings, globals(), names)

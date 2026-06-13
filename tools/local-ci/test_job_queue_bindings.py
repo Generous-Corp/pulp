@@ -71,7 +71,7 @@ class JobQueueBindingsTests(unittest.TestCase):
 
         self.assertEqual(bindings["normalize_job"]({"branch": "feature/x"}), {"id": "job-1"})
         self.assertEqual(bindings["load_queue_unlocked"](), [{"id": "job-1"}])
-        self.assertEqual(bindings["normalize_job"].__name__, "runner")
+        self.assertEqual(bindings["normalize_job"].__name__, "normalize_job")
         self.assertEqual([call[0] for call in calls], ["normalize_job", "load_queue_unlocked"])
 
 

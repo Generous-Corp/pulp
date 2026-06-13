@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from binding_utils import binding as _binding
-from binding_utils import install_module_attrs
+from binding_utils import install_local_helpers
 
 
 JOB_QUEUE_EXPORTS = (
@@ -29,4 +29,4 @@ def save_queue_unlocked(bindings: Mapping[str, Any], queue: list[dict]) -> None:
 
 
 def install_job_queue_helpers(bindings: dict[str, Any], names: tuple[str, ...] = JOB_QUEUE_EXPORTS) -> None:
-    install_module_attrs(bindings, "_job_queue", names)
+    install_local_helpers(bindings, globals(), names)

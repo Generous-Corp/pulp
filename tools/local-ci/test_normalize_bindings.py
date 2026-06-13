@@ -71,7 +71,7 @@ class NormalizeBindingsTests(unittest.TestCase):
 
         self.assertEqual(bindings["normalize_priority"]("NORMAL"), "normal")
         self.assertEqual(bindings["normalize_desktop_config"]({"targets": {}}), {"desktop_automation": {}})
-        self.assertEqual(bindings["normalize_priority"].__name__, "runner")
+        self.assertEqual(bindings["normalize_priority"].__name__, "normalize_priority")
         self.assertEqual([call[0] for call in calls], ["normalize_priority", "normalize_desktop_config"])
 
 

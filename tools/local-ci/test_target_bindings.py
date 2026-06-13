@@ -72,7 +72,7 @@ class TargetBindingsTests(unittest.TestCase):
 
         self.assertEqual(bindings["enabled_targets"](config), ["mac"])
         self.assertEqual(bindings["resolve_targets"](config, ["mac"]), ["mac"])
-        self.assertEqual(bindings["enabled_targets"].__name__, "runner")
+        self.assertEqual(bindings["enabled_targets"].__name__, "enabled_targets")
         self.assertEqual([call[0] for call in calls], ["enabled_targets", "resolve_targets"])
 
 

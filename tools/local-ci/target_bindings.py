@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from binding_utils import binding as _binding
-from binding_utils import install_module_attrs
+from binding_utils import install_local_helpers
 
 
 TARGET_EXPORTS = (
@@ -29,4 +29,4 @@ def resolve_targets(bindings: Mapping[str, Any], config: dict, requested: list[s
 
 
 def install_target_helpers(bindings: dict[str, Any], names: tuple[str, ...] = TARGET_EXPORTS) -> None:
-    install_module_attrs(bindings, "_targets", names)
+    install_local_helpers(bindings, globals(), names)

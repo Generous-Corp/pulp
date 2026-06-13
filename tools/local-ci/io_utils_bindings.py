@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from binding_utils import binding as _binding
-from binding_utils import install_module_attrs
+from binding_utils import install_local_helpers
 
 
 IO_UTILS_EXPORTS = (
@@ -50,4 +50,4 @@ def file_lock(bindings: Mapping[str, Any], path: Path, *, blocking: bool):
 
 
 def install_io_utils_helpers(bindings: dict[str, Any], names: tuple[str, ...] = IO_UTILS_EXPORTS) -> None:
-    install_module_attrs(bindings, "_io_utils", names)
+    install_local_helpers(bindings, globals(), names)

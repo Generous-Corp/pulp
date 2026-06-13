@@ -71,7 +71,7 @@ class ProvenanceBindingsTests(unittest.TestCase):
 
         self.assertEqual(bindings["normalize_provenance"](), {"execution_kind": "direct"})
         self.assertEqual(bindings["normalize_result"]({"overall": "pass"}), {"overall": "pass"})
-        self.assertEqual(bindings["normalize_provenance"].__name__, "runner")
+        self.assertEqual(bindings["normalize_provenance"].__name__, "normalize_provenance")
         self.assertEqual([call[0] for call in calls], ["normalize_provenance", "normalize_result"])
 
 
