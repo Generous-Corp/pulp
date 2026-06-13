@@ -34,10 +34,11 @@ struct LocalServer {
         thread = std::thread([this] { svr.listen_after_bind(); });
         svr.wait_until_ready();
     }
-    ~LocalServer() {
+    void stop() {
         svr.stop();
         if (thread.joinable()) thread.join();
     }
+    ~LocalServer() { stop(); }
     std::string url(const std::string& path) const {
         return "http://127.0.0.1:" + std::to_string(port) + path;
     }
@@ -73,6 +74,7 @@ TEST_CASE("model downloader: full download + sha256 + atomic rename", "[runtime]
     REQUIRE(fs::exists(dest));
     REQUIRE_FALSE(fs::exists(fs::path(dest) += ".part"));  // .part consumed by atomic rename
 
+    server.stop();
     fs::remove_all(root);
 }
 
@@ -101,6 +103,7 @@ TEST_CASE("model downloader: Range resume continues a partial", "[runtime][model
     REQUIRE(res.sha256 == sha);  // re-hashed the partial + streamed the rest correctly
     REQUIRE(fs::exists(dest));
 
+    server.stop();
     fs::remove_all(root);
 }
 
@@ -121,6 +124,7 @@ TEST_CASE("model downloader: sha256 mismatch is rejected", "[runtime][model][dow
     REQUIRE_FALSE(fs::exists(dest));                    // not published
     REQUIRE_FALSE(fs::exists(fs::path(dest) += ".part"));  // corrupt partial removed
 
+    server.stop();
     fs::remove_all(root);
 }
 
@@ -144,6 +148,7 @@ TEST_CASE("model downloader: cancel keeps the partial for resume", "[runtime][mo
     REQUIRE_FALSE(fs::exists(dest));                 // not published
     REQUIRE(fs::exists(fs::path(dest) += ".part"));  // partial kept for resume
 
+    server.stop();
     fs::remove_all(root);
 }
 
@@ -213,6 +218,7 @@ TEST_CASE("model downloader: a stale oversized partial fails closed instead of r
     REQUIRE_FALSE(res.ok);
     REQUIRE_FALSE(fs::exists(dest));  // not published as a completed download
 
+    server.stop();
     fs::remove_all(root);
 }
 
@@ -303,6 +309,7 @@ TEST_CASE("model store: install_model downloads + records, then remove_model del
     REQUIRE_FALSE(fs::exists(inst.metadata_path));
     REQUIRE(read_active_model_id("magenta", home).empty());
 
+    server.stop();
     fs::remove_all(root);
 }
 
@@ -402,6 +409,7 @@ TEST_CASE("model store: install_model fetches every asset of a multi-asset bundl
     REQUIRE(meta.find("\"state\"") != std::string::npos);
 
     meta_in.close();  // release the handle before remove_all (Windows can't unlink an open file)
+    server.stop();
     fs::remove_all(root);
 }
 
@@ -431,6 +439,7 @@ TEST_CASE("model store: install_model verifies each bundle asset's sha256",
     REQUIRE_FALSE(inst.ok);
     REQUIRE(inst.error.find("mismatch") != std::string::npos);
 
+    server.stop();
     fs::remove_all(root);
 }
 
@@ -461,5 +470,6 @@ TEST_CASE("model store: install_model rejects a bundle whose assets collide on f
     REQUIRE(inst.error.find("same file") != std::string::npos);
 
     std::error_code cleanup_error;
+    server.stop();
     fs::remove_all(root, cleanup_error);
 }
