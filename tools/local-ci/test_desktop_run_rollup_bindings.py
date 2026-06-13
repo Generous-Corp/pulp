@@ -18,6 +18,15 @@ class DesktopRunRollupBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
 
+    def test_run_rollup_exports_are_composed_from_focused_groups(self):
+        expected = (
+            *self.mod.DESKTOP_RUN_MANIFEST_EXPORTS,
+            *self.mod.DESKTOP_RUN_ROLLUP_ACTION_EXPORTS,
+        )
+
+        self.assertEqual(self.mod.DESKTOP_RUN_ROLLUP_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def _bindings(self, runner_name: str, runner):
         bindings = {
             "_reporting": types.SimpleNamespace(**{runner_name: runner}),
@@ -119,6 +128,40 @@ class DesktopRunRollupBindingsTests(unittest.TestCase):
         self.assertEqual(captured["kwargs"]["older_than_days"], 7)
         self.assertEqual(captured["kwargs"]["keep_last"], 2)
         self.assertIs(captured["kwargs"]["desktop_run_manifests_fn"], bindings["desktop_run_manifests"])
+
+    def test_install_desktop_run_rollup_helpers_wires_named_exports(self):
+        captured = {}
+
+        def capture(name, result=None):
+            def inner(*args, **kwargs):
+                captured[name] = (args, kwargs)
+                return result
+
+            return inner
+
+        bindings = {
+            "_reporting": types.SimpleNamespace(
+                desktop_run_manifests=capture("manifests", [{"ok": True}]),
+                desktop_rollup_dir=capture("rollup_dir", Path("/tmp/rollups")),
+                write_desktop_run_rollups=capture("write"),
+                prune_desktop_run_manifests=capture("prune", [Path("/tmp/run")]),
+            ),
+            "desktop_artifact_root": object(),
+            "desktop_rollup_dir": object(),
+            "desktop_run_manifests": object(),
+            "desktop_run_summary": object(),
+            "desktop_proof_summaries": object(),
+            "atomic_write_text": object(),
+        }
+
+        self.mod.install_desktop_run_rollup_helpers(bindings)
+
+        self.assertEqual(bindings["desktop_run_manifests"]({"desktop_automation": {}}), [{"ok": True}])
+        self.assertEqual(bindings["desktop_rollup_dir"]({"desktop_automation": {}}, "mac"), Path("/tmp/rollups"))
+        self.assertIsNone(bindings["write_desktop_run_rollups"]({"desktop_automation": {}}))
+        self.assertEqual(bindings["prune_desktop_run_manifests"]({"desktop_automation": {}}), [Path("/tmp/run")])
+        self.assertEqual(captured["manifests"][0], ({"desktop_automation": {}},))
+        self.assertEqual(captured["rollup_dir"][0], ({"desktop_automation": {}}, "mac"))
 
 
 if __name__ == "__main__":
