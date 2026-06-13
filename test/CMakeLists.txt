@@ -13,6 +13,17 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME token-coverage-ratchet COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/token_coverage_check.py")
 
+    # Phase 6 fidelity harness: pure-Python diff-core self-test (always runs) +
+    # the end-to-end gallery visual regression (skips=77 without binary/Pillow).
+    add_test(NAME gallery-diff-selftest
+        COMMAND ${Python3_EXECUTABLE} -m unittest test_gallery_visual_diff
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
+    add_test(NAME gallery-visual-regression COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/gallery_regression.py"
+        --binary "${CMAKE_BINARY_DIR}/examples/widget-gallery/pulp-widget-gallery"
+        --golden-dir "${CMAKE_SOURCE_DIR}/assets/design-system/ink-signal/reference/gallery")
+    set_tests_properties(gallery-visual-regression PROPERTIES SKIP_RETURN_CODE 77)
+
     if(PULP_ENABLE_SCENE3D)
         set(PULP_SCENE3D_CMAKE_EXPECT on)
     else()
