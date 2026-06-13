@@ -105,6 +105,23 @@ struct BenchFixture {
 
 }  // namespace
 
+TEST_CASE("HostBench AU v2 package matches MIDI descriptor", "[bench][au]") {
+    const auto source_dir = std::filesystem::path(__FILE__).parent_path();
+
+    std::ifstream entry_file(source_dir / "au_v2_entry.cpp");
+    REQUIRE(entry_file.good());
+    const std::string entry((std::istreambuf_iterator<char>(entry_file)),
+                            std::istreambuf_iterator<char>());
+    REQUIRE(entry.find("PULP_AU_MIDI_PLUGIN(PulpHostBenchAU") != std::string::npos);
+
+    std::ifstream plist_file(source_dir / "Info.plist.au");
+    REQUIRE(plist_file.good());
+    const std::string plist((std::istreambuf_iterator<char>(plist_file)),
+                            std::istreambuf_iterator<char>());
+    REQUIRE(plist.find("<key>type</key>") != std::string::npos);
+    REQUIRE(plist.find("<string>aumf</string>") != std::string::npos);
+}
+
 TEST_CASE("HostBench descriptor declares sidechain + MIDI in", "[bench]") {
     HostBenchProcessor proc("Standalone");
     auto desc = proc.descriptor();
