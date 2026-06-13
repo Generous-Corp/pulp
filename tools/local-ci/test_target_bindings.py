@@ -75,6 +75,14 @@ class TargetBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["enabled_targets"].__name__, "enabled_targets")
         self.assertEqual([call[0] for call in calls], ["enabled_targets", "resolve_targets"])
 
+    def test_install_target_helpers_keeps_unknown_local_fallback(self):
+        bindings = {}
+        self.mod.future_target_helper = lambda _bindings: "future"
+
+        self.mod.install_target_helpers(bindings, ("future_target_helper",))
+
+        self.assertEqual(bindings["future_target_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()

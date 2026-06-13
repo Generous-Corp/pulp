@@ -29,4 +29,10 @@ def resolve_targets(bindings: Mapping[str, Any], config: dict, requested: list[s
 
 
 def install_target_helpers(bindings: dict[str, Any], names: tuple[str, ...] = TARGET_EXPORTS) -> None:
-    install_local_helpers(bindings, globals(), names)
+    known_names = set(TARGET_EXPORTS)
+    target_names = tuple(name for name in names if name in known_names)
+    unknown_names = tuple(name for name in names if name not in known_names)
+
+    install_local_helpers(bindings, globals(), target_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)

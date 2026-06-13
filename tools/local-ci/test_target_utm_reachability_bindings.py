@@ -63,6 +63,14 @@ class TargetUtmReachabilityBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["utmctl_vm_status"].__name__, "utmctl_vm_status")
         self.assertNotIn("utmctl_start", bindings)
 
+    def test_install_target_utm_reachability_helpers_keeps_unknown_local_fallback(self) -> None:
+        bindings = {}
+        self.mod.future_target_utm_reachability_helper = lambda _bindings: "future"
+
+        self.mod.install_target_utm_reachability_helpers(bindings, ("future_target_utm_reachability_helper",))
+
+        self.assertEqual(bindings["future_target_utm_reachability_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()
