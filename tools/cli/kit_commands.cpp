@@ -2205,10 +2205,18 @@ void add_ui_kit_integration_preview(KitProfileResult& profile,
 }
 
 fs::path default_screenshot_tool_for_project(const fs::path& project_root) {
+    const auto base = project_root / "build" / "tools" / "screenshot" / "pulp-screenshot";
 #ifdef _WIN32
-    return project_root / "build" / "tools" / "screenshot" / "pulp-screenshot.exe";
+    for (const auto& suffix : {".exe", ".cmd", ".bat"}) {
+        auto candidate = base;
+        candidate += suffix;
+        if (fs::exists(candidate)) return candidate;
+    }
+    auto exe = base;
+    exe += ".exe";
+    return exe;
 #else
-    return project_root / "build" / "tools" / "screenshot" / "pulp-screenshot";
+    return base;
 #endif
 }
 

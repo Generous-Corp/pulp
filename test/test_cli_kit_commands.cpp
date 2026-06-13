@@ -193,6 +193,50 @@ std::string quote_for_shell(const fs::path& path) {
 #endif
 }
 
+fs::path screenshot_tool_path_for_test(const fs::path& project_root) {
+#ifdef _WIN32
+    return project_root / "build" / "tools" / "screenshot" / "pulp-screenshot.cmd";
+#else
+    return project_root / "build" / "tools" / "screenshot" / "pulp-screenshot";
+#endif
+}
+
+void write_fake_screenshot_tool(const fs::path& project_root, const std::string& bytes) {
+    const auto screenshot_tool = screenshot_tool_path_for_test(project_root);
+#ifdef _WIN32
+    write_file(screenshot_tool, std::string(R"BAT(@echo off
+set "out="
+:loop
+if "%~1"=="" goto done
+if "%~1"=="--output" (
+  shift
+  set "out=%~1"
+)
+shift
+goto loop
+:done
+> "%out%" <nul set /p dummy=)BAT") + bytes + R"BAT(
+exit /b 0
+)BAT");
+#else
+    write_file(screenshot_tool, std::string(R"SH(#!/bin/sh
+out=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--output" ]; then
+    shift
+    out="$1"
+  fi
+  shift
+done
+printf ')SH") + bytes + R"SH(' > "$out"
+exit 0
+)SH");
+    fs::permissions(screenshot_tool,
+                    fs::perms::owner_exec | fs::perms::owner_read | fs::perms::owner_write,
+                    fs::perm_options::add);
+#endif
+}
+
 int run_success_command(const std::string& cmd) {
     return std::system(cmd.c_str());
 }
@@ -421,7 +465,7 @@ TEST_CASE("pulp kit rejects unknown Pulp module dependencies",
   "requires": {
     "pulp": ">=0.395.0",
     "cpp": 20,
-    "platforms": ["macOS"]
+    "platforms": ["macOS", "Windows", "Linux"]
   },
   "capabilities": ["audio.effect.test"],
   "exports": {
@@ -519,7 +563,7 @@ TEST_CASE("pulp kit rejects malformed Pulp module dependencies",
   "requires": {
     "pulp": ">=0.395.0",
     "cpp": 20,
-    "platforms": ["macOS"]
+    "platforms": ["macOS", "Windows", "Linux"]
   },
   "capabilities": ["audio.effect.test"],
   "exports": {
@@ -589,7 +633,7 @@ TEST_CASE("pulp kit search discovers verified local kit and content archives",
     }, exit_code);
     REQUIRE(exit_code == 0);
     REQUIRE(kits.find("dev.pulp.fixtures.basic-ui-kit") != std::string::npos);
-    REQUIRE(kits.find(kit_archive.string()) != std::string::npos);
+    REQUIRE(kits.find(kit_archive.filename().string()) != std::string::npos);
     REQUIRE(kits.find("dev.pulp.fixtures.basic-content-pack") == std::string::npos);
 
     const auto content = capture_stdout_for([&] {
@@ -598,7 +642,7 @@ TEST_CASE("pulp kit search discovers verified local kit and content archives",
     }, exit_code);
     REQUIRE(exit_code == 0);
     REQUIRE(content.find("dev.pulp.fixtures.basic-content-pack") != std::string::npos);
-    REQUIRE(content.find(content_archive.string()) != std::string::npos);
+    REQUIRE(content.find(content_archive.filename().string()) != std::string::npos);
     REQUIRE(content.find("dev.pulp.fixtures.basic-ui-kit") == std::string::npos);
 }
 
@@ -794,7 +838,7 @@ TEST_CASE("pulp kit validation verifies hashed evidence objects",
   "requires": {
     "pulp": ">=0.395.0",
     "cpp": 20,
-    "platforms": ["macOS"]
+    "platforms": ["macOS", "Windows", "Linux"]
   },
   "capabilities": ["audio.effect.test"],
   "exports": {
@@ -851,7 +895,7 @@ TEST_CASE("pulp kit validation requires a per-asset license inventory",
   "requires": {
     "pulp": ">=0.395.0",
     "cpp": 20,
-    "platforms": ["macOS"]
+    "platforms": ["macOS", "Windows", "Linux"]
   },
   "capabilities": ["audio.effect.test"],
   "exports": {
@@ -898,7 +942,7 @@ TEST_CASE("pulp kit validation rejects mismatched evidence digests",
   "requires": {
     "pulp": ">=0.395.0",
     "cpp": 20,
-    "platforms": ["macOS"]
+    "platforms": ["macOS", "Windows", "Linux"]
   },
   "capabilities": ["audio.effect.test"],
   "exports": {
@@ -1063,22 +1107,7 @@ TEST_CASE("pulp kit verify can explicitly execute screenshot profiles after revi
           "[cli][kit][phase3]") {
     TempDir project;
     write_file(project.path / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\nproject(KitVerifyRender)\n");
-    const auto screenshot_tool = project.path / "build" / "tools" / "screenshot" / "pulp-screenshot";
-    write_file(screenshot_tool, R"SH(#!/bin/sh
-out=""
-while [ "$#" -gt 0 ]; do
-  if [ "$1" = "--output" ]; then
-    shift
-    out="$1"
-  fi
-  shift
-done
-printf 'fake png bytes' > "$out"
-exit 0
-)SH");
-    fs::permissions(screenshot_tool,
-                    fs::perms::owner_exec | fs::perms::owner_read | fs::perms::owner_write,
-                    fs::perm_options::add);
+    write_fake_screenshot_tool(project.path, "fake png bytes");
 
     const auto fixture = repo_root() / "fixtures/packages/basic-ui-kit";
     int exit_code = -1;
@@ -1101,22 +1130,7 @@ TEST_CASE("pulp kit verify writes visual diff reports for explicit screenshot ba
           "[cli][kit][phase3]") {
     TempDir project;
     write_file(project.path / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\nproject(KitVerifyVisualDiff)\n");
-    const auto screenshot_tool = project.path / "build" / "tools" / "screenshot" / "pulp-screenshot";
-    write_file(screenshot_tool, R"SH(#!/bin/sh
-out=""
-while [ "$#" -gt 0 ]; do
-  if [ "$1" = "--output" ]; then
-    shift
-    out="$1"
-  fi
-  shift
-done
-printf 'fake png bytes' > "$out"
-exit 0
-)SH");
-    fs::permissions(screenshot_tool,
-                    fs::perms::owner_exec | fs::perms::owner_read | fs::perms::owner_write,
-                    fs::perm_options::add);
+    write_fake_screenshot_tool(project.path, "fake png bytes");
 
     TempDir kit;
     write_file(kit.path / "AGENTS.md", "# Visual diff kit\n");
@@ -1165,7 +1179,7 @@ exit 0
   "requires": {
     "pulp": ">=0.395.0",
     "cpp": 20,
-    "platforms": ["macOS"]
+    "platforms": ["macOS", "Windows", "Linux"]
   },
   "capabilities": ["ui.controls.visual-diff"],
   "exports": {
@@ -1212,22 +1226,7 @@ TEST_CASE("pulp kit verify fails explicit screenshot baselines on visual mismatc
           "[cli][kit][phase3]") {
     TempDir project;
     write_file(project.path / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\nproject(KitVerifyVisualMismatch)\n");
-    const auto screenshot_tool = project.path / "build" / "tools" / "screenshot" / "pulp-screenshot";
-    write_file(screenshot_tool, R"SH(#!/bin/sh
-out=""
-while [ "$#" -gt 0 ]; do
-  if [ "$1" = "--output" ]; then
-    shift
-    out="$1"
-  fi
-  shift
-done
-printf 'actual bytes' > "$out"
-exit 0
-)SH");
-    fs::permissions(screenshot_tool,
-                    fs::perms::owner_exec | fs::perms::owner_read | fs::perms::owner_write,
-                    fs::perm_options::add);
+    write_fake_screenshot_tool(project.path, "actual bytes");
 
     TempDir kit;
     write_file(kit.path / "AGENTS.md", "# Visual mismatch kit\n");
@@ -1276,7 +1275,7 @@ exit 0
   "requires": {
     "pulp": ">=0.395.0",
     "cpp": 20,
-    "platforms": ["macOS"]
+    "platforms": ["macOS", "Windows", "Linux"]
   },
   "capabilities": ["ui.controls.visual-diff"],
   "exports": {
@@ -1323,22 +1322,7 @@ TEST_CASE("pulp kit verify allows visual diffs within declared byte tolerance",
           "[cli][kit][phase3]") {
     TempDir project;
     write_file(project.path / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\nproject(KitVerifyVisualTolerance)\n");
-    const auto screenshot_tool = project.path / "build" / "tools" / "screenshot" / "pulp-screenshot";
-    write_file(screenshot_tool, R"SH(#!/bin/sh
-out=""
-while [ "$#" -gt 0 ]; do
-  if [ "$1" = "--output" ]; then
-    shift
-    out="$1"
-  fi
-  shift
-done
-printf 'actual bytes' > "$out"
-exit 0
-)SH");
-    fs::permissions(screenshot_tool,
-                    fs::perms::owner_exec | fs::perms::owner_read | fs::perms::owner_write,
-                    fs::perm_options::add);
+    write_fake_screenshot_tool(project.path, "actual bytes");
 
     TempDir kit;
     write_file(kit.path / "AGENTS.md", "# Visual tolerance kit\n");
@@ -1388,7 +1372,7 @@ exit 0
   "requires": {
     "pulp": ">=0.395.0",
     "cpp": 20,
-    "platforms": ["macOS"]
+    "platforms": ["macOS", "Windows", "Linux"]
   },
   "capabilities": ["ui.controls.visual-diff"],
   "exports": {
@@ -1487,7 +1471,7 @@ TEST_CASE("pulp kit verify rejects negative visual diff tolerance without screen
   "requires": {
     "pulp": ">=0.395.0",
     "cpp": 20,
-    "platforms": ["macOS"]
+    "platforms": ["macOS", "Windows", "Linux"]
   },
   "capabilities": ["ui.controls.visual-diff"],
   "exports": {

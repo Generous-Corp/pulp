@@ -501,7 +501,7 @@ ReportEntry ValidationHarness::run_validator(
         payload << "{"
                 << "\"tool\": \"" << tool << "\","
                 << "\"tool_version\": \"" << escape_json(version) << "\","
-                << "\"plugin_path\": \"" << escape_json(plugin_path.string()) << "\","
+                << "\"plugin_path\": \"" << escape_json(plugin_path.generic_string()) << "\","
                 << "\"plugin_format\": \"" << detected_format << "\","
                 << "\"exit_code\": " << exit_code << ","
                 << "\"stdout\": \"" << escape_json(output) << "\","
@@ -561,7 +561,7 @@ ReportEntry ValidationHarness::validate_plugin_runtime_manifest(
         std::ostringstream payload;
         payload << "{"
                 << "\"plugin_path\": \"" << escape_json(plugin_path.string()) << "\","
-                << "\"manifest_path\": \"" << escape_json(manifest_path.string()) << "\""
+                << "\"manifest_path\": \"" << escape_json(manifest_path.generic_string()) << "\""
                 << "}";
         entry.payload_json = payload.str();
         entries_.push_back(entry);
@@ -580,8 +580,8 @@ ReportEntry ValidationHarness::validate_plugin_runtime_manifest(
 
     std::ostringstream payload;
     payload << "{"
-            << "\"plugin_path\": \"" << escape_json(plugin_path.string()) << "\","
-            << "\"manifest_path\": \"" << escape_json(manifest_path.string()) << "\","
+            << "\"plugin_path\": \"" << escape_json(plugin_path.generic_string()) << "\","
+            << "\"manifest_path\": \"" << escape_json(manifest_path.generic_string()) << "\","
             << "\"schema\": \"" << escape_json(manifest->schema) << "\","
             << "\"plugin_id\": \"" << escape_json(manifest->plugin_id) << "\","
             << "\"expected_plugin_id\": \"" << escape_json(expected) << "\","
