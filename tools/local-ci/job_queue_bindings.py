@@ -29,4 +29,10 @@ def save_queue_unlocked(bindings: Mapping[str, Any], queue: list[dict]) -> None:
 
 
 def install_job_queue_helpers(bindings: dict[str, Any], names: tuple[str, ...] = JOB_QUEUE_EXPORTS) -> None:
-    install_local_helpers(bindings, globals(), names)
+    known_names = set(JOB_QUEUE_EXPORTS)
+    queue_names = tuple(name for name in names if name in known_names)
+    unknown_names = tuple(name for name in names if name not in known_names)
+
+    install_local_helpers(bindings, globals(), queue_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)

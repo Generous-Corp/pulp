@@ -37,6 +37,14 @@ class QueueStateLifecycleBindingsTests(unittest.TestCase):
         self.assertNotIn("update_job_active_targets", bindings)
         self.assertEqual(bindings["load_job"].__name__, "load_job")
 
+    def test_install_state_lifecycle_helpers_keeps_unknown_local_fallback(self):
+        bindings = {}
+        self.mod.future_state_lifecycle_helper = lambda _bindings: "future"
+
+        self.mod.install_queue_state_lifecycle_helpers(bindings, ("future_state_lifecycle_helper",))
+
+        self.assertEqual(bindings["future_state_lifecycle_helper"](), "future")
+
     def _bindings(self, lifecycle=None, orchestrator=None):
         bindings = {
             "_queue_lifecycle": lifecycle or types.SimpleNamespace(),

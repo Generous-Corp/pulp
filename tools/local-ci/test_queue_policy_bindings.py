@@ -118,6 +118,14 @@ class QueuePolicyBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["default_priority_for"]("ship", {"priority": "high"}), "ship:high")
         self.assertEqual(bindings["validate_ci_branch_name"](" branch "), "branch")
 
+    def test_install_queue_policy_helpers_keeps_unknown_local_fallback(self):
+        bindings = {}
+        self.mod.future_queue_policy_helper = lambda _bindings: "future"
+
+        self.mod.install_queue_policy_helpers(bindings, ("future_queue_policy_helper",))
+
+        self.assertEqual(bindings["future_queue_policy_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()
