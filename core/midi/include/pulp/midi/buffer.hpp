@@ -117,6 +117,8 @@ public:
     }
     bool empty() const { return events_.empty(); }
     std::size_t size() const { return events_.size(); }
+    void reserve_events(std::size_t capacity) { events_.reserve(capacity); }
+    void reserve_sysex(std::size_t capacity) { sysex_.reserve(capacity); }
 
     /// Preallocate storage for realtime callers that append during process().
     void reserve(std::size_t event_capacity,

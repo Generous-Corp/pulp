@@ -1,21 +1,27 @@
 #include <catch2/catch_test_macros.hpp>
+#include <pulp/runtime/budget_policy.hpp>
 #include <pulp/runtime/dynamic_library.hpp>
 #include <pulp/runtime/high_resolution_timer.hpp>
 #include <pulp/runtime/range.hpp>
 #include <pulp/runtime/runtime.hpp>
 #include <pulp/runtime/temporary_file.hpp>
+#include "harness/rt_allocation_probe.hpp"
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdlib>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <limits>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
 #include <utility>
+#include <vector>
 
 using namespace pulp::runtime;
 using namespace std::chrono_literals;
@@ -68,6 +74,164 @@ private:
 
 } // namespace
 
+TEST_CASE("RuntimeBudgetPolicy keeps critical audio running",
+          "[runtime][budget-policy][phase4]") {
+    RuntimeBudgetRequest request;
+    request.lane = RuntimeWorkLane::CriticalAudio;
+    request.estimated_cost = 100;
+    request.remaining_budget = 0;
+    request.overload_active = true;
+
+    auto decision = evaluate_runtime_budget(request);
+
+    REQUIRE(decision.action == RuntimeBudgetAction::Run);
+    REQUIRE(decision.should_run());
+    REQUIRE(std::string(to_string(decision.action)) == "run");
+    REQUIRE(std::string(decision.reason) == "critical-audio");
+}
+
+TEST_CASE("RuntimeBudgetPolicy preserves reserve for interactive work",
+          "[runtime][budget-policy][phase4]") {
+    RuntimeBudgetPolicy policy;
+    policy.critical_audio_reserve = 128;
+
+    RuntimeBudgetRequest request;
+    request.lane = RuntimeWorkLane::Interactive;
+    request.estimated_cost = 64;
+    request.remaining_budget = 256;
+
+    auto decision = evaluate_runtime_budget(request, policy);
+    REQUIRE(decision.action == RuntimeBudgetAction::Run);
+
+    request.remaining_budget = 160;
+    decision = evaluate_runtime_budget(request, policy);
+    REQUIRE(decision.action == RuntimeBudgetAction::Defer);
+    REQUIRE_FALSE(decision.should_run());
+    REQUIRE(std::string(to_string(decision.action)) == "defer");
+    REQUIRE(std::string(decision.reason) == "interactive-defer");
+}
+
+TEST_CASE("RuntimeBudgetPolicy sheds opportunistic work under pressure",
+          "[runtime][budget-policy][phase4]") {
+    RuntimeBudgetRequest request;
+    request.lane = RuntimeWorkLane::Opportunistic;
+    request.estimated_cost = 8;
+    request.remaining_budget = 1024;
+    request.overload_active = true;
+
+    auto decision = evaluate_runtime_budget(request);
+
+    REQUIRE(decision.action == RuntimeBudgetAction::Shed);
+    REQUIRE_FALSE(decision.should_run());
+    REQUIRE(std::string(to_string(decision.action)) == "shed");
+    REQUIRE(std::string(decision.reason) == "overload-shed-opportunistic");
+}
+
+TEST_CASE("RuntimeBudgetPolicy makes background degradation explicit",
+          "[runtime][budget-policy][phase4]") {
+    RuntimeBudgetRequest request;
+    request.lane = RuntimeWorkLane::Background;
+    request.estimated_cost = 200;
+    request.remaining_budget = 100;
+
+    auto decision = evaluate_runtime_budget(request);
+    REQUIRE(decision.action == RuntimeBudgetAction::Bypass);
+    REQUIRE_FALSE(decision.should_run());
+    REQUIRE(std::string(to_string(decision.action)) == "bypass");
+    REQUIRE(std::string(decision.reason) == "budget-bypass-background");
+
+    request.required = true;
+    decision = evaluate_runtime_budget(request);
+    REQUIRE(decision.action == RuntimeBudgetAction::Defer);
+    REQUIRE(std::string(decision.reason) == "required-defer");
+
+    RuntimeBudgetPolicy policy;
+    policy.shed_background_on_overload = true;
+    request.required = false;
+    request.overload_active = true;
+    request.remaining_budget = 1000;
+    decision = evaluate_runtime_budget(request, policy);
+    REQUIRE(decision.action == RuntimeBudgetAction::Shed);
+    REQUIRE(std::string(decision.reason) == "overload-shed-background");
+}
+
+TEST_CASE("RuntimeBudgetFrame consumes budget and records degradation",
+          "[runtime][budget-policy][phase4][consumer]") {
+    RuntimeBudgetPolicy policy;
+    policy.critical_audio_reserve = 32;
+
+    RuntimeBudgetFrame frame(128, policy);
+
+    auto decision = frame.evaluate(RuntimeWorkLane::Interactive, 48);
+    REQUIRE(decision.action == RuntimeBudgetAction::Run);
+    REQUIRE(frame.remaining_budget() == 80);
+
+    decision = frame.evaluate(RuntimeWorkLane::Interactive, 64);
+    REQUIRE(decision.action == RuntimeBudgetAction::Defer);
+    REQUIRE(frame.remaining_budget() == 80);
+
+    decision = frame.evaluate(RuntimeWorkLane::Background, 96);
+    REQUIRE(decision.action == RuntimeBudgetAction::Bypass);
+
+    decision = frame.evaluate(RuntimeWorkLane::Opportunistic, 96);
+    REQUIRE(decision.action == RuntimeBudgetAction::Shed);
+
+    const auto& stats = frame.stats();
+    REQUIRE(stats.run_count == 1);
+    REQUIRE(stats.defer_count == 1);
+    REQUIRE(stats.bypass_count == 1);
+    REQUIRE(stats.shed_count == 1);
+    REQUIRE(stats.consumed_budget == 48);
+    REQUIRE(stats.remaining_budget == 80);
+}
+
+TEST_CASE("RuntimeBudgetFrame supports overload and refill hooks",
+          "[runtime][budget-policy][phase4][consumer]") {
+    RuntimeBudgetPolicy policy;
+    policy.shed_background_on_overload = true;
+
+    RuntimeBudgetFrame frame(16, policy);
+    frame.set_overload_active(true);
+
+    auto decision = frame.evaluate(RuntimeWorkLane::Background, 1);
+    REQUIRE(decision.action == RuntimeBudgetAction::Shed);
+    REQUIRE(std::string(decision.reason) == "overload-shed-background");
+
+    frame.set_overload_active(false);
+    frame.add_budget(32);
+    decision = frame.evaluate(RuntimeWorkLane::Background, 40);
+    REQUIRE(decision.action == RuntimeBudgetAction::Run);
+    REQUIRE(frame.remaining_budget() == 8);
+
+    frame.add_budget(std::numeric_limits<std::uint64_t>::max());
+    REQUIRE(frame.remaining_budget() == std::numeric_limits<std::uint64_t>::max());
+
+    RuntimeBudgetFrame saturating(0);
+    REQUIRE(saturating.evaluate(RuntimeWorkLane::CriticalAudio,
+                                std::numeric_limits<std::uint64_t>::max()).should_run());
+    REQUIRE(saturating.evaluate(RuntimeWorkLane::CriticalAudio, 1).should_run());
+    REQUIRE(saturating.stats().consumed_budget == std::numeric_limits<std::uint64_t>::max());
+}
+
+TEST_CASE("RuntimeBudgetFrame hot path is allocation-free",
+          "[runtime][budget-policy][phase4][consumer][rt]") {
+    RuntimeBudgetPolicy policy;
+    policy.critical_audio_reserve = 16;
+    RuntimeBudgetFrame frame(512, policy);
+
+    pulp::test::RtAllocationProbe probe;
+    for (int i = 0; i < 64; ++i) {
+        const auto decision = frame.evaluate(
+            i % 2 == 0 ? RuntimeWorkLane::Interactive : RuntimeWorkLane::Opportunistic,
+            4);
+        (void)decision;
+    }
+
+    REQUIRE_FALSE(probe.saw_allocation());
+    REQUIRE(probe.allocation_count() == 0);
+    REQUIRE(probe.allocated_bytes() == 0);
+}
+
 TEST_CASE("SpscQueue basic operations", "[runtime][spsc]") {
     SpscQueue<int, 16> q;
     REQUIRE(SpscQueue<int, 16>::capacity() == 16);
@@ -104,6 +268,312 @@ TEST_CASE("SpscQueue basic operations", "[runtime][spsc]") {
         }
         REQUIRE_FALSE(q.try_push(99));
     }
+}
+
+TEST_CASE("BackgroundJobService runs higher priority queued work first",
+          "[runtime][background-job][phase2]") {
+    BackgroundJobService service;
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool first_started = false;
+    bool release_first = false;
+    std::vector<std::string> order;
+
+    auto first = service.submit(
+        {.name = "first", .priority = BackgroundJobPriority::normal},
+        [&](BackgroundJobContext&) {
+            std::unique_lock lock(mutex);
+            first_started = true;
+            cv.notify_all();
+            cv.wait(lock, [&] { return release_first; });
+            order.push_back("first");
+        });
+
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, 2s, [&] { return first_started; }));
+    }
+
+    auto low = service.submit(
+        {.name = "low", .priority = BackgroundJobPriority::low},
+        [&](BackgroundJobContext&) {
+            std::lock_guard lock(mutex);
+            order.push_back("low");
+        });
+    auto high = service.submit(
+        {.name = "high", .priority = BackgroundJobPriority::high},
+        [&](BackgroundJobContext&) {
+            std::lock_guard lock(mutex);
+            order.push_back("high");
+        });
+
+    REQUIRE(service.pending_count() == 2);
+
+    {
+        std::lock_guard lock(mutex);
+        release_first = true;
+    }
+    cv.notify_all();
+
+    first.wait();
+    high.wait();
+    low.wait();
+
+    std::lock_guard lock(mutex);
+    REQUIRE(order.size() == 3);
+    REQUIRE(order[0] == "first");
+    REQUIRE(order[1] == "high");
+    REQUIRE(order[2] == "low");
+}
+
+TEST_CASE("BackgroundJobService publishes progress and observes cancellation",
+          "[runtime][background-job][cancel][phase2]") {
+    BackgroundJobService service;
+    std::atomic<bool> job_started{false};
+    std::atomic<bool> saw_cancel{false};
+
+    auto handle = service.submit(
+        {.name = "cancel", .priority = BackgroundJobPriority::normal},
+        [&](BackgroundJobContext& context) {
+            job_started.store(true, std::memory_order_release);
+            context.publish_progress({.completed = 1, .total = 4, .label = "loading"});
+            while (!context.is_cancelled()) {
+                std::this_thread::sleep_for(1ms);
+            }
+            saw_cancel.store(true, std::memory_order_release);
+        });
+
+    const auto deadline = std::chrono::steady_clock::now() + 2s;
+    std::optional<BackgroundJobProgress> progress;
+    while (std::chrono::steady_clock::now() < deadline) {
+        progress = handle.latest_progress();
+        if (job_started.load(std::memory_order_acquire) && progress.has_value()) break;
+        std::this_thread::sleep_for(1ms);
+    }
+    REQUIRE(job_started.load(std::memory_order_acquire));
+    REQUIRE(progress.has_value());
+    REQUIRE(progress->completed == 1);
+    REQUIRE(progress->total == 4);
+    REQUIRE(progress->label == "loading");
+
+    handle.cancel();
+    handle.wait();
+    REQUIRE(handle.is_cancelled());
+    REQUIRE(saw_cancel.load(std::memory_order_acquire));
+}
+
+TEST_CASE("BackgroundJobService cancels and drains queued work on teardown",
+          "[runtime][background-job][cancel][lifetime][phase2]") {
+    BackgroundJobService service;
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool first_started = false;
+    bool release_first = false;
+    std::atomic<bool> queued_ran{false};
+
+    auto first = service.submit(
+        {.name = "running", .priority = BackgroundJobPriority::normal},
+        [&](BackgroundJobContext& context) {
+            std::unique_lock lock(mutex);
+            first_started = true;
+            cv.notify_all();
+            cv.wait(lock, [&] {
+                return release_first || context.is_cancelled();
+            });
+        });
+
+    {
+        std::unique_lock lock(mutex);
+        REQUIRE(cv.wait_for(lock, 2s, [&] { return first_started; }));
+    }
+
+    auto queued_low = service.submit(
+        {.name = "queued-low", .priority = BackgroundJobPriority::low},
+        [&](BackgroundJobContext&) {
+            queued_ran.store(true, std::memory_order_release);
+        });
+    auto queued_high = service.submit(
+        {.name = "queued-high", .priority = BackgroundJobPriority::high},
+        [&](BackgroundJobContext&) {
+            queued_ran.store(true, std::memory_order_release);
+        });
+
+    REQUIRE(service.pending_count() == 2);
+
+    service.cancel_all();
+    {
+        std::lock_guard lock(mutex);
+        release_first = true;
+    }
+    cv.notify_all();
+    service.wait_all();
+
+    REQUIRE(first.is_finished());
+    REQUIRE(first.is_cancelled());
+    REQUIRE(queued_low.is_finished());
+    REQUIRE(queued_low.is_cancelled());
+    REQUIRE(queued_high.is_finished());
+    REQUIRE(queued_high.is_cancelled());
+    REQUIRE_FALSE(queued_ran.load(std::memory_order_acquire));
+    REQUIRE(service.pending_count() == 0);
+}
+
+TEST_CASE("RealtimeResourceSlot publishes prepared resources with deferred reclaim",
+          "[runtime][background-job][rt-handoff][phase2]") {
+    struct PreparedResource {
+        int value = 0;
+    };
+
+    RealtimeResourceSlot<PreparedResource, 4> slot;
+    REQUIRE(slot.get() == nullptr);
+
+    REQUIRE(slot.publish(std::make_unique<PreparedResource>(PreparedResource{1})));
+    REQUIRE(slot.get() != nullptr);
+    REQUIRE(slot.get()->value == 1);
+
+    REQUIRE(slot.publish(std::make_unique<PreparedResource>(PreparedResource{2})));
+    REQUIRE(slot.get() != nullptr);
+    REQUIRE(slot.get()->value == 2);
+    REQUIRE(slot.retired_count_approx() == 1);
+    REQUIRE(slot.reclaim_retired() == 1);
+    REQUIRE(slot.retired_count_approx() == 0);
+}
+
+TEST_CASE("RealtimeResourceSlot reports retire queue pressure",
+          "[runtime][background-job][rt-handoff][telemetry][phase2]") {
+    struct PreparedResource {
+        int value = 0;
+    };
+
+    RealtimeResourceSlot<PreparedResource, 1> slot;
+
+    REQUIRE(slot.publish(std::make_unique<PreparedResource>(PreparedResource{1})));
+    REQUIRE(slot.publish(std::make_unique<PreparedResource>(PreparedResource{2})));
+    REQUIRE(slot.retired_count_approx() == 1);
+    REQUIRE(slot.retire_overflow_count() == 0);
+
+    REQUIRE_FALSE(slot.publish(std::make_unique<PreparedResource>(PreparedResource{3})));
+    REQUIRE(slot.get() != nullptr);
+    REQUIRE(slot.get()->value == 2);
+    REQUIRE(slot.retired_count_approx() == 1);
+    REQUIRE(slot.retire_overflow_count() == 1);
+
+    REQUIRE(slot.reclaim_retired() == 1);
+    REQUIRE(slot.publish(std::make_unique<PreparedResource>(PreparedResource{3})));
+    REQUIRE(slot.get() != nullptr);
+    REQUIRE(slot.get()->value == 3);
+    REQUIRE(slot.retire_overflow_count() == 1);
+}
+
+TEST_CASE("RealtimeResourceSlot audio read path allocates zero times",
+          "[runtime][background-job][rt-handoff][rt-safety][phase2]") {
+    struct PreparedResource {
+        int value = 0;
+    };
+
+    RealtimeResourceSlot<PreparedResource, 2> slot;
+    REQUIRE(slot.publish(std::make_unique<PreparedResource>(PreparedResource{42})));
+
+    pulp::test::RtAllocationProbe probe;
+    const PreparedResource* resource = nullptr;
+    for (int i = 0; i < 256; ++i) {
+        resource = slot.get();
+        REQUIRE(resource != nullptr);
+        REQUIRE(resource->value == 42);
+    }
+
+    REQUIRE_FALSE(probe.saw_allocation());
+}
+
+TEST_CASE("Background resource job publishes immutable audio resource",
+          "[runtime][background-job][resource-recipe][phase2]") {
+    struct PreparedResource {
+        std::array<float, 4> values{};
+        std::string source_id;
+    };
+
+    BackgroundJobService service;
+    RealtimeResourceSlot<PreparedResource, 2> slot;
+    std::atomic<bool> publish_result{false};
+
+    auto handle = service.submit(
+        {.name = "prepare-ir", .priority = BackgroundJobPriority::normal},
+        [&](BackgroundJobContext& context) {
+            context.publish_progress({.completed = 1, .total = 2, .label = "decode"});
+
+            auto prepared = std::make_unique<PreparedResource>();
+            prepared->values = {0.25f, 0.5f, 0.125f, 0.0625f};
+            prepared->source_id = "factory-short-room";
+
+            context.publish_progress({.completed = 2, .total = 2, .label = "publish"});
+            if (!context.is_cancelled()) {
+                publish_result.store(slot.publish(std::move(prepared)),
+                                     std::memory_order_release);
+            }
+        });
+
+    handle.wait();
+    REQUIRE(publish_result.load(std::memory_order_acquire));
+
+    auto progress = handle.latest_progress();
+    REQUIRE(progress.has_value());
+    REQUIRE(progress->completed == 2);
+    REQUIRE(progress->total == 2);
+    REQUIRE(progress->label == "publish");
+
+    const PreparedResource* resource = nullptr;
+    {
+        pulp::test::RtAllocationProbe probe;
+        resource = slot.get();
+        REQUIRE(resource != nullptr);
+        REQUIRE(resource->values[0] == 0.25f);
+        REQUIRE(resource->values[1] == 0.5f);
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+
+    REQUIRE(resource->source_id == "factory-short-room");
+}
+
+TEST_CASE("Cancelled background resource job does not publish stale resource",
+          "[runtime][background-job][resource-recipe][cancel][phase2]") {
+    struct PreparedResource {
+        int revision = 0;
+    };
+
+    BackgroundJobService service;
+    RealtimeResourceSlot<PreparedResource, 2> slot;
+    std::atomic<bool> job_started{false};
+    std::atomic<bool> publish_attempted{false};
+
+    auto handle = service.submit(
+        {.name = "cancelled-sample-import", .priority = BackgroundJobPriority::normal},
+        [&](BackgroundJobContext& context) {
+            job_started.store(true, std::memory_order_release);
+            while (!context.is_cancelled()) {
+                std::this_thread::sleep_for(1ms);
+            }
+
+            auto prepared = std::make_unique<PreparedResource>();
+            prepared->revision = 7;
+            if (!context.is_cancelled()) {
+                publish_attempted.store(slot.publish(std::move(prepared)),
+                                        std::memory_order_release);
+            }
+        });
+
+    const auto deadline = std::chrono::steady_clock::now() + 2s;
+    while (!job_started.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(1ms);
+    }
+
+    REQUIRE(job_started.load(std::memory_order_acquire));
+    handle.cancel();
+    handle.wait();
+
+    REQUIRE(handle.is_cancelled());
+    REQUIRE_FALSE(publish_attempted.load(std::memory_order_acquire));
+    REQUIRE(slot.get() == nullptr);
 }
 
 TEST_CASE("SpscQueue reuses slots after wrap-around",
@@ -190,6 +660,51 @@ TEST_CASE("SpscQueue preserves moved string payload order",
     REQUIRE(q.try_pop().value() == "gamma");
     REQUIRE_FALSE(q.try_pop().has_value());
     REQUIRE(q.empty());
+}
+
+TEST_CASE("SpscQueue exposes producer overflow telemetry",
+          "[runtime][spsc][telemetry][phase2]") {
+    SpscQueue<int, 2> q;
+    REQUIRE(q.overflow_count() == 0);
+
+    REQUIRE(q.try_push(1));
+    REQUIRE(q.try_push(2));
+    REQUIRE_FALSE(q.try_push(3));
+    REQUIRE_FALSE(q.try_push(4));
+
+    REQUIRE(q.overflow_count() == 2);
+    const auto full = q.telemetry();
+    REQUIRE(full.size_approx == 2);
+    REQUIRE(full.capacity == 2);
+    REQUIRE(full.overflow_count == 2);
+
+    REQUIRE(q.try_pop().value() == 1);
+    REQUIRE(q.try_push(5));
+    REQUIRE(q.overflow_count() == 2);
+
+    q.reset_overflow_count();
+    REQUIRE(q.overflow_count() == 0);
+    const auto reset = q.telemetry();
+    REQUIRE(reset.size_approx == 2);
+    REQUIRE(reset.capacity == 2);
+    REQUIRE(reset.overflow_count == 0);
+}
+
+TEST_CASE("SpscQueue telemetry hot path allocates zero times",
+          "[runtime][spsc][telemetry][rt-safety][phase2]") {
+    SpscQueue<int, 2> q;
+
+    pulp::test::RtAllocationProbe probe;
+
+    REQUIRE(q.try_push(1));
+    REQUIRE(q.try_push(2));
+    REQUIRE_FALSE(q.try_push(3));
+    (void)q.telemetry();
+    q.reset_overflow_count();
+    REQUIRE(q.try_pop().value() == 1);
+    REQUIRE(q.try_push(4));
+
+    REQUIRE_FALSE(probe.saw_allocation());
 }
 
 TEST_CASE("ScopeGuard executes on exit", "[runtime][scope_guard]") {

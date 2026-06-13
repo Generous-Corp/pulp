@@ -95,7 +95,7 @@ clients) can drive them in one turn instead of multiple shell calls.
 | Build / test / status | `pulp_build`, `pulp_test`, `pulp_status`, `pulp_validate`, `pulp_create`, `pulp_docs_check`, `pulp_docs_search` |
 | UI rendering + interaction | `pulp_screenshot` (render JS UI to PNG), `pulp_simulate_click`, `pulp_get_view_tree` |
 | Live plugin inspection (inspector protocol) | `pulp_inspect_dom`, `pulp_inspect_params`, `pulp_inspect_set_param` (gesture-wrapped numeric param write), `pulp_inspect_screenshot`, `pulp_inspect_evaluate` (JS expr), `pulp_inspect_performance`, `pulp_inspect_audio` |
-| Audio model / WAV-first excerpt-find / live probe JSON | `pulp_audio_model_list`, `pulp_audio_model_status`, `pulp_audio_model_activate`, `pulp_audio_excerpt_find`, `pulp_audio_read_bundle`, `pulp_audio_probe_json` |
+| Audio model / WAV-first excerpt-find / live probe/scope JSON | `pulp_audio_model_list`, `pulp_audio_model_status`, `pulp_audio_model_activate`, `pulp_audio_excerpt_find`, `pulp_audio_read_bundle`, `pulp_audio_probe_json`, `pulp_audio_scope` |
 
 Use `pulp_audio_probe_json` as the quick live-health check for a standalone
 target. It runs the existing `pulp run --audio-probe-json` path through
@@ -103,6 +103,12 @@ target. It runs the existing `pulp run --audio-probe-json` path through
 stress counters. It is not a new MCP server and it is not an offline signal
 quality analyzer; switch to Audio Doctor or a scenario render when the live
 snapshot is healthy but the audio still sounds wrong.
+
+Use `pulp_audio_scope` when an agent needs real sample-window acquisition and
+measurements instead of scalar probe counters. Live target mode may open the
+standalone audio device; `input_wav` mode is speakerless/offline and can also
+write a PNG trace artifact for review. Both modes return `pulp.audio.scope.v1`
+structured JSON.
 
 #### Setup
 

@@ -597,20 +597,25 @@ shipyard run --targets windows --resume-from test   # ~2 min vs 15 min
 shipyard run --resume-from build
 ```
 
-### Linux/Windows self-hosted routing (opt-in)
+### Linux self-hosted routing (opt-in) and Windows x64 authority
 
-`build.yml`'s `resolve-provider` feeds the Linux/Windows leg selectors from
-(in precedence): the `linux_runner_selector_json` / `windows_runner_selector_json`
-workflow_dispatch input → the `PULP_LOCAL_LINUX_RUNS_ON_JSON` /
-`PULP_LOCAL_WINDOWS_RUNS_ON_JSON` repo var → `''` (github-hosted, the default).
+`build.yml`'s `resolve-provider` feeds the Linux leg selector from (in
+precedence): the `linux_runner_selector_json` workflow_dispatch input →
+`PULP_LOCAL_LINUX_RUNS_ON_JSON` repo var → `''` (github-hosted, the default).
 Set the repo var (e.g. `["self-hosted","Linux","ARM64","pulp-build-linux"]`) to
-route that leg to the self-hosted blackbook pool, served by
-`tools/ci/tart-runner-linux.sh` / `qemu-runner-windows.sh` (see the `tart-ci`
-skill) and toggled per-platform in the Shipyard macOS GUI. The explicit selector
-has NO capacity fallback, so only set it when blackbook reliably serves that
-lane — else legs route to a label with no online runner and queue. The pilot
-labels (`pulp-build-{linux,windows}`) are non-required, so a stuck pilot can't
-block PRs.
+route that leg to the self-hosted Linux pool, served by
+`tools/ci/tart-runner-linux.sh` (see the `tart-ci` skill) and toggled in the
+Shipyard macOS GUI. The explicit selector has NO capacity fallback, so only set
+it when the pool reliably serves that lane — else legs route to a label with no
+online runner and queue.
+
+Windows is intentionally different. The required `Windows (x64)` gate must stay
+on real GitHub-hosted `windows-latest` unless a local x64 lane is explicitly
+proven and promoted. The current local Windows pool is Windows ARM64 on QEMU
+(`qemu-system-aarch64`): it can maybe smoke x64 via Windows-on-ARM translation,
+but it is not the authoritative Intel/x64 gate. Do not wire
+`PULP_LOCAL_WINDOWS_RUNS_ON_JSON` into the required Build-and-Test Windows x64
+matrix leg; use a separate/dedicated label for any local Windows ARM64 smoke.
 
 ### macOS runner routing (current)
 

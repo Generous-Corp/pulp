@@ -14,6 +14,7 @@
 #include <pulp/format/registry.hpp>
 #include <pulp/runtime/log.hpp>
 
+#include <array>
 #include <cstring>
 
 namespace pulp::format::au {
@@ -238,65 +239,46 @@ OSStatus PulpAUInstrument::Render(AudioUnitRenderActionFlags& ioActionFlags,
         pending_midi_ = midi::MidiBuffer{};
     }
 
-    ProcessContext ctx;
-    ctx.sample_rate = GetOutput(0)->GetStreamFormat().mSampleRate;
-    ctx.num_samples = static_cast<int>(inNumberFrames);
+    ProcessContext ctx = make_render_process_context(
+        GetOutput(0)->GetStreamFormat().mSampleRate,
+        static_cast<int>(inNumberFrames));
 
-    // Item 1.3 — populate transport fields from the host callbacks
-    // (kAudioUnitProperty_HostCallbacks). Same wiring as PulpAUEffect
-    // — the instrument adapter is also AUBase-derived so the
-    // CallHostBeatAndTempo / CallHostMusicalTimeLocation /
-    // CallHostTransportState helpers route through the same proc
-    // pointers the host installed.
-    {
-        Float64 beat = 0.0;
-        Float64 tempo = 0.0;
-        if (CallHostBeatAndTempo(&beat, &tempo) == noErr) {
-            ctx.position_beats = beat;
-            if (tempo > 0.0) ctx.tempo_bpm = tempo;
-        }
+    apply_host_callbacks_to_process_context(ctx, *this, playhead_prev_);
 
-        UInt32 delta_samples = 0;
-        Float32 ts_num = 0.0f;
-        UInt32 ts_denom = 0;
-        Float64 current_measure_downbeat = 0.0;
-        if (CallHostMusicalTimeLocation(&delta_samples, &ts_num, &ts_denom,
-                                        &current_measure_downbeat) == noErr) {
-            if (ts_num > 0.0f) ctx.time_sig_numerator = static_cast<int>(ts_num);
-            if (ts_denom > 0) ctx.time_sig_denominator = static_cast<int>(ts_denom);
-        }
+    std::array<ProcessBusBufferView<const float>, 1> input_buses{{
+        {
+            .info = {
+                .name = "Audio In",
+                .index = 0,
+                .direction = BusDirection::Input,
+                .role = BusRole::Main,
+                .declared_channels = 0,
+                .optional = true,
+                .active = false,
+            },
+            .buffer = input_view,
+        },
+    }};
+    std::array<ProcessBusBufferView<float>, 1> output_buses{{
+        {
+            .info = {
+                .name = "Audio Out",
+                .index = 0,
+                .direction = BusDirection::Output,
+                .role = BusRole::Main,
+                .declared_channels = static_cast<int>(out_channels),
+                .optional = false,
+                .active = output_view.num_channels() > 0,
+            },
+            .buffer = output_view,
+        },
+    }};
+    ProcessBuffers process_buffers{
+        ProcessBusBufferSet<const float>{std::span(input_buses)},
+        ProcessBusBufferSet<float>{std::span(output_buses)},
+    };
 
-        Boolean is_playing = false;
-        Boolean transport_state_changed = false;
-        Float64 current_sample_in_timeline = 0.0;
-        Boolean is_cycling = false;
-        Float64 cycle_start = 0.0;
-        Float64 cycle_end = 0.0;
-        if (CallHostTransportState(&is_playing, &transport_state_changed,
-                                   &current_sample_in_timeline, &is_cycling,
-                                   &cycle_start, &cycle_end) == noErr) {
-            ctx.is_playing = (is_playing != 0);
-            ctx.position_samples = static_cast<int64_t>(current_sample_in_timeline);
-            ctx.is_looping = (is_cycling != 0);
-            if (ctx.is_looping) {
-                ctx.loop_start_beats = cycle_start;
-                ctx.loop_end_beats = cycle_end;
-            }
-        }
-
-        static mach_timebase_info_data_t timebase = {0, 0};
-        if (timebase.denom == 0) mach_timebase_info(&timebase);
-        if (timebase.denom != 0) {
-            const uint64_t now = mach_absolute_time();
-            ctx.host_time_ns = static_cast<int64_t>(
-                (now * timebase.numer) / timebase.denom);
-        }
-
-        pulp::format::detail::derive_bar_from_beats(ctx);
-    }
-    pulp::format::detail::compute_playhead_changes(ctx, playhead_prev_);
-
-    processor_->process(output_view, input_view, midi_in, midi_out, ctx);
+    processor_->process(process_buffers, midi_in, midi_out, ctx);
 
     return noErr;
 }
@@ -370,7 +352,17 @@ bool PulpAUInstrument::SupportsTail()
 
 Float64 PulpAUInstrument::GetTailTime()
 {
-    return 0.0;
+    if (!processor_) return 0.0;
+    const auto tail = processor_->descriptor().tail_samples;
+    if (tail <= 0) return tail_samples_to_seconds(tail, 0.0);
+
+    double sr = 0.0;
+    try {
+        sr = GetOutput(0)->GetStreamFormat().mSampleRate;
+    } catch (...) {
+        sr = 0.0;
+    }
+    return tail_samples_to_seconds(tail, sr);
 }
 
 Float64 PulpAUInstrument::GetLatency()

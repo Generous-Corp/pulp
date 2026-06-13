@@ -96,6 +96,17 @@ plugin therefore won't receive sample-accurate params on AU v2 yet; that needs
 the AUv3 `AURenderEventParameter` model and is a follow-up. Do not synthesise an
 AU v2 param-event mapping by guessing.
 
+### ProcessBuffers dispatch (DSP runtime Phase 2)
+
+`ProcessBufferLists()` now wraps the current main input/output buffers in a
+stack-owned `ProcessBuffers` block and calls the additive
+`processor_->process(process_buffers, midi_in, midi_out, ctx)` overload inside
+the existing `ScopedNoAlloc` guard. Legacy processors still reach the original
+main-in/main-out callback through the default projection, while processors that
+override the richer overload can inspect AU v2 bus metadata directly. The AU v2
+instrument `Render()` path uses the same additive dispatch with an inactive,
+optional main input bus and the active output bus.
+
 ### Latency / tail change notifications (PR #2934, item 3.11)
 
 A Processor flags a mid-render latency or tail change via

@@ -10,6 +10,7 @@
 #include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/events/plugin_main_thread.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
+#include <pulp/state/modulation_lane.hpp>
 #include <pulp/state/preset_manager.hpp>
 #include <clap/clap.h>
 
@@ -27,6 +28,7 @@
 namespace pulp::format::clap_adapter {
 
 static constexpr int kMaxChannels = 8;
+static constexpr state::ModulationSourceId kClapHostModulationSourceId = 1;
 
 // CLAP plugin instance — wraps a Pulp Processor
 struct PulpClapPlugin {
@@ -69,8 +71,8 @@ struct PulpClapPlugin {
     state::ParameterEventQueue param_events;
 
     // Reused per-block MIDI buffers. Reserved and capacity-limited during
-    // activate() so processors can append outbound MIDI while the process
-    // no-allocation guard is active.
+    // activate() so capacity survives warmup and processors can append
+    // outbound MIDI while the process no-allocation guard is active.
     midi::MidiBuffer midi_in;
     midi::MidiBuffer midi_out;
 
@@ -138,6 +140,9 @@ bool clap_start_processing(const clap_plugin_t* plugin);
 void clap_stop_processing(const clap_plugin_t* plugin);
 void clap_reset(const clap_plugin_t* plugin);
 clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process_t* process);
+bool clap_param_modulation_lane(const PulpClapPlugin& self,
+                                const clap_event_param_mod_t& event,
+                                state::ModulationLane& lane);
 const void* clap_get_extension(const clap_plugin_t* plugin, const char* id);
 void clap_on_main_thread(const clap_plugin_t* plugin);
 

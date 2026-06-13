@@ -2,6 +2,11 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/audio/offline_processor.hpp>
 
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <string>
+#include <utility>
 #include <vector>
 
 using namespace pulp::audio;
@@ -258,6 +263,775 @@ TEST_CASE("offline_process supports block size exactly equal to the input", "[au
     REQUIRE(output.has_value());
     REQUIRE(calls == 1);
     REQUIRE(output->channels == input.channels);
+}
+
+TEST_CASE("offline_render reports deterministic block schedule metadata",
+          "[audio][offline][advanced][phase3]") {
+    auto input = make_stereo_fixture();
+    OfflineRenderOptions options;
+    options.block_size_schedule = {2, 1};
+    options.start_sample_position = 100;
+    options.deterministic_seed = 0x1234;
+
+    std::vector<int> frames_seen;
+    std::vector<int> scheduled_seen;
+    std::vector<uint64_t> positions_seen;
+    std::vector<uint64_t> block_indices_seen;
+    std::vector<uint64_t> seeds_seen;
+
+    auto output = offline_render(
+        input,
+        [&](const float* in, float* out, int channels,
+            const OfflineRenderBlockContext& context) {
+            frames_seen.push_back(context.frames);
+            scheduled_seen.push_back(context.scheduled_block_size);
+            positions_seen.push_back(context.sample_position);
+            block_indices_seen.push_back(context.block_index);
+            seeds_seen.push_back(context.deterministic_seed);
+            for (int sample = 0; sample < channels * context.frames; ++sample)
+                out[sample] = in[sample];
+        },
+        options);
+
+    REQUIRE(output.has_value());
+    REQUIRE(output->channels == input.channels);
+    REQUIRE(frames_seen == std::vector<int>{2, 1, 1, 1});
+    REQUIRE(scheduled_seen == std::vector<int>{2, 1, 1, 1});
+    REQUIRE(positions_seen == std::vector<uint64_t>{100, 102, 103, 104});
+    REQUIRE(block_indices_seen == std::vector<uint64_t>{0, 1, 2, 3});
+    REQUIRE(seeds_seen == std::vector<uint64_t>{0x1234, 0x1234, 0x1234, 0x1234});
+}
+
+TEST_CASE("offline_render output can be deterministic across block schedules",
+          "[audio][offline][advanced][phase3]") {
+    auto input = make_stereo_fixture();
+
+    auto render_absolute_sample_index =
+        [](const AudioFileData& source, std::vector<int> schedule) {
+            OfflineRenderOptions options;
+            options.block_size_schedule = std::move(schedule);
+            options.start_sample_position = 7;
+            return offline_render(
+                source,
+                [](const float*, float* out, int channels,
+                   const OfflineRenderBlockContext& context) {
+                    for (int frame = 0; frame < context.frames; ++frame) {
+                        const float value = static_cast<float>(
+                            context.sample_position + static_cast<uint64_t>(frame));
+                        for (int channel = 0; channel < channels; ++channel) {
+                            out[frame * channels + channel] = value;
+                        }
+                    }
+                },
+                options);
+        };
+
+    auto one_block = render_absolute_sample_index(input, {5});
+    auto varied_blocks = render_absolute_sample_index(input, {2, 2, 1});
+
+    REQUIRE(one_block.has_value());
+    REQUIRE(varied_blocks.has_value());
+    REQUIRE(one_block->channels == varied_blocks->channels);
+    REQUIRE(one_block->channels[0] == std::vector<float>{7.0f, 8.0f, 9.0f, 10.0f, 11.0f});
+    REQUIRE(one_block->channels[1] == one_block->channels[0]);
+}
+
+TEST_CASE("offline_render rejects invalid block schedules",
+          "[audio][offline][advanced][phase3]") {
+    auto input = make_stereo_fixture();
+    OfflineRenderOptions options;
+    options.fallback_block_size = 0;
+    REQUIRE_FALSE(offline_render(
+        input,
+        [](const float*, float*, int, const OfflineRenderBlockContext&) {},
+        options).has_value());
+
+    options.fallback_block_size = 4;
+    options.block_size_schedule = {2, 0, 1};
+    REQUIRE_FALSE(offline_render(
+        input,
+        [](const float*, float*, int, const OfflineRenderBlockContext&) {},
+        options).has_value());
+}
+
+TEST_CASE("offline_render tail policy is explicit and deterministic",
+          "[audio][offline][advanced][tail][phase3]") {
+    AudioFileData input;
+    input.sample_rate = 48000;
+    input.channels = {{1.0f, 2.0f, 3.0f}};
+
+    OfflineRenderOptions truncate_options;
+    truncate_options.fallback_block_size = 2;
+    truncate_options.tail_frames = 3;
+    auto truncated = offline_render(
+        input,
+        [](const float* in, float* out, int, const OfflineRenderBlockContext& context) {
+            for (int frame = 0; frame < context.frames; ++frame)
+                out[frame] = in[frame];
+        },
+        truncate_options);
+
+    REQUIRE(truncated.has_value());
+    REQUIRE(truncated->channels[0] == std::vector<float>{1.0f, 2.0f, 3.0f});
+
+    OfflineRenderOptions tail_options = truncate_options;
+    tail_options.tail_policy = OfflineRenderTailPolicy::RenderTail;
+    tail_options.tail_frames = 3;
+
+    std::vector<int> frames_seen;
+    std::vector<uint64_t> positions_seen;
+    auto with_tail = offline_render(
+        input,
+        [&](const float* in, float* out, int, const OfflineRenderBlockContext& context) {
+            frames_seen.push_back(context.frames);
+            positions_seen.push_back(context.sample_position);
+            for (int frame = 0; frame < context.frames; ++frame) {
+                out[frame] = in[frame] == 0.0f
+                    ? 10.0f + static_cast<float>(context.sample_position
+                                                 + static_cast<uint64_t>(frame))
+                    : in[frame];
+            }
+        },
+        tail_options);
+
+    REQUIRE(with_tail.has_value());
+    REQUIRE(frames_seen == std::vector<int>{2, 2, 2});
+    REQUIRE(positions_seen == std::vector<uint64_t>{0, 2, 4});
+    REQUIRE(with_tail->channels[0]
+            == std::vector<float>{1.0f, 2.0f, 3.0f, 13.0f, 14.0f, 15.0f});
+}
+
+TEST_CASE("offline_render reports deterministic transport timeline metadata",
+          "[audio][offline][advanced][transport][phase3]") {
+    AudioFileData input;
+    input.sample_rate = 48000;
+    input.channels = {{0.0f, 0.0f, 0.0f, 0.0f}};
+
+    OfflineRenderOptions options;
+    options.fallback_block_size = 2;
+    options.start_sample_position = 48000;
+    options.start_position_beats = 8.0;
+    options.tempo_bpm = 120.0;
+    options.render_speed_ratio = 4.0;
+
+    std::vector<double> times_seen;
+    std::vector<double> beats_seen;
+    std::vector<double> tempos_seen;
+    std::vector<double> speeds_seen;
+    auto output = offline_render(
+        input,
+        [&](const float*, float* out, int, const OfflineRenderBlockContext& context) {
+            times_seen.push_back(context.time_seconds);
+            beats_seen.push_back(context.position_beats);
+            tempos_seen.push_back(context.tempo_bpm);
+            speeds_seen.push_back(context.render_speed_ratio);
+            for (int frame = 0; frame < context.frames; ++frame)
+                out[frame] = static_cast<float>(context.position_beats);
+        },
+        options);
+
+    REQUIRE(output.has_value());
+    REQUIRE(times_seen.size() == 2);
+    REQUIRE_THAT(times_seen[0], WithinAbs(1.0, 1e-12));
+    REQUIRE_THAT(times_seen[1], WithinAbs(1.0 + 2.0 / 48000.0, 1e-12));
+    REQUIRE_THAT(beats_seen[0], WithinAbs(8.0, 1e-12));
+    REQUIRE_THAT(beats_seen[1], WithinAbs(8.0 + 2.0 / 48000.0 * 2.0, 1e-12));
+    REQUIRE(tempos_seen == std::vector<double>{120.0, 120.0});
+    REQUIRE(speeds_seen == std::vector<double>{4.0, 4.0});
+    REQUIRE_THAT(output->channels[0][0], WithinAbs(8.0f, 1e-6f));
+    REQUIRE_THAT(output->channels[0][1], WithinAbs(8.0f, 1e-6f));
+    REQUIRE_THAT(output->channels[0][2], WithinAbs(8.000083f, 1e-6f));
+    REQUIRE_THAT(output->channels[0][3], WithinAbs(8.000083f, 1e-6f));
+}
+
+TEST_CASE("offline_render rejects invalid transport timeline hints",
+          "[audio][offline][advanced][transport][phase3]") {
+    auto input = make_stereo_fixture();
+    OfflineRenderOptions options;
+    options.tempo_bpm = 0.0;
+
+    REQUIRE_FALSE(offline_render(
+        input,
+        [](const float*, float*, int, const OfflineRenderBlockContext&) {},
+        options).has_value());
+
+    options.tempo_bpm = 120.0;
+    options.render_speed_ratio = 0.0;
+    REQUIRE_FALSE(offline_render(
+        input,
+        [](const float*, float*, int, const OfflineRenderBlockContext&) {},
+        options).has_value());
+}
+
+TEST_CASE("offline_render propagates deterministic state generation metadata",
+          "[audio][offline][advanced][state][phase3]") {
+    auto input = make_stereo_fixture();
+    OfflineRenderOptions options;
+    options.block_size_schedule = {2, 3};
+    options.state_generation = 42;
+    options.deterministic_seed = 0x5441;
+
+    std::vector<uint64_t> generations_seen;
+    std::vector<uint64_t> seeds_seen;
+    auto output = offline_render(
+        input,
+        [&](const float* in, float* out, int channels,
+            const OfflineRenderBlockContext& context) {
+            generations_seen.push_back(context.state_generation);
+            seeds_seen.push_back(context.deterministic_seed);
+            for (int sample = 0; sample < channels * context.frames; ++sample)
+                out[sample] = in[sample];
+        },
+        options);
+
+    REQUIRE(output.has_value());
+    REQUIRE(output->channels == input.channels);
+    REQUIRE(generations_seen == std::vector<uint64_t>{42, 42});
+    REQUIRE(seeds_seen == std::vector<uint64_t>{0x5441, 0x5441});
+}
+
+TEST_CASE("offline_render_stems extracts named channel groups from the mix",
+          "[audio][offline][advanced][stems][phase3]") {
+    AudioFileData input;
+    input.sample_rate = 48000;
+    input.channels = {
+        {1.0f, 2.0f},
+        {3.0f, 4.0f},
+        {5.0f, 6.0f},
+        {7.0f, 8.0f},
+    };
+
+    OfflineRenderOptions options;
+    options.fallback_block_size = 1;
+    options.state_generation = 99;
+    std::vector<uint64_t> generations_seen;
+
+    auto result = offline_render_stems(
+        input,
+        [&](const float* in, float* out, int channels,
+            const OfflineRenderBlockContext& context) {
+            generations_seen.push_back(context.state_generation);
+            for (int sample = 0; sample < channels * context.frames; ++sample)
+                out[sample] = in[sample] * 2.0f;
+        },
+        options,
+        {
+            {.name = "drums", .first_channel = 0, .channel_count = 2},
+            {.name = "fx", .first_channel = 2, .channel_count = 2},
+        });
+
+    REQUIRE(result.has_value());
+    REQUIRE(result->mix.num_channels() == 4);
+    REQUIRE(result->mix.channels[0] == std::vector<float>{2.0f, 4.0f});
+    REQUIRE(result->mix.channels[3] == std::vector<float>{14.0f, 16.0f});
+    REQUIRE(result->stems.size() == 2);
+    REQUIRE(result->stems[0].name == "drums");
+    REQUIRE(result->stems[0].audio.sample_rate == 48000);
+    REQUIRE(result->stems[0].audio.channels[0] == result->mix.channels[0]);
+    REQUIRE(result->stems[0].audio.channels[1] == result->mix.channels[1]);
+    REQUIRE(result->stems[1].name == "fx");
+    REQUIRE(result->stems[1].audio.channels[0] == result->mix.channels[2]);
+    REQUIRE(result->stems[1].audio.channels[1] == result->mix.channels[3]);
+    REQUIRE(generations_seen == std::vector<uint64_t>{99, 99});
+}
+
+TEST_CASE("offline_render_stems rejects malformed stem ranges before rendering",
+          "[audio][offline][advanced][stems][phase3]") {
+    auto input = make_stereo_fixture();
+    bool callback_called = false;
+    OfflineRenderOptions options;
+
+    auto missing_name = offline_render_stems(
+        input,
+        [&](const float*, float*, int, const OfflineRenderBlockContext&) {
+            callback_called = true;
+        },
+        options,
+        {{.name = "", .first_channel = 0, .channel_count = 1}});
+    REQUIRE_FALSE(missing_name.has_value());
+    REQUIRE_FALSE(callback_called);
+
+    auto out_of_range = offline_render_stems(
+        input,
+        [&](const float*, float*, int, const OfflineRenderBlockContext&) {
+            callback_called = true;
+        },
+        options,
+        {{.name = "wide", .first_channel = 1, .channel_count = 2}});
+    REQUIRE_FALSE(out_of_range.has_value());
+    REQUIRE_FALSE(callback_called);
+
+    auto overlapping = offline_render_stems(
+        input,
+        [&](const float*, float*, int, const OfflineRenderBlockContext&) {
+            callback_called = true;
+        },
+        options,
+        {
+            {.name = "left", .first_channel = 0, .channel_count = 1},
+            {.name = "both", .first_channel = 0, .channel_count = 2},
+        });
+    REQUIRE_FALSE(overlapping.has_value());
+    REQUIRE_FALSE(callback_called);
+}
+
+TEST_CASE("compare_offline_render_audio supports golden and null residual checks",
+          "[audio][offline][advanced][golden][null][phase3]") {
+    AudioFileData expected;
+    expected.sample_rate = 48000;
+    expected.channels = {
+        {1.0f, 2.0f, 3.0f},
+        {-1.0f, -2.0f, -3.0f},
+    };
+    AudioFileData actual = expected;
+
+    auto exact = compare_offline_render_audio(actual, expected);
+    REQUIRE(exact.has_value());
+    REQUIRE(exact->channels == 2);
+    REQUIRE(exact->frames == 3);
+    REQUIRE(exact->peak_error == 0.0f);
+    REQUIRE(exact->rms_error == 0.0);
+    REQUIRE(exact->passes(0.0f, 0.0));
+
+    actual.channels[0][1] += 0.25f;
+    auto residual = compare_offline_render_audio(actual, expected);
+    REQUIRE(residual.has_value());
+    REQUIRE_THAT(residual->peak_error, WithinAbs(0.25f, 1e-6f));
+    REQUIRE_THAT(residual->rms_error, WithinAbs(0.25 / std::sqrt(6.0), 1e-12));
+    REQUIRE_FALSE(residual->passes(0.1f, 0.1));
+    REQUIRE(residual->passes(0.3f, 0.2));
+}
+
+TEST_CASE("compare_offline_render_audio rejects incompatible artifacts",
+          "[audio][offline][advanced][golden][null][phase3]") {
+    auto actual = make_stereo_fixture();
+    auto expected = actual;
+
+    expected.sample_rate = 44100;
+    REQUIRE_FALSE(compare_offline_render_audio(actual, expected).has_value());
+
+    expected = actual;
+    expected.channels.pop_back();
+    REQUIRE_FALSE(compare_offline_render_audio(actual, expected).has_value());
+
+    expected = actual;
+    expected.channels[0].pop_back();
+    REQUIRE_FALSE(compare_offline_render_audio(actual, expected).has_value());
+}
+
+TEST_CASE("offline_render outputs null-test clean across block schedules",
+          "[audio][offline][advanced][golden][null][phase3]") {
+    auto input = make_stereo_fixture();
+
+    auto render_with_schedule = [&](std::vector<int> schedule) {
+        OfflineRenderOptions options;
+        options.block_size_schedule = std::move(schedule);
+        return offline_render(
+            input,
+            [](const float* in, float* out, int channels,
+               const OfflineRenderBlockContext& context) {
+                for (int sample = 0; sample < channels * context.frames; ++sample)
+                    out[sample] = in[sample] * 0.5f;
+            },
+            options);
+    };
+
+    auto one_block = render_with_schedule({5});
+    auto split_blocks = render_with_schedule({2, 1});
+    REQUIRE(one_block.has_value());
+    REQUIRE(split_blocks.has_value());
+
+    auto residual = compare_offline_render_audio(*one_block, *split_blocks);
+    REQUIRE(residual.has_value());
+    REQUIRE(residual->passes(0.0f, 0.0));
+}
+
+TEST_CASE("offline render manifests hash artifacts and deterministic plans",
+          "[audio][offline][manifest][phase4]") {
+    auto input = make_stereo_fixture();
+
+    OfflineRenderOptions options;
+    options.block_size_schedule = {2, 1, 4};
+    options.start_sample_position = 960;
+    options.start_position_beats = 12.0;
+    options.tempo_bpm = 96.0;
+    options.render_speed_ratio = 2.0;
+    options.state_generation = 44;
+    options.deterministic_seed = 1234;
+    options.tail_policy = OfflineRenderTailPolicy::RenderTail;
+    options.tail_frames = 2;
+
+    auto rendered = offline_render(
+        input,
+        [](const float* in, float* out, int channels,
+           const OfflineRenderBlockContext& context) {
+            for (int sample = 0; sample < channels * context.frames; ++sample)
+                out[sample] = in[sample] + 0.125f;
+        },
+        options);
+    REQUIRE(rendered.has_value());
+
+    auto manifest = create_offline_render_manifest(*rendered, options);
+    auto again = create_offline_render_manifest(*rendered, options);
+    REQUIRE(manifest.has_value());
+    REQUIRE(again.has_value());
+
+    REQUIRE(manifest->format_version == 1);
+    REQUIRE(manifest->sample_rate == 48000);
+    REQUIRE(manifest->channels == 2);
+    REQUIRE(manifest->frames == 7);
+    REQUIRE(manifest->audio_sha256.size() == 64);
+    REQUIRE(manifest->render_plan_sha256.size() == 64);
+    REQUIRE(manifest->audio_sha256 == again->audio_sha256);
+    REQUIRE(manifest->render_plan_sha256 == again->render_plan_sha256);
+    REQUIRE(manifest->matches_audio(*rendered));
+
+    REQUIRE(manifest->start_sample_position == 960);
+    REQUIRE(manifest->start_position_beats == 12.0);
+    REQUIRE(manifest->tempo_bpm == 96.0);
+    REQUIRE(manifest->render_speed_ratio == 2.0);
+    REQUIRE(manifest->state_generation == 44);
+    REQUIRE(manifest->deterministic_seed == 1234);
+    REQUIRE(manifest->tail_policy == OfflineRenderTailPolicy::RenderTail);
+    REQUIRE(manifest->tail_frames == 2);
+    REQUIRE(manifest->block_size_schedule == std::vector<int>{2, 1, 4});
+
+    REQUIRE(manifest->chunks.size() == 3);
+    REQUIRE(manifest->chunks[0].start_frame == 0);
+    REQUIRE(manifest->chunks[0].frame_count == 2);
+    REQUIRE(manifest->chunks[0].scheduled_block_size == 2);
+    REQUIRE(manifest->chunks[1].start_frame == 2);
+    REQUIRE(manifest->chunks[1].frame_count == 1);
+    REQUIRE(manifest->chunks[1].scheduled_block_size == 1);
+    REQUIRE(manifest->chunks[2].start_frame == 3);
+    REQUIRE(manifest->chunks[2].frame_count == 4);
+    REQUIRE(manifest->chunks[2].scheduled_block_size == 4);
+}
+
+TEST_CASE("offline render manifests separate audio and plan changes",
+          "[audio][offline][manifest][phase4]") {
+    auto audio = make_stereo_fixture();
+
+    OfflineRenderOptions options;
+    options.block_size_schedule = {3, 2};
+    options.state_generation = 1;
+
+    auto baseline = create_offline_render_manifest(audio, options);
+    REQUIRE(baseline.has_value());
+
+    auto changed_audio = audio;
+    changed_audio.channels[0][0] += 0.01f;
+    auto changed_artifact = create_offline_render_manifest(changed_audio, options);
+    REQUIRE(changed_artifact.has_value());
+    REQUIRE(changed_artifact->audio_sha256 != baseline->audio_sha256);
+    REQUIRE(changed_artifact->render_plan_sha256 == baseline->render_plan_sha256);
+
+    auto changed_options = options;
+    changed_options.state_generation = 2;
+    auto changed_plan = create_offline_render_manifest(audio, changed_options);
+    REQUIRE(changed_plan.has_value());
+    REQUIRE(changed_plan->audio_sha256 == baseline->audio_sha256);
+    REQUIRE(changed_plan->render_plan_sha256 != baseline->render_plan_sha256);
+
+    changed_options = options;
+    changed_options.block_size_schedule = {2, 2, 1};
+    auto changed_chunks = create_offline_render_manifest(audio, changed_options);
+    REQUIRE(changed_chunks.has_value());
+    REQUIRE(changed_chunks->audio_sha256 == baseline->audio_sha256);
+    REQUIRE(changed_chunks->render_plan_sha256 != baseline->render_plan_sha256);
+    REQUIRE(changed_chunks->chunks.size() == 3);
+}
+
+TEST_CASE("offline render manifests prove chunked render equivalence",
+          "[audio][offline][manifest][chunks][phase4]") {
+    auto input = make_stereo_fixture();
+
+    auto render_absolute_position = [&](std::vector<int> schedule) {
+        OfflineRenderOptions options;
+        options.block_size_schedule = std::move(schedule);
+        options.start_sample_position = 2048;
+        options.state_generation = 11;
+        options.deterministic_seed = 99;
+        auto rendered = offline_render(
+            input,
+            [](const float*, float* out, int channels,
+               const OfflineRenderBlockContext& context) {
+                for (int frame = 0; frame < context.frames; ++frame) {
+                    const auto absolute =
+                        context.sample_position + static_cast<uint64_t>(frame);
+                    for (int channel = 0; channel < channels; ++channel) {
+                        out[frame * channels + channel] =
+                            static_cast<float>(absolute + static_cast<uint64_t>(channel));
+                    }
+                }
+            },
+            options);
+        REQUIRE(rendered.has_value());
+        auto manifest = create_offline_render_manifest(*rendered, options);
+        REQUIRE(manifest.has_value());
+        return std::pair<AudioFileData, OfflineRenderArtifactManifest>{
+            std::move(*rendered), std::move(*manifest)};
+    };
+
+    auto one_chunk = render_absolute_position({5});
+    auto many_chunks = render_absolute_position({2, 1, 2});
+
+    auto residual = compare_offline_render_audio(one_chunk.first, many_chunks.first);
+    REQUIRE(residual.has_value());
+    REQUIRE(residual->passes(0.0f, 0.0));
+
+    REQUIRE(one_chunk.second.matches_audio(one_chunk.first));
+    REQUIRE(many_chunks.second.matches_audio(many_chunks.first));
+    REQUIRE(one_chunk.second.audio_sha256 == many_chunks.second.audio_sha256);
+    REQUIRE(one_chunk.second.render_plan_sha256 !=
+            many_chunks.second.render_plan_sha256);
+    REQUIRE(one_chunk.second.chunks.size() == 1);
+    REQUIRE(many_chunks.second.chunks.size() == 3);
+    REQUIRE(many_chunks.second.chunks[0].frame_count == 2);
+    REQUIRE(many_chunks.second.chunks[1].frame_count == 1);
+    REQUIRE(many_chunks.second.chunks[2].frame_count == 2);
+}
+
+TEST_CASE("offline render manifests record staged resources for cache reuse",
+          "[audio][offline][manifest][resources][phase4]") {
+    auto audio = make_stereo_fixture();
+
+    const std::string sample_hash(64, 'a');
+    const std::string ir_hash(64, 'b');
+
+    OfflineRenderOptions options;
+    options.resources = {
+        {
+            .id = "ir.main",
+            .path = "irs/hall.wav",
+            .content_sha256 = ir_hash,
+            .cache_key = "sha256:" + ir_hash,
+            .generation = 7,
+            .decoded_bytes = 4096,
+        },
+        {
+            .id = "sample.kick",
+            .path = "samples/kick.wav",
+            .content_sha256 = sample_hash,
+            .cache_key = "sha256:" + sample_hash,
+            .generation = 3,
+            .decoded_bytes = 2048,
+        },
+    };
+
+    auto manifest = create_offline_render_manifest(audio, options);
+    REQUIRE(manifest.has_value());
+    REQUIRE(manifest->resource_set_sha256.size() == 64);
+    REQUIRE(manifest->cache_reusable);
+    REQUIRE(manifest->missing_optional_resources == 0);
+    REQUIRE(manifest->resources.size() == 2);
+    REQUIRE(manifest->resources[0].id == "ir.main");
+    REQUIRE(manifest->resources[1].id == "sample.kick");
+
+    std::reverse(options.resources.begin(), options.resources.end());
+    auto reordered = create_offline_render_manifest(audio, options);
+    REQUIRE(reordered.has_value());
+    REQUIRE(reordered->resource_set_sha256 == manifest->resource_set_sha256);
+    REQUIRE(reordered->render_plan_sha256 == manifest->render_plan_sha256);
+
+    options.resources[0].content_sha256 = std::string(64, 'c');
+    options.resources[0].cache_key = "sha256:" + options.resources[0].content_sha256;
+    auto changed_resource = create_offline_render_manifest(audio, options);
+    REQUIRE(changed_resource.has_value());
+    REQUIRE(changed_resource->audio_sha256 == manifest->audio_sha256);
+    REQUIRE(changed_resource->resource_set_sha256 != manifest->resource_set_sha256);
+    REQUIRE(changed_resource->render_plan_sha256 != manifest->render_plan_sha256);
+}
+
+TEST_CASE("offline render manifests expose missing optional resources",
+          "[audio][offline][manifest][resources][phase4]") {
+    auto audio = make_stereo_fixture();
+
+    OfflineRenderOptions options;
+    options.resources = {
+        {
+            .id = "optional.texture",
+            .path = "missing.wav",
+            .required = false,
+            .staged = false,
+        },
+    };
+
+    auto manifest = create_offline_render_manifest(audio, options);
+    REQUIRE(manifest.has_value());
+    REQUIRE_FALSE(manifest->cache_reusable);
+    REQUIRE(manifest->missing_optional_resources == 1);
+    REQUIRE(manifest->resources[0].id == "optional.texture");
+    REQUIRE_FALSE(manifest->resources[0].staged);
+    REQUIRE(manifest->resource_set_sha256.size() == 64);
+}
+
+TEST_CASE("offline render manifests reject invalid staged resources",
+          "[audio][offline][manifest][resources][phase4]") {
+    auto audio = make_stereo_fixture();
+
+    OfflineRenderOptions options;
+    options.resources = {
+        {
+            .id = "required.sample",
+            .path = "missing.wav",
+            .required = true,
+            .staged = false,
+        },
+    };
+    REQUIRE_FALSE(create_offline_render_manifest(audio, options).has_value());
+
+    options.resources = {
+        {
+            .id = "sample",
+            .path = "sample.wav",
+            .content_sha256 = "not-a-sha",
+            .cache_key = "sample",
+        },
+    };
+    REQUIRE_FALSE(create_offline_render_manifest(audio, options).has_value());
+
+    options.resources = {
+        {.id = "dup", .content_sha256 = std::string(64, 'a'), .cache_key = "a"},
+        {.id = "dup", .content_sha256 = std::string(64, 'b'), .cache_key = "b"},
+    };
+    REQUIRE_FALSE(create_offline_render_manifest(audio, options).has_value());
+}
+
+TEST_CASE("offline render manifests reject invalid artifacts and options",
+          "[audio][offline][manifest][phase4]") {
+    AudioFileData empty;
+    empty.sample_rate = 48000;
+    REQUIRE_FALSE(offline_render_audio_sha256(empty).has_value());
+
+    AudioFileData ragged;
+    ragged.sample_rate = 48000;
+    ragged.channels = {{1.0f, 2.0f}, {3.0f}};
+    REQUIRE_FALSE(offline_render_audio_sha256(ragged).has_value());
+    REQUIRE_FALSE(create_offline_render_manifest(ragged).has_value());
+
+    auto audio = make_stereo_fixture();
+    OfflineRenderOptions bad_options;
+    bad_options.block_size_schedule = {128, 0};
+    REQUIRE_FALSE(create_offline_render_manifest(audio, bad_options).has_value());
+
+    bad_options = {};
+    bad_options.tempo_bpm = 0.0;
+    REQUIRE_FALSE(create_offline_render_manifest(audio, bad_options).has_value());
+}
+
+TEST_CASE("offline render compute policy rejects live audio-thread GPU work",
+          "[audio][offline][gpu-boundary][phase4]") {
+    OfflineRenderComputePolicy policy;
+    policy.scope = OfflineRenderExecutionScope::RealtimeAudioThread;
+    policy.requested_backend = OfflineRenderComputeBackend::Gpu;
+    policy.gpu_available = true;
+
+    auto decision = evaluate_offline_render_compute_policy(policy);
+
+    REQUIRE_FALSE(decision.accepted);
+    REQUIRE_FALSE(decision.uses_gpu());
+    REQUIRE(decision.backend == OfflineRenderComputeBackend::Cpu);
+    REQUIRE(std::string(decision.reason) == "gpu-not-allowed-on-realtime-audio-thread");
+}
+
+TEST_CASE("offline render compute policy accepts GPU only for offline scopes",
+          "[audio][offline][gpu-boundary][phase4]") {
+    OfflineRenderComputePolicy policy;
+    policy.scope = OfflineRenderExecutionScope::OfflineAnalysis;
+    policy.requested_backend = OfflineRenderComputeBackend::Gpu;
+    policy.gpu_available = true;
+
+    auto decision = evaluate_offline_render_compute_policy(policy);
+
+    REQUIRE(decision.accepted);
+    REQUIRE(decision.uses_gpu());
+    REQUIRE(decision.backend == OfflineRenderComputeBackend::Gpu);
+    REQUIRE_FALSE(decision.used_cpu_fallback);
+
+    policy.scope = OfflineRenderExecutionScope::BackgroundAnalysis;
+    decision = evaluate_offline_render_compute_policy(policy);
+    REQUIRE(decision.accepted);
+    REQUIRE(decision.uses_gpu());
+}
+
+TEST_CASE("offline render compute policy makes GPU fallback explicit",
+          "[audio][offline][gpu-boundary][phase4]") {
+    OfflineRenderComputePolicy policy;
+    policy.scope = OfflineRenderExecutionScope::OfflineAnalysis;
+    policy.requested_backend = OfflineRenderComputeBackend::Gpu;
+    policy.gpu_available = false;
+    policy.allow_cpu_fallback = true;
+
+    auto decision = evaluate_offline_render_compute_policy(policy);
+
+    REQUIRE(decision.accepted);
+    REQUIRE_FALSE(decision.uses_gpu());
+    REQUIRE(decision.backend == OfflineRenderComputeBackend::Cpu);
+    REQUIRE(decision.used_cpu_fallback);
+    REQUIRE(std::string(decision.reason) == "gpu-unavailable-cpu-fallback");
+
+    policy.allow_cpu_fallback = false;
+    decision = evaluate_offline_render_compute_policy(policy);
+    REQUIRE_FALSE(decision.accepted);
+    REQUIRE_FALSE(decision.uses_gpu());
+    REQUIRE(std::string(decision.reason) == "gpu-unavailable");
+}
+
+TEST_CASE("offline render compute policy is deterministic for offline analysis",
+          "[audio][offline][gpu-boundary][determinism][phase4]") {
+    const std::vector<OfflineRenderComputePolicy> policies = {
+        {
+            .scope = OfflineRenderExecutionScope::OfflineAnalysis,
+            .requested_backend = OfflineRenderComputeBackend::Cpu,
+            .gpu_available = false,
+            .allow_cpu_fallback = false,
+        },
+        {
+            .scope = OfflineRenderExecutionScope::OfflineAnalysis,
+            .requested_backend = OfflineRenderComputeBackend::Gpu,
+            .gpu_available = true,
+            .allow_cpu_fallback = true,
+        },
+        {
+            .scope = OfflineRenderExecutionScope::BackgroundAnalysis,
+            .requested_backend = OfflineRenderComputeBackend::Gpu,
+            .gpu_available = false,
+            .allow_cpu_fallback = true,
+        },
+        {
+            .scope = OfflineRenderExecutionScope::BackgroundAnalysis,
+            .requested_backend = OfflineRenderComputeBackend::Gpu,
+            .gpu_available = false,
+            .allow_cpu_fallback = false,
+        },
+    };
+
+    for (const auto& policy : policies) {
+        const auto first = evaluate_offline_render_compute_policy(policy);
+        const auto second = evaluate_offline_render_compute_policy(policy);
+
+        REQUIRE(second.accepted == first.accepted);
+        REQUIRE(second.backend == first.backend);
+        REQUIRE(second.used_cpu_fallback == first.used_cpu_fallback);
+        REQUIRE(std::string(second.reason) == std::string(first.reason));
+    }
+}
+
+TEST_CASE("offline render compute policy always accepts CPU requests",
+          "[audio][offline][gpu-boundary][phase4]") {
+    OfflineRenderComputePolicy policy;
+    policy.scope = OfflineRenderExecutionScope::RealtimeAudioThread;
+    policy.requested_backend = OfflineRenderComputeBackend::Cpu;
+    policy.gpu_available = false;
+    policy.allow_cpu_fallback = false;
+
+    auto decision = evaluate_offline_render_compute_policy(policy);
+
+    REQUIRE(decision.accepted);
+    REQUIRE_FALSE(decision.uses_gpu());
+    REQUIRE(decision.backend == OfflineRenderComputeBackend::Cpu);
+    REQUIRE_FALSE(decision.used_cpu_fallback);
 }
 
 TEST_CASE("apply_gain preserves an empty audio container", "[audio][offline][processor-edges]") {

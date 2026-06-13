@@ -5,6 +5,7 @@
 #include <pulp/state/binding.hpp>
 #include <pulp/state/state.hpp>
 #include <pulp/state/state_migration.hpp>
+#include "harness/rt_allocation_probe.hpp"
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -2208,6 +2209,61 @@ TEST_CASE("set_value_rt clamps and the RT queue is lossy under overflow",
     REQUIRE_THAT(store.get_value(1),
                  WithinAbs(static_cast<float>((kOverflowN - 1) % 100) * 0.01,
                            0.001));
+}
+
+TEST_CASE("StateStore exposes RT listener queue telemetry",
+          "[state][listener][rt][telemetry][phase2]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "X", "", {0.0f, 1.0f, 0.0f}));
+
+    auto token = store.add_listener([](ParamID, float) {}, ListenerThread::Main);
+
+    const auto initial = store.rt_listener_queue_telemetry();
+    REQUIRE(initial.size_approx == 0);
+    REQUIRE(initial.capacity > 0);
+    REQUIRE(initial.overflow_count == 0);
+
+    for (std::size_t i = 0; i < initial.capacity; ++i) {
+        store.set_value_rt(1, static_cast<float>(i % 100) * 0.01f);
+    }
+    const auto full = store.rt_listener_queue_telemetry();
+    REQUIRE(full.size_approx == initial.capacity);
+    REQUIRE(full.capacity == initial.capacity);
+    REQUIRE(full.overflow_count == 0);
+
+    store.set_value_rt(1, 0.25f);
+    store.set_value_rt(1, 0.5f);
+    const auto overflow = store.rt_listener_queue_telemetry();
+    REQUIRE(overflow.size_approx == initial.capacity);
+    REQUIRE(overflow.overflow_count == 2);
+
+    store.reset_rt_listener_queue_overflow_count();
+    const auto reset = store.rt_listener_queue_telemetry();
+    REQUIRE(reset.size_approx == initial.capacity);
+    REQUIRE(reset.overflow_count == 0);
+
+    REQUIRE(store.pump_listeners() == initial.capacity);
+    REQUIRE(store.rt_listener_queue_telemetry().size_approx == 0);
+}
+
+TEST_CASE("StateStore RT listener telemetry hot path allocates zero times",
+          "[state][listener][rt][telemetry][rt-safety][phase2]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "X", "", {0.0f, 1.0f, 0.0f}));
+
+    auto token = store.add_listener([](ParamID, float) {}, ListenerThread::Main);
+
+    pulp::test::RtAllocationProbe probe;
+
+    const auto capacity = store.rt_listener_queue_telemetry().capacity;
+    for (std::size_t i = 0; i < capacity; ++i) {
+        store.set_value_rt(1, static_cast<float>(i % 100) * 0.01f);
+    }
+    store.set_value_rt(1, 0.75f);
+    (void)store.rt_listener_queue_telemetry();
+    store.reset_rt_listener_queue_overflow_count();
+
+    REQUIRE_FALSE(probe.saw_allocation());
 }
 
 TEST_CASE("RT-queued changes are skipped when the token was reset before pump",

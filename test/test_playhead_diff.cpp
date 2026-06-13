@@ -151,6 +151,7 @@ TEST_CASE("compute_playhead_changes: first call after construction reports no ch
     REQUIRE_FALSE(ctx.tempo_changed);
     REQUIRE_FALSE(ctx.time_sig_changed);
     REQUIRE_FALSE(ctx.transport_changed);
+    REQUIRE_FALSE(ctx.transport_jump);
 
     REQUIRE(snapshot.has_previous);
     REQUIRE(snapshot.tempo_bpm == 137.5);
@@ -326,4 +327,105 @@ TEST_CASE("compute_playhead_changes: returning to previous values clears the fla
     REQUIRE_FALSE(steady.tempo_changed);
     REQUIRE_FALSE(steady.time_sig_changed);
     REQUIRE_FALSE(steady.transport_changed);
+}
+
+TEST_CASE("compute_playhead_changes: continuous sample-position advance is not a jump",
+          "[format][playhead][phase2][transport-jump]") {
+    PlayheadSnapshot snapshot;
+    ProcessContext seed;
+    seed.sample_rate = 48000.0;
+    seed.num_samples = 256;
+    seed.position_samples = 1024;
+    seed.is_playing = true;
+    compute_playhead_changes(seed, snapshot);
+
+    ProcessContext next;
+    next.sample_rate = 48000.0;
+    next.num_samples = 256;
+    next.position_samples = 1280;
+    next.is_playing = true;
+    compute_playhead_changes(next, snapshot);
+
+    REQUIRE_FALSE(next.transport_jump);
+}
+
+TEST_CASE("compute_playhead_changes: playing sample-position discontinuity is a jump",
+          "[format][playhead][phase2][transport-jump]") {
+    PlayheadSnapshot snapshot;
+    ProcessContext seed;
+    seed.sample_rate = 48000.0;
+    seed.num_samples = 256;
+    seed.position_samples = 1024;
+    seed.is_playing = true;
+    compute_playhead_changes(seed, snapshot);
+
+    ProcessContext next;
+    next.sample_rate = 48000.0;
+    next.num_samples = 256;
+    next.position_samples = 4096;
+    next.is_playing = true;
+    compute_playhead_changes(next, snapshot);
+
+    REQUIRE(next.transport_jump);
+    REQUIRE_FALSE(next.transport_changed);
+}
+
+TEST_CASE("compute_playhead_changes: stopped sample-position change is a jump",
+          "[format][playhead][phase2][transport-jump]") {
+    PlayheadSnapshot snapshot;
+    ProcessContext seed;
+    seed.position_samples = 2048;
+    seed.is_playing = false;
+    compute_playhead_changes(seed, snapshot);
+
+    ProcessContext next;
+    next.position_samples = 1024;
+    next.is_playing = false;
+    compute_playhead_changes(next, snapshot);
+
+    REQUIRE(next.transport_jump);
+    REQUIRE_FALSE(next.transport_changed);
+}
+
+TEST_CASE("compute_playhead_changes: transport edge with continuous sample advance is not a jump",
+          "[format][playhead][phase2][transport-jump]") {
+    PlayheadSnapshot snapshot;
+    ProcessContext seed;
+    seed.sample_rate = 48000.0;
+    seed.num_samples = 256;
+    seed.position_samples = 1024;
+    seed.is_playing = true;
+    compute_playhead_changes(seed, snapshot);
+
+    ProcessContext stopped;
+    stopped.sample_rate = 48000.0;
+    stopped.num_samples = 256;
+    stopped.position_samples = 1280;
+    stopped.is_playing = false;
+    compute_playhead_changes(stopped, snapshot);
+
+    REQUIRE(stopped.transport_changed);
+    REQUIRE_FALSE(stopped.transport_jump);
+}
+
+TEST_CASE("compute_playhead_changes: beat-position fallback distinguishes continuous advance",
+          "[format][playhead][phase2][transport-jump]") {
+    PlayheadSnapshot snapshot;
+    ProcessContext seed;
+    seed.sample_rate = 48000.0;
+    seed.num_samples = 480;
+    seed.tempo_bpm = 120.0;
+    seed.position_beats = 4.0;
+    seed.is_playing = true;
+    compute_playhead_changes(seed, snapshot);
+
+    ProcessContext next = seed;
+    next.position_beats = 4.02;
+    compute_playhead_changes(next, snapshot);
+    REQUIRE_FALSE(next.transport_jump);
+
+    ProcessContext jumped = next;
+    jumped.position_beats = 8.0;
+    compute_playhead_changes(jumped, snapshot);
+    REQUIRE(jumped.transport_jump);
 }

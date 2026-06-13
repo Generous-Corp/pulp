@@ -129,10 +129,11 @@ private:
 ///     seq, or a WinMM thread). Subscriber callbacks therefore must
 ///     be thread-tolerant; subscribers that need UI-thread marshalling
 ///     should hop themselves.
-///   - `cpu_load()` and `peak_cpu_load()` are safe to read from any
-///     thread. `begin_cpu_measure()` / `end_cpu_measure()` are intended
-///     to be called from the audio thread, mirroring
-///     `AudioProcessLoadMeasurer`.
+///   - `cpu_load()`, `peak_cpu_load()`, and `process_load_snapshot()`
+///     are safe to read from any thread. `begin_cpu_measure()` /
+///     `end_cpu_measure()` are intended to be called from the audio
+///     thread, mirroring `AudioProcessLoadMeasurer`, and do not take
+///     a manager mutex.
 class AudioDeviceManager {
 public:
     using MidiHandler = std::function<void(const pulp::midi::MidiEvent&)>;
@@ -216,8 +217,21 @@ public:
     /// Peak CPU load since last `reset_peak_cpu_load()`.
     float peak_cpu_load() const;
 
+    /// Latest process-load telemetry. Safe to poll from UI/diagnostic
+    /// threads; fields are relaxed latest-value counters.
+    AudioProcessLoadSnapshot process_load_snapshot() const;
+
     /// Reset the peak tracker.
     void reset_peak_cpu_load();
+
+    /// Manager-owned runtime telemetry that combines callback load and
+    /// backend xrun/overload counters for live tools.
+    struct RuntimeTelemetrySnapshot {
+        AudioProcessLoadSnapshot process_load;
+        std::uint64_t xrun_count = 0;
+    };
+
+    RuntimeTelemetrySnapshot runtime_telemetry_snapshot() const;
 
     // ── Lifecycle / hotplug / recovery (1.2b) ───────────────────────
 
@@ -444,12 +458,6 @@ private:
 
     AudioSystem*                                    attached_system_ = nullptr;
 
-    /// CPU-load mutex protects begin/end against load() readers on
-    /// other threads. The measurer itself is not thread-safe, so we
-    /// guard every access. Contention is negligible — readers are UI
-    /// thread polling once per frame, begin/end runs once per audio
-    /// callback.
-    mutable std::mutex                           load_mu_;
     AudioProcessLoadMeasurer                     load_;
 
     /// Latch state. `closed_` flips true in `latch_close()` and stays

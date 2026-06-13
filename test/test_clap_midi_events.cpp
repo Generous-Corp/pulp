@@ -167,6 +167,21 @@ public:
 class CapturingProcessor : public Processor {
 public:
     static constexpr state::ParamID kParamId = 9001;
+    static constexpr std::size_t kMaxCapturedSysex = 8;
+    static constexpr std::size_t kMaxCapturedSysexBytes = 256;
+
+    struct CapturedSysex {
+        std::array<uint8_t, kMaxCapturedSysexBytes> data{};
+        std::size_t size = 0;
+        int32_t sample_offset = 0;
+        double timestamp = 0.0;
+    };
+
+    CapturingProcessor() {
+        captured_midi.reserve_events(32);
+        captured_ump.reserve(32);
+        captured_param_events.reserve(32);
+    }
 
     bool opts_mpe = false;
     bool opts_ump = false;
@@ -175,6 +190,8 @@ public:
 
     // Mutable state captured each time process() runs.
     mutable midi::MidiBuffer captured_midi;
+    mutable std::array<CapturedSysex, kMaxCapturedSysex> captured_sysex{};
+    mutable std::size_t captured_sysex_count = 0;
     mutable std::vector<midi::UmpEvent> captured_ump;
     mutable std::vector<state::ParameterEvent> captured_param_events;
     mutable bool had_mpe_input = false;
@@ -277,6 +294,37 @@ public:
             state().set_value_rt(kParamId, process_param_value);
         }
     }
+};
+
+class ProcessBuffersCapturingProcessor : public CapturingProcessor {
+public:
+    using CapturingProcessor::process;
+
+    void process(ProcessBuffers& audio,
+                 midi::MidiBuffer& midi_in,
+                 midi::MidiBuffer& midi_out,
+                 const ProcessContext& context) override {
+        ++process_buffer_calls;
+        captured_input_bus_count = static_cast<int>(audio.inputs.size());
+        captured_output_bus_count = static_cast<int>(audio.outputs.size());
+        captured_active_input_bus_count = static_cast<int>(audio.inputs.active_count());
+        captured_active_output_bus_count = static_cast<int>(audio.outputs.active_count());
+        saw_process_buffer_sidechain =
+            audio.inputs.sidechain() != nullptr && audio.inputs.sidechain()->active();
+        process_buffer_layouts_match = audio.layouts_match_descriptors();
+        process_buffer_storage_valid = audio.active_buses_have_storage();
+
+        Processor::process(audio, midi_in, midi_out, context);
+    }
+
+    int process_buffer_calls = 0;
+    int captured_input_bus_count = 0;
+    int captured_output_bus_count = 0;
+    int captured_active_input_bus_count = 0;
+    int captured_active_output_bus_count = 0;
+    bool saw_process_buffer_sidechain = false;
+    bool process_buffer_layouts_match = false;
+    bool process_buffer_storage_valid = false;
 };
 
 // Emits a pre-programmed set of MIDI events on midi_out so we can test
@@ -552,16 +600,43 @@ public:
     }
 };
 
+class LatencyTailProcessor : public Processor {
+public:
+    PluginDescriptor descriptor() const override {
+        PluginDescriptor d;
+        d.name = "LatencyTailCLAP";
+        d.manufacturer = "PulpTest";
+        d.bundle_id = "com.pulp.test.clap.latency-tail";
+        d.version = "1.0.0";
+        d.tail_samples = tail_samples;
+        return d;
+    }
+    void define_parameters(state::StateStore&) override {}
+    void prepare(const PrepareContext&) override {}
+    void process(audio::BufferView<float>&,
+                 const audio::BufferView<const float>&,
+                 midi::MidiBuffer&,
+                 midi::MidiBuffer&,
+                 const ProcessContext&) override {}
+    int latency_samples() const override { return latency; }
+
+    int latency = 0;
+    int tail_samples = 0;
+};
+
 // Processor factory hooks have to be raw function pointers. Route through
 // singletons so the tests can configure the active processor before the
 // adapter instantiates one.
 CapturingProcessor* g_capturing = nullptr;
+ProcessBuffersCapturingProcessor* g_process_buffers_capturing = nullptr;
 EmittingProcessor*  g_emitting  = nullptr;
 ObservingMidiInProcessor* g_observing_midi_in = nullptr;
 ObservingParamIngressProcessor* g_observing_param_ingress = nullptr;
 ObservingSidecarProcessor* g_observing_sidecar = nullptr;
 OverflowingMidiOutProcessor* g_overflowing_midi_out = nullptr;
 ForwardingSysexProcessor* g_forwarding_sysex = nullptr;
+int g_pending_latency_samples = 0;
+int g_pending_tail_samples = 0;
 bool g_pending_opts_mpe = false;
 bool g_pending_opts_ump = false;
 bool g_pending_opts_node_mpe = false;
@@ -573,6 +648,21 @@ std::vector<midi::MidiBuffer::SysexEvent> g_pending_sysex;
 std::unique_ptr<Processor> make_capturing() {
     auto up = std::make_unique<CapturingProcessor>();
     g_capturing = up.get();
+    if (g_pending_opts_mpe) up->opts_mpe = true;
+    if (g_pending_opts_ump) up->opts_ump = true;
+    if (g_pending_opts_node_mpe) up->opts_node_mpe = true;
+    if (g_pending_opts_node_ump) up->opts_node_ump = true;
+    g_pending_opts_mpe = false;
+    g_pending_opts_ump = false;
+    g_pending_opts_node_mpe = false;
+    g_pending_opts_node_ump = false;
+    return up;
+}
+
+std::unique_ptr<Processor> make_process_buffers_capturing() {
+    auto up = std::make_unique<ProcessBuffersCapturingProcessor>();
+    g_capturing = up.get();
+    g_process_buffers_capturing = up.get();
     if (g_pending_opts_mpe) up->opts_mpe = true;
     if (g_pending_opts_ump) up->opts_ump = true;
     if (g_pending_opts_node_mpe) up->opts_node_mpe = true;
@@ -627,6 +717,15 @@ std::unique_ptr<Processor> make_overflowing_midi_out() {
 std::unique_ptr<Processor> make_forwarding_sysex() {
     auto up = std::make_unique<ForwardingSysexProcessor>();
     g_forwarding_sysex = up.get();
+    return up;
+}
+
+std::unique_ptr<Processor> make_latency_tail() {
+    auto up = std::make_unique<LatencyTailProcessor>();
+    up->latency = g_pending_latency_samples;
+    up->tail_samples = g_pending_tail_samples;
+    g_pending_latency_samples = 0;
+    g_pending_tail_samples = 0;
     return up;
 }
 
@@ -755,6 +854,23 @@ TEST_CASE("CLAP lifecycle forwards prepare/release and handles no-op callbacks",
     g_capturing = nullptr;
 }
 
+TEST_CASE("CLAP latency and tail extensions report processor runtime contract",
+          "[clap][latency][tail][phase2]") {
+    g_pending_latency_samples = 256;
+    g_pending_tail_samples = 4096;
+    Harness finite(make_latency_tail);
+    REQUIRE(clap_generic::latency_get(&finite.plugin.plugin) == 256u);
+    REQUIRE(clap_generic::tail_get(&finite.plugin.plugin) == 4096u);
+
+    finite.deactivate();
+
+    g_pending_latency_samples = -128;
+    g_pending_tail_samples = -1;
+    Harness infinite(make_latency_tail);
+    REQUIRE(clap_generic::latency_get(&infinite.plugin.plugin) == 0u);
+    REQUIRE(clap_generic::tail_get(&infinite.plugin.plugin) == UINT32_MAX);
+}
+
 TEST_CASE("CLAP init and process fail cleanly without a processor",
           "[clap][lifecycle]") {
     clap_adapter::PulpClapPlugin init_plugin;
@@ -866,6 +982,39 @@ TEST_CASE("CLAP parameter modulation applies for one block then resets",
     REQUIRE(g_capturing->captured_modulated_value == 0.0f);
 }
 
+TEST_CASE("CLAP parameter modulation projects to the typed global lane",
+          "[clap][params][modulation][lane][phase3]") {
+    g_pending_opts_mpe = false;
+    g_pending_opts_ump = false;
+    Harness h(make_capturing);
+
+    clap_event_param_mod_t mod{};
+    mod.header = make_header(sizeof(mod), CLAP_EVENT_PARAM_MOD, 5);
+    mod.param_id = CapturingProcessor::kParamId;
+    mod.note_id = 123;
+    mod.port_index = 0;
+    mod.channel = 2;
+    mod.key = 64;
+    mod.amount = 0.375;
+
+    state::ModulationLane lane;
+    REQUIRE(clap_adapter::clap_param_modulation_lane(h.plugin, mod, lane));
+    REQUIRE(lane.source.id == clap_adapter::kClapHostModulationSourceId);
+    REQUIRE(lane.source.scope == state::ModulationScope::Global);
+    REQUIRE(lane.source.rate == state::ModulationRate::Control);
+    REQUIRE(lane.target.param_id == CapturingProcessor::kParamId);
+    REQUIRE(lane.target.scope == state::ModulationScope::Global);
+    REQUIRE(lane.target.param_rate == state::ParamRate::ControlRate);
+    REQUIRE(lane.target.modulatable);
+    REQUIRE(lane.target.writable);
+    REQUIRE(lane.mix == state::ModulationMixMode::Add);
+    REQUIRE(lane.depth == 0.375f);
+    REQUIRE(state::validate_modulation_lane(lane).accepted);
+
+    mod.param_id = CapturingProcessor::kParamId + 1;
+    REQUIRE_FALSE(clap_adapter::clap_param_modulation_lane(h.plugin, mod, lane));
+}
+
 TEST_CASE("CLAP gesture events forward through StateStore callbacks",
           "[clap][params][gesture]") {
     g_pending_opts_mpe = false;
@@ -932,6 +1081,42 @@ TEST_CASE("CLAP routes sidechain input and clears secondary output buses",
     REQUIRE(std::all_of(aux_right.begin(), aux_right.end(), [](float v) { return v == 0.0f; }));
 }
 
+TEST_CASE("CLAP supplies ProcessBuffers to processors that override the richer surface",
+          "[clap][audio][process-buffers][phase2]") {
+    g_pending_opts_mpe = false;
+    g_pending_opts_ump = false;
+    Harness h(make_process_buffers_capturing);
+
+    std::vector<float> sc_left(Harness::kFrames, 0.25f);
+    std::vector<float> sc_right(Harness::kFrames, -0.5f);
+    float* sc_ptrs[2] = {sc_left.data(), sc_right.data()};
+    clap_audio_buffer_t sidechain{};
+    sidechain.data32 = sc_ptrs;
+    sidechain.channel_count = 2;
+
+    clap_audio_buffer_t inputs[2] = {h.audio_in, sidechain};
+    REQUIRE(h.run_custom(nullptr, nullptr,
+                         inputs, 2,
+                         &h.audio_out, 1) == CLAP_PROCESS_CONTINUE);
+
+    REQUIRE(g_process_buffers_capturing != nullptr);
+    REQUIRE(g_process_buffers_capturing->process_buffer_calls == 1);
+    REQUIRE(g_process_buffers_capturing->captured_input_bus_count == 2);
+    REQUIRE(g_process_buffers_capturing->captured_output_bus_count == 1);
+    REQUIRE(g_process_buffers_capturing->captured_active_input_bus_count == 2);
+    REQUIRE(g_process_buffers_capturing->captured_active_output_bus_count == 1);
+    REQUIRE(g_process_buffers_capturing->saw_process_buffer_sidechain);
+    REQUIRE(g_process_buffers_capturing->process_buffer_layouts_match);
+    REQUIRE(g_process_buffers_capturing->process_buffer_storage_valid);
+
+    REQUIRE(g_capturing->process_count == 1);
+    REQUIRE(g_capturing->had_sidechain_input);
+    REQUIRE(g_capturing->captured_sidechain_channels == 2);
+    REQUIRE(g_capturing->captured_sidechain_first_sample == 0.25f);
+    REQUIRE(g_capturing->captured_sidechain_second_sample == -0.5f);
+    REQUIRE(g_capturing->sidechain_input() == nullptr);
+}
+
 TEST_CASE("CLAP treats inactive or partial sidechain buses as disconnected",
           "[clap][audio][sidechain]") {
     g_pending_opts_mpe = false;
@@ -987,11 +1172,54 @@ TEST_CASE("CLAP transport state maps into ProcessContext",
                          &transport) == CLAP_PROCESS_CONTINUE);
 
     REQUIRE(g_capturing->captured_context.is_playing);
+    REQUIRE(g_capturing->captured_context.process_mode == ProcessMode::Realtime);
+    REQUIRE(g_capturing->captured_context.render_speed_hint ==
+            RenderSpeedHint::Realtime);
+    REQUIRE_FALSE(g_capturing->captured_context.is_offline());
+    REQUIRE_FALSE(g_capturing->captured_context.allows_offline_quality_work());
+    REQUIRE_FALSE(g_capturing->captured_context.is_maintenance_render());
     REQUIRE(g_capturing->captured_context.tempo_bpm == 132.25);
     REQUIRE(g_capturing->captured_context.position_beats == 12.5);
     REQUIRE(g_capturing->captured_context.time_sig_numerator == 7);
     REQUIRE(g_capturing->captured_context.time_sig_denominator == 8);
     REQUIRE(g_capturing->captured_context.num_samples == static_cast<int>(Harness::kFrames));
+}
+
+TEST_CASE("CLAP transport jumps request processor reset through ProcessContext",
+          "[clap][transport][reset][phase2]") {
+    g_pending_opts_mpe = false;
+    g_pending_opts_ump = false;
+    Harness h(make_capturing);
+
+    clap_event_transport_t transport{};
+    transport.header = make_header(sizeof(transport), CLAP_EVENT_TRANSPORT, 0);
+    transport.flags = CLAP_TRANSPORT_IS_PLAYING
+                    | CLAP_TRANSPORT_HAS_TEMPO
+                    | CLAP_TRANSPORT_HAS_BEATS_TIMELINE;
+    transport.tempo = 87.890625;  // 64 frames at 48 kHz advances exactly 1/512 beat.
+
+    auto run_at_beats = [&](clap_beattime beat_position) {
+        transport.song_pos_beats = beat_position;
+        REQUIRE(h.run_custom(nullptr, nullptr,
+                             &h.audio_in, 1,
+                             &h.audio_out, 1,
+                             Harness::kFrames,
+                             &transport) == CLAP_PROCESS_CONTINUE);
+        return g_capturing->captured_context;
+    };
+
+    const auto first = run_at_beats(8 * CLAP_BEATTIME_FACTOR);
+    REQUIRE_FALSE(first.transport_jump);
+    REQUIRE_FALSE(first.should_reset_dsp_state());
+
+    const auto continuous =
+        run_at_beats(8 * CLAP_BEATTIME_FACTOR + CLAP_BEATTIME_FACTOR / 512);
+    REQUIRE_FALSE(continuous.transport_jump);
+    REQUIRE_FALSE(continuous.should_reset_dsp_state());
+
+    const auto jumped = run_at_beats(10 * CLAP_BEATTIME_FACTOR);
+    REQUIRE(jumped.transport_jump);
+    REQUIRE(jumped.should_reset_dsp_state());
 }
 
 TEST_CASE("CLAP item-1.3 transport extensions land on ProcessContext",
@@ -1840,7 +2068,7 @@ TEST_CASE("CLAP_EVENT_MIDI_SYSEX with empty payload is dropped",
     events.push(ev);
 
     REQUIRE(h.run(events) == CLAP_PROCESS_CONTINUE);
-    REQUIRE(g_capturing->captured_midi.sysex().empty());
+    REQUIRE(g_capturing->captured_sysex_count == 0);
     REQUIRE(g_capturing->captured_midi.empty());
 }
 

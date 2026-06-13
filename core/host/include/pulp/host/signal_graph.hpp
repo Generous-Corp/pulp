@@ -19,7 +19,9 @@
 #include <pulp/audio/buffer.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
+#include <pulp/runtime/budget_policy.hpp>
 #include <pulp/runtime/triple_buffer.hpp>
+#include <pulp/state/modulation_lane.hpp>
 #include <atomic>
 #include <functional>
 #include <memory>
@@ -28,6 +30,7 @@
 #include <string>
 #include <string_view>
 #include <cstdint>
+#include <cstddef>
 
 namespace pulp::host {
 
@@ -170,6 +173,59 @@ struct GraphNode {
 
 class SignalGraph {
 public:
+    struct GraphLimits {
+        std::size_t max_nodes = 4096;
+        std::size_t max_connections = 16384;
+        std::size_t max_ports = 32768;
+        int max_block_size = 16384;
+        // Deterministic generated-graph work-unit budget. This is not a
+        // hardware CPU-cycle estimate; it is a stable shape/block-size score
+        // for importers that need to reject expensive generated graphs before
+        // prepare(). Zero disables the budget.
+        std::size_t max_estimated_work_units = 0;
+    };
+
+    enum class GeneratedGraphValidationRejectReason : uint8_t {
+        None,
+        InvalidBlockSize,
+        MaxBlockSizeExceeded,
+        NodeLimitExceeded,
+        ConnectionLimitExceeded,
+        PortLimitExceeded,
+        EstimatedWorkExceeded,
+    };
+
+    struct GeneratedGraphValidation {
+        bool accepted = true;
+        GeneratedGraphValidationRejectReason reason =
+            GeneratedGraphValidationRejectReason::None;
+        std::size_t actual = 0;
+        std::size_t limit = 0;
+    };
+
+    struct PreparedStats {
+        std::size_t node_count = 0;
+        std::size_t ordered_node_count = 0;
+        std::size_t connection_count = 0;
+        std::size_t total_ports = 0;
+        int max_block_size = 0;
+        std::size_t node_audio_buffer_bytes = 0;
+        std::size_t automation_buffer_bytes = 0;
+        std::size_t delay_buffer_bytes = 0;
+        std::size_t total_prepared_buffer_bytes = 0;
+    };
+
+    struct RuntimeBudgetReport {
+        runtime::RuntimeBudgetDecision decision{};
+        runtime::RuntimeBudgetFrameStats frame_stats{};
+        std::uint64_t estimated_cost = 0;
+        bool prepared = false;
+
+        bool should_run_optional_work() const noexcept {
+            return decision.should_run();
+        }
+    };
+
     SignalGraph() = default;
 
     // Add nodes — returns the node ID
@@ -276,13 +332,20 @@ public:
 
     // Audio-rate modulation connection: source audio samples drive every
     // sample of an AudioRate destination parameter. This edge is distinct
-    // from sparse automation above; it is accepted only for continuous
-    // automatable parameters whose HostParamInfo::rate is AudioRate.
+    // from sparse automation above; it is accepted only when the edge can be
+    // represented as a valid GraphNode-scoped state::ModulationLane targeting
+    // a continuous AudioRate destination parameter.
     bool connect_audio_rate_modulation(NodeId src, PortIndex src_audio_port,
                                        NodeId dest, uint32_t dest_param_id,
                                        float range_lo, float range_hi,
                                        float smoothing_ms = 0.0f,
                                        AutomationMix mix = AutomationMix::Replace);
+
+    // Project an accepted graph audio-rate modulation edge into the typed
+    // modulation-lane contract used by instruments, adapters, and generated
+    // graphs. Returns false for non-modulation edges or unresolved metadata.
+    bool audio_rate_modulation_lane(const Connection& connection,
+                                    state::ModulationLane& lane) const;
 
     // Inject a MIDI buffer into a MidiInput source node. Call before
     // process(); the events become that node's MIDI output this block.
@@ -310,6 +373,19 @@ public:
     // Lifecycle
     bool prepare(double sample_rate, int max_block_size);
     void release();
+
+    // Prepare-time topology bounds. Hosts that accept generated or user-built
+    // graphs can lower these before prepare() so oversized graphs fail before
+    // snapshot allocation or plugin prepare.
+    void set_limits(GraphLimits limits);
+    GraphLimits limits() const { return limits_; }
+    std::size_t estimate_generated_graph_work_units(int max_block_size) const;
+    GeneratedGraphValidation validate_generated_graph(int max_block_size) const;
+    PreparedStats prepared_stats() const;
+    RuntimeBudgetReport evaluate_optional_runtime_budget(
+        runtime::RuntimeBudgetFrame& frame,
+        runtime::RuntimeWorkLane lane = runtime::RuntimeWorkLane::Background,
+        bool required = false) const noexcept;
 
     // Process one block of audio through the graph
     void process(audio::BufferView<float>& output,
@@ -379,7 +455,15 @@ private:
         std::vector<float> input_data;
         std::vector<float*> input_ptrs;
         std::vector<const float*> input_const_ptrs;
+        struct EdgeRef {
+            size_t connection_index = 0;
+            NodeRuntime* source_runtime = nullptr;
+        };
         std::unique_ptr<std::atomic<float>> gain;
+        std::vector<EdgeRef> inbound_midi_edges;
+        std::vector<EdgeRef> inbound_audio_edges;
+        std::vector<EdgeRef> sparse_automation_edges;
+        std::vector<EdgeRef> audio_rate_modulation_edges;
 
         // PDC: cumulative samples of latency from AudioInput to this node's
         // input ports (input_latency) and output ports (output_latency).
@@ -396,14 +480,14 @@ private:
         std::vector<ParamBounds> param_bounds;
 
         struct SparseAutomationAccum {
-            uint32_t id = 0;
             float v0 = 0.0f;
             float vN = 0.0f;
             float lo = 0.0f;
             float hi = 1.0f;
             bool has_add = false;
-            bool active = false;
+            bool touched = false;
         };
+        std::vector<uint32_t> sparse_automation_param_ids;
         std::vector<SparseAutomationAccum> sparse_automation_accum;
 
         // MIDI scratch is audio-thread-owned. Control-thread ingress and
@@ -422,15 +506,15 @@ private:
         // Audio-rate modulation scratch. Each listed param gets one
         // max-block-sized slice in audio_rate_param_data, filled immediately
         // before the destination plugin processes.
-        std::vector<uint32_t> audio_rate_param_ids;
-        std::vector<float> audio_rate_param_data;
-        struct DenseModulationAccum {
+        struct DenseAutomationAccum {
             float lo = 0.0f;
             float hi = 1.0f;
             bool has_replace = false;
             bool has_add = false;
         };
-        std::vector<DenseModulationAccum> audio_rate_accum;
+        std::vector<uint32_t> audio_rate_param_ids;
+        std::vector<float> audio_rate_param_data;
+        std::vector<DenseAutomationAccum> audio_rate_accum;
     };
 
     // One delay line per graph connection, parallel to connections_. Used to
@@ -473,6 +557,7 @@ private:
     struct CompiledGraph {
         std::vector<NodeId> order;
         std::vector<Connection> connections;
+        std::vector<NodeRuntime::EdgeRef> feedback_edges;
         std::vector<ConnectionDelay> connection_delays;  // parallel to connections
         // Runtime + plugin + node-info keyed by NodeId so we don't rely on
         // pointers into an outer container.
@@ -484,7 +569,13 @@ private:
             int num_input_ports;
             int num_output_ports;
         };
+        struct OrderedRuntime {
+            NodeId id = 0;
+            NodeShape shape{};
+            NodeRuntime* runtime = nullptr;
+        };
         std::unordered_map<NodeId, NodeShape> shapes;
+        std::vector<OrderedRuntime> ordered_runtime;
         int max_block_size = 0;
         double sample_rate = 0.0;  // item 4.6 — needed to convert
                                    // automation_smoothing_ms into samples.
@@ -497,6 +588,7 @@ private:
     std::unordered_map<std::string, CustomNodeType> custom_node_types_;
     NodeId next_id_ = 1;
     std::vector<std::weak_ptr<CompiledGraph>> retired_snapshots_;
+    GraphLimits limits_;
 
     // Audio-thread snapshot, published by prepare() / mutators. Uses the
     // deprecated-but-supported std::atomic_store/atomic_load free-function
@@ -504,9 +596,21 @@ private:
     // specialize std::atomic<std::shared_ptr<T>>. Acquire/release semantics.
     std::shared_ptr<CompiledGraph> live_;
     std::atomic<int64_t> total_latency_samples_{0};  // reflected for const-query access
+    std::atomic<std::size_t> prepared_node_count_{0};
+    std::atomic<std::size_t> prepared_ordered_node_count_{0};
+    std::atomic<std::size_t> prepared_connection_count_{0};
+    std::atomic<std::size_t> prepared_total_ports_{0};
+    std::atomic<int> prepared_max_block_size_{0};
+    std::atomic<std::size_t> prepared_node_audio_buffer_bytes_{0};
+    std::atomic<std::size_t> prepared_automation_buffer_bytes_{0};
+    std::atomic<std::size_t> prepared_delay_buffer_bytes_{0};
+    std::atomic<std::size_t> prepared_total_buffer_bytes_{0};
 
     bool has_path(NodeId from, NodeId to) const;
+    std::size_t total_declared_ports_() const;
     std::shared_ptr<CompiledGraph> compile_(double sample_rate, int max_block_size);
+    void publish_prepared_stats_(const CompiledGraph& cg);
+    void clear_prepared_stats_();
     void invalidate_live_();
     void retire_snapshot_(std::shared_ptr<CompiledGraph> snapshot);
     void prune_retired_snapshots_();

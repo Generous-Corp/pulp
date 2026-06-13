@@ -138,12 +138,17 @@ CLI shortcuts (resolve the standalone binary + set the env vars for you):
 ```bash
 pulp run --audio-inspector                    # open the live inspector window
 pulp run --audio-probe-json /tmp/probe.json   # headless: dump probe JSON + exit
+pulp run --audio-scope-json /tmp/scope.json   # headless: dump live sample-window scope JSON + exit
+pulp audio scope --input-wav out.wav --json /tmp/scope.json --png /tmp/scope.png
 ```
 
-For MCP clients, use the existing `pulp-mcp` tool `pulp_audio_probe_json`
-instead of creating a new MCP server. It is a one-shot wrapper around
+For MCP clients, use the existing `pulp-mcp` tools instead of creating a new
+MCP server. `pulp_audio_probe_json` is a one-shot wrapper around
 `pulp run --audio-probe-json`, accepts optional `target` and `frames`, and
-returns the probe object as `structuredContent`.
+returns scalar probe counters as `structuredContent`. `pulp_audio_scope`
+returns `pulp.audio.scope.v1` sample-window acquisition/measurements; live
+target mode may open the audio device, while `input_wav` mode is speakerless
+offline and can also write a PNG artifact.
 
 Agent triage pattern:
 
@@ -158,8 +163,10 @@ Agent triage pattern:
 5. If `clip_count`/`clipped_blocks` or `nan_inf_count`/`nan_blocks` are non-zero,
    prioritize DSP/gain/state initialization bugs.
 6. If the live snapshot is healthy but the user says the sound is wrong, switch
-   to an offline render + Audio Doctor; this probe cannot prove THD, response,
-   phase, latency, or perceptual quality.
+   to `pulp_audio_scope` / `pulp audio scope --input-wav` for sample-window
+   facts, or to an offline render + Audio Doctor for THD/response/residual
+   checks. The scalar probe cannot prove THD, response, phase, latency, or
+   perceptual quality.
 
 `--audio-probe-json` is the **programmatic readout** for agents: it writes
 `output_probe().latest()` (+ the `AudioStats` subset) as a flat JSON object —

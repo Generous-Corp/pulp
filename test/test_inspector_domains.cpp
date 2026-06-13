@@ -19,6 +19,8 @@
 #include <pulp/state/store.hpp>
 #include <choc/containers/choc_Value.h>
 
+#include <algorithm>
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -292,6 +294,42 @@ TEST_CASE("DomainHandler: Audio domain exposes config and MIDI log") {
     REQUIRE(midi.params_json.find("60") != std::string::npos);
     REQUIRE(midi.params_json.find("\"description\"") != std::string::npos);
     REQUIRE(midi.params_json.find("Note On C4") != std::string::npos);
+
+    pulp::audio::AudioProcessLoadSnapshot load;
+    load.load = 0.2f;
+    load.peak_load = 0.6f;
+    load.last_load = 0.4f;
+    load.elapsed_ns = 2000;
+    load.available_ns = 10000;
+    load.callback_count = 4;
+    load.overload_count = 1;
+    audio.set_runtime_telemetry(load, 2);
+
+    auto telemetry = handler.handle(make_request(4, methods::kAudioRuntimeTelemetry));
+    REQUIRE_FALSE(telemetry.is_error);
+    auto compact_json = telemetry.params_json;
+    compact_json.erase(
+        std::remove_if(compact_json.begin(), compact_json.end(), [](unsigned char c) {
+            return std::isspace(c);
+        }),
+        compact_json.end());
+    REQUIRE(compact_json.find("\"available\"") != std::string::npos);
+    REQUIRE(compact_json.find("\"xrun_count\":2") != std::string::npos);
+    REQUIRE(compact_json.find("\"process_load\"") != std::string::npos);
+    REQUIRE(compact_json.find("\"callback_count\":4") != std::string::npos);
+    REQUIRE(compact_json.find("\"overload_count\":1") != std::string::npos);
+
+    audio.clear_runtime_telemetry();
+    telemetry = handler.handle(make_request(5, methods::kAudioRuntimeTelemetry));
+    REQUIRE_FALSE(telemetry.is_error);
+    compact_json = telemetry.params_json;
+    compact_json.erase(
+        std::remove_if(compact_json.begin(), compact_json.end(), [](unsigned char c) {
+            return std::isspace(c);
+        }),
+        compact_json.end());
+    REQUIRE(compact_json.find("\"available\"") != std::string::npos);
+    REQUIRE(compact_json.find("\"xrun_count\":0") != std::string::npos);
 
     auto unknown = handler.handle(make_request(4, "Audio.unknown"));
     REQUIRE(unknown.is_error);

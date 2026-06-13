@@ -211,6 +211,19 @@ struct ListenerRegistry : std::enable_shared_from_this<ListenerRegistry> {
         }
         return drained;
     }
+
+    RtListenerQueueTelemetry rt_queue_telemetry() const {
+        const auto telemetry = pending_rt.telemetry();
+        return {
+            .size_approx = telemetry.size_approx,
+            .capacity = telemetry.capacity,
+            .overflow_count = telemetry.overflow_count,
+        };
+    }
+
+    void reset_rt_queue_overflow_count() {
+        pending_rt.reset_overflow_count();
+    }
 };
 
 } // namespace detail
@@ -296,6 +309,15 @@ void StateStore::set_normalized_rt(ParamID id, float normalized) {
 std::size_t StateStore::pump_listeners() {
     if (!registry_) return 0;
     return registry_->drain_main_listeners();
+}
+
+RtListenerQueueTelemetry StateStore::rt_listener_queue_telemetry() const {
+    if (!registry_) return {};
+    return registry_->rt_queue_telemetry();
+}
+
+void StateStore::reset_rt_listener_queue_overflow_count() {
+    if (registry_) registry_->reset_rt_queue_overflow_count();
 }
 
 float StateStore::get_normalized(ParamID id) const {

@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "host": "REAPER",
+  "format": "VST3",
+  "daw_version": "7.74/macOS-arm64",
+  "os": "macOS 26.5.1 arm64",
+  "date": "2026-06-12",
+  "script": "06-reaper-vst3.md",
+  "pulp_commit": "1ed767e69251",
+  "plugin_version": "1.0.0",
+  "result_markdown": "06-reaper-vst3.md",
+  "logs": ["logs/REAPER-VST3-20260612T172051Z-pid5104.log"],
+  "capabilities": [
+    {
+      "capability": "load",
+      "observed": "Confirmed",
+      "notes": "The checked-in log contains session_start, define_parameters, and prepare events for the VST3 instance."
+    },
+    {
+      "capability": "params",
+      "observed": "Confirmed",
+      "notes": "The checked-in log contains define_parameters and serialize_plugin_state events."
+    },
+    {
+      "capability": "sidechain",
+      "observed": "Confirmed",
+      "notes": "The checked-in log contains a sidechain_edge event."
+    },
+    {
+      "capability": "multi-bus",
+      "observed": "Confirmed",
+      "notes": "The checked-in log contains repeated bus_layout_proposal events with a multi-input arrangement."
+    }
+  ],
+  "quirks": [
+    {
+      "flag": "reaper_vst3_gesture_ordering",
+      "row": "#15",
+      "observed": "Confirmed",
+      "notes": "The checked-in log contains process_is_playing_edge, which is the existing promotion-rule event for this VST3 defense."
+    },
+    {
+      "flag": "reaper_process_while_bypassed",
+      "row": "R1",
+      "observed": "Confirmed",
+      "notes": "The checked-in log contains repeated process_without_prepare events after REAPER released the initial prepare state."
+    },
+    {
+      "flag": "reaper_permissive_bus_arrangements",
+      "row": "R3",
+      "observed": "Confirmed",
+      "notes": "The checked-in log contains repeated bus_layout_proposal events for PulpHostBench VST3."
+    },
+    {
+      "flag": "reaper_keyboard_passthrough",
+      "row": "R2",
+      "observed": "Not Triggered",
+      "notes": "Keyboard routing was not exercised by this scripted evidence run."
+    },
+    {
+      "flag": "reaper_anticipative_fx_buffer_variability",
+      "row": "R4",
+      "observed": "Not Triggered",
+      "notes": "No process_buffer_overrun or process_sample_rate_drift event was observed in this run."
+    },
+    {
+      "flag": "reaper_midsession_setstate",
+      "row": "R6",
+      "observed": "Not Triggered",
+      "notes": "No deserialize_plugin_state event was observed in this run."
+    }
+  ]
+}

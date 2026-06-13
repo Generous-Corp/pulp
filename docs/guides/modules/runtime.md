@@ -14,6 +14,7 @@ The runtime module provides lock-free primitives, logging, assertions, and scope
 | Multi-field coherent read | `SeqLock<T>` | Transport state (tempo + beat position + time sig) |
 | Large data swap | `TripleBuffer<T>` | Wavetables, IR buffers, meter data |
 | Ordered event stream | `SpscQueue<T>` | MIDI events, UI commands |
+| Budgeted optional work | `evaluate_runtime_budget()` | Background analysis, voice/cache refresh, validation helpers |
 
 **Never use on the audio thread**: `std::mutex`, `std::condition_variable`, heap allocation, I/O.
 
@@ -94,16 +95,91 @@ Single-producer, single-consumer lock-free FIFO. Uses CHOC's `SingleReaderSingle
 pulp::runtime::SpscQueue<MidiEvent, 256> midi_queue;
 
 // Producer (audio thread):
-midi_queue.push(event);
+if (!midi_queue.try_push(event)) {
+    // Queue full; overflow_count() / telemetry() make this visible.
+}
 
 // Consumer (UI thread):
-MidiEvent ev;
-while (midi_queue.pop(ev)) {
-    handle_event(ev);
+while (auto ev = midi_queue.try_pop()) {
+    handle_event(*ev);
 }
 ```
 
-Use SpscQueue for ordered event streams where every event matters (MIDI, parameter automation points, UI commands).
+Use SpscQueue for ordered event streams where every event matters (MIDI,
+parameter automation points, UI commands). If the consumer falls behind,
+producer-side failed pushes increment `overflow_count()` and appear in
+`telemetry()`.
+
+## Budget Policy
+
+`budget_policy.hpp` provides a small, deterministic decision helper for
+runtime work that may need to degrade under load. Critical audio work always
+runs. Interactive work can defer to preserve an audio reserve. Background and
+opportunistic work can bypass or shed when budget is exhausted or overload is
+active.
+
+```cpp
+#include <pulp/runtime/budget_policy.hpp>
+
+RuntimeBudgetPolicy policy;
+policy.critical_audio_reserve = 128;
+
+RuntimeBudgetRequest request;
+request.lane = RuntimeWorkLane::Opportunistic;
+request.estimated_cost = 64;
+request.remaining_budget = 32;
+
+auto decision = evaluate_runtime_budget(request, policy);
+if (!decision.should_run()) {
+    // Upload telemetry or use a cheaper fallback; do not block process().
+}
+```
+
+For a group of optional tasks inside one callback or worker tick, use
+`RuntimeBudgetFrame`. It keeps the remaining budget and counts run/defer/shed/
+bypass decisions without allocating:
+
+```cpp
+RuntimeBudgetFrame frame(512, policy, overload_active);
+
+if (frame.evaluate(RuntimeWorkLane::Interactive, 64).should_run()) {
+    refresh_visible_analysis();
+}
+
+if (frame.evaluate(RuntimeWorkLane::Opportunistic, 256).should_run()) {
+    rebuild_noncritical_preview();
+}
+
+auto stats = frame.stats(); // publish off the audio thread if needed
+```
+
+This is the intended hook for large graph or instrument consumers: critical
+audio remains on the prepared path, while optional analysis, preview, and
+background refresh work degrades through the shared policy.
+
+Cost values passed to `RuntimeBudgetFrame` should be stable work units, not
+wall-clock timing. Current graph and instrument consumers use deterministic
+shape counters: graph node/edge/port/block/buffer stats, or voice-pool
+polyphony/active/releasing counts. That makes CI fixtures portable while still
+pinning whether optional work runs, defers, sheds, or bypasses at scale.
+
+### Degraded Optional Work Contract
+
+The budget policy is a cooperative decision helper. It does not preempt running
+audio work, measure CPU cycles, move work to another thread, or automatically
+virtualize graph nodes or instrument voices. Callers must ask before starting
+optional work and honor the returned action:
+
+| Action | Caller behavior |
+|--------|-----------------|
+| `Run` | Execute the optional work inside the caller's prepared budget. |
+| `Defer` | Keep required or interactive work queued for a later frame/tick. |
+| `Shed` | Drop optional work for this frame/tick without producing stale output. |
+| `Bypass` | Use an existing cached/cheap fallback and skip the expensive path. |
+
+Critical audio rendering should not be gated through this helper. Use it for
+noncritical graph previews, diagnostics, per-voice analysis, background refresh,
+and validation helpers where a degraded result is acceptable and visible.
 
 ## ScopeGuard
 

@@ -20,8 +20,11 @@
 
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/message.hpp>
+#include <pulp/runtime/budget_policy.hpp>
 
 #include <algorithm>
+#include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -37,9 +40,13 @@ struct SynthesiserNote {
     uint8_t note = 0;             ///< MIDI note number (0–127)
     uint8_t velocity = 0;         ///< Note-on velocity (1–127; 0 → note off)
     int8_t priority = 0;          ///< User-supplied priority for `Priority` steal
+    uint8_t voice_group = 0;      ///< Optional channel-scoped choke group (0 = none)
     uint32_t note_id = 0;         ///< Monotonic id; younger > older
     bool active = false;          ///< Voice is sounding (held or releasing)
     bool releasing = false;       ///< Note-off received; voice in release tail
+    bool sustained = false;       ///< Note-off deferred by sustain pedal (CC64)
+    bool sostenuto = false;       ///< Note captured by sostenuto pedal (CC66)
+    bool soft_pedal = false;      ///< Soft pedal (CC67) is active for this note
 };
 
 /// Voice-stealing strategy applied when `note_on` fires and no free
@@ -61,10 +68,32 @@ enum class VoiceStealStrategy : uint8_t {
     Priority,
 };
 
+struct SynthesiserTelemetry {
+    std::size_t polyphony = 0;
+    std::size_t active_voice_count = 0;
+    std::size_t releasing_voice_count = 0;
+    std::uint64_t steal_count = 0;
+    VoiceStealStrategy steal_strategy = VoiceStealStrategy::Oldest;
+};
+
+struct SynthesiserRuntimeBudgetReport {
+    runtime::RuntimeBudgetDecision decision{};
+    runtime::RuntimeBudgetFrameStats frame_stats{};
+    SynthesiserTelemetry telemetry{};
+    std::uint64_t estimated_cost = 0;
+
+    bool should_run_optional_work() const noexcept {
+        return decision.should_run();
+    }
+};
+
 /// Abstract base for one synth voice. Subclasses implement `render`
 /// and may override `on_pitch_bend` / `on_aftertouch` / `on_cc` /
 /// `peak_level` to participate in channel-level controllers and
-/// voice-stealing.
+/// voice-stealing. The owning `Synthesiser` handles sustain/sostenuto pedal
+/// state before calling `on_note_off()`: note-off is deferred while CC64 is
+/// down or the note is captured by CC66, then delivered through the normal
+/// note-off hook when the relevant pedal state clears.
 class SynthesiserVoice {
 public:
     virtual ~SynthesiserVoice() = default;
@@ -77,6 +106,8 @@ public:
         note_ = note;
         active_ = true;
         releasing_ = false;
+        note_.sustained = false;
+        note_.sostenuto = false;
     }
 
     /// Begin release. Subclasses typically schedule envelope release
@@ -88,6 +119,8 @@ public:
     virtual void on_note_off() {
         releasing_ = true;
         note_.releasing = true;
+        note_.sustained = false;
+        note_.sostenuto = false;
     }
 
     /// Channel-level pitch bend (semitones, already scaled by the
@@ -125,6 +158,42 @@ public:
     bool active() const { return active_; }
     bool releasing() const { return releasing_; }
     const SynthesiserNote& note() const { return note_; }
+
+    /// Mark this voice as waiting for sustain-pedal release. The voice remains
+    /// active and non-releasing; `release_sustained_note()` later invokes the
+    /// normal note-off path when CC64 is lifted and no other pedal holds it.
+    void defer_note_off_for_sustain() {
+        if (!active_ || releasing_) return;
+        note_.sustained = true;
+    }
+
+    /// Release a note whose note-off was deferred by CC64 sustain.
+    void release_sustained_note() {
+        if (!active_ || releasing_ || !note_.sustained) return;
+        note_.sustained = false;
+        if (!note_.sostenuto) on_note_off();
+    }
+
+    /// Capture this voice for sostenuto. Unlike sustain, only notes already
+    /// active when CC66 is pressed are held by the pedal.
+    void capture_for_sostenuto() {
+        if (!active_ || releasing_) return;
+        note_.sostenuto = true;
+    }
+
+    /// Release a note captured by CC66 sostenuto if no sustain hold remains.
+    void release_sostenuto_note() {
+        if (!active_ || releasing_ || !note_.sostenuto) return;
+        note_.sostenuto = false;
+        if (!note_.sustained) on_note_off();
+    }
+
+    /// Update note metadata for soft-pedal state. Sound design remains a voice
+    /// concern; this metadata lets a voice choose whether and how to apply it.
+    void set_soft_pedal(bool down) {
+        if (!active_ || releasing_) return;
+        note_.soft_pedal = down;
+    }
 
 protected:
     /// Subclasses call this from `render()` once their release tail
@@ -165,28 +234,47 @@ public:
     /// Direct event entry points — usable when the caller wants to
     /// build a Synthesiser pipeline without a full MidiBuffer.
     void note_on(uint8_t channel, uint8_t note, uint8_t velocity,
-                 int8_t priority = 0) {
+                 int8_t priority = 0, uint8_t voice_group = 0,
+                 bool choke_group = false) {
         if (velocity == 0) { note_off(channel, note); return; }
+        const auto masked_channel = static_cast<uint8_t>(channel & 0x0F);
+        const auto masked_group = static_cast<uint8_t>(voice_group & 0x7F);
+        if (choke_group && masked_group != 0) {
+            choke_voice_group(masked_channel, masked_group);
+        }
         Voice* v = find_free_voice();
         if (!v) v = steal_voice();
         if (!v) return;
         SynthesiserNote n;
-        n.channel = static_cast<uint8_t>(channel & 0x0F);
+        n.channel = masked_channel;
         n.note = static_cast<uint8_t>(note & 0x7F);
         n.velocity = static_cast<uint8_t>(velocity & 0x7F);
         n.priority = priority;
+        n.voice_group = masked_group;
         n.note_id = ++next_id_;
         n.active = true;
         n.releasing = false;
+        n.soft_pedal = soft_pedal_down_[n.channel];
         v->on_note_on(n);
     }
 
     void note_off(uint8_t channel, uint8_t note) {
+        const auto masked_channel = static_cast<uint8_t>(channel & 0x0F);
         for (auto& v : voices_) {
             if (v.active() && !v.releasing()
-                && v.note().channel == (channel & 0x0F)
+                && v.note().channel == masked_channel
                 && v.note().note == (note & 0x7F)) {
-                v.on_note_off();
+                bool deferred = false;
+                if (sustain_down_[masked_channel]) {
+                    v.defer_note_off_for_sustain();
+                    deferred = true;
+                }
+                if (v.note().sostenuto) {
+                    deferred = true;
+                }
+                if (!deferred) {
+                    v.on_note_off();
+                }
             }
         }
     }
@@ -208,10 +296,32 @@ public:
     }
 
     void cc(uint8_t channel, uint8_t cc_number, uint8_t value) {
+        const auto masked_channel = static_cast<uint8_t>(channel & 0x0F);
         for (auto& v : voices_) {
-            if (v.active() && v.note().channel == (channel & 0x0F)) {
+            if (v.active() && v.note().channel == masked_channel) {
                 v.on_cc(cc_number, value);
             }
+        }
+        if ((cc_number & 0x7F) == 64) {
+            const bool was_down = sustain_down_[masked_channel];
+            const bool is_down = value >= 64;
+            sustain_down_[masked_channel] = is_down;
+            if (was_down && !is_down) {
+                release_sustained_notes(masked_channel);
+            }
+        } else if ((cc_number & 0x7F) == 66) {
+            const bool was_down = sostenuto_down_[masked_channel];
+            const bool is_down = value >= 64;
+            sostenuto_down_[masked_channel] = is_down;
+            if (!was_down && is_down) {
+                capture_sostenuto_notes(masked_channel);
+            } else if (was_down && !is_down) {
+                release_sostenuto_notes(masked_channel);
+            }
+        } else if ((cc_number & 0x7F) == 67) {
+            const bool is_down = value >= 64;
+            soft_pedal_down_[masked_channel] = is_down;
+            set_soft_pedal_notes(masked_channel, is_down);
         }
     }
 
@@ -249,12 +359,86 @@ public:
         return n;
     }
 
+    std::size_t releasing_count() const {
+        std::size_t n = 0;
+        for (const auto& v : voices_) if (v.active() && v.releasing()) ++n;
+        return n;
+    }
+
+    std::uint64_t steal_count() const {
+        return steal_count_.load(std::memory_order_relaxed);
+    }
+
+    void reset_steal_count() {
+        steal_count_.store(0, std::memory_order_relaxed);
+    }
+
+    /// Cheap owner-thread snapshot for voice-count telemetry. Call from
+    /// the synth owner (normally the audio thread) and publish the returned
+    /// value through a lock-free latest-value channel if another thread
+    /// needs to observe it.
+    SynthesiserTelemetry telemetry() const {
+        return {
+            .polyphony = polyphony(),
+            .active_voice_count = active_count(),
+            .releasing_voice_count = releasing_count(),
+            .steal_count = steal_count(),
+            .steal_strategy = strategy_,
+        };
+    }
+
+    std::uint64_t estimate_optional_runtime_cost() const {
+        const auto t = telemetry();
+        std::uint64_t cost = 0;
+        cost = saturating_add_u64_(
+            cost, saturating_mul_u64_(
+                static_cast<std::uint64_t>(t.polyphony), 4));
+        cost = saturating_add_u64_(
+            cost, saturating_mul_u64_(
+                static_cast<std::uint64_t>(t.active_voice_count), 64));
+        cost = saturating_add_u64_(
+            cost, saturating_mul_u64_(
+                static_cast<std::uint64_t>(t.releasing_voice_count), 32));
+        return cost;
+    }
+
+    SynthesiserRuntimeBudgetReport evaluate_optional_runtime_budget(
+        runtime::RuntimeBudgetFrame& frame,
+        runtime::RuntimeWorkLane lane = runtime::RuntimeWorkLane::Background,
+        bool required = false) const {
+        const auto t = telemetry();
+        const auto cost = estimate_optional_runtime_cost();
+        const auto decision = frame.evaluate(lane, cost, required);
+        return {
+            .decision = decision,
+            .frame_stats = frame.stats(),
+            .telemetry = t,
+            .estimated_cost = cost,
+        };
+    }
+
     void reset() {
         for (auto& v : voices_) v.reset();
+        sustain_down_.fill(false);
+        sostenuto_down_.fill(false);
+        soft_pedal_down_.fill(false);
         next_id_ = 0;
     }
 
 private:
+    static std::uint64_t saturating_add_u64_(std::uint64_t a,
+                                             std::uint64_t b) {
+        const auto max = std::numeric_limits<std::uint64_t>::max();
+        return b > max - a ? max : a + b;
+    }
+
+    static std::uint64_t saturating_mul_u64_(std::uint64_t a,
+                                             std::uint64_t b) {
+        const auto max = std::numeric_limits<std::uint64_t>::max();
+        if (a == 0 || b == 0) return 0;
+        return a > max / b ? max : a * b;
+    }
+
     Voice* find_free_voice() {
         for (auto& v : voices_) if (!v.active()) return &v;
         return nullptr;
@@ -334,7 +518,10 @@ private:
                 break;
             }
         }
-        if (chosen) chosen->reset();
+        if (chosen) {
+            steal_count_.fetch_add(1, std::memory_order_relaxed);
+            chosen->reset();
+        }
         return chosen;
     }
 
@@ -375,10 +562,60 @@ private:
         }
     }
 
+    void release_sustained_notes(uint8_t channel) {
+        for (auto& v : voices_) {
+            if (v.active() && !v.releasing()
+                && v.note().channel == channel
+                && v.note().sustained) {
+                v.release_sustained_note();
+            }
+        }
+    }
+
+    void capture_sostenuto_notes(uint8_t channel) {
+        for (auto& v : voices_) {
+            if (v.active() && !v.releasing() && v.note().channel == channel) {
+                v.capture_for_sostenuto();
+            }
+        }
+    }
+
+    void release_sostenuto_notes(uint8_t channel) {
+        for (auto& v : voices_) {
+            if (v.active() && !v.releasing()
+                && v.note().channel == channel
+                && v.note().sostenuto) {
+                v.release_sostenuto_note();
+            }
+        }
+    }
+
+    void set_soft_pedal_notes(uint8_t channel, bool down) {
+        for (auto& v : voices_) {
+            if (v.active() && !v.releasing() && v.note().channel == channel) {
+                v.set_soft_pedal(down);
+            }
+        }
+    }
+
+    void choke_voice_group(uint8_t channel, uint8_t voice_group) {
+        for (auto& v : voices_) {
+            if (v.active() && !v.releasing()
+                && v.note().channel == channel
+                && v.note().voice_group == voice_group) {
+                v.on_note_off();
+            }
+        }
+    }
+
     std::vector<Voice> voices_;
+    std::array<bool, 16> sustain_down_{};
+    std::array<bool, 16> sostenuto_down_{};
+    std::array<bool, 16> soft_pedal_down_{};
     VoiceStealStrategy strategy_ = VoiceStealStrategy::Oldest;
     float bend_range_semi_ = 2.0f;
     uint32_t next_id_ = 0;
+    std::atomic<std::uint64_t> steal_count_{0};
 };
 
 } // namespace pulp::midi

@@ -105,6 +105,7 @@ TEST_CASE("StandaloneApp wires its output probe into the Audio Inspector window"
     // wiring reference stays valid.
     auto& probe = app.output_probe();
     app.stop();
+    REQUIRE(probe.capture_enabled());
 
     // The window consumes the SAME reference the host hands it in
     // run_with_editor(): app.output_probe(). No host factory → no native
@@ -135,6 +136,7 @@ TEST_CASE("StandaloneApp wires its output probe into the Audio Inspector window"
             AudioProbeStage::kStandaloneOutputBoundary);
     REQUIRE(window.panel().peak() > 0.0f);
     REQUIRE(window.panel().rms() > 0.0f);
+    REQUIRE(window.panel().waveform().sample_count() > 0);
 
     // The panel surfaces the live readout as visible text (not a blank panel):
     // the status reads "live", the level carries a "dBFS" readout, and the

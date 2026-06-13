@@ -648,6 +648,144 @@ TEST_CASE("GraphSerializer tolerates missing arrays and skips stale connection i
     REQUIRE_FALSE(dst.connections().front().automation);
 }
 
+TEST_CASE("GraphSerializer generated topology fuzz rejects unsafe imported edges",
+          "[host][serializer][generated][fuzz][phase3]") {
+    SignalGraph dst;
+    auto result = GraphSerializer::from_json(dst, R"({
+  "format_version": 1,
+  "nodes": [
+    {
+      "id": 10,
+      "type": "audio_in",
+      "name": "Input",
+      "num_input_ports": 0,
+      "num_output_ports": 1,
+      "gain": 1
+    },
+    {
+      "id": 11,
+      "type": "gain",
+      "name": "A",
+      "num_input_ports": 2,
+      "num_output_ports": 2,
+      "gain": 1
+    },
+    {
+      "id": 12,
+      "type": "gain",
+      "name": "B",
+      "num_input_ports": 2,
+      "num_output_ports": 2,
+      "gain": 1
+    },
+    {
+      "id": 13,
+      "type": "audio_out",
+      "name": "Output",
+      "num_input_ports": 1,
+      "num_output_ports": 0,
+      "gain": 1
+    }
+  ],
+  "connections": [
+    {
+      "source_node": 99,
+      "source_port": 0,
+      "dest_node": 11,
+      "dest_port": 0,
+      "feedback": false,
+      "midi": false,
+      "automation": false
+    },
+    {
+      "source_node": 10,
+      "source_port": 0,
+      "dest_node": 98,
+      "dest_port": 0,
+      "feedback": false,
+      "midi": false,
+      "automation": false
+    },
+    {
+      "source_node": 10,
+      "source_port": 1,
+      "dest_node": 11,
+      "dest_port": 0,
+      "feedback": false,
+      "midi": false,
+      "automation": false
+    },
+    {
+      "source_node": 10,
+      "source_port": 0,
+      "dest_node": 11,
+      "dest_port": 99,
+      "feedback": false,
+      "midi": false,
+      "automation": false
+    },
+    {
+      "source_node": 10,
+      "source_port": 0,
+      "dest_node": 11,
+      "dest_port": 0,
+      "feedback": false,
+      "midi": false,
+      "automation": false
+    },
+    {
+      "source_node": 11,
+      "source_port": 0,
+      "dest_node": 12,
+      "dest_port": 0,
+      "feedback": false,
+      "midi": false,
+      "automation": false
+    },
+    {
+      "source_node": 12,
+      "source_port": 0,
+      "dest_node": 11,
+      "dest_port": 0,
+      "feedback": false,
+      "midi": false,
+      "automation": false
+    },
+    {
+      "source_node": 12,
+      "source_port": 0,
+      "dest_node": 13,
+      "dest_port": 0,
+      "feedback": false,
+      "midi": false,
+      "automation": false
+    }
+  ]
+})");
+
+    REQUIRE(result.ok);
+    REQUIRE(dst.nodes().size() == 4);
+    REQUIRE(dst.connections().size() == 3);
+
+    const auto* a = find_node_named(dst, "A");
+    const auto* b = find_node_named(dst, "B");
+    REQUIRE(a != nullptr);
+    REQUIRE(b != nullptr);
+    REQUIRE_FALSE(dst.would_create_cycle(a->id, b->id));
+    REQUIRE(dst.would_create_cycle(b->id, a->id));
+
+    for (const auto& connection : dst.connections()) {
+        REQUIRE_FALSE((connection.source_node == b->id
+                       && connection.dest_node == a->id));
+        REQUIRE_FALSE(connection.feedback);
+        REQUIRE_FALSE(connection.midi);
+        REQUIRE_FALSE(connection.automation);
+    }
+
+    REQUIRE(dst.validate_generated_graph(16).accepted);
+    REQUIRE(dst.prepare(48000.0, 16));
+}
+
 TEST_CASE("GraphSerializer decodes fallback wire values deterministically",
           "[host][serializer][issue-493]") {
     SignalGraph dst;
@@ -830,6 +968,147 @@ TEST_CASE("GraphSerializer preserves opaque state for unresolved custom nodes",
     // Re-serializing preserves the blob (save-load-save keeps the state).
     const auto json2 = GraphSerializer::to_json(dst);
     REQUIRE(json2.find("\"state_b64\"") != std::string::npos);
+
+    SignalGraph reloaded;
+    auto reloaded_result = GraphSerializer::from_json(reloaded, json2);
+    REQUIRE(reloaded_result.ok);
+    REQUIRE(missing_custom_types_contain(reloaded_result, "pulp.test.level@1"));
+    REQUIRE(reloaded.nodes().size() == 1);
+    REQUIRE(reloaded.custom_node_state(reloaded.nodes().front().id) ==
+            ser_level_bytes(1.75f));
+}
+
+TEST_CASE("GraphSerializer generated custom-state fuzz validates state payloads",
+          "[host][serializer][generated][state][fuzz][phase3]") {
+    SECTION("malformed base64 fails closed") {
+        SignalGraph dst;
+        auto result = GraphSerializer::from_json(dst, R"({
+  "format_version": 1,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "custom",
+      "name": "GeneratedState",
+      "num_input_ports": 1,
+      "num_output_ports": 1,
+      "gain": 1,
+      "custom": {
+        "type_id": "pulp.generated.state",
+        "version": 1,
+        "state_b64": "AA#="
+      }
+    }
+  ],
+  "connections": []
+})");
+
+        REQUIRE_FALSE(result.ok);
+        REQUIRE(result.error == "invalid custom state_b64");
+        REQUIRE(dst.nodes().empty());
+        REQUIRE(dst.connections().empty());
+    }
+
+    SECTION("valid padded base64 tolerates whitespace") {
+        SignalGraph dst;
+        auto result = GraphSerializer::from_json(dst, R"({
+  "format_version": 1,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "custom",
+      "name": "GeneratedState",
+      "num_input_ports": 1,
+      "num_output_ports": 1,
+      "gain": 1,
+      "custom": {
+        "type_id": "pulp.generated.state",
+        "version": 1,
+        "state_b64": "AAEC/ w=="
+      }
+    }
+  ],
+  "connections": []
+})");
+
+        REQUIRE(result.ok);
+        REQUIRE(dst.nodes().size() == 1);
+        REQUIRE(dst.custom_node_state(dst.nodes().front().id)
+                == std::vector<uint8_t>{0x00, 0x01, 0x02, 0xff});
+    }
+}
+
+TEST_CASE("GraphSerializer generated node type validation rejects invalid shapes",
+          "[host][serializer][generated][type][phase3]") {
+    SECTION("audio input cannot declare input ports") {
+        SignalGraph dst;
+        auto result = GraphSerializer::from_json(dst, R"({
+  "format_version": 1,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "audio_in",
+      "name": "BadInput",
+      "num_input_ports": 1,
+      "num_output_ports": 1,
+      "gain": 1
+    }
+  ],
+  "connections": []
+})");
+
+        REQUIRE_FALSE(result.ok);
+        REQUIRE(result.error == "invalid generated node shape for audio_in");
+        REQUIRE(dst.nodes().empty());
+    }
+
+    SECTION("gain nodes must use the built-in stereo utility shape") {
+        SignalGraph dst;
+        auto result = GraphSerializer::from_json(dst, R"({
+  "format_version": 1,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "gain",
+      "name": "BadGain",
+      "num_input_ports": 1,
+      "num_output_ports": 1,
+      "gain": 1
+    }
+  ],
+  "connections": []
+})");
+
+        REQUIRE_FALSE(result.ok);
+        REQUIRE(result.error == "invalid generated node shape for gain");
+        REQUIRE(dst.nodes().empty());
+    }
+
+    SECTION("generated custom nodes cannot declare negative ports") {
+        SignalGraph dst;
+        auto result = GraphSerializer::from_json(dst, R"({
+  "format_version": 1,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "custom",
+      "name": "BadCustom",
+      "num_input_ports": -1,
+      "num_output_ports": 1,
+      "gain": 1,
+      "custom": {
+        "type_id": "pulp.generated.bad",
+        "version": 1
+      }
+    }
+  ],
+  "connections": []
+})");
+
+        REQUIRE_FALSE(result.ok);
+        REQUIRE(result.error
+                == "invalid generated node port count for custom");
+        REQUIRE(dst.nodes().empty());
+    }
 }
 
 TEST_CASE("GraphSerializer preserves unresolved custom node identity",
@@ -879,6 +1158,20 @@ TEST_CASE("GraphSerializer preserves unresolved custom node identity",
             std::string::npos);
     REQUIRE(second_json.find("\"version\": 4") != std::string::npos);
     REQUIRE(second_json.find("\"source_node\"") != std::string::npos);
+
+    SignalGraph reloaded;
+    auto reloaded_result = GraphSerializer::from_json(reloaded, second_json);
+    REQUIRE(reloaded_result.ok);
+    REQUIRE(missing_custom_types_contain(reloaded_result, "pulp.test.future-node@4"));
+    REQUIRE(reloaded.nodes().size() == 3);
+    REQUIRE(reloaded.connections().size() == 2);
+    const auto* reloaded_custom = find_node_named(reloaded, "Future Node");
+    REQUIRE(reloaded_custom != nullptr);
+    REQUIRE(reloaded_custom->type == NodeType::Custom);
+    REQUIRE(reloaded_custom->custom_type_id == "pulp.test.future-node");
+    REQUIRE(reloaded_custom->custom_type_version == 4);
+    REQUIRE(reloaded_custom->num_input_ports == 2);
+    REQUIRE(reloaded_custom->num_output_ports == 1);
 }
 
 TEST_CASE("GraphSerializer resolves custom nodes by exact registry version",

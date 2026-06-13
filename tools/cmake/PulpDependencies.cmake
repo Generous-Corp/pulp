@@ -16,9 +16,9 @@
 # d1df9788a).
 
 # ── Third-Party Dependencies ────────────────────────────────────────────────
+include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpFetchContent.cmake)
 include(FetchContent)
 set(FETCHCONTENT_UPDATES_DISCONNECTED ${PULP_FETCHCONTENT_UPDATES_DISCONNECTED})
-include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpFetchContent.cmake)
 
 # CHOC: header-only C++ utilities (ISC license)
 # Used for: JS engine abstraction, MIDI utilities, WebView (drag-and-drop)

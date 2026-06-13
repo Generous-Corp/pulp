@@ -29,12 +29,16 @@
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/screenshot_compare.hpp>
 #include <pulp/view/view.hpp>
+#include <pulp/state/properties_file.hpp>
 
+#include <cstdlib>
 #include <cmath>
-#include <memory>
-#include <vector>
 #include <filesystem>
 #include <fstream>
+#include <memory>
+#include <optional>
+#include <string>
+#include <vector>
 
 using namespace pulp::view;
 using pulp::audio::AudioProbe;
@@ -96,6 +100,40 @@ AudioInspectorWindow::HostFactory null_host_factory(int* calls) {
         return nullptr;
     };
 }
+
+void set_test_env(const char* name, const std::string& value) {
+#ifdef _WIN32
+    _putenv_s(name, value.c_str());
+#else
+    ::setenv(name, value.c_str(), 1);
+#endif
+}
+
+void unset_test_env(const char* name) {
+#ifdef _WIN32
+    _putenv_s(name, "");
+#else
+    ::unsetenv(name);
+#endif
+}
+
+struct ScopedEnv {
+    explicit ScopedEnv(const char* name, std::string value)
+        : name_(name) {
+        if (const char* prev = std::getenv(name_.c_str())) {
+            previous_ = std::string(prev);
+        }
+        set_test_env(name_.c_str(), value);
+    }
+
+    ~ScopedEnv() {
+        if (previous_) set_test_env(name_.c_str(), *previous_);
+        else unset_test_env(name_.c_str());
+    }
+
+    std::string name_;
+    std::optional<std::string> previous_;
+};
 
 }  // namespace
 
@@ -243,6 +281,182 @@ TEST_CASE("AudioInspectorWindow copies a fixed-capacity waveform off the probe",
     REQUIRE(wf.is_live());
     REQUIRE(wf.sample_count() > 0);
     REQUIRE(wf.sample_count() <= AudioWaveformView::kCapacity);
+}
+
+TEST_CASE("AudioWaveformView trigger mode only repositions over real samples",
+          "[view][audio-inspector][audio-harness]") {
+    AudioWaveformView waveform;
+    const float samples[] = {0.4f, 0.2f, -0.3f, -0.1f, 0.05f, 0.3f};
+    waveform.set_samples(samples, 6);
+
+    REQUIRE(waveform.trigger_mode() == AudioWaveformView::TriggerMode::kRaw);
+    REQUIRE(waveform.display_start_index() == 0);
+    REQUIRE(waveform.display_sample_count() == 6);
+
+    waveform.set_trigger_mode(AudioWaveformView::TriggerMode::kRisingZero);
+    REQUIRE(waveform.display_start_index() == 4);
+    REQUIRE(waveform.sample_at(waveform.display_start_index()) ==
+            Catch::Approx(samples[4]));
+    REQUIRE(waveform.display_sample_count() == 2);
+
+    const float no_crossing[] = {-0.6f, -0.4f, -0.2f, -0.1f};
+    waveform.set_samples(no_crossing, 4);
+    REQUIRE(waveform.display_start_index() == 0);
+    REQUIRE(waveform.display_sample_count() == 4);
+}
+
+TEST_CASE("AudioWaveformView horizontal scale shortens the real-sample window",
+          "[view][audio-inspector][audio-harness]") {
+    AudioWaveformView waveform;
+    const float samples[] = {-0.4f, -0.2f, 0.0f, 0.2f, 0.4f, 0.2f, 0.0f, -0.2f};
+    waveform.set_samples(samples, 8);
+
+    REQUIRE(waveform.horizontal_scale() == Catch::Approx(1.0f));
+    REQUIRE(waveform.display_sample_count() == 8);
+
+    waveform.set_horizontal_scale(2.0f);
+    REQUIRE(waveform.horizontal_scale() == Catch::Approx(2.0f));
+    REQUIRE(waveform.display_sample_count() == 4);
+
+    waveform.set_horizontal_scale(0.25f);
+    REQUIRE(waveform.horizontal_scale() == Catch::Approx(1.0f));
+    REQUIRE(waveform.display_sample_count() == 8);
+}
+
+TEST_CASE("AudioWaveformView paints grid and rounded thicker trace",
+          "[view][audio-inspector][audio-harness]") {
+    AudioWaveformView waveform;
+    waveform.set_bounds({0, 0, 160, 80});
+    const float samples[] = {-0.6f, -0.2f, 0.2f, 0.6f};
+    waveform.set_samples(samples, 4);
+
+    pulp::canvas::RecordingCanvas grid_canvas;
+    waveform.paint(grid_canvas);
+    REQUIRE(grid_canvas.count(pulp::canvas::DrawCommand::Type::stroke_line) >= 9);
+    REQUIRE(grid_canvas.count(pulp::canvas::DrawCommand::Type::set_line_cap) >= 2);
+    REQUIRE(grid_canvas.count(pulp::canvas::DrawCommand::Type::set_line_join) >= 2);
+
+    bool saw_trace_width = false;
+    for (const auto& cmd : grid_canvas.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::set_line_width &&
+            cmd.f[0] == Catch::Approx(1.75f)) {
+            saw_trace_width = true;
+        }
+    }
+    REQUIRE(saw_trace_width);
+
+    waveform.set_show_grid(false);
+    pulp::canvas::RecordingCanvas no_grid_canvas;
+    waveform.paint(no_grid_canvas);
+    REQUIRE(no_grid_canvas.count(pulp::canvas::DrawCommand::Type::stroke_line) <
+            grid_canvas.count(pulp::canvas::DrawCommand::Type::stroke_line));
+}
+
+TEST_CASE("AudioInspectorWindow applies display-only waveform env knobs",
+          "[view][audio-inspector][audio-harness]") {
+    ScopedEnv trigger("PULP_AUDIO_INSPECTOR_TRIGGER", "rising-zero");
+    ScopedEnv grid("PULP_AUDIO_INSPECTOR_GRID", "0");
+    ScopedEnv scale("PULP_AUDIO_INSPECTOR_SCALE", "2.5");
+
+    AudioInspectorWindow window;
+    const auto& waveform = window.panel().waveform();
+    REQUIRE(waveform.trigger_mode() == AudioWaveformView::TriggerMode::kRisingZero);
+    REQUIRE_FALSE(waveform.show_grid());
+    REQUIRE(waveform.horizontal_scale() == Catch::Approx(2.5f));
+}
+
+TEST_CASE("AudioInspectorWindow ignores non-finite waveform scale",
+          "[view][audio-inspector][audio-harness]") {
+    ScopedEnv scale("PULP_AUDIO_INSPECTOR_SCALE", "nan");
+
+    AudioInspectorWindow window;
+    const auto& waveform = window.panel().waveform();
+    REQUIRE(waveform.horizontal_scale() == Catch::Approx(1.0f));
+}
+
+TEST_CASE("AudioInspectorWindow remembers Signal and Scope mode preference",
+          "[view][audio-inspector][audio-scope]") {
+    pulp::state::PropertiesFile prefs;
+
+    AudioInspectorWindow first;
+    first.set_preferences(&prefs);
+    REQUIRE(first.mode() == AudioInspectorMode::kSignal);
+    REQUIRE(first.panel().mode() == AudioInspectorMode::kSignal);
+
+    first.set_mode(AudioInspectorMode::kScope);
+    REQUIRE(first.mode() == AudioInspectorMode::kScope);
+    REQUIRE(first.panel().mode() == AudioInspectorMode::kScope);
+    REQUIRE(prefs.get_string("audio_inspector.mode").value_or("") == "scope");
+
+    AudioInspectorWindow second;
+    second.set_preferences(&prefs);
+    REQUIRE(second.mode() == AudioInspectorMode::kScope);
+    REQUIRE(second.panel().mode() == AudioInspectorMode::kScope);
+
+    second.set_mode(AudioInspectorMode::kSignal);
+    REQUIRE(prefs.get_string("audio_inspector.mode").value_or("") == "signal");
+}
+
+TEST_CASE("AudioInspectorPanel distinguishes Scope measurements from Signal readout",
+          "[view][audio-inspector][audio-scope]") {
+    AudioInspectorPanel panel;
+    panel.set_mode(AudioInspectorMode::kScope);
+
+    pulp::audio::AudioProbeSnapshot snap{};
+    snap.stage_id = AudioProbeStage::kStandaloneOutputBoundary;
+    snap.channel_count = 1;
+    snap.sample_rate = 48000.0;
+    snap.block_size = 64;
+    snap.sequence_number = 1;
+    snap.peak_max = 0.5f;
+    snap.rms_max = 0.25f;
+
+    pulp::audio::AudioScopeResult scope;
+    scope.stage = AudioProbeStage::kStandaloneOutputBoundary;
+    scope.trigger_mode = pulp::audio::AudioScopeTriggerMode::kRisingZero;
+    scope.acquisition.ok = true;
+    scope.acquisition.window_samples = 64;
+    scope.acquisition.selected_channel = 0;
+    scope.acquisition.trigger_found = true;
+    scope.measurements.peak_to_peak_available = true;
+    scope.measurements.peak_to_peak = 1.0;
+    scope.measurements.rms_available = true;
+    scope.measurements.rms = 0.353553;
+    scope.measurements.frequency_available = true;
+    scope.measurements.frequency_hz = 440.0;
+    scope.measurements.dc_offset_available = true;
+    scope.measurements.dc_offset = 0.0;
+    scope.measurements.crest_factor_available = true;
+    scope.measurements.crest_factor = 1.414;
+
+    panel.update(AudioInspectorPanel::Status::kLive, snap, {}, nullptr, 0);
+    panel.set_scope_result(scope);
+
+    REQUIRE(panel.status_text().find("Scope") != std::string::npos);
+    REQUIRE(panel.level_text().find("Freq: 440.0 Hz") != std::string::npos);
+    REQUIRE(panel.content_text().find("Trigger: rising-zero (locked)") !=
+            std::string::npos);
+}
+
+TEST_CASE("AudioInspectorPanel keeps a peak hold while live level falls",
+          "[view][audio-inspector][audio-harness]") {
+    AudioInspectorPanel panel;
+    pulp::audio::AudioProbeSnapshot snap{};
+    snap.peak_max = 1.0f;
+    snap.rms_max = 0.5f;
+    panel.update(AudioInspectorPanel::Status::kLive, snap, {}, nullptr, 0);
+
+    const float held = panel.peak_meter_held_peak();
+    REQUIRE(held > 0.0f);
+
+    snap.peak_max = 0.05f;
+    snap.rms_max = 0.05f;
+    panel.update(AudioInspectorPanel::Status::kLive, snap, {}, nullptr, 0);
+    REQUIRE(panel.peak_meter_held_peak() >= held);
+
+    for (int i = 0; i < 180; ++i)
+        panel.update(AudioInspectorPanel::Status::kLive, snap, {}, nullptr, 0);
+    REQUIRE(panel.peak_meter_held_peak() < held);
 }
 
 TEST_CASE("AudioInspectorPanel renders a non-empty headless snapshot",

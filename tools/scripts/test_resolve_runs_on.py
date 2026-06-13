@@ -532,6 +532,23 @@ def test_script_entrypoint_success() -> None:
             f"unexpected script output: {proc.stdout!r}")
 
 
+def test_build_workflow_keeps_required_windows_x64_on_github_hosted() -> None:
+    """The required Windows x64 gate must not consume the local ARM64 pool."""
+    text = BUILD_WORKFLOW.read_text(encoding="utf-8")
+    match = re.search(
+        r"(?m)^\s*EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON:\s*(.+)$",
+        text,
+    )
+    _assert(match is not None,
+            "build.yml missing EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON")
+    expression = match.group(1)
+    _assert("inputs.windows_runner_selector_json" in expression,
+            f"workflow-dispatch override missing: {expression!r}")
+    _assert("PULP_LOCAL_WINDOWS_RUNS_ON_JSON" not in expression,
+            "required Windows x64 gate must not implicitly route to local "
+            "Windows ARM64/QEMU")
+
+
 def _all_tests() -> list:
     return [
         obj for name, obj in globals().items()

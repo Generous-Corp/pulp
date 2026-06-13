@@ -97,6 +97,16 @@ set_tests_properties(cmake-pulp-add-binary-data-encoder PROPERTIES
     LABELS "cmake;binary-data;issue-898;slow"
     TIMEOUT 60)
 
+# Windows FetchContent base-dir smoke — guards the WebGPU prebuilt
+# subbuild path from exceeding MSBuild's MAX_PATH limit in deep Actions
+# workspaces. Runs under `cmake -P`, so it does not need a Windows host.
+add_test(NAME cmake-fetchcontent-base-dir
+    COMMAND ${CMAKE_COMMAND} -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_fetchcontent_base_dir.cmake)
+set_tests_properties(cmake-fetchcontent-base-dir PROPERTIES
+    LABELS "cmake;fetchcontent;windows;issue-4039"
+    TIMEOUT 30)
+
 # Install-layout regression for issue-905 follow-up: when the SDK is
 # installed via `cmake --install`, the Python encoder MUST be bundled
 # alongside PulpUtils.cmake so find_package(Pulp) consumers can call
@@ -1786,7 +1796,7 @@ pulp_add_test_suite(pulp-test-properties SOURCES test_properties_file.cpp LIBRAR
 
 # AudioDeviceManager — persistence + MIDI hub (macOS plan item 1.2a)
 pulp_add_test_suite(pulp-test-audio-device-manager
-    SOURCES test_audio_device_manager.cpp
+    SOURCES test_audio_device_manager.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::audio pulp::midi pulp::state pulp::runtime)
 
 # DSP enhancement tests (dry/wet mixer, processor duplicator, matrix, special functions)
@@ -1942,7 +1952,9 @@ pulp_add_test_suite(pulp-test-permissions LIBRARIES pulp::platform)
 pulp_add_test_suite(pulp-test-environment LIBRARIES pulp::platform)
 
 # Runtime tests
-pulp_add_test_suite(pulp-test-runtime LIBRARIES pulp::runtime)
+pulp_add_test_suite(pulp-test-runtime
+    SOURCES test_runtime.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::runtime)
 
 # AbstractFifo (index-pair SPSC FIFO management)
 pulp_add_test_suite(pulp-test-abstract-fifo LIBRARIES pulp::runtime)
@@ -1988,6 +2000,9 @@ catch_discover_tests(pulp-test-events-timer-helpers PROPERTIES LABELS slow)
 
 # Audio file I/O tests
 pulp_add_test_suite(pulp-test-audio-file LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-sample-resource
+    SOURCES test_sample_resource.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::audio pulp::runtime)
 
 # AudioThumbnail + AudioThumbnailCache (item 6.12).
 # Links pulp::view so the WaveformView integration smoke compiles.
@@ -2040,7 +2055,9 @@ pulp_add_test_suite(pulp-test-midi LIBRARIES pulp::midi)
 pulp_add_test_suite(pulp-test-midi-file LIBRARIES pulp::midi)
 
 # State tests
-pulp_add_test_suite(pulp-test-state LIBRARIES pulp::state pulp::events)
+pulp_add_test_suite(pulp-test-state
+    SOURCES test_state.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::state pulp::events)
 
 # Binding tests
 pulp_add_test_suite(pulp-test-binding LIBRARIES pulp::state)
@@ -4450,7 +4467,9 @@ pulp_add_test_suite(pulp-test-resampler LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-halfband-iir LIBRARIES pulp::signal)
 
 # macOS plan Batch G — Generic Synthesiser polyphony (item 2.5)
-pulp_add_test_suite(pulp-test-synthesiser LIBRARIES pulp::midi)
+pulp_add_test_suite(pulp-test-synthesiser
+    SOURCES test_synthesiser.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::midi)
 
 # macOS plan Batch C — SampleConverter (item 1.5)
 pulp_add_test_suite(pulp-test-sample-converter LIBRARIES pulp::audio)
@@ -4503,7 +4522,7 @@ add_executable(pulp-test-inspector-domain-helpers
 target_include_directories(pulp-test-inspector-domain-helpers PRIVATE
     ${CMAKE_SOURCE_DIR}/inspect/include)
 target_link_libraries(pulp-test-inspector-domain-helpers PRIVATE
-    pulp::canvas pulp::state pulp::runtime Catch2::Catch2WithMain)
+    pulp::audio pulp::canvas pulp::state pulp::runtime Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-inspector-domain-helpers)
 
 # Inspector tests — only when GPU is enabled (pulp-inspect requires GPU stack).
@@ -5541,7 +5560,9 @@ pulp_add_test_suite(pulp-test-interpolator LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-midi-expansion LIBRARIES pulp::midi)
 
 # Audio process load measurer tests
-pulp_add_test_suite(pulp-test-load-measurer LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-load-measurer
+    SOURCES test_load_measurer.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::audio)
 
 # FilterDesign tests
 pulp_add_test_suite(pulp-test-filter-design LIBRARIES pulp::signal)
@@ -5701,7 +5722,9 @@ else()
 endif()
 
 # MPE synth voice helpers (voice, allocator, glide detector)
-pulp_add_test_suite(pulp-test-mpe-synth-voice LIBRARIES pulp::midi)
+pulp_add_test_suite(pulp-test-mpe-synth-voice
+    SOURCES test_mpe_synth_voice.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::midi)
 
 # Plugin hosting tests (scanner, signal graph)
 add_executable(pulp-test-host test_host.cpp)
@@ -5718,7 +5741,9 @@ catch_discover_tests(pulp-test-host)
 # P11-5 (#2647): SignalGraph tests carved out of test_host.cpp to bring the
 # 2,190-line parent under 2,000 (now 852). No CLAP fixture needed — these
 # exercise pure graph routing/topology, not plugin loading.
-add_executable(pulp-test-host-signal-graph test_host_signal_graph.cpp harness/rt_allocation_probe.cpp)
+add_executable(pulp-test-host-signal-graph test_host_signal_graph.cpp)
+target_sources(pulp-test-host-signal-graph PRIVATE
+    $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>)
 target_link_libraries(pulp-test-host-signal-graph PRIVATE pulp::host Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-host-signal-graph)
 

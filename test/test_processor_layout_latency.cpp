@@ -11,10 +11,12 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/format/processor.hpp>
+#include <pulp/format/process_block.hpp>
 #include <pulp/audio/buffer.hpp>
 #include <pulp/midi/buffer.hpp>
 
 #include <atomic>
+#include <array>
 #include <thread>
 #include <type_traits>
 
@@ -65,6 +67,28 @@ public:
         if (l.outputs[0] != l.inputs[0]) return false;
         return true;
     }
+};
+
+class ProjectingProcessor : public SidechainEffect {
+public:
+    void process(pulp::audio::BufferView<float>& output,
+                 const pulp::audio::BufferView<const float>& input,
+                 pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&,
+                 const ProcessContext&) override {
+        ++simple_process_calls;
+        saw_sidechain = sidechain_input() != nullptr;
+        observed_input_channels = input.num_channels();
+        observed_output_channels = output.num_channels();
+        if (!input.empty() && !output.empty()) {
+            output.channel(0)[0] = input.channel(0)[0] + 1.0f;
+        }
+    }
+
+    int simple_process_calls = 0;
+    std::size_t observed_input_channels = 0;
+    std::size_t observed_output_channels = 0;
+    bool saw_sidechain = false;
 };
 
 } // namespace
@@ -158,7 +182,8 @@ TEST_CASE("Processor::process is declared with float-precision BufferView. "
         pulp::midi::MidiBuffer&,
         pulp::midi::MidiBuffer&,
         const ProcessContext&);
-    static_assert(std::is_assignable_v<ProcessSig&, decltype(&Processor::process)>,
+    static_assert(std::is_same_v<decltype(static_cast<ProcessSig>(&Processor::process)),
+                                 ProcessSig>,
                   "Processor::process() must remain a float-precision "
                   "virtual until item 3.8's follow-up adds a double "
                   "overload deliberately; do not silently change the "
@@ -177,6 +202,288 @@ TEST_CASE("Processor::process is declared with float-precision BufferView. "
     ProcessContext ctx; ctx.sample_rate = 48000.0; ctx.num_samples = 8;
     p.process(out_view, in_view, mi, mo, ctx);
     SUCCEED("process() ran with float buffers");
+}
+
+// ── Phase 2 — additive multi-bus process surface ──────────────────────────
+
+TEST_CASE("ProcessBuffers exposes main and sidechain buses without owning audio",
+          "[processor][process-buffers][phase2]") {
+    float main_in_l[8] = {};
+    float main_in_r[8] = {};
+    float sidechain_l[8] = {};
+    float sidechain_r[8] = {};
+    float main_out_l[8] = {};
+    float main_out_r[8] = {};
+
+    const float* main_in_ptrs[2] = {main_in_l, main_in_r};
+    const float* sidechain_ptrs[2] = {sidechain_l, sidechain_r};
+    float* main_out_ptrs[2] = {main_out_l, main_out_r};
+
+    std::array<ProcessBusBufferView<const float>, 2> inputs{{
+        {
+            .info = {"Main In", 0, BusDirection::Input, BusRole::Main, 2, false, true},
+            .buffer = pulp::audio::BufferView<const float>(main_in_ptrs, 2, 8),
+        },
+        {
+            .info = {"Sidechain", 1, BusDirection::Input, BusRole::Sidechain, 2, true, true},
+            .buffer = pulp::audio::BufferView<const float>(sidechain_ptrs, 2, 8),
+        },
+    }};
+    std::array<ProcessBusBufferView<float>, 1> outputs{{
+        {
+            .info = {"Main Out", 0, BusDirection::Output, BusRole::Main, 2, false, true},
+            .buffer = pulp::audio::BufferView<float>(main_out_ptrs, 2, 8),
+        },
+    }};
+
+    ProcessBuffers buffers{
+        .inputs = ProcessBusBufferSet<const float>(inputs),
+        .outputs = ProcessBusBufferSet<float>(outputs),
+    };
+
+    REQUIRE(buffers.inputs.size() == 2);
+    REQUIRE(buffers.inputs.active_count() == 2);
+    REQUIRE(buffers.outputs.active_count() == 1);
+    REQUIRE(buffers.main_input() == &inputs[0].buffer);
+    REQUIRE(buffers.sidechain_input() == &inputs[1].buffer);
+    REQUIRE(buffers.main_output() == &outputs[0].buffer);
+    REQUIRE(buffers.layouts_match_descriptors());
+    REQUIRE(buffers.active_buses_have_storage());
+}
+
+TEST_CASE("BusBufferSet looks up indexed and named aux buses",
+          "[processor][process-buffers][phase2]") {
+    float main_l[4] = {};
+    float main_r[4] = {};
+    float cue_l[4] = {};
+    float* main_ptrs[2] = {main_l, main_r};
+    float* cue_ptrs[1] = {cue_l};
+
+    std::array<ProcessBusBufferView<float>, 3> outputs{{
+        {
+            .info = {"Main Out", 0, BusDirection::Output, BusRole::Main, 2, false, true},
+            .buffer = pulp::audio::BufferView<float>(main_ptrs, 2, 4),
+        },
+        {
+            .info = {"Cue", 1, BusDirection::Output, BusRole::Aux, 1, true, true},
+            .buffer = pulp::audio::BufferView<float>(cue_ptrs, 1, 4),
+        },
+        {
+            .info = {"Stem", 2, BusDirection::Output, BusRole::Aux, 2, true, false},
+            .buffer = {},
+        },
+    }};
+
+    ProcessBusBufferSet<float> buses(outputs);
+    const auto& const_buses = buses;
+
+    REQUIRE(buses.count(BusRole::Main) == 1);
+    REQUIRE(buses.count(BusRole::Aux) == 2);
+    REQUIRE(buses.active_count(BusRole::Aux) == 1);
+    REQUIRE(buses.find(BusRole::Aux, 0) == &outputs[1]);
+    REQUIRE(buses.find(BusRole::Aux, 1) == &outputs[2]);
+    REQUIRE(buses.find(BusRole::Aux, 2) == nullptr);
+    REQUIRE(buses.find_by_index(2) == &outputs[2]);
+    REQUIRE(buses.find_by_index(42) == nullptr);
+    REQUIRE(buses.find_by_name("Cue") == &outputs[1]);
+    REQUIRE(buses.find_by_name("Missing") == nullptr);
+    REQUIRE(const_buses.find(BusRole::Aux, 1) == &outputs[2]);
+    REQUIRE(const_buses.find_by_index(1) == &outputs[1]);
+    REQUIRE(const_buses.find_by_name("Stem") == &outputs[2]);
+}
+
+TEST_CASE("ProcessBuffers accepts inactive optional buses with empty views",
+          "[processor][process-buffers][phase2]") {
+    float main_in_l[4] = {};
+    float main_in_r[4] = {};
+    float main_out_l[4] = {};
+    float main_out_r[4] = {};
+    const float* main_in_ptrs[2] = {main_in_l, main_in_r};
+    float* main_out_ptrs[2] = {main_out_l, main_out_r};
+
+    std::array<ProcessBusBufferView<const float>, 2> inputs{{
+        {
+            .info = {"Main In", 0, BusDirection::Input, BusRole::Main, 2, false, true},
+            .buffer = pulp::audio::BufferView<const float>(main_in_ptrs, 2, 4),
+        },
+        {
+            .info = {"Sidechain", 1, BusDirection::Input, BusRole::Sidechain, 2, true, false},
+            .buffer = {},
+        },
+    }};
+    std::array<ProcessBusBufferView<float>, 1> outputs{{
+        {
+            .info = {"Main Out", 0, BusDirection::Output, BusRole::Main, 2, false, true},
+            .buffer = pulp::audio::BufferView<float>(main_out_ptrs, 2, 4),
+        },
+    }};
+
+    ProcessBuffers buffers{
+        .inputs = ProcessBusBufferSet<const float>(inputs),
+        .outputs = ProcessBusBufferSet<float>(outputs),
+    };
+
+    REQUIRE(buffers.inputs.active_count() == 1);
+    REQUIRE(buffers.sidechain_input() == nullptr);
+    REQUIRE(buffers.layouts_match_descriptors());
+    REQUIRE(buffers.active_buses_have_storage());
+}
+
+TEST_CASE("ProcessBuffers reports layout and storage mismatches before process",
+          "[processor][process-buffers][phase2]") {
+    float left[4] = {};
+    const float* missing_channel[2] = {left, nullptr};
+    std::array<ProcessBusBufferView<const float>, 1> inputs{{
+        {
+            .info = {"Main In", 0, BusDirection::Input, BusRole::Main, 2, false, true},
+            .buffer = pulp::audio::BufferView<const float>(missing_channel, 2, 4),
+        },
+    }};
+
+    float out_l[4] = {};
+    float* mono_out[1] = {out_l};
+    std::array<ProcessBusBufferView<float>, 1> outputs{{
+        {
+            .info = {"Main Out", 0, BusDirection::Output, BusRole::Main, 2, false, true},
+            .buffer = pulp::audio::BufferView<float>(mono_out, 1, 4),
+        },
+    }};
+
+    ProcessBuffers buffers{
+        .inputs = ProcessBusBufferSet<const float>(inputs),
+        .outputs = ProcessBusBufferSet<float>(outputs),
+    };
+
+    REQUIRE_FALSE(buffers.active_buses_have_storage());
+    REQUIRE_FALSE(buffers.layouts_match_descriptors());
+}
+
+TEST_CASE("Processor multi-bus overload projects to the legacy process callback",
+          "[processor][process-buffers][phase2]") {
+    ProjectingProcessor processor;
+    float in_l[4] = {2.0f, 0.0f, 0.0f, 0.0f};
+    float in_r[4] = {};
+    float side_l[4] = {};
+    float side_r[4] = {};
+    float out_l[4] = {};
+    float out_r[4] = {};
+    const float* in_ptrs[2] = {in_l, in_r};
+    const float* side_ptrs[2] = {side_l, side_r};
+    float* out_ptrs[2] = {out_l, out_r};
+
+    std::array<ProcessBusBufferView<const float>, 2> inputs{{
+        {
+            .info = {"Main In", 0, BusDirection::Input, BusRole::Main, 2, false, true},
+            .buffer = pulp::audio::BufferView<const float>(in_ptrs, 2, 4),
+        },
+        {
+            .info = {"Sidechain", 1, BusDirection::Input, BusRole::Sidechain, 2, true, true},
+            .buffer = pulp::audio::BufferView<const float>(side_ptrs, 2, 4),
+        },
+    }};
+    std::array<ProcessBusBufferView<float>, 1> outputs{{
+        {
+            .info = {"Main Out", 0, BusDirection::Output, BusRole::Main, 2, false, true},
+            .buffer = pulp::audio::BufferView<float>(out_ptrs, 2, 4),
+        },
+    }};
+
+    ProcessBuffers buffers{
+        .inputs = ProcessBusBufferSet<const float>(inputs),
+        .outputs = ProcessBusBufferSet<float>(outputs),
+    };
+    pulp::midi::MidiBuffer midi_in, midi_out;
+    ProcessContext ctx;
+
+    static_cast<Processor&>(processor).process(buffers, midi_in, midi_out, ctx);
+
+    REQUIRE(processor.simple_process_calls == 1);
+    REQUIRE(processor.observed_input_channels == 2);
+    REQUIRE(processor.observed_output_channels == 2);
+    REQUIRE(processor.saw_sidechain);
+    REQUIRE(out_l[0] == 3.0f);
+    REQUIRE(processor.sidechain_input() == nullptr);
+}
+
+TEST_CASE("Processor multi-bus overload no-ops when no active main output exists",
+          "[processor][process-buffers][phase2]") {
+    ProjectingProcessor processor;
+    float in_l[4] = {};
+    const float* in_ptrs[1] = {in_l};
+    std::array<ProcessBusBufferView<const float>, 1> inputs{{
+        {
+            .info = {"Main In", 0, BusDirection::Input, BusRole::Main, 1, false, true},
+            .buffer = pulp::audio::BufferView<const float>(in_ptrs, 1, 4),
+        },
+    }};
+    std::array<ProcessBusBufferView<float>, 1> outputs{{
+        {
+            .info = {"Main Out", 0, BusDirection::Output, BusRole::Main, 2, false, false},
+            .buffer = {},
+        },
+    }};
+
+    ProcessBuffers buffers{
+        .inputs = ProcessBusBufferSet<const float>(inputs),
+        .outputs = ProcessBusBufferSet<float>(outputs),
+    };
+    pulp::midi::MidiBuffer midi_in, midi_out;
+    ProcessContext ctx;
+
+    static_cast<Processor&>(processor).process(buffers, midi_in, midi_out, ctx);
+
+    REQUIRE(processor.simple_process_calls == 0);
+}
+
+// ── Phase 2 — runtime mode contract ───────────────────────────────────────
+
+TEST_CASE("ProcessContext defaults to realtime mode with explicit helper predicates",
+          "[processor][process-context][phase2]") {
+    ProcessContext ctx;
+
+    REQUIRE(ctx.process_mode == ProcessMode::Realtime);
+    REQUIRE(ctx.render_speed_hint == RenderSpeedHint::Unknown);
+    REQUIRE(ctx.is_realtime());
+    REQUIRE_FALSE(ctx.is_offline());
+    REQUIRE_FALSE(ctx.is_bypassed);
+    REQUIRE_FALSE(ctx.is_tail_drain);
+    REQUIRE_FALSE(ctx.reset_requested);
+    REQUIRE_FALSE(ctx.transport_jump);
+    REQUIRE_FALSE(ctx.allows_offline_quality_work());
+    REQUIRE_FALSE(ctx.should_reset_dsp_state());
+    REQUIRE_FALSE(ctx.is_maintenance_render());
+    REQUIRE_FALSE(ctx.should_render_tail_only());
+
+    ctx.process_mode = ProcessMode::Offline;
+    ctx.render_speed_hint = RenderSpeedHint::FasterThanRealtime;
+    REQUIRE_FALSE(ctx.is_realtime());
+    REQUIRE(ctx.is_offline());
+    REQUIRE(ctx.allows_offline_quality_work());
+
+    ctx.render_speed_hint = RenderSpeedHint::Realtime;
+    REQUIRE_FALSE(ctx.allows_offline_quality_work());
+}
+
+TEST_CASE("ProcessContext reset and maintenance helpers compose explicit flags",
+          "[processor][process-context][phase2]") {
+    ProcessContext ctx;
+
+    ctx.transport_jump = true;
+    REQUIRE(ctx.should_reset_dsp_state());
+    ctx.transport_jump = false;
+
+    ctx.reset_requested = true;
+    REQUIRE(ctx.should_reset_dsp_state());
+    ctx.reset_requested = false;
+
+    ctx.is_bypassed = true;
+    REQUIRE(ctx.is_maintenance_render());
+    REQUIRE_FALSE(ctx.should_render_tail_only());
+    ctx.is_bypassed = false;
+
+    ctx.is_tail_drain = true;
+    REQUIRE(ctx.is_maintenance_render());
+    REQUIRE(ctx.should_render_tail_only());
 }
 
 // ── Item 3.11 — latency / tail change notifications (RT-safe) ─────────────

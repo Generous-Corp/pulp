@@ -18,6 +18,7 @@
 /// never fakes zeros that look like a live-but-silent signal.
 
 #include <pulp/audio/audio_probe_snapshot.hpp>
+#include <pulp/audio/audio_scope.hpp>
 #include <pulp/audio/audio_stats.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>
@@ -29,6 +30,11 @@
 
 namespace pulp::view {
 
+enum class AudioInspectorMode {
+    kSignal,
+    kScope,
+};
+
 /// Time-domain waveform plot over a copied, fixed-capacity sample buffer.
 /// The window copies channel-0 history out of the probe (a non-RT read) and
 /// hands it here; this view only stores and paints — it never reads the probe.
@@ -36,6 +42,14 @@ class AudioWaveformView : public View {
 public:
     /// Fixed display capacity. The window copies at most this many frames.
     static constexpr int kCapacity = 512;
+
+    /// Display-only acquisition alignment. Raw preserves the copied buffer's
+    /// natural start; rising-zero starts the visible window at the first
+    /// negative→non-negative crossing when present. No samples are invented.
+    enum class TriggerMode {
+        kRaw,
+        kRisingZero,
+    };
 
     AudioWaveformView();
 
@@ -49,6 +63,22 @@ public:
     int sample_count() const { return count_; }
     float sample_at(int i) const { return (i >= 0 && i < count_) ? data_[i] : 0.0f; }
 
+    void set_show_grid(bool show);
+    bool show_grid() const { return show_grid_; }
+
+    void set_trigger_mode(TriggerMode mode);
+    TriggerMode trigger_mode() const { return trigger_mode_; }
+
+    /// Horizontal zoom for the diagnostic trace. 1.0 shows the whole copied
+    /// buffer; larger values show a shorter real-sample window.
+    void set_horizontal_scale(float scale);
+    float horizontal_scale() const { return horizontal_scale_; }
+
+    /// Index into `data_` where the current display window starts. Exposed for
+    /// headless tests of trigger/scale behavior.
+    int display_start_index() const;
+    int display_sample_count() const;
+
     /// When false the view paints a dimmed baseline + no trace (stale / no
     /// probe). Drives the honest-unavailable visual.
     void set_live(bool live) { live_ = live; }
@@ -57,9 +87,14 @@ public:
     void paint(canvas::Canvas& canvas) override;
 
 private:
+    int find_rising_zero_crossing() const;
+
     std::array<float, kCapacity> data_{};
     int count_ = 0;
     bool live_ = false;
+    bool show_grid_ = true;
+    TriggerMode trigger_mode_ = TriggerMode::kRaw;
+    float horizontal_scale_ = 1.0f;
 };
 
 /// dBFS floor used by the inspector's meter fill (and the empty-bar anchor).
@@ -96,6 +131,14 @@ public:
                 const float* waveform,
                 int waveform_count);
 
+    void set_mode(AudioInspectorMode mode);
+    AudioInspectorMode mode() const { return mode_; }
+
+    void set_scope_result(const audio::AudioScopeResult& result);
+    void clear_scope_result();
+
+    std::function<void(AudioInspectorMode)> on_mode_changed;
+
     // ── State accessors (for headless tests; no GPU/window needed) ──────────
 
     Status status() const { return status_; }
@@ -120,6 +163,15 @@ public:
     float balance() const { return balance_; }
 
     const AudioWaveformView& waveform() const { return *waveform_view_; }
+    AudioWaveformView& waveform() { return *waveform_view_; }
+
+    void set_waveform_grid_visible(bool visible);
+    void set_waveform_trigger_mode(AudioWaveformView::TriggerMode mode);
+    void set_waveform_horizontal_scale(float scale);
+
+    float peak_meter_display_peak() const;
+    float peak_meter_held_peak() const;
+    float rms_meter_held_peak() const;
 
     // ── Rendered-text accessors (for headless tests) ────────────────────────
     // The exact strings the labels paint. A test can assert these are
@@ -128,6 +180,7 @@ public:
     // only by eye.
     const std::string& status_text() const { return status_label_->text(); }
     const std::string& level_text() const { return level_label_->text(); }
+    const std::string& content_text() const { return content_label_->text(); }
     /// Color the status heading paints with. A test can assert its channels
     /// are in the valid [0,1] range — the white-on-white regression that hid
     /// every label came from feeding 0-255 values into the [0,1] Color ctor,
@@ -139,13 +192,19 @@ private:
     void refresh_labels();
 
     Status status_ = Status::kNoProbe;
+    AudioInspectorMode mode_ = AudioInspectorMode::kSignal;
     audio::AudioProbeSnapshot snapshot_{};
     audio::AudioStats stats_{};
+    audio::AudioScopeResult scope_result_{};
+    bool has_scope_result_ = false;
     float lr_match_ = 0.0f;
     float balance_ = 0.0f;
+    float meter_dt_seconds_ = 1.0f / 60.0f;
 
     // Widget pointers (owned by the view tree).
     Label* status_label_ = nullptr;
+    ToggleButton* signal_button_ = nullptr;
+    ToggleButton* scope_button_ = nullptr;
     Label* stage_label_ = nullptr;
     Meter* peak_meter_ = nullptr;
     Meter* rms_meter_ = nullptr;

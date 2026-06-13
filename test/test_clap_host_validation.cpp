@@ -81,7 +81,7 @@ public:
     void define_parameters(state::StateStore& store) override {
         store.add_parameter({
             .id = kParamGain, .name = "Gain", .unit = "dB",
-            .range = {-60.0f, 24.0f, 0.0f, 0.1f},
+            .range = {-60.0f, 24.0f, 0.0f, 0.0f},
         });
         store.add_parameter({
             .id = kParamCutoff, .name = "Cutoff", .unit = "Hz",

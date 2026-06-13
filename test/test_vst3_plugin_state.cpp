@@ -131,6 +131,10 @@ public:
                  pulp::midi::MidiBuffer&,
                  pulp::midi::MidiBuffer&,
                  const pulp::format::ProcessContext&) override;
+    void process(pulp::format::ProcessBuffers& audio,
+                 pulp::midi::MidiBuffer& midi_in,
+                 pulp::midi::MidiBuffer& midi_out,
+                 const pulp::format::ProcessContext& context) override;
 
     int latency_samples() const override { return config_.latency_samples; }
 
@@ -147,11 +151,19 @@ public:
     int prepare_count = 0;
     int release_count = 0;
     int process_count = 0;
+    int process_buffer_count = 0;
     pulp::format::PrepareContext last_prepare;
     pulp::format::ProcessContext last_context;
     std::size_t last_input_channels = 0;
     std::size_t last_output_channels = 0;
     std::size_t last_sidechain_channels = 0;
+    std::size_t last_process_buffer_input_buses = 0;
+    std::size_t last_process_buffer_output_buses = 0;
+    std::size_t last_process_buffer_active_inputs = 0;
+    std::size_t last_process_buffer_active_outputs = 0;
+    bool last_process_buffer_had_sidechain = false;
+    bool last_process_buffer_layouts_match = false;
+    bool last_process_buffer_storage_valid = false;
     std::size_t last_midi_in_size = 0;
     std::size_t last_sysex_size = 0;
     std::vector<uint8_t> last_sysex_payload;
@@ -240,6 +252,24 @@ void TestVst3Processor::process(
         note.sample_offset = 7;
         midi_out.add(note);
     }
+}
+
+void TestVst3Processor::process(
+    pulp::format::ProcessBuffers& audio,
+    pulp::midi::MidiBuffer& midi_in,
+    pulp::midi::MidiBuffer& midi_out,
+    const pulp::format::ProcessContext& context) {
+    ++process_buffer_count;
+    last_process_buffer_input_buses = audio.inputs.size();
+    last_process_buffer_output_buses = audio.outputs.size();
+    last_process_buffer_active_inputs = audio.inputs.active_count();
+    last_process_buffer_active_outputs = audio.outputs.active_count();
+    last_process_buffer_had_sidechain =
+        audio.inputs.sidechain() != nullptr && audio.inputs.sidechain()->active();
+    last_process_buffer_layouts_match = audio.layouts_match_descriptors();
+    last_process_buffer_storage_valid = audio.active_buses_have_storage();
+
+    pulp::format::Processor::process(audio, midi_in, midi_out, context);
 }
 
 std::unique_ptr<pulp::format::Processor> create_test_processor() {
@@ -418,6 +448,119 @@ TEST_CASE("VST3 adapter exposes parameter metadata and lifecycle values",
     REQUIRE(processor.terminate() == Steinberg::kResultOk);
 }
 
+TEST_CASE("VST3 latency and tail report processor runtime contract",
+          "[vst3][latency][tail][phase2]") {
+    HostApp host_app;
+
+    SECTION("finite latency and tail samples are reported directly") {
+        TestVst3Config config;
+        config.latency_samples = 192;
+        config.descriptor.tail_samples = 4096;
+        reset_test_processor(config);
+
+        pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+        REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+        REQUIRE(processor.getLatencySamples() == 192u);
+        REQUIRE(processor.getTailSamples() == 4096u);
+        REQUIRE(processor.terminate() == Steinberg::kResultOk);
+    }
+
+    SECTION("zero latency and tail remain zero") {
+        reset_test_processor();
+
+        pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+        REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+        REQUIRE(processor.getLatencySamples() == 0u);
+        REQUIRE(processor.getTailSamples() == 0u);
+        REQUIRE(processor.terminate() == Steinberg::kResultOk);
+    }
+
+    SECTION("negative latency clamps to zero and infinite tail maps to VST3 sentinel") {
+        TestVst3Config config;
+        config.latency_samples = -256;
+        config.descriptor.tail_samples = -1;
+        reset_test_processor(config);
+
+        pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+        REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+        REQUIRE(processor.getLatencySamples() == 0u);
+        REQUIRE(processor.getTailSamples() == Steinberg::Vst::kInfiniteTail);
+        REQUIRE(processor.terminate() == Steinberg::kResultOk);
+    }
+}
+
+TEST_CASE("VST3 transport jumps request processor reset through ProcessContext",
+          "[vst3][transport][reset][phase2]") {
+    reset_test_processor();
+
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    auto* test_processor = TestVst3Processor::g_last_processor;
+    REQUIRE(test_processor != nullptr);
+
+    Steinberg::Vst::ProcessSetup setup{};
+    setup.processMode = Steinberg::Vst::kRealtime;
+    setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+    setup.maxSamplesPerBlock = 8;
+    setup.sampleRate = 48000.0;
+    REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+
+    constexpr int kFrames = 8;
+    std::array<float, kFrames> in_l{};
+    std::array<float, kFrames> in_r{};
+    std::array<float, kFrames> out_l{};
+    std::array<float, kFrames> out_r{};
+    float* main_inputs[2] = {in_l.data(), in_r.data()};
+    float* main_outputs[2] = {out_l.data(), out_r.data()};
+
+    Steinberg::Vst::AudioBusBuffers audio_inputs[1]{};
+    audio_inputs[0].numChannels = 2;
+    audio_inputs[0].channelBuffers32 = main_inputs;
+    Steinberg::Vst::AudioBusBuffers audio_outputs[1]{};
+    audio_outputs[0].numChannels = 2;
+    audio_outputs[0].channelBuffers32 = main_outputs;
+
+    Steinberg::Vst::ParameterChanges input_params;
+    Steinberg::Vst::ParameterChanges output_params;
+    Steinberg::Vst::EventList input_events(1);
+    Steinberg::Vst::EventList output_events(1);
+    Steinberg::Vst::ProcessContext process_context{};
+    process_context.state = Steinberg::Vst::ProcessContext::kPlaying;
+
+    Steinberg::Vst::ProcessData data{};
+    data.numSamples = kFrames;
+    data.numInputs = 1;
+    data.numOutputs = 1;
+    data.inputs = audio_inputs;
+    data.outputs = audio_outputs;
+    data.inputParameterChanges = &input_params;
+    data.outputParameterChanges = &output_params;
+    data.inputEvents = &input_events;
+    data.outputEvents = &output_events;
+    data.processContext = &process_context;
+
+    auto run_at = [&](Steinberg::int64 sample_position) {
+        process_context.projectTimeSamples = sample_position;
+        REQUIRE(processor.process(data) == Steinberg::kResultOk);
+        return test_processor->last_context;
+    };
+
+    const auto first = run_at(1000);
+    REQUIRE_FALSE(first.transport_jump);
+    REQUIRE_FALSE(first.should_reset_dsp_state());
+
+    const auto continuous = run_at(1008);
+    REQUIRE_FALSE(continuous.transport_jump);
+    REQUIRE_FALSE(continuous.should_reset_dsp_state());
+
+    const auto jumped = run_at(4096);
+    REQUIRE(jumped.transport_jump);
+    REQUIRE(jumped.should_reset_dsp_state());
+
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
 TEST_CASE("VST3 editor creation is disabled by automation env",
           "[vst3][editor][issue-2515]") {
     ScopedEnv disable_editor("PULP_DISABLE_PLUGIN_EDITOR");
@@ -487,7 +630,7 @@ TEST_CASE("VST3 adapter process path maps host events, buses, and outputs",
             Steinberg::kResultTrue);
 
     Steinberg::Vst::ProcessSetup setup{};
-    setup.processMode = Steinberg::Vst::kRealtime;
+    setup.processMode = Steinberg::Vst::kOffline;
     setup.symbolicSampleSize = Steinberg::Vst::kSample32;
     setup.maxSamplesPerBlock = 8;
     setup.sampleRate = 44100.0;
@@ -584,6 +727,14 @@ TEST_CASE("VST3 adapter process path maps host events, buses, and outputs",
     REQUIRE(processor.process(data) == Steinberg::kResultOk);
 
     REQUIRE(test_processor->process_count == 1);
+    REQUIRE(test_processor->process_buffer_count == 1);
+    REQUIRE(test_processor->last_process_buffer_input_buses == 2);
+    REQUIRE(test_processor->last_process_buffer_output_buses == 1);
+    REQUIRE(test_processor->last_process_buffer_active_inputs == 2);
+    REQUIRE(test_processor->last_process_buffer_active_outputs == 1);
+    REQUIRE(test_processor->last_process_buffer_had_sidechain);
+    REQUIRE(test_processor->last_process_buffer_layouts_match);
+    REQUIRE(test_processor->last_process_buffer_storage_valid);
     REQUIRE(test_processor->last_input_channels == 2);
     REQUIRE(test_processor->last_output_channels == 2);
     REQUIRE(test_processor->last_sidechain_channels == 1);
@@ -592,6 +743,13 @@ TEST_CASE("VST3 adapter process path maps host events, buses, and outputs",
     REQUIRE(test_processor->last_sysex_payload == std::vector<uint8_t>(sysex.begin(), sysex.end()));
     REQUIRE_THAT(test_processor->gain_seen_in_process, WithinAbs(24.0f, 1e-5f));
     REQUIRE(test_processor->last_context.is_playing);
+    REQUIRE(test_processor->last_context.process_mode ==
+            pulp::format::ProcessMode::Offline);
+    REQUIRE(test_processor->last_context.render_speed_hint ==
+            pulp::format::RenderSpeedHint::FasterThanRealtime);
+    REQUIRE(test_processor->last_context.is_offline());
+    REQUIRE(test_processor->last_context.allows_offline_quality_work());
+    REQUIRE_FALSE(test_processor->last_context.is_maintenance_render());
     REQUIRE_THAT(test_processor->last_context.tempo_bpm, WithinAbs(137.5, 1e-6));
     REQUIRE(test_processor->last_context.position_samples == 12345);
     REQUIRE(test_processor->last_context.time_sig_numerator == 7);

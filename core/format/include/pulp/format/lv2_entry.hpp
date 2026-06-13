@@ -20,6 +20,7 @@
 #include <lv2/midi/midi.h>
 #include <lv2/urid/urid.h>
 
+#include <array>
 #include <cstring>
 #include <vector>
 
@@ -205,6 +206,24 @@ inline void run(LV2_Handle handle, uint32_t n_samples) {
         static_cast<size_t>(inst->num_audio_inputs), n_samples);
     audio::BufferView<float> output(out_ptrs,
         static_cast<size_t>(inst->num_audio_outputs), n_samples);
+    std::array<ProcessBusBufferView<const float>, 1> input_buses{{
+        {
+            .info = {"Main In", 0, BusDirection::Input, BusRole::Main,
+                     inst->num_audio_inputs, false, inst->num_audio_inputs > 0},
+            .buffer = input,
+        },
+    }};
+    std::array<ProcessBusBufferView<float>, 1> output_buses{{
+        {
+            .info = {"Main Out", 0, BusDirection::Output, BusRole::Main,
+                     inst->num_audio_outputs, false, inst->num_audio_outputs > 0},
+            .buffer = output,
+        },
+    }};
+    ProcessBuffers process_buffers{
+        .inputs = ProcessBusBufferSet<const float>(input_buses),
+        .outputs = ProcessBusBufferSet<float>(output_buses),
+    };
 
     // MIDI: parse the connected LV2_Atom_Sequence (if any) and promote
     // each MidiEvent into the Processor's MidiBuffer. Sysex atoms are
@@ -234,6 +253,8 @@ inline void run(LV2_Handle handle, uint32_t n_samples) {
     format::ProcessContext proc_ctx;
     proc_ctx.sample_rate = inst->sample_rate;
     proc_ctx.num_samples = static_cast<int>(n_samples);
+    proc_ctx.process_mode = format::ProcessMode::Realtime;
+    proc_ctx.render_speed_hint = format::RenderSpeedHint::Realtime;
 
     // Phase 3 — uniform param-events contract + RT-safety guard (mirrors VST3).
     // The queue carries no atom-sourced events yet; control-port params still
@@ -242,7 +263,7 @@ inline void run(LV2_Handle handle, uint32_t n_samples) {
     inst->processor->set_param_events(&inst->param_events);
     {
         pulp::runtime::ScopedNoAlloc no_alloc_guard;
-        inst->processor->process(output, input, midi_in, midi_out, proc_ctx);
+        inst->processor->process(process_buffers, midi_in, midi_out, proc_ctx);
     }
 
     // #491: serialize outgoing MIDI back to the LV2 atom output port.

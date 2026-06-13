@@ -122,6 +122,7 @@ namespace methods {
     constexpr auto kAudioGetConfig       = "Audio.getConfig";
     constexpr auto kAudioEnableMetering  = "Audio.enableMetering";
     constexpr auto kAudioGetMidiLog      = "Audio.getMidiLog";
+    constexpr auto kAudioRuntimeTelemetry = "Audio.runtimeTelemetry";
     constexpr auto kAudioBufferUnderrun  = "Audio.bufferUnderrun";
     constexpr auto kAudioLevels          = "Audio.levels";
 

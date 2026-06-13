@@ -11,6 +11,9 @@
 namespace pulp::native_components {
 
 inline constexpr std::uint32_t kNodeAbiMajor = PULP_NODE_V1_ABI_MAJOR;
+inline constexpr std::size_t kNodeEntryMinimumSize =
+    offsetof(pulp_node_entry_v1, descriptor)
+    + sizeof(((pulp_node_entry_v1*)nullptr)->descriptor);
 
 // The public node ABI major tracks the runtime node-ABI generation
 // (pulp::PULP_NODE_ABI_VERSION in <pulp/runtime/node_abi.hpp>) so a single
@@ -24,7 +27,7 @@ inline constexpr std::uint32_t kNodeAbiMajor = PULP_NODE_V1_ABI_MAJOR;
 // fields a newer node adds are ignored by an older host.
 inline bool node_is_compatible(const pulp_node_entry_v1* entry) noexcept {
     return entry != nullptr && entry->abi_major == kNodeAbiMajor &&
-           entry->size >= offsetof(pulp_node_entry_v1, descriptor);
+           entry->size >= kNodeEntryMinimumSize;
 }
 
 // Every boundary struct must be a C-compatible POD.

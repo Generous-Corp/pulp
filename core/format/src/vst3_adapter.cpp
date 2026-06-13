@@ -17,6 +17,7 @@
 #include <pluginterfaces/vst/ivsteditcontroller.h>
 #include <pluginterfaces/vst/ivsthostapplication.h>
 #include <pluginterfaces/base/ustring.h>
+#include <array>
 #include <cstring>
 
 namespace pulp::format::vst3 {
@@ -484,7 +485,29 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     audio::BufferView<const float> sidechain_view(
         const_cast<const float* const*>(sidechain_ptrs_.data()),
         sc_channels, num_samples);
-    processor_->set_sidechain(sc_channels > 0 ? &sidechain_view : nullptr);
+    std::array<ProcessBusBufferView<const float>, 2> input_buses{{
+        {
+            .info = {"Main In", 0, BusDirection::Input, BusRole::Main,
+                     proc_in, false, data.numInputs > 0},
+            .buffer = input_view,
+        },
+        {
+            .info = {"Sidechain", 1, BusDirection::Input, BusRole::Sidechain,
+                     sc_channels, true, sc_channels > 0},
+            .buffer = sidechain_view,
+        },
+    }};
+    std::array<ProcessBusBufferView<float>, 1> output_buses{{
+        {
+            .info = {"Main Out", 0, BusDirection::Output, BusRole::Main,
+                     proc_out, false, data.numOutputs > 0},
+            .buffer = output_view,
+        },
+    }};
+    ProcessBuffers process_buffers{
+        .inputs = ProcessBusBufferSet<const float>(input_buses),
+        .outputs = ProcessBusBufferSet<float>(output_buses),
+    };
 
     // Item 3.2 — VST3 `processBlockBypassed` behaviour. When the plugin
     // declared a Bypass parameter (kIsBypass) and the current normalized
@@ -560,6 +583,12 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     pulp::format::ProcessContext ctx;
     ctx.sample_rate = processSetup.sampleRate;
     ctx.num_samples = num_samples;
+    ctx.process_mode = processSetup.processMode == Steinberg::Vst::kOffline
+        ? pulp::format::ProcessMode::Offline
+        : pulp::format::ProcessMode::Realtime;
+    ctx.render_speed_hint = ctx.process_mode == pulp::format::ProcessMode::Offline
+        ? pulp::format::RenderSpeedHint::FasterThanRealtime
+        : pulp::format::RenderSpeedHint::Realtime;
     if (data.processContext) {
         const auto* pc = data.processContext;
         const uint32_t state = pc->state;
@@ -641,7 +670,7 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     // planning/2026-05-18-rt-safety-and-debug-dx.md.
     {
         pulp::runtime::ScopedNoAlloc no_alloc_guard;
-        processor_->process(output_view, input_view, midi_in, midi_out, ctx);
+        processor_->process(process_buffers, midi_in, midi_out, ctx);
     }
 
     // Write parameter output changes — lets the host record automation

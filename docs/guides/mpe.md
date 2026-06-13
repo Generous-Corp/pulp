@@ -84,6 +84,18 @@ The tracker normalises expressions so voices see consistent units:
 `pitch_bend()`, `pressure()`, `timbre()` directly without fighting
 zipper noise.
 
+`MpeVoiceAllocator<Voice>::telemetry()` returns an owner-thread snapshot with
+polyphony, active/releasing voice counts, steal count, steal mode, and the
+latest glide flag. If UI or tooling needs that data, call it from the processor
+owner and publish the returned value through a lock-free latest-value channel.
+For optional per-voice analysis, preview, or diagnostics, pass a
+`runtime::RuntimeBudgetFrame` to
+`MpeVoiceAllocator<Voice>::evaluate_optional_runtime_budget()`. The allocator
+uses the same voice telemetry to return a run/defer/shed/bypass decision without
+changing the MPE voice render path. Budget degradation does not disable active
+notes, change expression smoothing, or alter voice stealing; it is only for
+optional analysis, preview, or diagnostic work.
+
 ## Example
 
 `examples/mpe-synth/` ships an MPE-aware sine synth that demonstrates

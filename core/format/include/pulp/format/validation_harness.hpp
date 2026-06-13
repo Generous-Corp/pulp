@@ -7,6 +7,7 @@
 /// Produces validation reports conforming to validation-report-v1.schema.json.
 
 #include <pulp/format/headless.hpp>
+#include <pulp/audio/load_measurer.hpp>
 #include <chrono>
 #include <filesystem>
 #include <functional>
@@ -173,6 +174,12 @@ public:
     ReportEntry run_validator(const std::string& tool,
                                const std::filesystem::path& plugin_path,
                                const std::string& format = "");
+
+    /// Record runtime load/xrun telemetry using the shared overload policy.
+    ReportEntry record_runtime_overload(
+        const audio::AudioProcessLoadSnapshot& load,
+        std::uint64_t xrun_count,
+        const audio::AudioRuntimeOverloadPolicy& policy = {});
 
     // ── Report generation ───────────────────────────────────────────────
 

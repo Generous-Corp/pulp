@@ -1,3 +1,5 @@
+#include "harness/rt_allocation_probe.hpp"
+
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/midi/synthesiser.hpp>
@@ -153,6 +155,127 @@ TEST_CASE("Synthesiser note_on velocity 0 is a note-off", "[midi][synth]") {
     REQUIRE(synth.voice(0).releasing());
 }
 
+TEST_CASE("Synthesiser sustain pedal defers note-off until CC64 is lifted",
+          "[midi][synth][sustain][phase3]") {
+    Synthesiser<TestVoice> synth(2);
+    synth.note_on(0, 60, 100);
+
+    synth.cc(0, 64, 127);
+    REQUIRE(synth.voice(0).cc_calls == 1);
+    REQUIRE(synth.voice(0).last_cc_number == 64);
+    REQUIRE(synth.voice(0).last_cc_value == 127);
+
+    synth.note_off(0, 60);
+    REQUIRE(synth.voice(0).active());
+    REQUIRE_FALSE(synth.voice(0).releasing());
+    REQUIRE(synth.voice(0).note().sustained);
+    REQUIRE(synth.voice(0).note_off_calls == 0);
+
+    synth.cc(0, 64, 0);
+    REQUIRE(synth.voice(0).releasing());
+    REQUIRE_FALSE(synth.voice(0).note().sustained);
+    REQUIRE(synth.voice(0).note_off_calls == 1);
+}
+
+TEST_CASE("Synthesiser sustain pedal release is channel-scoped",
+          "[midi][synth][sustain][phase3]") {
+    Synthesiser<TestVoice> synth(2);
+    synth.note_on(0, 60, 100);
+    synth.note_on(1, 64, 100);
+
+    synth.cc(0, 64, 127);
+    synth.cc(1, 64, 127);
+    synth.note_off(0, 60);
+    synth.note_off(1, 64);
+
+    REQUIRE(synth.voice(0).note().sustained);
+    REQUIRE(synth.voice(1).note().sustained);
+
+    synth.cc(0, 64, 0);
+    REQUIRE(synth.voice(0).releasing());
+    REQUIRE_FALSE(synth.voice(0).note().sustained);
+    REQUIRE_FALSE(synth.voice(1).releasing());
+    REQUIRE(synth.voice(1).note().sustained);
+
+    synth.cc(1, 64, 0);
+    REQUIRE(synth.voice(1).releasing());
+    REQUIRE_FALSE(synth.voice(1).note().sustained);
+}
+
+TEST_CASE("Synthesiser sostenuto pedal captures only currently held notes",
+          "[midi][synth][sostenuto][phase3]") {
+    Synthesiser<TestVoice> synth(3);
+    synth.note_on(0, 60, 100);
+
+    synth.cc(0, 66, 127);
+    REQUIRE(synth.voice(0).cc_calls == 1);
+    REQUIRE(synth.voice(0).last_cc_number == 66);
+    REQUIRE(synth.voice(0).note().sostenuto);
+
+    synth.note_on(0, 64, 100);
+    REQUIRE_FALSE(synth.voice(1).note().sostenuto);
+
+    synth.note_off(0, 60);
+    synth.note_off(0, 64);
+
+    REQUIRE(synth.voice(0).active());
+    REQUIRE_FALSE(synth.voice(0).releasing());
+    REQUIRE(synth.voice(0).note().sostenuto);
+    REQUIRE(synth.voice(0).note_off_calls == 0);
+
+    REQUIRE(synth.voice(1).releasing());
+    REQUIRE(synth.voice(1).note_off_calls == 1);
+
+    synth.cc(0, 66, 0);
+    REQUIRE(synth.voice(0).releasing());
+    REQUIRE_FALSE(synth.voice(0).note().sostenuto);
+    REQUIRE(synth.voice(0).note_off_calls == 1);
+}
+
+TEST_CASE("Synthesiser sustain and sostenuto release independently",
+          "[midi][synth][sustain][sostenuto][phase3]") {
+    Synthesiser<TestVoice> synth(2);
+    synth.note_on(0, 60, 100);
+
+    synth.cc(0, 66, 127);
+    synth.cc(0, 64, 127);
+    synth.note_off(0, 60);
+
+    REQUIRE(synth.voice(0).note().sostenuto);
+    REQUIRE(synth.voice(0).note().sustained);
+    REQUIRE_FALSE(synth.voice(0).releasing());
+
+    synth.cc(0, 66, 0);
+    REQUIRE_FALSE(synth.voice(0).note().sostenuto);
+    REQUIRE(synth.voice(0).note().sustained);
+    REQUIRE_FALSE(synth.voice(0).releasing());
+
+    synth.cc(0, 64, 0);
+    REQUIRE_FALSE(synth.voice(0).note().sustained);
+    REQUIRE(synth.voice(0).releasing());
+    REQUIRE(synth.voice(0).note_off_calls == 1);
+}
+
+TEST_CASE("Synthesiser soft pedal metadata is channel-scoped",
+          "[midi][synth][soft-pedal][phase3]") {
+    Synthesiser<TestVoice> synth(3);
+    synth.cc(0, 67, 127);
+
+    synth.note_on(0, 60, 100);
+    synth.note_on(1, 64, 100);
+
+    REQUIRE(synth.voice(0).note().soft_pedal);
+    REQUIRE_FALSE(synth.voice(1).note().soft_pedal);
+
+    synth.cc(1, 67, 127);
+    REQUIRE(synth.voice(1).note().soft_pedal);
+    REQUIRE(synth.voice(0).note().soft_pedal);
+
+    synth.cc(0, 67, 0);
+    REQUIRE_FALSE(synth.voice(0).note().soft_pedal);
+    REQUIRE(synth.voice(1).note().soft_pedal);
+}
+
 TEST_CASE("Synthesiser allocates separate voices for distinct notes",
           "[midi][synth]") {
     Synthesiser<TestVoice> synth(4);
@@ -226,6 +349,48 @@ TEST_CASE("Synthesiser Quietest steal evicts the lowest peak_level",
     synth.note_on(0, 67, 80); // steals voice(1) (quieter)
     REQUIRE(synth.voice(1).note().note == 67);
     REQUIRE(synth.voice(0).note().note == 60);
+}
+
+TEST_CASE("Synthesiser voice group choke releases matching held voices",
+          "[midi][synth][choke][phase3]") {
+    Synthesiser<TestVoice> synth(4);
+    synth.note_on(0, 42, 100, /*priority=*/0, /*voice_group=*/1);
+    synth.note_on(0, 46, 100, /*priority=*/0, /*voice_group=*/1,
+                  /*choke_group=*/true);
+
+    REQUIRE(synth.voice(0).releasing());
+    REQUIRE(synth.voice(0).note().voice_group == 1);
+    REQUIRE(synth.voice(0).note_off_calls == 1);
+
+    REQUIRE(synth.voice(1).active());
+    REQUIRE_FALSE(synth.voice(1).releasing());
+    REQUIRE(synth.voice(1).note().note == 46);
+    REQUIRE(synth.voice(1).note().voice_group == 1);
+}
+
+TEST_CASE("Synthesiser voice group choke is channel-scoped",
+          "[midi][synth][choke][phase3]") {
+    Synthesiser<TestVoice> synth(4);
+    synth.note_on(0, 42, 100, /*priority=*/0, /*voice_group=*/2);
+    synth.note_on(1, 42, 100, /*priority=*/0, /*voice_group=*/2);
+    synth.note_on(0, 46, 100, /*priority=*/0, /*voice_group=*/2,
+                  /*choke_group=*/true);
+
+    REQUIRE(synth.voice(0).releasing());
+    REQUIRE_FALSE(synth.voice(1).releasing());
+    REQUIRE(synth.voice(1).note().channel == 1);
+    REQUIRE(synth.voice(2).note().note == 46);
+}
+
+TEST_CASE("Synthesiser voice group without choke allows overlap",
+          "[midi][synth][choke][phase3]") {
+    Synthesiser<TestVoice> synth(4);
+    synth.note_on(0, 42, 100, /*priority=*/0, /*voice_group=*/3);
+    synth.note_on(0, 46, 100, /*priority=*/0, /*voice_group=*/3);
+
+    REQUIRE_FALSE(synth.voice(0).releasing());
+    REQUIRE_FALSE(synth.voice(1).releasing());
+    REQUIRE(synth.active_count() == 2);
 }
 
 TEST_CASE("Synthesiser channel-level pitch bend reaches every voice on that channel",
@@ -345,6 +510,33 @@ TEST_CASE("Synthesiser 32-voice polyphony stress without dropouts",
     for (float s : out) REQUIRE_THAT(s, WithinAbs(16.0f, 1e-3f));
 }
 
+TEST_CASE("Synthesiser renders hundreds of voices without audio-thread allocation",
+          "[midi][synth][stress][rt-safety][phase3]") {
+    constexpr std::size_t kVoices = 256;
+    constexpr int kSamples = 128;
+    Synthesiser<TestVoice> synth(kVoices);
+
+    for (std::size_t i = 0; i < kVoices; ++i) {
+        synth.note_on(static_cast<uint8_t>(i % 16),
+                      static_cast<uint8_t>(i % 128),
+                      100);
+    }
+    REQUIRE(synth.active_count() == kVoices);
+
+    MidiBuffer empty;
+    std::vector<float> out(kSamples, 0.0f);
+
+    {
+        pulp::test::RtAllocationProbe probe;
+        synth.process(empty, out.data(), kSamples);
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+
+    for (float s : out) {
+        REQUIRE_THAT(s, WithinAbs(static_cast<float>(kVoices) * 0.5f, 1e-3f));
+    }
+}
+
 TEST_CASE("Synthesiser reset clears every voice", "[midi][synth]") {
     Synthesiser<TestVoice> synth(4);
     synth.note_on(0, 60, 100);
@@ -386,4 +578,126 @@ TEST_CASE("Synthesiser process clamps event sample_offset above block size",
     synth.process(buf, out.data(), 128);
     REQUIRE(synth.voice(0).rendered_samples == 128);
     REQUIRE(synth.voice(0).releasing());
+}
+
+TEST_CASE("Synthesiser exposes voice-count telemetry",
+          "[midi][synth][telemetry][phase2]") {
+    Synthesiser<TestVoice> synth(2);
+    synth.set_steal_strategy(VoiceStealStrategy::Oldest);
+
+    const auto initial = synth.telemetry();
+    REQUIRE(initial.polyphony == 2);
+    REQUIRE(initial.active_voice_count == 0);
+    REQUIRE(initial.releasing_voice_count == 0);
+    REQUIRE(initial.steal_count == 0);
+    REQUIRE(initial.steal_strategy == VoiceStealStrategy::Oldest);
+
+    synth.note_on(0, 60, 100);
+    synth.note_on(0, 64, 100);
+    const auto active = synth.telemetry();
+    REQUIRE(active.active_voice_count == 2);
+    REQUIRE(active.releasing_voice_count == 0);
+    REQUIRE(active.steal_count == 0);
+
+    synth.note_off(0, 60);
+    const auto releasing = synth.telemetry();
+    REQUIRE(releasing.active_voice_count == 2);
+    REQUIRE(releasing.releasing_voice_count == 1);
+
+    synth.note_on(0, 67, 100);
+    const auto stolen = synth.telemetry();
+    REQUIRE(stolen.active_voice_count == 2);
+    REQUIRE(stolen.releasing_voice_count == 0);
+    REQUIRE(stolen.steal_count == 1);
+    REQUIRE(synth.steal_count() == 1);
+
+    synth.reset_steal_count();
+    REQUIRE(synth.telemetry().steal_count == 0);
+}
+
+TEST_CASE("Synthesiser evaluates optional runtime budget from voice telemetry",
+          "[midi][synth][budget-policy][phase4]") {
+    Synthesiser<TestVoice> synth(2);
+    synth.note_on(0, 60, 100);
+    synth.note_on(0, 64, 100);
+    synth.note_off(0, 60);
+
+    REQUIRE(synth.estimate_optional_runtime_cost() == 168);
+
+    pulp::runtime::RuntimeBudgetFrame exact(168);
+    auto report = synth.evaluate_optional_runtime_budget(
+        exact, pulp::runtime::RuntimeWorkLane::Background);
+    REQUIRE(report.telemetry.polyphony == 2);
+    REQUIRE(report.telemetry.active_voice_count == 2);
+    REQUIRE(report.telemetry.releasing_voice_count == 1);
+    REQUIRE(report.estimated_cost == 168);
+    REQUIRE(report.decision.action == pulp::runtime::RuntimeBudgetAction::Run);
+    REQUIRE(report.should_run_optional_work());
+    REQUIRE(report.frame_stats.run_count == 1);
+    REQUIRE(report.frame_stats.remaining_budget == 0);
+
+    pulp::runtime::RuntimeBudgetFrame tight(167);
+    report = synth.evaluate_optional_runtime_budget(
+        tight, pulp::runtime::RuntimeWorkLane::Background);
+    REQUIRE(report.decision.action == pulp::runtime::RuntimeBudgetAction::Bypass);
+    REQUIRE_FALSE(report.should_run_optional_work());
+    REQUIRE(report.frame_stats.bypass_count == 1);
+
+    pulp::runtime::RuntimeBudgetPolicy policy;
+    policy.shed_background_on_overload = true;
+    pulp::runtime::RuntimeBudgetFrame overloaded(1024, policy, true);
+    report = synth.evaluate_optional_runtime_budget(
+        overloaded, pulp::runtime::RuntimeWorkLane::Background);
+    REQUIRE(report.decision.action == pulp::runtime::RuntimeBudgetAction::Shed);
+    REQUIRE(report.frame_stats.shed_count == 1);
+}
+
+TEST_CASE("Synthesiser optional runtime budget has deterministic large-voice cost",
+          "[midi][synth][budget-policy][scale][phase4]") {
+    constexpr std::size_t kVoices = 128;
+    Synthesiser<TestVoice> synth(kVoices);
+    for (std::size_t i = 0; i < kVoices; ++i) {
+        synth.note_on(0, static_cast<uint8_t>(i % 128), 100,
+                      static_cast<int8_t>(i % 16));
+    }
+
+    const auto expected_cost =
+        static_cast<std::uint64_t>(kVoices) * 4u
+        + static_cast<std::uint64_t>(kVoices) * 64u;
+    REQUIRE(synth.estimate_optional_runtime_cost() == expected_cost);
+
+    pulp::runtime::RuntimeBudgetFrame exact(expected_cost);
+    auto report = synth.evaluate_optional_runtime_budget(
+        exact, pulp::runtime::RuntimeWorkLane::Background);
+    REQUIRE(report.telemetry.polyphony == kVoices);
+    REQUIRE(report.telemetry.active_voice_count == kVoices);
+    REQUIRE(report.estimated_cost == expected_cost);
+    REQUIRE(report.decision.action == pulp::runtime::RuntimeBudgetAction::Run);
+
+    pulp::runtime::RuntimeBudgetFrame tight(expected_cost - 1);
+    report = synth.evaluate_optional_runtime_budget(
+        tight, pulp::runtime::RuntimeWorkLane::Background);
+    REQUIRE(report.decision.action == pulp::runtime::RuntimeBudgetAction::Bypass);
+}
+
+TEST_CASE("Synthesiser voice telemetry path allocates zero times",
+          "[midi][synth][telemetry][rt-safety][phase2]") {
+    Synthesiser<TestVoice> synth(2);
+    synth.note_on(0, 60, 100);
+    synth.note_on(0, 64, 100);
+    synth.note_off(0, 60);
+    pulp::runtime::RuntimeBudgetFrame frame(1024);
+
+    pulp::test::RtAllocationProbe probe;
+
+    (void)synth.telemetry();
+    (void)synth.estimate_optional_runtime_cost();
+    (void)synth.evaluate_optional_runtime_budget(
+        frame, pulp::runtime::RuntimeWorkLane::Opportunistic);
+    (void)synth.active_count();
+    (void)synth.releasing_count();
+    (void)synth.steal_count();
+    synth.reset_steal_count();
+
+    REQUIRE_FALSE(probe.saw_allocation());
 }

@@ -19,6 +19,7 @@
 #include <array>
 #include <string>
 #include <vector>
+#include <cmath>
 
 using Catch::Matchers::WithinAbs;
 
@@ -29,6 +30,8 @@ class TestAUInstrumentProcessor;
 
 TestAUEffectProcessor* g_last_effect_processor = nullptr;
 TestAUInstrumentProcessor* g_last_instrument_processor = nullptr;
+int g_pending_au_latency_samples = 0;
+int g_pending_au_tail_samples = 0;
 
 class TestAUEffectProcessor : public pulp::format::Processor {
 public:
@@ -61,13 +64,38 @@ public:
                  const pulp::audio::BufferView<const float>&,
                  pulp::midi::MidiBuffer&,
                  pulp::midi::MidiBuffer&,
-                 const pulp::format::ProcessContext&) override {
+                 const pulp::format::ProcessContext& context) override {
         ++process_count;
+        last_context = context;
         gain_seen_in_process = state().get_value(1);
         had_param_events = (param_events() != nullptr);
         last_param_events.clear();
         if (auto* events = param_events()) {
             for (const auto& event : *events) last_param_events.push_back(event);
+        }
+    }
+
+    void process(pulp::format::ProcessBuffers& audio,
+                 pulp::midi::MidiBuffer& midi_in,
+                 pulp::midi::MidiBuffer& midi_out,
+                 const pulp::format::ProcessContext& context) override {
+        ++process_buffers_count;
+        last_process_buffers_layout_ok = audio.layouts_match_descriptors();
+        last_process_buffers_storage_ok = audio.active_buses_have_storage();
+        last_process_buffers_input_count = audio.inputs.active_count();
+        last_process_buffers_output_count = audio.outputs.active_count();
+        last_process_buffers_main_input_channels =
+            audio.main_input() ? audio.main_input()->num_channels() : 0;
+        last_process_buffers_main_output_channels =
+            audio.main_output() ? audio.main_output()->num_channels() : 0;
+        last_process_buffers_sidechain_channels =
+            audio.sidechain_input() ? audio.sidechain_input()->num_channels() : 0;
+
+        auto* output = audio.main_output();
+        pulp::audio::BufferView<const float> empty_input;
+        auto* input = audio.main_input();
+        if (output) {
+            process(*output, input ? *input : empty_input, midi_in, midi_out, context);
         }
     }
 
@@ -82,8 +110,17 @@ public:
 
     std::string plugin_state;
     int process_count = 0;
+    int process_buffers_count = 0;
+    pulp::format::ProcessContext last_context{};
     float gain_seen_in_process = 0.0f;
     bool had_param_events = false;
+    bool last_process_buffers_layout_ok = false;
+    bool last_process_buffers_storage_ok = false;
+    std::size_t last_process_buffers_input_count = 0;
+    std::size_t last_process_buffers_output_count = 0;
+    std::size_t last_process_buffers_main_input_channels = 0;
+    std::size_t last_process_buffers_main_output_channels = 0;
+    std::size_t last_process_buffers_sidechain_channels = 0;
     std::vector<pulp::state::ParameterEvent> last_param_events;
 };
 
@@ -119,7 +156,28 @@ public:
                  const pulp::audio::BufferView<const float>&,
                  pulp::midi::MidiBuffer&,
                  pulp::midi::MidiBuffer&,
-                 const pulp::format::ProcessContext&) override {}
+                 const pulp::format::ProcessContext& context) override {
+        last_context = context;
+    }
+
+    void process(pulp::format::ProcessBuffers& audio,
+                 pulp::midi::MidiBuffer& midi_in,
+                 pulp::midi::MidiBuffer& midi_out,
+                 const pulp::format::ProcessContext& context) override {
+        ++process_buffers_count;
+        last_process_buffers_layout_ok = audio.layouts_match_descriptors();
+        last_process_buffers_storage_ok = audio.active_buses_have_storage();
+        last_process_buffers_input_count = audio.inputs.active_count();
+        last_process_buffers_output_count = audio.outputs.active_count();
+        last_process_buffers_main_output_channels =
+            audio.main_output() ? audio.main_output()->num_channels() : 0;
+
+        auto* output = audio.main_output();
+        pulp::audio::BufferView<const float> empty_input;
+        if (output) {
+            process(*output, empty_input, midi_in, midi_out, context);
+        }
+    }
 
     std::vector<uint8_t> serialize_plugin_state() const override {
         return std::vector<uint8_t>(plugin_state.begin(), plugin_state.end());
@@ -131,6 +189,13 @@ public:
     }
 
     std::string plugin_state;
+    int process_buffers_count = 0;
+    pulp::format::ProcessContext last_context{};
+    bool last_process_buffers_layout_ok = false;
+    bool last_process_buffers_storage_ok = false;
+    std::size_t last_process_buffers_input_count = 0;
+    std::size_t last_process_buffers_output_count = 0;
+    std::size_t last_process_buffers_main_output_channels = 0;
 };
 
 class TestAUWideEditorProcessor : public TestAUEffectProcessor {
@@ -138,6 +203,44 @@ public:
     pulp::format::ViewSize view_size() const override {
         return pulp::format::view_size_from_design(900, 520);
     }
+};
+
+class TestAULatencyTailEffectProcessor : public TestAUEffectProcessor {
+public:
+    TestAULatencyTailEffectProcessor()
+        : latency_samples_(g_pending_au_latency_samples)
+        , tail_samples_(g_pending_au_tail_samples) {}
+
+    pulp::format::PluginDescriptor descriptor() const override {
+        auto d = TestAUEffectProcessor::descriptor();
+        d.tail_samples = tail_samples_;
+        return d;
+    }
+
+    int latency_samples() const override { return latency_samples_; }
+
+private:
+    int latency_samples_ = 0;
+    int tail_samples_ = 0;
+};
+
+class TestAULatencyTailInstrumentProcessor : public TestAUInstrumentProcessor {
+public:
+    TestAULatencyTailInstrumentProcessor()
+        : latency_samples_(g_pending_au_latency_samples)
+        , tail_samples_(g_pending_au_tail_samples) {}
+
+    pulp::format::PluginDescriptor descriptor() const override {
+        auto d = TestAUInstrumentProcessor::descriptor();
+        d.tail_samples = tail_samples_;
+        return d;
+    }
+
+    int latency_samples() const override { return latency_samples_; }
+
+private:
+    int latency_samples_ = 0;
+    int tail_samples_ = 0;
 };
 
 std::unique_ptr<pulp::format::Processor> create_effect_processor() {
@@ -150,6 +253,14 @@ std::unique_ptr<pulp::format::Processor> create_instrument_processor() {
 
 std::unique_ptr<pulp::format::Processor> create_wide_editor_processor() {
     return std::make_unique<TestAUWideEditorProcessor>();
+}
+
+std::unique_ptr<pulp::format::Processor> create_latency_tail_effect_processor() {
+    return std::make_unique<TestAULatencyTailEffectProcessor>();
+}
+
+std::unique_ptr<pulp::format::Processor> create_latency_tail_instrument_processor() {
+    return std::make_unique<TestAULatencyTailInstrumentProcessor>();
 }
 
 void require_plst_blob(const uint8_t* bytes, std::size_t size) {
@@ -172,6 +283,56 @@ struct ScopedFactoryRegistration {
 
     pulp::format::ProcessorFactory previous;
 };
+
+struct AUv2TransportCallbackState {
+    double beat = 0.0;
+    double tempo = 120.0;
+    UInt32 time_sig_denominator = 4;
+    double measure_downbeat = 0.0;
+    Boolean is_playing = true;
+    Float64 sample_position = 0.0;
+};
+
+OSStatus auv2_test_beat_and_tempo(void* user_data,
+                                  Float64* out_beat,
+                                  Float64* out_tempo) {
+    auto* state = static_cast<AUv2TransportCallbackState*>(user_data);
+    if (out_beat) *out_beat = state->beat;
+    if (out_tempo) *out_tempo = state->tempo;
+    return noErr;
+}
+
+OSStatus auv2_test_musical_time(void* user_data,
+                                UInt32* out_delta_samples,
+                                Float32* out_time_sig_numerator,
+                                UInt32* out_time_sig_denominator,
+                                Float64* out_measure_downbeat) {
+    auto* state = static_cast<AUv2TransportCallbackState*>(user_data);
+    if (out_delta_samples) *out_delta_samples = 0;
+    if (out_time_sig_numerator) *out_time_sig_numerator = 4.0f;
+    if (out_time_sig_denominator) {
+        *out_time_sig_denominator = state->time_sig_denominator;
+    }
+    if (out_measure_downbeat) *out_measure_downbeat = state->measure_downbeat;
+    return noErr;
+}
+
+OSStatus auv2_test_transport_state(void* user_data,
+                                   Boolean* out_is_playing,
+                                   Boolean* out_transport_state_changed,
+                                   Float64* out_current_sample,
+                                   Boolean* out_is_cycling,
+                                   Float64* out_cycle_start,
+                                   Float64* out_cycle_end) {
+    auto* state = static_cast<AUv2TransportCallbackState*>(user_data);
+    if (out_is_playing) *out_is_playing = state->is_playing;
+    if (out_transport_state_changed) *out_transport_state_changed = false;
+    if (out_current_sample) *out_current_sample = state->sample_position;
+    if (out_is_cycling) *out_is_cycling = false;
+    if (out_cycle_start) *out_cycle_start = 0.0;
+    if (out_cycle_end) *out_cycle_end = 0.0;
+    return noErr;
+}
 
 } // namespace
 
@@ -241,6 +402,83 @@ TEST_CASE("AU v2 instrument SaveState/RestoreState round-trips plugin-owned payl
     REQUIRE(loader_processor->plugin_state == "snapshot=B");
 
     CFRelease(saved);
+}
+
+TEST_CASE("AU v2 latency and tail report processor runtime contract",
+          "[au][auv2][latency][tail][phase2]") {
+    constexpr int kTailSamples = 24000;
+
+    REQUIRE_THAT(pulp::format::au::tail_samples_to_seconds(kTailSamples, 48000.0),
+                 WithinAbs(0.5, 1e-9));
+    REQUIRE(pulp::format::au::tail_samples_to_seconds(0, 48000.0) == 0.0);
+    REQUIRE(pulp::format::au::tail_samples_to_seconds(kTailSamples, 0.0) == 0.0);
+
+    SECTION("effect and instrument map infinite tail to infinity") {
+        g_pending_au_latency_samples = 0;
+        g_pending_au_tail_samples = -1;
+        {
+            ScopedFactoryRegistration registration(create_latency_tail_effect_processor);
+            pulp::format::au::PulpAUEffect effect(nullptr);
+            REQUIRE(effect.SupportsTail());
+            REQUIRE(std::isinf(effect.GetTailTime()));
+        }
+        {
+            ScopedFactoryRegistration registration(create_latency_tail_instrument_processor);
+            pulp::format::au::PulpAUInstrument instrument(nullptr);
+            REQUIRE(instrument.SupportsTail());
+            REQUIRE(std::isinf(instrument.GetTailTime()));
+        }
+    }
+}
+
+TEST_CASE("AU v2 host callbacks mark transport jumps for processor reset",
+          "[au][auv2][transport][reset][phase2]") {
+    ScopedFactoryRegistration registration(create_effect_processor);
+
+    pulp::format::au::PulpAUEffect effect(nullptr);
+
+    AUv2TransportCallbackState transport;
+    HostCallbackInfo callbacks{};
+    callbacks.hostUserData = &transport;
+    callbacks.beatAndTempoProc = auv2_test_beat_and_tempo;
+    callbacks.musicalTimeLocationProc = auv2_test_musical_time;
+    callbacks.transportStateProc = auv2_test_transport_state;
+    REQUIRE(effect.DispatchSetProperty(kAudioUnitProperty_HostCallbacks,
+                                       kAudioUnitScope_Global,
+                                       0,
+                                       &callbacks,
+                                       sizeof(callbacks)) == noErr);
+
+    constexpr UInt32 kFrames = 8;
+    pulp::format::detail::PlayheadSnapshot previous;
+    auto first = pulp::format::au::make_render_process_context(48000.0, kFrames);
+    pulp::format::au::apply_host_callbacks_to_process_context(
+        first, effect, previous);
+    REQUIRE_FALSE(first.transport_jump);
+    REQUIRE_FALSE(first.should_reset_dsp_state());
+    REQUIRE(first.position_samples == 0);
+    REQUIRE(first.is_playing);
+    REQUIRE(first.process_mode == pulp::format::ProcessMode::Realtime);
+    REQUIRE(first.render_speed_hint == pulp::format::RenderSpeedHint::Realtime);
+
+    transport.sample_position = kFrames;
+    transport.beat = 1.0;
+    auto continuous =
+        pulp::format::au::make_render_process_context(48000.0, kFrames);
+    pulp::format::au::apply_host_callbacks_to_process_context(
+        continuous, effect, previous);
+    REQUIRE_FALSE(continuous.transport_jump);
+    REQUIRE_FALSE(continuous.should_reset_dsp_state());
+    REQUIRE(continuous.position_samples == kFrames);
+
+    transport.sample_position = 4096.0;
+    transport.beat = 64.0;
+    auto jumped = pulp::format::au::make_render_process_context(48000.0, kFrames);
+    pulp::format::au::apply_host_callbacks_to_process_context(
+        jumped, effect, previous);
+    REQUIRE(jumped.transport_jump);
+    REQUIRE(jumped.should_reset_dsp_state());
+    REQUIRE(jumped.position_samples == 4096);
 }
 
 TEST_CASE("AU v3 fullState round-trips plugin-owned payload",
@@ -364,7 +602,22 @@ TEST_CASE("AU v3 render events preserve parameter sample offsets and update Stat
                             nil);
         REQUIRE(status == noErr);
 
+        REQUIRE(processor->process_buffers_count == 1);
         REQUIRE(processor->process_count == 1);
+        REQUIRE(processor->last_context.process_mode ==
+                pulp::format::ProcessMode::Realtime);
+        REQUIRE(processor->last_context.render_speed_hint ==
+                pulp::format::RenderSpeedHint::Realtime);
+        REQUIRE_FALSE(processor->last_context.is_offline());
+        REQUIRE_FALSE(processor->last_context.allows_offline_quality_work());
+        REQUIRE_FALSE(processor->last_context.is_maintenance_render());
+        REQUIRE(processor->last_process_buffers_layout_ok);
+        REQUIRE(processor->last_process_buffers_storage_ok);
+        REQUIRE(processor->last_process_buffers_input_count == 0);
+        REQUIRE(processor->last_process_buffers_output_count == 1);
+        REQUIRE(processor->last_process_buffers_main_input_channels == 0);
+        REQUIRE(processor->last_process_buffers_main_output_channels == 2);
+        REQUIRE(processor->last_process_buffers_sidechain_channels == 0);
         REQUIRE_THAT(processor->gain_seen_in_process, WithinAbs(-12.0f, 1e-6f));
         REQUIRE(processor->had_param_events);
         REQUIRE(processor->last_param_events.size() == 2);
@@ -489,6 +742,108 @@ TEST_CASE("AU v3 render events drop past realtime parameter capacity without gro
                 static_cast<int32_t>(kCapacity - 1));
         REQUIRE_THAT([unit pulpLastParameterEventValueAtIndex:kCapacity - 1],
                      WithinAbs(-18.0f, 1e-6f));
+
+        [unit deallocateRenderResources];
+        [unit release];
+    }
+}
+
+TEST_CASE("AU v3 transport jumps request processor reset through ProcessContext",
+          "[au][auv3][transport][reset][phase2]") {
+    @autoreleasepool {
+        AudioComponentDescription desc{};
+        desc.componentType = kAudioUnitType_Effect;
+        desc.componentSubType = 'TTrJ';
+        desc.componentManufacturer = 'Plup';
+
+        ScopedFactoryRegistration registration(create_effect_processor);
+
+        NSError* error = nil;
+        PulpAudioUnit* unit =
+            [[PulpAudioUnit alloc] initWithComponentDescription:desc
+                                                       options:0
+                                                         error:&error];
+        REQUIRE(unit != nil);
+        REQUIRE(error == nil);
+
+        auto* processor = g_last_effect_processor;
+        REQUIRE(processor != nullptr);
+
+        NSError* allocate_error = nil;
+        REQUIRE([unit allocateRenderResourcesAndReturnError:&allocate_error]);
+        REQUIRE(allocate_error == nil);
+
+        constexpr UInt32 kFrames = 8;
+        float left[kFrames] = {};
+        float right[kFrames] = {};
+        struct StereoBufferList {
+            AudioBufferList list;
+            AudioBuffer extra[1];
+        } output{};
+        output.list.mNumberBuffers = 2;
+        output.list.mBuffers[0].mNumberChannels = 1;
+        output.list.mBuffers[0].mDataByteSize = kFrames * sizeof(float);
+        output.list.mBuffers[0].mData = left;
+        output.list.mBuffers[1].mNumberChannels = 1;
+        output.list.mBuffers[1].mDataByteSize = kFrames * sizeof(float);
+        output.list.mBuffers[1].mData = right;
+
+        __block double current_sample_position = 1000.0;
+        unit.transportStateBlock = ^BOOL(
+            AUHostTransportStateFlags* transport_flags,
+            double* sample_position,
+            double* cycle_start,
+            double* cycle_end) {
+            if (transport_flags) *transport_flags = AUHostTransportStateMoving;
+            if (sample_position) *sample_position = current_sample_position;
+            if (cycle_start) *cycle_start = 0.0;
+            if (cycle_end) *cycle_end = 0.0;
+            return YES;
+        };
+
+        AudioUnitRenderActionFlags flags = 0;
+        AudioTimeStamp timestamp{};
+        AUInternalRenderBlock block = [unit internalRenderBlock];
+        REQUIRE(block != nil);
+
+        current_sample_position = 1000.0;
+        auto status = block(&flags,
+                            &timestamp,
+                            kFrames,
+                            0,
+                            &output.list,
+                            nullptr,
+                            nil);
+        REQUIRE(status == noErr);
+        const auto first = processor->last_context;
+        REQUIRE_FALSE(first.transport_jump);
+        REQUIRE_FALSE(first.should_reset_dsp_state());
+
+        current_sample_position = 1008.0;
+        status = block(&flags,
+                       &timestamp,
+                       kFrames,
+                       0,
+                       &output.list,
+                       nullptr,
+                       nil);
+        REQUIRE(status == noErr);
+        const auto continuous = processor->last_context;
+        REQUIRE_FALSE(continuous.transport_jump);
+        REQUIRE_FALSE(continuous.should_reset_dsp_state());
+
+        current_sample_position = 4096.0;
+        status = block(&flags,
+                       &timestamp,
+                       kFrames,
+                       0,
+                       &output.list,
+                       nullptr,
+                       nil);
+        REQUIRE(status == noErr);
+        const auto jumped = processor->last_context;
+        REQUIRE(jumped.transport_jump);
+        REQUIRE(jumped.should_reset_dsp_state());
 
         [unit deallocateRenderResources];
         [unit release];
