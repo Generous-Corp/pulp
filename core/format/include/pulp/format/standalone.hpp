@@ -211,6 +211,15 @@ private:
     std::unique_ptr<view::CommandRegistry> command_registry_;
     std::unique_ptr<view::AudioInspectorWindow> audio_inspector_;
 #endif
+    // The MAXIMUM frames the audio callback may deliver in one block. This is
+    // NOT the nominal buffer_size: when the device runs at a different sample
+    // rate than the app, CoreAudio (and other backends) insert a resampler that
+    // pulls the render callback in variable, larger-than-nominal blocks. The
+    // processor and every scratch buffer are sized to THIS, and the callback
+    // guards against any block beyond it, so an oversized pull can never trip
+    // Processor::process()'s `num_samples <= max_block` assert or overflow the
+    // pre-allocated buffers.
+    int max_callback_block_ = 0;
     audio::Buffer<float> test_buffer_;        // Pre-allocated for audio callback
     audio::Buffer<float> silence_buffer_;    // Pre-allocated silence for missing input
     std::vector<float*> test_ptrs_;           // Pre-allocated channel pointers

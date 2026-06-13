@@ -976,6 +976,44 @@ overlay (`View::contains_native_overlay()`), the standalone now routes through
 takeSnapshot) so WebView editors are self-verifiable headlessly. A plain Skia UI
 falls through to the back-buffer capture unchanged. See the `screenshot` skill.
 
+## Standalone audio callback: size for the device's MAX block, NOT the nominal buffer
+
+`StandaloneApp::start()` reads `audio_device_->buffer_size()` into
+`config_.buffer_size` and it is tempting to size the processor + every scratch
+buffer to that. **Don't.** The device's nominal buffer is not the largest block
+the render callback can deliver: when the hardware sample rate differs from the
+app's configured rate, CoreAudio (and other backends) splice in a resampler
+(`AudioConverter…fillComplexBuffer` in the crash stack) that pulls the callback
+in *variable, larger-than-nominal* blocks — up to the host's
+`MaximumFramesPerSlice` (4096 by default on macOS). A user simply selecting an
+output device at a different rate is enough to trigger it.
+
+The 2026-06 symptom: a standalone SIGABRT on `com.apple.audio.IOThread.client`,
+~85 min in, in `RealtimePitchTimeProcessor::process` →
+`assert(num_samples <= config_.max_block)`. The processor had been
+`prepare()`d for the nominal buffer; an oversized resampler pull blew the
+assert (and, in NDEBUG, would have overflowed the pre-allocated scratch).
+
+The contract (`core/format/src/standalone.cpp`, `start()` + the audio lambda):
+
+- Compute `max_callback_block_ = std::max(config_.buffer_size, 4096)` once, and
+  use it for `PrepareContext::max_buffer_size`, `test_buffer_`,
+  `silence_buffer_`, and `output_probe_.prepare(...)` — every buffer the
+  callback can write, sized to the MAX, not the nominal.
+- Guard the callback head: if `ctx.buffer_size > max_callback_block_`, fill the
+  output with silence, `log_error` once, and `return` — never let an
+  over-max block reach `process()`. A backend that ignores
+  `MaximumFramesPerSlice` degrades to a one-time warning, not a crash on a real
+  user's machine.
+- The member lives in `standalone.hpp` (`int max_callback_block_`). The audio
+  device's `CallbackContext::buffer_size` is the *actual* frames this block
+  (it can exceed the nominal), so the guard compares against it, not
+  `config_.buffer_size`.
+
+Rule of thumb for any RT host you write: prepare for the worst-case block the
+backend may hand you, then assert/guard against anything larger. Nominal buffer
+size is a hint, not a ceiling.
+
 ## Standalone audio-callback probe tap (Phase 5 observability harness)
 
 `StandaloneApp`'s audio callback carries an optional realtime output-boundary
