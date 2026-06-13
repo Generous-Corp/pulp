@@ -22,9 +22,9 @@ class WindowsRemoteFileTransferBindingsTests(unittest.TestCase):
 
     def test_transfer_exports_match_wrappers(self) -> None:
         expected = (
-            "windows_ssh_fetch_file",
-            "windows_ssh_read_json",
-            "windows_ssh_remove_path",
+            *self.mod.WINDOWS_REMOTE_FILE_FETCH_EXPORTS,
+            *self.mod.WINDOWS_REMOTE_FILE_READ_EXPORTS,
+            *self.mod.WINDOWS_REMOTE_FILE_REMOVE_EXPORTS,
         )
 
         self.assertEqual(self.mod.WINDOWS_REMOTE_FILE_TRANSFER_EXPORTS, expected)
