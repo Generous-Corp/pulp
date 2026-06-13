@@ -22,9 +22,9 @@ class QueueLifecycleBindingsTests(unittest.TestCase):
         expected = (
             "supersede_job_unlocked",
             "cancel_job_unlocked",
-            "load_queue",
+            *self.mod.QUEUE_LOAD_EXPORTS,
             "update_job_active_targets",
-            "enqueue_job",
+            *self.mod.QUEUE_ENQUEUE_EXPORTS,
             "bump_queue_command_job",
             "cancel_queue_command_job",
             "reconcile_running_jobs_unlocked",
