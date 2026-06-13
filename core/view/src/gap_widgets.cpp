@@ -95,18 +95,34 @@ void Toast::on_mouse_down(Point pos) {
 // ── EmptyState ──────────────────────────────────────────────────────────
 void EmptyState::paint(canvas::Canvas& canvas) {
     const float w = bounds().width, h = bounds().height;
+    // Dashed placeholder border (matches the Figma empty-state).
     canvas.set_stroke_color(resolve_color("control.border", Color::rgba8(80, 80, 100)));
     canvas.set_line_width(1.5f);
+    const float dashes[] = {5.0f, 4.0f};
+    canvas.set_line_dash(dashes, 2, 0.0f);
     canvas.stroke_rounded_rect(1, 1, w - 2, h - 2, 14.0f);
+    canvas.set_line_dash(nullptr, 0, 0.0f);  // revert to solid
+
+    // Folder glyph above the text — a simple outlined folder.
+    auto icon = resolve_color("text.secondary", Color::rgba8(150, 150, 160));
+    const float fw = 22.0f, fh = 16.0f;
+    const float fx = (w - fw) * 0.5f, fy = h * 0.26f;
+    canvas.set_stroke_color(icon);
+    canvas.set_line_width(1.5f);
+    canvas.stroke_rounded_rect(fx, fy + 3.0f, fw, fh - 3.0f, 2.0f);   // body
+    canvas.stroke_line(fx + 2.0f, fy + 3.0f, fx + 2.0f + 7.0f, fy + 3.0f);  // tab top
+    canvas.stroke_line(fx + 2.0f, fy + 3.0f, fx + 3.0f, fy);
+    canvas.stroke_line(fx + 9.0f, fy + 3.0f, fx + 8.0f, fy);
+
     canvas.set_font("system", 14.0f);
     const float mw = canvas.measure_text(message_);
     const float aw = action_.empty() ? 0.0f : canvas.measure_text(action_) + 8.0f;
     float x = (w - (mw + aw)) / 2.0f;
-    canvas.set_fill_color(resolve_color("text.secondary", Color::rgba8(150, 150, 160)));
-    canvas.fill_text(message_, x, h * 0.56f);
+    canvas.set_fill_color(icon);
+    canvas.fill_text(message_, x, h * 0.66f);
     if (!action_.empty()) {
         canvas.set_fill_color(resolve_color("accent.primary", Color::rgba8(22, 218, 194)));
-        canvas.fill_text(action_, x + mw + 8.0f, h * 0.56f);
+        canvas.fill_text(action_, x + mw + 8.0f, h * 0.66f);
     }
 }
 void EmptyState::on_mouse_down(Point) { if (!action_.empty() && on_action) on_action(); }

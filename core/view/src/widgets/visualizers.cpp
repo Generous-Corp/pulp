@@ -560,12 +560,16 @@ void XYPad::paint(canvas::Canvas& canvas) {
     canvas.set_fill_color(bg);
     canvas.fill_rounded_rect(0, 0, b.width, b.height, 4.0f);
 
-    // Grid lines
-    auto grid = resolve_color("control.border", canvas::Color::rgba8(60, 60, 75));
+    // Grid lines — a 4×4 grid (matches the Figma XY pad), not just a centre cross.
+    auto grid = resolve_color("waveform.grid", canvas::Color::rgba8(60, 60, 75));
     canvas.set_stroke_color(grid);
     canvas.set_line_width(0.5f);
-    canvas.stroke_line(b.width * 0.5f, 0, b.width * 0.5f, b.height);
-    canvas.stroke_line(0, b.height * 0.5f, b.width, b.height * 0.5f);
+    for (int i = 1; i < 4; ++i) {
+        float gx = b.width * (static_cast<float>(i) / 4.0f);
+        float gy = b.height * (static_cast<float>(i) / 4.0f);
+        canvas.stroke_line(gx, 0, gx, b.height);
+        canvas.stroke_line(0, gy, b.width, gy);
+    }
 
     // Crosshair position — inset by dot radius so it doesn't clip at edges
     float dot_r = 5.0f;
