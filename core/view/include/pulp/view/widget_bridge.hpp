@@ -87,7 +87,17 @@ public:
     /// Set reviewed local roots used by JS asset loading for relative URLs.
     /// These are scoped to this bridge instance and are intended for
     /// post-review UI-kit assets copied under `pulp-kits/<kit-id>/`.
-    void set_asset_roots(std::vector<std::filesystem::path> roots);
+    void set_asset_roots(std::vector<std::filesystem::path> roots) {
+        asset_roots_.clear();
+        asset_roots_.reserve(roots.size());
+        for (auto& root : roots) {
+            if (root.empty()) continue;
+            std::error_code ec;
+            auto abs = std::filesystem::absolute(root, ec).lexically_normal();
+            if (ec) abs = root.lexically_normal();
+            asset_roots_.push_back(std::move(abs));
+        }
+    }
     const std::vector<std::filesystem::path>& asset_roots() const noexcept { return asset_roots_; }
 
     /// Phase 9: load_script overload that retains a script identifier.
