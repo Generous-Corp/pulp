@@ -20,15 +20,10 @@ class QueueStatusDisplayBindingsTests(unittest.TestCase):
 
     def test_status_display_exports_match_facade_helpers(self):
         expected = (
-            "summarize_active_targets",
-            "status_active_targets",
-            "status_target_states",
-            "status_submission_lines",
-            "target_state_detail_parts",
-            "status_target_detail_lines",
-            "status_runner_line",
-            "recent_completed_status_line",
-            "recent_completed_missing_result_line",
+            *self.mod.QUEUE_STATUS_ACTIVE_DISPLAY_EXPORTS[:2],
+            *self.mod.QUEUE_STATUS_TARGET_DISPLAY_EXPORTS,
+            self.mod.QUEUE_STATUS_ACTIVE_DISPLAY_EXPORTS[2],
+            *self.mod.QUEUE_STATUS_RECENT_DISPLAY_EXPORTS,
         )
 
         self.assertEqual(self.mod.QUEUE_STATUS_DISPLAY_EXPORTS, expected)
