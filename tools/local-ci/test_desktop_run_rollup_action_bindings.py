@@ -34,8 +34,8 @@ class DesktopRunRollupActionBindingsTests(unittest.TestCase):
 
     def test_rollup_action_exports_match_wrappers(self):
         expected = (
-            "write_desktop_run_rollups",
-            "prune_desktop_run_manifests",
+            *self.mod.DESKTOP_RUN_ROLLUP_WRITE_EXPORTS,
+            *self.mod.DESKTOP_RUN_ROLLUP_PRUNE_EXPORTS,
         )
 
         self.assertEqual(self.mod.DESKTOP_RUN_ROLLUP_ACTION_EXPORTS, expected)
@@ -108,6 +108,26 @@ class DesktopRunRollupActionBindingsTests(unittest.TestCase):
         self.assertIsNone(bindings["write_desktop_run_rollups"]({"desktop_automation": {}}, target_name="mac"))
         self.assertEqual(bindings["prune_desktop_run_manifests"]({"desktop_automation": {}}, keep_last=1), [Path("/tmp/run")])
         self.assertEqual(captured["write"][0], ({"desktop_automation": {}},))
+        self.assertEqual(captured["prune"][0], ({"desktop_automation": {}},))
+
+    def test_install_desktop_run_rollup_action_helpers_routes_selected_groups(self):
+        captured = {}
+
+        def write_runner(*args, **kwargs):
+            captured["write"] = (args, kwargs)
+
+        def prune_runner(*args, **kwargs):
+            captured["prune"] = (args, kwargs)
+            return [Path("/tmp/run")]
+
+        bindings = self._bindings("write_desktop_run_rollups", write_runner)
+        bindings["_reporting"].prune_desktop_run_manifests = prune_runner
+
+        self.mod.install_desktop_run_rollup_action_helpers(bindings, ("prune_desktop_run_manifests",))
+
+        self.assertNotIn("write_desktop_run_rollups", bindings)
+        self.assertEqual(bindings["prune_desktop_run_manifests"]({"desktop_automation": {}}, keep_last=1), [Path("/tmp/run")])
+        self.assertNotIn("write", captured)
         self.assertEqual(captured["prune"][0], ({"desktop_automation": {}},))
 
 
