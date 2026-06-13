@@ -481,9 +481,11 @@ def cmd_desktop_verdict(
         print_fn(f"Error: could not read desktop run manifest: {exc}")
         return 1
     status = "approved" if getattr(args, "approved", False) else "needs-work"
+    reviewed_at = now_iso_fn()
+    run_label = str(manifest.get("label") or manifest_path.parent.name)
     review = {
         "status": status,
-        "reviewed_at": now_iso_fn(),
+        "reviewed_at": reviewed_at,
     }
     if args.notes:
         review["notes"] = args.notes
@@ -496,17 +498,85 @@ def cmd_desktop_verdict(
     else:
         review["close_review_issue"] = False
         review["follow_up_required"] = True
+    markdown_path = manifest_path.parent / "review-verdict.md"
+    json_path = manifest_path.parent / "review-verdict.json"
+    if status == "approved":
+        summary_comment = f"Approved desktop video proof `{run_label}`."
+        if args.issue_url:
+            summary_comment += f" Review issue: {args.issue_url}."
+        if args.notes:
+            summary_comment += f" Notes: {args.notes}"
+        follow_up = None
+    else:
+        summary_comment = f"Desktop video proof `{run_label}` needs another iteration."
+        if args.notes:
+            summary_comment += f" Requested change: {args.notes}"
+        follow_up = {
+            "kind": "same-issue-checklist",
+            "text": f"- [ ] Re-record `{run_label}` after addressing: {args.notes or 'reviewer feedback'}",
+        }
+    verdict_payload = {
+        "kind": "desktop-video-proof-verdict",
+        "manifest": str(manifest_path),
+        "status": status,
+        "reviewed_at": reviewed_at,
+        "reviewer": args.reviewer or None,
+        "issue_url": args.issue_url or None,
+        "notes": args.notes or None,
+        "close_review_issue": bool(review["close_review_issue"]),
+        "follow_up_required": bool(review.get("follow_up_required", False)),
+        "summary_comment": summary_comment,
+        "follow_up": follow_up,
+    }
+    markdown_lines = [
+        f"# Desktop Video Proof Verdict: {status}",
+        "",
+        f"- Manifest: `{manifest_path}`",
+        f"- Run: `{run_label}`",
+        f"- Reviewed at: `{reviewed_at}`",
+    ]
+    if args.reviewer:
+        markdown_lines.append(f"- Reviewer: `{args.reviewer}`")
+    if args.issue_url:
+        markdown_lines.append(f"- Review issue: {args.issue_url}")
+    if args.notes:
+        markdown_lines.append(f"- Notes: {args.notes}")
+    markdown_lines.extend(
+        [
+            "",
+            "## Issue Comment",
+            "",
+            summary_comment,
+        ]
+    )
+    if follow_up:
+        markdown_lines.extend(["", "## Follow-up", "", follow_up["text"]])
+    if status == "approved":
+        markdown_lines.extend(["", "## Closeout", "", "Close the review issue after posting the summary comment."])
+    else:
+        markdown_lines.extend(["", "## Closeout", "", "Keep the review issue open until a replacement proof is recorded."])
+    atomic_write_text_fn(markdown_path, "\n".join(markdown_lines) + "\n")
+    atomic_write_text_fn(json_path, json.dumps(verdict_payload, indent=2) + "\n")
+    review["verdict_markdown"] = str(markdown_path)
+    review["verdict_json"] = str(json_path)
+    review["summary_comment"] = summary_comment
+    if follow_up:
+        review["follow_up"] = follow_up
     manifest["review"] = review
     atomic_write_text_fn(manifest_path, json.dumps(manifest, indent=2) + "\n")
     payload = {
         "manifest": str(manifest_path),
         "review": review,
+        "verdict_markdown": str(markdown_path),
+        "verdict_json": str(json_path),
     }
     if getattr(args, "json", False):
         print_fn(json.dumps(payload, indent=2))
     else:
         print_fn(f"Desktop proof verdict recorded: {status}")
         print_fn(f"  manifest: {manifest_path}")
+        print_fn(f"  verdict_markdown: {markdown_path}")
+        print_fn(f"  verdict_json: {json_path}")
         if args.issue_url:
             print_fn(f"  issue_url: {args.issue_url}")
     return 0

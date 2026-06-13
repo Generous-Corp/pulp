@@ -454,6 +454,9 @@ python3 tools/local-ci/local_ci.py desktop verdict /path/to/run/manifest.json \
 
 The manifest `review` block records `approved` or `needs-work`, the review
 timestamp, optional reviewer notes, and whether the review issue can be closed.
+The command also writes `review-verdict.md` and `review-verdict.json` next to
+the run manifest. Use the markdown file as the pasteable issue closeout comment
+or same-issue follow-up checklist; the JSON file is the automation handoff.
 
 ## Current Scope
 

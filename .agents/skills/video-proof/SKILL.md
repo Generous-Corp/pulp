@@ -473,7 +473,10 @@ python3 tools/local-ci/local_ci.py desktop verdict /path/to/run/manifest.json \
 ```
 
 `desktop verdict` writes a manifest `review` block with status, timestamp,
-optional reviewer notes, and whether the review issue can be closed.
+optional reviewer notes, and whether the review issue can be closed. It also
+writes `review-verdict.md` and `review-verdict.json` next to the manifest; use
+the markdown as the pasteable issue closeout comment or same-issue follow-up
+checklist, and keep the JSON for automation.
 
 ## High-value demo scenarios
 

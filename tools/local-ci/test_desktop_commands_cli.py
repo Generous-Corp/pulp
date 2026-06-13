@@ -526,7 +526,16 @@ class DesktopCommandsCliTests(unittest.TestCase):
             self.assertEqual(updated["review"]["notes"], "looks good")
             self.assertEqual(updated["review"]["reviewer"], "daniel")
             self.assertTrue(updated["review"]["close_review_issue"])
-            self.assertEqual(writes[0][0], manifest_path)
+            self.assertEqual(Path(updated["review"]["verdict_markdown"]).name, "review-verdict.md")
+            self.assertEqual(Path(updated["review"]["verdict_json"]).name, "review-verdict.json")
+            self.assertIn("Approved desktop video proof", updated["review"]["summary_comment"])
+            self.assertEqual(writes[0][0], manifest_path.parent / "review-verdict.md")
+            self.assertEqual(writes[1][0], manifest_path.parent / "review-verdict.json")
+            self.assertEqual(writes[2][0], manifest_path)
+            verdict_json = json.loads((manifest_path.parent / "review-verdict.json").read_text())
+            self.assertEqual(verdict_json["status"], "approved")
+            self.assertTrue(verdict_json["close_review_issue"])
+            self.assertIn("Approved desktop video proof", (manifest_path.parent / "review-verdict.md").read_text())
 
     def test_review_issue_writes_local_draft_from_report_directory(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -646,7 +655,11 @@ class DesktopCommandsCliTests(unittest.TestCase):
             self.assertEqual(updated["review"]["status"], "needs-work")
             self.assertTrue(updated["review"]["follow_up_required"])
             self.assertFalse(updated["review"]["close_review_issue"])
-            self.assertIn("needs-work", self.printed[-2])
+            self.assertIn("zoom starts too late", updated["review"]["follow_up"]["text"])
+            self.assertIn("Keep the review issue open", (manifest_path.parent / "review-verdict.md").read_text())
+            verdict_json = json.loads((manifest_path.parent / "review-verdict.json").read_text())
+            self.assertEqual(verdict_json["follow_up"]["kind"], "same-issue-checklist")
+            self.assertIn("needs-work", self.printed[-4])
 
             self.printed.clear()
             result = self.mod.cmd_desktop_verdict(
