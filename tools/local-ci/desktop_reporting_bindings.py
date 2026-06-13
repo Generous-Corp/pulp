@@ -13,6 +13,7 @@ from desktop_proof_bindings import (
     desktop_proof_scope_for_adapter,
     desktop_proof_summaries,
     desktop_run_summary,
+    install_desktop_proof_helpers,
     normalize_desktop_proof_source_mode,
 )
 from desktop_publish_bindings import (
@@ -41,7 +42,10 @@ DESKTOP_REPORTING_EXPORTS = (
 
 def install_desktop_reporting_helpers(bindings: dict[str, Any], names: tuple[str, ...] = DESKTOP_REPORTING_EXPORTS) -> None:
     publish_names = tuple(name for name in names if name in DESKTOP_PUBLISH_EXPORTS)
-    non_publish_names = tuple(name for name in names if name not in DESKTOP_PUBLISH_EXPORTS)
+    proof_names = tuple(name for name in names if name in DESKTOP_PROOF_EXPORTS)
+    delegated_names = set(DESKTOP_PUBLISH_EXPORTS) | set(DESKTOP_PROOF_EXPORTS)
+    remaining_names = tuple(name for name in names if name not in delegated_names)
 
     install_desktop_publish_helpers(bindings, publish_names)
-    install_local_helpers(bindings, globals(), non_publish_names)
+    install_desktop_proof_helpers(bindings, proof_names)
+    install_local_helpers(bindings, globals(), remaining_names)
