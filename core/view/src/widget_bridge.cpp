@@ -949,6 +949,8 @@ void WidgetBridge::register_api() {
 
     register_widget_factory_text_editor_api();
 
+    register_widget_factory_design_system_api();
+
 
 
     register_widget_value_label_api();

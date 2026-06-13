@@ -1,6 +1,7 @@
 // widget_bridge/widget_value_controls_api.cpp - scalar control value registrations for WidgetBridge.
 
 #include <pulp/view/widget_bridge.hpp>
+#include <pulp/view/gap_widgets.hpp>
 #include "api_registry.hpp"
 
 #include <string>
@@ -33,6 +34,10 @@ void WidgetBridge::register_widget_value_controls_api() {
             cb->set_checked(value > 0.5);
         else if (auto* tb = dynamic_cast<ToggleButton*>(it->second))
             tb->set_on(value > 0.5);
+        else if (auto* stepper = dynamic_cast<Stepper*>(it->second))
+            stepper->set_value(value);
+        else if (auto* pan = dynamic_cast<PanControl*>(it->second))
+            pan->set_value(static_cast<float>(value));
 
         return choc::value::Value();
     });

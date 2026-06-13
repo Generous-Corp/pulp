@@ -1,8 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/view/asset_manager.hpp>
 #include <pulp/view/canvas_widget.hpp>
+#include <pulp/view/gap_widgets.hpp>
 #include <pulp/view/modal.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/widget_bridge.hpp>
@@ -3507,4 +3509,58 @@ TEST_CASE("WidgetBridge eval_or_throw logs PULP_EVAL_THROW before rethrowing (#3
 
     REQUIRE(captured.find("PULP_EVAL_THROW:") != std::string::npos);
     REQUIRE(captured.find("name=user_script") != std::string::npos);
+}
+
+TEST_CASE("WidgetBridge creates Ink & Signal design-system widgets from JS",
+          "[view][bridge][design-system]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // createBadge(id, text, tone, parentId); createStepper/createPan(id, parentId).
+    bridge.load_script(
+        "createBadge('fmt', 'VST3', 'info', '');"
+        "createStepper('voices', '');"
+        "createPan('balance', '');");
+
+    REQUIRE(root.child_count() == 3);
+
+    auto* badge = dynamic_cast<Badge*>(bridge.widget("fmt"));
+    REQUIRE(badge != nullptr);
+    REQUIRE(badge->text() == "VST3");
+    REQUIRE(badge->tone() == Tone::info);
+
+    auto* stepper = dynamic_cast<Stepper*>(bridge.widget("voices"));
+    REQUIRE(stepper != nullptr);
+    auto* pan = dynamic_cast<PanControl*>(bridge.widget("balance"));
+    REQUIRE(pan != nullptr);
+
+    // setValue routes through the shared dynamic_cast chain to the gap widgets.
+    bridge.load_script("setValue('voices', 8); setValue('balance', -1); setText('fmt', 'CLAP');");
+    REQUIRE(stepper->value() == Catch::Approx(8.0));
+    REQUIRE(pan->value() == Catch::Approx(-1.0f));
+    REQUIRE(badge->text() == "CLAP");
+}
+
+TEST_CASE("WidgetBridge design-system stepper/pan dispatch change events",
+          "[view][bridge][design-system]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(
+        "globalThis.changes = [];"
+        "globalThis.__dispatch__ = function(id, ev, v) { changes.push({id:id, ev:ev, v:v}); };"
+        "createStepper('voices', '');");
+
+    auto* stepper = dynamic_cast<Stepper*>(bridge.widget("voices"));
+    REQUIRE(stepper != nullptr);
+    stepper->set_value(3);            // fires on_change → __dispatch__
+    engine.pump_message_loop();
+    REQUIRE(engine.evaluate("changes.length").getWithDefault<double>(0) >= 1);
+    REQUIRE(engine.evaluate("changes[changes.length-1].ev").getWithDefault<std::string>("") == "change");
 }

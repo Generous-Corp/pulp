@@ -11,7 +11,7 @@
   "hotspots": [
     {
       "path": "core/view/src/widget_bridge.cpp",
-      "max_loc": 1202,
+      "max_loc": 1204,
       "note": "WidgetBridge shell after registrar split; keep native JS API registration out"
     },
     {
