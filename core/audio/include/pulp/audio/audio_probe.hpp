@@ -93,8 +93,15 @@ public:
     /// Copy up to `max_frames` of the most recent captured channel-0 history
     /// into `dst` (UI/worker thread). Returns the number of frames written.
     /// Only meaningful when capture was enabled at prepare(). Non-RT; intended
-    /// for the consumer side.
+    /// for the consumer side. Kept as the legacy convenience reader over the
+    /// first channel of the multichannel capture ring.
     int read_capture(float* dst, int max_frames);
+
+    /// Copy up to `max_frames` of the most recent captured multichannel history
+    /// into `dst` (UI/worker thread). Missing source channels are zero-filled.
+    /// Returns the number of frames written. Single-consumer: this drains the
+    /// same FIFO as `read_capture(float*)`.
+    int read_capture(BufferView<float> dst, int max_frames);
 
     /// Reset all cumulative counters and the capture ring. Not thread-safe
     /// against a live audio thread; call when playback is stopped.
@@ -134,9 +141,11 @@ private:
     runtime::TripleBuffer<AudioProbeSnapshot> summary_buf_;
 
     // Optional last-N capture: AbstractFifo over preallocated, probe-owned
-    // storage (channel-0 only for the first slice). The ring is sized at
-    // prepare(); analyze_output() never resizes it.
+    // storage. The FIFO indexes frames; storage is channel-major with
+    // `capture_storage_channels_` lanes, each `capture_frames_ + 1` samples
+    // long. The ring is sized at prepare(); analyze_output() never resizes it.
     std::vector<float> capture_storage_;
+    int capture_storage_channels_ = 0;
     std::unique_ptr<runtime::AbstractFifo> capture_fifo_;
 };
 

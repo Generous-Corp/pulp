@@ -453,4 +453,100 @@ std::string handle_audio_probe_json(const std::string& params_json) {
     return json_tool_payload(normalized_json);
 }
 
+std::string handle_audio_scope(const std::string& params_json) {
+    auto root = find_project_root();
+    if (root.empty()) {
+        return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}";
+    }
+
+    int frames = 90;
+    auto frames_raw = extract_raw(params_json, "frames");
+    if (!frames_raw.empty() && frames_raw != "null") {
+        frames = extract_int(params_json, "frames", -1);
+        if (frames <= 0) {
+            return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: frames must be a positive integer\"}]}";
+        }
+    }
+
+    int window = 2048;
+    auto window_raw = extract_raw(params_json, "window");
+    if (!window_raw.empty() && window_raw != "null") {
+        window = extract_int(params_json, "window", -1);
+        if (window <= 0) {
+            return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: window must be a positive integer\"}]}";
+        }
+    }
+
+    int channel = 0;
+    auto channel_raw = extract_raw(params_json, "channel");
+    if (!channel_raw.empty() && channel_raw != "null") {
+        channel = extract_int(params_json, "channel", -1);
+        if (channel < 0) {
+            return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: channel must be a non-negative integer\"}]}";
+        }
+    }
+
+    auto trigger = extract_string(params_json, "trigger");
+    if (trigger.empty()) trigger = "rising-zero";
+    auto normalized_trigger = trigger;
+    std::replace(normalized_trigger.begin(), normalized_trigger.end(), '_', '-');
+    if (normalized_trigger != "none" && normalized_trigger != "off"
+        && normalized_trigger != "raw" && normalized_trigger != "rising-zero") {
+        return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: trigger must be one of none, raw, off, rising-zero\"}]}";
+    }
+
+    auto target = extract_string(params_json, "target");
+    if (!target.empty() && target.front() == '-') {
+        return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: target must be a standalone target name, not an option\"}]}";
+    }
+
+    auto input_wav = extract_string(params_json, "input_wav");
+    auto png_path = extract_string(params_json, "png_path");
+    if (!input_wav.empty() && !target.empty()) {
+        return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: target and input_wav are mutually exclusive\"}]}";
+    }
+    if (!png_path.empty() && input_wav.empty()) {
+        return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: png_path is only supported with input_wav\"}]}";
+    }
+
+    std::string temp_error;
+    auto temp = make_private_probe_json_temp(temp_error);
+    if (temp.json_path.empty()) {
+        return "{\"content\":[{\"type\":\"text\",\"text\":" + json_string("Error: " + temp_error) + "}]}";
+    }
+    auto output_path = temp.directory / "scope.json";
+
+    std::string cmd = shell_quote(source_build_cli_path(root).string()) + " audio scope";
+    if (!target.empty()) cmd += " " + shell_quote(target);
+    if (!input_wav.empty()) cmd += " --input-wav " + shell_quote(input_wav);
+    cmd += " --json " + shell_quote(output_path.string());
+    cmd += " --frames " + std::to_string(frames);
+    cmd += " --window " + std::to_string(window);
+    cmd += " --trigger " + shell_quote(trigger);
+    cmd += " --channel " + std::to_string(channel);
+    if (!png_path.empty()) cmd += " --png " + shell_quote(png_path);
+    cmd += " 2>&1";
+
+    auto output = exec(cmd);
+    auto scope_json = read_text_file(output_path);
+    std::error_code remove_ec;
+    fs::remove_all(temp.directory, remove_ec);
+
+    if (scope_json.empty()) {
+        std::string message = "Error: pulp audio scope did not write scope JSON";
+        if (!output.empty()) message += "\n" + output;
+        return "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(message) + "}]}";
+    }
+
+    std::string normalized_json;
+    std::string parse_error;
+    if (!normalize_structured_json(scope_json, normalized_json, parse_error)) {
+        std::string message = "Error: " + parse_error + "\n" + scope_json;
+        if (!output.empty()) message += "\n" + output;
+        return "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(message) + "}]}";
+    }
+
+    return json_tool_payload(normalized_json);
+}
+
 }  // namespace pulp_mcp

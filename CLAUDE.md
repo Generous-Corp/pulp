@@ -881,8 +881,10 @@ Several Pulp dev workflows can produce host audio out of the user's
 speakers without warning: `xcrun simctl launch` of an iOS Sim app that
 opens a virtual coreaudio device, `auval` validating an AU plug-in,
 loading any AUv3/VST3/CLAP into a host (Logic, GarageBand, REAPER,
-AUM, Cubasis) for scan or validation, or any test that exercises the
-audio render path with non-zero gain on an unmuted bus. If the user
+AUM, Cubasis) for scan or validation, `pulp run` of a standalone target
+(including visually headless live-probe commands such as
+`--audio-probe-json`), or any test that exercises the audio render path
+with non-zero gain on an unmuted bus. If the user
 is listening to music, on a call, near sleeping people, or just away
 from the desk, mystery audio is at minimum confusing and at worst
 embarrassing or harmful.
@@ -896,7 +898,10 @@ for every agent (Claude Code, Codex, human-driven scripts) is:
    dispatches the work, include a one-liner naming the source and an
    expected duration: "heads up — about to launch the iOS Sim with
    the demo plugin; audio may be active for ~30s while the cube
-   renders." Same for `auval`, host launches, etc.
+   renders." Same for `pulp run`, `--audio-inspector`,
+   `--audio-probe-json`, `auval`, host launches, etc. Prefer
+   `HeadlessHost`, the audio observability harness, or Audio Doctor for
+   no-speaker checks whenever the live device is not the thing being tested.
 2. **Cap the duration.** Pre-PR / pre-merge verification steps that
    open an audio device should have a hard wall-clock cap. Don't let
    a verify wait hang an open coreaudio session for hours; terminate
