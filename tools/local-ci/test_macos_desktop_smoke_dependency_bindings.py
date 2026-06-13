@@ -64,8 +64,15 @@ class MacosDesktopSmokeDependencyBindingsTests(unittest.TestCase):
 
     def test_dependency_exports_match_wrappers(self):
         expected = ("macos_desktop_smoke_dependencies",)
+        focused_expected = (
+            *self.mod.MACOS_DESKTOP_SMOKE_ARTIFACT_DEPENDENCY_EXPORTS,
+            *self.mod.MACOS_DESKTOP_SMOKE_PROCESS_DEPENDENCY_EXPORTS,
+            *self.mod.MACOS_DESKTOP_SMOKE_WINDOW_DEPENDENCY_EXPORTS,
+            *self.mod.MACOS_DESKTOP_SMOKE_INTERACTION_DEPENDENCY_EXPORTS,
+        )
 
         self.assertEqual(self.mod.MACOS_DESKTOP_SMOKE_DEPENDENCY_EXPORTS, expected)
+        self.assertEqual(self.mod.MACOS_DESKTOP_SMOKE_FOCUSED_DEPENDENCY_EXPORTS, focused_expected)
         for name in expected:
             self.assertTrue(callable(getattr(self.mod, name)))
 

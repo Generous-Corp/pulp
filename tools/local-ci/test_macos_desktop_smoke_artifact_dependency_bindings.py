@@ -20,6 +20,12 @@ class MacosDesktopSmokeArtifactDependencyBindingsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
 
+    def test_artifact_dependency_exports_match_wrappers(self) -> None:
+        expected = ("macos_desktop_smoke_artifact_dependencies",)
+
+        self.assertEqual(self.mod.MACOS_DESKTOP_SMOKE_ARTIFACT_DEPENDENCY_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def test_artifact_dependencies_bind_facade_values(self) -> None:
         desktop_actions = types.SimpleNamespace(
             desktop_action_artifact_paths=object(),
@@ -45,6 +51,30 @@ class MacosDesktopSmokeArtifactDependencyBindingsTests(unittest.TestCase):
         self.assertIs(deps["prepare_macos_exact_sha_source_fn"], bindings["prepare_macos_exact_sha_source"])
         self.assertIs(deps["image_change_summary_fn"], bindings["image_change_summary"])
         self.assertIs(deps["write_desktop_run_rollups_fn"], bindings["write_desktop_run_rollups"])
+
+    def test_install_artifact_dependency_helpers_wires_named_exports(self) -> None:
+        desktop_actions = types.SimpleNamespace(
+            desktop_action_artifact_paths=object(),
+            desktop_interaction_requested=object(),
+        )
+        bindings = {"_desktop_actions": desktop_actions}
+        for name in [
+            "create_desktop_run_bundle",
+            "now_iso",
+            "prepare_macos_exact_sha_source",
+            "image_change_summary",
+            "attach_desktop_source_to_manifest",
+            "atomic_write_text",
+            "write_desktop_run_rollups",
+        ]:
+            bindings[name] = object()
+
+        self.mod.install_macos_desktop_smoke_artifact_dependency_helpers(bindings)
+
+        self.assertIs(
+            bindings["macos_desktop_smoke_artifact_dependencies"]()["create_desktop_run_bundle_fn"],
+            bindings["create_desktop_run_bundle"],
+        )
 
 
 if __name__ == "__main__":

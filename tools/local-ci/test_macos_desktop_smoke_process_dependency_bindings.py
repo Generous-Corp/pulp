@@ -20,7 +20,7 @@ class MacosDesktopSmokeProcessDependencyBindingsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
 
-    def test_process_dependencies_bind_facade_values(self) -> None:
+    def _bindings(self) -> dict:
         bindings = {
             "subprocess": types.SimpleNamespace(run=object(), Popen=object()),
             "time": types.SimpleNamespace(sleep=object()),
@@ -37,6 +37,16 @@ class MacosDesktopSmokeProcessDependencyBindingsTests(unittest.TestCase):
             "terminate_process",
         ]:
             bindings[name] = object()
+        return bindings
+
+    def test_process_dependency_exports_match_wrappers(self) -> None:
+        expected = ("macos_desktop_smoke_process_dependencies",)
+
+        self.assertEqual(self.mod.MACOS_DESKTOP_SMOKE_PROCESS_DEPENDENCY_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
+    def test_process_dependencies_bind_facade_values(self) -> None:
+        bindings = self._bindings()
 
         deps = self.mod.macos_desktop_smoke_process_dependencies(bindings)
 
@@ -49,6 +59,16 @@ class MacosDesktopSmokeProcessDependencyBindingsTests(unittest.TestCase):
         self.assertIs(deps["environ_copy_fn"], bindings["os"].environ.copy)
         self.assertIs(deps["popen_fn"], bindings["subprocess"].Popen)
         self.assertIs(deps["terminate_process_fn"], bindings["terminate_process"])
+
+    def test_install_process_dependency_helpers_wires_named_exports(self) -> None:
+        bindings = self._bindings()
+
+        self.mod.install_macos_desktop_smoke_process_dependency_helpers(bindings)
+
+        self.assertIs(
+            bindings["macos_desktop_smoke_process_dependencies"]()["terminate_process_fn"],
+            bindings["terminate_process"],
+        )
 
 
 if __name__ == "__main__":

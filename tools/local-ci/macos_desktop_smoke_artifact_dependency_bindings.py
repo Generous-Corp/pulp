@@ -5,7 +5,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from binding_utils import install_local_helpers
 from binding_utils import binding as _binding
+
+
+MACOS_DESKTOP_SMOKE_ARTIFACT_DEPENDENCY_EXPORTS = ("macos_desktop_smoke_artifact_dependencies",)
 
 
 def macos_desktop_smoke_artifact_dependencies(bindings: Mapping[str, Any]) -> dict[str, Any]:
@@ -22,3 +26,10 @@ def macos_desktop_smoke_artifact_dependencies(bindings: Mapping[str, Any]) -> di
         "atomic_write_text_fn": _binding(bindings, "atomic_write_text"),
         "write_desktop_run_rollups_fn": _binding(bindings, "write_desktop_run_rollups"),
     }
+
+
+def install_macos_desktop_smoke_artifact_dependency_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = MACOS_DESKTOP_SMOKE_ARTIFACT_DEPENDENCY_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)

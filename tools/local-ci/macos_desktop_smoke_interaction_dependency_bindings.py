@@ -5,7 +5,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from binding_utils import install_local_helpers
 from binding_utils import binding as _binding
+
+
+MACOS_DESKTOP_SMOKE_INTERACTION_DEPENDENCY_EXPORTS = ("macos_desktop_smoke_interaction_dependencies",)
 
 
 def macos_desktop_smoke_interaction_dependencies(bindings: Mapping[str, Any]) -> dict[str, Any]:
@@ -21,3 +25,10 @@ def macos_desktop_smoke_interaction_dependencies(bindings: Mapping[str, Any]) ->
         "dispatch_macos_click_fn": _binding(bindings, "dispatch_macos_click"),
         "desktop_click_selector_fn": desktop_actions.desktop_click_selector,
     }
+
+
+def install_macos_desktop_smoke_interaction_dependency_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = MACOS_DESKTOP_SMOKE_INTERACTION_DEPENDENCY_EXPORTS,
+) -> None:
+    install_local_helpers(bindings, globals(), names)
