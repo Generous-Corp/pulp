@@ -57,13 +57,12 @@ class MacosWindowActionBindingsTests(unittest.TestCase):
 
     def test_action_exports_and_installer_wire_named_helpers(self) -> None:
         expected = (
-            "activate_macos_pid",
-            "activate_macos_bundle_id",
-            "dispatch_macos_click",
-            "terminate_process",
-            "quit_macos_bundle_id",
+            *self.mod.MACOS_WINDOW_ACTIVATION_EXPORTS,
+            *self.mod.MACOS_WINDOW_CLICK_EXPORTS,
+            *self.mod.MACOS_WINDOW_PROCESS_EXPORTS,
         )
         self.assertEqual(self.mod.MACOS_WINDOW_ACTION_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
 
         macos_desktop = types.SimpleNamespace(
             activate_macos_bundle_id=lambda bundle_id, **kwargs: {"bundle_id": bundle_id},
@@ -79,6 +78,29 @@ class MacosWindowActionBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["activate_macos_bundle_id"]("com.example.demo"), {"bundle_id": "com.example.demo"})
         self.assertIsNone(bindings["terminate_process"](object()))
         self.assertNotIn("dispatch_macos_click", bindings)
+
+    def test_action_installer_routes_selected_groups(self) -> None:
+        macos_desktop = types.SimpleNamespace(
+            activate_macos_bundle_id=lambda bundle_id, **kwargs: {"bundle_id": bundle_id},
+            dispatch_macos_click=lambda *args, **kwargs: {"clicked": True},
+            quit_macos_bundle_id=lambda bundle_id, **kwargs: None,
+        )
+        bindings = {
+            "_macos_desktop": macos_desktop,
+            "subprocess": types.SimpleNamespace(run=object()),
+            "macos_window_probe_path": object(),
+        }
+
+        self.mod.install_macos_window_action_helpers(
+            bindings,
+            ("activate_macos_bundle_id", "dispatch_macos_click", "quit_macos_bundle_id"),
+        )
+
+        self.assertEqual(bindings["activate_macos_bundle_id"]("com.example.demo"), {"bundle_id": "com.example.demo"})
+        self.assertEqual(bindings["dispatch_macos_click"](10.0, 20.0), {"clicked": True})
+        self.assertIsNone(bindings["quit_macos_bundle_id"]("com.example.demo"))
+        self.assertNotIn("activate_macos_pid", bindings)
+        self.assertNotIn("terminate_process", bindings)
 
 
 if __name__ == "__main__":

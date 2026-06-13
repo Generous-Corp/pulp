@@ -1,60 +1,46 @@
-"""Facade dependency bindings for macOS window action helpers."""
+"""Compatibility facade for macOS window action helper bindings."""
 
 from __future__ import annotations
 
-import subprocess
-
-from binding_utils import binding as _binding
-from binding_utils import binding_attr as _binding_attr
 from binding_utils import install_local_helpers
-
-
-MACOS_WINDOW_ACTION_EXPORTS = (
-    "activate_macos_pid",
-    "activate_macos_bundle_id",
-    "dispatch_macos_click",
-    "terminate_process",
-    "quit_macos_bundle_id",
+from macos_window_activation_bindings import (
+    MACOS_WINDOW_ACTIVATION_EXPORTS,
+    activate_macos_bundle_id,
+    activate_macos_pid,
+    install_macos_window_activation_helpers,
+)
+from macos_window_click_bindings import (
+    MACOS_WINDOW_CLICK_EXPORTS,
+    dispatch_macos_click,
+    install_macos_window_click_helpers,
+)
+from macos_window_process_bindings import (
+    MACOS_WINDOW_PROCESS_EXPORTS,
+    install_macos_window_process_helpers,
+    quit_macos_bundle_id,
+    terminate_process,
 )
 
 
-def activate_macos_pid(bindings: dict, pid: int) -> dict:
-    return _binding(bindings, "_macos_desktop").activate_macos_pid(
-        pid,
-        probe_path_fn=_binding(bindings, "macos_window_probe_path"),
-        run_fn=_binding_attr(bindings, "subprocess", "run"),
-    )
-
-
-def activate_macos_bundle_id(bindings: dict, bundle_id: str) -> dict:
-    return _binding(bindings, "_macos_desktop").activate_macos_bundle_id(
-        bundle_id,
-        run_fn=_binding_attr(bindings, "subprocess", "run"),
-    )
-
-
-def dispatch_macos_click(bindings: dict, screen_x: float, screen_y: float) -> dict:
-    return _binding(bindings, "_macos_desktop").dispatch_macos_click(
-        screen_x,
-        screen_y,
-        probe_path_fn=_binding(bindings, "macos_window_probe_path"),
-        run_fn=_binding_attr(bindings, "subprocess", "run"),
-    )
-
-
-def terminate_process(bindings: dict, proc: subprocess.Popen, timeout_secs: float = 5.0) -> None:
-    return _binding(bindings, "_macos_desktop").terminate_process(proc, timeout_secs=timeout_secs)
-
-
-def quit_macos_bundle_id(bindings: dict, bundle_id: str) -> None:
-    return _binding(bindings, "_macos_desktop").quit_macos_bundle_id(
-        bundle_id,
-        run_fn=_binding_attr(bindings, "subprocess", "run"),
-    )
+MACOS_WINDOW_ACTION_EXPORTS = (
+    *MACOS_WINDOW_ACTIVATION_EXPORTS,
+    *MACOS_WINDOW_CLICK_EXPORTS,
+    *MACOS_WINDOW_PROCESS_EXPORTS,
+)
 
 
 def install_macos_window_action_helpers(
     bindings: dict,
     names: tuple[str, ...] = MACOS_WINDOW_ACTION_EXPORTS,
 ) -> None:
-    install_local_helpers(bindings, globals(), names)
+    activation_names = tuple(name for name in names if name in MACOS_WINDOW_ACTIVATION_EXPORTS)
+    click_names = tuple(name for name in names if name in MACOS_WINDOW_CLICK_EXPORTS)
+    process_names = tuple(name for name in names if name in MACOS_WINDOW_PROCESS_EXPORTS)
+    known_names = set(MACOS_WINDOW_ACTION_EXPORTS)
+    unknown_names = tuple(name for name in names if name not in known_names)
+
+    install_macos_window_activation_helpers(bindings, activation_names)
+    install_macos_window_click_helpers(bindings, click_names)
+    install_macos_window_process_helpers(bindings, process_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)
