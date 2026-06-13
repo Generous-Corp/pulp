@@ -19,6 +19,15 @@ class DesktopSourceRewriteBindingsTests(unittest.TestCase):
         self.mod = load_module()
         self.root = Path("/repo")
 
+    def test_source_rewrite_exports_are_composed_from_focused_groups(self):
+        expected = (
+            *self.mod.DESKTOP_SOURCE_REWRITE_COMMAND_EXPORTS,
+            *self.mod.DESKTOP_SOURCE_REWRITE_ROOT_EXPORTS,
+        )
+
+        self.assertEqual(self.mod.DESKTOP_SOURCE_REWRITE_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
     def test_rewrite_wrappers_bind_root_and_windows_helpers(self):
         captured = {}
 
