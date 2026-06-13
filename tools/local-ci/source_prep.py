@@ -109,6 +109,20 @@ def rewrite_launch_command_for_posix_root(command: str | None, remote_root: str,
     return rewrite_launch_command_for_mapper(command, lambda rel: f"{remote_root}/{rel.as_posix()}", root=root)
 
 
+def link_local_skia_build_for_prepared_source(root: Path, prepared_root: Path) -> str | None:
+    local_skia = root / "external" / "skia-build"
+    if not local_skia.exists():
+        return None
+    prepared_skia = prepared_root / "external" / "skia-build"
+    if prepared_skia.exists():
+        return str(prepared_skia)
+    if prepared_skia.is_symlink():
+        prepared_skia.unlink()
+    prepared_skia.parent.mkdir(parents=True, exist_ok=True)
+    prepared_skia.symlink_to(local_skia, target_is_directory=True)
+    return str(prepared_skia)
+
+
 def rewrite_launch_command_for_windows_root(
     command: str | None,
     remote_root: str,
@@ -244,6 +258,7 @@ def prepare_macos_exact_sha_source(
             capture_output=True,
             text=True,
         )
+    linked_skia = link_local_skia_build_for_prepared_source(root, prepared_root)
     if source_request.get("prepare_command") and not reused:
         run = run_logged_command_fn(
             ["bash", "-lc", source_request["prepare_command"]],
@@ -264,6 +279,7 @@ def prepare_macos_exact_sha_source(
         "launch_cwd": str(prepared_root),
         "launch_command": rewrite_launch_command_for_source_root_fn(command, prepared_root),
         "prepare_log": str(prepare_log) if prepare_log.exists() else None,
+        "linked_skia_build": linked_skia,
         "prepared_state": "reused" if reused else "clean",
     }
 
