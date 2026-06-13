@@ -1,67 +1,44 @@
-"""Bindings from the local_ci facade to desktop publish helpers."""
+"""Compatibility composer for desktop publish dependency bindings."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from pathlib import Path
 from typing import Any
 
-from binding_utils import binding as _binding
-
-
-DESKTOP_PUBLISH_EXPORTS = (
-    "publish_report_to_branch",
-    "stage_desktop_publish_report",
-    "desktop_publish_reports",
-    "write_desktop_publish_rollups",
+from binding_utils import install_local_helpers
+from desktop_publish_branch_bindings import (
+    DESKTOP_PUBLISH_BRANCH_EXPORTS,
+    install_desktop_publish_branch_helpers,
+    publish_report_to_branch,
+)
+from desktop_publish_stage_bindings import (
+    DESKTOP_PUBLISH_STAGE_EXPORTS,
+    install_desktop_publish_stage_helpers,
+    stage_desktop_publish_report,
+)
+from desktop_publish_list_bindings import (
+    DESKTOP_PUBLISH_LIST_EXPORTS,
+    desktop_publish_reports,
+    install_desktop_publish_list_helpers,
+    write_desktop_publish_rollups,
 )
 
 
-def publish_report_to_branch(bindings: Mapping[str, Any], config: dict, report: dict) -> dict:
-    return _binding(bindings, "_reporting").publish_report_to_branch(
-        config,
-        report,
-        root=_binding(bindings, "ROOT"),
-        run_git_fn=_binding(bindings, "_run_git"),
-        reset_local_worktree_fn=_binding(bindings, "_reset_local_worktree"),
-        clear_directory_contents_fn=_binding(bindings, "_clear_directory_contents"),
-        git_origin_http_url_fn=_binding(bindings, "git_origin_http_url"),
-    )
+DESKTOP_PUBLISH_EXPORTS = (
+    *DESKTOP_PUBLISH_BRANCH_EXPORTS,
+    *DESKTOP_PUBLISH_STAGE_EXPORTS,
+    *DESKTOP_PUBLISH_LIST_EXPORTS,
+)
 
 
-def stage_desktop_publish_report(
-    bindings: Mapping[str, Any],
-    config: dict,
-    manifests: list[dict],
-    *,
-    output_dir: Path | None = None,
-    label: str | None = None,
-) -> dict:
-    return _binding(bindings, "_reporting").stage_desktop_publish_report(
-        config,
-        manifests,
-        output_dir=output_dir,
-        label=label,
-        create_desktop_publish_bundle_fn=_binding(bindings, "create_desktop_publish_bundle"),
-        now_iso_fn=_binding(bindings, "now_iso"),
-        atomic_write_text_fn=_binding(bindings, "atomic_write_text"),
-        write_desktop_publish_rollups_fn=_binding(bindings, "write_desktop_publish_rollups"),
-        publish_report_to_branch_fn=_binding(bindings, "publish_report_to_branch"),
-    )
+def install_desktop_publish_helpers(bindings: dict[str, Any], names: tuple[str, ...] = DESKTOP_PUBLISH_EXPORTS) -> None:
+    branch_names = tuple(name for name in names if name in DESKTOP_PUBLISH_BRANCH_EXPORTS)
+    stage_names = tuple(name for name in names if name in DESKTOP_PUBLISH_STAGE_EXPORTS)
+    list_names = tuple(name for name in names if name in DESKTOP_PUBLISH_LIST_EXPORTS)
+    known_names = set(DESKTOP_PUBLISH_EXPORTS)
+    unknown_names = tuple(name for name in names if name not in known_names)
 
-
-def desktop_publish_reports(bindings: Mapping[str, Any], config: dict, *, limit: int | None = None) -> list[dict]:
-    return _binding(bindings, "_reporting").desktop_publish_reports(
-        config,
-        limit=limit,
-        desktop_publish_root_fn=_binding(bindings, "desktop_publish_root"),
-    )
-
-
-def write_desktop_publish_rollups(bindings: Mapping[str, Any], config: dict) -> None:
-    return _binding(bindings, "_reporting").write_desktop_publish_rollups(
-        config,
-        desktop_publish_root_fn=_binding(bindings, "desktop_publish_root"),
-        desktop_publish_reports_fn=_binding(bindings, "desktop_publish_reports"),
-        atomic_write_text_fn=_binding(bindings, "atomic_write_text"),
-    )
+    install_desktop_publish_branch_helpers(bindings, branch_names)
+    install_desktop_publish_stage_helpers(bindings, stage_names)
+    install_desktop_publish_list_helpers(bindings, list_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)

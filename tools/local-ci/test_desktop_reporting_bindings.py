@@ -276,6 +276,24 @@ class DesktopReportingBindingsTests(unittest.TestCase):
         self.assertEqual(captured["kwargs"]["action"], "smoke")
         self.assertIs(captured["kwargs"]["desktop_artifact_root_fn"], bindings["desktop_artifact_root"])
 
+    def test_install_desktop_reporting_helpers_routes_publish_exports(self):
+        captured = {}
+
+        def runner(*args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            return [{"target": "mac"}]
+
+        bindings = self._bindings("desktop_publish_reports", runner)
+        self.mod.install_desktop_reporting_helpers(bindings, ("desktop_publish_reports",))
+
+        result = bindings["desktop_publish_reports"]({"desktop_automation": {}}, limit=1)
+
+        self.assertEqual(result, [{"target": "mac"}])
+        self.assertEqual(captured["args"], ({"desktop_automation": {}},))
+        self.assertEqual(captured["kwargs"]["limit"], 1)
+        self.assertIs(captured["kwargs"]["desktop_publish_root_fn"], bindings["desktop_publish_root"])
+
 
 if __name__ == "__main__":
     unittest.main()

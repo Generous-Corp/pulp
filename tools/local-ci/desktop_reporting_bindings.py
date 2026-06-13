@@ -18,6 +18,7 @@ from desktop_proof_bindings import (
 from desktop_publish_bindings import (
     DESKTOP_PUBLISH_EXPORTS,
     desktop_publish_reports,
+    install_desktop_publish_helpers,
     publish_report_to_branch,
     stage_desktop_publish_report,
     write_desktop_publish_rollups,
@@ -39,4 +40,8 @@ DESKTOP_REPORTING_EXPORTS = (
 
 
 def install_desktop_reporting_helpers(bindings: dict[str, Any], names: tuple[str, ...] = DESKTOP_REPORTING_EXPORTS) -> None:
-    install_local_helpers(bindings, globals(), names)
+    publish_names = tuple(name for name in names if name in DESKTOP_PUBLISH_EXPORTS)
+    non_publish_names = tuple(name for name in names if name not in DESKTOP_PUBLISH_EXPORTS)
+
+    install_desktop_publish_helpers(bindings, publish_names)
+    install_local_helpers(bindings, globals(), non_publish_names)

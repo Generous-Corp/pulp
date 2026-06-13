@@ -133,6 +133,31 @@ class DesktopPublishBindingsTests(unittest.TestCase):
                 for key, value in kwargs.items():
                     self.assertEqual(captured["kwargs"][key], value)
 
+    def test_publish_exports_are_composed_from_focused_groups(self):
+        expected = (
+            *self.mod.DESKTOP_PUBLISH_BRANCH_EXPORTS,
+            *self.mod.DESKTOP_PUBLISH_STAGE_EXPORTS,
+            *self.mod.DESKTOP_PUBLISH_LIST_EXPORTS,
+        )
+
+        self.assertEqual(self.mod.DESKTOP_PUBLISH_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
+    def test_install_desktop_publish_helpers_wires_named_exports(self):
+        captured = {}
+
+        def runner(*args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            return [{"target": "mac"}]
+
+        bindings = self._bindings("desktop_publish_reports", runner)
+        self.mod.install_desktop_publish_helpers(bindings, ("desktop_publish_reports",))
+
+        self.assertEqual(bindings["desktop_publish_reports"]({"desktop_automation": {}}, limit=2), [{"target": "mac"}])
+        self.assertEqual(captured["args"], ({"desktop_automation": {}},))
+        self.assertEqual(captured["kwargs"]["limit"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()
