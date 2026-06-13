@@ -107,6 +107,16 @@ need to rerender the synthetic Remotion smoke proof:
 python3 tools/local-ci/local_ci.py desktop video-doctor mac --skip-remotion-smoke
 ```
 
+For a host/plugin recipe, include the recipe details so setup problems are
+reported before recording starts:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop video-doctor mac \
+  --recipe reaper-plugin-editor \
+  --plugin PulpSynth \
+  --plugin-format clap
+```
+
 If `avfoundation_screen` fails, ffmpeg cannot enumerate the primary macOS input
 `Capture screen 0`; confirm the configured ffmpeg can run from the invoking
 terminal and rerun the doctor. This is a warning, not a hard failure, when
@@ -276,6 +286,15 @@ state because REAPER will not find the plugin during the proof. Open REAPER's
 Preferences > Plug-ins > CLAP and rescan, or remove the stale stanza from
 `~/Library/Application Support/REAPER/reaper-clap-macos-aarch64.ini` and relaunch
 REAPER.
+
+Run the same checks without recording when preparing another machine:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop video-doctor mac \
+  --recipe reaper-plugin-editor \
+  --plugin PulpSynth \
+  --plugin-format clap
+```
 
 Recipes select Remotion templates and write structured setup context into
 `video_proof_composition.context`. The composed video, `index.html`, and

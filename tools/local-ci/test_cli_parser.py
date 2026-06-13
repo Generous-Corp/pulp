@@ -232,6 +232,12 @@ class CliParserTests(unittest.TestCase):
             "system",
             "--video-audio-device",
             "BlackHole 2ch",
+            "--recipe",
+            "reaper-plugin-editor",
+            "--plugin",
+            "PulpSynth",
+            "--plugin-format",
+            "clap",
         ])
 
         self.assertEqual(args.command, "desktop")
@@ -242,6 +248,9 @@ class CliParserTests(unittest.TestCase):
         self.assertTrue(args.run_in_terminal)
         self.assertEqual(args.video_audio, "system")
         self.assertEqual(args.video_audio_device, "BlackHole 2ch")
+        self.assertEqual(args.recipe, "reaper-plugin-editor")
+        self.assertEqual(args.plugin, "PulpSynth")
+        self.assertEqual(args.plugin_format, "clap")
 
     def test_desktop_video_setup_command(self):
         parser = self.build_parser()

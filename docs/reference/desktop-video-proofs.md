@@ -70,6 +70,16 @@ For a faster config/tooling check that skips the Remotion smoke render:
 python3 tools/local-ci/local_ci.py desktop video-doctor mac --skip-remotion-smoke
 ```
 
+For a host/plugin recipe, include the recipe details so setup problems are
+reported before recording starts:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop video-doctor mac \
+  --recipe reaper-plugin-editor \
+  --plugin PulpSynth \
+  --plugin-format clap
+```
+
 `video-doctor` should show `PASS screencapture`, `PASS video_capture`,
 `PASS target.video_capture`, and `PASS remotion_smoke` before `--record-video`
 can produce a composed clip. `PASS avfoundation_screen` is preferred because it
@@ -204,6 +214,15 @@ state because REAPER will not find the plugin during the proof. Open REAPER's
 Preferences > Plug-ins > CLAP and rescan, or remove the stale stanza from
 `~/Library/Application Support/REAPER/reaper-clap-macos-aarch64.ini` and relaunch
 REAPER.
+
+The same checks are available without recording:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop video-doctor mac \
+  --recipe reaper-plugin-editor \
+  --plugin PulpSynth \
+  --plugin-format clap
+```
 
 ```bash
 python3 tools/local-ci/local_ci.py desktop video mac \

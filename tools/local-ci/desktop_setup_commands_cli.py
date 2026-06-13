@@ -4,9 +4,22 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Callable
+import importlib.util
 import json
 from pathlib import Path
 import subprocess
+
+try:
+    import reaper_video_recipe
+except ModuleNotFoundError:
+    _reaper_recipe_spec = importlib.util.spec_from_file_location(
+        "reaper_video_recipe",
+        Path(__file__).resolve().with_name("reaper_video_recipe.py"),
+    )
+    if _reaper_recipe_spec is None or _reaper_recipe_spec.loader is None:
+        raise
+    reaper_video_recipe = importlib.util.module_from_spec(_reaper_recipe_spec)
+    _reaper_recipe_spec.loader.exec_module(reaper_video_recipe)
 
 
 def cmd_desktop_install(
@@ -275,6 +288,27 @@ def desktop_video_doctor_remediations(checks: list[dict], *, target_name: str) -
                 "command": f"PULP_VIDEO_AUDIO_DEVICE=\"BlackHole 2ch\" python3 tools/local-ci/local_ci.py desktop video-doctor {target_name} --video-audio system --json",
             }
         )
+    reaper_clap_bundle = checks_by_name.get("reaper.clap_bundle")
+    if reaper_clap_bundle and not reaper_clap_bundle.get("ok"):
+        plugin = reaper_clap_bundle.get("plugin") or "<Plugin>"
+        remediations.append(
+            {
+                "check": "reaper.clap_bundle",
+                "title": "Build and install the CLAP bundle for REAPER",
+                "detail": f"Build the {plugin} CLAP target and install or symlink it under ~/Library/Audio/Plug-Ins/CLAP before recording the REAPER proof.",
+                "command": f"cmake --build build-video-nogpu --target {plugin}_CLAP -j$(sysctl -n hw.ncpu)",
+            }
+        )
+    reaper_clap_cache = checks_by_name.get("reaper.clap_cache")
+    if reaper_clap_cache and not reaper_clap_cache.get("ok"):
+        remediations.append(
+            {
+                "check": "reaper.clap_cache",
+                "title": "Refresh REAPER's CLAP plug-in cache",
+                "detail": "Open REAPER Preferences > Plug-ins > CLAP and rescan, or remove the stale plugin stanza from the REAPER CLAP cache and relaunch REAPER.",
+                "command": "open -a REAPER",
+            }
+        )
     remotion = checks_by_name.get("remotion_smoke")
     if remotion and not remotion.get("ok"):
         remediations.append(
@@ -286,6 +320,70 @@ def desktop_video_doctor_remediations(checks: list[dict], *, target_name: str) -
             }
         )
     return remediations
+
+
+def append_video_recipe_doctor_checks(args: argparse.Namespace, checks: list[dict]) -> None:
+    recipe = getattr(args, "recipe", None)
+    if not recipe:
+        return
+    if recipe != "reaper-plugin-editor":
+        checks.append(
+            {
+                "name": "recipe",
+                "ok": False,
+                "detail": f"video-doctor does not know recipe-specific checks for `{recipe}`",
+                "required": True,
+            }
+        )
+        return
+
+    plugin = getattr(args, "plugin", None)
+    plugin_format = getattr(args, "plugin_format", None)
+    if not plugin or not plugin_format:
+        checks.append(
+            {
+                "name": "recipe.reaper",
+                "ok": False,
+                "detail": "recipe `reaper-plugin-editor` requires --plugin and --plugin-format for readiness checks",
+                "required": True,
+            }
+        )
+        return
+
+    checks.append(
+        {
+            "name": "recipe.reaper",
+            "ok": True,
+            "detail": f"checking {plugin_format} plugin `{plugin}` in REAPER",
+            "required": True,
+        }
+    )
+    if plugin_format != "clap":
+        return
+
+    ok, detail = reaper_video_recipe.installed_clap_bundle_status(plugin)
+    checks.append(
+        {
+            "name": "reaper.clap_bundle",
+            "ok": ok,
+            "detail": detail,
+            "required": True,
+            "plugin": plugin,
+        }
+    )
+    if not ok:
+        return
+
+    ok, detail = reaper_video_recipe.reaper_clap_cache_status(plugin)
+    checks.append(
+        {
+            "name": "reaper.clap_cache",
+            "ok": ok,
+            "detail": detail,
+            "required": True,
+            "plugin": plugin,
+        }
+    )
 
 
 def desktop_video_setup_steps(target_name: str, *, machine_label: str | None = None) -> list[dict]:
@@ -474,6 +572,8 @@ def desktop_video_doctor_payload(
             ok, detail = probe_macos_avfoundation_audio_fn(getattr(args, "video_audio_device", None))
             checks.append({"name": "avfoundation_audio", "ok": ok, "detail": detail, "required": True})
 
+    append_video_recipe_doctor_checks(args, checks)
+
     if getattr(args, "skip_remotion_smoke", False):
         checks.append(
             {
@@ -621,6 +721,9 @@ def cmd_desktop_video_setup(
             skip_remotion_smoke=getattr(args, "skip_remotion_smoke", False),
             video_audio=getattr(args, "video_audio", "none"),
             video_audio_device=getattr(args, "video_audio_device", None),
+            recipe=getattr(args, "recipe", None),
+            plugin=getattr(args, "plugin", None),
+            plugin_format=getattr(args, "plugin_format", None),
         )
         exit_code, doctor_payload = desktop_video_doctor_payload(
             doctor_args,

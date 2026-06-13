@@ -437,6 +437,9 @@ def build_local_ci_parser(
         "--video-audio-device",
         help="AVFoundation audio device index or name for --video-audio system. Can also be set with PULP_VIDEO_AUDIO_DEVICE.",
     )
+    p_desktop_video_doctor.add_argument("--recipe", choices=["reaper-plugin-editor"], help="Also validate readiness for a specific video proof recipe.")
+    p_desktop_video_doctor.add_argument("--plugin", help="Plugin name for recipe-specific readiness checks.")
+    p_desktop_video_doctor.add_argument("--plugin-format", choices=["vst3", "auv2", "auv3", "clap", "lv2"], help="Plugin format for recipe-specific readiness checks.")
     p_desktop_video_doctor.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 
     p_desktop_video_setup = desktop_sub.add_parser("video-setup", help="Print first-run video proof setup steps for one desktop target")
@@ -463,6 +466,9 @@ def build_local_ci_parser(
         "--video-audio-device",
         help="AVFoundation audio device index or name for --video-audio system. Can also be set with PULP_VIDEO_AUDIO_DEVICE.",
     )
+    p_desktop_video_setup.add_argument("--recipe", choices=["reaper-plugin-editor"], help="When using --check, also validate readiness for a specific video proof recipe.")
+    p_desktop_video_setup.add_argument("--plugin", help="Plugin name for recipe-specific readiness checks.")
+    p_desktop_video_setup.add_argument("--plugin-format", choices=["vst3", "auv2", "auv3", "clap", "lv2"], help="Plugin format for recipe-specific readiness checks.")
     p_desktop_video_setup.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 
     p_desktop_serve = desktop_sub.add_parser("serve", help="Serve a desktop publish report over local HTTP")
