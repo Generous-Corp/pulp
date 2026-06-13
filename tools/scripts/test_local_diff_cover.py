@@ -446,6 +446,21 @@ class TargetedCtestTests(unittest.TestCase):
             "large full-suite coverage runs.",
         )
 
+    def test_profraw_pattern_merges_by_instrumented_binary(self) -> None:
+        text = SCRIPT.read_text()
+        self.assertIn(
+            'LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%m.profraw"',
+            text,
+            "local_diff_cover.sh should use LLVM's module-signature merge "
+            "placeholder so thousands of one-test Catch2 runs merge per binary.",
+        )
+        self.assertNotIn(
+            "pulp-%p-%m.profraw",
+            text,
+            "per-PID profraw files are too noisy for the full CTest registry "
+            "and can lose attribution when PIDs recycle.",
+        )
+
 
 class CoverageConfigureTests(unittest.TestCase):
     """Coverage configure should stay headless-safe on non-Skia worktrees."""

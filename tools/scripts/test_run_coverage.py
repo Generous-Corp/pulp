@@ -151,6 +151,36 @@ class ObjectDiscoveryTests(unittest.TestCase):
             "maps; production archives are enough for full-surface rows.",
         )
 
+    def test_profraw_cleanup_uses_find_delete(self) -> None:
+        text = SCRIPT.read_text()
+        self.assertIn(
+            'find "${PROFRAW_DIR}" -name \'*.profraw\' -type f -delete',
+            text,
+            "run_coverage.sh must delete stale profraw files with find so "
+            "large previous coverage runs cannot hit ARG_MAX.",
+        )
+        self.assertNotIn(
+            'rm -f "${PROFRAW_DIR}"/*.profraw',
+            text,
+            "rm over a profraw glob fails once coverage has thousands of "
+            "profile files.",
+        )
+
+    def test_profraw_pattern_merges_by_instrumented_binary(self) -> None:
+        text = SCRIPT.read_text()
+        self.assertIn(
+            'LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%m.profraw"',
+            text,
+            "run_coverage.sh should use LLVM's module-signature merge "
+            "placeholder so repeated Catch2 invocations merge per binary.",
+        )
+        self.assertNotIn(
+            "pulp-%p-%m.profraw",
+            text,
+            "per-PID profraw files are too noisy for the full coverage suite "
+            "and are vulnerable to PID reuse.",
+        )
+
 
 class StaleCacheTests(unittest.TestCase):
     """#570: the post-configure assert errors when the cache is stale.
