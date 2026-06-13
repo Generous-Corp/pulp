@@ -181,6 +181,33 @@ TEST_CASE("TextEditor line ending policy applies to input paste and IME",
     REQUIRE(single_line.text() == "a b");
 }
 
+TEST_CASE("TextEditor IME marked text supports UTF-16 selection and preserve policy",
+          "[view][text_editor][policy][ime][utf16]") {
+    TextEditor editor;
+    editor.on_focus_changed(true);
+    editor.multi_line = true;
+    editor.line_ending_policy = TextEditor::LineEndingPolicy::preserve;
+    editor.set_text("ab");
+    editor.set_caret_pos(1);
+
+    editor.set_marked_text_utf16("\xF0\x9F\x98\x80\r\nz", 2, 2);
+    REQUIRE(editor.has_marked_text());
+    REQUIRE(editor.text() == "a\xF0\x9F\x98\x80\r\nzb");
+    REQUIRE(editor.marked_range() == std::pair<int, int>{1, 7});
+    REQUIRE(editor.selection_range() == std::pair<int, int>{5, 7});
+
+    TextInputEvent input;
+    input.text = "\xE3\x81\x82";
+    editor.on_text_input(input);
+    REQUIRE_FALSE(editor.has_marked_text());
+    REQUIRE(editor.text() == "a\xE3\x81\x82" "b");
+    REQUIRE(editor.caret_pos() == 4);
+
+    REQUIRE(editor.undo());
+    REQUIRE(editor.text() == "ab");
+    REQUIRE_FALSE(editor.has_marked_text());
+}
+
 TEST_CASE("TextEditor paste-and-match-style uses the paste path",
           "[view][text_editor][clipboard][keyboard]") {
     TextEditor editor;

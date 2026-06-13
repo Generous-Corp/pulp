@@ -71,6 +71,37 @@ TEST_CASE("TextEditor public selection APIs clamp to grapheme boundaries",
     REQUIRE_FALSE(editor.has_selection());
 }
 
+TEST_CASE("TextEditor UTF offset helpers cover scalar widths and malformed input",
+          "[view][text_editor][unicode][utf16]") {
+    const std::string mixed = "A"
+        "\xC2\xA2"      // U+00A2, one UTF-16 unit, two UTF-8 bytes.
+        "\xE2\x82\xAC"  // U+20AC, one UTF-16 unit, three UTF-8 bytes.
+        "\xF0\x9F\x98\x80"  // U+1F600, two UTF-16 units, four UTF-8 bytes.
+        "Z";
+
+    REQUIRE(pulp::canvas::utf8_offset_for_utf16_offset(mixed, 0) == 0u);
+    REQUIRE(pulp::canvas::utf8_offset_for_utf16_offset(mixed, 1) == 1u);
+    REQUIRE(pulp::canvas::utf8_offset_for_utf16_offset(mixed, 2) == 3u);
+    REQUIRE(pulp::canvas::utf8_offset_for_utf16_offset(mixed, 3) == 6u);
+    REQUIRE(pulp::canvas::utf8_offset_for_utf16_offset(mixed, 4) == 6u);
+    REQUIRE(pulp::canvas::utf8_offset_for_utf16_offset(mixed, 5) == 10u);
+    REQUIRE(pulp::canvas::utf8_offset_for_utf16_offset(mixed, 6) == mixed.size());
+
+    REQUIRE(pulp::canvas::utf16_offset_for_utf8_offset(mixed, 0) == 0u);
+    REQUIRE(pulp::canvas::utf16_offset_for_utf8_offset(mixed, 1) == 1u);
+    REQUIRE(pulp::canvas::utf16_offset_for_utf8_offset(mixed, 3) == 2u);
+    REQUIRE(pulp::canvas::utf16_offset_for_utf8_offset(mixed, 6) == 3u);
+    REQUIRE(pulp::canvas::utf16_offset_for_utf8_offset(mixed, 10) == 5u);
+    REQUIRE(pulp::canvas::utf16_offset_for_utf8_offset(mixed, mixed.size()) == 6u);
+
+    std::string malformed;
+    malformed.push_back(static_cast<char>(0x80));
+    malformed += "ab";
+    REQUIRE(pulp::canvas::safe_utf8_prefix_size(malformed, malformed.size()) == 0u);
+    REQUIRE(pulp::canvas::utf8_offset_for_utf16_offset(malformed, 1) == 1u);
+    REQUIRE(pulp::canvas::utf16_offset_for_utf8_offset(malformed, 1) == 0u);
+}
+
 TEST_CASE("TextEditor undo/redo", "[view][text_editor]") {
     TextEditor editor;
     editor.on_focus_changed(true);
@@ -281,6 +312,34 @@ TEST_CASE("TextEditor key event: Cmd+A selects all", "[view][text_editor]") {
     REQUIRE(editor.on_key_event(e));
     REQUIRE(editor.has_selection());
     REQUIRE(editor.selected_text() == "Select me");
+}
+
+TEST_CASE("TextEditor command editing shortcuts copy cut paste undo and redo",
+          "[view][text_editor][keyboard][clipboard][undo]") {
+    require_system_clipboard_text("");
+
+    TextEditor editor;
+    editor.on_focus_changed(true);
+    editor.set_text("copy cut");
+    editor.set_selection(0, 4);
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::c, main_modifier())));
+    REQUIRE(editor.text() == "copy cut");
+    REQUIRE(editor.has_selection());
+
+    editor.set_selection(5, 8);
+    REQUIRE(editor.on_key_event(key_event(KeyCode::x, main_modifier())));
+    REQUIRE(editor.text() == "copy ");
+    REQUIRE_FALSE(editor.has_selection());
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::v, main_modifier())));
+    REQUIRE(editor.text() == "copy cut");
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::z, main_modifier())));
+    REQUIRE(editor.text() == "copy ");
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::z, main_modifier() | kModShift)));
+    REQUIRE(editor.text() == "copy cut");
 }
 
 TEST_CASE("TextEditor key event: Backspace deletes before caret", "[view][text_editor]") {
@@ -736,6 +795,11 @@ TEST_CASE("TextEditor word and line delete shortcuts follow platform conventions
 
     REQUIRE(editor.on_key_event(key_event(KeyCode::backspace, word_modifier())));
     REQUIRE(editor.text() == "lo-fi ");
+
+    editor.set_text("one two three");
+    editor.set_caret_pos(4);
+    REQUIRE(editor.on_key_event(key_event(KeyCode::delete_, word_modifier())));
+    REQUIRE(editor.text() == "one three");
 
     editor.multi_line = true;
     editor.set_text("one\ntwo three");
