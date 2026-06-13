@@ -587,14 +587,15 @@ private:
     std::vector<Connection> connections_;
     std::unordered_map<std::string, CustomNodeType> custom_node_types_;
     NodeId next_id_ = 1;
-    std::vector<std::weak_ptr<CompiledGraph>> retired_snapshots_;
     GraphLimits limits_;
 
-    // Audio-thread snapshot, published by prepare() / mutators. Uses the
-    // deprecated-but-supported std::atomic_store/atomic_load free-function
-    // overloads on shared_ptr because libc++ in our toolchain does not yet
-    // specialize std::atomic<std::shared_ptr<T>>. Acquire/release semantics.
+    // Audio-thread snapshot, published by prepare() / mutators. The audio
+    // thread reads live_raw_ only; live_ and retired_snapshots_ keep pointed-to
+    // storage alive from the control thread until active process readers drain.
     std::shared_ptr<CompiledGraph> live_;
+    std::atomic<CompiledGraph*> live_raw_{nullptr};
+    std::vector<std::shared_ptr<CompiledGraph>> retired_snapshots_;
+    std::atomic<std::uint32_t> active_process_readers_{0};
     std::atomic<int64_t> total_latency_samples_{0};  // reflected for const-query access
     std::atomic<std::size_t> prepared_node_count_{0};
     std::atomic<std::size_t> prepared_ordered_node_count_{0};

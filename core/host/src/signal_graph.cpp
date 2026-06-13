@@ -1,10 +1,11 @@
 // Signal Graph implementation.
 //
 // Phase 0B: audio-thread reads happen against a CompiledGraph snapshot,
-// published via atomic<shared_ptr>. UI-thread topology mutations (add_*,
+// published via an atomic raw pointer. UI-thread topology mutations (add_*,
 // connect*, disconnect, remove_node) invalidate the snapshot; prepare()
-// rebuilds and atomic-swaps a fresh snapshot. Live control scalars such as
-// gain update through snapshot-owned atomics without requiring re-prepare.
+// rebuilds and publishes a fresh snapshot. Control-thread shared_ptr owners
+// keep retired snapshots alive until active process readers drain, avoiding
+// libstdc++'s lock-taking atomic shared_ptr path in process().
 // See signal_graph.hpp for the mutation protocol details.
 
 #include <pulp/host/signal_graph.hpp>
@@ -632,7 +633,7 @@ bool SignalGraph::audio_rate_modulation_lane(const Connection& connection,
 }
 
 bool SignalGraph::inject_midi(NodeId id, const midi::MidiBuffer& events) {
-    auto cg = std::atomic_load_explicit(&live_, std::memory_order_acquire);
+    auto* cg = live_raw_.load(std::memory_order_acquire);
     if (!cg) return false;
     auto it = cg->runtime.find(id);
     if (it == cg->runtime.end()) return false;
@@ -652,7 +653,7 @@ bool SignalGraph::inject_midi(NodeId id, const midi::MidiBuffer& events) {
 }
 
 bool SignalGraph::extract_midi(NodeId id, midi::MidiBuffer& out) const {
-    auto cg = std::atomic_load_explicit(&live_, std::memory_order_acquire);
+    auto* cg = live_raw_.load(std::memory_order_acquire);
     if (!cg) return false;
     auto it = cg->runtime.find(id);
     if (it == cg->runtime.end()) return false;
@@ -759,7 +760,7 @@ float SignalGraph::get_node_parameter(NodeId id, uint32_t param_id) const {
 }
 
 int SignalGraph::node_latency_samples(NodeId id) const {
-    auto cg = std::atomic_load_explicit(&live_, std::memory_order_acquire);
+    const auto* cg = live_raw_.load(std::memory_order_acquire);
     if (!cg) return 0;
     auto it = cg->runtime.find(id);
     if (it == cg->runtime.end()) return 0;
@@ -824,10 +825,8 @@ void SignalGraph::invalidate_live_() {
     // Drop the live snapshot; process() will return silence until prepare()
     // is called again. This is the simple, safe semantic: UI-thread edits
     // always require a re-prepare before audio resumes.
-    retire_snapshot_(std::atomic_exchange_explicit(
-        &live_,
-        std::shared_ptr<CompiledGraph>(nullptr),
-        std::memory_order_acq_rel));
+    live_raw_.store(nullptr, std::memory_order_release);
+    retire_snapshot_(std::move(live_));
     total_latency_samples_.store(0, std::memory_order_relaxed);
     clear_prepared_stats_();
 }
@@ -884,27 +883,21 @@ void SignalGraph::publish_prepared_stats_(const CompiledGraph& cg) {
 }
 
 void SignalGraph::retire_snapshot_(std::shared_ptr<CompiledGraph> snapshot) {
-    if (snapshot) retired_snapshots_.emplace_back(snapshot);
+    if (snapshot) retired_snapshots_.emplace_back(std::move(snapshot));
     prune_retired_snapshots_();
 }
 
 void SignalGraph::prune_retired_snapshots_() {
-    retired_snapshots_.erase(
-        std::remove_if(retired_snapshots_.begin(),
-                       retired_snapshots_.end(),
-                       [](const std::weak_ptr<CompiledGraph>& snapshot) {
-                           return snapshot.expired();
-                       }),
-        retired_snapshots_.end());
+    if (active_process_readers_.load(std::memory_order_acquire) == 0) {
+        retired_snapshots_.clear();
+    }
 }
 
 void SignalGraph::wait_for_retired_snapshots_() {
-    for (const auto& snapshot : retired_snapshots_) {
-        while (!snapshot.expired()) {
-            std::this_thread::yield();
-        }
+    while (active_process_readers_.load(std::memory_order_acquire) != 0) {
+        std::this_thread::yield();
     }
-    prune_retired_snapshots_();
+    retired_snapshots_.clear();
 }
 
 void SignalGraph::compute_latencies_for_(CompiledGraph& cg,
@@ -1096,9 +1089,8 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
 }
 
 bool SignalGraph::prepare(double sample_rate, int max_block_size) {
-    std::atomic_store_explicit(&live_,
-                               std::shared_ptr<CompiledGraph>(nullptr),
-                               std::memory_order_release);
+    live_raw_.store(nullptr, std::memory_order_release);
+    retire_snapshot_(std::move(live_));
     total_latency_samples_.store(0, std::memory_order_relaxed);
     clear_prepared_stats_();
 
@@ -1211,10 +1203,9 @@ bool SignalGraph::prepare(double sample_rate, int max_block_size) {
     auto cg = compile_(sample_rate, max_block_size);
     total_latency_samples_.store(cg->total_latency_samples, std::memory_order_relaxed);
     publish_prepared_stats_(*cg);
-    retire_snapshot_(std::atomic_exchange_explicit(
-        &live_,
-        std::move(cg),
-        std::memory_order_acq_rel));
+    live_ = std::move(cg);
+    live_raw_.store(live_.get(), std::memory_order_release);
+    prune_retired_snapshots_();
     return true;
 }
 
@@ -1313,10 +1304,8 @@ SignalGraph::validate_generated_graph(int max_block_size) const {
 }
 
 void SignalGraph::release() {
-    retire_snapshot_(std::atomic_exchange_explicit(
-        &live_,
-        std::shared_ptr<CompiledGraph>(nullptr),
-        std::memory_order_acq_rel));
+    live_raw_.store(nullptr, std::memory_order_release);
+    retire_snapshot_(std::move(live_));
     wait_for_retired_snapshots_();
 
     for (auto& n : nodes_) if (n.plugin) n.plugin->release();
@@ -1372,7 +1361,17 @@ bool SignalGraph::set_custom_node_state(NodeId id,
 void SignalGraph::process(audio::BufferView<float>& output,
                           const audio::BufferView<const float>& input,
                           int num_samples) {
-    auto cg = std::atomic_load_explicit(&live_, std::memory_order_acquire);
+    struct ProcessReadGuard {
+        explicit ProcessReadGuard(SignalGraph& owner) noexcept : owner_(owner) {
+            owner_.active_process_readers_.fetch_add(1, std::memory_order_acq_rel);
+        }
+        ~ProcessReadGuard() noexcept {
+            owner_.active_process_readers_.fetch_sub(1, std::memory_order_acq_rel);
+        }
+        SignalGraph& owner_;
+    } read_guard{*this};
+
+    auto* cg = live_raw_.load(std::memory_order_acquire);
     // Negative or zero block sizes mean "nothing to do" — return without
     // touching output (a memset with size_t(negative) wraps to a huge size).
     if (num_samples <= 0) return;
@@ -1881,7 +1880,7 @@ bool SignalGraph::set_node_gain(NodeId id, float linear_gain) {
     auto* n = const_cast<GraphNode*>(node(id));
     if (!n) return false;
     n->gain = linear_gain;
-    auto cg = std::atomic_load_explicit(&live_, std::memory_order_acquire);
+    auto* cg = live_raw_.load(std::memory_order_acquire);
     if (cg) {
         auto it = cg->runtime.find(id);
         if (it != cg->runtime.end() && it->second.gain) {
