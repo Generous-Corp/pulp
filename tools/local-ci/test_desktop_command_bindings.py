@@ -2,6 +2,8 @@
 """Tests for desktop command facade bindings."""
 
 import importlib.util
+from argparse import Namespace
+import io
 import types
 import unittest
 from pathlib import Path
@@ -39,6 +41,7 @@ class DesktopCommandBindingsTests(unittest.TestCase):
             module_name: types.SimpleNamespace(**{runner_name: runner}),
             "_desktop_cli": desktop_cli,
             "ROOT": Path("/repo"),
+            "os": types.SimpleNamespace(environ={}),
             "subprocess": types.SimpleNamespace(run=object()),
             "sys": types.SimpleNamespace(platform="darwin"),
             "uuid": types.SimpleNamespace(uuid4=lambda: types.SimpleNamespace(hex="abcdef1234567890")),
@@ -314,6 +317,62 @@ class DesktopCommandBindingsTests(unittest.TestCase):
         self.assertTrue(callable(captured["kwargs"]["cmd_desktop_smoke_fn"]))
         self.assertTrue(callable(captured["kwargs"]["cmd_desktop_click_fn"]))
         self.assertTrue(callable(captured["kwargs"]["cmd_desktop_inspect_fn"]))
+
+    def test_video_doctor_can_reinvoke_through_terminal(self):
+        captured = {}
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+
+        def runner(*_args, **_kwargs):
+            self.fail("direct video-doctor should not run")
+
+        def run_terminal(*args, **kwargs):
+            captured["terminal"] = (args, kwargs)
+            return {"returncode": 17, "stdout": "child stdout\n", "stderr": "child stderr\n"}
+
+        terminal_runner = types.SimpleNamespace(
+            should_reinvoke_in_terminal=lambda **_kwargs: True,
+            run_local_ci_in_terminal=run_terminal,
+        )
+        bindings = self._bindings("_desktop_setup_commands_cli", "cmd_desktop_video_doctor", runner)
+        bindings["_macos_terminal_runner"] = terminal_runner
+        bindings["sys"] = types.SimpleNamespace(
+            platform="darwin",
+            argv=["local_ci.py", "desktop", "video-doctor", "mac", "--run-in-terminal"],
+            executable="/usr/bin/python3",
+            stdout=stdout,
+            stderr=stderr,
+        )
+        bindings["os"] = types.SimpleNamespace(environ={})
+
+        result = self.mod.cmd_desktop_video_doctor(bindings, Namespace(run_in_terminal=True))
+
+        self.assertEqual(result, 17)
+        self.assertEqual(stdout.getvalue(), "child stdout\n")
+        self.assertEqual(stderr.getvalue(), "child stderr\n")
+        args, kwargs = captured["terminal"]
+        self.assertEqual(args[0], ["desktop", "video-doctor", "mac", "--run-in-terminal"])
+        self.assertEqual(kwargs["cwd"], Path("/repo"))
+        self.assertEqual(kwargs["python_executable"], "/usr/bin/python3")
+        self.assertEqual(kwargs["script_path"], Path("/repo/tools/local-ci/local_ci.py"))
+
+    def test_terminal_reentry_guard_allows_direct_command(self):
+        captured = {}
+
+        def runner(*args, **kwargs):
+            captured["direct"] = (args, kwargs)
+            return 3
+
+        terminal_runner = types.SimpleNamespace(
+            should_reinvoke_in_terminal=lambda **_kwargs: False,
+            run_local_ci_in_terminal=lambda *_args, **_kwargs: self.fail("terminal should not run"),
+        )
+        bindings = self._bindings("_desktop_setup_commands_cli", "cmd_desktop_video_doctor", runner)
+        bindings["_macos_terminal_runner"] = terminal_runner
+
+        args_obj = Namespace(run_in_terminal=True)
+        self.assertEqual(self.mod.cmd_desktop_video_doctor(bindings, args_obj), 3)
+        self.assertEqual(captured["direct"][0], (args_obj,))
 
 
 if __name__ == "__main__":

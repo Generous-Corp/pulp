@@ -66,9 +66,12 @@ Required gates for video:
 
 - `PASS screencapture`
 - `PASS video_capture`
-- `PASS avfoundation_screen`
 - `PASS target.video_capture`
 - `PASS remotion_smoke`
+
+`PASS avfoundation_screen` is preferred because it enables the primary
+ffmpeg/AVFoundation recorder. If AVFoundation is hidden but `screencapture`
+passes, the macOS recorder can still use its screencapture fallback.
 
 Use `--skip-remotion-smoke` for a faster config/tooling check when you do not
 need to rerender the synthetic Remotion smoke proof:
@@ -79,16 +82,34 @@ python3 tools/local-ci/local_ci.py desktop video-doctor mac --skip-remotion-smok
 
 If `avfoundation_screen` fails, ffmpeg cannot enumerate the primary macOS input
 `Capture screen 0`; confirm the configured ffmpeg can run from the invoking
-terminal and rerun the doctor.
+terminal and rerun the doctor. This is a warning, not a hard failure, when
+`screencapture` passes.
 
 If `screencapture` fails with `could not create image from display`, macOS has
 not granted Screen Recording to the terminal or agent app. Ask the user to grant
 Screen Recording, restart that app, then rerun the doctor. You can still update
 docs/tests while waiting, but do not claim live capture has been validated.
 
+When Terminal.app has Screen Recording permission but the current agent process
+does not, run the same command through Terminal:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop video-doctor mac --run-in-terminal
+```
+
+Use `--run-in-terminal` on `desktop video`, `desktop smoke --record-video`,
+`desktop click --record-video`, or `desktop inspect --record-video` for the same
+permission handoff. The wrapper removes the flag for the child command, relays
+stdout/stderr and exit code, and sends a short `caffeinate -u` display-wake
+pulse first so idle/remote displays do not produce black captures.
+
 The macOS recorder uses ffmpeg/AVFoundation first and falls back to a
-`screencapture -l` frame sequence only when ffmpeg capture cannot start. Both
-paths still require Screen Recording permission for the invoking app.
+`screencapture -l` frame sequence when ffmpeg capture cannot start. If macOS
+refuses window-ID capture but allows full-screen capture, the fallback captures
+full-screen frames and crops them to the target window bounds during encoding.
+Final still screenshots use a last-resort full-screen fallback for the same TCC
+edge case. All paths still require Screen Recording permission for the invoking
+app.
 
 ## Capture a proof
 
@@ -97,6 +118,7 @@ dedicated video entry point:
 
 ```bash
 python3 tools/local-ci/local_ci.py desktop video mac \
+  --run-in-terminal \
   --command ./build/pulp \
   --click 120,80 \
   --duration 8 \

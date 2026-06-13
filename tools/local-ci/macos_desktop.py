@@ -164,6 +164,13 @@ def capture_macos_window(
         last_error = result.stderr.strip() or result.stdout.strip() or f"screencapture exited {result.returncode}"
         if attempt < 4:
             sleep_fn(0.2)
+    fallback_result = run_fn(
+        ["screencapture", "-x", str(output_path)],
+        capture_output=True,
+        text=True,
+    )
+    if fallback_result.returncode == 0 and output_path.exists():
+        return
     raise RuntimeError(f"Could not capture macOS window {window_id}: {last_error}")
 
 
@@ -356,8 +363,9 @@ def start_macos_window_frame_sequence_recording(
     frames_dir = output_path.parent / "frames"
     frames_dir.mkdir(parents=True, exist_ok=True)
     stop_event = threading.Event()
-    state = {"frames": 0, "errors": []}
+    state = {"frames": 0, "errors": [], "capture_scope": "window"}
     window_id = int(window["windowId"])
+    bounds = macos_window_video_bounds(window)
     started_at = time.monotonic()
     interval = 1.0 / max(1.0, fps)
 
@@ -372,6 +380,17 @@ def start_macos_window_frame_sequence_recording(
                 capture_output=True,
                 text=True,
             )
+            if result.returncode != 0 or not frame_path.exists():
+                window_detail = result.stderr.strip() or result.stdout.strip() or f"screencapture exited {result.returncode}"
+                screen_result = run_fn(
+                    ["screencapture", "-x", str(frame_path)],
+                    capture_output=True,
+                    text=True,
+                )
+                if screen_result.returncode == 0 and frame_path.exists():
+                    state["capture_scope"] = "screen-crop"
+                    state["errors"].append(f"window capture failed; using full-screen crop fallback: {window_detail}")
+                    result = screen_result
             if result.returncode == 0 and frame_path.exists():
                 state["frames"] = frame_index
             else:
@@ -395,7 +414,7 @@ def start_macos_window_frame_sequence_recording(
         "path": str(output_path),
         "duration_secs": duration_secs,
         "requested_fps": fps,
-        "bounds": macos_window_video_bounds(window),
+        "bounds": bounds,
         "window_id": window_id,
         "started_at": started_at,
         "fallback_reason": fallback_reason,
@@ -452,18 +471,30 @@ def stop_macos_window_video_recording(
         f"{actual_fps:.3f}",
         "-i",
         frame_pattern,
-        "-c:v",
-        "libx264",
-        "-preset",
-        "veryfast",
-        "-crf",
-        "23",
-        "-pix_fmt",
-        "yuv420p",
-        "-movflags",
-        "+faststart",
-        str(output_path),
     ]
+    if state.get("capture_scope") == "screen-crop":
+        bounds = recording.get("bounds") or {}
+        command.extend(
+            [
+                "-vf",
+                f"crop={bounds.get('width')}:{bounds.get('height')}:{bounds.get('x')}:{bounds.get('y')}",
+            ]
+        )
+    command.extend(
+        [
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "23",
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
+            str(output_path),
+        ]
+    )
     encoder = ffmpeg_encoder_identity(recording["ffmpeg_path"], run_fn=recording["run_fn"])
     result = recording["run_fn"](command, capture_output=True, text=True)
     metadata = desktop_video_metadata_fn(
@@ -476,6 +507,7 @@ def stop_macos_window_video_recording(
         encoder=encoder,
     )
     metadata["mode"] = recording.get("mode")
+    metadata["frame_capture_scope"] = state.get("capture_scope")
     metadata["requested_fps"] = fps
     metadata["frame_count"] = frame_count
     metadata["returncode"] = result.returncode
@@ -488,10 +520,29 @@ def stop_macos_window_video_recording(
     if state.get("errors"):
         metadata["capture_errors"] = state["errors"][-10:]
     if poster_path is not None:
-        first_frame = next(iter(sorted(recording["frames_dir"].glob("frame-*.png"))), None)
-        if first_frame is not None:
+        if state.get("capture_scope") == "screen-crop" and result.returncode == 0 and output_path.exists():
             poster_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(first_frame, poster_path)
+            poster_result = recording["run_fn"](
+                [
+                    recording["ffmpeg_path"],
+                    "-hide_banner",
+                    "-y",
+                    "-i",
+                    str(output_path),
+                    "-frames:v",
+                    "1",
+                    str(poster_path),
+                ],
+                capture_output=True,
+                text=True,
+            )
+            metadata["poster_command"] = poster_result.args
+            metadata["poster_returncode"] = poster_result.returncode
+        else:
+            first_frame = next(iter(sorted(recording["frames_dir"].glob("frame-*.png"))), None)
+            if first_frame is not None:
+                poster_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(first_frame, poster_path)
         metadata["poster"] = {
             "path": str(poster_path),
             "exists": poster_path.exists(),

@@ -45,13 +45,25 @@ python3 tools/local-ci/local_ci.py desktop video-doctor mac --skip-remotion-smok
 ```
 
 `video-doctor` should show `PASS screencapture`, `PASS video_capture`,
-`PASS avfoundation_screen`, `PASS target.video_capture`, and
-`PASS remotion_smoke` before `--record-video` can produce a composed clip. If
-`avfoundation_screen` fails, ffmpeg cannot enumerate the primary macOS capture
-input `Capture screen 0`; confirm ffmpeg is usable from the invoking terminal
-and rerun the doctor. If `screencapture` reports
+`PASS target.video_capture`, and `PASS remotion_smoke` before `--record-video`
+can produce a composed clip. `PASS avfoundation_screen` is preferred because it
+uses the primary ffmpeg/AVFoundation path; if it fails while `screencapture`
+passes, the recorder can still use the screencapture fallback. If
+`screencapture` reports
 `could not create image from display`, grant Screen Recording permission to the
 terminal/agent app that runs local CI, then restart that app.
+
+When Terminal.app has Screen Recording permission but the current agent process
+does not, run the readiness check through Terminal:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop video-doctor mac --run-in-terminal
+```
+
+`--run-in-terminal` re-invokes the same local-ci command inside Terminal.app,
+removes the flag for the child process, and relays the child stdout/stderr and
+exit code. It also sends a short `caffeinate -u` display-wake pulse before the
+child command so idle/remote displays do not produce black captures.
 
 ## Capture
 
@@ -60,6 +72,7 @@ composition unless `--compose-video-proof` is already set explicitly:
 
 ```bash
 python3 tools/local-ci/local_ci.py desktop video mac \
+  --run-in-terminal \
   --command ./build/pulp \
   --click 120,80 \
   --duration 8 \
@@ -71,7 +84,8 @@ python3 tools/local-ci/local_ci.py desktop video mac \
 Use `--action smoke`, `--action click`, or `--action inspect` to choose the
 underlying desktop action. The command currently records video on macOS only;
 Linux and Windows fail explicitly rather than producing a run bundle without a
-video artifact.
+video artifact. Use `--run-in-terminal` on macOS when Terminal is the process
+with Screen Recording permission.
 
 Named recipes apply reviewer-friendly defaults for common proof scenarios:
 
@@ -284,8 +298,11 @@ timestamp, optional reviewer notes, and whether the review issue can be closed.
 This first lane records the target window region on macOS with H.264 video and
 no audio. It uses ffmpeg/AVFoundation screen capture as the primary recorder
 and falls back to a short sequence of trusted `screencapture -l` window frames
-when the ffmpeg recorder cannot start.
+when the ffmpeg recorder cannot start. If macOS refuses window-ID capture but
+allows full-screen capture, the fallback captures full-screen frames and crops
+them to the target window bounds during encoding. Final still screenshots use a
+last-resort full-screen fallback for the same TCC edge case.
 
 Remotion composition and local review artifacts are implemented in this branch.
-Audio capture, iOS Simulator, Android, REAPER recipes, and GitHub issue
-automation are planned follow-on layers.
+Audio capture, iOS Simulator, Android, full REAPER project/plugin automation,
+and GitHub issue automation are planned follow-on layers.

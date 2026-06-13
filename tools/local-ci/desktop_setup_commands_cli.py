@@ -246,7 +246,7 @@ def desktop_video_doctor_remediations(checks: list[dict], *, target_name: str) -
             }
         )
     avfoundation = checks_by_name.get("avfoundation_screen")
-    if avfoundation and not avfoundation.get("ok"):
+    if avfoundation and not avfoundation.get("ok") and avfoundation.get("required", True):
         remediations.append(
             {
                 "check": "avfoundation_screen",
@@ -297,9 +297,15 @@ def cmd_desktop_video_doctor(
             "required": True,
         }
     )
+    checks_by_name = {check.get("name"): check for check in checks}
+    screencapture_ok = bool((checks_by_name.get("screencapture") or {}).get("ok"))
     for check in checks:
-        if check.get("name") in {"video_capture", "avfoundation_screen"}:
+        if check.get("name") == "video_capture":
             check["required"] = True
+        if check.get("name") == "avfoundation_screen":
+            check["required"] = not screencapture_ok
+            if not check.get("ok") and screencapture_ok:
+                check["detail"] = f"{check['detail']} (screencapture fallback available)"
 
     if getattr(args, "skip_remotion_smoke", False):
         checks.append(

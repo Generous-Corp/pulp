@@ -133,6 +133,19 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(args.video_audio, "none")
         self.assertEqual(args.video_attachment_budget_mb, 100.0)
         self.assertEqual(args.label, "standalone-bypass-toggle")
+        self.assertFalse(args.run_in_terminal)
+
+        args = parser.parse_args([
+            "desktop",
+            "video",
+            "mac",
+            "--bundle-id",
+            "com.apple.TextEdit",
+            "--action",
+            "smoke",
+            "--run-in-terminal",
+        ])
+        self.assertTrue(args.run_in_terminal)
 
     def test_desktop_verdict_command_requires_explicit_status(self):
         parser = self.build_parser()
@@ -179,13 +192,14 @@ class CliParserTests(unittest.TestCase):
     def test_desktop_video_doctor_defaults_to_mac(self):
         parser = self.build_parser()
 
-        args = parser.parse_args(["desktop", "video-doctor", "--skip-remotion-smoke", "--json"])
+        args = parser.parse_args(["desktop", "video-doctor", "--skip-remotion-smoke", "--json", "--run-in-terminal"])
 
         self.assertEqual(args.command, "desktop")
         self.assertEqual(args.desktop_command, "video-doctor")
         self.assertEqual(args.target, "mac")
         self.assertTrue(args.skip_remotion_smoke)
         self.assertTrue(args.json)
+        self.assertTrue(args.run_in_terminal)
 
     def test_desktop_compose_video_command_parses_outputs(self):
         parser = self.build_parser()

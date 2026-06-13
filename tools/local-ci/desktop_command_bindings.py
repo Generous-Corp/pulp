@@ -10,6 +10,31 @@ def _binding(bindings: Mapping[str, Any], name: str) -> Any:
     return bindings[name]
 
 
+def _maybe_run_local_ci_in_terminal(bindings: Mapping[str, Any], args: Any) -> int | None:
+    if not getattr(args, "run_in_terminal", False):
+        return None
+    sys_mod = _binding(bindings, "sys")
+    os_mod = _binding(bindings, "os")
+    terminal_runner = _binding(bindings, "_macos_terminal_runner")
+    if not terminal_runner.should_reinvoke_in_terminal(
+        requested=True,
+        sys_platform=sys_mod.platform,
+        environ=os_mod.environ,
+    ):
+        return None
+    result = terminal_runner.run_local_ci_in_terminal(
+        sys_mod.argv[1:],
+        cwd=_binding(bindings, "ROOT"),
+        python_executable=sys_mod.executable,
+        script_path=_binding(bindings, "ROOT") / "tools" / "local-ci" / "local_ci.py",
+    )
+    if result.get("stdout"):
+        sys_mod.stdout.write(result["stdout"])
+    if result.get("stderr"):
+        sys_mod.stderr.write(result["stderr"])
+    return int(result["returncode"])
+
+
 def cmd_desktop_install(bindings: Mapping[str, Any], args: Any) -> int:
     return _binding(bindings, "_desktop_setup_commands_cli").cmd_desktop_install(
         args,
@@ -48,6 +73,9 @@ def cmd_desktop_doctor(bindings: Mapping[str, Any], args: Any) -> int:
 
 
 def cmd_desktop_video_doctor(bindings: Mapping[str, Any], args: Any) -> int:
+    terminal_result = _maybe_run_local_ci_in_terminal(bindings, args)
+    if terminal_result is not None:
+        return terminal_result
     return _binding(bindings, "_desktop_setup_commands_cli").cmd_desktop_video_doctor(
         args,
         load_config_fn=_binding(bindings, "load_config"),
@@ -168,6 +196,9 @@ def cmd_desktop_cleanup(bindings: Mapping[str, Any], args: Any) -> int:
 
 
 def cmd_desktop_video(bindings: Mapping[str, Any], args: Any) -> int:
+    terminal_result = _maybe_run_local_ci_in_terminal(bindings, args)
+    if terminal_result is not None:
+        return terminal_result
     return _binding(bindings, "_desktop_action_commands_cli").cmd_desktop_video(
         args,
         cmd_desktop_smoke_fn=lambda video_args: cmd_desktop_smoke(bindings, video_args),
@@ -194,6 +225,9 @@ def _desktop_action_kwargs(bindings: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def cmd_desktop_smoke(bindings: Mapping[str, Any], args: Any) -> int:
+    terminal_result = _maybe_run_local_ci_in_terminal(bindings, args)
+    if terminal_result is not None:
+        return terminal_result
     return _binding(bindings, "_desktop_action_commands_cli").cmd_desktop_smoke(
         args,
         **_desktop_action_kwargs(bindings),
@@ -201,6 +235,9 @@ def cmd_desktop_smoke(bindings: Mapping[str, Any], args: Any) -> int:
 
 
 def cmd_desktop_click(bindings: Mapping[str, Any], args: Any) -> int:
+    terminal_result = _maybe_run_local_ci_in_terminal(bindings, args)
+    if terminal_result is not None:
+        return terminal_result
     return _binding(bindings, "_desktop_action_commands_cli").cmd_desktop_click(
         args,
         **_desktop_action_kwargs(bindings),
@@ -208,6 +245,9 @@ def cmd_desktop_click(bindings: Mapping[str, Any], args: Any) -> int:
 
 
 def cmd_desktop_inspect(bindings: Mapping[str, Any], args: Any) -> int:
+    terminal_result = _maybe_run_local_ci_in_terminal(bindings, args)
+    if terminal_result is not None:
+        return terminal_result
     return _binding(bindings, "_desktop_action_commands_cli").cmd_desktop_inspect(
         args,
         **_desktop_action_kwargs(bindings),

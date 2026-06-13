@@ -304,6 +304,36 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
         self.assertTrue(any("Grant macOS Screen Recording permission" in line for line in self.printed))
         self.assertTrue(any("Privacy_ScreenCapture" in line for line in self.printed))
 
+    def test_video_doctor_allows_screencapture_fallback_when_avfoundation_is_hidden(self):
+        self.targets["mac"]["optional"] = {"video_capture": True}
+        checks = [
+            {"name": "receipt", "ok": True, "detail": "installed"},
+            {"name": "screencapture", "ok": True, "detail": "/usr/sbin/screencapture"},
+            {"name": "video_capture", "ok": True, "detail": "/repo/node_modules/ffmpeg-static/ffmpeg", "required": False},
+            {"name": "avfoundation_screen", "ok": False, "detail": "Could not find AVFoundation device `Capture screen 0`", "required": False},
+        ]
+        deps = {
+            "load_config_fn": self.config,
+            "resolve_desktop_target_fn": lambda _config, name: self.targets[name],
+            "desktop_doctor_checks_fn": lambda _config, _name: [dict(check) for check in checks],
+            "normalize_desktop_optional_config_fn": lambda optional: {"video_capture": bool((optional or {}).get("video_capture"))},
+            "video_proof_smoke_fn": lambda: {"ok": True, "detail": "smoke ok"},
+            "print_fn": self.print_line,
+        }
+
+        result = self.mod.cmd_desktop_video_doctor(
+            Namespace(target="mac", json=True, skip_remotion_smoke=False),
+            **deps,
+        )
+
+        self.assertEqual(result, 0)
+        payload = json.loads(self.printed[0])
+        checks_by_name = {check["name"]: check for check in payload["checks"]}
+        self.assertTrue(payload["ok"])
+        self.assertFalse(checks_by_name["avfoundation_screen"]["ok"])
+        self.assertFalse(checks_by_name["avfoundation_screen"]["required"])
+        self.assertIn("screencapture fallback available", checks_by_name["avfoundation_screen"]["detail"])
+
 
 if __name__ == "__main__":
     unittest.main()

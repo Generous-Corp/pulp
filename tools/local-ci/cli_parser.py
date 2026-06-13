@@ -74,6 +74,11 @@ def build_local_ci_parser(
 
     def add_desktop_video_args(command_parser: argparse.ArgumentParser) -> None:
         command_parser.add_argument(
+            "--run-in-terminal",
+            action="store_true",
+            help="On macOS, re-run this local-ci command inside Terminal.app so Screen Recording permission follows Terminal's TCC grant.",
+        )
+        command_parser.add_argument(
             "--record-video",
             action="store_true",
             help="Record a short window-region MP4 proof while the desktop action runs.",
@@ -395,6 +400,11 @@ def build_local_ci_parser(
         "--skip-remotion-smoke",
         action="store_true",
         help="Skip the Remotion smoke render check and only report local tooling/config readiness.",
+    )
+    p_desktop_video_doctor.add_argument(
+        "--run-in-terminal",
+        action="store_true",
+        help="On macOS, re-run video-doctor inside Terminal.app so Screen Recording permission follows Terminal's TCC grant.",
     )
     p_desktop_video_doctor.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 

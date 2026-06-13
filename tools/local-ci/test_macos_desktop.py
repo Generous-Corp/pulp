@@ -145,6 +145,34 @@ class MacOSDesktopTests(unittest.TestCase):
         self.assertEqual(calls[0], 2)
         self.assertTrue(output_path.exists())
 
+    def test_capture_falls_back_to_full_screen_when_window_capture_fails(self) -> None:
+        output_path = self.root / "screens" / "window.png"
+        calls: list[list[str]] = []
+
+        def run_capture(cmd: list[str], **_kwargs):
+            calls.append(cmd)
+            if "-l" in cmd:
+                return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="could not create image from window")
+            Path(cmd[-1]).write_text("fullscreen")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        self.mod.capture_macos_window(88, output_path, run_fn=run_capture, sleep_fn=lambda _amount: None)
+
+        self.assertEqual(len([cmd for cmd in calls if "-l" in cmd]), 5)
+        self.assertEqual(calls[-1], ["screencapture", "-x", str(output_path)])
+        self.assertEqual(output_path.read_text(), "fullscreen")
+
+    def test_capture_reports_window_error_when_full_screen_fallback_fails(self) -> None:
+        output_path = self.root / "screens" / "window.png"
+
+        def run_capture(cmd: list[str], **_kwargs):
+            if "-l" in cmd:
+                return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="could not create image from window")
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="could not create image from display")
+
+        with self.assertRaisesRegex(RuntimeError, "could not create image from window"):
+            self.mod.capture_macos_window(88, output_path, run_fn=run_capture, sleep_fn=lambda _amount: None)
+
         class FakeProc:
             def __init__(self) -> None:
                 self.terminated = False
@@ -257,6 +285,64 @@ class MacOSDesktopTests(unittest.TestCase):
         self.assertIn(["/opt/ffmpeg", "-hide_banner", "-version"], calls)
         self.assertEqual(metadata["encoder"]["version"], "ffmpeg version 6.0")
         self.assertIn("Could not find AVFoundation device", metadata["fallback_reason"])
+
+    def test_window_video_recording_crops_full_screen_frames_when_window_capture_fails(self) -> None:
+        output_path = self.root / "video" / "proof.mp4"
+        metadata_path = self.root / "video" / "metadata.json"
+        poster_path = self.root / "video" / "poster.png"
+        calls: list[list[str]] = []
+
+        def run_capture_or_encode(cmd: list[str], **_kwargs):
+            calls.append(cmd)
+            if cmd[0] == "screencapture":
+                if "-l" in cmd:
+                    return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="could not create image from window")
+                Path(cmd[-1]).write_bytes(b"fullscreen-png")
+                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+            if cmd[1:] == ["-hide_banner", "-version"]:
+                return subprocess.CompletedProcess(cmd, 0, stdout="ffmpeg version 6.0\n", stderr="")
+            if "-frames:v" in cmd:
+                poster_path.write_bytes(b"cropped-poster")
+                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+            output_path.write_bytes(b"mp4")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="encoded")
+
+        recording = self.mod.start_macos_window_video_recording(
+            {"windowId": 88, "bounds": {"x": 10, "y": 20, "width": 320, "height": 200}},
+            output_path,
+            duration_secs=0.2,
+            fps=5.0,
+            run_fn=run_capture_or_encode,
+            ffmpeg_path="/opt/ffmpeg",
+        )
+        time.sleep(0.25)
+        metadata = self.mod.stop_macos_window_video_recording(
+            recording,
+            output_path=output_path,
+            metadata_path=metadata_path,
+            poster_path=poster_path,
+            duration_secs=0.2,
+            fps=5.0,
+            attachment_budget_bytes=1_000_000,
+            desktop_video_metadata_fn=lambda path, **kwargs: {
+                "path": str(path),
+                "fps": kwargs["fps"],
+                "command": kwargs["command"],
+                "encoder": kwargs["encoder"],
+                "size": {"fits_attachment_budget": True},
+            },
+            write_desktop_video_metadata_fn=lambda path, payload: path.write_text(str(payload)),
+        )
+
+        encode_command = metadata["command"]
+        self.assertEqual(metadata["frame_capture_scope"], "screen-crop")
+        self.assertIn("-vf", encode_command)
+        self.assertIn("crop=320:200:10:20", encode_command)
+        self.assertTrue(any(cmd[:3] == ["screencapture", "-x", "-l"] for cmd in calls))
+        self.assertTrue(any(cmd[:2] == ["screencapture", "-x"] and "-l" not in cmd for cmd in calls))
+        self.assertTrue(metadata["poster"]["exists"])
+        self.assertEqual(poster_path.read_bytes(), b"cropped-poster")
+        self.assertTrue(any("window capture failed" in error for error in metadata["capture_errors"]))
 
     def test_window_video_recording_uses_ffmpeg_avfoundation_primary_path(self) -> None:
         output_path = self.root / "video" / "proof.mp4"
