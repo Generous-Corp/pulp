@@ -176,6 +176,13 @@ public:
     void render_now(double host_bpm) { render_to_tempo(host_bpm); }
 
     // ── Editor UI (Ink & Signal) ─────────────────────────────────────────
+    /// The editor is an absolute-positioned 760×372 design; it does not
+    /// reflow, so lock the host window to that size (min = max = preferred,
+    /// aspect pinned) across all formats and the standalone GPU host.
+    format::ViewSize view_size() const override {
+        return {760, 372, 760, 372, 760, 372, 760.0 / 372.0};
+    }
+
     /// Build the plugin editor: a graphite panel with a signal-teal waveform
     /// view of the loaded loop, slice regions shaded per onset. This is the
     /// Phase-5 waveform-editor pilot for the Ink & Signal design language.
@@ -212,6 +219,15 @@ public:
             v.set_left(x); v.set_top(y);
             v.flex().dim_width = {w, DimensionUnit::px};
             v.flex().dim_height = {h, DimensionUnit::px};
+            // yoga_layout.cpp applies an explicit px size from preferred_width /
+            // preferred_height (resolve_dimensions normally fills these from
+            // dim_*, but it doesn't run for absolute leaves on a bare
+            // layout_children() pass — and the screenshot path re-runs layout
+            // after create_view(), so a post-layout set_bounds() would be
+            // discarded). Set them here so a leaf with no text measure func
+            // (e.g. WaveformEditor) still gets a non-empty frame.
+            v.flex().preferred_width = w;
+            v.flex().preferred_height = h;
         };
         auto rect = [&](float x, float y, float w, float h, Color c) {
             auto v = std::make_unique<View>(); place(*v, x, y, w, h);
@@ -247,7 +263,6 @@ public:
 
         // ── Waveform ──
         auto wf = std::make_unique<WaveformEditor>();
-        WaveformEditor* wfp = wf.get();
         place(*wf, 20, 92, 738, 222);
         {
             std::lock_guard<std::mutex> lock(raw_mutex_);
@@ -274,9 +289,6 @@ public:
         rect(662, 320, 96, 28, tealSoft); label(662, 325, 96, 18, "Auto-slice", teal, 12, 600, LabelAlign::center);
 
         root->layout_children();
-        // The waveform paints from its own frame; pin it AFTER layout so the
-        // absolute-leaf frame isn't left collapsed.
-        wfp->set_bounds({20, 92, 738, 222});
         return root;
     }
 
@@ -355,12 +367,12 @@ private:
     // ── Offline render to host tempo (worker thread) ──
     void render_to_tempo(double host_bpm) {
         std::vector<std::vector<float>> raw_copy;
-        long frames; int ch; double loop_bpm; double sr;
+        long frames; int ch; double loop_bpm;
         std::vector<long> slices;
         {
             std::lock_guard<std::mutex> lock(raw_mutex_);
             if (raw_frames_ <= 0) return;
-            frames = raw_frames_; ch = raw_channels_; sr = raw_sr_;
+            frames = raw_frames_; ch = raw_channels_;
             loop_bpm = loop_bpm_.load(std::memory_order_relaxed);
             raw_copy.assign(static_cast<size_t>(ch), {});
             for (int c = 0; c < ch; ++c) raw_copy[static_cast<size_t>(c)] = raw_[c];
