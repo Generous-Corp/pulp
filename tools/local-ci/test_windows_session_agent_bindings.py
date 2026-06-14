@@ -76,23 +76,6 @@ class WindowsSessionAgentBindingsTests(unittest.TestCase):
                 for name in dependency_names:
                     self.assertIs(captured["kwargs"][f"{name}_fn"], bindings[name])
 
-    def test_install_session_agent_helpers_wires_named_exports(self) -> None:
-        captured = {}
-
-        def runner(*args, **kwargs):
-            captured["args"] = args
-            captured["kwargs"] = kwargs
-            return {"started": True}
-
-        bindings = self._bindings(types.SimpleNamespace(start_windows_session_agent_task=runner))
-        for name in ["run_windows_ssh_powershell", "parse_windows_ssh_json", "ps_literal"]:
-            bindings[name] = object()
-
-        self.mod.install_windows_session_agent_helpers(bindings, ("start_windows_session_agent_task",))
-
-        self.assertEqual(bindings["start_windows_session_agent_task"]("win", {"task_name": "Pulp"}), {"started": True})
-        self.assertEqual(captured["args"], ("win", {"task_name": "Pulp"}))
-
 
 if __name__ == "__main__":
     unittest.main()

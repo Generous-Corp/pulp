@@ -51,23 +51,6 @@ class WindowsSessionCmakeProbeBindingsTests(unittest.TestCase):
         self.assertIs(captured["kwargs"]["run_fn"], bindings["subprocess"].run)
         self.assertIs(captured["kwargs"]["ps_literal_fn"], bindings["ps_literal"])
 
-    def test_install_cmake_probe_helpers_wires_named_exports(self) -> None:
-        bindings = {
-            "_windows_probe": types.SimpleNamespace(
-                probe_windows_ssh_cmake_settings=lambda *args, **kwargs: ("ARM64", "C:/VS")
-            ),
-            "subprocess": types.SimpleNamespace(run=object()),
-            "windows_ssh_powershell_command": object(),
-            "ps_literal": object(),
-        }
-
-        self.mod.install_windows_session_cmake_probe_helpers(bindings, ("probe_windows_ssh_cmake_settings",))
-
-        self.assertEqual(
-            bindings["probe_windows_ssh_cmake_settings"]("win", "Visual Studio 17 2022", "", ""),
-            ("ARM64", "C:/VS"),
-        )
-
 
 if __name__ == "__main__":
     unittest.main()

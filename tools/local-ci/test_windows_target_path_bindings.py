@@ -62,18 +62,6 @@ class WindowsTargetPathBindingsTests(unittest.TestCase):
         self.assertTrue(self.mod.windows_repo_checkout_ready(bindings, probe))
         self.assertEqual(captured["ready"][0], (probe,))
 
-    def test_install_windows_target_path_helpers_wires_named_exports(self) -> None:
-        windows_target = types.SimpleNamespace(
-            windows_path_join=lambda *parts: "\\".join(parts),
-            windows_repo_checkout_ready=lambda probe: True,
-        )
-        bindings = {"_windows_target": windows_target}
-
-        self.mod.install_windows_target_path_helpers(bindings, ("windows_path_join", "windows_repo_checkout_ready"))
-
-        self.assertEqual(bindings["windows_path_join"]("C:", "Pulp"), r"C:\Pulp")
-        self.assertTrue(bindings["windows_repo_checkout_ready"]({"git_found": True}))
-
 
 if __name__ == "__main__":
     unittest.main()

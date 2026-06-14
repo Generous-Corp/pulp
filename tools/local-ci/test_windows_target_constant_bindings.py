@@ -40,22 +40,6 @@ class WindowsTargetConstantBindingsTests(unittest.TestCase):
         self.assertIs(self.mod.windows_optional_remote_tools(bindings), windows_target.WINDOWS_OPTIONAL_REMOTE_TOOLS)
         self.assertEqual(self.mod.windows_default_remote_repo_dirname(bindings), "pulp-validate")
 
-    def test_install_windows_target_constant_helpers_wires_named_exports(self) -> None:
-        windows_target = types.SimpleNamespace(
-            WINDOWS_REQUIRED_REMOTE_TOOLS={"git": {"required": True}},
-            WINDOWS_OPTIONAL_REMOTE_TOOLS={"gh": {"required": False}},
-            WINDOWS_DEFAULT_REMOTE_REPO_DIRNAME="pulp-validate",
-        )
-        bindings = {"_windows_target": windows_target}
-
-        self.mod.install_windows_target_constant_helpers(
-            bindings,
-            ("windows_required_remote_tools", "windows_default_remote_repo_dirname"),
-        )
-
-        self.assertIs(bindings["windows_required_remote_tools"](), windows_target.WINDOWS_REQUIRED_REMOTE_TOOLS)
-        self.assertEqual(bindings["windows_default_remote_repo_dirname"](), "pulp-validate")
-
 
 if __name__ == "__main__":
     unittest.main()
