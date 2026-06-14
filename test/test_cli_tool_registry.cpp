@@ -361,16 +361,7 @@ TEST_CASE("tool registry extracts zip archives with literal paths",
     auto archive = tmp.path / "fixture.zip";
     auto dest = tmp.path / "out zip";
 
-#ifdef _WIN32
-    require_exec_ok(
-        "powershell",
-        {"-NoProfile", "-Command",
-         "& { param($payload, $archive) Add-Type -AssemblyName System.IO.Compression.FileSystem; "
-         "[IO.Compression.ZipFile]::CreateFromDirectory($payload, $archive) }",
-         payload.string(), archive.string()});
-#else
-    require_exec_ok("zip", {"-q", "-r", archive.string(), "."}, payload);
-#endif
+    require_exec_ok("cmake", {"-E", "tar", "cf", archive.string(), "--format=zip", "--", "nested/fixture.txt"}, payload);
 
     REQUIRE(extract_archive(archive, dest, "zip"));
     REQUIRE(fs::exists(dest / "nested" / "fixture.txt"));
