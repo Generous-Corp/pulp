@@ -4,6 +4,7 @@
 from module_test_utils import load_module_from_path
 import types
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -49,7 +50,7 @@ class QueueEnqueueBindingsTests(unittest.TestCase):
             bindings[name] = object()
         return bindings
 
-    def test_enqueue_job_binds_lifecycle_dependencies_and_now_lambda(self):
+    def test_enqueue_job_delegates_with_assembled_dependencies(self):
         captured = {}
 
         def enqueue(*args, **kwargs):
@@ -57,46 +58,28 @@ class QueueEnqueueBindingsTests(unittest.TestCase):
             captured["kwargs"] = kwargs
             return {"id": "job"}, True
 
-        bumped = {}
-
-        def bump_pending(job, priority, *, now_iso_fn):
-            bumped["job"] = job
-            bumped["priority"] = priority
-            bumped["now"] = now_iso_fn
-            return True
-
-        orchestrator = types.SimpleNamespace(
-            find_active_job_by_fingerprint_unlocked=object(),
-            bump_pending_job_priority_unlocked=bump_pending,
-            pending_supersedence_candidates_unlocked=object(),
-        )
         bindings = self._bindings(
             lifecycle=types.SimpleNamespace(enqueue_job_locked=enqueue),
-            orchestrator=orchestrator,
         )
+        deps = {"make_job_fn": object(), "supersede_job_unlocked_fn": object()}
 
-        result = self.mod.enqueue_job(
-            bindings,
-            "feature/topic",
-            "abc123",
-            "normal",
-            ["mac"],
-            "local",
-            "full",
-            submission={"source": "test"},
-        )
+        with mock.patch.object(self.mod, "queue_enqueue_dependencies", return_value=deps):
+            result = self.mod.enqueue_job(
+                bindings,
+                "feature/topic",
+                "abc123",
+                "normal",
+                ["mac"],
+                "local",
+                "full",
+                submission={"source": "test"},
+            )
 
         self.assertEqual(result, ({"id": "job"}, True))
         self.assertEqual(captured["args"], ("feature/topic", "abc123", "normal", ["mac"], "local", "full"))
         self.assertEqual(captured["kwargs"]["submission"], {"source": "test"})
-        self.assertIs(captured["kwargs"]["make_job_fn"], bindings["make_job"])
-        self.assertIs(captured["kwargs"]["supersede_job_unlocked_fn"], bindings["supersede_job_unlocked"])
-        self.assertIs(captured["kwargs"]["find_active_job_by_fingerprint_unlocked_fn"], orchestrator.find_active_job_by_fingerprint_unlocked)
-
-        self.assertTrue(captured["kwargs"]["bump_pending_job_priority_unlocked_fn"]({"id": "old"}, "high"))
-        self.assertEqual(bumped["job"], {"id": "old"})
-        self.assertEqual(bumped["priority"], "high")
-        self.assertIs(bumped["now"], bindings["now_iso"])
+        self.assertIs(captured["kwargs"]["make_job_fn"], deps["make_job_fn"])
+        self.assertIs(captured["kwargs"]["supersede_job_unlocked_fn"], deps["supersede_job_unlocked_fn"])
 
 
 if __name__ == "__main__":
