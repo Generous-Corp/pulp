@@ -392,6 +392,7 @@ needs a narrower machine-readable plan. Add `--check` to include lightweight
 machine-local readiness checks, such as whether `cmake`, the in-tree
 audio-inspector demo source, `adb`, `xcrun`, REAPER, or
 `external/skia-build/libskia.a` are available before attempting a demo. The
+failed checks include remediation text with the next setup step. The
 `audio-inspector-demo` row is the fast no-GPU macOS proof path and does not
 require Skia. The iOS Simulator row uses the working
 `simulator video` recorder. The

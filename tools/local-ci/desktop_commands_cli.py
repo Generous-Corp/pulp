@@ -537,8 +537,11 @@ def _video_matrix_check(
 ) -> dict:
     checks: list[dict] = []
 
-    def add(name: str, ok: bool, detail: str, *, required: bool = True) -> None:
-        checks.append({"name": name, "ok": ok, "required": required, "detail": detail})
+    def add(name: str, ok: bool, detail: str, *, required: bool = True, remediation: str | None = None) -> None:
+        check = {"name": name, "ok": ok, "required": required, "detail": detail}
+        if remediation and not ok:
+            check["remediation"] = remediation
+        checks.append(check)
 
     prepare_command = str(item.get("prepare_command") or "")
     if "cmake" in prepare_command:
@@ -551,28 +554,61 @@ def _video_matrix_check(
                 "/Applications/CMake.app/Contents/bin/cmake",
             ),
         )
-        add("cmake", bool(cmake_path), cmake_path or "cmake not found on PATH or common macOS install paths")
+        add(
+            "cmake",
+            bool(cmake_path),
+            cmake_path or "cmake not found on PATH or common macOS install paths",
+            remediation="Install CMake or add it to PATH; Homebrew installs are expected at /opt/homebrew/bin/cmake or /usr/local/bin/cmake.",
+        )
     if item["id"] in {"standalone-interaction", "component-zoom"}:
         skia_path = repo_root / "external" / "skia-build" / "libskia.a"
         add(
             "skia-build.libskia",
             skia_path.is_file(),
             str(skia_path) if skia_path.is_file() else f"missing required Skia binary: {skia_path}",
+            remediation="Install or sync the binary Skia bundle so external/skia-build/libskia.a exists, or choose audio-inspector-demo for a no-GPU proof.",
         )
     if item["id"] in {"audio-inspector-demo", "inspector-workflow"}:
         source = repo_root / "examples" / "audio-inspector-demo"
-        add("audio-inspector-demo-source", source.is_dir(), str(source) if source.is_dir() else f"missing source directory: {source}")
+        add(
+            "audio-inspector-demo-source",
+            source.is_dir(),
+            str(source) if source.is_dir() else f"missing source directory: {source}",
+            remediation="Run this check from a complete Pulp source checkout that includes examples/audio-inspector-demo.",
+        )
     if item["id"] == "reaper-plugin-editor":
         reaper_path = Path("/Applications/REAPER.app/Contents/MacOS/REAPER")
-        add("reaper.app", reaper_path.is_file(), str(reaper_path) if reaper_path.is_file() else "REAPER not found at /Applications/REAPER.app", required=False)
+        add(
+            "reaper.app",
+            reaper_path.is_file(),
+            str(reaper_path) if reaper_path.is_file() else "REAPER not found at /Applications/REAPER.app",
+            required=False,
+            remediation="Install REAPER at /Applications/REAPER.app or skip the REAPER proof on this machine.",
+        )
     if item["id"] == "ios-simulator":
         xcrun_path = which_fn("xcrun")
-        add("xcrun", bool(xcrun_path), xcrun_path or "xcrun not found on PATH")
+        add(
+            "xcrun",
+            bool(xcrun_path),
+            xcrun_path or "xcrun not found on PATH",
+            remediation="Install Xcode command line tools and run xcode-select so xcrun is available.",
+        )
     if item["id"] == "android-emulator":
         adb_path = which_fn("adb")
-        add("adb", bool(adb_path), adb_path or "adb not found on PATH or under Android SDK")
+        add(
+            "adb",
+            bool(adb_path),
+            adb_path or "adb not found on PATH or under Android SDK",
+            remediation="Install Android platform-tools or add adb to PATH before running Android emulator proofs.",
+        )
     if item["id"] in {"linux-xvfb-desktop", "windows-session-agent-desktop"}:
-        add("backend.recorder", False, "recorder backend is planned for this platform", required=True)
+        add(
+            "backend.recorder",
+            False,
+            "recorder backend is planned for this platform",
+            required=True,
+            remediation="Use macOS desktop, iOS Simulator, Android emulator, or still screenshots until this platform recorder backend lands.",
+        )
 
     failed_required = [check for check in checks if check["required"] and not check["ok"]]
     if failed_required:
@@ -689,6 +725,8 @@ def desktop_video_matrix_lines(payload: dict) -> list[str]:
                 prefix = "PASS" if check.get("ok") else "FAIL"
                 required = "required" if check.get("required") else "optional"
                 lines.append(f"    - {prefix} {check['name']} ({required}): {check['detail']}")
+                if check.get("remediation"):
+                    lines.append(f"      remediation: {check['remediation']}")
         lines.append("  watch for:")
         lines.extend(f"    - {value}" for value in item.get("watch_for", []))
     return lines
@@ -746,6 +784,8 @@ def desktop_video_matrix_markdown(payload: dict) -> str:
                 prefix = "PASS" if check.get("ok") else "FAIL"
                 required = "required" if check.get("required") else "optional"
                 lines.append(f"- {prefix} `{check['name']}` ({required}): {check['detail']}")
+                if check.get("remediation"):
+                    lines.append(f"  - Remediation: {check['remediation']}")
             lines.append("")
         lines.extend(["", "Watch for:"])
         lines.extend(f"- {value}" for value in item.get("watch_for", []))

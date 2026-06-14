@@ -252,6 +252,8 @@ class DesktopCommandsCliTests(unittest.TestCase):
             self.assertTrue(checks["cmake"]["ok"])
             self.assertFalse(checks["skia-build.libskia"]["ok"])
             self.assertIn("missing required Skia binary", checks["skia-build.libskia"]["detail"])
+            self.assertIn("external/skia-build/libskia.a", checks["skia-build.libskia"]["remediation"])
+            self.assertNotIn("remediation", checks["cmake"])
 
             (repo_root / "external" / "skia-build").mkdir(parents=True)
             (repo_root / "external" / "skia-build" / "libskia.a").write_bytes(b"skia")
@@ -274,6 +276,7 @@ class DesktopCommandsCliTests(unittest.TestCase):
             self.assertEqual(audio_demo["local_readiness"]["status"], "blocked")
             self.assertTrue(checks["cmake"]["ok"])
             self.assertFalse(checks["audio-inspector-demo-source"]["ok"])
+            self.assertIn("examples/audio-inspector-demo", checks["audio-inspector-demo-source"]["remediation"])
             self.assertNotIn("skia-build.libskia", checks)
 
             (repo_root / "examples" / "audio-inspector-demo").mkdir(parents=True)
@@ -332,7 +335,7 @@ class DesktopCommandsCliTests(unittest.TestCase):
 
         self.printed.clear()
         result = self.mod.cmd_desktop_video_matrix(
-            Namespace(target="windows", scenario=None, json=False, markdown=True),
+            Namespace(target="windows", scenario=None, json=False, markdown=True, check=True),
             print_fn=self.print_line,
         )
         self.assertEqual(result, 0)
@@ -341,6 +344,7 @@ class DesktopCommandsCliTests(unittest.TestCase):
         self.assertIn("Status: `planned`", windows_markdown)
         self.assertIn("desktop video-doctor windows", windows_markdown)
         self.assertIn("ddagrab/gdigrab", windows_markdown)
+        self.assertIn("Remediation: Use macOS desktop", windows_markdown)
         self.assertNotIn("iOS Simulator interaction", windows_markdown)
 
     def test_desktop_config_show_set_and_dispatch(self):
