@@ -38,7 +38,9 @@ or reviewer comprehension matters.
 - Use `python3 tools/local-ci/pack_video_proof_tool.py --json` when the branch
   needs a reviewable source add-on artifact. The packer records `sha256`, size,
   included files, npm pins, and policy flags, and it excludes `node_modules`,
-  Remotion caches, and generated videos.
+  Remotion caches, and generated videos. Follow it with
+  `python3 tools/local-ci/pack_video_proof_tool.py --verify <manifest> --json`
+  before treating the artifact as reviewable.
 - Prefer short clips: 5-12 seconds is the normal range. Keep the recording
   focused on the window or component under test.
 - Prefer `video/proof-composed.mp4` for review. Keep `video/proof.mp4` as the
@@ -137,6 +139,10 @@ Pack the source-tree video-proof tool payload for install/distribution review:
 SOURCE_DATE_EPOCH=0 python3 tools/local-ci/pack_video_proof_tool.py \
   --output-dir /tmp/pulp-video-proof-tool-pack \
   --version 0.0.0-local \
+  --json
+
+python3 tools/local-ci/pack_video_proof_tool.py \
+  --verify /tmp/pulp-video-proof-tool-pack/pulp-video-proof-tool-0.0.0-local.manifest.json \
   --json
 ```
 

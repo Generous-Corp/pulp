@@ -55,10 +55,11 @@ The long-term split should stay narrow:
 - The source-tree developer path can still use `npm --prefix tools/local-ci
   install` for direct iteration.
 - Before mainline release, produce a reviewable source add-on artifact with
-  `python3 tools/local-ci/pack_video_proof_tool.py --json`. The artifact is a
-  small zip plus manifest that contains only Pulp-owned package source,
-  `package-lock.json`, Remotion template source, and wrapper scripts; it
-  explicitly excludes `node_modules`, Remotion caches, and generated videos.
+  `python3 tools/local-ci/pack_video_proof_tool.py --json`, then verify the
+  generated manifest with `--verify`. The artifact is a small zip plus manifest
+  that contains only Pulp-owned package source, `package-lock.json`, Remotion
+  template source, and wrapper scripts; it explicitly excludes `node_modules`,
+  Remotion caches, and generated videos.
 - Reusable demo scenarios or source material may later be distributed as
   reviewed Pulp kits/content packs, but the recorder/composer itself should
   remain a tool add-on.
@@ -138,11 +139,18 @@ SOURCE_DATE_EPOCH=0 python3 tools/local-ci/pack_video_proof_tool.py \
   --output-dir /tmp/pulp-video-proof-tool-pack \
   --version 0.0.0-local \
   --json
+
+python3 tools/local-ci/pack_video_proof_tool.py \
+  --verify /tmp/pulp-video-proof-tool-pack/pulp-video-proof-tool-0.0.0-local.manifest.json \
+  --json
 ```
 
 The generated manifest records the zip path, `sha256`, size, included files,
 Remotion/ffmpeg-static npm pins, and the policy flags that keep this machine
-tool separate from core Pulp and `pulp add`.
+tool separate from core Pulp and `pulp add`. The verifier checks the manifest
+schema, install policy, archive size and `sha256`, zip entry list, required
+payload files, excluded generated/dependency paths, and required npm scripts and
+dependency pins.
 
 Validate the eventual optional tool install path from a fresh source checkout:
 

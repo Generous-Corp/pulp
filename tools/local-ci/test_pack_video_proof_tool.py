@@ -38,7 +38,10 @@ class PackVideoProofToolTests(unittest.TestCase):
                     "name": "pulp-local-ci-video-tools",
                     "private": True,
                     "version": "0.0.0",
-                    "scripts": {"smoke-video-proof": "node scripts/smoke-video-proof.mjs"},
+                    "scripts": {
+                        "compose-video-proof": "node scripts/compose-video-proof.mjs",
+                        "smoke-video-proof": "node scripts/smoke-video-proof.mjs",
+                    },
                     "devDependencies": {
                         "remotion": "4.0.476",
                         "ffmpeg-static": "5.2.0",
@@ -98,6 +101,60 @@ class PackVideoProofToolTests(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "missing: scripts/compose-video-proof.mjs"):
             self.mod.pack_video_proof_tool(repo_root=self.root, output_dir=self.root / "dist")
+
+    def test_verifier_accepts_matching_manifest_and_archive(self) -> None:
+        manifest = self.mod.pack_video_proof_tool(
+            repo_root=self.root,
+            output_dir=self.root / "dist",
+            version="0.0.0-test",
+        )
+
+        result = self.mod.verify_video_proof_tool_package(Path(manifest["manifest_path"]))
+
+        self.assertTrue(result["ok"], result)
+        checks = {check["name"]: check for check in result["checks"]}
+        self.assertTrue(checks["artifact_sha256"]["ok"])
+        self.assertTrue(checks["included_files_match_zip"]["ok"])
+        self.assertTrue(checks["excluded_paths_absent"]["ok"])
+        self.assertTrue(checks["npm_dependency_pins_present"]["ok"])
+
+    def test_verifier_rejects_tampered_archive(self) -> None:
+        manifest = self.mod.pack_video_proof_tool(
+            repo_root=self.root,
+            output_dir=self.root / "dist",
+            version="0.0.0-test",
+        )
+        archive_path = Path(manifest["artifact"]["path"])
+        with archive_path.open("ab") as handle:
+            handle.write(b"tampered")
+
+        result = self.mod.verify_video_proof_tool_package(Path(manifest["manifest_path"]))
+
+        self.assertFalse(result["ok"], result)
+        checks = {check["name"]: check for check in result["checks"]}
+        self.assertFalse(checks["artifact_size"]["ok"])
+        self.assertFalse(checks["artifact_sha256"]["ok"])
+
+    def test_verifier_rejects_excluded_archive_paths(self) -> None:
+        manifest = self.mod.pack_video_proof_tool(
+            repo_root=self.root,
+            output_dir=self.root / "dist",
+            version="0.0.0-test",
+        )
+        archive_path = Path(manifest["artifact"]["path"])
+        with zipfile.ZipFile(archive_path, "a") as archive:
+            archive.writestr("tools/local-ci/node_modules/remotion/package.json", "{}")
+
+        manifest["artifact"]["size_bytes"] = archive_path.stat().st_size
+        manifest["artifact"]["sha256"] = self.mod.sha256_file(archive_path)
+        Path(manifest["manifest_path"]).write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+
+        result = self.mod.verify_video_proof_tool_package(Path(manifest["manifest_path"]))
+
+        self.assertFalse(result["ok"], result)
+        checks = {check["name"]: check for check in result["checks"]}
+        self.assertFalse(checks["included_files_match_zip"]["ok"])
+        self.assertFalse(checks["excluded_paths_absent"]["ok"])
 
 
 if __name__ == "__main__":

@@ -32,6 +32,10 @@ EXCLUDED_PATHS = (
     ".remotion/",
     ".cache/",
 )
+VERIFY_SCHEMA = "pulp.video-proof-tool-package-verify.v1"
+MANIFEST_SCHEMA = "pulp.video-proof-tool-package.v1"
+REQUIRED_NPM_DEV_DEPENDENCIES = ("remotion", "ffmpeg-static")
+REQUIRED_NPM_SCRIPTS = ("smoke-video-proof", "compose-video-proof")
 
 
 def repo_root_from(start: Path) -> Path:
@@ -89,6 +93,183 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def check_result(name: str, ok: bool, detail: str) -> dict:
+    return {"name": name, "ok": ok, "detail": detail}
+
+
+def manifest_artifact_path(manifest_path: Path, artifact: dict) -> Path:
+    artifact_path = Path(str(artifact.get("path") or ""))
+    if not artifact_path.is_absolute():
+        artifact_path = manifest_path.parent / artifact_path
+    return artifact_path
+
+
+def has_excluded_path(zip_name: str, excluded_paths: list[str]) -> str | None:
+    normalized = zip_name.replace("\\", "/")
+    for excluded in excluded_paths:
+        marker = excluded.rstrip("/")
+        if normalized == marker or normalized.startswith(f"{marker}/") or f"/{marker}/" in normalized:
+            return excluded
+    return None
+
+
+def safe_zip_name(zip_name: str) -> bool:
+    path = Path(zip_name)
+    return not path.is_absolute() and ".." not in path.parts and zip_name.startswith(
+        f"{PACKAGE_ROOT_RELATIVE.as_posix()}/"
+    )
+
+
+def verify_video_proof_tool_package(manifest_path: Path) -> dict:
+    manifest_path = manifest_path.resolve()
+    checks: list[dict] = []
+    manifest: dict = {}
+    archive_names: list[str] = []
+    artifact_path: Path | None = None
+
+    try:
+        manifest = json.loads(manifest_path.read_text())
+        checks.append(check_result("manifest_json", True, f"read {manifest_path}"))
+    except (OSError, json.JSONDecodeError) as exc:
+        checks.append(check_result("manifest_json", False, str(exc)))
+        return {
+            "schema": VERIFY_SCHEMA,
+            "ok": False,
+            "manifest": str(manifest_path),
+            "artifact": None,
+            "checks": checks,
+        }
+
+    checks.extend(
+        [
+            check_result(
+                "manifest_schema",
+                manifest.get("schema") == MANIFEST_SCHEMA,
+                str(manifest.get("schema")),
+            ),
+            check_result("tool_id", manifest.get("tool_id") == "video-proof", str(manifest.get("tool_id"))),
+            check_result(
+                "distribution_lane",
+                manifest.get("distribution_lane") == "tool_addon",
+                str(manifest.get("distribution_lane")),
+            ),
+            check_result(
+                "package_format",
+                manifest.get("package_format") == "not_pulp_add",
+                str(manifest.get("package_format")),
+            ),
+        ]
+    )
+
+    policy = manifest.get("policy") if isinstance(manifest.get("policy"), dict) else {}
+    expected_policy = {
+        "core_pulp": False,
+        "pulp_add_package": False,
+        "machine_scoped_tool": True,
+        "bundles_node_modules": False,
+        "bundles_generated_videos": False,
+    }
+    for key, expected in expected_policy.items():
+        checks.append(check_result(f"policy.{key}", policy.get(key) is expected, str(policy.get(key))))
+
+    artifact = manifest.get("artifact") if isinstance(manifest.get("artifact"), dict) else {}
+    artifact_path = manifest_artifact_path(manifest_path, artifact)
+    if artifact_path.is_file():
+        checks.append(check_result("artifact_exists", True, str(artifact_path)))
+        actual_size = artifact_path.stat().st_size
+        expected_size = artifact.get("size_bytes")
+        checks.append(
+            check_result("artifact_size", actual_size == expected_size, f"actual={actual_size} expected={expected_size}")
+        )
+        actual_sha = sha256_file(artifact_path)
+        expected_sha = artifact.get("sha256")
+        checks.append(
+            check_result("artifact_sha256", actual_sha == expected_sha, f"actual={actual_sha} expected={expected_sha}")
+        )
+        try:
+            with zipfile.ZipFile(artifact_path) as archive:
+                archive_names = sorted(archive.namelist())
+            checks.append(check_result("artifact_zip_readable", True, f"{len(archive_names)} entries"))
+        except zipfile.BadZipFile as exc:
+            checks.append(check_result("artifact_zip_readable", False, str(exc)))
+    else:
+        checks.append(check_result("artifact_exists", False, str(artifact_path)))
+
+    expected_files = sorted(str(name) for name in manifest.get("included_files", []))
+    checks.append(
+        check_result(
+            "included_files_match_zip",
+            bool(archive_names) and archive_names == expected_files,
+            f"zip={len(archive_names)} manifest={len(expected_files)}",
+        )
+    )
+
+    required_files = sorted(str(PACKAGE_ROOT_RELATIVE / file) for file in INCLUDED_PATHS)
+    missing_required = [name for name in required_files if name not in archive_names]
+    checks.append(
+        check_result(
+            "required_files_present",
+            not missing_required,
+            "missing=" + ",".join(missing_required) if missing_required else f"{len(required_files)} required files",
+        )
+    )
+
+    unsafe_names = [name for name in archive_names if not safe_zip_name(name)]
+    checks.append(
+        check_result(
+            "zip_paths_safe",
+            not unsafe_names,
+            "unsafe=" + ",".join(unsafe_names) if unsafe_names else "all entries are relative package paths",
+        )
+    )
+
+    excluded_paths = list(manifest.get("excluded_paths", EXCLUDED_PATHS))
+    excluded_hits = [
+        f"{name}:{excluded}"
+        for name in archive_names
+        for excluded in [has_excluded_path(name, excluded_paths)]
+        if excluded
+    ]
+    checks.append(
+        check_result(
+            "excluded_paths_absent",
+            not excluded_hits,
+            "hits=" + ",".join(excluded_hits) if excluded_hits else ",".join(excluded_paths),
+        )
+    )
+
+    npm_package = manifest.get("npm_package") if isinstance(manifest.get("npm_package"), dict) else {}
+    scripts = npm_package.get("scripts") if isinstance(npm_package.get("scripts"), dict) else {}
+    dev_dependencies = (
+        npm_package.get("dev_dependencies") if isinstance(npm_package.get("dev_dependencies"), dict) else {}
+    )
+    missing_scripts = [name for name in REQUIRED_NPM_SCRIPTS if name not in scripts]
+    missing_deps = [name for name in REQUIRED_NPM_DEV_DEPENDENCIES if name not in dev_dependencies]
+    checks.append(
+        check_result(
+            "npm_scripts_present",
+            not missing_scripts,
+            "missing=" + ",".join(missing_scripts) if missing_scripts else ",".join(REQUIRED_NPM_SCRIPTS),
+        )
+    )
+    checks.append(
+        check_result(
+            "npm_dependency_pins_present",
+            not missing_deps,
+            "missing=" + ",".join(missing_deps) if missing_deps else ",".join(REQUIRED_NPM_DEV_DEPENDENCIES),
+        )
+    )
+
+    ok = all(check["ok"] for check in checks)
+    return {
+        "schema": VERIFY_SCHEMA,
+        "ok": ok,
+        "manifest": str(manifest_path),
+        "artifact": str(artifact_path) if artifact_path else None,
+        "checks": checks,
+    }
+
+
 def write_zip(package_root: Path, output_zip: Path, files: list[Path]) -> None:
     output_zip.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(output_zip, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
@@ -121,7 +302,7 @@ def create_manifest(
     package_json: dict,
 ) -> dict:
     return {
-        "schema": "pulp.video-proof-tool-package.v1",
+        "schema": MANIFEST_SCHEMA,
         "tool_id": "video-proof",
         "distribution_lane": "tool_addon",
         "package_format": "not_pulp_add",
@@ -204,12 +385,31 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Directory for the zip and manifest. Defaults to build/video-proof-tool.",
     )
     parser.add_argument("--version", help="Override the artifact version label.")
+    parser.add_argument(
+        "--verify",
+        type=Path,
+        default=None,
+        metavar="MANIFEST",
+        help="Verify an existing video-proof package manifest and artifact instead of packing.",
+    )
     parser.add_argument("--json", action="store_true", help="Emit the full manifest as JSON.")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if args.verify:
+        result = verify_video_proof_tool_package(args.verify)
+        if args.json:
+            print(json.dumps(result, indent=2, sort_keys=True))
+        else:
+            status = "PASS" if result["ok"] else "FAIL"
+            print(f"{status} video-proof tool package: {result['manifest']}")
+            for check in result["checks"]:
+                check_status = "PASS" if check["ok"] else "FAIL"
+                print(f"  {check_status} {check['name']}: {check['detail']}")
+        return 0 if result["ok"] else 1
+
     repo_root = args.repo_root.resolve() if args.repo_root else repo_root_from(Path(__file__))
     output_dir = args.output_dir or (repo_root / DEFAULT_OUTPUT_ROOT_RELATIVE)
     manifest = pack_video_proof_tool(repo_root=repo_root, output_dir=output_dir, version=args.version)
