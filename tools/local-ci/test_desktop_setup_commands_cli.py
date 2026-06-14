@@ -323,6 +323,9 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
         self.assertEqual(payload["install_model"]["current_command"], "npm --prefix tools/local-ci install")
         self.assertEqual(payload["install_model"]["future_command"], "pulp tool install video-proof")
         self.assertEqual(payload["install_model"]["future_check_command"], "pulp tool doctor video-proof --run")
+        self.assertEqual(payload["install_model"]["pack_command"], "python3 tools/local-ci/pack_video_proof_tool.py --json")
+        self.assertEqual(payload["install_model"]["pack_npm_script"], "npm --prefix tools/local-ci run pack-video-proof-tool -- --json")
+        self.assertEqual(payload["install_model"]["pack_manifest_schema"], "pulp.video-proof-tool-package.v1")
 
     def test_video_doctor_reports_screen_recording_remediation(self):
         self.targets["mac"]["optional"] = {"video_capture": True}
@@ -628,6 +631,7 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
         payload = json.loads(self.printed[0])
         self.assertFalse(payload["check"]["ok"])
         self.assertEqual(payload["install_model"]["package_format"], "not_pulp_add")
+        self.assertEqual(payload["install_model"]["pack_manifest_schema"], "pulp.video-proof-tool-package.v1")
         self.assertEqual(payload["check"]["checks"][0]["name"], "config")
         self.assertEqual(payload["check"]["remediations"][0]["command"], "cp tools/local-ci/config.example.json tools/local-ci/config.json")
         self.assertEqual(payload["steps"][0]["name"], "create_config")
@@ -699,6 +703,9 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
         self.assertEqual(payload["install_model"]["future_command"], "pulp tool install video-proof")
         self.assertEqual(payload["install_model"]["future_check_command"], "pulp tool doctor video-proof --run")
         self.assertEqual(payload["install_model"]["tool_info_command"], "pulp tool info video-proof --json")
+        self.assertEqual(payload["install_model"]["pack_command"], "python3 tools/local-ci/pack_video_proof_tool.py --json")
+        self.assertEqual(payload["install_model"]["pack_npm_script"], "npm --prefix tools/local-ci run pack-video-proof-tool -- --json")
+        self.assertEqual(payload["install_model"]["pack_manifest_schema"], "pulp.video-proof-tool-package.v1")
         self.assertEqual(payload["install_model"]["install_scope"], "machine")
         self.assertEqual(payload["install_model"]["distribution_lane"], "tool_addon")
         self.assertEqual(payload["install_model"]["package_format"], "not_pulp_add")
