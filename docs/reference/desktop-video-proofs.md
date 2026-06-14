@@ -643,7 +643,8 @@ python3 tools/local-ci/local_ci.py desktop video-matrix --markdown
 
 The matrix lists the full-service proof scenarios, current readiness, Remotion
 template, doctor command, concrete Release prepare command, recording/compose
-command, publish command, review-issue command, background serve/status/stop
+command, publish command, review-issue command with manifest-map output,
+review-status/review-watch closeout commands, background serve/status/stop
 commands, and what a reviewer should look for. Use `--target mac`, `--target
 ubuntu`, `--target windows`, `--target ios-simulator`, `--scenario
 audio-inspector-demo`, `--scenario component-zoom`, `--status ready`, or

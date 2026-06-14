@@ -857,17 +857,24 @@ def desktop_video_matrix_payload(
         label = row["id"]
         report_placeholder = f"/path/to/published-reports/{label}"
         manifest_placeholder = "/path/to/run/manifest.json"
+        manifest_map_placeholder = f"/tmp/{label}-video-review-manifest-map.json"
         row["publish_command"] = (
             f"python3 tools/local-ci/local_ci.py desktop publish --manifest {manifest_placeholder} "
             f"--label {label}-review"
         )
         row["review_issue_command"] = (
             f"python3 tools/local-ci/local_ci.py desktop review-issue {report_placeholder} "
-            "--repo owner/repo --check-files"
+            f"--repo owner/repo --check-files --manifest-map-output {manifest_map_placeholder}"
         )
         row["review_status_command"] = (
             "python3 tools/local-ci/local_ci.py desktop review-status <issue-url> "
             f"--repo owner/repo --manifest {manifest_placeholder} --close-issue"
+        )
+        row["review_manifest_map"] = manifest_map_placeholder
+        row["review_watch_command"] = (
+            "python3 tools/local-ci/local_ci.py desktop review-watch "
+            f"--repo owner/repo --label video-review --manifest-map {manifest_map_placeholder} "
+            "--state-file /tmp/pulp-video-review-watch.json --close-issue"
         )
         row["serve_background_command"] = (
             f"python3 tools/local-ci/local_ci.py desktop serve {report_placeholder} "
@@ -892,6 +899,7 @@ def desktop_video_matrix_payload(
             {"step": "serve_background", "command": row["serve_background_command"]},
             {"step": "check_server", "command": row["serve_status_command"]},
             {"step": "check_review", "command": row["review_status_command"]},
+            {"step": "watch_reviews", "command": row["review_watch_command"]},
             {"step": "stop_server", "command": row["serve_stop_command"]},
             {"step": "cleanup_published_reports", "command": row["published_cleanup_command"]},
         ]
@@ -941,6 +949,7 @@ def desktop_video_matrix_lines(payload: dict) -> list[str]:
                 f"  publish: {item['publish_command']}",
                 f"  review issue: {item['review_issue_command']}",
                 f"  review status: {item['review_status_command']}",
+                f"  review watch: {item['review_watch_command']}",
                 f"  serve background: {item['serve_background_command']}",
                 f"  serve status: {item['serve_status_command']}",
                 f"  serve stop: {item['serve_stop_command']}",
@@ -1012,6 +1021,7 @@ def desktop_video_matrix_markdown(payload: dict) -> str:
                 item["serve_background_command"],
                 item["serve_status_command"],
                 item["review_status_command"],
+                item["review_watch_command"],
                 item["serve_stop_command"],
                 item["published_cleanup_command"],
                 "```",
