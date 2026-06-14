@@ -1,35 +1,26 @@
-"""Bindings from the local_ci facade to queue utility command helpers."""
+"""Compatibility facade for queue utility command bindings."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Any
 
-from binding_utils import binding as _binding
 from binding_utils import install_local_helpers
-
-
-UTILITY_QUEUE_COMMAND_EXPORTS = (
-    "cmd_bump",
-    "cmd_cancel",
+from utility_queue_bump_command_bindings import (
+    UTILITY_QUEUE_BUMP_COMMAND_EXPORTS,
+    cmd_bump,
+    install_utility_queue_bump_command_helpers,
+)
+from utility_queue_cancel_command_bindings import (
+    UTILITY_QUEUE_CANCEL_COMMAND_EXPORTS,
+    cmd_cancel,
+    install_utility_queue_cancel_command_helpers,
 )
 
 
-def cmd_bump(bindings: Mapping[str, Any], args: Any) -> int:
-    return _binding(bindings, "_queue_commands_cli").cmd_bump(
-        args,
-        normalize_priority_fn=_binding(bindings, "normalize_priority"),
-        bump_queue_command_job_fn=_binding(bindings, "bump_queue_command_job"),
-        bump_queue_command_result_line_fn=_binding(bindings, "bump_queue_command_result_line"),
-    )
-
-
-def cmd_cancel(bindings: Mapping[str, Any], args: Any) -> int:
-    return _binding(bindings, "_queue_commands_cli").cmd_cancel(
-        args,
-        cancel_queue_command_job_fn=_binding(bindings, "cancel_queue_command_job"),
-        cancel_queue_command_result_line_fn=_binding(bindings, "cancel_queue_command_result_line"),
-    )
+UTILITY_QUEUE_COMMAND_EXPORTS = (
+    *UTILITY_QUEUE_BUMP_COMMAND_EXPORTS,
+    *UTILITY_QUEUE_CANCEL_COMMAND_EXPORTS,
+)
 
 
 def install_utility_queue_command_helpers(
@@ -37,9 +28,11 @@ def install_utility_queue_command_helpers(
     names: tuple[str, ...] = UTILITY_QUEUE_COMMAND_EXPORTS,
 ) -> None:
     known_names = set(UTILITY_QUEUE_COMMAND_EXPORTS)
-    queue_names = tuple(name for name in names if name in known_names)
+    bump_names = tuple(name for name in names if name in UTILITY_QUEUE_BUMP_COMMAND_EXPORTS)
+    cancel_names = tuple(name for name in names if name in UTILITY_QUEUE_CANCEL_COMMAND_EXPORTS)
     unknown_names = tuple(name for name in names if name not in known_names)
 
-    install_local_helpers(bindings, globals(), queue_names)
+    install_utility_queue_bump_command_helpers(bindings, bump_names)
+    install_utility_queue_cancel_command_helpers(bindings, cancel_names)
     if unknown_names:
         install_local_helpers(bindings, globals(), unknown_names)
