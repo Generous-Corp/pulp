@@ -54,7 +54,9 @@ public:
         c.set_fill_color(resolve_color("bg.primary", Color::rgba8(22, 26, 33)));
         c.fill_rect(0, 0, bounds().width, bounds().height);
     }
-    void layout_children() override {}
+    // No layout_children override: children are position:absolute, so the Yoga
+    // pass (used by both render_to_png and the live window's ScrollView) places
+    // each at its left()/top() with preferred size — same result on both paths.
 };
 
 std::vector<float> demo_wave(size_t n = 1024) {
@@ -91,7 +93,16 @@ std::unique_ptr<View> build_board(float& out_height) {
     float y = 24.0f;
 
     auto add = [&](std::unique_ptr<View> v, float x, float yy, float w, float h) -> View* {
+        // Position absolutely so the layout survives the window's full-subtree
+        // Yoga pass (a ScrollView wraps the board in the live window, and Yoga
+        // would otherwise stretch flex children to full width). Yoga reads
+        // left()/top() + preferred_width/height for absolute nodes.
         v->set_bounds({x, yy, w, h});
+        v->set_position(View::Position::absolute);
+        v->set_left(x);
+        v->set_top(yy);
+        v->flex().preferred_width = w;
+        v->flex().preferred_height = h;
         View* p = v.get();
         b->add_child(std::move(v));
         return p;
@@ -315,6 +326,11 @@ std::unique_ptr<View> build_board(float& out_height) {
     }
 
     out_height = y + 24.0f;
+    // Size the board so the window's Yoga pass lays it out to the full content
+    // extent (its absolute children are positioned within this box).
+    b->flex().preferred_width = kContentW + 2.0f * kMargin;
+    b->flex().preferred_height = out_height;
+    b->flex().flex_shrink = 0.0f;
     return board;
 }
 
