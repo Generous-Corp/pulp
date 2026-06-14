@@ -45,6 +45,7 @@ import linux_desktop_bindings as _linux_desktop_bindings
 import linux_target as _linux_target
 import linux_target_bindings as _linux_target_bindings
 import local_ci_bootstrap_constants as _local_ci_bootstrap_constants
+import local_ci_bootstrap_helper_installers as _local_ci_bootstrap_helper_installers
 import local_ci_bootstrap_module_aliases as _local_ci_bootstrap_module_aliases
 import local_ci_bootstrap_private_seams as _local_ci_bootstrap_private_seams
 import local_ci_command_bindings as _local_ci_command_bindings
@@ -91,10 +92,13 @@ def install_local_ci_facade(bindings: dict) -> None:
     """Install compatibility facade exports and private late-binding seams."""
     _local_ci_bootstrap_module_aliases.install_bootstrap_module_aliases(bindings, globals())
 
-    _state_path_bindings.install_state_path_helpers(bindings)
-    _footprint_bindings.install_footprint_helpers(bindings)
-    _ssh_subprocess_bindings.install_ssh_subprocess_helpers(bindings)
-    _ssh_bundle_bindings.install_ssh_bundle_helpers(bindings)
+    _local_ci_bootstrap_helper_installers.install_foundation_helpers(
+        bindings,
+        state_path_bindings=_state_path_bindings,
+        footprint_bindings=_footprint_bindings,
+        ssh_subprocess_bindings=_ssh_subprocess_bindings,
+        ssh_bundle_bindings=_ssh_bundle_bindings,
+    )
 
     _local_ci_bootstrap_constants.install_bootstrap_constants(
         bindings,
@@ -105,31 +109,37 @@ def install_local_ci_facade(bindings: dict) -> None:
         github_workflow_bindings=_github_workflow_bindings,
     )
 
-    _windows_target_bindings.install_windows_target_helpers(bindings)
-    _io_utils_bindings.install_io_utils_helpers(bindings)
-    _git_helpers_bindings.install_git_helpers(bindings)
-    _normalize_bindings.install_normalize_helpers(bindings)
-    _cli_parser_bindings.install_cli_parser_helpers(bindings)
-    _config_evidence_bindings.install_config_evidence_helpers(bindings)
-    _github_workflow_bindings.install_github_workflow_helpers(bindings)
-    _provenance_bindings.install_provenance_helpers(bindings)
-    _evidence_index_bindings.install_evidence_index_helpers(bindings)
-    _job_queue_bindings.install_job_queue_helpers(bindings)
-    _queue_bindings.install_queue_helpers(bindings)
-    _cleanup_bindings.install_cleanup_helpers(bindings)
-    _target_bindings.install_target_helpers(bindings)
-    _cloud_bindings.install_cloud_helpers(bindings)
-    _desktop_support_bindings.install_desktop_support_helpers(bindings)
-    _desktop_infra_bindings.install_desktop_infra_helpers(bindings)
-    _desktop_reporting_bindings.install_desktop_reporting_helpers(bindings)
-    _macos_window_bindings.install_macos_window_helpers(bindings)
-    _linux_target_bindings.install_linux_target_helpers(bindings)
-    _linux_desktop_bindings.install_linux_desktop_helpers(bindings)
-    _source_prep_bindings.install_source_prep_helpers(bindings)
-    _windows_probe_bindings.install_windows_probe_helpers(bindings)
-    _desktop_probe_bindings.install_desktop_probe_helpers(bindings)
-    _macos_desktop_bindings.install_macos_desktop_helpers(bindings)
-    _windows_desktop_bindings.install_windows_desktop_helpers(bindings)
+    _local_ci_bootstrap_helper_installers.install_core_helpers(
+        bindings,
+        windows_target_bindings=_windows_target_bindings,
+        io_utils_bindings=_io_utils_bindings,
+        git_helpers_bindings=_git_helpers_bindings,
+        normalize_bindings=_normalize_bindings,
+        cli_parser_bindings=_cli_parser_bindings,
+        config_evidence_bindings=_config_evidence_bindings,
+        github_workflow_bindings=_github_workflow_bindings,
+        provenance_bindings=_provenance_bindings,
+        evidence_index_bindings=_evidence_index_bindings,
+        job_queue_bindings=_job_queue_bindings,
+        queue_bindings=_queue_bindings,
+        cleanup_bindings=_cleanup_bindings,
+        target_bindings=_target_bindings,
+        cloud_bindings=_cloud_bindings,
+    )
+    _local_ci_bootstrap_helper_installers.install_desktop_helpers(
+        bindings,
+        desktop_support_bindings=_desktop_support_bindings,
+        desktop_infra_bindings=_desktop_infra_bindings,
+        desktop_reporting_bindings=_desktop_reporting_bindings,
+        macos_window_bindings=_macos_window_bindings,
+        linux_target_bindings=_linux_target_bindings,
+        linux_desktop_bindings=_linux_desktop_bindings,
+        source_prep_bindings=_source_prep_bindings,
+        windows_probe_bindings=_windows_probe_bindings,
+        desktop_probe_bindings=_desktop_probe_bindings,
+        macos_desktop_bindings=_macos_desktop_bindings,
+        windows_desktop_bindings=_windows_desktop_bindings,
+    )
 
     _local_ci_bootstrap_private_seams.install_desktop_private_seams(bindings)
 
