@@ -1177,7 +1177,8 @@ jobs:
             exit 0
           fi
           conclusion=""
-          for attempt in $(seq 1 180); do
+          max_attempts=360
+          for attempt in $(seq 1 "$max_attempts"); do
             jobs_json="$(mktemp)"
             jobs_err="$(mktemp)"
             if gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?per_page=100" >"$jobs_json" 2>"$jobs_err"; then
@@ -1205,7 +1206,7 @@ jobs:
             if [ -n "$conclusion" ] && [ "$conclusion" != "null" ]; then
               break
             fi
-            echo "Waiting for macOS matrix leg to report (attempt $attempt/180)..."
+            echo "Waiting for macOS matrix leg to report (attempt $attempt/$max_attempts)..."
             sleep 10
           done
           echo "macOS leg conclusion: ${conclusion:-unknown}"
