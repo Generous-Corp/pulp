@@ -255,6 +255,8 @@ class DesktopCommandsCliTests(unittest.TestCase):
             )
             row = payload["scenarios"][0]
             self.assertTrue(payload["checked"])
+            self.assertEqual(row["status"], "blocked")
+            self.assertEqual(row["declared_status"], "ready")
             self.assertEqual(row["local_readiness"]["status"], "blocked")
             checks = {check["name"]: check for check in row["local_readiness"]["checks"]}
             self.assertTrue(checks["cmake"]["ok"])
@@ -271,6 +273,8 @@ class DesktopCommandsCliTests(unittest.TestCase):
                 repo_root=repo_root,
                 which_fn=lambda name: "/usr/bin/cmake" if name == "cmake" else None,
             )
+            self.assertEqual(payload["scenarios"][0]["status"], "ready")
+            self.assertEqual(payload["scenarios"][0]["declared_status"], "ready")
             self.assertEqual(payload["scenarios"][0]["local_readiness"]["status"], "ready")
 
             payload = self.mod.desktop_video_matrix_payload(
@@ -281,6 +285,7 @@ class DesktopCommandsCliTests(unittest.TestCase):
             )
             audio_demo = payload["scenarios"][0]
             checks = {check["name"]: check for check in audio_demo["local_readiness"]["checks"]}
+            self.assertEqual(audio_demo["status"], "blocked")
             self.assertEqual(audio_demo["local_readiness"]["status"], "blocked")
             self.assertTrue(checks["cmake"]["ok"])
             self.assertFalse(checks["audio-inspector-demo-source"]["ok"])
@@ -294,6 +299,7 @@ class DesktopCommandsCliTests(unittest.TestCase):
                 repo_root=repo_root,
                 which_fn=lambda name: "/usr/bin/cmake" if name == "cmake" else None,
             )
+            self.assertEqual(payload["scenarios"][0]["status"], "ready")
             self.assertEqual(payload["scenarios"][0]["local_readiness"]["status"], "ready")
 
     def test_desktop_video_matrix_filters_by_status(self):
@@ -343,6 +349,7 @@ class DesktopCommandsCliTests(unittest.TestCase):
             self.assertFalse(design_checks["design-parity.source-image"]["ok"])
             self.assertIn("planning/screenshots/reference.png", design_checks["design-parity.source-image"]["remediation"])
             for row in blocked_payload["scenarios"]:
+                self.assertEqual(row["status"], "blocked")
                 self.assertEqual(row["local_readiness"]["status"], "blocked")
 
             (repo_root / "planning" / "screenshots").mkdir(parents=True)
@@ -420,7 +427,8 @@ class DesktopCommandsCliTests(unittest.TestCase):
         self.assertEqual(result, 0)
         windows_markdown = self.printed[0]
         self.assertIn("Windows session-agent desktop proof", windows_markdown)
-        self.assertIn("Status: `planned`", windows_markdown)
+        self.assertIn("Status: `blocked`", windows_markdown)
+        self.assertIn("Local readiness: `blocked`", windows_markdown)
         self.assertIn("desktop video-doctor windows", windows_markdown)
         self.assertIn("ddagrab/gdigrab", windows_markdown)
         self.assertIn("Remediation: Use macOS desktop", windows_markdown)

@@ -672,8 +672,11 @@ def desktop_video_matrix_payload(
         if scenario and item["id"] != scenario:
             continue
         row = {key: value for key, value in item.items()}
+        declared_status = str(row.get("status") or "")
         if check:
             row["local_readiness"] = _video_matrix_check(row, repo_root=root, which_fn=which_fn)
+            row["declared_status"] = declared_status
+            row["status"] = row["local_readiness"]["status"]
         status_value = row.get("local_readiness", {}).get("status") if check else row.get("status")
         if status and status_value != status:
             continue
