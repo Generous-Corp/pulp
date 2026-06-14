@@ -25,7 +25,7 @@ class QueueStaleReclaimBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.QUEUE_STALE_RECLAIM_EXPORTS, expected)
         self.assertTrue(callable(self.mod.reclaim_stale_remote_validators))
 
-    def test_reclaim_stale_remote_validators_binds_cleanup_dependencies(self):
+    def test_reclaim_stale_remote_validators_delegates_with_assembled_dependencies(self):
         captured = {}
 
         def reclaim_stale_remote_validators_locked(**kwargs):
@@ -33,10 +33,8 @@ class QueueStaleReclaimBindingsTests(unittest.TestCase):
             return 2
 
         lifecycle = types.SimpleNamespace(reclaim_stale_remote_validators_locked=reclaim_stale_remote_validators_locked)
-        cleanup = types.SimpleNamespace(reclaim_stale_remote_validator_candidates=object())
         bindings = {
             "_queue_lifecycle": lifecycle,
-            "_cleanup": cleanup,
             "queue_lock_path": object(),
             "file_lock": object(),
             "load_queue_unlocked": object(),
@@ -47,21 +45,12 @@ class QueueStaleReclaimBindingsTests(unittest.TestCase):
             "now_iso": object(),
             "trim_line": object(),
         }
+        deps = {"queue_lock_path_fn": object(), "cleanup_validator_fn": object()}
 
-        self.assertEqual(self.mod.reclaim_stale_remote_validators(bindings, {"targets": {}}), 2)
-        self.assertIs(captured["reclaim"]["queue_lock_path_fn"], bindings["queue_lock_path"])
-        self.assertIs(captured["reclaim"]["file_lock_fn"], bindings["file_lock"])
-        self.assertIs(captured["reclaim"]["load_queue_unlocked_fn"], bindings["load_queue_unlocked"])
-        self.assertIs(
-            captured["reclaim"]["collect_stale_windows_cleanup_candidates_unlocked_fn"],
-            bindings["collect_stale_windows_cleanup_candidates_unlocked"],
-        )
-        self.assertIs(captured["reclaim"]["save_queue_unlocked_fn"], bindings["save_queue_unlocked"])
-        self.assertIs(captured["reclaim"]["cleanup_validator_fn"], bindings["cleanup_stale_windows_validator"])
-        self.assertIs(captured["reclaim"]["update_job_target_state_fn"], bindings["update_job_target_state"])
-        self.assertIs(captured["reclaim"]["now_fn"], bindings["now_iso"])
-        self.assertIs(captured["reclaim"]["trim_line_fn"], bindings["trim_line"])
-        self.assertIs(captured["reclaim"]["reclaim_stale_remote_validator_candidates_fn"], cleanup.reclaim_stale_remote_validator_candidates)
+        with mock.patch.object(self.mod, "queue_stale_reclaim_dependencies", return_value=deps):
+            self.assertEqual(self.mod.reclaim_stale_remote_validators(bindings, {"targets": {}}), 2)
+        self.assertIs(captured["reclaim"]["queue_lock_path_fn"], deps["queue_lock_path_fn"])
+        self.assertIs(captured["reclaim"]["cleanup_validator_fn"], deps["cleanup_validator_fn"])
 
     def test_install_queue_stale_reclaim_helpers_wires_named_exports(self):
         bindings = {}
