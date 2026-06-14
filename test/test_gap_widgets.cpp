@@ -106,13 +106,45 @@ TEST_CASE("Toast action fires on a right-side click", "[view][gap][toast]") {
     REQUIRE(fired);
 }
 
+TEST_CASE("NumberBox end zones step the value and clamp", "[view][gap][numberbox]") {
+    NumberBox n;
+    n.set_range(-5, 5);
+    n.set_step(1);
+    n.set_value(0);
+    n.set_bounds({0, 0, 120, 32});
+    double last = 0;
+    n.on_change = [&](double v) { last = v; };
+    n.on_mouse_down({8, 16});      // ‹ zone (x < height 32) → decrement
+    REQUIRE(last == -1.0);
+    n.on_mouse_down({112, 16});    // › zone (x > w - height) → increment
+    REQUIRE(last == 0.0);
+    // Scroll wheel up (delta < 0) increments; clamps at range top.
+    n.set_value(5);
+    n.on_wheel(-1.0f);
+    REQUIRE(n.value() == 5.0);
+}
+
+TEST_CASE("Spinner is indeterminate by default and accepts a determinate fraction",
+          "[view][gap][spinner]") {
+    Spinner s;
+    s.set_bounds({0, 0, 24, 24});
+    REQUIRE(s.progress() < 0.0f);          // indeterminate
+    float before = s.phase();
+    s.advance_animations(0.1f);
+    REQUIRE(s.phase() > before);           // animation advances
+    s.set_progress(0.5f);
+    REQUIRE(s.progress() == 0.5f);
+}
+
 TEST_CASE("All gap widgets paint without crashing and emit draw commands",
           "[view][gap][smoke]") {
     EmptyState e; e.set_bounds({0, 0, 320, 100});
     Popover po; po.set_title("Quantize"); po.set_bounds({0, 0, 240, 120});
     InCanvasDialog d; d.set_message("Unsaved edits."); d.set_destructive(true); d.set_bounds({0, 0, 480, 320});
     ChannelStrip cs; cs.set_label("Drum Bus"); cs.set_level(0.6f); cs.set_pan(-0.3f); cs.set_bounds({0, 0, 90, 240});
-    for (View* v : std::vector<View*>{&e, &po, &d, &cs}) {
+    Spinner sp; sp.set_bounds({0, 0, 28, 28});
+    NumberBox nb; nb.set_suffix("st"); nb.set_value(-3.54); nb.set_bounds({0, 0, 130, 32});
+    for (View* v : std::vector<View*>{&e, &po, &d, &cs, &sp, &nb}) {
         RecordingCanvas rc;
         v->paint(rc);
         REQUIRE_FALSE(rc.commands().empty());

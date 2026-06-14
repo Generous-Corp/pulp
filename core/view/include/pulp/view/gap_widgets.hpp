@@ -206,4 +206,46 @@ private:
     float pan_ = 0.0f;
 };
 
+// ── Spinner ─────────────────────────────────────────────────────────────
+// Loading spinner: a faint full-circle track ring with an accent arc.
+// Indeterminate by default — the arc sweeps around as advance_animations()
+// is driven; set_progress(p in [0,1]) pins a determinate arc covering that
+// fraction. Paints entirely from theme tokens (control.track + accent.primary).
+class Spinner : public View {
+public:
+    void set_progress(float p) { progress_ = p; }   ///< <0 = indeterminate (spins)
+    float progress() const { return progress_; }
+    void advance_animations(float dt) { phase_ += dt; }
+    float phase() const { return phase_; }
+    void paint(canvas::Canvas& canvas) override;
+    float intrinsic_height() const override { return 24.0f; }
+private:
+    float progress_ = -1.0f;  ///< <0 = indeterminate
+    float phase_ = 0.0f;      ///< seconds; drives the indeterminate rotation
+};
+
+// ── NumberBox ───────────────────────────────────────────────────────────
+// Compact numeric field shaped as a rounded pill: ‹ value › with chevrons.
+// Click the ‹ / › end zones to step; scroll to nudge; the value + suffix sit
+// centered. Distinct from Stepper (square −/+ zones, taller) — NumberBox is
+// the inline pill form used in the Figma "Buttons & inputs" row.
+class NumberBox : public View {
+public:
+    NumberBox() { set_focusable(true); }
+    void set_value(double v);
+    double value() const { return value_; }
+    void set_range(double lo, double hi) { min_ = lo; max_ = hi; }
+    void set_step(double s) { step_ = s; }
+    void set_suffix(std::string s) { suffix_ = std::move(s); }
+    std::function<void(double)> on_change;
+    void paint(canvas::Canvas& canvas) override;
+    void on_mouse_down(Point pos) override;
+    bool wants_wheel_value() const override { return true; }
+    void on_wheel(float delta_y) override { set_value(value_ + (delta_y > 0 ? -step_ : step_)); }
+    float intrinsic_height() const override { return 32.0f; }
+private:
+    double value_ = 0.0, min_ = -24.0, max_ = 24.0, step_ = 1.0;
+    std::string suffix_;
+};
+
 }  // namespace pulp::view

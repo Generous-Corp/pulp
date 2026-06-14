@@ -407,4 +407,63 @@ void ChannelStrip::on_wheel(float delta_y) {
     if (v != level_) { level_ = v; request_repaint(); if (on_level_change) on_level_change(level_); }
 }
 
+// ── Spinner ─────────────────────────────────────────────────────────────
+void Spinner::paint(canvas::Canvas& canvas) {
+    const float w = bounds().width, h = bounds().height;
+    const float cx = w * 0.5f, cy = h * 0.5f;
+    const float thick = std::max(2.0f, std::min(w, h) * 0.12f);
+    const float r = std::min(w, h) * 0.5f - thick;
+    if (r <= 0.0f) return;
+    constexpr float kTwoPi = 6.2831853f;
+    canvas.set_line_cap(canvas::LineCap::round);
+    canvas.set_line_width(thick);
+    // Faint full-circle track.
+    canvas.set_stroke_color(resolve_color("control.track", Color::rgba8(60, 60, 60)));
+    canvas.stroke_arc(cx, cy, r, 0.0f, kTwoPi);
+    // Accent arc — determinate fraction, or a sweeping 270° arc when < 0.
+    canvas.set_stroke_color(resolve_color("accent.primary", Color::rgba8(22, 218, 194)));
+    if (progress_ >= 0.0f) {
+        const float sweep = std::clamp(progress_, 0.0f, 1.0f) * kTwoPi;
+        canvas.stroke_arc(cx, cy, r, -1.5708f, -1.5708f + sweep);  // from 12 o'clock
+    } else {
+        const float start = std::fmod(phase_ * 3.0f, kTwoPi);     // ~0.5 rev/s
+        canvas.stroke_arc(cx, cy, r, start, start + 4.712f);       // 270°
+    }
+}
+
+// ── NumberBox ───────────────────────────────────────────────────────────
+void NumberBox::set_value(double v) {
+    const double nv = std::clamp(v, min_, max_);
+    if (nv != value_) { value_ = nv; request_repaint(); if (on_change) on_change(value_); }
+}
+void NumberBox::paint(canvas::Canvas& canvas) {
+    const float w = bounds().width, h = bounds().height;
+    const float r = h * 0.5f;
+    canvas.set_fill_color(resolve_color("bg.surface", Color::rgba8(30, 30, 46)));
+    canvas.fill_rounded_rect(0, 0, w, h, r);
+    canvas.set_stroke_color(resolve_color("control.border", Color::rgba8(80, 80, 100)));
+    canvas.set_line_width(1.0f);
+    canvas.stroke_rounded_rect(0, 0, w, h, r);
+    // Chevrons in the end zones.
+    canvas.set_font("Inter", 13.0f);
+    canvas.set_fill_color(resolve_color("text.secondary", Color::rgba8(150, 150, 170)));
+    canvas.set_text_align(canvas::TextAlign::center);
+    canvas.fill_text_anchored("\xe2\x80\xb9", r, h * 0.5f, canvas::Canvas::TextAnchor::GlyphCenter);        // ‹
+    canvas.fill_text_anchored("\xe2\x80\xba", w - r, h * 0.5f, canvas::Canvas::TextAnchor::GlyphCenter);    // ›
+    // Centered value + suffix.
+    char buf[32];
+    const char* sign = value_ > 0 ? "+" : "";
+    std::snprintf(buf, sizeof(buf), "%s%g%s%s", sign, value_,
+                  suffix_.empty() ? "" : " ", suffix_.c_str());
+    canvas.set_font("Inter", 12.0f);
+    canvas.set_fill_color(resolve_color("text.primary", Color::rgba8(220, 220, 230)));
+    canvas.fill_text_anchored(buf, w * 0.5f, h * 0.5f, canvas::Canvas::TextAnchor::GlyphCenter);
+    canvas.set_text_align(canvas::TextAlign::left);
+}
+void NumberBox::on_mouse_down(Point pos) {
+    const float w = bounds().width, edge = bounds().height;  // square-ish end zones
+    if (pos.x < edge) set_value(value_ - step_);             // ‹ decrement
+    else if (pos.x > w - edge) set_value(value_ + step_);    // › increment
+}
+
 }  // namespace pulp::view
