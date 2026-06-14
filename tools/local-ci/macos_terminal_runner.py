@@ -165,6 +165,27 @@ def close_terminal_windows_with_title(
             "end tell",
         ]
     )
+    clear_stale_title_script = "\n".join(
+        [
+            'tell application "Terminal"',
+            "    set clearedTitleCount to 0",
+            "    repeat with w in (every window)",
+            "        set windowName to name of w",
+            f"        if windowName contains {json.dumps(title_contains)} then",
+            "            repeat with t in tabs of w",
+            "                try",
+            "                    if busy of t is false then",
+            '                        set custom title of t to ""',
+            "                        set clearedTitleCount to clearedTitleCount + 1",
+            "                    end if",
+            "                end try",
+            "            end repeat",
+            "        end if",
+            "    end repeat",
+            "    return clearedTitleCount",
+            "end tell",
+        ]
+    )
     result = subprocess.CompletedProcess(["osascript", "-e", close_window_script], 1, "", "")
     closed_count = 0
     close_attempt_count = 0
@@ -174,6 +195,7 @@ def close_terminal_windows_with_title(
     other_window_count: int | None = None
     miniaturized_count = 0
     exit_attempt_count = 0
+    stale_title_clear_count = 0
     for attempt in range(max(1, attempts)):
         if attempt:
             sleep_fn(0.2)
@@ -245,6 +267,27 @@ def close_terminal_windows_with_title(
     else:
         closed_count = 0
     if remaining_proof_count and remaining_proof_count > 0:
+        clear_title_result = run_fn(["osascript", "-e", clear_stale_title_script], capture_output=True, text=True)
+        if clear_title_result.returncode == 0:
+            try:
+                stale_title_clear_count = int((clear_title_result.stdout or "0").strip())
+            except ValueError:
+                stale_title_clear_count = 0
+            if stale_title_clear_count > 0:
+                sleep_fn(0.2)
+                state_result = run_fn(["osascript", "-e", state_script], capture_output=True, text=True)
+                if state_result.returncode == 0:
+                    state_fields = (state_result.stdout or "").strip().split("\t")
+                    if len(state_fields) == 3:
+                        try:
+                            remaining_proof_count = int(state_fields[1])
+                            other_window_count = int(state_fields[2])
+                        except ValueError:
+                            remaining_proof_count = None
+                            other_window_count = None
+                if remaining_proof_count == 0:
+                    closed_count = close_attempt_count
+    if remaining_proof_count and remaining_proof_count > 0:
         state_result = run_fn(["osascript", "-e", state_script], capture_output=True, text=True)
         if state_result.returncode == 0:
             state_fields = (state_result.stdout or "").strip().split("\t")
@@ -273,6 +316,7 @@ def close_terminal_windows_with_title(
         "closed_count": closed_count,
         "close_attempt_count": close_attempt_count,
         "exit_attempt_count": exit_attempt_count,
+        "stale_title_clear_count": stale_title_clear_count,
         "remaining_proof_count": remaining_proof_count,
         "other_window_count": other_window_count,
         "miniaturized_count": miniaturized_count,
