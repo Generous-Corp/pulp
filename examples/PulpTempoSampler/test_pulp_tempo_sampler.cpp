@@ -399,4 +399,42 @@ TEST_CASE("end-to-end: clicking a slice in the editor produces audio", "[tempo-s
     }
     CHECK(energy > 1e-6);  // the wired editor actually triggered the sample
 }
+
+TEST_CASE("waveform scroll zooms in/out and pans", "[tempo-sampler]") {
+    Fixture f;
+    auto loop = percussive_loop(48000, 4);
+    const float* ch[1] = {loop.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+
+    auto editor = f.proc->create_view();
+    REQUIRE(editor);
+    (void)view::render_to_png(*editor, 760, 372, 1.0f, view::ScreenshotBackend::skia);
+    WaveformDropView* wf = find_waveform(editor.get());
+    REQUIRE(wf != nullptr);
+    const auto b = wf->local_bounds();
+    const int full = wf->visible_length();
+    REQUIRE(full > 0);  // zoom-to-fit on load
+
+    auto wheel = [&](float dy, float dx, float fx) {
+        view::MouseEvent e;
+        e.is_wheel = true;
+        e.scroll_delta_y = dy;
+        e.scroll_delta_x = dx;
+        e.position = {b.x + b.width * fx, b.y + b.height * 0.5f};
+        wf->on_mouse_event(e);
+    };
+
+    wheel(3.0f, 0.0f, 0.5f);                  // scroll up at center -> zoom IN
+    const int zoomed = wf->visible_length();
+    REQUIRE(zoomed < full);
+
+    wheel(-6.0f, 0.0f, 0.5f);                 // scroll down -> zoom OUT (toward full)
+    REQUIRE(wf->visible_length() > zoomed);
+
+    wheel(3.0f, 0.0f, 0.5f);                  // zoom back in, then pan
+    const int start_before = wf->visible_start();
+    wheel(0.0f, 40.0f, 0.5f);                 // horizontal -> pan
+    REQUIRE(wf->visible_start() != start_before);
+}
 #endif  // __APPLE__

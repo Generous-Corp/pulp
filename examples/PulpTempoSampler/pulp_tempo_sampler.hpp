@@ -130,6 +130,10 @@ public:
     // Loaded: a left click on a slice auditions it (note = root + slice index),
     // instead of the base WaveformEditor's range selection.
     void on_mouse_event(const view::MouseEvent& event) override {
+        // Scroll/pinch INSIDE the waveform zooms (vertical, around the cursor)
+        // and pans (horizontal) — no zoom buttons.
+        if (event.is_wheel) { if (has_audio_) handle_wheel(event); return; }
+
         const bool explicit_phase = event.hasExplicitPhase();
         const bool down = explicit_phase ? event.isPress() : event.is_down;
         const bool up = explicit_phase ? event.isRelease() : !event.is_down;
@@ -170,7 +174,8 @@ public:
         auto b = local_bounds();
         if (!has_audio_) paint_cta(c, b);
         if (drag_over_)  paint_drag_overlay(c, b);
-        // Single playhead at the most-recently-triggered slice's position.
+        // Single playhead at the most-recently-triggered slice's position
+        // (viewport-aware via sample_to_x, so it tracks correctly when zoomed).
         if (has_audio_ && playhead_query && total_samples_ > 0) {
             int s = -1; float prog = 0.0f;
             playhead_query(s, prog);
@@ -179,10 +184,12 @@ public:
                     static_cast<double>(prog) *
                     static_cast<double>(slices_[static_cast<std::size_t>(s) + 1] -
                                         slices_[static_cast<std::size_t>(s)]);
-                const float x = b.x + static_cast<float>(samp / total_samples_) * b.width;
-                c.set_stroke_color(canvas::Color::rgba8(0x46, 0xF0, 0xDB));
-                c.set_line_width(2.0f);
-                c.stroke_line(x, b.y, x, b.y + b.height);
+                const float x = sample_to_x(static_cast<int>(samp), b);
+                if (x >= b.x && x <= b.x + b.width) {  // only when in view
+                    c.set_stroke_color(canvas::Color::rgba8(0x46, 0xF0, 0xDB));
+                    c.set_line_width(2.0f);
+                    c.stroke_line(x, b.y, x, b.y + b.height);
+                }
             }
         }
         const float fa = std::clamp(flash_.value(), 0.0f, 1.0f);
@@ -231,6 +238,7 @@ private:
             }
             slices_ = std::move(slices);
             total_samples_ = static_cast<long>(mono.size());
+            set_visible_range(0, static_cast<int>(total_samples_));  // zoom-to-fit new sample
             has_audio_ = true;
         } else {
             slices_.clear();
@@ -238,15 +246,36 @@ private:
             has_audio_ = false;
         }
     }
-    // Map a local x to a slice index (root + index = MIDI note). -1 if none.
-    int slice_at_x(float x) const {
+    // Scroll wheel / two-finger: vertical -> zoom around the cursor, horizontal
+    // -> pan. Cursor-centred zoom keeps the sample under the pointer fixed.
+    void handle_wheel(const view::MouseEvent& e) {
         auto b = local_bounds();
-        if (b.width <= 0 || total_samples_ <= 0 || slices_.size() < 2) return -1;
-        const float frac = std::clamp((x - b.x) / b.width, 0.0f, 0.999f);
-        const long sample = static_cast<long>(frac * static_cast<float>(total_samples_));
+        if (b.width <= 0 || total_samples_ <= 0) return;
+        const int total = static_cast<int>(total_samples_);
+        const int len = visible_length() > 0 ? visible_length() : total;
+        if (std::abs(e.scroll_delta_y) >= std::abs(e.scroll_delta_x)) {
+            const float factor = std::exp(e.scroll_delta_y * 0.15f);  // scroll up -> zoom in
+            int new_len = std::clamp(static_cast<int>(static_cast<float>(len) / factor), 64, total);
+            const int s0 = x_to_sample(e.position.x, b);
+            const float frac = std::clamp((e.position.x - b.x) / b.width, 0.0f, 1.0f);
+            int new_start = s0 - static_cast<int>(frac * static_cast<float>(new_len));
+            new_start = std::clamp(new_start, 0, std::max(0, total - new_len));
+            set_visible_range(new_start, new_len);
+        } else {
+            scroll(static_cast<int>(e.scroll_delta_x * static_cast<float>(len) * 0.01f));
+        }
+    }
+
+    // Map a local x to a slice index (root + index = MIDI note). -1 if none.
+    // Viewport-aware (uses the zoom/scroll transform) so clicks land on the
+    // right slice even when zoomed in.
+    int slice_at_x(float x) const {
+        if (total_samples_ <= 0 || slices_.size() < 2) return -1;
+        const long sample = static_cast<long>(x_to_sample(x, local_bounds()));
         for (std::size_t i = 0; i + 1 < slices_.size(); ++i)
             if (sample >= slices_[i] && sample < slices_[i + 1]) return static_cast<int>(i);
-        return static_cast<int>(slices_.size()) - 2;  // clamp to last slice
+        if (sample >= slices_.back()) return static_cast<int>(slices_.size()) - 2;
+        return 0;
     }
     void advance_flash() {
         const auto now = std::chrono::steady_clock::now();
