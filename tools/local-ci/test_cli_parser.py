@@ -548,6 +548,8 @@ class CliParserTests(unittest.TestCase):
             "--machine",
             "blackbook",
             "--check",
+            "--probe-host",
+            "blackbook",
             "--run-in-terminal",
             "--skip-remotion-smoke",
             "--video-audio",
@@ -568,6 +570,7 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(args.target, "mac")
         self.assertEqual(args.machine, "blackbook")
         self.assertTrue(args.check)
+        self.assertEqual(args.probe_host, "blackbook")
         self.assertTrue(args.run_in_terminal)
         self.assertTrue(args.skip_remotion_smoke)
         self.assertEqual(args.video_audio, "system")

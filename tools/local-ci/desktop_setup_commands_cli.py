@@ -7,6 +7,7 @@ from collections.abc import Callable
 import importlib.util
 import json
 from pathlib import Path
+import shlex
 import shutil
 import subprocess
 
@@ -445,6 +446,64 @@ def desktop_video_setup_prerequisite_remediations(checks: list[dict]) -> list[di
     return remediations
 
 
+def desktop_video_setup_remote_prerequisite_checks(
+    host: str,
+    *,
+    subprocess_run_fn: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+) -> list[dict]:
+    script = (
+        "for tool in pulp npm node cmake; do "
+        "path=$(command -v \"$tool\" 2>/dev/null || true); "
+        "if [ -n \"$path\" ]; then printf '%s\\t%s\\n' \"$tool\" \"$path\"; "
+        "else printf '%s\\t\\n' \"$tool\"; fi; "
+        "done"
+    )
+    try:
+        result = subprocess_run_fn(
+            ["ssh", "-o", "ConnectTimeout=5", "-o", "BatchMode=yes", host, "sh", "-lc", shlex.quote(script)],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return [
+            {
+                "name": "remote_setup.ssh",
+                "ok": False,
+                "detail": str(exc),
+                "required": True,
+                "title": "SSH",
+                "remediation": f"Make `{host}` reachable with non-interactive SSH before probing video setup prerequisites.",
+            }
+        ]
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or f"ssh exited {result.returncode}").strip()
+        return [
+            {
+                "name": "remote_setup.ssh",
+                "ok": False,
+                "detail": detail,
+                "required": True,
+                "title": "SSH",
+                "remediation": f"Make `{host}` reachable with non-interactive SSH before probing video setup prerequisites.",
+            }
+        ]
+
+    found: dict[str, str] = {}
+    for line in result.stdout.splitlines():
+        if "\t" not in line:
+            continue
+        name, path = line.split("\t", 1)
+        found[name] = path
+    checks: list[dict] = []
+    for check in desktop_video_setup_prerequisite_checks(which_fn=lambda name: found.get(name) or None):
+        remote_check = dict(check)
+        remote_check["name"] = check["name"].replace("setup.", "remote_setup.", 1)
+        remote_check["host"] = host
+        checks.append(remote_check)
+    return checks
+
+
 def append_video_recipe_doctor_checks(args: argparse.Namespace, checks: list[dict]) -> None:
     recipe = getattr(args, "recipe", None)
     if not recipe:
@@ -813,6 +872,7 @@ def cmd_desktop_video_setup(
     probe_macos_avfoundation_audio_fn: Callable[[str | None], tuple[bool, str]] | None = None,
     desktop_video_matrix_payload_fn: Callable[..., dict] | None = None,
     setup_prerequisite_checks_fn: Callable[[], list[dict]] = desktop_video_setup_prerequisite_checks,
+    remote_setup_prerequisite_checks_fn: Callable[[str], list[dict]] = desktop_video_setup_remote_prerequisite_checks,
     print_fn: Callable[[str], None] = print,
 ) -> int:
     steps = desktop_video_setup_steps(args.target, machine_label=getattr(args, "machine", None))
@@ -859,6 +919,7 @@ def cmd_desktop_video_setup(
         "install_model": desktop_video_install_model(),
         "steps": steps,
         "setup_prerequisites": None,
+        "remote_setup_prerequisites": None,
         "check": None,
     }
     exit_code = 0
@@ -892,6 +953,18 @@ def cmd_desktop_video_setup(
         payload["check"] = doctor_payload
         if not setup_ok:
             exit_code = 1
+        probe_host = getattr(args, "probe_host", None)
+        if probe_host:
+            remote_checks = remote_setup_prerequisite_checks_fn(probe_host)
+            remote_ok = all(check["ok"] for check in remote_checks if check.get("required", True))
+            payload["remote_setup_prerequisites"] = {
+                "host": probe_host,
+                "ok": remote_ok,
+                "checks": remote_checks,
+                "remediations": desktop_video_setup_prerequisite_remediations(remote_checks),
+            }
+            if not remote_ok:
+                exit_code = 1
         if desktop_video_matrix_payload_fn is not None:
             payload["demo_matrix"] = desktop_video_matrix_payload_fn(
                 target=args.target,
@@ -925,6 +998,20 @@ def cmd_desktop_video_setup(
                 print_fn("")
                 print_fn("Setup remediation:")
                 for item in payload["setup_prerequisites"]["remediations"]:
+                    print_fn(f"  - {item['title']}: {item['detail']}")
+        if payload.get("remote_setup_prerequisites"):
+            print_fn("")
+            print_fn(
+                "Remote setup prerequisites "
+                f"({payload['remote_setup_prerequisites']['host']}): "
+                f"{'PASS' if payload['remote_setup_prerequisites']['ok'] else 'FAIL'}"
+            )
+            for check in payload["remote_setup_prerequisites"]["checks"]:
+                print_fn(f"  {_desktop_check_status(check):4s}  {check['name']}: {check['detail']}")
+            if payload["remote_setup_prerequisites"]["remediations"]:
+                print_fn("")
+                print_fn("Remote setup remediation:")
+                for item in payload["remote_setup_prerequisites"]["remediations"]:
                     print_fn(f"  - {item['title']}: {item['detail']}")
         print_fn("")
         print_fn(f"Current check: {'PASS' if payload['check']['ok'] else 'FAIL'}")

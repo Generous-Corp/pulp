@@ -79,6 +79,19 @@ With `--check`, the setup report includes a separate
 lets a fresh Mac fail with actionable install remediations even if the later
 screen-capture checks are not yet meaningful.
 
+To inspect another Mac without changing its checkout, add `--probe-host` with
+an SSH host alias. The command runs read-only `command -v` probes and emits a
+`remote_setup_prerequisites` block:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop video-setup mac \
+  --machine blackbook \
+  --check \
+  --probe-host blackbook \
+  --skip-remotion-smoke \
+  --json
+```
+
 When the setup report should also prove that a specific design-parity
 comparison is runnable, pass the same concrete inputs used by `video-matrix`:
 

@@ -68,6 +68,10 @@ With `--check`, inspect `setup_prerequisites` before `check`: missing `pulp`,
 setup path cleanly. Fix those first, then rerun the setup check and move on to
 Screen Recording / `video-doctor` failures.
 
+When checking another Mac over SSH, add `--probe-host <ssh-host>`. The probe is
+read-only and emits `remote_setup_prerequisites` with the remote `pulp`, `npm`,
+`node`, and `cmake` status.
+
 Create the machine-local config on a new checkout:
 
 ```bash

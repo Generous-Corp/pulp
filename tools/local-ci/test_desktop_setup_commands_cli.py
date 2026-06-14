@@ -769,6 +769,52 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
         missing = [item["check"] for item in payload["setup_prerequisites"]["remediations"]]
         self.assertEqual(missing, ["setup.pulp", "setup.npm", "setup.cmake"])
 
+    def test_video_setup_check_can_probe_remote_host_prerequisites(self):
+        self.targets["mac"]["optional"] = {"video_capture": True}
+        checks = [
+            {"name": "receipt", "ok": True, "detail": "installed"},
+            {"name": "screencapture", "ok": True, "detail": "/usr/sbin/screencapture"},
+            {"name": "video_capture", "ok": True, "detail": "/repo/node_modules/ffmpeg-static/ffmpeg", "required": False},
+            {"name": "avfoundation_screen", "ok": True, "detail": "Capture screen 0 (3:)", "required": False},
+        ]
+        probed_hosts = []
+        deps = {
+            "load_config_fn": self.config,
+            "resolve_desktop_target_fn": lambda _config, name: self.targets[name],
+            "desktop_doctor_checks_fn": lambda _config, _name: [dict(check) for check in checks],
+            "normalize_desktop_optional_config_fn": lambda optional: {"video_capture": bool((optional or {}).get("video_capture"))},
+            "video_proof_smoke_fn": lambda: {"ok": True, "detail": "smoke ok"},
+            "probe_macos_avfoundation_audio_fn": lambda _device: self.fail("audio probe should not run"),
+            "setup_prerequisite_checks_fn": self.setup_ok_checks,
+            "remote_setup_prerequisite_checks_fn": lambda host: probed_hosts.append(host) or [
+                {"name": "remote_setup.pulp", "ok": False, "detail": "missing", "required": True, "title": "Pulp CLI", "remediation": "Install Pulp."},
+                {"name": "remote_setup.npm", "ok": True, "detail": "/opt/homebrew/bin/npm", "required": True, "title": "npm"},
+            ],
+            "print_fn": self.print_line,
+        }
+
+        result = self.mod.cmd_desktop_video_setup(
+            Namespace(
+                target="mac",
+                machine="blackbook",
+                check=True,
+                probe_host="blackbook",
+                skip_remotion_smoke=False,
+                video_audio="none",
+                video_audio_device=None,
+                json=True,
+            ),
+            **deps,
+        )
+
+        self.assertEqual(result, 1)
+        self.assertEqual(probed_hosts, ["blackbook"])
+        payload = json.loads(self.printed[0])
+        self.assertTrue(payload["setup_prerequisites"]["ok"])
+        self.assertFalse(payload["remote_setup_prerequisites"]["ok"])
+        self.assertEqual(payload["remote_setup_prerequisites"]["host"], "blackbook")
+        self.assertEqual(payload["remote_setup_prerequisites"]["remediations"][0]["check"], "remote_setup.pulp")
+
     def test_video_setup_text_reports_demo_matrix_blockers(self):
         self.targets["mac"]["optional"] = {"video_capture": True}
         checks = [

@@ -544,6 +544,10 @@ def build_local_ci_parser(
     p_desktop_video_setup.add_argument("--machine", help="Human-readable machine label to include in generated smoke labels")
     p_desktop_video_setup.add_argument("--check", action="store_true", help="Also run the video-doctor checks and include current readiness")
     p_desktop_video_setup.add_argument(
+        "--probe-host",
+        help="SSH host to probe read-only for setup prerequisites such as pulp, npm, node, and cmake.",
+    )
+    p_desktop_video_setup.add_argument(
         "--run-in-terminal",
         action="store_true",
         help="On macOS, re-run video-setup inside Terminal.app when using --check so Screen Recording permission follows Terminal's TCC grant.",
