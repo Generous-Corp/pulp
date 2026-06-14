@@ -6,6 +6,7 @@ from __future__ import annotations
 from module_test_utils import load_module_from_path
 from pathlib import Path
 import unittest
+from unittest import mock
 
 
 MODULE_PATH = Path(__file__).with_name("windows_probe_bindings.py")
@@ -30,44 +31,28 @@ class WindowsProbeBindingsTests(unittest.TestCase):
         self.assertEqual(len(expected), len(set(expected)))
 
     def test_install_windows_probe_helpers_routes_each_group(self) -> None:
-        calls = []
+        bindings = {}
 
-        def core_install(bindings, names):
-            calls.append(("core", names))
+        with (
+            mock.patch.object(self.mod, "install_windows_probe_core_helpers") as core,
+            mock.patch.object(self.mod, "install_windows_remote_file_helpers") as remote_file,
+            mock.patch.object(self.mod, "install_windows_session_probe_helpers") as session,
+            mock.patch.object(self.mod, "install_local_helpers") as install_local,
+        ):
+            self.mod.install_windows_probe_helpers(
+                bindings,
+                (
+                    "run_windows_ssh_powershell",
+                    "windows_ssh_write_text",
+                    "start_windows_session_agent_task",
+                    "custom_windows_probe_export",
+                ),
+            )
 
-        def remote_file_install(bindings, names):
-            calls.append(("remote_file", names))
-
-        def session_install(bindings, names):
-            calls.append(("session", names))
-
-        def local_install(bindings, globals_obj, names):
-            calls.append(("local", names))
-
-        self.mod.install_windows_probe_core_helpers = core_install
-        self.mod.install_windows_remote_file_helpers = remote_file_install
-        self.mod.install_windows_session_probe_helpers = session_install
-        self.mod.install_local_helpers = local_install
-
-        self.mod.install_windows_probe_helpers(
-            {},
-            (
-                "run_windows_ssh_powershell",
-                "windows_ssh_write_text",
-                "start_windows_session_agent_task",
-                "custom_windows_probe_export",
-            ),
-        )
-
-        self.assertEqual(
-            calls,
-            [
-                ("core", ("run_windows_ssh_powershell",)),
-                ("remote_file", ("windows_ssh_write_text",)),
-                ("session", ("start_windows_session_agent_task",)),
-                ("local", ("custom_windows_probe_export",)),
-            ],
-        )
+        core.assert_called_once_with(bindings, ("run_windows_ssh_powershell",))
+        remote_file.assert_called_once_with(bindings, ("windows_ssh_write_text",))
+        session.assert_called_once_with(bindings, ("start_windows_session_agent_task",))
+        install_local.assert_called_once_with(bindings, self.mod.__dict__, ("custom_windows_probe_export",))
 
 
 if __name__ == "__main__":

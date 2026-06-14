@@ -3,6 +3,7 @@
 
 from module_test_utils import load_module_from_path
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -27,38 +28,25 @@ class DesktopProbeBindingsTests(unittest.TestCase):
         self.assertEqual(len(expected), len(set(expected)))
 
     def test_install_desktop_probe_helpers_routes_selected_groups(self):
-        calls = []
+        bindings = {}
 
-        def windows_install(bindings, names):
-            calls.append(("windows", names))
+        with (
+            mock.patch.object(self.mod, "install_desktop_windows_probe_helpers") as windows,
+            mock.patch.object(self.mod, "install_desktop_doctor_probe_helpers") as doctor,
+            mock.patch.object(self.mod, "install_local_helpers") as install_local,
+        ):
+            self.mod.install_desktop_probe_helpers(
+                bindings,
+                (
+                    "probe_windows_repo_checkout",
+                    "probe_webdriver_endpoint",
+                    "custom_probe_export",
+                ),
+            )
 
-        def doctor_install(bindings, names):
-            calls.append(("doctor", names))
-
-        def local_install(bindings, globals_obj, names):
-            calls.append(("local", names))
-
-        self.mod.install_desktop_windows_probe_helpers = windows_install
-        self.mod.install_desktop_doctor_probe_helpers = doctor_install
-        self.mod.install_local_helpers = local_install
-
-        self.mod.install_desktop_probe_helpers(
-            {},
-            (
-                "probe_windows_repo_checkout",
-                "probe_webdriver_endpoint",
-                "custom_probe_export",
-            ),
-        )
-
-        self.assertEqual(
-            calls,
-            [
-                ("windows", ("probe_windows_repo_checkout",)),
-                ("doctor", ("probe_webdriver_endpoint",)),
-                ("local", ("custom_probe_export",)),
-            ],
-        )
+        windows.assert_called_once_with(bindings, ("probe_windows_repo_checkout",))
+        doctor.assert_called_once_with(bindings, ("probe_webdriver_endpoint",))
+        install_local.assert_called_once_with(bindings, self.mod.__dict__, ("custom_probe_export",))
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@
 
 from module_test_utils import load_module_from_path
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -27,37 +28,28 @@ class DesktopWindowsProbeBindingsTests(unittest.TestCase):
         self.assertEqual(len(expected), len(set(expected)))
 
     def test_install_desktop_windows_probe_helpers_routes_selected_groups_and_unknown_exports(self):
-        calls = []
+        bindings = {}
 
-        def repo_install(bindings, names):
-            calls.append(("repo", names))
+        with (
+            mock.patch.object(self.mod, "install_desktop_windows_repo_probe_helpers") as repo,
+            mock.patch.object(self.mod, "install_desktop_windows_tooling_probe_helpers") as tooling,
+            mock.patch.object(self.mod, "install_local_helpers") as install_local,
+        ):
+            self.mod.install_desktop_windows_probe_helpers(
+                bindings,
+                (
+                    "probe_windows_repo_checkout",
+                    "probe_windows_remote_tooling",
+                    "custom_desktop_windows_probe_export",
+                ),
+            )
 
-        def tooling_install(bindings, names):
-            calls.append(("tooling", names))
-
-        def fallback_install(bindings, globals_obj, names):
-            calls.append(("local_fallback", names))
-
-        self.mod.install_desktop_windows_repo_probe_helpers = repo_install
-        self.mod.install_desktop_windows_tooling_probe_helpers = tooling_install
-        self.mod.install_local_helpers = fallback_install
-
-        self.mod.install_desktop_windows_probe_helpers(
-            {},
-            (
-                "probe_windows_repo_checkout",
-                "probe_windows_remote_tooling",
-                "custom_desktop_windows_probe_export",
-            ),
-        )
-
-        self.assertEqual(
-            calls,
-            [
-                ("repo", ("probe_windows_repo_checkout",)),
-                ("tooling", ("probe_windows_remote_tooling",)),
-                ("local_fallback", ("custom_desktop_windows_probe_export",)),
-            ],
+        repo.assert_called_once_with(bindings, ("probe_windows_repo_checkout",))
+        tooling.assert_called_once_with(bindings, ("probe_windows_remote_tooling",))
+        install_local.assert_called_once_with(
+            bindings,
+            self.mod.__dict__,
+            ("custom_desktop_windows_probe_export",),
         )
 
 
