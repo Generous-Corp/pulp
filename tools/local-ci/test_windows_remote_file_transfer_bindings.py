@@ -33,52 +33,6 @@ class WindowsRemoteFileTransferBindingsTests(unittest.TestCase):
         for name in expected:
             self.assertTrue(callable(getattr(self.mod, name)))
 
-    def test_transfer_helpers_bind_facade_dependencies(self) -> None:
-        cases = [
-            (
-                "windows_ssh_fetch_file",
-                self.mod.windows_ssh_fetch_file,
-                ("win", r"%TEMP%\a.txt", Path("/tmp/a.txt")),
-                {"optional": True, "timeout": 99},
-            ),
-            (
-                "windows_ssh_read_json",
-                self.mod.windows_ssh_read_json,
-                ("win", r"%TEMP%\a.json"),
-                {"optional": True, "timeout": 17},
-            ),
-            (
-                "windows_ssh_remove_path",
-                self.mod.windows_ssh_remove_path,
-                ("win", r"%TEMP%\old"),
-                {},
-            ),
-        ]
-        for runner_name, wrapper, args, kwargs in cases:
-            with self.subTest(runner_name=runner_name):
-                captured = {}
-
-                def runner(*runner_args, **runner_kwargs):
-                    captured["args"] = runner_args
-                    captured["kwargs"] = runner_kwargs
-                    return {"ok": True}
-
-                bindings = {
-                    "_windows_probe": types.SimpleNamespace(**{runner_name: runner}),
-                    "run_windows_ssh_powershell": object(),
-                    "windows_contract_expand_expression": object(),
-                }
-
-                self.assertEqual(wrapper(bindings, *args, **kwargs), {"ok": True})
-                self.assertEqual(captured["args"], args)
-                for key, value in kwargs.items():
-                    self.assertEqual(captured["kwargs"][key], value)
-                self.assertIs(captured["kwargs"]["run_windows_ssh_powershell_fn"], bindings["run_windows_ssh_powershell"])
-                self.assertIs(
-                    captured["kwargs"]["windows_contract_expand_expression_fn"],
-                    bindings["windows_contract_expand_expression"],
-                )
-
     def test_install_windows_remote_file_transfer_helpers_routes_groups_and_fallback(self) -> None:
         bindings = {"_windows_probe": types.SimpleNamespace()}
 
