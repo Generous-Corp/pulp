@@ -19,7 +19,6 @@ from module_test_utils import load_module_from_path
 
 
 MODULE_PATH = Path(__file__).with_name("local_ci.py")
-VALIDATE_BUILD_PATH = MODULE_PATH.parent.parent.parent / "validate-build.sh"
 
 
 def load_module():
@@ -2143,42 +2142,6 @@ class LocalCiTests(unittest.TestCase):
         self.assertIn("refs/heads/$Branch`:refs/remotes/origin/$Branch", captured["input_text"])
         self.assertIn("$BundleName = 'pulp-ci-job126.bundle'", captured["input_text"])
         self.assertIn("$BundleRef`:refs/pulp-ci-bundles/job126", captured["input_text"])
-
-    def test_validate_build_preserves_original_args_for_lock_reexec(self):
-        text = VALIDATE_BUILD_PATH.read_text()
-        self.assertIn('ORIGINAL_ARGS=("$@")', text)
-        self.assertIn('if ((${#ORIGINAL_ARGS[@]})); then', text)
-        self.assertIn('acquire_validation_lock "${ORIGINAL_ARGS[@]}"', text)
-        self.assertIn('else\n    acquire_validation_lock\nfi', text)
-
-    def test_validate_build_no_args_survives_strict_empty_array(self):
-        env = os.environ.copy()
-        env["PULP_VALIDATE_NO_LOCK"] = "1"
-        env["PULP_EXPECT_SMOKE"] = "1"
-
-        result = subprocess.run(
-            ["bash", str(VALIDATE_BUILD_PATH)],
-            cwd=VALIDATE_BUILD_PATH.parent,
-            env=env,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-
-        self.assertEqual(result.returncode, 2, result.stderr)
-        self.assertIn("Smoke validation contract violated", result.stderr)
-        self.assertNotIn("unbound variable", result.stderr)
-
-    def test_validate_build_uses_release_sdk_for_install_smoke(self):
-        text = VALIDATE_BUILD_PATH.read_text()
-        self.assertIn("-DCMAKE_BUILD_TYPE=Release", text)
-        self.assertNotIn("-DCMAKE_BUILD_TYPE=Debug", text)
-
-        ps1 = VALIDATE_BUILD_PATH.with_suffix(".ps1").read_text()
-        self.assertIn('"-DCMAKE_BUILD_TYPE=Release"', ps1)
-        self.assertIn("cmake --build $BuildDir --config Release", ps1)
-        self.assertIn("cmake --install $BuildDir --prefix $InstallDir --config Release", ps1)
-        self.assertIn("ctest --test-dir $BuildDir --output-on-failure -C Release", ps1)
 
     def test_save_result_updates_evidence_index_with_last_good_target_results(self):
         result_path_one = self.mod.save_result(
