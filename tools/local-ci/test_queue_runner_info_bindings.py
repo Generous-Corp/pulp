@@ -5,6 +5,7 @@ from module_test_utils import load_module_from_path
 from pathlib import Path
 import types
 import unittest
+from unittest import mock
 
 
 MODULE_PATH = Path(__file__).with_name("queue_runner_info_bindings.py")
@@ -48,6 +49,20 @@ class QueueRunnerInfoBindingsTests(unittest.TestCase):
         self.mod.clear_runner_info(bindings)
 
         self.assertEqual(calls, ["read", ("pid", 789), "current", ("write", {"pid": 1}), "clear"])
+
+    def test_install_queue_runner_info_helpers_wires_named_exports(self):
+        bindings = {}
+
+        with mock.patch.object(self.mod, "install_local_helpers") as install_local:
+            self.mod.install_queue_runner_info_helpers(bindings, ("read_runner_info", "custom_runner_info"))
+
+        self.assertEqual(
+            install_local.call_args_list,
+            [
+                mock.call(bindings, self.mod.__dict__, ("read_runner_info",)),
+                mock.call(bindings, self.mod.__dict__, ("custom_runner_info",)),
+            ],
+        )
 
 
 if __name__ == "__main__":
