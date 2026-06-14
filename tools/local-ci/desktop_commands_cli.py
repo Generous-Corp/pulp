@@ -68,6 +68,22 @@ def _append_unique(items: list[str], value: str | None) -> None:
         items.append(value)
 
 
+def _find_executable_path(
+    name: str,
+    *,
+    which_fn: Callable[[str], str | None] = shutil.which,
+    extra_paths: tuple[str, ...] = (),
+) -> str | None:
+    found = which_fn(name)
+    if found:
+        return found
+    for candidate in extra_paths:
+        path = Path(candidate)
+        if path.is_file() and os.access(path, os.X_OK):
+            return str(path)
+    return None
+
+
 def desktop_serve_candidate_hosts(
     bind_host: str,
     *,
@@ -526,8 +542,16 @@ def _video_matrix_check(
 
     prepare_command = str(item.get("prepare_command") or "")
     if "cmake" in prepare_command:
-        cmake_path = which_fn("cmake")
-        add("cmake", bool(cmake_path), cmake_path or "cmake not found on PATH")
+        cmake_path = _find_executable_path(
+            "cmake",
+            which_fn=which_fn,
+            extra_paths=(
+                "/opt/homebrew/bin/cmake",
+                "/usr/local/bin/cmake",
+                "/Applications/CMake.app/Contents/bin/cmake",
+            ),
+        )
+        add("cmake", bool(cmake_path), cmake_path or "cmake not found on PATH or common macOS install paths")
     if item["id"] in {"standalone-interaction", "component-zoom"}:
         skia_path = repo_root / "external" / "skia-build" / "libskia.a"
         add(

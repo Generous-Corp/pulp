@@ -285,6 +285,32 @@ class DesktopCommandsCliTests(unittest.TestCase):
             )
             self.assertEqual(payload["scenarios"][0]["local_readiness"]["status"], "ready")
 
+    def test_find_executable_path_uses_common_fallbacks(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tool = Path(tmpdir) / "cmake"
+            tool.write_text("#!/bin/sh\n")
+            tool.chmod(0o755)
+            found = self.mod._find_executable_path(
+                "cmake",
+                which_fn=lambda _name: None,
+                extra_paths=(str(tool),),
+            )
+            self.assertEqual(found, str(tool))
+
+            missing = self.mod._find_executable_path(
+                "cmake",
+                which_fn=lambda _name: None,
+                extra_paths=(str(Path(tmpdir) / "missing"),),
+            )
+            self.assertIsNone(missing)
+
+            preferred = self.mod._find_executable_path(
+                "cmake",
+                which_fn=lambda _name: "/usr/bin/cmake",
+                extra_paths=(str(tool),),
+            )
+            self.assertEqual(preferred, "/usr/bin/cmake")
+
         self.printed.clear()
         result = self.mod.cmd_desktop_video_matrix(
             Namespace(target="ios-simulator", scenario=None, json=False, markdown=True, check=True),
