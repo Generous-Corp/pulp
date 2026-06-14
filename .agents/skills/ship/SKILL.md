@@ -213,6 +213,75 @@ place the API parity break appears. Keep this covered in
 `test/test_linux_packaging.cpp` alongside the macOS parser tests in
 `test/test_codesign.cpp`.
 
+### macOS manual sign + notarize from a worktree (no `pulp` CLI built)
+
+Feature worktrees usually build only the example targets (`build-gpu/...`), not
+the `pulp` CLI — so `pulp ship sign/notarize` isn't available. Sign and notarize
+with the raw Apple tools. This is the exact flow `pulp ship` automates; reach for
+it only when the CLI binary is absent.
+
+**One-time keychain authorization (THE blocker).** A fresh login keychain does
+not let `codesign` use the Developer ID private key non-interactively, even when
+the key is present and the keychain is unlocked. `codesign` fails with
+`errSecInternalComponent` (and a half-written `*.cstemp` is left behind). The fix
+is to authorize the partition list once — it needs the login password, so the
+user runs it (suggest the `!` prefix, or their own Terminal):
+
+```bash
+security set-key-partition-list -S apple-tool:,apple:,codesign: -s \
+  -k "<login-password>" ~/Library/Keychains/login.keychain-db
+```
+
+Symptoms map cleanly: `errSecInternalComponent` → partition list not set;
+`User interaction is not allowed` → keychain locked (`security unlock-keychain`);
+`no identity found` → wrong/absent cert (`security find-identity -v -p codesigning`).
+
+**Sign inner-out.** Pulp GPU bundles embed `libwgpu_native.dylib` in
+`Contents/MacOS/`. Sign every embedded dylib BEFORE the bundle, else you get
+`invalid or unsupported format for signature` / `code has no resources but
+signature indicates they must be present`. Remove any stale `_CodeSignature`
+first so the re-seal is clean. `--deep` is deprecated and misses nested Mach-Os —
+do the explicit inner-out walk:
+
+```bash
+ID="Developer ID Application: NAME (TEAMID)"
+sign() { codesign --force --timestamp --options runtime --sign "$ID" "$@"; }
+for b in build-gpu/AU/X.component build-gpu/VST3/X.vst3 build-gpu/CLAP/X.clap \
+         build-gpu/examples/X/X.app; do
+  rm -rf "$b/Contents/_CodeSignature"
+  find "$b/Contents/MacOS" -name '*.dylib' -exec false {} + ; \
+    while IFS= read -r d; do sign "$d"; done < <(find "$b/Contents/MacOS" -name '*.dylib')
+  sign "$b"
+  codesign --verify --deep --strict --verbose=2 "$b"   # expect "satisfies its Designated Requirement"
+done
+```
+
+**Build the signed installer:**
+
+```bash
+pkgbuild --root <stage-dir> --identifier com.pulp.<name> --version X.Y.Z \
+  --install-location / --sign "Developer ID Installer: NAME (TEAMID)" out.pkg
+pkgutil --check-signature out.pkg   # "signed by a developer certificate ... for distribution"
+```
+
+**Signed ≠ notarized.** `spctl --assess --type execute MyApp.app` on a signed but
+un-notarized bundle prints `rejected / source=Unnotarized Developer ID`. That is
+expected and fine for the build machine; recipients on other Macs need
+notarization. Submit the installer (or app/dmg) with notarytool — it authenticates
+to Apple's cloud, so it needs App Store Connect API-key creds (the same
+`~/.config/pulp/secrets/notary.env` trio that `pulp ship notarize` reads):
+
+```bash
+set -a; . ~/.config/pulp/secrets/notary.env; set +a   # PULP_NOTARY_KEY_PATH/_KEY_ID/_ISSUER_ID
+xcrun notarytool submit out.pkg --key "$PULP_NOTARY_KEY_PATH" \
+  --key-id "$PULP_NOTARY_KEY_ID" --issuer "$PULP_NOTARY_ISSUER_ID" --wait
+xcrun stapler staple out.pkg                  # embed the ticket so it works offline
+spctl --assess --type install -vv out.pkg     # now: accepted / source=Notarized Developer ID
+```
+
+If notarization is `Invalid`, fetch the per-file reasons:
+`xcrun notarytool log <submission-id> --key ... --key-id ... --issuer ...`.
+
 ### Linux: Build → Package (.deb / .tar.gz, no signing)
 
 ```bash
@@ -353,6 +422,19 @@ Run `security find-identity -v -p codesigning` (macOS) to find your identity, th
 ```bash
 pulp config set signing.apple.identity "Developer ID Application: ..."
 ```
+
+### `codesign` fails with `errSecInternalComponent`
+
+The identity is present and the keychain is unlocked, but `codesign` cannot use
+the private key non-interactively until the partition list is authorized once.
+The user runs (it needs the login password):
+```bash
+security set-key-partition-list -S apple-tool:,apple:,codesign: -s \
+  -k "<login-password>" ~/Library/Keychains/login.keychain-db
+```
+Full local sign+notarize recipe (inner-out dylib signing, the `*.cstemp`
+leftover, `pkgbuild`, notarytool, stapler) in *macOS manual sign + notarize from
+a worktree* above.
 
 ### "Android SDK not found"
 
