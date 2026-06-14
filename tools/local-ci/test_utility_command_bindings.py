@@ -2,8 +2,8 @@
 """Tests for utility command facade bindings."""
 
 from module_test_utils import load_module_from_path
-import types
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -30,32 +30,19 @@ class UtilityCommandBindingsTests(unittest.TestCase):
         )
         self.assertEqual(len(self.mod.UTILITY_COMMAND_EXPORTS), len(set(self.mod.UTILITY_COMMAND_EXPORTS)))
 
-    def _bindings(self, runner):
-        bindings = {
-            "_queue_commands_cli": types.SimpleNamespace(cmd_bump=runner),
-            "normalize_priority": object(),
-            "bump_queue_command_job": object(),
-            "bump_queue_command_result_line": object(),
-        }
-        return bindings
+    def test_install_utility_command_helpers_routes_known_and_unknown_exports(self):
+        bindings = {}
 
-    def test_install_utility_command_helpers_wires_named_exports(self):
-        captured = {}
+        with mock.patch.object(self.mod, "install_local_helpers") as install:
+            self.mod.install_utility_command_helpers(bindings, names=("cmd_cleanup", "cmd_bump", "external"))
 
-        def runner(*args, **kwargs):
-            captured["args"] = args
-            captured["kwargs"] = kwargs
-            return 8
-
-        bindings = self._bindings(runner)
-
-        self.mod.install_utility_command_helpers(bindings, names=("cmd_bump",))
-
-        args_obj = object()
-        self.assertEqual(bindings["cmd_bump"](args_obj), 8)
-        self.assertEqual(captured["args"], (args_obj,))
-        self.assertIs(captured["kwargs"]["normalize_priority_fn"], bindings["normalize_priority"])
-        self.assertEqual(bindings["cmd_bump"].__name__, "cmd_bump")
+        self.assertEqual(
+            install.call_args_list,
+            [
+                mock.call(bindings, self.mod.__dict__, ("cmd_cleanup", "cmd_bump")),
+                mock.call(bindings, self.mod.__dict__, ("external",)),
+            ],
+        )
 
 
 if __name__ == "__main__":
