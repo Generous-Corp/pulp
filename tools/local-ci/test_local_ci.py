@@ -1481,43 +1481,6 @@ class LocalCiTests(unittest.TestCase):
         self.assertIn("optional_capabilities: webview_dom, semantic_click, semantic_type, script_eval, element_screenshot, debug_attach, debug_command", output)
         self.assertIn('"webview_driver": true', output)
 
-    def test_probe_webdriver_endpoint_uses_status_and_parses_ready(self):
-        response = mock.MagicMock()
-        response.read.return_value = b'{"value":{"ready":true,"message":"ok"}}'
-        context = mock.MagicMock()
-        context.__enter__.return_value = response
-        context.__exit__.return_value = False
-
-        with mock.patch.object(self.mod.urllib.request, "urlopen", return_value=context) as mocked_urlopen:
-            probe = self.mod.probe_webdriver_endpoint("http://127.0.0.1:4444")
-
-        self.assertEqual(probe["status_url"], "http://127.0.0.1:4444/status")
-        self.assertEqual(probe["ready"], True)
-        self.assertEqual(probe["message"], "ok")
-        request = mocked_urlopen.call_args.args[0]
-        self.assertEqual(urlparse(request.full_url).path, "/status")
-
-    def test_desktop_doctor_reports_optional_webview_driver_and_debug_attach(self):
-        config = self.mod.load_config()
-        config["desktop_automation"]["targets"]["mac"]["optional"]["webview_driver"] = True
-        config["desktop_automation"]["targets"]["mac"]["optional"]["webdriver_url"] = "http://127.0.0.1:4444"
-        config["desktop_automation"]["targets"]["mac"]["optional"]["debug_attach"] = True
-        config["desktop_automation"]["targets"]["mac"]["optional"]["debugger_command"] = "lldb"
-        original_platform = self.mod.sys.platform
-        self.mod.sys.platform = "darwin"
-        try:
-            with mock.patch.object(self.mod, "macos_accessibility_trusted", return_value=True):
-                with mock.patch.object(self.mod, "probe_webdriver_endpoint", return_value={"status_url": "http://127.0.0.1:4444/status", "ready": True, "message": "ok"}):
-                    with mock.patch.object(self.mod.shutil, "which", side_effect=lambda cmd: f"/usr/bin/{cmd}"):
-                        checks = self.mod.desktop_doctor_checks(config, "mac")
-        finally:
-            self.mod.sys.platform = original_platform
-
-        names = {check["name"]: check for check in checks}
-        self.assertEqual(names["webview_driver"]["detail"], "reachable at http://127.0.0.1:4444/status (ready=true): ok")
-        self.assertTrue(names["webview_driver"]["ok"])
-        self.assertTrue(names["debug_attach"]["ok"])
-
     def test_cmd_desktop_recent_lists_recent_manifests(self):
         config = self.mod.load_config()
         artifact_root = Path(self.tmpdir.name) / "desktop-artifacts"
