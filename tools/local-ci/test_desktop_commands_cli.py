@@ -2037,6 +2037,7 @@ class DesktopCommandsCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / "manifest.json"
             manifest_path.write_text(json.dumps({"label": "video-proof"}) + "\n")
+            calls = []
 
             result = self.mod.cmd_desktop_verdict(
                 Namespace(
@@ -2045,23 +2046,32 @@ class DesktopCommandsCliTests(unittest.TestCase):
                     needs_work=True,
                     notes="zoom starts too late",
                     reviewer="",
-                    issue_url="",
+                    issue_url="https://github.com/example/repo/issues/2",
+                    comment_issue=True,
                     json=False,
                 ),
                 now_iso_fn=lambda: "2026-06-12T13:00:00+00:00",
                 atomic_write_text_fn=lambda path, text: path.write_text(text),
+                run_fn=lambda argv, **_kwargs: calls.append(argv) or subprocess.CompletedProcess(argv, 0, "commented\n", ""),
                 print_fn=self.print_line,
             )
             self.assertEqual(result, 0)
+            self.assertEqual(calls[0][0:3], ["gh", "issue", "comment"])
+            self.assertIn("https://github.com/example/repo/issues/2", calls[0])
+            self.assertIn("--body", calls[0])
+            self.assertIn("Follow-up:", calls[0][calls[0].index("--body") + 1])
+            self.assertIn("zoom starts too late", calls[0][calls[0].index("--body") + 1])
             updated = json.loads(manifest_path.read_text())
             self.assertEqual(updated["review"]["status"], "needs-work")
             self.assertTrue(updated["review"]["follow_up_required"])
             self.assertFalse(updated["review"]["close_review_issue"])
+            self.assertEqual(updated["review"]["issue_comment"]["stdout"], "commented\n")
             self.assertIn("zoom starts too late", updated["review"]["follow_up"]["text"])
             self.assertIn("Keep the review issue open", (manifest_path.parent / "review-verdict.md").read_text())
             verdict_json = json.loads((manifest_path.parent / "review-verdict.json").read_text())
             self.assertEqual(verdict_json["follow_up"]["kind"], "same-issue-checklist")
-            self.assertIn("needs-work", self.printed[-4])
+            self.assertEqual(verdict_json["issue_comment"]["returncode"], 0)
+            self.assertTrue(any("needs-work" in line for line in self.printed))
 
             self.printed.clear()
             result = self.mod.cmd_desktop_verdict(
@@ -2072,6 +2082,7 @@ class DesktopCommandsCliTests(unittest.TestCase):
                     notes="",
                     reviewer="",
                     issue_url="",
+                    comment_issue=False,
                     json=False,
                 ),
                 now_iso_fn=lambda: "unused",
@@ -2080,6 +2091,26 @@ class DesktopCommandsCliTests(unittest.TestCase):
             )
             self.assertEqual(result, 1)
             self.assertIn("manifest not found", self.printed[-1])
+
+            self.printed.clear()
+            result = self.mod.cmd_desktop_verdict(
+                Namespace(
+                    manifest=str(manifest_path),
+                    approved=False,
+                    needs_work=True,
+                    notes="too dark",
+                    reviewer="",
+                    issue_url="",
+                    comment_issue=True,
+                    json=False,
+                ),
+                now_iso_fn=lambda: "unused",
+                atomic_write_text_fn=lambda path, text: path.write_text(text),
+                run_fn=lambda *_args, **_kwargs: self.fail("gh should not run"),
+                print_fn=self.print_line,
+            )
+            self.assertEqual(result, 1)
+            self.assertEqual(self.printed[-1], "Error: --comment-issue requires --issue-url")
 
         removed = []
         rollups = []

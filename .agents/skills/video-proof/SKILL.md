@@ -893,13 +893,17 @@ For another iteration, keep the issue open and capture the reason:
 ```bash
 python3 tools/local-ci/local_ci.py desktop verdict /path/to/run/manifest.json \
   --needs-work \
+  --issue-url https://github.com/owner/repo/issues/123 \
+  --comment-issue \
   --notes "Zoom starts too late; recapture with the component centered."
 ```
 
 `desktop verdict` writes a manifest `review` block with status, timestamp,
 optional reviewer notes, and whether the review issue can be closed. It also
-writes `review-verdict.md` and `review-verdict.json` next to the manifest; use
-the markdown as the pasteable issue closeout comment or same-issue follow-up
+writes `review-verdict.md` and `review-verdict.json` next to the manifest. Use
+`--comment-issue` when the generated summary/checklist should be posted to the
+GitHub review issue before the local manifest is updated; otherwise use the
+markdown as the pasteable issue closeout comment or same-issue follow-up
 checklist, and keep the JSON for automation.
 
 ## High-value demo scenarios

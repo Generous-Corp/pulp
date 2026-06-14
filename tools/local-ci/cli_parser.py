@@ -431,6 +431,11 @@ def build_local_ci_parser(
     p_desktop_verdict.add_argument("--notes", default="", help="Optional reviewer notes")
     p_desktop_verdict.add_argument("--reviewer", default="", help="Optional reviewer identity")
     p_desktop_verdict.add_argument("--issue-url", default="", help="Optional GitHub review issue URL")
+    p_desktop_verdict.add_argument(
+        "--comment-issue",
+        action="store_true",
+        help="Post the verdict summary to --issue-url with gh before updating the local manifest",
+    )
     p_desktop_verdict.add_argument("--close-issue", action="store_true", help="Close --issue-url with gh after recording an approved verdict")
     p_desktop_verdict.add_argument(
         "--close-reason",

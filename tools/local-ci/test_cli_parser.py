@@ -360,6 +360,7 @@ class CliParserTests(unittest.TestCase):
             "daniel",
             "--issue-url",
             "https://github.com/example/repo/issues/1",
+            "--comment-issue",
             "--close-issue",
             "--close-reason",
             "completed",
@@ -372,6 +373,7 @@ class CliParserTests(unittest.TestCase):
         self.assertFalse(args.needs_work)
         self.assertEqual(args.reviewer, "daniel")
         self.assertEqual(args.issue_url, "https://github.com/example/repo/issues/1")
+        self.assertTrue(args.comment_issue)
         self.assertTrue(args.close_issue)
         self.assertEqual(args.close_reason, "completed")
         self.assertTrue(args.json)

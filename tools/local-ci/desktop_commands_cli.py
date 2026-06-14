@@ -1502,6 +1502,34 @@ def cmd_desktop_verdict(
             "kind": "same-issue-checklist",
             "text": f"- [ ] Re-record `{run_label}` after addressing: {args.notes or 'reviewer feedback'}",
         }
+    comment_lines = [summary_comment]
+    if follow_up:
+        comment_lines.extend(["", "Follow-up:", follow_up["text"]])
+    issue_comment_body = "\n".join(comment_lines)
+    comment_result = None
+    if getattr(args, "comment_issue", False) and not getattr(args, "close_issue", False):
+        if not args.issue_url:
+            print_fn("Error: --comment-issue requires --issue-url")
+            return 1
+        comment_argv = [
+            "gh",
+            "issue",
+            "comment",
+            args.issue_url,
+            "--body",
+            issue_comment_body,
+        ]
+        comment_process = run_fn(comment_argv, capture_output=True, text=True, check=False)
+        comment_result = {
+            "command": comment_argv,
+            "returncode": int(comment_process.returncode),
+            "stdout": comment_process.stdout,
+            "stderr": comment_process.stderr,
+        }
+        if comment_process.returncode != 0:
+            detail = (comment_process.stderr or comment_process.stdout or "gh issue comment failed").strip()
+            print_fn(f"Error: {detail}")
+            return 1
     close_result = None
     if getattr(args, "close_issue", False):
         if status != "approved":
@@ -1516,7 +1544,7 @@ def cmd_desktop_verdict(
             "close",
             args.issue_url,
             "--comment",
-            summary_comment,
+            issue_comment_body,
             "--reason",
             getattr(args, "close_reason", "completed") or "completed",
         ]
@@ -1543,6 +1571,7 @@ def cmd_desktop_verdict(
         "follow_up_required": bool(review.get("follow_up_required", False)),
         "summary_comment": summary_comment,
         "follow_up": follow_up,
+        "issue_comment": comment_result,
         "issue_close": close_result,
     }
     markdown_lines = [
@@ -1577,8 +1606,11 @@ def cmd_desktop_verdict(
     review["verdict_markdown"] = str(markdown_path)
     review["verdict_json"] = str(json_path)
     review["summary_comment"] = summary_comment
+    review["issue_comment_body"] = issue_comment_body
     if follow_up:
         review["follow_up"] = follow_up
+    if comment_result:
+        review["issue_comment"] = comment_result
     if close_result:
         review["issue_close"] = close_result
     manifest["review"] = review
@@ -1598,6 +1630,8 @@ def cmd_desktop_verdict(
         print_fn(f"  verdict_json: {json_path}")
         if args.issue_url:
             print_fn(f"  issue_url: {args.issue_url}")
+        if comment_result:
+            print_fn("  issue_comment: posted")
         if close_result:
             print_fn("  issue_close: closed")
     return 0

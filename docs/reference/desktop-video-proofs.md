@@ -989,14 +989,18 @@ If the proof needs another iteration, record that state instead:
 ```bash
 python3 tools/local-ci/local_ci.py desktop verdict /path/to/run/manifest.json \
   --needs-work \
+  --issue-url https://github.com/owner/repo/issues/123 \
+  --comment-issue \
   --notes "Zoom starts too late; recapture with the component centered."
 ```
 
 The manifest `review` block records `approved` or `needs-work`, the review
 timestamp, optional reviewer notes, and whether the review issue can be closed.
 The command also writes `review-verdict.md` and `review-verdict.json` next to
-the run manifest. Use the markdown file as the pasteable issue closeout comment
-or same-issue follow-up checklist; the JSON file is the automation handoff.
+the run manifest. Use `--comment-issue` when the GitHub issue should receive
+the generated summary/checklist immediately; without it, use the markdown file
+as the pasteable issue closeout comment or same-issue follow-up checklist. The
+JSON file is the automation handoff.
 
 ## Current Scope
 
