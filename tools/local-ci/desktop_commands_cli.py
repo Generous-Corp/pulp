@@ -558,16 +558,16 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
         "command": (
             "python3 tools/local-ci/local_ci.py android video "
             "--apk android/app/build/outputs/apk/debug/app-debug.apk --package com.pulp.demo "
-            "--open-url pulp-demo://validate --action-label 'open validation deep link' "
+            "--tap 540,1200 --action-label 'tap validation control' "
             "--label android-emulator-proof --duration 8 "
-            "--compose-video-proof --video-title 'Android emulator deep-link proof' "
-            "--video-note 'The emulator opens the validation deep link during recording.' --small-video"
+            "--compose-video-proof --video-title 'Android emulator tap proof' "
+            "--video-note 'The emulator receives a timed adb input tap during recording.' --small-video"
         ),
         "doctor": "python3 tools/local-ci/local_ci.py android video-doctor",
         "watch_for": [
             "adb serial/model and screenrecord readiness are identified",
             "app launch or current emulator state is visible",
-            "open-url action is marked in the proof; coordinate taps need a future automation backend",
+            "timed adb tap action is marked in the proof; use open-url when a deep link is the better validation action",
         ],
     },
     {

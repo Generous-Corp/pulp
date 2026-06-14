@@ -64,6 +64,8 @@ class AndroidVideoCommandsTests(unittest.TestCase):
             return subprocess.CompletedProcess(command, 0, stdout="Success", stderr="")
         if command[:6] == ["/usr/bin/adb", "-s", "emulator-5554", "shell", "am", "start"]:
             return subprocess.CompletedProcess(command, 0, stdout="Starting: Intent", stderr="")
+        if command[:6] == ["/usr/bin/adb", "-s", "emulator-5554", "shell", "input", "tap"]:
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
         if command[:5] == ["/usr/bin/adb", "-s", "emulator-5554", "shell", "monkey"]:
             return subprocess.CompletedProcess(command, 0, stdout="Events injected: 1", stderr="")
         if command[:4] == ["/usr/bin/adb", "-s", "emulator-5554", "pull"]:
@@ -142,7 +144,7 @@ class AndroidVideoCommandsTests(unittest.TestCase):
             self.assertEqual(manifest["video_proof_composition"]["template"], "mobile-emulator")
             self.assertEqual(manifest["video_proof_composition"]["action_marker"]["kind"], "open-url")
             self.assertIn("adb device identity", manifest["video_proof_notes"][0])
-            self.assertIn("deep-link tools", manifest["video_proof_composition"]["notes"][1])
+            self.assertIn("deep links", manifest["video_proof_composition"]["notes"][1])
             record_step = next(item for item in manifest["commands"] if item["step"] == "record-video")
             self.assertEqual(record_step["time_limit_secs"], 1)
             self.assertTrue(Path(payload["video"]).exists())
@@ -163,6 +165,94 @@ class AndroidVideoCommandsTests(unittest.TestCase):
                 self.commands,
             )
             self.assertEqual(self.popen_commands[0][:5], ["/usr/bin/adb", "-s", "emulator-5554", "shell", "screenrecord"])
+
+    def test_android_video_records_tap_action(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "run"
+
+            result = self.mod.cmd_android_video(
+                Namespace(
+                    device=None,
+                    apk=None,
+                    package="com.pulp.demo",
+                    activity=None,
+                    open_url=None,
+                    tap="540,1200",
+                    action_after=0.0,
+                    action_label="tap validation control",
+                    duration=1.0,
+                    compose_video_proof=False,
+                    video_title=None,
+                    video_note=[],
+                    video_attachment_budget_mb=100.0,
+                    small_video=False,
+                    small_video_budget_mb=10.0,
+                    label="android-tap-proof",
+                    output=str(output),
+                    json=True,
+                ),
+                print_fn=self.print_line,
+                which_fn=lambda name: f"/usr/bin/{name}" if name == "adb" else None,
+                run_fn=self.run_fn,
+                popen_fn=self.popen_fn,
+                time_sleep_fn=lambda _secs: None,
+            )
+
+            self.assertEqual(result, 0)
+            payload = json.loads(self.printed[0])
+            manifest = json.loads(Path(payload["manifest"]).read_text())
+            self.assertEqual(manifest["interaction"]["mode"], "tap")
+            self.assertEqual(manifest["interaction"]["x"], 540)
+            self.assertEqual(manifest["interaction"]["y"], 1200)
+            self.assertEqual(manifest["android_action"]["kind"], "tap")
+            self.assertEqual(manifest["video_proof_composition"]["action_marker"]["kind"], "tap")
+            self.assertEqual(manifest["video_proof_composition"]["context"]["action"], "tap")
+            self.assertIn(
+                ["/usr/bin/adb", "-s", "emulator-5554", "shell", "input", "tap", "540", "1200"],
+                self.commands,
+            )
+
+    def test_android_video_rejects_invalid_or_ambiguous_action(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            common = dict(
+                device=None,
+                apk=None,
+                package=None,
+                activity=None,
+                action_after=0.0,
+                action_label=None,
+                duration=1.0,
+                compose_video_proof=False,
+                video_title=None,
+                video_note=[],
+                video_attachment_budget_mb=100.0,
+                small_video=False,
+                small_video_budget_mb=10.0,
+                label="android-proof",
+                output=str(Path(tmp) / "run"),
+                json=True,
+            )
+            result = self.mod.cmd_android_video(
+                Namespace(open_url="https://example.com", tap="1,2", **common),
+                print_fn=self.print_line,
+                which_fn=lambda name: f"/usr/bin/{name}" if name == "adb" else None,
+                run_fn=self.run_fn,
+                popen_fn=self.popen_fn,
+                time_sleep_fn=lambda _secs: None,
+            )
+            self.assertEqual(result, 1)
+            self.assertIn("choose either --open-url or --tap", self.printed[-1])
+
+            result = self.mod.cmd_android_video(
+                Namespace(open_url=None, tap="bad", **common),
+                print_fn=self.print_line,
+                which_fn=lambda name: f"/usr/bin/{name}" if name == "adb" else None,
+                run_fn=self.run_fn,
+                popen_fn=self.popen_fn,
+                time_sleep_fn=lambda _secs: None,
+            )
+            self.assertEqual(result, 1)
+            self.assertIn("invalid --tap value", self.printed[-1])
 
     def test_android_video_can_compose_issue_ready_proof(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -194,6 +284,7 @@ class AndroidVideoCommandsTests(unittest.TestCase):
                     package=None,
                     activity=None,
                     open_url="https://example.com",
+                    tap=None,
                     action_after=0.0,
                     action_label="open example.com",
                     duration=1.0,

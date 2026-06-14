@@ -306,6 +306,8 @@ class CliParserTests(unittest.TestCase):
             ".MainActivity",
             "--open-url",
             "pulp-demo://validate",
+            "--tap",
+            "540,1200",
             "--action-label",
             "open validation deep link",
             "--duration",
@@ -333,6 +335,7 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(video.package, "com.pulp.demo")
         self.assertEqual(video.activity, ".MainActivity")
         self.assertEqual(video.open_url, "pulp-demo://validate")
+        self.assertEqual(video.tap, "540,1200")
         self.assertEqual(video.action_label, "open validation deep link")
         self.assertEqual(video.duration, 6.0)
         self.assertTrue(video.compose_video_proof)

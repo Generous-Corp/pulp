@@ -21,8 +21,8 @@ DEFAULT_ANDROID_VIDEO_ROOT = (
     Path.home() / "Library" / "Application Support" / "Pulp" / "desktop-automation" / "runs" / "android-emulator"
 )
 ANDROID_PROOF_NOTES = [
-    "Watch for the adb device identity, app launch or current emulator state, and the timed open-url/deep-link action.",
-    "Coordinate taps need a future automation backend; this proof uses Android's public activity/deep-link tools.",
+    "Watch for the adb device identity, app launch or current emulator state, and the timed Android action.",
+    "Android proofs use public adb actions: activity/package launch, deep links, and coordinate taps.",
 ]
 
 
@@ -233,6 +233,24 @@ def _android_action_marker(*, kind: str, label: str, command: list[str], at_secs
     }
 
 
+def parse_tap(value: str) -> tuple[int, int]:
+    raw = (value or "").strip()
+    if "," in raw:
+        parts = [part.strip() for part in raw.split(",", 1)]
+    else:
+        parts = raw.split()
+    if len(parts) != 2:
+        raise ValueError("tap must be formatted as x,y")
+    try:
+        x = int(parts[0])
+        y = int(parts[1])
+    except ValueError as exc:
+        raise ValueError("tap coordinates must be integers") from exc
+    if x < 0 or y < 0:
+        raise ValueError("tap coordinates must be non-negative")
+    return x, y
+
+
 def record_android_emulator_video(
     *,
     adb_path: str,
@@ -377,8 +395,26 @@ def cmd_android_video(
     duration = float(getattr(args, "duration", 8.0) or 8.0)
     action_after_secs = max(0.0, float(getattr(args, "action_after", 0.5) or 0.0))
     open_url = getattr(args, "open_url", None) or None
-    action_label = getattr(args, "action_label", None) or (f"open-url: {open_url}" if open_url else None)
-    action_command = [adb_path, "-s", serial, "shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", open_url] if open_url else None
+    tap_text = getattr(args, "tap", None) or None
+    if open_url and tap_text:
+        print_fn("Error: choose either --open-url or --tap for the timed Android action, not both.")
+        return 1
+    tap_xy: tuple[int, int] | None = None
+    if tap_text:
+        try:
+            tap_xy = parse_tap(tap_text)
+        except ValueError as exc:
+            print_fn(f"Error: invalid --tap value: {exc}")
+            return 1
+    action_kind = "open-url" if open_url else "tap" if tap_xy else None
+    action_label = getattr(args, "action_label", None) or (
+        f"open-url: {open_url}" if open_url else f"tap {tap_xy[0]},{tap_xy[1]}" if tap_xy else None
+    )
+    action_command = None
+    if open_url:
+        action_command = [adb_path, "-s", serial, "shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", open_url]
+    elif tap_xy:
+        action_command = [adb_path, "-s", serial, "shell", "input", "tap", str(tap_xy[0]), str(tap_xy[1])]
     record = record_android_emulator_video(
         adb_path=adb_path,
         serial=serial,
@@ -425,15 +461,31 @@ def cmd_android_video(
             "package": package_name,
             "activity": activity,
         },
-        "interaction": {"mode": "open-url", "url": open_url, "label": action_label} if open_url else None,
-        "android_action": {
-            "kind": "open-url",
-            "url": open_url,
-            "label": action_label,
-            "after_secs": action_after_secs,
-        }
-        if open_url
-        else None,
+        "interaction": (
+            {"mode": "open-url", "url": open_url, "label": action_label}
+            if open_url
+            else {"mode": "tap", "x": tap_xy[0], "y": tap_xy[1], "label": action_label}
+            if tap_xy
+            else None
+        ),
+        "android_action": (
+            {
+                "kind": "open-url",
+                "url": open_url,
+                "label": action_label,
+                "after_secs": action_after_secs,
+            }
+            if open_url
+            else {
+                "kind": "tap",
+                "x": tap_xy[0],
+                "y": tap_xy[1],
+                "label": action_label,
+                "after_secs": action_after_secs,
+            }
+            if tap_xy
+            else None
+        ),
         "video": {
             "path": str(video_path),
             "duration_secs": max(1, int(round(duration))),
@@ -444,17 +496,21 @@ def cmd_android_video(
         "artifacts": {"video": str(video_path), "bundle_dir": str(run_dir), "manifest": str(run_dir / "manifest.json")},
         "commands": commands,
     }
-    if open_url:
+    if action_kind:
         manifest["video_proof_notes"] = ANDROID_PROOF_NOTES
         manifest["video_proof_composition"] = {
             "template": "mobile-emulator",
             "action_marker": _android_action_marker(
-                kind="open-url",
-                label=action_label or f"open-url: {open_url}",
+                kind=action_kind,
+                label=action_label or action_kind,
                 command=action_command or [],
                 at_secs=float((record.get("action") or {}).get("at_secs") or action_after_secs),
             ),
-            "context": {"target": "android-emulator", "action": "open-url", "url": open_url},
+            "context": (
+                {"target": "android-emulator", "action": "open-url", "url": open_url}
+                if open_url
+                else {"target": "android-emulator", "action": "tap", "x": tap_xy[0], "y": tap_xy[1]}
+            ),
             "notes": ANDROID_PROOF_NOTES,
         }
     manifest_path = run_dir / "manifest.json"

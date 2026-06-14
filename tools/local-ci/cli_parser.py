@@ -825,6 +825,7 @@ def build_local_ci_parser(
     p_android_video.add_argument("--package", help="Optional package name to launch before recording")
     p_android_video.add_argument("--activity", help="Optional activity to launch with --package before recording")
     p_android_video.add_argument("--open-url", help="Optional URL/deep link to open during recording")
+    p_android_video.add_argument("--tap", help="Optional x,y screen coordinate to tap during recording")
     p_android_video.add_argument("--action-after", type=float, default=0.5, help="Seconds after capture start before running the Android action (default: 0.5)")
     p_android_video.add_argument("--action-label", help="Reviewer-facing label for the Android action marker")
     p_android_video.add_argument("--duration", type=float, default=8.0, help="Seconds to record, rounded for adb screenrecord (default: 8)")

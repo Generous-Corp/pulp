@@ -689,20 +689,20 @@ Start the emulator or connect a device first, then check readiness:
 python3 tools/local-ci/local_ci.py android video-doctor
 ```
 
-Record a short Android MP4 with optional install/launch context:
+Record a short Android MP4 with optional install/launch context and a timed tap:
 
 ```bash
 python3 tools/local-ci/local_ci.py android video \
   --apk android/app/build/outputs/apk/debug/app-debug.apk \
   --package com.pulp.demo \
   --activity .MainActivity \
-  --open-url pulp-demo://validate \
-  --action-label "open validation deep link" \
+  --tap 540,1200 \
+  --action-label "tap validation control" \
   --label android-emulator-proof \
   --duration 8 \
   --compose-video-proof \
-  --video-title "Android emulator deep-link proof" \
-  --video-note "The emulator opens the validation deep link during recording." \
+  --video-title "Android emulator tap proof" \
+  --video-note "The emulator receives a timed adb input tap during recording." \
   --small-video
 ```
 
@@ -711,10 +711,10 @@ directory using `adb shell screenrecord`. With `--compose-video-proof`, it
 immediately renders the `mobile-emulator` Remotion proof and writes
 `video/proof-composed.mp4`, `video/proof.issue.mp4`, optional
 `video/proof.small.mp4`, composition metadata, and a storyboard into the Android
-run manifest. With `--open-url`, the command opens the URL/deep link during
-capture and stores a `mobile-emulator` action marker. Coordinate tap driving
-still needs a future automation backend; use package launch and
-open-url/deep-link actions for portable Android proof clips today.
+run manifest. With `--tap x,y`, the command runs `adb shell input tap` during
+capture and stores a `mobile-emulator` action marker. Use `--open-url` instead
+when a URL/deep link is the right validation action; do not combine both action
+types in one proof.
 
 Use `desktop compose-video --template mobile-emulator` only when rerendering an
 existing run with different notes, title, or size budgets.
