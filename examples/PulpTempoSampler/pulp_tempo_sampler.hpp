@@ -19,7 +19,9 @@
 #include <pulp/audio/sample_key_map.hpp>
 #include <pulp/audio/sample_slot_bank.hpp>
 #include <pulp/format/processor.hpp>
+#include <pulp/midi/message.hpp>
 #include <pulp/platform/file_dialog.hpp>
+#include <pulp/runtime/spsc_queue.hpp>
 #include <pulp/signal/adsr.hpp>
 #include <pulp/signal/offline_stretch.hpp>
 #include <pulp/view/animation.hpp>
@@ -113,20 +115,32 @@ class WaveformDropView : public view::WaveformEditor, public view::DropReceiver 
 public:
     std::function<void(const std::string&)> on_file_dropped;
     std::function<void()> on_browse;             // click in the empty area -> file picker
+    std::function<void(int slice_index, bool on)> on_play_slice;  // click a slice -> audition
     std::function<std::uint64_t()> generation;   // processor raw_generation()
     std::function<bool(std::vector<float>&, float&, std::vector<long>&)> snapshot;
 
     WaveformDropView() { set_continuous_repaint(true); }
 
-    // Empty drop area: a left click opens a file picker (a backup to drag-drop).
-    // When a sample is loaded, defer to WaveformEditor's selection behavior.
+    // Empty area: a left click opens the file picker (drag-drop backup).
+    // Loaded: a left click on a slice auditions it (note = root + slice index),
+    // instead of the base WaveformEditor's range selection.
     void on_mouse_event(const view::MouseEvent& event) override {
+        const bool explicit_phase = event.hasExplicitPhase();
+        const bool down = explicit_phase ? event.isPress() : event.is_down;
+        const bool up = explicit_phase ? event.isRelease() : !event.is_down;
         if (!has_audio_) {
-            const bool press = event.hasExplicitPhase() ? event.isPress() : event.is_down;
-            if (press && event.button == view::MouseButton::left && on_browse) on_browse();
+            if (down && event.button == view::MouseButton::left && on_browse) on_browse();
             return;
         }
-        view::WaveformEditor::on_mouse_event(event);
+        if (down && !pressed_ && event.button == view::MouseButton::left) {
+            pressed_ = true;
+            active_slice_ = slice_at_x(event.position.x);
+            if (active_slice_ >= 0 && on_play_slice) on_play_slice(active_slice_, true);
+        } else if (up && pressed_) {
+            pressed_ = false;
+            if (active_slice_ >= 0 && on_play_slice) on_play_slice(active_slice_, false);
+            active_slice_ = -1;
+        }
     }
 
     bool accept_drag(const view::DropData& d, view::Point) override {
@@ -195,10 +209,24 @@ private:
                 r.color = canvas::Color::rgba8(0x16, 0xDA, 0xC2, (i % 2) ? 0x3C : 0x1A);
                 add_region(r);
             }
+            slices_ = std::move(slices);
+            total_samples_ = static_cast<long>(mono.size());
             has_audio_ = true;
         } else {
+            slices_.clear();
+            total_samples_ = 0;
             has_audio_ = false;
         }
+    }
+    // Map a local x to a slice index (root + index = MIDI note). -1 if none.
+    int slice_at_x(float x) const {
+        auto b = local_bounds();
+        if (b.width <= 0 || total_samples_ <= 0 || slices_.size() < 2) return -1;
+        const float frac = std::clamp((x - b.x) / b.width, 0.0f, 0.999f);
+        const long sample = static_cast<long>(frac * static_cast<float>(total_samples_));
+        for (std::size_t i = 0; i + 1 < slices_.size(); ++i)
+            if (sample >= slices_[i] && sample < slices_[i + 1]) return static_cast<int>(i);
+        return static_cast<int>(slices_.size()) - 2;  // clamp to last slice
     }
     void advance_flash() {
         const auto now = std::chrono::steady_clock::now();
@@ -241,9 +269,33 @@ private:
     bool has_audio_ = false;
     bool drag_over_ = false;
     bool have_last_paint_ = false;
+    bool pressed_ = false;
+    int active_slice_ = -1;
+    std::vector<long> slices_;
+    long total_samples_ = 0;
     std::uint64_t last_gen_ = ~0ull;  // force first refresh
     view::ValueAnimation flash_{0.0f};
     std::chrono::steady_clock::time_point last_paint_{};
+};
+
+// A label that re-renders from a callback every frame (continuous repaint) —
+// for live readouts like the slice count that change after a drop / re-slice.
+class LiveText : public view::View {
+public:
+    std::function<std::string()> text;
+    canvas::Color color = canvas::Color::rgba8(0x93, 0x9C, 0xA9);
+    float font_size = 11.0f;
+    std::string font_family;
+    LiveText() { set_continuous_repaint(true); }
+    void paint(canvas::Canvas& c) override {
+        if (!text) return;
+        auto b = local_bounds();
+        c.set_fill_color(color);
+        c.set_font(font_family, font_size);
+        c.set_text_align(canvas::TextAlign::left);
+        c.fill_text(text(), b.x, b.y + b.height * 0.72f);
+        c.set_text_align(canvas::TextAlign::left);
+    }
 };
 
 // Editor root that owns the widget<->parameter bindings and store listeners.
@@ -254,6 +306,42 @@ class SamplerEditorRoot : public view::View {
 public:
     std::vector<view::ParameterBinding> bindings;
     std::vector<state::ListenerToken> listeners;
+    std::function<void(int slice_index, bool on)> on_play_slice;  // musical typing
+
+    SamplerEditorRoot() { set_focusable(true); }
+
+    // Musical typing: home row a s d f g h j k l -> slices 0..8 (root + index).
+    // De-duped so key auto-repeat doesn't retrigger a held note.
+    bool on_key_event(const view::KeyEvent& event) override {
+        const int idx = slice_for_key(event.key);
+        if (idx < 0) return false;
+        if (event.is_down) {
+            if (held_[static_cast<std::size_t>(idx)]) return true;  // auto-repeat
+            held_[static_cast<std::size_t>(idx)] = true;
+            if (on_play_slice) on_play_slice(idx, true);
+        } else {
+            held_[static_cast<std::size_t>(idx)] = false;
+            if (on_play_slice) on_play_slice(idx, false);
+        }
+        return true;
+    }
+
+private:
+    static int slice_for_key(view::KeyCode k) {
+        switch (k) {
+            case view::KeyCode::a: return 0;
+            case view::KeyCode::s: return 1;
+            case view::KeyCode::d: return 2;
+            case view::KeyCode::f: return 3;
+            case view::KeyCode::g: return 4;
+            case view::KeyCode::h: return 5;
+            case view::KeyCode::j: return 6;
+            case view::KeyCode::k: return 7;
+            case view::KeyCode::l: return 8;
+            default: return -1;
+        }
+    }
+    std::array<bool, 9> held_{};
 };
 
 class PulpTempoSamplerProcessor : public format::Processor {
@@ -381,6 +469,20 @@ public:
     /// UI -> worker: coalesced re-slice request (onset-sensitivity change).
     void request_reanalyze() { analysis_flag_.store(true, std::memory_order_release); }
 
+    // ── UI-driven triggering (lock-free UI thread -> audio thread) ──────────
+    // Lets the editor play slices without a hardware MIDI device — clicking a
+    // slice or musical typing pushes notes here; process() drains them. Works
+    // in both the standalone and a plugin host (UI is in-process).
+    void ui_note_on(int note, float velocity = 0.8f) {
+        ui_notes_.try_push(UiNote{note, velocity, true});
+    }
+    void ui_note_off(int note) { ui_notes_.try_push(UiNote{note, 0.0f, false}); }
+    /// Play slice N: maps to MIDI note (root + N), same as a host note would.
+    void play_slice(int index, bool on) {
+        const int note = static_cast<int>(state().get_value(kRootNote)) + index;
+        if (on) ui_note_on(note); else ui_note_off(note);
+    }
+
     double detected_bpm() const { return loop_bpm_.load(std::memory_order_relaxed); }
     std::size_t num_slices() const {
         std::lock_guard<std::mutex> lock(raw_mutex_);
@@ -483,31 +585,20 @@ public:
             root->add_child(std::move(l));
         };
 
-        // ── Header ──
-        label(20, 14, 320, 24, "Waveform editor", textStr, 17, 600, LabelAlign::left);
-        label(182, 18, 280, 18, "trim  fades  slice  zoom  record", faint, 11, 400, LabelAlign::left);
-        rect(560, 14, 54, 24, tealSoft);   label(560, 17, 54, 18, "4.20 S", teal, 11, 600, LabelAlign::center, true);
-        rect(620, 14, 58, 24, raised);     label(620, 17, 58, 18, "96 KHZ", muted, 10, 600, LabelAlign::center, true);
-        label(684, 17, 40, 18, "SNAP", faint, 10, 600, LabelAlign::left, true);
-        label(720, 17, 40, 18, "ZERO-X", teal, 10, 600, LabelAlign::left, true);
+        (void)panel; (void)raised; (void)text; (void)rect;
 
-        // ── Tab + transport row ──
-        rect(20, 50, 260, 32, panel);
-        rect(24, 54, 86, 24, raised);  label(24, 58, 86, 18, "One Shot", textStr, 12, 600, LabelAlign::center);
-        label(110, 58, 78, 18, "Slice", muted, 12, 500, LabelAlign::center);
-        label(188, 58, 88, 18, "Recorder", muted, 12, 500, LabelAlign::center);
-        rect(516, 50, 78, 32, tealSoft); label(516, 58, 78, 18, "Loop", teal, 12, 600, LabelAlign::center);
-        rect(600, 50, 56, 32, raised);   label(600, 58, 56, 18, "Fwd", text, 12, 500, LabelAlign::center);
-        label(662, 58, 38, 18, "ZOOM", faint, 10, 600, LabelAlign::left, true);
-        rect(702, 50, 26, 32, panel);    label(702, 55, 26, 22, "-", text, 16, 500, LabelAlign::center);
-        rect(732, 50, 26, 32, panel);    label(732, 55, 26, 22, "+", text, 16, 500, LabelAlign::center);
+        // ── Header ── (mockup tabs/transport removed — only wired controls remain)
+        label(20, 16, 360, 24, "PulpTempoSampler", textStr, 17, 600, LabelAlign::left);
+        label(300, 20, 448, 18,
+              "Tap a slice  ·  A S D F G H J K L play slices  ·  drop or click to load",
+              faint, 11, 400, LabelAlign::right);
 
-        // ── Waveform / drop area ──
-        // Interactive: shows a "drop a sample" CTA when empty, the waveform +
-        // slices when loaded, accepts audio-file drops (load / replace) with a
-        // subtle flash, and polls the processor's generation to refresh.
+        // ── Waveform / drop area ── (enlarged now the mockup rows are gone).
+        // Shows a "drop a sample" CTA when empty; the waveform + slice regions
+        // when loaded. Click a slice (or musical-type) to audition it; drop or
+        // click-to-browse loads/replaces. Polls the processor to refresh.
         auto wf = std::make_unique<WaveformDropView>();
-        place(*wf, 20, 92, 738, 222);
+        place(*wf, 20, 50, 720, 256);  // 20px margins both sides (760 - 2*20)
         wf->on_file_dropped = [this](const std::string& path) { request_load_path(path); };
         wf->on_browse = [this] {
             auto picked = platform::FileDialog::open_file(
@@ -515,18 +606,20 @@ public:
                 {{"Audio Files", "wav;aif;aiff;flac;mp3;ogg"}}, "");
             if (picked && !picked->empty()) request_load_path(*picked);
         };
+        wf->on_play_slice = [this](int idx, bool on) { play_slice(idx, on); };
         wf->generation = [this] { return raw_generation(); };
         wf->snapshot = [this](std::vector<float>& mono, float& sr, std::vector<long>& sl) {
             return snapshot_for_view(mono, sr, sl);
         };
         root->add_child(std::move(wf));
 
-        // ── Footer: interactive controls ──
-        const std::size_t slices = num_slices();
+        // Musical typing (home row) routes to the same audition path.
+        root->on_play_slice = [this](int idx, bool on) { play_slice(idx, on); };
 
+        // ── Footer: wired controls only ──
         // Root-note dropdown (slice 0 maps to this MIDI note; idx = note - root).
         // Labels follow the requested C-2..C8 convention (C3 = 60); see note_name.
-        label(20, 326, 40, 18, "ROOT", faint, 10, 600, LabelAlign::left, true);
+        label(20, 320, 40, 18, "ROOT", faint, 10, 600, LabelAlign::left, true);
         {
             auto combo = std::make_unique<ComboBox>();
             std::vector<std::string> names;
@@ -548,17 +641,17 @@ public:
                         comboPtr->set_selected_silent(static_cast<int>(v) - kRootNoteMin);
                 },
                 state::ListenerThread::Main));
-            place(*combo, 64, 322, 96, 26);
+            place(*combo, 64, 316, 96, 26);
             root->add_child(std::move(combo));
         }
 
         // Onset-sensitivity fader: higher = more slices. Drag re-slices on the
         // worker (coalesced) via the kOnsetSens listener -> request_reanalyze().
-        label(176, 326, 44, 18, "SENS", faint, 10, 600, LabelAlign::left, true);
+        label(176, 320, 44, 18, "SENS", faint, 10, 600, LabelAlign::left, true);
         {
             auto fader = std::make_unique<Fader>();
             fader->set_orientation(Fader::Orientation::horizontal);
-            place(*fader, 220, 328, 150, 16);
+            place(*fader, 220, 322, 150, 16);
             root->bindings.push_back(bind_parameter(*fader, state(), kOnsetSens));
             root->add_child(std::move(fader));
             root->listeners.push_back(state().add_listener(
@@ -568,9 +661,14 @@ public:
                 state::ListenerThread::Main));
         }
 
-        label(390, 326, 120, 18, "SLICES  " + std::to_string(slices), muted, 11, 500, LabelAlign::left, true);
-        rect(596, 320, 60, 28, panel);   label(596, 325, 60, 18, "Snap", text, 12, 500, LabelAlign::center);
-        rect(662, 320, 96, 28, tealSoft); label(662, 325, 96, 18, "Auto-slice", teal, 12, 600, LabelAlign::center);
+        // Live slice count (updates after a drop or a sensitivity change).
+        {
+            auto live = std::make_unique<LiveText>();
+            live->font_family = mono;
+            live->text = [this] { return "SLICES  " + std::to_string(num_slices()); };
+            place(*live, 390, 320, 140, 18);
+            root->add_child(std::move(live));
+        }
 
         root->layout_children();
         return root;
@@ -598,6 +696,15 @@ public:
         const auto params = current_params();
         const auto block_frames = static_cast<std::uint32_t>(output.num_samples());
         midi_in.sort();
+
+        // Drain UI-injected notes (slice clicks / musical typing) at block start.
+        while (auto n = ui_notes_.try_pop()) {
+            if (n->on) {
+                if (can_trigger) trigger_note(n->note, n->velocity, published, params);
+            } else {
+                release_note(n->note);
+            }
+        }
 
         std::uint32_t cursor = 0;
         for (std::size_t i = 0; i < midi_in.size(); ++i) {
@@ -907,6 +1014,10 @@ private:
     std::atomic<double> pending_host_bpm_{120.0};
     std::mutex drop_mutex_;
     std::string pending_drop_path_;
+
+    // UI-thread -> audio-thread note injection (click/typing playback).
+    struct UiNote { int note = -1; float velocity = 0.8f; bool on = false; };
+    runtime::SpscQueue<UiNote, 256> ui_notes_;
 };
 
 inline std::unique_ptr<format::Processor> create_pulp_tempo_sampler() {

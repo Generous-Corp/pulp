@@ -10,6 +10,10 @@
 #include "pulp_tempo_sampler.hpp"
 
 #include <pulp/view/drag_drop.hpp>
+#include <pulp/view/input_events.hpp>
+#if defined(__APPLE__)
+#include <pulp/view/screenshot.hpp>  // render_to_png: drives one layout+paint pass
+#endif
 
 #include <chrono>
 #include <cmath>
@@ -212,6 +216,28 @@ TEST_CASE("invalid drop path is a graceful no-op", "[tempo-sampler]") {
     REQUIRE_FALSE(f.proc->has_sample());
 }
 
+TEST_CASE("UI play_slice triggers audio with no host MIDI", "[tempo-sampler]") {
+    Fixture f;
+    auto loop = percussive_loop(48000, 4);
+    const float* ch[1] = {loop.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+
+    std::vector<float> l(512), r(512);
+    process_block(*f.proc, 120.0, false, 0, l, r);  // publish at host tempo
+    REQUIRE(wait_for([&] { return f.proc->published_frames() > 0; }));
+
+    f.proc->play_slice(0, true);  // a UI click / key press on slice 0
+    double energy = 0.0;
+    for (int b = 0; b < 8; ++b) {
+        process_block(*f.proc, 120.0, false, 0, l, r);  // note_on=false: no host MIDI
+        for (int i = 0; i < 512; ++i) energy += l[static_cast<size_t>(i)] * l[static_cast<size_t>(i)];
+        for (float v : l) REQUIRE(std::isfinite(v));
+    }
+    CHECK(energy > 1e-6);  // UI-injected note produced audio
+    f.proc->play_slice(0, false);
+}
+
 TEST_CASE("root note remaps slice-to-key (idx = note - root)", "[tempo-sampler]") {
     Fixture f;
     // Default root is 60 (C3 in this editor's labeling).
@@ -280,5 +306,73 @@ TEST_CASE("empty drop area click triggers browse", "[tempo-sampler]") {
     press.is_down = true;
     v.on_mouse_event(press);
     REQUIRE(browsed);  // a click in the empty area opens the file picker
+}
+
+TEST_CASE("musical typing routes home-row keys to slices", "[tempo-sampler]") {
+    SamplerEditorRoot root;
+    std::vector<std::pair<int, bool>> events;
+    root.on_play_slice = [&](int idx, bool on) { events.emplace_back(idx, on); };
+    auto key = [](view::KeyCode k, bool down) {
+        view::KeyEvent e; e.key = k; e.is_down = down; return e;
+    };
+    REQUIRE(root.on_key_event(key(view::KeyCode::a, true)));
+    REQUIRE(root.on_key_event(key(view::KeyCode::a, true)));   // auto-repeat ignored
+    REQUIRE(root.on_key_event(key(view::KeyCode::a, false)));
+    REQUIRE(root.on_key_event(key(view::KeyCode::f, true)));
+    REQUIRE_FALSE(root.on_key_event(key(view::KeyCode::z, true)));  // unmapped key
+
+    REQUIRE(events.size() == 3);
+    CHECK(events[0] == std::make_pair(0, true));   // 'a' down -> slice 0
+    CHECK(events[1] == std::make_pair(0, false));  // 'a' up
+    CHECK(events[2] == std::make_pair(3, true));   // 'f' down -> slice 3
+}
+
+namespace {
+WaveformDropView* find_waveform(view::View* v) {
+    if (auto* w = dynamic_cast<WaveformDropView*>(v)) return w;
+    for (std::size_t i = 0; i < v->child_count(); ++i)
+        if (auto* w = find_waveform(v->child_at(i))) return w;
+    return nullptr;
+}
+} // namespace
+
+// THE regression guard for "looks done but doesn't play": drive the REAL user
+// gesture through the REAL wired editor (not just the processor API) and assert
+// audio comes out. If create_view() forgets to wire on_play_slice, or the click
+// no longer maps to a slice, this fails.
+TEST_CASE("end-to-end: clicking a slice in the editor produces audio", "[tempo-sampler]") {
+    Fixture f;
+    auto loop = percussive_loop(48000, 4);
+    const float* ch[1] = {loop.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+
+    auto editor = f.proc->create_view();  // builds + wires the real editor
+    REQUIRE(editor);
+    // One layout+paint pass so the WaveformDropView polls the processor and
+    // populates its slice map (the same path the live host drives each frame).
+    (void)view::render_to_png(*editor, 760, 372, 1.0f, view::ScreenshotBackend::skia);
+
+    WaveformDropView* wf = find_waveform(editor.get());
+    REQUIRE(wf != nullptr);
+    const auto b = wf->local_bounds();  // on_mouse_event expects local coords
+    REQUIRE(b.width > 0);
+
+    // Click near the left edge → slice 0; the editor routes click -> play_slice.
+    view::MouseEvent down;
+    down.button = view::MouseButton::left;
+    down.is_down = true;
+    down.position = {b.x + b.width * 0.05f, b.y + b.height * 0.5f};
+    wf->on_mouse_event(down);
+
+    std::vector<float> l(512), r(512);
+    process_block(*f.proc, 120.0, false, 0, l, r);
+    REQUIRE(wait_for([&] { return f.proc->published_frames() > 0; }));
+    double energy = 0.0;
+    for (int blk = 0; blk < 8; ++blk) {
+        process_block(*f.proc, 120.0, false, 0, l, r);
+        for (int i = 0; i < 512; ++i) energy += l[static_cast<size_t>(i)] * l[static_cast<size_t>(i)];
+    }
+    CHECK(energy > 1e-6);  // the wired editor actually triggered the sample
 }
 #endif  // __APPLE__
