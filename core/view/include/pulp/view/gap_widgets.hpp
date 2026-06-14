@@ -11,6 +11,7 @@
 
 #include <pulp/view/view.hpp>
 #include <pulp/view/animation.hpp>
+#include <algorithm>
 #include <functional>
 #include <string>
 
@@ -177,13 +178,29 @@ private:
 
 // ── ChannelStrip ──────────────────────────────────────────────────────────
 // Packaged mixer strip: label + level meter + vertical fader + 1-D pan.
+// Interactive: dragging the fader column sets the level; dragging the pan row
+// sets the pan. Both are draggable and fire their callbacks, so the strip is a
+// real control, not a static readout.
 class ChannelStrip : public View {
 public:
+    ChannelStrip() { set_focusable(true); }
     void set_label(std::string s) { label_ = std::move(s); }
-    void set_level(float v) { level_ = v; }   // 0..1 fader/meter
-    void set_pan(float v) { pan_ = v; }        // -1..1
+    void set_level(float v) { level_ = std::clamp(v, 0.0f, 1.0f); }   // 0..1 fader/meter
+    void set_pan(float v) { pan_ = std::clamp(v, -1.0f, 1.0f); }       // -1..1
+    float level() const { return level_; }
+    float pan() const { return pan_; }
+    std::function<void(float)> on_level_change;
+    std::function<void(float)> on_pan_change;
     void paint(canvas::Canvas& canvas) override;
+    void on_mouse_down(Point pos) override;
+    void on_mouse_drag(Point pos) override;
+    // Scroll-wheel over the strip nudges the level (the most common gesture).
+    bool wants_wheel_value() const override { return true; }
+    void on_wheel(float delta_y) override;
 private:
+    // Map a pointer position to whichever zone it falls in (fader column or
+    // pan row) and update that value. Shared by mouse-down and drag.
+    void handle_pointer_(Point pos);
     std::string label_ = "Ch";
     float level_ = 0.7f;
     float pan_ = 0.0f;

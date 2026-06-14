@@ -152,6 +152,33 @@ TEST_CASE("value widgets adjust on scroll wheel", "[design-system][interaction][
     pan.on_wheel(-10.0f); REQUIRE(pan.value() > 0.0f); REQUIRE(pf);
 }
 
+TEST_CASE("ChannelStrip fader + pan drag and fire callbacks", "[design-system][interaction]") {
+    ChannelStrip cs;
+    cs.set_bounds({0, 0, 84, 200});   // matches showcase strip size
+    cs.set_level(0.7f); cs.set_pan(0.0f);
+    bool lvl_fired = false, pan_fired = false;
+    cs.on_level_change = [&](float) { lvl_fired = true; };
+    cs.on_pan_change   = [&](float) { pan_fired = true; };
+
+    // Fader column (top half) — drag near the top sets a high level.
+    cs.on_mouse_down({50.0f, 20.0f});
+    REQUIRE(lvl_fired);
+    REQUIRE(cs.level() > 0.8f);
+    // Drag toward the bottom of the fader span lowers it.
+    cs.on_mouse_drag({50.0f, 150.0f});
+    REQUIRE(cs.level() < 0.3f);
+
+    // Pan row (bottom band, y >= h - 36) — drag left of centre pans left.
+    cs.on_mouse_down({10.0f, 175.0f});
+    REQUIRE(pan_fired);
+    REQUIRE(cs.pan() < 0.0f);
+
+    // Scroll wheel nudges the level.
+    float before = cs.level();
+    cs.on_wheel(-1.0f);
+    REQUIRE(cs.level() > before);
+}
+
 TEST_CASE("ComboBox dropdown flips above field near viewport bottom", "[design-system][interaction][dropdown]") {
     // ScrollView viewport 200px tall; a 3-item menu is 72px.
     ScrollView sv;

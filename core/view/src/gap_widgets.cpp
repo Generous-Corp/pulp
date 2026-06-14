@@ -380,4 +380,31 @@ void ChannelStrip::paint(canvas::Canvas& canvas) {
     canvas.fill_text(label_, (w - lw) / 2.0f, h - 8.0f);
 }
 
+void ChannelStrip::handle_pointer_(Point pos) {
+    // Geometry mirrors paint(): the fader column spans [topPad, topPad+faderH];
+    // the pan row sits in the bottom padding band. Pick the zone by y.
+    const float w = bounds().width, h = bounds().height;
+    const float topPad = 12.0f, botPad = 36.0f, faderH = h - topPad - botPad;
+    if (faderH <= 0.0f) return;
+    if (pos.y >= h - botPad) {
+        // Pan row: map x across the centered pan track to [-1, +1].
+        const float cx = w / 2.0f, panW = w * 0.6f;
+        if (panW <= 0.0f) return;
+        float v = std::clamp((pos.x - cx) / (panW / 2.0f), -1.0f, 1.0f);
+        if (v != pan_) { pan_ = v; request_repaint(); if (on_pan_change) on_pan_change(pan_); }
+    } else {
+        // Fader column: top = 1.0, bottom = 0.0.
+        float v = std::clamp(1.0f - (pos.y - topPad) / faderH, 0.0f, 1.0f);
+        if (v != level_) { level_ = v; request_repaint(); if (on_level_change) on_level_change(level_); }
+    }
+}
+
+void ChannelStrip::on_mouse_down(Point pos) { handle_pointer_(pos); }
+void ChannelStrip::on_mouse_drag(Point pos) { handle_pointer_(pos); }
+
+void ChannelStrip::on_wheel(float delta_y) {
+    float v = std::clamp(level_ + (delta_y > 0 ? -0.02f : 0.02f), 0.0f, 1.0f);
+    if (v != level_) { level_ = v; request_repaint(); if (on_level_change) on_level_change(level_); }
+}
+
 }  // namespace pulp::view
