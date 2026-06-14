@@ -62,6 +62,14 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
             },
         }
 
+    def setup_ok_checks(self):
+        return [
+            {"name": "setup.pulp", "ok": True, "detail": "/usr/local/bin/pulp", "required": True, "title": "Pulp CLI"},
+            {"name": "setup.npm", "ok": True, "detail": "/usr/local/bin/npm", "required": True, "title": "npm"},
+            {"name": "setup.node", "ok": True, "detail": "/usr/local/bin/node", "required": True, "title": "Node.js"},
+            {"name": "setup.cmake", "ok": True, "detail": "/usr/local/bin/cmake", "required": True, "title": "CMake"},
+        ]
+
     def deps(self):
         def resolve(_config, name):
             return self.targets[name]
@@ -557,6 +565,7 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
             "normalize_desktop_optional_config_fn": lambda optional: {"video_capture": bool((optional or {}).get("video_capture"))},
             "video_proof_smoke_fn": lambda: self.fail("smoke should not run without --check"),
             "probe_macos_avfoundation_audio_fn": lambda _device: self.fail("audio probe should not run without --check"),
+            "setup_prerequisite_checks_fn": self.setup_ok_checks,
             "print_fn": self.print_line,
         }
 
@@ -585,6 +594,7 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
             "normalize_desktop_optional_config_fn": lambda optional: {"video_capture": bool((optional or {}).get("video_capture"))},
             "video_proof_smoke_fn": lambda: self.fail("smoke should not run without --check"),
             "probe_macos_avfoundation_audio_fn": lambda _device: self.fail("audio probe should not run without --check"),
+            "setup_prerequisite_checks_fn": self.setup_ok_checks,
             "print_fn": self.print_line,
         }
 
@@ -605,6 +615,7 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
             "normalize_desktop_optional_config_fn": lambda optional: {"video_capture": bool((optional or {}).get("video_capture"))},
             "video_proof_smoke_fn": lambda: self.fail("smoke should not run without config"),
             "probe_macos_avfoundation_audio_fn": lambda _device: self.fail("audio probe should not run without config"),
+            "setup_prerequisite_checks_fn": self.setup_ok_checks,
             "print_fn": self.print_line,
         }
 
@@ -637,6 +648,7 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
             "normalize_desktop_optional_config_fn": lambda optional: {"video_capture": bool((optional or {}).get("video_capture"))},
             "video_proof_smoke_fn": lambda: {"ok": True, "detail": "smoke ok"},
             "probe_macos_avfoundation_audio_fn": lambda device: (device == "2", "BlackHole 2ch (2)" if device == "2" else "missing"),
+            "setup_prerequisite_checks_fn": self.setup_ok_checks,
             "desktop_video_matrix_payload_fn": lambda **kwargs: matrix_calls.append(kwargs) or {
                 "kind": "desktop-video-proof-demo-matrix",
                 "checked": True,
@@ -691,6 +703,9 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
         self.assertEqual(payload["install_model"]["distribution_lane"], "tool_addon")
         self.assertEqual(payload["install_model"]["package_format"], "not_pulp_add")
         self.assertEqual(payload["install_model"]["artifact_status"], "source_tree_iteration")
+        self.assertTrue(payload["setup_prerequisites"]["ok"])
+        prereq_checks_by_name = {check["name"]: check for check in payload["setup_prerequisites"]["checks"]}
+        self.assertEqual(prereq_checks_by_name["setup.pulp"]["detail"], "/usr/local/bin/pulp")
         self.assertTrue(payload["check"]["ok"])
         self.assertEqual(payload["check"]["target"], "mac")
         checks_by_name = {check["name"]: check for check in payload["check"]["checks"]}
@@ -718,6 +733,42 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
         self.assertEqual(payload["steps"][9]["name"], "smoke_proof")
         self.assertIn("--run-in-terminal", payload["steps"][7]["command"])
 
+    def test_video_setup_check_fails_when_setup_prerequisites_are_missing(self):
+        self.targets["mac"]["optional"] = {"video_capture": True}
+        checks = [
+            {"name": "receipt", "ok": True, "detail": "installed"},
+            {"name": "screencapture", "ok": True, "detail": "/usr/sbin/screencapture"},
+            {"name": "video_capture", "ok": True, "detail": "/repo/node_modules/ffmpeg-static/ffmpeg", "required": False},
+            {"name": "avfoundation_screen", "ok": True, "detail": "Capture screen 0 (3:)", "required": False},
+        ]
+        deps = {
+            "load_config_fn": self.config,
+            "resolve_desktop_target_fn": lambda _config, name: self.targets[name],
+            "desktop_doctor_checks_fn": lambda _config, _name: [dict(check) for check in checks],
+            "normalize_desktop_optional_config_fn": lambda optional: {"video_capture": bool((optional or {}).get("video_capture"))},
+            "video_proof_smoke_fn": lambda: {"ok": True, "detail": "smoke ok"},
+            "probe_macos_avfoundation_audio_fn": lambda _device: self.fail("audio probe should not run"),
+            "setup_prerequisite_checks_fn": lambda: [
+                {"name": "setup.pulp", "ok": False, "detail": "required for tool install", "required": True, "title": "Pulp CLI", "remediation": "Install Pulp."},
+                {"name": "setup.npm", "ok": False, "detail": "required for npm install", "required": True, "title": "npm", "remediation": "Install npm."},
+                {"name": "setup.node", "ok": True, "detail": "/opt/homebrew/bin/node", "required": True, "title": "Node.js"},
+                {"name": "setup.cmake", "ok": False, "detail": "required for CLI build", "required": True, "title": "CMake", "remediation": "Install CMake."},
+            ],
+            "print_fn": self.print_line,
+        }
+
+        result = self.mod.cmd_desktop_video_setup(
+            Namespace(target="mac", machine="blackbook", check=True, skip_remotion_smoke=False, video_audio="none", video_audio_device=None, json=True),
+            **deps,
+        )
+
+        self.assertEqual(result, 1)
+        payload = json.loads(self.printed[0])
+        self.assertFalse(payload["setup_prerequisites"]["ok"])
+        self.assertTrue(payload["check"]["ok"])
+        missing = [item["check"] for item in payload["setup_prerequisites"]["remediations"]]
+        self.assertEqual(missing, ["setup.pulp", "setup.npm", "setup.cmake"])
+
     def test_video_setup_text_reports_demo_matrix_blockers(self):
         self.targets["mac"]["optional"] = {"video_capture": True}
         checks = [
@@ -733,6 +784,7 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
             "normalize_desktop_optional_config_fn": lambda optional: {"video_capture": bool((optional or {}).get("video_capture"))},
             "video_proof_smoke_fn": lambda: {"ok": True, "detail": "smoke ok"},
             "probe_macos_avfoundation_audio_fn": lambda _device: self.fail("audio probe should not run"),
+            "setup_prerequisite_checks_fn": self.setup_ok_checks,
             "desktop_video_matrix_payload_fn": lambda **_kwargs: {
                 "kind": "desktop-video-proof-demo-matrix",
                 "checked": True,
@@ -774,6 +826,7 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
         )
 
         self.assertEqual(result, 0)
+        self.assertIn("Setup prerequisites: PASS", self.printed)
         self.assertIn("Demo matrix readiness:", self.printed)
         self.assertIn("  - audio-inspector-demo: ready", self.printed)
         self.assertIn("  - design-parity: blocked (declared: ready)", self.printed)

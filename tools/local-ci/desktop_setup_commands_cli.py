@@ -7,6 +7,7 @@ from collections.abc import Callable
 import importlib.util
 import json
 from pathlib import Path
+import shutil
 import subprocess
 
 try:
@@ -386,6 +387,64 @@ def desktop_video_install_model() -> dict:
     }
 
 
+def desktop_video_setup_prerequisite_checks(*, which_fn: Callable[[str], str | None] = shutil.which) -> list[dict]:
+    required_tools = [
+        {
+            "name": "pulp",
+            "title": "Pulp CLI",
+            "detail": "required for the optional `pulp tool install video-proof` and `pulp tool info video-proof --json` setup path",
+            "remediation": "Install or build the Pulp CLI, then ensure `pulp` is on PATH.",
+        },
+        {
+            "name": "npm",
+            "title": "npm",
+            "detail": "required for the current source-tree Remotion/ffmpeg-static install path",
+            "remediation": "Install Node.js/npm, for example with Homebrew or the Node.js installer.",
+        },
+        {
+            "name": "node",
+            "title": "Node.js",
+            "detail": "required by Remotion composition scripts",
+            "remediation": "Install Node.js, then rerun `node --version` and this setup check.",
+        },
+        {
+            "name": "cmake",
+            "title": "CMake",
+            "detail": "required to build the source checkout and validate the CLI/tool install path on a fresh machine",
+            "remediation": "Install CMake, then rebuild the Release CLI before running the tool install smoke.",
+        },
+    ]
+    checks: list[dict] = []
+    for tool in required_tools:
+        path = which_fn(tool["name"])
+        checks.append(
+            {
+                "name": f"setup.{tool['name']}",
+                "ok": bool(path),
+                "detail": path or tool["detail"],
+                "required": True,
+                "title": tool["title"],
+                "remediation": tool["remediation"],
+            }
+        )
+    return checks
+
+
+def desktop_video_setup_prerequisite_remediations(checks: list[dict]) -> list[dict]:
+    remediations: list[dict] = []
+    for check in checks:
+        if check.get("ok"):
+            continue
+        remediations.append(
+            {
+                "check": check["name"],
+                "title": f"Install {check.get('title') or check['name']}",
+                "detail": check.get("remediation") or check.get("detail") or "Install the missing setup prerequisite.",
+            }
+        )
+    return remediations
+
+
 def append_video_recipe_doctor_checks(args: argparse.Namespace, checks: list[dict]) -> None:
     recipe = getattr(args, "recipe", None)
     if not recipe:
@@ -753,6 +812,7 @@ def cmd_desktop_video_setup(
     video_proof_smoke_fn: Callable[[], dict],
     probe_macos_avfoundation_audio_fn: Callable[[str | None], tuple[bool, str]] | None = None,
     desktop_video_matrix_payload_fn: Callable[..., dict] | None = None,
+    setup_prerequisite_checks_fn: Callable[[], list[dict]] = desktop_video_setup_prerequisite_checks,
     print_fn: Callable[[str], None] = print,
 ) -> int:
     steps = desktop_video_setup_steps(args.target, machine_label=getattr(args, "machine", None))
@@ -798,10 +858,18 @@ def cmd_desktop_video_setup(
         "bootstrap": target["bootstrap"],
         "install_model": desktop_video_install_model(),
         "steps": steps,
+        "setup_prerequisites": None,
         "check": None,
     }
     exit_code = 0
     if getattr(args, "check", False):
+        setup_checks = setup_prerequisite_checks_fn()
+        setup_ok = all(check["ok"] for check in setup_checks if check.get("required", True))
+        payload["setup_prerequisites"] = {
+            "ok": setup_ok,
+            "checks": setup_checks,
+            "remediations": desktop_video_setup_prerequisite_remediations(setup_checks),
+        }
         doctor_args = argparse.Namespace(
             target=args.target,
             skip_remotion_smoke=getattr(args, "skip_remotion_smoke", False),
@@ -822,6 +890,8 @@ def cmd_desktop_video_setup(
             probe_macos_avfoundation_audio_fn=probe_macos_avfoundation_audio_fn,
         )
         payload["check"] = doctor_payload
+        if not setup_ok:
+            exit_code = 1
         if desktop_video_matrix_payload_fn is not None:
             payload["demo_matrix"] = desktop_video_matrix_payload_fn(
                 target=args.target,
@@ -846,6 +916,16 @@ def cmd_desktop_video_setup(
         print_fn(f"     {step['detail']}")
         print_fn(f"     command: {step['command']}")
     if payload["check"] is not None:
+        if payload.get("setup_prerequisites"):
+            print_fn("")
+            print_fn(f"Setup prerequisites: {'PASS' if payload['setup_prerequisites']['ok'] else 'FAIL'}")
+            for check in payload["setup_prerequisites"]["checks"]:
+                print_fn(f"  {_desktop_check_status(check):4s}  {check['name']}: {check['detail']}")
+            if payload["setup_prerequisites"]["remediations"]:
+                print_fn("")
+                print_fn("Setup remediation:")
+                for item in payload["setup_prerequisites"]["remediations"]:
+                    print_fn(f"  - {item['title']}: {item['detail']}")
         print_fn("")
         print_fn(f"Current check: {'PASS' if payload['check']['ok'] else 'FAIL'}")
         for check in payload["check"]["checks"]:

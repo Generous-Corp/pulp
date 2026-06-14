@@ -63,6 +63,11 @@ Recording grant:
 python3 tools/local-ci/local_ci.py desktop video-setup mac --machine blackbook --check --run-in-terminal --json
 ```
 
+With `--check`, inspect `setup_prerequisites` before `check`: missing `pulp`,
+`npm`, `node`, or `cmake` means the machine cannot yet run the optional tool
+setup path cleanly. Fix those first, then rerun the setup check and move on to
+Screen Recording / `video-doctor` failures.
+
 Create the machine-local config on a new checkout:
 
 ```bash

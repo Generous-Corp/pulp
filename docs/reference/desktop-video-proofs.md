@@ -73,6 +73,12 @@ grant:
 python3 tools/local-ci/local_ci.py desktop video-setup mac --machine blackbook --check --run-in-terminal --json
 ```
 
+With `--check`, the setup report includes a separate
+`setup_prerequisites` block for machine-level setup tools (`pulp`, `npm`,
+`node`, and `cmake`) before the `video-doctor` capture readiness payload. This
+lets a fresh Mac fail with actionable install remediations even if the later
+screen-capture checks are not yet meaningful.
+
 When the setup report should also prove that a specific design-parity
 comparison is runnable, pass the same concrete inputs used by `video-matrix`:
 
