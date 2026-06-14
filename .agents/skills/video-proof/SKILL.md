@@ -624,10 +624,11 @@ setup step. With `--check`,
 query. The matrix carries
 readiness status, Remotion template, doctor command, concrete Release prepare
 command, recording/compose command,
-publish/review-issue commands, manifest-map review-watch commands, background
-serve/status/stop commands, and reviewer watch-points for standalone,
-audio-inspector demo, REAPER/plugin-host, inspector, component-zoom,
-design-parity, iOS Simulator, Android Emulator, Linux, and Windows proofs.
+publish commands, draft review-issue commands, create-with-map review issue
+commands, manifest-map review-watch commands, background serve/status/stop
+commands, and reviewer watch-points for standalone, audio-inspector demo,
+REAPER/plugin-host, inspector, component-zoom, design-parity, iOS Simulator,
+Android Emulator, Linux, and Windows proofs.
 Linux/Windows `desktop video-doctor` must fail
 `backend.recorder` until their ffmpeg `x11grab` and `ddagrab`/`gdigrab`
 backends land.

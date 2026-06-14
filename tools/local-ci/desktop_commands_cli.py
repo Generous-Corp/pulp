@@ -864,7 +864,12 @@ def desktop_video_matrix_payload(
         )
         row["review_issue_command"] = (
             f"python3 tools/local-ci/local_ci.py desktop review-issue {report_placeholder} "
-            f"--repo owner/repo --check-files --manifest-map-output {manifest_map_placeholder}"
+            "--repo owner/repo --check-files"
+        )
+        row["review_create_command"] = (
+            f"python3 tools/local-ci/local_ci.py desktop review-issue {report_placeholder} "
+            f"--repo owner/repo --check-files --create --label video-review "
+            f"--manifest-map-output {manifest_map_placeholder}"
         )
         row["review_status_command"] = (
             "python3 tools/local-ci/local_ci.py desktop review-status <issue-url> "
@@ -896,6 +901,7 @@ def desktop_video_matrix_payload(
             {"step": "record_or_compose", "command": row["command"]},
             {"step": "publish", "command": row["publish_command"]},
             {"step": "draft_issue", "command": row["review_issue_command"]},
+            {"step": "create_issue_with_map", "command": row["review_create_command"]},
             {"step": "serve_background", "command": row["serve_background_command"]},
             {"step": "check_server", "command": row["serve_status_command"]},
             {"step": "check_review", "command": row["review_status_command"]},
@@ -948,6 +954,7 @@ def desktop_video_matrix_lines(payload: dict) -> list[str]:
                 f"  command: {item['command']}",
                 f"  publish: {item['publish_command']}",
                 f"  review issue: {item['review_issue_command']}",
+                f"  review create: {item['review_create_command']}",
                 f"  review status: {item['review_status_command']}",
                 f"  review watch: {item['review_watch_command']}",
                 f"  serve background: {item['serve_background_command']}",
@@ -1018,6 +1025,7 @@ def desktop_video_matrix_markdown(payload: dict) -> str:
                 "```bash",
                 item["publish_command"],
                 item["review_issue_command"],
+                item["review_create_command"],
                 item["serve_background_command"],
                 item["serve_status_command"],
                 item["review_status_command"],
