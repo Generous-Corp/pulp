@@ -496,23 +496,33 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
     },
     {
         "id": "ios-simulator",
-        "title": "iOS Simulator interaction",
+        "title": "iOS Pulp HostApp interaction",
         "platform": "ios-simulator",
-        "status": "partial",
+        "status": "ready",
         "template": "mobile-simulator",
-        "proves": "A booted iOS Simulator can launch an app and produce a bounded MP4 proof clip.",
+        "proves": "A booted iOS Simulator can install and launch a Pulp HostApp, then produce a bounded MP4 proof clip.",
+        "prepare_command": (
+            "cmake -S . -B build-ios-sim-video-proof -G Xcode -DCMAKE_SYSTEM_NAME=iOS "
+            "-DCMAKE_OSX_SYSROOT=iphonesimulator -DCMAKE_OSX_ARCHITECTURES=arm64 "
+            "-DCMAKE_OSX_DEPLOYMENT_TARGET=16.4 -DCMAKE_BUILD_TYPE=Release "
+            "-DPULP_ENABLE_GPU=OFF -DPULP_BUILD_TESTS=OFF -DPULP_BUILD_EXAMPLES=ON && "
+            "cmake --build build-ios-sim-video-proof --target PulpSineSynth_HostApp_Embed "
+            "--config Release -- -sdk iphonesimulator"
+        ),
         "command": (
             "python3 tools/local-ci/local_ci.py simulator video "
-            "--app build/ios/PulpDemo.app --bundle-id com.pulp.demo "
+            "--app build-ios-sim-video-proof/AUv3/Release/PulpSineSynth.app "
+            "--bundle-id com.pulp.examples.sinesynth.host "
             "--open-url https://example.com --action-label 'open validation URL' "
-            "--label ios-simulator-launch-proof --duration 8 --video-fps 10 "
-            "--compose-video-proof --video-title 'iOS Simulator open URL proof' "
-            "--video-note 'Simulator opens the validation URL during recording.' --small-video"
+            "--label ios-pulpsinesynth-hostapp-proof --duration 6 --video-fps 8 "
+            "--compose-video-proof --video-title 'Pulp iOS HostApp proof' "
+            "--video-note 'Installs and launches the PulpSineSynth iOS HostApp, then records the simulator while simctl opens a validation URL.' "
+            "--small-video"
         ),
         "doctor": "python3 tools/local-ci/local_ci.py simulator video-doctor",
         "watch_for": [
             "device/runtime is identified",
-            "app launch or host setup is visible",
+            "PulpSineSynth HostApp install/launch context is visible",
             "open-url action is marked in the proof; coordinate taps need a future automation backend",
         ],
     },

@@ -127,7 +127,7 @@ xcrun simctl launch --console booted com.example.MyApp
 > recipe + diagnostics live in
 > `.agents/skills/auv3/SKILL.md → "macOS AU v3 packaging"`.
 
-An AUv3 plugin on iOS ships as an **App Extension** bundled inside a **host app** (App Store requires a host container). Both targets must be in the same Xcode project.
+An AUv3 plugin on iOS ships as an **App Extension** bundled inside a **host app** (App Store requires a host container). Both targets must be in the same Xcode project. The extension bundle identifier must be nested under the containing HostApp bundle identifier: for HostApp `com.example.synth.host`, use an AUv3 base bundle id like `com.example.synth.host.MySynth`, which produces `.appex` id `com.example.synth.host.MySynth.appex`. If the extension id is a sibling such as `com.example.synth.appex`, `simctl install` fails with `IXErrorDomain code=2` / `Mismatched bundle IDs` while setting app extension placeholders.
 
 Minimal structure:
 

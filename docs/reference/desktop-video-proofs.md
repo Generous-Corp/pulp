@@ -566,21 +566,34 @@ For simulator validation, boot the target simulator first, then run:
 python3 tools/local-ci/local_ci.py simulator video-doctor
 ```
 
-Record a bounded MP4 proof of the booted simulator with optional app install and
-launch:
+Build the PulpSineSynth HostApp, then record a bounded MP4 proof of the booted
+simulator with app install and launch:
 
 ```bash
+cmake -S . -B build-ios-sim-video-proof -G Xcode \
+  -DCMAKE_SYSTEM_NAME=iOS \
+  -DCMAKE_OSX_SYSROOT=iphonesimulator \
+  -DCMAKE_OSX_ARCHITECTURES=arm64 \
+  -DCMAKE_OSX_DEPLOYMENT_TARGET=16.4 \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DPULP_ENABLE_GPU=OFF \
+  -DPULP_BUILD_TESTS=OFF \
+  -DPULP_BUILD_EXAMPLES=ON
+cmake --build build-ios-sim-video-proof \
+  --target PulpSineSynth_HostApp_Embed \
+  --config Release -- -sdk iphonesimulator
+
 python3 tools/local-ci/local_ci.py simulator video \
-  --app build/ios/PulpDemo.app \
-  --bundle-id com.pulp.demo \
+  --app build-ios-sim-video-proof/AUv3/Release/PulpSineSynth.app \
+  --bundle-id com.pulp.examples.sinesynth.host \
   --open-url https://example.com \
-  --action-label "open validation URL" \
-  --label ios-simulator-launch-proof \
-  --duration 8 \
-  --video-fps 10 \
+  --action-label "open validation URL after HostApp launch" \
+  --label ios-pulpsinesynth-hostapp-proof \
+  --duration 6 \
+  --video-fps 8 \
   --compose-video-proof \
-  --video-title "iOS Simulator open URL proof" \
-  --video-note "Simulator opens the validation URL during recording." \
+  --video-title "Pulp iOS HostApp proof" \
+  --video-note "Installs and launches the PulpSineSynth iOS HostApp, then records the simulator while simctl opens a validation URL." \
   --small-video
 ```
 
