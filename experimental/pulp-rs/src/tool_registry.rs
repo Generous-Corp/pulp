@@ -122,6 +122,15 @@ pub struct ToolDescriptor {
     /// Human/agent-facing packaging policy note.
     #[serde(default)]
     pub artifact_policy: String,
+    /// Command that produces the reviewable source add-on artifact.
+    #[serde(default)]
+    pub artifact_pack_command: String,
+    /// npm script wrapper for the reviewable source add-on artifact.
+    #[serde(default)]
+    pub artifact_pack_npm_script: String,
+    /// Expected schema id for the artifact manifest.
+    #[serde(default)]
+    pub artifact_manifest_schema: String,
 }
 
 /// Whole registry.

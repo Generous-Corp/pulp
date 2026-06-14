@@ -31,7 +31,10 @@ or reviewer comprehension matters.
 - Use `pulp tool info video-proof --json` when an agent or setup script needs
   the machine-readable install policy. It should report a machine-scoped
   `tool_addon`, `package_format: not_pulp_add`, and, on this feature branch,
-  `artifact_status: source_tree_iteration`.
+  `artifact_status: source_tree_iteration`. It should also report
+  `artifact_pack_command`, `artifact_pack_npm_script`, and
+  `artifact_manifest_schema` so the artifact-review step is discoverable from
+  the registry.
 - Use `python3 tools/local-ci/pack_video_proof_tool.py --json` when the branch
   needs a reviewable source add-on artifact. The packer records `sha256`, size,
   included files, npm pins, and policy flags, and it excludes `node_modules`,

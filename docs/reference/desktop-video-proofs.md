@@ -48,7 +48,10 @@ The long-term split should stay narrow:
   Remotion smoke proof when run without arguments.
 - `pulp tool info video-proof --json` exposes this as a machine-scoped
   `tool_addon` with `package_format: not_pulp_add` and, on this feature branch,
-  `artifact_status: source_tree_iteration`.
+  `artifact_status: source_tree_iteration`. The same payload includes
+  `artifact_pack_command`, `artifact_pack_npm_script`, and
+  `artifact_manifest_schema` so setup automation can discover the artifact
+  review step without scraping this document.
 - The source-tree developer path can still use `npm --prefix tools/local-ci
   install` for direct iteration.
 - Before mainline release, produce a reviewable source add-on artifact with

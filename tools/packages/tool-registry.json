@@ -141,6 +141,9 @@
       "package_format": "not_pulp_add",
       "artifact_status": "source_tree_iteration",
       "artifact_policy": "Keep Remotion, ffmpeg-static, node_modules, generated videos, and caches outside Pulp projects and shipped runtime artifacts; replace the source-tree npm root with a versioned tool add-on artifact before mainline release.",
+      "artifact_pack_command": "python3 tools/local-ci/pack_video_proof_tool.py --json",
+      "artifact_pack_npm_script": "npm --prefix tools/local-ci run pack-video-proof-tool -- --json",
+      "artifact_manifest_schema": "pulp.video-proof-tool-package.v1",
       "bundle_note": "Optional developer/agent tooling. Keeps node_modules, Remotion, ffmpeg-static, generated videos, and caches out of shipped Pulp artifacts."
     }
   }

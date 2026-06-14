@@ -124,6 +124,9 @@ ToolRegistryLoadResult load_tool_registry(const fs::path& path) {
             if (auto v = val.get("package_format")) tool.package_format = v->as_string();
             if (auto v = val.get("artifact_status")) tool.artifact_status = v->as_string();
             if (auto v = val.get("artifact_policy")) tool.artifact_policy = v->as_string();
+            if (auto v = val.get("artifact_pack_command")) tool.artifact_pack_command = v->as_string();
+            if (auto v = val.get("artifact_pack_npm_script")) tool.artifact_pack_npm_script = v->as_string();
+            if (auto v = val.get("artifact_manifest_schema")) tool.artifact_manifest_schema = v->as_string();
 
             // Optional project-importer fields (DATA-only; present on
             // framework-importer add-on tools).
@@ -229,6 +232,9 @@ static void print_tool_info_json(const ToolDescriptor& tool,
               << "\"package_format\":\"" << json_escape(tool.package_format) << "\","
               << "\"artifact_status\":\"" << json_escape(tool.artifact_status) << "\","
               << "\"artifact_policy\":\"" << json_escape(tool.artifact_policy) << "\","
+              << "\"artifact_pack_command\":\"" << json_escape(tool.artifact_pack_command) << "\","
+              << "\"artifact_pack_npm_script\":\"" << json_escape(tool.artifact_pack_npm_script) << "\","
+              << "\"artifact_manifest_schema\":\"" << json_escape(tool.artifact_manifest_schema) << "\","
               << "\"pinned_version\":\"" << json_escape(tool.pinned_version) << "\","
               << "\"bundleable\":" << (tool.bundleable ? "true" : "false") << ","
               << "\"managed_by_pulp\":" << (tool.managed_by_pulp ? "true" : "false") << ","
@@ -258,6 +264,12 @@ static void print_tool_info_text(const ToolDescriptor& tool,
         std::cout << "Artifact status: " << tool.artifact_status << "\n";
     if (!tool.artifact_policy.empty())
         std::cout << "Artifact policy: " << tool.artifact_policy << "\n";
+    if (!tool.artifact_pack_command.empty())
+        std::cout << "Artifact pack command: " << tool.artifact_pack_command << "\n";
+    if (!tool.artifact_pack_npm_script.empty())
+        std::cout << "Artifact pack npm script: " << tool.artifact_pack_npm_script << "\n";
+    if (!tool.artifact_manifest_schema.empty())
+        std::cout << "Artifact manifest schema: " << tool.artifact_manifest_schema << "\n";
     if (!tool.pinned_version.empty())
         std::cout << "Pinned version: " << tool.pinned_version << "\n";
     std::cout << "Platform: " << platform << "\n";

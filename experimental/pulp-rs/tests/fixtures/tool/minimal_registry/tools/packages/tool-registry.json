@@ -62,7 +62,15 @@
       "npm_package_root": "tools/local-ci",
       "npm_default_script": "smoke-video-proof",
       "pinned_version": "0.0.0",
-      "managed_by_pulp": true
+      "managed_by_pulp": true,
+      "install_scope": "machine",
+      "distribution_lane": "tool_addon",
+      "package_format": "not_pulp_add",
+      "artifact_status": "source_tree_iteration",
+      "artifact_policy": "Keep Remotion outside shipped artifacts.",
+      "artifact_pack_command": "python3 tools/local-ci/pack_video_proof_tool.py --json",
+      "artifact_pack_npm_script": "npm --prefix tools/local-ci run pack-video-proof-tool -- --json",
+      "artifact_manifest_schema": "pulp.video-proof-tool-package.v1"
     }
   }
 }

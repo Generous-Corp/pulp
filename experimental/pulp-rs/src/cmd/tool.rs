@@ -263,7 +263,7 @@ fn info(reg: &ToolRegistry, id: &str, json: bool, out: &mut impl Write) -> Resul
     if json {
         writeln!(
             out,
-            "{{\"id\":\"{}\",\"display_name\":\"{}\",\"category\":\"{}\",\"description\":\"{}\",\"install_method\":\"{}\",\"install_scope\":\"{}\",\"distribution_lane\":\"{}\",\"package_format\":\"{}\",\"artifact_status\":\"{}\",\"artifact_policy\":\"{}\",\"pinned_version\":\"{}\",\"bundleable\":{},\"managed_by_pulp\":{},\"platform\":\"{}\",\"available_on_platform\":{},\"installed\":{},\"location_source\":\"{}\",\"path\":\"{}\"}}",
+            "{{\"id\":\"{}\",\"display_name\":\"{}\",\"category\":\"{}\",\"description\":\"{}\",\"install_method\":\"{}\",\"install_scope\":\"{}\",\"distribution_lane\":\"{}\",\"package_format\":\"{}\",\"artifact_status\":\"{}\",\"artifact_policy\":\"{}\",\"artifact_pack_command\":\"{}\",\"artifact_pack_npm_script\":\"{}\",\"artifact_manifest_schema\":\"{}\",\"pinned_version\":\"{}\",\"bundleable\":{},\"managed_by_pulp\":{},\"platform\":\"{}\",\"available_on_platform\":{},\"installed\":{},\"location_source\":\"{}\",\"path\":\"{}\"}}",
             json_escape(&tool.id),
             json_escape(&tool.display_name),
             json_escape(&tool.category),
@@ -274,6 +274,9 @@ fn info(reg: &ToolRegistry, id: &str, json: bool, out: &mut impl Write) -> Resul
             json_escape(&tool.package_format),
             json_escape(&tool.artifact_status),
             json_escape(&tool.artifact_policy),
+            json_escape(&tool.artifact_pack_command),
+            json_escape(&tool.artifact_pack_npm_script),
+            json_escape(&tool.artifact_manifest_schema),
             json_escape(&tool.pinned_version),
             tool.bundleable,
             tool.managed_by_pulp,
@@ -314,6 +317,15 @@ fn info(reg: &ToolRegistry, id: &str, json: bool, out: &mut impl Write) -> Resul
     }
     if !tool.artifact_policy.is_empty() {
         writeln!(out, "Artifact policy: {}", tool.artifact_policy).map_err(io)?;
+    }
+    if !tool.artifact_pack_command.is_empty() {
+        writeln!(out, "Artifact pack command: {}", tool.artifact_pack_command).map_err(io)?;
+    }
+    if !tool.artifact_pack_npm_script.is_empty() {
+        writeln!(out, "Artifact pack npm script: {}", tool.artifact_pack_npm_script).map_err(io)?;
+    }
+    if !tool.artifact_manifest_schema.is_empty() {
+        writeln!(out, "Artifact manifest schema: {}", tool.artifact_manifest_schema).map_err(io)?;
     }
     if !tool.pinned_version.is_empty() {
         writeln!(out, "Pinned version: {}", tool.pinned_version).map_err(io)?;
@@ -927,7 +939,10 @@ mod tests {
                     "distribution_lane": "tool_addon",
                     "package_format": "not_pulp_add",
                     "artifact_status": "source_tree_iteration",
-                    "artifact_policy": "Keep Remotion outside shipped artifacts."
+                    "artifact_policy": "Keep Remotion outside shipped artifacts.",
+                    "artifact_pack_command": "python3 tools/local-ci/pack_video_proof_tool.py --json",
+                    "artifact_pack_npm_script": "npm --prefix tools/local-ci run pack-video-proof-tool -- --json",
+                    "artifact_manifest_schema": "pulp.video-proof-tool-package.v1"
                 }
             }
         }"#
@@ -1166,6 +1181,9 @@ mod tests {
         assert!(s.contains("\"distribution_lane\":\"tool_addon\""));
         assert!(s.contains("\"package_format\":\"not_pulp_add\""));
         assert!(s.contains("\"artifact_status\":\"source_tree_iteration\""));
+        assert!(s.contains("\"artifact_pack_command\":\"python3 tools/local-ci/pack_video_proof_tool.py --json\""));
+        assert!(s.contains("\"artifact_pack_npm_script\":\"npm --prefix tools/local-ci run pack-video-proof-tool -- --json\""));
+        assert!(s.contains("\"artifact_manifest_schema\":\"pulp.video-proof-tool-package.v1\""));
     }
 
     #[test]
