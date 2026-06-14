@@ -303,6 +303,8 @@ class ReportingTests(unittest.TestCase):
         self.assertIn("--background --label gallery-one --json", review_package["runs"][0]["fallback"]["serve_background_command"])
         self.assertIn("--status --label gallery-one --json", review_package["runs"][0]["fallback"]["serve_status_command"])
         self.assertIn("--stop --label gallery-one --json", review_package["runs"][0]["fallback"]["serve_stop_command"])
+        self.assertIn("desktop cleanup --published --older-than-days 14 --keep-last 3 --json", review_package["published_cleanup_command"])
+        self.assertEqual(review_package["runs"][0]["fallback"]["published_cleanup_command"], review_package["published_cleanup_command"])
         self.assertIn("# Gallery <One>", review_text)
         self.assertIn("looks good to me", review_text)
         self.assertIn("desktop serve` prints candidate URLs", review_text)
@@ -311,6 +313,8 @@ class ReportingTests(unittest.TestCase):
         self.assertIn("--background --label gallery-one --json", review_text)
         self.assertIn("Check server: `", review_text)
         self.assertIn("Stop server: `", review_text)
+        self.assertIn("Cleanup old published reports after review: `", review_text)
+        self.assertIn("desktop cleanup --published --older-than-days 14 --keep-last 3 --json", review_text)
         self.assertIn("PULP_DESKTOP_SERVE_HOSTS", review_text)
         self.assertIn("Candidate watch URL: `http://100.64.0.10:8765/`", review_text)
         self.assertIn("proof.issue.mp4", review_text)
@@ -358,6 +362,7 @@ class ReportingTests(unittest.TestCase):
             "serve_background_command": "python3 tools/local-ci/local_ci.py desktop serve /tmp/report --host 0.0.0.0 --port 8765 --background --label video-proof --json",
             "serve_status_command": "python3 tools/local-ci/local_ci.py desktop serve --status --label video-proof --json",
             "serve_stop_command": "python3 tools/local-ci/local_ci.py desktop serve --stop --label video-proof --json",
+            "published_cleanup_command": "python3 tools/local-ci/local_ci.py desktop cleanup --published --older-than-days 14 --keep-last 3 --json",
             "serve_urls": ["http://127.0.0.1:8765/", "http://100.64.0.10:8765/"],
             "runs": [
                 {
@@ -407,6 +412,7 @@ class ReportingTests(unittest.TestCase):
                         "serve_background_command": "python3 tools/local-ci/local_ci.py desktop serve /tmp/report --host 0.0.0.0 --port 8765 --background --label large-proof --json",
                         "serve_status_command": "python3 tools/local-ci/local_ci.py desktop serve --status --label large-proof --json",
                         "serve_stop_command": "python3 tools/local-ci/local_ci.py desktop serve --stop --label large-proof --json",
+                        "published_cleanup_command": "python3 tools/local-ci/local_ci.py desktop cleanup --published --older-than-days 14 --keep-last 3 --json",
                         "serve_urls": ["http://127.0.0.1:8765/", "http://100.64.0.10:8765/"],
                         "internal_ephemeral": True,
                     },
@@ -435,6 +441,7 @@ class ReportingTests(unittest.TestCase):
         self.assertIn("--background --label large-proof --json", draft["fallback_links"][0]["serve_background_command"])
         self.assertIn("--status --label large-proof --json", draft["fallback_links"][0]["serve_status_command"])
         self.assertIn("--stop --label large-proof --json", draft["fallback_links"][0]["serve_stop_command"])
+        self.assertIn("desktop cleanup --published", draft["fallback_links"][0]["published_cleanup_command"])
         self.assertTrue(draft["fallback_links"][0]["internal_ephemeral"])
         self.assertIn("gh issue create --repo danielraffel/pulp", draft["create_command"])
         self.assertIn("looks good to me", draft["body"])
@@ -454,6 +461,8 @@ class ReportingTests(unittest.TestCase):
         self.assertIn("--background --label video-proof --json", draft["body"])
         self.assertIn("Status command: `", draft["body"])
         self.assertIn("Stop command: `", draft["body"])
+        self.assertIn("Published cleanup command: `", draft["body"])
+        self.assertIn("desktop cleanup --published --older-than-days 14 --keep-last 3 --json", draft["body"])
         self.assertIn("Context component: `bypass-toggle`", draft["body"])
         self.assertIn("use the served report link", draft["body"])
 

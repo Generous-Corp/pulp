@@ -358,6 +358,10 @@ def _desktop_report_serve_commands(index_payload: dict, publish_dir: Path) -> di
             f"python3 tools/local-ci/local_ci.py desktop serve --stop "
             f"--label {shlex.quote(label)} --json"
         ),
+        "published_cleanup_command": (
+            "python3 tools/local-ci/local_ci.py desktop cleanup "
+            "--published --older-than-days 14 --keep-last 3 --json"
+        ),
     }
 
 
@@ -400,6 +404,7 @@ def desktop_review_issue_body(index_payload: dict, *, publish_dir: Path) -> str:
     serve_background_command = serve_commands["serve_background_command"]
     serve_status_command = serve_commands["serve_status_command"]
     serve_stop_command = serve_commands["serve_stop_command"]
+    published_cleanup_command = serve_commands["published_cleanup_command"]
     serve_urls = [str(url) for url in index_payload.get("serve_urls", []) if url]
     lines = [
         f"# {index_payload['label']}",
@@ -413,6 +418,7 @@ def desktop_review_issue_body(index_payload: dict, *, publish_dir: Path) -> str:
         f"- Start background server: `{serve_background_command}`",
         f"- Check server: `{serve_status_command}`",
         f"- Stop server: `{serve_stop_command}`",
+        f"- Cleanup old published reports after review: `{published_cleanup_command}`",
         "- Served URL: `desktop serve` prints candidate URLs, including localhost, configured public hosts, and Tailscale IPs when available.",
         "- Friendly Tailnet name: set `PULP_DESKTOP_SERVE_HOSTS=<name-or-ip>` before running `desktop serve` if reviewers should tap a stable host name.",
         "- Reviewer verdict: comment `looks good to me` when the proof is accepted, or describe the mismatch and run label when changes are needed.",
@@ -518,6 +524,7 @@ def desktop_review_package(index_payload: dict, *, publish_dir: Path) -> dict:
     serve_background_command = serve_commands["serve_background_command"]
     serve_status_command = serve_commands["serve_status_command"]
     serve_stop_command = serve_commands["serve_stop_command"]
+    published_cleanup_command = serve_commands["published_cleanup_command"]
     serve_urls = [str(url) for url in index_payload.get("serve_urls", []) if url]
     runs: list[dict] = []
     for run in index_payload.get("runs", []):
@@ -593,6 +600,7 @@ def desktop_review_package(index_payload: dict, *, publish_dir: Path) -> dict:
                     "serve_background_command": serve_background_command,
                     "serve_status_command": serve_status_command,
                     "serve_stop_command": serve_stop_command,
+                    "published_cleanup_command": published_cleanup_command,
                     "serve_urls": serve_urls,
                     "internal_ephemeral": True,
                 },
@@ -613,6 +621,7 @@ def desktop_review_package(index_payload: dict, *, publish_dir: Path) -> dict:
         "serve_background_command": serve_background_command,
         "serve_status_command": serve_status_command,
         "serve_stop_command": serve_stop_command,
+        "published_cleanup_command": published_cleanup_command,
         "serve_urls": serve_urls,
         "runs": runs,
     }
@@ -660,6 +669,9 @@ def desktop_review_issue_draft(
     serve_stop_command = review_package.get("serve_stop_command")
     if serve_stop_command:
         body_lines.append(f"- Stop command: `{serve_stop_command}`")
+    published_cleanup_command = review_package.get("published_cleanup_command")
+    if published_cleanup_command:
+        body_lines.append(f"- Published cleanup command: `{published_cleanup_command}`")
     serve_urls = [str(url) for url in review_package.get("serve_urls", []) if url]
     for url in serve_urls:
         body_lines.append(f"- Candidate watch URL: `{url}`")
@@ -745,6 +757,7 @@ def desktop_review_issue_draft(
                 "serve_background_command": fallback.get("serve_background_command") or serve_background_command,
                 "serve_status_command": fallback.get("serve_status_command") or serve_status_command,
                 "serve_stop_command": fallback.get("serve_stop_command") or serve_stop_command,
+                "published_cleanup_command": fallback.get("published_cleanup_command") or published_cleanup_command,
                 "serve_urls": fallback.get("serve_urls") or serve_urls,
                 "internal_ephemeral": bool(fallback.get("internal_ephemeral", True)),
                 "reason": attachment.get("reason"),
