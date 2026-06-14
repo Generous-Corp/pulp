@@ -28,6 +28,7 @@ import evidence_index as _evidence_index
 import evidence_index_bindings as _evidence_index_bindings
 import execution as _execution
 import execution_bindings as _execution_bindings
+import execution_logging_timing_bindings as _execution_logging_timing_bindings
 import footprint as _footprint
 import footprint_bindings as _footprint_bindings
 import git_helpers as _git_helpers
@@ -43,6 +44,7 @@ import linux_desktop_action as _linux_desktop_action
 import linux_desktop_bindings as _linux_desktop_bindings
 import linux_target as _linux_target
 import linux_target_bindings as _linux_target_bindings
+import local_ci_bootstrap_constants as _local_ci_bootstrap_constants
 import local_ci_command_bindings as _local_ci_command_bindings
 import local_ci_commands_cli as _local_ci_commands_cli
 import logs_cli as _logs_cli
@@ -139,32 +141,13 @@ def install_local_ci_facade(bindings: dict) -> None:
     _ssh_subprocess_bindings.install_ssh_subprocess_helpers(bindings)
     _ssh_bundle_bindings.install_ssh_bundle_helpers(bindings)
 
-    bindings["HEARTBEAT_INTERVAL_SECS"] = _execution_bindings.heartbeat_interval_secs(bindings)
-    bindings["STUCK_IDLE_SECS"] = _execution_bindings.stuck_idle_secs(bindings)
-    bindings["WINDOWS_REQUIRED_REMOTE_TOOLS"] = (
-        _windows_target_bindings.windows_required_remote_tools(bindings)
-    )
-    bindings["WINDOWS_OPTIONAL_REMOTE_TOOLS"] = (
-        _windows_target_bindings.windows_optional_remote_tools(bindings)
-    )
-    bindings["WINDOWS_DEFAULT_REMOTE_REPO_DIRNAME"] = (
-        _windows_target_bindings.windows_default_remote_repo_dirname(bindings)
-    )
-    bindings["LINUX_REQUIRED_REMOTE_TOOLS"] = (
-        _linux_target_bindings.linux_required_remote_tools(bindings)
-    )
-    bindings["LINUX_OPTIONAL_REMOTE_TOOLS"] = (
-        _linux_target_bindings.linux_optional_remote_tools(bindings)
-    )
-    bindings["PRIORITY_VALUES"] = _normalize_bindings.priority_values(bindings)
-    bindings["GITHUB_ACTIONS_DEFAULTS"] = (
-        _github_workflow_bindings.github_actions_defaults(bindings)
-    )
-    bindings["BUILTIN_GITHUB_WORKFLOWS"] = (
-        _github_workflow_bindings.builtin_github_workflows(bindings)
-    )
-    bindings["REPO_VARIABLE_FALLBACKS"] = (
-        _github_workflow_bindings.repo_variable_fallbacks(bindings)
+    _local_ci_bootstrap_constants.install_bootstrap_constants(
+        bindings,
+        execution_timing_bindings=_execution_logging_timing_bindings,
+        windows_target_bindings=_windows_target_bindings,
+        linux_target_bindings=_linux_target_bindings,
+        normalize_bindings=_normalize_bindings,
+        github_workflow_bindings=_github_workflow_bindings,
     )
 
     _windows_target_bindings.install_windows_target_helpers(bindings)
