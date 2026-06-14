@@ -69,16 +69,12 @@ class LocalCiBootstrapModuleAliasesTests(unittest.TestCase):
         self.assertEqual(set(module_aliases.BOOTSTRAP_MODULE_ALIASES), expected_names)
 
     def test_install_bootstrap_module_aliases_copies_from_module_globals(self) -> None:
-        module_globals = {
-            module_name: object()
-            for module_name in module_aliases.BOOTSTRAP_MODULE_ALIASES.values()
-        }
         bindings = {}
 
-        module_aliases.install_bootstrap_module_aliases(bindings, module_globals)
+        module_aliases.install_bootstrap_module_aliases(bindings)
 
-        for binding_name, module_name in module_aliases.BOOTSTRAP_MODULE_ALIASES.items():
-            self.assertIs(bindings[binding_name], module_globals[module_name])
+        for binding_name, module in module_aliases.BOOTSTRAP_MODULE_ALIASES.items():
+            self.assertIs(bindings[binding_name], module)
 
 
 if __name__ == "__main__":

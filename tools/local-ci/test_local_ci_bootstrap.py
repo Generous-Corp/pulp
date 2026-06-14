@@ -63,7 +63,10 @@ class LocalCiBootstrapTests(unittest.TestCase):
         ):
             self.assertIn(name, bindings)
 
-        self.assertIs(bindings["evidence_index_module"], self.mod._evidence_index)
+        self.assertIs(
+            bindings["evidence_index_module"],
+            self.mod._local_ci_bootstrap_module_aliases.BOOTSTRAP_MODULE_ALIASES["evidence_index_module"],
+        )
 
 
 if __name__ == "__main__":
