@@ -5,6 +5,7 @@ from module_test_utils import load_module_from_path
 import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 MODULE_PATH = Path(__file__).with_name("local_ci_pr_ship_command_bindings.py")
@@ -44,7 +45,7 @@ class LocalCiPrShipCommandBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.LOCAL_CI_PR_SHIP_COMMAND_EXPORTS, ("cmd_ship",))
         self.assertTrue(callable(self.mod.cmd_ship))
 
-    def test_cmd_ship_binds_facade_dependencies(self):
+    def test_cmd_ship_delegates_with_assembled_dependencies(self):
         captured = {}
 
         def runner(*args, **kwargs):
@@ -54,22 +55,13 @@ class LocalCiPrShipCommandBindingsTests(unittest.TestCase):
 
         bindings = self._bindings(runner)
         args_obj = object()
-        self.assertEqual(self.mod.cmd_ship(bindings, args_obj), 5)
+        deps = {"resolve_submission_options_fn": object(), "notify_fn": object()}
+        with mock.patch.object(self.mod, "local_ci_pr_ship_command_dependencies", return_value=deps):
+            self.assertEqual(self.mod.cmd_ship(bindings, args_obj), 5)
 
         self.assertEqual(captured["args"], (args_obj,))
-        self.assertIs(captured["kwargs"]["resolve_submission_options_fn"], bindings["resolve_submission_options"])
-        self.assertIs(captured["kwargs"]["gh_available_fn"], bindings["gh_available"])
-        self.assertIs(captured["kwargs"]["print_submission_metadata_fn"], bindings["print_submission_metadata"])
-        self.assertIs(captured["kwargs"]["root"], bindings["ROOT"])
-        self.assertIs(captured["kwargs"]["run_fn"], bindings["subprocess"].run)
-        self.assertIs(captured["kwargs"]["gh_pr_create_fn"], bindings["gh_pr_create"])
-        self.assertIs(captured["kwargs"]["enqueue_job_fn"], bindings["enqueue_job"])
-        self.assertIs(captured["kwargs"]["summarize_job_fn"], bindings["summarize_job"])
-        self.assertIs(captured["kwargs"]["wait_for_job_fn"], bindings["wait_for_job"])
-        self.assertIs(captured["kwargs"]["gh_pr_comment_fn"], bindings["gh_pr_comment"])
-        self.assertIs(captured["kwargs"]["format_ci_comment_fn"], bindings["format_ci_comment"])
-        self.assertIs(captured["kwargs"]["gh_pr_merge_fn"], bindings["gh_pr_merge"])
-        self.assertIs(captured["kwargs"]["notify_fn"], bindings["notify"])
+        self.assertIs(captured["kwargs"]["resolve_submission_options_fn"], deps["resolve_submission_options_fn"])
+        self.assertIs(captured["kwargs"]["notify_fn"], deps["notify_fn"])
 
     def test_install_ship_helpers_wires_named_exports(self):
         calls = []

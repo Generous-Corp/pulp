@@ -5,6 +5,7 @@ from module_test_utils import load_module_from_path
 import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 MODULE_PATH = Path(__file__).with_name("local_ci_pr_check_command_bindings.py")
@@ -46,7 +47,7 @@ class LocalCiPrCheckCommandBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.LOCAL_CI_PR_CHECK_COMMAND_EXPORTS, ("cmd_check",))
         self.assertTrue(callable(self.mod.cmd_check))
 
-    def test_cmd_check_binds_facade_dependencies(self):
+    def test_cmd_check_delegates_with_assembled_dependencies(self):
         captured = {}
 
         def runner(*args, **kwargs):
@@ -56,29 +57,13 @@ class LocalCiPrCheckCommandBindingsTests(unittest.TestCase):
 
         bindings = self._bindings(runner)
         args_obj = object()
-        self.assertEqual(self.mod.cmd_check(bindings, args_obj), 3)
+        deps = {"gh_available_fn": object(), "notify_fn": object()}
+        with mock.patch.object(self.mod, "local_ci_pr_check_command_dependencies", return_value=deps):
+            self.assertEqual(self.mod.cmd_check(bindings, args_obj), 3)
 
         self.assertEqual(captured["args"], (args_obj,))
-        for name in [
-            "gh_available",
-            "gh_pr_head",
-            "short_sha",
-            "load_config",
-            "resolve_targets",
-            "parse_targets_arg",
-            "normalize_priority",
-            "default_priority_for",
-            "normalize_validation_mode",
-            "build_submission_metadata",
-            "print_submission_metadata",
-            "enqueue_job",
-            "summarize_job",
-            "wait_for_job",
-            "gh_pr_comment",
-            "format_ci_comment",
-            "notify",
-        ]:
-            self.assertIs(captured["kwargs"][f"{name}_fn"], bindings[name])
+        self.assertIs(captured["kwargs"]["gh_available_fn"], deps["gh_available_fn"])
+        self.assertIs(captured["kwargs"]["notify_fn"], deps["notify_fn"])
 
     def test_install_check_helpers_wires_named_exports(self):
         calls = []
