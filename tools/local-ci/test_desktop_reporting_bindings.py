@@ -339,6 +339,14 @@ class DesktopReportingBindingsTests(unittest.TestCase):
         self.assertIs(captured["kwargs"]["desktop_run_manifests_fn"], bindings["desktop_run_manifests"])
         self.assertIs(captured["kwargs"]["desktop_run_summary_fn"], bindings["desktop_run_summary"])
 
+    def test_install_desktop_reporting_helpers_keeps_unknown_local_fallback(self):
+        bindings = {}
+        self.mod.future_desktop_reporting_helper = lambda _bindings: "future"
+
+        self.mod.install_desktop_reporting_helpers(bindings, ("future_desktop_reporting_helper",))
+
+        self.assertEqual(bindings["future_desktop_reporting_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()

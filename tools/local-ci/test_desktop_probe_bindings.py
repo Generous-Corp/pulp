@@ -297,6 +297,14 @@ class DesktopProbeBindingsTests(unittest.TestCase):
         self.assertNotIn("probe_windows_remote_tooling", bindings)
         self.assertNotIn("desktop_doctor_checks", bindings)
 
+    def test_install_desktop_probe_helpers_keeps_unknown_local_fallback(self):
+        bindings = {}
+        self.mod.future_desktop_probe_helper = lambda _bindings: "future"
+
+        self.mod.install_desktop_probe_helpers(bindings, ("future_desktop_probe_helper",))
+
+        self.assertEqual(bindings["future_desktop_probe_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()

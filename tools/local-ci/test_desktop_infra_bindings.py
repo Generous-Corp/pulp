@@ -120,6 +120,14 @@ class DesktopInfraBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["slugify_token"]("Demo Token", max_len=4), "demo")
         self.assertEqual(bindings["wait_for_path"](Path("/tmp/file"), 3.0), Path("/tmp/file"))
 
+    def test_install_desktop_infra_helpers_keeps_unknown_local_fallback(self) -> None:
+        bindings = {}
+        self.mod.future_desktop_infra_helper = lambda _bindings: "future"
+
+        self.mod.install_desktop_infra_helpers(bindings, ("future_desktop_infra_helper",))
+
+        self.assertEqual(bindings["future_desktop_infra_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()
