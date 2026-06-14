@@ -190,5 +190,14 @@ class WindowsTargetBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["windows_desktop_session_user"]({"session": "ok"}), "dev")
 
 
+    def test_install_windows_target_helpers_keeps_unknown_local_fallback(self) -> None:
+        bindings = {}
+        self.mod.future_windows_target_helper = lambda _bindings: "future"
+
+        self.mod.install_windows_target_helpers(bindings, ("future_windows_target_helper",))
+
+        self.assertEqual(bindings["future_windows_target_helper"](), "future")
+
+
 if __name__ == "__main__":
     unittest.main()
