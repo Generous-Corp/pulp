@@ -304,8 +304,9 @@ def desktop_video_doctor_remediations(checks: list[dict], *, target_name: str) -
             {
                 "check": "video_capture",
                 "title": "Install the repo-local video tooling",
-                "detail": "Install pinned npm developer tools so ffmpeg-static and Remotion are available.",
+                "detail": "Install pinned npm developer tools so ffmpeg-static and Remotion are available. The eventual user-facing install target is the optional `pulp tool install video-proof` add-on.",
                 "command": "npm --prefix tools/local-ci install",
+                "future_command": "pulp tool install video-proof",
             }
         )
     avfoundation = checks_by_name.get("avfoundation_screen")
@@ -360,6 +361,21 @@ def desktop_video_doctor_remediations(checks: list[dict], *, target_name: str) -
             }
         )
     return remediations
+
+
+def desktop_video_install_model() -> dict:
+    return {
+        "current": "source-tree",
+        "current_command": "npm --prefix tools/local-ci install",
+        "future": "pulp-tool-add-on",
+        "future_command": "pulp tool install video-proof",
+        "package_format": "not-pulp-add",
+        "detail": (
+            "The feature branch uses repo-local npm tooling. After the workflow is accepted, "
+            "the recorder/composer should install as optional developer tooling via `pulp tool install video-proof`, "
+            "not as a normal `pulp add` project package."
+        ),
+    }
 
 
 def append_video_recipe_doctor_checks(args: argparse.Namespace, checks: list[dict]) -> None:
@@ -440,7 +456,8 @@ def desktop_video_setup_steps(target_name: str, *, machine_label: str | None = N
             "name": "install_tools",
             "title": "Install repo-local video tools",
             "command": "npm --prefix tools/local-ci install",
-            "detail": "Installs pinned developer-only ffmpeg-static and Remotion packages.",
+            "detail": "Installs pinned developer-only ffmpeg-static and Remotion packages. Future accepted installs should use `pulp tool install video-proof`.",
+            "future_command": "pulp tool install video-proof",
         },
         {
             "name": "enable_target_capability",
@@ -539,6 +556,7 @@ def _missing_video_setup_config_payload(args: argparse.Namespace, error: Excepti
         "machine": getattr(args, "machine", None) or args.target,
         "adapter": target["adapter"],
         "bootstrap": target["bootstrap"],
+        "install_model": desktop_video_install_model(),
         "steps": steps,
         "check": check,
     }
@@ -652,6 +670,7 @@ def desktop_video_doctor_payload(
         "adapter": target["adapter"],
         "bootstrap": target["bootstrap"],
         "ok": all_ok,
+        "install_model": desktop_video_install_model(),
         "checks": checks,
         "remediations": desktop_video_doctor_remediations(checks, target_name=args.target),
     }
@@ -725,6 +744,7 @@ def cmd_desktop_video_setup(
         print_fn(f"  machine: {payload['machine']}")
         print_fn(f"  adapter: {payload['adapter']}")
         print_fn(f"  bootstrap: {payload['bootstrap']}")
+        print_fn(f"  install: {payload['install_model']['current_command']} (future: {payload['install_model']['future_command']})")
         print_fn("")
         print_fn("Steps:")
         for index, step in enumerate(steps, start=1):
@@ -752,6 +772,7 @@ def cmd_desktop_video_setup(
         "machine": getattr(args, "machine", None) or args.target,
         "adapter": target["adapter"],
         "bootstrap": target["bootstrap"],
+        "install_model": desktop_video_install_model(),
         "steps": steps,
         "check": None,
     }
@@ -785,6 +806,7 @@ def cmd_desktop_video_setup(
     print_fn(f"  machine: {payload['machine']}")
     print_fn(f"  adapter: {target['adapter']}")
     print_fn(f"  bootstrap: {target['bootstrap']}")
+    print_fn(f"  install: {payload['install_model']['current_command']} (future: {payload['install_model']['future_command']})")
     print_fn("")
     print_fn("Steps:")
     for index, step in enumerate(steps, start=1):

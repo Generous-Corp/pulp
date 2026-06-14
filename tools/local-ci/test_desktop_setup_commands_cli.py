@@ -307,8 +307,11 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
         remediations_by_check = {item["check"]: item for item in payload["remediations"]}
         self.assertEqual(remediations_by_check["target.video_capture"]["command"], "python3 tools/local-ci/local_ci.py desktop config set target.mac.video_capture true")
         self.assertEqual(remediations_by_check["video_capture"]["command"], "npm --prefix tools/local-ci install")
+        self.assertEqual(remediations_by_check["video_capture"]["future_command"], "pulp tool install video-proof")
         self.assertEqual(remediations_by_check["avfoundation_screen"]["command"], "python3 tools/local-ci/local_ci.py desktop video-doctor mac --json")
         self.assertEqual(remediations_by_check["remotion_smoke"]["command"], "npm --prefix tools/local-ci run smoke-video-proof")
+        self.assertEqual(payload["install_model"]["current_command"], "npm --prefix tools/local-ci install")
+        self.assertEqual(payload["install_model"]["future_command"], "pulp tool install video-proof")
 
     def test_video_doctor_reports_screen_recording_remediation(self):
         self.targets["mac"]["optional"] = {"video_capture": True}
@@ -564,6 +567,7 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
         self.assertIn("  machine: blackbook", self.printed)
         self.assertTrue(any("cp tools/local-ci/config.example.json tools/local-ci/config.json" in line for line in self.printed))
         self.assertTrue(any("npm --prefix tools/local-ci install" in line for line in self.printed))
+        self.assertTrue(any("future: pulp tool install video-proof" in line for line in self.printed))
         self.assertTrue(any("target.mac.video_capture true" in line for line in self.printed))
         self.assertTrue(any("--video-audio system" in line for line in self.printed))
         self.assertTrue(any("--label blackbook-video-setup-smoke" in line for line in self.printed))
@@ -607,6 +611,7 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
         self.assertEqual(result, 1)
         payload = json.loads(self.printed[0])
         self.assertFalse(payload["check"]["ok"])
+        self.assertEqual(payload["install_model"]["package_format"], "not-pulp-add")
         self.assertEqual(payload["check"]["checks"][0]["name"], "config")
         self.assertEqual(payload["check"]["remediations"][0]["command"], "cp tools/local-ci/config.example.json tools/local-ci/config.json")
         self.assertEqual(payload["steps"][0]["name"], "create_config")
@@ -637,6 +642,7 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
         self.assertEqual(result, 0)
         payload = json.loads(self.printed[0])
         self.assertEqual(payload["machine"], "blackbook")
+        self.assertEqual(payload["install_model"]["future_command"], "pulp tool install video-proof")
         self.assertTrue(payload["check"]["ok"])
         self.assertEqual(payload["check"]["target"], "mac")
         checks_by_name = {check["name"]: check for check in payload["check"]["checks"]}
