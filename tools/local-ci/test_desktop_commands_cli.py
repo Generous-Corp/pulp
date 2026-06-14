@@ -228,6 +228,7 @@ class DesktopCommandsCliTests(unittest.TestCase):
         inspector = next(item for item in payload["scenarios"] if item["id"] == "inspector-workflow")
         self.assertIn("-DPULP_ENABLE_GPU=OFF", inspector["prepare_command"])
         self.assertIn("./build-video-nogpu/examples/audio-inspector-demo/pulp-audio-inspector-demo", inspector["command"])
+        self.assertNotIn("--capture-ui-snapshot", inspector["command"])
         linux = next(item for item in payload["scenarios"] if item["id"] == "linux-xvfb-desktop")
         self.assertEqual(linux["platform"], "ubuntu")
         self.assertEqual(linux["status"], "planned")

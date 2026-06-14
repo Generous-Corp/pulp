@@ -363,6 +363,25 @@ class DesktopActionCommandsCliTests(unittest.TestCase):
         self.assertIn("audio-inspector surface", call["video_note"][0])
         self.assertIn("storyboard", call["video_note"][1])
 
+    def test_video_command_applies_inspector_workflow_recipe(self):
+        result = self.mod.cmd_desktop_video(
+            self.args(recipe="inspector-workflow", label=None, capture_ui_snapshot=True, action="inspect"),
+            cmd_desktop_smoke_fn=lambda args: self.calls.append(("smoke-wrapper", (), vars(args).copy())) or 0,
+            cmd_desktop_click_fn=lambda _args: self.fail("click should not run"),
+            cmd_desktop_inspect_fn=lambda _args: self.fail("inspect should not run"),
+            print_fn=self.print_line,
+        )
+
+        self.assertEqual(result, 0)
+        call = self.calls[0][2]
+        self.assertEqual(self.calls[0][0], "smoke-wrapper")
+        self.assertEqual(call["action"], "smoke")
+        self.assertFalse(call["capture_ui_snapshot"])
+        self.assertEqual(call["label"], "inspector-workflow-proof")
+        self.assertEqual(call["video_title"], "Inspector workflow proof")
+        self.assertEqual(call["video_template"], "inspector-workflow")
+        self.assertIn("inspector pane", call["video_note"][0])
+
     def test_video_command_applies_reaper_recipe(self):
         result = self.mod.cmd_desktop_video(
             self.args(recipe="reaper-plugin-editor", launch_command=None, label=None, plugin="PulpEffect", plugin_format="vst3"),

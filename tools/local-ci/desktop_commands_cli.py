@@ -386,7 +386,7 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
             "--command './build-video-nogpu/examples/audio-inspector-demo/pulp-audio-inspector-demo' "
             "--prepare-command 'cmake -S . -B build-video-nogpu -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF -DPULP_ENABLE_GPU=OFF && "
             "cmake --build build-video-nogpu --target pulp-audio-inspector-demo -j$(sysctl -n hw.ncpu)' "
-            "--capture-ui-snapshot --label inspector-open-and-select --compose-video-proof"
+            "--label inspector-open-and-select --compose-video-proof"
         ),
         "doctor": "python3 tools/local-ci/local_ci.py desktop video-doctor mac",
         "watch_for": [

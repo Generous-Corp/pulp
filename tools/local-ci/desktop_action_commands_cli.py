@@ -143,8 +143,8 @@ def _apply_desktop_video_recipe(args: argparse.Namespace) -> None:
         return
 
     if recipe == "inspector-workflow":
-        args.action = "inspect"
-        args.capture_ui_snapshot = True
+        args.action = "smoke"
+        args.capture_ui_snapshot = False
         _set_default(args, "label", "inspector-workflow-proof")
         _set_default(args, "video_title", "Inspector workflow proof")
         _set_default(args, "video_template", "inspector-workflow")
