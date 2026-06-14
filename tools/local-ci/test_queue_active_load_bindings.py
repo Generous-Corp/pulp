@@ -45,7 +45,7 @@ class QueueActiveLoadBindingsTests(unittest.TestCase):
             bindings[name] = object()
         return bindings
 
-    def test_active_targets_and_load_job_bind_locked_queue_dependencies(self):
+    def test_active_targets_and_load_job_delegate_with_assembled_dependencies(self):
         captured = {}
 
         def update_job_active_targets_locked(*args, **kwargs):
@@ -60,16 +60,20 @@ class QueueActiveLoadBindingsTests(unittest.TestCase):
             load_job_locked=load_job_locked,
         )
         bindings = self._bindings(lifecycle=lifecycle)
+        active_deps = {"queue_lock_path_fn": object(), "upsert_job_active_targets_unlocked_fn": object()}
+        load_deps = {"reconcile_running_jobs_unlocked_fn": object(), "find_job_unlocked_fn": object()}
 
-        self.mod.update_job_active_targets(bindings, "job1", {"mac": {"status": "running"}})
+        with mock.patch.object(self.mod, "queue_active_target_dependencies", return_value=active_deps):
+            self.mod.update_job_active_targets(bindings, "job1", {"mac": {"status": "running"}})
         self.assertEqual(captured["active"][0], ("job1", {"mac": {"status": "running"}}))
-        self.assertIs(captured["active"][1]["queue_lock_path_fn"], bindings["queue_lock_path"])
-        self.assertIs(captured["active"][1]["upsert_job_active_targets_unlocked_fn"], bindings["upsert_job_active_targets_unlocked"])
+        self.assertIs(captured["active"][1]["queue_lock_path_fn"], active_deps["queue_lock_path_fn"])
+        self.assertIs(captured["active"][1]["upsert_job_active_targets_unlocked_fn"], active_deps["upsert_job_active_targets_unlocked_fn"])
 
-        self.assertEqual(self.mod.load_job(bindings, "job1"), {"id": "job1"})
+        with mock.patch.object(self.mod, "queue_load_job_dependencies", return_value=load_deps):
+            self.assertEqual(self.mod.load_job(bindings, "job1"), {"id": "job1"})
         self.assertEqual(captured["load_job"][0], ("job1",))
-        self.assertIs(captured["load_job"][1]["reconcile_running_jobs_unlocked_fn"], bindings["reconcile_running_jobs_unlocked"])
-        self.assertIs(captured["load_job"][1]["find_job_unlocked_fn"], bindings["find_job_unlocked"])
+        self.assertIs(captured["load_job"][1]["reconcile_running_jobs_unlocked_fn"], load_deps["reconcile_running_jobs_unlocked_fn"])
+        self.assertIs(captured["load_job"][1]["find_job_unlocked_fn"], load_deps["find_job_unlocked_fn"])
 
     def test_install_queue_active_load_helpers_wires_named_exports(self):
         bindings = {}

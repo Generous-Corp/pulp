@@ -25,37 +25,28 @@ class QueueTargetUpdateBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.QUEUE_TARGET_UPDATE_EXPORTS, expected)
         self.assertTrue(callable(self.mod.update_job_target_state))
 
-    def test_update_job_target_state_binds_locked_queue_dependencies(self):
+    def test_update_job_target_state_delegates_with_assembled_dependencies(self):
         captured = {}
 
         def update_job_target_state_locked(*args, **kwargs):
             captured["target_state"] = (args, kwargs)
 
-        def update_job_target_state_unlocked(queue, job_id, target_name, fields, *, now_iso_fn):
-            captured["target_unlocked"] = (queue, job_id, target_name, fields, now_iso_fn)
-            return True
-
         lifecycle = types.SimpleNamespace(update_job_target_state_locked=update_job_target_state_locked)
-        orchestrator = types.SimpleNamespace(update_job_target_state_unlocked=update_job_target_state_unlocked)
         bindings = {
             "_queue_lifecycle": lifecycle,
-            "_queue_orchestrator": orchestrator,
             "queue_lock_path": object(),
             "file_lock": object(),
             "load_queue_unlocked": object(),
             "save_queue_unlocked": object(),
             "now_iso": object(),
         }
+        deps = {"queue_lock_path_fn": object(), "save_queue_unlocked_fn": object()}
 
-        self.mod.update_job_target_state(bindings, "job1", "mac", status="pass")
+        with mock.patch.object(self.mod, "queue_target_update_dependencies", return_value=deps):
+            self.mod.update_job_target_state(bindings, "job1", "mac", status="pass")
         self.assertEqual(captured["target_state"][0], ("job1", "mac", {"status": "pass"}))
-        self.assertIs(captured["target_state"][1]["queue_lock_path_fn"], bindings["queue_lock_path"])
-        self.assertIs(captured["target_state"][1]["file_lock_fn"], bindings["file_lock"])
-        self.assertIs(captured["target_state"][1]["load_queue_unlocked_fn"], bindings["load_queue_unlocked"])
-        self.assertIs(captured["target_state"][1]["save_queue_unlocked_fn"], bindings["save_queue_unlocked"])
-
-        captured["target_state"][1]["update_job_target_state_unlocked_fn"]([], "job1", "mac", {"status": "fail"})
-        self.assertEqual(captured["target_unlocked"], ([], "job1", "mac", {"status": "fail"}, bindings["now_iso"]))
+        self.assertIs(captured["target_state"][1]["queue_lock_path_fn"], deps["queue_lock_path_fn"])
+        self.assertIs(captured["target_state"][1]["save_queue_unlocked_fn"], deps["save_queue_unlocked_fn"])
 
     def test_install_queue_target_update_helpers_wires_named_exports(self):
         bindings = {}

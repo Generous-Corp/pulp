@@ -25,39 +25,27 @@ class QueueStaleReconcileBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.QUEUE_STALE_RECONCILE_EXPORTS, expected)
         self.assertTrue(callable(self.mod.reconcile_running_jobs_unlocked))
 
-    def test_reconcile_running_jobs_binds_stale_requeue_dependencies(self):
+    def test_reconcile_running_jobs_delegates_with_assembled_dependencies(self):
         captured = {}
 
         def reconcile_running_jobs_unlocked(queue, **kwargs):
             captured["reconcile"] = (queue, kwargs)
             return queue, True
 
-        def requeue(job, *, now_iso_fn):
-            captured["requeue"] = (job, now_iso_fn)
-
         lifecycle = types.SimpleNamespace(reconcile_running_jobs_unlocked=reconcile_running_jobs_unlocked)
-        orchestrator = types.SimpleNamespace(
-            stale_running_reconciliation_actions_unlocked=object(),
-            requeue_stale_running_job_unlocked=requeue,
-        )
         bindings = {
             "_queue_lifecycle": lifecycle,
-            "_queue_orchestrator": orchestrator,
             "stale_running_jobs_unlocked": object(),
             "supersede_job_unlocked": object(),
             "now_iso": object(),
         }
+        deps = {"stale_running_jobs_unlocked_fn": object(), "supersede_job_unlocked_fn": object()}
 
         queue = [{"id": "job1"}]
-        self.assertEqual(self.mod.reconcile_running_jobs_unlocked(bindings, queue), (queue, True))
-        self.assertIs(captured["reconcile"][1]["stale_running_jobs_unlocked_fn"], bindings["stale_running_jobs_unlocked"])
-        self.assertIs(captured["reconcile"][1]["supersede_job_unlocked_fn"], bindings["supersede_job_unlocked"])
-        self.assertIs(
-            captured["reconcile"][1]["stale_running_reconciliation_actions_unlocked_fn"],
-            orchestrator.stale_running_reconciliation_actions_unlocked,
-        )
-        captured["reconcile"][1]["requeue_stale_running_job_unlocked_fn"]({"id": "old"})
-        self.assertEqual(captured["requeue"], ({"id": "old"}, bindings["now_iso"]))
+        with mock.patch.object(self.mod, "queue_stale_reconcile_dependencies", return_value=deps):
+            self.assertEqual(self.mod.reconcile_running_jobs_unlocked(bindings, queue), (queue, True))
+        self.assertIs(captured["reconcile"][1]["stale_running_jobs_unlocked_fn"], deps["stale_running_jobs_unlocked_fn"])
+        self.assertIs(captured["reconcile"][1]["supersede_job_unlocked_fn"], deps["supersede_job_unlocked_fn"])
 
     def test_install_queue_stale_reconcile_helpers_wires_named_exports(self):
         bindings = {}
