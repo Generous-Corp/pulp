@@ -46,36 +46,21 @@ class QueueTargetStateBindingsTests(unittest.TestCase):
         )
         self.assertEqual(bindings["target_state_snapshot"]({"mac": {}}), {"snapshot": {"mac": {}}})
 
-    def test_install_queue_target_state_helpers_routes_focused_exports(self):
-        captured = {}
+    def test_install_queue_target_state_helpers_routes_groups_and_unknown_fallback(self):
+        bindings = {"_queue_orchestrator": types.SimpleNamespace()}
 
-        def upsert_job_active_targets_unlocked(queue, job_id, active_targets, *, now_iso_fn):
-            captured["upsert"] = (queue, job_id, active_targets, now_iso_fn)
-            return True
+        with (
+            mock.patch.object(self.mod, "install_queue_target_payload_helpers") as payload,
+            mock.patch.object(self.mod, "install_queue_active_target_helpers") as active,
+            mock.patch.object(self.mod, "install_local_helpers") as install_local,
+        ):
+            self.mod.install_queue_target_state_helpers(
+                bindings,
+                ("updated_target_state", "upsert_job_active_targets_unlocked", "unknown_helper"),
+            )
 
-        bindings = {
-            "_queue_orchestrator": types.SimpleNamespace(
-                updated_target_state=lambda previous, fields: {"previous": previous, **fields},
-                upsert_job_active_targets_unlocked=upsert_job_active_targets_unlocked,
-            ),
-            "now_iso": object(),
-        }
-
-        self.mod.install_queue_target_state_helpers(bindings, ("updated_target_state", "upsert_job_active_targets_unlocked"))
-
-        self.assertEqual(
-            bindings["updated_target_state"]({"status": "pending"}, {"status": "running"}),
-            {"previous": {"status": "pending"}, "status": "running"},
-        )
-        self.assertTrue(bindings["upsert_job_active_targets_unlocked"]([], "job1", None))
-        self.assertIs(captured["upsert"][3], bindings["now_iso"])
-
-    def test_install_queue_target_state_helpers_preserves_unknown_fallback(self):
-        bindings = {}
-
-        with mock.patch.object(self.mod, "install_local_helpers") as install_local:
-            self.mod.install_queue_target_state_helpers(bindings, ("unknown_helper",))
-
+        payload.assert_called_once_with(bindings, ("updated_target_state",))
+        active.assert_called_once_with(bindings, ("upsert_job_active_targets_unlocked",))
         install_local.assert_called_once_with(bindings, self.mod.__dict__, ("unknown_helper",))
 
 
