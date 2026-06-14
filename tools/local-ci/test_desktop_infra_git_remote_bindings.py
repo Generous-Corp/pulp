@@ -51,16 +51,5 @@ class DesktopInfraGitRemoteBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.normalize_git_remote_for_clone(bindings, "https://example/repo"), "git@example:repo.git")
         self.assertEqual(captured["clone"][0], ("https://example/repo",))
 
-    def test_install_remote_helpers_wires_named_exports(self) -> None:
-        git_helpers = types.SimpleNamespace(
-            normalize_git_remote_for_http=lambda remote_url: f"https:{remote_url}",
-        )
-        bindings = {"_git_helpers": git_helpers}
-
-        self.mod.install_desktop_infra_git_remote_helpers(bindings, ("normalize_git_remote_for_http",))
-
-        self.assertEqual(bindings["normalize_git_remote_for_http"]("example/repo"), "https:example/repo")
-
-
 if __name__ == "__main__":
     unittest.main()

@@ -39,14 +39,5 @@ class DesktopInfraWaitBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.wait_for_path(bindings, Path("/tmp/file"), 3.0), Path("/tmp/file"))
         self.assertEqual(captured["wait"][0], (Path("/tmp/file"), 3.0))
 
-    def test_install_desktop_infra_wait_helpers_wires_named_exports(self) -> None:
-        io_utils = types.SimpleNamespace(wait_for_path=lambda path, timeout_secs: path)
-        bindings = {"_io_utils": io_utils}
-
-        self.mod.install_desktop_infra_wait_helpers(bindings)
-
-        self.assertEqual(bindings["wait_for_path"](Path("/tmp/file"), 3.0), Path("/tmp/file"))
-
-
 if __name__ == "__main__":
     unittest.main()

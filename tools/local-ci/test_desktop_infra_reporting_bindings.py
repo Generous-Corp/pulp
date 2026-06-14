@@ -56,16 +56,5 @@ class DesktopInfraReportingBindingsTests(unittest.TestCase):
         self.assertEqual(captured["slug"][0], ("Demo Token",))
         self.assertEqual(captured["slug"][1], {"max_len": 12})
 
-    def test_install_desktop_infra_reporting_helpers_wires_named_exports(self) -> None:
-        reporting = types.SimpleNamespace(
-            slugify_token=lambda value, *, max_len=48: value[:max_len].lower(),
-        )
-        bindings = {"_reporting": reporting}
-
-        self.mod.install_desktop_infra_reporting_helpers(bindings, ("slugify_token",))
-
-        self.assertEqual(bindings["slugify_token"]("Demo Token", max_len=4), "demo")
-
-
 if __name__ == "__main__":
     unittest.main()

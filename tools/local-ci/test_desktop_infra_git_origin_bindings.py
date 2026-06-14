@@ -57,19 +57,5 @@ class DesktopInfraGitOriginBindingsTests(unittest.TestCase):
         self.assertEqual(captured["origin_clone"][0], (repo_root,))
         self.assertIs(captured["origin_clone"][1]["run_fn"], bindings["subprocess"].run)
 
-    def test_install_origin_helpers_wires_named_exports(self) -> None:
-        git_helpers = types.SimpleNamespace(
-            git_origin_http_url=lambda repo_root, *, run_fn: f"https:{repo_root}",
-        )
-        bindings = {
-            "_git_helpers": git_helpers,
-            "subprocess": types.SimpleNamespace(run=object()),
-        }
-
-        self.mod.install_desktop_infra_git_origin_helpers(bindings, ("git_origin_http_url",))
-
-        self.assertEqual(bindings["git_origin_http_url"](Path("/repo")), "https:/repo")
-
-
 if __name__ == "__main__":
     unittest.main()

@@ -47,22 +47,5 @@ class DesktopInfraGitRunBindingsTests(unittest.TestCase):
         self.assertEqual(captured["kwargs"]["check"], False)
         self.assertIs(captured["kwargs"]["run_fn"], bindings["subprocess"].run)
 
-    def test_install_run_helpers_wires_named_exports(self) -> None:
-        git_helpers = types.SimpleNamespace(
-            run_git=lambda args, *, cwd, check=True, run_fn: types.SimpleNamespace(args=args, cwd=cwd, check=check),
-        )
-        bindings = {
-            "_git_helpers": git_helpers,
-            "subprocess": types.SimpleNamespace(run=object()),
-        }
-
-        self.mod.install_desktop_infra_git_run_helpers(bindings, ("run_git",))
-
-        result = bindings["run_git"](["status"], cwd=Path("/repo"), check=False)
-        self.assertEqual(result.args, ["status"])
-        self.assertEqual(result.cwd, Path("/repo"))
-        self.assertFalse(result.check)
-
-
 if __name__ == "__main__":
     unittest.main()

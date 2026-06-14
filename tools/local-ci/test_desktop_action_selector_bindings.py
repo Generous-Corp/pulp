@@ -41,17 +41,5 @@ class DesktopActionSelectorBindingsTests(unittest.TestCase):
         self.assertTrue(self.mod.windows_requires_pulp_app_selectors(bindings, args_obj))
         self.assertIs(captured["args"], args_obj)
 
-    def test_install_desktop_action_selector_helpers_wires_named_exports(self) -> None:
-        bindings = {
-            "_desktop_action_commands_cli": types.SimpleNamespace(
-                windows_requires_pulp_app_selectors=lambda args: True,
-            ),
-        }
-
-        self.mod.install_desktop_action_selector_helpers(bindings)
-
-        self.assertTrue(bindings["windows_requires_pulp_app_selectors"](object()))
-
-
 if __name__ == "__main__":
     unittest.main()

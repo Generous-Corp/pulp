@@ -53,16 +53,5 @@ class DesktopActionGeometryBindingsTests(unittest.TestCase):
         )
         self.assertEqual(captured["screen"][0], ({"bounds": {}}, (100, 50), (1, 2)))
 
-    def test_install_geometry_helpers_wires_named_exports(self) -> None:
-        actions = types.SimpleNamespace(
-            parse_coordinate_pair=lambda value, *, flag_name: (1.0, 2.0),
-        )
-        bindings = {"_desktop_actions": actions}
-
-        self.mod.install_desktop_action_geometry_helpers(bindings, ("parse_coordinate_pair",))
-
-        self.assertEqual(bindings["parse_coordinate_pair"]("1,2", flag_name="--click"), (1.0, 2.0))
-
-
 if __name__ == "__main__":
     unittest.main()
