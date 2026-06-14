@@ -359,6 +359,14 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
         self.assertIn("Remediation:", self.printed)
         self.assertTrue(any("Grant macOS Screen Recording permission" in line for line in self.printed))
         self.assertTrue(any("Privacy_ScreenCapture" in line for line in self.printed))
+        self.assertTrue(any("--run-in-terminal --json" in line for line in self.printed))
+
+        remediation = self.mod.desktop_video_doctor_remediations(checks, target_name="mac")[0]
+        self.assertEqual(
+            remediation["rerun_command"],
+            "python3 tools/local-ci/local_ci.py desktop video-doctor mac --run-in-terminal --json",
+        )
+        self.assertIn("Terminal.app", remediation["detail"])
 
     def test_video_doctor_reports_receipt_remediation(self):
         self.targets["mac"]["optional"] = {"video_capture": True}

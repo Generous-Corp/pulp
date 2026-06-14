@@ -277,8 +277,13 @@ def desktop_video_doctor_remediations(checks: list[dict], *, target_name: str) -
             {
                 "check": "screencapture",
                 "title": "Grant macOS Screen Recording permission",
-                "detail": "Open System Settings > Privacy & Security > Screen Recording, enable the terminal/agent app running local CI, then restart that app.",
+                "detail": (
+                    "Open System Settings > Privacy & Security > Screen Recording, enable Terminal.app, "
+                    f"restart Terminal, then rerun video-doctor for `{target_name}` through Terminal re-entry. "
+                    "Direct agent sessions may still fail with `could not create image from display` even when Terminal is allowed."
+                ),
                 "command": "open 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'",
+                "rerun_command": f"python3 tools/local-ci/local_ci.py desktop video-doctor {target_name} --run-in-terminal --json",
             }
         )
     receipt = checks_by_name.get("receipt")
@@ -970,6 +975,8 @@ def _print_missing_video_setup_payload(payload: dict, print_fn: Callable[[str], 
             print_fn(f"  - {item['title']}: {item['detail']}")
             if item.get("command"):
                 print_fn(f"    command: {item['command']}")
+            if item.get("rerun_command"):
+                print_fn(f"    rerun: {item['rerun_command']}")
 
 
 def desktop_video_doctor_payload(
@@ -1131,6 +1138,8 @@ def cmd_desktop_video_doctor(
             print_fn(f"  - {item['title']}: {item['detail']}")
             if item.get("command"):
                 print_fn(f"    command: {item['command']}")
+            if item.get("rerun_command"):
+                print_fn(f"    rerun: {item['rerun_command']}")
     return exit_code
 
 
@@ -1324,6 +1333,8 @@ def cmd_desktop_video_setup(
                 print_fn(f"  - {item['title']}: {item['detail']}")
                 if item.get("command"):
                     print_fn(f"    command: {item['command']}")
+                if item.get("rerun_command"):
+                    print_fn(f"    rerun: {item['rerun_command']}")
     if payload.get("demo_matrix"):
         print_fn("")
         print_fn("Demo matrix readiness:")
