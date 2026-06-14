@@ -750,8 +750,13 @@ public:
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_event(const MouseEvent& event) override;
     void on_mouse_drag(Point pos) override;
+    void on_mouse_enter() override;
+    void on_mouse_leave() override;
+    void advance_animations(float dt) { hover_scale_.advance(dt); }
+    float hover_scale() const { return hover_scale_.value(); }
 
 private:
+    ValueAnimation hover_scale_{1.0f};  ///< thumb grows on hover (matches Fader)
     /// Convert a position along the track (0=start, 1=end) to a value
     /// after applying clamp + step quantisation.
     float position_to_value_(float t) const;

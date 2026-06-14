@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/view/widgets.hpp>
+#include <pulp/view/gap_widgets.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/frame_clock.hpp>
 
@@ -110,6 +111,38 @@ TEST_CASE("Fader hover scales thumb", "[view][widget_animation]") {
     fader.set_hovered(false);
     settle(fader);
     REQUIRE_THAT(fader.hover_scale(), WithinAbs(1.0, 0.01));
+}
+
+// ── RangeSlider animation tests ─────────────────────────────────────────────
+
+TEST_CASE("RangeSlider hover scales thumb", "[view][widget_animation]") {
+    RangeSlider slider;
+    slider.set_bounds({0, 0, 200, 24});
+    REQUIRE_THAT(slider.hover_scale(), WithinAbs(1.0, 0.01));
+
+    slider.set_hovered(true);
+    settle(slider);
+    REQUIRE_THAT(slider.hover_scale(), WithinAbs(1.3, 0.05));
+
+    slider.set_hovered(false);
+    settle(slider);
+    REQUIRE_THAT(slider.hover_scale(), WithinAbs(1.0, 0.01));
+}
+
+// ── PanControl animation tests ──────────────────────────────────────────────
+
+TEST_CASE("PanControl hover scales thumb", "[view][widget_animation]") {
+    PanControl pan;
+    pan.set_bounds({0, 0, 160, 18});
+    REQUIRE_THAT(pan.hover_scale(), WithinAbs(1.0, 0.01));
+
+    pan.set_hovered(true);
+    settle(pan);
+    REQUIRE_THAT(pan.hover_scale(), WithinAbs(1.3, 0.05));
+
+    pan.set_hovered(false);
+    settle(pan);
+    REQUIRE_THAT(pan.hover_scale(), WithinAbs(1.0, 0.01));
 }
 
 // ── Tooltip animation tests ─────────────────────────────────────────────────

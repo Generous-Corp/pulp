@@ -83,6 +83,8 @@ void advance_anims(View* v, float dt) {
     if (auto* k = dynamic_cast<Knob*>(v)) k->advance_animations(dt);
     else if (auto* t = dynamic_cast<Toggle*>(v)) t->advance_animations(dt);
     else if (auto* f = dynamic_cast<Fader*>(v)) f->advance_animations(dt);
+    else if (auto* r = dynamic_cast<RangeSlider*>(v)) r->advance_animations(dt);
+    else if (auto* p = dynamic_cast<PanControl*>(v)) p->advance_animations(dt);
     else if (auto* s = dynamic_cast<ScrollView*>(v)) s->advance_animations(dt);
     for (std::size_t i = 0; i < v->child_count(); ++i) advance_anims(v->child_at(i), dt);
 }

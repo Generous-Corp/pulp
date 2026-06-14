@@ -988,6 +988,16 @@ void RangeSlider::on_mouse_drag(Point pos) {
     update_from_position_(pos);
 }
 
+void RangeSlider::on_mouse_enter() {
+    float dur = resolve_dimension("motion.duration.fast", 0.08f);
+    hover_scale_.animate_to(1.3f, dur, easing::ease_out_quad);
+}
+
+void RangeSlider::on_mouse_leave() {
+    float dur = resolve_dimension("motion.duration.fast", 0.08f);
+    hover_scale_.animate_to(1.0f, dur, easing::ease_out_quad);
+}
+
 void RangeSlider::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
     bool horiz = orientation_ == Orientation::horizontal;
@@ -1039,8 +1049,9 @@ void RangeSlider::paint(canvas::Canvas& canvas) {
 
     // Handle. Inset by handle radius so it never overshoots the bounds.
     canvas.set_fill_color(thumb_color);
-    float handle_radius = horiz ? std::min(b.height, 16.0f) * 0.5f
-                                : std::min(b.width,  16.0f) * 0.5f;
+    float handle_radius = (horiz ? std::min(b.height, 16.0f) * 0.5f
+                                 : std::min(b.width,  16.0f) * 0.5f)
+                          * hover_scale_.value();
     if (horiz) {
         float usable = std::max(0.0f, b.width - 2.0f * handle_radius);
         float hx = handle_radius + t * usable;

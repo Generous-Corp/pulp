@@ -273,10 +273,16 @@ void PanControl::paint(canvas::Canvas& canvas) {
     canvas.set_fill_color(resolve_color("control.border", Color::rgba8(120, 130, 140)));
     canvas.fill_rect(cx - 1.0f, cy - th / 2 - 2.0f, 2.0f, th + 4.0f);   // centre detent
     canvas.set_fill_color(resolve_color("slider.thumb", Color::rgba8(220, 220, 220)));
-    canvas.fill_circle(tx, cy, h / 2.0f);
+    canvas.fill_circle(tx, cy, (h / 2.0f) * hover_scale_.value());
 }
 void PanControl::on_mouse_down(Point pos) { set_from_x(pos.x); }
 void PanControl::on_mouse_drag(Point pos) { set_from_x(pos.x); }
+void PanControl::on_mouse_enter() {
+    hover_scale_.animate_to(1.3f, resolve_dimension("motion.duration.fast", 0.08f), easing::ease_out_quad);
+}
+void PanControl::on_mouse_leave() {
+    hover_scale_.animate_to(1.0f, resolve_dimension("motion.duration.fast", 0.08f), easing::ease_out_quad);
+}
 
 // ── Popover ───────────────────────────────────────────────────────────────
 void Popover::paint(canvas::Canvas& canvas) {

@@ -10,6 +10,7 @@
 // docs/guides/design-tokens.md).
 
 #include <pulp/view/view.hpp>
+#include <pulp/view/animation.hpp>
 #include <functional>
 #include <string>
 
@@ -128,11 +129,16 @@ public:
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_down(Point pos) override;
     void on_mouse_drag(Point pos) override;
+    void on_mouse_enter() override;
+    void on_mouse_leave() override;
+    void advance_animations(float dt) { hover_scale_.advance(dt); }
+    float hover_scale() const { return hover_scale_.value(); }
     bool wants_wheel_value() const override { return true; }
     void on_wheel(float delta_y) override { set_value(value_ + (-delta_y) * 0.005f); }
     float intrinsic_height() const override { return 18.0f; }
 private:
     float value_ = 0.0f;
+    ValueAnimation hover_scale_{1.0f};  ///< thumb grows on hover (matches Fader / RangeSlider)
     void set_from_x(float x);
 };
 
