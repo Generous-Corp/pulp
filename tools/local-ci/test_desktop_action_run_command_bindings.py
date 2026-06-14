@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Tests for desktop action runner command facade bindings."""
+"""Tests for desktop action runner command compatibility bindings."""
 
 from __future__ import annotations
 
 from pathlib import Path
-import types
 import unittest
+from unittest import mock
 
 from module_test_utils import load_module_from_path
 
@@ -23,64 +23,32 @@ class DesktopActionRunCommandBindingsTests(unittest.TestCase):
 
     def test_run_command_exports_match_wrappers(self) -> None:
         expected = (
-            "cmd_desktop_smoke",
-            "cmd_desktop_click",
-            "cmd_desktop_inspect",
+            *self.mod.DESKTOP_ACTION_SMOKE_COMMAND_EXPORTS,
+            *self.mod.DESKTOP_ACTION_CLICK_COMMAND_EXPORTS,
+            *self.mod.DESKTOP_ACTION_INSPECT_COMMAND_EXPORTS,
         )
 
         self.assertEqual(self.mod.DESKTOP_ACTION_RUN_COMMAND_EXPORTS, expected)
         self.assertEqual(len(expected), len(set(expected)))
 
-    def bindings(self, runner_name: str, runner):
-        bindings = {
-            "_desktop_action_commands_cli": types.SimpleNamespace(**{runner_name: runner}),
-            "_desktop_cli": types.SimpleNamespace(desktop_action_success_lines=object()),
-            "sys": types.SimpleNamespace(platform="darwin"),
-        }
-        for name in [
-            "load_config",
-            "resolve_desktop_target",
-            "make_desktop_source_request",
-            "run_macos_local_smoke",
-            "run_linux_xvfb_remote_action",
-            "run_windows_session_agent_action",
-        ]:
-            bindings[name] = object()
-        return bindings
+    def test_install_desktop_action_run_command_helpers_routes_each_group(self) -> None:
+        bindings = {}
 
-    def test_action_commands_bind_shared_runner_dependencies(self) -> None:
-        cases = [
-            ("cmd_desktop_smoke", self.mod.cmd_desktop_smoke),
-            ("cmd_desktop_click", self.mod.cmd_desktop_click),
-            ("cmd_desktop_inspect", self.mod.cmd_desktop_inspect),
-        ]
-        for runner_name, wrapper in cases:
-            with self.subTest(runner_name=runner_name):
-                captured = {}
+        with (
+            mock.patch.object(self.mod, "install_desktop_action_smoke_command_helpers") as install_smoke,
+            mock.patch.object(self.mod, "install_desktop_action_click_command_helpers") as install_click,
+            mock.patch.object(self.mod, "install_desktop_action_inspect_command_helpers") as install_inspect,
+            mock.patch.object(self.mod, "install_local_helpers") as install_local,
+        ):
+            self.mod.install_desktop_action_run_command_helpers(
+                bindings,
+                ("cmd_desktop_smoke", "cmd_desktop_click", "cmd_desktop_inspect", "custom_action"),
+            )
 
-                def runner(*args, **kwargs):
-                    captured["args"] = args
-                    captured["kwargs"] = kwargs
-                    return 5
-
-                bindings = self.bindings(runner_name, runner)
-                args_obj = object()
-                self.assertEqual(wrapper(bindings, args_obj), 5)
-                self.assertEqual(captured["args"], (args_obj,))
-                for name in [
-                    "load_config",
-                    "resolve_desktop_target",
-                    "make_desktop_source_request",
-                    "run_macos_local_smoke",
-                    "run_linux_xvfb_remote_action",
-                    "run_windows_session_agent_action",
-                ]:
-                    self.assertIs(captured["kwargs"][f"{name}_fn"], bindings[name])
-                self.assertIs(
-                    captured["kwargs"]["desktop_action_success_lines_fn"],
-                    bindings["_desktop_cli"].desktop_action_success_lines,
-                )
-                self.assertEqual(captured["kwargs"]["sys_platform"], "darwin")
+        install_smoke.assert_called_once_with(bindings, ("cmd_desktop_smoke",))
+        install_click.assert_called_once_with(bindings, ("cmd_desktop_click",))
+        install_inspect.assert_called_once_with(bindings, ("cmd_desktop_inspect",))
+        install_local.assert_called_once_with(bindings, self.mod.__dict__, ("custom_action",))
 
 if __name__ == "__main__":
     unittest.main()
