@@ -87,11 +87,16 @@ Create the machine-local config on a new checkout:
 cp tools/local-ci/config.example.json tools/local-ci/config.json
 ```
 
-Install the repo-local developer ffmpeg on a new Mac:
+Install and validate the optional video-proof tool on a new Mac:
 
 ```bash
-npm --prefix tools/local-ci install
+pulp tool install video-proof
+pulp tool doctor video-proof --run
 ```
+
+For direct feature-branch iteration, the equivalent source-tree install is
+`npm --prefix tools/local-ci install`, and the source-tree smoke check is
+`npm --prefix tools/local-ci run smoke-video-proof`.
 
 Validate the eventual optional tool install path from a fresh source checkout:
 

@@ -308,10 +308,13 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
         self.assertEqual(remediations_by_check["target.video_capture"]["command"], "python3 tools/local-ci/local_ci.py desktop config set target.mac.video_capture true")
         self.assertEqual(remediations_by_check["video_capture"]["command"], "npm --prefix tools/local-ci install")
         self.assertEqual(remediations_by_check["video_capture"]["future_command"], "pulp tool install video-proof")
+        self.assertEqual(remediations_by_check["video_capture"]["future_check_command"], "pulp tool doctor video-proof --run")
         self.assertEqual(remediations_by_check["avfoundation_screen"]["command"], "python3 tools/local-ci/local_ci.py desktop video-doctor mac --json")
         self.assertEqual(remediations_by_check["remotion_smoke"]["command"], "npm --prefix tools/local-ci run smoke-video-proof")
+        self.assertEqual(remediations_by_check["remotion_smoke"]["future_command"], "pulp tool doctor video-proof --run")
         self.assertEqual(payload["install_model"]["current_command"], "npm --prefix tools/local-ci install")
         self.assertEqual(payload["install_model"]["future_command"], "pulp tool install video-proof")
+        self.assertEqual(payload["install_model"]["future_check_command"], "pulp tool doctor video-proof --run")
 
     def test_video_doctor_reports_screen_recording_remediation(self):
         self.targets["mac"]["optional"] = {"video_capture": True}
@@ -568,6 +571,7 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
         self.assertTrue(any("cp tools/local-ci/config.example.json tools/local-ci/config.json" in line for line in self.printed))
         self.assertTrue(any("npm --prefix tools/local-ci install" in line for line in self.printed))
         self.assertTrue(any("future: pulp tool install video-proof" in line for line in self.printed))
+        self.assertTrue(any("pulp tool doctor video-proof --run" in line for line in self.printed))
         self.assertTrue(any("target.mac.video_capture true" in line for line in self.printed))
         self.assertTrue(any("--video-audio system" in line for line in self.printed))
         self.assertTrue(any("--label blackbook-video-setup-smoke" in line for line in self.printed))
@@ -680,6 +684,7 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
         payload = json.loads(self.printed[0])
         self.assertEqual(payload["machine"], "blackbook")
         self.assertEqual(payload["install_model"]["future_command"], "pulp tool install video-proof")
+        self.assertEqual(payload["install_model"]["future_check_command"], "pulp tool doctor video-proof --run")
         self.assertTrue(payload["check"]["ok"])
         self.assertEqual(payload["check"]["target"], "mac")
         checks_by_name = {check["name"]: check for check in payload["check"]["checks"]}
@@ -699,9 +704,11 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
         self.assertEqual(payload["demo_matrix"]["scenarios"][1]["id"], "design-parity")
         self.assertEqual(payload["demo_matrix"]["scenarios"][1]["status"], "blocked")
         self.assertEqual(payload["demo_matrix"]["scenarios"][1]["declared_status"], "ready")
-        self.assertEqual(payload["steps"][6]["name"], "audio_doctor")
-        self.assertEqual(payload["steps"][7]["name"], "smoke_proof")
-        self.assertIn("--run-in-terminal", payload["steps"][5]["command"])
+        self.assertEqual(payload["steps"][2]["name"], "check_tool_addon")
+        self.assertEqual(payload["steps"][2]["command"], "pulp tool doctor video-proof --run")
+        self.assertEqual(payload["steps"][7]["name"], "audio_doctor")
+        self.assertEqual(payload["steps"][8]["name"], "smoke_proof")
+        self.assertIn("--run-in-terminal", payload["steps"][6]["command"])
 
     def test_video_setup_text_reports_demo_matrix_blockers(self):
         self.targets["mac"]["optional"] = {"video_capture": True}

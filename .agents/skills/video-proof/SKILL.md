@@ -69,11 +69,14 @@ Install the optional video-proof tool add-on:
 
 ```bash
 pulp tool install video-proof
+pulp tool doctor video-proof --run
 ```
 
-That installs the repo-local developer ffmpeg and Remotion tooling and writes a
-managed wrapper under `~/.pulp/tools/npm-packages/video-proof/`. For direct
-feature-branch iteration, the equivalent source-tree command is:
+The install command installs the repo-local developer ffmpeg and Remotion
+tooling and writes a managed wrapper under
+`~/.pulp/tools/npm-packages/video-proof/`. The focused doctor command runs the
+managed wrapper smoke check. For direct feature-branch iteration, the
+equivalent source-tree command is:
 
 ```bash
 npm --prefix tools/local-ci install

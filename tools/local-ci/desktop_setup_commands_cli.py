@@ -307,6 +307,7 @@ def desktop_video_doctor_remediations(checks: list[dict], *, target_name: str) -
                 "detail": "Install the optional `video-proof` tool add-on, or use the source-tree npm command while iterating on this branch, so ffmpeg-static and Remotion are available.",
                 "command": "npm --prefix tools/local-ci install",
                 "future_command": "pulp tool install video-proof",
+                "future_check_command": "pulp tool doctor video-proof --run",
             }
         )
     avfoundation = checks_by_name.get("avfoundation_screen")
@@ -358,6 +359,7 @@ def desktop_video_doctor_remediations(checks: list[dict], *, target_name: str) -
                 "title": "Run the Remotion proof smoke test",
                 "detail": "This verifies the local Remotion package and ffmpeg render path without needing Screen Recording.",
                 "command": "npm --prefix tools/local-ci run smoke-video-proof",
+                "future_command": "pulp tool doctor video-proof --run",
             }
         )
     return remediations
@@ -369,6 +371,7 @@ def desktop_video_install_model() -> dict:
         "current_command": "npm --prefix tools/local-ci install",
         "future": "pulp-tool-add-on",
         "future_command": "pulp tool install video-proof",
+        "future_check_command": "pulp tool doctor video-proof --run",
         "package_format": "not-pulp-add",
         "detail": (
             "The feature branch supports direct repo-local npm tooling for iteration, "
@@ -458,6 +461,12 @@ def desktop_video_setup_steps(target_name: str, *, machine_label: str | None = N
             "command": "npm --prefix tools/local-ci install",
             "detail": "Installs pinned developer-only ffmpeg-static and Remotion packages. Prefer `pulp tool install video-proof` for user-facing setup; use this command for source-tree iteration.",
             "future_command": "pulp tool install video-proof",
+        },
+        {
+            "name": "check_tool_addon",
+            "title": "Validate the optional video-proof tool",
+            "command": "pulp tool doctor video-proof --run",
+            "detail": "Runs the managed video-proof wrapper smoke check so setup failures surface before any screen recording permission handoff.",
         },
         {
             "name": "enable_target_capability",
