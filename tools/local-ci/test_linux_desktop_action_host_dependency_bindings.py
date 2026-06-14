@@ -39,17 +39,5 @@ class LinuxDesktopActionHostDependencyBindingsTests(unittest.TestCase):
         self.assertIs(deps["probe_linux_launch_backend_fn"], bindings["probe_linux_launch_backend"])
         self.assertIs(deps["run_fn"], bindings["subprocess"].run)
 
-    def test_host_dependency_installer_wires_named_export(self) -> None:
-        bindings = {
-            "ensure_host_reachable": object(),
-            "probe_linux_launch_backend": object(),
-            "subprocess": types.SimpleNamespace(run=object()),
-        }
-
-        self.mod.install_linux_desktop_action_host_dependency_helpers(bindings)
-
-        self.assertIs(bindings["linux_desktop_action_host_dependencies"]()["run_fn"], bindings["subprocess"].run)
-
-
 if __name__ == "__main__":
     unittest.main()

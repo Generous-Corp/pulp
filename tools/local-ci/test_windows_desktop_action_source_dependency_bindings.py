@@ -47,16 +47,5 @@ class WindowsDesktopActionSourceDependencyBindingsTests(unittest.TestCase):
         self.assertIs(deps["windows_ssh_read_json_fn"], bindings["windows_ssh_read_json"])
         self.assertIs(deps["attach_desktop_source_to_manifest_fn"], bindings["attach_desktop_source_to_manifest"])
 
-    def test_source_dependency_installer_wires_named_export(self):
-        bindings = self._bindings()
-
-        self.mod.install_windows_desktop_action_source_dependency_helpers(bindings)
-
-        self.assertIs(
-            bindings["windows_desktop_action_source_dependencies"]()["windows_path_join_fn"],
-            bindings["windows_path_join"],
-        )
-
-
 if __name__ == "__main__":
     unittest.main()

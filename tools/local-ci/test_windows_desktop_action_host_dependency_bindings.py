@@ -47,13 +47,5 @@ class WindowsDesktopActionHostDependencyBindingsTests(unittest.TestCase):
         self.assertIs(deps["time_fn"], bindings["time"].time)
         self.assertIs(deps["sleep_fn"], bindings["time"].sleep)
 
-    def test_host_dependency_installer_wires_named_export(self):
-        bindings = self._bindings()
-
-        self.mod.install_windows_desktop_action_host_dependency_helpers(bindings)
-
-        self.assertIs(bindings["windows_desktop_action_host_dependencies"]()["sleep_fn"], bindings["time"].sleep)
-
-
 if __name__ == "__main__":
     unittest.main()

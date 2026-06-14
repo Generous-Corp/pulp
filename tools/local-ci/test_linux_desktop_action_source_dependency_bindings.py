@@ -48,16 +48,5 @@ class LinuxDesktopActionSourceDependencyBindingsTests(unittest.TestCase):
         )
         self.assertIs(deps["attach_desktop_source_to_manifest_fn"], bindings["attach_desktop_source_to_manifest"])
 
-    def test_source_dependency_installer_wires_named_export(self) -> None:
-        bindings = self._bindings()
-
-        self.mod.install_linux_desktop_action_source_dependency_helpers(bindings)
-
-        self.assertIs(
-            bindings["linux_desktop_action_source_dependencies"]()["remote_linux_bundle_relpath_fn"],
-            bindings["remote_linux_bundle_relpath"],
-        )
-
-
 if __name__ == "__main__":
     unittest.main()

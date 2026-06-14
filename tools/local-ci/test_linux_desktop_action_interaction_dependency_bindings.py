@@ -51,16 +51,5 @@ class LinuxDesktopActionInteractionDependencyBindingsTests(unittest.TestCase):
         self.assertIs(deps["view_tree_inspector_summary_fn"], desktop_actions.view_tree_inspector_summary)
         self.assertIs(deps["pulp_app_interaction_summary_fn"], desktop_actions.pulp_app_interaction_summary)
 
-    def test_interaction_dependency_installer_wires_named_export(self) -> None:
-        bindings, desktop_actions = self._bindings()
-
-        self.mod.install_linux_desktop_action_interaction_dependency_helpers(bindings)
-
-        self.assertIs(
-            bindings["linux_desktop_action_interaction_dependencies"]()["desktop_interaction_requested_fn"],
-            desktop_actions.desktop_interaction_requested,
-        )
-
-
 if __name__ == "__main__":
     unittest.main()

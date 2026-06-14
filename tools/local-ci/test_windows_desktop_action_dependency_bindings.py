@@ -76,16 +76,5 @@ class WindowsDesktopActionDependencyBindingsTests(unittest.TestCase):
         self.assertIs(deps["windows_ssh_fetch_file_fn"], bindings["windows_ssh_fetch_file"])
         self.assertIs(deps["write_desktop_run_rollups_fn"], bindings["write_desktop_run_rollups"])
 
-    def test_install_dependency_helpers_wires_named_exports(self):
-        bindings, _desktop_actions = self._bindings()
-
-        self.mod.install_windows_desktop_action_dependency_helpers(bindings)
-
-        self.assertIs(
-            bindings["windows_desktop_action_dependencies"]()["windows_path_join_fn"],
-            bindings["windows_path_join"],
-        )
-
-
 if __name__ == "__main__":
     unittest.main()

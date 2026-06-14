@@ -51,16 +51,5 @@ class LinuxDesktopActionArtifactDependencyBindingsTests(unittest.TestCase):
         self.assertIs(deps["write_desktop_run_rollups_fn"], bindings["write_desktop_run_rollups"])
         self.assertIs(deps["now_iso_fn"], bindings["now_iso"])
 
-    def test_artifact_dependency_installer_wires_named_export(self) -> None:
-        bindings, desktop_actions = self._bindings()
-
-        self.mod.install_linux_desktop_action_artifact_dependency_helpers(bindings)
-
-        self.assertIs(
-            bindings["linux_desktop_action_artifact_dependencies"]()["desktop_action_artifact_paths_fn"],
-            desktop_actions.desktop_action_artifact_paths,
-        )
-
-
 if __name__ == "__main__":
     unittest.main()

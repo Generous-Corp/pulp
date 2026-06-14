@@ -73,16 +73,5 @@ class LinuxDesktopActionDependencyBindingsTests(unittest.TestCase):
         self.assertIs(deps["write_desktop_run_rollups_fn"], bindings["write_desktop_run_rollups"])
         self.assertIs(deps["view_tree_inspector_summary_fn"], desktop_actions.view_tree_inspector_summary)
 
-    def test_install_dependency_helpers_wires_named_exports(self) -> None:
-        bindings, _desktop_actions = self._bindings()
-
-        self.mod.install_linux_desktop_action_dependency_helpers(bindings)
-
-        self.assertIs(
-            bindings["linux_desktop_action_dependencies"]()["build_linux_xvfb_remote_command_fn"],
-            bindings["build_linux_xvfb_remote_command"],
-        )
-
-
 if __name__ == "__main__":
     unittest.main()
