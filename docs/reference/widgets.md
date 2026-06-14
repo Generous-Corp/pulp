@@ -131,6 +131,7 @@ interactive version of this set (dark + light), build and run
 
 | Widget | Purpose | Key capabilities | Header |
 |--------|---------|------------------|--------|
+| `ThemeModeControl` | System / light / dark theme picker | 3-segment icon control; pairs with `ThemeManager.set_mode()`; `on_mode_change(ThemeMode)` | `ui_components.hpp` |
 | `PreferencesPanel` | Tabbed preferences UI | setting categories, multi-page | `preferences_panel.hpp` |
 | `KeyMappingEditor` | Keyboard-shortcut editor | interactive key binding edit | `key_mapping_editor.hpp` |
 | `SplashScreen` | Startup splash | image, fade timing | `splash_screen.hpp` |

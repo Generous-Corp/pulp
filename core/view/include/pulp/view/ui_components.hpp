@@ -7,6 +7,7 @@
 #include <pulp/view/view.hpp>
 #include <pulp/view/input_events.hpp>
 #include <pulp/view/animation.hpp>
+#include <pulp/view/appearance_tracker.hpp>
 #include <pulp/canvas/canvas.hpp>
 #include <functional>
 #include <string>
@@ -143,6 +144,32 @@ public:
 private:
     std::string text_;
     ValueAnimation opacity_;
+};
+
+// ── ThemeModeControl ──────────────────────────────────────────────────────
+
+/// Compact 3-segment control to pick the theme mode: system / light / dark.
+/// Each segment is an icon (auto split-disc, sun, moon); the active one is
+/// highlighted and the hovered one shows its name. Clicking fires
+/// `on_mode_change(ThemeMode)`. Pair it with a `ThemeManager` (call its
+/// `set_mode()` from the callback, and `set_mode(manager.mode())` to reflect
+/// the live OS-follow state). Opt-in: a developer offering only one mode just
+/// never places this control.
+class ThemeModeControl : public View {
+public:
+    ThemeModeControl() { set_focusable(true); }
+    void set_mode(ThemeMode m) { if (m != mode_) { mode_ = m; request_repaint(); } }
+    ThemeMode mode() const { return mode_; }
+    std::function<void(ThemeMode)> on_mode_change;
+    int hovered_segment() const { return hover_seg_; }  ///< for tests; -1 none
+    void paint(canvas::Canvas& canvas) override;
+    void on_mouse_down(Point pos) override;
+    void on_mouse_event(const MouseEvent& event) override;  // hover tracking
+    float intrinsic_height() const override { return 28.0f; }
+private:
+    int segment_at_(Point pos) const;  // 0=system,1=light,2=dark, -1 outside
+    ThemeMode mode_ = ThemeMode::system;
+    int hover_seg_ = -1;
 };
 
 // ── ProgressBar ──────────────────────────────────────────────────────────

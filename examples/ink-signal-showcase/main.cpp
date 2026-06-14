@@ -103,7 +103,7 @@ void advance_anims(View* v, float dt) {
     for (std::size_t i = 0; i < v->child_count(); ++i) advance_anims(v->child_at(i), dt);
 }
 
-std::unique_ptr<View> build_board(float& out_height) {
+std::unique_ptr<View> build_board(float& out_height, ThemeModeControl*& out_theme_ctl) {
     auto board = std::make_unique<Board>();
     Board* b = board.get();
     float y = 24.0f;
@@ -132,6 +132,15 @@ std::unique_ptr<View> build_board(float& out_height) {
     auto section = [&](const std::string& t) { y += 6.0f; label(t, kMargin, y, kContentW, 13.0f); y += 26.0f; };
 
     title("Ink & Signal — Widget Gallery");
+
+    // Theme-mode control, top-right: system / light / dark. Wired to a
+    // ThemeManager in main() so it follows the OS live (system) or pins the
+    // theme (light/dark). A developer who wants only one mode just omits it.
+    {
+        auto ctl = std::make_unique<ThemeModeControl>();
+        out_theme_ctl = static_cast<ThemeModeControl*>(
+            add(std::move(ctl), kMargin + kContentW - 104.0f, 24.0f, 104.0f, 28.0f));
+    }
 
     // ── Buttons ────────────────────────────────────────────────────────
     section("Buttons");
@@ -489,14 +498,29 @@ int main(int argc, char** argv) {
 
     const ThemePreset* p = find_preset(preset);
     if (!p) { std::fprintf(stderr, "unknown preset '%s'\n", preset.c_str()); return 1; }
-    const bool dark = theme_name != "light";
+
+    // Theme manager: the Ink & Signal light/dark pair, with the mode chosen by
+    // --theme (system follows the OS live; light/dark pin it). This is the
+    // smart SDK surface — set_mode maps onto OS-follow vs pinned.
+    ThemeManager theme_mgr;
+    theme_mgr.set_theme_pair(theme_from_preset(*p, /*dark=*/false),
+                             theme_from_preset(*p, /*dark=*/true));
+    ThemeMode init_mode = theme_name == "system" ? ThemeMode::system
+                        : theme_name == "light"  ? ThemeMode::light
+                                                 : ThemeMode::dark;
+    theme_mgr.set_mode(init_mode);
 
     const uint32_t W = static_cast<uint32_t>(kContentW + 2.0f * kMargin);
     const uint32_t winH = 820;  // initial window height; content scrolls beyond it
 
     float content_h = 0.0f;
-    auto board = build_board(content_h);
-    board->set_theme(theme_from_preset(*p, dark));
+    ThemeModeControl* theme_ctl = nullptr;
+    auto board = build_board(content_h, theme_ctl);
+    if (theme_ctl) {
+        theme_ctl->set_mode(theme_mgr.mode());
+        theme_ctl->on_mode_change = [&theme_mgr](ThemeMode m) { theme_mgr.set_mode(m); };
+    }
+    board->set_theme(theme_mgr.active_theme());
     board->set_bounds({0, 0, static_cast<float>(W), content_h});
 
     // Headless GPU/Skia render — render the board directly (full content height)
@@ -542,7 +566,7 @@ int main(int argc, char** argv) {
         // Default: wrap the board in a ScrollView so content scrolls
         // (trackpad / wheel).
         scroll = std::make_unique<ScrollView>();
-        scroll->set_theme(theme_from_preset(*p, dark));
+        scroll->set_theme(theme_mgr.active_theme());
         scroll->set_frame_clock(&clock);
         scroll->add_child(std::move(board));
         scroll->set_content_size({static_cast<float>(W), content_h});
@@ -551,8 +575,25 @@ int main(int argc, char** argv) {
     }
 
     WindowHost* win = window.get();
-    window->set_idle_callback([win, board_ptr]() {
+    ScrollView* scroll_ptr = scroll.get();
+
+    // Re-apply the active theme to the whole tree whenever it changes — from a
+    // manual toggle (ThemeModeControl → set_mode) or a live OS appearance flip
+    // (theme_mgr.poll() below). resolve_color walks the parent chain, so
+    // setting the theme on the root + board restyles every widget.
+    auto apply_theme = [board_ptr, scroll_ptr](const Theme& t) {
+        if (scroll_ptr) scroll_ptr->set_theme(t);
+        board_ptr->set_theme(t);
+        board_ptr->request_repaint();
+    };
+    theme_mgr.on_theme_changed([&apply_theme](const Theme& t) { apply_theme(t); });
+
+    window->set_idle_callback([win, board_ptr, theme_ctl, &theme_mgr]() {
         constexpr float dt = 1.0f / 60.0f;
+        // Live OS-appearance follow: in system mode this swaps the theme when
+        // the OS toggles light/dark (fires on_theme_changed → apply_theme).
+        theme_mgr.poll();
+        if (theme_ctl) theme_ctl->set_mode(theme_mgr.mode());
         // Advance the shared modulation LFO (~0.25 Hz) that drives the Saturn
         // knobs' live indicator dots, then tick all widget animations.
         static float t = 0.0f;
@@ -565,7 +606,7 @@ int main(int argc, char** argv) {
     window->set_close_callback([]() {});
 
     std::printf("Ink & Signal showcase — %s, GPU window (%s). Close to exit.\n",
-                dark ? "dark" : "light",
+                theme_name.c_str(),
                 fit ? "proportional fit" : "scroll for more");
     window->run_event_loop();
     return 0;

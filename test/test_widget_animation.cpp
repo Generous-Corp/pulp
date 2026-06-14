@@ -145,6 +145,34 @@ TEST_CASE("PanControl hover scales thumb", "[view][widget_animation]") {
     REQUIRE_THAT(pan.hover_scale(), WithinAbs(1.0, 0.01));
 }
 
+// ── Theme mode tests ────────────────────────────────────────────────────────
+
+TEST_CASE("ThemeManager set_mode round-trips through mode()", "[view][theme]") {
+    ThemeManager tm;
+    tm.set_mode(ThemeMode::light);
+    REQUIRE(tm.mode() == ThemeMode::light);
+    tm.set_mode(ThemeMode::dark);
+    REQUIRE(tm.mode() == ThemeMode::dark);
+    tm.set_mode(ThemeMode::system);   // resumes OS tracking (unlocked)
+    REQUIRE(tm.mode() == ThemeMode::system);
+}
+
+TEST_CASE("ThemeModeControl click selects the segment and fires", "[view][theme]") {
+    ThemeModeControl c;
+    c.set_bounds({0, 0, 120, 28});
+    ThemeMode got = ThemeMode::system;
+    int fires = 0;
+    c.on_mode_change = [&](ThemeMode m) { got = m; ++fires; };
+
+    c.on_mouse_down({20, 14});   // segment 0 → system (already system, no fire)
+    c.on_mouse_down({60, 14});   // segment 1 → light
+    REQUIRE(got == ThemeMode::light);
+    REQUIRE(c.mode() == ThemeMode::light);
+    c.on_mouse_down({100, 14});  // segment 2 → dark
+    REQUIRE(got == ThemeMode::dark);
+    REQUIRE(fires == 2);         // system→system was a no-op
+}
+
 // ── Tooltip animation tests ─────────────────────────────────────────────────
 
 TEST_CASE("Tooltip fades in on show_at", "[view][widget_animation]") {

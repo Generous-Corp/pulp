@@ -424,6 +424,112 @@ void Tooltip::paint(canvas::Canvas& canvas) {
     canvas.fill_text(text_, b.x + 6, b.y + 15);
 }
 
+// ── ThemeModeControl ──────────────────────────────────────────────────────
+using canvas::Color;  // local convenience for the control's token fallbacks
+
+int ThemeModeControl::segment_at_(Point pos) const {
+    auto b = local_bounds();
+    if (pos.y < 0 || pos.y > b.height || pos.x < 0 || pos.x > b.width) return -1;
+    float seg_w = b.width / 3.0f;
+    int s = static_cast<int>(pos.x / seg_w);
+    return std::clamp(s, 0, 2);
+}
+
+void ThemeModeControl::paint(canvas::Canvas& canvas) {
+    auto b = local_bounds();
+    float seg_w = b.width / 3.0f, h = b.height;
+    float r = std::min(8.0f, h * 0.3f);
+
+    // Track background.
+    canvas.set_fill_color(resolve_color("bg.surface", Color::rgba8(30, 30, 46)));
+    canvas.fill_rounded_rect(0, 0, b.width, h, r);
+    canvas.set_stroke_color(resolve_color("control.border", Color::rgba8(80, 80, 100)));
+    canvas.set_line_width(1.0f);
+    canvas.stroke_rounded_rect(0, 0, b.width, h, r);
+
+    int active = mode_ == ThemeMode::system ? 0 : (mode_ == ThemeMode::light ? 1 : 2);
+    auto accent = resolve_color("accent.primary", Color::rgba8(22, 218, 194));
+    auto fg = resolve_color("text.primary", Color::rgba8(220, 220, 230));
+    auto dim = resolve_color("text.secondary", Color::rgba8(140, 145, 155));
+
+    for (int s = 0; s < 3; ++s) {
+        float sx = s * seg_w, scx = sx + seg_w * 0.5f, cy = h * 0.5f;
+        float ic = std::min(seg_w, h) * 0.30f;  // icon radius
+
+        // Active pill highlight.
+        if (s == active) {
+            canvas.set_fill_color(Color::rgba(accent.r, accent.g, accent.b, 0.18f));  // token-lint:allow (accent tint)
+            canvas.fill_rounded_rect(sx + 2, 2, seg_w - 4, h - 4, r - 1);
+        }
+        auto col = (s == active) ? accent : (s == hover_seg_ ? fg : dim);
+        canvas.set_stroke_color(col);
+        canvas.set_fill_color(col);
+        canvas.set_line_width(1.6f);
+
+        if (s == 0) {
+            // System: split disc (left filled = auto-follow).
+            canvas.stroke_circle(scx, cy, ic);
+            canvas.fill_circle(scx, cy, ic);            // full disc…
+            canvas.set_fill_color(resolve_color("bg.surface", Color::rgba8(30, 30, 46)));
+            canvas.fill_rect(scx, cy - ic - 1, ic + 2, ic * 2 + 2);  // …carve right half
+            canvas.set_stroke_color(col);
+            canvas.stroke_circle(scx, cy, ic);
+        } else if (s == 1) {
+            // Light: sun (disc + rays).
+            canvas.fill_circle(scx, cy, ic * 0.6f);
+            for (int k = 0; k < 8; ++k) {
+                float a = k * 0.7853982f;  // 45°
+                float x0 = scx + std::cos(a) * ic * 0.85f, y0 = cy + std::sin(a) * ic * 0.85f;
+                float x1 = scx + std::cos(a) * ic * 1.15f, y1 = cy + std::sin(a) * ic * 1.15f;
+                canvas.stroke_line(x0, y0, x1, y1);
+            }
+        } else {
+            // Dark: crescent moon (disc minus an offset disc). The carve must
+            // use the OPAQUE colour actually behind the icon so the crescent
+            // shows — on the active segment that's the accent-tinted pill
+            // (accent @0.18 over the surface) composited to a solid colour, not
+            // the transparent tint itself.
+            auto surface = resolve_color("bg.surface", Color::rgba8(30, 30, 46));
+            Color carve = surface;
+            if (s == active) {
+                carve = Color::rgba(surface.r * 0.82f + accent.r * 0.18f,
+                                    surface.g * 0.82f + accent.g * 0.18f,
+                                    surface.b * 0.82f + accent.b * 0.18f, 1.0f);  // token-lint:allow (pill composite)
+            }
+            canvas.fill_circle(scx, cy, ic);
+            canvas.set_fill_color(carve);
+            canvas.fill_circle(scx + ic * 0.45f, cy - ic * 0.25f, ic * 0.85f);
+        }
+    }
+
+    // Hover name (tooltip-style) centered under the hovered segment.
+    if (hover_seg_ >= 0) {
+        const char* names[] = {"System", "Light", "Dark"};
+        canvas.set_font("Inter", 10.0f);
+        canvas.set_fill_color(dim);
+        canvas.set_text_align(canvas::TextAlign::center);
+        canvas.fill_text(names[hover_seg_], hover_seg_ * seg_w + seg_w * 0.5f, h + 12.0f);
+        canvas.set_text_align(canvas::TextAlign::left);
+    }
+}
+
+void ThemeModeControl::on_mouse_down(Point pos) {
+    int s = segment_at_(pos);
+    if (s < 0) return;
+    ThemeMode m = s == 0 ? ThemeMode::system : (s == 1 ? ThemeMode::light : ThemeMode::dark);
+    if (m != mode_) {
+        mode_ = m;
+        request_repaint();
+        if (on_mode_change) on_mode_change(mode_);
+    }
+}
+
+void ThemeModeControl::on_mouse_event(const MouseEvent& event) {
+    if (event.is_down || event.is_wheel) return;
+    int s = segment_at_(event.position);
+    if (s != hover_seg_) { hover_seg_ = s; request_repaint(); }
+}
+
 // ── ProgressBar ──────────────────────────────────────────────────────────
 
 void ProgressBar::paint(canvas::Canvas& canvas) {
