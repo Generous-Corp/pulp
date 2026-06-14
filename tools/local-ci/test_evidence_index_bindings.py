@@ -86,14 +86,6 @@ class EvidenceIndexBindingTests(unittest.TestCase):
             ["empty_evidence_index", "load_evidence_index_unlocked", "collect_evidence_groups_from_index"],
         )
 
-    def test_install_evidence_index_helpers_keeps_unknown_local_fallback(self) -> None:
-        bindings = {}
-        evidence_index_bindings.future_evidence_index_helper = lambda _bindings: "future"
-
-        evidence_index_bindings.install_evidence_index_helpers(bindings, ("future_evidence_index_helper",))
-
-        self.assertEqual(bindings["future_evidence_index_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

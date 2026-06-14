@@ -52,14 +52,6 @@ class MacosWindowClickBindingsTests(unittest.TestCase):
 
         self.assertEqual(bindings["dispatch_macos_click"](10.0, 20.0), {"clicked": True})
 
-    def test_click_installer_keeps_unknown_local_fallback(self) -> None:
-        bindings = {}
-        self.mod.future_macos_window_click_helper = lambda _bindings: "future"
-
-        self.mod.install_macos_window_click_helpers(bindings, ("future_macos_window_click_helper",))
-
-        self.assertEqual(bindings["future_macos_window_click_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

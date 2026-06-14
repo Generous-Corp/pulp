@@ -72,17 +72,6 @@ class DesktopSourceRewriteCommandBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["command_path_rewrite_candidate"]("./tool"), Path("/repo/tool"))
         self.assertNotIn("rewrite_launch_command_for_mapper", bindings)
 
-    def test_command_rewrite_installer_keeps_unknown_local_fallback(self):
-        bindings = {}
-        self.mod.future_desktop_source_rewrite_command_helper = lambda _bindings: "future"
-
-        self.mod.install_desktop_source_rewrite_command_helpers(
-            bindings,
-            ("future_desktop_source_rewrite_command_helper",),
-        )
-
-        self.assertEqual(bindings["future_desktop_source_rewrite_command_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

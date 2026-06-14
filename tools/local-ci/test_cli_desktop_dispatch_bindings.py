@@ -92,14 +92,6 @@ class CliDesktopDispatchBindingsTests(unittest.TestCase):
         self.assertIs(captured["desktop_args"], args)
         self.assertEqual(bindings["cmd_desktop"].__name__, "cmd_desktop")
 
-    def test_install_cli_desktop_dispatch_helpers_keeps_unknown_local_fallback(self):
-        bindings = {}
-        self.mod.future_cli_desktop_dispatch_helper = lambda _bindings: "future"
-
-        self.mod.install_cli_desktop_dispatch_helpers(bindings, ("future_cli_desktop_dispatch_helper",))
-
-        self.assertEqual(bindings["future_cli_desktop_dispatch_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

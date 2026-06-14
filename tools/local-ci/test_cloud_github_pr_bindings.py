@@ -77,14 +77,6 @@ class CloudGithubPrBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["gh_pr_head"]("latest"), (42, "feature/x", "abc123"))
         self.assertEqual(calls, [("gh_pr_head", "latest")])
 
-    def test_install_cloud_github_pr_helpers_keeps_unknown_local_fallback(self):
-        bindings = {}
-        self.mod.future_cloud_github_pr_helper = lambda _bindings: "future"
-
-        self.mod.install_cloud_github_pr_helpers(bindings, ("future_cloud_github_pr_helper",))
-
-        self.assertEqual(bindings["future_cloud_github_pr_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

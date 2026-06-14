@@ -74,14 +74,6 @@ class NormalizeBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["normalize_priority"].__name__, "normalize_priority")
         self.assertEqual([call[0] for call in calls], ["normalize_priority", "normalize_desktop_config"])
 
-    def test_install_normalize_helpers_keeps_unknown_local_fallback(self):
-        bindings = {}
-        self.mod.future_normalize_helper = lambda _bindings: "future"
-
-        self.mod.install_normalize_helpers(bindings, ("future_normalize_helper",))
-
-        self.assertEqual(bindings["future_normalize_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

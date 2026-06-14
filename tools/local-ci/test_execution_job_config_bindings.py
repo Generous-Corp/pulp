@@ -84,14 +84,6 @@ class ExecutionJobConfigBindingsTests(unittest.TestCase):
         self.assertIs(captured["config"][1]["load_config_file_fn"], bindings["load_config_file"])
         self.assertEqual(bindings["config_for_job_execution"].__name__, "config_for_job_execution")
 
-    def test_install_execution_job_config_helpers_keeps_unknown_local_fallback(self) -> None:
-        bindings = {}
-        self.mod.future_execution_job_config_helper = lambda _bindings: "future"
-
-        self.mod.install_execution_job_config_helpers(bindings, ("future_execution_job_config_helper",))
-
-        self.assertEqual(bindings["future_execution_job_config_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

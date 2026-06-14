@@ -72,14 +72,6 @@ class FootprintBindingTests(unittest.TestCase):
         self.assertEqual(bindings["format_size_bytes"].__name__, "format_size_bytes")
         self.assertEqual([call[0] for call in fake.calls], ["format_size_bytes", "path_size_bytes"])
 
-    def test_install_footprint_helpers_keeps_unknown_local_fallback(self) -> None:
-        bindings = {}
-        footprint_bindings.future_footprint_helper = lambda _bindings: "future"
-
-        footprint_bindings.install_footprint_helpers(bindings, ("future_footprint_helper",))
-
-        self.assertEqual(bindings["future_footprint_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

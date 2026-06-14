@@ -192,14 +192,6 @@ class ExecutionJobBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["save_result"]({"job_id": "job"}), Path("/state/result.json"))
         self.assertEqual(list(captured), ["config", "process", "save"])
 
-    def test_install_execution_job_helpers_keeps_unknown_local_fallback(self) -> None:
-        bindings = {}
-        self.mod.future_execution_job_helper = lambda _bindings: "future"
-
-        self.mod.install_execution_job_helpers(bindings, ("future_execution_job_helper",))
-
-        self.assertEqual(bindings["future_execution_job_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

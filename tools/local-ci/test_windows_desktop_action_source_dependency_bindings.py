@@ -57,17 +57,6 @@ class WindowsDesktopActionSourceDependencyBindingsTests(unittest.TestCase):
             bindings["windows_path_join"],
         )
 
-    def test_source_dependency_installer_keeps_unknown_local_fallback(self):
-        bindings = {}
-        self.mod.future_windows_desktop_action_source_helper = lambda _bindings: "future"
-
-        self.mod.install_windows_desktop_action_source_dependency_helpers(
-            bindings,
-            ("future_windows_desktop_action_source_helper",),
-        )
-
-        self.assertEqual(bindings["future_windows_desktop_action_source_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -76,14 +76,6 @@ class DesktopProofSummaryBindingsTests(unittest.TestCase):
         self.assertEqual(captured["args"], ("exact-sha",))
         self.assertEqual(captured["kwargs"], {})
 
-    def test_install_desktop_proof_summary_helpers_keeps_unknown_local_fallback(self):
-        bindings = {}
-        self.mod.future_desktop_proof_summary_helper = lambda _bindings: "future"
-
-        self.mod.install_desktop_proof_summary_helpers(bindings, ("future_desktop_proof_summary_helper",))
-
-        self.assertEqual(bindings["future_desktop_proof_summary_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

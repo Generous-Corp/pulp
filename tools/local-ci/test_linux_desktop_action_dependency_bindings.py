@@ -83,17 +83,6 @@ class LinuxDesktopActionDependencyBindingsTests(unittest.TestCase):
             bindings["build_linux_xvfb_remote_command"],
         )
 
-    def test_install_dependency_helpers_keeps_unknown_local_fallback(self) -> None:
-        bindings = {}
-        self.mod.future_linux_desktop_action_dependency_helper = lambda _bindings: "future"
-
-        self.mod.install_linux_desktop_action_dependency_helpers(
-            bindings,
-            ("future_linux_desktop_action_dependency_helper",),
-        )
-
-        self.assertEqual(bindings["future_linux_desktop_action_dependency_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

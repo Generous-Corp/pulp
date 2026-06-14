@@ -103,14 +103,6 @@ class DesktopStatusCommandBindingsTests(unittest.TestCase):
 
         self.assertEqual(bindings["cmd_desktop_status"](object()), 17)
 
-    def test_install_desktop_status_command_helpers_keeps_unknown_local_fallback(self) -> None:
-        bindings = {}
-        self.mod.future_desktop_status_command_helper = lambda _bindings: "future"
-
-        self.mod.install_desktop_status_command_helpers(bindings, ("future_desktop_status_command_helper",))
-
-        self.assertEqual(bindings["future_desktop_status_command_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

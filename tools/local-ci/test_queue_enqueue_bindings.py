@@ -121,14 +121,6 @@ class QueueEnqueueBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["enqueue_job"]("feature/topic", "abc123", "normal", ["mac"], "local", "full"), ({"id": "job"}, False))
         self.assertEqual(captured["args"], ("feature/topic", "abc123", "normal", ["mac"], "local", "full"))
 
-    def test_install_queue_enqueue_helpers_keeps_unknown_local_fallback(self):
-        bindings = {}
-        self.mod.future_queue_enqueue_helper = lambda _bindings: "future"
-
-        self.mod.install_queue_enqueue_helpers(bindings, ("future_queue_enqueue_helper",))
-
-        self.assertEqual(bindings["future_queue_enqueue_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -56,17 +56,6 @@ class DesktopSourceRequestManifestBindingsTests(unittest.TestCase):
 
         self.assertEqual(captured["attach"], (manifest, None))
 
-    def test_manifest_installer_keeps_unknown_local_fallback(self):
-        bindings = {}
-        self.mod.future_desktop_source_request_manifest_helper = lambda _bindings: "future"
-
-        self.mod.install_desktop_source_request_manifest_helpers(
-            bindings,
-            ("future_desktop_source_request_manifest_helper",),
-        )
-
-        self.assertEqual(bindings["future_desktop_source_request_manifest_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

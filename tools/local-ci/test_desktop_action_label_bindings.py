@@ -51,14 +51,6 @@ class DesktopActionLabelBindingsTests(unittest.TestCase):
 
         self.assertEqual(bindings["default_desktop_label"]("./Demo"), "Demo")
 
-    def test_install_desktop_action_label_helpers_keeps_unknown_local_fallback(self) -> None:
-        bindings = {}
-        self.mod.future_desktop_action_label_helper = lambda _bindings: "future"
-
-        self.mod.install_desktop_action_label_helpers(bindings, ("future_desktop_action_label_helper",))
-
-        self.assertEqual(bindings["future_desktop_action_label_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

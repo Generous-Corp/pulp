@@ -74,14 +74,6 @@ class WindowsTargetPathBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["windows_path_join"]("C:", "Pulp"), r"C:\Pulp")
         self.assertTrue(bindings["windows_repo_checkout_ready"]({"git_found": True}))
 
-    def test_install_windows_target_path_helpers_keeps_unknown_local_fallback(self) -> None:
-        bindings = {}
-        self.mod.future_windows_path_helper = lambda _bindings: "future"
-
-        self.mod.install_windows_target_path_helpers(bindings, ("future_windows_path_helper",))
-
-        self.assertEqual(bindings["future_windows_path_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

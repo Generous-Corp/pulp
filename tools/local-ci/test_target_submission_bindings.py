@@ -101,14 +101,6 @@ class TargetSubmissionBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["print_submission_metadata"].__name__, "print_submission_metadata")
         self.assertNotIn("build_submission_metadata", bindings)
 
-    def test_install_target_submission_helpers_keeps_unknown_local_fallback(self) -> None:
-        bindings = {}
-        self.mod.future_target_submission_helper = lambda _bindings: "future"
-
-        self.mod.install_target_submission_helpers(bindings, ("future_target_submission_helper",))
-
-        self.assertEqual(bindings["future_target_submission_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

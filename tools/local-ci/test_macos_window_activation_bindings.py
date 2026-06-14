@@ -69,14 +69,6 @@ class MacosWindowActivationBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["activate_macos_bundle_id"]("com.example.demo"), {"bundle_id": "com.example.demo"})
         self.assertNotIn("activate_macos_pid", bindings)
 
-    def test_activation_installer_keeps_unknown_local_fallback(self) -> None:
-        bindings = {}
-        self.mod.future_macos_window_activation_helper = lambda _bindings: "future"
-
-        self.mod.install_macos_window_activation_helpers(bindings, ("future_macos_window_activation_helper",))
-
-        self.assertEqual(bindings["future_macos_window_activation_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

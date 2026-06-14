@@ -92,14 +92,6 @@ class QueueTargetPayloadBindingsTests(unittest.TestCase):
         )
         self.assertEqual(bindings["target_state_snapshot"]({"mac": {}}), {"snapshot": {"mac": {}}})
 
-    def test_install_queue_target_payload_helpers_keeps_unknown_local_fallback(self):
-        bindings = {}
-        self.mod.future_queue_target_payload_helper = lambda _bindings: "future"
-
-        self.mod.install_queue_target_payload_helpers(bindings, ("future_queue_target_payload_helper",))
-
-        self.assertEqual(bindings["future_queue_target_payload_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

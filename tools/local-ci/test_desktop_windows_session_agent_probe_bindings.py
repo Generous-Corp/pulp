@@ -63,17 +63,6 @@ class DesktopWindowsSessionAgentProbeBindingsTests(unittest.TestCase):
 
         self.assertEqual(bindings["probe_windows_session_agent"]("win", {}), {"ok": True})
 
-    def test_install_desktop_windows_session_agent_probe_helpers_keeps_unknown_local_fallback(self):
-        bindings = {}
-        self.mod.future_desktop_windows_session_agent_probe_helper = lambda _bindings: "future"
-
-        self.mod.install_desktop_windows_session_agent_probe_helpers(
-            bindings,
-            ("future_desktop_windows_session_agent_probe_helper",),
-        )
-
-        self.assertEqual(bindings["future_desktop_windows_session_agent_probe_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

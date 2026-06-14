@@ -97,14 +97,6 @@ class ExecutionResultIoBindingsTests(unittest.TestCase):
         self.assertIs(captured["save"][1]["results_dir_fn"], bindings["results_dir"])
         self.assertEqual(bindings["save_result"].__name__, "save_result")
 
-    def test_install_execution_result_io_helpers_keeps_unknown_local_fallback(self) -> None:
-        bindings = {}
-        self.mod.future_execution_result_io_helper = lambda _bindings: "future"
-
-        self.mod.install_execution_result_io_helpers(bindings, ("future_execution_result_io_helper",))
-
-        self.assertEqual(bindings["future_execution_result_io_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

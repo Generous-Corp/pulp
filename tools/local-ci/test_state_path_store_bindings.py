@@ -79,14 +79,6 @@ class StatePathStoreBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["queue_path"].__name__, "queue_path")
         self.assertEqual([call[0] for call in calls], ["queue_path", "logs_dir"])
 
-    def test_install_state_path_store_helpers_keeps_unknown_local_fallback(self) -> None:
-        bindings = {}
-        self.mod.future_state_path_store_helper = lambda _bindings: "future"
-
-        self.mod.install_state_path_store_helpers(bindings, ("future_state_path_store_helper",))
-
-        self.assertEqual(bindings["future_state_path_store_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

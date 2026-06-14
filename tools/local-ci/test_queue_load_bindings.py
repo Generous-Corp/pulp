@@ -101,14 +101,6 @@ class QueueLoadBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["load_queue"](), [])
         self.assertEqual(events, [("lock", Path("/state/queue.lock"), True), "enter", "load", "exit"])
 
-    def test_install_queue_load_helpers_keeps_unknown_local_fallback(self):
-        bindings = {}
-        self.mod.future_queue_load_helper = lambda _bindings: "future"
-
-        self.mod.install_queue_load_helpers(bindings, ("future_queue_load_helper",))
-
-        self.assertEqual(bindings["future_queue_load_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

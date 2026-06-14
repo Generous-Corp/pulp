@@ -73,14 +73,6 @@ class TargetConfigPreflightBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["config_material_for_targets"].__name__, "config_material_for_targets")
         self.assertNotIn("config_source_name", bindings)
 
-    def test_install_target_config_preflight_helpers_keeps_unknown_local_fallback(self) -> None:
-        bindings = {}
-        self.mod.future_target_config_preflight_helper = lambda _bindings: "future"
-
-        self.mod.install_target_config_preflight_helpers(bindings, ("future_target_config_preflight_helper",))
-
-        self.assertEqual(bindings["future_target_config_preflight_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

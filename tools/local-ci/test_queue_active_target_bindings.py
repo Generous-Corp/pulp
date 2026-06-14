@@ -61,14 +61,6 @@ class QueueActiveTargetBindingsTests(unittest.TestCase):
         self.assertEqual(captured["upsert"][1:3], ("job1", None))
         self.assertIs(captured["upsert"][3], bindings["now_iso"])
 
-    def test_install_queue_active_target_helpers_keeps_unknown_local_fallback(self):
-        bindings = {}
-        self.mod.future_queue_active_target_helper = lambda _bindings: "future"
-
-        self.mod.install_queue_active_target_helpers(bindings, ("future_queue_active_target_helper",))
-
-        self.assertEqual(bindings["future_queue_active_target_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

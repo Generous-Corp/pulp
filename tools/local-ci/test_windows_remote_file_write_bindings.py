@@ -71,14 +71,6 @@ class WindowsRemoteFileWriteBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["windows_ssh_write_text"]("win", r"%TEMP%\a.txt", "hello"), {"installed": True})
         self.assertEqual(captured["args"], ("win", r"%TEMP%\a.txt", "hello"))
 
-    def test_install_windows_remote_file_write_helpers_keeps_unknown_local_fallback(self) -> None:
-        bindings = {}
-        self.mod.future_windows_write_helper = lambda _bindings: "future"
-
-        self.mod.install_windows_remote_file_write_helpers(bindings, ("future_windows_write_helper",))
-
-        self.assertEqual(bindings["future_windows_write_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

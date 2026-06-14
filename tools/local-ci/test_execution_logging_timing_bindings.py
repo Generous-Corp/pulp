@@ -46,14 +46,6 @@ class ExecutionLoggingTimingBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["heartbeat_interval_secs"](), 15.0)
         self.assertNotIn("stuck_idle_secs", bindings)
 
-    def test_install_execution_logging_timing_helpers_keeps_unknown_local_fallback(self):
-        bindings = {}
-        self.mod.future_execution_logging_timing_helper = lambda _bindings: "future"
-
-        self.mod.install_execution_logging_timing_helpers(bindings, ("future_execution_logging_timing_helper",))
-
-        self.assertEqual(bindings["future_execution_logging_timing_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

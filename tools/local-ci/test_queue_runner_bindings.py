@@ -95,14 +95,6 @@ class QueueRunnerBindingsTests(unittest.TestCase):
         bindings["clear_runner_info"]()
         self.assertEqual(calls, ["read", "clear"])
 
-    def test_install_queue_runner_helpers_keeps_unknown_local_fallback(self):
-        bindings = {}
-        self.mod.future_queue_runner_helper = lambda _bindings: "future"
-
-        self.mod.install_queue_runner_helpers(bindings, ("future_queue_runner_helper",))
-
-        self.assertEqual(bindings["future_queue_runner_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

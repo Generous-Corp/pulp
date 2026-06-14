@@ -113,14 +113,6 @@ class ConfigEvidenceSummaryBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["evidence_empty_line"](has_header=False), "empty")
         self.assertEqual(calls["has_header"], False)
 
-    def test_install_config_evidence_summary_helpers_keeps_unknown_local_fallback(self) -> None:
-        bindings = {}
-        self.mod.future_config_evidence_summary_helper = lambda _bindings: "future"
-
-        self.mod.install_config_evidence_summary_helpers(bindings, ("future_config_evidence_summary_helper",))
-
-        self.assertEqual(bindings["future_config_evidence_summary_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

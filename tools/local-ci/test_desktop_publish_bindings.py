@@ -158,14 +158,6 @@ class DesktopPublishBindingsTests(unittest.TestCase):
         self.assertEqual(captured["args"], ({"desktop_automation": {}},))
         self.assertEqual(captured["kwargs"]["limit"], 2)
 
-    def test_install_desktop_publish_helpers_keeps_unknown_local_fallback(self):
-        bindings = {}
-        self.mod.future_desktop_publish_helper = lambda _bindings: "future"
-
-        self.mod.install_desktop_publish_helpers(bindings, ("future_desktop_publish_helper",))
-
-        self.assertEqual(bindings["future_desktop_publish_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

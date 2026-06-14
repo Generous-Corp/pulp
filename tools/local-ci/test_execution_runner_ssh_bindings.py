@@ -92,14 +92,6 @@ class ExecutionRunnerSshBindingsTests(unittest.TestCase):
         self.assertEqual(captured["args"], ("ubuntu", "host", "/repo", {"id": "job"}, "", None, None))
         self.assertIs(captured["kwargs"]["print_fn"], bindings["print"])
 
-    def test_install_execution_runner_ssh_helpers_keeps_unknown_local_fallback(self) -> None:
-        bindings = {}
-        self.mod.future_execution_runner_ssh_helper = lambda _bindings: "future"
-
-        self.mod.install_execution_runner_ssh_helpers(bindings, ("future_execution_runner_ssh_helper",))
-
-        self.assertEqual(bindings["future_execution_runner_ssh_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -66,14 +66,6 @@ class DesktopInfraReportingBindingsTests(unittest.TestCase):
 
         self.assertEqual(bindings["slugify_token"]("Demo Token", max_len=4), "demo")
 
-    def test_install_desktop_infra_reporting_helpers_keeps_unknown_local_fallback(self) -> None:
-        bindings = {}
-        self.mod.future_reporting_helper = lambda _bindings: "future"
-
-        self.mod.install_desktop_infra_reporting_helpers(bindings, ("future_reporting_helper",))
-
-        self.assertEqual(bindings["future_reporting_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

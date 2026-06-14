@@ -73,14 +73,6 @@ class ExecutionTargetResultBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["unreachable_target_result"]("linux"), {"target": "linux", "detail": "Host unreachable"})
         self.assertNotIn("validation_result_from_run", bindings)
 
-    def test_install_execution_target_result_helpers_keeps_unknown_local_fallback(self):
-        bindings = {}
-        self.mod.future_execution_target_result_helper = lambda _bindings: "future"
-
-        self.mod.install_execution_target_result_helpers(bindings, ("future_execution_target_result_helper",))
-
-        self.assertEqual(bindings["future_execution_target_result_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

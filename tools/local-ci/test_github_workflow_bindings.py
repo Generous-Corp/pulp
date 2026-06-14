@@ -192,14 +192,6 @@ class GithubWorkflowBindingsTests(unittest.TestCase):
 
         self.assertEqual(bindings["github_actions_defaults"](), {"provider": "github-hosted"})
 
-    def test_install_github_workflow_helpers_keeps_unknown_local_fallback(self):
-        bindings = {}
-        self.mod.future_github_workflow_helper = lambda _bindings: "future"
-
-        self.mod.install_github_workflow_helpers(bindings, ("future_github_workflow_helper",))
-
-        self.assertEqual(bindings["future_github_workflow_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

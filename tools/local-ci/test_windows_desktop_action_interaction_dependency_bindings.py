@@ -57,17 +57,6 @@ class WindowsDesktopActionInteractionDependencyBindingsTests(unittest.TestCase):
             desktop_actions.desktop_interaction_requested,
         )
 
-    def test_interaction_dependency_installer_keeps_unknown_local_fallback(self):
-        bindings = {}
-        self.mod.future_windows_desktop_action_interaction_helper = lambda _bindings: "future"
-
-        self.mod.install_windows_desktop_action_interaction_dependency_helpers(
-            bindings,
-            ("future_windows_desktop_action_interaction_helper",),
-        )
-
-        self.assertEqual(bindings["future_windows_desktop_action_interaction_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

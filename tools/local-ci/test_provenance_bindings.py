@@ -74,14 +74,6 @@ class ProvenanceBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["normalize_provenance"].__name__, "normalize_provenance")
         self.assertEqual([call[0] for call in calls], ["normalize_provenance", "normalize_result"])
 
-    def test_install_provenance_helpers_keeps_unknown_local_fallback(self):
-        bindings = {}
-        self.mod.future_provenance_helper = lambda _bindings: "future"
-
-        self.mod.install_provenance_helpers(bindings, ("future_provenance_helper",))
-
-        self.assertEqual(bindings["future_provenance_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

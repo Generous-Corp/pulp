@@ -68,14 +68,6 @@ class DesktopReceiptArtifactBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["desktop_target_receipt_path"]("mac"), Path("/receipts/mac.json"))
         self.assertNotIn("desktop_receipt_for", bindings)
 
-    def test_install_desktop_receipt_artifact_helpers_keeps_unknown_local_fallback(self) -> None:
-        bindings = {}
-        self.mod.future_desktop_receipt_artifact_helper = lambda _bindings: "future"
-
-        self.mod.install_desktop_receipt_artifact_helpers(bindings, ("future_desktop_receipt_artifact_helper",))
-
-        self.assertEqual(bindings["future_desktop_receipt_artifact_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

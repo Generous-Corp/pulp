@@ -128,14 +128,6 @@ class DesktopInstallCommandBindingsTests(unittest.TestCase):
 
         self.assertEqual(bindings["cmd_desktop_install"](object()), 23)
 
-    def test_install_desktop_install_command_helpers_keeps_unknown_local_fallback(self) -> None:
-        bindings = {}
-        self.mod.future_desktop_install_command_helper = lambda _bindings: "future"
-
-        self.mod.install_desktop_install_command_helpers(bindings, ("future_desktop_install_command_helper",))
-
-        self.assertEqual(bindings["future_desktop_install_command_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

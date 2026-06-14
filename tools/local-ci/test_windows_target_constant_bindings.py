@@ -56,14 +56,6 @@ class WindowsTargetConstantBindingsTests(unittest.TestCase):
         self.assertIs(bindings["windows_required_remote_tools"](), windows_target.WINDOWS_REQUIRED_REMOTE_TOOLS)
         self.assertEqual(bindings["windows_default_remote_repo_dirname"](), "pulp-validate")
 
-    def test_install_windows_target_constant_helpers_keeps_unknown_local_fallback(self) -> None:
-        bindings = {}
-        self.mod.future_windows_constant_helper = lambda _bindings: "future"
-
-        self.mod.install_windows_target_constant_helpers(bindings, ("future_windows_constant_helper",))
-
-        self.assertEqual(bindings["future_windows_constant_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

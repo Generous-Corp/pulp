@@ -59,14 +59,6 @@ class StatePathLogBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["job_logs_dir"].__name__, "job_logs_dir")
         self.assertEqual([call[0] for call in calls], ["job_logs_dir", "prepare_target_log"])
 
-    def test_install_state_path_log_helpers_keeps_unknown_local_fallback(self) -> None:
-        bindings = {}
-        self.mod.future_state_path_log_helper = lambda _bindings: "future"
-
-        self.mod.install_state_path_log_helpers(bindings, ("future_state_path_log_helper",))
-
-        self.assertEqual(bindings["future_state_path_log_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

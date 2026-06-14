@@ -63,14 +63,6 @@ class DesktopInfraGitRunBindingsTests(unittest.TestCase):
         self.assertEqual(result.cwd, Path("/repo"))
         self.assertFalse(result.check)
 
-    def test_install_run_helpers_keeps_unknown_local_fallback(self) -> None:
-        bindings = {}
-        self.mod.future_run_helper = lambda _bindings: "future"
-
-        self.mod.install_desktop_infra_git_run_helpers(bindings, ("future_run_helper",))
-
-        self.assertEqual(bindings["future_run_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

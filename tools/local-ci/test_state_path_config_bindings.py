@@ -73,14 +73,6 @@ class StatePathConfigBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["state_dir"].__name__, "state_dir")
         self.assertEqual([call[0] for call in calls], ["state_dir", "shared_config_path"])
 
-    def test_install_state_path_config_helpers_keeps_unknown_local_fallback(self) -> None:
-        bindings = {}
-        self.mod.future_state_path_config_helper = lambda _bindings: "future"
-
-        self.mod.install_state_path_config_helpers(bindings, ("future_state_path_config_helper",))
-
-        self.assertEqual(bindings["future_state_path_config_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

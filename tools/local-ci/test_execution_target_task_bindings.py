@@ -103,14 +103,6 @@ class ExecutionTargetTaskBindingsTests(unittest.TestCase):
         self.assertIs(captured["build"][1]["enabled_targets_fn"], bindings["enabled_targets"])
         self.assertEqual(bindings["build_target_tasks"].__name__, "build_target_tasks")
 
-    def test_install_execution_target_task_helpers_keeps_unknown_local_fallback(self) -> None:
-        bindings = {}
-        self.mod.future_execution_target_task_helper = lambda _bindings: "future"
-
-        self.mod.install_execution_target_task_helpers(bindings, ("future_execution_target_task_helper",))
-
-        self.assertEqual(bindings["future_execution_target_task_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

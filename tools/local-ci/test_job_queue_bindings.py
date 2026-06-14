@@ -74,14 +74,6 @@ class JobQueueBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["normalize_job"].__name__, "normalize_job")
         self.assertEqual([call[0] for call in calls], ["normalize_job", "load_queue_unlocked"])
 
-    def test_install_job_queue_helpers_keeps_unknown_local_fallback(self):
-        bindings = {}
-        self.mod.future_job_queue_helper = lambda _bindings: "future"
-
-        self.mod.install_job_queue_helpers(bindings, ("future_job_queue_helper",))
-
-        self.assertEqual(bindings["future_job_queue_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

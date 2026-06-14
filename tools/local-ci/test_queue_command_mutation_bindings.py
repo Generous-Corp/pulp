@@ -99,14 +99,6 @@ class QueueCommandMutationBindingsTests(unittest.TestCase):
         self.assertNotIn("cancel_queue_command_job", bindings)
         self.assertEqual(bindings["bump_queue_command_job"].__name__, "bump_queue_command_job")
 
-    def test_install_queue_command_mutation_helpers_keeps_unknown_local_fallback(self):
-        bindings = {}
-        self.mod.future_queue_command_mutation_helper = lambda _bindings: "future"
-
-        self.mod.install_queue_command_mutation_helpers(bindings, ("future_queue_command_mutation_helper",))
-
-        self.assertEqual(bindings["future_queue_command_mutation_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

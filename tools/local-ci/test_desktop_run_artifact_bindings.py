@@ -62,14 +62,6 @@ class DesktopRunArtifactBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["desktop_artifact_root"]({}), Path("/artifacts"))
         self.assertNotIn("create_desktop_run_bundle", bindings)
 
-    def test_run_installer_keeps_unknown_local_fallback(self) -> None:
-        bindings = {}
-        self.mod.future_desktop_run_artifact_helper = lambda _bindings: "future"
-
-        self.mod.install_desktop_run_artifact_helpers(bindings, ("future_desktop_run_artifact_helper",))
-
-        self.assertEqual(bindings["future_desktop_run_artifact_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

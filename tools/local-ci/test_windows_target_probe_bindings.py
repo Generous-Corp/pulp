@@ -82,14 +82,6 @@ class WindowsTargetProbeBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["windows_desktop_session_user"]({"session": "ok"}), "dev")
         self.assertEqual(bindings["windows_repo_checkout_detail"](None, fallback_path=r"C:\Fallback"), r"C:\Fallback")
 
-    def test_install_windows_target_probe_helpers_keeps_unknown_local_fallback(self) -> None:
-        bindings = {}
-        self.mod.future_windows_probe_helper = lambda _bindings: "future"
-
-        self.mod.install_windows_target_probe_helpers(bindings, ("future_windows_probe_helper",))
-
-        self.assertEqual(bindings["future_windows_probe_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

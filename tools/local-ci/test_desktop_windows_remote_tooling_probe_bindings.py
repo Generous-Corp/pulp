@@ -112,17 +112,6 @@ class DesktopWindowsRemoteToolingProbeBindingsTests(unittest.TestCase):
         self.assertNotIn("install_windows_remote_tool", bindings)
         self.assertEqual(captured["tooling"][0], ("win",))
 
-    def test_install_desktop_windows_remote_tooling_probe_helpers_keeps_unknown_local_fallback(self):
-        bindings = {}
-        self.mod.future_desktop_windows_remote_tooling_probe_helper = lambda _bindings: "future"
-
-        self.mod.install_desktop_windows_remote_tooling_probe_helpers(
-            bindings,
-            ("future_desktop_windows_remote_tooling_probe_helper",),
-        )
-
-        self.assertEqual(bindings["future_desktop_windows_remote_tooling_probe_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

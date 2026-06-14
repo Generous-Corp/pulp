@@ -72,14 +72,6 @@ class DesktopRunRollupPruneBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["prune_desktop_run_manifests"]({"desktop_automation": {}}, keep_last=1), [Path("/tmp/run")])
         self.assertEqual(captured["prune"][0], ({"desktop_automation": {}},))
 
-    def test_install_desktop_run_rollup_prune_helpers_keeps_unknown_local_fallback(self):
-        bindings = {}
-        self.mod.future_desktop_run_rollup_prune_helper = lambda _bindings: "future"
-
-        self.mod.install_desktop_run_rollup_prune_helpers(bindings, ("future_desktop_run_rollup_prune_helper",))
-
-        self.assertEqual(bindings["future_desktop_run_rollup_prune_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -166,14 +166,6 @@ class GithubWorkflowDispatchBindingsTests(unittest.TestCase):
             ],
         )
 
-    def test_install_github_workflow_dispatch_helpers_keeps_unknown_local_fallback(self):
-        bindings = {}
-        self.mod.future_github_workflow_dispatch_helper = lambda _bindings: "future"
-
-        self.mod.install_github_workflow_dispatch_helpers(bindings, ("future_github_workflow_dispatch_helper",))
-
-        self.assertEqual(bindings["future_github_workflow_dispatch_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

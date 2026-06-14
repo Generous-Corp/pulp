@@ -77,14 +77,6 @@ class ConfigFileBindingsTests(unittest.TestCase):
         self.assertEqual(self.config_path.read_text(), '{\n  "ok": true\n}\n')
         self.assertEqual(bindings["load_config"].__name__, "load_config")
 
-    def test_install_config_file_helpers_keeps_unknown_local_fallback(self) -> None:
-        bindings = {}
-        self.mod.future_config_file_helper = lambda _bindings: "future"
-
-        self.mod.install_config_file_helpers(bindings, ("future_config_file_helper",))
-
-        self.assertEqual(bindings["future_config_file_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

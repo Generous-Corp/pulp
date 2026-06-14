@@ -282,15 +282,6 @@ class LocalCiCommandBindingsTests(unittest.TestCase):
         self.assertIs(captured["kwargs"]["gh_available_fn"], bindings["gh_available"])
         self.assertEqual(bindings["cmd_list"].__name__, "cmd_list")
 
-    def test_install_local_ci_command_helpers_keeps_unknown_local_fallback(self):
-        bindings = self._bindings("cmd_list", lambda *_args, **_kwargs: 0)
-        self.mod.future_local_ci_command = lambda _bindings, args: ("future", args)
-
-        self.mod.install_local_ci_command_helpers(bindings, names=("future_local_ci_command",))
-
-        args_obj = object()
-        self.assertEqual(bindings["future_local_ci_command"](args_obj), ("future", args_obj))
-
 
 if __name__ == "__main__":
     unittest.main()

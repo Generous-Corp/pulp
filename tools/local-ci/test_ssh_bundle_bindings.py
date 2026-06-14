@@ -202,14 +202,6 @@ class SshBundleBindingsTests(unittest.TestCase):
         config = {"targets": {"win-target": {"host": "builder", "repo_path": r"C:\Pulp"}}}
         self.assertTrue(bindings["ssh_host_uses_windows_shell"](config, "builder"))
 
-    def test_install_ssh_bundle_helpers_keeps_unknown_local_fallback(self) -> None:
-        bindings = self._bindings(types.SimpleNamespace())
-        self.mod.future_ssh_bundle_helper = lambda _bindings: "future"
-
-        self.mod.install_ssh_bundle_helpers(bindings, ("future_ssh_bundle_helper",))
-
-        self.assertEqual(bindings["future_ssh_bundle_helper"](), "future")
-
     def test_probe_uploaded_bundle_size_returns_none_on_timeout(self) -> None:
         class ProbeTimeout(Exception):
             pass

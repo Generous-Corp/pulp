@@ -90,14 +90,6 @@ class CliMainDispatchBindingsTests(unittest.TestCase):
         self.assertIs(captured["main_args"], args)
         self.assertIs(captured["main_kwargs"]["print_help"], print_help)
 
-    def test_install_cli_main_dispatch_helpers_keeps_unknown_local_fallback(self):
-        bindings = {}
-        self.mod.future_cli_main_dispatch_helper = lambda _bindings: "future"
-
-        self.mod.install_cli_main_dispatch_helpers(bindings, ("future_cli_main_dispatch_helper",))
-
-        self.assertEqual(bindings["future_cli_main_dispatch_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

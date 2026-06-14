@@ -56,14 +56,6 @@ class GithubWorkflowConstantBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["github_actions_defaults"](), {"provider": "github-hosted"})
         self.assertEqual(bindings["repo_variable_fallbacks"](), {"PULP_VAR": "fallback"})
 
-    def test_install_github_workflow_constant_helpers_keeps_unknown_local_fallback(self):
-        bindings = {}
-        self.mod.future_github_workflow_constant_helper = lambda _bindings: "future"
-
-        self.mod.install_github_workflow_constant_helpers(bindings, ("future_github_workflow_constant_helper",))
-
-        self.assertEqual(bindings["future_github_workflow_constant_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

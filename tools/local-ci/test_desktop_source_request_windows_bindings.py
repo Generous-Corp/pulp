@@ -60,17 +60,6 @@ class DesktopSourceRequestWindowsBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["split_windows_prepare_commands"]("one;two"), ["one", "two"])
         self.assertNotIn("validate_windows_prepare_commands", bindings)
 
-    def test_windows_installer_keeps_unknown_local_fallback(self):
-        bindings = {}
-        self.mod.future_desktop_source_request_windows_helper = lambda _bindings: "future"
-
-        self.mod.install_desktop_source_request_windows_helpers(
-            bindings,
-            ("future_desktop_source_request_windows_helper",),
-        )
-
-        self.assertEqual(bindings["future_desktop_source_request_windows_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

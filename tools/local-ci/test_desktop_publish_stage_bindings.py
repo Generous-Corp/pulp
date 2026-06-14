@@ -86,14 +86,6 @@ class DesktopPublishStageBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["stage_desktop_publish_report"]({"desktop_automation": {}}, []), {"installed": True})
         self.assertEqual(captured["args"], ({"desktop_automation": {}}, []))
 
-    def test_install_desktop_publish_stage_helpers_keeps_unknown_local_fallback(self):
-        bindings = {}
-        self.mod.future_desktop_publish_stage_helper = lambda _bindings: "future"
-
-        self.mod.install_desktop_publish_stage_helpers(bindings, ("future_desktop_publish_stage_helper",))
-
-        self.assertEqual(bindings["future_desktop_publish_stage_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

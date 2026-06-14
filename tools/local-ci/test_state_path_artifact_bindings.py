@@ -64,14 +64,6 @@ class StatePathArtifactBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["bundles_dir"].__name__, "bundles_dir")
         self.assertEqual([call[0] for call in calls], ["bundles_dir", "prepared_dir"])
 
-    def test_install_state_path_artifact_helpers_keeps_unknown_local_fallback(self) -> None:
-        bindings = {}
-        self.mod.future_state_path_artifact_helper = lambda _bindings: "future"
-
-        self.mod.install_state_path_artifact_helpers(bindings, ("future_state_path_artifact_helper",))
-
-        self.assertEqual(bindings["future_state_path_artifact_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

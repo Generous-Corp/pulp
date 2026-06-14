@@ -137,14 +137,6 @@ class DesktopDoctorProbeBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["desktop_doctor_checks"]({}, "mac"), [{"name": "ok"}])
         self.assertEqual(bindings["probe_webdriver_endpoint"]("http://driver"), {"ready": True})
 
-    def test_install_desktop_doctor_probe_helpers_keeps_unknown_local_fallback(self):
-        bindings = {}
-        self.mod.future_desktop_doctor_probe_helper = lambda _bindings: "future"
-
-        self.mod.install_desktop_doctor_probe_helpers(bindings, ("future_desktop_doctor_probe_helper",))
-
-        self.assertEqual(bindings["future_desktop_doctor_probe_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

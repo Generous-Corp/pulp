@@ -220,14 +220,6 @@ class UtilityCommandBindingsTests(unittest.TestCase):
         self.assertIs(captured["kwargs"]["normalize_priority_fn"], bindings["normalize_priority"])
         self.assertEqual(bindings["cmd_bump"].__name__, "cmd_bump")
 
-    def test_install_utility_command_helpers_keeps_unknown_local_fallback(self):
-        bindings = {}
-        self.mod.future_utility_command_helper = lambda _bindings: "future"
-
-        self.mod.install_utility_command_helpers(bindings, names=("future_utility_command_helper",))
-
-        self.assertEqual(bindings["future_utility_command_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

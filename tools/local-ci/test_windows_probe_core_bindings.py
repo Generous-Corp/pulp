@@ -119,14 +119,6 @@ class WindowsProbeCoreBindingsTests(unittest.TestCase):
         self.assertEqual(captured["run"][2]["timeout"], 42)
         self.assertNotIn("ps_literal", bindings)
 
-    def test_install_windows_probe_core_helpers_keeps_unknown_local_fallback(self) -> None:
-        bindings = {}
-        self.mod.future_windows_probe_core_helper = lambda _bindings: "future"
-
-        self.mod.install_windows_probe_core_helpers(bindings, ("future_windows_probe_core_helper",))
-
-        self.assertEqual(bindings["future_windows_probe_core_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

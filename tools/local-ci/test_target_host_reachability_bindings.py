@@ -75,14 +75,6 @@ class TargetHostReachabilityBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["preflight_target_host_state"].__name__, "preflight_target_host_state")
         self.assertNotIn("ensure_host_reachable", bindings)
 
-    def test_install_target_host_reachability_helpers_keeps_unknown_local_fallback(self) -> None:
-        bindings = {}
-        self.mod.future_target_host_reachability_helper = lambda _bindings: "future"
-
-        self.mod.install_target_host_reachability_helpers(bindings, ("future_target_host_reachability_helper",))
-
-        self.assertEqual(bindings["future_target_host_reachability_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

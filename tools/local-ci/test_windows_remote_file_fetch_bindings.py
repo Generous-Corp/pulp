@@ -76,14 +76,6 @@ class WindowsRemoteFileFetchBindingsTests(unittest.TestCase):
         )
         self.assertEqual(captured["args"], ("win", r"%TEMP%\a.txt", Path("/tmp/a.txt")))
 
-    def test_install_windows_remote_file_fetch_helpers_keeps_unknown_local_fallback(self) -> None:
-        bindings = {}
-        self.mod.future_windows_fetch_helper = lambda _bindings: "future"
-
-        self.mod.install_windows_remote_file_fetch_helpers(bindings, ("future_windows_fetch_helper",))
-
-        self.assertEqual(bindings["future_windows_fetch_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

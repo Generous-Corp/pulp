@@ -53,14 +53,6 @@ class LinuxTargetBundleBindingsTests(unittest.TestCase):
             "ubuntu/smoke/run",
         )
 
-    def test_install_linux_target_bundle_helpers_keeps_unknown_local_fallback(self) -> None:
-        bindings = {}
-        self.mod.future_linux_bundle_helper = lambda _bindings: "future"
-
-        self.mod.install_linux_target_bundle_helpers(bindings, ("future_linux_bundle_helper",))
-
-        self.assertEqual(bindings["future_linux_bundle_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

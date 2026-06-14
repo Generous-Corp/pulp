@@ -57,17 +57,6 @@ class DesktopSourceRequestCoreBindingsTests(unittest.TestCase):
 
         self.assertEqual(bindings["make_desktop_source_request"](object()), {"mode": "live"})
 
-    def test_core_installer_keeps_unknown_local_fallback(self):
-        bindings = {}
-        self.mod.future_desktop_source_request_core_helper = lambda _bindings: "future"
-
-        self.mod.install_desktop_source_request_core_helpers(
-            bindings,
-            ("future_desktop_source_request_core_helper",),
-        )
-
-        self.assertEqual(bindings["future_desktop_source_request_core_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

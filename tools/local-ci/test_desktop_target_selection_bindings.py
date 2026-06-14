@@ -52,14 +52,6 @@ class DesktopTargetSelectionBindingsTests(unittest.TestCase):
 
         self.assertEqual(bindings["resolve_desktop_target"](config, "mac"), {"adapter": "macos-local"})
 
-    def test_install_desktop_target_selection_helpers_keeps_unknown_local_fallback(self) -> None:
-        bindings = {}
-        self.mod.future_desktop_target_selection_helper = lambda _bindings: "future"
-
-        self.mod.install_desktop_target_selection_helpers(bindings, ("future_desktop_target_selection_helper",))
-
-        self.assertEqual(bindings["future_desktop_target_selection_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

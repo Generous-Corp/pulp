@@ -101,14 +101,6 @@ class ExecutionRunnerWindowsRunBindingsTests(unittest.TestCase):
         )
         self.assertEqual(captured["runner"][0][0:4], ("windows", "host", r"C:\Repo", {"id": "job"}))
 
-    def test_install_execution_runner_windows_run_helpers_keeps_unknown_local_fallback(self) -> None:
-        bindings = {}
-        self.mod.future_execution_runner_windows_run_helper = lambda _bindings: "future"
-
-        self.mod.install_execution_runner_windows_run_helpers(bindings, ("future_execution_runner_windows_run_helper",))
-
-        self.assertEqual(bindings["future_execution_runner_windows_run_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

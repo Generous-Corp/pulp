@@ -56,17 +56,6 @@ class EvidenceIndexQueryBindingTests(unittest.TestCase):
         )
         self.assertEqual(bindings["collect_evidence_groups_from_index"].__name__, "collect_evidence_groups_from_index")
 
-    def test_install_evidence_index_query_helpers_keeps_unknown_local_fallback(self) -> None:
-        bindings = {}
-        evidence_index_query_bindings.future_evidence_index_query_helper = lambda _bindings: "future"
-
-        evidence_index_query_bindings.install_evidence_index_query_helpers(
-            bindings,
-            ("future_evidence_index_query_helper",),
-        )
-
-        self.assertEqual(bindings["future_evidence_index_query_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

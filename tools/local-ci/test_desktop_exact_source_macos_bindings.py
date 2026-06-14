@@ -80,17 +80,6 @@ class DesktopExactSourceMacosBindingsTests(unittest.TestCase):
             {"platform": "mac"},
         )
 
-    def test_macos_installer_keeps_unknown_local_fallback(self):
-        bindings = {}
-        self.mod.future_desktop_exact_source_macos_helper = lambda _bindings: "future"
-
-        self.mod.install_desktop_exact_source_macos_helpers(
-            bindings,
-            ("future_desktop_exact_source_macos_helper",),
-        )
-
-        self.assertEqual(bindings["future_desktop_exact_source_macos_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

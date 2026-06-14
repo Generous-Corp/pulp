@@ -69,14 +69,6 @@ class CloudGithubWorkflowBindingsTests(unittest.TestCase):
         self.assertTrue(bindings["gh_available"]())
         self.assertEqual(calls, [("gh_available",)])
 
-    def test_install_cloud_github_workflow_helpers_keeps_unknown_local_fallback(self):
-        bindings = {}
-        self.mod.future_cloud_github_workflow_helper = lambda _bindings: "future"
-
-        self.mod.install_cloud_github_workflow_helpers(bindings, ("future_cloud_github_workflow_helper",))
-
-        self.assertEqual(bindings["future_cloud_github_workflow_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

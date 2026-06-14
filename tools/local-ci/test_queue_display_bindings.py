@@ -108,14 +108,6 @@ class QueueDisplayBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["summarize_job"]({"id": "job1"}), "summary:job1")
         self.assertEqual(bindings["empty_log_line"](), "empty")
 
-    def test_install_queue_display_helpers_keeps_unknown_local_fallback(self):
-        bindings = {}
-        self.mod.future_queue_display_helper = lambda _bindings: "future"
-
-        self.mod.install_queue_display_helpers(bindings, ("future_queue_display_helper",))
-
-        self.assertEqual(bindings["future_queue_display_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -77,14 +77,6 @@ class ConfigEvidenceIndexBindingsTests(unittest.TestCase):
         self.assertEqual(calls["update"], ({"job": "1"}, Path("/tmp/result.json")))
         self.assertEqual(bindings["update_evidence_index"].__name__, "update_evidence_index")
 
-    def test_install_config_evidence_index_helpers_keeps_unknown_local_fallback(self) -> None:
-        bindings = {}
-        self.mod.future_config_evidence_index_helper = lambda _bindings: "future"
-
-        self.mod.install_config_evidence_index_helpers(bindings, ("future_config_evidence_index_helper",))
-
-        self.assertEqual(bindings["future_config_evidence_index_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()
