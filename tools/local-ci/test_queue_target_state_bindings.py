@@ -30,22 +30,6 @@ class QueueTargetStateBindingsTests(unittest.TestCase):
         for name in expected:
             self.assertTrue(callable(getattr(self.mod, name)))
 
-    def test_install_queue_target_state_helpers_wires_named_exports(self):
-        bindings = {
-            "_queue_orchestrator": types.SimpleNamespace(
-                updated_target_state=lambda previous, fields: {"previous": previous, **fields},
-                target_state_snapshot=lambda states: {"snapshot": states},
-            ),
-        }
-
-        self.mod.install_queue_target_state_helpers(bindings, ("updated_target_state", "target_state_snapshot"))
-
-        self.assertEqual(
-            bindings["updated_target_state"]({"status": "pending"}, {"status": "running"}),
-            {"previous": {"status": "pending"}, "status": "running"},
-        )
-        self.assertEqual(bindings["target_state_snapshot"]({"mac": {}}), {"snapshot": {"mac": {}}})
-
     def test_install_queue_target_state_helpers_routes_groups_and_unknown_fallback(self):
         bindings = {"_queue_orchestrator": types.SimpleNamespace()}
 

@@ -29,7 +29,7 @@ class DesktopDoctorProbeBindingsTests(unittest.TestCase):
             ),
         }
 
-    def test_doctor_probe_exports_and_installer_wire_named_helpers(self):
+    def test_doctor_probe_exports_match_focused_groups(self):
         expected = (
             *self.mod.DESKTOP_DOCTOR_CHECK_EXPORTS,
             *self.mod.DESKTOP_DOCTOR_WEBDRIVER_PROBE_EXPORTS,
@@ -38,21 +38,6 @@ class DesktopDoctorProbeBindingsTests(unittest.TestCase):
         self.assertEqual(len(expected), len(set(expected)))
         for name in expected:
             self.assertTrue(callable(getattr(self.mod, name)))
-
-        captured = {}
-
-        def webdriver_runner(*args, **kwargs):
-            captured["webdriver"] = (args, kwargs)
-            return {"ready": True}
-
-        bindings = self._bindings()
-        bindings["_desktop_doctor"].probe_webdriver_endpoint = webdriver_runner
-
-        self.mod.install_desktop_doctor_probe_helpers(bindings, ("probe_webdriver_endpoint",))
-
-        self.assertEqual(bindings["probe_webdriver_endpoint"]("http://driver"), {"ready": True})
-        self.assertNotIn("desktop_doctor_checks", bindings)
-        self.assertEqual(captured["webdriver"][0], ("http://driver",))
 
     def test_doctor_probe_installer_routes_selected_groups_and_unknown_fallback(self):
         bindings = self._bindings()

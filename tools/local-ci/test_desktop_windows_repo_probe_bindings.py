@@ -22,7 +22,7 @@ class DesktopWindowsRepoProbeBindingsTests(unittest.TestCase):
     def _bindings(self):
         return {"_windows_probe": types.SimpleNamespace()}
 
-    def test_repo_probe_exports_and_installer_wire_named_helpers(self):
+    def test_repo_probe_exports_match_focused_groups(self):
         expected = (
             *self.mod.DESKTOP_WINDOWS_REPO_CHECKOUT_PROBE_EXPORTS,
             *self.mod.DESKTOP_WINDOWS_REPO_CHECKOUT_ENSURE_EXPORTS,
@@ -31,23 +31,6 @@ class DesktopWindowsRepoProbeBindingsTests(unittest.TestCase):
         self.assertEqual(len(expected), len(set(expected)))
         for name in expected:
             self.assertTrue(callable(getattr(self.mod, name)))
-
-        captured = {}
-
-        def runner(*args, **kwargs):
-            captured["probe"] = (args, kwargs)
-            return {"ok": True}
-
-        bindings = self._bindings()
-        bindings["_windows_probe"].probe_windows_repo_checkout = runner
-        for name in ["run_windows_ssh_powershell", "windows_repo_path_is_unsafe", "parse_windows_ssh_json", "ps_literal"]:
-            bindings[name] = object()
-
-        self.mod.install_desktop_windows_repo_probe_helpers(bindings, ("probe_windows_repo_checkout",))
-
-        self.assertEqual(bindings["probe_windows_repo_checkout"]("win", r"C:\Pulp"), {"ok": True})
-        self.assertNotIn("ensure_windows_remote_repo_checkout", bindings)
-        self.assertEqual(captured["probe"][0], ("win", r"C:\Pulp"))
 
     def test_repo_probe_installer_routes_selected_groups_and_unknown_fallback(self):
         bindings = self._bindings()

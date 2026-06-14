@@ -26,7 +26,7 @@ class DesktopWindowsToolingProbeBindingsTests(unittest.TestCase):
             "WINDOWS_OPTIONAL_REMOTE_TOOLS": {"gh": {"required": False}},
         }
 
-    def test_tooling_probe_exports_and_installer_wire_named_helpers(self):
+    def test_tooling_probe_exports_match_focused_groups(self):
         expected = (
             *self.mod.DESKTOP_WINDOWS_SESSION_AGENT_PROBE_EXPORTS,
             *self.mod.DESKTOP_WINDOWS_REMOTE_TOOLING_PROBE_EXPORTS,
@@ -35,23 +35,6 @@ class DesktopWindowsToolingProbeBindingsTests(unittest.TestCase):
         self.assertEqual(len(expected), len(set(expected)))
         for name in expected:
             self.assertTrue(callable(getattr(self.mod, name)))
-
-        captured = {}
-
-        def runner(*args, **kwargs):
-            captured["tooling"] = (args, kwargs)
-            return {"ok": True}
-
-        bindings = self._bindings()
-        bindings["_windows_probe"].probe_windows_remote_tooling = runner
-        for name in ["run_windows_ssh_powershell", "parse_windows_ssh_json"]:
-            bindings[name] = object()
-
-        self.mod.install_desktop_windows_tooling_probe_helpers(bindings, ("probe_windows_remote_tooling",))
-
-        self.assertEqual(bindings["probe_windows_remote_tooling"]("win"), {"ok": True})
-        self.assertNotIn("probe_windows_session_agent", bindings)
-        self.assertEqual(captured["tooling"][0], ("win",))
 
     def test_tooling_probe_installer_routes_selected_groups_and_unknown_fallback(self):
         bindings = self._bindings()
