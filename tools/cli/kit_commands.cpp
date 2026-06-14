@@ -2331,6 +2331,16 @@ void maybe_execute_screenshot_profile(KitProfileResult& profile,
     const auto screenshot_ext = screenshot_tool.extension().string();
     if (screenshot_ext == ".cmd" || screenshot_ext == ".bat")
         command = "call " + command;
+    // `std::system` runs `cmd.exe /c <command>`. When <command> starts with a
+    // quoted path and also contains further quotes (our quoted --script /
+    // --output args and the redirect target), cmd mis-parses it and aborts
+    // with "The filename, directory name, or volume label syntax is incorrect"
+    // before running anything — so no screenshot and no render log are written.
+    // Wrapping the whole command in one extra pair of quotes makes cmd strip
+    // exactly that pair and run the remainder verbatim. Verified against real
+    // Windows; without it `pulp kit verify --execute-screenshots` cannot launch
+    // the screenshot tool at all.
+    command = "\"" + command + "\"";
 #endif
     const int rc = std::system(command.c_str());
     profile.artifacts.push_back({"render-log", log.string()});

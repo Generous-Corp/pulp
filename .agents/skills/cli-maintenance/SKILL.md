@@ -387,6 +387,22 @@ Any new `std::system` call that feeds an exit code MUST decode it the same
 way. Covered by `pulp delegates a non-zero child exit code intact` in
 `test/test_cli_shellout.cpp` (which runs against `pulp-cpp`, the delegate).
 
+**Windows `std::system` commands need an extra outer quote pair (2026-06-14):**
+`std::system(cmd)` runs `cmd.exe /c <cmd>`. When `<cmd>` *starts with* a quoted
+path **and** contains further quotes (e.g. quoted arguments and a quoted
+redirect target — the common shape `"C:\tool.exe" --output "C:\out" > "C:\log"
+2>&1`), `cmd /c` mis-parses it and aborts with *"The filename, directory name,
+or volume label syntax is incorrect"* before running anything — so the command
+never executes and the redirect file is never even created. Wrap the ENTIRE
+command in one extra pair of double quotes on Windows (`command = "\"" + command
++ "\"";`) so `cmd` strips exactly that pair and runs the remainder verbatim.
+This bit `pulp kit verify --execute-screenshots` (`maybe_execute_screenshot_profile`
+in `tools/cli/kit_commands.cpp`): on Windows the screenshot tool never launched,
+so it always reported `screenshot-render-failed`. Verified against a real
+Windows host (the bug and the fix both reproduce via the identical command shape
+through the CRT `system()`). Any new Windows `std::system` call whose command
+begins with a quoted path must apply the same wrap.
+
 ### Numeric CLI flags
 
 For count-like flags such as `pulp run --frames`, parsers should accept only
