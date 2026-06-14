@@ -205,60 +205,33 @@ std::string quote_for_shell(const fs::path& path) {
 }
 
 fs::path screenshot_tool_path_for_test(const fs::path& project_root) {
+    // Mirror default_screenshot_tool_for_project(): `.exe` on Windows (checked
+    // first there), bare name on POSIX.
 #ifdef _WIN32
-    return project_root / "build" / "tools" / "screenshot" / "pulp-screenshot.cmd";
+    return project_root / "build" / "tools" / "screenshot" / "pulp-screenshot.exe";
 #else
     return project_root / "build" / "tools" / "screenshot" / "pulp-screenshot";
 #endif
 }
 
+// Install the compiled fake `pulp-screenshot` into the project's expected tool
+// location and record the byte payload it should emit. The helper reads the
+// payload from `pulp-screenshot.bytes` next to itself, so each test can choose
+// the rendered bytes without a per-case binary. Using a real executable (built
+// as the `pulp-fake-screenshot-tool` target) keeps the kit-verify
+// screenshot-execution path identical across platforms; the previous generated
+// .cmd/.sh shims were a recurring Windows-only failure source.
 void write_fake_screenshot_tool(const fs::path& project_root, const std::string& bytes) {
     const auto screenshot_tool = screenshot_tool_path_for_test(project_root);
-#ifdef _WIN32
-    auto batch_bytes = replace_all(bytes, "%", "%%");
-    batch_bytes = replace_all(batch_bytes, "^", "^^");
-    batch_bytes = replace_all(batch_bytes, "&", "^&");
-    batch_bytes = replace_all(batch_bytes, "|", "^|");
-    batch_bytes = replace_all(batch_bytes, "<", "^<");
-    batch_bytes = replace_all(batch_bytes, ">", "^>");
-    auto script = std::string(R"BAT(@echo off
-setlocal
-set "out="
-:loop
-if "%~1"=="" goto done
-if /I "%~1"=="--output" (
-  shift
-  set "out=%~1"
-)
-shift
-goto loop
-:done
-if not defined out exit /b 2
-<nul set /p "payload=)BAT") + batch_bytes + R"BAT(" > "%out%"
-rem `set /p` reads EOF from `<nul`, which leaves ERRORLEVEL=1 even though the
-rem prompt text was written to the output file. Don't propagate that false
-rem failure: success is "the output file exists", matching the POSIX branch.
-if exist "%out%" exit /b 0
-exit /b 1
-)BAT";
-    write_file(screenshot_tool, replace_all(script, "\n", "\r\n"));
-#else
-    write_file(screenshot_tool, std::string(R"SH(#!/bin/sh
-out=""
-while [ "$#" -gt 0 ]; do
-  if [ "$1" = "--output" ]; then
-    shift
-    out="$1"
-  fi
-  shift
-done
-printf ')SH") + bytes + R"SH(' > "$out"
-exit 0
-)SH");
+    std::error_code ec;
+    fs::create_directories(screenshot_tool.parent_path(), ec);
+    fs::copy_file(fs::path(PULP_FAKE_SCREENSHOT_TOOL), screenshot_tool,
+                  fs::copy_options::overwrite_existing, ec);
+    REQUIRE_FALSE(ec);
     fs::permissions(screenshot_tool,
                     fs::perms::owner_exec | fs::perms::owner_read | fs::perms::owner_write,
-                    fs::perm_options::add);
-#endif
+                    fs::perm_options::add, ec);
+    write_file(screenshot_tool.parent_path() / "pulp-screenshot.bytes", bytes);
 }
 
 std::string fake_screenshot_bytes(std::string bytes) {
