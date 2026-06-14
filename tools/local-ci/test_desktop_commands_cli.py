@@ -1663,8 +1663,14 @@ class DesktopCommandsCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             report_dir = Path(tmpdir) / "report"
             report_dir.mkdir()
+            run_dir = report_dir / "runs" / "component"
+            run_dir.mkdir(parents=True)
+            (run_dir / "manifest.json").write_text("{}\n")
             package_path = report_dir / "review-package.json"
-            package_path.write_text(json.dumps({"label": "Video Proof", "runs": []}) + "\n")
+            package_path.write_text(
+                json.dumps({"label": "Video Proof", "runs": [{"bundle_dir": str(run_dir)}]}) + "\n"
+            )
+            manifest_map_path = report_dir / "review-manifest-map.json"
             writes = []
 
             def draft(review_package: dict, **kwargs):
@@ -1691,6 +1697,7 @@ class DesktopCommandsCliTests(unittest.TestCase):
                     repo="danielraffel/pulp",
                     body_output=None,
                     json_output=None,
+                    manifest_map_output=str(manifest_map_path),
                     check_files=True,
                     create=True,
                     label=["video-review"],
@@ -1710,16 +1717,29 @@ class DesktopCommandsCliTests(unittest.TestCase):
 
             self.assertEqual(result, 0)
             self.assertEqual(writes[0][0], report_dir / "github-issue.md")
-            self.assertEqual(writes[1][0], report_dir / "github-issue.json")
+            self.assertEqual(writes[1][0], manifest_map_path.resolve())
+            self.assertEqual(writes[2][0], report_dir / "github-issue.json")
             draft_json = json.loads((report_dir / "github-issue.json").read_text())
             self.assertEqual(draft_json["issue_url"], "https://github.com/danielraffel/pulp/issues/123")
+            self.assertEqual(draft_json["manifest_map"]["path"], str(manifest_map_path.resolve()))
+            self.assertIsNone(draft_json["manifest_map"]["error"])
+            manifest_map = json.loads(manifest_map_path.read_text())
+            self.assertEqual(
+                manifest_map,
+                {
+                    "https://github.com/danielraffel/pulp/issues/123": str(run_dir / "manifest.json"),
+                    "123": str(run_dir / "manifest.json"),
+                    "#123": str(run_dir / "manifest.json"),
+                },
+            )
             self.assertIn("--label", draft_json["create_result"]["command"])
             self.assertIn("video-review", draft_json["create_result"]["command"])
             self.assertIn("--assignee", draft_json["create_result"]["command"])
             self.assertIn("@me", draft_json["create_result"]["command"])
             self.assertIn("review issue draft ready", self.printed[0])
-            self.assertIn("attachments: 1", self.printed[-4])
-            self.assertIn("issue_url: https://github.com/danielraffel/pulp/issues/123", self.printed[-1])
+            self.assertTrue(any("attachments: 1" in line for line in self.printed))
+            self.assertTrue(any("issue_url: https://github.com/danielraffel/pulp/issues/123" in line for line in self.printed))
+            self.assertTrue(any(f"manifest_map: {manifest_map_path.resolve()}" in line for line in self.printed))
 
     def test_review_issue_create_failure_writes_failed_draft_json(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1735,6 +1755,7 @@ class DesktopCommandsCliTests(unittest.TestCase):
                     repo="danielraffel/pulp",
                     body_output=None,
                     json_output=None,
+                    manifest_map_output=None,
                     check_files=False,
                     create=True,
                     label=[],
@@ -1760,6 +1781,70 @@ class DesktopCommandsCliTests(unittest.TestCase):
             self.assertEqual(self.printed[-1], "Error: auth required")
             draft_json = json.loads((report_dir / "github-issue.json").read_text())
             self.assertEqual(draft_json["create_result"]["returncode"], 1)
+
+    def test_review_issue_manifest_map_skips_ambiguous_review_packages(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            report_dir = Path(tmpdir) / "report"
+            run_a = report_dir / "runs" / "a"
+            run_b = report_dir / "runs" / "b"
+            run_a.mkdir(parents=True)
+            run_b.mkdir(parents=True)
+            (run_a / "manifest.json").write_text("{}\n")
+            (run_b / "manifest.json").write_text("{}\n")
+            package_path = report_dir / "review-package.json"
+            package_path.write_text(
+                json.dumps(
+                    {
+                        "label": "Video Proof",
+                        "runs": [
+                            {"bundle_dir": str(run_a)},
+                            {"bundle_dir": str(run_b)},
+                        ],
+                    }
+                )
+                + "\n"
+            )
+            manifest_map_path = report_dir / "review-manifest-map.json"
+
+            result = self.mod.cmd_desktop_review_issue(
+                Namespace(
+                    path=str(report_dir),
+                    title=None,
+                    repo="danielraffel/pulp",
+                    body_output=None,
+                    json_output=None,
+                    manifest_map_output=str(manifest_map_path),
+                    check_files=False,
+                    create=True,
+                    label=[],
+                    assignee=[],
+                    json=True,
+                ),
+                desktop_review_issue_draft_fn=lambda _package, **_kwargs: {
+                    "kind": "desktop-video-proof-github-issue-draft",
+                    "title": "Review video",
+                    "body": "# Review video\n",
+                    "body_file": str(report_dir / "github-issue.md"),
+                    "json_file": str(report_dir / "github-issue.json"),
+                    "attachments": [],
+                    "fallback_links": [],
+                    "create_command": "gh issue create --repo danielraffel/pulp --title Review --body-file github-issue.md",
+                },
+                atomic_write_text_fn=lambda path, text: path.write_text(text),
+                run_fn=lambda argv, **_kwargs: subprocess.CompletedProcess(
+                    argv,
+                    0,
+                    "https://github.com/danielraffel/pulp/issues/124\n",
+                    "",
+                ),
+                print_fn=self.print_line,
+            )
+
+            self.assertEqual(result, 0)
+            self.assertFalse(manifest_map_path.exists())
+            payload = json.loads(self.printed[-1])
+            self.assertEqual(payload["manifest_map"]["entries"], {})
+            self.assertEqual(payload["manifest_map"]["error"], "expected exactly one run manifest, found 2")
 
     def test_review_status_detects_approval_and_suggests_verdict(self):
         issue_payload = {
@@ -2094,6 +2179,7 @@ class DesktopCommandsCliTests(unittest.TestCase):
                     repo=None,
                     body_output=None,
                     json_output=None,
+                    manifest_map_output=None,
                     check_files=False,
                     json=True,
                 ),
@@ -2122,6 +2208,7 @@ class DesktopCommandsCliTests(unittest.TestCase):
                     repo=None,
                     body_output=None,
                     json_output=None,
+                    manifest_map_output=None,
                     check_files=True,
                     json=True,
                 ),

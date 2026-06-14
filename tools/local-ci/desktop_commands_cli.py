@@ -10,6 +10,7 @@ import http.server
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import shutil
 import signal
@@ -1644,6 +1645,42 @@ def _review_package_path(path_value: str) -> Path:
     return path
 
 
+def _manifest_paths_from_review_package(review_package: dict) -> list[str]:
+    paths: list[str] = []
+    for run in review_package.get("runs") or []:
+        if not isinstance(run, dict):
+            continue
+        bundle_dir = run.get("bundle_dir")
+        if bundle_dir:
+            paths.append(str(Path(str(bundle_dir)) / "manifest.json"))
+            continue
+        manifest = run.get("manifest") if isinstance(run.get("manifest"), dict) else {}
+        manifest_path = manifest.get("path")
+        if manifest_path:
+            paths.append(str(manifest_path))
+    return sorted(set(paths))
+
+
+def _github_issue_number_from_url(issue_url: str) -> str | None:
+    match = re.search(r"/issues/(\d+)(?:$|[?#])", issue_url)
+    return match.group(1) if match else None
+
+
+def _review_issue_manifest_map(review_package: dict, issue_url: str) -> tuple[dict[str, str], str | None]:
+    manifests = _manifest_paths_from_review_package(review_package)
+    if not issue_url:
+        return {}, "missing issue URL"
+    if len(manifests) != 1:
+        return {}, f"expected exactly one run manifest, found {len(manifests)}"
+    manifest = manifests[0]
+    mapping = {issue_url: manifest}
+    issue_number = _github_issue_number_from_url(issue_url)
+    if issue_number:
+        mapping[issue_number] = manifest
+        mapping[f"#{issue_number}"] = manifest
+    return mapping, None
+
+
 def cmd_desktop_review_issue(
     args: argparse.Namespace,
     *,
@@ -1674,8 +1711,11 @@ def cmd_desktop_review_issue(
         return 1
     body_path = Path(args.body_output).expanduser().resolve() if args.body_output else Path(draft["body_file"])
     json_path = Path(args.json_output).expanduser().resolve() if args.json_output else Path(draft["json_file"])
+    manifest_map_path = Path(args.manifest_map_output).expanduser().resolve() if getattr(args, "manifest_map_output", None) else None
     draft["body_file"] = str(body_path)
     draft["json_file"] = str(json_path)
+    if manifest_map_path:
+        draft["manifest_map_file"] = str(manifest_map_path)
     atomic_write_text_fn(body_path, draft["body"])
     create_result = None
     if getattr(args, "create", False):
@@ -1701,6 +1741,15 @@ def cmd_desktop_review_issue(
         draft["create_result"] = create_result
         if issue_url:
             draft["issue_url"] = issue_url
+            if manifest_map_path:
+                manifest_map, manifest_map_error = _review_issue_manifest_map(review_package, issue_url)
+                draft["manifest_map"] = {
+                    "path": str(manifest_map_path),
+                    "entries": manifest_map,
+                    "error": manifest_map_error,
+                }
+                if manifest_map:
+                    atomic_write_text_fn(manifest_map_path, json.dumps(manifest_map, indent=2) + "\n")
         if process.returncode != 0:
             atomic_write_text_fn(json_path, json.dumps(draft, indent=2) + "\n")
             detail = (process.stderr or process.stdout or "gh issue create failed").strip()
@@ -1719,6 +1768,12 @@ def cmd_desktop_review_issue(
         print_fn(f"  create_command: {draft['create_command']}")
         if create_result and create_result.get("issue_url"):
             print_fn(f"  issue_url: {create_result['issue_url']}")
+        if draft.get("manifest_map"):
+            manifest_map = draft["manifest_map"]
+            if manifest_map.get("entries"):
+                print_fn(f"  manifest_map: {manifest_map['path']}")
+            elif manifest_map.get("error"):
+                print_fn(f"  manifest_map: skipped ({manifest_map['error']})")
     return 0
 
 

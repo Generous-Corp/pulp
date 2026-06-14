@@ -898,6 +898,7 @@ python3 tools/local-ci/local_ci.py desktop review-issue /path/to/published-repor
   --repo owner/repo \
   --check-files \
   --create \
+  --manifest-map-output /tmp/pulp-video-review-manifests.json \
   --label video-review \
   --assignee @me
 ```
@@ -905,7 +906,10 @@ python3 tools/local-ci/local_ci.py desktop review-issue /path/to/published-repor
 This does not upload MP4 attachments; `gh issue create` accepts the issue body
 but not local binary attachments. Use the generated JSON attachment decisions to
 attach `proof.issue.mp4` or `proof.small.mp4` manually, or include the served
-report link.
+report link. When the review package has exactly one run manifest,
+`--manifest-map-output` writes a JSON map keyed by issue URL, issue number, and
+`#number` so `desktop review-watch --manifest-map` can suggest the exact
+verdict command later.
 
 Before recording the final verdict, check whether the review issue has an
 actionable approval or needs-work trigger:

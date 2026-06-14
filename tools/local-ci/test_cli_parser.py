@@ -412,6 +412,8 @@ class CliParserTests(unittest.TestCase):
             "/tmp/body.md",
             "--json-output",
             "/tmp/body.json",
+            "--manifest-map-output",
+            "/tmp/manifest-map.json",
             "--check-files",
             "--create",
             "--label",
@@ -427,6 +429,7 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(args.repo, "danielraffel/pulp")
         self.assertEqual(args.body_output, "/tmp/body.md")
         self.assertEqual(args.json_output, "/tmp/body.json")
+        self.assertEqual(args.manifest_map_output, "/tmp/manifest-map.json")
         self.assertTrue(args.check_files)
         self.assertTrue(args.create)
         self.assertEqual(args.label, ["video-review"])

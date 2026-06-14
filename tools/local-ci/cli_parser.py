@@ -451,6 +451,10 @@ def build_local_ci_parser(
     p_desktop_review_issue.add_argument("--repo", help="Optional GitHub repo for the suggested gh issue create command")
     p_desktop_review_issue.add_argument("--body-output", help="Optional markdown body output path")
     p_desktop_review_issue.add_argument("--json-output", help="Optional JSON draft output path")
+    p_desktop_review_issue.add_argument(
+        "--manifest-map-output",
+        help="Optional JSON map output for review-watch after --create succeeds",
+    )
     p_desktop_review_issue.add_argument("--check-files", action="store_true", help="Verify attachable MP4 files still exist and fit their recorded budget")
     p_desktop_review_issue.add_argument("--create", action="store_true", help="Create the review issue with gh after writing the local draft")
     p_desktop_review_issue.add_argument("--label", action="append", default=[], help="GitHub label to apply when --create is used; may be repeated")

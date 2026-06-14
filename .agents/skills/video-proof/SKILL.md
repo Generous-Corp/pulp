@@ -828,13 +828,17 @@ python3 tools/local-ci/local_ci.py desktop review-issue /path/to/published-repor
   --repo owner/repo \
   --check-files \
   --create \
+  --manifest-map-output /tmp/pulp-video-review-manifests.json \
   --label video-review \
   --assignee @me
 ```
 
 This still does not upload MP4 attachments. Use `github-issue.json` to decide
 whether to attach `proof.issue.mp4`, attach `proof.small.mp4`, or rely on the
-served report link.
+served report link. When the review package has exactly one run manifest,
+`--manifest-map-output` writes a JSON map keyed by issue URL, issue number, and
+`#number` so `desktop review-watch --manifest-map` can suggest the exact verdict
+command later.
 
 Check whether the issue has an actionable approval or needs-work trigger before
 recording the final verdict:
