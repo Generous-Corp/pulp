@@ -805,8 +805,8 @@ calling GitHub. Use `github-issue.md` as the issue body. Use
 served fallback link. The draft also includes launch command, source branch/SHA,
 host/adapter, copied manifest path, and the Remotion `review_storyboard` steps
 when composition metadata recorded them. It includes a per-run
-`desktop review-status` command so agents can poll for `looks good to me`
-before applying the verdict.
+`desktop review-status` command so agents can poll for actionable approval or
+needs-work feedback before applying the verdict.
 `--check-files` verifies that every attachable MP4 still exists and fits its
 recorded attachment budget before writing the draft; fallback-link runs remain
 valid. GitHub supports `.mp4`, `.mov`, and `.webm` attachments and currently
@@ -817,8 +817,8 @@ recommends H.264 for compatibility; paid-plan eligible uploaders can use the
 fallback fits. Otherwise include the served report URL. The review issue can be
 closed when the reviewer comments `looks good to me`. The generated review body
 also records the attach/do-not-attach decision, the `desktop review-status`
-command for checking approval, and the `desktop verdict` commands for approval
-or follow-up.
+command for checking actionable review feedback, and the `desktop verdict`
+commands for approval or follow-up.
 
 When the user wants the issue created by the agent, add `--create` plus any
 labels or assignees:

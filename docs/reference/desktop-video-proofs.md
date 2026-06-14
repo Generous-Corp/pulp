@@ -865,8 +865,8 @@ action happened, what changed, and what the reviewer should verify. When a small
 be attached instead of the pro-account issue video. Both files include the
 concrete attach/do-not-attach decision and `desktop verdict` commands for
 approval or follow-up. They also include a `desktop review-status` command for
-checking the issue's `looks good to me` approval trigger before recording the
-final verdict. GitHub's
+checking the issue's actionable approval or needs-work trigger before recording
+the final verdict. GitHub's
 current hosted attachment policy is 100 MB for paid-plan video uploads when the
 uploader is eligible; otherwise plan for the 10 MB video cap and use the served
 report link.

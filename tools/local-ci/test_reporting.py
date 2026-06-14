@@ -337,7 +337,7 @@ class ReportingTests(unittest.TestCase):
         self.assertIn("--close-issue", review_text)
         self.assertIn("desktop verdict", review_text)
         self.assertIn("--approved --issue-url <issue-url>", review_text)
-        self.assertIn("--needs-work --notes", review_text)
+        self.assertIn("--needs-work --issue-url <issue-url> --comment-issue --notes", review_text)
         self.assertIn("Proof template: `design-parity`", review_text)
         self.assertIn("Visual diff reference:", review_text)
         self.assertIn("Command: `./build/pulp --inspect`", review_text)
@@ -504,6 +504,14 @@ class ReportingTests(unittest.TestCase):
         self.assertTrue(draft["fallback_links"][0]["internal_ephemeral"])
         self.assertIn("gh issue create --repo danielraffel/pulp", draft["create_command"])
         self.assertIn("looks good to me", draft["body"])
+        self.assertIn("needs work", draft["body"])
+        self.assertIn("needs changes", draft["body"])
+        self.assertIn("needs another pass", draft["body"])
+        self.assertIn("not approved", draft["body"])
+        self.assertEqual(
+            draft["needs_work_triggers"],
+            ["needs work", "needs changes", "needs another pass", "not approved"],
+        )
         self.assertIn("Review status command: `python3 tools/local-ci/local_ci.py desktop review-status <issue-url> --repo danielraffel/pulp", draft["body"])
         self.assertIn(f"--manifest {package_path.parent / 'runs' / 'component' / 'manifest.json'} --close-issue", draft["body"])
         self.assertIn("GitHub issue/PR video uploads support .mp4, .mov, .webm", draft["body"])

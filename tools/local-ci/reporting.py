@@ -412,7 +412,7 @@ def _review_needs_work_verdict_command_for_manifest(manifest_path: Path | None) 
     manifest = shlex.quote(str(manifest_path)) if manifest_path else "<manifest.json>"
     return (
         f"python3 tools/local-ci/local_ci.py desktop verdict {manifest} "
-        '--needs-work --notes "<what to change>" --issue-url <issue-url>'
+        '--needs-work --issue-url <issue-url> --comment-issue --notes "<what to change>"'
     )
 
 
@@ -671,6 +671,7 @@ def desktop_review_issue_draft(
         "- Watch the attached video when an attachment is listed below.",
         "- If the video is too large, unsupported, or unavailable, use the served report link from the fallback section.",
         "- Comment `looks good to me` when the proof is accepted. The local verdict command can then mark the run approved and the review issue can be closed.",
+        "- Comment `needs work`, `needs changes`, `needs another pass`, or `not approved` with specific notes when the proof needs another iteration. The local verdict command can then post the generated checklist back to this issue.",
         (
             "- GitHub issue/PR video uploads support "
             f"{', '.join(attachment_policy['supported_video_extensions'])}; "
@@ -809,7 +810,9 @@ def desktop_review_issue_draft(
         [
             "## Closeout",
             "",
-            "After a reviewer comments `looks good to me`, run `desktop review-status <issue-url>` to confirm the approval trigger, then run the suggested `desktop verdict ... --approved --issue-url <issue-url>` command and close this review issue.",
+            "After a reviewer comments `looks good to me` or requests changes with `needs work`, `needs changes`, `needs another pass`, or `not approved`, run `desktop review-status <issue-url>` to confirm the latest actionable trigger.",
+            "",
+            "For approval, run the suggested `desktop verdict ... --approved --issue-url <issue-url> --close-issue` command. For requested changes, run the suggested `desktop verdict ... --needs-work --issue-url <issue-url> --comment-issue --notes ...` command so the run manifest and this review issue stay aligned.",
             "",
         ]
     )
@@ -825,6 +828,7 @@ def desktop_review_issue_draft(
         "serve_urls": serve_urls,
         "attachment_policy": attachment_policy,
         "close_trigger": "looks good to me",
+        "needs_work_triggers": ["needs work", "needs changes", "needs another pass", "not approved"],
     }
     if check_files:
         draft["attachment_checks"] = attachment_checks

@@ -461,14 +461,14 @@ def build_local_ci_parser(
     p_desktop_review_issue.add_argument("--assignee", action="append", default=[], help="GitHub assignee to apply when --create is used; may be repeated")
     p_desktop_review_issue.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 
-    p_desktop_review_status = desktop_sub.add_parser("review-status", help="Check a video review issue for the approval trigger")
+    p_desktop_review_status = desktop_sub.add_parser("review-status", help="Check a video review issue for actionable approval or needs-work feedback")
     p_desktop_review_status.add_argument("issue_url", help="GitHub issue URL or number accepted by gh issue view")
     p_desktop_review_status.add_argument("--repo", help="Optional GitHub repo for gh issue view")
     p_desktop_review_status.add_argument("--manifest", help="Optional run manifest path for the suggested verdict command")
     p_desktop_review_status.add_argument("--close-issue", action="store_true", help="Include --close-issue in the suggested approved verdict command")
     p_desktop_review_status.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 
-    p_desktop_review_watch = desktop_sub.add_parser("review-watch", help="Check open video review issues for new approval feedback")
+    p_desktop_review_watch = desktop_sub.add_parser("review-watch", help="Check open video review issues for actionable approval or needs-work feedback")
     p_desktop_review_watch.add_argument("--repo", help="Optional GitHub repo for gh issue list/view")
     p_desktop_review_watch.add_argument("--label", default="video-review", help="GitHub label to query (default: video-review)")
     p_desktop_review_watch.add_argument("--state", default="open", choices=["open", "closed", "all"], help="Issue state to query (default: open)")
