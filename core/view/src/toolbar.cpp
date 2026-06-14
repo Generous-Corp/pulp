@@ -68,8 +68,10 @@ void Toolbar::set_enabled(std::string_view id, bool enabled) {
 void Toolbar::paint(canvas::Canvas& canvas) {
     float w = bounds().width, h = bounds().height;
 
-    // Background
-    canvas.set_fill_color(canvas::Color::rgba(40, 40, 48));
+    // Background. NOTE: Color::rgba() takes 0–1 floats and clamps — passing
+    // 0–255 ints (the prior bug) painted the whole toolbar solid white. Resolve
+    // from theme tokens with rgba8 fallbacks.
+    canvas.set_fill_color(resolve_color("bg.secondary", canvas::Color::rgba8(40, 40, 48)));
     canvas.fill_rect(0, 0, w, h);
 
     bool horiz = (orientation_ == Orientation::horizontal);
@@ -83,7 +85,7 @@ void Toolbar::paint(canvas::Canvas& canvas) {
         }
 
         if (item.type == ToolbarItemType::Separator) {
-            canvas.set_stroke_color(canvas::Color::rgba(70, 70, 80));
+            canvas.set_stroke_color(resolve_color("divider", canvas::Color::rgba8(70, 70, 80)));
             canvas.set_line_width(1.0f);
             if (horiz) {
                 canvas.stroke_line(pos, 4, pos, h - 4);
@@ -109,11 +111,11 @@ void Toolbar::paint(canvas::Canvas& canvas) {
             continue;
         }
 
-        // Button/toggle background
+        // Button/toggle background — toggled = accent fill, else elevated.
         auto bg_color = item.toggled
-            ? canvas::Color::rgba(60, 80, 140)
-            : canvas::Color::rgba(55, 55, 65);
-        if (!item.enabled) bg_color = canvas::Color::rgba(40, 40, 45);
+            ? resolve_color("accent.primary", canvas::Color::rgba8(60, 80, 140))
+            : resolve_color("bg.elevated", canvas::Color::rgba8(55, 55, 65));
+        if (!item.enabled) bg_color = resolve_color("bg.surface", canvas::Color::rgba8(40, 40, 45));
 
         if (horiz) {
             canvas.set_fill_color(bg_color);
@@ -123,10 +125,11 @@ void Toolbar::paint(canvas::Canvas& canvas) {
             canvas.fill_rounded_rect(4, item_y, item_size_, item_size_, 4.0f);
         }
 
-        // Label
-        auto text_color = item.enabled
-            ? canvas::Color::rgba(200, 200, 215)
-            : canvas::Color::rgba(100, 100, 110);
+        // Label — on a toggled (accent-filled) item use on-accent ink.
+        auto text_color = !item.enabled
+            ? resolve_color("text.disabled", canvas::Color::rgba8(100, 100, 110))
+            : item.toggled ? resolve_color("accent.text", canvas::Color::rgba8(20, 24, 30))
+                           : resolve_color("text.primary", canvas::Color::rgba8(200, 200, 215));
         canvas.set_fill_color(text_color);
         canvas.set_font("system", 11.0f);
 
@@ -145,7 +148,7 @@ void Toolbar::paint(canvas::Canvas& canvas) {
     }
 
     // Bottom border
-    canvas.set_stroke_color(canvas::Color::rgba(60, 60, 70));
+    canvas.set_stroke_color(resolve_color("divider", canvas::Color::rgba8(60, 60, 70)));
     canvas.set_line_width(1.0f);
     if (horiz)
         canvas.stroke_line(0, h - 1, w, h - 1);

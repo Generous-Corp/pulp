@@ -324,10 +324,12 @@ int main(int argc, char** argv) {
     std::string theme_name = "dark";
     std::string preset = "ink-signal";
     std::string screenshot;
+    bool fit = false;  // --fit: aspect-locked proportional resize instead of scroll
     for (int i = 1; i < argc; ++i) {
         if (!std::strcmp(argv[i], "--theme") && i + 1 < argc) theme_name = argv[++i];
         else if (!std::strcmp(argv[i], "--preset") && i + 1 < argc) preset = argv[++i];
         else if (!std::strcmp(argv[i], "--screenshot") && i + 1 < argc) screenshot = argv[++i];
+        else if (!std::strcmp(argv[i], "--fit")) fit = true;
     }
 
     const ThemePreset* p = find_preset(preset);
@@ -355,36 +357,50 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    // Live window — wrap the board in a ScrollView so the content scrolls
-    // (trackpad / wheel) and the window has a minimum size.
     FrameClock clock;
-    auto scroll = std::make_unique<ScrollView>();
-    scroll->set_theme(theme_from_preset(*p, dark));
-    scroll->set_frame_clock(&clock);
-    View* board_ptr = board.get();
-    scroll->add_child(std::move(board));
-    scroll->set_content_size({static_cast<float>(W), content_h});
-
     WindowOptions opts;
     opts.title = "Ink & Signal — Showcase";
     opts.width = static_cast<float>(W);
-    opts.height = static_cast<float>(winH);
+    opts.height = fit ? content_h : static_cast<float>(winH);
     opts.min_width = 560.0f;    // never crop below a usable width
     opts.min_height = 420.0f;
     opts.use_gpu = true;        // GPU (Skia Graphite / Dawn) when available
 
-    auto window = WindowHost::create(*scroll, opts);
-    if (!window) { std::fprintf(stderr, "failed to create window host\n"); return 1; }
+    View* board_ptr = board.get();
+    std::unique_ptr<WindowHost> window;
+    std::unique_ptr<ScrollView> scroll;  // kept alive for the scroll path
 
-    ScrollView* scroll_ptr = scroll.get();
-    window->set_idle_callback([scroll_ptr, board_ptr]() {
+    if (fit) {
+        // Aspect-locked proportional resize: the design viewport pins the board
+        // to its design size and scales it to fit the window (letterboxed),
+        // with inverse input mapping — no scroll, content never crops.
+        board->set_frame_clock(&clock);
+        window = WindowHost::create(*board, opts);
+        if (!window) { std::fprintf(stderr, "failed to create window host\n"); return 1; }
+        window->set_design_viewport(static_cast<float>(W), content_h);
+    } else {
+        // Default: wrap the board in a ScrollView so content scrolls
+        // (trackpad / wheel).
+        scroll = std::make_unique<ScrollView>();
+        scroll->set_theme(theme_from_preset(*p, dark));
+        scroll->set_frame_clock(&clock);
+        scroll->add_child(std::move(board));
+        scroll->set_content_size({static_cast<float>(W), content_h});
+        window = WindowHost::create(*scroll, opts);
+        if (!window) { std::fprintf(stderr, "failed to create window host\n"); return 1; }
+    }
+
+    WindowHost* win = window.get();
+    window->set_idle_callback([win, board_ptr]() {
         advance_anims(board_ptr, 1.0f / 60.0f);
-        scroll_ptr->request_repaint();
+        (void)win;
+        board_ptr->request_repaint();
     });
     window->set_close_callback([]() {});
 
-    std::printf("Ink & Signal showcase — %s, GPU window (scroll for more). Close to exit.\n",
-                dark ? "dark" : "light");
+    std::printf("Ink & Signal showcase — %s, GPU window (%s). Close to exit.\n",
+                dark ? "dark" : "light",
+                fit ? "proportional fit" : "scroll for more");
     window->run_event_loop();
     return 0;
 }
