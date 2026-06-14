@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
 """Tests for locked queue load dependency bindings."""
 
-from module_test_utils import load_module_from_path
+from module_test_utils import load_local_ci_module
 import unittest
 from pathlib import Path
 
 
-MODULE_PATH = Path(__file__).with_name("queue_load_bindings.py")
-
 
 def load_module():
-    return load_module_from_path(MODULE_PATH)
+    return load_local_ci_module("queue_load_bindings.py")
 
 
 class QueueLoadBindingsTests(unittest.TestCase):

@@ -3,12 +3,8 @@
 
 from __future__ import annotations
 
-from module_test_utils import load_module_from_path
-from pathlib import Path
+from module_test_utils import load_local_ci_module
 import unittest
-
-
-MODULE_PATH = Path(__file__).with_name("local_ci_status_command_dependency_bindings.py")
 
 
 STATUS_DEPENDENCY_NAMES = [
@@ -45,7 +41,7 @@ STATUS_DEPENDENCY_NAMES = [
 
 
 def load_module():
-    return load_module_from_path(MODULE_PATH)
+    return load_local_ci_module("local_ci_status_command_dependency_bindings.py")
 
 
 class LocalCiStatusCommandDependencyBindingsTests(unittest.TestCase):

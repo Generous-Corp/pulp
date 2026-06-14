@@ -1,17 +1,14 @@
 #!/usr/bin/env python3
 """Tests for queue target-state payload facade bindings."""
 
-from module_test_utils import load_module_from_path
-from pathlib import Path
+from module_test_utils import load_local_ci_module
 import unittest
 from unittest import mock
 
 
-MODULE_PATH = Path(__file__).with_name("queue_target_payload_bindings.py")
-
 
 def load_module():
-    return load_module_from_path(MODULE_PATH)
+    return load_local_ci_module("queue_target_payload_bindings.py")
 
 
 class QueueTargetPayloadBindingsTests(unittest.TestCase):
