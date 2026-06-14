@@ -966,6 +966,14 @@ public:
     void set_corner_radius(float radius) { corner_radius_ = std::max(0.0f, radius); request_repaint(); }
     void set_font_size(float size) { font_size_ = std::max(1.0f, size); request_repaint(); }
 
+    /// Radio-group id (0 = independent toggle, the default). Sibling
+    /// ToggleButtons under the same parent that share a non-zero id are
+    /// mutually exclusive: clicking one turns it on and the others off, and
+    /// clicking the already-on one is a no-op (it stays selected). Matches
+    /// JUCE setRadioGroupId semantics (grouping is by shared parent).
+    void set_radio_group(int id) { radio_group_ = id; }
+    int radio_group() const { return radio_group_; }
+
     const std::optional<canvas::Color>& on_background_color_override() const { return on_background_color_; }
     const std::optional<canvas::Color>& off_background_color_override() const { return off_background_color_; }
     const std::optional<canvas::Color>& on_text_color_override() const { return on_text_color_; }
@@ -984,6 +992,7 @@ public:
 
 private:
     bool on_ = false;
+    int radio_group_ = 0;   ///< 0 = independent; shared non-zero id = mutually exclusive
     std::string label_;
     std::optional<canvas::Color> on_background_color_;
     std::optional<canvas::Color> off_background_color_;

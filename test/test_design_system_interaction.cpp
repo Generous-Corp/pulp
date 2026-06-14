@@ -216,6 +216,32 @@ TEST_CASE("value widgets adjust on scroll wheel", "[design-system][interaction][
     pan.on_wheel(-10.0f); REQUIRE(pan.value() > 0.0f); REQUIRE(pf);
 }
 
+TEST_CASE("ToggleButton radio group is mutually exclusive", "[design-system][interaction][radio]") {
+    View parent;
+    auto a = std::make_unique<ToggleButton>(); auto* pa = a.get(); pa->set_radio_group(1);
+    auto b = std::make_unique<ToggleButton>(); auto* pb = b.get(); pb->set_radio_group(1);
+    auto c = std::make_unique<ToggleButton>(); auto* pc = c.get(); pc->set_radio_group(1);
+    parent.add_child(std::move(a));
+    parent.add_child(std::move(b));
+    parent.add_child(std::move(c));
+
+    pa->on_mouse_down({0, 0});
+    REQUIRE(pa->is_on());
+    pb->on_mouse_down({0, 0});
+    REQUIRE(pb->is_on());
+    REQUIRE_FALSE(pa->is_on());          // selecting b deselected a
+    pb->on_mouse_down({0, 0});
+    REQUIRE(pb->is_on());                // clicking the active radio is a no-op
+    pc->on_mouse_down({0, 0});
+    REQUIRE(pc->is_on());
+    REQUIRE_FALSE(pb->is_on());
+
+    // Independent (group 0) toggles still flip both ways.
+    ToggleButton ind;
+    ind.on_mouse_down({0, 0}); REQUIRE(ind.is_on());
+    ind.on_mouse_down({0, 0}); REQUIRE_FALSE(ind.is_on());
+}
+
 TEST_CASE("RangeSlider skew maps the midpoint to the track centre", "[design-system][skew]") {
     auto close = [](float a, float b, float tol) { return std::fabs(a - b) < tol; };
     RangeSlider s; s.set_bounds({0, 0, 200, 18});

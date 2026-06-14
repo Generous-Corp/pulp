@@ -1317,6 +1317,21 @@ void ToggleButton::paint(canvas::Canvas& canvas) {
 }
 
 void ToggleButton::on_mouse_down(Point) {
+    if (radio_group_ != 0) {
+        if (on_) return;            // clicking the active radio keeps it selected
+        set_on(true);
+        if (auto* p = parent()) {   // deselect siblings in the same group
+            for (size_t i = 0; i < p->child_count(); ++i) {
+                auto* sib = dynamic_cast<ToggleButton*>(p->child_at(i));
+                if (sib && sib != this && sib->radio_group_ == radio_group_ && sib->is_on()) {
+                    sib->set_on(false);
+                    if (sib->on_toggle) sib->on_toggle(false);
+                }
+            }
+        }
+        if (on_toggle) on_toggle(true);
+        return;
+    }
     set_on(!on_);
     if (on_toggle) on_toggle(on_);
 }
