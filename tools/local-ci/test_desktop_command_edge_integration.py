@@ -1,20 +1,16 @@
 #!/usr/bin/env python3
-"""Additional pure-helper coverage for tools/local-ci/local_ci.py."""
+"""Desktop command and artifact edge integration tests."""
 
 from __future__ import annotations
 
-import importlib
 import io
 import json
-import os
 import pathlib
 import subprocess
-import sys
 import tempfile
 import unittest
 from argparse import Namespace
-from contextlib import nullcontext, redirect_stdout
-from datetime import datetime, timezone
+from contextlib import redirect_stdout
 from unittest import mock
 
 from module_test_utils import load_module_from_path
@@ -24,14 +20,16 @@ MODULE_PATH = pathlib.Path(__file__).with_name("local_ci.py")
 
 
 def load_module():
-    return load_module_from_path(MODULE_PATH, module_name="pulp_local_ci_extra", add_module_dir=True)
+    return load_module_from_path(
+        MODULE_PATH,
+        module_name="pulp_local_ci_desktop_command_edge_integration",
+        add_module_dir=True,
+    )
 
 
-class LocalCiPureHelperTests(unittest.TestCase):
+class DesktopCommandEdgeIntegrationTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
-        # R2-1 (#2645): cloud helpers moved to cloud.py — patch the cloud module.
-        self.cloud = importlib.import_module("cloud")
         self.tmpdir = tempfile.TemporaryDirectory()
         self.root = pathlib.Path(self.tmpdir.name)
 
@@ -283,4 +281,4 @@ class LocalCiPureHelperTests(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(verbosity=2)
+    unittest.main()
