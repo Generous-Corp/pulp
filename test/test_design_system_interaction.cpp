@@ -6,11 +6,23 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/view/buttons.hpp>
+#include <pulp/view/context_menu.hpp>
 #include <pulp/view/gap_widgets.hpp>
+#include <pulp/view/side_panel.hpp>
+#include <pulp/view/table.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/widgets.hpp>
 
+#include <type_traits>
+
 using namespace pulp::view;
+
+// Design-system Figma-name aliases must resolve to their canonical SDK class.
+// See docs/reference/design-system-naming.md. These also force the alias
+// headers to compile in CI.
+static_assert(std::is_same_v<Sidebar, SidePanel>, "Sidebar must alias SidePanel");
+static_assert(std::is_same_v<PopupMenu, ContextMenu>, "PopupMenu must alias ContextMenu");
+static_assert(std::is_same_v<Table, TableListBox>, "Table must alias TableListBox");
 
 TEST_CASE("Knob moves on drag", "[design-system][interaction]") {
     Knob k; k.set_bounds({0, 0, 80, 80}); k.set_value(0.5f);
