@@ -268,7 +268,9 @@ def prepare_macos_exact_sha_source(
             text=True,
         )
     linked_skia = link_local_skia_build_for_prepared_source(root, prepared_root)
-    if source_request.get("prepare_command") and not reused:
+    prepare_stamp = prepared_root / ".pulp-prepare-ok"
+    prepare_is_current = prepare_stamp.is_file() and prepare_stamp.read_text(encoding="utf-8").strip() == source_request["sha"]
+    if source_request.get("prepare_command") and not prepare_is_current:
         run = run_logged_command_fn(
             ["bash", "-lc", source_request["prepare_command"]],
             cwd=prepared_root,
@@ -282,6 +284,8 @@ def prepare_macos_exact_sha_source(
         if run["returncode"] != 0:
             detail = tail_lines_fn(prepare_log, limit=40)
             raise RuntimeError("Desktop source prepare failed:\n" + "".join(detail).strip())
+        prepare_stamp.parent.mkdir(parents=True, exist_ok=True)
+        prepare_stamp.write_text(source_request["sha"] + "\n", encoding="utf-8")
     return {
         **source_request,
         "prepared_root": str(prepared_root),

@@ -212,6 +212,7 @@ class SourcePrepTests(unittest.TestCase):
         self.assertEqual(clean["prepare_log"], str(bundle_dir / "prepare.log"))
         self.assertEqual(run_calls[0][0], ["reset", str(prepared_root)])
         self.assertEqual(run_calls[1][0][:3], ["git", "worktree", "add"])
+        self.assertEqual((prepared_root / ".pulp-prepare-ok").read_text(), source_request["sha"] + "\n")
 
         logged = []
         reused = self.mod.prepare_macos_exact_sha_source(
@@ -232,6 +233,39 @@ class SourcePrepTests(unittest.TestCase):
         self.assertEqual(reused["prepared_state"], "reused")
         self.assertEqual(reused["launch_command"], f"{prepared_root}:./tool")
         self.assertEqual(logged, [])
+
+    def test_prepare_macos_exact_sha_source_reruns_prepare_without_stamp(self) -> None:
+        bundle_dir = self.root / "bundle-mac-reprepare"
+        bundle_dir.mkdir()
+        prepared_root = self.root / "prepared-mac-reprepare"
+        prepared_root.mkdir()
+        source_request = self.request(prepare_command="echo prepare")
+        logged = []
+
+        def fake_logged_command(command, **kwargs):
+            logged.append((command, kwargs))
+            kwargs["log_path"].write_text("prepared\n")
+            return {"timed_out": False, "returncode": 0}
+
+        context = self.mod.prepare_macos_exact_sha_source(
+            bundle_dir,
+            "mac",
+            "./tool",
+            source_request,
+            root=self.repo,
+            desktop_source_root_fn=lambda _target, _request: prepared_root,
+            local_worktree_matches_fn=lambda _path, _sha: True,
+            reset_local_worktree_fn=lambda _path: self.fail("reset should not run for a reused worktree"),
+            run_fn=lambda command, **kwargs: self.fail("git worktree add should not run for a reused worktree"),
+            run_logged_command_fn=fake_logged_command,
+            tail_lines_fn=lambda _path, limit=40: ["tail"],
+            rewrite_launch_command_for_source_root_fn=lambda command, root: f"{root}:{command}",
+        )
+
+        self.assertEqual(context["prepared_state"], "reused")
+        self.assertEqual(logged[0][0], ["bash", "-lc", "echo prepare"])
+        self.assertEqual(logged[0][1]["cwd"], prepared_root)
+        self.assertEqual((prepared_root / ".pulp-prepare-ok").read_text(), source_request["sha"] + "\n")
 
     def test_prepare_macos_exact_sha_source_links_local_skia_build(self) -> None:
         bundle_dir = self.root / "bundle-mac-skia"
