@@ -1547,6 +1547,18 @@ static void install_app_menu(NSString* appName) {
         layer.backgroundColor = CGColorCreate(cs, dark);
         CGColorSpaceRelease(cs);
 
+        // Pin the most-recent drawable to the top-left during a live resize
+        // instead of letting Core Animation's default kCAGravityResize STRETCH
+        // it to the new layer bounds. The default makes the canvas appear to
+        // zoom in/out as you drag a window edge (the old frame is scaled to the
+        // new size in the gap before the next Metal frame lands). With
+        // top-left gravity the content stays put at its native scale and the
+        // newly-exposed area shows the dark background until the next frame —
+        // i.e. the canvas "stays in its fixed position" as the user expects.
+        // Non-flipped NSView layer: max-Y is visually the top, so TopLeft is
+        // the upper-left corner where our (0,0)-origin UI begins.
+        layer.contentsGravity = kCAGravityTopLeft;
+
         self.layer = layer;
         _metalLayer = layer;
     }
@@ -1647,16 +1659,8 @@ static void install_app_menu(NSString* appName) {
 }
 
 - (NSSize)windowWillResize:(NSWindow*)sender toSize:(NSSize)frameSize {
-    // DEBUG: write to /tmp/pulp-aspect.log unconditionally
-    {
-        FILE* f = fopen("/tmp/pulp-aspect.log", "a");
-        if (f) {
-            fprintf(f, "ENTRY aspectRatio=%.3f frame=%.0fx%.0f\n",
-                    self.aspectRatio, frameSize.width, frameSize.height);
-            fclose(f);
-        }
-    }
-    // No-op when aspect-lock isn't requested.
+    // No-op when aspect-lock isn't requested (the scroll-mode showcase and
+    // every non-design-viewport window take this path — resize freely).
     if (self.aspectRatio <= 0) return frameSize;
 
     // Convert frame size → content size (NSWindow gives us frame; we
@@ -1672,16 +1676,6 @@ static void install_app_menu(NSString* appName) {
     CGFloat dw = std::fabs(targetW - currentContent.width);
     CGFloat dh = std::fabs(targetH - currentContent.height);
 
-    // DEBUG: write to /tmp/pulp-aspect.log
-    FILE* f = fopen("/tmp/pulp-aspect.log", "a");
-    if (f) {
-        fprintf(f, "willResize frame=%.0fx%.0f content=%.0fx%.0f cur=%.0fx%.0f dw=%.0f dh=%.0f ar=%.3f",
-                frameSize.width, frameSize.height,
-                targetW, targetH,
-                currentContent.width, currentContent.height,
-                dw, dh, self.aspectRatio);
-    }
-
     // Snap to aspect by picking the dominant drag axis: whichever
     // dimension changed more from the current size drives the other.
     // This lets the user grow OR shrink by dragging any edge or
@@ -1695,11 +1689,6 @@ static void install_app_menu(NSString* appName) {
     // Convert back content → frame so AppKit gets a frame size.
     NSRect newContent = NSMakeRect(0, 0, targetW, targetH);
     NSRect newFrame   = [sender frameRectForContentRect:newContent];
-    if (f) {
-        fprintf(f, " -> content=%.0fx%.0f frame=%.0fx%.0f\n",
-                targetW, targetH, newFrame.size.width, newFrame.size.height);
-        fclose(f);
-    }
     return newFrame.size;
 }
 

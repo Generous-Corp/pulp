@@ -380,8 +380,13 @@ int main(int argc, char** argv) {
     opts.title = "Ink & Signal — Showcase";
     opts.width = static_cast<float>(W);
     opts.height = fit ? content_h : static_cast<float>(winH);
-    opts.min_width = 560.0f;    // never crop below a usable width
-    opts.min_height = 420.0f;
+    // Never let the window crop content horizontally: the board is a fixed
+    // kContentW-wide design, so pin the minimum width to the full content
+    // width (chrome on the right — Master strip, breadcrumb — was getting
+    // clipped when the window shrank below it). Vertical overflow is handled
+    // by the ScrollView, so the height minimum only needs to stay usable.
+    opts.min_width = static_cast<float>(W);
+    opts.min_height = 480.0f;
     opts.use_gpu = true;        // GPU (Skia Graphite / Dawn) when available
 
     View* board_ptr = board.get();
