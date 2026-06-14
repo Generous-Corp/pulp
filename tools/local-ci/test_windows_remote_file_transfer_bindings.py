@@ -7,6 +7,7 @@ from module_test_utils import load_module_from_path
 from pathlib import Path
 import types
 import unittest
+from unittest import mock
 
 
 MODULE_PATH = Path(__file__).with_name("windows_remote_file_transfer_bindings.py")
@@ -78,36 +79,24 @@ class WindowsRemoteFileTransferBindingsTests(unittest.TestCase):
                     bindings["windows_contract_expand_expression"],
                 )
 
-    def test_install_windows_remote_file_transfer_helpers_wires_named_exports(self) -> None:
-        captured = {}
+    def test_install_windows_remote_file_transfer_helpers_routes_groups_and_fallback(self) -> None:
+        bindings = {"_windows_probe": types.SimpleNamespace()}
 
-        def capture(name):
-            def inner(*args, **kwargs):
-                captured[name] = (args, kwargs)
-                return {"name": name}
+        with (
+            mock.patch.object(self.mod, "install_windows_remote_file_fetch_helpers") as fetch,
+            mock.patch.object(self.mod, "install_windows_remote_file_read_helpers") as read,
+            mock.patch.object(self.mod, "install_windows_remote_file_remove_helpers") as remove,
+            mock.patch.object(self.mod, "install_local_helpers") as install_local,
+        ):
+            self.mod.install_windows_remote_file_transfer_helpers(
+                bindings,
+                ("windows_ssh_fetch_file", "windows_ssh_read_json", "windows_ssh_remove_path", "unknown_helper"),
+            )
 
-            return inner
-
-        bindings = {
-            "_windows_probe": types.SimpleNamespace(
-                windows_ssh_fetch_file=capture("fetch"),
-                windows_ssh_read_json=capture("read"),
-                windows_ssh_remove_path=capture("remove"),
-            ),
-            "run_windows_ssh_powershell": object(),
-            "windows_contract_expand_expression": object(),
-        }
-
-        self.mod.install_windows_remote_file_transfer_helpers(bindings)
-
-        self.assertEqual(
-            bindings["windows_ssh_fetch_file"]("win", r"%TEMP%\a.txt", Path("/tmp/a.txt")),
-            {"name": "fetch"},
-        )
-        self.assertEqual(bindings["windows_ssh_read_json"]("win", r"%TEMP%\a.json"), {"name": "read"})
-        self.assertEqual(bindings["windows_ssh_remove_path"]("win", r"%TEMP%\old"), {"name": "remove"})
-        self.assertEqual(captured["fetch"][0], ("win", r"%TEMP%\a.txt", Path("/tmp/a.txt")))
-
+        fetch.assert_called_once_with(bindings, ("windows_ssh_fetch_file",))
+        read.assert_called_once_with(bindings, ("windows_ssh_read_json",))
+        remove.assert_called_once_with(bindings, ("windows_ssh_remove_path",))
+        install_local.assert_called_once_with(bindings, self.mod.__dict__, ("unknown_helper",))
 
 
 if __name__ == "__main__":
