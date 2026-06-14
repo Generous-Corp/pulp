@@ -4,6 +4,7 @@
 from module_test_utils import load_module_from_path
 import types
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -65,7 +66,7 @@ class QueueWaitDrainBindingsTests(unittest.TestCase):
             bindings[name] = object()
         return bindings
 
-    def test_wait_and_drain_bind_runner_loop_dependencies(self):
+    def test_wait_and_drain_delegate_with_assembled_dependencies(self):
         captured = {}
 
         def wait_for_job_completion(*args, **kwargs):
@@ -81,20 +82,23 @@ class QueueWaitDrainBindingsTests(unittest.TestCase):
             drain_pending_jobs_locked=drain_pending_jobs_locked,
         )
         bindings = self._bindings(lifecycle=lifecycle)
+        wait_deps = {"load_job_fn": object(), "poll_secs": 0.25}
+        drain_deps = {"root": object(), "pid_fn": object()}
 
-        self.assertEqual(self.mod.wait_for_job(bindings, "job1", {"targets": {}}), ({"overall": "pass"}, 0))
+        with mock.patch.object(self.mod, "queue_wait_dependencies", return_value=wait_deps):
+            self.assertEqual(self.mod.wait_for_job(bindings, "job1", {"targets": {}}), ({"overall": "pass"}, 0))
+
         self.assertEqual(captured["wait"][0], ("job1", {"targets": {}}))
-        self.assertIs(captured["wait"][1]["load_job_fn"], bindings["load_job"])
-        self.assertIs(captured["wait"][1]["sleep_fn"], bindings["time"].sleep)
-        self.assertIs(captured["wait"][1]["poll_secs"], bindings["WAIT_POLL_SECS"])
+        self.assertIs(captured["wait"][1]["load_job_fn"], wait_deps["load_job_fn"])
+        self.assertIs(captured["wait"][1]["poll_secs"], wait_deps["poll_secs"])
 
-        self.assertEqual(self.mod.drain_pending_jobs(bindings, {"defaults": {}}, blocking=False), (True, False))
+        with mock.patch.object(self.mod, "queue_drain_dependencies", return_value=drain_deps):
+            self.assertEqual(self.mod.drain_pending_jobs(bindings, {"defaults": {}}, blocking=False), (True, False))
+
         self.assertEqual(captured["drain"][0], ({"defaults": {}},))
         self.assertFalse(captured["drain"][1]["blocking"])
-        self.assertIs(captured["drain"][1]["root"], bindings["ROOT"])
-        self.assertIs(captured["drain"][1]["lock_busy_error_cls"], bindings["LockBusyError"])
-        self.assertIs(captured["drain"][1]["claim_next_job_fn"], bindings["claim_next_job"])
-        self.assertIs(captured["drain"][1]["pid_fn"], bindings["os"].getpid)
+        self.assertIs(captured["drain"][1]["root"], drain_deps["root"])
+        self.assertIs(captured["drain"][1]["pid_fn"], drain_deps["pid_fn"])
 
 
 if __name__ == "__main__":
