@@ -703,6 +703,39 @@ def _video_matrix_check(
     return {"status": status, "checks": checks}
 
 
+def _latest_published_design_parity_inputs(publish_root: Path) -> dict | None:
+    if not publish_root.is_dir():
+        return None
+    for index_path in sorted(publish_root.glob("*/index.json"), reverse=True):
+        try:
+            index_payload = json.loads(index_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        report_dir = index_path.parent
+        for run in index_payload.get("runs") or []:
+            if not isinstance(run, dict):
+                continue
+            composition = run.get("video_proof_composition") if isinstance(run.get("video_proof_composition"), dict) else {}
+            if composition.get("template") != "design-parity":
+                continue
+            artifacts = run.get("artifacts") if isinstance(run.get("artifacts"), dict) else {}
+            manifest_rel = artifacts.get("manifest")
+            source_rel = artifacts.get("video_source_image")
+            if not isinstance(manifest_rel, str) or not isinstance(source_rel, str):
+                continue
+            manifest_path = report_dir / manifest_rel
+            source_image_path = report_dir / source_rel
+            if manifest_path.is_file() and source_image_path.is_file():
+                return {
+                    "manifest": manifest_path.resolve(),
+                    "source_image": source_image_path.resolve(),
+                    "report_dir": report_dir.resolve(),
+                    "label": index_payload.get("label"),
+                    "run_label": run.get("label"),
+                }
+    return None
+
+
 def desktop_video_matrix_payload(
     *,
     target: str | None = None,
@@ -711,12 +744,22 @@ def desktop_video_matrix_payload(
     check: bool = False,
     design_parity_manifest: str | Path | None = None,
     design_parity_source_image: str | Path | None = None,
+    design_parity_publish_root: str | Path | None = None,
     repo_root: Path | None = None,
     which_fn: Callable[[str], str | None] = shutil.which,
 ) -> dict:
     root = repo_root or Path.cwd()
     design_parity_manifest_path = Path(design_parity_manifest).expanduser().resolve() if design_parity_manifest else None
     design_parity_source_image_path = Path(design_parity_source_image).expanduser().resolve() if design_parity_source_image else None
+    design_parity_discovered: dict | None = None
+    if check and design_parity_publish_root and (not design_parity_manifest_path or not design_parity_source_image_path):
+        design_parity_discovered = _latest_published_design_parity_inputs(Path(design_parity_publish_root).expanduser().resolve())
+        if design_parity_discovered:
+            if not design_parity_manifest_path:
+                design_parity_manifest_path = design_parity_discovered["manifest"]
+            if not design_parity_source_image_path:
+                default_source = (root / "planning" / "screenshots" / "reference.png").resolve()
+                design_parity_source_image_path = default_source if default_source.is_file() else design_parity_discovered["source_image"]
     scenarios: list[dict] = []
     for item in VIDEO_PROOF_DEMO_SCENARIOS:
         if target and item["platform"] != target:
@@ -728,13 +771,19 @@ def desktop_video_matrix_payload(
         if row["id"] == "design-parity":
             manifest_for_command = design_parity_manifest_path or Path("/path/to/run/manifest.json")
             source_for_command = design_parity_source_image_path or (root / "planning" / "screenshots" / "reference.png").resolve()
+            source_label_for_command = "Source reference" if design_parity_discovered else "Figma reference"
             row["command"] = (
                 "python3 tools/local-ci/local_ci.py desktop compose-video "
                 f"{shlex.quote(str(manifest_for_command))} "
                 f"--template design-parity --source-image {shlex.quote(str(source_for_command))} "
-                "--source-label 'Figma reference' --title 'Design parity proof' "
+                f"--source-label {shlex.quote(source_label_for_command)} --title 'Design parity proof' "
                 "--small-video --small-video-budget-mb 10"
             )
+            if design_parity_discovered and manifest_for_command == design_parity_discovered.get("manifest"):
+                row["discovered_report"] = {
+                    key: str(value) if isinstance(value, Path) else value
+                    for key, value in design_parity_discovered.items()
+                }
         if check:
             row["local_readiness"] = _video_matrix_check(
                 row,
@@ -930,8 +979,16 @@ def desktop_video_matrix_markdown(payload: dict) -> str:
 def cmd_desktop_video_matrix(
     args: argparse.Namespace,
     *,
+    load_config_fn: Callable[[], dict] | None = None,
     print_fn: Callable[[str], None] = print,
 ) -> int:
+    design_parity_publish_root = None
+    if getattr(args, "check", False) and load_config_fn is not None:
+        try:
+            config = load_config_fn()
+            design_parity_publish_root = desktop_publish_root_from_config(config)
+        except Exception:
+            design_parity_publish_root = None
     payload = desktop_video_matrix_payload(
         target=getattr(args, "target", None) or None,
         scenario=getattr(args, "scenario", None) or None,
@@ -939,6 +996,7 @@ def cmd_desktop_video_matrix(
         check=getattr(args, "check", False),
         design_parity_manifest=getattr(args, "design_parity_manifest", None) or None,
         design_parity_source_image=getattr(args, "design_parity_source_image", None) or None,
+        design_parity_publish_root=design_parity_publish_root,
     )
     if getattr(args, "json", False):
         print_fn(json.dumps(payload, indent=2))

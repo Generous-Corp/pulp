@@ -420,6 +420,48 @@ class DesktopCommandsCliTests(unittest.TestCase):
             self.assertIn(str((repo_root / "planning" / "screenshots" / "reference.png").resolve()), design_ready["command"])
             self.assertEqual(design_ready["local_readiness"]["status"], "ready")
 
+            published_root = repo_root / "artifact-root" / "_published"
+            report_dir = published_root / "20260614-design"
+            run_dir = report_dir / "assets" / "run-01"
+            run_dir.mkdir(parents=True)
+            published_manifest = run_dir / "manifest.json"
+            published_source = run_dir / "source-reference" / "figma.png"
+            published_source.parent.mkdir(parents=True)
+            published_manifest.write_text(json.dumps({"label": "published-design-run"}) + "\n")
+            published_source.write_bytes(b"png")
+            (report_dir / "index.json").write_text(
+                json.dumps(
+                    {
+                        "label": "published-design-parity",
+                        "runs": [
+                            {
+                                "label": "component",
+                                "artifacts": {
+                                    "manifest": "assets/run-01/manifest.json",
+                                    "video_source_image": "assets/run-01/source-reference/figma.png",
+                                },
+                                "video_proof_composition": {"template": "design-parity"},
+                            }
+                        ],
+                    }
+                )
+                + "\n"
+            )
+            (repo_root / "planning" / "screenshots" / "reference.png").unlink()
+            checked_payload = self.mod.desktop_video_matrix_payload(
+                target="mac",
+                status="ready",
+                check=True,
+                repo_root=repo_root,
+                design_parity_publish_root=published_root,
+                which_fn=lambda name: "/usr/bin/cmake" if name == "cmake" else None,
+            )
+            design_ready = next(item for item in checked_payload["scenarios"] if item["id"] == "design-parity")
+            self.assertIn(str(published_manifest.resolve()), design_ready["command"])
+            self.assertIn(str(published_source.resolve()), design_ready["command"])
+            self.assertEqual(design_ready["local_readiness"]["status"], "ready")
+            self.assertEqual(design_ready["discovered_report"]["label"], "published-design-parity")
+
         self.printed.clear()
         result = self.mod.cmd_desktop_video_matrix(
             Namespace(target="windows", scenario=None, status="ready", json=False, markdown=True, check=False),
@@ -430,6 +472,58 @@ class DesktopCommandsCliTests(unittest.TestCase):
         self.assertIn("Status filter: `ready` (`declared`)", markdown)
         self.assertIn("No scenarios matched", markdown)
         self.assertIn("Add `--check`", markdown)
+
+    def test_desktop_video_matrix_cli_discovers_published_design_parity_inputs(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            artifact_root = Path(tmpdir) / "artifacts"
+            report_dir = artifact_root / "_published" / "20260614-design"
+            run_dir = report_dir / "assets" / "run-01"
+            run_dir.mkdir(parents=True)
+            manifest = run_dir / "manifest.json"
+            source = run_dir / "source-reference" / "figma.png"
+            source.parent.mkdir(parents=True)
+            manifest.write_text(json.dumps({"label": "design-run"}) + "\n")
+            source.write_bytes(b"png")
+            (report_dir / "index.json").write_text(
+                json.dumps(
+                    {
+                        "runs": [
+                            {
+                                "label": "design-run",
+                                "artifacts": {
+                                    "manifest": "assets/run-01/manifest.json",
+                                    "video_source_image": "assets/run-01/source-reference/figma.png",
+                                },
+                                "video_proof_composition": {"template": "design-parity"},
+                            }
+                        ]
+                    }
+                )
+                + "\n"
+            )
+
+            result = self.mod.cmd_desktop_video_matrix(
+                Namespace(
+                    target="mac",
+                    scenario="design-parity",
+                    status="ready",
+                    json=True,
+                    markdown=False,
+                    check=True,
+                    design_parity_manifest=None,
+                    design_parity_source_image=None,
+                ),
+                load_config_fn=lambda: {"desktop_automation": {"artifact_root": str(artifact_root)}},
+                print_fn=self.print_line,
+            )
+
+        self.assertEqual(result, 0)
+        payload = json.loads(self.printed[-1])
+        self.assertEqual(payload["scenario_count"], 1)
+        row = payload["scenarios"][0]
+        self.assertEqual(row["status"], "ready")
+        self.assertIn(str(manifest.resolve()), row["command"])
+        self.assertIn(str(source.resolve()), row["command"])
 
     def test_find_executable_path_uses_common_fallbacks(self):
         with tempfile.TemporaryDirectory() as tmpdir:

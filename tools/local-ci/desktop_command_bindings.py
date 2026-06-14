@@ -239,7 +239,10 @@ def cmd_desktop_design_diff(bindings: Mapping[str, Any], args: Any) -> int:
 
 
 def cmd_desktop_video_matrix(bindings: Mapping[str, Any], args: Any) -> int:
-    return _binding(bindings, "_desktop_commands_cli").cmd_desktop_video_matrix(args)
+    return _binding(bindings, "_desktop_commands_cli").cmd_desktop_video_matrix(
+        args,
+        load_config_fn=_binding(bindings, "load_config"),
+    )
 
 
 def cmd_desktop_serve(bindings: Mapping[str, Any], args: Any) -> int:

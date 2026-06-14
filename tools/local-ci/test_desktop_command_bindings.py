@@ -266,7 +266,7 @@ class DesktopCommandBindingsTests(unittest.TestCase):
             (
                 "cmd_desktop_video_matrix",
                 self.mod.cmd_desktop_video_matrix,
-                [],
+                ["load_config"],
                 {},
             ),
             (
