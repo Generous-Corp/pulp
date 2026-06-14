@@ -80,10 +80,19 @@ std::vector<float> demo_spectrum(size_t n = 48) {
     return m;
 }
 
+// Global modulation LFO phase in [-1,1], advanced once per frame in main()'s
+// idle callback and read here to drive every modulation knob's live indicator.
+float g_mod_lfo = 0.0f;
+
 // Advance animated widgets each frame (hover glow, toggle slide, scroll easing).
 void advance_anims(View* v, float dt) {
     if (!v) return;
-    if (auto* k = dynamic_cast<Knob*>(v)) k->advance_animations(dt);
+    if (auto* k = dynamic_cast<Knob*>(v)) {
+        k->advance_animations(dt);
+        // Modulation knobs: ride the shared LFO so the live indicator moves
+        // continuously, showing the real-time modulated value on the arc.
+        if (!k->modulation_rings().empty()) k->set_modulation_phase(g_mod_lfo);
+    }
     else if (auto* t = dynamic_cast<Toggle*>(v)) t->advance_animations(dt);
     else if (auto* f = dynamic_cast<Fader*>(v)) f->advance_animations(dt);
     else if (auto* r = dynamic_cast<RangeSlider*>(v)) r->advance_animations(dt);
@@ -170,11 +179,29 @@ std::unique_ptr<View> build_board(float& out_height) {
             {"3 sources", 0.5f, {{0.4f, LFO}, {0.6f, ENV}, {-0.5f, VEL}}},
         };
         float x = kMargin;
+        std::vector<Knob*> mod_targets;
         for (auto& s : specs) {
             auto k = std::make_unique<Knob>(); k->set_value(s.val); k->set_label(s.name);
             k->set_modulation_rings(s.rings);
-            add(std::move(k), x, y, 92.0f, 92.0f); x += 104.0f;
+            mod_targets.push_back(static_cast<Knob*>(add(std::move(k), x, y, 92.0f, 92.0f)));
+            x += 104.0f;
         }
+        // Master / macro control: dragging it drives the modulation DEPTH (the
+        // range width) of the other knobs — the macro-routing interaction. The
+        // live indicator dots ride the arcs continuously (LFO-driven in
+        // advance_anims), so widening the range here visibly enlarges where each
+        // indicator can travel.
+        auto macro = std::make_unique<Knob>();
+        macro->set_value(0.5f); macro->set_label("Macro");
+        macro->set_format([](float v) { char b[8]; std::snprintf(b, sizeof b, "%.0f%%", v * 100); return std::string(b); });
+        Knob* m0 = mod_targets[0];
+        Knob* m2 = mod_targets[2];
+        macro->on_change = [m0, m2](float v) {
+            // Map 0..1 → range half-width 0..0.6, applied to two target knobs.
+            m0->set_modulation_rings({{v * 0.6f, Color::hex(0xF6B847)}});
+            m2->set_modulation_rings({{v * 0.6f, Color::hex(0x8B6CF5)}});
+        };
+        add(std::move(macro), x + 12.0f, y, 92.0f, 92.0f);
         y += 112.0f;
     }
 
@@ -525,7 +552,13 @@ int main(int argc, char** argv) {
 
     WindowHost* win = window.get();
     window->set_idle_callback([win, board_ptr]() {
-        advance_anims(board_ptr, 1.0f / 60.0f);
+        constexpr float dt = 1.0f / 60.0f;
+        // Advance the shared modulation LFO (~0.25 Hz) that drives the Saturn
+        // knobs' live indicator dots, then tick all widget animations.
+        static float t = 0.0f;
+        t += dt;
+        g_mod_lfo = std::sin(t * 1.5f);
+        advance_anims(board_ptr, dt);
         (void)win;
         board_ptr->request_repaint();
     });

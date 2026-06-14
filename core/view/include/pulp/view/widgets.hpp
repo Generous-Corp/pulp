@@ -404,6 +404,28 @@ public:
     }
     const std::vector<ModulationRing>& modulation_rings() const { return mod_rings_; }
 
+    // Live modulation phase in [-1, 1] — the instantaneous output of the
+    // assigned source(s). Drives the indicator dot that rides the modulation
+    // arc, showing where the parameter actually IS right now. Set it from a
+    // master/macro control or animate it from the host (e.g. an LFO).
+    void set_modulation_phase(float p) {
+        float c = std::clamp(p, -1.0f, 1.0f);
+        if (c != mod_phase_) { mod_phase_ = c; request_repaint(); }
+    }
+    float modulation_phase() const { return mod_phase_; }
+
+    // The modulation range is CENTERED on the base value: [value-|depth|,
+    // value+|depth|], clipped to [0,1]. These expose the clipped endpoints of
+    // ring i for tests / hosts. Returns {lo, hi}.
+    std::pair<float, float> modulation_range(size_t ring) const;
+    // The live modulated value of ring i = clamp(value + depth*phase, 0, 1).
+    float modulated_value(size_t ring) const;
+
+    // Fired when dragging a modulation-arc handle changes a ring's depth.
+    std::function<void(int ring, float depth)> on_modulation_change;
+    // True while a modulation-arc handle is being dragged (vs the value).
+    bool dragging_modulation() const { return mod_drag_ring_ >= 0; }
+
     // Scroll-wheel adjusts the value (hover + wheel).
     bool wants_wheel_value() const override { return true; }
     void on_wheel(float delta_y) override {
@@ -413,6 +435,9 @@ public:
 
 private:
     std::vector<ModulationRing> mod_rings_;
+    float mod_phase_ = 0.0f;       ///< live source value in [-1,1] (indicator)
+    int mod_drag_ring_ = -1;       ///< ring whose handle is being dragged (-1 none)
+    bool mod_drag_is_high_ = true; ///< dragging the high (vs low) handle
     float value_ = 0.0f;
     float default_value_ = 0.5f;
     std::string label_;

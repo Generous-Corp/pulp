@@ -183,6 +183,31 @@ static void render_schema(canvas::Canvas& canvas, const std::string& json,
 
 // ── Knob animation ──────────────────────────────────────────────────────────
 
+namespace {
+// Default-path knob geometry shared by paint() and modulation hit-testing so
+// the drawn handles and the draggable hit zones never diverge.
+struct KnobModGeom { float cx, cy, ring_r, arc_w, mod_w, mod_r_base; };
+KnobModGeom knob_mod_geom(const Rect& b, size_t ring_count) {
+    float cx = b.width * 0.5f, cy = b.height * 0.5f;
+    float full_r = std::min(cx, cy) - 3.0f;
+    float arc_w = std::max(3.0f, full_r * 0.13f);
+    float ring_r = ring_count == 0 ? (full_r - arc_w * 0.5f) : (full_r * 0.64f);
+    float mod_w = std::max(2.0f, full_r * 0.05f);
+    float mod_r_base = ring_r + arc_w * 0.5f + mod_w * 0.5f + 2.0f;
+    return {cx, cy, ring_r, arc_w, mod_w, mod_r_base};
+}
+float knob_value_to_angle(float v) {
+    return Knob::start_angle + std::clamp(v, 0.0f, 1.0f) * (Knob::end_angle - Knob::start_angle);
+}
+// Pointer position → normalized value along the 270° dial sweep.
+float knob_pointer_to_value(float px, float py, float cx, float cy) {
+    float ang = std::atan2(py - cy, px - cx);
+    while (ang < Knob::start_angle) ang += 6.2831853f;  // 2π
+    return std::clamp((ang - Knob::start_angle) / (Knob::end_angle - Knob::start_angle),
+                      0.0f, 1.0f);
+}
+}  // namespace
+
 void Knob::on_mouse_enter() {
     float dur = resolve_dimension("motion.duration.fast", 0.08f);
     hover_glow_.animate_to(1.0f, dur, easing::ease_out_quad);
@@ -203,6 +228,27 @@ void Knob::on_mouse_event(const MouseEvent& event) {
 }
 
 void Knob::on_mouse_down(Point pos) {
+    // Modulation-arc handle hit-test FIRST: if the press lands on a ring's
+    // start/end handle, drag adjusts that ring's depth (not the base value),
+    // and we stay in absolute-coordinate mode (no relative-mouse capture).
+    if (!mod_rings_.empty()) {
+        auto g = knob_mod_geom(local_bounds(), mod_rings_.size());
+        float hit_r = std::max(3.0f, g.mod_w * 0.95f) + 4.0f;  // handle + slop
+        for (size_t i = 0; i < mod_rings_.size(); ++i) {
+            float mod_r = g.mod_r_base + static_cast<float>(i) * (g.mod_w + 2.0f);
+            auto [lo, hi] = modulation_range(i);
+            float lo_a = knob_value_to_angle(lo), hi_a = knob_value_to_angle(hi);
+            float lx = g.cx + mod_r * std::cos(lo_a), ly = g.cy + mod_r * std::sin(lo_a);
+            float hx = g.cx + mod_r * std::cos(hi_a), hy = g.cy + mod_r * std::sin(hi_a);
+            float dl = std::hypot(pos.x - lx, pos.y - ly);
+            float dh = std::hypot(pos.x - hx, pos.y - hy);
+            if (dl <= hit_r || dh <= hit_r) {
+                mod_drag_ring_ = static_cast<int>(i);
+                mod_drag_is_high_ = dh <= dl;
+                return;
+            }
+        }
+    }
     drag_start_y_ = pos.y;
     drag_start_value_ = value_;
     if (!gesture_active_) {
@@ -214,6 +260,7 @@ void Knob::on_mouse_down(Point pos) {
 }
 
 void Knob::on_mouse_up(Point) {
+    mod_drag_ring_ = -1;
     if (window_host())
         window_host()->set_mouse_relative_mode(false);
     if (gesture_active_) {
@@ -223,6 +270,25 @@ void Knob::on_mouse_up(Point) {
 }
 
 void Knob::on_mouse_drag(Point pos) {
+    // Dragging a modulation handle sets that ring's depth from the pointer's
+    // angle. The range is centered on the base, so |depth| = |pointerValue −
+    // base|; sign is preserved (polarity), and the range clips at 0/1. The arc
+    // can therefore grow until it hits a parameter limit. Wrapping the end past
+    // the start simply flips which handle is the high one on the next press.
+    if (mod_drag_ring_ >= 0) {
+        auto g = knob_mod_geom(local_bounds(), mod_rings_.size());
+        float pv = knob_pointer_to_value(pos.x, pos.y, g.cx, g.cy);
+        float hw = std::clamp(std::fabs(pv - value_), 0.0f, 1.0f);
+        auto& m = mod_rings_[static_cast<size_t>(mod_drag_ring_)];
+        float sign = m.depth < 0.0f ? -1.0f : 1.0f;
+        float nd = sign * hw;
+        if (nd != m.depth) {
+            m.depth = nd;
+            request_repaint();
+            if (on_modulation_change) on_modulation_change(mod_drag_ring_, nd);
+        }
+        return;
+    }
     // Drag up to increase, down to decrease. 150px = full range.
     float delta = (drag_start_y_ - pos.y) / 150.0f;
     float new_val = std::clamp(drag_start_value_ + delta, 0.0f, 1.0f);
@@ -386,6 +452,17 @@ static void draw_knob_captured_pointer(canvas::Canvas& canvas,
     canvas.set_stroke_color(color);
     canvas.set_line_width(width);
     canvas.stroke_line(ix, iy, ox, oy);
+}
+
+std::pair<float, float> Knob::modulation_range(size_t ring) const {
+    if (ring >= mod_rings_.size()) return {value_, value_};
+    float hw = std::fabs(mod_rings_[ring].depth);   // range is centered on the base
+    return {std::clamp(value_ - hw, 0.0f, 1.0f), std::clamp(value_ + hw, 0.0f, 1.0f)};
+}
+
+float Knob::modulated_value(size_t ring) const {
+    if (ring >= mod_rings_.size()) return value_;
+    return std::clamp(value_ + mod_rings_[ring].depth * mod_phase_, 0.0f, 1.0f);
 }
 
 void Knob::paint(canvas::Canvas& canvas) {
@@ -668,24 +745,48 @@ void Knob::paint(canvas::Canvas& canvas) {
         canvas.set_fill_color(thumb_color);
         canvas.fill_circle(dot_x, dot_y, dot_r);
 
-        // Modulation rings (Saturn) — thin per-source arcs outside the main arc,
-        // each swept from the value angle by its signed depth (bipolar).
+        // Modulation rings (Saturn) — one thin per-source arc outside the main
+        // arc. The arc shows the modulation RANGE centered on the base value
+        // ([value-|depth|, value+|depth|], clipped at the parameter limits). A
+        // dot at each end is a draggable handle (drag to set depth). A bright
+        // indicator dot rides the arc at the live modulated value (base +
+        // depth·phase), so you can see where the parameter actually is in real
+        // time as the source moves.
         if (!mod_rings_.empty()) {
-            float mod_w = std::max(2.0f, full_r * 0.05f);
-            float mod_r = ring_r + arc_w * 0.5f + mod_w * 0.5f + 2.0f;
+            auto g = knob_mod_geom(b, mod_rings_.size());
+            float handle_r = std::max(3.0f, g.mod_w * 0.95f);
             canvas.set_line_cap(canvas::LineCap::round);
-            for (const auto& m : mod_rings_) {
-                float span = std::clamp(m.depth, -1.0f, 1.0f) * (end_angle - start_angle);
-                float a0 = value_angle;
-                float a1 = std::clamp(value_angle + span, start_angle, end_angle);
-                // Faint full-track for the source, then the colored depth arc.
+            for (size_t i = 0; i < mod_rings_.size(); ++i) {
+                const auto& m = mod_rings_[i];
+                float mod_r = g.mod_r_base + static_cast<float>(i) * (g.mod_w + 2.0f);
+                auto [lo, hi] = modulation_range(i);
+                float lo_a = knob_value_to_angle(lo);
+                float hi_a = knob_value_to_angle(hi);
+
+                // Faint full track + the colored range arc.
                 canvas.set_stroke_color(canvas::Color::rgba(m.color.r, m.color.g, m.color.b, 0.22f));  // token-lint:allow (per-source mod colour)
-                canvas.set_line_width(mod_w);
-                canvas.stroke_arc(cx, cy, mod_r, start_angle, end_angle);
+                canvas.set_line_width(g.mod_w);
+                canvas.stroke_arc(g.cx, g.cy, mod_r, start_angle, end_angle);
                 canvas.set_stroke_color(m.color);
-                if (a1 >= a0) canvas.stroke_arc(cx, cy, mod_r, a0, a1);
-                else canvas.stroke_arc(cx, cy, mod_r, a1, a0);
-                mod_r += mod_w + 2.0f;
+                canvas.stroke_arc(g.cx, g.cy, mod_r, lo_a, hi_a);
+
+                // Drag handles at each end of the range.
+                canvas.set_fill_color(m.color);
+                for (float a : {lo_a, hi_a}) {
+                    canvas.fill_circle(g.cx + mod_r * std::cos(a),
+                                       g.cy + mod_r * std::sin(a), handle_r);
+                }
+
+                // Live modulated-value indicator: bright dot ringed in the
+                // source colour, riding the arc at base + depth·phase.
+                float la = knob_value_to_angle(modulated_value(i));
+                float lx = g.cx + mod_r * std::cos(la), ly = g.cy + mod_r * std::sin(la);
+                auto ind = resolve_color("knob.thumb", canvas::Color::rgba8(235, 235, 235));
+                canvas.set_fill_color(ind);
+                canvas.fill_circle(lx, ly, handle_r * 0.78f);
+                canvas.set_stroke_color(m.color);
+                canvas.set_line_width(2.0f);
+                canvas.stroke_circle(lx, ly, handle_r * 0.78f + 1.0f);
             }
         }
     }

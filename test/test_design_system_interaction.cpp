@@ -13,6 +13,7 @@
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/widgets.hpp>
 
+#include <cmath>
 #include <type_traits>
 
 using namespace pulp::view;
@@ -127,6 +128,69 @@ TEST_CASE("Knob modulation rings round-trip + render", "[design-system][modulati
     // Plain knob (no rings) leaves the set empty — keeps the goldens unchanged.
     Knob plain;
     REQUIRE(plain.modulation_rings().empty());
+}
+
+TEST_CASE("Knob modulation range is centered on the base and clips at limits",
+          "[design-system][modulation]") {
+    Knob k; k.set_bounds({0, 0, 92, 92}); k.set_value(0.5f);
+    k.set_modulation_rings({{0.3f, Color::hex(0x5E78FF)}});
+    auto close = [](float a, float b) { return std::fabs(a - b) < 1e-3f; };
+
+    auto [lo, hi] = k.modulation_range(0);
+    REQUIRE(close(lo, 0.2f));   // centered: 0.5 ± 0.3
+    REQUIRE(close(hi, 0.8f));
+
+    // Live indicator tracks the source phase across the range.
+    k.set_modulation_phase(1.0f);
+    REQUIRE(close(k.modulated_value(0), 0.8f));
+    k.set_modulation_phase(-1.0f);
+    REQUIRE(close(k.modulated_value(0), 0.2f));
+    k.set_modulation_phase(0.0f);
+    REQUIRE(close(k.modulated_value(0), 0.5f));
+
+    // Near a limit the range clips instead of overshooting.
+    k.set_value(0.9f);
+    auto [lo2, hi2] = k.modulation_range(0);
+    REQUIRE(close(hi2, 1.0f));   // 0.9 + 0.3 clipped to 1.0
+    REQUIRE(close(lo2, 0.6f));
+}
+
+TEST_CASE("Knob modulation handle drag adjusts depth, not the value",
+          "[design-system][modulation]") {
+    Knob k; k.set_bounds({0, 0, 92, 92}); k.set_value(0.5f);
+    k.set_modulation_rings({{0.3f, Color::hex(0x5E78FF)}});
+    float base_before = k.value();
+    int fired_ring = -2; float fired_depth = 999.0f;
+    k.on_modulation_change = [&](int r, float d) { fired_ring = r; fired_depth = d; };
+
+    // Compute the high-handle pixel the same way the widget does (b=92,
+    // value=0.5, depth=0.3 → hi=0.8). Mirrors knob_mod_geom / value→angle.
+    const float cx = 46.0f, cy = 46.0f, full_r = 43.0f;
+    const float arc_w = std::max(3.0f, full_r * 0.13f);
+    const float ring_r = full_r * 0.64f;
+    const float mod_w = std::max(2.0f, full_r * 0.05f);
+    const float mod_r = ring_r + arc_w * 0.5f + mod_w * 0.5f + 2.0f;
+    const float start = 2.356f, sweep = 7.069f - 2.356f;
+    auto angle = [&](float v) { return start + v * sweep; };
+    float hi_a = angle(0.8f);
+    Point high_handle{cx + mod_r * std::cos(hi_a), cy + mod_r * std::sin(hi_a)};
+
+    k.on_mouse_down(high_handle);
+    REQUIRE(k.dragging_modulation());
+
+    // Drag inward to the base-value angle → depth shrinks toward 0.
+    float base_a = angle(0.5f);
+    k.on_mouse_drag({cx + mod_r * std::cos(base_a), cy + mod_r * std::sin(base_a)});
+    REQUIRE(fired_ring == 0);
+    REQUIRE(std::fabs(k.modulation_rings()[0].depth) < 0.3f);  // reduced
+    REQUIRE(k.value() == base_before);                          // base untouched
+
+    k.on_mouse_up(high_handle);
+    REQUIRE_FALSE(k.dragging_modulation());
+
+    // A press in the dial center is a value drag, not a handle drag.
+    k.on_mouse_down({cx, cy});
+    REQUIRE_FALSE(k.dragging_modulation());
 }
 
 TEST_CASE("value widgets adjust on scroll wheel", "[design-system][interaction][wheel]") {
