@@ -1796,7 +1796,7 @@ def cmd_desktop_review_status(
         notes = _review_comment_notes(needs_work_comment)
         verdict_command = (
             "python3 tools/local-ci/local_ci.py desktop verdict "
-            f"{manifest} --needs-work --issue-url {quoted_issue_url}"
+            f"{manifest} --needs-work --issue-url {quoted_issue_url} --comment-issue"
         )
         if notes:
             verdict_command += f" --notes {shlex.quote(notes)}"
@@ -1893,6 +1893,8 @@ def _review_verdict_command(
         "python3 tools/local-ci/local_ci.py desktop verdict "
         f"{shlex.quote(manifest)} {status_flag} --issue-url {shlex.quote(issue_url)}"
     )
+    if status == "needs-work":
+        command += " --comment-issue"
     if notes:
         command += f" --notes {shlex.quote(notes)}"
     if status == "approved" and close_issue:

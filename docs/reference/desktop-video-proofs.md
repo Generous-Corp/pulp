@@ -968,8 +968,10 @@ The optional manifest map is a JSON object keyed by issue URL, issue number, or
 `#number`, with values pointing to run `manifest.json` files. When an approved
 or needs-work issue has a mapped manifest, `review-watch` emits the exact
 `desktop verdict ... --approved --issue-url ...` or
-`desktop verdict ... --needs-work --issue-url ... --notes ...` command. It
-includes `--close-issue` for approved issues when that flag was passed. Use
+`desktop verdict ... --needs-work --issue-url ... --comment-issue --notes ...`
+command. It includes `--close-issue` for approved issues when that flag was
+passed, and includes `--comment-issue` for needs-work issues so the generated
+same-issue checklist is posted before the local manifest is updated. Use
 `--interval N --max-iterations M` only for short post-ping watch windows;
 one-shot mode is the default.
 

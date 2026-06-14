@@ -1890,6 +1890,7 @@ class DesktopCommandsCliTests(unittest.TestCase):
         self.assertEqual(payload["needs_work_comment"]["author"]["login"], "reviewer")
         self.assertIn("--needs-work", payload["verdict_command"])
         self.assertIn("--issue-url https://github.com/danielraffel/pulp/issues/123", payload["verdict_command"])
+        self.assertIn("--comment-issue", payload["verdict_command"])
         self.assertIn("--notes 'Needs work: zoom starts too late'", payload["verdict_command"])
         self.assertNotIn("--close-issue", payload["verdict_command"])
 
@@ -2040,6 +2041,7 @@ class DesktopCommandsCliTests(unittest.TestCase):
             self.assertTrue(issue["needs_work"])
             self.assertIn("--needs-work", issue["verdict_command"])
             self.assertIn("/tmp/needs-work/manifest.json", issue["verdict_command"])
+            self.assertIn("--comment-issue", issue["verdict_command"])
             self.assertIn("--notes 'Needs changes: recapture after centering the component'", issue["verdict_command"])
             self.assertNotIn("--close-issue", issue["verdict_command"])
 

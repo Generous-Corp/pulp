@@ -871,7 +871,9 @@ with values pointing to run manifests. When a watched issue contains an
 actionable approval or needs-work comment, the JSON includes `approved: true` or
 `needs_work: true` and, when the manifest is known, the exact
 `desktop verdict ... --approved --issue-url ...` or
-`desktop verdict ... --needs-work --issue-url ... --notes ...` command to run.
+`desktop verdict ... --needs-work --issue-url ... --comment-issue --notes ...`
+command to run. Needs-work suggestions include `--comment-issue` so the
+generated same-issue checklist is posted before the local manifest is updated.
 Use `--interval` and `--max-iterations` only for short post-ping windows;
 otherwise run one-shot and let the state file skip unchanged issues.
 
