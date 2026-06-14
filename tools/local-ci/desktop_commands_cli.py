@@ -286,6 +286,38 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
         ],
     },
     {
+        "id": "audio-inspector-demo",
+        "title": "Audio inspector demo proof",
+        "platform": "mac",
+        "status": "ready",
+        "template": "inspector-workflow",
+        "proves": "The no-GPU audio inspector demo launches and produces a short Remotion-composed proof without requiring Skia.",
+        "prepare_command": (
+            "cmake -S . -B build-video-nogpu -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF -DPULP_ENABLE_GPU=OFF && "
+            "cmake --build build-video-nogpu --target pulp-audio-inspector-demo -j$(sysctl -n hw.ncpu)"
+        ),
+        "command": (
+            "python3 tools/local-ci/local_ci.py desktop video mac "
+            "--recipe audio-inspector-demo "
+            "--source-mode exact-sha "
+            "--command './build-video-nogpu/examples/audio-inspector-demo/pulp-audio-inspector-demo' "
+            "--prepare-command 'cmake -S . -B build-video-nogpu -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF -DPULP_ENABLE_GPU=OFF && "
+            "cmake --build build-video-nogpu --target pulp-audio-inspector-demo -j$(sysctl -n hw.ncpu)' "
+            "--duration 4 --video-fps 8 --video-title 'Audio inspector demo proof' "
+            "--video-note 'The proof launches the no-GPU audio inspector demo and records a short validation clip with Remotion context.' "
+            "--label audio-inspector-demo-proof --compose-video-proof"
+        ),
+        "doctor": (
+            "python3 tools/local-ci/local_ci.py desktop video-doctor mac "
+            "--recipe audio-inspector-demo"
+        ),
+        "watch_for": [
+            "Terminal/app proof shows the demo process running",
+            "Remotion title and notes explain this is an audio-inspector smoke proof",
+            "local readiness should pass on machines with cmake and the in-tree demo source",
+        ],
+    },
+    {
         "id": "reaper-plugin-editor",
         "title": "Plugin editor in REAPER",
         "platform": "mac",
@@ -503,7 +535,7 @@ def _video_matrix_check(
             skia_path.is_file(),
             str(skia_path) if skia_path.is_file() else f"missing required Skia binary: {skia_path}",
         )
-    if item["id"] == "inspector-workflow":
+    if item["id"] in {"audio-inspector-demo", "inspector-workflow"}:
         source = repo_root / "examples" / "audio-inspector-demo"
         add("audio-inspector-demo-source", source.is_dir(), str(source) if source.is_dir() else f"missing source directory: {source}")
     if item["id"] == "reaper-plugin-editor":

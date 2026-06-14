@@ -187,7 +187,7 @@ class DesktopCommandsCliTests(unittest.TestCase):
         self.assertEqual(result, 0)
         payload = json.loads(self.printed[0])
         self.assertEqual(payload["kind"], "desktop-video-proof-demo-matrix")
-        self.assertEqual(payload["scenario_count"], 9)
+        self.assertEqual(payload["scenario_count"], 10)
         self.assertIn("reaper-plugin-editor", {item["id"] for item in payload["scenarios"]})
         reaper = next(item for item in payload["scenarios"] if item["id"] == "reaper-plugin-editor")
         self.assertIn("desktop publish --manifest /path/to/run/manifest.json", reaper["publish_command"])
@@ -212,6 +212,16 @@ class DesktopCommandsCliTests(unittest.TestCase):
         self.assertIn("--source-mode exact-sha", standalone["command"])
         self.assertIn("--pulp-app-automation", standalone["command"])
         self.assertIn("./build-desktop-automation/examples/ui-preview/pulp-ui-preview", standalone["command"])
+        audio_demo = next(item for item in payload["scenarios"] if item["id"] == "audio-inspector-demo")
+        self.assertEqual(audio_demo["status"], "ready")
+        self.assertEqual(audio_demo["template"], "inspector-workflow")
+        self.assertIn("-DPULP_ENABLE_GPU=OFF", audio_demo["prepare_command"])
+        self.assertIn("--recipe audio-inspector-demo", audio_demo["command"])
+        self.assertIn("./build-video-nogpu/examples/audio-inspector-demo/pulp-audio-inspector-demo", audio_demo["command"])
+        self.assertIn("--duration 4 --video-fps 8", audio_demo["command"])
+        self.assertIn("--compose-video-proof", audio_demo["command"])
+        self.assertNotIn("--capture-ui-snapshot", audio_demo["command"])
+        self.assertNotIn("--pulp-app-automation", audio_demo["command"])
         inspector = next(item for item in payload["scenarios"] if item["id"] == "inspector-workflow")
         self.assertIn("-DPULP_ENABLE_GPU=OFF", inspector["prepare_command"])
         self.assertIn("./build-video-nogpu/examples/audio-inspector-demo/pulp-audio-inspector-demo", inspector["command"])
@@ -247,6 +257,28 @@ class DesktopCommandsCliTests(unittest.TestCase):
             (repo_root / "external" / "skia-build" / "libskia.a").write_bytes(b"skia")
             payload = self.mod.desktop_video_matrix_payload(
                 scenario="component-zoom",
+                check=True,
+                repo_root=repo_root,
+                which_fn=lambda name: "/usr/bin/cmake" if name == "cmake" else None,
+            )
+            self.assertEqual(payload["scenarios"][0]["local_readiness"]["status"], "ready")
+
+            payload = self.mod.desktop_video_matrix_payload(
+                scenario="audio-inspector-demo",
+                check=True,
+                repo_root=repo_root,
+                which_fn=lambda name: "/usr/bin/cmake" if name == "cmake" else None,
+            )
+            audio_demo = payload["scenarios"][0]
+            checks = {check["name"]: check for check in audio_demo["local_readiness"]["checks"]}
+            self.assertEqual(audio_demo["local_readiness"]["status"], "blocked")
+            self.assertTrue(checks["cmake"]["ok"])
+            self.assertFalse(checks["audio-inspector-demo-source"]["ok"])
+            self.assertNotIn("skia-build.libskia", checks)
+
+            (repo_root / "examples" / "audio-inspector-demo").mkdir(parents=True)
+            payload = self.mod.desktop_video_matrix_payload(
+                scenario="audio-inspector-demo",
                 check=True,
                 repo_root=repo_root,
                 which_fn=lambda name: "/usr/bin/cmake" if name == "cmake" else None,

@@ -463,6 +463,7 @@ def build_local_ci_parser(
         "--scenario",
         choices=[
             "standalone-interaction",
+            "audio-inspector-demo",
             "reaper-plugin-editor",
             "inspector-workflow",
             "component-zoom",

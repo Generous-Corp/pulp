@@ -464,6 +464,21 @@ class CliParserTests(unittest.TestCase):
             "desktop",
             "video-matrix",
             "--target",
+            "mac",
+            "--scenario",
+            "audio-inspector-demo",
+            "--json",
+        ])
+
+        self.assertEqual(args.target, "mac")
+        self.assertEqual(args.scenario, "audio-inspector-demo")
+        self.assertTrue(args.json)
+        self.assertFalse(args.check)
+
+        args = parser.parse_args([
+            "desktop",
+            "video-matrix",
+            "--target",
             "windows",
             "--scenario",
             "windows-session-agent-desktop",
