@@ -79,6 +79,7 @@ from `tools/local-ci/config.example.json` before checks run:
 python3 tools/local-ci/local_ci.py desktop video-setup mac \
   --machine blackbook \
   --init-config \
+  --enable-video-capture \
   --check \
   --json
 ```
@@ -91,6 +92,7 @@ a CLI without `tool`, pass `--pulp-command` or set `PULP_CLI`:
 python3 tools/local-ci/local_ci.py desktop video-setup mac \
   --machine blackbook \
   --init-config \
+  --enable-video-capture \
   --check \
   --check-tool-addon \
   --pulp-command ./build-video-proof-cli/tools/cli/pulp-cpp \
@@ -101,10 +103,11 @@ python3 tools/local-ci/local_ci.py desktop video-setup mac \
 With `--check`, inspect `setup_prerequisites` before `check`: missing `pulp`,
 `npm`, `node`, or `cmake` means the machine cannot yet run the optional tool
 setup path cleanly. Fix those first, then rerun the setup check and move on to
-Screen Recording / `video-doctor` failures. With `--check-tool-addon`, inspect
-`tool_addon` as well; failures there should be remediated with
-`pulp tool install video-proof` or the reviewed artifact-manifest install path
-before treating the machine as mainline-ready.
+Screen Recording / `video-doctor` failures. `--enable-video-capture` is the
+explicit local-config opt-in for recording on the selected target. With
+`--check-tool-addon`, inspect `tool_addon` as well; failures there should be
+remediated with `pulp tool install video-proof` or the reviewed
+artifact-manifest install path before treating the machine as mainline-ready.
 
 When checking another Mac over SSH, add `--probe-host <ssh-host>`. The probe is
 read-only and emits `remote_setup_prerequisites` with the remote `pulp`, `npm`,

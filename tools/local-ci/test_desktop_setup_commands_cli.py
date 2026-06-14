@@ -729,6 +729,16 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
             self.assertEqual(created["path"], str(destination))
             self.assertEqual(destination.read_text(), example.read_text())
 
+    def test_video_setup_enable_target_capture_helper(self):
+        config = {"desktop_automation": {"targets": {"mac": {"optional": {"video_capture": False}}}}}
+
+        payload = self.mod.desktop_video_enable_target_capture(config, "mac")
+
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["changed"])
+        self.assertEqual(payload["field"], "target.mac.video_capture")
+        self.assertTrue(config["desktop_automation"]["targets"]["mac"]["optional"]["video_capture"])
+
     def test_video_setup_init_config_then_runs_check(self):
         self.targets["mac"]["optional"] = {"video_capture": True}
         calls = {"load": 0, "init": 0}
@@ -766,6 +776,7 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
                 target="mac",
                 machine="blackbook",
                 init_config=True,
+                enable_video_capture=False,
                 check=True,
                 check_tool_addon=False,
                 skip_remotion_smoke=False,
@@ -782,6 +793,59 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
         self.assertTrue(payload["init_config"]["created"])
         self.assertTrue(payload["setup_prerequisites"]["ok"])
         self.assertTrue(payload["check"]["ok"])
+
+    def test_video_setup_can_enable_video_capture_before_check(self):
+        self.targets["mac"]["optional"] = {"video_capture": False}
+        saved_configs = []
+        checks = [
+            {"name": "receipt", "ok": True, "detail": "installed"},
+            {"name": "screencapture", "ok": True, "detail": "/usr/sbin/screencapture"},
+            {"name": "video_capture", "ok": True, "detail": "/repo/node_modules/ffmpeg-static/ffmpeg", "required": False},
+            {"name": "avfoundation_screen", "ok": True, "detail": "Capture screen 0 (3:)", "required": False},
+        ]
+        config = self.config()
+        config["desktop_automation"]["targets"]["mac"]["optional"]["video_capture"] = False
+
+        def resolve(_config, name):
+            self.targets[name] = _config["desktop_automation"]["targets"][name]
+            return self.targets[name]
+
+        deps = {
+            "load_config_fn": lambda: config,
+            "save_config_fn": saved_configs.append,
+            "resolve_desktop_target_fn": resolve,
+            "desktop_doctor_checks_fn": lambda _config, _name: [dict(check) for check in checks],
+            "normalize_desktop_optional_config_fn": lambda optional: {"video_capture": bool((optional or {}).get("video_capture"))},
+            "video_proof_smoke_fn": lambda: {"ok": True, "detail": "smoke ok"},
+            "probe_macos_avfoundation_audio_fn": lambda _device: self.fail("audio probe should not run"),
+            "setup_prerequisite_checks_fn": self.setup_ok_checks,
+            "print_fn": self.print_line,
+        }
+
+        result = self.mod.cmd_desktop_video_setup(
+            Namespace(
+                target="mac",
+                machine="blackbook",
+                init_config=False,
+                enable_video_capture=True,
+                check=True,
+                check_tool_addon=False,
+                skip_remotion_smoke=False,
+                video_audio="none",
+                video_audio_device=None,
+                json=True,
+            ),
+            **deps,
+        )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(len(saved_configs), 1)
+        self.assertTrue(saved_configs[0]["desktop_automation"]["targets"]["mac"]["optional"]["video_capture"])
+        payload = json.loads(self.printed[0])
+        self.assertTrue(payload["target_config"]["changed"])
+        self.assertTrue(payload["check"]["ok"])
+        checks_by_name = {check["name"]: check for check in payload["check"]["checks"]}
+        self.assertTrue(checks_by_name["target.video_capture"]["ok"])
 
     def test_video_setup_text_reports_setup_and_tool_addon_without_config(self):
         deps = {

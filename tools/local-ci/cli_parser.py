@@ -559,6 +559,11 @@ def build_local_ci_parser(
         action="store_true",
         help="Create tools/local-ci/config.json from config.example.json if it is missing before running setup checks.",
     )
+    p_desktop_video_setup.add_argument(
+        "--enable-video-capture",
+        action="store_true",
+        help="Set target.<name>.video_capture=true in the local desktop config before running setup checks.",
+    )
     p_desktop_video_setup.add_argument("--check", action="store_true", help="Also run the video-doctor checks and include current readiness")
     p_desktop_video_setup.add_argument(
         "--check-tool-addon",

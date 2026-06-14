@@ -582,6 +582,7 @@ class CliParserTests(unittest.TestCase):
             "--machine",
             "blackbook",
             "--init-config",
+            "--enable-video-capture",
             "--check",
             "--check-tool-addon",
             "--pulp-command",
@@ -608,6 +609,7 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(args.target, "mac")
         self.assertEqual(args.machine, "blackbook")
         self.assertTrue(args.init_config)
+        self.assertTrue(args.enable_video_capture)
         self.assertTrue(args.check)
         self.assertTrue(args.check_tool_addon)
         self.assertEqual(args.pulp_command, "./build-video-proof-cli/tools/cli/pulp-cpp")

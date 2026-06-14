@@ -613,6 +613,24 @@ def desktop_video_init_config(
     }
 
 
+def desktop_video_enable_target_capture(config: dict, target_name: str) -> dict:
+    desktop_cfg = config.setdefault("desktop_automation", {})
+    targets = desktop_cfg.setdefault("targets", {})
+    target_cfg = targets.setdefault(target_name, {})
+    optional_cfg = dict(target_cfg.get("optional", {}))
+    was_enabled = bool(optional_cfg.get("video_capture"))
+    optional_cfg["video_capture"] = True
+    target_cfg["optional"] = optional_cfg
+    return {
+        "ok": True,
+        "target": target_name,
+        "changed": not was_enabled,
+        "field": f"target.{target_name}.video_capture",
+        "value": True,
+        "detail": "already enabled" if was_enabled else f"enabled video_capture for `{target_name}`",
+    }
+
+
 def desktop_video_setup_remote_prerequisite_checks(
     host: str,
     *,
@@ -958,6 +976,7 @@ def desktop_video_doctor_payload(
     args: argparse.Namespace,
     *,
     load_config_fn: Callable[[], dict],
+    save_config_fn: Callable[[dict], None] | None = None,
     resolve_desktop_target_fn: Callable[[dict, str], dict],
     desktop_doctor_checks_fn: Callable[[dict, str], list[dict]],
     normalize_desktop_optional_config_fn: Callable[[dict | None], dict],
@@ -1129,6 +1148,7 @@ def cmd_desktop_video_setup(
     remote_setup_prerequisite_checks_fn: Callable[[str], list[dict]] = desktop_video_setup_remote_prerequisite_checks,
     tool_addon_checks_fn: Callable[..., list[dict]] = desktop_video_tool_addon_checks,
     init_config_fn: Callable[[], dict] = desktop_video_init_config,
+    save_config_fn: Callable[[dict], None] | None = None,
     print_fn: Callable[[str], None] = print,
 ) -> int:
     steps = desktop_video_setup_steps(args.target, machine_label=getattr(args, "machine", None))
@@ -1137,6 +1157,12 @@ def cmd_desktop_video_setup(
         init_config_payload = init_config_fn()
     try:
         config = load_config_fn()
+        target_config_payload = None
+        if getattr(args, "enable_video_capture", False):
+            target_config_payload = desktop_video_enable_target_capture(config, args.target)
+            if save_config_fn is None:
+                raise ValueError("save_config_fn is required when --enable-video-capture is used")
+            save_config_fn(config)
         target = resolve_desktop_target_fn(config, args.target)
     except FileNotFoundError as exc:
         setup_prerequisites = _video_setup_prerequisites_payload(setup_prerequisite_checks_fn) if getattr(args, "check", False) else None
@@ -1169,6 +1195,7 @@ def cmd_desktop_video_setup(
         "bootstrap": target["bootstrap"],
         "install_model": desktop_video_install_model(),
         "init_config": init_config_payload,
+        "target_config": target_config_payload,
         "steps": steps,
         "setup_prerequisites": None,
         "remote_setup_prerequisites": None,
@@ -1241,6 +1268,8 @@ def cmd_desktop_video_setup(
     print_fn(f"  install: {payload['install_model']['current_command']} (future: {payload['install_model']['future_command']})")
     if payload.get("init_config"):
         print_fn(f"  init_config: {payload['init_config']['detail']}")
+    if payload.get("target_config"):
+        print_fn(f"  target_config: {payload['target_config']['detail']}")
     print_fn("")
     print_fn("Steps:")
     for index, step in enumerate(steps, start=1):

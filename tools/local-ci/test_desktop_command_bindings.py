@@ -49,6 +49,7 @@ class DesktopCommandBindingsTests(unittest.TestCase):
         }
         for name in [
             "load_config",
+            "save_config",
             "resolve_desktop_target",
             "_check_writable_dir",
             "desktop_target_contract",
