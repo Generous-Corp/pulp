@@ -45,6 +45,7 @@ import linux_desktop_bindings as _linux_desktop_bindings
 import linux_target as _linux_target
 import linux_target_bindings as _linux_target_bindings
 import local_ci_bootstrap_constants as _local_ci_bootstrap_constants
+import local_ci_bootstrap_module_aliases as _local_ci_bootstrap_module_aliases
 import local_ci_bootstrap_private_seams as _local_ci_bootstrap_private_seams
 import local_ci_command_bindings as _local_ci_command_bindings
 import local_ci_commands_cli as _local_ci_commands_cli
@@ -88,54 +89,7 @@ import windows_target_bindings as _windows_target_bindings
 
 def install_local_ci_facade(bindings: dict) -> None:
     """Install compatibility facade exports and private late-binding seams."""
-    bindings.update(
-        {
-            "_state_paths": _state_paths,
-            "_footprint": _footprint,
-            "_cleanup": _cleanup,
-            "_cleanup_cli": _cleanup_cli,
-            "_cli_dispatch": _cli_dispatch,
-            "_cli_parser": _cli_parser,
-            "_cloud": _cloud,
-            "_desktop_action_commands_cli": _desktop_action_commands_cli,
-            "_desktop_actions": _desktop_actions,
-            "_desktop_artifacts": _desktop_artifacts,
-            "_desktop_commands_cli": _desktop_commands_cli,
-            "_desktop_cli": _desktop_cli,
-            "_desktop_doctor": _desktop_doctor,
-            "_desktop_setup_commands_cli": _desktop_setup_commands_cli,
-            "_evidence_cli": _evidence_cli,
-            "_execution": _execution,
-            "_git_helpers": _git_helpers,
-            "_github_workflows": _github_workflows,
-            "_io_utils": _io_utils,
-            "_job_queue": _job_queue,
-            "_linux_desktop_action": _linux_desktop_action,
-            "_linux_target": _linux_target,
-            "_local_ci_commands_cli": _local_ci_commands_cli,
-            "_logs_cli": _logs_cli,
-            "_macos_desktop": _macos_desktop,
-            "_macos_desktop_action": _macos_desktop_action,
-            "_notifications": _notifications,
-            "_normalize": _normalize,
-            "_provenance": _provenance,
-            "_queue_commands_cli": _queue_commands_cli,
-            "_queue_lifecycle": _queue_lifecycle,
-            "_queue_orchestrator": _queue_orchestrator,
-            "_reporting": _reporting,
-            "_runner_state": _runner_state,
-            "_source_prep": _source_prep,
-            "_ssh_bundle": _ssh_bundle,
-            "_ssh_subprocess": _ssh_subprocess,
-            "_target_preflight": _target_preflight,
-            "_targets": _targets,
-            "_windows_desktop_action": _windows_desktop_action,
-            "_windows_probe": _windows_probe,
-            "_windows_target": _windows_target,
-            "evidence_index_module": _evidence_index,
-            "LockBusyError": LockBusyError,
-        }
-    )
+    _local_ci_bootstrap_module_aliases.install_bootstrap_module_aliases(bindings, globals())
 
     _state_path_bindings.install_state_path_helpers(bindings)
     _footprint_bindings.install_footprint_helpers(bindings)
