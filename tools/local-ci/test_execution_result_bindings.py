@@ -2,7 +2,6 @@
 """Tests for validation result dependency bindings."""
 
 from module_test_utils import load_module_from_path
-import types
 import unittest
 from unittest import mock
 from pathlib import Path
@@ -18,19 +17,6 @@ def load_module():
 class ExecutionResultBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
-
-    def test_result_installer_wires_selected_exports(self):
-        execution = types.SimpleNamespace(
-            unreachable_target_result=lambda target, detail="Host unreachable": {"target": target, "detail": detail},
-            sorted_target_results=lambda results: list(reversed(results)),
-        )
-        bindings = {"_execution": execution}
-
-        self.mod.install_execution_result_helpers(bindings, ("unreachable_target_result", "sorted_target_results"))
-
-        self.assertEqual(bindings["unreachable_target_result"]("linux"), {"target": "linux", "detail": "Host unreachable"})
-        self.assertEqual(bindings["sorted_target_results"]([1, 2]), [2, 1])
-        self.assertNotIn("validation_result_from_run", bindings)
 
     def test_result_exports_are_composed_from_focused_groups(self):
         expected = (

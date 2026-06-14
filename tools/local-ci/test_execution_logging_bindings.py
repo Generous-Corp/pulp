@@ -5,6 +5,7 @@ from module_test_utils import load_module_from_path
 from pathlib import Path
 import types
 import unittest
+from unittest import mock
 
 
 MODULE_PATH = Path(__file__).with_name("execution_logging_bindings.py")
@@ -56,24 +57,24 @@ class ExecutionLoggingBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.EXECUTION_LOGGING_EXPORTS, expected)
         self.assertEqual(len(expected), len(set(expected)))
 
-    def test_logging_installer_wires_selected_exports(self):
-        execution = types.SimpleNamespace(
-            HEARTBEAT_INTERVAL_SECS=15.0,
-            STUCK_IDLE_SECS=90.0,
-            parse_progress_marker=lambda line: {"line": line},
-            run_logged_command=lambda cmd, **kwargs: {"cmd": cmd, **kwargs},
-        )
-        bindings = {"_execution": execution}
+    def test_logging_installer_routes_selected_groups_and_fallback(self):
+        bindings = {"_execution": object()}
 
-        self.mod.install_execution_logging_helpers(
-            bindings,
-            ("heartbeat_interval_secs", "parse_progress_marker", "run_logged_command"),
-        )
+        with (
+            mock.patch.object(self.mod, "install_execution_logging_timing_helpers") as timing,
+            mock.patch.object(self.mod, "install_execution_progress_marker_helpers") as progress,
+            mock.patch.object(self.mod, "install_execution_logged_command_helpers") as command,
+            mock.patch.object(self.mod, "install_local_helpers") as install_local,
+        ):
+            self.mod.install_execution_logging_helpers(
+                bindings,
+                ("heartbeat_interval_secs", "parse_progress_marker", "run_logged_command", "unknown_helper"),
+            )
 
-        self.assertEqual(bindings["heartbeat_interval_secs"](), 15.0)
-        self.assertEqual(bindings["parse_progress_marker"]("line"), {"line": "line"})
-        self.assertEqual(bindings["run_logged_command"](["cmd"])["cmd"], ["cmd"])
-        self.assertNotIn("stuck_idle_secs", bindings)
+        timing.assert_called_once_with(bindings, ("heartbeat_interval_secs",))
+        progress.assert_called_once_with(bindings, ("parse_progress_marker",))
+        command.assert_called_once_with(bindings, ("run_logged_command",))
+        install_local.assert_called_once_with(bindings, self.mod.__dict__, ("unknown_helper",))
 
 
 if __name__ == "__main__":
