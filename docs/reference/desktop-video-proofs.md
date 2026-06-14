@@ -13,6 +13,44 @@ diff does not explain enough.
 - `pulp ci-local desktop doctor mac` reports Screen Recording, ffmpeg, and
   AVFoundation screen-input state.
 
+## Install Model
+
+The feature-branch setup below is intentionally source-tree oriented while the
+workflow is still being reviewed. Before this lands as a normal user-facing
+surface, the intended install shape is an optional Pulp tool add-on:
+
+```bash
+pulp tool install video-proof
+pulp tool doctor
+pulp ci-local desktop video-setup mac --check
+```
+
+The video-proof tool is not a normal `pulp add` package. `pulp add` is for
+project dependencies that update a project's package lock file, generated CMake
+wiring, dependency metadata, and notices. Validation video proof capture is
+machine-level developer tooling: it needs host permissions, ffmpeg, Node/npm,
+Remotion composition, Terminal.app permission handoff on macOS, and optional
+host/simulator integrations. Those dependencies should stay outside user
+projects and outside the core runtime.
+
+The long-term split should stay narrow:
+
+- Core Pulp/local-CI keeps the command surface, run manifest schema, report
+  schema, attachment budget logic, and clear "video-proof tooling is not
+  installed" remediation text.
+- The optional `video-proof` tool owns ffmpeg/Remotion bootstrap, composition
+  templates, renderer scripts, and any large or license-sensitive developer
+  dependencies.
+- The source-tree developer path keeps using `npm --prefix tools/local-ci
+  install` until the add-on package is produced.
+- Reusable demo scenarios or source material may later be distributed as
+  reviewed Pulp kits/content packs, but the recorder/composer itself should
+  remain a tool add-on.
+
+This keeps normal Pulp installs small, avoids installing Remotion or ffmpeg
+unless the user asks for video evidence, and gives Remotion the same
+developer-supplied dependency treatment as other optional SDK/tool integrations.
+
 Print the portable first-run checklist for another Mac, such as blackbook:
 
 ```bash

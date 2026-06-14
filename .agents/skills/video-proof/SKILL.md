@@ -22,6 +22,12 @@ or reviewer comprehension matters.
 
 - Work on a feature branch or dedicated worktree until humans have reviewed the
   proof workflow. Do not merge generated videos or local config.
+- Treat video proof capture as optional developer tooling, not a core runtime
+  dependency and not a normal `pulp add` project package. The eventual
+  user-facing install target is a `pulp tool install video-proof` add-on that
+  owns ffmpeg/Remotion bootstrap and large or license-sensitive dependencies.
+  Keep source-tree setup (`npm --prefix tools/local-ci install`) as the branch
+  developer path until that add-on exists.
 - Prefer short clips: 5-12 seconds is the normal range. Keep the recording
   focused on the window or component under test.
 - Prefer `video/proof-composed.mp4` for review. Keep `video/proof.mp4` as the
