@@ -4,6 +4,7 @@
 from module_test_utils import load_module_from_path
 import types
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -45,6 +46,20 @@ class QueueLogDisplayBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.job_logs_header_line(bindings, {"id": "job"}), "header")
         self.assertEqual(self.mod.log_section_header_line(bindings, "mac"), "section")
         self.assertEqual(self.mod.empty_log_line(bindings), "empty")
+
+    def test_install_queue_log_display_helpers_wires_named_exports(self):
+        bindings = {}
+
+        with mock.patch.object(self.mod, "install_local_helpers") as install_local:
+            self.mod.install_queue_log_display_helpers(bindings, ("empty_log_line", "custom_log_display"))
+
+        self.assertEqual(
+            install_local.call_args_list,
+            [
+                mock.call(bindings, self.mod.__dict__, ("empty_log_line",)),
+                mock.call(bindings, self.mod.__dict__, ("custom_log_display",)),
+            ],
+        )
 
 
 if __name__ == "__main__":

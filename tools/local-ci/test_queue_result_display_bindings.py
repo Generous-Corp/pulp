@@ -4,6 +4,7 @@
 from module_test_utils import load_module_from_path
 import types
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -45,6 +46,20 @@ class QueueResultDisplayBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.target_result_line(bindings, {"target": "mac"}), "target")
         self.assertEqual(self.mod.result_target_lines(bindings, {"targets": []}), ["target"])
         self.assertEqual(self.mod.result_overall_line(bindings, {"overall": "pass"}), "overall")
+
+    def test_install_queue_result_display_helpers_wires_named_exports(self):
+        bindings = {}
+
+        with mock.patch.object(self.mod, "install_local_helpers") as install_local:
+            self.mod.install_queue_result_display_helpers(bindings, ("result_overall_line", "custom_result_display"))
+
+        self.assertEqual(
+            install_local.call_args_list,
+            [
+                mock.call(bindings, self.mod.__dict__, ("result_overall_line",)),
+                mock.call(bindings, self.mod.__dict__, ("custom_result_display",)),
+            ],
+        )
 
 
 if __name__ == "__main__":

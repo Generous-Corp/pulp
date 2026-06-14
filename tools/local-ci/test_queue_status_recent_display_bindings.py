@@ -4,6 +4,7 @@
 from module_test_utils import load_module_from_path
 import types
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -51,6 +52,23 @@ class QueueStatusRecentDisplayBindingsTests(unittest.TestCase):
             [
                 ("recent_completed_status_line", ({"id": "job"}, {"overall": "pass"}), {}),
                 ("recent_completed_missing_result_line", ({"id": "job"},), {}),
+            ],
+        )
+
+    def test_install_queue_status_recent_display_helpers_wires_named_exports(self):
+        bindings = {}
+
+        with mock.patch.object(self.mod, "install_local_helpers") as install_local:
+            self.mod.install_queue_status_recent_display_helpers(
+                bindings,
+                ("recent_completed_status_line", "custom_recent_status"),
+            )
+
+        self.assertEqual(
+            install_local.call_args_list,
+            [
+                mock.call(bindings, self.mod.__dict__, ("recent_completed_status_line",)),
+                mock.call(bindings, self.mod.__dict__, ("custom_recent_status",)),
             ],
         )
 

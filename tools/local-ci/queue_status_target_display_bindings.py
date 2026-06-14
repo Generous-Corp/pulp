@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from binding_utils import binding as _binding
+from binding_utils import install_local_helpers
 
 
 QUEUE_STATUS_TARGET_DISPLAY_EXPORTS = (
@@ -30,3 +31,16 @@ def target_state_detail_parts(bindings: Mapping[str, Any], state: dict) -> list[
 
 def status_target_detail_lines(bindings: Mapping[str, Any], job: dict, active_targets: dict | None) -> list[str]:
     return _binding(bindings, "_queue_orchestrator").status_target_detail_lines(job, active_targets)
+
+
+def install_queue_status_target_display_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = QUEUE_STATUS_TARGET_DISPLAY_EXPORTS,
+) -> None:
+    known_names = set(QUEUE_STATUS_TARGET_DISPLAY_EXPORTS)
+    target_names = tuple(name for name in names if name in known_names)
+    unknown_names = tuple(name for name in names if name not in known_names)
+
+    install_local_helpers(bindings, globals(), target_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)

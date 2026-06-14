@@ -29,19 +29,23 @@ class QueueDisplayBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.QUEUE_DISPLAY_EXPORTS, expected)
         self.assertEqual(len(expected), len(set(expected)))
 
-    def test_install_queue_display_helpers_routes_known_and_unknown_exports(self):
+    def test_install_queue_display_helpers_routes_focused_groups_and_unknown_exports(self):
         bindings = {}
 
-        with mock.patch.object(self.mod, "install_local_helpers") as install:
+        with (
+            mock.patch.object(self.mod, "install_queue_command_display_helpers") as command,
+            mock.patch.object(self.mod, "install_queue_status_display_helpers") as status,
+            mock.patch.object(self.mod, "install_queue_result_display_helpers") as result,
+            mock.patch.object(self.mod, "install_queue_log_display_helpers") as log,
+            mock.patch.object(self.mod, "install_local_helpers") as install,
+        ):
             self.mod.install_queue_display_helpers(bindings, names=("summarize_job", "result_overall_line", "external"))
 
-        self.assertEqual(
-            install.call_args_list,
-            [
-                mock.call(bindings, self.mod.__dict__, ("summarize_job", "result_overall_line")),
-                mock.call(bindings, self.mod.__dict__, ("external",)),
-            ],
-        )
+        command.assert_called_once_with(bindings, ("summarize_job",))
+        status.assert_called_once_with(bindings, ())
+        result.assert_called_once_with(bindings, ("result_overall_line",))
+        log.assert_called_once_with(bindings, ())
+        install.assert_called_once_with(bindings, self.mod.__dict__, ("external",))
 
 
 if __name__ == "__main__":

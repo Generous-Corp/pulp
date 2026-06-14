@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from binding_utils import binding as _binding
+from binding_utils import install_local_helpers
 
 
 QUEUE_COMMAND_DISPLAY_EXPORTS = (
@@ -35,3 +36,16 @@ def enqueue_command_result_line(bindings: Mapping[str, Any], job: dict, *, creat
 
 def drain_runner_active_line(bindings: Mapping[str, Any], runner_info: dict | None) -> str:
     return _binding(bindings, "_queue_orchestrator").drain_runner_active_line(runner_info)
+
+
+def install_queue_command_display_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = QUEUE_COMMAND_DISPLAY_EXPORTS,
+) -> None:
+    known_names = set(QUEUE_COMMAND_DISPLAY_EXPORTS)
+    command_names = tuple(name for name in names if name in known_names)
+    unknown_names = tuple(name for name in names if name not in known_names)
+
+    install_local_helpers(bindings, globals(), command_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)

@@ -4,6 +4,7 @@
 from module_test_utils import load_module_from_path
 import types
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -59,6 +60,23 @@ class QueueStatusTargetDisplayBindingsTests(unittest.TestCase):
                 ("status_submission_lines", ({"id": "job"},), {}),
                 ("target_state_detail_parts", ({"status": "pass"},), {}),
                 ("status_target_detail_lines", ({"id": "job"}, {"mac": {}}), {}),
+            ],
+        )
+
+    def test_install_queue_status_target_display_helpers_wires_named_exports(self):
+        bindings = {}
+
+        with mock.patch.object(self.mod, "install_local_helpers") as install_local:
+            self.mod.install_queue_status_target_display_helpers(
+                bindings,
+                ("status_target_states", "custom_target_status"),
+            )
+
+        self.assertEqual(
+            install_local.call_args_list,
+            [
+                mock.call(bindings, self.mod.__dict__, ("status_target_states",)),
+                mock.call(bindings, self.mod.__dict__, ("custom_target_status",)),
             ],
         )
 
