@@ -7,6 +7,7 @@ from typing import Any
 
 from binding_utils import binding as _binding
 from binding_utils import install_local_helpers
+from logs_resolution_command_dependency_bindings import logs_resolution_command_dependencies
 
 
 LOGS_RESOLUTION_COMMAND_EXPORTS = (
@@ -17,9 +18,7 @@ LOGS_RESOLUTION_COMMAND_EXPORTS = (
 def resolve_job_for_logs(bindings: Mapping[str, Any], job_ref: str | None) -> dict | None:
     return _binding(bindings, "_logs_cli").resolve_job_for_logs(
         job_ref,
-        load_queue_fn=_binding(bindings, "load_queue"),
-        current_runner_info_fn=_binding(bindings, "current_runner_info"),
-        select_job_for_logs_fn=_binding(bindings, "_queue_orchestrator").select_job_for_logs,
+        **logs_resolution_command_dependencies(bindings),
     )
 
 

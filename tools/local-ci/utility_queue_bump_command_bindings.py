@@ -7,6 +7,7 @@ from typing import Any
 
 from binding_utils import binding as _binding
 from binding_utils import install_local_helpers
+from utility_queue_bump_command_dependency_bindings import utility_queue_bump_command_dependencies
 
 
 UTILITY_QUEUE_BUMP_COMMAND_EXPORTS = (
@@ -17,9 +18,7 @@ UTILITY_QUEUE_BUMP_COMMAND_EXPORTS = (
 def cmd_bump(bindings: Mapping[str, Any], args: Any) -> int:
     return _binding(bindings, "_queue_commands_cli").cmd_bump(
         args,
-        normalize_priority_fn=_binding(bindings, "normalize_priority"),
-        bump_queue_command_job_fn=_binding(bindings, "bump_queue_command_job"),
-        bump_queue_command_result_line_fn=_binding(bindings, "bump_queue_command_result_line"),
+        **utility_queue_bump_command_dependencies(bindings),
     )
 
 

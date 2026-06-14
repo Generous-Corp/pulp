@@ -22,7 +22,7 @@ class UtilityQueueCancelCommandBindingsTests(unittest.TestCase):
     def test_exports_match_queue_cancel_command_helpers(self):
         self.assertEqual(self.mod.UTILITY_QUEUE_CANCEL_COMMAND_EXPORTS, ("cmd_cancel",))
 
-    def test_cmd_cancel_binds_facade_dependencies(self):
+    def test_cmd_cancel_delegates_with_assembled_dependencies(self):
         captured = {}
 
         def runner(*args, **kwargs):
@@ -36,14 +36,13 @@ class UtilityQueueCancelCommandBindingsTests(unittest.TestCase):
             "cancel_queue_command_result_line": object(),
         }
         args_obj = object()
+        deps = {"cancel_queue_command_job_fn": object(), "cancel_queue_command_result_line_fn": object()}
 
-        self.assertEqual(self.mod.cmd_cancel(bindings, args_obj), 4)
+        with mock.patch.object(self.mod, "utility_queue_cancel_command_dependencies", return_value=deps):
+            self.assertEqual(self.mod.cmd_cancel(bindings, args_obj), 4)
         self.assertEqual(captured["args"], (args_obj,))
-        self.assertIs(captured["kwargs"]["cancel_queue_command_job_fn"], bindings["cancel_queue_command_job"])
-        self.assertIs(
-            captured["kwargs"]["cancel_queue_command_result_line_fn"],
-            bindings["cancel_queue_command_result_line"],
-        )
+        self.assertIs(captured["kwargs"]["cancel_queue_command_job_fn"], deps["cancel_queue_command_job_fn"])
+        self.assertIs(captured["kwargs"]["cancel_queue_command_result_line_fn"], deps["cancel_queue_command_result_line_fn"])
 
     def test_install_utility_queue_cancel_command_helpers_wires_named_exports(self):
         bindings = {}

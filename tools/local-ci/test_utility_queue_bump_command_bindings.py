@@ -22,7 +22,7 @@ class UtilityQueueBumpCommandBindingsTests(unittest.TestCase):
     def test_exports_match_queue_bump_command_helpers(self):
         self.assertEqual(self.mod.UTILITY_QUEUE_BUMP_COMMAND_EXPORTS, ("cmd_bump",))
 
-    def test_cmd_bump_binds_facade_dependencies(self):
+    def test_cmd_bump_delegates_with_assembled_dependencies(self):
         captured = {}
 
         def runner(*args, **kwargs):
@@ -37,15 +37,13 @@ class UtilityQueueBumpCommandBindingsTests(unittest.TestCase):
             "bump_queue_command_result_line": object(),
         }
         args_obj = object()
+        deps = {"normalize_priority_fn": object(), "bump_queue_command_job_fn": object()}
 
-        self.assertEqual(self.mod.cmd_bump(bindings, args_obj), 4)
+        with mock.patch.object(self.mod, "utility_queue_bump_command_dependencies", return_value=deps):
+            self.assertEqual(self.mod.cmd_bump(bindings, args_obj), 4)
         self.assertEqual(captured["args"], (args_obj,))
-        self.assertIs(captured["kwargs"]["normalize_priority_fn"], bindings["normalize_priority"])
-        self.assertIs(captured["kwargs"]["bump_queue_command_job_fn"], bindings["bump_queue_command_job"])
-        self.assertIs(
-            captured["kwargs"]["bump_queue_command_result_line_fn"],
-            bindings["bump_queue_command_result_line"],
-        )
+        self.assertIs(captured["kwargs"]["normalize_priority_fn"], deps["normalize_priority_fn"])
+        self.assertIs(captured["kwargs"]["bump_queue_command_job_fn"], deps["bump_queue_command_job_fn"])
 
     def test_install_utility_queue_bump_command_helpers_wires_named_exports(self):
         bindings = {}

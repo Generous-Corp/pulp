@@ -22,7 +22,7 @@ class LogsRunCommandBindingsTests(unittest.TestCase):
     def test_exports_match_logs_run_helpers(self):
         self.assertEqual(self.mod.LOGS_RUN_COMMAND_EXPORTS, ("cmd_logs",))
 
-    def test_cmd_logs_binds_facade_dependencies(self):
+    def test_cmd_logs_delegates_with_assembled_dependencies(self):
         captured = {}
 
         def cmd_runner(*args, **kwargs):
@@ -43,22 +43,14 @@ class LogsRunCommandBindingsTests(unittest.TestCase):
             "empty_log_line",
         ]:
             bindings[name] = object()
+        deps = {"resolve_job_for_logs_fn": object(), "empty_log_line_fn": object()}
 
         args_obj = object()
-        self.assertEqual(self.mod.cmd_logs(bindings, args_obj), 2)
+        with mock.patch.object(self.mod, "logs_run_command_dependencies", return_value=deps):
+            self.assertEqual(self.mod.cmd_logs(bindings, args_obj), 2)
         self.assertEqual(captured["cmd_args"], (args_obj,))
-        for name in [
-            "resolve_job_for_logs",
-            "target_log_path",
-            "job_logs_dir",
-            "tail_lines",
-            "missing_job_logs_line",
-            "missing_log_files_line",
-            "job_logs_header_line",
-            "log_section_header_line",
-            "empty_log_line",
-        ]:
-            self.assertIs(captured["cmd_kwargs"][f"{name}_fn"], bindings[name])
+        self.assertIs(captured["cmd_kwargs"]["resolve_job_for_logs_fn"], deps["resolve_job_for_logs_fn"])
+        self.assertIs(captured["cmd_kwargs"]["empty_log_line_fn"], deps["empty_log_line_fn"])
 
     def test_install_logs_run_command_helpers_wires_named_exports(self):
         bindings = {}

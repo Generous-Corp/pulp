@@ -7,6 +7,7 @@ from typing import Any
 
 from binding_utils import binding as _binding
 from binding_utils import install_local_helpers
+from utility_queue_cancel_command_dependency_bindings import utility_queue_cancel_command_dependencies
 
 
 UTILITY_QUEUE_CANCEL_COMMAND_EXPORTS = (
@@ -17,8 +18,7 @@ UTILITY_QUEUE_CANCEL_COMMAND_EXPORTS = (
 def cmd_cancel(bindings: Mapping[str, Any], args: Any) -> int:
     return _binding(bindings, "_queue_commands_cli").cmd_cancel(
         args,
-        cancel_queue_command_job_fn=_binding(bindings, "cancel_queue_command_job"),
-        cancel_queue_command_result_line_fn=_binding(bindings, "cancel_queue_command_result_line"),
+        **utility_queue_cancel_command_dependencies(bindings),
     )
 
 
