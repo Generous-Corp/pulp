@@ -1077,6 +1077,10 @@ int cmd_tool(const std::vector<std::string>& args) {
             }
 
             auto& tool = it->second;
+            if (!artifact_manifest.empty() && tool.install_method != "npm_package") {
+                print_fail("--artifact-manifest is only valid with npm_package tools");
+                return 1;
+            }
 
             // Install dependencies first
             for (auto& dep : tool.requires_tools) {

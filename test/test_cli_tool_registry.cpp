@@ -975,6 +975,13 @@ TEST_CASE("tool command handles local list path doctor and error branches",
 
     {
         ScopedOutput output;
+        REQUIRE(cmd_tool({"install", "managed-cmd", "--artifact-manifest", "video-proof.manifest.json"}) == 1);
+        REQUIRE(output.err.str().find("--artifact-manifest is only valid with npm_package tools") !=
+                std::string::npos);
+    }
+
+    {
+        ScopedOutput output;
         REQUIRE(cmd_tool({"run"}) == 1);
         REQUIRE(output.err.str().find("Usage: pulp tool run") != std::string::npos);
     }
