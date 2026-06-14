@@ -7,6 +7,7 @@ from module_test_utils import load_module_from_path
 from pathlib import Path
 import types
 import unittest
+from unittest import mock
 
 
 MODULE_PATH = Path(__file__).with_name("state_path_core_bindings.py")
@@ -75,25 +76,22 @@ class StatePathCoreBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.STATE_PATH_CORE_EXPORTS, expected)
         self.assertEqual(len(expected), len(set(expected)))
 
-    def test_install_state_path_core_helpers_wires_named_exports(self) -> None:
-        bindings, calls = self._bindings()
+    def test_install_state_path_core_helpers_routes_focused_groups(self) -> None:
+        bindings = {}
 
-        self.mod.install_state_path_core_helpers(bindings, ("state_dir", "logs_dir"))
+        with (
+            mock.patch.object(self.mod, "install_state_path_config_helpers") as config,
+            mock.patch.object(self.mod, "install_state_path_store_helpers") as store,
+            mock.patch.object(self.mod, "install_local_helpers") as install_local,
+        ):
+            self.mod.install_state_path_core_helpers(
+                bindings,
+                ("config_path", "queue_path", "custom_state_path_export"),
+            )
 
-        self.assertEqual(bindings["state_dir"](), Path("/state"))
-        self.assertEqual(bindings["logs_dir"](), Path("/state/logs"))
-        self.assertEqual(bindings["state_dir"].__name__, "state_dir")
-        self.assertEqual(bindings["logs_dir"].__name__, "logs_dir")
-        self.assertEqual([call[0] for call in calls], ["state_dir", "logs_dir"])
-
-    def test_install_state_path_core_helpers_routes_focused_exports(self) -> None:
-        bindings, calls = self._bindings()
-
-        self.mod.install_state_path_core_helpers(bindings, ("config_path", "queue_path"))
-
-        self.assertEqual(bindings["config_path"](), Path("/state/config.json"))
-        self.assertEqual(bindings["queue_path"](), Path("/state/queue.json"))
-        self.assertEqual([call[0] for call in calls], ["config_path", "queue_path"])
+        config.assert_called_once_with(bindings, ("config_path",))
+        store.assert_called_once_with(bindings, ("queue_path",))
+        install_local.assert_called_once_with(bindings, self.mod.__dict__, ("custom_state_path_export",))
 
 
 if __name__ == "__main__":
