@@ -100,7 +100,7 @@ class MacOSTerminalRunnerTests(unittest.TestCase):
                 if "exists process" in cmd[-1]:
                     self.assertIn("exists process", cmd[-1])
                     return subprocess.CompletedProcess(cmd, 0, "false\n", "")
-                if "do script" in cmd[-1]:
+                if "terminal-command.sh" in cmd[-1]:
                     wrapper = tmp_path / "terminal-command.sh"
                     self.assertTrue(wrapper.exists())
                     wrapper_text = wrapper.read_text()
@@ -156,7 +156,7 @@ class MacOSTerminalRunnerTests(unittest.TestCase):
             def fake_run(cmd, **_kwargs):
                 if "exists process" in cmd[-1]:
                     return subprocess.CompletedProcess(cmd, 0, "true\n", "")
-                if "do script" in cmd[-1]:
+                if "terminal-command.sh" in cmd[-1]:
                     captured_wrapper["text"] = (tmp_path / "terminal-command.sh").read_text()
                     (tmp_path / "stdout.txt").write_text("")
                     (tmp_path / "stderr.txt").write_text("")
@@ -476,6 +476,37 @@ class MacOSTerminalRunnerTests(unittest.TestCase):
         self.assertEqual(result["returncode"], 124)
         self.assertEqual(result["stderr"], "osascript timed out after 0.25s")
         self.assertEqual(calls[0][1]["timeout"], 0.25)
+
+    def test_close_terminal_windows_continues_when_state_is_unknown(self):
+        calls = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            script = cmd[-1] if cmd[0] == "osascript" else ""
+            if "set closedCount" in script:
+                return subprocess.CompletedProcess(cmd, 0, "1\n", "")
+            if "set terminalPid" in script:
+                raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout") or 0)
+            if "set exitCount" in script:
+                return subprocess.CompletedProcess(cmd, 0, "1\n", "")
+            if "set clearedTitleCount" in script:
+                return subprocess.CompletedProcess(cmd, 0, "1\n", "")
+            if "set ttyRows" in script:
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        result = self.mod.close_terminal_windows_with_title(
+            "Pulp Video Proof local-ci test1234",
+            run_fn=fake_run,
+            sleep_fn=lambda _secs: None,
+            attempts=1,
+            osascript_timeout_secs=0.25,
+        )
+
+        self.assertEqual(result["exit_attempt_count"], 1)
+        self.assertEqual(result["stale_title_clear_count"], 1)
+        self.assertTrue(any(cmd[0] == "osascript" and 'do script "exit"' in cmd[-1] for cmd in calls))
+        self.assertTrue(any(cmd[0] == "osascript" and 'set custom title of t to ""' in cmd[-1] for cmd in calls))
 
     def test_terminal_app_running(self):
         result = self.mod.terminal_app_running(

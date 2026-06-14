@@ -256,7 +256,7 @@ def close_terminal_windows_with_title(
             if remaining_proof_count == 0:
                 closed_count = close_attempt_count
                 break
-    if remaining_proof_count and remaining_proof_count > 0:
+    if remaining_proof_count is None or remaining_proof_count > 0:
         exit_result = run_osascript(exit_tab_script)
         if exit_result.returncode == 0:
             try:
@@ -281,7 +281,7 @@ def close_terminal_windows_with_title(
                     except ValueError:
                         remaining_proof_count = None
                         other_window_count = None
-    if remaining_proof_count and remaining_proof_count > 0:
+    if remaining_proof_count is None or remaining_proof_count > 0:
         tab_result = run_osascript(close_tab_script)
         if tab_result.returncode == 0:
             try:
@@ -303,7 +303,7 @@ def close_terminal_windows_with_title(
         closed_count = close_attempt_count
     else:
         closed_count = 0
-    if remaining_proof_count and remaining_proof_count > 0:
+    if remaining_proof_count is None or remaining_proof_count > 0:
         clear_title_result = run_osascript(clear_stale_title_script)
         if clear_title_result.returncode == 0:
             try:
@@ -324,7 +324,7 @@ def close_terminal_windows_with_title(
                             other_window_count = None
                 if remaining_proof_count == 0:
                     closed_count = close_attempt_count
-    if remaining_proof_count and remaining_proof_count > 0:
+    if remaining_proof_count is None or remaining_proof_count > 0:
         tty_result = run_osascript(matching_ttys_script)
         if tty_result.returncode == 0:
             tty_names = []
