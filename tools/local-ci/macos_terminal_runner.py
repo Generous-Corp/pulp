@@ -68,7 +68,7 @@ def close_terminal_windows_with_title(
     sleep_fn: Callable[[float], None] = time.sleep,
     attempts: int = 5,
     allow_terminate_with_nonproof_windows: bool = False,
-    osascript_timeout_secs: float = 5.0,
+    osascript_timeout_secs: float = 1.0,
 ) -> dict:
     def run_osascript(script: str) -> subprocess.CompletedProcess:
         try:
