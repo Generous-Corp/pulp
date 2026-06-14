@@ -7,6 +7,11 @@ from typing import Any
 
 from binding_utils import install_local_helpers
 from binding_utils import binding as _binding
+from windows_probe_core_dependency_bindings import (
+    run_windows_ssh_powershell_dependencies,
+    windows_contract_expand_expression_dependencies,
+    windows_session_agent_template_path_dependencies,
+)
 
 
 WINDOWS_PROBE_CORE_EXPORTS = (
@@ -32,7 +37,7 @@ def run_windows_ssh_powershell(bindings: Mapping[str, Any], host: str, ps_script
         host,
         ps_script,
         timeout=timeout,
-        run_ssh_subprocess_fn=_binding(bindings, "run_ssh_subprocess"),
+        **run_windows_ssh_powershell_dependencies(bindings),
     )
 
 
@@ -43,12 +48,13 @@ def parse_windows_ssh_json(bindings: Mapping[str, Any], stdout: str) -> dict:
 def windows_contract_expand_expression(bindings: Mapping[str, Any], raw_value: str) -> str:
     return _binding(bindings, "_windows_probe").windows_contract_expand_expression(
         raw_value,
-        ps_literal_fn=_binding(bindings, "ps_literal"),
+        **windows_contract_expand_expression_dependencies(bindings),
     )
 
 
 def windows_session_agent_template_path(bindings: Mapping[str, Any]):
-    return _binding(bindings, "_windows_probe").windows_session_agent_template_path(_binding(bindings, "SCRIPT_DIR"))
+    dependencies = windows_session_agent_template_path_dependencies(bindings)
+    return _binding(bindings, "_windows_probe").windows_session_agent_template_path(dependencies["script_dir"])
 
 
 def install_windows_probe_core_helpers(

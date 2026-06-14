@@ -7,8 +7,8 @@ from pathlib import Path
 from typing import Any
 
 from binding_utils import binding as _binding
-from binding_utils import binding_attr as _binding_attr
 from binding_utils import install_local_helpers
+from desktop_infra_git_run_dependency_bindings import run_git_dependencies
 
 
 DESKTOP_INFRA_GIT_RUN_EXPORTS = ("run_git",)
@@ -19,7 +19,7 @@ def run_git(bindings: Mapping[str, Any], args: list[str], *, cwd: Path, check: b
         args,
         cwd=cwd,
         check=check,
-        run_fn=_binding_attr(bindings, "subprocess", "run"),
+        **run_git_dependencies(bindings),
     )
 
 

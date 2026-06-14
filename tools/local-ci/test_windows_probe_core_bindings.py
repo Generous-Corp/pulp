@@ -7,6 +7,7 @@ from module_test_utils import load_module_from_path
 from pathlib import Path
 import types
 import unittest
+from unittest import mock
 
 
 MODULE_PATH = Path(__file__).with_name("windows_probe_core_bindings.py")
@@ -69,7 +70,7 @@ class WindowsProbeCoreBindingsTests(unittest.TestCase):
         )
         self.assertEqual(captured["template"][0], (bindings["SCRIPT_DIR"],))
 
-    def test_run_windows_ssh_powershell_binds_ssh_runner(self) -> None:
+    def test_run_windows_ssh_powershell_delegates_with_assembled_dependencies(self) -> None:
         captured = {}
 
         def runner(*args, **kwargs):
@@ -79,14 +80,15 @@ class WindowsProbeCoreBindingsTests(unittest.TestCase):
 
         windows_probe = types.SimpleNamespace(run_windows_ssh_powershell=runner)
         bindings = self._bindings(windows_probe)
-        bindings["run_ssh_subprocess"] = object()
+        deps = {"run_ssh_subprocess_fn": object()}
 
-        self.assertEqual(self.mod.run_windows_ssh_powershell(bindings, "win", "Get-Date", timeout=42), "completed")
+        with mock.patch.object(self.mod, "run_windows_ssh_powershell_dependencies", return_value=deps):
+            self.assertEqual(self.mod.run_windows_ssh_powershell(bindings, "win", "Get-Date", timeout=42), "completed")
         self.assertEqual(captured["args"], ("win", "Get-Date"))
         self.assertEqual(captured["kwargs"]["timeout"], 42)
-        self.assertIs(captured["kwargs"]["run_ssh_subprocess_fn"], bindings["run_ssh_subprocess"])
+        self.assertIs(captured["kwargs"]["run_ssh_subprocess_fn"], deps["run_ssh_subprocess_fn"])
 
-    def test_windows_contract_expand_expression_binds_facade_literal(self) -> None:
+    def test_windows_contract_expand_expression_delegates_with_assembled_dependencies(self) -> None:
         captured = {}
 
         def runner(*args, **kwargs):
@@ -96,11 +98,32 @@ class WindowsProbeCoreBindingsTests(unittest.TestCase):
 
         windows_probe = types.SimpleNamespace(windows_contract_expand_expression=runner)
         bindings = self._bindings(windows_probe)
-        bindings["ps_literal"] = object()
+        deps = {"ps_literal_fn": object()}
 
-        self.assertEqual(self.mod.windows_contract_expand_expression(bindings, "%TEMP%"), "$env:TEMP")
+        with mock.patch.object(self.mod, "windows_contract_expand_expression_dependencies", return_value=deps):
+            self.assertEqual(self.mod.windows_contract_expand_expression(bindings, "%TEMP%"), "$env:TEMP")
         self.assertEqual(captured["args"], ("%TEMP%",))
-        self.assertIs(captured["kwargs"]["ps_literal_fn"], bindings["ps_literal"])
+        self.assertIs(captured["kwargs"]["ps_literal_fn"], deps["ps_literal_fn"])
+
+    def test_windows_session_agent_template_path_delegates_with_assembled_dependencies(self) -> None:
+        captured = {}
+
+        def runner(*args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            return Path("/repo/tools/local-ci/windows-session-agent.ps1")
+
+        windows_probe = types.SimpleNamespace(windows_session_agent_template_path=runner)
+        bindings = self._bindings(windows_probe)
+        deps = {"script_dir": Path("/custom/tools/local-ci")}
+
+        with mock.patch.object(self.mod, "windows_session_agent_template_path_dependencies", return_value=deps):
+            self.assertEqual(
+                self.mod.windows_session_agent_template_path(bindings),
+                Path("/repo/tools/local-ci/windows-session-agent.ps1"),
+            )
+        self.assertEqual(captured["args"], (deps["script_dir"],))
+        self.assertEqual(captured["kwargs"], {})
 
     def test_install_windows_probe_core_helpers_wires_named_exports(self) -> None:
         captured = {}

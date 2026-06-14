@@ -7,6 +7,7 @@ from typing import Any
 
 from binding_utils import binding as _binding
 from binding_utils import install_local_helpers
+from cli_parser_dependency_bindings import build_parser_dependencies
 
 
 CLI_PARSER_EXPORTS = (
@@ -32,9 +33,7 @@ def build_local_ci_parser(
 def build_parser(bindings: Mapping[str, Any]):
     return build_local_ci_parser(
         bindings,
-        priority_values=_binding(bindings, "PRIORITY_VALUES"),
-        keep_completed_jobs=_binding(bindings, "KEEP_COMPLETED_JOBS"),
-        epilog=_binding(bindings, "__doc__"),
+        **build_parser_dependencies(bindings),
     )
 
 

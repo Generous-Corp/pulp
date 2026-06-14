@@ -7,6 +7,7 @@ from module_test_utils import load_module_from_path
 from pathlib import Path
 import types
 import unittest
+from unittest import mock
 
 
 MODULE_PATH = Path(__file__).with_name("desktop_infra_git_run_bindings.py")
@@ -27,7 +28,7 @@ class DesktopInfraGitRunBindingsTests(unittest.TestCase):
         for name in expected:
             self.assertTrue(callable(getattr(self.mod, name)))
 
-    def test_run_git_binds_subprocess_runner(self) -> None:
+    def test_run_git_delegates_with_assembled_dependencies(self) -> None:
         captured = {}
 
         def run_git(*args, **kwargs):
@@ -37,15 +38,16 @@ class DesktopInfraGitRunBindingsTests(unittest.TestCase):
 
         bindings = {
             "_git_helpers": types.SimpleNamespace(run_git=run_git),
-            "subprocess": types.SimpleNamespace(run=object()),
         }
         repo_root = Path("/repo")
+        deps = {"run_fn": object()}
 
-        self.assertEqual(self.mod.run_git(bindings, ["status"], cwd=repo_root, check=False).returncode, 0)
+        with mock.patch.object(self.mod, "run_git_dependencies", return_value=deps):
+            self.assertEqual(self.mod.run_git(bindings, ["status"], cwd=repo_root, check=False).returncode, 0)
         self.assertEqual(captured["args"], (["status"],))
         self.assertEqual(captured["kwargs"]["cwd"], repo_root)
         self.assertEqual(captured["kwargs"]["check"], False)
-        self.assertIs(captured["kwargs"]["run_fn"], bindings["subprocess"].run)
+        self.assertIs(captured["kwargs"]["run_fn"], deps["run_fn"])
 
 if __name__ == "__main__":
     unittest.main()
