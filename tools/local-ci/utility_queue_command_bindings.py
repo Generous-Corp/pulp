@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from binding_utils import binding as _binding
+from binding_utils import install_local_helpers
 
 
 UTILITY_QUEUE_COMMAND_EXPORTS = (
@@ -29,3 +30,16 @@ def cmd_cancel(bindings: Mapping[str, Any], args: Any) -> int:
         cancel_queue_command_job_fn=_binding(bindings, "cancel_queue_command_job"),
         cancel_queue_command_result_line_fn=_binding(bindings, "cancel_queue_command_result_line"),
     )
+
+
+def install_utility_queue_command_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = UTILITY_QUEUE_COMMAND_EXPORTS,
+) -> None:
+    known_names = set(UTILITY_QUEUE_COMMAND_EXPORTS)
+    queue_names = tuple(name for name in names if name in known_names)
+    unknown_names = tuple(name for name in names if name not in known_names)
+
+    install_local_helpers(bindings, globals(), queue_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)

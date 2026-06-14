@@ -5,6 +5,7 @@ from module_test_utils import load_module_from_path
 import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 MODULE_PATH = Path(__file__).with_name("logs_command_bindings.py")
@@ -85,6 +86,20 @@ class LogsCommandBindingsTests(unittest.TestCase):
             "empty_log_line",
         ]:
             self.assertIs(captured["cmd_kwargs"][f"{name}_fn"], bindings[name])
+
+    def test_install_logs_command_helpers_wires_named_exports(self):
+        bindings = {}
+
+        with mock.patch.object(self.mod, "install_local_helpers") as install_local:
+            self.mod.install_logs_command_helpers(bindings, ("cmd_logs", "custom_logs"))
+
+        self.assertEqual(
+            install_local.call_args_list,
+            [
+                mock.call(bindings, self.mod.__dict__, ("cmd_logs",)),
+                mock.call(bindings, self.mod.__dict__, ("custom_logs",)),
+            ],
+        )
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@ from module_test_utils import load_module_from_path
 import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 MODULE_PATH = Path(__file__).with_name("cleanup_command_bindings.py")
@@ -90,6 +91,20 @@ class CleanupCommandBindingsTests(unittest.TestCase):
         self.assertIs(captured["kwargs"]["print_state_footprint_fn"], bindings["print_local_ci_state_footprint"])
         self.assertIs(captured["kwargs"]["format_size_fn"], bindings["format_size_bytes"])
         self.assertIs(captured["kwargs"]["describe_path_fn"], bindings["describe_path_for_cleanup"])
+
+    def test_install_cleanup_command_helpers_wires_named_exports(self):
+        bindings = {}
+
+        with mock.patch.object(self.mod, "install_local_helpers") as install_local:
+            self.mod.install_cleanup_command_helpers(bindings, ("cmd_cleanup", "custom_cleanup"))
+
+        self.assertEqual(
+            install_local.call_args_list,
+            [
+                mock.call(bindings, self.mod.__dict__, ("cmd_cleanup",)),
+                mock.call(bindings, self.mod.__dict__, ("custom_cleanup",)),
+            ],
+        )
 
 
 if __name__ == "__main__":

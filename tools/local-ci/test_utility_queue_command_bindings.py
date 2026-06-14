@@ -5,6 +5,7 @@ from module_test_utils import load_module_from_path
 import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 MODULE_PATH = Path(__file__).with_name("utility_queue_command_bindings.py")
@@ -68,6 +69,20 @@ class UtilityQueueCommandBindingsTests(unittest.TestCase):
                 self.assertEqual(captured["args"], (args_obj,))
                 for name in dependency_names:
                     self.assertIs(captured["kwargs"][f"{name}_fn"], bindings[name])
+
+    def test_install_utility_queue_command_helpers_wires_named_exports(self):
+        bindings = {}
+
+        with mock.patch.object(self.mod, "install_local_helpers") as install_local:
+            self.mod.install_utility_queue_command_helpers(bindings, ("cmd_cancel", "custom_queue_command"))
+
+        self.assertEqual(
+            install_local.call_args_list,
+            [
+                mock.call(bindings, self.mod.__dict__, ("cmd_cancel",)),
+                mock.call(bindings, self.mod.__dict__, ("custom_queue_command",)),
+            ],
+        )
 
 
 if __name__ == "__main__":

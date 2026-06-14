@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from binding_utils import binding as _binding
+from binding_utils import install_local_helpers
 
 
 CLEANUP_COMMAND_EXPORTS = (
@@ -42,3 +43,16 @@ def cmd_cleanup(bindings: Mapping[str, Any], args: Any) -> int:
         format_size_fn=_binding(bindings, "format_size_bytes"),
         describe_path_fn=_binding(bindings, "describe_path_for_cleanup"),
     )
+
+
+def install_cleanup_command_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = CLEANUP_COMMAND_EXPORTS,
+) -> None:
+    known_names = set(CLEANUP_COMMAND_EXPORTS)
+    cleanup_names = tuple(name for name in names if name in known_names)
+    unknown_names = tuple(name for name in names if name not in known_names)
+
+    install_local_helpers(bindings, globals(), cleanup_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)
