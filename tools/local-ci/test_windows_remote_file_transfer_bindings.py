@@ -5,7 +5,6 @@ from __future__ import annotations
 
 from module_test_utils import load_module_from_path
 from pathlib import Path
-import types
 import unittest
 from unittest import mock
 
@@ -34,7 +33,7 @@ class WindowsRemoteFileTransferBindingsTests(unittest.TestCase):
             self.assertTrue(callable(getattr(self.mod, name)))
 
     def test_install_windows_remote_file_transfer_helpers_routes_groups_and_fallback(self) -> None:
-        bindings = {"_windows_probe": types.SimpleNamespace()}
+        bindings = {}
 
         with (
             mock.patch.object(self.mod, "install_windows_remote_file_fetch_helpers") as fetch,
