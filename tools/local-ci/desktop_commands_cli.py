@@ -1715,6 +1715,30 @@ def _review_watch_command_for_manifest_map(
     return command
 
 
+def _review_create_command_for_manifest_map(args: argparse.Namespace, manifest_map_path: Path) -> str:
+    command = (
+        "python3 tools/local-ci/local_ci.py desktop review-issue "
+        f"{shlex.quote(str(Path(args.path).expanduser()))}"
+    )
+    if args.repo:
+        command += f" --repo {shlex.quote(args.repo)}"
+    if getattr(args, "check_files", False):
+        command += " --check-files"
+    command += " --create"
+    for label in getattr(args, "label", []) or []:
+        command += f" --label {shlex.quote(label)}"
+    for assignee in getattr(args, "assignee", []) or []:
+        command += f" --assignee {shlex.quote(assignee)}"
+    command += f" --manifest-map-output {shlex.quote(str(manifest_map_path))}"
+    if args.title:
+        command += f" --title {shlex.quote(args.title)}"
+    if args.body_output:
+        command += f" --body-output {shlex.quote(str(Path(args.body_output).expanduser()))}"
+    if args.json_output:
+        command += f" --json-output {shlex.quote(str(Path(args.json_output).expanduser()))}"
+    return command
+
+
 def cmd_desktop_review_issue(
     args: argparse.Namespace,
     *,
@@ -1755,6 +1779,8 @@ def cmd_desktop_review_issue(
             repo=args.repo,
             label=review_label,
         )
+        review_create_command = _review_create_command_for_manifest_map(args, manifest_map_path)
+        draft["review_create_command"] = review_create_command
         draft["review_watch_command"] = review_watch_command
         draft["manifest_map"] = {
             "path": str(manifest_map_path),
@@ -1764,8 +1790,11 @@ def cmd_desktop_review_issue(
         }
         draft["body"] = (
             draft["body"].rstrip()
-            + "\n\n## Batch Review Watch\n\n"
-            + "After this issue is created with `--create` and a manifest map is written, use:\n\n"
+            + "\n\n## Batch Review Create\n\n"
+            + "To create this issue and write the manifest map for review monitoring, use:\n\n"
+            + f"`{review_create_command}`\n"
+            + "\n## Batch Review Watch\n\n"
+            + "After the issue exists and the manifest map is written, use:\n\n"
             + f"`{review_watch_command}`\n"
         )
     atomic_write_text_fn(body_path, draft["body"])
