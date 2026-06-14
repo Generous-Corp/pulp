@@ -8,6 +8,7 @@ from binding_utils import install_local_helpers
 from queue_job_policy_bindings import (
     QUEUE_JOB_POLICY_EXPORTS,
     default_priority_for,
+    install_queue_job_policy_helpers,
     make_fingerprint,
     make_job,
     validate_ci_branch_name,
@@ -15,6 +16,7 @@ from queue_job_policy_bindings import (
 from queue_retention_policy_bindings import (
     QUEUE_RETENTION_POLICY_EXPORTS,
     find_job_unlocked,
+    install_queue_retention_policy_helpers,
     job_sort_key,
     queue_status_groups,
     recent_completed_jobs_for_status,
@@ -26,6 +28,7 @@ from queue_supersedence_policy_bindings import (
     cancellation_result,
     job_has_narrower_same_identity_scope,
     jobs_share_supersedence_scope,
+    install_queue_supersedence_policy_helpers,
     supersedence_identity_key,
     supersedence_key,
     supersedence_reason,
@@ -42,10 +45,14 @@ QUEUE_POLICY_EXPORTS = (
 
 
 def install_queue_policy_helpers(bindings: dict[str, Any], names: tuple[str, ...] = QUEUE_POLICY_EXPORTS) -> None:
+    job_names = tuple(name for name in names if name in QUEUE_JOB_POLICY_EXPORTS)
+    supersedence_names = tuple(name for name in names if name in QUEUE_SUPERSEDENCE_POLICY_EXPORTS)
+    retention_names = tuple(name for name in names if name in QUEUE_RETENTION_POLICY_EXPORTS)
     known_names = set(QUEUE_POLICY_EXPORTS)
-    policy_names = tuple(name for name in names if name in known_names)
     unknown_names = tuple(name for name in names if name not in known_names)
 
-    install_local_helpers(bindings, globals(), policy_names)
+    install_queue_job_policy_helpers(bindings, job_names)
+    install_queue_supersedence_policy_helpers(bindings, supersedence_names)
+    install_queue_retention_policy_helpers(bindings, retention_names)
     if unknown_names:
         install_local_helpers(bindings, globals(), unknown_names)

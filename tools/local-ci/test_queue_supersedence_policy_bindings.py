@@ -7,6 +7,7 @@ from module_test_utils import load_module_from_path
 from pathlib import Path
 import types
 import unittest
+from unittest import mock
 
 
 MODULE_PATH = Path(__file__).with_name("queue_supersedence_policy_bindings.py")
@@ -68,6 +69,23 @@ class QueueSupersedencePolicyBindingsTests(unittest.TestCase):
         self.assertTrue(self.mod.jobs_share_supersedence_scope(bindings, {"branch": "b"}, {"branch": "b"}))
         self.assertTrue(self.mod.job_has_narrower_same_identity_scope(bindings, {"targets": ["mac"]}, {"targets": ["mac", "linux"]}))
         self.assertEqual(self.mod.supersedence_reason(bindings, {"id": "new"}, {"id": "old"}), "newer_sha")
+
+    def test_install_queue_supersedence_policy_helpers_wires_named_exports(self) -> None:
+        bindings = {}
+
+        with mock.patch.object(self.mod, "install_local_helpers") as install_local:
+            self.mod.install_queue_supersedence_policy_helpers(
+                bindings,
+                ("supersedence_result", "custom_supersedence_policy"),
+            )
+
+        self.assertEqual(
+            install_local.call_args_list,
+            [
+                mock.call(bindings, self.mod.__dict__, ("supersedence_result",)),
+                mock.call(bindings, self.mod.__dict__, ("custom_supersedence_policy",)),
+            ],
+        )
 
 
 if __name__ == "__main__":

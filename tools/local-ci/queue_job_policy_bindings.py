@@ -7,6 +7,7 @@ from typing import Any
 
 from binding_utils import binding as _binding
 from binding_utils import binding_attr as _binding_attr
+from binding_utils import install_local_helpers
 
 
 QUEUE_JOB_POLICY_EXPORTS = (
@@ -52,3 +53,16 @@ def make_job(
 
 def validate_ci_branch_name(bindings: Mapping[str, Any], branch: str) -> str:
     return _binding(bindings, "_queue_orchestrator").validate_ci_branch_name(branch)
+
+
+def install_queue_job_policy_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = QUEUE_JOB_POLICY_EXPORTS,
+) -> None:
+    known_names = set(QUEUE_JOB_POLICY_EXPORTS)
+    job_names = tuple(name for name in names if name in known_names)
+    unknown_names = tuple(name for name in names if name not in known_names)
+
+    install_local_helpers(bindings, globals(), job_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)

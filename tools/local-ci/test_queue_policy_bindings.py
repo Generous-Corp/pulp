@@ -31,19 +31,24 @@ class QueuePolicyBindingsTests(unittest.TestCase):
         for name in expected:
             self.assertTrue(callable(getattr(self.mod, name)))
 
-    def test_install_queue_policy_helpers_routes_known_and_unknown_exports(self):
+    def test_install_queue_policy_helpers_routes_focused_groups_and_unknown_exports(self):
         bindings = {}
 
-        with mock.patch.object(self.mod, "install_local_helpers") as install_local:
-            self.mod.install_queue_policy_helpers(bindings, ("make_job", "unknown_helper"))
+        with (
+            mock.patch.object(self.mod, "install_queue_job_policy_helpers") as job,
+            mock.patch.object(self.mod, "install_queue_supersedence_policy_helpers") as supersedence,
+            mock.patch.object(self.mod, "install_queue_retention_policy_helpers") as retention,
+            mock.patch.object(self.mod, "install_local_helpers") as install_local,
+        ):
+            self.mod.install_queue_policy_helpers(
+                bindings,
+                ("make_job", "supersedence_result", "find_job_unlocked", "unknown_helper"),
+            )
 
-        self.assertEqual(
-            install_local.call_args_list,
-            [
-                mock.call(bindings, self.mod.__dict__, ("make_job",)),
-                mock.call(bindings, self.mod.__dict__, ("unknown_helper",)),
-            ],
-        )
+        job.assert_called_once_with(bindings, ("make_job",))
+        supersedence.assert_called_once_with(bindings, ("supersedence_result",))
+        retention.assert_called_once_with(bindings, ("find_job_unlocked",))
+        install_local.assert_called_once_with(bindings, self.mod.__dict__, ("unknown_helper",))
 
 
 if __name__ == "__main__":
