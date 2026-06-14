@@ -5,6 +5,7 @@ from module_test_utils import load_module_from_path
 import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 MODULE_PATH = Path(__file__).with_name("local_ci_pr_list_command_bindings.py")
@@ -19,20 +20,13 @@ class LocalCiPrListCommandBindingsTests(unittest.TestCase):
         self.mod = load_module()
 
     def _bindings(self, runner):
-        bindings = {"_local_ci_commands_cli": types.SimpleNamespace(cmd_list=runner)}
-        for name in [
-            "gh_available",
-            "gh_pr_list_open",
-            "open_pr_list_lines",
-        ]:
-            bindings[name] = object()
-        return bindings
+        return {"_local_ci_commands_cli": types.SimpleNamespace(cmd_list=runner)}
 
     def test_list_exports_match_wrappers(self):
         self.assertEqual(self.mod.LOCAL_CI_PR_LIST_COMMAND_EXPORTS, ("cmd_list",))
         self.assertTrue(callable(self.mod.cmd_list))
 
-    def test_cmd_list_binds_facade_dependencies(self):
+    def test_cmd_list_delegates_with_assembled_dependencies(self):
         captured = {}
 
         def runner(*args, **kwargs):
@@ -41,13 +35,17 @@ class LocalCiPrListCommandBindingsTests(unittest.TestCase):
             return 9
 
         bindings = self._bindings(runner)
+        deps = {
+            "gh_available_fn": object(),
+            "gh_pr_list_open_fn": object(),
+            "open_pr_list_lines_fn": object(),
+        }
         args_obj = object()
-        self.assertEqual(self.mod.cmd_list(bindings, args_obj), 9)
+        with mock.patch.object(self.mod, "local_ci_pr_list_command_dependencies", return_value=deps):
+            self.assertEqual(self.mod.cmd_list(bindings, args_obj), 9)
 
         self.assertEqual(captured["args"], (args_obj,))
-        self.assertIs(captured["kwargs"]["gh_available_fn"], bindings["gh_available"])
-        self.assertIs(captured["kwargs"]["gh_pr_list_open_fn"], bindings["gh_pr_list_open"])
-        self.assertIs(captured["kwargs"]["open_pr_list_lines_fn"], bindings["open_pr_list_lines"])
+        self.assertEqual(captured["kwargs"], deps)
 
     def test_install_list_helpers_wires_named_exports(self):
         calls = []
@@ -57,6 +55,9 @@ class LocalCiPrListCommandBindingsTests(unittest.TestCase):
             return 10
 
         bindings = self._bindings(runner)
+        bindings["gh_available"] = object()
+        bindings["gh_pr_list_open"] = object()
+        bindings["open_pr_list_lines"] = object()
         self.mod.install_local_ci_pr_list_command_helpers(bindings)
 
         args_obj = object()

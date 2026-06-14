@@ -6,6 +6,7 @@ from __future__ import annotations
 from pathlib import Path
 import types
 import unittest
+from unittest import mock
 
 from module_test_utils import load_module_from_path
 
@@ -24,7 +25,7 @@ class DesktopDoctorCommandBindingsTests(unittest.TestCase):
     def test_command_exports_are_declared(self) -> None:
         self.assertEqual(self.mod.DESKTOP_DOCTOR_COMMAND_EXPORTS, ("cmd_desktop_doctor",))
 
-    def test_doctor_binds_setup_dependencies(self) -> None:
+    def test_doctor_delegates_with_assembled_dependencies(self) -> None:
         captured = {}
 
         def runner(*args, **kwargs):
@@ -34,16 +35,17 @@ class DesktopDoctorCommandBindingsTests(unittest.TestCase):
 
         bindings = {
             "_desktop_setup_commands_cli": types.SimpleNamespace(cmd_desktop_doctor=runner),
-            "load_config": object(),
-            "resolve_desktop_target": object(),
-            "desktop_doctor_checks": object(),
+        }
+        deps = {
+            "load_config_fn": object(),
+            "resolve_desktop_target_fn": object(),
+            "desktop_doctor_checks_fn": object(),
         }
         args_obj = object()
-        self.assertEqual(self.mod.cmd_desktop_doctor(bindings, args_obj), 2)
+        with mock.patch.object(self.mod, "desktop_doctor_command_dependencies", return_value=deps):
+            self.assertEqual(self.mod.cmd_desktop_doctor(bindings, args_obj), 2)
         self.assertEqual(captured["args"], (args_obj,))
-        self.assertIs(captured["kwargs"]["load_config_fn"], bindings["load_config"])
-        self.assertIs(captured["kwargs"]["resolve_desktop_target_fn"], bindings["resolve_desktop_target"])
-        self.assertIs(captured["kwargs"]["desktop_doctor_checks_fn"], bindings["desktop_doctor_checks"])
+        self.assertEqual(captured["kwargs"], deps)
 
 if __name__ == "__main__":
     unittest.main()

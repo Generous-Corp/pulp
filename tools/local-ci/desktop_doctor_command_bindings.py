@@ -7,6 +7,7 @@ from typing import Any
 
 from binding_utils import install_local_helpers
 from binding_utils import binding as _binding
+from desktop_doctor_command_dependency_bindings import desktop_doctor_command_dependencies
 
 
 DESKTOP_DOCTOR_COMMAND_EXPORTS = ("cmd_desktop_doctor",)
@@ -15,9 +16,7 @@ DESKTOP_DOCTOR_COMMAND_EXPORTS = ("cmd_desktop_doctor",)
 def cmd_desktop_doctor(bindings: Mapping[str, Any], args: Any) -> int:
     return _binding(bindings, "_desktop_setup_commands_cli").cmd_desktop_doctor(
         args,
-        load_config_fn=_binding(bindings, "load_config"),
-        resolve_desktop_target_fn=_binding(bindings, "resolve_desktop_target"),
-        desktop_doctor_checks_fn=_binding(bindings, "desktop_doctor_checks"),
+        **desktop_doctor_command_dependencies(bindings),
     )
 
 
