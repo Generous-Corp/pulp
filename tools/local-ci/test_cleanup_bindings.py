@@ -19,14 +19,6 @@ def load_module():
 class CleanupBindingTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
-        self.cleanup = mock.Mock()
-        self.bindings = {
-            "_cleanup": self.cleanup,
-            "ps_literal": mock.Mock(name="ps_literal"),
-            "run_logged_command": mock.Mock(name="run_logged_command"),
-            "windows_ssh_powershell_command": mock.Mock(name="windows_ssh_powershell_command"),
-            "trim_line": mock.Mock(name="trim_line"),
-        }
 
     def test_cleanup_exports_are_composed_from_focused_groups(self) -> None:
         expected = (
@@ -37,28 +29,25 @@ class CleanupBindingTests(unittest.TestCase):
         self.assertEqual(self.mod.CLEANUP_EXPORTS, expected)
         self.assertEqual(len(expected), len(set(expected)))
 
-    def test_install_cleanup_helpers_wires_named_exports(self) -> None:
-        self.cleanup.result_file_job_id.return_value = "job1"
-        self.cleanup.cleanup_stale_windows_validator.return_value = {"killed": True}
+    def test_install_cleanup_helpers_routes_known_and_unknown_exports(self) -> None:
+        bindings = {}
 
-        self.mod.install_cleanup_helpers(
-            self.bindings,
-            ("result_file_job_id", "cleanup_stale_windows_validator"),
-        )
+        with mock.patch.object(self.mod, "install_local_helpers") as install_local:
+            self.mod.install_cleanup_helpers(
+                bindings,
+                ("result_file_job_id", "cleanup_stale_windows_validator", "custom_cleanup"),
+            )
 
-        self.assertEqual(self.bindings["result_file_job_id"](pathlib.Path("/state/results/job1.json")), "job1")
         self.assertEqual(
-            self.bindings["cleanup_stale_windows_validator"]("win", 123, "2026-05-01T00:00:00Z"),
-            {"killed": True},
-        )
-        self.cleanup.cleanup_stale_windows_validator.assert_called_once_with(
-            "win",
-            123,
-            "2026-05-01T00:00:00Z",
-            ps_literal_fn=self.bindings["ps_literal"],
-            run_logged_command_fn=self.bindings["run_logged_command"],
-            windows_ssh_powershell_command_fn=self.bindings["windows_ssh_powershell_command"],
-            trim_line_fn=self.bindings["trim_line"],
+            install_local.call_args_list,
+            [
+                mock.call(
+                    bindings,
+                    self.mod.__dict__,
+                    ("result_file_job_id", "cleanup_stale_windows_validator"),
+                ),
+                mock.call(bindings, self.mod.__dict__, ("custom_cleanup",)),
+            ],
         )
 
 
