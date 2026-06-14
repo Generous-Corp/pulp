@@ -29,24 +29,18 @@ class CliDispatchBindingsTests(unittest.TestCase):
         for name in self.mod.CLI_DISPATCH_EXPORTS:
             self.assertTrue(callable(getattr(self.mod, name)))
 
-    def test_install_cli_dispatch_helpers_routes_each_group(self):
+    def test_install_cli_dispatch_helpers_routes_each_group_and_unknown_exports(self):
         bindings = {}
 
         with (
             mock.patch.object(self.mod, "install_cli_desktop_dispatch_helpers") as install_desktop,
             mock.patch.object(self.mod, "install_cli_main_dispatch_helpers") as install_main,
+            mock.patch.object(self.mod, "install_local_helpers") as install_local,
         ):
-            self.mod.install_cli_dispatch_helpers(bindings, ("cmd_desktop", "dispatch_main_command"))
+            self.mod.install_cli_dispatch_helpers(bindings, ("cmd_desktop", "dispatch_main_command", "custom"))
 
         install_desktop.assert_called_once_with(bindings, ("cmd_desktop",))
         install_main.assert_called_once_with(bindings, ("dispatch_main_command",))
-
-    def test_install_cli_dispatch_helpers_preserves_unknown_fallbacks(self):
-        bindings = {"custom": object()}
-
-        with mock.patch.object(self.mod, "install_local_helpers") as install_local:
-            self.mod.install_cli_dispatch_helpers(bindings, ("custom",))
-
         install_local.assert_called_once_with(bindings, self.mod.__dict__, ("custom",))
 
 

@@ -30,12 +30,13 @@ class CloudCommandBindingsTests(unittest.TestCase):
         for name in expected:
             self.assertTrue(callable(getattr(self.mod, name)))
 
-    def test_install_cloud_command_helpers_routes_each_group(self):
+    def test_install_cloud_command_helpers_routes_each_group_and_unknown_exports(self):
         bindings = {}
         names = (
             "cmd_cloud_history",
             "cmd_cloud_status",
             "cmd_cloud_namespace_setup",
+            "custom",
         )
 
         with (
@@ -49,22 +50,6 @@ class CloudCommandBindingsTests(unittest.TestCase):
         reporting.assert_called_once_with(bindings, ("cmd_cloud_history",))
         run.assert_called_once_with(bindings, ("cmd_cloud_status",))
         namespace.assert_called_once_with(bindings, ("cmd_cloud_namespace_setup",))
-        install_local.assert_not_called()
-
-    def test_install_cloud_command_helpers_preserves_unknown_fallback(self):
-        bindings = {}
-
-        with (
-            mock.patch.object(self.mod, "install_cloud_reporting_command_helpers") as reporting,
-            mock.patch.object(self.mod, "install_cloud_run_command_helpers") as run,
-            mock.patch.object(self.mod, "install_cloud_namespace_command_helpers") as namespace,
-            mock.patch.object(self.mod, "install_local_helpers") as install_local,
-        ):
-            self.mod.install_cloud_command_helpers(bindings, ("custom",))
-
-        reporting.assert_called_once_with(bindings, ())
-        run.assert_called_once_with(bindings, ())
-        namespace.assert_called_once_with(bindings, ())
         install_local.assert_called_once_with(bindings, self.mod.__dict__, ("custom",))
 
 
