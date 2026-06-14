@@ -95,6 +95,14 @@ class StatePathCoreBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["queue_path"](), Path("/state/queue.json"))
         self.assertEqual([call[0] for call in calls], ["config_path", "queue_path"])
 
+    def test_install_state_path_core_helpers_keeps_unknown_local_fallback(self) -> None:
+        bindings = {}
+        self.mod.future_state_path_core_helper = lambda _bindings: "future"
+
+        self.mod.install_state_path_core_helpers(bindings, ("future_state_path_core_helper",))
+
+        self.assertEqual(bindings["future_state_path_core_helper"](), "future")
+
 
 if __name__ == "__main__":
     unittest.main()
