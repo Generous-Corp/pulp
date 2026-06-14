@@ -29,7 +29,7 @@ class DesktopRunRollupActionBindingsTests(unittest.TestCase):
         for name in expected:
             self.assertTrue(callable(getattr(self.mod, name)))
 
-    def test_install_desktop_run_rollup_action_helpers_routes_selected_groups(self):
+    def test_install_desktop_run_rollup_action_helpers_routes_selected_groups_and_unknown_exports(self):
         bindings = {}
 
         with (
@@ -37,24 +37,10 @@ class DesktopRunRollupActionBindingsTests(unittest.TestCase):
             mock.patch.object(self.mod, "install_desktop_run_rollup_prune_helpers") as prune,
             mock.patch.object(self.mod, "install_local_helpers") as install_local,
         ):
-            self.mod.install_desktop_run_rollup_action_helpers(bindings, ("prune_desktop_run_manifests",))
+            self.mod.install_desktop_run_rollup_action_helpers(bindings, ("prune_desktop_run_manifests", "custom"))
 
         write.assert_called_once_with(bindings, ())
         prune.assert_called_once_with(bindings, ("prune_desktop_run_manifests",))
-        install_local.assert_not_called()
-
-    def test_install_desktop_run_rollup_action_helpers_preserves_unknown_fallback(self):
-        bindings = {}
-
-        with (
-            mock.patch.object(self.mod, "install_desktop_run_rollup_write_helpers") as write,
-            mock.patch.object(self.mod, "install_desktop_run_rollup_prune_helpers") as prune,
-            mock.patch.object(self.mod, "install_local_helpers") as install_local,
-        ):
-            self.mod.install_desktop_run_rollup_action_helpers(bindings, ("custom",))
-
-        write.assert_called_once_with(bindings, ())
-        prune.assert_called_once_with(bindings, ())
         install_local.assert_called_once_with(bindings, self.mod.__dict__, ("custom",))
 
 

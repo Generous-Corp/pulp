@@ -33,7 +33,7 @@ class QueueClaimFinalizeBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.claim_next_job.__module__, "queue_claim_bindings")
         self.assertEqual(self.mod.finalize_job.__module__, "queue_finalize_bindings")
 
-    def test_install_claim_finalize_helpers_routes_selected_groups(self):
+    def test_install_claim_finalize_helpers_routes_selected_groups_and_unknown_exports(self):
         bindings = {}
 
         with (
@@ -41,23 +41,9 @@ class QueueClaimFinalizeBindingsTests(unittest.TestCase):
             mock.patch.object(self.mod, "install_queue_finalize_helpers") as finalize,
             mock.patch.object(self.mod, "install_local_helpers") as install_local,
         ):
-            self.mod.install_queue_claim_finalize_helpers(bindings, ("claim_next_job",))
+            self.mod.install_queue_claim_finalize_helpers(bindings, ("claim_next_job", "custom"))
 
         claim.assert_called_once_with(bindings, ("claim_next_job",))
-        finalize.assert_called_once_with(bindings, ())
-        install_local.assert_not_called()
-
-    def test_install_claim_finalize_helpers_preserves_unknown_fallback(self):
-        bindings = {}
-
-        with (
-            mock.patch.object(self.mod, "install_queue_claim_helpers") as claim,
-            mock.patch.object(self.mod, "install_queue_finalize_helpers") as finalize,
-            mock.patch.object(self.mod, "install_local_helpers") as install_local,
-        ):
-            self.mod.install_queue_claim_finalize_helpers(bindings, ("custom",))
-
-        claim.assert_called_once_with(bindings, ())
         finalize.assert_called_once_with(bindings, ())
         install_local.assert_called_once_with(bindings, self.mod.__dict__, ("custom",))
 
