@@ -484,8 +484,15 @@ class ReportingTests(unittest.TestCase):
         self.assertEqual(draft["title"], "Review proof")
         self.assertEqual(len(draft["attachments"]), 1)
         self.assertEqual(draft["attachments"][0]["relative_path"], "assets/proof.issue.mp4")
+        self.assertEqual(draft["attachments"][0]["extension"], ".mp4")
+        self.assertTrue(draft["attachments"][0]["supported_video_extension"])
         self.assertEqual(draft["attachment_checks"][0]["path"], str(issue_video))
         self.assertTrue(draft["attachment_checks"][0]["fits_attachment_budget"])
+        self.assertEqual(draft["attachment_checks"][0]["extension"], ".mp4")
+        self.assertTrue(draft["attachment_checks"][0]["supported_video_extension"])
+        self.assertEqual(draft["attachment_policy"]["supported_video_extensions"], [".mp4", ".mov", ".webm"])
+        self.assertEqual(draft["attachment_policy"]["pro_video_limit_bytes"], 100000000)
+        self.assertEqual(draft["attachment_policy"]["free_video_limit_bytes"], 10000000)
         self.assertEqual(draft["serve_urls"], ["http://127.0.0.1:8765/", "http://100.64.0.10:8765/"])
         self.assertEqual(len(draft["fallback_links"]), 1)
         self.assertEqual(draft["fallback_links"][0]["serve_urls"], ["http://127.0.0.1:8765/", "http://100.64.0.10:8765/"])
@@ -499,7 +506,8 @@ class ReportingTests(unittest.TestCase):
         self.assertIn("looks good to me", draft["body"])
         self.assertIn("Review status command: `python3 tools/local-ci/local_ci.py desktop review-status <issue-url> --repo danielraffel/pulp", draft["body"])
         self.assertIn(f"--manifest {package_path.parent / 'runs' / 'component' / 'manifest.json'} --close-issue", draft["body"])
-        self.assertIn("Attach MP4: `", draft["body"])
+        self.assertIn("GitHub issue/PR video uploads support .mp4, .mov, .webm", draft["body"])
+        self.assertIn("Attach video: `", draft["body"])
         self.assertIn("Command: `./build/pulp --inspect`", draft["body"])
         self.assertIn("Source: `mode=exact-sha, branch=feature/video, sha=abc123`", draft["body"])
         self.assertIn("Host: `macstudio`", draft["body"])
@@ -594,6 +602,37 @@ class ReportingTests(unittest.TestCase):
         }
 
         with self.assertRaisesRegex(ValueError, "attachment exceeds budget"):
+            self.mod.desktop_review_issue_draft(
+                review_package,
+                package_path=package_path,
+                check_files=True,
+            )
+
+    def test_desktop_review_issue_draft_check_files_rejects_unsupported_video_extension(self) -> None:
+        package_path = self.root / "report" / "review-package.json"
+        package_path.parent.mkdir(parents=True)
+        issue_video = package_path.parent / "proof.issue.avi"
+        issue_video.write_bytes(b"issue")
+        review_package = {
+            "label": "Video Proof",
+            "runs": [
+                {
+                    "target": "mac",
+                    "action": "click",
+                    "label": "component",
+                    "attachment": {
+                        "status": "attach-primary",
+                        "path": str(issue_video),
+                        "relative_path": "assets/proof.issue.avi",
+                        "size_bytes": issue_video.stat().st_size,
+                        "budget_bytes": 100000000,
+                        "reason": "primary issue video fits the configured attachment budget",
+                    },
+                }
+            ],
+        }
+
+        with self.assertRaisesRegex(ValueError, "unsupported video extension"):
             self.mod.desktop_review_issue_draft(
                 review_package,
                 package_path=package_path,

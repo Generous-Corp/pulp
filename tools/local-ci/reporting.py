@@ -31,6 +31,24 @@ ARTIFACT_KEYS = (
     "stderr",
 )
 
+GITHUB_VIDEO_ATTACHMENT_EXTENSIONS = (".mp4", ".mov", ".webm")
+GITHUB_PRO_VIDEO_ATTACHMENT_LIMIT_BYTES = 100_000_000
+GITHUB_FREE_VIDEO_ATTACHMENT_LIMIT_BYTES = 10_000_000
+GITHUB_ATTACHMENT_POLICY_SOURCE = (
+    "https://docs.github.com/en/get-started/writing-on-github/"
+    "working-with-advanced-formatting/attaching-files"
+)
+
+
+def _github_video_attachment_policy() -> dict:
+    return {
+        "source": GITHUB_ATTACHMENT_POLICY_SOURCE,
+        "supported_video_extensions": list(GITHUB_VIDEO_ATTACHMENT_EXTENSIONS),
+        "pro_video_limit_bytes": GITHUB_PRO_VIDEO_ATTACHMENT_LIMIT_BYTES,
+        "free_video_limit_bytes": GITHUB_FREE_VIDEO_ATTACHMENT_LIMIT_BYTES,
+        "fallback": "Use the served local/Tailscale report link when no supported issue-ready video fits the configured budget.",
+    }
+
 
 def _proof_notes_from_manifest(manifest: dict) -> list[str]:
     notes: list[str] = []
@@ -638,6 +656,7 @@ def desktop_review_issue_draft(
 ) -> dict:
     package_dir = package_path.parent
     issue_title = title or f"Review desktop validation video proof: {review_package.get('label') or package_dir.name}"
+    attachment_policy = _github_video_attachment_policy()
     attachments: list[dict] = []
     fallback_links: list[dict] = []
     attachment_checks: list[dict] = []
@@ -649,9 +668,15 @@ def desktop_review_issue_draft(
         "",
         "## What to review",
         "",
-        "- Watch the attached MP4 when an attachment is listed below.",
-        "- If the MP4 is too large or unavailable, use the served report link from the fallback section.",
+        "- Watch the attached video when an attachment is listed below.",
+        "- If the video is too large, unsupported, or unavailable, use the served report link from the fallback section.",
         "- Comment `looks good to me` when the proof is accepted. The local verdict command can then mark the run approved and the review issue can be closed.",
+        (
+            "- GitHub issue/PR video uploads support "
+            f"{', '.join(attachment_policy['supported_video_extensions'])}; "
+            f"paid-plan video budget is {_format_bytes(attachment_policy['pro_video_limit_bytes'])}, "
+            f"free-plan fallback budget is {_format_bytes(attachment_policy['free_video_limit_bytes'])}."
+        ),
         "",
         "## Report",
         "",
@@ -713,6 +738,8 @@ def desktop_review_issue_draft(
         for note in (run.get("notes") or [])[:5]:
             body_lines.append(f"- Proof note: {note}")
         if attach_path and status in {"attach-primary", "attach-small"}:
+            extension = Path(attach_path).suffix.lower()
+            supported_extension = extension in GITHUB_VIDEO_ATTACHMENT_EXTENSIONS
             if check_files:
                 attachment_path = Path(attach_path).expanduser()
                 exists = attachment_path.is_file()
@@ -727,9 +754,17 @@ def desktop_review_issue_draft(
                     "size_bytes": actual_size,
                     "budget_bytes": budget_bytes,
                     "fits_attachment_budget": bool(exists and not over_budget),
+                    "extension": extension,
+                    "supported_video_extension": supported_extension,
+                    "supported_video_extensions": list(GITHUB_VIDEO_ATTACHMENT_EXTENSIONS),
                 }
                 attachment_checks.append(check)
-                if not exists:
+                if not supported_extension:
+                    attachment_errors.append(
+                        f"run {index} attachment has unsupported video extension: {attach_path} "
+                        f"(supported: {', '.join(GITHUB_VIDEO_ATTACHMENT_EXTENSIONS)})"
+                    )
+                elif not exists:
                     attachment_errors.append(f"run {index} attachment missing: {attach_path}")
                 elif over_budget:
                     attachment_errors.append(
@@ -743,10 +778,12 @@ def desktop_review_issue_draft(
                 "relative_path": attachment.get("relative_path"),
                 "size_bytes": attachment.get("size_bytes"),
                 "budget_bytes": attachment.get("budget_bytes"),
+                "extension": extension,
+                "supported_video_extension": supported_extension,
                 "reason": attachment.get("reason"),
             }
             attachments.append(item)
-            body_lines.append(f"- Attach MP4: `{attach_path}`")
+            body_lines.append(f"- Attach video: `{attach_path}`")
         else:
             fallback_item = {
                 "run_index": index,
@@ -764,7 +801,7 @@ def desktop_review_issue_draft(
                 "reason": attachment.get("reason"),
             }
             fallback_links.append(fallback_item)
-            body_lines.append("- Attach MP4: not available within budget; use the served report link.")
+            body_lines.append("- Attach video: not available within budget; use the served report link.")
         body_lines.append("")
     if attachment_errors:
         raise ValueError("; ".join(attachment_errors))
@@ -786,6 +823,7 @@ def desktop_review_issue_draft(
         "attachments": attachments,
         "fallback_links": fallback_links,
         "serve_urls": serve_urls,
+        "attachment_policy": attachment_policy,
         "close_trigger": "looks good to me",
     }
     if check_files:
