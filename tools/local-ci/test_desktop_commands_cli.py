@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 from argparse import Namespace
 from pathlib import Path
 import subprocess
@@ -262,11 +263,12 @@ class DesktopCommandsCliTests(unittest.TestCase):
             self.assertTrue(checks["cmake"]["ok"])
             self.assertFalse(checks["skia-build.libskia"]["ok"])
             self.assertIn("missing required Skia binary", checks["skia-build.libskia"]["detail"])
-            self.assertIn("external/skia-build/libskia.a", checks["skia-build.libskia"]["remediation"])
+            self.assertIn("fetch_skia_for_release.py darwin-arm64", checks["skia-build.libskia"]["remediation"])
             self.assertNotIn("remediation", checks["cmake"])
 
-            (repo_root / "external" / "skia-build").mkdir(parents=True)
-            (repo_root / "external" / "skia-build" / "libskia.a").write_bytes(b"skia")
+            skia_lib = repo_root / "external" / "skia-build" / "build" / "mac-gpu" / "lib" / "Release" / "libskia.a"
+            skia_lib.parent.mkdir(parents=True)
+            skia_lib.write_bytes(b"skia")
             payload = self.mod.desktop_video_matrix_payload(
                 scenario="component-zoom",
                 check=True,
@@ -301,6 +303,33 @@ class DesktopCommandsCliTests(unittest.TestCase):
             )
             self.assertEqual(payload["scenarios"][0]["status"], "ready")
             self.assertEqual(payload["scenarios"][0]["local_readiness"]["status"], "ready")
+
+    def test_desktop_video_matrix_check_accepts_skia_dir_override(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_root = Path(tmpdir) / "repo"
+            skia_root = Path(tmpdir) / "skia"
+            skia_lib = skia_root / "mac-gpu" / "lib" / "Release" / "libskia.a"
+            skia_lib.parent.mkdir(parents=True)
+            skia_lib.write_bytes(b"skia")
+            old_skia_dir = os.environ.get("SKIA_DIR")
+            os.environ["SKIA_DIR"] = str(skia_root)
+            try:
+                payload = self.mod.desktop_video_matrix_payload(
+                    scenario="component-zoom",
+                    check=True,
+                    repo_root=repo_root,
+                    which_fn=lambda name: "/usr/bin/cmake" if name == "cmake" else None,
+                )
+            finally:
+                if old_skia_dir is None:
+                    os.environ.pop("SKIA_DIR", None)
+                else:
+                    os.environ["SKIA_DIR"] = old_skia_dir
+            row = payload["scenarios"][0]
+            self.assertEqual(row["status"], "ready")
+            checks = {check["name"]: check for check in row["local_readiness"]["checks"]}
+            self.assertTrue(checks["skia-build.libskia"]["ok"])
+            self.assertEqual(checks["skia-build.libskia"]["detail"], str(skia_lib.resolve()))
 
     def test_desktop_video_matrix_filters_by_status(self):
         static_payload = self.mod.desktop_video_matrix_payload(

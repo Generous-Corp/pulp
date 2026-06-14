@@ -85,6 +85,31 @@ def _find_executable_path(
     return None
 
 
+def _find_macos_skia_library(repo_root: Path) -> Path | None:
+    skia_roots: list[Path] = []
+    env_skia_dir = os.environ.get("SKIA_DIR")
+    if env_skia_dir:
+        skia_roots.append(Path(env_skia_dir).expanduser())
+    skia_roots.append(repo_root / "external" / "skia-build")
+
+    seen: set[Path] = set()
+    for root in skia_roots:
+        root = root.resolve() if root.exists() else root
+        if root in seen:
+            continue
+        seen.add(root)
+        for candidate in (
+            root / "build" / "mac-gpu" / "lib" / "Release" / "libskia.a",
+            root / "mac-gpu" / "lib" / "Release" / "libskia.a",
+            root / "mac" / "lib" / "libskia.a",
+            root / "lib" / "libskia.a",
+            root / "libskia.a",
+        ):
+            if candidate.is_file():
+                return candidate
+    return None
+
+
 def desktop_serve_candidate_hosts(
     bind_host: str,
     *,
@@ -588,12 +613,16 @@ def _video_matrix_check(
             remediation="Install CMake or add it to PATH; Homebrew installs are expected at /opt/homebrew/bin/cmake or /usr/local/bin/cmake.",
         )
     if item["id"] in {"standalone-interaction", "component-zoom"}:
-        skia_path = repo_root / "external" / "skia-build" / "libskia.a"
+        skia_path = _find_macos_skia_library(repo_root)
+        expected_path = repo_root / "external" / "skia-build" / "build" / "mac-gpu" / "lib" / "Release" / "libskia.a"
         add(
             "skia-build.libskia",
-            skia_path.is_file(),
-            str(skia_path) if skia_path.is_file() else f"missing required Skia binary: {skia_path}",
-            remediation="Install or sync the binary Skia bundle so external/skia-build/libskia.a exists, or choose audio-inspector-demo for a no-GPU proof.",
+            bool(skia_path),
+            str(skia_path) if skia_path else f"missing required Skia binary: {expected_path}",
+            remediation=(
+                "Run `python3 tools/scripts/fetch_skia_for_release.py darwin-arm64`, set SKIA_DIR to an existing "
+                "Skia bundle, or choose audio-inspector-demo for a no-GPU proof."
+            ),
         )
     if item["id"] in {"audio-inspector-demo", "inspector-workflow"}:
         source = repo_root / "examples" / "audio-inspector-demo"
