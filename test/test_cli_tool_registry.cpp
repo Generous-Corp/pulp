@@ -365,9 +365,8 @@ TEST_CASE("tool registry extracts zip archives with literal paths",
     require_exec_ok(
         "powershell",
         {"-NoProfile", "-Command",
-         "& { param($payload, $archive) "
-         "$nested = Join-Path $payload 'nested'; "
-         "Compress-Archive -Force -LiteralPath $nested -DestinationPath $archive }",
+         "& { param($payload, $archive) Add-Type -AssemblyName System.IO.Compression.FileSystem; "
+         "[IO.Compression.ZipFile]::CreateFromDirectory($payload, $archive) }",
          payload.string(), archive.string()});
 #else
     require_exec_ok("zip", {"-q", "-r", archive.string(), "."}, payload);
