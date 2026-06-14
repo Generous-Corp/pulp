@@ -87,6 +87,24 @@ void FileDialog::clear_backend() {
     g_backend_installed = false;
 }
 
+namespace detail {
+// True if a host/explicitly-set Backend handled open_file (result in `out`);
+// false means "use the platform-native dialog". The macOS impl consults this
+// FIRST so the Backend seam (host overrides + headless test mocks) works there
+// too — without it, file_dialog_mac.mm went straight to a blocking NSOpenPanel
+// and ignored set_backend(). The compiled-in native panel remains the default
+// when no explicit backend is installed.
+bool file_dialog_open_file_via_backend(const std::string& title,
+                                       const std::vector<FileFilter>& filters,
+                                       const std::string& default_path,
+                                       std::optional<std::string>& out) {
+    std::lock_guard lock(g_backend_mu);
+    if (!g_backend_installed || !g_backend.open_file) return false;
+    out = g_backend.open_file(title, filters, default_path);
+    return true;
+}
+}  // namespace detail
+
 bool FileDialog::has_backend() {
     // #312 + #316 Codex P2s: report "true" only on platforms where a
     // real native dialog impl is compiled in. macOS ships
