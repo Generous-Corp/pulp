@@ -11,6 +11,7 @@ from queue_completion import (
     complete_canceled_job_unlocked,
     complete_superseded_job_unlocked,
 )
+from queue_job_load import load_job_locked
 from queue_runner_lifecycle import (
     drain_pending_jobs_locked,
     scheduler_error_result,
@@ -108,26 +109,6 @@ def enqueue_job_locked(
             supersede_job_unlocked_fn(existing, job["id"], reason)
         save_queue_unlocked_fn(trim_completed_jobs_fn(queue))
         return job, True
-
-
-def load_job_locked(
-    job_id: str,
-    *,
-    queue_lock_path_fn: Callable[[], Path],
-    file_lock_fn,
-    load_queue_unlocked_fn: Callable[[], list[dict]],
-    reconcile_running_jobs_unlocked_fn: Callable[[list[dict]], tuple[list[dict], bool]],
-    save_queue_unlocked_fn: Callable[[list[dict]], None],
-    find_job_unlocked_fn: Callable[[list[dict], str], dict | None],
-    normalize_job_fn: Callable[[dict], dict],
-) -> dict | None:
-    with file_lock_fn(queue_lock_path_fn(), blocking=True):
-        queue = load_queue_unlocked_fn()
-        queue, changed = reconcile_running_jobs_unlocked_fn(queue)
-        if changed:
-            save_queue_unlocked_fn(queue)
-        job = find_job_unlocked_fn(queue, job_id)
-        return normalize_job_fn(job) if job else None
 
 
 def claim_next_job_locked(
