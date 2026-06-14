@@ -554,6 +554,10 @@ def build_local_ci_parser(
         "--design-parity-source-image",
         help="Source/reference image to check and substitute into the design-parity compose command.",
     )
+    p_desktop_video_matrix.add_argument(
+        "--design-parity-native-image",
+        help="Native screenshot/render to check and substitute into the one-shot design-proof command.",
+    )
     p_desktop_video_matrix.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 
     p_desktop_video_doctor = desktop_sub.add_parser("video-doctor", help="Run video proof setup/readiness checks for one desktop target")
@@ -648,6 +652,10 @@ def build_local_ci_parser(
     p_desktop_video_setup.add_argument(
         "--design-parity-source-image",
         help="When using --check, pass a source/reference image into the embedded design-parity matrix check.",
+    )
+    p_desktop_video_setup.add_argument(
+        "--design-parity-native-image",
+        help="When using --check, pass a native screenshot/render into the embedded design-parity matrix check.",
     )
     p_desktop_video_setup.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 

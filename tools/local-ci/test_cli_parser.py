@@ -500,6 +500,8 @@ class CliParserTests(unittest.TestCase):
             "/tmp/run/manifest.json",
             "--design-parity-source-image",
             "/tmp/source.png",
+            "--design-parity-native-image",
+            "/tmp/native.png",
             "--markdown",
             "--check",
         ])
@@ -510,6 +512,7 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(args.status, "blocked")
         self.assertEqual(args.design_parity_manifest, "/tmp/run/manifest.json")
         self.assertEqual(args.design_parity_source_image, "/tmp/source.png")
+        self.assertEqual(args.design_parity_native_image, "/tmp/native.png")
         self.assertTrue(args.markdown)
         self.assertTrue(args.check)
         self.assertFalse(args.json)
@@ -609,6 +612,8 @@ class CliParserTests(unittest.TestCase):
             "/tmp/run/manifest.json",
             "--design-parity-source-image",
             "/tmp/source.png",
+            "--design-parity-native-image",
+            "/tmp/native.png",
             "--json",
         ])
 
@@ -629,6 +634,7 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(args.video_audio_file, "/tmp/plugin.wav")
         self.assertEqual(args.design_parity_manifest, "/tmp/run/manifest.json")
         self.assertEqual(args.design_parity_source_image, "/tmp/source.png")
+        self.assertEqual(args.design_parity_native_image, "/tmp/native.png")
         self.assertTrue(args.json)
 
     def test_desktop_compose_video_command_parses_outputs(self):

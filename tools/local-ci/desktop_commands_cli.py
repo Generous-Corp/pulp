@@ -617,6 +617,7 @@ def _video_matrix_check(
     repo_root: Path,
     design_parity_manifest: Path | None = None,
     design_parity_source_image: Path | None = None,
+    design_parity_native_image: Path | None = None,
     which_fn: Callable[[str], str | None] = shutil.which,
 ) -> dict:
     checks: list[dict] = []
@@ -666,12 +667,23 @@ def _video_matrix_check(
         )
     if item["id"] == "design-parity":
         manifest = design_parity_manifest
+        native_image = design_parity_native_image
         source_image = design_parity_source_image or repo_root / "planning" / "screenshots" / "reference.png"
+        manifest_ok = bool(manifest and manifest.is_file())
+        native_image_ok = bool(native_image and native_image.is_file())
         add(
             "design-parity.run-manifest",
-            bool(manifest and manifest.is_file()),
-            str(manifest) if manifest and manifest.is_file() else "missing run manifest for design-parity composition",
-            remediation="Pass --design-parity-manifest /path/to/run/manifest.json after recording or choosing a run bundle to compare.",
+            manifest_ok,
+            str(manifest) if manifest_ok else "missing run manifest for design-parity composition",
+            required=not native_image_ok,
+            remediation="Pass --design-parity-manifest /path/to/run/manifest.json for an existing run, or --design-parity-native-image /path/to/native.png for one-shot design-proof.",
+        )
+        add(
+            "design-parity.native-image",
+            native_image_ok,
+            str(native_image) if native_image_ok else "missing native image for one-shot design-proof",
+            required=not manifest_ok,
+            remediation="Pass --design-parity-native-image /path/to/native.png, or --design-parity-manifest /path/to/run/manifest.json for an existing run.",
         )
         add(
             "design-parity.source-image",
@@ -766,6 +778,7 @@ def desktop_video_matrix_payload(
     check: bool = False,
     design_parity_manifest: str | Path | None = None,
     design_parity_source_image: str | Path | None = None,
+    design_parity_native_image: str | Path | None = None,
     design_parity_publish_root: str | Path | None = None,
     repo_root: Path | None = None,
     which_fn: Callable[[str], str | None] = shutil.which,
@@ -773,11 +786,20 @@ def desktop_video_matrix_payload(
     root = repo_root or Path.cwd()
     design_parity_manifest_path = Path(design_parity_manifest).expanduser().resolve() if design_parity_manifest else None
     design_parity_source_image_path = Path(design_parity_source_image).expanduser().resolve() if design_parity_source_image else None
+    design_parity_native_image_path = Path(design_parity_native_image).expanduser().resolve() if design_parity_native_image else None
     design_parity_discovered: dict | None = None
-    if check and design_parity_publish_root and (not design_parity_manifest_path or not design_parity_source_image_path):
+    should_discover_design_parity = (
+        check
+        and design_parity_publish_root
+        and (
+            not design_parity_source_image_path
+            or (not design_parity_native_image_path and not design_parity_manifest_path)
+        )
+    )
+    if should_discover_design_parity:
         design_parity_discovered = _latest_published_design_parity_inputs(Path(design_parity_publish_root).expanduser().resolve())
         if design_parity_discovered:
-            if not design_parity_manifest_path:
+            if not design_parity_manifest_path and not design_parity_native_image_path:
                 design_parity_manifest_path = design_parity_discovered["manifest"]
             if not design_parity_source_image_path:
                 default_source = (root / "planning" / "screenshots" / "reference.png").resolve()
@@ -793,14 +815,25 @@ def desktop_video_matrix_payload(
         if row["id"] == "design-parity":
             manifest_for_command = design_parity_manifest_path or Path("/path/to/run/manifest.json")
             source_for_command = design_parity_source_image_path or (root / "planning" / "screenshots" / "reference.png").resolve()
+            native_for_command = design_parity_native_image_path or Path("/path/to/native-render.png")
             source_label_for_command = "Source reference" if design_parity_discovered else "Figma reference"
-            row["command"] = (
-                "python3 tools/local-ci/local_ci.py desktop compose-video "
-                f"{shlex.quote(str(manifest_for_command))} "
-                f"--template design-parity --source-image {shlex.quote(str(source_for_command))} "
-                f"--source-label {shlex.quote(source_label_for_command)} --title 'Design parity proof' "
-                "--small-video --small-video-budget-mb 10"
-            )
+            if design_parity_native_image_path:
+                row["command"] = (
+                    "python3 tools/local-ci/local_ci.py desktop design-proof "
+                    f"--source-image {shlex.quote(str(source_for_command))} "
+                    f"--native-image {shlex.quote(str(native_for_command))} "
+                    "--label design-parity-proof "
+                    f"--source-label {shlex.quote(source_label_for_command)} --title 'Design parity proof' "
+                    "--small-video --small-video-budget-mb 10"
+                )
+            else:
+                row["command"] = (
+                    "python3 tools/local-ci/local_ci.py desktop compose-video "
+                    f"{shlex.quote(str(manifest_for_command))} "
+                    f"--template design-parity --source-image {shlex.quote(str(source_for_command))} "
+                    f"--source-label {shlex.quote(source_label_for_command)} --title 'Design parity proof' "
+                    "--small-video --small-video-budget-mb 10"
+                )
             if design_parity_discovered and manifest_for_command == design_parity_discovered.get("manifest"):
                 row["discovered_report"] = {
                     key: str(value) if isinstance(value, Path) else value
@@ -812,6 +845,7 @@ def desktop_video_matrix_payload(
                 repo_root=root,
                 design_parity_manifest=design_parity_manifest_path,
                 design_parity_source_image=design_parity_source_image_path,
+                design_parity_native_image=design_parity_native_image_path,
                 which_fn=which_fn,
             )
             row["declared_status"] = declared_status
@@ -1018,6 +1052,7 @@ def cmd_desktop_video_matrix(
         check=getattr(args, "check", False),
         design_parity_manifest=getattr(args, "design_parity_manifest", None) or None,
         design_parity_source_image=getattr(args, "design_parity_source_image", None) or None,
+        design_parity_native_image=getattr(args, "design_parity_native_image", None) or None,
         design_parity_publish_root=design_parity_publish_root,
     )
     if getattr(args, "json", False):

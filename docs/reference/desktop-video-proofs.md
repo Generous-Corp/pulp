@@ -648,9 +648,10 @@ audio-inspector-demo`, `--scenario component-zoom`, `--status ready`, or
 to include lightweight machine-local readiness checks, such as whether `cmake`,
 the in-tree audio-inspector demo source, `adb`, `xcrun`, REAPER, or
 `external/skia-build/libskia.a` are available before attempting a demo, and
-whether design-parity has both a source/reference image and an existing run
-manifest to recompose. For design parity, pass concrete inputs when checking a
-specific comparison:
+whether design-parity has a source/reference image plus either an existing run
+manifest to recompose or a native screenshot for the one-shot `desktop
+design-proof` helper. For design parity, pass concrete inputs when checking a
+specific recorded run:
 
 ```bash
 python3 tools/local-ci/local_ci.py desktop video-matrix \
@@ -659,6 +660,18 @@ python3 tools/local-ci/local_ci.py desktop video-matrix \
   --check \
   --design-parity-manifest /path/to/run/manifest.json \
   --design-parity-source-image planning/screenshots/reference.png
+```
+
+For a still-image source/native review with no prior recording, pass the native
+image instead. The matrix emits a ready `desktop design-proof` command:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop video-matrix \
+  --target mac \
+  --scenario design-parity \
+  --check \
+  --design-parity-source-image planning/screenshots/reference.png \
+  --design-parity-native-image /tmp/native-render.png
 ```
 
 If `--design-parity-source-image` is omitted, the check first tries

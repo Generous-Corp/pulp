@@ -392,6 +392,8 @@ class DesktopCommandsCliTests(unittest.TestCase):
             design_checks = {check["name"]: check for check in design_parity["local_readiness"]["checks"]}
             self.assertFalse(design_checks["design-parity.run-manifest"]["ok"])
             self.assertIn("--design-parity-manifest", design_checks["design-parity.run-manifest"]["remediation"])
+            self.assertFalse(design_checks["design-parity.native-image"]["ok"])
+            self.assertIn("--design-parity-native-image", design_checks["design-parity.native-image"]["remediation"])
             self.assertFalse(design_checks["design-parity.source-image"]["ok"])
             self.assertIn("--design-parity-source-image", design_checks["design-parity.source-image"]["remediation"])
             for row in blocked_payload["scenarios"]:
@@ -423,7 +425,35 @@ class DesktopCommandsCliTests(unittest.TestCase):
             design_ready = next(item for item in checked_payload["scenarios"] if item["id"] == "design-parity")
             self.assertIn(str(manifest_path.resolve()), design_ready["command"])
             self.assertIn(str((repo_root / "planning" / "screenshots" / "reference.png").resolve()), design_ready["command"])
+            self.assertIn("desktop compose-video", design_ready["command"])
             self.assertEqual(design_ready["local_readiness"]["status"], "ready")
+            design_checks = {check["name"]: check for check in design_ready["local_readiness"]["checks"]}
+            self.assertTrue(design_checks["design-parity.run-manifest"]["ok"])
+            self.assertFalse(design_checks["design-parity.native-image"]["ok"])
+            self.assertFalse(design_checks["design-parity.native-image"]["required"])
+
+            native_path = repo_root / "renders" / "native.png"
+            native_path.parent.mkdir()
+            native_path.write_bytes(b"png")
+            checked_payload = self.mod.desktop_video_matrix_payload(
+                target="mac",
+                status="ready",
+                check=True,
+                design_parity_source_image=repo_root / "planning" / "screenshots" / "reference.png",
+                design_parity_native_image=native_path,
+                repo_root=repo_root,
+                which_fn=lambda name: "/usr/bin/cmake" if name == "cmake" else None,
+            )
+            design_ready = next(item for item in checked_payload["scenarios"] if item["id"] == "design-parity")
+            self.assertIn("desktop design-proof", design_ready["command"])
+            self.assertIn(str(native_path.resolve()), design_ready["command"])
+            self.assertIn(str((repo_root / "planning" / "screenshots" / "reference.png").resolve()), design_ready["command"])
+            self.assertNotIn("discovered_report", design_ready)
+            self.assertEqual(design_ready["local_readiness"]["status"], "ready")
+            design_checks = {check["name"]: check for check in design_ready["local_readiness"]["checks"]}
+            self.assertTrue(design_checks["design-parity.native-image"]["ok"])
+            self.assertFalse(design_checks["design-parity.run-manifest"]["ok"])
+            self.assertFalse(design_checks["design-parity.run-manifest"]["required"])
 
             published_root = repo_root / "artifact-root" / "_published"
             report_dir = published_root / "20260614-design"
@@ -517,6 +547,7 @@ class DesktopCommandsCliTests(unittest.TestCase):
                     check=True,
                     design_parity_manifest=None,
                     design_parity_source_image=None,
+                    design_parity_native_image=None,
                 ),
                 load_config_fn=lambda: {"desktop_automation": {"artifact_root": str(artifact_root)}},
                 print_fn=self.print_line,

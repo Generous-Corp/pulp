@@ -1297,6 +1297,7 @@ def cmd_desktop_video_setup(
                 check=True,
                 design_parity_manifest=getattr(args, "design_parity_manifest", None),
                 design_parity_source_image=getattr(args, "design_parity_source_image", None),
+                design_parity_native_image=getattr(args, "design_parity_native_image", None),
             )
 
     if getattr(args, "json", False):

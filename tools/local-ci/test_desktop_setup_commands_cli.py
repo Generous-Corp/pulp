@@ -968,6 +968,7 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
                 video_audio_device="2",
                 design_parity_manifest="/tmp/run/manifest.json",
                 design_parity_source_image="/tmp/source.png",
+                design_parity_native_image="/tmp/native.png",
                 json=True,
             ),
             **deps,
@@ -1003,6 +1004,7 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
                     "check": True,
                     "design_parity_manifest": "/tmp/run/manifest.json",
                     "design_parity_source_image": "/tmp/source.png",
+                    "design_parity_native_image": "/tmp/native.png",
                 }
             ],
         )
