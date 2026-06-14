@@ -2,6 +2,7 @@
 """Tests for queue facade composition."""
 
 from module_test_utils import load_module_from_path
+from unittest import mock
 import unittest
 from pathlib import Path
 
@@ -30,56 +31,34 @@ class QueueBindingsTests(unittest.TestCase):
         self.assertEqual(len(expected), len(set(expected)))
 
     def test_install_queue_helpers_routes_each_group(self):
-        calls = []
+        bindings = {}
 
-        def lifecycle_install(bindings, names):
-            calls.append(("lifecycle", names))
+        with (
+            mock.patch.object(self.mod, "install_queue_lifecycle_helpers") as install_lifecycle,
+            mock.patch.object(self.mod, "install_queue_policy_helpers") as install_policy,
+            mock.patch.object(self.mod, "install_queue_display_helpers") as install_display,
+            mock.patch.object(self.mod, "install_queue_target_state_helpers") as install_target_state,
+            mock.patch.object(self.mod, "install_queue_runner_helpers") as install_runner,
+            mock.patch.object(self.mod, "install_local_helpers") as install_local,
+        ):
+            self.mod.install_queue_helpers(
+                bindings,
+                (
+                    "load_queue",
+                    "default_priority_for",
+                    "summarize_job",
+                    "updated_target_state",
+                    "read_runner_info",
+                    "custom_queue_export",
+                ),
+            )
 
-        def policy_install(bindings, names):
-            calls.append(("policy", names))
-
-        def display_install(bindings, names):
-            calls.append(("display", names))
-
-        def target_state_install(bindings, names):
-            calls.append(("target_state", names))
-
-        def runner_install(bindings, names):
-            calls.append(("runner", names))
-
-        def local_install(bindings, globals_obj, names):
-            calls.append(("local", names))
-
-        self.mod.install_queue_lifecycle_helpers = lifecycle_install
-        self.mod.install_queue_policy_helpers = policy_install
-        self.mod.install_queue_display_helpers = display_install
-        self.mod.install_queue_target_state_helpers = target_state_install
-        self.mod.install_queue_runner_helpers = runner_install
-        self.mod.install_local_helpers = local_install
-
-        self.mod.install_queue_helpers(
-            {},
-            (
-                "load_queue",
-                "default_priority_for",
-                "summarize_job",
-                "updated_target_state",
-                "read_runner_info",
-                "custom_queue_export",
-            ),
-        )
-
-        self.assertEqual(
-            calls,
-            [
-                ("lifecycle", ("load_queue",)),
-                ("policy", ("default_priority_for",)),
-                ("display", ("summarize_job",)),
-                ("target_state", ("updated_target_state",)),
-                ("runner", ("read_runner_info",)),
-                ("local", ("custom_queue_export",)),
-            ],
-        )
+        install_lifecycle.assert_called_once_with(bindings, ("load_queue",))
+        install_policy.assert_called_once_with(bindings, ("default_priority_for",))
+        install_display.assert_called_once_with(bindings, ("summarize_job",))
+        install_target_state.assert_called_once_with(bindings, ("updated_target_state",))
+        install_runner.assert_called_once_with(bindings, ("read_runner_info",))
+        install_local.assert_called_once_with(bindings, self.mod.__dict__, ("custom_queue_export",))
 
 
 if __name__ == "__main__":
