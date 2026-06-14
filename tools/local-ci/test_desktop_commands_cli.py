@@ -569,6 +569,22 @@ class DesktopCommandsCliTests(unittest.TestCase):
             report_dir = artifact_root / "_published" / "report"
             report_dir.mkdir(parents=True)
             (report_dir / "index.html").write_text("<html></html>")
+            (report_dir / "index.json").write_text(json.dumps({"serve_urls": ["http://127.0.0.1:8765/"]}) + "\n")
+            (report_dir / "review-package.json").write_text(
+                json.dumps(
+                    {
+                        "serve_urls": ["http://127.0.0.1:8765/"],
+                        "runs": [
+                            {
+                                "fallback": {
+                                    "serve_urls": ["http://127.0.0.1:8765/"],
+                                }
+                            }
+                        ],
+                    }
+                )
+                + "\n"
+            )
             serve_config = self.desktop_config()
             serve_config["desktop_automation"]["artifact_root"] = str(artifact_root)
 
@@ -608,6 +624,16 @@ class DesktopCommandsCliTests(unittest.TestCase):
             report_dir = artifact_root / "_published" / "report"
             report_dir.mkdir(parents=True)
             (report_dir / "index.html").write_text("<html></html>")
+            (report_dir / "index.json").write_text(json.dumps({"serve_urls": ["http://127.0.0.1:8765/"]}) + "\n")
+            (report_dir / "review-package.json").write_text(
+                json.dumps(
+                    {
+                        "serve_urls": ["http://127.0.0.1:8765/"],
+                        "runs": [{"fallback": {"serve_urls": ["http://127.0.0.1:8765/"]}}],
+                    }
+                )
+                + "\n"
+            )
             serve_config = self.desktop_config()
             serve_config["desktop_automation"]["artifact_root"] = str(artifact_root)
 
@@ -648,6 +674,16 @@ class DesktopCommandsCliTests(unittest.TestCase):
             report_dir = artifact_root / "_published" / "report"
             report_dir.mkdir(parents=True)
             (report_dir / "index.html").write_text("<html></html>")
+            (report_dir / "index.json").write_text(json.dumps({"serve_urls": ["http://127.0.0.1:8765/"]}) + "\n")
+            (report_dir / "review-package.json").write_text(
+                json.dumps(
+                    {
+                        "serve_urls": ["http://127.0.0.1:8765/"],
+                        "runs": [{"fallback": {"serve_urls": ["http://127.0.0.1:8765/"]}}],
+                    }
+                )
+                + "\n"
+            )
             serve_config = self.desktop_config()
             serve_config["desktop_automation"]["artifact_root"] = str(artifact_root)
 
@@ -676,11 +712,19 @@ class DesktopCommandsCliTests(unittest.TestCase):
                 print_fn=self.print_line,
             )
 
-        self.assertEqual(result, 0)
-        self.assertEqual(started[0][1]["port"], 8771)
-        auto_payload = json.loads(self.printed[0])
-        self.assertEqual(auto_payload["port"], 8771)
-        self.assertEqual(auto_payload["urls"][0], "http://127.0.0.1:8771/")
+            self.assertEqual(result, 0)
+            self.assertEqual(started[0][1]["port"], 8771)
+            auto_payload = json.loads(self.printed[0])
+            self.assertEqual(auto_payload["port"], 8771)
+            self.assertEqual(auto_payload["urls"][0], "http://127.0.0.1:8771/")
+            index_payload = json.loads((report_dir / "index.json").read_text())
+            review_package = json.loads((report_dir / "review-package.json").read_text())
+            self.assertEqual(index_payload["serve_urls"], ["http://127.0.0.1:8771/", "http://100.64.0.10:8771/"])
+            self.assertEqual(review_package["serve_urls"], ["http://127.0.0.1:8771/", "http://100.64.0.10:8771/"])
+            self.assertEqual(
+                review_package["runs"][0]["fallback"]["serve_urls"],
+                ["http://127.0.0.1:8771/", "http://100.64.0.10:8771/"],
+            )
 
         self.printed.clear()
         started.clear()

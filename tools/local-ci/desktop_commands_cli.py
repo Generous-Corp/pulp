@@ -231,6 +231,30 @@ def start_desktop_serve_process(
     return payload
 
 
+def persist_desktop_serve_urls(report_dir: Path, urls: list[str]) -> None:
+    clean_urls = [str(url) for url in urls if str(url).strip()]
+    if not clean_urls:
+        return
+    for filename in ("index.json", "review-package.json"):
+        path = report_dir / filename
+        if not path.exists():
+            continue
+        try:
+            payload = json.loads(path.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        payload["serve_urls"] = clean_urls
+        for run in payload.get("runs") or []:
+            if not isinstance(run, dict):
+                continue
+            fallback = run.get("fallback")
+            if isinstance(fallback, dict):
+                fallback["serve_urls"] = clean_urls
+        _write_json(path, payload)
+
+
 def read_desktop_serve_state(publish_root: Path, label: str) -> dict | None:
     state_path = desktop_serve_state_path(publish_root, label)
     if not state_path.exists():
@@ -1691,6 +1715,7 @@ def cmd_desktop_serve(
     desktop_serve_candidate_urls_fn: Callable[[str, int], list[str]] = desktop_serve_candidate_urls,
     serve_directory_fn: Callable[..., None] = serve_directory,
     start_serve_process_fn: Callable[..., dict] = start_desktop_serve_process,
+    persist_serve_urls_fn: Callable[[Path, list[str]], None] = persist_desktop_serve_urls,
     read_serve_state_fn: Callable[[Path, str], dict | None] = read_desktop_serve_state,
     stop_serve_process_fn: Callable[..., dict] = stop_desktop_serve_process,
     is_running_fn: Callable[[int], bool] = process_is_running,
@@ -1792,6 +1817,7 @@ def cmd_desktop_serve(
                 if state.get("stdout_tail"):
                     print_fn(f"  stdout: {state['stdout_tail'].strip()}")
             return 1
+        persist_serve_urls_fn(resolved_serve_dir, urls)
         if getattr(args, "json", False):
             print_fn(json.dumps({**state, "status": "started"}, indent=2))
         else:
@@ -1809,6 +1835,7 @@ def cmd_desktop_serve(
     for url in urls[1:]:
         print_fn(f"  also: {url}")
     print_fn(f"  directory: {serve_dir}")
+    persist_serve_urls_fn(resolved_serve_dir, urls)
     serve_directory_fn(serve_dir, host=args.host, port=port)
     return 0
 
