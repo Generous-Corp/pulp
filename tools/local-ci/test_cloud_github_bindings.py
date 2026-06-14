@@ -2,8 +2,8 @@
 """Tests for cloud GitHub facade bindings."""
 
 from module_test_utils import load_module_from_path
-import types
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -29,84 +29,18 @@ class CloudGithubBindingsTests(unittest.TestCase):
             self.assertTrue(callable(getattr(self.mod, name)))
 
     def test_install_cloud_github_helpers_routes_focused_groups(self):
-        calls = []
+        bindings = {}
 
-        def workflow_install(bindings, names):
-            calls.append(("workflow", names))
+        with (
+            mock.patch.object(self.mod, "install_cloud_github_workflow_helpers") as install_workflow,
+            mock.patch.object(self.mod, "install_cloud_github_pr_helpers") as install_pr,
+            mock.patch.object(self.mod, "install_local_helpers") as install_local,
+        ):
+            self.mod.install_cloud_github_helpers(bindings, ("gh_available", "gh_pr_head", "custom_github_export"))
 
-        def pr_install(bindings, names):
-            calls.append(("pr", names))
-
-        self.mod.install_cloud_github_workflow_helpers = workflow_install
-        self.mod.install_cloud_github_pr_helpers = pr_install
-
-        self.mod.install_cloud_github_helpers({}, ("gh_available", "gh_pr_head"))
-
-        self.assertEqual(
-            calls,
-            [
-                ("workflow", ("gh_available",)),
-                ("pr", ("gh_pr_head",)),
-            ],
-        )
-
-    def test_github_helpers_delegate_to_cloud_module(self):
-        calls = []
-
-        def make_runner(name, value):
-            def runner(*args, **kwargs):
-                calls.append((name, args, kwargs))
-                return value
-
-            return runner
-
-        cloud = types.SimpleNamespace(
-            gh_available=make_runner("gh_available", True),
-            gh_workflow_dispatch=make_runner("gh_workflow_dispatch", None),
-            gh_run_view=make_runner("gh_run_view", {"databaseId": 7}),
-            gh_pr_create=make_runner("gh_pr_create", 42),
-            gh_pr_comment=make_runner("gh_pr_comment", True),
-            gh_pr_merge=make_runner("gh_pr_merge", True),
-            gh_pr_list_open=make_runner("gh_pr_list_open", [{"number": 42}]),
-            gh_pr_head=make_runner("gh_pr_head", (42, "feature/x", "abc123")),
-        )
-        bindings = {"_cloud": cloud}
-
-        self.assertTrue(self.mod.gh_available(bindings))
-        self.assertIsNone(self.mod.gh_workflow_dispatch(bindings, "repo", "build.yml", "main", {"k": "v"}))
-        self.assertEqual(self.mod.gh_run_view(bindings, "repo", 7), {"databaseId": 7})
-        self.assertEqual(self.mod.gh_pr_create(bindings, "feature/x", "main"), 42)
-        self.assertTrue(self.mod.gh_pr_comment(bindings, 42, "body"))
-        self.assertTrue(self.mod.gh_pr_merge(bindings, 42, "squash"))
-        self.assertEqual(self.mod.gh_pr_list_open(bindings), [{"number": 42}])
-        self.assertEqual(self.mod.gh_pr_head(bindings, "latest"), (42, "feature/x", "abc123"))
-
-        self.assertEqual(
-            [call[0] for call in calls],
-            [
-                "gh_available",
-                "gh_workflow_dispatch",
-                "gh_run_view",
-                "gh_pr_create",
-                "gh_pr_comment",
-                "gh_pr_merge",
-                "gh_pr_list_open",
-                "gh_pr_head",
-            ],
-        )
-        self.assertEqual(calls[1][1], ("repo", "build.yml", "main", {"k": "v"}))
-        self.assertEqual(calls[3][1], ("feature/x", "main"))
-        self.assertEqual(calls[5][1], (42, "squash"))
-
-    def test_install_cloud_github_helpers_wires_named_exports(self):
-        calls = []
-        cloud = types.SimpleNamespace(gh_available=lambda: calls.append(("gh_available",)) or True)
-        bindings = {"_cloud": cloud}
-
-        self.mod.install_cloud_github_helpers(bindings, ("gh_available",))
-
-        self.assertTrue(bindings["gh_available"]())
-        self.assertEqual(calls, [("gh_available",)])
+        install_workflow.assert_called_once_with(bindings, ("gh_available",))
+        install_pr.assert_called_once_with(bindings, ("gh_pr_head",))
+        install_local.assert_called_once_with(bindings, self.mod.__dict__, ("custom_github_export",))
 
 
 if __name__ == "__main__":

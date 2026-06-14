@@ -2,8 +2,8 @@
 """Tests for cloud/GitHub facade composition."""
 
 from pathlib import Path
-import types
 import unittest
+from unittest import mock
 
 from module_test_utils import load_module_from_path
 
@@ -31,42 +31,35 @@ class CloudBindingsTests(unittest.TestCase):
         self.assertEqual(len(expected), len(set(expected)))
 
     def test_install_cloud_helpers_routes_each_group(self):
-        calls = []
+        bindings = {}
 
-        def make_runner(name, value):
-            def runner(*args, **kwargs):
-                calls.append((name, args, kwargs))
-                return value
-
-            return runner
-
-        bindings = {
-            "_cloud": types.SimpleNamespace(
-                summarize_runner_selector=make_runner("summarize_runner_selector", "linux,arm64"),
-                cmd_cloud_status=make_runner("cmd_cloud_status", 16),
-                gh_pr_head=make_runner("gh_pr_head", (42, "feature/x", "abc123")),
-                format_ci_comment=make_runner("format_ci_comment", "comment"),
+        with (
+            mock.patch.object(self.mod, "install_cloud_module_attr_helpers") as install_module_attrs,
+            mock.patch.object(self.mod, "install_cloud_command_helpers") as install_commands,
+            mock.patch.object(self.mod, "install_cloud_github_helpers") as install_github,
+            mock.patch.object(self.mod, "install_cloud_record_helpers") as install_records,
+        ):
+            self.mod.install_cloud_helpers(
+                bindings,
+                (
+                    "summarize_runner_selector",
+                    "cmd_cloud_status",
+                    "gh_pr_head",
+                    "format_ci_comment",
+                    "custom_cloud_export",
+                ),
             )
-        }
 
-        self.mod.install_cloud_helpers(
-            bindings,
-            (
-                "summarize_runner_selector",
-                "cmd_cloud_status",
-                "gh_pr_head",
-                "format_ci_comment",
-            ),
-        )
-
-        self.assertEqual(bindings["summarize_runner_selector"]("selector"), "linux,arm64")
-        self.assertEqual(bindings["cmd_cloud_status"](object()), 16)
-        self.assertEqual(bindings["gh_pr_head"]("latest"), (42, "feature/x", "abc123"))
-        self.assertEqual(bindings["format_ci_comment"]({"overall": "pass"}), "comment")
         self.assertEqual(
-            [call[0] for call in calls],
-            ["summarize_runner_selector", "cmd_cloud_status", "gh_pr_head", "format_ci_comment"],
+            install_module_attrs.call_args_list,
+            [
+                mock.call(bindings, ("summarize_runner_selector",)),
+                mock.call(bindings, ("custom_cloud_export",)),
+            ],
         )
+        install_commands.assert_called_once_with(bindings, ("cmd_cloud_status",))
+        install_github.assert_called_once_with(bindings, ("gh_pr_head",))
+        install_records.assert_called_once_with(bindings, ("format_ci_comment",))
 
 
 if __name__ == "__main__":
