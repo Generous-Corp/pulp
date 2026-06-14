@@ -24,6 +24,14 @@ if(Python3_Interpreter_FOUND)
         --golden-dir "${CMAKE_SOURCE_DIR}/assets/design-system/ink-signal/reference/gallery")
     set_tests_properties(gallery-visual-regression PROPERTIES SKIP_RETURN_CODE 77)
 
+    # Per-primitive visual regression — catches widget-fidelity drift vs the
+    # Figma-converged native renders (skips=77 without binary/Pillow/backend).
+    add_test(NAME component-visual-regression COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/component_regression.py"
+        --binary "${CMAKE_BINARY_DIR}/examples/component-shots/pulp-component-shots"
+        --golden-dir "${CMAKE_SOURCE_DIR}/assets/design-system/ink-signal/reference/components")
+    set_tests_properties(component-visual-regression PROPERTIES SKIP_RETURN_CODE 77)
+
     if(PULP_ENABLE_SCENE3D)
         set(PULP_SCENE3D_CMAKE_EXPECT on)
     else()
@@ -5950,6 +5958,9 @@ pulp_add_test_suite(pulp-test-design-system LIBRARIES pulp::view)
 
 # Sampler starter (Phase 8d) — real sampler UI built from the design catalog
 pulp_add_test_suite(pulp-test-sampler-starter LIBRARIES pulp::view)
+
+# Design-system interaction — verifies the widgets are wired (knob moves, etc.)
+pulp_add_test_suite(pulp-test-design-system-interaction LIBRARIES pulp::view)
 
 # OS appearance tracking
 pulp_add_test_suite(pulp-test-appearance SOURCES test_appearance_tracker.cpp LIBRARIES pulp::view)
