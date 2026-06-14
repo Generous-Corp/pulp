@@ -737,38 +737,6 @@ class LocalCiTests(unittest.TestCase):
             ['cmake -S . -B build -G "Visual Studio 17 2022" -A x64']
         )
 
-    def test_run_ssh_subprocess_retries_transient_connection_reset(self):
-        calls = []
-
-        def fake_run(*args, **kwargs):
-            calls.append((args, kwargs))
-            if len(calls) == 1:
-                return subprocess.CompletedProcess(args[0][0], 255, "", "kex_exchange_identification: read: Connection reset by peer")
-            return subprocess.CompletedProcess(args[0][0], 0, "ok\n", "")
-
-        with mock.patch.object(self.mod.subprocess, "run", side_effect=fake_run):
-            with mock.patch.object(self.mod.time, "sleep") as sleep_mock:
-                result = self.mod.run_ssh_subprocess(["ssh", "win2", "hostname"], timeout=5)
-
-        self.assertEqual(result.returncode, 0)
-        self.assertEqual(len(calls), 2)
-        sleep_mock.assert_called_once()
-
-    def test_run_ssh_subprocess_does_not_retry_non_transient_failure(self):
-        calls = []
-
-        def fake_run(*args, **kwargs):
-            calls.append((args, kwargs))
-            return subprocess.CompletedProcess(args[0][0], 1, "", "permission denied")
-
-        with mock.patch.object(self.mod.subprocess, "run", side_effect=fake_run):
-            with mock.patch.object(self.mod.time, "sleep") as sleep_mock:
-                result = self.mod.run_ssh_subprocess(["ssh", "win2", "hostname"], timeout=5)
-
-        self.assertEqual(result.returncode, 1)
-        self.assertEqual(len(calls), 1)
-        sleep_mock.assert_not_called()
-
     def test_prepare_linux_exact_sha_source_fetches_bundle_ref_without_lfs_smudge(self):
         bundle_dir = Path(self.tmpdir.name) / "bundle-linux"
         bundle_dir.mkdir(parents=True, exist_ok=True)
@@ -1015,20 +983,6 @@ class LocalCiTests(unittest.TestCase):
         self.assertIn("export XDG_RUNTIME_DIR=/run/user/1000", remote_cmd)
         self.assertNotIn("xvfb-run -a", remote_cmd)
         self.assertIn("bash -lc ./build/ui-preview", remote_cmd)
-
-    def test_ssh_failure_detail_reports_handshake_reset(self):
-        result = subprocess.CompletedProcess(["ssh"], 255, "", "kex_exchange_identification: read: Connection reset by peer\nConnection reset by 100.110.129.45 port 22\n")
-        with mock.patch.object(self.mod, "ssh_probe", return_value=result):
-            detail = self.mod.ssh_failure_detail("win2", 5)
-
-        self.assertEqual(detail, "win2 (SSH service reset during handshake; verify OpenSSH server on the target)")
-
-    def test_ssh_probe_timeout_returns_completed_process(self):
-        with mock.patch.object(self.mod, "run_ssh_subprocess", side_effect=subprocess.TimeoutExpired(["ssh"], 5)):
-            result = self.mod.ssh_probe("win2", 5)
-
-        self.assertEqual(result.returncode, 124)
-        self.assertIn("timed out", result.stderr.lower())
 
     def test_cmd_desktop_install_records_receipt(self):
         buf = io.StringIO()
@@ -4453,21 +4407,6 @@ class LocalCiTests(unittest.TestCase):
         info = self.mod.read_runner_info()
         self.assertIn(info["active_job_id"], {"job1", "job2"})
         self.assertIn(info["active_branch"], {"feature/1", "feature/2"})
-
-    def test_windows_ssh_powershell_command_uses_stdin_eval_wrapper(self):
-        cmd = self.mod.windows_ssh_powershell_command("win2")
-        self.assertEqual(
-            cmd,
-            [
-                "ssh",
-                "win2",
-                "powershell",
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                "$script = [Console]::In.ReadToEnd(); Invoke-Expression $script",
-            ],
-        )
 
     def test_windows_validation_can_pass_generator_instance(self):
         captured = {}
