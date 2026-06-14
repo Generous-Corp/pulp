@@ -7,14 +7,12 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from module_test_utils import load_module_from_path
+from module_test_utils import load_local_ci_module
 
-
-MODULE_PATH = Path(__file__).with_name("cleanup_plan_apply.py")
 
 
 def load_module():
-    return load_module_from_path(MODULE_PATH, module_name="pulp_cleanup_plan_apply")
+    return load_local_ci_module("cleanup_plan_apply.py", module_name="pulp_cleanup_plan_apply")
 
 
 class CleanupPlanApplyTests(unittest.TestCase):

@@ -3,18 +3,15 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import unittest
 from unittest import mock
 
-from module_test_utils import load_module_from_path
+from module_test_utils import load_local_ci_module
 
-
-MODULE_PATH = Path(__file__).with_name("cleanup_stale_windows_reclaim.py")
 
 
 def load_module():
-    return load_module_from_path(MODULE_PATH, add_module_dir=True)
+    return load_local_ci_module("cleanup_stale_windows_reclaim.py", add_module_dir=True)
 
 
 class CleanupStaleWindowsReclaimTests(unittest.TestCase):

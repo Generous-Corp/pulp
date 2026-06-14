@@ -3,18 +3,15 @@
 
 from __future__ import annotations
 
-import pathlib
 import unittest
 from unittest import mock
 
-from module_test_utils import load_module_from_path
+from module_test_utils import load_local_ci_module
 
-
-MODULE_PATH = pathlib.Path(__file__).with_name("cleanup.py")
 
 
 def load_module():
-    return load_module_from_path(MODULE_PATH)
+    return load_local_ci_module("cleanup.py")
 
 
 class CleanupTests(unittest.TestCase):

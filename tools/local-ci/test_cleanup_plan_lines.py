@@ -6,14 +6,12 @@ from __future__ import annotations
 from pathlib import Path
 import unittest
 
-from module_test_utils import load_module_from_path
+from module_test_utils import load_local_ci_module
 
-
-MODULE_PATH = Path(__file__).with_name("cleanup_plan_lines.py")
 
 
 def load_module():
-    return load_module_from_path(MODULE_PATH, module_name="pulp_cleanup_plan_lines")
+    return load_local_ci_module("cleanup_plan_lines.py", module_name="pulp_cleanup_plan_lines")
 
 
 class CleanupPlanLinesTests(unittest.TestCase):
