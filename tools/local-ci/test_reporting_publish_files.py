@@ -7,14 +7,12 @@ import pathlib
 import tempfile
 import unittest
 
-from module_test_utils import load_module_from_path
+from module_test_utils import load_local_ci_module
 
-
-MODULE_PATH = pathlib.Path(__file__).with_name("reporting_publish_files.py")
 
 
 def load_module():
-    return load_module_from_path(MODULE_PATH, add_module_dir=True)
+    return load_local_ci_module("reporting_publish_files.py", add_module_dir=True)
 
 
 class ReportingPublishFilesTests(unittest.TestCase):

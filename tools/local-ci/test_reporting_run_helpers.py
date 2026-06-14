@@ -8,11 +8,11 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from module_test_utils import load_module_from_path
+from module_test_utils import load_local_ci_module
 
 
 def load_module(name: str):
-    return load_module_from_path(Path(__file__).with_name(f"{name}.py"), add_module_dir=True)
+    return load_local_ci_module(f"{name}.py", add_module_dir=True)
 
 
 class ReportingRunHelperTests(unittest.TestCase):

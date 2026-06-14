@@ -7,14 +7,12 @@ import pathlib
 import tempfile
 import unittest
 
-from module_test_utils import load_module_from_path
+from module_test_utils import load_local_ci_module
 
-
-MODULE_PATH = pathlib.Path(__file__).with_name("validation_runner_windows.py")
 
 
 def load_module():
-    return load_module_from_path(MODULE_PATH)
+    return load_local_ci_module("validation_runner_windows.py")
 
 
 def result_from_run(target_name: str, run: dict, *, log_path: pathlib.Path, validation: str, transport_mode: str) -> dict:
