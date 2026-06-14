@@ -71,10 +71,10 @@ class MacOSTerminalRunnerTests(unittest.TestCase):
         self.assertIn("desktop video-doctor mac", script)
         self.assertIn("'/tmp/out file'", script)
         self.assertIn("'/tmp/rc file'", script)
-        self.assertIn("/usr/bin/osascript", script)
-        self.assertIn("first window whose name contains", script)
-        self.assertIn("saving no", script)
-        self.assertIn("; exit", script)
+        self.assertIn("exec /bin/zsh -l", script)
+        self.assertNotIn("; exit", script)
+        self.assertNotIn("/usr/bin/osascript", script)
+        self.assertNotIn("first window whose name contains", script)
 
     def test_run_local_ci_in_terminal_replays_output_and_returncode(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -211,6 +211,51 @@ class MacOSTerminalRunnerTests(unittest.TestCase):
         self.assertEqual(result["returncode"], 1)
         self.assertEqual(result["stderr"], "denied\n")
 
+    def test_run_local_ci_in_terminal_cleans_up_on_timeout(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            calls = []
+            times = iter([0.0, 2.0])
+
+            class FixedTemporaryDirectory:
+                def __init__(self, *_args, **_kwargs):
+                    pass
+
+                def __enter__(self):
+                    return str(tmp_path)
+
+                def __exit__(self, *_args):
+                    return False
+
+            def fake_run(cmd, **_kwargs):
+                calls.append(cmd)
+                if cmd[0] == "osascript" and "set proofCount" in cmd[-1]:
+                    return subprocess.CompletedProcess(cmd, 0, "1234\t0\t1", "")
+                if cmd[0] == "osascript" and "exists process" in cmd[-1]:
+                    return subprocess.CompletedProcess(cmd, 0, "true\n", "")
+                if cmd[0] == "osascript" and "do script" in cmd[-1]:
+                    return subprocess.CompletedProcess(cmd, 0, "", "")
+                if cmd[0] == "osascript" and "set closedCount" in cmd[-1]:
+                    return subprocess.CompletedProcess(cmd, 0, "1\n", "")
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+
+            with mock.patch.object(self.mod.tempfile, "TemporaryDirectory", FixedTemporaryDirectory):
+                result = self.mod.run_local_ci_in_terminal(
+                    ["desktop", "video-doctor", "--run-in-terminal", "mac"],
+                    cwd=Path("/repo"),
+                    python_executable="/usr/bin/python3",
+                    script_path=Path("/repo/tools/local-ci/local_ci.py"),
+                    timeout_secs=1,
+                    run_fn=fake_run,
+                    monotonic_fn=lambda: next(times),
+                    sleep_fn=lambda _secs: None,
+                )
+
+        self.assertEqual(result["returncode"], 124)
+        self.assertTrue(result["timed_out"])
+        self.assertEqual(result["terminal_cleanup"]["remaining_proof_count"], 0)
+        self.assertTrue(any(cmd[0] == "osascript" and "set closedCount" in cmd[-1] for cmd in calls))
+
     def test_close_terminal_windows_terminates_only_scoped_proof_terminal(self):
         calls = []
 
@@ -319,6 +364,54 @@ class MacOSTerminalRunnerTests(unittest.TestCase):
         self.assertEqual(result["remaining_proof_count"], 0)
         self.assertEqual(result["miniaturized_count"], 0)
         self.assertTrue(any(cmd[0] == "osascript" and 'set custom title of t to ""' in cmd[-1] for cmd in calls))
+
+    def test_close_terminal_windows_terminates_scoped_tty_sentinel_before_miniaturizing(self):
+        calls = []
+        state_outputs = iter(["1234\t1\t1", "1234\t1\t1", "1234\t1\t1", "1234\t1\t1", "1234\t0\t1"])
+
+        def fake_run(cmd, **_kwargs):
+            calls.append(cmd)
+            script = cmd[-1] if cmd[0] == "osascript" else ""
+            if "set closedCount" in script:
+                return subprocess.CompletedProcess(cmd, 0, "1\n", "")
+            if "set exitCount" in script:
+                return subprocess.CompletedProcess(cmd, 0, "1\n", "")
+            if "set clearedTitleCount" in script:
+                return subprocess.CompletedProcess(cmd, 0, "0\n", "")
+            if "set ttyRows" in script:
+                return subprocess.CompletedProcess(cmd, 0, "/dev/ttys006\n", "")
+            if "set terminalPid" in script:
+                return subprocess.CompletedProcess(cmd, 0, next(state_outputs), "")
+            if cmd[0] == "ps":
+                return subprocess.CompletedProcess(
+                    cmd,
+                    0,
+                    "45818 login -pf danielraffel\n"
+                    "45819 -zsh\n"
+                    "45839 /bin/zsh /tmp/pulp-local-ci-terminal-123/terminal-command.sh\n"
+                    "45843 /usr/bin/caffeinate -u -t 60\n"
+                    "45873 sleep 3600\n",
+                    "",
+                )
+            if cmd[0] == "kill":
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+            if "miniaturizedCount" in script:
+                return subprocess.CompletedProcess(cmd, 0, "1\n", "")
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        result = self.mod.close_terminal_windows_with_title(
+            "Pulp Video Proof local-ci test1234",
+            run_fn=fake_run,
+            sleep_fn=lambda _secs: None,
+            attempts=1,
+        )
+
+        self.assertEqual(result["tty_terminate_count"], 3)
+        self.assertEqual(result["tty_close_retry_count"], 1)
+        self.assertEqual(result["remaining_proof_count"], 0)
+        self.assertEqual(result["miniaturized_count"], 0)
+        self.assertTrue(any(cmd[:2] == ["ps", "-t"] and cmd[2] == "ttys006" for cmd in calls))
+        self.assertTrue(any(cmd[:2] == ["kill", "-TERM"] and "45873" in cmd for cmd in calls))
 
     def test_close_terminal_windows_can_terminate_new_terminal_session(self):
         calls = []

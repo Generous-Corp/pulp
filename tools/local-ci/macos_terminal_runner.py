@@ -48,11 +48,6 @@ def terminal_shell_script(
         str(script_path),
         *strip_run_in_terminal_args(argv),
     ]
-    close_script = (
-        f'tell application "Terminal" to close (first window whose name contains {json.dumps(title)}) saving no'
-        if title
-        else None
-    )
     parts = [
         f"cd {shlex.quote(str(cwd))}",
         f"printf '\\033]0;%s\\007' {shlex.quote(title)}" if title else None,
@@ -61,8 +56,7 @@ def terminal_shell_script(
         f"> {shlex.quote(str(stdout_path))} "
         f"2> {shlex.quote(str(stderr_path))}",
         f"printf '%s\\n' \"$?\" > {shlex.quote(str(returncode_path))}",
-        f"(sleep 0.2; /usr/bin/osascript -e {shlex.quote(close_script)} >/dev/null 2>&1) &" if close_script else None,
-        "exit",
+        "exec /bin/zsh -l",
     ]
     return "; ".join(part for part in parts if part)
 
@@ -165,6 +159,30 @@ def close_terminal_windows_with_title(
             "end tell",
         ]
     )
+    matching_ttys_script = "\n".join(
+        [
+            'tell application "Terminal"',
+            "    set ttyRows to {}",
+            "    repeat with w in (every window)",
+            "        set windowName to name of w",
+            f"        if windowName contains {json.dumps(title_contains)} then",
+            "            repeat with t in tabs of w",
+            "                try",
+            "                    set ttyPath to tty of t",
+            "                    if ttyPath is not missing value and ttyPath is not \"\" then",
+            "                        set end of ttyRows to ttyPath",
+            "                    end if",
+            "                end try",
+            "            end repeat",
+            "        end if",
+            "    end repeat",
+            '    set AppleScript\'s text item delimiters to "\n"',
+            "    set ttyText to ttyRows as text",
+            '    set AppleScript\'s text item delimiters to ""',
+            "    return ttyText",
+            "end tell",
+        ]
+    )
     clear_stale_title_script = "\n".join(
         [
             'tell application "Terminal"',
@@ -196,6 +214,8 @@ def close_terminal_windows_with_title(
     miniaturized_count = 0
     exit_attempt_count = 0
     stale_title_clear_count = 0
+    tty_terminate_count = 0
+    tty_close_retry_count = 0
     for attempt in range(max(1, attempts)):
         if attempt:
             sleep_fn(0.2)
@@ -288,6 +308,62 @@ def close_terminal_windows_with_title(
                 if remaining_proof_count == 0:
                     closed_count = close_attempt_count
     if remaining_proof_count and remaining_proof_count > 0:
+        tty_result = run_fn(["osascript", "-e", matching_ttys_script], capture_output=True, text=True)
+        if tty_result.returncode == 0:
+            tty_names = []
+            for raw_tty in (tty_result.stdout or "").splitlines():
+                tty_name = raw_tty.strip()
+                if not tty_name:
+                    continue
+                if tty_name.startswith("/dev/"):
+                    tty_name = tty_name[len("/dev/") :]
+                if tty_name not in tty_names:
+                    tty_names.append(tty_name)
+            for tty_name in tty_names:
+                ps_result = run_fn(["ps", "-t", tty_name, "-o", "pid=,command="], capture_output=True, text=True)
+                if ps_result.returncode != 0:
+                    continue
+                pids: list[str] = []
+                for line in (ps_result.stdout or "").splitlines():
+                    stripped = line.strip()
+                    if not stripped:
+                        continue
+                    parts = stripped.split(maxsplit=1)
+                    if len(parts) != 2:
+                        continue
+                    pid, command_text = parts
+                    if (
+                        "terminal-command.sh" in command_text
+                        or command_text == "sleep 3600"
+                        or command_text == "/usr/bin/caffeinate -u -t 60"
+                    ):
+                        pids.append(pid)
+                if pids:
+                    kill_result = run_fn(["kill", "-TERM", *pids], capture_output=True, text=True)
+                    if kill_result.returncode == 0:
+                        tty_terminate_count += len(pids)
+            if tty_terminate_count > 0:
+                retry_result = run_fn(["osascript", "-e", close_window_script], capture_output=True, text=True)
+                if retry_result.returncode == 0:
+                    try:
+                        tty_close_retry_count = int((retry_result.stdout or "0").strip())
+                        close_attempt_count += tty_close_retry_count
+                    except ValueError:
+                        tty_close_retry_count = 0
+                sleep_fn(0.2)
+                state_result = run_fn(["osascript", "-e", state_script], capture_output=True, text=True)
+                if state_result.returncode == 0:
+                    state_fields = (state_result.stdout or "").strip().split("\t")
+                    if len(state_fields) == 3:
+                        try:
+                            remaining_proof_count = int(state_fields[1])
+                            other_window_count = int(state_fields[2])
+                        except ValueError:
+                            remaining_proof_count = None
+                            other_window_count = None
+                if remaining_proof_count == 0:
+                    closed_count = close_attempt_count
+    if remaining_proof_count and remaining_proof_count > 0:
         state_result = run_fn(["osascript", "-e", state_script], capture_output=True, text=True)
         if state_result.returncode == 0:
             state_fields = (state_result.stdout or "").strip().split("\t")
@@ -317,6 +393,8 @@ def close_terminal_windows_with_title(
         "close_attempt_count": close_attempt_count,
         "exit_attempt_count": exit_attempt_count,
         "stale_title_clear_count": stale_title_clear_count,
+        "tty_terminate_count": tty_terminate_count,
+        "tty_close_retry_count": tty_close_retry_count,
         "remaining_proof_count": remaining_proof_count,
         "other_window_count": other_window_count,
         "miniaturized_count": miniaturized_count,
@@ -419,4 +497,10 @@ def run_local_ci_in_terminal(
             "stderr": f"Timed out waiting for Terminal-launched local-ci command after {timeout_secs:g}s.\n",
             "timed_out": True,
             "terminal_title": terminal_title,
+            "terminal_cleanup": close_terminal_windows_with_title(
+                terminal_title,
+                run_fn=run_fn,
+                sleep_fn=sleep_fn,
+                allow_terminate_with_nonproof_windows=not terminal_was_running,
+            ),
         }
