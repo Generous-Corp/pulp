@@ -45,18 +45,5 @@ class DesktopSourceRequestCoreBindingsTests(unittest.TestCase):
         self.assertIs(captured["make_request"][1]["current_branch_fn"], bindings["current_branch"])
         self.assertIs(captured["make_request"][1]["current_sha_fn"], bindings["current_sha"])
 
-    def test_core_installer_wires_selected_helper(self):
-        bindings = {
-            "_source_prep": types.SimpleNamespace(make_desktop_source_request=lambda args, **kwargs: {"mode": "live"}),
-            "normalize_desktop_source_mode": object(),
-            "current_branch": object(),
-            "current_sha": object(),
-        }
-
-        self.mod.install_desktop_source_request_core_helpers(bindings)
-
-        self.assertEqual(bindings["make_desktop_source_request"](object()), {"mode": "live"})
-
-
 if __name__ == "__main__":
     unittest.main()

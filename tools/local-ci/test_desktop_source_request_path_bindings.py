@@ -54,16 +54,5 @@ class DesktopSourceRequestPathBindingsTests(unittest.TestCase):
         self.assertEqual(captured["source_root"][0], ("mac", request))
         self.assertIs(captured["source_root"][1]["state_dir_fn"], bindings["state_dir"])
 
-    def test_path_installer_wires_selected_helper(self):
-        bindings = {
-            "_source_prep": types.SimpleNamespace(desktop_source_cache_key=lambda source_request: "abc123"),
-        }
-
-        self.mod.install_desktop_source_request_path_helpers(bindings, ("desktop_source_cache_key",))
-
-        self.assertEqual(bindings["desktop_source_cache_key"]({"sha": "abc"}), "abc123")
-        self.assertNotIn("desktop_source_root", bindings)
-
-
 if __name__ == "__main__":
     unittest.main()

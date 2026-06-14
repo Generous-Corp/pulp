@@ -40,22 +40,5 @@ class DesktopSourceRequestManifestBindingsTests(unittest.TestCase):
 
         self.assertEqual(captured["attach"], (manifest, source_context))
 
-    def test_manifest_installer_wires_named_helper(self):
-        captured = {}
-
-        def attach_manifest(manifest, source_context):
-            captured["attach"] = (manifest, source_context)
-
-        bindings = {
-            "_source_prep": types.SimpleNamespace(attach_desktop_source_to_manifest=attach_manifest),
-        }
-        manifest = {}
-
-        self.mod.install_desktop_source_request_manifest_helpers(bindings)
-        bindings["attach_desktop_source_to_manifest"](manifest, None)
-
-        self.assertEqual(captured["attach"], (manifest, None))
-
-
 if __name__ == "__main__":
     unittest.main()

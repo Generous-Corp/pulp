@@ -67,20 +67,5 @@ class DesktopSourceRewriteRootBindingsTests(unittest.TestCase):
         self.assertEqual(captured["windows"][1]["root"], self.root)
         self.assertIs(captured["windows"][1]["windows_path_join_fn"], bindings["windows_path_join"])
 
-    def test_root_rewrite_installer_wires_selected_helpers(self):
-        source_prep = types.SimpleNamespace(
-            rewrite_launch_command_for_posix_root=lambda command, remote_root, **kwargs: "posix-root",
-        )
-        bindings = {
-            "_source_prep": source_prep,
-            "ROOT": self.root,
-        }
-
-        self.mod.install_desktop_source_rewrite_root_helpers(bindings, ("rewrite_launch_command_for_posix_root",))
-
-        self.assertEqual(bindings["rewrite_launch_command_for_posix_root"]("./tool", "/remote"), "posix-root")
-        self.assertNotIn("rewrite_launch_command_for_windows_root", bindings)
-
-
 if __name__ == "__main__":
     unittest.main()

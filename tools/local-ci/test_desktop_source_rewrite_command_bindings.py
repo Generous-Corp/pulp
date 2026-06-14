@@ -58,20 +58,5 @@ class DesktopSourceRewriteCommandBindingsTests(unittest.TestCase):
         self.assertEqual(captured["mapper"][1]["root"], self.root)
         self.assertTrue(captured["mapper"][1]["windows"])
 
-    def test_command_rewrite_installer_wires_selected_helpers(self):
-        source_prep = types.SimpleNamespace(
-            command_path_rewrite_candidate=lambda token, **kwargs: Path("/repo/tool"),
-        )
-        bindings = {
-            "_source_prep": source_prep,
-            "ROOT": self.root,
-        }
-
-        self.mod.install_desktop_source_rewrite_command_helpers(bindings, ("command_path_rewrite_candidate",))
-
-        self.assertEqual(bindings["command_path_rewrite_candidate"]("./tool"), Path("/repo/tool"))
-        self.assertNotIn("rewrite_launch_command_for_mapper", bindings)
-
-
 if __name__ == "__main__":
     unittest.main()

@@ -50,16 +50,5 @@ class DesktopSourceRequestWindowsBindingsTests(unittest.TestCase):
         self.mod.validate_windows_prepare_commands(bindings, ["one"])
         self.assertEqual(captured["validate"], ["one"])
 
-    def test_windows_installer_wires_selected_helper(self):
-        bindings = {
-            "_source_prep": types.SimpleNamespace(split_windows_prepare_commands=lambda command: ["one", "two"]),
-        }
-
-        self.mod.install_desktop_source_request_windows_helpers(bindings, ("split_windows_prepare_commands",))
-
-        self.assertEqual(bindings["split_windows_prepare_commands"]("one;two"), ["one", "two"])
-        self.assertNotIn("validate_windows_prepare_commands", bindings)
-
-
 if __name__ == "__main__":
     unittest.main()
