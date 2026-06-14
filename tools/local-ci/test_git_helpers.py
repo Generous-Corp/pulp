@@ -10,27 +10,27 @@ import unittest
 from datetime import datetime
 from unittest import mock
 
-from module_test_utils import load_module_from_path
+from module_test_utils import load_local_ci_module
 
 
-COMMAND_MODULE_PATH = pathlib.Path(__file__).with_name("git_command_helpers.py")
-COMPAT_MODULE_PATH = pathlib.Path(__file__).with_name("git_helpers.py")
-REF_MODULE_PATH = pathlib.Path(__file__).with_name("git_ref_helpers.py")
-REMOTE_MODULE_PATH = pathlib.Path(__file__).with_name("git_remote_helpers.py")
-TIME_MODULE_PATH = pathlib.Path(__file__).with_name("git_time_helpers.py")
+COMMAND_MODULE = "git_command_helpers.py"
+COMPAT_MODULE = "git_helpers.py"
+REF_MODULE = "git_ref_helpers.py"
+REMOTE_MODULE = "git_remote_helpers.py"
+TIME_MODULE = "git_time_helpers.py"
 
 
-def load_module(path: pathlib.Path):
-    return load_module_from_path(path, add_module_dir=True)
+def load_module(filename: str):
+    return load_local_ci_module(filename, add_module_dir=True)
 
 
 class GitHelpersTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.command_mod = load_module(COMMAND_MODULE_PATH)
-        self.compat_mod = load_module(COMPAT_MODULE_PATH)
-        self.ref_mod = load_module(REF_MODULE_PATH)
-        self.remote_mod = load_module(REMOTE_MODULE_PATH)
-        self.time_mod = load_module(TIME_MODULE_PATH)
+        self.command_mod = load_module(COMMAND_MODULE)
+        self.compat_mod = load_module(COMPAT_MODULE)
+        self.ref_mod = load_module(REF_MODULE)
+        self.remote_mod = load_module(REMOTE_MODULE)
+        self.time_mod = load_module(TIME_MODULE)
         self.tmpdir = tempfile.TemporaryDirectory()
         self.root = pathlib.Path(self.tmpdir.name)
 

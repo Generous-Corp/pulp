@@ -12,21 +12,17 @@ import threading
 import unittest
 from pathlib import Path
 
-from module_test_utils import load_module_from_path
+from module_test_utils import load_local_ci_module
 
 
-MODULE_PATH = Path(__file__).with_name("execution.py")
-QUEUE_MODULE_PATH = Path(__file__).with_name("queue_orchestrator.py")
-
-
-def load_module(path: Path = MODULE_PATH, name: str = "pulp_local_ci_execution"):
-    return load_module_from_path(path, module_name=name, add_module_dir=True)
+def load_module(filename: str = "execution.py", name: str = "pulp_local_ci_execution"):
+    return load_local_ci_module(filename, module_name=name, add_module_dir=True)
 
 
 class ExecutionTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
-        self.queue = load_module(QUEUE_MODULE_PATH, "pulp_local_ci_queue_orchestrator")
+        self.queue = load_module("queue_orchestrator.py", "pulp_local_ci_queue_orchestrator")
 
     def test_parse_progress_marker_detects_progress_contract(self) -> None:
         self.assertEqual(self.mod.parse_progress_marker("__PULP_PHASE__:build\n"), {"phase": "build"})

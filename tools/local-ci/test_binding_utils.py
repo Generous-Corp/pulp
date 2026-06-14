@@ -3,16 +3,12 @@ from __future__ import annotations
 import unittest
 
 import builtins
-from module_test_utils import load_module_from_path
-import pathlib
+from module_test_utils import load_local_ci_module
 import types
 
 
-MODULE_PATH = pathlib.Path(__file__).with_name("binding_utils.py")
-
-
 def load_module():
-    return load_module_from_path(MODULE_PATH)
+    return load_local_ci_module("binding_utils.py")
 
 
 class BindingUtilsTests(unittest.TestCase):
