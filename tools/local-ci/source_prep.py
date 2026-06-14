@@ -22,11 +22,14 @@ def make_desktop_source_request(
     current_sha_fn: Callable[[], str],
 ) -> dict:
     mode = normalize_desktop_source_mode_fn(getattr(args, "source_mode", "live"))
+    prepare_command = (getattr(args, "prepare_command", None) or "").strip() or None
+    if prepare_command and mode != "exact-sha":
+        raise ValueError("--prepare-command requires --source-mode exact-sha so the command runs in a prepared source root.")
     return {
         "mode": mode,
         "branch": getattr(args, "branch", None) or current_branch_fn(),
         "sha": getattr(args, "sha", None) or current_sha_fn(),
-        "prepare_command": (getattr(args, "prepare_command", None) or "").strip() or None,
+        "prepare_command": prepare_command,
         "prepare_timeout_secs": float(getattr(args, "prepare_timeout", 900.0) or 900.0),
     }
 

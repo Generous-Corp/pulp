@@ -686,6 +686,18 @@ class LocalCiTests(unittest.TestCase):
         self.assertEqual(request["sha"], "a" * 40)
         self.assertEqual(request["prepare_timeout_secs"], 900.0)
 
+    def test_make_desktop_source_request_rejects_live_prepare_command(self):
+        args = SimpleNamespace(
+            source_mode="live",
+            branch=None,
+            sha=None,
+            prepare_command="cmake --build build-video-nogpu",
+            prepare_timeout=None,
+        )
+
+        with self.assertRaisesRegex(ValueError, "--prepare-command requires --source-mode exact-sha"):
+            self.mod.make_desktop_source_request(args)
+
     def test_rewrite_launch_command_helpers_retarget_repo_local_paths(self):
         command = f"{self.mod.ROOT}/build/ui-preview --flag"
         source_root = Path(self.tmpdir.name) / "prepared"

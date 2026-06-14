@@ -79,6 +79,23 @@ class SourcePrepTests(unittest.TestCase):
         source_root = self.mod.desktop_source_root("mac", request, state_dir_fn=lambda: state)
         self.assertEqual(source_root.parent, state / "desktop-source" / "mac")
 
+    def test_prepare_command_requires_exact_sha_source_mode(self) -> None:
+        args = argparse.Namespace(
+            source_mode="live",
+            branch=None,
+            sha=None,
+            prepare_command="cmake --build build-video-nogpu",
+            prepare_timeout=42,
+        )
+
+        with self.assertRaisesRegex(ValueError, "--prepare-command requires --source-mode exact-sha"):
+            self.mod.make_desktop_source_request(
+                args,
+                normalize_desktop_source_mode_fn=lambda value: str(value).lower(),
+                current_branch_fn=lambda: "main",
+                current_sha_fn=lambda: "b" * 40,
+            )
+
         prepared = self.root / "prepared"
         rewritten = self.mod.rewrite_launch_command_for_source_root(
             f"{self.repo}/bin/ui-preview --label 'UI Preview'",

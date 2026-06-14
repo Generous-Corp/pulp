@@ -76,7 +76,10 @@ def build_local_ci_parser(
         )
         command_parser.add_argument("--branch", help="Branch label to record for desktop source provenance (default: current branch)")
         command_parser.add_argument("--sha", help="Exact commit SHA to prepare for desktop source mode (default: current HEAD)")
-        command_parser.add_argument("--prepare-command", help="Optional shell command to run in the prepared source root before launch")
+        command_parser.add_argument(
+            "--prepare-command",
+            help="Optional shell command to run in the exact-SHA prepared source root before launch; requires --source-mode exact-sha",
+        )
         command_parser.add_argument(
             "--prepare-timeout",
             type=float,
