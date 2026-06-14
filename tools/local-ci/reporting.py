@@ -361,6 +361,39 @@ def _desktop_report_serve_commands(index_payload: dict, publish_dir: Path) -> di
     }
 
 
+def _review_manifest_path_for_run(run: dict) -> Path | None:
+    bundle_dir = run.get("bundle_dir")
+    if bundle_dir:
+        return Path(str(bundle_dir)) / "manifest.json"
+    manifest_info = run.get("manifest") if isinstance(run.get("manifest"), dict) else {}
+    manifest_path = manifest_info.get("path")
+    if manifest_path:
+        return Path(str(manifest_path))
+    return None
+
+
+def _review_status_command_for_manifest(manifest_path: Path | None, *, repo: str | None = None) -> str:
+    command = "python3 tools/local-ci/local_ci.py desktop review-status <issue-url>"
+    if repo:
+        command += f" --repo {shlex.quote(repo)}"
+    if manifest_path:
+        command += f" --manifest {shlex.quote(str(manifest_path))} --close-issue"
+    return command
+
+
+def _review_approved_verdict_command_for_manifest(manifest_path: Path | None) -> str:
+    manifest = shlex.quote(str(manifest_path)) if manifest_path else "<manifest.json>"
+    return f"python3 tools/local-ci/local_ci.py desktop verdict {manifest} --approved --issue-url <issue-url>"
+
+
+def _review_needs_work_verdict_command_for_manifest(manifest_path: Path | None) -> str:
+    manifest = shlex.quote(str(manifest_path)) if manifest_path else "<manifest.json>"
+    return (
+        f"python3 tools/local-ci/local_ci.py desktop verdict {manifest} "
+        '--needs-work --notes "<what to change>" --issue-url <issue-url>'
+    )
+
+
 def desktop_review_issue_body(index_payload: dict, *, publish_dir: Path) -> str:
     serve_commands = _desktop_report_serve_commands(index_payload, publish_dir)
     serve_command = serve_commands["serve_command"]
@@ -424,7 +457,7 @@ def desktop_review_issue_body(index_payload: dict, *, publish_dir: Path) -> str:
             attach_action = "Do not attach the MP4; use the served report link."
             if small_fits is True and artifacts.get("video_small"):
                 attach_action = f"Attach small fallback `{publish_dir / artifacts['video_small']}` or use the served report link for the full proof."
-        verdict_manifest = Path(str(run.get("bundle_dir") or "")) / "manifest.json"
+        verdict_manifest = _review_manifest_path_for_run(run)
         lines.extend(
             [
                 f"### {run.get('target') or '?'}/{run.get('action') or '?'} - {run.get('label') or '?'}",
@@ -449,8 +482,9 @@ def desktop_review_issue_body(index_payload: dict, *, publish_dir: Path) -> str:
                 f"- Small variant: `{small_status}`" + (f" via `{small_selected_attempt}`" if small_selected_attempt else "") if small_status else "- Small variant: not recorded",
                 f"- Attachment action: {attach_action}",
                 f"- Manifest: `{artifacts['manifest']}`" if artifacts.get("manifest") else "- Manifest: not copied",
-                f"- Approve command: `python3 tools/local-ci/local_ci.py desktop verdict {verdict_manifest} --approved --issue-url <issue-url>`",
-                f"- Needs-work command: `python3 tools/local-ci/local_ci.py desktop verdict {verdict_manifest} --needs-work --notes \"<what to change>\" --issue-url <issue-url>`",
+                f"- Review status command: `{_review_status_command_for_manifest(verdict_manifest)}`",
+                f"- Approve command: `{_review_approved_verdict_command_for_manifest(verdict_manifest)}`",
+                f"- Needs-work command: `{_review_needs_work_verdict_command_for_manifest(verdict_manifest)}`",
             ]
         )
         if storyboard_lines:
@@ -638,6 +672,7 @@ def desktop_review_issue_draft(
         storyboard_lines = _proof_storyboard_lines(storyboard)
         source = run.get("source") if isinstance(run.get("source"), dict) else {}
         manifest_info = run.get("manifest") if isinstance(run.get("manifest"), dict) else {}
+        review_manifest = _review_manifest_path_for_run(run)
         source_text = _source_summary(source)
         status = attachment.get("status") or "fallback-link"
         attach_path = attachment.get("path") if isinstance(attachment.get("path"), str) else None
@@ -651,6 +686,7 @@ def desktop_review_issue_draft(
                 f"- Host: `{run.get('host')}`" if run.get("host") else "- Host: local/default",
                 f"- Adapter: `{run.get('adapter')}`" if run.get("adapter") else "- Adapter: not recorded",
                 f"- Manifest: `{manifest_info.get('path')}`" if manifest_info.get("path") else "- Manifest: not recorded",
+                f"- Review status command: `{_review_status_command_for_manifest(review_manifest, repo=repo)}`",
                 f"- Attachment decision: `{status}`",
                 f"- Attachment reason: {attachment.get('reason') or 'not recorded'}",
             ]
@@ -722,7 +758,7 @@ def desktop_review_issue_draft(
         [
             "## Closeout",
             "",
-            "After a reviewer comments `looks good to me`, run the matching `desktop verdict ... --approved --issue-url <issue-url>` command from `review.md`, then close this review issue.",
+            "After a reviewer comments `looks good to me`, run `desktop review-status <issue-url>` to confirm the approval trigger, then run the suggested `desktop verdict ... --approved --issue-url <issue-url>` command and close this review issue.",
             "",
         ]
     )

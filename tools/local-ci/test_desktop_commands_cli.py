@@ -174,6 +174,8 @@ class DesktopCommandsCliTests(unittest.TestCase):
         self.assertNotIn("compressor-threshold", text)
         self.assertIn("publish:", text)
         self.assertIn("review issue:", text)
+        self.assertIn("review status:", text)
+        self.assertIn("desktop review-status <issue-url>", text)
         self.assertIn("--background --label component-zoom-review --json", text)
         self.assertNotIn("ios-simulator", text)
 
@@ -190,12 +192,15 @@ class DesktopCommandsCliTests(unittest.TestCase):
         reaper = next(item for item in payload["scenarios"] if item["id"] == "reaper-plugin-editor")
         self.assertIn("desktop publish --manifest /path/to/run/manifest.json", reaper["publish_command"])
         self.assertIn("desktop review-issue /path/to/published-reports/reaper-plugin-editor", reaper["review_issue_command"])
+        self.assertIn("desktop review-status <issue-url>", reaper["review_status_command"])
+        self.assertIn("--manifest /path/to/run/manifest.json --close-issue", reaper["review_status_command"])
         self.assertIn("--auto-port", reaper["serve_background_command"])
         self.assertIn("--background --label reaper-plugin-editor-review --json", reaper["serve_background_command"])
         self.assertIn("PulpSynth_CLAP", reaper["prepare_command"])
         self.assertIn("Plug-Ins/CLAP/PulpSynth.clap", reaper["command"])
         self.assertEqual(reaper["review_workflow"][0]["step"], "prepare")
         self.assertEqual(reaper["review_workflow"][1]["step"], "doctor")
+        self.assertEqual(reaper["review_workflow"][-2]["step"], "check_review")
         self.assertEqual(reaper["review_workflow"][-1]["step"], "stop_server")
         standalone = next(item for item in payload["scenarios"] if item["id"] == "standalone-interaction")
         self.assertEqual(
@@ -235,6 +240,7 @@ class DesktopCommandsCliTests(unittest.TestCase):
         self.assertIn("python3 tools/local-ci/local_ci.py simulator video", markdown)
         self.assertIn("python3 tools/local-ci/local_ci.py simulator video-doctor", markdown)
         self.assertIn("--background --label ios-simulator-review --json", markdown)
+        self.assertIn("desktop review-status <issue-url>", markdown)
         self.assertNotIn("Standalone app interaction", markdown)
 
         self.printed.clear()

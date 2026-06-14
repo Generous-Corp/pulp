@@ -500,6 +500,10 @@ def desktop_video_matrix_payload(*, target: str | None = None, scenario: str | N
             f"python3 tools/local-ci/local_ci.py desktop review-issue {report_placeholder} "
             "--repo owner/repo --check-files"
         )
+        row["review_status_command"] = (
+            "python3 tools/local-ci/local_ci.py desktop review-status <issue-url> "
+            f"--repo owner/repo --manifest {manifest_placeholder} --close-issue"
+        )
         row["serve_background_command"] = (
             f"python3 tools/local-ci/local_ci.py desktop serve {report_placeholder} "
             f"--host 0.0.0.0 --port 8765 --auto-port --background --label {label}-review --json"
@@ -518,6 +522,7 @@ def desktop_video_matrix_payload(*, target: str | None = None, scenario: str | N
             {"step": "draft_issue", "command": row["review_issue_command"]},
             {"step": "serve_background", "command": row["serve_background_command"]},
             {"step": "check_server", "command": row["serve_status_command"]},
+            {"step": "check_review", "command": row["review_status_command"]},
             {"step": "stop_server", "command": row["serve_stop_command"]},
         ]
         scenarios.append(row)
@@ -550,6 +555,7 @@ def desktop_video_matrix_lines(payload: dict) -> list[str]:
                 f"  command: {item['command']}",
                 f"  publish: {item['publish_command']}",
                 f"  review issue: {item['review_issue_command']}",
+                f"  review status: {item['review_status_command']}",
                 f"  serve background: {item['serve_background_command']}",
                 f"  serve status: {item['serve_status_command']}",
                 f"  serve stop: {item['serve_stop_command']}",
@@ -594,6 +600,7 @@ def desktop_video_matrix_markdown(payload: dict) -> str:
                 item["review_issue_command"],
                 item["serve_background_command"],
                 item["serve_status_command"],
+                item["review_status_command"],
                 item["serve_stop_command"],
                 "```",
                 "",

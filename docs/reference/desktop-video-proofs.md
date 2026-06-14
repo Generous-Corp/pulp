@@ -544,7 +544,9 @@ action happened, what changed, and what the reviewer should verify. When a small
 `proof.small.mp4`, its 10 MB budget status, and whether that smaller file should
 be attached instead of the pro-account issue video. Both files include the
 concrete attach/do-not-attach decision and `desktop verdict` commands for
-approval or follow-up. GitHub's
+approval or follow-up. They also include a `desktop review-status` command for
+checking the issue's `looks good to me` approval trigger before recording the
+final verdict. GitHub's
 current hosted attachment policy is 100 MB for paid-plan video uploads when the
 uploader is eligible; otherwise plan for the 10 MB video cap and use the served
 report link.
@@ -562,7 +564,8 @@ The command accepts either the report directory or its `review-package.json`.
 It writes `github-issue.md` and `github-issue.json` next to the report without
 calling GitHub. The JSON draft lists attachable MP4 paths, fallback links,
 source/command/manifest context for each run, the close trigger (`looks good to
-me`), and a suggested `gh issue create` command. `--check-files` verifies that
+me`), a read-only `desktop review-status` polling command, and a suggested `gh
+issue create` command. `--check-files` verifies that
 every attachable MP4 still exists and fits its recorded attachment budget before
 writing the draft; runs that already use the served-report fallback remain
 valid.

@@ -321,6 +321,9 @@ class ReportingTests(unittest.TestCase):
         self.assertIn("Small video size: 8.0 MB (fits 10 MB budget)", review_text)
         self.assertIn("Small variant: `transcoded` via `compact-540p`", review_text)
         self.assertIn("Attachment action: Attach `", review_text)
+        self.assertIn("Review status command: `python3 tools/local-ci/local_ci.py desktop review-status <issue-url>", review_text)
+        self.assertIn("--manifest", review_text)
+        self.assertIn("--close-issue", review_text)
         self.assertIn("desktop verdict", review_text)
         self.assertIn("--approved --issue-url <issue-url>", review_text)
         self.assertIn("--needs-work --notes", review_text)
@@ -363,6 +366,7 @@ class ReportingTests(unittest.TestCase):
                     "action": "click",
                     "label": "component",
                     "host": "macstudio",
+                    "bundle_dir": str(package_path.parent / "runs" / "component"),
                     "command": "./build/pulp --inspect",
                     "source": {"mode": "exact-sha", "branch": "feature/video", "sha": "abc123"},
                     "manifest": {"path": str(package_path.parent / "assets/run/manifest.json"), "relative_path": "assets/run/manifest.json"},
@@ -434,6 +438,8 @@ class ReportingTests(unittest.TestCase):
         self.assertTrue(draft["fallback_links"][0]["internal_ephemeral"])
         self.assertIn("gh issue create --repo danielraffel/pulp", draft["create_command"])
         self.assertIn("looks good to me", draft["body"])
+        self.assertIn("Review status command: `python3 tools/local-ci/local_ci.py desktop review-status <issue-url> --repo danielraffel/pulp", draft["body"])
+        self.assertIn(f"--manifest {package_path.parent / 'runs' / 'component' / 'manifest.json'} --close-issue", draft["body"])
         self.assertIn("Attach MP4: `", draft["body"])
         self.assertIn("Command: `./build/pulp --inspect`", draft["body"])
         self.assertIn("Source: `mode=exact-sha, branch=feature/video, sha=abc123`", draft["body"])
