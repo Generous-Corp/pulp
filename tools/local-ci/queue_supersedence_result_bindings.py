@@ -7,6 +7,7 @@ from typing import Any
 
 from binding_utils import binding as _binding
 from binding_utils import install_local_helpers
+from queue_supersedence_result_dependency_bindings import queue_supersedence_result_dependencies
 
 
 QUEUE_SUPERSEDENCE_RESULT_EXPORTS = (
@@ -20,7 +21,7 @@ def supersedence_result(bindings: Mapping[str, Any], job: dict, superseded_by: s
         job,
         superseded_by,
         reason,
-        now_iso_fn=_binding(bindings, "now_iso"),
+        **queue_supersedence_result_dependencies(bindings),
     )
 
 
@@ -28,7 +29,7 @@ def cancellation_result(bindings: Mapping[str, Any], job: dict, reason: str) -> 
     return _binding(bindings, "_queue_orchestrator").cancellation_result(
         job,
         reason,
-        now_iso_fn=_binding(bindings, "now_iso"),
+        **queue_supersedence_result_dependencies(bindings),
     )
 
 

@@ -5,6 +5,7 @@ from module_test_utils import load_module_from_path
 import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 MODULE_PATH = Path(__file__).with_name("queue_command_mutation_bindings.py")
@@ -45,7 +46,7 @@ class QueueCommandMutationBindingsTests(unittest.TestCase):
             bindings[name] = object()
         return bindings
 
-    def test_queue_command_mutation_binds_lock_and_now_dependencies(self):
+    def test_queue_command_mutation_delegates_with_assembled_dependencies(self):
         captured = {}
 
         def bump_queue_command_job_locked(*args, **kwargs):
@@ -56,39 +57,31 @@ class QueueCommandMutationBindingsTests(unittest.TestCase):
             captured["cancel"] = (args, kwargs)
             return {"id": "job1", "status": "canceled"}
 
-        def set_pending_job_priority_unlocked(job, priority, *, now_iso_fn):
-            captured["set_priority"] = (job, priority, now_iso_fn)
-            return True
-
         lifecycle = types.SimpleNamespace(
             bump_queue_command_job_locked=bump_queue_command_job_locked,
             cancel_queue_command_job_locked=cancel_queue_command_job_locked,
         )
-        orchestrator = types.SimpleNamespace(
-            find_queue_command_job_unlocked=object(),
-            set_pending_job_priority_unlocked=set_pending_job_priority_unlocked,
-        )
-        bindings = self._bindings(lifecycle=lifecycle, orchestrator=orchestrator)
+        bindings = self._bindings(lifecycle=lifecycle)
+        bump_deps = {"queue_lock_path_fn": object(), "summarize_job_fn": object()}
+        cancel_deps = {"cancel_job_unlocked_fn": object(), "trim_completed_jobs_fn": object()}
 
-        self.assertEqual(
-            self.mod.bump_queue_command_job(bindings, "job1", "high"),
-            {"id": "job1", "priority": "high"},
-        )
+        with mock.patch.object(self.mod, "queue_bump_command_dependencies", return_value=bump_deps):
+            self.assertEqual(
+                self.mod.bump_queue_command_job(bindings, "job1", "high"),
+                {"id": "job1", "priority": "high"},
+            )
         self.assertEqual(captured["bump"][0], ("job1", "high"))
-        self.assertIs(captured["bump"][1]["queue_lock_path_fn"], bindings["queue_lock_path"])
-        self.assertIs(captured["bump"][1]["find_queue_command_job_unlocked_fn"], orchestrator.find_queue_command_job_unlocked)
-        self.assertTrue(captured["bump"][1]["set_pending_job_priority_unlocked_fn"]({"id": "job1"}, "high"))
-        self.assertEqual(captured["set_priority"], ({"id": "job1"}, "high", bindings["now_iso"]))
+        self.assertIs(captured["bump"][1]["queue_lock_path_fn"], bump_deps["queue_lock_path_fn"])
+        self.assertIs(captured["bump"][1]["summarize_job_fn"], bump_deps["summarize_job_fn"])
 
-        self.assertEqual(
-            self.mod.cancel_queue_command_job(bindings, "job1"),
-            {"id": "job1", "status": "canceled"},
-        )
+        with mock.patch.object(self.mod, "queue_cancel_command_dependencies", return_value=cancel_deps):
+            self.assertEqual(
+                self.mod.cancel_queue_command_job(bindings, "job1"),
+                {"id": "job1", "status": "canceled"},
+            )
         self.assertEqual(captured["cancel"][0], ("job1",))
-        self.assertIs(captured["cancel"][1]["find_queue_command_job_unlocked_fn"], orchestrator.find_queue_command_job_unlocked)
-        self.assertIs(captured["cancel"][1]["cancel_job_unlocked_fn"], bindings["cancel_job_unlocked"])
-        self.assertIs(captured["cancel"][1]["trim_completed_jobs_fn"], bindings["trim_completed_jobs"])
-        self.assertIs(captured["cancel"][1]["summarize_job_fn"], bindings["summarize_job"])
+        self.assertIs(captured["cancel"][1]["cancel_job_unlocked_fn"], cancel_deps["cancel_job_unlocked_fn"])
+        self.assertIs(captured["cancel"][1]["trim_completed_jobs_fn"], cancel_deps["trim_completed_jobs_fn"])
 
     def test_install_queue_command_mutation_helpers_installs_requested_facades(self):
         bindings = self._bindings()

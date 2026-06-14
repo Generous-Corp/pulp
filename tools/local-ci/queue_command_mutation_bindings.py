@@ -7,6 +7,8 @@ from typing import Any
 
 from binding_utils import binding as _binding
 from binding_utils import install_local_helpers
+from queue_command_mutation_dependency_bindings import queue_bump_command_dependencies
+from queue_command_mutation_dependency_bindings import queue_cancel_command_dependencies
 
 
 QUEUE_COMMAND_MUTATION_EXPORTS = (
@@ -16,36 +18,17 @@ QUEUE_COMMAND_MUTATION_EXPORTS = (
 
 
 def bump_queue_command_job(bindings: Mapping[str, Any], job_ref: str, requested_priority: str) -> dict:
-    queue_orchestrator = _binding(bindings, "_queue_orchestrator")
-
     return _binding(bindings, "_queue_lifecycle").bump_queue_command_job_locked(
         job_ref,
         requested_priority,
-        queue_lock_path_fn=_binding(bindings, "queue_lock_path"),
-        file_lock_fn=_binding(bindings, "file_lock"),
-        load_queue_unlocked_fn=_binding(bindings, "load_queue_unlocked"),
-        find_queue_command_job_unlocked_fn=queue_orchestrator.find_queue_command_job_unlocked,
-        set_pending_job_priority_unlocked_fn=lambda job, priority: queue_orchestrator.set_pending_job_priority_unlocked(
-            job,
-            priority,
-            now_iso_fn=_binding(bindings, "now_iso"),
-        ),
-        save_queue_unlocked_fn=_binding(bindings, "save_queue_unlocked"),
-        summarize_job_fn=_binding(bindings, "summarize_job"),
+        **queue_bump_command_dependencies(bindings),
     )
 
 
 def cancel_queue_command_job(bindings: Mapping[str, Any], job_ref: str) -> dict:
     return _binding(bindings, "_queue_lifecycle").cancel_queue_command_job_locked(
         job_ref,
-        queue_lock_path_fn=_binding(bindings, "queue_lock_path"),
-        file_lock_fn=_binding(bindings, "file_lock"),
-        load_queue_unlocked_fn=_binding(bindings, "load_queue_unlocked"),
-        find_queue_command_job_unlocked_fn=_binding(bindings, "_queue_orchestrator").find_queue_command_job_unlocked,
-        cancel_job_unlocked_fn=_binding(bindings, "cancel_job_unlocked"),
-        trim_completed_jobs_fn=_binding(bindings, "trim_completed_jobs"),
-        save_queue_unlocked_fn=_binding(bindings, "save_queue_unlocked"),
-        summarize_job_fn=_binding(bindings, "summarize_job"),
+        **queue_cancel_command_dependencies(bindings),
     )
 
 

@@ -6,6 +6,7 @@ from __future__ import annotations
 from pathlib import Path
 import types
 import unittest
+from unittest import mock
 
 from module_test_utils import load_module_from_path
 
@@ -30,7 +31,7 @@ class QueueSupersedenceResultBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.QUEUE_SUPERSEDENCE_RESULT_EXPORTS, expected)
         self.assertEqual(len(expected), len(set(expected)))
 
-    def test_result_bindings_delegate_with_time_seam(self) -> None:
+    def test_result_bindings_delegate_with_assembled_dependencies(self) -> None:
         captured = {}
 
         def supersedence_result(job, superseded_by, reason, *, now_iso_fn):
@@ -49,14 +50,17 @@ class QueueSupersedenceResultBindingsTests(unittest.TestCase):
             "_queue_orchestrator": orchestrator,
             "now_iso": object(),
         }
+        deps = {"now_iso_fn": object()}
 
-        self.assertEqual(
-            self.mod.supersedence_result(bindings, {"id": "old"}, "new", "newer_sha"),
-            {"overall": "superseded"},
-        )
-        self.assertIs(captured["supersedence_result"][3], bindings["now_iso"])
-        self.assertEqual(self.mod.cancellation_result(bindings, {"id": "old"}, "operator"), {"overall": "canceled"})
-        self.assertIs(captured["cancellation_result"][2], bindings["now_iso"])
+        with mock.patch.object(self.mod, "queue_supersedence_result_dependencies", return_value=deps):
+            self.assertEqual(
+                self.mod.supersedence_result(bindings, {"id": "old"}, "new", "newer_sha"),
+                {"overall": "superseded"},
+            )
+        self.assertIs(captured["supersedence_result"][3], deps["now_iso_fn"])
+        with mock.patch.object(self.mod, "queue_supersedence_result_dependencies", return_value=deps):
+            self.assertEqual(self.mod.cancellation_result(bindings, {"id": "old"}, "operator"), {"overall": "canceled"})
+        self.assertIs(captured["cancellation_result"][2], deps["now_iso_fn"])
 
 
 if __name__ == "__main__":
