@@ -111,10 +111,17 @@ def rewrite_launch_command_for_posix_root(command: str | None, remote_root: str,
 
 def link_local_skia_build_for_prepared_source(root: Path, prepared_root: Path) -> str | None:
     local_skia = root / "external" / "skia-build"
-    if not (local_skia / "libskia.a").exists():
+    skia_candidates = (
+        local_skia / "build" / "mac-gpu" / "lib" / "Release" / "libskia.a",
+        local_skia / "mac-gpu" / "lib" / "Release" / "libskia.a",
+        local_skia / "mac" / "lib" / "libskia.a",
+        local_skia / "lib" / "libskia.a",
+        local_skia / "libskia.a",
+    )
+    if not any(candidate.is_file() for candidate in skia_candidates):
         return None
     prepared_skia = prepared_root / "external" / "skia-build"
-    if (prepared_skia / "libskia.a").exists():
+    if any((prepared_skia / candidate.relative_to(local_skia)).is_file() for candidate in skia_candidates):
         return str(prepared_skia)
     if prepared_skia.is_symlink():
         prepared_skia.unlink()

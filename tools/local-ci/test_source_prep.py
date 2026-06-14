@@ -241,7 +241,9 @@ class SourcePrepTests(unittest.TestCase):
         local_skia = self.repo / "external" / "skia-build"
         local_skia.mkdir(parents=True)
         (local_skia / "VERSION.md").write_text("skia\n")
-        (local_skia / "libskia.a").write_bytes(b"skia")
+        skia_lib = local_skia / "build" / "mac-gpu" / "lib" / "Release" / "libskia.a"
+        skia_lib.parent.mkdir(parents=True)
+        skia_lib.write_bytes(b"skia")
         prepared_metadata = prepared_root / "external" / "skia-build"
         prepared_metadata.mkdir(parents=True)
         (prepared_metadata / "VERSION.md").write_text("metadata only\n")
