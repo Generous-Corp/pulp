@@ -269,4 +269,16 @@ TEST_CASE("WaveformDropView accepts audio drops, rejects others", "[tempo-sample
     REQUIRE_FALSE(v.accept_drop(other, {}));
     REQUIRE(dropped.empty());
 }
+
+TEST_CASE("empty drop area click triggers browse", "[tempo-sampler]") {
+    WaveformDropView v;  // no sample loaded -> empty state
+    bool browsed = false;
+    v.on_browse = [&] { browsed = true; };
+
+    view::MouseEvent press;
+    press.button = view::MouseButton::left;
+    press.is_down = true;
+    v.on_mouse_event(press);
+    REQUIRE(browsed);  // a click in the empty area opens the file picker
+}
 #endif  // __APPLE__

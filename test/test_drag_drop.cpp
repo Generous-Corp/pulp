@@ -1,6 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
+#include <pulp/platform/file_dialog.hpp>
 #include <pulp/view/drag_drop.hpp>
 #include <pulp/view/file_drop_zone.hpp>
+#include <pulp/view/input_events.hpp>
 #include <pulp/view/view.hpp>
 
 // XDND payload-parsing + coordinate-mapping helpers (Linux X11 producer). These
@@ -429,4 +431,67 @@ TEST_CASE("XDND root_to_child_local subtracts the child window origin",
     Point q = root_to_child_local(5, 7, 0, 0);
     CHECK(q.x == 5.0f);
     CHECK(q.y == 7.0f);
+}
+
+// ── FileDropZone click-to-browse (cross-platform via FileDialog) ──────────────
+
+namespace {
+// RAII install of a fake FileDialog backend so the click path is testable with
+// no real native dialog. Returns a fixed path from open_file.
+struct FakeFileDialog {
+    explicit FakeFileDialog(std::optional<std::string> result) {
+        pulp::platform::FileDialog::Backend b;
+        b.open_file = [result](const std::string&, const std::vector<pulp::platform::FileFilter>&,
+                               const std::string&) { return result; };
+        pulp::platform::FileDialog::set_backend(std::move(b));
+    }
+    ~FakeFileDialog() { pulp::platform::FileDialog::clear_backend(); }
+};
+
+MouseEvent left_press() {
+    MouseEvent e;
+    e.button = MouseButton::left;
+    e.is_down = true;
+    return e;
+}
+} // namespace
+
+TEST_CASE("FileDropZone click opens the picker and fires on_drop", "[view][dnd]") {
+    FakeFileDialog backend(std::string("/music/loop.wav"));
+    FileDropZone zone;
+    zone.set_accepted_extensions({".wav", ".flac"});
+    std::vector<std::string> got;
+    zone.on_drop = [&](const std::vector<std::string>& p) { got = p; };
+
+    zone.on_mouse_event(left_press());
+    REQUIRE(got.size() == 1);
+    REQUIRE(got[0] == "/music/loop.wav");
+}
+
+TEST_CASE("FileDropZone click is a no-op when browse disabled", "[view][dnd]") {
+    FakeFileDialog backend(std::string("/music/loop.wav"));
+    FileDropZone zone;
+    zone.set_browse_on_click(false);
+    bool fired = false;
+    zone.on_drop = [&](const std::vector<std::string>&) { fired = true; };
+    zone.on_mouse_event(left_press());
+    REQUIRE_FALSE(fired);
+}
+
+TEST_CASE("FileDropZone click without a dialog backend is a graceful no-op", "[view][dnd]") {
+    pulp::platform::FileDialog::clear_backend();  // ensure none installed
+    FileDropZone zone;
+    bool fired = false;
+    zone.on_drop = [&](const std::vector<std::string>&) { fired = true; };
+    zone.on_mouse_event(left_press());     // no backend -> drag-drop only
+    REQUIRE_FALSE(fired);
+}
+
+TEST_CASE("FileDropZone click cancel (no selection) does not fire on_drop", "[view][dnd]") {
+    FakeFileDialog backend(std::nullopt);  // user cancelled the dialog
+    FileDropZone zone;
+    bool fired = false;
+    zone.on_drop = [&](const std::vector<std::string>&) { fired = true; };
+    zone.on_mouse_event(left_press());
+    REQUIRE_FALSE(fired);
 }

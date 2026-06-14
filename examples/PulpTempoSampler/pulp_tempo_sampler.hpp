@@ -19,6 +19,7 @@
 #include <pulp/audio/sample_key_map.hpp>
 #include <pulp/audio/sample_slot_bank.hpp>
 #include <pulp/format/processor.hpp>
+#include <pulp/platform/file_dialog.hpp>
 #include <pulp/signal/adsr.hpp>
 #include <pulp/signal/offline_stretch.hpp>
 #include <pulp/view/animation.hpp>
@@ -111,10 +112,22 @@ enum TempoSamplerParams : state::ParamID {
 class WaveformDropView : public view::WaveformEditor, public view::DropReceiver {
 public:
     std::function<void(const std::string&)> on_file_dropped;
+    std::function<void()> on_browse;             // click in the empty area -> file picker
     std::function<std::uint64_t()> generation;   // processor raw_generation()
     std::function<bool(std::vector<float>&, float&, std::vector<long>&)> snapshot;
 
     WaveformDropView() { set_continuous_repaint(true); }
+
+    // Empty drop area: a left click opens a file picker (a backup to drag-drop).
+    // When a sample is loaded, defer to WaveformEditor's selection behavior.
+    void on_mouse_event(const view::MouseEvent& event) override {
+        if (!has_audio_) {
+            const bool press = event.hasExplicitPhase() ? event.isPress() : event.is_down;
+            if (press && event.button == view::MouseButton::left && on_browse) on_browse();
+            return;
+        }
+        view::WaveformEditor::on_mouse_event(event);
+    }
 
     bool accept_drag(const view::DropData& d, view::Point) override {
         drag_over_ = first_audio_path(d).has_value();
@@ -211,7 +224,7 @@ private:
         c.set_fill_color(canvas::Color::rgba8(0xD6, 0xDC, 0xE4));
         c.set_font("", 14.0f);
         c.set_text_align(canvas::TextAlign::center);
-        c.fill_text("Drop a sample to begin", b.x + b.width / 2, cy + 42);
+        c.fill_text("Drop a sample, or click to browse", b.x + b.width / 2, cy + 42);
         c.set_fill_color(canvas::Color::rgba8(0x64, 0x6D, 0x7A));
         c.set_font("", 11.0f);
         c.fill_text("WAV  AIFF  FLAC  MP3  OGG", b.x + b.width / 2, cy + 62);
@@ -496,6 +509,12 @@ public:
         auto wf = std::make_unique<WaveformDropView>();
         place(*wf, 20, 92, 738, 222);
         wf->on_file_dropped = [this](const std::string& path) { request_load_path(path); };
+        wf->on_browse = [this] {
+            auto picked = platform::FileDialog::open_file(
+                "Load a sample",
+                {{"Audio Files", "wav;aif;aiff;flac;mp3;ogg"}}, "");
+            if (picked && !picked->empty()) request_load_path(*picked);
+        };
         wf->generation = [this] { return raw_generation(); };
         wf->snapshot = [this](std::vector<float>& mono, float& sr, std::vector<long>& sl) {
             return snapshot_for_view(mono, sr, sl);
