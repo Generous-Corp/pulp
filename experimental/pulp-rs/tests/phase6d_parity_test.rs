@@ -253,6 +253,88 @@ fn tool_install_stub_reports_unported_and_exits_nonzero() {
 }
 
 #[test]
+fn tool_install_video_proof_installs_npm_wrapper() {
+    let root = fixture_root("tool", "minimal_registry");
+    let home = tempfile::tempdir().unwrap();
+    let fake_bin = tempfile::tempdir().unwrap();
+    let npm_log = fake_bin.path().join("npm.log");
+    let npm = if cfg!(windows) {
+        fake_bin.path().join("npm.exe")
+    } else {
+        fake_bin.path().join("npm")
+    };
+    #[cfg(windows)]
+    {
+        std::fs::write(
+            &npm,
+            format!(
+                "@echo off\r\necho %* > \"{}\"\r\nexit /b 0\r\n",
+                npm_log.display()
+            ),
+        )
+        .expect("fake npm");
+    }
+    #[cfg(unix)]
+    {
+        std::fs::write(
+            &npm,
+            format!("#!/bin/sh\necho \"$@\" > '{}'\nexit 0\n", npm_log.display()),
+        )
+        .expect("fake npm");
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&npm).expect("metadata").permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&npm, perms).expect("chmod");
+    }
+    let original_path = std::env::var_os("PATH");
+    let mut path_entries = vec![fake_bin.path().to_path_buf()];
+    if let Some(existing) = original_path.as_ref() {
+        path_entries.extend(std::env::split_paths(existing));
+    }
+    let joined = std::env::join_paths(path_entries).expect("join path");
+
+    let output = Command::cargo_bin("pulp")
+        .expect("binary")
+        .current_dir(&root)
+        .args(["tool", "install", "video-proof"])
+        .env("PULP_HOME", home.path())
+        .env("PATH", joined)
+        .env_remove("NO_COLOR")
+        .output()
+        .expect("run");
+
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8(output.stdout).expect("utf8");
+    assert!(stdout.contains("Installed Video Proof"), "stdout: {stdout}");
+    let wrapper = home
+        .path()
+        .join("tools/npm-packages/video-proof")
+        .join(if cfg!(windows) { "run.bat" } else { "run.sh" });
+    let manifest = home
+        .path()
+        .join("tools/npm-packages/video-proof/manifest.json");
+    assert!(
+        wrapper.is_file(),
+        "missing wrapper at {}",
+        wrapper.display()
+    );
+    assert!(
+        manifest.is_file(),
+        "missing manifest at {}",
+        manifest.display()
+    );
+    assert!(std::fs::read_to_string(&wrapper)
+        .expect("wrapper")
+        .contains("smoke-video-proof"));
+    assert!(std::fs::read_to_string(&manifest)
+        .expect("manifest")
+        .contains("\"method\": \"npm_package\""));
+    assert!(std::fs::read_to_string(&npm_log)
+        .expect("npm log")
+        .contains("install"));
+}
+
+#[test]
 fn tool_path_for_unknown_tool_errors() {
     let root = fixture_root("tool", "minimal_registry");
     let output = run_in(&root, &["tool", "path", "doesnotexist"]);

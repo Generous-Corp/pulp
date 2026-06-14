@@ -2,7 +2,7 @@
 //!
 //! # Phase 6d scope
 //!
-//! Everything **except** `install` is ported Rust-native:
+//! Everything except archive/python `install` is ported Rust-native:
 //!
 //! | Subcommand  | Status      | Notes                                        |
 //! |-------------|-------------|----------------------------------------------|
@@ -11,14 +11,16 @@
 //! | `path`      | Ported      | Prints absolute path via `locate_tool`.      |
 //! | `run`       | Ported      | Exec via `Spawner`.                          |
 //! | `doctor`    | Ported      | Health report per tool.                      |
-//! | `install`   | **Stubbed** | Prints notice; archive download + extraction |
-//! |             |             | needs `ureq` + `tar` + `zip` crates.         |
+//! | `install`   | Partial     | `npm_package` tools install natively;        |
+//! |             |             | archive/python installs fall through.        |
 //!
-//! The install stub still dispatches (so `pulp-rs tool install <id>`
-//! returns a clean "not yet ported" exit code, not an "unknown
-//! subcommand" error). See `tool_registry.cpp` for the reference.
+//! Archive/python installs still dispatch (so `pulp-rs tool install <id>`
+//! returns the C++ behavior when `pulp-cpp` is present, or a clean "not yet
+//! ported" exit code otherwise). See `tool_registry.cpp` for the reference.
 
+use std::fs;
 use std::io::Write;
+use std::path::{Path, PathBuf};
 
 use crate::color;
 use crate::error::{CliError, Result};
@@ -135,7 +137,9 @@ pub fn run<S: Spawner>(sub: &Sub, spawner: &S, out: &mut impl Write) -> Result<i
     match sub {
         Sub::Help => unreachable!(), // handled above
         Sub::List => list(&reg, out),
-        Sub::Install { id, all, force: _ } => install(id.as_deref(), *all, out),
+        Sub::Install { id, all, force } => {
+            install(&reg, &reg_path, id.as_deref(), *all, *force, spawner, out)
+        }
         Sub::Uninstall(id) => uninstall(id, out),
         Sub::Path(id) => path(&reg, id, out),
         Sub::Run { id, args } => run_tool(&reg, id, args, spawner, out),
@@ -219,11 +223,63 @@ fn status_label(
     }
 }
 
-fn install(_id: Option<&str>, _all: bool, out: &mut impl Write) -> Result<i32> {
-    // Phase 7: archive download + tar/zip/xz extraction + xattr
-    // cleanup is ~500 LOC of new deps (tar + flate2 + zip). Delegate
-    // to pulp-cpp when present; print the pre-Phase-7 stub when it's
-    // not on PATH so CI/sandboxed callers see a clear error.
+fn install<S: Spawner>(
+    reg: &ToolRegistry,
+    reg_path: &Path,
+    id: Option<&str>,
+    all: bool,
+    force: bool,
+    spawner: &S,
+    out: &mut impl Write,
+) -> Result<i32> {
+    if all {
+        let mut rc = 0;
+        let mut delegated = false;
+        for (tool_id, tool) in &reg.tools {
+            if tool.install_method == "npm_package" {
+                rc |= install_npm_tool(tool, reg_path, force, spawner, out)?;
+            } else {
+                delegated = true;
+                writeln!(
+                    out,
+                    "pulp-rs tool install: {tool_id} uses {}; delegating non-npm installers.",
+                    tool.install_method
+                )
+                .map_err(io)?;
+            }
+        }
+        if delegated {
+            rc |= delegate_install(out)?;
+        }
+        return Ok(rc);
+    }
+
+    let Some(id) = id else {
+        writeln!(out, "Usage: pulp tool install <tool-id> [--force]").map_err(io)?;
+        return Ok(1);
+    };
+    let Some(tool) = reg.tools.get(id) else {
+        writeln!(
+            out,
+            "{red}✗{reset} Tool '{id}' not found in registry",
+            red = color::red(),
+            reset = color::reset()
+        )
+        .map_err(io)?;
+        return Ok(1);
+    };
+
+    if tool.install_method == "npm_package" {
+        return install_npm_tool(tool, reg_path, force, spawner, out);
+    }
+
+    delegate_install(out)
+}
+
+fn delegate_install(out: &mut impl Write) -> Result<i32> {
+    // Phase 7: archive download + tar/zip/xz extraction + xattr cleanup is
+    // still delegated to pulp-cpp. The native path above covers repo-local
+    // npm tools such as `video-proof` without adding archive dependencies.
     let argv = crate::fallthrough::current_argv_tail();
     match crate::fallthrough::delegate(&argv)? {
         crate::fallthrough::Outcome::Delegated(rc) => Ok(rc),
@@ -237,6 +293,212 @@ fn install(_id: Option<&str>, _all: bool, out: &mut impl Write) -> Result<i32> {
             Ok(1)
         }
     }
+}
+
+fn install_npm_tool<S: Spawner>(
+    tool: &ToolDescriptor,
+    reg_path: &Path,
+    force: bool,
+    spawner: &S,
+    out: &mut impl Write,
+) -> Result<i32> {
+    let wrapper = npm_tool_wrapper_path(tool);
+    if !force && wrapper.is_file() {
+        writeln!(
+            out,
+            "{green}✓{reset} Installed {} {}",
+            display_name(tool),
+            tool.pinned_version,
+            green = color::green(),
+            reset = color::reset()
+        )
+        .map_err(io)?;
+        writeln!(
+            out,
+            "  {dim}{}{reset}",
+            wrapper.display(),
+            dim = color::dim(),
+            reset = color::reset()
+        )
+        .map_err(io)?;
+        return Ok(0);
+    }
+
+    let Some(npm) = crate::proc::which("npm") else {
+        writeln!(
+            out,
+            "{red}✗{reset} npm not found on PATH",
+            red = color::red(),
+            reset = color::reset()
+        )
+        .map_err(io)?;
+        return Ok(1);
+    };
+
+    if tool.npm_package_root.is_empty() {
+        writeln!(
+            out,
+            "{red}✗{reset} npm_package_root is required for npm_package tools",
+            red = color::red(),
+            reset = color::reset()
+        )
+        .map_err(io)?;
+        return Ok(1);
+    }
+
+    let package_root = package_root_from_registry(reg_path, &tool.npm_package_root)?;
+    if !package_root.join("package.json").is_file() {
+        writeln!(
+            out,
+            "{red}✗{reset} package.json not found at {}",
+            package_root.display(),
+            red = color::red(),
+            reset = color::reset()
+        )
+        .map_err(io)?;
+        return Ok(1);
+    }
+
+    writeln!(
+        out,
+        "  Installing npm dependencies for {}...",
+        display_name(tool)
+    )
+    .map_err(io)?;
+    let rc = spawner.run(
+        &Invocation::new(npm.to_string_lossy().into_owned())
+            .arg("--prefix")
+            .arg(package_root.to_string_lossy().into_owned())
+            .arg("install"),
+    )?;
+    if rc != 0 {
+        writeln!(
+            out,
+            "{red}✗{reset} npm install failed with exit code {rc}",
+            red = color::red(),
+            reset = color::reset()
+        )
+        .map_err(io)?;
+        return Ok(1);
+    }
+
+    let install_dir = npm_tool_dir(tool);
+    fs::create_dir_all(&install_dir).map_err(|e| CliError::io(install_dir.clone(), e))?;
+    fs::write(&wrapper, npm_wrapper_body(tool, &package_root))
+        .map_err(|e| CliError::io(wrapper.clone(), e))?;
+    make_executable(&wrapper)?;
+
+    let manifest = format!(
+        "{{\n  \"tool_id\": \"{}\",\n  \"version\": \"{}\",\n  \"method\": \"npm_package\",\n  \"package_root\": \"{}\",\n  \"wrapper_path\": \"{}\"\n}}\n",
+        json_escape(&tool.id),
+        json_escape(&tool.pinned_version),
+        json_escape(package_root.to_string_lossy().as_ref()),
+        json_escape(wrapper.to_string_lossy().as_ref()),
+    );
+    fs::write(install_dir.join("manifest.json"), manifest)
+        .map_err(|e| CliError::io(install_dir.join("manifest.json"), e))?;
+
+    writeln!(
+        out,
+        "{green}✓{reset} Installed {} {}",
+        display_name(tool),
+        tool.pinned_version,
+        green = color::green(),
+        reset = color::reset()
+    )
+    .map_err(io)?;
+    writeln!(
+        out,
+        "  {dim}{}{reset}",
+        wrapper.display(),
+        dim = color::dim(),
+        reset = color::reset()
+    )
+    .map_err(io)?;
+    Ok(0)
+}
+
+fn display_name(tool: &ToolDescriptor) -> &str {
+    if tool.display_name.is_empty() {
+        &tool.id
+    } else {
+        &tool.display_name
+    }
+}
+
+fn package_root_from_registry(reg_path: &Path, raw_root: &str) -> Result<PathBuf> {
+    let mut root = PathBuf::from(raw_root);
+    if root.is_relative() {
+        let repo_root = reg_path
+            .parent()
+            .and_then(Path::parent)
+            .and_then(Path::parent)
+            .ok_or_else(|| {
+                CliError::Other(format!(
+                    "invalid tool registry path: {}",
+                    reg_path.display()
+                ))
+            })?;
+        root = repo_root.join(root);
+    }
+    Ok(root.canonicalize().unwrap_or(root))
+}
+
+fn npm_tool_dir(tool: &ToolDescriptor) -> PathBuf {
+    tool_registry::tools_dir()
+        .join("npm-packages")
+        .join(&tool.id)
+}
+
+fn npm_tool_wrapper_path(tool: &ToolDescriptor) -> PathBuf {
+    if cfg!(windows) {
+        npm_tool_dir(tool).join("run.bat")
+    } else {
+        npm_tool_dir(tool).join("run.sh")
+    }
+}
+
+fn npm_wrapper_body(tool: &ToolDescriptor, package_root: &Path) -> String {
+    let default_script = if tool.npm_default_script.is_empty() {
+        "smoke-video-proof"
+    } else {
+        &tool.npm_default_script
+    };
+    let root = package_root.to_string_lossy();
+    if cfg!(windows) {
+        format!(
+            "@echo off\r\nset PULP_VIDEO_PROOF_PACKAGE_ROOT={root}\r\nif \"%1\"==\"\" (\r\n  npm --prefix \"{root}\" run {default_script}\r\n) else (\r\n  npm --prefix \"{root}\" run %*\r\n)\r\n"
+        )
+    } else {
+        format!(
+            "#!/bin/sh\nset -e\nPACKAGE_ROOT='{}'\nexport PULP_VIDEO_PROOF_PACKAGE_ROOT=\"$PACKAGE_ROOT\"\nif [ \"$#\" -eq 0 ]; then\n  exec npm --prefix \"$PACKAGE_ROOT\" run {default_script}\nfi\nexec npm --prefix \"$PACKAGE_ROOT\" run \"$@\"\n",
+            shell_single_quote(&root)
+        )
+    }
+}
+
+fn shell_single_quote(value: &str) -> String {
+    value.replace('\'', "'\"'\"'")
+}
+
+fn json_escape(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+}
+
+fn make_executable(path: &Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(path)
+            .map_err(|e| CliError::io(path.to_path_buf(), e))?
+            .permissions();
+        perms.set_mode(perms.mode() | 0o110);
+        fs::set_permissions(path, perms).map_err(|e| CliError::io(path.to_path_buf(), e))?;
+    }
+    Ok(())
 }
 
 fn uninstall(id: &str, out: &mut impl Write) -> Result<i32> {
@@ -419,6 +681,14 @@ mod tests {
                         "Linux-x64": {"url_template":"x","archive_format":"tar.gz","binary_name":"uv"},
                         "Linux-arm64": {"url_template":"x","archive_format":"tar.gz","binary_name":"uv"}
                     }
+                },
+                "video-proof": {
+                    "display_name": "Video Proof",
+                    "description": "Validation video proof tooling",
+                    "install_method": "npm_package",
+                    "npm_package_root": "tools/local-ci",
+                    "npm_default_script": "smoke-video-proof",
+                    "pinned_version": "0.0.0"
                 }
             }
         }"#
@@ -505,12 +775,113 @@ mod tests {
     }
 
     #[test]
-    fn install_prints_stub_notice() {
+    fn install_prints_stub_notice_for_binary_tool() {
+        let _l = crate::test_support::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        std::env::set_var(crate::fallthrough::DISABLE_ENV, "1");
+        let td = plant_project(registry_body());
+        let reg_path = td.path().join("tools/packages/tool-registry.json");
+        let reg = load(&reg_path).unwrap();
+        let spawner = crate::proc::testing::RecordingSpawner::ok();
         let mut buf = Vec::new();
-        let rc = install(Some("uv"), false, &mut buf).unwrap();
+        let rc = install(
+            &reg,
+            &reg_path,
+            Some("uv"),
+            false,
+            false,
+            &spawner,
+            &mut buf,
+        )
+        .unwrap();
         assert_eq!(rc, 1);
         let s = String::from_utf8(buf).unwrap();
         assert!(s.contains("not ported"));
+        std::env::remove_var(crate::fallthrough::DISABLE_ENV);
+    }
+
+    #[test]
+    fn install_npm_tool_writes_wrapper_and_manifest() {
+        let _l = crate::test_support::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let td = plant_project(registry_body());
+        fs::create_dir_all(td.path().join("tools/local-ci")).unwrap();
+        fs::write(
+            td.path().join("tools/local-ci/package.json"),
+            r#"{"scripts":{"smoke-video-proof":"node smoke.mjs"}}"#,
+        )
+        .unwrap();
+        let fake_bin = tempfile::tempdir().unwrap();
+        let npm_path = if cfg!(windows) {
+            fake_bin.path().join("npm.exe")
+        } else {
+            fake_bin.path().join("npm")
+        };
+        fs::write(&npm_path, "fake npm\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(&npm_path).unwrap().permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&npm_path, perms).unwrap();
+        }
+        let old_path = std::env::var_os("PATH");
+        let mut path_entries = vec![fake_bin.path().to_path_buf()];
+        if let Some(existing) = old_path.as_ref() {
+            path_entries.extend(std::env::split_paths(existing));
+        }
+        let joined_path = std::env::join_paths(path_entries).unwrap();
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("PATH", joined_path);
+        std::env::set_var("PULP_HOME", home.path());
+
+        let reg_path = td.path().join("tools/packages/tool-registry.json");
+        let reg = load(&reg_path).unwrap();
+        let spawner = crate::proc::testing::RecordingSpawner::ok();
+        let mut buf = Vec::new();
+        let rc = install(
+            &reg,
+            &reg_path,
+            Some("video-proof"),
+            false,
+            false,
+            &spawner,
+            &mut buf,
+        )
+        .unwrap();
+
+        assert_eq!(rc, 0);
+        let calls = spawner.calls.borrow();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].program, npm_path.to_string_lossy().as_ref());
+        assert_eq!(calls[0].args[0], "--prefix");
+        assert!(calls[0].args[1].ends_with("tools/local-ci"));
+        assert_eq!(calls[0].args[2], "install");
+
+        let wrapper = home
+            .path()
+            .join("tools/npm-packages/video-proof")
+            .join(if cfg!(windows) { "run.bat" } else { "run.sh" });
+        let manifest = home
+            .path()
+            .join("tools/npm-packages/video-proof/manifest.json");
+        assert!(wrapper.is_file());
+        assert!(manifest.is_file());
+        let wrapper_text = fs::read_to_string(wrapper).unwrap();
+        assert!(wrapper_text.contains("smoke-video-proof"));
+        let manifest_text = fs::read_to_string(manifest).unwrap();
+        assert!(manifest_text.contains("\"method\": \"npm_package\""));
+        assert!(String::from_utf8(buf)
+            .unwrap()
+            .contains("Installed Video Proof"));
+
+        match old_path {
+            Some(value) => std::env::set_var("PATH", value),
+            None => std::env::remove_var("PATH"),
+        }
+        std::env::remove_var("PULP_HOME");
     }
 
     #[test]
@@ -629,8 +1000,7 @@ mod tests {
     #[test]
     fn parse_sub_unknown_top_level_errors() {
         let err = parse_sub(&["nonsense".to_owned()]).unwrap_err();
-        assert!(matches!(err, CliError::UnknownSubcommand)
-                || err.to_string().contains("unknown"));
+        assert!(matches!(err, CliError::UnknownSubcommand) || err.to_string().contains("unknown"));
     }
 
     #[test]
@@ -642,6 +1012,9 @@ mod tests {
         let rc = run(&Sub::Help, &spawner, &mut buf).unwrap();
         assert_eq!(rc, 0);
         let s = String::from_utf8(buf).unwrap();
-        assert!(s.contains("Usage: pulp tool"), "missing usage in help: {s:?}");
+        assert!(
+            s.contains("Usage: pulp tool"),
+            "missing usage in help: {s:?}"
+        );
     }
 }

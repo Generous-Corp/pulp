@@ -1,0 +1,5 @@
+{
+  "scripts": {
+    "smoke-video-proof": "node smoke.mjs"
+  }
+}

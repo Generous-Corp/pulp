@@ -94,12 +94,12 @@ Run the post-implementation audit checklist (below) after every phase. The table
 | `ship` | **Stays in C++** | Uses `pulp::ship::*` APIs directly |
 | `audio` | **Stays in C++** | Uses `pulp::tools::audio::*` directly |
 | `host` | **Stays in C++** | Uses `pulp::host::{PluginScanner, PluginSlot}` directly |
-| `tool` | **Ported-partial** | Phase 6d — `list`, `path`, `uninstall`, `run`, `doctor` ported Rust-native over new `src/tool_registry.rs` reader (serde-driven; preserves BTreeMap ordering). `install` stubbed — archive download + extraction (tar/zip/xz + xattr cleanup + chmod) would add ~500 LOC of deps; users fall back to C++ `pulp tool install` until that lands. |
+| `tool` | **Ported-partial** | Phase 6d plus video-proof hardening — `list`, `path`, `uninstall`, `run`, `doctor` ported Rust-native over new `src/tool_registry.rs` reader (serde-driven; preserves BTreeMap ordering). `install` now handles `npm_package` tools such as `video-proof` natively; archive/python install paths still fall through to C++ because download/extraction/venv management would add a larger dependency surface. |
 | `ci-local` / `add-component` | **Already-delegate** | Python-script shims — unchanged |
 | `design-debug` / `inspect` / `import-design` / `export-tokens` | **Already-delegate** | Built-binary shims — unchanged |
 | `install` (legacy) | **Already-delegate** | Alias for `cache fetch skia` |
 
-**Revised completion (post-Phase-6e):** ~92% feature-complete (15 Ported + 15 Ported-partial at their core paths) against ~30 distinct user-visible commands, plus two cross-cutting UX parity fixes (bare invocation + fuzzy suggester). Phase 6e closed the cheap-fill gaps: `version` (bump + check), `status` (git probe + SDK detail + format counts), `run` (macOS `.app` fallback), `config` (bare-invocation help + snooze clear). Phase 7 introduces a `pulp-cpp` fallthrough wrapper so remaining Ported-partial branches (`cache fetch`, `sdk install`, `upgrade install`, `pr --native`, most of `doctor`, watch loops in `dev`/`design`, `tool install`, `create` wizard, deep `scan` metadata) route to the C++ binary transparently — no user-visible regressions on the Phase 8 swap day.
+**Revised completion (post-Phase-6e):** ~92% feature-complete (15 Ported + 15 Ported-partial at their core paths) against ~30 distinct user-visible commands, plus two cross-cutting UX parity fixes (bare invocation + fuzzy suggester). Phase 6e closed the cheap-fill gaps: `version` (bump + check), `status` (git probe + SDK detail + format counts), `run` (macOS `.app` fallback), `config` (bare-invocation help + snooze clear). Phase 7 introduces a `pulp-cpp` fallthrough wrapper so remaining Ported-partial branches (`cache fetch`, `sdk install`, `upgrade install`, `pr --native`, most of `doctor`, watch loops in `dev`/`design`, archive/python `tool install`, `create` wizard, deep `scan` metadata) route to the C++ binary transparently — no user-visible regressions on the Phase 8 swap day. `npm_package` tool installs are Rust-native for `video-proof`.
 
 ## Deferred list (needs porting in future phases)
 
@@ -109,7 +109,7 @@ Remaining polish items (all tracked inside their classification-matrix rows abov
 
 - `scan` deep metadata — needs `pulp::host::PluginScanner` dlopen path.
 - `dev` / `design` watch loop — needs `notify` crate integration + debounced rebuild.
-- `tool install` — needs archive download (ureq, already present) + extraction (tar/zip/xz crates) + platform chmod / xattr fixups.
+- archive/python `tool install` — needs archive download (ureq, already present) + extraction (tar/zip/xz crates), venv management, and platform chmod / xattr fixups. `npm_package` tools such as `video-proof` are already Rust-native.
 - `create` interactive wizard — keeps the C++ binary as the prompt driver.
 - `docs build-site/build-api/check` — delegates intentionally stay as `Spawner` calls to `mkdocs` / `bash`.
 
