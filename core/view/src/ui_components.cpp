@@ -112,14 +112,10 @@ void ComboBox::paint(canvas::Canvas& canvas) {
 
     // Dropdown menu: deferred to overlay queue so it paints on top of everything
     if (open_ && !items_.empty()) {
-        // Compute absolute position by walking up the parent chain.
-        float abs_x = 0, abs_y = 0;
-        View* v = this;
-        while (v) {
-            abs_x += v->bounds().x;
-            abs_y += v->bounds().y;
-            v = v->parent();
-        }
+        // On-screen position, peeling off ScrollView scroll (the overlay paints
+        // at the root with no scroll transform).
+        float abs_x = 0, abs_y = 0, viewport_h = 0;
+        overlay_anchor_(abs_x, abs_y, viewport_h);
 
         float item_h = 24.0f;
         float dd_w = b.width;
@@ -221,17 +217,42 @@ void ComboBox::close_dropdown() {
     if (active_popup_ == this) active_popup_ = nullptr;
 }
 
+void ComboBox::overlay_anchor_(float& out_x, float& out_y, float& out_viewport_h) const {
+    float x = 0.0f, y = 0.0f, viewport_h = 0.0f;
+    const View* v = this;
+    while (v) {
+        // A ScrollView paints its children shifted by -scroll; `this` lives in
+        // that scrolled content, so peel the offset off to get the on-screen
+        // position. Track the nearest scroll viewport's height for flip logic.
+        if (auto* sv = dynamic_cast<const ScrollView*>(v)) {
+            x -= sv->scroll_x();
+            y -= sv->scroll_y();
+            if (viewport_h <= 0.0f) viewport_h = sv->bounds().height;
+        }
+        x += v->bounds().x;
+        y += v->bounds().y;
+        if (!v->parent()) {
+            // Root: its height is the window viewport when no ScrollView was seen.
+            if (viewport_h <= 0.0f) viewport_h = v->bounds().height;
+        }
+        v = v->parent();
+    }
+    out_x = x;
+    out_y = y;
+    out_viewport_h = viewport_h;
+}
+
 float ComboBox::dropdown_local_top() const {
     const float base_h = std::min(local_bounds().height, 28.0f);
     const float dd_h = static_cast<float>(items_.size()) * 24.0f;
-    float abs_y = 0.0f, root_h = 0.0f;
-    const View* v = this;
-    while (v) {
-        abs_y += v->bounds().y;
-        root_h = v->bounds().height;  // last assignment is the root (window content height)
-        v = v->parent();
-    }
-    if (root_h > 0.0f && abs_y + base_h + 2.0f + dd_h > root_h && abs_y - dd_h - 2.0f >= 0.0f)
+    // Flip decision in viewport space: `abs_y` is the field's ON-SCREEN top
+    // (scroll already peeled off), compared against the visible viewport. Flip
+    // up only when the menu would spill past the viewport bottom AND there is
+    // room above — so a field near the bottom of a scrolled page pops upward.
+    float abs_x = 0.0f, abs_y = 0.0f, viewport_h = 0.0f;
+    overlay_anchor_(abs_x, abs_y, viewport_h);
+    if (viewport_h > 0.0f && abs_y + base_h + 2.0f + dd_h > viewport_h &&
+        abs_y - dd_h - 2.0f >= 0.0f)
         return -(dd_h + 2.0f);  // flip above the field
     return base_h + 2.0f;       // below the field
 }
@@ -575,6 +596,11 @@ void ScrollView::set_scroll(float x, float y) {
 }
 
 void ScrollView::scroll_by(float dx, float dy, bool animate) {
+    // A scroll gesture dismisses any open dropdown — the anchored menu would
+    // otherwise drift away from its field as the page moves under it. Matches
+    // native menu behavior (scrolling the backdrop closes the menu).
+    if ((dx != 0.0f || dy != 0.0f) && ComboBox::active_popup_)
+        ComboBox::close_active_popup();
     target_scroll_x_ += dx;
     target_scroll_y_ += dy;
     clamp_scroll_targets();

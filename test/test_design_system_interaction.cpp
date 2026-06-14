@@ -140,6 +140,51 @@ TEST_CASE("value widgets adjust on scroll wheel", "[design-system][interaction][
     pan.on_wheel(-10.0f); REQUIRE(pan.value() > 0.0f); REQUIRE(pf);
 }
 
+TEST_CASE("ComboBox dropdown flips above field near viewport bottom", "[design-system][interaction][dropdown]") {
+    // ScrollView viewport 200px tall; a 3-item menu is 72px.
+    ScrollView sv;
+    sv.set_bounds({0, 0, 300, 200});
+    sv.set_content_size({300, 1000});
+
+    auto owned = std::make_unique<ComboBox>();
+    ComboBox* combo = owned.get();
+    combo->set_items({"Sine", "Saw", "Square"});
+    sv.add_child(std::move(owned));
+
+    // Near the top of the viewport → menu drops DOWN.
+    combo->set_bounds({0, 10, 120, 28});
+    REQUIRE_FALSE(combo->flips_up());
+
+    // Near the bottom of the viewport → menu pops UP (no room below).
+    combo->set_bounds({0, 170, 120, 28});
+    REQUIRE(combo->flips_up());
+
+    // Scrolling the field back up into open space flips it down again —
+    // proves the decision tracks the field's ON-SCREEN position.
+    sv.set_scroll(0, 160);   // field on-screen y ≈ 10
+    REQUIRE_FALSE(combo->flips_up());
+}
+
+TEST_CASE("Scrolling closes an open ComboBox dropdown", "[design-system][interaction][dropdown]") {
+    ScrollView sv;
+    sv.set_bounds({0, 0, 300, 200});
+    sv.set_content_size({300, 1000});
+
+    auto owned = std::make_unique<ComboBox>();
+    ComboBox* combo = owned.get();
+    combo->set_items({"Sine", "Saw", "Square"});
+    combo->set_bounds({0, 40, 120, 28});
+    sv.add_child(std::move(owned));
+
+    MouseEvent down; down.is_down = true; down.position = {10, 10};
+    combo->on_mouse_event(down);   // open
+    REQUIRE(combo->is_open());
+
+    sv.scroll_by(0, 30, /*animate=*/false);
+    REQUIRE_FALSE(combo->is_open());
+    ComboBox::close_active_popup();  // tidy the static slot for later cases
+}
+
 TEST_CASE("Stepper click-to-type edits the value", "[design-system][interaction]") {
     Stepper s; s.set_bounds({0, 0, 140, 36}); s.set_range(-99, 99); s.set_value(0);
     s.on_mouse_down({70.0f, 18.0f});   // centre cell → begin editing

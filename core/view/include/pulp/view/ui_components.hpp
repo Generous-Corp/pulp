@@ -73,6 +73,10 @@ public:
     void on_text_input(const TextInputEvent& event) override;
 
     bool is_open() const { return open_; }
+    /// True when the menu currently renders ABOVE the field (it would spill past
+    /// the viewport bottom). Scroll-aware: reflects the field's on-screen
+    /// position, so scrolling the page can change the answer.
+    bool flips_up() const { return dropdown_local_top() < 0.0f; }
     /// Index of the row painted with the hover/keyboard highlight (-1 = none).
     int hovered_index() const { return hover_index_; }
     float dropdown_width_hint() const;
@@ -91,6 +95,13 @@ private:
     // negative (above the field) when flipped up because it would spill past the window.
     // Shared by paint, hit_test, and mouse hover so they always agree.
     float dropdown_local_top() const;
+    // On-screen (overlay-space) geometry of the field: top-left x/y and the
+    // height of the nearest scroll viewport. The dropdown overlay paints at the
+    // root canvas with NO scroll translation, so every ScrollView ancestor's
+    // scroll offset must be peeled off here — otherwise the menu renders at the
+    // unscrolled position (far from the field) once the page is scrolled, and
+    // the flip-up decision compares against the wrong viewport.
+    void overlay_anchor_(float& out_x, float& out_y, float& out_viewport_h) const;
     void move_hover(int delta);  // keyboard: move the highlighted row, skipping separators
 
     std::vector<std::string> items_;

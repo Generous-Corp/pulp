@@ -76,6 +76,17 @@ pulp::view::Point to_local(pulp::view::Point pos, pulp::view::View* target, pulp
     std::reverse(chain.begin(), chain.end());
     auto local = pos;
     float scale_chain = 1.0f;  // accumulated scale from root down to current ancestor
+    // `pos` is already in root-local space, so root's own bounds offset is NOT
+    // subtracted — but if root itself is a ScrollView it still paints its
+    // children shifted by -scroll (and ScrollView::hit_test adds +scroll), so
+    // peel that off here too. Missing this is why dragging a widget jumped once
+    // the page (a root ScrollView, as in the Ink & Signal showcase) was
+    // scrolled: hit_test found the right target but the dispatched local
+    // coordinate was off by the scroll amount.
+    if (auto* root_sv = dynamic_cast<pulp::view::ScrollView*>(root)) {
+        local.x += root_sv->scroll_x();
+        local.y += root_sv->scroll_y();
+    }
     for (auto* v : chain) {
         local.x -= v->bounds().x * scale_chain;
         local.y -= v->bounds().y * scale_chain;
