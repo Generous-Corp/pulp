@@ -4,8 +4,8 @@
 from __future__ import annotations
 
 from pathlib import Path
-import types
 import unittest
+from unittest import mock
 
 from module_test_utils import load_module_from_path
 
@@ -31,65 +31,24 @@ class DesktopManagementCommandBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.DESKTOP_MANAGEMENT_COMMAND_EXPORTS, expected)
         self.assertEqual(len(expected), len(set(expected)))
 
-    def bindings(self, runner_name: str, runner):
-        desktop_cli = types.SimpleNamespace(desktop_recent_lines=object())
-        bindings = {
-            "_desktop_commands_cli": types.SimpleNamespace(**{runner_name: runner}),
-            "_desktop_cli": desktop_cli,
-        }
-        for name in [
-            "load_config",
-            "desktop_run_manifests",
-            "desktop_run_summary",
-            "short_sha",
-        ]:
-            bindings[name] = object()
-        return bindings
-
-    def test_recent_binds_management_dependencies(self) -> None:
-        captured = {}
-
-        def runner(*args, **kwargs):
-            captured["args"] = args
-            captured["kwargs"] = kwargs
-            return 4
-
-        bindings = self.bindings("cmd_desktop_recent", runner)
-        args_obj = object()
-        self.assertEqual(self.mod.cmd_desktop_recent(bindings, args_obj), 4)
-        self.assertEqual(captured["args"], (args_obj,))
-        self.assertIs(captured["kwargs"]["load_config_fn"], bindings["load_config"])
-        self.assertIs(captured["kwargs"]["desktop_run_manifests_fn"], bindings["desktop_run_manifests"])
-        self.assertIs(captured["kwargs"]["desktop_recent_lines_fn"], bindings["_desktop_cli"].desktop_recent_lines)
-
     def test_install_desktop_management_command_helpers_routes_each_group(self) -> None:
-        bindings = self.bindings("cmd_desktop_recent", lambda *args, **kwargs: 41)
-        bindings["_desktop_commands_cli"].cmd_desktop_status = lambda *args, **kwargs: 43
-        bindings["_desktop_commands_cli"].cmd_desktop_config_show = lambda *args, **kwargs: 47
-        bindings["_desktop_cli"].desktop_status_lines = object()
-        bindings["_desktop_cli"].desktop_config_show_lines = object()
-        for name in [
-            "desktop_receipt_for",
-            "desktop_capabilities_for",
-            "desktop_optional_capabilities",
-            "desktop_proof_summaries",
-            "normalize_desktop_optional_config",
-            "desktop_target_contract",
-            "desktop_publish_reports",
-            "windows_tooling_detail",
-            "windows_repo_checkout_detail",
-        ]:
-            bindings[name] = object()
+        bindings = {}
 
-        self.mod.install_desktop_management_command_helpers(
-            bindings,
-            ("cmd_desktop_status", "cmd_desktop_config_show", "cmd_desktop_recent"),
-        )
+        with (
+            mock.patch.object(self.mod, "install_desktop_status_command_helpers") as install_status,
+            mock.patch.object(self.mod, "install_desktop_config_command_helpers") as install_config,
+            mock.patch.object(self.mod, "install_desktop_report_command_helpers") as install_report,
+            mock.patch.object(self.mod, "install_local_helpers") as install_local,
+        ):
+            self.mod.install_desktop_management_command_helpers(
+                bindings,
+                ("cmd_desktop_status", "cmd_desktop_config_show", "cmd_desktop_recent", "custom_management_command"),
+            )
 
-        self.assertEqual(bindings["cmd_desktop_status"](object()), 43)
-        self.assertEqual(bindings["cmd_desktop_config_show"](object()), 47)
-        self.assertEqual(bindings["cmd_desktop_recent"](object()), 41)
-        self.assertNotIn("cmd_desktop_cleanup", bindings)
+        install_status.assert_called_once_with(bindings, ("cmd_desktop_status",))
+        install_config.assert_called_once_with(bindings, ("cmd_desktop_config_show",))
+        install_report.assert_called_once_with(bindings, ("cmd_desktop_recent",))
+        install_local.assert_called_once_with(bindings, self.mod.__dict__, ("custom_management_command",))
 
 
 if __name__ == "__main__":
