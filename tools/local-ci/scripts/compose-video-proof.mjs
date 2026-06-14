@@ -138,6 +138,26 @@ const videoSizeFor = (manifest, videoMeta) => {
 	return {sizeBytes, attachmentBudgetBytes, fitsAttachmentBudget};
 };
 
+const captureValueFor = (manifest, videoMeta, key) => {
+	if (videoMeta && videoMeta[key] !== undefined && videoMeta[key] !== null) {
+		return videoMeta[key];
+	}
+	const manifestVideo = manifest.video && typeof manifest.video === 'object' ? manifest.video : {};
+	if (manifestVideo[key] !== undefined && manifestVideo[key] !== null) {
+		return manifestVideo[key];
+	}
+	return null;
+};
+
+const captureModeFor = (manifest, videoMeta) => {
+	const mode = captureValueFor(manifest, videoMeta, 'mode');
+	if (mode) {
+		return mode;
+	}
+	const recorder = captureValueFor(manifest, videoMeta, 'recorder');
+	return recorder || null;
+};
+
 const storyboardFor = ({inputProps, proofNotes, videoMeta, issueMeta}) => {
 	const steps = Array.isArray(inputProps.stepItems)
 		? inputProps.stepItems
@@ -163,9 +183,9 @@ const storyboardFor = ({inputProps, proofNotes, videoMeta, issueMeta}) => {
 			sha: inputProps.sourceSha || null,
 		},
 		capture: {
-			mode: videoMeta.mode || null,
-			duration_secs: videoMeta.duration_secs ?? null,
-			fps: videoMeta.fps ?? null,
+			mode: inputProps.captureMode || null,
+			duration_secs: inputProps.durationSecs ?? null,
+			fps: inputProps.fps ?? null,
 			has_audio: inputProps.videoHasAudio === true,
 		},
 		issue: {
@@ -192,10 +212,13 @@ const stepItemsFor = (manifest, videoMeta, issueMeta, proofNotes = []) => {
 		: proofNotes.length
 			? proofNotes.slice(0, 2).join(' ')
 			: 'no interaction recorded';
+	const captureMode = captureModeFor(manifest, videoMeta);
+	const durationSecs = captureValueFor(manifest, videoMeta, 'duration_secs');
+	const fps = captureValueFor(manifest, videoMeta, 'fps');
 	const captureDetail = [
-		videoMeta.mode || 'video proof',
-		videoMeta.duration_secs ? `${videoMeta.duration_secs}s` : null,
-		videoMeta.fps ? `${Math.round(videoMeta.fps)} fps` : null,
+		captureMode || 'video proof',
+		durationSecs ? `${durationSecs}s` : null,
+		fps ? `${Math.round(fps)} fps` : null,
 	]
 		.filter(Boolean)
 		.join(' / ');
@@ -325,9 +348,9 @@ const main = async () => {
 				sourceMode: manifest.source?.mode || null,
 				sourceSha: manifest.source?.sha || null,
 				sourceBranch: manifest.source?.branch || null,
-				captureMode: videoMeta.mode || null,
-				durationSecs: videoMeta.duration_secs ?? null,
-				fps: videoMeta.fps ?? null,
+				captureMode: captureModeFor(manifest, videoMeta),
+				durationSecs: captureValueFor(manifest, videoMeta, 'duration_secs'),
+				fps: captureValueFor(manifest, videoMeta, 'fps'),
 				sizeBytes: videoSize.sizeBytes,
 				attachmentBudgetBytes: videoSize.attachmentBudgetBytes,
 				fitsAttachmentBudget: videoSize.fitsAttachmentBudget,
@@ -343,7 +366,7 @@ const main = async () => {
 					...proofNotes,
 					manifest.source?.mode ? `source: ${manifest.source.mode}` : null,
 					manifest.source?.sha ? `sha: ${manifest.source.sha.slice(0, 12)}` : null,
-					videoMeta.mode ? `capture: ${videoMeta.mode}` : null,
+					captureModeFor(manifest, videoMeta) ? `capture: ${captureModeFor(manifest, videoMeta)}` : null,
 					videoMeta.frame_count ? `${videoMeta.frame_count} captured frames` : null,
 					issueMeta.status ? `issue variant: ${issueMeta.status}` : null,
 				].filter(Boolean),
