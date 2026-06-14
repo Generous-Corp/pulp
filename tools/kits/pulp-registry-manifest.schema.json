@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulp.dev/schemas/pulp-registry-manifest-v1.schema.json",
+  "title": "Pulp Registry Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "id",
+    "version",
+    "canonicalManifestSha256",
+    "signerPublicKey",
+    "signature"
+  ],
+  "properties": {
+    "schema": {
+      "const": "pulp-registry-manifest-v1"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9][A-Za-z0-9.+-]*$"
+    },
+    "canonicalManifestSha256": {
+      "type": "string",
+      "pattern": "^sha256-[0-9a-f]{64}$"
+    },
+    "signerPublicKey": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{64}$"
+    },
+    "signature": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{128}$"
+    }
+  }
+}

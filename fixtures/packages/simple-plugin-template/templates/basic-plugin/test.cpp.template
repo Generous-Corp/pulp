@@ -1,0 +1,10 @@
+#include "{{HEADER_NAME}}"
+
+#include <catch2/catch_test_macros.hpp>
+
+TEST_CASE("{{CLASS_NAME}} descriptor is generated from template kit") {
+    auto processor = {{NAMESPACE}}::create_{{FACTORY_NAME}}();
+    auto descriptor = processor->descriptor();
+    REQUIRE(descriptor.name == "{{PLUGIN_NAME}}");
+    REQUIRE(descriptor.manufacturer == "{{MANUFACTURER}}");
+}

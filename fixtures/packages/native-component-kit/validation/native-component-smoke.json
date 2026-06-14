@@ -1,0 +1,8 @@
+{
+  "kind": "native-component-validation-profile",
+  "checks": [
+    "public-native-core-abi",
+    "source-built-only-when-selected",
+    "process-no-alloc-no-lock"
+  ]
+}

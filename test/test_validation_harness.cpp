@@ -110,6 +110,29 @@ std::filesystem::path make_temp_dir(const char* stem) {
     return std::filesystem::temp_directory_path() / (std::string(stem) + "-" + unique);
 }
 
+void write_text_file(const std::filesystem::path& path, const std::string& text) {
+    std::filesystem::create_directories(path.parent_path());
+    std::ofstream f(path);
+    REQUIRE(f.good());
+    f << text;
+    REQUIRE(f.good());
+}
+
+std::string valid_runtime_manifest_json(std::string plugin_id = "com.pulp.test.harness-gain") {
+    return std::string(R"json({
+  "schema": "pulp.plugin-runtime.v1",
+  "pluginId": ")json") + plugin_id + R"json(",
+  "content": {
+    "capabilities": ["content.presets.v1", "content.samples.v1"],
+    "kinds": ["presets", "samples"],
+    "reload": {
+      "hotReloadKinds": ["presets"],
+      "manualRescanKinds": ["samples"]
+    }
+  }
+})json";
+}
+
 class ScopedEnv {
 public:
     explicit ScopedEnv(std::string name) : name_(std::move(name)) {
@@ -515,6 +538,134 @@ TEST_CASE("ValidationHarness marks critical runtime overload as validation failu
     REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"severity\": \"critical\""));
     REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"should_bypass_optional_work\": true"));
     REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"validation_failure\": true"));
+}
+
+TEST_CASE("ValidationHarness validates plugin runtime manifest in bundle resources",
+          "[harness][content][phase3]") {
+    pulp::format::ValidationHarness harness(create_test_gain);
+    harness.configure({});
+
+    const auto bundle = make_temp_dir("pulp-runtime-manifest-bundle") / "HarnessTestGain.vst3";
+    const auto manifest_path = bundle / "Contents" / "Resources" / "pulp.plugin-runtime.json";
+    write_text_file(manifest_path, valid_runtime_manifest_json());
+
+    auto entry = harness.validate_plugin_runtime_manifest(bundle);
+
+    REQUIRE(entry.type == "plugin_runtime_manifest");
+    REQUIRE(entry.status == pulp::format::ValidationStatus::pass);
+    REQUIRE(entry.error_message.empty());
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"schema\": \"pulp.plugin-runtime.v1\""));
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"plugin_id\": \"com.pulp.test.harness-gain\""));
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"content.samples.v1\""));
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"hot_reload_kinds\": [\"presets\"]"));
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"manual_rescan_kinds\": [\"samples\"]"));
+
+    const auto report = harness.generate_report();
+    REQUIRE_THAT(report, ContainsSubstring("\"plugin_runtime_manifest\""));
+    REQUIRE_THAT(report, ContainsSubstring("\"manifest_path\""));
+
+    std::error_code ec;
+    std::filesystem::remove_all(bundle.parent_path(), ec);
+    REQUIRE_FALSE(ec);
+}
+
+TEST_CASE("ValidationHarness validates plugin runtime manifest sidecar",
+          "[harness][content][phase3]") {
+    pulp::format::ValidationHarness harness(create_test_gain);
+    harness.configure({});
+
+    const auto dir = make_temp_dir("pulp-runtime-manifest-sidecar");
+    const auto plugin_path = dir / "HarnessTestGain.clap";
+    write_text_file(plugin_path, "not a real plugin binary");
+    write_text_file(dir / "HarnessTestGain.pulp.plugin-runtime.json",
+                    valid_runtime_manifest_json());
+
+    auto entry = harness.validate_plugin_runtime_manifest(plugin_path);
+
+    REQUIRE(entry.status == pulp::format::ValidationStatus::pass);
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("HarnessTestGain.pulp.plugin-runtime.json"));
+
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    REQUIRE_FALSE(ec);
+}
+
+TEST_CASE("ValidationHarness validates plugin runtime manifest at bundle root",
+          "[harness][content][phase3]") {
+    pulp::format::ValidationHarness harness(create_test_gain);
+    harness.configure({});
+
+    const auto bundle = make_temp_dir("pulp-runtime-manifest-lv2") / "HarnessTestGain.lv2";
+    write_text_file(bundle / "pulp.plugin-runtime.json", valid_runtime_manifest_json());
+
+    auto entry = harness.validate_plugin_runtime_manifest(bundle);
+
+    REQUIRE(entry.status == pulp::format::ValidationStatus::pass);
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("HarnessTestGain.lv2/pulp.plugin-runtime.json"));
+
+    std::error_code ec;
+    std::filesystem::remove_all(bundle.parent_path(), ec);
+    REQUIRE_FALSE(ec);
+}
+
+TEST_CASE("ValidationHarness reports missing plugin runtime manifest",
+          "[harness][content][phase3]") {
+    pulp::format::ValidationHarness harness(create_test_gain);
+    harness.configure({});
+
+    const auto bundle = make_temp_dir("pulp-runtime-manifest-missing") / "HarnessTestGain.vst3";
+    std::filesystem::create_directories(bundle / "Contents" / "Resources");
+
+    auto entry = harness.validate_plugin_runtime_manifest(bundle);
+
+    REQUIRE(entry.status == pulp::format::ValidationStatus::fail);
+    REQUIRE_THAT(entry.error_message, ContainsSubstring("Missing pulp.plugin-runtime.json"));
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"manifest_path\": null"));
+
+    std::error_code ec;
+    std::filesystem::remove_all(bundle.parent_path(), ec);
+    REQUIRE_FALSE(ec);
+}
+
+TEST_CASE("ValidationHarness rejects invalid plugin runtime manifest",
+          "[harness][content][phase3]") {
+    pulp::format::ValidationHarness harness(create_test_gain);
+    harness.configure({});
+
+    const auto bundle = make_temp_dir("pulp-runtime-manifest-invalid") / "HarnessTestGain.vst3";
+    write_text_file(bundle / "Contents" / "Resources" / "pulp.plugin-runtime.json",
+                    R"json({"schema":"pulp.plugin-runtime.v1","pluginId":"com.pulp.test.harness-gain"})json");
+
+    auto entry = harness.validate_plugin_runtime_manifest(bundle);
+
+    REQUIRE(entry.status == pulp::format::ValidationStatus::fail);
+    REQUIRE_THAT(entry.error_message, ContainsSubstring("Invalid plugin runtime manifest"));
+    REQUIRE_THAT(entry.error_message, ContainsSubstring("content object is required"));
+
+    std::error_code ec;
+    std::filesystem::remove_all(bundle.parent_path(), ec);
+    REQUIRE_FALSE(ec);
+}
+
+TEST_CASE("ValidationHarness rejects mismatched plugin runtime manifest id",
+          "[harness][content][phase3]") {
+    pulp::format::ValidationHarness harness(create_test_gain);
+    harness.configure({});
+
+    const auto bundle = make_temp_dir("pulp-runtime-manifest-mismatch") / "HarnessTestGain.vst3";
+    write_text_file(bundle / "Contents" / "Resources" / "pulp.plugin-runtime.json",
+                    valid_runtime_manifest_json("com.example.other"));
+
+    auto entry = harness.validate_plugin_runtime_manifest(bundle);
+
+    REQUIRE(entry.status == pulp::format::ValidationStatus::fail);
+    REQUIRE_THAT(entry.error_message, ContainsSubstring("pluginId does not match"));
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"expected_plugin_id\": \"com.pulp.test.harness-gain\""));
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"plugin_id\": \"com.example.other\""));
+
+    std::error_code ec;
+    std::filesystem::remove_all(bundle.parent_path(), ec);
+    REQUIRE_FALSE(ec);
 }
 
 TEST_CASE("ValidationHarness report escapes JSON metadata and entry strings",

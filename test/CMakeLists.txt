@@ -780,6 +780,8 @@ target_link_libraries(pulp-test-cli-package-commands PRIVATE
     Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-package-commands)
 
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/content_workflow_tests.cmake")
+
 # CLI package registry (#643): pure local tests for registry parsing,
 # lock-file round trips, target TOML parsing/writing, semver, quality
 # scoring, unsupported-target detection, and search ranking. This stays

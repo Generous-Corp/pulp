@@ -94,6 +94,14 @@ Decision heuristics for "does this deserve MCP exposure":
 - Trivial Bash equivalent (clean, version, config) → **NO**, baseline it.
 - Interactive surface (design, ship) → **NO**, baseline it.
 - Subcommand under an umbrella tool already present (audio, docs, inspect) → **NO**, baseline it (the umbrella's sub-tools cover the surface).
+- Trust-boundary workflows with many reviewable subcommands (kit/content) →
+  **YES for the umbrella and explicit MCP sub-tools.** Keep `pulp kit` and
+  `pulp content` documented as top-level CLI commands, but expose agent-safe
+  sub-tools such as `pulp_kit_plan`, `pulp_kit_apply`,
+  `pulp_content_preview`, and `pulp_content_install` so MCP callers cannot blur
+  inspect/preview/approve/apply boundaries. Add those sub-tools to the
+  `mcp_only` baseline with a reason that they are sub-tools of the umbrella CLI
+  command, not missing top-level CLI peers.
 
 The gate runs in three places, all pinned to the same script:
 

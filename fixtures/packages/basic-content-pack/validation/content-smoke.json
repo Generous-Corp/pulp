@@ -1,0 +1,5 @@
+{
+  "schema": "pulp-validation-report-v1",
+  "status": "passed",
+  "checks": ["manifest", "preset-json", "theme-json", "sample-file", "wavetable-json"]
+}
