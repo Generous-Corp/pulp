@@ -2,6 +2,7 @@
 """Tests for desktop command facade bindings."""
 
 import importlib.util
+import json
 from argparse import Namespace
 import io
 import types
@@ -420,6 +421,52 @@ class DesktopCommandBindingsTests(unittest.TestCase):
         self.assertEqual(kwargs["python_executable"], "/usr/bin/python3")
         self.assertEqual(kwargs["script_path"], Path("/repo/tools/local-ci/local_ci.py"))
         self.assertEqual(captured["cleanup_title"], "Pulp Video Proof local-ci test1234")
+
+    def test_terminal_reinvoke_adds_cleanup_to_json_stdout(self):
+        captured = {}
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+
+        def runner(*_args, **_kwargs):
+            self.fail("direct video-doctor should not run")
+
+        def run_terminal(*args, **kwargs):
+            captured["terminal"] = (args, kwargs)
+            return {
+                "returncode": 0,
+                "stdout": '{"kind":"desktop-video-doctor"}\n',
+                "stderr": "",
+                "terminal_title": "Pulp Video Proof local-ci test1234",
+                "terminal_cleanup": {
+                    "closed_count": 0,
+                    "remaining_proof_count": 1,
+                    "miniaturized_count": 1,
+                },
+            }
+
+        terminal_runner = types.SimpleNamespace(
+            should_reinvoke_in_terminal=lambda **_kwargs: True,
+            run_local_ci_in_terminal=run_terminal,
+        )
+        bindings = self._bindings("_desktop_setup_commands_cli", "cmd_desktop_video_doctor", runner)
+        bindings["_macos_terminal_runner"] = terminal_runner
+        bindings["sys"] = types.SimpleNamespace(
+            platform="darwin",
+            argv=["local_ci.py", "desktop", "video-doctor", "mac", "--run-in-terminal", "--json"],
+            executable="/usr/bin/python3",
+            stdout=stdout,
+            stderr=stderr,
+        )
+        bindings["os"] = types.SimpleNamespace(environ={})
+
+        result = self.mod.cmd_desktop_video_doctor(bindings, Namespace(run_in_terminal=True))
+
+        self.assertEqual(result, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["kind"], "desktop-video-doctor")
+        self.assertEqual(payload["terminal_reinvoke"]["title"], "Pulp Video Proof local-ci test1234")
+        self.assertEqual(payload["terminal_reinvoke"]["cleanup"]["remaining_proof_count"], 1)
+        self.assertEqual(payload["terminal_reinvoke"]["cleanup"]["miniaturized_count"], 1)
 
     def test_video_setup_can_reinvoke_through_terminal(self):
         captured = {}

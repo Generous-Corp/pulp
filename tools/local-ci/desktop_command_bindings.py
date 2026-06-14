@@ -2,12 +2,33 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from typing import Any
 
 
 def _binding(bindings: Mapping[str, Any], name: str) -> Any:
     return bindings[name]
+
+
+def _terminal_stdout(result: Mapping[str, Any]) -> str:
+    stdout = str(result.get("stdout") or "")
+    cleanup = result.get("terminal_cleanup")
+    title = result.get("terminal_title")
+    if not stdout or not (cleanup or title):
+        return stdout
+    try:
+        payload = json.loads(stdout)
+    except json.JSONDecodeError:
+        return stdout
+    if not isinstance(payload, dict):
+        return stdout
+    payload["terminal_reinvoke"] = {
+        "title": title,
+        "cleanup": cleanup,
+        "timed_out": bool(result.get("timed_out")),
+    }
+    return json.dumps(payload, indent=2) + "\n"
 
 
 def _maybe_run_local_ci_in_terminal(bindings: Mapping[str, Any], args: Any) -> int | None:
@@ -29,7 +50,7 @@ def _maybe_run_local_ci_in_terminal(bindings: Mapping[str, Any], args: Any) -> i
         script_path=_binding(bindings, "ROOT") / "tools" / "local-ci" / "local_ci.py",
     )
     if result.get("stdout"):
-        sys_mod.stdout.write(result["stdout"])
+        sys_mod.stdout.write(_terminal_stdout(result))
     if result.get("stderr"):
         sys_mod.stderr.write(result["stderr"])
     terminal_title = result.get("terminal_title")
