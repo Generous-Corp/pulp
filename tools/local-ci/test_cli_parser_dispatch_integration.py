@@ -7,17 +7,14 @@ import io
 import sys
 import unittest
 from contextlib import redirect_stdout
-from pathlib import Path
 from unittest import mock
 
-from module_test_utils import load_module_from_path
+from module_test_utils import load_local_ci_module
 
-
-MODULE_PATH = Path(__file__).with_name("local_ci.py")
 
 
 def load_module():
-    return load_module_from_path(MODULE_PATH, module_name="pulp_local_ci_cli_parser_dispatch_integration", add_module_dir=True)
+    return load_local_ci_module("local_ci.py", module_name="pulp_local_ci_cli_parser_dispatch_integration", add_module_dir=True)
 
 
 class CliParserDispatchIntegrationTests(unittest.TestCase):

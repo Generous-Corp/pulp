@@ -4,17 +4,14 @@
 from __future__ import annotations
 
 import argparse
-import pathlib
 import unittest
 
-from module_test_utils import load_module_from_path
+from module_test_utils import load_local_ci_module
 
-
-MODULE_PATH = pathlib.Path(__file__).with_name("cli_parser_desktop.py")
 
 
 def load_module():
-    return load_module_from_path(MODULE_PATH)
+    return load_local_ci_module("cli_parser_desktop.py")
 
 
 class CliParserDesktopTests(unittest.TestCase):
