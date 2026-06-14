@@ -8,14 +8,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from module_test_utils import load_module_from_path
+from module_test_utils import load_local_ci_module
 
-
-MODULE_PATH = Path(__file__).with_name("runner_state.py")
 
 
 def load_module():
-    return load_module_from_path(MODULE_PATH, module_name="pulp_runner_state", add_module_dir=True)
+    return load_local_ci_module("runner_state.py", module_name="pulp_runner_state", add_module_dir=True)
 
 
 class RunnerStateTests(unittest.TestCase):

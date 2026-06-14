@@ -10,14 +10,12 @@ import tempfile
 import threading
 import unittest
 
-from module_test_utils import load_module_from_path
+from module_test_utils import load_local_ci_module
 
-
-MODULE_PATH = pathlib.Path(__file__).with_name("ssh_bundle.py")
 
 
 def load_module():
-    return load_module_from_path(MODULE_PATH)
+    return load_local_ci_module("ssh_bundle.py")
 
 
 class SshBundleTests(unittest.TestCase):

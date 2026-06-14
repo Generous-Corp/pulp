@@ -6,14 +6,12 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from module_test_utils import load_module_from_path
+from module_test_utils import load_local_ci_module
 
-
-MODULE_PATH = Path(__file__).with_name("normalize.py")
 
 
 def load_module():
-    return load_module_from_path(MODULE_PATH)
+    return load_local_ci_module("normalize.py")
 
 
 class NormalizeTests(unittest.TestCase):

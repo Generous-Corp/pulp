@@ -12,15 +12,13 @@ from argparse import Namespace
 from contextlib import redirect_stdout
 from unittest import mock
 
-from module_test_utils import load_module_from_path
+from module_test_utils import load_local_ci_module
 
-
-MODULE_PATH = pathlib.Path(__file__).with_name("local_ci.py")
 
 
 def load_module():
-    return load_module_from_path(
-        MODULE_PATH,
+    return load_local_ci_module(
+        "local_ci.py",
         module_name="pulp_local_ci_scheduler_integration",
         add_module_dir=True,
     )

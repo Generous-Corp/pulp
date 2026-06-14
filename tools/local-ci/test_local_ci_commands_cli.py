@@ -8,14 +8,12 @@ from contextlib import redirect_stdout
 from pathlib import Path
 import unittest
 
-from module_test_utils import load_module_from_path
+from module_test_utils import load_local_ci_module
 
-
-MODULE_PATH = Path(__file__).resolve().with_name("local_ci_commands_cli.py")
 
 
 def load_local_ci_commands_cli_module():
-    return load_module_from_path(MODULE_PATH)
+    return load_local_ci_module("local_ci_commands_cli.py")
 
 
 class LocalCiCommandsCliTests(unittest.TestCase):
