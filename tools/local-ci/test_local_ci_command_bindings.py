@@ -3,6 +3,7 @@
 
 from module_test_utils import load_module_from_path
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -29,35 +30,29 @@ class LocalCiCommandBindingsTests(unittest.TestCase):
         self.assertEqual(len(expected), len(set(expected)))
 
     def test_install_local_ci_command_helpers_routes_pr_local_and_unknown_exports(self):
-        calls = []
+        bindings = {}
 
-        def pr_install(bindings, names):
-            calls.append(("pr", names))
+        with (
+            mock.patch.object(self.mod, "install_local_ci_pr_command_helpers") as pr,
+            mock.patch.object(self.mod, "install_local_helpers") as install_local,
+        ):
+            self.mod.install_local_ci_command_helpers(
+                bindings,
+                (
+                    "resolve_submission_options",
+                    "cmd_enqueue",
+                    "cmd_ship",
+                    "cmd_status",
+                    "custom_command_export",
+                ),
+            )
 
-        def local_install(bindings, globals_obj, names):
-            calls.append(("local", names))
-
-        self.mod.install_local_ci_pr_command_helpers = pr_install
-        self.mod.install_local_helpers = local_install
-
-        self.mod.install_local_ci_command_helpers(
-            {},
-            (
-                "resolve_submission_options",
-                "cmd_enqueue",
-                "cmd_ship",
-                "cmd_status",
-                "custom_command_export",
-            ),
-        )
-
-        self.assertEqual(
-            calls,
+        pr.assert_called_once_with(bindings, ("cmd_ship",))
+        install_local.assert_has_calls(
             [
-                ("pr", ("cmd_ship",)),
-                ("local", ("resolve_submission_options", "cmd_enqueue", "cmd_status")),
-                ("local", ("custom_command_export",)),
-            ],
+                mock.call(bindings, self.mod.__dict__, ("resolve_submission_options", "cmd_enqueue", "cmd_status")),
+                mock.call(bindings, self.mod.__dict__, ("custom_command_export",)),
+            ]
         )
 
 
