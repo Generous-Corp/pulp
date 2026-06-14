@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import unittest
+from unittest import mock
 
 from module_test_utils import load_module_from_path
 
@@ -31,45 +32,29 @@ class ExecutionRunnerBindingsTests(unittest.TestCase):
         self.assertEqual(len(expected), len(set(expected)))
 
     def test_install_execution_runner_helpers_routes_each_group_and_unknown_exports(self) -> None:
-        calls = []
+        bindings = {}
 
-        def local_install(bindings, names):
-            calls.append(("local", names))
+        with (
+            mock.patch.object(self.mod, "install_execution_runner_local_helpers") as local,
+            mock.patch.object(self.mod, "install_execution_runner_ssh_helpers") as ssh,
+            mock.patch.object(self.mod, "install_execution_runner_windows_helpers") as windows,
+            mock.patch.object(self.mod, "install_local_helpers") as install_local,
+        ):
+            self.mod.install_execution_runner_helpers(
+                bindings,
+                (
+                    "run_local_validation",
+                    "run_posix_ssh_validation",
+                    "run_windows_ssh_validation",
+                    "windows_validation_script",
+                    "custom_execution_runner_export",
+                ),
+            )
 
-        def ssh_install(bindings, names):
-            calls.append(("ssh", names))
-
-        def windows_install(bindings, names):
-            calls.append(("windows", names))
-
-        def fallback_install(bindings, globals_obj, names):
-            calls.append(("local_fallback", names))
-
-        self.mod.install_execution_runner_local_helpers = local_install
-        self.mod.install_execution_runner_ssh_helpers = ssh_install
-        self.mod.install_execution_runner_windows_helpers = windows_install
-        self.mod.install_local_helpers = fallback_install
-
-        self.mod.install_execution_runner_helpers(
-            {},
-            (
-                "run_local_validation",
-                "run_posix_ssh_validation",
-                "run_windows_ssh_validation",
-                "windows_validation_script",
-                "custom_execution_runner_export",
-            ),
-        )
-
-        self.assertEqual(
-            calls,
-            [
-                ("local", ("run_local_validation",)),
-                ("ssh", ("run_posix_ssh_validation",)),
-                ("windows", ("run_windows_ssh_validation", "windows_validation_script")),
-                ("local_fallback", ("custom_execution_runner_export",)),
-            ],
-        )
+        local.assert_called_once_with(bindings, ("run_local_validation",))
+        ssh.assert_called_once_with(bindings, ("run_posix_ssh_validation",))
+        windows.assert_called_once_with(bindings, ("run_windows_ssh_validation", "windows_validation_script"))
+        install_local.assert_called_once_with(bindings, self.mod.__dict__, ("custom_execution_runner_export",))
 
 
 if __name__ == "__main__":

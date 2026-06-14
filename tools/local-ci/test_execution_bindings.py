@@ -3,6 +3,7 @@
 
 from module_test_utils import load_module_from_path
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -38,56 +39,34 @@ class ExecutionBindingsTests(unittest.TestCase):
         )
 
     def test_install_execution_helpers_routes_focused_groups(self):
-        calls = []
+        bindings = {}
 
-        def command_install(bindings, names):
-            calls.append(("command", names))
+        with (
+            mock.patch.object(self.mod, "install_execution_command_helpers") as command,
+            mock.patch.object(self.mod, "install_execution_result_helpers") as result,
+            mock.patch.object(self.mod, "install_execution_logging_helpers") as logging,
+            mock.patch.object(self.mod, "install_execution_runner_helpers") as runner,
+            mock.patch.object(self.mod, "install_execution_job_helpers") as job,
+            mock.patch.object(self.mod, "install_local_helpers") as install_local,
+        ):
+            self.mod.install_execution_helpers(
+                bindings,
+                (
+                    "local_validation_command",
+                    "unreachable_target_result",
+                    "parse_progress_marker",
+                    "run_local_validation",
+                    "config_for_job_execution",
+                    "custom_export",
+                ),
+            )
 
-        def result_install(bindings, names):
-            calls.append(("result", names))
-
-        def logging_install(bindings, names):
-            calls.append(("logging", names))
-
-        def runner_install(bindings, names):
-            calls.append(("runner", names))
-
-        def job_install(bindings, names):
-            calls.append(("job", names))
-
-        def local_install(bindings, globals_obj, names):
-            calls.append(("local", names))
-
-        self.mod.install_execution_command_helpers = command_install
-        self.mod.install_execution_result_helpers = result_install
-        self.mod.install_execution_logging_helpers = logging_install
-        self.mod.install_execution_runner_helpers = runner_install
-        self.mod.install_execution_job_helpers = job_install
-        self.mod.install_local_helpers = local_install
-
-        self.mod.install_execution_helpers(
-            {},
-            (
-                "local_validation_command",
-                "unreachable_target_result",
-                "parse_progress_marker",
-                "run_local_validation",
-                "config_for_job_execution",
-                "custom_export",
-            ),
-        )
-
-        self.assertEqual(
-            calls,
-            [
-                ("command", ("local_validation_command",)),
-                ("result", ("unreachable_target_result",)),
-                ("logging", ("parse_progress_marker",)),
-                ("runner", ("run_local_validation",)),
-                ("job", ("config_for_job_execution",)),
-                ("local", ("custom_export",)),
-            ],
-        )
+        command.assert_called_once_with(bindings, ("local_validation_command",))
+        result.assert_called_once_with(bindings, ("unreachable_target_result",))
+        logging.assert_called_once_with(bindings, ("parse_progress_marker",))
+        runner.assert_called_once_with(bindings, ("run_local_validation",))
+        job.assert_called_once_with(bindings, ("config_for_job_execution",))
+        install_local.assert_called_once_with(bindings, self.mod.__dict__, ("custom_export",))
 
 
 if __name__ == "__main__":

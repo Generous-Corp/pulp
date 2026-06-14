@@ -6,6 +6,7 @@ from __future__ import annotations
 from module_test_utils import load_module_from_path
 from pathlib import Path
 import unittest
+from unittest import mock
 
 
 MODULE_PATH = Path(__file__).with_name("target_preflight_bindings.py")
@@ -30,34 +31,21 @@ class TargetPreflightBindingsTests(unittest.TestCase):
         self.assertEqual(len(expected), len(set(expected)))
 
     def test_install_target_preflight_helpers_routes_each_group(self) -> None:
-        calls = []
+        bindings = {}
 
-        def reachability_install(bindings, names):
-            calls.append(("reachability", names))
+        with (
+            mock.patch.object(self.mod, "install_target_reachability_helpers") as reachability,
+            mock.patch.object(self.mod, "install_target_config_preflight_helpers") as config,
+            mock.patch.object(self.mod, "install_target_submission_helpers") as submission,
+        ):
+            self.mod.install_target_preflight_helpers(
+                bindings,
+                ("ssh_probe", "config_source_name", "print_submission_metadata"),
+            )
 
-        def config_install(bindings, names):
-            calls.append(("config", names))
-
-        def submission_install(bindings, names):
-            calls.append(("submission", names))
-
-        self.mod.install_target_reachability_helpers = reachability_install
-        self.mod.install_target_config_preflight_helpers = config_install
-        self.mod.install_target_submission_helpers = submission_install
-
-        self.mod.install_target_preflight_helpers(
-            {},
-            ("ssh_probe", "config_source_name", "print_submission_metadata"),
-        )
-
-        self.assertEqual(
-            calls,
-            [
-                ("reachability", ("ssh_probe",)),
-                ("config", ("config_source_name",)),
-                ("submission", ("print_submission_metadata",)),
-            ],
-        )
+        reachability.assert_called_once_with(bindings, ("ssh_probe",))
+        config.assert_called_once_with(bindings, ("config_source_name",))
+        submission.assert_called_once_with(bindings, ("print_submission_metadata",))
 
 
 if __name__ == "__main__":

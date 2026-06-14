@@ -3,6 +3,7 @@
 
 from module_test_utils import load_module_from_path
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -28,24 +29,19 @@ class TargetBindingsTests(unittest.TestCase):
         self.assertEqual(len(expected), len(set(expected)))
 
     def test_install_target_helpers_routes_known_and_unknown_exports(self):
-        calls = []
+        bindings = {}
 
-        def local_install(bindings, globals_obj, names):
-            calls.append(names)
+        with mock.patch.object(self.mod, "install_local_helpers") as install_local:
+            self.mod.install_target_helpers(
+                bindings,
+                ("enabled_targets", "custom_target_export", "resolve_targets"),
+            )
 
-        self.mod.install_local_helpers = local_install
-
-        self.mod.install_target_helpers(
-            {},
-            ("enabled_targets", "custom_target_export", "resolve_targets"),
-        )
-
-        self.assertEqual(
-            calls,
+        install_local.assert_has_calls(
             [
-                ("enabled_targets", "resolve_targets"),
-                ("custom_target_export",),
-            ],
+                mock.call(bindings, self.mod.__dict__, ("enabled_targets", "resolve_targets")),
+                mock.call(bindings, self.mod.__dict__, ("custom_target_export",)),
+            ]
         )
 
 
