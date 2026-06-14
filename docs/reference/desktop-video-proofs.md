@@ -121,7 +121,10 @@ explicit local-config opt-in for recording on that target. With
 
 To inspect another Mac without changing its checkout, add `--probe-host` with
 an SSH host alias. The command runs read-only `command -v` probes and emits a
-`remote_setup_prerequisites` block:
+`remote_setup_prerequisites` block. Remote probes run through `zsh -lc` with
+`$HOME/.local/bin`, `/opt/homebrew/bin`, and `/usr/local/bin` prepended, so
+Homebrew or local tool installs are visible even when raw non-interactive SSH
+would not find `node` or `npm`:
 
 ```bash
 python3 tools/local-ci/local_ci.py desktop video-setup mac \

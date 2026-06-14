@@ -25,6 +25,10 @@ except ModuleNotFoundError:
     _reaper_recipe_spec.loader.exec_module(reaper_video_recipe)
 
 
+REMOTE_SETUP_PROBE_SHELL = "zsh -lc"
+REMOTE_SETUP_PROBE_PATH_PREFIX = "$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+
 def cmd_desktop_install(
     args: argparse.Namespace,
     *,
@@ -655,7 +659,7 @@ def desktop_video_setup_remote_prerequisite_checks(
     subprocess_run_fn: Callable[..., subprocess.CompletedProcess] = subprocess.run,
 ) -> list[dict]:
     script = (
-        "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"; export PATH; "
+        f"PATH=\"{REMOTE_SETUP_PROBE_PATH_PREFIX}\"; export PATH; "
         "for tool in pulp npm node cmake; do "
         "found_path=$(command -v \"$tool\" 2>/dev/null || true); "
         "if [ -n \"$found_path\" ]; then printf '%s\\t%s\\n' \"$tool\" \"$found_path\"; "
@@ -704,8 +708,23 @@ def desktop_video_setup_remote_prerequisite_checks(
         remote_check = dict(check)
         remote_check["name"] = check["name"].replace("setup.", "remote_setup.", 1)
         remote_check["host"] = host
+        remote_check["probe_shell"] = REMOTE_SETUP_PROBE_SHELL
+        remote_check["probe_path_prefix"] = REMOTE_SETUP_PROBE_PATH_PREFIX
         checks.append(remote_check)
     return checks
+
+
+def _remote_setup_probe_metadata(checks: list[dict]) -> dict | None:
+    for check in checks:
+        shell = check.get("probe_shell")
+        path_prefix = check.get("probe_path_prefix")
+        if shell or path_prefix:
+            return {
+                "shell": shell or "",
+                "path_prefix": path_prefix or "",
+                "detail": "Remote setup probes use a login-style zsh command so Homebrew/local tool paths are visible over non-interactive SSH.",
+            }
+    return None
 
 
 def append_video_recipe_doctor_checks(args: argparse.Namespace, checks: list[dict]) -> None:
@@ -1286,6 +1305,7 @@ def cmd_desktop_video_setup(
             payload["remote_setup_prerequisites"] = {
                 "host": probe_host,
                 "ok": remote_ok,
+                "probe": _remote_setup_probe_metadata(remote_checks),
                 "checks": remote_checks,
                 "remediations": desktop_video_setup_prerequisite_remediations(remote_checks),
             }

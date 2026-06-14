@@ -112,7 +112,9 @@ artifact-manifest install path before treating the machine as mainline-ready.
 
 When checking another Mac over SSH, add `--probe-host <ssh-host>`. The probe is
 read-only and emits `remote_setup_prerequisites` with the remote `pulp`, `npm`,
-`node`, and `cmake` status.
+`node`, and `cmake` status. It uses `zsh -lc` and prepends
+`$HOME/.local/bin`, `/opt/homebrew/bin`, and `/usr/local/bin`, so trust its
+reported `probe` metadata over a raw `ssh host command -v node` check.
 
 If you prefer to create the machine-local config manually:
 

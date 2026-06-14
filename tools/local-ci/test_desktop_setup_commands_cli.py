@@ -1261,6 +1261,7 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
         self.assertFalse(payload["remote_setup_prerequisites"]["ok"])
         self.assertEqual(payload["remote_setup_prerequisites"]["host"], "blackbook")
         self.assertEqual(payload["remote_setup_prerequisites"]["remediations"][0]["check"], "remote_setup.pulp")
+        self.assertIsNone(payload["remote_setup_prerequisites"]["probe"])
 
     def test_remote_setup_prerequisite_probe_uses_login_zsh_path(self):
         commands = []
@@ -1277,6 +1278,25 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
         self.assertNotIn(" do path=", commands[0][8])
         self.assertTrue(all(check["ok"] for check in checks), checks)
         self.assertEqual(checks[0]["detail"], "/Users/me/.local/bin/pulp")
+        self.assertEqual(checks[0]["probe_shell"], "zsh -lc")
+        self.assertIn("/opt/homebrew/bin", checks[0]["probe_path_prefix"])
+
+    def test_remote_setup_probe_metadata_is_reported(self):
+        metadata = self.mod._remote_setup_probe_metadata(
+            [
+                {
+                    "name": "remote_setup.node",
+                    "ok": True,
+                    "detail": "/opt/homebrew/bin/node",
+                    "probe_shell": "zsh -lc",
+                    "probe_path_prefix": "$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH",
+                }
+            ]
+        )
+
+        self.assertEqual(metadata["shell"], "zsh -lc")
+        self.assertIn("/opt/homebrew/bin", metadata["path_prefix"])
+        self.assertIn("non-interactive SSH", metadata["detail"])
 
     def test_video_setup_text_reports_demo_matrix_blockers(self):
         self.targets["mac"]["optional"] = {"video_capture": True}
