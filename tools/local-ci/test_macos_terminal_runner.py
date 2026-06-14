@@ -61,12 +61,22 @@ class MacOSTerminalRunnerTests(unittest.TestCase):
             stderr_path=Path("/tmp/err file"),
             returncode_path=Path("/tmp/rc file"),
             title="Pulp Video Proof local-ci test1234",
+            environ={
+                "PULP_HOME": "/tmp/pulp home",
+                "PULP_LOCAL_CI_CONFIG": "/tmp/config dir/config.json",
+                "PULP_VIDEO_AUDIO_DEVICE": "BlackHole 2ch",
+                "UNRELATED_SECRET": "do-not-copy",
+            },
         )
 
         self.assertIn("cd '/repo path'", script)
         self.assertIn("Pulp Video Proof local-ci test1234", script)
         self.assertIn("/usr/bin/caffeinate -u -t 60", script)
         self.assertIn("PULP_LOCAL_CI_TERMINAL_REENTRY=1", script)
+        self.assertIn("'PULP_HOME=/tmp/pulp home'", script)
+        self.assertIn("'PULP_LOCAL_CI_CONFIG=/tmp/config dir/config.json'", script)
+        self.assertIn("'PULP_VIDEO_AUDIO_DEVICE=BlackHole 2ch'", script)
+        self.assertNotIn("UNRELATED_SECRET", script)
         self.assertNotIn("--run-in-terminal", script)
         self.assertIn("desktop video-doctor mac", script)
         self.assertIn("'/tmp/out file'", script)
@@ -75,6 +85,29 @@ class MacOSTerminalRunnerTests(unittest.TestCase):
         self.assertNotIn("; exit", script)
         self.assertNotIn("/usr/bin/osascript", script)
         self.assertNotIn("first window whose name contains", script)
+
+    def test_terminal_preserved_env_args_keeps_setup_overrides_only(self):
+        args = self.mod.terminal_preserved_env_args(
+            {
+                "PULP_HOME": "/tmp/pulp-home",
+                "PULP_LOCAL_CI_CONFIG": "/tmp/local-ci/config.json",
+                "PULP_CLI": "./build/tools/cli/pulp-cpp",
+                "PULP_FFMPEG": "/tmp/ffmpeg",
+                "FFMPEG_PATH": "/tmp/fallback-ffmpeg",
+                "UNRELATED": "ignored",
+            }
+        )
+
+        self.assertEqual(
+            args,
+            [
+                "PULP_HOME=/tmp/pulp-home",
+                "PULP_LOCAL_CI_CONFIG=/tmp/local-ci/config.json",
+                "PULP_CLI=./build/tools/cli/pulp-cpp",
+                "PULP_FFMPEG=/tmp/ffmpeg",
+                "FFMPEG_PATH=/tmp/fallback-ffmpeg",
+            ],
+        )
 
     def test_run_local_ci_in_terminal_replays_output_and_returncode(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -106,6 +139,8 @@ class MacOSTerminalRunnerTests(unittest.TestCase):
                     wrapper_text = wrapper.read_text()
                     self.assertIn("Pulp Video Proof local-ci", wrapper_text)
                     self.assertIn("desktop video mac", wrapper_text)
+                    self.assertIn("PULP_HOME=/tmp/pulp-home", wrapper_text)
+                    self.assertIn("PULP_LOCAL_CI_CONFIG=/tmp/local-ci/config.json", wrapper_text)
                     self.assertIn("/bin/zsh", cmd[-1])
                     self.assertIn("terminal-command.sh", cmd[-1])
                     (tmp_path / "stdout.txt").write_text("child stdout\n")
@@ -117,7 +152,17 @@ class MacOSTerminalRunnerTests(unittest.TestCase):
                 self.assertIn("Pulp Video Proof local-ci", cmd[-1])
                 return subprocess.CompletedProcess(cmd, 0, cleanup_stdout.pop(0), "")
 
-            with mock.patch.object(self.mod.tempfile, "TemporaryDirectory", FixedTemporaryDirectory):
+            with (
+                mock.patch.object(self.mod.tempfile, "TemporaryDirectory", FixedTemporaryDirectory),
+                mock.patch.dict(
+                    self.mod.os.environ,
+                    {
+                        "PULP_HOME": "/tmp/pulp-home",
+                        "PULP_LOCAL_CI_CONFIG": "/tmp/local-ci/config.json",
+                    },
+                    clear=True,
+                ),
+            ):
                 result = self.mod.run_local_ci_in_terminal(
                     ["desktop", "video", "--run-in-terminal", "mac"],
                     cwd=Path("/repo"),

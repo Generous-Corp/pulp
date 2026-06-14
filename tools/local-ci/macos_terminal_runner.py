@@ -14,6 +14,19 @@ import uuid
 
 
 TERMINAL_REENTRY_ENV = "PULP_LOCAL_CI_TERMINAL_REENTRY"
+TERMINAL_PRESERVED_ENV_VARS = (
+    "PULP_HOME",
+    "PULP_LOCAL_CI_HOME",
+    "PULP_LOCAL_CI_CONFIG",
+    "PULP_CLI",
+    "PULP_FFMPEG",
+    "PULP_FFMPEG_PATH",
+    "FFMPEG_PATH",
+    "PULP_VIDEO_AUDIO_DEVICE",
+    "PULP_DESKTOP_ARTIFACT_ROOT",
+    "PULP_DESKTOP_SERVE_HOSTS",
+    "PULP_DESKTOP_SERVE_PUBLIC_HOSTS",
+)
 
 
 def strip_run_in_terminal_args(argv: Sequence[str]) -> list[str]:
@@ -30,6 +43,16 @@ def should_reinvoke_in_terminal(
     return bool(requested) and sys_platform == "darwin" and environ.get(TERMINAL_REENTRY_ENV) != "1"
 
 
+def terminal_preserved_env_args(environ: Mapping[str, str] | None = None) -> list[str]:
+    environ = environ or os.environ
+    args: list[str] = []
+    for name in TERMINAL_PRESERVED_ENV_VARS:
+        value = environ.get(name)
+        if value is not None:
+            args.append(f"{name}={value}")
+    return args
+
+
 def terminal_shell_script(
     *,
     cwd: Path,
@@ -40,10 +63,12 @@ def terminal_shell_script(
     stderr_path: Path,
     returncode_path: Path,
     title: str | None = None,
+    environ: Mapping[str, str] | None = None,
 ) -> str:
     command = [
         "env",
         f"{TERMINAL_REENTRY_ENV}=1",
+        *terminal_preserved_env_args(environ),
         python_executable,
         str(script_path),
         *strip_run_in_terminal_args(argv),
