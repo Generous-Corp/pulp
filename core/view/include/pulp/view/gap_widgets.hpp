@@ -84,23 +84,33 @@ private:
 };
 
 // ── Stepper ───────────────────────────────────────────────────────────────
-// [−] value [+] numeric stepper. Click the minus/plus zones to nudge by step.
+// [−] value [+] numeric stepper. Click the −/+ zones to nudge by step; click
+// the centre value to type a number (Enter commits, Esc cancels); scroll-wheel
+// over it to nudge.
 class Stepper : public View {
 public:
+    Stepper() { set_focusable(true); }
     void set_value(double v);
     double value() const { return value_; }
     void set_range(double lo, double hi) { min_ = lo; max_ = hi; }
     void set_step(double s) { step_ = s; }
     void set_suffix(std::string s) { suffix_ = std::move(s); }
+    bool is_editing() const { return editing_; }
     std::function<void(double)> on_change;
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_down(Point pos) override;
+    void on_text_input(const TextInputEvent& event) override;
+    bool on_key_event(const KeyEvent& event) override;
+    void on_focus_changed(bool gained) override;
     bool wants_wheel_value() const override { return true; }
     void on_wheel(float delta_y) override { set_value(value_ + (delta_y > 0 ? -step_ : step_)); }
     float intrinsic_height() const override { return 36.0f; }
 private:
+    void commit_edit_();
     double value_ = 0.0, min_ = -24.0, max_ = 24.0, step_ = 1.0;
     std::string suffix_ = "";
+    bool editing_ = false;
+    std::string edit_buffer_;
 };
 
 // ── PanControl (1-D) ──────────────────────────────────────────────────────

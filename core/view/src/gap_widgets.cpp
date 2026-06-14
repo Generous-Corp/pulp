@@ -151,20 +151,71 @@ void Stepper::paint(canvas::Canvas& canvas) {
     canvas.set_fill_color(resolve_color("text.secondary", Color::rgba8(150, 150, 160)));
     canvas.fill_text("-", btn * 0.4f, h * 0.62f);
     canvas.fill_text("+", w - btn * 0.55f, h * 0.62f);
-    char buf[32];
-    const char* sign = value_ > 0 ? "+" : "";
-    std::snprintf(buf, sizeof(buf), "%s%g%s%s", sign, value_,
-                  suffix_.empty() ? "" : " ", suffix_.c_str());
+    // Center value — the edit buffer + caret while typing, else the value.
+    std::string s;
+    if (editing_) {
+        canvas.set_stroke_color(resolve_color("focus.ring", Color::rgba8(22, 218, 194)));
+        canvas.set_line_width(1.5f);
+        canvas.stroke_rounded_rect(btn + 1.0f, 2.0f,
+                                   std::max(0.0f, w - 2.0f * btn - 2.0f), h - 4.0f, 4.0f);
+        s = edit_buffer_ + "|";
+    } else {
+        char buf[32];
+        const char* sign = value_ > 0 ? "+" : "";
+        std::snprintf(buf, sizeof(buf), "%s%g%s%s", sign, value_,
+                      suffix_.empty() ? "" : " ", suffix_.c_str());
+        s = buf;
+    }
     canvas.set_font("system", 14.0f);
     canvas.set_fill_color(resolve_color("text.primary", Color::rgba8(220, 220, 230)));
-    const std::string s(buf);
     const float sw = canvas.measure_text(s);
     canvas.fill_text(s, (w - sw) / 2.0f, h * 0.62f);
 }
 void Stepper::on_mouse_down(Point pos) {
     const float w = bounds().width, btn = bounds().height;
-    if (pos.x < btn) set_value(value_ - step_);
-    else if (pos.x > w - btn) set_value(value_ + step_);
+    if (pos.x < btn) { commit_edit_(); set_value(value_ - step_); }
+    else if (pos.x > w - btn) { commit_edit_(); set_value(value_ + step_); }
+    else {
+        // Center cell: start typing a value (the host focuses us on click).
+        editing_ = true;
+        char buf[32]; std::snprintf(buf, sizeof(buf), "%g", value_);
+        edit_buffer_ = buf;
+        request_repaint();
+    }
+}
+void Stepper::on_text_input(const TextInputEvent& event) {
+    if (!editing_) return;
+    for (char c : event.text) {
+        if ((c >= '0' && c <= '9') || c == '.' || (c == '-' && edit_buffer_.empty()))
+            edit_buffer_ += c;
+    }
+    request_repaint();
+}
+bool Stepper::on_key_event(const KeyEvent& event) {
+    if (!editing_ || !event.is_down) return false;
+    if (event.key == KeyCode::enter) { commit_edit_(); return true; }
+    if (event.key == KeyCode::escape) {
+        editing_ = false; edit_buffer_.clear(); request_repaint(); return true;
+    }
+    if (event.key == KeyCode::backspace) {
+        if (!edit_buffer_.empty()) edit_buffer_.pop_back();
+        request_repaint();
+        return true;
+    }
+    return false;
+}
+void Stepper::on_focus_changed(bool gained) {
+    View::on_focus_changed(gained);
+    if (!gained && editing_) commit_edit_();
+}
+void Stepper::commit_edit_() {
+    if (!editing_) return;
+    editing_ = false;
+    try {
+        if (!edit_buffer_.empty()) set_value(std::stod(edit_buffer_));
+    } catch (...) {}
+    edit_buffer_.clear();
+    request_repaint();
 }
 
 // ── PanControl (1-D) ──────────────────────────────────────────────────────

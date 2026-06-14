@@ -139,3 +139,23 @@ TEST_CASE("value widgets adjust on scroll wheel", "[design-system][interaction][
     PanControl pan; pan.set_value(0.0f); bool pf = false; pan.on_change = [&](float) { pf = true; };
     pan.on_wheel(-10.0f); REQUIRE(pan.value() > 0.0f); REQUIRE(pf);
 }
+
+TEST_CASE("Stepper click-to-type edits the value", "[design-system][interaction]") {
+    Stepper s; s.set_bounds({0, 0, 140, 36}); s.set_range(-99, 99); s.set_value(0);
+    s.on_mouse_down({70.0f, 18.0f});   // centre cell → begin editing
+    REQUIRE(s.is_editing());
+    TextInputEvent te; te.text = "12"; s.on_text_input(te);
+    KeyEvent enter; enter.key = KeyCode::enter; enter.is_down = true;
+    REQUIRE(s.on_key_event(enter));
+    REQUIRE_FALSE(s.is_editing());
+    REQUIRE(s.value() == 12.0);
+    // Escape cancels (value unchanged).
+    s.on_mouse_down({70.0f, 18.0f});
+    TextInputEvent te2; te2.text = "99"; s.on_text_input(te2);
+    KeyEvent esc; esc.key = KeyCode::escape; esc.is_down = true; s.on_key_event(esc);
+    REQUIRE_FALSE(s.is_editing());
+    REQUIRE(s.value() == 12.0);
+    // The +/- zones still nudge.
+    s.on_mouse_down({6.0f, 18.0f});    // minus zone
+    REQUIRE(s.value() == 11.0);
+}
