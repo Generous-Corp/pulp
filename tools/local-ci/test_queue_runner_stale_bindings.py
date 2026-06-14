@@ -25,27 +25,24 @@ class QueueRunnerStaleBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.QUEUE_RUNNER_STALE_EXPORTS, expected)
         self.assertEqual(len(expected), len(set(expected)))
 
-    def test_stale_running_jobs_unlocked_binds_orchestrator_helper(self):
+    def test_stale_running_jobs_unlocked_delegates_with_assembled_dependencies(self):
         captured = {}
 
         def stale_running_jobs_for_current_runner(queue, **kwargs):
             captured["stale"] = (queue, kwargs)
             return [{"id": "old"}]
 
-        orchestrator = types.SimpleNamespace(stale_running_jobs_for_runner_unlocked=object())
         bindings = {
             "_runner_state": types.SimpleNamespace(
                 stale_running_jobs_for_current_runner=stale_running_jobs_for_current_runner,
             ),
-            "_queue_orchestrator": orchestrator,
         }
+        deps = {"stale_running_jobs_for_runner_unlocked_fn": object()}
 
-        self.assertEqual(self.mod.stale_running_jobs_unlocked(bindings, [{"id": "run"}]), [{"id": "old"}])
+        with mock.patch.object(self.mod, "queue_runner_stale_dependencies", return_value=deps):
+            self.assertEqual(self.mod.stale_running_jobs_unlocked(bindings, [{"id": "run"}]), [{"id": "old"}])
         self.assertEqual(captured["stale"][0], [{"id": "run"}])
-        self.assertIs(
-            captured["stale"][1]["stale_running_jobs_for_runner_unlocked_fn"],
-            orchestrator.stale_running_jobs_for_runner_unlocked,
-        )
+        self.assertIs(captured["stale"][1]["stale_running_jobs_for_runner_unlocked_fn"], deps["stale_running_jobs_for_runner_unlocked_fn"])
 
     def test_install_queue_runner_stale_helpers_wires_named_exports(self):
         bindings = {}

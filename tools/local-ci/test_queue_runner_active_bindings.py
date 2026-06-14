@@ -25,28 +25,23 @@ class QueueRunnerActiveBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.QUEUE_RUNNER_ACTIVE_EXPORTS, expected)
         self.assertEqual(len(expected), len(set(expected)))
 
-    def test_update_runner_active_targets_binds_orchestrator_mutator(self):
+    def test_update_runner_active_targets_delegates_with_assembled_dependencies(self):
         captured = {}
 
         def update_current_runner_active_targets(*args, **kwargs):
             captured["runner"] = (args, kwargs)
 
-        def update_runner_info_active_targets(info, job_id, active_targets, *, now_iso_fn):
-            captured["mutate"] = (info, job_id, active_targets, now_iso_fn)
-            return True
-
         bindings = {
             "_runner_state": types.SimpleNamespace(update_current_runner_active_targets=update_current_runner_active_targets),
-            "_queue_orchestrator": types.SimpleNamespace(update_runner_info_active_targets=update_runner_info_active_targets),
             "now_iso": object(),
         }
+        deps = {"update_runner_info_active_targets_fn": object()}
 
-        self.mod.update_runner_active_targets(bindings, "job1", {"mac": {"status": "pass"}})
+        with mock.patch.object(self.mod, "queue_runner_active_dependencies", return_value=deps):
+            self.mod.update_runner_active_targets(bindings, "job1", {"mac": {"status": "pass"}})
 
         self.assertEqual(captured["runner"][0], ("job1", {"mac": {"status": "pass"}}))
-        update_info = captured["runner"][1]["update_runner_info_active_targets_fn"]
-        self.assertTrue(update_info({"pid": 1}, "job1", {"mac": {"status": "pass"}}))
-        self.assertIs(captured["mutate"][3], bindings["now_iso"])
+        self.assertIs(captured["runner"][1]["update_runner_info_active_targets_fn"], deps["update_runner_info_active_targets_fn"])
 
     def test_install_queue_runner_active_helpers_wires_named_exports(self):
         bindings = {}
