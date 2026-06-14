@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
+import importlib
 import io
-import importlib.util
 import json
 import os
 import subprocess
@@ -15,17 +15,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
+from module_test_utils import load_module_from_path
+
 
 MODULE_PATH = Path(__file__).with_name("local_ci.py")
 VALIDATE_BUILD_PATH = MODULE_PATH.parent.parent.parent / "validate-build.sh"
 
 
 def load_module():
-    spec = importlib.util.spec_from_file_location("pulp_local_ci", MODULE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    return load_module_from_path(MODULE_PATH, module_name="pulp_local_ci", add_module_dir=True)
 
 
 class LocalCiTests(unittest.TestCase):

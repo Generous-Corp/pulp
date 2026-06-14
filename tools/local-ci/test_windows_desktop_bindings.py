@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tests for Windows desktop action facade bindings."""
 
-import importlib.util
+from module_test_utils import load_module_from_path
 import types
 import unittest
 from pathlib import Path
@@ -11,16 +11,15 @@ MODULE_PATH = Path(__file__).with_name("windows_desktop_bindings.py")
 
 
 def load_module():
-    spec = importlib.util.spec_from_file_location("windows_desktop_bindings_under_test", MODULE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    return load_module_from_path(MODULE_PATH)
 
 
 class WindowsDesktopBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
+
+    def test_windows_desktop_exports_are_composed_from_action_exports(self):
+        self.assertEqual(self.mod.WINDOWS_DESKTOP_EXPORTS, self.mod.WINDOWS_DESKTOP_ACTION_EXPORTS)
 
     def test_run_windows_session_agent_action_binds_facade_dependencies(self):
         captured = {}
@@ -114,6 +113,74 @@ class WindowsDesktopBindingsTests(unittest.TestCase):
         self.assertIs(captured["kwargs"]["windows_ssh_remove_path_fn"], bindings["windows_ssh_remove_path"])
         self.assertIs(captured["kwargs"]["write_desktop_run_rollups_fn"], bindings["write_desktop_run_rollups"])
         self.assertIs(captured["kwargs"]["view_tree_inspector_summary_fn"], desktop_actions.view_tree_inspector_summary)
+
+    def test_install_windows_desktop_helpers_wires_named_exports(self):
+        captured = {}
+
+        def action_runner(*args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            return {"installed": True}
+
+        desktop_actions = types.SimpleNamespace(
+            desktop_action_artifact_paths=object(),
+            desktop_interaction_requested=object(),
+            view_tree_inspector_summary=object(),
+            pulp_app_interaction_summary=object(),
+        )
+        bindings = {
+            "_desktop_actions": desktop_actions,
+            "_windows_desktop_action": types.SimpleNamespace(run_windows_session_agent_action=action_runner),
+            "time": types.SimpleNamespace(time=object(), sleep=object()),
+        }
+        for name in [
+            "ensure_host_reachable",
+            "desktop_receipt_for",
+            "desktop_target_contract",
+            "probe_windows_session_agent",
+            "windows_desktop_session_user",
+            "create_desktop_run_bundle",
+            "prepare_windows_exact_sha_source",
+            "build_windows_session_agent_request",
+            "windows_path_join",
+            "windows_ssh_write_text",
+            "start_windows_session_agent_task",
+            "windows_ssh_read_json",
+            "atomic_write_text",
+            "windows_ssh_fetch_file",
+            "windows_ssh_remove_path",
+            "default_desktop_label",
+            "image_change_summary",
+            "attach_desktop_source_to_manifest",
+            "write_desktop_run_rollups",
+            "now_iso",
+        ]:
+            bindings[name] = object()
+
+        self.mod.install_windows_desktop_helpers(bindings)
+
+        result = bindings["run_windows_session_agent_action"](
+            {"defaults": {}},
+            "windows",
+            {"adapter": "windows-session-agent"},
+            r".\tool.exe",
+            action_name="smoke",
+            label=None,
+            output_path=None,
+            pulp_app_automation=False,
+            capture_ui_snapshot=False,
+            click_point=None,
+            click_view_id=None,
+            click_view_type=None,
+            click_view_text=None,
+            click_view_label=None,
+            capture_before=False,
+            settle_secs=0.0,
+            timeout_secs=1.0,
+        )
+
+        self.assertEqual(result, {"installed": True})
+        self.assertEqual(captured["args"], ({"defaults": {}}, "windows", {"adapter": "windows-session-agent"}, r".\tool.exe"))
 
 
 if __name__ == "__main__":

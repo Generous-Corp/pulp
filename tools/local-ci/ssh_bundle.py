@@ -1,8 +1,8 @@
 """SSH git-bundle transport helpers for local-ci.
 
 This module owns the pure bundle naming/build/upload mechanics. The
-`local_ci.py` entrypoint keeps thin wrappers around these helpers so existing
-tests and callers can still monkey-patch the historical `local_ci.*` names.
+ssh_bundle_bindings.py module installs the historical `local_ci.*` facade names
+so existing tests and callers can keep monkey-patching those seams.
 """
 
 from __future__ import annotations

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tests for validation execution facade bindings."""
 
-import importlib.util
+from module_test_utils import load_module_from_path
 import builtins
 import types
 import unittest
@@ -12,16 +12,52 @@ MODULE_PATH = Path(__file__).with_name("execution_bindings.py")
 
 
 def load_module():
-    spec = importlib.util.spec_from_file_location("execution_bindings_under_test", MODULE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    return load_module_from_path(MODULE_PATH)
 
 
 class ExecutionBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
+
+    def test_execution_exports_include_runner_install_exports(self):
+        self.assertIn("run_local_validation", self.mod.EXECUTION_EXPORTS)
+        self.assertIn("run_posix_ssh_validation", self.mod.EXECUTION_EXPORTS)
+        self.assertIn("run_windows_ssh_validation", self.mod.EXECUTION_EXPORTS)
+        self.assertIn("windows_validation_script", self.mod.EXECUTION_EXPORTS)
+        self.assertEqual(
+            self.mod.EXECUTION_EXPORTS[
+                self.mod.EXECUTION_EXPORTS.index(self.mod.EXECUTION_RUNNER_INSTALL_EXPORTS[0]) :
+                self.mod.EXECUTION_EXPORTS.index(self.mod.EXECUTION_RUNNER_INSTALL_EXPORTS[0])
+                + len(self.mod.EXECUTION_RUNNER_INSTALL_EXPORTS)
+            ],
+            self.mod.EXECUTION_RUNNER_INSTALL_EXPORTS,
+        )
+
+    def test_execution_exports_include_job_exports(self):
+        start = self.mod.EXECUTION_EXPORTS.index(self.mod.EXECUTION_JOB_EXPORTS[0])
+
+        self.assertEqual(
+            self.mod.EXECUTION_EXPORTS[start : start + len(self.mod.EXECUTION_JOB_EXPORTS)],
+            self.mod.EXECUTION_JOB_EXPORTS,
+        )
+
+    def test_install_execution_helpers_routes_focused_export_groups(self):
+        execution = types.SimpleNamespace(
+            parse_progress_marker=lambda line: {"line": line},
+            unreachable_target_result=lambda target, detail="Host unreachable": {"target": target, "detail": detail},
+            local_validation_command=lambda job, exclude_tests="": ([job["id"]], exclude_tests),
+        )
+        bindings = {"_execution": execution}
+
+        self.mod.install_execution_helpers(
+            bindings,
+            ("local_validation_command", "unreachable_target_result", "parse_progress_marker"),
+        )
+
+        self.assertEqual(bindings["local_validation_command"]({"id": "job"}, "slow"), (["job"], "slow"))
+        self.assertEqual(bindings["unreachable_target_result"]("linux"), {"target": "linux", "detail": "Host unreachable"})
+        self.assertEqual(bindings["parse_progress_marker"]("line"), {"line": "line"})
+        self.assertNotIn("run_local_validation", bindings)
 
     def _bindings(self, runner_name: str, runner):
         execution = types.SimpleNamespace(**{runner_name: runner})
@@ -121,6 +157,8 @@ class ExecutionBindingsTests(unittest.TestCase):
         bindings["target_exception_result"] = object()
         bindings["ps_literal"] = object()
 
+        self.assertEqual(self.mod.heartbeat_interval_secs(bindings), 15.0)
+        self.assertEqual(self.mod.stuck_idle_secs(bindings), 90.0)
         self.assertEqual(self.mod.remote_commit_error(bindings, "mac", "host", {"id": "job"}), "mac:host:job")
         self.assertEqual(self.mod.parse_progress_marker(bindings, "line"), {"line": "line"})
         self.assertEqual(self.mod.prepared_state_root(bindings, "mac", "full"), Path("/prepared/mac/full"))
@@ -417,6 +455,48 @@ class ExecutionBindingsTests(unittest.TestCase):
         self.assertIs(captured["kwargs"]["result_target_lines_fn"], bindings["result_target_lines"])
         self.assertIs(captured["kwargs"]["result_overall_line_fn"], bindings["result_overall_line"])
         self.assertIs(captured["kwargs"]["print_fn"], bindings["print"])
+
+    def test_install_execution_helpers_wires_named_exports(self):
+        execution = types.SimpleNamespace(
+            remote_commit_error=lambda target, host, job: f"{target}:{host}:{job['id']}",
+            parse_progress_marker=lambda line: {"line": line},
+        )
+        bindings = self._bindings("unused", lambda: None)
+        bindings["_execution"] = execution
+
+        self.mod.install_execution_helpers(bindings, ("remote_commit_error", "parse_progress_marker"))
+
+        self.assertEqual(bindings["remote_commit_error"]("mac", "host", {"id": "job"}), "mac:host:job")
+        self.assertEqual(bindings["parse_progress_marker"]("::pulp::target=mac"), {"line": "::pulp::target=mac"})
+
+    def test_install_execution_helpers_routes_runner_exports(self):
+        captured = {}
+
+        def local_runner(*args, **kwargs):
+            captured["local"] = (args, kwargs)
+            return {"target": "mac"}
+
+        bindings = self._bindings("run_local_validation", local_runner)
+
+        self.mod.install_execution_helpers(bindings, ("run_local_validation",))
+
+        self.assertEqual(bindings["run_local_validation"]({"id": "job"}), {"target": "mac"})
+        self.assertIs(captured["local"][1]["root"], bindings["ROOT"])
+
+    def test_install_execution_helpers_routes_job_exports(self):
+        captured = {}
+
+        def runner(*args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            return {"targets": {}}
+
+        bindings = self._bindings("config_for_job_execution", runner)
+
+        self.mod.install_execution_helpers(bindings, ("config_for_job_execution",))
+
+        self.assertEqual(bindings["config_for_job_execution"]({"id": "job"}, {"targets": {}}), {"targets": {}})
+        self.assertIs(captured["kwargs"]["load_config_file_fn"], bindings["load_config_file"])
 
 
 if __name__ == "__main__":

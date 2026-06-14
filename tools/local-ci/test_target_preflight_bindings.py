@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-import importlib.util
+from module_test_utils import load_module_from_path
 from pathlib import Path
 import types
 import unittest
@@ -13,16 +13,22 @@ MODULE_PATH = Path(__file__).with_name("target_preflight_bindings.py")
 
 
 def load_module():
-    spec = importlib.util.spec_from_file_location("target_preflight_bindings_under_test", MODULE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    return load_module_from_path(MODULE_PATH)
 
 
 class TargetPreflightBindingsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
+
+    def test_preflight_exports_are_composed_from_focused_groups(self) -> None:
+        expected = (
+            *self.mod.TARGET_REACHABILITY_EXPORTS,
+            *self.mod.TARGET_CONFIG_PREFLIGHT_EXPORTS,
+            *self.mod.TARGET_SUBMISSION_EXPORTS,
+        )
+
+        self.assertEqual(self.mod.TARGET_PREFLIGHT_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
 
     def _bindings(self, preflight):
         bindings = {
@@ -148,6 +154,62 @@ class TargetPreflightBindingsTests(unittest.TestCase):
         self.assertIs(captured["print"][1]["short_sha_fn"], bindings["short_sha"])
         self.assertIs(captured["print"][1]["provenance_summary_fn"], bindings["provenance_summary"])
         self.assertIs(captured["print"][1]["print_fn"], bindings["print"])
+
+    def test_install_target_preflight_helpers_wires_named_exports(self) -> None:
+        captured = {}
+
+        def ssh_probe(host, timeout, **kwargs):
+            captured["ssh_probe"] = (host, timeout, kwargs)
+            return {"host": host}
+
+        def source_name(path, **kwargs):
+            captured["source_name"] = (path, kwargs)
+            return "shared"
+
+        preflight = types.SimpleNamespace(
+            ssh_probe=ssh_probe,
+            config_source_name=source_name,
+        )
+        bindings = self._bindings(preflight)
+
+        self.mod.install_target_preflight_helpers(bindings, ("ssh_probe", "config_source_name"))
+
+        self.assertEqual(bindings["ssh_probe"]("ubuntu", 9), {"host": "ubuntu"})
+        self.assertEqual(bindings["config_source_name"](Path("/config")), "shared")
+        self.assertEqual(captured["ssh_probe"][0:2], ("ubuntu", 9))
+        self.assertIs(captured["ssh_probe"][2]["run_ssh_subprocess_fn"], bindings["run_ssh_subprocess"])
+        self.assertEqual(captured["source_name"][0], Path("/config"))
+        self.assertIs(captured["source_name"][1]["shared_config_path_fn"], bindings["shared_config_path"])
+
+    def test_install_target_preflight_helpers_routes_each_group(self) -> None:
+        calls = []
+
+        def reachability_install(bindings, names):
+            calls.append(("reachability", names))
+
+        def config_install(bindings, names):
+            calls.append(("config", names))
+
+        def submission_install(bindings, names):
+            calls.append(("submission", names))
+
+        self.mod.install_target_reachability_helpers = reachability_install
+        self.mod.install_target_config_preflight_helpers = config_install
+        self.mod.install_target_submission_helpers = submission_install
+
+        self.mod.install_target_preflight_helpers(
+            {},
+            ("ssh_probe", "config_source_name", "print_submission_metadata"),
+        )
+
+        self.assertEqual(
+            calls,
+            [
+                ("reachability", ("ssh_probe",)),
+                ("config", ("config_source_name",)),
+                ("submission", ("print_submission_metadata",)),
+            ],
+        )
 
 
 if __name__ == "__main__":

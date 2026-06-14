@@ -3,15 +3,22 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Callable, Mapping
-import json
+from collections.abc import Callable
 from pathlib import Path
 import shutil
 
-
-def _print_lines(lines, *, print_fn: Callable[[str], None]) -> None:
-    for line in lines:
-        print_fn(line)
+from desktop_command_flow import (
+    emit_desktop_command_result,
+    load_desktop_command_config,
+    require_desktop_run_manifests,
+    run_desktop_command_step,
+)
+from desktop_config_commands_cli import (
+    cmd_desktop_config,
+    cmd_desktop_config_set,
+    cmd_desktop_config_show,
+)
+from desktop_status_payload import desktop_status_payload
 
 
 def cmd_desktop_status(
@@ -33,226 +40,44 @@ def cmd_desktop_status(
     windows_repo_checkout_detail_fn: Callable[..., str],
     print_fn: Callable[[str], None] = print,
 ) -> int:
-    try:
-        config = load_config_fn()
-    except FileNotFoundError as exc:
-        print_fn(f"Error: {exc}")
-        return 1
+    config, status = load_desktop_command_config(load_config_fn=load_config_fn, print_fn=print_fn)
+    if status is not None:
+        return status
 
-    desktop_cfg = config["desktop_automation"]
-    targets = desktop_cfg.get("targets", {})
-    if args.target:
-        if args.target not in targets:
-            print_fn(f"\nError: unknown desktop target `{args.target}`")
-            return 1
-        target_names = [args.target]
-    else:
-        target_names = sorted(targets)
+    payload, status = run_desktop_command_step(
+        lambda: desktop_status_payload(
+            config,
+            target_name=args.target,
+            desktop_receipt_for_fn=desktop_receipt_for_fn,
+            desktop_capabilities_for_fn=desktop_capabilities_for_fn,
+            desktop_optional_capabilities_fn=desktop_optional_capabilities_fn,
+            desktop_run_manifests_fn=desktop_run_manifests_fn,
+            desktop_run_summary_fn=desktop_run_summary_fn,
+            desktop_proof_summaries_fn=desktop_proof_summaries_fn,
+            normalize_desktop_optional_config_fn=normalize_desktop_optional_config_fn,
+            desktop_target_contract_fn=desktop_target_contract_fn,
+            desktop_publish_reports_fn=desktop_publish_reports_fn,
+        ),
+        print_fn=print_fn,
+        error_prefix="\nError: ",
+        handled_exceptions=(ValueError,),
+    )
+    if status is not None:
+        return status
 
-    target_payloads: list[dict] = []
-    for name in target_names:
-        target = targets[name]
-        receipt = desktop_receipt_for_fn(name)
-        capabilities = ", ".join(
-            desktop_capabilities_for_fn(target["adapter"], target["capability_tier"], target.get("optional"))
-        )
-        optional_capabilities = desktop_optional_capabilities_fn(target.get("optional"))
-        latest = desktop_run_manifests_fn(config, target_name=name)[:1]
-        latest_manifest = latest[0] if latest else None
-        latest_run = desktop_run_summary_fn(config, latest_manifest) if latest_manifest else None
-        latest_proof_matches = desktop_proof_summaries_fn(config, target_name=name, limit=1)
-        latest_proof = latest_proof_matches[0] if latest_proof_matches else None
-        target_info = {
-            "name": name,
-            "enabled": target["enabled"],
-            "adapter": target["adapter"],
-            "bootstrap": target["bootstrap"],
-            "type": target["target_type"],
-            "host": target.get("host"),
-            "repo_path": target.get("repo_path"),
-            "capability_tier": target["capability_tier"],
-            "capabilities": desktop_capabilities_for_fn(target["adapter"], target["capability_tier"], target.get("optional")),
-            "capabilities_text": capabilities,
-            "optional_features": normalize_desktop_optional_config_fn(target.get("optional")),
-            "optional_capabilities": optional_capabilities,
-            "installed": bool(receipt),
-            "installed_at": receipt.get("installed_at", "?") if receipt else None,
-            "contract": receipt.get("contract") if receipt else desktop_target_contract_fn(name, target),
-            "remote_bootstrap_ready": receipt.get("remote_bootstrap_ready") if receipt else None,
-            "remote_tooling_ready": receipt.get("remote_tooling_ready") if receipt else None,
-            "remote_repo_checkout_ready": receipt.get("remote_repo_checkout_ready") if receipt else None,
-            "tooling_probe": receipt.get("tooling_probe") if receipt else None,
-            "repo_checkout_probe": receipt.get("repo_checkout_probe") if receipt else None,
-            "latest_run": None,
-            "latest_proof": latest_proof,
-        }
-        if latest_run:
-            target_info["latest_run"] = {
-                "label": latest_run["label"],
-                "completed_at": latest_run["completed_at"],
-                "interaction_mode": latest_run["interaction_mode"],
-                "run_status": latest_run["run_status"],
-                "source_mode": latest_run["source"]["mode"],
-                "source_branch": latest_run["source"]["branch"],
-                "source_sha": latest_run["source"]["sha"],
-                "proof_scope": latest_run["proof_scope"],
-                "host": latest_run["host"],
-                "screenshot": latest_run["artifacts"]["screenshot"],
-                "before_screenshot": latest_run["artifacts"]["before_screenshot"],
-                "diff_screenshot": latest_run["artifacts"]["diff_screenshot"],
-                "image_change": latest_run["artifacts"]["image_change"],
-                "ui_snapshot": latest_run["artifacts"]["ui_snapshot"],
-                "bundle_dir": latest_run["artifacts"]["bundle_dir"],
-            }
-        target_payloads.append(target_info)
-
-    latest_publish_matches = desktop_publish_reports_fn(config, limit=1)
-    latest_publish = latest_publish_matches[0] if latest_publish_matches else None
-    if getattr(args, "json", False):
-        payload = {
-            "artifact_root": desktop_cfg["artifact_root"],
-            "publish_mode": desktop_cfg["publish_mode"],
-            "publish_branch": desktop_cfg["publish_branch"],
-            "retention_days": desktop_cfg["retention_days"],
-            "latest_publish": latest_publish,
-            "targets": target_payloads,
-        }
-        print_fn(json.dumps(payload, indent=2))
-        return 0
-
-    _print_lines(
-        desktop_status_lines_fn(
-            desktop_cfg,
-            target_payloads,
-            latest_publish=latest_publish,
+    return emit_desktop_command_result(
+        payload=payload,
+        json_output=getattr(args, "json", False),
+        text_lines=desktop_status_lines_fn(
+            config["desktop_automation"],
+            payload["targets"],
+            latest_publish=payload["latest_publish"],
             short_sha_fn=short_sha_fn,
             windows_tooling_detail_fn=windows_tooling_detail_fn,
             windows_repo_checkout_detail_fn=windows_repo_checkout_detail_fn,
         ),
         print_fn=print_fn,
     )
-    return 0
-
-
-def cmd_desktop_config_show(
-    args: argparse.Namespace,
-    *,
-    load_config_fn: Callable[[], dict],
-    desktop_config_show_lines_fn: Callable[[dict], list[str]],
-    print_fn: Callable[[str], None] = print,
-) -> int:
-    try:
-        config = load_config_fn()
-    except FileNotFoundError as exc:
-        print_fn(f"Error: {exc}")
-        return 1
-
-    desktop_cfg = config["desktop_automation"]
-    if getattr(args, "json", False):
-        print_fn(json.dumps(desktop_cfg, indent=2))
-        return 0
-
-    _print_lines(desktop_config_show_lines_fn(desktop_cfg), print_fn=print_fn)
-    return 0
-
-
-def cmd_desktop_config_set(
-    args: argparse.Namespace,
-    *,
-    load_config_fn: Callable[[], dict],
-    save_config_fn: Callable[[dict], None],
-    config_path_fn: Callable[[], Path],
-    normalize_publish_mode_fn: Callable[[str], str],
-    parse_config_bool_fn: Callable[[str], bool],
-    normalize_desktop_config_fn: Callable[[dict], dict],
-    desktop_config_update_lines_fn: Callable[[dict], list[str]],
-    print_fn: Callable[[str], None] = print,
-) -> int:
-    try:
-        config = load_config_fn()
-    except FileNotFoundError as exc:
-        print_fn(f"Error: {exc}")
-        return 1
-
-    desktop_cfg = config.setdefault("desktop_automation", {})
-    key = args.key
-    raw_value = args.value
-    payload_value = None
-    try:
-        if key == "artifact_root":
-            desktop_cfg["artifact_root"] = raw_value
-            payload_value = desktop_cfg["artifact_root"]
-        elif key == "publish_mode":
-            desktop_cfg["publish_mode"] = normalize_publish_mode_fn(raw_value)
-            payload_value = desktop_cfg["publish_mode"]
-        elif key == "publish_branch":
-            desktop_cfg["publish_branch"] = raw_value
-            payload_value = desktop_cfg["publish_branch"]
-        elif key == "retention_days":
-            retention_days = int(raw_value)
-            if retention_days < 0:
-                raise ValueError("retention_days must be >= 0")
-            desktop_cfg["retention_days"] = retention_days
-            payload_value = desktop_cfg["retention_days"]
-        elif key.startswith("target."):
-            parts = key.split(".")
-            if len(parts) != 3:
-                raise ValueError("Target desktop config keys must look like target.<name>.<field>.")
-            _, target_name, field = parts
-            target_cfg = desktop_cfg.setdefault("targets", {}).setdefault(target_name, {})
-            optional_cfg = dict(target_cfg.get("optional", {}))
-            if field in {"webview_driver", "debug_attach", "video_capture", "frame_stats"}:
-                optional_cfg[field] = parse_config_bool_fn(raw_value)
-            elif field in {"webdriver_url", "debugger_command"}:
-                optional_cfg[field] = raw_value
-            else:
-                raise ValueError(
-                    "Unsupported target desktop config field. Use one of: "
-                    "target.<name>.webview_driver, target.<name>.webdriver_url, "
-                    "target.<name>.debug_attach, target.<name>.debugger_command, "
-                    "target.<name>.video_capture, target.<name>.frame_stats."
-                )
-            target_cfg["optional"] = optional_cfg
-            payload_value = optional_cfg[field]
-        else:
-            raise ValueError(
-                f"Unsupported desktop config key `{key}`. Use one of: artifact_root, publish_mode, publish_branch, retention_days, or target.<name>.<field>."
-            )
-        normalized = normalize_desktop_config_fn(config)
-    except ValueError as exc:
-        print_fn(f"Error: {exc}")
-        return 1
-
-    save_config_fn(normalized)
-    if key.startswith("target."):
-        _, target_name, field = key.split(".")
-        payload_value = normalized["desktop_automation"]["targets"][target_name]["optional"][field]
-    else:
-        payload_value = normalized["desktop_automation"][key]
-    payload = {
-        "key": key,
-        "value": payload_value,
-        "config_path": str(config_path_fn()),
-    }
-    if getattr(args, "json", False):
-        print_fn(json.dumps(payload, indent=2))
-        return 0
-
-    _print_lines(desktop_config_update_lines_fn(payload), print_fn=print_fn)
-    return 0
-
-
-def cmd_desktop_config(
-    args: argparse.Namespace,
-    *,
-    commands: Mapping[str, Callable[[argparse.Namespace], int]],
-    print_fn: Callable[[str], None] = print,
-) -> int:
-    handler = commands.get(args.desktop_config_command)
-    if handler is None:
-        print_fn("Error: desktop config subcommand required (show, set)")
-        return 1
-    return handler(args)
 
 
 def cmd_desktop_recent(
@@ -265,24 +90,26 @@ def cmd_desktop_recent(
     short_sha_fn: Callable[[str], str],
     print_fn: Callable[[str], None] = print,
 ) -> int:
-    try:
-        config = load_config_fn()
-    except FileNotFoundError as exc:
-        print_fn(f"Error: {exc}")
-        return 1
+    config, status = load_desktop_command_config(load_config_fn=load_config_fn, print_fn=print_fn)
+    if status is not None:
+        return status
 
     manifests = desktop_run_manifests_fn(config, target_name=args.target, action=args.action)
-    if not manifests:
-        print_fn("No desktop automation runs found.")
+    if not require_desktop_run_manifests(
+        manifests,
+        empty_line="No desktop automation runs found.",
+        print_fn=print_fn,
+    ):
         return 0
     manifests = manifests[: args.limit]
-    if getattr(args, "json", False):
-        print_fn(json.dumps({"runs": manifests}, indent=2))
-        return 0
 
     run_summaries = [desktop_run_summary_fn(config, manifest) for manifest in manifests]
-    _print_lines(desktop_recent_lines_fn(run_summaries, short_sha_fn=short_sha_fn), print_fn=print_fn)
-    return 0
+    return emit_desktop_command_result(
+        payload={"runs": manifests},
+        json_output=getattr(args, "json", False),
+        text_lines=desktop_recent_lines_fn(run_summaries, short_sha_fn=short_sha_fn),
+        print_fn=print_fn,
+    )
 
 
 def cmd_desktop_proof(
@@ -295,14 +122,12 @@ def cmd_desktop_proof(
     short_sha_fn: Callable[[str], str],
     print_fn: Callable[[str], None] = print,
 ) -> int:
-    try:
-        config = load_config_fn()
-    except FileNotFoundError as exc:
-        print_fn(f"Error: {exc}")
-        return 1
+    config, status = load_desktop_command_config(load_config_fn=load_config_fn, print_fn=print_fn)
+    if status is not None:
+        return status
 
-    try:
-        proofs = desktop_proof_summaries_fn(
+    proofs, status = run_desktop_command_step(
+        lambda: desktop_proof_summaries_fn(
             config,
             target_name=args.target,
             action=args.action,
@@ -310,14 +135,11 @@ def cmd_desktop_proof(
             sha=args.sha,
             branch=args.branch,
             limit=args.limit,
-        )
-    except ValueError as exc:
-        print_fn(f"Error: {exc}")
-        return 1
-
-    if getattr(args, "json", False):
-        print_fn(json.dumps({"proofs": proofs}, indent=2))
-        return 0
+        ),
+        print_fn=print_fn,
+    )
+    if status is not None:
+        return status
 
     if not proofs:
         print_fn(
@@ -332,8 +154,12 @@ def cmd_desktop_proof(
         )
         return 0
 
-    _print_lines(desktop_proof_lines_fn(proofs, short_sha_fn=short_sha_fn), print_fn=print_fn)
-    return 0
+    return emit_desktop_command_result(
+        payload={"proofs": proofs},
+        json_output=getattr(args, "json", False),
+        text_lines=desktop_proof_lines_fn(proofs, short_sha_fn=short_sha_fn),
+        print_fn=print_fn,
+    )
 
 
 def cmd_desktop_publish(
@@ -345,31 +171,34 @@ def cmd_desktop_publish(
     desktop_publish_lines_fn: Callable[[dict], list[str]],
     print_fn: Callable[[str], None] = print,
 ) -> int:
-    try:
-        config = load_config_fn()
-    except FileNotFoundError as exc:
-        print_fn(f"Error: {exc}")
-        return 1
+    config, status = load_desktop_command_config(load_config_fn=load_config_fn, print_fn=print_fn)
+    if status is not None:
+        return status
 
     manifests = desktop_run_manifests_fn(config, target_name=args.target, action=args.action)
-    if not manifests:
-        print_fn("No desktop automation runs found.")
+    if not require_desktop_run_manifests(
+        manifests,
+        empty_line="No desktop automation runs found.",
+        print_fn=print_fn,
+    ):
         return 0
 
     manifests = manifests[: args.limit]
     output_dir = Path(args.output).expanduser() if args.output else None
-    try:
-        report = stage_desktop_publish_report_fn(config, manifests, output_dir=output_dir, label=args.label)
-    except Exception as exc:
-        print_fn(f"Error: {exc}")
-        return 1
 
-    if getattr(args, "json", False):
-        print_fn(json.dumps(report, indent=2))
-        return 0
+    report, status = run_desktop_command_step(
+        lambda: stage_desktop_publish_report_fn(config, manifests, output_dir=output_dir, label=args.label),
+        print_fn=print_fn,
+    )
+    if status is not None:
+        return status
 
-    _print_lines(desktop_publish_lines_fn(report), print_fn=print_fn)
-    return 0
+    return emit_desktop_command_result(
+        payload=report,
+        json_output=getattr(args, "json", False),
+        text_lines=desktop_publish_lines_fn(report),
+        print_fn=print_fn,
+    )
 
 
 def cmd_desktop_cleanup(
@@ -383,11 +212,9 @@ def cmd_desktop_cleanup(
     remove_tree_fn: Callable[..., None] = shutil.rmtree,
     print_fn: Callable[[str], None] = print,
 ) -> int:
-    try:
-        config = load_config_fn()
-    except FileNotFoundError as exc:
-        print_fn(f"Error: {exc}")
-        return 1
+    config, status = load_desktop_command_config(load_config_fn=load_config_fn, print_fn=print_fn)
+    if status is not None:
+        return status
 
     older_than = args.older_than_days if args.older_than_days is not None else config["desktop_automation"]["retention_days"]
     paths = prune_desktop_run_manifests_fn(
@@ -407,9 +234,9 @@ def cmd_desktop_cleanup(
     if args.target is not None:
         write_desktop_run_rollups_fn(config)
 
-    if getattr(args, "json", False):
-        print_fn(json.dumps({"removed": [str(path) for path in paths]}, indent=2))
-        return 0
-
-    _print_lines(desktop_cleanup_lines_fn(paths), print_fn=print_fn)
-    return 0
+    return emit_desktop_command_result(
+        payload={"removed": [str(path) for path in paths]},
+        json_output=getattr(args, "json", False),
+        text_lines=desktop_cleanup_lines_fn(paths),
+        print_fn=print_fn,
+    )

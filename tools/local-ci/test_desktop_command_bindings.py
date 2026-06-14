@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tests for desktop command facade bindings."""
 
-import importlib.util
+from module_test_utils import load_module_from_path
 import types
 import unittest
 from pathlib import Path
@@ -11,16 +11,22 @@ MODULE_PATH = Path(__file__).with_name("desktop_command_bindings.py")
 
 
 def load_module():
-    spec = importlib.util.spec_from_file_location("desktop_command_bindings_under_test", MODULE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    return load_module_from_path(MODULE_PATH)
 
 
 class DesktopCommandBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
+
+    def test_command_exports_are_composed_from_focused_groups(self):
+        expected = (
+            *self.mod.DESKTOP_SETUP_COMMAND_EXPORTS,
+            *self.mod.DESKTOP_MANAGEMENT_COMMAND_EXPORTS,
+            *self.mod.DESKTOP_ACTION_COMMAND_EXPORTS,
+        )
+
+        self.assertEqual(self.mod.DESKTOP_COMMAND_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
 
     def _bindings(self, module_name: str, runner_name: str, runner):
         desktop_cli = types.SimpleNamespace(
@@ -271,6 +277,40 @@ class DesktopCommandBindingsTests(unittest.TestCase):
                     self.assertIs(captured["kwargs"][f"{name}_fn"], bindings[name])
                 self.assertIs(captured["kwargs"]["desktop_action_success_lines_fn"], bindings["_desktop_cli"].desktop_action_success_lines)
                 self.assertEqual(captured["kwargs"]["sys_platform"], "darwin")
+
+    def test_install_desktop_command_helpers_wires_named_exports(self):
+        captured = {}
+
+        def runner(*args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            return 11
+
+        bindings = self._bindings("_desktop_commands_cli", "cmd_desktop_recent", runner)
+
+        self.mod.install_desktop_command_helpers(bindings, names=("cmd_desktop_recent",))
+
+        args_obj = object()
+        self.assertEqual(bindings["cmd_desktop_recent"](args_obj), 11)
+        self.assertEqual(captured["args"], (args_obj,))
+        self.assertIs(captured["kwargs"]["load_config_fn"], bindings["load_config"])
+        self.assertIs(captured["kwargs"]["desktop_recent_lines_fn"], bindings["_desktop_cli"].desktop_recent_lines)
+        self.assertEqual(bindings["cmd_desktop_recent"].__name__, "cmd_desktop_recent")
+
+    def test_install_desktop_command_helpers_routes_each_group(self):
+        bindings = self._bindings("_desktop_setup_commands_cli", "cmd_desktop_install", lambda *args, **kwargs: 53)
+        bindings["_desktop_commands_cli"] = types.SimpleNamespace(cmd_desktop_status=lambda *args, **kwargs: 59)
+        bindings["_desktop_action_commands_cli"] = types.SimpleNamespace(cmd_desktop_smoke=lambda *args, **kwargs: 61)
+
+        self.mod.install_desktop_command_helpers(
+            bindings,
+            ("cmd_desktop_install", "cmd_desktop_status", "cmd_desktop_smoke"),
+        )
+
+        self.assertEqual(bindings["cmd_desktop_install"](object()), 53)
+        self.assertEqual(bindings["cmd_desktop_status"](object()), 59)
+        self.assertEqual(bindings["cmd_desktop_smoke"](object()), 61)
+        self.assertNotIn("cmd_desktop_cleanup", bindings)
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tests for top-level local-CI command facade bindings."""
 
-import importlib.util
+from module_test_utils import load_module_from_path
 import types
 import unittest
 from pathlib import Path
@@ -11,11 +11,7 @@ MODULE_PATH = Path(__file__).with_name("local_ci_command_bindings.py")
 
 
 def load_module():
-    spec = importlib.util.spec_from_file_location("local_ci_command_bindings_under_test", MODULE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    return load_module_from_path(MODULE_PATH)
 
 
 class LocalCiCommandBindingsTests(unittest.TestCase):
@@ -267,6 +263,24 @@ class LocalCiCommandBindingsTests(unittest.TestCase):
         for name in status_dependency_names:
             self.assertIs(captured["kwargs"][f"{name}_fn"], bindings[name])
         self.assertIs(captured["kwargs"]["print_state_footprint_fn"], bindings["print_local_ci_state_footprint"])
+
+    def test_install_local_ci_command_helpers_wires_named_exports(self):
+        captured = {}
+
+        def runner(*args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            return 12
+
+        bindings = self._bindings("cmd_list", runner)
+
+        self.mod.install_local_ci_command_helpers(bindings, names=("cmd_list",))
+
+        args_obj = object()
+        self.assertEqual(bindings["cmd_list"](args_obj), 12)
+        self.assertEqual(captured["args"], (args_obj,))
+        self.assertIs(captured["kwargs"]["gh_available_fn"], bindings["gh_available"])
+        self.assertEqual(bindings["cmd_list"].__name__, "cmd_list")
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tests for queue lifecycle facade bindings."""
 
-import importlib.util
+from module_test_utils import load_module_from_path
 import types
 import unittest
 from pathlib import Path
@@ -11,16 +11,24 @@ MODULE_PATH = Path(__file__).with_name("queue_bindings.py")
 
 
 def load_module():
-    spec = importlib.util.spec_from_file_location("queue_bindings_under_test", MODULE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    return load_module_from_path(MODULE_PATH)
 
 
 class QueueBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
+
+    def test_queue_exports_are_composed_from_focused_groups(self):
+        expected = (
+            *self.mod.QUEUE_LIFECYCLE_EXPORTS,
+            *self.mod.QUEUE_POLICY_EXPORTS,
+            *self.mod.QUEUE_DISPLAY_EXPORTS,
+            *self.mod.QUEUE_TARGET_STATE_EXPORTS,
+            *self.mod.QUEUE_RUNNER_EXPORTS,
+        )
+
+        self.assertEqual(self.mod.QUEUE_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
 
     def _bindings(self, lifecycle=None, orchestrator=None):
         bindings = {
@@ -131,6 +139,64 @@ class QueueBindingsTests(unittest.TestCase):
         self.assertEqual(bumped["job"], {"id": "old"})
         self.assertEqual(bumped["priority"], "high")
         self.assertIs(bumped["now"], bindings["now_iso"])
+
+    def test_load_queue_locks_reconciles_and_saves_only_when_changed(self):
+        events = []
+        queue_path = Path("/state/queue.lock")
+        original_queue = [{"id": "job1", "status": "running"}]
+        reconciled_queue = [{"id": "job1", "status": "pending"}]
+
+        class Lock:
+            def __enter__(self):
+                events.append("enter")
+
+            def __exit__(self, exc_type, exc, tb):
+                events.append("exit")
+
+        def file_lock(path, *, blocking):
+            events.append(("lock", path, blocking))
+            return Lock()
+
+        def load_queue_unlocked():
+            events.append("load")
+            return original_queue
+
+        def reconcile(queue):
+            events.append(("reconcile", queue))
+            return reconciled_queue, True
+
+        def save(queue):
+            events.append(("save", queue))
+
+        bindings = self._bindings()
+        bindings.update(
+            {
+                "queue_lock_path": lambda: queue_path,
+                "file_lock": file_lock,
+                "load_queue_unlocked": load_queue_unlocked,
+                "reconcile_running_jobs_unlocked": reconcile,
+                "save_queue_unlocked": save,
+            }
+        )
+
+        self.assertEqual(self.mod.load_queue(bindings), reconciled_queue)
+        self.assertEqual(
+            events,
+            [
+                ("lock", queue_path, True),
+                "enter",
+                "load",
+                ("reconcile", original_queue),
+                ("save", reconciled_queue),
+                "exit",
+            ],
+        )
+
+        events.clear()
+        bindings["reconcile_running_jobs_unlocked"] = lambda queue: (queue, False)
+
+        self.assertEqual(self.mod.load_queue(bindings), original_queue)
+        self.assertNotIn(("save", original_queue), events)
 
     def test_active_target_and_runner_updates_bind_facade_dependencies(self):
         calls = {}
@@ -417,6 +483,73 @@ class QueueBindingsTests(unittest.TestCase):
         self.assertIs(captured["kwargs"]["now_fn"], bindings["now_iso"])
         self.assertIs(captured["kwargs"]["trim_line_fn"], bindings["trim_line"])
         self.assertIs(captured["kwargs"]["reclaim_stale_remote_validator_candidates_fn"], cleanup.reclaim_stale_remote_validator_candidates)
+
+    def test_install_queue_helpers_wires_named_exports(self):
+        orchestrator = types.SimpleNamespace(
+            default_priority_for=lambda command, config: f"{command}:{config['priority']}",
+            summarize_job=lambda job: f"summary:{job['id']}",
+        )
+        bindings = self._bindings(orchestrator=orchestrator)
+
+        self.mod.install_queue_helpers(bindings, ("default_priority_for", "summarize_job"))
+
+        self.assertEqual(bindings["default_priority_for"]("ship", {"priority": "high"}), "ship:high")
+        self.assertEqual(bindings["summarize_job"]({"id": "job1"}), "summary:job1")
+
+    def test_install_queue_helpers_routes_each_group(self):
+        events = []
+
+        class Lock:
+            def __enter__(self):
+                events.append("enter")
+
+            def __exit__(self, exc_type, exc, tb):
+                events.append("exit")
+
+        orchestrator = types.SimpleNamespace(
+            default_priority_for=lambda command, config: f"{command}:{config['priority']}",
+            summarize_job=lambda job: f"summary:{job['id']}",
+            updated_target_state=lambda previous, fields: {"previous": previous, **fields},
+        )
+        runner_state = types.SimpleNamespace(read_runner_info=lambda: {"pid": 1})
+        bindings = self._bindings(orchestrator=orchestrator)
+        bindings["_runner_state"] = runner_state
+        bindings.update(
+            {
+                "queue_lock_path": lambda: Path("/state/queue.lock"),
+                "file_lock": lambda path, *, blocking: events.append(("lock", path, blocking)) or Lock(),
+                "load_queue_unlocked": lambda: events.append("load") or [],
+                "reconcile_running_jobs_unlocked": lambda queue: (queue, False),
+            }
+        )
+
+        self.mod.install_queue_helpers(
+            bindings,
+            (
+                "load_queue",
+                "default_priority_for",
+                "summarize_job",
+                "updated_target_state",
+                "read_runner_info",
+            ),
+        )
+
+        self.assertEqual(bindings["load_queue"](), [])
+        self.assertEqual(bindings["default_priority_for"]("ship", {"priority": "high"}), "ship:high")
+        self.assertEqual(bindings["summarize_job"]({"id": "job1"}), "summary:job1")
+        self.assertEqual(
+            bindings["updated_target_state"]({"status": "pending"}, {"status": "running"}),
+            {"previous": {"status": "pending"}, "status": "running"},
+        )
+        self.assertEqual(bindings["read_runner_info"](), {"pid": 1})
+        self.assertEqual(events, [("lock", Path("/state/queue.lock"), True), "enter", "load", "exit"])
+
+    def test_install_queue_helpers_keeps_unknown_imported_name_support(self):
+        bindings = self._bindings()
+
+        self.mod.install_queue_helpers(bindings, ("install_queue_display_helpers",))
+
+        self.assertEqual(bindings["install_queue_display_helpers"].__name__, "install_queue_display_helpers")
 
 
 if __name__ == "__main__":

@@ -3,11 +3,9 @@
 
 from __future__ import annotations
 
-import importlib.util
 import io
 import json
 import subprocess
-import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -16,21 +14,14 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+from module_test_utils import load_module_from_path
+
 
 MODULE_PATH = Path(__file__).with_name("cloud.py")
-MODULE_DIR = MODULE_PATH.parent
 
 
 def load_module():
-    sys.path.insert(0, str(MODULE_DIR))
-    try:
-        spec = importlib.util.spec_from_file_location("pulp_local_ci_cloud", MODULE_PATH)
-        module = importlib.util.module_from_spec(spec)
-        assert spec.loader is not None
-        spec.loader.exec_module(module)
-        return module
-    finally:
-        sys.path.pop(0)
+    return load_module_from_path(MODULE_PATH, module_name="pulp_local_ci_cloud", add_module_dir=True)
 
 
 class CloudCliHelperTests(unittest.TestCase):

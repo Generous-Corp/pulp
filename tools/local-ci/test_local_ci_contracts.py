@@ -9,7 +9,6 @@ semantics.
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
 import tempfile
@@ -17,16 +16,14 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from module_test_utils import load_module_from_path
+
 
 MODULE_PATH = Path(__file__).with_name("local_ci.py")
 
 
 def load_module():
-    spec = importlib.util.spec_from_file_location("pulp_local_ci_contracts", MODULE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    return load_module_from_path(MODULE_PATH, module_name="pulp_local_ci_contracts", add_module_dir=True)
 
 
 class LocalCiContractTests(unittest.TestCase):

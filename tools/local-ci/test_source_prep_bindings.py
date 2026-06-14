@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tests for source-prep facade bindings."""
 
-import importlib.util
+from module_test_utils import load_module_from_path
 import types
 import unittest
 from pathlib import Path
@@ -11,11 +11,7 @@ MODULE_PATH = Path(__file__).with_name("source_prep_bindings.py")
 
 
 def load_module():
-    spec = importlib.util.spec_from_file_location("source_prep_bindings_under_test", MODULE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    return load_module_from_path(MODULE_PATH)
 
 
 class SourcePrepBindingsTests(unittest.TestCase):
@@ -23,6 +19,16 @@ class SourcePrepBindingsTests(unittest.TestCase):
         self.mod = load_module()
         self.root = Path("/repo")
         self.run_fn = object()
+
+    def test_source_prep_exports_are_composed_from_focused_groups(self):
+        expected = (
+            *self.mod.DESKTOP_SOURCE_REQUEST_EXPORTS,
+            *self.mod.DESKTOP_SOURCE_REWRITE_EXPORTS,
+            *self.mod.DESKTOP_EXACT_SOURCE_EXPORTS,
+        )
+
+        self.assertEqual(self.mod.SOURCE_PREP_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
 
     def _bindings(self, **overrides):
         bindings = {
@@ -282,6 +288,45 @@ class SourcePrepBindingsTests(unittest.TestCase):
         self.assertIs(captured["kwargs"]["validate_windows_prepare_commands_fn"], bindings["validate_windows_prepare_commands"])
         self.assertIs(captured["kwargs"]["run_windows_ssh_powershell_fn"], bindings["run_windows_ssh_powershell"])
         self.assertIs(captured["kwargs"]["windows_ssh_fetch_file_fn"], bindings["windows_ssh_fetch_file"])
+
+    def test_install_source_prep_helpers_wires_named_exports(self):
+        source_prep = types.SimpleNamespace(
+            desktop_source_cache_key=lambda source_request: source_request["sha"],
+            split_windows_prepare_commands=lambda command: command.split(";"),
+        )
+        bindings = self._bindings(_source_prep=source_prep)
+
+        self.mod.install_source_prep_helpers(
+            bindings,
+            ("desktop_source_cache_key", "split_windows_prepare_commands"),
+        )
+
+        self.assertEqual(bindings["desktop_source_cache_key"]({"sha": "abc123"}), "abc123")
+        self.assertEqual(bindings["split_windows_prepare_commands"]("one;two"), ["one", "two"])
+
+    def test_install_source_prep_helpers_routes_each_group(self):
+        source_prep = types.SimpleNamespace(
+            desktop_source_cache_key=lambda source_request: source_request["sha"],
+            command_path_rewrite_candidate=lambda command, **kwargs: Path("/repo/tool"),
+            local_worktree_matches=lambda path, sha, **kwargs: True,
+        )
+        bindings = self._bindings(_source_prep=source_prep)
+
+        self.mod.install_source_prep_helpers(
+            bindings,
+            (
+                "desktop_source_cache_key",
+                "command_path_rewrite_candidate",
+                "local_worktree_matches",
+            ),
+        )
+
+        self.assertEqual(bindings["desktop_source_cache_key"]({"sha": "abc123"}), "abc123")
+        self.assertEqual(bindings["command_path_rewrite_candidate"]("./tool"), Path("/repo/tool"))
+        self.assertTrue(bindings["local_worktree_matches"](Path("/tmp/wt"), "abc123"))
+        self.assertNotIn("desktop_source_root", bindings)
+        self.assertNotIn("rewrite_launch_command_for_source_root", bindings)
+        self.assertNotIn("prepare_macos_exact_sha_source", bindings)
 
 
 if __name__ == "__main__":

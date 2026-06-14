@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-import importlib.util
+from module_test_utils import load_module_from_path
 from pathlib import Path
 import types
 import unittest
@@ -13,16 +13,30 @@ MODULE_PATH = Path(__file__).with_name("ssh_bundle_bindings.py")
 
 
 def load_module():
-    spec = importlib.util.spec_from_file_location("ssh_bundle_bindings_under_test", MODULE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    return load_module_from_path(MODULE_PATH)
 
 
 class SshBundleBindingsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
+
+    def test_exports_compose_focused_export_groups(self) -> None:
+        self.assertEqual(
+            self.mod.SSH_BUNDLE_LOCAL_EXPORTS,
+            (
+                *self.mod.SSH_BUNDLE_NAME_EXPORTS,
+                *self.mod.SSH_BUNDLE_BUILD_EXPORTS,
+                *self.mod.SSH_BUNDLE_SYNC_EXPORTS,
+            ),
+        )
+        self.assertEqual(
+            self.mod.SSH_BUNDLE_EXPORTS,
+            (
+                *self.mod.SSH_BUNDLE_LOCAL_EXPORTS,
+                *self.mod.SSH_BUNDLE_PROBE_EXPORTS,
+            ),
+        )
+        self.assertEqual(len(self.mod.SSH_BUNDLE_EXPORTS), len(set(self.mod.SSH_BUNDLE_EXPORTS)))
 
     def _bindings(self, ssh_bundle, **overrides):
         bindings = {
@@ -167,6 +181,26 @@ class SshBundleBindingsTests(unittest.TestCase):
             run=lambda *_args, **_kwargs: types.SimpleNamespace(returncode=0, stdout="not-a-number\n")
         )
         self.assertIsNone(self.mod.probe_uploaded_bundle_size(bindings, "ubuntu", "bundle.git", config={"targets": {}}))
+
+    def test_install_ssh_bundle_helpers_wires_named_exports(self) -> None:
+        captured = {}
+
+        def bundle_ref_name(job_id):
+            captured["job_id"] = job_id
+            return f"refs/pulp-ci-bundles/{job_id}"
+
+        ssh_bundle = types.SimpleNamespace(bundle_ref_name=bundle_ref_name)
+        bindings = self._bindings(ssh_bundle)
+
+        self.mod.install_ssh_bundle_helpers(bindings, ("bundle_ref_name", "ssh_host_uses_windows_shell"))
+
+        self.assertEqual(bindings["bundle_ref_name"]("job1"), "refs/pulp-ci-bundles/job1")
+        self.assertEqual(captured["job_id"], "job1")
+        self.assertEqual(bindings["bundle_ref_name"].__name__, "bundle_ref_name")
+
+        bindings["target_name_for_ssh_host"] = lambda _config, _host: "win-target"
+        config = {"targets": {"win-target": {"host": "builder", "repo_path": r"C:\Pulp"}}}
+        self.assertTrue(bindings["ssh_host_uses_windows_shell"](config, "builder"))
 
     def test_probe_uploaded_bundle_size_returns_none_on_timeout(self) -> None:
         class ProbeTimeout(Exception):
