@@ -69,6 +69,27 @@ def _append_unique(items: list[str], value: str | None) -> None:
         items.append(value)
 
 
+def _safe_path_label(value: str) -> str:
+    safe = "".join(ch if ch.isalnum() or ch in {"-", "_", "."} else "-" for ch in value.strip())
+    safe = safe.strip("-._")
+    return safe or "desktop-proof"
+
+
+def _parse_context_pairs(items: list[str]) -> dict[str, str]:
+    context: dict[str, str] = {}
+    for item in items:
+        if "=" not in item:
+            raise ValueError(f"context must be key=value: {item}")
+        key, value = item.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if not key:
+            raise ValueError(f"context key is empty: {item}")
+        if value:
+            context[key] = value
+    return context
+
+
 def _find_executable_path(
     name: str,
     *,
@@ -2194,6 +2215,188 @@ def cmd_desktop_design_diff(
     else:
         print_fn("  bbox: unchanged")
     print_fn(f"  compose_args: --diff-image {shlex.quote(str(output))} --diff-label 'Source vs native screenshot diff'")
+    return 0
+
+
+def cmd_desktop_design_proof(
+    args: argparse.Namespace,
+    *,
+    load_config_fn: Callable[[], dict],
+    design_parity_diff_summary_fn: Callable[..., dict],
+    compose_desktop_video_proof_fn: Callable[..., dict],
+    create_issue_video_variant_fn: Callable[..., dict],
+    atomic_write_text_fn: Callable[[Path, str], None],
+    now_fn: Callable[[], datetime] | None = None,
+    print_fn: Callable[[str], None] = print,
+) -> int:
+    source_image = Path(args.source_image).expanduser()
+    if not source_image.is_file():
+        print_fn(f"Error: source image not found: {source_image}")
+        return 1
+    source_image = source_image.resolve()
+
+    native_image = Path(args.native_image).expanduser()
+    if not native_image.is_file():
+        print_fn(f"Error: native image not found: {native_image}")
+        return 1
+    native_image = native_image.resolve()
+
+    label = getattr(args, "label", None) or "design-parity-proof"
+    safe_label = _safe_path_label(label)
+    now = now_fn() if now_fn else datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    completed_at = now.astimezone(timezone.utc).isoformat()
+    stamp = now.astimezone(timezone.utc).strftime("%Y%m%d-%H%M%S")
+
+    output_dir_arg = getattr(args, "output_dir", None)
+    if output_dir_arg:
+        run_dir = Path(output_dir_arg).expanduser().resolve()
+    else:
+        try:
+            config = load_config_fn()
+            artifact_root = Path(config["desktop_automation"]["artifact_root"]).expanduser().resolve()
+        except Exception as exc:
+            print_fn(f"Error: could not resolve desktop artifact root: {exc}")
+            return 1
+        run_dir = artifact_root / "mac" / "design-proof" / f"{stamp}-{safe_label}"
+    video_dir = run_dir / "video"
+    manifest_path = run_dir / "manifest.json"
+    diff_path = video_dir / "source-vs-native-diff.png"
+    diff_metadata_path = video_dir / "source-vs-native-diff.json"
+    resized_source_path = video_dir / "source-resized-to-native.png"
+
+    try:
+        context = _parse_context_pairs(list(getattr(args, "context", None) or []))
+    except ValueError as exc:
+        print_fn(f"Error: {exc}")
+        return 1
+
+    notes = [note for note in (getattr(args, "note", None) or []) if note]
+    title = getattr(args, "title", None) or "Design parity proof"
+    source_label = getattr(args, "source_label", None) or "Source reference"
+    diff_label = getattr(args, "diff_label", None) or "Source vs native screenshot diff"
+
+    manifest = {
+        "target": "mac",
+        "action": "design-parity",
+        "label": label,
+        "completed_at": completed_at,
+        "source": {
+            "mode": "still-images",
+        },
+        "artifacts": {
+            "screenshot": str(native_image),
+            "video_poster": str(native_image),
+        },
+        "video_proof_composition": {
+            "template": "design-parity",
+            "title": title,
+            "source_image": str(source_image),
+            "source_label": source_label,
+            "diff_label": diff_label,
+            "context": context,
+            "notes": notes,
+        },
+    }
+
+    try:
+        video_dir.mkdir(parents=True, exist_ok=True)
+        atomic_write_text_fn(manifest_path, json.dumps(manifest, indent=2) + "\n")
+        diff_summary = design_parity_diff_summary_fn(
+            source_image,
+            native_image,
+            diff_output_path=diff_path,
+            resized_source_output_path=resized_source_path,
+            enhance_brightness=float(getattr(args, "enhance_brightness", 3.0)),
+        )
+        diff_payload = {
+            "kind": "desktop-design-parity-diff",
+            "source_image": str(source_image),
+            "native_image": str(native_image),
+            "manifest": str(manifest_path),
+            "diff_image": str(diff_path),
+            "resized_source_image": str(resized_source_path),
+            "metadata": str(diff_metadata_path),
+            "summary": diff_summary,
+            "compose_args": [
+                "--diff-image",
+                str(diff_path),
+                "--diff-label",
+                diff_label,
+            ],
+        }
+        atomic_write_text_fn(diff_metadata_path, json.dumps(diff_payload, indent=2) + "\n")
+
+        manifest["artifacts"]["diff_screenshot"] = str(diff_path)
+        manifest["artifacts"]["diff_metadata"] = str(diff_metadata_path)
+        manifest["artifacts"]["source_resized_to_native"] = str(resized_source_path)
+        manifest["video_proof_composition"]["diff_image"] = str(diff_path)
+        atomic_write_text_fn(manifest_path, json.dumps(manifest, indent=2) + "\n")
+    except Exception as exc:
+        print_fn(f"Error: {exc}")
+        return 1
+
+    compose_lines: list[str] = []
+    compose_result = cmd_desktop_compose_video(
+        argparse.Namespace(
+            manifest=str(manifest_path),
+            output=None,
+            metadata=None,
+            issue_output=None,
+            issue_metadata=None,
+            small_video=bool(getattr(args, "small_video", False)),
+            small_output=None,
+            small_metadata=None,
+            small_video_budget_mb=float(getattr(args, "small_video_budget_mb", 10.0)),
+            template="design-parity",
+            source_image=str(source_image),
+            source_label=source_label,
+            diff_image=str(diff_path),
+            diff_label=diff_label,
+            title=title,
+            note=notes,
+            video_attachment_budget_mb=float(getattr(args, "video_attachment_budget_mb", 100.0)),
+            json=True,
+        ),
+        compose_desktop_video_proof_fn=compose_desktop_video_proof_fn,
+        create_issue_video_variant_fn=create_issue_video_variant_fn,
+        atomic_write_text_fn=atomic_write_text_fn,
+        print_fn=compose_lines.append,
+    )
+    if compose_result != 0:
+        for line in compose_lines:
+            print_fn(line)
+        return compose_result
+
+    compose_payload = json.loads(compose_lines[-1]) if compose_lines else {}
+    payload = {
+        "kind": "desktop-design-proof",
+        "manifest": str(manifest_path),
+        "run_dir": str(run_dir),
+        "source_image": str(source_image),
+        "native_image": str(native_image),
+        "diff": diff_payload,
+        "video_composed": compose_payload.get("video_composed"),
+        "video_issue": compose_payload.get("video_issue"),
+        "video_small": compose_payload.get("video_small"),
+        "artifacts": compose_payload.get("artifacts", {}),
+    }
+    if getattr(args, "json", False):
+        print_fn(json.dumps(payload, indent=2))
+        return 0
+
+    print_fn("Desktop design proof created.")
+    print_fn(f"  manifest: {manifest_path}")
+    print_fn(f"  source_image: {source_image}")
+    print_fn(f"  native_image: {native_image}")
+    print_fn(f"  diff_image: {diff_path}")
+    if compose_payload.get("artifacts", {}).get("video_composed"):
+        print_fn(f"  video_composed: {compose_payload['artifacts']['video_composed']}")
+    if compose_payload.get("artifacts", {}).get("video_issue"):
+        print_fn(f"  video_issue: {compose_payload['artifacts']['video_issue']}")
+    if compose_payload.get("artifacts", {}).get("video_small"):
+        print_fn(f"  video_small: {compose_payload['artifacts']['video_small']}")
     return 0
 
 

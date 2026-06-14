@@ -243,6 +243,17 @@ def cmd_desktop_design_diff(bindings: Mapping[str, Any], args: Any) -> int:
     )
 
 
+def cmd_desktop_design_proof(bindings: Mapping[str, Any], args: Any) -> int:
+    return _binding(bindings, "_desktop_commands_cli").cmd_desktop_design_proof(
+        args,
+        load_config_fn=_binding(bindings, "load_config"),
+        design_parity_diff_summary_fn=_binding(bindings, "design_parity_diff_summary"),
+        compose_desktop_video_proof_fn=_binding(bindings, "compose_desktop_video_proof"),
+        create_issue_video_variant_fn=_binding(bindings, "create_issue_video_variant"),
+        atomic_write_text_fn=_binding(bindings, "atomic_write_text"),
+    )
+
+
 def cmd_desktop_video_matrix(bindings: Mapping[str, Any], args: Any) -> int:
     return _binding(bindings, "_desktop_commands_cli").cmd_desktop_video_matrix(
         args,

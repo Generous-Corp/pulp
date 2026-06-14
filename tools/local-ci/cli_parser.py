@@ -501,6 +501,22 @@ def build_local_ci_parser(
     p_desktop_design_diff.add_argument("--metadata", help="Optional metadata JSON output path")
     p_desktop_design_diff.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 
+    p_desktop_design_proof = desktop_sub.add_parser("design-proof", help="Create a design-parity proof from source and native still images")
+    p_desktop_design_proof.add_argument("--source-image", required=True, help="Source/reference image, such as a Figma export")
+    p_desktop_design_proof.add_argument("--native-image", required=True, help="Native implementation screenshot/render to compare")
+    p_desktop_design_proof.add_argument("--output-dir", help="Output run directory (default: desktop artifact root/mac/design-proof/<timestamp-label>)")
+    p_desktop_design_proof.add_argument("--label", default="design-parity-proof", help="Run label (default: design-parity-proof)")
+    p_desktop_design_proof.add_argument("--source-label", default="Source reference", help="Label for the source image (default: Source reference)")
+    p_desktop_design_proof.add_argument("--diff-label", default="Source vs native screenshot diff", help="Label for the generated diff image")
+    p_desktop_design_proof.add_argument("--title", default="Design parity proof", help="Composed video title")
+    p_desktop_design_proof.add_argument("--note", action="append", default=[], help="Short note to show in the composed proof video; may be repeated")
+    p_desktop_design_proof.add_argument("--context", action="append", default=[], help="Context key=value to include in the proof report; may be repeated")
+    p_desktop_design_proof.add_argument("--enhance-brightness", type=float, default=3.0, help="Brightness multiplier for the visual diff image (default: 3)")
+    p_desktop_design_proof.add_argument("--video-attachment-budget-mb", type=float, default=100.0, help="Attachment budget in decimal MB for the issue video (default: 100)")
+    p_desktop_design_proof.add_argument("--small-video", action="store_true", help="Also create a <=10 MB convenience encode when possible")
+    p_desktop_design_proof.add_argument("--small-video-budget-mb", type=float, default=10.0, help="Attachment budget in decimal MB for the small video (default: 10)")
+    p_desktop_design_proof.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+
     p_desktop_video_matrix = desktop_sub.add_parser("video-matrix", help="Show the curated validation video proof demo matrix")
     p_desktop_video_matrix.add_argument(
         "--target",

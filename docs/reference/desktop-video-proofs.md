@@ -569,8 +569,27 @@ details, and issue-variant state. `desktop publish` carries that storyboard into
 `github-issue.md`, so reviewers can understand what the clip is proving before
 they open the MP4.
 
-For source/design comparison reviews, pass a reference image and the
-`design-parity` template:
+For source/design comparison reviews from two still images, use
+`desktop design-proof`. This creates a run manifest, generates a source/native
+diff, renders the Remotion `design-parity` proof, and writes both the normal
+issue MP4 and optional 10 MB fallback:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop design-proof \
+  --source-image planning/screenshots/reference.png \
+  --native-image /tmp/native-render.png \
+  --label figma-native-design-proof \
+  --source-label "Figma reference" \
+  --title "Design parity proof" \
+  --note "The source reference was exported from Figma before composition." \
+  --context fixture=elysium.pulp.zip \
+  --video-attachment-budget-mb 100 \
+  --small-video \
+  --small-video-budget-mb 10
+```
+
+Use the lower-level two-step path when comparing a source image against an
+existing recorded run manifest, or when rerendering a proof with a custom diff:
 
 ```bash
 python3 tools/local-ci/local_ci.py desktop design-diff \
@@ -593,17 +612,17 @@ python3 tools/local-ci/local_ci.py desktop compose-video /path/to/run/manifest.j
   --small-video-budget-mb 10
 ```
 
-`desktop design-diff` compares the source/reference image with either
-`--native-image` or the run manifest's `artifacts.screenshot`, resizing the
-source image to the native screenshot dimensions when needed. It writes a visual
-diff image and JSON metadata that includes copy-paste `compose_args`. It uses
-Pillow when available and falls back to a stdlib PNG path for 8-bit RGB/RGBA
-PNG exports and screenshots. The
-composition then renders the source/reference image beside the captured proof
-and adds the diff image to the proof context panel. If the run manifest already
-has `artifacts.diff_screenshot`, `compose-video` uses it automatically unless
-`--diff-image` overrides it. The command records a `video_proof_composition`
-block in the run manifest.
+`desktop design-proof` and `desktop design-diff` both compare the
+source/reference image with a native screenshot, resizing the source image to
+the native dimensions when needed. `design-proof` is the repeatable one-shot
+route for still-image source/native reviews; `design-diff` writes a visual diff
+image and JSON metadata that includes copy-paste `compose_args` for an existing
+run. Both use Pillow when available and fall back to a stdlib PNG path for
+8-bit RGB/RGBA PNG exports and screenshots. The composition renders the
+source/reference image beside the native proof and adds the diff image to the
+proof context panel. If the run manifest already has `artifacts.diff_screenshot`,
+`compose-video` uses it automatically unless `--diff-image` overrides it. The
+commands record a `video_proof_composition` block in the run manifest.
 
 ```bash
 npm --prefix tools/local-ci run compose-video-proof -- \

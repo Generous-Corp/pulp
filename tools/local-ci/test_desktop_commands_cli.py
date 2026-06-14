@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 from argparse import Namespace
+from datetime import datetime, timezone
 from pathlib import Path
 import subprocess
 import tempfile
@@ -1373,6 +1374,92 @@ class DesktopCommandsCliTests(unittest.TestCase):
             self.assertEqual(payload["compose_args"], ["--diff-image", str(output.resolve()), "--diff-label", "Source vs native screenshot diff"])
             written = json.loads(metadata.read_text())
             self.assertEqual(written["native_image"], str(screenshot.resolve()))
+
+    def test_design_proof_creates_manifest_diff_and_composed_variants(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source = root / "source.png"
+            native = root / "native.png"
+            source.write_bytes(b"source")
+            native.write_bytes(b"native")
+            run_dir = root / "run"
+            resolved_run_dir = run_dir.resolve()
+
+            def design_diff(source_path: Path, native_path: Path, **kwargs):
+                self.assertEqual(source_path, source.resolve())
+                self.assertEqual(native_path, native.resolve())
+                self.assertEqual(kwargs["diff_output_path"], resolved_run_dir / "video" / "source-vs-native-diff.png")
+                self.assertEqual(kwargs["resized_source_output_path"], resolved_run_dir / "video" / "source-resized-to-native.png")
+                self.assertEqual(kwargs["enhance_brightness"], 2.0)
+                kwargs["diff_output_path"].write_bytes(b"diff")
+                kwargs["resized_source_output_path"].write_bytes(b"resized")
+                return {
+                    "changed": True,
+                    "bbox": {"left": 0, "top": 0, "right": 10, "bottom": 10},
+                }
+
+            def compose(manifest_path_arg: Path, output_path: Path, **kwargs):
+                self.assertEqual(manifest_path_arg, resolved_run_dir / "manifest.json")
+                self.assertEqual(kwargs["template"], "design-parity")
+                self.assertEqual(kwargs["source_image"], source.resolve())
+                self.assertEqual(kwargs["source_label"], "Figma REST reference")
+                self.assertEqual(kwargs["diff_image"], resolved_run_dir / "video" / "source-vs-native-diff.png")
+                self.assertEqual(kwargs["diff_label"], "Delta heatmap")
+                self.assertEqual(kwargs["title"], "ELYSIUM proof")
+                self.assertEqual(kwargs["notes"], ["Reference frozen", "Known ROI gap"])
+                output_path.write_bytes(b"composed")
+                return {"output": str(output_path), "composer": "remotion"}
+
+            def issue(source_path: Path, output_path: Path, metadata_path: Path, *, attachment_budget_bytes: int):
+                self.assertEqual(source_path, resolved_run_dir / "video" / "proof-composed.mp4")
+                output_path.write_bytes(b"issue")
+                payload = {"status": "copied", "output": str(output_path), "budget": attachment_budget_bytes}
+                metadata_path.write_text(json.dumps(payload) + "\n")
+                return payload
+
+            result = self.mod.cmd_desktop_design_proof(
+                Namespace(
+                    source_image=str(source),
+                    native_image=str(native),
+                    output_dir=str(run_dir),
+                    label="elysium-proof",
+                    source_label="Figma REST reference",
+                    diff_label="Delta heatmap",
+                    title="ELYSIUM proof",
+                    note=["Reference frozen", "Known ROI gap"],
+                    context=["fixture=elysium.pulp.zip", "native=mac gpu harness"],
+                    enhance_brightness=2.0,
+                    video_attachment_budget_mb=40.0,
+                    small_video=True,
+                    small_video_budget_mb=10.0,
+                    json=True,
+                ),
+                load_config_fn=self.desktop_config,
+                design_parity_diff_summary_fn=design_diff,
+                compose_desktop_video_proof_fn=compose,
+                create_issue_video_variant_fn=issue,
+                atomic_write_text_fn=lambda path, text: path.parent.mkdir(parents=True, exist_ok=True) or path.write_text(text),
+                now_fn=lambda: datetime(2026, 6, 14, 15, 0, 0, tzinfo=timezone.utc),
+                print_fn=self.print_line,
+            )
+
+            self.assertEqual(result, 0)
+            payload = json.loads(self.printed[-1])
+            self.assertEqual(payload["kind"], "desktop-design-proof")
+            self.assertEqual(payload["manifest"], str(resolved_run_dir / "manifest.json"))
+            self.assertEqual(payload["video_issue"]["budget"], 40_000_000)
+            self.assertEqual(payload["video_small"]["budget"], 10_000_000)
+            self.assertEqual(payload["diff"]["summary"]["bbox"]["right"], 10)
+            manifest = json.loads((run_dir / "manifest.json").read_text())
+            self.assertEqual(manifest["target"], "mac")
+            self.assertEqual(manifest["action"], "design-parity")
+            self.assertEqual(manifest["label"], "elysium-proof")
+            self.assertEqual(manifest["source"]["mode"], "still-images")
+            self.assertEqual(manifest["video_proof_composition"]["context"]["fixture"], "elysium.pulp.zip")
+            self.assertEqual(manifest["video_proof_composition"]["context"]["native"], "mac gpu harness")
+            self.assertTrue(manifest["artifacts"]["diff_screenshot"].endswith("/video/source-vs-native-diff.png"))
+            self.assertTrue(manifest["artifacts"]["video_composed"].endswith("/video/proof-composed.mp4"))
+            self.assertTrue(manifest["artifacts"]["video_small"].endswith("/video/proof.small.mp4"))
 
     def test_design_diff_requires_native_image_or_manifest_screenshot(self):
         with tempfile.TemporaryDirectory() as tmpdir:

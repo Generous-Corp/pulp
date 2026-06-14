@@ -731,6 +731,56 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(args.metadata, "/tmp/diff.json")
         self.assertTrue(args.json)
 
+    def test_desktop_design_proof_command_parses_inputs(self):
+        parser = self.build_parser()
+
+        args = parser.parse_args([
+            "desktop",
+            "design-proof",
+            "--source-image",
+            "/tmp/source.png",
+            "--native-image",
+            "/tmp/native.png",
+            "--output-dir",
+            "/tmp/run",
+            "--label",
+            "elysium-proof",
+            "--source-label",
+            "Figma REST reference",
+            "--diff-label",
+            "Delta heatmap",
+            "--title",
+            "ELYSIUM design proof",
+            "--note",
+            "Reference is frozen",
+            "--context",
+            "fixture=elysium.pulp.zip",
+            "--enhance-brightness",
+            "2.25",
+            "--video-attachment-budget-mb",
+            "40",
+            "--small-video",
+            "--small-video-budget-mb",
+            "10",
+            "--json",
+        ])
+
+        self.assertEqual(args.desktop_command, "design-proof")
+        self.assertEqual(args.source_image, "/tmp/source.png")
+        self.assertEqual(args.native_image, "/tmp/native.png")
+        self.assertEqual(args.output_dir, "/tmp/run")
+        self.assertEqual(args.label, "elysium-proof")
+        self.assertEqual(args.source_label, "Figma REST reference")
+        self.assertEqual(args.diff_label, "Delta heatmap")
+        self.assertEqual(args.title, "ELYSIUM design proof")
+        self.assertEqual(args.note, ["Reference is frozen"])
+        self.assertEqual(args.context, ["fixture=elysium.pulp.zip"])
+        self.assertEqual(args.enhance_brightness, 2.25)
+        self.assertEqual(args.video_attachment_budget_mb, 40.0)
+        self.assertTrue(args.small_video)
+        self.assertEqual(args.small_video_budget_mb, 10.0)
+        self.assertTrue(args.json)
+
     def test_cleanup_defaults_use_injected_retention(self):
         parser = self.build_parser(keep_completed_jobs=7)
 

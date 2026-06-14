@@ -2621,6 +2621,10 @@ def cmd_desktop_design_diff(args: argparse.Namespace) -> int:
     return _desktop_command_bindings.cmd_desktop_design_diff(globals(), args)
 
 
+def cmd_desktop_design_proof(args: argparse.Namespace) -> int:
+    return _desktop_command_bindings.cmd_desktop_design_proof(globals(), args)
+
+
 def cmd_desktop_video_matrix(args: argparse.Namespace) -> int:
     return _desktop_command_bindings.cmd_desktop_video_matrix(globals(), args)
 
