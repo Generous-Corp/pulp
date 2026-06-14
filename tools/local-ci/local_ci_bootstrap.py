@@ -45,6 +45,7 @@ import linux_desktop_bindings as _linux_desktop_bindings
 import linux_target as _linux_target
 import linux_target_bindings as _linux_target_bindings
 import local_ci_bootstrap_constants as _local_ci_bootstrap_constants
+import local_ci_bootstrap_private_seams as _local_ci_bootstrap_private_seams
 import local_ci_command_bindings as _local_ci_command_bindings
 import local_ci_commands_cli as _local_ci_commands_cli
 import logs_cli as _logs_cli
@@ -176,20 +177,12 @@ def install_local_ci_facade(bindings: dict) -> None:
     _macos_desktop_bindings.install_macos_desktop_helpers(bindings)
     _windows_desktop_bindings.install_windows_desktop_helpers(bindings)
 
-    bindings["_desktop_check"] = bindings["desktop_check"]
-    bindings["_check_writable_dir"] = bindings["check_writable_dir"]
-    bindings["_clear_directory_contents"] = bindings["clear_directory_contents"]
-    bindings["_copy_directory_contents"] = bindings["copy_directory_contents"]
-    bindings["_run_git"] = bindings["run_git"]
-    bindings["_command_path_rewrite_candidate"] = bindings["command_path_rewrite_candidate"]
-    bindings["_rewrite_launch_command_for_mapper"] = bindings["rewrite_launch_command_for_mapper"]
-    bindings["_local_worktree_matches"] = bindings["local_worktree_matches"]
-    bindings["_reset_local_worktree"] = bindings["reset_local_worktree"]
+    _local_ci_bootstrap_private_seams.install_desktop_private_seams(bindings)
 
     _target_preflight_bindings.install_target_preflight_helpers(bindings)
     _notification_bindings.install_notification_helpers(bindings)
     _execution_bindings.install_execution_helpers(bindings)
-    bindings["_build_target_tasks"] = bindings["build_target_tasks"]
+    _local_ci_bootstrap_private_seams.install_execution_private_seams(bindings)
     _utility_command_bindings.install_utility_command_helpers(bindings)
     _local_ci_command_bindings.install_local_ci_command_helpers(bindings)
     _desktop_command_bindings.install_desktop_command_helpers(bindings)
