@@ -32,50 +32,21 @@ class WindowsRemoteFileBindingsTests(unittest.TestCase):
         for name in expected:
             self.assertTrue(callable(getattr(self.mod, name)))
 
-    def test_install_windows_remote_file_helpers_wires_named_exports(self) -> None:
-        captured = {}
+    def test_install_windows_remote_file_helpers_routes_groups_and_unknown_fallback(self) -> None:
+        bindings = {"_windows_probe": types.SimpleNamespace()}
 
-        def capture(name):
-            def inner(*args, **kwargs):
-                captured[name] = (args, kwargs)
-                return {"name": name}
+        with (
+            mock.patch.object(self.mod, "install_windows_remote_file_write_helpers") as write,
+            mock.patch.object(self.mod, "install_windows_remote_file_transfer_helpers") as transfer,
+            mock.patch.object(self.mod, "install_local_helpers") as install_local,
+        ):
+            self.mod.install_windows_remote_file_helpers(
+                bindings,
+                ("windows_ssh_write_text", "windows_ssh_fetch_file", "unknown_helper"),
+            )
 
-            return inner
-
-        bindings = {
-            "_windows_probe": types.SimpleNamespace(
-                windows_ssh_write_text=capture("write"),
-                windows_ssh_fetch_file=capture("fetch"),
-                windows_ssh_read_json=capture("read"),
-                windows_ssh_remove_path=capture("remove"),
-            ),
-            "run_windows_ssh_powershell": object(),
-            "parse_windows_ssh_json": object(),
-            "windows_contract_expand_expression": object(),
-            "ps_literal": object(),
-        }
-
-        self.mod.install_windows_remote_file_helpers(
-            bindings,
-            ("windows_ssh_write_text", "windows_ssh_fetch_file", "windows_ssh_read_json", "windows_ssh_remove_path"),
-        )
-
-        self.assertEqual(bindings["windows_ssh_write_text"]("win", r"%TEMP%\a.txt", "hello"), {"name": "write"})
-        self.assertEqual(
-            bindings["windows_ssh_fetch_file"]("win", r"%TEMP%\a.txt", Path("/tmp/a.txt")),
-            {"name": "fetch"},
-        )
-        self.assertEqual(bindings["windows_ssh_read_json"]("win", r"%TEMP%\a.json"), {"name": "read"})
-        self.assertEqual(bindings["windows_ssh_remove_path"]("win", r"%TEMP%\old"), {"name": "remove"})
-        self.assertEqual(captured["write"][0], ("win", r"%TEMP%\a.txt", "hello"))
-        self.assertEqual(captured["fetch"][0], ("win", r"%TEMP%\a.txt", Path("/tmp/a.txt")))
-
-    def test_install_windows_remote_file_helpers_preserves_unknown_fallback(self) -> None:
-        bindings = {}
-
-        with mock.patch.object(self.mod, "install_local_helpers") as install_local:
-            self.mod.install_windows_remote_file_helpers(bindings, ("unknown_helper",))
-
+        write.assert_called_once_with(bindings, ("windows_ssh_write_text",))
+        transfer.assert_called_once_with(bindings, ("windows_ssh_fetch_file",))
         install_local.assert_called_once_with(bindings, self.mod.__dict__, ("unknown_helper",))
 
 

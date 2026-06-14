@@ -53,36 +53,21 @@ class DesktopWindowsToolingProbeBindingsTests(unittest.TestCase):
         self.assertNotIn("probe_windows_session_agent", bindings)
         self.assertEqual(captured["tooling"][0], ("win",))
 
-    def test_tooling_probe_installer_routes_selected_groups(self):
-        bindings = self._bindings()
-        bindings["_windows_probe"].probe_windows_session_agent = lambda *args, **kwargs: {"session": True}
-        bindings["_windows_probe"].ensure_windows_remote_tooling = lambda *args, **kwargs: {"tooling": True}
-        for name in [
-            "run_windows_ssh_powershell",
-            "parse_windows_ssh_json",
-            "windows_contract_expand_expression",
-            "ps_literal",
-        ]:
-            bindings[name] = object()
-        bindings["probe_windows_remote_tooling"] = object()
-        bindings["install_windows_remote_tool"] = object()
-        existing_install = bindings["install_windows_remote_tool"]
-
-        self.mod.install_desktop_windows_tooling_probe_helpers(
-            bindings,
-            ("probe_windows_session_agent", "ensure_windows_remote_tooling"),
-        )
-
-        self.assertEqual(bindings["probe_windows_session_agent"]("win", {}), {"session": True})
-        self.assertEqual(bindings["ensure_windows_remote_tooling"]("win"), {"tooling": True})
-        self.assertIs(bindings["install_windows_remote_tool"], existing_install)
-
-    def test_tooling_probe_installer_preserves_unknown_fallback(self):
+    def test_tooling_probe_installer_routes_selected_groups_and_unknown_fallback(self):
         bindings = self._bindings()
 
-        with mock.patch.object(self.mod, "install_local_helpers") as install_local:
-            self.mod.install_desktop_windows_tooling_probe_helpers(bindings, ("unknown_helper",))
+        with (
+            mock.patch.object(self.mod, "install_desktop_windows_session_agent_probe_helpers") as session_agent,
+            mock.patch.object(self.mod, "install_desktop_windows_remote_tooling_probe_helpers") as remote_tooling,
+            mock.patch.object(self.mod, "install_local_helpers") as install_local,
+        ):
+            self.mod.install_desktop_windows_tooling_probe_helpers(
+                bindings,
+                ("probe_windows_session_agent", "ensure_windows_remote_tooling", "unknown_helper"),
+            )
 
+        session_agent.assert_called_once_with(bindings, ("probe_windows_session_agent",))
+        remote_tooling.assert_called_once_with(bindings, ("ensure_windows_remote_tooling",))
         install_local.assert_called_once_with(bindings, self.mod.__dict__, ("unknown_helper",))
 
 

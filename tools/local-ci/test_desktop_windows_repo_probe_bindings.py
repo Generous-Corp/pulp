@@ -49,35 +49,21 @@ class DesktopWindowsRepoProbeBindingsTests(unittest.TestCase):
         self.assertNotIn("ensure_windows_remote_repo_checkout", bindings)
         self.assertEqual(captured["probe"][0], ("win", r"C:\Pulp"))
 
-    def test_repo_probe_installer_routes_selected_groups(self):
-        bindings = self._bindings()
-        bindings["_windows_probe"].probe_windows_repo_checkout = lambda *args, **kwargs: {"ok": True}
-        bindings["_windows_probe"].ensure_windows_remote_repo_checkout = lambda *args, **kwargs: {"ready": True}
-        for name in [
-            "run_windows_ssh_powershell",
-            "windows_repo_path_is_unsafe",
-            "parse_windows_ssh_json",
-            "ps_literal",
-            "probe_windows_repo_checkout",
-            "windows_default_repo_checkout_path",
-            "windows_contract_expand_expression",
-        ]:
-            bindings[name] = object()
-
-        self.mod.install_desktop_windows_repo_probe_helpers(
-            bindings,
-            ("probe_windows_repo_checkout", "ensure_windows_remote_repo_checkout"),
-        )
-
-        self.assertEqual(bindings["probe_windows_repo_checkout"]("win", r"C:\Pulp"), {"ok": True})
-        self.assertEqual(bindings["ensure_windows_remote_repo_checkout"]("win", r"C:\Pulp"), {"ready": True})
-
-    def test_repo_probe_installer_preserves_unknown_fallback(self):
+    def test_repo_probe_installer_routes_selected_groups_and_unknown_fallback(self):
         bindings = self._bindings()
 
-        with mock.patch.object(self.mod, "install_local_helpers") as install_local:
-            self.mod.install_desktop_windows_repo_probe_helpers(bindings, ("unknown_helper",))
+        with (
+            mock.patch.object(self.mod, "install_desktop_windows_repo_checkout_probe_helpers") as probe,
+            mock.patch.object(self.mod, "install_desktop_windows_repo_checkout_ensure_helpers") as ensure,
+            mock.patch.object(self.mod, "install_local_helpers") as install_local,
+        ):
+            self.mod.install_desktop_windows_repo_probe_helpers(
+                bindings,
+                ("probe_windows_repo_checkout", "ensure_windows_remote_repo_checkout", "unknown_helper"),
+            )
 
+        probe.assert_called_once_with(bindings, ("probe_windows_repo_checkout",))
+        ensure.assert_called_once_with(bindings, ("ensure_windows_remote_repo_checkout",))
         install_local.assert_called_once_with(bindings, self.mod.__dict__, ("unknown_helper",))
 
 
