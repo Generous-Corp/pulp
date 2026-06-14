@@ -71,6 +71,16 @@ if(APPLE AND NOT PULP_IOS)
         LABELS slow)
 endif()
 
+# Fast configure-time guard for iOS HostApp/AUv3 bundle-id containment.
+# The full simulator tests above prove a valid bundle installs; this negative
+# fixture keeps bad sibling extension ids from reaching `simctl install`.
+add_test(NAME cmake-ios-hostapp-bundle-guard
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_ios_hostapp_bundle_guard.sh
+            ${CMAKE_SOURCE_DIR})
+set_tests_properties(cmake-ios-hostapp-bundle-guard PROPERTIES
+    LABELS "cmake;ios;auv3"
+    TIMEOUT 30)
+
 # AU v2 component-type selection smoke — hardens the aufx→aumf flip
 # for descriptor.accepts_midi=true. Runs under `cmake -P` so it works
 # on every platform without building the Pulp tree.

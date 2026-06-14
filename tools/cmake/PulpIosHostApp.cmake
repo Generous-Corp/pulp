@@ -128,8 +128,9 @@ function(pulp_add_ios_host_app target)
     get_target_property(_au_version_int   ${HOST_AUV3_EXTENSION} PULP_AUV3_VERSION_INT)
     get_target_property(_au_plugin_name   ${HOST_AUV3_EXTENSION} PULP_AUV3_PLUGIN_NAME)
     get_target_property(_au_manufacturer_name ${HOST_AUV3_EXTENSION} PULP_AUV3_MANUFACTURER_NAME)
+    get_target_property(_au_bundle_id     ${HOST_AUV3_EXTENSION} PULP_AUV3_BUNDLE_ID)
 
-    foreach(_var IN ITEMS _au_manufacturer _au_subtype _au_type _au_version_int _au_plugin_name _au_manufacturer_name)
+    foreach(_var IN ITEMS _au_manufacturer _au_subtype _au_type _au_version_int _au_plugin_name _au_manufacturer_name _au_bundle_id)
         if("${${_var}}" STREQUAL "${_var}-NOTFOUND")
             message(FATAL_ERROR
                 "pulp_add_ios_host_app(${target}): AUv3 extension target "
@@ -140,6 +141,21 @@ function(pulp_add_ios_host_app target)
                 "pulp_add_ios_host_app(...).")
         endif()
     endforeach()
+
+    if(NOT _au_bundle_id STREQUAL HOST_BUNDLE_ID)
+        string(FIND "${_au_bundle_id}" "${HOST_BUNDLE_ID}." _au_host_prefix_pos)
+        if(NOT _au_host_prefix_pos EQUAL 0)
+            message(FATAL_ERROR
+                "pulp_add_ios_host_app(${target}): AUv3 extension bundle id "
+                "'${_au_bundle_id}.appex' must be nested under containing "
+                "HostApp bundle id '${HOST_BUNDLE_ID}'. Use the same id or a "
+                "child id such as '${HOST_BUNDLE_ID}.${_au_plugin_name}' for "
+                "pulp_add_ios_auv3(... BUNDLE_ID ...). Otherwise "
+                "`xcrun simctl install` fails while setting app extension "
+                "placeholders with IXErrorDomain code=2 / Mismatched bundle "
+                "IDs.")
+        endif()
+    endif()
 
     # ── Generate HostApp Info.plist ─────────────────────────────────────
     set(PLUGIN_NAME                 "${HOST_NAME}")
