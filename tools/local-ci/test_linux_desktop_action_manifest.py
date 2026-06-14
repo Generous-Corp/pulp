@@ -8,14 +8,11 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from module_test_utils import load_module_from_path
-
-
-MODULE_PATH = Path(__file__).resolve().with_name("linux_desktop_action_manifest.py")
+from module_test_utils import load_local_ci_module
 
 
 def load_module():
-    return load_module_from_path(MODULE_PATH, add_module_dir=True)
+    return load_local_ci_module("linux_desktop_action_manifest.py", add_module_dir=True)
 
 
 class LinuxDesktopActionManifestTests(unittest.TestCase):

@@ -7,14 +7,11 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from module_test_utils import load_module_from_path
-
-
-MODULE_PATH = Path(__file__).resolve().with_name("linux_desktop_action_metadata.py")
+from module_test_utils import load_local_ci_module
 
 
 def load_module():
-    return load_module_from_path(MODULE_PATH)
+    return load_local_ci_module("linux_desktop_action_metadata.py")
 
 
 class LinuxDesktopActionMetadataTests(unittest.TestCase):
