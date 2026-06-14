@@ -93,3 +93,12 @@ Use MCP tools when available:
 - `pulp_kit_pack`
 - `pulp_kit_publish_check`
 - `pulp_kit_init`
+
+## Tool add-ons are not kits
+
+Optional developer tools in `tools/packages/tool-registry.json`, such as
+`video-proof`, are installed with `pulp tool install ...` and live under
+`~/.pulp/tools/`. Do not model them as kits, templates, content packs, or
+`pulp add` dependencies. Kits may still be useful later for reusable video proof
+scenarios, source screenshots, or demo projects, but the recorder/composer
+engine itself remains a tool add-on.

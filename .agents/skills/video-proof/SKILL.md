@@ -23,11 +23,11 @@ or reviewer comprehension matters.
 - Work on a feature branch or dedicated worktree until humans have reviewed the
   proof workflow. Do not merge generated videos or local config.
 - Treat video proof capture as optional developer tooling, not a core runtime
-  dependency and not a normal `pulp add` project package. The eventual
-  user-facing install target is a `pulp tool install video-proof` add-on that
-  owns ffmpeg/Remotion bootstrap and large or license-sensitive dependencies.
-  Keep source-tree setup (`npm --prefix tools/local-ci install`) as the branch
-  developer path until that add-on exists.
+  dependency and not a normal `pulp add` project package. Prefer the
+  `pulp tool install video-proof` add-on for user-facing setup; it owns the
+  ffmpeg/Remotion bootstrap and large or license-sensitive dependencies. Keep
+  direct source-tree setup (`npm --prefix tools/local-ci install`) as the
+  feature-branch iteration fallback.
 - Prefer short clips: 5-12 seconds is the normal range. Keep the recording
   focused on the window or component under test.
 - Prefer `video/proof-composed.mp4` for review. Keep `video/proof.mp4` as the
@@ -65,7 +65,15 @@ Create the machine-local config on a new checkout:
 cp tools/local-ci/config.example.json tools/local-ci/config.json
 ```
 
-Install the repo-local developer ffmpeg and Remotion tooling:
+Install the optional video-proof tool add-on:
+
+```bash
+pulp tool install video-proof
+```
+
+That installs the repo-local developer ffmpeg and Remotion tooling and writes a
+managed wrapper under `~/.pulp/tools/npm-packages/video-proof/`. For direct
+feature-branch iteration, the equivalent source-tree command is:
 
 ```bash
 npm --prefix tools/local-ci install

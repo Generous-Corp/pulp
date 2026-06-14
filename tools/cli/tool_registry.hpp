@@ -38,6 +38,8 @@ struct ToolDescriptor {
     std::string install_method;  // "binary_download", "python_pip"
     std::map<std::string, BinarySource> binary_sources;
     std::string pip_package;     // for python_pip
+    std::string npm_package_root; // repo-relative package root for npm_package
+    std::string npm_default_script; // default script for npm_package wrapper
     std::string pinned_version;
     std::vector<std::string> requires_tools;
     bool managed_by_pulp = true;
@@ -137,6 +139,9 @@ ToolInstallResult install_binary_tool(const ToolDescriptor& tool, bool force = f
 ToolInstallResult install_python_tool(const ToolDescriptor& tool,
                                        const ToolRegistry& registry,
                                        bool force = false);
+ToolInstallResult install_npm_tool(const ToolDescriptor& tool,
+                                   const fs::path& registry_path,
+                                   bool force = false);
 bool uninstall_tool(const std::string& tool_id);
 
 // ── Archive Extraction ──

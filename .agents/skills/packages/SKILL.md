@@ -212,3 +212,10 @@ framework→Pulp project importers resolved by `pulp import`). They're parsed by
 `tools/cli/tool_registry.cpp` and ignored for non-importer tools. The importers
 themselves install via the tool lane (`pulp tool install <importer>`), never as
 project `packages.lock.json` dependencies.
+
+`tool-registry.json` can also carry optional developer tools that are not
+project packages. `video-proof` is one of these: it uses the `npm_package`
+install method to bootstrap repo-local Remotion/ffmpeg proof tooling under
+`~/.pulp/tools/npm-packages/`. Do not route this through `pulp add`, do not add
+it to a project's `packages.lock.json`, and do not treat its Remotion/ffmpeg
+dependencies as core Pulp runtime dependencies.

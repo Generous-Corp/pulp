@@ -89,6 +89,12 @@ pub struct ToolDescriptor {
     /// For `python_pip` tools: pip distribution name.
     #[serde(default)]
     pub pip_package: String,
+    /// Repo-relative package root for `npm_package` tools.
+    #[serde(default)]
+    pub npm_package_root: String,
+    /// Default npm script the managed wrapper runs when no script is supplied.
+    #[serde(default)]
+    pub npm_default_script: String,
     /// Version the registry pins the tool to.
     #[serde(default)]
     pub pinned_version: String,
@@ -246,6 +252,28 @@ pub fn locate_tool(tool: &ToolDescriptor) -> LocateResult {
         }
     }
 
+    // Repo-local npm package wrapper.
+    if tool.install_method == "npm_package" {
+        let wrapper = if cfg!(windows) {
+            tools_dir()
+                .join("npm-packages")
+                .join(&tool.id)
+                .join("run.bat")
+        } else {
+            tools_dir()
+                .join("npm-packages")
+                .join(&tool.id)
+                .join("run.sh")
+        };
+        if wrapper.is_file() {
+            return LocateResult {
+                found: true,
+                path: wrapper,
+                source: "pulp-managed".to_owned(),
+            };
+        }
+    }
+
     // System PATH fallback.
     if let Some(p) = crate::proc::which(&tool.id) {
         return LocateResult {
@@ -313,6 +341,11 @@ pub fn uninstall_tool(id: &str) -> Result<bool> {
     let venv = tools_dir().join("python-envs").join(id);
     if venv.is_dir() {
         fs::remove_dir_all(&venv).map_err(|e| CliError::io(venv, e))?;
+        return Ok(true);
+    }
+    let npm = tools_dir().join("npm-packages").join(id);
+    if npm.is_dir() {
+        fs::remove_dir_all(&npm).map_err(|e| CliError::io(npm, e))?;
         return Ok(true);
     }
     Ok(false)

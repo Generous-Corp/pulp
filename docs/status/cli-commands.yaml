@@ -1647,12 +1647,12 @@ commands:
 
   - name: tool
     status: usable
-    summary: Manage third-party developer tools (validators, formatters, importers) installed under ~/.pulp/tools/. Driven by tools/packages/tool-registry.json.
+    summary: Manage third-party developer tools (validators, formatters, npm-backed video proof tooling, importers) installed under ~/.pulp/tools/. Driven by tools/packages/tool-registry.json.
     subcommands:
       - name: list
         summary: Show every registered tool and its install state
       - name: install
-        summary: "Download and install a tool; --all installs every tool available on this platform; --force reinstalls even if present. For a framework importer (category: importer), installs a checksummed per-platform package after validating the SDK/SPI version window, then drops its SKILL.md into ~/.agents/skills/ and records the install under ~/.pulp/importers/. --from <path|file://...> installs from a local package."
+        summary: "Download and install a tool; --all installs every tool available on this platform; --force reinstalls even if present. npm_package tools such as video-proof install repo-local npm dependencies and write a managed wrapper under ~/.pulp/tools/npm-packages/. For a framework importer (category: importer), installs a checksummed per-platform package after validating the SDK/SPI version window, then drops its SKILL.md into ~/.agents/skills/ and records the install under ~/.pulp/importers/. --from <path|file://...> installs from a local package."
         args:
           - name: --force
             kind: flag

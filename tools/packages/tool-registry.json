@@ -121,6 +121,22 @@
       "requires_tools": [],
       "managed_by_pulp": true,
       "bundleable": false
+    },
+    "video-proof": {
+      "display_name": "Video Proof",
+      "category": "developer_tool",
+      "description": "Optional desktop validation video proof tooling: Remotion composer plus ffmpeg-static bootstrap",
+      "upstream_url": "https://github.com/danielraffel/pulp",
+      "license": "MIT; installs developer-supplied Remotion packages under Remotion's license and ffmpeg-static under its package license",
+      "license_note": "Developer-side proof tooling only. Not bundled into Pulp runtime, project packages, or public CI; companies above Remotion's free threshold need a Remotion license to run composition.",
+      "install_method": "npm_package",
+      "npm_package_root": "tools/local-ci",
+      "npm_default_script": "smoke-video-proof",
+      "pinned_version": "0.0.0",
+      "requires_tools": [],
+      "managed_by_pulp": true,
+      "bundleable": false,
+      "bundle_note": "Optional developer/agent tooling. Keeps node_modules, Remotion, ffmpeg-static, generated videos, and caches out of shipped Pulp artifacts."
     }
   }
 }

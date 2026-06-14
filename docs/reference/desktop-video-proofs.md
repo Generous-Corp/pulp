@@ -15,9 +15,9 @@ diff does not explain enough.
 
 ## Install Model
 
-The feature-branch setup below is intentionally source-tree oriented while the
-workflow is still being reviewed. Before this lands as a normal user-facing
-surface, the intended install shape is an optional Pulp tool add-on:
+The feature-branch setup below still supports direct source-tree commands while
+the workflow is being reviewed. The intended user-facing install shape is now an
+optional Pulp tool add-on:
 
 ```bash
 pulp tool install video-proof
@@ -41,8 +41,12 @@ The long-term split should stay narrow:
 - The optional `video-proof` tool owns ffmpeg/Remotion bootstrap, composition
   templates, renderer scripts, and any large or license-sensitive developer
   dependencies.
-- The source-tree developer path keeps using `npm --prefix tools/local-ci
-  install` until the add-on package is produced.
+- On the feature branch, `pulp tool install video-proof` installs the
+  repo-local `tools/local-ci` npm package and writes a managed wrapper under
+  `~/.pulp/tools/npm-packages/video-proof/`. That wrapper defaults to the
+  Remotion smoke proof when run without arguments.
+- The source-tree developer path can still use `npm --prefix tools/local-ci
+  install` for direct iteration.
 - Reusable demo scenarios or source material may later be distributed as
   reviewed Pulp kits/content packs, but the recorder/composer itself should
   remain a tool add-on.

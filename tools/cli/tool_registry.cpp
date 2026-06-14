@@ -113,6 +113,8 @@ ToolRegistryLoadResult load_tool_registry(const fs::path& path) {
             if (auto v = val.get("license")) tool.license = v->as_string();
             if (auto v = val.get("install_method")) tool.install_method = v->as_string();
             if (auto v = val.get("pip_package")) tool.pip_package = v->as_string();
+            if (auto v = val.get("npm_package_root")) tool.npm_package_root = v->as_string();
+            if (auto v = val.get("npm_default_script")) tool.npm_default_script = v->as_string();
             if (auto v = val.get("pinned_version")) tool.pinned_version = v->as_string();
             if (auto v = val.get("requires_tools")) tool.requires_tools = v->as_string_array();
             if (auto v = val.get("managed_by_pulp")) tool.managed_by_pulp = v->as_bool();
@@ -172,6 +174,30 @@ static std::string expand_url(const std::string& tmpl, const std::string& versio
     if (pos != std::string::npos)
         url.replace(pos, 10, version);
     return url;
+}
+
+static bool tool_available_on_platform(const ToolDescriptor& tool, const std::string& platform) {
+    return tool.binary_sources.count(platform) > 0
+        || tool.install_method == "python_pip"
+        || tool.install_method == "npm_package";
+}
+
+static fs::path repo_root_from_registry(const fs::path& registry_path) {
+    auto packages = registry_path.parent_path();
+    auto tools = packages.parent_path();
+    return tools.parent_path();
+}
+
+static fs::path npm_tool_dir(const ToolDescriptor& tool) {
+    return tools_dir() / "npm-packages" / tool.id;
+}
+
+static fs::path npm_tool_wrapper_path(const ToolDescriptor& tool) {
+#ifdef _WIN32
+    return npm_tool_dir(tool) / "run.bat";
+#else
+    return npm_tool_dir(tool) / "run.sh";
+#endif
 }
 
 // ── Archive Extraction ──
@@ -237,6 +263,17 @@ ToolLocateResult locate_tool(const ToolDescriptor& tool) {
 #else
         auto wrapper = venv_dir / "run.sh";
 #endif
+        if (fs::exists(wrapper)) {
+            result.found = true;
+            result.path = wrapper;
+            result.source = "pulp-managed";
+            return result;
+        }
+    }
+
+    // Check for repo-local npm package tools
+    if (tool.install_method == "npm_package") {
+        auto wrapper = npm_tool_wrapper_path(tool);
         if (fs::exists(wrapper)) {
             result.found = true;
             result.path = wrapper;
@@ -475,6 +512,101 @@ ToolInstallResult install_python_tool(const ToolDescriptor& tool,
     return result;
 }
 
+// ── Repo-Local npm Tool Install ──
+
+ToolInstallResult install_npm_tool(const ToolDescriptor& tool,
+                                   const fs::path& registry_path,
+                                   bool force) {
+    ToolInstallResult result;
+
+    auto wrapper_path = npm_tool_wrapper_path(tool);
+    if (!force && fs::exists(wrapper_path)) {
+        result.ok = true;
+        result.binary_path = wrapper_path;
+        result.installed_version = tool.pinned_version;
+        return result;
+    }
+
+    auto npm = pulp::platform::find_on_path("npm");
+    if (!npm) {
+        result.error = "npm not found on PATH";
+        return result;
+    }
+
+    if (tool.npm_package_root.empty()) {
+        result.error = "npm_package_root is required for npm_package tools";
+        return result;
+    }
+
+    auto package_root = fs::path(tool.npm_package_root);
+    if (package_root.is_relative())
+        package_root = repo_root_from_registry(registry_path) / package_root;
+    std::error_code ec;
+    package_root = fs::weakly_canonical(package_root, ec);
+    if (ec) package_root = fs::absolute(package_root);
+
+    if (!fs::exists(package_root / "package.json")) {
+        result.error = "package.json not found at " + package_root.string();
+        return result;
+    }
+
+    std::cout << "  Installing npm dependencies for " << tool.display_name << "...\n";
+    auto install = pulp::platform::exec(
+        npm->string(), {"--prefix", package_root.string(), "install"}, 300000);
+    if (install.exit_code != 0) {
+        result.error = "npm install failed: " + install.stderr_output;
+        return result;
+    }
+
+    auto install_dir = npm_tool_dir(tool);
+    fs::create_directories(install_dir);
+#ifdef _WIN32
+    std::string wrapper = "@echo off\r\n"
+        "set PULP_VIDEO_PROOF_PACKAGE_ROOT=" + package_root.string() + "\r\n"
+        "if \"%1\"==\"\" (\r\n"
+        "  npm --prefix \"" + package_root.string() + "\" run "
+            + (tool.npm_default_script.empty() ? "smoke-video-proof" : tool.npm_default_script)
+            + "\r\n"
+        ") else (\r\n"
+        "  npm --prefix \"" + package_root.string() + "\" run %*\r\n"
+        ")\r\n";
+#else
+    std::string wrapper = "#!/bin/sh\n"
+        "set -e\n"
+        "PACKAGE_ROOT='" + package_root.string() + "'\n"
+        "export PULP_VIDEO_PROOF_PACKAGE_ROOT=\"$PACKAGE_ROOT\"\n"
+        "if [ \"$#\" -eq 0 ]; then\n"
+        "  exec npm --prefix \"$PACKAGE_ROOT\" run "
+            + (tool.npm_default_script.empty() ? "smoke-video-proof" : tool.npm_default_script)
+            + "\n"
+        "fi\n"
+        "exec npm --prefix \"$PACKAGE_ROOT\" run \"$@\"\n";
+#endif
+    if (!write_file(wrapper_path, wrapper)) {
+        result.error = "failed to write wrapper: " + wrapper_path.string();
+        return result;
+    }
+#ifndef _WIN32
+    fs::permissions(wrapper_path, fs::perms::owner_exec | fs::perms::group_exec,
+                    fs::perm_options::add);
+#endif
+
+    std::ostringstream manifest;
+    manifest << "{\n"
+             << "  \"tool_id\": \"" << tool.id << "\",\n"
+             << "  \"version\": \"" << tool.pinned_version << "\",\n"
+             << "  \"method\": \"npm_package\",\n"
+             << "  \"package_root\": \"" << package_root.string() << "\",\n"
+             << "  \"wrapper_path\": \"" << wrapper_path.string() << "\"\n"
+             << "}\n";
+    write_file(install_dir / "manifest.json", manifest.str());
+
+    result.ok = true;
+    result.binary_path = wrapper_path;
+    result.installed_version = tool.pinned_version;
+    return result;
+}
+
 // ── Uninstall ──
 
 bool uninstall_tool(const std::string& tool_id) {
@@ -486,6 +618,11 @@ bool uninstall_tool(const std::string& tool_id) {
     auto venv_dir = tools_dir() / "python-envs" / tool_id;
     if (fs::exists(venv_dir)) {
         fs::remove_all(venv_dir);
+        return true;
+    }
+    auto npm_dir = tools_dir() / "npm-packages" / tool_id;
+    if (fs::exists(npm_dir)) {
+        fs::remove_all(npm_dir);
         return true;
     }
     return false;
@@ -558,7 +695,7 @@ int cmd_tool(const std::vector<std::string>& args) {
                 status = green("installed");
             else if (loc.found)
                 status = yellow("system (" + loc.path.string() + ")");
-            else if (tool.binary_sources.count(platform) || tool.install_method == "python_pip")
+            else if (tool_available_on_platform(tool, platform))
                 status = dim("available");
             else
                 status = red("not available for " + platform);
@@ -639,6 +776,8 @@ int cmd_tool(const std::vector<std::string>& args) {
                 result = install_binary_tool(tool, force);
             else if (tool.install_method == "python_pip")
                 result = install_python_tool(tool, reg, force);
+            else if (tool.install_method == "npm_package")
+                result = install_npm_tool(tool, reg_path, force);
             else {
                 print_fail("Unknown install method: " + tool.install_method);
                 return 1;
@@ -732,7 +871,7 @@ int cmd_tool(const std::vector<std::string>& args) {
             if (loc.found) {
                 print_ok(tool.display_name + " — " + loc.source + " (" + loc.path.string() + ")");
             } else {
-                bool available = tool.binary_sources.count(platform) || tool.install_method == "python_pip";
+                bool available = tool_available_on_platform(tool, platform);
                 if (available) {
                     std::cout << "  " << yellow("–") << " " << tool.display_name
                               << " — not installed " << dim("(pulp tool install " + id + ")") << "\n";

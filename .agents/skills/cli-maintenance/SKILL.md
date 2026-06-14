@@ -1752,3 +1752,22 @@ new transport field, new persisted key), update **both**:
 
 Test coverage lives in `test/test_standalone_transport_midi.cpp` —
 add a case there when you extend either surface.
+
+## Optional npm-backed tools
+
+`pulp tool` can install repo-local npm-backed developer tools via
+`install_method: "npm_package"` in `tools/packages/tool-registry.json`.
+The first use case is `video-proof`, which bootstraps the Remotion/ffmpeg
+proof composer without making it a core runtime dependency or a normal
+`pulp add` project package.
+
+When adding or changing an npm-backed tool:
+
+1. Update `tools/cli/tool_registry.{hpp,cpp}` and mirror read/list/path/doctor
+   behavior in `experimental/pulp-rs/src/tool_registry.rs` and
+   `experimental/pulp-rs/src/cmd/tool.rs`.
+2. Add hermetic tests in `test/test_cli_tool_registry.cpp`; use a fake `npm`
+   executable rather than network installs.
+3. Update `tools/packages/tool-registry.json`, `docs/reference/cli.md`,
+   `docs/status/cli-commands.yaml`, and any domain skill that gives setup
+   commands for the tool.

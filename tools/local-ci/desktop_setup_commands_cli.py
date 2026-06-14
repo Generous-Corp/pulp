@@ -304,7 +304,7 @@ def desktop_video_doctor_remediations(checks: list[dict], *, target_name: str) -
             {
                 "check": "video_capture",
                 "title": "Install the repo-local video tooling",
-                "detail": "Install pinned npm developer tools so ffmpeg-static and Remotion are available. The eventual user-facing install target is the optional `pulp tool install video-proof` add-on.",
+                "detail": "Install the optional `video-proof` tool add-on, or use the source-tree npm command while iterating on this branch, so ffmpeg-static and Remotion are available.",
                 "command": "npm --prefix tools/local-ci install",
                 "future_command": "pulp tool install video-proof",
             }
@@ -371,9 +371,9 @@ def desktop_video_install_model() -> dict:
         "future_command": "pulp tool install video-proof",
         "package_format": "not-pulp-add",
         "detail": (
-            "The feature branch uses repo-local npm tooling. After the workflow is accepted, "
-            "the recorder/composer should install as optional developer tooling via `pulp tool install video-proof`, "
-            "not as a normal `pulp add` project package."
+            "The feature branch supports direct repo-local npm tooling for iteration, "
+            "and `pulp tool install video-proof` is the optional developer-tool install path. "
+            "The recorder/composer is not a normal `pulp add` project package."
         ),
     }
 
@@ -456,7 +456,7 @@ def desktop_video_setup_steps(target_name: str, *, machine_label: str | None = N
             "name": "install_tools",
             "title": "Install repo-local video tools",
             "command": "npm --prefix tools/local-ci install",
-            "detail": "Installs pinned developer-only ffmpeg-static and Remotion packages. Future accepted installs should use `pulp tool install video-proof`.",
+            "detail": "Installs pinned developer-only ffmpeg-static and Remotion packages. Prefer `pulp tool install video-proof` for user-facing setup; use this command for source-tree iteration.",
             "future_command": "pulp tool install video-proof",
         },
         {

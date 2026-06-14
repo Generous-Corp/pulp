@@ -208,7 +208,7 @@ fn status_label(
             loc.path.display(),
             color::reset()
         )
-    } else if tool.binary_sources.contains_key(platform) || tool.install_method == "python_pip" {
+    } else if tool_available_on_platform(tool, platform) {
         format!("{}available{}", color::dim(), color::reset())
     } else {
         format!(
@@ -344,8 +344,7 @@ fn doctor(reg: &ToolRegistry, out: &mut impl Write) -> Result<i32> {
             )
             .map_err(io)?;
         } else {
-            let available =
-                tool.binary_sources.contains_key(platform) || tool.install_method == "python_pip";
+            let available = tool_available_on_platform(tool, platform);
             if available {
                 writeln!(
                     out,
@@ -370,6 +369,12 @@ fn doctor(reg: &ToolRegistry, out: &mut impl Write) -> Result<i32> {
         }
     }
     Ok(i32::from(issues > 0))
+}
+
+fn tool_available_on_platform(tool: &ToolDescriptor, platform: &str) -> bool {
+    tool.binary_sources.contains_key(platform)
+        || tool.install_method == "python_pip"
+        || tool.install_method == "npm_package"
 }
 
 // Helper used only in tests to resolve fixtures.
