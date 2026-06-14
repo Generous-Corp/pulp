@@ -21,9 +21,8 @@ local_ci.py.
 
 from __future__ import annotations
 
-import argparse
-
-from github_workflow_config import workflow_provider_config
+import github_workflow_dispatch
+import github_workflow_provider
 from github_workflow_metadata import (
     BUILTIN_GITHUB_WORKFLOWS,
     GITHUB_ACTIONS_DEFAULTS,
@@ -40,13 +39,10 @@ from github_workflow_settings import (
 def resolve_workflow_runner_selector_json(
     config: dict | None, workflow_key: str, provider: str
 ) -> str:
-    provider_info = workflow_provider_config(config, workflow_key, provider)
-    selector = provider_info.get("runner_selector_json")
-    if not isinstance(selector, str) or not selector.strip():
-        return ""
-    return normalize_runs_on_json(
-        selector,
-        setting_name=f"github_actions.workflows.{workflow_key}.providers.{provider}.runner_selector_json",
+    return github_workflow_dispatch.resolve_workflow_runner_selector_json(
+        config,
+        workflow_key,
+        provider,
     )
 
 
@@ -56,22 +52,12 @@ def resolve_workflow_dispatch_field_values(
     provider: str,
     field_names: list[str] | tuple[str, ...] | None,
 ) -> dict[str, str]:
-    if not field_names:
-        return {}
-
-    provider_info = workflow_provider_config(config, workflow_key, provider)
-    resolved: dict[str, str] = {}
-    for field_name in field_names:
-        value = provider_info.get(field_name)
-        if not isinstance(value, str) or not value.strip():
-            continue
-        resolved[field_name] = normalize_runs_on_json(
-            value,
-            setting_name=(
-                f"github_actions.workflows.{workflow_key}.providers.{provider}.{field_name}"
-            ),
-        )
-    return resolved
+    return github_workflow_dispatch.resolve_workflow_dispatch_field_values(
+        config,
+        workflow_key,
+        provider,
+        field_names,
+    )
 
 
 def resolve_default_provider_for_workflow(
@@ -80,26 +66,11 @@ def resolve_default_provider_for_workflow(
     *,
     explicit_provider: str | None = None,
 ) -> tuple[str, str]:
-    workflow = BUILTIN_GITHUB_WORKFLOWS.get(workflow_key)
-    if workflow is None:
-        raise ValueError(f"Unknown workflow '{workflow_key}'.")
-
-    supported = workflow.get("providers", ["github-hosted"])
-    if explicit_provider:
-        provider = explicit_provider.strip()
-        if provider not in supported:
-            raise ValueError(
-                f"workflow '{workflow_key}' does not support provider '{provider}'. "
-                f"Supported: {', '.join(supported)}"
-            )
-        return provider, "cli"
-
-    preferred = (settings.get("provider") or "github-hosted").strip() or "github-hosted"
-    if preferred in supported:
-        source = "github_actions.defaults.provider" if settings.get("provider") else "builtin default"
-        return preferred, source
-
-    return "github-hosted", f"workflow fallback (default provider '{preferred}' unsupported)"
+    return github_workflow_provider.resolve_default_provider_for_workflow(
+        settings,
+        workflow_key,
+        explicit_provider=explicit_provider,
+    )
 
 
 def resolve_workflow_field_value_and_source(
@@ -192,26 +163,7 @@ def summarize_workflow_provider_defaults(
 
 
 def resolve_cli_dispatch_field_values(
-    args: argparse.Namespace,
+    args,
     field_names: list[str] | tuple[str, ...] | None,
 ) -> dict[str, str]:
-    supported = set(field_names or [])
-    override_names = (
-        "linux_runner_selector_json",
-        "windows_runner_selector_json",
-        "macos_runner_selector_json",
-    )
-    resolved: dict[str, str] = {}
-    for field_name in override_names:
-        value = getattr(args, field_name, None)
-        if not value:
-            continue
-        if field_name not in supported:
-            raise ValueError(
-                f"--{field_name.replace('_', '-')} is not supported for this workflow."
-            )
-        resolved[field_name] = normalize_runs_on_json(
-            value,
-            setting_name=f"--{field_name.replace('_', '-')}",
-        )
-    return resolved
+    return github_workflow_dispatch.resolve_cli_dispatch_field_values(args, field_names)

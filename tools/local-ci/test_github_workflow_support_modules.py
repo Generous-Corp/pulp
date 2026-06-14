@@ -4,9 +4,12 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 
 import github_workflow_config
+import github_workflow_dispatch
 import github_workflow_metadata
+import github_workflow_provider
 import github_workflow_settings
 
 
@@ -108,6 +111,73 @@ class GithubWorkflowSupportModuleTests(unittest.TestCase):
                     "namespace",
                 ),
                 {},
+            )
+
+    def test_dispatch_module_resolves_config_and_cli_selector_values(self) -> None:
+        config = {
+            "github_actions": {
+                "workflows": {
+                    "build": {
+                        "providers": {
+                            "namespace": {
+                                "runner_selector_json": '"namespace-default"',
+                                "linux_runner_selector_json": '"namespace-linux"',
+                            },
+                        },
+                    },
+                },
+            },
+        }
+
+        self.assertEqual(
+            github_workflow_dispatch.resolve_workflow_runner_selector_json(
+                config,
+                "build",
+                "namespace",
+            ),
+            '"namespace-default"',
+        )
+        self.assertEqual(
+            github_workflow_dispatch.resolve_workflow_dispatch_field_values(
+                config,
+                "build",
+                "namespace",
+                ("linux_runner_selector_json", "windows_runner_selector_json"),
+            ),
+            {"linux_runner_selector_json": '"namespace-linux"'},
+        )
+        self.assertEqual(
+            github_workflow_dispatch.resolve_cli_dispatch_field_values(
+                SimpleNamespace(
+                    linux_runner_selector_json='"linux-cli"',
+                    windows_runner_selector_json=None,
+                    macos_runner_selector_json=None,
+                ),
+                ("linux_runner_selector_json",),
+            ),
+            {"linux_runner_selector_json": '"linux-cli"'},
+        )
+
+    def test_provider_module_resolves_defaults_and_unsupported_overrides(self) -> None:
+        self.assertEqual(
+            github_workflow_provider.resolve_default_provider_for_workflow(
+                {"provider": "namespace"},
+                "build",
+            ),
+            ("namespace", "github_actions.defaults.provider"),
+        )
+        self.assertEqual(
+            github_workflow_provider.resolve_default_provider_for_workflow(
+                {"provider": "namespace"},
+                "validate",
+            )[0],
+            "github-hosted",
+        )
+        with self.assertRaisesRegex(ValueError, "does not support provider"):
+            github_workflow_provider.resolve_default_provider_for_workflow(
+                {},
+                "validate",
+                explicit_provider="namespace",
             )
 
 
