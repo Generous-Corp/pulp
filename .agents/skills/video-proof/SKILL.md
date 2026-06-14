@@ -279,6 +279,32 @@ counts so odd-sized host windows still encode with libx264. Final still
 screenshots use a last-resort full-screen fallback for the same TCC edge case.
 All paths still require Screen Recording permission for the invoking app.
 
+### Capturing continuous motion vs discrete state (important)
+
+Pick the recorder for what you are proving:
+
+- **Continuous animation** (meters moving, a knob sweep, a spinning 3D scene, any
+  per-frame motion) — use `--video-recorder avfoundation`. AVFoundation records
+  the live display, so it captures real frame-to-frame motion.
+- **Discrete state change** (a click flips a toggle; before/after differs) —
+  `--video-recorder frame-sequence` is fine and is the resilient fallback.
+
+Why this matters: `screencapture -l <windowId>` (the frame-sequence path) does
+**not** reliably capture live motion from Pulp's GPU/`CAMetalLayer`-backed
+windows — it grabs the window-server's composite, which can stay frozen on one
+frame for a Metal drawable. It still picks up *discrete* repaints (a click forces
+one), which is why click proofs look fine but a "continuously animating" capture
+can come out as 96 identical frames (a static screenshot with animated Remotion
+overlays). If a motion proof looks frozen, that is the symptom — switch to
+`--video-recorder avfoundation`.
+
+Additionally, macOS pauses an **occluded** window's render loop (CVDisplayLink /
+Core Animation throttle). Because proofs are driven from a terminal that would
+otherwise stay frontmost, the recorder raises the target window to the front and
+re-raises it on an interval during frame capture so its render loop keeps
+running. A backgrounded target that "stops animating" mid-capture is this
+throttle, not a recorder crash.
+
 ## Capture a proof
 
 Record a short click proof and render the Remotion composition with the

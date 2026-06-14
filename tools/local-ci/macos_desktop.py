@@ -772,6 +772,7 @@ def start_macos_window_video_recording(
     prefer_frame_sequence: bool = False,
     audio_source: str = "none",
     audio_device: str | None = None,
+    activate_fn: Callable[[], None] | None = None,
 ) -> dict:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     if audio_source not in {"none", "system"}:
@@ -787,6 +788,7 @@ def start_macos_window_video_recording(
             run_fn=run_fn,
             ffmpeg_path=ffmpeg_path,
             fallback_reason="window-id frame capture preferred",
+            activate_fn=activate_fn,
         )
     try:
         input_device = input_device_fn(ffmpeg_path=ffmpeg_path, run_fn=run_fn)
@@ -840,6 +842,7 @@ def start_macos_window_video_recording(
         run_fn=run_fn,
         ffmpeg_path=ffmpeg_path,
         fallback_reason=fallback_reason,
+        activate_fn=activate_fn,
     )
 
 
@@ -852,11 +855,13 @@ def start_macos_window_frame_sequence_recording(
     run_fn: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
     ffmpeg_path: str = "ffmpeg",
     fallback_reason: str | None = None,
+    activate_fn: Callable[[], None] | None = None,
+    activate_interval_secs: float = 1.0,
 ) -> dict:
     frames_dir = output_path.parent / "frames"
     frames_dir.mkdir(parents=True, exist_ok=True)
     stop_event = threading.Event()
-    state = {"frames": 0, "errors": [], "capture_scope": "window"}
+    state = {"frames": 0, "errors": [], "capture_scope": "window", "activations": 0}
     window_id = int(window["windowId"])
     bounds = macos_window_video_bounds(window)
     started_at = time.monotonic()
@@ -865,7 +870,23 @@ def start_macos_window_frame_sequence_recording(
     def capture_loop() -> None:
         next_frame_at = time.monotonic()
         deadline = started_at + duration_secs
+        # macOS pauses an occluded window's render loop (CVDisplayLink / Core
+        # Animation throttle), so a background window's backing surface stops
+        # updating and `screencapture -l` returns identical frames even while the
+        # app is "animating". Keep the target window frontmost during capture so
+        # its render loop keeps running. Re-raise on an interval because focus can
+        # drift back to the terminal driving the proof. Discrete events (clicks)
+        # still repaint an occluded window, which is why those were captured even
+        # before this activation step existed.
+        last_activate_at = float("-inf")
         while not stop_event.is_set() and time.monotonic() < deadline:
+            if activate_fn is not None and (time.monotonic() - last_activate_at) >= activate_interval_secs:
+                try:
+                    activate_fn()
+                    state["activations"] = int(state.get("activations", 0)) + 1
+                except Exception as exc:  # best-effort; never abort capture on raise failure
+                    state["errors"].append(f"window activate failed: {exc}")
+                last_activate_at = time.monotonic()
             frame_index = int(state["frames"]) + 1
             frame_path = frames_dir / f"frame-{frame_index:06d}.png"
             last_error = ""

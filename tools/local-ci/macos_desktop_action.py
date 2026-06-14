@@ -447,6 +447,13 @@ def run_macos_local_smoke(
         content_size = content_size_from_window_fn(window)
         if record_video:
             recorder_audio_source = "none" if video_audio_source == "plugin" else video_audio_source
+            # Keep the captured window frontmost during frame-sequence capture so
+            # macOS does not pause its (occluded) render loop and freeze the
+            # recording on a single frame. The proof is driven from a terminal,
+            # which would otherwise stay frontmost and occlude the target.
+            recording_activate_fn = (
+                (lambda _pid=int(pid): activate_macos_pid_fn(_pid)) if pid else None
+            )
             video_recording = start_macos_window_video_recording_fn(
                 window,
                 video_path,
@@ -455,6 +462,7 @@ def run_macos_local_smoke(
                 audio_source=recorder_audio_source,
                 audio_device=None if video_audio_source == "plugin" else video_audio_device,
                 prefer_frame_sequence=video_recorder == "frame-sequence" or bool(capture_bundle_id),
+                activate_fn=recording_activate_fn,
             )
         if capture_ui_snapshot and not use_pulp_app_automation:
             wait_for_path_fn(ui_snapshot_path, timeout_secs)

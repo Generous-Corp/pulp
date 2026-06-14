@@ -1535,6 +1535,8 @@ pulp add <importer>                 # Alias for `pulp tool install <importer>`
 
 Install methods come from the registry — today `binary_download` (pinned release artifact), `python_pip` (pipx-style isolated install), `npm_package` (repo-local developer tooling such as `video-proof`), and `importer_package` (a checksummed, per-platform framework-importer archive). `pulp tool doctor` is the per-platform companion to `pulp doctor`; `pulp tool doctor <id> --run` executes the installed wrapper for tools that provide a smoke command.
 
+> Unsure whether something belongs in `pulp tool`, `pulp add`, `pulp kit`, or `pulp content`? See [extending-pulp.md](extending-pulp.md) for a side-by-side comparison and FAQ. In short: **`tool`** = machine-level developer tooling (no project change); **`add`** = third-party DSP libraries wired into your project; **`kit`** = reusable Pulp code/UI/templates; **`content`** = data-only packs for an installed plugin.
+
 `video-proof` is optional developer tooling, not a core runtime dependency and
 not a normal `pulp add` project package. Installing it runs npm in the
 repo-local video proof package, writes a managed wrapper under

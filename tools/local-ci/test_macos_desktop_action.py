@@ -108,6 +108,7 @@ class MacosDesktopActionTests(unittest.TestCase):
             audio_source="none",
             audio_device=None,
             prefer_frame_sequence=False,
+            activate_fn=None,
         ):
             self.assertEqual(window_payload, expected_video_window)
             return {
@@ -117,6 +118,7 @@ class MacosDesktopActionTests(unittest.TestCase):
                 "audio_source": audio_source,
                 "audio_device": audio_device,
                 "prefer_frame_sequence": prefer_frame_sequence,
+                "activate_fn_provided": activate_fn is not None,
             }
 
         def stop_video(recording, *, output_path, metadata_path, poster_path, duration_secs, fps, attachment_budget_bytes):

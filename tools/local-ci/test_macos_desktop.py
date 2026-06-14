@@ -518,6 +518,62 @@ class MacOSDesktopTests(unittest.TestCase):
         self.assertEqual(metadata["encoder"]["version"], "ffmpeg version 6.0")
         self.assertIn("Could not find AVFoundation device", metadata["fallback_reason"])
 
+    def test_frame_sequence_raises_target_window_to_keep_it_rendering(self) -> None:
+        # An occluded window's render loop is paused by macOS, freezing the
+        # capture on one frame; the recorder must raise the target window so it
+        # keeps animating during a frame-sequence capture.
+        output_path = self.root / "video" / "proof.mp4"
+        activate_calls: list[int] = []
+
+        def run_capture(cmd: list[str], **_kwargs):
+            if cmd[0] == "screencapture":
+                Path(cmd[-1]).write_bytes(b"png")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        def activate() -> None:
+            activate_calls.append(1)
+
+        recording = self.mod.start_macos_window_video_recording(
+            {"windowId": 91, "bounds": {"x": 0, "y": 0, "width": 320, "height": 200}},
+            output_path,
+            duration_secs=0.2,
+            fps=10.0,
+            run_fn=run_capture,
+            ffmpeg_path="/opt/ffmpeg",
+            prefer_frame_sequence=True,
+            activate_fn=activate,
+        )
+        time.sleep(0.25)
+        recording["stop_event"].set()
+        recording["thread"].join(timeout=2.0)
+        # Raised at least once (before the first frame) and recorded in state.
+        self.assertGreaterEqual(len(activate_calls), 1)
+        self.assertGreaterEqual(int(recording["state"].get("activations", 0)), 1)
+
+    def test_frame_sequence_without_activate_fn_still_captures(self) -> None:
+        # Activation is optional; absence must not break capture.
+        output_path = self.root / "video" / "proof.mp4"
+
+        def run_capture(cmd: list[str], **_kwargs):
+            if cmd[0] == "screencapture":
+                Path(cmd[-1]).write_bytes(b"png")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        recording = self.mod.start_macos_window_video_recording(
+            {"windowId": 92, "bounds": {"x": 0, "y": 0, "width": 320, "height": 200}},
+            output_path,
+            duration_secs=0.2,
+            fps=10.0,
+            run_fn=run_capture,
+            ffmpeg_path="/opt/ffmpeg",
+            prefer_frame_sequence=True,
+        )
+        time.sleep(0.25)
+        recording["stop_event"].set()
+        recording["thread"].join(timeout=2.0)
+        self.assertGreaterEqual(int(recording["state"].get("frames", 0)), 1)
+        self.assertEqual(int(recording["state"].get("activations", 0)), 0)
+
     def test_window_video_recording_crops_full_screen_frames_when_window_capture_fails(self) -> None:
         output_path = self.root / "video" / "proof.mp4"
         metadata_path = self.root / "video" / "metadata.json"
