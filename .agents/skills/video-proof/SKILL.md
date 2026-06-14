@@ -170,9 +170,10 @@ The macOS recorder uses ffmpeg/AVFoundation first and falls back to a
 `screencapture -l` frame sequence when ffmpeg capture cannot start. If macOS
 refuses window-ID capture but allows full-screen capture, the fallback captures
 full-screen frames and crops them to the target window bounds during encoding.
-Final still screenshots use a last-resort full-screen fallback for the same TCC
-edge case. All paths still require Screen Recording permission for the invoking
-app.
+The frame-sequence fallback normalizes encoded video dimensions to even pixel
+counts so odd-sized host windows still encode with libx264. Final still
+screenshots use a last-resort full-screen fallback for the same TCC edge case.
+All paths still require Screen Recording permission for the invoking app.
 
 ## Capture a proof
 
@@ -288,6 +289,11 @@ prepared-session workflow; in that mode, add `--capture-bundle-id
 com.cockos.reaper` yourself if the command is only a wrapper process. The
 `audio-inspector-demo` recipe is a smoke proof for a built standalone demo
 binary; pass the command path for the build directory you want to validate.
+Generated REAPER proofs wait for the `TrackFX_Show floating-editor mode=3`
+status marker, then refine capture from the main REAPER window to a visible
+secondary window that looks like the floating plugin editor. The run manifest
+records this as `capture_window_refinement` so reviewers can see the original
+host window and the final captured editor window.
 
 For generated CLAP recipes, build and install the plugin bundle before
 recording. The recipe checks that

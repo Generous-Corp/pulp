@@ -65,6 +65,7 @@ class MacosDesktopActionTests(unittest.TestCase):
             "window",
             {"windowId": 88, "title": "UI Preview", "bounds": {"width": 320, "height": 200}},
         )
+        expected_video_window = overrides.pop("expected_video_window", window)
 
         def popen(args, **kwargs):
             launched.append((args, kwargs))
@@ -105,7 +106,7 @@ class MacosDesktopActionTests(unittest.TestCase):
             audio_device=None,
             prefer_frame_sequence=False,
         ):
-            self.assertEqual(window_payload, window)
+            self.assertEqual(window_payload, expected_video_window)
             return {
                 "path": str(output_path),
                 "duration_secs": duration_secs,
@@ -182,6 +183,7 @@ class MacosDesktopActionTests(unittest.TestCase):
             "activate_macos_bundle_id_fn": lambda _bundle_id: None,
             "wait_for_macos_bundle_window_fn": lambda _bundle_id, _timeout: (5151, window),
             "wait_for_macos_bundle_window_title_fn": lambda _bundle_id, _title, _timeout: (5151, window),
+            "wait_for_macos_bundle_secondary_window_fn": lambda _bundle_id, _timeout: (5151, window),
             "split_command_fn": lambda command: command.split(),
             "detect_macos_app_bundle_fn": lambda _command: None,
             "macos_bundle_id_for_app_path_fn": lambda _path: None,
@@ -375,6 +377,46 @@ class MacosDesktopActionTests(unittest.TestCase):
         self.assertTrue(manifest["video"]["recording"]["prefer_frame_sequence"])
         self.assertEqual(terminated, [4242])
         self.assertEqual(quits, ["com.cockos.reaper"])
+
+    def test_generated_reaper_recipe_captures_secondary_window(self) -> None:
+        host_window = {"windowId": 120, "title": "", "bounds": {"width": 900, "height": 520}}
+        editor_window = {"windowId": 121, "title": "", "bounds": {"width": 724, "height": 394}}
+        bundle_waits = []
+        secondary_waits = []
+
+        def wait_for_bundle(bundle_id, timeout):
+            bundle_waits.append((bundle_id, timeout))
+            (self.bundle_dir / "stdout.log").write_text(
+                "TrackFX_AddByName PulpSynth -> 0\n"
+                "fx name ok=true name=CLAPi: PulpSynth (Pulp)\n"
+                "TrackFX_Show floating-editor mode=3\n"
+            )
+            return (9090, host_window)
+
+        def wait_for_secondary(bundle_id, timeout):
+            secondary_waits.append((bundle_id, timeout))
+            return (9090, editor_window)
+
+        manifest, _launched, _terminated, _waited_paths, _rollups = self.run_action(
+            window=host_window,
+            expected_video_window=editor_window,
+            capture_ui_snapshot=False,
+            capture_bundle_id="com.cockos.reaper",
+            record_video=True,
+            wait_for_macos_bundle_window_fn=wait_for_bundle,
+            wait_for_macos_bundle_secondary_window_fn=wait_for_secondary,
+            video_context={"reaper_recipe": "generated"},
+        )
+
+        self.assertEqual(bundle_waits, [("com.cockos.reaper", 5.0)])
+        self.assertEqual(secondary_waits, [("com.cockos.reaper", 5.0)])
+        self.assertEqual(manifest["window"], editor_window)
+        self.assertEqual(
+            manifest["capture_window_refinement"]["strategy"],
+            "floating-editor-secondary-window-after-reaper-marker",
+        )
+        self.assertEqual(manifest["capture_window_refinement"]["from"], host_window)
+        self.assertEqual(manifest["capture_window_refinement"]["to"], editor_window)
 
     def test_run_macos_local_smoke_ignores_cleanup_quit_failures(self) -> None:
         host_window = {"windowId": 120, "title": "REAPER", "bounds": {"width": 900, "height": 520}}

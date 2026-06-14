@@ -1041,6 +1041,17 @@ def wait_for_macos_bundle_window_title(bundle_id: str, title_contains: str, time
     )
 
 
+def wait_for_macos_bundle_secondary_window(bundle_id: str, timeout_secs: float) -> tuple[int, dict]:
+    return _macos_desktop.wait_for_macos_bundle_secondary_window(
+        bundle_id,
+        timeout_secs,
+        macos_window_info_for_bundle_id_fn=macos_window_info_for_bundle_id,
+        activate_macos_bundle_id_fn=activate_macos_bundle_id,
+        time_fn=time.time,
+        sleep_fn=time.sleep,
+    )
+
+
 def launch_macos_terminal_proof_command(
     command_args: list[str],
     *,

@@ -240,6 +240,11 @@ selectors such as `--click-view-id` are rejected because REAPER is not a Pulp
 ViewInspector target. Pass an explicit `--command` to keep a
 prepared-session workflow; in that mode, add `--capture-bundle-id
 com.cockos.reaper` yourself if the command is only a wrapper process.
+Generated REAPER proofs wait for the `TrackFX_Show floating-editor mode=3`
+status marker, then refine capture from the main REAPER window to a visible
+secondary window that looks like the floating plugin editor. The run manifest
+records this as `capture_window_refinement` so reviewers can see the original
+host window and the final captured editor window.
 
 For generated CLAP recipes, build and install the plugin bundle before
 recording. The recipe checks that
@@ -365,6 +370,10 @@ issue-ready clip. Pass `--video-audio-device <index-or-name>` or set
 audio-requested capture will not silently fall back to a no-audio frame
 sequence. `--video-audio plugin` is still reserved until a plugin-origin audio
 source is available.
+
+The macOS `screencapture` frame-sequence fallback normalizes encoded video
+dimensions to even pixel counts. This avoids libx264 failures when a host
+exposes an odd-sized floating editor window.
 
 ## Remotion Composition
 

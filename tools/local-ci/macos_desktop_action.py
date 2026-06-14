@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 import json
 from pathlib import Path
+import time
 import uuid
 
 
@@ -103,6 +104,23 @@ def _validate_generated_reaper_recipe_status(video_context: dict | None, log_pat
         raise RuntimeError("Generated REAPER proof recipe did not confirm that the floating plugin editor was requested.")
 
 
+def _wait_for_log_text(log_path: Path, needle: str, timeout_secs: float, *, sleep_fn: Callable[[float], None]) -> None:
+    deadline = time.monotonic() + timeout_secs
+    last_error = ""
+    while time.monotonic() < deadline:
+        try:
+            if needle in log_path.read_text(errors="replace"):
+                return
+        except OSError as exc:
+            last_error = str(exc)
+        sleep_fn(0.2)
+    raise RuntimeError(last_error or f"timed out waiting for `{needle}` in `{log_path}`")
+
+
+def _should_capture_generated_reaper_secondary_window(video_context: dict | None) -> bool:
+    return bool(video_context and video_context.get("reaper_recipe") == "generated")
+
+
 def run_macos_local_smoke(
     config: dict,
     command: str | None,
@@ -134,6 +152,7 @@ def run_macos_local_smoke(
     activate_macos_bundle_id_fn: Callable[[str], None],
     wait_for_macos_bundle_window_fn: Callable[[str, float], tuple[int, dict]],
     wait_for_macos_bundle_window_title_fn: Callable[[str, str, float], tuple[int, dict]],
+    wait_for_macos_bundle_secondary_window_fn: Callable[[str, float], tuple[int, dict]],
     split_command_fn: Callable[[str], list[str]],
     detect_macos_app_bundle_fn: Callable[[str | None], Path | None],
     macos_bundle_id_for_app_path_fn: Callable[[Path], str | None],
@@ -346,6 +365,26 @@ def run_macos_local_smoke(
                     else:
                         window = wait_for_macos_window_fn(proc.pid, timeout_secs)
                         launch_descriptor = {"command": args}
+
+        if capture_bundle_id and _should_capture_generated_reaper_secondary_window(video_context):
+            _wait_for_log_text(
+                log_path,
+                "TrackFX_Show floating-editor mode=3",
+                min(timeout_secs, 15.0),
+                sleep_fn=sleep_fn,
+            )
+            original_window = dict(window)
+            try:
+                pid, window = wait_for_macos_bundle_secondary_window_fn(capture_bundle_id, min(timeout_secs, 10.0))
+            except RuntimeError as exc:
+                raise RuntimeError(
+                    "Generated REAPER proof requested a floating editor, but no secondary REAPER window was visible to capture."
+                ) from exc
+            launch_descriptor["capture_window_refinement"] = {
+                "strategy": "floating-editor-secondary-window-after-reaper-marker",
+                "from": original_window,
+                "to": window,
+            }
 
         inspector_summary = None
         view_tree = None

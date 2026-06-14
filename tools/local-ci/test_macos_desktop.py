@@ -190,6 +190,32 @@ class MacOSDesktopTests(unittest.TestCase):
 
         self.assertEqual(result, (456, {"title": "Pulp Video Proof abcd1234", "windowId": 2}))
 
+    def test_wait_for_bundle_secondary_window_prefers_medium_floating_editor(self) -> None:
+        now = [0.0]
+        payloads = [
+            {"pid": 456, "windows": [{"windowId": 1, "bounds": {"width": 1000, "height": 700}}]},
+            {
+                "pid": 456,
+                "windows": [
+                    {"windowId": 1, "bounds": {"width": 1000, "height": 700}},
+                    {"windowId": 2, "bounds": {"width": 724, "height": 394}},
+                    {"windowId": 3, "bounds": {"width": 724, "height": 394}},
+                    {"windowId": 4, "bounds": {"width": 400, "height": 353}},
+                ],
+            },
+        ]
+
+        result = self.mod.wait_for_macos_bundle_secondary_window(
+            "com.cockos.reaper",
+            1.0,
+            macos_window_info_for_bundle_id_fn=lambda _bundle_id: payloads.pop(0),
+            activate_macos_bundle_id_fn=lambda _bundle_id: {"activated": True, "stderr": ""},
+            time_fn=lambda: now[0],
+            sleep_fn=lambda amount: now.__setitem__(0, now[0] + amount),
+        )
+
+        self.assertEqual(result, (456, {"windowId": 4, "bounds": {"width": 400, "height": 353}}))
+
     def test_terminal_proof_shell_script_sets_title_and_teed_logs(self) -> None:
         script = self.mod.terminal_proof_shell_script(
             cwd=Path("/repo path"),
@@ -474,6 +500,7 @@ class MacOSDesktopTests(unittest.TestCase):
             desktop_video_metadata_fn=lambda path, **kwargs: {
                 "path": str(path),
                 "fps": kwargs["fps"],
+                "command": kwargs["command"],
                 "encoder": kwargs["encoder"],
                 "size": {"fits_attachment_budget": True},
             },
@@ -542,7 +569,7 @@ class MacOSDesktopTests(unittest.TestCase):
         encode_command = metadata["command"]
         self.assertEqual(metadata["frame_capture_scope"], "screen-crop")
         self.assertIn("-vf", encode_command)
-        self.assertIn("crop=320:200:10:20", encode_command)
+        self.assertIn("crop=320:200:10:20,scale=trunc(iw/2)*2:trunc(ih/2)*2", encode_command)
         self.assertTrue(any(cmd[:3] == ["screencapture", "-x", "-l"] for cmd in calls))
         self.assertTrue(any(cmd[:2] == ["screencapture", "-x"] and "-l" not in cmd for cmd in calls))
         self.assertTrue(metadata["poster"]["exists"])
@@ -565,7 +592,7 @@ class MacOSDesktopTests(unittest.TestCase):
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="encoded")
 
         recording = self.mod.start_macos_window_video_recording(
-            {"windowId": 88, "bounds": {"x": 10, "y": 20, "width": 320, "height": 200}},
+            {"windowId": 88, "bounds": {"x": 10, "y": 20, "width": 321, "height": 201}},
             output_path,
             duration_secs=0.2,
             fps=5.0,
@@ -586,6 +613,7 @@ class MacOSDesktopTests(unittest.TestCase):
             desktop_video_metadata_fn=lambda path, **kwargs: {
                 "path": str(path),
                 "fps": kwargs["fps"],
+                "command": kwargs["command"],
                 "encoder": kwargs["encoder"],
                 "size": {"fits_attachment_budget": True},
             },
@@ -595,6 +623,8 @@ class MacOSDesktopTests(unittest.TestCase):
         self.assertEqual(recording["mode"], "screencapture-sequence")
         self.assertEqual(metadata["mode"], "screencapture-sequence")
         self.assertEqual(metadata["fallback_reason"], "window-id frame capture preferred")
+        self.assertIn("-vf", metadata["command"])
+        self.assertIn("scale=trunc(iw/2)*2:trunc(ih/2)*2", metadata["command"])
         self.assertTrue(any(cmd[:3] == ["screencapture", "-x", "-l"] for cmd in calls))
         self.assertFalse(any("avfoundation" in cmd for cmd in calls))
 

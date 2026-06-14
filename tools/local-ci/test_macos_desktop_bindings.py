@@ -61,6 +61,7 @@ class MacosDesktopBindingsTests(unittest.TestCase):
             "activate_macos_bundle_id",
             "wait_for_macos_bundle_window",
             "wait_for_macos_bundle_window_title",
+            "wait_for_macos_bundle_secondary_window",
             "detect_macos_app_bundle",
             "macos_bundle_id_for_app_path",
             "launch_macos_terminal_proof_command",
@@ -133,6 +134,10 @@ class MacosDesktopBindingsTests(unittest.TestCase):
         self.assertIs(captured["kwargs"]["environ_copy_fn"], os_mod.environ.copy)
         self.assertIs(captured["kwargs"]["wait_for_macos_window_fn"], bindings["wait_for_macos_window"])
         self.assertIs(captured["kwargs"]["wait_for_macos_bundle_window_title_fn"], bindings["wait_for_macos_bundle_window_title"])
+        self.assertIs(
+            captured["kwargs"]["wait_for_macos_bundle_secondary_window_fn"],
+            bindings["wait_for_macos_bundle_secondary_window"],
+        )
         self.assertIs(captured["kwargs"]["launch_macos_terminal_proof_command_fn"], bindings["launch_macos_terminal_proof_command"])
         self.assertIs(
             captured["kwargs"]["close_macos_terminal_windows_with_title_fn"],

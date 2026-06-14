@@ -97,6 +97,7 @@ def run_macos_local_smoke(
         activate_macos_bundle_id_fn=_binding(bindings, "activate_macos_bundle_id"),
         wait_for_macos_bundle_window_fn=_binding(bindings, "wait_for_macos_bundle_window"),
         wait_for_macos_bundle_window_title_fn=_binding(bindings, "wait_for_macos_bundle_window_title"),
+        wait_for_macos_bundle_secondary_window_fn=_binding(bindings, "wait_for_macos_bundle_secondary_window"),
         split_command_fn=shlex_mod.split,
         detect_macos_app_bundle_fn=_binding(bindings, "detect_macos_app_bundle"),
         macos_bundle_id_for_app_path_fn=_binding(bindings, "macos_bundle_id_for_app_path"),
