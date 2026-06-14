@@ -234,8 +234,9 @@ shift
 goto loop
 :done
 if not defined out exit /b 2
-<nul set /p "payload=)BAT") + batch_bytes + R"BAT(" > "%out%"
-exit /b 0
+set "payload=)BAT") + batch_bytes + R"BAT("
+powershell -NoProfile -ExecutionPolicy Bypass -Command "[IO.File]::WriteAllBytes($env:out,[Text.Encoding]::ASCII.GetBytes($env:payload))"
+exit /b %errorlevel%
 )BAT";
     write_file(screenshot_tool, replace_all(script, "\n", "\r\n"));
 #else

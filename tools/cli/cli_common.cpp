@@ -239,6 +239,18 @@ bool parse_double_arg(const std::string& text, const char* flag, double& out) {
         return false;
     }
 
+    auto lowered = text;
+    std::transform(lowered.begin(), lowered.end(), lowered.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    const auto starts_with = [&](const char* prefix) {
+        return lowered.rfind(prefix, 0) == 0;
+    };
+    if (starts_with("nan") || starts_with("+nan") || starts_with("-nan")
+        || starts_with("inf") || starts_with("+inf") || starts_with("-inf")) {
+        std::cerr << "Error: invalid value for " << flag << ": " << text << "\n";
+        return false;
+    }
+
     errno = 0;
     char* end = nullptr;
     const auto value = std::strtod(text.c_str(), &end);
