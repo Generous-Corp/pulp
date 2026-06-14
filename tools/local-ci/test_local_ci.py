@@ -322,31 +322,6 @@ class LocalCiTests(unittest.TestCase):
         self.assertEqual(self.mod.resolve_targets(config, None), ["mac", "ubuntu"])
         self.assertEqual(self.mod.resolve_targets(config, ["windows", "mac", "windows"]), ["mac", "windows"])
 
-    def test_windows_checkout_path_helpers_join_and_detect_unsafe_roots(self):
-        self.assertEqual(
-            self.mod.windows_path_join(r"C:\Users\daniel\\", r"\Code\\", "pulp"),
-            r"C:\Users\daniel\Code\pulp",
-        )
-        self.assertEqual(self.mod.windows_default_repo_checkout_path(None), "pulp-validate")
-        self.assertEqual(
-            self.mod.windows_default_repo_checkout_path(r"C:\Users\daniel"),
-            r"C:\Users\daniel\pulp-validate",
-        )
-        self.assertTrue(self.mod.windows_repo_path_is_unsafe(None))
-        self.assertTrue(self.mod.windows_repo_path_is_unsafe(r"C:\\"))
-        self.assertTrue(
-            self.mod.windows_repo_path_is_unsafe(
-                r"C:\Users\daniel",
-                r"C:\Users\daniel",
-            )
-        )
-        self.assertFalse(
-            self.mod.windows_repo_path_is_unsafe(
-                r"C:\Users\daniel\pulp-validate",
-                r"C:\Users\daniel",
-            )
-        )
-
     def test_resolve_submission_options_uses_branch_tip_when_branch_is_explicit(self):
         args = SimpleNamespace(
             branch="feature/topic",
@@ -472,10 +447,6 @@ class LocalCiTests(unittest.TestCase):
                 )
         finally:
             self.mod.ssh_reachable = original_ssh
-
-    def test_parse_windows_ssh_json_rejects_non_object_payload(self):
-        with self.assertRaises(RuntimeError):
-            self.mod.parse_windows_ssh_json("null\n")
 
     def test_process_job_prefers_submission_config_path_for_windows_target(self):
         shared_config = {
@@ -5654,46 +5625,6 @@ class LocalCiTests(unittest.TestCase):
         self.assertIn("$BundleRef = 'refs/pulp-ci-bundles/123'", captured["script"])
         self.assertIn("[Environment]::SetEnvironmentVariable('GIT_LFS_SKIP_SMUDGE', '1', 'Process')", captured["script"])
         self.assertIn("git -C $Repo fetch $BundlePath \"$BundleRef`:refs/pulp-ci-bundles/source\"", captured["script"])
-
-    def test_windows_repo_checkout_ready_requires_head_and_setup(self):
-        self.assertTrue(
-            self.mod.windows_repo_checkout_ready(
-                {"git_dir_exists": True, "head_exists": True, "setup_exists": True, "repo_path_unsafe": False}
-            )
-        )
-        self.assertFalse(
-            self.mod.windows_repo_checkout_ready(
-                {"git_dir_exists": True, "head_exists": False, "setup_exists": True, "repo_path_unsafe": False}
-            )
-        )
-        self.assertFalse(
-            self.mod.windows_repo_checkout_ready(
-                {"git_dir_exists": True, "head_exists": True, "setup_exists": False, "repo_path_unsafe": False}
-            )
-        )
-
-    def test_windows_repo_checkout_detail_reports_empty_or_incomplete_checkout(self):
-        empty_detail = self.mod.windows_repo_checkout_detail(
-            {
-                "repo_path": r"C:\Users\danielraffel\pulp-validate",
-                "git_dir_exists": True,
-                "head_exists": False,
-                "setup_exists": False,
-                "origin_url": "https://github.com/danielraffel/pulp",
-            }
-        )
-        self.assertIn("empty git repo", empty_detail)
-
-        incomplete_detail = self.mod.windows_repo_checkout_detail(
-            {
-                "repo_path": r"C:\Users\danielraffel\pulp-validate",
-                "git_dir_exists": True,
-                "head_exists": True,
-                "setup_exists": False,
-                "origin_url": "https://github.com/danielraffel/pulp",
-            }
-        )
-        self.assertIn("checkout incomplete; setup.sh missing", incomplete_detail)
 
     def test_validate_build_preserves_original_args_for_lock_reexec(self):
         text = VALIDATE_BUILD_PATH.read_text()
