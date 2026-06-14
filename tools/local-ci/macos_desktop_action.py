@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Callable
 import json
+import os
 from pathlib import Path
+import signal
 import time
 import uuid
 
@@ -119,6 +121,37 @@ def _wait_for_log_text(log_path: Path, needle: str, timeout_secs: float, *, slee
 
 def _should_capture_generated_reaper_secondary_window(video_context: dict | None) -> bool:
     return bool(video_context and video_context.get("reaper_recipe") == "generated")
+
+
+def _pid_exists(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _terminate_pid(pid: int, *, sleep_fn: Callable[[float], None]) -> None:
+    if pid <= 0:
+        return
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    except PermissionError:
+        return
+    for _ in range(10):
+        if not _pid_exists(pid):
+            return
+        sleep_fn(0.2)
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+    except PermissionError:
+        return
 
 
 def run_macos_local_smoke(
@@ -633,6 +666,8 @@ def run_macos_local_smoke(
             except RuntimeError:
                 pass
         if proc is not None:
+            if capture_bundle_id and _should_capture_generated_reaper_secondary_window(video_context) and pid is not None:
+                _terminate_pid(int(pid), sleep_fn=sleep_fn)
             terminate_process_fn(proc)
         active_bundle_id = bundle_id
         if not active_bundle_id and "launch_descriptor" in locals():

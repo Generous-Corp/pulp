@@ -418,6 +418,38 @@ class MacosDesktopActionTests(unittest.TestCase):
         self.assertEqual(manifest["capture_window_refinement"]["from"], host_window)
         self.assertEqual(manifest["capture_window_refinement"]["to"], editor_window)
 
+    def test_generated_reaper_recipe_terminates_captured_reaper_pid(self) -> None:
+        host_window = {"windowId": 120, "title": "", "bounds": {"width": 900, "height": 520}}
+        editor_window = {"windowId": 121, "title": "", "bounds": {"width": 724, "height": 394}}
+        terminated_pids = []
+
+        def wait_for_bundle(_bundle_id, _timeout):
+            (self.bundle_dir / "stdout.log").write_text(
+                "TrackFX_AddByName PulpSynth -> 0\n"
+                "fx name ok=true name=CLAPi: PulpSynth (Pulp)\n"
+                "TrackFX_Show floating-editor mode=3\n"
+            )
+            return (9090, host_window)
+
+        original_terminate_pid = self.mod._terminate_pid
+        self.mod._terminate_pid = lambda pid, **_kwargs: terminated_pids.append(pid)
+        try:
+            _manifest, _launched, terminated, _waited_paths, _rollups = self.run_action(
+                window=host_window,
+                expected_video_window=editor_window,
+                capture_ui_snapshot=False,
+                capture_bundle_id="com.cockos.reaper",
+                record_video=True,
+                wait_for_macos_bundle_window_fn=wait_for_bundle,
+                wait_for_macos_bundle_secondary_window_fn=lambda _bundle_id, _timeout: (9090, editor_window),
+                video_context={"reaper_recipe": "generated"},
+            )
+        finally:
+            self.mod._terminate_pid = original_terminate_pid
+
+        self.assertEqual(terminated_pids, [9090])
+        self.assertEqual(terminated, [4242])
+
     def test_run_macos_local_smoke_ignores_cleanup_quit_failures(self) -> None:
         host_window = {"windowId": 120, "title": "REAPER", "bounds": {"width": 900, "height": 520}}
 
