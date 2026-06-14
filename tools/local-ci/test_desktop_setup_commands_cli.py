@@ -618,6 +618,7 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
 
     def test_video_setup_json_can_include_current_doctor_check(self):
         self.targets["mac"]["optional"] = {"video_capture": True}
+        matrix_calls = []
         checks = [
             {"name": "receipt", "ok": True, "detail": "installed"},
             {"name": "screencapture", "ok": True, "detail": "/usr/sbin/screencapture"},
@@ -631,6 +632,32 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
             "normalize_desktop_optional_config_fn": lambda optional: {"video_capture": bool((optional or {}).get("video_capture"))},
             "video_proof_smoke_fn": lambda: {"ok": True, "detail": "smoke ok"},
             "probe_macos_avfoundation_audio_fn": lambda device: (device == "2", "BlackHole 2ch (2)" if device == "2" else "missing"),
+            "desktop_video_matrix_payload_fn": lambda **kwargs: matrix_calls.append(kwargs) or {
+                "kind": "desktop-video-proof-demo-matrix",
+                "checked": True,
+                "scenarios": [
+                    {
+                        "id": "audio-inspector-demo",
+                        "status": "ready",
+                        "declared_status": "ready",
+                    },
+                    {
+                        "id": "design-parity",
+                        "status": "blocked",
+                        "declared_status": "ready",
+                        "local_readiness": {
+                            "checks": [
+                                {
+                                    "name": "source_image",
+                                    "ok": False,
+                                    "required": True,
+                                    "detail": "missing planning/screenshots/reference.png",
+                                }
+                            ],
+                        },
+                    },
+                ],
+            },
             "print_fn": self.print_line,
         }
 
@@ -647,9 +674,76 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
         self.assertEqual(payload["check"]["target"], "mac")
         checks_by_name = {check["name"]: check for check in payload["check"]["checks"]}
         self.assertTrue(checks_by_name["avfoundation_audio"]["ok"])
+        self.assertEqual(matrix_calls, [{"target": "mac", "check": True}])
+        self.assertEqual(payload["demo_matrix"]["checked"], True)
+        self.assertEqual(payload["demo_matrix"]["scenarios"][1]["id"], "design-parity")
+        self.assertEqual(payload["demo_matrix"]["scenarios"][1]["status"], "blocked")
+        self.assertEqual(payload["demo_matrix"]["scenarios"][1]["declared_status"], "ready")
         self.assertEqual(payload["steps"][6]["name"], "audio_doctor")
         self.assertEqual(payload["steps"][7]["name"], "smoke_proof")
         self.assertIn("--run-in-terminal", payload["steps"][5]["command"])
+
+    def test_video_setup_text_reports_demo_matrix_blockers(self):
+        self.targets["mac"]["optional"] = {"video_capture": True}
+        checks = [
+            {"name": "receipt", "ok": True, "detail": "installed"},
+            {"name": "screencapture", "ok": True, "detail": "/usr/sbin/screencapture"},
+            {"name": "video_capture", "ok": True, "detail": "/repo/node_modules/ffmpeg-static/ffmpeg", "required": False},
+            {"name": "avfoundation_screen", "ok": True, "detail": "Capture screen 0 (3:)", "required": False},
+        ]
+        deps = {
+            "load_config_fn": self.config,
+            "resolve_desktop_target_fn": lambda _config, name: self.targets[name],
+            "desktop_doctor_checks_fn": lambda _config, _name: [dict(check) for check in checks],
+            "normalize_desktop_optional_config_fn": lambda optional: {"video_capture": bool((optional or {}).get("video_capture"))},
+            "video_proof_smoke_fn": lambda: {"ok": True, "detail": "smoke ok"},
+            "probe_macos_avfoundation_audio_fn": lambda _device: self.fail("audio probe should not run"),
+            "desktop_video_matrix_payload_fn": lambda **_kwargs: {
+                "kind": "desktop-video-proof-demo-matrix",
+                "checked": True,
+                "scenarios": [
+                    {
+                        "id": "audio-inspector-demo",
+                        "status": "ready",
+                        "declared_status": "ready",
+                    },
+                    {
+                        "id": "design-parity",
+                        "status": "blocked",
+                        "declared_status": "ready",
+                        "local_readiness": {
+                            "checks": [
+                                {
+                                    "name": "source_image",
+                                    "ok": False,
+                                    "required": True,
+                                    "detail": "missing planning/screenshots/reference.png",
+                                },
+                                {
+                                    "name": "optional_note",
+                                    "ok": False,
+                                    "required": False,
+                                    "detail": "ignored",
+                                },
+                            ],
+                        },
+                    },
+                ],
+            },
+            "print_fn": self.print_line,
+        }
+
+        result = self.mod.cmd_desktop_video_setup(
+            Namespace(target="mac", machine="blackbook", check=True, skip_remotion_smoke=False, video_audio="none", video_audio_device=None, json=False),
+            **deps,
+        )
+
+        self.assertEqual(result, 0)
+        self.assertIn("Demo matrix readiness:", self.printed)
+        self.assertIn("  - audio-inspector-demo: ready", self.printed)
+        self.assertIn("  - design-parity: blocked (declared: ready)", self.printed)
+        self.assertIn("      blocker: source_image: missing planning/screenshots/reference.png", self.printed)
+        self.assertFalse(any("optional_note" in line for line in self.printed))
 
 
 if __name__ == "__main__":

@@ -729,6 +729,7 @@ def cmd_desktop_video_setup(
     normalize_desktop_optional_config_fn: Callable[[dict | None], dict],
     video_proof_smoke_fn: Callable[[], dict],
     probe_macos_avfoundation_audio_fn: Callable[[str | None], tuple[bool, str]] | None = None,
+    desktop_video_matrix_payload_fn: Callable[..., dict] | None = None,
     print_fn: Callable[[str], None] = print,
 ) -> int:
     steps = desktop_video_setup_steps(args.target, machine_label=getattr(args, "machine", None))
@@ -797,6 +798,11 @@ def cmd_desktop_video_setup(
             probe_macos_avfoundation_audio_fn=probe_macos_avfoundation_audio_fn,
         )
         payload["check"] = doctor_payload
+        if desktop_video_matrix_payload_fn is not None:
+            payload["demo_matrix"] = desktop_video_matrix_payload_fn(
+                target=args.target,
+                check=True,
+            )
 
     if getattr(args, "json", False):
         print_fn(json.dumps(payload, indent=2))
@@ -825,4 +831,17 @@ def cmd_desktop_video_setup(
                 print_fn(f"  - {item['title']}: {item['detail']}")
                 if item.get("command"):
                     print_fn(f"    command: {item['command']}")
+    if payload.get("demo_matrix"):
+        print_fn("")
+        print_fn("Demo matrix readiness:")
+        for item in payload["demo_matrix"].get("scenarios", []):
+            line = f"  - {item['id']}: {item['status']}"
+            declared = item.get("declared_status")
+            if declared and declared != item.get("status"):
+                line += f" (declared: {declared})"
+            print_fn(line)
+            readiness = item.get("local_readiness") or {}
+            for check in readiness.get("checks", []):
+                if check.get("required", True) and not check.get("ok"):
+                    print_fn(f"      blocker: {check['name']}: {check['detail']}")
     return exit_code

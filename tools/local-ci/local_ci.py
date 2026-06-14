@@ -2533,6 +2533,10 @@ def cmd_desktop_video_setup(args: argparse.Namespace) -> int:
     return _desktop_command_bindings.cmd_desktop_video_setup(globals(), args)
 
 
+def desktop_video_matrix_payload(**kwargs) -> dict:
+    return _desktop_commands_cli.desktop_video_matrix_payload(**kwargs)
+
+
 def cmd_desktop_status(args: argparse.Namespace) -> int:
     return _desktop_command_bindings.cmd_desktop_status(globals(), args)
 

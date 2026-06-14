@@ -97,6 +97,7 @@ class DesktopCommandBindingsTests(unittest.TestCase):
             "run_macos_local_smoke",
             "run_linux_xvfb_remote_action",
             "run_windows_session_agent_action",
+            "desktop_video_matrix_payload",
         ]:
             bindings[name] = object()
         return bindings
@@ -374,6 +375,7 @@ class DesktopCommandBindingsTests(unittest.TestCase):
             "normalize_desktop_optional_config",
             "video_proof_smoke",
             "probe_macos_avfoundation_audio",
+            "desktop_video_matrix_payload",
         ]:
             self.assertIs(captured["kwargs"][f"{name}_fn"], bindings[name])
 
