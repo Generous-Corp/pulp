@@ -7,14 +7,12 @@ from pathlib import Path
 from types import SimpleNamespace
 import unittest
 
-from module_test_utils import load_module_from_path
+from module_test_utils import load_local_ci_module
 
-
-MODULE_PATH = Path(__file__).with_name("windows_probe_core.py")
 
 
 def load_module():
-    return load_module_from_path(MODULE_PATH)
+    return load_local_ci_module("windows_probe_core.py")
 
 
 class WindowsProbeCoreTests(unittest.TestCase):

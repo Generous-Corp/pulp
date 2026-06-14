@@ -8,14 +8,12 @@ from types import SimpleNamespace
 import tempfile
 import unittest
 
-from module_test_utils import load_module_from_path
+from module_test_utils import load_local_ci_module
 
-
-MODULE_PATH = Path(__file__).with_name("windows_session_agent.py")
 
 
 def load_module():
-    return load_module_from_path(MODULE_PATH, add_module_dir=True)
+    return load_local_ci_module("windows_session_agent.py", add_module_dir=True)
 
 
 def completed(*, returncode: int = 0, stdout: str = "", stderr: str = ""):

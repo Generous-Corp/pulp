@@ -8,14 +8,12 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from module_test_utils import load_module_from_path
+from module_test_utils import load_local_ci_module
 
-
-MODULE_PATH = Path(__file__).resolve().with_name("windows_desktop_action_manifest.py")
 
 
 def load_module():
-    return load_module_from_path(MODULE_PATH, add_module_dir=True)
+    return load_local_ci_module("windows_desktop_action_manifest.py", add_module_dir=True)
 
 
 class WindowsDesktopActionManifestTests(unittest.TestCase):
