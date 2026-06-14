@@ -79,3 +79,25 @@ def install_desktop_helpers(
     desktop_probe_bindings.install_desktop_probe_helpers(bindings)
     macos_desktop_bindings.install_macos_desktop_helpers(bindings)
     windows_desktop_bindings.install_windows_desktop_helpers(bindings)
+
+
+def install_command_helpers(
+    bindings: dict[str, Any],
+    *,
+    target_preflight_bindings: Any,
+    notification_bindings: Any,
+    execution_bindings: Any,
+    private_seams: Any,
+    utility_command_bindings: Any,
+    local_ci_command_bindings: Any,
+    desktop_command_bindings: Any,
+    cli_dispatch_bindings: Any,
+) -> None:
+    target_preflight_bindings.install_target_preflight_helpers(bindings)
+    notification_bindings.install_notification_helpers(bindings)
+    execution_bindings.install_execution_helpers(bindings)
+    private_seams.install_execution_private_seams(bindings)
+    utility_command_bindings.install_utility_command_helpers(bindings)
+    local_ci_command_bindings.install_local_ci_command_helpers(bindings)
+    desktop_command_bindings.install_desktop_command_helpers(bindings)
+    cli_dispatch_bindings.install_cli_dispatch_helpers(bindings)

@@ -120,6 +120,35 @@ class LocalCiBootstrapHelperInstallersTests(unittest.TestCase):
             ],
         )
 
+    def test_install_command_helpers_preserves_order(self) -> None:
+        calls: list[str] = []
+
+        helper_installers.install_command_helpers(
+            {},
+            target_preflight_bindings=recorder("install_target_preflight_helpers", calls),
+            notification_bindings=recorder("install_notification_helpers", calls),
+            execution_bindings=recorder("install_execution_helpers", calls),
+            private_seams=recorder("install_execution_private_seams", calls),
+            utility_command_bindings=recorder("install_utility_command_helpers", calls),
+            local_ci_command_bindings=recorder("install_local_ci_command_helpers", calls),
+            desktop_command_bindings=recorder("install_desktop_command_helpers", calls),
+            cli_dispatch_bindings=recorder("install_cli_dispatch_helpers", calls),
+        )
+
+        self.assertEqual(
+            calls,
+            [
+                "install_target_preflight_helpers",
+                "install_notification_helpers",
+                "install_execution_helpers",
+                "install_execution_private_seams",
+                "install_utility_command_helpers",
+                "install_local_ci_command_helpers",
+                "install_desktop_command_helpers",
+                "install_cli_dispatch_helpers",
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

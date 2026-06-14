@@ -99,11 +99,14 @@ def install_local_ci_facade(bindings: dict) -> None:
 
     _local_ci_bootstrap_private_seams.install_desktop_private_seams(bindings)
 
-    _target_preflight_bindings.install_target_preflight_helpers(bindings)
-    _notification_bindings.install_notification_helpers(bindings)
-    _execution_bindings.install_execution_helpers(bindings)
-    _local_ci_bootstrap_private_seams.install_execution_private_seams(bindings)
-    _utility_command_bindings.install_utility_command_helpers(bindings)
-    _local_ci_command_bindings.install_local_ci_command_helpers(bindings)
-    _desktop_command_bindings.install_desktop_command_helpers(bindings)
-    _cli_dispatch_bindings.install_cli_dispatch_helpers(bindings)
+    _local_ci_bootstrap_helper_installers.install_command_helpers(
+        bindings,
+        target_preflight_bindings=_target_preflight_bindings,
+        notification_bindings=_notification_bindings,
+        execution_bindings=_execution_bindings,
+        private_seams=_local_ci_bootstrap_private_seams,
+        utility_command_bindings=_utility_command_bindings,
+        local_ci_command_bindings=_local_ci_command_bindings,
+        desktop_command_bindings=_desktop_command_bindings,
+        cli_dispatch_bindings=_cli_dispatch_bindings,
+    )
