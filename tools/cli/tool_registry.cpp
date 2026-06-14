@@ -187,10 +187,7 @@ bool extract_archive(const fs::path& archive, const fs::path& dest,
     // the Windows x64 build/test gate and cannot be exercised in this lane.
     if (format == "zip") {
         auto r = pulp::platform::exec(
-            "powershell",
-            {"-NoProfile", "-Command",
-             "& { param($archive, $dest) Expand-Archive -Force -LiteralPath $archive -DestinationPath $dest }",
-             archive.string(), dest.string()},
+            "tar", {"xf", archive.string(), "-C", dest.string()},
             120000);
         return r.exit_code == 0;
     }
