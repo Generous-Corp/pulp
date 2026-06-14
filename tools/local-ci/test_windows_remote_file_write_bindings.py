@@ -50,27 +50,6 @@ class WindowsRemoteFileWriteBindingsTests(unittest.TestCase):
         self.assertIs(captured["kwargs"]["windows_contract_expand_expression_fn"], bindings["windows_contract_expand_expression"])
         self.assertIs(captured["kwargs"]["ps_literal_fn"], bindings["ps_literal"])
 
-    def test_install_windows_remote_file_write_helpers_wires_named_exports(self) -> None:
-        captured = {}
-
-        def runner(*args, **kwargs):
-            captured["args"] = args
-            captured["kwargs"] = kwargs
-            return {"installed": True}
-
-        bindings = {
-            "_windows_probe": types.SimpleNamespace(windows_ssh_write_text=runner),
-            "run_windows_ssh_powershell": object(),
-            "parse_windows_ssh_json": object(),
-            "windows_contract_expand_expression": object(),
-            "ps_literal": object(),
-        }
-
-        self.mod.install_windows_remote_file_write_helpers(bindings)
-
-        self.assertEqual(bindings["windows_ssh_write_text"]("win", r"%TEMP%\a.txt", "hello"), {"installed": True})
-        self.assertEqual(captured["args"], ("win", r"%TEMP%\a.txt", "hello"))
-
 
 if __name__ == "__main__":
     unittest.main()

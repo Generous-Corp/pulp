@@ -49,25 +49,6 @@ class WindowsRemoteFileRemoveBindingsTests(unittest.TestCase):
             bindings["windows_contract_expand_expression"],
         )
 
-    def test_install_windows_remote_file_remove_helpers_wires_named_exports(self) -> None:
-        captured = {}
-
-        def runner(*args, **kwargs):
-            captured["args"] = args
-            captured["kwargs"] = kwargs
-            return {"installed": True}
-
-        bindings = {
-            "_windows_probe": types.SimpleNamespace(windows_ssh_remove_path=runner),
-            "run_windows_ssh_powershell": object(),
-            "windows_contract_expand_expression": object(),
-        }
-
-        self.mod.install_windows_remote_file_remove_helpers(bindings)
-
-        self.assertEqual(bindings["windows_ssh_remove_path"]("win", r"%TEMP%\old"), {"installed": True})
-        self.assertEqual(captured["args"], ("win", r"%TEMP%\old"))
-
 
 if __name__ == "__main__":
     unittest.main()

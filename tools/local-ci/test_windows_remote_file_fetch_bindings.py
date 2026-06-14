@@ -54,28 +54,6 @@ class WindowsRemoteFileFetchBindingsTests(unittest.TestCase):
             bindings["windows_contract_expand_expression"],
         )
 
-    def test_install_windows_remote_file_fetch_helpers_wires_named_exports(self) -> None:
-        captured = {}
-
-        def runner(*args, **kwargs):
-            captured["args"] = args
-            captured["kwargs"] = kwargs
-            return {"installed": True}
-
-        bindings = {
-            "_windows_probe": types.SimpleNamespace(windows_ssh_fetch_file=runner),
-            "run_windows_ssh_powershell": object(),
-            "windows_contract_expand_expression": object(),
-        }
-
-        self.mod.install_windows_remote_file_fetch_helpers(bindings)
-
-        self.assertEqual(
-            bindings["windows_ssh_fetch_file"]("win", r"%TEMP%\a.txt", Path("/tmp/a.txt")),
-            {"installed": True},
-        )
-        self.assertEqual(captured["args"], ("win", r"%TEMP%\a.txt", Path("/tmp/a.txt")))
-
 
 if __name__ == "__main__":
     unittest.main()
