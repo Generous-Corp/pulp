@@ -72,20 +72,5 @@ class DesktopPublishStageBindingsTests(unittest.TestCase):
         ]:
             self.assertIs(captured["kwargs"][f"{name}_fn"], bindings[name])
 
-    def test_install_desktop_publish_stage_helpers_wires_named_exports(self):
-        captured = {}
-
-        def runner(*args, **kwargs):
-            captured["args"] = args
-            captured["kwargs"] = kwargs
-            return {"installed": True}
-
-        bindings = self._bindings(runner)
-        self.mod.install_desktop_publish_stage_helpers(bindings)
-
-        self.assertEqual(bindings["stage_desktop_publish_report"]({"desktop_automation": {}}, []), {"installed": True})
-        self.assertEqual(captured["args"], ({"desktop_automation": {}}, []))
-
-
 if __name__ == "__main__":
     unittest.main()

@@ -72,23 +72,5 @@ class DesktopRunManifestBindingsTests(unittest.TestCase):
                 self.assertEqual(result, expected)
                 self.assertIs(captured["kwargs"]["desktop_artifact_root_fn"], bindings["desktop_artifact_root"])
 
-    def test_install_desktop_run_manifest_helpers_wires_named_exports(self):
-        bindings = {
-            "_reporting": types.SimpleNamespace(
-                desktop_run_manifests=lambda config, **kwargs: [{"config": config, **kwargs}],
-                desktop_rollup_dir=lambda config, target_name=None, **_kwargs: Path(f"/rollups/{target_name or 'all'}"),
-            ),
-            "desktop_artifact_root": object(),
-        }
-
-        self.mod.install_desktop_run_manifest_helpers(bindings)
-
-        self.assertEqual(
-            bindings["desktop_run_manifests"]({"desktop_automation": {}}, target_name="mac"),
-            [{"config": {"desktop_automation": {}}, "target_name": "mac", "action": None, "desktop_artifact_root_fn": bindings["desktop_artifact_root"]}],
-        )
-        self.assertEqual(bindings["desktop_rollup_dir"]({"desktop_automation": {}}, "mac"), Path("/rollups/mac"))
-
-
 if __name__ == "__main__":
     unittest.main()

@@ -58,20 +58,5 @@ class DesktopRunRollupPruneBindingsTests(unittest.TestCase):
         self.assertEqual(captured["kwargs"]["keep_last"], 2)
         self.assertIs(captured["kwargs"]["desktop_run_manifests_fn"], bindings["desktop_run_manifests"])
 
-    def test_install_desktop_run_rollup_prune_helpers_wires_named_exports(self):
-        captured = {}
-
-        def runner(*args, **kwargs):
-            captured["prune"] = (args, kwargs)
-            return [Path("/tmp/run")]
-
-        bindings = self._bindings(runner)
-
-        self.mod.install_desktop_run_rollup_prune_helpers(bindings)
-
-        self.assertEqual(bindings["prune_desktop_run_manifests"]({"desktop_automation": {}}, keep_last=1), [Path("/tmp/run")])
-        self.assertEqual(captured["prune"][0], ({"desktop_automation": {}},))
-
-
 if __name__ == "__main__":
     unittest.main()

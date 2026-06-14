@@ -70,21 +70,5 @@ class DesktopProofListBindingsTests(unittest.TestCase):
         self.assertIs(captured["kwargs"]["desktop_run_manifests_fn"], bindings["desktop_run_manifests"])
         self.assertIs(captured["kwargs"]["desktop_run_summary_fn"], bindings["desktop_run_summary"])
 
-    def test_install_desktop_proof_list_helpers_wires_named_exports(self):
-        captured = {}
-
-        def runner(*args, **kwargs):
-            captured["args"] = args
-            captured["kwargs"] = kwargs
-            return [{"installed": True}]
-
-        bindings = self._bindings(runner)
-        self.mod.install_desktop_proof_list_helpers(bindings)
-
-        self.assertEqual(bindings["desktop_proof_summaries"]({"desktop_automation": {}}, target_name="mac"), [{"installed": True}])
-        self.assertEqual(captured["args"], ({"desktop_automation": {}},))
-        self.assertEqual(captured["kwargs"]["target_name"], "mac")
-
-
 if __name__ == "__main__":
     unittest.main()

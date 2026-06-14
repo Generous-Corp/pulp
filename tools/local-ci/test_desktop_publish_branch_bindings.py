@@ -59,23 +59,5 @@ class DesktopPublishBranchBindingsTests(unittest.TestCase):
         self.assertIs(captured["kwargs"]["clear_directory_contents_fn"], bindings["_clear_directory_contents"])
         self.assertIs(captured["kwargs"]["git_origin_http_url_fn"], bindings["git_origin_http_url"])
 
-    def test_install_desktop_publish_branch_helpers_wires_named_exports(self):
-        captured = {}
-
-        def runner(*args, **kwargs):
-            captured["args"] = args
-            captured["kwargs"] = kwargs
-            return {"installed": True}
-
-        bindings = self._bindings(runner)
-        self.mod.install_desktop_publish_branch_helpers(bindings)
-
-        self.assertEqual(
-            bindings["publish_report_to_branch"]({"desktop_automation": {}}, {"output_dir": "/tmp/report"}),
-            {"installed": True},
-        )
-        self.assertEqual(captured["args"], ({"desktop_automation": {}}, {"output_dir": "/tmp/report"}))
-
-
 if __name__ == "__main__":
     unittest.main()

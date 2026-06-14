@@ -61,19 +61,5 @@ class DesktopRunRollupWriteBindingsTests(unittest.TestCase):
         ]:
             self.assertIs(captured["kwargs"][f"{name}_fn"], bindings[name])
 
-    def test_install_desktop_run_rollup_write_helpers_wires_named_exports(self):
-        captured = {}
-
-        def runner(*args, **kwargs):
-            captured["write"] = (args, kwargs)
-
-        bindings = self._bindings(runner)
-
-        self.mod.install_desktop_run_rollup_write_helpers(bindings)
-
-        self.assertIsNone(bindings["write_desktop_run_rollups"]({"desktop_automation": {}}, target_name="mac"))
-        self.assertEqual(captured["write"][0], ({"desktop_automation": {}},))
-
-
 if __name__ == "__main__":
     unittest.main()

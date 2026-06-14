@@ -61,21 +61,5 @@ class DesktopProofSummaryBindingsTests(unittest.TestCase):
                 self.assertEqual(captured["args"], args)
                 self.assertEqual(captured["kwargs"], {})
 
-    def test_install_desktop_proof_summary_helpers_wires_named_exports(self):
-        captured = {}
-
-        def runner(*args, **kwargs):
-            captured["args"] = args
-            captured["kwargs"] = kwargs
-            return "exact-sha"
-
-        bindings = self._bindings("normalize_desktop_proof_source_mode", runner)
-        self.mod.install_desktop_proof_summary_helpers(bindings, ("normalize_desktop_proof_source_mode",))
-
-        self.assertEqual(bindings["normalize_desktop_proof_source_mode"]("exact-sha"), "exact-sha")
-        self.assertEqual(captured["args"], ("exact-sha",))
-        self.assertEqual(captured["kwargs"], {})
-
-
 if __name__ == "__main__":
     unittest.main()

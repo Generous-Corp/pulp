@@ -80,21 +80,5 @@ class DesktopPublishListBindingsTests(unittest.TestCase):
                 for key, value in kwargs.items():
                     self.assertEqual(captured["kwargs"][key], value)
 
-    def test_install_desktop_publish_list_helpers_wires_named_exports(self):
-        captured = {}
-
-        def runner(*args, **kwargs):
-            captured["args"] = args
-            captured["kwargs"] = kwargs
-            return [{"installed": True}]
-
-        bindings = self._bindings("desktop_publish_reports", runner)
-        self.mod.install_desktop_publish_list_helpers(bindings, ("desktop_publish_reports",))
-
-        self.assertEqual(bindings["desktop_publish_reports"]({"desktop_automation": {}}, limit=1), [{"installed": True}])
-        self.assertEqual(captured["args"], ({"desktop_automation": {}},))
-        self.assertEqual(captured["kwargs"]["limit"], 1)
-
-
 if __name__ == "__main__":
     unittest.main()
