@@ -1188,11 +1188,21 @@ mod tests {
 
     #[test]
     fn focused_doctor_missing_tool_returns_nonzero() {
+        let _l = crate::test_support::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let td = plant_project(registry_body());
+        let home = tempfile::tempdir().unwrap();
+        let original_home = std::env::var_os("PULP_HOME");
+        std::env::set_var("PULP_HOME", home.path());
         let reg = load(&td.path().join("tools/packages/tool-registry.json")).unwrap();
         let spawner = crate::proc::testing::RecordingSpawner::ok();
         let mut buf = Vec::new();
         let rc = doctor(&reg, Some("video-proof"), false, &spawner, &mut buf).unwrap();
+        match original_home {
+            Some(value) => std::env::set_var("PULP_HOME", value),
+            None => std::env::remove_var("PULP_HOME"),
+        }
         assert_eq!(rc, 1);
         let s = String::from_utf8(buf).unwrap();
         assert!(s.contains("pulp tool install video-proof"));
