@@ -3,16 +3,14 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import types
 import unittest
 
-from module_test_utils import load_module_from_path
+from module_test_utils import load_local_ci_module
 
 
-MODULE_PATH = Path(__file__).with_name("local_ci_bootstrap_helper_installers.py")
-helper_installers = load_module_from_path(
-    MODULE_PATH,
+helper_installers = load_local_ci_module(
+    "local_ci_bootstrap_helper_installers.py",
     module_name="local_ci_bootstrap_helper_installers",
     add_module_dir=True,
 )

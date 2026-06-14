@@ -3,24 +3,19 @@
 
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
-import sys
 import unittest
 
+from module_test_utils import load_local_ci_module
 
-MODULE_PATH = Path(__file__).with_name("local_ci_bootstrap.py")
-LOCAL_CI_DIR = MODULE_PATH.parent
 
 
 def load_module():
-    if str(LOCAL_CI_DIR) not in sys.path:
-        sys.path.insert(0, str(LOCAL_CI_DIR))
-    spec = importlib.util.spec_from_file_location("local_ci_bootstrap_under_test", MODULE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    return load_local_ci_module(
+        "local_ci_bootstrap.py",
+        module_name="local_ci_bootstrap_under_test",
+        add_module_dir=True,
+    )
 
 
 class LocalCiBootstrapTests(unittest.TestCase):

@@ -3,15 +3,13 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import unittest
 
-from module_test_utils import load_module_from_path
+from module_test_utils import load_local_ci_module
 
 
-MODULE_PATH = Path(__file__).with_name("local_ci_bootstrap_module_aliases.py")
-module_aliases = load_module_from_path(
-    MODULE_PATH,
+module_aliases = load_local_ci_module(
+    "local_ci_bootstrap_module_aliases.py",
     module_name="local_ci_bootstrap_module_aliases",
     add_module_dir=True,
 )

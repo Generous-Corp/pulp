@@ -3,15 +3,13 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import unittest
 
-from module_test_utils import load_module_from_path
+from module_test_utils import load_local_ci_module
 
 
-MODULE_PATH = Path(__file__).with_name("local_ci_bootstrap_private_seams.py")
-private_seams = load_module_from_path(
-    MODULE_PATH,
+private_seams = load_local_ci_module(
+    "local_ci_bootstrap_private_seams.py",
     module_name="local_ci_bootstrap_private_seams",
     add_module_dir=True,
 )
