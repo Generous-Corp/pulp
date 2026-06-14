@@ -28,13 +28,14 @@ class GithubWorkflowResolutionBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.GITHUB_WORKFLOW_RESOLUTION_EXPORTS, expected)
         self.assertEqual(len(expected), len(set(expected)))
 
-    def test_install_resolution_helpers_routes_each_group(self):
+    def test_install_resolution_helpers_routes_each_group_and_unknown_exports(self):
         bindings = {}
 
         with (
             mock.patch.object(self.mod, "install_github_workflow_settings_helpers") as install_settings,
             mock.patch.object(self.mod, "install_github_workflow_dispatch_helpers") as install_dispatch,
             mock.patch.object(self.mod, "install_github_workflow_provider_helpers") as install_provider,
+            mock.patch.object(self.mod, "install_local_helpers") as install_local,
         ):
             self.mod.install_github_workflow_resolution_helpers(
                 bindings,
@@ -42,19 +43,13 @@ class GithubWorkflowResolutionBindingsTests(unittest.TestCase):
                     "resolve_github_actions_settings",
                     "resolve_cli_dispatch_field_values",
                     "resolve_default_provider_for_workflow",
+                    "custom",
                 ),
             )
 
         install_settings.assert_called_once_with(bindings, ("resolve_github_actions_settings",))
         install_dispatch.assert_called_once_with(bindings, ("resolve_cli_dispatch_field_values",))
         install_provider.assert_called_once_with(bindings, ("resolve_default_provider_for_workflow",))
-
-    def test_install_resolution_helpers_preserves_unknown_fallbacks(self):
-        bindings = {"custom": object()}
-
-        with mock.patch.object(self.mod, "install_local_helpers") as install_local:
-            self.mod.install_github_workflow_resolution_helpers(bindings, ("custom",))
-
         install_local.assert_called_once_with(bindings, self.mod.__dict__, ("custom",))
 
 

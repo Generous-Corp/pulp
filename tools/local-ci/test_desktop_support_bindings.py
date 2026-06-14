@@ -30,29 +30,23 @@ class DesktopSupportBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.DESKTOP_SUPPORT_EXPORTS, expected)
         self.assertEqual(len(expected), len(set(expected)))
 
-    def test_install_desktop_support_helpers_routes_each_group(self) -> None:
+    def test_install_desktop_support_helpers_routes_each_group_and_unknown_exports(self) -> None:
         bindings = {}
 
         with (
             mock.patch.object(self.mod, "install_desktop_artifact_helpers") as install_artifact,
             mock.patch.object(self.mod, "install_desktop_doctor_helpers") as install_doctor,
             mock.patch.object(self.mod, "install_desktop_action_support_helpers") as install_action,
+            mock.patch.object(self.mod, "install_local_helpers") as install_local,
         ):
             self.mod.install_desktop_support_helpers(
                 bindings,
-                ("desktop_artifact_root", "webdriver_status_url", "default_desktop_label"),
+                ("desktop_artifact_root", "webdriver_status_url", "default_desktop_label", "custom"),
             )
 
         install_artifact.assert_called_once_with(bindings, ("desktop_artifact_root",))
         install_doctor.assert_called_once_with(bindings, ("webdriver_status_url",))
         install_action.assert_called_once_with(bindings, ("default_desktop_label",))
-
-    def test_install_desktop_support_helpers_preserves_unknown_fallbacks(self) -> None:
-        bindings = {"custom": object()}
-
-        with mock.patch.object(self.mod, "install_local_helpers") as install_local:
-            self.mod.install_desktop_support_helpers(bindings, ("custom",))
-
         install_local.assert_called_once_with(bindings, self.mod.__dict__, ("custom",))
 
 

@@ -28,13 +28,14 @@ class LinuxTargetCommandBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.LINUX_TARGET_COMMAND_EXPORTS, expected)
         self.assertEqual(len(expected), len(set(expected)))
 
-    def test_install_linux_target_command_helpers_routes_each_group(self) -> None:
+    def test_install_linux_target_command_helpers_routes_each_group_and_unknown_exports(self) -> None:
         bindings = {}
 
         with (
             mock.patch.object(self.mod, "install_linux_target_bundle_helpers") as install_bundle,
             mock.patch.object(self.mod, "install_linux_target_xvfb_command_helpers") as install_xvfb,
             mock.patch.object(self.mod, "install_linux_target_window_command_helpers") as install_window,
+            mock.patch.object(self.mod, "install_local_helpers") as install_local,
         ):
             self.mod.install_linux_target_command_helpers(
                 bindings,
@@ -42,19 +43,13 @@ class LinuxTargetCommandBindingsTests(unittest.TestCase):
                     "remote_linux_bundle_relpath",
                     "build_linux_xvfb_remote_command",
                     "build_linux_window_driver_remote_command",
+                    "custom",
                 ),
             )
 
         install_bundle.assert_called_once_with(bindings, ("remote_linux_bundle_relpath",))
         install_xvfb.assert_called_once_with(bindings, ("build_linux_xvfb_remote_command",))
         install_window.assert_called_once_with(bindings, ("build_linux_window_driver_remote_command",))
-
-    def test_install_linux_target_command_helpers_preserves_unknown_fallbacks(self) -> None:
-        bindings = {"custom": object()}
-
-        with mock.patch.object(self.mod, "install_local_helpers") as install_local:
-            self.mod.install_linux_target_command_helpers(bindings, ("custom",))
-
         install_local.assert_called_once_with(bindings, self.mod.__dict__, ("custom",))
 
 
