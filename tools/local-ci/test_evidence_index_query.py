@@ -6,19 +6,15 @@ from __future__ import annotations
 from pathlib import Path
 import unittest
 
-from module_test_utils import load_module_from_path
-
-
-CORE_PATH = Path(__file__).with_name("evidence_index_core.py")
-MODULE_PATH = Path(__file__).with_name("evidence_index_query.py")
+from module_test_utils import load_local_ci_module
 
 
 def load_core_module():
-    return load_module_from_path(CORE_PATH, module_name="pulp_evidence_index_core_for_query", add_module_dir=True)
+    return load_local_ci_module("evidence_index_core.py", module_name="pulp_evidence_index_core_for_query", add_module_dir=True)
 
 
 def load_module():
-    return load_module_from_path(MODULE_PATH, module_name="pulp_evidence_index_query", add_module_dir=True)
+    return load_local_ci_module("evidence_index_query.py", module_name="pulp_evidence_index_query", add_module_dir=True)
 
 
 class EvidenceIndexQueryTests(unittest.TestCase):

@@ -5,17 +5,14 @@ from __future__ import annotations
 
 from contextlib import redirect_stdout
 import io
-from pathlib import Path
 import unittest
 
-from module_test_utils import load_module_from_path
+from module_test_utils import load_local_ci_module
 
-
-MODULE_PATH = Path(__file__).with_name("evidence_index_display.py")
 
 
 def load_module():
-    return load_module_from_path(MODULE_PATH, module_name="pulp_evidence_index_display", add_module_dir=True)
+    return load_local_ci_module("evidence_index_display.py", module_name="pulp_evidence_index_display", add_module_dir=True)
 
 
 class EvidenceIndexDisplayTests(unittest.TestCase):

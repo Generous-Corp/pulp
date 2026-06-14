@@ -2,17 +2,14 @@
 from __future__ import annotations
 
 from argparse import Namespace
-from pathlib import Path
 import unittest
 
-from module_test_utils import load_module_from_path
+from module_test_utils import load_local_ci_module
 
-
-MODULE_PATH = Path(__file__).resolve().with_name("evidence_cli.py")
 
 
 def load_evidence_cli_module():
-    return load_module_from_path(MODULE_PATH)
+    return load_local_ci_module("evidence_cli.py")
 
 
 class EvidenceCliTests(unittest.TestCase):
