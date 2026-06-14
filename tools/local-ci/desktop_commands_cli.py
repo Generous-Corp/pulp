@@ -2092,6 +2092,20 @@ def _review_watch_once(
             and cached.get("updated_at") == updated_at
         )
         if unchanged:
+            manifest = _review_manifest_for_issue(listed, manifest_map)
+            action = "approved" if cached.get("approved") else "needs-work" if cached.get("needs_work") else None
+            cached_needs_work_comment = cached.get("needs_work_comment")
+            verdict_command = (
+                _review_verdict_command(
+                    issue_url,
+                    manifest,
+                    status=action,
+                    close_issue=bool(getattr(args, "close_issue", False)),
+                    notes=_review_comment_notes(cached_needs_work_comment) if isinstance(cached_needs_work_comment, dict) else None,
+                )
+                if action in {"approved", "needs-work"} and manifest
+                else cached.get("verdict_command")
+            )
             skipped_count += 1
             issues.append(
                 {
@@ -2104,7 +2118,8 @@ def _review_watch_once(
                     "needs_work": bool(cached.get("needs_work")),
                     "approval_comment": cached.get("approval_comment"),
                     "needs_work_comment": cached.get("needs_work_comment"),
-                    "verdict_command": cached.get("verdict_command"),
+                    "manifest": manifest,
+                    "verdict_command": verdict_command,
                 }
             )
             continue

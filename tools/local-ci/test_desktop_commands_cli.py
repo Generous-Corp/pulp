@@ -2235,6 +2235,87 @@ class DesktopCommandsCliTests(unittest.TestCase):
             self.assertIn("--notes 'Needs changes: recapture after centering the component'", issue["verdict_command"])
             self.assertNotIn("--close-issue", issue["verdict_command"])
 
+    def test_review_watch_recomputes_cached_verdict_when_manifest_map_arrives(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_file = Path(tmpdir) / "review-watch.json"
+            manifest_map = Path(tmpdir) / "manifest-map.json"
+            manifest_map.write_text(json.dumps({"126": "/tmp/run/manifest.json"}) + "\n")
+            listed = [
+                {
+                    "number": 126,
+                    "title": "Review validation proof",
+                    "url": "https://github.com/danielraffel/pulp/issues/126",
+                    "updatedAt": "2026-06-14T12:03:00Z",
+                }
+            ]
+            viewed = {
+                "state": "OPEN",
+                "number": 126,
+                "title": "Review validation proof",
+                "url": "https://github.com/danielraffel/pulp/issues/126",
+                "updatedAt": "2026-06-14T12:03:00Z",
+                "comments": [
+                    {"body": "Looks good to me", "author": {"login": "daniel"}, "url": "https://example/comment/4"}
+                ],
+            }
+            calls = []
+
+            def run_fn(argv, **_kwargs):
+                calls.append(argv)
+                if argv[:3] == ["gh", "issue", "list"]:
+                    return subprocess.CompletedProcess(argv, 0, json.dumps(listed), "")
+                if argv[:3] == ["gh", "issue", "view"]:
+                    return subprocess.CompletedProcess(argv, 0, json.dumps(viewed), "")
+                self.fail(f"unexpected command: {argv}")
+
+            first_args = Namespace(
+                repo="danielraffel/pulp",
+                label="video-review",
+                state="open",
+                state_file=str(state_file),
+                manifest_map=None,
+                refresh=False,
+                close_issue=False,
+                interval=0.0,
+                max_iterations=1,
+                json=True,
+            )
+            result = self.mod.cmd_desktop_review_watch(first_args, run_fn=run_fn, print_fn=self.print_line)
+
+            self.assertEqual(result, 0)
+            first_payload = json.loads(self.printed[-1])
+            self.assertTrue(first_payload["issues"][0]["approved"])
+            self.assertIsNone(first_payload["issues"][0]["verdict_command"])
+            self.assertEqual(sum(1 for call in calls if call[:3] == ["gh", "issue", "view"]), 1)
+
+            self.printed.clear()
+            calls.clear()
+            second_args = Namespace(
+                repo="danielraffel/pulp",
+                label="video-review",
+                state="open",
+                state_file=str(state_file),
+                manifest_map=str(manifest_map),
+                refresh=False,
+                close_issue=True,
+                interval=0.0,
+                max_iterations=1,
+                json=True,
+            )
+            result = self.mod.cmd_desktop_review_watch(second_args, run_fn=run_fn, print_fn=self.print_line)
+
+            self.assertEqual(result, 0)
+            second_payload = json.loads(self.printed[-1])
+            self.assertEqual(second_payload["checked_count"], 0)
+            self.assertEqual(second_payload["skipped_unchanged_count"], 1)
+            issue = second_payload["issues"][0]
+            self.assertEqual(issue["manifest"], "/tmp/run/manifest.json")
+            self.assertIn("--approved", issue["verdict_command"])
+            self.assertIn("/tmp/run/manifest.json", issue["verdict_command"])
+            self.assertIn("--issue-url https://github.com/danielraffel/pulp/issues/126", issue["verdict_command"])
+            self.assertIn("--close-issue", issue["verdict_command"])
+            self.assertEqual(sum(1 for call in calls if call[:3] == ["gh", "issue", "view"]), 0)
+
     def test_review_watch_reports_gh_and_manifest_map_errors(self):
         result = self.mod.cmd_desktop_review_watch(
             Namespace(
