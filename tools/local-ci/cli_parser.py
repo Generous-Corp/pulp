@@ -475,6 +475,11 @@ def build_local_ci_parser(
         ],
         help="Filter matrix to one named scenario.",
     )
+    p_desktop_video_matrix.add_argument(
+        "--status",
+        choices=["ready", "partial", "planned", "blocked"],
+        help="Filter by declared scenario status, or by machine-local readiness status when --check is used.",
+    )
     p_desktop_video_matrix.add_argument("--markdown", action="store_true", help="Emit markdown suitable for a handoff or review issue")
     p_desktop_video_matrix.add_argument("--check", action="store_true", help="Include lightweight machine-local readiness checks for each scenario")
     p_desktop_video_matrix.add_argument("--json", action="store_true", help="Emit machine-readable JSON")

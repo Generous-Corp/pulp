@@ -449,6 +449,8 @@ class CliParserTests(unittest.TestCase):
             "mac",
             "--scenario",
             "component-zoom",
+            "--status",
+            "blocked",
             "--markdown",
             "--check",
         ])
@@ -456,6 +458,7 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(args.desktop_command, "video-matrix")
         self.assertEqual(args.target, "mac")
         self.assertEqual(args.scenario, "component-zoom")
+        self.assertEqual(args.status, "blocked")
         self.assertTrue(args.markdown)
         self.assertTrue(args.check)
         self.assertFalse(args.json)

@@ -387,12 +387,16 @@ template, doctor command, concrete Release prepare command, recording/compose
 command, publish command, review-issue command, background serve/status/stop
 commands, and what a reviewer should look for. Use `--target mac`, `--target
 ubuntu`, `--target windows`, `--target ios-simulator`, `--scenario
-audio-inspector-demo`, `--scenario component-zoom`, or `--json` when an agent
-needs a narrower machine-readable plan. Add `--check` to include lightweight
-machine-local readiness checks, such as whether `cmake`, the in-tree
+audio-inspector-demo`, `--scenario component-zoom`, `--status ready`, or
+`--json` when an agent needs a narrower machine-readable plan. Add `--check`
+to include lightweight machine-local readiness checks, such as whether `cmake`,
+the in-tree
 audio-inspector demo source, `adb`, `xcrun`, REAPER, or
 `external/skia-build/libskia.a` are available before attempting a demo. The
 failed checks include remediation text with the next setup step. The
+status filter uses declared matrix status by default; with `--check`, it uses
+computed local readiness, so `--target mac --status ready --check` prints the
+macOS proofs this machine can run now. The
 `audio-inspector-demo` row is the fast no-GPU macOS proof path and does not
 require Skia. The iOS Simulator row uses the working
 `simulator video` recorder. The

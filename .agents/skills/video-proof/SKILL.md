@@ -420,12 +420,14 @@ the current macOS lane, `--target ios-simulator` narrows to simulator capture,
 `--target android-emulator` narrows to Android capture, `--target ubuntu` and
 `--target windows` show the planned Linux/Xvfb and Windows/session-agent rows,
 `--scenario audio-inspector-demo` selects the fast no-GPU audio-inspector proof,
-`--scenario component-zoom` prints one row, and `--json` is suitable for
-automation. Add `--check` on a fresh machine or blackbook to include
-machine-local readiness checks for obvious blockers such as missing `cmake`,
-the in-tree audio-inspector demo source, `adb`, `xcrun`, REAPER, or
+`--scenario component-zoom` prints one row, `--status ready` filters by status,
+and `--json` is suitable for automation. Add `--check` on a fresh machine or
+blackbook to include machine-local readiness checks for obvious blockers such
+as missing `cmake`, the in-tree audio-inspector demo source, `adb`, `xcrun`, REAPER, or
 `external/skia-build/libskia.a`. Failed checks include remediation text with the
-next setup step. The matrix carries
+next setup step. With `--check`, `--status` filters by computed local readiness
+instead of declared status, so `--target mac --status ready --check` is the
+quick "what can I record here?" query. The matrix carries
 readiness status, Remotion template, doctor command, concrete Release prepare
 command, recording/compose command,
 publish/review-issue commands, background serve/status/stop commands, and

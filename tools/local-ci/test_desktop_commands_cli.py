@@ -162,6 +162,7 @@ class DesktopCommandsCliTests(unittest.TestCase):
         self.assertEqual(result, 0)
         text = "\n".join(self.printed)
         self.assertIn("Desktop validation video proof demo matrix:", text)
+        self.assertIn("status: all (declared)", text)
         self.assertIn("component-zoom [ready]", text)
         self.assertIn("--recipe component-zoom", text)
         self.assertIn("build-desktop-automation/examples/ui-preview/pulp-ui-preview", text)
@@ -187,6 +188,8 @@ class DesktopCommandsCliTests(unittest.TestCase):
         self.assertEqual(result, 0)
         payload = json.loads(self.printed[0])
         self.assertEqual(payload["kind"], "desktop-video-proof-demo-matrix")
+        self.assertEqual(payload["status"], "all")
+        self.assertEqual(payload["status_basis"], "declared")
         self.assertEqual(payload["scenario_count"], 10)
         self.assertIn("reaper-plugin-editor", {item["id"] for item in payload["scenarios"]})
         reaper = next(item for item in payload["scenarios"] if item["id"] == "reaper-plugin-editor")
@@ -287,6 +290,60 @@ class DesktopCommandsCliTests(unittest.TestCase):
                 which_fn=lambda name: "/usr/bin/cmake" if name == "cmake" else None,
             )
             self.assertEqual(payload["scenarios"][0]["local_readiness"]["status"], "ready")
+
+    def test_desktop_video_matrix_filters_by_status(self):
+        static_payload = self.mod.desktop_video_matrix_payload(
+            target="mac",
+            status="partial",
+        )
+        self.assertFalse(static_payload["checked"])
+        self.assertEqual(static_payload["status"], "partial")
+        self.assertEqual(static_payload["status_basis"], "declared")
+        self.assertEqual([item["id"] for item in static_payload["scenarios"]], ["reaper-plugin-editor"])
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_root = Path(tmpdir)
+            (repo_root / "examples" / "audio-inspector-demo").mkdir(parents=True)
+            checked_payload = self.mod.desktop_video_matrix_payload(
+                target="mac",
+                status="ready",
+                check=True,
+                repo_root=repo_root,
+                which_fn=lambda name: "/usr/bin/cmake" if name == "cmake" else None,
+            )
+            self.assertTrue(checked_payload["checked"])
+            self.assertEqual(checked_payload["status"], "ready")
+            self.assertEqual(checked_payload["status_basis"], "local_readiness")
+            ids = {item["id"] for item in checked_payload["scenarios"]}
+            self.assertIn("audio-inspector-demo", ids)
+            self.assertIn("inspector-workflow", ids)
+            self.assertNotIn("component-zoom", ids)
+            self.assertNotIn("standalone-interaction", ids)
+
+            blocked_payload = self.mod.desktop_video_matrix_payload(
+                target="mac",
+                status="blocked",
+                check=True,
+                repo_root=repo_root,
+                which_fn=lambda name: "/usr/bin/cmake" if name == "cmake" else None,
+            )
+            blocked_ids = {item["id"] for item in blocked_payload["scenarios"]}
+            self.assertIn("component-zoom", blocked_ids)
+            self.assertIn("standalone-interaction", blocked_ids)
+            self.assertNotIn("audio-inspector-demo", blocked_ids)
+            for row in blocked_payload["scenarios"]:
+                self.assertEqual(row["local_readiness"]["status"], "blocked")
+
+        self.printed.clear()
+        result = self.mod.cmd_desktop_video_matrix(
+            Namespace(target="windows", scenario=None, status="ready", json=False, markdown=True, check=False),
+            print_fn=self.print_line,
+        )
+        self.assertEqual(result, 0)
+        markdown = self.printed[0]
+        self.assertIn("Status filter: `ready` (`declared`)", markdown)
+        self.assertIn("No scenarios matched", markdown)
+        self.assertIn("Add `--check`", markdown)
 
     def test_find_executable_path_uses_common_fallbacks(self):
         with tempfile.TemporaryDirectory() as tmpdir:

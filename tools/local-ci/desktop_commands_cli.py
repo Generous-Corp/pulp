@@ -626,6 +626,7 @@ def desktop_video_matrix_payload(
     *,
     target: str | None = None,
     scenario: str | None = None,
+    status: str | None = None,
     check: bool = False,
     repo_root: Path | None = None,
     which_fn: Callable[[str], str | None] = shutil.which,
@@ -640,6 +641,9 @@ def desktop_video_matrix_payload(
         row = {key: value for key, value in item.items()}
         if check:
             row["local_readiness"] = _video_matrix_check(row, repo_root=root, which_fn=which_fn)
+        status_value = row.get("local_readiness", {}).get("status") if check else row.get("status")
+        if status and status_value != status:
+            continue
         label = row["id"]
         report_placeholder = f"/path/to/published-reports/{label}"
         manifest_placeholder = "/path/to/run/manifest.json"
@@ -681,6 +685,8 @@ def desktop_video_matrix_payload(
         "kind": "desktop-video-proof-demo-matrix",
         "target": target or "all",
         "scenario": scenario or "all",
+        "status": status or "all",
+        "status_basis": "local_readiness" if check else "declared",
         "checked": check,
         "scenario_count": len(scenarios),
         "scenarios": scenarios,
@@ -691,8 +697,14 @@ def desktop_video_matrix_lines(payload: dict) -> list[str]:
     lines = [
         "Desktop validation video proof demo matrix:",
         f"  target: {payload.get('target')}",
+        f"  status: {payload.get('status')} ({payload.get('status_basis')})",
         f"  scenarios: {payload.get('scenario_count')}",
     ]
+    if not payload.get("scenarios"):
+        lines.append("  no scenarios matched the selected filters")
+        if payload.get("status") != "all" and not payload.get("checked"):
+            lines.append("  tip: add --check to filter by machine-local readiness instead of declared matrix status")
+        return lines
     for item in payload.get("scenarios", []):
         lines.extend(
             [
@@ -737,9 +749,20 @@ def desktop_video_matrix_markdown(payload: dict) -> str:
         "# Desktop Validation Video Proof Demo Matrix",
         "",
         f"- Target: `{payload.get('target')}`",
+        f"- Status filter: `{payload.get('status')}` (`{payload.get('status_basis')}`)",
         f"- Scenarios: `{payload.get('scenario_count')}`",
         "",
     ]
+    if not payload.get("scenarios"):
+        lines.append("_No scenarios matched the selected filters._")
+        if payload.get("status") != "all" and not payload.get("checked"):
+            lines.extend(
+                [
+                    "",
+                    "Add `--check` to filter by machine-local readiness instead of the declared matrix status.",
+                ]
+            )
+        return "\n".join(lines).rstrip() + "\n"
     for item in payload.get("scenarios", []):
         lines.extend(
             [
@@ -801,6 +824,7 @@ def cmd_desktop_video_matrix(
     payload = desktop_video_matrix_payload(
         target=getattr(args, "target", None) or None,
         scenario=getattr(args, "scenario", None) or None,
+        status=getattr(args, "status", None) or None,
         check=getattr(args, "check", False),
     )
     if getattr(args, "json", False):
