@@ -258,6 +258,35 @@ For unattended/turnkey remote signing, prefer a **dedicated build keychain**
 login password — the same pattern `apple-actions/import-codesign-certs` uses in
 CI.
 
+**Dedicated-keychain recipe that actually works when the login keychain ALSO has
+the cert** (the macstudio case — the GUI host has the same Developer ID identity):
+
+1. Export the identity to a `.p12` once on a Mac where it works — the private-key
+   export needs a GUI "Allow" click, so the *user* runs it (`security export -k
+   login.keychain-db -t identities -f pkcs12 -P <p12pw> -o key.p12`); it can't be
+   done headlessly.
+2. On the remote Mac: `security create-keychain -p <kcpw> pulp-signing.keychain-db`;
+   `unlock-keychain`; `security import key.p12 -k <kc> -P <p12pw> -T /usr/bin/codesign
+   -T /usr/bin/productbuild -T /usr/bin/pkgbuild`; `set-key-partition-list -S
+   apple-tool:,apple:,codesign: -s -k <kcpw> <kc>`. Store `<kcpw>` + the cert SHA-1
+   hashes in `~/.config/pulp/secrets/keychain.env`.
+3. **Sign by SHA-1 hash, not by name.** The identity now exists in BOTH the
+   dedicated keychain and login keychain, so signing by name → `ambiguous (matches
+   ... in two keychains)`. Signing by the 40-char hash disambiguates.
+4. **The dedicated keychain MUST be in the search list** for codesign to find the
+   identity — `--keychain <kc>` alone does NOT restrict lookup (codesign still uses
+   the search list and hits the *locked* login cert → `errSecInternalComponent`).
+   Put it FRONT of the search list for the signing call, then restore:
+   `security list-keychains -d user -s <kc> <login>` → sign → `... -s <login>`.
+   Safe on a CI-runner host because the Mac Studio runner only builds+tests; the
+   signing/release lanes run on GitHub-hosted (it never signs, so a transient
+   search-list change can't break the required `macos` gate).
+
+`~/.config/pulp/pulp-sign.sh` wraps steps 3–4 (inner-out, by hash, restore) and
+falls back to login-keychain-by-name when no `keychain.env` exists. Deployed on
+both Daniel's Macs; notary + signing creds live only in `~/.config/pulp/secrets/`
+(chmod 600, never in the repo).
+
 **Sign inner-out.** Pulp GPU bundles embed `libwgpu_native.dylib` in
 `Contents/MacOS/`. Sign every embedded dylib BEFORE the bundle, else you get
 `invalid or unsupported format for signature` / `code has no resources but
