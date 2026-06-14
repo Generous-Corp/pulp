@@ -1,17 +1,14 @@
 #!/usr/bin/env python3
 """Tests for desktop Windows repo checkout ensure bindings."""
 
-from module_test_utils import load_module_from_path
+from module_test_utils import load_local_ci_module
 import types
 import unittest
-from pathlib import Path
 
-
-MODULE_PATH = Path(__file__).with_name("desktop_windows_repo_checkout_ensure_bindings.py")
 
 
 def load_module():
-    return load_module_from_path(MODULE_PATH)
+    return load_local_ci_module("desktop_windows_repo_checkout_ensure_bindings.py")
 
 
 class DesktopWindowsRepoCheckoutEnsureBindingsTests(unittest.TestCase):
