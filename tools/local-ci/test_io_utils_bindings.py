@@ -6,11 +6,13 @@ from __future__ import annotations
 from pathlib import Path
 import unittest
 
-from module_test_utils import load_module_from_path
+from module_test_utils import load_local_ci_module
 
-
-MODULE_PATH = Path(__file__).with_name("io_utils_bindings.py")
-io_utils_bindings = load_module_from_path(MODULE_PATH, module_name="io_utils_bindings", add_module_dir=True)
+io_utils_bindings = load_local_ci_module(
+    "io_utils_bindings.py",
+    module_name="io_utils_bindings",
+    add_module_dir=True,
+)
 
 
 class FakeIoUtils:

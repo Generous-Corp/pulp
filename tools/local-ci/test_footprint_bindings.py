@@ -6,11 +6,13 @@ from __future__ import annotations
 from pathlib import Path
 import unittest
 
-from module_test_utils import load_module_from_path
+from module_test_utils import load_local_ci_module
 
-
-MODULE_PATH = Path(__file__).with_name("footprint_bindings.py")
-footprint_bindings = load_module_from_path(MODULE_PATH, module_name="footprint_bindings", add_module_dir=True)
+footprint_bindings = load_local_ci_module(
+    "footprint_bindings.py",
+    module_name="footprint_bindings",
+    add_module_dir=True,
+)
 
 
 class FakeFootprint:

@@ -3,18 +3,15 @@
 
 from __future__ import annotations
 
-from module_test_utils import load_module_from_path
-import pathlib
+from module_test_utils import load_local_ci_module
 import types
 import unittest
 from unittest import mock
 
 
-MODULE_PATH = pathlib.Path(__file__).with_name("cli_parser_bindings.py")
-
 
 def load_module():
-    return load_module_from_path(MODULE_PATH)
+    return load_local_ci_module("cli_parser_bindings.py")
 
 
 class CliParserBindingTests(unittest.TestCase):

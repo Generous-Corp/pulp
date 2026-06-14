@@ -6,12 +6,10 @@ from __future__ import annotations
 from pathlib import Path
 import unittest
 
-from module_test_utils import load_module_from_path
+from module_test_utils import load_local_ci_module
 
-
-MODULE_PATH = Path(__file__).with_name("git_ref_helpers_bindings.py")
-git_ref_helpers_bindings = load_module_from_path(
-    MODULE_PATH,
+git_ref_helpers_bindings = load_local_ci_module(
+    "git_ref_helpers_bindings.py",
     module_name="git_ref_helpers_bindings",
     add_module_dir=True,
 )

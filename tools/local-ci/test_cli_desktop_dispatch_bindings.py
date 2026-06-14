@@ -1,17 +1,14 @@
 #!/usr/bin/env python3
 """Tests for desktop CLI dispatch dependency bindings."""
 
-from module_test_utils import load_module_from_path
+from module_test_utils import load_local_ci_module
 import types
 import unittest
-from pathlib import Path
 
-
-MODULE_PATH = Path(__file__).with_name("cli_desktop_dispatch_bindings.py")
 
 
 def load_module():
-    return load_module_from_path(MODULE_PATH)
+    return load_local_ci_module("cli_desktop_dispatch_bindings.py")
 
 
 class CliDesktopDispatchBindingsTests(unittest.TestCase):
