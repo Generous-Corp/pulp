@@ -3,23 +3,18 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import unittest
 
-from module_test_utils import load_module_from_path
-
-
-MODULE_PATH = Path(__file__).with_name("queue_reconcile_lifecycle.py")
-ORCHESTRATOR_PATH = Path(__file__).with_name("queue_orchestrator.py")
+from module_test_utils import load_local_ci_module
 
 
 def load_module():
-    return load_module_from_path(MODULE_PATH, module_name="pulp_queue_reconcile_lifecycle")
+    return load_local_ci_module("queue_reconcile_lifecycle.py", module_name="pulp_queue_reconcile_lifecycle")
 
 
 def load_orchestrator_module():
-    return load_module_from_path(
-        ORCHESTRATOR_PATH,
+    return load_local_ci_module(
+        "queue_orchestrator.py",
         module_name="pulp_queue_orchestrator_for_reconcile_lifecycle_tests",
         add_module_dir=True,
     )

@@ -7,14 +7,12 @@ from contextlib import contextmanager
 from pathlib import Path
 import unittest
 
-from module_test_utils import load_module_from_path
+from module_test_utils import load_local_ci_module
 
-
-MODULE_PATH = Path(__file__).with_name("queue_enqueue_lifecycle.py")
 
 
 def load_module():
-    return load_module_from_path(MODULE_PATH, module_name="pulp_queue_enqueue_lifecycle")
+    return load_local_ci_module("queue_enqueue_lifecycle.py", module_name="pulp_queue_enqueue_lifecycle")
 
 
 @contextmanager
