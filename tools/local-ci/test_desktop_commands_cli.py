@@ -1745,6 +1745,7 @@ class DesktopCommandsCliTests(unittest.TestCase):
             draft_json = json.loads((report_dir / "github-issue.json").read_text())
             self.assertEqual(draft_json["issue_url"], "https://github.com/danielraffel/pulp/issues/123")
             self.assertEqual(draft_json["manifest_map"]["path"], str(manifest_map_path.resolve()))
+            self.assertEqual(draft_json["manifest_map"]["status"], "written")
             self.assertIsNone(draft_json["manifest_map"]["error"])
             manifest_map = json.loads(manifest_map_path.read_text())
             self.assertEqual(
@@ -1763,6 +1764,57 @@ class DesktopCommandsCliTests(unittest.TestCase):
             self.assertTrue(any("attachments: 1" in line for line in self.printed))
             self.assertTrue(any("issue_url: https://github.com/danielraffel/pulp/issues/123" in line for line in self.printed))
             self.assertTrue(any(f"manifest_map: {manifest_map_path.resolve()}" in line for line in self.printed))
+
+    def test_review_issue_manifest_map_output_requires_create(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            report_dir = Path(tmpdir) / "report"
+            report_dir.mkdir()
+            run_dir = report_dir / "runs" / "component"
+            run_dir.mkdir(parents=True)
+            (run_dir / "manifest.json").write_text("{}\n")
+            package_path = report_dir / "review-package.json"
+            package_path.write_text(
+                json.dumps({"label": "Video Proof", "runs": [{"bundle_dir": str(run_dir)}]}) + "\n"
+            )
+            manifest_map_path = report_dir / "review-manifest-map.json"
+
+            result = self.mod.cmd_desktop_review_issue(
+                Namespace(
+                    path=str(report_dir),
+                    title=None,
+                    repo="danielraffel/pulp",
+                    body_output=None,
+                    json_output=None,
+                    manifest_map_output=str(manifest_map_path),
+                    check_files=False,
+                    create=False,
+                    label=[],
+                    assignee=[],
+                    json=True,
+                ),
+                desktop_review_issue_draft_fn=lambda _package, **_kwargs: {
+                    "kind": "desktop-video-proof-github-issue-draft",
+                    "title": "Review video",
+                    "body": "# Review video\n",
+                    "body_file": str(report_dir / "github-issue.md"),
+                    "json_file": str(report_dir / "github-issue.json"),
+                    "attachments": [],
+                    "fallback_links": [],
+                    "create_command": "gh issue create --repo danielraffel/pulp --title Review --body-file github-issue.md",
+                },
+                atomic_write_text_fn=lambda path, text: path.write_text(text),
+                run_fn=lambda *_args, **_kwargs: self.fail("gh should not run for draft-only review issue"),
+                print_fn=self.print_line,
+            )
+
+            self.assertEqual(result, 0)
+            self.assertFalse(manifest_map_path.exists())
+            payload = json.loads(self.printed[-1])
+            self.assertNotIn("manifest_map_file", payload)
+            self.assertEqual(payload["manifest_map"]["path"], str(manifest_map_path.resolve()))
+            self.assertEqual(payload["manifest_map"]["entries"], {})
+            self.assertIsNone(payload["manifest_map"]["error"])
+            self.assertEqual(payload["manifest_map"]["status"], "requires-create")
 
     def test_review_issue_create_failure_writes_failed_draft_json(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1868,6 +1920,7 @@ class DesktopCommandsCliTests(unittest.TestCase):
             payload = json.loads(self.printed[-1])
             self.assertEqual(payload["manifest_map"]["entries"], {})
             self.assertEqual(payload["manifest_map"]["error"], "expected exactly one run manifest, found 2")
+            self.assertEqual(payload["manifest_map"]["status"], "skipped")
 
     def test_review_status_detects_approval_and_suggests_verdict(self):
         issue_payload = {

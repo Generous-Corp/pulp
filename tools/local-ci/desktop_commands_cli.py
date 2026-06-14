@@ -1733,7 +1733,12 @@ def cmd_desktop_review_issue(
     draft["body_file"] = str(body_path)
     draft["json_file"] = str(json_path)
     if manifest_map_path:
-        draft["manifest_map_file"] = str(manifest_map_path)
+        draft["manifest_map"] = {
+            "path": str(manifest_map_path),
+            "entries": {},
+            "error": None,
+            "status": "pending-create" if getattr(args, "create", False) else "requires-create",
+        }
     atomic_write_text_fn(body_path, draft["body"])
     create_result = None
     if getattr(args, "create", False):
@@ -1765,6 +1770,7 @@ def cmd_desktop_review_issue(
                     "path": str(manifest_map_path),
                     "entries": manifest_map,
                     "error": manifest_map_error,
+                    "status": "written" if manifest_map else "skipped",
                 }
                 if manifest_map:
                     atomic_write_text_fn(manifest_map_path, json.dumps(manifest_map, indent=2) + "\n")
