@@ -6007,7 +6007,6 @@ if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA)
     target_compile_definitions(pulp-test-mac-platform-harness PRIVATE
         PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     catch_discover_tests(pulp-test-mac-platform-harness)
-
     # pulp #2088 — pin the invariant -[PulpView liveFocusedView] depends on:
     # ~View() must auto-clear focused_input_ (#1708 contract) so the
     # accessor can safely re-sync the ivar to nullptr before any deref.
@@ -6020,7 +6019,6 @@ if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA)
     )
     catch_discover_tests(pulp-test-mac-mousedown-stale-focus)
 endif()
-
 if(APPLE AND NOT PULP_IOS)
     # pulp #2128 — pin macOS performKeyEquivalent routing, text-input
     # protocol conformance, and TextEditor-specific command priority.

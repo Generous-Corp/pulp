@@ -200,12 +200,21 @@ def local_host_availability(
     planned_lanes: list[PlannedLane],
     *,
     applications_dir: pathlib.Path = pathlib.Path("/Applications"),
+    host_app_overrides: dict[str, pathlib.Path] | None = None,
 ) -> dict[str, HostAvailability]:
     hosts = sorted({lane.host for lane in planned_lanes})
     availability: dict[str, HostAvailability] = {}
+    host_app_overrides = host_app_overrides or {}
     is_macos = platform.system() == "Darwin" or applications_dir != pathlib.Path("/Applications")
 
     for host in hosts:
+        override = host_app_overrides.get(host.casefold())
+        if override is not None:
+            if override.is_dir():
+                availability[host] = HostAvailability("available", f"override {override.as_posix()}")
+            else:
+                availability[host] = HostAvailability("unavailable", f"override missing {override.as_posix()}")
+            continue
         if host == "AUM":
             availability[host] = HostAvailability(
                 "unavailable",
@@ -236,6 +245,20 @@ def local_host_availability(
                 "not found in " + applications_dir.as_posix(),
             )
     return availability
+
+
+def parse_host_app_overrides(values: list[str]) -> dict[str, pathlib.Path]:
+    overrides: dict[str, pathlib.Path] = {}
+    for value in values:
+        if "=" not in value:
+            raise ValueError(f"--host-app must be HOST=/path/to/App.app, got {value!r}")
+        host, path = value.split("=", 1)
+        host = host.strip()
+        path = path.strip()
+        if not host or not path:
+            raise ValueError(f"--host-app must be HOST=/path/to/App.app, got {value!r}")
+        overrides[host.casefold()] = pathlib.Path(path).expanduser()
+    return overrides
 
 
 def render_markdown(
@@ -395,13 +418,25 @@ def main(argv: list[str] | None = None) -> int:
                         help="annotate missing scripted lanes with local macOS host availability")
     parser.add_argument("--applications-dir", type=pathlib.Path, default=pathlib.Path("/Applications"),
                         help="macOS Applications directory used with --include-local-host-availability")
+    parser.add_argument("--host-app", action="append", default=[],
+                        metavar="HOST=/path/to/App.app",
+                        help="override local availability for a host installed outside --applications-dir")
     args = parser.parse_args(argv)
 
     summaries, results = load_summaries(args.paths, repo_root=args.repo_root)
     planned_lanes = load_scripted_lanes(args.scripts_dir, repo_root=args.repo_root)
     missing_lanes = missing_scripted_lanes(summaries, planned_lanes)
+    try:
+        host_app_overrides = parse_host_app_overrides(args.host_app)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
     availability = (
-        local_host_availability(planned_lanes, applications_dir=args.applications_dir)
+        local_host_availability(
+            planned_lanes,
+            applications_dir=args.applications_dir,
+            host_app_overrides=host_app_overrides,
+        )
         if args.include_local_host_availability
         else None
     )

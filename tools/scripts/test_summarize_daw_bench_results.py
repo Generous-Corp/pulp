@@ -238,6 +238,40 @@ class DawBenchSummaryTests(unittest.TestCase):
             self.assertIn("WaveLab 12.app", availability["Wavelab"].detail)
             self.assertEqual(availability["Bitwig Studio"].status, "unavailable")
 
+    def test_local_host_availability_accepts_explicit_host_app_override(self) -> None:
+        tmp_ctx = tempfile.TemporaryDirectory()
+        with tmp_ctx:
+            root = pathlib.Path(tmp_ctx.name)
+            custom_live = root / "External Apps" / "Ableton Live 12 Suite.app"
+            custom_live.mkdir(parents=True)
+            lanes = [
+                summary.PlannedLane("Ableton Live", "VST3", pathlib.Path("live.md")),
+                summary.PlannedLane("Bitwig Studio", "VST3", pathlib.Path("bitwig.md")),
+            ]
+            availability = summary.local_host_availability(
+                lanes,
+                applications_dir=root / "Applications",
+                host_app_overrides={
+                    "ableton live": custom_live,
+                    "bitwig studio": root / "Missing" / "Bitwig Studio.app",
+                },
+            )
+            self.assertEqual(availability["Ableton Live"].status, "available")
+            self.assertIn("override", availability["Ableton Live"].detail)
+            self.assertIn("Ableton Live 12 Suite.app", availability["Ableton Live"].detail)
+            self.assertEqual(availability["Bitwig Studio"].status, "unavailable")
+            self.assertIn("override missing", availability["Bitwig Studio"].detail)
+
+    def test_parse_host_app_overrides_rejects_bad_values(self) -> None:
+        self.assertEqual(
+            summary.parse_host_app_overrides(["Ableton Live=/Applications/Live.app"]),
+            {"ableton live": pathlib.Path("/Applications/Live.app")},
+        )
+        with self.assertRaises(ValueError):
+            summary.parse_host_app_overrides(["Ableton Live"])
+        with self.assertRaises(ValueError):
+            summary.parse_host_app_overrides(["=/Applications/Live.app"])
+
     def test_json_report_can_include_local_host_availability(self) -> None:
         tmp_ctx, root, result_dir = self._repo()
         with tmp_ctx:
@@ -265,6 +299,48 @@ class DawBenchSummaryTests(unittest.TestCase):
             self.assertIn("Logic Pro.app", missing[0]["local_host_detail"])
             self.assertEqual(missing[1]["host"], "AUM")
             self.assertEqual(missing[1]["local_host_status"], "unavailable")
+
+    def test_cli_json_report_can_include_host_app_override(self) -> None:
+        tmp_ctx, root, result_dir = self._repo()
+        with tmp_ctx:
+            custom_logic = root / "External Apps" / "Logic Pro.app"
+            custom_logic.mkdir(parents=True)
+            path = result_dir / "reaper-vst3.daw-bench.json"
+            path.write_text(json.dumps(_manifest()), encoding="utf-8")
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                rc = summary.main([
+                    str(result_dir),
+                    "--repo-root", str(root),
+                    "--scripts-dir", str(root / "docs" / "validation" / "daw-bench"),
+                    "--format", "json",
+                    "--require-any",
+                    "--include-local-host-availability",
+                    "--host-app", f"Logic Pro={custom_logic}",
+                ])
+            self.assertEqual(rc, 0)
+            data = json.loads(stdout.getvalue())
+            missing = data["scripted_lanes_without_manifests"]
+            self.assertEqual(missing[0]["host"], "Logic Pro")
+            self.assertEqual(missing[0]["local_host_status"], "available")
+            self.assertIn("override", missing[0]["local_host_detail"])
+
+    def test_cli_rejects_malformed_host_app_override(self) -> None:
+        tmp_ctx, root, result_dir = self._repo()
+        with tmp_ctx:
+            path = result_dir / "reaper-vst3.daw-bench.json"
+            path.write_text(json.dumps(_manifest()), encoding="utf-8")
+            with contextlib.redirect_stdout(io.StringIO()), \
+                 contextlib.redirect_stderr(io.StringIO()) as stderr:
+                rc = summary.main([
+                    str(result_dir),
+                    "--repo-root", str(root),
+                    "--scripts-dir", str(root / "docs" / "validation" / "daw-bench"),
+                    "--include-local-host-availability",
+                    "--host-app", "bad-override",
+                ])
+            self.assertEqual(rc, 2)
+            self.assertIn("--host-app must be HOST=", stderr.getvalue())
 
     def test_invalid_manifest_blocks_summary(self) -> None:
         tmp_ctx, root, result_dir = self._repo()

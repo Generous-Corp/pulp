@@ -9,6 +9,7 @@ import os
 import plistlib
 import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -179,6 +180,78 @@ def _check_codesign(bundle: Path) -> CheckResult:
     return CheckResult("codesign", True, output or "valid")
 
 
+def _check_signing_identity(bundle: Path, identity: str) -> CheckResult:
+    codesign = shutil.which("codesign")
+    if codesign is None:
+        return CheckResult("signing identity", False, "codesign not found")
+    with tempfile.TemporaryDirectory(prefix="pulp-au-signing-check-") as temp_dir:
+        temp_bundle = Path(temp_dir) / bundle.name
+        try:
+            shutil.copytree(bundle, temp_bundle, symlinks=True)
+        except OSError as exc:
+            return CheckResult("signing identity", False, f"cannot copy bundle: {exc}")
+        proc = subprocess.run(
+            [
+                codesign,
+                "--force",
+                "--deep",
+                "--sign",
+                identity,
+                "--timestamp=none",
+                "--options",
+                "runtime",
+                str(temp_bundle),
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+    output = proc.stdout.strip()
+    if proc.returncode != 0:
+        if "errSecInternalComponent" in output:
+            output += (
+                "\nprivate key access failed; unlock the keychain or configure "
+                "the key partition list for Apple signing tools"
+            )
+        return CheckResult("signing identity", False, output or "codesign signing failed")
+    return CheckResult("signing identity", True, identity)
+
+
+def _check_gatekeeper(bundle: Path) -> CheckResult:
+    spctl = shutil.which("spctl")
+    if spctl is None:
+        return CheckResult("gatekeeper", False, "spctl not found")
+    proc = subprocess.run(
+        [spctl, "--assess", "--type", "execute", "--verbose=4", str(bundle)],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    output = proc.stdout.strip()
+    if proc.returncode != 0:
+        policy_detail = _check_distribution_policy(bundle)
+        if policy_detail:
+            output = "\n".join(part for part in (output, policy_detail) if part)
+        return CheckResult("gatekeeper", False, output or "spctl rejected component")
+    return CheckResult("gatekeeper", True, output or "accepted")
+
+
+def _check_distribution_policy(bundle: Path) -> str:
+    syspolicy = shutil.which("syspolicy_check")
+    if syspolicy is None:
+        return ""
+    proc = subprocess.run(
+        [syspolicy, "distribution", str(bundle)],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    return proc.stdout.strip()
+
+
 def _check_symbol(executable: Path, symbol: str) -> CheckResult:
     nm = shutil.which("nm")
     if nm is None:
@@ -315,6 +388,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="verify the current process can read/traverse the component bundle")
     parser.add_argument("--check-codesign", action="store_true",
                         help="also run codesign --verify --deep --strict on the component bundle")
+    parser.add_argument("--check-signing-identity", default=None,
+                        help="copy the bundle to a temp dir and verify this identity can sign it")
+    parser.add_argument("--check-gatekeeper", action="store_true",
+                        help="also require spctl --assess --type execute to accept the bundle")
     parser.add_argument("--check-auval-list", action="store_true",
                         help="also require auval -a to list the expected type/subtype/manufacturer")
     parser.add_argument("--run-auval", action="store_true",
@@ -329,6 +406,10 @@ def main(argv: list[str] | None = None) -> int:
     results = _check_bundle(args)
     if args.check_codesign:
         results.append(_check_codesign(args.bundle))
+    if args.check_signing_identity:
+        results.append(_check_signing_identity(args.bundle, args.check_signing_identity))
+    if args.check_gatekeeper:
+        results.append(_check_gatekeeper(args.bundle))
     if args.check_auval_list:
         results.append(_check_auval_list(args))
     if args.run_auval:

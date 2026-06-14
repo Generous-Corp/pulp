@@ -51,6 +51,18 @@ python3 tools/scripts/summarize_daw_bench_results.py \
     --include-local-host-availability
 ```
 
+If a DAW is installed outside `/Applications`, add one or more explicit
+overrides instead of leaving the lane marked unavailable:
+
+```bash
+python3 tools/scripts/summarize_daw_bench_results.py \
+    docs/validation/daw-bench/results \
+    --require-any \
+    --include-local-host-availability \
+    --host-app "Ableton Live=/Volumes/Audio Apps/Ableton Live 12 Suite.app" \
+    --host-app "Studio One=/Volumes/Audio Apps/Studio One 6.app"
+```
+
 Those annotations are scheduling hints, not validation evidence. They do not
 change `covered_scripted_lane_count`, and they do not close any missing lane.
 
@@ -89,6 +101,7 @@ python3 tools/scripts/check_au_component_preflight.py \
     --expect-symbol PulpHostBenchAUFactory \
     --check-permissions \
     --check-codesign \
+    --check-gatekeeper \
     --check-auval-list \
     --run-auval \
     --auval-repeat 2 \
@@ -107,6 +120,11 @@ listed any non-Apple components. A result that lists only Apple components means
 the local AU registrar is not exposing third-party components, so a missing
 Logic AU lane should stay open until that machine-level condition is fixed and
 stable repeated `auval` passes are captured.
+When Gatekeeper reports `Adhoc Signed App` or `Notary Ticket Missing`, rerun the
+preflight with `--check-signing-identity "Developer ID Application: ..."` before
+attempting a notarized replacement install; that check signs a temporary copy
+and catches keychain private-key access failures without mutating the installed
+component.
 
 ## Manifest Schema
 

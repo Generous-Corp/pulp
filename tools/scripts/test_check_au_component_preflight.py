@@ -184,6 +184,98 @@ class AuComponentPreflightTests(unittest.TestCase):
             self.assertEqual(rc, 1)
             self.assertIn("FAIL: codesign: resource envelope is obsolete", out)
 
+    def test_signing_identity_check_reports_accessible_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            bundle = _make_bundle(pathlib.Path(d))
+            def fake_which(name: str) -> str | None:
+                return "/usr/bin/codesign" if name == "codesign" else None
+            with mock.patch.object(preflight.shutil, "which", side_effect=fake_which), \
+                 mock.patch.object(preflight.subprocess, "run") as run:
+                run.return_value = preflight.subprocess.CompletedProcess(
+                    args=["codesign"], returncode=0, stdout=""
+                )
+                rc, out = self._run([
+                    str(bundle),
+                    "--expect-type", "aumf",
+                    "--check-signing-identity", "Developer ID Application: Example",
+                ])
+            self.assertEqual(rc, 0, out)
+            self.assertIn(
+                "PASS: signing identity: Developer ID Application: Example",
+                out,
+            )
+
+    def test_signing_identity_check_reports_keychain_access_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            bundle = _make_bundle(pathlib.Path(d))
+            def fake_which(name: str) -> str | None:
+                return "/usr/bin/codesign" if name == "codesign" else None
+            with mock.patch.object(preflight.shutil, "which", side_effect=fake_which), \
+                 mock.patch.object(preflight.subprocess, "run") as run:
+                run.return_value = preflight.subprocess.CompletedProcess(
+                    args=["codesign"], returncode=1, stdout="errSecInternalComponent\n"
+                )
+                rc, out = self._run([
+                    str(bundle),
+                    "--expect-type", "aumf",
+                    "--check-signing-identity", "Developer ID Application: Example",
+                ])
+            self.assertEqual(rc, 1)
+            self.assertIn("FAIL: signing identity: errSecInternalComponent", out)
+            self.assertIn("private key access failed", out)
+
+    def test_gatekeeper_check_reports_acceptance(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            bundle = _make_bundle(pathlib.Path(d))
+            def fake_which(name: str) -> str | None:
+                return "/usr/sbin/spctl" if name == "spctl" else None
+            with mock.patch.object(preflight.shutil, "which", side_effect=fake_which), \
+                 mock.patch.object(preflight.subprocess, "run") as run:
+                run.return_value = preflight.subprocess.CompletedProcess(
+                    args=["spctl"], returncode=0, stdout="accepted\n"
+                )
+                rc, out = self._run([
+                    str(bundle),
+                    "--expect-type", "aumf",
+                    "--check-gatekeeper",
+                ])
+            self.assertEqual(rc, 0, out)
+            self.assertIn("PASS: gatekeeper: accepted", out)
+
+    def test_gatekeeper_check_reports_rejection(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            bundle = _make_bundle(pathlib.Path(d))
+            def fake_which(name: str) -> str | None:
+                if name == "spctl":
+                    return "/usr/sbin/spctl"
+                if name == "syspolicy_check":
+                    return "/usr/bin/syspolicy_check"
+                return None
+            with mock.patch.object(preflight.shutil, "which", side_effect=fake_which), \
+                 mock.patch.object(preflight.subprocess, "run") as run:
+                run.side_effect = [
+                    preflight.subprocess.CompletedProcess(
+                        args=["spctl"],
+                        returncode=3,
+                        stdout="rejected\nsource=Insufficient Context\n",
+                    ),
+                    preflight.subprocess.CompletedProcess(
+                        args=["syspolicy_check"],
+                        returncode=1,
+                        stdout="Notary Ticket Missing\nAdhoc Signed App\n",
+                    ),
+                ]
+                rc, out = self._run([
+                    str(bundle),
+                    "--expect-type", "aumf",
+                    "--check-gatekeeper",
+                ])
+            self.assertEqual(rc, 1)
+            self.assertIn("FAIL: gatekeeper: rejected", out)
+            self.assertIn("source=Insufficient Context", out)
+            self.assertIn("Notary Ticket Missing", out)
+            self.assertIn("Adhoc Signed App", out)
+
     def test_auval_list_check_requires_component_registration(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             bundle = _make_bundle(pathlib.Path(d))
