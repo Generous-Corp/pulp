@@ -32,10 +32,12 @@ int main(int argc, char** argv) {
 
     const char* out = "/tmp/pulp_tempo_sampler_ui.png";
     bool want_gpu = false;
+    bool empty_state = false;  // --empty: render the drop call-to-action (no sample)
     for (int i = 1; i < argc; ++i) {
         const std::string arg(argv[i]);
         if (arg == "--gpu") want_gpu = true;
         else if (arg == "--raster") want_gpu = false;
+        else if (arg == "--empty") empty_state = true;
         else if (!arg.empty() && arg[0] != '-') out = argv[i];
     }
 
@@ -56,8 +58,10 @@ int main(int argc, char** argv) {
         buf[static_cast<size_t>(i)] =
             static_cast<float>(0.85 * env * std::sin(2.0 * pi * freq * i / sr));
     }
-    const float* ch[1] = {buf.data()};
-    proc.load_loop(ch, 1, n, static_cast<double>(sr));
+    if (!empty_state) {
+        const float* ch[1] = {buf.data()};
+        proc.load_loop(ch, 1, n, static_cast<double>(sr));
+    }
 
     ScreenshotBackend backend = ScreenshotBackend::skia;
     if (want_gpu) {

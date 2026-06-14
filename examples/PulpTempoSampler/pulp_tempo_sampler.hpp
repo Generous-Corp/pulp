@@ -11,6 +11,7 @@
 
 #include <pulp/audio/built_in_key_tempo_analyzer.hpp>
 #include <pulp/audio/buffer.hpp>
+#include <pulp/audio/format_registry.hpp>
 #include <pulp/audio/loop_renderer.hpp>
 #include <pulp/audio/loop_types.hpp>
 #include <pulp/audio/onset_detector.hpp>
@@ -20,7 +21,11 @@
 #include <pulp/format/processor.hpp>
 #include <pulp/signal/adsr.hpp>
 #include <pulp/signal/offline_stretch.hpp>
+#include <pulp/view/animation.hpp>
+#include <pulp/view/drag_drop.hpp>
+#include <pulp/view/parameter_binding.hpp>
 #include <pulp/view/theme.hpp>
+#include <pulp/view/ui_components.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/waveform_editor.hpp>
 #include <pulp/view/widgets.hpp>
@@ -28,11 +33,14 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <optional>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -89,6 +97,150 @@ enum TempoSamplerParams : state::ParamID {
     kTempoFormant = 8, // 0 follow, 1 preserve, 2 independent
     kTempoQuality = 9, // 0 draft, 2 best
     kTempoLoop    = 10,
+    kRootNote     = 11, // MIDI note of slice 0 (slice idx = note - root)
+    kOnsetSens    = 12, // 0..1 onset-detection sensitivity (higher = more slices)
+};
+
+// Editor waveform surface. Inherits WaveformEditor's waveform + slice-region
+// rendering, and adds: a "drop a sample" call-to-action when empty, audio-file
+// drop handling (load / replace), and a subtle teal flash on drop. It polls a
+// generation counter every frame (set_continuous_repaint) so a drop decoded on
+// the background worker refreshes the waveform without an explicit redraw call.
+// Being a DropReceiver, the native drag dispatch (drag_drop.cpp) finds it via
+// dynamic_cast at the hit-tested point.
+class WaveformDropView : public view::WaveformEditor, public view::DropReceiver {
+public:
+    std::function<void(const std::string&)> on_file_dropped;
+    std::function<std::uint64_t()> generation;   // processor raw_generation()
+    std::function<bool(std::vector<float>&, float&, std::vector<long>&)> snapshot;
+
+    WaveformDropView() { set_continuous_repaint(true); }
+
+    bool accept_drag(const view::DropData& d, view::Point) override {
+        drag_over_ = first_audio_path(d).has_value();
+        return drag_over_;
+    }
+    void leave_drag() override { drag_over_ = false; }
+    bool accept_drop(const view::DropData& d, view::Point) override {
+        drag_over_ = false;
+        auto p = first_audio_path(d);
+        if (!p) return false;
+        if (on_file_dropped) on_file_dropped(*p);
+        flash_.set(1.0f);
+        flash_.animate_to(0.0f, 0.18f);  // ease-out fade (default easing)
+        return true;
+    }
+
+    void paint(canvas::Canvas& c) override {
+        refresh_if_dirty();
+        advance_flash();
+        view::WaveformEditor::paint(c);              // waveform + slice regions
+        auto b = local_bounds();
+        if (!has_audio_) paint_cta(c, b);
+        if (drag_over_)  paint_drag_overlay(c, b);
+        const float fa = std::clamp(flash_.value(), 0.0f, 1.0f);
+        if (fa > 0.001f) {
+            c.set_fill_color(canvas::Color::rgba8(
+                0x16, 0xDA, 0xC2, static_cast<std::uint8_t>(0x55 * fa)));
+            c.fill_rounded_rect(b.x, b.y, b.width, b.height, 6.0f);
+        }
+    }
+
+private:
+    static bool is_audio_ext(const std::string& path) {
+        static const char* kExts[] = {".wav", ".aif", ".aiff", ".flac", ".mp3", ".ogg"};
+        std::string lower = path;
+        std::transform(lower.begin(), lower.end(), lower.begin(),
+                       [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+        for (const char* e : kExts) {
+            const std::string es = e;
+            if (lower.size() >= es.size() &&
+                lower.compare(lower.size() - es.size(), es.size(), es) == 0)
+                return true;
+        }
+        return false;
+    }
+    static std::optional<std::string> first_audio_path(const view::DropData& d) {
+        if (d.type != view::DropData::Type::files) return std::nullopt;
+        for (const auto& p : d.file_paths)
+            if (is_audio_ext(p)) return p;
+        return std::nullopt;
+    }
+    void refresh_if_dirty() {
+        if (!generation || !snapshot) return;
+        const std::uint64_t g = generation();
+        if (g == last_gen_) return;
+        last_gen_ = g;
+        std::vector<float> mono; float sr = 48000.0f; std::vector<long> slices;
+        if (snapshot(mono, sr, slices) && !mono.empty()) {
+            set_audio_data(mono.data(), static_cast<int>(mono.size()), sr);
+            clear_regions();
+            for (std::size_t i = 0; i + 1 < slices.size(); ++i) {
+                view::WaveformRegion r;
+                r.start_sample = static_cast<int>(slices[i]);
+                r.end_sample = static_cast<int>(slices[i + 1]);
+                r.color = canvas::Color::rgba8(0x16, 0xDA, 0xC2, (i % 2) ? 0x3C : 0x1A);
+                add_region(r);
+            }
+            has_audio_ = true;
+        } else {
+            has_audio_ = false;
+        }
+    }
+    void advance_flash() {
+        const auto now = std::chrono::steady_clock::now();
+        if (have_last_paint_) {
+            const float dt = std::chrono::duration<float>(now - last_paint_).count();
+            flash_.advance(std::min(dt, 0.1f));
+        }
+        last_paint_ = now;
+        have_last_paint_ = true;
+    }
+    void paint_cta(canvas::Canvas& c, const view::Rect& b) {
+        c.set_fill_color(canvas::Color::rgba8(0x0F, 0x12, 0x17));
+        c.fill_rounded_rect(b.x, b.y, b.width, b.height, 8.0f);
+        c.set_stroke_color(canvas::Color::rgba8(0x28, 0x30, 0x3C));
+        c.set_line_width(2.0f);
+        c.stroke_rounded_rect(b.x + 6, b.y + 6, b.width - 12, b.height - 12, 8.0f);
+        const float cx = b.x + b.width / 2, cy = b.y + b.height / 2 - 16;
+        c.set_stroke_color(canvas::Color::rgba8(0x16, 0xDA, 0xC2));
+        c.set_line_width(2.0f);
+        c.stroke_line(cx, cy + 18, cx, cy - 4);
+        c.stroke_line(cx - 9, cy + 6, cx, cy - 4);
+        c.stroke_line(cx + 9, cy + 6, cx, cy - 4);
+        c.set_fill_color(canvas::Color::rgba8(0xD6, 0xDC, 0xE4));
+        c.set_font("", 14.0f);
+        c.set_text_align(canvas::TextAlign::center);
+        c.fill_text("Drop a sample to begin", b.x + b.width / 2, cy + 42);
+        c.set_fill_color(canvas::Color::rgba8(0x64, 0x6D, 0x7A));
+        c.set_font("", 11.0f);
+        c.fill_text("WAV  AIFF  FLAC  MP3  OGG", b.x + b.width / 2, cy + 62);
+        c.set_text_align(canvas::TextAlign::left);
+    }
+    void paint_drag_overlay(canvas::Canvas& c, const view::Rect& b) {
+        c.set_fill_color(canvas::Color::rgba8(0x16, 0xDA, 0xC2, 0x22));
+        c.fill_rounded_rect(b.x, b.y, b.width, b.height, 8.0f);
+        c.set_stroke_color(canvas::Color::rgba8(0x16, 0xDA, 0xC2));
+        c.set_line_width(2.0f);
+        c.stroke_rounded_rect(b.x + 2, b.y + 2, b.width - 4, b.height - 4, 8.0f);
+    }
+
+    bool has_audio_ = false;
+    bool drag_over_ = false;
+    bool have_last_paint_ = false;
+    std::uint64_t last_gen_ = ~0ull;  // force first refresh
+    view::ValueAnimation flash_{0.0f};
+    std::chrono::steady_clock::time_point last_paint_{};
+};
+
+// Editor root that owns the widget<->parameter bindings and store listeners.
+// They are destroyed (and their store listeners removed) before the View base
+// destroys the child widgets they reference — so a closing editor never fires a
+// listener against a freed widget.
+class SamplerEditorRoot : public view::View {
+public:
+    std::vector<view::ParameterBinding> bindings;
+    std::vector<state::ListenerToken> listeners;
 };
 
 class PulpTempoSamplerProcessor : public format::Processor {
@@ -96,7 +248,32 @@ public:
     static constexpr int kMaxVoices = 8;
     static constexpr std::uint32_t kMaxSampleChannels = SamplerSampleStore::kMaxChannels;
     static constexpr std::uint32_t kMaxOutputChannels = 8;
-    static constexpr int kRootNote = 60;
+    static constexpr int kDefaultRootNote = 60;  // C3 in C-2..C8 labeling (see note_name)
+    static constexpr int kRootNoteMin = 0;       // C-2
+    static constexpr int kRootNoteMax = 120;     // C8
+
+    // Onset sensitivity s in [0,1] maps (inversely) to OnsetDetectionConfig
+    // threshold_multiplier: higher sensitivity -> lower multiplier -> MORE slices.
+    //   multiplier = kSensMulHi - s * (kSensMulHi - kSensMulLo)
+    static constexpr double kSensMulLo = 0.8;   // most sensitive (most onsets)
+    static constexpr double kSensMulHi = 3.0;   // least sensitive (fewest onsets)
+    // Default sensitivity reproduces the detector's own default multiplier (1.5).
+    static constexpr float kDefaultOnsetSensitivity =
+        static_cast<float>((kSensMulHi - 1.5) / (kSensMulHi - kSensMulLo));
+    static double onset_multiplier_for(double sensitivity) {
+        const double s = std::clamp(sensitivity, 0.0, 1.0);
+        return kSensMulHi - s * (kSensMulHi - kSensMulLo);
+    }
+
+    // MIDI note name in the user-requested C-2..C8 convention (C3 = 60). NOTE:
+    // this deliberately differs from Pulp's MidiKeyboard, which labels 60 as C4
+    // ((note/12)-1); the sampler dropdown follows the requested C-2..C8 range.
+    static std::string note_name(int note) {
+        static const char* kNames[12] = {"C","C#","D","D#","E","F","F#","G","G#","A","A#","B"};
+        const int n = ((note % 12) + 12) % 12;
+        const int octave = (note / 12) - 2;
+        return std::string(kNames[n]) + std::to_string(octave);
+    }
 
     ~PulpTempoSamplerProcessor() override { stop_worker(); }
 
@@ -126,6 +303,12 @@ public:
         store.add_parameter({.id = kTempoFormant, .name = "Formant", .unit = "", .range = {0, 2, 1, 1}});
         store.add_parameter({.id = kTempoQuality, .name = "Quality", .unit = "", .range = {0, 2, 2, 1}});
         store.add_parameter({.id = kTempoLoop, .name = "Loop", .unit = "", .range = {0, 1, 1, 1}});
+        store.add_parameter({.id = kRootNote, .name = "Root Note", .unit = "",
+                             .range = {static_cast<float>(kRootNoteMin),
+                                       static_cast<float>(kRootNoteMax),
+                                       static_cast<float>(kDefaultRootNote), 1}});
+        store.add_parameter({.id = kOnsetSens, .name = "Onset Sensitivity", .unit = "",
+                             .range = {0, 1, kDefaultOnsetSensitivity, 0.01f}});
     }
 
     void prepare(const format::PrepareContext& ctx) override {
@@ -159,18 +342,63 @@ public:
             std::copy(src, src + frames, raw_[c].begin());
         }
         analyze_locked();
+        raw_generation_.fetch_add(1, std::memory_order_acq_rel);
         request_render(pending_host_bpm_.load(std::memory_order_relaxed));
         return true;
     }
+
+    /// Decode an audio file from disk and load it. For UI drag-drop / the
+    /// background worker — NEVER call on the audio thread (it allocates + reads
+    /// the filesystem). Replaces any currently-loaded loop.
+    bool load_loop_from_path(const std::string& path) {
+        auto data = audio::FormatRegistry::instance().read(path);
+        if (!data || data->empty()) return false;
+        std::vector<const float*> ch(data->num_channels());
+        for (std::uint32_t c = 0; c < data->num_channels(); ++c)
+            ch[c] = data->channels[c].data();
+        return load_loop(ch.data(), static_cast<int>(data->num_channels()),
+                         static_cast<long>(data->num_frames()), data->sample_rate);
+    }
+
+    /// UI drop handler -> worker: decode + load a file off the UI/audio threads.
+    void request_load_path(const std::string& path) {
+        { std::lock_guard<std::mutex> lock(drop_mutex_); pending_drop_path_ = path; }
+        drop_flag_.store(true, std::memory_order_release);
+    }
+    /// UI -> worker: coalesced re-slice request (onset-sensitivity change).
+    void request_reanalyze() { analysis_flag_.store(true, std::memory_order_release); }
 
     double detected_bpm() const { return loop_bpm_.load(std::memory_order_relaxed); }
     std::size_t num_slices() const {
         std::lock_guard<std::mutex> lock(raw_mutex_);
         return slices_orig_.empty() ? 0 : slices_orig_.size() - 1;
     }
+
+    /// Monotonic counter bumped whenever the raw loop or its slices change.
+    /// The editor view polls this to know when to refresh (cheap dirty-check).
+    std::uint64_t raw_generation() const {
+        return raw_generation_.load(std::memory_order_acquire);
+    }
+    /// UI-thread snapshot of the raw mono waveform + slice boundaries for the
+    /// editor. Returns false when no sample is loaded. Copies under raw_mutex_.
+    bool snapshot_for_view(std::vector<float>& mono_out, float& sr_out,
+                           std::vector<long>& slices_out) const {
+        std::lock_guard<std::mutex> lock(raw_mutex_);
+        if (raw_frames_ <= 0) return false;
+        mono_out.assign(raw_[0].begin(), raw_[0].begin() + raw_frames_);
+        sr_out = static_cast<float>(raw_sr_);
+        slices_out = slices_orig_;
+        return true;
+    }
     bool has_sample() const { return store_.has_sample(); }
     long published_frames() const { return static_cast<long>(store_.read_published_view().num_frames); }
     void set_loop_bpm_for_test(double bpm) { loop_bpm_.store(bpm, std::memory_order_relaxed); }
+    /// Test-only: the slice index a MIDI note maps to under the current root
+    /// (mirrors region_for_note's `idx = note - root`). Deterministic and
+    /// independent of whether a sample is loaded.
+    int slice_index_for_note_test(int note) const {
+        return note - static_cast<int>(state().get_value(kRootNote));
+    }
 
     /// Render synchronously (tests/headless). Real hosts use the worker.
     void render_now(double host_bpm) { render_to_tempo(host_bpm); }
@@ -202,7 +430,7 @@ public:
         const Color faint   = Color::rgba8(0x64, 0x6D, 0x7A);
         const char* mono    = "JetBrains Mono";
 
-        auto root = std::make_unique<View>();
+        auto root = std::make_unique<SamplerEditorRoot>();
         root->set_bounds({0, 0, 760, 372});
         root->set_background_color(bg900);
 
@@ -261,30 +489,67 @@ public:
         rect(702, 50, 26, 32, panel);    label(702, 55, 26, 22, "-", text, 16, 500, LabelAlign::center);
         rect(732, 50, 26, 32, panel);    label(732, 55, 26, 22, "+", text, 16, 500, LabelAlign::center);
 
-        // ── Waveform ──
-        auto wf = std::make_unique<WaveformEditor>();
+        // ── Waveform / drop area ──
+        // Interactive: shows a "drop a sample" CTA when empty, the waveform +
+        // slices when loaded, accepts audio-file drops (load / replace) with a
+        // subtle flash, and polls the processor's generation to refresh.
+        auto wf = std::make_unique<WaveformDropView>();
         place(*wf, 20, 92, 738, 222);
-        {
-            std::lock_guard<std::mutex> lock(raw_mutex_);
-            if (raw_frames_ > 0)
-                wf->set_audio_data(raw_[0].data(), static_cast<int>(raw_frames_),
-                                   static_cast<float>(raw_sr_));
-            for (std::size_t i = 0; i + 1 < slices_orig_.size(); ++i) {
-                WaveformRegion r;
-                r.start_sample = static_cast<int>(slices_orig_[i]);
-                r.end_sample = static_cast<int>(slices_orig_[i + 1]);
-                r.color = Color::rgba8(0x16, 0xDA, 0xC2, (i % 2) ? 0x3C : 0x1A);
-                wf->add_region(r);
-            }
-        }
+        wf->on_file_dropped = [this](const std::string& path) { request_load_path(path); };
+        wf->generation = [this] { return raw_generation(); };
+        wf->snapshot = [this](std::vector<float>& mono, float& sr, std::vector<long>& sl) {
+            return snapshot_for_view(mono, sr, sl);
+        };
         root->add_child(std::move(wf));
 
-        // ── Footer readout ──
+        // ── Footer: interactive controls ──
         const std::size_t slices = num_slices();
-        label(20, 326, 120, 18, "IN  0:00.00", text, 11, 500, LabelAlign::left, true);
-        label(150, 326, 130, 18, "OUT  0:02.00", text, 11, 500, LabelAlign::left, true);
-        label(290, 326, 150, 18, "FADE  12 / 80 MS", muted, 11, 500, LabelAlign::left, true);
-        label(440, 326, 120, 18, "SLICES  " + std::to_string(slices), muted, 11, 500, LabelAlign::left, true);
+
+        // Root-note dropdown (slice 0 maps to this MIDI note; idx = note - root).
+        // Labels follow the requested C-2..C8 convention (C3 = 60); see note_name.
+        label(20, 326, 40, 18, "ROOT", faint, 10, 600, LabelAlign::left, true);
+        {
+            auto combo = std::make_unique<ComboBox>();
+            std::vector<std::string> names;
+            names.reserve(static_cast<std::size_t>(kRootNoteMax - kRootNoteMin + 1));
+            for (int n = kRootNoteMin; n <= kRootNoteMax; ++n) names.push_back(note_name(n));
+            combo->set_items(std::move(names));
+            const int cur = static_cast<int>(state().get_value(kRootNote));
+            combo->set_selected_silent(std::clamp(cur - kRootNoteMin, 0, kRootNoteMax - kRootNoteMin));
+            combo->on_change = [this](int idx) {
+                const int note = kRootNoteMin + idx;
+                state().begin_gesture(kRootNote);
+                state().set_value(kRootNote, static_cast<float>(note));
+                state().end_gesture(kRootNote);
+            };
+            ComboBox* comboPtr = combo.get();
+            root->listeners.push_back(state().add_listener(
+                [comboPtr](state::ParamID id, float v) {
+                    if (id == kRootNote)
+                        comboPtr->set_selected_silent(static_cast<int>(v) - kRootNoteMin);
+                },
+                state::ListenerThread::Main));
+            place(*combo, 64, 322, 96, 26);
+            root->add_child(std::move(combo));
+        }
+
+        // Onset-sensitivity fader: higher = more slices. Drag re-slices on the
+        // worker (coalesced) via the kOnsetSens listener -> request_reanalyze().
+        label(176, 326, 44, 18, "SENS", faint, 10, 600, LabelAlign::left, true);
+        {
+            auto fader = std::make_unique<Fader>();
+            fader->set_orientation(Fader::Orientation::horizontal);
+            place(*fader, 220, 328, 150, 16);
+            root->bindings.push_back(bind_parameter(*fader, state(), kOnsetSens));
+            root->add_child(std::move(fader));
+            root->listeners.push_back(state().add_listener(
+                [this](state::ParamID id, float) {
+                    if (id == kOnsetSens) request_reanalyze();
+                },
+                state::ListenerThread::Main));
+        }
+
+        label(390, 326, 120, 18, "SLICES  " + std::to_string(slices), muted, 11, 500, LabelAlign::left, true);
         rect(596, 320, 60, 28, panel);   label(596, 325, 60, 18, "Snap", text, 12, 500, LabelAlign::center);
         rect(662, 320, 96, 28, tealSoft); label(662, 325, 96, 18, "Auto-slice", teal, 12, 600, LabelAlign::center);
 
@@ -353,7 +618,9 @@ private:
         loop_bpm_.store(kr.tempo_bpm, std::memory_order_relaxed);
 
         audio::OnsetDetector od;
-        const auto onsets = od.detect(view);
+        audio::OnsetDetectionConfig oc;
+        oc.threshold_multiplier = onset_multiplier_for(state().get_value(kOnsetSens));
+        const auto onsets = od.detect(view, oc);
         slices_orig_.clear();
         slices_orig_.push_back(0);
         for (const auto& m : onsets.markers)
@@ -445,11 +712,25 @@ private:
         worker_run_.store(true, std::memory_order_release);
         worker_ = std::thread([this] {
             while (worker_run_.load(std::memory_order_acquire)) {
+                bool did_work = false;
+                // Decode + load a dropped file off the UI/audio threads.
+                if (drop_flag_.exchange(false, std::memory_order_acq_rel)) {
+                    std::string path;
+                    { std::lock_guard<std::mutex> lock(drop_mutex_); path = pending_drop_path_; }
+                    if (!path.empty()) load_loop_from_path(path);
+                    did_work = true;
+                }
+                // Onset re-analysis (e.g. sensitivity changed) coalesces to the
+                // latest request, then triggers a re-render of the new slices.
+                if (analysis_flag_.exchange(false, std::memory_order_acq_rel)) {
+                    reanalyze();
+                    did_work = true;
+                }
                 if (render_flag_.exchange(false, std::memory_order_acq_rel)) {
                     render_to_tempo(pending_host_bpm_.load(std::memory_order_relaxed));
-                } else {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(3));
+                    did_work = true;
                 }
+                if (!did_work) std::this_thread::sleep_for(std::chrono::milliseconds(3));
             }
         });
     }
@@ -460,6 +741,16 @@ private:
     void request_render(double bpm) {
         pending_host_bpm_.store(bpm, std::memory_order_relaxed);
         render_flag_.store(true, std::memory_order_release); // worker supersedes stale renders
+    }
+    // Worker: re-detect onsets with the current sensitivity, then re-render.
+    void reanalyze() {
+        {
+            std::lock_guard<std::mutex> lock(raw_mutex_);
+            if (raw_frames_ <= 0) return;
+            analyze_locked();
+        }
+        raw_generation_.fetch_add(1, std::memory_order_acq_rel);
+        request_render(pending_host_bpm_.load(std::memory_order_relaxed));
     }
 
     RenderParams current_params() const {
@@ -482,10 +773,11 @@ private:
     audio::LoopRegion region_for_note(int note, const audio::PublishedSampleView& sample,
                                       bool loop) const noexcept {
         std::uint64_t start = 0, end = sample.num_frames;
+        const int root = static_cast<int>(state().get_value(kRootNote));
         {
             std::lock_guard<std::mutex> lock(slice_mutex_);
             if (slices_stretched_.size() >= 2) {
-                const int idx = note - kRootNote;
+                const int idx = note - root;
                 if (idx >= 0 && idx + 1 < static_cast<int>(slices_stretched_.size())) {
                     start = static_cast<std::uint64_t>(slices_stretched_[static_cast<size_t>(idx)]);
                     end = static_cast<std::uint64_t>(slices_stretched_[static_cast<size_t>(idx) + 1]);
@@ -590,7 +882,12 @@ private:
     std::thread worker_;
     std::atomic<bool> worker_run_{false};
     std::atomic<bool> render_flag_{false};
+    std::atomic<bool> analysis_flag_{false};
+    std::atomic<bool> drop_flag_{false};
+    std::atomic<std::uint64_t> raw_generation_{0};
     std::atomic<double> pending_host_bpm_{120.0};
+    std::mutex drop_mutex_;
+    std::string pending_drop_path_;
 };
 
 inline std::unique_ptr<format::Processor> create_pulp_tempo_sampler() {
