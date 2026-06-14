@@ -44,6 +44,11 @@ struct ToolDescriptor {
     std::vector<std::string> requires_tools;
     bool managed_by_pulp = true;
     bool bundleable = false;
+    std::string install_scope;    // "machine", "project", or empty when legacy
+    std::string distribution_lane; // "tool_addon", "core", "pulp_add", etc.
+    std::string package_format;   // "not_pulp_add", "pulp_add", "kit", etc.
+    std::string artifact_status;  // "source_tree_iteration", "packaged", etc.
+    std::string artifact_policy;  // short user/agent-facing packaging note
 
     // ── Project-importer fields (optional) ──
     //

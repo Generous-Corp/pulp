@@ -1515,6 +1515,8 @@ Manage the third-party developer tools Pulp can optionally use (formatters, vali
 ```bash
 pulp tool                           # Show help
 pulp tool list                      # Show every registered tool and its install state
+pulp tool info video-proof          # Show install scope, distribution lane, and package-format metadata
+pulp tool info video-proof --json   # Emit machine-readable tool install metadata
 pulp tool install clap-validator    # Download and install one tool
 pulp tool install video-proof       # Install optional Remotion/ffmpeg video proof tooling
 pulp tool install --all             # Install every tool available on the current platform
@@ -1539,7 +1541,12 @@ repo-local video proof package, writes a managed wrapper under
 `~/.pulp/tools/npm-packages/video-proof/`, and keeps Remotion, ffmpeg-static,
 `node_modules`, generated videos, and caches outside shipped Pulp artifacts.
 Use `pulp tool doctor video-proof --run` after install to prove the wrapper can
-render the synthetic Remotion smoke proof.
+render the synthetic Remotion smoke proof. Use `pulp tool info video-proof
+--json` when setup automation needs to confirm that this is a machine-scoped
+`tool_addon` with `package_format: not_pulp_add`. On the feature branch its
+`artifact_status` is `source_tree_iteration`; before mainline release that
+should become a versioned distributable tool artifact rather than a project
+package.
 
 **Framework importers.** An importer is a vendor-specific add-on (described in the tool-registry with `category: "importer"`) that drives Pulp's JSON-over-stdio import SPI. Installing one is gated three ways: the importer's `[sdk_min, sdk_max]` must include the running SDK and its `[spi_min, spi_max]` window must overlap the SDK's supported import-SPI window (a mismatch fails loudly with an "upgrade Pulp" / "upgrade the importer" message); the fetched or local package's `sha256` must match the digest pinned in the registry (a mismatch refuses to install); and the importer's bundled `SKILL.md` is installed into `~/.agents/skills/<importer>/` on install and removed on uninstall. Each install is recorded under `~/.pulp/importers/<id>.json` (id, version, sha256, SDK version, SPI window, paths, terms metadata) so uninstall and version checks work, and so the importer-terms accept-gate composes with the same record. `pulp add <importer>` routes to the same install path. Use `--from <path|file://...>` to install from a local package rather than the registry URL (offline installs, pinned artifacts, CI). The producer side — how prebuilt per-platform artifacts are built, hosted, pinned per SDK release, and signed/notarized, and the bundled-libclang choice — is documented in [framework-importer-packaging.md](framework-importer-packaging.md); this CLI consumes that contract, it does not decide it.
 

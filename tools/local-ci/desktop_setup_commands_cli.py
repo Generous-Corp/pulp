@@ -372,11 +372,16 @@ def desktop_video_install_model() -> dict:
         "future": "pulp-tool-add-on",
         "future_command": "pulp tool install video-proof",
         "future_check_command": "pulp tool doctor video-proof --run",
-        "package_format": "not-pulp-add",
+        "tool_info_command": "pulp tool info video-proof --json",
+        "install_scope": "machine",
+        "distribution_lane": "tool_addon",
+        "package_format": "not_pulp_add",
+        "artifact_status": "source_tree_iteration",
         "detail": (
             "The feature branch supports direct repo-local npm tooling for iteration, "
             "and `pulp tool install video-proof` is the optional developer-tool install path. "
-            "The recorder/composer is not a normal `pulp add` project package."
+            "The recorder/composer is not a normal `pulp add` project package and should "
+            "be packaged as a versioned tool add-on before mainline release."
         ),
     }
 

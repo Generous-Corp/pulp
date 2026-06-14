@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <sstream>
 
@@ -118,6 +119,11 @@ ToolRegistryLoadResult load_tool_registry(const fs::path& path) {
             if (auto v = val.get("requires_tools")) tool.requires_tools = v->as_string_array();
             if (auto v = val.get("managed_by_pulp")) tool.managed_by_pulp = v->as_bool();
             if (auto v = val.get("bundleable")) tool.bundleable = v->as_bool();
+            if (auto v = val.get("install_scope")) tool.install_scope = v->as_string();
+            if (auto v = val.get("distribution_lane")) tool.distribution_lane = v->as_string();
+            if (auto v = val.get("package_format")) tool.package_format = v->as_string();
+            if (auto v = val.get("artifact_status")) tool.artifact_status = v->as_string();
+            if (auto v = val.get("artifact_policy")) tool.artifact_policy = v->as_string();
 
             // Optional project-importer fields (DATA-only; present on
             // framework-importer add-on tools).
@@ -179,6 +185,87 @@ static bool tool_available_on_platform(const ToolDescriptor& tool, const std::st
     return tool.binary_sources.count(platform) > 0
         || tool.install_method == "python_pip"
         || tool.install_method == "npm_package";
+}
+
+static std::string json_escape(const std::string& input) {
+    std::string out;
+    out.reserve(input.size() + 8);
+    for (char c : input) {
+        switch (c) {
+            case '"': out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\b': out += "\\b"; break;
+            case '\f': out += "\\f"; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default:
+                if (static_cast<unsigned char>(c) < 0x20) {
+                    std::ostringstream hex;
+                    hex << "\\u" << std::hex << std::uppercase;
+                    hex.width(4);
+                    hex.fill('0');
+                    hex << static_cast<int>(static_cast<unsigned char>(c));
+                    out += hex.str();
+                } else {
+                    out.push_back(c);
+                }
+        }
+    }
+    return out;
+}
+
+static void print_tool_info_json(const ToolDescriptor& tool,
+                                 const ToolLocateResult& loc,
+                                 const std::string& platform) {
+    std::cout << "{"
+              << "\"id\":\"" << json_escape(tool.id) << "\","
+              << "\"display_name\":\"" << json_escape(tool.display_name) << "\","
+              << "\"category\":\"" << json_escape(tool.category) << "\","
+              << "\"description\":\"" << json_escape(tool.description) << "\","
+              << "\"install_method\":\"" << json_escape(tool.install_method) << "\","
+              << "\"install_scope\":\"" << json_escape(tool.install_scope) << "\","
+              << "\"distribution_lane\":\"" << json_escape(tool.distribution_lane) << "\","
+              << "\"package_format\":\"" << json_escape(tool.package_format) << "\","
+              << "\"artifact_status\":\"" << json_escape(tool.artifact_status) << "\","
+              << "\"artifact_policy\":\"" << json_escape(tool.artifact_policy) << "\","
+              << "\"pinned_version\":\"" << json_escape(tool.pinned_version) << "\","
+              << "\"bundleable\":" << (tool.bundleable ? "true" : "false") << ","
+              << "\"managed_by_pulp\":" << (tool.managed_by_pulp ? "true" : "false") << ","
+              << "\"platform\":\"" << json_escape(platform) << "\","
+              << "\"available_on_platform\":"
+              << (tool_available_on_platform(tool, platform) ? "true" : "false") << ","
+              << "\"installed\":" << (loc.found ? "true" : "false") << ","
+              << "\"location_source\":\"" << json_escape(loc.source) << "\","
+              << "\"path\":\"" << json_escape(loc.path.string()) << "\""
+              << "}\n";
+}
+
+static void print_tool_info_text(const ToolDescriptor& tool,
+                                 const ToolLocateResult& loc,
+                                 const std::string& platform) {
+    std::cout << tool.display_name << " " << dim("(" + tool.id + ")") << "\n\n";
+    if (!tool.description.empty())
+        std::cout << tool.description << "\n\n";
+    std::cout << "Install method: " << tool.install_method << "\n";
+    if (!tool.install_scope.empty())
+        std::cout << "Install scope: " << tool.install_scope << "\n";
+    if (!tool.distribution_lane.empty())
+        std::cout << "Distribution lane: " << tool.distribution_lane << "\n";
+    if (!tool.package_format.empty())
+        std::cout << "Package format: " << tool.package_format << "\n";
+    if (!tool.artifact_status.empty())
+        std::cout << "Artifact status: " << tool.artifact_status << "\n";
+    if (!tool.artifact_policy.empty())
+        std::cout << "Artifact policy: " << tool.artifact_policy << "\n";
+    if (!tool.pinned_version.empty())
+        std::cout << "Pinned version: " << tool.pinned_version << "\n";
+    std::cout << "Platform: " << platform << "\n";
+    std::cout << "Available: " << (tool_available_on_platform(tool, platform) ? "yes" : "no") << "\n";
+    if (loc.found)
+        std::cout << "Installed: yes (" << loc.source << ", " << loc.path.string() << ")\n";
+    else
+        std::cout << "Installed: no\n";
 }
 
 static fs::path repo_root_from_registry(const fs::path& registry_path) {
@@ -659,6 +746,7 @@ int cmd_tool(const std::vector<std::string>& args) {
         std::cout << "Usage: pulp tool <command> [options]\n\n"
                   << "Commands:\n"
                   << "  list                    Show available and installed tools\n"
+                  << "  info <tool> [--json]    Show install/package metadata for one tool\n"
                   << "  install <tool>          Download and install a tool\n"
                   << "  install <importer>      Install a framework importer (checksummed,\n"
                   << "                          SDK/SPI-window-checked; --from <path> for local)\n"
@@ -704,6 +792,41 @@ int cmd_tool(const std::vector<std::string>& args) {
             std::cout << std::string(pad, ' ') << status;
             std::cout << "  " << dim(tool.description) << "\n";
         }
+        return 0;
+    }
+
+    if (subcmd == "info") {
+        if (args.size() < 2) {
+            print_fail("Usage: pulp tool info <tool-id> [--json]");
+            return 1;
+        }
+        std::string tool_id;
+        bool json = false;
+        for (size_t i = 1; i < args.size(); ++i) {
+            if (args[i] == "--json") {
+                json = true;
+            } else if (tool_id.empty()) {
+                tool_id = args[i];
+            } else {
+                print_fail("Usage: pulp tool info <tool-id> [--json]");
+                return 1;
+            }
+        }
+        if (tool_id.empty()) {
+            print_fail("Usage: pulp tool info <tool-id> [--json]");
+            return 1;
+        }
+        auto it = reg.tools.find(tool_id);
+        if (it == reg.tools.end()) {
+            print_fail("Tool '" + tool_id + "' not found");
+            return 1;
+        }
+        auto platform = current_platform_key();
+        auto loc = locate_tool(it->second);
+        if (json)
+            print_tool_info_json(it->second, loc, platform);
+        else
+            print_tool_info_text(it->second, loc, platform);
         return 0;
     }
 

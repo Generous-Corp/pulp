@@ -28,6 +28,10 @@ or reviewer comprehension matters.
   ffmpeg/Remotion bootstrap and large or license-sensitive dependencies. Keep
   direct source-tree setup (`npm --prefix tools/local-ci install`) as the
   feature-branch iteration fallback.
+- Use `pulp tool info video-proof --json` when an agent or setup script needs
+  the machine-readable install policy. It should report a machine-scoped
+  `tool_addon`, `package_format: not_pulp_add`, and, on this feature branch,
+  `artifact_status: source_tree_iteration`.
 - Prefer short clips: 5-12 seconds is the normal range. Keep the recording
   focused on the window or component under test.
 - Prefer `video/proof-composed.mp4` for review. Keep `video/proof.mp4` as the
@@ -69,6 +73,7 @@ Install the optional video-proof tool add-on:
 
 ```bash
 pulp tool install video-proof
+pulp tool info video-proof --json
 pulp tool doctor video-proof --run
 ```
 

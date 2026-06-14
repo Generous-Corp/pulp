@@ -21,6 +21,7 @@ optional Pulp tool add-on:
 
 ```bash
 pulp tool install video-proof
+pulp tool info video-proof --json
 pulp tool doctor video-proof --run
 pulp ci-local desktop video-setup mac --check
 ```
@@ -45,6 +46,9 @@ The long-term split should stay narrow:
   repo-local `tools/local-ci` npm package and writes a managed wrapper under
   `~/.pulp/tools/npm-packages/video-proof/`. That wrapper defaults to the
   Remotion smoke proof when run without arguments.
+- `pulp tool info video-proof --json` exposes this as a machine-scoped
+  `tool_addon` with `package_format: not_pulp_add` and, on this feature branch,
+  `artifact_status: source_tree_iteration`.
 - The source-tree developer path can still use `npm --prefix tools/local-ci
   install` for direct iteration.
 - Reusable demo scenarios or source material may later be distributed as
@@ -91,6 +95,7 @@ Install and validate the optional video-proof tool on a new Mac:
 
 ```bash
 pulp tool install video-proof
+pulp tool info video-proof --json
 pulp tool doctor video-proof --run
 ```
 

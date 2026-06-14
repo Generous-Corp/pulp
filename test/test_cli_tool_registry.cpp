@@ -183,7 +183,12 @@ fs::path write_registry_fixture(const fs::path& root) {
       "install_method": "npm_package",
       "npm_package_root": "tools/local-ci",
       "npm_default_script": "smoke-video-proof",
-      "pinned_version": "0.0.0"
+      "pinned_version": "0.0.0",
+      "install_scope": "machine",
+      "distribution_lane": "tool_addon",
+      "package_format": "not_pulp_add",
+      "artifact_status": "source_tree_iteration",
+      "artifact_policy": "fixture policy"
     }
   }
 }
@@ -251,6 +256,11 @@ TEST_CASE("tool registry parses descriptors and reports malformed roots",
     REQUIRE(npm.npm_package_root == "tools/local-ci");
     REQUIRE(npm.npm_default_script == "smoke-video-proof");
     REQUIRE(npm.pinned_version == "0.0.0");
+    REQUIRE(npm.install_scope == "machine");
+    REQUIRE(npm.distribution_lane == "tool_addon");
+    REQUIRE(npm.package_format == "not_pulp_add");
+    REQUIRE(npm.artifact_status == "source_tree_iteration");
+    REQUIRE(npm.artifact_policy == "fixture policy");
 
     auto missing = load_tool_registry(tmp.path / "missing.json");
     REQUIRE(missing.registry.tools.empty());
@@ -359,6 +369,11 @@ TEST_CASE("tool registry accepts empty and partial descriptor shapes",
     REQUIRE_FALSE(tool.bundleable);
     REQUIRE(tool.npm_package_root.empty());
     REQUIRE(tool.npm_default_script.empty());
+    REQUIRE(tool.install_scope.empty());
+    REQUIRE(tool.distribution_lane.empty());
+    REQUIRE(tool.package_format.empty());
+    REQUIRE(tool.artifact_status.empty());
+    REQUIRE(tool.artifact_policy.empty());
     REQUIRE(tool.binary_sources.count(current_platform_key()) == 1);
     REQUIRE(tool.binary_sources.at(current_platform_key()).binary_name.empty());
 }
@@ -764,7 +779,12 @@ TEST_CASE("tool command handles local list path doctor and error branches",
       "install_method": "npm_package",
       "npm_package_root": "tools/local-ci",
       "npm_default_script": "smoke-video-proof",
-      "pinned_version": "0.0.0"
+      "pinned_version": "0.0.0",
+      "install_scope": "machine",
+      "distribution_lane": "tool_addon",
+      "package_format": "not_pulp_add",
+      "artifact_status": "source_tree_iteration",
+      "artifact_policy": "Keep video proof tooling outside projects."
     }
   }
 }
@@ -786,6 +806,23 @@ TEST_CASE("tool command handles local list path doctor and error branches",
         REQUIRE(output.out.str().find("unavailable-cmd") != std::string::npos);
         REQUIRE(output.out.str().find("video-proof") != std::string::npos);
         REQUIRE(output.out.str().find("available") != std::string::npos);
+    }
+
+    {
+        ScopedOutput output;
+        REQUIRE(cmd_tool({"info", "video-proof", "--json"}) == 0);
+        REQUIRE(output.out.str().find("\"id\":\"video-proof\"") != std::string::npos);
+        REQUIRE(output.out.str().find("\"install_scope\":\"machine\"") != std::string::npos);
+        REQUIRE(output.out.str().find("\"distribution_lane\":\"tool_addon\"") != std::string::npos);
+        REQUIRE(output.out.str().find("\"package_format\":\"not_pulp_add\"") != std::string::npos);
+        REQUIRE(output.out.str().find("\"artifact_status\":\"source_tree_iteration\"") != std::string::npos);
+        REQUIRE(output.out.str().find("\"installed\":false") != std::string::npos);
+    }
+
+    {
+        ScopedOutput output;
+        REQUIRE(cmd_tool({"info", "missing-cmd"}) == 1);
+        REQUIRE(output.err.str().find("Tool 'missing-cmd' not found") != std::string::npos);
     }
 
     {

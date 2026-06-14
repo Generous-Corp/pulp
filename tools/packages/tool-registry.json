@@ -136,6 +136,11 @@
       "requires_tools": [],
       "managed_by_pulp": true,
       "bundleable": false,
+      "install_scope": "machine",
+      "distribution_lane": "tool_addon",
+      "package_format": "not_pulp_add",
+      "artifact_status": "source_tree_iteration",
+      "artifact_policy": "Keep Remotion, ffmpeg-static, node_modules, generated videos, and caches outside Pulp projects and shipped runtime artifacts; replace the source-tree npm root with a versioned tool add-on artifact before mainline release.",
       "bundle_note": "Optional developer/agent tooling. Keeps node_modules, Remotion, ffmpeg-static, generated videos, and caches out of shipped Pulp artifacts."
     }
   }
