@@ -7,6 +7,7 @@ import unittest
 from types import SimpleNamespace
 
 import github_workflow_config
+import github_workflow_defaults
 import github_workflow_dispatch
 import github_workflow_metadata
 import github_workflow_provider
@@ -179,6 +180,63 @@ class GithubWorkflowSupportModuleTests(unittest.TestCase):
                 "validate",
                 explicit_provider="namespace",
             )
+
+    def test_defaults_module_resolves_config_repo_and_summary_values(self) -> None:
+        config = {
+            "github_actions": {
+                "defaults": {"provider": "namespace"},
+                "workflows": {
+                    "build": {
+                        "providers": {
+                            "namespace": {
+                                "linux_runner_selector_json": '"linux-config"',
+                            },
+                        },
+                    },
+                },
+            },
+        }
+        repo_variables = {
+            "PULP_NAMESPACE_BUILD_WINDOWS_RUNS_ON_JSON": '"windows-repo"',
+        }
+
+        value, source = github_workflow_defaults.resolve_workflow_field_value_and_source(
+            config,
+            repo_variables,
+            "build",
+            "namespace",
+            "linux_runner_selector_json",
+        )
+        self.assertEqual(value, '"linux-config"')
+        self.assertIn("config github_actions.workflows.build", source)
+
+        defaults, sources = github_workflow_defaults.resolve_workflow_dispatch_defaults(
+            config,
+            repo_variables,
+            "build",
+            "namespace",
+            ("linux_runner_selector_json", "windows_runner_selector_json"),
+        )
+        self.assertEqual(
+            defaults,
+            {
+                "linux_runner_selector_json": '"linux-config"',
+                "windows_runner_selector_json": '"windows-repo"',
+            },
+        )
+        self.assertEqual(
+            sources["windows_runner_selector_json"],
+            "repo variable PULP_NAMESPACE_BUILD_WINDOWS_RUNS_ON_JSON",
+        )
+
+        summary = github_workflow_defaults.summarize_workflow_provider_defaults(
+            config,
+            repo_variables,
+            github_workflow_settings.resolve_github_actions_settings(config),
+            "build",
+        )
+        self.assertEqual(summary["provider"], "namespace")
+        self.assertEqual(summary["dispatch_fields"], defaults)
 
 
 if __name__ == "__main__":

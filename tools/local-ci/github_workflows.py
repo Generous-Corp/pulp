@@ -22,6 +22,7 @@ local_ci.py.
 from __future__ import annotations
 
 import github_workflow_dispatch
+import github_workflow_defaults
 import github_workflow_provider
 from github_workflow_metadata import (
     BUILTIN_GITHUB_WORKFLOWS,
@@ -80,24 +81,13 @@ def resolve_workflow_field_value_and_source(
     provider: str,
     field_name: str,
 ) -> tuple[str, str]:
-    config_values = resolve_workflow_dispatch_field_values(config, workflow_key, provider, [field_name])
-    value = config_values.get(field_name, "")
-    if value:
-        return (
-            value,
-            f"config github_actions.workflows.{workflow_key}.providers.{provider}.{field_name}",
-        )
-
-    variable_name = repo_variable_name_for_workflow_field(workflow_key, provider, field_name)
-    if variable_name:
-        variable_value = repository_variables.get(variable_name, "")
-        if variable_value:
-            return (
-                normalize_runs_on_json(variable_value, setting_name=variable_name),
-                f"repo variable {variable_name}",
-            )
-
-    return "", ""
+    return github_workflow_defaults.resolve_workflow_field_value_and_source(
+        config,
+        repository_variables,
+        workflow_key,
+        provider,
+        field_name,
+    )
 
 
 def resolve_workflow_dispatch_defaults(
@@ -107,22 +97,14 @@ def resolve_workflow_dispatch_defaults(
     provider: str,
     field_names: list[str] | tuple[str, ...] | None,
 ) -> tuple[dict[str, str], dict[str, str]]:
-    resolved: dict[str, str] = {}
-    sources: dict[str, str] = {}
-    for field_name in field_names or []:
-        value, source = resolve_workflow_field_value_and_source(
-            config,
-            repository_variables,
-            workflow_key,
-            provider,
-            field_name,
-        )
-        if not value:
-            continue
-        resolved[field_name] = value
-        if source:
-            sources[field_name] = source
-    return resolved, sources
+    return github_workflow_defaults.resolve_workflow_dispatch_defaults(
+        config,
+        repository_variables,
+        workflow_key,
+        provider,
+        field_names,
+        field_value_resolver=resolve_workflow_field_value_and_source,
+    )
 
 
 def summarize_workflow_provider_defaults(
@@ -131,35 +113,15 @@ def summarize_workflow_provider_defaults(
     settings: dict,
     workflow_key: str,
 ) -> dict:
-    workflow = BUILTIN_GITHUB_WORKFLOWS[workflow_key]
-    provider, provider_source = resolve_default_provider_for_workflow(settings, workflow_key)
-    dispatch_fields, dispatch_sources = resolve_workflow_dispatch_defaults(
+    return github_workflow_defaults.summarize_workflow_provider_defaults(
         config,
         repository_variables,
+        settings,
         workflow_key,
-        provider,
-        workflow.get("dispatch_fields"),
+        provider_resolver=resolve_default_provider_for_workflow,
+        dispatch_defaults_resolver=resolve_workflow_dispatch_defaults,
+        field_value_resolver=resolve_workflow_field_value_and_source,
     )
-    selector_value = ""
-    selector_source = ""
-    selector_input = workflow.get("selector_input")
-    if selector_input:
-        selector_value, selector_source = resolve_workflow_field_value_and_source(
-            config,
-            repository_variables,
-            workflow_key,
-            provider,
-            selector_input,
-        )
-    return {
-        "provider": provider,
-        "provider_source": provider_source,
-        "selector_input": selector_input or "",
-        "selector_value": selector_value,
-        "selector_source": selector_source,
-        "dispatch_fields": dispatch_fields,
-        "dispatch_sources": dispatch_sources,
-    }
 
 
 def resolve_cli_dispatch_field_values(
