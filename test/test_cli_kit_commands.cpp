@@ -234,9 +234,12 @@ shift
 goto loop
 :done
 if not defined out exit /b 2
-set "payload=)BAT") + batch_bytes + R"BAT("
-powershell -NoProfile -ExecutionPolicy Bypass -Command "[IO.File]::WriteAllBytes($env:out,[Text.Encoding]::ASCII.GetBytes($env:payload))"
-exit /b %errorlevel%
+<nul set /p "payload=)BAT") + batch_bytes + R"BAT(" > "%out%"
+rem `set /p` reads EOF from `<nul`, which leaves ERRORLEVEL=1 even though the
+rem prompt text was written to the output file. Don't propagate that false
+rem failure: success is "the output file exists", matching the POSIX branch.
+if exist "%out%" exit /b 0
+exit /b 1
 )BAT";
     write_file(screenshot_tool, replace_all(script, "\n", "\r\n"));
 #else
