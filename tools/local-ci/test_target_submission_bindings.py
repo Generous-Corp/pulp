@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Tests for target submission metadata facade bindings."""
+"""Tests for target submission metadata compatibility bindings."""
 
 from __future__ import annotations
 
 from module_test_utils import load_module_from_path
 from pathlib import Path
-import types
 import unittest
+from unittest import mock
 
 
 MODULE_PATH = Path(__file__).with_name("target_submission_bindings.py")
@@ -21,85 +21,30 @@ class TargetSubmissionBindingsTests(unittest.TestCase):
         self.mod = load_module()
 
     def test_submission_exports_are_declared(self) -> None:
-        self.assertEqual(
-            self.mod.TARGET_SUBMISSION_EXPORTS,
-            ("build_submission_metadata", "print_submission_metadata"),
+        expected = (
+            *self.mod.TARGET_SUBMISSION_BUILD_EXPORTS,
+            *self.mod.TARGET_SUBMISSION_PRINT_EXPORTS,
         )
 
-    def _bindings(self, preflight):
-        bindings = {
-            "_target_preflight": preflight,
-            "ROOT": Path("/repo"),
-            "os": types.SimpleNamespace(environ={"PULP_LOCAL_CI_CONFIG": "/config"}),
-            "print": object(),
-        }
-        for name in [
-            "git_root_for",
-            "config_path",
-            "config_source_name",
-            "preflight_target_host_state",
-            "find_material_config_drift",
-            "normalize_provenance",
-            "short_sha",
-            "provenance_summary",
-        ]:
-            bindings[name] = object()
-        return bindings
+        self.assertEqual(self.mod.TARGET_SUBMISSION_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
 
-    def test_submission_and_print_bindings_delegate_facade_dependencies(self) -> None:
-        captured = {}
+    def test_install_target_submission_helpers_routes_focused_groups_and_unknown_exports(self) -> None:
+        bindings = {}
 
-        def capture(name, result=None):
-            def inner(*args, **kwargs):
-                captured[name] = (args, kwargs)
-                return result
-
-            return inner
-
-        preflight = types.SimpleNamespace(
-            build_submission_metadata=lambda *args, **kwargs: captured.setdefault("metadata", (args, kwargs)) and {"branch": args[1]},
-            print_submission_metadata=capture("print"),
-        )
-        bindings = self._bindings(preflight)
-
-        self.assertEqual(
-            self.mod.build_submission_metadata(
+        with (
+            mock.patch.object(self.mod, "install_target_submission_build_helpers") as build,
+            mock.patch.object(self.mod, "install_target_submission_print_helpers") as print_,
+            mock.patch.object(self.mod, "install_local_helpers") as install_local,
+        ):
+            self.mod.install_target_submission_helpers(
                 bindings,
-                {"targets": {}},
-                "feature/topic",
-                "a" * 40,
-                ["mac"],
-                "normal",
-                "full",
-                allow_root_mismatch=False,
-                allow_unreachable_targets=True,
-            ),
-            {"branch": "feature/topic"},
-        )
-        metadata_kwargs = captured["metadata"][1]
-        self.assertIs(metadata_kwargs["root"], bindings["ROOT"])
-        self.assertIs(metadata_kwargs["git_root_for_fn"], bindings["git_root_for"])
-        self.assertIs(metadata_kwargs["config_path_fn"], bindings["config_path"])
-        self.assertIs(metadata_kwargs["config_source_name_fn"], bindings["config_source_name"])
-        self.assertIs(metadata_kwargs["preflight_target_host_state_fn"], bindings["preflight_target_host_state"])
-        self.assertIs(metadata_kwargs["find_material_config_drift_fn"], bindings["find_material_config_drift"])
-        self.assertIs(metadata_kwargs["normalize_provenance_fn"], bindings["normalize_provenance"])
-        self.assertIs(metadata_kwargs["environ"], bindings["os"].environ)
+                ("build_submission_metadata", "print_submission_metadata", "custom_submission"),
+            )
 
-        self.mod.print_submission_metadata(bindings, {"branch": "feature/topic"})
-        self.assertIs(captured["print"][1]["short_sha_fn"], bindings["short_sha"])
-        self.assertIs(captured["print"][1]["provenance_summary_fn"], bindings["provenance_summary"])
-        self.assertIs(captured["print"][1]["print_fn"], bindings["print"])
-
-    def test_install_target_submission_helpers_wires_named_exports(self) -> None:
-        preflight = types.SimpleNamespace(print_submission_metadata=lambda metadata, **kwargs: None)
-        bindings = self._bindings(preflight)
-
-        self.mod.install_target_submission_helpers(bindings, ("print_submission_metadata",))
-
-        self.assertIsNone(bindings["print_submission_metadata"]({"branch": "feature/topic"}))
-        self.assertEqual(bindings["print_submission_metadata"].__name__, "print_submission_metadata")
-        self.assertNotIn("build_submission_metadata", bindings)
+        build.assert_called_once_with(bindings, ("build_submission_metadata",))
+        print_.assert_called_once_with(bindings, ("print_submission_metadata",))
+        install_local.assert_called_once_with(bindings, self.mod.__dict__, ("custom_submission",))
 
 
 if __name__ == "__main__":
