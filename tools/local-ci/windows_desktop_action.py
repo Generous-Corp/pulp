@@ -11,6 +11,10 @@ from windows_desktop_action_result import (
     fetch_windows_session_agent_outputs,
     wait_for_windows_session_agent_manifest,
 )
+from desktop_remote_action_preflight import (
+    require_pulp_app_automation_for_remote_view_options,
+    resolve_remote_desktop_action_host,
+)
 
 
 def run_windows_session_agent_action(
@@ -60,11 +64,12 @@ def run_windows_session_agent_action(
     write_desktop_run_rollups_fn: Callable[..., None],
     now_iso_fn: Callable[[], str],
 ) -> dict:
-    host = ensure_host_reachable_fn(target_name, target, config.get("defaults", {}))
-    if not host:
-        raise RuntimeError(f"Desktop target `{target_name}` is not reachable over SSH.")
-    if not target.get("repo_path"):
-        raise RuntimeError(f"Desktop target `{target_name}` is missing repo_path.")
+    host, repo_path = resolve_remote_desktop_action_host(
+        config,
+        target_name,
+        target,
+        ensure_host_reachable_fn=ensure_host_reachable_fn,
+    )
 
     receipt = desktop_receipt_for_fn(target_name)
     if not receipt:
@@ -86,15 +91,17 @@ def run_windows_session_agent_action(
         raise RuntimeError(
             f"Desktop target `{target_name}` has no logged-in desktop session. Log into the target desktop, then retry."
         )
-    if not pulp_app_automation:
-        if capture_ui_snapshot:
-            raise RuntimeError(
-                f"Desktop target `{target_name}` currently supports --capture-ui-snapshot only with --pulp-app-automation."
-            )
-        if any([click_view_id, click_view_type, click_view_text, click_view_label]):
-            raise RuntimeError(
-                f"Desktop target `{target_name}` currently supports view-target selectors only with --pulp-app-automation."
-            )
+    require_pulp_app_automation_for_remote_view_options(
+        target_name=target_name,
+        pulp_app_automation=pulp_app_automation,
+        capture_ui_snapshot=capture_ui_snapshot,
+        click_view_id=click_view_id,
+        click_view_type=click_view_type,
+        click_view_text=click_view_text,
+        click_view_label=click_view_label,
+        snapshot_error="Desktop target `{target_name}` currently supports --capture-ui-snapshot only with --pulp-app-automation.",
+        selector_error="Desktop target `{target_name}` currently supports view-target selectors only with --pulp-app-automation.",
+    )
 
     bundle_dir = create_desktop_run_bundle_fn(config, target_name, action_name)
     action_paths = desktop_action_artifact_paths_fn(bundle_dir, output_path)
@@ -116,7 +123,7 @@ def run_windows_session_agent_action(
     source_context = dict(source_request or {})
     if source_context.get("mode") == "exact-sha":
         source_context = prepare_windows_exact_sha_source_fn(bundle_dir, target_name, host, command, source_context)
-    launch_cwd = source_context.get("launch_cwd") or target["repo_path"]
+    launch_cwd = source_context.get("launch_cwd") or repo_path
     launch_command = source_context.get("launch_command") or command
 
     request = build_windows_session_agent_request_fn(

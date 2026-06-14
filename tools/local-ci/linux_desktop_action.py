@@ -13,11 +13,17 @@ from linux_desktop_action_result import (
     fetch_linux_remote_action_outputs,
 )
 from linux_desktop_artifacts import cleanup_remote_ssh_dir, fetch_ssh_artifact
+from desktop_remote_action_preflight import (
+    require_pulp_app_automation_for_remote_view_options,
+    resolve_remote_desktop_action_host,
+)
 
 
 __all__ = (
     "cleanup_remote_ssh_dir",
     "fetch_ssh_artifact",
+    "require_pulp_app_automation_for_remote_view_options",
+    "resolve_remote_desktop_action_host",
     "run_linux_xvfb_remote_action",
 )
 
@@ -64,12 +70,12 @@ def run_linux_xvfb_remote_action(
     view_tree_inspector_summary_fn: Callable[[dict], dict],
     pulp_app_interaction_summary_fn: Callable[..., dict],
 ) -> dict:
-    host = ensure_host_reachable_fn(target_name, target, config.get("defaults", {}))
-    if not host:
-        raise RuntimeError(f"Desktop target `{target_name}` is not reachable over SSH.")
-    repo_path = target.get("repo_path")
-    if not repo_path:
-        raise RuntimeError(f"Desktop target `{target_name}` is missing repo_path.")
+    host, repo_path = resolve_remote_desktop_action_host(
+        config,
+        target_name,
+        target,
+        ensure_host_reachable_fn=ensure_host_reachable_fn,
+    )
     launch_backend = probe_linux_launch_backend_fn(host)
     if launch_backend.get("mode") == "missing":
         raise RuntimeError(
@@ -82,11 +88,17 @@ def run_linux_xvfb_remote_action(
         click_view_text=click_view_text,
         click_view_label=click_view_label,
     )
-    if not pulp_app_automation:
-        if capture_ui_snapshot:
-            raise RuntimeError("linux-xvfb desktop inspect supports UI snapshots only with --pulp-app-automation.")
-        if any([click_view_id, click_view_type, click_view_text, click_view_label]):
-            raise RuntimeError("linux-xvfb view-target selectors currently require --pulp-app-automation.")
+    require_pulp_app_automation_for_remote_view_options(
+        target_name=target_name,
+        pulp_app_automation=pulp_app_automation,
+        capture_ui_snapshot=capture_ui_snapshot,
+        click_view_id=click_view_id,
+        click_view_type=click_view_type,
+        click_view_text=click_view_text,
+        click_view_label=click_view_label,
+        snapshot_error="linux-xvfb desktop inspect supports UI snapshots only with --pulp-app-automation.",
+        selector_error="linux-xvfb view-target selectors currently require --pulp-app-automation.",
+    )
 
     bundle_dir = create_desktop_run_bundle_fn(config, target_name, action_name)
     action_paths = desktop_action_artifact_paths_fn(bundle_dir, output_path)
