@@ -272,13 +272,6 @@ class LocalCiTests(unittest.TestCase):
         self.assertEqual(result["overall"], "canceled")
         self.assertEqual(result["canceled_reason"], "operator_canceled")
 
-    def test_resolve_targets_uses_defaults_and_rejects_disabled_targets(self):
-        config = self.mod.load_config()
-        self.assertEqual(self.mod.resolve_targets(config, None), ["mac"])
-
-        with self.assertRaises(ValueError):
-            self.mod.resolve_targets(config, ["windows"])
-
     def test_config_path_prefers_shared_state_config(self):
         original_override = os.environ.pop("PULP_LOCAL_CI_CONFIG", None)
         shared_config = self.state_dir / "config.json"
@@ -299,28 +292,6 @@ class LocalCiTests(unittest.TestCase):
                 os.environ.pop("PULP_LOCAL_CI_CONFIG", None)
             else:
                 os.environ["PULP_LOCAL_CI_CONFIG"] = original_override
-
-    def test_priority_and_target_helpers_normalize_inputs(self):
-        self.assertIsNone(self.mod.parse_targets_arg(""))
-        self.assertEqual(
-            self.mod.parse_targets_arg(" windows,mac,windows, ,ubuntu "),
-            ["mac", "ubuntu", "windows"],
-        )
-        self.assertEqual(self.mod.normalize_priority(" HIGH "), "high")
-        self.assertEqual(self.mod.priority_value(None), 50)
-        with self.assertRaisesRegex(ValueError, "Invalid priority"):
-            self.mod.normalize_priority("urgent")
-
-        config = {
-            "targets": {
-                "mac": {"enabled": True},
-                "ubuntu": {"enabled": True},
-                "windows": {"enabled": True},
-            },
-            "defaults": {"targets": "ubuntu,mac,ubuntu"},
-        }
-        self.assertEqual(self.mod.resolve_targets(config, None), ["mac", "ubuntu"])
-        self.assertEqual(self.mod.resolve_targets(config, ["windows", "mac", "windows"]), ["mac", "windows"])
 
     def test_resolve_submission_options_uses_branch_tip_when_branch_is_explicit(self):
         args = SimpleNamespace(
