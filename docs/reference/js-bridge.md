@@ -35,6 +35,21 @@ createTextEditor(id, parentId)     // Text input field
 createCombo(id, parentId)          // Dropdown selector
 ```
 
+`createTextEditor` uses the SDK `TextEditor`, so native text behavior is
+inherited by JS-authored UIs and imported HTML inputs: grapheme-safe UTF-8
+caret/delete, platform word/line/document/page movement, Shift-selection
+variants, clipboard shortcuts, undo/redo, double-click word selection with
+word-granular drag extension, triple-click line selection in multi-line mode,
+IME marked text, paste-and-match-style shortcut routing, standard
+Cut/Copy/Paste/Select All context menus, and multi-line scrolling.
+Programmatic bridge `setText()`
+syncs state without creating a user undo entry; typed input, paste, delete,
+and cut still participate in the editor undo model. SDK policies such as
+read-only, disabled, Tab/Return handling, clipboard/password export,
+line-ending normalization, max length, paste sanitization, input filtering,
+and whole-buffer validation live on `TextEditor`, so imported inputs inherit
+the same behavior.
+
 ### Custom Drawing
 
 ```js

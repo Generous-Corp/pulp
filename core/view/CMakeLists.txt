@@ -345,7 +345,11 @@ target_sources(pulp-view-core PRIVATE
     src/inspector.cpp
     src/sdl_window_host.cpp
     src/auto_ui.cpp
+    src/text_edit_model.cpp
     src/text_editor.cpp
+    src/text_editor_clipboard.cpp
+    src/text_editor_ime.cpp
+    src/text_editor_paint.cpp
     src/ui_components.cpp
     src/context_menu.cpp
     src/scroll_bar.cpp
@@ -638,6 +642,7 @@ if(APPLE)
             platform/mac/window_host_mac.mm
             platform/mac/window_host_mac_capture.mm
             platform/mac/window_host_mac_geometry.mm
+            platform/mac/window_host_mac_text_input.mm
             platform/mac/window_manager_mac.mm
             platform/mac/plugin_view_host_mac.mm
             platform/mac/screenshot_mac.mm
