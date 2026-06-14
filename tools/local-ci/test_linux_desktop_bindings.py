@@ -3,6 +3,7 @@
 
 from module_test_utils import load_module_from_path
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -27,29 +28,23 @@ class LinuxDesktopBindingsTests(unittest.TestCase):
         self.assertEqual(len(expected), len(set(expected)))
 
     def test_install_linux_desktop_helpers_routes_artifact_action_and_unknown_exports(self):
-        calls = []
+        bindings = {}
 
-        def action_install(bindings, names):
-            calls.append(("action", names))
+        with (
+            mock.patch.object(self.mod, "install_linux_desktop_action_helpers") as action,
+            mock.patch.object(self.mod, "install_local_helpers") as install_local,
+        ):
+            self.mod.install_linux_desktop_helpers(
+                bindings,
+                ("fetch_ssh_artifact", "run_linux_xvfb_remote_action", "custom_linux_desktop_export"),
+            )
 
-        def local_install(bindings, globals_obj, names):
-            calls.append(("local", names))
-
-        self.mod.install_linux_desktop_action_helpers = action_install
-        self.mod.install_local_helpers = local_install
-
-        self.mod.install_linux_desktop_helpers(
-            {},
-            ("fetch_ssh_artifact", "run_linux_xvfb_remote_action", "custom_linux_desktop_export"),
-        )
-
-        self.assertEqual(
-            calls,
+        action.assert_called_once_with(bindings, ("run_linux_xvfb_remote_action",))
+        install_local.assert_has_calls(
             [
-                ("local", ("fetch_ssh_artifact",)),
-                ("action", ("run_linux_xvfb_remote_action",)),
-                ("local", ("custom_linux_desktop_export",)),
-            ],
+                mock.call(bindings, self.mod.__dict__, ("fetch_ssh_artifact",)),
+                mock.call(bindings, self.mod.__dict__, ("custom_linux_desktop_export",)),
+            ]
         )
 
 

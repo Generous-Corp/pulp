@@ -3,6 +3,7 @@
 
 from module_test_utils import load_module_from_path
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -22,29 +23,19 @@ class MacosDesktopBindingsTests(unittest.TestCase):
         self.assertEqual(len(self.mod.MACOS_DESKTOP_EXPORTS), len(set(self.mod.MACOS_DESKTOP_EXPORTS)))
 
     def test_install_macos_desktop_helpers_routes_smoke_and_unknown_exports(self):
-        calls = []
+        bindings = {}
 
-        def smoke_install(bindings, names):
-            calls.append(("smoke", names))
+        with (
+            mock.patch.object(self.mod, "install_macos_desktop_smoke_helpers") as smoke,
+            mock.patch.object(self.mod, "install_local_helpers") as install_local,
+        ):
+            self.mod.install_macos_desktop_helpers(
+                bindings,
+                ("run_macos_local_smoke", "custom_macos_desktop_export"),
+            )
 
-        def local_install(bindings, globals_obj, names):
-            calls.append(("local", names))
-
-        self.mod.install_macos_desktop_smoke_helpers = smoke_install
-        self.mod.install_local_helpers = local_install
-
-        self.mod.install_macos_desktop_helpers(
-            {},
-            ("run_macos_local_smoke", "custom_macos_desktop_export"),
-        )
-
-        self.assertEqual(
-            calls,
-            [
-                ("smoke", ("run_macos_local_smoke",)),
-                ("local", ("custom_macos_desktop_export",)),
-            ],
-        )
+        smoke.assert_called_once_with(bindings, ("run_macos_local_smoke",))
+        install_local.assert_called_once_with(bindings, self.mod.__dict__, ("custom_macos_desktop_export",))
 
 
 if __name__ == "__main__":
