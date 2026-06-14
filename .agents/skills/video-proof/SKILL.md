@@ -391,6 +391,21 @@ into `video/proof.mp4` as AAC, and then lets Remotion and issue-variant
 generation preserve the audio stream. Prefer this over system capture when the
 test harness can render the plugin output directly.
 
+For the Audio Inspector demo, prefer the paired HeadlessHost renderer over an
+external sine generator:
+
+```bash
+cmake --build build-video-nogpu \
+  --target pulp-audio-inspector-demo pulp-audio-inspector-demo-render \
+  -j$(sysctl -n hw.ncpu)
+./build-video-nogpu/examples/audio-inspector-demo/pulp-audio-inspector-demo-render \
+  --output /tmp/pulp-audio-inspector-headless-proof.wav \
+  --metadata-json /tmp/pulp-audio-inspector-headless-proof.json \
+  --duration 4 \
+  --frequency 440 \
+  --level-db -12
+```
+
 Each run bundle should contain:
 
 - `video/proof.mp4`

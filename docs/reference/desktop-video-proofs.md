@@ -354,6 +354,24 @@ Audio Inspector demo window without requiring a UI snapshot artifact.
 `design-parity` records an inspect proof and composes it with the Remotion
 `design-parity` template directly during capture.
 
+For audio-bearing Audio Inspector proofs, build the paired HeadlessHost renderer
+and use its WAV as the plugin-origin audio source. The renderer exercises the
+same `AudioInspectorDemoProcessor` factory as the standalone window, writes a
+deterministic WAV, and records a small metadata JSON next to it:
+
+```bash
+cmake --build build-video-nogpu \
+  --target pulp-audio-inspector-demo pulp-audio-inspector-demo-render \
+  -j$(sysctl -n hw.ncpu)
+
+./build-video-nogpu/examples/audio-inspector-demo/pulp-audio-inspector-demo-render \
+  --output /tmp/pulp-audio-inspector-headless-proof.wav \
+  --metadata-json /tmp/pulp-audio-inspector-headless-proof.json \
+  --duration 4 \
+  --frequency 440 \
+  --level-db -12
+```
+
 The same recorder can be enabled on lower-level desktop actions:
 
 ```bash
@@ -409,10 +427,10 @@ expected audio directly, prefer the explicit plugin-audio mux path:
 
 ```bash
 python3 tools/local-ci/local_ci.py desktop video mac \
-  --command ./build/pulp \
-  --action smoke \
+  --recipe audio-inspector-demo \
+  --command ./build-video-nogpu/examples/audio-inspector-demo/pulp-audio-inspector-demo \
   --video-audio plugin \
-  --video-audio-file /path/to/rendered-plugin-output.wav \
+  --video-audio-file /tmp/pulp-audio-inspector-headless-proof.wav \
   --compose-video-proof
 ```
 
