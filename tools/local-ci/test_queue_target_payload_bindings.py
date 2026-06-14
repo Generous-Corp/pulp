@@ -3,7 +3,6 @@
 
 from module_test_utils import load_module_from_path
 from pathlib import Path
-import types
 import unittest
 
 
