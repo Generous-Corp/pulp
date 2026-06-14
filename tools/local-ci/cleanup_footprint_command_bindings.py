@@ -7,6 +7,7 @@ from typing import Any
 
 from binding_utils import binding as _binding
 from binding_utils import install_local_helpers
+from cleanup_footprint_command_dependency_bindings import cleanup_footprint_command_dependencies
 
 
 CLEANUP_FOOTPRINT_COMMAND_EXPORTS = (
@@ -16,9 +17,8 @@ CLEANUP_FOOTPRINT_COMMAND_EXPORTS = (
 
 def print_local_ci_state_footprint(bindings: Mapping[str, Any], *, indent: str = "") -> None:
     return _binding(bindings, "_cleanup_cli").print_local_ci_state_footprint(
-        local_ci_state_footprint_fn=_binding(bindings, "local_ci_state_footprint"),
-        state_footprint_lines_fn=_binding(bindings, "state_footprint_lines"),
         indent=indent,
+        **cleanup_footprint_command_dependencies(bindings),
     )
 
 

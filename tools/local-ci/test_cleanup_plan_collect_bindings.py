@@ -32,18 +32,30 @@ class CleanupPlanCollectBindingTests(unittest.TestCase):
     def test_cleanup_plan_collect_exports_match_facade_helpers(self) -> None:
         self.assertEqual(self.mod.CLEANUP_PLAN_COLLECT_EXPORTS, ("collect_local_ci_cleanup_plan",))
 
-    def test_collect_cleanup_plan_wires_facade_dependencies(self) -> None:
+    def test_collect_cleanup_plan_delegates_with_assembled_dependencies(self) -> None:
         self.cleanup.collect_local_ci_cleanup_plan.return_value = {"categories": {}}
         queue = [{"id": "job1"}]
+        retention = {"keep_results": 1, "keep_logs": 2}
+        deps = {
+            "bundles_dir_fn": object(),
+            "logs_dir_fn": object(),
+            "results_dir_fn": object(),
+            "prepared_dir_fn": object(),
+            "path_size_bytes_fn": object(),
+        }
 
-        result = self.mod.collect_local_ci_cleanup_plan(
-            self.bindings,
-            queue,
-            keep_results=1,
-            keep_logs=2,
-            keep_bundles=3,
-            include_prepared=True,
-        )
+        with (
+            mock.patch.object(self.mod, "cleanup_plan_retention_values", return_value=retention),
+            mock.patch.object(self.mod, "cleanup_plan_collect_dependencies", return_value=deps),
+        ):
+            result = self.mod.collect_local_ci_cleanup_plan(
+                self.bindings,
+                queue,
+                keep_results=1,
+                keep_logs=2,
+                keep_bundles=3,
+                include_prepared=True,
+            )
 
         self.assertEqual(result, {"categories": {}})
         self.cleanup.collect_local_ci_cleanup_plan.assert_called_once_with(
@@ -52,21 +64,19 @@ class CleanupPlanCollectBindingTests(unittest.TestCase):
             keep_logs=2,
             keep_bundles=3,
             include_prepared=True,
-            bundles_dir_fn=self.bindings["bundles_dir"],
-            logs_dir_fn=self.bindings["logs_dir"],
-            results_dir_fn=self.bindings["results_dir"],
-            prepared_dir_fn=self.bindings["prepared_dir"],
-            path_size_bytes_fn=self.bindings["path_size_bytes"],
+            **deps,
         )
 
     def test_collect_cleanup_plan_uses_default_retention(self) -> None:
         self.cleanup.collect_local_ci_cleanup_plan.return_value = {"categories": {}}
-        self.bindings["KEEP_COMPLETED_JOBS"] = 17
+        retention = {"keep_results": 17, "keep_logs": 17}
 
-        self.assertEqual(
-            self.mod.collect_local_ci_cleanup_plan(self.bindings, [{"id": "job1"}]),
-            {"categories": {}},
-        )
+        with mock.patch.object(self.mod, "cleanup_plan_retention_values", return_value=retention) as retention_values:
+            self.assertEqual(
+                self.mod.collect_local_ci_cleanup_plan(self.bindings, [{"id": "job1"}]),
+                {"categories": {}},
+            )
+        retention_values.assert_called_once_with(self.bindings, keep_results=None, keep_logs=None)
         self.cleanup.collect_local_ci_cleanup_plan.assert_called_once_with(
             [{"id": "job1"}],
             keep_results=17,

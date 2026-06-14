@@ -25,7 +25,7 @@ class CleanupPlanCommandBindingsTests(unittest.TestCase):
             ("print_local_ci_cleanup_plan",),
         )
 
-    def test_cleanup_plan_print_binds_facade_dependencies(self):
+    def test_cleanup_plan_print_delegates_with_assembled_dependencies(self):
         captured = {}
 
         def plan_runner(*args, **kwargs):
@@ -34,15 +34,16 @@ class CleanupPlanCommandBindingsTests(unittest.TestCase):
 
         bindings = {
             "_cleanup_cli": types.SimpleNamespace(print_local_ci_cleanup_plan=plan_runner),
-            "cleanup_plan_lines": object(),
         }
+        deps = {"cleanup_plan_lines_fn": object()}
         plan = {"remove": []}
 
-        self.mod.print_local_ci_cleanup_plan(bindings, plan, dry_run=True)
+        with mock.patch.object(self.mod, "cleanup_plan_command_dependencies", return_value=deps):
+            self.mod.print_local_ci_cleanup_plan(bindings, plan, dry_run=True)
 
         self.assertEqual(captured["plan_args"], (plan,))
         self.assertTrue(captured["plan_kwargs"]["dry_run"])
-        self.assertIs(captured["plan_kwargs"]["cleanup_plan_lines_fn"], bindings["cleanup_plan_lines"])
+        self.assertIs(captured["plan_kwargs"]["cleanup_plan_lines_fn"], deps["cleanup_plan_lines_fn"])
 
     def test_install_cleanup_plan_command_helpers_wires_named_exports(self):
         bindings = {}

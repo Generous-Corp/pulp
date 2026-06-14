@@ -7,6 +7,10 @@ from typing import Any
 
 from binding_utils import binding as _binding
 from binding_utils import install_local_helpers
+from cleanup_plan_collect_dependency_bindings import (
+    cleanup_plan_collect_dependencies,
+    cleanup_plan_retention_values,
+)
 
 
 CLEANUP_PLAN_COLLECT_EXPORTS = (
@@ -23,21 +27,13 @@ def collect_local_ci_cleanup_plan(
     keep_bundles: int = 0,
     include_prepared: bool = False,
 ) -> dict:
-    if keep_results is None:
-        keep_results = _binding(bindings, "KEEP_COMPLETED_JOBS")
-    if keep_logs is None:
-        keep_logs = _binding(bindings, "KEEP_COMPLETED_JOBS")
+    retention = cleanup_plan_retention_values(bindings, keep_results=keep_results, keep_logs=keep_logs)
     return _binding(bindings, "_cleanup").collect_local_ci_cleanup_plan(
         queue,
-        keep_results=keep_results,
-        keep_logs=keep_logs,
+        **retention,
         keep_bundles=keep_bundles,
         include_prepared=include_prepared,
-        bundles_dir_fn=_binding(bindings, "bundles_dir"),
-        logs_dir_fn=_binding(bindings, "logs_dir"),
-        results_dir_fn=_binding(bindings, "results_dir"),
-        prepared_dir_fn=_binding(bindings, "prepared_dir"),
-        path_size_bytes_fn=_binding(bindings, "path_size_bytes"),
+        **cleanup_plan_collect_dependencies(bindings),
     )
 
 

@@ -25,7 +25,7 @@ class CleanupFootprintCommandBindingsTests(unittest.TestCase):
             ("print_local_ci_state_footprint",),
         )
 
-    def test_cleanup_footprint_binds_facade_dependencies(self):
+    def test_cleanup_footprint_delegates_with_assembled_dependencies(self):
         captured = {}
 
         def footprint_runner(**kwargs):
@@ -33,14 +33,17 @@ class CleanupFootprintCommandBindingsTests(unittest.TestCase):
 
         bindings = {
             "_cleanup_cli": types.SimpleNamespace(print_local_ci_state_footprint=footprint_runner),
-            "local_ci_state_footprint": object(),
-            "state_footprint_lines": object(),
+        }
+        deps = {
+            "local_ci_state_footprint_fn": object(),
+            "state_footprint_lines_fn": object(),
         }
 
-        self.mod.print_local_ci_state_footprint(bindings, indent="  ")
+        with mock.patch.object(self.mod, "cleanup_footprint_command_dependencies", return_value=deps):
+            self.mod.print_local_ci_state_footprint(bindings, indent="  ")
 
-        self.assertIs(captured["footprint"]["local_ci_state_footprint_fn"], bindings["local_ci_state_footprint"])
-        self.assertIs(captured["footprint"]["state_footprint_lines_fn"], bindings["state_footprint_lines"])
+        self.assertIs(captured["footprint"]["local_ci_state_footprint_fn"], deps["local_ci_state_footprint_fn"])
+        self.assertIs(captured["footprint"]["state_footprint_lines_fn"], deps["state_footprint_lines_fn"])
         self.assertEqual(captured["footprint"]["indent"], "  ")
 
     def test_install_cleanup_footprint_command_helpers_wires_named_exports(self):

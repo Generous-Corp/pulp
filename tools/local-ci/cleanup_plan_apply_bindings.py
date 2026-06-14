@@ -7,6 +7,7 @@ from typing import Any
 
 from binding_utils import binding as _binding
 from binding_utils import install_local_helpers
+from cleanup_plan_apply_dependency_bindings import cleanup_plan_lines_dependencies
 
 
 CLEANUP_PLAN_APPLY_EXPORTS = (
@@ -23,8 +24,7 @@ def cleanup_plan_lines(bindings: Mapping[str, Any], plan: dict, *, dry_run: bool
     return _binding(bindings, "_cleanup").cleanup_plan_lines(
         plan,
         dry_run=dry_run,
-        format_size_fn=_binding(bindings, "format_size_bytes"),
-        describe_path_fn=_binding(bindings, "describe_path_for_cleanup"),
+        **cleanup_plan_lines_dependencies(bindings),
     )
 
 

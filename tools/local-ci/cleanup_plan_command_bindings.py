@@ -7,6 +7,7 @@ from typing import Any
 
 from binding_utils import binding as _binding
 from binding_utils import install_local_helpers
+from cleanup_plan_command_dependency_bindings import cleanup_plan_command_dependencies
 
 
 CLEANUP_PLAN_COMMAND_EXPORTS = (
@@ -18,7 +19,7 @@ def print_local_ci_cleanup_plan(bindings: Mapping[str, Any], plan: dict, *, dry_
     return _binding(bindings, "_cleanup_cli").print_local_ci_cleanup_plan(
         plan,
         dry_run=dry_run,
-        cleanup_plan_lines_fn=_binding(bindings, "cleanup_plan_lines"),
+        **cleanup_plan_command_dependencies(bindings),
     )
 
 

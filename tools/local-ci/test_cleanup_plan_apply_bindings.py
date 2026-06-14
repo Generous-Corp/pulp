@@ -44,18 +44,22 @@ class CleanupPlanApplyBindingTests(unittest.TestCase):
         )
         self.cleanup.apply_local_ci_cleanup_plan.assert_called_once_with({"categories": {}})
 
-    def test_cleanup_plan_lines_wires_formatters(self) -> None:
+    def test_cleanup_plan_lines_delegates_with_assembled_dependencies(self) -> None:
         self.cleanup.cleanup_plan_lines.return_value = ["line"]
         plan = {"categories": {}}
+        deps = {
+            "format_size_fn": object(),
+            "describe_path_fn": object(),
+        }
 
-        result = self.mod.cleanup_plan_lines(self.bindings, plan, dry_run=False)
+        with mock.patch.object(self.mod, "cleanup_plan_lines_dependencies", return_value=deps):
+            result = self.mod.cleanup_plan_lines(self.bindings, plan, dry_run=False)
 
         self.assertEqual(result, ["line"])
         self.cleanup.cleanup_plan_lines.assert_called_once_with(
             plan,
             dry_run=False,
-            format_size_fn=self.bindings["format_size_bytes"],
-            describe_path_fn=self.bindings["describe_path_for_cleanup"],
+            **deps,
         )
 
     def test_install_cleanup_plan_apply_helpers_wires_named_exports(self) -> None:
