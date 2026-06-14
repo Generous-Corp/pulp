@@ -226,14 +226,43 @@ class DesktopCommandsCliTests(unittest.TestCase):
         self.assertIn("video-doctor windows", windows["doctor"])
         self.assertIn("ddagrab/gdigrab", " ".join(windows["watch_for"]))
 
+    def test_desktop_video_matrix_check_reports_local_blockers(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_root = Path(tmpdir)
+            payload = self.mod.desktop_video_matrix_payload(
+                scenario="component-zoom",
+                check=True,
+                repo_root=repo_root,
+                which_fn=lambda name: "/usr/bin/cmake" if name == "cmake" else None,
+            )
+            row = payload["scenarios"][0]
+            self.assertTrue(payload["checked"])
+            self.assertEqual(row["local_readiness"]["status"], "blocked")
+            checks = {check["name"]: check for check in row["local_readiness"]["checks"]}
+            self.assertTrue(checks["cmake"]["ok"])
+            self.assertFalse(checks["skia-build.libskia"]["ok"])
+            self.assertIn("missing required Skia binary", checks["skia-build.libskia"]["detail"])
+
+            (repo_root / "external" / "skia-build").mkdir(parents=True)
+            (repo_root / "external" / "skia-build" / "libskia.a").write_bytes(b"skia")
+            payload = self.mod.desktop_video_matrix_payload(
+                scenario="component-zoom",
+                check=True,
+                repo_root=repo_root,
+                which_fn=lambda name: "/usr/bin/cmake" if name == "cmake" else None,
+            )
+            self.assertEqual(payload["scenarios"][0]["local_readiness"]["status"], "ready")
+
         self.printed.clear()
         result = self.mod.cmd_desktop_video_matrix(
-            Namespace(target="ios-simulator", scenario=None, json=False, markdown=True),
+            Namespace(target="ios-simulator", scenario=None, json=False, markdown=True, check=True),
             print_fn=self.print_line,
         )
         self.assertEqual(result, 0)
         markdown = self.printed[0]
         self.assertIn("# Desktop Validation Video Proof Demo Matrix", markdown)
+        self.assertIn("Local readiness:", markdown)
+        self.assertIn("Readiness checks:", markdown)
         self.assertIn("iOS Simulator interaction", markdown)
         self.assertIn("- Prepare: `none`", markdown)
         self.assertIn("Publish, draft, and serve:", markdown)

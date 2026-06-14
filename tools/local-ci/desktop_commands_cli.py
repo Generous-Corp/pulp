@@ -481,7 +481,64 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
 )
 
 
-def desktop_video_matrix_payload(*, target: str | None = None, scenario: str | None = None) -> dict:
+def _video_matrix_check(
+    item: dict,
+    *,
+    repo_root: Path,
+    which_fn: Callable[[str], str | None] = shutil.which,
+) -> dict:
+    checks: list[dict] = []
+
+    def add(name: str, ok: bool, detail: str, *, required: bool = True) -> None:
+        checks.append({"name": name, "ok": ok, "required": required, "detail": detail})
+
+    prepare_command = str(item.get("prepare_command") or "")
+    if "cmake" in prepare_command:
+        cmake_path = which_fn("cmake")
+        add("cmake", bool(cmake_path), cmake_path or "cmake not found on PATH")
+    if item["id"] in {"standalone-interaction", "component-zoom"}:
+        skia_path = repo_root / "external" / "skia-build" / "libskia.a"
+        add(
+            "skia-build.libskia",
+            skia_path.is_file(),
+            str(skia_path) if skia_path.is_file() else f"missing required Skia binary: {skia_path}",
+        )
+    if item["id"] == "inspector-workflow":
+        source = repo_root / "examples" / "audio-inspector-demo"
+        add("audio-inspector-demo-source", source.is_dir(), str(source) if source.is_dir() else f"missing source directory: {source}")
+    if item["id"] == "reaper-plugin-editor":
+        reaper_path = Path("/Applications/REAPER.app/Contents/MacOS/REAPER")
+        add("reaper.app", reaper_path.is_file(), str(reaper_path) if reaper_path.is_file() else "REAPER not found at /Applications/REAPER.app", required=False)
+    if item["id"] == "ios-simulator":
+        xcrun_path = which_fn("xcrun")
+        add("xcrun", bool(xcrun_path), xcrun_path or "xcrun not found on PATH")
+    if item["id"] == "android-emulator":
+        adb_path = which_fn("adb")
+        add("adb", bool(adb_path), adb_path or "adb not found on PATH or under Android SDK")
+    if item["id"] in {"linux-xvfb-desktop", "windows-session-agent-desktop"}:
+        add("backend.recorder", False, "recorder backend is planned for this platform", required=True)
+
+    failed_required = [check for check in checks if check["required"] and not check["ok"]]
+    if failed_required:
+        status = "blocked"
+    elif item.get("status") == "planned":
+        status = "planned"
+    elif item.get("status") == "partial":
+        status = "partial"
+    else:
+        status = "ready"
+    return {"status": status, "checks": checks}
+
+
+def desktop_video_matrix_payload(
+    *,
+    target: str | None = None,
+    scenario: str | None = None,
+    check: bool = False,
+    repo_root: Path | None = None,
+    which_fn: Callable[[str], str | None] = shutil.which,
+) -> dict:
+    root = repo_root or Path.cwd()
     scenarios: list[dict] = []
     for item in VIDEO_PROOF_DEMO_SCENARIOS:
         if target and item["platform"] != target:
@@ -489,6 +546,8 @@ def desktop_video_matrix_payload(*, target: str | None = None, scenario: str | N
         if scenario and item["id"] != scenario:
             continue
         row = {key: value for key, value in item.items()}
+        if check:
+            row["local_readiness"] = _video_matrix_check(row, repo_root=root, which_fn=which_fn)
         label = row["id"]
         report_placeholder = f"/path/to/published-reports/{label}"
         manifest_placeholder = "/path/to/run/manifest.json"
@@ -530,6 +589,7 @@ def desktop_video_matrix_payload(*, target: str | None = None, scenario: str | N
         "kind": "desktop-video-proof-demo-matrix",
         "target": target or "all",
         "scenario": scenario or "all",
+        "checked": check,
         "scenario_count": len(scenarios),
         "scenarios": scenarios,
     }
@@ -549,6 +609,12 @@ def desktop_video_matrix_lines(payload: dict) -> list[str]:
                 f"  title: {item['title']}",
                 f"  platform: {item['platform']}",
                 f"  template: {item['template']}",
+            ]
+        )
+        if item.get("local_readiness"):
+            lines.append(f"  local readiness: {item['local_readiness']['status']}")
+        lines.extend(
+            [
                 f"  proves: {item['proves']}",
                 f"  doctor: {item['doctor']}",
                 f"  prepare: {item.get('prepare_command') or '(none)'}",
@@ -559,9 +625,15 @@ def desktop_video_matrix_lines(payload: dict) -> list[str]:
                 f"  serve background: {item['serve_background_command']}",
                 f"  serve status: {item['serve_status_command']}",
                 f"  serve stop: {item['serve_stop_command']}",
-                "  watch for:",
             ]
         )
+        if item.get("local_readiness"):
+            lines.append("  readiness checks:")
+            for check in item["local_readiness"].get("checks", []):
+                prefix = "PASS" if check.get("ok") else "FAIL"
+                required = "required" if check.get("required") else "optional"
+                lines.append(f"    - {prefix} {check['name']} ({required}): {check['detail']}")
+        lines.append("  watch for:")
         lines.extend(f"    - {value}" for value in item.get("watch_for", []))
     return lines
 
@@ -583,6 +655,12 @@ def desktop_video_matrix_markdown(payload: dict) -> str:
                 f"- Status: `{item['status']}`",
                 f"- Platform: `{item['platform']}`",
                 f"- Remotion template: `{item['template']}`",
+            ]
+        )
+        if item.get("local_readiness"):
+            lines.append(f"- Local readiness: `{item['local_readiness']['status']}`")
+        lines.extend(
+            [
                 f"- Proves: {item['proves']}",
                 f"- Doctor: `{item['doctor']}`",
                 f"- Prepare: `{item.get('prepare_command') or 'none'}`",
@@ -603,10 +681,17 @@ def desktop_video_matrix_markdown(payload: dict) -> str:
                 item["review_status_command"],
                 item["serve_stop_command"],
                 "```",
-                "",
-                "Watch for:",
             ]
         )
+        if item.get("local_readiness"):
+            lines.append("")
+            lines.append("Readiness checks:")
+            for check in item["local_readiness"].get("checks", []):
+                prefix = "PASS" if check.get("ok") else "FAIL"
+                required = "required" if check.get("required") else "optional"
+                lines.append(f"- {prefix} `{check['name']}` ({required}): {check['detail']}")
+            lines.append("")
+        lines.extend(["", "Watch for:"])
         lines.extend(f"- {value}" for value in item.get("watch_for", []))
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
@@ -620,6 +705,7 @@ def cmd_desktop_video_matrix(
     payload = desktop_video_matrix_payload(
         target=getattr(args, "target", None) or None,
         scenario=getattr(args, "scenario", None) or None,
+        check=getattr(args, "check", False),
     )
     if getattr(args, "json", False):
         print_fn(json.dumps(payload, indent=2))

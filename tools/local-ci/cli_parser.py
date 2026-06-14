@@ -475,6 +475,7 @@ def build_local_ci_parser(
         help="Filter matrix to one named scenario.",
     )
     p_desktop_video_matrix.add_argument("--markdown", action="store_true", help="Emit markdown suitable for a handoff or review issue")
+    p_desktop_video_matrix.add_argument("--check", action="store_true", help="Include lightweight machine-local readiness checks for each scenario")
     p_desktop_video_matrix.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 
     p_desktop_video_doctor = desktop_sub.add_parser("video-doctor", help="Run video proof setup/readiness checks for one desktop target")

@@ -388,7 +388,10 @@ command, publish command, review-issue command, background serve/status/stop
 commands, and what a reviewer should look for. Use `--target mac`, `--target
 ubuntu`, `--target windows`, `--target ios-simulator`, `--scenario
 component-zoom`, or `--json` when an agent needs a narrower machine-readable
-plan. The iOS Simulator row uses the working `simulator video` recorder. The
+plan. Add `--check` to include lightweight machine-local readiness checks, such
+as whether `cmake`, `adb`, `xcrun`, REAPER, or `external/skia-build/libskia.a`
+are available before attempting a demo. The iOS Simulator row uses the working
+`simulator video` recorder. The
 Android row uses the working `android video` command for adb-connected
 emulators/devices with `screenrecord` and timed open-url/deep-link actions. The
 Linux/Xvfb and Windows/session-agent rows are marked `planned`; their

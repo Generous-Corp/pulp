@@ -420,8 +420,11 @@ the current macOS lane, `--target ios-simulator` narrows to simulator capture,
 `--target android-emulator` narrows to Android capture, `--target ubuntu` and
 `--target windows` show the planned Linux/Xvfb and Windows/session-agent rows,
 `--scenario component-zoom` prints one row, and `--json` is suitable for
-automation. The matrix carries readiness status, Remotion template, doctor
-command, concrete Release prepare command, recording/compose command,
+automation. Add `--check` on a fresh machine or blackbook to include
+machine-local readiness checks for obvious blockers such as missing `cmake`,
+`adb`, `xcrun`, REAPER, or `external/skia-build/libskia.a`. The matrix carries
+readiness status, Remotion template, doctor command, concrete Release prepare
+command, recording/compose command,
 publish/review-issue commands, background serve/status/stop commands, and
 reviewer watch-points for standalone, REAPER/plugin-host, inspector,
 component-zoom, design-parity, iOS Simulator, Android Emulator, Linux, and

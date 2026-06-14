@@ -450,12 +450,14 @@ class CliParserTests(unittest.TestCase):
             "--scenario",
             "component-zoom",
             "--markdown",
+            "--check",
         ])
 
         self.assertEqual(args.desktop_command, "video-matrix")
         self.assertEqual(args.target, "mac")
         self.assertEqual(args.scenario, "component-zoom")
         self.assertTrue(args.markdown)
+        self.assertTrue(args.check)
         self.assertFalse(args.json)
 
         args = parser.parse_args([
@@ -471,6 +473,7 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(args.target, "windows")
         self.assertEqual(args.scenario, "windows-session-agent-desktop")
         self.assertTrue(args.json)
+        self.assertFalse(args.check)
 
     def test_desktop_video_doctor_defaults_to_mac(self):
         parser = self.build_parser()
