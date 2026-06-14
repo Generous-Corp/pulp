@@ -28,29 +28,28 @@ class DesktopPublishBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.DESKTOP_PUBLISH_EXPORTS, expected)
         self.assertEqual(len(expected), len(set(expected)))
 
-    def test_install_desktop_publish_helpers_routes_each_group(self):
+    def test_install_desktop_publish_helpers_routes_each_group_and_unknown_exports(self):
         bindings = {}
 
         with (
             mock.patch.object(self.mod, "install_desktop_publish_branch_helpers") as install_branch,
             mock.patch.object(self.mod, "install_desktop_publish_stage_helpers") as install_stage,
             mock.patch.object(self.mod, "install_desktop_publish_list_helpers") as install_list,
+            mock.patch.object(self.mod, "install_local_helpers") as install_local,
         ):
             self.mod.install_desktop_publish_helpers(
                 bindings,
-                ("publish_report_to_branch", "stage_desktop_publish_report", "desktop_publish_reports"),
+                (
+                    "publish_report_to_branch",
+                    "stage_desktop_publish_report",
+                    "desktop_publish_reports",
+                    "custom",
+                ),
             )
 
         install_branch.assert_called_once_with(bindings, ("publish_report_to_branch",))
         install_stage.assert_called_once_with(bindings, ("stage_desktop_publish_report",))
         install_list.assert_called_once_with(bindings, ("desktop_publish_reports",))
-
-    def test_install_desktop_publish_helpers_preserves_unknown_fallbacks(self):
-        bindings = {"custom": object()}
-
-        with mock.patch.object(self.mod, "install_local_helpers") as install_local:
-            self.mod.install_desktop_publish_helpers(bindings, ("custom",))
-
         install_local.assert_called_once_with(bindings, self.mod.__dict__, ("custom",))
 
 

@@ -30,9 +30,9 @@ class LocalCiPrCommandBindingsTests(unittest.TestCase):
         for name in expected:
             self.assertTrue(callable(getattr(self.mod, name)))
 
-    def test_install_pr_command_helpers_routes_selected_groups(self):
+    def test_install_pr_command_helpers_routes_selected_groups_and_unknown_exports(self):
         bindings = {}
-        names = ("cmd_ship", "cmd_list")
+        names = ("cmd_ship", "cmd_list", "custom")
 
         with (
             mock.patch.object(self.mod, "install_local_ci_pr_ship_command_helpers") as ship,
@@ -45,22 +45,6 @@ class LocalCiPrCommandBindingsTests(unittest.TestCase):
         ship.assert_called_once_with(bindings, ("cmd_ship",))
         check.assert_called_once_with(bindings, ())
         list_.assert_called_once_with(bindings, ("cmd_list",))
-        install_local.assert_not_called()
-
-    def test_install_pr_command_helpers_preserves_unknown_fallback(self):
-        bindings = {}
-
-        with (
-            mock.patch.object(self.mod, "install_local_ci_pr_ship_command_helpers") as ship,
-            mock.patch.object(self.mod, "install_local_ci_pr_check_command_helpers") as check,
-            mock.patch.object(self.mod, "install_local_ci_pr_list_command_helpers") as list_,
-            mock.patch.object(self.mod, "install_local_helpers") as install_local,
-        ):
-            self.mod.install_local_ci_pr_command_helpers(bindings, ("custom",))
-
-        ship.assert_called_once_with(bindings, ())
-        check.assert_called_once_with(bindings, ())
-        list_.assert_called_once_with(bindings, ())
         install_local.assert_called_once_with(bindings, self.mod.__dict__, ("custom",))
 
 

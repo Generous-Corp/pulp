@@ -31,7 +31,7 @@ class GithubWorkflowDispatchBindingsTests(unittest.TestCase):
         for name in expected:
             self.assertTrue(callable(getattr(self.mod, name)))
 
-    def test_install_github_workflow_dispatch_helpers_routes_each_group(self):
+    def test_install_github_workflow_dispatch_helpers_routes_each_group_and_unknown_exports(self):
         bindings = {}
 
         with (
@@ -39,6 +39,7 @@ class GithubWorkflowDispatchBindingsTests(unittest.TestCase):
             mock.patch.object(self.mod, "install_github_workflow_dispatch_field_helpers") as install_field,
             mock.patch.object(self.mod, "install_github_workflow_dispatch_default_helpers") as install_default,
             mock.patch.object(self.mod, "install_github_workflow_dispatch_cli_helpers") as install_cli,
+            mock.patch.object(self.mod, "install_local_helpers") as install_local,
         ):
             self.mod.install_github_workflow_dispatch_helpers(
                 bindings,
@@ -47,6 +48,7 @@ class GithubWorkflowDispatchBindingsTests(unittest.TestCase):
                     "repo_variable_name_for_workflow_field",
                     "resolve_workflow_dispatch_defaults",
                     "resolve_cli_dispatch_field_values",
+                    "custom",
                 ),
             )
 
@@ -54,13 +56,6 @@ class GithubWorkflowDispatchBindingsTests(unittest.TestCase):
         install_field.assert_called_once_with(bindings, ("repo_variable_name_for_workflow_field",))
         install_default.assert_called_once_with(bindings, ("resolve_workflow_dispatch_defaults",))
         install_cli.assert_called_once_with(bindings, ("resolve_cli_dispatch_field_values",))
-
-    def test_install_github_workflow_dispatch_helpers_preserves_unknown_fallbacks(self):
-        bindings = {"custom": object()}
-
-        with mock.patch.object(self.mod, "install_local_helpers") as install_local:
-            self.mod.install_github_workflow_dispatch_helpers(bindings, ("custom",))
-
         install_local.assert_called_once_with(bindings, self.mod.__dict__, ("custom",))
 
 
