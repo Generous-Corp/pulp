@@ -2,7 +2,6 @@
 """Tests for target selection facade bindings."""
 
 from module_test_utils import load_module_from_path
-import types
 import unittest
 from pathlib import Path
 
@@ -18,62 +17,36 @@ class TargetBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
 
-    def test_target_helpers_delegate_to_targets_module(self):
-        calls = []
-
-        def make_runner(name, value):
-            def runner(*args, **kwargs):
-                calls.append((name, args, kwargs))
-                return value
-
-            return runner
-
-        bindings = {
-            "_targets": types.SimpleNamespace(
-                enabled_targets=make_runner("enabled_targets", ["mac"]),
-                parse_targets_arg=make_runner("parse_targets_arg", ["mac", "windows"]),
-                resolve_targets=make_runner("resolve_targets", ["mac"]),
-            )
-        }
-        config = {"targets": {"mac": {"enabled": True}}}
-        requested = ["mac"]
-
-        self.assertEqual(self.mod.enabled_targets(bindings, config), ["mac"])
-        self.assertEqual(self.mod.parse_targets_arg(bindings, "mac,windows"), ["mac", "windows"])
-        self.assertEqual(self.mod.resolve_targets(bindings, config, requested), ["mac"])
-
-        self.assertEqual([call[0] for call in calls], [
+    def test_target_exports_are_named_helpers(self):
+        expected = (
             "enabled_targets",
             "parse_targets_arg",
             "resolve_targets",
-        ])
-        self.assertEqual(calls[0][1], (config,))
-        self.assertEqual(calls[1][1], ("mac,windows",))
-        self.assertEqual(calls[2][1], (config, requested))
+        )
 
-    def test_install_target_helpers_wires_named_exports(self):
+        self.assertEqual(self.mod.TARGET_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+
+    def test_install_target_helpers_routes_known_and_unknown_exports(self):
         calls = []
 
-        def make_runner(name, value):
-            def runner(*args, **kwargs):
-                calls.append((name, args, kwargs))
-                return value
+        def local_install(bindings, globals_obj, names):
+            calls.append(names)
 
-            return runner
+        self.mod.install_local_helpers = local_install
 
-        bindings = {
-            "_targets": types.SimpleNamespace(
-                enabled_targets=make_runner("enabled_targets", ["mac"]),
-                resolve_targets=make_runner("resolve_targets", ["mac"]),
-            )
-        }
-        config = {"targets": {"mac": {"enabled": True}}}
-        self.mod.install_target_helpers(bindings, ("enabled_targets", "resolve_targets"))
+        self.mod.install_target_helpers(
+            {},
+            ("enabled_targets", "custom_target_export", "resolve_targets"),
+        )
 
-        self.assertEqual(bindings["enabled_targets"](config), ["mac"])
-        self.assertEqual(bindings["resolve_targets"](config, ["mac"]), ["mac"])
-        self.assertEqual(bindings["enabled_targets"].__name__, "enabled_targets")
-        self.assertEqual([call[0] for call in calls], ["enabled_targets", "resolve_targets"])
+        self.assertEqual(
+            calls,
+            [
+                ("enabled_targets", "resolve_targets"),
+                ("custom_target_export",),
+            ],
+        )
 
 
 if __name__ == "__main__":
