@@ -1699,6 +1699,22 @@ def _review_issue_manifest_map(review_package: dict, issue_url: str) -> tuple[di
     return mapping, None
 
 
+def _review_watch_command_for_manifest_map(
+    manifest_map_path: Path,
+    *,
+    repo: str | None = None,
+    label: str | None = None,
+) -> str:
+    command = "python3 tools/local-ci/local_ci.py desktop review-watch"
+    if repo:
+        command += f" --repo {shlex.quote(repo)}"
+    if label:
+        command += f" --label {shlex.quote(label)}"
+    command += f" --manifest-map {shlex.quote(str(manifest_map_path))}"
+    command += " --state-file /tmp/pulp-video-review-watch.json --close-issue"
+    return command
+
+
 def cmd_desktop_review_issue(
     args: argparse.Namespace,
     *,
@@ -1733,12 +1749,25 @@ def cmd_desktop_review_issue(
     draft["body_file"] = str(body_path)
     draft["json_file"] = str(json_path)
     if manifest_map_path:
+        review_label = next(iter(getattr(args, "label", []) or []), "video-review")
+        review_watch_command = _review_watch_command_for_manifest_map(
+            manifest_map_path,
+            repo=args.repo,
+            label=review_label,
+        )
+        draft["review_watch_command"] = review_watch_command
         draft["manifest_map"] = {
             "path": str(manifest_map_path),
             "entries": {},
             "error": None,
             "status": "pending-create" if getattr(args, "create", False) else "requires-create",
         }
+        draft["body"] = (
+            draft["body"].rstrip()
+            + "\n\n## Batch Review Watch\n\n"
+            + "After this issue is created with `--create` and a manifest map is written, use:\n\n"
+            + f"`{review_watch_command}`\n"
+        )
     atomic_write_text_fn(body_path, draft["body"])
     create_result = None
     if getattr(args, "create", False):

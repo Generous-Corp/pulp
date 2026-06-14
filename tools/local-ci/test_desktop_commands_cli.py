@@ -1747,6 +1747,10 @@ class DesktopCommandsCliTests(unittest.TestCase):
             self.assertEqual(draft_json["manifest_map"]["path"], str(manifest_map_path.resolve()))
             self.assertEqual(draft_json["manifest_map"]["status"], "written")
             self.assertIsNone(draft_json["manifest_map"]["error"])
+            self.assertIn("desktop review-watch", draft_json["review_watch_command"])
+            self.assertIn("--label video-review", draft_json["review_watch_command"])
+            self.assertIn(f"--manifest-map {manifest_map_path.resolve()}", draft_json["review_watch_command"])
+            self.assertIn("Batch Review Watch", (report_dir / "github-issue.md").read_text())
             manifest_map = json.loads(manifest_map_path.read_text())
             self.assertEqual(
                 manifest_map,
@@ -1815,6 +1819,10 @@ class DesktopCommandsCliTests(unittest.TestCase):
             self.assertEqual(payload["manifest_map"]["entries"], {})
             self.assertIsNone(payload["manifest_map"]["error"])
             self.assertEqual(payload["manifest_map"]["status"], "requires-create")
+            self.assertIn("desktop review-watch", payload["review_watch_command"])
+            self.assertIn("--label video-review", payload["review_watch_command"])
+            self.assertIn(f"--manifest-map {manifest_map_path.resolve()}", payload["review_watch_command"])
+            self.assertIn("Batch Review Watch", (report_dir / "github-issue.md").read_text())
 
     def test_review_issue_create_failure_writes_failed_draft_json(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1921,6 +1929,7 @@ class DesktopCommandsCliTests(unittest.TestCase):
             self.assertEqual(payload["manifest_map"]["entries"], {})
             self.assertEqual(payload["manifest_map"]["error"], "expected exactly one run manifest, found 2")
             self.assertEqual(payload["manifest_map"]["status"], "skipped")
+            self.assertIn("desktop review-watch", payload["review_watch_command"])
 
     def test_review_status_detects_approval_and_suggests_verdict(self):
         issue_payload = {
