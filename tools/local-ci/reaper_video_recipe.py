@@ -138,7 +138,9 @@ def write_reaper_plugin_editor_recipe(
               local ok, name = reaper.TrackFX_GetFXName(track, fx)
               log("fx name ok=" .. tostring(ok) .. " name=" .. tostring(name) .. " matched=" .. matched)
               reaper.TrackFX_Show(track, fx, 3)
+              log("TrackFX_Show floating-editor mode=3")
               reaper.TrackFX_Show(track, fx, 1)
+              log("TrackFX_Show fx-chain mode=1")
             else
               log("plugin not found")
             end

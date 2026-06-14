@@ -393,7 +393,11 @@ class MacosDesktopActionTests(unittest.TestCase):
 
     def test_generated_reaper_recipe_status_requires_opened_plugin(self) -> None:
         log_path = self.root / "stdout.log"
-        log_path.write_text("TrackFX_AddByName PulpSynth -> 0\nfx name ok=true name=CLAPi: PulpSynth (Pulp)\n")
+        log_path.write_text(
+            "TrackFX_AddByName PulpSynth -> 0\n"
+            "fx name ok=true name=CLAPi: PulpSynth (Pulp)\n"
+            "TrackFX_Show floating-editor mode=3\n"
+        )
         self.mod._validate_generated_reaper_recipe_status({"reaper_recipe": "generated"}, log_path)
 
         log_path.write_text("TrackFX_AddByName PulpSynth -> -1\nplugin not found\n")
@@ -401,7 +405,11 @@ class MacosDesktopActionTests(unittest.TestCase):
             self.mod._validate_generated_reaper_recipe_status({"reaper_recipe": "generated"}, log_path)
 
         log_path.write_text("starting\n")
-        with self.assertRaisesRegex(RuntimeError, "did not confirm"):
+        with self.assertRaisesRegex(RuntimeError, "did not confirm that the plugin loaded"):
+            self.mod._validate_generated_reaper_recipe_status({"reaper_recipe": "generated"}, log_path)
+
+        log_path.write_text("TrackFX_AddByName PulpSynth -> 0\nfx name ok=true name=CLAPi: PulpSynth (Pulp)\n")
+        with self.assertRaisesRegex(RuntimeError, "floating plugin editor"):
             self.mod._validate_generated_reaper_recipe_status({"reaper_recipe": "generated"}, log_path)
 
     def test_run_macos_local_smoke_rejects_capture_bundle_id_combinations(self) -> None:

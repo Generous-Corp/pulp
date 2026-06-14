@@ -98,7 +98,9 @@ def _validate_generated_reaper_recipe_status(video_context: dict | None, log_pat
     if "plugin not found" in text:
         raise RuntimeError("Generated REAPER proof recipe did not find the requested plugin.")
     if "fx name ok=true" not in text:
-        raise RuntimeError("Generated REAPER proof recipe did not confirm that the plugin editor opened.")
+        raise RuntimeError("Generated REAPER proof recipe did not confirm that the plugin loaded.")
+    if "TrackFX_Show floating-editor mode=3" not in text:
+        raise RuntimeError("Generated REAPER proof recipe did not confirm that the floating plugin editor was requested.")
 
 
 def run_macos_local_smoke(

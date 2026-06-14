@@ -88,6 +88,8 @@ class ReaperVideoRecipeTests(unittest.TestCase):
             self.assertIn('"PulpSynth", "CLAP: PulpSynth", "CLAPi: PulpSynth"', lua)
             self.assertIn("TrackFX_AddByName", lua)
             self.assertIn("TrackFX_Show(track, fx, 3)", lua)
+            self.assertIn("TrackFX_Show floating-editor mode=3", lua)
+            self.assertIn("TrackFX_Show fx-chain mode=1", lua)
 
 
 if __name__ == "__main__":
