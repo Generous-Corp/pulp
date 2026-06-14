@@ -1647,6 +1647,18 @@ def cmd_desktop_compose_video(
         print_fn(f"Error: diff image not found: {diff_image}")
         return 1
 
+    artifacts = manifest.setdefault("artifacts", {})
+    existing_composition = manifest.get("video_proof_composition") if isinstance(manifest.get("video_proof_composition"), dict) else {}
+    resolved_template = template or existing_composition.get("template") or "validation-proof"
+    artifact_diff_image: Path | None = None
+    if diff_image is None and resolved_template == "design-parity":
+        artifact_diff = artifacts.get("diff_screenshot")
+        if artifact_diff:
+            candidate = Path(str(artifact_diff)).expanduser().resolve()
+            if candidate.is_file():
+                artifact_diff_image = candidate
+    diff_image_for_compose = diff_image or artifact_diff_image
+
     try:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         metadata_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1661,7 +1673,7 @@ def cmd_desktop_compose_video(
             template=template,
             source_image=source_image,
             source_label=source_label,
-            diff_image=diff_image,
+            diff_image=diff_image_for_compose,
             diff_label=diff_label,
             title=title,
             notes=notes,
@@ -1685,14 +1697,13 @@ def cmd_desktop_compose_video(
         print_fn(f"Error: {exc}")
         return 1
 
-    artifacts = manifest.setdefault("artifacts", {})
     manifest["video_composed"] = composed_summary
     manifest["video_issue"] = issue_summary
     if small_summary is not None:
         manifest["video_small"] = small_summary
     if notes:
         manifest["video_proof_notes"] = notes
-    if template or source_image or source_label or diff_image or diff_label or title or notes:
+    if template or source_image or source_label or diff_image_for_compose or diff_label or title or notes:
         composition = manifest.setdefault("video_proof_composition", {})
         if not isinstance(composition, dict):
             composition = {}
@@ -1702,7 +1713,7 @@ def cmd_desktop_compose_video(
                 "template": template or composition.get("template") or "validation-proof",
                 "source_image": str(source_image) if source_image else composition.get("source_image"),
                 "source_label": source_label if source_label is not None else composition.get("source_label"),
-                "diff_image": str(diff_image) if diff_image else composition.get("diff_image"),
+                "diff_image": str(diff_image_for_compose) if diff_image_for_compose else composition.get("diff_image"),
                 "diff_label": diff_label if diff_label is not None else composition.get("diff_label"),
                 "title": title if title is not None else composition.get("title"),
                 "notes": notes if notes else composition.get("notes", []),

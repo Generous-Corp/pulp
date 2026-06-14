@@ -356,6 +356,50 @@ class ReportingTests(unittest.TestCase):
         self.assertIn("Source reference: `", review_text)
         self.assertIn("Proof note: Source import matches the native render.", review_text)
 
+    def test_stage_desktop_publish_report_uses_diff_screenshot_as_design_parity_reference(self) -> None:
+        bundle = self.root / "bundle"
+        bundle.mkdir()
+        diff = bundle / "diff.png"
+        diff.write_bytes(b"diff")
+        video = bundle / "proof-composed.mp4"
+        video.write_bytes(b"composed")
+        manifest = {
+            "target": "mac",
+            "action": "inspect",
+            "label": "Design parity",
+            "artifacts": {
+                "bundle_dir": str(bundle),
+                "video_composed": str(video),
+                "diff_screenshot": str(diff),
+            },
+            "video_proof_composition": {
+                "template": "design-parity",
+            },
+        }
+
+        output_dir = self.root / "published"
+        self.mod.stage_desktop_publish_report(
+            self.config,
+            [manifest],
+            label="design-parity",
+            output_dir=output_dir,
+            create_desktop_publish_bundle_fn=lambda _config: output_dir,
+            now_iso_fn=lambda: "2026-05-22T12:01:00+00:00",
+            atomic_write_text_fn=self.atomic_write,
+            write_desktop_publish_rollups_fn=lambda _config: None,
+            publish_report_to_branch_fn=lambda _config, _report: {},
+        )
+
+        payload = json.loads((output_dir / "index.json").read_text())
+        published_run = payload["runs"][0]
+        self.assertIn("video_diff_image", published_run["artifacts"])
+        self.assertIn("diff-reference/diff.png", published_run["artifacts"]["video_diff_image"])
+        self.assertTrue((output_dir / published_run["artifacts"]["video_diff_image"]).is_file())
+        html_text = (output_dir / "index.html").read_text()
+        self.assertIn("visual diff reference", html_text)
+        review_text = (output_dir / "review.md").read_text()
+        self.assertIn("Visual diff reference:", review_text)
+
     def test_desktop_review_issue_draft_lists_attachments_and_fallbacks(self) -> None:
         package_path = self.root / "report" / "review-package.json"
         package_path.parent.mkdir(parents=True)

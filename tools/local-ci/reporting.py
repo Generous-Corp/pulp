@@ -859,6 +859,8 @@ def stage_desktop_publish_report(
         if _copy_optional_file(source_image, run_dir / "source-reference" / Path(str(source_image)).name):
             copied_artifacts["video_source_image"] = str((run_dir / "source-reference" / Path(str(source_image)).name).relative_to(publish_dir))
         diff_image = video_proof_composition.get("diff_image") if video_proof_composition else None
+        if not diff_image and video_proof_composition.get("template") == "design-parity":
+            diff_image = manifest.get("artifacts", {}).get("diff_screenshot")
         if _copy_optional_file(diff_image, run_dir / "diff-reference" / Path(str(diff_image)).name):
             copied_artifacts["video_diff_image"] = str((run_dir / "diff-reference" / Path(str(diff_image)).name).relative_to(publish_dir))
 
