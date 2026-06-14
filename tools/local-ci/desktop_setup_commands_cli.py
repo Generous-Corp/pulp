@@ -802,6 +802,8 @@ def cmd_desktop_video_setup(
             payload["demo_matrix"] = desktop_video_matrix_payload_fn(
                 target=args.target,
                 check=True,
+                design_parity_manifest=getattr(args, "design_parity_manifest", None),
+                design_parity_source_image=getattr(args, "design_parity_source_image", None),
             )
 
     if getattr(args, "json", False):

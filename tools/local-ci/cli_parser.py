@@ -546,6 +546,14 @@ def build_local_ci_parser(
     p_desktop_video_setup.add_argument("--recipe", choices=["reaper-plugin-editor"], help="When using --check, also validate readiness for a specific video proof recipe.")
     p_desktop_video_setup.add_argument("--plugin", help="Plugin name for recipe-specific readiness checks.")
     p_desktop_video_setup.add_argument("--plugin-format", choices=["vst3", "auv2", "auv3", "clap", "lv2"], help="Plugin format for recipe-specific readiness checks.")
+    p_desktop_video_setup.add_argument(
+        "--design-parity-manifest",
+        help="When using --check, pass an existing run manifest into the embedded design-parity matrix check.",
+    )
+    p_desktop_video_setup.add_argument(
+        "--design-parity-source-image",
+        help="When using --check, pass a source/reference image into the embedded design-parity matrix check.",
+    )
     p_desktop_video_setup.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 
     p_desktop_serve = desktop_sub.add_parser("serve", help="Serve a desktop publish report over local HTTP")

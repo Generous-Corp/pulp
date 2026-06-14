@@ -548,6 +548,10 @@ class CliParserTests(unittest.TestCase):
             "system",
             "--video-audio-device",
             "BlackHole 2ch",
+            "--design-parity-manifest",
+            "/tmp/run/manifest.json",
+            "--design-parity-source-image",
+            "/tmp/source.png",
             "--json",
         ])
 
@@ -560,6 +564,8 @@ class CliParserTests(unittest.TestCase):
         self.assertTrue(args.skip_remotion_smoke)
         self.assertEqual(args.video_audio, "system")
         self.assertEqual(args.video_audio_device, "BlackHole 2ch")
+        self.assertEqual(args.design_parity_manifest, "/tmp/run/manifest.json")
+        self.assertEqual(args.design_parity_source_image, "/tmp/source.png")
         self.assertTrue(args.json)
 
     def test_desktop_compose_video_command_parses_outputs(self):

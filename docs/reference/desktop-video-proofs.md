@@ -69,6 +69,18 @@ grant:
 python3 tools/local-ci/local_ci.py desktop video-setup mac --machine blackbook --check --run-in-terminal --json
 ```
 
+When the setup report should also prove that a specific design-parity
+comparison is runnable, pass the same concrete inputs used by `video-matrix`:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop video-setup mac \
+  --machine blackbook \
+  --check \
+  --design-parity-manifest /path/to/run/manifest.json \
+  --design-parity-source-image planning/screenshots/reference.png \
+  --json
+```
+
 Create the machine-local config on a new checkout:
 
 ```bash

@@ -662,7 +662,17 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
         }
 
         result = self.mod.cmd_desktop_video_setup(
-            Namespace(target="mac", machine="blackbook", check=True, skip_remotion_smoke=False, video_audio="system", video_audio_device="2", json=True),
+            Namespace(
+                target="mac",
+                machine="blackbook",
+                check=True,
+                skip_remotion_smoke=False,
+                video_audio="system",
+                video_audio_device="2",
+                design_parity_manifest="/tmp/run/manifest.json",
+                design_parity_source_image="/tmp/source.png",
+                json=True,
+            ),
             **deps,
         )
 
@@ -674,7 +684,17 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
         self.assertEqual(payload["check"]["target"], "mac")
         checks_by_name = {check["name"]: check for check in payload["check"]["checks"]}
         self.assertTrue(checks_by_name["avfoundation_audio"]["ok"])
-        self.assertEqual(matrix_calls, [{"target": "mac", "check": True}])
+        self.assertEqual(
+            matrix_calls,
+            [
+                {
+                    "target": "mac",
+                    "check": True,
+                    "design_parity_manifest": "/tmp/run/manifest.json",
+                    "design_parity_source_image": "/tmp/source.png",
+                }
+            ],
+        )
         self.assertEqual(payload["demo_matrix"]["checked"], True)
         self.assertEqual(payload["demo_matrix"]["scenarios"][1]["id"], "design-parity")
         self.assertEqual(payload["demo_matrix"]["scenarios"][1]["status"], "blocked")
