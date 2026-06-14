@@ -242,6 +242,12 @@ class DesktopCommandBindingsTests(unittest.TestCase):
                 {},
             ),
             (
+                "cmd_desktop_review_status",
+                self.mod.cmd_desktop_review_status,
+                [],
+                {},
+            ),
+            (
                 "cmd_desktop_compose_video",
                 self.mod.cmd_desktop_compose_video,
                 ["compose_desktop_video_proof", "create_issue_video_variant", "atomic_write_text"],

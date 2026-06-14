@@ -428,6 +428,13 @@ def build_local_ci_parser(
     p_desktop_review_issue.add_argument("--assignee", action="append", default=[], help="GitHub assignee to apply when --create is used; may be repeated")
     p_desktop_review_issue.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 
+    p_desktop_review_status = desktop_sub.add_parser("review-status", help="Check a video review issue for the approval trigger")
+    p_desktop_review_status.add_argument("issue_url", help="GitHub issue URL or number accepted by gh issue view")
+    p_desktop_review_status.add_argument("--repo", help="Optional GitHub repo for gh issue view")
+    p_desktop_review_status.add_argument("--manifest", help="Optional run manifest path for the suggested verdict command")
+    p_desktop_review_status.add_argument("--close-issue", action="store_true", help="Include --close-issue in the suggested approved verdict command")
+    p_desktop_review_status.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+
     p_desktop_compose_video = desktop_sub.add_parser("compose-video", help="Render or rerender a Remotion proof for an existing desktop run manifest")
     p_desktop_compose_video.add_argument("manifest", help="Path to the run manifest.json to compose")
     p_desktop_compose_video.add_argument("--output", help="Output composed MP4 path (default: <run>/video/proof-composed.mp4)")

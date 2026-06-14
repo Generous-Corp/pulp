@@ -1104,6 +1104,102 @@ class DesktopCommandsCliTests(unittest.TestCase):
             draft_json = json.loads((report_dir / "github-issue.json").read_text())
             self.assertEqual(draft_json["create_result"]["returncode"], 1)
 
+    def test_review_status_detects_approval_and_suggests_verdict(self):
+        issue_payload = {
+            "state": "OPEN",
+            "url": "https://github.com/danielraffel/pulp/issues/123",
+            "comments": [
+                {"body": "needs another pass", "author": {"login": "reviewer"}, "url": "https://example/comment/1"},
+                {"body": "Looks good to me", "author": {"login": "daniel"}, "url": "https://example/comment/2"},
+            ],
+        }
+        calls = []
+
+        result = self.mod.cmd_desktop_review_status(
+            Namespace(
+                issue_url="https://github.com/danielraffel/pulp/issues/123",
+                repo="danielraffel/pulp",
+                manifest="/tmp/run/manifest.json",
+                close_issue=True,
+                json=True,
+            ),
+            run_fn=lambda argv, **_kwargs: calls.append(argv) or subprocess.CompletedProcess(argv, 0, json.dumps(issue_payload), ""),
+            print_fn=self.print_line,
+        )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(
+            calls[0],
+            [
+                "gh",
+                "issue",
+                "view",
+                "https://github.com/danielraffel/pulp/issues/123",
+                "--json",
+                "state,url,comments",
+                "--repo",
+                "danielraffel/pulp",
+            ],
+        )
+        payload = json.loads(self.printed[-1])
+        self.assertTrue(payload["approved"])
+        self.assertEqual(payload["approval_comment"]["author"]["login"], "daniel")
+        self.assertIn("--approved", payload["verdict_command"])
+        self.assertIn("/tmp/run/manifest.json", payload["verdict_command"])
+        self.assertIn("--issue-url https://github.com/danielraffel/pulp/issues/123", payload["verdict_command"])
+        self.assertIn("--close-issue", payload["verdict_command"])
+
+    def test_review_status_reports_pending_and_gh_errors(self):
+        pending_payload = {
+            "state": "OPEN",
+            "url": "https://github.com/danielraffel/pulp/issues/123",
+            "comments": [{"body": "not yet", "author": {"login": "reviewer"}}],
+        }
+        result = self.mod.cmd_desktop_review_status(
+            Namespace(
+                issue_url="https://github.com/danielraffel/pulp/issues/123",
+                repo=None,
+                manifest=None,
+                close_issue=False,
+                json=False,
+            ),
+            run_fn=lambda argv, **_kwargs: subprocess.CompletedProcess(argv, 0, json.dumps(pending_payload), ""),
+            print_fn=self.print_line,
+        )
+        self.assertEqual(result, 0)
+        self.assertIn("  approved: false", self.printed)
+        self.assertIn("  waiting_for: looks good to me", self.printed)
+
+        self.printed.clear()
+        result = self.mod.cmd_desktop_review_status(
+            Namespace(
+                issue_url="https://github.com/danielraffel/pulp/issues/123",
+                repo=None,
+                manifest=None,
+                close_issue=False,
+                json=False,
+            ),
+            run_fn=lambda argv, **_kwargs: subprocess.CompletedProcess(argv, 1, "", "auth required\n"),
+            print_fn=self.print_line,
+        )
+        self.assertEqual(result, 1)
+        self.assertEqual(self.printed[-1], "Error: auth required")
+
+        self.printed.clear()
+        result = self.mod.cmd_desktop_review_status(
+            Namespace(
+                issue_url="https://github.com/danielraffel/pulp/issues/123",
+                repo=None,
+                manifest=None,
+                close_issue=False,
+                json=False,
+            ),
+            run_fn=lambda argv, **_kwargs: subprocess.CompletedProcess(argv, 0, "{nope", ""),
+            print_fn=self.print_line,
+        )
+        self.assertEqual(result, 1)
+        self.assertIn("invalid gh issue view JSON", self.printed[-1])
+
     def test_review_issue_reports_missing_package(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             result = self.mod.cmd_desktop_review_issue(

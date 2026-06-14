@@ -417,6 +417,28 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(args.assignee, ["@me"])
         self.assertTrue(args.json)
 
+    def test_desktop_review_status_parses_issue_and_manifest(self):
+        parser = self.build_parser()
+
+        args = parser.parse_args([
+            "desktop",
+            "review-status",
+            "https://github.com/danielraffel/pulp/issues/123",
+            "--repo",
+            "danielraffel/pulp",
+            "--manifest",
+            "/tmp/run/manifest.json",
+            "--close-issue",
+            "--json",
+        ])
+
+        self.assertEqual(args.desktop_command, "review-status")
+        self.assertEqual(args.issue_url, "https://github.com/danielraffel/pulp/issues/123")
+        self.assertEqual(args.repo, "danielraffel/pulp")
+        self.assertEqual(args.manifest, "/tmp/run/manifest.json")
+        self.assertTrue(args.close_issue)
+        self.assertTrue(args.json)
+
     def test_desktop_video_matrix_parses_filters_and_formats(self):
         parser = self.build_parser()
 

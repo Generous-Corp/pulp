@@ -611,6 +611,21 @@ This still does not upload MP4 attachments. Use `github-issue.json` to decide
 whether to attach `proof.issue.mp4`, attach `proof.small.mp4`, or rely on the
 served report link.
 
+Check whether the issue has the approval trigger before recording the final
+verdict:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop review-status \
+  https://github.com/owner/repo/issues/123 \
+  --manifest /path/to/run/manifest.json \
+  --close-issue
+```
+
+`desktop review-status` is read-only. It calls `gh issue view`, detects `looks
+good to me` in issue comments, and prints a suggested `desktop verdict` command
+when approval is present. Add `--json` for automation and `--repo owner/repo`
+when passing a bare issue number.
+
 Record that review state back into the run manifest:
 
 ```bash

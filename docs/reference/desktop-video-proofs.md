@@ -584,6 +584,21 @@ but not local binary attachments. Use the generated JSON attachment decisions to
 attach `proof.issue.mp4` or `proof.small.mp4` manually, or include the served
 report link.
 
+Before recording the final verdict, check whether the review issue has the
+approval trigger:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop review-status \
+  https://github.com/owner/repo/issues/123 \
+  --manifest /path/to/run/manifest.json \
+  --close-issue
+```
+
+This command is read-only. It uses `gh issue view` to inspect comments for
+`looks good to me`; when found, it reports `approved: true` and prints a
+suggested `desktop verdict` command. Add `--json` for automation handoff, and
+add `--repo owner/repo` when passing a bare issue number.
+
 The intended review loop is:
 
 1. Publish the report.
@@ -592,8 +607,22 @@ The intended review loop is:
 3. Open a GitHub issue with `github-issue.md`.
 4. Attach the MP4 manually when it fits the configured budget, or use the served
    report link when it does not.
-5. Record the review verdict in the run manifest once the reviewer responds.
-6. Close the issue once the reviewer comments `looks good to me`.
+5. Check the issue for the reviewer approval phrase.
+6. Record the review verdict in the run manifest once the reviewer responds.
+7. Close the issue once the reviewer comments `looks good to me`.
+
+```bash
+python3 tools/local-ci/local_ci.py desktop review-status \
+  https://github.com/owner/repo/issues/123 \
+  --manifest /path/to/run/manifest.json \
+  --close-issue
+```
+
+`desktop review-status` is read-only. It calls `gh issue view`, detects the
+close trigger (`looks good to me`) in issue comments, and prints or JSON-emits a
+suggested `desktop verdict` command when approval is present. Use `--repo
+owner/repo` when the issue argument is a bare number or when GitHub context
+cannot be inferred.
 
 ```bash
 python3 tools/local-ci/local_ci.py desktop verdict /path/to/run/manifest.json \

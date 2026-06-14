@@ -9,6 +9,7 @@ import http.server
 import json
 import os
 from pathlib import Path
+import shlex
 import shutil
 import signal
 import socket
@@ -1243,6 +1244,75 @@ def cmd_desktop_review_issue(
         print_fn(f"  create_command: {draft['create_command']}")
         if create_result and create_result.get("issue_url"):
             print_fn(f"  issue_url: {create_result['issue_url']}")
+    return 0
+
+
+def _review_status_approval_comment(comments: list[dict], trigger: str = "looks good to me") -> dict | None:
+    trigger_lower = trigger.lower()
+    for comment in reversed(comments):
+        body = str(comment.get("body") or "")
+        if trigger_lower in body.lower():
+            return comment
+    return None
+
+
+def cmd_desktop_review_status(
+    args: argparse.Namespace,
+    *,
+    run_fn: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+    print_fn: Callable[[str], None] = print,
+) -> int:
+    argv = ["gh", "issue", "view", args.issue_url, "--json", "state,url,comments"]
+    if getattr(args, "repo", None):
+        argv.extend(["--repo", args.repo])
+    process = run_fn(argv, capture_output=True, text=True, check=False)
+    if process.returncode != 0:
+        detail = (process.stderr or process.stdout or "gh issue view failed").strip()
+        print_fn(f"Error: {detail}")
+        return 1
+    try:
+        issue = json.loads(process.stdout or "{}")
+    except json.JSONDecodeError as exc:
+        print_fn(f"Error: invalid gh issue view JSON: {exc}")
+        return 1
+    comments = issue.get("comments") if isinstance(issue.get("comments"), list) else []
+    approval_comment = _review_status_approval_comment(comments)
+    issue_url = str(issue.get("url") or args.issue_url)
+    verdict_command = None
+    if approval_comment and getattr(args, "manifest", None):
+        manifest = shlex.quote(str(Path(args.manifest).expanduser()))
+        quoted_issue_url = shlex.quote(issue_url)
+        verdict_command = (
+            "python3 tools/local-ci/local_ci.py desktop verdict "
+            f"{manifest} --approved --issue-url {quoted_issue_url}"
+        )
+        if getattr(args, "close_issue", False):
+            verdict_command += " --close-issue"
+    payload = {
+        "kind": "desktop-video-proof-review-status",
+        "issue_url": issue_url,
+        "state": issue.get("state"),
+        "close_trigger": "looks good to me",
+        "approved": approval_comment is not None,
+        "approval_comment": approval_comment,
+        "verdict_command": verdict_command,
+    }
+    if getattr(args, "json", False):
+        print_fn(json.dumps(payload, indent=2))
+        return 0
+    print_fn(f"Desktop video review issue: {issue_url}")
+    print_fn(f"  state: {payload['state'] or 'unknown'}")
+    print_fn(f"  approved: {str(payload['approved']).lower()}")
+    if approval_comment:
+        author = approval_comment.get("author")
+        if isinstance(author, dict) and author.get("login"):
+            print_fn(f"  approved_by: {author['login']}")
+        if approval_comment.get("url"):
+            print_fn(f"  approval_comment: {approval_comment['url']}")
+    if verdict_command:
+        print_fn(f"  verdict_command: {verdict_command}")
+    elif not approval_comment:
+        print_fn("  waiting_for: looks good to me")
     return 0
 
 
