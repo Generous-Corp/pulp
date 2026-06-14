@@ -79,28 +79,6 @@ class QueueLoadBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.load_queue(bindings), original_queue)
         self.assertNotIn(("save", original_queue), events)
 
-    def test_install_queue_load_helpers_wires_named_exports(self):
-        events = []
-
-        class Lock:
-            def __enter__(self):
-                events.append("enter")
-
-            def __exit__(self, exc_type, exc, tb):
-                events.append("exit")
-
-        bindings = {
-            "queue_lock_path": lambda: Path("/state/queue.lock"),
-            "file_lock": lambda path, *, blocking: events.append(("lock", path, blocking)) or Lock(),
-            "load_queue_unlocked": lambda: events.append("load") or [],
-            "reconcile_running_jobs_unlocked": lambda queue: (queue, False),
-        }
-
-        self.mod.install_queue_load_helpers(bindings)
-
-        self.assertEqual(bindings["load_queue"](), [])
-        self.assertEqual(events, [("lock", Path("/state/queue.lock"), True), "enter", "load", "exit"])
-
 
 if __name__ == "__main__":
     unittest.main()

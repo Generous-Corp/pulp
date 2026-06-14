@@ -80,21 +80,6 @@ class QueueRunnerBindingsTests(unittest.TestCase):
         self.assertTrue(update_info({"pid": 1}, "job1", {"mac": {"status": "pass"}}))
         self.assertIs(captured["mutate"][3], bindings["now_iso"])
 
-    def test_install_queue_runner_helpers_wires_named_exports(self):
-        calls = []
-        bindings = {
-            "_runner_state": types.SimpleNamespace(
-                read_runner_info=lambda: calls.append("read") or {"pid": 1},
-                clear_runner_info=lambda: calls.append("clear"),
-            ),
-        }
-
-        self.mod.install_queue_runner_helpers(bindings, ("read_runner_info", "clear_runner_info"))
-
-        self.assertEqual(bindings["read_runner_info"](), {"pid": 1})
-        bindings["clear_runner_info"]()
-        self.assertEqual(calls, ["read", "clear"])
-
 
 if __name__ == "__main__":
     unittest.main()

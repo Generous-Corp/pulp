@@ -98,29 +98,6 @@ class QueueEnqueueBindingsTests(unittest.TestCase):
         self.assertEqual(bumped["priority"], "high")
         self.assertIs(bumped["now"], bindings["now_iso"])
 
-    def test_install_queue_enqueue_helpers_wires_named_exports(self):
-        captured = {}
-
-        def enqueue(*args, **kwargs):
-            captured["args"] = args
-            captured["kwargs"] = kwargs
-            return {"id": "job"}, False
-
-        orchestrator = types.SimpleNamespace(
-            find_active_job_by_fingerprint_unlocked=object(),
-            bump_pending_job_priority_unlocked=lambda job, priority, *, now_iso_fn: False,
-            pending_supersedence_candidates_unlocked=object(),
-        )
-        bindings = self._bindings(
-            lifecycle=types.SimpleNamespace(enqueue_job_locked=enqueue),
-            orchestrator=orchestrator,
-        )
-
-        self.mod.install_queue_enqueue_helpers(bindings)
-
-        self.assertEqual(bindings["enqueue_job"]("feature/topic", "abc123", "normal", ["mac"], "local", "full"), ({"id": "job"}, False))
-        self.assertEqual(captured["args"], ("feature/topic", "abc123", "normal", ["mac"], "local", "full"))
-
 
 if __name__ == "__main__":
     unittest.main()

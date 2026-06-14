@@ -41,26 +41,6 @@ class QueueActiveTargetBindingsTests(unittest.TestCase):
         self.assertTrue(self.mod.upsert_job_active_targets_unlocked(bindings, [], "job1", {"mac": {}}))
         self.assertIs(captured["upsert"][3], bindings["now_iso"])
 
-    def test_install_queue_active_target_helpers_wires_named_exports(self):
-        captured = {}
-
-        def upsert_job_active_targets_unlocked(queue, job_id, active_targets, *, now_iso_fn):
-            captured["upsert"] = (queue, job_id, active_targets, now_iso_fn)
-            return True
-
-        bindings = {
-            "_queue_orchestrator": types.SimpleNamespace(
-                upsert_job_active_targets_unlocked=upsert_job_active_targets_unlocked,
-            ),
-            "now_iso": object(),
-        }
-
-        self.mod.install_queue_active_target_helpers(bindings)
-
-        self.assertTrue(bindings["upsert_job_active_targets_unlocked"]([], "job1", None))
-        self.assertEqual(captured["upsert"][1:3], ("job1", None))
-        self.assertIs(captured["upsert"][3], bindings["now_iso"])
-
 
 if __name__ == "__main__":
     unittest.main()

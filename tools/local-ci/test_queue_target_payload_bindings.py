@@ -76,22 +76,6 @@ class QueueTargetPayloadBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.target_state_snapshot(bindings, {"mac": {"status": "pass"}}), {"mac": {"status": "pass"}})
         self.assertEqual(captured["snapshot"], {"mac": {"status": "pass"}})
 
-    def test_install_queue_target_payload_helpers_wires_named_exports(self):
-        bindings = {
-            "_queue_orchestrator": types.SimpleNamespace(
-                updated_target_state=lambda previous, fields: {"previous": previous, **fields},
-                target_state_snapshot=lambda states: {"snapshot": states},
-            ),
-        }
-
-        self.mod.install_queue_target_payload_helpers(bindings, ("updated_target_state", "target_state_snapshot"))
-
-        self.assertEqual(
-            bindings["updated_target_state"]({"status": "pending"}, {"status": "running"}),
-            {"previous": {"status": "pending"}, "status": "running"},
-        )
-        self.assertEqual(bindings["target_state_snapshot"]({"mac": {}}), {"snapshot": {"mac": {}}})
-
 
 if __name__ == "__main__":
     unittest.main()

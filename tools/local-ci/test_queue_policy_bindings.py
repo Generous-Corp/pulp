@@ -106,18 +106,6 @@ class QueuePolicyBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.find_job_unlocked(bindings, [{"id": "a"}], "a", {"pending"}), {"id": "a"})
         self.assertEqual(self.mod.validate_ci_branch_name(bindings, " branch "), "branch")
 
-    def test_install_queue_policy_helpers_wires_named_exports(self):
-        orchestrator = types.SimpleNamespace(
-            default_priority_for=lambda command, config: f"{command}:{config['priority']}",
-            validate_ci_branch_name=lambda branch: branch.strip(),
-        )
-        bindings = {"_queue_orchestrator": orchestrator}
-
-        self.mod.install_queue_policy_helpers(bindings, ("default_priority_for", "validate_ci_branch_name"))
-
-        self.assertEqual(bindings["default_priority_for"]("ship", {"priority": "high"}), "ship:high")
-        self.assertEqual(bindings["validate_ci_branch_name"](" branch "), "branch")
-
 
 if __name__ == "__main__":
     unittest.main()

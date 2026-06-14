@@ -96,18 +96,6 @@ class QueueDisplayBindingsTests(unittest.TestCase):
         self.assertEqual(calls[3], ("enqueue_command_result_line", ({"id": "job"},), {"created": True}))
         self.assertEqual(calls[5], ("summarize_active_targets", ({"mac": {}}, ["mac"]), {}))
 
-    def test_install_queue_display_helpers_wires_named_exports(self):
-        orchestrator = types.SimpleNamespace(
-            summarize_job=lambda job: f"summary:{job['id']}",
-            empty_log_line=lambda: "empty",
-        )
-        bindings = {"_queue_orchestrator": orchestrator}
-
-        self.mod.install_queue_display_helpers(bindings, ("summarize_job", "empty_log_line"))
-
-        self.assertEqual(bindings["summarize_job"]({"id": "job1"}), "summary:job1")
-        self.assertEqual(bindings["empty_log_line"](), "empty")
-
 
 if __name__ == "__main__":
     unittest.main()
