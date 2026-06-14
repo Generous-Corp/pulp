@@ -582,6 +582,9 @@ class CliParserTests(unittest.TestCase):
             "--machine",
             "blackbook",
             "--check",
+            "--check-tool-addon",
+            "--pulp-command",
+            "./build-video-proof-cli/tools/cli/pulp-cpp",
             "--probe-host",
             "blackbook",
             "--run-in-terminal",
@@ -604,6 +607,8 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(args.target, "mac")
         self.assertEqual(args.machine, "blackbook")
         self.assertTrue(args.check)
+        self.assertTrue(args.check_tool_addon)
+        self.assertEqual(args.pulp_command, "./build-video-proof-cli/tools/cli/pulp-cpp")
         self.assertEqual(args.probe_host, "blackbook")
         self.assertTrue(args.run_in_terminal)
         self.assertTrue(args.skip_remotion_smoke)

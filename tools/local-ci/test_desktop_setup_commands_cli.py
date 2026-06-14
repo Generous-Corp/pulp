@@ -780,6 +780,154 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
         missing = [item["check"] for item in payload["setup_prerequisites"]["remediations"]]
         self.assertEqual(missing, ["setup.pulp", "setup.npm", "setup.cmake"])
 
+    def test_video_setup_check_can_validate_tool_addon(self):
+        self.targets["mac"]["optional"] = {"video_capture": True}
+        checks = [
+            {"name": "receipt", "ok": True, "detail": "installed"},
+            {"name": "screencapture", "ok": True, "detail": "/usr/sbin/screencapture"},
+            {"name": "video_capture", "ok": True, "detail": "/repo/node_modules/ffmpeg-static/ffmpeg", "required": False},
+            {"name": "avfoundation_screen", "ok": True, "detail": "Capture screen 0 (3:)", "required": False},
+        ]
+        tool_addon_calls = []
+
+        def fake_tool_addon_checks(**kwargs):
+            tool_addon_calls.append(kwargs.get("pulp_command"))
+            return [
+                {"name": "tool_addon.info", "ok": True, "detail": "video-proof scope=machine lane=tool_addon format=not_pulp_add", "required": True},
+                {"name": "tool_addon.doctor", "ok": True, "detail": "smoke ok", "required": True},
+            ]
+
+        deps = {
+            "load_config_fn": self.config,
+            "resolve_desktop_target_fn": lambda _config, name: self.targets[name],
+            "desktop_doctor_checks_fn": lambda _config, _name: [dict(check) for check in checks],
+            "normalize_desktop_optional_config_fn": lambda optional: {"video_capture": bool((optional or {}).get("video_capture"))},
+            "video_proof_smoke_fn": lambda: {"ok": True, "detail": "smoke ok"},
+            "probe_macos_avfoundation_audio_fn": lambda _device: self.fail("audio probe should not run"),
+            "setup_prerequisite_checks_fn": self.setup_ok_checks,
+            "tool_addon_checks_fn": fake_tool_addon_checks,
+            "print_fn": self.print_line,
+        }
+
+        result = self.mod.cmd_desktop_video_setup(
+            Namespace(
+                target="mac",
+                machine="blackbook",
+                check=True,
+                check_tool_addon=True,
+                pulp_command="./build-video-proof-cli/tools/cli/pulp-cpp",
+                skip_remotion_smoke=False,
+                video_audio="none",
+                video_audio_device=None,
+                json=True,
+            ),
+            **deps,
+        )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(tool_addon_calls, ["./build-video-proof-cli/tools/cli/pulp-cpp"])
+        payload = json.loads(self.printed[0])
+        self.assertTrue(payload["check"]["ok"])
+        self.assertTrue(payload["tool_addon"]["ok"])
+        tool_checks_by_name = {check["name"]: check for check in payload["tool_addon"]["checks"]}
+        self.assertEqual(tool_checks_by_name["tool_addon.info"]["detail"], "video-proof scope=machine lane=tool_addon format=not_pulp_add")
+        self.assertEqual(payload["tool_addon"]["remediations"], [])
+
+    def test_video_setup_check_reports_tool_addon_remediation(self):
+        self.targets["mac"]["optional"] = {"video_capture": True}
+        checks = [
+            {"name": "receipt", "ok": True, "detail": "installed"},
+            {"name": "screencapture", "ok": True, "detail": "/usr/sbin/screencapture"},
+            {"name": "video_capture", "ok": True, "detail": "/repo/node_modules/ffmpeg-static/ffmpeg", "required": False},
+            {"name": "avfoundation_screen", "ok": True, "detail": "Capture screen 0 (3:)", "required": False},
+        ]
+        deps = {
+            "load_config_fn": self.config,
+            "resolve_desktop_target_fn": lambda _config, name: self.targets[name],
+            "desktop_doctor_checks_fn": lambda _config, _name: [dict(check) for check in checks],
+            "normalize_desktop_optional_config_fn": lambda optional: {"video_capture": bool((optional or {}).get("video_capture"))},
+            "video_proof_smoke_fn": lambda: {"ok": True, "detail": "smoke ok"},
+            "probe_macos_avfoundation_audio_fn": lambda _device: self.fail("audio probe should not run"),
+            "setup_prerequisite_checks_fn": self.setup_ok_checks,
+            "tool_addon_checks_fn": lambda: [
+                {"name": "tool_addon.info", "ok": False, "detail": "tool not installed", "required": True},
+                {"name": "tool_addon.doctor", "ok": False, "detail": "skipped because tool info failed", "required": True},
+            ],
+            "print_fn": self.print_line,
+        }
+
+        result = self.mod.cmd_desktop_video_setup(
+            Namespace(target="mac", machine="blackbook", check=True, check_tool_addon=True, skip_remotion_smoke=False, video_audio="none", video_audio_device=None, json=True),
+            **deps,
+        )
+
+        self.assertEqual(result, 1)
+        payload = json.loads(self.printed[0])
+        self.assertTrue(payload["check"]["ok"])
+        self.assertFalse(payload["tool_addon"]["ok"])
+        self.assertEqual(payload["tool_addon"]["remediations"][0]["command"], "pulp tool install video-proof")
+        self.assertEqual(payload["tool_addon"]["remediations"][0]["check_command"], "pulp tool doctor video-proof --run")
+
+    def test_video_tool_addon_checks_run_info_and_doctor(self):
+        calls = []
+
+        def fake_run(cmd, **_kwargs):
+            calls.append(cmd)
+            if cmd[1:4] == ["tool", "info", "video-proof"]:
+                return subprocess.CompletedProcess(
+                    cmd,
+                    0,
+                    json.dumps(
+                        {
+                            "id": "video-proof",
+                            "install_scope": "machine",
+                            "distribution_lane": "tool_addon",
+                            "package_format": "not_pulp_add",
+                        }
+                    ),
+                    "",
+                )
+            return subprocess.CompletedProcess(cmd, 0, "managed wrapper smoke ok", "")
+
+        checks = self.mod.desktop_video_tool_addon_checks(
+            subprocess_run_fn=fake_run,
+            pulp_command="./build-video-proof-cli/tools/cli/pulp-cpp",
+        )
+
+        self.assertEqual(
+            calls,
+            [
+                ["./build-video-proof-cli/tools/cli/pulp-cpp", "tool", "info", "video-proof", "--json"],
+                ["./build-video-proof-cli/tools/cli/pulp-cpp", "tool", "doctor", "video-proof", "--run"],
+            ],
+        )
+        self.assertTrue(all(check["ok"] for check in checks), checks)
+        self.assertIn("scope=machine", checks[0]["detail"])
+        self.assertEqual(checks[1]["detail"], "managed wrapper smoke ok")
+
+    def test_video_tool_addon_checks_reject_project_package_policy(self):
+        def fake_run(cmd, **_kwargs):
+            return subprocess.CompletedProcess(
+                cmd,
+                0,
+                json.dumps(
+                    {
+                        "id": "video-proof",
+                        "install_scope": "project",
+                        "distribution_lane": "package",
+                        "package_format": "pulp_add",
+                    }
+                ),
+                "",
+            )
+
+        checks = self.mod.desktop_video_tool_addon_checks(subprocess_run_fn=fake_run)
+
+        self.assertFalse(checks[0]["ok"])
+        self.assertIn("expected machine-scoped tool_addon not_pulp_add", checks[0]["detail"])
+        self.assertFalse(checks[1]["ok"])
+        self.assertEqual(checks[1]["detail"], "skipped because tool info failed")
+
     def test_video_setup_check_can_probe_remote_host_prerequisites(self):
         self.targets["mac"]["optional"] = {"video_capture": True}
         checks = [

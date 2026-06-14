@@ -556,6 +556,15 @@ def build_local_ci_parser(
     p_desktop_video_setup.add_argument("--machine", help="Human-readable machine label to include in generated smoke labels")
     p_desktop_video_setup.add_argument("--check", action="store_true", help="Also run the video-doctor checks and include current readiness")
     p_desktop_video_setup.add_argument(
+        "--check-tool-addon",
+        action="store_true",
+        help="When using --check, also validate the managed `pulp tool install video-proof` add-on path.",
+    )
+    p_desktop_video_setup.add_argument(
+        "--pulp-command",
+        help="Pulp CLI path for --check-tool-addon. Defaults to PULP_CLI or pulp on PATH.",
+    )
+    p_desktop_video_setup.add_argument(
         "--probe-host",
         help="SSH host to probe read-only for setup prerequisites such as pulp, npm, node, and cmake.",
     )

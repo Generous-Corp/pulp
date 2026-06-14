@@ -6,6 +6,7 @@ import argparse
 from collections.abc import Callable
 import importlib.util
 import json
+import os
 from pathlib import Path
 import shlex
 import shutil
@@ -451,6 +452,132 @@ def desktop_video_setup_prerequisite_remediations(checks: list[dict]) -> list[di
     return remediations
 
 
+def desktop_video_tool_addon_checks(
+    *,
+    subprocess_run_fn: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+    pulp_command: str | None = None,
+) -> list[dict]:
+    resolved_pulp_command = pulp_command or os.environ.get("PULP_CLI") or "pulp"
+    checks: list[dict] = []
+    info_cmd = [resolved_pulp_command, "tool", "info", "video-proof", "--json"]
+    try:
+        info_result = subprocess_run_fn(info_cmd, capture_output=True, text=True, check=False)
+    except OSError as exc:
+        checks.append(
+            {
+                "name": "tool_addon.info",
+                "ok": False,
+                "detail": f"could not run `{shlex.join(info_cmd)}`: {exc}",
+                "required": True,
+                "command": shlex.join(info_cmd),
+            }
+        )
+        checks.append(
+            {
+                "name": "tool_addon.doctor",
+                "ok": False,
+                "detail": "skipped because tool info failed",
+                "required": True,
+                "command": shlex.join([resolved_pulp_command, "tool", "doctor", "video-proof", "--run"]),
+            }
+        )
+        return checks
+
+    info_stdout = (info_result.stdout or "").strip()
+    info_stderr = (info_result.stderr or "").strip()
+    info_ok = info_result.returncode == 0
+    info_detail = info_stdout or info_stderr or f"exit {info_result.returncode}"
+    info_payload = None
+    if info_ok:
+        try:
+            info_payload = json.loads(info_stdout)
+        except json.JSONDecodeError as exc:
+            info_ok = False
+            info_detail = f"invalid JSON from tool info: {exc}"
+    if info_ok and info_payload:
+        install_scope = info_payload.get("install_scope")
+        package_format = info_payload.get("package_format")
+        distribution_lane = info_payload.get("distribution_lane")
+        info_detail = (
+            f"{info_payload.get('id', 'video-proof')} "
+            f"scope={install_scope or 'unknown'} "
+            f"lane={distribution_lane or 'unknown'} "
+            f"format={package_format or 'unknown'}"
+        )
+        if install_scope != "machine" or distribution_lane != "tool_addon" or package_format != "not_pulp_add":
+            info_ok = False
+            info_detail = (
+                f"{info_detail}; expected machine-scoped tool_addon not_pulp_add policy"
+            )
+    checks.append(
+        {
+            "name": "tool_addon.info",
+            "ok": info_ok,
+            "detail": info_detail,
+            "required": True,
+            "command": shlex.join(info_cmd),
+            "payload": info_payload,
+        }
+    )
+
+    doctor_cmd = [resolved_pulp_command, "tool", "doctor", "video-proof", "--run"]
+    if not info_ok:
+        checks.append(
+            {
+                "name": "tool_addon.doctor",
+                "ok": False,
+                "detail": "skipped because tool info failed",
+                "required": True,
+                "command": shlex.join(doctor_cmd),
+            }
+        )
+        return checks
+    try:
+        doctor_result = subprocess_run_fn(doctor_cmd, capture_output=True, text=True, check=False)
+    except OSError as exc:
+        checks.append(
+            {
+                "name": "tool_addon.doctor",
+                "ok": False,
+                "detail": f"could not run `{shlex.join(doctor_cmd)}`: {exc}",
+                "required": True,
+                "command": shlex.join(doctor_cmd),
+            }
+        )
+        return checks
+
+    doctor_stdout = (doctor_result.stdout or "").strip()
+    doctor_stderr = (doctor_result.stderr or "").strip()
+    checks.append(
+        {
+            "name": "tool_addon.doctor",
+            "ok": doctor_result.returncode == 0,
+            "detail": doctor_stdout or doctor_stderr or f"exit {doctor_result.returncode}",
+            "required": True,
+            "command": shlex.join(doctor_cmd),
+        }
+    )
+    return checks
+
+
+def desktop_video_tool_addon_remediations(checks: list[dict]) -> list[dict]:
+    if all(check.get("ok") for check in checks if check.get("required", True)):
+        return []
+    return [
+        {
+            "check": "tool_addon",
+            "title": "Install or repair the optional video-proof tool add-on",
+            "detail": (
+                "Install the machine-scoped video-proof tool, then rerun the add-on setup check. "
+                "For reviewed local artifacts, use the artifact manifest install command."
+            ),
+            "command": "pulp tool install video-proof",
+            "check_command": "pulp tool doctor video-proof --run",
+            "artifact_install_command": "pulp tool install video-proof --artifact-manifest <manifest> --force",
+        }
+    ]
+
+
 def desktop_video_setup_remote_prerequisite_checks(
     host: str,
     *,
@@ -879,6 +1006,7 @@ def cmd_desktop_video_setup(
     desktop_video_matrix_payload_fn: Callable[..., dict] | None = None,
     setup_prerequisite_checks_fn: Callable[[], list[dict]] = desktop_video_setup_prerequisite_checks,
     remote_setup_prerequisite_checks_fn: Callable[[str], list[dict]] = desktop_video_setup_remote_prerequisite_checks,
+    tool_addon_checks_fn: Callable[..., list[dict]] = desktop_video_tool_addon_checks,
     print_fn: Callable[[str], None] = print,
 ) -> int:
     steps = desktop_video_setup_steps(args.target, machine_label=getattr(args, "machine", None))
@@ -926,6 +1054,7 @@ def cmd_desktop_video_setup(
         "steps": steps,
         "setup_prerequisites": None,
         "remote_setup_prerequisites": None,
+        "tool_addon": None,
         "check": None,
     }
     exit_code = 0
@@ -959,6 +1088,20 @@ def cmd_desktop_video_setup(
         payload["check"] = doctor_payload
         if not setup_ok:
             exit_code = 1
+        if getattr(args, "check_tool_addon", False):
+            pulp_command = getattr(args, "pulp_command", None)
+            if pulp_command:
+                tool_checks = tool_addon_checks_fn(pulp_command=pulp_command)
+            else:
+                tool_checks = tool_addon_checks_fn()
+            tool_ok = all(check["ok"] for check in tool_checks if check.get("required", True))
+            payload["tool_addon"] = {
+                "ok": tool_ok,
+                "checks": tool_checks,
+                "remediations": desktop_video_tool_addon_remediations(tool_checks),
+            }
+            if not tool_ok:
+                exit_code = 1
         probe_host = getattr(args, "probe_host", None)
         if probe_host:
             remote_checks = remote_setup_prerequisite_checks_fn(probe_host)
@@ -1019,6 +1162,18 @@ def cmd_desktop_video_setup(
                 print_fn("Remote setup remediation:")
                 for item in payload["remote_setup_prerequisites"]["remediations"]:
                     print_fn(f"  - {item['title']}: {item['detail']}")
+        if payload.get("tool_addon"):
+            print_fn("")
+            print_fn(f"Tool add-on check: {'PASS' if payload['tool_addon']['ok'] else 'FAIL'}")
+            for check in payload["tool_addon"]["checks"]:
+                print_fn(f"  {_desktop_check_status(check):4s}  {check['name']}: {check['detail']}")
+            if payload["tool_addon"]["remediations"]:
+                print_fn("")
+                print_fn("Tool add-on remediation:")
+                for item in payload["tool_addon"]["remediations"]:
+                    print_fn(f"  - {item['title']}: {item['detail']}")
+                    if item.get("command"):
+                        print_fn(f"    command: {item['command']}")
         print_fn("")
         print_fn(f"Current check: {'PASS' if payload['check']['ok'] else 'FAIL'}")
         for check in payload["check"]["checks"]:

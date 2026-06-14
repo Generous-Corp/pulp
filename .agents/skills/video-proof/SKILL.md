@@ -72,10 +72,27 @@ Recording grant:
 python3 tools/local-ci/local_ci.py desktop video-setup mac --machine blackbook --check --run-in-terminal --json
 ```
 
+When the goal is to prove the eventual managed add-on install path on a fresh
+machine, include `--check-tool-addon`. If `pulp` on `PATH` is stale or points at
+a CLI without `tool`, pass `--pulp-command` or set `PULP_CLI`:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop video-setup mac \
+  --machine blackbook \
+  --check \
+  --check-tool-addon \
+  --pulp-command ./build-video-proof-cli/tools/cli/pulp-cpp \
+  --run-in-terminal \
+  --json
+```
+
 With `--check`, inspect `setup_prerequisites` before `check`: missing `pulp`,
 `npm`, `node`, or `cmake` means the machine cannot yet run the optional tool
 setup path cleanly. Fix those first, then rerun the setup check and move on to
-Screen Recording / `video-doctor` failures.
+Screen Recording / `video-doctor` failures. With `--check-tool-addon`, inspect
+`tool_addon` as well; failures there should be remediated with
+`pulp tool install video-proof` or the reviewed artifact-manifest install path
+before treating the machine as mainline-ready.
 
 When checking another Mac over SSH, add `--probe-host <ssh-host>`. The probe is
 read-only and emits `remote_setup_prerequisites` with the remote `pulp`, `npm`,

@@ -82,11 +82,27 @@ grant:
 python3 tools/local-ci/local_ci.py desktop video-setup mac --machine blackbook --check --run-in-terminal --json
 ```
 
+Add `--check-tool-addon` when the setup run should also prove the eventual
+managed `pulp tool install video-proof` path. If `pulp` on `PATH` is not the
+fresh branch CLI, pass `--pulp-command` or set `PULP_CLI`:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop video-setup mac \
+  --machine blackbook \
+  --check \
+  --check-tool-addon \
+  --pulp-command ./build-video-proof-cli/tools/cli/pulp-cpp \
+  --run-in-terminal \
+  --json
+```
+
 With `--check`, the setup report includes a separate
 `setup_prerequisites` block for machine-level setup tools (`pulp`, `npm`,
 `node`, and `cmake`) before the `video-doctor` capture readiness payload. This
 lets a fresh Mac fail with actionable install remediations even if the later
-screen-capture checks are not yet meaningful.
+screen-capture checks are not yet meaningful. With `--check-tool-addon`, the
+report also includes a `tool_addon` block for `pulp tool info video-proof
+--json` and `pulp tool doctor video-proof --run`.
 
 To inspect another Mac without changing its checkout, add `--probe-host` with
 an SSH host alias. The command runs read-only `command -v` probes and emits a
