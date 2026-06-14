@@ -221,6 +221,10 @@ def cmd_desktop_review_status(bindings: Mapping[str, Any], args: Any) -> int:
     return _binding(bindings, "_desktop_commands_cli").cmd_desktop_review_status(args)
 
 
+def cmd_desktop_review_watch(bindings: Mapping[str, Any], args: Any) -> int:
+    return _binding(bindings, "_desktop_commands_cli").cmd_desktop_review_watch(args)
+
+
 def cmd_desktop_compose_video(bindings: Mapping[str, Any], args: Any) -> int:
     return _binding(bindings, "_desktop_commands_cli").cmd_desktop_compose_video(
         args,

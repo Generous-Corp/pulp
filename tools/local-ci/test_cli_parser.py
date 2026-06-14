@@ -442,6 +442,40 @@ class CliParserTests(unittest.TestCase):
         self.assertTrue(args.close_issue)
         self.assertTrue(args.json)
 
+    def test_desktop_review_watch_parses_label_cache_and_manifest_map(self):
+        parser = self.build_parser()
+
+        args = parser.parse_args([
+            "desktop",
+            "review-watch",
+            "--repo",
+            "danielraffel/pulp",
+            "--label",
+            "video-review",
+            "--state-file",
+            "/tmp/review-watch.json",
+            "--manifest-map",
+            "/tmp/manifests.json",
+            "--refresh",
+            "--close-issue",
+            "--interval",
+            "0.1",
+            "--max-iterations",
+            "2",
+            "--json",
+        ])
+
+        self.assertEqual(args.desktop_command, "review-watch")
+        self.assertEqual(args.repo, "danielraffel/pulp")
+        self.assertEqual(args.label, "video-review")
+        self.assertEqual(args.state_file, "/tmp/review-watch.json")
+        self.assertEqual(args.manifest_map, "/tmp/manifests.json")
+        self.assertTrue(args.refresh)
+        self.assertTrue(args.close_issue)
+        self.assertEqual(args.interval, 0.1)
+        self.assertEqual(args.max_iterations, 2)
+        self.assertTrue(args.json)
+
     def test_desktop_video_matrix_parses_filters_and_formats(self):
         parser = self.build_parser()
 

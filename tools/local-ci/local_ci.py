@@ -2603,6 +2603,10 @@ def cmd_desktop_review_status(args: argparse.Namespace) -> int:
     return _desktop_command_bindings.cmd_desktop_review_status(globals(), args)
 
 
+def cmd_desktop_review_watch(args: argparse.Namespace) -> int:
+    return _desktop_command_bindings.cmd_desktop_review_watch(globals(), args)
+
+
 def cmd_desktop_compose_video(args: argparse.Namespace) -> int:
     return _desktop_command_bindings.cmd_desktop_compose_video(globals(), args)
 

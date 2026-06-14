@@ -790,6 +790,26 @@ good to me` in issue comments, and prints a suggested `desktop verdict` command
 when approval is present. Add `--json` for automation and `--repo owner/repo`
 when passing a bare issue number.
 
+At the start of a session, or after posting several review issues, converge with
+the read-only watcher:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop review-watch \
+  --repo owner/repo \
+  --label video-review \
+  --state-file /tmp/pulp-video-review-watch.json \
+  --manifest-map /tmp/pulp-video-review-manifests.json \
+  --close-issue \
+  --json
+```
+
+The manifest map is optional JSON keyed by issue URL, issue number, or `#number`
+with values pointing to run manifests. When a watched issue contains `looks good
+to me`, the JSON includes `approved: true` and, when the manifest is known, the
+exact `desktop verdict ... --approved --issue-url ...` command to run. Use
+`--interval` and `--max-iterations` only for short post-ping windows; otherwise
+run one-shot and let the state file skip unchanged issues.
+
 Record that review state back into the run manifest:
 
 ```bash

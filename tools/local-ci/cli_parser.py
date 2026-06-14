@@ -439,6 +439,18 @@ def build_local_ci_parser(
     p_desktop_review_status.add_argument("--close-issue", action="store_true", help="Include --close-issue in the suggested approved verdict command")
     p_desktop_review_status.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 
+    p_desktop_review_watch = desktop_sub.add_parser("review-watch", help="Check open video review issues for new approval feedback")
+    p_desktop_review_watch.add_argument("--repo", help="Optional GitHub repo for gh issue list/view")
+    p_desktop_review_watch.add_argument("--label", default="video-review", help="GitHub label to query (default: video-review)")
+    p_desktop_review_watch.add_argument("--state", default="open", choices=["open", "closed", "all"], help="Issue state to query (default: open)")
+    p_desktop_review_watch.add_argument("--state-file", help="Optional JSON cache that skips unchanged issues by updatedAt")
+    p_desktop_review_watch.add_argument("--manifest-map", help="Optional JSON map from issue URL or number to run manifest path")
+    p_desktop_review_watch.add_argument("--refresh", action="store_true", help="View every listed issue even when --state-file says it is unchanged")
+    p_desktop_review_watch.add_argument("--close-issue", action="store_true", help="Include --close-issue in suggested approved verdict commands")
+    p_desktop_review_watch.add_argument("--interval", type=float, default=0.0, help="Seconds between watch iterations (default: one-shot)")
+    p_desktop_review_watch.add_argument("--max-iterations", type=int, default=1, help="Maximum watch iterations; use with --interval for short polling windows")
+    p_desktop_review_watch.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+
     p_desktop_compose_video = desktop_sub.add_parser("compose-video", help="Render or rerender a Remotion proof for an existing desktop run manifest")
     p_desktop_compose_video.add_argument("manifest", help="Path to the run manifest.json to compose")
     p_desktop_compose_video.add_argument("--output", help="Output composed MP4 path (default: <run>/video/proof-composed.mp4)")

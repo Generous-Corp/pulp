@@ -1700,6 +1700,256 @@ def cmd_desktop_review_status(
     return 0
 
 
+def _load_review_watch_state(path: Path | None) -> dict:
+    if not path or not path.is_file():
+        return {"kind": "desktop-video-proof-review-watch-state", "issues": {}}
+    try:
+        payload = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {"kind": "desktop-video-proof-review-watch-state", "issues": {}}
+    if not isinstance(payload, dict):
+        return {"kind": "desktop-video-proof-review-watch-state", "issues": {}}
+    issues = payload.get("issues")
+    if not isinstance(issues, dict):
+        payload["issues"] = {}
+    payload.setdefault("kind", "desktop-video-proof-review-watch-state")
+    return payload
+
+
+def _load_review_manifest_map(path: Path | None) -> dict[str, str]:
+    if not path:
+        return {}
+    payload = json.loads(path.read_text())
+    if not isinstance(payload, dict):
+        raise ValueError("manifest map must be a JSON object")
+    out: dict[str, str] = {}
+    for key, value in payload.items():
+        if isinstance(value, str):
+            out[str(key)] = value
+    return out
+
+
+def _review_manifest_for_issue(issue: dict, manifest_map: Mapping[str, str]) -> str | None:
+    keys = [
+        str(issue.get("url") or ""),
+        str(issue.get("number") or ""),
+        f"#{issue.get('number')}" if issue.get("number") is not None else "",
+    ]
+    for key in keys:
+        if key and key in manifest_map:
+            return manifest_map[key]
+    return None
+
+
+def _review_verdict_command(issue_url: str, manifest: str | None, *, close_issue: bool) -> str | None:
+    if not manifest:
+        return None
+    command = (
+        "python3 tools/local-ci/local_ci.py desktop verdict "
+        f"{shlex.quote(manifest)} --approved --issue-url {shlex.quote(issue_url)}"
+    )
+    if close_issue:
+        command += " --close-issue"
+    return command
+
+
+def _review_watch_once(
+    args: argparse.Namespace,
+    *,
+    state_payload: dict,
+    manifest_map: Mapping[str, str],
+    run_fn: Callable[..., subprocess.CompletedProcess[str]],
+) -> tuple[dict, dict]:
+    list_argv = [
+        "gh",
+        "issue",
+        "list",
+        "--state",
+        args.state,
+        "--label",
+        args.label,
+        "--json",
+        "number,title,url,updatedAt",
+    ]
+    if getattr(args, "repo", None):
+        list_argv.extend(["--repo", args.repo])
+    list_process = run_fn(list_argv, capture_output=True, text=True, check=False)
+    if list_process.returncode != 0:
+        detail = (list_process.stderr or list_process.stdout or "gh issue list failed").strip()
+        raise RuntimeError(detail)
+    try:
+        listed_issues = json.loads(list_process.stdout or "[]")
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"invalid gh issue list JSON: {exc}") from exc
+    if not isinstance(listed_issues, list):
+        raise RuntimeError("gh issue list did not return a JSON array")
+
+    cached_issues = state_payload.setdefault("issues", {})
+    if not isinstance(cached_issues, dict):
+        cached_issues = {}
+        state_payload["issues"] = cached_issues
+
+    checked_count = 0
+    skipped_count = 0
+    issues: list[dict] = []
+    for listed in listed_issues:
+        if not isinstance(listed, dict):
+            continue
+        issue_url = str(listed.get("url") or listed.get("number") or "")
+        issue_number = listed.get("number")
+        updated_at = str(listed.get("updatedAt") or "")
+        cached = cached_issues.get(issue_url) if issue_url else None
+        unchanged = bool(
+            cached
+            and not getattr(args, "refresh", False)
+            and updated_at
+            and cached.get("updated_at") == updated_at
+        )
+        if unchanged:
+            skipped_count += 1
+            issues.append(
+                {
+                    "number": issue_number,
+                    "title": listed.get("title"),
+                    "url": issue_url,
+                    "updated_at": updated_at,
+                    "checked": False,
+                    "approved": bool(cached.get("approved")),
+                    "approval_comment": cached.get("approval_comment"),
+                    "verdict_command": cached.get("verdict_command"),
+                }
+            )
+            continue
+
+        view_ref = issue_url or str(issue_number)
+        view_argv = ["gh", "issue", "view", view_ref, "--json", "state,url,number,title,updatedAt,comments"]
+        if getattr(args, "repo", None):
+            view_argv.extend(["--repo", args.repo])
+        view_process = run_fn(view_argv, capture_output=True, text=True, check=False)
+        if view_process.returncode != 0:
+            detail = (view_process.stderr or view_process.stdout or "gh issue view failed").strip()
+            issue_payload = {
+                "number": issue_number,
+                "title": listed.get("title"),
+                "url": issue_url,
+                "updated_at": updated_at,
+                "checked": True,
+                "error": detail,
+                "approved": False,
+                "verdict_command": None,
+            }
+            issues.append(issue_payload)
+            cached_issues[issue_url] = issue_payload
+            checked_count += 1
+            continue
+        try:
+            issue = json.loads(view_process.stdout or "{}")
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"invalid gh issue view JSON for {view_ref}: {exc}") from exc
+        comments = issue.get("comments") if isinstance(issue.get("comments"), list) else []
+        approval_comment = _review_status_approval_comment(comments)
+        resolved_url = str(issue.get("url") or issue_url)
+        manifest = _review_manifest_for_issue(issue, manifest_map) or _review_manifest_for_issue(listed, manifest_map)
+        verdict_command = _review_verdict_command(
+            resolved_url,
+            manifest,
+            close_issue=bool(getattr(args, "close_issue", False)),
+        ) if approval_comment else None
+        issue_payload = {
+            "number": issue.get("number") or issue_number,
+            "title": issue.get("title") or listed.get("title"),
+            "url": resolved_url,
+            "state": issue.get("state"),
+            "updated_at": issue.get("updatedAt") or updated_at,
+            "checked": True,
+            "approved": approval_comment is not None,
+            "approval_comment": approval_comment,
+            "manifest": manifest,
+            "verdict_command": verdict_command,
+        }
+        issues.append(issue_payload)
+        if resolved_url:
+            cached_issues[resolved_url] = {
+                "updated_at": issue_payload["updated_at"],
+                "approved": issue_payload["approved"],
+                "approval_comment": approval_comment,
+                "verdict_command": verdict_command,
+            }
+        checked_count += 1
+
+    payload = {
+        "kind": "desktop-video-proof-review-watch",
+        "repo": getattr(args, "repo", None),
+        "label": args.label,
+        "state": args.state,
+        "issue_count": len(issues),
+        "checked_count": checked_count,
+        "skipped_unchanged_count": skipped_count,
+        "approved_count": sum(1 for issue in issues if issue.get("approved")),
+        "issues": issues,
+    }
+    return payload, state_payload
+
+
+def cmd_desktop_review_watch(
+    args: argparse.Namespace,
+    *,
+    run_fn: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+    print_fn: Callable[[str], None] = print,
+    sleep_fn: Callable[[float], None] = time.sleep,
+) -> int:
+    state_path = Path(args.state_file).expanduser().resolve() if getattr(args, "state_file", None) else None
+    try:
+        manifest_map = _load_review_manifest_map(Path(args.manifest_map).expanduser().resolve() if getattr(args, "manifest_map", None) else None)
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        print_fn(f"Error: could not read manifest map: {exc}")
+        return 1
+    state_payload = _load_review_watch_state(state_path)
+    max_iterations = max(1, int(getattr(args, "max_iterations", 1) or 1))
+    interval = max(0.0, float(getattr(args, "interval", 0.0) or 0.0))
+    payloads: list[dict] = []
+    for index in range(max_iterations):
+        try:
+            payload, state_payload = _review_watch_once(
+                args,
+                state_payload=state_payload,
+                manifest_map=manifest_map,
+                run_fn=run_fn,
+            )
+        except RuntimeError as exc:
+            print_fn(f"Error: {exc}")
+            return 1
+        payload["iteration"] = index + 1
+        payloads.append(payload)
+        if state_path:
+            state_path.parent.mkdir(parents=True, exist_ok=True)
+            state_path.write_text(json.dumps(state_payload, indent=2) + "\n")
+        if index + 1 < max_iterations and interval > 0:
+            sleep_fn(interval)
+    final_payload = payloads[-1] if len(payloads) == 1 else {
+        "kind": "desktop-video-proof-review-watch-series",
+        "iterations": payloads,
+    }
+    if getattr(args, "json", False):
+        print_fn(json.dumps(final_payload, indent=2))
+        return 0
+    if final_payload["kind"] == "desktop-video-proof-review-watch-series":
+        summary = final_payload["iterations"][-1]
+    else:
+        summary = final_payload
+    print_fn(f"Desktop video review watch: label={summary['label']} state={summary['state']}")
+    print_fn(f"  issues: {summary['issue_count']}")
+    print_fn(f"  checked: {summary['checked_count']}")
+    print_fn(f"  skipped_unchanged: {summary['skipped_unchanged_count']}")
+    print_fn(f"  approved: {summary['approved_count']}")
+    for issue in summary["issues"]:
+        if issue.get("approved"):
+            print_fn(f"  approved_issue: {issue.get('url')}")
+            if issue.get("verdict_command"):
+                print_fn(f"    verdict_command: {issue['verdict_command']}")
+    return 0
+
+
 def cmd_desktop_compose_video(
     args: argparse.Namespace,
     *,

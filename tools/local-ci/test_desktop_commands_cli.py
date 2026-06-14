@@ -1735,6 +1735,134 @@ class DesktopCommandsCliTests(unittest.TestCase):
         self.assertEqual(result, 1)
         self.assertIn("invalid gh issue view JSON", self.printed[-1])
 
+    def test_review_watch_detects_approved_issues_and_uses_state_cache(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_file = Path(tmpdir) / "review-watch.json"
+            manifest_map = Path(tmpdir) / "manifest-map.json"
+            manifest_map.write_text(json.dumps({"123": "/tmp/run/manifest.json"}) + "\n")
+            listed = [
+                {
+                    "number": 123,
+                    "title": "Review validation proof",
+                    "url": "https://github.com/danielraffel/pulp/issues/123",
+                    "updatedAt": "2026-06-14T12:00:00Z",
+                },
+                {
+                    "number": 124,
+                    "title": "Pending validation proof",
+                    "url": "https://github.com/danielraffel/pulp/issues/124",
+                    "updatedAt": "2026-06-14T12:01:00Z",
+                },
+            ]
+            viewed = {
+                "https://github.com/danielraffel/pulp/issues/123": {
+                    "state": "OPEN",
+                    "number": 123,
+                    "title": "Review validation proof",
+                    "url": "https://github.com/danielraffel/pulp/issues/123",
+                    "updatedAt": "2026-06-14T12:00:00Z",
+                    "comments": [
+                        {"body": "Looks good to me", "author": {"login": "daniel"}, "url": "https://example/comment/2"}
+                    ],
+                },
+                "https://github.com/danielraffel/pulp/issues/124": {
+                    "state": "OPEN",
+                    "number": 124,
+                    "title": "Pending validation proof",
+                    "url": "https://github.com/danielraffel/pulp/issues/124",
+                    "updatedAt": "2026-06-14T12:01:00Z",
+                    "comments": [{"body": "still watching", "author": {"login": "reviewer"}}],
+                },
+            }
+            calls = []
+
+            def run_fn(argv, **_kwargs):
+                calls.append(argv)
+                if argv[:3] == ["gh", "issue", "list"]:
+                    return subprocess.CompletedProcess(argv, 0, json.dumps(listed), "")
+                if argv[:3] == ["gh", "issue", "view"]:
+                    return subprocess.CompletedProcess(argv, 0, json.dumps(viewed[argv[3]]), "")
+                self.fail(f"unexpected command: {argv}")
+
+            args = Namespace(
+                repo="danielraffel/pulp",
+                label="video-review",
+                state="open",
+                state_file=str(state_file),
+                manifest_map=str(manifest_map),
+                refresh=False,
+                close_issue=True,
+                interval=0.0,
+                max_iterations=1,
+                json=True,
+            )
+            result = self.mod.cmd_desktop_review_watch(args, run_fn=run_fn, print_fn=self.print_line)
+
+            self.assertEqual(result, 0)
+            payload = json.loads(self.printed[-1])
+            self.assertEqual(payload["kind"], "desktop-video-proof-review-watch")
+            self.assertEqual(payload["issue_count"], 2)
+            self.assertEqual(payload["checked_count"], 2)
+            self.assertEqual(payload["approved_count"], 1)
+            approved = next(issue for issue in payload["issues"] if issue["approved"])
+            self.assertIn("--approved", approved["verdict_command"])
+            self.assertIn("--issue-url https://github.com/danielraffel/pulp/issues/123", approved["verdict_command"])
+            self.assertIn("--close-issue", approved["verdict_command"])
+            self.assertEqual(sum(1 for call in calls if call[:3] == ["gh", "issue", "view"]), 2)
+            state_payload = json.loads(state_file.read_text())
+            self.assertTrue(state_payload["issues"]["https://github.com/danielraffel/pulp/issues/123"]["approved"])
+
+            self.printed.clear()
+            calls.clear()
+            result = self.mod.cmd_desktop_review_watch(args, run_fn=run_fn, print_fn=self.print_line)
+
+            self.assertEqual(result, 0)
+            payload = json.loads(self.printed[-1])
+            self.assertEqual(payload["checked_count"], 0)
+            self.assertEqual(payload["skipped_unchanged_count"], 2)
+            self.assertEqual(payload["approved_count"], 1)
+            self.assertEqual(sum(1 for call in calls if call[:3] == ["gh", "issue", "view"]), 0)
+
+    def test_review_watch_reports_gh_and_manifest_map_errors(self):
+        result = self.mod.cmd_desktop_review_watch(
+            Namespace(
+                repo=None,
+                label="video-review",
+                state="open",
+                state_file=None,
+                manifest_map="/tmp/does-not-exist.json",
+                refresh=False,
+                close_issue=False,
+                interval=0.0,
+                max_iterations=1,
+                json=False,
+            ),
+            run_fn=lambda *_args, **_kwargs: self.fail("gh should not run"),
+            print_fn=self.print_line,
+        )
+        self.assertEqual(result, 1)
+        self.assertIn("could not read manifest map", self.printed[-1])
+
+        self.printed.clear()
+        result = self.mod.cmd_desktop_review_watch(
+            Namespace(
+                repo=None,
+                label="video-review",
+                state="open",
+                state_file=None,
+                manifest_map=None,
+                refresh=False,
+                close_issue=False,
+                interval=0.0,
+                max_iterations=1,
+                json=False,
+            ),
+            run_fn=lambda argv, **_kwargs: subprocess.CompletedProcess(argv, 1, "", "auth required\n"),
+            print_fn=self.print_line,
+        )
+        self.assertEqual(result, 1)
+        self.assertEqual(self.printed[-1], "Error: auth required")
+
     def test_review_issue_reports_missing_package(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             result = self.mod.cmd_desktop_review_issue(

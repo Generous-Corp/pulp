@@ -880,6 +880,27 @@ suggested `desktop verdict` command when approval is present. Use `--repo
 owner/repo` when the issue argument is a bare number or when GitHub context
 cannot be inferred.
 
+To converge on all open video-review issues at session start, use
+`desktop review-watch`. It first lists open issues with the `video-review`
+label, then views only uncached or changed issues when a state file is provided:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop review-watch \
+  --repo owner/repo \
+  --label video-review \
+  --state-file /tmp/pulp-video-review-watch.json \
+  --manifest-map /tmp/pulp-video-review-manifests.json \
+  --close-issue \
+  --json
+```
+
+The optional manifest map is a JSON object keyed by issue URL, issue number, or
+`#number`, with values pointing to run `manifest.json` files. When an approved
+issue has a mapped manifest, `review-watch` emits the exact `desktop verdict
+... --approved --issue-url ...` command, and includes `--close-issue` when that
+flag was passed. Use `--interval N --max-iterations M` only for short
+post-ping watch windows; one-shot mode is the default.
+
 ```bash
 python3 tools/local-ci/local_ci.py desktop verdict /path/to/run/manifest.json \
   --approved \
