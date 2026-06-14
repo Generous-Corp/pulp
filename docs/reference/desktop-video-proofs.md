@@ -542,13 +542,15 @@ python3 tools/local-ci/local_ci.py desktop video-matrix \
   --design-parity-source-image planning/screenshots/reference.png
 ```
 
-If `--design-parity-source-image` is omitted, the check falls back to
-`planning/screenshots/reference.png`; the manifest must be supplied because
-design parity recomposes an existing proof rather than launching a fresh app.
-The failed checks include remediation text with the next setup step. The
-status filter uses declared matrix status by default; with `--check`, it uses
-computed local readiness, so `--target mac --status ready --check` prints the
-macOS proofs this machine can run now. The
+If `--design-parity-source-image` is omitted, the check first tries
+`planning/screenshots/reference.png`. If either design-parity input is still
+missing, `video-matrix --check` also searches the configured published report
+root for the latest design-parity report that contains both a copied run
+manifest and a copied source/reference image. Explicit paths always win. The
+failed checks include remediation text with the next setup step. The status
+filter uses declared matrix status by default; with `--check`, it uses computed
+local readiness, so `--target mac --status ready --check` prints the macOS
+proofs this machine can run now. The
 `audio-inspector-demo` row is the fast no-GPU macOS proof path and does not
 require Skia. The iOS Simulator row uses the working
 `simulator video` recorder. The

@@ -506,10 +506,14 @@ and `--json` is suitable for automation. Add `--check` on a fresh machine or
 blackbook to include machine-local readiness checks for obvious blockers such
 as missing `cmake`, the in-tree audio-inspector demo source, `adb`, `xcrun`,
 REAPER, `external/skia-build/libskia.a`, or the design-parity source image at
-`planning/screenshots/reference.png`. Failed checks include remediation text with the
-next setup step. With `--check`, `--status` filters by computed local readiness
-instead of declared status, so `--target mac --status ready --check` is the
-quick "what can I record here?" query. The matrix carries
+`planning/screenshots/reference.png`. If explicit design-parity inputs are not
+provided and that default source image is absent, the user-facing matrix command
+searches the configured published report root for the latest design-parity
+report with both a copied manifest and a copied source/reference image. Failed
+checks include remediation text with the next setup step. With `--check`,
+`--status` filters by computed local readiness instead of declared status, so
+`--target mac --status ready --check` is the quick "what can I record here?"
+query. The matrix carries
 readiness status, Remotion template, doctor command, concrete Release prepare
 command, recording/compose command,
 publish/review-issue commands, background serve/status/stop commands, and
