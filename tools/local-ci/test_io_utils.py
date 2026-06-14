@@ -350,6 +350,35 @@ class IoUtilsTests(unittest.TestCase):
         self.assertEqual(diff_path.read_text(), "diff\n")
         self.assertEqual(resized_path.read_text(), "image (588, 460)\n")
 
+    def test_design_parity_diff_summary_falls_back_to_stdlib_png(self):
+        source_path = Path(self.tmpdir.name) / "source.png"
+        native_path = Path(self.tmpdir.name) / "native.png"
+        diff_path = Path(self.tmpdir.name) / "out" / "diff.png"
+        resized_path = Path(self.tmpdir.name) / "out" / "source-resized.png"
+        try:
+            from PIL import Image
+        except Exception as exc:
+            self.skipTest(f"Pillow unavailable for fixture generation: {exc}")
+        Image.new("RGB", (2, 1), (10, 20, 30)).save(source_path)
+        Image.new("RGB", (1, 1), (20, 20, 30)).save(native_path)
+
+        with mock.patch.dict(sys.modules, {"PIL": None}):
+            summary = self.mod.design_parity_diff_summary(
+                source_path,
+                native_path,
+                diff_output_path=diff_path,
+                resized_source_output_path=resized_path,
+                enhance_brightness=2.0,
+            )
+
+        self.assertTrue(summary["changed"])
+        self.assertTrue(summary["resized_source"])
+        self.assertEqual(summary["method"], "stdlib-png-resized-source-diff")
+        self.assertEqual(summary["bbox"], {"left": 0, "top": 0, "right": 1, "bottom": 1})
+        self.assertTrue(diff_path.is_file())
+        self.assertTrue(resized_path.is_file())
+        self.assertGreater(diff_path.stat().st_size, 0)
+
     def test_tail_lines_replaces_invalid_bytes_and_trim_exact_boundary(self):
         log_path = self.state_dir / "logs" / "invalid.log"
         log_path.parent.mkdir(parents=True)

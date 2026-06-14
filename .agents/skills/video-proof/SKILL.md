@@ -459,7 +459,9 @@ This renders the source/reference image beside the captured proof and, when
 provided, adds the diff image to the proof context panel. `desktop design-diff`
 compares the source/reference image with either `--native-image` or the run
 manifest's `artifacts.screenshot`, resizing the source image to the native
-screenshot dimensions when needed. If the run manifest already has
+screenshot dimensions when needed. It uses Pillow when available and falls back
+to a stdlib PNG path for 8-bit RGB/RGBA PNG exports and screenshots. If the run
+manifest already has
 `artifacts.diff_screenshot`, the composer uses it automatically unless
 `--diff-image` overrides it. The command records a `video_proof_composition`
 block in the manifest.

@@ -462,7 +462,9 @@ python3 tools/local-ci/local_ci.py desktop compose-video /path/to/run/manifest.j
 `desktop design-diff` compares the source/reference image with either
 `--native-image` or the run manifest's `artifacts.screenshot`, resizing the
 source image to the native screenshot dimensions when needed. It writes a visual
-diff image and JSON metadata that includes copy-paste `compose_args`. The
+diff image and JSON metadata that includes copy-paste `compose_args`. It uses
+Pillow when available and falls back to a stdlib PNG path for 8-bit RGB/RGBA
+PNG exports and screenshots. The
 composition then renders the source/reference image beside the captured proof
 and adds the diff image to the proof context panel. If the run manifest already
 has `artifacts.diff_screenshot`, `compose-video` uses it automatically unless
