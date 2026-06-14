@@ -45,7 +45,7 @@ source ~/.config/pulp/secrets/notary.env
 # examples/ios-auv3-synth/CMakeLists.txt
 pulp_add_ios_auv3(
     NAME            PulpSineSynth
-    BUNDLE_ID       com.pulp.examples.sinesynth
+    BUNDLE_ID       com.pulp.examples.sinesynth.host.PulpSineSynth
     MANUFACTURER    Pulp
     MANUFACTURER_CODE  Pulp
     SUBTYPE_CODE    PsSn
@@ -151,7 +151,7 @@ cmake --build build-ios-device \
 
 > **Provisioning profile gotcha**: Automatic signing requires the
 > bundle identifier (`com.pulp.examples.sinesynth.host` and its
-> `.appex` sibling `com.pulp.examples.sinesynth`) to already exist
+> `.appex` sibling `com.pulp.examples.sinesynth.host.PulpSineSynth.appex`) to already exist
 > in [Apple Developer → Identifiers](https://developer.apple.com/account/resources/identifiers/list).
 > If Xcode reports "No matching profiles found", open the generated
 > `Pulp.xcodeproj` once in Xcode and let it register the IDs.

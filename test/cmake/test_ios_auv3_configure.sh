@@ -164,6 +164,15 @@ if [[ "${PULP_IOS_AUV3_SMOKE_BUILD:-1}" == "1" ]]; then
         /usr/bin/plutil -p "${appex_path}/Info.plist" >&2
         exit 1
     fi
+    if ! /usr/bin/plutil -p "${appex_path}/Info.plist" | grep -q '"CFBundleIdentifier" => "com.pulp.examples.sinesynth.host.PulpSineSynth.appex"'; then
+        echo "FAIL: .appex Info.plist has the wrong CFBundleIdentifier"
+        /usr/bin/plutil -p "${appex_path}/Info.plist" >&2
+        exit 1
+    fi
+    if ! grep -q 'PRODUCT_BUNDLE_IDENTIFIER = com.pulp.examples.sinesynth.host.PulpSineSynth.appex;' "${build_dir}/build/Pulp.xcodeproj/project.pbxproj"; then
+        echo "FAIL: PulpSineSynth_AUv3 Xcode target missing PRODUCT_BUNDLE_IDENTIFIER"
+        exit 1
+    fi
 
     # Phase iOS-B: build the HostApp .app that wraps the .appex too,
     # so the Simulator install path (xcrun simctl install <UDID> <.app>)

@@ -430,6 +430,7 @@ function(_pulp_add_auv3_ios target name bundle_id version manufacturer manufactu
         PREFIX ""
         XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
         XCODE_ATTRIBUTE_IPHONEOS_DEPLOYMENT_TARGET "${_pulp_ios_min}"
+        XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${bundle_id}.appex"
         XCODE_ATTRIBUTE_WRAPPER_EXTENSION "appex"
         # Stash the AudioComponentDescription on the target so
         # pulp_add_ios_host_app(...) can read them back without
