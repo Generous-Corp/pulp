@@ -545,13 +545,32 @@ fn install_npm_tool<S: Spawner>(
         .map_err(|e| CliError::io(wrapper.clone(), e))?;
     make_executable(&wrapper)?;
 
-    let manifest = format!(
-        "{{\n  \"tool_id\": \"{}\",\n  \"version\": \"{}\",\n  \"method\": \"npm_package\",\n  \"package_root\": \"{}\",\n  \"wrapper_path\": \"{}\"\n}}\n",
+    let mut manifest = format!(
+        "{{\n  \"tool_id\": \"{}\",\n  \"version\": \"{}\",\n  \"method\": \"npm_package\",\n  \"package_root\": \"{}\",\n  \"wrapper_path\": \"{}\"",
         json_escape(&tool.id),
         json_escape(&tool.pinned_version),
         json_escape(package_root.to_string_lossy().as_ref()),
         json_escape(wrapper.to_string_lossy().as_ref()),
     );
+    if !tool.artifact_pack_command.is_empty() {
+        manifest.push_str(&format!(
+            ",\n  \"artifact_pack_command\": \"{}\"",
+            json_escape(&tool.artifact_pack_command)
+        ));
+    }
+    if !tool.artifact_pack_npm_script.is_empty() {
+        manifest.push_str(&format!(
+            ",\n  \"artifact_pack_npm_script\": \"{}\"",
+            json_escape(&tool.artifact_pack_npm_script)
+        ));
+    }
+    if !tool.artifact_manifest_schema.is_empty() {
+        manifest.push_str(&format!(
+            ",\n  \"artifact_manifest_schema\": \"{}\"",
+            json_escape(&tool.artifact_manifest_schema)
+        ));
+    }
+    manifest.push_str("\n}\n");
     fs::write(install_dir.join("manifest.json"), manifest)
         .map_err(|e| CliError::io(install_dir.join("manifest.json"), e))?;
 
@@ -1140,6 +1159,9 @@ mod tests {
         assert!(wrapper_text.contains("smoke-video-proof"));
         let manifest_text = fs::read_to_string(manifest).unwrap();
         assert!(manifest_text.contains("\"method\": \"npm_package\""));
+        assert!(manifest_text.contains("\"artifact_pack_command\": \"python3 tools/local-ci/pack_video_proof_tool.py --json\""));
+        assert!(manifest_text.contains("\"artifact_pack_npm_script\": \"npm --prefix tools/local-ci run pack-video-proof-tool -- --json\""));
+        assert!(manifest_text.contains("\"artifact_manifest_schema\": \"pulp.video-proof-tool-package.v1\""));
         assert!(String::from_utf8(buf)
             .unwrap()
             .contains("Installed Video Proof"));

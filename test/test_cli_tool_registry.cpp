@@ -1009,7 +1009,10 @@ TEST_CASE("tool command installs npm package tools through the registry",
       "install_method": "npm_package",
       "npm_package_root": "tools/local-ci",
       "npm_default_script": "smoke-video-proof",
-      "pinned_version": "0.0.0"
+      "pinned_version": "0.0.0",
+      "artifact_pack_command": "python3 tools/local-ci/pack_video_proof_tool.py --json",
+      "artifact_pack_npm_script": "npm --prefix tools/local-ci run pack-video-proof-tool -- --json",
+      "artifact_manifest_schema": "pulp.video-proof-tool-package.v1"
     }
   }
 }
@@ -1030,7 +1033,13 @@ TEST_CASE("tool command installs npm package tools through the registry",
     }
 
     auto wrapper = pulp_home() / "tools" / "npm-packages" / "video-proof" / "run.sh";
+    auto manifest = wrapper.parent_path() / "manifest.json";
     REQUIRE(fs::exists(wrapper));
+    REQUIRE(fs::exists(manifest));
+    const auto manifest_text = read_file(manifest);
+    REQUIRE(manifest_text.find("\"artifact_pack_command\": \"python3 tools/local-ci/pack_video_proof_tool.py --json\"") != std::string::npos);
+    REQUIRE(manifest_text.find("\"artifact_pack_npm_script\": \"npm --prefix tools/local-ci run pack-video-proof-tool -- --json\"") != std::string::npos);
+    REQUIRE(manifest_text.find("\"artifact_manifest_schema\": \"pulp.video-proof-tool-package.v1\"") != std::string::npos);
 
     {
         ScopedOutput output;

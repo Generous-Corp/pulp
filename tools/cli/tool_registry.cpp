@@ -695,7 +695,14 @@ ToolInstallResult install_npm_tool(const ToolDescriptor& tool,
              << "  \"version\": \"" << tool.pinned_version << "\",\n"
              << "  \"method\": \"npm_package\",\n"
              << "  \"package_root\": \"" << package_root.string() << "\",\n"
-             << "  \"wrapper_path\": \"" << wrapper_path.string() << "\"\n"
+             << "  \"wrapper_path\": \"" << wrapper_path.string() << "\"";
+    if (!tool.artifact_pack_command.empty())
+        manifest << ",\n  \"artifact_pack_command\": \"" << json_escape(tool.artifact_pack_command) << "\"";
+    if (!tool.artifact_pack_npm_script.empty())
+        manifest << ",\n  \"artifact_pack_npm_script\": \"" << json_escape(tool.artifact_pack_npm_script) << "\"";
+    if (!tool.artifact_manifest_schema.empty())
+        manifest << ",\n  \"artifact_manifest_schema\": \"" << json_escape(tool.artifact_manifest_schema) << "\"";
+    manifest << "\n"
              << "}\n";
     write_file(install_dir / "manifest.json", manifest.str());
 
