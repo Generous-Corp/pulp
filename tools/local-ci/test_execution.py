@@ -1159,9 +1159,15 @@ class ExecutionTests(unittest.TestCase):
         self.assertEqual(validation, "full")
         self.assertEqual(cmd[:3], ["ssh", "ubuntu.example.com", "bash"])
         self.assertIn('export PATH="$HOME/.local/bin:$PATH"; set -euo pipefail', remote_cmd)
+        self.assertIn("bundle-sync", remote_cmd)
         self.assertIn("branch=feature/posix", remote_cmd)
         self.assertIn("sha=" + "c" * 40, remote_cmd)
+        self.assertIn('bundle="$HOME/$bundle_name"', remote_cmd)
+        self.assertIn('prepared_root="$HOME/.local/state/pulp/local-ci/prepared/ubuntu/full"', remote_cmd)
+        self.assertIn('PULP_VALIDATE_REUSE_PREPARED="$reuse_prepared"', remote_cmd)
+        self.assertIn('script="$PWD/$script_name"', remote_cmd)
         self.assertIn("git fetch \"$bundle\" \"$bundle_ref:refs/remotes/origin/$branch\"", remote_cmd)
+        self.assertIn('git show "$sha:validate-build.sh" > "$script"', remote_cmd)
         self.assertIn("PULP_EXPECT_SMOKE=0", remote_cmd)
         self.assertIn("bash \"$script\" --quiet --keep-worktree --ref \"$sha\"", remote_cmd)
         self.assertIn("--exclude-regex 'slow test'", remote_cmd)
@@ -1187,7 +1193,9 @@ class ExecutionTests(unittest.TestCase):
         remote_cmd = self.mod.shlex.split(cmd[-1])[0]
 
         self.assertEqual(validation, "smoke")
+        self.assertIn("script_name=.pulp-ci-validate-job702.sh", remote_cmd)
         self.assertIn("prepared/ubuntu/smoke", remote_cmd)
+        self.assertIn('git show "$sha:validate-build.sh" > "$script"', remote_cmd)
         self.assertIn("PULP_EXPECT_SMOKE=1", remote_cmd)
         self.assertIn("--smoke --no-tests", remote_cmd)
 
