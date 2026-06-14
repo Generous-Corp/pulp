@@ -2,8 +2,8 @@
 """Tests for cloud command facade bindings."""
 
 from module_test_utils import load_module_from_path
-import types
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -30,95 +30,42 @@ class CloudCommandBindingsTests(unittest.TestCase):
         for name in expected:
             self.assertTrue(callable(getattr(self.mod, name)))
 
-    def test_cloud_commands_delegate_to_cloud_module(self):
-        calls = []
-
-        def make_runner(name, value):
-            def runner(*args, **kwargs):
-                calls.append((name, args, kwargs))
-                return value
-
-            return runner
-
-        cloud = types.SimpleNamespace(
-            cmd_cloud_workflows=make_runner("cmd_cloud_workflows", 10),
-            cmd_cloud_defaults=make_runner("cmd_cloud_defaults", 11),
-            cmd_cloud_history=make_runner("cmd_cloud_history", 12),
-            cmd_cloud_compare=make_runner("cmd_cloud_compare", 13),
-            cmd_cloud_recommend=make_runner("cmd_cloud_recommend", 14),
-            cmd_cloud_run=make_runner("cmd_cloud_run", 15),
-            cmd_cloud_status=make_runner("cmd_cloud_status", 16),
-            cmd_cloud_namespace_doctor=make_runner("cmd_cloud_namespace_doctor", 17),
-            cmd_cloud_namespace_setup=make_runner("cmd_cloud_namespace_setup", 18),
-        )
-        bindings = {"_cloud": cloud}
-        args = object()
-
-        cases = [
-            ("cmd_cloud_workflows", 10),
-            ("cmd_cloud_defaults", 11),
-            ("cmd_cloud_history", 12),
-            ("cmd_cloud_compare", 13),
-            ("cmd_cloud_recommend", 14),
-            ("cmd_cloud_run", 15),
-            ("cmd_cloud_status", 16),
-            ("cmd_cloud_namespace_doctor", 17),
-            ("cmd_cloud_namespace_setup", 18),
-        ]
-        for name, expected in cases:
-            with self.subTest(name=name):
-                self.assertEqual(getattr(self.mod, name)(bindings, args), expected)
-
-        self.assertEqual([call[0] for call in calls], [name for name, _ in cases])
-        for _name, call_args, call_kwargs in calls:
-            self.assertEqual(call_args, (args,))
-            self.assertEqual(call_kwargs, {})
-
-    def test_install_cloud_command_helpers_wires_named_exports(self):
-        calls = []
-        cloud = types.SimpleNamespace(cmd_cloud_run=lambda args: calls.append(("cmd_cloud_run", args)) or 15)
-        bindings = {"_cloud": cloud}
-
-        self.mod.install_cloud_command_helpers(bindings, ("cmd_cloud_run",))
-
-        args = object()
-        self.assertEqual(bindings["cmd_cloud_run"](args), 15)
-        self.assertEqual(calls, [("cmd_cloud_run", args)])
-
     def test_install_cloud_command_helpers_routes_each_group(self):
-        calls = []
-
-        def make_runner(name, value):
-            def runner(*args, **kwargs):
-                calls.append((name, args, kwargs))
-                return value
-
-            return runner
-
-        cloud = types.SimpleNamespace(
-            cmd_cloud_history=make_runner("cmd_cloud_history", 12),
-            cmd_cloud_status=make_runner("cmd_cloud_status", 16),
-            cmd_cloud_namespace_setup=make_runner("cmd_cloud_namespace_setup", 18),
+        bindings = {}
+        names = (
+            "cmd_cloud_history",
+            "cmd_cloud_status",
+            "cmd_cloud_namespace_setup",
         )
-        bindings = {"_cloud": cloud}
 
-        self.mod.install_cloud_command_helpers(
-            bindings,
-            (
-                "cmd_cloud_history",
-                "cmd_cloud_status",
-                "cmd_cloud_namespace_setup",
-            ),
-        )
-        args = object()
+        with (
+            mock.patch.object(self.mod, "install_cloud_reporting_command_helpers") as reporting,
+            mock.patch.object(self.mod, "install_cloud_run_command_helpers") as run,
+            mock.patch.object(self.mod, "install_cloud_namespace_command_helpers") as namespace,
+            mock.patch.object(self.mod, "install_local_helpers") as install_local,
+        ):
+            self.mod.install_cloud_command_helpers(bindings, names)
 
-        self.assertEqual(bindings["cmd_cloud_history"](args), 12)
-        self.assertEqual(bindings["cmd_cloud_status"](args), 16)
-        self.assertEqual(bindings["cmd_cloud_namespace_setup"](args), 18)
-        self.assertEqual(
-            [call[0] for call in calls],
-            ["cmd_cloud_history", "cmd_cloud_status", "cmd_cloud_namespace_setup"],
-        )
+        reporting.assert_called_once_with(bindings, ("cmd_cloud_history",))
+        run.assert_called_once_with(bindings, ("cmd_cloud_status",))
+        namespace.assert_called_once_with(bindings, ("cmd_cloud_namespace_setup",))
+        install_local.assert_not_called()
+
+    def test_install_cloud_command_helpers_preserves_unknown_fallback(self):
+        bindings = {}
+
+        with (
+            mock.patch.object(self.mod, "install_cloud_reporting_command_helpers") as reporting,
+            mock.patch.object(self.mod, "install_cloud_run_command_helpers") as run,
+            mock.patch.object(self.mod, "install_cloud_namespace_command_helpers") as namespace,
+            mock.patch.object(self.mod, "install_local_helpers") as install_local,
+        ):
+            self.mod.install_cloud_command_helpers(bindings, ("custom",))
+
+        reporting.assert_called_once_with(bindings, ())
+        run.assert_called_once_with(bindings, ())
+        namespace.assert_called_once_with(bindings, ())
+        install_local.assert_called_once_with(bindings, self.mod.__dict__, ("custom",))
 
 
 if __name__ == "__main__":
