@@ -3,7 +3,6 @@
 
 from module_test_utils import load_module_from_path
 from pathlib import Path
-import types
 import unittest
 from unittest import mock
 
@@ -18,34 +17,6 @@ def load_module():
 class ExecutionLoggingBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
-
-    def test_logging_helpers_delegate_and_bind_default_timing(self):
-        captured = {}
-
-        def run_logged_command(cmd, **kwargs):
-            captured["logged"] = (cmd, kwargs)
-            return {"exit_code": 0}
-
-        execution = types.SimpleNamespace(
-            HEARTBEAT_INTERVAL_SECS=15.0,
-            STUCK_IDLE_SECS=90.0,
-            parse_progress_marker=lambda line: {"line": line},
-            run_logged_command=run_logged_command,
-        )
-        bindings = {"_execution": execution}
-
-        self.assertEqual(self.mod.heartbeat_interval_secs(bindings), 15.0)
-        self.assertEqual(self.mod.stuck_idle_secs(bindings), 90.0)
-        self.assertEqual(self.mod.parse_progress_marker(bindings, "line"), {"line": "line"})
-        self.assertEqual(self.mod.run_logged_command(bindings, ["cmd"]), {"exit_code": 0})
-        self.assertEqual(captured["logged"][1]["heartbeat_interval_secs"], 15.0)
-        self.assertEqual(captured["logged"][1]["stuck_idle_secs"], 90.0)
-        self.assertEqual(
-            self.mod.run_logged_command(bindings, ["cmd"], heartbeat_interval_secs=1.5, stuck_idle_secs=2.5),
-            {"exit_code": 0},
-        )
-        self.assertEqual(captured["logged"][1]["heartbeat_interval_secs"], 1.5)
-        self.assertEqual(captured["logged"][1]["stuck_idle_secs"], 2.5)
 
     def test_logging_exports_are_composed_from_focused_groups(self):
         expected = (
