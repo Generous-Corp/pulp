@@ -468,6 +468,12 @@ def desktop_video_setup_steps(target_name: str, *, machine_label: str | None = N
             "future_command": "pulp tool install video-proof",
         },
         {
+            "name": "inspect_tool_addon",
+            "title": "Inspect the optional video-proof install policy",
+            "command": "pulp tool info video-proof --json",
+            "detail": "Confirms video-proof is machine-scoped optional tooling, not a core runtime or project-level `pulp add` package.",
+        },
+        {
             "name": "check_tool_addon",
             "title": "Validate the optional video-proof tool",
             "command": "pulp tool doctor video-proof --run",

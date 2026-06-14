@@ -571,6 +571,7 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
         self.assertTrue(any("cp tools/local-ci/config.example.json tools/local-ci/config.json" in line for line in self.printed))
         self.assertTrue(any("npm --prefix tools/local-ci install" in line for line in self.printed))
         self.assertTrue(any("future: pulp tool install video-proof" in line for line in self.printed))
+        self.assertTrue(any("pulp tool info video-proof --json" in line for line in self.printed))
         self.assertTrue(any("pulp tool doctor video-proof --run" in line for line in self.printed))
         self.assertTrue(any("target.mac.video_capture true" in line for line in self.printed))
         self.assertTrue(any("--video-audio system" in line for line in self.printed))
@@ -709,11 +710,13 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
         self.assertEqual(payload["demo_matrix"]["scenarios"][1]["id"], "design-parity")
         self.assertEqual(payload["demo_matrix"]["scenarios"][1]["status"], "blocked")
         self.assertEqual(payload["demo_matrix"]["scenarios"][1]["declared_status"], "ready")
-        self.assertEqual(payload["steps"][2]["name"], "check_tool_addon")
-        self.assertEqual(payload["steps"][2]["command"], "pulp tool doctor video-proof --run")
-        self.assertEqual(payload["steps"][7]["name"], "audio_doctor")
-        self.assertEqual(payload["steps"][8]["name"], "smoke_proof")
-        self.assertIn("--run-in-terminal", payload["steps"][6]["command"])
+        self.assertEqual(payload["steps"][2]["name"], "inspect_tool_addon")
+        self.assertEqual(payload["steps"][2]["command"], "pulp tool info video-proof --json")
+        self.assertEqual(payload["steps"][3]["name"], "check_tool_addon")
+        self.assertEqual(payload["steps"][3]["command"], "pulp tool doctor video-proof --run")
+        self.assertEqual(payload["steps"][8]["name"], "audio_doctor")
+        self.assertEqual(payload["steps"][9]["name"], "smoke_proof")
+        self.assertIn("--run-in-terminal", payload["steps"][7]["command"])
 
     def test_video_setup_text_reports_demo_matrix_blockers(self):
         self.targets["mac"]["optional"] = {"video_capture": True}
