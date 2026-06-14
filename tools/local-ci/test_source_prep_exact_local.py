@@ -8,14 +8,12 @@ import subprocess
 import tempfile
 import unittest
 
-from module_test_utils import load_module_from_path
+from module_test_utils import load_local_ci_module
 
-
-MODULE_PATH = pathlib.Path(__file__).with_name("source_prep_exact_local.py")
 
 
 def load_module():
-    return load_module_from_path(MODULE_PATH, add_module_dir=True)
+    return load_local_ci_module("source_prep_exact_local.py", add_module_dir=True)
 
 
 class SourcePrepExactLocalTests(unittest.TestCase):
