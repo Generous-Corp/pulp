@@ -103,11 +103,16 @@ public:
     bool on_key_event(const KeyEvent& event) override;
     void on_focus_changed(bool gained) override;
     bool wants_wheel_value() const override { return true; }
-    void on_wheel(float delta_y) override { set_value(value_ + (delta_y > 0 ? -step_ : step_)); }
+    void on_wheel(float delta_y) override {
+        // Nudge by the typed decimal precision (wheel_step_) when set, else step_.
+        double s = wheel_step_ > 0.0 ? wheel_step_ : step_;
+        set_value(value_ + (delta_y > 0 ? -s : s));
+    }
     float intrinsic_height() const override { return 36.0f; }
 private:
     void commit_edit_();
     double value_ = 0.0, min_ = -24.0, max_ = 24.0, step_ = 1.0;
+    double wheel_step_ = 0.0;   ///< 0 = use step_; set from typed decimal precision
     std::string suffix_ = "";
     bool editing_ = false;
     std::string edit_buffer_;

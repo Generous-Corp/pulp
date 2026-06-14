@@ -17,6 +17,7 @@
 #if TARGET_OS_OSX
 
 #include <pulp/view/view.hpp>
+#include <pulp/view/ui_components.hpp>  // ScrollView (scroll-offset in to_local)
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/modal.hpp>
 #include <pulp/view/window_host.hpp>
@@ -79,6 +80,15 @@ pulp::view::Point to_local(pulp::view::Point pos, pulp::view::View* target, pulp
         local.x -= v->bounds().x * scale_chain;
         local.y -= v->bounds().y * scale_chain;
         scale_chain *= v->scale();
+        // A ScrollView paints its children shifted by -scroll; undo that here
+        // so the dispatched local coordinate matches what ScrollView::hit_test
+        // (which adds +scroll) used to find the target. Without this, dragging
+        // a widget inside a SCROLLED ScrollView landed at the wrong value
+        // ("jump"/"can't adjust") — the bug only showed once you scrolled.
+        if (auto* sv = dynamic_cast<pulp::view::ScrollView*>(v)) {
+            local.x += sv->scroll_x() * scale_chain;
+            local.y += sv->scroll_y() * scale_chain;
+        }
     }
     if (scale_chain != 0.0f && scale_chain != 1.0f) {
         local.x /= scale_chain;
