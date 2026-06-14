@@ -6,6 +6,7 @@ from __future__ import annotations
 from pathlib import Path
 import types
 import unittest
+from unittest import mock
 
 from module_test_utils import load_module_from_path
 
@@ -30,19 +31,9 @@ class DesktopConfigCommandBindingsTests(unittest.TestCase):
     def bindings(self, runner_name: str, runner):
         return {
             "_desktop_commands_cli": types.SimpleNamespace(**{runner_name: runner}),
-            "_desktop_cli": types.SimpleNamespace(
-                desktop_config_show_lines=object(),
-                desktop_config_update_lines=object(),
-            ),
-            "load_config": object(),
-            "save_config": object(),
-            "config_path": object(),
-            "normalize_publish_mode": object(),
-            "parse_config_bool": object(),
-            "normalize_desktop_config": object(),
         }
 
-    def test_config_show_binds_facade_dependencies(self) -> None:
+    def test_config_show_delegates_with_assembled_dependencies(self) -> None:
         captured = {}
 
         def runner(*args, **kwargs):
@@ -51,16 +42,14 @@ class DesktopConfigCommandBindingsTests(unittest.TestCase):
             return 3
 
         bindings = self.bindings("cmd_desktop_config_show", runner)
+        deps = {"load_config_fn": object(), "desktop_config_show_lines_fn": object()}
         args_obj = object()
-        self.assertEqual(self.mod.cmd_desktop_config_show(bindings, args_obj), 3)
+        with mock.patch.object(self.mod, "desktop_config_show_command_dependencies", return_value=deps):
+            self.assertEqual(self.mod.cmd_desktop_config_show(bindings, args_obj), 3)
         self.assertEqual(captured["args"], (args_obj,))
-        self.assertIs(captured["kwargs"]["load_config_fn"], bindings["load_config"])
-        self.assertIs(
-            captured["kwargs"]["desktop_config_show_lines_fn"],
-            bindings["_desktop_cli"].desktop_config_show_lines,
-        )
+        self.assertEqual(captured["kwargs"], deps)
 
-    def test_config_set_binds_facade_dependencies(self) -> None:
+    def test_config_set_delegates_with_assembled_dependencies(self) -> None:
         captured = {}
 
         def runner(*args, **kwargs):
@@ -69,22 +58,20 @@ class DesktopConfigCommandBindingsTests(unittest.TestCase):
             return 5
 
         bindings = self.bindings("cmd_desktop_config_set", runner)
+        deps = {
+            "load_config_fn": object(),
+            "save_config_fn": object(),
+            "config_path_fn": object(),
+            "normalize_publish_mode_fn": object(),
+            "parse_config_bool_fn": object(),
+            "normalize_desktop_config_fn": object(),
+            "desktop_config_update_lines_fn": object(),
+        }
         args_obj = object()
-        self.assertEqual(self.mod.cmd_desktop_config_set(bindings, args_obj), 5)
+        with mock.patch.object(self.mod, "desktop_config_set_command_dependencies", return_value=deps):
+            self.assertEqual(self.mod.cmd_desktop_config_set(bindings, args_obj), 5)
         self.assertEqual(captured["args"], (args_obj,))
-        for name in [
-            "load_config",
-            "save_config",
-            "config_path",
-            "normalize_publish_mode",
-            "parse_config_bool",
-            "normalize_desktop_config",
-        ]:
-            self.assertIs(captured["kwargs"][f"{name}_fn"], bindings[name])
-        self.assertIs(
-            captured["kwargs"]["desktop_config_update_lines_fn"],
-            bindings["_desktop_cli"].desktop_config_update_lines,
-        )
+        self.assertEqual(captured["kwargs"], deps)
 
 if __name__ == "__main__":
     unittest.main()

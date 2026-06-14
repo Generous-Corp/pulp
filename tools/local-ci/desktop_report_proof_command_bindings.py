@@ -6,8 +6,8 @@ from collections.abc import Mapping
 from typing import Any
 
 from binding_utils import binding as _binding
-from binding_utils import binding_attr as _binding_attr
 from binding_utils import install_local_helpers
+from desktop_report_proof_command_dependency_bindings import desktop_report_proof_command_dependencies
 
 
 DESKTOP_REPORT_PROOF_COMMAND_EXPORTS = (
@@ -18,11 +18,7 @@ DESKTOP_REPORT_PROOF_COMMAND_EXPORTS = (
 def cmd_desktop_proof(bindings: Mapping[str, Any], args: Any) -> int:
     return _binding(bindings, "_desktop_commands_cli").cmd_desktop_proof(
         args,
-        load_config_fn=_binding(bindings, "load_config"),
-        desktop_proof_summaries_fn=_binding(bindings, "desktop_proof_summaries"),
-        desktop_proof_empty_line_fn=_binding_attr(bindings, "_desktop_cli", "desktop_proof_empty_line"),
-        desktop_proof_lines_fn=_binding_attr(bindings, "_desktop_cli", "desktop_proof_lines"),
-        short_sha_fn=_binding(bindings, "short_sha"),
+        **desktop_report_proof_command_dependencies(bindings),
     )
 
 

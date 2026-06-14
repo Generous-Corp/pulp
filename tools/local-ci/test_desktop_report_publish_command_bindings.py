@@ -6,6 +6,7 @@ from __future__ import annotations
 from pathlib import Path
 import types
 import unittest
+from unittest import mock
 
 from module_test_utils import load_module_from_path
 
@@ -24,7 +25,7 @@ class DesktopReportPublishCommandBindingsTests(unittest.TestCase):
     def test_publish_command_exports_are_declared(self) -> None:
         self.assertEqual(self.mod.DESKTOP_REPORT_PUBLISH_COMMAND_EXPORTS, ("cmd_desktop_publish",))
 
-    def test_publish_binds_facade_dependencies(self) -> None:
+    def test_publish_delegates_with_assembled_dependencies(self) -> None:
         captured = {}
 
         def runner(*args, **kwargs):
@@ -34,19 +35,19 @@ class DesktopReportPublishCommandBindingsTests(unittest.TestCase):
 
         bindings = {
             "_desktop_commands_cli": types.SimpleNamespace(cmd_desktop_publish=runner),
-            "_desktop_cli": types.SimpleNamespace(desktop_publish_lines=object()),
-            "load_config": object(),
-            "desktop_run_manifests": object(),
-            "stage_desktop_publish_report": object(),
+        }
+        deps = {
+            "load_config_fn": object(),
+            "desktop_run_manifests_fn": object(),
+            "stage_desktop_publish_report_fn": object(),
+            "desktop_publish_lines_fn": object(),
         }
 
         args_obj = object()
-        self.assertEqual(self.mod.cmd_desktop_publish(bindings, args_obj), 8)
+        with mock.patch.object(self.mod, "desktop_report_publish_command_dependencies", return_value=deps):
+            self.assertEqual(self.mod.cmd_desktop_publish(bindings, args_obj), 8)
         self.assertEqual(captured["args"], (args_obj,))
-        self.assertIs(captured["kwargs"]["load_config_fn"], bindings["load_config"])
-        self.assertIs(captured["kwargs"]["desktop_run_manifests_fn"], bindings["desktop_run_manifests"])
-        self.assertIs(captured["kwargs"]["stage_desktop_publish_report_fn"], bindings["stage_desktop_publish_report"])
-        self.assertIs(captured["kwargs"]["desktop_publish_lines_fn"], bindings["_desktop_cli"].desktop_publish_lines)
+        self.assertEqual(captured["kwargs"], deps)
 
 
 if __name__ == "__main__":

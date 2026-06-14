@@ -6,6 +6,7 @@ from __future__ import annotations
 from pathlib import Path
 import types
 import unittest
+from unittest import mock
 
 from module_test_utils import load_module_from_path
 
@@ -24,7 +25,7 @@ class DesktopReportProofCommandBindingsTests(unittest.TestCase):
     def test_proof_command_exports_are_declared(self) -> None:
         self.assertEqual(self.mod.DESKTOP_REPORT_PROOF_COMMAND_EXPORTS, ("cmd_desktop_proof",))
 
-    def test_proof_binds_facade_dependencies(self) -> None:
+    def test_proof_delegates_with_assembled_dependencies(self) -> None:
         captured = {}
 
         def runner(*args, **kwargs):
@@ -34,23 +35,20 @@ class DesktopReportProofCommandBindingsTests(unittest.TestCase):
 
         bindings = {
             "_desktop_commands_cli": types.SimpleNamespace(cmd_desktop_proof=runner),
-            "_desktop_cli": types.SimpleNamespace(
-                desktop_proof_empty_line=object(),
-                desktop_proof_lines=object(),
-            ),
-            "load_config": object(),
-            "desktop_proof_summaries": object(),
-            "short_sha": object(),
+        }
+        deps = {
+            "load_config_fn": object(),
+            "desktop_proof_summaries_fn": object(),
+            "desktop_proof_empty_line_fn": object(),
+            "desktop_proof_lines_fn": object(),
+            "short_sha_fn": object(),
         }
 
         args_obj = object()
-        self.assertEqual(self.mod.cmd_desktop_proof(bindings, args_obj), 6)
+        with mock.patch.object(self.mod, "desktop_report_proof_command_dependencies", return_value=deps):
+            self.assertEqual(self.mod.cmd_desktop_proof(bindings, args_obj), 6)
         self.assertEqual(captured["args"], (args_obj,))
-        self.assertIs(captured["kwargs"]["load_config_fn"], bindings["load_config"])
-        self.assertIs(captured["kwargs"]["desktop_proof_summaries_fn"], bindings["desktop_proof_summaries"])
-        self.assertIs(captured["kwargs"]["desktop_proof_empty_line_fn"], bindings["_desktop_cli"].desktop_proof_empty_line)
-        self.assertIs(captured["kwargs"]["desktop_proof_lines_fn"], bindings["_desktop_cli"].desktop_proof_lines)
-        self.assertIs(captured["kwargs"]["short_sha_fn"], bindings["short_sha"])
+        self.assertEqual(captured["kwargs"], deps)
 
 
 if __name__ == "__main__":

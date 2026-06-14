@@ -6,8 +6,8 @@ from collections.abc import Mapping
 from typing import Any
 
 from binding_utils import binding as _binding
-from binding_utils import binding_attr as _binding_attr
 from binding_utils import install_local_helpers
+from desktop_report_publish_command_dependency_bindings import desktop_report_publish_command_dependencies
 
 
 DESKTOP_REPORT_PUBLISH_COMMAND_EXPORTS = (
@@ -18,10 +18,7 @@ DESKTOP_REPORT_PUBLISH_COMMAND_EXPORTS = (
 def cmd_desktop_publish(bindings: Mapping[str, Any], args: Any) -> int:
     return _binding(bindings, "_desktop_commands_cli").cmd_desktop_publish(
         args,
-        load_config_fn=_binding(bindings, "load_config"),
-        desktop_run_manifests_fn=_binding(bindings, "desktop_run_manifests"),
-        stage_desktop_publish_report_fn=_binding(bindings, "stage_desktop_publish_report"),
-        desktop_publish_lines_fn=_binding_attr(bindings, "_desktop_cli", "desktop_publish_lines"),
+        **desktop_report_publish_command_dependencies(bindings),
     )
 
 
