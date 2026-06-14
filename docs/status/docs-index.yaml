@@ -304,6 +304,16 @@ docs:
     kind: reference
     summary: CLI commands and usage
 
+  - slug: widgets
+    path: reference/widgets.md
+    kind: reference
+    summary: Catalog of every developer-facing core/view UI primitive
+
+  - slug: design-system-naming
+    path: reference/design-system-naming.md
+    kind: reference
+    summary: Figma primitive name to SDK class mapping (design-system aliases)
+
   - slug: js-bridge
     path: reference/js-bridge.md
     kind: reference

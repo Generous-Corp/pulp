@@ -226,6 +226,14 @@ if [ -x "$ROOT/tools/docs_generate.py" ]; then
         ERRORS=$((ERRORS + 1))
     fi
 fi
+
+# ── Widget catalog sync (every View primitive documented) ─────────────────────
+if [ -f "$ROOT/tools/scripts/widgets_doc_check.py" ]; then
+    echo "Checking widget catalog (docs/reference/widgets.md) is in sync..."
+    if ! python3 "$ROOT/tools/scripts/widgets_doc_check.py"; then
+        error "docs/reference/widgets.md is out of sync with core/view primitives"
+    fi
+fi
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo ""
 if [ $ERRORS -gt 0 ]; then
