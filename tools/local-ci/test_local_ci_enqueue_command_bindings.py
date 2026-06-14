@@ -5,6 +5,7 @@ from module_test_utils import load_module_from_path
 import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 MODULE_PATH = Path(__file__).with_name("local_ci_enqueue_command_bindings.py")
@@ -21,7 +22,7 @@ class LocalCiEnqueueCommandBindingsTests(unittest.TestCase):
     def test_enqueue_export_matches_wrapper(self):
         self.assertEqual(self.mod.LOCAL_CI_ENQUEUE_COMMAND_EXPORTS, ("cmd_enqueue",))
 
-    def test_cmd_enqueue_binds_facade_dependencies(self):
+    def test_cmd_enqueue_delegates_with_assembled_dependencies(self):
         captured = {}
 
         def runner(*args, **kwargs):
@@ -30,24 +31,18 @@ class LocalCiEnqueueCommandBindingsTests(unittest.TestCase):
             return 7
 
         bindings = {"_local_ci_commands_cli": types.SimpleNamespace(cmd_enqueue=runner)}
-        for name in [
-            "resolve_submission_options",
-            "print_submission_metadata",
-            "enqueue_job",
-            "enqueue_command_result_line",
-        ]:
-            bindings[name] = object()
+        deps = {
+            "resolve_submission_options_fn": object(),
+            "print_submission_metadata_fn": object(),
+            "enqueue_job_fn": object(),
+            "enqueue_command_result_line_fn": object(),
+        }
 
         args_obj = object()
-        self.assertEqual(self.mod.cmd_enqueue(bindings, args_obj), 7)
+        with mock.patch.object(self.mod, "local_ci_enqueue_command_dependencies", return_value=deps):
+            self.assertEqual(self.mod.cmd_enqueue(bindings, args_obj), 7)
         self.assertEqual(captured["args"], (args_obj,))
-        for name in [
-            "resolve_submission_options",
-            "print_submission_metadata",
-            "enqueue_job",
-            "enqueue_command_result_line",
-        ]:
-            self.assertIs(captured["kwargs"][f"{name}_fn"], bindings[name])
+        self.assertEqual(captured["kwargs"], deps)
 
 
 if __name__ == "__main__":

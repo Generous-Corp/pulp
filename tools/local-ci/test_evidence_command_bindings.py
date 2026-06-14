@@ -23,7 +23,7 @@ class EvidenceCommandBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.EVIDENCE_COMMAND_EXPORTS, ("cmd_evidence",))
         self.assertTrue(callable(self.mod.cmd_evidence))
 
-    def test_evidence_binds_facade_dependencies(self):
+    def test_evidence_delegates_with_assembled_dependencies(self):
         captured = {}
 
         def runner(*args, **kwargs):
@@ -32,24 +32,18 @@ class EvidenceCommandBindingsTests(unittest.TestCase):
             return 0
 
         bindings = {"_evidence_cli": types.SimpleNamespace(cmd_evidence=runner)}
-        for name in [
-            "current_branch",
-            "evidence_scope_header_line",
-            "print_evidence_summary",
-            "evidence_empty_line",
-        ]:
-            bindings[name] = object()
+        deps = {
+            "current_branch_fn": object(),
+            "evidence_scope_header_line_fn": object(),
+            "print_evidence_summary_fn": object(),
+            "evidence_empty_line_fn": object(),
+        }
 
         args_obj = object()
-        self.assertEqual(self.mod.cmd_evidence(bindings, args_obj), 0)
+        with mock.patch.object(self.mod, "evidence_command_dependencies", return_value=deps):
+            self.assertEqual(self.mod.cmd_evidence(bindings, args_obj), 0)
         self.assertEqual(captured["args"], (args_obj,))
-        for name in [
-            "current_branch",
-            "evidence_scope_header_line",
-            "print_evidence_summary",
-            "evidence_empty_line",
-        ]:
-            self.assertIs(captured["kwargs"][f"{name}_fn"], bindings[name])
+        self.assertEqual(captured["kwargs"], deps)
 
     def test_install_evidence_command_helpers_wires_named_exports(self):
         bindings = {}
