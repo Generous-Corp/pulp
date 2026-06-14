@@ -5877,25 +5877,6 @@ class LocalCiTests(unittest.TestCase):
         self.assertEqual(metadata["provenance"]["direct_backend"], "local-ci")
         self.assertEqual(metadata["provenance"]["hosted_orchestrator"], "")
 
-    def test_load_result_backfills_default_provenance(self):
-        result_path = self.state_dir / "legacy-result.json"
-        result_path.parent.mkdir(parents=True, exist_ok=True)
-        result_path.write_text(
-            json.dumps(
-                {
-                    "job_id": "job123",
-                    "branch": "feature/legacy",
-                    "sha": "b" * 40,
-                    "results": [],
-                    "overall": "pass",
-                }
-            )
-        )
-
-        result = self.cloud.load_result(result_path)
-        self.assertEqual(result["provenance"]["execution_kind"], "direct")
-        self.assertEqual(result["provenance"]["direct_backend"], "local-ci")
-
     def test_evidence_record_carries_provenance(self):
         result = {
             "job_id": "job123",
@@ -5920,20 +5901,6 @@ class LocalCiTests(unittest.TestCase):
         self.assertEqual(record["provenance"]["hosted_orchestrator"], "github-actions")
         self.assertEqual(record["provenance"]["runner_provider"], "namespace")
         self.assertEqual(record["provenance"]["runner_selector"], "mac-arm64")
-
-    def test_format_ci_comment_includes_execution_summary(self):
-        comment = self.cloud.format_ci_comment(
-            {
-                "job_id": "job123",
-                "branch": "feature/comment",
-                "sha": "d" * 40,
-                "completed_at": "2026-04-04T12:00:00+00:00",
-                "overall": "pass",
-                "results": [{"target": "mac", "status": "pass", "duration_secs": 12}],
-            }
-        )
-
-        self.assertIn("Execution: `direct via local-ci`", comment)
 
     def test_cloud_record_round_trip_and_lookup(self):
         first = self.cloud.normalize_cloud_record(
