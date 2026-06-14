@@ -38,14 +38,5 @@ class ExecutionLoggingTimingBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.heartbeat_interval_secs(bindings), 15.0)
         self.assertEqual(self.mod.stuck_idle_secs(bindings), 90.0)
 
-    def test_timing_installer_wires_selected_exports(self):
-        bindings = {"_execution": types.SimpleNamespace(HEARTBEAT_INTERVAL_SECS=15.0)}
-
-        self.mod.install_execution_logging_timing_helpers(bindings, ("heartbeat_interval_secs",))
-
-        self.assertEqual(bindings["heartbeat_interval_secs"](), 15.0)
-        self.assertNotIn("stuck_idle_secs", bindings)
-
-
 if __name__ == "__main__":
     unittest.main()

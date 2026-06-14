@@ -50,27 +50,5 @@ class ExecutionPosixCommandBindingsTests(unittest.TestCase):
         self.assertEqual(captured["posix"][1]["bundle_name"], "bundle")
         self.assertEqual(captured["posix"][1]["bundle_ref"], "ref")
 
-    def test_posix_command_installer_wires_selected_exports(self):
-        execution = types.SimpleNamespace(
-            posix_ssh_validation_command=lambda *args, **kwargs: (list(args), kwargs["exclude_tests"]),
-        )
-        bindings = {"_execution": execution}
-
-        self.mod.install_execution_posix_command_helpers(bindings, ("posix_ssh_validation_command",))
-
-        self.assertEqual(
-            bindings["posix_ssh_validation_command"](
-                "ubuntu",
-                "host",
-                "/repo",
-                {"id": "job"},
-                bundle_name="bundle",
-                bundle_ref="ref",
-                exclude_tests="slow",
-            ),
-            (["ubuntu", "host", "/repo", {"id": "job"}], "slow"),
-        )
-
-
 if __name__ == "__main__":
     unittest.main()

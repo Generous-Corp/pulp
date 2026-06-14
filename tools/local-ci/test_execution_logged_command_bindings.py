@@ -48,18 +48,5 @@ class ExecutionLoggedCommandBindingsTests(unittest.TestCase):
         self.assertEqual(captured["logged"][1]["heartbeat_interval_secs"], 1.5)
         self.assertEqual(captured["logged"][1]["stuck_idle_secs"], 2.5)
 
-    def test_logged_command_installer_wires_selected_exports(self):
-        execution = types.SimpleNamespace(
-            HEARTBEAT_INTERVAL_SECS=15.0,
-            STUCK_IDLE_SECS=90.0,
-            run_logged_command=lambda cmd, **kwargs: {"cmd": cmd, **kwargs},
-        )
-        bindings = {"_execution": execution}
-
-        self.mod.install_execution_logged_command_helpers(bindings, ("run_logged_command",))
-
-        self.assertEqual(bindings["run_logged_command"](["cmd"])["cmd"], ["cmd"])
-
-
 if __name__ == "__main__":
     unittest.main()

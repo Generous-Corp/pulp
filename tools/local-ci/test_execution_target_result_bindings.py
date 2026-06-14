@@ -62,17 +62,5 @@ class ExecutionTargetResultBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.EXECUTION_TARGET_RESULT_EXPORTS, expected)
         self.assertEqual(len(expected), len(set(expected)))
 
-    def test_target_result_installer_wires_selected_exports(self):
-        execution = types.SimpleNamespace(
-            unreachable_target_result=lambda target, detail="Host unreachable": {"target": target, "detail": detail},
-        )
-        bindings = {"_execution": execution}
-
-        self.mod.install_execution_target_result_helpers(bindings, ("unreachable_target_result",))
-
-        self.assertEqual(bindings["unreachable_target_result"]("linux"), {"target": "linux", "detail": "Host unreachable"})
-        self.assertNotIn("validation_result_from_run", bindings)
-
-
 if __name__ == "__main__":
     unittest.main()

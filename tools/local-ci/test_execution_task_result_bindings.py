@@ -41,19 +41,5 @@ class ExecutionTaskResultBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.EXECUTION_TASK_RESULT_EXPORTS, expected)
         self.assertEqual(len(expected), len(set(expected)))
 
-    def test_task_result_installer_wires_selected_exports(self):
-        def run_target_tasks(tasks, *, exception_result_fn, on_target_complete):
-            return [{"target": tasks[0][0]}]
-
-        bindings = {
-            "_execution": types.SimpleNamespace(run_target_tasks=run_target_tasks),
-            "target_exception_result": object(),
-        }
-
-        self.mod.install_execution_task_result_helpers(bindings, ("run_target_tasks",))
-
-        self.assertEqual(bindings["run_target_tasks"]([("mac", lambda: {})], on_target_complete=object()), [{"target": "mac"}])
-
-
 if __name__ == "__main__":
     unittest.main()

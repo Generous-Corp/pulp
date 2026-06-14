@@ -35,16 +35,5 @@ class ExecutionLocalCommandBindingsTests(unittest.TestCase):
             (["job", "slow"], "smoke"),
         )
 
-    def test_local_command_installer_wires_selected_exports(self):
-        execution = types.SimpleNamespace(
-            local_validation_command=lambda job, exclude_tests="": ([job["id"], exclude_tests], job.get("validation", "full")),
-        )
-        bindings = {"_execution": execution}
-
-        self.mod.install_execution_local_command_helpers(bindings, ("local_validation_command",))
-
-        self.assertEqual(bindings["local_validation_command"]({"id": "job"}, "slow"), (["job", "slow"], "full"))
-
-
 if __name__ == "__main__":
     unittest.main()

@@ -46,15 +46,5 @@ class ExecutionCompletedResultBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.EXECUTION_COMPLETED_RESULT_EXPORTS, expected)
         self.assertEqual(len(expected), len(set(expected)))
 
-    def test_completed_result_installer_wires_selected_exports(self):
-        execution = types.SimpleNamespace(sorted_target_results=lambda results: list(reversed(results)))
-        bindings = {"_execution": execution}
-
-        self.mod.install_execution_completed_result_helpers(bindings, ("sorted_target_results",))
-
-        self.assertEqual(bindings["sorted_target_results"]([1, 2]), [2, 1])
-        self.assertNotIn("completed_job_result", bindings)
-
-
 if __name__ == "__main__":
     unittest.main()

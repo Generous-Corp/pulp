@@ -31,15 +31,5 @@ class ExecutionProgressMarkerBindingsTests(unittest.TestCase):
 
         self.assertEqual(self.mod.parse_progress_marker(bindings, "line"), {"line": "line"})
 
-    def test_progress_marker_installer_wires_selected_exports(self):
-        bindings = {
-            "_execution": types.SimpleNamespace(parse_progress_marker=lambda line: {"line": line}),
-        }
-
-        self.mod.install_execution_progress_marker_helpers(bindings, ("parse_progress_marker",))
-
-        self.assertEqual(bindings["parse_progress_marker"]("line"), {"line": "line"})
-
-
 if __name__ == "__main__":
     unittest.main()

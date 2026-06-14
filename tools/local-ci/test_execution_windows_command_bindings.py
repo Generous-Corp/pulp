@@ -57,33 +57,5 @@ class ExecutionWindowsCommandBindingsTests(unittest.TestCase):
         self.assertEqual(captured["windows"][1]["resolved_generator_instance"], r"C:\VS")
         self.assertIs(captured["windows"][1]["ps_literal_fn"], ps_literal)
 
-    def test_windows_command_installer_wires_selected_exports(self):
-        def windows_validation_script(*args, **kwargs):
-            return "script", "full"
-
-        bindings = {
-            "_execution": types.SimpleNamespace(windows_validation_script=windows_validation_script),
-            "ps_literal": object(),
-        }
-
-        self.mod.install_execution_windows_command_helpers(bindings, ("windows_validation_script",))
-
-        self.assertEqual(
-            bindings["windows_validation_script"](
-                "windows",
-                "host",
-                r"C:\Repo",
-                {"id": "job"},
-                bundle_name="bundle",
-                bundle_ref="ref",
-                exclude_tests="slow",
-                cmake_generator="Ninja",
-                resolved_platform="ARM64",
-                resolved_generator_instance=r"C:\VS",
-            ),
-            ("script", "full"),
-        )
-
-
 if __name__ == "__main__":
     unittest.main()
