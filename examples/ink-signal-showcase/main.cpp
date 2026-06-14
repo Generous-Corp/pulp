@@ -123,7 +123,7 @@ std::unique_ptr<View> build_board(float& out_height) {
         y += 56.0f;
     }
 
-    // ── Knobs (incl. modulation set) ───────────────────────────────────
+    // ── Knobs ──────────────────────────────────────────────────────────
     section("Knobs");
     {
         float x = kMargin;
@@ -133,10 +133,31 @@ std::unique_ptr<View> build_board(float& out_height) {
             auto k = std::make_unique<Knob>(); k->set_value(vals[i]); k->set_label(names[i]);
             add(std::move(k), x, y, 84.0f, 84.0f); x += 96.0f;
         }
-        label("Modulation knobs (LFO/ENV/VEL/MACRO rings) are in the Figma "
-              "library; native modulation-ring rendering is a follow-up.",
-              x + 8.0f, y + 30.0f, kContentW - x - kMargin, 11.0f);
         y += 104.0f;
+    }
+
+    // ── Knob modulation (Saturn rings) ─────────────────────────────────
+    section("Knob modulation");
+    {
+        // Brand modulation-source colours (LFO blue, ENV amber, VEL pink,
+        // MACRO violet) — match the Figma "Knob Modulation" set.
+        const Color LFO = Color::hex(0x5E78FF), ENV = Color::hex(0xF6B847),
+                    VEL = Color::hex(0xFF7AA8), MAC = Color::hex(0x8B6CF5);
+        struct Spec { const char* name; float val; std::vector<Knob::ModulationRing> rings; };
+        std::vector<Spec> specs = {
+            {"Positive", 0.5f, {{0.5f, ENV}}},
+            {"Negative", 0.6f, {{-0.4f, LFO}}},
+            {"Bipolar", 0.5f, {{0.55f, MAC}}},
+            {"2 sources", 0.45f, {{0.5f, LFO}, {-0.3f, ENV}}},
+            {"3 sources", 0.5f, {{0.4f, LFO}, {0.6f, ENV}, {-0.5f, VEL}}},
+        };
+        float x = kMargin;
+        for (auto& s : specs) {
+            auto k = std::make_unique<Knob>(); k->set_value(s.val); k->set_label(s.name);
+            k->set_modulation_rings(s.rings);
+            add(std::move(k), x, y, 92.0f, 92.0f); x += 104.0f;
+        }
+        y += 112.0f;
     }
 
     // ── Sliders, faders, pan, stepper ──────────────────────────────────

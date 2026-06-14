@@ -389,7 +389,30 @@ public:
     void set_widget_schema(std::string json) { widget_schema_ = std::move(json); }
     const std::string& widget_schema() const { return widget_schema_; }
 
+    // ── Modulation rings (Saturn) ───────────────────────────────────────
+    // Thin concentric rings drawn OUTSIDE the value arc, one per modulation
+    // source, each showing a signed depth swept from the current value angle
+    // (bipolar). Matches the Figma "Knob Modulation" set (LFO / ENV / VEL /
+    // MACRO). Empty by default (a plain knob).
+    struct ModulationRing {
+        float depth = 0.0f;          ///< -1..1 — signed modulation depth
+        canvas::Color color;         ///< per-source colour
+    };
+    void set_modulation_rings(std::vector<ModulationRing> rings) {
+        mod_rings_ = std::move(rings);
+        request_repaint();
+    }
+    const std::vector<ModulationRing>& modulation_rings() const { return mod_rings_; }
+
+    // Scroll-wheel adjusts the value (hover + wheel).
+    bool wants_wheel_value() const override { return true; }
+    void on_wheel(float delta_y) override {
+        float nv = std::clamp(value_ + (-delta_y) * 0.004f, 0.0f, 1.0f);
+        if (nv != value_) { set_value(nv); if (on_change) on_change(value_); }
+    }
+
 private:
+    std::vector<ModulationRing> mod_rings_;
     float value_ = 0.0f;
     float default_value_ = 0.5f;
     std::string label_;
@@ -484,6 +507,13 @@ public:
         request_repaint();
     }
     float value() const { return value_; }
+
+    // Scroll-wheel adjusts the value (hover + wheel).
+    bool wants_wheel_value() const override { return true; }
+    void on_wheel(float delta_y) override {
+        float nv = std::clamp(value_ + (-delta_y) * 0.004f, 0.0f, 1.0f);
+        if (nv != value_) { set_value(nv); if (on_change) on_change(value_); }
+    }
 
     void set_orientation(Orientation o) { orientation_ = o; }
     Orientation orientation() const { return orientation_; }
@@ -679,6 +709,14 @@ public:
         if (value_ != prev) request_repaint();
     }
     float value() const { return value_; }
+
+    // Scroll-wheel adjusts the value (hover + wheel), scaled to the range.
+    bool wants_wheel_value() const override { return true; }
+    void on_wheel(float delta_y) override {
+        float prev = value_;
+        set_value(value_ + (-delta_y) * 0.004f * (max_ - min_));
+        if (value_ != prev && on_change) on_change(value_);
+    }
 
     void set_orientation(Orientation o) { orientation_ = o; }
     Orientation orientation() const { return orientation_; }

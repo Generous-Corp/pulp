@@ -619,7 +619,9 @@ void Knob::paint(canvas::Canvas& canvas) {
         // language (not a thin needle on a bare arc).
         float full_r = std::min(cx, cy) - 3.0f;
         float arc_w  = std::max(3.0f, full_r * 0.13f);   // thick ring
-        float ring_r = full_r - arc_w * 0.5f;            // ring centerline
+        // With modulation rings present, shrink the main arc so the thin
+        // per-source rings fit in the band outside it (within full_r).
+        float ring_r = mod_rings_.empty() ? (full_r - arc_w * 0.5f) : (full_r * 0.64f);
         float body_r = ring_r - arc_w * 0.5f - 2.0f;     // disc inside the ring
         float value_angle = start_angle + value_ * (end_angle - start_angle);
 
@@ -665,6 +667,27 @@ void Knob::paint(canvas::Canvas& canvas) {
         auto thumb_color = resolve_color("knob.thumb", canvas::Color::rgba8(230, 230, 230));
         canvas.set_fill_color(thumb_color);
         canvas.fill_circle(dot_x, dot_y, dot_r);
+
+        // Modulation rings (Saturn) — thin per-source arcs outside the main arc,
+        // each swept from the value angle by its signed depth (bipolar).
+        if (!mod_rings_.empty()) {
+            float mod_w = std::max(2.0f, full_r * 0.05f);
+            float mod_r = ring_r + arc_w * 0.5f + mod_w * 0.5f + 2.0f;
+            canvas.set_line_cap(canvas::LineCap::round);
+            for (const auto& m : mod_rings_) {
+                float span = std::clamp(m.depth, -1.0f, 1.0f) * (end_angle - start_angle);
+                float a0 = value_angle;
+                float a1 = std::clamp(value_angle + span, start_angle, end_angle);
+                // Faint full-track for the source, then the colored depth arc.
+                canvas.set_stroke_color(canvas::Color::rgba(m.color.r, m.color.g, m.color.b, 0.22f));  // token-lint:allow (per-source mod colour)
+                canvas.set_line_width(mod_w);
+                canvas.stroke_arc(cx, cy, mod_r, start_angle, end_angle);
+                canvas.set_stroke_color(m.color);
+                if (a1 >= a0) canvas.stroke_arc(cx, cy, mod_r, a0, a1);
+                else canvas.stroke_arc(cx, cy, mod_r, a1, a0);
+                mod_r += mod_w + 2.0f;
+            }
+        }
     }
 
     // Label below (always drawn, even with shader)

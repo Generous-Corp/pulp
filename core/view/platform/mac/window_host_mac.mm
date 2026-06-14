@@ -389,6 +389,16 @@ static void install_app_menu(NSString* appName) {
     me.scroll_delta_x = static_cast<float>(event.scrollingDeltaX);
     me.scroll_delta_y = static_cast<float>(-event.scrollingDeltaY);
 
+    // Value widgets (knob / fader / slider / stepper / pan) under the cursor
+    // consume the wheel to adjust their value, taking precedence over an
+    // enclosing ScrollView — so "hover + scroll" tweaks the control rather than
+    // scrolling the page.
+    if (target->wants_wheel_value()) {
+        target->on_wheel(me.scroll_delta_y);
+        [self setNeedsDisplay:YES];
+        return;
+    }
+
     // Walk up from target to find nearest ScrollView ancestor
     // W3C wheel bubble: dispatch to every ancestor with on_pointer_event
     // set. Each handler self-filters on me.is_wheel:

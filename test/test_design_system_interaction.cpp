@@ -105,3 +105,37 @@ TEST_CASE("TabPanel switches active tab on click", "[design-system][interaction]
     t.on_mouse_event(ev);
     REQUIRE(t.active_tab() == 1);
 }
+
+TEST_CASE("Knob modulation rings round-trip + render", "[design-system][modulation]") {
+    Knob k; k.set_bounds({0, 0, 92, 92}); k.set_value(0.5f);
+    k.set_modulation_rings({{0.5f, Color::hex(0x5E78FF)}, {-0.3f, Color::hex(0xF6B847)}});
+    REQUIRE(k.modulation_rings().size() == 2);
+    REQUIRE(k.modulation_rings()[0].depth == 0.5f);
+    REQUIRE(k.modulation_rings()[1].depth == -0.3f);
+    // Plain knob (no rings) leaves the set empty — keeps the goldens unchanged.
+    Knob plain;
+    REQUIRE(plain.modulation_rings().empty());
+}
+
+TEST_CASE("value widgets adjust on scroll wheel", "[design-system][interaction][wheel]") {
+    // delta_y < 0 = scroll up = increase.
+    Knob k; k.set_value(0.5f); bool kf = false; k.on_change = [&](float) { kf = true; };
+    REQUIRE(k.wants_wheel_value());
+    k.on_wheel(-10.0f); REQUIRE(k.value() > 0.5f); REQUIRE(kf);
+    k.on_wheel(40.0f);  REQUIRE(k.value() < 0.6f);   // scroll down decreases
+
+    Fader f; f.set_value(0.5f); bool ff = false; f.on_change = [&](float) { ff = true; };
+    f.on_wheel(-10.0f); REQUIRE(f.value() > 0.5f); REQUIRE(ff);
+
+    RangeSlider s; s.set_min(0); s.set_max(10); s.set_value(5.0f);
+    bool sf = false; s.on_change = [&](float) { sf = true; };
+    s.on_wheel(-10.0f); REQUIRE(s.value() > 5.0f); REQUIRE(sf);
+
+    Stepper st; st.set_range(-10, 10); st.set_step(1); st.set_value(0);
+    bool stf = false; st.on_change = [&](double) { stf = true; };
+    st.on_wheel(-1.0f); REQUIRE(st.value() == 1.0); REQUIRE(stf);
+    st.on_wheel(1.0f);  REQUIRE(st.value() == 0.0);
+
+    PanControl pan; pan.set_value(0.0f); bool pf = false; pan.on_change = [&](float) { pf = true; };
+    pan.on_wheel(-10.0f); REQUIRE(pan.value() > 0.0f); REQUIRE(pf);
+}

@@ -95,6 +95,8 @@ public:
     std::function<void(double)> on_change;
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_down(Point pos) override;
+    bool wants_wheel_value() const override { return true; }
+    void on_wheel(float delta_y) override { set_value(value_ + (delta_y > 0 ? -step_ : step_)); }
     float intrinsic_height() const override { return 36.0f; }
 private:
     double value_ = 0.0, min_ = -24.0, max_ = 24.0, step_ = 1.0;
@@ -111,6 +113,8 @@ public:
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_down(Point pos) override;
     void on_mouse_drag(Point pos) override;
+    bool wants_wheel_value() const override { return true; }
+    void on_wheel(float delta_y) override { set_value(value_ + (-delta_y) * 0.005f); }
     float intrinsic_height() const override { return 18.0f; }
 private:
     float value_ = 0.0f;
