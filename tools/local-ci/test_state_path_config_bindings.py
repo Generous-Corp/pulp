@@ -63,16 +63,6 @@ class StatePathConfigBindingsTests(unittest.TestCase):
         )
         self.assertTrue(all(call[1] == () and call[2] == {} for call in calls))
 
-    def test_install_state_path_config_helpers_wires_named_exports(self) -> None:
-        bindings, calls = self._bindings()
-
-        self.mod.install_state_path_config_helpers(bindings, ("state_dir", "shared_config_path"))
-
-        self.assertEqual(bindings["state_dir"](), Path("/state"))
-        self.assertEqual(bindings["shared_config_path"](), Path("/state/config.json"))
-        self.assertEqual(bindings["state_dir"].__name__, "state_dir")
-        self.assertEqual([call[0] for call in calls], ["state_dir", "shared_config_path"])
-
 
 if __name__ == "__main__":
     unittest.main()

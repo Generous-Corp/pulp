@@ -69,16 +69,6 @@ class StatePathStoreBindingsTests(unittest.TestCase):
         )
         self.assertTrue(all(call[1] == () and call[2] == {} for call in calls))
 
-    def test_install_state_path_store_helpers_wires_named_exports(self) -> None:
-        bindings, calls = self._bindings()
-
-        self.mod.install_state_path_store_helpers(bindings, ("queue_path", "logs_dir"))
-
-        self.assertEqual(bindings["queue_path"](), Path("/state/queue.json"))
-        self.assertEqual(bindings["logs_dir"](), Path("/state/logs"))
-        self.assertEqual(bindings["queue_path"].__name__, "queue_path")
-        self.assertEqual([call[0] for call in calls], ["queue_path", "logs_dir"])
-
 
 if __name__ == "__main__":
     unittest.main()

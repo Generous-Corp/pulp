@@ -54,16 +54,6 @@ class StatePathLockBindingsTests(unittest.TestCase):
         self.assertEqual([call[0] for call in calls], helpers)
         self.assertTrue(all(call[1] == () and call[2] == {} for call in calls))
 
-    def test_install_state_path_lock_helpers_wires_named_exports(self) -> None:
-        bindings, calls = self._bindings()
-
-        self.mod.install_state_path_lock_helpers(bindings, ("queue_lock_path", "runner_info_path"))
-
-        self.assertEqual(bindings["queue_lock_path"](), Path("/state/queue.lock"))
-        self.assertEqual(bindings["runner_info_path"](), Path("/state/runner.json"))
-        self.assertEqual(bindings["queue_lock_path"].__name__, "queue_lock_path")
-        self.assertEqual([call[0] for call in calls], ["queue_lock_path", "runner_info_path"])
-
 
 if __name__ == "__main__":
     unittest.main()

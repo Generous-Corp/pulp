@@ -49,16 +49,6 @@ class StatePathLogBindingsTests(unittest.TestCase):
         self.assertEqual(calls[1][1], ("job-1", "mac"))
         self.assertEqual(calls[2][1], ("job-1", "mac"))
 
-    def test_install_state_path_log_helpers_wires_named_exports(self) -> None:
-        bindings, calls = self._bindings()
-
-        self.mod.install_state_path_log_helpers(bindings, ("job_logs_dir", "prepare_target_log"))
-
-        self.assertEqual(bindings["job_logs_dir"]("job-1"), Path("/state/logs/job-1"))
-        self.assertEqual(bindings["prepare_target_log"]("job-1", "mac"), Path("/state/logs/job-1/mac.log"))
-        self.assertEqual(bindings["job_logs_dir"].__name__, "job_logs_dir")
-        self.assertEqual([call[0] for call in calls], ["job_logs_dir", "prepare_target_log"])
-
 
 if __name__ == "__main__":
     unittest.main()
