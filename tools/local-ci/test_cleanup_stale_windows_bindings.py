@@ -39,38 +39,46 @@ class CleanupStaleWindowsBindingTests(unittest.TestCase):
         self.assertEqual(self.mod.CLEANUP_STALE_WINDOWS_EXPORTS, expected)
         self.assertEqual(len(expected), len(set(expected)))
 
-    def test_stale_windows_candidate_wiring_preserves_facade_seams(self) -> None:
+    def test_stale_windows_candidate_wiring_delegates_with_assembled_dependencies(self) -> None:
         self.cleanup.collect_stale_windows_cleanup_candidates_unlocked.return_value = [{"job_id": "job1"}]
         queue = [{"id": "job1"}]
+        deps = {
+            "stale_running_jobs_fn": object(),
+            "now_fn": object(),
+        }
 
-        result = self.mod.collect_stale_windows_cleanup_candidates_unlocked(self.bindings, queue)
+        with mock.patch.object(self.mod, "stale_windows_candidate_dependencies", return_value=deps):
+            result = self.mod.collect_stale_windows_cleanup_candidates_unlocked(self.bindings, queue)
 
         self.assertEqual(result, [{"job_id": "job1"}])
         self.cleanup.collect_stale_windows_cleanup_candidates_unlocked.assert_called_once_with(
             queue,
-            stale_running_jobs_fn=self.bindings["stale_running_jobs_unlocked"],
-            now_fn=self.bindings["now_iso"],
+            **deps,
         )
 
-    def test_cleanup_stale_windows_validator_wires_remote_helpers(self) -> None:
+    def test_cleanup_stale_windows_validator_delegates_with_assembled_dependencies(self) -> None:
         self.cleanup.cleanup_stale_windows_validator.return_value = {"killed": True}
+        deps = {
+            "ps_literal_fn": object(),
+            "run_logged_command_fn": object(),
+            "windows_ssh_powershell_command_fn": object(),
+            "trim_line_fn": object(),
+        }
 
-        result = self.mod.cleanup_stale_windows_validator(
-            self.bindings,
-            "win",
-            123,
-            "2026-05-01T00:00:00Z",
-        )
+        with mock.patch.object(self.mod, "cleanup_stale_windows_validator_dependencies", return_value=deps):
+            result = self.mod.cleanup_stale_windows_validator(
+                self.bindings,
+                "win",
+                123,
+                "2026-05-01T00:00:00Z",
+            )
 
         self.assertEqual(result, {"killed": True})
         self.cleanup.cleanup_stale_windows_validator.assert_called_once_with(
             "win",
             123,
             "2026-05-01T00:00:00Z",
-            ps_literal_fn=self.bindings["ps_literal"],
-            run_logged_command_fn=self.bindings["run_logged_command"],
-            windows_ssh_powershell_command_fn=self.bindings["windows_ssh_powershell_command"],
-            trim_line_fn=self.bindings["trim_line"],
+            **deps,
         )
 
     def test_install_cleanup_stale_windows_helpers_wires_named_exports(self) -> None:

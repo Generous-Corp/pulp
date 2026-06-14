@@ -22,7 +22,7 @@ class CleanupRunCommandBindingsTests(unittest.TestCase):
     def test_exports_match_cleanup_run_command_helpers(self):
         self.assertEqual(self.mod.CLEANUP_RUN_COMMAND_EXPORTS, ("cmd_cleanup",))
 
-    def test_cmd_cleanup_binds_facade_dependencies(self):
+    def test_cmd_cleanup_delegates_with_assembled_dependencies(self):
         captured = {}
 
         def runner(*args, **kwargs):
@@ -31,27 +31,21 @@ class CleanupRunCommandBindingsTests(unittest.TestCase):
             return 9
 
         bindings = {"_cleanup_cli": types.SimpleNamespace(cmd_cleanup=runner)}
-        for name in [
-            "load_queue",
-            "collect_local_ci_cleanup_plan",
-            "apply_local_ci_cleanup_plan",
-            "print_local_ci_cleanup_plan",
-            "print_local_ci_state_footprint",
-            "format_size_bytes",
-            "describe_path_for_cleanup",
-        ]:
-            bindings[name] = object()
+        deps = {
+            "load_queue_fn": object(),
+            "collect_cleanup_plan_fn": object(),
+            "apply_cleanup_plan_fn": object(),
+            "print_cleanup_plan_fn": object(),
+            "print_state_footprint_fn": object(),
+            "format_size_fn": object(),
+            "describe_path_fn": object(),
+        }
 
         args_obj = object()
-        self.assertEqual(self.mod.cmd_cleanup(bindings, args_obj), 9)
+        with mock.patch.object(self.mod, "cleanup_run_command_dependencies", return_value=deps):
+            self.assertEqual(self.mod.cmd_cleanup(bindings, args_obj), 9)
         self.assertEqual(captured["args"], (args_obj,))
-        self.assertIs(captured["kwargs"]["load_queue_fn"], bindings["load_queue"])
-        self.assertIs(captured["kwargs"]["collect_cleanup_plan_fn"], bindings["collect_local_ci_cleanup_plan"])
-        self.assertIs(captured["kwargs"]["apply_cleanup_plan_fn"], bindings["apply_local_ci_cleanup_plan"])
-        self.assertIs(captured["kwargs"]["print_cleanup_plan_fn"], bindings["print_local_ci_cleanup_plan"])
-        self.assertIs(captured["kwargs"]["print_state_footprint_fn"], bindings["print_local_ci_state_footprint"])
-        self.assertIs(captured["kwargs"]["format_size_fn"], bindings["format_size_bytes"])
-        self.assertIs(captured["kwargs"]["describe_path_fn"], bindings["describe_path_for_cleanup"])
+        self.assertEqual(captured["kwargs"], deps)
 
     def test_install_cleanup_run_command_helpers_wires_named_exports(self):
         bindings = {}
