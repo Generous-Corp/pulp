@@ -12,6 +12,16 @@
 7.x), `PulpHostBench.clap` installed under
 `~/Library/Audio/Plug-Ins/CLAP/` (macOS) or the platform CLAP folder.
 
+Optional preflight smoke:
+
+```bash
+python3 tools/scripts/run_reaper_hostbench_smoke.py --format clap
+```
+
+Passing smoke output proves REAPER can instantiate the HostBench CLAP and write
+a bench log on this machine. It does not replace the manual steps below for
+transport, render, state-round-trip, or sidechain observations.
+
 ## Steps
 
 1. **Clear stale logs**.

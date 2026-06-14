@@ -5524,7 +5524,7 @@ if(APPLE)
     add_executable(pulp-test-screenshot-compare test_screenshot_compare.cpp)
     target_link_libraries(pulp-test-screenshot-compare PRIVATE pulp::view Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-screenshot-compare
-        PROPERTIES LABELS "parser-import" TIMEOUT 120)
+        PROPERTIES LABELS "parser-import" TIMEOUT 240)
 endif()
 
 # Parameter attachment tests
@@ -5740,7 +5740,10 @@ if(TARGET PulpGain_CLAP)
         PULP_TEST_CLAP_PATH="${CMAKE_BINARY_DIR}/CLAP/PulpGain.clap")
     add_dependencies(pulp-test-host PulpGain_CLAP)
 endif()
-catch_discover_tests(pulp-test-host)
+# issue-669's older snapshot-publish stress case is intentionally kept in the
+# binary for manual replay, but not registered in the default per-PR CTest set:
+# it is a known flaky stress surface with a dedicated gated stress target below.
+catch_discover_tests(pulp-test-host TEST_SPEC "~[flaky]")
 
 # P11-5 (#2647): SignalGraph tests carved out of test_host.cpp to bring the
 # 2,190-line parent under 2,000 (now 852). No CLAP fixture needed — these

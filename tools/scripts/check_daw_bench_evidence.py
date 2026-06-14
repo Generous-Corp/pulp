@@ -280,6 +280,40 @@ def _validate_claimed_log_events(
     return errors
 
 
+def _validate_preflight_report(path: pathlib.Path, prefix: str) -> list[str]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        return [f"{prefix} cannot be read: {exc}"]
+    except json.JSONDecodeError as exc:
+        return [f"{prefix} invalid JSON: {exc.msg} at line {exc.lineno} column {exc.colno}"]
+
+    if not isinstance(data, dict):
+        return [f"{prefix} root must be a JSON object"]
+
+    errors: list[str] = []
+    if not isinstance(data.get("ok"), bool):
+        errors.append(f"{prefix}.ok must be a boolean")
+
+    checks = data.get("checks")
+    if not isinstance(checks, list) or not checks:
+        errors.append(f"{prefix}.checks must be a non-empty array")
+        return errors
+
+    for index, check in enumerate(checks):
+        check_prefix = f"{prefix}.checks[{index}]"
+        if not isinstance(check, dict):
+            errors.append(f"{check_prefix} must be an object")
+            continue
+        if not isinstance(check.get("label"), str) or not check["label"].strip():
+            errors.append(f"{check_prefix}.label must be a non-empty string")
+        if not isinstance(check.get("ok"), bool):
+            errors.append(f"{check_prefix}.ok must be a boolean")
+        if not isinstance(check.get("detail"), str):
+            errors.append(f"{check_prefix}.detail must be a string")
+    return errors
+
+
 def validate_manifest(path: pathlib.Path, *, repo_root: pathlib.Path = REPO_ROOT) -> ValidationResult:
     data, errors = _load_json(path)
     if data is None:
@@ -347,6 +381,23 @@ def validate_manifest(path: pathlib.Path, *, repo_root: pathlib.Path = REPO_ROOT
             errors.append("external_log_url must be an http(s) URL when present")
     if logs == [] and external_log_url is None:
         errors.append("provide at least one checked-in log or external_log_url")
+
+    preflight_reports = data.get("preflight_reports", [])
+    if preflight_reports is None:
+        preflight_reports = []
+    if not isinstance(preflight_reports, list):
+        errors.append("preflight_reports must be an array when present")
+    else:
+        for index, report in enumerate(preflight_reports):
+            prefix = f"preflight_reports[{index}]"
+            if not isinstance(report, str) or not report.strip() or _is_placeholder(report):
+                errors.append(f"{prefix} must be a non-placeholder path")
+                continue
+            report_path = _relative_existing_file(base, report, repo_root=repo_root)
+            if report_path is None:
+                errors.append(f"{prefix} must reference a checked-in preflight JSON file")
+                continue
+            errors.extend(_validate_preflight_report(report_path, prefix))
 
     errors.extend(_validate_quirks(data))
     errors.extend(_validate_capabilities(data))

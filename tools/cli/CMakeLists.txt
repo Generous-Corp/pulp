@@ -66,6 +66,7 @@ add_executable(pulp-cli
     cmd_dev.cpp
     cmd_loop.cpp
     cmd_host.cpp
+    au_info_plist.cpp
     cmd_import.cpp
     import_run.cpp
     import_detect.cpp
@@ -168,6 +169,15 @@ install(TARGETS pulp-cli RUNTIME DESTINATION "${_pulp_cli_install_bindir}")
 
 # Integration tests for CLI commands
 if(PULP_BUILD_TESTS)
+    add_executable(pulp-test-cli-au-info-plist
+        ${CMAKE_SOURCE_DIR}/test/test_cli_au_info_plist.cpp
+        au_info_plist.cpp)
+    target_include_directories(pulp-test-cli-au-info-plist PRIVATE
+        ${CMAKE_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(pulp-test-cli-au-info-plist PRIVATE Catch2::Catch2WithMain)
+    add_test(NAME pulp-test-cli-au-info-plist COMMAND pulp-test-cli-au-info-plist)
+
     set(_pulp_cli_doctor_ctest_env
         "PULP_UPDATE_CHECK_DISABLED=1"
         "PULP_HOME=${CMAKE_BINARY_DIR}/test-tmp/pulp-home-doctor")
