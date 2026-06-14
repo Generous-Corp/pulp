@@ -182,6 +182,9 @@ bool extract_archive(const fs::path& archive, const fs::path& dest,
     std::string cmd;
 
 #ifdef _WIN32
+    // LCOV_EXCL_START
+    // PR diff coverage is macOS-only; Windows archive extraction is covered by
+    // the Windows x64 build/test gate and cannot be exercised in this lane.
     if (format == "zip") {
         auto r = pulp::platform::exec(
             "powershell",
@@ -197,6 +200,7 @@ bool extract_archive(const fs::path& archive, const fs::path& dest,
         return r.exit_code == 0;
     }
     return false;
+    // LCOV_EXCL_STOP
 #else
     if (format == "zip") {
         cmd = "unzip -o -q '" + archive.string() + "' -d '" + dest.string() + "'";
