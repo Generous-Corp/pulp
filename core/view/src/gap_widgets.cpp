@@ -50,8 +50,10 @@ void InlineBanner::paint(canvas::Canvas& canvas) {
     canvas.set_stroke_color(resolve_color("control.border", Color::rgba8(80, 80, 100)));
     canvas.set_line_width(1.0f);
     canvas.stroke_rounded_rect(0, 0, w, h, 10.0f);
-    canvas.set_fill_color(accent);                       // left accent bar
-    canvas.fill_rect(0, 0, 4.0f, h);
+    // Left accent bar — inset to the panel's corner radius so its square ends
+    // don't poke past the rounded corners.
+    canvas.set_fill_color(accent);
+    canvas.fill_rect(0, 10.0f, 4.0f, std::max(0.0f, h - 20.0f));
     canvas.set_font("system", 13.0f);
     canvas.set_fill_color(resolve_color("text.primary", Color::rgba8(230, 230, 240)));
     const float lw = canvas.measure_text(label_);
@@ -71,7 +73,7 @@ void Toast::paint(canvas::Canvas& canvas) {
     canvas.set_line_width(1.0f);
     canvas.stroke_rounded_rect(0, 0, w, h, 14.0f);
     canvas.set_fill_color(resolve_color("accent.primary", Color::rgba8(22, 218, 194)));
-    canvas.fill_rect(0, 0, 4.0f, h);
+    canvas.fill_rect(0, 14.0f, 4.0f, std::max(0.0f, h - 28.0f));  // inset to corner radius
     canvas.set_font("system", 14.0f);
     canvas.set_fill_color(resolve_color("text.primary", Color::rgba8(240, 240, 245)));
     canvas.fill_text(title_, 18.0f, subtitle_.empty() ? h * 0.6f : h * 0.42f);
