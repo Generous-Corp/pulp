@@ -458,6 +458,25 @@ class MacOSTerminalRunnerTests(unittest.TestCase):
         self.assertEqual(result["remaining_proof_count"], 0)
         self.assertNotIn(["kill", "-TERM", "1234"], calls)
 
+    def test_close_terminal_windows_bounds_stuck_osascript(self):
+        calls = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append((cmd, kwargs))
+            raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout") or 0)
+
+        result = self.mod.close_terminal_windows_with_title(
+            "Pulp Video Proof local-ci test1234",
+            run_fn=fake_run,
+            sleep_fn=lambda _secs: None,
+            attempts=1,
+            osascript_timeout_secs=0.25,
+        )
+
+        self.assertEqual(result["returncode"], 124)
+        self.assertEqual(result["stderr"], "osascript timed out after 0.25s")
+        self.assertEqual(calls[0][1]["timeout"], 0.25)
+
     def test_terminal_app_running(self):
         result = self.mod.terminal_app_running(
             run_fn=lambda cmd, **_kwargs: subprocess.CompletedProcess(cmd, 0, "true\n", "")
