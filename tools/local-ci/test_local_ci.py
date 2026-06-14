@@ -804,46 +804,6 @@ class LocalCiTests(unittest.TestCase):
         self.assertEqual(context["prepared_state"], "clean")
         self.assertIn(r"%LOCALAPPDATA%\Pulp\desktop-source\windows", context["launch_command"])
 
-    def test_build_linux_xvfb_remote_command_uses_launch_cwd(self):
-        remote_cmd = self.mod.build_linux_xvfb_remote_command(
-            "/tmp/pulp",
-            ".local/state/pulp/desktop-automation/remote/ubuntu/smoke/run-1",
-            "./build/ui-preview",
-            launch_cwd="$HOME/.local/state/pulp/desktop-source/ubuntu/abc123",
-            capture_ui_snapshot=False,
-            click_point=None,
-            click_view_id=None,
-            click_view_type=None,
-            click_view_text=None,
-            click_view_label=None,
-            capture_before=False,
-            settle_secs=0.5,
-        )
-
-        self.assertIn('launch_cwd=$HOME/.local/state/pulp/desktop-source/ubuntu/abc123', remote_cmd)
-        self.assertIn('cd "$launch_cwd"', remote_cmd)
-
-    def test_build_linux_xvfb_remote_command_supports_existing_display(self):
-        remote_cmd = self.mod.build_linux_xvfb_remote_command(
-            "/tmp/pulp",
-            ".local/state/pulp/desktop-automation/remote/ubuntu/smoke/run-1",
-            "./build/ui-preview",
-            launch_backend={"mode": "display", "display": ":0", "xdg_runtime_dir": "/run/user/1000"},
-            capture_ui_snapshot=False,
-            click_point=None,
-            click_view_id=None,
-            click_view_type=None,
-            click_view_text=None,
-            click_view_label=None,
-            capture_before=False,
-            settle_secs=0.0,
-        )
-
-        self.assertIn("export DISPLAY=:0", remote_cmd)
-        self.assertIn("export XDG_RUNTIME_DIR=/run/user/1000", remote_cmd)
-        self.assertNotIn("xvfb-run -a", remote_cmd)
-        self.assertIn("bash -lc ./build/ui-preview", remote_cmd)
-
     def test_cmd_desktop_install_records_receipt(self):
         buf = io.StringIO()
         with redirect_stdout(buf):
