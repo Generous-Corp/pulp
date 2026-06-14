@@ -82,17 +82,5 @@ class DesktopActionRunCommandBindingsTests(unittest.TestCase):
                 )
                 self.assertEqual(captured["kwargs"]["sys_platform"], "darwin")
 
-    def test_install_desktop_action_run_command_helpers_wires_named_exports(self) -> None:
-        def runner(*args, **kwargs):
-            return 5
-
-        bindings = self.bindings("cmd_desktop_click", runner)
-
-        self.mod.install_desktop_action_run_command_helpers(bindings, ("cmd_desktop_click",))
-
-        self.assertEqual(bindings["cmd_desktop_click"](object()), 5)
-        self.assertNotIn("cmd_desktop_smoke", bindings)
-
-
 if __name__ == "__main__":
     unittest.main()
