@@ -678,6 +678,10 @@ def desktop_video_matrix_payload(
         row["serve_stop_command"] = (
             f"python3 tools/local-ci/local_ci.py desktop serve --stop --label {label}-review --json"
         )
+        row["published_cleanup_command"] = (
+            "python3 tools/local-ci/local_ci.py desktop cleanup "
+            "--published --older-than-days 14 --keep-last 3 --json"
+        )
         row["review_workflow"] = [
             {"step": "prepare", "command": row.get("prepare_command") or "not required"},
             {"step": "doctor", "command": row["doctor"]},
@@ -688,6 +692,7 @@ def desktop_video_matrix_payload(
             {"step": "check_server", "command": row["serve_status_command"]},
             {"step": "check_review", "command": row["review_status_command"]},
             {"step": "stop_server", "command": row["serve_stop_command"]},
+            {"step": "cleanup_published_reports", "command": row["published_cleanup_command"]},
         ]
         scenarios.append(row)
     return {
@@ -738,6 +743,7 @@ def desktop_video_matrix_lines(payload: dict) -> list[str]:
                 f"  serve background: {item['serve_background_command']}",
                 f"  serve status: {item['serve_status_command']}",
                 f"  serve stop: {item['serve_stop_command']}",
+                f"  cleanup published: {item['published_cleanup_command']}",
             ]
         )
         if item.get("local_readiness"):
@@ -806,6 +812,7 @@ def desktop_video_matrix_markdown(payload: dict) -> str:
                 item["serve_status_command"],
                 item["review_status_command"],
                 item["serve_stop_command"],
+                item["published_cleanup_command"],
                 "```",
             ]
         )

@@ -178,6 +178,8 @@ class DesktopCommandsCliTests(unittest.TestCase):
         self.assertIn("review status:", text)
         self.assertIn("desktop review-status <issue-url>", text)
         self.assertIn("--background --label component-zoom-review --json", text)
+        self.assertIn("cleanup published:", text)
+        self.assertIn("desktop cleanup --published --older-than-days 14 --keep-last 3 --json", text)
         self.assertNotIn("ios-simulator", text)
 
         self.printed.clear()
@@ -203,8 +205,10 @@ class DesktopCommandsCliTests(unittest.TestCase):
         self.assertIn("Plug-Ins/CLAP/PulpSynth.clap", reaper["command"])
         self.assertEqual(reaper["review_workflow"][0]["step"], "prepare")
         self.assertEqual(reaper["review_workflow"][1]["step"], "doctor")
-        self.assertEqual(reaper["review_workflow"][-2]["step"], "check_review")
-        self.assertEqual(reaper["review_workflow"][-1]["step"], "stop_server")
+        self.assertIn("desktop cleanup --published", reaper["published_cleanup_command"])
+        self.assertEqual(reaper["review_workflow"][-3]["step"], "check_review")
+        self.assertEqual(reaper["review_workflow"][-2]["step"], "stop_server")
+        self.assertEqual(reaper["review_workflow"][-1]["step"], "cleanup_published_reports")
         standalone = next(item for item in payload["scenarios"] if item["id"] == "standalone-interaction")
         self.assertEqual(
             standalone["prepare_command"],
