@@ -83,6 +83,7 @@ class WindowsSessionAgentTests(unittest.TestCase):
         self.assertEqual(result["task_present"], True)
         self.assertEqual(writes, [("win", contract["script_path"], "agent body")])
         self.assertIn("Register-ScheduledTask", scripts[-1])
+        self.assertIn('-File "{0}" -RemoteRoot "{1}"', scripts[-1])
         self.assertIn("PulpDesktopAutomationAgent-win", scripts[-1])
 
         self.mod.start_windows_session_agent_task(

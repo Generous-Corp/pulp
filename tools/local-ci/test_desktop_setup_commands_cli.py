@@ -145,6 +145,7 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
         self.assertTrue(receipt["remote_bootstrap_ready"])
         self.assertTrue(receipt["remote_tooling_ready"])
         self.assertTrue(receipt["remote_repo_checkout_ready"])
+        self.assertEqual(receipt["contract"]["task_name"], "PulpDesktopAutomationAgent-windows")
         self.assertEqual(receipt["repo_path"], r"C:\Users\daniel\pulp-validate")
         self.assertEqual(len(self.saved_configs), 1)
         self.assertIn("  remote bootstrap: ready", self.printed)
