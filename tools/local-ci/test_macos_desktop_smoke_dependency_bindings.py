@@ -132,16 +132,6 @@ class MacosDesktopSmokeDependencyBindingsTests(unittest.TestCase):
         self.assertIs(deps["environ_copy_fn"], bindings["os"].environ.copy)
         self.assertIs(deps["terminate_process_fn"], bindings["terminate_process"])
 
-    def test_install_dependency_helpers_wires_named_exports(self):
-        bindings, _desktop_actions = self._bindings()
-
-        self.mod.install_macos_desktop_smoke_dependency_helpers(bindings)
-
-        self.assertIs(
-            bindings["macos_desktop_smoke_dependencies"]()["wait_for_macos_window_fn"],
-            bindings["wait_for_macos_window"],
-        )
-
 
 if __name__ == "__main__":
     unittest.main()

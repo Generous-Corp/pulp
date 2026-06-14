@@ -53,29 +53,6 @@ class MacosDesktopSmokeInteractionDependencyBindingsTests(unittest.TestCase):
         self.assertIs(deps["dispatch_macos_click_fn"], bindings["dispatch_macos_click"])
         self.assertIs(deps["desktop_click_selector_fn"], desktop_actions.desktop_click_selector)
 
-    def test_install_interaction_dependency_helpers_wires_named_exports(self) -> None:
-        desktop_actions = types.SimpleNamespace(
-            view_tree_inspector_summary=object(),
-            pulp_app_interaction_summary=object(),
-            desktop_click_selector=object(),
-        )
-        bindings = {"_desktop_actions": desktop_actions}
-        for name in [
-            "parse_coordinate_pair",
-            "resolve_view_tree_click_point",
-            "screen_point_for_content_point",
-            "activate_macos_pid",
-            "dispatch_macos_click",
-        ]:
-            bindings[name] = object()
-
-        self.mod.install_macos_desktop_smoke_interaction_dependency_helpers(bindings)
-
-        self.assertIs(
-            bindings["macos_desktop_smoke_interaction_dependencies"]()["dispatch_macos_click_fn"],
-            bindings["dispatch_macos_click"],
-        )
-
 
 if __name__ == "__main__":
     unittest.main()

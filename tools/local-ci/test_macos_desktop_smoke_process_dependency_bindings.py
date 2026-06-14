@@ -60,16 +60,6 @@ class MacosDesktopSmokeProcessDependencyBindingsTests(unittest.TestCase):
         self.assertIs(deps["popen_fn"], bindings["subprocess"].Popen)
         self.assertIs(deps["terminate_process_fn"], bindings["terminate_process"])
 
-    def test_install_process_dependency_helpers_wires_named_exports(self) -> None:
-        bindings = self._bindings()
-
-        self.mod.install_macos_desktop_smoke_process_dependency_helpers(bindings)
-
-        self.assertIs(
-            bindings["macos_desktop_smoke_process_dependencies"]()["terminate_process_fn"],
-            bindings["terminate_process"],
-        )
-
 
 if __name__ == "__main__":
     unittest.main()

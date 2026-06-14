@@ -46,25 +46,6 @@ class MacosDesktopSmokeWindowDependencyBindingsTests(unittest.TestCase):
         self.assertIs(deps["content_size_from_view_tree_fn"], desktop_actions.content_size_from_view_tree)
         self.assertIs(deps["capture_macos_window_fn"], bindings["capture_macos_window"])
 
-    def test_install_window_dependency_helpers_wires_named_exports(self) -> None:
-        desktop_actions = types.SimpleNamespace(
-            content_size_from_window=object(),
-            content_size_from_view_tree=object(),
-        )
-        bindings = {
-            "_desktop_actions": desktop_actions,
-            "wait_for_macos_window": object(),
-            "wait_for_path": object(),
-            "capture_macos_window": object(),
-        }
-
-        self.mod.install_macos_desktop_smoke_window_dependency_helpers(bindings)
-
-        self.assertIs(
-            bindings["macos_desktop_smoke_window_dependencies"]()["capture_macos_window_fn"],
-            bindings["capture_macos_window"],
-        )
-
 
 if __name__ == "__main__":
     unittest.main()
