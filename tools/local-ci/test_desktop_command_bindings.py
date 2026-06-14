@@ -68,6 +68,7 @@ class DesktopCommandBindingsTests(unittest.TestCase):
             "atomic_write_text",
             "compose_desktop_video_proof",
             "create_issue_video_variant",
+            "design_parity_diff_summary",
             "windows_tooling_detail",
             "desktop_doctor_checks",
             "video_proof_smoke",
@@ -254,6 +255,12 @@ class DesktopCommandBindingsTests(unittest.TestCase):
                 "cmd_desktop_compose_video",
                 self.mod.cmd_desktop_compose_video,
                 ["compose_desktop_video_proof", "create_issue_video_variant", "atomic_write_text"],
+                {},
+            ),
+            (
+                "cmd_desktop_design_diff",
+                self.mod.cmd_desktop_design_diff,
+                ["design_parity_diff_summary", "atomic_write_text"],
                 {},
             ),
             (

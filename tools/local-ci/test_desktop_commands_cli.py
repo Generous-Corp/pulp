@@ -1179,6 +1179,84 @@ class DesktopCommandsCliTests(unittest.TestCase):
             self.assertTrue(updated["artifacts"]["video_issue"].endswith("/video/proof.issue.mp4"))
             self.assertTrue(updated["artifacts"]["video_small"].endswith("/video/proof.small.mp4"))
 
+    def test_design_diff_uses_manifest_screenshot_and_writes_metadata(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source = root / "source.png"
+            source.write_bytes(b"source")
+            screenshot = root / "window.png"
+            screenshot.write_bytes(b"native")
+            manifest_path = root / "manifest.json"
+            manifest_path.write_text(json.dumps({"artifacts": {"screenshot": str(screenshot)}}) + "\n")
+            output = root / "diff" / "source-native.png"
+            resized = root / "diff" / "source-resized.png"
+            metadata = root / "diff" / "metadata.json"
+
+            def design_diff(source_path: Path, native_path: Path, **kwargs):
+                self.assertEqual(source_path, source.resolve())
+                self.assertEqual(native_path, screenshot.resolve())
+                self.assertEqual(kwargs["diff_output_path"], output.resolve())
+                self.assertEqual(kwargs["resized_source_output_path"], resized.resolve())
+                self.assertEqual(kwargs["enhance_brightness"], 2.5)
+                output.parent.mkdir(parents=True, exist_ok=True)
+                output.write_bytes(b"diff")
+                resized.write_bytes(b"resized")
+                return {
+                    "diff_image": str(output.resolve()),
+                    "resized_source_image": str(resized.resolve()),
+                    "changed": True,
+                    "bbox": {"left": 0, "top": 1, "right": 2, "bottom": 3},
+                }
+
+            result = self.mod.cmd_desktop_design_diff(
+                Namespace(
+                    source_image=str(source),
+                    native_image=None,
+                    manifest=str(manifest_path),
+                    output=str(output),
+                    resized_source_output=str(resized),
+                    enhance_brightness=2.5,
+                    metadata=str(metadata),
+                    json=True,
+                ),
+                design_parity_diff_summary_fn=design_diff,
+                atomic_write_text_fn=lambda path, text: path.parent.mkdir(parents=True, exist_ok=True) or path.write_text(text),
+                print_fn=self.print_line,
+            )
+
+            self.assertEqual(result, 0)
+            payload = json.loads(self.printed[-1])
+            self.assertEqual(payload["kind"], "desktop-design-parity-diff")
+            self.assertEqual(payload["diff_image"], str(output.resolve()))
+            self.assertEqual(payload["metadata"], str(metadata.resolve()))
+            self.assertEqual(payload["summary"]["bbox"]["right"], 2)
+            self.assertEqual(payload["compose_args"], ["--diff-image", str(output.resolve()), "--diff-label", "Source vs native screenshot diff"])
+            written = json.loads(metadata.read_text())
+            self.assertEqual(written["native_image"], str(screenshot.resolve()))
+
+    def test_design_diff_requires_native_image_or_manifest_screenshot(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source = Path(tmpdir) / "source.png"
+            source.write_bytes(b"source")
+            result = self.mod.cmd_desktop_design_diff(
+                Namespace(
+                    source_image=str(source),
+                    native_image=None,
+                    manifest=None,
+                    output=str(Path(tmpdir) / "diff.png"),
+                    resized_source_output=None,
+                    enhance_brightness=3.0,
+                    metadata=None,
+                    json=False,
+                ),
+                design_parity_diff_summary_fn=lambda *_args, **_kwargs: self.fail("diff should not run"),
+                atomic_write_text_fn=lambda _path, _text: None,
+                print_fn=self.print_line,
+            )
+
+            self.assertEqual(result, 1)
+            self.assertIn("native image required", self.printed[-1])
+
     def test_compose_video_reports_missing_manifest(self):
         result = self.mod.cmd_desktop_compose_video(
             Namespace(

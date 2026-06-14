@@ -299,6 +299,7 @@ from io_utils import (  # noqa: E402  -- re-exported for in-file consumers
     trim_line,
     atomic_write_text,
     image_change_summary,
+    design_parity_diff_summary,
     file_lock,
 )
 
@@ -2587,6 +2588,10 @@ def cmd_desktop_review_status(args: argparse.Namespace) -> int:
 
 def cmd_desktop_compose_video(args: argparse.Namespace) -> int:
     return _desktop_command_bindings.cmd_desktop_compose_video(globals(), args)
+
+
+def cmd_desktop_design_diff(args: argparse.Namespace) -> int:
+    return _desktop_command_bindings.cmd_desktop_design_diff(globals(), args)
 
 
 def cmd_desktop_video_matrix(args: argparse.Namespace) -> int:

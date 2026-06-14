@@ -637,6 +637,37 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(args.desktop_command, "compose-video")
         self.assertEqual(args.template, "mobile-simulator")
 
+    def test_desktop_design_diff_command_parses_inputs(self):
+        parser = self.build_parser()
+
+        args = parser.parse_args([
+            "desktop",
+            "design-diff",
+            "--source-image",
+            "/tmp/source.png",
+            "--manifest",
+            "/tmp/run/manifest.json",
+            "--output",
+            "/tmp/diff.png",
+            "--resized-source-output",
+            "/tmp/source-resized.png",
+            "--enhance-brightness",
+            "2.5",
+            "--metadata",
+            "/tmp/diff.json",
+            "--json",
+        ])
+
+        self.assertEqual(args.desktop_command, "design-diff")
+        self.assertEqual(args.source_image, "/tmp/source.png")
+        self.assertEqual(args.manifest, "/tmp/run/manifest.json")
+        self.assertIsNone(args.native_image)
+        self.assertEqual(args.output, "/tmp/diff.png")
+        self.assertEqual(args.resized_source_output, "/tmp/source-resized.png")
+        self.assertEqual(args.enhance_brightness, 2.5)
+        self.assertEqual(args.metadata, "/tmp/diff.json")
+        self.assertTrue(args.json)
+
     def test_cleanup_defaults_use_injected_retention(self):
         parser = self.build_parser(keep_completed_jobs=7)
 

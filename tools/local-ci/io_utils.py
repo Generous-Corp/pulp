@@ -90,6 +90,60 @@ def image_change_summary(before_path: Path, after_path: Path, *, diff_output_pat
     return summary
 
 
+def design_parity_diff_summary(
+    source_path: Path,
+    native_path: Path,
+    *,
+    diff_output_path: Path,
+    resized_source_output_path: Path | None = None,
+    enhance_brightness: float = 3.0,
+) -> dict:
+    try:
+        from PIL import Image, ImageChops, ImageEnhance
+    except Exception as exc:
+        raise RuntimeError("design parity diff generation requires Pillow") from exc
+
+    source = Image.open(source_path).convert("RGB")
+    native = Image.open(native_path).convert("RGB")
+    source_size = {"width": source.size[0], "height": source.size[1]}
+    native_size = {"width": native.size[0], "height": native.size[1]}
+    resized = source.size != native.size
+    if resized:
+        resampling = getattr(getattr(Image, "Resampling", Image), "LANCZOS")
+        source_for_diff = source.resize(native.size, resampling)
+    else:
+        source_for_diff = source
+    if resized_source_output_path is not None:
+        resized_source_output_path.parent.mkdir(parents=True, exist_ok=True)
+        source_for_diff.save(resized_source_output_path)
+    diff = ImageChops.difference(source_for_diff, native)
+    if enhance_brightness != 1.0:
+        diff = ImageEnhance.Brightness(diff).enhance(enhance_brightness)
+    diff_output_path.parent.mkdir(parents=True, exist_ok=True)
+    diff.save(diff_output_path)
+    bbox = ImageChops.difference(source_for_diff, native).getbbox()
+    summary = {
+        "source_image": str(source_path),
+        "native_image": str(native_path),
+        "diff_image": str(diff_output_path),
+        "resized_source_image": str(resized_source_output_path) if resized_source_output_path else None,
+        "source_size": source_size,
+        "native_size": native_size,
+        "resized_source": resized,
+        "method": "pillow-resized-source-diff",
+        "enhance_brightness": enhance_brightness,
+        "changed": bbox is not None,
+    }
+    if bbox is not None:
+        summary["bbox"] = {
+            "left": bbox[0],
+            "top": bbox[1],
+            "right": bbox[2],
+            "bottom": bbox[3],
+        }
+    return summary
+
+
 def wait_for_path(
     path: Path,
     timeout_secs: float,

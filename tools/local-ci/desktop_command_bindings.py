@@ -230,6 +230,14 @@ def cmd_desktop_compose_video(bindings: Mapping[str, Any], args: Any) -> int:
     )
 
 
+def cmd_desktop_design_diff(bindings: Mapping[str, Any], args: Any) -> int:
+    return _binding(bindings, "_desktop_commands_cli").cmd_desktop_design_diff(
+        args,
+        design_parity_diff_summary_fn=_binding(bindings, "design_parity_diff_summary"),
+        atomic_write_text_fn=_binding(bindings, "atomic_write_text"),
+    )
+
+
 def cmd_desktop_video_matrix(bindings: Mapping[str, Any], args: Any) -> int:
     return _binding(bindings, "_desktop_commands_cli").cmd_desktop_video_matrix(args)
 

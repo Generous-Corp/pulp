@@ -438,21 +438,31 @@ python3 tools/local-ci/local_ci.py desktop compose-video /path/to/run/manifest.j
 For a design/source comparison proof, use the Remotion design-parity template:
 
 ```bash
+python3 tools/local-ci/local_ci.py desktop design-diff \
+  --source-image planning/screenshots/reference.png \
+  --manifest /path/to/run/manifest.json \
+  --output planning/screenshots/source-vs-native-diff.png \
+  --resized-source-output planning/screenshots/source-resized-to-native.png \
+  --json
+
 python3 tools/local-ci/local_ci.py desktop compose-video /path/to/run/manifest.json \
   --template design-parity \
   --source-image planning/screenshots/reference.png \
   --source-label "Figma reference" \
-  --diff-image planning/screenshots/diff.png \
-  --diff-label "Layout delta" \
+  --diff-image planning/screenshots/source-vs-native-diff.png \
+  --diff-label "Source vs native screenshot diff" \
   --title "Design parity proof" \
   --note "The imported layout keeps the same primary control grouping."
 ```
 
 This renders the source/reference image beside the captured proof and, when
-provided, adds the diff image to the proof context panel. If the run manifest
-already has `artifacts.diff_screenshot`, the composer uses it automatically
-unless `--diff-image` overrides it. The command records a
-`video_proof_composition` block in the manifest.
+provided, adds the diff image to the proof context panel. `desktop design-diff`
+compares the source/reference image with either `--native-image` or the run
+manifest's `artifacts.screenshot`, resizing the source image to the native
+screenshot dimensions when needed. If the run manifest already has
+`artifacts.diff_screenshot`, the composer uses it automatically unless
+`--diff-image` overrides it. The command records a `video_proof_composition`
+block in the manifest.
 
 ## Publish and serve for review
 

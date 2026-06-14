@@ -1761,6 +1761,94 @@ def cmd_desktop_compose_video(
     return 0
 
 
+def cmd_desktop_design_diff(
+    args: argparse.Namespace,
+    *,
+    design_parity_diff_summary_fn: Callable[..., dict],
+    atomic_write_text_fn: Callable[[Path, str], None],
+    print_fn: Callable[[str], None] = print,
+) -> int:
+    source_image = Path(args.source_image).expanduser()
+    if not source_image.is_file():
+        print_fn(f"Error: source image not found: {source_image}")
+        return 1
+    source_image = source_image.resolve()
+
+    native_image: Path | None = Path(args.native_image).expanduser() if getattr(args, "native_image", None) else None
+    manifest_path: Path | None = Path(args.manifest).expanduser() if getattr(args, "manifest", None) else None
+    if manifest_path:
+        if not manifest_path.is_file():
+            print_fn(f"Error: desktop run manifest not found: {manifest_path}")
+            return 1
+        manifest_path = manifest_path.resolve()
+        try:
+            manifest = json.loads(manifest_path.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            print_fn(f"Error: could not read desktop run manifest: {exc}")
+            return 1
+        if native_image is None:
+            screenshot = (manifest.get("artifacts") or {}).get("screenshot")
+            if screenshot:
+                native_image = Path(str(screenshot)).expanduser()
+    if native_image is None:
+        print_fn("Error: native image required; pass --native-image or --manifest with artifacts.screenshot")
+        return 1
+    if not native_image.is_file():
+        print_fn(f"Error: native image not found: {native_image}")
+        return 1
+    native_image = native_image.resolve()
+
+    output = Path(args.output).expanduser().resolve()
+    resized_source_output = Path(args.resized_source_output).expanduser().resolve() if getattr(args, "resized_source_output", None) else None
+    metadata_path = Path(args.metadata).expanduser().resolve() if getattr(args, "metadata", None) else output.with_suffix(".json")
+    try:
+        summary = design_parity_diff_summary_fn(
+            source_image,
+            native_image,
+            diff_output_path=output,
+            resized_source_output_path=resized_source_output,
+            enhance_brightness=float(getattr(args, "enhance_brightness", 3.0)),
+        )
+    except Exception as exc:
+        print_fn(f"Error: {exc}")
+        return 1
+
+    payload = {
+        "kind": "desktop-design-parity-diff",
+        "source_image": str(source_image),
+        "native_image": str(native_image),
+        "manifest": str(manifest_path) if manifest_path else None,
+        "diff_image": str(output),
+        "resized_source_image": str(resized_source_output) if resized_source_output else None,
+        "metadata": str(metadata_path),
+        "summary": summary,
+        "compose_args": [
+            "--diff-image",
+            str(output),
+            "--diff-label",
+            "Source vs native screenshot diff",
+        ],
+    }
+    atomic_write_text_fn(metadata_path, json.dumps(payload, indent=2) + "\n")
+    if getattr(args, "json", False):
+        print_fn(json.dumps(payload, indent=2))
+        return 0
+    print_fn("Desktop design parity diff generated")
+    print_fn(f"  source_image: {source_image}")
+    print_fn(f"  native_image: {native_image}")
+    print_fn(f"  diff_image: {output}")
+    if resized_source_output:
+        print_fn(f"  resized_source_image: {resized_source_output}")
+    print_fn(f"  metadata: {metadata_path}")
+    if summary.get("bbox"):
+        bbox = summary["bbox"]
+        print_fn(f"  bbox: {bbox['left']},{bbox['top']} -> {bbox['right']},{bbox['bottom']}")
+    else:
+        print_fn("  bbox: unchanged")
+    print_fn(f"  compose_args: --diff-image {shlex.quote(str(output))} --diff-label 'Source vs native screenshot diff'")
+    return 0
+
+
 def cmd_desktop_serve(
     args: argparse.Namespace,
     *,

@@ -439,12 +439,19 @@ For source/design comparison reviews, pass a reference image and the
 `design-parity` template:
 
 ```bash
+python3 tools/local-ci/local_ci.py desktop design-diff \
+  --source-image planning/screenshots/reference.png \
+  --manifest /path/to/run/manifest.json \
+  --output planning/screenshots/source-vs-native-diff.png \
+  --resized-source-output planning/screenshots/source-resized-to-native.png \
+  --json
+
 python3 tools/local-ci/local_ci.py desktop compose-video /path/to/run/manifest.json \
   --template design-parity \
   --source-image planning/screenshots/reference.png \
   --source-label "Figma reference" \
-  --diff-image planning/screenshots/diff.png \
-  --diff-label "Layout delta" \
+  --diff-image planning/screenshots/source-vs-native-diff.png \
+  --diff-label "Source vs native screenshot diff" \
   --title "Design parity proof" \
   --note "The imported layout keeps the same primary control grouping." \
   --video-attachment-budget-mb 100 \
@@ -452,11 +459,15 @@ python3 tools/local-ci/local_ci.py desktop compose-video /path/to/run/manifest.j
   --small-video-budget-mb 10
 ```
 
-That composition renders the source/reference image beside the captured proof
-and, when provided, adds the diff image to the proof context panel. If the run
-manifest already has `artifacts.diff_screenshot`, the composer uses it
-automatically unless `--diff-image` overrides it. The command records a
-`video_proof_composition` block in the run manifest.
+`desktop design-diff` compares the source/reference image with either
+`--native-image` or the run manifest's `artifacts.screenshot`, resizing the
+source image to the native screenshot dimensions when needed. It writes a visual
+diff image and JSON metadata that includes copy-paste `compose_args`. The
+composition then renders the source/reference image beside the captured proof
+and adds the diff image to the proof context panel. If the run manifest already
+has `artifacts.diff_screenshot`, `compose-video` uses it automatically unless
+`--diff-image` overrides it. The command records a `video_proof_composition`
+block in the run manifest.
 
 ```bash
 npm --prefix tools/local-ci run compose-video-proof -- \

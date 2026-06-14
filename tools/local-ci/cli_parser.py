@@ -455,6 +455,16 @@ def build_local_ci_parser(
     p_desktop_compose_video.add_argument("--video-attachment-budget-mb", type=float, default=100.0, help="Attachment budget in decimal MB for the issue video (default: 100)")
     p_desktop_compose_video.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 
+    p_desktop_design_diff = desktop_sub.add_parser("design-diff", help="Generate a source-vs-native image diff for design-parity proof videos")
+    p_desktop_design_diff.add_argument("--source-image", required=True, help="Source/reference image, such as a Figma export")
+    p_desktop_design_diff.add_argument("--native-image", help="Native implementation screenshot to compare")
+    p_desktop_design_diff.add_argument("--manifest", help="Run manifest whose artifacts.screenshot should be used as --native-image when omitted")
+    p_desktop_design_diff.add_argument("--output", required=True, help="Output visual diff image path")
+    p_desktop_design_diff.add_argument("--resized-source-output", help="Optional output path for the source image resized to native screenshot dimensions")
+    p_desktop_design_diff.add_argument("--enhance-brightness", type=float, default=3.0, help="Brightness multiplier for the visual diff image (default: 3)")
+    p_desktop_design_diff.add_argument("--metadata", help="Optional metadata JSON output path")
+    p_desktop_design_diff.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+
     p_desktop_video_matrix = desktop_sub.add_parser("video-matrix", help="Show the curated validation video proof demo matrix")
     p_desktop_video_matrix.add_argument(
         "--target",
