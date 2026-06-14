@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Tests for Namespace cloud facade dependency wiring helpers."""
 
-from pathlib import Path
 import unittest
 
 from module_test_utils import load_local_ci_module

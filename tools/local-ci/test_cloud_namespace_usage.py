@@ -4,18 +4,15 @@
 from __future__ import annotations
 
 import io
-import pathlib
 import unittest
 from contextlib import redirect_stdout
 
-from module_test_utils import load_module_from_path
+from module_test_utils import load_local_ci_module
 
-
-MODULE_PATH = pathlib.Path(__file__).with_name("cloud_namespace_usage.py")
 
 
 def load_module():
-    return load_module_from_path(MODULE_PATH, add_module_dir=True)
+    return load_local_ci_module("cloud_namespace_usage.py", add_module_dir=True)
 
 
 class CloudNamespaceUsageTests(unittest.TestCase):
