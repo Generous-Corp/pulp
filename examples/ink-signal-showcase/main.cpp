@@ -14,11 +14,14 @@
 
 #include <pulp/view/breadcrumb.hpp>
 #include <pulp/view/buttons.hpp>
+#include <pulp/view/context_menu.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/gap_widgets.hpp>
 #include <pulp/view/midi_keyboard.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/scroll_bar.hpp>
+#include <pulp/view/side_panel.hpp>
+#include <pulp/view/table.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/theme_presets.hpp>
 #include <pulp/view/toolbar.hpp>
@@ -85,6 +88,8 @@ void advance_anims(View* v, float dt) {
     else if (auto* f = dynamic_cast<Fader*>(v)) f->advance_animations(dt);
     else if (auto* r = dynamic_cast<RangeSlider*>(v)) r->advance_animations(dt);
     else if (auto* p = dynamic_cast<PanControl*>(v)) p->advance_animations(dt);
+    else if (auto* sp = dynamic_cast<Spinner*>(v)) sp->advance_animations(dt);
+    else if (auto* tip = dynamic_cast<Tooltip*>(v)) tip->advance_animations(dt);
     else if (auto* s = dynamic_cast<ScrollView*>(v)) s->advance_animations(dt);
     for (std::size_t i = 0; i < v->child_count(); ++i) advance_anims(v->child_at(i), dt);
 }
@@ -325,6 +330,111 @@ std::unique_ptr<View> build_board(float& out_height) {
         auto cs = std::make_unique<ChannelStrip>(); cs->set_label("Master"); cs->set_level(0.75f); cs->set_pan(0.0f);
         add(std::move(cs), fx + 20.0f, y, 84.0f, 150.0f);
         y += 168.0f;
+    }
+
+    // ── Buttons & inputs — Search · TextArea · NumberBox ───────────────
+    section("Buttons & inputs — Search · Number · TextArea");
+    {
+        auto search = std::make_unique<TextEditor>();
+        search->placeholder = "Filter devices…";          // Search = placeholder input
+        add(std::move(search), kMargin, y, 240.0f, 32.0f);
+
+        auto num = std::make_unique<NumberBox>();
+        num->set_range(-24, 24); num->set_step(0.5); num->set_value(-3.5); num->set_suffix("st");
+        add(std::move(num), kMargin + 260.0f, y, 150.0f, 32.0f);
+
+        auto ta = std::make_unique<TextEditor>();
+        ta->multi_line = true;                              // TextArea = multi-line input
+        ta->set_text("Warm, glassy tail.\nLong reverb decay.");
+        add(std::move(ta), kMargin + 430.0f, y, 260.0f, 64.0f);
+        y += 84.0f;
+    }
+
+    // ── Status — Spinner · Tooltip ─────────────────────────────────────
+    section("Status — Spinner · Tooltip");
+    {
+        auto sp1 = std::make_unique<Spinner>();                       // indeterminate
+        add(std::move(sp1), kMargin, y, 28.0f, 28.0f);
+        auto sp2 = std::make_unique<Spinner>(); sp2->set_progress(0.65f);  // determinate
+        add(std::move(sp2), kMargin + 44.0f, y, 28.0f, 28.0f);
+
+        auto tip = std::make_unique<Tooltip>("Bypass (\xe2\x8c\xa5""B)");
+        Tooltip* tp = tip.get();
+        add(std::move(tip), kMargin + 120.0f, y + 2.0f, 120.0f, 24.0f);
+        tp->show_at({kMargin + 120.0f, y + 26.0f});      // make it visible (fade settles below)
+        for (int i = 0; i < 20; ++i) tp->advance_animations(0.05f);
+        y += 44.0f;
+    }
+
+    // ── Data — Table ───────────────────────────────────────────────────
+    section("Data — Table");
+    {
+        // Model is non-owning from the table's perspective; a function-static
+        // keeps it alive for the single showcase instance's lifetime.
+        static SimpleTableModel table_model;
+        table_model.set_data({{"Kick", "C1", "-6 dB"}, {"Snare", "D1", "-4 dB"},
+                              {"Hat", "F#1", "-9 dB"}, {"Clap", "E1", "-7 dB"}});
+        auto table = std::make_unique<TableListBox>();
+        table->add_column({"NAME", 140.0f});
+        table->add_column({"NOTE", 80.0f});
+        table->add_column({"GAIN", 90.0f});
+        table->set_model(&table_model);
+        add(std::move(table), kMargin, y, 320.0f, 150.0f);
+        y += 170.0f;
+    }
+
+    // ── Navigation — Sidebar · PopupMenu ───────────────────────────────
+    section("Navigation — Sidebar · PopupMenu");
+    {
+        // Sidebar == SidePanel (a chrome-less slide container), so to read as a
+        // sidebar it hosts a visible icon-rail Panel. Children are absolute so
+        // the board's Yoga pass places them deterministically.
+        auto side = std::make_unique<Sidebar>();
+        side->set_edge(Sidebar::Edge::left);
+        side->set_extent(72.0f);
+        side->open();
+        for (int i = 0; i < 30; ++i) side->advance_animations(0.05f);  // settle open
+        auto rail = std::make_unique<Panel>();
+        rail->set_position(View::Position::absolute);
+        rail->set_left(0); rail->set_top(0);
+        rail->flex().preferred_width = 72.0f; rail->flex().preferred_height = 150.0f;
+        rail->set_bounds({0, 0, 72.0f, 150.0f});
+        const char* icons[] = {"\xe2\x99\xac", "\xe2\x96\xa4", "\xe2\x9a\x99", "\xe2\x98\xb0"};
+        for (int i = 0; i < 4; ++i) {
+            auto ic = std::make_unique<Label>(icons[i]);
+            ic->set_font_size(18.0f);
+            ic->set_position(View::Position::absolute);
+            ic->set_left(26.0f); ic->set_top(16.0f + i * 32.0f);
+            ic->flex().preferred_width = 28.0f; ic->flex().preferred_height = 24.0f;
+            ic->set_bounds({26.0f, 16.0f + i * 32.0f, 28.0f, 24.0f});
+            rail->add_child(std::move(ic));
+        }
+        side->add_child(std::move(rail));
+        add(std::move(side), kMargin, y, 72.0f, 150.0f);
+
+        auto menu = std::make_unique<PopupMenu>();  // == ContextMenu (Figma name)
+        menu->set_items({{1, "Init Patch"}, {2, "Randomize"},
+                         PopupMenu::Item::make_separator(), {3, "Save As\xe2\x80\xa6"}});
+        menu->set_anchor({0, 0});
+        add(std::move(menu), kMargin + 110.0f, y, 180.0f, 104.0f);
+        y += 170.0f;
+    }
+
+    // ── Overlays — Dialog · Popover ────────────────────────────────────
+    section("Overlays — Dialog · Popover");
+    {
+        auto pop = std::make_unique<Popover>();
+        pop->set_title("Quantize");
+        add(std::move(pop), kMargin, y, 220.0f, 120.0f);
+
+        auto dlg = std::make_unique<InCanvasDialog>();   // == Dialog (Figma name)
+        dlg->set_title("Discard changes?");
+        dlg->set_message("Your edits to Velvet Plate will be lost.");
+        dlg->set_confirm_label("Discard");
+        dlg->set_cancel_label("Cancel");
+        dlg->set_destructive(true);
+        add(std::move(dlg), kMargin + 260.0f, y, 380.0f, 180.0f);
+        y += 200.0f;
     }
 
     out_height = y + 24.0f;
