@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Tests for desktop report command facade bindings."""
+"""Tests for desktop report command compatibility bindings."""
 
 from __future__ import annotations
 
 from pathlib import Path
-import types
 import unittest
+from unittest import mock
 
 from module_test_utils import load_module_from_path
 
@@ -21,108 +21,43 @@ class DesktopReportCommandBindingsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
 
-    def test_command_exports_are_declared(self) -> None:
-        self.assertEqual(
-            self.mod.DESKTOP_REPORT_COMMAND_EXPORTS,
-            (
-                "cmd_desktop_recent",
-                "cmd_desktop_proof",
-                "cmd_desktop_publish",
-                "cmd_desktop_cleanup",
-            ),
+    def test_command_exports_are_composed_from_focused_groups(self) -> None:
+        expected = (
+            *self.mod.DESKTOP_REPORT_RECENT_COMMAND_EXPORTS,
+            *self.mod.DESKTOP_REPORT_PROOF_COMMAND_EXPORTS,
+            *self.mod.DESKTOP_REPORT_PUBLISH_COMMAND_EXPORTS,
+            *self.mod.DESKTOP_REPORT_CLEANUP_COMMAND_EXPORTS,
         )
 
-    def bindings(self, runner_name: str, runner):
-        return {
-            "_desktop_commands_cli": types.SimpleNamespace(**{runner_name: runner}),
-            "_desktop_cli": types.SimpleNamespace(
-                desktop_recent_lines=object(),
-                desktop_proof_empty_line=object(),
-                desktop_proof_lines=object(),
-                desktop_publish_lines=object(),
-                desktop_cleanup_empty_line=object(),
-                desktop_cleanup_lines=object(),
-            ),
-            "load_config": object(),
-            "desktop_run_manifests": object(),
-            "desktop_run_summary": object(),
-            "desktop_proof_summaries": object(),
-            "short_sha": object(),
-            "stage_desktop_publish_report": object(),
-            "prune_desktop_run_manifests": object(),
-            "write_desktop_run_rollups": object(),
-        }
+        self.assertEqual(self.mod.DESKTOP_REPORT_COMMAND_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
 
-    def test_recent_binds_facade_dependencies(self) -> None:
-        captured = {}
+    def test_install_desktop_report_command_helpers_routes_focused_groups(self) -> None:
+        bindings = {}
 
-        def runner(*args, **kwargs):
-            captured["args"] = args
-            captured["kwargs"] = kwargs
-            return 4
+        with (
+            mock.patch.object(self.mod, "install_desktop_report_recent_command_helpers") as recent,
+            mock.patch.object(self.mod, "install_desktop_report_proof_command_helpers") as proof,
+            mock.patch.object(self.mod, "install_desktop_report_publish_command_helpers") as publish,
+            mock.patch.object(self.mod, "install_desktop_report_cleanup_command_helpers") as cleanup,
+            mock.patch.object(self.mod, "install_local_helpers") as install_local,
+        ):
+            self.mod.install_desktop_report_command_helpers(
+                bindings,
+                (
+                    "cmd_desktop_recent",
+                    "cmd_desktop_proof",
+                    "cmd_desktop_publish",
+                    "cmd_desktop_cleanup",
+                    "custom_desktop_report",
+                ),
+            )
 
-        bindings = self.bindings("cmd_desktop_recent", runner)
-        args_obj = object()
-        self.assertEqual(self.mod.cmd_desktop_recent(bindings, args_obj), 4)
-        self.assertEqual(captured["args"], (args_obj,))
-        self.assertIs(captured["kwargs"]["load_config_fn"], bindings["load_config"])
-        self.assertIs(captured["kwargs"]["desktop_run_manifests_fn"], bindings["desktop_run_manifests"])
-        self.assertIs(captured["kwargs"]["desktop_run_summary_fn"], bindings["desktop_run_summary"])
-        self.assertIs(captured["kwargs"]["desktop_recent_lines_fn"], bindings["_desktop_cli"].desktop_recent_lines)
-        self.assertIs(captured["kwargs"]["short_sha_fn"], bindings["short_sha"])
-
-    def test_proof_binds_facade_dependencies(self) -> None:
-        captured = {}
-
-        def runner(*args, **kwargs):
-            captured["args"] = args
-            captured["kwargs"] = kwargs
-            return 6
-
-        bindings = self.bindings("cmd_desktop_proof", runner)
-        args_obj = object()
-        self.assertEqual(self.mod.cmd_desktop_proof(bindings, args_obj), 6)
-        self.assertEqual(captured["args"], (args_obj,))
-        self.assertIs(captured["kwargs"]["load_config_fn"], bindings["load_config"])
-        self.assertIs(captured["kwargs"]["desktop_proof_summaries_fn"], bindings["desktop_proof_summaries"])
-        self.assertIs(captured["kwargs"]["desktop_proof_empty_line_fn"], bindings["_desktop_cli"].desktop_proof_empty_line)
-        self.assertIs(captured["kwargs"]["desktop_proof_lines_fn"], bindings["_desktop_cli"].desktop_proof_lines)
-        self.assertIs(captured["kwargs"]["short_sha_fn"], bindings["short_sha"])
-
-    def test_publish_binds_facade_dependencies(self) -> None:
-        captured = {}
-
-        def runner(*args, **kwargs):
-            captured["args"] = args
-            captured["kwargs"] = kwargs
-            return 8
-
-        bindings = self.bindings("cmd_desktop_publish", runner)
-        args_obj = object()
-        self.assertEqual(self.mod.cmd_desktop_publish(bindings, args_obj), 8)
-        self.assertEqual(captured["args"], (args_obj,))
-        self.assertIs(captured["kwargs"]["load_config_fn"], bindings["load_config"])
-        self.assertIs(captured["kwargs"]["desktop_run_manifests_fn"], bindings["desktop_run_manifests"])
-        self.assertIs(captured["kwargs"]["stage_desktop_publish_report_fn"], bindings["stage_desktop_publish_report"])
-        self.assertIs(captured["kwargs"]["desktop_publish_lines_fn"], bindings["_desktop_cli"].desktop_publish_lines)
-
-    def test_cleanup_binds_facade_dependencies(self) -> None:
-        captured = {}
-
-        def runner(*args, **kwargs):
-            captured["args"] = args
-            captured["kwargs"] = kwargs
-            return 9
-
-        bindings = self.bindings("cmd_desktop_cleanup", runner)
-        args_obj = object()
-        self.assertEqual(self.mod.cmd_desktop_cleanup(bindings, args_obj), 9)
-        self.assertEqual(captured["args"], (args_obj,))
-        self.assertIs(captured["kwargs"]["load_config_fn"], bindings["load_config"])
-        self.assertIs(captured["kwargs"]["prune_desktop_run_manifests_fn"], bindings["prune_desktop_run_manifests"])
-        self.assertIs(captured["kwargs"]["write_desktop_run_rollups_fn"], bindings["write_desktop_run_rollups"])
-        self.assertIs(captured["kwargs"]["desktop_cleanup_empty_line_fn"], bindings["_desktop_cli"].desktop_cleanup_empty_line)
-        self.assertIs(captured["kwargs"]["desktop_cleanup_lines_fn"], bindings["_desktop_cli"].desktop_cleanup_lines)
+        recent.assert_called_once_with(bindings, ("cmd_desktop_recent",))
+        proof.assert_called_once_with(bindings, ("cmd_desktop_proof",))
+        publish.assert_called_once_with(bindings, ("cmd_desktop_publish",))
+        cleanup.assert_called_once_with(bindings, ("cmd_desktop_cleanup",))
+        install_local.assert_called_once_with(bindings, self.mod.__dict__, ("custom_desktop_report",))
 
 if __name__ == "__main__":
     unittest.main()
