@@ -3,18 +3,15 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import unittest
 from unittest import mock
 
-from module_test_utils import load_module_from_path
+from module_test_utils import load_local_ci_module
 
-
-MODULE_PATH = Path(__file__).with_name("execution_runner_windows_bindings.py")
 
 
 def load_module():
-    return load_module_from_path(MODULE_PATH)
+    return load_local_ci_module("execution_runner_windows_bindings.py")
 
 
 class ExecutionRunnerWindowsBindingsTests(unittest.TestCase):
