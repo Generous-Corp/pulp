@@ -95,6 +95,72 @@ class WebdriverWindowsDetailIntegrationTests(unittest.TestCase):
             ),
         )
 
+    def test_webdriver_probe_parses_status_shapes_and_errors(self) -> None:
+        self.assertEqual(self.mod.webdriver_status_url("http://127.0.0.1:4444"), "http://127.0.0.1:4444/status")
+        self.assertEqual(self.mod.webdriver_status_url("http://host/wd/hub"), "http://host/wd/hub/status")
+        self.assertEqual(self.mod.webdriver_status_url("http://host/status?old=1#frag"), "http://host/status")
+        with self.assertRaisesRegex(ValueError, "scheme and host"):
+            self.mod.webdriver_status_url("localhost:4444")
+
+        class FakeResponse:
+            def __init__(self, payload: str) -> None:
+                self.payload = payload
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_exc):
+                return False
+
+            def read(self) -> bytes:
+                return self.payload.encode("utf-8")
+
+        with mock.patch.object(
+            self.mod.urllib.request,
+            "urlopen",
+            return_value=FakeResponse('{"value":{"ready":true,"message":" ok "}}'),
+        ) as urlopen:
+            probe = self.mod.probe_webdriver_endpoint("http://driver")
+            self.assertEqual(probe["status_url"], "http://driver/status")
+            self.assertTrue(probe["ready"])
+            self.assertEqual(probe["message"], "ok")
+            self.assertEqual(urlopen.call_args.kwargs["timeout"], 5.0)
+
+        with mock.patch.object(
+            self.mod.urllib.request,
+            "urlopen",
+            return_value=FakeResponse('{"ready":false,"message":"not ready"}'),
+        ):
+            probe = self.mod.probe_webdriver_endpoint("http://driver/status", timeout=1.5)
+            self.assertFalse(probe["ready"])
+            self.assertEqual(probe["message"], "not ready")
+
+        http_error = self.mod.urllib.error.HTTPError(
+            "http://driver/status",
+            500,
+            "boom",
+            {},
+            mock.Mock(read=lambda: b"server body"),
+        )
+        with mock.patch.object(self.mod.urllib.request, "urlopen", side_effect=http_error):
+            with self.assertRaisesRegex(RuntimeError, "HTTP 500: server body"):
+                self.mod.probe_webdriver_endpoint("http://driver")
+        with mock.patch.object(self.mod.urllib.request, "urlopen", return_value=FakeResponse("{bad")):
+            with self.assertRaisesRegex(RuntimeError, "invalid JSON response"):
+                self.mod.probe_webdriver_endpoint("http://driver")
+        with mock.patch.object(
+            self.mod.urllib.request,
+            "urlopen",
+            side_effect=self.mod.urllib.error.URLError("connection refused"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "connection refused"):
+                self.mod.probe_webdriver_endpoint("http://driver")
+        with mock.patch.object(self.mod.urllib.request, "urlopen", return_value=FakeResponse("[]")):
+            probe = self.mod.probe_webdriver_endpoint("http://driver")
+        self.assertIsNone(probe["ready"])
+        self.assertEqual(probe["message"], "")
+        self.assertEqual(probe["payload"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

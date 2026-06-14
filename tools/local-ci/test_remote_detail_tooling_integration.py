@@ -121,6 +121,83 @@ class RemoteDetailToolingIntegrationTests(unittest.TestCase):
                 self.mod.ensure_windows_remote_tooling("win")
         install.assert_not_called()
 
+    def test_remote_probe_wrappers_parse_mocked_outputs(self) -> None:
+        win_success = subprocess.CompletedProcess(
+            [],
+            0,
+            stdout='banner\n{"task_present": true, "interactive_user": "dev"}\n',
+            stderr="",
+        )
+        with mock.patch.object(self.mod, "run_windows_ssh_powershell", return_value=win_success) as run_ps:
+            session = self.mod.probe_windows_session_agent(
+                "win",
+                {
+                    "task_name": "Pulp Agent",
+                    "remote_root": r"%LOCALAPPDATA%\Pulp\agent",
+                    "script_path": r"%LOCALAPPDATA%\Pulp\agent\agent.ps1",
+                },
+            )
+            self.assertTrue(session["task_present"])
+            self.assertEqual(session["interactive_user"], "dev")
+            self.assertIn("Get-ScheduledTask", run_ps.call_args.args[1])
+
+            tooling = self.mod.probe_windows_remote_tooling("win")
+            self.assertTrue(tooling["task_present"])
+            self.assertIn("Get-Command git", run_ps.call_args.args[1])
+
+        win_failure = subprocess.CompletedProcess([], 7, stdout="", stderr="powershell failed")
+        with mock.patch.object(self.mod, "run_windows_ssh_powershell", return_value=win_failure):
+            with self.assertRaisesRegex(RuntimeError, "powershell failed"):
+                self.mod.probe_windows_session_agent("win", {"task_name": "task", "remote_root": "root"})
+            with self.assertRaisesRegex(RuntimeError, "powershell failed"):
+                self.mod.probe_windows_remote_tooling("win")
+            with self.assertRaisesRegex(RuntimeError, "powershell failed"):
+                self.mod.install_windows_remote_tool("win", "Git.Git", timeout=1)
+
+        linux_success = subprocess.CompletedProcess(
+            [],
+            0,
+            stdout="ignored\nmode=display\ndisplay=:2\nxdg_runtime_dir=/run/user/501\n",
+            stderr="",
+        )
+        with mock.patch.object(self.mod, "ssh_command_result", return_value=linux_success) as ssh_run:
+            backend = self.mod.probe_linux_launch_backend("ubuntu")
+            self.assertEqual(backend["mode"], "display")
+            self.assertEqual(backend["display"], ":2")
+            self.assertIn("xvfb-run", ssh_run.call_args.args[1])
+
+        linux_tooling = subprocess.CompletedProcess(
+            [],
+            0,
+            stdout="git_found=true\ngit_path=/usr/bin/git\ngit_version=git version 2.49\nwmctrl_found=false\n",
+            stderr="",
+        )
+        with mock.patch.object(self.mod, "ssh_command_result", return_value=linux_tooling):
+            probe = self.mod.probe_linux_remote_tooling("ubuntu")
+            self.assertEqual(probe["git_version"], "git version 2.49")
+            self.assertEqual(probe["wmctrl_found"], "false")
+
+        linux_failure = subprocess.CompletedProcess([], 2, stdout="", stderr="ssh failed")
+        with mock.patch.object(self.mod, "ssh_command_result", return_value=linux_failure):
+            with self.assertRaisesRegex(RuntimeError, "ssh failed"):
+                self.mod.probe_linux_launch_backend("ubuntu")
+            with self.assertRaisesRegex(RuntimeError, "ssh failed"):
+                self.mod.probe_linux_remote_tooling("ubuntu")
+
+        command = self.mod.build_linux_window_driver_remote_command(
+            "/repo",
+            "bundle",
+            "pulp-ui",
+            launch_backend={"mode": "display", "display": ":2", "xdg_runtime_dir": "/run/user/501"},
+            launch_cwd="$HOME/repo",
+            click_point="10,20",
+            capture_before=True,
+            settle_secs=0.25,
+        )
+        self.assertIn("export DISPLAY=:2", command)
+        self.assertIn("xdotool click 1", command)
+        self.assertIn("sleep 0.250", command)
+
 
 if __name__ == "__main__":
     unittest.main()
