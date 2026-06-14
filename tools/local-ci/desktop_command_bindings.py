@@ -228,6 +228,8 @@ def cmd_desktop_cleanup(bindings: Mapping[str, Any], args: Any) -> int:
         write_desktop_run_rollups_fn=_binding(bindings, "write_desktop_run_rollups"),
         desktop_cleanup_empty_line_fn=_binding(bindings, "_desktop_cli").desktop_cleanup_empty_line,
         desktop_cleanup_lines_fn=_binding(bindings, "_desktop_cli").desktop_cleanup_lines,
+        desktop_publish_reports_fn=_binding(bindings, "desktop_publish_reports"),
+        write_desktop_publish_rollups_fn=_binding(bindings, "write_desktop_publish_rollups"),
     )
 
 

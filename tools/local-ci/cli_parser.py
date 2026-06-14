@@ -597,14 +597,15 @@ def build_local_ci_parser(
     add_desktop_video_args(p_desktop_video)
     add_desktop_source_args(p_desktop_video)
 
-    p_desktop_cleanup = desktop_sub.add_parser("cleanup", help="Prune old desktop automation bundles")
+    p_desktop_cleanup = desktop_sub.add_parser("cleanup", help="Prune old desktop automation bundles or published reports")
     p_desktop_cleanup.add_argument("target", nargs="?", help="Optional one-target filter")
+    p_desktop_cleanup.add_argument("--published", action="store_true", help="Prune published desktop proof reports instead of run bundles")
     p_desktop_cleanup.add_argument(
         "--older-than-days",
         type=int,
-        help="Remove bundles older than N days (default: configured retention)",
+        help="Remove bundles/reports older than N days (default: configured retention)",
     )
-    p_desktop_cleanup.add_argument("--keep-last", type=int, default=0, help="Always keep the newest N bundles per filter (default: 0)")
+    p_desktop_cleanup.add_argument("--keep-last", type=int, default=0, help="Always keep the newest N bundles/reports per filter (default: 0)")
     p_desktop_cleanup.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 
     p_desktop_smoke = desktop_sub.add_parser("smoke", help="Run a desktop automation smoke action on one target")

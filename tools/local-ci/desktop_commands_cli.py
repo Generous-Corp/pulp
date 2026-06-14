@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Callable, Mapping
+from datetime import datetime, timezone
 from functools import partial
 import http.server
 import json
@@ -1805,6 +1806,43 @@ def cmd_desktop_serve(
     return 0
 
 
+def _parse_report_generated_at(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def published_report_cleanup_paths(
+    reports: list[dict],
+    *,
+    older_than_days: int,
+    keep_last: int,
+    now_fn: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+) -> list[Path]:
+    keep_count = max(0, int(keep_last or 0))
+    cutoff = now_fn().astimezone(timezone.utc).timestamp() - (max(0, older_than_days) * 86400)
+    paths: list[Path] = []
+    for index, report in enumerate(reports):
+        if index < keep_count:
+            continue
+        generated_at = _parse_report_generated_at(report.get("generated_at"))
+        if generated_at is None or generated_at.timestamp() > cutoff:
+            continue
+        output_dir = report.get("output_dir")
+        if output_dir:
+            paths.append(Path(str(output_dir)))
+    return paths
+
+
 def cmd_desktop_cleanup(
     args: argparse.Namespace,
     *,
@@ -1813,6 +1851,9 @@ def cmd_desktop_cleanup(
     write_desktop_run_rollups_fn: Callable[..., None],
     desktop_cleanup_empty_line_fn: Callable[[], str],
     desktop_cleanup_lines_fn: Callable[[list[Path]], list[str]],
+    desktop_publish_reports_fn: Callable[..., list[dict]] | None = None,
+    write_desktop_publish_rollups_fn: Callable[..., None] | None = None,
+    now_fn: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
     remove_tree_fn: Callable[..., None] = shutil.rmtree,
     print_fn: Callable[[str], None] = print,
 ) -> int:
@@ -1823,6 +1864,45 @@ def cmd_desktop_cleanup(
         return 1
 
     older_than = args.older_than_days if args.older_than_days is not None else config["desktop_automation"]["retention_days"]
+    if getattr(args, "published", False):
+        if getattr(args, "target", None):
+            print_fn("Error: desktop cleanup --published does not accept a target filter.")
+            return 1
+        if desktop_publish_reports_fn is None or write_desktop_publish_rollups_fn is None:
+            print_fn("Error: desktop publish cleanup dependencies are not available.")
+            return 1
+        reports = desktop_publish_reports_fn(config)
+        paths = published_report_cleanup_paths(
+            reports,
+            older_than_days=older_than,
+            keep_last=args.keep_last,
+            now_fn=now_fn,
+        )
+        if not paths:
+            if getattr(args, "json", False):
+                print_fn(json.dumps({"kind": "desktop-published-report-cleanup", "removed": []}, indent=2))
+            else:
+                print_fn("Desktop cleanup: no published reports to remove.")
+            return 0
+        for path in paths:
+            remove_tree_fn(path, ignore_errors=False)
+        write_desktop_publish_rollups_fn(config)
+        if getattr(args, "json", False):
+            print_fn(
+                json.dumps(
+                    {
+                        "kind": "desktop-published-report-cleanup",
+                        "removed": [str(path) for path in paths],
+                    },
+                    indent=2,
+                )
+            )
+            return 0
+        print_fn(f"Desktop cleanup removed {len(paths)} published report(s).")
+        for path in paths[:10]:
+            print_fn(f"  {path}")
+        return 0
+
     paths = prune_desktop_run_manifests_fn(
         config,
         target_name=args.target,

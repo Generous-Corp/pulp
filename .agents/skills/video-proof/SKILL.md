@@ -570,6 +570,12 @@ python3 tools/local-ci/local_ci.py desktop serve --status --label validation-vid
 python3 tools/local-ci/local_ci.py desktop serve --stop --label validation-video-proof --json
 ```
 
+After review, prune old published reports without touching run bundles:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop cleanup --published --older-than-days 14 --keep-last 3 --json
+```
+
 Use `--auto-port` for review links so a stale server on `8765` does not produce
 a dead URL; the JSON response records the actual port and candidate watch URLs.
 If background startup returns `status: failed`, treat the watch link as dead.

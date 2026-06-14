@@ -1488,6 +1488,53 @@ class DesktopCommandsCliTests(unittest.TestCase):
         self.assertEqual(len(rollups), 2)
         self.assertEqual(json.loads(self.printed[-1])["removed"], [str(path)])
 
+        self.printed.clear()
+        removed.clear()
+        publish_rollups = []
+        with tempfile.TemporaryDirectory() as tmpdir:
+            old_report = Path(tmpdir) / "old-report"
+            newest_report = Path(tmpdir) / "newest-report"
+            old_report.mkdir()
+            newest_report.mkdir()
+            reports = [
+                {"output_dir": str(newest_report), "generated_at": "2026-06-14T00:00:00Z"},
+                {"output_dir": str(old_report), "generated_at": "2026-05-01T00:00:00Z"},
+            ]
+            result = self.mod.cmd_desktop_cleanup(
+                Namespace(target=None, older_than_days=14, keep_last=1, published=True, json=True),
+                load_config_fn=lambda: {"desktop_automation": {"retention_days": 30}},
+                prune_desktop_run_manifests_fn=lambda *_args, **_kwargs: self.fail("run cleanup should not run"),
+                write_desktop_run_rollups_fn=lambda *_args, **_kwargs: self.fail("run rollups should not be rewritten"),
+                desktop_cleanup_empty_line_fn=lambda: "none",
+                desktop_cleanup_lines_fn=lambda paths: [f"removed {len(paths)}"],
+                desktop_publish_reports_fn=lambda _config: reports,
+                write_desktop_publish_rollups_fn=lambda _config: publish_rollups.append("published"),
+                now_fn=lambda: self.mod.datetime(2026, 6, 14, tzinfo=self.mod.timezone.utc),
+                remove_tree_fn=lambda remove_path, **_kwargs: removed.append(remove_path),
+                print_fn=self.print_line,
+            )
+        self.assertEqual(result, 0)
+        self.assertEqual(removed, [old_report])
+        self.assertEqual(publish_rollups, ["published"])
+        payload = json.loads(self.printed[-1])
+        self.assertEqual(payload["kind"], "desktop-published-report-cleanup")
+        self.assertEqual(payload["removed"], [str(old_report)])
+
+        self.printed.clear()
+        result = self.mod.cmd_desktop_cleanup(
+            Namespace(target="mac", older_than_days=14, keep_last=0, published=True, json=False),
+            load_config_fn=lambda: {"desktop_automation": {"retention_days": 30}},
+            prune_desktop_run_manifests_fn=lambda *_args, **_kwargs: [],
+            write_desktop_run_rollups_fn=lambda *_args, **_kwargs: None,
+            desktop_cleanup_empty_line_fn=lambda: "none",
+            desktop_cleanup_lines_fn=lambda paths: [f"removed {len(paths)}"],
+            desktop_publish_reports_fn=lambda _config: reports,
+            write_desktop_publish_rollups_fn=lambda _config: None,
+            print_fn=self.print_line,
+        )
+        self.assertEqual(result, 1)
+        self.assertIn("--published does not accept a target", self.printed[-1])
+
     def test_recent_publish_cleanup_empty_and_error_paths(self):
         config = {"desktop_automation": {"retention_days": 30}}
         result = self.mod.cmd_desktop_recent(

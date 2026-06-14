@@ -632,6 +632,18 @@ class CliParserTests(unittest.TestCase):
         self.assertFalse(args.dry_run)
         self.assertFalse(args.apply)
 
+    def test_desktop_cleanup_published_flag(self):
+        parser = self.build_parser()
+
+        args = parser.parse_args(["desktop", "cleanup", "--published", "--older-than-days", "14", "--keep-last", "2"])
+
+        self.assertEqual(args.command, "desktop")
+        self.assertEqual(args.desktop_command, "cleanup")
+        self.assertTrue(args.published)
+        self.assertIsNone(args.target)
+        self.assertEqual(args.older_than_days, 14)
+        self.assertEqual(args.keep_last, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

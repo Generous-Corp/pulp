@@ -79,6 +79,7 @@ class DesktopCommandBindingsTests(unittest.TestCase):
             "desktop_proof_summaries",
             "normalize_desktop_optional_config",
             "desktop_publish_reports",
+            "write_desktop_publish_rollups",
             "desktop_serve_candidate_urls",
             "short_sha",
             "windows_repo_checkout_detail",
@@ -268,7 +269,13 @@ class DesktopCommandBindingsTests(unittest.TestCase):
             (
                 "cmd_desktop_cleanup",
                 self.mod.cmd_desktop_cleanup,
-                ["load_config", "prune_desktop_run_manifests", "write_desktop_run_rollups"],
+                [
+                    "load_config",
+                    "prune_desktop_run_manifests",
+                    "write_desktop_run_rollups",
+                    "desktop_publish_reports",
+                    "write_desktop_publish_rollups",
+                ],
                 {"desktop_cleanup_empty_line_fn": "desktop_cleanup_empty_line", "desktop_cleanup_lines_fn": "desktop_cleanup_lines"},
             ),
         ]
