@@ -1013,6 +1013,7 @@ def cmd_desktop_verdict(
     *,
     now_iso_fn: Callable[[], str],
     atomic_write_text_fn: Callable[[Path, str], None],
+    run_fn: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
     print_fn: Callable[[str], None] = print,
 ) -> int:
     manifest_path = Path(args.manifest).expanduser()
@@ -1059,6 +1060,35 @@ def cmd_desktop_verdict(
             "kind": "same-issue-checklist",
             "text": f"- [ ] Re-record `{run_label}` after addressing: {args.notes or 'reviewer feedback'}",
         }
+    close_result = None
+    if getattr(args, "close_issue", False):
+        if status != "approved":
+            print_fn("Error: --close-issue requires --approved")
+            return 1
+        if not args.issue_url:
+            print_fn("Error: --close-issue requires --issue-url")
+            return 1
+        close_argv = [
+            "gh",
+            "issue",
+            "close",
+            args.issue_url,
+            "--comment",
+            summary_comment,
+            "--reason",
+            getattr(args, "close_reason", "completed") or "completed",
+        ]
+        close_process = run_fn(close_argv, capture_output=True, text=True, check=False)
+        close_result = {
+            "command": close_argv,
+            "returncode": int(close_process.returncode),
+            "stdout": close_process.stdout,
+            "stderr": close_process.stderr,
+        }
+        if close_process.returncode != 0:
+            detail = (close_process.stderr or close_process.stdout or "gh issue close failed").strip()
+            print_fn(f"Error: {detail}")
+            return 1
     verdict_payload = {
         "kind": "desktop-video-proof-verdict",
         "manifest": str(manifest_path),
@@ -1071,6 +1101,7 @@ def cmd_desktop_verdict(
         "follow_up_required": bool(review.get("follow_up_required", False)),
         "summary_comment": summary_comment,
         "follow_up": follow_up,
+        "issue_close": close_result,
     }
     markdown_lines = [
         f"# Desktop Video Proof Verdict: {status}",
@@ -1106,6 +1137,8 @@ def cmd_desktop_verdict(
     review["summary_comment"] = summary_comment
     if follow_up:
         review["follow_up"] = follow_up
+    if close_result:
+        review["issue_close"] = close_result
     manifest["review"] = review
     atomic_write_text_fn(manifest_path, json.dumps(manifest, indent=2) + "\n")
     payload = {
@@ -1123,6 +1156,8 @@ def cmd_desktop_verdict(
         print_fn(f"  verdict_json: {json_path}")
         if args.issue_url:
             print_fn(f"  issue_url: {args.issue_url}")
+        if close_result:
+            print_fn("  issue_close: closed")
     return 0
 
 
@@ -1138,6 +1173,7 @@ def cmd_desktop_review_issue(
     *,
     desktop_review_issue_draft_fn: Callable[..., dict],
     atomic_write_text_fn: Callable[[Path, str], None],
+    run_fn: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
     print_fn: Callable[[str], None] = print,
 ) -> int:
     package_path = _review_package_path(args.path)
@@ -1165,6 +1201,35 @@ def cmd_desktop_review_issue(
     draft["body_file"] = str(body_path)
     draft["json_file"] = str(json_path)
     atomic_write_text_fn(body_path, draft["body"])
+    create_result = None
+    if getattr(args, "create", False):
+        create_argv = ["gh", "issue", "create"]
+        if args.repo:
+            create_argv.extend(["--repo", args.repo])
+        create_argv.extend(["--title", draft["title"], "--body-file", str(body_path)])
+        for label in getattr(args, "label", []) or []:
+            create_argv.extend(["--label", label])
+        for assignee in getattr(args, "assignee", []) or []:
+            create_argv.extend(["--assignee", assignee])
+        process = run_fn(create_argv, capture_output=True, text=True, check=False)
+        issue_url = ""
+        if process.returncode == 0:
+            issue_url = next((line.strip() for line in reversed((process.stdout or "").splitlines()) if line.strip()), "")
+        create_result = {
+            "command": create_argv,
+            "returncode": int(process.returncode),
+            "stdout": process.stdout,
+            "stderr": process.stderr,
+            "issue_url": issue_url or None,
+        }
+        draft["create_result"] = create_result
+        if issue_url:
+            draft["issue_url"] = issue_url
+        if process.returncode != 0:
+            atomic_write_text_fn(json_path, json.dumps(draft, indent=2) + "\n")
+            detail = (process.stderr or process.stdout or "gh issue create failed").strip()
+            print_fn(f"Error: {detail}")
+            return 1
     atomic_write_text_fn(json_path, json.dumps(draft, indent=2) + "\n")
     if args.json:
         print_fn(json.dumps(draft, indent=2))
@@ -1176,6 +1241,8 @@ def cmd_desktop_review_issue(
         print_fn(f"  attachments: {len(draft.get('attachments') or [])}")
         print_fn(f"  fallback_links: {len(draft.get('fallback_links') or [])}")
         print_fn(f"  create_command: {draft['create_command']}")
+        if create_result and create_result.get("issue_url"):
+            print_fn(f"  issue_url: {create_result['issue_url']}")
     return 0
 
 

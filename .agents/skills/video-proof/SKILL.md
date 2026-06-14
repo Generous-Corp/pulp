@@ -595,12 +595,37 @@ closed when the reviewer comments `looks good to me`. The generated review body
 also records the attach/do-not-attach decision and the `desktop verdict`
 commands for approval or follow-up.
 
+When the user wants the issue created by the agent, add `--create` plus any
+labels or assignees:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop review-issue /path/to/published-report \
+  --repo owner/repo \
+  --check-files \
+  --create \
+  --label video-review \
+  --assignee @me
+```
+
+This still does not upload MP4 attachments. Use `github-issue.json` to decide
+whether to attach `proof.issue.mp4`, attach `proof.small.mp4`, or rely on the
+served report link.
+
 Record that review state back into the run manifest:
 
 ```bash
 python3 tools/local-ci/local_ci.py desktop verdict /path/to/run/manifest.json \
   --approved \
   --issue-url https://github.com/owner/repo/issues/123
+```
+
+If the user asks to close the accepted review issue, add `--close-issue`:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop verdict /path/to/run/manifest.json \
+  --approved \
+  --issue-url https://github.com/owner/repo/issues/123 \
+  --close-issue
 ```
 
 For another iteration, keep the issue open and capture the reason:

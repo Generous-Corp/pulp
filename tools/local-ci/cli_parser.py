@@ -407,6 +407,13 @@ def build_local_ci_parser(
     p_desktop_verdict.add_argument("--notes", default="", help="Optional reviewer notes")
     p_desktop_verdict.add_argument("--reviewer", default="", help="Optional reviewer identity")
     p_desktop_verdict.add_argument("--issue-url", default="", help="Optional GitHub review issue URL")
+    p_desktop_verdict.add_argument("--close-issue", action="store_true", help="Close --issue-url with gh after recording an approved verdict")
+    p_desktop_verdict.add_argument(
+        "--close-reason",
+        default="completed",
+        choices=["completed", "not planned"],
+        help="GitHub issue close reason for --close-issue",
+    )
     p_desktop_verdict.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 
     p_desktop_review_issue = desktop_sub.add_parser("review-issue", help="Create a local GitHub issue draft from a video review package")
@@ -416,6 +423,9 @@ def build_local_ci_parser(
     p_desktop_review_issue.add_argument("--body-output", help="Optional markdown body output path")
     p_desktop_review_issue.add_argument("--json-output", help="Optional JSON draft output path")
     p_desktop_review_issue.add_argument("--check-files", action="store_true", help="Verify attachable MP4 files still exist and fit their recorded budget")
+    p_desktop_review_issue.add_argument("--create", action="store_true", help="Create the review issue with gh after writing the local draft")
+    p_desktop_review_issue.add_argument("--label", action="append", default=[], help="GitHub label to apply when --create is used; may be repeated")
+    p_desktop_review_issue.add_argument("--assignee", action="append", default=[], help="GitHub assignee to apply when --create is used; may be repeated")
     p_desktop_review_issue.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 
     p_desktop_compose_video = desktop_sub.add_parser("compose-video", help="Render or rerender a Remotion proof for an existing desktop run manifest")

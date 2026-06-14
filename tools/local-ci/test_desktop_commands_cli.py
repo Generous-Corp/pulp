@@ -923,10 +923,13 @@ class DesktopCommandsCliTests(unittest.TestCase):
                     notes="looks good",
                     reviewer="daniel",
                     issue_url="https://github.com/example/repo/issues/1",
+                    close_issue=True,
+                    close_reason="completed",
                     json=True,
                 ),
                 now_iso_fn=lambda: "2026-06-12T12:00:00+00:00",
                 atomic_write_text_fn=lambda path, text: writes.append((path, text)) or path.write_text(text),
+                run_fn=lambda argv, **_kwargs: subprocess.CompletedProcess(argv, 0, "closed\n", ""),
                 print_fn=self.print_line,
             )
 
@@ -938,6 +941,9 @@ class DesktopCommandsCliTests(unittest.TestCase):
             self.assertEqual(updated["review"]["notes"], "looks good")
             self.assertEqual(updated["review"]["reviewer"], "daniel")
             self.assertTrue(updated["review"]["close_review_issue"])
+            self.assertEqual(updated["review"]["issue_close"]["returncode"], 0)
+            self.assertEqual(updated["review"]["issue_close"]["command"][0:3], ["gh", "issue", "close"])
+            self.assertIn("--reason", updated["review"]["issue_close"]["command"])
             self.assertEqual(Path(updated["review"]["verdict_markdown"]).name, "review-verdict.md")
             self.assertEqual(Path(updated["review"]["verdict_json"]).name, "review-verdict.json")
             self.assertIn("Approved desktop video proof", updated["review"]["summary_comment"])
@@ -947,7 +953,54 @@ class DesktopCommandsCliTests(unittest.TestCase):
             verdict_json = json.loads((manifest_path.parent / "review-verdict.json").read_text())
             self.assertEqual(verdict_json["status"], "approved")
             self.assertTrue(verdict_json["close_review_issue"])
+            self.assertEqual(verdict_json["issue_close"]["stdout"], "closed\n")
             self.assertIn("Approved desktop video proof", (manifest_path.parent / "review-verdict.md").read_text())
+
+    def test_verdict_close_issue_requires_approved_and_issue_url(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / "manifest.json"
+            manifest_path.write_text(json.dumps({"label": "video-proof"}) + "\n")
+
+            result = self.mod.cmd_desktop_verdict(
+                Namespace(
+                    manifest=str(manifest_path),
+                    approved=False,
+                    needs_work=True,
+                    notes="",
+                    reviewer="",
+                    issue_url="https://github.com/example/repo/issues/1",
+                    close_issue=True,
+                    close_reason="completed",
+                    json=False,
+                ),
+                now_iso_fn=lambda: "2026-06-12T12:00:00+00:00",
+                atomic_write_text_fn=lambda path, text: path.write_text(text),
+                run_fn=lambda *_args, **_kwargs: self.fail("gh should not run"),
+                print_fn=self.print_line,
+            )
+            self.assertEqual(result, 1)
+            self.assertEqual(self.printed[-1], "Error: --close-issue requires --approved")
+
+            self.printed.clear()
+            result = self.mod.cmd_desktop_verdict(
+                Namespace(
+                    manifest=str(manifest_path),
+                    approved=True,
+                    needs_work=False,
+                    notes="",
+                    reviewer="",
+                    issue_url="",
+                    close_issue=True,
+                    close_reason="completed",
+                    json=False,
+                ),
+                now_iso_fn=lambda: "2026-06-12T12:00:00+00:00",
+                atomic_write_text_fn=lambda path, text: path.write_text(text),
+                run_fn=lambda *_args, **_kwargs: self.fail("gh should not run"),
+                print_fn=self.print_line,
+            )
+            self.assertEqual(result, 1)
+            self.assertEqual(self.printed[-1], "Error: --close-issue requires --issue-url")
 
     def test_review_issue_writes_local_draft_from_report_directory(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -982,18 +1035,74 @@ class DesktopCommandsCliTests(unittest.TestCase):
                     body_output=None,
                     json_output=None,
                     check_files=True,
+                    create=True,
+                    label=["video-review"],
+                    assignee=["@me"],
                     json=False,
                 ),
                 desktop_review_issue_draft_fn=draft,
                 atomic_write_text_fn=lambda path, text: writes.append((path, text)) or path.write_text(text),
+                run_fn=lambda argv, **_kwargs: subprocess.CompletedProcess(
+                    argv,
+                    0,
+                    "https://github.com/danielraffel/pulp/issues/123\n",
+                    "",
+                ),
                 print_fn=self.print_line,
             )
 
             self.assertEqual(result, 0)
             self.assertEqual(writes[0][0], report_dir / "github-issue.md")
             self.assertEqual(writes[1][0], report_dir / "github-issue.json")
+            draft_json = json.loads((report_dir / "github-issue.json").read_text())
+            self.assertEqual(draft_json["issue_url"], "https://github.com/danielraffel/pulp/issues/123")
+            self.assertIn("--label", draft_json["create_result"]["command"])
+            self.assertIn("video-review", draft_json["create_result"]["command"])
+            self.assertIn("--assignee", draft_json["create_result"]["command"])
+            self.assertIn("@me", draft_json["create_result"]["command"])
             self.assertIn("review issue draft ready", self.printed[0])
-            self.assertIn("attachments: 1", self.printed[-3])
+            self.assertIn("attachments: 1", self.printed[-4])
+            self.assertIn("issue_url: https://github.com/danielraffel/pulp/issues/123", self.printed[-1])
+
+    def test_review_issue_create_failure_writes_failed_draft_json(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            report_dir = Path(tmpdir) / "report"
+            report_dir.mkdir()
+            package_path = report_dir / "review-package.json"
+            package_path.write_text(json.dumps({"label": "Video Proof", "runs": []}) + "\n")
+
+            result = self.mod.cmd_desktop_review_issue(
+                Namespace(
+                    path=str(report_dir),
+                    title=None,
+                    repo="danielraffel/pulp",
+                    body_output=None,
+                    json_output=None,
+                    check_files=False,
+                    create=True,
+                    label=[],
+                    assignee=[],
+                    json=True,
+                ),
+                desktop_review_issue_draft_fn=lambda _package, **_kwargs: {
+                    "kind": "desktop-video-proof-github-issue-draft",
+                    "title": "Review video",
+                    "body": "# Review video\n",
+                    "body_file": str(report_dir / "github-issue.md"),
+                    "json_file": str(report_dir / "github-issue.json"),
+                    "attachments": [],
+                    "fallback_links": [],
+                    "create_command": "gh issue create --repo danielraffel/pulp --title Review --body-file github-issue.md",
+                },
+                atomic_write_text_fn=lambda path, text: path.write_text(text),
+                run_fn=lambda argv, **_kwargs: subprocess.CompletedProcess(argv, 1, "", "auth required\n"),
+                print_fn=self.print_line,
+            )
+
+            self.assertEqual(result, 1)
+            self.assertEqual(self.printed[-1], "Error: auth required")
+            draft_json = json.loads((report_dir / "github-issue.json").read_text())
+            self.assertEqual(draft_json["create_result"]["returncode"], 1)
 
     def test_review_issue_reports_missing_package(self):
         with tempfile.TemporaryDirectory() as tmpdir:

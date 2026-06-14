@@ -567,6 +567,23 @@ every attachable MP4 still exists and fits its recorded attachment budget before
 writing the draft; runs that already use the served-report fallback remain
 valid.
 
+To create the GitHub issue directly after writing the local draft, add
+`--create`. Labels and assignees are passed through to `gh issue create`:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop review-issue /path/to/published-report \
+  --repo owner/repo \
+  --check-files \
+  --create \
+  --label video-review \
+  --assignee @me
+```
+
+This does not upload MP4 attachments; `gh issue create` accepts the issue body
+but not local binary attachments. Use the generated JSON attachment decisions to
+attach `proof.issue.mp4` or `proof.small.mp4` manually, or include the served
+report link.
+
 The intended review loop is:
 
 1. Publish the report.
@@ -582,6 +599,16 @@ The intended review loop is:
 python3 tools/local-ci/local_ci.py desktop verdict /path/to/run/manifest.json \
   --approved \
   --issue-url https://github.com/owner/repo/issues/123
+```
+
+To close the review issue through `gh` in the same step after an approved
+verdict, add `--close-issue`:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop verdict /path/to/run/manifest.json \
+  --approved \
+  --issue-url https://github.com/owner/repo/issues/123 \
+  --close-issue
 ```
 
 If the proof needs another iteration, record that state instead:

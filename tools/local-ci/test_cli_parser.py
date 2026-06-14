@@ -346,6 +346,9 @@ class CliParserTests(unittest.TestCase):
             "daniel",
             "--issue-url",
             "https://github.com/example/repo/issues/1",
+            "--close-issue",
+            "--close-reason",
+            "completed",
             "--json",
         ])
 
@@ -355,6 +358,8 @@ class CliParserTests(unittest.TestCase):
         self.assertFalse(args.needs_work)
         self.assertEqual(args.reviewer, "daniel")
         self.assertEqual(args.issue_url, "https://github.com/example/repo/issues/1")
+        self.assertTrue(args.close_issue)
+        self.assertEqual(args.close_reason, "completed")
         self.assertTrue(args.json)
 
     def test_desktop_publish_parses_explicit_manifests(self):
@@ -392,6 +397,11 @@ class CliParserTests(unittest.TestCase):
             "--json-output",
             "/tmp/body.json",
             "--check-files",
+            "--create",
+            "--label",
+            "video-review",
+            "--assignee",
+            "@me",
             "--json",
         ])
 
@@ -402,6 +412,9 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(args.body_output, "/tmp/body.md")
         self.assertEqual(args.json_output, "/tmp/body.json")
         self.assertTrue(args.check_files)
+        self.assertTrue(args.create)
+        self.assertEqual(args.label, ["video-review"])
+        self.assertEqual(args.assignee, ["@me"])
         self.assertTrue(args.json)
 
     def test_desktop_video_matrix_parses_filters_and_formats(self):
