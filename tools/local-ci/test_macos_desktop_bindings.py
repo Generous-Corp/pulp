@@ -116,6 +116,8 @@ class MacosDesktopBindingsTests(unittest.TestCase):
             video_capture_target="terminal",
             capture_bundle_id="com.cockos.reaper",
             video_attachment_budget_bytes=50,
+            small_video=True,
+            small_video_budget_bytes=8,
             compose_video_proof=True,
             video_template="design-parity",
             video_source_image="/tmp/reference.png",
@@ -164,6 +166,8 @@ class MacosDesktopBindingsTests(unittest.TestCase):
         self.assertEqual(captured["kwargs"]["video_capture_target"], "terminal")
         self.assertEqual(captured["kwargs"]["capture_bundle_id"], "com.cockos.reaper")
         self.assertEqual(captured["kwargs"]["video_attachment_budget_bytes"], 50)
+        self.assertTrue(captured["kwargs"]["small_video"])
+        self.assertEqual(captured["kwargs"]["small_video_budget_bytes"], 8)
         self.assertEqual(captured["kwargs"]["video_template"], "design-parity")
         self.assertEqual(captured["kwargs"]["video_source_image"], "/tmp/reference.png")
         self.assertEqual(captured["kwargs"]["video_source_label"], "Figma reference")
