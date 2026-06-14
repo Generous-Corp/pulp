@@ -13,6 +13,7 @@ def desktop_action_artifact_paths(bundle_dir: Path, output_path: str | None = No
         "diff_screenshot": bundle_dir / "screenshots" / "diff.png",
         "ui_snapshot": bundle_dir / "ui-tree.json",
         "video": bundle_dir / "video" / "proof.mp4",
+        "video_audio": bundle_dir / "video" / "audio.wav",
         "video_composed": bundle_dir / "video" / "proof-composed.mp4",
         "video_issue": bundle_dir / "video" / "proof.issue.mp4",
         "video_small": bundle_dir / "video" / "proof.small.mp4",

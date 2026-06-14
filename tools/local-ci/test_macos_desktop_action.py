@@ -44,6 +44,7 @@ class MacosDesktopActionTests(unittest.TestCase):
             "diff_screenshot": current_bundle / "screenshots" / "diff.png",
             "ui_snapshot": current_bundle / "ui-tree.json",
             "video": current_bundle / "video" / "proof.mp4",
+            "video_audio": current_bundle / "video" / "audio.wav",
             "video_composed": current_bundle / "video" / "proof-composed.mp4",
             "video_issue": current_bundle / "video" / "proof.issue.mp4",
             "video_metadata": current_bundle / "video" / "metadata.json",
@@ -155,6 +156,23 @@ class MacosDesktopActionTests(unittest.TestCase):
             metadata_path.write_text(json.dumps(payload, indent=2) + "\n")
             return payload
 
+        def mux_audio(video_path: Path, audio_path: Path, *, attachment_budget_bytes: int):
+            self.assertTrue(video_path.exists())
+            self.assertTrue(audio_path.exists())
+            video_path.write_bytes(video_path.read_bytes() + b"+audio")
+            return {
+                "kind": "desktop-video-proof-audio-mux",
+                "status": "muxed",
+                "audio_source": "plugin",
+                "audio_file": str(audio_path),
+                "output": str(video_path),
+                "size": {
+                    "size_bytes": video_path.stat().st_size,
+                    "attachment_budget_bytes": attachment_budget_bytes,
+                    "fits_attachment_budget": True,
+                },
+            }
+
         kwargs = {
             "action_name": "inspect",
             "bundle_id": None,
@@ -214,6 +232,7 @@ class MacosDesktopActionTests(unittest.TestCase):
             "image_change_summary_fn": image_change_summary,
             "start_macos_window_video_recording_fn": start_video,
             "stop_macos_window_video_recording_fn": stop_video,
+            "mux_desktop_video_audio_fn": mux_audio,
             "compose_desktop_video_proof_fn": compose_video,
             "create_issue_video_variant_fn": issue_video,
             "attach_desktop_source_to_manifest_fn": lambda payload, context: payload.setdefault("source", context) if context else None,
@@ -311,6 +330,27 @@ class MacosDesktopActionTests(unittest.TestCase):
         self.assertTrue(manifest["artifacts"]["video_issue_metadata"].endswith("/video/issue-metadata.json"))
         self.assertEqual(manifest["video_issue"]["status"], "copied")
         self.assertTrue(manifest["video_issue"]["source"].endswith("/video/proof-composed.mp4"))
+
+    def test_run_macos_local_smoke_muxes_plugin_audio_file(self) -> None:
+        source_audio = self.root / "plugin-output.wav"
+        source_audio.write_bytes(b"wav")
+
+        manifest, _launched, _terminated, _waited_paths, _rollups = self.run_action(
+            record_video=True,
+            video_audio_source="plugin",
+            video_audio_file=str(source_audio),
+            video_attachment_budget_bytes=4_000_000,
+            capture_ui_snapshot=False,
+        )
+
+        self.assertTrue(manifest["artifacts"]["video_audio"].endswith("/video/audio.wav"))
+        copied_audio = self.bundle_dir / "video" / "audio.wav"
+        self.assertEqual(copied_audio.read_bytes(), b"wav")
+        self.assertTrue(manifest["video"]["has_audio"])
+        self.assertEqual(manifest["video"]["audio_source"], "plugin")
+        self.assertEqual(manifest["video"]["audio_file"], str(copied_audio))
+        self.assertEqual(manifest["video"]["audio_mux"]["status"], "muxed")
+        self.assertEqual(manifest["video"]["recording"]["audio_source"], "none")
 
     def test_run_macos_local_smoke_records_terminal_capture(self) -> None:
         terminal_launches = []

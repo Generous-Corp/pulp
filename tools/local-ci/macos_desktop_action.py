@@ -6,6 +6,7 @@ from collections.abc import Callable
 import json
 import os
 from pathlib import Path
+import shutil
 import signal
 import time
 import uuid
@@ -210,6 +211,7 @@ def run_macos_local_smoke(
     image_change_summary_fn: Callable[..., dict],
     start_macos_window_video_recording_fn: Callable[..., dict],
     stop_macos_window_video_recording_fn: Callable[..., dict],
+    mux_desktop_video_audio_fn: Callable[..., dict],
     compose_desktop_video_proof_fn: Callable[[Path, Path], dict],
     create_issue_video_variant_fn: Callable[..., dict],
     attach_desktop_source_to_manifest_fn: Callable[[dict, dict | None], None],
@@ -220,6 +222,7 @@ def run_macos_local_smoke(
     video_duration_secs: float = 8.0,
     video_fps: float = 30.0,
     video_audio_source: str = "none",
+    video_audio_file: str | None = None,
     video_audio_device: str | None = None,
     video_capture_target: str = "app",
     capture_bundle_id: str | None = None,
@@ -239,6 +242,7 @@ def run_macos_local_smoke(
     diff_screenshot_path = action_paths["diff_screenshot"]
     ui_snapshot_path = action_paths["ui_snapshot"]
     video_path = action_paths["video"]
+    video_audio_path = action_paths["video_audio"]
     video_composed_path = action_paths["video_composed"]
     video_issue_path = action_paths["video_issue"]
     video_metadata_path = action_paths["video_metadata"]
@@ -261,6 +265,16 @@ def run_macos_local_smoke(
         raise RuntimeError("Pulp app automation requires a direct --command launch so automation env vars can be injected.")
     if video_capture_target not in {"app", "terminal"}:
         raise RuntimeError(f"Unknown video capture target `{video_capture_target}`.")
+    if video_audio_source == "plugin":
+        if not video_audio_file:
+            raise RuntimeError("--video-audio plugin requires --video-audio-file.")
+        source_audio_path = Path(video_audio_file).expanduser().resolve()
+        if not source_audio_path.exists():
+            raise RuntimeError(f"--video-audio-file does not exist: {source_audio_path}")
+    elif video_audio_file:
+        raise RuntimeError("--video-audio-file is only valid with --video-audio plugin.")
+    else:
+        source_audio_path = None
     if capture_bundle_id and bundle_id:
         raise RuntimeError("--capture-bundle-id is only valid with --command.")
     if capture_bundle_id and video_capture_target == "terminal":
@@ -423,13 +437,14 @@ def run_macos_local_smoke(
         view_tree = None
         content_size = content_size_from_window_fn(window)
         if record_video:
+            recorder_audio_source = "none" if video_audio_source == "plugin" else video_audio_source
             video_recording = start_macos_window_video_recording_fn(
                 window,
                 video_path,
                 duration_secs=video_duration_secs,
                 fps=video_fps,
-                audio_source=video_audio_source,
-                audio_device=video_audio_device,
+                audio_source=recorder_audio_source,
+                audio_device=None if video_audio_source == "plugin" else video_audio_device,
                 prefer_frame_sequence=bool(capture_bundle_id),
             )
         if capture_ui_snapshot and not use_pulp_app_automation:
@@ -512,6 +527,21 @@ def run_macos_local_smoke(
                 attachment_budget_bytes=video_attachment_budget_bytes,
             )
             video_recording = None
+            if video_audio_source == "plugin" and source_audio_path is not None:
+                video_audio_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source_audio_path, video_audio_path)
+                audio_mux = mux_desktop_video_audio_fn(
+                    video_path,
+                    video_audio_path,
+                    attachment_budget_bytes=video_attachment_budget_bytes,
+                )
+                video_summary["has_audio"] = True
+                video_summary["audio_source"] = "plugin"
+                video_summary["audio_file"] = str(video_audio_path)
+                video_summary["audio_mux"] = audio_mux
+                if "size" in audio_mux:
+                    video_summary["size"] = audio_mux["size"]
+                video_metadata_path.write_text(json.dumps(video_summary, indent=2) + "\n")
         _validate_generated_reaper_recipe_status(video_context, log_path)
 
         terminal_returncode = None
@@ -596,6 +626,8 @@ def run_macos_local_smoke(
                 manifest["artifacts"]["video_metadata"] = str(video_metadata_path)
             if video_poster_path.exists():
                 manifest["artifacts"]["video_poster"] = str(video_poster_path)
+            if video_audio_path.exists():
+                manifest["artifacts"]["video_audio"] = str(video_audio_path)
         attach_desktop_source_to_manifest_fn(manifest, source_context or source_request)
         if compose_video_proof and video_path.exists():
             source_manifest_path = bundle_dir / "manifest.video-source.json"

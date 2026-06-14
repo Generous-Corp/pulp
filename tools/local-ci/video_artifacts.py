@@ -155,6 +155,68 @@ def compose_desktop_video_proof(
     return payload
 
 
+def mux_desktop_video_audio(
+    video_path: Path,
+    audio_path: Path,
+    *,
+    ffmpeg_path: str,
+    attachment_budget_bytes: int = DEFAULT_VIDEO_ATTACHMENT_BUDGET_BYTES,
+    run_fn: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+) -> dict:
+    if not video_path.exists():
+        raise RuntimeError(f"Cannot mux plugin audio; video file does not exist: {video_path}")
+    if not audio_path.exists():
+        raise RuntimeError(f"Cannot mux plugin audio; audio file does not exist: {audio_path}")
+
+    tmp_path = video_path.with_name(f"{video_path.stem}.audio-tmp{video_path.suffix}")
+    tmp_path.unlink(missing_ok=True)
+    command = [
+        ffmpeg_path,
+        "-hide_banner",
+        "-y",
+        "-i",
+        str(video_path),
+        "-i",
+        str(audio_path),
+        "-map",
+        "0:v:0",
+        "-map",
+        "1:a:0",
+        "-c:v",
+        "copy",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "128k",
+        "-shortest",
+        "-movflags",
+        "+faststart",
+        str(tmp_path),
+    ]
+    result = run_fn(command, capture_output=True, text=True)
+    payload = {
+        "kind": "desktop-video-proof-audio-mux",
+        "audio_source": "plugin",
+        "source_video": str(video_path),
+        "audio_file": str(audio_path),
+        "output": str(video_path),
+        "command": command,
+        "returncode": result.returncode,
+    }
+    if result.stdout:
+        payload["stdout_tail"] = result.stdout[-4000:]
+    if result.stderr:
+        payload["stderr_tail"] = result.stderr[-4000:]
+    if result.returncode != 0 or not tmp_path.exists():
+        detail = (result.stderr or result.stdout or f"ffmpeg exited {result.returncode}").strip()
+        raise RuntimeError(f"Plugin audio mux failed: {detail[-1000:]}")
+
+    tmp_path.replace(video_path)
+    payload["status"] = "muxed"
+    payload["size"] = desktop_video_size_status(video_path, attachment_budget_bytes=attachment_budget_bytes)
+    return payload
+
+
 def create_issue_video_variant(
     source_path: Path,
     output_path: Path,

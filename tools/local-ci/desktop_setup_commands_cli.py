@@ -600,11 +600,14 @@ def desktop_video_doctor_payload(
 
     video_audio = getattr(args, "video_audio", "none")
     if video_audio == "plugin":
+        audio_file = getattr(args, "video_audio_file", None)
+        audio_path = Path(audio_file).expanduser().resolve() if audio_file else None
+        ok = bool(audio_path and audio_path.exists())
         checks.append(
             {
                 "name": "video_audio",
-                "ok": False,
-                "detail": "plugin audio proof capture is reserved and not implemented yet",
+                "ok": ok,
+                "detail": f"plugin audio WAV ready: {audio_path}" if ok else "pass --video-audio-file <wav> pointing at rendered plugin audio",
                 "required": True,
             }
         )
@@ -783,6 +786,7 @@ def cmd_desktop_video_setup(
             target=args.target,
             skip_remotion_smoke=getattr(args, "skip_remotion_smoke", False),
             video_audio=getattr(args, "video_audio", "none"),
+            video_audio_file=getattr(args, "video_audio_file", None),
             video_audio_device=getattr(args, "video_audio_device", None),
             recipe=getattr(args, "recipe", None),
             plugin=getattr(args, "plugin", None),

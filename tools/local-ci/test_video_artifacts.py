@@ -148,6 +148,35 @@ class VideoArtifactsTests(unittest.TestCase):
         self.assertTrue(payload["size"]["fits_attachment_budget"])
         self.assertEqual(payload, self.mod.json.loads(metadata.read_text()))
 
+    def test_mux_desktop_video_audio_uses_explicit_wav_and_replaces_video(self) -> None:
+        video = self.root / "proof.mp4"
+        audio = self.root / "audio.wav"
+        video.write_bytes(b"video")
+        audio.write_bytes(b"wav")
+        calls = []
+
+        def run_mux(cmd, **kwargs):
+            calls.append((cmd, kwargs))
+            Path(cmd[-1]).write_bytes(b"muxed")
+            return self.mod.subprocess.CompletedProcess(cmd, 0, stdout="", stderr="mux ok")
+
+        payload = self.mod.mux_desktop_video_audio(
+            video,
+            audio,
+            ffmpeg_path="/opt/ffmpeg",
+            attachment_budget_bytes=100,
+            run_fn=run_mux,
+        )
+
+        self.assertEqual(video.read_bytes(), b"muxed")
+        self.assertEqual(payload["status"], "muxed")
+        self.assertEqual(payload["audio_source"], "plugin")
+        self.assertEqual(payload["audio_file"], str(audio))
+        self.assertEqual(calls[0][0][0], "/opt/ffmpeg")
+        self.assertIn("1:a:0", calls[0][0])
+        self.assertIn("-shortest", calls[0][0])
+        self.assertTrue(payload["size"]["fits_attachment_budget"])
+
     def test_create_issue_video_variant_transcodes_when_source_exceeds_budget(self) -> None:
         source = self.root / "proof-composed.mp4"
         output = self.root / "proof.issue.mp4"

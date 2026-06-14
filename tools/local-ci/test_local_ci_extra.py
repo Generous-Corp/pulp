@@ -1602,7 +1602,7 @@ class LocalCiPureHelperTests(unittest.TestCase):
         reset_worktree.assert_not_called()
         logged_command.assert_not_called()
 
-        with mock.patch.object(self.mod, "desktop_source_root", return_value=self.root / "prepared"), \
+        with mock.patch.object(self.mod, "desktop_source_root", return_value=self.root / "prepared-timeout"), \
              mock.patch.object(self.mod, "_local_worktree_matches", return_value=False), \
              mock.patch.object(self.mod, "_reset_local_worktree"), \
              mock.patch.object(self.mod.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, stdout="", stderr="")), \

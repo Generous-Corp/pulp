@@ -1183,6 +1183,21 @@ def video_proof_smoke() -> dict:
     return payload
 
 
+def mux_desktop_video_audio(
+    video_path: Path,
+    audio_path: Path,
+    *,
+    attachment_budget_bytes: int = _video_artifacts.DEFAULT_VIDEO_ATTACHMENT_BUDGET_BYTES,
+) -> dict:
+    return _video_artifacts.mux_desktop_video_audio(
+        video_path,
+        audio_path,
+        attachment_budget_bytes=attachment_budget_bytes,
+        ffmpeg_path=resolve_ffmpeg_path(),
+        run_fn=subprocess.run,
+    )
+
+
 def create_issue_video_variant(
     source_path: Path,
     output_path: Path,
@@ -1395,6 +1410,7 @@ def run_macos_local_smoke(
     video_duration_secs: float = 8.0,
     video_fps: float = 30.0,
     video_audio_source: str = "none",
+    video_audio_file: str | None = None,
     video_audio_device: str | None = None,
     video_capture_target: str = "app",
     capture_bundle_id: str | None = None,
@@ -1430,6 +1446,7 @@ def run_macos_local_smoke(
         video_duration_secs=video_duration_secs,
         video_fps=video_fps,
         video_audio_source=video_audio_source,
+        video_audio_file=video_audio_file,
         video_audio_device=video_audio_device,
         video_capture_target=video_capture_target,
         capture_bundle_id=capture_bundle_id,

@@ -148,7 +148,11 @@ def build_local_ci_parser(
             "--video-audio",
             choices=["none", "plugin", "system"],
             default="none",
-            help="Audio source for the proof video. 'system' records an explicit AVFoundation audio device; plugin is reserved.",
+            help="Audio source for the proof video. 'plugin' muxes an explicit --video-audio-file WAV; 'system' records an explicit AVFoundation audio device.",
+        )
+        command_parser.add_argument(
+            "--video-audio-file",
+            help="WAV file to mux into the proof video when --video-audio plugin is selected.",
         )
         command_parser.add_argument(
             "--video-audio-device",
@@ -520,7 +524,11 @@ def build_local_ci_parser(
         "--video-audio",
         choices=["none", "system", "plugin"],
         default="none",
-        help="Also validate readiness for an audio-bearing proof. system requires an explicit AVFoundation audio device; plugin is reserved.",
+        help="Also validate readiness for an audio-bearing proof. plugin checks an explicit --video-audio-file WAV; system checks an explicit AVFoundation audio device.",
+    )
+    p_desktop_video_doctor.add_argument(
+        "--video-audio-file",
+        help="WAV file to validate when --video-audio plugin is selected.",
     )
     p_desktop_video_doctor.add_argument(
         "--video-audio-device",
@@ -550,6 +558,10 @@ def build_local_ci_parser(
         choices=["none", "system", "plugin"],
         default="none",
         help="When using --check, also validate readiness for an audio-bearing proof.",
+    )
+    p_desktop_video_setup.add_argument(
+        "--video-audio-file",
+        help="WAV file to validate when --video-audio plugin is selected.",
     )
     p_desktop_video_setup.add_argument(
         "--video-audio-device",

@@ -77,6 +77,7 @@ class MacosDesktopBindingsTests(unittest.TestCase):
             "image_change_summary",
             "start_macos_window_video_recording",
             "stop_macos_window_video_recording",
+            "mux_desktop_video_audio",
             "compose_desktop_video_proof",
             "create_issue_video_variant",
             "attach_desktop_source_to_manifest",
@@ -109,6 +110,7 @@ class MacosDesktopBindingsTests(unittest.TestCase):
             video_duration_secs=2.0,
             video_fps=15.0,
             video_audio_source="system",
+            video_audio_file="/tmp/plugin.wav",
             video_audio_device="BlackHole 2ch",
             video_capture_target="terminal",
             capture_bundle_id="com.cockos.reaper",
@@ -154,7 +156,9 @@ class MacosDesktopBindingsTests(unittest.TestCase):
         self.assertEqual(captured["kwargs"]["video_duration_secs"], 2.0)
         self.assertEqual(captured["kwargs"]["video_fps"], 15.0)
         self.assertEqual(captured["kwargs"]["video_audio_source"], "system")
+        self.assertEqual(captured["kwargs"]["video_audio_file"], "/tmp/plugin.wav")
         self.assertEqual(captured["kwargs"]["video_audio_device"], "BlackHole 2ch")
+        self.assertIs(captured["kwargs"]["mux_desktop_video_audio_fn"], bindings["mux_desktop_video_audio"])
         self.assertEqual(captured["kwargs"]["video_capture_target"], "terminal")
         self.assertEqual(captured["kwargs"]["capture_bundle_id"], "com.cockos.reaper")
         self.assertEqual(captured["kwargs"]["video_attachment_budget_bytes"], 50)

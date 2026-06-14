@@ -382,12 +382,19 @@ Keep `--video-audio none` unless the proof genuinely needs audio. Use
 macOS AVFoundation audio input or loopback device should be recorded; the same
 device can be supplied with `PULP_VIDEO_AUDIO_DEVICE`. Do not guess a
 microphone/system device. Audio-requested captures must fail rather than fall
-back to a no-audio frame sequence. `--video-audio plugin` is still reserved
-until plugin-origin audio capture exists.
+back to a no-audio frame sequence.
+
+For deterministic Pulp-owned plugin or standalone audio, use
+`--video-audio plugin --video-audio-file /path/to/rendered-plugin-output.wav`.
+The harness copies the WAV into the run bundle as `video/audio.wav`, muxes it
+into `video/proof.mp4` as AAC, and then lets Remotion and issue-variant
+generation preserve the audio stream. Prefer this over system capture when the
+test harness can render the plugin output directly.
 
 Each run bundle should contain:
 
 - `video/proof.mp4`
+- `video/audio.wav` when `--video-audio plugin` was used
 - `video/proof-composed.mp4` when `--compose-video-proof` is set
 - `video/proof.issue.mp4` for GitHub/pro-account attachment review
 - `video/proof.small.mp4` when `desktop compose-video --small-video` is used

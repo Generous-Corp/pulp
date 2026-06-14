@@ -402,8 +402,24 @@ issue-ready clip. Pass `--video-audio-device <index-or-name>` or set
 `PULP_VIDEO_AUDIO_DEVICE`; common loopback setups use a device such as
 `BlackHole 2ch`. The harness does not guess a microphone/system device, and an
 audio-requested capture will not silently fall back to a no-audio frame
-sequence. `--video-audio plugin` is still reserved until a plugin-origin audio
-source is available.
+sequence.
+
+For Pulp-owned plugin or standalone validation where the harness can render the
+expected audio directly, prefer the explicit plugin-audio mux path:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop video mac \
+  --command ./build/pulp \
+  --action smoke \
+  --video-audio plugin \
+  --video-audio-file /path/to/rendered-plugin-output.wav \
+  --compose-video-proof
+```
+
+The WAV is copied into the run bundle as `video/audio.wav`, muxed into
+`video/proof.mp4` as AAC, and then carried through Remotion composition and the
+issue-size retry ladder. This path avoids microphone guessing and host loopback
+setup when the proof should use deterministic plugin-rendered audio.
 
 The macOS `screencapture` frame-sequence fallback normalizes encoded video
 dimensions to even pixel counts. This avoids libx264 failures when a host
@@ -795,17 +811,16 @@ or same-issue follow-up checklist; the JSON file is the automation handoff.
 
 ## Current Scope
 
-This first lane records the target window region on macOS with H.264 video, and
-can include AAC audio when `--video-audio system` is paired with an explicit
-AVFoundation audio device. It uses ffmpeg/AVFoundation screen capture as the
-primary recorder and falls back to a short sequence of trusted
+This first lane records the target window region on macOS with H.264 video. It
+can include AAC audio from either explicit AVFoundation system capture or an
+explicit plugin-rendered WAV mux. It uses ffmpeg/AVFoundation screen capture as
+the primary recorder and falls back to a short sequence of trusted
 `screencapture -l` window frames when the ffmpeg recorder cannot start and no
-audio was requested. If macOS refuses window-ID capture but allows full-screen
-capture, the fallback captures full-screen frames and crops them to the target
-window bounds during encoding. Final still screenshots use a last-resort
-full-screen fallback for the same TCC edge case.
+system audio was requested. If macOS refuses window-ID capture but allows
+full-screen capture, the fallback captures full-screen frames and crops them to
+the target window bounds during encoding. Final still screenshots use a
+last-resort full-screen fallback for the same TCC edge case.
 
 Remotion composition and local review artifacts are implemented in this branch.
-Plugin-origin audio capture, iOS Simulator, Android, richer REAPER plugin
-interaction automation, and GitHub issue automation are planned follow-on
-layers.
+iOS Simulator, Android, richer REAPER plugin interaction automation, and GitHub
+issue automation are planned follow-on layers.

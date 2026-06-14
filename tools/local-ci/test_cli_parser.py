@@ -118,6 +118,8 @@ class CliParserTests(unittest.TestCase):
             "system",
             "--video-audio-device",
             "BlackHole 2ch",
+            "--video-audio-file",
+            "/tmp/plugin.wav",
             "--capture-bundle-id",
             "com.cockos.reaper",
             "--label",
@@ -141,6 +143,7 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(args.video_fps, 24.0)
         self.assertEqual(args.video_audio, "system")
         self.assertEqual(args.video_audio_device, "BlackHole 2ch")
+        self.assertEqual(args.video_audio_file, "/tmp/plugin.wav")
         self.assertEqual(args.capture_bundle_id, "com.cockos.reaper")
         self.assertEqual(args.video_attachment_budget_mb, 100.0)
         self.assertEqual(args.label, "standalone-bypass-toggle")
@@ -512,6 +515,8 @@ class CliParserTests(unittest.TestCase):
             "system",
             "--video-audio-device",
             "BlackHole 2ch",
+            "--video-audio-file",
+            "/tmp/plugin.wav",
             "--recipe",
             "reaper-plugin-editor",
             "--plugin",
@@ -528,6 +533,7 @@ class CliParserTests(unittest.TestCase):
         self.assertTrue(args.run_in_terminal)
         self.assertEqual(args.video_audio, "system")
         self.assertEqual(args.video_audio_device, "BlackHole 2ch")
+        self.assertEqual(args.video_audio_file, "/tmp/plugin.wav")
         self.assertEqual(args.recipe, "reaper-plugin-editor")
         self.assertEqual(args.plugin, "PulpSynth")
         self.assertEqual(args.plugin_format, "clap")
@@ -548,6 +554,8 @@ class CliParserTests(unittest.TestCase):
             "system",
             "--video-audio-device",
             "BlackHole 2ch",
+            "--video-audio-file",
+            "/tmp/plugin.wav",
             "--design-parity-manifest",
             "/tmp/run/manifest.json",
             "--design-parity-source-image",
@@ -564,6 +572,7 @@ class CliParserTests(unittest.TestCase):
         self.assertTrue(args.skip_remotion_smoke)
         self.assertEqual(args.video_audio, "system")
         self.assertEqual(args.video_audio_device, "BlackHole 2ch")
+        self.assertEqual(args.video_audio_file, "/tmp/plugin.wav")
         self.assertEqual(args.design_parity_manifest, "/tmp/run/manifest.json")
         self.assertEqual(args.design_parity_source_image, "/tmp/source.png")
         self.assertTrue(args.json)
