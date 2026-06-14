@@ -1880,8 +1880,9 @@ class LocalCiTests(unittest.TestCase):
                 with mock.patch.object(self.mod, "probe_webdriver_endpoint", return_value={"status_url": "http://127.0.0.1:4444/status", "ready": True, "message": "ok"}):
                     with mock.patch.object(self.mod.shutil, "which", side_effect=lambda cmd: f"/usr/bin/{cmd}"):
                         with mock.patch.object(self.mod, "probe_macos_screencapture", return_value=(True, "ok")):
-                            with mock.patch.object(self.mod, "probe_macos_avfoundation_screen", return_value=(True, "Capture screen 0 (3:)")):
-                                checks = self.mod.desktop_doctor_checks(config, "mac")
+                            with mock.patch.object(self.mod, "resolve_ffmpeg_path", return_value="/tmp/ffmpeg"):
+                                with mock.patch.object(self.mod, "probe_macos_avfoundation_screen", return_value=(True, "Capture screen 0 (3:)")):
+                                    checks = self.mod.desktop_doctor_checks(config, "mac")
         finally:
             self.mod.sys.platform = original_platform
 
