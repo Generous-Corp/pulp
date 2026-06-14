@@ -387,7 +387,7 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
         "id": "reaper-plugin-editor",
         "title": "Plugin editor in REAPER",
         "platform": "mac",
-        "status": "partial",
+        "status": "ready",
         "template": "plugin-host",
         "proves": "A real host loads a Pulp plugin and records host/editor context.",
         "prepare_command": (
@@ -415,7 +415,7 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
         "watch_for": [
             "REAPER chrome proves real host context",
             "plugin is inserted rather than only opening a blank project",
-            "future slice should pop/focus the floating plugin editor reliably",
+            "floating plugin editor is focused and captured rather than a blank project window",
         ],
     },
     {

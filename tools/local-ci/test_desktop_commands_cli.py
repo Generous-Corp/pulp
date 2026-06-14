@@ -343,7 +343,13 @@ class DesktopCommandsCliTests(unittest.TestCase):
         self.assertFalse(static_payload["checked"])
         self.assertEqual(static_payload["status"], "partial")
         self.assertEqual(static_payload["status_basis"], "declared")
-        self.assertEqual([item["id"] for item in static_payload["scenarios"]], ["reaper-plugin-editor"])
+        self.assertEqual(static_payload["scenarios"], [])
+
+        ready_payload = self.mod.desktop_video_matrix_payload(
+            target="mac",
+            status="ready",
+        )
+        self.assertIn("reaper-plugin-editor", {item["id"] for item in ready_payload["scenarios"]})
 
         with tempfile.TemporaryDirectory() as tmpdir:
             repo_root = Path(tmpdir)
