@@ -4,6 +4,7 @@
 from module_test_utils import load_module_from_path
 from pathlib import Path
 import unittest
+from unittest import mock
 
 
 MODULE_PATH = Path(__file__).with_name("queue_target_payload_bindings.py")
@@ -48,27 +49,26 @@ class QueueTargetPayloadBindingsTests(unittest.TestCase):
                 captured["snapshot"] = target_states
                 return {"mac": {"status": "pass"}}
 
-        bindings = {
-            "_queue_orchestrator": Orchestrator(),
-            "target_log_path": lambda job_id, target: Path(f"/logs/{job_id}-{target}.log"),
-        }
+        bindings = {"_queue_orchestrator": Orchestrator()}
 
-        self.assertEqual(
-            self.mod.initial_target_state(bindings, "job1", "mac", started_at="now"),
-            {"status": "running"},
-        )
-        self.assertEqual(captured["initial"], ("now", "/logs/job1-mac.log"))
-        self.assertEqual(
-            self.mod.completed_target_state(
-                bindings,
-                "job1",
-                "mac",
-                {"status": "pass"},
+        with mock.patch.object(self.mod, "queue_target_log_path", return_value="/logs/job1-mac.log"):
+            self.assertEqual(
+                self.mod.initial_target_state(bindings, "job1", "mac", started_at="now"),
                 {"status": "running"},
-                completed_at="done",
-            ),
-            {"status": "pass"},
-        )
+            )
+        self.assertEqual(captured["initial"], ("now", "/logs/job1-mac.log"))
+        with mock.patch.object(self.mod, "queue_target_log_path", return_value="/logs/job1-mac.log"):
+            self.assertEqual(
+                self.mod.completed_target_state(
+                    bindings,
+                    "job1",
+                    "mac",
+                    {"status": "pass"},
+                    {"status": "running"},
+                    completed_at="done",
+                ),
+                {"status": "pass"},
+            )
         self.assertEqual(captured["completed"][3], "/logs/job1-mac.log")
         self.assertEqual(self.mod.updated_target_state(bindings, {"status": "pending"}, {"status": "running"}), {"status": "running"})
         self.assertEqual(captured["updated"], ({"status": "pending"}, {"status": "running"}))

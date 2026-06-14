@@ -5,6 +5,7 @@ from module_test_utils import load_module_from_path
 from pathlib import Path
 import types
 import unittest
+from unittest import mock
 
 
 MODULE_PATH = Path(__file__).with_name("queue_active_target_bindings.py")
@@ -24,7 +25,7 @@ class QueueActiveTargetBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.QUEUE_ACTIVE_TARGET_EXPORTS, expected)
         self.assertEqual(len(expected), len(set(expected)))
 
-    def test_upsert_job_active_targets_unlocked_binds_now_iso(self):
+    def test_upsert_job_active_targets_unlocked_delegates_with_assembled_dependencies(self):
         captured = {}
 
         def upsert_job_active_targets_unlocked(queue, job_id, active_targets, *, now_iso_fn):
@@ -37,9 +38,11 @@ class QueueActiveTargetBindingsTests(unittest.TestCase):
             ),
             "now_iso": object(),
         }
+        deps = {"now_iso_fn": object()}
 
-        self.assertTrue(self.mod.upsert_job_active_targets_unlocked(bindings, [], "job1", {"mac": {}}))
-        self.assertIs(captured["upsert"][3], bindings["now_iso"])
+        with mock.patch.object(self.mod, "queue_active_target_dependencies", return_value=deps):
+            self.assertTrue(self.mod.upsert_job_active_targets_unlocked(bindings, [], "job1", {"mac": {}}))
+        self.assertIs(captured["upsert"][3], deps["now_iso_fn"])
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@ from typing import Any
 
 from binding_utils import binding as _binding
 from binding_utils import install_local_helpers
+from queue_target_payload_dependency_bindings import queue_target_log_path
 
 
 QUEUE_TARGET_PAYLOAD_EXPORTS = (
@@ -20,7 +21,7 @@ QUEUE_TARGET_PAYLOAD_EXPORTS = (
 def initial_target_state(bindings: Mapping[str, Any], job_id: str, target_name: str, *, started_at: str) -> dict:
     return _binding(bindings, "_queue_orchestrator").initial_target_state(
         started_at=started_at,
-        log_path=str(_binding(bindings, "target_log_path")(job_id, target_name)),
+        log_path=queue_target_log_path(bindings, job_id, target_name),
     )
 
 
@@ -37,7 +38,7 @@ def completed_target_state(
         result,
         previous_state,
         completed_at=completed_at,
-        default_log_path=str(_binding(bindings, "target_log_path")(job_id, target_name)),
+        default_log_path=queue_target_log_path(bindings, job_id, target_name),
     )
 
 

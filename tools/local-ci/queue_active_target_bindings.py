@@ -7,6 +7,7 @@ from typing import Any
 
 from binding_utils import binding as _binding
 from binding_utils import install_local_helpers
+from queue_active_target_dependency_bindings import queue_active_target_dependencies
 
 
 QUEUE_ACTIVE_TARGET_EXPORTS = ("upsert_job_active_targets_unlocked",)
@@ -22,7 +23,7 @@ def upsert_job_active_targets_unlocked(
         queue,
         job_id,
         active_targets,
-        now_iso_fn=_binding(bindings, "now_iso"),
+        **queue_active_target_dependencies(bindings),
     )
 
 
