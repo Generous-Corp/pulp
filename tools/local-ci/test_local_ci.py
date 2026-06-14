@@ -2143,49 +2143,6 @@ class LocalCiTests(unittest.TestCase):
         self.assertIn("$BundleName = 'pulp-ci-job126.bundle'", captured["input_text"])
         self.assertIn("$BundleRef`:refs/pulp-ci-bundles/job126", captured["input_text"])
 
-    def test_build_submission_metadata_adds_default_provenance(self):
-        config = self.mod.load_config()
-        metadata = self.mod.build_submission_metadata(
-            config,
-            "feature/provenance",
-            "a" * 40,
-            ["mac"],
-            "normal",
-            "full",
-            allow_root_mismatch=True,
-            allow_unreachable_targets=False,
-        )
-
-        self.assertEqual(metadata["provenance"]["execution_kind"], "direct")
-        self.assertEqual(metadata["provenance"]["control_plane"], "pulp-ci-local")
-        self.assertEqual(metadata["provenance"]["direct_backend"], "local-ci")
-        self.assertEqual(metadata["provenance"]["hosted_orchestrator"], "")
-
-    def test_evidence_record_carries_provenance(self):
-        result = {
-            "job_id": "job123",
-            "branch": "feature/evidence",
-            "sha": "c" * 40,
-            "validation": "full",
-            "completed_at": "2026-04-04T12:00:00+00:00",
-            "provenance": {
-                "execution_kind": "hosted",
-                "control_plane": "pulp-ci-local",
-                "direct_backend": "",
-                "hosted_orchestrator": "github-actions",
-                "runner_provider": "namespace",
-                "runner_selector": "mac-arm64",
-                "run_id": "12345",
-                "run_url": "https://example.test/runs/12345",
-            },
-        }
-        item = {"target": "mac", "status": "pass", "duration_secs": 12}
-
-        record = self.mod.evidence_record_from_result(result, item, self.state_dir / "result.json")
-        self.assertEqual(record["provenance"]["hosted_orchestrator"], "github-actions")
-        self.assertEqual(record["provenance"]["runner_provider"], "namespace")
-        self.assertEqual(record["provenance"]["runner_selector"], "mac-arm64")
-
     def test_cmd_cloud_run_rejects_unsupported_provider(self):
         original_gh_available = self.cloud.gh_available
         self.cloud.gh_available = lambda: True

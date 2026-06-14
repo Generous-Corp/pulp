@@ -114,6 +114,7 @@ class TargetPreflightTests(unittest.TestCase):
         self.assertEqual(metadata["target_hosts"]["windows"]["status"], "fallback-up")
         self.assertEqual(metadata["target_hosts"]["windows"]["resolved_host"], "win")
         self.assertEqual(metadata["config_drift"], ["windows: drift"])
+        self.assertEqual(metadata["provenance"], {"execution_kind": "direct"})
         self.assertTrue(any("fallback win is up" in warning for warning in metadata["warnings"]))
         self.assertTrue(any("config drift detected" in warning for warning in metadata["warnings"]))
 

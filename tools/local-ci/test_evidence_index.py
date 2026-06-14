@@ -111,6 +111,31 @@ class EvidenceIndexTests(unittest.TestCase):
         self.assertEqual(groups["full"][0]["branch"], "feature/alpha")
         self.assertIn("mac", groups["full"][0]["targets"])
 
+    def test_evidence_record_carries_normalized_provenance(self) -> None:
+        record = self.mod.evidence_record_from_result(
+            {
+                "job_id": "job123",
+                "branch": "feature/evidence",
+                "sha": "c" * 40,
+                "validation": "full",
+                "completed_at": "2026-04-04T12:00:00+00:00",
+                "provenance": {
+                    "execution_kind": "hosted",
+                    "hosted_orchestrator": "github-actions",
+                    "runner_provider": "namespace",
+                    "runner_selector": "mac-arm64",
+                    "run_id": "12345",
+                    "run_url": "https://example.test/runs/12345",
+                },
+            },
+            {"target": "mac", "status": "pass", "duration_secs": 12},
+            Path("/tmp/result.json"),
+        )
+
+        self.assertEqual(record["provenance"]["hosted_orchestrator"], "github-actions")
+        self.assertEqual(record["provenance"]["runner_provider"], "namespace")
+        self.assertEqual(record["provenance"]["runner_selector"], "mac-arm64")
+
     def test_print_evidence_summary_groups_branch_results(self) -> None:
         groups = {
             "smoke": [

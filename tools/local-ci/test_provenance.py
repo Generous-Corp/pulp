@@ -16,6 +16,12 @@ class ProvenanceTests(unittest.TestCase):
         self.mod = provenance
 
     def test_extracted_provenance_helpers_normalize_result_and_summarize(self):
+        defaults = self.mod.normalize_provenance()
+        self.assertEqual(defaults["execution_kind"], "direct")
+        self.assertEqual(defaults["control_plane"], "pulp-ci-local")
+        self.assertEqual(defaults["direct_backend"], "local-ci")
+        self.assertEqual(defaults["hosted_orchestrator"], "")
+
         direct = self.mod.normalize_provenance({"direct_backend": ""})
         self.assertEqual(direct["execution_kind"], "direct")
         self.assertEqual(direct["direct_backend"], "")
