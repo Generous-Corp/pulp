@@ -1,42 +1,26 @@
-"""Bindings from the local_ci facade to logs command helpers."""
+"""Compatibility facade for logs command bindings."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Any
 
-from binding_utils import binding as _binding
 from binding_utils import install_local_helpers
-
-
-LOGS_COMMAND_EXPORTS = (
-    "resolve_job_for_logs",
-    "cmd_logs",
+from logs_resolution_command_bindings import (
+    LOGS_RESOLUTION_COMMAND_EXPORTS,
+    install_logs_resolution_command_helpers,
+    resolve_job_for_logs,
+)
+from logs_run_command_bindings import (
+    LOGS_RUN_COMMAND_EXPORTS,
+    cmd_logs,
+    install_logs_run_command_helpers,
 )
 
 
-def resolve_job_for_logs(bindings: Mapping[str, Any], job_ref: str | None) -> dict | None:
-    return _binding(bindings, "_logs_cli").resolve_job_for_logs(
-        job_ref,
-        load_queue_fn=_binding(bindings, "load_queue"),
-        current_runner_info_fn=_binding(bindings, "current_runner_info"),
-        select_job_for_logs_fn=_binding(bindings, "_queue_orchestrator").select_job_for_logs,
-    )
-
-
-def cmd_logs(bindings: Mapping[str, Any], args: Any) -> int:
-    return _binding(bindings, "_logs_cli").cmd_logs(
-        args,
-        resolve_job_for_logs_fn=_binding(bindings, "resolve_job_for_logs"),
-        target_log_path_fn=_binding(bindings, "target_log_path"),
-        job_logs_dir_fn=_binding(bindings, "job_logs_dir"),
-        tail_lines_fn=_binding(bindings, "tail_lines"),
-        missing_job_logs_line_fn=_binding(bindings, "missing_job_logs_line"),
-        missing_log_files_line_fn=_binding(bindings, "missing_log_files_line"),
-        job_logs_header_line_fn=_binding(bindings, "job_logs_header_line"),
-        log_section_header_line_fn=_binding(bindings, "log_section_header_line"),
-        empty_log_line_fn=_binding(bindings, "empty_log_line"),
-    )
+LOGS_COMMAND_EXPORTS = (
+    *LOGS_RESOLUTION_COMMAND_EXPORTS,
+    *LOGS_RUN_COMMAND_EXPORTS,
+)
 
 
 def install_logs_command_helpers(
@@ -44,9 +28,11 @@ def install_logs_command_helpers(
     names: tuple[str, ...] = LOGS_COMMAND_EXPORTS,
 ) -> None:
     known_names = set(LOGS_COMMAND_EXPORTS)
-    logs_names = tuple(name for name in names if name in known_names)
+    resolution_names = tuple(name for name in names if name in LOGS_RESOLUTION_COMMAND_EXPORTS)
+    run_names = tuple(name for name in names if name in LOGS_RUN_COMMAND_EXPORTS)
     unknown_names = tuple(name for name in names if name not in known_names)
 
-    install_local_helpers(bindings, globals(), logs_names)
+    install_logs_resolution_command_helpers(bindings, resolution_names)
+    install_logs_run_command_helpers(bindings, run_names)
     if unknown_names:
         install_local_helpers(bindings, globals(), unknown_names)
