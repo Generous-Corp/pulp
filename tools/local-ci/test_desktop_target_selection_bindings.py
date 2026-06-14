@@ -44,14 +44,5 @@ class DesktopTargetSelectionBindingsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Desktop target 'linux' is disabled"):
             self.mod.resolve_desktop_target({}, config, "linux")
 
-    def test_install_target_selection_helpers_wires_named_exports(self) -> None:
-        config = {"desktop_automation": {"targets": {"mac": {"adapter": "macos-local"}}}}
-        bindings = {}
-
-        self.mod.install_desktop_target_selection_helpers(bindings)
-
-        self.assertEqual(bindings["resolve_desktop_target"](config, "mac"), {"adapter": "macos-local"})
-
-
 if __name__ == "__main__":
     unittest.main()

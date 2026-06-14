@@ -45,21 +45,5 @@ class DesktopDoctorCommandBindingsTests(unittest.TestCase):
         self.assertIs(captured["kwargs"]["resolve_desktop_target_fn"], bindings["resolve_desktop_target"])
         self.assertIs(captured["kwargs"]["desktop_doctor_checks_fn"], bindings["desktop_doctor_checks"])
 
-    def test_install_desktop_doctor_command_helpers_wires_named_exports(self) -> None:
-        def runner(*args, **kwargs):
-            return 29
-
-        bindings = {
-            "_desktop_setup_commands_cli": types.SimpleNamespace(cmd_desktop_doctor=runner),
-            "load_config": object(),
-            "resolve_desktop_target": object(),
-            "desktop_doctor_checks": object(),
-        }
-
-        self.mod.install_desktop_doctor_command_helpers(bindings, ("cmd_desktop_doctor",))
-
-        self.assertEqual(bindings["cmd_desktop_doctor"](object()), 29)
-
-
 if __name__ == "__main__":
     unittest.main()

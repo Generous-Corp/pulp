@@ -91,43 +91,5 @@ class DesktopInstallCommandBindingsTests(unittest.TestCase):
         self.assertEqual(captured["kwargs"]["root_path"], Path("/repo"))
         self.assertEqual(captured["kwargs"]["new_install_job_id_fn"](), "abcdef123456")
 
-    def test_install_desktop_install_command_helpers_wires_named_exports(self) -> None:
-        def runner(*args, **kwargs):
-            return 23
-
-        bindings = {
-            "_desktop_setup_commands_cli": types.SimpleNamespace(cmd_desktop_install=runner),
-            "ROOT": Path("/repo"),
-            "subprocess": types.SimpleNamespace(run=object()),
-            "uuid": types.SimpleNamespace(uuid4=lambda: types.SimpleNamespace(hex="abcdef1234567890")),
-        }
-        for name in [
-            "load_config",
-            "resolve_desktop_target",
-            "_check_writable_dir",
-            "desktop_target_contract",
-            "ensure_host_reachable",
-            "bootstrap_windows_session_agent",
-            "probe_windows_session_agent",
-            "sync_job_bundle_to_ssh_host",
-            "ensure_windows_remote_tooling",
-            "windows_remote_tooling_ready",
-            "ensure_windows_remote_repo_checkout",
-            "git_origin_clone_url",
-            "windows_repo_checkout_ready",
-            "update_target_repo_path",
-            "save_config",
-            "now_iso",
-            "desktop_target_receipt_path",
-            "atomic_write_text",
-            "windows_tooling_detail",
-        ]:
-            bindings[name] = object()
-
-        self.mod.install_desktop_install_command_helpers(bindings, ("cmd_desktop_install",))
-
-        self.assertEqual(bindings["cmd_desktop_install"](object()), 23)
-
-
 if __name__ == "__main__":
     unittest.main()

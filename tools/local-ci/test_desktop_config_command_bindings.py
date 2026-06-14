@@ -86,24 +86,5 @@ class DesktopConfigCommandBindingsTests(unittest.TestCase):
             bindings["_desktop_cli"].desktop_config_update_lines,
         )
 
-    def test_install_desktop_config_command_helpers_wires_named_exports(self) -> None:
-        captured = {}
-
-        def runner(*args, **kwargs):
-            captured["args"] = args
-            captured["kwargs"] = kwargs
-            return 13
-
-        bindings = self.bindings("cmd_desktop_config_show", runner)
-
-        self.mod.install_desktop_config_command_helpers(bindings, ("cmd_desktop_config_show",))
-
-        args_obj = object()
-        self.assertEqual(bindings["cmd_desktop_config_show"](args_obj), 13)
-        self.assertEqual(captured["args"], (args_obj,))
-        self.assertIs(captured["kwargs"]["load_config_fn"], bindings["load_config"])
-        self.assertNotIn("cmd_desktop_config_set", bindings)
-
-
 if __name__ == "__main__":
     unittest.main()

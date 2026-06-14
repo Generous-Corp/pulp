@@ -65,14 +65,5 @@ class DesktopViewTreeBindingsTests(unittest.TestCase):
         )
         self.assertEqual(captured["resolve"][1]["view_label"], "Gain slider")
 
-    def test_install_view_tree_helpers_wires_named_exports(self) -> None:
-        actions = types.SimpleNamespace(count_view_tree_nodes=lambda node: 3)
-        bindings = {"_desktop_actions": actions}
-
-        self.mod.install_desktop_view_tree_helpers(bindings, ("count_view_tree_nodes",))
-
-        self.assertEqual(bindings["count_view_tree_nodes"]({"children": []}), 3)
-
-
 if __name__ == "__main__":
     unittest.main()

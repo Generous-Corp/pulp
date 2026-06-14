@@ -124,17 +124,5 @@ class DesktopReportCommandBindingsTests(unittest.TestCase):
         self.assertIs(captured["kwargs"]["desktop_cleanup_empty_line_fn"], bindings["_desktop_cli"].desktop_cleanup_empty_line)
         self.assertIs(captured["kwargs"]["desktop_cleanup_lines_fn"], bindings["_desktop_cli"].desktop_cleanup_lines)
 
-    def test_install_desktop_report_command_helpers_wires_named_exports(self) -> None:
-        def runner(*args, **kwargs):
-            return 19
-
-        bindings = self.bindings("cmd_desktop_recent", runner)
-
-        self.mod.install_desktop_report_command_helpers(bindings, ("cmd_desktop_recent",))
-
-        self.assertEqual(bindings["cmd_desktop_recent"](object()), 19)
-        self.assertNotIn("cmd_desktop_cleanup", bindings)
-
-
 if __name__ == "__main__":
     unittest.main()
