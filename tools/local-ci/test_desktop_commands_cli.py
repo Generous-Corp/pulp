@@ -317,6 +317,7 @@ class DesktopCommandsCliTests(unittest.TestCase):
             ids = {item["id"] for item in checked_payload["scenarios"]}
             self.assertIn("audio-inspector-demo", ids)
             self.assertIn("inspector-workflow", ids)
+            self.assertNotIn("design-parity", ids)
             self.assertNotIn("component-zoom", ids)
             self.assertNotIn("standalone-interaction", ids)
 
@@ -330,9 +331,25 @@ class DesktopCommandsCliTests(unittest.TestCase):
             blocked_ids = {item["id"] for item in blocked_payload["scenarios"]}
             self.assertIn("component-zoom", blocked_ids)
             self.assertIn("standalone-interaction", blocked_ids)
+            self.assertIn("design-parity", blocked_ids)
             self.assertNotIn("audio-inspector-demo", blocked_ids)
+            design_parity = next(item for item in blocked_payload["scenarios"] if item["id"] == "design-parity")
+            design_checks = {check["name"]: check for check in design_parity["local_readiness"]["checks"]}
+            self.assertFalse(design_checks["design-parity.source-image"]["ok"])
+            self.assertIn("planning/screenshots/reference.png", design_checks["design-parity.source-image"]["remediation"])
             for row in blocked_payload["scenarios"]:
                 self.assertEqual(row["local_readiness"]["status"], "blocked")
+
+            (repo_root / "planning" / "screenshots").mkdir(parents=True)
+            (repo_root / "planning" / "screenshots" / "reference.png").write_bytes(b"png")
+            checked_payload = self.mod.desktop_video_matrix_payload(
+                target="mac",
+                status="ready",
+                check=True,
+                repo_root=repo_root,
+                which_fn=lambda name: "/usr/bin/cmake" if name == "cmake" else None,
+            )
+            self.assertIn("design-parity", {item["id"] for item in checked_payload["scenarios"]})
 
         self.printed.clear()
         result = self.mod.cmd_desktop_video_matrix(

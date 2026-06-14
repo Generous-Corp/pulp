@@ -390,10 +390,11 @@ ubuntu`, `--target windows`, `--target ios-simulator`, `--scenario
 audio-inspector-demo`, `--scenario component-zoom`, `--status ready`, or
 `--json` when an agent needs a narrower machine-readable plan. Add `--check`
 to include lightweight machine-local readiness checks, such as whether `cmake`,
-the in-tree
-audio-inspector demo source, `adb`, `xcrun`, REAPER, or
-`external/skia-build/libskia.a` are available before attempting a demo. The
-failed checks include remediation text with the next setup step. The
+the in-tree audio-inspector demo source, `adb`, `xcrun`, REAPER, or
+`external/skia-build/libskia.a` are available before attempting a demo, and
+whether design-parity has a source image at
+`planning/screenshots/reference.png`. The failed checks include remediation text
+with the next setup step. The
 status filter uses declared matrix status by default; with `--check`, it uses
 computed local readiness, so `--target mac --status ready --check` prints the
 macOS proofs this machine can run now. The

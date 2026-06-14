@@ -423,8 +423,9 @@ the current macOS lane, `--target ios-simulator` narrows to simulator capture,
 `--scenario component-zoom` prints one row, `--status ready` filters by status,
 and `--json` is suitable for automation. Add `--check` on a fresh machine or
 blackbook to include machine-local readiness checks for obvious blockers such
-as missing `cmake`, the in-tree audio-inspector demo source, `adb`, `xcrun`, REAPER, or
-`external/skia-build/libskia.a`. Failed checks include remediation text with the
+as missing `cmake`, the in-tree audio-inspector demo source, `adb`, `xcrun`,
+REAPER, `external/skia-build/libskia.a`, or the design-parity source image at
+`planning/screenshots/reference.png`. Failed checks include remediation text with the
 next setup step. With `--check`, `--status` filters by computed local readiness
 instead of declared status, so `--target mac --status ready --check` is the
 quick "what can I record here?" query. The matrix carries

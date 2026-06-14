@@ -576,6 +576,14 @@ def _video_matrix_check(
             str(source) if source.is_dir() else f"missing source directory: {source}",
             remediation="Run this check from a complete Pulp source checkout that includes examples/audio-inspector-demo.",
         )
+    if item["id"] == "design-parity":
+        source_image = repo_root / "planning" / "screenshots" / "reference.png"
+        add(
+            "design-parity.source-image",
+            source_image.is_file(),
+            str(source_image) if source_image.is_file() else f"missing source image: {source_image}",
+            remediation="Export or provide the source/reference image at planning/screenshots/reference.png, or choose another ready proof scenario.",
+        )
     if item["id"] == "reaper-plugin-editor":
         reaper_path = Path("/Applications/REAPER.app/Contents/MacOS/REAPER")
         add(
