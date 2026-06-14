@@ -32,6 +32,10 @@ or reviewer comprehension matters.
   the machine-readable install policy. It should report a machine-scoped
   `tool_addon`, `package_format: not_pulp_add`, and, on this feature branch,
   `artifact_status: source_tree_iteration`.
+- Use `python3 tools/local-ci/pack_video_proof_tool.py --json` when the branch
+  needs a reviewable source add-on artifact. The packer records `sha256`, size,
+  included files, npm pins, and policy flags, and it excludes `node_modules`,
+  Remotion caches, and generated videos.
 - Prefer short clips: 5-12 seconds is the normal range. Keep the recording
   focused on the window or component under test.
 - Prefer `video/proof-composed.mp4` for review. Keep `video/proof.mp4` as the
@@ -122,6 +126,15 @@ Smoke-test Remotion composition without requiring macOS Screen Recording:
 
 ```bash
 npm --prefix tools/local-ci run smoke-video-proof
+```
+
+Pack the source-tree video-proof tool payload for install/distribution review:
+
+```bash
+SOURCE_DATE_EPOCH=0 python3 tools/local-ci/pack_video_proof_tool.py \
+  --output-dir /tmp/pulp-video-proof-tool-pack \
+  --version 0.0.0-local \
+  --json
 ```
 
 Enable optional video capture for the mac desktop target:

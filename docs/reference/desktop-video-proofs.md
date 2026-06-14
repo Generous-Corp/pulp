@@ -51,6 +51,11 @@ The long-term split should stay narrow:
   `artifact_status: source_tree_iteration`.
 - The source-tree developer path can still use `npm --prefix tools/local-ci
   install` for direct iteration.
+- Before mainline release, produce a reviewable source add-on artifact with
+  `python3 tools/local-ci/pack_video_proof_tool.py --json`. The artifact is a
+  small zip plus manifest that contains only Pulp-owned package source,
+  `package-lock.json`, Remotion template source, and wrapper scripts; it
+  explicitly excludes `node_modules`, Remotion caches, and generated videos.
 - Reusable demo scenarios or source material may later be distributed as
   reviewed Pulp kits/content packs, but the recorder/composer itself should
   remain a tool add-on.
@@ -121,6 +126,20 @@ pulp tool doctor video-proof --run
 For direct feature-branch iteration, the equivalent source-tree install is
 `npm --prefix tools/local-ci install`, and the source-tree smoke check is
 `npm --prefix tools/local-ci run smoke-video-proof`.
+
+Pack the current source-tree tool payload for review before changing the
+registry from source-tree iteration to a versioned add-on artifact:
+
+```bash
+SOURCE_DATE_EPOCH=0 python3 tools/local-ci/pack_video_proof_tool.py \
+  --output-dir /tmp/pulp-video-proof-tool-pack \
+  --version 0.0.0-local \
+  --json
+```
+
+The generated manifest records the zip path, `sha256`, size, included files,
+Remotion/ffmpeg-static npm pins, and the policy flags that keep this machine
+tool separate from core Pulp and `pulp add`.
 
 Validate the eventual optional tool install path from a fresh source checkout:
 

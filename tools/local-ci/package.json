@@ -5,6 +5,7 @@
   "version": "0.0.0",
   "scripts": {
     "compose-video-proof": "node scripts/compose-video-proof.mjs",
+    "pack-video-proof-tool": "python3 pack_video_proof_tool.py",
     "smoke-video-proof": "node scripts/smoke-video-proof.mjs"
   },
   "devDependencies": {
