@@ -331,7 +331,7 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
         "template": "standalone",
         "proves": "A Pulp standalone launches, accepts a click, and visibly changes state.",
         "prepare_command": (
-            "cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF && "
+            'cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF -DSKIA_DIR="$(pwd)/external/skia-build" && '
             "cmake --build build-desktop-automation --target pulp-ui-preview -j$(sysctl -n hw.ncpu)"
         ),
         "command": (
@@ -339,7 +339,7 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
             "--recipe standalone-interaction "
             "--source-mode exact-sha "
             "--command './build-desktop-automation/examples/ui-preview/pulp-ui-preview' "
-            "--prepare-command 'cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF && "
+            "--prepare-command 'cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF -DSKIA_DIR=\"$(pwd)/external/skia-build\" && "
             "cmake --build build-desktop-automation --target pulp-ui-preview -j$(sysctl -n hw.ncpu)' "
             "--pulp-app-automation --capture-ui-snapshot --click-view-id bypass-toggle "
             "--label standalone-bypass-toggle --compose-video-proof"
@@ -453,7 +453,7 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
         "template": "component-zoom",
         "proves": "The proof highlights one component so the reviewer does not hunt through the full window.",
         "prepare_command": (
-            "cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF && "
+            'cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF -DSKIA_DIR="$(pwd)/external/skia-build" && '
             "cmake --build build-desktop-automation --target pulp-ui-preview -j$(sysctl -n hw.ncpu)"
         ),
         "command": (
@@ -461,7 +461,7 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
             "--recipe component-zoom "
             "--source-mode exact-sha "
             "--command './build-desktop-automation/examples/ui-preview/pulp-ui-preview' "
-            "--prepare-command 'cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF && "
+            "--prepare-command 'cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF -DSKIA_DIR=\"$(pwd)/external/skia-build\" && "
             "cmake --build build-desktop-automation --target pulp-ui-preview -j$(sysctl -n hw.ncpu)' "
             "--pulp-app-automation --capture-ui-snapshot --component-id bypass-toggle "
             "--click-view-id bypass-toggle --label component-bypass-toggle "

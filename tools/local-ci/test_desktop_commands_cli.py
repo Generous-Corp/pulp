@@ -213,10 +213,11 @@ class DesktopCommandsCliTests(unittest.TestCase):
         standalone = next(item for item in payload["scenarios"] if item["id"] == "standalone-interaction")
         self.assertEqual(
             standalone["prepare_command"],
-            "cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF && "
+            'cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF -DSKIA_DIR="$(pwd)/external/skia-build" && '
             "cmake --build build-desktop-automation --target pulp-ui-preview -j$(sysctl -n hw.ncpu)",
         )
         self.assertIn("--prepare-command", standalone["command"])
+        self.assertIn('-DSKIA_DIR="$(pwd)/external/skia-build"', standalone["command"])
         self.assertIn("--source-mode exact-sha", standalone["command"])
         self.assertIn("--pulp-app-automation", standalone["command"])
         self.assertIn("./build-desktop-automation/examples/ui-preview/pulp-ui-preview", standalone["command"])
@@ -234,6 +235,9 @@ class DesktopCommandsCliTests(unittest.TestCase):
         self.assertIn("-DPULP_ENABLE_GPU=OFF", inspector["prepare_command"])
         self.assertIn("./build-video-nogpu/examples/audio-inspector-demo/pulp-audio-inspector-demo", inspector["command"])
         self.assertNotIn("--capture-ui-snapshot", inspector["command"])
+        component = next(item for item in payload["scenarios"] if item["id"] == "component-zoom")
+        self.assertIn('-DSKIA_DIR="$(pwd)/external/skia-build"', component["prepare_command"])
+        self.assertIn('-DSKIA_DIR="$(pwd)/external/skia-build"', component["command"])
         linux = next(item for item in payload["scenarios"] if item["id"] == "linux-xvfb-desktop")
         self.assertEqual(linux["platform"], "ubuntu")
         self.assertEqual(linux["status"], "planned")
