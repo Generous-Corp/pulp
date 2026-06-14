@@ -143,6 +143,10 @@ SOURCE_DATE_EPOCH=0 python3 tools/local-ci/pack_video_proof_tool.py \
 python3 tools/local-ci/pack_video_proof_tool.py \
   --verify /tmp/pulp-video-proof-tool-pack/pulp-video-proof-tool-0.0.0-local.manifest.json \
   --json
+
+pulp tool install video-proof \
+  --artifact-manifest /tmp/pulp-video-proof-tool-pack/pulp-video-proof-tool-0.0.0-local.manifest.json \
+  --force
 ```
 
 The generated manifest records the zip path, `sha256`, size, included files,
@@ -151,6 +155,11 @@ tool separate from core Pulp and `pulp add`. The verifier checks the manifest
 schema, install policy, archive size and `sha256`, zip entry list, required
 payload files, excluded generated/dependency paths, and required npm scripts and
 dependency pins.
+
+The `--artifact-manifest` install path is an explicit review lane for verified
+local artifacts. The default `pulp tool install video-proof` path remains the
+source-tree npm install on this feature branch until humans approve switching
+the registry to a versioned add-on source.
 
 Validate the eventual optional tool install path from a fresh source checkout:
 

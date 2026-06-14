@@ -3,8 +3,8 @@
 //
 // Coverage tranche for issue #643. These tests stay on local registry,
 // discovery, uninstall, and command dispatch paths. They intentionally avoid
-// network downloads, archive extraction, Python package installs, and running
-// external tools from the registry.
+// network downloads, Python package installs, and running external tools from
+// the registry. The video-proof artifact install test uses a tiny local zip.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -121,6 +121,32 @@ std::string read_file(const fs::path& path) {
 fs::path touch_file(const fs::path& path) {
     write_file(path, "fixture\n");
     return path;
+}
+
+std::string python_string_literal(const std::string& s) {
+    std::string out = "\"";
+    for (char c : s) {
+        if (c == '\\' || c == '"') out += '\\', out += c;
+        else if (c == '\n') out += "\\n";
+        else if (c == '\r') out += "\\r";
+        else out += c;
+    }
+    out += '"';
+    return out;
+}
+
+void create_zip_with_python(const fs::path& zip_path,
+                            const std::vector<std::pair<std::string, std::string>>& entries) {
+    auto script = zip_path.parent_path() / "make_zip.py";
+    std::ostringstream py;
+    py << "import zipfile\n";
+    py << "z = zipfile.ZipFile(" << std::quoted(zip_path.string()) << ", 'w')\n";
+    for (const auto& [name, body] : entries) {
+        py << "z.writestr(" << std::quoted(name) << ", " << python_string_literal(body) << ")\n";
+    }
+    py << "z.close()\n";
+    write_file(script, py.str());
+    REQUIRE(std::system(("/usr/bin/python3 " + script.string()).c_str()) == 0);
 }
 
 std::string system_shell_tool_id() {
@@ -626,14 +652,19 @@ TEST_CASE("tool install helpers have deterministic local exits",
     auto fake_bin = tmp.path / "fake-bin";
     auto fake_npm = fake_bin / "npm";
     write_file(fake_npm, "#!/bin/sh\nexit 0\n");
+    auto fake_python = fake_bin / "python3";
+    write_file(fake_python, "#!/bin/sh\nexec /usr/bin/python3 \"$@\"\n");
     fs::permissions(fake_npm,
+                    fs::perms::owner_exec | fs::perms::group_exec | fs::perms::others_exec,
+                    fs::perm_options::add);
+    fs::permissions(fake_python,
                     fs::perms::owner_exec | fs::perms::group_exec | fs::perms::others_exec,
                     fs::perm_options::add);
     auto repo = tmp.path / "repo";
     write_file(repo / "tools" / "local-ci" / "package.json",
                "{\"scripts\":{\"smoke-video-proof\":\"node smoke.mjs\"}}\n");
     write_file(repo / "tools" / "packages" / "tool-registry.json", "{}\n");
-    ScopedEnv path{"PATH", fake_bin};
+    ScopedEnv path{"PATH", fs::path(fake_bin.string() + ":/usr/bin:/bin:/usr/local/bin")};
     auto fresh_npm = npm;
     fresh_npm.id = "fresh-npm-tool";
     auto installed_npm = install_npm_tool(
@@ -648,6 +679,50 @@ TEST_CASE("tool install helpers have deterministic local exits",
         read_file(installed_npm.binary_path.parent_path() / "manifest.json");
     REQUIRE(manifest_text.find("\"method\": \"npm_package\"") != std::string::npos);
     REQUIRE(manifest_text.find((repo / "tools" / "local-ci").string()) != std::string::npos);
+
+    auto artifact_repo = tmp.path / "artifact-repo";
+    auto artifact_registry = artifact_repo / "tools" / "packages" / "tool-registry.json";
+    write_file(artifact_registry, "{}\n");
+    write_file(artifact_repo / "tools" / "local-ci" / "pack_video_proof_tool.py",
+               "import sys\nprint('{\"ok\": true}')\nsys.exit(0)\n");
+    auto zip_path = tmp.path / "video-proof-artifact.zip";
+    create_zip_with_python(
+        zip_path,
+        {
+            {"tools/local-ci/package.json",
+             "{\"scripts\":{\"smoke-video-proof\":\"node smoke.mjs\"}}\n"},
+            {"tools/local-ci/package-lock.json", "{\"lockfileVersion\":3}\n"},
+            {"tools/local-ci/scripts/smoke-video-proof.mjs", "console.log('ok')\n"},
+        });
+    auto manifest_path = tmp.path / "video-proof-artifact.manifest.json";
+    write_file(manifest_path,
+               std::string("{\n") +
+                   "  \"schema\": \"pulp.video-proof-tool-package.v1\",\n" +
+                   "  \"tool_id\": \"artifact-npm-tool\",\n" +
+                   "  \"distribution_lane\": \"tool_addon\",\n" +
+                   "  \"package_format\": \"not_pulp_add\",\n" +
+                   "  \"artifact\": {\"path\": \"" + quote_json(zip_path.string()) + "\"}\n" +
+                   "}\n");
+    auto artifact_npm = npm;
+    artifact_npm.id = "artifact-npm-tool";
+    artifact_npm.artifact_verify_command =
+        "python3 tools/local-ci/pack_video_proof_tool.py --verify <manifest> --json";
+    auto installed_artifact = install_npm_tool(
+        artifact_npm,
+        artifact_registry,
+        /*force=*/true,
+        manifest_path);
+    INFO(installed_artifact.error);
+    REQUIRE(installed_artifact.ok);
+    const auto artifact_manifest_text =
+        read_file(installed_artifact.binary_path.parent_path() / "manifest.json");
+    REQUIRE(artifact_manifest_text.find("\"method\": \"npm_package_artifact\"") != std::string::npos);
+    REQUIRE(artifact_manifest_text.find("\"artifact_manifest\":") != std::string::npos);
+    REQUIRE(artifact_manifest_text.find("\"artifact_path\":") != std::string::npos);
+    REQUIRE(artifact_manifest_text.find("artifact-npm-tool") != std::string::npos);
+    REQUIRE(artifact_manifest_text.find("tools/npm-packages/artifact-npm-tool/package") != std::string::npos);
+    REQUIRE(artifact_manifest_text.find("pulp-video-proof-tool-artifact") == std::string::npos);
+    REQUIRE(fs::exists(installed_artifact.binary_path.parent_path() / "package" / "package.json"));
 #endif
 }
 

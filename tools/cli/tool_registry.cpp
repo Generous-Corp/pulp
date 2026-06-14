@@ -4,6 +4,7 @@
 #include <pulp/platform/child_process.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <fstream>
 #include <iomanip>
@@ -290,8 +291,52 @@ static fs::path repo_root_from_registry(const fs::path& registry_path) {
     return tools.parent_path();
 }
 
+static fs::path unique_temp_dir(const std::string& prefix) {
+    auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    return fs::temp_directory_path() / (prefix + "-" + std::to_string(stamp));
+}
+
+static fs::path absolute_from(const fs::path& base, const std::string& path) {
+    fs::path p(path);
+    if (p.is_absolute()) return p;
+    return base / p;
+}
+
+static const JsonValue* object_field(const JsonValue& value, const std::string& key) {
+    auto* field = value.get(key);
+    return field && field->type == JsonValue::Object ? field : nullptr;
+}
+
+static std::string string_field(const JsonValue& value, const std::string& key) {
+    auto* field = value.get(key);
+    return field && field->type == JsonValue::String ? field->str_val : std::string{};
+}
+
 static fs::path npm_tool_dir(const ToolDescriptor& tool) {
     return tools_dir() / "npm-packages" / tool.id;
+}
+
+static bool copy_directory_tree(const fs::path& source, const fs::path& dest, std::string& error) {
+    std::error_code ec;
+    fs::remove_all(dest, ec);
+    if (ec) {
+        error = "failed to remove existing package root " + dest.string() + ": " + ec.message();
+        return false;
+    }
+    fs::create_directories(dest.parent_path(), ec);
+    if (ec) {
+        error = "failed to create package parent " + dest.parent_path().string() + ": " + ec.message();
+        return false;
+    }
+    fs::copy(source,
+             dest,
+             fs::copy_options::recursive | fs::copy_options::overwrite_existing,
+             ec);
+    if (ec) {
+        error = "failed to copy artifact package into managed install root: " + ec.message();
+        return false;
+    }
+    return true;
 }
 
 static fs::path npm_tool_wrapper_path(const ToolDescriptor& tool) {
@@ -329,6 +374,88 @@ bool extract_archive(const fs::path& archive, const fs::path& dest,
 #endif
 
     return r.exit_code == 0;
+}
+
+static bool verify_video_proof_artifact_manifest(const ToolDescriptor& tool,
+                                                 const fs::path& registry_path,
+                                                 const fs::path& manifest_path,
+                                                 std::string& error) {
+    if (tool.artifact_verify_command.empty()) {
+        error = "tool '" + tool.id + "' does not expose an artifact verifier";
+        return false;
+    }
+    auto script = repo_root_from_registry(registry_path) /
+                  "tools" / "local-ci" / "pack_video_proof_tool.py";
+    if (!fs::exists(script)) {
+        error = "artifact verifier script not found at " + script.string();
+        return false;
+    }
+    auto verify = pulp::platform::exec(
+        "python3", {script.string(), "--verify", manifest_path.string(), "--json"}, 300000);
+    if (verify.exit_code != 0) {
+        error = "artifact verification failed: " + verify.stderr_output + verify.stdout_output;
+        return false;
+    }
+    return true;
+}
+
+static bool resolve_verified_artifact_package_root(const ToolDescriptor& tool,
+                                                   const fs::path& registry_path,
+                                                   const fs::path& manifest_path,
+                                                   fs::path& package_root,
+                                                   fs::path& artifact_path,
+                                                   std::string& error) {
+    auto resolved_manifest = fs::absolute(manifest_path);
+    if (!fs::exists(resolved_manifest)) {
+        error = "artifact manifest not found: " + resolved_manifest.string();
+        return false;
+    }
+    if (!verify_video_proof_artifact_manifest(tool, registry_path, resolved_manifest, error))
+        return false;
+
+    JsonParser parser{read_file(resolved_manifest)};
+    auto root = parser.parse();
+    if (root.type != JsonValue::Object) {
+        error = "artifact manifest is not a JSON object: " + resolved_manifest.string();
+        return false;
+    }
+    if (string_field(root, "schema") != "pulp.video-proof-tool-package.v1") {
+        error = "unsupported artifact manifest schema: " + string_field(root, "schema");
+        return false;
+    }
+    if (string_field(root, "tool_id") != tool.id) {
+        error = "artifact manifest tool_id does not match " + tool.id;
+        return false;
+    }
+    if (string_field(root, "distribution_lane") != "tool_addon" ||
+        string_field(root, "package_format") != "not_pulp_add") {
+        error = "artifact manifest is not a tool add-on package";
+        return false;
+    }
+    auto* artifact = object_field(root, "artifact");
+    if (!artifact) {
+        error = "artifact manifest is missing artifact object";
+        return false;
+    }
+    artifact_path = absolute_from(resolved_manifest.parent_path(), string_field(*artifact, "path"));
+    if (!fs::exists(artifact_path)) {
+        error = "artifact zip not found: " + artifact_path.string();
+        return false;
+    }
+
+    auto staging = unique_temp_dir("pulp-video-proof-tool-artifact");
+    std::error_code ec;
+    fs::remove_all(staging, ec);
+    if (!extract_archive(artifact_path, staging, "zip")) {
+        error = "failed to extract artifact zip: " + artifact_path.string();
+        return false;
+    }
+    package_root = staging / "tools" / "local-ci";
+    if (!fs::exists(package_root / "package.json")) {
+        error = "artifact zip did not contain tools/local-ci/package.json";
+        return false;
+    }
+    return true;
 }
 
 // ── Tool Location ──
@@ -616,9 +743,11 @@ ToolInstallResult install_python_tool(const ToolDescriptor& tool,
 
 // ── Repo-Local npm Tool Install ──
 
-ToolInstallResult install_npm_tool(const ToolDescriptor& tool,
-                                   const fs::path& registry_path,
-                                   bool force) {
+static ToolInstallResult install_npm_tool_from_package_root(const ToolDescriptor& tool,
+                                                            fs::path package_root,
+                                                            bool force,
+                                                            const fs::path& artifact_manifest,
+                                                            const fs::path& artifact_path) {
     ToolInstallResult result;
 
     auto wrapper_path = npm_tool_wrapper_path(tool);
@@ -635,14 +764,17 @@ ToolInstallResult install_npm_tool(const ToolDescriptor& tool,
         return result;
     }
 
-    if (tool.npm_package_root.empty()) {
-        result.error = "npm_package_root is required for npm_package tools";
-        return result;
+    auto install_dir = npm_tool_dir(tool);
+    if (!artifact_manifest.empty()) {
+        std::string copy_error;
+        auto managed_package_root = install_dir / "package";
+        if (!copy_directory_tree(package_root, managed_package_root, copy_error)) {
+            result.error = copy_error;
+            return result;
+        }
+        package_root = managed_package_root;
     }
 
-    auto package_root = fs::path(tool.npm_package_root);
-    if (package_root.is_relative())
-        package_root = repo_root_from_registry(registry_path) / package_root;
     std::error_code ec;
     package_root = fs::weakly_canonical(package_root, ec);
     if (ec) package_root = fs::absolute(package_root);
@@ -660,7 +792,6 @@ ToolInstallResult install_npm_tool(const ToolDescriptor& tool,
         return result;
     }
 
-    auto install_dir = npm_tool_dir(tool);
     fs::create_directories(install_dir);
 #ifdef _WIN32
     std::string wrapper = "@echo off\r\n"
@@ -697,9 +828,13 @@ ToolInstallResult install_npm_tool(const ToolDescriptor& tool,
     manifest << "{\n"
              << "  \"tool_id\": \"" << tool.id << "\",\n"
              << "  \"version\": \"" << tool.pinned_version << "\",\n"
-             << "  \"method\": \"npm_package\",\n"
+             << "  \"method\": \"" << (artifact_manifest.empty() ? "npm_package" : "npm_package_artifact") << "\",\n"
              << "  \"package_root\": \"" << package_root.string() << "\",\n"
              << "  \"wrapper_path\": \"" << wrapper_path.string() << "\"";
+    if (!artifact_manifest.empty())
+        manifest << ",\n  \"artifact_manifest\": \"" << json_escape(fs::absolute(artifact_manifest).string()) << "\"";
+    if (!artifact_path.empty())
+        manifest << ",\n  \"artifact_path\": \"" << json_escape(fs::absolute(artifact_path).string()) << "\"";
     if (!tool.artifact_pack_command.empty())
         manifest << ",\n  \"artifact_pack_command\": \"" << json_escape(tool.artifact_pack_command) << "\"";
     if (!tool.artifact_pack_npm_script.empty())
@@ -716,6 +851,36 @@ ToolInstallResult install_npm_tool(const ToolDescriptor& tool,
     result.binary_path = wrapper_path;
     result.installed_version = tool.pinned_version;
     return result;
+}
+
+ToolInstallResult install_npm_tool(const ToolDescriptor& tool,
+                                   const fs::path& registry_path,
+                                   bool force,
+                                   const fs::path& artifact_manifest) {
+    if (!artifact_manifest.empty()) {
+        fs::path package_root;
+        fs::path artifact_path;
+        std::string error;
+        if (!resolve_verified_artifact_package_root(
+                tool, registry_path, artifact_manifest, package_root, artifact_path, error)) {
+            ToolInstallResult result;
+            result.error = error;
+            return result;
+        }
+        return install_npm_tool_from_package_root(
+            tool, package_root, force, artifact_manifest, artifact_path);
+    }
+
+    if (tool.npm_package_root.empty()) {
+        ToolInstallResult result;
+        result.error = "npm_package_root is required for npm_package tools";
+        return result;
+    }
+
+    auto package_root = fs::path(tool.npm_package_root);
+    if (package_root.is_relative())
+        package_root = repo_root_from_registry(registry_path) / package_root;
+    return install_npm_tool_from_package_root(tool, package_root, force, {}, {});
 }
 
 // ── Uninstall ──
@@ -773,6 +938,8 @@ int cmd_tool(const std::vector<std::string>& args) {
                   << "  list                    Show available and installed tools\n"
                   << "  info <tool> [--json]    Show install/package metadata for one tool\n"
                   << "  install <tool>          Download and install a tool\n"
+                  << "  install <tool> --artifact-manifest <path>\n"
+                  << "                          Install an npm tool from a verified local artifact\n"
                   << "  install <importer>      Install a framework importer (checksummed,\n"
                   << "                          SDK/SPI-window-checked; --from <path> for local)\n"
                   << "  install --all           Install all tools for current platform\n"
@@ -857,7 +1024,7 @@ int cmd_tool(const std::vector<std::string>& args) {
 
     if (subcmd == "install") {
         if (args.size() < 2) {
-            print_fail("Usage: pulp tool install <tool-id> [--force]");
+            print_fail("Usage: pulp tool install <tool-id> [--force] [--artifact-manifest <path>]");
             return 1;
         }
 
@@ -865,6 +1032,7 @@ int cmd_tool(const std::vector<std::string>& args) {
         bool all = false;
         std::string tool_id;
         std::string from_override;
+        fs::path artifact_manifest;
         for (size_t i = 1; i < args.size(); ++i) {
             if (args[i] == "--force") force = true;
             else if (args[i] == "--all") all = true;
@@ -875,7 +1043,18 @@ int cmd_tool(const std::vector<std::string>& args) {
                 }
                 from_override = args[++i];
             }
+            else if (args[i] == "--artifact-manifest") {
+                if (i + 1 >= args.size()) {
+                    print_fail("--artifact-manifest requires a manifest path");
+                    return 1;
+                }
+                artifact_manifest = args[++i];
+            }
             else tool_id = args[i];
+        }
+        if (all && !artifact_manifest.empty()) {
+            print_fail("--artifact-manifest is only valid with one npm_package tool");
+            return 1;
         }
 
         // Importer add-ons (#19) install via the checksummed, version-window
@@ -924,7 +1103,7 @@ int cmd_tool(const std::vector<std::string>& args) {
             else if (tool.install_method == "python_pip")
                 result = install_python_tool(tool, reg, force);
             else if (tool.install_method == "npm_package")
-                result = install_npm_tool(tool, reg_path, force);
+                result = install_npm_tool(tool, reg_path, force, artifact_manifest);
             else {
                 print_fail("Unknown install method: " + tool.install_method);
                 return 1;

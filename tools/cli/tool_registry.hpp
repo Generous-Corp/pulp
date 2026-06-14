@@ -150,7 +150,8 @@ ToolInstallResult install_python_tool(const ToolDescriptor& tool,
                                        bool force = false);
 ToolInstallResult install_npm_tool(const ToolDescriptor& tool,
                                    const fs::path& registry_path,
-                                   bool force = false);
+                                   bool force = false,
+                                   const fs::path& artifact_manifest = {});
 bool uninstall_tool(const std::string& tool_id);
 
 // ── Archive Extraction ──

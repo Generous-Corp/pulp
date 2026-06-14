@@ -22,6 +22,7 @@
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use crate::color;
 use crate::error::{CliError, Result};
@@ -52,6 +53,8 @@ pub enum Sub {
         all: bool,
         /// `--force`.
         force: bool,
+        /// Optional verified artifact manifest for npm tool add-ons.
+        artifact_manifest: Option<PathBuf>,
     },
     /// `uninstall <id>`.
     Uninstall(String),
@@ -109,19 +112,42 @@ pub fn parse_sub(args: &[String]) -> Result<Sub> {
             let mut id = None;
             let mut all = false;
             let mut force = false;
-            for a in &args[1..] {
-                match a.as_str() {
+            let mut artifact_manifest = None;
+            let mut i = 1;
+            while i < args.len() {
+                match args[i].as_str() {
                     "--all" => all = true,
                     "--force" => force = true,
-                    _ => id = Some(a.clone()),
+                    "--artifact-manifest" => {
+                        i += 1;
+                        let Some(path) = args.get(i) else {
+                            return Err(CliError::BadUsage(
+                                "Usage: pulp tool install <tool-id> [--force] [--artifact-manifest <path>]".to_owned(),
+                            ));
+                        };
+                        artifact_manifest = Some(PathBuf::from(path));
+                    }
+                    _ => id = Some(args[i].clone()),
                 }
+                i += 1;
             }
             if !all && id.is_none() {
                 return Err(CliError::BadUsage(
-                    "Usage: pulp tool install <tool-id> [--force]".to_owned(),
+                    "Usage: pulp tool install <tool-id> [--force] [--artifact-manifest <path>]"
+                        .to_owned(),
                 ));
             }
-            Ok(Sub::Install { id, all, force })
+            if all && artifact_manifest.is_some() {
+                return Err(CliError::BadUsage(
+                    "--artifact-manifest is only valid with one npm_package tool".to_owned(),
+                ));
+            }
+            Ok(Sub::Install {
+                id,
+                all,
+                force,
+                artifact_manifest,
+            })
         }
         "uninstall" => {
             let id = args.get(1).cloned().ok_or_else(|| {
@@ -185,9 +211,21 @@ pub fn run<S: Spawner>(sub: &Sub, spawner: &S, out: &mut impl Write) -> Result<i
         Sub::Help => unreachable!(), // handled above
         Sub::List => list(&reg, out),
         Sub::Info { id, json } => info(&reg, id, *json, out),
-        Sub::Install { id, all, force } => {
-            install(&reg, &reg_path, id.as_deref(), *all, *force, spawner, out)
-        }
+        Sub::Install {
+            id,
+            all,
+            force,
+            artifact_manifest,
+        } => install(
+            &reg,
+            &reg_path,
+            id.as_deref(),
+            *all,
+            *force,
+            artifact_manifest.as_deref(),
+            spawner,
+            out,
+        ),
         Sub::Uninstall(id) => uninstall(id, out),
         Sub::Path(id) => path(&reg, id, out),
         Sub::Run { id, args } => run_tool(&reg, id, args, spawner, out),
@@ -211,6 +249,8 @@ pub fn print_help(out: &mut impl Write) -> Result<()> {
         \x20 list                    Show available and installed tools\n\
         \x20 info <tool> [--json]    Show install metadata for a tool\n\
         \x20 install <tool>          Download and install a tool\n\
+        \x20 install <tool> --artifact-manifest <path>\n\
+        \x20                         Install an npm tool from a verified local artifact\n\
         \x20 install --all           Install all tools for current platform\n\
         \x20 uninstall <tool>        Remove a pulp-managed tool\n\
         \x20 path <tool>             Print path to a tool's binary\n\
@@ -323,13 +363,28 @@ fn info(reg: &ToolRegistry, id: &str, json: bool, out: &mut impl Write) -> Resul
         writeln!(out, "Artifact pack command: {}", tool.artifact_pack_command).map_err(io)?;
     }
     if !tool.artifact_pack_npm_script.is_empty() {
-        writeln!(out, "Artifact pack npm script: {}", tool.artifact_pack_npm_script).map_err(io)?;
+        writeln!(
+            out,
+            "Artifact pack npm script: {}",
+            tool.artifact_pack_npm_script
+        )
+        .map_err(io)?;
     }
     if !tool.artifact_verify_command.is_empty() {
-        writeln!(out, "Artifact verify command: {}", tool.artifact_verify_command).map_err(io)?;
+        writeln!(
+            out,
+            "Artifact verify command: {}",
+            tool.artifact_verify_command
+        )
+        .map_err(io)?;
     }
     if !tool.artifact_manifest_schema.is_empty() {
-        writeln!(out, "Artifact manifest schema: {}", tool.artifact_manifest_schema).map_err(io)?;
+        writeln!(
+            out,
+            "Artifact manifest schema: {}",
+            tool.artifact_manifest_schema
+        )
+        .map_err(io)?;
     }
     if !tool.pinned_version.is_empty() {
         writeln!(out, "Pinned version: {}", tool.pinned_version).map_err(io)?;
@@ -390,6 +445,7 @@ fn install<S: Spawner>(
     id: Option<&str>,
     all: bool,
     force: bool,
+    artifact_manifest: Option<&Path>,
     spawner: &S,
     out: &mut impl Write,
 ) -> Result<i32> {
@@ -398,7 +454,7 @@ fn install<S: Spawner>(
         let mut delegated = false;
         for (tool_id, tool) in &reg.tools {
             if tool.install_method == "npm_package" {
-                rc |= install_npm_tool(tool, reg_path, force, spawner, out)?;
+                rc |= install_npm_tool(tool, reg_path, force, None, spawner, out)?;
             } else {
                 delegated = true;
                 writeln!(
@@ -431,7 +487,7 @@ fn install<S: Spawner>(
     };
 
     if tool.install_method == "npm_package" {
-        return install_npm_tool(tool, reg_path, force, spawner, out);
+        return install_npm_tool(tool, reg_path, force, artifact_manifest, spawner, out);
     }
 
     delegate_install(out)
@@ -456,10 +512,178 @@ fn delegate_install(out: &mut impl Write) -> Result<i32> {
     }
 }
 
+fn repo_root_from_registry(reg_path: &Path) -> Result<PathBuf> {
+    let packages = reg_path
+        .parent()
+        .ok_or_else(|| CliError::Other(format!("bad registry path {}", reg_path.display())))?;
+    let tools = packages
+        .parent()
+        .ok_or_else(|| CliError::Other(format!("bad registry path {}", reg_path.display())))?;
+    let repo = tools
+        .parent()
+        .ok_or_else(|| CliError::Other(format!("bad registry path {}", reg_path.display())))?;
+    Ok(repo.to_path_buf())
+}
+
+fn verify_artifact_manifest<S: Spawner>(
+    tool: &ToolDescriptor,
+    reg_path: &Path,
+    manifest: &Path,
+    spawner: &S,
+    out: &mut impl Write,
+) -> Result<bool> {
+    if tool.artifact_verify_command.is_empty() {
+        writeln!(
+            out,
+            "{red}✗{reset} tool '{}' does not expose an artifact verifier",
+            tool.id,
+            red = color::red(),
+            reset = color::reset()
+        )
+        .map_err(io)?;
+        return Ok(false);
+    }
+    let script = repo_root_from_registry(reg_path)?.join("tools/local-ci/pack_video_proof_tool.py");
+    if !script.is_file() {
+        writeln!(
+            out,
+            "{red}✗{reset} artifact verifier script not found at {}",
+            script.display(),
+            red = color::red(),
+            reset = color::reset()
+        )
+        .map_err(io)?;
+        return Ok(false);
+    }
+    let rc = spawner.run(
+        &Invocation::new("python3")
+            .arg(script.to_string_lossy().into_owned())
+            .arg("--verify")
+            .arg(manifest.to_string_lossy().into_owned())
+            .arg("--json"),
+    )?;
+    if rc != 0 {
+        writeln!(
+            out,
+            "{red}✗{reset} artifact verification failed with exit code {rc}",
+            red = color::red(),
+            reset = color::reset()
+        )
+        .map_err(io)?;
+        return Ok(false);
+    }
+    Ok(true)
+}
+
+fn resolve_artifact_package_root<S: Spawner>(
+    tool: &ToolDescriptor,
+    reg_path: &Path,
+    manifest: &Path,
+    spawner: &S,
+    out: &mut impl Write,
+) -> Result<Option<(PathBuf, PathBuf)>> {
+    let manifest = manifest
+        .canonicalize()
+        .map_err(|e| CliError::io(manifest.to_path_buf(), e))?;
+    if !verify_artifact_manifest(tool, reg_path, &manifest, spawner, out)? {
+        return Ok(None);
+    }
+    let text = fs::read_to_string(&manifest).map_err(|e| CliError::io(manifest.clone(), e))?;
+    let value: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| CliError::Other(format!("invalid artifact manifest JSON: {e}")))?;
+    if value.get("schema").and_then(|v| v.as_str()) != Some("pulp.video-proof-tool-package.v1") {
+        return Err(CliError::Other(
+            "unsupported artifact manifest schema".to_owned(),
+        ));
+    }
+    if value.get("tool_id").and_then(|v| v.as_str()) != Some(tool.id.as_str()) {
+        return Err(CliError::Other(format!(
+            "artifact manifest tool_id does not match {}",
+            tool.id
+        )));
+    }
+    if value.get("distribution_lane").and_then(|v| v.as_str()) != Some("tool_addon")
+        || value.get("package_format").and_then(|v| v.as_str()) != Some("not_pulp_add")
+    {
+        return Err(CliError::Other(
+            "artifact manifest is not a tool add-on package".to_owned(),
+        ));
+    }
+    let artifact_rel = value
+        .get("artifact")
+        .and_then(|v| v.get("path"))
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| CliError::Other("artifact manifest is missing artifact.path".to_owned()))?;
+    let artifact = {
+        let p = PathBuf::from(artifact_rel);
+        if p.is_absolute() {
+            p
+        } else {
+            manifest.parent().unwrap_or_else(|| Path::new(".")).join(p)
+        }
+    };
+    if !artifact.is_file() {
+        return Err(CliError::Other(format!(
+            "artifact zip not found: {}",
+            artifact.display()
+        )));
+    }
+    let staging = std::env::temp_dir().join(format!(
+        "pulp-video-proof-tool-artifact-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+    fs::create_dir_all(&staging).map_err(|e| CliError::io(staging.clone(), e))?;
+    let status = Command::new("tar")
+        .arg("-xf")
+        .arg(&artifact)
+        .arg("-C")
+        .arg(&staging)
+        .status()
+        .map_err(|e| CliError::Other(format!("could not spawn tar: {e}")))?;
+    if !status.success() {
+        return Err(CliError::Other(format!(
+            "failed to extract artifact zip: {}",
+            artifact.display()
+        )));
+    }
+    let package_root = staging.join("tools/local-ci");
+    if !package_root.join("package.json").is_file() {
+        return Err(CliError::Other(
+            "artifact zip did not contain tools/local-ci/package.json".to_owned(),
+        ));
+    }
+    Ok(Some((package_root, artifact)))
+}
+
+fn copy_dir_recursive(source: &Path, dest: &Path) -> Result<()> {
+    if dest.exists() {
+        fs::remove_dir_all(dest).map_err(|e| CliError::io(dest.to_path_buf(), e))?;
+    }
+    fs::create_dir_all(dest).map_err(|e| CliError::io(dest.to_path_buf(), e))?;
+    for entry in fs::read_dir(source).map_err(|e| CliError::io(source.to_path_buf(), e))? {
+        let entry = entry.map_err(|e| CliError::io(source.to_path_buf(), e))?;
+        let source_path = entry.path();
+        let dest_path = dest.join(entry.file_name());
+        let ty = entry
+            .file_type()
+            .map_err(|e| CliError::io(source_path.clone(), e))?;
+        if ty.is_dir() {
+            copy_dir_recursive(&source_path, &dest_path)?;
+        } else if ty.is_file() {
+            fs::copy(&source_path, &dest_path).map_err(|e| CliError::io(dest_path, e))?;
+        }
+    }
+    Ok(())
+}
+
 fn install_npm_tool<S: Spawner>(
     tool: &ToolDescriptor,
     reg_path: &Path,
     force: bool,
+    artifact_manifest: Option<&Path>,
     spawner: &S,
     out: &mut impl Write,
 ) -> Result<i32> {
@@ -496,7 +720,14 @@ fn install_npm_tool<S: Spawner>(
         return Ok(1);
     };
 
-    if tool.npm_package_root.is_empty() {
+    let (mut package_root, artifact_path) = if let Some(manifest) = artifact_manifest {
+        let Some((package_root, artifact_path)) =
+            resolve_artifact_package_root(tool, reg_path, manifest, spawner, out)?
+        else {
+            return Ok(1);
+        };
+        (package_root, Some(artifact_path))
+    } else if tool.npm_package_root.is_empty() {
         writeln!(
             out,
             "{red}✗{reset} npm_package_root is required for npm_package tools",
@@ -505,9 +736,18 @@ fn install_npm_tool<S: Spawner>(
         )
         .map_err(io)?;
         return Ok(1);
+    } else {
+        (
+            package_root_from_registry(reg_path, &tool.npm_package_root)?,
+            None,
+        )
+    };
+    let install_dir = npm_tool_dir(tool);
+    if artifact_manifest.is_some() {
+        let managed_package_root = install_dir.join("package");
+        copy_dir_recursive(&package_root, &managed_package_root)?;
+        package_root = managed_package_root;
     }
-
-    let package_root = package_root_from_registry(reg_path, &tool.npm_package_root)?;
     if !package_root.join("package.json").is_file() {
         writeln!(
             out,
@@ -543,19 +783,35 @@ fn install_npm_tool<S: Spawner>(
         return Ok(1);
     }
 
-    let install_dir = npm_tool_dir(tool);
     fs::create_dir_all(&install_dir).map_err(|e| CliError::io(install_dir.clone(), e))?;
     fs::write(&wrapper, npm_wrapper_body(tool, &package_root))
         .map_err(|e| CliError::io(wrapper.clone(), e))?;
     make_executable(&wrapper)?;
 
     let mut manifest = format!(
-        "{{\n  \"tool_id\": \"{}\",\n  \"version\": \"{}\",\n  \"method\": \"npm_package\",\n  \"package_root\": \"{}\",\n  \"wrapper_path\": \"{}\"",
+        "{{\n  \"tool_id\": \"{}\",\n  \"version\": \"{}\",\n  \"method\": \"{}\",\n  \"package_root\": \"{}\",\n  \"wrapper_path\": \"{}\"",
         json_escape(&tool.id),
         json_escape(&tool.pinned_version),
+        if artifact_manifest.is_some() {
+            "npm_package_artifact"
+        } else {
+            "npm_package"
+        },
         json_escape(package_root.to_string_lossy().as_ref()),
         json_escape(wrapper.to_string_lossy().as_ref()),
     );
+    if let Some(path) = artifact_manifest {
+        manifest.push_str(&format!(
+            ",\n  \"artifact_manifest\": \"{}\"",
+            json_escape(&path.to_string_lossy())
+        ));
+    }
+    if let Some(path) = artifact_path.as_ref() {
+        manifest.push_str(&format!(
+            ",\n  \"artifact_path\": \"{}\"",
+            json_escape(&path.to_string_lossy())
+        ));
+    }
     if !tool.artifact_pack_command.is_empty() {
         manifest.push_str(&format!(
             ",\n  \"artifact_pack_command\": \"{}\"",
@@ -978,6 +1234,22 @@ mod tests {
         }"#
     }
 
+    fn create_zip_with_python(zip_path: &Path, entries: &[(&str, &str)]) {
+        let script = zip_path.parent().unwrap().join("make_zip.py");
+        let mut body = String::from("import zipfile\n");
+        body.push_str(&format!("z = zipfile.ZipFile({:?}, 'w')\n", zip_path));
+        for (name, content) in entries {
+            body.push_str(&format!("z.writestr({name:?}, {content:?})\n"));
+        }
+        body.push_str("z.close()\n");
+        fs::write(&script, body).unwrap();
+        let status = Command::new("/usr/bin/python3")
+            .arg(&script)
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+
     #[test]
     fn parse_list_simple() {
         assert_eq!(parse_sub(&["list".into()]).unwrap(), Sub::List);
@@ -1088,6 +1360,7 @@ mod tests {
             Some("uv"),
             false,
             false,
+            None,
             &spawner,
             &mut buf,
         )
@@ -1144,6 +1417,7 @@ mod tests {
             Some("video-proof"),
             false,
             false,
+            None,
             &spawner,
             &mut buf,
         )
@@ -1170,13 +1444,136 @@ mod tests {
         assert!(wrapper_text.contains("smoke-video-proof"));
         let manifest_text = fs::read_to_string(manifest).unwrap();
         assert!(manifest_text.contains("\"method\": \"npm_package\""));
-        assert!(manifest_text.contains("\"artifact_pack_command\": \"python3 tools/local-ci/pack_video_proof_tool.py --json\""));
+        assert!(manifest_text.contains(
+            "\"artifact_pack_command\": \"python3 tools/local-ci/pack_video_proof_tool.py --json\""
+        ));
         assert!(manifest_text.contains("\"artifact_pack_npm_script\": \"npm --prefix tools/local-ci run pack-video-proof-tool -- --json\""));
         assert!(manifest_text.contains("\"artifact_verify_command\": \"python3 tools/local-ci/pack_video_proof_tool.py --verify <manifest> --json\""));
-        assert!(manifest_text.contains("\"artifact_manifest_schema\": \"pulp.video-proof-tool-package.v1\""));
+        assert!(manifest_text
+            .contains("\"artifact_manifest_schema\": \"pulp.video-proof-tool-package.v1\""));
         assert!(String::from_utf8(buf)
             .unwrap()
             .contains("Installed Video Proof"));
+
+        match old_path {
+            Some(value) => std::env::set_var("PATH", value),
+            None => std::env::remove_var("PATH"),
+        }
+        std::env::remove_var("PULP_HOME");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn install_npm_tool_from_verified_artifact_manifest() {
+        let _l = crate::test_support::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let td = plant_project(registry_body());
+        fs::create_dir_all(td.path().join("tools/local-ci")).unwrap();
+        fs::write(
+            td.path().join("tools/local-ci/pack_video_proof_tool.py"),
+            "print('{\"ok\": true}')\n",
+        )
+        .unwrap();
+        let zip_path = td.path().join("video-proof-artifact.zip");
+        create_zip_with_python(
+            &zip_path,
+            &[
+                (
+                    "tools/local-ci/package.json",
+                    r#"{"scripts":{"smoke-video-proof":"node smoke.mjs"}}"#,
+                ),
+                (
+                    "tools/local-ci/package-lock.json",
+                    r#"{"lockfileVersion":3}"#,
+                ),
+                (
+                    "tools/local-ci/scripts/smoke-video-proof.mjs",
+                    "console.log('ok')\n",
+                ),
+            ],
+        );
+        let manifest_path = td.path().join("video-proof-artifact.manifest.json");
+        fs::write(
+            &manifest_path,
+            format!(
+                "{{\n  \"schema\": \"pulp.video-proof-tool-package.v1\",\n  \"tool_id\": \"video-proof\",\n  \"distribution_lane\": \"tool_addon\",\n  \"package_format\": \"not_pulp_add\",\n  \"artifact\": {{\"path\": \"{}\"}}\n}}\n",
+                zip_path.display()
+            ),
+        )
+        .unwrap();
+
+        let fake_bin = tempfile::tempdir().unwrap();
+        let npm_path = if cfg!(windows) {
+            fake_bin.path().join("npm.exe")
+        } else {
+            fake_bin.path().join("npm")
+        };
+        fs::write(&npm_path, "fake npm\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(&npm_path).unwrap().permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&npm_path, perms).unwrap();
+        }
+        let old_path = std::env::var_os("PATH");
+        let mut path_entries = vec![fake_bin.path().to_path_buf()];
+        if let Some(existing) = old_path.as_ref() {
+            path_entries.extend(std::env::split_paths(existing));
+        }
+        let joined_path = std::env::join_paths(path_entries).unwrap();
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("PATH", joined_path);
+        std::env::set_var("PULP_HOME", home.path());
+
+        let reg_path = td.path().join("tools/packages/tool-registry.json");
+        let reg = load(&reg_path).unwrap();
+        let spawner = crate::proc::testing::RecordingSpawner::with_codes(vec![0, 0]);
+        let mut buf = Vec::new();
+        let rc = install(
+            &reg,
+            &reg_path,
+            Some("video-proof"),
+            false,
+            true,
+            Some(&manifest_path),
+            &spawner,
+            &mut buf,
+        )
+        .unwrap();
+
+        assert_eq!(rc, 0);
+        let calls = spawner.calls.borrow();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].program, "python3");
+        assert_eq!(calls[0].args[1], "--verify");
+        assert_eq!(
+            calls[0].args[2],
+            manifest_path
+                .canonicalize()
+                .unwrap()
+                .to_string_lossy()
+                .as_ref()
+        );
+        assert_eq!(calls[1].program, npm_path.to_string_lossy().as_ref());
+        assert_eq!(calls[1].args[0], "--prefix");
+        assert!(calls[1].args[1].contains("tools/npm-packages/video-proof/package"));
+        assert!(!calls[1].args[1].contains("pulp-video-proof-tool-artifact"));
+        assert_eq!(calls[1].args[2], "install");
+        let manifest = home
+            .path()
+            .join("tools/npm-packages/video-proof/manifest.json");
+        let manifest_text = fs::read_to_string(manifest).unwrap();
+        assert!(manifest_text.contains("\"method\": \"npm_package_artifact\""));
+        assert!(manifest_text.contains("\"artifact_manifest\":"));
+        assert!(manifest_text.contains("\"artifact_path\":"));
+        assert!(manifest_text.contains("tools/npm-packages/video-proof/package"));
+        assert!(!manifest_text.contains("pulp-video-proof-tool-artifact"));
+        assert!(home
+            .path()
+            .join("tools/npm-packages/video-proof/package/package.json")
+            .is_file());
 
         match old_path {
             Some(value) => std::env::set_var("PATH", value),
@@ -1215,7 +1612,9 @@ mod tests {
         assert!(s.contains("\"distribution_lane\":\"tool_addon\""));
         assert!(s.contains("\"package_format\":\"not_pulp_add\""));
         assert!(s.contains("\"artifact_status\":\"source_tree_iteration\""));
-        assert!(s.contains("\"artifact_pack_command\":\"python3 tools/local-ci/pack_video_proof_tool.py --json\""));
+        assert!(s.contains(
+            "\"artifact_pack_command\":\"python3 tools/local-ci/pack_video_proof_tool.py --json\""
+        ));
         assert!(s.contains("\"artifact_pack_npm_script\":\"npm --prefix tools/local-ci run pack-video-proof-tool -- --json\""));
         assert!(s.contains("\"artifact_verify_command\":\"python3 tools/local-ci/pack_video_proof_tool.py --verify <manifest> --json\""));
         assert!(s.contains("\"artifact_manifest_schema\":\"pulp.video-proof-tool-package.v1\""));
@@ -1315,10 +1714,16 @@ mod tests {
     fn parse_sub_install_with_id_only() {
         let s = parse_sub(&["install".to_owned(), "uv".to_owned()]).unwrap();
         match s {
-            Sub::Install { id, all, force } => {
+            Sub::Install {
+                id,
+                all,
+                force,
+                artifact_manifest,
+            } => {
                 assert_eq!(id.as_deref(), Some("uv"));
                 assert!(!all);
                 assert!(!force);
+                assert!(artifact_manifest.is_none());
             }
             other => panic!("expected Install, got {other:?}"),
         }
@@ -1333,10 +1738,16 @@ mod tests {
         ])
         .unwrap();
         match s {
-            Sub::Install { id, all, force } => {
+            Sub::Install {
+                id,
+                all,
+                force,
+                artifact_manifest,
+            } => {
                 assert!(id.is_none());
                 assert!(all);
                 assert!(force);
+                assert!(artifact_manifest.is_none());
             }
             other => panic!("expected Install, got {other:?}"),
         }

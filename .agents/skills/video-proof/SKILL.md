@@ -144,7 +144,15 @@ SOURCE_DATE_EPOCH=0 python3 tools/local-ci/pack_video_proof_tool.py \
 python3 tools/local-ci/pack_video_proof_tool.py \
   --verify /tmp/pulp-video-proof-tool-pack/pulp-video-proof-tool-0.0.0-local.manifest.json \
   --json
+
+pulp tool install video-proof \
+  --artifact-manifest /tmp/pulp-video-proof-tool-pack/pulp-video-proof-tool-0.0.0-local.manifest.json \
+  --force
 ```
+
+Use `--artifact-manifest` only as the explicit review lane for a verified local
+artifact. The default `pulp tool install video-proof` path remains the
+source-tree npm install until humans approve a versioned add-on source.
 
 Enable optional video capture for the mac desktop target:
 

@@ -378,6 +378,7 @@ def desktop_video_install_model() -> dict:
         "pack_command": "python3 tools/local-ci/pack_video_proof_tool.py --json",
         "pack_npm_script": "npm --prefix tools/local-ci run pack-video-proof-tool -- --json",
         "verify_command": "python3 tools/local-ci/pack_video_proof_tool.py --verify <manifest> --json",
+        "artifact_install_command": "pulp tool install video-proof --artifact-manifest <manifest> --force",
         "pack_manifest_schema": "pulp.video-proof-tool-package.v1",
         "install_scope": "machine",
         "distribution_lane": "tool_addon",
