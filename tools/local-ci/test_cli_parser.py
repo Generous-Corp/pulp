@@ -451,6 +451,10 @@ class CliParserTests(unittest.TestCase):
             "component-zoom",
             "--status",
             "blocked",
+            "--design-parity-manifest",
+            "/tmp/run/manifest.json",
+            "--design-parity-source-image",
+            "/tmp/source.png",
             "--markdown",
             "--check",
         ])
@@ -459,6 +463,8 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(args.target, "mac")
         self.assertEqual(args.scenario, "component-zoom")
         self.assertEqual(args.status, "blocked")
+        self.assertEqual(args.design_parity_manifest, "/tmp/run/manifest.json")
+        self.assertEqual(args.design_parity_source_image, "/tmp/source.png")
         self.assertTrue(args.markdown)
         self.assertTrue(args.check)
         self.assertFalse(args.json)

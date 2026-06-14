@@ -346,8 +346,10 @@ class DesktopCommandsCliTests(unittest.TestCase):
             self.assertNotIn("audio-inspector-demo", blocked_ids)
             design_parity = next(item for item in blocked_payload["scenarios"] if item["id"] == "design-parity")
             design_checks = {check["name"]: check for check in design_parity["local_readiness"]["checks"]}
+            self.assertFalse(design_checks["design-parity.run-manifest"]["ok"])
+            self.assertIn("--design-parity-manifest", design_checks["design-parity.run-manifest"]["remediation"])
             self.assertFalse(design_checks["design-parity.source-image"]["ok"])
-            self.assertIn("planning/screenshots/reference.png", design_checks["design-parity.source-image"]["remediation"])
+            self.assertIn("--design-parity-source-image", design_checks["design-parity.source-image"]["remediation"])
             for row in blocked_payload["scenarios"]:
                 self.assertEqual(row["status"], "blocked")
                 self.assertEqual(row["local_readiness"]["status"], "blocked")
@@ -361,7 +363,23 @@ class DesktopCommandsCliTests(unittest.TestCase):
                 repo_root=repo_root,
                 which_fn=lambda name: "/usr/bin/cmake" if name == "cmake" else None,
             )
-            self.assertIn("design-parity", {item["id"] for item in checked_payload["scenarios"]})
+            self.assertNotIn("design-parity", {item["id"] for item in checked_payload["scenarios"]})
+
+            manifest_path = repo_root / "runs" / "design" / "manifest.json"
+            manifest_path.parent.mkdir(parents=True)
+            manifest_path.write_text(json.dumps({"label": "design-parity-base-run"}) + "\n")
+            checked_payload = self.mod.desktop_video_matrix_payload(
+                target="mac",
+                status="ready",
+                check=True,
+                design_parity_manifest=manifest_path,
+                repo_root=repo_root,
+                which_fn=lambda name: "/usr/bin/cmake" if name == "cmake" else None,
+            )
+            design_ready = next(item for item in checked_payload["scenarios"] if item["id"] == "design-parity")
+            self.assertIn(str(manifest_path.resolve()), design_ready["command"])
+            self.assertIn(str((repo_root / "planning" / "screenshots" / "reference.png").resolve()), design_ready["command"])
+            self.assertEqual(design_ready["local_readiness"]["status"], "ready")
 
         self.printed.clear()
         result = self.mod.cmd_desktop_video_matrix(

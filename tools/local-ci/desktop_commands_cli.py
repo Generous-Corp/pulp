@@ -558,6 +558,8 @@ def _video_matrix_check(
     item: dict,
     *,
     repo_root: Path,
+    design_parity_manifest: Path | None = None,
+    design_parity_source_image: Path | None = None,
     which_fn: Callable[[str], str | None] = shutil.which,
 ) -> dict:
     checks: list[dict] = []
@@ -602,12 +604,19 @@ def _video_matrix_check(
             remediation="Run this check from a complete Pulp source checkout that includes examples/audio-inspector-demo.",
         )
     if item["id"] == "design-parity":
-        source_image = repo_root / "planning" / "screenshots" / "reference.png"
+        manifest = design_parity_manifest
+        source_image = design_parity_source_image or repo_root / "planning" / "screenshots" / "reference.png"
+        add(
+            "design-parity.run-manifest",
+            bool(manifest and manifest.is_file()),
+            str(manifest) if manifest and manifest.is_file() else "missing run manifest for design-parity composition",
+            remediation="Pass --design-parity-manifest /path/to/run/manifest.json after recording or choosing a run bundle to compare.",
+        )
         add(
             "design-parity.source-image",
             source_image.is_file(),
             str(source_image) if source_image.is_file() else f"missing source image: {source_image}",
-            remediation="Export or provide the source/reference image at planning/screenshots/reference.png, or choose another ready proof scenario.",
+            remediation="Pass --design-parity-source-image /path/to/source.png, export or provide planning/screenshots/reference.png, or choose another ready proof scenario.",
         )
     if item["id"] == "reaper-plugin-editor":
         reaper_path = Path("/Applications/REAPER.app/Contents/MacOS/REAPER")
@@ -661,10 +670,14 @@ def desktop_video_matrix_payload(
     scenario: str | None = None,
     status: str | None = None,
     check: bool = False,
+    design_parity_manifest: str | Path | None = None,
+    design_parity_source_image: str | Path | None = None,
     repo_root: Path | None = None,
     which_fn: Callable[[str], str | None] = shutil.which,
 ) -> dict:
     root = repo_root or Path.cwd()
+    design_parity_manifest_path = Path(design_parity_manifest).expanduser().resolve() if design_parity_manifest else None
+    design_parity_source_image_path = Path(design_parity_source_image).expanduser().resolve() if design_parity_source_image else None
     scenarios: list[dict] = []
     for item in VIDEO_PROOF_DEMO_SCENARIOS:
         if target and item["platform"] != target:
@@ -673,8 +686,24 @@ def desktop_video_matrix_payload(
             continue
         row = {key: value for key, value in item.items()}
         declared_status = str(row.get("status") or "")
+        if row["id"] == "design-parity":
+            manifest_for_command = design_parity_manifest_path or Path("/path/to/run/manifest.json")
+            source_for_command = design_parity_source_image_path or (root / "planning" / "screenshots" / "reference.png").resolve()
+            row["command"] = (
+                "python3 tools/local-ci/local_ci.py desktop compose-video "
+                f"{shlex.quote(str(manifest_for_command))} "
+                f"--template design-parity --source-image {shlex.quote(str(source_for_command))} "
+                "--source-label 'Figma reference' --title 'Design parity proof' "
+                "--small-video --small-video-budget-mb 10"
+            )
         if check:
-            row["local_readiness"] = _video_matrix_check(row, repo_root=root, which_fn=which_fn)
+            row["local_readiness"] = _video_matrix_check(
+                row,
+                repo_root=root,
+                design_parity_manifest=design_parity_manifest_path,
+                design_parity_source_image=design_parity_source_image_path,
+                which_fn=which_fn,
+            )
             row["declared_status"] = declared_status
             row["status"] = row["local_readiness"]["status"]
         status_value = row.get("local_readiness", {}).get("status") if check else row.get("status")
@@ -869,6 +898,8 @@ def cmd_desktop_video_matrix(
         scenario=getattr(args, "scenario", None) or None,
         status=getattr(args, "status", None) or None,
         check=getattr(args, "check", False),
+        design_parity_manifest=getattr(args, "design_parity_manifest", None) or None,
+        design_parity_source_image=getattr(args, "design_parity_source_image", None) or None,
     )
     if getattr(args, "json", False):
         print_fn(json.dumps(payload, indent=2))

@@ -443,9 +443,23 @@ audio-inspector-demo`, `--scenario component-zoom`, `--status ready`, or
 to include lightweight machine-local readiness checks, such as whether `cmake`,
 the in-tree audio-inspector demo source, `adb`, `xcrun`, REAPER, or
 `external/skia-build/libskia.a` are available before attempting a demo, and
-whether design-parity has a source image at
-`planning/screenshots/reference.png`. The failed checks include remediation text
-with the next setup step. The
+whether design-parity has both a source/reference image and an existing run
+manifest to recompose. For design parity, pass concrete inputs when checking a
+specific comparison:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop video-matrix \
+  --target mac \
+  --scenario design-parity \
+  --check \
+  --design-parity-manifest /path/to/run/manifest.json \
+  --design-parity-source-image planning/screenshots/reference.png
+```
+
+If `--design-parity-source-image` is omitted, the check falls back to
+`planning/screenshots/reference.png`; the manifest must be supplied because
+design parity recomposes an existing proof rather than launching a fresh app.
+The failed checks include remediation text with the next setup step. The
 status filter uses declared matrix status by default; with `--check`, it uses
 computed local readiness, so `--target mac --status ready --check` prints the
 macOS proofs this machine can run now. The
