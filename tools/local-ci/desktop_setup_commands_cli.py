@@ -793,7 +793,14 @@ def _default_video_setup_target(target_name: str) -> dict:
     return {"adapter": "unknown", "bootstrap": "unknown"}
 
 
-def _missing_video_setup_config_payload(args: argparse.Namespace, error: Exception, steps: list[dict]) -> tuple[int, dict]:
+def _missing_video_setup_config_payload(
+    args: argparse.Namespace,
+    error: Exception,
+    steps: list[dict],
+    *,
+    setup_prerequisites: dict | None = None,
+    tool_addon: dict | None = None,
+) -> tuple[int, dict]:
     target = _default_video_setup_target(args.target)
     check = None
     exit_code = 0
@@ -829,6 +836,8 @@ def _missing_video_setup_config_payload(args: argparse.Namespace, error: Excepti
         "bootstrap": target["bootstrap"],
         "install_model": desktop_video_install_model(),
         "steps": steps,
+        "setup_prerequisites": setup_prerequisites,
+        "tool_addon": tool_addon,
         "check": check,
     }
 
@@ -1014,7 +1023,33 @@ def cmd_desktop_video_setup(
         config = load_config_fn()
         target = resolve_desktop_target_fn(config, args.target)
     except FileNotFoundError as exc:
-        exit_code, payload = _missing_video_setup_config_payload(args, exc, steps)
+        setup_prerequisites = None
+        tool_addon = None
+        if getattr(args, "check", False):
+            setup_checks = setup_prerequisite_checks_fn()
+            setup_prerequisites = {
+                "ok": all(check["ok"] for check in setup_checks if check.get("required", True)),
+                "checks": setup_checks,
+                "remediations": desktop_video_setup_prerequisite_remediations(setup_checks),
+            }
+            if getattr(args, "check_tool_addon", False):
+                pulp_command = getattr(args, "pulp_command", None)
+                if pulp_command:
+                    tool_checks = tool_addon_checks_fn(pulp_command=pulp_command)
+                else:
+                    tool_checks = tool_addon_checks_fn()
+                tool_addon = {
+                    "ok": all(check["ok"] for check in tool_checks if check.get("required", True)),
+                    "checks": tool_checks,
+                    "remediations": desktop_video_tool_addon_remediations(tool_checks),
+                }
+        exit_code, payload = _missing_video_setup_config_payload(
+            args,
+            exc,
+            steps,
+            setup_prerequisites=setup_prerequisites,
+            tool_addon=tool_addon,
+        )
         if getattr(args, "json", False):
             print_fn(json.dumps(payload, indent=2))
             return exit_code
@@ -1029,6 +1064,28 @@ def cmd_desktop_video_setup(
             print_fn(f"  {index}. {step['title']}")
             print_fn(f"     {step['detail']}")
             print_fn(f"     command: {step['command']}")
+        if payload.get("setup_prerequisites"):
+            print_fn("")
+            print_fn(f"Setup prerequisites: {'PASS' if payload['setup_prerequisites']['ok'] else 'FAIL'}")
+            for check in payload["setup_prerequisites"]["checks"]:
+                print_fn(f"  {_desktop_check_status(check):4s}  {check['name']}: {check['detail']}")
+            if payload["setup_prerequisites"]["remediations"]:
+                print_fn("")
+                print_fn("Setup remediation:")
+                for item in payload["setup_prerequisites"]["remediations"]:
+                    print_fn(f"  - {item['title']}: {item['detail']}")
+        if payload.get("tool_addon"):
+            print_fn("")
+            print_fn(f"Tool add-on check: {'PASS' if payload['tool_addon']['ok'] else 'FAIL'}")
+            for check in payload["tool_addon"]["checks"]:
+                print_fn(f"  {_desktop_check_status(check):4s}  {check['name']}: {check['detail']}")
+            if payload["tool_addon"]["remediations"]:
+                print_fn("")
+                print_fn("Tool add-on remediation:")
+                for item in payload["tool_addon"]["remediations"]:
+                    print_fn(f"  - {item['title']}: {item['detail']}")
+                    if item.get("command"):
+                        print_fn(f"    command: {item['command']}")
         if payload["check"] is not None:
             print_fn("")
             print_fn("Current check: FAIL")

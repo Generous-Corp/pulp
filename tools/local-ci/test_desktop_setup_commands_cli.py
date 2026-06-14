@@ -634,9 +634,95 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
         self.assertFalse(payload["check"]["ok"])
         self.assertEqual(payload["install_model"]["package_format"], "not_pulp_add")
         self.assertEqual(payload["install_model"]["pack_manifest_schema"], "pulp.video-proof-tool-package.v1")
+        self.assertTrue(payload["setup_prerequisites"]["ok"])
+        prereq_checks_by_name = {check["name"]: check for check in payload["setup_prerequisites"]["checks"]}
+        self.assertEqual(prereq_checks_by_name["setup.pulp"]["detail"], "/usr/local/bin/pulp")
+        self.assertIsNone(payload["tool_addon"])
         self.assertEqual(payload["check"]["checks"][0]["name"], "config")
         self.assertEqual(payload["check"]["remediations"][0]["command"], "cp tools/local-ci/config.example.json tools/local-ci/config.json")
         self.assertEqual(payload["steps"][0]["name"], "create_config")
+
+    def test_video_setup_json_can_check_tool_addon_without_config(self):
+        tool_addon_calls = []
+
+        def fake_tool_addon_checks(**kwargs):
+            tool_addon_calls.append(kwargs.get("pulp_command"))
+            return [
+                {"name": "tool_addon.info", "ok": True, "detail": "video-proof scope=machine lane=tool_addon format=not_pulp_add", "required": True},
+                {"name": "tool_addon.doctor", "ok": True, "detail": "smoke ok", "required": True},
+            ]
+
+        deps = {
+            "load_config_fn": lambda: (_ for _ in ()).throw(FileNotFoundError("Local CI config not found at /repo/tools/local-ci/config.json")),
+            "resolve_desktop_target_fn": lambda *_args: self.fail("target should not be resolved without config"),
+            "desktop_doctor_checks_fn": lambda *_args: self.fail("doctor should not run without config"),
+            "normalize_desktop_optional_config_fn": lambda optional: {"video_capture": bool((optional or {}).get("video_capture"))},
+            "video_proof_smoke_fn": lambda: self.fail("smoke should not run without config"),
+            "probe_macos_avfoundation_audio_fn": lambda _device: self.fail("audio probe should not run without config"),
+            "setup_prerequisite_checks_fn": self.setup_ok_checks,
+            "tool_addon_checks_fn": fake_tool_addon_checks,
+            "print_fn": self.print_line,
+        }
+
+        result = self.mod.cmd_desktop_video_setup(
+            Namespace(
+                target="mac",
+                machine="blackbook",
+                check=True,
+                check_tool_addon=True,
+                pulp_command="./build-video-proof-cli/tools/cli/pulp-cpp",
+                skip_remotion_smoke=False,
+                video_audio="none",
+                video_audio_device=None,
+                json=True,
+            ),
+            **deps,
+        )
+
+        self.assertEqual(result, 1)
+        self.assertEqual(tool_addon_calls, ["./build-video-proof-cli/tools/cli/pulp-cpp"])
+        payload = json.loads(self.printed[0])
+        self.assertFalse(payload["check"]["ok"])
+        self.assertTrue(payload["setup_prerequisites"]["ok"])
+        self.assertTrue(payload["tool_addon"]["ok"])
+        self.assertEqual(payload["tool_addon"]["remediations"], [])
+        self.assertEqual(payload["check"]["checks"][0]["name"], "config")
+
+    def test_video_setup_text_reports_setup_and_tool_addon_without_config(self):
+        deps = {
+            "load_config_fn": lambda: (_ for _ in ()).throw(FileNotFoundError("Local CI config not found at /repo/tools/local-ci/config.json")),
+            "resolve_desktop_target_fn": lambda *_args: self.fail("target should not be resolved without config"),
+            "desktop_doctor_checks_fn": lambda *_args: self.fail("doctor should not run without config"),
+            "normalize_desktop_optional_config_fn": lambda optional: {"video_capture": bool((optional or {}).get("video_capture"))},
+            "video_proof_smoke_fn": lambda: self.fail("smoke should not run without config"),
+            "probe_macos_avfoundation_audio_fn": lambda _device: self.fail("audio probe should not run without config"),
+            "setup_prerequisite_checks_fn": self.setup_ok_checks,
+            "tool_addon_checks_fn": lambda: [
+                {"name": "tool_addon.info", "ok": False, "detail": "pulp does not support tool", "required": True},
+                {"name": "tool_addon.doctor", "ok": False, "detail": "skipped because tool info failed", "required": True},
+            ],
+            "print_fn": self.print_line,
+        }
+
+        result = self.mod.cmd_desktop_video_setup(
+            Namespace(
+                target="mac",
+                machine="blackbook",
+                check=True,
+                check_tool_addon=True,
+                skip_remotion_smoke=False,
+                video_audio="none",
+                video_audio_device=None,
+                json=False,
+            ),
+            **deps,
+        )
+
+        self.assertEqual(result, 1)
+        self.assertIn("Setup prerequisites: PASS", self.printed)
+        self.assertIn("Tool add-on check: FAIL", self.printed)
+        self.assertTrue(any("pulp does not support tool" in line for line in self.printed))
+        self.assertIn("Current check: FAIL", self.printed)
 
     def test_video_setup_json_can_include_current_doctor_check(self):
         self.targets["mac"]["optional"] = {"video_capture": True}
