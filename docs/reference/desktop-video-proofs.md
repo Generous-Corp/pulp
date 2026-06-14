@@ -907,8 +907,8 @@ but not local binary attachments. Use the generated JSON attachment decisions to
 attach `proof.issue.mp4` or `proof.small.mp4` manually, or include the served
 report link.
 
-Before recording the final verdict, check whether the review issue has the
-approval trigger:
+Before recording the final verdict, check whether the review issue has an
+actionable approval or needs-work trigger:
 
 ```bash
 python3 tools/local-ci/local_ci.py desktop review-status \
@@ -918,9 +918,12 @@ python3 tools/local-ci/local_ci.py desktop review-status \
 ```
 
 This command is read-only. It uses `gh issue view` to inspect comments for
-`looks good to me`; when found, it reports `approved: true` and prints a
-suggested `desktop verdict` command. Add `--json` for automation handoff, and
-add `--repo owner/repo` when passing a bare issue number.
+`looks good to me`, `needs work`, `needs changes`, `needs another pass`, or
+`not approved`. The latest actionable comment wins: approval reports
+`approved: true`, while requested changes report `needs_work: true`. In either
+case, it prints a suggested `desktop verdict` command when a manifest is
+provided. Add `--json` for automation handoff, and add `--repo owner/repo`
+when passing a bare issue number.
 
 The intended review loop is:
 
@@ -930,7 +933,7 @@ The intended review loop is:
 3. Open a GitHub issue with `github-issue.md`.
 4. Attach the MP4 manually when it fits the configured budget, or use the served
    report link when it does not.
-5. Check the issue for the reviewer approval phrase.
+5. Check the issue for a reviewer approval or needs-work phrase.
 6. Record the review verdict in the run manifest once the reviewer responds.
 7. Close the issue once the reviewer comments `looks good to me`.
 
@@ -942,8 +945,8 @@ python3 tools/local-ci/local_ci.py desktop review-status \
 ```
 
 `desktop review-status` is read-only. It calls `gh issue view`, detects the
-close trigger (`looks good to me`) in issue comments, and prints or JSON-emits a
-suggested `desktop verdict` command when approval is present. Use `--repo
+latest actionable close trigger (`looks good to me`) or needs-work trigger, and
+prints or JSON-emits a suggested `desktop verdict` command. Use `--repo
 owner/repo` when the issue argument is a bare number or when GitHub context
 cannot be inferred.
 
@@ -963,10 +966,12 @@ python3 tools/local-ci/local_ci.py desktop review-watch \
 
 The optional manifest map is a JSON object keyed by issue URL, issue number, or
 `#number`, with values pointing to run `manifest.json` files. When an approved
-issue has a mapped manifest, `review-watch` emits the exact `desktop verdict
-... --approved --issue-url ...` command, and includes `--close-issue` when that
-flag was passed. Use `--interval N --max-iterations M` only for short
-post-ping watch windows; one-shot mode is the default.
+or needs-work issue has a mapped manifest, `review-watch` emits the exact
+`desktop verdict ... --approved --issue-url ...` or
+`desktop verdict ... --needs-work --issue-url ... --notes ...` command. It
+includes `--close-issue` for approved issues when that flag was passed. Use
+`--interval N --max-iterations M` only for short post-ping watch windows;
+one-shot mode is the default.
 
 ```bash
 python3 tools/local-ci/local_ci.py desktop verdict /path/to/run/manifest.json \

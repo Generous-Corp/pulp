@@ -1722,13 +1722,38 @@ def cmd_desktop_review_issue(
     return 0
 
 
-def _review_status_approval_comment(comments: list[dict], trigger: str = "looks good to me") -> dict | None:
-    trigger_lower = trigger.lower()
+def _review_status_action_comment(
+    comments: list[dict],
+    *,
+    approval_trigger: str = "looks good to me",
+    needs_work_triggers: tuple[str, ...] = ("needs work", "needs another pass", "needs changes", "not approved"),
+) -> tuple[str | None, dict | None]:
+    approval_trigger_lower = approval_trigger.lower()
+    needs_work_triggers_lower = tuple(trigger.lower() for trigger in needs_work_triggers)
     for comment in reversed(comments):
         body = str(comment.get("body") or "")
-        if trigger_lower in body.lower():
-            return comment
-    return None
+        body_lower = body.lower()
+        if approval_trigger_lower in body_lower:
+            return "approved", comment
+        if any(trigger in body_lower for trigger in needs_work_triggers_lower):
+            return "needs-work", comment
+    return None, None
+
+
+def _review_status_approval_comment(comments: list[dict], trigger: str = "looks good to me") -> dict | None:
+    action, comment = _review_status_action_comment(comments, approval_trigger=trigger)
+    return comment if action == "approved" else None
+
+
+def _review_comment_notes(comment: dict | None) -> str | None:
+    if not comment:
+        return None
+    body = " ".join(str(comment.get("body") or "").split())
+    if not body:
+        return None
+    if len(body) > 500:
+        body = body[:497].rstrip() + "..."
+    return body
 
 
 def cmd_desktop_review_status(
@@ -1751,10 +1776,12 @@ def cmd_desktop_review_status(
         print_fn(f"Error: invalid gh issue view JSON: {exc}")
         return 1
     comments = issue.get("comments") if isinstance(issue.get("comments"), list) else []
-    approval_comment = _review_status_approval_comment(comments)
+    action, action_comment = _review_status_action_comment(comments)
+    approval_comment = action_comment if action == "approved" else None
+    needs_work_comment = action_comment if action == "needs-work" else None
     issue_url = str(issue.get("url") or args.issue_url)
     verdict_command = None
-    if approval_comment and getattr(args, "manifest", None):
+    if action == "approved" and getattr(args, "manifest", None):
         manifest = shlex.quote(str(Path(args.manifest).expanduser()))
         quoted_issue_url = shlex.quote(issue_url)
         verdict_command = (
@@ -1763,6 +1790,16 @@ def cmd_desktop_review_status(
         )
         if getattr(args, "close_issue", False):
             verdict_command += " --close-issue"
+    elif action == "needs-work" and getattr(args, "manifest", None):
+        manifest = shlex.quote(str(Path(args.manifest).expanduser()))
+        quoted_issue_url = shlex.quote(issue_url)
+        notes = _review_comment_notes(needs_work_comment)
+        verdict_command = (
+            "python3 tools/local-ci/local_ci.py desktop verdict "
+            f"{manifest} --needs-work --issue-url {quoted_issue_url}"
+        )
+        if notes:
+            verdict_command += f" --notes {shlex.quote(notes)}"
     payload = {
         "kind": "desktop-video-proof-review-status",
         "issue_url": issue_url,
@@ -1770,6 +1807,8 @@ def cmd_desktop_review_status(
         "close_trigger": "looks good to me",
         "approved": approval_comment is not None,
         "approval_comment": approval_comment,
+        "needs_work": needs_work_comment is not None,
+        "needs_work_comment": needs_work_comment,
         "verdict_command": verdict_command,
     }
     if getattr(args, "json", False):
@@ -1778,15 +1817,22 @@ def cmd_desktop_review_status(
     print_fn(f"Desktop video review issue: {issue_url}")
     print_fn(f"  state: {payload['state'] or 'unknown'}")
     print_fn(f"  approved: {str(payload['approved']).lower()}")
+    print_fn(f"  needs_work: {str(payload['needs_work']).lower()}")
     if approval_comment:
         author = approval_comment.get("author")
         if isinstance(author, dict) and author.get("login"):
             print_fn(f"  approved_by: {author['login']}")
         if approval_comment.get("url"):
             print_fn(f"  approval_comment: {approval_comment['url']}")
+    if needs_work_comment:
+        author = needs_work_comment.get("author")
+        if isinstance(author, dict) and author.get("login"):
+            print_fn(f"  needs_work_by: {author['login']}")
+        if needs_work_comment.get("url"):
+            print_fn(f"  needs_work_comment: {needs_work_comment['url']}")
     if verdict_command:
         print_fn(f"  verdict_command: {verdict_command}")
-    elif not approval_comment:
+    elif not approval_comment and not needs_work_comment:
         print_fn("  waiting_for: looks good to me")
     return 0
 
@@ -1832,14 +1878,24 @@ def _review_manifest_for_issue(issue: dict, manifest_map: Mapping[str, str]) -> 
     return None
 
 
-def _review_verdict_command(issue_url: str, manifest: str | None, *, close_issue: bool) -> str | None:
+def _review_verdict_command(
+    issue_url: str,
+    manifest: str | None,
+    *,
+    status: str,
+    close_issue: bool,
+    notes: str | None = None,
+) -> str | None:
     if not manifest:
         return None
+    status_flag = "--approved" if status == "approved" else "--needs-work"
     command = (
         "python3 tools/local-ci/local_ci.py desktop verdict "
-        f"{shlex.quote(manifest)} --approved --issue-url {shlex.quote(issue_url)}"
+        f"{shlex.quote(manifest)} {status_flag} --issue-url {shlex.quote(issue_url)}"
     )
-    if close_issue:
+    if notes:
+        command += f" --notes {shlex.quote(notes)}"
+    if status == "approved" and close_issue:
         command += " --close-issue"
     return command
 
@@ -1906,7 +1962,9 @@ def _review_watch_once(
                     "updated_at": updated_at,
                     "checked": False,
                     "approved": bool(cached.get("approved")),
+                    "needs_work": bool(cached.get("needs_work")),
                     "approval_comment": cached.get("approval_comment"),
+                    "needs_work_comment": cached.get("needs_work_comment"),
                     "verdict_command": cached.get("verdict_command"),
                 }
             )
@@ -1927,6 +1985,7 @@ def _review_watch_once(
                 "checked": True,
                 "error": detail,
                 "approved": False,
+                "needs_work": False,
                 "verdict_command": None,
             }
             issues.append(issue_payload)
@@ -1938,14 +1997,18 @@ def _review_watch_once(
         except json.JSONDecodeError as exc:
             raise RuntimeError(f"invalid gh issue view JSON for {view_ref}: {exc}") from exc
         comments = issue.get("comments") if isinstance(issue.get("comments"), list) else []
-        approval_comment = _review_status_approval_comment(comments)
+        action, action_comment = _review_status_action_comment(comments)
+        approval_comment = action_comment if action == "approved" else None
+        needs_work_comment = action_comment if action == "needs-work" else None
         resolved_url = str(issue.get("url") or issue_url)
         manifest = _review_manifest_for_issue(issue, manifest_map) or _review_manifest_for_issue(listed, manifest_map)
         verdict_command = _review_verdict_command(
             resolved_url,
             manifest,
+            status=action or "",
             close_issue=bool(getattr(args, "close_issue", False)),
-        ) if approval_comment else None
+            notes=_review_comment_notes(needs_work_comment) if needs_work_comment else None,
+        ) if action in {"approved", "needs-work"} else None
         issue_payload = {
             "number": issue.get("number") or issue_number,
             "title": issue.get("title") or listed.get("title"),
@@ -1954,7 +2017,9 @@ def _review_watch_once(
             "updated_at": issue.get("updatedAt") or updated_at,
             "checked": True,
             "approved": approval_comment is not None,
+            "needs_work": needs_work_comment is not None,
             "approval_comment": approval_comment,
+            "needs_work_comment": needs_work_comment,
             "manifest": manifest,
             "verdict_command": verdict_command,
         }
@@ -1963,7 +2028,9 @@ def _review_watch_once(
             cached_issues[resolved_url] = {
                 "updated_at": issue_payload["updated_at"],
                 "approved": issue_payload["approved"],
+                "needs_work": issue_payload["needs_work"],
                 "approval_comment": approval_comment,
+                "needs_work_comment": needs_work_comment,
                 "verdict_command": verdict_command,
             }
         checked_count += 1
@@ -1977,6 +2044,7 @@ def _review_watch_once(
         "checked_count": checked_count,
         "skipped_unchanged_count": skipped_count,
         "approved_count": sum(1 for issue in issues if issue.get("approved")),
+        "needs_work_count": sum(1 for issue in issues if issue.get("needs_work")),
         "issues": issues,
     }
     return payload, state_payload
@@ -2033,9 +2101,14 @@ def cmd_desktop_review_watch(
     print_fn(f"  checked: {summary['checked_count']}")
     print_fn(f"  skipped_unchanged: {summary['skipped_unchanged_count']}")
     print_fn(f"  approved: {summary['approved_count']}")
+    print_fn(f"  needs_work: {summary['needs_work_count']}")
     for issue in summary["issues"]:
         if issue.get("approved"):
             print_fn(f"  approved_issue: {issue.get('url')}")
+            if issue.get("verdict_command"):
+                print_fn(f"    verdict_command: {issue['verdict_command']}")
+        if issue.get("needs_work"):
+            print_fn(f"  needs_work_issue: {issue.get('url')}")
             if issue.get("verdict_command"):
                 print_fn(f"    verdict_command: {issue['verdict_command']}")
     return 0

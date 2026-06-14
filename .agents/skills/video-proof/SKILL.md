@@ -836,8 +836,8 @@ This still does not upload MP4 attachments. Use `github-issue.json` to decide
 whether to attach `proof.issue.mp4`, attach `proof.small.mp4`, or rely on the
 served report link.
 
-Check whether the issue has the approval trigger before recording the final
-verdict:
+Check whether the issue has an actionable approval or needs-work trigger before
+recording the final verdict:
 
 ```bash
 python3 tools/local-ci/local_ci.py desktop review-status \
@@ -846,10 +846,12 @@ python3 tools/local-ci/local_ci.py desktop review-status \
   --close-issue
 ```
 
-`desktop review-status` is read-only. It calls `gh issue view`, detects `looks
-good to me` in issue comments, and prints a suggested `desktop verdict` command
-when approval is present. Add `--json` for automation and `--repo owner/repo`
-when passing a bare issue number.
+`desktop review-status` is read-only. It calls `gh issue view` and detects the
+latest actionable comment: `looks good to me` maps to an approved verdict, while
+`needs work`, `needs changes`, `needs another pass`, or `not approved` maps to a
+needs-work verdict. It prints a suggested `desktop verdict` command when a
+manifest is provided. Add `--json` for automation and `--repo owner/repo` when
+passing a bare issue number.
 
 At the start of a session, or after posting several review issues, converge with
 the read-only watcher:
@@ -865,11 +867,13 @@ python3 tools/local-ci/local_ci.py desktop review-watch \
 ```
 
 The manifest map is optional JSON keyed by issue URL, issue number, or `#number`
-with values pointing to run manifests. When a watched issue contains `looks good
-to me`, the JSON includes `approved: true` and, when the manifest is known, the
-exact `desktop verdict ... --approved --issue-url ...` command to run. Use
-`--interval` and `--max-iterations` only for short post-ping windows; otherwise
-run one-shot and let the state file skip unchanged issues.
+with values pointing to run manifests. When a watched issue contains an
+actionable approval or needs-work comment, the JSON includes `approved: true` or
+`needs_work: true` and, when the manifest is known, the exact
+`desktop verdict ... --approved --issue-url ...` or
+`desktop verdict ... --needs-work --issue-url ... --notes ...` command to run.
+Use `--interval` and `--max-iterations` only for short post-ping windows;
+otherwise run one-shot and let the state file skip unchanged issues.
 
 Record that review state back into the run manifest:
 

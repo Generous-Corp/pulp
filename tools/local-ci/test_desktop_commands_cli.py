@@ -1857,6 +1857,42 @@ class DesktopCommandsCliTests(unittest.TestCase):
         self.assertEqual(result, 1)
         self.assertIn("invalid gh issue view JSON", self.printed[-1])
 
+    def test_review_status_detects_needs_work_and_suggests_verdict(self):
+        issue_payload = {
+            "state": "OPEN",
+            "url": "https://github.com/danielraffel/pulp/issues/123",
+            "comments": [
+                {"body": "Looks good to me", "author": {"login": "daniel"}, "url": "https://example/comment/1"},
+                {
+                    "body": "Needs work: zoom starts too late",
+                    "author": {"login": "reviewer"},
+                    "url": "https://example/comment/2",
+                },
+            ],
+        }
+
+        result = self.mod.cmd_desktop_review_status(
+            Namespace(
+                issue_url="https://github.com/danielraffel/pulp/issues/123",
+                repo="danielraffel/pulp",
+                manifest="/tmp/run/manifest.json",
+                close_issue=True,
+                json=True,
+            ),
+            run_fn=lambda argv, **_kwargs: subprocess.CompletedProcess(argv, 0, json.dumps(issue_payload), ""),
+            print_fn=self.print_line,
+        )
+
+        self.assertEqual(result, 0)
+        payload = json.loads(self.printed[-1])
+        self.assertFalse(payload["approved"])
+        self.assertTrue(payload["needs_work"])
+        self.assertEqual(payload["needs_work_comment"]["author"]["login"], "reviewer")
+        self.assertIn("--needs-work", payload["verdict_command"])
+        self.assertIn("--issue-url https://github.com/danielraffel/pulp/issues/123", payload["verdict_command"])
+        self.assertIn("--notes 'Needs work: zoom starts too late'", payload["verdict_command"])
+        self.assertNotIn("--close-issue", payload["verdict_command"])
+
     def test_review_watch_detects_approved_issues_and_uses_state_cache(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             state_file = Path(tmpdir) / "review-watch.json"
@@ -1944,6 +1980,68 @@ class DesktopCommandsCliTests(unittest.TestCase):
             self.assertEqual(payload["skipped_unchanged_count"], 2)
             self.assertEqual(payload["approved_count"], 1)
             self.assertEqual(sum(1 for call in calls if call[:3] == ["gh", "issue", "view"]), 0)
+
+    def test_review_watch_detects_needs_work_issues(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_map = Path(tmpdir) / "manifest-map.json"
+            manifest_map.write_text(json.dumps({"125": "/tmp/needs-work/manifest.json"}) + "\n")
+            listed = [
+                {
+                    "number": 125,
+                    "title": "Review validation proof",
+                    "url": "https://github.com/danielraffel/pulp/issues/125",
+                    "updatedAt": "2026-06-14T12:02:00Z",
+                }
+            ]
+            viewed = {
+                "state": "OPEN",
+                "number": 125,
+                "title": "Review validation proof",
+                "url": "https://github.com/danielraffel/pulp/issues/125",
+                "updatedAt": "2026-06-14T12:02:00Z",
+                "comments": [
+                    {
+                        "body": "Needs changes: recapture after centering the component",
+                        "author": {"login": "reviewer"},
+                        "url": "https://example/comment/3",
+                    }
+                ],
+            }
+
+            def run_fn(argv, **_kwargs):
+                if argv[:3] == ["gh", "issue", "list"]:
+                    return subprocess.CompletedProcess(argv, 0, json.dumps(listed), "")
+                if argv[:3] == ["gh", "issue", "view"]:
+                    return subprocess.CompletedProcess(argv, 0, json.dumps(viewed), "")
+                self.fail(f"unexpected command: {argv}")
+
+            result = self.mod.cmd_desktop_review_watch(
+                Namespace(
+                    repo="danielraffel/pulp",
+                    label="video-review",
+                    state="open",
+                    state_file=None,
+                    manifest_map=str(manifest_map),
+                    refresh=False,
+                    close_issue=True,
+                    interval=0.0,
+                    max_iterations=1,
+                    json=True,
+                ),
+                run_fn=run_fn,
+                print_fn=self.print_line,
+            )
+
+            self.assertEqual(result, 0)
+            payload = json.loads(self.printed[-1])
+            self.assertEqual(payload["approved_count"], 0)
+            self.assertEqual(payload["needs_work_count"], 1)
+            issue = payload["issues"][0]
+            self.assertTrue(issue["needs_work"])
+            self.assertIn("--needs-work", issue["verdict_command"])
+            self.assertIn("/tmp/needs-work/manifest.json", issue["verdict_command"])
+            self.assertIn("--notes 'Needs changes: recapture after centering the component'", issue["verdict_command"])
+            self.assertNotIn("--close-issue", issue["verdict_command"])
 
     def test_review_watch_reports_gh_and_manifest_map_errors(self):
         result = self.mod.cmd_desktop_review_watch(
