@@ -353,10 +353,26 @@ class DesktopActionCommandsCliTests(unittest.TestCase):
         self.assertTrue(call["capture_ui_snapshot"])
         self.assertTrue(call["capture_before"])
         self.assertEqual(call["video_template"], "component-zoom")
+        self.assertEqual(call["video_duration"], 6.0)
+        self.assertEqual(call["video_fps"], 8.0)
         self.assertEqual(call["label"], "component-threshold-proof")
         self.assertEqual(call["video_title"], "Component validation")
         self.assertIn("full-window context", call["video_note"][0])
         self.assertIn("focus box", call["video_note"][1])
+
+    def test_video_command_preserves_explicit_component_capture_budget(self):
+        result = self.mod.cmd_desktop_video(
+            self.args(recipe="component-zoom", component_id="threshold", video_duration=3.0, video_fps=12.0),
+            cmd_desktop_smoke_fn=lambda _args: self.fail("smoke should not run"),
+            cmd_desktop_click_fn=lambda args: self.calls.append(("click-wrapper", (), vars(args).copy())) or 0,
+            cmd_desktop_inspect_fn=lambda _args: self.fail("inspect should not run"),
+            print_fn=self.print_line,
+        )
+
+        self.assertEqual(result, 0)
+        call = self.calls[0][2]
+        self.assertEqual(call["video_duration"], 3.0)
+        self.assertEqual(call["video_fps"], 12.0)
 
     def test_video_command_applies_audio_inspector_recipe(self):
         result = self.mod.cmd_desktop_video(

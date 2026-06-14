@@ -68,6 +68,11 @@ def _set_default(args: argparse.Namespace, name: str, value) -> None:
         setattr(args, name, value)
 
 
+def _set_default_number(args: argparse.Namespace, name: str, value: float, parser_default: float) -> None:
+    if float(getattr(args, name, parser_default) or parser_default) == parser_default:
+        setattr(args, name, value)
+
+
 def _append_recipe_proof_notes(args: argparse.Namespace, recipe: str) -> None:
     notes = list(getattr(args, "video_note", None) or [])
     for note in RECIPE_PROOF_NOTES.get(recipe, []):
@@ -87,6 +92,8 @@ def _apply_desktop_video_recipe(args: argparse.Namespace) -> None:
         _set_default(args, "label", "standalone-interaction-proof")
         _set_default(args, "video_title", "Standalone UI interaction")
         _set_default(args, "video_template", "standalone")
+        _set_default_number(args, "video_duration", 6.0, 8.0)
+        _set_default_number(args, "video_fps", 8.0, 30.0)
         if any([args.click, args.click_view_id, args.click_view_type, args.click_view_text, args.click_view_label]):
             args.capture_before = True
         _append_recipe_proof_notes(args, recipe)
@@ -162,6 +169,8 @@ def _apply_desktop_video_recipe(args: argparse.Namespace) -> None:
         _set_default(args, "video_template", "component-zoom")
         _set_default(args, "label", f"component-{args.click_view_id or component_id or 'zoom'}-proof")
         _set_default(args, "video_title", "Component validation")
+        _set_default_number(args, "video_duration", 6.0, 8.0)
+        _set_default_number(args, "video_fps", 8.0, 30.0)
         _append_recipe_proof_notes(args, recipe)
         return
 
