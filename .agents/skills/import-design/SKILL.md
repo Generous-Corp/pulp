@@ -961,6 +961,31 @@ emitters across the C++/Swift backends — a follow-up, not these aliases. Test:
 catalog (`pulp/design/design_system.hpp`) is the authoritative component→native
 mapping these aliases mirror.
 
+#### Native widget fidelity is inherited — keep token keys correct
+
+An imported design materializes these native widgets, so it inherits whatever
+the **native defaults** look like. The native widgets were converged to the
+Ink & Signal Figma source (Knob body+arc+dot, square Checkbox, teal Toggle,
+filled `TextButton::Style::primary`, slab Fader thumb, segmented Stepper, area
+Spectrum, bar Waveform, etc.), so a faithful import needs no per-instance skin
+for the common case — getting the native default right is what makes the import
+look right.
+
+The recurring failure mode here is a **wrong token key**: a widget that calls
+`resolve_color("typo_or_old.key", <hardcoded fallback>)` where the key isn't a
+real theme token compiles, paints the hardcoded fallback, and silently ignores
+the imported token set (the reskin never reaches it). This shipped the coral
+`ProgressBar`/`Tab` and several grey `CallOutBox`/`ListBox`/key-mapping bugs.
+Canonical keys are the `t.colors["…"]` names in `theme_presets.cpp` (dotted:
+`progress.fill`, `tab.active`, `text.primary`, `control.border`, `meter.green`,
+…) — never underscore/bare forms. Enforced by `tools/scripts/token_key_check.py`
+(`token-key-correctness` ctest) and, on Pillow lanes, the
+`component-visual-regression` per-primitive gate. See
+[docs/guides/design-tokens.md](../../../docs/guides/design-tokens.md) →
+"Use the *real* token key". GPU vs raster fill caveat: an area/shader fill
+(`Canvas::draw_waveform`) shows nothing on the CPU raster path — draw fills with
+raster primitives if they must render off-GPU (see the `skia-gpu-build` skill).
+
 ### Value-driven silhouette fill (illustration shapes — item 3)
 
 A captured illustration PNG (ELYSIUM's prism / cylinder / pentagon / cube) can

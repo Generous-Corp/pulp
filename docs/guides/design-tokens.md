@@ -348,6 +348,39 @@ accents, borders, meters) must resolve from a token.
 > takes **0–255 bytes**. Passing `rgba(120,160,255)` clamps every channel to
 > 1.0 and paints solid white. Use `rgba8` for byte values.
 
+### Use the *real* token key — a typo silently disables reskinning
+
+`resolve_color("key", fallback)` returns the fallback whenever `key` isn't a
+token in the active theme — including when `key` is a **typo or an old name**.
+The widget then compiles, renders the hardcoded fallback, and silently can't be
+reskinned. This shipped real bugs: a `ProgressBar` that resolved
+`"progress_track"` / `"accent"` (neither exists — the real names are
+`progress.track` / `progress.fill`) painted a permanent coral fill, and a
+`TabPanel` underline resolved `"accent"` and stayed coral instead of the teal
+`tab.active`.
+
+The canonical token names are exactly the `t.colors["…"]` keys assigned in
+`core/view/src/theme_presets.cpp` (`derive_theme` + the per-preset overrides) —
+dotted, e.g. `bg.surface`, `text.primary`, `control.border`, `meter.green`,
+`progress.fill`, `tab.active`. Never underscore (`tab_bar_bg`) or bare
+(`text`, `border`) forms.
+
+```cpp
+// Bad — "text"/"border"/"callout_bg" are NOT tokens; the fallback is permanent:
+resolve_color("text",   canvas::Color::hex(0xe0e0e0));   // -> text.primary
+resolve_color("border", canvas::Color::hex(0x3a3a5a));   // -> control.border / modal.border
+
+// Good:
+resolve_color("text.primary",   canvas::Color::hex(0xe0e0e0));
+resolve_color("modal.border",   canvas::Color::hex(0x3a3a5a));
+```
+
+This is **enforced**: `tools/scripts/token_key_check.py` (the
+`token-key-correctness` ctest) fails the build on any `resolve_color("…")` whose
+key isn't canonical. A deliberate widget-specific override token that *falls back
+to a canonical token* (e.g. `resolve_color("text_editor_bg", resolve_color("bg.surface", …))`)
+is allowed via that script's small `ALLOWLISTED_OVERRIDES` set.
+
 ### Verifying a reskin
 
 - **Headless**: drive a widget through a `RecordingCanvas` and assert the fill

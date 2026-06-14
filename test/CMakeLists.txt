@@ -13,6 +13,11 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME token-coverage-ratchet COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/token_coverage_check.py")
 
+    # Token-key correctness: fail on resolve_color("typo.key", …) that isn't a
+    # real theme token (silently renders the hardcoded fallback, breaks reskin).
+    add_test(NAME token-key-correctness COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/token_key_check.py")
+
     # Phase 6 fidelity harness: pure-Python diff-core self-test (always runs) +
     # the end-to-end gallery visual regression (skips=77 without binary/Pillow).
     add_test(NAME gallery-diff-selftest

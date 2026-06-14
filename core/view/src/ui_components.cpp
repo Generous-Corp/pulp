@@ -454,14 +454,14 @@ std::unique_ptr<CallOutBox> CallOutBox::notify(
 
 void CallOutBox::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
-    canvas.set_fill_color(resolve_color("callout_bg", canvas::Color::hex(0x16213e)));
+    canvas.set_fill_color(resolve_color("modal.bg", canvas::Color::hex(0x16213e)));
     canvas.fill_rounded_rect(b.x, b.y, b.width, b.height, 8);
-    canvas.set_stroke_color(resolve_color("border", canvas::Color::hex(0x3a3a5a)));
+    canvas.set_stroke_color(resolve_color("modal.border", canvas::Color::hex(0x3a3a5a)));
     canvas.set_line_width(1);
     canvas.stroke_rounded_rect(b.x, b.y, b.width, b.height, 8);
 
     canvas.set_font("system", 13);
-    canvas.set_fill_color(resolve_color("text", canvas::Color::hex(0xe0e0e0)));
+    canvas.set_fill_color(resolve_color("text.primary", canvas::Color::hex(0xe0e0e0)));
     canvas.fill_text_anchored(message_, b.x + 16, b.y + b.height / 2,
                               canvas::Canvas::TextAnchor::GlyphCenter);
 }
@@ -934,12 +934,12 @@ void ListBox::paint(canvas::Canvas& canvas) {
         float y = b.y + static_cast<float>(i) * row_height_ - scroll_offset_;
 
         if (i == selected_) {
-            canvas.set_fill_color(resolve_color("list_selected_bg", canvas::Color::hex(0x0f3460)));
+            canvas.set_fill_color(resolve_color("bg.elevated", canvas::Color::hex(0x0f3460)));
             canvas.fill_rect(b.x, y, b.width, row_height_);
         }
 
         canvas.set_font("system", 13);
-        canvas.set_fill_color(resolve_color("text", canvas::Color::hex(0xe0e0e0)));
+        canvas.set_fill_color(resolve_color("text.primary", canvas::Color::hex(0xe0e0e0)));
         canvas.fill_text(items_[static_cast<size_t>(i)], b.x + 8, y + row_height_ * 0.65f);
     }
 

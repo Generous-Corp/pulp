@@ -453,8 +453,7 @@ void TextEditor::paint(canvas::Canvas& canvas) {
         ? border_color()
         : (has_focus()
             ? resolve_color("accent.primary", canvas::Color::rgba8(140, 120, 255, 255))
-            : resolve_color("control.border",
-                            resolve_color("border", canvas::Color::hex(0x3a3a5a))));
+            : resolve_color("control.border", canvas::Color::hex(0x3a3a5a)));
     float stroke_width = has_border() ? border_width() : (has_focus() ? 2.0f : 1.0f);
     if (stroke_width > 0.0f) {
         canvas.set_fill_color(stroke);

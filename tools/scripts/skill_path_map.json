@@ -250,6 +250,13 @@
         "core/view/include/pulp/view/screenshot.hpp"
       ]
     },
+    "skia-gpu-build": {
+      "paths": [
+        "tools/cmake/FindSkia.cmake",
+        "tools/build-skia.sh",
+        "tools/build-skia-android.sh"
+      ]
+    },
     "ship": {
       "paths": [
         "ship/**",

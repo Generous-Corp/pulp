@@ -175,7 +175,7 @@ float KeyMappingEditor::intrinsic_height() const {
 
 void KeyMappingEditor::paint(canvas::Canvas& canvas) {
     const auto r = local_bounds();
-    const Color bg       = resolve_color("background.surface",
+    const Color bg       = resolve_color("bg.surface",
                                          Color::rgba(0.10f, 0.10f, 0.11f, 1.0f));
     const Color text     = resolve_color("text.primary",
                                          Color::rgba(0.92f, 0.92f, 0.95f, 1.0f));
@@ -183,7 +183,7 @@ void KeyMappingEditor::paint(canvas::Canvas& canvas) {
                                          Color::rgba(0.62f, 0.62f, 0.66f, 1.0f));
     const Color sel      = resolve_color("accent.primary",
                                          Color::rgba(0.20f, 0.45f, 0.85f, 1.0f));
-    const Color border   = resolve_color("border.subtle",
+    const Color border   = resolve_color("control.border",
                                          Color::rgba(0.20f, 0.20f, 0.22f, 1.0f));
 
     canvas.set_fill_color(bg);
