@@ -462,15 +462,16 @@ void Meter::paint(canvas::Canvas& canvas) {
                           meter_length);
     };
 
-    // RMS fill (main body)
-    auto rms_color = resolve_color("accent.success", canvas::Color::rgba8(80, 200, 80));
+    // RMS fill (main body) — meter.* tokens carry the brand meter palette
+    // (e.g. ink-signal's leaf green), distinct from the generic accent.* family.
+    auto rms_color = resolve_color("meter.green", canvas::Color::rgba8(80, 200, 80));
     float rms_level = ballistics_.display_rms;
 
     // Color changes at different levels
     if (rms_level > 0.9f)
-        rms_color = resolve_color("accent.error", canvas::Color::rgba8(240, 60, 60));
+        rms_color = resolve_color("meter.red", canvas::Color::rgba8(240, 60, 60));
     else if (rms_level > 0.7f)
-        rms_color = resolve_color("accent.warning", canvas::Color::rgba8(240, 180, 60));
+        rms_color = resolve_color("meter.yellow", canvas::Color::rgba8(240, 180, 60));
 
     canvas.set_fill_color(rms_color);
     float fill = level_to_pixels(rms_level);
@@ -813,15 +814,25 @@ void WaveformView::paint(canvas::Canvas& canvas) {
     float cy = b.height * 0.5f;
     canvas.stroke_line(0, cy, b.width, cy);
 
-    // GPU-accelerated waveform rendering via SkSL shader
-    canvas::Canvas::WaveformStyle style;
-    style.line_color = wave_color;
-    style.fill_color = fill_color;
-    style.line_thickness = 2.0f;
-    style.show_fill = true;
-    style.fill_center = 0.5f;
-
-    canvas.draw_waveform(samples_.data(), samples_.size(), 0, 0, b.width, b.height, style);
+    // Mirrored bar waveform — one vertical bar per column at the column's peak
+    // amplitude, mirrored about the centre line (the classic audio-editor
+    // thumbnail). Drawn with fill_rect so it renders on the CPU raster path,
+    // not only the GPU waveform shader.
+    const int cols = std::max(1, std::min<int>(static_cast<int>(b.width), 512));
+    const float colw = b.width / static_cast<float>(cols);
+    const std::size_t n = samples_.size();
+    const float half_h = b.height * 0.5f - 1.0f;
+    canvas.set_fill_color(wave_color);
+    for (int c = 0; c < cols; ++c) {
+        std::size_t i0 = static_cast<std::size_t>(static_cast<float>(c) / cols * n);
+        std::size_t i1 = static_cast<std::size_t>(static_cast<float>(c + 1) / cols * n);
+        float amp = 0.0f;
+        for (std::size_t i = i0; i < i1 && i < n; ++i)
+            amp = std::max(amp, std::abs(samples_[i]));
+        float half = std::clamp(amp, 0.0f, 1.0f) * half_h;
+        float bw = std::max(1.0f, colw - 1.0f);
+        canvas.fill_rect(static_cast<float>(c) * colw, cy - half, bw, half * 2.0f + 1.0f);
+    }
 }
 
 // ── SpectrumView ─────────────────────────────────────────────────────────────
@@ -860,24 +871,33 @@ void SpectrumView::paint(canvas::Canvas& canvas) {
             canvas.fill_rect(x, b.height - bar_h, std::max(bar_width - 1, 1.0f), bar_h);
         }
     } else {
-        // Line or filled style — use GPU waveform shader for anti-aliased rendering
+        // Line / filled style — drawn with raster primitives (vertical strips
+        // for the area + a polyline on top) so the area fill renders on the CPU
+        // CoreGraphics raster path, not only the GPU waveform shader.
         auto fill = resolve_color("waveform.fill", canvas::Color::rgba(spectrum_color.r, spectrum_color.g, spectrum_color.b, 60.0f/255.0f));
-
-        // Normalize dB values to -1..1 for the waveform shader (0 dB → top, min_db → bottom)
-        std::vector<float> normalized(bins_.size());
-        for (size_t i = 0; i < bins_.size(); ++i) {
+        const size_t n = bins_.size();
+        auto y_at = [&](size_t i) {
             float norm = std::clamp((bins_[i] - min_db_) / db_range, 0.0f, 1.0f);
-            normalized[i] = norm * 2.0f - 1.0f;  // Map 0..1 → -1..1
+            return b.height - norm * b.height;  // 0 dB → top
+        };
+        const float step = n > 1 ? b.width / static_cast<float>(n - 1) : b.width;
+
+        if (style_ == Style::filled) {
+            canvas.set_fill_color(fill);
+            for (size_t i = 0; i + 1 < n; ++i) {
+                float x0 = static_cast<float>(i) * step;
+                // Average the two endpoints so the strip top tracks the curve.
+                float y = (y_at(i) + y_at(i + 1)) * 0.5f;
+                canvas.fill_rect(x0, y, step + 1.0f, b.height - y);
+            }
         }
-
-        canvas::Canvas::WaveformStyle ws;
-        ws.line_color = spectrum_color;
-        ws.fill_color = fill;
-        ws.line_thickness = 1.5f;
-        ws.show_fill = (style_ == Style::filled);
-        ws.fill_center = 1.0f;  // Fill from bottom
-
-        canvas.draw_waveform(normalized.data(), normalized.size(), 0, 0, b.width, b.height, ws);
+        // Curve line on top.
+        canvas.set_stroke_color(spectrum_color);
+        canvas.set_line_width(1.5f);
+        for (size_t i = 0; i + 1 < n; ++i) {
+            canvas.stroke_line(static_cast<float>(i) * step, y_at(i),
+                               static_cast<float>(i + 1) * step, y_at(i + 1));
+        }
     }
 
     // Frequency grid lines (approximate positions)

@@ -178,8 +178,15 @@ std::vector<Entry> entries() {
 
 int main(int argc, char** argv) {
     std::string out = "shots";
-    for (int i = 1; i < argc; ++i)
+    auto backend = ScreenshotBackend::default_backend;
+    for (int i = 1; i < argc; ++i) {
         if (!std::strcmp(argv[i], "--out") && i + 1 < argc) out = argv[++i];
+        else if (!std::strcmp(argv[i], "--backend") && i + 1 < argc) {
+            std::string b = argv[++i];
+            if (b == "skia") backend = ScreenshotBackend::skia;
+            else if (b == "coregraphics") backend = ScreenshotBackend::coregraphics;
+        }
+    }
 
     bool ok = true;
     for (const auto& entry : entries()) {
@@ -192,7 +199,7 @@ int main(int argc, char** argv) {
             const auto H = static_cast<uint32_t>(entry.h);
             const std::string path = out + "/" + entry.name + (dark ? "-dark.png" : "-light.png");
             const bool wrote = render_to_file(*cell, W, H, path, 2.0f,
-                                              ScreenshotBackend::default_backend);
+                                              backend);
             std::printf("%s %s\n", wrote ? "wrote" : "FAILED", path.c_str());
             ok &= wrote;
         }

@@ -30,6 +30,7 @@ Theme derive_theme(const SemanticColors& sc) {
     t.colors["accent.error"]     = sc.destructive;
     t.colors["accent.warning"]   = shift_hue(sc.primary, 30.0f);   // warm hue shift
     t.colors["accent.success"]   = shift_hue(sc.primary, -120.0f); // green hue shift
+    t.colors["accent.info"]      = sc.chart4;                      // distinct info hue (blue family)
 
     // Control tokens
     t.colors["control.track"]  = sc.muted;

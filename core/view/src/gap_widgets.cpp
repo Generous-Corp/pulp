@@ -14,7 +14,7 @@ using canvas::Color;
 // colour (ink-signal provides it; others fall back to a dark ink).
 const char* tone_token(Tone t) {
     switch (t) {
-        case Tone::info:    return "accent.secondary";
+        case Tone::info:    return "accent.info";
         case Tone::success: return "accent.success";
         case Tone::warning: return "accent.warning";
         case Tone::danger:  return "accent.error";
