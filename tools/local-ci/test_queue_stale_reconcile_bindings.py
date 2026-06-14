@@ -5,6 +5,7 @@ from module_test_utils import load_module_from_path
 import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 MODULE_PATH = Path(__file__).with_name("queue_stale_reconcile_bindings.py")
@@ -57,6 +58,20 @@ class QueueStaleReconcileBindingsTests(unittest.TestCase):
         )
         captured["reconcile"][1]["requeue_stale_running_job_unlocked_fn"]({"id": "old"})
         self.assertEqual(captured["requeue"], ({"id": "old"}, bindings["now_iso"]))
+
+    def test_install_queue_stale_reconcile_helpers_wires_named_exports(self):
+        bindings = {}
+
+        with mock.patch.object(self.mod, "install_local_helpers") as install_local:
+            self.mod.install_queue_stale_reconcile_helpers(bindings, ("reconcile_running_jobs_unlocked", "custom_reconcile"))
+
+        self.assertEqual(
+            install_local.call_args_list,
+            [
+                mock.call(bindings, self.mod.__dict__, ("reconcile_running_jobs_unlocked",)),
+                mock.call(bindings, self.mod.__dict__, ("custom_reconcile",)),
+            ],
+        )
 
 
 if __name__ == "__main__":

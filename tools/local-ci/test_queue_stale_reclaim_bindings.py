@@ -5,6 +5,7 @@ from module_test_utils import load_module_from_path
 import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 MODULE_PATH = Path(__file__).with_name("queue_stale_reclaim_bindings.py")
@@ -61,6 +62,20 @@ class QueueStaleReclaimBindingsTests(unittest.TestCase):
         self.assertIs(captured["reclaim"]["now_fn"], bindings["now_iso"])
         self.assertIs(captured["reclaim"]["trim_line_fn"], bindings["trim_line"])
         self.assertIs(captured["reclaim"]["reclaim_stale_remote_validator_candidates_fn"], cleanup.reclaim_stale_remote_validator_candidates)
+
+    def test_install_queue_stale_reclaim_helpers_wires_named_exports(self):
+        bindings = {}
+
+        with mock.patch.object(self.mod, "install_local_helpers") as install_local:
+            self.mod.install_queue_stale_reclaim_helpers(bindings, ("reclaim_stale_remote_validators", "custom_reclaim"))
+
+        self.assertEqual(
+            install_local.call_args_list,
+            [
+                mock.call(bindings, self.mod.__dict__, ("reclaim_stale_remote_validators",)),
+                mock.call(bindings, self.mod.__dict__, ("custom_reclaim",)),
+            ],
+        )
 
 
 if __name__ == "__main__":

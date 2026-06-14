@@ -5,6 +5,7 @@ from module_test_utils import load_module_from_path
 import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 MODULE_PATH = Path(__file__).with_name("queue_target_update_bindings.py")
@@ -55,6 +56,20 @@ class QueueTargetUpdateBindingsTests(unittest.TestCase):
 
         captured["target_state"][1]["update_job_target_state_unlocked_fn"]([], "job1", "mac", {"status": "fail"})
         self.assertEqual(captured["target_unlocked"], ([], "job1", "mac", {"status": "fail"}, bindings["now_iso"]))
+
+    def test_install_queue_target_update_helpers_wires_named_exports(self):
+        bindings = {}
+
+        with mock.patch.object(self.mod, "install_local_helpers") as install_local:
+            self.mod.install_queue_target_update_helpers(bindings, ("update_job_target_state", "custom_target_update"))
+
+        self.assertEqual(
+            install_local.call_args_list,
+            [
+                mock.call(bindings, self.mod.__dict__, ("update_job_target_state",)),
+                mock.call(bindings, self.mod.__dict__, ("custom_target_update",)),
+            ],
+        )
 
 
 if __name__ == "__main__":

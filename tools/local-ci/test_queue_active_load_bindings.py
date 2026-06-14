@@ -6,6 +6,7 @@ import types
 import unittest
 
 from pathlib import Path
+from unittest import mock
 
 
 MODULE_PATH = Path(__file__).with_name("queue_active_load_bindings.py")
@@ -69,6 +70,20 @@ class QueueActiveLoadBindingsTests(unittest.TestCase):
         self.assertEqual(captured["load_job"][0], ("job1",))
         self.assertIs(captured["load_job"][1]["reconcile_running_jobs_unlocked_fn"], bindings["reconcile_running_jobs_unlocked"])
         self.assertIs(captured["load_job"][1]["find_job_unlocked_fn"], bindings["find_job_unlocked"])
+
+    def test_install_queue_active_load_helpers_wires_named_exports(self):
+        bindings = {}
+
+        with mock.patch.object(self.mod, "install_local_helpers") as install_local:
+            self.mod.install_queue_active_load_helpers(bindings, ("load_job", "custom_active_load"))
+
+        self.assertEqual(
+            install_local.call_args_list,
+            [
+                mock.call(bindings, self.mod.__dict__, ("load_job",)),
+                mock.call(bindings, self.mod.__dict__, ("custom_active_load",)),
+            ],
+        )
 
 
 if __name__ == "__main__":
