@@ -334,6 +334,23 @@ public:
     void set_default_value(float v) { default_value_ = std::clamp(v, 0.0f, 1.0f); }
     float default_value() const { return default_value_; }
 
+    /// Skew / response curve (see RangeSlider::set_skew). 1 = linear (default);
+    /// <1 gives finer control near the low end (the law a frequency/time knob
+    /// wants). Value is normalized 0..1; set_skew_from_midpoint takes a
+    /// normalized midpoint. Applies to the value arc, dot, and drag; modulation
+    /// rings are unaffected.
+    void set_skew(float s) { skew_ = std::max(0.0001f, s); }
+    float skew() const { return skew_; }
+    void set_skew_from_midpoint(float mid_normalized) {
+        float p = std::clamp(mid_normalized, 1e-4f, 1.0f - 1e-4f);
+        skew_ = std::max(0.0001f, std::log(0.5f) / std::log(p));
+    }
+    float position_for_value() const { return skew_ == 1.0f ? value_ : std::pow(value_, skew_); }
+    float value_for_position(float p) const {
+        p = std::clamp(p, 0.0f, 1.0f);
+        return skew_ == 1.0f ? p : std::pow(p, 1.0f / skew_);
+    }
+
     void set_label(std::string text) {
         if (label_ == text) return;
         label_ = std::move(text);
@@ -439,6 +456,7 @@ private:
     int mod_drag_ring_ = -1;       ///< ring whose handle is being dragged (-1 none)
     bool mod_drag_is_high_ = true; ///< dragging the high (vs low) handle
     float value_ = 0.0f;
+    float skew_ = 1.0f;            ///< 1 = linear; <1 = finer control at the low end
     float default_value_ = 0.5f;
     std::string label_;
     std::function<std::string(float)> format_;
@@ -588,6 +606,23 @@ public:
     float hover_scale() const { return hover_thumb_scale_.value(); }
     void advance_animations(float dt);
 
+    /// Skew / response curve (see RangeSlider::set_skew). 1 = linear (default);
+    /// <1 gives finer control near the bottom of the fader. Value is normalized
+    /// 0..1, so set_skew_from_midpoint takes a normalized midpoint.
+    void set_skew(float s) { skew_ = std::max(0.0001f, s); }
+    float skew() const { return skew_; }
+    void set_skew_from_midpoint(float mid_normalized) {
+        float p = std::clamp(mid_normalized, 1e-4f, 1.0f - 1e-4f);
+        skew_ = std::max(0.0001f, std::log(0.5f) / std::log(p));
+    }
+    /// Track position [0,1] (skew-mapped) for the current value, and the
+    /// inverse used while dragging.
+    float position_for_value() const { return skew_ == 1.0f ? value_ : std::pow(value_, skew_); }
+    float value_for_position(float p) const {
+        p = std::clamp(p, 0.0f, 1.0f);
+        return skew_ == 1.0f ? p : std::pow(p, 1.0f / skew_);
+    }
+
     void set_custom_shader(std::string sksl) { custom_sksl_ = std::move(sksl); }
     void clear_custom_shader() { custom_sksl_.clear(); }
     bool has_custom_shader() const { return !custom_sksl_.empty(); }
@@ -602,6 +637,7 @@ public:
 
 private:
     float value_ = 0.0f;
+    float skew_ = 1.0f;   ///< 1 = linear; <1 = finer control at the low end
     Orientation orientation_ = Orientation::vertical;
     // Ink & Signal faders use a slab/handle thumb by default (matches the Figma
     // design language); callers can opt back to a circle per-widget.
@@ -762,6 +798,19 @@ public:
     void set_track_thickness(float t) { track_thickness_ = std::max(1.0f, t); }
     float track_thickness() const { return track_thickness_; }
 
+    /// Skew / response curve. skew == 1 is linear (default). The drawn thumb
+    /// position is pow(valueProportion, skew); dragging is the inverse, so a
+    /// linear drag yields a perceptually non-linear value. skew < 1 gives more
+    /// travel (finer control) at the low end — the law a frequency or time
+    /// control wants. Matches JUCE's NormalisableRange skew convention.
+    void set_skew(float s) { skew_ = std::max(0.0001f, s); }
+    float skew() const { return skew_; }
+    /// Choose skew so `mid_value` lands at the middle of the track (position
+    /// 0.5). E.g. a 20 Hz–20 kHz slider with set_skew_from_midpoint(1000).
+    void set_skew_from_midpoint(float mid_value);
+    /// Track position [0,1] (skew-mapped) the thumb is drawn at for the value.
+    float position_for_value() const { return value_to_position_(); }
+
     /// Fired when the value changes — from drag, click, or set_value(). The
     /// callback receives the post-quantisation value, exactly the same
     /// number value() will return.
@@ -793,10 +842,15 @@ private:
     /// Common drag/click handler — `pos` is in local coordinates.
     void update_from_position_(Point pos);
 
+    /// Track position [0,1] the thumb is drawn at for the current value,
+    /// applying the skew curve.
+    float value_to_position_() const;
+
     float min_ = 0.0f;
     float max_ = 1.0f;
     float step_ = 0.0f;
     float value_ = 0.0f;
+    float skew_ = 1.0f;   ///< 1 = linear; <1 = finer control at the low end
     Orientation orientation_ = Orientation::horizontal;
     bool dragging_ = false;
     float track_thickness_ = 4.0f;

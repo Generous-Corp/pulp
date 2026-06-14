@@ -167,6 +167,18 @@ std::unique_ptr<View> build_board(float& out_height, ThemeModeControl*& out_them
         const float vals[] = {0.2f, 0.5f, 0.8f, 0.35f, 0.65f};
         for (int i = 0; i < 5; ++i) {
             auto k = std::make_unique<Knob>(); k->set_value(vals[i]); k->set_label(names[i]);
+            // Cutoff is a frequency control → logarithmic law (skew), so the
+            // dial spends most of its travel in the musically-useful low range.
+            if (i == 0) {
+                k->set_skew(0.35f);
+                k->set_format([](float v) {
+                    float hz = 20.0f * std::pow(1000.0f, v);  // 20 Hz … 20 kHz
+                    char b[16];
+                    if (hz >= 1000.0f) std::snprintf(b, sizeof b, "%.1fk", hz / 1000.0f);
+                    else               std::snprintf(b, sizeof b, "%.0f", hz);
+                    return std::string(b);
+                });
+            }
             add(std::move(k), x, y, 84.0f, 84.0f); x += 96.0f;
         }
         y += 104.0f;

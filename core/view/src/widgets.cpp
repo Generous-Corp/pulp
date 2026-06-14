@@ -289,9 +289,13 @@ void Knob::on_mouse_drag(Point pos) {
         }
         return;
     }
-    // Drag up to increase, down to decrease. 150px = full range.
+    // Drag up to increase, down to decrease. 150px = full track. The delta is
+    // applied in POSITION space and mapped back through the skew curve, so a
+    // skewed knob drags perceptually-linearly (identical when skew is 1).
     float delta = (drag_start_y_ - pos.y) / 150.0f;
-    float new_val = std::clamp(drag_start_value_ + delta, 0.0f, 1.0f);
+    float start_pos = skew_ == 1.0f ? drag_start_value_
+                                    : std::pow(drag_start_value_, skew_);
+    float new_val = value_for_position(std::clamp(start_pos + delta, 0.0f, 1.0f));
     if (new_val != value_) {
         value_ = new_val;
         if (on_change) on_change(value_);
@@ -326,12 +330,10 @@ void Fader::on_mouse_down(Point pos) {
     if (!dragging_ && on_gesture_begin) on_gesture_begin();
     dragging_ = true;
     auto b = local_bounds();
-    float new_val;
-    if (orientation_ == Orientation::horizontal) {
-        new_val = std::clamp(pos.x / b.width, 0.0f, 1.0f);
-    } else {
-        new_val = std::clamp(1.0f - pos.y / b.height, 0.0f, 1.0f);
-    }
+    float p = orientation_ == Orientation::horizontal
+                  ? (b.width > 0 ? pos.x / b.width : 0.0f)
+                  : (b.height > 0 ? 1.0f - pos.y / b.height : 0.0f);
+    float new_val = value_for_position(p);
     if (new_val != value_) {
         value_ = new_val;
         if (on_change) on_change(value_);
@@ -347,12 +349,10 @@ void Fader::on_mouse_up(Point) {
 void Fader::on_mouse_drag(Point pos) {
     if (!dragging_) return;
     auto b = local_bounds();
-    float new_val;
-    if (orientation_ == Orientation::horizontal) {
-        new_val = std::clamp(pos.x / b.width, 0.0f, 1.0f);
-    } else {
-        new_val = std::clamp(1.0f - pos.y / b.height, 0.0f, 1.0f);
-    }
+    float p = orientation_ == Orientation::horizontal
+                  ? (b.width > 0 ? pos.x / b.width : 0.0f)
+                  : (b.height > 0 ? 1.0f - pos.y / b.height : 0.0f);
+    float new_val = value_for_position(p);
     if (new_val != value_) {
         value_ = new_val;
         if (on_change) on_change(value_);
@@ -700,7 +700,7 @@ void Knob::paint(canvas::Canvas& canvas) {
         // per-source rings fit in the band outside it (within full_r).
         float ring_r = mod_rings_.empty() ? (full_r - arc_w * 0.5f) : (full_r * 0.64f);
         float body_r = ring_r - arc_w * 0.5f - 2.0f;     // disc inside the ring
-        float value_angle = start_angle + value_ * (end_angle - start_angle);
+        float value_angle = start_angle + position_for_value() * (end_angle - start_angle);
 
         // Hover glow ring (drawn behind everything)
         float glow = hover_glow_.value();
@@ -866,6 +866,9 @@ void Fader::paint(canvas::Canvas& canvas) {
             canvas.fill_rounded_rect(0, ty, track_length, track_thick, track_thick * 0.5f);
         }
     } else {
+        // Skew-mapped track position for the current value (== value_ when
+        // skew is linear, so the default look is unchanged).
+        const float pos = position_for_value();
 
         // ── Per-widget skin overrides (figma-plugin import) ────────────────
         // When the importer derived track / fill / thumb colours from the
@@ -921,11 +924,11 @@ void Fader::paint(canvas::Canvas& canvas) {
         canvas.set_fill_color({fill_color.r, fill_color.g, fill_color.b, fill_color.a});
 
         if (vert) {
-            float fill_height = value_ * track_length;
+            float fill_height = pos * track_length;
             float tx = (b.width - track_thick) * 0.5f;
             canvas.fill_rounded_rect(tx, track_length - fill_height, track_thick, fill_height, track_radius);
         } else {
-            float fill_width = value_ * track_length;
+            float fill_width = pos * track_length;
             float ty = (b.height - track_thick) * 0.5f;
             canvas.fill_rounded_rect(0, ty, fill_width, track_thick, track_radius);
         }
@@ -959,7 +962,7 @@ void Fader::paint(canvas::Canvas& canvas) {
             const float thumb_h = std::max(1.0f, (thumb_height_ > 0.0f ? thumb_height_ : default_h) * scale);
             const float axis_half = (vert ? thumb_h : thumb_w) * 0.5f;
             const float usable = std::max(0.0f, track_length - 2.0f * axis_half);
-            const float axis_center = axis_half + (vert ? (1.0f - value_) : value_) * usable;
+            const float axis_center = axis_half + (vert ? (1.0f - pos) : pos) * usable;
             // Skinned slab defaults to a generously rounded corner when none
             // was provided (the captured thumb is a pill).
             const float skin_radius = std::min(thumb_w, thumb_h) * 0.5f;
@@ -989,11 +992,11 @@ void Fader::paint(canvas::Canvas& canvas) {
             //   usable = length - 2 * radius;  pos = radius + value * usable;
             if (vert) {
                 float usable = track_length - 2.0f * thumb_radius;
-                float thumb_y = thumb_radius + usable - value_ * usable;
+                float thumb_y = thumb_radius + usable - pos * usable;
                 canvas.fill_circle(b.width * 0.5f, thumb_y, thumb_radius);
             } else {
                 float usable = track_length - 2.0f * thumb_radius;
-                float thumb_x = thumb_radius + value_ * usable;
+                float thumb_x = thumb_radius + pos * usable;
                 canvas.fill_circle(thumb_x, b.height * 0.5f, thumb_radius);
             }
         }
@@ -1043,11 +1046,28 @@ void RangeSlider::clamp_and_quantize_() {
     }
 }
 
+void RangeSlider::set_skew_from_midpoint(float mid_value) {
+    float lo = min_, hi = std::max(min_, max_);
+    if (hi <= lo) { skew_ = 1.0f; return; }
+    float prop = std::clamp((mid_value - lo) / (hi - lo), 1e-4f, 1.0f - 1e-4f);
+    skew_ = std::log(0.5f) / std::log(prop);
+    skew_ = std::max(0.0001f, skew_);
+}
+
+float RangeSlider::value_to_position_() const {
+    float lo = min_, hi = std::max(min_, max_);
+    float span = hi - lo;
+    float prop = span > 0.0f ? std::clamp((value_ - lo) / span, 0.0f, 1.0f) : 0.0f;
+    return skew_ == 1.0f ? prop : std::pow(prop, skew_);
+}
+
 float RangeSlider::position_to_value_(float t) const {
     float lo = min_;
     float hi = std::max(min_, max_);
     float clamped_t = std::clamp(t, 0.0f, 1.0f);
-    float v = lo + clamped_t * (hi - lo);
+    // Linear drag position → value proportion via the inverse skew curve.
+    float prop = skew_ == 1.0f ? clamped_t : std::pow(clamped_t, 1.0f / skew_);
+    float v = lo + prop * (hi - lo);
 
     if (step_ > 0.0f) {
         float steps = std::round((v - lo) / step_);
@@ -1117,11 +1137,10 @@ void RangeSlider::paint(canvas::Canvas& canvas) {
                                        : std::max(b.width,  1.0f));
 
     // Normalised position along the track, taking the (possibly-collapsed)
-    // [min,max] range into account.
+    // [min,max] range and the skew curve into account.
     float lo = min_;
     float hi = std::max(min_, max_);
-    float span = hi - lo;
-    float t = span > 0 ? std::clamp((value_ - lo) / span, 0.0f, 1.0f) : 0.0f;
+    float t = value_to_position_();
 
     // Background track.
     canvas.set_fill_color(track_color);

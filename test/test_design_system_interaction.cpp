@@ -216,6 +216,41 @@ TEST_CASE("value widgets adjust on scroll wheel", "[design-system][interaction][
     pan.on_wheel(-10.0f); REQUIRE(pan.value() > 0.0f); REQUIRE(pf);
 }
 
+TEST_CASE("RangeSlider skew maps the midpoint to the track centre", "[design-system][skew]") {
+    auto close = [](float a, float b, float tol) { return std::fabs(a - b) < tol; };
+    RangeSlider s; s.set_bounds({0, 0, 200, 18});
+    s.set_min(20); s.set_max(20000);
+
+    // Linear default: centre of the track is the arithmetic midpoint.
+    s.on_mouse_event([] { MouseEvent e; e.is_down = true; e.position = {100, 9}; return e; }());
+    REQUIRE(close(s.value(), 10010.0f, 50.0f));
+
+    // Log skew: the centre of the track now yields ~1000 (the chosen midpoint),
+    // and the thumb for value 1000 sits at the centre (position ≈ 0.5).
+    s.set_skew_from_midpoint(1000.0f);
+    s.on_mouse_event([] { MouseEvent e; e.is_down = true; e.position = {100, 9}; return e; }());
+    REQUIRE(close(s.value(), 1000.0f, 60.0f));
+    s.set_value(1000.0f);
+    REQUIRE(close(s.position_for_value(), 0.5f, 0.02f));
+    // Monotonic: dragging right always increases.
+    s.on_mouse_event([] { MouseEvent e; e.is_down = true; e.position = {160, 9}; return e; }());
+    REQUIRE(s.value() > 1000.0f);
+}
+
+TEST_CASE("Knob/Fader skew round-trips position and value", "[design-system][skew]") {
+    auto close = [](float a, float b) { return std::fabs(a - b) < 1e-3f; };
+    Knob k; k.set_skew_from_midpoint(0.25f);
+    REQUIRE(close(k.value_for_position(0.5f), 0.25f));   // centre → midpoint
+    REQUIRE(close(k.position_for_value() , 0.0f));        // value 0 → pos 0
+    k.set_value(0.25f);
+    REQUIRE(close(k.position_for_value(), 0.5f));
+
+    Fader f; f.set_skew(1.0f);                            // linear identity
+    REQUIRE(close(f.value_for_position(0.3f), 0.3f));
+    f.set_skew_from_midpoint(0.25f);
+    REQUIRE(close(f.value_for_position(0.5f), 0.25f));
+}
+
 TEST_CASE("ChannelStrip fader + pan drag and fire callbacks", "[design-system][interaction]") {
     ChannelStrip cs;
     cs.set_bounds({0, 0, 84, 200});   // matches showcase strip size
