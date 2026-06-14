@@ -25,3 +25,16 @@ def load_module_from_path(module_path: Path, *, module_name: str | None = None, 
     finally:
         if inserted_module_dir:
             sys.path.pop(0)
+
+
+def load_local_ci_module(
+    filename: str,
+    *,
+    module_name: str | None = None,
+    add_module_dir: bool = False,
+) -> ModuleType:
+    return load_module_from_path(
+        Path(__file__).with_name(filename),
+        module_name=module_name,
+        add_module_dir=add_module_dir,
+    )

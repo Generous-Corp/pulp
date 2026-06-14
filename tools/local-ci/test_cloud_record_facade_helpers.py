@@ -4,14 +4,11 @@
 from pathlib import Path
 import unittest
 
-from module_test_utils import load_module_from_path
-
-
-MODULE_PATH = Path(__file__).with_name("cloud_record_facade_helpers.py")
+from module_test_utils import load_local_ci_module
 
 
 def load_module():
-    return load_module_from_path(MODULE_PATH)
+    return load_local_ci_module("cloud_record_facade_helpers.py")
 
 
 class CloudRecordFacadeHelpersTests(unittest.TestCase):

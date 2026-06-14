@@ -1,17 +1,14 @@
 #!/usr/bin/env python3
 """Tests for cloud GitHub PR facade bindings."""
 
-from module_test_utils import load_module_from_path
 import types
 import unittest
-from pathlib import Path
 
-
-MODULE_PATH = Path(__file__).with_name("cloud_github_pr_bindings.py")
+from module_test_utils import load_local_ci_module
 
 
 def load_module():
-    return load_module_from_path(MODULE_PATH)
+    return load_local_ci_module("cloud_github_pr_bindings.py")
 
 
 class CloudGithubPrBindingsTests(unittest.TestCase):
