@@ -94,6 +94,10 @@ int main(int argc, char** argv) {
     config.output_channels = 2;
     config.input_channels = 0;
     config.persist_settings = false;
+    // Host the editor directly (no Settings-tab chrome) so it is the window root
+    // — the host's global-key hook fires on it, which is what makes musical
+    // typing work without the editor holding keyboard focus.
+    config.show_settings_tab = false;
     config.headless = headless;
     config.screenshot_path = screenshot_path;
     app.set_config(config);

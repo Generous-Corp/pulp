@@ -256,18 +256,42 @@ TEST_CASE("onset sensitivity changes the slice count", "[tempo-sampler]") {
     REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
     REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
 
-    // Least sensitive -> fewest slices.
+    // Minimum sensitivity -> exactly ONE slice (the whole sample triggers as one).
     f.store.set_value(kOnsetSens, 0.0f);
     f.proc->request_reanalyze();
-    std::this_thread::sleep_for(std::chrono::milliseconds(120));
+    REQUIRE(wait_for([&] { return f.proc->num_slices() == 1; }));
     const std::size_t low = f.proc->num_slices();
+    REQUIRE(low == 1);
 
-    // Most sensitive -> at least as many slices.
+    // Higher sensitivity -> more slices (up to the available onsets).
     f.store.set_value(kOnsetSens, 1.0f);
     f.proc->request_reanalyze();
-    REQUIRE(wait_for([&] { return f.proc->num_slices() >= low; }));
-    const std::size_t high = f.proc->num_slices();
-    REQUIRE(high >= low);
+    REQUIRE(wait_for([&] { return f.proc->num_slices() > low; }));
+    REQUIRE(f.proc->num_slices() > low);
+}
+
+TEST_CASE("plugin state round-trips the loaded sample (close/reopen)", "[tempo-sampler]") {
+    auto loop = percussive_loop(48000, 4);
+    const float* ch[1] = {loop.data()};
+
+    std::vector<std::uint8_t> blob;
+    {
+        Fixture a;
+        REQUIRE(a.proc->load_loop(ch, 1, 48000, 48000.0));
+        REQUIRE(wait_for([&] { return a.proc->has_sample(); }));
+        blob = a.proc->serialize_plugin_state();
+        REQUIRE(!blob.empty());
+    }
+    // Fresh processor instance (simulates close+reopen / DAW project reload).
+    Fixture b;
+    REQUIRE_FALSE(b.proc->has_sample());          // starts empty
+    REQUIRE(b.proc->deserialize_plugin_state(blob));
+    REQUIRE(wait_for([&] { return b.proc->has_sample(); }));  // restored
+
+    std::vector<float> mono; float sr = 0; std::vector<long> sl;
+    REQUIRE(b.proc->snapshot_for_view(mono, sr, sl));
+    REQUIRE(mono.size() == 48000);                // same audio came back
+    REQUIRE(sr == 48000.0f);
 }
 
 // The view-level drop-target test instantiates a WaveformDropView, which pulls

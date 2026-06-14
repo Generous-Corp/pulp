@@ -40,9 +40,11 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <string>
 #include <thread>
 #include <vector>
@@ -59,6 +61,7 @@ struct SamplerVoice {
     signal::Adsr adsr;
     audio::LoopRenderer renderer;
     audio::PublishedSampleView sample;
+    audio::LoopRegion region;   // stored so the UI playhead can map position->progress
     bool released = false;
 
     void reset() {
@@ -67,9 +70,10 @@ struct SamplerVoice {
     }
     bool start(int n, float vel, double speed, float host_sample_rate,
                const audio::PublishedSampleView& sample_view,
-               const audio::LoopRegion& region, std::uint64_t source_frames) {
+               const audio::LoopRegion& region_in, std::uint64_t source_frames) {
         reset();
-        if (!renderer.set_region(region, source_frames)) return false;
+        if (!renderer.set_region(region_in, source_frames)) return false;
+        region = region_in;
         note = n; velocity = vel; sample = sample_view; active = true;
         adsr.set_sample_rate(host_sample_rate); adsr.note_on();
         renderer.set_playback_rate(speed); renderer.start();
@@ -116,6 +120,7 @@ public:
     std::function<void(const std::string&)> on_file_dropped;
     std::function<void()> on_browse;             // click in the empty area -> file picker
     std::function<void(int slice_index, bool on)> on_play_slice;  // click a slice -> audition
+    std::function<void(int&, float&)> playhead_query;             // (slice, 0..1 progress)
     std::function<std::uint64_t()> generation;   // processor raw_generation()
     std::function<bool(std::vector<float>&, float&, std::vector<long>&)> snapshot;
 
@@ -165,6 +170,21 @@ public:
         auto b = local_bounds();
         if (!has_audio_) paint_cta(c, b);
         if (drag_over_)  paint_drag_overlay(c, b);
+        // Single playhead at the most-recently-triggered slice's position.
+        if (has_audio_ && playhead_query && total_samples_ > 0) {
+            int s = -1; float prog = 0.0f;
+            playhead_query(s, prog);
+            if (s >= 0 && s + 1 < static_cast<int>(slices_.size())) {
+                const double samp = static_cast<double>(slices_[static_cast<std::size_t>(s)]) +
+                    static_cast<double>(prog) *
+                    static_cast<double>(slices_[static_cast<std::size_t>(s) + 1] -
+                                        slices_[static_cast<std::size_t>(s)]);
+                const float x = b.x + static_cast<float>(samp / total_samples_) * b.width;
+                c.set_stroke_color(canvas::Color::rgba8(0x46, 0xF0, 0xDB));
+                c.set_line_width(2.0f);
+                c.stroke_line(x, b.y, x, b.y + b.height);
+            }
+        }
         const float fa = std::clamp(flash_.value(), 0.0f, 1.0f);
         if (fa > 0.001f) {
             c.set_fill_color(canvas::Color::rgba8(
@@ -308,7 +328,14 @@ public:
     std::vector<state::ListenerToken> listeners;
     std::function<void(int slice_index, bool on)> on_play_slice;  // musical typing
 
-    SamplerEditorRoot() { set_focusable(true); }
+    SamplerEditorRoot() {
+        set_focusable(true);
+        // Musical typing must work without the editor holding keyboard focus, so
+        // also receive keys via the host's global-key hook (fired on the root
+        // view every keystroke). Works when the editor IS the window root —
+        // plugin hosts, and the standalone with show_settings_tab=false.
+        on_global_key = [this](const view::KeyEvent& e) { return on_key_event(e); };
+    }
 
     // Musical typing: home row a s d f g h j k l -> slices 0..8 (root + index).
     // De-duped so key auto-repeat doesn't retrigger a held note.
@@ -353,18 +380,10 @@ public:
     static constexpr int kRootNoteMin = 0;       // C-2
     static constexpr int kRootNoteMax = 120;     // C8
 
-    // Onset sensitivity s in [0,1] maps (inversely) to OnsetDetectionConfig
-    // threshold_multiplier: higher sensitivity -> lower multiplier -> MORE slices.
-    //   multiplier = kSensMulHi - s * (kSensMulHi - kSensMulLo)
-    static constexpr double kSensMulLo = 0.8;   // most sensitive (most onsets)
-    static constexpr double kSensMulHi = 3.0;   // least sensitive (fewest onsets)
-    // Default sensitivity reproduces the detector's own default multiplier (1.5).
-    static constexpr float kDefaultOnsetSensitivity =
-        static_cast<float>((kSensMulHi - 1.5) / (kSensMulHi - kSensMulLo));
-    static double onset_multiplier_for(double sensitivity) {
-        const double s = std::clamp(sensitivity, 0.0, 1.0);
-        return kSensMulHi - s * (kSensMulHi - kSensMulLo);
-    }
+    // Onset sensitivity s in [0,1] maps to a slice COUNT (the strongest cuts by
+    // confidence are kept): s=0 -> 1 slice (whole sample), s=1 -> kMaxSlices.
+    static constexpr int kMaxSlices = 32;
+    static constexpr float kDefaultOnsetSensitivity = 0.5f;  // ~16 slices by default
 
     // MIDI note name in the user-requested C-2..C8 convention (C3 = 60). NOTE:
     // this deliberately differs from Pulp's MidiKeyboard, which labels 60 as C4
@@ -461,6 +480,53 @@ public:
                          static_cast<long>(data->num_frames()), data->sample_rate);
     }
 
+    // ── Plugin state: persist the loaded sample across reload / project save ──
+    // The host calls these on save/restore; we serialize the raw loop audio so a
+    // dropped sample survives closing+reopening the editor, plugin reload, and
+    // DAW project save. (The slices/tempo re-derive on load.)
+    std::vector<std::uint8_t> serialize_plugin_state() const override {
+        std::lock_guard<std::mutex> lock(raw_mutex_);
+        std::vector<std::uint8_t> out;
+        if (raw_frames_ <= 0) return out;  // nothing loaded
+        const std::uint32_t magic = 0x504C5053u;  // 'PLPS'
+        const std::uint32_t version = 1;
+        const std::int32_t ch = raw_channels_;
+        const std::int64_t frames = raw_frames_;
+        const double sr = raw_sr_;
+        auto put = [&out](const void* p, std::size_t n) {
+            const auto* b = static_cast<const std::uint8_t*>(p);
+            out.insert(out.end(), b, b + n);
+        };
+        put(&magic, 4); put(&version, 4); put(&ch, 4); put(&frames, 8); put(&sr, 8);
+        for (int c = 0; c < raw_channels_; ++c)
+            put(raw_[c].data(), static_cast<std::size_t>(raw_frames_) * sizeof(float));
+        return out;
+    }
+    bool deserialize_plugin_state(std::span<const std::uint8_t> data) override {
+        constexpr std::size_t kHeader = 4 + 4 + 4 + 8 + 8;
+        if (data.size() < kHeader) return true;  // no sample saved — fine
+        const std::uint8_t* p = data.data();
+        auto get = [&p](void* d, std::size_t n) { std::memcpy(d, p, n); p += n; };
+        std::uint32_t magic = 0, version = 0; std::int32_t ch = 0;
+        std::int64_t frames = 0; double sr = 0;
+        get(&magic, 4); get(&version, 4); get(&ch, 4); get(&frames, 8); get(&sr, 8);
+        if (magic != 0x504C5053u || frames <= 0 || ch < 1 || ch > 2 || sr <= 0) return true;
+        const std::size_t need = kHeader + static_cast<std::size_t>(ch) *
+                                 static_cast<std::size_t>(frames) * sizeof(float);
+        if (data.size() < need) return false;
+        std::vector<std::vector<float>> tmp(static_cast<std::size_t>(ch));
+        std::vector<const float*> ptrs(static_cast<std::size_t>(ch));
+        for (int c = 0; c < ch; ++c) {
+            tmp[static_cast<std::size_t>(c)].resize(static_cast<std::size_t>(frames));
+            std::memcpy(tmp[static_cast<std::size_t>(c)].data(), p,
+                        static_cast<std::size_t>(frames) * sizeof(float));
+            p += static_cast<std::size_t>(frames) * sizeof(float);
+            ptrs[static_cast<std::size_t>(c)] = tmp[static_cast<std::size_t>(c)].data();
+        }
+        load_loop(ptrs.data(), ch, static_cast<long>(frames), sr);
+        return true;
+    }
+
     /// UI drop handler -> worker: decode + load a file off the UI/audio threads.
     void request_load_path(const std::string& path) {
         { std::lock_guard<std::mutex> lock(drop_mutex_); pending_drop_path_ = path; }
@@ -481,6 +547,11 @@ public:
     void play_slice(int index, bool on) {
         const int note = static_cast<int>(state().get_value(kRootNote)) + index;
         if (on) ui_note_on(note); else ui_note_off(note);
+    }
+    /// UI playhead: the most-recent active slice (-1 = none) + its 0..1 progress.
+    void playhead(int& slice_out, float& pos_out) const {
+        slice_out = ui_play_slice_.load(std::memory_order_acquire);
+        pos_out = ui_play_pos_.load(std::memory_order_relaxed);
     }
 
     double detected_bpm() const { return loop_bpm_.load(std::memory_order_relaxed); }
@@ -589,9 +660,6 @@ public:
 
         // ── Header ── (mockup tabs/transport removed — only wired controls remain)
         label(20, 16, 360, 24, "PulpTempoSampler", textStr, 17, 600, LabelAlign::left);
-        label(300, 20, 448, 18,
-              "Tap a slice  ·  A S D F G H J K L play slices  ·  drop or click to load",
-              faint, 11, 400, LabelAlign::right);
 
         // ── Waveform / drop area ── (enlarged now the mockup rows are gone).
         // Shows a "drop a sample" CTA when empty; the waveform + slice regions
@@ -607,6 +675,7 @@ public:
             if (picked && !picked->empty()) request_load_path(*picked);
         };
         wf->on_play_slice = [this](int idx, bool on) { play_slice(idx, on); };
+        wf->playhead_query = [this](int& s, float& p) { playhead(s, p); };
         wf->generation = [this] { return raw_generation(); };
         wf->snapshot = [this](std::vector<float>& mono, float& sr, std::vector<long>& sl) {
             return snapshot_for_view(mono, sr, sl);
@@ -619,17 +688,19 @@ public:
         // ── Footer: wired controls only ──
         // Root-note dropdown (slice 0 maps to this MIDI note; idx = note - root).
         // Labels follow the requested C-2..C8 convention (C3 = 60); see note_name.
+        // Root = octave (C-2..C8). Octave granularity keeps the dropdown short
+        // enough to fit + flip above when needed (a 121-note chromatic list was
+        // taller than the window and got clipped). idx -> MIDI note idx*12.
         label(20, 320, 40, 18, "ROOT", faint, 10, 600, LabelAlign::left, true);
         {
             auto combo = std::make_unique<ComboBox>();
             std::vector<std::string> names;
-            names.reserve(static_cast<std::size_t>(kRootNoteMax - kRootNoteMin + 1));
-            for (int n = kRootNoteMin; n <= kRootNoteMax; ++n) names.push_back(note_name(n));
+            for (int n = kRootNoteMin; n <= kRootNoteMax; n += 12) names.push_back(note_name(n));
             combo->set_items(std::move(names));
             const int cur = static_cast<int>(state().get_value(kRootNote));
-            combo->set_selected_silent(std::clamp(cur - kRootNoteMin, 0, kRootNoteMax - kRootNoteMin));
+            combo->set_selected_silent(std::clamp(cur / 12, 0, kRootNoteMax / 12));
             combo->on_change = [this](int idx) {
-                const int note = kRootNoteMin + idx;
+                const int note = std::clamp(idx * 12, kRootNoteMin, kRootNoteMax);
                 state().begin_gesture(kRootNote);
                 state().set_value(kRootNote, static_cast<float>(note));
                 state().end_gesture(kRootNote);
@@ -637,8 +708,7 @@ public:
             ComboBox* comboPtr = combo.get();
             root->listeners.push_back(state().add_listener(
                 [comboPtr](state::ParamID id, float v) {
-                    if (id == kRootNote)
-                        comboPtr->set_selected_silent(static_cast<int>(v) - kRootNoteMin);
+                    if (id == kRootNote) comboPtr->set_selected_silent(static_cast<int>(v) / 12);
                 },
                 state::ListenerThread::Main));
             place(*combo, 64, 316, 96, 26);
@@ -721,6 +791,7 @@ public:
             cursor = offset;
         }
         if (cursor < block_frames) render_active_voices(output, cursor, block_frames - cursor, params);
+        publish_playhead();
         publish_audio_acknowledgement(published);
     }
 
@@ -730,6 +801,26 @@ private:
         signal::Adsr::Params adsr;
         bool loop = false;
     };
+
+    // Publish the most-recently-triggered active voice's slice + progress for
+    // the UI playhead (audio thread; lock-free atomics).
+    void publish_playhead() noexcept {
+        const int root = static_cast<int>(state().get_value(kRootNote));
+        for (const auto& v : voices_) {
+            if (v.active && v.note == last_note_) {
+                const double start = static_cast<double>(v.region.start_frame);
+                const double len = static_cast<double>(v.region.end_frame) - start;
+                float pos = 0.0f;
+                if (len > 0.0)
+                    pos = static_cast<float>(
+                        std::clamp((v.renderer.position() - start) / len, 0.0, 1.0));
+                ui_play_slice_.store(v.note - root, std::memory_order_release);
+                ui_play_pos_.store(pos, std::memory_order_relaxed);
+                return;
+            }
+        }
+        ui_play_slice_.store(-1, std::memory_order_release);  // nothing playing
+    }
 
     // ── Analysis (under raw_mutex_) ──
     void analyze_locked() {
@@ -743,15 +834,30 @@ private:
         const auto kr = kt.analyze(view, kc);
         loop_bpm_.store(kr.tempo_bpm, std::memory_order_relaxed);
 
+        // Collect a generous candidate set, then keep the strongest cuts by
+        // confidence so sensitivity maps DIRECTLY to a slice COUNT (predictable
+        // UX): s=0 -> 1 slice (whole sample), s=1 -> up to kMaxSlices.
         audio::OnsetDetector od;
         audio::OnsetDetectionConfig oc;
-        oc.threshold_multiplier = onset_multiplier_for(state().get_value(kOnsetSens));
+        oc.threshold_multiplier = 1.0;   // generous — gather candidates
+        oc.max_markers = 256;
         const auto onsets = od.detect(view, oc);
-        slices_orig_.clear();
-        slices_orig_.push_back(0);
+
+        const double s = std::clamp(static_cast<double>(state().get_value(kOnsetSens)), 0.0, 1.0);
+        const int target = 1 + static_cast<int>(std::lround(s * (kMaxSlices - 1)));  // 1..kMaxSlices
+        const int keep = std::max(0, target - 1);  // number of cut points
+
+        std::vector<audio::OnsetMarker> cand;
         for (const auto& m : onsets.markers)
             if (static_cast<long>(m.frame) > 0 && static_cast<long>(m.frame) < raw_frames_)
-                slices_orig_.push_back(static_cast<long>(m.frame));
+                cand.push_back(m);
+        std::sort(cand.begin(), cand.end(),
+                  [](const auto& a, const auto& b) { return a.confidence > b.confidence; });
+        if (static_cast<int>(cand.size()) > keep) cand.resize(static_cast<std::size_t>(keep));
+
+        slices_orig_.clear();
+        slices_orig_.push_back(0);
+        for (const auto& m : cand) slices_orig_.push_back(static_cast<long>(m.frame));
         slices_orig_.push_back(raw_frames_);
         std::sort(slices_orig_.begin(), slices_orig_.end());
         slices_orig_.erase(std::unique(slices_orig_.begin(), slices_orig_.end()), slices_orig_.end());
@@ -963,6 +1069,7 @@ private:
         const auto region = region_for_note(note, sample, params.loop);
         // Buffer is already at host tempo -> play at native rate (1.0).
         target->start(note, velocity, 1.0, host_sample_rate_, sample, region, sample.num_frames);
+        last_note_ = note;  // most-recently-triggered note drives the playhead
     }
 
     void release_note(int note) {
@@ -1018,6 +1125,13 @@ private:
     // UI-thread -> audio-thread note injection (click/typing playback).
     struct UiNote { int note = -1; float velocity = 0.8f; bool on = false; };
     runtime::SpscQueue<UiNote, 256> ui_notes_;
+
+    // Playhead: the audio thread publishes the MOST-RECENTLY-triggered active
+    // voice's slice + progress; the UI draws a single playhead (Plunderphonics
+    // style — only the latest shows, even if older voices still sound).
+    std::atomic<int> ui_play_slice_{-1};
+    std::atomic<float> ui_play_pos_{0.0f};  // 0..1 through the slice
+    int last_note_ = -1;  // audio-thread only: most recent note_on
 };
 
 inline std::unique_ptr<format::Processor> create_pulp_tempo_sampler() {
