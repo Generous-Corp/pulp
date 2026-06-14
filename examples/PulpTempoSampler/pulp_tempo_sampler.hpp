@@ -26,6 +26,7 @@
 #include <pulp/signal/offline_stretch.hpp>
 #include <pulp/view/animation.hpp>
 #include <pulp/view/drag_drop.hpp>
+#include <pulp/view/musical_typing.hpp>
 #include <pulp/view/parameter_binding.hpp>
 #include <pulp/view/theme.hpp>
 #include <pulp/view/ui_components.hpp>
@@ -355,49 +356,35 @@ class SamplerEditorRoot : public view::View {
 public:
     std::vector<view::ParameterBinding> bindings;
     std::vector<state::ListenerToken> listeners;
-    std::function<void(int slice_index, bool on)> on_play_slice;  // musical typing
+    // Musical typing (computer keyboard -> notes -> slices). The SDK controller
+    // owns the QWERTY->note map, dedup, modifier-chord rejection and note-off;
+    // create_view() wires its on_note_on/off to the processor's RT note queue and
+    // current_root_note to the ROOT param.
+    view::MusicalTypingController typing;
+    std::function<int()> current_root_note;
 
     SamplerEditorRoot() {
         set_focusable(true);
-        // Musical typing must work without the editor holding keyboard focus, so
-        // also receive keys via the host's global-key hook (fired on the root
-        // view every keystroke). Works when the editor IS the window root —
-        // plugin hosts, and the standalone with show_settings_tab=false.
-        on_global_key = [this](const view::KeyEvent& e) { return on_key_event(e); };
+        // Receive keys whether or not the editor holds focus: the host's
+        // global-key hook fires on the window root every keystroke (standalone),
+        // and on_key_event covers the focused path.
+        on_global_key = [this](const view::KeyEvent& e) { return on_musical_key(e); };
     }
 
-    // Musical typing: home row a s d f g h j k l -> slices 0..8 (root + index).
-    // De-duped so key auto-repeat doesn't retrigger a held note.
-    bool on_key_event(const view::KeyEvent& event) override {
-        const int idx = slice_for_key(event.key);
-        if (idx < 0) return false;
-        if (event.is_down) {
-            if (held_[static_cast<std::size_t>(idx)]) return true;  // auto-repeat
-            held_[static_cast<std::size_t>(idx)] = true;
-            if (on_play_slice) on_play_slice(idx, true);
-        } else {
-            held_[static_cast<std::size_t>(idx)] = false;
-            if (on_play_slice) on_play_slice(idx, false);
-        }
-        return true;
-    }
+    bool on_key_event(const view::KeyEvent& event) override { return on_musical_key(event); }
+
+    // Release any held typing notes (e.g. on focus loss) so nothing sticks.
+    void release_all_typing() { typing.all_notes_off(); }
 
 private:
-    static int slice_for_key(view::KeyCode k) {
-        switch (k) {
-            case view::KeyCode::a: return 0;
-            case view::KeyCode::s: return 1;
-            case view::KeyCode::d: return 2;
-            case view::KeyCode::f: return 3;
-            case view::KeyCode::g: return 4;
-            case view::KeyCode::h: return 5;
-            case view::KeyCode::j: return 6;
-            case view::KeyCode::k: return 7;
-            case view::KeyCode::l: return 8;
-            default: return -1;
-        }
+    bool on_musical_key(const view::KeyEvent& e) {
+        // Don't turn typing into a name field into notes — if a text-input widget
+        // owns focus, let it have the keys.
+        if (auto* fv = view::View::focused_input_; fv && fv->accepts_text_input())
+            return false;
+        if (current_root_note) typing.set_base_note(current_root_note());
+        return typing.handle_key(e);  // false for unmapped / modifier chords -> host keeps them
     }
-    std::array<bool, 9> held_{};
 };
 
 class PulpTempoSamplerProcessor : public format::Processor {
@@ -711,8 +698,12 @@ public:
         };
         root->add_child(std::move(wf));
 
-        // Musical typing (home row) routes to the same audition path.
-        root->on_play_slice = [this](int idx, bool on) { play_slice(idx, on); };
+        // Musical typing: the SDK MusicalTypingController turns the QWERTY row
+        // into notes; base = ROOT so 'a' plays slice 0, 'w' slice 1, … Notes go
+        // to the same lock-free UI->audio queue as host MIDI and slice clicks.
+        root->current_root_note = [this] { return static_cast<int>(state().get_value(kRootNote)); };
+        root->typing.on_note_on = [this](int note, float vel) { ui_note_on(note, vel); };
+        root->typing.on_note_off = [this](int note) { ui_note_off(note); };
 
         // ── Footer: wired controls only ──
         // Root-note dropdown (slice 0 maps to this MIDI note; idx = note - root).

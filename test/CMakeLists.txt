@@ -1834,6 +1834,7 @@ pulp_add_test_suite(pulp-test-simd LIBRARIES pulp::runtime pulp::signal)
 
 # Drag-and-drop tests
 pulp_add_test_suite(pulp-test-dnd SOURCES test_drag_drop.cpp LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-musical-typing SOURCES test_musical_typing.cpp LIBRARIES pulp::view)
 
 # OSC tests
 pulp_add_test_suite(pulp-test-osc LIBRARIES pulp::osc)

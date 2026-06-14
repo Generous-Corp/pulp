@@ -332,23 +332,25 @@ TEST_CASE("empty drop area click triggers browse", "[tempo-sampler]") {
     REQUIRE(browsed);  // a click in the empty area opens the file picker
 }
 
-TEST_CASE("musical typing routes home-row keys to slices", "[tempo-sampler]") {
+TEST_CASE("musical typing maps QWERTY keys to slice notes (root-based)", "[tempo-sampler]") {
     SamplerEditorRoot root;
-    std::vector<std::pair<int, bool>> events;
-    root.on_play_slice = [&](int idx, bool on) { events.emplace_back(idx, on); };
-    auto key = [](view::KeyCode k, bool down) {
-        view::KeyEvent e; e.key = k; e.is_down = down; return e;
+    root.current_root_note = [] { return 60; };  // base 'a' = root note
+    std::vector<std::pair<int, bool>> notes;
+    root.typing.on_note_on = [&](int n, float) { notes.emplace_back(n, true); };
+    root.typing.on_note_off = [&](int n) { notes.emplace_back(n, false); };
+    auto key = [](view::KeyCode k, bool down, bool rep = false) {
+        view::KeyEvent e; e.key = k; e.is_down = down; e.is_repeat = rep; return e;
     };
-    REQUIRE(root.on_key_event(key(view::KeyCode::a, true)));
-    REQUIRE(root.on_key_event(key(view::KeyCode::a, true)));   // auto-repeat ignored
-    REQUIRE(root.on_key_event(key(view::KeyCode::a, false)));
-    REQUIRE(root.on_key_event(key(view::KeyCode::f, true)));
-    REQUIRE_FALSE(root.on_key_event(key(view::KeyCode::z, true)));  // unmapped key
+    REQUIRE(root.on_key_event(key(view::KeyCode::a, true)));         // root + 0 -> note 60
+    REQUIRE(root.on_key_event(key(view::KeyCode::a, true, true)));   // auto-repeat ignored
+    REQUIRE(root.on_key_event(key(view::KeyCode::a, false)));        // note off 60
+    REQUIRE(root.on_key_event(key(view::KeyCode::s, true)));         // root + 2 -> note 62
+    REQUIRE_FALSE(root.on_key_event(key(view::KeyCode::num1, true)));  // unmapped -> host
 
-    REQUIRE(events.size() == 3);
-    CHECK(events[0] == std::make_pair(0, true));   // 'a' down -> slice 0
-    CHECK(events[1] == std::make_pair(0, false));  // 'a' up
-    CHECK(events[2] == std::make_pair(3, true));   // 'f' down -> slice 3
+    REQUIRE(notes.size() == 3);
+    CHECK(notes[0] == std::make_pair(60, true));   // 'a' down  (slice 0 = root)
+    CHECK(notes[1] == std::make_pair(60, false));  // 'a' up
+    CHECK(notes[2] == std::make_pair(62, true));   // 's' down  (slice 2)
 }
 
 namespace {

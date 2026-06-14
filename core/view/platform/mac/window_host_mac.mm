@@ -1097,6 +1097,31 @@ static void install_app_menu(NSString* appName) {
     }
 }
 
+// Symmetric key-up so released keys reach handlers that need both edges — most
+// importantly musical-typing note-off (without this, computer-keyboard notes
+// stick). Routes the global-key hook (is_down=false) then the focused view.
+- (void)keyUp:(NSEvent*)event {
+    @try {
+        try {
+            pulp::view::KeyEvent ke;
+            ke.key = key_code_from_ns(event.keyCode);
+            ke.modifiers = modifiers_from_ns_flags(event.modifierFlags);
+            ke.is_down = false;
+            if (self.rootView && self.rootView->on_global_key)
+                self.rootView->on_global_key(ke);
+            if (auto* fv = [self liveFocusedView]) fv->on_key_event(ke);
+            [self setNeedsDisplay:YES];
+        } catch (const std::exception& e) {
+            std::cerr << "MacWindowHost keyUp error: " << e.what() << "\n";
+        } catch (...) {
+            std::cerr << "MacWindowHost keyUp error: unknown exception\n";
+        }
+    } @catch (NSException* exception) {
+        std::cerr << "MacWindowHost keyUp NSException: "
+                  << [[exception name] UTF8String] << "\n";
+    }
+}
+
 - (void)mouseMoved:(NSEvent*)event {
     @try {
         try {
