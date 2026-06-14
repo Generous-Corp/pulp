@@ -1131,6 +1131,8 @@ def compose_desktop_video_proof(
     template: str | None = None,
     source_image: Path | None = None,
     source_label: str | None = None,
+    diff_image: Path | None = None,
+    diff_label: str | None = None,
     title: str | None = None,
     notes: list[str] | None = None,
 ) -> dict:
@@ -1141,6 +1143,8 @@ def compose_desktop_video_proof(
         template=template,
         source_image=source_image,
         source_label=source_label,
+        diff_image=diff_image,
+        diff_label=diff_label,
         title=title,
         notes=notes,
         run_fn=subprocess.run,

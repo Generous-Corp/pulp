@@ -592,6 +592,10 @@ class CliParserTests(unittest.TestCase):
             "/tmp/source.png",
             "--source-label",
             "Figma reference",
+            "--diff-image",
+            "/tmp/diff.png",
+            "--diff-label",
+            "Delta heatmap",
             "--title",
             "Design parity",
             "--note",
@@ -612,6 +616,8 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(args.template, "design-parity")
         self.assertEqual(args.source_image, "/tmp/source.png")
         self.assertEqual(args.source_label, "Figma reference")
+        self.assertEqual(args.diff_image, "/tmp/diff.png")
+        self.assertEqual(args.diff_label, "Delta heatmap")
         self.assertEqual(args.title, "Design parity")
         self.assertEqual(args.note, ["Reference matches implementation"])
         self.assertEqual(args.video_attachment_budget_mb, 40.0)

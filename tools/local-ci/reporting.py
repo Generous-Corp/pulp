@@ -479,6 +479,7 @@ def desktop_review_issue_body(index_payload: dict, *, publish_dir: Path) -> str:
                 f"- Action marker: `{action_label}`" if action_label else "- Action marker: not recorded",
                 f"- Action point: `{json.dumps(action_marker['content_point'], sort_keys=True)}`" if action_marker.get("content_point") else "- Action point: not recorded",
                 f"- Source reference: `{artifacts['video_source_image']}`" if artifacts.get("video_source_image") else "- Source reference: not attached",
+                f"- Visual diff reference: `{artifacts['video_diff_image']}`" if artifacts.get("video_diff_image") else "- Visual diff reference: not attached",
                 f"- Issue video: `{artifacts['video_issue']}`" if artifacts.get("video_issue") else "- Issue video: not generated",
                 f"- Small video: `{artifacts['video_small']}`" if artifacts.get("video_small") else "- Small video: not generated",
                 f"- Review video: `{artifacts.get('video_composed') or artifacts.get('video')}`" if artifacts.get("video_composed") or artifacts.get("video") else "- Review video: not recorded",
@@ -857,6 +858,9 @@ def stage_desktop_publish_report(
         source_image = video_proof_composition.get("source_image") if video_proof_composition else None
         if _copy_optional_file(source_image, run_dir / "source-reference" / Path(str(source_image)).name):
             copied_artifacts["video_source_image"] = str((run_dir / "source-reference" / Path(str(source_image)).name).relative_to(publish_dir))
+        diff_image = video_proof_composition.get("diff_image") if video_proof_composition else None
+        if _copy_optional_file(diff_image, run_dir / "diff-reference" / Path(str(diff_image)).name):
+            copied_artifacts["video_diff_image"] = str((run_dir / "diff-reference" / Path(str(diff_image)).name).relative_to(publish_dir))
 
         published_runs.append(
             {
@@ -977,6 +981,14 @@ def stage_desktop_publish_report(
                 f"<img src=\"{html.escape(str(artifacts['video_source_image']))}\" alt=\"source reference\" />"
                 "</figure>"
             )
+        diff_reference_block = ""
+        if artifacts.get("video_diff_image"):
+            diff_reference_block = (
+                "<figure>"
+                "<figcaption>visual diff reference</figcaption>"
+                f"<img src=\"{html.escape(str(artifacts['video_diff_image']))}\" alt=\"visual diff reference\" />"
+                "</figure>"
+            )
         image_blocks: list[str] = []
         for title, rel_path in (("before", before), ("after", screenshot), ("diff", diff)):
             if not rel_path:
@@ -993,6 +1005,7 @@ def stage_desktop_publish_report(
             + video_block
             + "<div class=\"images\">"
             + source_block
+            + diff_reference_block
             + "".join(image_blocks)
             + "</div></section>"
         )

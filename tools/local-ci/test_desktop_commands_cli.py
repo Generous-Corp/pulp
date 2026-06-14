@@ -961,12 +961,15 @@ class DesktopCommandsCliTests(unittest.TestCase):
                 + "\n"
             )
             (run_dir / "reference.png").write_bytes(b"png")
+            (run_dir / "diff.png").write_bytes(b"diff")
             writes = []
 
             def compose(manifest_path_arg: Path, output_path: Path, **kwargs):
                 self.assertEqual(kwargs["template"], "design-parity")
                 self.assertEqual(kwargs["source_image"], (run_dir / "reference.png").resolve())
                 self.assertEqual(kwargs["source_label"], "Figma reference")
+                self.assertEqual(kwargs["diff_image"], (run_dir / "diff.png").resolve())
+                self.assertEqual(kwargs["diff_label"], "Delta heatmap")
                 self.assertEqual(kwargs["title"], "Design parity")
                 self.assertEqual(kwargs["notes"], ["Reference matches implementation"])
                 output_path.write_bytes(b"composed")
@@ -996,6 +999,8 @@ class DesktopCommandsCliTests(unittest.TestCase):
                     template="design-parity",
                     source_image=str(run_dir / "reference.png"),
                     source_label="Figma reference",
+                    diff_image=str(run_dir / "diff.png"),
+                    diff_label="Delta heatmap",
                     title="Design parity",
                     note=["Reference matches implementation"],
                     video_attachment_budget_mb=40.0,
@@ -1019,6 +1024,8 @@ class DesktopCommandsCliTests(unittest.TestCase):
             self.assertEqual(updated["video_proof_composition"]["template"], "design-parity")
             self.assertTrue(updated["video_proof_composition"]["source_image"].endswith("/reference.png"))
             self.assertEqual(updated["video_proof_composition"]["source_label"], "Figma reference")
+            self.assertTrue(updated["video_proof_composition"]["diff_image"].endswith("/diff.png"))
+            self.assertEqual(updated["video_proof_composition"]["diff_label"], "Delta heatmap")
             self.assertEqual(updated["video_proof_composition"]["title"], "Design parity")
             self.assertEqual(updated["video_proof_composition"]["notes"], ["Reference matches implementation"])
             self.assertEqual(updated["video_proof_composition"]["focus"]["label"], "bypass-toggle")

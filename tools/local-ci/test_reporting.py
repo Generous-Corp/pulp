@@ -138,6 +138,8 @@ class ReportingTests(unittest.TestCase):
         video_small_metadata.write_text('{"status":"transcoded","selected_attempt":"compact-540p","size":{"size_bytes":8000000,"fits_attachment_budget":true}}\n')
         source_reference = bundle / "source-reference.png"
         source_reference.write_bytes(b"png")
+        diff_reference = bundle / "diff-reference.png"
+        diff_reference.write_bytes(b"diff")
         (bundle / "manifest.json").write_text('{"label":"bundle-copy"}\n')
         manifest = {
             "target": "mac<>",
@@ -174,6 +176,8 @@ class ReportingTests(unittest.TestCase):
                 "template": "design-parity",
                 "source_image": str(source_reference),
                 "source_label": "Figma source",
+                "diff_image": str(diff_reference),
+                "diff_label": "Delta heatmap",
                 "focus": {
                     "label": "bypass-toggle",
                     "selector": {"click_view_id": "bypass-toggle"},
@@ -237,10 +241,12 @@ class ReportingTests(unittest.TestCase):
         self.assertIn("video_issue_metadata", published_run["artifacts"])
         self.assertIn("video_small_metadata", published_run["artifacts"])
         self.assertIn("video_source_image", published_run["artifacts"])
+        self.assertIn("video_diff_image", published_run["artifacts"])
         self.assertIn("manifest", published_run["artifacts"])
         self.assertNotIn("screenshot", published_run["artifacts"])
         self.assertEqual(published_run["artifacts"]["image_change"], {"changed": False})
         self.assertEqual(published_run["video_proof_composition"]["template"], "design-parity")
+        self.assertEqual(published_run["video_proof_composition"]["diff_label"], "Delta heatmap")
         self.assertEqual(published_run["video_proof_composition"]["focus"]["label"], "bypass-toggle")
         self.assertEqual(published_run["video_proof_composition"]["action_marker"]["label"], "bypass-toggle")
         self.assertEqual(published_run["video_proof_composition"]["context"]["plugin"], "PulpSynth")
@@ -254,6 +260,7 @@ class ReportingTests(unittest.TestCase):
         self.assertIn("<video controls", html_text)
         self.assertIn("video metadata", html_text)
         self.assertIn("template: design-parity", html_text)
+        self.assertIn("visual diff reference", html_text)
         self.assertIn("command: ./build/pulp --inspect", html_text)
         self.assertIn("source: mode=exact-sha, branch=feat/validation-video-proof, sha=abc123", html_text)
         self.assertIn("adapter: macos-local", html_text)
@@ -332,6 +339,7 @@ class ReportingTests(unittest.TestCase):
         self.assertIn("--approved --issue-url <issue-url>", review_text)
         self.assertIn("--needs-work --notes", review_text)
         self.assertIn("Proof template: `design-parity`", review_text)
+        self.assertIn("Visual diff reference:", review_text)
         self.assertIn("Command: `./build/pulp --inspect`", review_text)
         self.assertIn("Source: `mode=exact-sha, branch=feat/validation-video-proof, sha=abc123`", review_text)
         self.assertIn("Host: `macstudio`", review_text)

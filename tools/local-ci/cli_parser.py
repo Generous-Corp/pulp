@@ -448,6 +448,8 @@ def build_local_ci_parser(
     p_desktop_compose_video.add_argument("--template", choices=VIDEO_PROOF_TEMPLATE_CHOICES, help="Remotion proof template variant")
     p_desktop_compose_video.add_argument("--source-image", help="Optional source/reference image for design-parity proofs")
     p_desktop_compose_video.add_argument("--source-label", help="Label for --source-image (default: Source reference)")
+    p_desktop_compose_video.add_argument("--diff-image", help="Optional visual diff image for design-parity proofs")
+    p_desktop_compose_video.add_argument("--diff-label", help="Label for --diff-image (default: Difference map)")
     p_desktop_compose_video.add_argument("--title", help="Override the composed video title")
     p_desktop_compose_video.add_argument("--note", action="append", default=[], help="Short note to show in the composed proof video; may be repeated")
     p_desktop_compose_video.add_argument("--video-attachment-budget-mb", type=float, default=100.0, help="Attachment budget in decimal MB for the issue video (default: 100)")

@@ -89,9 +89,11 @@ class VideoArtifactsTests(unittest.TestCase):
         output = self.root / "proof-composed.mp4"
         script = self.root / "compose.mjs"
         source = self.root / "source.png"
+        diff = self.root / "diff.png"
         manifest.write_text('{"label":"demo"}\n')
         script.write_text("")
         source.write_bytes(b"png")
+        diff.write_bytes(b"diff")
         calls = []
 
         def run_compose(cmd, **kwargs):
@@ -106,6 +108,8 @@ class VideoArtifactsTests(unittest.TestCase):
             template="design-parity",
             source_image=source,
             source_label="Figma reference",
+            diff_image=diff,
+            diff_label="Delta heatmap",
             title="Design parity",
             notes=["Reference matches implementation", "Issue video fits"],
             run_fn=run_compose,
@@ -116,6 +120,8 @@ class VideoArtifactsTests(unittest.TestCase):
         self.assertEqual(calls[0][0][calls[0][0].index("--template") + 1], "design-parity")
         self.assertEqual(calls[0][0][calls[0][0].index("--source-image") + 1], str(source))
         self.assertEqual(calls[0][0][calls[0][0].index("--source-label") + 1], "Figma reference")
+        self.assertEqual(calls[0][0][calls[0][0].index("--diff-image") + 1], str(diff))
+        self.assertEqual(calls[0][0][calls[0][0].index("--diff-label") + 1], "Delta heatmap")
         self.assertEqual(calls[0][0][calls[0][0].index("--title") + 1], "Design parity")
         note_indexes = [index for index, value in enumerate(calls[0][0]) if value == "--note"]
         self.assertEqual([calls[0][0][index + 1] for index in note_indexes], ["Reference matches implementation", "Issue video fits"])

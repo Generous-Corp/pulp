@@ -11,7 +11,7 @@ const toolDir = path.resolve(scriptDir, '..');
 const entryPoint = path.join(toolDir, 'remotion-proof', 'index.jsx');
 
 const usage = () => {
-	console.error(`usage: compose-video-proof.mjs --manifest <manifest.json> --output <proof.mp4> [--video <raw.mp4>] [--title <title>] [--template validation-proof|design-parity] [--source-image <png>] [--source-label <label>] [--note <text>]...`);
+	console.error(`usage: compose-video-proof.mjs --manifest <manifest.json> --output <proof.mp4> [--video <raw.mp4>] [--title <title>] [--template validation-proof|design-parity] [--source-image <png>] [--source-label <label>] [--diff-image <png>] [--diff-label <label>] [--note <text>]...`);
 	process.exit(2);
 };
 
@@ -263,6 +263,15 @@ const main = async () => {
 		args['source-label'] ||
 		manifest.video_proof_composition?.source_label ||
 		'Source reference';
+	const diffImage =
+		args['diff-image'] ||
+		manifest.video_proof_composition?.diff_image ||
+		artifacts.diff_screenshot ||
+		null;
+	const diffLabel =
+		args['diff-label'] ||
+		manifest.video_proof_composition?.diff_label ||
+		'Difference map';
 	const videoMetaPath = artifacts.video_metadata;
 	const videoMeta = await readJsonIfPresent(videoMetaPath);
 	const issueMeta = await readJsonIfPresent(artifacts.video_issue_metadata);
@@ -287,6 +296,7 @@ const main = async () => {
 			const videoFileName = await copyIfPresent(rawVideo, publicDir, 'raw-video.mp4');
 			const posterFileName = await copyIfPresent(poster, publicDir, 'poster.png');
 			const sourceImageFileName = await copyIfPresent(sourceImage, publicDir, 'source-reference.png');
+			const diffImageFileName = await copyIfPresent(diffImage, publicDir, 'diff-reference.png');
 			const inputProps = {
 				title: args.title || manifest.video_proof_composition?.title || manifest.label || 'Validation Proof',
 				subtitle:
@@ -305,6 +315,8 @@ const main = async () => {
 				posterFileName,
 				sourceImageFileName,
 				sourceLabel,
+				diffImageFileName,
+				diffLabel,
 				target: manifest.target || 'unknown',
 				action: manifest.action || 'run',
 				label: manifest.label || 'untitled',
@@ -381,6 +393,7 @@ const main = async () => {
 							note_count: proofNotes.length,
 							issue_status: inputProps.issueStatus,
 							has_audio: videoHasAudio,
+							has_diff: Boolean(inputProps.diffImageFileName),
 						},
 						review_storyboard: reviewStoryboard,
 					},

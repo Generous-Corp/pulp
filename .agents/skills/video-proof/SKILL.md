@@ -442,11 +442,16 @@ python3 tools/local-ci/local_ci.py desktop compose-video /path/to/run/manifest.j
   --template design-parity \
   --source-image planning/screenshots/reference.png \
   --source-label "Figma reference" \
+  --diff-image planning/screenshots/diff.png \
+  --diff-label "Layout delta" \
   --title "Design parity proof" \
   --note "The imported layout keeps the same primary control grouping."
 ```
 
-This renders the source/reference image beside the captured proof and records a
+This renders the source/reference image beside the captured proof and, when
+provided, adds the diff image to the proof context panel. If the run manifest
+already has `artifacts.diff_screenshot`, the composer uses it automatically
+unless `--diff-image` overrides it. The command records a
 `video_proof_composition` block in the manifest.
 
 ## Publish and serve for review

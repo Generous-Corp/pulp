@@ -82,6 +82,8 @@ export const ValidationProof = ({
 	posterFileName,
 	sourceImageFileName,
 	sourceLabel,
+	diffImageFileName,
+	diffLabel,
 	target,
 	action,
 	label,
@@ -421,6 +423,38 @@ export const ValidationProof = ({
 					>
 						{issueText}
 					</div>
+					{designParity && diffImageFileName ? (
+						<div
+							style={{
+								marginTop: 18,
+								border: `1px solid ${colors.line}`,
+								borderRadius: 12,
+								overflow: 'hidden',
+								background: '#020617',
+							}}
+						>
+							<div
+								style={{
+									padding: '9px 12px',
+									background: '#0f172a',
+									color: '#f8fafc',
+									fontSize: 17,
+									fontWeight: 760,
+								}}
+							>
+								{diffLabel || 'Difference map'}
+							</div>
+							<Img
+								src={staticFile(diffImageFileName)}
+								style={{
+									width: '100%',
+									height: 126,
+									objectFit: 'contain',
+									display: 'block',
+								}}
+							/>
+						</div>
+					) : null}
 					<div style={{marginTop: 22, display: 'grid', gap: 10}}>
 						{steps.map((step, index) => (
 							<div

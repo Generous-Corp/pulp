@@ -106,6 +106,8 @@ def compose_desktop_video_proof(
     template: str | None = None,
     source_image: Path | None = None,
     source_label: str | None = None,
+    diff_image: Path | None = None,
+    diff_label: str | None = None,
     title: str | None = None,
     notes: list[str] | None = None,
     node_path: str = "node",
@@ -126,6 +128,10 @@ def compose_desktop_video_proof(
         command.extend(["--source-image", str(source_image)])
     if source_label:
         command.extend(["--source-label", source_label])
+    if diff_image:
+        command.extend(["--diff-image", str(diff_image)])
+    if diff_label:
+        command.extend(["--diff-label", diff_label])
     if title:
         command.extend(["--title", title])
     for note in notes or []:

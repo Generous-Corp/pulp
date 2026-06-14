@@ -1636,10 +1636,15 @@ def cmd_desktop_compose_video(
     template = getattr(args, "template", None) or None
     source_image = Path(args.source_image).expanduser().resolve() if getattr(args, "source_image", None) else None
     source_label = getattr(args, "source_label", None) or None
+    diff_image = Path(args.diff_image).expanduser().resolve() if getattr(args, "diff_image", None) else None
+    diff_label = getattr(args, "diff_label", None) or None
     title = getattr(args, "title", None) or None
     notes = [note for note in (getattr(args, "note", None) or []) if note]
     if source_image and not source_image.is_file():
         print_fn(f"Error: source image not found: {source_image}")
+        return 1
+    if diff_image and not diff_image.is_file():
+        print_fn(f"Error: diff image not found: {diff_image}")
         return 1
 
     try:
@@ -1656,6 +1661,8 @@ def cmd_desktop_compose_video(
             template=template,
             source_image=source_image,
             source_label=source_label,
+            diff_image=diff_image,
+            diff_label=diff_label,
             title=title,
             notes=notes,
         )
@@ -1685,7 +1692,7 @@ def cmd_desktop_compose_video(
         manifest["video_small"] = small_summary
     if notes:
         manifest["video_proof_notes"] = notes
-    if template or source_image or source_label or title or notes:
+    if template or source_image or source_label or diff_image or diff_label or title or notes:
         composition = manifest.setdefault("video_proof_composition", {})
         if not isinstance(composition, dict):
             composition = {}
@@ -1695,6 +1702,8 @@ def cmd_desktop_compose_video(
                 "template": template or composition.get("template") or "validation-proof",
                 "source_image": str(source_image) if source_image else composition.get("source_image"),
                 "source_label": source_label if source_label is not None else composition.get("source_label"),
+                "diff_image": str(diff_image) if diff_image else composition.get("diff_image"),
+                "diff_label": diff_label if diff_label is not None else composition.get("diff_label"),
                 "title": title if title is not None else composition.get("title"),
                 "notes": notes if notes else composition.get("notes", []),
             }
