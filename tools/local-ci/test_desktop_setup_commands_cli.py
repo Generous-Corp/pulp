@@ -695,6 +695,26 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
         self.assertFalse(payload["check"]["ok"])
         self.assertTrue(payload["setup_prerequisites"]["ok"])
         self.assertTrue(payload["tool_addon"]["ok"])
+        self.assertEqual(
+            payload["install_model"]["tool_info_command"],
+            "./build-video-proof-cli/tools/cli/pulp-cpp tool info video-proof --json",
+        )
+        self.assertEqual(
+            payload["install_model"]["future_command"],
+            "./build-video-proof-cli/tools/cli/pulp-cpp tool install video-proof",
+        )
+        self.assertEqual(
+            payload["install_model"]["future_check_command"],
+            "./build-video-proof-cli/tools/cli/pulp-cpp tool doctor video-proof --run",
+        )
+        self.assertEqual(
+            payload["steps"][2]["command"],
+            "./build-video-proof-cli/tools/cli/pulp-cpp tool info video-proof --json",
+        )
+        self.assertEqual(
+            payload["steps"][3]["command"],
+            "./build-video-proof-cli/tools/cli/pulp-cpp tool doctor video-proof --run",
+        )
         self.assertEqual(payload["tool_addon"]["remediations"], [])
         self.assertEqual(payload["check"]["checks"][0]["name"], "config")
 
@@ -1085,6 +1105,18 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
         self.assertTrue(payload["tool_addon"]["ok"])
         tool_checks_by_name = {check["name"]: check for check in payload["tool_addon"]["checks"]}
         self.assertEqual(tool_checks_by_name["tool_addon.info"]["detail"], "video-proof scope=machine lane=tool_addon format=not_pulp_add")
+        self.assertEqual(
+            payload["steps"][2]["command"],
+            "./build-video-proof-cli/tools/cli/pulp-cpp tool info video-proof --json",
+        )
+        self.assertEqual(
+            payload["steps"][3]["command"],
+            "./build-video-proof-cli/tools/cli/pulp-cpp tool doctor video-proof --run",
+        )
+        self.assertEqual(
+            payload["install_model"]["artifact_install_command"],
+            "./build-video-proof-cli/tools/cli/pulp-cpp tool install video-proof --artifact-manifest <manifest> --force",
+        )
         self.assertEqual(payload["tool_addon"]["remediations"], [])
 
     def test_video_setup_check_reports_tool_addon_remediation(self):

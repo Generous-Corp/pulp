@@ -373,18 +373,26 @@ def desktop_video_doctor_remediations(checks: list[dict], *, target_name: str) -
     return remediations
 
 
-def desktop_video_install_model() -> dict:
+def _resolved_pulp_command(pulp_command: str | None = None) -> str:
+    return pulp_command or os.environ.get("PULP_CLI") or "pulp"
+
+
+def desktop_video_install_model(*, pulp_command: str | None = None) -> dict:
+    resolved_pulp_command = _resolved_pulp_command(pulp_command)
     return {
         "current": "source-tree",
         "current_command": "npm --prefix tools/local-ci install",
         "future": "pulp-tool-add-on",
-        "future_command": "pulp tool install video-proof",
-        "future_check_command": "pulp tool doctor video-proof --run",
-        "tool_info_command": "pulp tool info video-proof --json",
+        "future_command": shlex.join([resolved_pulp_command, "tool", "install", "video-proof"]),
+        "future_check_command": shlex.join([resolved_pulp_command, "tool", "doctor", "video-proof", "--run"]),
+        "tool_info_command": shlex.join([resolved_pulp_command, "tool", "info", "video-proof", "--json"]),
         "pack_command": "python3 tools/local-ci/pack_video_proof_tool.py --json",
         "pack_npm_script": "npm --prefix tools/local-ci run pack-video-proof-tool -- --json",
         "verify_command": "python3 tools/local-ci/pack_video_proof_tool.py --verify <manifest> --json",
-        "artifact_install_command": "pulp tool install video-proof --artifact-manifest <manifest> --force",
+        "artifact_install_command": (
+            shlex.join([resolved_pulp_command, "tool", "install", "video-proof"])
+            + " --artifact-manifest <manifest> --force"
+        ),
         "pack_manifest_schema": "pulp.video-proof-tool-package.v1",
         "install_scope": "machine",
         "distribution_lane": "tool_addon",
@@ -392,7 +400,8 @@ def desktop_video_install_model() -> dict:
         "artifact_status": "source_tree_iteration",
         "detail": (
             "The feature branch supports direct repo-local npm tooling for iteration, "
-            "and `pulp tool install video-proof` is the optional developer-tool install path. "
+            f"and `{shlex.join([resolved_pulp_command, 'tool', 'install', 'video-proof'])}` is "
+            "the optional developer-tool install path. "
             "The recorder/composer is not a normal `pulp add` project package and should "
             "be packaged as a versioned tool add-on before mainline release."
         ),
@@ -462,7 +471,7 @@ def desktop_video_tool_addon_checks(
     subprocess_run_fn: Callable[..., subprocess.CompletedProcess] = subprocess.run,
     pulp_command: str | None = None,
 ) -> list[dict]:
-    resolved_pulp_command = pulp_command or os.environ.get("PULP_CLI") or "pulp"
+    resolved_pulp_command = _resolved_pulp_command(pulp_command)
     checks: list[dict] = []
     info_cmd = [resolved_pulp_command, "tool", "info", "video-proof", "--json"]
     try:
@@ -565,9 +574,10 @@ def desktop_video_tool_addon_checks(
     return checks
 
 
-def desktop_video_tool_addon_remediations(checks: list[dict]) -> list[dict]:
+def desktop_video_tool_addon_remediations(checks: list[dict], *, pulp_command: str | None = None) -> list[dict]:
     if all(check.get("ok") for check in checks if check.get("required", True)):
         return []
+    resolved_pulp_command = _resolved_pulp_command(pulp_command)
     return [
         {
             "check": "tool_addon",
@@ -576,9 +586,12 @@ def desktop_video_tool_addon_remediations(checks: list[dict]) -> list[dict]:
                 "Install the machine-scoped video-proof tool, then rerun the add-on setup check. "
                 "For reviewed local artifacts, use the artifact manifest install command."
             ),
-            "command": "pulp tool install video-proof",
-            "check_command": "pulp tool doctor video-proof --run",
-            "artifact_install_command": "pulp tool install video-proof --artifact-manifest <manifest> --force",
+            "command": shlex.join([resolved_pulp_command, "tool", "install", "video-proof"]),
+            "check_command": shlex.join([resolved_pulp_command, "tool", "doctor", "video-proof", "--run"]),
+            "artifact_install_command": (
+                shlex.join([resolved_pulp_command, "tool", "install", "video-proof"])
+                + " --artifact-manifest <manifest> --force"
+            ),
         }
     ]
 
@@ -759,9 +772,18 @@ def append_video_recipe_doctor_checks(args: argparse.Namespace, checks: list[dic
     )
 
 
-def desktop_video_setup_steps(target_name: str, *, machine_label: str | None = None) -> list[dict]:
+def desktop_video_setup_steps(
+    target_name: str,
+    *,
+    machine_label: str | None = None,
+    pulp_command: str | None = None,
+) -> list[dict]:
     label = (machine_label or target_name).strip() or target_name
     smoke_label = f"{label}-video-setup-smoke"
+    resolved_pulp_command = _resolved_pulp_command(pulp_command)
+    install_command = shlex.join([resolved_pulp_command, "tool", "install", "video-proof"])
+    info_command = shlex.join([resolved_pulp_command, "tool", "info", "video-proof", "--json"])
+    doctor_command = shlex.join([resolved_pulp_command, "tool", "doctor", "video-proof", "--run"])
     return [
         {
             "name": "create_config",
@@ -773,19 +795,23 @@ def desktop_video_setup_steps(target_name: str, *, machine_label: str | None = N
             "name": "install_tools",
             "title": "Install repo-local video tools",
             "command": "npm --prefix tools/local-ci install",
-            "detail": "Installs pinned developer-only ffmpeg-static and Remotion packages. Prefer `pulp tool install video-proof` for user-facing setup; use this command for source-tree iteration.",
-            "future_command": "pulp tool install video-proof",
+            "detail": (
+                "Installs pinned developer-only ffmpeg-static and Remotion packages. "
+                f"Prefer `{install_command}` for user-facing setup; use this command "
+                "for source-tree iteration."
+            ),
+            "future_command": install_command,
         },
         {
             "name": "inspect_tool_addon",
             "title": "Inspect the optional video-proof install policy",
-            "command": "pulp tool info video-proof --json",
+            "command": info_command,
             "detail": "Confirms video-proof is machine-scoped optional tooling, not a core runtime or project-level `pulp add` package.",
         },
         {
             "name": "check_tool_addon",
             "title": "Validate the optional video-proof tool",
-            "command": "pulp tool doctor video-proof --run",
+            "command": doctor_command,
             "detail": "Runs the managed video-proof wrapper smoke check so setup failures surface before any screen recording permission handoff.",
         },
         {
@@ -892,7 +918,7 @@ def _missing_video_setup_config_payload(
         "machine": getattr(args, "machine", None) or args.target,
         "adapter": target["adapter"],
         "bootstrap": target["bootstrap"],
-        "install_model": desktop_video_install_model(),
+        "install_model": desktop_video_install_model(pulp_command=getattr(args, "pulp_command", None)),
         "steps": steps,
         "init_config": None,
         "setup_prerequisites": setup_prerequisites,
@@ -922,7 +948,10 @@ def _video_setup_tool_addon_payload(
     return {
         "ok": all(check["ok"] for check in tool_checks if check.get("required", True)),
         "checks": tool_checks,
-        "remediations": desktop_video_tool_addon_remediations(tool_checks),
+        "remediations": desktop_video_tool_addon_remediations(
+            tool_checks,
+            pulp_command=getattr(args, "pulp_command", None),
+        ),
     }
 
 
@@ -1160,7 +1189,11 @@ def cmd_desktop_video_setup(
     save_config_fn: Callable[[dict], None] | None = None,
     print_fn: Callable[[str], None] = print,
 ) -> int:
-    steps = desktop_video_setup_steps(args.target, machine_label=getattr(args, "machine", None))
+    steps = desktop_video_setup_steps(
+        args.target,
+        machine_label=getattr(args, "machine", None),
+        pulp_command=getattr(args, "pulp_command", None),
+    )
     init_config_payload = None
     if getattr(args, "init_config", False):
         init_config_payload = init_config_fn()
@@ -1202,7 +1235,7 @@ def cmd_desktop_video_setup(
         "machine": getattr(args, "machine", None) or args.target,
         "adapter": target["adapter"],
         "bootstrap": target["bootstrap"],
-        "install_model": desktop_video_install_model(),
+        "install_model": desktop_video_install_model(pulp_command=getattr(args, "pulp_command", None)),
         "init_config": init_config_payload,
         "target_config": target_config_payload,
         "steps": steps,
