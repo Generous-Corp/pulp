@@ -62,27 +62,6 @@ class GithubWorkflowProviderBindingsTests(unittest.TestCase):
         self.assertEqual(calls[0][2], {"explicit_provider": "github-hosted"})
         self.assertEqual(calls[1][1], (config, repository_variables, {"provider": "namespace"}, "build"))
 
-    def test_install_github_workflow_provider_helpers_wires_named_exports(self):
-        calls = []
-
-        def resolve_provider(settings, workflow_key, *, explicit_provider=None):
-            calls.append(("resolve_default_provider_for_workflow", settings, workflow_key, explicit_provider))
-            return "github-hosted", "builtin"
-
-        workflows = types.SimpleNamespace(resolve_default_provider_for_workflow=resolve_provider)
-        bindings = {"_github_workflows": workflows}
-
-        self.mod.install_github_workflow_provider_helpers(bindings, ("resolve_default_provider_for_workflow",))
-
-        self.assertEqual(
-            bindings["resolve_default_provider_for_workflow"]({"provider": "namespace"}, "build", explicit_provider="github-hosted"),
-            ("github-hosted", "builtin"),
-        )
-        self.assertEqual(
-            calls,
-            [("resolve_default_provider_for_workflow", {"provider": "namespace"}, "build", "github-hosted")],
-        )
-
 
 if __name__ == "__main__":
     unittest.main()

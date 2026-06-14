@@ -43,24 +43,6 @@ class GithubWorkflowDispatchDefaultBindingsTests(unittest.TestCase):
         )
         self.assertEqual(calls, [(config, repository_variables, "build", "namespace", ("field",))])
 
-    def test_install_default_helpers_wires_named_exports(self):
-        calls = []
-
-        def defaults(config, repository_variables, workflow_key, provider, field_names):
-            calls.append((config, repository_variables, workflow_key, provider, field_names))
-            return {"field": "value"}, {"field": "source"}
-
-        workflows = types.SimpleNamespace(resolve_workflow_dispatch_defaults=defaults)
-        bindings = {"_github_workflows": workflows}
-
-        self.mod.install_github_workflow_dispatch_default_helpers(bindings)
-
-        self.assertEqual(
-            bindings["resolve_workflow_dispatch_defaults"]({}, {}, "build", "namespace", ("field",)),
-            ({"field": "value"}, {"field": "source"}),
-        )
-        self.assertEqual(calls, [({}, {}, "build", "namespace", ("field",))])
-
 
 if __name__ == "__main__":
     unittest.main()

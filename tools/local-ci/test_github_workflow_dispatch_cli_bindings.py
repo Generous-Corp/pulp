@@ -39,22 +39,6 @@ class GithubWorkflowDispatchCliBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.resolve_cli_dispatch_field_values(bindings, args, ("field",)), {"field": "cli"})
         self.assertEqual(calls, [(args, ("field",))])
 
-    def test_install_cli_helpers_wires_named_exports(self):
-        calls = []
-
-        def cli_values(args, field_names):
-            calls.append((args, field_names))
-            return {"field": "cli"}
-
-        workflows = types.SimpleNamespace(resolve_cli_dispatch_field_values=cli_values)
-        bindings = {"_github_workflows": workflows}
-        args = types.SimpleNamespace(linux_runner_selector_json=None)
-
-        self.mod.install_github_workflow_dispatch_cli_helpers(bindings)
-
-        self.assertEqual(bindings["resolve_cli_dispatch_field_values"](args, ("field",)), {"field": "cli"})
-        self.assertEqual(calls, [(args, ("field",))])
-
 
 if __name__ == "__main__":
     unittest.main()

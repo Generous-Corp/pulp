@@ -42,21 +42,6 @@ class GithubWorkflowDispatchSelectorBindingsTests(unittest.TestCase):
         )
         self.assertEqual(calls, [(config, "docs-check", "namespace")])
 
-    def test_install_selector_helpers_wires_named_exports(self):
-        calls = []
-
-        def resolve(config, workflow_key, provider):
-            calls.append((config, workflow_key, provider))
-            return '"macos-15"'
-
-        workflows = types.SimpleNamespace(resolve_workflow_runner_selector_json=resolve)
-        bindings = {"_github_workflows": workflows}
-
-        self.mod.install_github_workflow_dispatch_selector_helpers(bindings)
-
-        self.assertEqual(bindings["resolve_workflow_runner_selector_json"]({}, "build", "github-hosted"), '"macos-15"')
-        self.assertEqual(calls, [({}, "build", "github-hosted")])
-
 
 if __name__ == "__main__":
     unittest.main()

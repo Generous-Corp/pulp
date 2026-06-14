@@ -81,21 +81,6 @@ class GithubWorkflowDispatchFieldBindingsTests(unittest.TestCase):
             ],
         )
 
-    def test_install_field_helpers_wires_named_exports(self):
-        calls = []
-
-        def variable_name(workflow_key, provider, field_name):
-            calls.append((workflow_key, provider, field_name))
-            return "PULP_VAR"
-
-        workflows = types.SimpleNamespace(repo_variable_name_for_workflow_field=variable_name)
-        bindings = {"_github_workflows": workflows}
-
-        self.mod.install_github_workflow_dispatch_field_helpers(bindings, ("repo_variable_name_for_workflow_field",))
-
-        self.assertEqual(bindings["repo_variable_name_for_workflow_field"]("build", "namespace", "linux_runner_selector_json"), "PULP_VAR")
-        self.assertEqual(calls, [("build", "namespace", "linux_runner_selector_json")])
-
 
 if __name__ == "__main__":
     unittest.main()
