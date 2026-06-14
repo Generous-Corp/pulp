@@ -224,6 +224,7 @@ def run_macos_local_smoke(
     video_audio_source: str = "none",
     video_audio_file: str | None = None,
     video_audio_device: str | None = None,
+    video_recorder: str = "auto",
     video_capture_target: str = "app",
     capture_bundle_id: str | None = None,
     video_attachment_budget_bytes: int = 100_000_000,
@@ -265,6 +266,10 @@ def run_macos_local_smoke(
         raise RuntimeError("Pulp app automation requires a direct --command launch so automation env vars can be injected.")
     if video_capture_target not in {"app", "terminal"}:
         raise RuntimeError(f"Unknown video capture target `{video_capture_target}`.")
+    if video_recorder not in {"auto", "avfoundation", "frame-sequence"}:
+        raise RuntimeError(f"Unknown video recorder `{video_recorder}`.")
+    if video_recorder == "frame-sequence" and video_audio_source == "system":
+        raise RuntimeError("--video-audio system requires --video-recorder auto or avfoundation.")
     if video_audio_source == "plugin":
         if not video_audio_file:
             raise RuntimeError("--video-audio plugin requires --video-audio-file.")
@@ -390,7 +395,7 @@ def run_macos_local_smoke(
                         env["PULP_AUTOMATION_AFTER_OUT"] = str(screenshot_path)
                         env["PULP_AUTOMATION_DELAY_MS"] = "1000"
                         env["PULP_AUTOMATION_AFTER_DELAY_MS"] = str(max(0, int(settle_secs * 1000.0)))
-                        env["PULP_AUTOMATION_EXIT_AFTER"] = "1"
+                        env["PULP_AUTOMATION_EXIT_AFTER"] = "0" if record_video else "1"
                     try:
                         proc = popen_fn(
                             args,
@@ -445,7 +450,7 @@ def run_macos_local_smoke(
                 fps=video_fps,
                 audio_source=recorder_audio_source,
                 audio_device=None if video_audio_source == "plugin" else video_audio_device,
-                prefer_frame_sequence=bool(capture_bundle_id),
+                prefer_frame_sequence=video_recorder == "frame-sequence" or bool(capture_bundle_id),
             )
         if capture_ui_snapshot and not use_pulp_app_automation:
             wait_for_path_fn(ui_snapshot_path, timeout_secs)

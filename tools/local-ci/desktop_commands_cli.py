@@ -342,7 +342,8 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
             "--prepare-command 'cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF -DSKIA_DIR=\"$(pwd)/external/skia-build\" && "
             "cmake --build build-desktop-automation --target pulp-ui-preview -j$(sysctl -n hw.ncpu)' "
             "--pulp-app-automation --capture-ui-snapshot --click-view-id bypass-toggle "
-            "--duration 6 --video-fps 8 --label standalone-bypass-toggle --compose-video-proof"
+            "--duration 6 --video-fps 8 --video-recorder frame-sequence "
+            "--label standalone-bypass-toggle --compose-video-proof"
         ),
         "doctor": "python3 tools/local-ci/local_ci.py desktop video-doctor mac",
         "watch_for": [
@@ -465,7 +466,7 @@ VIDEO_PROOF_DEMO_SCENARIOS = (
             "cmake --build build-desktop-automation --target pulp-ui-preview -j$(sysctl -n hw.ncpu)' "
             "--pulp-app-automation --capture-ui-snapshot --component-id bypass-toggle "
             "--click-view-id bypass-toggle --label component-bypass-toggle "
-            "--duration 6 --video-fps 8 --compose-video-proof"
+            "--duration 6 --video-fps 8 --video-recorder frame-sequence --compose-video-proof"
         ),
         "doctor": "python3 tools/local-ci/local_ci.py desktop video-doctor mac",
         "watch_for": [

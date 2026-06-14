@@ -294,6 +294,19 @@ class MacosDesktopActionTests(unittest.TestCase):
         self.assertIn("before.png", waited_paths)
         self.assertEqual(terminated, [4242])
 
+    def test_run_macos_local_smoke_keeps_pulp_app_alive_for_video_automation(self) -> None:
+        _manifest, launched, terminated, _waited_paths, _rollups = self.run_action(
+            action_name="click",
+            pulp_app_automation=True,
+            capture_before=True,
+            click_view_id="bypass-toggle",
+            record_video=True,
+        )
+
+        env = launched[0][1]["env"]
+        self.assertEqual(env["PULP_AUTOMATION_EXIT_AFTER"], "0")
+        self.assertEqual(terminated, [4242])
+
     def test_run_macos_local_smoke_dispatches_desktop_click_and_diff(self) -> None:
         manifest, _launched, _terminated, _waited_paths, _rollups = self.run_action(
             action_name="click",
@@ -330,6 +343,24 @@ class MacosDesktopActionTests(unittest.TestCase):
         self.assertTrue(manifest["artifacts"]["video_issue_metadata"].endswith("/video/issue-metadata.json"))
         self.assertEqual(manifest["video_issue"]["status"], "copied")
         self.assertTrue(manifest["video_issue"]["source"].endswith("/video/proof-composed.mp4"))
+
+    def test_run_macos_local_smoke_can_prefer_frame_sequence_video(self) -> None:
+        manifest, _launched, _terminated, _waited_paths, _rollups = self.run_action(
+            record_video=True,
+            video_recorder="frame-sequence",
+            capture_ui_snapshot=False,
+        )
+
+        self.assertTrue(manifest["video"]["recording"]["prefer_frame_sequence"])
+
+    def test_run_macos_local_smoke_rejects_frame_sequence_system_audio(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "--video-audio system requires --video-recorder auto or avfoundation"):
+            self.run_action(
+                record_video=True,
+                video_recorder="frame-sequence",
+                video_audio_source="system",
+                capture_ui_snapshot=False,
+            )
 
     def test_run_macos_local_smoke_muxes_plugin_audio_file(self) -> None:
         source_audio = self.root / "plugin-output.wav"

@@ -58,6 +58,7 @@ class DesktopActionCommandsCliTests(unittest.TestCase):
             "video_audio": "none",
             "video_audio_file": None,
             "video_audio_device": None,
+            "video_recorder": "auto",
             "video_capture_target": "app",
             "capture_bundle_id": None,
             "compose_video_proof": False,
@@ -355,14 +356,21 @@ class DesktopActionCommandsCliTests(unittest.TestCase):
         self.assertEqual(call["video_template"], "component-zoom")
         self.assertEqual(call["video_duration"], 6.0)
         self.assertEqual(call["video_fps"], 8.0)
+        self.assertEqual(call["video_recorder"], "frame-sequence")
         self.assertEqual(call["label"], "component-threshold-proof")
         self.assertEqual(call["video_title"], "Component validation")
         self.assertIn("full-window context", call["video_note"][0])
         self.assertIn("focus box", call["video_note"][1])
 
-    def test_video_command_preserves_explicit_component_capture_budget(self):
+    def test_video_command_preserves_explicit_component_capture_settings(self):
         result = self.mod.cmd_desktop_video(
-            self.args(recipe="component-zoom", component_id="threshold", video_duration=3.0, video_fps=12.0),
+            self.args(
+                recipe="component-zoom",
+                component_id="threshold",
+                video_duration=3.0,
+                video_fps=12.0,
+                video_recorder="avfoundation",
+            ),
             cmd_desktop_smoke_fn=lambda _args: self.fail("smoke should not run"),
             cmd_desktop_click_fn=lambda args: self.calls.append(("click-wrapper", (), vars(args).copy())) or 0,
             cmd_desktop_inspect_fn=lambda _args: self.fail("inspect should not run"),
@@ -373,6 +381,7 @@ class DesktopActionCommandsCliTests(unittest.TestCase):
         call = self.calls[0][2]
         self.assertEqual(call["video_duration"], 3.0)
         self.assertEqual(call["video_fps"], 12.0)
+        self.assertEqual(call["video_recorder"], "avfoundation")
 
     def test_video_command_applies_audio_inspector_recipe(self):
         result = self.mod.cmd_desktop_video(

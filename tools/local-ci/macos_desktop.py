@@ -868,27 +868,36 @@ def start_macos_window_frame_sequence_recording(
         while not stop_event.is_set() and time.monotonic() < deadline:
             frame_index = int(state["frames"]) + 1
             frame_path = frames_dir / f"frame-{frame_index:06d}.png"
-            result = run_fn(
-                ["screencapture", "-x", "-l", str(window_id), str(frame_path)],
-                capture_output=True,
-                text=True,
-            )
-            if result.returncode != 0 or not frame_path.exists():
-                window_detail = result.stderr.strip() or result.stdout.strip() or f"screencapture exited {result.returncode}"
+            last_error = ""
+            captured = False
+            for attempt in range(5):
+                result = run_fn(
+                    ["screencapture", "-x", "-l", str(window_id), str(frame_path)],
+                    capture_output=True,
+                    text=True,
+                )
+                if result.returncode == 0 and frame_path.exists():
+                    captured = True
+                    break
+                last_error = result.stderr.strip() or result.stdout.strip() or f"screencapture exited {result.returncode}"
+                if attempt < 4:
+                    time.sleep(0.2)
+            if not captured:
                 screen_result = run_fn(
                     ["screencapture", "-x", str(frame_path)],
                     capture_output=True,
                     text=True,
                 )
                 if screen_result.returncode == 0 and frame_path.exists():
+                    captured = True
                     state["capture_scope"] = "screen-crop"
-                    state["errors"].append(f"window capture failed; using full-screen crop fallback: {window_detail}")
-                    result = screen_result
-            if result.returncode == 0 and frame_path.exists():
+                    state["errors"].append(f"window capture failed; using full-screen crop fallback: {last_error}")
+                else:
+                    last_error = screen_result.stderr.strip() or screen_result.stdout.strip() or last_error
+            if captured:
                 state["frames"] = frame_index
             else:
-                detail = result.stderr.strip() or result.stdout.strip() or f"screencapture exited {result.returncode}"
-                state["errors"].append(detail)
+                state["errors"].append(last_error or "screencapture failed")
             next_frame_at += interval
             sleep_for = next_frame_at - time.monotonic()
             if sleep_for > 0:

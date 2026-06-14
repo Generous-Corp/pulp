@@ -73,6 +73,11 @@ def _set_default_number(args: argparse.Namespace, name: str, value: float, parse
         setattr(args, name, value)
 
 
+def _set_auto(args: argparse.Namespace, name: str, value: str) -> None:
+    if getattr(args, name, None) in {None, "", "auto"}:
+        setattr(args, name, value)
+
+
 def _append_recipe_proof_notes(args: argparse.Namespace, recipe: str) -> None:
     notes = list(getattr(args, "video_note", None) or [])
     for note in RECIPE_PROOF_NOTES.get(recipe, []):
@@ -94,6 +99,7 @@ def _apply_desktop_video_recipe(args: argparse.Namespace) -> None:
         _set_default(args, "video_template", "standalone")
         _set_default_number(args, "video_duration", 6.0, 8.0)
         _set_default_number(args, "video_fps", 8.0, 30.0)
+        _set_auto(args, "video_recorder", "frame-sequence")
         if any([args.click, args.click_view_id, args.click_view_type, args.click_view_text, args.click_view_label]):
             args.capture_before = True
         _append_recipe_proof_notes(args, recipe)
@@ -171,6 +177,7 @@ def _apply_desktop_video_recipe(args: argparse.Namespace) -> None:
         _set_default(args, "video_title", "Component validation")
         _set_default_number(args, "video_duration", 6.0, 8.0)
         _set_default_number(args, "video_fps", 8.0, 30.0)
+        _set_auto(args, "video_recorder", "frame-sequence")
         _append_recipe_proof_notes(args, recipe)
         return
 
@@ -228,6 +235,7 @@ def _video_kwargs(args: argparse.Namespace) -> dict:
         "video_audio_source": audio_source,
         "video_audio_file": resolved_audio_file,
         "video_audio_device": getattr(args, "video_audio_device", None),
+        "video_recorder": getattr(args, "video_recorder", "auto"),
         "video_capture_target": getattr(args, "video_capture_target", "app"),
         "capture_bundle_id": getattr(args, "capture_bundle_id", None),
         "video_attachment_budget_bytes": int(float(getattr(args, "video_attachment_budget_mb", 100.0)) * 1_000_000),

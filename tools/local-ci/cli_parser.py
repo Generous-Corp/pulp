@@ -119,6 +119,12 @@ def build_local_ci_parser(
             help="Capture the launched app window (default) or a Terminal.app window running the command.",
         )
         command_parser.add_argument(
+            "--video-recorder",
+            choices=["auto", "avfoundation", "frame-sequence"],
+            default="auto",
+            help="macOS recorder backend for app-window video proofs (default: auto).",
+        )
+        command_parser.add_argument(
             "--capture-bundle-id",
             help="After launching --command on macOS, capture this bundle id's window instead of the command process window.",
         )

@@ -102,6 +102,8 @@ class CliParserTests(unittest.TestCase):
             "6",
             "--video-fps",
             "24",
+            "--video-recorder",
+            "frame-sequence",
             "--recipe",
             "component-zoom",
             "--component-id",
@@ -141,6 +143,7 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(args.video_note, ["Click bypass", "Meter changed"])
         self.assertEqual(args.video_duration, 6.0)
         self.assertEqual(args.video_fps, 24.0)
+        self.assertEqual(args.video_recorder, "frame-sequence")
         self.assertEqual(args.video_audio, "system")
         self.assertEqual(args.video_audio_device, "BlackHole 2ch")
         self.assertEqual(args.video_audio_file, "/tmp/plugin.wav")
