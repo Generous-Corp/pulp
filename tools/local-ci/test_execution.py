@@ -773,6 +773,10 @@ class ExecutionTests(unittest.TestCase):
         self.assertEqual(full_validation, "full")
         self.assertEqual(full_cmd[0], "env")
         self.assertIn("PULP_VALIDATE_REUSE_PREPARED=1", full_cmd)
+        self.assertTrue(
+            any(arg.startswith("PULP_VALIDATE_ROOT_OVERRIDE=") for arg in full_cmd),
+            msg=f"missing prepared root override in {full_cmd}",
+        )
         self.assertIn("./validate-build.sh", full_cmd)
         self.assertIn("--keep-worktree", full_cmd)
         self.assertIn("--exclude-regex", full_cmd)

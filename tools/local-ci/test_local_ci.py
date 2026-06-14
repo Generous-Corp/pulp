@@ -4365,10 +4365,6 @@ class LocalCiTests(unittest.TestCase):
         self.assertEqual(queue[0]["active_targets"]["windows"]["status"], "running")
         self.assertFalse(self.mod.runner_info_path().exists())
 
-    def test_make_job_rejects_unsupported_branch_characters(self):
-        with self.assertRaises(ValueError):
-            self.mod.make_job("feature/$oops", "3" * 40, "normal", ["mac"], "run", "full")
-
     def test_stale_running_job_is_superseded_when_newer_pending_exists(self):
         older_job = self.mod.make_job("feature/stale", "3" * 40, "normal", ["mac"], "run", "full")
         older_job["queued_at"] = "2026-03-31T00:00:00+00:00"
@@ -4420,40 +4416,6 @@ class LocalCiTests(unittest.TestCase):
         self.assertEqual(broader_stored["superseded_reason"], "narrower_scope_queued")
         self.assertEqual(narrower_stored["status"], "pending")
 
-    def test_summarize_active_targets_uses_requested_order(self):
-        summary = self.mod.summarize_active_targets(
-            {
-                "ubuntu": {"status": "running"},
-                "windows": {"status": "pending"},
-                "mac": {"status": "pass"},
-            },
-            ["mac", "ubuntu"],
-        )
-        self.assertEqual(summary, "mac=pass, ubuntu=running, windows=pending")
-
-    def test_update_runner_active_targets_tracks_live_state(self):
-        self.mod.write_runner_info(
-            {
-                "pid": os.getpid(),
-                "root": "/tmp/pulp",
-                "active_job_id": "job123",
-                "active_branch": "feature/live-state",
-            }
-        )
-
-        self.mod.update_runner_active_targets(
-            "job123",
-            {
-                "mac": {"status": "pass", "duration_secs": 12.3},
-                "windows": {"status": "running"},
-            },
-        )
-
-        info = self.mod.read_runner_info()
-        self.assertEqual(info["active_targets"]["mac"]["status"], "pass")
-        self.assertEqual(info["active_targets"]["windows"]["status"], "running")
-        self.assertIn("updated_at", info)
-
     def test_write_runner_info_is_safe_under_concurrent_updates(self):
         barrier = threading.Barrier(2)
         errors = []
@@ -4491,24 +4453,6 @@ class LocalCiTests(unittest.TestCase):
         info = self.mod.read_runner_info()
         self.assertIn(info["active_job_id"], {"job1", "job2"})
         self.assertIn(info["active_branch"], {"feature/1", "feature/2"})
-
-    def test_update_job_active_targets_tracks_live_state(self):
-        job = self.mod.make_job("feature/progress", "4" * 40, "normal", ["mac", "ubuntu"], "run", "full")
-        self.mod.ensure_state_dirs()
-        self.mod.queue_path().write_text(json.dumps([job], indent=2) + "\n")
-
-        self.mod.update_job_active_targets(
-            job["id"],
-            {
-                "mac": {"status": "pass", "duration_secs": 12.3},
-                "ubuntu": {"status": "running"},
-            },
-        )
-
-        queue = self.mod.load_queue()
-        self.assertEqual(queue[0]["active_targets"]["mac"]["status"], "pass")
-        self.assertEqual(queue[0]["active_targets"]["ubuntu"]["status"], "running")
-        self.assertIn("last_progress_at", queue[0])
 
     def test_windows_ssh_powershell_command_uses_stdin_eval_wrapper(self):
         cmd = self.mod.windows_ssh_powershell_command("win2")
@@ -5812,88 +5756,6 @@ class LocalCiTests(unittest.TestCase):
         )
         self.assertIn("checkout incomplete; setup.sh missing", incomplete_detail)
 
-    def test_run_logged_command_starts_reader_before_writing_input(self):
-        read_started = threading.Event()
-        read_finished = threading.Event()
-        writes = []
-
-        class FakeStdout:
-            def __iter__(self):
-                read_started.set()
-                yield "ready\n"
-                read_finished.set()
-
-            def close(self):
-                read_finished.set()
-
-        class FakeStdin:
-            def write(self, text):
-                if not read_started.wait(timeout=1):
-                    raise TimeoutError("reader did not start before stdin write")
-                writes.append(text)
-
-            def close(self):
-                writes.append("<closed>")
-
-        class FakeProc:
-            def __init__(self):
-                self.stdin = FakeStdin()
-                self.stdout = FakeStdout()
-
-            def poll(self):
-                return 0 if read_finished.is_set() else None
-
-            def wait(self, timeout=None):
-                self.poll()
-                read_finished.wait(timeout=timeout)
-                return 0
-
-            def kill(self):
-                read_finished.set()
-
-        original_popen = self.mod._execution.subprocess.Popen
-        self.mod._execution.subprocess.Popen = lambda *args, **kwargs: FakeProc()
-        try:
-            result = self.mod.run_logged_command(["ssh", "win2"], input_text="payload", timeout=5)
-        finally:
-            self.mod._execution.subprocess.Popen = original_popen
-
-        self.assertFalse(result["timed_out"])
-        self.assertEqual(result["returncode"], 0)
-        self.assertEqual(result["output"], "ready\n")
-        self.assertEqual(writes, ["payload", "<closed>"])
-
-    def test_parse_progress_marker_detects_phase_wait_and_smoke_contract(self):
-        self.assertEqual(
-            self.mod.parse_progress_marker("__PULP_PHASE__:build\n"),
-            {"phase": "build"},
-        )
-        self.assertEqual(
-            self.mod.parse_progress_marker("__PULP_WAIT__:host-lock\n"),
-            {"wait_reason": "host-lock"},
-        )
-        self.assertEqual(
-            self.mod.parse_progress_marker("__PULP_VALIDATION__:smoke\n"),
-            {"validation_mode": "smoke"},
-        )
-        self.assertEqual(
-            self.mod.parse_progress_marker("__PULP_TEST_POLICY__:skip\n"),
-            {"test_policy": "skip"},
-        )
-        self.assertEqual(
-            self.mod.parse_progress_marker("__PULP_PREPARED__:reused\n"),
-            {"prepared_state": "reused"},
-        )
-        self.assertEqual(
-            self.mod.parse_progress_marker("__PULP_VALIDATOR_PID__:4321\n"),
-            {"validator_pid": 4321},
-        )
-        self.assertEqual(
-            self.mod.parse_progress_marker("__PULP_VALIDATOR_STARTED__:2026-04-02T04:00:00+00:00\n"),
-            {"validator_started_at": "2026-04-02T04:00:00+00:00"},
-        )
-        self.assertEqual(self.mod.parse_progress_marker("normal output\n"), {})
-
     def test_validate_build_preserves_original_args_for_lock_reexec(self):
         text = VALIDATE_BUILD_PATH.read_text()
         self.assertIn('ORIGINAL_ARGS=("$@")', text)
@@ -5929,128 +5791,6 @@ class LocalCiTests(unittest.TestCase):
         self.assertIn("cmake --build $BuildDir --config Release", ps1)
         self.assertIn("cmake --install $BuildDir --prefix $InstallDir --config Release", ps1)
         self.assertIn("ctest --test-dir $BuildDir --output-on-failure -C Release", ps1)
-
-    def test_run_local_validation_uses_prepared_root_for_single_target_reruns(self):
-        captured = {}
-
-        def fake_run_logged_command(cmd, **kwargs):
-            captured["cmd"] = cmd
-            return {
-                "timed_out": False,
-                "returncode": 0,
-                "output": "ok\n",
-                "duration_secs": 1.2,
-            }
-
-        original_run_logged = self.mod.run_logged_command
-        self.mod.run_logged_command = fake_run_logged_command
-        try:
-            result = self.mod.run_local_validation(
-                {"id": "job501", "branch": "feature/local", "sha": "5" * 40, "targets": ["mac"]}
-            )
-        finally:
-            self.mod.run_logged_command = original_run_logged
-
-        self.assertEqual(result["status"], "pass")
-        cmd = captured["cmd"]
-        self.assertEqual(cmd[0], "env")
-        self.assertIn("PULP_VALIDATE_REUSE_PREPARED=1", cmd)
-        self.assertTrue(
-            any(arg.startswith("PULP_VALIDATE_ROOT_OVERRIDE=") for arg in cmd),
-            msg=f"missing prepared root override in {cmd}",
-        )
-        self.assertIn("--keep-worktree", cmd)
-
-    def test_run_logged_command_keeps_progress_markers_in_output_and_reports_them(self):
-        log_path = self.state_dir / "marker.log"
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        seen = {}
-
-        def report_progress(**fields):
-            seen.update(fields)
-
-        result = self.mod.run_logged_command(
-            [
-                "python3",
-                "-c",
-                (
-                    "print('__PULP_VALIDATION__:smoke');"
-                    "print('__PULP_TEST_POLICY__:skip');"
-                    "print('__PULP_PHASE__:build');"
-                    "print('done')"
-                ),
-            ],
-            log_path=log_path,
-            report_progress=report_progress,
-        )
-
-        self.assertEqual(result["returncode"], 0)
-        self.assertIn("__PULP_VALIDATION__:smoke", result["output"])
-        self.assertIn("__PULP_TEST_POLICY__:skip", result["output"])
-        self.assertIn("__PULP_PHASE__:build", result["output"])
-        self.assertIn("done", result["output"])
-        logged = log_path.read_text()
-        self.assertIn("__PULP_VALIDATION__:smoke", logged)
-        self.assertIn("__PULP_TEST_POLICY__:skip", logged)
-        self.assertEqual(seen["validation_mode"], "smoke")
-        self.assertEqual(seen["test_policy"], "skip")
-        self.assertEqual(seen["phase"], "build")
-
-    def test_run_logged_command_emits_quiet_heartbeat_and_stuck_state(self):
-        seen: list[dict] = []
-
-        def report_progress(**fields):
-            seen.append(dict(fields))
-
-        result = self.mod.run_logged_command(
-            [
-                "python3",
-                "-c",
-                "import time; time.sleep(0.18); print('done')",
-            ],
-            report_progress=report_progress,
-            heartbeat_interval_secs=0.05,
-            stuck_idle_secs=0.1,
-        )
-
-        self.assertEqual(result["returncode"], 0)
-        heartbeat_events = [item for item in seen if item.get("last_heartbeat_at")]
-        self.assertTrue(heartbeat_events, msg=f"missing heartbeat events in {seen}")
-        liveness_values = {item.get("liveness") for item in heartbeat_events}
-        self.assertTrue(
-            liveness_values <= {"quiet", "stuck"},
-            msg=f"unexpected heartbeat states in {heartbeat_events}",
-        )
-        self.assertTrue(
-            "stuck" in liveness_values,
-            msg=f"missing stuck heartbeat in {heartbeat_events}",
-        )
-        self.assertTrue(any(item.get("last_output_at") for item in seen))
-
-    def test_run_logged_command_replaces_invalid_utf8_bytes(self):
-        log_path = self.state_dir / "nonutf8.log"
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-
-        result = self.mod.run_logged_command(
-            [
-                "python3",
-                "-c",
-                (
-                    "import sys; "
-                    "sys.stdout.buffer.write(b'prefix\\xe5suffix\\\\n'); "
-                    "sys.stdout.flush()"
-                ),
-            ],
-            log_path=log_path,
-        )
-
-        self.assertEqual(result["returncode"], 0)
-        self.assertIn("prefix", result["output"])
-        self.assertIn("suffix", result["output"])
-        self.assertIn("\ufffd", result["output"])
-        logged = log_path.read_text()
-        self.assertIn("prefix", logged)
-        self.assertIn("suffix", logged)
 
     def test_save_result_updates_evidence_index_with_last_good_target_results(self):
         result_path_one = self.mod.save_result(
