@@ -73,6 +73,21 @@ class CleanupStaleWindowsBindingTests(unittest.TestCase):
             trim_line_fn=self.bindings["trim_line"],
         )
 
+    def test_install_cleanup_stale_windows_helpers_wires_named_exports(self) -> None:
+        with mock.patch.object(self.mod, "install_local_helpers") as install_local:
+            self.mod.install_cleanup_stale_windows_helpers(
+                self.bindings,
+                ("cleanup_stale_windows_validator", "custom_stale_cleanup"),
+            )
+
+        self.assertEqual(
+            install_local.call_args_list,
+            [
+                mock.call(self.bindings, self.mod.__dict__, ("cleanup_stale_windows_validator",)),
+                mock.call(self.bindings, self.mod.__dict__, ("custom_stale_cleanup",)),
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

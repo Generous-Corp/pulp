@@ -29,26 +29,22 @@ class CleanupBindingTests(unittest.TestCase):
         self.assertEqual(self.mod.CLEANUP_EXPORTS, expected)
         self.assertEqual(len(expected), len(set(expected)))
 
-    def test_install_cleanup_helpers_routes_known_and_unknown_exports(self) -> None:
+    def test_install_cleanup_helpers_routes_focused_groups_and_unknown_exports(self) -> None:
         bindings = {}
 
-        with mock.patch.object(self.mod, "install_local_helpers") as install_local:
+        with (
+            mock.patch.object(self.mod, "install_cleanup_plan_helpers") as plan,
+            mock.patch.object(self.mod, "install_cleanup_stale_windows_helpers") as stale_windows,
+            mock.patch.object(self.mod, "install_local_helpers") as install_local,
+        ):
             self.mod.install_cleanup_helpers(
                 bindings,
                 ("result_file_job_id", "cleanup_stale_windows_validator", "custom_cleanup"),
             )
 
-        self.assertEqual(
-            install_local.call_args_list,
-            [
-                mock.call(
-                    bindings,
-                    self.mod.__dict__,
-                    ("result_file_job_id", "cleanup_stale_windows_validator"),
-                ),
-                mock.call(bindings, self.mod.__dict__, ("custom_cleanup",)),
-            ],
-        )
+        plan.assert_called_once_with(bindings, ("result_file_job_id",))
+        stale_windows.assert_called_once_with(bindings, ("cleanup_stale_windows_validator",))
+        install_local.assert_called_once_with(bindings, self.mod.__dict__, ("custom_cleanup",))
 
 
 if __name__ == "__main__":

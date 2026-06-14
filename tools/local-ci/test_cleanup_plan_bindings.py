@@ -116,6 +116,18 @@ class CleanupPlanBindingTests(unittest.TestCase):
             describe_path_fn=self.bindings["describe_path_for_cleanup"],
         )
 
+    def test_install_cleanup_plan_helpers_wires_named_exports(self) -> None:
+        with mock.patch.object(self.mod, "install_local_helpers") as install_local:
+            self.mod.install_cleanup_plan_helpers(self.bindings, ("result_file_job_id", "custom_cleanup_plan"))
+
+        self.assertEqual(
+            install_local.call_args_list,
+            [
+                mock.call(self.bindings, self.mod.__dict__, ("result_file_job_id",)),
+                mock.call(self.bindings, self.mod.__dict__, ("custom_cleanup_plan",)),
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

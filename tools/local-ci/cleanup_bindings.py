@@ -11,12 +11,14 @@ from cleanup_plan_bindings import (
     artifact_entry_sort_key,
     cleanup_plan_lines,
     collect_local_ci_cleanup_plan,
+    install_cleanup_plan_helpers,
     result_file_job_id,
 )
 from cleanup_stale_windows_bindings import (
     CLEANUP_STALE_WINDOWS_EXPORTS,
     cleanup_stale_windows_validator,
     collect_stale_windows_cleanup_candidates_unlocked,
+    install_cleanup_stale_windows_helpers,
 )
 
 
@@ -27,10 +29,12 @@ CLEANUP_EXPORTS = (
 
 
 def install_cleanup_helpers(bindings: dict[str, Any], names: tuple[str, ...] = CLEANUP_EXPORTS) -> None:
+    plan_names = tuple(name for name in names if name in CLEANUP_PLAN_EXPORTS)
+    stale_names = tuple(name for name in names if name in CLEANUP_STALE_WINDOWS_EXPORTS)
     known_names = set(CLEANUP_EXPORTS)
-    cleanup_names = tuple(name for name in names if name in known_names)
     unknown_names = tuple(name for name in names if name not in known_names)
 
-    install_local_helpers(bindings, globals(), cleanup_names)
+    install_cleanup_plan_helpers(bindings, plan_names)
+    install_cleanup_stale_windows_helpers(bindings, stale_names)
     if unknown_names:
         install_local_helpers(bindings, globals(), unknown_names)
