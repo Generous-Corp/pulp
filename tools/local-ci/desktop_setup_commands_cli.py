@@ -578,6 +578,41 @@ def desktop_video_tool_addon_remediations(checks: list[dict]) -> list[dict]:
     ]
 
 
+def desktop_video_init_config(
+    *,
+    config_path: Path | None = None,
+    example_path: Path | None = None,
+) -> dict:
+    env_config = os.environ.get("PULP_LOCAL_CI_CONFIG")
+    destination = config_path or (Path(env_config).expanduser() if env_config else Path(__file__).resolve().with_name("config.json"))
+    source = example_path or Path(__file__).resolve().with_name("config.example.json")
+    if destination.exists():
+        return {
+            "ok": True,
+            "created": False,
+            "path": str(destination),
+            "source": str(source),
+            "detail": f"config already exists at {destination}",
+        }
+    if not source.exists():
+        return {
+            "ok": False,
+            "created": False,
+            "path": str(destination),
+            "source": str(source),
+            "detail": f"example config not found at {source}",
+        }
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(source.read_text())
+    return {
+        "ok": True,
+        "created": True,
+        "path": str(destination),
+        "source": str(source),
+        "detail": f"created {destination} from {source}",
+    }
+
+
 def desktop_video_setup_remote_prerequisite_checks(
     host: str,
     *,
@@ -836,10 +871,87 @@ def _missing_video_setup_config_payload(
         "bootstrap": target["bootstrap"],
         "install_model": desktop_video_install_model(),
         "steps": steps,
+        "init_config": None,
         "setup_prerequisites": setup_prerequisites,
         "tool_addon": tool_addon,
         "check": check,
     }
+
+
+def _video_setup_prerequisites_payload(setup_prerequisite_checks_fn: Callable[[], list[dict]]) -> dict:
+    setup_checks = setup_prerequisite_checks_fn()
+    return {
+        "ok": all(check["ok"] for check in setup_checks if check.get("required", True)),
+        "checks": setup_checks,
+        "remediations": desktop_video_setup_prerequisite_remediations(setup_checks),
+    }
+
+
+def _video_setup_tool_addon_payload(
+    args: argparse.Namespace,
+    tool_addon_checks_fn: Callable[..., list[dict]],
+) -> dict:
+    pulp_command = getattr(args, "pulp_command", None)
+    if pulp_command:
+        tool_checks = tool_addon_checks_fn(pulp_command=pulp_command)
+    else:
+        tool_checks = tool_addon_checks_fn()
+    return {
+        "ok": all(check["ok"] for check in tool_checks if check.get("required", True)),
+        "checks": tool_checks,
+        "remediations": desktop_video_tool_addon_remediations(tool_checks),
+    }
+
+
+def _print_missing_video_setup_payload(payload: dict, print_fn: Callable[[str], None]) -> None:
+    print_fn(f"Desktop video setup for `{payload['target']}`")
+    print_fn(f"  machine: {payload['machine']}")
+    print_fn(f"  adapter: {payload['adapter']}")
+    print_fn(f"  bootstrap: {payload['bootstrap']}")
+    print_fn(f"  install: {payload['install_model']['current_command']} (future: {payload['install_model']['future_command']})")
+    if payload.get("init_config"):
+        print_fn("")
+        print_fn(f"Init config: {'PASS' if payload['init_config'].get('ok') else 'FAIL'}")
+        print_fn(f"  {payload['init_config'].get('detail')}")
+    print_fn("")
+    print_fn("Steps:")
+    for index, step in enumerate(payload["steps"], start=1):
+        print_fn(f"  {index}. {step['title']}")
+        print_fn(f"     {step['detail']}")
+        print_fn(f"     command: {step['command']}")
+    if payload.get("setup_prerequisites"):
+        print_fn("")
+        print_fn(f"Setup prerequisites: {'PASS' if payload['setup_prerequisites']['ok'] else 'FAIL'}")
+        for check in payload["setup_prerequisites"]["checks"]:
+            print_fn(f"  {_desktop_check_status(check):4s}  {check['name']}: {check['detail']}")
+        if payload["setup_prerequisites"]["remediations"]:
+            print_fn("")
+            print_fn("Setup remediation:")
+            for item in payload["setup_prerequisites"]["remediations"]:
+                print_fn(f"  - {item['title']}: {item['detail']}")
+    if payload.get("tool_addon"):
+        print_fn("")
+        print_fn(f"Tool add-on check: {'PASS' if payload['tool_addon']['ok'] else 'FAIL'}")
+        for check in payload["tool_addon"]["checks"]:
+            print_fn(f"  {_desktop_check_status(check):4s}  {check['name']}: {check['detail']}")
+        if payload["tool_addon"]["remediations"]:
+            print_fn("")
+            print_fn("Tool add-on remediation:")
+            for item in payload["tool_addon"]["remediations"]:
+                print_fn(f"  - {item['title']}: {item['detail']}")
+                if item.get("command"):
+                    print_fn(f"    command: {item['command']}")
+    if payload["check"] is not None:
+        print_fn("")
+        print_fn("Current check: FAIL")
+        for check in payload["check"]["checks"]:
+            print_fn(f"  {_desktop_check_status(check):4s}  {check['name']}: {check['detail']}")
+        print_fn("")
+        print_fn("Remediation:")
+        for item in payload["check"]["remediations"]:
+            print_fn(f"  - {item['title']}: {item['detail']}")
+            if item.get("command"):
+                print_fn(f"    command: {item['command']}")
 
 
 def desktop_video_doctor_payload(
@@ -1016,33 +1128,23 @@ def cmd_desktop_video_setup(
     setup_prerequisite_checks_fn: Callable[[], list[dict]] = desktop_video_setup_prerequisite_checks,
     remote_setup_prerequisite_checks_fn: Callable[[str], list[dict]] = desktop_video_setup_remote_prerequisite_checks,
     tool_addon_checks_fn: Callable[..., list[dict]] = desktop_video_tool_addon_checks,
+    init_config_fn: Callable[[], dict] = desktop_video_init_config,
     print_fn: Callable[[str], None] = print,
 ) -> int:
     steps = desktop_video_setup_steps(args.target, machine_label=getattr(args, "machine", None))
+    init_config_payload = None
+    if getattr(args, "init_config", False):
+        init_config_payload = init_config_fn()
     try:
         config = load_config_fn()
         target = resolve_desktop_target_fn(config, args.target)
     except FileNotFoundError as exc:
-        setup_prerequisites = None
-        tool_addon = None
-        if getattr(args, "check", False):
-            setup_checks = setup_prerequisite_checks_fn()
-            setup_prerequisites = {
-                "ok": all(check["ok"] for check in setup_checks if check.get("required", True)),
-                "checks": setup_checks,
-                "remediations": desktop_video_setup_prerequisite_remediations(setup_checks),
-            }
-            if getattr(args, "check_tool_addon", False):
-                pulp_command = getattr(args, "pulp_command", None)
-                if pulp_command:
-                    tool_checks = tool_addon_checks_fn(pulp_command=pulp_command)
-                else:
-                    tool_checks = tool_addon_checks_fn()
-                tool_addon = {
-                    "ok": all(check["ok"] for check in tool_checks if check.get("required", True)),
-                    "checks": tool_checks,
-                    "remediations": desktop_video_tool_addon_remediations(tool_checks),
-                }
+        setup_prerequisites = _video_setup_prerequisites_payload(setup_prerequisite_checks_fn) if getattr(args, "check", False) else None
+        tool_addon = (
+            _video_setup_tool_addon_payload(args, tool_addon_checks_fn)
+            if getattr(args, "check", False) and getattr(args, "check_tool_addon", False)
+            else None
+        )
         exit_code, payload = _missing_video_setup_config_payload(
             args,
             exc,
@@ -1050,53 +1152,11 @@ def cmd_desktop_video_setup(
             setup_prerequisites=setup_prerequisites,
             tool_addon=tool_addon,
         )
+        payload["init_config"] = init_config_payload
         if getattr(args, "json", False):
             print_fn(json.dumps(payload, indent=2))
             return exit_code
-        print_fn(f"Desktop video setup for `{args.target}`")
-        print_fn(f"  machine: {payload['machine']}")
-        print_fn(f"  adapter: {payload['adapter']}")
-        print_fn(f"  bootstrap: {payload['bootstrap']}")
-        print_fn(f"  install: {payload['install_model']['current_command']} (future: {payload['install_model']['future_command']})")
-        print_fn("")
-        print_fn("Steps:")
-        for index, step in enumerate(steps, start=1):
-            print_fn(f"  {index}. {step['title']}")
-            print_fn(f"     {step['detail']}")
-            print_fn(f"     command: {step['command']}")
-        if payload.get("setup_prerequisites"):
-            print_fn("")
-            print_fn(f"Setup prerequisites: {'PASS' if payload['setup_prerequisites']['ok'] else 'FAIL'}")
-            for check in payload["setup_prerequisites"]["checks"]:
-                print_fn(f"  {_desktop_check_status(check):4s}  {check['name']}: {check['detail']}")
-            if payload["setup_prerequisites"]["remediations"]:
-                print_fn("")
-                print_fn("Setup remediation:")
-                for item in payload["setup_prerequisites"]["remediations"]:
-                    print_fn(f"  - {item['title']}: {item['detail']}")
-        if payload.get("tool_addon"):
-            print_fn("")
-            print_fn(f"Tool add-on check: {'PASS' if payload['tool_addon']['ok'] else 'FAIL'}")
-            for check in payload["tool_addon"]["checks"]:
-                print_fn(f"  {_desktop_check_status(check):4s}  {check['name']}: {check['detail']}")
-            if payload["tool_addon"]["remediations"]:
-                print_fn("")
-                print_fn("Tool add-on remediation:")
-                for item in payload["tool_addon"]["remediations"]:
-                    print_fn(f"  - {item['title']}: {item['detail']}")
-                    if item.get("command"):
-                        print_fn(f"    command: {item['command']}")
-        if payload["check"] is not None:
-            print_fn("")
-            print_fn("Current check: FAIL")
-            for check in payload["check"]["checks"]:
-                print_fn(f"  {_desktop_check_status(check):4s}  {check['name']}: {check['detail']}")
-            print_fn("")
-            print_fn("Remediation:")
-            for item in payload["check"]["remediations"]:
-                print_fn(f"  - {item['title']}: {item['detail']}")
-                if item.get("command"):
-                    print_fn(f"    command: {item['command']}")
+        _print_missing_video_setup_payload(payload, print_fn)
         return exit_code
     except ValueError as exc:
         print_fn(f"Error: {exc}")
@@ -1108,6 +1168,7 @@ def cmd_desktop_video_setup(
         "adapter": target["adapter"],
         "bootstrap": target["bootstrap"],
         "install_model": desktop_video_install_model(),
+        "init_config": init_config_payload,
         "steps": steps,
         "setup_prerequisites": None,
         "remote_setup_prerequisites": None,
@@ -1146,18 +1207,8 @@ def cmd_desktop_video_setup(
         if not setup_ok:
             exit_code = 1
         if getattr(args, "check_tool_addon", False):
-            pulp_command = getattr(args, "pulp_command", None)
-            if pulp_command:
-                tool_checks = tool_addon_checks_fn(pulp_command=pulp_command)
-            else:
-                tool_checks = tool_addon_checks_fn()
-            tool_ok = all(check["ok"] for check in tool_checks if check.get("required", True))
-            payload["tool_addon"] = {
-                "ok": tool_ok,
-                "checks": tool_checks,
-                "remediations": desktop_video_tool_addon_remediations(tool_checks),
-            }
-            if not tool_ok:
+            payload["tool_addon"] = _video_setup_tool_addon_payload(args, tool_addon_checks_fn)
+            if not payload["tool_addon"]["ok"]:
                 exit_code = 1
         probe_host = getattr(args, "probe_host", None)
         if probe_host:
@@ -1188,6 +1239,8 @@ def cmd_desktop_video_setup(
     print_fn(f"  adapter: {target['adapter']}")
     print_fn(f"  bootstrap: {target['bootstrap']}")
     print_fn(f"  install: {payload['install_model']['current_command']} (future: {payload['install_model']['future_command']})")
+    if payload.get("init_config"):
+        print_fn(f"  init_config: {payload['init_config']['detail']}")
     print_fn("")
     print_fn("Steps:")
     for index, step in enumerate(steps, start=1):

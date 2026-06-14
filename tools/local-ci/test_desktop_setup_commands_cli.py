@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 from argparse import Namespace
 from pathlib import Path
 import subprocess
+import tempfile
 import unittest
 
 
@@ -688,6 +690,99 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
         self.assertEqual(payload["tool_addon"]["remediations"], [])
         self.assertEqual(payload["check"]["checks"][0]["name"], "config")
 
+    def test_video_setup_init_config_helper_creates_without_overwriting(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            example = root / "config.example.json"
+            destination = root / "config.json"
+            example.write_text('{"desktop_automation": {"targets": {}}}\n')
+
+            created = self.mod.desktop_video_init_config(config_path=destination, example_path=example)
+            self.assertTrue(created["ok"])
+            self.assertTrue(created["created"])
+            self.assertEqual(destination.read_text(), example.read_text())
+
+            destination.write_text('{"custom": true}\n')
+            existing = self.mod.desktop_video_init_config(config_path=destination, example_path=example)
+            self.assertTrue(existing["ok"])
+            self.assertFalse(existing["created"])
+            self.assertEqual(destination.read_text(), '{"custom": true}\n')
+
+    def test_video_setup_init_config_helper_honors_env_config_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            example = root / "config.example.json"
+            destination = root / "nested" / "config.json"
+            example.write_text('{"desktop_automation": {"targets": {}}}\n')
+            previous = os.environ.get("PULP_LOCAL_CI_CONFIG")
+            os.environ["PULP_LOCAL_CI_CONFIG"] = str(destination)
+            try:
+                created = self.mod.desktop_video_init_config(example_path=example)
+            finally:
+                if previous is None:
+                    os.environ.pop("PULP_LOCAL_CI_CONFIG", None)
+                else:
+                    os.environ["PULP_LOCAL_CI_CONFIG"] = previous
+
+            self.assertTrue(created["ok"])
+            self.assertTrue(created["created"])
+            self.assertEqual(created["path"], str(destination))
+            self.assertEqual(destination.read_text(), example.read_text())
+
+    def test_video_setup_init_config_then_runs_check(self):
+        self.targets["mac"]["optional"] = {"video_capture": True}
+        calls = {"load": 0, "init": 0}
+        checks = [
+            {"name": "receipt", "ok": True, "detail": "installed"},
+            {"name": "screencapture", "ok": True, "detail": "/usr/sbin/screencapture"},
+            {"name": "video_capture", "ok": True, "detail": "/repo/node_modules/ffmpeg-static/ffmpeg", "required": False},
+            {"name": "avfoundation_screen", "ok": True, "detail": "Capture screen 0 (3:)", "required": False},
+        ]
+
+        def load_config_once_missing():
+            calls["load"] += 1
+            if calls["init"] == 0:
+                raise FileNotFoundError("Local CI config not found")
+            return self.config()
+
+        def init_config():
+            calls["init"] += 1
+            return {"ok": True, "created": True, "path": "/repo/tools/local-ci/config.json", "source": "/repo/tools/local-ci/config.example.json", "detail": "created config"}
+
+        deps = {
+            "load_config_fn": load_config_once_missing,
+            "resolve_desktop_target_fn": lambda _config, name: self.targets[name],
+            "desktop_doctor_checks_fn": lambda _config, _name: [dict(check) for check in checks],
+            "normalize_desktop_optional_config_fn": lambda optional: {"video_capture": bool((optional or {}).get("video_capture"))},
+            "video_proof_smoke_fn": lambda: {"ok": True, "detail": "smoke ok"},
+            "probe_macos_avfoundation_audio_fn": lambda _device: self.fail("audio probe should not run"),
+            "setup_prerequisite_checks_fn": self.setup_ok_checks,
+            "init_config_fn": init_config,
+            "print_fn": self.print_line,
+        }
+
+        result = self.mod.cmd_desktop_video_setup(
+            Namespace(
+                target="mac",
+                machine="blackbook",
+                init_config=True,
+                check=True,
+                check_tool_addon=False,
+                skip_remotion_smoke=False,
+                video_audio="none",
+                video_audio_device=None,
+                json=True,
+            ),
+            **deps,
+        )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(calls, {"load": 1, "init": 1})
+        payload = json.loads(self.printed[0])
+        self.assertTrue(payload["init_config"]["created"])
+        self.assertTrue(payload["setup_prerequisites"]["ok"])
+        self.assertTrue(payload["check"]["ok"])
+
     def test_video_setup_text_reports_setup_and_tool_addon_without_config(self):
         deps = {
             "load_config_fn": lambda: (_ for _ in ()).throw(FileNotFoundError("Local CI config not found at /repo/tools/local-ci/config.json")),
@@ -708,6 +803,7 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
             Namespace(
                 target="mac",
                 machine="blackbook",
+                init_config=False,
                 check=True,
                 check_tool_addon=True,
                 skip_remotion_smoke=False,

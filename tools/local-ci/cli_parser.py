@@ -554,6 +554,11 @@ def build_local_ci_parser(
     p_desktop_video_setup = desktop_sub.add_parser("video-setup", help="Print first-run video proof setup steps for one desktop target")
     p_desktop_video_setup.add_argument("target", nargs="?", default="mac", help="Desktop target name (default: mac)")
     p_desktop_video_setup.add_argument("--machine", help="Human-readable machine label to include in generated smoke labels")
+    p_desktop_video_setup.add_argument(
+        "--init-config",
+        action="store_true",
+        help="Create tools/local-ci/config.json from config.example.json if it is missing before running setup checks.",
+    )
     p_desktop_video_setup.add_argument("--check", action="store_true", help="Also run the video-doctor checks and include current readiness")
     p_desktop_video_setup.add_argument(
         "--check-tool-addon",

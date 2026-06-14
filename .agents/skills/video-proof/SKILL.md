@@ -72,6 +72,17 @@ Recording grant:
 python3 tools/local-ci/local_ci.py desktop video-setup mac --machine blackbook --check --run-in-terminal --json
 ```
 
+On a fresh checkout, add `--init-config` to create the ignored local config
+from `tools/local-ci/config.example.json` before checks run:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop video-setup mac \
+  --machine blackbook \
+  --init-config \
+  --check \
+  --json
+```
+
 When the goal is to prove the eventual managed add-on install path on a fresh
 machine, include `--check-tool-addon`. If `pulp` on `PATH` is stale or points at
 a CLI without `tool`, pass `--pulp-command` or set `PULP_CLI`:
@@ -79,6 +90,7 @@ a CLI without `tool`, pass `--pulp-command` or set `PULP_CLI`:
 ```bash
 python3 tools/local-ci/local_ci.py desktop video-setup mac \
   --machine blackbook \
+  --init-config \
   --check \
   --check-tool-addon \
   --pulp-command ./build-video-proof-cli/tools/cli/pulp-cpp \
@@ -98,7 +110,7 @@ When checking another Mac over SSH, add `--probe-host <ssh-host>`. The probe is
 read-only and emits `remote_setup_prerequisites` with the remote `pulp`, `npm`,
 `node`, and `cmake` status.
 
-Create the machine-local config on a new checkout:
+If you prefer to create the machine-local config manually:
 
 ```bash
 cp tools/local-ci/config.example.json tools/local-ci/config.json

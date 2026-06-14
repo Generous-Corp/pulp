@@ -82,6 +82,17 @@ grant:
 python3 tools/local-ci/local_ci.py desktop video-setup mac --machine blackbook --check --run-in-terminal --json
 ```
 
+On a fresh checkout, add `--init-config` to create the ignored local config from
+`tools/local-ci/config.example.json` before setup checks run:
+
+```bash
+python3 tools/local-ci/local_ci.py desktop video-setup mac \
+  --machine blackbook \
+  --init-config \
+  --check \
+  --json
+```
+
 Add `--check-tool-addon` when the setup run should also prove the eventual
 managed `pulp tool install video-proof` path. If `pulp` on `PATH` is not the
 fresh branch CLI, pass `--pulp-command` or set `PULP_CLI`:
@@ -89,6 +100,7 @@ fresh branch CLI, pass `--pulp-command` or set `PULP_CLI`:
 ```bash
 python3 tools/local-ci/local_ci.py desktop video-setup mac \
   --machine blackbook \
+  --init-config \
   --check \
   --check-tool-addon \
   --pulp-command ./build-video-proof-cli/tools/cli/pulp-cpp \
@@ -129,7 +141,7 @@ python3 tools/local-ci/local_ci.py desktop video-setup mac \
   --json
 ```
 
-Create the machine-local config on a new checkout:
+If you prefer to create the machine-local config manually:
 
 ```bash
 cp tools/local-ci/config.example.json tools/local-ci/config.json
