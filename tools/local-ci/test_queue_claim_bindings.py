@@ -7,6 +7,7 @@ from module_test_utils import load_module_from_path
 from pathlib import Path
 import types
 import unittest
+from unittest import mock
 
 
 MODULE_PATH = Path(__file__).with_name("queue_claim_bindings.py")
@@ -42,32 +43,22 @@ class QueueClaimBindingsTests(unittest.TestCase):
     def test_claim_exports_match_facade_helpers(self) -> None:
         self.assertEqual(self.mod.QUEUE_CLAIM_EXPORTS, ("claim_next_job",))
 
-    def test_claim_next_job_binds_queue_and_runner_dependencies(self) -> None:
+    def test_claim_next_job_delegates_with_assembled_dependencies(self) -> None:
         captured = {}
 
         def claim_next_job_locked(**kwargs):
             captured["claim"] = kwargs
             return {"id": "claimed"}
 
-        def claim_next_job_unlocked(queue, *, runner, now_iso_fn):
-            captured["claim_unlocked"] = (queue, runner, now_iso_fn)
-            return {"id": "claimed"}
-
         lifecycle = types.SimpleNamespace(claim_next_job_locked=claim_next_job_locked)
-        orchestrator = types.SimpleNamespace(claim_next_job_unlocked=claim_next_job_unlocked)
-        bindings = self._bindings(lifecycle=lifecycle, orchestrator=orchestrator)
+        bindings = self._bindings(lifecycle=lifecycle)
+        deps = {"root": object(), "pid_fn": object()}
 
-        self.assertEqual(self.mod.claim_next_job(bindings), {"id": "claimed"})
-        self.assertIs(captured["claim"]["root"], bindings["ROOT"])
-        self.assertIs(captured["claim"]["queue_lock_path_fn"], bindings["queue_lock_path"])
-        self.assertIs(captured["claim"]["file_lock_fn"], bindings["file_lock"])
-        self.assertIs(captured["claim"]["load_queue_unlocked_fn"], bindings["load_queue_unlocked"])
-        self.assertIs(captured["claim"]["reconcile_running_jobs_unlocked_fn"], bindings["reconcile_running_jobs_unlocked"])
-        self.assertIs(captured["claim"]["save_queue_unlocked_fn"], bindings["save_queue_unlocked"])
-        self.assertIs(captured["claim"]["normalize_job_fn"], bindings["normalize_job"])
-        self.assertIs(captured["claim"]["pid_fn"], bindings["os"].getpid)
-        self.assertEqual(captured["claim"]["claim_next_job_unlocked_fn"]([], runner={"pid": 1}), {"id": "claimed"})
-        self.assertEqual(captured["claim_unlocked"], ([], {"pid": 1}, bindings["now_iso"]))
+        with mock.patch.object(self.mod, "queue_claim_dependencies", return_value=deps):
+            self.assertEqual(self.mod.claim_next_job(bindings), {"id": "claimed"})
+
+        self.assertIs(captured["claim"]["root"], deps["root"])
+        self.assertIs(captured["claim"]["pid_fn"], deps["pid_fn"])
 
     def test_install_queue_claim_helpers_wires_named_export(self) -> None:
         bindings = self._bindings()
