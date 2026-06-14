@@ -6,13 +6,14 @@ from collections.abc import Callable, Mapping
 import json
 from pathlib import Path
 
-from target_reachability import (
-    ensure_host_reachable,
-    preflight_target_host_state,
+from target_host_reachability import ensure_host_reachable, preflight_target_host_state
+from target_ssh_reachability import (
     ssh_command_result,
     ssh_failure_detail,
     ssh_probe,
     ssh_reachable,
+)
+from target_utm_reachability import (
     utmctl_start,
     utmctl_vm_status,
 )
