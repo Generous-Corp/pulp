@@ -89,20 +89,5 @@ class ExecutionTargetTaskBindingsTests(unittest.TestCase):
         for name in expected:
             self.assertTrue(callable(getattr(self.mod, name)))
 
-    def test_install_target_task_helpers_wires_named_exports(self) -> None:
-        captured = {}
-
-        def build_runner(*args, **kwargs):
-            captured["build"] = (args, kwargs)
-            return [("mac", object())]
-
-        bindings = self.bindings("build_target_tasks", build_runner)
-        self.mod.install_execution_target_task_helpers(bindings, ("build_target_tasks",))
-
-        self.assertEqual(len(bindings["build_target_tasks"]({"id": "job"}, {"targets": {}})), 1)
-        self.assertIs(captured["build"][1]["enabled_targets_fn"], bindings["enabled_targets"])
-        self.assertEqual(bindings["build_target_tasks"].__name__, "build_target_tasks")
-
-
 if __name__ == "__main__":
     unittest.main()

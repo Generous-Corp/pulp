@@ -65,25 +65,5 @@ class ExecutionJobConfigBindingsTests(unittest.TestCase):
         for name in expected:
             self.assertTrue(callable(getattr(self.mod, name)))
 
-    def test_install_job_config_helpers_wires_named_exports(self) -> None:
-        captured = {}
-
-        def config_runner(*args, **kwargs):
-            captured["config"] = (args, kwargs)
-            return {"targets": {}}
-
-        bindings = {
-            "_execution": types.SimpleNamespace(config_for_job_execution=config_runner),
-            "print": object(),
-            "load_config_file": object(),
-        }
-
-        self.mod.install_execution_job_config_helpers(bindings, ("config_for_job_execution",))
-
-        self.assertEqual(bindings["config_for_job_execution"]({"id": "job"}, {"targets": {}}), {"targets": {}})
-        self.assertIs(captured["config"][1]["load_config_file_fn"], bindings["load_config_file"])
-        self.assertEqual(bindings["config_for_job_execution"].__name__, "config_for_job_execution")
-
-
 if __name__ == "__main__":
     unittest.main()

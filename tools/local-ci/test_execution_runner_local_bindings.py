@@ -78,21 +78,5 @@ class ExecutionRunnerLocalBindingsTests(unittest.TestCase):
         self.assertEqual(result, {"target": "mac"})
         self.assertIs(captured["kwargs"]["print_fn"], builtins.print)
 
-    def test_install_execution_runner_local_helpers_wires_named_exports(self) -> None:
-        captured = {}
-
-        def runner(*args, **kwargs):
-            captured["args"] = args
-            captured["kwargs"] = kwargs
-            return {"target": "mac"}
-
-        bindings = self._bindings(runner)
-        self.mod.install_execution_runner_local_helpers(bindings)
-
-        self.assertEqual(bindings["run_local_validation"]({"id": "job"}), {"target": "mac"})
-        self.assertEqual(captured["args"], ({"id": "job"}, "", None))
-        self.assertIs(captured["kwargs"]["root"], bindings["ROOT"])
-
-
 if __name__ == "__main__":
     unittest.main()

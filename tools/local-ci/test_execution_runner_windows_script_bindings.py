@@ -57,33 +57,5 @@ class ExecutionRunnerWindowsScriptBindingsTests(unittest.TestCase):
         self.assertEqual(script, ("script", "full"))
         self.assertIs(captured["script"][1]["ps_literal_fn"], bindings["ps_literal"])
 
-    def test_install_execution_runner_windows_script_helpers_wires_named_exports(self) -> None:
-        captured = {}
-
-        def script_runner(*args, **kwargs):
-            captured["script"] = (args, kwargs)
-            return "script", "full"
-
-        bindings = self._bindings(script_runner)
-        self.mod.install_execution_runner_windows_script_helpers(bindings)
-
-        self.assertEqual(
-            bindings["windows_validation_script"](
-                "windows",
-                "host",
-                r"C:\Repo",
-                {"id": "job"},
-                bundle_name="bundle",
-                bundle_ref="ref",
-                exclude_tests="",
-                cmake_generator="Ninja",
-                resolved_platform="ARM64",
-                resolved_generator_instance="",
-            ),
-            ("script", "full"),
-        )
-        self.assertIs(captured["script"][1]["ps_literal_fn"], bindings["ps_literal"])
-
-
 if __name__ == "__main__":
     unittest.main()

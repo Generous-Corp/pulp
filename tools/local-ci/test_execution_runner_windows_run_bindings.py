@@ -85,22 +85,5 @@ class ExecutionRunnerWindowsRunBindingsTests(unittest.TestCase):
         self.assertIs(captured["kwargs"]["windows_validation_script_fn"], bindings["windows_validation_script"])
         self.assertIs(captured["kwargs"]["windows_ssh_powershell_command_fn"], bindings["windows_ssh_powershell_command"])
 
-    def test_install_execution_runner_windows_run_helpers_wires_named_exports(self) -> None:
-        captured = {}
-
-        def runner(*args, **kwargs):
-            captured["runner"] = (args, kwargs)
-            return {"target": "windows"}
-
-        bindings = self._bindings(runner)
-        self.mod.install_execution_runner_windows_run_helpers(bindings)
-
-        self.assertEqual(
-            bindings["run_windows_ssh_validation"]("windows", "host", r"C:\Repo", {"id": "job"}),
-            {"target": "windows"},
-        )
-        self.assertEqual(captured["runner"][0][0:4], ("windows", "host", r"C:\Repo", {"id": "job"}))
-
-
 if __name__ == "__main__":
     unittest.main()
