@@ -3,6 +3,7 @@
 
 from module_test_utils import load_module_from_path
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -31,23 +32,22 @@ class ExecutionCommandBindingsTests(unittest.TestCase):
         for name in expected_exports:
             self.assertTrue(callable(getattr(self.mod, name)))
 
-    def test_command_installer_wires_selected_exports(self):
-        execution = type(
-            "Execution",
-            (),
-            {
-                "remote_commit_error": staticmethod(lambda target, host, job: f"{target}:{host}:{job['id']}"),
-                "local_validation_command": staticmethod(lambda job, exclude_tests="": ([job["id"]], exclude_tests)),
-            },
-        )
-        bindings = {"_execution": execution}
+    def test_command_installer_routes_selected_groups_and_fallback(self):
+        bindings = {"_execution": object()}
 
-        self.mod.install_execution_command_helpers(bindings, ("remote_commit_error", "local_validation_command"))
+        with (
+            mock.patch.object(self.mod, "install_execution_command_state_helpers") as command_state,
+            mock.patch.object(self.mod, "install_execution_validation_command_helpers") as validation_command,
+            mock.patch.object(self.mod, "install_local_helpers") as install_local,
+        ):
+            self.mod.install_execution_command_helpers(
+                bindings,
+                ("remote_commit_error", "local_validation_command", "unknown_helper"),
+            )
 
-        self.assertEqual(bindings["remote_commit_error"]("mac", "host", {"id": "job"}), "mac:host:job")
-        self.assertEqual(bindings["local_validation_command"]({"id": "job"}, "slow"), (["job"], "slow"))
-        self.assertNotIn("windows_validation_script", bindings)
-        self.assertNotIn("prepared_state_root", bindings)
+        command_state.assert_called_once_with(bindings, ("remote_commit_error",))
+        validation_command.assert_called_once_with(bindings, ("local_validation_command",))
+        install_local.assert_called_once_with(bindings, self.mod.__dict__, ("unknown_helper",))
 
 
 if __name__ == "__main__":
