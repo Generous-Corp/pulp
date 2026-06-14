@@ -35,6 +35,7 @@
 #include <pulp/signal/multichannel_phase_coordinator.hpp>
 #include <pulp/signal/spectral_envelope_shifter.hpp>
 #include <pulp/signal/realtime_pitch_time_processor.hpp>
+#include <pulp/signal/offline_stretch.hpp>
 #include <pulp/signal/latency_aware_control_smoother.hpp>
 #include <pulp/signal/transient_phase_policy.hpp>
 #include <pulp/signal/freeze_hold.hpp>
