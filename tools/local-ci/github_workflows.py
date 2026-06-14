@@ -21,122 +21,26 @@ local_ci.py.
 
 from __future__ import annotations
 
-import json
-import os
+import argparse
 
-GITHUB_ACTIONS_DEFAULTS = {
-    "repository": "",
-    "workflow": "build",
-    "provider": "github-hosted",
-    "wait_poll_secs": 10,
-    "match_timeout_secs": 60,
-}
-BUILTIN_GITHUB_WORKFLOWS = {
-    "build": {
-        "file": "build.yml",
-        "display_name": "Build and Test",
-        "providers": ["github-hosted", "namespace"],
-        "provider_input": "runner_provider",
-        "dispatch_fields": [
-            "linux_runner_selector_json",
-            "windows_runner_selector_json",
-            "macos_runner_selector_json",
-        ],
-    },
-    "validate": {
-        "file": "validate.yml",
-        "display_name": "Plugin Validation",
-        "providers": ["github-hosted"],
-    },
-    "sanitizers": {
-        "file": "sanitizers.yml",
-        "display_name": "Sanitizer Tests",
-        "providers": ["github-hosted"],
-    },
-    "docs-check": {
-        "file": "docs-check.yml",
-        "display_name": "Docs Consistency",
-        "providers": ["github-hosted", "namespace"],
-        "provider_input": "runner_provider",
-        "selector_input": "runner_selector_json",
-    },
-}
-REPO_VARIABLE_FALLBACKS = {
-    ("build", "namespace", "linux_runner_selector_json"): "PULP_NAMESPACE_BUILD_LINUX_RUNS_ON_JSON",
-    ("build", "namespace", "windows_runner_selector_json"): "PULP_NAMESPACE_BUILD_WINDOWS_RUNS_ON_JSON",
-    ("build", "namespace", "macos_runner_selector_json"): "PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON",
-    ("docs-check", "namespace", "runner_selector_json"): "PULP_NAMESPACE_DOCS_CHECK_RUNS_ON_JSON",
-}
-
-
-def github_actions_settings_for_display(config: dict | None) -> dict:
-    settings = dict(GITHUB_ACTIONS_DEFAULTS)
-    github_actions = (config or {}).get("github_actions", {})
-    defaults = github_actions.get("defaults", {})
-
-    repository = github_actions.get("repository")
-    if isinstance(repository, str) and repository.strip():
-        settings["repository"] = repository.strip()
-
-    workflow = defaults.get("workflow")
-    if isinstance(workflow, str) and workflow.strip():
-        settings["workflow"] = workflow.strip()
-
-    provider = defaults.get("provider")
-    if isinstance(provider, str) and provider.strip():
-        settings["provider"] = provider.strip()
-
-    return settings
-
-
-def resolve_github_actions_settings(config: dict | None) -> dict:
-    settings = github_actions_settings_for_display(config)
-    defaults = ((config or {}).get("github_actions") or {}).get("defaults", {})
-
-    for key in ("wait_poll_secs", "match_timeout_secs"):
-        value = defaults.get(key)
-        if value in (None, ""):
-            continue
-        try:
-            parsed = int(value)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f"github_actions.defaults.{key} must be an integer.") from exc
-        if parsed <= 0:
-            raise ValueError(f"github_actions.defaults.{key} must be positive.")
-        settings[key] = parsed
-
-    return settings
-
-
-def normalize_runs_on_json(raw: str, *, setting_name: str) -> str:
-    value = (raw or "").strip()
-    if not value:
-        return ""
-    try:
-        decoded = json.loads(value)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"{setting_name} must be valid JSON.") from exc
-    if not isinstance(decoded, (str, list)):
-        raise ValueError(f"{setting_name} must decode to a string or array accepted by runs-on.")
-    return json.dumps(decoded)
+from github_workflow_config import workflow_provider_config
+from github_workflow_metadata import (
+    BUILTIN_GITHUB_WORKFLOWS,
+    GITHUB_ACTIONS_DEFAULTS,
+    REPO_VARIABLE_FALLBACKS,
+    repo_variable_name_for_workflow_field,
+)
+from github_workflow_settings import (
+    github_actions_settings_for_display,
+    normalize_runs_on_json,
+    resolve_github_actions_settings,
+)
 
 
 def resolve_workflow_runner_selector_json(
     config: dict | None, workflow_key: str, provider: str
 ) -> str:
-    github_actions = (config or {}).get("github_actions", {})
-    workflows = github_actions.get("workflows", {})
-    if not isinstance(workflows, dict):
-        return ""
-    workflow = workflows.get(workflow_key, {})
-    if not isinstance(workflow, dict):
-        return ""
-    providers = workflow.get("providers", {})
-    if not isinstance(providers, dict):
-        return ""
-    provider_info = providers.get(provider, {})
-    if not isinstance(provider_info, dict):
-        return ""
+    provider_info = workflow_provider_config(config, workflow_key, provider)
     selector = provider_info.get("runner_selector_json")
     if not isinstance(selector, str) or not selector.strip():
         return ""
@@ -155,20 +59,7 @@ def resolve_workflow_dispatch_field_values(
     if not field_names:
         return {}
 
-    github_actions = (config or {}).get("github_actions", {})
-    workflows = github_actions.get("workflows", {})
-    if not isinstance(workflows, dict):
-        return {}
-    workflow = workflows.get(workflow_key, {})
-    if not isinstance(workflow, dict):
-        return {}
-    providers = workflow.get("providers", {})
-    if not isinstance(providers, dict):
-        return {}
-    provider_info = providers.get(provider, {})
-    if not isinstance(provider_info, dict):
-        return {}
-
+    provider_info = workflow_provider_config(config, workflow_key, provider)
     resolved: dict[str, str] = {}
     for field_name in field_names:
         value = provider_info.get(field_name)
@@ -181,12 +72,6 @@ def resolve_workflow_dispatch_field_values(
             ),
         )
     return resolved
-
-
-def repo_variable_name_for_workflow_field(
-    workflow_key: str, provider: str, field_name: str
-) -> str:
-    return REPO_VARIABLE_FALLBACKS.get((workflow_key, provider, field_name), "")
 
 
 def resolve_default_provider_for_workflow(
@@ -330,4 +215,3 @@ def resolve_cli_dispatch_field_values(
             setting_name=f"--{field_name.replace('_', '-')}",
         )
     return resolved
-
