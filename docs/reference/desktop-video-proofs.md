@@ -93,6 +93,28 @@ Install the repo-local developer ffmpeg on a new Mac:
 npm --prefix tools/local-ci install
 ```
 
+Validate the eventual optional tool install path from a fresh source checkout:
+
+```bash
+cmake -S . -B build-video-proof-cli \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DPULP_BUILD_TESTS=ON \
+  -DPULP_BUILD_EXAMPLES=OFF
+cmake --build build-video-proof-cli --target pulp-cli pulp-test-cli-tool-registry -j$(sysctl -n hw.ncpu)
+./build-video-proof-cli/test/pulp-test-cli-tool-registry '~[slow]'
+
+tmp_home=$(mktemp -d /tmp/pulp-video-proof-tool-home.XXXXXX)
+PULP_HOME="$tmp_home" ./build-video-proof-cli/tools/cli/pulp-cpp tool install video-proof --force
+PULP_HOME="$tmp_home" ./build-video-proof-cli/tools/cli/pulp-cpp tool doctor
+PULP_HOME="$tmp_home" ./build-video-proof-cli/tools/cli/pulp-cpp tool run video-proof
+rm -rf "$tmp_home"
+```
+
+`PULP_BUILD_EXAMPLES=OFF` keeps this scoped to the CLI/tool-registry path on
+fresh machines that do not have binary Skia installed yet. Do not set
+`PULP_ENABLE_GPU=OFF` for this smoke: the C++ CLI target is only generated in the
+desktop GPU build graph.
+
 Verify the Remotion/ffmpeg composition stack without Screen Recording
 permission:
 

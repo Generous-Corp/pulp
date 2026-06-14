@@ -79,6 +79,28 @@ feature-branch iteration, the equivalent source-tree command is:
 npm --prefix tools/local-ci install
 ```
 
+To validate the eventual tool install path from a fresh source checkout, build
+the Release C++ CLI with examples disabled, then use an isolated `PULP_HOME`:
+
+```bash
+cmake -S . -B build-video-proof-cli \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DPULP_BUILD_TESTS=ON \
+  -DPULP_BUILD_EXAMPLES=OFF
+cmake --build build-video-proof-cli --target pulp-cli pulp-test-cli-tool-registry -j$(sysctl -n hw.ncpu)
+./build-video-proof-cli/test/pulp-test-cli-tool-registry '~[slow]'
+
+tmp_home=$(mktemp -d /tmp/pulp-video-proof-tool-home.XXXXXX)
+PULP_HOME="$tmp_home" ./build-video-proof-cli/tools/cli/pulp-cpp tool install video-proof --force
+PULP_HOME="$tmp_home" ./build-video-proof-cli/tools/cli/pulp-cpp tool doctor
+PULP_HOME="$tmp_home" ./build-video-proof-cli/tools/cli/pulp-cpp tool run video-proof
+rm -rf "$tmp_home"
+```
+
+Keep `PULP_ENABLE_GPU` on for this smoke because the C++ CLI target is generated
+only in the desktop GPU build graph. Use `-DPULP_BUILD_EXAMPLES=OFF` when the
+fresh machine does not have binary Skia installed yet.
+
 Smoke-test Remotion composition without requiring macOS Screen Recording:
 
 ```bash
