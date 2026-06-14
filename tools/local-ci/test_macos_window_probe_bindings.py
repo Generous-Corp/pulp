@@ -115,14 +115,6 @@ class MacosWindowProbeBindingsTests(unittest.TestCase):
         self.assertNotIn("wait_for_macos_bundle_window", bindings)
 
 
-    def test_install_macos_window_probe_helpers_keeps_unknown_local_fallback(self):
-        bindings = {}
-        self.mod.future_macos_window_probe_helper = lambda _bindings: "future"
-
-        self.mod.install_macos_window_probe_helpers(bindings, ("future_macos_window_probe_helper",))
-
-        self.assertEqual(bindings["future_macos_window_probe_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

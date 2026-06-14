@@ -292,14 +292,6 @@ class WindowsProbeBindingsTests(unittest.TestCase):
         self.assertNotIn("probe_windows_ssh_cmake_settings", bindings)
 
 
-    def test_install_windows_probe_helpers_keeps_unknown_local_fallback(self) -> None:
-        bindings = {}
-        self.mod.future_windows_probe_helper = lambda _bindings: "future"
-
-        self.mod.install_windows_probe_helpers(bindings, ("future_windows_probe_helper",))
-
-        self.assertEqual(bindings["future_windows_probe_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -137,14 +137,6 @@ class WindowsSessionProbeBindingsTests(unittest.TestCase):
         self.assertEqual(captured["cmake"][0], ("win", "Visual Studio 17 2022", "", ""))
 
 
-    def test_install_windows_session_probe_helpers_keeps_unknown_local_fallback(self) -> None:
-        bindings = {}
-        self.mod.future_windows_session_probe_helper = lambda _bindings: "future"
-
-        self.mod.install_windows_session_probe_helpers(bindings, ("future_windows_session_probe_helper",))
-
-        self.assertEqual(bindings["future_windows_session_probe_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

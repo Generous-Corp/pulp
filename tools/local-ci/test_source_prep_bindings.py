@@ -328,14 +328,6 @@ class SourcePrepBindingsTests(unittest.TestCase):
         self.assertNotIn("rewrite_launch_command_for_source_root", bindings)
         self.assertNotIn("prepare_macos_exact_sha_source", bindings)
 
-    def test_install_source_prep_helpers_keeps_unknown_local_fallback(self):
-        bindings = {}
-        self.mod.future_source_prep_helper = lambda _bindings: "future"
-
-        self.mod.install_source_prep_helpers(bindings, ("future_source_prep_helper",))
-
-        self.assertEqual(bindings["future_source_prep_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()

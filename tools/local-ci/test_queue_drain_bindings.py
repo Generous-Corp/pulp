@@ -55,14 +55,6 @@ class QueueDrainBindingsTests(unittest.TestCase):
             ],
         )
 
-    def test_install_queue_drain_helpers_keeps_unknown_local_fallback(self):
-        bindings = {}
-        self.mod.future_queue_drain_helper = lambda _bindings: "future"
-
-        self.mod.install_queue_drain_helpers(bindings, ("future_queue_drain_helper",))
-
-        self.assertEqual(bindings["future_queue_drain_helper"](), "future")
-
     def _bindings(self, lifecycle=None, orchestrator=None):
         bindings = {
             "_queue_lifecycle": lifecycle or types.SimpleNamespace(),

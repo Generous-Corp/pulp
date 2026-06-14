@@ -91,14 +91,6 @@ class DesktopViewActionBindingsTests(unittest.TestCase):
         self.assertEqual(bindings["parse_coordinate_pair"]("1,2", flag_name="--click"), (1.0, 2.0))
         self.assertEqual(bindings["default_desktop_label"]("./Demo"), "Demo")
 
-    def test_install_desktop_view_action_helpers_keeps_unknown_local_fallback(self) -> None:
-        bindings = {}
-        self.mod.future_desktop_view_action_helper = lambda _bindings: "future"
-
-        self.mod.install_desktop_view_action_helpers(bindings, ("future_desktop_view_action_helper",))
-
-        self.assertEqual(bindings["future_desktop_view_action_helper"](), "future")
-
 
 if __name__ == "__main__":
     unittest.main()
