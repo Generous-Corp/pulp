@@ -20,7 +20,6 @@ static std::string dim(const std::string& s) { return "\033[2m" + s + "\033[0m";
 
 static void print_ok(const std::string& msg) { std::cout << green("✓") << " " << msg << "\n"; }
 static void print_fail(const std::string& msg) { std::cerr << red("✗") << " " << msg << "\n"; }
-static void print_warn(const std::string& msg) { std::cout << yellow("⚠") << " " << msg << "\n"; }
 
 // ── File Helpers ──
 
@@ -864,6 +863,67 @@ int cmd_tool(const std::vector<std::string>& args) {
 
     if (subcmd == "doctor") {
         auto platform = current_platform_key();
+        if (args.size() > 1) {
+            bool run_check = false;
+            std::string tool_id;
+            for (size_t i = 1; i < args.size(); ++i) {
+                if (args[i] == "--run") {
+                    run_check = true;
+                } else if (tool_id.empty()) {
+                    tool_id = args[i];
+                } else {
+                    print_fail("Usage: pulp tool doctor [tool-id] [--run]");
+                    return 1;
+                }
+            }
+            if (tool_id.empty()) {
+                print_fail("Usage: pulp tool doctor [tool-id] [--run]");
+                return 1;
+            }
+
+            auto it = reg.tools.find(tool_id);
+            if (it == reg.tools.end()) {
+                print_fail("Tool '" + tool_id + "' not found");
+                return 1;
+            }
+
+            auto& tool = it->second;
+            std::cout << "Tool Health " << dim("(" + platform + ")") << ":\n\n";
+            if (!tool_available_on_platform(tool, platform)) {
+                std::cout << "  " << red("✗") << " " << tool.display_name
+                          << " — not available for " << platform << "\n";
+                return 1;
+            }
+
+            auto loc = locate_tool(tool);
+            if (!loc.found) {
+                std::cout << "  " << red("✗") << " " << tool.display_name
+                          << " — not installed " << dim("(pulp tool install " + tool_id + ")") << "\n";
+                return 1;
+            }
+
+            print_ok(tool.display_name + " — " + loc.source + " (" + loc.path.string() + ")");
+            if (!run_check) {
+                if (tool.install_method == "npm_package")
+                    std::cout << "  " << dim("Run `pulp tool doctor " + tool_id
+                              + " --run` to execute its smoke check.") << "\n";
+                return 0;
+            }
+
+            auto result = pulp::platform::ChildProcess::run(loc.path.string(), {}, {});
+            std::cout << result.stdout_output;
+            if (!result.stderr_output.empty())
+                std::cerr << result.stderr_output;
+            if (result.exit_code == 0) {
+                print_ok(tool.display_name + " smoke check passed");
+                return 0;
+            }
+
+            print_fail(tool.display_name + " smoke check failed with exit code "
+                       + std::to_string(result.exit_code));
+            return result.exit_code;
+        }
+
         std::cout << "Tool Health " << dim("(" + platform + ")") << ":\n\n";
         int issues = 0;
         for (auto& [id, tool] : reg.tools) {

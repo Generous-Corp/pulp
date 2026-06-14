@@ -92,8 +92,8 @@ cmake --build build-video-proof-cli --target pulp-cli pulp-test-cli-tool-registr
 
 tmp_home=$(mktemp -d /tmp/pulp-video-proof-tool-home.XXXXXX)
 PULP_HOME="$tmp_home" ./build-video-proof-cli/tools/cli/pulp-cpp tool install video-proof --force
-PULP_HOME="$tmp_home" ./build-video-proof-cli/tools/cli/pulp-cpp tool doctor
-PULP_HOME="$tmp_home" ./build-video-proof-cli/tools/cli/pulp-cpp tool run video-proof
+PULP_HOME="$tmp_home" ./build-video-proof-cli/tools/cli/pulp-cpp tool doctor video-proof
+PULP_HOME="$tmp_home" ./build-video-proof-cli/tools/cli/pulp-cpp tool doctor video-proof --run
 rm -rf "$tmp_home"
 ```
 

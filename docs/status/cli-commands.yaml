@@ -1671,7 +1671,7 @@ commands:
       - name: run
         summary: Run the installed tool with pass-through arguments
       - name: doctor
-        summary: Health check — which tools are installed, missing, or unavailable on this platform
+        summary: Health check — without args, lists installed/missing/unavailable tools; with a tool id, exits non-zero when that tool is missing; with --run, executes the installed wrapper smoke check
     docs: reference/cli.md#tool
 
   - name: audit

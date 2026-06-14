@@ -818,6 +818,19 @@ TEST_CASE("tool command handles local list path doctor and error branches",
 
     {
         ScopedOutput output;
+        REQUIRE(cmd_tool({"doctor", "video-proof"}) == 1);
+        REQUIRE(output.out.str().find("Video Proof") != std::string::npos);
+        REQUIRE(output.out.str().find("pulp tool install video-proof") != std::string::npos);
+    }
+
+    {
+        ScopedOutput output;
+        REQUIRE(cmd_tool({"doctor", "--run"}) == 1);
+        REQUIRE(output.err.str().find("Usage: pulp tool doctor") != std::string::npos);
+    }
+
+    {
+        ScopedOutput output;
         REQUIRE(cmd_tool({"install"}) == 1);
         REQUIRE(output.err.str().find("Usage: pulp tool install") != std::string::npos);
     }
@@ -971,6 +984,19 @@ TEST_CASE("tool command installs npm package tools through the registry",
         ScopedOutput output;
         REQUIRE(cmd_tool({"path", "video-proof"}) == 0);
         REQUIRE(output.out.str().find(wrapper.string()) != std::string::npos);
+    }
+
+    {
+        ScopedOutput output;
+        REQUIRE(cmd_tool({"doctor", "video-proof"}) == 0);
+        REQUIRE(output.out.str().find("Video Proof") != std::string::npos);
+        REQUIRE(output.out.str().find("pulp tool doctor video-proof --run") != std::string::npos);
+    }
+
+    {
+        ScopedOutput output;
+        REQUIRE(cmd_tool({"doctor", "video-proof", "--run"}) == 0);
+        REQUIRE(output.out.str().find("Video Proof smoke check passed") != std::string::npos);
     }
 #endif
 }

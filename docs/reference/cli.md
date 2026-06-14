@@ -1525,17 +1525,21 @@ pulp tool uninstall <id>            # Remove a pulp-managed tool, or an importer
 pulp tool path <id>                 # Print the absolute path to the installed tool's binary
 pulp tool run <id> [args...]        # Run the installed tool with pass-through arguments
 pulp tool doctor                    # Health check: which tools are installed, which are missing, which are unavailable on this platform
+pulp tool doctor <id>               # Focused health check; exits non-zero when the named tool is missing
+pulp tool doctor video-proof --run  # Execute the video-proof Remotion smoke check
 
 pulp add <importer>                 # Alias for `pulp tool install <importer>`
 ```
 
-Install methods come from the registry — today `binary_download` (pinned release artifact), `python_pip` (pipx-style isolated install), `npm_package` (repo-local developer tooling such as `video-proof`), and `importer_package` (a checksummed, per-platform framework-importer archive). `pulp tool doctor` is the per-platform companion to `pulp doctor`.
+Install methods come from the registry — today `binary_download` (pinned release artifact), `python_pip` (pipx-style isolated install), `npm_package` (repo-local developer tooling such as `video-proof`), and `importer_package` (a checksummed, per-platform framework-importer archive). `pulp tool doctor` is the per-platform companion to `pulp doctor`; `pulp tool doctor <id> --run` executes the installed wrapper for tools that provide a smoke command.
 
 `video-proof` is optional developer tooling, not a core runtime dependency and
 not a normal `pulp add` project package. Installing it runs npm in the
 repo-local video proof package, writes a managed wrapper under
 `~/.pulp/tools/npm-packages/video-proof/`, and keeps Remotion, ffmpeg-static,
 `node_modules`, generated videos, and caches outside shipped Pulp artifacts.
+Use `pulp tool doctor video-proof --run` after install to prove the wrapper can
+render the synthetic Remotion smoke proof.
 
 **Framework importers.** An importer is a vendor-specific add-on (described in the tool-registry with `category: "importer"`) that drives Pulp's JSON-over-stdio import SPI. Installing one is gated three ways: the importer's `[sdk_min, sdk_max]` must include the running SDK and its `[spi_min, spi_max]` window must overlap the SDK's supported import-SPI window (a mismatch fails loudly with an "upgrade Pulp" / "upgrade the importer" message); the fetched or local package's `sha256` must match the digest pinned in the registry (a mismatch refuses to install); and the importer's bundled `SKILL.md` is installed into `~/.agents/skills/<importer>/` on install and removed on uninstall. Each install is recorded under `~/.pulp/importers/<id>.json` (id, version, sha256, SDK version, SPI window, paths, terms metadata) so uninstall and version checks work, and so the importer-terms accept-gate composes with the same record. `pulp add <importer>` routes to the same install path. Use `--from <path|file://...>` to install from a local package rather than the registry URL (offline installs, pinned artifacts, CI). The producer side — how prebuilt per-platform artifacts are built, hosted, pinned per SDK release, and signed/notarized, and the bundled-libclang choice — is documented in [framework-importer-packaging.md](framework-importer-packaging.md); this CLI consumes that contract, it does not decide it.
 
