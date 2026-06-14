@@ -236,6 +236,28 @@ Symptoms map cleanly: `errSecInternalComponent` → partition list not set;
 `User interaction is not allowed` → keychain locked (`security unlock-keychain`);
 `no identity found` → wrong/absent cert (`security find-identity -v -p codesigning`).
 
+**Signing over SSH (e.g. an agent on a remote Mac like `macstudio`).** An SSH
+session is NOT the GUI Aqua session, so the login keychain is **locked** there
+even when it's unlocked on the console — `security show-keychain-info
+login.keychain-db` prints `User interaction is not allowed`, and codesign fails
+with `errSecInternalComponent` regardless of the partition list. The GitHub
+self-hosted runners sign fine only because they run inside the logged-in GUI
+session. For SSH signing you must unlock the keychain in-session first:
+
+```bash
+security unlock-keychain -p "<login-password>" ~/Library/Keychains/login.keychain-db
+# then partition-list (once) + codesign as above
+```
+
+Notarization over SSH is unaffected — `notarytool` authenticates with the App
+Store Connect API key in `~/.config/pulp/secrets/notary.env`, never the keychain.
+For unattended/turnkey remote signing, prefer a **dedicated build keychain**
+(import a `.p12` of the Developer ID cert+key, give it its own password stored in
+`~/.config/pulp/secrets/`, `set-key-partition-list` on it, and
+`unlock-keychain` it per session) so signing never depends on the interactive
+login password — the same pattern `apple-actions/import-codesign-certs` uses in
+CI.
+
 **Sign inner-out.** Pulp GPU bundles embed `libwgpu_native.dylib` in
 `Contents/MacOS/`. Sign every embedded dylib BEFORE the bundle, else you get
 `invalid or unsupported format for signature` / `code has no resources but
