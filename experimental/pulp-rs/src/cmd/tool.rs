@@ -263,7 +263,7 @@ fn info(reg: &ToolRegistry, id: &str, json: bool, out: &mut impl Write) -> Resul
     if json {
         writeln!(
             out,
-            "{{\"id\":\"{}\",\"display_name\":\"{}\",\"category\":\"{}\",\"description\":\"{}\",\"install_method\":\"{}\",\"install_scope\":\"{}\",\"distribution_lane\":\"{}\",\"package_format\":\"{}\",\"artifact_status\":\"{}\",\"artifact_policy\":\"{}\",\"artifact_pack_command\":\"{}\",\"artifact_pack_npm_script\":\"{}\",\"artifact_manifest_schema\":\"{}\",\"pinned_version\":\"{}\",\"bundleable\":{},\"managed_by_pulp\":{},\"platform\":\"{}\",\"available_on_platform\":{},\"installed\":{},\"location_source\":\"{}\",\"path\":\"{}\"}}",
+            "{{\"id\":\"{}\",\"display_name\":\"{}\",\"category\":\"{}\",\"description\":\"{}\",\"install_method\":\"{}\",\"install_scope\":\"{}\",\"distribution_lane\":\"{}\",\"package_format\":\"{}\",\"artifact_status\":\"{}\",\"artifact_policy\":\"{}\",\"artifact_pack_command\":\"{}\",\"artifact_pack_npm_script\":\"{}\",\"artifact_verify_command\":\"{}\",\"artifact_manifest_schema\":\"{}\",\"pinned_version\":\"{}\",\"bundleable\":{},\"managed_by_pulp\":{},\"platform\":\"{}\",\"available_on_platform\":{},\"installed\":{},\"location_source\":\"{}\",\"path\":\"{}\"}}",
             json_escape(&tool.id),
             json_escape(&tool.display_name),
             json_escape(&tool.category),
@@ -276,6 +276,7 @@ fn info(reg: &ToolRegistry, id: &str, json: bool, out: &mut impl Write) -> Resul
             json_escape(&tool.artifact_policy),
             json_escape(&tool.artifact_pack_command),
             json_escape(&tool.artifact_pack_npm_script),
+            json_escape(&tool.artifact_verify_command),
             json_escape(&tool.artifact_manifest_schema),
             json_escape(&tool.pinned_version),
             tool.bundleable,
@@ -323,6 +324,9 @@ fn info(reg: &ToolRegistry, id: &str, json: bool, out: &mut impl Write) -> Resul
     }
     if !tool.artifact_pack_npm_script.is_empty() {
         writeln!(out, "Artifact pack npm script: {}", tool.artifact_pack_npm_script).map_err(io)?;
+    }
+    if !tool.artifact_verify_command.is_empty() {
+        writeln!(out, "Artifact verify command: {}", tool.artifact_verify_command).map_err(io)?;
     }
     if !tool.artifact_manifest_schema.is_empty() {
         writeln!(out, "Artifact manifest schema: {}", tool.artifact_manifest_schema).map_err(io)?;
@@ -562,6 +566,12 @@ fn install_npm_tool<S: Spawner>(
         manifest.push_str(&format!(
             ",\n  \"artifact_pack_npm_script\": \"{}\"",
             json_escape(&tool.artifact_pack_npm_script)
+        ));
+    }
+    if !tool.artifact_verify_command.is_empty() {
+        manifest.push_str(&format!(
+            ",\n  \"artifact_verify_command\": \"{}\"",
+            json_escape(&tool.artifact_verify_command)
         ));
     }
     if !tool.artifact_manifest_schema.is_empty() {
@@ -961,6 +971,7 @@ mod tests {
                     "artifact_policy": "Keep Remotion outside shipped artifacts.",
                     "artifact_pack_command": "python3 tools/local-ci/pack_video_proof_tool.py --json",
                     "artifact_pack_npm_script": "npm --prefix tools/local-ci run pack-video-proof-tool -- --json",
+                    "artifact_verify_command": "python3 tools/local-ci/pack_video_proof_tool.py --verify <manifest> --json",
                     "artifact_manifest_schema": "pulp.video-proof-tool-package.v1"
                 }
             }
@@ -1161,6 +1172,7 @@ mod tests {
         assert!(manifest_text.contains("\"method\": \"npm_package\""));
         assert!(manifest_text.contains("\"artifact_pack_command\": \"python3 tools/local-ci/pack_video_proof_tool.py --json\""));
         assert!(manifest_text.contains("\"artifact_pack_npm_script\": \"npm --prefix tools/local-ci run pack-video-proof-tool -- --json\""));
+        assert!(manifest_text.contains("\"artifact_verify_command\": \"python3 tools/local-ci/pack_video_proof_tool.py --verify <manifest> --json\""));
         assert!(manifest_text.contains("\"artifact_manifest_schema\": \"pulp.video-proof-tool-package.v1\""));
         assert!(String::from_utf8(buf)
             .unwrap()
@@ -1205,6 +1217,7 @@ mod tests {
         assert!(s.contains("\"artifact_status\":\"source_tree_iteration\""));
         assert!(s.contains("\"artifact_pack_command\":\"python3 tools/local-ci/pack_video_proof_tool.py --json\""));
         assert!(s.contains("\"artifact_pack_npm_script\":\"npm --prefix tools/local-ci run pack-video-proof-tool -- --json\""));
+        assert!(s.contains("\"artifact_verify_command\":\"python3 tools/local-ci/pack_video_proof_tool.py --verify <manifest> --json\""));
         assert!(s.contains("\"artifact_manifest_schema\":\"pulp.video-proof-tool-package.v1\""));
     }
 

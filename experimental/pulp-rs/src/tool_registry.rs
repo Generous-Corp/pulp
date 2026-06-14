@@ -128,6 +128,9 @@ pub struct ToolDescriptor {
     /// npm script wrapper for the reviewable source add-on artifact.
     #[serde(default)]
     pub artifact_pack_npm_script: String,
+    /// Command that verifies a packed artifact manifest.
+    #[serde(default)]
+    pub artifact_verify_command: String,
     /// Expected schema id for the artifact manifest.
     #[serde(default)]
     pub artifact_manifest_schema: String,

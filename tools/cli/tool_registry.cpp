@@ -126,6 +126,7 @@ ToolRegistryLoadResult load_tool_registry(const fs::path& path) {
             if (auto v = val.get("artifact_policy")) tool.artifact_policy = v->as_string();
             if (auto v = val.get("artifact_pack_command")) tool.artifact_pack_command = v->as_string();
             if (auto v = val.get("artifact_pack_npm_script")) tool.artifact_pack_npm_script = v->as_string();
+            if (auto v = val.get("artifact_verify_command")) tool.artifact_verify_command = v->as_string();
             if (auto v = val.get("artifact_manifest_schema")) tool.artifact_manifest_schema = v->as_string();
 
             // Optional project-importer fields (DATA-only; present on
@@ -234,6 +235,7 @@ static void print_tool_info_json(const ToolDescriptor& tool,
               << "\"artifact_policy\":\"" << json_escape(tool.artifact_policy) << "\","
               << "\"artifact_pack_command\":\"" << json_escape(tool.artifact_pack_command) << "\","
               << "\"artifact_pack_npm_script\":\"" << json_escape(tool.artifact_pack_npm_script) << "\","
+              << "\"artifact_verify_command\":\"" << json_escape(tool.artifact_verify_command) << "\","
               << "\"artifact_manifest_schema\":\"" << json_escape(tool.artifact_manifest_schema) << "\","
               << "\"pinned_version\":\"" << json_escape(tool.pinned_version) << "\","
               << "\"bundleable\":" << (tool.bundleable ? "true" : "false") << ","
@@ -268,6 +270,8 @@ static void print_tool_info_text(const ToolDescriptor& tool,
         std::cout << "Artifact pack command: " << tool.artifact_pack_command << "\n";
     if (!tool.artifact_pack_npm_script.empty())
         std::cout << "Artifact pack npm script: " << tool.artifact_pack_npm_script << "\n";
+    if (!tool.artifact_verify_command.empty())
+        std::cout << "Artifact verify command: " << tool.artifact_verify_command << "\n";
     if (!tool.artifact_manifest_schema.empty())
         std::cout << "Artifact manifest schema: " << tool.artifact_manifest_schema << "\n";
     if (!tool.pinned_version.empty())
@@ -700,6 +704,8 @@ ToolInstallResult install_npm_tool(const ToolDescriptor& tool,
         manifest << ",\n  \"artifact_pack_command\": \"" << json_escape(tool.artifact_pack_command) << "\"";
     if (!tool.artifact_pack_npm_script.empty())
         manifest << ",\n  \"artifact_pack_npm_script\": \"" << json_escape(tool.artifact_pack_npm_script) << "\"";
+    if (!tool.artifact_verify_command.empty())
+        manifest << ",\n  \"artifact_verify_command\": \"" << json_escape(tool.artifact_verify_command) << "\"";
     if (!tool.artifact_manifest_schema.empty())
         manifest << ",\n  \"artifact_manifest_schema\": \"" << json_escape(tool.artifact_manifest_schema) << "\"";
     manifest << "\n"

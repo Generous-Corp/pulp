@@ -191,6 +191,7 @@ fs::path write_registry_fixture(const fs::path& root) {
       "artifact_policy": "fixture policy",
       "artifact_pack_command": "python3 tools/local-ci/pack_video_proof_tool.py --json",
       "artifact_pack_npm_script": "npm --prefix tools/local-ci run pack-video-proof-tool -- --json",
+      "artifact_verify_command": "python3 tools/local-ci/pack_video_proof_tool.py --verify <manifest> --json",
       "artifact_manifest_schema": "pulp.video-proof-tool-package.v1"
     }
   }
@@ -266,6 +267,7 @@ TEST_CASE("tool registry parses descriptors and reports malformed roots",
     REQUIRE(npm.artifact_policy == "fixture policy");
     REQUIRE(npm.artifact_pack_command == "python3 tools/local-ci/pack_video_proof_tool.py --json");
     REQUIRE(npm.artifact_pack_npm_script == "npm --prefix tools/local-ci run pack-video-proof-tool -- --json");
+    REQUIRE(npm.artifact_verify_command == "python3 tools/local-ci/pack_video_proof_tool.py --verify <manifest> --json");
     REQUIRE(npm.artifact_manifest_schema == "pulp.video-proof-tool-package.v1");
 
     auto missing = load_tool_registry(tmp.path / "missing.json");
@@ -382,6 +384,7 @@ TEST_CASE("tool registry accepts empty and partial descriptor shapes",
     REQUIRE(tool.artifact_policy.empty());
     REQUIRE(tool.artifact_pack_command.empty());
     REQUIRE(tool.artifact_pack_npm_script.empty());
+    REQUIRE(tool.artifact_verify_command.empty());
     REQUIRE(tool.artifact_manifest_schema.empty());
     REQUIRE(tool.binary_sources.count(current_platform_key()) == 1);
     REQUIRE(tool.binary_sources.at(current_platform_key()).binary_name.empty());
@@ -796,6 +799,7 @@ TEST_CASE("tool command handles local list path doctor and error branches",
       "artifact_policy": "Keep video proof tooling outside projects.",
       "artifact_pack_command": "python3 tools/local-ci/pack_video_proof_tool.py --json",
       "artifact_pack_npm_script": "npm --prefix tools/local-ci run pack-video-proof-tool -- --json",
+      "artifact_verify_command": "python3 tools/local-ci/pack_video_proof_tool.py --verify <manifest> --json",
       "artifact_manifest_schema": "pulp.video-proof-tool-package.v1"
     }
   }
@@ -830,6 +834,7 @@ TEST_CASE("tool command handles local list path doctor and error branches",
         REQUIRE(output.out.str().find("\"artifact_status\":\"source_tree_iteration\"") != std::string::npos);
         REQUIRE(output.out.str().find("\"artifact_pack_command\":\"python3 tools/local-ci/pack_video_proof_tool.py --json\"") != std::string::npos);
         REQUIRE(output.out.str().find("\"artifact_pack_npm_script\":\"npm --prefix tools/local-ci run pack-video-proof-tool -- --json\"") != std::string::npos);
+        REQUIRE(output.out.str().find("\"artifact_verify_command\":\"python3 tools/local-ci/pack_video_proof_tool.py --verify <manifest> --json\"") != std::string::npos);
         REQUIRE(output.out.str().find("\"artifact_manifest_schema\":\"pulp.video-proof-tool-package.v1\"") != std::string::npos);
         REQUIRE(output.out.str().find("\"installed\":false") != std::string::npos);
     }
@@ -1012,6 +1017,7 @@ TEST_CASE("tool command installs npm package tools through the registry",
       "pinned_version": "0.0.0",
       "artifact_pack_command": "python3 tools/local-ci/pack_video_proof_tool.py --json",
       "artifact_pack_npm_script": "npm --prefix tools/local-ci run pack-video-proof-tool -- --json",
+      "artifact_verify_command": "python3 tools/local-ci/pack_video_proof_tool.py --verify <manifest> --json",
       "artifact_manifest_schema": "pulp.video-proof-tool-package.v1"
     }
   }
@@ -1039,6 +1045,7 @@ TEST_CASE("tool command installs npm package tools through the registry",
     const auto manifest_text = read_file(manifest);
     REQUIRE(manifest_text.find("\"artifact_pack_command\": \"python3 tools/local-ci/pack_video_proof_tool.py --json\"") != std::string::npos);
     REQUIRE(manifest_text.find("\"artifact_pack_npm_script\": \"npm --prefix tools/local-ci run pack-video-proof-tool -- --json\"") != std::string::npos);
+    REQUIRE(manifest_text.find("\"artifact_verify_command\": \"python3 tools/local-ci/pack_video_proof_tool.py --verify <manifest> --json\"") != std::string::npos);
     REQUIRE(manifest_text.find("\"artifact_manifest_schema\": \"pulp.video-proof-tool-package.v1\"") != std::string::npos);
 
     {

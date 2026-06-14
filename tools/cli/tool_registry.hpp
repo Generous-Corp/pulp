@@ -51,6 +51,7 @@ struct ToolDescriptor {
     std::string artifact_policy;  // short user/agent-facing packaging note
     std::string artifact_pack_command; // command that produces reviewable artifact metadata
     std::string artifact_pack_npm_script; // npm script wrapper for artifact pack
+    std::string artifact_verify_command; // command that verifies a packed artifact manifest
     std::string artifact_manifest_schema; // expected pack manifest schema id
 
     // ── Project-importer fields (optional) ──
