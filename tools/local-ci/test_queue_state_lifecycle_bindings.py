@@ -28,24 +28,16 @@ class QueueStateLifecycleBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.QUEUE_STATE_LIFECYCLE_EXPORTS, expected)
         self.assertEqual(len(expected), len(set(expected)))
 
-    def test_install_state_lifecycle_helpers_installs_requested_facades(self):
+    def test_install_state_lifecycle_helpers_routes_known_and_unknown_exports(self):
         bindings = {}
 
         with mock.patch.object(self.mod, "install_local_helpers") as install_local:
-            self.mod.install_queue_state_lifecycle_helpers(bindings, ("load_job",))
-
-        install_local.assert_called_once_with(bindings, self.mod.__dict__, ("load_job",))
-
-    def test_install_state_lifecycle_helpers_preserves_unknown_fallbacks(self):
-        bindings = {"custom": object()}
-
-        with mock.patch.object(self.mod, "install_local_helpers") as install_local:
-            self.mod.install_queue_state_lifecycle_helpers(bindings, ("custom",))
+            self.mod.install_queue_state_lifecycle_helpers(bindings, ("load_job", "custom"))
 
         self.assertEqual(
             install_local.call_args_list,
             [
-                mock.call(bindings, self.mod.__dict__, ()),
+                mock.call(bindings, self.mod.__dict__, ("load_job",)),
                 mock.call(bindings, self.mod.__dict__, ("custom",)),
             ],
         )

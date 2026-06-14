@@ -28,26 +28,20 @@ class QueueDrainBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.QUEUE_DRAIN_EXPORTS, expected)
         self.assertEqual(len(expected), len(set(expected)))
 
-    def test_install_drain_helpers_routes_focused_groups(self):
+    def test_install_drain_helpers_routes_focused_groups_and_unknown_exports(self):
         bindings = {}
 
         with (
             mock.patch.object(self.mod, "install_queue_claim_helpers") as install_claim,
             mock.patch.object(self.mod, "install_queue_finalize_helpers") as install_finalize,
             mock.patch.object(self.mod, "install_queue_wait_drain_helpers") as install_wait,
+            mock.patch.object(self.mod, "install_local_helpers") as install_local,
         ):
-            self.mod.install_queue_drain_helpers(bindings, ("claim_next_job", "finalize_job", "wait_for_job"))
+            self.mod.install_queue_drain_helpers(bindings, ("claim_next_job", "finalize_job", "wait_for_job", "custom"))
 
         install_claim.assert_called_once_with(bindings, ("claim_next_job",))
         install_finalize.assert_called_once_with(bindings, ("finalize_job",))
         install_wait.assert_called_once_with(bindings, ("wait_for_job",))
-
-    def test_install_drain_helpers_preserves_unknown_fallbacks(self):
-        bindings = {"custom": object()}
-
-        with mock.patch.object(self.mod, "install_local_helpers") as install_local:
-            self.mod.install_queue_drain_helpers(bindings, ("custom",))
-
         install_local.assert_called_once_with(bindings, self.mod.__dict__, ("custom",))
 
 

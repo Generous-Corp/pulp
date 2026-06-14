@@ -27,27 +27,21 @@ class QueueCommandLifecycleBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.QUEUE_COMMAND_LIFECYCLE_EXPORTS, expected)
         self.assertEqual(len(expected), len(set(expected)))
 
-    def test_install_queue_command_lifecycle_helpers_routes_focused_groups(self):
+    def test_install_queue_command_lifecycle_helpers_routes_focused_groups_and_unknown_exports(self):
         bindings = {}
 
         with (
             mock.patch.object(self.mod, "install_queue_terminal_result_helpers") as install_terminal,
             mock.patch.object(self.mod, "install_queue_command_mutation_helpers") as install_command,
+            mock.patch.object(self.mod, "install_local_helpers") as install_local,
         ):
             self.mod.install_queue_command_lifecycle_helpers(
                 bindings,
-                ("cancel_job_unlocked", "bump_queue_command_job"),
+                ("cancel_job_unlocked", "bump_queue_command_job", "custom"),
             )
 
         install_terminal.assert_called_once_with(bindings, ("cancel_job_unlocked",))
         install_command.assert_called_once_with(bindings, ("bump_queue_command_job",))
-
-    def test_install_queue_command_lifecycle_helpers_preserves_unknown_fallbacks(self):
-        bindings = {"custom": object()}
-
-        with mock.patch.object(self.mod, "install_local_helpers") as install_local:
-            self.mod.install_queue_command_lifecycle_helpers(bindings, ("custom",))
-
         install_local.assert_called_once_with(bindings, self.mod.__dict__, ("custom",))
 
 
