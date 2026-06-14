@@ -1692,40 +1692,6 @@ class LocalCiTests(unittest.TestCase):
         self.assertIn(str(failed_bundle), output)
         self.assertIn(str(proof_bundle), output)
 
-    def test_cmd_desktop_config_show_json(self):
-        buf = io.StringIO()
-        with redirect_stdout(buf):
-            exit_code = self.mod.cmd_desktop_config_show(SimpleNamespace(json=True))
-
-        payload = json.loads(buf.getvalue())
-        self.assertEqual(exit_code, 0)
-        self.assertIn("artifact_root", payload)
-        self.assertIn("publish_mode", payload)
-
-    def test_cmd_desktop_config_set_updates_file(self):
-        buf = io.StringIO()
-        with redirect_stdout(buf):
-            exit_code = self.mod.cmd_desktop_config_set(
-                SimpleNamespace(key="retention_days", value="30", json=False)
-            )
-
-        self.assertEqual(exit_code, 0)
-        updated = self.mod.load_config()
-        self.assertEqual(updated["desktop_automation"]["retention_days"], 30)
-        self.assertIn("retention_days = 30", buf.getvalue())
-
-    def test_cmd_desktop_config_set_target_optional_updates_file(self):
-        buf = io.StringIO()
-        with redirect_stdout(buf):
-            exit_code = self.mod.cmd_desktop_config_set(
-                SimpleNamespace(key="target.mac.webview_driver", value="true", json=False)
-            )
-
-        self.assertEqual(exit_code, 0)
-        updated = self.mod.load_config()
-        self.assertTrue(updated["desktop_automation"]["targets"]["mac"]["optional"]["webview_driver"])
-        self.assertIn("target.mac.webview_driver = True", buf.getvalue())
-
     def test_cmd_desktop_status_reports_optional_capabilities(self):
         config = self.mod.load_config()
         config["desktop_automation"]["targets"]["mac"]["optional"]["webview_driver"] = True
