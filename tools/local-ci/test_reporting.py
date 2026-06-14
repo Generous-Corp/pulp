@@ -416,6 +416,12 @@ class ReportingTests(unittest.TestCase):
             "serve_stop_command": "python3 tools/local-ci/local_ci.py desktop serve --stop --label video-proof --json",
             "published_cleanup_command": "python3 tools/local-ci/local_ci.py desktop cleanup --published --older-than-days 14 --keep-last 3 --json",
             "serve_urls": ["http://127.0.0.1:8765/", "http://100.64.0.10:8765/"],
+            "serve_verification": {
+                "kind": "desktop-proof-serve-verification",
+                "status": "ok",
+                "url": "http://127.0.0.1:8765/",
+                "http_status": 200,
+            },
             "runs": [
                 {
                     "target": "mac",
@@ -466,6 +472,12 @@ class ReportingTests(unittest.TestCase):
                         "serve_stop_command": "python3 tools/local-ci/local_ci.py desktop serve --stop --label large-proof --json",
                         "published_cleanup_command": "python3 tools/local-ci/local_ci.py desktop cleanup --published --older-than-days 14 --keep-last 3 --json",
                         "serve_urls": ["http://127.0.0.1:8765/", "http://100.64.0.10:8765/"],
+                        "serve_verification": {
+                            "kind": "desktop-proof-serve-verification",
+                            "status": "ok",
+                            "url": "http://127.0.0.1:8765/",
+                            "http_status": 200,
+                        },
                         "internal_ephemeral": True,
                     },
                 },
@@ -496,6 +508,8 @@ class ReportingTests(unittest.TestCase):
         self.assertEqual(draft["serve_urls"], ["http://127.0.0.1:8765/", "http://100.64.0.10:8765/"])
         self.assertEqual(len(draft["fallback_links"]), 1)
         self.assertEqual(draft["fallback_links"][0]["serve_urls"], ["http://127.0.0.1:8765/", "http://100.64.0.10:8765/"])
+        self.assertTrue(draft["fallback_links"][0]["serve_verified"])
+        self.assertEqual(draft["fallback_links"][0]["serve_verification"]["http_status"], 200)
         self.assertEqual(draft["fallback_links"][0]["serve_label"], "large-proof")
         self.assertIn("--background --label large-proof --json", draft["fallback_links"][0]["serve_background_command"])
         self.assertIn("--status --label large-proof --json", draft["fallback_links"][0]["serve_status_command"])
@@ -525,6 +539,8 @@ class ReportingTests(unittest.TestCase):
         self.assertIn("Launch: mac/click", draft["body"])
         self.assertIn("Action: click: bypass-toggle", draft["body"])
         self.assertIn("Candidate watch URL: `http://100.64.0.10:8765/`", draft["body"])
+        self.assertIn("Watch URL verification: `ok` `http://127.0.0.1:8765/`", draft["body"])
+        self.assertIn("Served link verification: `ok`", draft["body"])
         self.assertIn("Background serve command: `", draft["body"])
         self.assertIn("--background --label video-proof --json", draft["body"])
         self.assertIn("Status command: `", draft["body"])
@@ -579,6 +595,36 @@ class ReportingTests(unittest.TestCase):
         }
 
         with self.assertRaisesRegex(ValueError, "run 1 attachment missing"):
+            self.mod.desktop_review_issue_draft(
+                review_package,
+                package_path=package_path,
+                check_files=True,
+            )
+
+    def test_desktop_review_issue_draft_check_files_rejects_unverified_fallback(self) -> None:
+        package_path = self.root / "report" / "review-package.json"
+        package_path.parent.mkdir(parents=True)
+        review_package = {
+            "label": "Video Proof",
+            "serve_urls": ["http://127.0.0.1:8765/"],
+            "runs": [
+                {
+                    "target": "mac",
+                    "action": "click",
+                    "label": "component",
+                    "attachment": {
+                        "status": "fallback-link",
+                        "reason": "no issue-ready MP4 fits the configured attachment budget",
+                    },
+                    "fallback": {
+                        "serve_urls": ["http://127.0.0.1:8765/"],
+                        "serve_background_command": "python3 tools/local-ci/local_ci.py desktop serve /tmp/report --background --label video-proof --json",
+                    },
+                }
+            ],
+        }
+
+        with self.assertRaisesRegex(ValueError, "fallback serve URL not verified"):
             self.mod.desktop_review_issue_draft(
                 review_package,
                 package_path=package_path,

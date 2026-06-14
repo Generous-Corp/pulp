@@ -846,6 +846,10 @@ watch URLs. If background startup returns `status: failed`, the URL is not live.
 Check the JSON `stderr_tail` for bind errors such as `Address already in use`,
 then stop the conflicting labeled server or choose another port before sharing
 the link.
+When background startup succeeds, the command probes the primary URL and writes
+`serve_verification` into `index.json` and `review-package.json`. Treat
+`serve_verification.status == "ok"` as the local proof that the fallback link
+was live before you share it.
 
 `desktop publish` also writes `review.md` and `review-package.json` next to
 `index.html`. The publish step records the same candidate watch URLs in
@@ -889,8 +893,9 @@ source/command/manifest context for each run, the close trigger (`looks good to
 me`), a read-only `desktop review-status` polling command, and a suggested `gh
 issue create` command. `--check-files` verifies that
 every attachable MP4 still exists and fits its recorded attachment budget before
-writing the draft; runs that already use the served-report fallback remain
-valid.
+writing the draft; runs that use the served-report fallback must have
+`serve_verification.status == "ok"` recorded by `desktop serve --background`
+before the draft is accepted.
 
 To create the GitHub issue directly after writing the local draft, add
 `--create`. Labels and assignees are passed through to `gh issue create`:

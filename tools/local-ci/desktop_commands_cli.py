@@ -18,6 +18,8 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 
 
 def _print_lines(lines, *, print_fn: Callable[[str], None]) -> None:
@@ -168,6 +170,38 @@ def desktop_serve_candidate_urls(bind_host: str, port: int, **kwargs) -> list[st
     return [f"http://{host}:{port}/" for host in desktop_serve_candidate_hosts(bind_host, **kwargs)]
 
 
+def verify_desktop_serve_url(
+    url: str,
+    *,
+    timeout: float = 2.0,
+    urlopen_fn: Callable[..., object] = urllib.request.urlopen,
+) -> dict:
+    payload = {
+        "kind": "desktop-proof-serve-verification",
+        "url": url,
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        response = urlopen_fn(url, timeout=timeout)
+        try:
+            status = int(getattr(response, "status", 200) or 200)
+            payload.update(
+                {
+                    "status": "ok" if 200 <= status < 400 else "failed",
+                    "http_status": status,
+                }
+            )
+        finally:
+            close = getattr(response, "close", None)
+            if callable(close):
+                close()
+    except urllib.error.HTTPError as exc:
+        payload.update({"status": "failed", "http_status": int(exc.code), "error": str(exc)})
+    except Exception as exc:
+        payload.update({"status": "failed", "error": str(exc)})
+    return payload
+
+
 def find_available_desktop_serve_port(host: str, preferred_port: int, *, attempts: int = 100) -> int:
     start = max(1, int(preferred_port or 8765))
     for offset in range(max(1, attempts)):
@@ -278,9 +312,9 @@ def start_desktop_serve_process(
     return payload
 
 
-def persist_desktop_serve_urls(report_dir: Path, urls: list[str]) -> None:
+def persist_desktop_serve_urls(report_dir: Path, urls: list[str], verification: dict | None = None) -> None:
     clean_urls = [str(url) for url in urls if str(url).strip()]
-    if not clean_urls:
+    if not clean_urls and not verification:
         return
     for filename in ("index.json", "review-package.json"):
         path = report_dir / filename
@@ -292,13 +326,19 @@ def persist_desktop_serve_urls(report_dir: Path, urls: list[str]) -> None:
             continue
         if not isinstance(payload, dict):
             continue
-        payload["serve_urls"] = clean_urls
+        if clean_urls:
+            payload["serve_urls"] = clean_urls
+        if verification:
+            payload["serve_verification"] = verification
         for run in payload.get("runs") or []:
             if not isinstance(run, dict):
                 continue
             fallback = run.get("fallback")
             if isinstance(fallback, dict):
-                fallback["serve_urls"] = clean_urls
+                if clean_urls:
+                    fallback["serve_urls"] = clean_urls
+                if verification:
+                    fallback["serve_verification"] = verification
         _write_json(path, payload)
 
 
@@ -2704,11 +2744,12 @@ def cmd_desktop_serve(
     desktop_serve_candidate_urls_fn: Callable[[str, int], list[str]] = desktop_serve_candidate_urls,
     serve_directory_fn: Callable[..., None] = serve_directory,
     start_serve_process_fn: Callable[..., dict] = start_desktop_serve_process,
-    persist_serve_urls_fn: Callable[[Path, list[str]], None] = persist_desktop_serve_urls,
+    persist_serve_urls_fn: Callable[..., None] = persist_desktop_serve_urls,
     read_serve_state_fn: Callable[[Path, str], dict | None] = read_desktop_serve_state,
     stop_serve_process_fn: Callable[..., dict] = stop_desktop_serve_process,
     is_running_fn: Callable[[int], bool] = process_is_running,
     find_available_port_fn: Callable[[str, int], int] = find_available_desktop_serve_port,
+    verify_serve_url_fn: Callable[[str], dict] = verify_desktop_serve_url,
     print_fn: Callable[[str], None] = print,
 ) -> int:
     try:
@@ -2806,7 +2847,12 @@ def cmd_desktop_serve(
                 if state.get("stdout_tail"):
                     print_fn(f"  stdout: {state['stdout_tail'].strip()}")
             return 1
-        persist_serve_urls_fn(resolved_serve_dir, urls)
+        verification = verify_serve_url_fn(primary_url)
+        state["serve_verification"] = verification
+        state_path = state.get("state_path")
+        if state_path:
+            _write_json(Path(str(state_path)), state)
+        persist_serve_urls_fn(resolved_serve_dir, urls, verification)
         if getattr(args, "json", False):
             print_fn(json.dumps({**state, "status": "started"}, indent=2))
         else:
@@ -2818,6 +2864,7 @@ def cmd_desktop_serve(
             print_fn(f"  pid: {state['pid']}")
             if port != int(getattr(args, "port", 8765) or 8765):
                 print_fn(f"  auto_port: {port}")
+            print_fn(f"  verification: {verification.get('status')} {verification.get('url')}")
             print_fn(f"  stop: python3 tools/local-ci/local_ci.py desktop serve --stop --label {label}")
         return 0
     print_fn(f"Serving desktop report: {primary_url}")

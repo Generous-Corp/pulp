@@ -545,6 +545,7 @@ def desktop_review_package(index_payload: dict, *, publish_dir: Path) -> dict:
     serve_stop_command = serve_commands["serve_stop_command"]
     published_cleanup_command = serve_commands["published_cleanup_command"]
     serve_urls = [str(url) for url in index_payload.get("serve_urls", []) if url]
+    serve_verification = index_payload.get("serve_verification") if isinstance(index_payload.get("serve_verification"), dict) else {}
     runs: list[dict] = []
     for run in index_payload.get("runs", []):
         artifacts = run.get("artifacts") or {}
@@ -621,6 +622,7 @@ def desktop_review_package(index_payload: dict, *, publish_dir: Path) -> dict:
                     "serve_stop_command": serve_stop_command,
                     "published_cleanup_command": published_cleanup_command,
                     "serve_urls": serve_urls,
+                    "serve_verification": serve_verification,
                     "internal_ephemeral": True,
                 },
             }
@@ -642,6 +644,7 @@ def desktop_review_package(index_payload: dict, *, publish_dir: Path) -> dict:
         "serve_stop_command": serve_stop_command,
         "published_cleanup_command": published_cleanup_command,
         "serve_urls": serve_urls,
+        "serve_verification": serve_verification,
         "runs": runs,
     }
 
@@ -702,6 +705,12 @@ def desktop_review_issue_draft(
     serve_urls = [str(url) for url in review_package.get("serve_urls", []) if url]
     for url in serve_urls:
         body_lines.append(f"- Candidate watch URL: `{url}`")
+    serve_verification = review_package.get("serve_verification") if isinstance(review_package.get("serve_verification"), dict) else {}
+    if serve_verification:
+        body_lines.append(
+            f"- Watch URL verification: `{serve_verification.get('status') or 'unknown'}`"
+            + (f" `{serve_verification.get('url')}`" if serve_verification.get("url") else "")
+        )
     body_lines.extend(["", "## Runs", ""])
     for index, run in enumerate(review_package.get("runs") or [], start=1):
         attachment = run.get("attachment") if isinstance(run.get("attachment"), dict) else {}
@@ -786,6 +795,12 @@ def desktop_review_issue_draft(
             attachments.append(item)
             body_lines.append(f"- Attach video: `{attach_path}`")
         else:
+            fallback_verification = fallback.get("serve_verification") if isinstance(fallback.get("serve_verification"), dict) else serve_verification
+            fallback_verified = isinstance(fallback_verification, dict) and fallback_verification.get("status") == "ok"
+            if check_files and not fallback_verified:
+                attachment_errors.append(
+                    f"run {index} fallback serve URL not verified; run the background serve command and retry review-issue --check-files"
+                )
             fallback_item = {
                 "run_index": index,
                 "status": status,
@@ -798,11 +813,14 @@ def desktop_review_issue_draft(
                 "serve_stop_command": fallback.get("serve_stop_command") or serve_stop_command,
                 "published_cleanup_command": fallback.get("published_cleanup_command") or published_cleanup_command,
                 "serve_urls": fallback.get("serve_urls") or serve_urls,
+                "serve_verification": fallback_verification,
+                "serve_verified": fallback_verified,
                 "internal_ephemeral": bool(fallback.get("internal_ephemeral", True)),
                 "reason": attachment.get("reason"),
             }
             fallback_links.append(fallback_item)
             body_lines.append("- Attach video: not available within budget; use the served report link.")
+            body_lines.append(f"- Served link verification: `{'ok' if fallback_verified else 'missing-or-failed'}`")
         body_lines.append("")
     if attachment_errors:
         raise ValueError("; ".join(attachment_errors))

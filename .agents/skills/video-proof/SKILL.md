@@ -785,6 +785,10 @@ If background startup returns `status: failed`, treat the watch link as dead.
 Inspect `stderr_tail` for bind errors such as `Address already in use`, then
 stop the conflicting labeled server or rerun `desktop serve` with a different
 port before sharing the URL.
+When background startup succeeds, the command probes the primary URL and writes
+`serve_verification` into `index.json` and `review-package.json`. Treat
+`serve_verification.status == "ok"` as the local proof that the fallback link
+was live before you share it.
 
 `desktop publish` writes `review.md` and `review-package.json` next to
 `index.html`, including candidate watch URLs from localhost, configured
@@ -810,8 +814,9 @@ when composition metadata recorded them. It includes a per-run
 `desktop review-status` command so agents can poll for actionable approval or
 needs-work feedback before applying the verdict.
 `--check-files` verifies that every attachable MP4 still exists and fits its
-recorded attachment budget before writing the draft; fallback-link runs remain
-valid. GitHub supports `.mp4`, `.mov`, and `.webm` attachments and currently
+recorded attachment budget before writing the draft; fallback-link runs require
+a recorded `serve_verification.status == "ok"` before the draft is accepted.
+GitHub supports `.mp4`, `.mov`, and `.webm` attachments and currently
 recommends H.264 for compatibility; paid-plan eligible uploaders can use the
 100 MB video budget, while others should assume 10 MB. Attach
 `proof.issue.mp4` manually when it fits the chosen budget; attach

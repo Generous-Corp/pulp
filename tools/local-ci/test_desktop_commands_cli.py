@@ -835,8 +835,9 @@ class DesktopCommandsCliTests(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertEqual(started[0][0], report_dir.resolve())
         self.assertEqual(started[0][1]["label"], "ios-proof")
-        self.assertIn("background: ios-proof", self.printed[-3])
-        self.assertIn("pid: 4242", self.printed[-2])
+        self.assertTrue(any("background: ios-proof" in line for line in self.printed))
+        self.assertTrue(any("pid: 4242" in line for line in self.printed))
+        self.assertTrue(any("verification:" in line for line in self.printed))
 
         self.printed.clear()
         started.clear()
