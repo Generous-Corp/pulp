@@ -1,17 +1,14 @@
 #!/usr/bin/env python3
 """Tests for Windows target path facade bindings."""
 
-from module_test_utils import load_module_from_path
+from module_test_utils import load_local_ci_module
 import types
 import unittest
-from pathlib import Path
 
-
-MODULE_PATH = Path(__file__).with_name("windows_target_path_bindings.py")
 
 
 def load_module():
-    return load_module_from_path(MODULE_PATH)
+    return load_local_ci_module("windows_target_path_bindings.py")
 
 
 class WindowsTargetPathBindingsTests(unittest.TestCase):

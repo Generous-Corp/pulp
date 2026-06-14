@@ -3,17 +3,14 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import unittest
 
-from module_test_utils import load_module_from_path
+from module_test_utils import load_local_ci_module
 
-
-MODULE_PATH = Path(__file__).with_name("linux_target_probe_command_dependency_bindings.py")
 
 
 def load_module():
-    return load_module_from_path(MODULE_PATH)
+    return load_local_ci_module("linux_target_probe_command_dependency_bindings.py")
 
 
 class LinuxTargetProbeCommandDependencyBindingsTests(unittest.TestCase):

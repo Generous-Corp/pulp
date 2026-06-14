@@ -1,17 +1,14 @@
 #!/usr/bin/env python3
 """Tests for Windows desktop action artifact/rollup dependency bindings."""
 
-from module_test_utils import load_module_from_path
-from pathlib import Path
+from module_test_utils import load_local_ci_module
 import types
 import unittest
 
 
-MODULE_PATH = Path(__file__).with_name("windows_desktop_action_artifact_dependency_bindings.py")
-
 
 def load_module():
-    return load_module_from_path(MODULE_PATH)
+    return load_local_ci_module("windows_desktop_action_artifact_dependency_bindings.py")
 
 
 class WindowsDesktopActionArtifactDependencyBindingsTests(unittest.TestCase):

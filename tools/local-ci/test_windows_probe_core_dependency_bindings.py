@@ -3,16 +3,14 @@
 
 from __future__ import annotations
 
-from module_test_utils import load_module_from_path
+from module_test_utils import load_local_ci_module
 from pathlib import Path
 import unittest
 
 
-MODULE_PATH = Path(__file__).with_name("windows_probe_core_dependency_bindings.py")
-
 
 def load_module():
-    return load_module_from_path(MODULE_PATH)
+    return load_local_ci_module("windows_probe_core_dependency_bindings.py")
 
 
 class WindowsProbeCoreDependencyBindingsTests(unittest.TestCase):

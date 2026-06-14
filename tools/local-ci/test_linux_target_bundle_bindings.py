@@ -1,17 +1,15 @@
 #!/usr/bin/env python3
 """Tests for Linux remote bundle path dependency bindings."""
 
-from module_test_utils import load_module_from_path
+from module_test_utils import load_local_ci_module
 from pathlib import Path
 import types
 import unittest
 
 
-MODULE_PATH = Path(__file__).with_name("linux_target_bundle_bindings.py")
-
 
 def load_module():
-    return load_module_from_path(MODULE_PATH)
+    return load_local_ci_module("linux_target_bundle_bindings.py")
 
 
 class LinuxTargetBundleBindingsTests(unittest.TestCase):

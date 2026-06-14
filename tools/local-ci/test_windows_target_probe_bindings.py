@@ -1,17 +1,14 @@
 #!/usr/bin/env python3
 """Tests for Windows target probe/detail compatibility bindings."""
 
-from module_test_utils import load_module_from_path
+from module_test_utils import load_local_ci_module
 import unittest
 from unittest import mock
-from pathlib import Path
 
-
-MODULE_PATH = Path(__file__).with_name("windows_target_probe_bindings.py")
 
 
 def load_module():
-    return load_module_from_path(MODULE_PATH)
+    return load_local_ci_module("windows_target_probe_bindings.py")
 
 
 class WindowsTargetProbeBindingsTests(unittest.TestCase):
