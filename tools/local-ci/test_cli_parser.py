@@ -122,6 +122,9 @@ class CliParserTests(unittest.TestCase):
             "BlackHole 2ch",
             "--video-audio-file",
             "/tmp/plugin.wav",
+            "--small-video",
+            "--small-video-budget-mb",
+            "8",
             "--capture-bundle-id",
             "com.cockos.reaper",
             "--label",
@@ -147,6 +150,8 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(args.video_audio, "system")
         self.assertEqual(args.video_audio_device, "BlackHole 2ch")
         self.assertEqual(args.video_audio_file, "/tmp/plugin.wav")
+        self.assertTrue(args.small_video)
+        self.assertEqual(args.small_video_budget_mb, 8.0)
         self.assertEqual(args.capture_bundle_id, "com.cockos.reaper")
         self.assertEqual(args.video_attachment_budget_mb, 100.0)
         self.assertEqual(args.label, "standalone-bypass-toggle")

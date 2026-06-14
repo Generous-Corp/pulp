@@ -55,6 +55,8 @@ class DesktopActionCommandsCliTests(unittest.TestCase):
             "video_duration": 8.0,
             "video_fps": 30.0,
             "video_attachment_budget_mb": 100.0,
+            "small_video": False,
+            "small_video_budget_mb": 10.0,
             "video_audio": "none",
             "video_audio_file": None,
             "video_audio_device": None,
@@ -338,6 +340,19 @@ class DesktopActionCommandsCliTests(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertEqual(self.calls[0][2]["video_audio"], "plugin")
         self.assertEqual(self.calls[0][2]["video_audio_file"], "/tmp/plugin.wav")
+
+        self.printed.clear()
+        self.calls.clear()
+        result = self.mod.cmd_desktop_video(
+            self.args(action="smoke", small_video=True, small_video_budget_mb=8.0),
+            cmd_desktop_smoke_fn=lambda args: self.calls.append(("smoke-wrapper", (), vars(args).copy())) or 0,
+            cmd_desktop_click_fn=lambda _args: self.fail("click should not run"),
+            cmd_desktop_inspect_fn=lambda _args: self.fail("inspect should not run"),
+            print_fn=self.print_line,
+        )
+        self.assertEqual(result, 0)
+        self.assertTrue(self.calls[0][2]["small_video"])
+        self.assertEqual(self.calls[0][2]["small_video_budget_mb"], 8.0)
 
     def test_video_command_applies_component_recipe(self):
         result = self.mod.cmd_desktop_video(

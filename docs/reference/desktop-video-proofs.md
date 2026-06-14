@@ -490,7 +490,8 @@ The run bundle records:
 - `video/proof.mp4`
 - `video/proof-composed.mp4` when `--compose-video-proof` is set
 - `video/proof.issue.mp4` as the configured GitHub/pro-account attachment target
-- `video/proof.small.mp4` when `desktop compose-video --small-video` is used
+- `video/proof.small.mp4` when `desktop video --small-video` or
+  `desktop compose-video --small-video` is used
 - `video/metadata.json`
 - `video/issue-metadata.json`
 - `video/small-metadata.json` when the small fallback is rendered

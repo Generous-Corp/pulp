@@ -228,6 +228,8 @@ def run_macos_local_smoke(
     video_capture_target: str = "app",
     capture_bundle_id: str | None = None,
     video_attachment_budget_bytes: int = 100_000_000,
+    small_video: bool = False,
+    small_video_budget_bytes: int = 10_000_000,
     compose_video_proof: bool = False,
     video_template: str | None = None,
     video_source_image: str | None = None,
@@ -246,9 +248,11 @@ def run_macos_local_smoke(
     video_audio_path = action_paths["video_audio"]
     video_composed_path = action_paths["video_composed"]
     video_issue_path = action_paths["video_issue"]
+    video_small_path = action_paths["video_small"]
     video_metadata_path = action_paths["video_metadata"]
     video_composed_metadata_path = action_paths["video_composed_metadata"]
     video_issue_metadata_path = action_paths["video_issue_metadata"]
+    video_small_metadata_path = action_paths["video_small_metadata"]
     video_poster_path = action_paths["video_poster"]
     terminal_returncode_path = bundle_dir / "terminal-returncode.txt"
     log_path = action_paths["stdout"]
@@ -684,6 +688,18 @@ def run_macos_local_smoke(
                 manifest["artifacts"]["video_issue"] = str(video_issue_path)
             if video_issue_metadata_path.exists():
                 manifest["artifacts"]["video_issue_metadata"] = str(video_issue_metadata_path)
+            if small_video:
+                small_summary = create_issue_video_variant_fn(
+                    issue_source_path,
+                    video_small_path,
+                    video_small_metadata_path,
+                    attachment_budget_bytes=small_video_budget_bytes,
+                )
+                manifest["video_small"] = small_summary
+                if video_small_path.exists():
+                    manifest["artifacts"]["video_small"] = str(video_small_path)
+                if video_small_metadata_path.exists():
+                    manifest["artifacts"]["video_small_metadata"] = str(video_small_metadata_path)
         atomic_write_text_fn(bundle_dir / "manifest.json", json.dumps(manifest, indent=2) + "\n")
         write_desktop_run_rollups_fn(config, target_name="mac")
         write_desktop_run_rollups_fn(config)

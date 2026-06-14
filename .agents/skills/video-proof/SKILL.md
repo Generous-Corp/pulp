@@ -49,8 +49,9 @@ or reviewer comprehension matters.
   paid/pro GitHub issue attachment planning only when the uploader is eligible
   for videos above 10 MB. Otherwise use a 10 MB budget or publish a local report
   and link the served report instead of attaching the MP4.
-- For review issues that may be handled by a non-pro uploader, rerender with
-  `desktop compose-video --small-video --small-video-budget-mb 10` so
+- For review issues that may be handled by a non-pro uploader, pass
+  `--small-video --small-video-budget-mb 10` to `desktop video`, or rerender
+  with `desktop compose-video --small-video --small-video-budget-mb 10`, so
   `video/proof.small.mp4` is available as a convenience attachment.
 - Never commit `tools/local-ci/config.json`, `tools/local-ci/node_modules/`,
   `.remotion/`, or generated desktop artifact bundles.
@@ -491,7 +492,8 @@ Each run bundle should contain:
 - `video/audio.wav` when `--video-audio plugin` was used
 - `video/proof-composed.mp4` when `--compose-video-proof` is set
 - `video/proof.issue.mp4` for GitHub/pro-account attachment review
-- `video/proof.small.mp4` when `desktop compose-video --small-video` is used
+- `video/proof.small.mp4` when `desktop video --small-video` or
+  `desktop compose-video --small-video` is used
 - `video/metadata.json` with `size_bytes`, budget, and
   `fits_attachment_budget`
 - `video/issue-metadata.json` with copy/transcode/budget status

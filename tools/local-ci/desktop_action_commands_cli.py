@@ -239,6 +239,8 @@ def _video_kwargs(args: argparse.Namespace) -> dict:
         "video_capture_target": getattr(args, "video_capture_target", "app"),
         "capture_bundle_id": getattr(args, "capture_bundle_id", None),
         "video_attachment_budget_bytes": int(float(getattr(args, "video_attachment_budget_mb", 100.0)) * 1_000_000),
+        "small_video": bool(getattr(args, "small_video", False)),
+        "small_video_budget_bytes": int(float(getattr(args, "small_video_budget_mb", 10.0)) * 1_000_000),
         "compose_video_proof": bool(getattr(args, "compose_video_proof", False)),
         "video_template": getattr(args, "video_template", None),
         "video_source_image": getattr(args, "source_image", None),

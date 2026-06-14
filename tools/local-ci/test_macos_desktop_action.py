@@ -47,9 +47,11 @@ class MacosDesktopActionTests(unittest.TestCase):
             "video_audio": current_bundle / "video" / "audio.wav",
             "video_composed": current_bundle / "video" / "proof-composed.mp4",
             "video_issue": current_bundle / "video" / "proof.issue.mp4",
+            "video_small": current_bundle / "video" / "proof.small.mp4",
             "video_metadata": current_bundle / "video" / "metadata.json",
             "video_composed_metadata": current_bundle / "video" / "composed-metadata.json",
             "video_issue_metadata": current_bundle / "video" / "issue-metadata.json",
+            "video_small_metadata": current_bundle / "video" / "small-metadata.json",
             "video_poster": current_bundle / "video" / "poster.png",
             "stdout": current_bundle / "stdout.log",
             "stderr": current_bundle / "stderr.log",
@@ -601,6 +603,22 @@ class MacosDesktopActionTests(unittest.TestCase):
         self.assertEqual(manifest["video_proof_composition"]["source_image"], str(reference.resolve()))
         self.assertEqual(manifest["video_proof_composition"]["notes"], ["Reference matches implementation"])
         self.assertEqual(manifest["video_proof_composition"]["context"], {"recipe": "design-parity", "source": "figma"})
+
+    def test_run_macos_local_smoke_can_create_small_video_variant_inline(self) -> None:
+        manifest, _launched, _terminated, _waited_paths, _rollups = self.run_action(
+            record_video=True,
+            compose_video_proof=True,
+            capture_ui_snapshot=False,
+            small_video=True,
+            small_video_budget_bytes=8_000_000,
+        )
+
+        self.assertEqual(manifest["video_issue"]["size"]["attachment_budget_bytes"], 100_000_000)
+        self.assertEqual(manifest["video_small"]["size"]["attachment_budget_bytes"], 8_000_000)
+        self.assertTrue(manifest["artifacts"]["video_small"].endswith("/video/proof.small.mp4"))
+        self.assertTrue(manifest["artifacts"]["video_small_metadata"].endswith("/video/small-metadata.json"))
+        self.assertTrue((self.bundle_dir / "video" / "proof.small.mp4").is_file())
+        self.assertTrue((self.bundle_dir / "video" / "small-metadata.json").is_file())
 
     def test_run_macos_local_smoke_adds_component_zoom_focus_context(self) -> None:
         manifest, _launched, _terminated, _waited_paths, _rollups = self.run_action(

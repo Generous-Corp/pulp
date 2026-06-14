@@ -135,6 +135,17 @@ def build_local_ci_parser(
             help="Attachment budget in decimal MB for issue-ready video metadata (default: 100)",
         )
         command_parser.add_argument(
+            "--small-video",
+            action="store_true",
+            help="Also create a small fallback MP4 for a 10 MB-style attachment budget.",
+        )
+        command_parser.add_argument(
+            "--small-video-budget-mb",
+            type=float,
+            default=10.0,
+            help="Attachment budget in decimal MB for --small-video fallback (default: 10)",
+        )
+        command_parser.add_argument(
             "--compose-video-proof",
             action="store_true",
             help="Use Remotion to render an annotated proof video from the raw recording.",
