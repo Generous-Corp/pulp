@@ -3,7 +3,6 @@
 
 from module_test_utils import load_module_from_path
 from pathlib import Path
-import types
 import unittest
 from unittest import mock
 
@@ -31,7 +30,7 @@ class QueueTargetStateBindingsTests(unittest.TestCase):
             self.assertTrue(callable(getattr(self.mod, name)))
 
     def test_install_queue_target_state_helpers_routes_groups_and_unknown_fallback(self):
-        bindings = {"_queue_orchestrator": types.SimpleNamespace()}
+        bindings = {}
 
         with (
             mock.patch.object(self.mod, "install_queue_target_payload_helpers") as payload,

@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 from module_test_utils import load_module_from_path
-import types
 import unittest
 from unittest import mock
 from pathlib import Path
@@ -33,7 +32,7 @@ class WindowsSessionProbeBindingsTests(unittest.TestCase):
             self.assertTrue(callable(getattr(self.mod, name)))
 
     def test_install_session_probe_helpers_routes_groups_and_unknown_fallback(self) -> None:
-        bindings = self._bindings(types.SimpleNamespace())
+        bindings = {}
 
         with (
             mock.patch.object(self.mod, "install_windows_session_agent_helpers") as agent,
@@ -48,12 +47,6 @@ class WindowsSessionProbeBindingsTests(unittest.TestCase):
         agent.assert_called_once_with(bindings, ("start_windows_session_agent_task",))
         cmake_probe.assert_called_once_with(bindings, ("probe_windows_ssh_cmake_settings",))
         install_local.assert_called_once_with(bindings, self.mod.__dict__, ("unknown_helper",))
-
-    def _bindings(self, windows_probe):
-        return {
-            "_windows_probe": windows_probe,
-            "subprocess": types.SimpleNamespace(run=object()),
-        }
 
 if __name__ == "__main__":
     unittest.main()

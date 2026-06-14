@@ -2,7 +2,6 @@
 """Tests for desktop source request dependency bindings."""
 
 from module_test_utils import load_module_from_path
-import types
 import unittest
 from unittest import mock
 from pathlib import Path
@@ -33,7 +32,7 @@ class DesktopSourceRequestBindingsTests(unittest.TestCase):
             self.assertTrue(callable(getattr(self.mod, name)))
 
     def test_source_request_installer_routes_selected_groups_and_unknown_fallback(self):
-        bindings = {"_source_prep": types.SimpleNamespace()}
+        bindings = {}
 
         with (
             mock.patch.object(self.mod, "install_desktop_source_request_core_helpers") as core,

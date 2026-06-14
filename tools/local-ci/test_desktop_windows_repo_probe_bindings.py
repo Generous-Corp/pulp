@@ -2,7 +2,6 @@
 """Tests for desktop Windows repo probe dependency bindings."""
 
 from module_test_utils import load_module_from_path
-import types
 import unittest
 from unittest import mock
 from pathlib import Path
@@ -19,9 +18,6 @@ class DesktopWindowsRepoProbeBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
 
-    def _bindings(self):
-        return {"_windows_probe": types.SimpleNamespace()}
-
     def test_repo_probe_exports_match_focused_groups(self):
         expected = (
             *self.mod.DESKTOP_WINDOWS_REPO_CHECKOUT_PROBE_EXPORTS,
@@ -33,7 +29,7 @@ class DesktopWindowsRepoProbeBindingsTests(unittest.TestCase):
             self.assertTrue(callable(getattr(self.mod, name)))
 
     def test_repo_probe_installer_routes_selected_groups_and_unknown_fallback(self):
-        bindings = self._bindings()
+        bindings = {}
 
         with (
             mock.patch.object(self.mod, "install_desktop_windows_repo_checkout_probe_helpers") as probe,

@@ -2,7 +2,6 @@
 """Tests for desktop doctor probe dependency bindings."""
 
 from module_test_utils import load_module_from_path
-import types
 import unittest
 from unittest import mock
 from pathlib import Path
@@ -19,16 +18,6 @@ class DesktopDoctorProbeBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
 
-    def _bindings(self):
-        return {
-            "_desktop_doctor": types.SimpleNamespace(),
-            "sys": types.SimpleNamespace(platform="darwin"),
-            "shutil": types.SimpleNamespace(which=object()),
-            "urllib": types.SimpleNamespace(
-                request=types.SimpleNamespace(Request=object(), urlopen=object()),
-            ),
-        }
-
     def test_doctor_probe_exports_match_focused_groups(self):
         expected = (
             *self.mod.DESKTOP_DOCTOR_CHECK_EXPORTS,
@@ -40,7 +29,7 @@ class DesktopDoctorProbeBindingsTests(unittest.TestCase):
             self.assertTrue(callable(getattr(self.mod, name)))
 
     def test_doctor_probe_installer_routes_selected_groups_and_unknown_fallback(self):
-        bindings = self._bindings()
+        bindings = {}
 
         with (
             mock.patch.object(self.mod, "install_desktop_doctor_check_helpers") as checks,

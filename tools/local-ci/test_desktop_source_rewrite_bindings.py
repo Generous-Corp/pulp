@@ -2,7 +2,6 @@
 """Tests for desktop source command rewrite dependency bindings."""
 
 from module_test_utils import load_module_from_path
-import types
 import unittest
 from unittest import mock
 from pathlib import Path
@@ -18,7 +17,6 @@ def load_module():
 class DesktopSourceRewriteBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
-        self.root = Path("/repo")
 
     def test_source_rewrite_exports_are_composed_from_focused_groups(self):
         expected = (
@@ -32,7 +30,7 @@ class DesktopSourceRewriteBindingsTests(unittest.TestCase):
             self.assertTrue(callable(getattr(self.mod, name)))
 
     def test_source_rewrite_installer_routes_selected_groups_and_unknown_fallback(self):
-        bindings = {"_source_prep": types.SimpleNamespace(), "ROOT": self.root}
+        bindings = {}
 
         with (
             mock.patch.object(self.mod, "install_desktop_source_rewrite_command_helpers") as command,

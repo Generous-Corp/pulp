@@ -2,7 +2,6 @@
 """Tests for desktop Windows session/tooling probe dependency bindings."""
 
 from module_test_utils import load_module_from_path
-import types
 import unittest
 from unittest import mock
 from pathlib import Path
@@ -19,13 +18,6 @@ class DesktopWindowsToolingProbeBindingsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
 
-    def _bindings(self):
-        return {
-            "_windows_probe": types.SimpleNamespace(),
-            "WINDOWS_REQUIRED_REMOTE_TOOLS": {"git": {"required": True}},
-            "WINDOWS_OPTIONAL_REMOTE_TOOLS": {"gh": {"required": False}},
-        }
-
     def test_tooling_probe_exports_match_focused_groups(self):
         expected = (
             *self.mod.DESKTOP_WINDOWS_SESSION_AGENT_PROBE_EXPORTS,
@@ -37,7 +29,7 @@ class DesktopWindowsToolingProbeBindingsTests(unittest.TestCase):
             self.assertTrue(callable(getattr(self.mod, name)))
 
     def test_tooling_probe_installer_routes_selected_groups_and_unknown_fallback(self):
-        bindings = self._bindings()
+        bindings = {}
 
         with (
             mock.patch.object(self.mod, "install_desktop_windows_session_agent_probe_helpers") as session_agent,
