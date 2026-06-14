@@ -7,6 +7,10 @@ import os
 from pathlib import Path
 
 from queue_command_lifecycle import bump_queue_command_job_locked, cancel_queue_command_job_locked
+from queue_completion import (
+    complete_canceled_job_unlocked,
+    complete_superseded_job_unlocked,
+)
 from queue_runner_lifecycle import (
     drain_pending_jobs_locked,
     scheduler_error_result,
@@ -54,35 +58,6 @@ def reconcile_running_jobs_unlocked(
             break
 
     return queue, changed
-
-
-def complete_superseded_job_unlocked(
-    job: dict,
-    superseded_by: str,
-    reason: str,
-    *,
-    supersedence_result_fn: Callable[[dict, str, str], dict],
-    save_result_fn: Callable[[dict], Path | str],
-    complete_job_with_result_unlocked_fn: Callable[[dict, dict, Path | str], None],
-) -> Path | str:
-    result = supersedence_result_fn(job, superseded_by, reason)
-    result_path = save_result_fn(result)
-    complete_job_with_result_unlocked_fn(job, result, result_path)
-    return result_path
-
-
-def complete_canceled_job_unlocked(
-    job: dict,
-    reason: str,
-    *,
-    cancellation_result_fn: Callable[[dict, str], dict],
-    save_result_fn: Callable[[dict], Path | str],
-    complete_job_with_result_unlocked_fn: Callable[[dict, dict, Path | str], None],
-) -> Path | str:
-    result = cancellation_result_fn(job, reason)
-    result_path = save_result_fn(result)
-    complete_job_with_result_unlocked_fn(job, result, result_path)
-    return result_path
 
 
 def enqueue_job_locked(

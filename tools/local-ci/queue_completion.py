@@ -68,6 +68,35 @@ def complete_job_with_result_unlocked(job: dict, result: dict, result_path: Path
     job.pop("last_progress_at", None)
 
 
+def complete_superseded_job_unlocked(
+    job: dict,
+    superseded_by: str,
+    reason: str,
+    *,
+    supersedence_result_fn: Callable[[dict, str, str], dict],
+    save_result_fn: Callable[[dict], Path | str],
+    complete_job_with_result_unlocked_fn: Callable[[dict, dict, Path | str], None],
+) -> Path | str:
+    result = supersedence_result_fn(job, superseded_by, reason)
+    result_path = save_result_fn(result)
+    complete_job_with_result_unlocked_fn(job, result, result_path)
+    return result_path
+
+
+def complete_canceled_job_unlocked(
+    job: dict,
+    reason: str,
+    *,
+    cancellation_result_fn: Callable[[dict, str], dict],
+    save_result_fn: Callable[[dict], Path | str],
+    complete_job_with_result_unlocked_fn: Callable[[dict, dict, Path | str], None],
+) -> Path | str:
+    result = cancellation_result_fn(job, reason)
+    result_path = save_result_fn(result)
+    complete_job_with_result_unlocked_fn(job, result, result_path)
+    return result_path
+
+
 def complete_job_unlocked(
     queue: list[dict],
     job_id: str,
