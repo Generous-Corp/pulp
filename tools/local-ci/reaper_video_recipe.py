@@ -170,6 +170,17 @@ def write_reaper_plugin_editor_recipe(
               wait "$quit_pid" >/dev/null 2>&1 || true
             }}
 
+            terminate_reaper_pid() {{
+              local pid="$1"
+              kill "$pid" >/dev/null 2>&1 || true
+              for _ in {{1..10}}; do
+                kill -0 "$pid" >/dev/null 2>&1 || return 0
+                sleep 0.5
+              done
+              kill -KILL "$pid" >/dev/null 2>&1 || true
+              wait "$pid" >/dev/null 2>&1 || true
+            }}
+
             rm -f "$STATUS" "$REAPER_STDOUT" "$REAPER_STDERR" "$SCRIPT_STDOUT" "$SCRIPT_STDERR"
             quit_reaper_best_effort
 
@@ -183,7 +194,7 @@ def write_reaper_plugin_editor_recipe(
             cat "$STATUS" 2>/dev/null || true
 
             sleep 30
-            kill "$reaper_pid" >/dev/null 2>&1 || true
+            terminate_reaper_pid "$reaper_pid"
             quit_reaper_best_effort
             """
         )
