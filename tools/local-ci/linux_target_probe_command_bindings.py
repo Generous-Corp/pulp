@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from binding_utils import install_local_helpers
 from binding_utils import binding as _binding
+from linux_target_probe_command_dependency_bindings import linux_target_probe_command_dependencies
 
 
 LINUX_TARGET_PROBE_COMMAND_EXPORTS = (
@@ -15,14 +16,14 @@ LINUX_TARGET_PROBE_COMMAND_EXPORTS = (
 def probe_linux_launch_backend(bindings: dict, host: str) -> dict:
     return _binding(bindings, "_linux_target").probe_linux_launch_backend(
         host,
-        ssh_command_result_fn=_binding(bindings, "ssh_command_result"),
+        **linux_target_probe_command_dependencies(bindings),
     )
 
 
 def probe_linux_remote_tooling(bindings: dict, host: str) -> dict:
     return _binding(bindings, "_linux_target").probe_linux_remote_tooling(
         host,
-        ssh_command_result_fn=_binding(bindings, "ssh_command_result"),
+        **linux_target_probe_command_dependencies(bindings),
     )
 
 

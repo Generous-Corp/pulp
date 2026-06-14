@@ -28,7 +28,7 @@ class LinuxTargetProbeCommandBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.LINUX_TARGET_PROBE_COMMAND_EXPORTS, expected)
         self.assertEqual(len(expected), len(set(expected)))
 
-    def test_probe_commands_bind_ssh_dependency(self) -> None:
+    def test_probe_commands_delegate_with_assembled_dependencies(self) -> None:
         captured = {}
 
         def capture(name, result):
@@ -44,19 +44,20 @@ class LinuxTargetProbeCommandBindingsTests(unittest.TestCase):
         )
         bindings = {
             "_linux_target": linux_target,
-            "ssh_command_result": object(),
         }
+        deps = {"ssh_command_result_fn": object()}
 
-        self.assertEqual(
-            self.mod.probe_linux_launch_backend(bindings, "ubuntu"),
-            {"mode": "xvfb"},
-        )
-        self.assertIs(captured["launch"][1]["ssh_command_result_fn"], bindings["ssh_command_result"])
-        self.assertEqual(
-            self.mod.probe_linux_remote_tooling(bindings, "ubuntu"),
-            {"git_found": True},
-        )
-        self.assertIs(captured["tooling"][1]["ssh_command_result_fn"], bindings["ssh_command_result"])
+        with mock.patch.object(self.mod, "linux_target_probe_command_dependencies", return_value=deps):
+            self.assertEqual(
+                self.mod.probe_linux_launch_backend(bindings, "ubuntu"),
+                {"mode": "xvfb"},
+            )
+            self.assertEqual(
+                self.mod.probe_linux_remote_tooling(bindings, "ubuntu"),
+                {"git_found": True},
+            )
+        self.assertEqual(captured["launch"][1], deps)
+        self.assertEqual(captured["tooling"][1], deps)
 
     def test_install_linux_target_probe_command_helpers_wires_named_exports(self) -> None:
         linux_target = types.SimpleNamespace(

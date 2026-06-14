@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from binding_utils import install_local_helpers
 from binding_utils import binding as _binding
+from linux_target_window_command_dependency_bindings import linux_target_window_command_dependencies
 
 
 LINUX_TARGET_WINDOW_COMMAND_EXPORTS = ("build_linux_window_driver_remote_command",)
@@ -30,7 +31,7 @@ def build_linux_window_driver_remote_command(
         click_point=click_point,
         capture_before=capture_before,
         settle_secs=settle_secs,
-        parse_coordinate_pair_fn=_binding(bindings, "parse_coordinate_pair"),
+        **linux_target_window_command_dependencies(bindings),
     )
 
 

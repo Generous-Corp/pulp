@@ -5,6 +5,7 @@ from module_test_utils import load_module_from_path
 from pathlib import Path
 import types
 import unittest
+from unittest import mock
 
 
 MODULE_PATH = Path(__file__).with_name("linux_target_window_command_bindings.py")
@@ -24,38 +25,38 @@ class LinuxTargetWindowCommandBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.LINUX_TARGET_WINDOW_COMMAND_EXPORTS, expected)
         self.assertEqual(len(expected), len(set(expected)))
 
-    def test_window_remote_command_delegates_with_parse_coordinate_seam(self) -> None:
+    def test_window_remote_command_delegates_with_assembled_dependencies(self) -> None:
         captured = {}
 
         def build_linux_window_driver_remote_command(*args, **kwargs):
             captured["window"] = (args, kwargs)
             return "window-cmd"
 
-        parse_coordinate_pair = object()
         bindings = {
             "_linux_target": types.SimpleNamespace(
                 build_linux_window_driver_remote_command=build_linux_window_driver_remote_command,
             ),
-            "parse_coordinate_pair": parse_coordinate_pair,
         }
+        deps = {"parse_coordinate_pair_fn": object()}
 
-        self.assertEqual(
-            self.mod.build_linux_window_driver_remote_command(
-                bindings,
-                "/repo",
-                ".local/run",
-                "./app",
-                launch_backend={"mode": "display", "display": ":99"},
-                launch_cwd="/repo/build",
-                click_point="1,2",
-                capture_before=True,
-                settle_secs=0.25,
-            ),
-            "window-cmd",
-        )
+        with mock.patch.object(self.mod, "linux_target_window_command_dependencies", return_value=deps):
+            self.assertEqual(
+                self.mod.build_linux_window_driver_remote_command(
+                    bindings,
+                    "/repo",
+                    ".local/run",
+                    "./app",
+                    launch_backend={"mode": "display", "display": ":99"},
+                    launch_cwd="/repo/build",
+                    click_point="1,2",
+                    capture_before=True,
+                    settle_secs=0.25,
+                ),
+                "window-cmd",
+            )
         self.assertEqual(captured["window"][0], ("/repo", ".local/run", "./app"))
         self.assertEqual(captured["window"][1]["launch_backend"], {"mode": "display", "display": ":99"})
-        self.assertIs(captured["window"][1]["parse_coordinate_pair_fn"], parse_coordinate_pair)
+        self.assertEqual(captured["window"][1]["parse_coordinate_pair_fn"], deps["parse_coordinate_pair_fn"])
 
     def test_install_linux_target_window_command_helpers_wires_named_exports(self) -> None:
         linux_target = types.SimpleNamespace(
