@@ -388,11 +388,28 @@ widgets:
     notes: ScrollView with smooth scroll animation, bar fade-in/out, content size management.
   text_editor:
     status: usable
-    ci_test: pulp-test-text-editor
+    ci_test:
+      - pulp-test-text-editor
+      - pulp-test-text-editor-mouse
+      - pulp-test-text-editor-paint
+      - pulp-test-text-editor-policy
+      - pulp-test-text-editor-multiline
+      - pulp-test-text-input
+      - pulp-test-context-menu
+      - pulp-test-cluster-step
+      - pulp-test-bidi-text
     notes: >
-      Full text editor: selection (click/double/triple), clipboard (Cmd+C/X/V/A),
-      undo/redo (Cmd+Z/Shift+Z), numeric-only, password mode, multi-line,
-      placeholder, IME composition with marked text.
+      Full text editor: grapheme-safe UTF-8 cursor/delete, platform keyboard
+      movement and selection variants, word/line delete shortcuts, page
+      movement, selection (click/drag/double/triple), word-granular
+      double-click drag, clipboard (Cmd/Ctrl+C/X/V/A and
+      paste-and-match-style), password clipboard/selected-text protection,
+      explicit clipboard and line-ending policies, default Cut/Copy/Paste/Select
+      All context menu, undo/redo with selection restoration, configurable Tab
+      and multiline Return policies, read-only and disabled policy, numeric-only,
+      max length, paste sanitizer, input filter/validator hooks, password mode,
+      public caret/selection APIs, programmatic set_text undo reset, multi-line
+      scrolling, placeholder, and IME composition with marked text.
   tree_view:
     status: usable
     ci_test: pulp-test-tree-view

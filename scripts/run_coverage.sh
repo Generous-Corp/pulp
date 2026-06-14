@@ -142,8 +142,13 @@ cmake --build "${BUILD_DIR}" -j"${JOBS}"
 
 echo "=== Running tests with LLVM_PROFILE_FILE ==="
 mkdir -p "${PROFRAW_DIR}"
+find "${PROFRAW_DIR}" -name '*.profraw' -type f -delete
 cd "${BUILD_DIR}"
-export LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%p-%m.profraw"
+# Use one merge-enabled profile per instrumented binary. The full suite runs
+# thousands of one-test Catch2 processes; per-PID profiles are noisy, can hit
+# shell argv limits during cleanup, and are vulnerable to PID reuse over a long
+# coverage run.
+export LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%m.profraw"
 
 # #317 Codex P2: track test-suite outcome without aborting the
 # coverage report. A broken test run should still upload its

@@ -1623,6 +1623,23 @@ jobs:
         run: |
           set -euo pipefail
           repo='${{ github.repository }}'
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("coverage-diff-comment.md")
+          limit = 60000
+          marker = "<!-- pulp-coverage-diff-gate -->"
+          note = (
+              "\n\n---\n\n"
+              "_Coverage comment truncated to stay under GitHub's 65,536-character "
+              "comment limit. Download this run's `coverage-diff-*` artifact for "
+              "the full `coverage-diff.md` report._\n"
+          )
+          body = path.read_text(encoding="utf-8")
+          if len(body) > limit:
+              keep = max(len(marker) + 1, limit - len(note))
+              path.write_text(body[:keep].rstrip() + note, encoding="utf-8")
+          PY
           body="$(cat coverage-diff-comment.md)"
 
           existing=$(

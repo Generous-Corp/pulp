@@ -7,6 +7,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/canvas/bundled_fonts.hpp>
+#include <pulp/canvas/text_utf8.hpp>
 
 #include <string>
 
@@ -25,6 +26,24 @@ TEST_CASE("cluster_step: plain ASCII advances by one byte", "[font][cluster]") {
     REQUIRE(cluster_step(s, 4, true) == 5u);
     REQUIRE(cluster_step(s, 5, false) == 4u);
     REQUIRE(cluster_step(s, 1, false) == 0u);
+}
+
+TEST_CASE("text_utf8: converts UTF-16 code-unit offsets to UTF-8 byte offsets",
+          "[font][cluster][utf16]") {
+    const std::string hiragana = "\xE3\x81\xAB\xE3\x81\xBB";
+    const std::string emoji_plus_ascii = "\xF0\x9F\x98\x80" "a";
+
+    REQUIRE(utf8_offset_for_utf16_offset(hiragana, 0) == 0u);
+    REQUIRE(utf8_offset_for_utf16_offset(hiragana, 1) == 3u);
+    REQUIRE(utf8_offset_for_utf16_offset(hiragana, 2) == 6u);
+    REQUIRE(utf16_offset_for_utf8_offset(hiragana, 3) == 1u);
+    REQUIRE(utf16_offset_for_utf8_offset(hiragana, 6) == 2u);
+
+    REQUIRE(utf8_offset_for_utf16_offset(emoji_plus_ascii, 1) == 0u);
+    REQUIRE(utf8_offset_for_utf16_offset(emoji_plus_ascii, 2) == 4u);
+    REQUIRE(utf8_offset_for_utf16_offset(emoji_plus_ascii, 3) == 5u);
+    REQUIRE(utf16_offset_for_utf8_offset(emoji_plus_ascii, 4) == 2u);
+    REQUIRE(utf16_offset_for_utf8_offset(emoji_plus_ascii, 5) == 3u);
 }
 
 TEST_CASE("cluster_step: emoji ZWJ family is one cluster", "[font][cluster][emoji]") {

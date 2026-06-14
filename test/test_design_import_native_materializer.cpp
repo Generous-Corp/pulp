@@ -43,6 +43,10 @@ void bind_generated_binding_runtime_ui(pulp::view::View& root,
 #define PULP_TEST_CXX_COMPILER ""
 #endif
 
+#ifndef PULP_TEST_OSX_SYSROOT
+#define PULP_TEST_OSX_SYSROOT ""
+#endif
+
 #ifndef PULP_REPO_ROOT
 #define PULP_REPO_ROOT ""
 #endif
@@ -114,6 +118,28 @@ public:
 #endif
     {
         args = {"-std=c++20"};
+#if defined(__APPLE__)
+        fs::path macosx_sysroot(PULP_TEST_OSX_SYSROOT);
+        if (macosx_sysroot.empty() || !fs::exists(macosx_sysroot)) {
+            const auto sdk = pulp::platform::exec(
+                "/usr/bin/xcrun",
+                {"--sdk", "macosx", "--show-sdk-path"},
+                10000);
+            if (!sdk.timed_out && sdk.exit_code == 0) {
+                std::string path = sdk.stdout_output;
+                while (!path.empty() &&
+                       (path.back() == '\n' || path.back() == '\r' ||
+                        path.back() == ' ' || path.back() == '\t')) {
+                    path.pop_back();
+                }
+                macosx_sysroot = fs::path(path);
+            }
+        }
+        if (!macosx_sysroot.empty() && fs::exists(macosx_sysroot)) {
+            args.push_back("-isysroot");
+            args.push_back(macosx_sysroot.string());
+        }
+#endif
         for (const auto& dir : include_dirs) {
             args.push_back("-I");
             args.push_back(dir);

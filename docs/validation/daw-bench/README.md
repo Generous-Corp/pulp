@@ -45,6 +45,61 @@ session.
    - AU:   `cp -R build/AU/PulpHostBench.component ~/Library/Audio/Plug-Ins/Components/`
    - VST3: `cp -R build/VST3/PulpHostBench.vst3 ~/Library/Audio/Plug-Ins/VST3/`
    - CLAP: `cp -R build/CLAP/PulpHostBench.clap ~/Library/Audio/Plug-Ins/CLAP/`
+   For Logic AU benches, prefer the repeatable prep helper because
+   `PulpHostBench` is a MIDI-capable effect and must be installed, signed,
+   notarized, stapled, and scanned as `aumf PHBn Pulp` before host evidence is
+   valid:
+   ```bash
+   python3 tools/scripts/prepare_logic_hostbench_au.py \
+       --component build/AU/PulpHostBench.component \
+       --identity "Developer ID Application: <Name> (<TEAMID>)" \
+       --notarize
+   ```
+   Use `--dry-run` first to print the copy/sign/notary/staple/preflight
+   commands without changing files or contacting Apple. After rebuilding or
+   reinstalling the AU manually, clear the AU registrar cache before trusting
+   host results:
+   ```bash
+   python3 tools/scripts/check_au_component_preflight.py \
+       ~/Library/Audio/Plug-Ins/Components/PulpHostBench.component \
+       --expect-type aumf \
+       --expect-subtype PHBn \
+       --expect-manufacturer Pulp \
+       --expect-factory PulpHostBenchAUFactory \
+       --expect-symbol PulpHostBenchAUFactory \
+       --check-permissions \
+       --check-codesign \
+       --check-gatekeeper
+   killall -KILL AudioComponentRegistrar 2>/dev/null || true
+   sleep 5
+   python3 tools/scripts/check_au_component_preflight.py \
+       ~/Library/Audio/Plug-Ins/Components/PulpHostBench.component \
+       --expect-type aumf \
+       --expect-subtype PHBn \
+       --expect-manufacturer Pulp \
+       --expect-factory PulpHostBenchAUFactory \
+       --expect-symbol PulpHostBenchAUFactory \
+       --check-permissions \
+       --check-codesign \
+       --check-gatekeeper \
+       --check-auval-list \
+       --run-auval \
+       --auval-repeat 2
+   ```
+   Both `auval` runs must be stable. A transient pass immediately after cache
+   reset is not durable evidence, and a discovery failure means the Logic AU
+   bench is not ready to run. If the preflight reports that `auval -a` lists
+   Apple components and no non-Apple components, treat that as a machine-level
+   AU registrar issue rather than evidence about the HostBench bundle itself.
+   If Gatekeeper reports `Adhoc Signed App` or `Notary Ticket Missing`, verify
+   the shell can use the Developer ID private key before attempting a new
+   notarized install:
+   ```bash
+   python3 tools/scripts/check_au_component_preflight.py \
+       ~/Library/Audio/Plug-Ins/Components/PulpHostBench.component \
+       --expect-type aumf \
+       --check-signing-identity "Developer ID Application: <Name> (<TEAMID>)"
+   ```
 3. **Clear stale logs** so this session's events stand alone:
    ```bash
    rm -rf ~/Library/Logs/PulpHostBench/   # macOS
@@ -68,7 +123,19 @@ session.
 6. **Fill in the Result table** at the bottom of the script.
    Mark each row Confirmed / Refuted / Not Triggered. Save the
    resulting `.md` so it can be pasted back into the follow-up PR.
-7. **Run the aggregator** when you've benched as many hosts as
+7. **Optionally run the REAPER smoke helper** when checking local VST3 or CLAP
+   readiness before a full manual run:
+   ```bash
+   python3 tools/scripts/run_reaper_hostbench_smoke.py --format vst3 \
+       --copy-log-to docs/validation/daw-bench/results/<date>/logs
+   python3 tools/scripts/run_reaper_hostbench_smoke.py --format clap \
+       --copy-log-to docs/validation/daw-bench/results/<date>/logs
+   ```
+   This helper proves REAPER can instantiate HostBench and write a bench log
+   for that format on this machine. It is diagnostic automation only; do not
+   skip the filled-in script or manifest review steps when promoting support
+   claims.
+8. **Run the aggregator** when you've benched as many hosts as
    you plan to in this round:
    ```bash
    python3 tools/scripts/promote_quirk_tiers.py \
@@ -78,7 +145,7 @@ session.
    git apply /tmp/promote.patch
    git diff core/format/include/pulp/format/host_quirks.hpp
    ```
-8. **Write the evidence manifest** beside the filled-in result
+9. **Write the evidence manifest** beside the filled-in result
    markdown. Use the schema in [`results/README.md`](results/README.md)
    and validate it before promoting tiers:
    ```bash
@@ -86,7 +153,7 @@ session.
        docs/validation/daw-bench/results/<date> \
        --require-any
    ```
-9. **Open a PR** that includes the patch plus the filled-in
+10. **Open a PR** that includes the patch plus the filled-in
    scripts and `.daw-bench.json` manifest under
    `docs/validation/daw-bench/results/<date>/`.
 

@@ -1,0 +1,45 @@
+{
+  "schema": "pulp-package-v1",
+  "id": "dev.pulp.fixtures.level-graph-node-kit",
+  "name": "Level Graph Node Kit",
+  "version": "0.1.0",
+  "license": "MIT",
+  "licenses": {
+    "code": "MIT"
+  },
+  "kind": ["source"],
+  "audience": ["developer", "agent"],
+  "description": "Source-built SignalGraph custom node fixture with state-validation metadata.",
+  "requires": {
+    "pulp": ">=0.395.0",
+    "cpp": 20,
+    "platforms": ["macOS", "Windows", "Linux", "Android", "iOS", "AUv3"]
+  },
+  "capabilities": ["signal.graph.node.level", "audio.effect.gain"],
+  "exports": {
+    "cmakeTargets": ["pulp::fixture_level_node"],
+    "sourceFiles": ["src/level_node.cpp"],
+    "graphFixtures": ["fixtures/level-graph.json"],
+    "stateFixtures": ["fixtures/level-state.json"]
+  },
+  "dependencies": {
+    "pulp": ["pulp::host", "pulp::signal"],
+    "packages": []
+  },
+  "realtime": {
+    "processSafe": true,
+    "allocatesInProcess": false,
+    "locksInProcess": false,
+    "notes": "Custom node process path scales borrowed host buffers and keeps state in the node instance."
+  },
+  "agent": {
+    "guidance": "AGENTS.md"
+  },
+  "authoring": {
+    "createdBy": "human",
+    "humanReviewed": true
+  },
+  "validation": {
+    "profiles": ["validation/graph-state.json"]
+  }
+}

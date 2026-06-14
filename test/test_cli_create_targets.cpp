@@ -98,6 +98,17 @@ TEST_CASE("CLI create targets match complete format tokens only",
     });
 }
 
+TEST_CASE("CLI create targets can omit the test target for template kit builds",
+          "[cli][create][kit]") {
+    const auto targets = create_default_build_targets(
+        "KitGain", "effect", "CLAP Standalone", false);
+
+    CHECK(targets == std::vector<std::string>{
+        "KitGain_CLAP",
+        "KitGain_Standalone",
+    });
+}
+
 TEST_CASE("CLI create selects build config at build/test time for multi-config generators",
           "[cli][create][issue-2133]") {
     // Codex P1 on PR #2133: `pulp create` set only the configure-time

@@ -108,6 +108,7 @@ ALLOWED_ROOT_PATHS = frozenset({
     "examples",
     "experimental",
     "external",
+    "fixtures",  # Package-format manifests and archive/content workflow fixtures.
     "hooks",
     "inspect",
     "packages",

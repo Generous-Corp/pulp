@@ -50,6 +50,7 @@ tiers:
       - core/audio/**
       - core/dsl/**
       - core/format/**
+      - core/graph/**
       - core/host/**
       - core/midi/**
       - core/native-components/**

@@ -7,7 +7,8 @@ namespace pulp::cli {
 
 std::vector<std::string> create_default_build_targets(const std::string& class_name,
                                                       const std::string& type,
-                                                      const std::string& formats);
+                                                      const std::string& formats,
+                                                      bool include_test_target = true);
 
 // Returns the CMake build configuration name ("Release" by default, "Debug"
 // when debug is true).

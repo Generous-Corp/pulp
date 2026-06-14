@@ -47,6 +47,7 @@ function(_pulp_add_standalone target name bundle_id version)
     if(COMMAND target_copy_webgpu_binaries)
         target_copy_webgpu_binaries(${target}_Standalone)
     endif()
+    _pulp_attach_plugin_runtime_manifest(${target} ${target}_Standalone)
     # Linux+GNU-ld link-order fix: libskia.a → fontconfig. Same helper
     # used for pulp-cli (#1986) and pulp-import-design (#2018). Standalone
     # transitively pulls in pulp::view → pulp::canvas → libskia.a, which

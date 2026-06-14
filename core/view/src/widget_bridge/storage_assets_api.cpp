@@ -62,6 +62,36 @@ bool bridge_asset_is_text_like(const std::string& mime_type) {
         || mime_type.find("svg") != std::string::npos;
 }
 
+bool safe_relative_asset_path(const std::filesystem::path& rel) {
+    if (rel.empty() || rel.is_absolute()) return false;
+    for (const auto& part : rel) {
+        const auto s = part.string();
+        if (s.empty() || s == "." || s == "..") return false;
+    }
+    return true;
+}
+
+bool path_within(const std::filesystem::path& path, const std::filesystem::path& root) {
+    auto p = path.lexically_normal();
+    auto r = root.lexically_normal();
+    auto pit = p.begin();
+    auto rit = r.begin();
+    for (; rit != r.end(); ++rit, ++pit) {
+        if (pit == p.end() || *pit != *rit) return false;
+    }
+    return true;
+}
+
+std::filesystem::path best_effort_canonical(std::filesystem::path path) {
+    std::error_code ec;
+    auto canonical = std::filesystem::weakly_canonical(path, ec);
+    if (!ec) return canonical.lexically_normal();
+    ec.clear();
+    canonical = std::filesystem::absolute(path, ec);
+    if (!ec) return canonical.lexically_normal();
+    return path.lexically_normal();
+}
+
 struct BridgeAssetLoad {
     bool ok = false;
     int status = 404;
@@ -70,7 +100,8 @@ struct BridgeAssetLoad {
     BlobData blob;
 };
 
-BridgeAssetLoad load_bridge_asset(const std::string& url) {
+BridgeAssetLoad load_bridge_asset(const std::string& url,
+                                  const std::vector<std::filesystem::path>& asset_roots) {
     BridgeAssetLoad result;
     if (url.empty()) {
         result.status = 400;
@@ -78,6 +109,7 @@ BridgeAssetLoad load_bridge_asset(const std::string& url) {
     }
 
     auto& assets = AssetManager::instance();
+    const bool reviewed_roots_only = !asset_roots.empty();
 
     auto load_from_file = [&](std::string path) {
         if (path.empty()) {
@@ -104,17 +136,43 @@ BridgeAssetLoad load_bridge_asset(const std::string& url) {
         return BlobData{};
     };
 
+    auto load_from_asset_roots = [&](std::string rel) {
+        rel = strip_leading_slashes(std::move(rel));
+        const std::filesystem::path rel_path(rel);
+        if (!safe_relative_asset_path(rel_path)) {
+            return BlobData{};
+        }
+        for (const auto& root : asset_roots) {
+            auto root_norm = best_effort_canonical(root);
+            auto candidate = best_effort_canonical(root / rel_path);
+            if (!path_within(candidate, root_norm)) continue;
+            auto blob = load_from_file(candidate.string());
+            if (blob.valid()) return blob;
+        }
+        return BlobData{};
+    };
+
     if (url.rfind("pulp://", 0) == 0) {
         auto ref = url.substr(7);
         result.blob = load_from_embedded(ref);
         if (!result.blob.valid()) {
+            result.blob = load_from_asset_roots(ref);
+        }
+        if (!result.blob.valid() && !reviewed_roots_only) {
             result.blob = load_from_file(strip_leading_slashes(ref));
         }
     } else if (url.rfind("file://", 0) == 0) {
+        if (reviewed_roots_only) {
+            result.status = 403;
+            return result;
+        }
         result.blob = load_from_file(url.substr(7));
     } else {
         result.blob = load_from_embedded(url);
         if (!result.blob.valid()) {
+            result.blob = load_from_asset_roots(url);
+        }
+        if (!result.blob.valid() && !reviewed_roots_only) {
             result.blob = load_from_file(url);
         }
     }
@@ -175,9 +233,9 @@ void WidgetBridge::register_storage_key_value_api() {
 void WidgetBridge::register_asset_loading_api() {
     BridgeApiContext api{engine_};
 
-    register_bridge_function(api, "__loadAssetSync__", [](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "__loadAssetSync__", [this](choc::javascript::ArgumentList args) {
         auto url = args.get<std::string>(0, "");
-        auto asset = load_bridge_asset(url);
+        auto asset = load_bridge_asset(url, asset_roots_);
 
         auto result = choc::value::createObject("");
         result.addMember("ok", choc::value::createBool(asset.ok));

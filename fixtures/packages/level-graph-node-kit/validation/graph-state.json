@@ -1,0 +1,11 @@
+{
+  "kind": "signal-graph-state-validation",
+  "checks": [
+    "register-custom-node-type",
+    "save-load-state",
+    "reprepare",
+    "process-no-alloc-no-lock"
+  ],
+  "graphFixture": "fixtures/level-graph.json",
+  "stateFixture": "fixtures/level-state.json"
+}

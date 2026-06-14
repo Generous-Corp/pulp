@@ -18,6 +18,7 @@
 
 namespace pulp::view { struct ClaudeBundle; }
 #include <chrono>
+#include <filesystem>
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -82,6 +83,22 @@ public:
 
     // Load and execute a UI script
     void load_script(const std::string& code);
+
+    /// Set reviewed local roots used by JS asset loading for relative URLs.
+    /// These are scoped to this bridge instance and are intended for
+    /// post-review UI-kit assets copied under `pulp-kits/<kit-id>/`.
+    void set_asset_roots(std::vector<std::filesystem::path> roots) {
+        asset_roots_.clear();
+        asset_roots_.reserve(roots.size());
+        for (auto& root : roots) {
+            if (root.empty()) continue;
+            std::error_code ec;
+            auto abs = std::filesystem::absolute(root, ec).lexically_normal();
+            if (ec) abs = root.lexically_normal();
+            asset_roots_.push_back(std::move(abs));
+        }
+    }
+    const std::vector<std::filesystem::path>& asset_roots() const noexcept { return asset_roots_; }
 
     /// Phase 9: load_script overload that retains a script identifier.
     /// `script_id` is recorded as `active_script_id_` and threaded into
@@ -218,6 +235,7 @@ private:
     state::StateStore& store_;
     render::GpuSurface* gpu_surface_ = nullptr;
     std::unique_ptr<NativeGpuBridgeState> native_gpu_bridge_state_;
+    std::vector<std::filesystem::path> asset_roots_;
 
     // Track widgets by ID for JS access
     std::unordered_map<std::string, View*> widgets_;

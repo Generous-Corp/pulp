@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v04320"></a>
+## [0.432.0] - 2026-06-13
+
+- feat(view): close text input behavior gaps ([#4055](https://github.com/danielraffel/pulp/pull/4055))
+- docs(audio): explain inspector signal and scope modes ([#4056](https://github.com/danielraffel/pulp/pull/4056))
+
 <a id="v04312"></a>
 ## [0.431.2] - 2026-06-12
 
@@ -4407,6 +4413,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.432.0]: https://github.com/danielraffel/pulp/releases/tag/v0.432.0
 [0.431.2]: https://github.com/danielraffel/pulp/releases/tag/v0.431.2
 [0.431.1]: https://github.com/danielraffel/pulp/releases/tag/v0.431.1
 [0.431.0]: https://github.com/danielraffel/pulp/releases/tag/v0.431.0

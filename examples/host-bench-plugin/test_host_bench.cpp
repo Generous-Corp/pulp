@@ -84,7 +84,11 @@ struct BenchFixture {
     }
 
     void prepare(double sr = 48000.0, int n = 512) {
-        format::PrepareContext ctx{sr, n, 2, 2};
+        format::PrepareContext ctx;
+        ctx.sample_rate = sr;
+        ctx.max_buffer_size = n;
+        ctx.input_channels = 2;
+        ctx.output_channels = 2;
         processor->prepare(ctx);
     }
     void process(int n = 256) {
@@ -104,6 +108,29 @@ struct BenchFixture {
 };
 
 }  // namespace
+
+TEST_CASE("HostBench AU v2 package matches MIDI descriptor", "[bench][au]") {
+    const auto source_dir = std::filesystem::path(__FILE__).parent_path();
+
+    std::ifstream cmake_file(source_dir / "CMakeLists.txt");
+    REQUIRE(cmake_file.good());
+    const std::string cmake((std::istreambuf_iterator<char>(cmake_file)),
+                            std::istreambuf_iterator<char>());
+    REQUIRE(cmake.find("ACCEPTS_MIDI") != std::string::npos);
+
+    std::ifstream entry_file(source_dir / "au_v2_entry.cpp");
+    REQUIRE(entry_file.good());
+    const std::string entry((std::istreambuf_iterator<char>(entry_file)),
+                            std::istreambuf_iterator<char>());
+    REQUIRE(entry.find("PULP_AU_MIDI_PLUGIN(PulpHostBenchAU") != std::string::npos);
+
+    std::ifstream plist_file(source_dir / "Info.plist.au");
+    REQUIRE(plist_file.good());
+    const std::string plist((std::istreambuf_iterator<char>(plist_file)),
+                            std::istreambuf_iterator<char>());
+    REQUIRE(plist.find("<key>type</key>") != std::string::npos);
+    REQUIRE(plist.find("<string>aumf</string>") != std::string::npos);
+}
 
 TEST_CASE("HostBench descriptor declares sidechain + MIDI in", "[bench]") {
     HostBenchProcessor proc("Standalone");

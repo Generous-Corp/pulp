@@ -253,6 +253,56 @@ TEST_CASE("pulp host validates parser errors before plugin loading",
     }
 }
 
+TEST_CASE("pulp host derives AU id from bundle Info.plist",
+          "[cli][shellout][host][au][coverage]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+#if !defined(__APPLE__)
+    SUCCEED("AU host loading is macOS-only");
+    return;
+#else
+    auto root = unique_temp_dir("pulp-host-au-id");
+    auto bundle = root / "PulpShelloutAU.component";
+    auto contents = bundle / "Contents";
+    auto macos = contents / "MacOS";
+    fs::create_directories(macos);
+    write_text(macos / "PulpShelloutAU", "");
+    write_text(contents / "Info.plist",
+               R"(<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleExecutable</key>
+  <string>PulpShelloutAU</string>
+  <key>CFBundleIdentifier</key>
+  <string>com.pulp.shellout-au</string>
+  <key>AudioComponents</key>
+  <array>
+    <dict>
+      <key>type</key>
+      <string>aumf</string>
+      <key>subtype</key>
+      <string>TstA</string>
+      <key>manufacturer</key>
+      <string>Pulp</string>
+    </dict>
+  </array>
+</dict>
+</plist>
+)");
+
+    auto r = run_pulp({"host", bundle.string(), "--format", "au"},
+                      /*timeout_ms=*/30000);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 1);
+    REQUIRE(r.stderr_output.find("unique_id must be") == std::string::npos);
+    REQUIRE(r.stderr_output.find("AudioComponentFindNext failed for 'aumf:TstA:Pulp'") !=
+            std::string::npos);
+
+    std::error_code ec;
+    fs::remove_all(root, ec);
+#endif
+}
+
 TEST_CASE("pulp scan --no-load runs filesystem-only enumeration cleanly",
           "[cli][shellout][scan][issue-812]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }

@@ -277,7 +277,12 @@ fi
 # ── Run tests with profile output ───────────────────────────────────────────
 PROFRAW_DIR="${BUILD_DIR}/profraw"
 mkdir -p "${PROFRAW_DIR}"
-export LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%p-%m.profraw"
+find "${PROFRAW_DIR}" -name '*.profraw' -type f -delete
+# Use LLVM's module-signature placeholder so all invocations of the same
+# instrumented binary merge into one profile file. The full CTest registry
+# launches thousands of one-case Catch2 processes; a per-PID pattern creates
+# enough files to hit ARG_MAX and can lose useful coverage when PIDs recycle.
+export LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%m.profraw"
 
 echo "=== Running tests ==="
 CTEST_ARGS=(--test-dir "${BUILD_DIR}" --output-on-failure)

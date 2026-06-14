@@ -4,6 +4,7 @@
 #include <pulp/format/validation_harness.hpp>
 #include <pulp/platform/child_process.hpp>
 #include <pulp/platform/platform.hpp>
+#include <pulp/state/content_registry.hpp>
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
@@ -15,6 +16,49 @@
 #include <utility>
 
 namespace pulp::format {
+
+namespace {
+
+constexpr const char* kPluginRuntimeManifestName = "pulp.plugin-runtime.json";
+
+std::vector<std::filesystem::path> plugin_runtime_manifest_candidates(
+    const std::filesystem::path& plugin_path)
+{
+    std::vector<std::filesystem::path> candidates;
+
+    if (plugin_path.filename() == kPluginRuntimeManifestName) {
+        candidates.push_back(plugin_path);
+        return candidates;
+    }
+
+    candidates.push_back(plugin_path / "Contents" / "Resources" / kPluginRuntimeManifestName);
+    candidates.push_back(plugin_path / "Resources" / kPluginRuntimeManifestName);
+    candidates.push_back(plugin_path / kPluginRuntimeManifestName);
+
+    if (plugin_path.has_parent_path()) {
+        const auto stem = plugin_path.stem().string();
+        if (!stem.empty()) {
+            candidates.push_back(
+                plugin_path.parent_path() / (stem + ".pulp.plugin-runtime.json"));
+        }
+    }
+
+    return candidates;
+}
+
+std::filesystem::path find_plugin_runtime_manifest(
+    const std::filesystem::path& plugin_path)
+{
+    std::error_code ec;
+    for (const auto& candidate : plugin_runtime_manifest_candidates(plugin_path)) {
+        if (std::filesystem::is_regular_file(candidate, ec) && !ec)
+            return candidate;
+        ec.clear();
+    }
+    return {};
+}
+
+} // namespace
 
 ValidationHarness::ValidationHarness(ProcessorFactory factory)
     : host_(std::move(factory))
@@ -457,7 +501,7 @@ ReportEntry ValidationHarness::run_validator(
         payload << "{"
                 << "\"tool\": \"" << tool << "\","
                 << "\"tool_version\": \"" << escape_json(version) << "\","
-                << "\"plugin_path\": \"" << escape_json(plugin_path.string()) << "\","
+                << "\"plugin_path\": \"" << escape_json(plugin_path.generic_string()) << "\","
                 << "\"plugin_format\": \"" << detected_format << "\","
                 << "\"exit_code\": " << exit_code << ","
                 << "\"stdout\": \"" << escape_json(output) << "\","
@@ -465,6 +509,90 @@ ReportEntry ValidationHarness::run_validator(
                 << "}";
         entry.payload_json = payload.str();
     }
+
+    entries_.push_back(entry);
+    return entry;
+}
+
+ReportEntry ValidationHarness::validate_plugin_runtime_manifest(
+    const std::filesystem::path& plugin_path,
+    const std::string& expected_plugin_id)
+{
+    ReportEntry entry;
+    entry.type = "plugin_runtime_manifest";
+    entry.target = plugin_path.filename().string();
+
+    std::error_code ec;
+    if (!std::filesystem::exists(plugin_path, ec) || ec) {
+        entry.status = ValidationStatus::error;
+        entry.error_message = "Plugin path not found: " + plugin_path.string();
+        entries_.push_back(entry);
+        return entry;
+    }
+
+    const auto manifest_path = find_plugin_runtime_manifest(plugin_path);
+    if (manifest_path.empty()) {
+        entry.status = ValidationStatus::fail;
+        entry.error_message =
+            std::string("Missing ") + kPluginRuntimeManifestName
+            + " in plugin bundle resources";
+        std::ostringstream payload;
+        payload << "{"
+                << "\"plugin_path\": \"" << escape_json(plugin_path.string()) << "\","
+                << "\"expected_plugin_id\": \""
+                << escape_json(expected_plugin_id.empty()
+                                   ? descriptor().bundle_id
+                                   : expected_plugin_id)
+                << "\","
+                << "\"manifest_path\": null"
+                << "}";
+        entry.payload_json = payload.str();
+        entries_.push_back(entry);
+        return entry;
+    }
+
+    std::string parse_error;
+    const auto manifest =
+        state::load_content_capability_manifest(manifest_path, &parse_error);
+    if (!manifest) {
+        entry.status = ValidationStatus::fail;
+        entry.error_message =
+            "Invalid plugin runtime manifest: " + parse_error;
+        std::ostringstream payload;
+        payload << "{"
+                << "\"plugin_path\": \"" << escape_json(plugin_path.string()) << "\","
+                << "\"manifest_path\": \"" << escape_json(manifest_path.generic_string()) << "\""
+                << "}";
+        entry.payload_json = payload.str();
+        entries_.push_back(entry);
+        return entry;
+    }
+
+    const auto expected =
+        expected_plugin_id.empty() ? descriptor().bundle_id : expected_plugin_id;
+    if (!expected.empty() && manifest->plugin_id != expected) {
+        entry.status = ValidationStatus::fail;
+        entry.error_message =
+            "pluginId does not match expected plugin id";
+    } else {
+        entry.status = ValidationStatus::pass;
+    }
+
+    std::ostringstream payload;
+    payload << "{"
+            << "\"plugin_path\": \"" << escape_json(plugin_path.generic_string()) << "\","
+            << "\"manifest_path\": \"" << escape_json(manifest_path.generic_string()) << "\","
+            << "\"schema\": \"" << escape_json(manifest->schema) << "\","
+            << "\"plugin_id\": \"" << escape_json(manifest->plugin_id) << "\","
+            << "\"expected_plugin_id\": \"" << escape_json(expected) << "\","
+            << "\"capabilities\": " << json_string_array(manifest->capabilities) << ","
+            << "\"kinds\": " << json_string_array(manifest->content_kinds) << ","
+            << "\"reload\": {"
+            << "\"hot_reload_kinds\": " << json_string_array(manifest->hot_reload_kinds) << ","
+            << "\"manual_rescan_kinds\": " << json_string_array(manifest->manual_rescan_kinds)
+            << "}"
+            << "}";
+    entry.payload_json = payload.str();
 
     entries_.push_back(entry);
     return entry;
@@ -557,6 +685,7 @@ std::string ValidationHarness::generate_report() const {
             else if (e.type == "sanitizer")   payload_key = "sanitizer";
             else if (e.type == "test_suite")  payload_key = "test_suite";
             else if (e.type == "runtime_overload") payload_key = "runtime_overload";
+            else if (e.type == "plugin_runtime_manifest") payload_key = "plugin_runtime_manifest";
 
             if (!payload_key.empty())
                 ss << ",\n      \"" << payload_key << "\": " << e.payload_json;
@@ -636,6 +765,19 @@ std::string ValidationHarness::escape_json(const std::string& s) const {
         }
     }
     return result;
+}
+
+std::string ValidationHarness::json_string_array(
+    const std::vector<std::string>& values) const
+{
+    std::ostringstream ss;
+    ss << "[";
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        if (i > 0) ss << ",";
+        ss << "\"" << escape_json(values[i]) << "\"";
+    }
+    ss << "]";
+    return ss.str();
 }
 
 } // namespace pulp::format

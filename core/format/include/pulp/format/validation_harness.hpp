@@ -175,6 +175,20 @@ public:
                                const std::filesystem::path& plugin_path,
                                const std::string& format = "");
 
+    /// Validate the embedded plugin runtime manifest for content-pack support.
+    ///
+    /// Looks for `pulp.plugin-runtime.json` in the bundle resource convention:
+    /// `Contents/Resources/` first (VST3/AU/macOS bundles), then `Resources/`,
+    /// then the bundle root. Single-file plugin paths may also use a sibling
+    /// `<plugin-stem>.pulp.plugin-runtime.json` sidecar for validation fixtures
+    /// and non-bundle formats.
+    ///
+    /// If `expected_plugin_id` is empty, the harness compares the manifest
+    /// `pluginId` against the processor descriptor's `bundle_id`.
+    ReportEntry validate_plugin_runtime_manifest(
+        const std::filesystem::path& plugin_path,
+        const std::string& expected_plugin_id = "");
+
     /// Record runtime load/xrun telemetry using the shared overload policy.
     ReportEntry record_runtime_overload(
         const audio::AudioProcessLoadSnapshot& load,
@@ -221,6 +235,7 @@ private:
     std::string platform_string() const;
     std::string iso_timestamp() const;
     std::string escape_json(const std::string& s) const;
+    std::string json_string_array(const std::vector<std::string>& values) const;
 };
 
 } // namespace pulp::format

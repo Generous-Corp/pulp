@@ -1,0 +1,42 @@
+{
+  "schema": "pulp-package-v1",
+  "id": "dev.pulp.fixtures.gain-dsp-kit",
+  "name": "Gain DSP Kit",
+  "version": "0.1.0",
+  "license": "MIT",
+  "licenses": {
+    "code": "MIT"
+  },
+  "kind": ["source"],
+  "audience": ["developer", "agent"],
+  "description": "Tiny source-only gain DSP fixture for package manifest validation.",
+  "requires": {
+    "pulp": ">=0.395.0",
+    "cpp": 20,
+    "platforms": ["macOS", "Windows", "Linux"]
+  },
+  "capabilities": ["audio.effect.gain"],
+  "exports": {
+    "cmakeTargets": ["pulp::fixture_gain"]
+  },
+  "dependencies": {
+    "pulp": ["pulp::signal"],
+    "packages": []
+  },
+  "realtime": {
+    "processSafe": true,
+    "allocatesInProcess": false,
+    "locksInProcess": false,
+    "notes": "No allocation or locks in process."
+  },
+  "agent": {
+    "guidance": "AGENTS.md"
+  },
+  "authoring": {
+    "createdBy": "human",
+    "humanReviewed": true
+  },
+  "validation": {
+    "profiles": ["validation/smoke.json"]
+  }
+}

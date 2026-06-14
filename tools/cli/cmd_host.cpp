@@ -6,6 +6,7 @@
 //                requiring a DAW.
 
 #include "cli_common.hpp"
+#include "au_info_plist.hpp"
 
 #include <pulp/audio/buffer.hpp>
 #include <pulp/host/plugin_slot.hpp>
@@ -279,6 +280,19 @@ int cmd_host(const std::vector<std::string>& args) {
         std::fprintf(stderr, "pulp host: no plug-in path given\n");
         return 1;
     }
+    if (unique_id.empty() && format == PluginFormat::AudioUnit) {
+        unique_id = pulp::cli::au_info_plist::unique_id_from_bundle(path);
+    }
+
+#if !PULP_HOST_HAS_AU
+    if (format == PluginFormat::AudioUnit || format == PluginFormat::AudioUnitV3) {
+        std::fprintf(stderr, "pulp host: failed to load '%s'\n", path.c_str());
+        std::fprintf(stderr, "  AU host loader not available in this build (macOS only).\n"
+                             "  Rebuild on macOS with external/AudioUnitSDK present\n"
+                             "  (git clone https://github.com/apple/AudioUnitSDK external/AudioUnitSDK).\n");
+        return 1;
+    }
+#endif
 
     PluginInfo info;
     info.path      = path;

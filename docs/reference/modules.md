@@ -795,8 +795,46 @@ root->add_child(std::move(meter));
 | Fader | Vertical or horizontal slider for continuous parameter control |
 | Knob | Rotary control for parameters like gain, frequency, resonance |
 | TextButton | Clickable button with a text label — supports toggle mode |
-| TextEditor | Single or multi-line text input with selection, copy/paste, undo |
+| TextEditor | Single or multi-line text input with native keyboard movement, selection, copy/paste, undo, IME, and grapheme-safe UTF-8 editing |
 | Toggle | Two-state switch control for enabling/disabling features |
+
+##### TextEditor Behavior
+
+`TextEditor` is the SDK-level text-entry control used by native views, imported
+HTML `<input>`, and imported `<textarea>` controls. It implements platform-style
+caret movement and selection by default: character, word, line, document, page,
+and Shift-selection variants; word/line delete shortcuts; double-click word
+selection with word-granular drag extension; triple-click line selection in
+multi-line mode; standard Cut/Copy/Paste/Select All context menus; and
+mouse/trackpad scrolling for multi-line fields.
+
+Text positions are stored as UTF-8 byte offsets for host/IME compatibility, but
+editing commands snap those offsets to grapheme-cluster boundaries. This keeps
+emoji, combining marks, flags, and ZWJ sequences from being split by arrow keys,
+Backspace/Delete, hit testing, or selection expansion.
+
+Applications can tune text-field policy without forking key handling:
+`read_only` allows focus, navigation, selection, and copy while blocking
+mutation; `View::set_enabled(false)` disables interaction entirely;
+`tab_behavior` chooses focus traversal, literal tab insertion, commit callback,
+or consume/ignore behavior;
+`multi_line_return_behavior` chooses Return/Shift-Return behavior; `max_length`
+counts grapheme clusters; `paste_sanitizer` handles paste-only cleanup;
+`input_filter` sanitizes typed and pasted insertion text; and `validator`
+accepts or rejects a whole-buffer candidate before an edit lands.
+`line_ending_policy` normalizes, strips, or preserves inserted line endings
+where the control shape allows it. `clipboard_policy` can disable clipboard
+traffic entirely or explicitly allow password contents to leave the field.
+Password fields mask display text and disable selected-text export, copy, and
+cut by default unless `allow_password_clipboard` or
+`ClipboardPolicy::allow_password_contents` is enabled.
+
+Programmatic `set_text()` is a host/state-sync operation, so it clears the
+editor undo stack instead of recording a user-edit undo entry. Use
+`set_caret_pos()`, `set_selection()`, `selection_anchor()`,
+`selection_active()`, and `selection_range()` when a host, importer, IME, or
+test needs explicit caret/selection control; all public offsets are clamped to
+grapheme boundaries.
 
 #### Containers
 
