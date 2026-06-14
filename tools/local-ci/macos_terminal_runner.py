@@ -107,6 +107,23 @@ def close_terminal_windows_with_title(
             "end tell",
         ]
     )
+    exit_tab_script = "\n".join(
+        [
+            'tell application "Terminal"',
+            "    set exitCount to 0",
+            "    repeat with w in (every window)",
+            "        set windowName to name of w",
+            f"        if windowName contains {json.dumps(title_contains)} then",
+            "            try",
+            '                do script "exit" in selected tab of w',
+            "                set exitCount to exitCount + 1",
+            "            end try",
+            "        end if",
+            "    end repeat",
+            "    return exitCount",
+            "end tell",
+        ]
+    )
     state_script = "\n".join(
         [
             'tell application "System Events"',
@@ -156,6 +173,7 @@ def close_terminal_windows_with_title(
     remaining_proof_count: int | None = None
     other_window_count: int | None = None
     miniaturized_count = 0
+    exit_attempt_count = 0
     for attempt in range(max(1, attempts)):
         if attempt:
             sleep_fn(0.2)
@@ -179,6 +197,31 @@ def close_terminal_windows_with_title(
             if remaining_proof_count == 0:
                 closed_count = close_attempt_count
                 break
+    if remaining_proof_count and remaining_proof_count > 0:
+        exit_result = run_fn(["osascript", "-e", exit_tab_script], capture_output=True, text=True)
+        if exit_result.returncode == 0:
+            try:
+                exit_attempt_count += int((exit_result.stdout or "0").strip())
+            except ValueError:
+                pass
+            sleep_fn(0.2)
+            retry_result = run_fn(["osascript", "-e", close_window_script], capture_output=True, text=True)
+            if retry_result.returncode == 0:
+                try:
+                    close_attempt_count += int((retry_result.stdout or "0").strip())
+                except ValueError:
+                    pass
+            sleep_fn(0.2)
+            state_result = run_fn(["osascript", "-e", state_script], capture_output=True, text=True)
+            if state_result.returncode == 0:
+                state_fields = (state_result.stdout or "").strip().split("\t")
+                if len(state_fields) == 3:
+                    try:
+                        remaining_proof_count = int(state_fields[1])
+                        other_window_count = int(state_fields[2])
+                    except ValueError:
+                        remaining_proof_count = None
+                        other_window_count = None
     if remaining_proof_count and remaining_proof_count > 0:
         tab_result = run_fn(["osascript", "-e", close_tab_script], capture_output=True, text=True)
         if tab_result.returncode == 0:
@@ -229,6 +272,7 @@ def close_terminal_windows_with_title(
         "title_contains": title_contains,
         "closed_count": closed_count,
         "close_attempt_count": close_attempt_count,
+        "exit_attempt_count": exit_attempt_count,
         "remaining_proof_count": remaining_proof_count,
         "other_window_count": other_window_count,
         "miniaturized_count": miniaturized_count,

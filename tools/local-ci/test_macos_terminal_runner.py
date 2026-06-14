@@ -260,6 +260,35 @@ class MacOSTerminalRunnerTests(unittest.TestCase):
         self.assertEqual(result["other_window_count"], 1)
         self.assertNotIn(["kill", "-TERM", "1234"], calls)
 
+    def test_close_terminal_windows_sends_exit_before_miniaturizing_stubborn_proof_window(self):
+        calls = []
+        state_outputs = iter(["1234\t1\t1", "1234\t1\t1", "1234\t0\t1"])
+
+        def fake_run(cmd, **_kwargs):
+            calls.append(cmd)
+            script = cmd[-1] if cmd[0] == "osascript" else ""
+            if "set closedCount" in script:
+                return subprocess.CompletedProcess(cmd, 0, "1\n", "")
+            if "set exitCount" in script:
+                return subprocess.CompletedProcess(cmd, 0, "1\n", "")
+            if "set terminalPid" in script:
+                return subprocess.CompletedProcess(cmd, 0, next(state_outputs), "")
+            if "miniaturizedCount" in script:
+                return subprocess.CompletedProcess(cmd, 0, "1\n", "")
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        result = self.mod.close_terminal_windows_with_title(
+            "Pulp Video Proof local-ci test1234",
+            run_fn=fake_run,
+            sleep_fn=lambda _secs: None,
+            attempts=1,
+        )
+
+        self.assertEqual(result["remaining_proof_count"], 0)
+        self.assertEqual(result["exit_attempt_count"], 1)
+        self.assertEqual(result["miniaturized_count"], 0)
+        self.assertTrue(any(cmd[0] == "osascript" and 'do script "exit"' in cmd[-1] for cmd in calls))
+
     def test_close_terminal_windows_can_terminate_new_terminal_session(self):
         calls = []
 
