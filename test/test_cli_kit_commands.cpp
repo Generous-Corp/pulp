@@ -235,7 +235,11 @@ goto loop
 :done
 if not defined out exit /b 2
 <nul set /p "payload=)BAT") + batch_bytes + R"BAT(" > "%out%"
-exit /b %ERRORLEVEL%
+rem `set /p` reads EOF from `<nul`, which leaves ERRORLEVEL=1 even though the
+rem prompt text was written to the output file. Don't propagate that false
+rem failure: success is "the output file exists", matching the POSIX branch.
+if exist "%out%" exit /b 0
+exit /b 1
 )BAT";
     write_file(screenshot_tool, replace_all(script, "\n", "\r\n"));
 #else
