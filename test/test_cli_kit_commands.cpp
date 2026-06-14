@@ -215,6 +215,12 @@ fs::path screenshot_tool_path_for_test(const fs::path& project_root) {
 void write_fake_screenshot_tool(const fs::path& project_root, const std::string& bytes) {
     const auto screenshot_tool = screenshot_tool_path_for_test(project_root);
 #ifdef _WIN32
+    auto batch_bytes = replace_all(bytes, "%", "%%");
+    batch_bytes = replace_all(batch_bytes, "^", "^^");
+    batch_bytes = replace_all(batch_bytes, "&", "^&");
+    batch_bytes = replace_all(batch_bytes, "|", "^|");
+    batch_bytes = replace_all(batch_bytes, "<", "^<");
+    batch_bytes = replace_all(batch_bytes, ">", "^>");
     auto script = std::string(R"BAT(@echo off
 setlocal
 set "out="
@@ -228,7 +234,7 @@ shift
 goto loop
 :done
 if not defined out exit /b 2
-powershell -NoProfile -ExecutionPolicy Bypass -Command "[IO.File]::WriteAllText($env:out, ')BAT") + bytes + R"BAT(', [Text.UTF8Encoding]::new($false))"
+<nul set /p "payload=)BAT") + batch_bytes + R"BAT(" > "%out%"
 exit /b %ERRORLEVEL%
 )BAT";
     write_file(screenshot_tool, replace_all(script, "\n", "\r\n"));
@@ -2216,11 +2222,16 @@ TEST_CASE("pulp kit apply replaces same-id kit roots without leaving stale owned
           "[cli][kit][phase2]") {
     TempDir project;
     TempDir first_pack;
+    TempDir second_pack;
     write_file(project.path / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\nproject(KitReplace)\n");
     const auto fixture = repo_root() / "fixtures/packages/basic-ui-kit";
 
     std::error_code ec;
     fs::copy(fixture, first_pack.path / "basic-ui-kit",
+             fs::copy_options::recursive | fs::copy_options::overwrite_existing,
+             ec);
+    REQUIRE_FALSE(ec);
+    fs::copy(fixture, second_pack.path / "basic-ui-kit",
              fs::copy_options::recursive | fs::copy_options::overwrite_existing,
              ec);
     REQUIRE_FALSE(ec);
@@ -2236,7 +2247,8 @@ TEST_CASE("pulp kit apply replaces same-id kit roots without leaving stale owned
                      "--project", project.path.string(), "--yes"}) == 0);
     REQUIRE(fs::exists(project.path / "pulp-kits" / "dev.pulp.fixtures.basic-ui-kit" / "legacy" / "old.txt"));
 
-    REQUIRE(cmd_kit({"apply", fixture.string(), "--project", project.path.string(), "--yes"}) == 0);
+    REQUIRE(cmd_kit({"apply", (second_pack.path / "basic-ui-kit").string(),
+                     "--project", project.path.string(), "--yes"}) == 0);
     REQUIRE_FALSE(fs::exists(project.path / "pulp-kits" / "dev.pulp.fixtures.basic-ui-kit" / "legacy" / "old.txt"));
     const auto lock = read_file(project.path / ".pulp" / "kits.lock.json");
     REQUIRE(lock.find("legacy/old.txt") == std::string::npos);
