@@ -2,16 +2,13 @@
 from __future__ import annotations
 
 import unittest
-from pathlib import Path
 
-from module_test_utils import load_module_from_path
+from module_test_utils import load_local_ci_module
 
-
-MODULE_PATH = Path(__file__).resolve().with_name("desktop_status_payload.py")
 
 
 def load_module():
-    return load_module_from_path(MODULE_PATH)
+    return load_local_ci_module("desktop_status_payload.py")
 
 
 class DesktopStatusPayloadTests(unittest.TestCase):
