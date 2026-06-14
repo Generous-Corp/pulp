@@ -6,6 +6,7 @@ from __future__ import annotations
 from module_test_utils import load_module_from_path
 from pathlib import Path
 import unittest
+from unittest import mock
 
 
 MODULE_PATH = Path(__file__).with_name("target_reachability_bindings.py")
@@ -32,34 +33,21 @@ class TargetReachabilityBindingsTests(unittest.TestCase):
             self.assertTrue(callable(getattr(self.mod, name)))
 
     def test_install_target_reachability_helpers_routes_each_group(self) -> None:
-        calls = []
+        bindings = {}
 
-        def ssh_install(bindings, names):
-            calls.append(("ssh", names))
+        with (
+            mock.patch.object(self.mod, "install_target_ssh_reachability_helpers") as ssh,
+            mock.patch.object(self.mod, "install_target_utm_reachability_helpers") as utm,
+            mock.patch.object(self.mod, "install_target_host_reachability_helpers") as host,
+        ):
+            self.mod.install_target_reachability_helpers(
+                bindings,
+                ("ssh_probe", "utmctl_start", "preflight_target_host_state"),
+            )
 
-        def utm_install(bindings, names):
-            calls.append(("utm", names))
-
-        def host_install(bindings, names):
-            calls.append(("host", names))
-
-        self.mod.install_target_ssh_reachability_helpers = ssh_install
-        self.mod.install_target_utm_reachability_helpers = utm_install
-        self.mod.install_target_host_reachability_helpers = host_install
-
-        self.mod.install_target_reachability_helpers(
-            {},
-            ("ssh_probe", "utmctl_start", "preflight_target_host_state"),
-        )
-
-        self.assertEqual(
-            calls,
-            [
-                ("ssh", ("ssh_probe",)),
-                ("utm", ("utmctl_start",)),
-                ("host", ("preflight_target_host_state",)),
-            ],
-        )
+        ssh.assert_called_once_with(bindings, ("ssh_probe",))
+        utm.assert_called_once_with(bindings, ("utmctl_start",))
+        host.assert_called_once_with(bindings, ("preflight_target_host_state",))
 
 
 if __name__ == "__main__":

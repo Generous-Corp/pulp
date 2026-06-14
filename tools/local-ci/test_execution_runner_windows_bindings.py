@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import unittest
+from unittest import mock
 
 from module_test_utils import load_module_from_path
 
@@ -30,38 +31,25 @@ class ExecutionRunnerWindowsBindingsTests(unittest.TestCase):
         self.assertEqual(len(expected), len(set(expected)))
 
     def test_install_execution_runner_windows_helpers_routes_focused_and_unknown_exports(self) -> None:
-        calls = []
+        bindings = {}
 
-        def run_install(bindings, names):
-            calls.append(("run", names))
+        with (
+            mock.patch.object(self.mod, "install_execution_runner_windows_run_helpers") as run,
+            mock.patch.object(self.mod, "install_execution_runner_windows_script_helpers") as script,
+            mock.patch.object(self.mod, "install_local_helpers") as install_local,
+        ):
+            self.mod.install_execution_runner_windows_helpers(
+                bindings,
+                (
+                    "run_windows_ssh_validation",
+                    "windows_validation_script",
+                    "custom_windows_runner_export",
+                ),
+            )
 
-        def script_install(bindings, names):
-            calls.append(("script", names))
-
-        def fallback_install(bindings, globals_obj, names):
-            calls.append(("local_fallback", names))
-
-        self.mod.install_execution_runner_windows_run_helpers = run_install
-        self.mod.install_execution_runner_windows_script_helpers = script_install
-        self.mod.install_local_helpers = fallback_install
-
-        self.mod.install_execution_runner_windows_helpers(
-            {},
-            (
-                "run_windows_ssh_validation",
-                "windows_validation_script",
-                "custom_windows_runner_export",
-            ),
-        )
-
-        self.assertEqual(
-            calls,
-            [
-                ("run", ("run_windows_ssh_validation",)),
-                ("script", ("windows_validation_script",)),
-                ("local_fallback", ("custom_windows_runner_export",)),
-            ],
-        )
+        run.assert_called_once_with(bindings, ("run_windows_ssh_validation",))
+        script.assert_called_once_with(bindings, ("windows_validation_script",))
+        install_local.assert_called_once_with(bindings, self.mod.__dict__, ("custom_windows_runner_export",))
 
 
 if __name__ == "__main__":

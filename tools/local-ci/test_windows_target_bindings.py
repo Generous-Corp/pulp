@@ -6,6 +6,7 @@ from __future__ import annotations
 from module_test_utils import load_module_from_path
 from pathlib import Path
 import unittest
+from unittest import mock
 
 
 MODULE_PATH = Path(__file__).with_name("windows_target_bindings.py")
@@ -38,50 +39,31 @@ class WindowsTargetBindingsTests(unittest.TestCase):
         )
 
     def test_install_windows_target_helpers_routes_each_group_and_unknown_exports(self) -> None:
-        calls = []
+        bindings = {}
 
-        def constant_install(bindings, names):
-            calls.append(("constant", names))
+        with (
+            mock.patch.object(self.mod, "install_windows_target_constant_helpers") as constant,
+            mock.patch.object(self.mod, "install_windows_target_session_helpers") as session,
+            mock.patch.object(self.mod, "install_windows_target_path_helpers") as path,
+            mock.patch.object(self.mod, "install_windows_target_probe_helpers") as probe,
+            mock.patch.object(self.mod, "install_local_helpers") as install_local,
+        ):
+            self.mod.install_windows_target_helpers(
+                bindings,
+                (
+                    "windows_required_remote_tools",
+                    "default_windows_session_task_name",
+                    "windows_path_join",
+                    "windows_desktop_session_user",
+                    "custom_windows_target_export",
+                ),
+            )
 
-        def session_install(bindings, names):
-            calls.append(("session", names))
-
-        def path_install(bindings, names):
-            calls.append(("path", names))
-
-        def probe_install(bindings, names):
-            calls.append(("probe", names))
-
-        def local_install(bindings, globals_obj, names):
-            calls.append(("local", names))
-
-        self.mod.install_windows_target_constant_helpers = constant_install
-        self.mod.install_windows_target_session_helpers = session_install
-        self.mod.install_windows_target_path_helpers = path_install
-        self.mod.install_windows_target_probe_helpers = probe_install
-        self.mod.install_local_helpers = local_install
-
-        self.mod.install_windows_target_helpers(
-            {},
-            (
-                "windows_required_remote_tools",
-                "default_windows_session_task_name",
-                "windows_path_join",
-                "windows_desktop_session_user",
-                "custom_windows_target_export",
-            ),
-        )
-
-        self.assertEqual(
-            calls,
-            [
-                ("constant", ("windows_required_remote_tools",)),
-                ("session", ("default_windows_session_task_name",)),
-                ("path", ("windows_path_join",)),
-                ("probe", ("windows_desktop_session_user",)),
-                ("local", ("custom_windows_target_export",)),
-            ],
-        )
+        constant.assert_called_once_with(bindings, ("windows_required_remote_tools",))
+        session.assert_called_once_with(bindings, ("default_windows_session_task_name",))
+        path.assert_called_once_with(bindings, ("windows_path_join",))
+        probe.assert_called_once_with(bindings, ("windows_desktop_session_user",))
+        install_local.assert_called_once_with(bindings, self.mod.__dict__, ("custom_windows_target_export",))
 
 
 if __name__ == "__main__":

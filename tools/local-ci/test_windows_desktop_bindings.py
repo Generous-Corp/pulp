@@ -3,6 +3,7 @@
 
 from module_test_utils import load_module_from_path
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -22,29 +23,19 @@ class WindowsDesktopBindingsTests(unittest.TestCase):
         self.assertEqual(len(self.mod.WINDOWS_DESKTOP_EXPORTS), len(set(self.mod.WINDOWS_DESKTOP_EXPORTS)))
 
     def test_install_windows_desktop_helpers_routes_action_and_unknown_exports(self):
-        calls = []
+        bindings = {}
 
-        def action_install(bindings, names):
-            calls.append(("action", names))
+        with (
+            mock.patch.object(self.mod, "install_windows_desktop_action_helpers") as action,
+            mock.patch.object(self.mod, "install_local_helpers") as install_local,
+        ):
+            self.mod.install_windows_desktop_helpers(
+                bindings,
+                ("run_windows_session_agent_action", "custom_windows_desktop_export"),
+            )
 
-        def local_install(bindings, globals_obj, names):
-            calls.append(("local", names))
-
-        self.mod.install_windows_desktop_action_helpers = action_install
-        self.mod.install_local_helpers = local_install
-
-        self.mod.install_windows_desktop_helpers(
-            {},
-            ("run_windows_session_agent_action", "custom_windows_desktop_export"),
-        )
-
-        self.assertEqual(
-            calls,
-            [
-                ("action", ("run_windows_session_agent_action",)),
-                ("local", ("custom_windows_desktop_export",)),
-            ],
-        )
+        action.assert_called_once_with(bindings, ("run_windows_session_agent_action",))
+        install_local.assert_called_once_with(bindings, self.mod.__dict__, ("custom_windows_desktop_export",))
 
 
 if __name__ == "__main__":

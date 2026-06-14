@@ -4,6 +4,7 @@
 from module_test_utils import load_module_from_path
 from pathlib import Path
 import unittest
+from unittest import mock
 
 
 MODULE_PATH = Path(__file__).with_name("queue_lifecycle_bindings.py")
@@ -32,56 +33,34 @@ class QueueLifecycleBindingsTests(unittest.TestCase):
         self.assertEqual(len(expected), len(set(expected)))
 
     def test_install_queue_lifecycle_helpers_routes_focused_and_unknown_exports(self):
-        calls = []
+        bindings = {}
 
-        def load_install(bindings, names):
-            calls.append(("load", names))
+        with (
+            mock.patch.object(self.mod, "install_queue_load_helpers") as load,
+            mock.patch.object(self.mod, "install_queue_enqueue_helpers") as enqueue,
+            mock.patch.object(self.mod, "install_queue_command_lifecycle_helpers") as command,
+            mock.patch.object(self.mod, "install_queue_state_lifecycle_helpers") as state,
+            mock.patch.object(self.mod, "install_queue_drain_helpers") as drain,
+            mock.patch.object(self.mod, "install_local_helpers") as install_local,
+        ):
+            self.mod.install_queue_lifecycle_helpers(
+                bindings,
+                (
+                    "load_queue",
+                    "enqueue_job",
+                    "cancel_queue_command_job",
+                    "update_job_target_state",
+                    "wait_for_job",
+                    "custom_queue_lifecycle_export",
+                ),
+            )
 
-        def enqueue_install(bindings, names):
-            calls.append(("enqueue", names))
-
-        def command_install(bindings, names):
-            calls.append(("command", names))
-
-        def state_install(bindings, names):
-            calls.append(("state", names))
-
-        def drain_install(bindings, names):
-            calls.append(("drain", names))
-
-        def local_install(bindings, globals_obj, names):
-            calls.append(("local", names))
-
-        self.mod.install_queue_load_helpers = load_install
-        self.mod.install_queue_enqueue_helpers = enqueue_install
-        self.mod.install_queue_command_lifecycle_helpers = command_install
-        self.mod.install_queue_state_lifecycle_helpers = state_install
-        self.mod.install_queue_drain_helpers = drain_install
-        self.mod.install_local_helpers = local_install
-
-        self.mod.install_queue_lifecycle_helpers(
-            {},
-            (
-                "load_queue",
-                "enqueue_job",
-                "cancel_queue_command_job",
-                "update_job_target_state",
-                "wait_for_job",
-                "custom_queue_lifecycle_export",
-            ),
-        )
-
-        self.assertEqual(
-            calls,
-            [
-                ("load", ("load_queue",)),
-                ("enqueue", ("enqueue_job",)),
-                ("command", ("cancel_queue_command_job",)),
-                ("state", ("update_job_target_state",)),
-                ("drain", ("wait_for_job",)),
-                ("local", ("custom_queue_lifecycle_export",)),
-            ],
-        )
+        load.assert_called_once_with(bindings, ("load_queue",))
+        enqueue.assert_called_once_with(bindings, ("enqueue_job",))
+        command.assert_called_once_with(bindings, ("cancel_queue_command_job",))
+        state.assert_called_once_with(bindings, ("update_job_target_state",))
+        drain.assert_called_once_with(bindings, ("wait_for_job",))
+        install_local.assert_called_once_with(bindings, self.mod.__dict__, ("custom_queue_lifecycle_export",))
 
 
 if __name__ == "__main__":
