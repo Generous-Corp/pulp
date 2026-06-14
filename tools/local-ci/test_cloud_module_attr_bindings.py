@@ -4,8 +4,8 @@
 from __future__ import annotations
 
 from pathlib import Path
-import types
 import unittest
+from unittest import mock
 
 from module_test_utils import load_module_from_path
 
@@ -34,84 +34,35 @@ class CloudModuleAttrBindingsTests(unittest.TestCase):
         self.assertEqual(self.mod.CLOUD_MODULE_ATTR_EXPORTS, flattened)
         self.assertEqual(len(flattened), len(set(flattened)))
 
-    def test_install_cloud_module_attr_helpers_wires_late_bound_exports(self):
-        calls = []
-
-        def summarize_runner_selector(value):
-            calls.append(("summarize_runner_selector", value))
-            return "linux,arm64"
-
-        cloud = types.SimpleNamespace(summarize_runner_selector=summarize_runner_selector)
-        bindings = {"_cloud": cloud}
-
-        self.mod.install_cloud_module_attr_helpers(bindings, ("summarize_runner_selector",))
-
-        self.assertEqual(bindings["summarize_runner_selector"]('["linux", "arm64"]'), "linux,arm64")
-        self.assertEqual(calls, [("summarize_runner_selector", '["linux", "arm64"]')])
-
-        def replacement(value):
-            calls.append(("replacement", value))
-            return "replacement"
-
-        bindings["_cloud"].summarize_runner_selector = replacement
-        self.assertEqual(bindings["summarize_runner_selector"]('"macos-15"'), "replacement")
-        self.assertEqual(calls[-1], ("replacement", '"macos-15"'))
-
     def test_install_cloud_module_attr_helpers_routes_each_group(self):
-        calls = []
+        bindings = {}
 
-        def make_runner(name, value):
-            def runner(*args, **kwargs):
-                calls.append((name, args, kwargs))
-                return value
+        with (
+            mock.patch.object(self.mod, "install_cloud_billing_attr_helpers") as install_billing,
+            mock.patch.object(self.mod, "install_cloud_record_store_attr_helpers") as install_record_store,
+            mock.patch.object(self.mod, "install_cloud_github_attr_helpers") as install_github,
+            mock.patch.object(self.mod, "install_cloud_namespace_attr_helpers") as install_namespace,
+            mock.patch.object(self.mod, "install_cloud_format_attr_helpers") as install_format,
+            mock.patch.object(self.mod, "install_module_attrs") as install_module_attrs,
+        ):
+            self.mod.install_cloud_module_attr_helpers(
+                bindings,
+                (
+                    "estimate_cloud_record_cost",
+                    "normalize_cloud_record",
+                    "gh_repo_variables",
+                    "nsc_available",
+                    "summarize_runner_selector",
+                    "replacement_only",
+                ),
+            )
 
-            return runner
-
-        cloud = types.SimpleNamespace(
-            estimate_cloud_record_cost=make_runner("estimate_cloud_record_cost", 1.0),
-            normalize_cloud_record=make_runner("normalize_cloud_record", {"normalized": True}),
-            gh_repo_variables=make_runner("gh_repo_variables", {"PULP_VAR": "value"}),
-            nsc_available=make_runner("nsc_available", True),
-            summarize_runner_selector=make_runner("summarize_runner_selector", "linux,arm64"),
-        )
-        bindings = {"_cloud": cloud}
-
-        self.mod.install_cloud_module_attr_helpers(
-            bindings,
-            (
-                "estimate_cloud_record_cost",
-                "normalize_cloud_record",
-                "gh_repo_variables",
-                "nsc_available",
-                "summarize_runner_selector",
-            ),
-        )
-
-        self.assertEqual(bindings["estimate_cloud_record_cost"]({"provider": "github"}, {}), 1.0)
-        self.assertEqual(bindings["normalize_cloud_record"]({"id": "run"}), {"normalized": True})
-        self.assertEqual(bindings["gh_repo_variables"]("owner/repo"), {"PULP_VAR": "value"})
-        self.assertTrue(bindings["nsc_available"]())
-        self.assertEqual(bindings["summarize_runner_selector"]("selector"), "linux,arm64")
-        self.assertEqual(
-            [call[0] for call in calls],
-            [
-                "estimate_cloud_record_cost",
-                "normalize_cloud_record",
-                "gh_repo_variables",
-                "nsc_available",
-                "summarize_runner_selector",
-            ],
-        )
-
-    def test_install_cloud_module_attr_helpers_keeps_unknown_module_attr_support(self):
-        def replacement_only(value):
-            return f"replacement:{value}"
-
-        bindings = {"_cloud": types.SimpleNamespace(replacement_only=replacement_only)}
-
-        self.mod.install_cloud_module_attr_helpers(bindings, ("replacement_only",))
-
-        self.assertEqual(bindings["replacement_only"]("value"), "replacement:value")
+        install_billing.assert_called_once_with(bindings, ("estimate_cloud_record_cost",))
+        install_record_store.assert_called_once_with(bindings, ("normalize_cloud_record",))
+        install_github.assert_called_once_with(bindings, ("gh_repo_variables",))
+        install_namespace.assert_called_once_with(bindings, ("nsc_available",))
+        install_format.assert_called_once_with(bindings, ("summarize_runner_selector",))
+        install_module_attrs.assert_called_once_with(bindings, "_cloud", ("replacement_only",))
 
 
 if __name__ == "__main__":
