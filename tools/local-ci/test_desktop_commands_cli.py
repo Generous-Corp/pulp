@@ -240,6 +240,25 @@ class DesktopCommandsCliTests(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertEqual(self.printed[-1], "published 1")
 
+        report = {
+            "output_dir": "/tmp/publish",
+            "index_html": "/tmp/publish/index.html",
+            "index_json": "/tmp/publish/index.json",
+            "run_count": 1,
+            "runs": [],
+        }
+        result = self.mod.cmd_desktop_publish(
+            Namespace(target="mac", action="smoke", limit=1, output=None, label="gallery", json=True),
+            load_config_fn=lambda: config,
+            desktop_run_manifests_fn=lambda *_args, **_kwargs: [run_manifest],
+            stage_desktop_publish_report_fn=lambda *_args, **_kwargs: report,
+            desktop_publish_lines_fn=lambda _report: ["unused"],
+            print_fn=self.print_line,
+        )
+        self.assertEqual(result, 0)
+        self.assertEqual(json.loads(self.printed[-1])["index_html"], "/tmp/publish/index.html")
+        self.assertEqual(json.loads(self.printed[-1])["run_count"], 1)
+
         removed = []
         rollups = []
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -804,88 +804,6 @@ class LocalCiTests(unittest.TestCase):
         self.assertEqual(context["prepared_state"], "clean")
         self.assertIn(r"%LOCALAPPDATA%\Pulp\desktop-source\windows", context["launch_command"])
 
-    def test_desktop_parser_accepts_shared_exact_sha_source_flags(self):
-        parser = self.mod.build_parser()
-
-        smoke = parser.parse_args(
-            [
-                "desktop",
-                "smoke",
-                "mac",
-                "--command",
-                "/tmp/ui-preview",
-                "--source-mode",
-                "exact-sha",
-                "--branch",
-                "feature/ui",
-                "--sha",
-                "a" * 40,
-                "--prepare-command",
-                "./scripts/build-ui-preview.sh",
-                "--prepare-timeout",
-                "321",
-            ]
-        )
-        click = parser.parse_args(
-            [
-                "desktop",
-                "click",
-                "ubuntu",
-                "--command",
-                "/tmp/ui-preview",
-                "--click-view-id",
-                "bypass-toggle",
-                "--source-mode",
-                "exact-sha",
-            ]
-        )
-        inspect = parser.parse_args(
-            [
-                "desktop",
-                "inspect",
-                "windows",
-                "--command",
-                r"C:\Pulp\ui-preview.exe",
-            ]
-        )
-
-        self.assertEqual(smoke.source_mode, "exact-sha")
-        self.assertEqual(smoke.branch, "feature/ui")
-        self.assertEqual(smoke.sha, "a" * 40)
-        self.assertEqual(smoke.prepare_command, "./scripts/build-ui-preview.sh")
-        self.assertEqual(smoke.prepare_timeout, 321.0)
-        self.assertEqual(click.source_mode, "exact-sha")
-        self.assertEqual(inspect.source_mode, "live")
-
-    def test_desktop_parser_accepts_proof_filters(self):
-        parser = self.mod.build_parser()
-
-        proof = parser.parse_args(
-            [
-                "desktop",
-                "proof",
-                "windows",
-                "--action",
-                "inspect",
-                "--source-mode",
-                "legacy",
-                "--sha",
-                "a" * 40,
-                "--branch",
-                "feature/ui",
-                "--limit",
-                "7",
-            ]
-        )
-
-        self.assertEqual(proof.desktop_command, "proof")
-        self.assertEqual(proof.target, "windows")
-        self.assertEqual(proof.action, "inspect")
-        self.assertEqual(proof.source_mode, "legacy")
-        self.assertEqual(proof.sha, "a" * 40)
-        self.assertEqual(proof.branch, "feature/ui")
-        self.assertEqual(proof.limit, 7)
-
     def test_build_linux_xvfb_remote_command_uses_launch_cwd(self):
         remote_cmd = self.mod.build_linux_xvfb_remote_command(
             "/tmp/pulp",
@@ -2140,32 +2058,6 @@ class LocalCiTests(unittest.TestCase):
         self.assertIn("ui-preview", html_text)
         self.assertIn("window.png", html_text)
 
-    def test_normalize_git_remote_for_http_handles_github_urls(self):
-        self.assertEqual(
-            self.mod.normalize_git_remote_for_http('git@github.com:danielraffel/pulp.git'),
-            'https://github.com/danielraffel/pulp',
-        )
-        self.assertEqual(
-            self.mod.normalize_git_remote_for_http('https://github.com/danielraffel/pulp.git'),
-            'https://github.com/danielraffel/pulp',
-        )
-        self.assertIsNone(self.mod.normalize_git_remote_for_http('/tmp/pulp.git'))
-
-    def test_normalize_git_remote_for_clone_handles_github_urls(self):
-        self.assertEqual(
-            self.mod.normalize_git_remote_for_clone('git@github.com:danielraffel/pulp.git'),
-            'https://github.com/danielraffel/pulp.git',
-        )
-        self.assertEqual(
-            self.mod.normalize_git_remote_for_clone('https://github.com/danielraffel/pulp'),
-            'https://github.com/danielraffel/pulp.git',
-        )
-        self.assertEqual(
-            self.mod.normalize_git_remote_for_clone('https://github.com/danielraffel/pulp.git'),
-            'https://github.com/danielraffel/pulp.git',
-        )
-        self.assertIsNone(self.mod.normalize_git_remote_for_clone('/tmp/pulp.git'))
-
     def test_publish_report_to_branch_pushes_report_to_remote_branch(self):
         config = self.mod.load_config()
         artifact_root = Path(self.tmpdir.name) / 'desktop-artifacts'
@@ -2241,31 +2133,6 @@ class LocalCiTests(unittest.TestCase):
             report = self.mod.stage_desktop_publish_report(config, [manifest], label='desktop-gallery')
 
         self.assertEqual(report['published']['branch'], 'dev-artifacts')
-
-    def test_cmd_desktop_publish_json_emits_report_paths(self):
-        config = self.mod.load_config()
-        report = {
-            "output_dir": "/tmp/publish",
-            "index_html": "/tmp/publish/index.html",
-            "index_json": "/tmp/publish/index.json",
-            "run_count": 1,
-            "runs": [],
-        }
-        manifests = [{"label": "ui-preview"}]
-
-        with mock.patch.object(self.mod, "load_config", return_value=config):
-            with mock.patch.object(self.mod, "desktop_run_manifests", return_value=manifests):
-                with mock.patch.object(self.mod, "stage_desktop_publish_report", return_value=report):
-                    buf = io.StringIO()
-                    with redirect_stdout(buf):
-                        exit_code = self.mod.cmd_desktop_publish(
-                            SimpleNamespace(target="mac", action="click", limit=3, label="gallery", output=None, json=True)
-                        )
-
-        payload = json.loads(buf.getvalue())
-        self.assertEqual(exit_code, 0)
-        self.assertEqual(payload["index_html"], "/tmp/publish/index.html")
-        self.assertEqual(payload["run_count"], 1)
 
     def test_cmd_desktop_cleanup_removes_old_bundles(self):
         config = self.mod.load_config()

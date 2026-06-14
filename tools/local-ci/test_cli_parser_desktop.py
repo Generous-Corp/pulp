@@ -50,18 +50,22 @@ class CliParserDesktopTests(unittest.TestCase):
             "--action",
             "inspect",
             "--source-mode",
-            "exact-sha",
+            "legacy",
             "--sha",
             "a" * 40,
             "--branch",
-            "feature/a",
+            "feature/ui",
             "--limit",
-            "4",
+            "7",
             "--json",
         ])
         self.assertEqual(proof.desktop_command, "proof")
-        self.assertEqual(proof.source_mode, "exact-sha")
-        self.assertEqual(proof.limit, 4)
+        self.assertEqual(proof.target, "windows")
+        self.assertEqual(proof.action, "inspect")
+        self.assertEqual(proof.source_mode, "legacy")
+        self.assertEqual(proof.sha, "a" * 40)
+        self.assertEqual(proof.branch, "feature/ui")
+        self.assertEqual(proof.limit, 7)
         self.assertTrue(proof.json)
 
     def test_action_commands_share_desktop_source_arguments(self) -> None:
@@ -99,10 +103,14 @@ class CliParserDesktopTests(unittest.TestCase):
             "--json",
             "--source-mode",
             "exact-sha",
+            "--branch",
+            "feature/ui",
             "--sha",
             "b" * 40,
             "--prepare-command",
             "cmake --build build",
+            "--prepare-timeout",
+            "321",
         ])
 
         self.assertEqual(smoke.desktop_command, "smoke")
@@ -111,9 +119,10 @@ class CliParserDesktopTests(unittest.TestCase):
         self.assertTrue(smoke.capture_ui_snapshot)
         self.assertTrue(smoke.capture_before)
         self.assertEqual(smoke.source_mode, "exact-sha")
+        self.assertEqual(smoke.branch, "feature/ui")
         self.assertEqual(smoke.sha, "b" * 40)
         self.assertEqual(smoke.prepare_command, "cmake --build build")
-        self.assertEqual(smoke.prepare_timeout, 900.0)
+        self.assertEqual(smoke.prepare_timeout, 321.0)
 
         click = parser.parse_args(["desktop", "click", "windows", "--click", "1,2", "--settle-secs", "1.5"])
         self.assertEqual(click.desktop_command, "click")
@@ -122,6 +131,7 @@ class CliParserDesktopTests(unittest.TestCase):
 
         inspect_args = parser.parse_args(["desktop", "inspect", "mac", "--pulp-app-automation", "--timeout", "2"])
         self.assertEqual(inspect_args.desktop_command, "inspect")
+        self.assertEqual(inspect_args.source_mode, "live")
         self.assertTrue(inspect_args.pulp_app_automation)
         self.assertEqual(inspect_args.timeout, 2.0)
 
