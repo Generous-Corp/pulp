@@ -452,15 +452,16 @@ def desktop_video_setup_remote_prerequisite_checks(
     subprocess_run_fn: Callable[..., subprocess.CompletedProcess] = subprocess.run,
 ) -> list[dict]:
     script = (
+        "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"; export PATH; "
         "for tool in pulp npm node cmake; do "
-        "path=$(command -v \"$tool\" 2>/dev/null || true); "
-        "if [ -n \"$path\" ]; then printf '%s\\t%s\\n' \"$tool\" \"$path\"; "
+        "found_path=$(command -v \"$tool\" 2>/dev/null || true); "
+        "if [ -n \"$found_path\" ]; then printf '%s\\t%s\\n' \"$tool\" \"$found_path\"; "
         "else printf '%s\\t\\n' \"$tool\"; fi; "
         "done"
     )
     try:
         result = subprocess_run_fn(
-            ["ssh", "-o", "ConnectTimeout=5", "-o", "BatchMode=yes", host, "sh", "-lc", shlex.quote(script)],
+            ["ssh", "-o", "ConnectTimeout=5", "-o", "BatchMode=yes", host, "zsh", "-lc", shlex.quote(script)],
             capture_output=True,
             text=True,
             timeout=20,

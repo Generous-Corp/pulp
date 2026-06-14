@@ -1,4 +1,4 @@
-//! `pulp-rs tool` — list / install / uninstall / path / run / doctor.
+//! `pulp-rs tool` — list / info / install / uninstall / path / run / doctor.
 //!
 //! # Phase 6d scope
 //!
@@ -7,10 +7,11 @@
 //! | Subcommand  | Status      | Notes                                        |
 //! |-------------|-------------|----------------------------------------------|
 //! | `list`      | Ported      | Two-column table; color-aware.               |
+//! | `info`      | Ported      | Install/distribution metadata; JSON mode.    |
 //! | `uninstall` | Ported      | `rm -rf` of `$PULP_HOME/tools/<id>`.          |
 //! | `path`      | Ported      | Prints absolute path via `locate_tool`.      |
 //! | `run`       | Ported      | Exec via `Spawner`.                          |
-//! | `doctor`    | Ported      | Health report per tool.                      |
+//! | `doctor`    | Ported      | All-tool and focused health/smoke checks.    |
 //! | `install`   | Partial     | `npm_package` tools install natively;        |
 //! |             |             | archive/python installs fall through.        |
 //!
@@ -36,6 +37,13 @@ pub enum Sub {
     Help,
     /// `list`.
     List,
+    /// `info <id> [--json]`.
+    Info {
+        /// Tool id.
+        id: String,
+        /// Emit machine-readable JSON.
+        json: bool,
+    },
     /// `install <id>` / `install --all` / `install <id> --force`.
     Install {
         /// Tool id to install, `None` when `--all` is set.
@@ -56,8 +64,13 @@ pub enum Sub {
         /// Arguments forwarded to the tool.
         args: Vec<String>,
     },
-    /// `doctor`.
-    Doctor,
+    /// `doctor [id] [--run]`.
+    Doctor {
+        /// Optional focused tool id.
+        id: Option<String>,
+        /// Execute the tool's smoke command when focused.
+        run: bool,
+    },
 }
 
 /// Parse the tail into a [`Sub`].
@@ -73,6 +86,25 @@ pub fn parse_sub(args: &[String]) -> Result<Sub> {
     };
     match first.as_str() {
         "list" => Ok(Sub::List),
+        "info" => {
+            let mut id = None;
+            let mut json = false;
+            for a in &args[1..] {
+                match a.as_str() {
+                    "--json" => json = true,
+                    _ if id.is_none() => id = Some(a.clone()),
+                    _ => {
+                        return Err(CliError::BadUsage(
+                            "Usage: pulp tool info <tool-id> [--json]".to_owned(),
+                        ));
+                    }
+                }
+            }
+            let id = id.ok_or_else(|| {
+                CliError::BadUsage("Usage: pulp tool info <tool-id> [--json]".to_owned())
+            })?;
+            Ok(Sub::Info { id, json })
+        }
         "install" => {
             let mut id = None;
             let mut all = false;
@@ -111,7 +143,22 @@ pub fn parse_sub(args: &[String]) -> Result<Sub> {
             let rest = args.get(2..).map(<[String]>::to_vec).unwrap_or_default();
             Ok(Sub::Run { id, args: rest })
         }
-        "doctor" => Ok(Sub::Doctor),
+        "doctor" => {
+            let mut id = None;
+            let mut run = false;
+            for a in &args[1..] {
+                match a.as_str() {
+                    "--run" => run = true,
+                    _ if id.is_none() => id = Some(a.clone()),
+                    _ => {
+                        return Err(CliError::BadUsage(
+                            "Usage: pulp tool doctor [tool-id] [--run]".to_owned(),
+                        ));
+                    }
+                }
+            }
+            Ok(Sub::Doctor { id, run })
+        }
         _ => Err(CliError::UnknownSubcommand),
     }
 }
@@ -137,13 +184,14 @@ pub fn run<S: Spawner>(sub: &Sub, spawner: &S, out: &mut impl Write) -> Result<i
     match sub {
         Sub::Help => unreachable!(), // handled above
         Sub::List => list(&reg, out),
+        Sub::Info { id, json } => info(&reg, id, *json, out),
         Sub::Install { id, all, force } => {
             install(&reg, &reg_path, id.as_deref(), *all, *force, spawner, out)
         }
         Sub::Uninstall(id) => uninstall(id, out),
         Sub::Path(id) => path(&reg, id, out),
         Sub::Run { id, args } => run_tool(&reg, id, args, spawner, out),
-        Sub::Doctor => doctor(&reg, out),
+        Sub::Doctor { id, run } => doctor(&reg, id.as_deref(), *run, spawner, out),
     }
 }
 
@@ -161,12 +209,13 @@ pub fn print_help(out: &mut impl Write) -> Result<()> {
         b"Usage: pulp tool <command> [options]\n\n\
         Commands:\n\
         \x20 list                    Show available and installed tools\n\
+        \x20 info <tool> [--json]    Show install metadata for a tool\n\
         \x20 install <tool>          Download and install a tool\n\
         \x20 install --all           Install all tools for current platform\n\
         \x20 uninstall <tool>        Remove a pulp-managed tool\n\
         \x20 path <tool>             Print path to a tool's binary\n\
         \x20 run <tool> [args]       Run a tool with arguments\n\
-        \x20 doctor                  Check tool health\n",
+        \x20 doctor [tool] [--run]   Check tool health\n",
     )
     .map_err(io)
 }
@@ -194,6 +243,102 @@ fn list(reg: &ToolRegistry, out: &mut impl Write) -> Result<i32> {
             reset = color::reset()
         )
         .map_err(io)?;
+    }
+    Ok(0)
+}
+
+fn info(reg: &ToolRegistry, id: &str, json: bool, out: &mut impl Write) -> Result<i32> {
+    let Some(tool) = reg.tools.get(id) else {
+        writeln!(
+            out,
+            "{red}✗{reset} Tool '{id}' not found",
+            red = color::red(),
+            reset = color::reset()
+        )
+        .map_err(io)?;
+        return Ok(1);
+    };
+    let platform = current_platform_key();
+    let loc = locate_tool(tool);
+    if json {
+        writeln!(
+            out,
+            "{{\"id\":\"{}\",\"display_name\":\"{}\",\"category\":\"{}\",\"description\":\"{}\",\"install_method\":\"{}\",\"install_scope\":\"{}\",\"distribution_lane\":\"{}\",\"package_format\":\"{}\",\"artifact_status\":\"{}\",\"artifact_policy\":\"{}\",\"pinned_version\":\"{}\",\"bundleable\":{},\"managed_by_pulp\":{},\"platform\":\"{}\",\"available_on_platform\":{},\"installed\":{},\"location_source\":\"{}\",\"path\":\"{}\"}}",
+            json_escape(&tool.id),
+            json_escape(&tool.display_name),
+            json_escape(&tool.category),
+            json_escape(&tool.description),
+            json_escape(&tool.install_method),
+            json_escape(&tool.install_scope),
+            json_escape(&tool.distribution_lane),
+            json_escape(&tool.package_format),
+            json_escape(&tool.artifact_status),
+            json_escape(&tool.artifact_policy),
+            json_escape(&tool.pinned_version),
+            tool.bundleable,
+            tool.managed_by_pulp,
+            json_escape(platform),
+            tool_available_on_platform(tool, platform),
+            loc.found,
+            json_escape(&loc.source),
+            json_escape(&loc.path.to_string_lossy()),
+        )
+        .map_err(io)?;
+        return Ok(0);
+    }
+
+    writeln!(
+        out,
+        "{} {dim}({}){reset}\n",
+        display_name(tool),
+        tool.id,
+        dim = color::dim(),
+        reset = color::reset()
+    )
+    .map_err(io)?;
+    if !tool.description.is_empty() {
+        writeln!(out, "{}\n", tool.description).map_err(io)?;
+    }
+    writeln!(out, "Install method: {}", tool.install_method).map_err(io)?;
+    if !tool.install_scope.is_empty() {
+        writeln!(out, "Install scope: {}", tool.install_scope).map_err(io)?;
+    }
+    if !tool.distribution_lane.is_empty() {
+        writeln!(out, "Distribution lane: {}", tool.distribution_lane).map_err(io)?;
+    }
+    if !tool.package_format.is_empty() {
+        writeln!(out, "Package format: {}", tool.package_format).map_err(io)?;
+    }
+    if !tool.artifact_status.is_empty() {
+        writeln!(out, "Artifact status: {}", tool.artifact_status).map_err(io)?;
+    }
+    if !tool.artifact_policy.is_empty() {
+        writeln!(out, "Artifact policy: {}", tool.artifact_policy).map_err(io)?;
+    }
+    if !tool.pinned_version.is_empty() {
+        writeln!(out, "Pinned version: {}", tool.pinned_version).map_err(io)?;
+    }
+    writeln!(out, "Platform: {platform}").map_err(io)?;
+    writeln!(
+        out,
+        "Available: {}",
+        if tool_available_on_platform(tool, platform) {
+            "yes"
+        } else {
+            "no"
+        }
+    )
+    .map_err(io)?;
+    if loc.found {
+        writeln!(
+            out,
+            "Installed: yes ({}, {})",
+            loc.source,
+            loc.path.display()
+        )
+        .map_err(io)?;
+    } else {
+        writeln!(out, "Installed: no").map_err(io)?;
     }
     Ok(0)
 }
@@ -582,7 +727,13 @@ fn run_tool<S: Spawner>(
     spawner.run(&inv)
 }
 
-fn doctor(reg: &ToolRegistry, out: &mut impl Write) -> Result<i32> {
+fn doctor<S: Spawner>(
+    reg: &ToolRegistry,
+    focused_id: Option<&str>,
+    run: bool,
+    spawner: &S,
+    out: &mut impl Write,
+) -> Result<i32> {
     let platform = current_platform_key();
     writeln!(
         out,
@@ -591,6 +742,86 @@ fn doctor(reg: &ToolRegistry, out: &mut impl Write) -> Result<i32> {
         reset = color::reset()
     )
     .map_err(io)?;
+    if let Some(id) = focused_id {
+        let Some(tool) = reg.tools.get(id) else {
+            writeln!(
+                out,
+                "{red}✗{reset} Tool '{id}' not found",
+                red = color::red(),
+                reset = color::reset()
+            )
+            .map_err(io)?;
+            return Ok(1);
+        };
+        if !tool_available_on_platform(tool, platform) {
+            writeln!(
+                out,
+                "  {red}✗{reset} {} — not available for {platform}",
+                display_name(tool),
+                red = color::red(),
+                reset = color::reset()
+            )
+            .map_err(io)?;
+            return Ok(1);
+        }
+        let loc = locate_tool(tool);
+        if !loc.found {
+            writeln!(
+                out,
+                "  {red}✗{reset} {} — not installed {dim}(pulp tool install {id}){reset}",
+                display_name(tool),
+                red = color::red(),
+                reset = color::reset(),
+                dim = color::dim()
+            )
+            .map_err(io)?;
+            return Ok(1);
+        }
+        writeln!(
+            out,
+            "  {green}✓{reset} {} — {} ({})",
+            display_name(tool),
+            loc.source,
+            loc.path.display(),
+            green = color::green(),
+            reset = color::reset()
+        )
+        .map_err(io)?;
+        if !run {
+            if tool.install_method == "npm_package" {
+                writeln!(
+                    out,
+                    "  {dim}Run `pulp tool doctor {id} --run` to execute its smoke check.{reset}",
+                    dim = color::dim(),
+                    reset = color::reset()
+                )
+                .map_err(io)?;
+            }
+            return Ok(0);
+        }
+        let rc = spawner.run(&Invocation::new(loc.path.to_string_lossy().into_owned()))?;
+        if rc == 0 {
+            writeln!(
+                out,
+                "  {green}✓{reset} {} smoke check passed",
+                display_name(tool),
+                green = color::green(),
+                reset = color::reset()
+            )
+            .map_err(io)?;
+            return Ok(0);
+        }
+        writeln!(
+            out,
+            "{red}✗{reset} {} smoke check failed with exit code {rc}",
+            display_name(tool),
+            red = color::red(),
+            reset = color::reset()
+        )
+        .map_err(io)?;
+        return Ok(rc);
+    }
+
     let mut issues = 0;
     for (id, tool) in &reg.tools {
         let loc = locate_tool(tool);
@@ -598,7 +829,7 @@ fn doctor(reg: &ToolRegistry, out: &mut impl Write) -> Result<i32> {
             writeln!(
                 out,
                 "  {green}✓{reset} {} — {} ({})",
-                tool.display_name,
+                display_name(tool),
                 loc.source,
                 loc.path.display(),
                 green = color::green(),
@@ -611,7 +842,7 @@ fn doctor(reg: &ToolRegistry, out: &mut impl Write) -> Result<i32> {
                 writeln!(
                     out,
                     "  {yel}-{reset} {} — not installed {dim}(pulp tool install {id}){reset}",
-                    tool.display_name,
+                    display_name(tool),
                     yel = color::yellow(),
                     reset = color::reset(),
                     dim = color::dim()
@@ -621,7 +852,7 @@ fn doctor(reg: &ToolRegistry, out: &mut impl Write) -> Result<i32> {
                 writeln!(
                     out,
                     "  {red}✗{reset} {} — not available for {platform}",
-                    tool.display_name,
+                    display_name(tool),
                     red = color::red(),
                     reset = color::reset()
                 )
@@ -684,11 +915,19 @@ mod tests {
                 },
                 "video-proof": {
                     "display_name": "Video Proof",
+                    "category": "developer_tool",
                     "description": "Validation video proof tooling",
                     "install_method": "npm_package",
                     "npm_package_root": "tools/local-ci",
                     "npm_default_script": "smoke-video-proof",
-                    "pinned_version": "0.0.0"
+                    "pinned_version": "0.0.0",
+                    "managed_by_pulp": true,
+                    "bundleable": false,
+                    "install_scope": "machine",
+                    "distribution_lane": "tool_addon",
+                    "package_format": "not_pulp_add",
+                    "artifact_status": "source_tree_iteration",
+                    "artifact_policy": "Keep Remotion outside shipped artifacts."
                 }
             }
         }"#
@@ -697,6 +936,18 @@ mod tests {
     #[test]
     fn parse_list_simple() {
         assert_eq!(parse_sub(&["list".into()]).unwrap(), Sub::List);
+    }
+
+    #[test]
+    fn parse_info_accepts_json_flag() {
+        let s = parse_sub(&["info".into(), "video-proof".into(), "--json".into()]).unwrap();
+        assert_eq!(
+            s,
+            Sub::Info {
+                id: "video-proof".to_owned(),
+                json: true
+            }
+        );
     }
 
     #[test]
@@ -755,8 +1006,9 @@ mod tests {
     fn doctor_reports_zero_issues_when_nothing_marked_unavailable() {
         let td = plant_project(registry_body());
         let reg = load(&td.path().join("tools/packages/tool-registry.json")).unwrap();
+        let spawner = crate::proc::testing::RecordingSpawner::ok();
         let mut buf = Vec::new();
-        let rc = doctor(&reg, &mut buf).unwrap();
+        let rc = doctor(&reg, None, false, &spawner, &mut buf).unwrap();
         let s = String::from_utf8(buf).unwrap();
         // UV is "available" or "installed" for current platform.
         assert!(s.contains("UV"));
@@ -889,9 +1141,68 @@ mod tests {
         let mut buf = Vec::new();
         print_help(&mut buf).unwrap();
         let s = String::from_utf8(buf).unwrap();
-        for cmd in ["list", "install", "uninstall", "path", "run", "doctor"] {
+        for cmd in [
+            "list",
+            "info",
+            "install",
+            "uninstall",
+            "path",
+            "run",
+            "doctor",
+        ] {
             assert!(s.contains(cmd), "missing {cmd}");
         }
+    }
+
+    #[test]
+    fn info_json_reports_install_policy_metadata() {
+        let td = plant_project(registry_body());
+        let reg = load(&td.path().join("tools/packages/tool-registry.json")).unwrap();
+        let mut buf = Vec::new();
+        let rc = info(&reg, "video-proof", true, &mut buf).unwrap();
+        assert_eq!(rc, 0);
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("\"install_scope\":\"machine\""));
+        assert!(s.contains("\"distribution_lane\":\"tool_addon\""));
+        assert!(s.contains("\"package_format\":\"not_pulp_add\""));
+        assert!(s.contains("\"artifact_status\":\"source_tree_iteration\""));
+    }
+
+    #[test]
+    fn focused_doctor_missing_tool_returns_nonzero() {
+        let td = plant_project(registry_body());
+        let reg = load(&td.path().join("tools/packages/tool-registry.json")).unwrap();
+        let spawner = crate::proc::testing::RecordingSpawner::ok();
+        let mut buf = Vec::new();
+        let rc = doctor(&reg, Some("video-proof"), false, &spawner, &mut buf).unwrap();
+        assert_eq!(rc, 1);
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("pulp tool install video-proof"));
+    }
+
+    #[test]
+    fn focused_doctor_run_executes_installed_wrapper() {
+        let _l = crate::test_support::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let td = plant_project(registry_body());
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("PULP_HOME", home.path());
+        let wrapper = home.path().join("tools/npm-packages/video-proof/run.sh");
+        fs::create_dir_all(wrapper.parent().unwrap()).unwrap();
+        fs::write(&wrapper, "#!/bin/sh\nexit 0\n").unwrap();
+        let reg = load(&td.path().join("tools/packages/tool-registry.json")).unwrap();
+        let spawner = crate::proc::testing::RecordingSpawner::ok();
+        let mut buf = Vec::new();
+        let rc = doctor(&reg, Some("video-proof"), true, &spawner, &mut buf).unwrap();
+        assert_eq!(rc, 0);
+        let calls = spawner.calls.borrow();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].program, wrapper.to_string_lossy().as_ref());
+        assert!(String::from_utf8(buf)
+            .unwrap()
+            .contains("smoke check passed"));
+        std::env::remove_var("PULP_HOME");
     }
 
     // ── #45 coverage uplift slice 8 — tool.rs parse_sub edges ─────
@@ -911,7 +1222,30 @@ mod tests {
     #[test]
     fn parse_sub_doctor() {
         let s = parse_sub(&["doctor".to_owned()]).unwrap();
-        assert!(matches!(s, Sub::Doctor));
+        assert!(matches!(
+            s,
+            Sub::Doctor {
+                id: None,
+                run: false
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_sub_doctor_accepts_focused_run() {
+        let s = parse_sub(&[
+            "doctor".to_owned(),
+            "video-proof".to_owned(),
+            "--run".to_owned(),
+        ])
+        .unwrap();
+        assert_eq!(
+            s,
+            Sub::Doctor {
+                id: Some("video-proof".to_owned()),
+                run: true
+            }
+        );
     }
 
     #[test]

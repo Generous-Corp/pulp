@@ -107,6 +107,21 @@ pub struct ToolDescriptor {
     /// `true` when the tool may be bundled into distributions.
     #[serde(default)]
     pub bundleable: bool,
+    /// Machine/project/core scope metadata used by setup automation.
+    #[serde(default)]
+    pub install_scope: String,
+    /// Distribution lane such as `tool_addon` or `core`.
+    #[serde(default)]
+    pub distribution_lane: String,
+    /// Package-format marker; `video-proof` is `not_pulp_add`.
+    #[serde(default)]
+    pub package_format: String,
+    /// Artifact maturity, for example `source_tree_iteration`.
+    #[serde(default)]
+    pub artifact_status: String,
+    /// Human/agent-facing packaging policy note.
+    #[serde(default)]
+    pub artifact_policy: String,
 }
 
 /// Whole registry.
@@ -468,7 +483,10 @@ mod tests {
         let td = tempfile::tempdir().unwrap();
         let path = td.path().join("nope.json");
         let err = load(&path).unwrap_err();
-        assert!(matches!(err, CliError::Io { .. }), "expected Io error: {err}");
+        assert!(
+            matches!(err, CliError::Io { .. }),
+            "expected Io error: {err}"
+        );
     }
 
     #[test]
@@ -477,13 +495,20 @@ mod tests {
         let path = td.path().join("bad.json");
         std::fs::write(&path, "{not-json").unwrap();
         let err = load(&path).unwrap_err();
-        assert!(matches!(err, CliError::Json { .. }), "expected Json error: {err}");
+        assert!(
+            matches!(err, CliError::Json { .. }),
+            "expected Json error: {err}"
+        );
     }
 
     #[test]
     fn find_tool_registry_path_walks_up_to_find_tools_packages() {
         let td = tempfile::tempdir().unwrap();
-        let reg = td.path().join("tools").join("packages").join("tool-registry.json");
+        let reg = td
+            .path()
+            .join("tools")
+            .join("packages")
+            .join("tool-registry.json");
         std::fs::create_dir_all(reg.parent().unwrap()).unwrap();
         std::fs::write(&reg, r#"{"tools":{}}"#).unwrap();
         let nested = td.path().join("a").join("b").join("c");
@@ -491,10 +516,7 @@ mod tests {
         let found = find_tool_registry_path(&nested).unwrap();
         // Path resolution may add canonical /private prefix on macOS;
         // compare via canonicalize to be hermetic.
-        assert_eq!(
-            found.canonicalize().unwrap(),
-            reg.canonicalize().unwrap()
-        );
+        assert_eq!(found.canonicalize().unwrap(), reg.canonicalize().unwrap());
     }
 
     #[test]
@@ -505,7 +527,9 @@ mod tests {
 
     #[test]
     fn pulp_home_honors_explicit_env_var() {
-        let _l = crate::test_support::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _l = crate::test_support::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let td = tempfile::tempdir().unwrap();
         std::env::set_var("PULP_HOME", td.path());
         assert_eq!(pulp_home(), td.path());
@@ -514,7 +538,9 @@ mod tests {
 
     #[test]
     fn tools_dir_is_pulp_home_plus_tools() {
-        let _l = crate::test_support::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _l = crate::test_support::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let td = tempfile::tempdir().unwrap();
         std::env::set_var("PULP_HOME", td.path());
         assert_eq!(tools_dir(), td.path().join("tools"));
@@ -532,7 +558,9 @@ mod tests {
 
     #[test]
     fn uninstall_tool_returns_false_for_missing_id() {
-        let _l = crate::test_support::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _l = crate::test_support::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         // Point PULP_HOME at a fresh tempdir so we don't touch the
         // user's real ~/.pulp/tools tree.
         let td = tempfile::tempdir().unwrap();
@@ -544,7 +572,9 @@ mod tests {
 
     #[test]
     fn uninstall_tool_removes_existing_dir() {
-        let _l = crate::test_support::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _l = crate::test_support::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let td = tempfile::tempdir().unwrap();
         std::env::set_var("PULP_HOME", td.path());
         let tool_dir = td.path().join("tools").join("uv");

@@ -815,6 +815,22 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
         self.assertEqual(payload["remote_setup_prerequisites"]["host"], "blackbook")
         self.assertEqual(payload["remote_setup_prerequisites"]["remediations"][0]["check"], "remote_setup.pulp")
 
+    def test_remote_setup_prerequisite_probe_uses_login_zsh_path(self):
+        commands = []
+
+        def fake_run(cmd, **_kwargs):
+            commands.append(cmd)
+            return subprocess.CompletedProcess(cmd, 0, stdout="pulp\t/Users/me/.local/bin/pulp\nnpm\t/opt/homebrew/bin/npm\nnode\t/opt/homebrew/bin/node\ncmake\t/opt/homebrew/bin/cmake\n", stderr="")
+
+        checks = self.mod.desktop_video_setup_remote_prerequisite_checks("blackbook", subprocess_run_fn=fake_run)
+
+        self.assertEqual(commands[0][6:8], ["zsh", "-lc"])
+        self.assertIn("/opt/homebrew/bin", commands[0][8])
+        self.assertIn("found_path=", commands[0][8])
+        self.assertNotIn(" do path=", commands[0][8])
+        self.assertTrue(all(check["ok"] for check in checks), checks)
+        self.assertEqual(checks[0]["detail"], "/Users/me/.local/bin/pulp")
+
     def test_video_setup_text_reports_demo_matrix_blockers(self):
         self.targets["mac"]["optional"] = {"video_capture": True}
         checks = [
