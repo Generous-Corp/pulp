@@ -628,6 +628,38 @@ class MacOSDesktopTests(unittest.TestCase):
         self.assertTrue(any(cmd[:3] == ["screencapture", "-x", "-l"] for cmd in calls))
         self.assertFalse(any("avfoundation" in cmd for cmd in calls))
 
+    def test_frame_sequence_failure_points_to_terminal_reentry(self) -> None:
+        output_path = self.root / "video" / "proof.mp4"
+        metadata_path = self.root / "video" / "metadata.json"
+
+        def fail_screencapture(cmd: list[str], **_kwargs):
+            if cmd[0] == "screencapture":
+                return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="could not create image from display")
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        recording = self.mod.start_macos_window_video_recording(
+            {"windowId": 88, "bounds": {"x": 10, "y": 20, "width": 321, "height": 201}},
+            output_path,
+            duration_secs=0.05,
+            fps=1.0,
+            run_fn=fail_screencapture,
+            ffmpeg_path="/opt/ffmpeg",
+            input_device_fn=lambda **_kwargs: self.fail("AVFoundation should not be probed"),
+            prefer_frame_sequence=True,
+        )
+        with self.assertRaisesRegex(RuntimeError, "--run-in-terminal"):
+            self.mod.stop_macos_window_video_recording(
+                recording,
+                output_path=output_path,
+                metadata_path=metadata_path,
+                poster_path=None,
+                duration_secs=0.05,
+                fps=1.0,
+                attachment_budget_bytes=1_000_000,
+                desktop_video_metadata_fn=lambda path, **kwargs: {"path": str(path), **kwargs},
+                write_desktop_video_metadata_fn=lambda path, payload: path.write_text(str(payload)),
+            )
+
     def test_window_video_recording_uses_ffmpeg_avfoundation_primary_path(self) -> None:
         output_path = self.root / "video" / "proof.mp4"
         metadata_path = self.root / "video" / "metadata.json"

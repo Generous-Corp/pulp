@@ -923,6 +923,21 @@ def start_macos_window_frame_sequence_recording(
     }
 
 
+def _macos_screencapture_failure_detail(errors: list[str] | tuple[str, ...] | None) -> str:
+    detail = "; ".join(str(error) for error in (errors or []) if str(error)) or "no frames captured"
+    lower_detail = detail.lower()
+    if (
+        "could not create image from display" in lower_detail
+        or "could not create image from window" in lower_detail
+        or "screen recording" in lower_detail
+    ):
+        detail += (
+            "; screen capture is not available to this process. "
+            "Re-run with --run-in-terminal after granting Terminal.app Screen Recording permission."
+        )
+    return detail
+
+
 def stop_macos_window_video_recording(
     recording: dict,
     *,
@@ -966,7 +981,7 @@ def stop_macos_window_video_recording(
     elapsed_secs = max(0.001, time.monotonic() - float(recording["started_at"]))
     actual_fps = max(1.0, frame_count / elapsed_secs)
     if frame_count <= 0:
-        detail = "; ".join(state.get("errors") or []) or "no frames captured"
+        detail = _macos_screencapture_failure_detail(state.get("errors"))
         raise RuntimeError(f"Video proof recording failed: {detail}")
 
     frame_pattern = str(recording["frames_dir"] / "frame-%06d.png")
