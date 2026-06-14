@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from binding_utils import binding as _binding
+from binding_utils import install_local_helpers
 
 
 NORMALIZE_SCALAR_EXPORTS = (
@@ -50,3 +51,16 @@ def normalize_publish_mode(bindings: Mapping[str, Any], mode: str | None) -> str
 
 def parse_config_bool(bindings: Mapping[str, Any], value: object) -> bool:
     return _binding(bindings, "_normalize").parse_config_bool(value)
+
+
+def install_normalize_scalar_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = NORMALIZE_SCALAR_EXPORTS,
+) -> None:
+    known_names = set(NORMALIZE_SCALAR_EXPORTS)
+    scalar_names = tuple(name for name in names if name in known_names)
+    unknown_names = tuple(name for name in names if name not in known_names)
+
+    install_local_helpers(bindings, globals(), scalar_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)

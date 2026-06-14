@@ -4,6 +4,7 @@
 from module_test_utils import load_module_from_path
 import types
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -70,6 +71,20 @@ class NormalizeScalarBindingsTests(unittest.TestCase):
         )
         self.assertEqual(calls[0][1], ("NORMAL",))
         self.assertEqual(calls[4][1], ())
+
+    def test_install_normalize_scalar_helpers_wires_named_exports(self):
+        bindings = {}
+
+        with mock.patch.object(self.mod, "install_local_helpers") as install_local:
+            self.mod.install_normalize_scalar_helpers(bindings, ("normalize_priority", "custom_scalar"))
+
+        self.assertEqual(
+            install_local.call_args_list,
+            [
+                mock.call(bindings, self.mod.__dict__, ("normalize_priority",)),
+                mock.call(bindings, self.mod.__dict__, ("custom_scalar",)),
+            ],
+        )
 
 
 if __name__ == "__main__":

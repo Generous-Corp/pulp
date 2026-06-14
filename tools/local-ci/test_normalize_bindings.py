@@ -38,19 +38,19 @@ class NormalizeBindingsTests(unittest.TestCase):
         for name in ("priority_values", *expected_exports):
             self.assertTrue(callable(getattr(self.mod, name)))
 
-    def test_install_normalize_helpers_routes_known_and_unknown_exports(self):
+    def test_install_normalize_helpers_routes_focused_groups_and_unknown_exports(self):
         bindings = {}
 
-        with mock.patch.object(self.mod, "install_local_helpers") as install:
+        with (
+            mock.patch.object(self.mod, "install_normalize_scalar_helpers") as scalar,
+            mock.patch.object(self.mod, "install_normalize_desktop_config_helpers") as desktop,
+            mock.patch.object(self.mod, "install_local_helpers") as install,
+        ):
             self.mod.install_normalize_helpers(bindings, ("normalize_priority", "normalize_desktop_config", "external"))
 
-        self.assertEqual(
-            install.call_args_list,
-            [
-                mock.call(bindings, self.mod.__dict__, ("normalize_priority", "normalize_desktop_config")),
-                mock.call(bindings, self.mod.__dict__, ("external",)),
-            ],
-        )
+        scalar.assert_called_once_with(bindings, ("normalize_priority",))
+        desktop.assert_called_once_with(bindings, ("normalize_desktop_config",))
+        install.assert_called_once_with(bindings, self.mod.__dict__, ("external",))
 
 
 if __name__ == "__main__":
