@@ -1,75 +1,37 @@
-"""Facade dependency bindings for Windows target session helpers."""
+"""Compatibility installer for Windows target session helpers."""
 
 from __future__ import annotations
 
 from binding_utils import install_local_helpers
-from binding_utils import binding as _binding
-
-
-WINDOWS_TARGET_SESSION_EXPORTS = (
-    "default_windows_session_task_name",
-    "desktop_target_contract",
-    "build_windows_session_agent_request",
+from windows_target_session_identity_bindings import (
+    WINDOWS_TARGET_SESSION_IDENTITY_EXPORTS,
+    default_windows_session_task_name,
+    desktop_target_contract,
+    install_windows_target_session_identity_helpers,
+)
+from windows_target_session_request_bindings import (
+    WINDOWS_TARGET_SESSION_REQUEST_EXPORTS,
+    build_windows_session_agent_request,
+    install_windows_target_session_request_helpers,
 )
 
 
-def default_windows_session_task_name(bindings: dict, target_name: str) -> str:
-    return _binding(bindings, "_windows_target").default_windows_session_task_name(target_name)
-
-
-def desktop_target_contract(bindings: dict, target_name: str, target: dict) -> dict:
-    return _binding(bindings, "_windows_target").desktop_target_contract(target_name, target)
-
-
-def build_windows_session_agent_request(
-    bindings: dict,
-    target_name: str,
-    contract: dict,
-    command: str,
-    *,
-    repo_path: str,
-    action_name: str,
-    label: str | None,
-    pulp_app_automation: bool,
-    capture_ui_snapshot: bool,
-    click_point: str | None,
-    click_view_id: str | None,
-    click_view_type: str | None,
-    click_view_text: str | None,
-    click_view_label: str | None,
-    capture_before: bool,
-    settle_secs: float,
-    timeout_secs: float,
-) -> dict:
-    return _binding(bindings, "_windows_target").build_windows_session_agent_request(
-        target_name,
-        contract,
-        command,
-        repo_path=repo_path,
-        action_name=action_name,
-        label=label,
-        pulp_app_automation=pulp_app_automation,
-        capture_ui_snapshot=capture_ui_snapshot,
-        click_point=click_point,
-        click_view_id=click_view_id,
-        click_view_type=click_view_type,
-        click_view_text=click_view_text,
-        click_view_label=click_view_label,
-        capture_before=capture_before,
-        settle_secs=settle_secs,
-        timeout_secs=timeout_secs,
-        default_desktop_label_fn=_binding(bindings, "default_desktop_label"),
-    )
+WINDOWS_TARGET_SESSION_EXPORTS = (
+    *WINDOWS_TARGET_SESSION_IDENTITY_EXPORTS,
+    *WINDOWS_TARGET_SESSION_REQUEST_EXPORTS,
+)
 
 
 def install_windows_target_session_helpers(
     bindings: dict,
     names: tuple[str, ...] = WINDOWS_TARGET_SESSION_EXPORTS,
 ) -> None:
+    identity_names = tuple(name for name in names if name in WINDOWS_TARGET_SESSION_IDENTITY_EXPORTS)
+    request_names = tuple(name for name in names if name in WINDOWS_TARGET_SESSION_REQUEST_EXPORTS)
     known_names = set(WINDOWS_TARGET_SESSION_EXPORTS)
-    session_names = tuple(name for name in names if name in known_names)
     unknown_names = tuple(name for name in names if name not in known_names)
 
-    install_local_helpers(bindings, globals(), session_names)
+    install_windows_target_session_identity_helpers(bindings, identity_names)
+    install_windows_target_session_request_helpers(bindings, request_names)
     if unknown_names:
         install_local_helpers(bindings, globals(), unknown_names)
