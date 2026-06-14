@@ -1,0 +1,5 @@
+# Generated synthetic fixtures — regenerate via tools/make_corpus.py
+synthetic/*.wav
+synthetic/MANIFEST.tsv
+# User-supplied musical loops — never committed (licensed audio)
+musical/

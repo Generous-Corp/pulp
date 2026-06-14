@@ -1,0 +1,12 @@
+// PulpTempoSampler VST3 entry point.
+
+#include "pulp_tempo_sampler.hpp"
+#include <pulp/format/vst3_entry.hpp>
+
+// Unique ID — stable across versions, never change.
+static const Steinberg::FUID PulpTempoSamplerUID(0x50554C50, 0x54454D50, 0x53414D50, 0x00000001);
+
+PULP_VST3_PLUGIN(PulpTempoSamplerUID, "PulpTempoSampler",
+                 Steinberg::Vst::PlugType::kInstrumentSynth,
+                 "Pulp", "1.0.0", "https://github.com/danielraffel/pulp",
+                 pulp::examples::create_pulp_tempo_sampler)
