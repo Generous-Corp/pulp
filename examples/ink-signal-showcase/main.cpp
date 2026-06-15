@@ -18,15 +18,7 @@
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/gap_widgets.hpp>
 #include <pulp/view/midi_keyboard.hpp>
-#include <pulp/view/musical_typing_keyboard.hpp>
-#include <pulp/view/channel_strip_view.hpp>
-#include <pulp/view/range_slider_view.hpp>
-#include <pulp/view/inline_value_editor_view.hpp>
-#include <pulp/view/property_panel_view.hpp>
-#include <pulp/view/group_box_view.hpp>
-#include <pulp/view/number_box_states_view.hpp>
-#include <pulp/view/knob_modulation_view.hpp>
-#include <pulp/view/waveform_recorder_view.hpp>
+#include <pulp/view/design_frame_view.hpp>  // FaithfulOverview (--overview reference)
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/scroll_bar.hpp>
 #include <pulp/view/side_panel.hpp>
@@ -112,7 +104,10 @@ void advance_anims(View* v, float dt) {
     for (std::size_t i = 0; i < v->child_count(); ++i) advance_anims(v->child_at(i), dt);
 }
 
-std::unique_ptr<View> build_board(float& out_height, ThemeModeControl*& out_theme_ctl) {
+// Legacy hand-built native-widget gallery — kept for the future "interactive"
+// hybrid view, but no longer the default (the showcase now mirrors the Figma
+// Overview 1:1; see build_overview_board).
+[[maybe_unused]] std::unique_ptr<View> build_board(float& out_height, ThemeModeControl*& out_theme_ctl) {
     auto board = std::make_unique<Board>();
     Board* b = board.get();
     float y = 24.0f;
@@ -200,13 +195,16 @@ std::unique_ptr<View> build_board(float& out_height, ThemeModeControl*& out_them
         // MACRO violet) — match the Figma "Knob Modulation" set.
         const Color LFO = Color::hex(0x5E78FF), ENV = Color::hex(0xF6B847),
                     VEL = Color::hex(0xFF7AA8), MAC = Color::hex(0x8B6CF5);
+        // Each ring is {lo, hi, color} — independent signed offsets from base,
+        // so the labels are now literal: Positive extends up only (lo=0), Negative
+        // down only (hi=0), Bipolar both ways. Each handle drags on its own.
         struct Spec { const char* name; float val; std::vector<Knob::ModulationRing> rings; };
         std::vector<Spec> specs = {
-            {"Positive", 0.5f, {{0.5f, ENV}}},
-            {"Negative", 0.6f, {{-0.4f, LFO}}},
-            {"Bipolar", 0.5f, {{0.55f, MAC}}},
-            {"2 sources", 0.45f, {{0.5f, LFO}, {-0.3f, ENV}}},
-            {"3 sources", 0.5f, {{0.4f, LFO}, {0.6f, ENV}, {-0.5f, VEL}}},
+            {"Positive", 0.5f, {{0.0f, 0.5f, ENV}}},
+            {"Negative", 0.6f, {{-0.4f, 0.0f, LFO}}},
+            {"Bipolar", 0.5f, {{-0.55f, 0.55f, MAC}}},
+            {"2 sources", 0.45f, {{0.0f, 0.5f, LFO}, {-0.3f, 0.0f, ENV}}},
+            {"3 sources", 0.5f, {{0.0f, 0.4f, LFO}, {0.0f, 0.6f, ENV}, {-0.5f, 0.0f, VEL}}},
         };
         float x = kMargin;
         std::vector<Knob*> mod_targets;
@@ -227,9 +225,10 @@ std::unique_ptr<View> build_board(float& out_height, ThemeModeControl*& out_them
         Knob* m0 = mod_targets[0];
         Knob* m2 = mod_targets[2];
         macro->on_change = [m0, m2](float v) {
-            // Map 0..1 → range half-width 0..0.6, applied to two target knobs.
-            m0->set_modulation_rings({{v * 0.6f, Color::hex(0xF6B847)}});
-            m2->set_modulation_rings({{v * 0.6f, Color::hex(0x8B6CF5)}});
+            // Map 0..1 → bipolar half-width 0..0.6, applied to two target knobs
+            // (widens both ends symmetrically — the macro-routing demo).
+            m0->set_modulation_rings({{-v * 0.6f, v * 0.6f, Color::hex(0xF6B847)}});
+            m2->set_modulation_rings({{-v * 0.6f, v * 0.6f, Color::hex(0x8B6CF5)}});
         };
         add(std::move(macro), x + 12.0f, y, 92.0f, 92.0f);
         y += 112.0f;
@@ -365,51 +364,11 @@ std::unique_ptr<View> build_board(float& out_height, ThemeModeControl*& out_them
         auto kbd = std::make_unique<MidiKeyboard>(); kbd->set_range(48, 72);
         add(std::move(kbd), kMargin + 160.0f, y + 40.0f, 740.0f, 90.0f);
         y += 150.0f;
-        // Musical Typing Keyboard (catalog component) — faithful Figma-exported
-        // SVG rendered 1:1 via DesignFrameView. Shows both typing + piano states.
-        auto mtk = std::make_unique<MusicalTypingKeyboard>();
-        add(std::move(mtk), kMargin, y, 900.0f, 300.0f);
-        y += 320.0f;
-        // Channel Strip (faithful Figma render via DesignFrameView) — the rich
-        // pro strip; the lean interactive widget is ChannelStrip (mixer below).
-        add(std::make_unique<ChannelStripView>(), kMargin, y, 900.0f, 300.0f);
-        y += 320.0f;
-        // The remaining faithful Figma specimens (DesignFrameView; fit-to-bounds).
-        section("Design specimens (faithful Figma)");
-        add(std::make_unique<RangeSliderView>(),       kMargin, y, 460.0f, 600.0f);
-        add(std::make_unique<InlineValueEditorView>(), kMargin + 480.0f, y, 460.0f, 360.0f);
-        y += 620.0f;
-        add(std::make_unique<PropertyPanelView>(),     kMargin, y, 460.0f, 560.0f);
-        add(std::make_unique<GroupBoxView>(),          kMargin + 480.0f, y, 460.0f, 360.0f);
-        y += 580.0f;
-        add(std::make_unique<NumberBoxStatesView>(),   kMargin, y, 800.0f, 340.0f);
-        y += 360.0f;
-        add(std::make_unique<KnobModulationView>(),    kMargin, y, 900.0f, 240.0f);
-        y += 260.0f;
-        add(std::make_unique<WaveformRecorderView>(),  kMargin, y, 900.0f, 780.0f);
-        y += 800.0f;
-    }
-
-    // ── Containers / mixer (interactive faders) ────────────────────────
-    section("Containers · Mixer");
-    {
-        auto panel = std::make_unique<Panel>();
-        add(std::move(panel), kMargin, y, 200.0f, 150.0f);
-        label("Panel", kMargin + 12.0f, y + 10.0f, 120.0f, 12.0f);
-
-        // Real interactive faders (draggable), plus a display ChannelStrip.
-        float fx = kMargin + 230.0f;
-        const char* chans[] = {"Drums", "Bass", "Synth", "Keys"};
-        const float fl[] = {0.7f, 0.5f, 0.82f, 0.6f};
-        for (int i = 0; i < 4; ++i) {
-            auto f = std::make_unique<Fader>(); f->set_value(fl[i]);
-            add(std::move(f), fx, y + 6.0f, 26.0f, 120.0f);
-            label(chans[i], fx - 6.0f, y + 132.0f, 40.0f, 11.0f);
-            fx += 60.0f;
-        }
-        auto cs = std::make_unique<ChannelStrip>(); cs->set_label("Master"); cs->set_level(0.75f); cs->set_pan(0.0f);
-        add(std::move(cs), fx + 20.0f, y, 84.0f, 150.0f);
-        y += 168.0f;
+        // The faithful Figma renders (Musical Typing, Channel Strip, Range Slider,
+        // Property Panel, etc.) are pixel-perfect but STATIC. They live as catalog
+        // components and in the `--overview` 1:1 reference — not inline here, where
+        // every widget should be live. Their interactive versions land per the
+        // faithful-playable follow-up (see planning/2026-06-15-faithful-playable-mtk-contract.md).
     }
 
     // ── Buttons & inputs — Search · TextArea · NumberBox ───────────────
@@ -451,15 +410,20 @@ std::unique_ptr<View> build_board(float& out_height, ThemeModeControl*& out_them
     {
         // Model is non-owning from the table's perspective; a function-static
         // keeps it alive for the single showcase instance's lifetime.
+        // Columns + data mirror the Figma "Table · TableListBox" (NAME / TYPE /
+        // CPU) with a teal-selected row, not the old NAME/NOTE/GAIN placeholder.
         static SimpleTableModel table_model;
-        table_model.set_data({{"Kick", "C1", "-6 dB"}, {"Snare", "D1", "-4 dB"},
-                              {"Hat", "F#1", "-9 dB"}, {"Clap", "E1", "-7 dB"}});
+        table_model.set_data({{"E-Piano", "Instrument", "4.2%"},
+                              {"Reverb", "FX", "1.8%"},
+                              {"Arp", "MIDI FX", "0.9%"},
+                              {"Master", "Bus", "2.6%"}});
         auto table = std::make_unique<TableListBox>();
-        table->add_column({"NAME", 140.0f});
-        table->add_column({"NOTE", 80.0f});
-        table->add_column({"GAIN", 90.0f});
+        table->add_column({"NAME", 150.0f});
+        table->add_column({"TYPE", 110.0f});
+        table->add_column({"CPU", 70.0f});
         table->set_model(&table_model);
-        add(std::move(table), kMargin, y, 320.0f, 150.0f);
+        table->set_selected_row(1);  // teal-highlighted row (matches Figma)
+        add(std::move(table), kMargin, y, 340.0f, 150.0f);
         y += 170.0f;
     }
 
@@ -526,18 +490,103 @@ std::unique_ptr<View> build_board(float& out_height, ThemeModeControl*& out_them
     return board;
 }
 
+// ── Faithful Overview ────────────────────────────────────────────────────
+// The showcase body: the design's Overview rendered 1:1 via DesignFrameView
+// (SkSVGDOM), swapping the dark/light SVG export to match the active theme.
+// This makes the app match the Figma Overview page, with only a showcase title
+// and the system/light/dark toggle added on top.
+class FaithfulOverview : public View {
+public:
+    FaithfulOverview(std::string dark_svg, std::string light_svg, float w, float h) {
+        auto mk = [&](std::string svg) -> DesignFrameView* {
+            auto v = std::make_unique<DesignFrameView>(std::move(svg),
+                                                       std::vector<DesignFrameElement>{});
+            v->set_bounds({0.0f, 0.0f, w, h});
+            DesignFrameView* p = v.get();
+            add_child(std::move(v));
+            return p;
+        };
+        dark_ = mk(std::move(dark_svg));
+        light_ = mk(std::move(light_svg));
+        set_dark(true);
+    }
+    void set_dark(bool d) {
+        if (dark_) dark_->set_visible(d);
+        if (light_) light_->set_visible(!d);
+        request_repaint();
+    }
+private:
+    DesignFrameView* dark_ = nullptr;
+    DesignFrameView* light_ = nullptr;
+};
+
+std::string read_showcase_asset(const char* name) {
+    std::string path = std::string(SHOWCASE_ASSET_DIR) + "/" + name;
+    std::ifstream f(path, std::ios::binary);
+    if (!f) { std::fprintf(stderr, "warning: cannot read asset %s\n", path.c_str()); return {}; }
+    return std::string(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+}
+
+View* add_abs(Board* b, std::unique_ptr<View> v, float x, float y, float w, float h) {
+    v->set_bounds({x, y, w, h});
+    v->set_position(View::Position::absolute);
+    v->set_left(x);
+    v->set_top(y);
+    v->flex().preferred_width = w;
+    v->flex().preferred_height = h;
+    View* p = v.get();
+    b->add_child(std::move(v));
+    return p;
+}
+
+// Build the showcase as the faithful Figma Overview + a showcase title and the
+// theme toggle (the only two deliberate departures from the Overview).
+std::unique_ptr<View> build_overview_board(float& out_height,
+                                           ThemeModeControl*& out_theme_ctl,
+                                           FaithfulOverview*& out_overview) {
+    auto board = std::make_unique<Board>();
+    Board* b = board.get();
+
+    auto title = std::make_unique<Label>("Ink & Signal — Showcase");
+    title->set_font_size(24.0f);
+    add_abs(b, std::move(title), kMargin, 24.0f, kContentW - 130.0f, 30.0f);
+
+    auto ctl = std::make_unique<ThemeModeControl>();
+    out_theme_ctl = static_cast<ThemeModeControl*>(
+        add_abs(b, std::move(ctl), kMargin + kContentW - 104.0f, 24.0f, 104.0f, 28.0f));
+
+    // The Overview SVG panel is ~1400×11011; fit its width to the content area
+    // (DesignFrameView preserves aspect).
+    const float ovY = 72.0f;
+    const float ovW = kContentW;
+    const float ovH = ovW * (11011.0f / 1400.0f);
+    auto ov = std::make_unique<FaithfulOverview>(read_showcase_asset("overview-dark.svg"),
+                                                 read_showcase_asset("overview-light.svg"),
+                                                 ovW, ovH);
+    out_overview = ov.get();
+    add_abs(b, std::move(ov), kMargin, ovY, ovW, ovH);
+
+    out_height = ovY + ovH + 24.0f;
+    b->flex().preferred_width = kContentW + 2.0f * kMargin;
+    b->flex().preferred_height = out_height;
+    b->flex().flex_shrink = 0.0f;
+    return board;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
     std::string theme_name = "dark";
     std::string preset = "ink-signal";
     std::string screenshot;
-    bool fit = false;  // --fit: aspect-locked proportional resize instead of scroll
+    bool fit = false;       // --fit: aspect-locked proportional resize instead of scroll
+    bool overview = false;  // --overview: faithful 1:1 Figma render (static reference)
     for (int i = 1; i < argc; ++i) {
         if (!std::strcmp(argv[i], "--theme") && i + 1 < argc) theme_name = argv[++i];
         else if (!std::strcmp(argv[i], "--preset") && i + 1 < argc) preset = argv[++i];
         else if (!std::strcmp(argv[i], "--screenshot") && i + 1 < argc) screenshot = argv[++i];
         else if (!std::strcmp(argv[i], "--fit")) fit = true;
+        else if (!std::strcmp(argv[i], "--overview")) overview = true;
     }
 
     const ThemePreset* p = find_preset(preset);
@@ -559,11 +608,28 @@ int main(int argc, char** argv) {
 
     float content_h = 0.0f;
     ThemeModeControl* theme_ctl = nullptr;
-    auto board = build_board(content_h, theme_ctl);
+    // Default: the interactive native-widget gallery (real, draggable, theme-
+    // inheriting reusable components). `--overview` instead renders the faithful
+    // 1:1 Figma Overview as a static reference (a fidelity proof, not the app).
+    FaithfulOverview* overview_view = nullptr;
+    auto board = overview ? build_overview_board(content_h, theme_ctl, overview_view)
+                          : build_board(content_h, theme_ctl);
     if (theme_ctl) {
         theme_ctl->set_mode(theme_mgr.mode());
         theme_ctl->on_mode_change = [&theme_mgr](ThemeMode m) { theme_mgr.set_mode(m); };
     }
+
+    // Pick the faithful-Overview SVG variant (dark/light) that matches the
+    // resolved theme: light/dark pin it, system follows the OS appearance.
+    auto effective_dark = [&theme_mgr]() -> bool {
+        switch (theme_mgr.mode()) {
+            case ThemeMode::light: return false;
+            case ThemeMode::dark:  return true;
+            default: return theme_mgr.tracker().current_appearance() == Appearance::dark;
+        }
+    };
+    if (overview_view) overview_view->set_dark(effective_dark());
+
     board->set_theme(theme_mgr.active_theme());
     board->set_bounds({0, 0, static_cast<float>(W), content_h});
 
@@ -625,21 +691,27 @@ int main(int argc, char** argv) {
     // manual toggle (ThemeModeControl → set_mode) or a live OS appearance flip
     // (theme_mgr.poll() below). resolve_color walks the parent chain, so
     // setting the theme on the root + board restyles every widget.
-    auto apply_theme = [board_ptr, scroll_ptr](const Theme& t) {
+    auto apply_theme = [board_ptr, scroll_ptr, overview_view, effective_dark](const Theme& t) {
         if (scroll_ptr) scroll_ptr->set_theme(t);
         board_ptr->set_theme(t);
+        // Swap the faithful-Overview SVG variant to match the new appearance.
+        if (overview_view) overview_view->set_dark(effective_dark());
         board_ptr->request_repaint();
     };
     theme_mgr.on_theme_changed([&apply_theme](const Theme& t) { apply_theme(t); });
 
-    window->set_idle_callback([win, board_ptr, theme_ctl, &theme_mgr]() {
+    window->set_idle_callback([win, board_ptr, theme_ctl, overview_view, &theme_mgr,
+                               effective_dark]() {
         constexpr float dt = 1.0f / 60.0f;
         // Live OS-appearance follow: in system mode this swaps the theme when
         // the OS toggles light/dark (fires on_theme_changed → apply_theme).
         theme_mgr.poll();
         if (theme_ctl) theme_ctl->set_mode(theme_mgr.mode());
-        // Advance the shared modulation LFO (~0.25 Hz) that drives the Saturn
-        // knobs' live indicator dots, then tick all widget animations.
+        // Keep the Overview SVG variant in sync (covers the system-mode OS flip
+        // even if no Theme object changed identity).
+        if (overview_view) overview_view->set_dark(effective_dark());
+        // Tick widget animations (the title/toggle chrome); the Overview render
+        // itself is a static faithful vector.
         static float t = 0.0f;
         t += dt;
         g_mod_lfo = std::sin(t * 1.5f);
