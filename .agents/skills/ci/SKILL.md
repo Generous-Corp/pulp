@@ -165,6 +165,14 @@ Slice 6 (#551).
   it only fails on a header that genuinely won't compile alone (no "unused
   include" false positives), so it is safe to block on. Headers whose module
   isn't in the GPU-off compile DB are skipped, not failed.
+- **Windows FetchContent subbuilds need a short base dir.** GitHub-hosted
+  Windows runners can still route MSBuild metadata through the legacy
+  260-character path limit. The wgpu prebuilt-populate subbuild has deeply
+  nested stamp paths, so `build-windows/_deps/...` can exceed MAX_PATH during
+  configure even before compilation. `build.yml` passes
+  `-DFETCHCONTENT_BASE_DIR="$PWD/fc"` only on Windows to keep dependency
+  subbuilds short while preserving the normal `build-windows` artifact/test
+  directory.
 - `.github/workflows/watchdog-reaper.yml` (pulp #2576) sweeps ALL open release
   watchdog trackers daily and closes any whose version is released or superseded
   — the existing watchdogs only auto-close inside a recent window, so historical

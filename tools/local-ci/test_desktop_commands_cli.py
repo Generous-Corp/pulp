@@ -1,23 +1,18 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import importlib.util
 import json
 from argparse import Namespace
 from pathlib import Path
 import tempfile
 import unittest
 
+from module_test_utils import load_local_ci_module
 
-MODULE_PATH = Path(__file__).resolve().with_name("desktop_commands_cli.py")
 
 
 def load_desktop_commands_cli_module():
-    spec = importlib.util.spec_from_file_location("desktop_commands_cli_under_test", MODULE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    return load_local_ci_module("desktop_commands_cli.py")
 
 
 class DesktopCommandsCliTests(unittest.TestCase):
@@ -242,6 +237,25 @@ class DesktopCommandsCliTests(unittest.TestCase):
         )
         self.assertEqual(result, 0)
         self.assertEqual(self.printed[-1], "published 1")
+
+        report = {
+            "output_dir": "/tmp/publish",
+            "index_html": "/tmp/publish/index.html",
+            "index_json": "/tmp/publish/index.json",
+            "run_count": 1,
+            "runs": [],
+        }
+        result = self.mod.cmd_desktop_publish(
+            Namespace(target="mac", action="smoke", limit=1, output=None, label="gallery", json=True),
+            load_config_fn=lambda: config,
+            desktop_run_manifests_fn=lambda *_args, **_kwargs: [run_manifest],
+            stage_desktop_publish_report_fn=lambda *_args, **_kwargs: report,
+            desktop_publish_lines_fn=lambda _report: ["unused"],
+            print_fn=self.print_line,
+        )
+        self.assertEqual(result, 0)
+        self.assertEqual(json.loads(self.printed[-1])["index_html"], "/tmp/publish/index.html")
+        self.assertEqual(json.loads(self.printed[-1])["run_count"], 1)
 
         removed = []
         rollups = []

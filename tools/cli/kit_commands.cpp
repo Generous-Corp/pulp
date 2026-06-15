@@ -10,6 +10,7 @@
 #include "package_registry.hpp"
 #include "pulp_version_gen.h"
 
+#include <pulp/platform/child_process.hpp>
 #include <pulp/runtime/crypto.hpp>
 
 #include "../../external/miniz/miniz.h"
@@ -2141,9 +2142,9 @@ bool dimensions_match(const JsonValue& profile_dims, const JsonValue& report_dim
         && int_field(profile_dims, "scale") == int_field(report_dims, "scale");
 }
 
+#ifdef _WIN32
 std::string shell_quote_local(const fs::path& path) {
     const auto s = path.string();
-#ifdef _WIN32
     std::string out = "\"";
     for (char c : s) {
         if (c == '"') out += "\\\"";
@@ -2151,16 +2152,8 @@ std::string shell_quote_local(const fs::path& path) {
     }
     out += "\"";
     return out;
-#else
-    std::string out = "'";
-    for (char c : s) {
-        if (c == '\'') out += "'\\''";
-        else out += c;
-    }
-    out += "'";
-    return out;
-#endif
 }
+#endif
 
 std::string safe_artifact_stem(std::string value) {
     if (value.empty()) value = "profile";
@@ -2319,32 +2312,32 @@ void maybe_execute_screenshot_profile(KitProfileResult& profile,
     const int height = int_field(dimensions, "height");
     const int scale = int_field(dimensions, "scale");
 
-    std::string command = shell_quote_local(screenshot_tool)
-        + " --script " + shell_quote_local(root / fs::path(entrypoint))
-        + " --output " + shell_quote_local(output)
-        + " --width " + std::to_string(width)
-        + " --height " + std::to_string(height)
-        + " --scale " + std::to_string(scale)
-        + " --backend " + shell_quote_local(fs::path(options.screenshot_backend))
-        + " > " + shell_quote_local(log) + " 2>&1";
+    const std::vector<std::string> screenshot_args{
+        "--script", (root / fs::path(entrypoint)).string(),
+        "--output", output.string(),
+        "--width", std::to_string(width),
+        "--height", std::to_string(height),
+        "--scale", std::to_string(scale),
+        "--backend", options.screenshot_backend,
+    };
+    pulp::platform::ProcessResult result;
 #ifdef _WIN32
     const auto screenshot_ext = screenshot_tool.extension().string();
-    if (screenshot_ext == ".cmd" || screenshot_ext == ".bat")
-        command = "call " + command;
-    // `std::system` runs `cmd.exe /c <command>`. When <command> starts with a
-    // quoted path and also contains further quotes (our quoted --script /
-    // --output args and the redirect target), cmd mis-parses it and aborts
-    // with "The filename, directory name, or volume label syntax is incorrect"
-    // before running anything — so no screenshot and no render log are written.
-    // Wrapping the whole command in one extra pair of quotes makes cmd strip
-    // exactly that pair and run the remainder verbatim. Verified against real
-    // Windows; without it `pulp kit verify --execute-screenshots` cannot launch
-    // the screenshot tool at all.
-    command = "\"" + command + "\"";
+    if (screenshot_ext == ".cmd" || screenshot_ext == ".bat") {
+        std::string shell_command = "call " + shell_quote_local(screenshot_tool);
+        for (const auto& arg : screenshot_args) {
+            shell_command += " " + shell_quote_local(fs::path(arg));
+        }
+        result = pulp::platform::exec("cmd", {"/C", shell_command}, 120000);
+    } else {
+        result = pulp::platform::exec(screenshot_tool.string(), screenshot_args, 120000);
+    }
+#else
+    result = pulp::platform::exec(screenshot_tool.string(), screenshot_args, 120000);
 #endif
-    const int rc = std::system(command.c_str());
+    (void)write_text(log, result.stdout_output + result.stderr_output);
     profile.artifacts.push_back({"render-log", log.string()});
-    if (rc != 0 || !fs::exists(output) || fs::file_size(output, ec) == 0 || ec) {
+    if (result.exit_code != 0 || !fs::exists(output) || fs::file_size(output, ec) == 0 || ec) {
         add_profile_issue(profile, "error", "screenshot-render-failed",
                           "Screenshot execution failed; see render log");
         profile.status = "fail";

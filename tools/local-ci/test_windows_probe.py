@@ -4,23 +4,18 @@
 from __future__ import annotations
 
 import base64
-import importlib.util
 import json
 from pathlib import Path
 from types import SimpleNamespace
 import tempfile
 import unittest
 
+from module_test_utils import load_local_ci_module
 
-MODULE_PATH = Path(__file__).with_name("windows_probe.py")
 
 
 def load_module():
-    spec = importlib.util.spec_from_file_location("windows_probe_under_test", MODULE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    return load_local_ci_module("windows_probe.py")
 
 
 def completed(*, returncode: int = 0, stdout: str = "", stderr: str = ""):

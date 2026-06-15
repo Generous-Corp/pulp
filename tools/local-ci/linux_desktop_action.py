@@ -8,41 +8,24 @@ from pathlib import Path
 import shlex
 import subprocess
 
-
-def fetch_ssh_artifact(
-    host: str,
-    remote_path: str,
-    local_path: Path,
-    *,
-    optional: bool = False,
-    timeout: int = 60,
-    run_fn: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
-) -> bool:
-    local_path.parent.mkdir(parents=True, exist_ok=True)
-    result = run_fn(
-        ["scp", f"{host}:{remote_path}", str(local_path)],
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-    )
-    if result.returncode == 0 and local_path.exists():
-        return True
-    if optional:
-        return False
-    detail = result.stderr.strip() or result.stdout.strip() or f"scp exited {result.returncode}"
-    raise RuntimeError(f"Failed to copy `{remote_path}` from {host}: {detail}")
+from linux_desktop_action_result import (
+    build_linux_desktop_action_manifest,
+    fetch_linux_remote_action_outputs,
+)
+from linux_desktop_artifacts import cleanup_remote_ssh_dir, fetch_ssh_artifact
+from desktop_remote_action_preflight import (
+    require_pulp_app_automation_for_remote_view_options,
+    resolve_remote_desktop_action_host,
+)
 
 
-def cleanup_remote_ssh_dir(
-    host: str,
-    remote_dir_expr: str,
-    *,
-    ssh_command_result_fn: Callable[..., subprocess.CompletedProcess[str]],
-) -> None:
-    try:
-        ssh_command_result_fn(host, f"rm -rf {remote_dir_expr}", timeout=20)
-    except Exception:
-        pass
+__all__ = (
+    "cleanup_remote_ssh_dir",
+    "fetch_ssh_artifact",
+    "require_pulp_app_automation_for_remote_view_options",
+    "resolve_remote_desktop_action_host",
+    "run_linux_xvfb_remote_action",
+)
 
 
 def run_linux_xvfb_remote_action(
@@ -87,12 +70,12 @@ def run_linux_xvfb_remote_action(
     view_tree_inspector_summary_fn: Callable[[dict], dict],
     pulp_app_interaction_summary_fn: Callable[..., dict],
 ) -> dict:
-    host = ensure_host_reachable_fn(target_name, target, config.get("defaults", {}))
-    if not host:
-        raise RuntimeError(f"Desktop target `{target_name}` is not reachable over SSH.")
-    repo_path = target.get("repo_path")
-    if not repo_path:
-        raise RuntimeError(f"Desktop target `{target_name}` is missing repo_path.")
+    host, repo_path = resolve_remote_desktop_action_host(
+        config,
+        target_name,
+        target,
+        ensure_host_reachable_fn=ensure_host_reachable_fn,
+    )
     launch_backend = probe_linux_launch_backend_fn(host)
     if launch_backend.get("mode") == "missing":
         raise RuntimeError(
@@ -105,11 +88,17 @@ def run_linux_xvfb_remote_action(
         click_view_text=click_view_text,
         click_view_label=click_view_label,
     )
-    if not pulp_app_automation:
-        if capture_ui_snapshot:
-            raise RuntimeError("linux-xvfb desktop inspect supports UI snapshots only with --pulp-app-automation.")
-        if any([click_view_id, click_view_type, click_view_text, click_view_label]):
-            raise RuntimeError("linux-xvfb view-target selectors currently require --pulp-app-automation.")
+    require_pulp_app_automation_for_remote_view_options(
+        target_name=target_name,
+        pulp_app_automation=pulp_app_automation,
+        capture_ui_snapshot=capture_ui_snapshot,
+        click_view_id=click_view_id,
+        click_view_type=click_view_type,
+        click_view_text=click_view_text,
+        click_view_label=click_view_label,
+        snapshot_error="linux-xvfb desktop inspect supports UI snapshots only with --pulp-app-automation.",
+        selector_error="linux-xvfb view-target selectors currently require --pulp-app-automation.",
+    )
 
     bundle_dir = create_desktop_run_bundle_fn(config, target_name, action_name)
     action_paths = desktop_action_artifact_paths_fn(bundle_dir, output_path)
@@ -169,93 +158,66 @@ def run_linux_xvfb_remote_action(
     log_path.write_text(run.stdout or "")
     err_path.write_text(run.stderr or "")
 
-    remote_screenshot = remote_bundle_copy_root + "/screenshots/window.png"
-    remote_before = remote_bundle_copy_root + "/screenshots/before.png"
-    remote_ui = remote_bundle_copy_root + "/ui-tree.json"
-    remote_stdout = remote_bundle_copy_root + "/stdout.log"
-    remote_stderr = remote_bundle_copy_root + "/stderr.log"
-    remote_pid = remote_bundle_copy_root + "/pid.txt"
-    remote_window_id = remote_bundle_copy_root + "/window-id.txt"
-    remote_window_title = remote_bundle_copy_root + "/window-title.txt"
-
-    try:
-        fetch_ssh_artifact_fn(host, remote_stdout, log_path, optional=True)
-        fetch_ssh_artifact_fn(host, remote_stderr, err_path, optional=True)
-        fetch_ssh_artifact_fn(host, remote_screenshot, screenshot_path)
-        fetch_ssh_artifact_fn(host, remote_pid, pid_path, optional=True)
-        fetch_ssh_artifact_fn(host, remote_window_id, window_id_path, optional=True)
-        fetch_ssh_artifact_fn(host, remote_window_title, window_title_path, optional=True)
-        if capture_before:
-            fetch_ssh_artifact_fn(host, remote_before, before_screenshot_path, optional=not pulp_app_automation)
-        if capture_ui_snapshot:
-            fetch_ssh_artifact_fn(host, remote_ui, ui_snapshot_path)
-    finally:
-        cleanup_remote_ssh_dir_fn(host, remote_bundle_cleanup_expr)
+    fetch_linux_remote_action_outputs(
+        host=host,
+        remote_bundle_copy_root=remote_bundle_copy_root,
+        remote_bundle_cleanup_expr=remote_bundle_cleanup_expr,
+        pulp_app_automation=pulp_app_automation,
+        capture_before=capture_before,
+        capture_ui_snapshot=capture_ui_snapshot,
+        screenshot_path=screenshot_path,
+        before_screenshot_path=before_screenshot_path,
+        ui_snapshot_path=ui_snapshot_path,
+        log_path=log_path,
+        err_path=err_path,
+        pid_path=pid_path,
+        window_id_path=window_id_path,
+        window_title_path=window_title_path,
+        fetch_ssh_artifact_fn=fetch_ssh_artifact_fn,
+        cleanup_remote_ssh_dir_fn=cleanup_remote_ssh_dir_fn,
+    )
 
     if run.returncode != 0:
         detail = err_path.read_text(errors="replace").strip() or log_path.read_text(errors="replace").strip() or f"remote command exited {run.returncode}"
         raise RuntimeError(detail)
 
-    pid_value = None
-    if pid_path.exists():
-        try:
-            pid_value = int(pid_path.read_text().strip())
-        except ValueError:
-            pid_value = None
-
-    manifest = {
-        "target": target_name,
-        "adapter": target["adapter"],
-        "action": action_name,
-        "label": label or default_desktop_label_fn(command),
-        "pid": pid_value,
-        "host": host,
-        "repo_path": repo_path,
-        "command": launch_command,
-        "started_at": started_at,
-        "completed_at": now_iso_fn(),
-        "artifacts": {
-            "bundle_dir": str(bundle_dir),
-            "screenshot": str(screenshot_path),
-            "stdout": str(log_path),
-            "stderr": str(err_path),
-            "remote_bundle_dir": remote_bundle_copy_root,
-        },
-    }
-    if window_id_path.exists() or window_title_path.exists():
-        manifest["window"] = {}
-        if window_id_path.exists():
-            manifest["window"]["window_id"] = window_id_path.read_text().strip()
-        if window_title_path.exists():
-            manifest["window"]["title"] = window_title_path.read_text().strip()
-    if capture_before and before_screenshot_path.exists() and screenshot_path.exists():
-        manifest["artifacts"]["before_screenshot"] = str(before_screenshot_path)
-        manifest["artifacts"]["image_change"] = image_change_summary_fn(
-            before_screenshot_path,
-            screenshot_path,
-            diff_output_path=diff_screenshot_path,
-        )
-        if diff_screenshot_path.exists():
-            manifest["artifacts"]["diff_screenshot"] = str(diff_screenshot_path)
-    if capture_ui_snapshot and ui_snapshot_path.exists():
-        view_tree = json.loads(ui_snapshot_path.read_text())
-        manifest["artifacts"]["ui_snapshot"] = str(ui_snapshot_path)
-        manifest["inspector"] = view_tree_inspector_summary_fn(view_tree)
-    if interaction_requested:
-        if pulp_app_automation:
-            manifest["interaction"] = pulp_app_interaction_summary_fn(
-                click_point=click_point,
-                click_view_id=click_view_id,
-                click_view_type=click_view_type,
-                click_view_text=click_view_text,
-                click_view_label=click_view_label,
-            )
-        else:
-            click_summary = {"point": click_point}
-            if click_point:
-                content_x, content_y = parse_coordinate_pair_fn(click_point, flag_name="--click")
-                click_summary["content_point"] = {"x": content_x, "y": content_y}
-            manifest["interaction"] = {"mode": "x11-window-driver", "click": click_summary}
+    manifest = build_linux_desktop_action_manifest(
+        target_name=target_name,
+        target=target,
+        command=command,
+        launch_command=launch_command,
+        host=host,
+        repo_path=repo_path,
+        action_name=action_name,
+        label=label,
+        started_at=started_at,
+        completed_at=now_iso_fn(),
+        bundle_dir=bundle_dir,
+        remote_bundle_copy_root=remote_bundle_copy_root,
+        screenshot_path=screenshot_path,
+        before_screenshot_path=before_screenshot_path,
+        diff_screenshot_path=diff_screenshot_path,
+        ui_snapshot_path=ui_snapshot_path,
+        log_path=log_path,
+        err_path=err_path,
+        pid_path=pid_path,
+        window_id_path=window_id_path,
+        window_title_path=window_title_path,
+        capture_before=capture_before,
+        capture_ui_snapshot=capture_ui_snapshot,
+        interaction_requested=interaction_requested,
+        pulp_app_automation=pulp_app_automation,
+        click_point=click_point,
+        click_view_id=click_view_id,
+        click_view_type=click_view_type,
+        click_view_text=click_view_text,
+        click_view_label=click_view_label,
+        default_desktop_label_fn=default_desktop_label_fn,
+        image_change_summary_fn=image_change_summary_fn,
+        parse_coordinate_pair_fn=parse_coordinate_pair_fn,
+        view_tree_inspector_summary_fn=view_tree_inspector_summary_fn,
+        pulp_app_interaction_summary_fn=pulp_app_interaction_summary_fn,
+    )
     attach_desktop_source_to_manifest_fn(manifest, source_context or source_request)
     atomic_write_text_fn(bundle_dir / "manifest.json", json.dumps(manifest, indent=2) + "\n")
     write_desktop_run_rollups_fn(config, target_name=target_name)

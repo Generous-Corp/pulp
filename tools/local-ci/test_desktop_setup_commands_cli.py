@@ -1,23 +1,18 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import importlib.util
 import json
 from argparse import Namespace
 from pathlib import Path
 import subprocess
 import unittest
 
+from module_test_utils import load_local_ci_module
 
-MODULE_PATH = Path(__file__).resolve().with_name("desktop_setup_commands_cli.py")
 
 
 def load_desktop_setup_commands_cli_module():
-    spec = importlib.util.spec_from_file_location("desktop_setup_commands_cli_under_test", MODULE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    return load_local_ci_module("desktop_setup_commands_cli.py")
 
 
 class DesktopSetupCommandsCliTests(unittest.TestCase):
@@ -148,6 +143,7 @@ class DesktopSetupCommandsCliTests(unittest.TestCase):
         self.assertTrue(receipt["remote_bootstrap_ready"])
         self.assertTrue(receipt["remote_tooling_ready"])
         self.assertTrue(receipt["remote_repo_checkout_ready"])
+        self.assertEqual(receipt["contract"]["task_name"], "PulpDesktopAutomationAgent-windows")
         self.assertEqual(receipt["repo_path"], r"C:\Users\daniel\pulp-validate")
         self.assertEqual(len(self.saved_configs), 1)
         self.assertIn("  remote bootstrap: ready", self.printed)

@@ -36,6 +36,37 @@ namespace fs = std::filesystem;
 
 namespace {
 
+std::string shell_quote_arg(const std::string& value) {
+#ifdef _WIN32
+    std::string out = "\"";
+    int backslashes = 0;
+    for (char c : value) {
+        if (c == '\\') {
+            backslashes++;
+        } else if (c == '"') {
+            out.append(static_cast<std::size_t>(backslashes) * 2 + 1, '\\');
+            out += '"';
+            backslashes = 0;
+        } else {
+            out.append(static_cast<std::size_t>(backslashes), '\\');
+            out += c;
+            backslashes = 0;
+        }
+    }
+    out.append(static_cast<std::size_t>(backslashes) * 2, '\\');
+    out += "\"";
+    return out;
+#else
+    std::string out = "'";
+    for (char c : value) {
+        if (c == '\'') out += "'\\''";
+        else out += c;
+    }
+    out += "'";
+    return out;
+#endif
+}
+
 // A hand-crafted fixture table used by everything except the codegen
 // round-trip test. Lives in a free function so each TEST_CASE gets a
 // fresh vector — string_view points into static storage so lifetime
@@ -270,11 +301,17 @@ TEST_CASE("build_migration_index.py - frontmatter -> embedded C++ round-trip",
     }
 
     auto out_cpp = tmp / "out.cpp";
-    std::string cmd = std::string("python3 ") +
-        std::string(src_root) + "/tools/scripts/build_migration_index.py" +
-        " --docs-dir " + (tmp / "docs").string() +
-        " --out "     + out_cpp.string();
+    std::string cmd =
+#ifdef _WIN32
+        "python";
+#else
+        "python3";
+#endif
+    cmd += " " + shell_quote_arg(std::string(src_root) + "/tools/scripts/build_migration_index.py");
+    cmd += " --docs-dir " + shell_quote_arg((tmp / "docs").string());
+    cmd += " --out " + shell_quote_arg(out_cpp.string());
     int rc = std::system(cmd.c_str());
+    INFO(cmd);
     REQUIRE(rc == 0);
 
     std::ifstream in(out_cpp);

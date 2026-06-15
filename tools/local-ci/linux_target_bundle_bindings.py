@@ -1,0 +1,28 @@
+"""Bindings from the local_ci facade to Linux remote bundle path helpers."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from binding_utils import install_local_helpers
+from binding_utils import binding as _binding
+
+
+LINUX_TARGET_BUNDLE_EXPORTS = ("remote_linux_bundle_relpath",)
+
+
+def remote_linux_bundle_relpath(bindings: dict, target_name: str, action_name: str, bundle_dir: Path) -> str:
+    return _binding(bindings, "_linux_target").remote_linux_bundle_relpath(target_name, action_name, bundle_dir)
+
+
+def install_linux_target_bundle_helpers(
+    bindings: dict,
+    names: tuple[str, ...] = LINUX_TARGET_BUNDLE_EXPORTS,
+) -> None:
+    known_names = set(LINUX_TARGET_BUNDLE_EXPORTS)
+    bundle_names = tuple(name for name in names if name in known_names)
+    unknown_names = tuple(name for name in names if name not in known_names)
+
+    install_local_helpers(bindings, globals(), bundle_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)
