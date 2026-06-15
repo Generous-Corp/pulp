@@ -1,0 +1,14 @@
+2026-06-15T04:42:12.368Z	session_start	host=REAPER	format=CLAP	pulp_bench_plugin=1.0.0	n=1
+2026-06-15T04:42:12.368Z	processor_construct	plugin_version=1.0.0	n=2
+2026-06-15T04:42:12.368Z	processor_destruct	n=3
+2026-06-15T04:42:12.368Z	session_end	n=4
+2026-06-15T04:42:12.369Z	session_start	host=REAPER	format=CLAP	pulp_bench_plugin=1.0.0	n=1
+2026-06-15T04:42:12.369Z	processor_construct	plugin_version=1.0.0	n=2
+2026-06-15T04:42:12.369Z	define_parameters	count=3	n=3
+2026-06-15T04:42:12.369Z	prepare	sample_rate=48000	max_buffer_size=512	input_channels=2	output_channels=2	prepare_count=1	n=4
+2026-06-15T04:42:12.369Z	serialize_plugin_state	n=5
+2026-06-15T04:42:12.369Z	serialize_plugin_state	n=6
+2026-06-15T04:42:12.373Z	sidechain_edge	connected=true	n=7
+2026-06-15T04:42:13.243Z	release	n=8
+2026-06-15T04:42:13.243Z	processor_destruct	n=9
+2026-06-15T04:42:13.243Z	session_end	n=10
