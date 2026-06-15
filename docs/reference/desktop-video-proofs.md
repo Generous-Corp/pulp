@@ -7,11 +7,34 @@ diff does not explain enough.
 ## Requirements
 
 - The desktop target should enable optional `video_capture`.
-- The runner process must have macOS Screen Recording permission.
 - The runner needs ffmpeg, either from `PULP_FFMPEG`, `PATH`, or the
   repo-local developer install.
-- `pulp ci-local desktop doctor mac` reports Screen Recording, ffmpeg, and
-  AVFoundation screen-input state.
+
+### macOS permissions (two are required)
+
+The controlling app — Terminal.app when you use `--run-in-terminal` — needs
+**both** of these in **System Settings > Privacy & Security**:
+
+- **Screen Recording** — to capture pixels (screencapture + AVFoundation).
+- **Accessibility** — to post real cursor clicks (`--click` / view-targeted
+  clicks) and raise the captured window. Not needed for `--pulp-app-automation`
+  clicks, which inject in-app without a visible cursor.
+
+Enable Terminal.app under each, then **quit and reopen Terminal** (macOS only
+applies these to newly launched processes). `pulp ci-local desktop doctor mac`
+and `desktop video-doctor mac` report a `screencapture` check (Screen Recording)
+and an `accessibility` check, and the interaction path fails fast with the exact
+remediation when Accessibility is missing — so missing permissions are detected
+and reported, never silently skipped.
+
+### Choosing a recorder for motion
+
+`--video-recorder avfoundation` records the live display and captures continuous
+motion (animations, a cursor moving, a control changing). `screencapture -l`
+(the `frame-sequence` path) reliably captures discrete state changes but not
+continuous motion from GPU/`CAMetalLayer` windows — use AVFoundation when the
+proof is about motion. AVFoundation crops to the window using the probe's screen
+backing-scale factor, so Retina (2×) captures land on the correct region.
 
 ## Install Model
 

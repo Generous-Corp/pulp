@@ -358,6 +358,41 @@ def close_macos_terminal_windows_with_title(
             "end tell",
         ]
     )
+    # Closing a Terminal window whose shell still has a running process pops a
+    # blocking "Do you want to terminate the running process?" modal that the
+    # AppleScript `close` cannot dismiss. The `do script` shell counts as such a
+    # process, so we first kill each proof window's tty foreground processes;
+    # the window then closes silently (it shows "[Process completed]").
+    killed_ttys: list[str] = []
+    tty_script = "\n".join(
+        [
+            'tell application "Terminal"',
+            "    set ttyList to \"\"",
+            "    repeat with w in (every window)",
+            f"        if (name of w) contains {json.dumps(title_contains)} then",
+            "            try",
+            "                set ttyList to ttyList & (tty of (selected tab of w)) & linefeed",
+            "            end try",
+            "        end if",
+            "    end repeat",
+            "    return ttyList",
+            "end tell",
+        ]
+    )
+    tty_result = run_fn(["osascript", "-e", tty_script], capture_output=True, text=True)
+    if tty_result.returncode == 0:
+        for line in (tty_result.stdout or "").splitlines():
+            tty = line.strip()
+            if not tty:
+                continue
+            tty_name = tty[len("/dev/") :] if tty.startswith("/dev/") else tty
+            kill_result = run_fn(["pkill", "-t", tty_name], capture_output=True, text=True)
+            # pkill returns 1 when no process matched (already idle) — both are fine.
+            if kill_result.returncode in (0, 1):
+                killed_ttys.append(tty_name)
+        if killed_ttys:
+            sleep_fn(0.3)
+
     result = subprocess.CompletedProcess(["osascript", "-e", script], 1, "", "")
     closed_count = 0
     terminated_terminal = False
@@ -420,6 +455,7 @@ def close_macos_terminal_windows_with_title(
     return {
         "title_contains": title_contains,
         "closed_count": closed_count,
+        "killed_ttys": killed_ttys,
         "terminated_terminal": terminated_terminal,
         "terminate_returncode": terminate_returncode,
         "returncode": result.returncode,
@@ -496,7 +532,23 @@ def macos_window_video_command(
     audio_device: str | None = None,
 ) -> list[str]:
     bounds = macos_window_video_bounds(window)
-    video_filter = f"crop={bounds['width']}:{bounds['height']}:{bounds['x']}:{bounds['y']},fps={fps}"
+    # AVFoundation screen capture produces native pixels; CGWindow bounds are
+    # logical points. On a Retina display (scale 2.0) an unscaled crop grabs the
+    # wrong region (top-left quadrant) — so scale the crop rect by the window's
+    # screen backing scale factor reported by the probe.
+    scale = float(window.get("scale") or 1.0)
+    if scale <= 0:
+        scale = 1.0
+
+    def _even(value: float) -> int:
+        pixels = int(round(value))
+        return pixels - 1 if pixels % 2 else pixels
+
+    crop_x = max(0, int(round(bounds["x"] * scale)))
+    crop_y = max(0, int(round(bounds["y"] * scale)))
+    crop_w = max(2, _even(bounds["width"] * scale))
+    crop_h = max(2, _even(bounds["height"] * scale))
+    video_filter = f"crop={crop_w}:{crop_h}:{crop_x}:{crop_y},fps={fps}"
     input_spec = input_device
     audio_args = ["-an"]
     if audio_source == "system":

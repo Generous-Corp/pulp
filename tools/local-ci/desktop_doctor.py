@@ -133,7 +133,13 @@ def desktop_doctor_checks(
                 desktop_check(
                     "accessibility",
                     trusted,
-                    "trusted" if trusted else "not trusted; desktop-event click is unavailable but Pulp app automation still works",
+                    "trusted"
+                    if trusted
+                    else (
+                        "not trusted; synthetic-cursor (desktop-event) clicks are unavailable. "
+                        "Grant System Settings > Privacy & Security > Accessibility to Terminal.app, "
+                        "then quit and reopen Terminal. Pulp app automation clicks still work without it."
+                    ),
                     required=False,
                 )
             )

@@ -252,6 +252,28 @@ PULP_VIDEO_AUDIO_DEVICE="BlackHole 2ch" \
 
 Require `PASS avfoundation_audio`; do not guess a microphone or system input.
 
+### macOS permissions — two are required, and we detect both
+
+macOS gates video proofs behind two separate TCC permissions for the controlling
+app (Terminal.app when using `--run-in-terminal`):
+
+| Permission | Needed for | `video-doctor` / `doctor` check | Symptom when missing |
+|---|---|---|---|
+| **Screen Recording** | capturing pixels (screencapture + AVFoundation) | `screencapture` check | `could not create image from display`; black/empty captures |
+| **Accessibility** | synthetic-cursor (desktop-event) clicks and window raise | `accessibility` check (advisory) | `…requires Accessibility permission…`; clicks refused |
+
+Grant both at **System Settings > Privacy & Security**: add/enable **Terminal.app**
+under *Screen Recording* and under *Accessibility*, then **quit and reopen
+Terminal** (macOS only applies these to newly launched processes). Pulp app
+automation clicks (`--pulp-app-automation`) do not need Accessibility, but they
+inject in-app and do not move a visible cursor; real cursor clicks (`--click`,
+view-targeted clicks without `--pulp-app-automation`) do need it.
+
+`pulp ci-local desktop doctor mac` and `desktop video-doctor mac` report both
+checks, so detect-and-complain is built in — read those before claiming a proof
+lane is ready. The interaction path also fails fast with the exact remediation
+when Accessibility is missing.
+
 If `screencapture` fails with `could not create image from display`, macOS has
 not granted Screen Recording to the terminal or agent app. Ask the user to grant
 Screen Recording, restart that app, then rerun the doctor. You can still update

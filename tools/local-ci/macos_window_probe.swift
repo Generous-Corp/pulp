@@ -18,6 +18,30 @@ struct WindowInfo: Codable {
     let ownerName: String
     let title: String
     let bounds: Bounds
+    let scale: Double
+}
+
+/// Backing scale factor (1.0 normal, 2.0 Retina) of the screen that contains the
+/// center of a CGWindow rect. CGWindow bounds are top-left-origin global points;
+/// NSScreen frames are bottom-left-origin. AVFoundation screen capture produces
+/// native pixels, so callers must multiply point-space crop bounds by this scale.
+func backingScale(forWindowRect rect: CGRect) -> Double {
+    let screens = NSScreen.screens
+    guard !screens.isEmpty else { return Double(NSScreen.main?.backingScaleFactor ?? 1.0) }
+    let primaryHeight: CGFloat = screens.first(where: { $0.frame.origin == .zero })?.frame.height
+        ?? NSScreen.main?.frame.height
+        ?? screens[0].frame.height
+    let center = CGPoint(x: rect.midX, y: rect.midY)
+    for screen in screens {
+        let f = screen.frame
+        // Convert the AppKit (bottom-left) frame to CG (top-left) global coords.
+        let cgTop = primaryHeight - (f.origin.y + f.height)
+        let cgRect = CGRect(x: f.origin.x, y: cgTop, width: f.width, height: f.height)
+        if cgRect.contains(center) {
+            return Double(screen.backingScaleFactor)
+        }
+    }
+    return Double(NSScreen.main?.backingScaleFactor ?? 1.0)
 }
 
 func usage() -> Never {
@@ -96,7 +120,8 @@ func windowInfos(for pid: Int32) -> [WindowInfo] {
                 y: rect.origin.y,
                 width: rect.width,
                 height: rect.height
-            )
+            ),
+            scale: backingScale(forWindowRect: rect)
         )
     }
     .sorted { lhs, rhs in
@@ -170,6 +195,7 @@ case "window-info":
                     "width": window.bounds.width,
                     "height": window.bounds.height,
                 ],
+                "scale": window.scale,
             ]
         },
     ]

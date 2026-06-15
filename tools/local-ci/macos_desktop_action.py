@@ -300,7 +300,12 @@ def run_macos_local_smoke(
         if interaction_requested:
             raise RuntimeError("Terminal capture currently supports smoke actions only; use app capture for clicks.")
     if interaction_requested and not use_pulp_app_automation and not macos_accessibility_trusted_fn():
-        raise RuntimeError("macOS desktop interaction requires Accessibility access for the terminal/runner.")
+        raise RuntimeError(
+            "macOS desktop interaction (synthetic clicks) requires Accessibility permission for the "
+            "controlling app. Grant it in System Settings > Privacy & Security > Accessibility, enable "
+            "Terminal.app (the same app that needs Screen Recording for capture), then quit and reopen "
+            "Terminal so the permission takes effect. Re-run with --run-in-terminal."
+        )
     if (click_view_id or click_view_type or click_view_text or click_view_label) and not capture_ui_snapshot and not use_pulp_app_automation:
         raise RuntimeError("View-targeted click requires --capture-ui-snapshot so the app writes a ViewInspector tree.")
 

@@ -241,6 +241,9 @@ class MacOSDesktopTests(unittest.TestCase):
 
         def run_osascript(cmd: list[str], **_kwargs):
             calls.append(cmd)
+            script = cmd[-1] if cmd[0] == "osascript" else ""
+            if "set ttyList" in script:
+                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
             return subprocess.CompletedProcess(cmd, 0, stdout=stdout_values.pop(0), stderr="")
 
         result = self.mod.close_macos_terminal_windows_with_title(
@@ -250,16 +253,43 @@ class MacOSDesktopTests(unittest.TestCase):
 
         self.assertEqual(result["closed_count"], 2)
         self.assertEqual(result["returncode"], 0)
-        self.assertEqual(calls[0][0], "osascript")
-        self.assertIn("Pulp Video Proof abcd1234", calls[0][-1])
-        self.assertIn("close w", calls[0][-1])
-        self.assertEqual(len(calls), 2)
+        close_calls = [c for c in calls if c[0] == "osascript" and "close w" in c[-1]]
+        self.assertTrue(close_calls)
+        self.assertIn("Pulp Video Proof abcd1234", close_calls[0][-1])
+
+    def test_close_terminal_windows_kills_proof_tty_before_close(self) -> None:
+        calls = []
+        stdout_values = ["1\n", "0\n"]
+
+        def run_fn(cmd: list[str], **_kwargs):
+            calls.append(cmd)
+            if cmd[0] == "osascript" and "set ttyList" in cmd[-1]:
+                self.assertIn("Pulp Video Proof abcd1234", cmd[-1])
+                return subprocess.CompletedProcess(cmd, 0, stdout="/dev/ttys012\n", stderr="")
+            if cmd[0] == "osascript":
+                return subprocess.CompletedProcess(cmd, 0, stdout=stdout_values.pop(0), stderr="")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        result = self.mod.close_macos_terminal_windows_with_title(
+            "Pulp Video Proof abcd1234",
+            run_fn=run_fn,
+            sleep_fn=lambda _s: None,
+        )
+
+        self.assertIn("ttys012", result["killed_ttys"])
+        self.assertIn(["pkill", "-t", "ttys012"], calls)
+        # The tty kill happens before the close script runs.
+        pkill_idx = calls.index(["pkill", "-t", "ttys012"])
+        close_idx = next(i for i, c in enumerate(calls) if c[0] == "osascript" and "close w" in c[-1])
+        self.assertLess(pkill_idx, close_idx)
 
     def test_close_terminal_windows_terminates_only_scoped_proof_terminal(self) -> None:
         calls = []
 
         def run_osascript(cmd: list[str], **_kwargs):
             calls.append(cmd)
+            if cmd[0] == "osascript" and "set ttyList" in cmd[-1]:
+                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
             if cmd[0] == "osascript" and "set closedCount" in cmd[-1]:
                 return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="User canceled")
             if cmd[0] == "osascript":
@@ -282,6 +312,8 @@ class MacOSDesktopTests(unittest.TestCase):
 
         def run_osascript(cmd: list[str], **_kwargs):
             calls.append(cmd)
+            if cmd[0] == "osascript" and "set ttyList" in cmd[-1]:
+                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
             if cmd[0] == "osascript" and "set closedCount" in cmd[-1]:
                 return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="User canceled")
             return subprocess.CompletedProcess(cmd, 0, stdout="1234\t1\t1", stderr="")
@@ -385,6 +417,21 @@ class MacOSDesktopTests(unittest.TestCase):
         self.assertIn("libx264", command)
         self.assertEqual(command[command.index("-frames:v") + 1], "60")
         self.assertEqual(command[-1], str(output_path))
+
+    def test_window_video_command_scales_crop_for_retina_capture(self) -> None:
+        # AVFoundation captures Retina displays at 2x native pixels, so the crop
+        # rect (point-space window bounds) must be doubled or it grabs the wrong
+        # region. The probe reports the window's screen backing scale.
+        window = {"bounds": {"x": 100, "y": 174, "width": 360, "height": 512}, "scale": 2.0}
+        command = self.mod.macos_window_video_command(
+            window,
+            self.root / "video" / "proof.mp4",
+            duration_secs=4.0,
+            fps=15.0,
+            ffmpeg_path="/opt/ffmpeg",
+            input_device="1:",
+        )
+        self.assertIn("crop=720:1024:200:348,fps=15.0", command)
 
     def test_avfoundation_screen_input_device_uses_listed_capture_screen_index(self) -> None:
         def run_devices(cmd: list[str], **_kwargs):
