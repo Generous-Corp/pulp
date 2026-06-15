@@ -59,7 +59,22 @@ SkSVGDOM **does** render Figma's effects-heavy SVG (67 filters, 61 masks)
 faithfully — the export and the SkSVGDOM render are both fine; only the
 native-materialize/codegen path is lossy.
 
-**Ship a 1:1 catalog component = subclass `DesignFrameView` with the embedded SVG.**
+**One-command path (USE THIS): `tools/import-design/make_catalog_component.py`.**
+It runs the whole lane — exports the Figma node, embeds the faithful SVG (chunked
+base64), and emits the `DesignFrameView` subclass + the catalog/CMake/showcase
+paste-ins. Example:
+```bash
+python3 tools/import-design/make_catalog_component.py \
+  --name "Channel Strip" --class ChannelStripView --node 182:2 \
+  --category containers --usage "Pro channel strip…"
+```
+Then paste the printed lines into `core/view/CMakeLists.txt`, the
+`design_system.{hpp,cpp}` catalog, the showcase, and add a test
+(`test_faithful_specimens.cpp` pattern). Validate with `pulp-svg-probe` +
+`verify_region.py`. This is how Musical Typing, Channel Strip, and 7 specimen
+components were built — never hand-paint.
+
+**Under the hood: a 1:1 catalog component = subclass `DesignFrameView` with the embedded SVG.**
 See `core/view/{include/pulp/view,src}/musical_typing_keyboard*` +
 `design_system.cpp` catalog entry: the class is
 `MusicalTypingKeyboard : public DesignFrameView`, constructed from the
