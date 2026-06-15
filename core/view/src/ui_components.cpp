@@ -434,7 +434,12 @@ void Tooltip::paint(canvas::Canvas& canvas) {
     canvas.fill_rounded_rect(b.x, b.y, b.width, b.height, 4);
     canvas.set_font("system", 11);
     canvas.set_fill_color(canvas::Color::rgba8(0xe0, 0xe0, 0xe0, alpha));
-    canvas.fill_text(text_, b.x + 6, b.y + 15);
+    // Center the label on the bubble's vertical midline (GlyphCenter anchors
+    // on the glyph's optical centre, not the baseline) with an 8px left pad,
+    // instead of a fixed baseline that left the text sitting low.
+    canvas.set_text_align(canvas::TextAlign::left);
+    canvas.fill_text_anchored(text_, b.x + 8, b.y + b.height * 0.5f,
+                              canvas::Canvas::TextAnchor::GlyphCenter);
 }
 
 // ── ThemeModeControl ──────────────────────────────────────────────────────
