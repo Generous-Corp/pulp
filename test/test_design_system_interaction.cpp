@@ -8,11 +8,15 @@
 #include <pulp/view/buttons.hpp>
 #include <pulp/view/context_menu.hpp>
 #include <pulp/view/gap_widgets.hpp>
+#include <pulp/view/midi_keyboard.hpp>
+#include <pulp/view/screenshot.hpp>
 #include <pulp/view/side_panel.hpp>
 #include <pulp/view/table.hpp>
+#include <pulp/view/theme_presets.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/widgets.hpp>
 
+#include <array>
 #include <cmath>
 #include <type_traits>
 
@@ -121,30 +125,34 @@ TEST_CASE("TabPanel switches active tab on click", "[design-system][interaction]
 
 TEST_CASE("Knob modulation rings round-trip + render", "[design-system][modulation]") {
     Knob k; k.set_bounds({0, 0, 92, 92}); k.set_value(0.5f);
-    k.set_modulation_rings({{0.5f, Color::hex(0x5E78FF)}, {-0.3f, Color::hex(0xF6B847)}});
+    // {lo, hi, color}: a unipolar-positive ring and a unipolar-negative one.
+    k.set_modulation_rings({{0.0f, 0.5f, Color::hex(0x5E78FF)},
+                            {-0.3f, 0.0f, Color::hex(0xF6B847)}});
     REQUIRE(k.modulation_rings().size() == 2);
-    REQUIRE(k.modulation_rings()[0].depth == 0.5f);
-    REQUIRE(k.modulation_rings()[1].depth == -0.3f);
+    REQUIRE(k.modulation_rings()[0].hi == 0.5f);
+    REQUIRE(k.modulation_rings()[0].lo == 0.0f);
+    REQUIRE(k.modulation_rings()[1].lo == -0.3f);
+    REQUIRE(k.modulation_rings()[1].hi == 0.0f);
     // Plain knob (no rings) leaves the set empty — keeps the goldens unchanged.
     Knob plain;
     REQUIRE(plain.modulation_rings().empty());
 }
 
-TEST_CASE("Knob modulation range is centered on the base and clips at limits",
+TEST_CASE("Knob modulation range spans [base+lo, base+hi] and clips at limits",
           "[design-system][modulation]") {
     Knob k; k.set_bounds({0, 0, 92, 92}); k.set_value(0.5f);
-    k.set_modulation_rings({{0.3f, Color::hex(0x5E78FF)}});
+    k.set_modulation_rings({{-0.3f, 0.3f, Color::hex(0x5E78FF)}});  // bipolar
     auto close = [](float a, float b) { return std::fabs(a - b) < 1e-3f; };
 
     auto [lo, hi] = k.modulation_range(0);
-    REQUIRE(close(lo, 0.2f));   // centered: 0.5 ± 0.3
-    REQUIRE(close(hi, 0.8f));
+    REQUIRE(close(lo, 0.2f));   // base+lo = 0.5 − 0.3
+    REQUIRE(close(hi, 0.8f));   // base+hi = 0.5 + 0.3
 
     // Live indicator tracks the source phase across the range.
     k.set_modulation_phase(1.0f);
-    REQUIRE(close(k.modulated_value(0), 0.8f));
+    REQUIRE(close(k.modulated_value(0), 0.8f));   // toward hi
     k.set_modulation_phase(-1.0f);
-    REQUIRE(close(k.modulated_value(0), 0.2f));
+    REQUIRE(close(k.modulated_value(0), 0.2f));   // toward lo
     k.set_modulation_phase(0.0f);
     REQUIRE(close(k.modulated_value(0), 0.5f));
 
@@ -155,16 +163,21 @@ TEST_CASE("Knob modulation range is centered on the base and clips at limits",
     REQUIRE(close(lo2, 0.6f));
 }
 
-TEST_CASE("Knob modulation handle drag adjusts depth, not the value",
+TEST_CASE("Knob modulation handle drag moves ONLY the grabbed endpoint",
           "[design-system][modulation]") {
+    // Regression: a bipolar ring's two ends must move INDEPENDENTLY — dragging
+    // the high handle must not shrink/grow the low handle (and vice-versa).
     Knob k; k.set_bounds({0, 0, 92, 92}); k.set_value(0.5f);
-    k.set_modulation_rings({{0.3f, Color::hex(0x5E78FF)}});
+    k.set_modulation_rings({{-0.3f, 0.3f, Color::hex(0x5E78FF)}});  // lo=−0.3, hi=+0.3
     float base_before = k.value();
-    int fired_ring = -2; float fired_depth = 999.0f;
-    k.on_modulation_change = [&](int r, float d) { fired_ring = r; fired_depth = d; };
+    int fired_ring = -2; float fired_lo = 999.0f, fired_hi = 999.0f;
+    k.on_modulation_change = [&](int r, float lo, float hi) {
+        fired_ring = r; fired_lo = lo; fired_hi = hi;
+    };
+    auto close = [](float a, float b) { return std::fabs(a - b) < 0.02f; };
 
-    // Compute the high-handle pixel the same way the widget does (b=92,
-    // value=0.5, depth=0.3 → hi=0.8). Mirrors knob_mod_geom / value→angle.
+    // Geometry mirrors knob_mod_geom (b=92): handles sit on the mod ring at the
+    // value→angle of each endpoint.
     const float cx = 46.0f, cy = 46.0f, full_r = 43.0f;
     const float arc_w = std::max(3.0f, full_r * 0.13f);
     const float ring_r = full_r * 0.64f;
@@ -172,25 +185,134 @@ TEST_CASE("Knob modulation handle drag adjusts depth, not the value",
     const float mod_r = ring_r + arc_w * 0.5f + mod_w * 0.5f + 2.0f;
     const float start = 2.356f, sweep = 7.069f - 2.356f;
     auto angle = [&](float v) { return start + v * sweep; };
-    float hi_a = angle(0.8f);
-    Point high_handle{cx + mod_r * std::cos(hi_a), cy + mod_r * std::sin(hi_a)};
+    auto pt = [&](float v) {
+        return Point{cx + mod_r * std::cos(angle(v)), cy + mod_r * std::sin(angle(v))};
+    };
 
-    k.on_mouse_down(high_handle);
+    // Grab the HIGH handle (base+hi = 0.8) and drag it inward to base (0.5).
+    k.on_mouse_down(pt(0.8f));
     REQUIRE(k.dragging_modulation());
-
-    // Drag inward to the base-value angle → depth shrinks toward 0.
-    float base_a = angle(0.5f);
-    k.on_mouse_drag({cx + mod_r * std::cos(base_a), cy + mod_r * std::sin(base_a)});
+    k.on_mouse_drag(pt(0.5f));
     REQUIRE(fired_ring == 0);
-    REQUIRE(std::fabs(k.modulation_rings()[0].depth) < 0.3f);  // reduced
-    REQUIRE(k.value() == base_before);                          // base untouched
-
-    k.on_mouse_up(high_handle);
+    REQUIRE(close(k.modulation_rings()[0].hi, 0.0f));    // high end moved to ~base
+    REQUIRE(close(k.modulation_rings()[0].lo, -0.3f));   // LOW END UNCHANGED ← the fix
+    REQUIRE(k.value() == base_before);                    // base value untouched
+    k.on_mouse_up(pt(0.5f));
     REQUIRE_FALSE(k.dragging_modulation());
+
+    // Now grab the LOW handle (base+lo = 0.2) and drag it; only lo changes.
+    float hi_now = k.modulation_rings()[0].hi;
+    k.on_mouse_down(pt(0.2f));
+    REQUIRE(k.dragging_modulation());
+    k.on_mouse_drag(pt(0.35f));
+    REQUIRE(close(k.modulation_rings()[0].lo, -0.15f));   // low end → 0.35 − 0.5
+    REQUIRE(close(k.modulation_rings()[0].hi, hi_now));   // HIGH END UNCHANGED
+    k.on_mouse_up(pt(0.35f));
 
     // A press in the dial center is a value drag, not a handle drag.
     k.on_mouse_down({cx, cy});
     REQUIRE_FALSE(k.dragging_modulation());
+}
+
+TEST_CASE("Knob modulation handle clamps at the bottom gap instead of flipping",
+          "[design-system][modulation]") {
+    // Regression: dragging a handle off the bottom (into the dead-zone gap
+    // between the arc's two ends) must clamp to the NEARER end, not wrap across
+    // the gap to the opposite end (the handle "teleporting" to 5 o'clock).
+    Knob k; k.set_bounds({0, 0, 92, 92}); k.set_value(0.5f);
+    k.set_modulation_rings({{-0.3f, 0.3f, Color::hex(0x5E78FF)}});
+    auto close = [](float a, float b) { return std::fabs(a - b) < 0.02f; };
+
+    const float cx = 46.0f, cy = 46.0f, full_r = 43.0f;
+    const float arc_w = std::max(3.0f, full_r * 0.13f);
+    const float ring_r = full_r * 0.64f;
+    const float mod_w = std::max(2.0f, full_r * 0.05f);
+    const float mod_r = ring_r + arc_w * 0.5f + mod_w * 0.5f + 2.0f;
+    const float start = 2.356f, sweep = 7.069f - 2.356f;
+    auto angle = [&](float v) { return start + v * sweep; };
+
+    // Grab the LOW handle (base+lo = 0.2) and drag past the parameter start
+    // into the bottom gap, clearly on the START side of the gap (just below the
+    // start boundary at ~7:30, short of the 6 o'clock midpoint).
+    const float two_pi = 6.2831853f;
+    float gap_a = (start + two_pi) - 0.25f;       // inside the gap, near the start
+    Point gap_pt{cx + mod_r * std::cos(gap_a), cy + mod_r * std::sin(gap_a)};
+    k.on_mouse_down({cx + mod_r * std::cos(angle(0.2f)), cy + mod_r * std::sin(angle(0.2f))});
+    REQUIRE(k.dragging_modulation());
+    k.on_mouse_drag(gap_pt);
+    // Clamps at the start (value 0 → offset −0.5); does NOT flip to +0.5.
+    REQUIRE(close(k.modulation_rings()[0].lo, -0.5f));
+    REQUIRE(k.modulation_rings()[0].lo < 0.0f);   // stayed on the start side
+    REQUIRE(close(k.modulation_rings()[0].hi, 0.3f));  // other end untouched
+    k.on_mouse_up(gap_pt);
+}
+
+TEST_CASE("Knob modulation dot rides strictly between the two endpoints",
+          "[design-system][modulation]") {
+    auto close = [](float a, float b) { return std::fabs(a - b) < 1e-3f; };
+    auto sweep_within = [&](const Knob& k, float end_a, float end_b) {
+        float lo = std::min(end_a, end_b), hi = std::max(end_a, end_b);
+        for (float ph : {-1.0f, -0.5f, 0.0f, 0.4f, 1.0f}) {
+            const_cast<Knob&>(k).set_modulation_phase(ph);
+            float v = k.modulated_value(0);
+            REQUIRE(v >= lo - 1e-3f);
+            REQUIRE(v <= hi + 1e-3f);
+        }
+    };
+
+    // Unipolar-positive: range is [base, base+hi]; the dot must NOT dip below
+    // base toward where the old "phase 0 = base" model anchored it.
+    {
+        Knob k; k.set_bounds({0, 0, 92, 92}); k.set_value(0.5f);
+        k.set_modulation_rings({{0.0f, 0.5f, Color::hex(0x5E78FF)}});  // lo=0, hi=0.5
+        sweep_within(k, 0.5f, 1.0f);
+        k.set_modulation_phase(-1.0f); REQUIRE(close(k.modulated_value(0), 0.5f));  // low end
+        k.set_modulation_phase(1.0f);  REQUIRE(close(k.modulated_value(0), 1.0f));  // high end
+    }
+    // Inverted (lo > hi, as if the ends were dragged past each other): the dot
+    // still stays between them, just sweeping the other direction.
+    {
+        Knob k; k.set_bounds({0, 0, 92, 92}); k.set_value(0.4f);
+        k.set_modulation_rings({{0.5f, 0.2f, Color::hex(0xF6B847)}});  // lo=+0.5, hi=+0.2
+        sweep_within(k, 0.9f, 0.6f);  // endpoints clamp to 0.9 and 0.6
+        k.set_modulation_phase(-1.0f); REQUIRE(close(k.modulated_value(0), 0.9f));  // base+lo
+        k.set_modulation_phase(1.0f);  REQUIRE(close(k.modulated_value(0), 0.6f));  // base+hi
+    }
+}
+
+TEST_CASE("MidiKeyboard pressed key uses the accent color, not default black",
+          "[design-system][midi-keyboard][regression]") {
+    // Regression: canvas::Color default-constructs to OPAQUE black (a=1), so the
+    // old `highlight_color_.a > 0` sentinel was always true and every pressed key
+    // painted solid black instead of falling back to accent.primary.
+    MidiKeyboard kb;
+    kb.set_range(60, 72);                 // C4..C5 (8 white keys)
+    kb.set_bounds({0, 0, 400, 90});
+    if (const ThemePreset* p = find_preset("ink-signal"))
+        kb.set_theme(theme_from_preset(*p, /*dark=*/true));  // accent.primary = teal
+
+    uint32_t w = 0, h = 0;
+    auto resting = render_to_rgba(kb, 400, 90, 1.0f, &w, &h);
+    if (resting.empty() || w == 0) return;  // no Skia raster backend → skip
+
+    // First white key spans the leftmost 1/8 width; sample its lower region,
+    // below where the black keys reach, so only the white key paints there.
+    const int px = 25, py = 75;
+    auto sample = [&](const std::vector<uint8_t>& buf) {
+        size_t i = (static_cast<size_t>(py) * w + static_cast<size_t>(px)) * 4;
+        return std::array<int, 3>{buf[i], buf[i + 1], buf[i + 2]};
+    };
+    auto rest_px = sample(resting);
+
+    kb.note_on(60, 0.9f);                 // press C4
+    auto pressed = render_to_rgba(kb, 400, 90, 1.0f, &w, &h);
+    REQUIRE_FALSE(pressed.empty());
+    auto press_px = sample(pressed);
+
+    REQUIRE(press_px != rest_px);                                   // press is visible
+    bool near_black = press_px[0] < 40 && press_px[1] < 40 && press_px[2] < 40;
+    REQUIRE_FALSE(near_black);                                      // ← the bug
+    REQUIRE(press_px[1] > press_px[0] + 30);                        // accent (teal): green ≫ red
 }
 
 TEST_CASE("value widgets adjust on scroll wheel", "[design-system][interaction][wheel]") {

@@ -157,6 +157,7 @@ void MidiKeyboard::on_mouse_down(Point pos) {
         mouse_note_ = note;
         note_on(note, 0.8f);
         if (on_note_on) on_note_on(note, 0.8f);
+        request_repaint();  // show the active (accent) key immediately
     }
 }
 
@@ -174,6 +175,7 @@ void MidiKeyboard::on_mouse_drag(Point pos) {
         } else {
             mouse_note_ = -1;
         }
+        request_repaint();  // glissando: old key releases, new key lights
     }
 }
 
@@ -183,6 +185,7 @@ void MidiKeyboard::on_mouse_up(Point pos) {
         note_off(mouse_note_);
         if (on_note_off) on_note_off(mouse_note_);
         mouse_note_ = -1;
+        request_repaint();  // clear the active key on release
     }
 }
 

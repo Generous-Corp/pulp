@@ -408,11 +408,16 @@ public:
 
     // ── Modulation rings (Saturn) ───────────────────────────────────────
     // Thin concentric rings drawn OUTSIDE the value arc, one per modulation
-    // source, each showing a signed depth swept from the current value angle
-    // (bipolar). Matches the Figma "Knob Modulation" set (LFO / ENV / VEL /
-    // MACRO). Empty by default (a plain knob).
+    // source. Matches the Figma "Knob Modulation" set (LFO / ENV / VEL / MACRO).
+    // Empty by default (a plain knob).
     struct ModulationRing {
-        float depth = 0.0f;          ///< -1..1 — signed modulation depth
+        // Two INDEPENDENT signed offsets from the base value, one per arc end —
+        // dragging one handle moves only that end (not a symmetric grow/shrink
+        // off a single depth). Unipolar-positive: lo=0, hi>0. Unipolar-negative:
+        // lo<0, hi=0. Bipolar: lo<0, hi>0. The range is [base+lo, base+hi]; the
+        // endpoints sort themselves, so the two may cross without breaking paint.
+        float lo = 0.0f;             ///< low-end offset from base (−1..1)
+        float hi = 0.0f;             ///< high-end offset from base (−1..1)
         canvas::Color color;         ///< per-source colour
     };
     void set_modulation_rings(std::vector<ModulationRing> rings) {
@@ -431,15 +436,17 @@ public:
     }
     float modulation_phase() const { return mod_phase_; }
 
-    // The modulation range is CENTERED on the base value: [value-|depth|,
-    // value+|depth|], clipped to [0,1]. These expose the clipped endpoints of
-    // ring i for tests / hosts. Returns {lo, hi}.
+    // The modulation range is [value+lo, value+hi] clipped to [0,1], sorted so
+    // the returned .first ≤ .second regardless of which end is which. Exposes the
+    // clipped endpoints of ring i for tests / hosts. Returns {lo_v, hi_v}.
     std::pair<float, float> modulation_range(size_t ring) const;
-    // The live modulated value of ring i = clamp(value + depth*phase, 0, 1).
+    // The live modulated value of ring i: phase≥0 sweeps toward base+hi, phase<0
+    // toward base+lo, clipped to [0,1].
     float modulated_value(size_t ring) const;
 
-    // Fired when dragging a modulation-arc handle changes a ring's depth.
-    std::function<void(int ring, float depth)> on_modulation_change;
+    // Fired when dragging a modulation-arc handle changes a ring's endpoints.
+    // Reports BOTH offsets (the dragged one moved, the other is unchanged).
+    std::function<void(int ring, float lo, float hi)> on_modulation_change;
     // True while a modulation-arc handle is being dragged (vs the value).
     bool dragging_modulation() const { return mod_drag_ring_ >= 0; }
 
@@ -455,6 +462,8 @@ private:
     float mod_phase_ = 0.0f;       ///< live source value in [-1,1] (indicator)
     int mod_drag_ring_ = -1;       ///< ring whose handle is being dragged (-1 none)
     bool mod_drag_is_high_ = true; ///< dragging the high (vs low) handle
+    float mod_drag_last_angle_ = 0.0f;  ///< continuous (unwrapped) drag angle; the
+                                        ///< bottom gap is a hard wall — see on_mouse_drag
     float value_ = 0.0f;
     float skew_ = 1.0f;            ///< 1 = linear; <1 = finer control at the low end
     float default_value_ = 0.5f;

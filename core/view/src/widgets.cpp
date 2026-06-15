@@ -200,12 +200,6 @@ float knob_value_to_angle(float v) {
     return Knob::start_angle + std::clamp(v, 0.0f, 1.0f) * (Knob::end_angle - Knob::start_angle);
 }
 // Pointer position → normalized value along the 270° dial sweep.
-float knob_pointer_to_value(float px, float py, float cx, float cy) {
-    float ang = std::atan2(py - cy, px - cx);
-    while (ang < Knob::start_angle) ang += 6.2831853f;  // 2π
-    return std::clamp((ang - Knob::start_angle) / (Knob::end_angle - Knob::start_angle),
-                      0.0f, 1.0f);
-}
 }  // namespace
 
 void Knob::on_mouse_enter() {
@@ -236,15 +230,23 @@ void Knob::on_mouse_down(Point pos) {
         float hit_r = std::max(3.0f, g.mod_w * 0.95f) + 4.0f;  // handle + slop
         for (size_t i = 0; i < mod_rings_.size(); ++i) {
             float mod_r = g.mod_r_base + static_cast<float>(i) * (g.mod_w + 2.0f);
-            auto [lo, hi] = modulation_range(i);
-            float lo_a = knob_value_to_angle(lo), hi_a = knob_value_to_angle(hi);
+            // Use the RAW per-end offsets (not the sorted range) so the grabbed
+            // handle maps to the endpoint it actually is — that endpoint then
+            // moves independently of the other on drag.
+            const auto& m = mod_rings_[i];
+            float lo_v = std::clamp(value_ + m.lo, 0.0f, 1.0f);
+            float hi_v = std::clamp(value_ + m.hi, 0.0f, 1.0f);
+            float lo_a = knob_value_to_angle(lo_v), hi_a = knob_value_to_angle(hi_v);
             float lx = g.cx + mod_r * std::cos(lo_a), ly = g.cy + mod_r * std::sin(lo_a);
             float hx = g.cx + mod_r * std::cos(hi_a), hy = g.cy + mod_r * std::sin(hi_a);
             float dl = std::hypot(pos.x - lx, pos.y - ly);
             float dh = std::hypot(pos.x - hx, pos.y - hy);
             if (dl <= hit_r || dh <= hit_r) {
                 mod_drag_ring_ = static_cast<int>(i);
-                mod_drag_is_high_ = dh <= dl;
+                mod_drag_is_high_ = dh <= dl;  // which END was grabbed
+                // Seed the continuous-angle tracker at the grabbed handle's
+                // current position so the drag can't cross the bottom gap.
+                mod_drag_last_angle_ = knob_value_to_angle(mod_drag_is_high_ ? hi_v : lo_v);
                 return;
             }
         }
@@ -270,22 +272,32 @@ void Knob::on_mouse_up(Point) {
 }
 
 void Knob::on_mouse_drag(Point pos) {
-    // Dragging a modulation handle sets that ring's depth from the pointer's
-    // angle. The range is centered on the base, so |depth| = |pointerValue −
-    // base|; sign is preserved (polarity), and the range clips at 0/1. The arc
-    // can therefore grow until it hits a parameter limit. Wrapping the end past
-    // the start simply flips which handle is the high one on the next press.
+    // Dragging a modulation handle moves ONLY the grabbed endpoint to the
+    // pointer's angle (offset = pointerValue − base, clipped to [−1,1]). The
+    // other endpoint stays fixed — no symmetric grow/shrink. The two ends may
+    // cross; modulation_range() sorts them, so the arc still draws correctly.
     if (mod_drag_ring_ >= 0) {
+        constexpr float two_pi = 6.2831853f, pi = 3.14159265f;
         auto g = knob_mod_geom(local_bounds(), mod_rings_.size());
-        float pv = knob_pointer_to_value(pos.x, pos.y, g.cx, g.cy);
-        float hw = std::clamp(std::fabs(pv - value_), 0.0f, 1.0f);
+        // Track the drag angle CONTINUOUSLY (unwrapped relative to the last
+        // angle), then clamp to the live arc [start, end]. The bottom gap is a
+        // hard wall: pushing the pointer into or across it sticks the handle at
+        // the boundary on its current side instead of teleporting to the far
+        // end. To reach the other end the user must drag the long way (over the
+        // top), which never crosses the gap.
+        float raw = std::atan2(pos.y - g.cy, pos.x - g.cx);
+        while (raw - mod_drag_last_angle_ < -pi) raw += two_pi;
+        while (raw - mod_drag_last_angle_ >  pi) raw -= two_pi;
+        float clamped = std::clamp(raw, Knob::start_angle, Knob::end_angle);
+        mod_drag_last_angle_ = clamped;
+        float pv = (clamped - Knob::start_angle) / (Knob::end_angle - Knob::start_angle);
         auto& m = mod_rings_[static_cast<size_t>(mod_drag_ring_)];
-        float sign = m.depth < 0.0f ? -1.0f : 1.0f;
-        float nd = sign * hw;
-        if (nd != m.depth) {
-            m.depth = nd;
+        float& end = mod_drag_is_high_ ? m.hi : m.lo;
+        float off = std::clamp(pv - value_, -1.0f, 1.0f);
+        if (off != end) {
+            end = off;
             request_repaint();
-            if (on_modulation_change) on_modulation_change(mod_drag_ring_, nd);
+            if (on_modulation_change) on_modulation_change(mod_drag_ring_, m.lo, m.hi);
         }
         return;
     }
@@ -456,13 +468,26 @@ static void draw_knob_captured_pointer(canvas::Canvas& canvas,
 
 std::pair<float, float> Knob::modulation_range(size_t ring) const {
     if (ring >= mod_rings_.size()) return {value_, value_};
-    float hw = std::fabs(mod_rings_[ring].depth);   // range is centered on the base
-    return {std::clamp(value_ - hw, 0.0f, 1.0f), std::clamp(value_ + hw, 0.0f, 1.0f)};
+    const auto& m = mod_rings_[ring];
+    // Independent endpoints: [base+lo, base+hi], sorted so .first ≤ .second.
+    float a = std::clamp(value_ + m.lo, 0.0f, 1.0f);
+    float b = std::clamp(value_ + m.hi, 0.0f, 1.0f);
+    return {std::min(a, b), std::max(a, b)};
 }
 
 float Knob::modulated_value(size_t ring) const {
     if (ring >= mod_rings_.size()) return value_;
-    return std::clamp(value_ + mod_rings_[ring].depth * mod_phase_, 0.0f, 1.0f);
+    const auto& m = mod_rings_[ring];
+    // The indicator rides STRICTLY between the two current endpoints: phase
+    // [-1,1] → t [0,1] interpolated from the low-offset end to the high-offset
+    // end. Because it's a convex blend of the two clamped endpoints, the dot
+    // always stays on the arc between them — even when the range is unipolar
+    // (base sits at one end) or the ends have been dragged past each other
+    // (lo > hi); it simply sweeps the other direction.
+    float lo_v = std::clamp(value_ + m.lo, 0.0f, 1.0f);
+    float hi_v = std::clamp(value_ + m.hi, 0.0f, 1.0f);
+    float t = (std::clamp(mod_phase_, -1.0f, 1.0f) + 1.0f) * 0.5f;
+    return lo_v + t * (hi_v - lo_v);
 }
 
 void Knob::paint(canvas::Canvas& canvas) {
@@ -769,13 +794,9 @@ void Knob::paint(canvas::Canvas& canvas) {
                 canvas.stroke_arc(g.cx, g.cy, mod_r, start_angle, end_angle);
                 canvas.set_stroke_color(m.color);
                 canvas.stroke_arc(g.cx, g.cy, mod_r, lo_a, hi_a);
-
-                // Drag handles at each end of the range.
-                canvas.set_fill_color(m.color);
-                for (float a : {lo_a, hi_a}) {
-                    canvas.fill_circle(g.cx + mod_r * std::cos(a),
-                                       g.cy + mod_r * std::sin(a), handle_r);
-                }
+                // No end-cap handle dots by design — the arc's ends are still
+                // draggable (hit-tested in on_mouse_down), but only the live
+                // indicator dot below is drawn, riding between the two ends.
 
                 // Live modulated-value indicator: bright dot ringed in the
                 // source colour, riding the arc at base + depth·phase.
