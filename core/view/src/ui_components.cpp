@@ -127,6 +127,10 @@ void ComboBox::paint(canvas::Canvas& canvas) {
         auto items_copy = items_;
         auto dropdown_bg = resolve_color("bg.elevated", canvas::Color::rgba8(45, 45, 60));
         auto accent_c = resolve_color("accent.primary", canvas::Color::rgba8(100, 150, 255));
+        // Persistent highlight for the SELECTED row — distinct from the
+        // accent hover fill so the current choice stays visible even when the
+        // pointer is over another row (or off the menu entirely).
+        auto selected_bg = resolve_color("selection.bg", canvas::Color::rgba8(60, 80, 140));
         auto border = border_c;
         auto text = text_c;
         canvas.set_font("Inter", 12);
@@ -159,7 +163,13 @@ void ComboBox::paint(canvas::Canvas& canvas) {
                 }
 
                 int hov = *hover_ptr;
-                // Highlight: hover takes priority for background, check marks selected
+                // Highlight: the selected row carries a persistent background;
+                // hover paints the brighter accent fill on top (so the hovered
+                // row always wins visually, but the selection stays marked).
+                if (i == sel && i != hov) {
+                    c.set_fill_color(selected_bg);
+                    c.fill_rect(abs_x + 1, iy, dd_w - 2, item_h);
+                }
                 if (i == hov) {
                     c.set_fill_color(accent_c);
                     c.fill_rect(abs_x + 1, iy, dd_w - 2, item_h);
