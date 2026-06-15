@@ -315,16 +315,27 @@ if [[ ${#BINARIES[@]} -eq 0 ]]; then
     exit 1
 fi
 
+# A full build probes 1000+ `-object` entries. Passing them inline overflows
+# the Windows command-line length limit (CreateProcess ~32 KB) — llvm-cov dies
+# with "Argument list too long", filters out every source file, and no
+# Cobertura XML is produced (the os-windows coverage leg's failure mode). Feed
+# the object list through an LLVM response file (`@file`, expanded by every LLVM
+# tool's CommandLine parser) so the OS arg-length limit never applies — on any
+# platform. One token per line; the probed paths never contain spaces.
+OBJ_RSP="${REPORT_DIR}/llvm-cov-objects.rsp"
+printf '%s\n' "${BINARIES[@]}" > "${OBJ_RSP}"
+echo "=== Wrote ${#BINARIES[@]} -object tokens to a response file (avoids Windows ARG_MAX) ==="
+
 echo "=== llvm-cov report (top-level summary) ==="
 llvm-cov report \
-    "${BINARIES[@]}" \
+    "@${OBJ_RSP}" \
     -instr-profile="${PROFDATA}" \
     -ignore-filename-regex="${COVERAGE_IGNORE_REGEX}" \
     | tee "${REPORT_DIR}/summary.txt"
 
 echo "=== llvm-cov show (HTML drilldown) ==="
 llvm-cov show \
-    "${BINARIES[@]}" \
+    "@${OBJ_RSP}" \
     -instr-profile="${PROFDATA}" \
     -ignore-filename-regex="${COVERAGE_IGNORE_REGEX}" \
     -format=html \
@@ -364,7 +375,7 @@ fi
 
 echo "=== llvm-cov export → LCOV ==="
 llvm-cov export --format=lcov \
-    "${BINARIES[@]}" \
+    "@${OBJ_RSP}" \
     -instr-profile="${PROFDATA}" \
     -ignore-filename-regex="${COVERAGE_IGNORE_REGEX}" \
     > "${RAW_LCOV_FILE}"
