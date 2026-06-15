@@ -2058,29 +2058,22 @@ target_include_directories(pulp-test-mcp-server PRIVATE
     "${CMAKE_BINARY_DIR}/tools/mcp")
 add_dependencies(pulp-test-mcp-server pulp-mcp)
 catch_discover_tests(pulp-test-mcp-server)
-
 # MIDI tests
 pulp_add_test_suite(pulp-test-midi LIBRARIES pulp::midi)
-
 pulp_add_test_suite(pulp-test-midi-file LIBRARIES pulp::midi)
-
 # State tests
 pulp_add_test_suite(pulp-test-state
     SOURCES test_state.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::state pulp::events)
-
 # Binding tests
 pulp_add_test_suite(pulp-test-binding LIBRARIES pulp::state)
-
 # Headless adapter tests
 pulp_add_test_suite(pulp-test-headless LIBRARIES pulp::format)
 pulp_add_test_suite(pulp-test-audio-inspector-demo-processor SOURCES test_audio_inspector_demo_processor.cpp LIBRARIES pulp::format pulp::audio pulp::midi)
 # .pulpset render/replay harness (G4)
 pulp_add_test_suite(pulp-test-pulpset-replay SOURCES test_pulpset_replay.cpp LIBRARIES pulp::format)
-
 # Diagnostic reporter tests
 pulp_add_test_suite(pulp-test-diagnostic SOURCES test_diagnostic_reporter.cpp LIBRARIES pulp::format)
-
 # CLAP entry point macro test
 if(PULP_HAS_CLAP)
     add_executable(pulp-test-clap-entry test_clap_entry.cpp
@@ -2089,7 +2082,6 @@ if(PULP_HAS_CLAP)
     target_link_libraries(pulp-test-clap-entry PRIVATE pulp::format clap Catch2::Catch2WithMain)
     target_compile_definitions(pulp-test-clap-entry PRIVATE PULP_CLAP_GUI=1)
     catch_discover_tests(pulp-test-clap-entry)
-
     # CLAP inbound/outbound MIDI event coverage + steady-state RT process guard.
     #
     # Unlike `pulp-test-clap-entry` above, this test DOES NOT re-compile
