@@ -197,6 +197,17 @@ void TextEditor::delete_char_after_caret() {
 // ── Caret movement ───────────────────────────────────────────────────────
 
 void TextEditor::move_caret(int delta, bool extend) {
+    // A plain (non-extending) arrow over an active selection collapses to the
+    // selection boundary in the direction of travel — Left→start, Right→end —
+    // WITHOUT moving an extra character (standard text-field behavior).
+    if (!extend && has_selection()) {
+        const int lo = std::min(selection_start_, selection_end_);
+        const int hi = std::max(selection_start_, selection_end_);
+        caret_position_ = delta < 0 ? lo : hi;
+        selection_start_ = selection_end_ = caret_position_;
+        caret_blink_time_ = 0;
+        return;
+    }
     caret_position_ = std::clamp(caret_position_ + delta, 0, static_cast<int>(text_.size()));
     if (extend)
         selection_end_ = caret_position_;
@@ -676,7 +687,7 @@ void TextEditor::paint(canvas::Canvas& canvas) {
         if (has_focus()) {
             caret_blink_time_ += 1.0f / 60.0f;
             bool caret_visible = std::fmod(caret_blink_time_, 1.06f) < 0.53f;
-            if (caret_visible || has_selection()) {
+            if (caret_visible && !has_selection()) {  // hide the caret while text is selected
                 // Read caret x from the cached snapshot instead of
                 // re-measuring a prefix substring every paint.
                 const auto& snap_line =
@@ -837,7 +848,7 @@ void TextEditor::paint(canvas::Canvas& canvas) {
     if (has_focus()) {
         caret_blink_time_ += 1.0f / 60.0f;  // approximate frame time
         bool caret_visible = std::fmod(caret_blink_time_, 1.06f) < 0.53f;
-        if (caret_visible || has_selection()) {
+        if (caret_visible && !has_selection()) {  // hide the caret while text is selected
             // Use the shaped offsets (same as the drawn text), not measure_text of
             // a prefix substring — keeps the caret exactly at the glyph boundary.
             float caret_x = text_x + x_at(caret_position_);

@@ -585,3 +585,30 @@ TEST_CASE("Multi-line TextEditor vertical + paragraph navigation",
     keytap(e2, KeyCode::up, kModAlt);     // option+Up → start of paragraph 2 (3)
     REQUIRE(e2.caret_pos() == 3);
 }
+
+TEST_CASE("Arrow over a selection collapses to its boundary, no extra move",
+          "[design-system][text-editor][regression]") {
+    // Shared move_caret() path (single- and multi-line): a plain Left/Right over
+    // an active selection collapses to the start/end of the selection without
+    // advancing an extra character (was landing one past the selection).
+    auto keytap = [](TextEditor& e, KeyCode k, uint16_t mods = 0) {
+        KeyEvent ev{}; ev.is_down = true; ev.key = k; ev.modifiers = mods;
+        e.on_key_event(ev);
+    };
+    TextEditor s;
+    s.on_focus_changed(true);
+    s.set_text("Warm, glassy");
+    keytap(s, KeyCode::home);                                   // caret → 0
+    for (int i = 0; i < 4; ++i) keytap(s, KeyCode::right, kModShift);  // select "Warm" [0,4]
+    REQUIRE(s.selected_text() == "Warm");
+
+    keytap(s, KeyCode::right);                                  // collapse to END
+    REQUIRE_FALSE(s.has_selection());
+    REQUIRE(s.caret_pos() == 4);                                // after 'm', NOT past the comma
+
+    for (int i = 0; i < 4; ++i) keytap(s, KeyCode::left, kModShift);   // re-select "Warm"
+    REQUIRE(s.selected_text() == "Warm");
+    keytap(s, KeyCode::left);                                   // collapse to START
+    REQUIRE_FALSE(s.has_selection());
+    REQUIRE(s.caret_pos() == 0);
+}
