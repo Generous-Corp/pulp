@@ -915,6 +915,38 @@ TEST_CASE("tool command handles local list path doctor and error branches",
     }
 
     {
+        // Text (non-JSON) info path renders the descriptor fields.
+        ScopedOutput output;
+        REQUIRE(cmd_tool({"info", "video-proof"}) == 0);
+        const auto text = output.out.str();
+        REQUIRE(text.find("Install method: npm_package") != std::string::npos);
+        REQUIRE(text.find("Install scope: machine") != std::string::npos);
+        REQUIRE(text.find("Distribution lane: tool_addon") != std::string::npos);
+        REQUIRE(text.find("Package format: not_pulp_add") != std::string::npos);
+        REQUIRE(text.find("Artifact manifest schema: pulp.video-proof-tool-package.v1") != std::string::npos);
+        REQUIRE(text.find("Installed: no") != std::string::npos);
+    }
+
+    {
+        // Install with a missing artifact manifest fails at the existence check.
+        ScopedOutput output;
+        const auto missing = (tmp.path / "no-such-manifest.json").string();
+        REQUIRE(cmd_tool({"install", "video-proof", "--artifact-manifest", missing}) == 1);
+        REQUIRE(output.err.str().find("artifact manifest not found") != std::string::npos);
+    }
+
+    {
+        // Install with an existing manifest whose verifier script is absent (the
+        // temp repo has no tools/local-ci/pack_video_proof_tool.py) fails in the
+        // artifact verifier.
+        ScopedOutput output;
+        const auto manifest = tmp.path / "artifact-manifest.json";
+        write_file(manifest, "{}");
+        REQUIRE(cmd_tool({"install", "video-proof", "--artifact-manifest", manifest.string()}) == 1);
+        REQUIRE(output.err.str().find("artifact verifier script not found") != std::string::npos);
+    }
+
+    {
         ScopedOutput output;
         REQUIRE(cmd_tool({"info", "missing-cmd"}) == 1);
         REQUIRE(output.err.str().find("Tool 'missing-cmd' not found") != std::string::npos);
