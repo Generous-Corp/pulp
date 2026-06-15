@@ -25,6 +25,7 @@
 #include <pulp/signal/adsr.hpp>
 #include <pulp/signal/offline_stretch.hpp>
 #include <pulp/view/animation.hpp>
+#include <pulp/view/buttons.hpp>
 #include <pulp/view/drag_drop.hpp>
 #include <pulp/view/musical_typing.hpp>
 #include <pulp/view/parameter_binding.hpp>
@@ -677,6 +678,19 @@ public:
         // ── Header ── (mockup tabs/transport removed — only wired controls remain)
         label(20, 16, 360, 24, "PulpTempoSampler", textStr, 17, 600, LabelAlign::left);
 
+        // Always-visible "Open…" button (top-right). A tap on the WAVEFORM
+        // auditions a slice once a sample is loaded, so this is the reliable
+        // tap target to load OR replace the sample at any time (drag-drop and
+        // the empty-area CTA remain too). Shares the do_browse action wired
+        // below — declared as a forward so we can assign it after do_browse.
+        TextButton* openBtn = nullptr;
+        {
+            auto btn = std::make_unique<TextButton>("Open…");
+            place(*btn, 656, 14, 84, 28);
+            openBtn = btn.get();
+            root->add_child(std::move(btn));
+        }
+
         // ── Waveform / drop area ── (enlarged now the mockup rows are gone).
         // Shows a "drop a sample" CTA when empty; the waveform + slice regions
         // when loaded. Click a slice (or musical-type) to audition it; drop or
@@ -684,12 +698,17 @@ public:
         auto wf = std::make_unique<WaveformDropView>();
         place(*wf, 20, 50, 720, 256);  // 20px margins both sides (760 - 2*20)
         wf->on_file_dropped = [this](const std::string& path) { request_load_path(path); };
-        wf->on_browse = [this] {
+        // Shared "open a sample" action: used by the empty-area tap CTA AND the
+        // always-visible Open button (so you can load/replace even with a sample
+        // already loaded, where a waveform tap auditions a slice instead).
+        auto do_browse = [this] {
             auto picked = platform::FileDialog::open_file(
                 "Load a sample",
                 {{"Audio Files", "wav;aif;aiff;flac;mp3;ogg"}}, "");
             if (picked && !picked->empty()) request_load_path(*picked);
         };
+        wf->on_browse = do_browse;
+        if (openBtn) openBtn->on_click = do_browse;
         wf->on_play_slice = [this](int idx, bool on) { play_slice(idx, on); };
         wf->playhead_query = [this](int& s, float& p) { playhead(s, p); };
         wf->generation = [this] { return raw_generation(); };

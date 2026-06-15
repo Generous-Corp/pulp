@@ -9,6 +9,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include "pulp_tempo_sampler.hpp"
 
+#include <pulp/platform/file_dialog.hpp>
+#include <pulp/view/buttons.hpp>
 #include <pulp/view/drag_drop.hpp>
 #include <pulp/view/input_events.hpp>
 #if defined(__APPLE__)
@@ -360,6 +362,26 @@ WaveformDropView* find_waveform(view::View* v) {
         if (auto* w = find_waveform(v->child_at(i))) return w;
     return nullptr;
 }
+
+view::TextButton* find_button(view::View* v, const std::string& label) {
+    if (auto* b = dynamic_cast<view::TextButton*>(v); b && b->label() == label) return b;
+    for (std::size_t i = 0; i < v->child_count(); ++i)
+        if (auto* b = find_button(v->child_at(i), label)) return b;
+    return nullptr;
+}
+
+// RAII fake FileDialog backend so the Open-button path is testable headlessly
+// (no native panel). open_file() returns the given path.
+struct FakeFileDialog {
+    explicit FakeFileDialog(std::optional<std::string> result) {
+        pulp::platform::FileDialog::Backend b;
+        b.open_file = [result](const std::string&,
+                               const std::vector<pulp::platform::FileFilter>&,
+                               const std::string&) { return result; };
+        pulp::platform::FileDialog::set_backend(std::move(b));
+    }
+    ~FakeFileDialog() { pulp::platform::FileDialog::clear_backend(); }
+};
 } // namespace
 
 // THE regression guard for "looks done but doesn't play": drive the REAL user
@@ -402,6 +424,37 @@ TEST_CASE("end-to-end: clicking a slice in the editor produces audio", "[tempo-s
     CHECK(energy > 1e-6);  // the wired editor actually triggered the sample
 }
 
+// "fix the standalone to tap to open file": once a sample is loaded, a waveform
+// tap auditions a slice, so loading/replacing must work through the always-
+// visible Open button. Drive the REAL button -> do_browse -> FileDialog -> load.
+TEST_CASE("Open button loads a sample even when one is already loaded", "[tempo-sampler]") {
+    const std::string path = "/tmp/pulp_tempo_open_button.wav";
+    REQUIRE(write_wav(path, percussive_loop(48000, 4), 48000));
+
+    Fixture f;
+    // Start WITH a sample loaded so a waveform tap would audition a slice
+    // (the exact state where tap-to-open used to be impossible).
+    auto first = percussive_loop(48000, 2);
+    const float* ch[1] = {first.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+
+    auto editor = f.proc->create_view();
+    REQUIRE(editor);
+    (void)view::render_to_png(*editor, 760, 372, 1.0f, view::ScreenshotBackend::skia);
+
+    view::TextButton* btn = find_button(editor.get(), "Open…");  // "Open…"
+    REQUIRE(btn != nullptr);
+
+    {
+        FakeFileDialog fake(path);  // RAII: the picker returns our WAV
+        const auto b = btn->local_bounds();
+        btn->on_mouse_down({b.width * 0.5f, b.height * 0.5f});  // -> on_click -> do_browse
+    }
+    // The Open button loaded + sliced the new sample off-thread.
+    REQUIRE(wait_for([&] { return f.proc->num_slices() >= 2; }));
+}
+
 TEST_CASE("waveform scroll zooms in/out and pans", "[tempo-sampler]") {
     Fixture f;
     auto loop = percussive_loop(48000, 4);
@@ -438,5 +491,34 @@ TEST_CASE("waveform scroll zooms in/out and pans", "[tempo-sampler]") {
     const int start_before = wf->visible_start();
     wheel(0.0f, 40.0f, 0.5f);                 // horizontal -> pan
     REQUIRE(wf->visible_start() != start_before);
+}
+
+// Standalone musical typing: the host calls root->on_global_key per keystroke.
+// Prove the wired editor turns a typed 'a' into audio (the real standalone path).
+TEST_CASE("standalone musical typing: on_global_key plays a slice", "[tempo-sampler]") {
+    Fixture f;
+    auto loop = percussive_loop(48000, 4);
+    const float* ch[1] = {loop.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+
+    auto editor = f.proc->create_view();
+    REQUIRE(editor);
+    auto* root = dynamic_cast<SamplerEditorRoot*>(editor.get());
+    REQUIRE(root != nullptr);
+    REQUIRE(root->on_global_key);  // the hook the standalone host fires per key
+
+    view::KeyEvent a; a.key = view::KeyCode::a; a.is_down = true;
+    REQUIRE(root->on_global_key(a));  // 'a' -> note (slice 0), consumed
+
+    std::vector<float> l(512), r(512);
+    process_block(*f.proc, 120.0, false, 0, l, r);
+    REQUIRE(wait_for([&] { return f.proc->published_frames() > 0; }));
+    double energy = 0.0;
+    for (int blk = 0; blk < 8; ++blk) {
+        process_block(*f.proc, 120.0, false, 0, l, r);
+        for (int i = 0; i < 512; ++i) energy += l[static_cast<size_t>(i)] * l[static_cast<size_t>(i)];
+    }
+    CHECK(energy > 1e-6);  // typing produced audio through the wired editor
 }
 #endif  // __APPLE__
