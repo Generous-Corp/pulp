@@ -1198,6 +1198,27 @@ def mux_desktop_video_audio(
     )
 
 
+def generate_interaction_focus(
+    video_path: Path,
+    output_path: Path,
+    *,
+    content_point: tuple[float, float],
+    window_bounds: dict,
+    scale: float = 1.0,
+    attachment_budget_bytes: int = _video_artifacts.DEFAULT_VIDEO_ATTACHMENT_BUDGET_BYTES,
+) -> dict:
+    return _video_artifacts.generate_interaction_focus(
+        video_path,
+        output_path,
+        content_point=content_point,
+        window_bounds=window_bounds,
+        scale=scale,
+        ffmpeg_path=resolve_ffmpeg_path(),
+        attachment_budget_bytes=attachment_budget_bytes,
+        run_fn=subprocess.run,
+    )
+
+
 def create_issue_video_variant(
     source_path: Path,
     output_path: Path,

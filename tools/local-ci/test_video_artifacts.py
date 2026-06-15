@@ -29,6 +29,62 @@ class VideoArtifactsTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.tmpdir.cleanup()
 
+    def test_interaction_focus_crop_scales_and_centers_on_click(self) -> None:
+        # Retina (scale 2.0): a click at logical (44,156) in a 360x512 window maps
+        # to pixel center (88,312) in the 720x1024 raw video; the crop box is
+        # scaled and clamped, centered on that point.
+        crop = self.mod.macos_interaction_focus_crop(
+            (44.0, 156.0),
+            {"width": 360, "height": 512},
+            scale=2.0,
+            focus_points=(200.0, 100.0),
+        )
+        self.assertEqual(crop["video_width"], 720)
+        self.assertEqual(crop["video_height"], 1024)
+        self.assertEqual(crop["width"], 400)  # 200 * 2
+        self.assertEqual(crop["height"], 200)  # 100 * 2
+        # centered on (88,312), clamped to >= 0
+        self.assertEqual(crop["x"], 0)  # 88 - 200 -> clamped to 0
+        self.assertEqual(crop["y"], 212)  # 312 - 100
+
+    def test_generate_interaction_focus_skips_when_raw_video_missing(self) -> None:
+        result = self.mod.generate_interaction_focus(
+            self.root / "missing.mp4",
+            self.root / "focus.mp4",
+            content_point=(10.0, 10.0),
+            window_bounds={"width": 100, "height": 100},
+            scale=1.0,
+            ffmpeg_path="/opt/ffmpeg",
+            run_fn=lambda *a, **k: (_ for _ in ()).throw(AssertionError("ffmpeg must not run")),
+        )
+        self.assertEqual(result["status"], "skipped")
+
+    def test_generate_interaction_focus_runs_ffmpeg_crop_and_reports_created(self) -> None:
+        raw = self.root / "proof.mp4"
+        raw.write_bytes(b"rawmp4")
+        out = self.root / "proof.focus.mp4"
+
+        def fake_run(cmd, **_kwargs):
+            self.assertEqual(cmd[0], "/opt/ffmpeg")
+            self.assertTrue(any(arg.startswith("crop=") for arg in cmd))
+            out.write_bytes(b"focusmp4")
+            import subprocess
+
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        result = self.mod.generate_interaction_focus(
+            raw,
+            out,
+            content_point=(44.0, 156.0),
+            window_bounds={"width": 360, "height": 512},
+            scale=2.0,
+            ffmpeg_path="/opt/ffmpeg",
+            run_fn=fake_run,
+        )
+        self.assertEqual(result["status"], "created")
+        self.assertEqual(result["crop"]["width"], 440)
+        self.assertIn("size", result)
+
     def test_resolve_ffmpeg_path_prefers_explicit_env(self) -> None:
         ffmpeg = self.root / "ffmpeg"
         fallback = self.root / "ffmpeg-path"

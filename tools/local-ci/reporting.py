@@ -22,6 +22,7 @@ ARTIFACT_KEYS = (
     "video_composed",
     "video_issue",
     "video_small",
+    "video_focus",
     "video_metadata",
     "video_composed_metadata",
     "video_issue_metadata",

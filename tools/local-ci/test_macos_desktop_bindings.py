@@ -78,6 +78,7 @@ class MacosDesktopBindingsTests(unittest.TestCase):
             "start_macos_window_video_recording",
             "stop_macos_window_video_recording",
             "mux_desktop_video_audio",
+            "generate_interaction_focus",
             "compose_desktop_video_proof",
             "create_issue_video_variant",
             "attach_desktop_source_to_manifest",

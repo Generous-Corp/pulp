@@ -217,6 +217,115 @@ def mux_desktop_video_audio(
     return payload
 
 
+def macos_interaction_focus_crop(
+    content_point: tuple[float, float],
+    window_bounds: dict,
+    *,
+    scale: float = 1.0,
+    focus_points: tuple[float, float] = (220.0, 130.0),
+) -> dict:
+    """Compute the crop rect (in raw-video pixels) centered on an interacted
+    control so a small change at the click point can be magnified. The raw window
+    recording is the window bounds captured at the screen backing scale, so a
+    logical content point maps to pixel = point * scale."""
+    if scale <= 0:
+        scale = 1.0
+    vid_w = max(2, int(round(float(window_bounds.get("width", 0) or 0) * scale)))
+    vid_h = max(2, int(round(float(window_bounds.get("height", 0) or 0) * scale)))
+    box_w = min(vid_w, max(2, int(round(focus_points[0] * scale))))
+    box_h = min(vid_h, max(2, int(round(focus_points[1] * scale))))
+    if box_w % 2:
+        box_w -= 1
+    if box_h % 2:
+        box_h -= 1
+    cx = float(content_point[0]) * scale
+    cy = float(content_point[1]) * scale
+    x = max(0, min(int(round(cx - box_w / 2)), vid_w - box_w))
+    y = max(0, min(int(round(cy - box_h / 2)), vid_h - box_h))
+    return {"x": x, "y": y, "width": box_w, "height": box_h, "video_width": vid_w, "video_height": vid_h}
+
+
+def macos_interaction_focus_command(
+    video_path: Path,
+    output_path: Path,
+    crop: dict,
+    *,
+    ffmpeg_path: str,
+    output_width: int = 1080,
+) -> list[str]:
+    out_w = output_width - (output_width % 2)
+    out_h = int(round(out_w * crop["height"] / max(1, crop["width"])))
+    out_h -= out_h % 2
+    vf = (
+        f"crop={crop['width']}:{crop['height']}:{crop['x']}:{crop['y']},"
+        f"scale={out_w}:{out_h}:flags=neighbor"
+    )
+    return [
+        ffmpeg_path,
+        "-hide_banner",
+        "-y",
+        "-i",
+        str(video_path),
+        "-vf",
+        vf,
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+        str(output_path),
+    ]
+
+
+def generate_interaction_focus(
+    video_path: Path,
+    output_path: Path,
+    *,
+    content_point: tuple[float, float],
+    window_bounds: dict,
+    scale: float = 1.0,
+    ffmpeg_path: str,
+    focus_points: tuple[float, float] = (220.0, 130.0),
+    output_width: int = 1080,
+    attachment_budget_bytes: int = DEFAULT_VIDEO_ATTACHMENT_BUDGET_BYTES,
+    run_fn: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+) -> dict:
+    """Produce a "zoom to the demoed control" clip: crop the raw window recording
+    to the region around the interaction point and scale it up so the on-screen
+    change is clearly visible. Returns metadata; status='skipped' when the raw
+    video is absent so smoke (no-interaction) runs are unaffected."""
+    if not video_path.exists():
+        return {
+            "kind": "desktop-video-proof-focus",
+            "status": "skipped",
+            "reason": f"raw video does not exist: {video_path}",
+        }
+    crop = macos_interaction_focus_crop(
+        content_point, window_bounds, scale=scale, focus_points=focus_points
+    )
+    command = macos_interaction_focus_command(
+        video_path, output_path, crop, ffmpeg_path=ffmpeg_path, output_width=output_width
+    )
+    result = run_fn(command, capture_output=True, text=True)
+    payload = {
+        "kind": "desktop-video-proof-focus",
+        "output": str(output_path),
+        "crop": crop,
+        "scale": scale,
+        "content_point": {"x": content_point[0], "y": content_point[1]},
+        "command": command,
+        "returncode": result.returncode,
+    }
+    if result.returncode != 0 or not output_path.exists():
+        payload["status"] = "failed"
+        payload["error"] = (result.stderr or result.stdout or f"ffmpeg exited {result.returncode}").strip()[-500:]
+        return payload
+    payload["status"] = "created"
+    payload["size"] = desktop_video_size_status(output_path, attachment_budget_bytes=attachment_budget_bytes)
+    return payload
+
+
 def create_issue_video_variant(
     source_path: Path,
     output_path: Path,

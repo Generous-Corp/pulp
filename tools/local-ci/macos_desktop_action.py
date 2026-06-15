@@ -212,6 +212,7 @@ def run_macos_local_smoke(
     start_macos_window_video_recording_fn: Callable[..., dict],
     stop_macos_window_video_recording_fn: Callable[..., dict],
     mux_desktop_video_audio_fn: Callable[..., dict],
+    generate_interaction_focus_fn: Callable[..., dict] | None = None,
     compose_desktop_video_proof_fn: Callable[[Path, Path], dict],
     create_issue_video_variant_fn: Callable[..., dict],
     attach_desktop_source_to_manifest_fn: Callable[[dict, dict | None], None],
@@ -326,6 +327,7 @@ def run_macos_local_smoke(
     pid = None
     video_recording = None
     video_summary = None
+    interaction_content_point: tuple[float, float] | None = None
     terminal_title: str | None = None
     terminal_cleanup: dict | None = None
     try:
@@ -508,6 +510,7 @@ def run_macos_local_smoke(
                         view_label=click_view_label,
                     )
                 screen_point = screen_point_for_content_point_fn(window, content_size, content_point)
+                interaction_content_point = (float(content_point[0]), float(content_point[1]))
                 activation_payload = activate_macos_pid_fn(int(pid or 0)) if pid else {"activated": False}
                 dispatch_payload = dispatch_macos_click_fn(*screen_point)
                 interaction_summary = {
@@ -563,6 +566,28 @@ def run_macos_local_smoke(
                 video_summary["audio_mux"] = audio_mux
                 if "size" in audio_mux:
                     video_summary["size"] = audio_mux["size"]
+                video_metadata_path.write_text(json.dumps(video_summary, indent=2) + "\n")
+            # Codified "zoom to the demoed control": when an interaction has a
+            # known click point, auto-produce a focused clip cropped+scaled to
+            # that control so the on-screen change is clearly visible, not a
+            # speck in the full window. No-interaction smoke runs skip this.
+            if (
+                generate_interaction_focus_fn is not None
+                and interaction_content_point is not None
+                and video_summary is not None
+                and Path(video_path).exists()
+            ):
+                focus_path = Path(video_path).with_name("proof.focus.mp4")
+                focus_summary = generate_interaction_focus_fn(
+                    Path(video_path),
+                    focus_path,
+                    content_point=interaction_content_point,
+                    window_bounds=window.get("bounds") or {},
+                    scale=float(window.get("scale") or 1.0),
+                )
+                video_summary["focus"] = focus_summary
+                if focus_summary.get("status") == "created":
+                    video_summary.setdefault("artifacts", {})["video_focus"] = str(focus_path)
                 video_metadata_path.write_text(json.dumps(video_summary, indent=2) + "\n")
         _validate_generated_reaper_recipe_status(video_context, log_path)
 
@@ -648,6 +673,13 @@ def run_macos_local_smoke(
                 manifest["artifacts"]["video_metadata"] = str(video_metadata_path)
             if video_poster_path.exists():
                 manifest["artifacts"]["video_poster"] = str(video_poster_path)
+            focus_clip_path = video_path.with_name("proof.focus.mp4")
+            if (
+                isinstance(video_summary, dict)
+                and (video_summary.get("focus") or {}).get("status") == "created"
+                and focus_clip_path.exists()
+            ):
+                manifest["artifacts"]["video_focus"] = str(focus_clip_path)
             if video_audio_path.exists():
                 manifest["artifacts"]["video_audio"] = str(video_audio_path)
         attach_desktop_source_to_manifest_fn(manifest, source_context or source_request)

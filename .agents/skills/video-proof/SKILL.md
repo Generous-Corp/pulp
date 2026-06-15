@@ -327,6 +327,20 @@ re-raises it on an interval during frame capture so its render loop keeps
 running. A backgrounded target that "stops animating" mid-capture is this
 throttle, not a recorder crash.
 
+### Auto-focus on the interacted control (`proof.focus.mp4`)
+
+A change to a small control (a toggle, a knob) is a speck in a full-window
+recording — easy to miss, which makes a video look like a static screenshot. So
+whenever an interaction has a known click point (the `--click x,y` /
+view-targeted desktop-event path), the macOS recorder **automatically produces
+`video/proof.focus.mp4`**: the raw recording cropped+scaled to the region around
+the clicked control, so the on-screen change fills the frame. It is recorded in
+the manifest as `focus` and `artifacts.video_focus`, and published/served like
+the other variants. No-interaction smoke runs skip it. This is the "zoom to the
+thing being demoed" behavior — use the focus clip when showing a reviewer that a
+specific control responded; it is continuous captured frames (you see the change
+happen), not a before/after still.
+
 ## Capture a proof
 
 Record a short click proof and render the Remotion composition with the
