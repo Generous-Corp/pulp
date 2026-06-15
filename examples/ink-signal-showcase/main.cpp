@@ -594,14 +594,19 @@ void advance_anims(View* v, float dt) {
         rail->set_left(0); rail->set_top(0);
         rail->flex().preferred_width = 72.0f; rail->flex().preferred_height = 150.0f;
         rail->set_bounds({0, 0, 72.0f, 150.0f});
-        const char* icons[] = {"\xe2\x99\xac", "\xe2\x96\xa4", "\xe2\x9a\x99", "\xe2\x98\xb0"};
+        // Full-width, center-aligned icon labels, evenly spaced so glyphs of
+        // differing widths line up and never overlap.
+        const char* icons[] = {"\xe2\x99\xaa", "\xe2\x96\xa4", "\xe2\x9a\x99", "\xe2\x98\xb0"};
+        const float row_h = 28.0f, gap = 6.0f, first_top = 12.0f;
         for (int i = 0; i < 4; ++i) {
+            float top = first_top + static_cast<float>(i) * (row_h + gap);
             auto ic = std::make_unique<Label>(icons[i]);
-            ic->set_font_size(18.0f);
+            ic->set_font_size(17.0f);
+            ic->set_text_align(LabelAlign::center);
             ic->set_position(View::Position::absolute);
-            ic->set_left(26.0f); ic->set_top(16.0f + i * 32.0f);
-            ic->flex().preferred_width = 28.0f; ic->flex().preferred_height = 24.0f;
-            ic->set_bounds({26.0f, 16.0f + i * 32.0f, 28.0f, 24.0f});
+            ic->set_left(0.0f); ic->set_top(top);
+            ic->flex().preferred_width = 72.0f; ic->flex().preferred_height = row_h;
+            ic->set_bounds({0.0f, top, 72.0f, row_h});
             rail->add_child(std::move(ic));
         }
         side->add_child(std::move(rail));
