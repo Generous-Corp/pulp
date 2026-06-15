@@ -116,8 +116,8 @@
     },
     {
       "path": "core/view/include/pulp/view/view.hpp",
-      "max_loc": 1663,
-      "note": "public view header trim candidate"
+      "max_loc": 1670,
+      "note": "public view header trim candidate (+7 for View::start_file_drag outbound-drag public API + FileDragRequest fwd-decl; doc comment kept minimal)"
     },
     {
       "path": "core/canvas/include/pulp/canvas/canvas.hpp",
