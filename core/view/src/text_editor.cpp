@@ -41,13 +41,16 @@ int vertical_line_position(const std::string& text, int caret, int direction) {
     const int column = caret - current_start;
 
     if (direction < 0) {
-        if (current_start == 0) return caret;
+        // Already on the first line: extend to the document start (matches the
+        // single-line up-arrow and macOS), so shift+Up selects the first row.
+        if (current_start == 0) return 0;
         const int previous_end = current_start - 1;
         const int previous_start = line_start_for_position(text, previous_end);
         return previous_start + std::min(column, previous_end - previous_start);
     }
 
-    if (current_end >= static_cast<int>(text.size())) return caret;
+    // Already on the last line: extend to the document end.
+    if (current_end >= static_cast<int>(text.size())) return static_cast<int>(text.size());
     const int next_start = current_end + 1;
     const int next_end = line_end_for_position(text, next_start);
     return next_start + std::min(column, next_end - next_start);
@@ -308,15 +311,31 @@ bool TextEditor::on_key_event(const KeyEvent& event) {
             return true;
 
         case KeyCode::up:
-            if (!multi_line) { move_to_start(shift); return true; }
-            caret_position_ = vertical_line_position(text_, caret_position_, -1);
+            if (!multi_line || mod) { move_to_start(shift); return true; }  // Cmd+Up = doc start
+            if (alt) {
+                // Option+Up: to the start of the paragraph, or the previous
+                // paragraph's start if already there.
+                int ls = line_start_for_position(text_, caret_position_);
+                caret_position_ = (caret_position_ == ls && ls > 0)
+                    ? line_start_for_position(text_, ls - 1) : ls;
+            } else {
+                caret_position_ = vertical_line_position(text_, caret_position_, -1);
+            }
             if (shift) selection_end_ = caret_position_;
             else selection_start_ = selection_end_ = caret_position_;
             return true;
 
         case KeyCode::down:
-            if (!multi_line) { move_to_end(shift); return true; }
-            caret_position_ = vertical_line_position(text_, caret_position_, 1);
+            if (!multi_line || mod) { move_to_end(shift); return true; }  // Cmd+Down = doc end
+            if (alt) {
+                // Option+Down: to the end of the paragraph, or the next
+                // paragraph's end if already there.
+                int le = line_end_for_position(text_, caret_position_);
+                caret_position_ = (caret_position_ == le && le < static_cast<int>(text_.size()))
+                    ? line_end_for_position(text_, le + 1) : le;
+            } else {
+                caret_position_ = vertical_line_position(text_, caret_position_, 1);
+            }
             if (shift) selection_end_ = caret_position_;
             else selection_start_ = selection_end_ = caret_position_;
             return true;
@@ -596,17 +615,13 @@ void TextEditor::paint(canvas::Canvas& canvas) {
                 dst.baseline_y = dst.top_y + font_size_;
                 dst.inner_x = inner_x;
                 dst.line_height = line_h;
-                // O(N) single-char accumulation. Loses inter-glyph
-                // kerning vs full-prefix shaping, but the legacy
-                // substr-measure loop was O(N²) Skia-paragraph builds
-                // per paint — unshippable on the hot path.
+                // Caret/selection x from the SHAPED run (text_x_for_byte), same
+                // as the single-line path. A sum of isolated glyph widths loses
+                // inter-glyph kerning and drifts, which showed as extra space
+                // after the caret + padding around the selection rect.
                 dst.x_offsets.resize(src.text.size() + 1);
-                dst.x_offsets[0] = 0.f;
-                float cum = 0.f;
-                for (size_t j = 0; j < src.text.size(); ++j) {
-                    cum += canvas.measure_text(std::string(1, src.text[j]));
-                    dst.x_offsets[j + 1] = cum;
-                }
+                for (size_t j = 0; j <= src.text.size(); ++j)
+                    dst.x_offsets[j] = canvas.text_x_for_byte(src.text, j);
                 last_layout_.lines.push_back(std::move(dst));
             }
             last_layout_key_ = key;

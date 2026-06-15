@@ -550,3 +550,38 @@ TEST_CASE("Multi-line TextEditor draws a selection highlight",
     // The teal highlight behind row 1 measurably raises its green energy.
     REQUIRE(green_strip(sel) > before);
 }
+
+TEST_CASE("Multi-line TextEditor vertical + paragraph navigation",
+          "[design-system][text-editor][regression]") {
+    auto keytap = [](TextEditor& e, KeyCode k, uint16_t mods = 0) {
+        KeyEvent ev{}; ev.is_down = true; ev.key = k; ev.modifiers = mods;
+        e.on_key_event(ev);
+    };
+
+    // Shift+Up on the FIRST row must extend the selection to the document start
+    // (was a no-op before — "can't highlight the first row").
+    TextEditor ed; ed.multi_line = true;
+    ed.on_focus_changed(true);       // focus first so set_text puts caret at end
+    ed.set_text("ab\ncd");          // line1 "ab" [0,2], line2 "cd" [3,5]; caret at 5
+    REQUIRE(ed.caret_pos() == 5);
+    keytap(ed, KeyCode::up);         // → end of line 1 (pos 2)
+    REQUIRE(ed.caret_pos() == 2);
+    keytap(ed, KeyCode::up, kModShift);  // shift+Up on first row → select to 0
+    REQUIRE(ed.caret_pos() == 0);
+    REQUIRE(ed.has_selection());
+    REQUIRE(ed.selected_text() == "ab");
+
+    // Option+Down / Option+Up move by paragraph (was inert in multi-line).
+    TextEditor e2; e2.multi_line = true;
+    e2.on_focus_changed(true);
+    e2.set_text("ab\ncd");                // caret at 5
+    keytap(e2, KeyCode::up);              // → 2
+    keytap(e2, KeyCode::up);              // first row → doc start (0)
+    REQUIRE(e2.caret_pos() == 0);
+    keytap(e2, KeyCode::down, kModAlt);   // option+Down → end of paragraph 1 (2)
+    REQUIRE(e2.caret_pos() == 2);
+    keytap(e2, KeyCode::down, kModAlt);   // already at end → next paragraph end (5)
+    REQUIRE(e2.caret_pos() == 5);
+    keytap(e2, KeyCode::up, kModAlt);     // option+Up → start of paragraph 2 (3)
+    REQUIRE(e2.caret_pos() == 3);
+}
