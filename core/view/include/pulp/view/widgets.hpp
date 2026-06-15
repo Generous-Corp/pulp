@@ -1464,6 +1464,49 @@ private:
     int drag_ = -1;   // 0 = low thumb, 1 = high thumb, -1 = none
 };
 
+// ── InlineValueEditor ────────────────────────────────────────────────────────
+// A click-to-type numeric value readout (the Figma "Inline Value Editor"): shows
+// `value + suffix` idle; click to edit (caret), Enter commits, Esc cancels. A
+// committed value outside [min,max] shows a danger ring and is rejected. Pair it
+// with a Knob/Fader (the readout drives the control via on_change; the control
+// updates the readout via set_value). States: idle / editing / invalid / disabled.
+class InlineValueEditor : public View {
+public:
+    InlineValueEditor() { set_focusable(true); }
+
+    void set_value(double v) { value_ = v; request_repaint(); }
+    double value() const { return value_; }
+    void set_range(double min, double max) { min_ = min; max_ = max; }
+    void set_suffix(std::string s) { suffix_ = std::move(s); request_repaint(); }
+    void set_decimals(int d) { decimals_ = d; request_repaint(); }
+    void set_enabled(bool e) { enabled_ = e; if (!e) editing_ = false; request_repaint(); }
+    bool enabled() const { return enabled_; }
+    bool editing() const { return editing_; }
+    bool invalid() const { return invalid_; }
+
+    // Fired when a typed value is committed in range.
+    std::function<void(double)> on_change;
+
+    void begin_edit();
+    void commit_edit();
+    void cancel_edit();
+
+    void paint(canvas::Canvas& canvas) override;
+    void on_mouse_down(Point pos) override;
+    void on_text_input(const TextInputEvent& event) override;
+    bool on_key_event(const KeyEvent& event) override;
+    void on_focus_changed(bool gained) override;
+
+private:
+    std::string display_() const;     // value + suffix
+    double value_ = 0.0, min_ = -1e9, max_ = 1e9;
+    int decimals_ = 1;
+    std::string suffix_;
+    bool enabled_ = true, editing_ = false, invalid_ = false;
+    std::string edit_buffer_;
+    float blink_ = 0.0f;
+};
+
 // ── SpectrogramView ──────────────────────────────────────────────────────────
 // Scrolling time-frequency display. Each STFT frame becomes a column of
 // colored pixels, scrolling left as new frames arrive.

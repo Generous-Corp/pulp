@@ -482,6 +482,42 @@ void advance_anims(View* v, float dt) {
         y += 130.0f;
     }
 
+    // ── Inline value editor — click a readout to type ─────────────────────
+    section("Inline value editor — click a readout to type");
+    {
+        // Knob + editable readout, wired both ways: drag the knob and the
+        // readout updates; click the readout, type, Enter → the knob moves.
+        auto* kp = static_cast<Knob*>(add(std::make_unique<Knob>(), kMargin, y, 84.0f, 84.0f));
+        kp->set_value(0.62f); kp->set_label("Level");
+        auto ied = std::make_unique<InlineValueEditor>();
+        ied->set_range(0, 100); ied->set_decimals(0); ied->set_suffix("%"); ied->set_value(62);
+        auto* ep = static_cast<InlineValueEditor*>(add(std::move(ied), kMargin, y + 90.0f, 84.0f, 26.0f));
+        kp->on_change = [ep](float v) { ep->set_value(v * 100.0); };
+        ep->on_change = [kp](double v) { kp->set_value(static_cast<float>(v / 100.0)); };
+        label("UNDER KNOB", kMargin, y + 120.0f, 120.0f, 11.0f);
+
+        // Fader + editable dB readout beside it.
+        auto* fp = static_cast<Fader*>(add(std::make_unique<Fader>(), kMargin + 200.0f, y, 26.0f, 100.0f));
+        fp->set_value(0.7f);
+        auto fied = std::make_unique<InlineValueEditor>();
+        fied->set_range(-60, 0); fied->set_decimals(1); fied->set_suffix(" dB");
+        fied->set_value(-60.0 + 60.0 * 0.7);
+        auto* fep = static_cast<InlineValueEditor*>(add(std::move(fied), kMargin + 240.0f, y + 36.0f, 96.0f, 26.0f));
+        fp->on_change = [fep](float v) { fep->set_value(-60.0 + 60.0 * v); };
+        fep->on_change = [fp](double v) { fp->set_value(static_cast<float>((v + 60.0) / 60.0)); };
+        label("BESIDE FADER", kMargin + 200.0f, y + 120.0f, 140.0f, 11.0f);
+
+        // Disabled readout.
+        { auto de = std::make_unique<InlineValueEditor>();
+          de->set_value(-3.5); de->set_decimals(1); de->set_suffix(" dB"); de->set_enabled(false);
+          add(std::move(de), kMargin + 420.0f, y + 36.0f, 96.0f, 26.0f); }
+        label("DISABLED", kMargin + 420.0f, y + 120.0f, 120.0f, 11.0f);
+
+        label("Click a readout, type, Enter commits \xc2\xb7 Esc cancels \xc2\xb7 out-of-range shows a danger ring",
+              kMargin, y + 140.0f, 760.0f, 11.0f);
+        y += 162.0f;
+    }
+
     // ── Buttons & inputs — Search · TextArea · NumberBox ───────────────
     section("Buttons & inputs — Search · Number · TextArea");
     {

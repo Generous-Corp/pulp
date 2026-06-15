@@ -766,3 +766,36 @@ TEST_CASE("NumberBox steps, click-to-types, and scrubs on vertical drag",
     REQUIRE(n.hovered_zone() == -1);
     REQUIRE(fired > 0);
 }
+
+TEST_CASE("InlineValueEditor click-to-type: commit / out-of-range / cancel",
+          "[design-system][interaction]") {
+    InlineValueEditor e; e.set_bounds({0, 0, 96, 26});
+    e.set_range(-60, 0); e.set_decimals(1); e.set_value(-12.0);
+    double committed = 999.0; e.on_change = [&](double v) { committed = v; };
+    auto type = [&](const char* s) { TextInputEvent t{}; t.text = s; e.on_text_input(t); };
+    auto key = [&](KeyCode k) { KeyEvent ev{}; ev.is_down = true; ev.key = k; e.on_key_event(ev); };
+
+    // Click → edit, clear the prefilled buffer, type a valid value, Enter.
+    e.on_mouse_down({48.0f, 13.0f});
+    REQUIRE(e.editing());
+    for (int i = 0; i < 8; ++i) key(KeyCode::backspace);
+    type("-3.5"); key(KeyCode::enter);
+    REQUIRE_FALSE(e.editing());
+    REQUIRE(std::fabs(committed - (-3.5)) < 1e-6);
+    REQUIRE(std::fabs(e.value() - (-3.5)) < 1e-6);
+    REQUIRE_FALSE(e.invalid());
+
+    // Out-of-range commit → flagged invalid, value unchanged.
+    e.on_mouse_down({48.0f, 13.0f});
+    for (int i = 0; i < 8; ++i) key(KeyCode::backspace);
+    type("12"); key(KeyCode::enter);
+    REQUIRE(e.invalid());
+    REQUIRE(std::fabs(e.value() - (-3.5)) < 1e-6);
+
+    // Esc cancels without committing.
+    double before = e.value();
+    e.on_mouse_down({48.0f, 13.0f});
+    type("99"); key(KeyCode::escape);
+    REQUIRE_FALSE(e.editing());
+    REQUIRE(e.value() == before);
+}

@@ -1429,6 +1429,115 @@ void Icon::paint(canvas::Canvas& canvas) {
     }
 }
 
+// ── InlineValueEditor ────────────────────────────────────────────────────────
+
+std::string InlineValueEditor::display_() const {
+    char buf[48];
+    std::snprintf(buf, sizeof buf, "%.*f", std::max(0, decimals_), value_);
+    return std::string(buf) + suffix_;
+}
+
+void InlineValueEditor::begin_edit() {
+    if (!enabled_ || editing_) return;
+    editing_ = true;
+    invalid_ = false;
+    blink_ = 0.0f;
+    char buf[48];
+    std::snprintf(buf, sizeof buf, "%.*f", std::max(0, decimals_), value_);
+    edit_buffer_ = buf;
+    request_repaint();
+}
+
+void InlineValueEditor::commit_edit() {
+    if (!editing_) return;
+    editing_ = false;
+    if (!edit_buffer_.empty()) {
+        try {
+            double v = std::stod(edit_buffer_);
+            if (v < min_ || v > max_) {
+                invalid_ = true;   // out of range: flag, keep the prior value
+            } else {
+                invalid_ = false;
+                value_ = v;
+                if (on_change) on_change(value_);
+            }
+        } catch (...) {
+            // unparseable → leave the value unchanged
+        }
+    }
+    request_repaint();
+}
+
+void InlineValueEditor::cancel_edit() {
+    editing_ = false;
+    invalid_ = false;
+    edit_buffer_.clear();
+    request_repaint();
+}
+
+void InlineValueEditor::on_mouse_down(Point) {
+    if (enabled_ && !editing_) begin_edit();
+}
+
+void InlineValueEditor::on_text_input(const TextInputEvent& event) {
+    if (!editing_) return;
+    for (char c : event.text)
+        if ((c >= '0' && c <= '9') || c == '.' || c == '-' || c == '+')
+            edit_buffer_ += c;
+    invalid_ = false;
+    request_repaint();
+}
+
+bool InlineValueEditor::on_key_event(const KeyEvent& event) {
+    if (!editing_ || !event.is_down) return false;
+    if (event.key == KeyCode::enter) { commit_edit(); return true; }
+    if (event.key == KeyCode::escape) { cancel_edit(); return true; }
+    if (event.key == KeyCode::backspace) {
+        if (!edit_buffer_.empty()) edit_buffer_.pop_back();
+        request_repaint();
+        return true;
+    }
+    return false;
+}
+
+void InlineValueEditor::on_focus_changed(bool gained) {
+    if (!gained && editing_) commit_edit();
+}
+
+void InlineValueEditor::paint(canvas::Canvas& canvas) {
+    auto b = local_bounds();
+    const float radius = 6.0f;
+    auto bg = resolve_color("bg.elevated", canvas::Color::rgba8(20, 24, 30));
+    auto fg = resolve_color("text.primary", canvas::Color::rgba8(220, 224, 230));
+    auto accent = resolve_color("accent.primary", canvas::Color::rgba8(22, 218, 194));
+    auto danger = resolve_color("accent.error", canvas::Color::rgba8(255, 92, 77));
+    auto border = resolve_color("control.border", canvas::Color::rgba8(60, 66, 78));
+    if (!enabled_) fg.a = 120;
+
+    canvas.set_fill_color(bg);
+    canvas.fill_rounded_rect(0, 0, b.width, b.height, radius);
+
+    auto ring = invalid_ ? danger : (editing_ ? accent : border);
+    canvas.set_stroke_color(ring);
+    canvas.set_line_width((editing_ || invalid_) ? 1.6f : 1.0f);
+    canvas.stroke_rounded_rect(0.8f, 0.8f, b.width - 1.6f, b.height - 1.6f, radius - 0.8f);
+
+    canvas.set_font("Inter", std::min(14.0f, b.height * 0.55f));
+    canvas.set_text_align(canvas::TextAlign::center);
+    canvas.set_fill_color(editing_ ? accent : fg);
+    std::string txt;
+    if (editing_) {
+        blink_ += 1.0f / 60.0f;
+        bool caret = std::fmod(blink_, 1.06f) < 0.53f;
+        txt = edit_buffer_ + (caret ? "|" : "");
+    } else {
+        txt = display_();
+    }
+    canvas.fill_text_anchored(txt, b.width * 0.5f, b.height * 0.5f,
+                              canvas::Canvas::TextAnchor::GlyphCenter);
+    canvas.set_text_align(canvas::TextAlign::left);
+}
+
 // ── DualRangeSlider ──────────────────────────────────────────────────────────
 
 void DualRangeSlider::clamp_() {
