@@ -479,7 +479,11 @@ void advance_anims(View* v, float dt) {
           v->set_low(0.2f); v->set_high(0.75f);
           add(std::move(v), kMargin + 440.0f, y - 6.0f, 18.0f, 100.0f); }
         label("VERTICAL", kMargin + 410.0f, y + 100.0f, 120.0f, 11.0f);
-        y += 130.0f;
+        { auto cl = std::make_unique<DualRangeSlider>();
+          cl->set_low(0.35f); cl->set_high(0.65f); cl->set_no_cross(true);
+          add(std::move(cl), kMargin, y + 44.0f, 360.0f, 18.0f); }
+        label("CLAMPED \xc2\xb7 thumbs can\xe2\x80\x99t cross", kMargin, y + 66.0f, 260.0f, 11.0f);
+        y += 150.0f;
     }
 
     // ── Inline value editor — click a readout to type ─────────────────────

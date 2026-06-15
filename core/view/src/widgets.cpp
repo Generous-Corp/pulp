@@ -1615,7 +1615,9 @@ float DualRangeSlider::pointer_t_(Point pos) const {
 
 void DualRangeSlider::apply_(Point pos) {
     float v = value_for_pos_(pointer_t_(pos));
-    if (drag_ == 0) low_ = v; else if (drag_ == 1) high_ = v;
+    // no_cross: a dragged thumb stops at the other (low ≤ high preserved).
+    if (drag_ == 0) low_ = no_cross_ ? std::min(v, high_) : v;
+    else if (drag_ == 1) high_ = no_cross_ ? std::max(v, low_) : v;
     clamp_();
     if (on_change) on_change(low_, high_);
 }

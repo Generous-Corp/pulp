@@ -799,3 +799,14 @@ TEST_CASE("InlineValueEditor click-to-type: commit / out-of-range / cancel",
     REQUIRE_FALSE(e.editing());
     REQUIRE(e.value() == before);
 }
+
+TEST_CASE("DualRangeSlider no_cross clamps a dragged thumb at the other",
+          "[design-system][interaction]") {
+    DualRangeSlider d; d.set_bounds({0, 0, 360, 18}); d.set_range(0, 1);
+    d.set_low(0.30f); d.set_high(0.60f); d.set_no_cross(true);
+    // Grab the low thumb (~x 111) and drag far right past the high thumb.
+    d.on_mouse_down({111.0f, 9.0f});
+    d.on_mouse_drag({350.0f, 9.0f});
+    REQUIRE(d.low() <= d.high());                          // never crosses
+    REQUIRE(std::fabs(d.low() - d.high()) < 1e-3f);        // clamps at high (0.60)
+}

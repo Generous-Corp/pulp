@@ -1443,6 +1443,10 @@ public:
     float max_value() const { return max_; }
     void set_enabled(bool e) { enabled_ = e; request_repaint(); }
     bool enabled() const { return enabled_; }
+    // When true, a dragged thumb stops at the other thumb instead of crossing it
+    // (low ≤ high always). Default false (ends move freely / may cross).
+    void set_no_cross(bool b) { no_cross_ = b; }
+    bool no_cross() const { return no_cross_; }
 
     // Fired on a thumb drag with the (possibly-updated) low and high values.
     std::function<void(float low, float high)> on_change;
@@ -1461,6 +1465,7 @@ private:
     Orientation orientation_ = Orientation::horizontal;
     float min_ = 0.0f, max_ = 1.0f, low_ = 0.25f, high_ = 0.70f;
     bool enabled_ = true;
+    bool no_cross_ = false;
     int drag_ = -1;   // 0 = low thumb, 1 = high thumb, -1 = none
 };
 
