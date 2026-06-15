@@ -690,15 +690,27 @@ def run_macos_local_smoke(
                 manifest["video_proof_notes"] = cleaned_video_notes
                 composition = manifest.setdefault("video_proof_composition", {})
                 composition["notes"] = cleaned_video_notes
-            # The embedded recording will be the focus crop, not the full window,
-            # so remap the tap marker + zoom-center into the crop's coordinate
-            # frame. Otherwise they keep their full-window normalized position and
-            # land on the wrong place (e.g. the orange tap marker on a knob above
-            # the control that was actually clicked).
+            # SINGLE SOURCE OF TRUTH for what the Remotion proof embeds: the
+            # auto-focused interaction crop when it exists, otherwise the
+            # full-window capture. `embed_video` drives BOTH the embedded
+            # recording and whether overlay coordinates are remapped, so the tap
+            # marker / zoom-center always match whatever is shown (full vs
+            # zoomed). Keep these coupled — they are the thing that breaks if
+            # they ever drift apart.
+            focus_clip_for_compose = video_path.with_name("proof.focus.mp4")
             focus_meta = video_summary.get("focus") if isinstance(video_summary, dict) else None
-            if (
+            embed_focus = bool(
                 isinstance(focus_meta, dict)
                 and focus_meta.get("status") == "created"
+                and focus_clip_for_compose.exists()
+            )
+            embed_video = focus_clip_for_compose if embed_focus else None
+            # When (and only when) the focus crop is embedded, remap the tap
+            # marker + zoom-center from full-window coordinates into the crop's
+            # frame. For a full-window embed the original full-window coordinates
+            # are already correct, so they are left untouched.
+            if (
+                embed_focus
                 and isinstance(focus_meta.get("crop"), dict)
                 and isinstance(focus_meta.get("content_point"), dict)
             ):
@@ -719,20 +731,6 @@ def run_macos_local_smoke(
                         composition["focus"]["normalized_center"] = {"x": nx, "y": ny}
             atomic_write_text_fn(source_manifest_path, json.dumps(manifest, indent=2) + "\n")
             source_image_path = Path(video_source_image).expanduser().resolve() if video_source_image else None
-            # When an auto-focused interaction clip exists, embed it as the
-            # Remotion recording so the composed proof shows the zoomed change
-            # (title card + context + the visible result), not the full-window
-            # speck. Falls back to the manifest's full capture otherwise.
-            focus_clip_for_compose = video_path.with_name("proof.focus.mp4")
-            embed_video = (
-                focus_clip_for_compose
-                if (
-                    isinstance(video_summary, dict)
-                    and (video_summary.get("focus") or {}).get("status") == "created"
-                    and focus_clip_for_compose.exists()
-                )
-                else None
-            )
             composed_summary = compose_desktop_video_proof_fn(
                 source_manifest_path,
                 video_composed_path,

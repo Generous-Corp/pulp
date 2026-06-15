@@ -364,6 +364,12 @@ looks like a static screenshot with only the overlays moving, suspect these:
   the action recomputes them relative to the crop before writing the source
   manifest — otherwise the marker keeps its full-window position and lands on the
   wrong control (e.g. a knob above the toggle that was clicked).
+- **One decision drives both (don't let them drift).** A single `embed_video`
+  value in `macos_desktop_action` decides whether the proof embeds the focus
+  crop or the full-window capture, AND gates the overlay remap. Full-window
+  embed → original full-window coordinates (already correct); focus-crop embed →
+  remapped coordinates. Keep the embed choice and the remap keyed off the same
+  value so the marker/zoom always match whatever is shown.
 
 ## Capture a proof
 
