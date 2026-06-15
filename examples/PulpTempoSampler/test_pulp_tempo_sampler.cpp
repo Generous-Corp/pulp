@@ -9,6 +9,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include "pulp_tempo_sampler.hpp"
 
+#include <pulp/platform/file_dialog.hpp>
+#include <pulp/view/buttons.hpp>
 #include <pulp/view/drag_drop.hpp>
 #include <pulp/view/input_events.hpp>
 #if defined(__APPLE__)
@@ -158,6 +160,38 @@ TEST_CASE("MIDI note plays the cached stretched buffer", "[tempo-sampler]") {
         for (float v : l) REQUIRE(std::isfinite(v));
     }
     CHECK(energy > 1e-6); // produced audio
+}
+
+// Each slice maps to its own chromatic note (idx = note - root). A note off the
+// map must be SILENT — it must NOT fall back to playing the whole sample (the
+// Reaper/host "MIDI triggers the entire sample across the keyboard" bug).
+TEST_CASE("MIDI note outside the slice map is silent (no whole-sample fallback)",
+          "[tempo-sampler]") {
+    Fixture f;
+    auto loop = percussive_loop(48000, 4);
+    const float* ch[1] = {loop.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    f.proc->set_loop_bpm_for_test(120.0);
+    std::vector<float> l(512), r(512);
+    process_block(*f.proc, 120.0, false, 0, l, r);
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+    REQUIRE(wait_for([&] { return f.proc->num_slices() >= 2; }));
+
+    // Note BELOW the root (idx = note - root < 0) maps to no slice. Root = 60.
+    double oor = 0.0;
+    for (int b = 0; b < 8; ++b) {
+        process_block(*f.proc, 120.0, b == 0, 59, l, r);
+        for (int i = 0; i < 512; ++i) oor += l[static_cast<size_t>(i)] * l[static_cast<size_t>(i)];
+    }
+    CHECK(oor < 1e-9);  // silent — did NOT play the whole sample
+
+    // Sanity: the root note (slice 0) still plays (we didn't mute everything).
+    double inr = 0.0;
+    for (int b = 0; b < 8; ++b) {
+        process_block(*f.proc, 120.0, b == 0, 60, l, r);
+        for (int i = 0; i < 512; ++i) inr += l[static_cast<size_t>(i)] * l[static_cast<size_t>(i)];
+    }
+    CHECK(inr > 1e-6);
 }
 
 TEST_CASE("render while playing is finite + stable (race)", "[tempo-sampler]") {
@@ -360,6 +394,26 @@ WaveformDropView* find_waveform(view::View* v) {
         if (auto* w = find_waveform(v->child_at(i))) return w;
     return nullptr;
 }
+
+view::TextButton* find_button(view::View* v, const std::string& label) {
+    if (auto* b = dynamic_cast<view::TextButton*>(v); b && b->label() == label) return b;
+    for (std::size_t i = 0; i < v->child_count(); ++i)
+        if (auto* b = find_button(v->child_at(i), label)) return b;
+    return nullptr;
+}
+
+// RAII fake FileDialog backend so the Open-button path is testable headlessly
+// (no native panel). open_file() returns the given path.
+struct FakeFileDialog {
+    explicit FakeFileDialog(std::optional<std::string> result) {
+        pulp::platform::FileDialog::Backend b;
+        b.open_file = [result](const std::string&,
+                               const std::vector<pulp::platform::FileFilter>&,
+                               const std::string&) { return result; };
+        pulp::platform::FileDialog::set_backend(std::move(b));
+    }
+    ~FakeFileDialog() { pulp::platform::FileDialog::clear_backend(); }
+};
 } // namespace
 
 // THE regression guard for "looks done but doesn't play": drive the REAL user
@@ -402,6 +456,37 @@ TEST_CASE("end-to-end: clicking a slice in the editor produces audio", "[tempo-s
     CHECK(energy > 1e-6);  // the wired editor actually triggered the sample
 }
 
+// "fix the standalone to tap to open file": once a sample is loaded, a waveform
+// tap auditions a slice, so loading/replacing must work through the always-
+// visible Open button. Drive the REAL button -> do_browse -> FileDialog -> load.
+TEST_CASE("Open button loads a sample even when one is already loaded", "[tempo-sampler]") {
+    const std::string path = "/tmp/pulp_tempo_open_button.wav";
+    REQUIRE(write_wav(path, percussive_loop(48000, 4), 48000));
+
+    Fixture f;
+    // Start WITH a sample loaded so a waveform tap would audition a slice
+    // (the exact state where tap-to-open used to be impossible).
+    auto first = percussive_loop(48000, 2);
+    const float* ch[1] = {first.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+
+    auto editor = f.proc->create_view();
+    REQUIRE(editor);
+    (void)view::render_to_png(*editor, 760, 372, 1.0f, view::ScreenshotBackend::skia);
+
+    view::TextButton* btn = find_button(editor.get(), "Open…");  // "Open…"
+    REQUIRE(btn != nullptr);
+
+    {
+        FakeFileDialog fake(path);  // RAII: the picker returns our WAV
+        const auto b = btn->local_bounds();
+        btn->on_mouse_down({b.width * 0.5f, b.height * 0.5f});  // -> on_click -> do_browse
+    }
+    // The Open button loaded + sliced the new sample off-thread.
+    REQUIRE(wait_for([&] { return f.proc->num_slices() >= 2; }));
+}
+
 TEST_CASE("waveform scroll zooms in/out and pans", "[tempo-sampler]") {
     Fixture f;
     auto loop = percussive_loop(48000, 4);
@@ -438,5 +523,101 @@ TEST_CASE("waveform scroll zooms in/out and pans", "[tempo-sampler]") {
     const int start_before = wf->visible_start();
     wheel(0.0f, 40.0f, 0.5f);                 // horizontal -> pan
     REQUIRE(wf->visible_start() != start_before);
+}
+
+// Standalone musical typing: the host calls root->on_global_key per keystroke.
+// Prove the wired editor turns a typed 'a' into audio (the real standalone path).
+TEST_CASE("standalone musical typing: on_global_key plays a slice", "[tempo-sampler]") {
+    Fixture f;
+    auto loop = percussive_loop(48000, 4);
+    const float* ch[1] = {loop.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+
+    auto editor = f.proc->create_view();
+    REQUIRE(editor);
+    auto* root = dynamic_cast<SamplerEditorRoot*>(editor.get());
+    REQUIRE(root != nullptr);
+    REQUIRE(root->on_global_key);  // the hook the standalone host fires per key
+
+    view::KeyEvent a; a.key = view::KeyCode::a; a.is_down = true;
+    REQUIRE(root->on_global_key(a));  // 'a' -> note (slice 0), consumed
+
+    std::vector<float> l(512), r(512);
+    process_block(*f.proc, 120.0, false, 0, l, r);
+    REQUIRE(wait_for([&] { return f.proc->published_frames() > 0; }));
+    double energy = 0.0;
+    for (int blk = 0; blk < 8; ++blk) {
+        process_block(*f.proc, 120.0, false, 0, l, r);
+        for (int i = 0; i < 512; ++i) energy += l[static_cast<size_t>(i)] * l[static_cast<size_t>(i)];
+    }
+    CHECK(energy > 1e-6);  // typing produced audio through the wired editor
+}
+
+// ⌘K (Ctrl+K on Win/Linux) toggles the on-screen musical-typing keyboard. The
+// standalone host routes Cmd-chords via performKeyEquivalent: to on_global_key.
+TEST_CASE("Cmd+K toggles the on-screen keyboard overlay", "[tempo-sampler]") {
+    Fixture f;
+    auto loop = percussive_loop(48000, 4);
+    const float* ch[1] = {loop.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+
+    auto editor = f.proc->create_view();
+    REQUIRE(editor);
+    auto* root = dynamic_cast<SamplerEditorRoot*>(editor.get());
+    REQUIRE(root != nullptr);
+    REQUIRE(root->keyboard != nullptr);
+    REQUIRE_FALSE(root->keyboard->visible());  // hidden by default
+
+    view::KeyEvent k; k.key = view::KeyCode::k; k.is_down = true; k.modifiers = view::kModCmd;
+    REQUIRE(root->on_global_key(k));           // ⌘K consumed
+    REQUIRE(root->keyboard->visible());        // shown
+
+    // Render the shown state to prove the embedded SVG paints inside the editor.
+    auto png = view::render_to_png(*editor, 760, 372, 1.0f, view::ScreenshotBackend::skia);
+    REQUIRE(png.size() > 1000);
+    std::ofstream("/tmp/sampler_keyboard_shown.png", std::ios::binary)
+        .write(reinterpret_cast<const char*>(png.data()), static_cast<std::streamsize>(png.size()));
+
+    REQUIRE(root->on_global_key(k));           // ⌘K again -> hide
+    REQUIRE_FALSE(root->keyboard->visible());
+}
+
+// Clicking a key on the on-screen keyboard auditions its slice (same path as a
+// waveform-slice tap). Drives the REAL widget -> on_play_slice -> audio.
+TEST_CASE("on-screen keyboard key click auditions a slice", "[tempo-sampler]") {
+    Fixture f;
+    auto loop = percussive_loop(48000, 4);
+    const float* ch[1] = {loop.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+
+    auto editor = f.proc->create_view();
+    auto* root = dynamic_cast<SamplerEditorRoot*>(editor.get());
+    REQUIRE(root != nullptr);
+    REQUIRE(root->keyboard != nullptr);
+    // Show it first (the ⌘K flow): a hidden view lays out to zero size, so the
+    // keyboard must be visible to have clickable key geometry.
+    root->keyboard->set_visible(true);
+    (void)view::render_to_png(*editor, 760, 372, 1.0f, view::ScreenshotBackend::skia);
+    REQUIRE(root->keyboard->local_bounds().width > 0);
+
+    // Click the first white key ("A" = slice 0). Keyboard coords are local
+    // (origin 0,0); x~50 is inside white key 0, y=150 is below the black keys.
+    view::MouseEvent down;
+    down.button = view::MouseButton::left; down.is_down = true;
+    down.position = {50.0f, 150.0f};
+    root->keyboard->on_mouse_event(down);
+
+    std::vector<float> l(512), r(512);
+    process_block(*f.proc, 120.0, false, 0, l, r);
+    REQUIRE(wait_for([&] { return f.proc->published_frames() > 0; }));
+    double energy = 0.0;
+    for (int blk = 0; blk < 8; ++blk) {
+        process_block(*f.proc, 120.0, false, 0, l, r);
+        for (int i = 0; i < 512; ++i) energy += l[static_cast<size_t>(i)] * l[static_cast<size_t>(i)];
+    }
+    CHECK(energy > 1e-6);  // a keyboard-key click actually triggered the slice
 }
 #endif  // __APPLE__
