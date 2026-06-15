@@ -495,41 +495,50 @@ void TextEditor::paint(canvas::Canvas& canvas) {
         };
 
         std::vector<WrappedLine> lines;
-        lines.push_back({"", 0, 0});
-        int current_start = 0;
-        std::string current;
-
-        auto flush_line = [&](int end_index) {
-            lines.back().text = current;
-            lines.back().start = current_start;
-            lines.back().end = end_index;
-            current.clear();
-            current_start = end_index;
-            lines.push_back({"", current_start, current_start});
-        };
+        int seg_start = 0;          // logical start index of the line being built
+        std::string current;        // text accumulated for the current visual line
+        int last_space_rel = -1;    // index in `current` of the last space (break point)
 
         for (int i = 0; i < static_cast<int>(display.size()); ++i) {
             char c = display[static_cast<size_t>(i)];
             if (c == '\n') {
-                flush_line(i);
-                current_start = i + 1;
-                lines.back().start = current_start;
-                lines.back().end = current_start;
+                lines.push_back({current, seg_start, i});
+                current.clear();
+                last_space_rel = -1;
+                seg_start = i + 1;
                 continue;
             }
 
             std::string candidate = current + c;
             if (!current.empty() && canvas.measure_text(candidate) > inner_w) {
-                flush_line(i);
-                current_start = i;
+                if (last_space_rel >= 0) {
+                    // Word wrap: break at the last space so whole words stay
+                    // together. The overflowing word moves to the next line; the
+                    // breaking space is dropped from the displayed text but kept
+                    // in the logical range (this line ends AT the space).
+                    int br = last_space_rel;
+                    lines.push_back({current.substr(0, static_cast<size_t>(br)),
+                                     seg_start, seg_start + br});
+                    current = current.substr(static_cast<size_t>(br + 1));
+                    seg_start = seg_start + br + 1;
+                    last_space_rel = -1;
+                } else {
+                    // A single word wider than the box — hard char-break so the
+                    // loop can't stall.
+                    lines.push_back({current, seg_start, i});
+                    current.clear();
+                    seg_start = i;
+                }
             }
+            if (c == ' ') last_space_rel = static_cast<int>(current.size());
             current += c;
         }
 
-        lines.back().text = current;
-        lines.back().start = current_start;
-        lines.back().end = static_cast<int>(display.size());
-        if (lines.size() > 1 && lines.back().text.empty() && lines[lines.size() - 2].end == static_cast<int>(display.size())) {
+        lines.push_back({current, seg_start, static_cast<int>(display.size())});
+        // Drop a trailing empty line left by a final '\n' so the caret on the
+        // last line doesn't fall off the end.
+        if (lines.size() > 1 && lines.back().text.empty()
+            && lines[lines.size() - 2].end == static_cast<int>(display.size())) {
             lines.pop_back();
         }
 
@@ -609,6 +618,31 @@ void TextEditor::paint(canvas::Canvas& canvas) {
                 dst.top_y = inner_y + i * line_h - scroll_offset_;
                 dst.baseline_y = dst.top_y + font_size_;
                 dst.inner_x = inner_x;
+            }
+        }
+
+        // Selection highlight: one rect per visual row the selection overlaps,
+        // drawn BEHIND the text. (Single-line draws this further below; the
+        // multi-line path previously had none, so dragging a selection showed
+        // no highlight.)
+        if (has_selection()) {
+            auto sel_fill = resolve_color("accent.primary",
+                                          canvas::Color::rgba8(65, 105, 225, 255));
+            sel_fill.a = 168;
+            const int sstart = std::min(selection_start_, selection_end_);
+            const int send = std::max(selection_start_, selection_end_);
+            canvas.set_fill_color(sel_fill);
+            for (const auto& row : last_layout_.lines) {
+                int lo = std::max(sstart, row.start);
+                int hi = std::min(send, row.end);
+                if (lo >= hi || row.x_offsets.empty()) continue;
+                size_t c0 = std::clamp<size_t>(static_cast<size_t>(lo - row.start),
+                                               0, row.x_offsets.size() - 1);
+                size_t c1 = std::clamp<size_t>(static_cast<size_t>(hi - row.start),
+                                               0, row.x_offsets.size() - 1);
+                float x1 = row.inner_x + row.x_offsets[c0];
+                float x2 = row.inner_x + row.x_offsets[c1];
+                if (x2 > x1) canvas.fill_rect(x1, row.top_y, x2 - x1, row.line_height);
             }
         }
 

@@ -10,6 +10,7 @@
 #include <pulp/view/gap_widgets.hpp>
 #include <pulp/view/midi_keyboard.hpp>
 #include <pulp/view/screenshot.hpp>
+#include <pulp/view/text_editor.hpp>
 #include <pulp/view/side_panel.hpp>
 #include <pulp/view/table.hpp>
 #include <pulp/view/theme_presets.hpp>
@@ -489,4 +490,63 @@ TEST_CASE("Stepper click-to-type edits the value", "[design-system][interaction]
     // The +/- zones still nudge.
     s.on_mouse_down({6.0f, 18.0f});    // minus zone
     REQUIRE(s.value() == 11.0);
+}
+
+TEST_CASE("Multi-line TextEditor wraps at word boundaries, not mid-word",
+          "[design-system][text-editor][regression]") {
+    // Regression: the wrap used to break at the character that overflowed,
+    // splitting words ("lazy" → "laz"/"y") — the "all messed up" text. It must
+    // break at the last space so whole words stay together.
+    TextEditor ed; ed.multi_line = true;
+    ed.set_bounds({0, 0, 260, 64});
+    if (const ThemePreset* p = find_preset("ink-signal"))
+        ed.set_theme(theme_from_preset(*p, true));
+    ed.set_text("The quick brown fox jumps over the lazy dog today");
+    ed.on_focus_changed(true);
+    (void)render_to_png(ed, 260, 64, 3.0f, ScreenshotBackend::skia);  // populate layout
+
+    // Click far past the right edge on the FIRST row → caret lands at that row's
+    // wrap boundary. With word-wrap that boundary is a SPACE, never mid-word.
+    MouseEvent e{}; e.is_down = true; e.position = {1000.0f, 8.0f};
+    ed.on_mouse_event(e);
+    int wrap = ed.caret_pos();
+    REQUIRE(wrap > 0);
+    REQUIRE(wrap < static_cast<int>(ed.text().size()));
+    REQUIRE(ed.text()[static_cast<size_t>(wrap)] == ' ');
+}
+
+TEST_CASE("Multi-line TextEditor draws a selection highlight",
+          "[design-system][text-editor][regression]") {
+    // Regression: the multi-line paint path drew text + caret but no selection
+    // rectangle (only the single-line path did), so dragging a selection showed
+    // nothing. Selecting must tint the selected rows.
+    TextEditor ed; ed.multi_line = true;
+    ed.set_bounds({0, 0, 260, 64});
+    if (const ThemePreset* p = find_preset("ink-signal"))
+        ed.set_theme(theme_from_preset(*p, true));
+    ed.set_text("alpha beta gamma\ndelta epsilon");
+    ed.on_focus_changed(true);
+
+    uint32_t w = 0, h = 0;
+    auto plain = render_to_rgba(ed, 260, 64, 1.0f, &w, &h);
+    if (plain.empty() || w == 0) return;  // no Skia raster backend → skip
+
+    // Green energy over a row-1 strip (the caret sits on row 2 after select-all,
+    // so it can't pollute this band).
+    auto green_strip = [&](const std::vector<uint8_t>& buf) {
+        long sum = 0;
+        for (int y = 6; y < 18; ++y)
+            for (int x = 8; x < 240; ++x)
+                sum += buf[(static_cast<size_t>(y) * w + static_cast<size_t>(x)) * 4 + 1];
+        return sum;
+    };
+    long before = green_strip(plain);
+
+    MouseEvent e{}; e.is_down = true; e.click_count = 3; e.position = {20, 8};
+    ed.on_mouse_event(e);
+    REQUIRE(ed.has_selection());
+    auto sel = render_to_rgba(ed, 260, 64, 1.0f, &w, &h);
+    REQUIRE_FALSE(sel.empty());
+    // The teal highlight behind row 1 measurably raises its green energy.
+    REQUIRE(green_strip(sel) > before);
 }
