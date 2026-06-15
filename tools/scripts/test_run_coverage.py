@@ -151,6 +151,22 @@ class ObjectDiscoveryTests(unittest.TestCase):
             "maps; production archives are enough for full-surface rows.",
         )
 
+    def test_llvm_cov_objects_passed_via_response_file(self) -> None:
+        # A full build probes 1000+ `-object` entries. Passing them inline
+        # overflows the Windows command-line length limit (CreateProcess
+        # ~32 KB) — llvm-cov dies with "Argument list too long", filters out
+        # every source file, and the os-windows coverage leg produces no
+        # Cobertura XML. report/show/export must all read the object list from
+        # an LLVM @response file instead.
+        text = SCRIPT.read_text()
+        self.assertIn('printf \'%s\\n\' "${BINARIES[@]}" > "${OBJ_RSP}"', text,
+                      "object list must be written to a response file")
+        self.assertGreaterEqual(
+            text.count('"@${OBJ_RSP}"'), 3,
+            "llvm-cov report, show, and export must each pass objects via the "
+            "@response file, not inline ${BINARIES[@]}",
+        )
+
     def test_optional_ctest_args_are_threaded_into_ctest_invocation(self) -> None:
         self.assertTrue(
             _script_contains('PULP_COVERAGE_CTEST_ARGS'),
