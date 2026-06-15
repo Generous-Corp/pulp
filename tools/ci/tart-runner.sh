@@ -197,8 +197,15 @@ print(n)
     )" || matches=0
     count=$((count + ${matches:-0}))
   done < <(
-    gh api "repos/$REPO/actions/runs?status=queued&per_page=30" \
-      --jq ".workflow_runs[] | select(.name == \"${WORKFLOW_NAME}\") | .id" 2>/dev/null || true
+    # Scan BOTH queued and in_progress runs: a workflow with an early
+    # GitHub-hosted resolver/classify job (Coverage, Release CLI) flips to
+    # `in_progress` before its self-hosted leg is even queued, so a
+    # queued-only run scan would never see the self-hosted job and the VM
+    # would never boot. Matches the tartci macOS provider's loop.
+    for st in queued in_progress; do
+      gh api "repos/$REPO/actions/runs?status=$st&per_page=30" \
+        --jq ".workflow_runs[] | select(.name == \"${WORKFLOW_NAME}\") | .id" 2>/dev/null || true
+    done
   )
   echo "$count"
 }

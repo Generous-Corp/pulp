@@ -594,6 +594,24 @@ Coverage --queue-match-labels`, so it wakes only for queued Coverage jobs whose
 labels match `self-hosted,macOS,ARM64,pulp-coverage-vm-macos`, not unrelated
 Coverage jobs waiting for GitHub-hosted macOS.
 
+**Host-path requirement (macOS TCC).** The launchd agent and the runner script
+it executes must live under the agent user's `$HOME` (and `TART_HOME` under
+`$HOME/VMs`). A LaunchAgent whose `ProgramArguments` point at a repo checkout on
+an external/secondary volume (e.g. `/Volumes/...`) is denied by macOS privacy
+controls — launchd fails with `Operation not permitted` / `getcwd: ... Operation
+not permitted` and the supervisor loop thrashes under `KeepAlive` without ever
+registering a runner. On the maintainer host the working agents drive the
+home-installed `tartci serve macos` tool; mirror that layout when wiring this
+lane (matching label + `Coverage` workflow filter).
+
+**Capacity policy.** Coverage VMs share the physical Tart host with the
+build/gate VM pool. Run the coverage supervisor with a cap of **1**
+(`TARTCI_MACOS_VM_CAP=1` / `--cap 1`) so an advisory coverage run can never
+occupy every VM slot and stall the required `macos` gate. Label isolation
+(`pulp-coverage-vm-macos`, never `pulp-build`/`pulp-build-vm`) keeps the *jobs*
+apart; the cap keeps the *host capacity* apart. A central priority scheduler
+across lanes is the longer-term fix.
+
 ## Related reading
 
 - Issue #641 — authoritative coverage-compliance tracker

@@ -195,23 +195,30 @@ jobs:
         run: |
           set -euo pipefail
           resolve() {
+            # $5 (optional): comma-separated labels the selector must not contain.
             python3 tools/scripts/resolve_runs_on.py \
               --target-name "$1" \
               --mode default \
               --explicit-env "$2" \
               --override-env "$3" \
-              --default-label "$4"
+              --default-label "$4" \
+              ${5:+--deny-labels "$5"}
           }
           linux=$(resolve \
             "Coverage (Linux)" \
             EXPLICIT_LINUX_RUNNER_SELECTOR_JSON \
             LINUX_RUNS_ON_JSON \
             ubuntu-latest)
+          # macOS coverage must never land on the shared pulp-build/pulp-build-vm
+          # gate pool that serves the required `macos` check — a long advisory
+          # coverage run there would contend with / starve the gate. The dedicated
+          # ephemeral lane uses pulp-coverage-vm-macos.
           macos=$(resolve \
             "Coverage (macOS)" \
             EXPLICIT_MACOS_RUNNER_SELECTOR_JSON \
             MACOS_RUNS_ON_JSON \
-            macos-latest)
+            macos-latest \
+            pulp-build,pulp-build-vm)
           android_kotlin=$(resolve \
             "Coverage (Android, Kotlin)" \
             "" \

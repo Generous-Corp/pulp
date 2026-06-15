@@ -224,6 +224,17 @@ Do not push empty commits just to churn queued macOS checks. Cancel
 superseded SHAs, rebase or push only when a PR needs current `main`, and
 wait unless a check has actually failed.
 
+`coverage.yml`'s macOS leg resolves its `runs-on` via
+`resolve_runs_on.py --deny-labels pulp-build,pulp-build-vm`: a coverage
+selector (repo var `PULP_COVERAGE_MACOS_RUNS_ON_JSON` or a dispatch input)
+that names the shared gate pool **fails the resolver fast** rather than
+letting a long advisory coverage run contend with the required `macos`
+check. The dedicated coverage lane uses `pulp-coverage-vm-macos`; a bare
+GitHub-hosted label (`macos-15`) is never denied. (Push-triggered coverage
+on a busy `main` is *designed* to be superseded while queued — the
+supersession-immune **scheduled** run, cron `17 */8 * * *`, is the one that
+produces the green full-matrix upload that clears the coverage-stale watchdog.)
+
 ### Advisory cross-lane workflow: `macos-cross-advisory.yml`
 
 `.github/workflows/macos-cross-advisory.yml` is a path-scoped advisory

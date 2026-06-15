@@ -14,11 +14,13 @@
 // identically on every platform — no shell in the loop.
 //
 // The payload is not passed on the command line (the kit verifier builds the
-// command itself and never forwards a payload). The kit test sets the
-// `PULP_FAKE_SCREENSHOT_PAYLOAD` environment variable before invoking the
-// verifier; the verifier spawns this tool via `std::system`, so the variable is
-// inherited. A sidecar `pulp-screenshot.bytes` next to the executable is a
-// fallback if the variable is unset.
+// command itself and never forwards a payload). The kit test writes a sidecar
+// `pulp-screenshot.bytes` next to the executable AND sets the
+// `PULP_FAKE_SCREENSHOT_PAYLOAD` environment variable (inherited because the
+// verifier spawns this tool). The sidecar is preferred — it is read in binary
+// mode and can carry arbitrary bytes (incl. embedded NULs), whereas an env var
+// is NUL-terminated and would silently truncate a binary payload. The env var
+// is the fallback for the ASCII-only case or when no sidecar was written.
 //
 // Diagnostics: every run prints a one-line trace to stdout (captured into the
 // verifier's render log) so a failure on a CI lane we can't attach to is
@@ -65,11 +67,16 @@ int main(int argc, char** argv) {
     }
 
     const fs::path self = argc > 0 ? fs::path(argv[0]) : fs::path();
-    auto payload = payload_from_env();
-    const char* source = "env";
+    // Prefer the sidecar: it is read in binary mode and can carry arbitrary
+    // bytes (including embedded NULs), whereas an environment variable is
+    // NUL-terminated and silently truncates binary payloads. The env var
+    // remains a fallback for the common ASCII-only case (or when no sidecar
+    // was written).
+    auto payload = payload_from_sidecar(self);
+    const char* source = "sidecar";
     if (!payload) {
-        payload = payload_from_sidecar(self);
-        source = "sidecar";
+        payload = payload_from_env();
+        source = "env";
     }
 
     std::cout << "fake-screenshot: argv0=" << self.string()

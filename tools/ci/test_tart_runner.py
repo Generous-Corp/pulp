@@ -160,6 +160,15 @@ class ReuseSafetyTests(unittest.TestCase):
         self.assertIn("--queue-match-labels)", self.body)
         self.assertIn("want.issubset(labels)", self.body)
 
+    def test_label_matched_queue_scan_covers_in_progress_runs(self) -> None:
+        # A workflow whose early GitHub-hosted resolver/classify job runs first
+        # (Coverage, Release CLI) flips the run to `in_progress` before its
+        # self-hosted leg is queued. A queued-only run scan would never see that
+        # job and the VM would never boot. The label-matched gate must scan BOTH
+        # statuses (mirrors the tartci macOS provider's loop).
+        self.assertIn("for st in queued in_progress;", self.body)
+        self.assertIn("runs?status=$st", self.body)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

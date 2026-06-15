@@ -421,6 +421,66 @@ def test_default_mode_override_accepts_legacy_bare_label() -> None:
             f"legacy bare override label was not accepted: {out!r}")
 
 
+def test_deny_labels_rejects_gate_pool_selector() -> None:
+    """Coverage macOS must never resolve onto the shared pulp-build gate pool."""
+    code, _, err = _run([
+        "--target-name", "Coverage (macOS)",
+        "--mode", "default",
+        "--override-env", "MACOS_RUNS_ON_JSON",
+        "--default-label", "macos-latest",
+        "--deny-labels", "pulp-build,pulp-build-vm",
+    ], env_extra={
+        "MACOS_RUNS_ON_JSON": '["self-hosted","macOS","ARM64","pulp-build"]',
+    }, expect_error=True)
+    _assert(code != 0, f"expected nonzero exit, got {code}")
+    _assert("pulp-build" in err,
+            f"error should name the forbidden label: {err!r}")
+
+
+def test_deny_labels_rejects_gate_pool_case_insensitively() -> None:
+    code, _, err = _run([
+        "--target-name", "Coverage (macOS)",
+        "--mode", "default",
+        "--override-env", "MACOS_RUNS_ON_JSON",
+        "--default-label", "macos-latest",
+        "--deny-labels", "pulp-build,pulp-build-vm",
+    ], env_extra={
+        "MACOS_RUNS_ON_JSON": '["self-hosted","macOS","ARM64","PULP-BUILD-VM"]',
+    }, expect_error=True)
+    _assert(code != 0, f"expected nonzero exit, got {code}")
+    _assert("pulp-build-vm" in err, f"unexpected error: {err!r}")
+
+
+def test_deny_labels_allows_dedicated_coverage_label() -> None:
+    _, out, _ = _run([
+        "--target-name", "Coverage (macOS)",
+        "--mode", "default",
+        "--override-env", "MACOS_RUNS_ON_JSON",
+        "--default-label", "macos-latest",
+        "--deny-labels", "pulp-build,pulp-build-vm",
+    ], env_extra={
+        "MACOS_RUNS_ON_JSON":
+            '["self-hosted","macOS","ARM64","pulp-coverage-vm-macos"]',
+    })
+    _assert(
+        json.loads(out) == ["self-hosted", "macOS", "ARM64",
+                            "pulp-coverage-vm-macos"],
+        f"dedicated coverage selector was wrongly rejected: {out!r}")
+
+
+def test_deny_labels_never_denies_bare_github_hosted_label() -> None:
+    """A bare GitHub-hosted fallback label is always allowed under deny-labels."""
+    _, out, _ = _run([
+        "--target-name", "Coverage (macOS)",
+        "--mode", "default",
+        "--override-env", "MACOS_RUNS_ON_JSON",
+        "--default-label", "macos-15",
+        "--deny-labels", "pulp-build,pulp-build-vm",
+    ])  # no override env -> falls back to the bare default label
+    _assert(json.loads(out) == "macos-15",
+            f"bare github-hosted label should pass deny-labels: {out!r}")
+
+
 def test_default_mode_explicit_beats_override() -> None:
     _, out, _ = _run([
         "--target-name", "TSan (macOS ARM64)",

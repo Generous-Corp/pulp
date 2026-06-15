@@ -71,6 +71,10 @@ fi
 if [[ -n "${PULP_COVERAGE_CTEST_ARGS:-}" ]]; then
     # Optional coverage-only CTest arguments. Keep policy in the workflow and
     # let this script provide the shared execution/reporting mechanics.
+    # NOTE: this is whitespace-tokenized only (no shell quoting) — fine for
+    # simple flags like `-LE validation`, but a value needing an embedded space
+    # (e.g. -LE 'validation|slow gpu') will split wrong. If that's ever needed,
+    # switch this to a NUL/newline-delimited or JSON transport.
     read -r -a EXTRA_CTEST_ARGS <<< "${PULP_COVERAGE_CTEST_ARGS}"
 fi
 
