@@ -258,6 +258,42 @@ def close_terminal_windows_with_title(
     stale_title_clear_count = 0
     tty_terminate_count = 0
     tty_close_retry_count = 0
+    # Kill each proof window's tty foreground process BEFORE the first close.
+    # `close w` on a window whose shell still has a running process pops a
+    # blocking "Do you want to terminate the running process?" modal that the
+    # script cannot dismiss; killing the tty first makes the window idle so it
+    # closes silently.
+    killed_tty_count = 0
+    tty_script = "\n".join(
+        [
+            'tell application "Terminal"',
+            '    set ttyList to ""',
+            "    repeat with w in (every window)",
+            f"        if (name of w) contains {json.dumps(title_contains)} then",
+            "            try",
+            "                set ttyList to ttyList & (tty of (selected tab of w)) & linefeed",
+            "            end try",
+            "        end if",
+            "    end repeat",
+            "    return ttyList",
+            "end tell",
+        ]
+    )
+    tty_result = run_osascript(tty_script)
+    if tty_result.returncode == 0:
+        for line in (tty_result.stdout or "").splitlines():
+            tty = line.strip()
+            if not tty:
+                continue
+            tty_name = tty[len("/dev/") :] if tty.startswith("/dev/") else tty
+            try:
+                kill_result = run_fn(["pkill", "-t", tty_name], capture_output=True, text=True)
+            except Exception:
+                continue
+            if kill_result.returncode in (0, 1):
+                killed_tty_count += 1
+        if killed_tty_count:
+            sleep_fn(0.3)
     for attempt in range(max(1, attempts)):
         if attempt:
             sleep_fn(0.2)
@@ -437,6 +473,7 @@ def close_terminal_windows_with_title(
         "stale_title_clear_count": stale_title_clear_count,
         "tty_terminate_count": tty_terminate_count,
         "tty_close_retry_count": tty_close_retry_count,
+        "killed_tty_count": killed_tty_count,
         "remaining_proof_count": remaining_proof_count,
         "other_window_count": other_window_count,
         "miniaturized_count": miniaturized_count,

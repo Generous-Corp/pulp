@@ -128,6 +128,9 @@ class MacOSTerminalRunnerTests(unittest.TestCase):
             def fake_run(cmd, **_kwargs):
                 calls.append(cmd)
                 self.assertEqual(cmd[0], "osascript")
+                if "set ttyList" in cmd[-1]:
+                    # No proof ttys to kill in this scenario.
+                    return subprocess.CompletedProcess(cmd, 0, "", "")
                 if "set proofCount" in cmd[-1]:
                     return subprocess.CompletedProcess(cmd, 0, "0\t0\t0", "")
                 if "exists process" in cmd[-1]:
@@ -181,7 +184,9 @@ class MacOSTerminalRunnerTests(unittest.TestCase):
         self.assertEqual(result["terminal_cleanup"]["returncode"], 0)
         self.assertEqual(result["terminal_cleanup"]["closed_count"], 1)
         self.assertEqual(result["terminal_cleanup"]["remaining_proof_count"], 0)
-        self.assertEqual(len(calls), 4)
+        # launch + tty-collect + close + state-after-close.
+        self.assertEqual(len(calls), 5)
+        self.assertTrue(any("set ttyList" in c[-1] for c in calls if c[0] == "osascript"))
 
     def test_run_local_ci_in_terminal_preserves_long_shell_operator_argument_in_wrapper(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -325,6 +330,34 @@ class MacOSTerminalRunnerTests(unittest.TestCase):
         self.assertEqual(result["remaining_proof_count"], 1)
         self.assertEqual(result["other_window_count"], 0)
         self.assertEqual(calls[-1], ["kill", "-TERM", "1234"])
+
+    def test_close_terminal_windows_kills_proof_tty_before_first_close(self):
+        # Killing the proof window's tty process before `close w` avoids the
+        # blocking "terminate the running process?" modal.
+        calls = []
+
+        def fake_run(cmd, **_kwargs):
+            calls.append(cmd)
+            if cmd[0] == "osascript" and "set ttyList" in cmd[-1]:
+                return subprocess.CompletedProcess(cmd, 0, "/dev/ttys021\n", "")
+            if cmd[0] == "osascript" and "set closedCount" in cmd[-1]:
+                return subprocess.CompletedProcess(cmd, 0, "1\n", "")
+            if cmd[0] == "osascript":
+                return subprocess.CompletedProcess(cmd, 0, "0\t0\t0", "")
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        result = self.mod.close_terminal_windows_with_title(
+            "Pulp Video Proof local-ci tty5678",
+            run_fn=fake_run,
+            sleep_fn=lambda _secs: None,
+            attempts=1,
+        )
+
+        self.assertEqual(result["killed_tty_count"], 1)
+        self.assertIn(["pkill", "-t", "ttys021"], calls)
+        pkill_idx = calls.index(["pkill", "-t", "ttys021"])
+        close_idx = next(i for i, c in enumerate(calls) if c[0] == "osascript" and "set closedCount" in c[-1])
+        self.assertLess(pkill_idx, close_idx)
 
     def test_close_terminal_windows_does_not_terminate_with_other_windows(self):
         calls = []
