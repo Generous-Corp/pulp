@@ -68,6 +68,7 @@ public:
 
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_event(const MouseEvent& event) override;
+    void on_hover_move(Point local_pos) override;  // track hovered dropdown row
     bool on_key_event(const KeyEvent& event) override;
     View* hit_test(Point local_point) override;  // extend hit area over the open dropdown
 

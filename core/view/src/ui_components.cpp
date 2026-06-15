@@ -292,6 +292,20 @@ void ComboBox::move_hover(int delta) {
     request_repaint();
 }
 
+void ComboBox::on_hover_move(Point local_pos) {
+    // The platform host dispatches hover samples through on_hover_move (NOT
+    // on_mouse_event with is_down=false), so the open dropdown's row highlight
+    // is updated here. hit_test() already claims the dropdown region, so this
+    // fires for hovers over the menu even though it's outside our own bounds.
+    if (!open_ || items_.empty()) return;
+    const float top = dropdown_local_top();
+    const float bottom = top + static_cast<float>(items_.size()) * 24.0f;
+    int idx = (local_pos.y >= top && local_pos.y < bottom)
+                  ? static_cast<int>((local_pos.y - top) / 24.0f) : -1;
+    int next = (idx >= 0 && idx < static_cast<int>(items_.size())) ? idx : -1;
+    if (next != hover_index_) { hover_index_ = next; request_repaint(); }
+}
+
 void ComboBox::on_mouse_event(const MouseEvent& event) {
     // Menu geometry in local coords — shared with paint/hit_test so hover/click line up with
     // what's drawn, including the flipped-up case.
