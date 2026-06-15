@@ -341,6 +341,12 @@ thing being demoed" behavior — use the focus clip when showing a reviewer that
 specific control responded; it is continuous captured frames (you see the change
 happen), not a before/after still.
 
+When `--compose-video-proof` is set and a focus clip exists, the Remotion
+composer **embeds the focused recording** (via `--video`) instead of the
+full-window capture, so `proof-composed.mp4` shows the zoomed change *inside* the
+Remotion proof (title card + storyboard + context) rather than a speck. The
+full-window `proof.mp4` is still kept as the raw artifact.
+
 ## Capture a proof
 
 Record a short click proof and render the Remotion composition with the

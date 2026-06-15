@@ -692,6 +692,20 @@ def run_macos_local_smoke(
                 composition["notes"] = cleaned_video_notes
             atomic_write_text_fn(source_manifest_path, json.dumps(manifest, indent=2) + "\n")
             source_image_path = Path(video_source_image).expanduser().resolve() if video_source_image else None
+            # When an auto-focused interaction clip exists, embed it as the
+            # Remotion recording so the composed proof shows the zoomed change
+            # (title card + context + the visible result), not the full-window
+            # speck. Falls back to the manifest's full capture otherwise.
+            focus_clip_for_compose = video_path.with_name("proof.focus.mp4")
+            embed_video = (
+                focus_clip_for_compose
+                if (
+                    isinstance(video_summary, dict)
+                    and (video_summary.get("focus") or {}).get("status") == "created"
+                    and focus_clip_for_compose.exists()
+                )
+                else None
+            )
             composed_summary = compose_desktop_video_proof_fn(
                 source_manifest_path,
                 video_composed_path,
@@ -700,6 +714,7 @@ def run_macos_local_smoke(
                 source_label=video_source_label,
                 title=video_title,
                 notes=cleaned_video_notes,
+                video=embed_video,
             )
             manifest["video_composed"] = composed_summary
             if any([video_template, source_image_path, video_source_label, video_title, cleaned_video_notes, cleaned_video_context]):

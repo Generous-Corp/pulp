@@ -184,6 +184,30 @@ class VideoArtifactsTests(unittest.TestCase):
         self.assertEqual(payload["composer"], "remotion")
         self.assertTrue(payload["size"]["fits_attachment_budget"])
 
+    def test_compose_desktop_video_proof_embeds_explicit_video(self) -> None:
+        manifest = self.root / "manifest.json"
+        output = self.root / "proof-composed.mp4"
+        script = self.root / "compose.mjs"
+        focus = self.root / "proof.focus.mp4"
+        manifest.write_text('{"label":"demo"}\n')
+        script.write_text("")
+        focus.write_bytes(b"focus")
+        calls = []
+
+        def run_compose(cmd, **kwargs):
+            calls.append(cmd)
+            output.write_bytes(b"mp4")
+            return self.mod.subprocess.CompletedProcess(cmd, 0, stdout='{"composer":"remotion"}\n', stderr="")
+
+        self.mod.compose_desktop_video_proof(
+            manifest,
+            output,
+            script_path=script,
+            video=focus,
+            run_fn=run_compose,
+        )
+        self.assertEqual(calls[0][calls[0].index("--video") + 1], str(focus))
+
     def test_create_issue_video_variant_copies_source_when_it_fits(self) -> None:
         source = self.root / "proof-composed.mp4"
         output = self.root / "proof.issue.mp4"

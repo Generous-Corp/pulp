@@ -110,6 +110,7 @@ def compose_desktop_video_proof(
     diff_label: str | None = None,
     title: str | None = None,
     notes: list[str] | None = None,
+    video: Path | None = None,
     node_path: str = "node",
     run_fn: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
 ) -> dict:
@@ -122,6 +123,11 @@ def compose_desktop_video_proof(
         "--output",
         str(output_path),
     ]
+    # Embed an explicit recording (e.g. the auto-focused interaction clip) instead
+    # of the full-window capture from the manifest, so the Remotion proof shows the
+    # zoomed change rather than a speck.
+    if video:
+        command.extend(["--video", str(video)])
     if template:
         command.extend(["--template", template])
     if source_image:

@@ -1136,6 +1136,7 @@ def compose_desktop_video_proof(
     diff_label: str | None = None,
     title: str | None = None,
     notes: list[str] | None = None,
+    video: Path | None = None,
 ) -> dict:
     return _video_artifacts.compose_desktop_video_proof(
         manifest_path,
@@ -1148,6 +1149,7 @@ def compose_desktop_video_proof(
         diff_label=diff_label,
         title=title,
         notes=notes,
+        video=video,
         run_fn=subprocess.run,
     )
 
