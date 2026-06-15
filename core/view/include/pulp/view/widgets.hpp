@@ -1425,6 +1425,45 @@ private:
     bool collapsed_ = false;
 };
 
+// ── DualRangeSlider ──────────────────────────────────────────────────────────
+// Two-thumb min↔max range selector (the Figma "Range Slider"): a track with a
+// filled segment between an independently-draggable low and high thumb. (The
+// single-thumb pulp::view::RangeSlider is a plain value slider; this is the
+// dual-handle variant.) Horizontal or vertical; optional disabled state.
+class DualRangeSlider : public View {
+public:
+    enum class Orientation { horizontal, vertical };
+    void set_orientation(Orientation o) { orientation_ = o; request_repaint(); }
+    void set_range(float min, float max) { min_ = min; max_ = std::max(min, max); clamp_(); }
+    void set_low(float v) { low_ = v; clamp_(); }
+    void set_high(float v) { high_ = v; clamp_(); }
+    float low() const { return low_; }
+    float high() const { return high_; }
+    float min_value() const { return min_; }
+    float max_value() const { return max_; }
+    void set_enabled(bool e) { enabled_ = e; request_repaint(); }
+    bool enabled() const { return enabled_; }
+
+    // Fired on a thumb drag with the (possibly-updated) low and high values.
+    std::function<void(float low, float high)> on_change;
+
+    void paint(canvas::Canvas& canvas) override;
+    void on_mouse_down(Point pos) override;
+    void on_mouse_drag(Point pos) override;
+    void on_mouse_up(Point pos) override;
+
+private:
+    void clamp_();
+    float pos_for_(float v) const;        // value → 0..1 along the track
+    float value_for_pos_(float t) const;  // 0..1 → value
+    float pointer_t_(Point pos) const;    // pointer → 0..1 along the track
+    void apply_(Point pos);               // move the active thumb to the pointer
+    Orientation orientation_ = Orientation::horizontal;
+    float min_ = 0.0f, max_ = 1.0f, low_ = 0.25f, high_ = 0.70f;
+    bool enabled_ = true;
+    int drag_ = -1;   // 0 = low thumb, 1 = high thumb, -1 = none
+};
+
 // ── SpectrogramView ──────────────────────────────────────────────────────────
 // Scrolling time-frequency display. Each STFT frame becomes a column of
 // colored pixels, scrolling left as new frames arrive.

@@ -636,3 +636,29 @@ TEST_CASE("GroupBox header click toggles collapse + child visibility",
     g.on_mouse_event(body);
     REQUIRE_FALSE(g.collapsed());
 }
+
+TEST_CASE("DualRangeSlider drags the nearer thumb independently",
+          "[design-system][interaction]") {
+    DualRangeSlider d; d.set_bounds({0, 0, 360, 18});
+    d.set_range(0, 1); d.set_low(0.25f); d.set_high(0.70f);
+
+    // Grab near the HIGH thumb (~x 249) and drag right → high grows, low fixed.
+    d.on_mouse_down({249.0f, 9.0f});
+    d.on_mouse_drag({330.0f, 9.0f});
+    REQUIRE(d.high() > 0.70f);
+    REQUIRE(d.low() == 0.25f);
+    d.on_mouse_up({330.0f, 9.0f});
+
+    // Grab near the LOW thumb (~x 93) and drag left → low shrinks, high fixed.
+    float hi_now = d.high();
+    d.on_mouse_down({93.0f, 9.0f});
+    d.on_mouse_drag({20.0f, 9.0f});
+    REQUIRE(d.low() < 0.25f);
+    REQUIRE(d.high() == hi_now);
+
+    // Disabled ignores input.
+    DualRangeSlider e; e.set_bounds({0, 0, 360, 18}); e.set_low(0.3f); e.set_enabled(false);
+    e.on_mouse_down({200.0f, 9.0f});
+    e.on_mouse_drag({10.0f, 9.0f});
+    REQUIRE(e.low() == 0.3f);
+}

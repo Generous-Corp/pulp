@@ -1429,6 +1429,104 @@ void Icon::paint(canvas::Canvas& canvas) {
     }
 }
 
+// ── DualRangeSlider ──────────────────────────────────────────────────────────
+
+void DualRangeSlider::clamp_() {
+    low_ = std::clamp(low_, min_, max_);
+    high_ = std::clamp(high_, min_, max_);
+    request_repaint();
+}
+
+float DualRangeSlider::pos_for_(float v) const {
+    if (max_ <= min_) return 0.0f;
+    return std::clamp((v - min_) / (max_ - min_), 0.0f, 1.0f);
+}
+
+float DualRangeSlider::value_for_pos_(float t) const {
+    return min_ + std::clamp(t, 0.0f, 1.0f) * (max_ - min_);
+}
+
+void DualRangeSlider::paint(canvas::Canvas& canvas) {
+    auto b = local_bounds();
+    const bool horiz = orientation_ == Orientation::horizontal;
+    const float track = 4.0f, r = 7.0f;
+    auto track_color = resolve_color("control.track", canvas::Color::rgba8(58, 64, 74));
+    auto fill_color = resolve_color("control.fill", canvas::Color::rgba8(22, 218, 194));
+    auto thumb_color = resolve_color("control.thumb", canvas::Color::rgba8(232, 236, 242));
+    if (!enabled_) {
+        fill_color.a = 90; thumb_color.a = 130; track_color.a = 140;
+    }
+    const float tlo = pos_for_(std::min(low_, high_));
+    const float thi = pos_for_(std::max(low_, high_));
+
+    if (horiz) {
+        const float cy = b.height * 0.5f;
+        const float x0 = r, x1 = b.width - r, span = std::max(1.0f, x1 - x0);
+        canvas.set_fill_color(track_color);
+        canvas.fill_rounded_rect(x0, cy - track * 0.5f, span, track, track * 0.5f);
+        canvas.set_fill_color(fill_color);
+        canvas.fill_rounded_rect(x0 + tlo * span, cy - track * 0.5f, (thi - tlo) * span, track, track * 0.5f);
+        for (float t : {pos_for_(low_), pos_for_(high_)}) {
+            float cx = x0 + t * span;
+            canvas.set_fill_color(thumb_color);
+            canvas.fill_circle(cx, cy, r);
+            canvas.set_stroke_color(fill_color);
+            canvas.set_line_width(2.0f);
+            canvas.stroke_circle(cx, cy, r);
+        }
+    } else {
+        const float cx = b.width * 0.5f;
+        const float y0 = r, y1 = b.height - r, span = std::max(1.0f, y1 - y0);
+        // Vertical: min at the bottom, so invert the screen-y.
+        canvas.set_fill_color(track_color);
+        canvas.fill_rounded_rect(cx - track * 0.5f, y0, track, span, track * 0.5f);
+        canvas.set_fill_color(fill_color);
+        canvas.fill_rounded_rect(cx - track * 0.5f, y0 + (1.0f - thi) * span, track, (thi - tlo) * span, track * 0.5f);
+        for (float t : {pos_for_(low_), pos_for_(high_)}) {
+            float cy = y0 + (1.0f - t) * span;
+            canvas.set_fill_color(thumb_color);
+            canvas.fill_circle(cx, cy, r);
+            canvas.set_stroke_color(fill_color);
+            canvas.set_line_width(2.0f);
+            canvas.stroke_circle(cx, cy, r);
+        }
+    }
+}
+
+float DualRangeSlider::pointer_t_(Point pos) const {
+    auto b = local_bounds();
+    const float r = 7.0f;
+    if (orientation_ == Orientation::horizontal) {
+        float x0 = r, span = std::max(1.0f, b.width - 2 * r);
+        return std::clamp((pos.x - x0) / span, 0.0f, 1.0f);
+    }
+    float y0 = r, span = std::max(1.0f, b.height - 2 * r);
+    return std::clamp(1.0f - (pos.y - y0) / span, 0.0f, 1.0f);  // min at bottom
+}
+
+void DualRangeSlider::apply_(Point pos) {
+    float v = value_for_pos_(pointer_t_(pos));
+    if (drag_ == 0) low_ = v; else if (drag_ == 1) high_ = v;
+    clamp_();
+    if (on_change) on_change(low_, high_);
+}
+
+void DualRangeSlider::on_mouse_down(Point pos) {
+    if (!enabled_) return;
+    float t = pointer_t_(pos);
+    // Grab the nearer thumb; tie favours the low thumb.
+    drag_ = (std::fabs(t - pos_for_(high_)) < std::fabs(t - pos_for_(low_))) ? 1 : 0;
+    apply_(pos);
+}
+
+void DualRangeSlider::on_mouse_drag(Point pos) {
+    if (drag_ >= 0) apply_(pos);
+}
+
+void DualRangeSlider::on_mouse_up(Point) {
+    drag_ = -1;
+}
+
 // ── GroupBox ───────────────────────────────────────────────────────────────
 
 void GroupBox::set_collapsed(bool c) {

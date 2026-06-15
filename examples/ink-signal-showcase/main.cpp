@@ -458,6 +458,27 @@ void advance_anims(View* v, float dt) {
         y += 64.0f + 28.0f;
     }
 
+    // ── Range slider — dual-handle (min–max) ──────────────────────────────
+    section("Range slider — dual-handle (min–max)");
+    {
+        { auto d = std::make_unique<DualRangeSlider>(); d->set_low(0.25f); d->set_high(0.70f);
+          add(std::move(d), kMargin, y + 8.0f, 360.0f, 18.0f); }
+        label("DEFAULT · 25–70%", kMargin, y + 30.0f, 200.0f, 11.0f);
+        { auto d = std::make_unique<DualRangeSlider>(); d->set_low(0.0f); d->set_high(1.0f);
+          add(std::move(d), kMargin + 400.0f, y + 8.0f, 360.0f, 18.0f); }
+        label("FULL RANGE · 0–100%", kMargin + 400.0f, y + 30.0f, 200.0f, 11.0f);
+        y += 56.0f;
+        { auto d = std::make_unique<DualRangeSlider>(); d->set_low(0.3f); d->set_high(0.8f); d->set_enabled(false);
+          add(std::move(d), kMargin, y + 8.0f, 360.0f, 18.0f); }
+        label("DISABLED", kMargin, y + 30.0f, 120.0f, 11.0f);
+        { auto v = std::make_unique<DualRangeSlider>();
+          v->set_orientation(DualRangeSlider::Orientation::vertical);
+          v->set_low(0.2f); v->set_high(0.75f);
+          add(std::move(v), kMargin + 440.0f, y - 6.0f, 18.0f, 100.0f); }
+        label("VERTICAL", kMargin + 410.0f, y + 100.0f, 120.0f, 11.0f);
+        y += 130.0f;
+    }
+
     // ── Buttons & inputs — Search · TextArea · NumberBox ───────────────
     section("Buttons & inputs — Search · Number · TextArea");
     {
