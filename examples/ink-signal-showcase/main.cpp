@@ -446,16 +446,19 @@ void advance_anims(View* v, float dt) {
         label("COLLAPSIBLE · EXPANDED", gx2, y + gh + 4.0f, 200.0f, 11.0f);
         y += gh + 28.0f;
 
-        auto* gb3 = static_cast<GroupBox*>(add(std::make_unique<GroupBox>(), kMargin, y, gw, GroupBox::header_height));
+        // Collapsible, starts collapsed. Full bounds (gh) are reserved so that
+        // clicking to expand fills its own slot instead of overlapping the rows
+        // below (the absolute showcase layout has no reflow).
+        auto* gb3 = static_cast<GroupBox*>(add(std::make_unique<GroupBox>(), kMargin, y, gw, gh));
         gb3->set_title("Filter"); gb3->set_collapsible(true); filter_rows(gb3); gb3->set_collapsed(true);
-        label("COLLAPSIBLE · COLLAPSED", kMargin, y + GroupBox::header_height + 4.0f, 200.0f, 11.0f);
+        label("COLLAPSIBLE · COLLAPSED (click to expand)", kMargin, y + gh + 4.0f, 320.0f, 11.0f);
 
-        auto* gb4 = static_cast<GroupBox*>(add(std::make_unique<GroupBox>(), gx2, y, gw, 64.0f));
+        auto* gb4 = static_cast<GroupBox*>(add(std::make_unique<GroupBox>(), gx2, y, gw, gh));
         gb4->set_title("Envelope");
         { auto e = std::make_unique<Label>("NO CONTROLS YET"); e->set_font_size(11.0f);
           add_to(gb4, std::move(e), 16.0f, gb4->content_top() + 6.0f, 200.0f, 16.0f); }
-        label("EMPTY · TITLE ONLY", gx2, y + 64.0f + 4.0f, 200.0f, 11.0f);
-        y += 64.0f + 28.0f;
+        label("EMPTY · TITLE ONLY", gx2, y + gh + 4.0f, 200.0f, 11.0f);
+        y += gh + 28.0f;
     }
 
     // ── Range slider — dual-handle (min–max) ──────────────────────────────
