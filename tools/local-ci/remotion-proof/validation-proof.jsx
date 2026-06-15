@@ -2,8 +2,8 @@ import React from 'react';
 import {
 	AbsoluteFill,
 	Img,
+	OffthreadVideo,
 	Sequence,
-	Video,
 	interpolate,
 	staticFile,
 	useCurrentFrame,
@@ -108,6 +108,11 @@ export const ValidationProof = ({
 	notes,
 }) => {
 	const frame = useCurrentFrame();
+	// Start the embedded recording once its panel is visible. Otherwise the clip
+	// plays from frame 0 behind the title-card intro, so an early on-screen change
+	// (e.g. a toggle flip ~1-2s in) happens while the panel is hidden and the
+	// viewer only ever sees the post-change state.
+	const recordingStartFrame = 48;
 	const introOpacity = interpolate(frame, [0, 24, 54], [0, 1, 0], {
 		extrapolateLeft: 'clamp',
 		extrapolateRight: 'clamp',
@@ -218,15 +223,17 @@ export const ValidationProof = ({
 					}}
 				>
 					{videoFileName ? (
-						<Video
-							src={staticFile(videoFileName)}
-							muted={!videoHasAudio}
-							style={{
-								width: '100%',
-								height: '100%',
-								objectFit: 'contain',
-							}}
-						/>
+						<Sequence from={recordingStartFrame} layout="none">
+							<OffthreadVideo
+								src={staticFile(videoFileName)}
+								muted={!videoHasAudio}
+								style={{
+									width: '100%',
+									height: '100%',
+									objectFit: 'contain',
+								}}
+							/>
+						</Sequence>
 					) : posterFileName ? (
 						<Img
 							src={staticFile(posterFileName)}
@@ -332,11 +339,13 @@ export const ValidationProof = ({
 									}}
 								>
 									{videoFileName ? (
-										<Video
-											src={staticFile(videoFileName)}
-											muted
-											style={{width: '100%', height: '100%', objectFit: 'contain'}}
-										/>
+										<Sequence from={recordingStartFrame} layout="none">
+											<OffthreadVideo
+												src={staticFile(videoFileName)}
+												muted
+												style={{width: '100%', height: '100%', objectFit: 'contain'}}
+											/>
+										</Sequence>
 									) : posterFileName ? (
 										<Img
 											src={staticFile(posterFileName)}

@@ -347,6 +347,18 @@ full-window capture, so `proof-composed.mp4` shows the zoomed change *inside* th
 Remotion proof (title card + storyboard + context) rather than a speck. The
 full-window `proof.mp4` is still kept as the raw artifact.
 
+Two Remotion render gotchas the template handles — if a composed proof ever
+looks like a static screenshot with only the overlays moving, suspect these:
+
+- **Use `<OffthreadVideo>`, never `<Video>`, for the embedded recording.**
+  `<Video>` renders a frozen frame under `renderMedia` (only the overlay/zoom
+  animation moves), so the recording never actually plays in the output.
+- **Start the recording when its panel is visible** (the template wraps it in a
+  `<Sequence from={recordingStartFrame}>`). If the clip plays from frame 0 it
+  runs behind the title-card intro, so an early on-screen change (a toggle flip
+  ~1-2s in) happens while the panel is hidden and the viewer only sees the
+  post-change state.
+
 ## Capture a proof
 
 Record a short click proof and render the Remotion composition with the
