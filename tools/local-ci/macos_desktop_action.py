@@ -690,6 +690,33 @@ def run_macos_local_smoke(
                 manifest["video_proof_notes"] = cleaned_video_notes
                 composition = manifest.setdefault("video_proof_composition", {})
                 composition["notes"] = cleaned_video_notes
+            # The embedded recording will be the focus crop, not the full window,
+            # so remap the tap marker + zoom-center into the crop's coordinate
+            # frame. Otherwise they keep their full-window normalized position and
+            # land on the wrong place (e.g. the orange tap marker on a knob above
+            # the control that was actually clicked).
+            focus_meta = video_summary.get("focus") if isinstance(video_summary, dict) else None
+            if (
+                isinstance(focus_meta, dict)
+                and focus_meta.get("status") == "created"
+                and isinstance(focus_meta.get("crop"), dict)
+                and isinstance(focus_meta.get("content_point"), dict)
+            ):
+                crop = focus_meta["crop"]
+                cp = focus_meta["content_point"]
+                fscale = float(window.get("scale") or 1.0) or 1.0
+                cw = float(crop.get("width") or 0.0)
+                ch = float(crop.get("height") or 0.0)
+                if cw > 0 and ch > 0:
+                    px = float(cp.get("x", 0.0)) * fscale
+                    py = float(cp.get("y", 0.0)) * fscale
+                    nx = max(0.0, min(1.0, (px - float(crop.get("x", 0.0))) / cw))
+                    ny = max(0.0, min(1.0, (py - float(crop.get("y", 0.0))) / ch))
+                    composition = manifest.setdefault("video_proof_composition", {})
+                    if isinstance(composition.get("action_marker"), dict):
+                        composition["action_marker"]["normalized_point"] = {"x": nx, "y": ny}
+                    if isinstance(composition.get("focus"), dict):
+                        composition["focus"]["normalized_center"] = {"x": nx, "y": ny}
             atomic_write_text_fn(source_manifest_path, json.dumps(manifest, indent=2) + "\n")
             source_image_path = Path(video_source_image).expanduser().resolve() if video_source_image else None
             # When an auto-focused interaction clip exists, embed it as the

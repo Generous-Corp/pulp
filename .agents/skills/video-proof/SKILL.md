@@ -358,6 +358,12 @@ looks like a static screenshot with only the overlays moving, suspect these:
   runs behind the title-card intro, so an early on-screen change (a toggle flip
   ~1-2s in) happens while the panel is hidden and the viewer only sees the
   post-change state.
+- **Remap the tap marker + zoom-center to the crop frame.** The marker
+  (`action_marker.normalized_point`) and zoom (`focus.normalized_center`) are
+  computed against the full window. When the embedded video is the focus crop,
+  the action recomputes them relative to the crop before writing the source
+  manifest — otherwise the marker keeps its full-window position and lands on the
+  wrong control (e.g. a knob above the toggle that was clicked).
 
 ## Capture a proof
 
