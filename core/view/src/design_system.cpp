@@ -159,6 +159,11 @@ std::vector<ComponentInfo> build_catalog() {
          "pulp/view/musical_typing_keyboard.hpp", "Musical Typing Keyboard",
          "Logic-style typing + piano keyboard (computer-key letters / mouse piano)",
          {"surface.panel", "accent.primary", "accent.text", "key.white", "key.black", "text.secondary"}},
+        {"Channel Strip", C::containers, "pulp::view::ChannelStripView",
+         "pulp/view/channel_strip_view.hpp", "Channel Strip",
+         "Pro channel strip: inserts, sends, routing, pan, dB-tick fader, VU "
+         "(faithful Figma render; the lean interactive widget is \"ChannelStrip\")",
+         {"surface.panel", "accent.primary", "text.primary"}},
 
         // ── Feedback ───────────────────────────────────────────────────────
         {"InlineBanner", C::feedback, "pulp::view::InlineBanner", "pulp/view/gap_widgets.hpp", "InlineBanner",

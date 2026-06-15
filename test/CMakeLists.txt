@@ -5288,6 +5288,14 @@ target_link_libraries(pulp-test-musical-typing-keyboard
 catch_discover_tests(pulp-test-musical-typing-keyboard
     PROPERTIES LABELS "view")
 
+# ChannelStripView — faithful Figma-vector catalog component.
+add_executable(pulp-test-channel-strip-view
+    test_channel_strip_view.cpp)
+target_link_libraries(pulp-test-channel-strip-view
+    PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-channel-strip-view
+    PROPERTIES LABELS "view")
+
 # P5-3 follow-up — W3C Design Tokens cluster extracted from
 # test_design_import.cpp. Covers parse_w3c_tokens, export_w3c_tokens,
 # composite typography/shadow shapes, alias resolution, math

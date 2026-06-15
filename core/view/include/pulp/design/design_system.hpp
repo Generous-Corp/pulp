@@ -36,6 +36,7 @@
 #include <pulp/view/context_menu.hpp>
 #include <pulp/view/midi_keyboard.hpp>
 #include <pulp/view/musical_typing_keyboard.hpp>
+#include <pulp/view/channel_strip_view.hpp>
 #include <pulp/view/text_editor.hpp>
 
 #include <string>

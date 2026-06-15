@@ -19,6 +19,7 @@
 #include <pulp/view/gap_widgets.hpp>
 #include <pulp/view/midi_keyboard.hpp>
 #include <pulp/view/musical_typing_keyboard.hpp>
+#include <pulp/view/channel_strip_view.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/scroll_bar.hpp>
 #include <pulp/view/side_panel.hpp>
@@ -361,6 +362,10 @@ std::unique_ptr<View> build_board(float& out_height, ThemeModeControl*& out_them
         // SVG rendered 1:1 via DesignFrameView. Shows both typing + piano states.
         auto mtk = std::make_unique<MusicalTypingKeyboard>();
         add(std::move(mtk), kMargin, y, 900.0f, 300.0f);
+        y += 320.0f;
+        // Channel Strip (faithful Figma render via DesignFrameView) — the rich
+        // pro strip; the lean interactive widget is ChannelStrip (mixer below).
+        add(std::make_unique<ChannelStripView>(), kMargin, y, 900.0f, 300.0f);
         y += 320.0f;
     }
 
