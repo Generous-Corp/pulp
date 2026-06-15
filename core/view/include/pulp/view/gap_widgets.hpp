@@ -91,16 +91,25 @@ private:
 // over it to nudge.
 class Stepper : public View {
 public:
-    Stepper() { set_focusable(true); }
+    // ↕ resize cursor advertises the click-and-drag-vertically scrub gesture.
+    Stepper() { set_focusable(true); set_cursor(CursorStyle::vertical_resize); }
     void set_value(double v);
     double value() const { return value_; }
     void set_range(double lo, double hi) { min_ = lo; max_ = hi; }
     void set_step(double s) { step_ = s; }
     void set_suffix(std::string s) { suffix_ = std::move(s); }
     bool is_editing() const { return editing_; }
+    /// Which −/+ zone is currently hovered / pressed (0 = minus, 1 = plus,
+    /// -1 = none). Exposed for interaction tests.
+    int hovered_zone() const { return hover_zone_; }
+    int pressed_zone() const { return pressed_zone_; }
     std::function<void(double)> on_change;
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_down(Point pos) override;
+    void on_mouse_drag(Point pos) override;
+    void on_mouse_up(Point pos) override;
+    void on_hover_move(Point local_pos) override;
+    void on_mouse_leave() override;
     void on_text_input(const TextInputEvent& event) override;
     bool on_key_event(const KeyEvent& event) override;
     void on_focus_changed(bool gained) override;
@@ -113,11 +122,17 @@ public:
     float intrinsic_height() const override { return 36.0f; }
 private:
     void commit_edit_();
+    int zone_at_(float x) const;   ///< 0 = minus, 1 = plus, -1 = centre/none
     double value_ = 0.0, min_ = -24.0, max_ = 24.0, step_ = 1.0;
     double wheel_step_ = 0.0;   ///< 0 = use step_; set from typed decimal precision
     std::string suffix_ = "";
     bool editing_ = false;
     std::string edit_buffer_;
+    int hover_zone_ = -1;       ///< −/+ zone under the pointer (hover tint)
+    int pressed_zone_ = -1;     ///< −/+ zone held down (press tint)
+    float press_y_ = 0.0f;      ///< y at mouse-down, for drag-scrub delta
+    double drag_start_value_ = 0.0;
+    bool scrubbing_ = false;    ///< true once a press turns into a vertical drag
 };
 
 // ── PanControl (1-D) ──────────────────────────────────────────────────────
@@ -231,21 +246,43 @@ private:
 // the inline pill form used in the Figma "Buttons & inputs" row.
 class NumberBox : public View {
 public:
-    NumberBox() { set_focusable(true); }
+    // ↕ resize cursor advertises the click-and-drag-vertically scrub gesture.
+    NumberBox() { set_focusable(true); set_cursor(CursorStyle::vertical_resize); }
     void set_value(double v);
     double value() const { return value_; }
     void set_range(double lo, double hi) { min_ = lo; max_ = hi; }
     void set_step(double s) { step_ = s; }
     void set_suffix(std::string s) { suffix_ = std::move(s); }
+    bool is_editing() const { return editing_; }
+    /// Which ‹/› zone is currently hovered / pressed (0 = down, 1 = up,
+    /// -1 = none). Exposed for interaction tests.
+    int hovered_zone() const { return hover_zone_; }
+    int pressed_zone() const { return pressed_zone_; }
     std::function<void(double)> on_change;
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_down(Point pos) override;
+    void on_mouse_drag(Point pos) override;
+    void on_mouse_up(Point pos) override;
+    void on_hover_move(Point local_pos) override;
+    void on_mouse_leave() override;
+    void on_text_input(const TextInputEvent& event) override;
+    bool on_key_event(const KeyEvent& event) override;
+    void on_focus_changed(bool gained) override;
     bool wants_wheel_value() const override { return true; }
     void on_wheel(float delta_y) override { set_value(value_ + (delta_y > 0 ? -step_ : step_)); }
     float intrinsic_height() const override { return 32.0f; }
 private:
+    void commit_edit_();
+    int zone_at_(float x) const;   ///< 0 = ‹ decrement, 1 = › increment, -1 = centre/none
     double value_ = 0.0, min_ = -24.0, max_ = 24.0, step_ = 1.0;
     std::string suffix_;
+    bool editing_ = false;
+    std::string edit_buffer_;
+    int hover_zone_ = -1;       ///< ‹/› zone under the pointer (hover tint)
+    int pressed_zone_ = -1;     ///< ‹/› zone held down (press tint)
+    float press_y_ = 0.0f;      ///< y at mouse-down, for drag-scrub delta
+    double drag_start_value_ = 0.0;
+    bool scrubbing_ = false;    ///< true once a press turns into a vertical drag
 };
 
 }  // namespace pulp::view

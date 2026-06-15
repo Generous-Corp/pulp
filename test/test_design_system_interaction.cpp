@@ -696,3 +696,73 @@ TEST_CASE("TreeView scroll offset clamps so the top row is always reachable",
     tree.on_mouse_event(up);
     REQUIRE(tree.scroll_offset() == 0.0f);
 }
+
+TEST_CASE("Stepper scrubs on vertical drag and shows zone hover/press state",
+          "[design-system][interaction]") {
+    Stepper s; s.set_bounds({0, 0, 140, 36}); s.set_range(-99, 99);
+    s.set_step(1); s.set_value(0);
+    int fired = 0; s.on_change = [&](double) { ++fired; };
+
+    // Drag up from the centre cell increases; down decreases (snapped to step).
+    s.on_mouse_down({70.0f, 18.0f});   // centre press → begins as click-to-type
+    s.on_mouse_drag({70.0f, 0.0f});    // 18px up → +3 steps at 6px/step
+    REQUIRE(s.value() == 3.0);
+    REQUIRE_FALSE(s.is_editing());     // a real drag cancels the would-be edit
+    s.on_mouse_drag({70.0f, 54.0f});   // back down past start → negative
+    REQUIRE(s.value() < 0.0);
+    s.on_mouse_up({70.0f, 54.0f});
+    REQUIRE(fired > 0);
+
+    // Hover/press state tracks the −/+ zones for the affordance tint.
+    s.on_hover_move({6.0f, 18.0f});    // minus zone
+    REQUIRE(s.hovered_zone() == 0);
+    s.on_hover_move({134.0f, 18.0f});  // plus zone
+    REQUIRE(s.hovered_zone() == 1);
+    s.on_mouse_leave();
+    REQUIRE(s.hovered_zone() == -1);
+    s.on_mouse_down({134.0f, 18.0f});  // press the plus zone
+    REQUIRE(s.pressed_zone() == 1);
+    s.on_mouse_up({134.0f, 18.0f});
+    REQUIRE(s.pressed_zone() == -1);
+}
+
+TEST_CASE("NumberBox steps, click-to-types, and scrubs on vertical drag",
+          "[design-system][interaction]") {
+    NumberBox n; n.set_bounds({0, 0, 120, 32}); n.set_range(-99, 99);
+    n.set_step(1); n.set_value(0);
+    int fired = 0; n.on_change = [&](double) { ++fired; };
+
+    // ‹ / › end zones step (zone width == height == 32).
+    n.on_mouse_down({110.0f, 16.0f});  // › increment
+    REQUIRE(n.value() == 1.0);
+    n.on_mouse_up({110.0f, 16.0f});
+    n.on_mouse_down({6.0f, 16.0f});    // ‹ decrement
+    REQUIRE(n.value() == 0.0);
+    n.on_mouse_up({6.0f, 16.0f});
+
+    // Centre click types a value (new capability, mirrors Stepper).
+    n.on_mouse_down({60.0f, 16.0f});
+    REQUIRE(n.is_editing());
+    TextInputEvent te; te.text = "42"; n.on_text_input(te);
+    KeyEvent enter; enter.key = KeyCode::enter; enter.is_down = true;
+    REQUIRE(n.on_key_event(enter));
+    REQUIRE_FALSE(n.is_editing());
+    REQUIRE(n.value() == 42.0);
+
+    // Centre drag scrubs instead of editing.
+    n.set_value(0);
+    n.on_mouse_down({60.0f, 16.0f});
+    n.on_mouse_drag({60.0f, -12.0f});  // 28px up from y=16 → +4 steps at 6px/step ≈ round(4.67)=5
+    REQUIRE_FALSE(n.is_editing());
+    REQUIRE(n.value() > 0.0);
+    n.on_mouse_up({60.0f, -12.0f});
+
+    // Hover state tracks the chevron zones.
+    n.on_hover_move({6.0f, 16.0f});
+    REQUIRE(n.hovered_zone() == 0);
+    n.on_hover_move({114.0f, 16.0f});
+    REQUIRE(n.hovered_zone() == 1);
+    n.on_mouse_leave();
+    REQUIRE(n.hovered_zone() == -1);
+    REQUIRE(fired > 0);
+}

@@ -24,6 +24,12 @@ const char* tone_token(Tone t) {
 }
 
 constexpr float kPad = 12.0f;
+
+// Drag-to-scrub tuning, shared by Stepper and NumberBox: how many vertical
+// pixels of drag equal one `step_`, and the pixel threshold below which a press
+// counts as a click (type / nudge) rather than the start of a scrub.
+constexpr float kScrubPxPerStep = 6.0f;
+constexpr float kScrubThreshold = 3.0f;
 }  // namespace
 
 // ── Badge ───────────────────────────────────────────────────────────────
@@ -165,6 +171,20 @@ void Stepper::paint(canvas::Canvas& canvas) {
     // segmented [-] value [+] look).
     canvas.set_fill_color(resolve_color("bg.surface", Color::rgba8(20, 25, 33)));
     canvas.fill_rect(btn, 1.0f, std::max(0.0f, w - 2.0f * btn), h - 2.0f);
+    // Hover / press affordance: a soft disc behind the −/+ glyph under the
+    // pointer, so the buttons feel pressable instead of static.
+    {
+        Color accent = resolve_color("accent.primary", Color::rgba8(22, 218, 194));
+        auto tint = [&](int zone, float cx) {
+            const bool press = pressed_zone_ == zone, hov = hover_zone_ == zone;
+            if (!press && !hov) return;
+            canvas.set_fill_color(Color::rgba(accent.r, accent.g, accent.b,
+                                              press ? 0.24f : 0.12f));  // token-lint:allow (zone state tint)
+            canvas.fill_circle(cx, h * 0.5f, h * 0.5f - 4.0f);
+        };
+        tint(0, btn * 0.5f);          // minus
+        tint(1, w - btn * 0.5f);      // plus
+    }
     canvas.set_stroke_color(resolve_color("control.border", Color::rgba8(80, 80, 100)));
     canvas.set_line_width(1.0f);
     canvas.stroke_rounded_rect(0, 0, w, h, 10.0f);
@@ -201,17 +221,51 @@ void Stepper::paint(canvas::Canvas& canvas) {
     canvas.fill_text_anchored(s, w * 0.5f, h * 0.5f, canvas::Canvas::TextAnchor::GlyphCenter);
     canvas.set_text_align(canvas::TextAlign::left);
 }
-void Stepper::on_mouse_down(Point pos) {
+int Stepper::zone_at_(float x) const {
     const float w = bounds().width, btn = bounds().height;
-    if (pos.x < btn) { commit_edit_(); set_value(value_ - step_); }
-    else if (pos.x > w - btn) { commit_edit_(); set_value(value_ + step_); }
+    if (x < btn) return 0;          // minus
+    if (x > w - btn) return 1;      // plus
+    return -1;                      // centre value cell
+}
+void Stepper::on_mouse_down(Point pos) {
+    press_y_ = pos.y;
+    scrubbing_ = false;
+    const int z = zone_at_(pos.x);
+    if (z == 0) { commit_edit_(); set_value(value_ - step_); pressed_zone_ = 0; }
+    else if (z == 1) { commit_edit_(); set_value(value_ + step_); pressed_zone_ = 1; }
     else {
+        pressed_zone_ = -1;
         // Center cell: start typing a value (the host focuses us on click).
         editing_ = true;
         char buf[32]; std::snprintf(buf, sizeof(buf), "%g", value_);
         edit_buffer_ = buf;
-        request_repaint();
     }
+    drag_start_value_ = value_;
+    request_repaint();
+}
+void Stepper::on_mouse_drag(Point pos) {
+    // A vertical drag scrubs the value (up = increase). Below the threshold a
+    // centre press stays a click-to-type; once it becomes a drag we cancel any
+    // just-started edit and scrub instead.
+    if (!scrubbing_ && std::abs(press_y_ - pos.y) < kScrubThreshold) return;
+    scrubbing_ = true;
+    if (editing_) { editing_ = false; edit_buffer_.clear(); }
+    const double raw = drag_start_value_
+        + static_cast<double>(press_y_ - pos.y) / kScrubPxPerStep * step_;
+    set_value(std::round(raw / step_) * step_);   // snap to the step grid
+    request_repaint();
+}
+void Stepper::on_mouse_up(Point) {
+    pressed_zone_ = -1;
+    scrubbing_ = false;
+    request_repaint();
+}
+void Stepper::on_hover_move(Point local_pos) {
+    const int z = zone_at_(local_pos.x);
+    if (z != hover_zone_) { hover_zone_ = z; request_repaint(); }
+}
+void Stepper::on_mouse_leave() {
+    if (hover_zone_ != -1) { hover_zone_ = -1; request_repaint(); }
 }
 void Stepper::on_text_input(const TextInputEvent& event) {
     if (!editing_) return;
@@ -449,6 +503,22 @@ void NumberBox::paint(canvas::Canvas& canvas) {
     const float r = h * 0.5f;
     canvas.set_fill_color(resolve_color("bg.surface", Color::rgba8(30, 30, 46)));
     canvas.fill_rounded_rect(0, 0, w, h, r);
+
+    // Hover / press affordance: a soft disc behind the chevron under the
+    // pointer, so the ‹ › buttons feel pressable instead of static.
+    {
+        Color accent = resolve_color("accent.primary", Color::rgba8(22, 218, 194));
+        auto tint = [&](int zone, float cx) {
+            const bool press = pressed_zone_ == zone, hov = hover_zone_ == zone;
+            if (!press && !hov) return;
+            canvas.set_fill_color(Color::rgba(accent.r, accent.g, accent.b,
+                                              press ? 0.24f : 0.12f));  // token-lint:allow (zone state tint)
+            canvas.fill_circle(cx, h * 0.5f, r - 4.0f);
+        };
+        tint(0, r);          // ‹
+        tint(1, w - r);      // ›
+    }
+
     canvas.set_stroke_color(resolve_color("control.border", Color::rgba8(80, 80, 100)));
     canvas.set_line_width(1.0f);
     canvas.stroke_rounded_rect(0, 0, w, h, r);
@@ -458,20 +528,107 @@ void NumberBox::paint(canvas::Canvas& canvas) {
     canvas.set_text_align(canvas::TextAlign::center);
     canvas.fill_text_anchored("\xe2\x80\xb9", r, h * 0.5f, canvas::Canvas::TextAnchor::GlyphCenter);        // ‹
     canvas.fill_text_anchored("\xe2\x80\xba", w - r, h * 0.5f, canvas::Canvas::TextAnchor::GlyphCenter);    // ›
-    // Centered value + suffix.
-    char buf[32];
-    const char* sign = value_ > 0 ? "+" : "";
-    std::snprintf(buf, sizeof(buf), "%s%g%s%s", sign, value_,
-                  suffix_.empty() ? "" : " ", suffix_.c_str());
+    // Centre: the edit buffer + blinking caret while typing, else the value.
+    std::string s;
+    if (editing_) {
+        canvas.set_stroke_color(resolve_color("focus.ring", Color::rgba8(22, 218, 194)));
+        canvas.set_line_width(1.5f);
+        canvas.stroke_rounded_rect(h, 2.0f, std::max(0.0f, w - 2.0f * h),
+                                   h - 4.0f, (h - 4.0f) * 0.5f);
+        auto* fc = frame_clock();
+        const bool caret_on = !fc || std::fmod(fc->time(), 1.0) < 0.5;  // ~1 Hz blink
+        s = edit_buffer_ + (caret_on ? "|" : " ");
+    } else {
+        char buf[32];
+        const char* sign = value_ > 0 ? "+" : "";
+        std::snprintf(buf, sizeof(buf), "%s%g%s%s", sign, value_,
+                      suffix_.empty() ? "" : " ", suffix_.c_str());
+        s = buf;
+    }
     canvas.set_font("Inter", 12.0f);
     canvas.set_fill_color(resolve_color("text.primary", Color::rgba8(220, 220, 230)));
-    canvas.fill_text_anchored(buf, w * 0.5f, h * 0.5f, canvas::Canvas::TextAnchor::GlyphCenter);
+    canvas.set_text_align(canvas::TextAlign::center);
+    canvas.fill_text_anchored(s, w * 0.5f, h * 0.5f, canvas::Canvas::TextAnchor::GlyphCenter);
     canvas.set_text_align(canvas::TextAlign::left);
 }
-void NumberBox::on_mouse_down(Point pos) {
+int NumberBox::zone_at_(float x) const {
     const float w = bounds().width, edge = bounds().height;  // square-ish end zones
-    if (pos.x < edge) set_value(value_ - step_);             // ‹ decrement
-    else if (pos.x > w - edge) set_value(value_ + step_);    // › increment
+    if (x < edge) return 0;          // ‹ decrement
+    if (x > w - edge) return 1;      // › increment
+    return -1;                       // centre value cell
+}
+void NumberBox::on_mouse_down(Point pos) {
+    press_y_ = pos.y;
+    scrubbing_ = false;
+    const int z = zone_at_(pos.x);
+    if (z == 0) { commit_edit_(); set_value(value_ - step_); pressed_zone_ = 0; }       // ‹
+    else if (z == 1) { commit_edit_(); set_value(value_ + step_); pressed_zone_ = 1; }  // ›
+    else {
+        pressed_zone_ = -1;
+        // Centre cell: start typing a value (the host focuses us on click).
+        editing_ = true;
+        char buf[32]; std::snprintf(buf, sizeof(buf), "%g", value_);
+        edit_buffer_ = buf;
+    }
+    drag_start_value_ = value_;
+    request_repaint();
+}
+void NumberBox::on_mouse_drag(Point pos) {
+    // Vertical drag scrubs (up = increase); a sub-threshold centre press stays
+    // a click-to-type. Once it becomes a drag, cancel any edit and scrub.
+    if (!scrubbing_ && std::abs(press_y_ - pos.y) < kScrubThreshold) return;
+    scrubbing_ = true;
+    if (editing_) { editing_ = false; edit_buffer_.clear(); }
+    const double raw = drag_start_value_
+        + static_cast<double>(press_y_ - pos.y) / kScrubPxPerStep * step_;
+    set_value(std::round(raw / step_) * step_);   // snap to the step grid
+    request_repaint();
+}
+void NumberBox::on_mouse_up(Point) {
+    pressed_zone_ = -1;
+    scrubbing_ = false;
+    request_repaint();
+}
+void NumberBox::on_hover_move(Point local_pos) {
+    const int z = zone_at_(local_pos.x);
+    if (z != hover_zone_) { hover_zone_ = z; request_repaint(); }
+}
+void NumberBox::on_mouse_leave() {
+    if (hover_zone_ != -1) { hover_zone_ = -1; request_repaint(); }
+}
+void NumberBox::on_text_input(const TextInputEvent& event) {
+    if (!editing_) return;
+    for (char c : event.text) {
+        if ((c >= '0' && c <= '9') || c == '.' || (c == '-' && edit_buffer_.empty()))
+            edit_buffer_ += c;
+    }
+    request_repaint();
+}
+bool NumberBox::on_key_event(const KeyEvent& event) {
+    if (!editing_ || !event.is_down) return false;
+    if (event.key == KeyCode::enter) { commit_edit_(); return true; }
+    if (event.key == KeyCode::escape) {
+        editing_ = false; edit_buffer_.clear(); request_repaint(); return true;
+    }
+    if (event.key == KeyCode::backspace) {
+        if (!edit_buffer_.empty()) edit_buffer_.pop_back();
+        request_repaint();
+        return true;
+    }
+    return false;
+}
+void NumberBox::on_focus_changed(bool gained) {
+    View::on_focus_changed(gained);
+    if (!gained && editing_) commit_edit_();
+}
+void NumberBox::commit_edit_() {
+    if (!editing_) return;
+    editing_ = false;
+    try {
+        if (!edit_buffer_.empty()) set_value(std::stod(edit_buffer_));
+    } catch (...) {}
+    edit_buffer_.clear();
+    request_repaint();
 }
 
 }  // namespace pulp::view
