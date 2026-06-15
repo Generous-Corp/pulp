@@ -17,6 +17,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/format/au_v2_adapter.hpp>
+#include <pulp/format/au_v2_instrument.hpp>  // pulls the MusicDevice SDK (AUMusicLookup)
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/message.hpp>
 
@@ -53,6 +54,24 @@ TEST_CASE("AU v2 MIDI-effect lookup dispatches MusicDeviceMIDIEvent; "
     // Both still dispatch a core selector — sanity that the lookups are live.
     REQUIRE(ausdk::AUMIDILookup::Lookup(kAudioUnitInitializeSelect) != nullptr);
     REQUIRE(ausdk::AUBaseLookup::Lookup(kAudioUnitInitializeSelect) != nullptr);
+}
+
+// The INSTRUMENT (`aumu`) analogue of the dispatch bug above. PULP_AU_INSTRUMENT
+// registers through ausdk::AUMusicDeviceFactory (lookup = AUMusicLookup), which
+// carries the MusicDevice MIDI selector. The plain PULP_AU_PLUGIN (AUBaseFactory)
+// does NOT — so an instrument mistakenly built with the effect macro stamps an
+// `aumu` Info.plist but returns -4 (unimpErr) on MusicDeviceMIDIEvent: it loads,
+// plays UI-triggered audio, and silently ignores all host MIDI. That is exactly
+// the "AU plays slice taps but not MIDI" bug (PulpTempoSampler used PULP_AU_PLUGIN
+// before this fix). This pins the selector the instrument factory must carry.
+TEST_CASE("AU v2 instrument lookup dispatches MusicDeviceMIDIEvent; "
+          "base lookup does not",
+          "[au][midi][au-v2][dispatch]")
+{
+    REQUIRE(ausdk::AUMusicLookup::Lookup(kMusicDeviceMIDIEventSelect) != nullptr);
+    REQUIRE(ausdk::AUBaseLookup::Lookup(kMusicDeviceMIDIEventSelect) == nullptr);
+    // Sanity: the instrument lookup also dispatches a core selector.
+    REQUIRE(ausdk::AUMusicLookup::Lookup(kAudioUnitInitializeSelect) != nullptr);
 }
 
 TEST_CASE("AU v2 effect: Control Change decode round-trips channel + data",

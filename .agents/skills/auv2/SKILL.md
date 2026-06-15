@@ -66,6 +66,8 @@ So the entry macro is type-specific (`core/format/include/pulp/format/au_v2_entr
 
 **Three surfaces must agree** for an `aumf`, or the component is invalid: `descriptor().accepts_midi = true`, the `aumf` type (CMake `ACCEPTS_MIDI` or a hand-written `Info.plist.au`), **and** `PULP_AU_MIDI_PLUGIN` in the plugin's `au_v2_entry.cpp`. The dispatch contract is pinned by `test/test_au_v2_effect.cpp` (`[dispatch]` — asserts `AUMIDILookup` routes `kMusicDeviceMIDIEventSelect` and `AUBaseLookup` does not), so a regression to the base factory fails in CI instead of at auval/Logic time.
 
+**The `aumu` instrument variant is the same trap** (PulpTempoSampler hit it 2026-06-15): a `category = Instrument` plugin gets an `aumu` Info.plist from CMake, but if its `au_v2_entry.cpp` uses `PULP_AU_PLUGIN` (→ `AUBaseFactory`) instead of `PULP_AU_INSTRUMENT` (`#include <pulp/format/au_v2_instrument_entry.hpp>` → `AUMusicDeviceFactory`/`AUMusicLookup`), the host's `MusicDeviceMIDIEvent` returns **-4**. The plugin loads and plays UI-triggered audio (slice taps, on-screen keyboard — those bypass host MIDI via the UI→audio queue), so it looks fine, but **silently ignores all host MIDI in Logic/Ableton**. `auval -v aumu` catches it (`Test MIDI` fails); the same `[dispatch]` test now also pins `AUMusicLookup` carries the selector and `AUBaseLookup` does not. The factory name (`<ClassName>Factory`) is identical across both macros, so swapping `PULP_AU_PLUGIN` → `PULP_AU_INSTRUMENT` keeps the generated `Info.plist` factory reference valid.
+
 ### Flow
 
 The adapter inherits `AUMIDIEffectBase` (`AUEffectBase` + `AUMIDIBase`) so the SDK's `MIDIEvent` / `SysEx` entry points exist. Inbound MIDI flows:
