@@ -46,15 +46,17 @@ void TableListBox::paint(canvas::Canvas& canvas) {
 
         canvas.fill_text(columns_[c].header, text_x, header_height_ * 0.7f);
 
-        // Sort indicator
+        // Sort indicator — anchored on the header's vertical midline via
+        // GlyphCenter so the arrow lines up with the header label instead of
+        // sitting high (the old baseline+4 offset placed the glyph above
+        // centre).
         if (c == sort_column_ && columns_[c].sortable) {
             float arrow_x = col_x + col_w - 14.0f;
-            float arrow_y = header_height_ * 0.5f;
             canvas.set_fill_color(c_accent);
-            if (sort_ascending_)
-                canvas.fill_text("\xe2\x96\xb2", arrow_x, arrow_y + 4.0f);  // ▲
-            else
-                canvas.fill_text("\xe2\x96\xbc", arrow_x, arrow_y + 4.0f);  // ▼
+            const char* glyph = sort_ascending_ ? "\xe2\x96\xb2"   // ▲
+                                                : "\xe2\x96\xbc";  // ▼
+            canvas.fill_text_anchored(glyph, arrow_x, header_height_ * 0.5f,
+                                      canvas::Canvas::TextAnchor::GlyphCenter);
         }
 
         // Column separator
