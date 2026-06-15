@@ -1524,18 +1524,24 @@ void InlineValueEditor::paint(canvas::Canvas& canvas) {
 
     canvas.set_font("Inter", std::min(14.0f, b.height * 0.55f));
     canvas.set_text_align(canvas::TextAlign::center);
+    const std::string txt = editing_ ? edit_buffer_ : display_();
     canvas.set_fill_color(editing_ ? accent : fg);
-    std::string txt;
-    if (editing_) {
-        blink_ += 1.0f / 60.0f;
-        bool caret = std::fmod(blink_, 1.06f) < 0.53f;
-        txt = edit_buffer_ + (caret ? "|" : "");
-    } else {
-        txt = display_();
-    }
     canvas.fill_text_anchored(txt, b.width * 0.5f, b.height * 0.5f,
                               canvas::Canvas::TextAnchor::GlyphCenter);
     canvas.set_text_align(canvas::TextAlign::left);
+    // Caret is a SEPARATE blinking line just right of the (stable, centered)
+    // text — never part of the measured string, so the value doesn't jump or
+    // shift left/right as the caret blinks.
+    if (editing_) {
+        blink_ += 1.0f / 60.0f;
+        if (std::fmod(blink_, 1.06f) < 0.53f) {
+            float tw = canvas.measure_text(txt);
+            float cx = b.width * 0.5f + tw * 0.5f + 3.0f;
+            canvas.set_stroke_color(accent);
+            canvas.set_line_width(1.5f);
+            canvas.stroke_line(cx, b.height * 0.28f, cx, b.height * 0.72f);
+        }
+    }
 }
 
 // ── DualRangeSlider ──────────────────────────────────────────────────────────
