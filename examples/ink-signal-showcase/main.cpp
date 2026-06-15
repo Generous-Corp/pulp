@@ -20,6 +20,13 @@
 #include <pulp/view/midi_keyboard.hpp>
 #include <pulp/view/musical_typing_keyboard.hpp>
 #include <pulp/view/channel_strip_view.hpp>
+#include <pulp/view/range_slider_view.hpp>
+#include <pulp/view/inline_value_editor_view.hpp>
+#include <pulp/view/property_panel_view.hpp>
+#include <pulp/view/group_box_view.hpp>
+#include <pulp/view/number_box_states_view.hpp>
+#include <pulp/view/knob_modulation_view.hpp>
+#include <pulp/view/waveform_recorder_view.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/scroll_bar.hpp>
 #include <pulp/view/side_panel.hpp>
@@ -367,6 +374,20 @@ std::unique_ptr<View> build_board(float& out_height, ThemeModeControl*& out_them
         // pro strip; the lean interactive widget is ChannelStrip (mixer below).
         add(std::make_unique<ChannelStripView>(), kMargin, y, 900.0f, 300.0f);
         y += 320.0f;
+        // The remaining faithful Figma specimens (DesignFrameView; fit-to-bounds).
+        section("Design specimens (faithful Figma)");
+        add(std::make_unique<RangeSliderView>(),       kMargin, y, 460.0f, 600.0f);
+        add(std::make_unique<InlineValueEditorView>(), kMargin + 480.0f, y, 460.0f, 360.0f);
+        y += 620.0f;
+        add(std::make_unique<PropertyPanelView>(),     kMargin, y, 460.0f, 560.0f);
+        add(std::make_unique<GroupBoxView>(),          kMargin + 480.0f, y, 460.0f, 360.0f);
+        y += 580.0f;
+        add(std::make_unique<NumberBoxStatesView>(),   kMargin, y, 800.0f, 340.0f);
+        y += 360.0f;
+        add(std::make_unique<KnobModulationView>(),    kMargin, y, 900.0f, 240.0f);
+        y += 260.0f;
+        add(std::make_unique<WaveformRecorderView>(),  kMargin, y, 900.0f, 780.0f);
+        y += 800.0f;
     }
 
     // ── Containers / mixer (interactive faders) ────────────────────────

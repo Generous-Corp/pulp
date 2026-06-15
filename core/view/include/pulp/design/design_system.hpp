@@ -37,6 +37,13 @@
 #include <pulp/view/midi_keyboard.hpp>
 #include <pulp/view/musical_typing_keyboard.hpp>
 #include <pulp/view/channel_strip_view.hpp>
+#include <pulp/view/range_slider_view.hpp>
+#include <pulp/view/inline_value_editor_view.hpp>
+#include <pulp/view/property_panel_view.hpp>
+#include <pulp/view/group_box_view.hpp>
+#include <pulp/view/number_box_states_view.hpp>
+#include <pulp/view/knob_modulation_view.hpp>
+#include <pulp/view/waveform_recorder_view.hpp>
 #include <pulp/view/text_editor.hpp>
 
 #include <string>

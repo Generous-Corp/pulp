@@ -5296,6 +5296,14 @@ target_link_libraries(pulp-test-channel-strip-view
 catch_discover_tests(pulp-test-channel-strip-view
     PROPERTIES LABELS "view")
 
+# Faithful Figma-vector specimen catalog components (generated).
+add_executable(pulp-test-faithful-specimens
+    test_faithful_specimens.cpp)
+target_link_libraries(pulp-test-faithful-specimens
+    PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-faithful-specimens
+    PROPERTIES LABELS "view")
+
 # P5-3 follow-up — W3C Design Tokens cluster extracted from
 # test_design_import.cpp. Covers parse_w3c_tokens, export_w3c_tokens,
 # composite typography/shadow shapes, alias resolution, math

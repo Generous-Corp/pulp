@@ -393,6 +393,20 @@ target_sources(pulp-view-core PRIVATE
     src/musical_typing_keyboard_svg.cpp
     src/channel_strip_view.cpp
     src/channel_strip_view_svg.cpp
+    src/range_slider_view.cpp
+    src/range_slider_view_svg.cpp
+    src/inline_value_editor_view.cpp
+    src/inline_value_editor_view_svg.cpp
+    src/property_panel_view.cpp
+    src/property_panel_view_svg.cpp
+    src/group_box_view.cpp
+    src/group_box_view_svg.cpp
+    src/number_box_states_view.cpp
+    src/number_box_states_view_svg.cpp
+    src/knob_modulation_view.cpp
+    src/knob_modulation_view_svg.cpp
+    src/waveform_recorder_view.cpp
+    src/waveform_recorder_view_svg.cpp
     src/color_picker.cpp
     src/theme_editor.cpp
     src/file_drop_zone.cpp
