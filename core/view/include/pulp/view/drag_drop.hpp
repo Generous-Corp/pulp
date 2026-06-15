@@ -94,6 +94,33 @@ struct DragSource {
     // Called by the view system when the user starts dragging
 };
 
+// ── Outbound file drag (view-tree → host) ────────────────────────────────────
+//
+// A request to drag one or more EXISTING on-disk files out of a Pulp view and
+// into another application (e.g. drop a rendered/bounced .wav onto a DAW
+// timeline). The files must already exist at `file_paths` when the drag begins
+// — this is a plain file-URL drag, not a lazy file-promise, so the caller
+// writes the file (typically to a temp dir) first.
+//
+// Driven from a pointer interaction: `View::start_file_drag()` reaches the
+// view's attached host, hands the request to the platform backend
+// (`begin_file_drag` below), and the OS takes over the drag. On macOS the
+// backend begins an `NSDraggingSession` on the host NSView using the current
+// mouse event, so this must be called synchronously from within a
+// mouse-down/drag handler (where `NSApp.currentEvent` is the initiating event).
+struct FileDragRequest {
+    std::vector<std::string> file_paths;  // existing files to drag (>= 1 required)
+    Point root_position{};                 // drag origin in root/view coords
+    std::string display_name;              // optional label for the drag image
+};
+
+// Begin a native outbound file drag from `native_view` (macOS: an NSView*).
+// Returns true if the platform started a drag session. Returns false when the
+// platform is unsupported, the handle is null, there are no files, or there is
+// no active mouse event to anchor the drag. Implemented per-platform alongside
+// register_drop_target (macOS today; a no-op stub elsewhere).
+bool begin_file_drag(void* native_view, const FileDragRequest& request);
+
 // ── Drag-drop registration ──────────────────────────────────────────────────
 
 // Register/unregister a native view for file drops (macOS NSView). See the

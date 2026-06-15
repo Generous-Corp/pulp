@@ -19,6 +19,7 @@ class WindowHost;  // Forward declaration for View→Host back-reference
 class PluginViewHost;
 
 class FrameClock;
+struct FileDragRequest;  // pulp/view/drag_drop.hpp
 
 // Base class for all UI elements
 // Views form a tree: each view has zero or more children and one optional parent
@@ -349,6 +350,12 @@ public:
     /// `requestAnimationFrame` callbacks reach the host's invalidator.
     /// See `WidgetBridge::set_repaint_callback` for the override path.
     void request_repaint();
+
+    /// Drag existing on-disk files out of this view to another app (e.g. drop a
+    /// rendered .wav onto a DAW timeline). Routes through the attached host's
+    /// native view to the platform backend; call from a pointer handler. False
+    /// if no host, no files, or unsupported. See `pulp/view/drag_drop.hpp`.
+    bool start_file_drag(const FileDragRequest& request);
     bool has_focus() const { return has_focus_; }
     void set_focus(bool f) { has_focus_ = f; }
 

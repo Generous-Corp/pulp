@@ -3,6 +3,7 @@
 #include <pulp/view/drag_drop.hpp>
 #include <pulp/view/file_drop_zone.hpp>
 #include <pulp/view/input_events.hpp>
+#include <pulp/view/plugin_view_host.hpp>
 #include <pulp/view/view.hpp>
 
 // XDND payload-parsing + coordinate-mapping helpers (Linux X11 producer). These
@@ -492,4 +493,86 @@ TEST_CASE("FileDropZone click cancel (no selection) does not fire on_drop", "[vi
     zone.on_drop = [&](const std::vector<std::string>&) { fired = true; };
     zone.on_mouse_event(left_press());
     REQUIRE_FALSE(fired);
+}
+
+// ── Outbound file drag (View::start_file_drag / begin_file_drag) ─────────────
+//
+// The cross-platform contract + graceful-degradation guards. The actual
+// NSDraggingSession (macOS) needs a live window, an NSView, and a mouse event,
+// so — like the inbound NSDraggingDestination delivery path — the OS-level drag
+// is GUI-interactive and not unit-tested here; these pin the platform-agnostic
+// preconditions the host code relies on.
+
+TEST_CASE("start_file_drag with no files is a no-op", "[view][dnd][file-drag]") {
+    View v;
+    FileDragRequest req;  // empty file_paths
+    REQUIRE_FALSE(v.start_file_drag(req));
+}
+
+TEST_CASE("start_file_drag with no attached host returns false",
+          "[view][dnd][file-drag]") {
+    View v;  // never attached to a WindowHost / PluginViewHost
+    FileDragRequest req;
+    req.file_paths = {"/tmp/does-not-need-to-exist.wav"};
+    req.display_name = "loop";
+    // No host -> no native view -> cannot start a drag (never reaches the
+    // platform backend).
+    REQUIRE_FALSE(v.start_file_drag(req));
+}
+
+TEST_CASE("begin_file_drag rejects a null native view and empty requests",
+          "[view][dnd][file-drag]") {
+    FileDragRequest empty;
+    REQUIRE_FALSE(begin_file_drag(nullptr, empty));
+
+    FileDragRequest with_file;
+    with_file.file_paths = {"/tmp/loop.wav"};
+    // Null native handle -> false on every platform (macOS guards on !view; the
+    // non-Apple stub always returns false).
+    REQUIRE_FALSE(begin_file_drag(nullptr, with_file));
+}
+
+namespace {
+// Minimal PluginViewHost stub whose native handle is test-controlled, so the
+// cross-platform View::start_file_drag glue (host lookup → native handle →
+// begin_file_drag handoff) can be exercised without a real window.
+class StubPluginViewHost : public PluginViewHost {
+public:
+    explicit StubPluginViewHost(NativeViewHandle h) : handle_(h) {}
+    NativeViewHandle native_handle() override { return handle_; }
+    void attach_to_parent(NativeViewHandle) override {}
+    void detach() override {}
+    void repaint() override {}
+    void set_size(uint32_t, uint32_t) override {}
+    Size get_size() const override { return {0, 0}; }
+private:
+    NativeViewHandle handle_;
+};
+} // namespace
+
+TEST_CASE("start_file_drag with an attached host but no native view returns false",
+          "[view][dnd][file-drag]") {
+    StubPluginViewHost host(nullptr);  // host present, but no native view yet
+    View v;
+    v.set_plugin_view_host(&host);
+    FileDragRequest req;
+    req.file_paths = {"/tmp/loop.wav"};
+    // Host branch taken, native handle is null → no drag.
+    REQUIRE_FALSE(v.start_file_drag(req));
+}
+
+TEST_CASE("start_file_drag hands off to the platform backend when a host has a "
+          "native view", "[view][dnd][file-drag]") {
+    // A non-null sentinel handle drives start_file_drag all the way to
+    // begin_file_drag. The macOS backend bails at [NSApp currentEvent] (nil in
+    // a headless test) BEFORE dereferencing the handle, and the non-Apple stub
+    // ignores it — so the full cross-platform handoff is exercised and the
+    // result is a safe `false` (no live mouse event / drag session to start).
+    StubPluginViewHost host(reinterpret_cast<NativeViewHandle>(0x1));
+    View v;
+    v.set_plugin_view_host(&host);
+    FileDragRequest req;
+    req.file_paths = {"/tmp/loop.wav"};
+    req.display_name = "frozen loop";
+    REQUIRE_FALSE(v.start_file_drag(req));  // no event context outside a drag
 }
