@@ -23,6 +23,10 @@ pulp_add_plugin(<target>
     SOURCES         <file-list>
     PROCESSOR_FACTORY <function-name>
     UI_SCRIPT       <path>
+    CONTENT_CAPABILITIES <capability-list>
+    CONTENT_KINDS   <presets|themes|samples|wavetables...>
+    CONTENT_HOT_RELOAD_KINDS <presets|themes|samples|wavetables...>
+    CONTENT_MANUAL_RESCAN_KINDS <presets|themes|samples|wavetables...>
 )
 ```
 
@@ -43,6 +47,47 @@ pulp_add_plugin(<target>
 | `SOURCES` | No | -- | Source files for the core object library |
 | `PROCESSOR_FACTORY` | No | -- | Factory function name (for generated entry points) |
 | `UI_SCRIPT` | No | -- | Path to a JavaScript UI entry file. Pulp passes it through to VST3, AU, CLAP, and Standalone targets via `PULP_UI_SCRIPT_PATH`. Scripted-editor loading is supported in those targets; live JS/theme reload is currently only runtime-validated in the Standalone macOS lane. |
+| `CONTENT_CAPABILITIES` | No | -- | Runtime content capabilities the plugin actually consumes, such as `content.presets.v1`. Use this when the plugin can load installed content packs. Must be paired with `CONTENT_KINDS`. |
+| `CONTENT_KINDS` | No | -- | Content kinds accepted by the plugin: `presets`, `themes`, `samples`, `wavetables`. This lets users and agents reject mismatched packs before install. Must be paired with `CONTENT_CAPABILITIES`. |
+| `CONTENT_HOT_RELOAD_KINDS` | No | -- | Accepted content kinds the plugin can refresh immediately after install/update. Each value must also appear in `CONTENT_KINDS`. |
+| `CONTENT_MANUAL_RESCAN_KINDS` | No | -- | Accepted content kinds that require an in-app rescan action but not a full restart. Each value must also appear in `CONTENT_KINDS`. |
+
+When `CONTENT_CAPABILITIES` and `CONTENT_KINDS` are present,
+`pulp_add_plugin()` generates a `pulp.plugin-runtime.json` resource containing
+the `pulp.plugin-runtime.v1` manifest. Reload-policy fields are optional:
+accepted kinds listed in `CONTENT_HOT_RELOAD_KINDS` can update immediately,
+accepted kinds listed in `CONTENT_MANUAL_RESCAN_KINDS` should surface an in-app
+rescan action, and all other accepted kinds are restart-required in content
+preview/install UX. VST3/AU-style desktop bundles receive the manifest under
+`Contents/Resources/`; AUv3/iOS flat bundles receive it under `Resources/`;
+LV2 bundles receive it at the `.lv2` bundle root; single file non-bundle formats
+receive a sibling `<plugin-stem>.pulp.plugin-runtime.json` sidecar. Validate the emitted artifact with
+`ValidationHarness::validate_plugin_runtime_manifest(...)`.
+
+Reviewed UI kits are consumed explicitly after `pulp kit apply` has generated
+`cmake/pulp-kits.cmake`. Include that file, declare the plugin, then attach the
+chosen kit script:
+
+```cmake
+include(cmake/pulp-kits.cmake OPTIONAL)
+
+pulp_add_plugin(MyPlugin
+    FORMATS CLAP Standalone
+    ...)
+
+pulp_use_kit_ui(MyPlugin pulp_kit_dev_pulp_fixtures_basic_ui_kit)
+```
+
+`pulp_use_kit_ui(<plugin-target> <kit-target> [SCRIPT <exported-path>] [TOKENS <exported-path>])`
+reads the reviewed kit target's `PULP_UI_SCRIPTS`, `PULP_DESIGN_TOKENS`, and
+`PULP_ASSETS` properties. The selected script is applied to existing format
+targets through `PULP_UI_SCRIPT_PATH`; the selected token/theme file is applied
+through `PULP_UI_THEME_PATH`; declared asset directories are applied through
+`PULP_UI_ASSET_ROOTS`. Scripted editors can then use `__loadAssetSync__` with
+relative paths into those reviewed asset roots. Kits with multiple scripts or
+token files require the matching `SCRIPT` / `TOKENS` argument so the project
+makes the choice intentionally. The helper does not apply kits automatically
+and does not run package code.
 
 ### Created Targets
 

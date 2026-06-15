@@ -1,0 +1,13 @@
+{
+  "kind": "pulp-screenshot-report",
+  "profile": "validation/screenshots/basic-ui-kit.json",
+  "renderer": "pulp",
+  "status": "recorded",
+  "dimensions": {
+    "width": 320,
+    "height": 160,
+    "scale": 1
+  },
+  "artifacts": [],
+  "notes": "Fixture records the Pulp screenshot probe shape. Rendering is executed by validation lanes, not by kit inspect or plan."
+}

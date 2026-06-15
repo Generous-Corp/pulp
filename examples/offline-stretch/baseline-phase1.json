@@ -1,0 +1,120 @@
+{
+  "engine": "OfflineStretch tempo-only (Phase 1, RealtimePitchTimeProcessor)",
+  "rubberband_comparison": "deferred (rubberband not installed)",
+  "ratios": [
+    0.75,
+    0.85,
+    1.15,
+    1.5
+  ],
+  "rows": [
+    {
+      "file": "clickloop_120bpm.wav",
+      "ratio": 0.75,
+      "length_exact": true,
+      "onset_timing_mean_ms": 6.133,
+      "onset_timing_max_ms": 10.667,
+      "pre_echo_db": -47.82,
+      "null_rms_db": null
+    },
+    {
+      "file": "clickloop_120bpm.wav",
+      "ratio": 0.85,
+      "length_exact": true,
+      "onset_timing_mean_ms": 3.609,
+      "onset_timing_max_ms": 6.933,
+      "pre_echo_db": -48.98,
+      "null_rms_db": null
+    },
+    {
+      "file": "clickloop_120bpm.wav",
+      "ratio": 1.15,
+      "length_exact": true,
+      "onset_timing_mean_ms": 2.578,
+      "onset_timing_max_ms": 6.667,
+      "pre_echo_db": -52.16,
+      "null_rms_db": null
+    },
+    {
+      "file": "clickloop_120bpm.wav",
+      "ratio": 1.5,
+      "length_exact": true,
+      "onset_timing_mean_ms": 6.222,
+      "onset_timing_max_ms": 10.667,
+      "pre_echo_db": -79.66,
+      "null_rms_db": null
+    },
+    {
+      "file": "sine_440_mono.wav",
+      "ratio": 0.75,
+      "length_exact": true,
+      "onset_timing_mean_ms": 5.086,
+      "onset_timing_max_ms": 30.667,
+      "pre_echo_db": -0.2,
+      "null_rms_db": null
+    },
+    {
+      "file": "sine_440_mono.wav",
+      "ratio": 0.85,
+      "length_exact": true,
+      "onset_timing_mean_ms": 5.411,
+      "onset_timing_max_ms": 41.6,
+      "pre_echo_db": -0.29,
+      "null_rms_db": null
+    },
+    {
+      "file": "sine_440_mono.wav",
+      "ratio": 1.15,
+      "length_exact": true,
+      "onset_timing_mean_ms": 4.732,
+      "onset_timing_max_ms": 20.8,
+      "pre_echo_db": -0.18,
+      "null_rms_db": null
+    },
+    {
+      "file": "sine_440_mono.wav",
+      "ratio": 1.5,
+      "length_exact": true,
+      "onset_timing_mean_ms": 5.121,
+      "onset_timing_max_ms": 32.0,
+      "pre_echo_db": -0.14,
+      "null_rms_db": null
+    },
+    {
+      "file": "logsweep_20_20k.wav",
+      "ratio": 0.75,
+      "length_exact": true,
+      "onset_timing_mean_ms": 8.138,
+      "onset_timing_max_ms": 32.0,
+      "pre_echo_db": -0.31,
+      "null_rms_db": null
+    },
+    {
+      "file": "logsweep_20_20k.wav",
+      "ratio": 0.85,
+      "length_exact": true,
+      "onset_timing_mean_ms": 7.839,
+      "onset_timing_max_ms": 23.733,
+      "pre_echo_db": -0.21,
+      "null_rms_db": null
+    },
+    {
+      "file": "logsweep_20_20k.wav",
+      "ratio": 1.15,
+      "length_exact": true,
+      "onset_timing_mean_ms": 7.991,
+      "onset_timing_max_ms": 30.933,
+      "pre_echo_db": -0.22,
+      "null_rms_db": null
+    },
+    {
+      "file": "logsweep_20_20k.wav",
+      "ratio": 1.5,
+      "length_exact": true,
+      "onset_timing_mean_ms": 7.08,
+      "onset_timing_max_ms": 29.333,
+      "pre_echo_db": -0.42,
+      "null_rms_db": null
+    }
+  ]
+}

@@ -25,10 +25,23 @@ static NSArray<UTType*>* make_content_types(const std::vector<FileFilter>& filte
     return types.count > 0 ? types : nil;
 }
 
+// Defined in file_dialog_stub.cpp (shared backend registry). Lets a host-set or
+// test-injected Backend intercept on macOS too, instead of always blocking on
+// the native panel.
+namespace detail {
+bool file_dialog_open_file_via_backend(const std::string& title,
+                                       const std::vector<FileFilter>& filters,
+                                       const std::string& default_path,
+                                       std::optional<std::string>& out);
+}
+
 std::optional<std::string> FileDialog::open_file(
     const std::string& title,
     const std::vector<FileFilter>& filters,
     const std::string& default_path) {
+    std::optional<std::string> via_backend;
+    if (detail::file_dialog_open_file_via_backend(title, filters, default_path, via_backend))
+        return via_backend;
     @autoreleasepool {
         NSOpenPanel* panel = [NSOpenPanel openPanel];
         [panel setTitle:[NSString stringWithUTF8String:title.c_str()]];

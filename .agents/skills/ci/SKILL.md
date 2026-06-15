@@ -12,6 +12,37 @@ requires:
 
 Validate branches and ship code safely. This skill handles all CI workflows for Pulp across local machines and VMs.
 
+## Runner timing metrics
+
+When asked whether Pulp's local runners are fast, stuck, regressing, or worth
+monitoring, query Shipyard's metrics surface before guessing. Pulp does not
+mirror these records into `pulp` CLI or `pulp-mcp`; Shipyard is the metrics
+store and tartci is an optional VM runtime emitter.
+
+This metrics surface requires a Shipyard build that includes the
+`shipyard metrics` subcommand. Pulp's current pinned source-checkout Shipyard in
+`tools/shipyard.toml` is `v0.68.0`, which does not include it yet. If a checkout
+only has the pinned binary, use a newer Shipyard binary or source checkout for
+the optional metrics workflow, or skip metrics and inspect live jobs directly.
+
+Use these commands as the normal agent loop:
+
+```bash
+shipyard metrics import github --repo danielraffel/pulp --limit 50 --json
+tartci runtime export --repo danielraffel/pulp --since-days 14 \
+  | shipyard metrics import tartci --json
+shipyard metrics summary --project pulp --json
+shipyard metrics watch --project pulp --since 14d --json
+shipyard metrics advise --project pulp --json
+```
+
+Read `watch` as a triage signal, not as a hard failure. `insufficient_samples`
+means the lane does not have enough history yet; drift, failure-rate, or slowest
+findings are the useful prompts to inspect runner logs, VM boot behavior, cache
+state, or GitHub queue time. If tartci is not installed for a repo, skip the
+`tartci runtime export` import and still use the GitHub import plus Shipyard
+summary/watch commands.
+
 > **If a PR's required `macos` check has been queued >30 min** or the
 > repo's PRs are all in `mergeable_state=blocked` with no movement,
 > jump to **"Self-hosted runner ops"** near the end of this file.
@@ -134,6 +165,14 @@ Slice 6 (#551).
   it only fails on a header that genuinely won't compile alone (no "unused
   include" false positives), so it is safe to block on. Headers whose module
   isn't in the GPU-off compile DB are skipped, not failed.
+- **Windows FetchContent subbuilds need a short base dir.** GitHub-hosted
+  Windows runners can still route MSBuild metadata through the legacy
+  260-character path limit. The wgpu prebuilt-populate subbuild has deeply
+  nested stamp paths, so `build-windows/_deps/...` can exceed MAX_PATH during
+  configure even before compilation. `build.yml` passes
+  `-DFETCHCONTENT_BASE_DIR="$PWD/fc"` only on Windows to keep dependency
+  subbuilds short while preserving the normal `build-windows` artifact/test
+  directory.
 - `.github/workflows/watchdog-reaper.yml` (pulp #2576) sweeps ALL open release
   watchdog trackers daily and closes any whose version is released or superseded
   — the existing watchdogs only auto-close inside a recent window, so historical
@@ -2273,6 +2312,10 @@ Gotchas:
 - **`merge_cobertura.py` normalises Windows backslash paths and applies `COVERAGE_IGNORE_REGEX` itself.** Two sneaky bugs found together on PR #660 by walking the actual merged XML: (1) the Windows cobertura emits filenames with backslash separators (`core\\format\\src\\clap_adapter.cpp`), Linux/macOS use forward slashes — without normalisation the merge stores them as TWO files and diff-cover matches the backslash variant against the git diff (which uses forward slashes), finding 0 hits and silently reporting 0% on cross-platform code that was actually exercised on Linux. (2) The Windows leg was leaking ~250 `test\*` entries into the cobertura because run_coverage.sh's `COVERAGE_IGNORE_REGEX` matches `/test/` only — backslash paths slipped past. The merge now normalises slashes AND mirrors the same exclude regex (`tools/scripts/merge_cobertura.py::_IGNORE_RE`) so the gate's view is consistent regardless of which OS produced an artifact. Keep the regex in lockstep with `scripts/run_coverage.sh::COVERAGE_IGNORE_REGEX`.
 - **Install PyYAML before any step that imports it.** `tools/scripts/test_coverage_tier_check.py` calls `ctc.load_targets()` which imports `yaml`, so the `Install PyYAML` step in `coverage.yml` must run BEFORE both the fixture-tests step and the per-tier gate step. Issue #900 caught the original ordering where the install ran after the test, so runners without preinstalled PyYAML hard-failed the required coverage job. If you add another script under `tools/scripts/` that imports `yaml` and gets wired into a workflow, make sure the PyYAML install step precedes every step that runs it.
 - **Every first-party source must classify into exactly one tier (#1056).** `ci/coverage-targets.yaml` tier globs are silent no-ops if a new source path falls outside every tier — it inherits the looser global 75% floor instead of its intended tier. The `TierCoverageCompleteness` cases in `tools/scripts/test_coverage_tier_check.py` lock this in (every tier matches at least one file; every first-party source under `core/`, `tools/`, `apple/`, `android/`, `inspect/` lands in exactly one tier). Non-instrumented surfaces (`apple/**.swift`, `android/**.kt`, `apple/Package.swift`) classify under `infrastructure` for audit-completeness; the `is_instrumented_source` filter in `coverage_tier_check.py` keeps them out of the score so they don't bias the per-tier number. New native user-facing render surfaces, such as `core/scene/**`, belong in the `user-facing` tier alongside `core/render/**` rather than falling through to the global diff-cover fallback.
+- **Realtime graph runtime code belongs in `audio-critical`.** `core/graph/**`
+  contains graph planning/queue primitives consumed by DSP/host execution; keep
+  it on the same 80% tier as `core/audio/**`, `core/host/**`, and
+  `core/midi/**`, not the looser infrastructure tier.
 - **Don't `cancel-in-progress: true` the coverage workflow (#1884).** `coverage.yml` deliberately sets `concurrency.cancel-in-progress: false`. Codecov's `after_n_builds: 4` (pulp#1883) waits for all per-OS uploads before posting; if a force-push cancels an in-flight run mid-upload, some legs upload and others don't, Codecov gets stuck waiting for the missing leg, and the PR merges with no coverage signal. A 2026-05-12 audit found this pattern on 21/30 most-recent merged PRs (~70% of merges shipping without the `Diff coverage required` check). The fix costs some compute on stale commits but guarantees every push ends with a real check conclusion. If you ever need to flip cancellation back on for this workflow, you MUST also change the Codecov side (drop `after_n_builds` or accept partial reports) or you re-open the same silent-skip.
 
 ## IWYU advisory gate (`#594` Phase 2)

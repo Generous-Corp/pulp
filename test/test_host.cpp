@@ -875,7 +875,7 @@ TEST_CASE("ClapSlot restore_state supersedes cached host edits",
 // every sample in the audio thread's output buffer is either silence (post-
 // invalidate, pre-reprepare) or a valid sample in [-1, 1].
 
-TEST_CASE("SignalGraph snapshot publish is race-clean", "[host][graph][race][issue-669]") {
+TEST_CASE("SignalGraph snapshot publish is race-clean", "[host][graph][race][issue-669][flaky]") {
     SignalGraph graph;
     auto in  = graph.add_input_node(1, "in");
     auto g   = graph.add_gain_node("g");

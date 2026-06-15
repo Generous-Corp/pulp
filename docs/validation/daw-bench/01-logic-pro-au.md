@@ -6,7 +6,67 @@
 - `logic_au_tail_time_conversion` (catalog row #20) — AU tail time depends on cached sample rate.
 - General lifecycle: `prepare` → `process` → `release` ordering.
 
-**Prereqs**: macOS 13+, Logic Pro 10.7+, `PulpHostBench.component` installed under `~/Library/Audio/Plug-Ins/Components/` and re-validated by Logic (Logic Pro → Settings → Audio → Audio Units Manager → "Reset & Rescan Selection").
+**Prereqs**: macOS 13+, Logic Pro 10.7+, `PulpHostBench.component` installed
+under `~/Library/Audio/Plug-Ins/Components/` as a MIDI-capable AU effect
+(`aumf PHBn Pulp`) and re-validated by Logic (Logic Pro → Settings → Audio →
+Audio Units Manager → "Reset & Rescan Selection").
+
+Before launching Logic, clear the AU registrar cache and require two stable
+`auval` passes:
+
+```bash
+python3 tools/scripts/prepare_logic_hostbench_au.py \
+    --component build/AU/PulpHostBench.component \
+    --identity "Developer ID Application: <Name> (<TEAMID>)" \
+    --notarize
+```
+
+Use `--dry-run` first to print the copy/sign/notary/staple/preflight commands
+without changing files or contacting Apple. If you are debugging an already
+installed component manually, run the underlying preflights directly:
+
+```bash
+python3 tools/scripts/check_au_component_preflight.py \
+    ~/Library/Audio/Plug-Ins/Components/PulpHostBench.component \
+    --expect-type aumf \
+    --expect-subtype PHBn \
+    --expect-manufacturer Pulp \
+    --expect-factory PulpHostBenchAUFactory \
+    --expect-symbol PulpHostBenchAUFactory \
+    --check-permissions \
+    --check-codesign \
+    --check-gatekeeper
+killall -KILL AudioComponentRegistrar 2>/dev/null || true
+sleep 5
+python3 tools/scripts/check_au_component_preflight.py \
+    ~/Library/Audio/Plug-Ins/Components/PulpHostBench.component \
+    --expect-type aumf \
+    --expect-subtype PHBn \
+    --expect-manufacturer Pulp \
+    --expect-factory PulpHostBenchAUFactory \
+    --expect-symbol PulpHostBenchAUFactory \
+    --check-permissions \
+    --check-codesign \
+    --check-gatekeeper \
+    --check-auval-list \
+    --run-auval \
+    --auval-repeat 2
+```
+
+If `auval` cannot discover the component, stop here. Do not use a Logic session
+as evidence until AU discovery is stable. If the preflight says `auval -a`
+listed Apple components and no non-Apple components, fix the local AU registrar
+environment first; that means this Mac is not exposing third-party AU
+components to `auval`. If Gatekeeper reports `Adhoc Signed App` or
+`Notary Ticket Missing`, verify the shell can use the Developer ID private key
+before attempting a new notarized install:
+
+```bash
+python3 tools/scripts/check_au_component_preflight.py \
+    ~/Library/Audio/Plug-Ins/Components/PulpHostBench.component \
+    --expect-type aumf \
+    --check-signing-identity "Developer ID Application: <Name> (<TEAMID>)"
+```
 
 ## Steps
 

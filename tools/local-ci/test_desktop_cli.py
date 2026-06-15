@@ -3,20 +3,15 @@
 
 from __future__ import annotations
 
-import importlib.util
 import pathlib
 import unittest
 
+from module_test_utils import load_local_ci_module
 
-MODULE_PATH = pathlib.Path(__file__).with_name("desktop_cli.py")
 
 
 def load_module():
-    spec = importlib.util.spec_from_file_location("desktop_cli_under_test", MODULE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    return load_local_ci_module("desktop_cli.py")
 
 
 class DesktopCliTests(unittest.TestCase):

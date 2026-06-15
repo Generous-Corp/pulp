@@ -234,17 +234,17 @@ bool parse_size_arg(const std::string& text, const char* flag, std::size_t& out)
 }
 
 bool parse_double_arg(const std::string& text, const char* flag, double& out) {
-    if (text.empty()) {
-        std::cerr << "Error: invalid value for " << flag << ": " << text << "\n";
-        return false;
+    if (text.empty()) { std::cerr << "Error: invalid value for " << flag << ": " << text << "\n"; return false; }
+
+    const auto head = (text[0] == '+' || text[0] == '-') ? 1u : 0u;
+    if (head < text.size() && (std::tolower(static_cast<unsigned char>(text[head])) == 'n' || std::tolower(static_cast<unsigned char>(text[head])) == 'i')) {
+        std::cerr << "Error: invalid value for " << flag << ": " << text << "\n"; return false;
     }
 
-    errno = 0;
-    char* end = nullptr;
+    errno = 0; char* end = nullptr;
     const auto value = std::strtod(text.c_str(), &end);
     if (errno == ERANGE || end != text.c_str() + text.size() || !std::isfinite(value)) {
-        std::cerr << "Error: invalid value for " << flag << ": " << text << "\n";
-        return false;
+        std::cerr << "Error: invalid value for " << flag << ": " << text << "\n"; return false;
     }
 
     out = value;

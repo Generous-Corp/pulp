@@ -142,10 +142,23 @@ bool StandaloneApp::start() {
     config_.sample_rate = audio_device_->sample_rate();
     config_.buffer_size = audio_device_->buffer_size();
 
+    // The device's nominal buffer_size is NOT the largest block the audio
+    // callback can deliver. When the hardware runs at a different sample rate
+    // than the app, CoreAudio (and other backends) insert a resampler that
+    // pulls the render callback in variable, larger-than-nominal blocks — up to
+    // the host's MaximumFramesPerSlice (4096 by default on macOS). Size the
+    // processor and every scratch buffer to this MAX, not the nominal buffer,
+    // so an oversized pull can never trip Processor::process()'s
+    // `num_samples <= max_block` assert or overflow a pre-allocated buffer.
+    // (Diagnosed from a standalone SIGABRT in RealtimePitchTimeProcessor::process
+    // when the output device's rate differed from the app's configured rate.)
+    constexpr int kMaxCallbackBlockFloor = 4096;
+    max_callback_block_ = std::max(config_.buffer_size, kMaxCallbackBlockFloor);
+
     // Prepare processor
     PrepareContext prep;
     prep.sample_rate = config_.sample_rate;
-    prep.max_buffer_size = config_.buffer_size;
+    prep.max_buffer_size = max_callback_block_;
     prep.input_channels = config_.input_channels;
     prep.output_channels = config_.output_channels;
     processor_->prepare(prep);
@@ -154,7 +167,7 @@ bool StandaloneApp::start() {
     test_signal_.set_sample_rate(config_.sample_rate);
     int test_ch = std::max(config_.input_channels, config_.output_channels);
     if (test_ch < 2) test_ch = 2;
-    test_buffer_.resize(static_cast<size_t>(test_ch), static_cast<size_t>(config_.buffer_size));
+    test_buffer_.resize(static_cast<size_t>(test_ch), static_cast<size_t>(max_callback_block_));
     test_ptrs_.resize(static_cast<size_t>(test_ch));
     for (int c = 0; c < test_ch; ++c)
         test_ptrs_[static_cast<size_t>(c)] = test_buffer_.view().channel_ptr(static_cast<size_t>(c));
@@ -164,7 +177,7 @@ bool StandaloneApp::start() {
 
     // Pre-allocate silence buffer for when no input device is available
     int silence_ch = std::max(config_.output_channels, 2);
-    silence_buffer_.resize(static_cast<size_t>(silence_ch), static_cast<size_t>(config_.buffer_size));
+    silence_buffer_.resize(static_cast<size_t>(silence_ch), static_cast<size_t>(max_callback_block_));
     silence_ptrs_.resize(static_cast<size_t>(silence_ch));
     for (int c = 0; c < silence_ch; ++c)
         silence_ptrs_[static_cast<size_t>(c)] = silence_buffer_.view().channel_ptr(static_cast<size_t>(c));
@@ -183,7 +196,7 @@ bool StandaloneApp::start() {
         : std::clamp(config_.audio_scope_window_samples, 1, kMaxScopeWindowSamples);
     probe_capture.capture_frames = std::max(view::AudioWaveformView::kCapacity,
                                             scope_capture_frames);
-    output_probe_.prepare(config_.output_channels, config_.buffer_size,
+    output_probe_.prepare(config_.output_channels, max_callback_block_,
                           config_.sample_rate,
                           audio::AudioProbeStage::kStandaloneOutputBoundary,
                           probe_capture);
@@ -216,6 +229,36 @@ bool StandaloneApp::start() {
         audio::BufferView<float>& output,
         const audio::CallbackContext& ctx)
     {
+        // Hard guard: the processor and all scratch buffers were prepared for at
+        // most `max_callback_block_` frames (see start()). A block beyond that —
+        // which would indicate a backend not honoring MaximumFramesPerSlice —
+        // must never reach process(), or it trips the `num_samples <= max_block`
+        // assert / overflows the buffers. Emit silence and warn once rather than
+        // crash the audio device on a real user's machine.
+        if (ctx.buffer_size > max_callback_block_) {
+            for (size_t c = 0; c < output.num_channels(); ++c) {
+                float* dst = output.channel_ptr(c);
+                std::fill(dst, dst + output.num_samples(), 0.0f);
+            }
+            static bool warned = false;
+            if (!warned) {
+                warned = true;
+                runtime::log_error(
+                    "Standalone: audio block {} exceeds prepared max {} — "
+                    "emitting silence (report this device)",
+                    ctx.buffer_size, max_callback_block_);
+            }
+            // Keep the transport clock monotonic across the dropped block.
+            // The normal path advances by ctx.buffer_size after process();
+            // skipping it here would lag transport position (and the MIDI
+            // timeline derived from it) by exactly the silenced frames.
+            if (config_.transport_playing) {
+                transport_position_samples_.fetch_add(
+                    ctx.buffer_size, std::memory_order_relaxed);
+            }
+            return;
+        }
+
         // Collect pending MIDI from the hardware input thread (mutex-guarded
         // accumulator). UI / virtual-keyboard / scripting MIDI is delivered
         // separately via `ui_midi_collector_` (item 3.5 — pulp::midi::

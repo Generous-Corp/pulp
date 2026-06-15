@@ -31,6 +31,10 @@ The reusable runner path is now the sibling `tartci` repo:
 - `tartci observe macos --json [--runner <name>]` ties GitHub job, local VM,
   guest process, ctest tail, and runner log together.
 - `tartci doctor --reap --json` is the local cleanup/health digest.
+- `TARTCI_RUNTIME_MEASURE=1 tartci serve ...` records per-job VM timings; use
+  `tartci runtime recent|summary|export --repo danielraffel/pulp --json` and
+  pipe exports into `shipyard metrics import tartci` for long-term agent
+  baselines.
 - `shipyard --json runner fleet-status --target macos` is the cross-host pool
   view for macOS VM slots and supervisor freshness.
 

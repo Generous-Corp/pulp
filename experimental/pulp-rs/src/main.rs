@@ -111,12 +111,21 @@ enum Command {
     /// Dependency audit: internal flags, or delegate to `tools/audit.py`. Phase 6c.
     Audit(PkgTailArgs),
 
+    /// Inspect and apply local Pulp package manifests. Delegates to C++.
+    #[command(disable_help_flag = true)]
+    Kit(PkgTailArgs),
+
+    /// Validate and install data-only content packs. Delegates to C++.
+    #[command(disable_help_flag = true)]
+    Content(PkgTailArgs),
+
     /// Unified development loop: configure + build (+ optional test /
     /// run). Phase 6d — watch loop stubbed.
     Dev(PkgTailArgs),
 
     /// Scaffold a new plugin project. Phase 6d — `--ci` non-interactive
     /// path ported; interactive path rejects.
+    #[command(disable_help_flag = true)]
     Create(PkgTailArgs),
 
     /// Local documentation reader: `index`, `search`, `open`, `show`,
@@ -567,6 +576,22 @@ fn real_main() -> Result<(), ExitCode> {
             let spawner = pulp_rs::proc::SystemSpawner;
             map_exit(cmd::audit::run(flags, &rest, &spawner, &mut out))
         }
+        Command::Kit(args) => {
+            let mut argv = vec!["kit".to_owned()];
+            argv.extend(args.tail);
+            map_exit(pulp_rs::fallthrough::delegate_or_stub(
+                &argv,
+                "pulp kit is implemented by the C++ delegate. Build/install pulp-cpp to use it.",
+            ))
+        }
+        Command::Content(args) => {
+            let mut argv = vec!["content".to_owned()];
+            argv.extend(args.tail);
+            map_exit(pulp_rs::fallthrough::delegate_or_stub(
+                &argv,
+                "pulp content is implemented by the C++ delegate. Build/install pulp-cpp to use it.",
+            ))
+        }
         Command::Dev(args) => {
             let parsed = cmd::dev::parse_args(&args.tail);
             let cwd = read_cwd()?;
@@ -576,6 +601,14 @@ fn real_main() -> Result<(), ExitCode> {
         Command::Create(args) => {
             let parsed = cmd::create::parse_args(&args.tail);
             let cwd = read_cwd()?;
+            if cmd::create::template_points_to_local_package(&cwd, &parsed) {
+                let mut argv = vec!["create".to_owned()];
+                argv.extend(args.tail);
+                return map_exit(pulp_rs::fallthrough::delegate_or_stub(
+                    &argv,
+                    "package-backed templates are implemented by the C++ delegate. Build/install pulp-cpp to use them.",
+                ));
+            }
             map_exit(cmd::create::run(&cwd, &parsed, &mut out))
         }
         Command::Docs(args) => {

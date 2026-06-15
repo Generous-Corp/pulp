@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Tests for Android local CI target helpers."""
 
-import importlib.util
 import os
 import subprocess
 import tempfile
@@ -9,16 +8,11 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-
-MODULE_PATH = Path(__file__).with_name("android_target.py")
+from module_test_utils import load_local_ci_module
 
 
 def load_module():
-    spec = importlib.util.spec_from_file_location("pulp_local_ci_android_target", MODULE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    return load_local_ci_module("android_target.py")
 
 
 class AndroidTargetTests(unittest.TestCase):

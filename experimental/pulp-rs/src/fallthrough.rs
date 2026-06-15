@@ -79,6 +79,26 @@ pub struct SystemResolver;
 
 impl BinaryResolver for SystemResolver {
     fn resolve(&self, name: &str) -> Option<PathBuf> {
+        if let Ok(self_exe) = std::env::current_exe() {
+            if let Some(dir) = self_exe.parent() {
+                let sibling = dir.join(name);
+                if is_file_executable(&sibling) {
+                    return Some(sibling);
+                }
+                let source_build_delegate = dir.join("tools").join("cli").join(name);
+                if is_file_executable(&source_build_delegate) {
+                    return Some(source_build_delegate);
+                }
+                #[cfg(windows)]
+                {
+                    let source_build_delegate =
+                        dir.join("tools").join("cli").join(format!("{name}.exe"));
+                    if is_file_executable(&source_build_delegate) {
+                        return Some(source_build_delegate);
+                    }
+                }
+            }
+        }
         let path = std::env::var_os("PATH")?;
         for dir in std::env::split_paths(&path) {
             let candidate = dir.join(name);

@@ -122,6 +122,67 @@ class DawBenchEvidenceTests(unittest.TestCase):
             result = checker.validate_manifest(path, repo_root=root)
             self.assertEqual(result.errors, ())
 
+    def test_preflight_report_is_optional_diagnostic_context(self) -> None:
+        tmp_ctx, root, result_dir = self._repo()
+        with tmp_ctx:
+            _write(
+                result_dir / "preflight" / "logic-au.json",
+                json.dumps(
+                    {
+                        "ok": False,
+                        "checks": [
+                            {
+                                "label": "auval -v aumf PHBn Pulp",
+                                "ok": False,
+                                "detail": "Cannot get Component's Name strings",
+                            }
+                        ],
+                    }
+                ),
+            )
+            path = result_dir / "with-preflight.daw-bench.json"
+            path.write_text(
+                json.dumps(_manifest(preflight_reports=["preflight/logic-au.json"])),
+                encoding="utf-8",
+            )
+            result = checker.validate_manifest(path, repo_root=root)
+            self.assertEqual(result.errors, ())
+
+    def test_preflight_report_path_must_exist(self) -> None:
+        tmp_ctx, root, result_dir = self._repo()
+        with tmp_ctx:
+            path = result_dir / "missing-preflight.daw-bench.json"
+            path.write_text(
+                json.dumps(_manifest(preflight_reports=["preflight/missing.json"])),
+                encoding="utf-8",
+            )
+            errors = checker.validate_manifest(path, repo_root=root).errors
+            self.assertIn(
+                "preflight_reports[0] must reference a checked-in preflight JSON file",
+                errors,
+            )
+
+    def test_preflight_report_shape_is_validated(self) -> None:
+        tmp_ctx, root, result_dir = self._repo()
+        with tmp_ctx:
+            _write(
+                result_dir / "preflight" / "broken.json",
+                json.dumps({"ok": "yes", "checks": [{"label": "", "ok": "no"}]}),
+            )
+            path = result_dir / "bad-preflight.daw-bench.json"
+            path.write_text(
+                json.dumps(_manifest(preflight_reports=["preflight/broken.json"])),
+                encoding="utf-8",
+            )
+            errors = checker.validate_manifest(path, repo_root=root).errors
+            self.assertIn("preflight_reports[0].ok must be a boolean", errors)
+            self.assertIn(
+                "preflight_reports[0].checks[0].label must be a non-empty string",
+                errors,
+            )
+            self.assertIn("preflight_reports[0].checks[0].ok must be a boolean", errors)
+            self.assertIn("preflight_reports[0].checks[0].detail must be a string", errors)
+
     def test_confirmed_known_flag_requires_matching_log_event(self) -> None:
         tmp_ctx, root, result_dir = self._repo()
         with tmp_ctx:

@@ -7,7 +7,8 @@ namespace pulp::cli {
 
 std::vector<std::string> create_default_build_targets(const std::string& class_name,
                                                       const std::string& type,
-                                                      const std::string& formats) {
+                                                      const std::string& formats,
+                                                      bool include_test_target) {
     std::vector<std::string> targets;
     std::vector<std::string> format_tokens;
     {
@@ -41,7 +42,7 @@ std::vector<std::string> create_default_build_targets(const std::string& class_n
     // create flow should fall back to "no buildable targets" rather
     // than emit a guaranteed-broken target string.
     // Codex P2 on PR #1271.
-    if (!class_name.empty()) {
+    if (include_test_target && !class_name.empty()) {
         add_target(class_name + "-test");
     }
 

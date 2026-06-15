@@ -1,0 +1,4 @@
+Basic UI Kit fixture license.
+
+Code: MIT
+Assets: CC0-1.0

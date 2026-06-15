@@ -871,3 +871,39 @@ TEST_CASE("WidgetBridge text editor escape dispatches JS handler", "[view][bridg
     REQUIRE(engine.evaluate("escaped").getWithDefault<int>(0) == 1);
 }
 
+TEST_CASE("WidgetBridge createTextEditor uses SDK TextEditor text navigation",
+          "[view][bridge][text][text_editor][integration]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createTextEditor('field', '');
+        setText('field', 'lo-fi jack, tail');
+    )");
+
+    auto* field = dynamic_cast<TextEditor*>(bridge.widget("field"));
+    REQUIRE(field != nullptr);
+    REQUIRE(field->text() == "lo-fi jack, tail");
+
+    field->on_focus_changed(true);
+    field->set_caret_pos(static_cast<int>(field->text().size()));
+
+    KeyEvent word_left{};
+    word_left.is_down = true;
+    word_left.key = KeyCode::left;
+#ifdef __APPLE__
+    word_left.modifiers = kModAlt;
+#else
+    word_left.modifiers = kModCtrl;
+#endif
+
+    REQUIRE(field->on_key_event(word_left));
+    REQUIRE(field->caret_pos() == 12);
+    REQUIRE(field->on_key_event(word_left));
+    REQUIRE(field->caret_pos() == 6);
+    REQUIRE(field->on_key_event(word_left));
+    REQUIRE(field->caret_pos() == 0);
+}

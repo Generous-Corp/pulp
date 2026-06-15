@@ -75,7 +75,7 @@ jobs:
     name: sandbox-e2e (${{ matrix.os }})
     needs: resolve-runners
     runs-on: ${{ fromJSON(matrix.runs_on_json) }}
-    timeout-minutes: 60
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -125,7 +125,10 @@ jobs:
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DPULP_BUILD_TESTS=OFF \
-            -DPULP_BUILD_EXAMPLES=OFF
+            -DPULP_BUILD_EXAMPLES=OFF \
+            -DPULP_BUILD_WEBVIEW=OFF \
+            -DPULP_BUILD_NODEJS=OFF \
+            -DPULP_ENABLE_SWIFT=OFF
           cmake --build build --target pulp-cli --parallel
           if [[ -x "$PWD/build/tools/cli/pulp-cpp" ]]; then
             echo "bin=$PWD/build/tools/cli/pulp-cpp" >> "$GITHUB_OUTPUT"

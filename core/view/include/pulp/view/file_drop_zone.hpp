@@ -36,11 +36,23 @@ public:
     /// Callback when files are dropped.
     std::function<void(const std::vector<std::string>& paths)> on_drop;
 
+    /// Click-to-browse (on by default): a left click opens the platform file
+    /// picker (pulp::platform::FileDialog) filtered to `accepted_extensions`,
+    /// and feeds the chosen path through the same `on_drop` callback as a drag
+    /// drop. Cross-platform — macOS built-in / Linux portal / Windows backend;
+    /// a graceful no-op when no dialog backend is installed
+    /// (FileDialog::has_backend() == false), so drag-drop still works.
+    void set_browse_on_click(bool on) { browse_on_click_ = on; }
+    bool browse_on_click() const { return browse_on_click_; }
+    /// Title for the click-to-browse dialog (default "Choose a file").
+    void set_dialog_title(std::string title) { dialog_title_ = std::move(title); }
+
     /// Current drag-over state (for external styling).
     bool is_drag_over() const { return drag_over_; }
     bool is_drag_valid() const { return drag_valid_; }
 
     void paint(canvas::Canvas& canvas) override;
+    void on_mouse_event(const MouseEvent& event) override;
 
     // Called by the platform drag-drop system
     void drag_enter(const std::vector<std::string>& paths);
@@ -63,6 +75,8 @@ private:
     IconStyle icon_style_ = IconStyle::upload;
     bool drag_over_ = false;
     bool drag_valid_ = false;
+    bool browse_on_click_ = true;
+    std::string dialog_title_ = "Choose a file";
 
     bool is_valid_extension(const std::string& path) const;
 };

@@ -1,0 +1,45 @@
+{
+  "schema": "pulp-package-v1",
+  "id": "dev.pulp.fixtures.basic-content-pack",
+  "name": "Basic Content Pack",
+  "version": "0.1.0",
+  "license": "MIT",
+  "licenses": {
+    "content": "MIT"
+  },
+  "kind": ["content-pack"],
+  "audience": ["end-user", "agent"],
+  "description": "Fixture preset, theme, sample, and wavetable content pack.",
+  "requires": {
+    "pulp": ">=0.395.0",
+    "platforms": ["macOS", "Windows", "Linux"]
+  },
+  "capabilities": [
+    "content.presets.v1",
+    "content.themes.v1",
+    "content.samples.v1",
+    "content.wavetables.v1"
+  ],
+  "exports": {
+    "presets": ["presets"],
+    "themes": ["themes"],
+    "samples": ["samples"],
+    "wavetables": ["wavetables"],
+    "licenses": ["licenses/LICENSE.txt"]
+  },
+  "content": {
+    "pluginIds": ["dev.pulp.fixtures.content-target"],
+    "kinds": ["presets", "themes", "samples", "wavetables"]
+  },
+  "dependencies": {
+    "pulp": [],
+    "packages": []
+  },
+  "validation": {
+    "reports": ["validation/content-smoke.json"]
+  },
+  "authoring": {
+    "createdBy": "human",
+    "humanReviewed": true
+  }
+}

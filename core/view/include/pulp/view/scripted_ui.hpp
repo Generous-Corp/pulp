@@ -21,6 +21,8 @@ namespace pulp::view {
 
 struct ScriptedUiOptions {
     std::filesystem::path script_path;
+    std::filesystem::path theme_path;
+    std::vector<std::filesystem::path> asset_roots;
     bool enable_hot_reload = false;
     bool enable_theme_reload = true;
 };
@@ -75,6 +77,7 @@ private:
     state::StateStore& store_;
     std::filesystem::path script_path_;
     std::filesystem::path theme_path_;
+    std::vector<std::filesystem::path> asset_roots_;
     bool hot_reload_enabled_ = false;
     bool theme_reload_enabled_ = false;
 

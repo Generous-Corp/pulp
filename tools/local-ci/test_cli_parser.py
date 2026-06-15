@@ -1,20 +1,14 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import importlib.util
-from pathlib import Path
 import unittest
 
+from module_test_utils import load_local_ci_module
 
-MODULE_PATH = Path(__file__).resolve().with_name("cli_parser.py")
 
 
 def load_cli_parser_module():
-    spec = importlib.util.spec_from_file_location("cli_parser_under_test", MODULE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    return load_local_ci_module("cli_parser.py")
 
 
 class CliParserTests(unittest.TestCase):
