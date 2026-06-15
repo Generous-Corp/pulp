@@ -1205,9 +1205,9 @@ private:
     }
 
     // Region for a note: a slice of the published (already tempo-matched) buffer.
-    audio::LoopRegion region_for_note(int note, const audio::PublishedSampleView& sample,
-                                      bool loop) const noexcept {
-        std::uint64_t start = 0, end = sample.num_frames;
+    std::optional<audio::LoopRegion> region_for_note(int note, const audio::PublishedSampleView& sample,
+                                                     bool loop) const noexcept {
+        std::uint64_t start = 0, end = 0;
         const int root = static_cast<int>(state().get_value(kRootNote));
         {
             std::lock_guard<std::mutex> lock(slice_mutex_);
@@ -1219,7 +1219,12 @@ private:
                 }
             }
         }
-        if (end <= start || end > sample.num_frames) { start = 0; end = sample.num_frames; }
+        // Each slice is mapped to its own chromatic note (idx = note - root). A
+        // note outside [root, root + num_slices) — or one with invalid stretched
+        // boundaries — maps to NO slice: play nothing. Never fall back to the
+        // whole sample (that mapped the entire sample across the keyboard, the
+        // Reaper/host MIDI bug).
+        if (end <= start || end > sample.num_frames) return std::nullopt;
         audio::LoopRegion region;
         region.start_frame = start;
         region.end_frame = end;
@@ -1266,12 +1271,13 @@ private:
 
     void trigger_note(int note, float velocity, const audio::PublishedSampleView& sample,
                       const RenderParams& params) {
+        const auto region = region_for_note(note, sample, params.loop);
+        if (!region) return;  // note maps to no slice -> silent (don't play the whole sample)
         SamplerVoice* target = nullptr;
         for (auto& voice : voices_) if (!voice.active) { target = &voice; break; }
         if (target == nullptr) target = &voices_[0];
-        const auto region = region_for_note(note, sample, params.loop);
         // Buffer is already at host tempo -> play at native rate (1.0).
-        target->start(note, velocity, 1.0, host_sample_rate_, sample, region, sample.num_frames);
+        target->start(note, velocity, 1.0, host_sample_rate_, sample, *region, sample.num_frames);
         last_note_ = note;  // most-recently-triggered note drives the playhead
     }
 

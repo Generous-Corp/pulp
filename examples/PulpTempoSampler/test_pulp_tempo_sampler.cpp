@@ -162,6 +162,38 @@ TEST_CASE("MIDI note plays the cached stretched buffer", "[tempo-sampler]") {
     CHECK(energy > 1e-6); // produced audio
 }
 
+// Each slice maps to its own chromatic note (idx = note - root). A note off the
+// map must be SILENT — it must NOT fall back to playing the whole sample (the
+// Reaper/host "MIDI triggers the entire sample across the keyboard" bug).
+TEST_CASE("MIDI note outside the slice map is silent (no whole-sample fallback)",
+          "[tempo-sampler]") {
+    Fixture f;
+    auto loop = percussive_loop(48000, 4);
+    const float* ch[1] = {loop.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    f.proc->set_loop_bpm_for_test(120.0);
+    std::vector<float> l(512), r(512);
+    process_block(*f.proc, 120.0, false, 0, l, r);
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+    REQUIRE(wait_for([&] { return f.proc->num_slices() >= 2; }));
+
+    // Note BELOW the root (idx = note - root < 0) maps to no slice. Root = 60.
+    double oor = 0.0;
+    for (int b = 0; b < 8; ++b) {
+        process_block(*f.proc, 120.0, b == 0, 59, l, r);
+        for (int i = 0; i < 512; ++i) oor += l[static_cast<size_t>(i)] * l[static_cast<size_t>(i)];
+    }
+    CHECK(oor < 1e-9);  // silent — did NOT play the whole sample
+
+    // Sanity: the root note (slice 0) still plays (we didn't mute everything).
+    double inr = 0.0;
+    for (int b = 0; b < 8; ++b) {
+        process_block(*f.proc, 120.0, b == 0, 60, l, r);
+        for (int i = 0; i < 512; ++i) inr += l[static_cast<size_t>(i)] * l[static_cast<size_t>(i)];
+    }
+    CHECK(inr > 1e-6);
+}
+
 TEST_CASE("render while playing is finite + stable (race)", "[tempo-sampler]") {
     Fixture f;
     auto buf = sine(220.0, 48000.0, 24000);
