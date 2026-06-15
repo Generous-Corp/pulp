@@ -364,11 +364,52 @@ void advance_anims(View* v, float dt) {
         auto kbd = std::make_unique<MidiKeyboard>(); kbd->set_range(48, 72);
         add(std::move(kbd), kMargin + 160.0f, y + 40.0f, 740.0f, 90.0f);
         y += 150.0f;
-        // The faithful Figma renders (Musical Typing, Channel Strip, Range Slider,
-        // Property Panel, etc.) are pixel-perfect but STATIC. They live as catalog
-        // components and in the `--overview` 1:1 reference — not inline here, where
-        // every widget should be live. Their interactive versions land per the
-        // faithful-playable follow-up (see planning/2026-06-15-faithful-playable-mtk-contract.md).
+    }
+
+    // ── Containers — Property panel · Channel strip (native, interactive) ──
+    section("Containers — Property panel · Channel strip");
+    {
+        // Property panel composed from native primitives — labeled rows, each a
+        // LIVE control (slider / choice / toggle / text / button), like a real
+        // plugin builds it. (pulp::view::PropertyPanel is a backing data model,
+        // not a rendered widget, so the visual panel is composed here.)
+        const float pw = 460.0f, rowH = 44.0f, padX = 16.0f;
+        const float ctlX = kMargin + pw - 196.0f, ctlW = 180.0f;
+        const float panelTop = y;
+        const float panelH = 5 * rowH + 16.0f;
+        add(std::make_unique<Panel>(), kMargin, panelTop, pw, panelH);
+        auto row_label = [&](const char* t, float ry) {
+            auto l = std::make_unique<Label>(t); l->set_font_size(13.0f);
+            add(std::move(l), kMargin + padX, ry + 14.0f, 120.0f, 18.0f);
+        };
+        float ry = panelTop + 8.0f;
+        row_label("Cutoff", ry);
+        { auto s = std::make_unique<RangeSlider>(); s->set_min(20); s->set_max(20000); s->set_value(1200);
+          add(std::move(s), ctlX, ry + 18.0f, ctlW - 44.0f, 16.0f);
+          auto v = std::make_unique<Label>("1.2k"); v->set_font_size(12.0f);
+          add(std::move(v), ctlX + ctlW - 38.0f, ry + 14.0f, 40.0f, 16.0f); }
+        ry += rowH;
+        row_label("Shape", ry);
+        { auto c = std::make_unique<ComboBox>(); c->set_items({"Low-pass", "Band-pass", "High-pass"}); c->set_selected(0);
+          add(std::move(c), ctlX, ry + 6.0f, ctlW, 32.0f); }
+        ry += rowH;
+        row_label("Key sync", ry);
+        { auto t = std::make_unique<Toggle>(); t->set_on(true);
+          add(std::move(t), ctlX + ctlW - 52.0f, ry + 8.0f, 52.0f, 30.0f); }
+        ry += rowH;
+        row_label("Name", ry);
+        { auto e = std::make_unique<TextEditor>(); e->set_text("Pad 02");
+          add(std::move(e), ctlX, ry + 6.0f, ctlW, 32.0f); }
+        ry += rowH;
+        row_label("Preset", ry);
+        { auto b = std::make_unique<TextButton>("Load\xe2\x80\xa6"); b->set_style(TextButton::Style::secondary);
+          add(std::move(b), ctlX + ctlW - 90.0f, ry + 6.0f, 90.0f, 32.0f); }
+
+        // Native ChannelStrip: draggable fader + pan, live meter.
+        auto cs = std::make_unique<ChannelStrip>();
+        cs->set_label("Master"); cs->set_level(0.75f); cs->set_pan(0.0f);
+        add(std::move(cs), kMargin + pw + 40.0f, panelTop, 96.0f, panelH);
+        y = panelTop + panelH + 20.0f;
     }
 
     // ── Buttons & inputs — Search · TextArea · NumberBox ───────────────
