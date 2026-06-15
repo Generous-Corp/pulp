@@ -111,11 +111,17 @@ void EmptyState::paint(canvas::Canvas& canvas) {
     canvas.stroke_rounded_rect(1, 1, w - 2, h - 2, 14.0f);
     canvas.set_line_dash(nullptr, 0, 0.0f);  // revert to solid
 
-    // Folder glyph above the text — a single clean outline (tab + body),
-    // matching the Figma empty-state icon.
+    // Folder glyph stacked cleanly ABOVE the text. Lay the icon and the
+    // message out as one vertically-centered block (icon, gap, text) so the
+    // two never crowd or overlap regardless of the box height — the previous
+    // fixed fractions (icon at 0.22h, text at 0.66h) collided on short boxes.
     auto icon = resolve_color("text.secondary", Color::rgba8(150, 150, 160));
     const float bw = 26.0f, bh = 19.0f;
-    const float bx = (w - bw) * 0.5f, by = h * 0.22f;
+    const float gap = 12.0f;        // clear space between icon and text
+    const float msg_font = 14.0f;
+    const float stack_h = bh + gap + msg_font;
+    const float by = std::max(8.0f, (h - stack_h) * 0.5f);  // icon top
+    const float bx = (w - bw) * 0.5f;
     const float t = 4.0f;  // tab height
     canvas.set_stroke_color(icon);
     canvas.set_line_width(1.5f);
@@ -131,15 +137,17 @@ void EmptyState::paint(canvas::Canvas& canvas) {
     canvas.line_to(bx, by + bh);                 // bottom edge (close)
     canvas.stroke_current_path();
 
-    canvas.set_font("system", 14.0f);
+    canvas.set_font("system", msg_font);
     const float mw = canvas.measure_text(message_);
     const float aw = action_.empty() ? 0.0f : canvas.measure_text(action_) + 8.0f;
     float x = (w - (mw + aw)) / 2.0f;
+    // Baseline sits a gap below the folder body, with room for the glyph ascent.
+    const float text_baseline = by + bh + gap + msg_font * 0.78f;
     canvas.set_fill_color(icon);
-    canvas.fill_text(message_, x, h * 0.66f);
+    canvas.fill_text(message_, x, text_baseline);
     if (!action_.empty()) {
         canvas.set_fill_color(resolve_color("accent.primary", Color::rgba8(22, 218, 194)));
-        canvas.fill_text(action_, x + mw + 8.0f, h * 0.66f);
+        canvas.fill_text(action_, x + mw + 8.0f, text_baseline);
     }
 }
 void EmptyState::on_mouse_down(Point) { if (!action_.empty() && on_action) on_action(); }
