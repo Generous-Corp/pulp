@@ -101,9 +101,12 @@ void ComboBox::paint(canvas::Canvas& canvas) {
     canvas.set_text_align(canvas::TextAlign::left);
     canvas.fill_text(display_text, 8, base_h * 0.5f + font_size * 0.34f);
 
-    // Dropdown arrow
+    // Dropdown chevron — vertically centered on the field so it lines up with
+    // the field text's optical centre (which sits at base_h*0.5). The V's
+    // bounding box is symmetric about `ay`; lift it 1px to compensate for the
+    // downward point's optical weight, which otherwise reads as sitting low.
     float ax = b.width - 16;
-    float ay = base_h / 2;
+    float ay = base_h * 0.5f - 1.0f;
     auto arrow_c = resolve_color("text.secondary", canvas::Color::rgba8(150, 150, 170));
     canvas.set_stroke_color(arrow_c);
     canvas.set_line_width(1.5f);
