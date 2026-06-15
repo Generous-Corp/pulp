@@ -612,3 +612,27 @@ TEST_CASE("Arrow over a selection collapses to its boundary, no extra move",
     REQUIRE_FALSE(s.has_selection());
     REQUIRE(s.caret_pos() == 0);
 }
+
+TEST_CASE("GroupBox header click toggles collapse + child visibility",
+          "[design-system][interaction]") {
+    GroupBox g; g.set_bounds({0, 0, 280, 120}); g.set_collapsible(true);
+    auto child = std::make_unique<View>();
+    View* c = child.get();
+    g.add_child(std::move(child));
+    REQUIRE(c->visible());            // expanded → content shown
+
+    MouseEvent e{}; e.is_down = true; e.position = {140.0f, 10.0f};  // header band
+    g.on_mouse_event(e);
+    REQUIRE(g.collapsed());
+    REQUIRE_FALSE(c->visible());      // collapsed → content hidden
+
+    g.on_mouse_event(e);              // click again → expand
+    REQUIRE_FALSE(g.collapsed());
+    REQUIRE(c->visible());
+
+    // A click below the header (in the body) does NOT toggle.
+    g.set_collapsed(false);
+    MouseEvent body{}; body.is_down = true; body.position = {140.0f, 80.0f};
+    g.on_mouse_event(body);
+    REQUIRE_FALSE(g.collapsed());
+}

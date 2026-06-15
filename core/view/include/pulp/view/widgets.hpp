@@ -1389,6 +1389,42 @@ private:
     float border_width_ = 1.0f;
 };
 
+// ── GroupBox ───────────────────────────────────────────────────────────────
+// A titled container: rounded frame, a title chip at the top-left, and an
+// optional collapse chevron at the top-right. Collapsing hides the child
+// content (the caller sizes a collapsed box to header height). Matches the
+// Figma "Group Box" specimen (default / collapsible-expanded / collapsed /
+// empty-title-only). Children are added via add_child() and positioned by the
+// caller within the content area (origin = content_top()).
+class GroupBox : public View {
+public:
+    static constexpr float header_height = 30.0f;
+
+    void set_title(std::string t) { title_ = std::move(t); request_repaint(); }
+    const std::string& title() const { return title_; }
+
+    void set_collapsible(bool c) { collapsible_ = c; request_repaint(); }
+    bool collapsible() const { return collapsible_; }
+
+    // Collapsed hides all child content; expanded shows it. Fires on_toggle.
+    void set_collapsed(bool c);
+    bool collapsed() const { return collapsed_; }
+
+    // Y at which child content begins (below the header band).
+    float content_top() const { return header_height + 6.0f; }
+
+    std::function<void(bool collapsed)> on_toggle;
+
+    void paint(canvas::Canvas& canvas) override;
+    void on_mouse_event(const MouseEvent& event) override;
+
+private:
+    void apply_child_visibility();
+    std::string title_;
+    bool collapsible_ = false;
+    bool collapsed_ = false;
+};
+
 // ── SpectrogramView ──────────────────────────────────────────────────────────
 // Scrolling time-frequency display. Each STFT frame becomes a column of
 // colored pixels, scrolling left as new frames arrive.

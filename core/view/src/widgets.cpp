@@ -1429,6 +1429,74 @@ void Icon::paint(canvas::Canvas& canvas) {
     }
 }
 
+// ── GroupBox ───────────────────────────────────────────────────────────────
+
+void GroupBox::set_collapsed(bool c) {
+    if (c == collapsed_) return;
+    collapsed_ = c;
+    apply_child_visibility();
+    if (on_toggle) on_toggle(collapsed_);
+    request_repaint();
+}
+
+void GroupBox::apply_child_visibility() {
+    for (std::size_t i = 0; i < child_count(); ++i)
+        child_at(i)->set_visible(!collapsed_);
+}
+
+void GroupBox::paint(canvas::Canvas& canvas) {
+    auto b = local_bounds();
+    const float radius = 8.0f;
+    const float frame_h = collapsed_ ? GroupBox::header_height : b.height;
+
+    auto bg = resolve_color("bg.surface", canvas::Color::rgba8(30, 36, 46));
+    auto border = resolve_color("control.border", canvas::Color::rgba8(60, 66, 78));
+    auto fg = resolve_color("text.secondary", canvas::Color::rgba8(150, 156, 168));
+
+    canvas.set_fill_color(bg);
+    canvas.fill_rounded_rect(0, 0, b.width, frame_h, radius);
+    canvas.set_stroke_color(border);
+    canvas.set_line_width(1.0f);
+    canvas.stroke_rounded_rect(0.5f, 0.5f, b.width - 1.0f, frame_h - 1.0f, radius - 0.5f);
+
+    // Title chip (top-left): a filled pill with the uppercase title.
+    if (!title_.empty()) {
+        std::string up = title_;
+        for (auto& ch : up) if (ch >= 'a' && ch <= 'z') ch = static_cast<char>(ch - 32);
+        canvas.set_font("Inter", 11.0f);
+        canvas.set_text_align(canvas::TextAlign::left);
+        float tw = canvas.measure_text(up);
+        canvas.set_fill_color(resolve_color("bg.elevated", canvas::Color::rgba8(42, 48, 60)));
+        canvas.fill_rounded_rect(10.0f, 7.0f, tw + 18.0f, 18.0f, 5.0f);
+        canvas.set_fill_color(fg);
+        canvas.fill_text(up, 19.0f, 20.0f);
+    }
+
+    // Collapse chevron (top-right), drawn as strokes so it never tofus:
+    // ▾ when expanded, ▸ when collapsed.
+    if (collapsible_) {
+        const float cx = b.width - 18.0f, cy = GroupBox::header_height * 0.5f;
+        canvas.set_stroke_color(fg);
+        canvas.set_line_width(1.6f);
+        if (collapsed_) {                 // ▸ pointing right
+            canvas.stroke_line(cx - 2.0f, cy - 4.0f, cx + 2.0f, cy);
+            canvas.stroke_line(cx + 2.0f, cy, cx - 2.0f, cy + 4.0f);
+        } else {                          // ▾ pointing down
+            canvas.stroke_line(cx - 4.0f, cy - 2.0f, cx, cy + 2.0f);
+            canvas.stroke_line(cx, cy + 2.0f, cx + 4.0f, cy - 2.0f);
+        }
+    }
+}
+
+void GroupBox::on_mouse_event(const MouseEvent& event) {
+    // A click anywhere in the header band toggles collapse (when collapsible).
+    if (event.is_down && collapsible_ && event.position.y <= GroupBox::header_height) {
+        set_collapsed(!collapsed_);
+        return;
+    }
+    View::on_mouse_event(event);
+}
+
 // Visualizers (ImageView / Meter / XYPad / WaveformView /
 // SpectrumView / Panel / SpectrogramView / MultiMeter /
 // CorrelationMeter) moved to core/view/src/widgets/visualizers.cpp

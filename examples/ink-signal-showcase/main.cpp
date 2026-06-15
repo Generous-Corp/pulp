@@ -412,6 +412,52 @@ void advance_anims(View* v, float dt) {
         y = panelTop + panelH + 20.0f;
     }
 
+    // ── Group box (titled container) — default / collapsible / empty ──────
+    section("Group box — titled container");
+    {
+        // Add a child control into a GroupBox at the group's local coords, so
+        // collapsing the group hides it (GroupBox toggles its children).
+        auto add_to = [](GroupBox* g, std::unique_ptr<View> v, float x, float yy, float w, float h) {
+            v->set_bounds({x, yy, w, h});
+            v->set_position(View::Position::absolute);
+            v->set_left(x); v->set_top(yy);
+            v->flex().preferred_width = w; v->flex().preferred_height = h;
+            g->add_child(std::move(v));
+        };
+        auto filter_rows = [&](GroupBox* g) {
+            const float ct = g->content_top();
+            auto l1 = std::make_unique<Label>("CUTOFF"); l1->set_font_size(11.0f);
+            add_to(g, std::move(l1), 16.0f, ct + 4.0f, 70.0f, 16.0f);
+            auto s1 = std::make_unique<RangeSlider>(); s1->set_min(0); s1->set_max(1); s1->set_value(0.62f);
+            add_to(g, std::move(s1), 96.0f, ct + 6.0f, 156.0f, 14.0f);
+            auto l2 = std::make_unique<Label>("RESO"); l2->set_font_size(11.0f);
+            add_to(g, std::move(l2), 16.0f, ct + 34.0f, 70.0f, 16.0f);
+            auto s2 = std::make_unique<RangeSlider>(); s2->set_min(0); s2->set_max(1); s2->set_value(0.3f);
+            add_to(g, std::move(s2), 96.0f, ct + 36.0f, 156.0f, 14.0f);
+        };
+        const float gw = 280.0f, gh = 120.0f, gx2 = kMargin + 320.0f;
+
+        auto* gb1 = static_cast<GroupBox*>(add(std::make_unique<GroupBox>(), kMargin, y, gw, gh));
+        gb1->set_title("Filter"); filter_rows(gb1);
+        label("DEFAULT", kMargin, y + gh + 4.0f, 120.0f, 11.0f);
+
+        auto* gb2 = static_cast<GroupBox*>(add(std::make_unique<GroupBox>(), gx2, y, gw, gh));
+        gb2->set_title("Filter"); gb2->set_collapsible(true); filter_rows(gb2);
+        label("COLLAPSIBLE · EXPANDED", gx2, y + gh + 4.0f, 200.0f, 11.0f);
+        y += gh + 28.0f;
+
+        auto* gb3 = static_cast<GroupBox*>(add(std::make_unique<GroupBox>(), kMargin, y, gw, GroupBox::header_height));
+        gb3->set_title("Filter"); gb3->set_collapsible(true); filter_rows(gb3); gb3->set_collapsed(true);
+        label("COLLAPSIBLE · COLLAPSED", kMargin, y + GroupBox::header_height + 4.0f, 200.0f, 11.0f);
+
+        auto* gb4 = static_cast<GroupBox*>(add(std::make_unique<GroupBox>(), gx2, y, gw, 64.0f));
+        gb4->set_title("Envelope");
+        { auto e = std::make_unique<Label>("NO CONTROLS YET"); e->set_font_size(11.0f);
+          add_to(gb4, std::move(e), 16.0f, gb4->content_top() + 6.0f, 200.0f, 16.0f); }
+        label("EMPTY · TITLE ONLY", gx2, y + 64.0f + 4.0f, 200.0f, 11.0f);
+        y += 64.0f + 28.0f;
+    }
+
     // ── Buttons & inputs — Search · TextArea · NumberBox ───────────────
     section("Buttons & inputs — Search · Number · TextArea");
     {
