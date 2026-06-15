@@ -521,4 +521,71 @@ TEST_CASE("standalone musical typing: on_global_key plays a slice", "[tempo-samp
     }
     CHECK(energy > 1e-6);  // typing produced audio through the wired editor
 }
+
+// ⌘K (Ctrl+K on Win/Linux) toggles the on-screen musical-typing keyboard. The
+// standalone host routes Cmd-chords via performKeyEquivalent: to on_global_key.
+TEST_CASE("Cmd+K toggles the on-screen keyboard overlay", "[tempo-sampler]") {
+    Fixture f;
+    auto loop = percussive_loop(48000, 4);
+    const float* ch[1] = {loop.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+
+    auto editor = f.proc->create_view();
+    REQUIRE(editor);
+    auto* root = dynamic_cast<SamplerEditorRoot*>(editor.get());
+    REQUIRE(root != nullptr);
+    REQUIRE(root->keyboard != nullptr);
+    REQUIRE_FALSE(root->keyboard->visible());  // hidden by default
+
+    view::KeyEvent k; k.key = view::KeyCode::k; k.is_down = true; k.modifiers = view::kModCmd;
+    REQUIRE(root->on_global_key(k));           // ⌘K consumed
+    REQUIRE(root->keyboard->visible());        // shown
+
+    // Render the shown state to prove the embedded SVG paints inside the editor.
+    auto png = view::render_to_png(*editor, 760, 372, 1.0f, view::ScreenshotBackend::skia);
+    REQUIRE(png.size() > 1000);
+    std::ofstream("/tmp/sampler_keyboard_shown.png", std::ios::binary)
+        .write(reinterpret_cast<const char*>(png.data()), static_cast<std::streamsize>(png.size()));
+
+    REQUIRE(root->on_global_key(k));           // ⌘K again -> hide
+    REQUIRE_FALSE(root->keyboard->visible());
+}
+
+// Clicking a key on the on-screen keyboard auditions its slice (same path as a
+// waveform-slice tap). Drives the REAL widget -> on_play_slice -> audio.
+TEST_CASE("on-screen keyboard key click auditions a slice", "[tempo-sampler]") {
+    Fixture f;
+    auto loop = percussive_loop(48000, 4);
+    const float* ch[1] = {loop.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+
+    auto editor = f.proc->create_view();
+    auto* root = dynamic_cast<SamplerEditorRoot*>(editor.get());
+    REQUIRE(root != nullptr);
+    REQUIRE(root->keyboard != nullptr);
+    // Show it first (the ⌘K flow): a hidden view lays out to zero size, so the
+    // keyboard must be visible to have clickable key geometry.
+    root->keyboard->set_visible(true);
+    (void)view::render_to_png(*editor, 760, 372, 1.0f, view::ScreenshotBackend::skia);
+    REQUIRE(root->keyboard->local_bounds().width > 0);
+
+    // Click the first white key ("A" = slice 0). Keyboard coords are local
+    // (origin 0,0); x~50 is inside white key 0, y=150 is below the black keys.
+    view::MouseEvent down;
+    down.button = view::MouseButton::left; down.is_down = true;
+    down.position = {50.0f, 150.0f};
+    root->keyboard->on_mouse_event(down);
+
+    std::vector<float> l(512), r(512);
+    process_block(*f.proc, 120.0, false, 0, l, r);
+    REQUIRE(wait_for([&] { return f.proc->published_frames() > 0; }));
+    double energy = 0.0;
+    for (int blk = 0; blk < 8; ++blk) {
+        process_block(*f.proc, 120.0, false, 0, l, r);
+        for (int i = 0; i < 512; ++i) energy += l[static_cast<size_t>(i)] * l[static_cast<size_t>(i)];
+    }
+    CHECK(energy > 1e-6);  // a keyboard-key click actually triggered the slice
+}
 #endif  // __APPLE__
