@@ -82,11 +82,13 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from typing import Optional
 
 
 VALID_PROVIDERS = ("github-hosted", "namespace", "local")
+BARE_LABEL_RE = re.compile(r"^[A-Za-z0-9_.:-]+$")
 
 
 def _load_selector(raw: str, target_name: str) -> str:
@@ -94,6 +96,8 @@ def _load_selector(raw: str, target_name: str) -> str:
     try:
         decoded = json.loads(raw)
     except json.JSONDecodeError as exc:
+        if BARE_LABEL_RE.fullmatch(raw):
+            return json.dumps(raw)
         print(
             f"{target_name} runner selector JSON is not valid: {exc}",
             file=sys.stderr,

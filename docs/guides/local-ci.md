@@ -89,6 +89,29 @@ Shipyard is missing; contributors who prefer their own PR flow can set
 `gh` directly and requires it to be installed and authenticated. Run
 `pulp status` to see the effective workflow and local tool health.
 
+### Optional local VM routing
+
+Core Pulp development can also use local, disposable VMs through
+[tartci](https://github.com/danielraffel/tartci). This is optional: a normal
+contributor can open a PR and let GitHub Actions run on hosted runners. The
+value of the local VM setup is faster feedback on trusted Apple Silicon
+hardware while keeping every job clean-per-run.
+
+The current Pulp routing policy is intentionally kept in parseable TOML at
+[`.shipyard/ci-profiles/normal-local-fast.toml`](../../.shipyard/ci-profiles/normal-local-fast.toml)
+instead of copied into this guide. It names the PR, release, coverage,
+scheduled, and issue-on-failure policies and maps stable target IDs to concrete
+GitHub `runs-on` selectors. Shipyard owns orchestration and profile selection;
+tartci owns the local VM providers, goldens, host caches, and per-host status.
+Use the upstream docs for details:
+
+- [Shipyard profiles](https://github.com/danielraffel/Shipyard/blob/main/docs/profiles.md)
+  explain how profiles and fallback resolution work.
+- [tartci](https://github.com/danielraffel/tartci) explains the Tart/QEMU VM
+  lanes, `tartci status --json`, and `tartci profile explain|plan`.
+- [mac-ci-host-setup.md](mac-ci-host-setup.md) is the Pulp-specific host setup
+  guide for joining the macOS VM pool.
+
 ### Shipping a PR: `shipyard pr`
 
 `shipyard pr` is the single "ship this" orchestrator. Agents and humans should
@@ -702,6 +725,12 @@ hard-coded defaults they had before this mechanism was lifted into a
 shared resolver. Nothing changes by default.** Setting one variable moves
 one job. Nothing more.
 
+Coverage is stricter than the build matrix. It reads explicit
+`workflow_dispatch` inputs and `PULP_COVERAGE_*_RUNS_ON_JSON`, not
+`PULP_NAMESPACE_BUILD_*`. If coverage moves local, use a dedicated ephemeral
+label such as `pulp-coverage-vm-macos`; do not point coverage at `pulp-build`,
+`pulp-build-vm`, or the warm macOS gate pool.
+
 ### Global default (`build.yml` matrix only)
 
 | Variable | Effect | Example |
@@ -771,6 +800,20 @@ manual run:
 gh workflow run sanitizers.yml \
   -f tsan_runner_selector_json='["self-hosted","macos","arm64","sanitizer"]'
 ```
+
+`coverage.yml` accepts `linux_runner_selector_json`,
+`macos_runner_selector_json`, and `windows_runner_selector_json` inputs. The
+macOS Tart coverage proof path is:
+
+```bash
+gh workflow run coverage.yml \
+  -f macos_runner_selector_json='["self-hosted","macOS","ARM64","pulp-coverage-vm-macos"]'
+```
+
+Only set `PULP_COVERAGE_MACOS_RUNS_ON_JSON` to that selector after the proof
+run uploads the `os-macos` Codecov flag. The coverage LaunchAgent uses
+`--queue-match-labels` so existing hosted Coverage jobs do not accidentally
+boot a local coverage VM.
 
 `build.yml` has the equivalent `linux_runner_selector_json`,
 `windows_runner_selector_json`, and `macos_runner_selector_json` inputs.

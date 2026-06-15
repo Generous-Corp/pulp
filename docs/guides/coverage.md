@@ -563,6 +563,37 @@ The per-OS runs-on labels resolve through the shared
 variable to route any one leg to Namespace or a self-hosted runner
 without a workflow edit.
 
+Coverage routing is intentionally independent from the build matrix. The
+Coverage workflow reads only explicit `workflow_dispatch` inputs and the
+`PULP_COVERAGE_*_RUNS_ON_JSON` repo variables; it does not read
+`PULP_NAMESPACE_BUILD_*`. Long-running coverage jobs must not use the warm
+macOS gate pool or the shared `pulp-build-vm` build-pilot label.
+The local VM routing profile in
+`.shipyard/ci-profiles/normal-local-fast.toml` records the current coverage
+policy without making this guide a second routing table.
+
+The dedicated local macOS coverage lane uses an ephemeral Tart runner with
+the `pulp-coverage-vm-macos` label:
+
+```bash
+gh workflow run coverage.yml \
+  -f macos_runner_selector_json='["self-hosted","macOS","ARM64","pulp-coverage-vm-macos"]'
+```
+
+After that proof run uploads the macOS Codecov report with the `os-macos`
+flag, make the route persistent:
+
+```bash
+gh variable set PULP_COVERAGE_MACOS_RUNS_ON_JSON \
+  --body '["self-hosted","macOS","ARM64","pulp-coverage-vm-macos"]'
+```
+
+Install `tools/launchd/pulp-tart-runner-coverage-macos.plist.template` on a
+Tart host to serve that lane. It runs `tart-runner.sh --workflow-name
+Coverage --queue-match-labels`, so it wakes only for queued Coverage jobs whose
+labels match `self-hosted,macOS,ARM64,pulp-coverage-vm-macos`, not unrelated
+Coverage jobs waiting for GitHub-hosted macOS.
+
 ## Related reading
 
 - Issue #641 — authoritative coverage-compliance tracker

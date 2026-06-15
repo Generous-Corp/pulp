@@ -151,6 +151,18 @@ class ObjectDiscoveryTests(unittest.TestCase):
             "maps; production archives are enough for full-surface rows.",
         )
 
+    def test_optional_ctest_args_are_threaded_into_ctest_invocation(self) -> None:
+        self.assertTrue(
+            _script_contains('PULP_COVERAGE_CTEST_ARGS'),
+            "Coverage workflow needs a script-level hook for platform-specific "
+            "CTest policy such as macOS validation-label exclusion.",
+        )
+        self.assertTrue(
+            _script_contains('"${EXTRA_CTEST_ARGS[@]}" --output-on-failure'),
+            "run_coverage.sh must pass optional CTest args before the shared "
+            "output/retry flags.",
+        )
+
     def test_profraw_cleanup_uses_find_delete(self) -> None:
         text = SCRIPT.read_text()
         self.assertIn(
