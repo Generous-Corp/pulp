@@ -6,6 +6,7 @@
 #include <pulp/view/view.hpp>
 #include <pulp/view/input_events.hpp>
 #include <pulp/canvas/canvas.hpp>
+#include <algorithm>
 #include <string>
 #include <vector>
 #include <memory>
@@ -103,6 +104,22 @@ public:
         return static_cast<float>(visible_node_count()) * row_height_;
     }
 
+    /// Current vertical scroll offset in pixels (0 = first row flush at top).
+    float scroll_offset() const { return scroll_offset_; }
+
+    /// Largest valid scroll offset: 0 when the content fits, else the overflow
+    /// past the viewport. The first row is always reachable at offset 0.
+    float max_scroll_offset() const {
+        return std::max(0.0f, content_height() - local_bounds().height);
+    }
+
+    /// Scroll to an absolute offset, clamped to [0, max_scroll_offset()] so the
+    /// view can neither overscroll past the last row nor leave the first row
+    /// cut off above the top — the scrollbar always reaches the very top.
+    void set_scroll_offset(float v) {
+        scroll_offset_ = std::clamp(v, 0.0f, max_scroll_offset());
+    }
+
     void paint(canvas::Canvas& canvas) override {
         auto b = local_bounds();
 
@@ -116,6 +133,12 @@ public:
     }
 
     void on_mouse_event(const MouseEvent& event) override {
+        // Wheel/trackpad scroll, clamped so the top stays reachable.
+        if (event.is_wheel) {
+            set_scroll_offset(scroll_offset_ + event.scroll_delta_y);
+            request_repaint();
+            return;
+        }
         if (!event.is_down) return;
 
         float y = event.position.y + scroll_offset_;
@@ -187,6 +210,11 @@ private:
                 canvas.fill_rect(x, y, width, row_height_);
             }
 
+            // Row vertical midline — both the disclosure triangle and the
+            // label anchor here (GlyphCenter) so they line up exactly,
+            // instead of the triangle sitting below the label's baseline.
+            const float row_mid = y + row_height_ * 0.5f;
+
             // Expand triangle. Draw with an explicit SMALL font so it
             // doesn't inherit the stale/large font from a previous paint
             // call (which made the glyph render oversized and overlap the
@@ -198,25 +226,24 @@ private:
                 canvas.set_fill_color(resolve_color("text_muted",
                     canvas::Color::hex(0x808090)));
                 float tx = indent_x + 2;
-                // Vertically center the small glyph on the row. fill_text's
-                // y is the baseline, so offset up from the row middle by
-                // roughly a third of the glyph height.
-                float ty = y + row_height_ / 2 + kTriangleFontSize * 0.35f;
-                if (node.expanded) {
-                    // Down-pointing triangle
-                    canvas.fill_text("\xe2\x96\xbc", tx, ty); // ▼
-                } else {
-                    canvas.fill_text("\xe2\x96\xb6", tx, ty); // ▶
-                }
+                canvas.set_text_align(canvas::TextAlign::left);
+                const char* glyph = node.expanded
+                    ? "\xe2\x96\xbc"   // ▼ down-pointing
+                    : "\xe2\x96\xb6";  // ▶ right-pointing
+                canvas.fill_text_anchored(glyph, tx, row_mid,
+                    canvas::Canvas::TextAnchor::GlyphCenter);
             }
 
             // Label — offset past the triangle column so the arrow always
-            // sits cleanly before the text with a visible gap.
+            // sits cleanly before the text with a visible gap, and anchored
+            // on the same row midline as the triangle.
             float label_x = indent_x + kTriangleWidth;
             canvas.set_font("system", 13);
             canvas.set_fill_color(resolve_color("text",
                 canvas::Color::hex(0xe0e0e0)));
-            canvas.fill_text(node.label, label_x, y + row_height_ * 0.7f);
+            canvas.set_text_align(canvas::TextAlign::left);
+            canvas.fill_text_anchored(node.label, label_x, row_mid,
+                canvas::Canvas::TextAnchor::GlyphCenter);
 
             y += row_height_;
         }

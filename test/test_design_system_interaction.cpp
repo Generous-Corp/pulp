@@ -14,6 +14,7 @@
 #include <pulp/view/side_panel.hpp>
 #include <pulp/view/table.hpp>
 #include <pulp/view/theme_presets.hpp>
+#include <pulp/view/tree_view.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/widgets.hpp>
 
@@ -661,4 +662,37 @@ TEST_CASE("DualRangeSlider drags the nearer thumb independently",
     e.on_mouse_down({200.0f, 9.0f});
     e.on_mouse_drag({10.0f, 9.0f});
     REQUIRE(e.low() == 0.3f);
+}
+
+TEST_CASE("TreeView scroll offset clamps so the top row is always reachable",
+          "[design-system][interaction][tree]") {
+    // The disclosure tree must clamp its scroll offset to [0, max] so a wheel
+    // gesture can never leave the first row cut off above the top (the
+    // "scroll won't reach the top" nit) nor overscroll past the last row.
+    TreeView tree;
+    tree.set_bounds({0, 0, 200, 66});   // viewport shows 3 rows at 22px each
+    auto& root = tree.root();
+    auto& a = root.add_child("A");      // 6 visible rows once expanded → 132px
+    a.expanded = true;
+    a.add_child("A1"); a.add_child("A2");
+    auto& b = root.add_child("B");
+    b.expanded = true;
+    b.add_child("B1"); b.add_child("B2");
+
+    REQUIRE(tree.visible_node_count() == 6);
+    REQUIRE(tree.content_height() == 132.0f);
+    REQUIRE(tree.max_scroll_offset() == 66.0f);  // 132 - 66
+
+    // Negative / over-scroll both clamp into range.
+    tree.set_scroll_offset(-50.0f);
+    REQUIRE(tree.scroll_offset() == 0.0f);            // top reachable
+    tree.set_scroll_offset(9999.0f);
+    REQUIRE(tree.scroll_offset() == 66.0f);
+
+    // A wheel scroll up from the bottom returns all the way to the very top.
+    MouseEvent up{};
+    up.is_wheel = true;
+    up.scroll_delta_y = -1000.0f;
+    tree.on_mouse_event(up);
+    REQUIRE(tree.scroll_offset() == 0.0f);
 }
