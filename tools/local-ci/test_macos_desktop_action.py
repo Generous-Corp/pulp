@@ -146,6 +146,8 @@ class MacosDesktopActionTests(unittest.TestCase):
             serializable_kwargs = dict(kwargs)
             if serializable_kwargs.get("source_image") is not None:
                 serializable_kwargs["source_image"] = str(serializable_kwargs["source_image"])
+            if serializable_kwargs.get("video") is not None:
+                serializable_kwargs["video"] = str(serializable_kwargs["video"])
             return {"output": str(output_path), "composer": "remotion", "size": {"fits_attachment_budget": True}, "kwargs": serializable_kwargs}
 
         def issue_video(source_path: Path, output_path: Path, metadata_path: Path, *, attachment_budget_bytes: int):
@@ -347,6 +349,53 @@ class MacosDesktopActionTests(unittest.TestCase):
         self.assertTrue(manifest["artifacts"]["video_issue_metadata"].endswith("/video/issue-metadata.json"))
         self.assertEqual(manifest["video_issue"]["status"], "copied")
         self.assertTrue(manifest["video_issue"]["source"].endswith("/video/proof-composed.mp4"))
+
+    def test_video_focus_auto_generates_and_embeds_interaction_focus(self) -> None:
+        calls = []
+
+        def fake_focus(video_path, output_path, **kwargs):
+            calls.append(kwargs)
+            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+            Path(output_path).write_bytes(b"focus")
+            return {
+                "status": "created",
+                "crop": {"x": 0, "y": 0, "width": 160, "height": 96, "video_width": 320, "video_height": 200},
+                "content_point": {"x": 12.0, "y": 24.0},
+            }
+
+        manifest, *_ = self.run_action(
+            action_name="click",
+            capture_ui_snapshot=True,
+            click_view_id="bypass-toggle",
+            record_video=True,
+            compose_video_proof=True,
+            generate_interaction_focus_fn=fake_focus,
+        )
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(manifest["artifacts"]["video_focus"].endswith("/video/proof.focus.mp4"))
+        # The composer embeds the focus clip, not the full-window capture.
+        self.assertTrue(str(manifest["video_composed"]["kwargs"].get("video", "")).endswith("/video/proof.focus.mp4"))
+
+    def test_video_focus_off_keeps_full_window_and_skips_focus_clip(self) -> None:
+        calls = []
+
+        def fake_focus(video_path, output_path, **kwargs):
+            calls.append(kwargs)
+            return {"status": "created"}
+
+        manifest, *_ = self.run_action(
+            action_name="click",
+            capture_ui_snapshot=True,
+            click_view_id="bypass-toggle",
+            record_video=True,
+            compose_video_proof=True,
+            video_focus="off",
+            generate_interaction_focus_fn=fake_focus,
+        )
+        self.assertEqual(calls, [])
+        self.assertNotIn("video_focus", manifest["artifacts"])
+        # Full-window embed: composer gets no explicit video override.
+        self.assertIsNone(manifest["video_composed"]["kwargs"].get("video"))
 
     def test_run_macos_local_smoke_can_prefer_frame_sequence_video(self) -> None:
         manifest, _launched, _terminated, _waited_paths, _rollups = self.run_action(

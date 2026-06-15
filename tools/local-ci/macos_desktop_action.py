@@ -226,6 +226,7 @@ def run_macos_local_smoke(
     video_audio_file: str | None = None,
     video_audio_device: str | None = None,
     video_recorder: str = "auto",
+    video_focus: str = "auto",
     video_capture_target: str = "app",
     capture_bundle_id: str | None = None,
     video_attachment_budget_bytes: int = 100_000_000,
@@ -273,6 +274,8 @@ def run_macos_local_smoke(
         raise RuntimeError(f"Unknown video capture target `{video_capture_target}`.")
     if video_recorder not in {"auto", "avfoundation", "frame-sequence"}:
         raise RuntimeError(f"Unknown video recorder `{video_recorder}`.")
+    if video_focus not in {"auto", "off"}:
+        raise RuntimeError(f"Unknown video focus mode `{video_focus}` (expected auto or off).")
     if video_recorder == "frame-sequence" and video_audio_source == "system":
         raise RuntimeError("--video-audio system requires --video-recorder auto or avfoundation.")
     if video_audio_source == "plugin":
@@ -570,9 +573,11 @@ def run_macos_local_smoke(
             # Codified "zoom to the demoed control": when an interaction has a
             # known click point, auto-produce a focused clip cropped+scaled to
             # that control so the on-screen change is clearly visible, not a
-            # speck in the full window. No-interaction smoke runs skip this.
+            # speck in the full window. No-interaction smoke runs skip this, and
+            # `--video-focus off` opts out to keep the full-window framing.
             if (
-                generate_interaction_focus_fn is not None
+                video_focus != "off"
+                and generate_interaction_focus_fn is not None
                 and interaction_content_point is not None
                 and video_summary is not None
                 and Path(video_path).exists()

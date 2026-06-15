@@ -371,6 +371,17 @@ looks like a static screenshot with only the overlays moving, suspect these:
   remapped coordinates. Keep the embed choice and the remap keyed off the same
   value so the marker/zoom always match whatever is shown.
 
+Choosing full vs zoomed framing — `--video-focus`:
+
+- `--video-focus auto` (default): an interaction proof zooms the embedded
+  recording to the clicked control (the focus clip) so the change is obvious.
+- `--video-focus off`: keep the full-window framing (no focus clip; the
+  composed proof embeds the whole captured window).
+
+Overlays are placed correctly in **both** modes (the embed decision drives the
+overlay coordinate frame), so pick whichever reads better for the proof — zoomed
+for a small control changing, full for showing surrounding context/layout.
+
 ## Capture a proof
 
 Record a short click proof and render the Remotion composition with the

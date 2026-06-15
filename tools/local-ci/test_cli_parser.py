@@ -104,6 +104,8 @@ class CliParserTests(unittest.TestCase):
             "24",
             "--video-recorder",
             "frame-sequence",
+            "--video-focus",
+            "off",
             "--recipe",
             "component-zoom",
             "--component-id",
@@ -147,6 +149,7 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(args.video_duration, 6.0)
         self.assertEqual(args.video_fps, 24.0)
         self.assertEqual(args.video_recorder, "frame-sequence")
+        self.assertEqual(args.video_focus, "off")
         self.assertEqual(args.video_audio, "system")
         self.assertEqual(args.video_audio_device, "BlackHole 2ch")
         self.assertEqual(args.video_audio_file, "/tmp/plugin.wav")

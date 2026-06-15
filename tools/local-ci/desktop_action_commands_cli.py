@@ -236,6 +236,7 @@ def _video_kwargs(args: argparse.Namespace) -> dict:
         "video_audio_file": resolved_audio_file,
         "video_audio_device": getattr(args, "video_audio_device", None),
         "video_recorder": getattr(args, "video_recorder", "auto"),
+        "video_focus": getattr(args, "video_focus", "auto"),
         "video_capture_target": getattr(args, "video_capture_target", "app"),
         "capture_bundle_id": getattr(args, "capture_bundle_id", None),
         "video_attachment_budget_bytes": int(float(getattr(args, "video_attachment_budget_mb", 100.0)) * 1_000_000),

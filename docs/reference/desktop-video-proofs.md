@@ -36,6 +36,21 @@ continuous motion from GPU/`CAMetalLayer` windows — use AVFoundation when the
 proof is about motion. AVFoundation crops to the window using the probe's screen
 backing-scale factor, so Retina (2×) captures land on the correct region.
 
+### Full vs zoomed framing — `--video-focus`
+
+For an interaction proof (a click with a known target), the composed proof can
+either zoom into the control that changed or show the whole window:
+
+- `--video-focus auto` (default) — embed a focus clip zoomed to the clicked
+  control so a small change (a toggle flip, a knob move) fills the frame and is
+  obviously visible.
+- `--video-focus off` — keep the full-window framing (embed the whole captured
+  window); use this when the surrounding layout/context is the point.
+
+The tap marker and zoom-center overlays are placed correctly in either mode — a
+single decision in the recorder drives both what is embedded and how the overlay
+coordinates are mapped, so they always match what is shown.
+
 ## Install Model
 
 The feature-branch setup below still supports direct source-tree commands while

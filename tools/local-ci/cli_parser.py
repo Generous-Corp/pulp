@@ -125,6 +125,17 @@ def build_local_ci_parser(
             help="macOS recorder backend for app-window video proofs (default: auto).",
         )
         command_parser.add_argument(
+            "--video-focus",
+            choices=["auto", "off"],
+            default="auto",
+            help=(
+                "Composed-proof framing for an interaction: 'auto' (default) zooms the "
+                "embedded recording to the clicked control so the change is clearly "
+                "visible; 'off' keeps the full-window framing. Overlays (tap marker / "
+                "zoom-center) are placed correctly in either mode."
+            ),
+        )
+        command_parser.add_argument(
             "--capture-bundle-id",
             help="After launching --command on macOS, capture this bundle id's window instead of the command process window.",
         )
