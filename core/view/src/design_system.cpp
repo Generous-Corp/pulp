@@ -155,6 +155,10 @@ std::vector<ComponentInfo> build_catalog() {
         {"MIDIKeyboard", C::audio, "pulp::view::MidiKeyboard", "pulp/view/midi_keyboard.hpp", "MIDIKeyboard",
          "Piano keyboard input surface",
          {"bg.surface", "text.primary", "accent.primary"}},
+        {"MusicalTyping", C::audio, "pulp::view::MusicalTypingKeyboard",
+         "pulp/view/musical_typing_keyboard.hpp", "Musical Typing Keyboard",
+         "Logic-style typing + piano keyboard (computer-key letters / mouse piano)",
+         {"surface.panel", "accent.primary", "accent.text", "key.white", "key.black", "text.secondary"}},
 
         // ── Feedback ───────────────────────────────────────────────────────
         {"InlineBanner", C::feedback, "pulp::view::InlineBanner", "pulp/view/gap_widgets.hpp", "InlineBanner",

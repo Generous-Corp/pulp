@@ -7,6 +7,79 @@ description: Import designs from Figma, Stitch, v0, Pencil, React Native, or Cla
 
 Import a design from an external tool (Figma, Stitch, v0, Pencil, React Native, Claude Design, or the experimental JSX runtime lane) into this Pulp project.
 
+## Figma → Pulp, faithful (1:1) — THE WORKING LANE (read first)
+
+When the goal is a **visually faithful (1:1)** import of a component that lives in
+the **Figma file** (e.g. the Ink & Signal library, file key `q9iDYZzg86YrOQKr6I3bY0`),
+use the **figma-plugin faithful-vector lane**. This is the lane that actually
+reproduces the design; the others below do NOT and waste hours:
+
+- ❌ **Do NOT hand-write a C++ `paint()`** to mimic the design. It is never 1:1
+  (SVG icons, gradients, shadows, pills) and is pure slop. The framework exists
+  to render the design, not to re-draw it by hand.
+- ❌ **Do NOT use `--from claude` for layout.** On a standalone/bundled HTML it
+  falls back to regex *text* extraction ("0 widgets, N labels", ~58% and it even
+  scrapes CSS comments) — no CSS layout, no geometry.
+
+**The lane that works (Figma is the source of truth):**
+```bash
+# 1) Export the Figma NODE to a scene (faithful vectors + geometry + assets).
+#    Token resolves from --token, $FIGMA_TOKEN, then ~/.config/pulp/figma-token.
+python3 tools/import-design/figma_rest_export.py \
+  --file-key q9iDYZzg86YrOQKr6I3bY0 --node 187:2 \
+  --out scene.pulp.json            # → "N nodes, faithful-vector SVG, interactive elements"
+
+# 2) Import the scene (the source-of-truth lane: audio-widget + library matching,
+#    faithful-vector render) and validate against the Figma render.
+build-gpu/tools/import-design/pulp-import-design \
+  --from figma-plugin --file scene.pulp.json --output ui.js \
+  --validate --screenshot-backend skia \
+  --reference <figma-node-render.png> --diff diff.png --render-size 1356x781
+```
+
+**THE #1 LESSON — `--validate` does NOT render the faithful SVG.** This is what
+cost hours. The scene's root carries `render_mode=faithful_svg` + the embedded
+SVG, and the **C++ runtime** honors it (`design_import_native_common.cpp` →
+`make_faithful_svg_frame` → `DesignFrameView`/SkSVGDOM, line ~1734). But
+`pulp import-design --validate` renders the **emitted native-widget JS**
+(`build_native_view_tree`/codegen materialization), NOT the faithful SVG — so it
+mis-lays composite vectors (e.g. piano black keys grouped/dropped) and reports
+~18/255 *even though the faithful render is pixel-perfect*. **Do not trust
+`--validate`'s number as the faithful fidelity.**
+
+**Validate the FAITHFUL render with `pulp-svg-probe`** (renders an SVG via
+`DesignFrameView`/SkSVGDOM, the real 1:1 path):
+```bash
+# extract the data:image/svg+xml base64 from scene.pulp.json → faithful.svg, then:
+build-gpu/tools/import-design/pulp-svg-probe faithful.svg out.png 1356 781
+python3 tools/figma-import/verify_region.py source.png out.png 80 9.0   # → ~1.08/255 = 1:1
+```
+This is how Musical Typing was proven 1:1 (1.08/255 vs the design). Pulp's
+SkSVGDOM **does** render Figma's effects-heavy SVG (67 filters, 61 masks)
+faithfully — the export and the SkSVGDOM render are both fine; only the
+native-materialize/codegen path is lossy.
+
+**Ship a 1:1 catalog component = subclass `DesignFrameView` with the embedded SVG.**
+See `core/view/{include/pulp/view,src}/musical_typing_keyboard*` +
+`design_system.cpp` catalog entry: the class is
+`MusicalTypingKeyboard : public DesignFrameView`, constructed from the
+base64-embedded Figma SVG (`musical_typing_keyboard_svg.cpp`). Reskin/extend by
+re-exporting the node and re-embedding — never re-draw by hand. (Open follow-up:
+teach the codegen/`--validate` path to emit/render `faithful_svg` as a
+DesignFrameView so the import itself is 1:1, not just the runtime.)
+
+**Lesser gotchas:**
+- `--validate`'s "Similarity %" also breaks on **size mismatch** (it renders at
+  `--render-size`, often 2× the reference) — always diff at matched dimensions
+  with `verify_region.py` (per-tile).
+- `--render-size` must match the node aspect or content letterboxes → inflated diff.
+- Skia backend is mandatory for image/asset compositing (`--screenshot-backend skia`).
+
+This pairs with the upstream Figma-import toolkit (`tools/figma-import/`, which
+captures the design HTML→Figma 1:1): **Figma is the single source** — design HTML
+→ Figma (figma-import) → Pulp (this lane). Keep both ends improving from each
+import's lessons.
+
 ## CRITICAL: pulp-design-tool requires the GPU host (PULP_HAS_SKIA)
 
 Before debugging *any* runtime-import resize / sizing / layout issue in `pulp-design-tool` or `/tmp/<App>.app`, verify the binary is using `MacGpuWindowHost`, not the CPU `MacWindowHost`. The design viewport pin, aspect-lock, and uniform paint-scale all live in `MacGpuWindowHost` (gated by `#ifdef PULP_HAS_SKIA` in `core/view/platform/mac/window_host_mac.mm`). When Skia isn't linked, `WindowHost::create()` returns `MacWindowHost`, where `set_design_viewport()` and `set_fixed_aspect_ratio()` are base-class no-ops — the example still builds and runs, but resize behaves as if every fix you've shipped is missing.

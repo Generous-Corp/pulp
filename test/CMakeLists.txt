@@ -5279,6 +5279,15 @@ target_link_libraries(pulp-test-design-frame-view
 catch_discover_tests(pulp-test-design-frame-view
     PROPERTIES LABELS "view")
 
+# MusicalTypingKeyboard — Ink & Signal catalog component (faithful Figma SVG
+# via DesignFrameView). Pins SVG load, headless render, catalog registration.
+add_executable(pulp-test-musical-typing-keyboard
+    test_musical_typing_keyboard.cpp)
+target_link_libraries(pulp-test-musical-typing-keyboard
+    PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-musical-typing-keyboard
+    PROPERTIES LABELS "view")
+
 # P5-3 follow-up — W3C Design Tokens cluster extracted from
 # test_design_import.cpp. Covers parse_w3c_tokens, export_w3c_tokens,
 # composite typography/shadow shapes, alias resolution, math

@@ -389,6 +389,8 @@ target_sources(pulp-view-core PRIVATE
     src/window_manager.cpp
     src/eq_curve_view.cpp
     src/midi_keyboard.cpp
+    src/musical_typing_keyboard.cpp
+    src/musical_typing_keyboard_svg.cpp
     src/color_picker.cpp
     src/theme_editor.cpp
     src/file_drop_zone.cpp
