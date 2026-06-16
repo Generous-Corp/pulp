@@ -54,7 +54,13 @@ def load_wav_float32(path):
         csz = struct.unpack("<I", b[i + 4:i + 8])[0]
         body = b[i + 8:i + 8 + csz]
         if cid == b"fmt ":
-            fmt = struct.unpack("<HHIIHH", body[:16])
+            tag, ch, sr, br, ba, bits = struct.unpack("<HHIIHH", body[:16])
+            # WAVE_FORMAT_EXTENSIBLE (0xFFFE): the real format code is the first
+            # 2 bytes of the SubFormat GUID at body[24:26] (1=PCM, 3=IEEE float).
+            # Real-world loops (afconvert/DAW output) commonly use this.
+            if tag == 0xFFFE and len(body) >= 26:
+                tag = struct.unpack("<H", body[24:26])[0]
+            fmt = (tag, ch, sr, br, ba, bits)
         elif cid == b"data":
             data = body
         i += 8 + csz + (csz & 1)
@@ -176,12 +182,56 @@ def metrics(in_path, out_path, ratio):
             result["pre_echo_db"] = round(sum(ratios_db) / len(ratios_db), 2)
 
     if _np is None:
-        result["spectral_lsd"] = "skipped (no numpy)"
-        result["pitch_cents"] = "skipped (no numpy)"
-    # TODO(phase1+): with numpy, add log-spectral distance on stationary
-    # segments and f0-tracking cents error on tonal material.
+        result["attack_sharpness"] = "skipped (no numpy)"
+        result["spectral_flatness"] = "skipped (no numpy)"
+        result["crest_db"] = "skipped (no numpy)"
+    else:
+        # Reference-free, artifact-specific probes (validated 2026-06-16 to
+        # discriminate Pulp from Rubber Band R3 on a real drum break). These are
+        # PRIMARY objective signals for stretch quality precisely because no
+        # length-aligned reference exists (PEAQ/ViSQOL are invalid for stretch).
+        a = _np.asarray(om, dtype=_np.float64)
+        result["attack_sharpness"] = round(_attack_sharpness(a, osr), 4)
+        result["spectral_flatness"] = round(_spectral_flatness(a), 4)
+        result["crest_db"] = round(_crest_db(a), 2)
+    # TODO(track B): f0-track continuity (cents) on sustained tonal material.
 
     return result
+
+
+def _attack_sharpness(a, sr):
+    """Mean attack-envelope rise around detected onsets. Higher = crisper
+    transients; phase-vocoder smearing pulls it down. Reference-free."""
+    hop = max(1, int(sr * 0.002)); win = max(1, int(sr * 0.005))
+    env = _np.array([math.sqrt(float(_np.mean(a[i:i + win] ** 2)) + 1e-12)
+                     for i in range(0, len(a) - win, hop)])
+    if len(env) < 5:
+        return 0.0
+    flux = _np.diff(env); flux[flux < 0] = 0.0
+    thr = float(flux.mean() + 2.0 * flux.std())
+    ons = [i for i in range(1, len(flux) - 1)
+           if flux[i] > thr and flux[i] >= flux[i - 1] and flux[i] > flux[i + 1]]
+    rises = [float(env[o:o + 10].max() - env[max(0, o - 10):o].mean())
+             for o in ons if o > 10 and o + 10 < len(env)]
+    return float(_np.mean(rises)) if rises else 0.0
+
+
+def _spectral_flatness(a):
+    """Mean spectral flatness (geo/arith mean of power). Higher = more
+    broadband/noise texture preserved; phase vocoders tonalize noise and pull
+    it down ('noisy textures becoming synthetic'). Reference-free."""
+    NF = 2048; w = _np.hanning(NF); sf = []
+    for i in range(0, len(a) - NF, NF):
+        m = _np.abs(_np.fft.rfft(a[i:i + NF] * w)) ** 2 + 1e-12
+        sf.append(float(_np.exp(_np.mean(_np.log(m))) / _np.mean(m)))
+    return float(_np.mean(sf)) if sf else 0.0
+
+
+def _crest_db(a):
+    """Peak-to-RMS in dB. Far above the source = splice/click artifacts."""
+    peak = float(_np.max(_np.abs(a))) + 1e-9
+    r = math.sqrt(float(_np.mean(a ** 2)) + 1e-18)
+    return 20.0 * math.log10(peak / r)
 
 
 def main(argv):

@@ -48,3 +48,28 @@ Tests that require musical material **skip with a clear reason** when `musical/`
 is empty, so the suite stays green on a fresh checkout. The synthetic fixtures
 cover all correctness (length, null, determinism, safety) and the transient/
 pitch metrics on known-onset material without any user audio.
+
+## Running the scoreboard (Pulp vs Rubber Band R3)
+
+`tools/capture_baseline.py` renders the corpus (synthetic + every `musical/*.wav`)
+through Pulp's `stretchcli` and — when a `rubberband` CLI is on PATH — through
+**Rubber Band R3** (`rubberband -3`) at the same ratios, and scores both with the
+reference-free probes in `metrics.py`. Rubber Band is a *benchmark only* (GPL —
+never linked or vendored; see the clean-room ledger in
+`planning/2026-06-16-offline-stretch-beat-r3-plan.md`).
+
+```bash
+# Optional but recommended — the R3 comparison lane:
+brew install rubberband            # provides the `rubberband` CLI
+# The discriminating metrics (attack sharpness, spectral flatness, crest) need
+# numpy; the harness still runs without it and reports those as "skipped".
+python3 -m venv .venv && .venv/bin/pip install numpy
+
+.venv/bin/python tools/capture_baseline.py \
+  ../../build/examples/offline-stretch/stretchcli corpus/synthetic /tmp/baseline.json
+```
+
+Without `rubberband` the R3 lane is reported `deferred`; the Pulp baseline is
+still captured. The objective probes are **reference-free by design** —
+PEAQ/ViSQOL are invalid for time-stretch because no length-aligned reference
+exists; primary quality judgement is blind MUSHRA listening.
