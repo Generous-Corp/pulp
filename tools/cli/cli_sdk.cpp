@@ -353,6 +353,17 @@ fs::path ensure_checkout_sdk(const fs::path& repo_root, const std::string& versi
         + " -DPULP_BUILD_TESTS=OFF"
         + " -DPULP_BUILD_EXAMPLES=OFF"
         + " -DPULP_ENABLE_AUDIO_PROBES=OFF"
+        // Strip the dev inspector (the in-plugin authoring / MCP-reachable
+        // surface) from the shipped SDK. A developer who deliberately wants an
+        // inspectable / MCP-reachable plugin re-enables it in their own plugin
+        // build with -DPULP_ENABLE_INSPECTOR=ON. The pulp CLI / MCP server are
+        // separate binaries and are unaffected by this flag.
+        + " -DPULP_ENABLE_INSPECTOR=OFF"
+        // Strip the design-import authoring subsystem (importers, codegen, lock,
+        // runtime design-import) from the shipped SDK. The runtime W3C token API
+        // stays. Re-enable with -DPULP_ENABLE_DESIGN_IMPORT=ON for a plugin that
+        // needs runtime design import.
+        + " -DPULP_ENABLE_DESIGN_IMPORT=OFF"
         + " -DPULP_ENABLE_GPU=OFF";
     append_windows_visual_studio_generator_args(configure_cmd);
     if (run_with_spinner(configure_cmd, "Configuring local SDK") != 0) {

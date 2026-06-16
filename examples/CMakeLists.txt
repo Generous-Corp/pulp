@@ -29,8 +29,12 @@ add_subdirectory(pulp-effect)
 # Phase 5: PulpCompressor (sidechain compressor validating multi-bus)
 add_subdirectory(pulp-compressor)
 
-# Phase 6: UI Preview (validates rendering pipeline)
-add_subdirectory(ui-preview)
+# Phase 6: UI Preview (validates rendering pipeline). Depends on the
+# design-import authoring cluster, so it is skipped in stripped
+# (PULP_ENABLE_DESIGN_IMPORT=OFF) builds.
+if(PULP_ENABLE_DESIGN_IMPORT)
+    add_subdirectory(ui-preview)
+endif()
 
 # Phase 6: PulpDrums (generative drum sequencer MIDI effect)
 add_subdirectory(PulpDrums)
@@ -67,7 +71,7 @@ if(NOT IOS)
 endif()
 
 # Experimental native import preview: generated C++ view tree, no scripted UI.
-if(APPLE AND NOT PULP_IOS AND EXISTS "${CMAKE_SOURCE_DIR}/planning/artifacts/native-ui/nv0/reports/generated/chainer-phase-f-hybrid.cpp")
+if(PULP_ENABLE_DESIGN_IMPORT AND APPLE AND NOT PULP_IOS AND EXISTS "${CMAKE_SOURCE_DIR}/planning/artifacts/native-ui/nv0/reports/generated/chainer-phase-f-hybrid.cpp")
     add_subdirectory(native-ui-phase-f-preview)
 endif()
 
@@ -87,15 +91,17 @@ if(NOT IOS)
     add_subdirectory(plugin-host-demo)
 endif()
 
-# AI Style Designer: JS-defined design tool with hot reload
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/design-tool/CMakeLists.txt)
+# AI Style Designer: JS-defined design tool with hot reload (design-import only)
+if(PULP_ENABLE_DESIGN_IMPORT AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/design-tool/CMakeLists.txt)
     add_subdirectory(design-tool)
 endif()
 
 # Design-import standalone: imports a figma-plugin .pulp.zip natively
 # (sprite-knob hoist) and renders it in a GPU window — launchable demo. The
 # default fixture is a private dev-only test design (not shipped).
-add_subdirectory(design-import-standalone)
+if(PULP_ENABLE_DESIGN_IMPORT)
+    add_subdirectory(design-import-standalone)
+endif()
 
 # TextEditor keyboard input test (Phase 21.1)
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/text-input-test/CMakeLists.txt)

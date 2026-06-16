@@ -4150,6 +4150,10 @@ endif()
 # Canvas tests
 pulp_add_test_suite(pulp-test-canvas-color LIBRARIES pulp::canvas)
 
+# Outset box-shadow coverage cache (Skia path). Test body is gated on
+# PULP_HAS_SKIA, which pulp::canvas propagates; without Skia it has zero cases.
+pulp_add_test_suite(pulp-test-box-shadow-cache LIBRARIES pulp::canvas)
+
 add_executable(pulp-test-canvas test_canvas.cpp)
 target_link_libraries(pulp-test-canvas PRIVATE pulp::canvas Catch2::Catch2WithMain)
 if(APPLE)
@@ -4830,6 +4834,14 @@ pulp_add_test_suite(pulp-test-text-input LIBRARIES pulp::view)
 
 # W3C Layout parity tests (flexbox, box model, visual properties)
 pulp_add_test_suite(pulp-test-layout-w3c LIBRARIES pulp::view)
+
+# W3C design-token runtime pair (parse/export) via the self-contained
+# w3c_tokens.hpp — stays always-compiled when design-import is gated.
+pulp_add_test_suite(pulp-test-w3c-tokens LIBRARIES pulp::view)
+
+# LottieView playback logic (opt-in PULP_LOTTIE). Passes whether or not Lottie
+# is compiled in: LottieView::supported() gates the playback assertions.
+pulp_add_test_suite(pulp-test-lottie-view LIBRARIES pulp::view)
 
 # Visual semantic snapshot harness. This is a custom-main Catch2 binary:
 # --self-test runs its focused tests, while --fixture emits a stable JSON

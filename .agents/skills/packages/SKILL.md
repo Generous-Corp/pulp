@@ -122,6 +122,11 @@ Pulp fetches, vendors, or redistributes it independently. Otherwise the audit
 will require standalone NOTICE/licensing rows for something whose license and
 distribution boundary are already covered by the parent prebuilt.
 
+Same rule for Skia *modules* (e.g. `skottie`/`sksg`, linked only when the opt-in
+`PULP_LOTTIE` CMake option is enabled): they ship inside the existing Skia
+prebuilt under the same Skia BSD-3-Clause entry — clarify their use in the Skia
+row of `DEPENDENCIES.md`, do **not** add a separate dependency/NOTICE entry.
+
 The Skia toolchain itself is pinned at `chrome/m149` via the
 `danielraffel/skia-builder` fork (see `tools/deps/manifest.json` →
 `determinism.skia_builder_fork`). The fork tracks upstream
