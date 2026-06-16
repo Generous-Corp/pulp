@@ -2003,6 +2003,12 @@ catch_discover_tests(pulp-test-events-timer-helpers PROPERTIES LABELS slow)
 
 # Audio file I/O tests
 pulp_add_test_suite(pulp-test-audio-file LIBRARIES pulp::audio)
+
+# Phase-vocoder offline time-stretch / pitch-shift.
+pulp_add_test_suite(pulp-test-phase-vocoder LIBRARIES pulp::signal)
+
+# Click-free soft-bypass wrapper.
+pulp_add_test_suite(pulp-test-soft-bypass LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-sample-resource
     SOURCES test_sample_resource.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::audio pulp::runtime)
