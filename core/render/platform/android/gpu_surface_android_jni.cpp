@@ -17,6 +17,8 @@
 #include <android/native_window_jni.h>
 #include <android/log.h>
 #include <stdexcept>
+#include <string>
+#include <vector>
 
 #define PULP_LOG_TAG "Pulp"
 #define PULP_LOGI(...) __android_log_print(ANDROID_LOG_INFO, PULP_LOG_TAG, __VA_ARGS__)
@@ -108,6 +110,35 @@ Java_com_pulp_render_PulpSurfaceView_nativeOnTouchUp(
 JNIEXPORT void JNICALL
 Java_com_pulp_render_PulpSurfaceView_nativeOnTouchCancel(JNIEnv*, jobject) {
     pulp::render::g_captured_view = nullptr;
+}
+
+// Native file drop — Kotlin's OnDragListener resolved the drag's ClipData
+// content URIs into absolute cache-file paths and passes them here with the
+// drop point (physical px). Forwards into the shared dispatch core.
+JNIEXPORT void JNICALL
+Java_com_pulp_render_PulpSurfaceView_nativeOnDrop(
+    JNIEnv* env, jobject, jobjectArray jpaths, jfloat x, jfloat y) {
+    std::vector<std::string> paths;
+    if (jpaths) {
+        const jsize n = env->GetArrayLength(jpaths);
+        paths.reserve(static_cast<size_t>(n));
+        for (jsize i = 0; i < n; ++i) {
+            auto js = static_cast<jstring>(env->GetObjectArrayElement(jpaths, i));
+            if (!js) continue;
+            if (const char* c = env->GetStringUTFChars(js, nullptr)) {
+                paths.emplace_back(c);
+                env->ReleaseStringUTFChars(js, c);
+            }
+            env->DeleteLocalRef(js);
+        }
+    }
+    try {
+        pulp::render::android_on_drop(paths, x, y);
+    } catch (const std::exception& e) {
+        PULP_LOGE("nativeOnDrop threw: %s", e.what());
+    } catch (...) {
+        PULP_LOGE("Unknown C++ exception in nativeOnDrop");
+    }
 }
 
 // ── Accessibility (TalkBack) ─────────────────────────────────────────────

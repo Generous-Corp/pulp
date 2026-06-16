@@ -288,6 +288,24 @@ cmake -S . -B build-android \
 cmake --build build-android -j$(sysctl -n hw.ncpu)
 ```
 
+**Android Skia must be built from source — there is NO prebuilt slice.** The
+`danielraffel/skia-builder` release fork ships ios / linux / mac slices but no
+`android` asset (verified at `chrome/m150` + `m149`). So unlike the other
+platforms (which `fetch_skia_for_release.py` downloads), Android Skia comes from:
+
+```bash
+export ANDROID_HOME=$HOME/Library/Android/sdk
+export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/<version>
+SKIA_BRANCH=chrome/m150 bash tools/build-skia-android.sh   # needs `ninja` on PATH
+# -> external/skia-build/android-gpu/lib/Release/*.a (gitignored; headers under
+#    external/skia-build/include/android/** ARE tracked). For the x86_64 emulator
+#    set ANDROID_ABI=x86_64 and FindSkia.cmake picks android-gpu-x86_64/.
+```
+
+`ninja: command not found` is the usual first failure (`brew install ninja`);
+`gn` is fetched by the script. `libdawn_combined.a` may come out as a tiny stub
+(WebGPU/Dawn for Android is a separate concern from the Skia raster libs).
+
 ### Build the APK
 
 ```bash
@@ -353,6 +371,34 @@ adb shell input swipe 200 400 200 300 300
 # Take screenshot after to verify state changed
 sleep 0.5 && adb exec-out screencap -p > /tmp/after-tap.png
 ```
+
+### Native drag-and-drop (inbound)
+
+`PulpSurfaceView` accepts dropped files and routes them into the C++ view
+tree's shared `dispatch_drop` core (the same core the mac/win/linux/iOS hosts
+use). The wiring mirrors touch:
+
+- **Kotlin** (`PulpSurfaceView.kt`): `setOnDragListener` → `ACTION_DRAG_STARTED`
+  accepts any drag with items; `ACTION_DROP` calls
+  `requestDragAndDropPermissions(event)` (needed to read another app's
+  `content://` URIs), copies each ClipData URI into `cacheDir/dropped/` via
+  `ContentResolver.openInputStream` (the C++ side needs filesystem paths —
+  `content://` URIs are not openable by path), then `nativeOnDrop(paths, x, y)`.
+- **JNI** (`gpu_surface_android_jni.cpp`): `nativeOnDrop` marshals the
+  `jobjectArray` of paths → `std::vector<std::string>` → `android_on_drop`.
+- **C++** (`gpu_surface_android.cpp`): `android_on_drop` converts px→dp (÷
+  `g_display_density`, like touch) and calls `dispatch_drop(*g_root_view, …)`.
+
+**Architecture note:** Android has NO `WindowHost`/`PluginViewHost` — the tree
+is the global `g_root_view` in `gpu_surface_android.cpp`. So inbound routes
+directly through `g_root_view`. **Outbound** (`View::start_file_drag` →
+`startDragAndDrop`) is NOT wired: it needs a host-owned drag path / a JNI
+up-call to Kotlin, since `View::start_file_drag` requires a host pointer that
+Android's bare `g_root_view` doesn't have. (Follow-up.)
+
+Emulator gesture test: drag a file from the Files app onto the Pulp window;
+watch `adb logcat -s Pulp` for the drop. The headless test suites can't exercise
+the OS drag gesture (same as touch).
 
 ### Logcat
 
