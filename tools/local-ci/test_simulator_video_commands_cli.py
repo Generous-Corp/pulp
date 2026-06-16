@@ -1,26 +1,19 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import importlib.util
 import json
 from argparse import Namespace
 from pathlib import Path
 import subprocess
-import sys
 import tempfile
 import unittest
 
 
-MODULE_PATH = Path(__file__).resolve().with_name("simulator_video_commands_cli.py")
+from module_test_utils import load_local_ci_module
 
 
 def load_module():
-    sys.path.insert(0, str(MODULE_PATH.parent))
-    spec = importlib.util.spec_from_file_location("simulator_video_commands_cli_under_test", MODULE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    return load_local_ci_module("simulator_video_commands_cli.py", add_module_dir=True)
 
 
 class SimulatorVideoCommandsTests(unittest.TestCase):

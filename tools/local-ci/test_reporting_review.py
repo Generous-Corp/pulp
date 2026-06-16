@@ -3,22 +3,17 @@
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import pathlib
 import tempfile
 import unittest
 
 
-MODULE_PATH = pathlib.Path(__file__).with_name("reporting_review.py")
+from module_test_utils import load_local_ci_module
 
 
 def load_module():
-    spec = importlib.util.spec_from_file_location("reporting_review_under_test", MODULE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    return load_local_ci_module("reporting_review.py", add_module_dir=True)
 
 
 class ReportingReviewTests(unittest.TestCase):

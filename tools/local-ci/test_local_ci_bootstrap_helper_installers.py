@@ -98,6 +98,7 @@ class LocalCiBootstrapHelperInstallersTests(unittest.TestCase):
             windows_probe_bindings=recorder("install_windows_probe_helpers", calls),
             desktop_probe_bindings=recorder("install_desktop_probe_helpers", calls),
             macos_desktop_bindings=recorder("install_macos_desktop_helpers", calls),
+            macos_video_bindings=recorder("install_macos_video_helpers", calls),
             windows_desktop_bindings=recorder("install_windows_desktop_helpers", calls),
         )
 
@@ -114,6 +115,7 @@ class LocalCiBootstrapHelperInstallersTests(unittest.TestCase):
                 "install_windows_probe_helpers",
                 "install_desktop_probe_helpers",
                 "install_macos_desktop_helpers",
+                "install_macos_video_helpers",
                 "install_windows_desktop_helpers",
             ],
         )

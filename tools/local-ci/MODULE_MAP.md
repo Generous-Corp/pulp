@@ -10,8 +10,23 @@ and the matching contract tests in the same change.
 | Module | Owns | Must not own |
 | --- | --- | --- |
 | `android_target.py` | Android SDK/NDK discovery, Android Gradle prerequisite checks, and debug APK build invocation metadata. | Queue orchestration, desktop automation, GitHub Actions dispatch, or cross-target validation execution. |
+| `android_video_commands_cli.py` | Android device/emulator video-proof capture CLI (record + compose mobile proof). | macOS/iOS capture, queue orchestration, or report publishing. |
 | `binding_utils.py` | Shared lookup helper for local_ci facade binding modules. | Facade export policy, target behavior, command dispatch, or queue mutation. |
+| `io_utils_design_parity.py` | Stdlib PNG codec and design-parity image diff summary. | Video recording, capture orchestration, or report publishing. |
+| `macos_desktop_action_video.py` | Video-only helpers for the macOS smoke flow (focus/marker summaries, reaper-recipe validation, pid/log waits). | Launch/capture sequencing or binding installation. |
+| `macos_desktop_smoke_video_dependency_bindings.py` | Video dependency callables for the macOS smoke facade. | Underlying recording logic or command dispatch. |
+| `macos_desktop_video.py` | macOS window video recording core (screencapture frames + AVFoundation, ffmpeg command, device pick, poster stats). | Window selection, terminal proof, or higher-level orchestration. |
+| `macos_terminal_proof.py` | Terminal.app proof launcher and scoped teardown for permission-inheriting capture. | Recording, ffmpeg, or window selection. |
+| `macos_terminal_runner.py` | --run-in-terminal re-entry runner for Screen Recording permission. | Recording or capture orchestration. |
+| `macos_video_bindings.py` | Installs macOS video-proof helpers into the local_ci facade with their injected dependencies. | Underlying recording/compose logic or command dispatch. |
+| `macos_window_video_select.py` | Window selection for recording (main vs floating editor, titled/secondary window waits). | Recording, capture, or ffmpeg. |
+| `mobile_video_composition.py` | Shared iOS/Android mobile video-proof compose path. | macOS capture or desktop orchestration. |
 | `module_test_utils.py` | Shared dynamic module loader for local-ci facade binding tests. | Production local-CI behavior, facade export policy, target behavior, command dispatch, or queue mutation. |
+| `pack_video_proof_tool.py` | Packs the video-proof tool add-on (zip + manifest + checksums). | Runtime recording or report publishing. |
+| `reaper_video_recipe.py` | Generates a REAPER launch/record recipe for plugin video proofs. | macOS capture orchestration or report publishing. |
+| `reporting_review.py` | GitHub review-issue body/package/draft and verdict commands for video proofs. | Recording, compose, or HTML report staging. |
+| `reporting_video.py` | Shared proof/video report helpers (focus/marker/storyboard summaries, artifact metadata, serve commands). | Recording, compose, or publish-branch mechanics. |
+| `simulator_video_commands_cli.py` | iOS Simulator video-proof capture CLI. | macOS/Android capture or queue orchestration. |
 | `state_paths.py` | State/config/log/bundle path resolution and state-directory creation. | Queue JSON contents, result schema, or target behavior. |
 | `state_path_bindings.py` | Compatibility installer for the `local_ci.py` state path facade exports while focused state path binding modules own direct wrapper delegation. | New state path binding behavior, state path behavior, queue JSON contents, result schema, or target behavior. |
 | `state_path_core_bindings.py` | Compatibility facade composing focused state/config and queue/result/evidence state path dependency bindings. | New state path binding behavior, artifact path behavior, lock path behavior, queue JSON contents, result schema, or target behavior. |
@@ -526,6 +541,7 @@ and the matching contract tests in the same change.
 | `macos_desktop_action_interaction.py` | macOS desktop-event interaction summary assembly for content/screen click points, activation payloads, dispatch payloads, and selector metadata. | macOS process launch policy, window/capture primitive implementations, manifest/action policy, source preparation, queue orchestration, or CLI command parsing. |
 | `macos_desktop_action_launch.py` | macOS desktop action launch-mode branching for bundle-id, app-bundle, and direct-command launches, including launch logs, direct-launch env injection, and returned launch descriptors. | Desktop-event interaction summary assembly, manifest assembly, macOS window/capture primitive implementations, source preparation, queue orchestration, or CLI command parsing. |
 | `macos_desktop_action_manifest.py` | macOS desktop action manifest assembly: labels, launch descriptors, base artifacts, before/diff artifacts, inspector summaries, and interaction summaries. | macOS process launch policy, window/capture primitive implementations, source preparation, queue orchestration, or CLI command parsing. |
+| `video_artifacts.py` | ffmpeg compose/focus-crop/issue-variant/mux, Remotion compose invocation, and ffmpeg resolution. | macOS window capture, window selection, or command dispatch. |
 | `windows_desktop_bindings.py` | Compatibility installer for Windows desktop action facade exports while focused Windows desktop binding modules own session-agent action dependency wiring. | New Windows desktop binding behavior, Windows target contract/probe policy, manifest/action policy, source preparation, or CLI command parsing. |
 | `windows_desktop_action_dependency_bindings.py` | Compatibility dependency facade composing focused Windows desktop action host/session, source/request, artifact/rollup, and interaction dependency groups. | New Windows desktop action dependency behavior, Windows desktop action execution behavior, Windows target contract/probe policy, manifest/action policy, source preparation, or CLI command parsing. |
 | `windows_desktop_action_host_dependency_bindings.py` | Dependency dictionary assembly for Windows desktop action host reachability, receipt/target contract, session-agent probe, session user, and timing seams. | Windows desktop action execution behavior, Windows source/request dependencies, artifact dependencies, interaction dependencies, or CLI command parsing. |

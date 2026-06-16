@@ -66,6 +66,7 @@ def install_desktop_helpers(
     windows_probe_bindings: Any,
     desktop_probe_bindings: Any,
     macos_desktop_bindings: Any,
+    macos_video_bindings: Any,
     windows_desktop_bindings: Any,
 ) -> None:
     desktop_support_bindings.install_desktop_support_helpers(bindings)
@@ -78,6 +79,7 @@ def install_desktop_helpers(
     windows_probe_bindings.install_windows_probe_helpers(bindings)
     desktop_probe_bindings.install_desktop_probe_helpers(bindings)
     macos_desktop_bindings.install_macos_desktop_helpers(bindings)
+    macos_video_bindings.install_macos_video_helpers(bindings)
     windows_desktop_bindings.install_windows_desktop_helpers(bindings)
 
 

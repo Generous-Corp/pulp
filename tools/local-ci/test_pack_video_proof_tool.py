@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import importlib.util
 import json
 from pathlib import Path
 import tempfile
@@ -11,15 +10,11 @@ import unittest
 import zipfile
 
 
-MODULE_PATH = Path(__file__).with_name("pack_video_proof_tool.py")
+from module_test_utils import load_local_ci_module
 
 
 def load_module():
-    spec = importlib.util.spec_from_file_location("pack_video_proof_tool_under_test", MODULE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    return load_local_ci_module("pack_video_proof_tool.py", add_module_dir=True)
 
 
 class PackVideoProofToolTests(unittest.TestCase):

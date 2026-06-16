@@ -46,9 +46,20 @@ class MacosDesktopSmokeBindingsTests(unittest.TestCase):
             "time": types.SimpleNamespace(sleep=object()),
             "shlex": types.SimpleNamespace(split=object()),
             "os": types.SimpleNamespace(environ=types.SimpleNamespace(copy=object())),
+            "Path": types.SimpleNamespace(cwd=object()),
         }
         for name in [
             "create_desktop_run_bundle",
+            "wait_for_macos_bundle_window_title",
+            "wait_for_macos_bundle_secondary_window",
+            "launch_macos_terminal_proof_command",
+            "close_macos_terminal_windows_with_title",
+            "start_macos_window_video_recording",
+            "stop_macos_window_video_recording",
+            "mux_desktop_video_audio",
+            "generate_interaction_focus",
+            "compose_desktop_video_proof",
+            "create_issue_video_variant",
             "macos_accessibility_trusted",
             "now_iso",
             "prepare_macos_exact_sha_source",
@@ -92,6 +103,9 @@ class MacosDesktopSmokeBindingsTests(unittest.TestCase):
             settle_secs=0.25,
             timeout_secs=1.0,
             source_request={"mode": "current"},
+            record_video=True,
+            video_focus="off",
+            video_duration_secs=4.0,
         )
 
         self.assertEqual(result, {"ok": True})
@@ -102,6 +116,14 @@ class MacosDesktopSmokeBindingsTests(unittest.TestCase):
         self.assertIs(captured["kwargs"]["wait_for_macos_window_fn"], bindings["wait_for_macos_window"])
         self.assertIs(captured["kwargs"]["capture_macos_window_fn"], bindings["capture_macos_window"])
         self.assertIs(captured["kwargs"]["terminate_process_fn"], bindings["terminate_process"])
+        self.assertTrue(captured["kwargs"]["record_video"])
+        self.assertEqual(captured["kwargs"]["video_focus"], "off")
+        self.assertEqual(captured["kwargs"]["video_duration_secs"], 4.0)
+        self.assertIs(
+            captured["kwargs"]["start_macos_window_video_recording_fn"],
+            bindings["start_macos_window_video_recording"],
+        )
+        self.assertIs(captured["kwargs"]["cwd_path_fn"], bindings["Path"].cwd)
 
 
 if __name__ == "__main__":

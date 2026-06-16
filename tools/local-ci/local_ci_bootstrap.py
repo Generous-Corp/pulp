@@ -27,6 +27,7 @@ import local_ci_bootstrap_module_aliases as _local_ci_bootstrap_module_aliases
 import local_ci_bootstrap_private_seams as _local_ci_bootstrap_private_seams
 import local_ci_command_bindings as _local_ci_command_bindings
 import macos_desktop_bindings as _macos_desktop_bindings
+import macos_video_bindings as _macos_video_bindings
 import macos_window_bindings as _macos_window_bindings
 import notification_bindings as _notification_bindings
 import normalize_bindings as _normalize_bindings
@@ -94,6 +95,7 @@ def install_local_ci_facade(bindings: dict) -> None:
         windows_probe_bindings=_windows_probe_bindings,
         desktop_probe_bindings=_desktop_probe_bindings,
         macos_desktop_bindings=_macos_desktop_bindings,
+        macos_video_bindings=_macos_video_bindings,
         windows_desktop_bindings=_windows_desktop_bindings,
     )
 

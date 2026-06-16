@@ -1,26 +1,21 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
 import tempfile
 import unittest
 
 
-MODULE_PATH = Path(__file__).resolve().with_name("reaper_video_recipe.py")
+from module_test_utils import load_local_ci_module
 
 
-def load_reaper_video_recipe_module():
-    spec = importlib.util.spec_from_file_location("reaper_video_recipe_under_test", MODULE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+def load_module():
+    return load_local_ci_module("reaper_video_recipe.py", add_module_dir=True)
 
 
 class ReaperVideoRecipeTests(unittest.TestCase):
     def setUp(self):
-        self.mod = load_reaper_video_recipe_module()
+        self.mod = load_module()
 
     def test_plugin_candidates_include_reaper_prefixes(self):
         self.assertEqual(

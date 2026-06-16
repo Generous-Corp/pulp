@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
 import subprocess
 import tempfile
@@ -9,20 +8,16 @@ import unittest
 from unittest import mock
 
 
-MODULE_PATH = Path(__file__).resolve().with_name("macos_terminal_runner.py")
+from module_test_utils import load_local_ci_module
 
 
-def load_macos_terminal_runner_module():
-    spec = importlib.util.spec_from_file_location("macos_terminal_runner_under_test", MODULE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+def load_module():
+    return load_local_ci_module("macos_terminal_runner.py", add_module_dir=True)
 
 
 class MacOSTerminalRunnerTests(unittest.TestCase):
     def setUp(self):
-        self.mod = load_macos_terminal_runner_module()
+        self.mod = load_module()
 
     def test_strip_and_reentry_guard(self):
         self.assertEqual(

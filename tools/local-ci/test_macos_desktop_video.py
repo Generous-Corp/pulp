@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import importlib.util
 import json
 from pathlib import Path
 import subprocess
@@ -14,15 +13,11 @@ import unittest
 import zlib
 
 
-MODULE_PATH = Path(__file__).with_name("macos_desktop_video.py")
+from module_test_utils import load_local_ci_module
 
 
 def load_module():
-    spec = importlib.util.spec_from_file_location("macos_desktop_video_under_test", MODULE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    return load_local_ci_module("macos_desktop_video.py", add_module_dir=True)
 
 
 def write_rgb_png(path: Path, width: int, height: int, pixels: list[tuple[int, int, int]]) -> None:
