@@ -8,6 +8,7 @@
 #include <istream>
 #include <memory>
 #include <streambuf>
+#include <vector>
 
 namespace pulp::audio {
 
@@ -54,6 +55,11 @@ struct MemoryMappedAudioReader::RangedState {
     std::shared_ptr<std::istream> stream;
     std::unique_ptr<choc::audio::AudioFileReader> reader;
     std::optional<AudioFileData> fallback;  // lazy whole-file decode (non-ranged path)
+    // Planar scratch for channel-subset ranged reads (choc requires the view's
+    // channel count to match the file exactly, so a mono-from-stereo read decodes
+    // all file channels here then copies the requested prefix). Reused per call.
+    std::vector<float> subset_scratch;
+    std::vector<float*> subset_ptrs;
 
     RangedState(const char* base, std::size_t size) : buf(base, size) {
         stream = std::make_shared<std::istream>(&buf);
@@ -127,10 +133,35 @@ bool MemoryMappedAudioReader::read_frames(float** dest_channels, uint32_t num_ch
 
     // Ranged path: decode only [start, start+count) via the seeking reader.
     if (supports_ranged_read()) {
-        auto view = choc::buffer::createChannelArrayView<float>(
-            dest_channels, ch_count, static_cast<choc::buffer::FrameCount>(count));
-        if (ranged_->reader->readFrames(start, view))
-            return true;
+        const auto fcount = static_cast<choc::buffer::FrameCount>(count);
+        if (ch_count == info_.num_channels) {
+            // Exact channel match: decode straight into the caller's buffers.
+            auto view = choc::buffer::createChannelArrayView<float>(
+                dest_channels, ch_count, fcount);
+            if (ranged_->reader->readFrames(start, view))
+                return true;
+        } else {
+            // Channel subset (e.g. mono from a stereo file): choc requires the
+            // view's channel count to equal the file's, so decode all file
+            // channels into scratch then copy the requested prefix. Still a true
+            // ranged decode — no whole-file read, so supports_ranged_read() stays
+            // honest for sub-channel callers (a normal sample-library operation).
+            auto& rs = *ranged_;
+            const std::size_t fch = info_.num_channels;
+            rs.subset_scratch.assign(fch * static_cast<std::size_t>(count), 0.0f);
+            rs.subset_ptrs.resize(fch);
+            for (std::size_t c = 0; c < fch; ++c)
+                rs.subset_ptrs[c] =
+                    rs.subset_scratch.data() + c * static_cast<std::size_t>(count);
+            auto view = choc::buffer::createChannelArrayView<float>(
+                rs.subset_ptrs.data(), info_.num_channels, fcount);
+            if (rs.reader->readFrames(start, view)) {
+                for (uint32_t c = 0; c < ch_count; ++c)
+                    std::copy(rs.subset_ptrs[c],
+                              rs.subset_ptrs[c] + count, dest_channels[c]);
+                return true;
+            }
+        }
         // A seek/read failure falls through to the whole-file decode below.
     }
 
@@ -147,9 +178,18 @@ bool MemoryMappedAudioReader::read_frames(float** dest_channels, uint32_t num_ch
     const uint32_t fb_ch = std::min(ch_count, data.num_channels());
     const uint64_t fb_avail = start < data.num_frames() ? data.num_frames() - start : 0;
     const uint64_t fb_count = std::min(count, fb_avail);
-    for (uint32_t c = 0; c < fb_ch; ++c)
-        for (uint64_t f = 0; f < fb_count; ++f)
+    for (uint32_t c = 0; c < ch_count; ++c) {
+        const uint64_t copy = (c < fb_ch) ? fb_count : 0;
+        for (uint64_t f = 0; f < copy; ++f)
             dest_channels[c][f] = data.channels[c][static_cast<std::size_t>(start + f)];
+        // Zero whatever the fallback couldn't supply within [0, count). A header
+        // that over-reports the frame count (MP3 frame estimates are a common
+        // case) decodes fewer frames than `count`, and a file with fewer channels
+        // than requested supplies none for the surplus — without this the caller's
+        // buffer would be returned partly uninitialized as audio.
+        if (copy < count)
+            std::fill(dest_channels[c] + copy, dest_channels[c] + count, 0.0f);
+    }
     return true;
 }
 

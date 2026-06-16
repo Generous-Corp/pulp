@@ -104,6 +104,43 @@ TEST_CASE("MemoryMappedAudioReader ranged read of a WAV", "[audio][mmap][ranged]
         }
     }
 
+    // Sub-channel (mono-from-stereo) reads must stay on the ranged path (no
+    // whole-file decode) — a normal sample-library operation. choc requires the
+    // view's channel count to match the file, so the reader decodes both file
+    // channels into scratch and copies the requested channel-0 prefix.
+    auto read_mono_at = [&](std::uint64_t start, std::uint64_t n) {
+        std::vector<float> m(n, 999.0f);
+        float* dst[1] = {m.data()};
+        REQUIRE(r.read_frames(dst, 1, start, n));
+        return m;
+    };
+
+    SECTION("mono subset read of a stereo file matches channel 0") {
+        REQUIRE(r.supports_ranged_read());  // subset reads do NOT defeat ranged
+        const std::uint64_t start = 4321;
+        auto m = read_mono_at(start, 600);
+        for (std::uint64_t i = 0; i < 600; ++i)
+            REQUIRE(approx(m[i], expected_sample(start + i, 0)));
+    }
+
+    SECTION("mono subset read across EOF zero-fills the tail") {
+        const std::uint64_t start = total - 50;
+        auto m = read_mono_at(start, 300);  // 50 real + 250 past EOF
+        for (std::uint64_t i = 0; i < 50; ++i)
+            REQUIRE(approx(m[i], expected_sample(start + i, 0)));
+        for (std::uint64_t i = 50; i < 300; ++i)
+            REQUIRE(m[i] == 0.0f);
+    }
+
     r.close();
     std::remove(path.c_str());
 }
+
+// Note on the whole-file fallback path (read_frames when supports_ranged_read()
+// is false, or a seek/read fails): it is reachable only for formats the WAV
+// ranged reader can't seek (e.g. MP3, whose header frame count is an estimate
+// that can exceed the decoded length — the case the fallback's defensive
+// zero-fill of the uncovered [decoded, requested) region guards against). The
+// test harness can only write WAV, which always takes the ranged path, so that
+// branch is not unit-tested here; it is exercised by integration use and held
+// correct by review. If a non-WAV writer is added, add a fallback-gap fixture.

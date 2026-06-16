@@ -42,6 +42,10 @@ public:
     /// whole-file decode). Returns false on error. Frames past end-of-file are
     /// zero-filled. RT note: this performs decode/copy work, so it is for the
     /// control / background-reader thread, never the audio callback.
+    /// Not thread-safe: the persistent ranged reader carries a single seek
+    /// position plus lazily-initialized scratch/fallback state, so concurrent
+    /// calls on one instance race. Serialize calls (one streaming reader thread
+    /// per reader), or use one MemoryMappedAudioReader per thread.
     bool read_frames(float** dest_channels, uint32_t num_channels,
                      uint64_t start_frame, uint64_t num_frames);
 
