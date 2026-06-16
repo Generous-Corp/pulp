@@ -824,6 +824,46 @@ a rect (x,y,w,h) + `options`/`selected_index`/`placeholder`.
   fully opaque, NOT 47%. Build alpha variants with `Color::rgba(r, g, b, 0.26f)`.
   All in `DesignFrameView` (`core/view/src/design_frame_view.cpp`).
 
+### Re-importing a design revision (round-trip)
+
+Designers WILL revise a frame and expect the change to flow back into Pulp.
+The round-trip is **figma frame → `figma_rest_export.py` → embed**, and the
+canonical source of the faithful frame is the **figma node**, NOT a design-system
+export folder. Hard-won steps (from re-importing the MTK after an even-spacing fix):
+
+1. **Find the source node.** It's in the embed's provenance header (e.g.
+   `musical_typing_keyboard_svg.cpp`: "Figma file `<key>` node `<id>`"). A
+   design-system HTML/CSS export folder (tokens, components, `*.html`) does NOT
+   contain the detailed frame SVG — only a schematic. Don't try to source the
+   faithful SVG from it.
+2. **If the node still returns the OLD design, the revision lives elsewhere.** A
+   byte-identical re-export means the figma node wasn't the thing edited (the
+   designer changed a different node, or only the HTML/CSS kit). Either get the
+   updated node's URL, or update the figma node yourself from the canonical spec
+   (see step 3), then export.
+3. **Map CSS intent → figma layout.** A folder's `flex` even-spacing
+   (`.mtk-keys { display:flex; padding:6px; gap:0 }`, keys `flex:1`) is NOT a
+   one-value figma fix. Figma auto-layout beds with FIXED-width, MIN-aligned
+   children + ABSOLUTE overlays need: symmetric padding **and** the flow children
+   set to fill (`resize` to `content/n`) **and** the absolute overlays
+   repositioned onto the new boundaries (`use_figma`). Verify with a figma
+   `get_screenshot` of the bed before exporting.
+4. **Export + regenerate the embed.** `figma_rest_export.py --file-key … --node …
+   --out scene.pulp.json --faithful-vector`. The frame SVG lands in the scene's
+   `asset_manifest` as `frame-svg-<node>` → an `assets/<hash>.svg` file (NOT an
+   inline JSON field). Base64-chunk it (≤8000 chars/literal) into the embed cpp,
+   matching the existing `kParts[]`+join format.
+5. **Re-extract interactive rects.** Geometry shifts on any spacing change. Re-run
+   the hit-rect extraction (path bounding boxes from the new SVG) and update the
+   element tables; positional index is NOT stable across a re-export.
+6. **Neutralize baked pressed/selected states.** A revision may bake a demo
+   "pressed" key (a teal gradient like `paint36`). For the interactive widget,
+   rewrite that gradient's stops to the resting fill (`#EBEEF1`→`white`) so the
+   live overlay owns every highlight — otherwise the widget shows a stuck-lit key.
+7. **Verify headless both ways.** Resting render: even spacing, no stuck keys. Lit
+   render: overlay lands exactly on the new key positions with the design's
+   pressed gradient.
+
 The `pulp-design-import-standalone` example has demo flags to capture overlay states
 headlessly: `--focus-search` (focus ring) and `--open-dropdown=SUBSTR` (opens
 the matching ComboBox's popup). Use `--raster=out.png` (Skia) not `--screenshot`
