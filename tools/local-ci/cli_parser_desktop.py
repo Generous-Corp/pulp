@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 
+from cli_parser_video import add_desktop_video_args
+
 
 def add_desktop_source_args(command_parser: argparse.ArgumentParser) -> None:
     command_parser.add_argument(
@@ -107,6 +109,7 @@ def add_desktop_subcommands(sub: argparse._SubParsersAction) -> None:
     p_desktop_smoke.add_argument("--settle-secs", type=float, default=0.5, help="Seconds to wait after an interaction before the final screenshot (default: 0.5)")
     p_desktop_smoke.add_argument("--timeout", type=float, default=15.0, help="Wait timeout in seconds (default: 15)")
     p_desktop_smoke.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+    add_desktop_video_args(p_desktop_smoke)
     add_desktop_source_args(p_desktop_smoke)
 
     p_desktop_click = desktop_sub.add_parser("click", help="Launch an app, perform one click interaction, and capture before/after evidence")
@@ -129,6 +132,7 @@ def add_desktop_subcommands(sub: argparse._SubParsersAction) -> None:
     p_desktop_click.add_argument("--settle-secs", type=float, default=0.5, help="Seconds to wait after the interaction before the final screenshot (default: 0.5)")
     p_desktop_click.add_argument("--timeout", type=float, default=15.0, help="Wait timeout in seconds (default: 15)")
     p_desktop_click.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+    add_desktop_video_args(p_desktop_click)
     add_desktop_source_args(p_desktop_click)
 
     p_desktop_inspect = desktop_sub.add_parser("inspect", help="Launch an app and capture screenshot + available UI state")

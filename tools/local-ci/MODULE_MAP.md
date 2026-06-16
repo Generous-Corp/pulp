@@ -12,6 +12,7 @@ and the matching contract tests in the same change.
 | `android_target.py` | Android SDK/NDK discovery, Android Gradle prerequisite checks, and debug APK build invocation metadata. | Queue orchestration, desktop automation, GitHub Actions dispatch, or cross-target validation execution. |
 | `android_video_commands_cli.py` | Android device/emulator video-proof capture CLI (record + compose mobile proof). | macOS/iOS capture, queue orchestration, or report publishing. |
 | `binding_utils.py` | Shared lookup helper for local_ci facade binding modules. | Facade export policy, target behavior, command dispatch, or queue mutation. |
+| `cli_parser_video.py` | Video-proof argument group (--record-video / --video-* / --capture-bundle-id) for the desktop smoke/click subcommands. | Argument dispatch, command execution, or video recording logic. |
 | `io_utils_design_parity.py` | Stdlib PNG codec and design-parity image diff summary. | Video recording, capture orchestration, or report publishing. |
 | `macos_desktop_action_video.py` | Video-only helpers for the macOS smoke flow (focus/marker summaries, reaper-recipe validation, pid/log waits). | Launch/capture sequencing or binding installation. |
 | `macos_desktop_smoke_video_dependency_bindings.py` | Video dependency callables for the macOS smoke facade. | Underlying recording logic or command dispatch. |
