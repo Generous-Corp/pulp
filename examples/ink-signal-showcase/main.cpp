@@ -522,6 +522,26 @@ void advance_anims(View* v, float dt) {
         y += 162.0f;
     }
 
+    // ── Waveform recorder — armed · recording · captured ──────────────────
+    section("Waveform recorder — armed \xc2\xb7 recording \xc2\xb7 captured");
+    {
+        const char* labels[] = {"ARMED \xc2\xb7 threshold-armed", "RECORDING \xc2\xb7 press to stop",
+                                "CAPTURED \xc2\xb7 ready to play"};
+        WaveformRecorder::State states[] = {WaveformRecorder::State::armed,
+                                            WaveformRecorder::State::recording,
+                                            WaveformRecorder::State::captured};
+        for (int i = 0; i < 3; ++i) {
+            auto wr = std::make_unique<WaveformRecorder>();
+            wr->set_waveform(demo_wave());
+            wr->set_state(states[i]);
+            wr->set_level(i == 1 ? 0.82f : 0.4f);
+            wr->set_threshold(0.3f);
+            add(std::move(wr), kMargin, y, kContentW, 130.0f);
+            label(labels[i], kMargin, y + 134.0f, 280.0f, 11.0f);
+            y += 158.0f;
+        }
+    }
+
     // ── Buttons & inputs — Search · TextArea · NumberBox ───────────────
     section("Buttons & inputs — Search · Number · TextArea");
     {
