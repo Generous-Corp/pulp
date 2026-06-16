@@ -471,7 +471,7 @@ private:
     // a wall-clock deadline so a buggy/unresponsive target can never wedge the
     // grabbed pointer. Returns true if a target accepted the drop.
     bool run_xdnd_source(const FileDragRequest& request) {
-        if (!display_ || !child_ || !request.valid()) return false;
+        if (!display_ || !child_ || request.file_paths.empty()) return false;
         const std::string uri_list = xdnd::build_uri_list(request.file_paths);
         if (uri_list.empty()) return false;
 

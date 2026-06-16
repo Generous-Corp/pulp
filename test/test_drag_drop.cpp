@@ -601,3 +601,48 @@ TEST_CASE("start_file_drag hands off to the platform backend when a host has a "
     req.display_name = "frozen loop";
     REQUIRE_FALSE(v.start_file_drag(req));  // no event context outside a drag
 }
+
+namespace {
+// A host that owns its outbound drag (the Windows OLE / Linux XDND shape):
+// start_file_drag() is overridden and reports success, so View::start_file_drag
+// must short-circuit to it and never fall through to the free begin_file_drag
+// backend (whose native-view requirement this host deliberately does not meet).
+class OutboundDragHost : public StubPluginViewHost {
+public:
+    OutboundDragHost() : StubPluginViewHost(nullptr) {}  // no native view on purpose
+    bool start_file_drag(const FileDragRequest& request) override {
+        last_request_paths = request.file_paths;
+        ++calls;
+        return true;  // host handled the drag itself
+    }
+    int calls = 0;
+    std::vector<std::string> last_request_paths;
+};
+} // namespace
+
+TEST_CASE("start_file_drag prefers the host's own outbound backend (win/linux)",
+          "[view][dnd][file-drag]") {
+    OutboundDragHost host;
+    View v;
+    v.set_plugin_view_host(&host);
+    FileDragRequest req;
+    req.file_paths = {"/tmp/frozen.wav", "/tmp/take2.wav"};
+    req.display_name = "frozen loop";
+
+    // Host-owned path taken: returns true even though the host has NO native
+    // view (the free begin_file_drag fallback would have failed on the null
+    // handle). Proves the host method is consulted first and short-circuits.
+    REQUIRE(v.start_file_drag(req));
+    REQUIRE(host.calls == 1);
+    REQUIRE(host.last_request_paths == req.file_paths);
+}
+
+TEST_CASE("start_file_drag with empty files never consults the host backend",
+          "[view][dnd][file-drag]") {
+    OutboundDragHost host;
+    View v;
+    v.set_plugin_view_host(&host);
+    FileDragRequest empty;  // no file_paths
+    REQUIRE_FALSE(v.start_file_drag(empty));
+    REQUIRE(host.calls == 0);  // early-out precedes host dispatch
+}

@@ -356,7 +356,7 @@ private:
 // Run an outbound file drag on the calling (UI) thread. Returns true if the OS
 // completed a copy/link drop. Blocks until the drag ends (standard DoDragDrop).
 inline bool win_start_file_drag(const FileDragRequest& request) {
-    if (!request.valid()) return false;
+    if (request.file_paths.empty()) return false;
     HGLOBAL hdrop = make_hdrop_global(request.file_paths);
     if (!hdrop) return false;
 
