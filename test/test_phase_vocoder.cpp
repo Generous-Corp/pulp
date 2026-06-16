@@ -110,3 +110,33 @@ TEST_CASE("PhaseVocoder pitch-shift preserves length, changes pitch",
         REQUIRE(out.size() == n);
     }
 }
+
+TEST_CASE("PhaseVocoder time-stretch honors the exact length contract at the edges",
+          "[signal][phasevocoder]") {
+    PhaseVocoder pv;  // default fft_size 2048
+
+    SECTION("input shorter than one FFT frame still hits target length") {
+        // Regression: a sub-frame input used to be returned unchanged, breaking
+        // the round(n_in * factor) length contract a caller sizes buffers off.
+        const std::vector<float> tiny(500, 0.25f);  // < 2048
+        REQUIRE(pv.time_stretch(tiny, 2.0).size() == 1000);
+        REQUIRE(pv.time_stretch(tiny, 0.5).size() == 250);
+    }
+
+    SECTION("a factor that rounds the output to zero returns an empty buffer") {
+        // Regression: target == 0 used to skip the resize and return the full
+        // internal overlap-add buffer instead of an empty result.
+        const std::vector<float> tiny(10, 1.0f);
+        REQUIRE(pv.time_stretch(tiny, 0.001).empty());          // sub-frame path
+        const auto sine_in = sine(440.0, 44100.0, 4096);        // >= one frame
+        REQUIRE(pv.time_stretch(sine_in, 1e-6).empty());        // framed path
+    }
+
+    SECTION("an absurd factor is clamped, not allowed to allocate gigabytes") {
+        // Regression: an unbounded factor computed an astronomical target and
+        // threw bad_alloc. The factor is clamped to kMaxStretch (100x).
+        const auto in = sine(440.0, 44100.0, 4096);
+        const auto out = pv.time_stretch(in, 1e9);
+        REQUIRE(out.size() == in.size() * 100);  // clamped to 100x, no crash
+    }
+}

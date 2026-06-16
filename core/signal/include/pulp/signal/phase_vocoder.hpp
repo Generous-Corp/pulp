@@ -51,19 +51,34 @@ public:
 
     const PhaseVocoderConfig& config() const noexcept { return config_; }
 
-    /// Time-stretch @p input by @p factor (> 0). Output is ~factor times as long
-    /// as the input and keeps the same pitch. factor == 1 is ~identity.
+    /// Time-stretch @p input by @p factor (> 0). Output is exactly
+    /// round(input.size() * factor) frames long and keeps the same pitch.
+    /// factor == 1 is ~identity. @p factor is clamped to a sane maximum
+    /// (kMaxStretch) so an absurd value can't request a multi-gigabyte buffer.
     std::vector<float> time_stretch(const std::vector<float>& input,
                                     double factor) const {
         const int N = fft_size_;
         if (input.empty() || factor <= 0.0 || N <= 1) return input;
+        // Guard against an absurd factor allocating gigabytes — a 100x stretch is
+        // already far past any musical use. Clamp rather than throw bad_alloc.
+        factor = std::min(factor, kMaxStretch());
+
+        const std::size_t n_in = input.size();
+        // Exact length contract: every path returns round(n_in * factor) frames.
+        const std::size_t target = static_cast<std::size_t>(
+            std::lround(static_cast<double>(n_in) * factor));
 
         const int Hs = synthesis_hop_;
         int Ha = static_cast<int>(std::lround(static_cast<double>(Hs) / factor));
         Ha = std::max(1, Ha);
 
-        const std::size_t n_in = input.size();
-        if (n_in < static_cast<std::size_t>(N)) return input;  // too short to frame
+        if (n_in < static_cast<std::size_t>(N)) {
+            // Too short to form even one analysis frame — no phase-vocoder pitch
+            // preservation is possible below one FFT frame. Honor the length
+            // contract by linear-resampling to the target (resample_linear
+            // returns an empty buffer when target == 0).
+            return resample_linear(input, target);
+        }
 
         const int num_frames =
             static_cast<int>((n_in - static_cast<std::size_t>(N)) / Ha) + 1;
@@ -118,10 +133,9 @@ public:
 
         // Deliver exactly round(n_in * factor) frames: trim the overlap-add
         // tail, or zero-pad when the framed output falls a hop short (so callers
-        // can size a destination buffer off round(n_in * factor)).
-        const std::size_t target = static_cast<std::size_t>(
-            std::lround(static_cast<double>(n_in) * factor));
-        if (target > 0) out.resize(target, 0.0f);
+        // can size a destination buffer off round(n_in * factor)). resize(0) is
+        // well-defined and yields the correct empty buffer for a tiny factor.
+        out.resize(target, 0.0f);
         return out;
     }
 
@@ -142,6 +156,9 @@ public:
 private:
     static constexpr double kPi() { return 3.14159265358979323846; }
     static constexpr double kTwoPi() { return 2.0 * kPi(); }
+    // Upper bound on the stretch factor — caps output allocation at 100x the
+    // input so a pathological factor can't request a multi-gigabyte buffer.
+    static constexpr double kMaxStretch() { return 100.0; }
 
     // Nearest power of two >= 2 (rounds down on a tie).
     static int round_to_pow2(int n) {

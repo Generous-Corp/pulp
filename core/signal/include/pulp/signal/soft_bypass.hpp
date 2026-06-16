@@ -37,6 +37,9 @@ public:
     SoftBypass() = default;
     explicit SoftBypass(Processor processor) : processor_(std::move(processor)) {}
 
+    /// Access the wrapped processor. SoftBypass forwards reset() but NOT
+    /// prepare()/sample-rate setup — a wrapped processor that needs preparation
+    /// must be prepared through this accessor before use.
     Processor& processor() noexcept { return processor_; }
     const Processor& processor() const noexcept { return processor_; }
 
