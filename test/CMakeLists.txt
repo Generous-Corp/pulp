@@ -2016,6 +2016,9 @@ pulp_add_test_suite(pulp-test-sample-resource
 # AudioThumbnail + AudioThumbnailCache (item 6.12).
 # Links pulp::view so the WaveformView integration smoke compiles.
 pulp_add_test_suite(pulp-test-audio-thumbnail LIBRARIES pulp::audio pulp::view)
+
+# Memory-mapped reader: true ranged (seek-based) decode, no whole-file decode.
+pulp_add_test_suite(pulp-test-mmap-reader-ranged LIBRARIES pulp::audio)
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/sampler_runtime_tests.cmake")
 # WAV metadata round-trip tests (BWAV / iXML / ASWG / ACID — item 6.11)
 pulp_add_test_suite(pulp-test-wav-metadata LIBRARIES pulp::audio)
