@@ -90,15 +90,22 @@ void SkiaCanvas::draw_box_shadow(float x, float y, float w, float h,
 
                 sk_sp<SkImage> coverage =
                     cache.get_or_render(key, [&]() -> sk_sp<SkImage> {
-                        // Clamp before the int cast: an extreme scale would make
-                        // width*scale overflow to inf, and static_cast<int>(inf)
-                        // is UB. A too-large surface simply fails to allocate
-                        // below and falls through to the direct path.
+                        // Bail (→ direct path) rather than clamp the device size:
+                        // clamping width*scale to the max would allocate a
+                        // truncated coverage image that drawImageRect then
+                        // stretches across the full dst, squishing the shadow.
+                        // Returning nullptr makes the caller fall through to the
+                        // direct (uncached) path so output stays correct. The
+                        // comparison also rejects inf/NaN (an extreme scale),
+                        // which would otherwise be UB in the int cast below.
                         constexpr float kMaxCoveragePx = 16384.0f;
-                        const int pw = std::max(1, static_cast<int>(std::ceil(
-                            std::min(shadow_rect.width() * scale, kMaxCoveragePx))));
-                        const int ph = std::max(1, static_cast<int>(std::ceil(
-                            std::min(shadow_rect.height() * scale, kMaxCoveragePx))));
+                        const float want_w = std::ceil(shadow_rect.width() * scale);
+                        const float want_h = std::ceil(shadow_rect.height() * scale);
+                        if (!(want_w > 0.0f) || !(want_h > 0.0f) ||
+                            want_w > kMaxCoveragePx || want_h > kMaxCoveragePx)
+                            return nullptr;
+                        const int pw = static_cast<int>(want_w);
+                        const int ph = static_cast<int>(want_h);
                         SkImageInfo info =
                             SkImageInfo::MakeN32Premul(pw, ph, SkColorSpace::MakeSRGB());
                         sk_sp<SkSurface> surf = SkSurfaces::Raster(info);

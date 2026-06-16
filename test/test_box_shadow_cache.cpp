@@ -58,6 +58,13 @@ TEST_CASE("box shadow cache matches the direct path within tolerance",
     const int worst = max_abs_diff(reference, cached);
     CAPTURE(mean, worst);
     REQUIRE(mean < 2.5);
+    // Also bound the worst single-pixel deviation: a mean-only check hides edge
+    // resampling error from the cached path's linear blit. At scale 1.0 the
+    // cached coverage is blitted 1:1 (observed worst is ~1/255); the margin
+    // tolerates cross-platform AA rounding while still catching a gross
+    // divergence (a squished oversized render or a wrong-key collision would
+    // push this into the hundreds).
+    REQUIRE(worst < 16);
 }
 
 TEST_CASE("moving shadow re-blits without re-blurring", "[canvas][shadow][cache]") {

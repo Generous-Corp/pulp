@@ -24,6 +24,7 @@
 
 #ifdef PULP_HAS_SKIA
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -55,6 +56,13 @@ struct BoxShadowKey {
     }
 
     static std::int32_t q(float v) noexcept {
+        // static_cast<int32_t> of a non-finite or out-of-range float is UB, and
+        // a parsed/animated shadow param can reach inf/NaN. Map non-finite to a
+        // fixed bucket and clamp so the *4 and the cast can't overflow int32.
+        if (!std::isfinite(v)) return 0;
+        constexpr float kLimit = 4.0e8f;  // /4 ≈ 1e8, well inside int32 range
+        if (v > kLimit) v = kLimit;
+        else if (v < -kLimit) v = -kLimit;
         return static_cast<std::int32_t>(v * 4.0f + (v < 0 ? -0.5f : 0.5f));
     }
 };
