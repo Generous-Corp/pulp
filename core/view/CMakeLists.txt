@@ -736,7 +736,12 @@ elseif(UNIX)
         target_sources(pulp-view-core PRIVATE src/screenshot_skia.cpp)
         find_package(X11)
         if(X11_FOUND)
-            target_sources(pulp-view-core PRIVATE platform/linux/plugin_view_host_linux.cpp)
+            target_sources(pulp-view-core PRIVATE
+                platform/linux/plugin_view_host_linux.cpp
+                # Standalone outbound file-drag backend (free begin_file_drag via
+                # XDND source). Gated with PULP_HAS_X11 so the drag_drop.cpp no-op
+                # drops out only when this real backend is compiled.
+                platform/linux/drag_drop_linux.cpp)
             target_link_libraries(pulp-view-core PRIVATE ${X11_LIBRARIES})
             target_include_directories(pulp-view-core PRIVATE ${X11_INCLUDE_DIR})
             target_compile_definitions(pulp-view-core PRIVATE PULP_HAS_X11=1)
