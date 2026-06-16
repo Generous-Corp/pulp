@@ -387,12 +387,15 @@ void advance_anims(View* v, float dt) {
 
         auto kb = std::make_unique<MusicalTypingKeyboard>();
         MusicalTypingKeyboard* kbp = kb.get();
-        // Map a typing-key semitone (0..17, relative to C) to a readable name.
-        auto name_for = [](int semitone) {
+        // The typing row carries a RELATIVE semitone (0..17 from C2); the piano
+        // keyboard carries an ABSOLUTE MIDI note (>=48). Distinguish by magnitude
+        // and name both via one MIDI->name map (C2 = MIDI 48, so the octave is
+        // midi/12 - 2).
+        auto name_for = [](int note) {
             static const char* n[] = {"C", "C#", "D", "D#", "E", "F",
                                       "F#", "G", "G#", "A", "A#", "B"};
-            int oct = 3 + semitone / 12;          // typing row starts at C3
-            return std::string(n[semitone % 12]) + std::to_string(oct);
+            const int midi = note < 24 ? 48 + note : note;  // typing is C2-relative
+            return std::string(n[midi % 12]) + std::to_string(midi / 12 - 2);
         };
         kbp->on_gesture_begin = [kbp, readout, name_for](int i) {
             const int note = kbp->element_note(i);

@@ -807,9 +807,14 @@ a rect (x,y,w,h) + `options`/`selected_index`/`placeholder`.
   (order-independent, survives re-export reordering). (2) **highlight must carve
   out notches** — a lit white (larger) key's overlay rect would otherwise bleed
   teal over the black keys notching its top, swallowing them; `paint()` subtracts
-  any smaller same-view momentary rect that overlaps in x and shares the top
-  edge, painting the highlight as bands that leave the black-key channels dark.
-  Both are in `DesignFrameView` (`core/view/src/design_frame_view.cpp`).
+  any smaller same-view momentary rect that GENUINELY notches the key's top
+  (x-overlap, starts at/above the top, AND reaches down into the key), painting
+  the highlight as bands that leave the black-key channels dark. The reach-into
+  test is load-bearing when one frame shows two keyboards in the same view group
+  (typing row above a piano keyboard): their keys overlap in x but not in y, so
+  without it a typing black key was mistaken for a notch on a piano key and drew
+  a tall bar across the inter-keyboard gap. The notch bottom is clamped to the
+  key. Both are in `DesignFrameView` (`core/view/src/design_frame_view.cpp`).
 
 The `pulp-design-import-standalone` example has demo flags to capture overlay states
 headlessly: `--focus-search` (focus ring) and `--open-dropdown=SUBSTR` (opens

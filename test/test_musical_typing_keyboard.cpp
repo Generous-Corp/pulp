@@ -9,6 +9,7 @@
 #include <pulp/view/musical_typing_keyboard.hpp>
 #include <pulp/view/screenshot.hpp>
 
+#include <algorithm>
 #include <memory>
 #include <vector>
 
@@ -48,15 +49,39 @@ TEST_CASE("MusicalTyping is registered in the pulp::design catalog", "[design][c
     REQUIRE(info->category == pulp::design::Category::audio);
 }
 
-TEST_CASE("MusicalTypingKeyboard: 18 playable momentary keys, typing view active",
+TEST_CASE("MusicalTypingKeyboard: typing + piano playable momentary keys",
           "[view][musical-typing][momentary]") {
     auto kbp = make_playable_kb(); auto& kb = *kbp;
-    REQUIRE(kb.element_count() == 18);
+    // 18 typing keys (relative semitone 0..17) + 36 piano keys (chromatic
+    // C2..B4 = MIDI 48..83). Both keyboards render in the faithful frame and
+    // are playable at once.
+    REQUIRE(kb.element_count() == 18 + 36);
     REQUIRE(kb.active_view_group() == 0);
-    for (int i = 0; i < kb.element_count(); ++i) {
+    for (int i = 0; i < kb.element_count(); ++i)
         REQUIRE(kb.element_kind(i) == K::momentary);
-        REQUIRE(kb.element_note(i) == i);  // array order == semitone 0..17
-    }
+    // Typing row: array order == relative semitone.
+    for (int i = 0; i < 18; ++i) REQUIRE(kb.element_note(i) == i);
+    // Piano row: the full chromatic span 48..83 is present, each exactly once.
+    std::vector<int> piano;
+    for (int i = 18; i < kb.element_count(); ++i) piano.push_back(kb.element_note(i));
+    std::sort(piano.begin(), piano.end());
+    REQUIRE(piano.front() == 48);   // C2
+    REQUIRE(piano.back() == 83);    // B4
+    REQUIRE(piano.size() == 36);
+    for (int n = 48; n <= 83; ++n)
+        REQUIRE(std::count(piano.begin(), piano.end(), n) == 1);
+}
+
+TEST_CASE("MusicalTypingKeyboard: piano white-key click plays its MIDI note",
+          "[view][musical-typing][momentary]") {
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    std::vector<int> begins;
+    kb.on_gesture_begin = [&](int i) { begins.push_back(kb.element_note(i)); };
+    // Leftmost piano white key C2 (MIDI 48): rect x[90,120] y[456,535]; click
+    // low-centre (below the black keys) so only the white key is under the point.
+    kb.on_mouse_down({100.0f, 525.0f});
+    REQUIRE(begins == std::vector<int>{48});
+    kb.on_mouse_up({100.0f, 525.0f});
 }
 
 TEST_CASE("MusicalTypingKeyboard: white-key click plays its note",

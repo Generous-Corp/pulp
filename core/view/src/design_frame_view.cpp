@@ -437,8 +437,13 @@ void DesignFrameView::paint(canvas::Canvas& canvas) {
         // A larger (white) key's highlight must not bleed teal over the black
         // keys that notch into its top edge — otherwise lighting a white key
         // swallows the neighbouring black keys. Collect every smaller momentary
-        // rect (same view) that overlaps this one in x and shares its top, then
-        // paint the highlight as bands that leave those channels dark.
+        // rect (same view) that genuinely notches this key's TOP: overlaps in x,
+        // starts at/above the top, AND extends down into the key. The last test
+        // matters because a second keyboard in the same frame (e.g. the piano
+        // below the typing row) shares the view group and can overlap in x — its
+        // keys must NOT be mistaken for notches (that drew a tall bar across the
+        // inter-keyboard gap). Paint the highlight as bands leaving the channels
+        // dark; the notch bottom is clamped to the key so a band never escapes it.
         struct Notch { float x0, x1, bottom; };
         std::vector<Notch> notches;
         const float my_area = e.w * e.h;
@@ -446,9 +451,10 @@ void DesignFrameView::paint(canvas::Canvas& canvas) {
             if (b.kind != DesignFrameElement::Kind::momentary || &b == &e) continue;
             if (!in_view(b) || b.w * b.h >= my_area) continue;
             if (b.x + b.w <= e.x || b.x >= e.x + e.w) continue;  // no x-overlap
-            if (b.y > e.y + 1.0f) continue;                       // not a top notch
+            if (b.y > e.y + 2.0f) continue;                       // not a top notch
+            if (b.y + b.h <= e.y) continue;                       // must reach into the key
             notches.push_back({std::max(b.x, e.x), std::min(b.x + b.w, e.x + e.w),
-                               b.y + b.h});
+                               std::min(b.y + b.h, e.y + e.h)});
         }
         if (notches.empty()) {
             canvas.fill_rounded_rect(rx, ry, rw, rh, 3.0f);

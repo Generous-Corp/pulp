@@ -47,11 +47,57 @@ std::vector<DesignFrameElement> build_typing_keys() {
     }
     return els;
 }
+
+// The lower piano keyboard's playable keys. `note` is the ABSOLUTE MIDI number
+// (C2=48 … B4=83, three chromatic octaves), per the contract's piano-key
+// convention — consumers distinguish typing (relative semitone 0..17) from
+// piano (>=48) by magnitude. Rects are the path bounding boxes extracted from
+// the same Figma frame; black keys are narrower/shorter so the smallest-area
+// hit tiebreak picks them over the white key they overlap. view_group 0 too:
+// this faithful frame shows BOTH keyboards at once, so both are always playable
+// (the view_group toggle is for single-keyboard consumers, not this frame).
+std::vector<DesignFrameElement> build_piano_keys() {
+    struct K { int note; float x, y, w, h; };
+    static const K keys[] = {
+        {48, 90, 456, 30, 79}, {49, 112, 450, 22, 58}, {50, 123, 456, 30, 79},
+        {51, 144, 450, 22, 58}, {52, 155, 456, 30, 79}, {53, 187, 456, 30, 79},
+        {54, 208, 450, 22, 58}, {55, 219, 456, 30, 79}, {56, 240, 450, 22, 58},
+        {57, 251, 456, 30, 79}, {58, 272, 450, 22, 58}, {59, 284, 456, 30, 79},
+        {60, 316, 456, 30, 79}, {61, 336, 450, 22, 58}, {62, 348, 456, 30, 79},
+        {63, 368, 450, 22, 58}, {64, 380, 456, 30, 79}, {65, 412, 456, 30, 79},
+        {66, 433, 450, 22, 58}, {67, 445, 456, 30, 79}, {68, 466, 450, 22, 58},
+        {69, 477, 456, 30, 79}, {70, 498, 450, 22, 58}, {71, 509, 456, 30, 79},
+        {72, 541, 456, 30, 79}, {73, 562, 450, 22, 58}, {74, 573, 456, 30, 79},
+        {75, 594, 450, 22, 58}, {76, 606, 456, 30, 79}, {77, 638, 456, 30, 79},
+        {78, 658, 450, 22, 58}, {79, 670, 456, 30, 79}, {80, 690, 450, 22, 58},
+        {81, 702, 456, 30, 79}, {82, 722, 450, 22, 58}, {83, 734, 456, 30, 79},
+    };
+    std::vector<DesignFrameElement> els;
+    els.reserve(sizeof(keys) / sizeof(keys[0]));
+    for (const auto& k : keys) {
+        DesignFrameElement e;
+        e.kind = DesignFrameElement::Kind::momentary;
+        e.note = k.note;
+        e.view_group = 0;
+        e.x = k.x; e.y = k.y; e.w = k.w; e.h = k.h;
+        els.push_back(e);
+    }
+    return els;
+}
+
+// Typing row first (indices 0..17, relative semitones), then the piano keyboard
+// (absolute MIDI). Both groups render in the faithful frame at once.
+std::vector<DesignFrameElement> build_keys() {
+    auto els = build_typing_keys();
+    auto piano = build_piano_keys();
+    els.insert(els.end(), piano.begin(), piano.end());
+    return els;
+}
 }  // namespace
 
 MusicalTypingKeyboard::MusicalTypingKeyboard()
-    : DesignFrameView(decode_embedded_svg(), build_typing_keys()) {
-    set_active_view_group(0);  // typing view playable by default
+    : DesignFrameView(decode_embedded_svg(), build_keys()) {
+    set_active_view_group(0);  // both keyboards playable
 }
 
 }  // namespace pulp::view
