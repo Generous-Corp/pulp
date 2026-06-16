@@ -323,8 +323,38 @@ fi
 # tool's CommandLine parser) so the OS arg-length limit never applies — on any
 # platform. One token per line; the probed paths never contain spaces.
 OBJ_RSP="${REPORT_DIR}/llvm-cov-objects.rsp"
-printf '%s\n' "${BINARIES[@]}" > "${OBJ_RSP}"
-echo "=== Wrote ${#BINARIES[@]} -object tokens to a response file (avoids Windows ARG_MAX) ==="
+# Final existence filter while materializing the response file. An -object can
+# vanish between the pre-flight probe above and this point — the observed
+# Windows case is a late-cleaned test-fixture executable (e.g.
+# `test/pulp-cli-run-fixture.exe`) that is still present when the probe loads it
+# but gone by report time. llvm-cov hard-fails the ENTIRE run on a single
+# missing -object ("failed to load coverage: '…': no such file or directory"),
+# so one disappearing fixture would blackhole the whole os-windows leg. Drop any
+# that are no longer present instead.
+: > "${OBJ_RSP}"
+KEPT_OBJECTS=0
+VANISHED_OBJECTS=0
+prev=""
+for tok in "${BINARIES[@]}"; do
+    if [[ "${prev}" == "-object" ]]; then
+        if [[ -f "${tok}" ]]; then
+            printf -- '-object\n%s\n' "${tok}" >> "${OBJ_RSP}"
+            KEPT_OBJECTS=$((KEPT_OBJECTS + 1))
+        else
+            VANISHED_OBJECTS=$((VANISHED_OBJECTS + 1))
+            echo "  ✗ dropping object that vanished after pre-flight: ${tok}" >&2
+        fi
+    fi
+    prev="${tok}"
+done
+if [[ "${VANISHED_OBJECTS}" -gt 0 ]]; then
+    echo "=== Dropped ${VANISHED_OBJECTS} object(s) that vanished after the pre-flight probe ==="
+fi
+if [[ "${KEPT_OBJECTS}" -eq 0 ]]; then
+    echo "run_coverage.sh: existence filter left zero -object entries" >&2
+    exit 1
+fi
+echo "=== Wrote ${KEPT_OBJECTS} -object tokens to a response file (avoids Windows ARG_MAX) ==="
 
 echo "=== llvm-cov report (top-level summary) ==="
 llvm-cov report \
