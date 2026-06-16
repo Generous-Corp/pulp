@@ -424,9 +424,18 @@ void DesignFrameView::paint(canvas::Canvas& canvas) {
     // match the faithful key: square top, rounded BOTTOM corners (the design's
     // keys curve at the bottom, ~4 SVG units), and the top notched out around
     // any black keys so a lit white key never swallows them. View-scoped.
-    auto hl = resolve_color("accent.primary", canvas::Color::rgba8(22, 218, 194));
-    hl.a = 120;
-    canvas.set_fill_color(hl);
+    //
+    // The FILL mirrors the design's own pressed-key paint (paint36 in the
+    // export): a vertical accent-teal gradient fading from 26% opacity at the
+    // key top to 100% at the bottom (the "light mint top, deep teal bottom"
+    // wash). It's set per key over the key's own height and applies identically
+    // to white and black keys, so a lit key looks exactly like the figma.
+    const auto teal = resolve_color("accent.primary", canvas::Color::rgba8(22, 218, 194));
+    const canvas::Color grad_cols[2] = {
+        canvas::Color::rgba(teal.r, teal.g, teal.b, 0.26f),  // top (offset 0)
+        canvas::Color::rgba(teal.r, teal.g, teal.b, 1.0f),   // bottom (offset 1)
+    };
+    const float grad_pos[2] = {0.0f, 1.0f};
     const bool group_scoped = active_view_group_ != -1;
     auto in_view = [&](const DesignFrameElement& e) {
         return e.view_group == -1 || !group_scoped || e.view_group == active_view_group_;
@@ -465,6 +474,9 @@ void DesignFrameView::paint(canvas::Canvas& canvas) {
         std::sort(notches.begin(), notches.end(),
                   [](const Notch& a, const Notch& c) { return a.x0 < c.x0; });
 
+        // Per-key vertical gradient over the key's own height (top→bottom).
+        canvas.set_fill_gradient_linear(rx, ry, rx, ry + rh, grad_cols, grad_pos, 2);
+
         // Build the key outline: top-left → across the top (dipping down and back
         // up around each notch) → top-right → down → rounded bottom-right →
         // across the bottom → rounded bottom-left → close.
@@ -484,6 +496,7 @@ void DesignFrameView::paint(canvas::Canvas& canvas) {
         canvas.close_path();
         canvas.fill_current_path();
     }
+    canvas.clear_fill_gradient();
 }
 
 int DesignFrameView::hit_element(Point pos) const {
