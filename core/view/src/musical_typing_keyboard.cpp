@@ -97,7 +97,67 @@ std::vector<DesignFrameElement> build_keys() {
 
 MusicalTypingKeyboard::MusicalTypingKeyboard()
     : DesignFrameView(decode_embedded_svg(), build_keys()) {
-    set_active_view_group(0);  // both keyboards playable
+    set_active_view_group(0);       // both keyboards playable
+    set_focusable(true);            // accept computer-keyboard focus for typing
+    controller_.set_base_note(48);  // 'a' = C2, matching the design's OCTAVE C2
+
+    // Computer keyboard → notes (controller) forwarded to the public note sink.
+    controller_.on_note_on  = [this](int note, float vel) { if (on_note_on) on_note_on(note, vel); };
+    controller_.on_note_off = [this](int note)            { if (on_note_off) on_note_off(note); };
+
+    // Clicking a key (DesignFrameView momentary gesture) plays its note too:
+    // typing keys follow base+octave, piano keys are absolute MIDI.
+    on_gesture_begin = [this](int i) {
+        const int n = midi_for_element(i);
+        if (n >= 0 && on_note_on) on_note_on(n, controller_.velocity);
+    };
+    on_gesture_end = [this](int i) {
+        const int n = midi_for_element(i);
+        if (n >= 0 && on_note_off) on_note_off(n);
+    };
+}
+
+bool MusicalTypingKeyboard::on_key_event(const KeyEvent& event) {
+    const bool consumed = controller_.handle_key(event);  // QWERTY→note + z/x octave
+    // Light the matching typing key (by relative semitone, octave-independent).
+    const int semi = MusicalTypingController::semitone_for_key(event.key);
+    if (semi >= 0) {
+        if (event.is_down && !event.is_repeat) light_typing_semitone(semi, true);
+        else if (!event.is_down)               light_typing_semitone(semi, false);
+    }
+    return consumed;
+}
+
+void MusicalTypingKeyboard::on_focus_changed(bool gained) {
+    DesignFrameView::on_focus_changed(gained);
+    if (!gained) {  // release held notes + clear typing highlights so none stick
+        controller_.all_notes_off();
+        for (int i = 0; i < element_count(); ++i)
+            if (element_kind(i) == DesignFrameElement::Kind::momentary && element_note(i) < 24)
+                set_element_value(i, 0.0f);
+        request_repaint();
+    }
+}
+
+int MusicalTypingKeyboard::typing_element_for_semitone(int semitone) const {
+    if (semitone < 0 || semitone >= 24) return -1;  // typing relative-semitone range
+    for (int i = 0; i < element_count(); ++i)
+        if (element_kind(i) == DesignFrameElement::Kind::momentary && element_note(i) == semitone)
+            return i;
+    return -1;
+}
+
+int MusicalTypingKeyboard::midi_for_element(int index) const {
+    const int note = element_note(index);
+    if (note < 0) return -1;
+    if (note < 24)  // typing: relative semitone → base note + octave shift
+        return controller_.base_note() + controller_.octave_shift() * 12 + note;
+    return note;    // piano: absolute MIDI
+}
+
+void MusicalTypingKeyboard::light_typing_semitone(int semitone, bool on) {
+    const int i = typing_element_for_semitone(semitone);
+    if (i >= 0) { set_element_value(i, on ? 1.0f : 0.0f); request_repaint(); }
 }
 
 }  // namespace pulp::view

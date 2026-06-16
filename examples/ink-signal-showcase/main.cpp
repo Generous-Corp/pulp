@@ -387,20 +387,16 @@ void advance_anims(View* v, float dt) {
 
         auto kb = std::make_unique<MusicalTypingKeyboard>();
         MusicalTypingKeyboard* kbp = kb.get();
-        // The typing row carries a RELATIVE semitone (0..17 from C2); the piano
-        // keyboard carries an ABSOLUTE MIDI note (>=48). Distinguish by magnitude
-        // and name both via one MIDI->name map (C2 = MIDI 48, so the octave is
-        // midi/12 - 2).
-        auto name_for = [](int note) {
+        // The keyboard emits absolute MIDI notes (typing keys via base C2 + the
+        // z/x octave; piano keys absolute). Name them off one MIDI map (C2 = 48,
+        // so octave = midi/12 - 2) for the live "last note" readout.
+        auto midi_name = [](int midi) {
             static const char* n[] = {"C", "C#", "D", "D#", "E", "F",
                                       "F#", "G", "G#", "A", "A#", "B"};
-            const int midi = note < 24 ? 48 + note : note;  // typing is C2-relative
             return std::string(n[midi % 12]) + std::to_string(midi / 12 - 2);
         };
-        kbp->on_gesture_begin = [kbp, readout, name_for](int i) {
-            const int note = kbp->element_note(i);
-            if (note >= 0 && readout)
-                readout->set_text("Play a key \xe2\x80\x94 last note: " + name_for(note));
+        kbp->on_note_on = [readout, midi_name](int note, float) {
+            if (readout) readout->set_text("Play a key \xe2\x80\x94 last note: " + midi_name(note));
         };
         // Default display mirrors the design's "selected keys shown" illustration —
         // a held chord (typing A W G U + piano C4/D#4). The live overlay lights

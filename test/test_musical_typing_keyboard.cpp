@@ -126,3 +126,75 @@ TEST_CASE("MusicalTypingKeyboard: set_element_value lights without firing change
     REQUIRE(kb.element_value(5) == 0.0f);
     REQUIRE_FALSE(changed);                 // host->view push must not echo
 }
+
+// ── Wiring: computer-keyboard play, octave, click→note, focus release ───────
+
+namespace {
+int typing_idx(const MusicalTypingKeyboard& kb, int semitone) {
+    for (int i = 0; i < kb.element_count(); ++i)
+        if (kb.element_note(i) == semitone) return i;
+    return -1;
+}
+}  // namespace
+
+TEST_CASE("MusicalTypingKeyboard: computer keyboard plays + lights typing keys",
+          "[view][musical-typing][wiring]") {
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    std::vector<int> ons, offs;
+    kb.on_note_on  = [&](int n, float) { ons.push_back(n); };
+    kb.on_note_off = [&](int n) { offs.push_back(n); };
+
+    KeyEvent a{}; a.key = KeyCode::a; a.is_down = true;      // 'a' = C2 = MIDI 48
+    REQUIRE(kb.on_key_event(a));
+    REQUIRE(ons == std::vector<int>{48});
+    REQUIRE(kb.element_value(typing_idx(kb, 0)) == 1.0f);   // note-0 key lit
+    a.is_down = false;
+    REQUIRE(kb.on_key_event(a));
+    REQUIRE(offs == std::vector<int>{48});
+    REQUIRE(kb.element_value(typing_idx(kb, 0)) == 0.0f);
+
+    // Cmd-chords are NOT consumed (host keeps its shortcuts).
+    KeyEvent cmdA{}; cmdA.key = KeyCode::a; cmdA.is_down = true; cmdA.modifiers = kModCmd;
+    REQUIRE_FALSE(kb.on_key_event(cmdA));
+}
+
+TEST_CASE("MusicalTypingKeyboard: z/x shift the typed octave",
+          "[view][musical-typing][wiring]") {
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    std::vector<int> ons;
+    kb.on_note_on = [&](int n, float) { ons.push_back(n); };
+    auto down = [&](KeyCode k) { KeyEvent e{}; e.key = k; e.is_down = true; kb.on_key_event(e); };
+    auto tap_a = [&] { KeyEvent e{}; e.key = KeyCode::a; e.is_down = true; kb.on_key_event(e);
+                       e.is_down = false; kb.on_key_event(e); };
+
+    down(KeyCode::x);  tap_a();          // octave +1 → C3 (60)
+    REQUIRE(ons.back() == 60);
+    down(KeyCode::z);  down(KeyCode::z); tap_a();  // back to -1 → C1 (36)
+    REQUIRE(ons.back() == 36);
+}
+
+TEST_CASE("MusicalTypingKeyboard: clicking a key emits its MIDI note",
+          "[view][musical-typing][wiring]") {
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    std::vector<int> ons;
+    kb.on_note_on = [&](int n, float) { ons.push_back(n); };
+    kb.on_mouse_down({191.0f, 300.0f});  // typing 'a' (note 0) → C2 48
+    kb.on_mouse_up({191.0f, 300.0f});
+    REQUIRE(ons == std::vector<int>{48});
+    ons.clear();
+    kb.on_mouse_down({556.0f, 500.0f});  // piano C4 (note 72, absolute)
+    kb.on_mouse_up({556.0f, 500.0f});
+    REQUIRE(ons == std::vector<int>{72});
+}
+
+TEST_CASE("MusicalTypingKeyboard: focus loss releases held notes + clears highlights",
+          "[view][musical-typing][wiring]") {
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    std::vector<int> offs;
+    kb.on_note_off = [&](int n) { offs.push_back(n); };
+    KeyEvent a{}; a.key = KeyCode::a; a.is_down = true; kb.on_key_event(a);  // hold C2
+    REQUIRE(kb.element_value(typing_idx(kb, 0)) == 1.0f);
+    kb.on_focus_changed(false);
+    REQUIRE(offs == std::vector<int>{48});                  // note released
+    REQUIRE(kb.element_value(typing_idx(kb, 0)) == 0.0f);   // highlight cleared
+}

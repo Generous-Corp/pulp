@@ -153,11 +153,17 @@ std::vector<ComponentInfo> build_catalog() {
          "2-D parameter control surface",
          {"control.track", "accent.primary", "control.thumb"}},
         {"MIDIKeyboard", C::audio, "pulp::view::MidiKeyboard", "pulp/view/midi_keyboard.hpp", "MIDIKeyboard",
-         "Piano keyboard input surface",
+         "Plain MIDI piano input strip (note on/off only). For a playable "
+         "computer-typing + piano keyboard with QWERTY play, octave and velocity, "
+         "use MusicalTyping instead — NOT this.",
          {"bg.surface", "text.primary", "accent.primary"}},
         {"MusicalTyping", C::audio, "pulp::view::MusicalTypingKeyboard",
          "pulp/view/musical_typing_keyboard.hpp", "Musical Typing Keyboard",
-         "Logic-style typing + piano keyboard (computer-key letters / mouse piano)",
+         "THE playable musical-typing keyboard: computer-key letters "
+         "(a w s e d f t g y h u j k o l p) play notes, z/x shift octave, plus a "
+         "click-to-play piano row; pressed keys light with the accent gradient. "
+         "Wire on_note_on/on_note_off. Use this for a \"musical typing keyboard\", "
+         "NOT MIDIKeyboard (the plain strip).",
          {"surface.panel", "accent.primary", "accent.text", "key.white", "key.black", "text.secondary"}},
         {"Channel Strip", C::containers, "pulp::view::ChannelStripView",
          "pulp/view/channel_strip_view.hpp", "Channel Strip",
