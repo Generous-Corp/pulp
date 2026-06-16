@@ -402,6 +402,13 @@ void advance_anims(View* v, float dt) {
             if (note >= 0 && readout)
                 readout->set_text("Play a key \xe2\x80\x94 last note: " + name_for(note));
         };
+        // Default display mirrors the design's "selected keys shown" illustration —
+        // a held chord (typing A W G U + piano C4/D#4). The live overlay lights
+        // these; the keyboard stays interactive (clicking plays/lights others).
+        const int kHeld[] = {0, 1, 7, 10, 72, 75};
+        for (int i = 0; i < kbp->element_count(); ++i)
+            for (int n : kHeld)
+                if (kbp->element_note(i) == n) kbp->set_element_value(i, 1.0f);
         add(std::move(kb), kMargin, y, kw, kh);
         y += kh + 20.0f;
     }
