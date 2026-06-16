@@ -390,6 +390,31 @@ TEST_CASE("XDND file_uri_to_path handles file:// forms", "[view][dnd][xdnd]") {
     CHECK(file_uri_to_path("file://host").empty());
 }
 
+TEST_CASE("XDND path_to_file_uri encodes + round-trips (drag source)",
+          "[view][dnd][xdnd]") {
+    using namespace pulp::view::xdnd;
+    // file:// prefix + percent-escape of reserved/space bytes; '/' + unreserved kept.
+    CHECK(path_to_file_uri("/home/u/a.wav") == "file:///home/u/a.wav");
+    CHECK(path_to_file_uri("/home/u/my preset (1).json") ==
+          "file:///home/u/my%20preset%20%281%29.json");
+    CHECK(path_to_file_uri("").empty());
+
+    // Round-trips byte-exact with the sink decoder (spaces, parens, UTF-8 bytes).
+    for (const std::string& p : {std::string("/a/b.wav"),
+                                 std::string("/x/My File (2).aiff"),
+                                 std::string("/\xCF\x80/\xC3\xA9.wav")}) {  // /π/é.wav
+        CHECK(file_uri_to_path(path_to_file_uri(p)) == p);
+    }
+
+    // build_uri_list joins CRLF + skips empties; parse_uri_list recovers the set.
+    const std::string payload = build_uri_list({"/a/x.wav", "", "/b/y.aiff"});
+    CHECK(payload == "file:///a/x.wav\r\nfile:///b/y.aiff\r\n");
+    const auto back = parse_uri_list(payload);
+    REQUIRE(back.size() == 2);
+    CHECK(back[0] == "/a/x.wav");
+    CHECK(back[1] == "/b/y.aiff");
+}
+
 TEST_CASE("XDND parse_uri_list splits CRLF and skips comments/blanks/non-file",
           "[view][dnd][xdnd]") {
     using namespace pulp::view::xdnd;
@@ -575,4 +600,49 @@ TEST_CASE("start_file_drag hands off to the platform backend when a host has a "
     req.file_paths = {"/tmp/loop.wav"};
     req.display_name = "frozen loop";
     REQUIRE_FALSE(v.start_file_drag(req));  // no event context outside a drag
+}
+
+namespace {
+// A host that owns its outbound drag (the Windows OLE / Linux XDND shape):
+// start_file_drag() is overridden and reports success, so View::start_file_drag
+// must short-circuit to it and never fall through to the free begin_file_drag
+// backend (whose native-view requirement this host deliberately does not meet).
+class OutboundDragHost : public StubPluginViewHost {
+public:
+    OutboundDragHost() : StubPluginViewHost(nullptr) {}  // no native view on purpose
+    bool start_file_drag(const FileDragRequest& request) override {
+        last_request_paths = request.file_paths;
+        ++calls;
+        return true;  // host handled the drag itself
+    }
+    int calls = 0;
+    std::vector<std::string> last_request_paths;
+};
+} // namespace
+
+TEST_CASE("start_file_drag prefers the host's own outbound backend (win/linux)",
+          "[view][dnd][file-drag]") {
+    OutboundDragHost host;
+    View v;
+    v.set_plugin_view_host(&host);
+    FileDragRequest req;
+    req.file_paths = {"/tmp/frozen.wav", "/tmp/take2.wav"};
+    req.display_name = "frozen loop";
+
+    // Host-owned path taken: returns true even though the host has NO native
+    // view (the free begin_file_drag fallback would have failed on the null
+    // handle). Proves the host method is consulted first and short-circuits.
+    REQUIRE(v.start_file_drag(req));
+    REQUIRE(host.calls == 1);
+    REQUIRE(host.last_request_paths == req.file_paths);
+}
+
+TEST_CASE("start_file_drag with empty files never consults the host backend",
+          "[view][dnd][file-drag]") {
+    OutboundDragHost host;
+    View v;
+    v.set_plugin_view_host(&host);
+    FileDragRequest empty;  // no file_paths
+    REQUIRE_FALSE(v.start_file_drag(empty));
+    REQUIRE(host.calls == 0);  // early-out precedes host dispatch
 }

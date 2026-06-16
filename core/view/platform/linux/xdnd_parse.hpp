@@ -74,6 +74,45 @@ inline std::string file_uri_to_path(const std::string& uri) {
     return percent_decode(s);
 }
 
+// Encode a filesystem path as a `file://` URI for an XDND `text/uri-list`
+// payload — the inverse of file_uri_to_path(), used by the XDND drag SOURCE.
+// Percent-encodes every byte that is not an RFC 3986 unreserved character,
+// leaving '/' as the path separator, and prefixes the empty-authority `file://`
+// form (an absolute path yields `file:///abs/path`). Round-trips with
+// file_uri_to_path() for any absolute path.
+inline std::string path_to_file_uri(const std::string& path) {
+    if (path.empty()) return {};
+    auto is_unreserved = [](unsigned char c) {
+        return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+               (c >= '0' && c <= '9') || c == '-' || c == '_' ||
+               c == '.' || c == '~' || c == '/';
+    };
+    static const char kHex[] = "0123456789ABCDEF";
+    std::string out = "file://";
+    for (unsigned char c : path) {
+        if (is_unreserved(c)) {
+            out.push_back(static_cast<char>(c));
+        } else {
+            out.push_back('%');
+            out.push_back(kHex[c >> 4]);
+            out.push_back(kHex[c & 0x0F]);
+        }
+    }
+    return out;
+}
+
+// Build a full XDND `text/uri-list` payload (CRLF-separated file URIs) from a
+// set of absolute paths. Empty paths are skipped.
+inline std::string build_uri_list(const std::vector<std::string>& paths) {
+    std::string out;
+    for (const auto& p : paths) {
+        if (p.empty()) continue;
+        out += path_to_file_uri(p);
+        out += "\r\n";
+    }
+    return out;
+}
+
 // Parse an XDND `text/uri-list` payload into filesystem paths. The format
 // (RFC 2483) is CRLF-separated URIs; lines beginning with '#' are comments and
 // blank lines are ignored. Lenient on the line ending: handles CRLF, lone LF,

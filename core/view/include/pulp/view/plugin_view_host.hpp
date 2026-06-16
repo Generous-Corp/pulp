@@ -63,6 +63,23 @@ public:
     // child views; callers must branch on attach_native_child_view().
     virtual NativeViewHandle native_handle() = 0;
 
+    // Begin a native OUTBOUND file drag from this host's window (drag audio out
+    // to Finder/Explorer, a Canvas, another app). Default: unsupported → false.
+    //
+    // This is the host-owned drag path, distinct from the free function
+    // `begin_file_drag(native_view, request)` in drag_drop.hpp. macOS leaves
+    // this at the default and uses the free NSDraggingSession backend via
+    // native_handle(); Windows (OLE IDataObject/DoDragDrop) and Linux (XDND)
+    // override it because their drag needs host-owned native state — the HWND,
+    // or the Display* connection plus the interned Xdnd atoms — that the free
+    // function does not receive. `View::start_file_drag()` tries this first and
+    // only falls back to the free backend when it returns false. Call
+    // synchronously from within the pointer interaction that initiates the drag.
+    virtual bool start_file_drag(const FileDragRequest& request) {
+        (void)request;
+        return false;
+    }
+
     // Attach this view to a parent native view (the DAW's editor window)
     virtual void attach_to_parent(NativeViewHandle parent) = 0;
 
