@@ -418,9 +418,12 @@ void DesignFrameView::paint(canvas::Canvas& canvas) {
     canvas.draw_svg(s, t.ox - panel_x_ * t.scale, t.oy - panel_y_ * t.scale,
                     svg_w_ * t.scale, svg_h_ * t.scale);
 
-    // Native overlay highlight for lit momentary keys (value>0.5): a translucent
-    // accent rect over the key's hit-region. Drawn ON TOP of the baked SVG — we
-    // never recolor SVG paths (that would fight every re-export). View-scoped.
+    // Native overlay highlight for lit momentary keys (value>0.5): the accent
+    // fill of the key's exact shape, drawn ON TOP of the baked SVG (we never
+    // recolor SVG paths — that would fight every re-export). The shape MUST
+    // match the faithful key: square top, rounded BOTTOM corners (the design's
+    // keys curve at the bottom, ~4 SVG units), and the top notched out around
+    // any black keys so a lit white key never swallows them. View-scoped.
     auto hl = resolve_color("accent.primary", canvas::Color::rgba8(22, 218, 194));
     hl.a = 120;
     canvas.set_fill_color(hl);
@@ -428,22 +431,22 @@ void DesignFrameView::paint(canvas::Canvas& canvas) {
     auto in_view = [&](const DesignFrameElement& e) {
         return e.view_group == -1 || !group_scoped || e.view_group == active_view_group_;
     };
+    const float kKeyCornerSvg = 4.0f;  // design's bottom-corner radius, SVG units
     for (const auto& e : elements_) {
         if (e.kind != DesignFrameElement::Kind::momentary || e.value <= 0.5f) continue;
         if (!in_view(e)) continue;
         const float rx = t.ox + (e.x - panel_x_) * t.scale;
         const float ry = t.oy + (e.y - panel_y_) * t.scale;
         const float rw = e.w * t.scale, rh = e.h * t.scale;
-        // A larger (white) key's highlight must not bleed teal over the black
-        // keys that notch into its top edge — otherwise lighting a white key
-        // swallows the neighbouring black keys. Collect every smaller momentary
-        // rect (same view) that genuinely notches this key's TOP: overlaps in x,
-        // starts at/above the top, AND extends down into the key. The last test
-        // matters because a second keyboard in the same frame (e.g. the piano
-        // below the typing row) shares the view group and can overlap in x — its
-        // keys must NOT be mistaken for notches (that drew a tall bar across the
-        // inter-keyboard gap). Paint the highlight as bands leaving the channels
-        // dark; the notch bottom is clamped to the key so a band never escapes it.
+        const float r = std::min({kKeyCornerSvg * t.scale, rw * 0.5f, rh * 0.5f});
+
+        // Collect every smaller momentary rect (same view) that GENUINELY notches
+        // this key's TOP: overlaps in x, starts at/above the top, AND extends down
+        // into the key. The reach-into test matters because a second keyboard in
+        // the same frame (the piano below the typing row) shares the view group and
+        // overlaps in x but not in y — its keys must NOT be mistaken for notches
+        // (that drew a tall bar across the inter-keyboard gap). Notch bottoms are
+        // clamped to the key. View-space x-spans, sorted left→right.
         struct Notch { float x0, x1, bottom; };
         std::vector<Notch> notches;
         const float my_area = e.w * e.h;
@@ -453,32 +456,33 @@ void DesignFrameView::paint(canvas::Canvas& canvas) {
             if (b.x + b.w <= e.x || b.x >= e.x + e.w) continue;  // no x-overlap
             if (b.y > e.y + 2.0f) continue;                       // not a top notch
             if (b.y + b.h <= e.y) continue;                       // must reach into the key
-            notches.push_back({std::max(b.x, e.x), std::min(b.x + b.w, e.x + e.w),
-                               std::min(b.y + b.h, e.y + e.h)});
-        }
-        if (notches.empty()) {
-            canvas.fill_rounded_rect(rx, ry, rw, rh, 3.0f);
-            continue;
+            const float nx0 = std::max(b.x, e.x), nx1 = std::min(b.x + b.w, e.x + e.w);
+            const float nb = std::min(b.y + b.h, e.y + e.h);
+            notches.push_back({t.ox + (nx0 - panel_x_) * t.scale,
+                               t.ox + (nx1 - panel_x_) * t.scale,
+                               t.oy + (nb - panel_y_) * t.scale});
         }
         std::sort(notches.begin(), notches.end(),
                   [](const Notch& a, const Notch& c) { return a.x0 < c.x0; });
-        float cursor = e.x;
+
+        // Build the key outline: top-left → across the top (dipping down and back
+        // up around each notch) → top-right → down → rounded bottom-right →
+        // across the bottom → rounded bottom-left → close.
+        canvas.begin_path();
+        canvas.move_to(rx, ry);
         for (const auto& n : notches) {
-            if (n.x0 > cursor) {  // full-height band left of the notch
-                canvas.fill_rect(t.ox + (cursor - panel_x_) * t.scale, ry,
-                                 (n.x0 - cursor) * t.scale, rh);
-            }
-            const float nb = t.oy + (n.bottom - panel_y_) * t.scale;  // notch bottom
-            if (nb < ry + rh) {  // band below the black key
-                canvas.fill_rect(t.ox + (n.x0 - panel_x_) * t.scale, nb,
-                                 (n.x1 - n.x0) * t.scale, ry + rh - nb);
-            }
-            cursor = std::max(cursor, n.x1);
+            canvas.line_to(n.x0, ry);
+            canvas.line_to(n.x0, n.bottom);
+            canvas.line_to(n.x1, n.bottom);
+            canvas.line_to(n.x1, ry);
         }
-        if (cursor < e.x + e.w) {  // full-height band right of the last notch
-            canvas.fill_rect(t.ox + (cursor - panel_x_) * t.scale, ry,
-                             (e.x + e.w - cursor) * t.scale, rh);
-        }
+        canvas.line_to(rx + rw, ry);
+        canvas.line_to(rx + rw, ry + rh - r);
+        canvas.quad_to(rx + rw, ry + rh, rx + rw - r, ry + rh);
+        canvas.line_to(rx + r, ry + rh);
+        canvas.quad_to(rx, ry + rh, rx, ry + rh - r);
+        canvas.close_path();
+        canvas.fill_current_path();
     }
 }
 
