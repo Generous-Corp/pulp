@@ -46,6 +46,7 @@
     pulp::view::Point (^_xform)(pulp::view::Point);
     pulp::view::DragSession _session;              // hover state for dispatch_drag_*
     NSMutableArray<NSString*>* _pendingPaths;      // staged outbound payload
+    NSTimeInterval _armTime;                       // when _pendingPaths was staged
 }
 
 - (instancetype)initWithRoot:(pulp::view::View*)root
@@ -71,9 +72,15 @@
 
 - (BOOL)armOutboundDrag:(const std::vector<std::string>&)paths {
     [_pendingPaths removeAllObjects];
-    for (const auto& p : paths)
-        if (!p.empty())
-            [_pendingPaths addObject:[NSString stringWithUTF8String:p.c_str()]];
+    NSFileManager* fm = [NSFileManager defaultManager];
+    for (const auto& p : paths) {
+        if (p.empty()) continue;
+        // Use the filesystem-representation inverse, not stringWithUTF8String:
+        // (which returns nil for a non-UTF8 path and would crash addObject:).
+        NSString* s = [fm stringWithFileSystemRepresentation:p.c_str() length:p.size()];
+        if (s) [_pendingPaths addObject:s];
+    }
+    _armTime = [NSProcessInfo processInfo].systemUptime;
     return _pendingPaths.count > 0;
 }
 
@@ -86,12 +93,21 @@
 
 - (UIDropProposal *)dropInteraction:(UIDropInteraction *)interaction
                    sessionDidUpdate:(id<UIDropSession>)session {
+    // Only advertise Copy when a DropReceiver / on_drop actually accepts the
+    // point — otherwise the whole view looks droppable and performDrop loads the
+    // files just to discard them. dispatch_drag_move forwards to the idempotent
+    // dispatch_drag_enter, which returns whether a receiver claimed the hover.
+    BOOL accepted = NO;
     if (_root) {
         pulp::view::DropData data;
         data.type = pulp::view::DropData::Type::files;
-        pulp::view::dispatch_drag_move(*_root, _session, data, [self rootPointFor:session]);
+        // dispatch_drag_enter is idempotent (safe to call on every update) and
+        // returns whether a receiver claimed the hover.
+        accepted = pulp::view::dispatch_drag_enter(*_root, _session, data,
+                                                   [self rootPointFor:session]);
     }
-    return [[UIDropProposal alloc] initWithDropOperation:UIDropOperationCopy];
+    return [[UIDropProposal alloc]
+        initWithDropOperation:accepted ? UIDropOperationCopy : UIDropOperationCancel];
 }
 
 - (void)dropInteraction:(UIDropInteraction *)interaction
@@ -128,6 +144,14 @@
 
 - (NSArray<UIDragItem *> *)dragInteraction:(UIDragInteraction *)interaction
                   itemsForBeginningSession:(id<UIDragSession>)session {
+    // Expire a stale arm: start_file_drag stages paths for the NEXT lift, but if
+    // that lift never comes (tap instead of drag, gesture cancelled), the payload
+    // must not silently attach to a later unrelated drag. Bound the window so a
+    // drag only carries freshly-armed files.
+    if (_pendingPaths.count > 0 &&
+        [NSProcessInfo processInfo].systemUptime - _armTime > 2.0) {
+        [_pendingPaths removeAllObjects];
+    }
     if (_pendingPaths.count == 0) return @[];  // nothing armed → no drag begins
     NSMutableArray<UIDragItem*>* items = [NSMutableArray array];
     for (NSString* path in _pendingPaths) {
