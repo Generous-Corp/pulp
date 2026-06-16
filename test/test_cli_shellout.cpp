@@ -151,6 +151,83 @@ TEST_CASE("pulp <unknown-command> exits non-zero with a diagnostic",
     REQUIRE(mentioned);
 }
 
+TEST_CASE("pulp host derives AU ids from bundle Info.plist before loading",
+          "[cli][shellout][host][au]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    const auto base = unique_temp_dir("pulp-host-au-info-plist");
+    const auto valid_bundle = base / "Valid.component";
+    write_text(valid_bundle / "Contents" / "Info.plist",
+               "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+               "<plist version=\"1.0\">\n"
+               "<dict>\n"
+               "  <key>AudioComponents</key>\n"
+               "  <array>\n"
+               "    <dict>\n"
+               "      <key>type</key><string>aumf</string>\n"
+               "      <key>subtype</key><string>PLPT</string>\n"
+               "      <key>manufacturer</key><string>Pulp</string>\n"
+               "    </dict>\n"
+               "  </array>\n"
+               "</dict>\n"
+               "</plist>\n");
+
+    const auto no_audio_components = base / "NoAudioComponents.component";
+    write_text(no_audio_components / "Contents" / "Info.plist",
+               "<plist><dict><key>CFBundleName</key><string>Fixture</string></dict></plist>\n");
+
+    const auto no_dict = base / "NoDict.component";
+    write_text(no_dict / "Contents" / "Info.plist",
+               "<plist><dict><key>AudioComponents</key><array/></dict></plist>\n");
+
+    const auto unterminated_dict = base / "Unterminated.component";
+    write_text(unterminated_dict / "Contents" / "Info.plist",
+               "<plist><dict><key>AudioComponents</key><array><dict>"
+               "<key>type</key><string>aumf</string></array></dict></plist>\n");
+
+    const auto missing_manufacturer = base / "MissingManufacturer.component";
+    write_text(missing_manufacturer / "Contents" / "Info.plist",
+               "<plist><dict><key>AudioComponents</key><array><dict>"
+               "<key>type</key><string>aumf</string>"
+               "<key>subtype</key><string>PLPT</string>"
+               "</dict></array></dict></plist>\n");
+
+    const auto missing_type = base / "MissingType.component";
+    write_text(missing_type / "Contents" / "Info.plist",
+               "<plist><dict><key>AudioComponents</key><array><dict>"
+               "<key>subtype</key><string>PLPT</string>"
+               "<key>manufacturer</key><string>Pulp</string>"
+               "</dict></array></dict></plist>\n");
+
+    const auto missing_subtype = base / "MissingSubtype.component";
+    write_text(missing_subtype / "Contents" / "Info.plist",
+               "<plist><dict><key>AudioComponents</key><array><dict>"
+               "<key>type</key><string>aumf</string>"
+               "<key>manufacturer</key><string>Pulp</string>"
+               "</dict></array></dict></plist>\n");
+
+    const std::vector<fs::path> bundles = {
+        base / "MissingInfoPlist.component",
+        valid_bundle,
+        no_audio_components,
+        no_dict,
+        unterminated_dict,
+        missing_manufacturer,
+        missing_type,
+        missing_subtype,
+    };
+
+    for (const auto& bundle : bundles) {
+        auto r = run_pulp({"host", bundle.string(), "--format", "au"});
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 1);
+        REQUIRE(r.stderr_output.find("pulp host: failed to load") !=
+                std::string::npos);
+    }
+
+    fs::remove_all(base);
+}
+
 TEST_CASE("pulp audio usage and parser errors are deterministic",
           "[cli][shellout][audio][issue-643]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }

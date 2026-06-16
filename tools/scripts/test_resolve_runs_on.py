@@ -62,6 +62,13 @@ def _build_workflow_requested_provider_fallback() -> str:
     return match.group(1)
 
 
+def _build_workflow_env_value(name: str) -> str:
+    text = BUILD_WORKFLOW.read_text(encoding="utf-8")
+    match = re.search(rf"(?m)^\s+{re.escape(name)}:\s*(.+?)\s*$", text)
+    _assert(match is not None, f"build.yml missing {name}")
+    return match.group(1)
+
+
 def _run(args: list[str], env_extra: dict[str, str] | None = None,
          expect_error: bool = False) -> tuple[int, str, str]:
     env = os.environ.copy()
@@ -145,6 +152,15 @@ def test_build_workflow_pull_request_fallback_does_not_require_namespace() -> No
             f"pull_request fallback unexpectedly required Namespace: {out!r}")
 
 
+def test_build_workflow_windows_does_not_read_local_arm64_selector_by_default() -> None:
+    """The required Windows PR leg is x64; local QEMU Windows is ARM64 smoke."""
+    env_value = _build_workflow_env_value("EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON")
+    _assert("PULP_LOCAL_WINDOWS_RUNS_ON_JSON" not in env_value,
+            f"Windows x64 leg must not read local ARM64 selector: {env_value!r}")
+    _assert("inputs.windows_runner_selector_json" in env_value,
+            f"manual Windows selector override should remain wired: {env_value!r}")
+
+
 def test_provider_namespace_with_env() -> None:
     _, out, _ = _run([
         "--target-name", "Windows (x64)",
@@ -161,6 +177,20 @@ def test_provider_namespace_with_env() -> None:
     })
     _assert(json.loads(out) == ["namespace-profile-generouscorp-windows"],
             f"unexpected namespace routing: {out!r}")
+
+
+def test_provider_namespace_accepts_legacy_bare_label() -> None:
+    _, out, _ = _run([
+        "--target-name", "macOS coverage",
+        "--mode", "provider",
+        "--github-hosted-label", "macos-latest",
+        "--namespace-env", "NAMESPACE_MACOS_RUNS_ON_JSON",
+    ], env_extra={
+        "REQUESTED_PROVIDER": "namespace",
+        "NAMESPACE_MACOS_RUNS_ON_JSON": "macos-15",
+    })
+    _assert(json.loads(out) == "macos-15",
+            f"legacy bare label was not accepted: {out!r}")
 
 
 def test_provider_namespace_missing_env_errors() -> None:
@@ -378,6 +408,77 @@ def test_default_mode_override_wins() -> None:
     })
     _assert(json.loads(out) == ["self-hosted", "macos", "arm64", "sanitizer"],
             f"override ignored: {out!r}")
+
+
+def test_default_mode_override_accepts_legacy_bare_label() -> None:
+    _, out, _ = _run([
+        "--target-name", "Coverage (macOS)",
+        "--mode", "default",
+        "--override-env", "MACOS_RUNS_ON_JSON",
+        "--default-label", "macos-latest",
+    ], env_extra={"MACOS_RUNS_ON_JSON": "macos-15"})
+    _assert(json.loads(out) == "macos-15",
+            f"legacy bare override label was not accepted: {out!r}")
+
+
+def test_deny_labels_rejects_gate_pool_selector() -> None:
+    """Coverage macOS must never resolve onto the shared pulp-build gate pool."""
+    code, _, err = _run([
+        "--target-name", "Coverage (macOS)",
+        "--mode", "default",
+        "--override-env", "MACOS_RUNS_ON_JSON",
+        "--default-label", "macos-latest",
+        "--deny-labels", "pulp-build,pulp-build-vm",
+    ], env_extra={
+        "MACOS_RUNS_ON_JSON": '["self-hosted","macOS","ARM64","pulp-build"]',
+    }, expect_error=True)
+    _assert(code != 0, f"expected nonzero exit, got {code}")
+    _assert("pulp-build" in err,
+            f"error should name the forbidden label: {err!r}")
+
+
+def test_deny_labels_rejects_gate_pool_case_insensitively() -> None:
+    code, _, err = _run([
+        "--target-name", "Coverage (macOS)",
+        "--mode", "default",
+        "--override-env", "MACOS_RUNS_ON_JSON",
+        "--default-label", "macos-latest",
+        "--deny-labels", "pulp-build,pulp-build-vm",
+    ], env_extra={
+        "MACOS_RUNS_ON_JSON": '["self-hosted","macOS","ARM64","PULP-BUILD-VM"]',
+    }, expect_error=True)
+    _assert(code != 0, f"expected nonzero exit, got {code}")
+    _assert("pulp-build-vm" in err, f"unexpected error: {err!r}")
+
+
+def test_deny_labels_allows_dedicated_coverage_label() -> None:
+    _, out, _ = _run([
+        "--target-name", "Coverage (macOS)",
+        "--mode", "default",
+        "--override-env", "MACOS_RUNS_ON_JSON",
+        "--default-label", "macos-latest",
+        "--deny-labels", "pulp-build,pulp-build-vm",
+    ], env_extra={
+        "MACOS_RUNS_ON_JSON":
+            '["self-hosted","macOS","ARM64","pulp-coverage-vm-macos"]',
+    })
+    _assert(
+        json.loads(out) == ["self-hosted", "macOS", "ARM64",
+                            "pulp-coverage-vm-macos"],
+        f"dedicated coverage selector was wrongly rejected: {out!r}")
+
+
+def test_deny_labels_never_denies_bare_github_hosted_label() -> None:
+    """A bare GitHub-hosted fallback label is always allowed under deny-labels."""
+    _, out, _ = _run([
+        "--target-name", "Coverage (macOS)",
+        "--mode", "default",
+        "--override-env", "MACOS_RUNS_ON_JSON",
+        "--default-label", "macos-15",
+        "--deny-labels", "pulp-build,pulp-build-vm",
+    ])  # no override env -> falls back to the bare default label
+    _assert(json.loads(out) == "macos-15",
+            f"bare github-hosted label should pass deny-labels: {out!r}")
 
 
 def test_default_mode_explicit_beats_override() -> None:

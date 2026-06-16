@@ -135,4 +135,17 @@ bool dispatch_drop(View& root, DragSession& session, const DropData& data,
     return false;
 }
 
+#if !defined(__APPLE__)
+// Outbound file drag is macOS-only today — the NSDraggingSession backend lives
+// in platform/mac/drag_drop_mac.mm, which is compiled only on macOS. On every
+// other platform View::start_file_drag (cross-platform, in view.cpp) still
+// references begin_file_drag, so provide a no-op here so it links and degrades
+// gracefully. Windows (IDataObject/DoDragDrop) and Linux (XDND) backends can
+// supply a real implementation in their own platform TU when they land; this
+// definition then drops out via the same __APPLE__-style guard.
+bool begin_file_drag(void* /*native_view*/, const FileDragRequest& /*request*/) {
+    return false;
+}
+#endif
+
 }  // namespace pulp::view

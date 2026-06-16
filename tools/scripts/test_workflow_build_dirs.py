@@ -100,7 +100,17 @@ class MacosNinjaGeneratorTests(unittest.TestCase):
         self.assertIn("gen=()", self.text)
         self.assertIn("gen=(-G Ninja)", self.text)
         self.assertIn(
-            'cmake -S . -B "$PULP_BUILD_DIR" "${gen[@]}" -DCMAKE_BUILD_TYPE=Release',
+            'cmake -S . -B "$PULP_BUILD_DIR" "${gen[@]}" ${cmake_extra[@]+"${cmake_extra[@]}"} -DCMAKE_BUILD_TYPE=Release',
+            self.text,
+        )
+
+    def test_windows_configure_uses_short_fetchcontent_base(self) -> None:
+        # MSBuild still evaluates some FetchContent subbuild paths through
+        # MAX_PATH-limited metadata. Keep Windows dependency subbuilds short.
+        self.assertIn('if [ "${RUNNER_OS}" = "Windows" ]; then', self.text)
+        self.assertIn('cmake_extra=(-DFETCHCONTENT_BASE_DIR="$PWD/fc")', self.text)
+        self.assertIn(
+            'cmake -S . -B "$PULP_BUILD_DIR" "${gen[@]}" ${cmake_extra[@]+"${cmake_extra[@]}"} -DCMAKE_BUILD_TYPE=Release',
             self.text,
         )
 

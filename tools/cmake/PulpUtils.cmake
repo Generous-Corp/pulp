@@ -4,6 +4,7 @@
 #   pulp_add_plugin()  — Create a plugin target with format adapters
 #   pulp_add_app()     — Create a standalone application target
 #   pulp_app_icon()    — Attach a generated app icon to a target
+#   pulp_use_kit_ui()  — Attach reviewed kit UI resources to plugin formats
 
 include("${CMAKE_CURRENT_LIST_DIR}/PulpAppIcon.cmake")
 
@@ -119,6 +120,329 @@ function(_pulp_apply_ui_script_definition target ui_script_path)
     )
 endfunction()
 
+function(_pulp_apply_ui_theme_definition target theme_path)
+    if(NOT theme_path)
+        return()
+    endif()
+
+    target_compile_definitions(${target} PRIVATE
+        PULP_UI_THEME_PATH="${theme_path}"
+    )
+endfunction()
+
+function(_pulp_apply_ui_asset_roots_definition target asset_roots)
+    if(NOT asset_roots)
+        return()
+    endif()
+
+    target_compile_definitions(${target} PRIVATE
+        PULP_UI_ASSET_ROOTS="${asset_roots}"
+    )
+endfunction()
+
+function(_pulp_select_kit_export out_var helper_name kit_target property explicit_value label)
+    get_target_property(_values "${kit_target}" "${property}")
+    if(NOT _values)
+        set(${out_var} "" PARENT_SCOPE)
+        return()
+    endif()
+
+    set(_selected "")
+    if(explicit_value)
+        foreach(_value IN LISTS _values)
+            if(_value STREQUAL explicit_value)
+                set(_selected "${_value}")
+            endif()
+        endforeach()
+        if(NOT _selected)
+            message(FATAL_ERROR
+                "${helper_name}: ${label} '${explicit_value}' is not exported by the kit")
+        endif()
+    else()
+        list(LENGTH _values _value_count)
+        if(_value_count EQUAL 1)
+            list(GET _values 0 _selected)
+        elseif(_value_count GREATER 1)
+            message(FATAL_ERROR
+                "${helper_name}: kit exports multiple ${label} entries; pass ${label} <path>")
+        endif()
+    endif()
+
+    set(${out_var} "${_selected}" PARENT_SCOPE)
+endfunction()
+
+function(_pulp_absolute_project_path out_var path)
+    if(NOT path)
+        set(${out_var} "" PARENT_SCOPE)
+        return()
+    endif()
+    if(IS_ABSOLUTE "${path}")
+        set(_abs "${path}")
+    else()
+        set(_abs "${CMAKE_SOURCE_DIR}/${path}")
+    endif()
+    get_filename_component(_abs "${_abs}" ABSOLUTE)
+    file(TO_CMAKE_PATH "${_abs}" _abs)
+    set(${out_var} "${_abs}" PARENT_SCOPE)
+endfunction()
+
+function(_pulp_absolute_project_paths out_var)
+    set(_out)
+    foreach(_path IN LISTS ARGN)
+        _pulp_absolute_project_path(_abs "${_path}")
+        if(_abs)
+            list(APPEND _out "${_abs}")
+        endif()
+    endforeach()
+    set(${out_var} "${_out}" PARENT_SCOPE)
+endfunction()
+
+function(_pulp_pipe_join out_var)
+    set(_joined "")
+    foreach(_value IN LISTS ARGN)
+        if(_value MATCHES "\\|")
+            message(FATAL_ERROR
+                "pulp_use_kit_ui: asset root paths must not contain '|': ${_value}")
+        endif()
+        if(_joined)
+            string(APPEND _joined "|")
+        endif()
+        string(APPEND _joined "${_value}")
+    endforeach()
+    set(${out_var} "${_joined}" PARENT_SCOPE)
+endfunction()
+
+function(pulp_use_kit_ui target kit_target)
+    set(options)
+    set(oneValueArgs SCRIPT TOKENS)
+    set(multiValueArgs)
+    cmake_parse_arguments(KIT_UI "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
+
+    if(KIT_UI_UNPARSED_ARGUMENTS)
+        message(FATAL_ERROR
+            "pulp_use_kit_ui(${target} ${kit_target}): unknown arguments: ${KIT_UI_UNPARSED_ARGUMENTS}")
+    endif()
+
+    if(NOT TARGET "${target}_Core")
+        message(FATAL_ERROR
+            "pulp_use_kit_ui(${target} ...): call this after pulp_add_plugin(${target} ...)")
+    endif()
+    if(NOT TARGET "${kit_target}")
+        message(FATAL_ERROR
+            "pulp_use_kit_ui(${target} ${kit_target}): kit target does not exist. "
+            "Apply the kit and include(cmake/pulp-kits.cmake OPTIONAL) first.")
+    endif()
+
+    _pulp_select_kit_export(_selected_script
+        "pulp_use_kit_ui(${target} ${kit_target})"
+        "${kit_target}" PULP_UI_SCRIPTS "${KIT_UI_SCRIPT}" "SCRIPT")
+    if(NOT _selected_script)
+        message(FATAL_ERROR
+            "pulp_use_kit_ui(${target} ${kit_target}): kit exports no PULP_UI_SCRIPTS")
+    endif()
+
+    _pulp_select_kit_export(_selected_tokens
+        "pulp_use_kit_ui(${target} ${kit_target})"
+        "${kit_target}" PULP_DESIGN_TOKENS "${KIT_UI_TOKENS}" "TOKENS")
+    get_target_property(_selected_assets "${kit_target}" PULP_ASSETS)
+    if(NOT _selected_assets)
+        set(_selected_assets)
+    endif()
+
+    _pulp_absolute_project_path(_selected_script_abs "${_selected_script}")
+    _pulp_absolute_project_path(_selected_tokens_abs "${_selected_tokens}")
+    _pulp_absolute_project_paths(_selected_assets_abs ${_selected_assets})
+    _pulp_pipe_join(_selected_assets_joined ${_selected_assets_abs})
+
+    if(NOT EXISTS "${_selected_script_abs}")
+        message(WARNING
+            "pulp_use_kit_ui(${target} ${kit_target}): selected UI script is missing: "
+            "${_selected_script_abs}")
+    endif()
+    if(_selected_tokens_abs AND NOT EXISTS "${_selected_tokens_abs}")
+        message(WARNING
+            "pulp_use_kit_ui(${target} ${kit_target}): selected design token file is missing: "
+            "${_selected_tokens_abs}")
+    endif()
+
+    set(PULP_${target}_UI_SCRIPT "${_selected_script_abs}" CACHE INTERNAL "")
+    if(_selected_tokens_abs)
+        set(PULP_${target}_UI_THEME "${_selected_tokens_abs}" CACHE INTERNAL "")
+    endif()
+    if(_selected_assets_joined)
+        set(PULP_${target}_UI_ASSET_ROOTS "${_selected_assets_joined}" CACHE INTERNAL "")
+    endif()
+    set_property(TARGET "${target}_Core" PROPERTY PULP_KIT_UI_TARGET "${kit_target}")
+    set_property(TARGET "${target}_Core" PROPERTY PULP_KIT_UI_SCRIPT "${_selected_script}")
+    if(_selected_tokens)
+        set_property(TARGET "${target}_Core" PROPERTY PULP_KIT_UI_TOKENS "${_selected_tokens}")
+    endif()
+    if(_selected_assets)
+        set_property(TARGET "${target}_Core" PROPERTY PULP_KIT_UI_ASSETS "${_selected_assets}")
+    endif()
+
+    set(_applied_targets)
+    foreach(_fmt VST3 CLAP AU LV2 AAX AUv3 Standalone)
+        if(TARGET "${target}_${_fmt}")
+            _pulp_apply_ui_script_definition("${target}_${_fmt}" "${_selected_script_abs}")
+            _pulp_apply_ui_theme_definition("${target}_${_fmt}" "${_selected_tokens_abs}")
+            _pulp_apply_ui_asset_roots_definition("${target}_${_fmt}" "${_selected_assets_joined}")
+            list(APPEND _applied_targets "${target}_${_fmt}")
+        endif()
+    endforeach()
+
+    if(NOT _applied_targets)
+        message(WARNING
+            "pulp_use_kit_ui(${target} ${kit_target}): no existing format targets were found; "
+            "call this after pulp_add_plugin has created at least one format target")
+    endif()
+endfunction()
+
+function(_pulp_json_string_array out_var)
+    set(_json "[")
+    set(_first TRUE)
+    foreach(_value IN LISTS ARGN)
+        if(_value MATCHES "[\"\\\\]")
+            message(FATAL_ERROR
+                "pulp_add_plugin: plugin runtime manifest values must not "
+                "contain quotes or backslashes: '${_value}'")
+        endif()
+        if(NOT _first)
+            string(APPEND _json ", ")
+        endif()
+        string(APPEND _json "\"${_value}\"")
+        set(_first FALSE)
+    endforeach()
+    string(APPEND _json "]")
+    set(${out_var} "${_json}" PARENT_SCOPE)
+endfunction()
+
+function(_pulp_configure_plugin_runtime_manifest target bundle_id)
+    set(_capabilities ${PULP_${target}_CONTENT_CAPABILITIES})
+    set(_kinds ${PULP_${target}_CONTENT_KINDS})
+    set(_hot_reload_kinds ${PULP_${target}_CONTENT_HOT_RELOAD_KINDS})
+    set(_manual_rescan_kinds ${PULP_${target}_CONTENT_MANUAL_RESCAN_KINDS})
+    set(_pulp_valid_content_kinds presets themes samples wavetables)
+
+    if(NOT _capabilities AND NOT _kinds)
+        if(_hot_reload_kinds OR _manual_rescan_kinds)
+            message(FATAL_ERROR
+                "pulp_add_plugin(${target}): CONTENT_HOT_RELOAD_KINDS and "
+                "CONTENT_MANUAL_RESCAN_KINDS require CONTENT_CAPABILITIES "
+                "and CONTENT_KINDS.")
+        endif()
+        set(PULP_${target}_PLUGIN_RUNTIME_MANIFEST "" CACHE INTERNAL "")
+        return()
+    endif()
+    if(NOT _capabilities OR NOT _kinds)
+        message(FATAL_ERROR
+            "pulp_add_plugin(${target}): CONTENT_CAPABILITIES and "
+            "CONTENT_KINDS must be provided together.")
+    endif()
+    if(NOT bundle_id)
+        message(FATAL_ERROR
+            "pulp_add_plugin(${target}): BUNDLE_ID is required when "
+            "CONTENT_CAPABILITIES / CONTENT_KINDS are declared.")
+    endif()
+
+    foreach(_kind IN LISTS _kinds)
+        if(NOT _kind IN_LIST _pulp_valid_content_kinds)
+            message(FATAL_ERROR
+                "pulp_add_plugin(${target}): unsupported CONTENT_KINDS "
+                "'${_kind}'. Expected one of: presets, themes, samples, "
+                "wavetables.")
+        endif()
+    endforeach()
+    foreach(_kind IN LISTS _hot_reload_kinds)
+        if(NOT _kind IN_LIST _kinds)
+            message(FATAL_ERROR
+                "pulp_add_plugin(${target}): CONTENT_HOT_RELOAD_KINDS "
+                "'${_kind}' must also be listed in CONTENT_KINDS.")
+        endif()
+    endforeach()
+    foreach(_kind IN LISTS _manual_rescan_kinds)
+        if(NOT _kind IN_LIST _kinds)
+            message(FATAL_ERROR
+                "pulp_add_plugin(${target}): CONTENT_MANUAL_RESCAN_KINDS "
+                "'${_kind}' must also be listed in CONTENT_KINDS.")
+        endif()
+    endforeach()
+
+    _pulp_json_string_array(_capabilities_json ${_capabilities})
+    _pulp_json_string_array(_kinds_json ${_kinds})
+    _pulp_json_string_array(_hot_reload_json ${_hot_reload_kinds})
+    _pulp_json_string_array(_manual_rescan_json ${_manual_rescan_kinds})
+
+    set(_manifest "${CMAKE_CURRENT_BINARY_DIR}/${target}_pulp.plugin-runtime.json")
+    file(WRITE "${_manifest}" "{\n")
+    file(APPEND "${_manifest}" "  \"schema\": \"pulp.plugin-runtime.v1\",\n")
+    file(APPEND "${_manifest}" "  \"pluginId\": \"${bundle_id}\",\n")
+    file(APPEND "${_manifest}" "  \"content\": {\n")
+    file(APPEND "${_manifest}" "    \"capabilities\": ${_capabilities_json},\n")
+    file(APPEND "${_manifest}" "    \"kinds\": ${_kinds_json}")
+    if(NOT "${_hot_reload_kinds}" STREQUAL "" OR NOT "${_manual_rescan_kinds}" STREQUAL "")
+        file(APPEND "${_manifest}" ",\n")
+        file(APPEND "${_manifest}" "    \"reload\": {\n")
+        file(APPEND "${_manifest}" "      \"hotReloadKinds\": ${_hot_reload_json},\n")
+        file(APPEND "${_manifest}" "      \"manualRescanKinds\": ${_manual_rescan_json}\n")
+        file(APPEND "${_manifest}" "    }\n")
+    else()
+        file(APPEND "${_manifest}" "\n")
+    endif()
+    file(APPEND "${_manifest}" "  }\n")
+    file(APPEND "${_manifest}" "}\n")
+
+    set(PULP_${target}_PLUGIN_RUNTIME_MANIFEST "${_manifest}" CACHE INTERNAL "")
+endfunction()
+
+function(_pulp_attach_plugin_runtime_manifest target format_target)
+    set(_manifest "${PULP_${target}_PLUGIN_RUNTIME_MANIFEST}")
+    if(NOT _manifest)
+        return()
+    endif()
+    if(NOT TARGET ${format_target})
+        return()
+    endif()
+
+    if("${format_target}" MATCHES "_LV2$")
+        add_custom_command(TARGET ${format_target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${_manifest}"
+                "$<TARGET_FILE_DIR:${format_target}>/pulp.plugin-runtime.json"
+            COMMENT "Embedding pulp.plugin-runtime.json into ${format_target} LV2 bundle"
+            VERBATIM
+        )
+    elseif(APPLE AND PULP_IOS)
+        add_custom_command(TARGET ${format_target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                "$<TARGET_BUNDLE_DIR:${format_target}>/Resources"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${_manifest}"
+                "$<TARGET_BUNDLE_DIR:${format_target}>/Resources/pulp.plugin-runtime.json"
+            COMMENT "Embedding pulp.plugin-runtime.json into ${format_target} flat bundle resources"
+            VERBATIM
+        )
+    elseif(APPLE)
+        add_custom_command(TARGET ${format_target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                "$<TARGET_BUNDLE_DIR:${format_target}>/Contents/Resources"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${_manifest}"
+                "$<TARGET_BUNDLE_DIR:${format_target}>/Contents/Resources/pulp.plugin-runtime.json"
+            COMMENT "Embedding pulp.plugin-runtime.json into ${format_target}"
+            VERBATIM
+        )
+    else()
+        add_custom_command(TARGET ${format_target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${_manifest}"
+                "$<TARGET_FILE_DIR:${format_target}>/$<TARGET_FILE_BASE_NAME:${format_target}>.pulp.plugin-runtime.json"
+            COMMENT "Writing pulp.plugin-runtime sidecar for ${format_target}"
+            VERBATIM
+        )
+    endif()
+endfunction()
+
 function(_pulp_apply_macho_exports target file_stem)
     if(NOT APPLE)
         return()
@@ -168,7 +492,7 @@ function(pulp_add_plugin target)
     cmake_parse_arguments(PLUGIN
         "ACCEPTS_MIDI;PRODUCES_MIDI"
         "PLUGIN_NAME;BUNDLE_ID;VERSION;MANUFACTURER;CATEGORY;PLUGIN_CODE;MANUFACTURER_CODE;AAX_PRODUCT_CODE;AAX_NATIVE_CODE;PROCESSOR_FACTORY;UI_SCRIPT;DESIGN_WIDTH;DESIGN_HEIGHT;DESIGN_MIN_WIDTH;DESIGN_MIN_HEIGHT;DESIGN_MAX_WIDTH;DESIGN_MAX_HEIGHT"
-        "FORMATS;SOURCES"
+        "FORMATS;SOURCES;CONTENT_CAPABILITIES;CONTENT_KINDS;CONTENT_HOT_RELOAD_KINDS;CONTENT_MANUAL_RESCAN_KINDS"
         ${ARGN}
     )
 
@@ -202,12 +526,17 @@ function(pulp_add_plugin target)
 
     _pulp_normalize_ui_script_path(_PULP_UI_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}" "${PLUGIN_UI_SCRIPT}")
     set(PULP_${target}_UI_SCRIPT "${_PULP_UI_SCRIPT}" CACHE INTERNAL "")
+    set(PULP_${target}_CONTENT_CAPABILITIES "${PLUGIN_CONTENT_CAPABILITIES}" CACHE INTERNAL "")
+    set(PULP_${target}_CONTENT_KINDS "${PLUGIN_CONTENT_KINDS}" CACHE INTERNAL "")
+    set(PULP_${target}_CONTENT_HOT_RELOAD_KINDS "${PLUGIN_CONTENT_HOT_RELOAD_KINDS}" CACHE INTERNAL "")
+    set(PULP_${target}_CONTENT_MANUAL_RESCAN_KINDS "${PLUGIN_CONTENT_MANUAL_RESCAN_KINDS}" CACHE INTERNAL "")
 
     if(_PULP_UI_SCRIPT AND NOT EXISTS "${_PULP_UI_SCRIPT}")
         message(WARNING
             "pulp_add_plugin(${target}): UI_SCRIPT points to a missing file: ${_PULP_UI_SCRIPT}. "
             "The editor will fall back to AutoUi until the script exists.")
     endif()
+    _pulp_configure_plugin_runtime_manifest(${target} "${PLUGIN_BUNDLE_ID}")
 
     # ── Core library ────────────────────────────────────────────────────
     # For header-only processors (no SOURCES), create INTERFACE library.

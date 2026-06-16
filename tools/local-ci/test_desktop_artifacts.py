@@ -4,22 +4,17 @@
 from __future__ import annotations
 
 from datetime import datetime
-import importlib.util
 import json
 import pathlib
 import tempfile
 import unittest
 
+from module_test_utils import load_local_ci_module
 
-MODULE_PATH = pathlib.Path(__file__).with_name("desktop_artifacts.py")
 
 
 def load_module():
-    spec = importlib.util.spec_from_file_location("desktop_artifacts_under_test", MODULE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    return load_local_ci_module("desktop_artifacts.py")
 
 
 class DesktopArtifactsTests(unittest.TestCase):

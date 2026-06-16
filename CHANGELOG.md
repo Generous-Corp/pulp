@@ -8,6 +8,32 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v04330"></a>
+## [0.433.0] - 2026-06-15
+
+- feature/view outbound file drag ([#4068](https://github.com/danielraffel/pulp/pull/4068))
+- ci(coverage): harden coverage VM lane + screenshot helper (post-merge review) ([#4066](https://github.com/danielraffel/pulp/pull/4066))
+- Sampler: waveform zoom + pan (scroll/pinch) ([#4059](https://github.com/danielraffel/pulp/pull/4059))
+- ci: add dedicated macOS coverage VM lane ([#4036](https://github.com/danielraffel/pulp/pull/4036))
+- docs(validation): autonomous REAPER HostBench re-validation on current main ([#4063](https://github.com/danielraffel/pulp/pull/4063))
+
+<a id="v04321"></a>
+## [0.432.1] - 2026-06-14
+
+- fix(cli): make kit-verify --execute-screenshots pass on Windows ([#4061](https://github.com/danielraffel/pulp/pull/4061))
+- refactor(local-ci): extract ssh bundle bindings ([#4027](https://github.com/danielraffel/pulp/pull/4027))
+- test(validation): fix two Windows-only host-lab test fixtures ([#4060](https://github.com/danielraffel/pulp/pull/4060))
+- Offline stretch engine + PulpTempoSampler (Phases 0-4) ([#4054](https://github.com/danielraffel/pulp/pull/4054))
+- test(validation): check AU gatekeeper preflight ([#4058](https://github.com/danielraffel/pulp/pull/4058))
+- Add package kit and content workflows ([#4044](https://github.com/danielraffel/pulp/pull/4044))
+- feature/dsp hostlab coverage summary ([#4052](https://github.com/danielraffel/pulp/pull/4052))
+
+<a id="v04320"></a>
+## [0.432.0] - 2026-06-13
+
+- feat(view): close text input behavior gaps ([#4055](https://github.com/danielraffel/pulp/pull/4055))
+- docs(audio): explain inspector signal and scope modes ([#4056](https://github.com/danielraffel/pulp/pull/4056))
+
 <a id="v04312"></a>
 ## [0.431.2] - 2026-06-12
 
@@ -4407,6 +4433,9 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.433.0]: https://github.com/danielraffel/pulp/releases/tag/v0.433.0
+[0.432.1]: https://github.com/danielraffel/pulp/releases/tag/v0.432.1
+[0.432.0]: https://github.com/danielraffel/pulp/releases/tag/v0.432.0
 [0.431.2]: https://github.com/danielraffel/pulp/releases/tag/v0.431.2
 [0.431.1]: https://github.com/danielraffel/pulp/releases/tag/v0.431.1
 [0.431.0]: https://github.com/danielraffel/pulp/releases/tag/v0.431.0

@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "host": "REAPER",
+  "format": "CLAP",
+  "daw_version": "7.74/macOS-arm64",
+  "os": "macOS 26.5.1 arm64",
+  "date": "2026-06-15",
+  "script": "07-reaper-clap.md",
+  "pulp_commit": "1e4348a16376",
+  "plugin_version": "1.0.0",
+  "result_markdown": "07-reaper-clap.md",
+  "logs": ["logs/REAPER-CLAP-20260615T044212Z-pid29054.log"],
+  "capabilities": [
+    {
+      "capability": "load",
+      "observed": "Confirmed",
+      "notes": "Log contains session_start (host=REAPER format=CLAP), define_parameters, and prepare events."
+    },
+    {
+      "capability": "params",
+      "observed": "Confirmed",
+      "notes": "Log contains define_parameters and serialize_plugin_state events."
+    },
+    {
+      "capability": "sidechain",
+      "observed": "Confirmed",
+      "notes": "Log contains a sidechain_edge event."
+    }
+  ],
+  "quirks": [
+    {
+      "flag": "reaper_process_while_bypassed",
+      "row": "R1",
+      "observed": "Not Triggered",
+      "notes": "No process_without_prepare event in this headless smoke (no active playback device drove processing while bypassed)."
+    },
+    {
+      "flag": "reaper_anticipative_fx_buffer_variability",
+      "row": "R4",
+      "observed": "Not Triggered",
+      "notes": "No process_buffer_overrun or process_sample_rate_drift event was observed in this run."
+    },
+    {
+      "flag": "reaper_midsession_setstate",
+      "row": "R6",
+      "observed": "Not Triggered",
+      "notes": "No deserialize_plugin_state event was observed (the smoke does not reopen a saved session)."
+    },
+    {
+      "flag": "reaper_clap_transport_edges",
+      "row": "R7",
+      "observed": "Not Triggered",
+      "notes": "No transport-playing edge was observed; the headless smoke ran without an active playback device."
+    }
+  ]
+}

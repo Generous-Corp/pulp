@@ -144,6 +144,7 @@ function(_pulp_add_auv3_macos_framework target name bundle_id version auv3_entry
     if(COMMAND target_copy_webgpu_binaries)
         target_copy_webgpu_binaries(${fw_target})
     endif()
+    _pulp_attach_plugin_runtime_manifest(${target} ${fw_target})
 endfunction()
 
 # ── macOS stub .appex: tiny shell linking the framework ────────────────────
@@ -225,6 +226,7 @@ function(_pulp_add_auv3_macos_appex target name bundle_id version manufacturer m
     # runtime, which happens at framework load.
     target_link_options(${appex_target} PRIVATE
         "-Wl,-force_load,$<TARGET_FILE:${target}_AUv3Framework>")
+    _pulp_attach_plugin_runtime_manifest(${target} ${appex_target})
 endfunction()
 
 # ── macOS container .app: holds the .appex + framework ────────────────────
@@ -448,6 +450,7 @@ function(_pulp_add_auv3_ios target name bundle_id version manufacturer manufactu
     if(COMMAND target_copy_webgpu_binaries)
         target_copy_webgpu_binaries(${target}_AUv3)
     endif()
+    _pulp_attach_plugin_runtime_manifest(${target} ${target}_AUv3)
 
     # iOS-D.3b Slice 3: Embed three.iife.js + web-compat-three-shim.js
     # into the .appex `threejs/` subdirectory so the JSC engine can load

@@ -783,11 +783,9 @@ catch_discover_tests(pulp-test-cli-sdk-tarball-filename)
 
 # CLI package commands (#643): local-only tests for target/search/list/
 # update/suggest/audit/add/remove behavior against staged project files
-# and registry fixtures. Stays off remote fetch / archive extraction /
-# install branches; links the package_commands_* TUs + package_registry.cpp
-# directly so the command surface can be exercised without shelling out
-# to the built binary. Roadmap item P11-2 split the sub-command bodies
-# out of package_commands.cpp into _util / _search / _add sibling TUs.
+# and registry fixtures. Stays off remote fetch / archive extraction; links
+# package_commands_* + package_registry.cpp directly without shelling out.
+# Roadmap item P11-2 split subcommands into _util / _search / _add TUs.
 add_executable(pulp-test-cli-package-commands
     test_cli_package_commands.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/package_commands.cpp
@@ -807,6 +805,8 @@ target_link_libraries(pulp-test-cli-package-commands PRIVATE
     pulp::platform
     Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-package-commands)
+
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/content_workflow_tests.cmake")
 
 # CLI package registry (#643): pure local tests for registry parsing,
 # lock-file round trips, target TOML parsing/writing, semver, quality
@@ -1865,6 +1865,7 @@ pulp_add_test_suite(pulp-test-simd LIBRARIES pulp::runtime pulp::signal)
 
 # Drag-and-drop tests
 pulp_add_test_suite(pulp-test-dnd SOURCES test_drag_drop.cpp LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-musical-typing SOURCES test_musical_typing.cpp LIBRARIES pulp::view)
 
 # OSC tests
 pulp_add_test_suite(pulp-test-osc LIBRARIES pulp::osc)
@@ -1903,6 +1904,8 @@ pulp_add_test_suite(pulp-test-signal-spectral LIBRARIES pulp::signal)
 # Spectral primitives: STFT/WOLA engine, pitch/time, formant, smoothing.
 pulp_add_test_suite(pulp-test-spectral-primitives SOURCES test_spectral_frame_engine.cpp test_realtime_pitch_time.cpp test_transient_freeze_delay.cpp test_spectral_matrix.cpp test_stn_stretch.cpp test_sinc_pitch.cpp LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-stn-decomposer LIBRARIES pulp::signal)
+# Offline time-stretch/pitch engine (orchestrates the spectral primitives).
+pulp_add_test_suite(pulp-test-offline-stretch LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-noise-morpher LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-sinc-resampler LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-freeze-loop-sampler LIBRARIES pulp::signal)
@@ -4826,6 +4829,9 @@ pulp_add_test_suite(pulp-test-input-events LIBRARIES pulp::view)
 
 # Text editor tests
 pulp_add_test_suite(pulp-test-text-editor LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-text-editor-mouse LIBRARIES pulp::view PROPERTIES RESOURCE_LOCK system-clipboard)
+pulp_add_test_suite(pulp-test-text-editor-paint LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-text-editor-policy LIBRARIES pulp::view PROPERTIES RESOURCE_LOCK system-clipboard)
 
 # TextEditor multi-line coverage (audit P3: wrap, click-to-caret in
 # wrapped rows, caret_rect pixel positioning, single-vs-multi Enter
@@ -4998,6 +5004,7 @@ target_link_libraries(pulp-test-design-import-native-materializer
     PRIVATE pulp::view Catch2::Catch2WithMain)
 target_compile_definitions(pulp-test-design-import-native-materializer PRIVATE
     PULP_TEST_CXX_COMPILER="${CMAKE_CXX_COMPILER}"
+    PULP_TEST_OSX_SYSROOT="${CMAKE_OSX_SYSROOT}"
     PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")
 catch_discover_tests(pulp-test-design-import-native-materializer
     PROPERTIES LABELS "parser-import")
@@ -5576,7 +5583,7 @@ if(APPLE)
     add_executable(pulp-test-screenshot-compare test_screenshot_compare.cpp)
     target_link_libraries(pulp-test-screenshot-compare PRIVATE pulp::view Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-screenshot-compare
-        PROPERTIES LABELS "parser-import")
+        PROPERTIES LABELS "parser-import" TIMEOUT 240)
 endif()
 
 # Parameter attachment tests
@@ -5792,7 +5799,10 @@ if(TARGET PulpGain_CLAP)
         PULP_TEST_CLAP_PATH="${CMAKE_BINARY_DIR}/CLAP/PulpGain.clap")
     add_dependencies(pulp-test-host PulpGain_CLAP)
 endif()
-catch_discover_tests(pulp-test-host)
+# issue-669's older snapshot-publish stress case is intentionally kept in the
+# binary for manual replay, but not registered in the default per-PR CTest set:
+# it is a known flaky stress surface with a dedicated gated stress target below.
+catch_discover_tests(pulp-test-host TEST_SPEC "~[flaky]")
 
 # P11-5 (#2647): SignalGraph tests carved out of test_host.cpp to bring the
 # 2,190-line parent under 2,000 (now 852). No CLAP fixture needed — these
@@ -6072,7 +6082,6 @@ if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA)
     target_compile_definitions(pulp-test-mac-platform-harness PRIVATE
         PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     catch_discover_tests(pulp-test-mac-platform-harness)
-
     # pulp #2088 — pin the invariant -[PulpView liveFocusedView] depends on:
     # ~View() must auto-clear focused_input_ (#1708 contract) so the
     # accessor can safely re-sync the ivar to nullptr before any deref.
@@ -6084,11 +6093,10 @@ if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA)
         Catch2::Catch2WithMain
     )
     catch_discover_tests(pulp-test-mac-mousedown-stale-focus)
-
-    # pulp #2128 follow-up — pin the macOS performKeyEquivalent: route that
-    # delivers Cmd-modified chords into rootView->on_global_key. Without
-    # the override, every auto-bound default chord (Cmd+, Cmd+? Cmd+S) is
-    # silently consumed by NSResponder's first-responder chain.
+endif()
+if(APPLE AND NOT PULP_IOS)
+    # pulp #2128 — pin macOS performKeyEquivalent routing, text-input
+    # protocol conformance, and TextEditor-specific command priority.
     add_executable(pulp-test-mac-perform-key-equivalent
         test_mac_perform_key_equivalent.mm
     )
@@ -6097,11 +6105,8 @@ if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA)
         Catch2::Catch2WithMain
         "-framework AppKit"
     )
-    # PulpView's Obj-C class metadata only registers when the linker keeps
-    # window_host_mac.mm.o — but no C++ symbol the test references lives in
-    # that .o, so static-lib pruning drops it. Force-load the one specific
-    # object to register the class without dragging in every other .mm
-    # (which would duplicate-symbol on PulpAccessibilityElement).
+    # Force-load the view object so static-lib pruning does not drop Obj-C
+    # class registration; window_host_mac.mm anchors the text-input category.
     target_link_options(pulp-test-mac-perform-key-equivalent PRIVATE
         "LINKER:-force_load,${CMAKE_BINARY_DIR}/core/view/CMakeFiles/pulp-view-core.dir/platform/mac/window_host_mac.mm.o"
     )

@@ -1,160 +1,196 @@
 #include <pulp/view/text_editor.hpp>
+#include <pulp/view/context_menu.hpp>
 #include <pulp/view/frame_clock.hpp>  // caret-blink subscription
+#include "text_edit_model.hpp"
 #include <algorithm>
-#include <cctype>
 #include <cmath>
+#include <optional>
+#include <vector>
 
 namespace pulp::view {
 
 namespace {
 
-int clamp_position(const std::string& text, int position) {
-    return std::clamp(position, 0, static_cast<int>(text.size()));
+constexpr float kCaretBlinkPeriodSeconds = 1.06f;
+constexpr float kCaretBlinkOnSeconds = 0.53f;
+constexpr float kCaretSolidHoldSeconds = 0.35f;
+
+enum TextEditorMenuCommand {
+    kTextEditorMenuCut = 1,
+    kTextEditorMenuCopy,
+    kTextEditorMenuPaste,
+    kTextEditorMenuSelectAll,
+};
+
+View* root_view(View* view) {
+    if (!view) return nullptr;
+    while (view->parent()) view = view->parent();
+    return view;
 }
 
-int line_start_for_position(const std::string& text, int position) {
-    position = clamp_position(text, position);
-    while (position > 0 && text[static_cast<size_t>(position - 1)] != '\n') {
-        --position;
+Point local_to_root(View* view, Point p) {
+    for (auto* current = view; current; current = current->parent()) {
+        const auto b = current->bounds();
+        p.x += b.x;
+        p.y += b.y;
     }
-    return position;
+    return p;
 }
 
-int line_end_for_position(const std::string& text, int position) {
-    position = clamp_position(text, position);
-    const int len = static_cast<int>(text.size());
-    while (position < len && text[static_cast<size_t>(position)] != '\n') {
-        ++position;
-    }
-    return position;
+bool row_owns_caret(int caret, int start, int end, bool has_next, int next_start) {
+    if (caret < start || caret > end) return false;
+    if (caret < end) return true;
+    if (start == end) return true;
+    return !has_next || next_start != end;
 }
 
-int vertical_line_position(const std::string& text, int caret, int direction) {
-    // Hard `\n` line breaks only. Soft-wrap navigation across
-    // visually-wrapped rows requires moving column bookkeeping out of
-    // `caret_position_` (so the caret can ride wrap-induced visual
-    // rows without changing logical position) and reading the wrap
-    // geometry from `last_layout_` — out of scope here.
-    caret = clamp_position(text, caret);
-    const int current_start = line_start_for_position(text, caret);
-    const int current_end = line_end_for_position(text, caret);
-    const int column = caret - current_start;
-
-    if (direction < 0) {
-        // Already on the first line: extend to the document start (matches the
-        // single-line up-arrow and macOS), so shift+Up selects the first row.
-        if (current_start == 0) return 0;
-        const int previous_end = current_start - 1;
-        const int previous_start = line_start_for_position(text, previous_end);
-        return previous_start + std::min(column, previous_end - previous_start);
+text_edit::LineEndingMode line_ending_mode_for(TextEditor::LineEndingPolicy policy) {
+    switch (policy) {
+        case TextEditor::LineEndingPolicy::strip:
+            return text_edit::LineEndingMode::strip;
+        case TextEditor::LineEndingPolicy::preserve:
+            return text_edit::LineEndingMode::preserve;
+        case TextEditor::LineEndingPolicy::normalize:
+        default:
+            return text_edit::LineEndingMode::normalize;
     }
-
-    // Already on the last line: extend to the document end.
-    if (current_end >= static_cast<int>(text.size())) return static_cast<int>(text.size());
-    const int next_start = current_end + 1;
-    const int next_end = line_end_for_position(text, next_start);
-    return next_start + std::min(column, next_end - next_start);
 }
 
 } // namespace
 
 void TextEditor::set_text(const std::string& t) {
-    push_undo();
+    if (text_ == t) return;
     text_ = t;
-    caret_position_ = has_focus() ? static_cast<int>(t.size()) : 0;
+    caret_position_ = has_focus() ? text_edit::clamp_boundary(t, static_cast<int>(t.size())) : 0;
     selection_start_ = selection_end_ = caret_position_;
     scroll_offset_ = 0.0f;
+    marked_text_.clear();
+    marked_start_ = 0;
+    marked_selected_pos_ = 0;
+    marked_selected_len_ = 0;
+    marked_undo_active_ = false;
+    undo_history_.clear();
+    redo_history_.clear();
+    invalidate_layout_cache();
+    break_undo_coalescing();
+    reset_preferred_horizontal();
+    if (has_focus())
+        keep_caret_solid();
+    else
+        request_repaint();
     notify_change();
 }
 
 std::string TextEditor::selected_text() const {
     if (!has_selection()) return {};
-    int start = std::min(selection_start_, selection_end_);
-    int end = std::max(selection_start_, selection_end_);
+    if (password_mode && !password_contents_allowed()) return {};
+    int start = text_edit::clamp_boundary(text_, std::min(selection_start_, selection_end_));
+    int end = text_edit::clamp_boundary(text_, std::max(selection_start_, selection_end_));
     return text_.substr(static_cast<size_t>(start),
                         static_cast<size_t>(end - start));
 }
 
 void TextEditor::select_all() {
     selection_start_ = 0;
-    selection_end_ = static_cast<int>(text_.size());
+    selection_end_ = text_edit::clamp_boundary(text_, static_cast<int>(text_.size()));
     caret_position_ = selection_end_;
+    reset_preferred_horizontal();
+    request_repaint();
 }
 
 void TextEditor::clear_selection() {
     selection_start_ = selection_end_ = caret_position_;
+    reset_preferred_horizontal();
+    request_repaint();
 }
 
-// ── Clipboard ───────────────────────────────────────────────────────────
-
-bool TextEditor::copy_to_clipboard() {
-    if (!has_selection()) return false;
-    platform::Clipboard::set_text(selected_text());
-    return true;
+void TextEditor::set_caret_pos(int byte_offset) {
+    caret_position_ = text_edit::clamp_boundary(text_, byte_offset);
+    selection_start_ = selection_end_ = caret_position_;
+    reset_preferred_horizontal();
+    break_undo_coalescing();
+    keep_caret_solid();
 }
 
-bool TextEditor::cut_to_clipboard() {
-    if (!has_selection()) return false;
-    push_undo();
-    platform::Clipboard::set_text(selected_text());
-    delete_selection();
-    notify_change();
-    return true;
+void TextEditor::set_selection(int anchor_byte_offset, int active_byte_offset) {
+    selection_start_ = text_edit::clamp_boundary(text_, anchor_byte_offset);
+    selection_end_ = text_edit::clamp_boundary(text_, active_byte_offset);
+    caret_position_ = selection_end_;
+    reset_preferred_horizontal();
+    break_undo_coalescing();
+    keep_caret_solid();
 }
 
-bool TextEditor::paste_from_clipboard() {
-    if (!platform::Clipboard::has_text()) return false;
-    auto opt_text = platform::Clipboard::get_text();
-    if (!opt_text || opt_text->empty()) return false;
-
-    push_undo();
-    if (has_selection()) delete_selection();
-
-    std::string text = *opt_text;
-    if (numeric_only) {
-        // Filter to numeric characters
-        std::string filtered;
-        for (char c : text) {
-            if (std::isdigit(c) || c == '.' || c == '-') filtered += c;
-        }
-        text = filtered;
-    }
-
-    insert_text(text);
-    notify_change();
-    return true;
+std::pair<int, int> TextEditor::selection_range() const {
+    const int start = text_edit::clamp_boundary(text_, std::min(selection_start_, selection_end_));
+    const int end = text_edit::clamp_boundary(text_, std::max(selection_start_, selection_end_));
+    return {start, end};
 }
 
 // ── Undo/Redo ────────────────────────────────────────────────────────────
 
-void TextEditor::push_undo() {
-    undo_history_.emplace_back(text_, caret_position_);
+TextEditor::UndoSnapshot TextEditor::snapshot() const {
+    return {
+        .text = text_,
+        .caret_position = caret_position_,
+        .selection_start = selection_start_,
+        .selection_end = selection_end_,
+        .scroll_offset = scroll_offset_,
+    };
+}
+
+void TextEditor::restore_snapshot(const UndoSnapshot& s) {
+    text_ = s.text;
+    caret_position_ = text_edit::clamp_boundary(text_, s.caret_position);
+    selection_start_ = text_edit::clamp_boundary(text_, s.selection_start);
+    selection_end_ = text_edit::clamp_boundary(text_, s.selection_end);
+    scroll_offset_ = std::max(0.0f, s.scroll_offset);
+    marked_text_.clear();
+    marked_start_ = 0;
+    marked_selected_pos_ = 0;
+    marked_selected_len_ = 0;
+    marked_undo_active_ = false;
+    invalidate_layout_cache();
+    reset_preferred_horizontal();
+}
+
+void TextEditor::push_undo(UndoCoalesce coalesce) {
+    if (coalesce != UndoCoalesce::none && last_undo_coalesce_ == coalesce && !undo_history_.empty())
+        return;
+    undo_history_.push_back(snapshot());
     if (undo_history_.size() > kMaxUndoHistory) {
         undo_history_.erase(undo_history_.begin());
     }
     redo_history_.clear();
+    last_undo_coalesce_ = coalesce;
+}
+
+void TextEditor::break_undo_coalescing() {
+    last_undo_coalesce_ = UndoCoalesce::none;
 }
 
 bool TextEditor::undo() {
+    if (!can_edit()) return false;
     if (undo_history_.empty()) return false;
-    redo_history_.emplace_back(text_, caret_position_);
-    auto [t, pos] = undo_history_.back();
+    redo_history_.push_back(snapshot());
+    auto s = undo_history_.back();
     undo_history_.pop_back();
-    text_ = t;
-    caret_position_ = pos;
-    selection_start_ = selection_end_ = caret_position_;
+    restore_snapshot(s);
+    break_undo_coalescing();
+    keep_caret_solid();
     notify_change();
     return true;
 }
 
 bool TextEditor::redo() {
+    if (!can_edit()) return false;
     if (redo_history_.empty()) return false;
-    undo_history_.emplace_back(text_, caret_position_);
-    auto [t, pos] = redo_history_.back();
+    undo_history_.push_back(snapshot());
+    auto s = redo_history_.back();
     redo_history_.pop_back();
-    text_ = t;
-    caret_position_ = pos;
-    selection_start_ = selection_end_ = caret_position_;
+    restore_snapshot(s);
+    break_undo_coalescing();
+    keep_caret_solid();
     notify_change();
     return true;
 }
@@ -162,222 +198,711 @@ bool TextEditor::redo() {
 // ── Text manipulation ────────────────────────────────────────────────────
 
 void TextEditor::insert_text(const std::string& t) {
+    caret_position_ = text_edit::clamp_boundary(text_, caret_position_);
     text_.insert(static_cast<size_t>(caret_position_), t);
-    caret_position_ += static_cast<int>(t.size());
+    caret_position_ = text_edit::clamp_boundary(text_, caret_position_ + static_cast<int>(t.size()));
     selection_start_ = selection_end_ = caret_position_;
+    invalidate_layout_cache();
+    reset_preferred_horizontal();
 }
 
 void TextEditor::delete_selection() {
-    int start = std::min(selection_start_, selection_end_);
-    int end = std::max(selection_start_, selection_end_);
+    int start = text_edit::clamp_boundary(text_, std::min(selection_start_, selection_end_));
+    int end = text_edit::clamp_boundary(text_, std::max(selection_start_, selection_end_));
     text_.erase(static_cast<size_t>(start), static_cast<size_t>(end - start));
     caret_position_ = start;
     selection_start_ = selection_end_ = caret_position_;
+    invalidate_layout_cache();
+    reset_preferred_horizontal();
 }
 
 void TextEditor::delete_char_before_caret() {
     if (caret_position_ > 0) {
-        push_undo();
-        text_.erase(static_cast<size_t>(caret_position_ - 1), 1);
-        --caret_position_;
-        selection_start_ = selection_end_ = caret_position_;
-        notify_change();
+        const int end = text_edit::clamp_boundary(text_, caret_position_);
+        const int start = text_edit::previous_cluster(text_, end);
+        delete_range(start, end, UndoCoalesce::backspace);
     }
 }
 
 void TextEditor::delete_char_after_caret() {
     if (caret_position_ < static_cast<int>(text_.size())) {
-        push_undo();
-        text_.erase(static_cast<size_t>(caret_position_), 1);
-        selection_start_ = selection_end_ = caret_position_;
-        notify_change();
+        const int start = text_edit::clamp_boundary(text_, caret_position_);
+        const int end = text_edit::next_cluster(text_, start);
+        delete_range(start, end, UndoCoalesce::delete_forward);
     }
+}
+
+void TextEditor::delete_word_before_caret() {
+    const int end = text_edit::clamp_boundary(text_, caret_position_);
+    delete_range(text_edit::previous_word_start(text_, end), end);
+}
+
+void TextEditor::delete_word_after_caret() {
+    const int start = text_edit::clamp_boundary(text_, caret_position_);
+    delete_range(start, text_edit::next_word_start(text_, start));
+}
+
+void TextEditor::delete_to_line_start() {
+    const int end = text_edit::clamp_boundary(text_, caret_position_);
+    delete_range(text_edit::line_start(text_, end), end);
+}
+
+void TextEditor::delete_to_line_end() {
+    const int start = text_edit::clamp_boundary(text_, caret_position_);
+    delete_range(start, text_edit::line_end(text_, start));
+}
+
+bool TextEditor::candidate_is_valid(int replace_start, int replace_end, std::string_view insertion) const {
+    replace_start = text_edit::clamp_boundary(text_, replace_start);
+    replace_end = text_edit::clamp_boundary(text_, replace_end);
+    if (replace_end < replace_start) std::swap(replace_start, replace_end);
+    std::string candidate = text_;
+    candidate.replace(static_cast<std::size_t>(replace_start),
+                      static_cast<std::size_t>(replace_end - replace_start),
+                      insertion.data(), insertion.size());
+    return !validator || validator(candidate);
+}
+
+bool TextEditor::delete_range(int start, int end, UndoCoalesce coalesce) {
+    if (!can_edit()) return false;
+    start = text_edit::clamp_boundary(text_, start);
+    end = text_edit::clamp_boundary(text_, end);
+    if (end < start) std::swap(start, end);
+    if (start == end) return false;
+    if (!candidate_is_valid(start, end, {})) return false;
+
+    push_undo(coalesce);
+    text_.erase(static_cast<std::size_t>(start), static_cast<std::size_t>(end - start));
+    caret_position_ = start;
+    selection_start_ = selection_end_ = caret_position_;
+    invalidate_layout_cache();
+    reset_preferred_horizontal();
+    keep_caret_solid();
+    notify_change();
+    return true;
+}
+
+bool TextEditor::replace_selection_or_insert(std::string text, UndoCoalesce coalesce, bool from_paste) {
+    if (!can_edit()) return false;
+    text = text_edit::normalize_insert_text(
+        std::move(text), multi_line, line_ending_mode_for(line_ending_policy));
+    if (from_paste && paste_sanitizer) text = paste_sanitizer(text);
+    if (numeric_only) text = text_edit::filter_numeric(std::move(text));
+    if (input_filter) text = input_filter(text);
+    if (text.empty()) return false;
+
+    int start = has_selection()
+        ? text_edit::clamp_boundary(text_, std::min(selection_start_, selection_end_))
+        : text_edit::clamp_boundary(text_, caret_position_);
+    int end = has_selection()
+        ? text_edit::clamp_boundary(text_, std::max(selection_start_, selection_end_))
+        : start;
+
+    std::string existing_after_replace = text_;
+    existing_after_replace.erase(static_cast<std::size_t>(start),
+                                 static_cast<std::size_t>(end - start));
+    text = text_edit::truncate_to_cluster_count(existing_after_replace, std::move(text), max_length);
+    if (text.empty()) return false;
+    if (!candidate_is_valid(start, end, text)) return false;
+
+    push_undo(has_selection() ? UndoCoalesce::none : coalesce);
+    if (has_selection()) delete_selection();
+    insert_text(text);
+    keep_caret_solid();
+    notify_change();
+    return true;
 }
 
 // ── Caret movement ───────────────────────────────────────────────────────
 
 void TextEditor::move_caret(int delta, bool extend) {
-    // A plain (non-extending) arrow over an active selection collapses to the
-    // selection boundary in the direction of travel — Left→start, Right→end —
-    // WITHOUT moving an extra character (standard text-field behavior).
-    if (!extend && has_selection()) {
-        const int lo = std::min(selection_start_, selection_end_);
-        const int hi = std::max(selection_start_, selection_end_);
-        caret_position_ = delta < 0 ? lo : hi;
-        selection_start_ = selection_end_ = caret_position_;
-        caret_blink_time_ = 0;
-        return;
-    }
-    caret_position_ = std::clamp(caret_position_ + delta, 0, static_cast<int>(text_.size()));
+    reset_preferred_horizontal();
+    caret_position_ = text_edit::move_clusters(text_, caret_position_, delta);
     if (extend)
         selection_end_ = caret_position_;
     else
         selection_start_ = selection_end_ = caret_position_;
-    caret_blink_time_ = 0;  // keep the caret solid while moving; it resumes blinking when idle
+    break_undo_coalescing();
+    keep_caret_solid();
 }
 
 void TextEditor::move_word(int direction, bool extend) {
-    int pos = caret_position_;
-    int len = static_cast<int>(text_.size());
-    if (direction > 0) {
-        while (pos < len && !is_word_char(text_[static_cast<size_t>(pos)])) ++pos;
-        while (pos < len && is_word_char(text_[static_cast<size_t>(pos)])) ++pos;
-    } else {
-        while (pos > 0 && !is_word_char(text_[static_cast<size_t>(pos - 1)])) --pos;
-        while (pos > 0 && is_word_char(text_[static_cast<size_t>(pos - 1)])) --pos;
-    }
+    reset_preferred_horizontal();
+    int pos = direction > 0
+        ? text_edit::next_word_start(text_, caret_position_)
+        : text_edit::previous_word_start(text_, caret_position_);
     caret_position_ = pos;
     if (extend) selection_end_ = pos;
     else selection_start_ = selection_end_ = pos;
+    break_undo_coalescing();
+    keep_caret_solid();
+}
+
+void TextEditor::move_visual_line(int direction, bool extend) {
+    if (!multi_line) {
+        if (direction < 0) move_to_start(extend);
+        else move_to_end(extend);
+        return;
+    }
+
+    auto apply_position = [&](int pos) {
+        caret_position_ = text_edit::clamp_boundary(text_, pos);
+        if (extend) selection_end_ = caret_position_;
+        else selection_start_ = selection_end_ = caret_position_;
+        break_undo_coalescing();
+        keep_caret_solid();
+    };
+
+    if (last_layout_.multi_line && !last_layout_.lines.empty()) {
+        int current_row = 0;
+        for (int i = 0; i < static_cast<int>(last_layout_.lines.size()); ++i) {
+            const auto& row = last_layout_.lines[static_cast<size_t>(i)];
+            const bool has_next = i + 1 < static_cast<int>(last_layout_.lines.size());
+            const int next_start = has_next
+                ? last_layout_.lines[static_cast<size_t>(i + 1)].start
+                : row.end;
+            if (row_owns_caret(caret_position_, row.start, row.end, has_next, next_start)) {
+                current_row = i;
+                break;
+            }
+        }
+
+        const int target_row = current_row + direction;
+        if (target_row < 0 || target_row >= static_cast<int>(last_layout_.lines.size())) {
+            apply_position(caret_position_);
+            return;
+        }
+
+        const auto& current = last_layout_.lines[static_cast<size_t>(current_row)];
+        if (!has_preferred_horizontal_) {
+            const int current_col = text_edit::cluster_index_for_position(current.byte_offsets, caret_position_);
+            preferred_text_column_ = current_col;
+            preferred_visual_x_ = current.inner_x +
+                (current.x_offsets.empty() ? 0.0f : current.x_offsets[static_cast<size_t>(current_col)]);
+            has_preferred_horizontal_ = true;
+        }
+
+        const auto& target = last_layout_.lines[static_cast<size_t>(target_row)];
+        if (target.x_offsets.empty()) {
+            apply_position(target.start);
+            return;
+        }
+
+        const float local_x = preferred_visual_x_ - target.inner_x;
+        int best = 0;
+        float best_dist = std::abs(local_x - target.x_offsets[0]);
+        for (size_t i = 1; i < target.x_offsets.size(); ++i) {
+            const float dist = std::abs(local_x - target.x_offsets[i]);
+            if (dist < best_dist) {
+                best_dist = dist;
+                best = static_cast<int>(i);
+            }
+        }
+        if (!target.byte_offsets.empty())
+            apply_position(target.byte_offsets[static_cast<std::size_t>(best)]);
+        else
+            apply_position(target.start);
+        return;
+    }
+
+    if (!has_preferred_horizontal_) {
+        preferred_text_column_ = text_edit::cluster_column_in_line(
+            text_, text_edit::line_start(text_, caret_position_), caret_position_);
+        preferred_visual_x_ = static_cast<float>(preferred_text_column_);
+        has_preferred_horizontal_ = true;
+    }
+    apply_position(text_edit::visual_line_position(text_, caret_position_, direction, preferred_text_column_));
+}
+
+void TextEditor::move_page(int direction, bool extend) {
+    if (!multi_line) {
+        if (direction < 0) move_to_start(extend);
+        else move_to_end(extend);
+        return;
+    }
+
+    int rows = 8;
+    if (!last_layout_.lines.empty()) {
+        const float line_h = std::max(1.0f, last_layout_.lines.front().line_height);
+        rows = std::max(1, static_cast<int>(std::max(1.0f, local_bounds().height) / line_h) - 1);
+    }
+    for (int i = 0; i < rows; ++i) move_visual_line(direction, extend);
+}
+
+void TextEditor::move_paragraph(int direction, bool extend) {
+    reset_preferred_horizontal();
+    caret_position_ = direction < 0
+        ? text_edit::line_start(text_, caret_position_)
+        : text_edit::line_end(text_, caret_position_);
+    if (extend) selection_end_ = caret_position_;
+    else selection_start_ = selection_end_ = caret_position_;
+    break_undo_coalescing();
+    keep_caret_solid();
 }
 
 void TextEditor::move_to_line_start(bool extend) {
-    caret_position_ = line_start_for_position(text_, caret_position_);
+    if (!multi_line) {
+        move_to_start(extend);
+        return;
+    }
+    reset_preferred_horizontal();
+    caret_position_ = text_edit::line_start(text_, caret_position_);
     if (extend) selection_end_ = caret_position_;
     else selection_start_ = selection_end_ = caret_position_;
+    break_undo_coalescing();
+    keep_caret_solid();
 }
 
 void TextEditor::move_to_line_end(bool extend) {
-    caret_position_ = line_end_for_position(text_, caret_position_);
+    if (!multi_line) {
+        move_to_end(extend);
+        return;
+    }
+    reset_preferred_horizontal();
+    caret_position_ = text_edit::line_end(text_, caret_position_);
     if (extend) selection_end_ = caret_position_;
     else selection_start_ = selection_end_ = caret_position_;
+    break_undo_coalescing();
+    keep_caret_solid();
 }
 
 void TextEditor::move_to_start(bool extend) {
+    reset_preferred_horizontal();
     caret_position_ = 0;
     if (extend) selection_end_ = caret_position_;
     else selection_start_ = selection_end_ = caret_position_;
+    break_undo_coalescing();
+    keep_caret_solid();
 }
 
 void TextEditor::move_to_end(bool extend) {
-    caret_position_ = static_cast<int>(text_.size());
+    reset_preferred_horizontal();
+    caret_position_ = text_edit::clamp_boundary(text_, static_cast<int>(text_.size()));
     if (extend) selection_end_ = caret_position_;
     else selection_start_ = selection_end_ = caret_position_;
+    break_undo_coalescing();
+    keep_caret_solid();
 }
 
-bool TextEditor::is_word_char(char c) const {
-    return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
+std::pair<int, int> TextEditor::word_range_at_position(int position) const {
+    return text_edit::word_range_at(text_, position);
 }
 
-// ── Event handling ───────────────────────────────────────────────────────
+std::pair<int, int> TextEditor::line_range_at_position(int position) const {
+    return text_edit::line_range_at(text_, position);
+}
+
+void TextEditor::show_default_context_menu(Point local_pos) {
+    auto* root = root_view(this);
+    if (!root) return;
+
+    std::vector<ContextMenu::Item> items{
+        {kTextEditorMenuCut, "Cut",
+         can_edit() && has_selection() && clipboard_export_allowed()},
+        {kTextEditorMenuCopy, "Copy",
+         has_selection() && clipboard_export_allowed()},
+        {kTextEditorMenuPaste, "Paste",
+         clipboard_import_allowed() && platform::Clipboard::has_text()},
+        ContextMenu::Item::make_separator(),
+        {kTextEditorMenuSelectAll, "Select All",
+         enabled() && !text_.empty()},
+    };
+
+    auto alive = import_binding_lifetime_token();
+    ContextMenu::show(root, local_to_root(this, local_pos), std::move(items),
+        [alive, this](std::optional<int> command) {
+            if (alive.expired()) return;
+            if (command) {
+                switch (*command) {
+                    case kTextEditorMenuCut:       cut_to_clipboard(); break;
+                    case kTextEditorMenuCopy:      copy_to_clipboard(); break;
+                    case kTextEditorMenuPaste:     paste_from_clipboard(); break;
+                    case kTextEditorMenuSelectAll: select_all(); break;
+                    default: break;
+                }
+                if (alive.expired()) return;
+            }
+            if (enabled() && focusable()) {
+                if (!has_focus()) on_focus_changed(true);
+                claim_input_focus();
+            }
+        });
+}
+
+void TextEditor::invalidate_layout_cache() const {
+    last_layout_.lines.clear();
+    last_layout_key_ = {};
+}
+
+void TextEditor::cancel_drag_selection(int pointer_id) {
+    drag_selecting_ = false;
+    drag_selecting_words_ = false;
+    suppress_next_legacy_mouse_down_ = false;
+    if (has_drag_pointer_capture_) release_pointer_capture(drag_pointer_id_);
+    release_pointer_capture(pointer_id);
+    has_drag_pointer_capture_ = false;
+}
+
+void TextEditor::reset_preferred_horizontal() {
+    has_preferred_horizontal_ = false;
+    preferred_visual_x_ = 0.0f;
+    preferred_text_column_ = 0;
+}
+
+void TextEditor::keep_caret_solid() {
+    caret_blink_time_ = 0.0f;
+    caret_solid_time_remaining_ = kCaretSolidHoldSeconds;
+    request_repaint();
+}
+
+void TextEditor::advance_caret_blink(float dt) {
+    if (!has_focus()) return;
+    dt = std::max(0.0f, dt);
+    if (caret_solid_time_remaining_ > 0.0f) {
+        if (dt < caret_solid_time_remaining_) {
+            caret_solid_time_remaining_ -= dt;
+            return;
+        }
+        dt -= caret_solid_time_remaining_;
+        caret_solid_time_remaining_ = 0.0f;
+        caret_blink_time_ = 0.0f;
+    }
+    caret_blink_time_ = std::fmod(caret_blink_time_ + dt, kCaretBlinkPeriodSeconds);
+}
+
+bool TextEditor::should_paint_caret() const {
+    if (!has_focus()) return false;
+    if (has_selection()) return true;
+    if (caret_solid_time_remaining_ > 0.0f) return true;
+    return std::fmod(caret_blink_time_, kCaretBlinkPeriodSeconds) < kCaretBlinkOnSeconds;
+}
+
+void TextEditor::ensure_caret_blink_subscription() {
+    if (caret_blink_sub_ >= 0) return;
+    if (auto* fc = frame_clock()) {
+        caret_blink_clock_ = fc;
+        caret_blink_sub_ = fc->subscribe([this](float dt) {
+            advance_caret_blink(dt);
+            request_repaint();
+            return true;
+        });
+    }
+}
+
+void TextEditor::clear_caret_blink_subscription() {
+    if (caret_blink_sub_ >= 0 && caret_blink_clock_)
+        caret_blink_clock_->unsubscribe(caret_blink_sub_);
+    caret_blink_sub_ = -1;
+    caret_blink_clock_ = nullptr;
+}
 
 void TextEditor::on_mouse_event(const MouseEvent& event) {
-    caret_blink_time_ = 0;  // reset blink on click
+    if (event.isRelease() || event.is_cancelled) {
+        cancel_drag_selection(event.pointer_id);
+        return;
+    }
+    if (!enabled()) {
+        cancel_drag_selection(event.pointer_id);
+        return;
+    }
     if (multi_line && event.is_wheel) {
         scroll_offset_ = std::max(0.0f, scroll_offset_ + event.scroll_delta_y);
         return;
     }
-    if (!event.is_down) return;
+    if (event.button == MouseButton::right && event.isPress()) {
+        suppress_next_legacy_mouse_down_ = true;
+        if (on_context_menu) on_context_menu(event.position);
+        else show_default_context_menu(event.position);
+        return;
+    }
+    if (event.isDrag()) {
+        suppress_next_legacy_mouse_down_ = false;
+        on_mouse_drag(event.position);
+        return;
+    }
+    if (!event.is_down && !event.isPress()) {
+        return;
+    }
+    suppress_next_legacy_mouse_down_ = true;
+    set_pointer_capture(event.pointer_id);
+    drag_pointer_id_ = event.pointer_id;
+    has_drag_pointer_capture_ = true;
 
-    // char_index_at_point reads from the cached LayoutSnapshot; for
-    // single-line that snapshot is one row of measured advances, so
-    // hit-test accuracy doesn't depend on the 0.6em fallback heuristic
-    // anymore.
+    reset_preferred_horizontal();
     int pos = char_index_at_point(event.position.x, event.position.y);
 
     if (event.click_count == 3) {
-        // Triple-click: select all (line in multi-line)
-        select_all();
+        if (multi_line) {
+            auto [start, end] = line_range_at_position(pos);
+            selection_start_ = start;
+            selection_end_ = end;
+            caret_position_ = end;
+        } else {
+            select_all();
+        }
+        drag_selecting_ = false;
+        drag_selecting_words_ = false;
     } else if (event.click_count == 2) {
-        // Double-click: select word
-        int start = pos, end = pos;
-        while (start > 0 && is_word_char(text_[static_cast<size_t>(start - 1)])) --start;
-        while (end < static_cast<int>(text_.size()) && is_word_char(text_[static_cast<size_t>(end)])) ++end;
+        auto [start, end] = word_range_at_position(pos);
         selection_start_ = start;
         selection_end_ = end;
         caret_position_ = end;
+        drag_anchor_ = start;
+        drag_word_start_ = start;
+        drag_word_end_ = end;
+        drag_selecting_ = start != end;
+        drag_selecting_words_ = start != end;
     } else if (event.isShiftDown()) {
-        // Shift-click: extend selection
         selection_end_ = pos;
         caret_position_ = pos;
+        drag_anchor_ = selection_start_;
+        drag_selecting_ = true;
+        drag_selecting_words_ = false;
     } else {
-        // Single click: place caret
         caret_position_ = pos;
         selection_start_ = selection_end_ = pos;
+        drag_anchor_ = pos;
+        drag_selecting_ = true;
+        drag_selecting_words_ = false;
     }
+    break_undo_coalescing();
+    keep_caret_solid();
+}
+
+void TextEditor::on_mouse_down(Point pos) {
+    if (suppress_next_legacy_mouse_down_) {
+        suppress_next_legacy_mouse_down_ = false;
+        return;
+    }
+
+    MouseEvent event;
+    event.position = pos;
+    event.is_down = true;
+    event.phase = MousePhase::press;
+    on_mouse_event(event);
+}
+
+void TextEditor::on_mouse_drag(Point pos) {
+    if (!enabled()) {
+        cancel_drag_selection(0);
+        return;
+    }
+    if (!drag_selecting_) return;
+    auto b = local_bounds();
+    bool scrolled = false;
+    const float previous_scroll_offset = scroll_offset_;
+    if (multi_line) {
+        const float line_h = last_layout_.lines.empty()
+            ? std::max(1.0f, font_size_ * 1.35f)
+            : std::max(1.0f, last_layout_.lines.front().line_height);
+        if (pos.y < b.y) {
+            scroll_offset_ = std::max(0.0f, scroll_offset_ - line_h);
+            scrolled = true;
+        } else if (pos.y > b.y + b.height) {
+            scroll_offset_ += line_h;
+            scrolled = true;
+        }
+        if (!last_layout_.lines.empty()) {
+            const float visible_h = std::max(line_h, b.height - 8.0f);
+            const float total_h = std::max(
+                visible_h, static_cast<float>(last_layout_.lines.size()) * line_h);
+            scroll_offset_ = std::clamp(scroll_offset_, 0.0f,
+                                        std::max(0.0f, total_h - visible_h));
+        }
+    } else {
+        const float char_w = std::max(1.0f, font_size_ * 0.6f);
+        if (pos.x < b.x) {
+            scroll_offset_ = std::max(0.0f, scroll_offset_ - char_w);
+            scrolled = true;
+        } else if (pos.x > b.x + b.width) {
+            scroll_offset_ += char_w;
+            scrolled = true;
+        }
+    }
+    if (scrolled) {
+        const float delta = scroll_offset_ - previous_scroll_offset;
+        if (delta != 0.0f && !last_layout_.lines.empty()) {
+            if (multi_line) {
+                for (auto& row : last_layout_.lines) {
+                    row.top_y -= delta;
+                    row.baseline_y -= delta;
+                }
+            } else if (!last_layout_.lines.empty()) {
+                last_layout_.lines.front().inner_x -= delta;
+            }
+            last_layout_key_.scroll_offset = scroll_offset_;
+        } else if (last_layout_.lines.empty()) {
+            invalidate_layout_cache();
+        }
+    }
+    caret_position_ = char_index_at_point(pos.x, pos.y);
+    if (drag_selecting_words_) {
+        auto [start, end] = word_range_at_position(caret_position_);
+        if (caret_position_ < drag_word_start_) {
+            selection_start_ = drag_word_end_;
+            selection_end_ = start;
+            caret_position_ = start;
+        } else if (caret_position_ > drag_word_end_) {
+            selection_start_ = drag_word_start_;
+            selection_end_ = end;
+            caret_position_ = end;
+        } else {
+            selection_start_ = drag_word_start_;
+            selection_end_ = drag_word_end_;
+            caret_position_ = drag_word_end_;
+        }
+        keep_caret_solid();
+        return;
+    }
+    selection_start_ = drag_anchor_;
+    selection_end_ = caret_position_;
+    keep_caret_solid();
+}
+
+void TextEditor::on_mouse_up(Point) {
+    cancel_drag_selection(0);
+    break_undo_coalescing();
 }
 
 bool TextEditor::on_key_event(const KeyEvent& event) {
+    if (!enabled()) return false;
     if (!event.is_down) return false;
 
-    // Any key press makes the caret solid (and it resumes blinking when idle) — standard
-    // text-field behavior so the caret never appears to vanish mid-keystroke.
-    caret_blink_time_ = 0;
-
-    bool shift = event.isShiftDown();
-    bool mod = event.isMainModifier();  // Cmd on macOS, Ctrl on Win/Linux
-    bool alt = event.isAltDown();
+    const bool shift = event.isShiftDown();
+    const bool main_modifier = event.isMainModifier();  // Cmd on macOS, Ctrl on Win/Linux
+    const bool alt = event.isAltDown();
+#ifdef __APPLE__
+    const bool ctrl = event.isCtrlDown();
+    const bool command = event.isCmdDown() || (event.modifiers & kModMeta) != 0;
+    const bool word_modifier = alt && !command;
+    const bool line_arrow_modifier = command;
+    const bool document_arrow_modifier = command;
+    const bool paragraph_modifier = alt && !command;
+    const bool document_home_end_modifier = command;
+    const bool delete_word_modifier = alt && !command;
+    const bool delete_line_start_backspace_modifier = command;
+    const bool delete_line_start_modifier = ctrl && event.key == KeyCode::u;
+    const bool delete_line_end_modifier = command;
+#else
+    const bool ctrl = event.isCtrlDown();
+    const bool word_modifier = ctrl;
+    const bool line_arrow_modifier = false;
+    const bool document_arrow_modifier = false;
+    const bool paragraph_modifier = ctrl;
+    const bool document_home_end_modifier = ctrl;
+    const bool delete_word_modifier = ctrl;
+    const bool delete_line_start_backspace_modifier = false;
+    const bool delete_line_start_modifier = ctrl && event.key == KeyCode::u;
+    const bool delete_line_end_modifier = false;
+#endif
 
     switch (event.key) {
         case KeyCode::left:
-            if (mod) move_to_line_start(shift);
-            else if (alt) move_word(-1, shift);
+            if (line_arrow_modifier) move_to_line_start(shift);
+            else if (word_modifier) move_word(-1, shift);
             else move_caret(-1, shift);
             return true;
 
         case KeyCode::right:
-            if (mod) move_to_line_end(shift);
-            else if (alt) move_word(1, shift);
+            if (line_arrow_modifier) move_to_line_end(shift);
+            else if (word_modifier) move_word(1, shift);
             else move_caret(1, shift);
             return true;
 
         case KeyCode::up:
-            if (!multi_line || mod) { move_to_start(shift); return true; }  // Cmd+Up = doc start
-            if (alt) {
-                // Option+Up: to the start of the paragraph, or the previous
-                // paragraph's start if already there.
-                int ls = line_start_for_position(text_, caret_position_);
-                caret_position_ = (caret_position_ == ls && ls > 0)
-                    ? line_start_for_position(text_, ls - 1) : ls;
-            } else {
-                caret_position_ = vertical_line_position(text_, caret_position_, -1);
-            }
-            if (shift) selection_end_ = caret_position_;
-            else selection_start_ = selection_end_ = caret_position_;
+            if (document_arrow_modifier) { move_to_start(shift); return true; }
+            if (paragraph_modifier) { move_paragraph(-1, shift); return true; }
+            move_visual_line(-1, shift);
             return true;
 
         case KeyCode::down:
-            if (!multi_line || mod) { move_to_end(shift); return true; }  // Cmd+Down = doc end
-            if (alt) {
-                // Option+Down: to the end of the paragraph, or the next
-                // paragraph's end if already there.
-                int le = line_end_for_position(text_, caret_position_);
-                caret_position_ = (caret_position_ == le && le < static_cast<int>(text_.size()))
-                    ? line_end_for_position(text_, le + 1) : le;
-            } else {
-                caret_position_ = vertical_line_position(text_, caret_position_, 1);
-            }
-            if (shift) selection_end_ = caret_position_;
-            else selection_start_ = selection_end_ = caret_position_;
+            if (document_arrow_modifier) { move_to_end(shift); return true; }
+            if (paragraph_modifier) { move_paragraph(1, shift); return true; }
+            move_visual_line(1, shift);
+            return true;
+
+        case KeyCode::page_up:
+            move_page(-1, shift);
+            return true;
+
+        case KeyCode::page_down:
+            move_page(1, shift);
             return true;
 
         case KeyCode::home:
-            if (multi_line) move_to_line_start(shift);
+            if (document_home_end_modifier) move_to_start(shift);
+            else if (multi_line) move_to_line_start(shift);
             else move_to_start(shift);
             return true;
 
         case KeyCode::end_:
-            if (multi_line) move_to_line_end(shift);
+            if (document_home_end_modifier) move_to_end(shift);
+            else if (multi_line) move_to_line_end(shift);
             else move_to_end(shift);
             return true;
 
         case KeyCode::backspace:
-            if (has_selection()) { push_undo(); delete_selection(); notify_change(); }
+            if (read_only) return true;
+            if (has_selection()) {
+                const int start = std::min(selection_start_, selection_end_);
+                const int end = std::max(selection_start_, selection_end_);
+                delete_range(start, end);
+            }
+            else if (delete_line_start_backspace_modifier) delete_to_line_start();
+            else if (delete_word_modifier) delete_word_before_caret();
             else delete_char_before_caret();
             return true;
 
         case KeyCode::delete_:
-            if (has_selection()) { push_undo(); delete_selection(); notify_change(); }
+            if (read_only) return true;
+            if (has_selection()) {
+                const int start = std::min(selection_start_, selection_end_);
+                const int end = std::max(selection_start_, selection_end_);
+                delete_range(start, end);
+            }
+            else if (delete_line_end_modifier) delete_to_line_end();
+            else if (delete_word_modifier) delete_word_after_caret();
             else delete_char_after_caret();
             return true;
 
+        case KeyCode::tab:
+            switch (tab_behavior) {
+                case TabBehavior::insert_tab:
+                    (void)replace_selection_or_insert("\t");
+                    return true;
+                case TabBehavior::commit:
+                    break_undo_coalescing();
+                    if (on_tab_commit) on_tab_commit(text_);
+                    else if (on_return) on_return(text_);
+                    return true;
+                case TabBehavior::ignore:
+                    break_undo_coalescing();
+                    return true;
+                case TabBehavior::move_focus:
+                    break;
+            }
+            break_undo_coalescing();
+            return false;
+
+        case KeyCode::u:
+            if (delete_line_start_modifier) { delete_to_line_start(); return true; }
+            break;
+
+        case KeyCode::k:
+            if (ctrl) { delete_to_line_end(); return true; }
+            break;
+
         case KeyCode::enter:
-            if (multi_line && !mod) {
-                push_undo();
-                if (has_selection()) delete_selection();
-                insert_text("\n");
-                notify_change();
-                return true;
+            if (multi_line) {
+                if (main_modifier) {
+                    if (on_return) on_return(text_);
+                    return true;
+                }
+                const bool should_insert_newline =
+                    multi_line_return_behavior == MultiLineReturnBehavior::insert_newline
+                    || (multi_line_return_behavior == MultiLineReturnBehavior::shift_inserts_newline && shift);
+                if (should_insert_newline)
+                    return replace_selection_or_insert("\n");
             }
             if (on_return) on_return(text_);
             return true;
@@ -387,20 +912,28 @@ bool TextEditor::on_key_event(const KeyEvent& event) {
             return true;
 
         case KeyCode::a:
-            if (mod) { select_all(); return true; }
+            if (main_modifier) { select_all(); return true; }
             break;
         case KeyCode::c:
-            if (mod) { copy_to_clipboard(); return true; }
+            if (main_modifier) { copy_to_clipboard(); return true; }
             break;
         case KeyCode::v:
-            if (mod) { paste_from_clipboard(); return true; }
+        {
+#ifdef __APPLE__
+            const bool paste_match_style = command && shift && alt;
+#else
+            const bool paste_match_style = main_modifier && shift;
+#endif
+            if (paste_match_style) { paste_from_clipboard(); return true; }
+            if (main_modifier) { paste_from_clipboard(); return true; }
             break;
+        }
         case KeyCode::x:
-            if (mod) { cut_to_clipboard(); return true; }
+            if (main_modifier) { cut_to_clipboard(); return true; }
             break;
         case KeyCode::z:
-            if (mod && shift) { redo(); return true; }
-            if (mod) { undo(); return true; }
+            if (main_modifier && shift) { redo(); return true; }
+            if (main_modifier) { undo(); return true; }
             break;
 
         default:
@@ -409,587 +942,37 @@ bool TextEditor::on_key_event(const KeyEvent& event) {
     return false;
 }
 
-void TextEditor::on_text_input(const TextInputEvent& event) {
-    caret_blink_time_ = 0;  // reset blink on input
-    if (event.text.empty()) return;
-
-    if (numeric_only) {
-        for (char c : event.text) {
-            if (!std::isdigit(c) && c != '.' && c != '-') return;
-        }
-    }
-
-    push_undo();
-    if (has_selection()) delete_selection();
-    insert_text(event.text);
-    notify_change();
-}
-
 TextEditor::~TextEditor() {
     // Unsubscribe from the clock we actually subscribed to (cached), NOT
     // frame_clock() — by destruction the editor may already be detached from the
     // view tree, in which case frame_clock() walks a null parent_ and returns
     // nullptr, leaking the subscription with a dangling `this` (use-after-free on
     // the next tick).
-    if (caret_blink_sub_ >= 0 && caret_blink_clock_)
-        caret_blink_clock_->unsubscribe(caret_blink_sub_);
+    clear_caret_blink_subscription();
 }
 
 void TextEditor::on_focus_changed(bool gained) {
     View::on_focus_changed(gained);  // sets has_focus_ for border rendering
     if (gained) {
         if (select_on_focus) select_all();
-        // Drive the caret blink from the frame clock so it keeps blinking while focused,
-        // independent of mouse movement (paint-driven blinking froze when the pointer left
-        // the field — repaints only happened on hover). Each tick just requests a repaint;
-        // paint() advances caret_blink_time_.
         caret_blink_time_ = 0.0f;
-        if (caret_blink_sub_ < 0)
-            if (auto* fc = frame_clock()) {
-                caret_blink_clock_ = fc;  // cache so we can always unsubscribe later
-                caret_blink_sub_ = fc->subscribe([this](float) {
-                    request_repaint();
-                    return true;
-                });
-            }
+        caret_solid_time_remaining_ = 0.0f;
+        ensure_caret_blink_subscription();
     } else {
-        if (caret_blink_sub_ >= 0 && caret_blink_clock_)
-            caret_blink_clock_->unsubscribe(caret_blink_sub_);
-        caret_blink_sub_ = -1;
-        caret_blink_clock_ = nullptr;
+        clear_caret_blink_subscription();
+        caret_solid_time_remaining_ = 0.0f;
         request_repaint();  // clear the caret now that focus is lost
     }
 }
 
-// ── Painting ─────────────────────────────────────────────────────────────
-
-void TextEditor::paint(canvas::Canvas& canvas) {
-    auto b = local_bounds();
-
-    auto bg_color = has_background_color()
-        ? background_color()
-        : (has_focus()
-            ? resolve_color("text_editor_focus_bg",
-                            resolve_color("bg.elevated",
-                                          resolve_color("bg.surface", canvas::Color::hex(0x2a2a4a))))
-            : resolve_color("text_editor_bg",
-                            resolve_color("bg.surface", canvas::Color::hex(0x1a1a2e))));
-    float radius = corner_radius() > 0.0f ? corner_radius() : 6.0f;
-    float max_radius = std::max(0.0f, std::min(b.width, b.height) * 0.5f - 0.5f);
-    radius = std::min(radius, max_radius);
-
-    // Border — use explicit per-view styling when present, otherwise theme defaults.
-    auto stroke = has_border()
-        ? border_color()
-        : (has_focus()
-            ? resolve_color("accent.primary", canvas::Color::rgba8(140, 120, 255, 255))
-            : resolve_color("control.border", canvas::Color::hex(0x3a3a5a)));
-    float stroke_width = has_border() ? border_width() : (has_focus() ? 2.0f : 1.0f);
-    if (stroke_width > 0.0f) {
-        canvas.set_fill_color(stroke);
-        canvas.fill_rounded_rect(b.x, b.y, b.width, b.height, radius);
-
-        float inset = std::max(0.0f, stroke_width);
-        float inner_w = std::max(0.0f, b.width - inset * 2.0f);
-        float inner_h = std::max(0.0f, b.height - inset * 2.0f);
-        float inner_max_radius = std::max(0.0f, std::min(inner_w, inner_h) * 0.5f - 0.5f);
-        float inner_radius = std::min(inner_max_radius, std::max(0.0f, radius - inset - 0.5f));
-        canvas.set_fill_color(bg_color);
-        canvas.fill_rounded_rect(b.x + inset, b.y + inset, inner_w, inner_h, inner_radius);
-    } else {
-        canvas.set_fill_color(bg_color);
-        canvas.fill_rounded_rect(b.x, b.y, b.width, b.height, radius);
-    }
-
-    canvas.set_font("Inter", font_size_);
-    canvas.set_text_align(canvas::TextAlign::left);
-
-    // Display text
-    std::string display = text_;
-    if (password_mode) {
-        display = std::string(text_.size(), password_char);
-    }
-
-    if (multi_line) {
-        canvas.set_font("Inter", font_size_);
-        canvas.set_text_align(canvas::TextAlign::left);
-        const float inner_x = b.x + 6.0f;
-        const float inner_y = b.y + 4.0f;
-        const float inner_w = std::max(20.0f, b.width - 12.0f);
-        const float line_h = font_size_ * 1.35f;
-
-        struct WrappedLine {
-            std::string text;
-            int start = 0;
-            int end = 0;
-        };
-
-        std::vector<WrappedLine> lines;
-        int seg_start = 0;          // logical start index of the line being built
-        std::string current;        // text accumulated for the current visual line
-        int last_space_rel = -1;    // index in `current` of the last space (break point)
-
-        for (int i = 0; i < static_cast<int>(display.size()); ++i) {
-            char c = display[static_cast<size_t>(i)];
-            if (c == '\n') {
-                lines.push_back({current, seg_start, i});
-                current.clear();
-                last_space_rel = -1;
-                seg_start = i + 1;
-                continue;
-            }
-
-            std::string candidate = current + c;
-            if (!current.empty() && canvas.measure_text(candidate) > inner_w) {
-                if (last_space_rel >= 0) {
-                    // Word wrap: break at the last space so whole words stay
-                    // together. The overflowing word moves to the next line; the
-                    // breaking space is dropped from the displayed text but kept
-                    // in the logical range (this line ends AT the space).
-                    int br = last_space_rel;
-                    lines.push_back({current.substr(0, static_cast<size_t>(br)),
-                                     seg_start, seg_start + br});
-                    current = current.substr(static_cast<size_t>(br + 1));
-                    seg_start = seg_start + br + 1;
-                    last_space_rel = -1;
-                } else {
-                    // A single word wider than the box — hard char-break so the
-                    // loop can't stall.
-                    lines.push_back({current, seg_start, i});
-                    current.clear();
-                    seg_start = i;
-                }
-            }
-            if (c == ' ') last_space_rel = static_cast<int>(current.size());
-            current += c;
-        }
-
-        lines.push_back({current, seg_start, static_cast<int>(display.size())});
-        // Drop a trailing empty line left by a final '\n' so the caret on the
-        // last line doesn't fall off the end.
-        if (lines.size() > 1 && lines.back().text.empty()
-            && lines[lines.size() - 2].end == static_cast<int>(display.size())) {
-            lines.pop_back();
-        }
-
-        if (lines.empty()) lines.push_back({"", 0, 0});
-
-        int caret_line = 0;
-        int caret_column = 0;
-        for (int i = 0; i < static_cast<int>(lines.size()); ++i) {
-            auto& line = lines[static_cast<size_t>(i)];
-            if (caret_position_ >= line.start && caret_position_ <= line.end) {
-                caret_line = i;
-                caret_column = std::clamp(caret_position_ - line.start, 0, static_cast<int>(line.text.size()));
-                break;
-            }
-        }
-
-        float visible_h = std::max(line_h, b.height - 8.0f);
-        float total_h = std::max(visible_h, static_cast<float>(lines.size()) * line_h);
-        float caret_top = caret_line * line_h;
-        float caret_bottom = caret_top + line_h;
-        if (caret_bottom - scroll_offset_ > visible_h) {
-            scroll_offset_ = caret_bottom - visible_h;
-        } else if (caret_top - scroll_offset_ < 0) {
-            scroll_offset_ = caret_top;
-        }
-        scroll_offset_ = std::clamp(scroll_offset_, 0.0f, std::max(0.0f, total_h - visible_h));
-
-        // Cache-keyed snapshot: only rebuild the per-character offset
-        // table when an input that affects layout changes (text, font,
-        // bounds, scroll, mode). On a quiet 60Hz frame this collapses
-        // to a key compare — `measure_text` is multi-millisecond on
-        // the SkParagraph path and the legacy code rebuilt it every
-        // paint, blowing the audio-UI thread budget.
-        LayoutCacheKey key{
-            std::hash<std::string>{}(display),
-            font_size_,
-            b.width,
-            b.height,
-            scroll_offset_,
-            /*multi_line=*/true,
-            password_mode,
-            /*placeholder_visible=*/display.empty() && !placeholder.empty() && !has_focus(),
-        };
-        if (!(last_layout_key_ == key) || last_layout_.lines.size() != lines.size()) {
-            last_layout_.multi_line = true;
-            last_layout_.lines.clear();
-            last_layout_.lines.reserve(lines.size());
-            last_layout_.fallback_char_w = canvas.measure_text("M");
-            for (int i = 0; i < static_cast<int>(lines.size()); ++i) {
-                const auto& src = lines[static_cast<size_t>(i)];
-                LayoutSnapshot::Line dst;
-                dst.start = src.start;
-                dst.end = src.end;
-                dst.top_y = inner_y + i * line_h - scroll_offset_;
-                dst.baseline_y = dst.top_y + font_size_;
-                dst.inner_x = inner_x;
-                dst.line_height = line_h;
-                // Caret/selection x from the SHAPED run (text_x_for_byte), same
-                // as the single-line path. A sum of isolated glyph widths loses
-                // inter-glyph kerning and drifts, which showed as extra space
-                // after the caret + padding around the selection rect.
-                dst.x_offsets.resize(src.text.size() + 1);
-                for (size_t j = 0; j <= src.text.size(); ++j)
-                    dst.x_offsets[j] = canvas.text_x_for_byte(src.text, j);
-                last_layout_.lines.push_back(std::move(dst));
-            }
-            last_layout_key_ = key;
-        } else {
-            // Cache hit — refresh only the y/x baselines that depend on
-            // scroll_offset_ + bounds origin (cheap; no measure calls).
-            for (int i = 0; i < static_cast<int>(lines.size()); ++i) {
-                auto& dst = last_layout_.lines[static_cast<size_t>(i)];
-                dst.top_y = inner_y + i * line_h - scroll_offset_;
-                dst.baseline_y = dst.top_y + font_size_;
-                dst.inner_x = inner_x;
-            }
-        }
-
-        // Selection highlight: one rect per visual row the selection overlaps,
-        // drawn BEHIND the text. (Single-line draws this further below; the
-        // multi-line path previously had none, so dragging a selection showed
-        // no highlight.)
-        if (has_selection()) {
-            auto sel_fill = resolve_color("accent.primary",
-                                          canvas::Color::rgba8(65, 105, 225, 255));
-            sel_fill.a = 168;
-            const int sstart = std::min(selection_start_, selection_end_);
-            const int send = std::max(selection_start_, selection_end_);
-            canvas.set_fill_color(sel_fill);
-            for (const auto& row : last_layout_.lines) {
-                int lo = std::max(sstart, row.start);
-                int hi = std::min(send, row.end);
-                if (lo >= hi || row.x_offsets.empty()) continue;
-                size_t c0 = std::clamp<size_t>(static_cast<size_t>(lo - row.start),
-                                               0, row.x_offsets.size() - 1);
-                size_t c1 = std::clamp<size_t>(static_cast<size_t>(hi - row.start),
-                                               0, row.x_offsets.size() - 1);
-                float x1 = row.inner_x + row.x_offsets[c0];
-                float x2 = row.inner_x + row.x_offsets[c1];
-                if (x2 > x1) canvas.fill_rect(x1, row.top_y, x2 - x1, row.line_height);
-            }
-        }
-
-        if (display.empty() && !placeholder.empty() && !has_focus()) {
-            canvas.set_fill_color(resolve_color("text.secondary", canvas::Color::hex(0x808090)));
-            canvas.fill_text(placeholder, inner_x, inner_y + font_size_);
-        } else {
-            for (int i = 0; i < static_cast<int>(lines.size()); ++i) {
-                float baseline_y = inner_y + font_size_ + i * line_h - scroll_offset_;
-                if (baseline_y < b.y - line_h || baseline_y > b.y + b.height + line_h) continue;
-                canvas.set_fill_color(resolve_color("text.primary", canvas::Color::hex(0xe0e0e0)));
-                canvas.fill_text(lines[static_cast<size_t>(i)].text, inner_x, baseline_y);
-            }
-        }
-
-        if (has_focus()) {
-            caret_blink_time_ += 1.0f / 60.0f;
-            bool caret_visible = std::fmod(caret_blink_time_, 1.06f) < 0.53f;
-            if (caret_visible && !has_selection()) {  // hide the caret while text is selected
-                // Read caret x from the cached snapshot instead of
-                // re-measuring a prefix substring every paint.
-                const auto& snap_line =
-                    last_layout_.lines[static_cast<size_t>(caret_line)];
-                size_t col = std::clamp<size_t>(caret_column, 0,
-                    snap_line.x_offsets.empty() ? 0 : snap_line.x_offsets.size() - 1);
-                float caret_x = inner_x + (snap_line.x_offsets.empty()
-                    ? 0.f : snap_line.x_offsets[col]);
-                float caret_y = inner_y + caret_line * line_h - scroll_offset_;
-                canvas.set_stroke_color(resolve_color("text.primary", canvas::Color::hex(0xe0e0e0)));
-                canvas.set_line_width(1.5f);
-                canvas.stroke_line(caret_x, caret_y, caret_x, caret_y + line_h - 2.0f);
-            }
-        }
-        return;
-    }
-
-    const float text_pad_x = std::max(9.0f, border_width() + 7.0f);
-    const float left_pad = std::max(text_pad_x, content_inset_left_);
-    const float text_inner_x = b.x + left_pad;
-    const float text_inner_w = std::max(0.0f, b.width - left_pad - text_pad_x);
-    const auto metrics = canvas.measure_text_full(display.empty() ? std::string("Ag") : display);
-    const float text_y = b.y + std::max(0.0f, (b.height - metrics.line_height) * 0.5f) + metrics.ascent;
-
-    // Cache-keyed single-line snapshot. Skips the per-char measure
-    // rebuild on quiet frames. See multi-line block above for the
-    // identical pattern + rationale.
-    LayoutCacheKey key{
-        std::hash<std::string>{}(display),
-        font_size_,
-        b.width,
-        b.height,
-        scroll_offset_,
-        /*multi_line=*/false,
-        password_mode,
-        /*placeholder_visible=*/display.empty() && !placeholder.empty() && !has_focus(),
-    };
-    // Store `inner_x` in scrolled (visual) coordinates so snapshot
-    // readers (`char_index_at_point`, `caret_rect()`,
-    // `firstRectForCharacterRange`) match the painted text — which
-    // draws at `text_inner_x - scroll_offset_`. Cache key includes
-    // `scroll_offset_`, so the snapshot rebuilds when scroll changes.
-    const float visual_inner_x = text_inner_x - scroll_offset_;
-    if (!(last_layout_key_ == key) || last_layout_.lines.size() != 1) {
-        last_layout_.multi_line = false;
-        last_layout_.fallback_char_w = canvas.measure_text("M");
-        last_layout_.lines.clear();
-        LayoutSnapshot::Line line_snap;
-        line_snap.start = 0;
-        line_snap.end = static_cast<int>(display.size());
-        line_snap.top_y = b.y + std::max(0.0f, (b.height - metrics.line_height) * 0.5f);
-        line_snap.baseline_y = text_y;
-        line_snap.line_height = metrics.line_height > 0.f ? metrics.line_height : font_size_;
-        line_snap.inner_x = visual_inner_x;
-        // Caret/selection x from the SHAPED run (text_x_for_byte), not a sum of
-        // isolated glyph widths — the per-char sum drifts on kerned/spaced runs,
-        // which showed as extra space after the last char + padding around a
-        // selection. text_x_for_byte queries the same shaping the painter draws.
-        line_snap.x_offsets.resize(display.size() + 1);
-        for (size_t j = 0; j <= display.size(); ++j)
-            line_snap.x_offsets[j] = canvas.text_x_for_byte(display, j);
-        last_layout_.lines.push_back(std::move(line_snap));
-        last_layout_key_ = key;
-    } else if (!last_layout_.lines.empty()) {
-        auto& dst = last_layout_.lines.front();
-        dst.top_y = b.y + std::max(0.0f, (b.height - metrics.line_height) * 0.5f);
-        dst.baseline_y = text_y;
-        dst.inner_x = visual_inner_x;
-    }
-    const float total_text_w = last_layout_.lines.front().x_offsets.back();
-    const float caret_w = last_layout_.lines.front()
-        .x_offsets[std::clamp<size_t>(caret_position_, 0, display.size())];
-
-    if (has_focus() || has_selection()) {
-        if (caret_w - scroll_offset_ > text_inner_w) {
-            scroll_offset_ = caret_w - text_inner_w;
-        } else if (caret_w - scroll_offset_ < 0.0f) {
-            scroll_offset_ = caret_w;
-        }
-        scroll_offset_ = std::clamp(scroll_offset_, 0.0f, std::max(0.0f, total_text_w - text_inner_w));
-    } else {
-        scroll_offset_ = 0.0f;
-    }
-
-    float text_x = text_inner_x - scroll_offset_;
-    // After the scroll-offset update, re-write the snapshot's
-    // `inner_x` so readers (caret_rect, hit-test, IME) match the
-    // painted origin even on the first paint where scroll_offset_
-    // bumps from 0 to a non-zero value AFTER the snapshot was built.
-    if (!last_layout_.lines.empty()) {
-        last_layout_.lines.front().inner_x = text_x;
-    }
-    auto text_primary = resolve_color("text.primary", canvas::Color::hex(0xe0e0e0));
-    auto text_secondary = resolve_color("text.secondary", canvas::Color::hex(0x808090));
-    auto selection_fill = resolve_color("accent.primary", canvas::Color::rgba8(65, 105, 225, 255));
-    selection_fill.a = 168;
-    auto selected_text_color = resolve_color("bg.primary", bg_color);
-
-    canvas.save();
-    canvas.clip_rect(text_inner_x - 2.0f, b.y + 2.0f, text_inner_w + 4.0f, std::max(0.0f, b.height - 4.0f));
-
-    // Reuse the cached single-line snapshot for all per-glyph x lookups
-    // (selection start/width, before/selected/after text origins). The
-    // legacy code called `canvas.measure_text(substr(...))` four times
-    // per paint, each going through SkParagraph build+layout.
-    const auto& xoff = last_layout_.lines.front().x_offsets;
-    auto x_at = [&](int idx) -> float {
-        size_t i = std::clamp<size_t>(idx, 0, display.size());
-        return xoff[i];
-    };
-
-    // Selection rect + selected-glyph x-range, from the SHAPED full-string
-    // offsets (the same the painter draws), so the highlight aligns exactly.
-    float sel_x = 0.0f, sel_w = 0.0f;
-    if (has_selection()) {
-        const int start = std::min(selection_start_, selection_end_);
-        const int end = std::max(selection_start_, selection_end_);
-        sel_x = text_x + x_at(start);
-        sel_w = x_at(end) - x_at(start);
-        canvas.set_fill_color(selection_fill);
-        canvas.fill_rect(sel_x, b.y + 2, sel_w, b.height - 4);
-    }
-
-    if (display.empty() && !placeholder.empty() && !has_focus()) {
-        canvas.set_fill_color(text_secondary);
-        canvas.fill_text(placeholder, text_x, text_y);
-    } else if (has_selection() && sel_w > 0.0f) {
-        // Paint the WHOLE string as ONE shaped run, re-colored per region by
-        // clipping. The three clip rects tile the editor width edge-to-edge and
-        // are disjoint, so every pixel is painted exactly once and a glyph never
-        // moves just because part of it became selected — a glyph straddling the
-        // selection boundary is simply split between the two colors at the same x.
-        //
-        // The previous painter re-shaped before/selected/after as three separate
-        // runs positioned by full-string offsets; a piece shaped in isolation
-        // lost its in-context kerning/side-bearing, so selected glyphs drifted —
-        // the "gap between the letters" a user sees dragging a selection across a
-        // space into a word.
-        const float band_l = sel_x;
-        const float band_r = sel_x + sel_w;
-        auto paint_clipped = [&](float clip_x, float clip_w, canvas::Color color) {
-            if (clip_w <= 0.0f) return;
-            canvas.save();
-            canvas.clip_rect(clip_x, b.y, clip_w, b.height);
-            canvas.set_fill_color(color);
-            canvas.fill_text(display, text_x, text_y);
-            canvas.restore();
-        };
-        paint_clipped(b.x, band_l - b.x, text_primary);                       // before
-        paint_clipped(band_l, band_r - band_l, selected_text_color);          // selected
-        paint_clipped(band_r, (b.x + b.width) - band_r, text_primary);        // after
-    } else {
-        canvas.set_fill_color(text_primary);
-        canvas.fill_text(display, text_x, text_y);
-    }
-
-    // Caret with blinking (530ms on, 530ms off)
-    if (has_focus()) {
-        caret_blink_time_ += 1.0f / 60.0f;  // approximate frame time
-        bool caret_visible = std::fmod(caret_blink_time_, 1.06f) < 0.53f;
-        if (caret_visible && !has_selection()) {  // hide the caret while text is selected
-            // Use the shaped offsets (same as the drawn text), not measure_text of
-            // a prefix substring — keeps the caret exactly at the glyph boundary.
-            float caret_x = text_x + x_at(caret_position_);
-            canvas.set_stroke_color(resolve_color("text.primary", canvas::Color::hex(0xe0e0e0)));
-            canvas.set_line_width(1.5f);
-            canvas.stroke_line(caret_x, b.y + 4, caret_x, b.y + b.height - 4);
-        }
-    }
-    canvas.restore();
-}
-
-int TextEditor::char_index_at_x(float x) const {
-    float char_w = font_size_ * 0.6f;
-    float text_x = std::max(std::max(9.0f, border_width() + 7.0f),
-                            content_inset_left_) - scroll_offset_;
-    int index = static_cast<int>((x - text_x) / char_w + 0.5f);
-    return std::clamp(index, 0, static_cast<int>(text_.size()));
-}
-
-int TextEditor::char_index_at_point(float x, float y) const {
-    // If paint() has not yet populated a layout snapshot (e.g. the first
-    // mouse event arrives before the first frame), fall back to the
-    // legacy x-only routine — the y is just lost in that case. Once the
-    // first paint runs, the snapshot is authoritative for both single-
-    // and multi-line: single-line records one row whose x_offsets are
-    // real measured advances, so the row-walk below collapses to that
-    // single row and picks the right column.
-    if (last_layout_.lines.empty()) {
-        return char_index_at_x(x);
-    }
-
-    // Pick the row by y: clamp to first/last row when the click is
-    // above/below the content, otherwise find the row whose vertical
-    // band contains y. This keeps a click in the gap between rows from
-    // collapsing to row 0.
-    const auto& rows = last_layout_.lines;
-    int row_index = 0;
-    if (y <= rows.front().top_y) {
-        row_index = 0;
-    } else if (y >= rows.back().top_y + rows.back().line_height) {
-        row_index = static_cast<int>(rows.size()) - 1;
-    } else {
-        for (int i = 0; i < static_cast<int>(rows.size()); ++i) {
-            const auto& row = rows[static_cast<size_t>(i)];
-            if (y >= row.top_y && y < row.top_y + row.line_height) {
-                row_index = i;
-                break;
-            }
-        }
-    }
-
-    const auto& row = rows[static_cast<size_t>(row_index)];
-    const float local_x = x - row.inner_x;
-    if (row.x_offsets.empty()) return row.start;
-
-    // Nearest-edge hit-test: find the char boundary whose x is closest
-    // to the click. Matches the half-glyph convention single-line uses.
-    int best = 0;
-    float best_dist = std::abs(local_x - row.x_offsets[0]);
-    for (size_t j = 1; j < row.x_offsets.size(); ++j) {
-        float d = std::abs(local_x - row.x_offsets[j]);
-        if (d < best_dist) {
-            best_dist = d;
-            best = static_cast<int>(j);
-        }
-    }
-    return std::clamp(row.start + best, 0, static_cast<int>(text_.size()));
-}
-
-Rect TextEditor::caret_rect() const {
-    // No paint has run yet: anchor the caret to the inner padding so an
-    // IME host querying us before the first frame still gets a
-    // non-degenerate rect. All coordinates returned by `caret_rect()`
-    // are in local view space, matching what `paint()` records.
-    if (last_layout_.lines.empty()) {
-        Rect fallback;
-        fallback.x = std::max(9.0f, border_width() + 7.0f);
-        fallback.y = 2.0f;
-        fallback.width = 1.5f;
-        fallback.height = std::max(font_size_, local_bounds().height - 4.0f);
-        return fallback;
-    }
-
-    // Find the row that owns the caret. The wrap path puts the caret on
-    // the row whose [start,end] band brackets the codepoint; the
-    // single-line path always has exactly one row so this still works.
-    int row_index = 0;
-    for (int i = 0; i < static_cast<int>(last_layout_.lines.size()); ++i) {
-        const auto& row = last_layout_.lines[static_cast<size_t>(i)];
-        if (caret_position_ >= row.start && caret_position_ <= row.end) {
-            row_index = i;
-            break;
-        }
-    }
-
-    const auto& row = last_layout_.lines[static_cast<size_t>(row_index)];
-    int col = std::clamp(caret_position_ - row.start, 0,
-                         static_cast<int>(row.x_offsets.empty() ? 0 : row.x_offsets.size() - 1));
-    float caret_x = row.inner_x + (row.x_offsets.empty() ? 0.f : row.x_offsets[static_cast<size_t>(col)]);
-
-    Rect r;
-    r.x = caret_x;
-    r.y = row.top_y;
-    r.width = 1.5f;
-    r.height = row.line_height;
-    return r;
+void TextEditor::on_attached() {
+    View::on_attached();
+    if (has_focus())
+        ensure_caret_blink_subscription();
 }
 
 void TextEditor::notify_change() {
     if (on_change) on_change(text_);
-}
-
-// ── IME composition ─────────────────────────────────────────────────────────
-
-void TextEditor::set_marked_text(const std::string& marked, int selected_pos, int selected_len) {
-    // Remove any previous marked text
-    if (!marked_text_.empty()) {
-        text_.erase(static_cast<size_t>(marked_start_), marked_text_.size());
-        caret_position_ = marked_start_;
-    }
-
-    marked_text_ = marked;
-    marked_start_ = caret_position_;
-    marked_selected_pos_ = selected_pos;
-    marked_selected_len_ = selected_len;
-
-    // Insert marked text at caret
-    if (!marked.empty()) {
-        text_.insert(static_cast<size_t>(marked_start_), marked);
-        caret_position_ = marked_start_ + static_cast<int>(marked.size());
-    }
-
-    selection_start_ = selection_end_ = caret_position_;
-}
-
-void TextEditor::unmark_text() {
-    // Marked text has already been inserted into text_; just clear the state
-    marked_text_.clear();
-    marked_start_ = 0;
-    marked_selected_pos_ = 0;
-    marked_selected_len_ = 0;
 }
 
 } // namespace pulp::view

@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+"""Tests for desktop doctor probe dependency bindings."""
+
+from module_test_utils import load_local_ci_module
+import unittest
+from unittest import mock
+
+
+
+def load_module():
+    return load_local_ci_module("desktop_doctor_probe_bindings.py")
+
+
+class DesktopDoctorProbeBindingsTests(unittest.TestCase):
+    def setUp(self):
+        self.mod = load_module()
+
+    def test_doctor_probe_exports_match_focused_groups(self):
+        expected = (
+            *self.mod.DESKTOP_DOCTOR_CHECK_EXPORTS,
+            *self.mod.DESKTOP_DOCTOR_WEBDRIVER_PROBE_EXPORTS,
+        )
+        self.assertEqual(self.mod.DESKTOP_DOCTOR_PROBE_EXPORTS, expected)
+        self.assertEqual(len(expected), len(set(expected)))
+        for name in expected:
+            self.assertTrue(callable(getattr(self.mod, name)))
+
+    def test_doctor_probe_installer_routes_selected_groups_and_unknown_fallback(self):
+        bindings = {}
+
+        with (
+            mock.patch.object(self.mod, "install_desktop_doctor_check_helpers") as checks,
+            mock.patch.object(self.mod, "install_desktop_doctor_webdriver_probe_helpers") as webdriver,
+            mock.patch.object(self.mod, "install_local_helpers") as install_local,
+        ):
+            self.mod.install_desktop_doctor_probe_helpers(
+                bindings,
+                ("desktop_doctor_checks", "probe_webdriver_endpoint", "unknown_helper"),
+            )
+
+        checks.assert_called_once_with(bindings, ("desktop_doctor_checks",))
+        webdriver.assert_called_once_with(bindings, ("probe_webdriver_endpoint",))
+        install_local.assert_called_once_with(bindings, self.mod.__dict__, ("unknown_helper",))
+
+
+if __name__ == "__main__":
+    unittest.main()

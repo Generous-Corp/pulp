@@ -224,8 +224,9 @@ bool parse_node_pack_manifest(const std::string& json, NodePackManifest& out) {
 }
 
 std::vector<std::uint8_t> node_pack_signed_message(const NodePackManifest& m) {
-    // Binds pack identity + ABI major + the binary hash. Deterministic and
-    // independent of JSON formatting, so re-serialization can't break the sig.
+    // Binds pack identity, ABI major, binary hash, and load-relevant metadata.
+    // Deterministic and independent of JSON formatting, so re-serialization
+    // can't break the sig.
     std::string s = "pulp-node-pack-v1\n";
     s += m.pack_id;
     s += '\n';

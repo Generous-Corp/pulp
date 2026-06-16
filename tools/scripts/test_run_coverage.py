@@ -151,6 +151,78 @@ class ObjectDiscoveryTests(unittest.TestCase):
             "maps; production archives are enough for full-surface rows.",
         )
 
+    def test_llvm_cov_objects_passed_via_response_file(self) -> None:
+        # A full build probes 1000+ `-object` entries. Passing them inline
+        # overflows the Windows command-line length limit (CreateProcess
+        # ~32 KB) — llvm-cov dies with "Argument list too long", filters out
+        # every source file, and the os-windows coverage leg produces no
+        # Cobertura XML. report/show/export must all read the object list from
+        # an LLVM @response file instead.
+        text = SCRIPT.read_text()
+        self.assertIn('OBJ_RSP=', text,
+                      "object list must be written to a response file")
+        self.assertIn('printf -- \'-object\\n%s\\n\' "${tok}" >> "${OBJ_RSP}"', text,
+                      "response file must be built one -object/path pair at a time")
+        self.assertGreaterEqual(
+            text.count('"@${OBJ_RSP}"'), 3,
+            "llvm-cov report, show, and export must each pass objects via the "
+            "@response file, not inline ${BINARIES[@]}",
+        )
+
+    def test_objects_that_vanished_after_probe_are_dropped(self) -> None:
+        # An -object can disappear between the pre-flight probe and the report
+        # (a late-cleaned test-fixture .exe on Windows is the observed case).
+        # llvm-cov hard-fails the whole run on one missing -object, so the
+        # response-file builder must existence-check each path and drop the
+        # vanished ones rather than blackhole the os-windows leg.
+        text = SCRIPT.read_text()
+        self.assertIn('if [[ -f "${tok}" ]]; then', text,
+                      "response-file builder must drop objects that no longer exist")
+        self.assertIn("existence filter left zero -object entries", text,
+                      "an empty post-filter object set must fail loudly")
+
+    def test_optional_ctest_args_are_threaded_into_ctest_invocation(self) -> None:
+        self.assertTrue(
+            _script_contains('PULP_COVERAGE_CTEST_ARGS'),
+            "Coverage workflow needs a script-level hook for platform-specific "
+            "CTest policy such as macOS validation-label exclusion.",
+        )
+        self.assertTrue(
+            _script_contains('"${EXTRA_CTEST_ARGS[@]}" --output-on-failure'),
+            "run_coverage.sh must pass optional CTest args before the shared "
+            "output/retry flags.",
+        )
+
+    def test_profraw_cleanup_uses_find_delete(self) -> None:
+        text = SCRIPT.read_text()
+        self.assertIn(
+            'find "${PROFRAW_DIR}" -name \'*.profraw\' -type f -delete',
+            text,
+            "run_coverage.sh must delete stale profraw files with find so "
+            "large previous coverage runs cannot hit ARG_MAX.",
+        )
+        self.assertNotIn(
+            'rm -f "${PROFRAW_DIR}"/*.profraw',
+            text,
+            "rm over a profraw glob fails once coverage has thousands of "
+            "profile files.",
+        )
+
+    def test_profraw_pattern_merges_by_instrumented_binary(self) -> None:
+        text = SCRIPT.read_text()
+        self.assertIn(
+            'LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%m.profraw"',
+            text,
+            "run_coverage.sh should use LLVM's module-signature merge "
+            "placeholder so repeated Catch2 invocations merge per binary.",
+        )
+        self.assertNotIn(
+            "pulp-%p-%m.profraw",
+            text,
+            "per-PID profraw files are too noisy for the full coverage suite "
+            "and are vulnerable to PID reuse.",
+        )
+
 
 class StaleCacheTests(unittest.TestCase):
     """#570: the post-configure assert errors when the cache is stale.

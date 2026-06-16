@@ -1,0 +1,42 @@
+{
+  "schema": "pulp-package-v1",
+  "id": "dev.pulp.fixtures.signed-node-pack-kit",
+  "name": "Signed Node Pack Kit",
+  "version": "0.1.0",
+  "license": "MIT",
+  "licenses": {
+    "code": "MIT",
+    "binary": "MIT"
+  },
+  "kind": ["node-pack"],
+  "audience": ["developer", "agent"],
+  "description": "Metadata-only fixture for a signed desktop/Android pulp_node_v1 pack.",
+  "requires": {
+    "pulp": ">=0.395.0",
+    "platforms": ["macOS", "Windows", "Linux", "Android"]
+  },
+  "capabilities": ["signal.graph.node.native", "audio.effect.gain"],
+  "exports": {
+    "nodePackManifests": ["node-pack/manifest.json"]
+  },
+  "dependencies": {
+    "pulp": ["pulp::host", "pulp::native-components"],
+    "packages": []
+  },
+  "realtime": {
+    "processSafe": true,
+    "allocatesInProcess": false,
+    "locksInProcess": false,
+    "notes": "pulp_node_v1 process callbacks borrow host buffers and may not call non-RT host services."
+  },
+  "agent": {
+    "guidance": "AGENTS.md"
+  },
+  "authoring": {
+    "createdBy": "human",
+    "humanReviewed": true
+  },
+  "validation": {
+    "profiles": ["validation/node-pack-smoke.json"]
+  }
+}

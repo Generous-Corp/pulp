@@ -3,21 +3,15 @@
 
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
 import subprocess
 import unittest
 
-
-MODULE_PATH = Path(__file__).with_name("linux_target.py")
+from module_test_utils import load_local_ci_module
 
 
 def load_module():
-    spec = importlib.util.spec_from_file_location("linux_target_under_test", MODULE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    return load_local_ci_module("linux_target.py")
 
 
 class LinuxTargetTests(unittest.TestCase):

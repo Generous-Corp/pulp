@@ -1,0 +1,331 @@
+#!/usr/bin/env python3
+"""Tests for cloud compatibility facade dependency wiring helpers."""
+
+from pathlib import Path
+import unittest
+
+from module_test_utils import load_local_ci_module
+
+
+def load_module():
+    return load_local_ci_module("cloud_facade_helpers.py")
+
+
+class CloudFacadeHelpersTests(unittest.TestCase):
+    def setUp(self):
+        self.mod = load_module()
+
+    def test_record_storage_helpers_forward_facade_dependencies(self):
+        calls = []
+
+        def save_cloud_record_fn(record, **kwargs):
+            calls.append(("save", record, kwargs))
+            return Path("stored.json")
+
+        def list_cloud_records_fn(**kwargs):
+            calls.append(("list", kwargs))
+            return [{"dispatch_id": "abc"}]
+
+        self.assertEqual(
+            self.mod.save_cloud_record_with_deps(
+                {"dispatch_id": "abc"},
+                save_cloud_record_fn=save_cloud_record_fn,
+                ensure_state_dirs_fn=lambda: None,
+                cloud_run_path_fn=lambda dispatch_id: Path(f"{dispatch_id}.json"),
+                atomic_write_text_fn=lambda path, text: None,
+            ),
+            Path("stored.json"),
+        )
+        self.assertEqual(
+            self.mod.list_cloud_records_with_deps(
+                limit=5,
+                list_cloud_records_fn=list_cloud_records_fn,
+                ensure_state_dirs_fn=lambda: None,
+                cloud_runs_dir_fn=lambda: Path("."),
+                load_cloud_record_fn=lambda path: {"path": str(path)},
+            ),
+            [{"dispatch_id": "abc"}],
+        )
+
+        self.assertEqual(calls[0][0], "save")
+        self.assertEqual(calls[0][2]["cloud_run_path_fn"]("abc"), Path("abc.json"))
+        self.assertEqual(calls[1][1]["limit"], 5)
+
+    def test_billing_and_metadata_helpers_forward_facade_dependencies(self):
+        calls = []
+
+        def billing_totals_fn(records, config, **kwargs):
+            calls.append(("totals", records, config, kwargs))
+            return {"provider": kwargs["provider"]}
+
+        def github_billing_fn(repository, config, **kwargs):
+            calls.append(("github", repository, config, kwargs))
+            return {"repository": repository}
+
+        def metadata_fn(record, **kwargs):
+            calls.append(("metadata", record, kwargs))
+            return {"metadata": True}
+
+        self.assertEqual(
+            self.mod.estimate_billing_period_totals_with_deps(
+                [{"dispatch_id": "abc"}],
+                {"cfg": True},
+                provider="namespace",
+                estimate_billing_period_totals_fn=billing_totals_fn,
+                billing_period_window_fn=lambda start_day: None,
+            ),
+            {"provider": "namespace"},
+        )
+        self.assertEqual(
+            self.mod.fetch_github_repo_actions_billing_summary_with_deps(
+                "danielraffel/pulp",
+                {"cfg": True},
+                fetch_github_repo_actions_billing_summary_fn=github_billing_fn,
+                resolve_billing_settings_fn=lambda config: {},
+                gh_available_fn=lambda: True,
+                gh_api_json_fn=lambda path, **kwargs: ({}, ""),
+                billing_period_window_fn=lambda start_day: None,
+                iter_year_months_fn=lambda start, end: [],
+                gh_token_scopes_fn=lambda: set(),
+                parse_iso_date_fn=lambda value: None,
+                provider_billing_note_text_fn=lambda: "note",
+            ),
+            {"repository": "danielraffel/pulp"},
+        )
+        self.assertEqual(
+            self.mod.enrich_cloud_record_provider_metadata_with_deps(
+                {"dispatch_id": "abc"},
+                enrich_cloud_record_provider_metadata_fn=metadata_fn,
+                normalize_cloud_record_fn=lambda record: record,
+                nsc_logged_in_fn=lambda: False,
+                namespace_instances_for_run_fn=lambda repository, run_id: [],
+                summarize_namespace_usage_fn=lambda instances: {},
+            ),
+            {"metadata": True},
+        )
+
+        self.assertEqual([call[0] for call in calls], ["totals", "github", "metadata"])
+        self.assertIn("period_window_func", calls[0][3])
+        self.assertIn("gh_api_json_fn", calls[1][3])
+        self.assertIn("nsc_logged_in_fn", calls[2][2])
+
+    def test_namespace_facade_helpers_forward_dependencies(self):
+        calls = []
+
+        def duration_fn(instance, **kwargs):
+            calls.append(("duration", instance, kwargs))
+            return 12.5
+
+        def normalize_fn(instance, **kwargs):
+            calls.append(("normalize", instance, kwargs))
+            return {"normalized": instance["id"]}
+
+        def namespace_matches_fn(repository, run_id, **kwargs):
+            calls.append(("matches", repository, run_id, kwargs))
+            return [{"cluster_id": "cluster-1"}]
+
+        self.assertEqual(
+            self.mod.namespace_instance_duration_secs_with_deps(
+                {"id": "instance-1"},
+                namespace_instance_duration_secs_fn=duration_fn,
+                now_iso_fn=lambda: "now",
+            ),
+            12.5,
+        )
+        self.assertEqual(
+            self.mod.normalize_namespace_instance_with_deps(
+                {"id": "instance-1"},
+                normalize_namespace_instance_fn=normalize_fn,
+                now_iso_fn=lambda: "now",
+            ),
+            {"normalized": "instance-1"},
+        )
+        self.assertEqual(
+            self.mod.namespace_instances_for_run_with_deps(
+                "danielraffel/pulp",
+                123,
+                namespace_instances_for_run_fn=namespace_matches_fn,
+                nsc_instance_history_fn=lambda: [{"id": "raw"}],
+                normalize_namespace_instance_fn=lambda item: item,
+            ),
+            [{"cluster_id": "cluster-1"}],
+        )
+
+        self.assertEqual([call[0] for call in calls], ["duration", "normalize", "matches"])
+        self.assertIn("now_iso_fn", calls[0][2])
+        self.assertIn("now_iso_fn", calls[1][2])
+        self.assertIn("nsc_instance_history_fn", calls[2][3])
+
+    def test_namespace_cli_facade_helpers_forward_nsc_run(self):
+        calls = []
+
+        def nsc_run(args, **kwargs):
+            calls.append(("run", args, kwargs))
+            return None
+
+        self.assertTrue(
+            self.mod.nsc_available_with_deps(
+                nsc_available_fn=lambda **kwargs: calls.append(("available", kwargs)) or True,
+                nsc_run_fn=nsc_run,
+            )
+        )
+        self.assertEqual(
+            self.mod.nsc_version_with_deps(
+                nsc_version_fn=lambda **kwargs: calls.append(("version", kwargs)) or "v0.0.493",
+                nsc_run_fn=nsc_run,
+            ),
+            "v0.0.493",
+        )
+        self.assertTrue(
+            self.mod.nsc_logged_in_with_deps(
+                nsc_logged_in_fn=lambda **kwargs: calls.append(("logged-in", kwargs)) or True,
+                nsc_run_fn=nsc_run,
+            )
+        )
+        self.assertEqual(
+            self.mod.nsc_workspace_info_with_deps(
+                nsc_workspace_info_fn=lambda **kwargs: calls.append(("workspace", kwargs)) or {"Name": "Personal"},
+                nsc_run_fn=nsc_run,
+            ),
+            {"Name": "Personal"},
+        )
+        self.assertEqual(
+            self.mod.nsc_instance_history_with_deps(
+                7,
+                nsc_instance_history_fn=lambda **kwargs: calls.append(("history", kwargs)) or [{"id": "instance"}],
+                nsc_run_fn=nsc_run,
+            ),
+            [{"id": "instance"}],
+        )
+
+        self.assertEqual(
+            [call[0] for call in calls],
+            ["available", "version", "logged-in", "workspace", "history"],
+        )
+        for _name, kwargs in calls:
+            self.assertIs(kwargs["nsc_run_fn"], nsc_run)
+        self.assertEqual(calls[-1][1]["max_entries"], 7)
+
+    def test_summary_and_run_update_helpers_forward_facade_dependencies(self):
+        calls = []
+
+        def summary_fn(record, config, **kwargs):
+            calls.append(("summary", record, config, kwargs))
+            return "summary"
+
+        def update_fn(record, snapshot, **kwargs):
+            calls.append(("update", record, snapshot, kwargs))
+            return {"updated": True}
+
+        self.assertEqual(
+            self.mod.cloud_record_summary_with_deps(
+                {"dispatch_id": "abc"},
+                {"cfg": True},
+                cloud_record_summary_fn=summary_fn,
+                estimate_cloud_record_cost_fn=lambda record, config: {},
+                format_currency_amount_fn=lambda amount, currency: "",
+            ),
+            "summary",
+        )
+        self.assertEqual(
+            self.mod.update_cloud_record_from_run_with_deps(
+                {"dispatch_id": "abc"},
+                {"databaseId": 7},
+                provider_resolved="namespace",
+                update_cloud_record_from_run_fn=update_fn,
+                now_iso_fn=lambda: "now",
+            ),
+            {"updated": True},
+        )
+
+        self.assertIn("estimate_cloud_record_cost_fn", calls[0][3])
+        self.assertEqual(calls[1][3]["provider_resolved"], "namespace")
+
+    def test_resolve_github_repository_prefers_config_then_discovery(self):
+        self.assertEqual(
+            self.mod.resolve_github_repository_with_deps(
+                {"repository": "configured/repo"},
+                gh_repo_name_fn=lambda: "discovered/repo",
+            ),
+            "configured/repo",
+        )
+        self.assertEqual(
+            self.mod.resolve_github_repository_with_deps(
+                {"repository": "  "},
+                gh_repo_name_fn=lambda: "discovered/repo",
+            ),
+            "discovered/repo",
+        )
+        with self.assertRaises(ValueError):
+            self.mod.resolve_github_repository_with_deps({}, gh_repo_name_fn=lambda: None)
+
+    def test_refresh_cloud_record_with_deps_handles_missing_and_present_snapshots(self):
+        calls = []
+
+        self.assertEqual(
+            self.mod.refresh_cloud_record_with_deps(
+                {"dispatch_id": "no-run"},
+                "danielraffel/pulp",
+                require_snapshot=True,
+                normalize_cloud_record_fn=lambda record: {"normalized": record["dispatch_id"]},
+                gh_run_view_fn=lambda repository, run_id: None,
+                update_cloud_record_from_run_fn=lambda record, snapshot: {},
+                enrich_cloud_record_provider_metadata_fn=lambda record: record,
+                save_cloud_record_fn=lambda record: Path("unused"),
+            ),
+            {"normalized": "no-run"},
+        )
+        self.assertEqual(
+            self.mod.refresh_cloud_record_with_deps(
+                {"dispatch_id": "missing", "run_id": 42},
+                "danielraffel/pulp",
+                require_snapshot=False,
+                normalize_cloud_record_fn=lambda record: {"normalized": record["dispatch_id"]},
+                gh_run_view_fn=lambda repository, run_id: None,
+                update_cloud_record_from_run_fn=lambda record, snapshot: {},
+                enrich_cloud_record_provider_metadata_fn=lambda record: record,
+                save_cloud_record_fn=lambda record: Path("unused"),
+            ),
+            {"normalized": "missing"},
+        )
+        with self.assertRaises(RuntimeError):
+            self.mod.refresh_cloud_record_with_deps(
+                {"dispatch_id": "missing", "run_id": 42},
+                "danielraffel/pulp",
+                require_snapshot=True,
+                normalize_cloud_record_fn=lambda record: record,
+                gh_run_view_fn=lambda repository, run_id: None,
+                update_cloud_record_from_run_fn=lambda record, snapshot: {},
+                enrich_cloud_record_provider_metadata_fn=lambda record: record,
+                save_cloud_record_fn=lambda record: Path("unused"),
+            )
+
+        def update(record, snapshot):
+            calls.append(("update", record, snapshot))
+            return {"updated": record["dispatch_id"], "snapshot": snapshot["databaseId"]}
+
+        def enrich(record):
+            calls.append(("enrich", record))
+            return {"enriched": record["updated"]}
+
+        def save(record):
+            calls.append(("save", record))
+            return Path("stored.json")
+
+        refreshed = self.mod.refresh_cloud_record_with_deps(
+            {"dispatch_id": "abc", "run_id": 42},
+            "danielraffel/pulp",
+            require_snapshot=True,
+            normalize_cloud_record_fn=lambda record: record,
+            gh_run_view_fn=lambda repository, run_id: {"databaseId": run_id, "repo": repository},
+            update_cloud_record_from_run_fn=update,
+            enrich_cloud_record_provider_metadata_fn=enrich,
+            save_cloud_record_fn=save,
+        )
+
+        self.assertEqual(refreshed, {"enriched": "abc"})
+        self.assertEqual([call[0] for call in calls], ["update", "enrich", "save"])
+
+
+if __name__ == "__main__":
+    unittest.main()

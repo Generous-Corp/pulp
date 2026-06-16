@@ -6,6 +6,16 @@ from collections.abc import Callable
 import json
 from pathlib import Path
 
+from windows_desktop_action_result import (
+    build_windows_desktop_action_manifest,
+    fetch_windows_session_agent_outputs,
+    wait_for_windows_session_agent_manifest,
+)
+from desktop_remote_action_preflight import (
+    require_pulp_app_automation_for_remote_view_options,
+    resolve_remote_desktop_action_host,
+)
+
 
 def run_windows_session_agent_action(
     config: dict,
@@ -54,11 +64,12 @@ def run_windows_session_agent_action(
     write_desktop_run_rollups_fn: Callable[..., None],
     now_iso_fn: Callable[[], str],
 ) -> dict:
-    host = ensure_host_reachable_fn(target_name, target, config.get("defaults", {}))
-    if not host:
-        raise RuntimeError(f"Desktop target `{target_name}` is not reachable over SSH.")
-    if not target.get("repo_path"):
-        raise RuntimeError(f"Desktop target `{target_name}` is missing repo_path.")
+    host, repo_path = resolve_remote_desktop_action_host(
+        config,
+        target_name,
+        target,
+        ensure_host_reachable_fn=ensure_host_reachable_fn,
+    )
 
     receipt = desktop_receipt_for_fn(target_name)
     if not receipt:
@@ -80,15 +91,17 @@ def run_windows_session_agent_action(
         raise RuntimeError(
             f"Desktop target `{target_name}` has no logged-in desktop session. Log into the target desktop, then retry."
         )
-    if not pulp_app_automation:
-        if capture_ui_snapshot:
-            raise RuntimeError(
-                f"Desktop target `{target_name}` currently supports --capture-ui-snapshot only with --pulp-app-automation."
-            )
-        if any([click_view_id, click_view_type, click_view_text, click_view_label]):
-            raise RuntimeError(
-                f"Desktop target `{target_name}` currently supports view-target selectors only with --pulp-app-automation."
-            )
+    require_pulp_app_automation_for_remote_view_options(
+        target_name=target_name,
+        pulp_app_automation=pulp_app_automation,
+        capture_ui_snapshot=capture_ui_snapshot,
+        click_view_id=click_view_id,
+        click_view_type=click_view_type,
+        click_view_text=click_view_text,
+        click_view_label=click_view_label,
+        snapshot_error="Desktop target `{target_name}` currently supports --capture-ui-snapshot only with --pulp-app-automation.",
+        selector_error="Desktop target `{target_name}` currently supports view-target selectors only with --pulp-app-automation.",
+    )
 
     bundle_dir = create_desktop_run_bundle_fn(config, target_name, action_name)
     action_paths = desktop_action_artifact_paths_fn(bundle_dir, output_path)
@@ -110,7 +123,7 @@ def run_windows_session_agent_action(
     source_context = dict(source_request or {})
     if source_context.get("mode") == "exact-sha":
         source_context = prepare_windows_exact_sha_source_fn(bundle_dir, target_name, host, command, source_context)
-    launch_cwd = source_context.get("launch_cwd") or target["repo_path"]
+    launch_cwd = source_context.get("launch_cwd") or repo_path
     launch_command = source_context.get("launch_command") or command
 
     request = build_windows_session_agent_request_fn(
@@ -135,114 +148,71 @@ def run_windows_session_agent_action(
     windows_ssh_write_text_fn(host, remote_request_path, json.dumps(request, indent=2) + "\n")
     try:
         start_windows_session_agent_task_fn(host, contract)
-        deadline = time_fn() + timeout_secs + settle_secs + 15.0
-        remote_manifest: dict | None = None
-        while time_fn() < deadline:
-            remote_manifest = windows_ssh_read_json_fn(
-                host,
-                request["outputs"]["manifest"],
-                timeout=15,
-                optional=True,
-            )
-            if remote_manifest is not None:
-                break
-            sleep_fn(0.5)
-        if remote_manifest is None:
-            raise RuntimeError(
-                f"Timed out waiting for Windows desktop agent result for `{target_name}` ({request['job_id']})."
-            )
+        remote_manifest = wait_for_windows_session_agent_manifest(
+            host=host,
+            target_name=target_name,
+            request=request,
+            timeout_secs=timeout_secs,
+            settle_secs=settle_secs,
+            time_fn=time_fn,
+            sleep_fn=sleep_fn,
+            windows_ssh_read_json_fn=windows_ssh_read_json_fn,
+        )
 
         agent_manifest_path.parent.mkdir(parents=True, exist_ok=True)
         atomic_write_text_fn(agent_manifest_path, json.dumps(remote_manifest, indent=2) + "\n")
 
-        fetch_stdout = windows_ssh_fetch_file_fn(
-            host,
-            request["outputs"]["stdout"],
-            log_path,
-            optional=True,
-            timeout=30,
+        fetch_windows_session_agent_outputs(
+            host=host,
+            request=request,
+            capture_before=capture_before,
+            capture_ui_snapshot=capture_ui_snapshot,
+            screenshot_path=screenshot_path,
+            before_screenshot_path=before_screenshot_path,
+            ui_snapshot_path=ui_snapshot_path,
+            log_path=log_path,
+            err_path=err_path,
+            windows_ssh_fetch_file_fn=windows_ssh_fetch_file_fn,
         )
-        fetch_stderr = windows_ssh_fetch_file_fn(
-            host,
-            request["outputs"]["stderr"],
-            err_path,
-            optional=True,
-            timeout=30,
-        )
-        if not fetch_stdout:
-            log_path.write_text("")
-        if not fetch_stderr:
-            err_path.write_text("")
-        windows_ssh_fetch_file_fn(host, request["outputs"]["screenshot"], screenshot_path, timeout=60)
-        if capture_before:
-            windows_ssh_fetch_file_fn(
-                host,
-                request["outputs"]["before_screenshot"],
-                before_screenshot_path,
-                optional=False,
-                timeout=60,
-            )
-        if capture_ui_snapshot:
-            windows_ssh_fetch_file_fn(
-                host,
-                request["outputs"]["ui_snapshot"],
-                ui_snapshot_path,
-                optional=False,
-                timeout=30,
-            )
     finally:
         windows_ssh_remove_path_fn(host, remote_request_path)
         windows_ssh_remove_path_fn(host, request["outputs"]["result_root"])
 
     status = remote_manifest.get("status") or "error"
     error_detail = remote_manifest.get("error")
-    manifest = {
-        "target": target_name,
-        "adapter": target["adapter"],
-        "action": action_name,
-        "label": label or default_desktop_label_fn(command),
-        "pid": remote_manifest.get("pid"),
-        "host": host,
-        "repo_path": target["repo_path"],
-        "command": launch_command,
-        "started_at": started_at,
-        "completed_at": now_iso_fn(),
-        "window": remote_manifest.get("window"),
-        "artifacts": {
-            "bundle_dir": str(bundle_dir),
-            "screenshot": str(screenshot_path),
-            "stdout": str(log_path),
-            "stderr": str(err_path),
-            "agent_manifest": str(agent_manifest_path),
-        },
-        "agent_status": status,
-    }
-    if capture_before and before_screenshot_path.exists() and screenshot_path.exists():
-        manifest["artifacts"]["before_screenshot"] = str(before_screenshot_path)
-        manifest["artifacts"]["image_change"] = image_change_summary_fn(
-            before_screenshot_path,
-            screenshot_path,
-            diff_output_path=diff_screenshot_path,
-        )
-        if diff_screenshot_path.exists():
-            manifest["artifacts"]["diff_screenshot"] = str(diff_screenshot_path)
-    if capture_ui_snapshot and ui_snapshot_path.exists():
-        view_tree = json.loads(ui_snapshot_path.read_text())
-        manifest["artifacts"]["ui_snapshot"] = str(ui_snapshot_path)
-        manifest["inspector"] = view_tree_inspector_summary_fn(view_tree)
-    remote_interaction = remote_manifest.get("interaction")
-    if remote_interaction:
-        manifest["interaction"] = remote_interaction
-    elif interaction_requested:
-        manifest["interaction"] = pulp_app_interaction_summary_fn(
-            click_point=click_point,
-            click_view_id=click_view_id,
-            click_view_type=click_view_type,
-            click_view_text=click_view_text,
-            click_view_label=click_view_label,
-        )
-        if not pulp_app_automation:
-            manifest["interaction"]["mode"] = "window-capture"
+    manifest = build_windows_desktop_action_manifest(
+        target_name=target_name,
+        target=target,
+        command=command,
+        launch_command=launch_command,
+        host=host,
+        action_name=action_name,
+        label=label,
+        started_at=started_at,
+        completed_at=now_iso_fn(),
+        remote_manifest=remote_manifest,
+        bundle_dir=bundle_dir,
+        agent_manifest_path=agent_manifest_path,
+        screenshot_path=screenshot_path,
+        before_screenshot_path=before_screenshot_path,
+        diff_screenshot_path=diff_screenshot_path,
+        ui_snapshot_path=ui_snapshot_path,
+        log_path=log_path,
+        err_path=err_path,
+        capture_before=capture_before,
+        capture_ui_snapshot=capture_ui_snapshot,
+        interaction_requested=interaction_requested,
+        pulp_app_automation=pulp_app_automation,
+        click_point=click_point,
+        click_view_id=click_view_id,
+        click_view_type=click_view_type,
+        click_view_text=click_view_text,
+        click_view_label=click_view_label,
+        default_desktop_label_fn=default_desktop_label_fn,
+        image_change_summary_fn=image_change_summary_fn,
+        view_tree_inspector_summary_fn=view_tree_inspector_summary_fn,
+        pulp_app_interaction_summary_fn=pulp_app_interaction_summary_fn,
+    )
     attach_desktop_source_to_manifest_fn(manifest, source_context or source_request)
     atomic_write_text_fn(bundle_dir / "manifest.json", json.dumps(manifest, indent=2) + "\n")
     write_desktop_run_rollups_fn(config, target_name=target_name)

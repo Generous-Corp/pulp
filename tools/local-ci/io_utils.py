@@ -10,9 +10,9 @@ is unavailable, so the local CI test suite stays runnable on stripped
 environments (CI bot images without PIL).
 
 `LockBusyError` lives here rather than in `state_paths` because its
-only real use site is `file_lock`. Two other call sites in local_ci.py
-catch it (worktree job queue + drain enforcement) — they continue to
-catch it via the re-export from `local_ci.py`.
+primary use site is `file_lock`. Facade callers still catch it via the
+`local_ci.py` re-export while queue and drain orchestration receive the class
+through their binding modules.
 """
 
 from __future__ import annotations

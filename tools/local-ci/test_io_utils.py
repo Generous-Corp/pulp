@@ -1,55 +1,24 @@
 #!/usr/bin/env python3
 """Tests for the io_utils text/file/image helpers.
 
-Split out of test_local_ci.py (roadmap P11-3) so the test surface mirrors
-the extracted io_utils module. The harness still loads the local_ci.py
-orchestrator, which re-exports the io_utils symbols.
+Split out of test_local_ci.py (roadmap P11-3) so the test surface exercises the
+extracted io_utils module directly instead of the local_ci.py facade.
 """
 
-import io
-import importlib.util
-import json
 import os
-import subprocess
 import sys
 import tempfile
-import threading
 import unittest
-from urllib.parse import urlparse
 from unittest import mock
-from contextlib import redirect_stdout
-from datetime import datetime, timezone
 from pathlib import Path
-from types import SimpleNamespace
 
-
-MODULE_PATH = Path(__file__).with_name("local_ci.py")
-IO_UTILS_PATH = Path(__file__).with_name("io_utils.py")
-VALIDATE_BUILD_PATH = MODULE_PATH.parent.parent.parent / "validate-build.sh"
-
-
-def load_module():
-    spec = importlib.util.spec_from_file_location("pulp_local_ci", MODULE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
-
-
-def load_io_utils_module():
-    if str(IO_UTILS_PATH.parent) not in sys.path:
-        sys.path.insert(0, str(IO_UTILS_PATH.parent))
-    spec = importlib.util.spec_from_file_location("pulp_io_utils", IO_UTILS_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+import io_utils
 
 
 class IoUtilsDirectTests(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.TemporaryDirectory()
-        self.mod = load_io_utils_module()
+        self.mod = io_utils
 
     def tearDown(self):
         self.tmpdir.cleanup()
@@ -92,87 +61,20 @@ class IoUtilsDirectTests(unittest.TestCase):
 
 
 class IoUtilsTests(unittest.TestCase):
-    def _set_target_enabled(self, name: str, enabled: bool):
-        payload = json.loads(self.config_path.read_text())
-        payload.setdefault("targets", {}).setdefault(name, {})["enabled"] = enabled
-        self.config_path.write_text(json.dumps(payload) + "\n")
-
-    def _write_desktop_manifest(self, config, target, action, manifest):
-        bundle = self.mod.create_desktop_run_bundle(config, target, action)
-        payload = dict(manifest)
-        artifacts = dict(payload.get("artifacts", {}))
-        artifacts.setdefault("bundle_dir", str(bundle))
-        payload["artifacts"] = artifacts
-        (bundle / "manifest.json").write_text(json.dumps(payload) + "\n")
-        return bundle, payload
-
     def setUp(self):
         self.tmpdir = tempfile.TemporaryDirectory()
         root = Path(self.tmpdir.name)
         self.state_dir = root / "state"
-        self.config_path = root / "config.json"
-        self.config_path.write_text(
-            json.dumps(
-                {
-                    "desktop_automation": {
-                        "artifact_root": str(root / "desktop-artifacts"),
-                    },
-                    "targets": {
-                        "mac": {"type": "local", "enabled": True},
-                        "ubuntu": {"type": "ssh", "enabled": True, "host": "ubuntu", "repo_path": "/tmp/pulp"},
-                        "windows": {"type": "ssh", "enabled": False, "host": "win2", "repo_path": "C:\\Pulp"},
-                    },
-                    "github_actions": {
-                        "repository": "danielraffel/pulp",
-                        "defaults": {
-                            "workflow": "build",
-                            "provider": "github-hosted",
-                            "wait_poll_secs": 5,
-                            "match_timeout_secs": 30,
-                        },
-                        "workflows": {
-                            "build": {
-                                "providers": {
-                                    "namespace": {
-                                        "linux_runner_selector_json": "\"namespace-profile-default\"",
-                                        "windows_runner_selector_json": "\"namespace-profile-default\"",
-                                    }
-                                }
-                            },
-                            "docs-check": {
-                                "providers": {
-                                    "namespace": {
-                                        "runner_selector_json": "\"namespace-profile-default\""
-                                    }
-                                }
-                            }
-                        },
-                    },
-                    "defaults": {
-                        "priority": "normal",
-                        "targets": ["mac"],
-                    },
-                }
-            )
-            + "\n"
-        )
 
         self.prev_home = os.environ.get("PULP_LOCAL_CI_HOME")
-        self.prev_config = os.environ.get("PULP_LOCAL_CI_CONFIG")
         os.environ["PULP_LOCAL_CI_HOME"] = str(self.state_dir)
-        os.environ["PULP_LOCAL_CI_CONFIG"] = str(self.config_path)
-        self.mod = load_module()
+        self.mod = io_utils
 
     def tearDown(self):
         if self.prev_home is None:
             os.environ.pop("PULP_LOCAL_CI_HOME", None)
         else:
             os.environ["PULP_LOCAL_CI_HOME"] = self.prev_home
-
-        if self.prev_config is None:
-            os.environ.pop("PULP_LOCAL_CI_CONFIG", None)
-        else:
-            os.environ["PULP_LOCAL_CI_CONFIG"] = self.prev_config
 
         self.tmpdir.cleanup()
 
@@ -289,9 +191,8 @@ class IoUtilsTests(unittest.TestCase):
 
     def test_file_lock_raises_busy_when_nonblocking_flock_fails(self):
         lock_path = self.state_dir / "queue.lock"
-        io_utils_mod = sys.modules["io_utils"]
 
-        with mock.patch.object(io_utils_mod.fcntl, "flock", side_effect=BlockingIOError("busy")):
+        with mock.patch.object(io_utils.fcntl, "flock", side_effect=BlockingIOError("busy")):
             with self.assertRaises(self.mod.LockBusyError):
                 with self.mod.file_lock(lock_path, blocking=False):
                     pass

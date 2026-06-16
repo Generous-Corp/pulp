@@ -1,5 +1,25 @@
 #include <pulp/runtime/model_download.hpp>
 
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
+#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+
+namespace pulp::runtime {
+
+DownloadResult download_file(const DownloadRequest& req, const DownloadProgressFn&,
+                             const CancellationToken*) {
+    DownloadResult r;
+    r.path = req.dest;
+    r.error = "model downloads are not supported on iOS";
+    return r;
+}
+
+}  // namespace pulp::runtime
+
+#else
+
 #include <pulp/runtime/async_stream.hpp>
 
 #include <mbedtls/sha256.h>
@@ -365,3 +385,5 @@ DownloadResult download_file(const DownloadRequest& req, const DownloadProgressF
 }
 
 }  // namespace pulp::runtime
+
+#endif

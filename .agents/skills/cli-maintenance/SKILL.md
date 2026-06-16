@@ -94,6 +94,14 @@ Decision heuristics for "does this deserve MCP exposure":
 - Trivial Bash equivalent (clean, version, config) → **NO**, baseline it.
 - Interactive surface (design, ship) → **NO**, baseline it.
 - Subcommand under an umbrella tool already present (audio, docs, inspect) → **NO**, baseline it (the umbrella's sub-tools cover the surface).
+- Trust-boundary workflows with many reviewable subcommands (kit/content) →
+  **YES for the umbrella and explicit MCP sub-tools.** Keep `pulp kit` and
+  `pulp content` documented as top-level CLI commands, but expose agent-safe
+  sub-tools such as `pulp_kit_plan`, `pulp_kit_apply`,
+  `pulp_content_preview`, and `pulp_content_install` so MCP callers cannot blur
+  inspect/preview/approve/apply boundaries. Add those sub-tools to the
+  `mcp_only` baseline with a reason that they are sub-tools of the umbrella CLI
+  command, not missing top-level CLI peers.
 
 The gate runs in three places, all pinned to the same script:
 
@@ -378,6 +386,25 @@ exits 2 for) read as exit 0 through `pulp-cpp`. `run()` now routes through
 Any new `std::system` call that feeds an exit code MUST decode it the same
 way. Covered by `pulp delegates a non-zero child exit code intact` in
 `test/test_cli_shellout.cpp` (which runs against `pulp-cpp`, the delegate).
+
+**Prefer `pulp::platform::exec` over `std::system` for quoted-path shell-outs
+on Windows (2026-06-14):** `std::system(cmd)` runs `cmd.exe /c <cmd>`. When
+`<cmd>` *starts with* a quoted path **and** contains further quotes (e.g. quoted
+arguments and a quoted redirect target — the common shape `"C:\tool.exe"
+--output "C:\out" > "C:\log" 2>&1`), `cmd /c` mis-parses it and aborts with
+*"The filename, directory name, or volume label syntax is incorrect"* before
+running anything — so the tool never launches and no output/redirect file is
+created. Reproduced against a real Windows host through the CRT `system()`. The
+robust fix is to **not go through the shell at all**: spawn the tool with
+`pulp::platform::exec(program, args_vector, timeout_ms)`, which passes an argv
+array straight to the process (no `cmd`, no quote parsing). `pulp kit verify
+--execute-screenshots` (`maybe_execute_screenshot_profile` in
+`tools/cli/kit_commands.cpp`) hit this — it now uses `exec()` for both the
+direct-`.exe` path and the `.cmd`/`.bat` path (`exec("cmd", {"/C", shell_command})`).
+If you must use `std::system` (e.g. you genuinely need shell features) and the
+command begins with a quoted path, wrap the ENTIRE command in one extra pair of
+double quotes (`command = "\"" + command + "\"";`) so `cmd` strips exactly that
+pair and runs the remainder verbatim.
 
 ### Numeric CLI flags
 

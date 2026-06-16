@@ -2,13 +2,14 @@
 // `tools/cli/tool_registry.cpp`.
 //
 // Coverage tranche for issue #643. These tests stay on local registry,
-// discovery, uninstall, and command dispatch paths. They intentionally avoid
-// network downloads, archive extraction, Python package installs, and running
+// discovery, archive extraction, uninstall, and command dispatch paths. They
+// intentionally avoid network downloads, Python package installs, and running
 // external tools from the registry.
 
 #include <catch2/catch_test_macros.hpp>
 
 #include "../tools/cli/tool_registry.hpp"
+#include <pulp/platform/child_process.hpp>
 
 #include <atomic>
 #include <cstdint>
@@ -197,6 +198,19 @@ fs::path managed_binary_path(const fs::path& home,
     return home / "tools" / id / version / binary_name;
 }
 
+void require_exec_ok(const std::string& command,
+                     const std::vector<std::string>& args,
+                     const fs::path& cwd = {}) {
+    pulp::platform::ProcessOptions options;
+    options.timeout_ms = 60000;
+    if (!cwd.empty()) options.working_directory = cwd.string();
+    auto r = pulp::platform::ChildProcess::run(command, args, options);
+    INFO(command);
+    INFO(r.stdout_output);
+    INFO(r.stderr_output);
+    REQUIRE(r.exit_code == 0);
+}
+
 }  // namespace
 
 TEST_CASE("tool registry parses descriptors and reports malformed roots",
@@ -337,6 +351,41 @@ TEST_CASE("tool registry accepts empty and partial descriptor shapes",
     REQUIRE_FALSE(tool.bundleable);
     REQUIRE(tool.binary_sources.count(current_platform_key()) == 1);
     REQUIRE(tool.binary_sources.at(current_platform_key()).binary_name.empty());
+}
+
+TEST_CASE("tool registry extracts zip archives with literal paths",
+          "[cli][tool-registry][archive][issue-643]") {
+    TempDir tmp;
+    auto payload = tmp.path / "payload";
+    write_file(payload / "nested" / "fixture.txt", "zip fixture\n");
+    auto archive = tmp.path / "fixture.zip";
+    auto dest = tmp.path / "out zip";
+
+    require_exec_ok("cmake", {"-E", "tar", "cf", archive.string(), "--format=zip", "--", "nested/fixture.txt"}, payload);
+
+    REQUIRE(extract_archive(archive, dest, "zip"));
+    REQUIRE(fs::exists(dest / "nested" / "fixture.txt"));
+}
+
+TEST_CASE("tool registry extracts tar.xz archives without shell quoting",
+          "[cli][tool-registry][archive][issue-643]") {
+    TempDir tmp;
+    auto payload = tmp.path / "payload";
+    write_file(payload / "nested" / "fixture.txt", "tar fixture\n");
+    auto archive = tmp.path / "fixture.tar.xz";
+    auto dest = tmp.path / "out tar";
+
+    require_exec_ok("tar", {"cJf", archive.string(), "-C", payload.string(), "."});
+
+    REQUIRE(extract_archive(archive, dest, "tar.xz"));
+    REQUIRE(fs::exists(dest / "nested" / "fixture.txt"));
+}
+
+TEST_CASE("tool registry rejects unsupported archive formats",
+          "[cli][tool-registry][archive][issue-643]") {
+    TempDir tmp;
+    auto archive = touch_file(tmp.path / "fixture.unsupported");
+    REQUIRE_FALSE(extract_archive(archive, tmp.path / "out", "rar"));
 }
 
 TEST_CASE("tool registry coverage preserves platform sources and home helpers",

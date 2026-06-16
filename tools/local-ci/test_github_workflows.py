@@ -1,126 +1,68 @@
 #!/usr/bin/env python3
 """Tests for the github_workflows selector/provider helpers.
 
-Split out of test_local_ci.py (roadmap P11-3) so the test surface mirrors
-the extracted github_workflows module. The harness still loads the local_ci.py
-orchestrator, which re-exports the github_workflows symbols.
+Split out of test_local_ci.py (roadmap P11-3) so the test surface exercises the
+extracted github_workflows module directly instead of the local_ci.py facade.
 """
 
-import io
-import importlib.util
 import json
 import os
-import subprocess
-import sys
 import tempfile
-import threading
 import unittest
-from urllib.parse import urlparse
 from unittest import mock
-from contextlib import redirect_stdout
-from datetime import datetime, timezone
-from pathlib import Path
 from types import SimpleNamespace
 
-
-MODULE_PATH = Path(__file__).with_name("local_ci.py")
-VALIDATE_BUILD_PATH = MODULE_PATH.parent.parent.parent / "validate-build.sh"
-
-
-def load_module():
-    spec = importlib.util.spec_from_file_location("pulp_local_ci", MODULE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+import github_workflows
 
 
 
 class GithubWorkflowsTests(unittest.TestCase):
-    def _set_target_enabled(self, name: str, enabled: bool):
-        payload = json.loads(self.config_path.read_text())
-        payload.setdefault("targets", {}).setdefault(name, {})["enabled"] = enabled
-        self.config_path.write_text(json.dumps(payload) + "\n")
-
-    def _write_desktop_manifest(self, config, target, action, manifest):
-        bundle = self.mod.create_desktop_run_bundle(config, target, action)
-        payload = dict(manifest)
-        artifacts = dict(payload.get("artifacts", {}))
-        artifacts.setdefault("bundle_dir", str(bundle))
-        payload["artifacts"] = artifacts
-        (bundle / "manifest.json").write_text(json.dumps(payload) + "\n")
-        return bundle, payload
-
     def setUp(self):
         self.tmpdir = tempfile.TemporaryDirectory()
-        root = Path(self.tmpdir.name)
-        self.state_dir = root / "state"
-        self.config_path = root / "config.json"
-        self.config_path.write_text(
-            json.dumps(
-                {
-                    "desktop_automation": {
-                        "artifact_root": str(root / "desktop-artifacts"),
-                    },
-                    "targets": {
-                        "mac": {"type": "local", "enabled": True},
-                        "ubuntu": {"type": "ssh", "enabled": True, "host": "ubuntu", "repo_path": "/tmp/pulp"},
-                        "windows": {"type": "ssh", "enabled": False, "host": "win2", "repo_path": "C:\\Pulp"},
-                    },
-                    "github_actions": {
-                        "repository": "danielraffel/pulp",
-                        "defaults": {
-                            "workflow": "build",
-                            "provider": "github-hosted",
-                            "wait_poll_secs": 5,
-                            "match_timeout_secs": 30,
-                        },
-                        "workflows": {
-                            "build": {
-                                "providers": {
-                                    "namespace": {
-                                        "linux_runner_selector_json": "\"namespace-profile-default\"",
-                                        "windows_runner_selector_json": "\"namespace-profile-default\"",
-                                    }
-                                }
-                            },
-                            "docs-check": {
-                                "providers": {
-                                    "namespace": {
-                                        "runner_selector_json": "\"namespace-profile-default\""
-                                    }
-                                }
+        root = self.tmpdir.name
+        self.config_path = os.path.join(root, "config.json")
+        self.config = {
+            "github_actions": {
+                "repository": "danielraffel/pulp",
+                "defaults": {
+                    "workflow": "build",
+                    "provider": "github-hosted",
+                    "wait_poll_secs": 5,
+                    "match_timeout_secs": 30,
+                },
+                "workflows": {
+                    "build": {
+                        "providers": {
+                            "namespace": {
+                                "linux_runner_selector_json": "\"namespace-profile-default\"",
+                                "windows_runner_selector_json": "\"namespace-profile-default\"",
                             }
-                        },
+                        }
                     },
-                    "defaults": {
-                        "priority": "normal",
-                        "targets": ["mac"],
+                    "docs-check": {
+                        "providers": {
+                            "namespace": {
+                                "runner_selector_json": "\"namespace-profile-default\""
+                            }
+                        }
                     },
-                }
-            )
-            + "\n"
-        )
-
-        self.prev_home = os.environ.get("PULP_LOCAL_CI_HOME")
-        self.prev_config = os.environ.get("PULP_LOCAL_CI_CONFIG")
-        os.environ["PULP_LOCAL_CI_HOME"] = str(self.state_dir)
-        os.environ["PULP_LOCAL_CI_CONFIG"] = str(self.config_path)
-        self.mod = load_module()
+                },
+            }
+        }
+        self.write_config(self.config)
+        self.mod = github_workflows
 
     def tearDown(self):
-        if self.prev_home is None:
-            os.environ.pop("PULP_LOCAL_CI_HOME", None)
-        else:
-            os.environ["PULP_LOCAL_CI_HOME"] = self.prev_home
-
-        if self.prev_config is None:
-            os.environ.pop("PULP_LOCAL_CI_CONFIG", None)
-        else:
-            os.environ["PULP_LOCAL_CI_CONFIG"] = self.prev_config
-
         self.tmpdir.cleanup()
 
+    def write_config(self, config):
+        with open(self.config_path, "w", encoding="utf-8") as handle:
+            json.dump(config, handle)
+            handle.write("\n")
+
+    def load_optional_config(self):
+        with open(self.config_path, encoding="utf-8") as handle:
+            return json.load(handle)
 
     def test_extracted_github_workflow_helpers_resolve_sources_and_cli_overrides(self):
         config = {
@@ -255,7 +197,7 @@ class GithubWorkflowsTests(unittest.TestCase):
 
 
     def test_resolve_github_actions_settings_reads_optional_config_defaults(self):
-        settings = self.mod.resolve_github_actions_settings(self.mod.load_optional_config())
+        settings = self.mod.resolve_github_actions_settings(self.load_optional_config())
         self.assertEqual(settings["repository"], "danielraffel/pulp")
         self.assertEqual(settings["workflow"], "build")
         self.assertEqual(settings["provider"], "github-hosted")
@@ -265,7 +207,7 @@ class GithubWorkflowsTests(unittest.TestCase):
 
     def test_resolve_workflow_runner_selector_json_reads_docs_check_provider_default(self):
         selector = self.mod.resolve_workflow_runner_selector_json(
-            self.mod.load_optional_config(), "docs-check", "namespace"
+            self.load_optional_config(), "docs-check", "namespace"
         )
         self.assertEqual(selector, "\"namespace-profile-default\"")
 
@@ -280,12 +222,12 @@ class GithubWorkflowsTests(unittest.TestCase):
 
 
     def test_resolve_workflow_field_value_and_source_reads_repo_variable_fallback(self):
-        config = json.loads(self.config_path.read_text())
+        config = self.load_optional_config()
         del config["github_actions"]["workflows"]["docs-check"]["providers"]["namespace"]["runner_selector_json"]
-        self.config_path.write_text(json.dumps(config) + "\n")
+        self.write_config(config)
 
         value, source = self.mod.resolve_workflow_field_value_and_source(
-            self.mod.load_optional_config(),
+            self.load_optional_config(),
             {"PULP_NAMESPACE_DOCS_CHECK_RUNS_ON_JSON": "\"namespace-profile-repo-var\""},
             "docs-check",
             "namespace",
@@ -297,7 +239,7 @@ class GithubWorkflowsTests(unittest.TestCase):
 
     def test_resolve_workflow_dispatch_field_values_reads_build_namespace_defaults(self):
         fields = self.mod.resolve_workflow_dispatch_field_values(
-            self.mod.load_optional_config(),
+            self.load_optional_config(),
             "build",
             "namespace",
             ["linux_runner_selector_json", "windows_runner_selector_json"],
@@ -426,7 +368,7 @@ class GithubWorkflowsTests(unittest.TestCase):
 
         self.assertEqual(
             self.mod.resolve_workflow_dispatch_field_values(
-                self.mod.load_optional_config(), "build", "namespace", []
+                self.load_optional_config(), "build", "namespace", []
             ),
             {},
         )
@@ -460,9 +402,8 @@ class GithubWorkflowsTests(unittest.TestCase):
         self.assertEqual(defaults, {})
         self.assertEqual(sources, {})
 
-        github_workflows_mod = sys.modules["github_workflows"]
         with mock.patch.object(
-            github_workflows_mod,
+            github_workflows,
             "resolve_workflow_field_value_and_source",
             return_value=('"forced"', ""),
         ):

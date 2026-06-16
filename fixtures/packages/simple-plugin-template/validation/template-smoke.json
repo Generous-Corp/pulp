@@ -1,0 +1,4 @@
+{
+  "kind": "metadata-smoke",
+  "checks": ["template-paths"]
+}

@@ -1,0 +1,49 @@
+# Golden generated-project diff for:
+#   pulp create "Kit Gain" --template fixtures/packages/simple-plugin-template --no-build --ci
+#
+# This intentionally records stable review anchors rather than machine-specific
+# paths or SDK cache locations. The shell-out test verifies these anchors
+# against the actual generated project.
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+new file mode 100644
+--- /dev/null
++++ b/CMakeLists.txt
+@@
++cmake_minimum_required(VERSION 3.20)
++project(KitGain VERSION 1.0.0 LANGUAGES CXX)
++find_package(Pulp REQUIRED CONFIG)
++add_executable(KitGain-test test_kit_gain.cpp)
++target_link_libraries(KitGain-test PRIVATE Pulp::format Catch2::Catch2WithMain)
++pulp_add_plugin(KitGain
++    FORMATS         CLAP Standalone
++    PLUGIN_NAME     "Kit Gain"
++    BUNDLE_ID       "com.pulp.kit_gain"
+
+diff --git a/clap_entry.cpp b/clap_entry.cpp
+new file mode 100644
+--- /dev/null
++++ b/clap_entry.cpp
+@@
++#include "kit_gain.hpp"
++PULP_CLAP_PLUGIN(kit_gain::create_kit_gain)
+
+diff --git a/kit_gain.hpp b/kit_gain.hpp
+new file mode 100644
+--- /dev/null
++++ b/kit_gain.hpp
+@@
++class KitGain : public pulp::format::Processor {
++            .name = "Kit Gain",
++            .bundle_id = "com.pulp.kit_gain",
++    void prepare(const pulp::format::PrepareContext&) override {}
++inline std::unique_ptr<pulp::format::Processor> create_kit_gain() {
+
+diff --git a/test_kit_gain.cpp b/test_kit_gain.cpp
+new file mode 100644
+--- /dev/null
++++ b/test_kit_gain.cpp
+@@
++#include "kit_gain.hpp"
++TEST_CASE("KitGain descriptor is generated from template kit") {
++    REQUIRE(descriptor.name == "Kit Gain");

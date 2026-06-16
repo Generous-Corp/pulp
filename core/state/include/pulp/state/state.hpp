@@ -4,3 +4,4 @@
 #include <pulp/state/parameter_event_queue.hpp>
 #include <pulp/state/param_cursor.hpp>
 #include <pulp/state/store.hpp>
+#include <pulp/state/content_registry.hpp>

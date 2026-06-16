@@ -45,7 +45,7 @@
 
 use std::fs;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use rand::RngCore;
 
@@ -142,6 +142,42 @@ pub fn parse_args(args: &[String]) -> CreateArgs {
     out
 }
 
+/// Return true when `--template` points at a local Pulp package manifest or
+/// package directory. Package-backed template creation is still owned by the
+/// C++ delegate so validation, trust-boundary errors, and generated files stay
+/// byte-for-byte with `pulp-cpp`.
+#[must_use]
+pub fn template_points_to_local_package(cwd: &Path, args: &CreateArgs) -> bool {
+    let Some(template) = args.template.as_deref() else {
+        return false;
+    };
+    let path_like = template.contains('/')
+        || template.contains('\\')
+        || Path::new(template).is_absolute()
+        || matches!(template, "." | ".." | "pulp.package.json");
+    if !path_like && is_builtin_template_name(template) {
+        return false;
+    }
+    let path = PathBuf::from(template);
+    let path = if path.is_absolute() {
+        path
+    } else {
+        cwd.join(path)
+    };
+    path.join("pulp.package.json").is_file()
+        || path
+            .file_name()
+            .is_some_and(|name| name == "pulp.package.json")
+            && path.is_file()
+}
+
+fn is_builtin_template_name(template: &str) -> bool {
+    matches!(
+        template,
+        "effect" | "instrument" | "app" | "bare" | "gain" | "from-figma" | "from-v0"
+    )
+}
+
 /// Print usage banner.
 ///
 /// # Errors
@@ -154,7 +190,7 @@ pub fn print_help(out: &mut impl Write) -> Result<()> {
         Options:\n\
         \x20 --type <effect|instrument|app|bare>  Plugin type (default: effect)\n\
         \x20 --mpe                                Opt into MPE (per-note expression) - instrument only\n\
-        \x20 --template <name>                    Use named template (e.g. gain)\n\
+        \x20 --template <name-or-kit-dir>         Use named template (e.g. gain) or local template kit\n\
         \x20 --manufacturer <name>                Manufacturer (default: Pulp)\n\
         \x20 --output <dir>                       Override output directory\n\
         \x20 --targets <list>                     Comma-separated extra targets (e.g. android)\n\
@@ -324,13 +360,32 @@ pub fn default_formats(kind: &str) -> String {
 
 // ── Scaffolding ──────────────────────────────────────────────────────
 
+fn lexical_normalize(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            _ => out.push(component.as_os_str()),
+        }
+    }
+    out
+}
+
+fn path_is_within(path: &Path, root: &Path) -> bool {
+    lexical_normalize(path).starts_with(lexical_normalize(root))
+}
+
 /// Resolve an output directory given the parsed args + project root
 /// (when in-tree).
 ///
 /// # Errors
 ///
 /// [`CliError::BadUsage`] when in-tree mode is used outside a checkout
-/// or when the output path collides with an existing directory.
+/// or when the output path collides with an existing directory or violates
+/// create's standalone/in-tree containment policy.
 pub fn resolve_out_dir(args: &CreateArgs, root: Option<&Path>, cwd: &Path) -> Result<PathBuf> {
     let lower = to_lower_name(&args.name);
     let out_dir = if let Some(o) = args.output.as_deref() {
@@ -355,6 +410,28 @@ pub fn resolve_out_dir(args: &CreateArgs, root: Option<&Path>, cwd: &Path) -> Re
             .map_or_else(|| cwd.to_path_buf(), Path::to_path_buf);
         base.join(&lower)
     };
+
+    if args.in_tree {
+        let Some(root) = root else {
+            return Err(CliError::BadUsage(
+                "Error: --in-tree/--example can only be used from inside the Pulp repo".to_owned(),
+            ));
+        };
+        let examples_root = root.join("examples");
+        if !path_is_within(&out_dir, &examples_root) {
+            return Err(CliError::BadUsage(format!(
+                "Error: --in-tree projects must live under {}",
+                examples_root.display()
+            )));
+        }
+    } else if let Some(root) = root {
+        if path_is_within(&out_dir, root) {
+            return Err(CliError::BadUsage(format!(
+                "Error: standalone product projects must live outside the Pulp repo\n  Use --in-tree to scaffold under examples/, or choose --output outside\n  {}",
+                root.display()
+            )));
+        }
+    }
 
     if out_dir.exists() {
         return Err(CliError::BadUsage(format!(
@@ -951,6 +1028,37 @@ mod tests {
     }
 
     #[test]
+    fn resolve_out_dir_rejects_standalone_inside_checkout() {
+        let td = tempfile::tempdir().unwrap();
+        let root = td.path().join("pulp");
+        fs::create_dir_all(&root).unwrap();
+        let args = CreateArgs {
+            name: "Inside".to_owned(),
+            output: Some(root.join("build/generated")),
+            ci_mode: true,
+            ..CreateArgs::default()
+        };
+        let err = resolve_out_dir(&args, Some(&root), td.path()).unwrap_err();
+        assert!(err.to_string().contains("standalone product projects"));
+    }
+
+    #[test]
+    fn resolve_out_dir_rejects_in_tree_output_outside_examples() {
+        let td = tempfile::tempdir().unwrap();
+        let root = td.path().join("pulp");
+        fs::create_dir_all(root.join("examples")).unwrap();
+        let args = CreateArgs {
+            name: "Outside".to_owned(),
+            output: Some(td.path().join("outside")),
+            in_tree: true,
+            ci_mode: true,
+            ..CreateArgs::default()
+        };
+        let err = resolve_out_dir(&args, Some(&root), td.path()).unwrap_err();
+        assert!(err.to_string().contains("--in-tree projects must live under"));
+    }
+
+    #[test]
     fn run_errors_when_name_missing() {
         let td = tempfile::tempdir().unwrap();
         let mut buf = Vec::new();
@@ -968,6 +1076,11 @@ mod tests {
 
     #[test]
     fn run_rejects_non_ci_mode() {
+        let _guard = crate::test_support::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let old = std::env::var_os(crate::fallthrough::DISABLE_ENV);
+        std::env::set_var(crate::fallthrough::DISABLE_ENV, "1");
         let td = tempfile::tempdir().unwrap();
         let mut buf = Vec::new();
         let err = run(
@@ -979,6 +1092,10 @@ mod tests {
             &mut buf,
         )
         .unwrap_err();
+        match old {
+            Some(value) => std::env::set_var(crate::fallthrough::DISABLE_ENV, value),
+            None => std::env::remove_var(crate::fallthrough::DISABLE_ENV),
+        }
         assert!(err.to_string().contains("--ci"));
     }
 
@@ -1025,6 +1142,32 @@ mod tests {
         assert!(p.mpe);
         assert_eq!(p.template.as_deref(), Some("gain"));
         assert_eq!(p.manufacturer, "Acme");
+    }
+
+    #[test]
+    fn template_points_to_local_package_detects_manifest_dirs() {
+        let td = tempfile::tempdir().unwrap();
+        let kit = td.path().join("kit");
+        fs::create_dir_all(&kit).unwrap();
+        fs::write(kit.join("pulp.package.json"), "{}").unwrap();
+        let args = CreateArgs {
+            template: Some("kit".to_owned()),
+            ..CreateArgs::default()
+        };
+        assert!(template_points_to_local_package(td.path(), &args));
+    }
+
+    #[test]
+    fn template_points_to_local_package_leaves_named_templates_on_rust_path() {
+        let td = tempfile::tempdir().unwrap();
+        let shadowing_kit = td.path().join("gain");
+        fs::create_dir_all(&shadowing_kit).unwrap();
+        fs::write(shadowing_kit.join("pulp.package.json"), "{}").unwrap();
+        let args = CreateArgs {
+            template: Some("gain".to_owned()),
+            ..CreateArgs::default()
+        };
+        assert!(!template_points_to_local_package(td.path(), &args));
     }
 
     #[test]

@@ -431,6 +431,36 @@ class TargetedCtestTests(unittest.TestCase):
             "the regex selector and default full-suite path share the same call.",
         )
 
+    def test_profraw_cleanup_does_not_expand_a_large_glob(self) -> None:
+        text = SCRIPT.read_text()
+        self.assertIn(
+            'find "${PROFRAW_DIR}" -name \'*.profraw\' -type f -delete',
+            text,
+            "local_diff_cover.sh must delete stale profraw files via find so "
+            "a previous full run with thousands of profiles cannot hit ARG_MAX.",
+        )
+        self.assertNotIn(
+            'rm -f "${PROFRAW_DIR}"/*.profraw',
+            text,
+            "rm over a profraw glob fails with 'Argument list too long' after "
+            "large full-suite coverage runs.",
+        )
+
+    def test_profraw_pattern_merges_by_instrumented_binary(self) -> None:
+        text = SCRIPT.read_text()
+        self.assertIn(
+            'LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%m.profraw"',
+            text,
+            "local_diff_cover.sh should use LLVM's module-signature merge "
+            "placeholder so thousands of one-test Catch2 runs merge per binary.",
+        )
+        self.assertNotIn(
+            "pulp-%p-%m.profraw",
+            text,
+            "per-PID profraw files are too noisy for the full CTest registry "
+            "and can lose attribution when PIDs recycle.",
+        )
+
 
 class CoverageConfigureTests(unittest.TestCase):
     """Coverage configure should stay headless-safe on non-Skia worktrees."""

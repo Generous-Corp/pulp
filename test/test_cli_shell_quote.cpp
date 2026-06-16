@@ -93,6 +93,8 @@ TEST_CASE("parse_double_arg accepts finite decimals and rejects non-finite text"
     REQUIRE(value == 4.25);
     REQUIRE_FALSE(parse_double_arg("nan", "--min-score", value));
     REQUIRE(value == 4.25);
+    REQUIRE_FALSE(parse_double_arg("NaNx", "--min-score", value));
+    REQUIRE(value == 4.25);
     REQUIRE_FALSE(parse_double_arg("inf", "--min-score", value));
     REQUIRE(value == 4.25);
     REQUIRE_FALSE(parse_double_arg("0.5x", "--min-score", value));

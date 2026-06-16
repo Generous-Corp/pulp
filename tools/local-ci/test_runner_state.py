@@ -3,26 +3,17 @@
 
 from __future__ import annotations
 
-import importlib.util
 import os
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 
+from module_test_utils import load_local_ci_module
 
-MODULE_PATH = Path(__file__).with_name("runner_state.py")
 
 
 def load_module():
-    script_dir = str(MODULE_PATH.parent)
-    if script_dir not in sys.path:
-        sys.path.insert(0, script_dir)
-    spec = importlib.util.spec_from_file_location("pulp_runner_state", MODULE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    return load_local_ci_module("runner_state.py", module_name="pulp_runner_state", add_module_dir=True)
 
 
 class RunnerStateTests(unittest.TestCase):

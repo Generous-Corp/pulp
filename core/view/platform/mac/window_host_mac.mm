@@ -10,6 +10,7 @@
 
 #include "window_host_mac_capture.h"
 #include "window_host_mac_internal.hpp"
+#include "window_host_mac_view.h"
 
 #include <TargetConditionals.h>
 #if TARGET_OS_OSX
@@ -163,6 +164,36 @@ static void request_hidden_cocoa_window_close(NSWindow* window) {
 // the `pulp::view::mac_geometry` namespace.
 using namespace pulp::view::mac_geometry;
 
+extern "C" void pulp_mac_text_input_client_category_anchor();
+
+static bool dispatch_mouse_down_if_live(PulpView* host,
+                                        pulp::view::View*& target,
+                                        const pulp::view::MouseEvent& event,
+                                        pulp::view::Point local) {
+    if (!host || !target) return false;
+    auto* root = [host rootView];
+    if (!root) {
+        target = nullptr;
+        return false;
+    }
+
+    target->on_mouse_event(event);
+    root = [host rootView];
+    if (!view_is_in_tree(target, root)) {
+        target = nullptr;
+        return false;
+    }
+
+    target->on_mouse_down(local);
+    root = [host rootView];
+    if (!view_is_in_tree(target, root)) {
+        target = nullptr;
+        return false;
+    }
+
+    return true;
+}
+
 static pulp::events::MainThreadDispatcher::Backend make_cocoa_main_thread_backend(
     std::shared_ptr<std::atomic<bool>> alive) {
     return {
@@ -201,24 +232,6 @@ static void install_app_menu(NSString* appName) {
 
 // ── PulpView: CoreGraphics NSView (CPU rendering path) ───────────────────────
 
-@interface PulpView : NSView <NSTextInputClient>
-@property (nonatomic, assign) pulp::view::View* rootView;
-@property (nonatomic, assign) pulp::view::FrameClock* frameClock;
-@property (nonatomic, strong) NSTimer* animationTimer;
-@property (nonatomic, strong) NSTrackingArea* trackingArea;
-// Inverse design-viewport transform applied to every window-space input
-// point before hit_test. Set by WindowHost::set_design_viewport; nil
-// when no design viewport is in effect (identity).
-@property (nonatomic, copy) pulp::view::Point (^pointTransform)(pulp::view::Point);
-// pulp #2502 — the host destructor MUST call this before the View tree /
-// WidgetBridge / ScriptEngine the deferred-click blocks were built from can
-// be freed. It invalidates every still-queued `mouseUp:` deferred-click block
-// so none of them can run a `std::function` (`on_click` / `on_global_click`)
-// whose closure references freed bridge/engine state.
-- (void)prepareForTeardown;
-- (void)setRelativeMouseMode:(BOOL)enabled;
-@end
-
 @implementation PulpView {
     pulp::view::View* _dragTarget;
     pulp::view::View* _focusedView;
@@ -246,6 +259,7 @@ static void install_app_menu(NSString* appName) {
 - (instancetype)initWithFrame:(NSRect)frame {
     self = [super initWithFrame:frame];
     if (self) {
+        pulp_mac_text_input_client_category_anchor();
         // pulp #1321: ensure the content view tracks the window's content rect
         // so AppKit resizes our frame when the user drags the window edge.
         // Without this, the view's bounds stay at the original frame and Yoga
@@ -257,14 +271,14 @@ static void install_app_menu(NSString* appName) {
     return self;
 }
 
-// pulp #2502 — invalidate every queued deferred-click block. After this
-// returns, any deferred-click block that later drains is a guaranteed no-op,
-// so it is safe for the owning View tree / WidgetBridge / ScriptEngine to be
-// destroyed. Invoked from the host destructors (`~MacWindowHost`,
-// `~MacGpuWindowHost`) which run synchronously in the same teardown step —
-// between a test's bridge going out of scope and the next run-loop pump — so
-// flipping the token here reliably defuses every block before it can fault.
+// pulp #2502 — invalidate queued callbacks before the owning C++ host and View
+// tree can be destroyed. After this returns, deferred click blocks are
+// guaranteed no-ops and the AppKit animation timer can no longer tick the host's
+// FrameClock after it is freed.
 - (void)prepareForTeardown {
+    [self.animationTimer invalidate];
+    self.animationTimer = nil;
+    self.frameClock = nullptr;
     self.rootView = nullptr;
     _dragTarget = nullptr;
     _relativeMouseMode = NO;
@@ -568,8 +582,7 @@ static void install_app_menu(NSString* appName) {
                     me.modifiers = modifiers_from_ns_flags(event.modifierFlags);
                     me.is_down = true;
                     me.click_count = static_cast<int>(event.clickCount);
-                    _dragTarget->on_mouse_event(me);
-                    _dragTarget->on_mouse_down(local);
+                    (void)dispatch_mouse_down_if_live(self, _dragTarget, me, local);
                     [self setNeedsDisplay:YES];
                     return;
                 }
@@ -619,8 +632,7 @@ static void install_app_menu(NSString* appName) {
             me.modifiers = modifiers_from_ns_flags(event.modifierFlags);
             me.is_down = true;
             me.click_count = static_cast<int>(event.clickCount);
-            _dragTarget->on_mouse_event(me);
-            _dragTarget->on_mouse_down(local);
+            const bool target_alive = dispatch_mouse_down_if_live(self, _dragTarget, me, local);
 
             // Bubble pointerdown through ancestors that subscribed via
             // registerPointer. on_mouse_event is the W3C bubbling
@@ -629,11 +641,13 @@ static void install_app_menu(NSString* appName) {
             // band-drawer is this exact pattern) never sees the down
             // event because the canvas child wins hit_test. Recompute
             // each ancestor's local-coord position by re-toLocal'ing.
-            for (auto* bubble = _dragTarget->parent(); bubble; bubble = bubble->parent()) {
-                if (!bubble->on_pointer_event) continue;
-                pulp::view::MouseEvent bme = me;
-                bme.position = to_local(pt, bubble, self.rootView);
-                bubble->on_pointer_event(bme);
+            if (target_alive) {
+                for (auto* bubble = _dragTarget->parent(); bubble; bubble = bubble->parent()) {
+                    if (!bubble->on_pointer_event) continue;
+                    pulp::view::MouseEvent bme = me;
+                    bme.position = to_local(pt, bubble, self.rootView);
+                    bubble->on_pointer_event(bme);
+                }
             }
         }
             [self setNeedsDisplay:YES];
@@ -908,6 +922,15 @@ static void install_app_menu(NSString* appName) {
     gke.modifiers = mods;
     gke.is_down = true;
     gke.is_repeat = event.isARepeat;
+
+    if (auto* fv = [self liveFocusedView]) {
+        if (fv->on_key_event(gke)) {
+            [self startAnimationTimerIfNeeded];
+            [self setNeedsDisplay:YES];
+            return YES;
+        }
+    }
+
     // Honor consumption: a chord the root hook claims (e.g. the shell's
     // CommandRegistry dispatch) returns YES — no menu fallthrough, and no
     // script fan-out so the command can't double-fire a JS 'keydown'.
@@ -953,6 +976,19 @@ static void install_app_menu(NSString* appName) {
         }
 
         if (key == pulp::view::KeyCode::tab && self.rootView) {
+            if (auto* fv = [self liveFocusedView]) {
+                pulp::view::KeyEvent ke;
+                ke.key = key;
+                ke.modifiers = mods;
+                ke.is_down = true;
+                ke.is_repeat = event.isARepeat;
+                if (fv->on_key_event(ke)) {
+                    [self startAnimationTimerIfNeeded];
+                    [self setNeedsDisplay:YES];
+                    return;
+                }
+            }
+
             // pulp #2088 — re-sync via liveFocusedView so a destroyed prior
             // focused view doesn't leak a dangling ivar into focus_next/prev
             // and the on_focus_changed/release_input_focus calls below.
@@ -1071,131 +1107,30 @@ static void install_app_menu(NSString* appName) {
     }
 }
 
-- (void)insertText:(id)string replacementRange:(NSRange)range {
-    (void)range;
-    NSString* in_str = [string isKindOfClass:[NSAttributedString class]]
-        ? [(NSAttributedString*)string string] : (NSString*)string;
-
-    // WYSIWYG P3 — inspector inline Text-tool edit intercepts character
-    // input BEFORE the focused widget. When the inspector consumes it (an
-    // inline text edit is in progress), the keystroke must NOT also reach
-    // a focused widget. Checked before the focused-view delivery below.
-    {
-        pulp::view::TextInputEvent ite;
-        ite.text = [in_str UTF8String];
-        // WYSIWYG P4 FIX 1 — gate to this window's root so text typed into a
-        // secondary window doesn't drive the canvas overlay's inline edit.
-        if (pulp::view::View::call_inspector_text_hook(ite, self.rootView)) {
+// Symmetric key-up so released keys reach handlers that need both edges — most
+// importantly musical-typing note-off (without this, computer-keyboard notes
+// stick). Routes the global-key hook (is_down=false) then the focused view.
+- (void)keyUp:(NSEvent*)event {
+    @try {
+        try {
+            pulp::view::KeyEvent ke;
+            ke.key = key_code_from_ns(event.keyCode);
+            ke.modifiers = modifiers_from_ns_flags(event.modifierFlags);
+            ke.is_down = false;
+            if (self.rootView && self.rootView->on_global_key)
+                self.rootView->on_global_key(ke);
+            if (auto* fv = [self liveFocusedView]) fv->on_key_event(ke);
             [self setNeedsDisplay:YES];
-            return;
+        } catch (const std::exception& e) {
+            std::cerr << "MacWindowHost keyUp error: " << e.what() << "\n";
+        } catch (...) {
+            std::cerr << "MacWindowHost keyUp error: unknown exception\n";
         }
-    }
-
-    // pulp #1708 — read from View::focused_input_ rather than the raw
-    // _focusedView ivar. The static is auto-cleared by ~View() when the
-    // focused widget is destroyed (e.g., React unmount of an open modal),
-    // so we never dispatch text-input on freed memory.
-    auto* fv = pulp::view::View::focused_input_;
-    if (fv) {
-        NSString* str = [string isKindOfClass:[NSAttributedString class]]
-            ? [(NSAttributedString*)string string] : (NSString*)string;
-        pulp::view::TextInputEvent te;
-        te.text = [str UTF8String];
-        fv->on_text_input(te);
-        [self setNeedsDisplay:YES];
+    } @catch (NSException* exception) {
+        std::cerr << "MacWindowHost keyUp NSException: "
+                  << [[exception name] UTF8String] << "\n";
     }
 }
-
-- (pulp::view::TextEditor*)focusedTextEditor {
-    // pulp #1708 — use the auto-clearing static slot. Without this, the
-    // raw _focusedView ivar dangles after the focused widget is freed
-    // (React unmount of an open modal) and dynamic_cast on freed memory
-    // segfaults inside libc++abi during -[NSTextInputContext
-    // hasMarkedTextWithCompletionHandler:] on the next keypress.
-    auto* fv = pulp::view::View::focused_input_;
-    auto* te = dynamic_cast<pulp::view::TextEditor*>(fv);
-    return te;
-}
-
-- (BOOL)hasMarkedText {
-    auto* te = [self focusedTextEditor];
-    return te ? te->has_marked_text() : NO;
-}
-
-- (NSRange)markedRange {
-    auto* te = [self focusedTextEditor];
-    if (!te || !te->has_marked_text()) return NSMakeRange(NSNotFound, 0);
-    auto [start, len] = te->marked_range();
-    return NSMakeRange(static_cast<NSUInteger>(start), static_cast<NSUInteger>(len));
-}
-
-- (NSRange)selectedRange {
-    auto* te = [self focusedTextEditor];
-    if (!te) return NSMakeRange(0, 0);
-    return NSMakeRange(static_cast<NSUInteger>(te->caret_pos()), 0);
-}
-
-- (void)setMarkedText:(id)string selectedRange:(NSRange)sel replacementRange:(NSRange)rep {
-    (void)rep;
-    auto* te = [self focusedTextEditor];
-    if (!te) return;
-    NSString* str = [string isKindOfClass:[NSAttributedString class]]
-        ? [(NSAttributedString*)string string] : (NSString*)string;
-    te->set_marked_text([str UTF8String],
-                        static_cast<int>(sel.location),
-                        static_cast<int>(sel.length));
-    [self setNeedsDisplay:YES];
-}
-
-- (void)unmarkText {
-    auto* te = [self focusedTextEditor];
-    if (te) te->unmark_text();
-}
-
-- (NSArray<NSAttributedStringKey>*)validAttributesForMarkedText { return @[]; }
-
-- (NSAttributedString*)attributedSubstringForProposedRange:(NSRange)r actualRange:(NSRangePointer)a {
-    (void)a;
-    auto* te = [self focusedTextEditor];
-    if (!te) return nil;
-    auto& text = te->text();
-    if (r.location >= text.size()) return nil;
-    auto len = std::min(r.length, text.size() - r.location);
-    auto sub = text.substr(r.location, len);
-    return [[NSAttributedString alloc] initWithString:[NSString stringWithUTF8String:sub.c_str()]];
-}
-
-- (NSUInteger)characterIndexForPoint:(NSPoint)p { (void)p; return 0; }
-
-- (NSRect)firstRectForCharacterRange:(NSRange)r actualRange:(NSRangePointer)a {
-    (void)r; (void)a;
-    // IME candidate window positioning. `TextEditor::caret_rect()` is
-    // the post-paint, layout-aware caret geometry — single source of
-    // truth for both the visible caret and the IME hook so the
-    // candidate window aligns with the rendered position even when
-    // the text is wrapped or proportional-width.
-    auto* te = [self focusedTextEditor];
-    if (!te) return NSZeroRect;
-
-    pulp::view::Rect caret = te->caret_rect();
-    float local_x = caret.x;
-    float local_y = caret.y;
-    float caret_w = caret.width > 0.f ? caret.width : 1.0f;
-    float caret_h = caret.height > 0.f ? caret.height : te->font_size();
-
-    float rx = local_x, ry = local_y;
-    for (auto* v = static_cast<pulp::view::View*>(te); v; v = v->parent()) {
-        rx += v->bounds().x;
-        ry += v->bounds().y;
-    }
-
-    float viewHeight = static_cast<float>(self.bounds.size.height);
-    NSRect viewRect = NSMakeRect(rx, viewHeight - ry - caret_h, caret_w, caret_h);
-    NSRect windowRect = [self convertRect:viewRect toView:nil];
-    return [self.window convertRectToScreen:windowRect];
-}
-
-- (void)doCommandBySelector:(SEL)sel { (void)sel; }
 
 - (void)mouseMoved:(NSEvent*)event {
     @try {

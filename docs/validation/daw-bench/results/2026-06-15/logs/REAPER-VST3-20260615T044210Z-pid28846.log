@@ -1,0 +1,102 @@
+2026-06-15T04:42:10.777Z	session_start	host=REAPER	format=VST3	pulp_bench_plugin=1.0.0	n=1
+2026-06-15T04:42:10.777Z	processor_construct	plugin_version=1.0.0	n=2
+2026-06-15T04:42:10.777Z	define_parameters	count=3	n=3
+2026-06-15T04:42:10.777Z	bus_layout_proposal	inputs=2,2	outputs=2	n=4
+2026-06-15T04:42:10.777Z	bus_layout_proposal	inputs=2,2	outputs=2	n=5
+2026-06-15T04:42:10.777Z	serialize_plugin_state	n=6
+2026-06-15T04:42:10.777Z	bus_layout_proposal	inputs=2,2	outputs=2	n=7
+2026-06-15T04:42:10.777Z	bus_layout_proposal	inputs=2,2	outputs=2	n=8
+2026-06-15T04:42:10.777Z	prepare	sample_rate=48000	max_buffer_size=512	input_channels=2	output_channels=2	prepare_count=1	n=9
+2026-06-15T04:42:10.777Z	serialize_plugin_state	n=10
+2026-06-15T04:42:10.777Z	release	n=11
+2026-06-15T04:42:10.777Z	bus_layout_proposal	inputs=2,2	outputs=2	n=12
+2026-06-15T04:42:10.777Z	bus_layout_proposal	inputs=2,2	outputs=2	n=13
+2026-06-15T04:42:10.777Z	bus_layout_proposal	inputs=2,2	outputs=2	n=14
+2026-06-15T04:42:10.777Z	bus_layout_proposal	inputs=2,2	outputs=2	n=15
+2026-06-15T04:42:10.781Z	process_without_prepare	block_count=1	n=16
+2026-06-15T04:42:10.781Z	sidechain_edge	connected=true	n=17
+2026-06-15T04:42:10.781Z	process_without_prepare	block_count=2	n=18
+2026-06-15T04:42:10.781Z	process_without_prepare	block_count=3	n=19
+2026-06-15T04:42:10.781Z	process_without_prepare	block_count=4	n=20
+2026-06-15T04:42:10.781Z	process_without_prepare	block_count=5	n=21
+2026-06-15T04:42:10.781Z	process_without_prepare	block_count=6	n=22
+2026-06-15T04:42:10.785Z	process_without_prepare	block_count=7	n=23
+2026-06-15T04:42:10.786Z	process_without_prepare	block_count=8	n=24
+2026-06-15T04:42:10.786Z	process_without_prepare	block_count=9	n=25
+2026-06-15T04:42:10.786Z	process_without_prepare	block_count=10	n=26
+2026-06-15T04:42:10.786Z	process_without_prepare	block_count=11	n=27
+2026-06-15T04:42:10.786Z	process_without_prepare	block_count=12	n=28
+2026-06-15T04:42:10.786Z	process_without_prepare	block_count=13	n=29
+2026-06-15T04:42:10.791Z	process_without_prepare	block_count=14	n=30
+2026-06-15T04:42:10.791Z	process_without_prepare	block_count=15	n=31
+2026-06-15T04:42:10.791Z	process_without_prepare	block_count=16	n=32
+2026-06-15T04:42:10.791Z	process_without_prepare	block_count=17	n=33
+2026-06-15T04:42:10.791Z	process_without_prepare	block_count=18	n=34
+2026-06-15T04:42:10.796Z	process_without_prepare	block_count=19	n=35
+2026-06-15T04:42:10.796Z	process_without_prepare	block_count=20	n=36
+2026-06-15T04:42:10.807Z	process_without_prepare	block_count=21	n=37
+2026-06-15T04:42:10.818Z	process_without_prepare	block_count=22	n=38
+2026-06-15T04:42:10.828Z	process_without_prepare	block_count=23	n=39
+2026-06-15T04:42:10.839Z	process_without_prepare	block_count=24	n=40
+2026-06-15T04:42:10.849Z	process_without_prepare	block_count=25	n=41
+2026-06-15T04:42:10.860Z	process_without_prepare	block_count=26	n=42
+2026-06-15T04:42:10.871Z	process_without_prepare	block_count=27	n=43
+2026-06-15T04:42:10.881Z	process_without_prepare	block_count=28	n=44
+2026-06-15T04:42:10.892Z	process_without_prepare	block_count=29	n=45
+2026-06-15T04:42:10.903Z	process_without_prepare	block_count=30	n=46
+2026-06-15T04:42:10.913Z	process_without_prepare	block_count=31	n=47
+2026-06-15T04:42:10.924Z	process_without_prepare	block_count=32	n=48
+2026-06-15T04:42:10.935Z	process_without_prepare	block_count=33	n=49
+2026-06-15T04:42:10.945Z	process_without_prepare	block_count=34	n=50
+2026-06-15T04:42:10.956Z	process_without_prepare	block_count=35	n=51
+2026-06-15T04:42:10.967Z	process_without_prepare	block_count=36	n=52
+2026-06-15T04:42:10.978Z	process_without_prepare	block_count=37	n=53
+2026-06-15T04:42:10.988Z	process_without_prepare	block_count=38	n=54
+2026-06-15T04:42:10.999Z	process_without_prepare	block_count=39	n=55
+2026-06-15T04:42:11.010Z	process_without_prepare	block_count=40	n=56
+2026-06-15T04:42:11.020Z	process_without_prepare	block_count=41	n=57
+2026-06-15T04:42:11.031Z	process_without_prepare	block_count=42	n=58
+2026-06-15T04:42:11.042Z	process_without_prepare	block_count=43	n=59
+2026-06-15T04:42:11.052Z	process_without_prepare	block_count=44	n=60
+2026-06-15T04:42:11.063Z	process_without_prepare	block_count=45	n=61
+2026-06-15T04:42:11.073Z	process_without_prepare	block_count=46	n=62
+2026-06-15T04:42:11.084Z	process_without_prepare	block_count=47	n=63
+2026-06-15T04:42:11.095Z	process_without_prepare	block_count=48	n=64
+2026-06-15T04:42:11.106Z	process_without_prepare	block_count=49	n=65
+2026-06-15T04:42:11.116Z	process_without_prepare	block_count=50	n=66
+2026-06-15T04:42:11.127Z	process_without_prepare	block_count=51	n=67
+2026-06-15T04:42:11.137Z	process_without_prepare	block_count=52	n=68
+2026-06-15T04:42:11.148Z	process_without_prepare	block_count=53	n=69
+2026-06-15T04:42:11.159Z	process_without_prepare	block_count=54	n=70
+2026-06-15T04:42:11.169Z	process_without_prepare	block_count=55	n=71
+2026-06-15T04:42:11.180Z	process_without_prepare	block_count=56	n=72
+2026-06-15T04:42:11.191Z	process_without_prepare	block_count=57	n=73
+2026-06-15T04:42:11.202Z	process_without_prepare	block_count=58	n=74
+2026-06-15T04:42:11.212Z	process_without_prepare	block_count=59	n=75
+2026-06-15T04:42:11.223Z	process_without_prepare	block_count=60	n=76
+2026-06-15T04:42:11.233Z	process_without_prepare	block_count=61	n=77
+2026-06-15T04:42:11.244Z	process_without_prepare	block_count=62	n=78
+2026-06-15T04:42:11.257Z	process_without_prepare	block_count=63	n=79
+2026-06-15T04:42:11.265Z	process_without_prepare	block_count=64	n=80
+2026-06-15T04:42:11.276Z	process_without_prepare	block_count=65	n=81
+2026-06-15T04:42:11.287Z	process_without_prepare	block_count=66	n=82
+2026-06-15T04:42:11.298Z	process_without_prepare	block_count=67	n=83
+2026-06-15T04:42:11.308Z	process_without_prepare	block_count=68	n=84
+2026-06-15T04:42:11.319Z	process_without_prepare	block_count=69	n=85
+2026-06-15T04:42:11.329Z	process_without_prepare	block_count=70	n=86
+2026-06-15T04:42:11.340Z	process_without_prepare	block_count=71	n=87
+2026-06-15T04:42:11.351Z	process_without_prepare	block_count=72	n=88
+2026-06-15T04:42:11.361Z	process_without_prepare	block_count=73	n=89
+2026-06-15T04:42:11.372Z	process_without_prepare	block_count=74	n=90
+2026-06-15T04:42:11.383Z	process_without_prepare	block_count=75	n=91
+2026-06-15T04:42:11.393Z	process_without_prepare	block_count=76	n=92
+2026-06-15T04:42:11.404Z	process_without_prepare	block_count=77	n=93
+2026-06-15T04:42:11.415Z	process_without_prepare	block_count=78	n=94
+2026-06-15T04:42:11.426Z	process_without_prepare	block_count=79	n=95
+2026-06-15T04:42:11.436Z	process_without_prepare	block_count=80	n=96
+2026-06-15T04:42:11.447Z	process_without_prepare	block_count=81	n=97
+2026-06-15T04:42:11.457Z	process_without_prepare	block_count=82	n=98
+2026-06-15T04:42:11.468Z	process_without_prepare	block_count=83	n=99
+2026-06-15T04:42:11.623Z	release	n=100
+2026-06-15T04:42:11.623Z	processor_destruct	n=101
+2026-06-15T04:42:11.623Z	session_end	n=102

@@ -26,7 +26,7 @@ if(DEFINED FORMAT)
 endif()
 
 execute_process(
-    COMMAND "${CLI}" ${host_args}
+    COMMAND "${CMAKE_COMMAND}" -E env "PULP_UPDATE_CHECK_DISABLED=1" "${CLI}" ${host_args}
     WORKING_DIRECTORY "${WORKING_DIR}"
     RESULT_VARIABLE cli_result
     OUTPUT_VARIABLE cli_stdout

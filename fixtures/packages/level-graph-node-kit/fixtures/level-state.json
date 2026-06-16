@@ -1,0 +1,8 @@
+{
+  "kind": "custom-node-state-fixture",
+  "nodeType": "dev.pulp.fixtures.level-node",
+  "version": 1,
+  "state": {
+    "level": 0.5
+  }
+}

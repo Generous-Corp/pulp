@@ -31,6 +31,34 @@ It is deliberately shallow and cheap. It does not prove frequency response,
 THD, phase, latency, tuning, or golden-file parity. For those, render a WAV or
 artifact bundle and use the offline Audio Doctor.
 
+## Signal mode vs Scope mode
+
+The Inspector window has two related modes:
+
+| Mode | Use it when | What it optimizes for |
+|---|---|---|
+| **Signal** | You need to know whether the live host is healthy. | Literal buffer observability: levels, clip/NaN counters, silence, callbacks, device stress, and a raw rolling waveform. |
+| **Scope** | You need to understand the shape of a signal. | Repeatable sample-window acquisition: trigger alignment, grid/readouts, and measurements such as frequency, peak-to-peak, RMS, DC offset, and crest factor. |
+
+Signal mode is the most diagnostic view. It shows what the probe just copied
+from the live output boundary, with no invented samples, interpolation,
+temporal smoothing, or persistence. That makes it the right mode for debugging
+silence, clipping, NaN/Inf output, DC offsets, discontinuities, and dropouts.
+A periodic signal may appear to slide around because each UI tick can land at a
+different phase; that is expected, and it is part of why Signal mode is useful.
+
+Scope mode is more readable, not more "smoothed." It still uses real copied
+samples, but it chooses a bounded acquisition window and can align the display
+to a rising zero crossing when one exists. That makes a healthy oscillator or
+periodic waveform look stable enough to inspect, and it gives agents and humans
+measurements they can compare. If no trigger is found, Scope reports that fact
+and falls back to the available sample window rather than fabricating a cleaner
+trace.
+
+New users start in Signal mode. If you switch to Scope, the Inspector remembers
+that preference for the app, so reopening the window returns to the mode you
+last used.
+
 ## Quick developer smoke check
 
 For a human, the fastest path is the live window:

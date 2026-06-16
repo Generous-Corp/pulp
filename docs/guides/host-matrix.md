@@ -31,6 +31,22 @@ python3 tools/scripts/summarize_daw_bench_results.py \
     --require-any
 ```
 
+The summary's missing-lane section is a backlog of scripted host/format benches
+that still need checked-in manifests. Do not treat those rows as validation
+evidence or promote matrix cells from them.
+
+When closing the host-lab roadmap item, run the stricter completion gate:
+
+```bash
+python3 tools/scripts/summarize_daw_bench_results.py \
+    docs/validation/daw-bench/results \
+    --require-any \
+    --require-complete-scripted-lanes
+```
+
+It must pass before claiming that every scripted DAW-bench lane has checked-in
+evidence.
+
 If a capability stays `n/a`, name the host or format reason in the Notes column.
 If it stays `—`, do not infer support from adapter unit tests, pluginval,
 clap-validator, or a successful build.

@@ -1,47 +1,27 @@
 #include <catch2/catch_test_macros.hpp>
-#include <pulp/view/text_editor.hpp>
-#include <pulp/view/frame_clock.hpp>
-#include <pulp/view/screenshot.hpp>
-#include <pulp/view/screenshot_compare.hpp>
-#include <pulp/view/theme.hpp>
-#include <pulp/canvas/canvas.hpp>
+#include "support/text_editor_test_utils.hpp"
 
-#include <memory>
+#include <cctype>
+#include <string_view>
+#include <vector>
 
 using namespace pulp::view;
-using namespace pulp::canvas;
+using namespace pulp::test;
 
 namespace {
 
-KeyEvent key_event(KeyCode key, uint16_t modifiers = 0) {
-    KeyEvent event;
-    event.key = key;
-    event.modifiers = modifiers;
-    event.is_down = true;
-    return event;
-}
-
-uint16_t main_modifier() {
-#ifdef __APPLE__
-    return kModCmd;
-#else
-    return kModCtrl;
-#endif
-}
-
-// A canvas whose shaped text_x_for_byte() deliberately diverges from the sum of
-// isolated per-glyph measure_text() widths — the exact gap that kerning/spacing
-// produces with a real shaper. A caret built from shaped offsets lands near 500+;
-// one built by summing glyph widths (the pre-fix path) lands near 16. Used to
-// assert TextEditor::paint feeds caret_rect() from text_x_for_byte, not glyph sums.
-struct ShapedOffsetCanvas : RecordingCanvas {
-    float measure_text(const std::string& text) override {
-        return 8.0f * static_cast<float>(text.size());
+bool is_cluster_boundary(const std::string& text, int pos) {
+    if (pos < 0 || pos > static_cast<int>(text.size())) return false;
+    if (pos == 0 || pos == static_cast<int>(text.size())) return true;
+    std::size_t cursor = 0;
+    while (cursor < text.size()) {
+        const std::size_t next = pulp::canvas::cluster_step(text, cursor, true);
+        if (next <= cursor || next > text.size()) break;
+        cursor = next;
+        if (cursor == static_cast<std::size_t>(pos)) return true;
     }
-    float text_x_for_byte(const std::string& text, std::size_t byte_index) override {
-        return 500.0f + static_cast<float>(std::min(byte_index, text.size()));
-    }
-};
+    return false;
+}
 
 } // namespace
 
@@ -74,10 +54,64 @@ TEST_CASE("TextEditor clear selection", "[view][text_editor]") {
     REQUIRE_FALSE(editor.has_selection());
 }
 
+TEST_CASE("TextEditor public selection APIs clamp to grapheme boundaries",
+          "[view][text_editor][selection][api][unicode]") {
+    TextEditor editor;
+    editor.on_focus_changed(true);
+    editor.set_text("A" "e\xCC\x81" "B");
+
+    editor.set_selection(2, 3);  // byte offsets inside the combining sequence
+    REQUIRE(editor.selection_anchor() == 1);
+    REQUIRE(editor.selection_active() == 4);
+    REQUIRE(editor.selection_range() == std::pair<int, int>{1, 4});
+    REQUIRE(editor.selected_text() == "e\xCC\x81");
+
+    editor.set_caret_pos(3);
+    REQUIRE(editor.caret_pos() == 4);
+    REQUIRE_FALSE(editor.has_selection());
+}
+
+TEST_CASE("TextEditor UTF offset helpers cover scalar widths and malformed input",
+          "[view][text_editor][unicode][utf16]") {
+    const std::string mixed = "A"
+        "\xC2\xA2"      // U+00A2, one UTF-16 unit, two UTF-8 bytes.
+        "\xE2\x82\xAC"  // U+20AC, one UTF-16 unit, three UTF-8 bytes.
+        "\xF0\x9F\x98\x80"  // U+1F600, two UTF-16 units, four UTF-8 bytes.
+        "Z";
+
+    REQUIRE(pulp::canvas::utf8_offset_for_utf16_offset(mixed, 0) == 0u);
+    REQUIRE(pulp::canvas::utf8_offset_for_utf16_offset(mixed, 1) == 1u);
+    REQUIRE(pulp::canvas::utf8_offset_for_utf16_offset(mixed, 2) == 3u);
+    REQUIRE(pulp::canvas::utf8_offset_for_utf16_offset(mixed, 3) == 6u);
+    REQUIRE(pulp::canvas::utf8_offset_for_utf16_offset(mixed, 4) == 6u);
+    REQUIRE(pulp::canvas::utf8_offset_for_utf16_offset(mixed, 5) == 10u);
+    REQUIRE(pulp::canvas::utf8_offset_for_utf16_offset(mixed, 6) == mixed.size());
+
+    REQUIRE(pulp::canvas::utf16_offset_for_utf8_offset(mixed, 0) == 0u);
+    REQUIRE(pulp::canvas::utf16_offset_for_utf8_offset(mixed, 1) == 1u);
+    REQUIRE(pulp::canvas::utf16_offset_for_utf8_offset(mixed, 3) == 2u);
+    REQUIRE(pulp::canvas::utf16_offset_for_utf8_offset(mixed, 6) == 3u);
+    REQUIRE(pulp::canvas::utf16_offset_for_utf8_offset(mixed, 10) == 5u);
+    REQUIRE(pulp::canvas::utf16_offset_for_utf8_offset(mixed, mixed.size()) == 6u);
+
+    std::string malformed;
+    malformed.push_back(static_cast<char>(0x80));
+    malformed += "ab";
+    REQUIRE(pulp::canvas::safe_utf8_prefix_size(malformed, malformed.size()) == 0u);
+    REQUIRE(pulp::canvas::utf8_offset_for_utf16_offset(malformed, 1) == 1u);
+    REQUIRE(pulp::canvas::utf16_offset_for_utf8_offset(malformed, 1) == 0u);
+}
+
 TEST_CASE("TextEditor undo/redo", "[view][text_editor]") {
     TextEditor editor;
-    editor.set_text("First");
-    editor.set_text("Second");
+    editor.on_focus_changed(true);
+
+    TextInputEvent input;
+    input.text = "First";
+    editor.on_text_input(input);
+    editor.select_all();
+    input.text = "Second";
+    editor.on_text_input(input);
     REQUIRE(editor.text() == "Second");
 
     REQUIRE(editor.undo());
@@ -91,6 +125,75 @@ TEST_CASE("TextEditor undo on empty history returns false", "[view][text_editor]
     TextEditor editor;
     REQUIRE_FALSE(editor.undo());
     REQUIRE_FALSE(editor.redo());
+}
+
+TEST_CASE("TextEditor programmatic set_text clears undo history",
+          "[view][text_editor][undo][api]") {
+    TextEditor editor;
+    editor.on_focus_changed(true);
+
+    TextInputEvent input;
+    input.text = "draft";
+    editor.on_text_input(input);
+    REQUIRE(editor.text() == "draft");
+    REQUIRE(editor.undo());
+    REQUIRE(editor.text().empty());
+
+    input.text = "typed";
+    editor.on_text_input(input);
+    editor.set_text("synced");
+
+    REQUIRE(editor.text() == "synced");
+    REQUIRE_FALSE(editor.undo());
+    REQUIRE_FALSE(editor.redo());
+}
+
+TEST_CASE("TextEditor same-value set_text preserves local editing state",
+          "[view][text_editor][undo][api]") {
+    TextEditor editor;
+    editor.on_focus_changed(true);
+
+    TextInputEvent input;
+    input.text = "abc";
+    editor.on_text_input(input);
+    REQUIRE(editor.text() == "abc");
+
+    int changes = 0;
+    editor.on_change = [&](const std::string&) { ++changes; };
+    editor.set_text("abc");
+
+    REQUIRE(changes == 0);
+    REQUIRE(editor.undo());
+    REQUIRE(editor.text().empty());
+}
+
+TEST_CASE("TextEditor public caret and selection APIs break typing undo coalescing",
+          "[view][text_editor][undo][api]") {
+    TextEditor caret_editor;
+    caret_editor.on_focus_changed(true);
+
+    TextInputEvent input;
+    input.text = "ab";
+    caret_editor.on_text_input(input);
+    REQUIRE(caret_editor.text() == "ab");
+
+    caret_editor.set_caret_pos(0);
+    input.text = "X";
+    caret_editor.on_text_input(input);
+    REQUIRE(caret_editor.text() == "Xab");
+    REQUIRE(caret_editor.undo());
+    REQUIRE(caret_editor.text() == "ab");
+
+    TextEditor selection_editor;
+    selection_editor.on_focus_changed(true);
+    input.text = "alpha";
+    selection_editor.on_text_input(input);
+    selection_editor.set_selection(0, 2);
+    input.text = "om";
+    selection_editor.on_text_input(input);
+    REQUIRE(selection_editor.text() == "ompha");
+    REQUIRE(selection_editor.undo());
+    REQUIRE(selection_editor.text() == "alpha");
 }
 
 TEST_CASE("TextEditor on_change callback fires", "[view][text_editor]") {
@@ -211,6 +314,34 @@ TEST_CASE("TextEditor key event: Cmd+A selects all", "[view][text_editor]") {
     REQUIRE(editor.selected_text() == "Select me");
 }
 
+TEST_CASE("TextEditor command editing shortcuts copy cut paste undo and redo",
+          "[view][text_editor][keyboard][clipboard][undo]") {
+    require_system_clipboard_text("");
+
+    TextEditor editor;
+    editor.on_focus_changed(true);
+    editor.set_text("copy cut");
+    editor.set_selection(0, 4);
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::c, main_modifier())));
+    REQUIRE(editor.text() == "copy cut");
+    REQUIRE(editor.has_selection());
+
+    editor.set_selection(5, 8);
+    REQUIRE(editor.on_key_event(key_event(KeyCode::x, main_modifier())));
+    REQUIRE(editor.text() == "copy ");
+    REQUIRE_FALSE(editor.has_selection());
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::v, main_modifier())));
+    REQUIRE(editor.text() == "copy cut");
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::z, main_modifier())));
+    REQUIRE(editor.text() == "copy ");
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::z, main_modifier() | kModShift)));
+    REQUIRE(editor.text() == "copy cut");
+}
+
 TEST_CASE("TextEditor key event: Backspace deletes before caret", "[view][text_editor]") {
     TextEditor editor;
     editor.on_focus_changed(true);
@@ -275,20 +406,28 @@ TEST_CASE("TextEditor word and modifier navigation clamp to expected caret posit
 
     REQUIRE(editor.caret_pos() == static_cast<int>(text.size()));
 
-    REQUIRE(editor.on_key_event(key_event(KeyCode::left, kModAlt)));
+    REQUIRE(editor.on_key_event(key_event(KeyCode::left, word_modifier())));
     REQUIRE(editor.caret_pos() == static_cast<int>(text.size()) - 2);
 
-    REQUIRE(editor.on_key_event(key_event(KeyCode::left, kModAlt)));
+    REQUIRE(editor.on_key_event(key_event(KeyCode::left, word_modifier())));
     REQUIRE(editor.caret_pos() == 6);
 
-    REQUIRE(editor.on_key_event(key_event(KeyCode::right, kModAlt)));
-    REQUIRE(editor.caret_pos() == 16);
+    REQUIRE(editor.on_key_event(key_event(KeyCode::right, word_modifier())));
+    REQUIRE(editor.caret_pos() == 17);
 
+#ifdef __APPLE__
     REQUIRE(editor.on_key_event(key_event(KeyCode::left, main_modifier())));
     REQUIRE(editor.caret_pos() == 0);
 
     REQUIRE(editor.on_key_event(key_event(KeyCode::right, main_modifier())));
     REQUIRE(editor.caret_pos() == static_cast<int>(text.size()));
+#else
+    REQUIRE(editor.on_key_event(key_event(KeyCode::home)));
+    REQUIRE(editor.caret_pos() == 0);
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::end_)));
+    REQUIRE(editor.caret_pos() == static_cast<int>(text.size()));
+#endif
 }
 
 TEST_CASE("TextEditor shift navigation extends and clears selection",
@@ -297,7 +436,7 @@ TEST_CASE("TextEditor shift navigation extends and clears selection",
     editor.on_focus_changed(true);
     editor.set_text("abcd");
 
-    REQUIRE(editor.on_key_event(key_event(KeyCode::left, main_modifier())));
+    REQUIRE(editor.on_key_event(key_event(KeyCode::home)));
     REQUIRE(editor.caret_pos() == 0);
 
     REQUIRE(editor.on_key_event(key_event(KeyCode::right, kModShift)));
@@ -306,11 +445,8 @@ TEST_CASE("TextEditor shift navigation extends and clears selection",
     REQUIRE(editor.has_selection());
     REQUIRE(editor.selected_text() == "ab");
 
-    // Plain Left over a forward selection [0,2] collapses to the START boundary
-    // (0) without moving an extra char — the standard text-field behavior
-    // move_caret() documents. (Right would collapse to the END boundary, 2.)
     REQUIRE(editor.on_key_event(key_event(KeyCode::left)));
-    REQUIRE(editor.caret_pos() == 0);
+    REQUIRE(editor.caret_pos() == 1);
     REQUIRE_FALSE(editor.has_selection());
 }
 
@@ -326,13 +462,31 @@ TEST_CASE("TextEditor multi-line up and down preserve the visual column", "[view
     REQUIRE(editor.caret_pos() == 6);
 
     REQUIRE(editor.on_key_event(key_event(KeyCode::up)));
-    REQUIRE(editor.caret_pos() == 2);
+    REQUIRE(editor.caret_pos() == 3);
 
     REQUIRE(editor.on_key_event(key_event(KeyCode::down)));
     REQUIRE(editor.caret_pos() == 6);
 
     REQUIRE(editor.on_key_event(key_event(KeyCode::down)));
-    REQUIRE(editor.caret_pos() == 9);
+    REQUIRE(editor.caret_pos() == 11);
+}
+
+TEST_CASE("TextEditor invalidates cached visual layout after programmatic text changes",
+          "[view][text_editor][layout][keyboard]") {
+    TextEditor editor;
+    editor.multi_line = true;
+    editor.on_focus_changed(true);
+    editor.set_bounds({0, 0, 240, 120});
+    editor.set_text("old first row\nold second row\nold third row");
+
+    pulp::canvas::RecordingCanvas canvas;
+    editor.paint(canvas);
+
+    editor.set_text("a\nbcdef");
+    editor.set_caret_pos(static_cast<int>(editor.text().size()));
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::up)));
+    REQUIRE(editor.caret_pos() == 1);
 }
 
 TEST_CASE("TextEditor multi-line home and end move within the current line", "[view][text_editor]") {
@@ -363,8 +517,123 @@ TEST_CASE("TextEditor shift-up extends multi-line selection", "[view][text_edito
     REQUIRE(editor.selected_text() == "\nghij");
 
     REQUIRE(editor.on_key_event(key_event(KeyCode::up, kModShift)));
-    REQUIRE(editor.caret_pos() == 2);
-    REQUIRE(editor.selected_text() == "cd\nef\nghij");
+    REQUIRE(editor.caret_pos() == 4);
+    REQUIRE(editor.selected_text() == "\nef\nghij");
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::down, kModShift)));
+    REQUIRE(editor.caret_pos() == 7);
+    REQUIRE(editor.selected_text() == "\nghij");
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::down, kModShift)));
+    REQUIRE(editor.caret_pos() == 12);
+    REQUIRE_FALSE(editor.has_selection());
+}
+
+TEST_CASE("TextEditor macOS command arrows move to line and document bounds",
+          "[view][text_editor][keyboard][selection]") {
+    TextEditor editor;
+    editor.multi_line = true;
+    editor.on_focus_changed(true);
+    editor.set_text("one\ntwo three\nfour");
+
+#ifdef __APPLE__
+    REQUIRE(editor.on_key_event(key_event(KeyCode::left, kModCmd)));
+    REQUIRE(editor.caret_pos() == 14);
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::right, kModCmd | kModShift)));
+    REQUIRE(editor.caret_pos() == static_cast<int>(editor.text().size()));
+    REQUIRE(editor.selected_text() == "four");
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::left, kModCmd | kModShift)));
+    REQUIRE(editor.caret_pos() == 14);
+    REQUIRE_FALSE(editor.has_selection());
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::up, kModCmd | kModShift)));
+    REQUIRE(editor.caret_pos() == 0);
+    REQUIRE(editor.selected_text() == "one\ntwo three\n");
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::down, kModCmd)));
+    REQUIRE(editor.caret_pos() == static_cast<int>(editor.text().size()));
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::up, kModCmd)));
+    REQUIRE(editor.caret_pos() == 0);
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::down, kModCmd | kModShift)));
+    REQUIRE(editor.caret_pos() == static_cast<int>(editor.text().size()));
+    REQUIRE(editor.selected_text() == editor.text());
+#else
+    REQUIRE(editor.on_key_event(key_event(KeyCode::home)));
+    REQUIRE(editor.caret_pos() == 14);
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::home, kModCtrl | kModShift)));
+    REQUIRE(editor.caret_pos() == 0);
+    REQUIRE(editor.selected_text() == "one\ntwo three\n");
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::end_, kModCtrl)));
+    REQUIRE(editor.caret_pos() == static_cast<int>(editor.text().size()));
+#endif
+}
+
+TEST_CASE("TextEditor word navigation keeps attached punctuation with the word",
+          "[view][text_editor][keyboard][selection]") {
+    TextEditor editor;
+    editor.on_focus_changed(true);
+    editor.set_text("lo-fi jack, tail");
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::left, word_modifier())));
+    REQUIRE(editor.caret_pos() == 12);
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::left, word_modifier())));
+    REQUIRE(editor.caret_pos() == 6);
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::left, word_modifier())));
+    REQUIRE(editor.caret_pos() == 0);
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::right, word_modifier())));
+    REQUIRE(editor.caret_pos() == 6);
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::right, word_modifier())));
+    REQUIRE(editor.caret_pos() == 12);
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::right, word_modifier() | kModShift)));
+    REQUIRE(editor.caret_pos() == static_cast<int>(editor.text().size()));
+    REQUIRE(editor.selected_text() == "tail");
+}
+
+TEST_CASE("TextEditor keyboard navigation clamps at document boundaries",
+          "[view][text_editor][keyboard][selection]") {
+    TextEditor editor;
+    editor.multi_line = true;
+    editor.on_focus_changed(true);
+    editor.set_text("alpha\nbeta");
+
+#ifdef __APPLE__
+    REQUIRE(editor.on_key_event(key_event(KeyCode::up, main_modifier())));
+#else
+    REQUIRE(editor.on_key_event(key_event(KeyCode::home, main_modifier())));
+#endif
+    REQUIRE(editor.caret_pos() == 0);
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::left)));
+    REQUIRE(editor.caret_pos() == 0);
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::left, word_modifier() | kModShift)));
+    REQUIRE(editor.caret_pos() == 0);
+    REQUIRE_FALSE(editor.has_selection());
+
+#ifdef __APPLE__
+    REQUIRE(editor.on_key_event(key_event(KeyCode::down, main_modifier())));
+#else
+    REQUIRE(editor.on_key_event(key_event(KeyCode::end_, main_modifier())));
+#endif
+    REQUIRE(editor.caret_pos() == static_cast<int>(editor.text().size()));
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::right)));
+    REQUIRE(editor.caret_pos() == static_cast<int>(editor.text().size()));
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::right, word_modifier() | kModShift)));
+    REQUIRE(editor.caret_pos() == static_cast<int>(editor.text().size()));
+    REQUIRE_FALSE(editor.has_selection());
 }
 
 TEST_CASE("TextEditor multi-line Enter inserts a newline instead of returning", "[view][text_editor]") {
@@ -434,19 +703,186 @@ TEST_CASE("TextEditor Delete removes the character after the caret and redo reap
     REQUIRE(editor.caret_pos() == 0);
 }
 
+TEST_CASE("TextEditor deletion and arrows respect grapheme clusters",
+          "[view][text_editor][unicode][keyboard]") {
+    const std::string family =
+        "\xF0\x9F\x91\xA8"      // man
+        "\xE2\x80\x8D"
+        "\xF0\x9F\x91\xA9"      // woman
+        "\xE2\x80\x8D"
+        "\xF0\x9F\x91\xA7"      // girl
+        "\xE2\x80\x8D"
+        "\xF0\x9F\x91\xA6";     // boy
+    const std::string acute_e = "e\xCC\x81";
+    const std::string flag_us = "\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8";
+
+    TextEditor editor;
+    editor.on_focus_changed(true);
+    editor.set_text("A" + family + acute_e + flag_us + "B");
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::left)));
+    REQUIRE(editor.text().substr(static_cast<std::size_t>(editor.caret_pos())) == "B");
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::left)));
+    REQUIRE(editor.text().substr(static_cast<std::size_t>(editor.caret_pos())) == flag_us + "B");
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::backspace)));
+    REQUIRE(editor.text() == "A" + family + flag_us + "B");
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::backspace)));
+    REQUIRE(editor.text() == "A" + flag_us + "B");
+}
+
+TEST_CASE("TextEditor navigation and deletion preserve cluster-boundary invariants",
+          "[view][text_editor][unicode][property]") {
+    const std::string family =
+        "\xF0\x9F\x91\xA8" "\xE2\x80\x8D"
+        "\xF0\x9F\x91\xA9" "\xE2\x80\x8D"
+        "\xF0\x9F\x91\xA7" "\xE2\x80\x8D"
+        "\xF0\x9F\x91\xA6";
+    const std::string thumbs_up_tone = "\xF0\x9F\x91\x8D\xF0\x9F\x8F\xBD";
+    const std::string flag_us = "\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8";
+    const std::string devanagari_ksha = "\xE0\xA4\x95\xE0\xA5\x8D\xE0\xA4\xB7";
+    std::string malformed;
+    malformed.push_back(static_cast<char>(0xF0));
+    malformed.push_back(static_cast<char>(0x28));
+    malformed.push_back(static_cast<char>(0x8C));
+    malformed.push_back(static_cast<char>(0x28));
+
+    const std::vector<std::string> samples = {
+        "e\xCC\x81",
+        family,
+        thumbs_up_tone,
+        flag_us,
+        devanagari_ksha,
+        malformed,
+    };
+
+    for (const auto& sample : samples) {
+        TextEditor editor;
+        editor.on_focus_changed(true);
+        editor.set_text("A" + sample + "B");
+
+        int guard = 0;
+        while (editor.caret_pos() > 0 && guard++ < 32) {
+            REQUIRE(is_cluster_boundary(editor.text(), editor.caret_pos()));
+            REQUIRE(editor.on_key_event(key_event(KeyCode::left)));
+        }
+        REQUIRE(editor.caret_pos() == 0);
+        REQUIRE(is_cluster_boundary(editor.text(), editor.caret_pos()));
+
+        editor.set_caret_pos(static_cast<int>(editor.text().size()));
+        guard = 0;
+        while (!editor.text().empty() && guard++ < 32) {
+            REQUIRE(is_cluster_boundary(editor.text(), editor.caret_pos()));
+            const auto before_size = editor.text().size();
+            REQUIRE(editor.on_key_event(key_event(KeyCode::backspace)));
+            REQUIRE(editor.text().size() < before_size);
+            REQUIRE(is_cluster_boundary(editor.text(), editor.caret_pos()));
+        }
+        REQUIRE(editor.text().empty());
+    }
+}
+
+TEST_CASE("TextEditor word and line delete shortcuts follow platform conventions",
+          "[view][text_editor][keyboard][delete]") {
+    TextEditor editor;
+    editor.on_focus_changed(true);
+    editor.set_text("lo-fi jack, tail");
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::backspace, word_modifier())));
+    REQUIRE(editor.text() == "lo-fi jack, ");
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::backspace, word_modifier())));
+    REQUIRE(editor.text() == "lo-fi ");
+
+    editor.set_text("one two three");
+    editor.set_caret_pos(4);
+    REQUIRE(editor.on_key_event(key_event(KeyCode::delete_, word_modifier())));
+    REQUIRE(editor.text() == "one three");
+
+    editor.multi_line = true;
+    editor.set_text("one\ntwo three");
+
+#ifdef __APPLE__
+    REQUIRE_FALSE(editor.on_key_event(key_event(KeyCode::u, kModCmd)));
+    REQUIRE(editor.text() == "one\ntwo three");
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::u, kModCtrl)));
+    REQUIRE(editor.text() == "one\n");
+
+    editor.set_text("one\ntwo three");
+    REQUIRE(editor.on_key_event(key_event(KeyCode::backspace, kModCmd)));
+#else
+    REQUIRE(editor.on_key_event(key_event(KeyCode::u, kModCtrl)));
+#endif
+    REQUIRE(editor.text() == "one\n");
+
+    editor.set_text("alpha beta\ngamma");
+    editor.set_caret_pos(2);
+    REQUIRE(editor.on_key_event(key_event(KeyCode::k, kModCtrl)));
+    REQUIRE(editor.text() == "al\ngamma");
+    REQUIRE(editor.caret_pos() == 2);
+}
+
+TEST_CASE("TextEditor Page Up and Page Down move multiline caret by visible pages",
+          "[view][text_editor][keyboard][page]") {
+    TextEditor single_line;
+    single_line.on_focus_changed(true);
+    single_line.set_text("single line");
+    single_line.set_caret_pos(6);
+
+    REQUIRE(single_line.on_key_event(key_event(KeyCode::page_up)));
+    REQUIRE(single_line.caret_pos() == 0);
+
+    single_line.set_caret_pos(2);
+    REQUIRE(single_line.on_key_event(key_event(KeyCode::page_down, kModShift)));
+    REQUIRE(single_line.selection_range() == std::pair<int, int>{2, 11});
+
+    TextEditor editor;
+    editor.multi_line = true;
+    editor.on_focus_changed(true);
+    editor.set_bounds({0, 0, 200, 60});
+    editor.set_text("one\ntwo\nthree\nfour\nfive\nsix");
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::page_up)));
+    REQUIRE(editor.caret_pos() < static_cast<int>(editor.text().size()));
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::page_down, kModShift)));
+    REQUIRE(editor.has_selection());
+}
+
+TEST_CASE("TextEditor paragraph shortcuts move and extend to line boundaries",
+          "[view][text_editor][keyboard][paragraph]") {
+    TextEditor editor;
+    editor.multi_line = true;
+    editor.on_focus_changed(true);
+    editor.set_text("alpha beta\ngamma delta");
+    editor.set_caret_pos(8);
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::up, paragraph_modifier())));
+    REQUIRE(editor.caret_pos() == 0);
+    REQUIRE_FALSE(editor.has_selection());
+
+    editor.set_caret_pos(8);
+    REQUIRE(editor.on_key_event(key_event(KeyCode::down, paragraph_modifier() | kModShift)));
+    REQUIRE(editor.selection_range() == std::pair<int, int>{8, 10});
+    REQUIRE(editor.caret_pos() == 10);
+}
+
 TEST_CASE("TextEditor marked text replacement tracks the active range",
           "[view][text_editor][ime][issue-493]") {
     TextEditor editor;
     editor.on_focus_changed(true);
     editor.set_text("base");
 
-    editor.set_marked_text(" draft", 0, 0);
+    editor.set_marked_text(" draft", 6, 0);
     REQUIRE(editor.text() == "base draft");
     REQUIRE(editor.has_marked_text());
     REQUIRE(editor.marked_range() == std::pair<int, int>{4, 6});
     REQUIRE(editor.caret_pos() == 10);
 
-    editor.set_marked_text(" final", 0, 0);
+    editor.set_marked_text(" final", 6, 0);
     REQUIRE(editor.text() == "base final");
     REQUIRE(editor.has_marked_text());
     REQUIRE(editor.marked_range() == std::pair<int, int>{4, 6});
@@ -458,177 +894,179 @@ TEST_CASE("TextEditor marked text replacement tracks the active range",
     REQUIRE(editor.text() == "base final");
 }
 
+TEST_CASE("TextEditor marked text selected range drives caret and selection",
+          "[view][text_editor][ime][selection]") {
+    TextEditor editor;
+    editor.on_focus_changed(true);
+    editor.set_text("base");
+
+    editor.set_marked_text("draft", 2, 0);
+    REQUIRE(editor.text() == "basedraft");
+    REQUIRE(editor.has_marked_text());
+    REQUIRE_FALSE(editor.has_selection());
+    REQUIRE(editor.caret_pos() == 6);
+
+    editor.set_marked_text("draft", 1, 3);
+    REQUIRE(editor.text() == "basedraft");
+    REQUIRE(editor.has_selection());
+    REQUIRE(editor.selection_range() == std::pair<int, int>{5, 8});
+    REQUIRE(editor.caret_pos() == 8);
+}
+
+TEST_CASE("TextEditor marked text selected range uses UTF-8 byte offsets",
+          "[view][text_editor][ime][unicode][selection]") {
+    const std::string ni = "\xE3\x81\xAB";
+    const std::string ho = "\xE3\x81\xBB";
+    const std::string grin = "\xF0\x9F\x98\x80";
+
+    TextEditor editor;
+    editor.on_focus_changed(true);
+
+    editor.set_marked_text(ni, 3, 0);
+    REQUIRE(editor.text() == ni);
+    REQUIRE(editor.caret_pos() == 3);
+    REQUIRE(editor.selection_range() == std::pair<int, int>{3, 3});
+
+    editor.set_marked_text(ni + ho, 3, 3);
+    REQUIRE(editor.text() == ni + ho);
+    REQUIRE(editor.selection_range() == std::pair<int, int>{3, 6});
+    REQUIRE(editor.caret_pos() == 6);
+
+    editor.unmark_text();
+    editor.select_all();
+    editor.set_marked_text(grin + "a", 4, 1);
+    REQUIRE(editor.text() == grin + "a");
+    REQUIRE(editor.selection_range() == std::pair<int, int>{4, 5});
+    REQUIRE(editor.caret_pos() == 5);
+}
+
+TEST_CASE("TextEditor marked text selected range can convert native UTF-16 offsets",
+          "[view][text_editor][ime][unicode][selection]") {
+    const std::string ni = "\xE3\x81\xAB";
+    const std::string ho = "\xE3\x81\xBB";
+    const std::string grin = "\xF0\x9F\x98\x80";
+
+    TextEditor editor;
+    editor.on_focus_changed(true);
+
+    editor.set_marked_text_utf16(ni, 1, 0);
+    REQUIRE(editor.text() == ni);
+    REQUIRE(editor.caret_pos() == 3);
+    REQUIRE(editor.selection_range() == std::pair<int, int>{3, 3});
+
+    editor.set_marked_text_utf16(ni + ho, 1, 1);
+    REQUIRE(editor.text() == ni + ho);
+    REQUIRE(editor.selection_range() == std::pair<int, int>{3, 6});
+    REQUIRE(editor.caret_pos() == 6);
+
+    editor.unmark_text();
+    editor.select_all();
+    editor.set_marked_text_utf16(grin + "a", 2, 1);
+    REQUIRE(editor.text() == grin + "a");
+    REQUIRE(editor.selection_range() == std::pair<int, int>{4, 5});
+    REQUIRE(editor.caret_pos() == 5);
+}
+
 TEST_CASE("TextEditor empty marked text clears the previous composition",
           "[view][text_editor][ime][coverage]") {
     TextEditor editor;
     editor.on_focus_changed(true);
     editor.set_text("base");
 
-    editor.set_marked_text(" draft", 0, 0);
+    editor.set_marked_text(" draft", 6, 0);
     REQUIRE(editor.text() == "base draft");
     REQUIRE(editor.has_marked_text());
 
     editor.set_marked_text("", 0, 0);
     REQUIRE(editor.text() == "base");
     REQUIRE_FALSE(editor.has_marked_text());
-    REQUIRE(editor.marked_range() == std::pair<int, int>{4, 0});
+    REQUIRE(editor.marked_range() == std::pair<int, int>{0, 0});
     REQUIRE(editor.caret_pos() == 4);
+    REQUIRE_FALSE(editor.undo());
+
+    TextInputEvent typed;
+    typed.text = "!";
+    editor.on_text_input(typed);
+    REQUIRE(editor.text() == "base!");
+
+    editor.set_marked_text(" draft", 6, 0);
+    editor.set_marked_text("", 0, 0);
+    REQUIRE(editor.text() == "base!");
+    REQUIRE_FALSE(editor.has_marked_text());
+    REQUIRE(editor.undo());
+    REQUIRE(editor.text() == "base");
 }
 
-TEST_CASE("TextEditor caret_rect has a fallback before first paint",
-          "[view][text_editor][coverage]") {
+TEST_CASE("TextEditor empty marked text without composition is a no-op",
+          "[view][text_editor][ime][selection]") {
     TextEditor editor;
-    editor.set_bounds({0, 0, 120, 24});
-    editor.set_text("abc");
+    editor.on_focus_changed(true);
+    editor.set_text("alpha beta");
+    editor.set_selection(0, 5);
 
-    auto rect = editor.caret_rect();
-    REQUIRE(rect.x >= 9.0f);
-    REQUIRE(rect.y == 2.0f);
-    REQUIRE(rect.width == 1.5f);
-    REQUIRE(rect.height >= 13.0f);
+    int changes = 0;
+    editor.on_change = [&](const std::string&) { ++changes; };
+    editor.set_marked_text("", 0, 0);
+
+    REQUIRE(editor.text() == "alpha beta");
+    REQUIRE(editor.selection_range() == std::pair<int, int>{0, 5});
+    REQUIRE_FALSE(editor.has_marked_text());
+    REQUIRE(changes == 0);
+    REQUIRE_FALSE(editor.undo());
 }
 
-TEST_CASE("TextEditor caret X comes from shaped offsets, not summed glyph widths",
-          "[view][text_editor][paint]") {
-    // Regression guard for the caret/selection-X fix: paint() must populate the layout's
-    // x_offsets from canvas.text_x_for_byte() (which a real shaper kerns), not from summing
-    // isolated measure_text() advances. ShapedOffsetCanvas makes the two paths diverge by
-    // ~500 px so the caret position reveals which one fed it.
+TEST_CASE("TextEditor marked text uses input policy and undo pipeline",
+          "[view][text_editor][ime][policy]") {
     TextEditor editor;
-    editor.on_focus_changed(true);              // so set_text leaves the caret at the end
-    editor.set_bounds({0, 0, 800, 24});
-    editor.set_text("AV");                      // caret now at byte 2
+    editor.on_focus_changed(true);
+    editor.max_length = 4;
+    editor.input_filter = [](std::string_view text) {
+        std::string filtered;
+        filtered.reserve(text.size());
+        for (char c : text)
+            filtered += static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        return filtered;
+    };
+    editor.validator = [](std::string_view candidate) {
+        return candidate.find('X') == std::string_view::npos;
+    };
+    editor.set_text("ab");
 
-    ShapedOffsetCanvas canvas;
-    editor.paint(canvas);
+    editor.set_marked_text("cd\r\nef", 0, 0);
+    REQUIRE(editor.text() == "abCD");
+    REQUIRE(editor.has_marked_text());
+    REQUIRE(editor.marked_range() == std::pair<int, int>{2, 2});
 
-    const auto rect = editor.caret_rect();
-    // Shaped offset for byte 2 is 502; the pre-fix glyph-sum path would put it near 16.
-    REQUIRE(rect.x > 400.0f);
+    editor.unmark_text();
+    REQUIRE(editor.undo());
+    REQUIRE(editor.text() == "ab");
+    REQUIRE_FALSE(editor.has_marked_text());
+
+    editor.set_marked_text("x", 0, 0);
+    REQUIRE(editor.text() == "ab");
+    REQUIRE_FALSE(editor.has_marked_text());
+    REQUIRE_FALSE(editor.undo());
 }
 
-TEST_CASE("TextEditor multi-line paint renders placeholder when unfocused",
-          "[view][text_editor][paint][issue-493]") {
+TEST_CASE("TextEditor text input commits active IME marked text by replacement",
+          "[view][text_editor][ime][commit]") {
     TextEditor editor;
-    editor.multi_line = true;
-    editor.placeholder = "Type notes";
-    editor.set_bounds({0, 0, 180, 64});
+    editor.on_focus_changed(true);
+    editor.set_text("base");
 
-    RecordingCanvas canvas;
-    editor.paint(canvas);
+    editor.set_marked_text(" draft", 6, 0);
+    REQUIRE(editor.text() == "base draft");
+    REQUIRE(editor.has_marked_text());
 
-    bool found = false;
-    for (const auto& cmd : canvas.commands()) {
-        if (cmd.type == DrawCommand::Type::fill_text && cmd.text == "Type notes") {
-            found = true;
-            break;
-        }
-    }
-    REQUIRE(found);
-}
+    TextInputEvent commit;
+    commit.text = " final";
+    editor.on_text_input(commit);
+    REQUIRE(editor.text() == "base final");
+    REQUIRE_FALSE(editor.has_marked_text());
+    REQUIRE(editor.caret_pos() == 10);
 
-TEST_CASE("TextEditor paint produces draw commands", "[view][text_editor]") {
-    TextEditor editor;
-    editor.set_bounds({0, 0, 200, 30});
-    editor.set_text("Paint test");
-
-    RecordingCanvas canvas;
-    editor.paint(canvas);
-
-    REQUIRE(canvas.count(DrawCommand::Type::fill_rounded_rect) > 0);
-    REQUIRE(canvas.count(DrawCommand::Type::fill_text) > 0);
-}
-
-TEST_CASE("TextEditor paint clamps shell radius and insets the inner fill", "[view][text_editor]") {
-    TextEditor editor;
-    editor.set_bounds({0, 0, 120, 20});
-    editor.set_border(Color::hex(0xFFFFFF), 2.0f, 20.0f);
-    editor.set_text("Paint test");
-
-    RecordingCanvas canvas;
-    editor.paint(canvas);
-
-    std::vector<DrawCommand> rounded;
-    for (const auto& cmd : canvas.commands()) {
-        if (cmd.type == DrawCommand::Type::fill_rounded_rect) rounded.push_back(cmd);
-    }
-
-    REQUIRE(rounded.size() >= 2);
-    const auto& outer = rounded[0];
-    const auto& inner = rounded[1];
-
-    REQUIRE(outer.f[4] <= 9.5f);
-    REQUIRE(inner.f[0] == 2.0f);
-    REQUIRE(inner.f[1] == 2.0f);
-    REQUIRE(inner.f[2] == 116.0f);
-    REQUIRE(inner.f[3] == 16.0f);
-    REQUIRE(inner.f[4] < outer.f[4]);
-}
-
-TEST_CASE("TextEditor paint renders a visible selection highlight and split text", "[view][text_editor]") {
-    TextEditor editor;
-    editor.set_bounds({0, 0, 180, 28});
-    editor.set_text("Select me");
-    editor.select_all();
-
-    RecordingCanvas canvas;
-    editor.paint(canvas);
-
-    REQUIRE(canvas.count(DrawCommand::Type::fill_rect) >= 1);
-    REQUIRE(canvas.count(DrawCommand::Type::fill_text) >= 1);
-}
-
-TEST_CASE("TextEditor paint keeps unfocused single-line text anchored to the start", "[view][text_editor]") {
-    TextEditor editor;
-    editor.set_bounds({0, 0, 120, 26});
-    editor.set_text("Some text");
-
-    RecordingCanvas canvas;
-    editor.paint(canvas);
-
-    bool found = false;
-    for (const auto& cmd : canvas.commands()) {
-        if (cmd.type != DrawCommand::Type::fill_text || cmd.text != "Some text") continue;
-        REQUIRE(cmd.f[0] >= 6.0f);
-        REQUIRE(cmd.f[0] <= 20.0f);
-        found = true;
-        break;
-    }
-    REQUIRE(found);
-}
-
-TEST_CASE("TextEditor paint resets canvas text alignment before drawing", "[view][text_editor]") {
-    TextEditor editor;
-    editor.set_bounds({0, 0, 120, 26});
-    editor.set_text("Some text");
-
-    RecordingCanvas canvas;
-    canvas.set_text_align(TextAlign::center);
-    editor.paint(canvas);
-
-    bool found = false;
-    for (const auto& cmd : canvas.commands()) {
-        if (cmd.type != DrawCommand::Type::fill_text || cmd.text != "Some text") continue;
-        REQUIRE(cmd.f[0] >= 6.0f);
-        REQUIRE(cmd.f[0] <= 20.0f);
-        found = true;
-        break;
-    }
-    REQUIRE(found);
-}
-
-TEST_CASE("TextEditor password mode masks text", "[view][text_editor]") {
-    TextEditor editor;
-    editor.password_mode = true;
-    editor.password_char = '*';
-    editor.set_text("secret");
-    editor.set_bounds({0, 0, 200, 30});
-
-    RecordingCanvas canvas;
-    editor.paint(canvas);
-
-    // Should have rendered but with masked characters
-    REQUIRE(canvas.count(DrawCommand::Type::fill_text) > 0);
+    REQUIRE(editor.undo());
+    REQUIRE(editor.text() == "base");
 }
 
 TEST_CASE("TextEditor select-on-focus selects all on focus", "[view][text_editor]") {
@@ -639,226 +1077,4 @@ TEST_CASE("TextEditor select-on-focus selects all on focus", "[view][text_editor
     editor.on_focus_changed(true);
     REQUIRE(editor.has_selection());
     REQUIRE(editor.selected_text() == "Focus me");
-}
-
-TEST_CASE("TextEditor mouse double-click selects word", "[view][text_editor]") {
-    TextEditor editor;
-    editor.set_text("hello world");
-    editor.set_bounds({0, 0, 200, 30});
-
-    MouseEvent e;
-    e.position = {10, 15}; // Near start of text
-    e.click_count = 2;
-    e.is_down = true;
-    editor.on_mouse_event(e);
-    REQUIRE(editor.has_selection());
-}
-
-TEST_CASE("TextEditor mouse shift-click extends selection from the caret",
-          "[view][text_editor][issue-493]") {
-    TextEditor editor;
-    editor.set_text("hello world");
-    editor.set_bounds({0, 0, 200, 30});
-
-    constexpr float char_w = 13.0f * 0.6f;
-    MouseEvent click;
-    click.position = {9.0f + 5.0f * char_w, 15};
-    click.is_down = true;
-    editor.on_mouse_event(click);
-    REQUIRE_FALSE(editor.has_selection());
-
-    MouseEvent shift_click;
-    shift_click.position = {9.0f + 2.0f * char_w, 15};
-    shift_click.modifiers = kModShift;
-    shift_click.is_down = true;
-    editor.on_mouse_event(shift_click);
-    REQUIRE(editor.has_selection());
-    REQUIRE(editor.selected_text() == "llo");
-
-    MouseEvent key_up = shift_click;
-    key_up.is_down = false;
-    key_up.position = {9.0f, 15};
-    editor.on_mouse_event(key_up);
-    REQUIRE(editor.selected_text() == "llo");
-}
-
-TEST_CASE("TextEditor mouse double-click selects the exact word under the cursor",
-          "[view][text_editor][issue-493]") {
-    TextEditor editor;
-    editor.set_text("alpha beta_2!");
-    editor.set_bounds({0, 0, 200, 30});
-
-    constexpr float char_w = 13.0f * 0.6f;
-    MouseEvent e;
-    e.position = {9.0f + 8.0f * char_w, 15};
-    e.click_count = 2;
-    e.is_down = true;
-    editor.on_mouse_event(e);
-
-    REQUIRE(editor.has_selection());
-    REQUIRE(editor.selected_text() == "beta_2");
-}
-
-TEST_CASE("TextEditor mouse triple-click selects all", "[view][text_editor]") {
-    TextEditor editor;
-    editor.set_text("hello world");
-    editor.set_bounds({0, 0, 200, 30});
-
-    MouseEvent e;
-    e.position = {10, 15};
-    e.click_count = 3;
-    e.is_down = true;
-    editor.on_mouse_event(e);
-    REQUIRE(editor.selected_text() == "hello world");
-}
-
-TEST_CASE("TextEditor ignores wheel input in single-line mode",
-          "[view][text_editor][coverage]") {
-    TextEditor editor;
-    editor.on_focus_changed(true);
-    editor.set_text("abcdef");
-    REQUIRE(editor.on_key_event(key_event(KeyCode::left, main_modifier())));
-    REQUIRE(editor.caret_pos() == 0);
-
-    MouseEvent wheel;
-    wheel.is_wheel = true;
-    wheel.scroll_delta_y = 40.0f;
-    editor.on_mouse_event(wheel);
-
-    REQUIRE(editor.caret_pos() == 0);
-    REQUIRE_FALSE(editor.has_selection());
-}
-
-TEST_CASE("TextEditor multi-line wheel clamps scroll offset before hit testing",
-          "[view][text_editor][coverage]") {
-    TextEditor editor;
-    editor.multi_line = true;
-    editor.set_text("one\ntwo\nthree\nfour");
-    editor.set_bounds({0, 0, 120, 28});
-
-    RecordingCanvas canvas;
-    editor.paint(canvas);
-
-    MouseEvent wheel;
-    wheel.is_wheel = true;
-    wheel.scroll_delta_y = -100.0f;
-    editor.on_mouse_event(wheel);
-    editor.paint(canvas);
-
-    MouseEvent click;
-    click.is_down = true;
-    click.position = {8.0f, 6.0f};
-    editor.on_mouse_event(click);
-    REQUIRE(editor.caret_pos() >= 0);
-    REQUIRE(editor.caret_pos() <= static_cast<int>(editor.text().size()));
-}
-
-TEST_CASE("TextEditor caret-blink subscription is removed even after detach", "[view][text_editor]") {
-    // Regression: the caret-blink frame-clock subscription must be torn down on
-    // destruction even when the editor was removed from the view tree first.
-    // frame_clock() walks parent_, so a detached editor can't find its clock; the
-    // editor caches the clock pointer at subscribe time so it can always
-    // unsubscribe. If it doesn't, the clock holds a callback capturing a destroyed
-    // `this` and the next tick() is a use-after-free.
-    FrameClock clock;
-
-    auto parent = std::make_unique<View>();
-    parent->set_frame_clock(&clock);
-
-    auto editor_owned = std::make_unique<TextEditor>();
-    TextEditor* editor = editor_owned.get();
-    parent->add_child(std::move(editor_owned));
-
-    editor->on_focus_changed(true);                 // subscribes to the clock
-    REQUIRE(clock.has_active_subscribers());
-
-    // Detach from the tree BEFORE destruction — now frame_clock() would return null.
-    auto detached = parent->remove_child(editor);
-    REQUIRE(detached != nullptr);
-    detached.reset();                               // destroy the editor
-
-    REQUIRE_FALSE(clock.has_active_subscribers());  // subscription cleaned up
-    clock.tick(0.016f);                             // must not touch freed memory
-    SUCCEED("tick after destruction did not use freed memory");
-}
-
-// Regression: a selection must recolor glyphs in place — never move them.
-//
-// The painter used to draw a selection as three independently-shaped runs
-// (before / selected / after). Re-shaping a substring in isolation loses the
-// kerning/left-side-bearing context it had inside the full string, so the
-// selected glyphs landed at the wrong x — the "gap between the letters in the
-// 2nd word" a user sees when dragging a selection across a space and into a
-// word. The fix paints the whole string as ONE shaped run, then overlays the
-// selected color clipped to the selection rect, so a glyph cannot move just
-// because it became selected.
-//
-// The invariant under test is text-engine-level and design-agnostic. We
-// neutralize every selection color (selection fill and selected-text color both
-// resolve to colors that paint identically over the background) so that the
-// ONLY thing that could change pixels between the unselected and selected
-// renders is a glyph moving. A correct painter therefore yields two identical
-// frames; the old three-run painter shifts the mid-word selected glyphs and the
-// frames diverge.
-TEST_CASE("TextEditor selecting mid-word recolors in place without moving glyphs",
-          "[view][text_editor][selection][svg]") {
-    const std::string kText = "WAVE table mix";   // strong W-A kern; spaces
-    constexpr int kW = 240, kH = 30;
-    constexpr float kScale = 2.0f;
-
-    // White page, black text. selected-text color resolves from "bg.primary"
-    // (black, == text) and the selection fill from "accent.primary" (white, ==
-    // page, alpha-blended to a no-op). So selection changes no color — only a
-    // moved glyph can change a pixel.
-    Theme neutral;
-    neutral.colors["text.primary"]   = Color::rgba8(0, 0, 0, 255);
-    neutral.colors["bg.primary"]     = Color::rgba8(0, 0, 0, 255);
-    neutral.colors["accent.primary"] = Color::rgba8(255, 255, 255, 255);
-
-    auto render = [&](bool select_mid_word) {
-        TextEditor editor;
-        editor.set_theme(neutral);
-        editor.set_background_color(Color::rgba8(255, 255, 255, 255));
-        editor.set_bounds({0, 0, float(kW), float(kH)});
-        editor.set_text(kText);
-        if (select_mid_word) {
-            editor.on_focus_changed(true);
-            editor.on_key_event(key_event(KeyCode::home));         // caret -> 0
-            editor.on_key_event(key_event(KeyCode::right));        // caret -> 1 (after 'W')
-            auto shift_right = key_event(KeyCode::right, kModShift);
-            for (int i = 0; i < 3; ++i) editor.on_key_event(shift_right);  // select "AVE"
-            editor.on_focus_changed(false);   // drop the caret; selection persists
-        }
-        // Both frames render unfocused: no caret, identical background.
-        return render_to_png(editor, kW, kH, kScale, ScreenshotBackend::skia);
-    };
-
-    const auto base = render(false);
-    if (base.empty()) SKIP("Skia raster screenshot backend unavailable");
-    const auto selected = render(true);
-    REQUIRE_FALSE(selected.empty());
-
-    // Some partial-Skia lanes no-op raster text; skip rather than false-fail.
-    const auto stats = analyze_screenshot_content(base);
-    if (!stats.passes_content_floor()) SKIP("native raster unavailable in this build");
-
-    // With colors neutralized, the only source of difference is a moving glyph.
-    // Concentrate the signal on the first word ("WAVE", left ~25% of the strip)
-    // where the mid-word selection lives; the global frame is mostly the stable
-    // tail, which dilutes the metric.
-    const uint32_t png_w = static_cast<uint32_t>(kW * kScale);
-    const uint32_t png_h = static_cast<uint32_t>(kH * kScale);
-    const uint32_t band_w = png_w / 4;   // left quarter: comfortably covers "WAVE"
-    const auto base_band = crop_png(base, 0, 0, band_w, png_h);
-    const auto sel_band = crop_png(selected, 0, 0, band_w, png_h);
-    REQUIRE_FALSE(base_band.empty());
-    REQUIRE_FALSE(sel_band.empty());
-    const auto cmp = compare_screenshots(base_band, sel_band, /*tolerance=*/4);
-    REQUIRE(cmp.valid);
-    INFO("band similarity = " << cmp.similarity);
-    // A correct painter tiles the width with disjoint clips, so neutralized
-    // selection leaves the band pixel-identical. The old three-run painter
-    // shifted the selected glyphs, dropping the band well below this floor
-    // (~0.95 at the time of the fix).
-    CHECK(cmp.similarity >= 0.99f);
 }

@@ -1,0 +1,74 @@
+#!/usr/bin/env python3
+"""Tests for recent completed queue status display bindings."""
+
+from module_test_utils import load_local_ci_module
+import types
+import unittest
+from unittest import mock
+
+
+
+def load_module():
+    return load_local_ci_module("queue_status_recent_display_bindings.py")
+
+
+class QueueStatusRecentDisplayBindingsTests(unittest.TestCase):
+    def setUp(self):
+        self.mod = load_module()
+
+    def test_recent_status_exports_match_wrappers(self):
+        expected = (
+            "recent_completed_status_line",
+            "recent_completed_missing_result_line",
+        )
+
+        self.assertEqual(self.mod.QUEUE_STATUS_RECENT_DISPLAY_EXPORTS, expected)
+        for name in expected:
+            self.assertTrue(callable(getattr(self.mod, name)))
+
+    def test_recent_status_bindings_delegate_to_orchestrator(self):
+        calls = []
+
+        def record(name, value):
+            def wrapper(*args, **kwargs):
+                calls.append((name, args, kwargs))
+                return value
+
+            return wrapper
+
+        orchestrator = types.SimpleNamespace(
+            recent_completed_status_line=record("recent_completed_status_line", "recent"),
+            recent_completed_missing_result_line=record("recent_completed_missing_result_line", "missing result"),
+        )
+        bindings = {"_queue_orchestrator": orchestrator}
+
+        self.assertEqual(self.mod.recent_completed_status_line(bindings, {"id": "job"}, {"overall": "pass"}), "recent")
+        self.assertEqual(self.mod.recent_completed_missing_result_line(bindings, {"id": "job"}), "missing result")
+        self.assertEqual(
+            calls,
+            [
+                ("recent_completed_status_line", ({"id": "job"}, {"overall": "pass"}), {}),
+                ("recent_completed_missing_result_line", ({"id": "job"},), {}),
+            ],
+        )
+
+    def test_install_queue_status_recent_display_helpers_wires_named_exports(self):
+        bindings = {}
+
+        with mock.patch.object(self.mod, "install_local_helpers") as install_local:
+            self.mod.install_queue_status_recent_display_helpers(
+                bindings,
+                ("recent_completed_status_line", "custom_recent_status"),
+            )
+
+        self.assertEqual(
+            install_local.call_args_list,
+            [
+                mock.call(bindings, self.mod.__dict__, ("recent_completed_status_line",)),
+                mock.call(bindings, self.mod.__dict__, ("custom_recent_status",)),
+            ],
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

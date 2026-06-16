@@ -3,48 +3,22 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-import json
 from pathlib import Path
 import shutil
-import subprocess
 import sys
-import urllib.error
-import urllib.parse
-import urllib.request
 import uuid
 
-import linux_target
-from normalize import normalize_desktop_optional_config
-import windows_target
-
-
-def desktop_optional_capabilities(optional_cfg: dict | None) -> list[str]:
-    optional = normalize_desktop_optional_config(optional_cfg)
-    caps: list[str] = []
-    if optional.get("webview_driver"):
-        caps.extend(["webview_dom", "semantic_click", "semantic_type", "script_eval", "element_screenshot"])
-    if optional.get("debug_attach"):
-        caps.extend(["debug_attach", "debug_command"])
-    if optional.get("video_capture"):
-        caps.append("video_capture")
-    if optional.get("frame_stats"):
-        caps.append("frame_stats")
-    return caps
-
-
-def desktop_capabilities_for(adapter: str, tier: str, optional_cfg: dict | None = None) -> list[str]:
-    base = ["launch_app", "wait_ready", "window_screenshot", "collect_logs", "crash_artifacts"]
-    if tier in {"v2", "v3"}:
-        if adapter == "linux-xvfb":
-            base.extend(["coordinate_click", "before_after_capture", "image_diff"])
-        else:
-            base.extend(["ui_snapshot", "coordinate_click", "view_target_click", "before_after_capture", "image_diff"])
-            if adapter in {"macos-local", "windows-session-agent"}:
-                base.append("pulp_app_automation")
-    if tier == "v3":
-        base.extend(["type_text", "wheel", "desktop_screenshot", "record_video", "debug_attach"])
-    base.extend(desktop_optional_capabilities(optional_cfg))
-    return list(dict.fromkeys(base))
+from desktop_doctor_checks import (
+    macos_local_doctor_checks,
+    optional_desktop_doctor_checks,
+    ssh_desktop_doctor_checks,
+)
+from desktop_doctor_optional import (
+    desktop_capabilities_for,
+    desktop_optional_capabilities,
+    probe_webdriver_endpoint,
+    webdriver_status_url,
+)
 
 
 def desktop_check(name: str, ok: bool, detail: str, *, required: bool = True) -> dict:
@@ -108,279 +82,42 @@ def desktop_doctor_checks(
 
     adapter = target["adapter"]
     if adapter == "macos-local":
-        checks.append(desktop_check("platform", platform == "darwin", f"running on {platform}"))
-        checks.append(
-            desktop_check(
-                "screencapture",
-                which_fn("screencapture") is not None,
-                which_fn("screencapture") or "missing",
+        checks.extend(
+            macos_local_doctor_checks(
+                platform=platform,
+                which_fn=which_fn,
+                macos_accessibility_trusted_fn=macos_accessibility_trusted_fn,
+                desktop_check_fn=desktop_check,
             )
         )
-        checks.append(
-            desktop_check(
-                "osascript",
-                which_fn("osascript") is not None,
-                which_fn("osascript") or "missing",
-            )
-        )
-        try:
-            trusted = macos_accessibility_trusted_fn()
-            checks.append(
-                desktop_check(
-                    "accessibility",
-                    trusted,
-                    "trusted" if trusted else "not trusted; desktop-event click is unavailable but Pulp app automation still works",
-                    required=False,
-                )
-            )
-        except (subprocess.SubprocessError, json.JSONDecodeError) as exc:
-            checks.append(desktop_check("accessibility", False, str(exc), required=False))
     elif target["target_type"] == "ssh":
-        host = target.get("host")
-        checks.append(desktop_check("host", bool(host), host or "missing"))
-        ssh_ok = False
-        if host:
-            ssh_ok = ssh_reachable_fn(host, 5)
-            ssh_detail = host if ssh_ok else ssh_failure_detail_fn(host, 5)
-            checks.append(desktop_check("ssh", ssh_ok, ssh_detail))
-            if ssh_ok and adapter == "linux-xvfb":
-                try:
-                    backend = probe_linux_launch_backend_fn(host)
-                    if backend.get("mode") == "xvfb":
-                        detail = backend.get("path") or "xvfb-run"
-                    elif backend.get("mode") == "display":
-                        detail = f"existing display {backend.get('display') or ':0'}"
-                    else:
-                        detail = "missing; install xvfb and xauth (for example: sudo apt-get install xvfb xauth)"
-                    checks.append(desktop_check("launch_backend", backend.get("mode") != "missing", detail))
-                except (subprocess.SubprocessError, OSError, RuntimeError) as exc:
-                    checks.append(desktop_check("launch_backend", False, str(exc)))
-                try:
-                    tooling = probe_linux_remote_tooling_fn(host)
-                    for tool_name, spec in linux_target.LINUX_REQUIRED_REMOTE_TOOLS.items():
-                        checks.append(
-                            desktop_check(
-                                spec["display_name"],
-                                bool(tooling.get(f"{tool_name}_found")),
-                                linux_target.linux_tooling_detail(tooling, tool_name, missing_hint=f"missing; {spec['package_hint']}"),
-                            )
-                        )
-                    for tool_name, spec in linux_target.LINUX_OPTIONAL_REMOTE_TOOLS.items():
-                        checks.append(
-                            desktop_check(
-                                spec["display_name"],
-                                bool(tooling.get(f"{tool_name}_found")),
-                                linux_target.linux_tooling_detail(tooling, tool_name, missing_hint=f"missing; {spec['package_hint']}"),
-                                required=False,
-                            )
-                        )
-                except (subprocess.SubprocessError, OSError, RuntimeError) as exc:
-                    checks.append(desktop_check("remote_tooling", False, str(exc)))
-            if ssh_ok and adapter == "windows-session-agent":
-                bootstrap_required = bool(receipt and receipt.get("remote_bootstrap_ready"))
-                checks.append(desktop_check("task_name", bool(contract.get("task_name")), contract.get("task_name") or "missing", required=False))
-                try:
-                    probe = probe_windows_session_agent_fn(host, contract)
-                    checks.append(
-                        desktop_check(
-                            "scheduled_task",
-                            bool(probe.get("task_present")),
-                            f"{probe.get('task_name') or contract.get('task_name')} ({probe.get('task_state') or 'missing'})",
-                            required=bootstrap_required,
-                        )
-                    )
-                    desktop_session_user = windows_target.windows_desktop_session_user(probe)
-                    desktop_session_state = windows_target.windows_desktop_session_state(probe)
-                    if desktop_session_user:
-                        session_detail = desktop_session_user
-                        if desktop_session_state:
-                            session_detail = f"{session_detail} ({desktop_session_state})"
-                    else:
-                        session_detail = "no logged-in desktop session detected; log into the Windows desktop, then retry"
-                    checks.append(desktop_check("interactive_user", bool(desktop_session_user), session_detail, required=False))
-                    checks.append(desktop_check("agent_root", bool(probe.get("agent_root_exists")), probe.get("remote_root") or contract.get("remote_root") or "missing", required=bootstrap_required))
-                    checks.append(desktop_check("jobs_dir", bool(probe.get("jobs_dir_exists")), probe.get("jobs_dir") or "missing", required=bootstrap_required))
-                    checks.append(desktop_check("results_dir", bool(probe.get("results_dir_exists")), probe.get("results_dir") or "missing", required=bootstrap_required))
-                    checks.append(desktop_check("script_path", bool(probe.get("script_exists")), probe.get("script_path") or contract.get("script_path") or "missing", required=bootstrap_required))
-                    tooling = probe_windows_remote_tooling_fn(host)
-                    checks.append(
-                        desktop_check(
-                            "git",
-                            bool(tooling.get("git_found")),
-                            windows_target.windows_tooling_detail(
-                                tooling,
-                                "git",
-                                missing_hint="missing; `desktop install windows` will provision Git via winget when available",
-                            ),
-                        )
-                    )
-                    checks.append(
-                        desktop_check(
-                            "winget",
-                            bool(tooling.get("winget_found")),
-                            windows_target.windows_tooling_detail(
-                                tooling,
-                                "winget",
-                                missing_hint="missing; install App Installer/winget or install Git manually",
-                            ),
-                            required=False,
-                        )
-                    )
-                    checks.append(
-                        desktop_check(
-                            "gh",
-                            bool(tooling.get("gh_found")),
-                            windows_target.windows_tooling_detail(
-                                tooling,
-                                "gh",
-                                missing_hint="missing; optional for remote GitHub workflows on the Windows target",
-                            ),
-                            required=False,
-                        )
-                    )
-                    gh_auth_ready = tooling.get("gh_auth_ready")
-                    if tooling.get("gh_found"):
-                        auth_detail = tooling.get("gh_auth_detail") or "authenticated"
-                    else:
-                        auth_detail = "not applicable until gh is installed"
-                    checks.append(
-                        desktop_check(
-                            "gh_auth",
-                            bool(gh_auth_ready) if gh_auth_ready is not None else False,
-                            auth_detail,
-                            required=False,
-                        )
-                    )
-                    try:
-                        repo_probe = probe_windows_repo_checkout_fn(host, target.get("repo_path"))
-                        repo_ready = windows_target.windows_repo_checkout_ready(repo_probe)
-                        repo_detail = windows_target.windows_repo_checkout_detail(repo_probe, fallback_path=target.get("repo_path"))
-                        if repo_probe.get("repo_path_unsafe"):
-                            repo_detail = f"{repo_detail}; unsafe repo root, run `pulp ci-local desktop install {target_name}`"
-                        checks.append(
-                            desktop_check(
-                                "repo_checkout",
-                                repo_ready,
-                                repo_detail,
-                                required=bootstrap_required,
-                            )
-                        )
-                    except (subprocess.SubprocessError, OSError, RuntimeError) as exc:
-                        checks.append(desktop_check("repo_checkout", False, str(exc), required=bootstrap_required))
-                except (subprocess.SubprocessError, OSError, RuntimeError) as exc:
-                    checks.append(desktop_check("scheduled_task", False, str(exc), required=bootstrap_required))
-        checks.append(desktop_check("bootstrap", True, target.get("bootstrap", "manual")))
+        checks.extend(
+            ssh_desktop_doctor_checks(
+                target_name=target_name,
+                target=target,
+                contract=contract,
+                receipt=receipt,
+                ssh_reachable_fn=ssh_reachable_fn,
+                ssh_failure_detail_fn=ssh_failure_detail_fn,
+                probe_linux_launch_backend_fn=probe_linux_launch_backend_fn,
+                probe_linux_remote_tooling_fn=probe_linux_remote_tooling_fn,
+                probe_windows_session_agent_fn=probe_windows_session_agent_fn,
+                probe_windows_remote_tooling_fn=probe_windows_remote_tooling_fn,
+                probe_windows_repo_checkout_fn=probe_windows_repo_checkout_fn,
+                desktop_check_fn=desktop_check,
+            )
+        )
     else:
         checks.append(desktop_check("adapter", adapter != "unknown", adapter))
 
     probe_webdriver_endpoint_fn = probe_webdriver_endpoint_fn or probe_webdriver_endpoint
-    optional = normalize_desktop_optional_config(target.get("optional"))
-    if optional.get("webview_driver"):
-        webdriver_url = optional.get("webdriver_url")
-        if not webdriver_url:
-            checks.append(desktop_check("webview_driver", False, "enabled but webdriver_url is not set", required=False))
-        else:
-            try:
-                probe = probe_webdriver_endpoint_fn(webdriver_url)
-                ready = probe.get("ready")
-                ready_text = "" if ready is None else f" (ready={str(ready).lower()})"
-                message = probe.get("message")
-                detail = f"reachable at {probe['status_url']}{ready_text}"
-                if message:
-                    detail = f"{detail}: {message}"
-                checks.append(desktop_check("webview_driver", ready is not False, detail, required=False))
-            except (RuntimeError, ValueError) as exc:
-                checks.append(desktop_check("webview_driver", False, str(exc), required=False))
-    if optional.get("debug_attach"):
-        debugger_command = optional.get("debugger_command")
-        if target["target_type"] == "local":
-            debugger = debugger_command or "lldb"
-            debugger_path = which_fn(debugger)
-            checks.append(
-                desktop_check(
-                    "debug_attach",
-                    debugger_path is not None,
-                    debugger_path or f"{debugger} not found on PATH",
-                    required=False,
-                )
-            )
-        else:
-            detail = debugger_command or "enabled; remote debugger validation deferred to target tooling"
-            checks.append(desktop_check("debug_attach", True, detail, required=False))
-    if optional.get("video_capture"):
-        if target["target_type"] == "local":
-            ffmpeg_path = which_fn("ffmpeg")
-            checks.append(
-                desktop_check(
-                    "video_capture",
-                    ffmpeg_path is not None,
-                    ffmpeg_path or "ffmpeg not found on PATH",
-                    required=False,
-                )
-            )
-        else:
-            checks.append(
-                desktop_check(
-                    "video_capture",
-                    True,
-                    "enabled; remote video tooling validation deferred to target tooling",
-                    required=False,
-                )
-            )
-    if optional.get("frame_stats"):
-        checks.append(desktop_check("frame_stats", True, "enabled", required=False))
+    checks.extend(
+        optional_desktop_doctor_checks(
+            target,
+            which_fn=which_fn,
+            probe_webdriver_endpoint_fn=probe_webdriver_endpoint_fn,
+            desktop_check_fn=desktop_check,
+        )
+    )
 
     return checks
-
-
-def webdriver_status_url(base_url: str) -> str:
-    parsed = urllib.parse.urlparse((base_url or "").strip())
-    if not parsed.scheme or not parsed.netloc:
-        raise ValueError("webdriver_url must include a scheme and host, for example http://127.0.0.1:4444")
-    path = parsed.path or ""
-    if not path or path == "/":
-        path = "/status"
-    elif not path.rstrip("/").endswith("/status"):
-        path = f"{path.rstrip('/')}/status"
-    return urllib.parse.urlunparse(parsed._replace(path=path, params="", query="", fragment=""))
-
-
-def probe_webdriver_endpoint(
-    base_url: str,
-    *,
-    timeout: float = 5.0,
-    request_cls: Callable[..., urllib.request.Request] | None = None,
-    urlopen_fn: Callable[..., object] | None = None,
-) -> dict:
-    request_cls = request_cls or urllib.request.Request
-    urlopen_fn = urlopen_fn or urllib.request.urlopen
-    status_url = webdriver_status_url(base_url)
-    request = request_cls(status_url, headers={"Accept": "application/json"})
-    try:
-        with urlopen_fn(request, timeout=timeout) as response:
-            payload = json.loads(response.read().decode("utf-8") or "{}")
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace").strip()
-        detail = f"HTTP {exc.code}"
-        if body:
-            detail = f"{detail}: {body[:200]}"
-        raise RuntimeError(detail) from exc
-    except urllib.error.URLError as exc:
-        reason = getattr(exc, "reason", exc)
-        raise RuntimeError(str(reason)) from exc
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"invalid JSON response: {exc}") from exc
-
-    value = payload.get("value") if isinstance(payload, dict) else None
-    if isinstance(value, dict):
-        ready = value.get("ready")
-        message = value.get("message")
-    else:
-        ready = payload.get("ready") if isinstance(payload, dict) else None
-        message = payload.get("message") if isinstance(payload, dict) else None
-    return {
-        "status_url": status_url,
-        "ready": ready,
-        "message": str(message).strip() if message is not None else "",
-        "payload": payload,
-    }

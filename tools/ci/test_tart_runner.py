@@ -58,6 +58,19 @@ class ScriptContractTests(unittest.TestCase):
         r = _run("--definitely-not-a-flag")
         self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
 
+    def test_workflow_name_option_is_parseable(self) -> None:
+        # Coverage uses the same supervisor binary but watches the Coverage
+        # workflow queue instead of the Build and Test queue.
+        self.assertEqual(
+            _name(
+                "--workflow-name",
+                "Coverage",
+                "--name-prefix",
+                "pulp-coverage-macos",
+            ),
+            "pulp-coverage-macos-01",
+        )
+
 
 class NameDerivationTests(unittest.TestCase):
     """The `--print-name` contract — derivation must be pure + deterministic."""
@@ -136,6 +149,25 @@ class ReuseSafetyTests(unittest.TestCase):
         self.assertIn("actions/runners", self.body)
         # ...and any crashed leftover Tart clone.
         self.assertIn('tart delete "$name"', self.body)
+
+    def test_loop_queue_gate_uses_configured_workflow_name(self) -> None:
+        self.assertIn('WORKFLOW_NAME="${PULP_RUNNER_WORKFLOW_NAME:-Build and Test}"', self.body)
+        self.assertIn("--workflow-name)", self.body)
+        self.assertIn('select(.name == \\"${WORKFLOW_NAME}\\")', self.body)
+
+    def test_queue_gate_can_require_matching_labels(self) -> None:
+        self.assertIn('MATCH_LABELS="${PULP_RUNNER_QUEUE_MATCH_LABELS:-0}"', self.body)
+        self.assertIn("--queue-match-labels)", self.body)
+        self.assertIn("want.issubset(labels)", self.body)
+
+    def test_label_matched_queue_scan_covers_in_progress_runs(self) -> None:
+        # A workflow whose early GitHub-hosted resolver/classify job runs first
+        # (Coverage, Release CLI) flips the run to `in_progress` before its
+        # self-hosted leg is queued. A queued-only run scan would never see that
+        # job and the VM would never boot. The label-matched gate must scan BOTH
+        # statuses (mirrors the tartci macOS provider's loop).
+        self.assertIn("for st in queued in_progress;", self.body)
+        self.assertIn("runs?status=$st", self.body)
 
 
 if __name__ == "__main__":

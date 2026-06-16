@@ -13,6 +13,16 @@
 **Prereqs**: Reaper 7.x, `PulpHostBench.vst3` installed and rescanned
 (Reaper → Options → Preferences → Plug-ins → VST → Re-scan).
 
+Optional preflight smoke:
+
+```bash
+python3 tools/scripts/run_reaper_hostbench_smoke.py --format vst3
+```
+
+Passing smoke output proves REAPER can instantiate the HostBench VST3 and
+write a bench log on this machine. It does not replace the manual steps below
+for keyboard, render, and state-round-trip observations.
+
 ## Steps
 
 1. **Clear stale logs**.

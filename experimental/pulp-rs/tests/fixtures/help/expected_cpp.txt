@@ -24,6 +24,9 @@ Commands:
   inspect        Connect to a running plugin inspector
   scan           Scan system paths for VST3 / AU / CLAP / LV2 plug-ins
   host           Load a plug-in and run a synthetic audio block through it
+  import         Detect a framework project and emit a Pulp migration scaffold
+  kit            Inspect and apply local Pulp package manifests
+  content        Validate and install data-only content packs
   pr             One-shot push-a-PR: gates + bump + ship
   projects       Manage the ~/.pulp/projects.json registry
   project        Per-project SDK pin: bump, undo

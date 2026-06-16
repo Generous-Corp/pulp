@@ -168,7 +168,9 @@ jobs:
   # No behavior change when the repo variables are unset — matches today's
   # single-job baseline on Linux and adds macOS/Windows on the standard
   # GitHub-hosted labels. Set PULP_COVERAGE_<OS>_RUNS_ON_JSON to route any
-  # one leg to Namespace without a code change.
+  # one leg without a code change. Coverage deliberately does not read the
+  # Namespace build variables because coverage/sanitizer/release lanes must
+  # not spill onto the warm macOS gate pool.
   resolve-runners:
     runs-on: ubuntu-latest
     outputs:
@@ -187,29 +189,36 @@ jobs:
           EXPLICIT_MACOS_RUNNER_SELECTOR_JSON: ${{ inputs.macos_runner_selector_json || '' }}
           EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON: ${{ inputs.windows_runner_selector_json || '' }}
           LINUX_RUNS_ON_JSON: ${{ vars.PULP_COVERAGE_LINUX_RUNS_ON_JSON }}
-          MACOS_RUNS_ON_JSON: ${{ vars.PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON || vars.PULP_COVERAGE_MACOS_RUNS_ON_JSON }}
+          MACOS_RUNS_ON_JSON: ${{ vars.PULP_COVERAGE_MACOS_RUNS_ON_JSON }}
           WINDOWS_RUNS_ON_JSON: ${{ vars.PULP_COVERAGE_WINDOWS_RUNS_ON_JSON }}
-          ANDROID_KOTLIN_RUNS_ON_JSON: ${{ vars.PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON || vars.PULP_COVERAGE_ANDROID_KOTLIN_RUNS_ON_JSON }}
+          ANDROID_KOTLIN_RUNS_ON_JSON: ${{ vars.PULP_COVERAGE_ANDROID_KOTLIN_RUNS_ON_JSON }}
         run: |
           set -euo pipefail
           resolve() {
+            # $5 (optional): comma-separated labels the selector must not contain.
             python3 tools/scripts/resolve_runs_on.py \
               --target-name "$1" \
               --mode default \
               --explicit-env "$2" \
               --override-env "$3" \
-              --default-label "$4"
+              --default-label "$4" \
+              ${5:+--deny-labels "$5"}
           }
           linux=$(resolve \
             "Coverage (Linux)" \
             EXPLICIT_LINUX_RUNNER_SELECTOR_JSON \
             LINUX_RUNS_ON_JSON \
             ubuntu-latest)
+          # macOS coverage must never land on the shared pulp-build/pulp-build-vm
+          # gate pool that serves the required `macos` check — a long advisory
+          # coverage run there would contend with / starve the gate. The dedicated
+          # ephemeral lane uses pulp-coverage-vm-macos.
           macos=$(resolve \
             "Coverage (macOS)" \
             EXPLICIT_MACOS_RUNNER_SELECTOR_JSON \
             MACOS_RUNS_ON_JSON \
-            macos-latest)
+            macos-latest \
+            pulp-build,pulp-build-vm)
           android_kotlin=$(resolve \
             "Coverage (Android, Kotlin)" \
             "" \
@@ -334,11 +343,10 @@ jobs:
     # Hard backstop against a wedged matrix leg. A healthy coverage build
     # runs ~1h; 150 min leaves generous headroom for a slow self-hosted
     # runner without ever letting a leg squat for GitHub's 6h job limit.
-    # Critically, this also bounds the QUEUED state: when a self-hosted
-    # macOS runner pool (routed via PULP_COVERAGE_MACOS_RUNS_ON_JSON) is
-    # saturated, a leg that never gets a runner now fails on this timeout
-    # instead of hanging indefinitely — which previously kept the whole
-    # Coverage run `in_progress` for 4h+ and starved the downstream gate.
+    # This bounds the running state once a runner is assigned. Queued
+    # self-hosted legs are handled by the explicit queue watchdog below,
+    # because job-level timeouts do not start while GitHub is still waiting
+    # for a matching runner.
     timeout-minutes: 150
     strategy:
       # Don't cancel other OSes when one fails — coverage is advisory
@@ -453,6 +461,21 @@ jobs:
         run: ./setup.sh --ci --deps-only
         shell: bash
 
+      - name: Install macOS coverage runtime dependencies
+        # The dedicated Tart coverage image is intentionally lean. Keep the
+        # workflow self-describing so an older golden VM can still upload
+        # Codecov (requires gpg) and run the embedded Python bindings smoke
+        # (requires numpy in the interpreter CMake discovers).
+        if: matrix.os == 'macos'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v gpg >/dev/null 2>&1; then
+            brew install gnupg
+          fi
+          python3 -m pip install --user --upgrade numpy || \
+            python3 -m pip install --break-system-packages --user --upgrade numpy
+
       - name: Fetch prebuilt Skia (macOS)
         # scripts/run_coverage.sh configures with examples enabled. The
         # design-tool example requires Skia when GPU support is enabled,
@@ -485,6 +508,7 @@ jobs:
         env:
           CMAKE_GENERATOR: ${{ matrix.os == 'windows' && 'Ninja' || '' }}
           PULP_COVERAGE_CMAKE_ARGS: ${{ (matrix.os == 'linux' || matrix.os == 'macos') && '-DPULP_BUILD_PYTHON=ON' || '' }}
+          PULP_COVERAGE_CTEST_ARGS: ${{ matrix.os == 'macos' && '-LE validation' || '' }}
           # Coverage workflow targets C++ source coverage. The Rust CLI
           # (#778, Phase 8 PR #1) gets its own `cli-rust` Codecov tier
           # via a separate cargo-llvm-cov job (planned in PR #783) —
@@ -1623,6 +1647,23 @@ jobs:
         run: |
           set -euo pipefail
           repo='${{ github.repository }}'
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("coverage-diff-comment.md")
+          limit = 60000
+          marker = "<!-- pulp-coverage-diff-gate -->"
+          note = (
+              "\n\n---\n\n"
+              "_Coverage comment truncated to stay under GitHub's 65,536-character "
+              "comment limit. Download this run's `coverage-diff-*` artifact for "
+              "the full `coverage-diff.md` report._\n"
+          )
+          body = path.read_text(encoding="utf-8")
+          if len(body) > limit:
+              keep = max(len(marker) + 1, limit - len(note))
+              path.write_text(body[:keep].rstrip() + note, encoding="utf-8")
+          PY
           body="$(cat coverage-diff-comment.md)"
 
           existing=$(

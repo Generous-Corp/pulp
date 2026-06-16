@@ -155,6 +155,40 @@ TEST_CASE("TextEditor multi-line soft-wrap recorded in the layout snapshot via c
     REQUIRE(home_rect.y < end_rect.y);
 }
 
+TEST_CASE("TextEditor soft-wrap boundary belongs to the following visual row",
+          "[view][text_editor][multiline][selection]") {
+    TextEditor editor;
+    editor.multi_line = true;
+    editor.set_bounds({0, 0, 60, 200});
+    editor.on_focus_changed(true);
+    editor.set_text("abcdefghijkl");
+
+    editor.set_caret_pos(5);
+    prime_layout(editor);
+    auto previous_row = editor.caret_rect();
+
+    editor.set_caret_pos(6);
+    prime_layout(editor);
+    auto boundary = editor.caret_rect();
+
+    editor.set_caret_pos(7);
+    prime_layout(editor);
+    auto following_row = editor.caret_rect();
+
+    REQUIRE(boundary.y > previous_row.y);
+    REQUIRE(boundary.y == following_row.y);
+
+    editor.set_caret_pos(6);
+    prime_layout(editor);
+    REQUIRE(editor.on_key_event(key(KeyCode::up)));
+    REQUIRE(editor.caret_pos() == 0);
+
+    editor.set_caret_pos(6);
+    prime_layout(editor);
+    REQUIRE(editor.on_key_event(key(KeyCode::up, kModShift)));
+    REQUIRE(editor.selection_range() == std::pair<int, int>{0, 6});
+}
+
 TEST_CASE("TextEditor single-line Enter commits without inserting a newline",
           "[view][text_editor][multiline]") {
     TextEditor editor;

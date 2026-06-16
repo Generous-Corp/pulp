@@ -82,11 +82,13 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from typing import Optional
 
 
 VALID_PROVIDERS = ("github-hosted", "namespace", "local")
+BARE_LABEL_RE = re.compile(r"^[A-Za-z0-9_.:-]+$")
 
 
 def _load_selector(raw: str, target_name: str) -> str:
@@ -94,6 +96,8 @@ def _load_selector(raw: str, target_name: str) -> str:
     try:
         decoded = json.loads(raw)
     except json.JSONDecodeError as exc:
+        if BARE_LABEL_RE.fullmatch(raw):
+            return json.dumps(raw)
         print(
             f"{target_name} runner selector JSON is not valid: {exc}",
             file=sys.stderr,
@@ -212,6 +216,38 @@ def resolve_default_mode(
     return json.dumps(default_label)
 
 
+def _enforce_deny_labels(out: str, deny_labels: list[str], target_name: str) -> None:
+    """Fail fast if a resolved self-hosted selector contains a forbidden label.
+
+    Guards a production-host policy that repo-variable discipline alone cannot
+    enforce: e.g. the macOS *coverage* leg must never be routed onto the shared
+    `pulp-build` / `pulp-build-vm` gate pool that serves the required `macos`
+    check, or a long advisory coverage run could starve the required gate.
+
+    `out` is the JSON the resolver is about to emit. A bare GitHub-hosted label
+    (e.g. `"macos-15"`) is never denied; only an array selector that contains a
+    denied label trips this. Comparison is case-insensitive.
+    """
+    if not deny_labels:
+        return
+    try:
+        selector = json.loads(out)
+    except (TypeError, ValueError):
+        return
+    if not isinstance(selector, list):
+        return
+    have = {str(s).strip().lower() for s in selector}
+    denied = sorted(have & {d.strip().lower() for d in deny_labels if d.strip()})
+    if denied:
+        raise SystemExit(
+            f"Refusing to resolve runs-on for {target_name}: selector "
+            f"{json.dumps(selector)} contains forbidden label(s) "
+            f"{denied}. This target must not run on the {denied} gate pool "
+            f"(it would contend with the required `macos` check). Fix the "
+            f"routing variable / dispatch input to use a dedicated label."
+        )
+
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     p.add_argument("--target-name", required=True,
@@ -245,6 +281,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--default-label",
                    help="Default-mode: hard-coded fallback label "
                         "(e.g. macos-14).")
+    p.add_argument("--deny-labels",
+                   help="Comma-separated labels that the resolved selector must "
+                        "NOT contain (e.g. pulp-build,pulp-build-vm). Fails fast "
+                        "if an array selector includes any of them. A bare "
+                        "GitHub-hosted label is never denied.")
     return p
 
 
@@ -294,6 +335,9 @@ def main(argv: Optional[list[str]] = None) -> int:
             override_env=args.override_env,
             default_label=args.default_label,
         )
+
+    deny = [s for s in (args.deny_labels or "").split(",") if s.strip()]
+    _enforce_deny_labels(out, deny, args.target_name)
 
     sys.stdout.write(out)
     return 0

@@ -1,0 +1,46 @@
+"""Bindings from the local_ci facade to local exact-source worktree helpers."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any
+
+from binding_utils import binding as _binding
+from binding_utils import binding_attr as _binding_attr
+from binding_utils import install_local_helpers
+
+
+DESKTOP_EXACT_SOURCE_LOCAL_EXPORTS = (
+    "local_worktree_matches",
+    "reset_local_worktree",
+)
+
+
+def local_worktree_matches(bindings: Mapping[str, Any], path: Path, sha: str) -> bool:
+    return _binding(bindings, "_source_prep").local_worktree_matches(
+        path,
+        sha,
+        run_fn=_binding_attr(bindings, "subprocess", "run"),
+    )
+
+
+def reset_local_worktree(bindings: Mapping[str, Any], path: Path) -> None:
+    return _binding(bindings, "_source_prep").reset_local_worktree(
+        path,
+        root=_binding(bindings, "ROOT"),
+        run_fn=_binding_attr(bindings, "subprocess", "run"),
+    )
+
+
+def install_desktop_exact_source_local_helpers(
+    bindings: dict[str, Any],
+    names: tuple[str, ...] = DESKTOP_EXACT_SOURCE_LOCAL_EXPORTS,
+) -> None:
+    known_names = set(DESKTOP_EXACT_SOURCE_LOCAL_EXPORTS)
+    local_names = tuple(name for name in names if name in known_names)
+    unknown_names = tuple(name for name in names if name not in known_names)
+
+    install_local_helpers(bindings, globals(), local_names)
+    if unknown_names:
+        install_local_helpers(bindings, globals(), unknown_names)

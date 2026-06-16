@@ -17,7 +17,7 @@
 # Macs (the same hosts that run the bare-metal runners today) or enable the
 # Appendix-D quota override on the dedicated Studio.
 # CAPACITY+QUEUE-AWARE --loop (#3299): the loop boots a VM only when there is
-# queued "Build and Test" work AND running_macos_vms < cap (PULP_VM_CAP,
+# queued workflow work AND running_macos_vms < cap (PULP_VM_CAP,
 # default 2). It cooperates with tools/scripts/macos_reroute_watcher.py (task
 # #22), whose capacity check is likewise VM-slot-aware ("free VM slot", not
 # single-runner busy/idle). Together they close the loop the operator described:
@@ -33,6 +33,7 @@
 #   tart-runner.sh                     # one ephemeral job then exit (pilot default)
 #   tart-runner.sh --loop              # keep spinning a fresh VM after each job
 #   tart-runner.sh --labels self-hosted,macos,arm64,pulp-build   # promote
+#   tart-runner.sh --workflow-name Coverage --labels self-hosted,macos,arm64,pulp-coverage-vm-macos
 #   tart-runner.sh --golden pulp-build-runner:latest --repo danielraffel/pulp
 set -euo pipefail
 
@@ -43,6 +44,8 @@ CACHE_ROOT="${PULP_CI_CACHE:-$HOME/.cache/pulp-ci}"
 GOLDEN="${PULP_RUNNER_GOLDEN:-pulp-build-runner:latest}"
 REPO="${PULP_RUNNER_REPO:-danielraffel/pulp}"
 LABELS="${PULP_RUNNER_LABELS:-self-hosted,macos,arm64,pulp-build-vm}"
+WORKFLOW_NAME="${PULP_RUNNER_WORKFLOW_NAME:-Build and Test}"
+MATCH_LABELS="${PULP_RUNNER_QUEUE_MATCH_LABELS:-0}"
 RUNNER_GROUP_ID="${PULP_RUNNER_GROUP_ID:-1}"
 LOOP=0
 CAP="${PULP_VM_CAP:-2}"          # macOS 2-VM kernel cap per host (plan Appendix D)
@@ -67,6 +70,8 @@ while [ $# -gt 0 ]; do case "$1" in
   --once) LOOP=0; shift;;
   --golden) GOLDEN="$2"; shift 2;;
   --labels) LABELS="$2"; shift 2;;
+  --workflow-name) WORKFLOW_NAME="$2"; shift 2;;
+  --queue-match-labels) MATCH_LABELS=1; shift;;
   --repo) REPO="$2"; shift 2;;
   --cap) CAP="$2"; shift 2;;
   --name) RUNNER_NAME="$2"; shift 2;;
@@ -157,13 +162,52 @@ discard_current_vm(){
 trap 'discard_current_vm; trap - EXIT; exit 143' INT TERM
 trap discard_current_vm EXIT
 
-# Coarse "is there macOS work waiting?" gate: count queued Build-and-Test runs.
-# Precise cloud-leg targeting is the watcher's job; here we only avoid booting a
-# VM when the queue is plainly empty. 0 on any gh failure (treat as "no work").
-queued_bat_work(){
-  gh api "repos/$REPO/actions/runs?status=queued&per_page=30" \
-    --jq '[.workflow_runs[] | select(.name == "Build and Test")] | length' \
-    2>/dev/null || echo 0
+# Coarse "is there macOS work waiting?" gate: count queued runs for the
+# configured workflow. Precise cloud-leg targeting is the watcher's job; here
+# we only avoid booting a VM when the queue is plainly empty. 0 on any gh
+# failure (treat as "no work").
+queued_work(){
+  if [ "$MATCH_LABELS" != "1" ]; then
+    gh api "repos/$REPO/actions/runs?status=queued&per_page=30" \
+      --jq "[.workflow_runs[] | select(.name == \"${WORKFLOW_NAME}\")] | length" \
+      2>/dev/null || echo 0
+    return
+  fi
+
+  local label_json count=0 run_id matches
+  label_json="$(LABELS="$LABELS" python3 -c 'import json, os; print(json.dumps([x.strip() for x in os.environ["LABELS"].split(",") if x.strip()]))')"
+  while IFS= read -r run_id; do
+    [ -n "$run_id" ] || continue
+    matches="$(
+      gh api "repos/$REPO/actions/runs/$run_id/jobs?filter=latest&per_page=100" \
+        --jq '.jobs[] | select(.status == "queued") | .labels | @json' 2>/dev/null |
+      LABEL_JSON="$label_json" python3 -c '
+import json, os, sys
+want = {s.lower() for s in json.loads(os.environ["LABEL_JSON"])}
+n = 0
+for line in sys.stdin:
+    try:
+        labels = {s.lower() for s in json.loads(line)}
+    except Exception:
+        continue
+    if want.issubset(labels):
+        n += 1
+print(n)
+'
+    )" || matches=0
+    count=$((count + ${matches:-0}))
+  done < <(
+    # Scan BOTH queued and in_progress runs: a workflow with an early
+    # GitHub-hosted resolver/classify job (Coverage, Release CLI) flips to
+    # `in_progress` before its self-hosted leg is even queued, so a
+    # queued-only run scan would never see the self-hosted job and the VM
+    # would never boot. Matches the tartci macOS provider's loop.
+    for st in queued in_progress; do
+      gh api "repos/$REPO/actions/runs?status=$st&per_page=30" \
+        --jq ".workflow_runs[] | select(.name == \"${WORKFLOW_NAME}\") | .id" 2>/dev/null || true
+    done
+  )
+  echo "$count"
 }
 
 # Reclaim a static runner name before reusing it: a JIT runner that finished
@@ -240,9 +284,9 @@ run_one(){ # $1=iteration index — log label only; the VM/runner name is now st
 
 i=0
 if [ "$LOOP" = 1 ]; then
-  note "ephemeral runner LOOP (Ctrl-C to stop); golden=$GOLDEN labels=$LABELS cap=$CAP"
+  note "ephemeral runner LOOP (Ctrl-C to stop); workflow=$WORKFLOW_NAME labels_match=$MATCH_LABELS golden=$GOLDEN labels=$LABELS cap=$CAP"
   while true; do
-    q="$(queued_bat_work)"; r="$(running_macos_vms)"
+    q="$(queued_work)"; r="$(running_macos_vms)"
     if [ "${q:-0}" -gt 0 ] && [ "${r:-0}" -lt "$CAP" ]; then
       i=$((i+1)); note "[$i] queued=$q running_vms=$r/$CAP → booting ephemeral VM"
       run_one "$i" || true
@@ -252,6 +296,6 @@ if [ "$LOOP" = 1 ]; then
     fi
   done
 else
-  note "ephemeral runner ONCE; golden=$GOLDEN labels=$LABELS"
+  note "ephemeral runner ONCE; workflow=$WORKFLOW_NAME golden=$GOLDEN labels=$LABELS"
   run_one 1
 fi

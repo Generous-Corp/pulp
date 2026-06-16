@@ -1,0 +1,37 @@
+{
+  "schema": "pulp-package-v1",
+  "id": "dev.pulp.fixtures.simple-plugin-template",
+  "name": "Simple Plugin Template",
+  "version": "0.1.0",
+  "license": "MIT",
+  "licenses": {
+    "code": "MIT"
+  },
+  "kind": ["template"],
+  "audience": ["developer", "agent"],
+  "description": "Tiny template-only fixture for package manifest validation.",
+  "requires": {
+    "pulp": ">=0.395.0",
+    "cpp": 20,
+    "platforms": ["macOS", "Windows", "Linux"]
+  },
+  "capabilities": ["template.plugin.basic"],
+  "exports": {
+    "templates": ["templates/basic-plugin"]
+  },
+  "dependencies": {
+    "pulp": ["pulp::format"],
+    "packages": []
+  },
+  "agent": {
+    "guidance": "AGENTS.md"
+  },
+  "authoring": {
+    "createdBy": "human",
+    "humanReviewed": true
+  },
+  "validation": {
+    "profiles": ["validation/template-smoke.json"],
+    "generatedProjectDiffs": ["validation/generated-project.diff"]
+  }
+}

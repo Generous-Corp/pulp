@@ -2,6 +2,7 @@
 #include <pulp/view/motion.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/plugin_view_host.hpp>
+#include <pulp/view/drag_drop.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
 #include <algorithm>
 #include <atomic>
@@ -1192,6 +1193,25 @@ void View::request_repaint() {
     } else if (plugin_view_host_) {
         plugin_view_host_->repaint();
     }
+}
+
+bool View::start_file_drag(const FileDragRequest& request) {
+    if (request.file_paths.empty()) return false;
+
+    // Reach the native view of whichever host this tree is attached to (host
+    // pointers propagate on add_child, same as request_repaint). The window
+    // host exposes its content NSView; the plugin view host's handle IS its
+    // NSView. No host attached, or a platform whose host has no native view →
+    // no drag.
+    void* native_view = nullptr;
+    if (window_host_) {
+        native_view = window_host_->native_content_view_handle();
+    } else if (plugin_view_host_) {
+        native_view = plugin_view_host_->native_handle();
+    }
+    if (!native_view) return false;
+
+    return begin_file_drag(native_view, request);
 }
 
 void View::simulate_hover(Point root_pos) {

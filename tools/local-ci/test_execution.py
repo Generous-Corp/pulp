@@ -4,38 +4,25 @@
 from __future__ import annotations
 
 from datetime import datetime
-import importlib.util
 import json
 import os
 import subprocess
-import sys
 import tempfile
 import threading
 import unittest
 from pathlib import Path
 
-
-MODULE_PATH = Path(__file__).with_name("execution.py")
-QUEUE_MODULE_PATH = Path(__file__).with_name("queue_orchestrator.py")
-MODULE_DIR = MODULE_PATH.parent
+from module_test_utils import load_local_ci_module
 
 
-def load_module(path: Path = MODULE_PATH, name: str = "pulp_local_ci_execution"):
-    sys.path.insert(0, str(MODULE_DIR))
-    try:
-        spec = importlib.util.spec_from_file_location(name, path)
-        module = importlib.util.module_from_spec(spec)
-        assert spec.loader is not None
-        spec.loader.exec_module(module)
-        return module
-    finally:
-        sys.path.pop(0)
+def load_module(filename: str = "execution.py", name: str = "pulp_local_ci_execution"):
+    return load_local_ci_module(filename, module_name=name, add_module_dir=True)
 
 
 class ExecutionTests(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load_module()
-        self.queue = load_module(QUEUE_MODULE_PATH, "pulp_local_ci_queue_orchestrator")
+        self.queue = load_module("queue_orchestrator.py", "pulp_local_ci_queue_orchestrator")
 
     def test_parse_progress_marker_detects_progress_contract(self) -> None:
         self.assertEqual(self.mod.parse_progress_marker("__PULP_PHASE__:build\n"), {"phase": "build"})
@@ -782,6 +769,10 @@ class ExecutionTests(unittest.TestCase):
         self.assertEqual(full_validation, "full")
         self.assertEqual(full_cmd[0], "env")
         self.assertIn("PULP_VALIDATE_REUSE_PREPARED=1", full_cmd)
+        self.assertTrue(
+            any(arg.startswith("PULP_VALIDATE_ROOT_OVERRIDE=") for arg in full_cmd),
+            msg=f"missing prepared root override in {full_cmd}",
+        )
         self.assertIn("./validate-build.sh", full_cmd)
         self.assertIn("--keep-worktree", full_cmd)
         self.assertIn("--exclude-regex", full_cmd)
@@ -1164,9 +1155,15 @@ class ExecutionTests(unittest.TestCase):
         self.assertEqual(validation, "full")
         self.assertEqual(cmd[:3], ["ssh", "ubuntu.example.com", "bash"])
         self.assertIn('export PATH="$HOME/.local/bin:$PATH"; set -euo pipefail', remote_cmd)
+        self.assertIn("bundle-sync", remote_cmd)
         self.assertIn("branch=feature/posix", remote_cmd)
         self.assertIn("sha=" + "c" * 40, remote_cmd)
+        self.assertIn('bundle="$HOME/$bundle_name"', remote_cmd)
+        self.assertIn('prepared_root="$HOME/.local/state/pulp/local-ci/prepared/ubuntu/full"', remote_cmd)
+        self.assertIn('PULP_VALIDATE_REUSE_PREPARED="$reuse_prepared"', remote_cmd)
+        self.assertIn('script="$PWD/$script_name"', remote_cmd)
         self.assertIn("git fetch \"$bundle\" \"$bundle_ref:refs/remotes/origin/$branch\"", remote_cmd)
+        self.assertIn('git show "$sha:validate-build.sh" > "$script"', remote_cmd)
         self.assertIn("PULP_EXPECT_SMOKE=0", remote_cmd)
         self.assertIn("bash \"$script\" --quiet --keep-worktree --ref \"$sha\"", remote_cmd)
         self.assertIn("--exclude-regex 'slow test'", remote_cmd)
@@ -1192,7 +1189,9 @@ class ExecutionTests(unittest.TestCase):
         remote_cmd = self.mod.shlex.split(cmd[-1])[0]
 
         self.assertEqual(validation, "smoke")
+        self.assertIn("script_name=.pulp-ci-validate-job702.sh", remote_cmd)
         self.assertIn("prepared/ubuntu/smoke", remote_cmd)
+        self.assertIn('git show "$sha:validate-build.sh" > "$script"', remote_cmd)
         self.assertIn("PULP_EXPECT_SMOKE=1", remote_cmd)
         self.assertIn("--smoke --no-tests", remote_cmd)
 

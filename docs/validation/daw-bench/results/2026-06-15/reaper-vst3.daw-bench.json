@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "host": "REAPER",
+  "format": "VST3",
+  "daw_version": "7.74/macOS-arm64",
+  "os": "macOS 26.5.1 arm64",
+  "date": "2026-06-15",
+  "script": "06-reaper-vst3.md",
+  "pulp_commit": "1e4348a16376",
+  "plugin_version": "1.0.0",
+  "result_markdown": "06-reaper-vst3.md",
+  "logs": ["logs/REAPER-VST3-20260615T044210Z-pid28846.log"],
+  "capabilities": [
+    {
+      "capability": "load",
+      "observed": "Confirmed",
+      "notes": "Log contains session_start (host=REAPER format=VST3), define_parameters, and prepare events."
+    },
+    {
+      "capability": "params",
+      "observed": "Confirmed",
+      "notes": "Log contains define_parameters and serialize_plugin_state events."
+    },
+    {
+      "capability": "sidechain",
+      "observed": "Confirmed",
+      "notes": "Log contains a sidechain_edge event."
+    },
+    {
+      "capability": "multi-bus",
+      "observed": "Confirmed",
+      "notes": "Log contains 8 bus_layout_proposal events (2 in / 1 out arrangements, including an unsupported layout accepted via the silence accommodation)."
+    }
+  ],
+  "quirks": [
+    {
+      "flag": "reaper_process_while_bypassed",
+      "row": "R1",
+      "observed": "Confirmed",
+      "notes": "Log contains repeated process_without_prepare events (83) after REAPER released the initial prepare state."
+    },
+    {
+      "flag": "reaper_permissive_bus_arrangements",
+      "row": "R3",
+      "observed": "Confirmed",
+      "notes": "Log contains repeated bus_layout_proposal events for PulpHostBench VST3."
+    },
+    {
+      "flag": "reaper_vst3_gesture_ordering",
+      "row": "#15",
+      "observed": "Not Triggered",
+      "notes": "No process_is_playing_edge in this headless scripted smoke; REAPER ran without an active playback device, so no real transport-playing edge was produced. The 2026-06-12 manual run confirmed this flag."
+    },
+    {
+      "flag": "reaper_keyboard_passthrough",
+      "row": "R2",
+      "observed": "Not Triggered",
+      "notes": "Keyboard routing is not exercised by the scripted smoke."
+    },
+    {
+      "flag": "reaper_anticipative_fx_buffer_variability",
+      "row": "R4",
+      "observed": "Not Triggered",
+      "notes": "No process_buffer_overrun or process_sample_rate_drift event was observed in this run."
+    },
+    {
+      "flag": "reaper_midsession_setstate",
+      "row": "R6",
+      "observed": "Not Triggered",
+      "notes": "No deserialize_plugin_state event was observed (the smoke does not reopen a saved session)."
+    }
+  ]
+}

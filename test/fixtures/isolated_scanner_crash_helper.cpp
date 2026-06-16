@@ -18,6 +18,27 @@
 #include <string>
 #include <thread>
 
+#ifdef _WIN32
+#include <windows.h>
+
+// On Windows an unhandled access violation is normally intercepted by
+// Windows Error Reporting / a registered post-mortem debugger, which can
+// hold the faulting process alive long enough that the parent scanner's
+// timeout fires first — the worker is then misclassified as Timeout instead
+// of Crash (the failure this helper exists to exercise). Suppress that
+// machinery and install a top-level filter that terminates immediately with
+// the exception code, so the AV surfaces as a fast, non-zero "crash" exit.
+static LONG WINAPI terminate_on_unhandled(EXCEPTION_POINTERS* info) {
+    TerminateProcess(GetCurrentProcess(), info->ExceptionRecord->ExceptionCode);
+    return EXCEPTION_EXECUTE_HANDLER;  // unreachable
+}
+
+static void arm_fast_fail_crash() {
+    SetErrorMode(SEM_NOGPFAULTERRORBOX | SEM_FAILCRITICALERRORS);
+    SetUnhandledExceptionFilter(terminate_on_unhandled);
+}
+#endif
+
 int main(int argc, char** argv) {
     // Allow either `helper <mode>` (test for worker contract) or
     // `helper <bundle> <mode>` (matches real-worker signature where
@@ -30,6 +51,9 @@ int main(int argc, char** argv) {
     }
 
     if (mode == "crash") {
+#ifdef _WIN32
+        arm_fast_fail_crash();
+#endif
         // Volatile to defeat the optimizer collapsing this away.
         volatile int* p = nullptr;
         *p = 42;  // boom

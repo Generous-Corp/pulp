@@ -26,6 +26,7 @@ REPORT_DIR="${BUILD_DIR}/coverage"
 JOBS=$(command -v nproc >/dev/null 2>&1 && nproc || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 TESTS_REGEX=""
 EXTRA_CMAKE_ARGS=()
+EXTRA_CTEST_ARGS=()
 
 # Canonical source-filter regex used by llvm-cov and by the
 # LCOV→Cobertura converter. Matches paths we explicitly DO NOT want in
@@ -66,6 +67,15 @@ if [[ -n "${PULP_COVERAGE_CMAKE_ARGS:-}" ]]; then
     # Linux lane) belong in the workflow, not hard-coded here. Split on
     # shell words so simple space-delimited CMake args pass through.
     read -r -a EXTRA_CMAKE_ARGS <<< "${PULP_COVERAGE_CMAKE_ARGS}"
+fi
+if [[ -n "${PULP_COVERAGE_CTEST_ARGS:-}" ]]; then
+    # Optional coverage-only CTest arguments. Keep policy in the workflow and
+    # let this script provide the shared execution/reporting mechanics.
+    # NOTE: this is whitespace-tokenized only (no shell quoting) — fine for
+    # simple flags like `-LE validation`, but a value needing an embedded space
+    # (e.g. -LE 'validation|slow gpu') will split wrong. If that's ever needed,
+    # switch this to a NUL/newline-delimited or JSON transport.
+    read -r -a EXTRA_CTEST_ARGS <<< "${PULP_COVERAGE_CTEST_ARGS}"
 fi
 
 # Require Clang — llvm-cov reads Clang-specific .profdata format.
@@ -142,8 +152,13 @@ cmake --build "${BUILD_DIR}" -j"${JOBS}"
 
 echo "=== Running tests with LLVM_PROFILE_FILE ==="
 mkdir -p "${PROFRAW_DIR}"
+find "${PROFRAW_DIR}" -name '*.profraw' -type f -delete
 cd "${BUILD_DIR}"
-export LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%p-%m.profraw"
+# Use one merge-enabled profile per instrumented binary. The full suite runs
+# thousands of one-test Catch2 processes; per-PID profiles are noisy, can hit
+# shell argv limits during cleanup, and are vulnerable to PID reuse over a long
+# coverage run.
+export LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%m.profraw"
 
 # #317 Codex P2: track test-suite outcome without aborting the
 # coverage report. A broken test run should still upload its
@@ -152,9 +167,9 @@ export LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%p-%m.profraw"
 # silently swallowing test failures hid real regressions.
 CTEST_RC=0
 if [[ -n "${TESTS_REGEX}" ]]; then
-    ctest -R "${TESTS_REGEX}" --output-on-failure --repeat until-pass:2 || CTEST_RC=$?
+    ctest -R "${TESTS_REGEX}" "${EXTRA_CTEST_ARGS[@]}" --output-on-failure --repeat until-pass:2 || CTEST_RC=$?
 else
-    ctest --output-on-failure --repeat until-pass:2 || CTEST_RC=$?
+    ctest "${EXTRA_CTEST_ARGS[@]}" --output-on-failure --repeat until-pass:2 || CTEST_RC=$?
 fi
 if [[ "${CTEST_RC}" -ne 0 ]]; then
     echo "=== ctest failed with exit ${CTEST_RC} — coverage report WILL be generated from partial profile data, then the script will exit with that code. ==="
@@ -300,16 +315,57 @@ if [[ ${#BINARIES[@]} -eq 0 ]]; then
     exit 1
 fi
 
+# A full build probes 1000+ `-object` entries. Passing them inline overflows
+# the Windows command-line length limit (CreateProcess ~32 KB) — llvm-cov dies
+# with "Argument list too long", filters out every source file, and no
+# Cobertura XML is produced (the os-windows coverage leg's failure mode). Feed
+# the object list through an LLVM response file (`@file`, expanded by every LLVM
+# tool's CommandLine parser) so the OS arg-length limit never applies — on any
+# platform. One token per line; the probed paths never contain spaces.
+OBJ_RSP="${REPORT_DIR}/llvm-cov-objects.rsp"
+# Final existence filter while materializing the response file. An -object can
+# vanish between the pre-flight probe above and this point — the observed
+# Windows case is a late-cleaned test-fixture executable (e.g.
+# `test/pulp-cli-run-fixture.exe`) that is still present when the probe loads it
+# but gone by report time. llvm-cov hard-fails the ENTIRE run on a single
+# missing -object ("failed to load coverage: '…': no such file or directory"),
+# so one disappearing fixture would blackhole the whole os-windows leg. Drop any
+# that are no longer present instead.
+: > "${OBJ_RSP}"
+KEPT_OBJECTS=0
+VANISHED_OBJECTS=0
+prev=""
+for tok in "${BINARIES[@]}"; do
+    if [[ "${prev}" == "-object" ]]; then
+        if [[ -f "${tok}" ]]; then
+            printf -- '-object\n%s\n' "${tok}" >> "${OBJ_RSP}"
+            KEPT_OBJECTS=$((KEPT_OBJECTS + 1))
+        else
+            VANISHED_OBJECTS=$((VANISHED_OBJECTS + 1))
+            echo "  ✗ dropping object that vanished after pre-flight: ${tok}" >&2
+        fi
+    fi
+    prev="${tok}"
+done
+if [[ "${VANISHED_OBJECTS}" -gt 0 ]]; then
+    echo "=== Dropped ${VANISHED_OBJECTS} object(s) that vanished after the pre-flight probe ==="
+fi
+if [[ "${KEPT_OBJECTS}" -eq 0 ]]; then
+    echo "run_coverage.sh: existence filter left zero -object entries" >&2
+    exit 1
+fi
+echo "=== Wrote ${KEPT_OBJECTS} -object tokens to a response file (avoids Windows ARG_MAX) ==="
+
 echo "=== llvm-cov report (top-level summary) ==="
 llvm-cov report \
-    "${BINARIES[@]}" \
+    "@${OBJ_RSP}" \
     -instr-profile="${PROFDATA}" \
     -ignore-filename-regex="${COVERAGE_IGNORE_REGEX}" \
     | tee "${REPORT_DIR}/summary.txt"
 
 echo "=== llvm-cov show (HTML drilldown) ==="
 llvm-cov show \
-    "${BINARIES[@]}" \
+    "@${OBJ_RSP}" \
     -instr-profile="${PROFDATA}" \
     -ignore-filename-regex="${COVERAGE_IGNORE_REGEX}" \
     -format=html \
@@ -349,7 +405,7 @@ fi
 
 echo "=== llvm-cov export → LCOV ==="
 llvm-cov export --format=lcov \
-    "${BINARIES[@]}" \
+    "@${OBJ_RSP}" \
     -instr-profile="${PROFDATA}" \
     -ignore-filename-regex="${COVERAGE_IGNORE_REGEX}" \
     > "${RAW_LCOV_FILE}"

@@ -13,6 +13,8 @@
 
 namespace pulp::state {
 
+struct ContentCapabilityManifest;
+
 /// Metadata for a single preset file.
 struct PresetInfo {
     std::string name;                  ///< Display name (filename without extension)
@@ -84,6 +86,25 @@ public:
     /// Get user presets only.
     std::vector<PresetInfo> user_presets() const;
 
+    /// Get installed content-pack presets matching this plugin's content
+    /// capabilities. These are read-only expansion/factory presets.
+    std::vector<PresetInfo> content_presets() const;
+
+    /// Opt into installed content-pack discovery for this plugin id.
+    void set_content_plugin_id(std::string plugin_id);
+
+    /// Limit installed content packs to matching capabilities such as
+    /// `content.presets.v1`.
+    void set_content_capabilities(std::vector<std::string> capabilities);
+
+    /// Override the content data root. Intended for tests and explicit
+    /// sandboxing; normal plugins use the platform user-data root.
+    void set_content_data_root(std::filesystem::path data_root);
+
+    /// Opt into content discovery from a parsed `pulp.plugin-runtime.v1`
+    /// manifest embedded in the plugin/app bundle.
+    void set_content_manifest(const ContentCapabilityManifest& manifest);
+
     /// Rescan preset directories (call after external changes).
     void refresh();
 
@@ -127,6 +148,10 @@ private:
     std::string plugin_name_;
     std::filesystem::path user_dir_;
     std::filesystem::path factory_dir_;
+    std::filesystem::path content_data_root_;
+    std::string content_plugin_id_;
+    std::vector<std::string> content_capabilities_;
+    std::vector<std::string> content_kinds_;
 
     std::string current_name_;
     bool unsaved_changes_ = false;
