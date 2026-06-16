@@ -135,6 +135,22 @@ bool dispatch_drop(View& root, DragSession& session, const DropData& data,
     return false;
 }
 
+// ── Process-global outbound drag backend (hostless platforms; Android) ───────
+
+namespace {
+FileDragBackend g_file_drag_backend;
+}  // namespace
+
+FileDragBackend set_file_drag_backend(FileDragBackend backend) {
+    FileDragBackend prev = std::move(g_file_drag_backend);
+    g_file_drag_backend = std::move(backend);
+    return prev;
+}
+
+bool invoke_file_drag_backend(const FileDragRequest& request) {
+    return g_file_drag_backend ? g_file_drag_backend(request) : false;
+}
+
 #if !defined(__APPLE__)
 // Outbound file drag is macOS-only today — the NSDraggingSession backend lives
 // in platform/mac/drag_drop_mac.mm, which is compiled only on macOS. On every

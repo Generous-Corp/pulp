@@ -1,6 +1,7 @@
 package com.pulp.render
 
 import android.app.Activity
+import android.content.ClipData
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -10,6 +11,7 @@ import android.view.MotionEvent
 import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import androidx.core.content.FileProvider
 import java.io.File
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -230,6 +232,48 @@ class PulpSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
         } catch (e: Exception) {
             null
         }
+    }
+
+    // ── Drag-and-Drop (outbound) ──────────────────────────────────────────
+
+    // Invoked from C++ (JNI up-call via the registered global file-drag backend)
+    // when View::start_file_drag runs on hostless Android. Builds a ClipData of
+    // FileProvider content URIs and runs startDragAndDrop. Returns true if the
+    // drag started (off the UI thread it posts and reports optimistic success).
+    @Suppress("unused")  // called via JNI
+    fun startFileDrag(paths: Array<String>): Boolean {
+        if (paths.isEmpty()) return false
+        val clip = buildDragClip(paths) ?: return false
+        val flags = DRAG_FLAG_GLOBAL or DRAG_FLAG_GLOBAL_URI_READ
+        return if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+            startDragAndDrop(clip, DragShadowBuilder(this), null, flags)
+        } else {
+            post { startDragAndDrop(clip, DragShadowBuilder(this), null, flags) }
+            true
+        }
+    }
+
+    private fun buildDragClip(paths: Array<String>): ClipData? {
+        val authority = "${context.packageName}.fileprovider"
+        var clip: ClipData? = null
+        for (p in paths) {
+            val file = File(p)
+            if (!file.exists()) continue
+            val uri: Uri = try {
+                FileProvider.getUriForFile(context, authority, file)
+            } catch (e: IllegalArgumentException) {
+                // File lives outside the FileProvider's configured roots.
+                Log.w(TAG, "Not shareable via FileProvider: $p (${e.message})")
+                continue
+            }
+            val item = ClipData.Item(uri)
+            if (clip == null) {
+                clip = ClipData(file.name, arrayOf("application/octet-stream"), item)
+            } else {
+                clip.addItem(item)
+            }
+        }
+        return clip
     }
 
     // ── Native Methods ────────────────────────────────────────────────────

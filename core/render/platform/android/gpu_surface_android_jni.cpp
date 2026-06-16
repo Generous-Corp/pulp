@@ -13,6 +13,7 @@
 #include "gpu_surface_android_internal.hpp"
 
 #include <pulp/platform/android/jni.hpp>
+#include <pulp/view/drag_drop.hpp>
 #include <android/native_window.h>
 #include <android/native_window_jni.h>
 #include <android/log.h>
@@ -24,6 +25,47 @@
 #define PULP_LOGI(...) __android_log_print(ANDROID_LOG_INFO, PULP_LOG_TAG, __VA_ARGS__)
 #define PULP_LOGW(...) __android_log_print(ANDROID_LOG_WARN, PULP_LOG_TAG, __VA_ARGS__)
 #define PULP_LOGE(...) __android_log_print(ANDROID_LOG_ERROR, PULP_LOG_TAG, __VA_ARGS__)
+
+// ── Outbound file drag (host-less Android: JNI up-call into Kotlin) ──────────
+//
+// Android's view tree is the bare global g_root_view with no Window/PluginView
+// host, so View::start_file_drag() falls back to the process-global drag
+// backend (drag_drop.hpp). We register a backend that up-calls the cached
+// PulpSurfaceView's `startFileDrag(String[]): Boolean`, which builds a ClipData
+// of FileProvider content URIs and runs View.startDragAndDrop. The surface ref
+// is cached at surfaceCreated; the up-call runs on whichever thread initiated
+// the drag (touch dispatch → UI thread), and Kotlin re-posts to the UI thread.
+
+namespace {
+
+pulp::android::GlobalRef g_surface_view;  // PulpSurfaceView
+
+bool android_start_file_drag(const std::vector<std::string>& paths) {
+    if (paths.empty() || !g_surface_view) return false;
+    JNIEnv* env = pulp::android::get_env();
+    jobject view = g_surface_view.get();
+    jclass cls = env->GetObjectClass(view);
+    jmethodID mid = env->GetMethodID(cls, "startFileDrag", "([Ljava/lang/String;)Z");
+    env->DeleteLocalRef(cls);
+    if (!mid) { env->ExceptionClear(); return false; }
+
+    jclass str_cls = env->FindClass("java/lang/String");
+    jobjectArray arr =
+        env->NewObjectArray(static_cast<jsize>(paths.size()), str_cls, nullptr);
+    for (jsize i = 0; i < static_cast<jsize>(paths.size()); ++i) {
+        jstring s = env->NewStringUTF(paths[static_cast<size_t>(i)].c_str());
+        env->SetObjectArrayElement(arr, i, s);
+        env->DeleteLocalRef(s);
+    }
+    env->DeleteLocalRef(str_cls);
+
+    const jboolean ok = env->CallBooleanMethod(view, mid, arr);
+    env->DeleteLocalRef(arr);
+    if (env->ExceptionCheck()) { env->ExceptionDescribe(); env->ExceptionClear(); return false; }
+    return ok == JNI_TRUE;
+}
+
+}  // namespace
 
 // ── JNI Exports ───────────────────────────────────────────────────────────
 
@@ -47,6 +89,13 @@ JNIEXPORT void JNICALL
 Java_com_pulp_render_PulpSurfaceView_nativeOnSurfaceCreated(
     JNIEnv* env, jobject thiz, jobject surface) {
     try {
+        // Cache the PulpSurfaceView for outbound-drag up-calls and register the
+        // process-global drag backend View::start_file_drag falls back to.
+        g_surface_view = pulp::android::GlobalRef(env, thiz);
+        pulp::view::set_file_drag_backend([](const pulp::view::FileDragRequest& req) {
+            return android_start_file_drag(req.file_paths);
+        });
+
         ANativeWindow* window = ANativeWindow_fromSurface(env, surface);
         if (window) {
             pulp::render::android_surface_created(window);

@@ -390,11 +390,19 @@ use). The wiring mirrors touch:
   `g_display_density`, like touch) and calls `dispatch_drop(*g_root_view, …)`.
 
 **Architecture note:** Android has NO `WindowHost`/`PluginViewHost` — the tree
-is the global `g_root_view` in `gpu_surface_android.cpp`. So inbound routes
-directly through `g_root_view`. **Outbound** (`View::start_file_drag` →
-`startDragAndDrop`) is NOT wired: it needs a host-owned drag path / a JNI
-up-call to Kotlin, since `View::start_file_drag` requires a host pointer that
-Android's bare `g_root_view` doesn't have. (Follow-up.)
+is the global `g_root_view` in `gpu_surface_android.cpp`, so `View::start_file_drag`
+has no host pointer to dispatch through. **Outbound** is therefore wired via a
+**process-global drag backend**: `drag_drop.hpp`'s `set_file_drag_backend()` /
+`invoke_file_drag_backend()` — `View::start_file_drag` calls the registered
+backend as a last resort when no host handles the drag. The Android JNI bridge
+caches the `PulpSurfaceView` (`GlobalRef`) at `surfaceCreated` and registers a
+backend that **up-calls** Kotlin `startFileDrag(String[]): Boolean` (via
+`get_env()` + `CallBooleanMethod`), which builds a `ClipData` of **FileProvider**
+`content://` URIs (`${applicationId}.fileprovider`, declared in the manifest +
+`res/xml/file_paths.xml`) and runs `View.startDragAndDrop` with
+`DRAG_FLAG_GLOBAL | DRAG_FLAG_GLOBAL_URI_READ`. Call `start_file_drag` from a
+touch handler (UI thread); off-thread it posts and reports optimistic success.
+JNI namespace is `pulp::android` (NOT `pulp::platform::android`).
 
 Emulator gesture test: drag a file from the Files app onto the Pulp window;
 watch `adb logcat -s Pulp` for the drop. The headless test suites can't exercise
