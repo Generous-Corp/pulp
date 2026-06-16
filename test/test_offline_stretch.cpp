@@ -10,8 +10,7 @@
 //     shift doubles/halves frequency, repitch sinc passband);
 //   - the process() contract rejects misuse (unprepared, wrong out length,
 //     ratio/pitch outside the prepared range).
-// Quality is not yet compared against a reference (Rubber Band R3) — that
-// benchmark is deferred (needs `rubberband` on PATH).
+// Output quality is not yet compared against an external reference renderer.
 
 #include <catch2/catch_test_macros.hpp>
 

@@ -39,7 +39,16 @@ pulp --version     # same, POSIX-shortcut form
 ```cmake
 find_package(Pulp CONFIG REQUIRED)
 message(STATUS "Building against Pulp ${Pulp_VERSION}")
+
+# Link the subsystems you need. Installed targets are namespaced `Pulp::`
+# (capital P) — e.g. Pulp::signal, Pulp::audio, Pulp::view — even though the
+# in-tree aliases are lowercase `pulp::`.
+target_link_libraries(my_plugin PRIVATE Pulp::signal Pulp::audio)
 ```
+Use a plain `find_package(Pulp CONFIG REQUIRED)` — **`COMPONENTS` are not
+supported** (`PulpConfig.cmake` defines no per-component machinery, so
+`find_package(Pulp COMPONENTS signal)` fails). Request the package once and link
+whichever `Pulp::<subsystem>` targets you need.
 
 ### From the Claude Code plugin
 The `/status` and `/doctor` slash-commands both print the SDK version in their output, alongside the Claude plugin version. A dedicated `/version` command prints both on a single line:

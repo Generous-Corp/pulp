@@ -64,6 +64,10 @@ FftBackend resolve_fft_backend(FftBackend hint = FftBackend::auto_) noexcept;
 /// load libraries, allocate plans, or throw, so run them off the audio thread.
 /// forward(), inverse(), size(), and backend() are allocation-free after
 /// construction when callers provide a valid buffer.
+///
+/// Thread safety: distinct instances are independent (all plan/buffer state is
+/// per-instance). Constructing instances concurrently on multiple threads is
+/// safe — the fftw3 backend's non-reentrant planner is internally serialized.
 class MultiBackendFft {
 public:
     /// Construct for a given power-of-2 size. backend=auto_ picks via

@@ -123,6 +123,16 @@ static const Bindings& get() noexcept {
     return bindings;
 }
 
+// FFTW's planner is NOT reentrant — only fftwf_execute() is thread-safe; all
+// plan creation must be serialized (FFTW docs, "Thread safety"). Guard the
+// plan_dft_1d() calls so two MultiBackendFft instances constructed on different
+// threads don't race inside libfftw3f's global planner state. The hot path
+// (execute on a per-instance buffer) needs no lock.
+inline std::mutex& planner_mutex() {
+    static std::mutex m;
+    return m;
+}
+
 }  // namespace fftw3_dyn
 
 // ── Intel MKL dynamic binding ──────────────────────────────────────────────
@@ -326,9 +336,13 @@ struct MultiBackendFft::Impl {
         if (!fftw_buf) throw std::runtime_error("MultiBackendFft: fftwf_malloc failed");
         using cx = fftw3_dyn::fftwf_complex;
         cx* buf = static_cast<cx*>(fftw_buf);
-        // FFTW_FORWARD=-1, FFTW_BACKWARD=+1, FFTW_ESTIMATE=1<<6
-        fftw_plan_fwd = b.plan_dft_1d(size, buf, buf, -1, 1u << 6);
-        fftw_plan_bwd = b.plan_dft_1d(size, buf, buf,  1, 1u << 6);
+        // FFTW_FORWARD=-1, FFTW_BACKWARD=+1, FFTW_ESTIMATE=1<<6.
+        // Serialize plan creation — FFTW's planner is not reentrant.
+        {
+            std::lock_guard<std::mutex> lock(fftw3_dyn::planner_mutex());
+            fftw_plan_fwd = b.plan_dft_1d(size, buf, buf, -1, 1u << 6);
+            fftw_plan_bwd = b.plan_dft_1d(size, buf, buf,  1, 1u << 6);
+        }
         if (!fftw_plan_fwd || !fftw_plan_bwd)
             throw std::runtime_error("MultiBackendFft: fftwf_plan_dft_1d failed");
     }

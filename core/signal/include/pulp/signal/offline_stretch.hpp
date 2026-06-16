@@ -13,10 +13,10 @@
 ///
 /// Design + task plan: planning/Sampler-Offline-Stretch-Build-Plan.md.
 ///
-/// Tiering: this orchestration is the v1 BASELINE. The realtime core is
-/// hop-quantized and causal; if measured quality fails the Rubber Band R3 bar
-/// (see the metrics harness), the plan opens a native offline path. The
-/// realtime core's validated numbers are realtime results — offline re-proves.
+/// Tiering: this orchestration is the v1 BASELINE built on the (hop-quantized,
+/// causal) realtime core; a native offline-quality path can follow if measured
+/// quality warrants it. The realtime core's validated numbers are realtime
+/// results — offline re-proves.
 ///
 /// ─────────────────────────────────────────────────────────────────────────
 /// STATUS: tempo stretch, duration-preserving pitch shift, the three formant
@@ -26,9 +26,8 @@
 /// with an EXACT output length guaranteed at every ratio. DEFERRED/GATED:
 /// StretchTransientMode::verbatim_relocate (the `transient_mode` field is
 /// currently inert — only phase-reset transient handling is active) and the
-/// native offline-quality path. Quality has NOT yet been benchmarked against
-/// the Rubber Band R3 bar — the metrics harness needs `rubberband` on PATH
-/// (see examples/offline-stretch/PHASE3-DISPOSITION.md).
+/// native offline-quality path. Output quality has not yet been benchmarked
+/// against an external reference renderer.
 /// ─────────────────────────────────────────────────────────────────────────
 
 #include <pulp/signal/interpolator.hpp>
@@ -67,7 +66,9 @@ struct OfflineStretchOptions {
                                     ///< follows time_ratio, spectral path skipped
     bool route_noise_stn = true;    ///< route noise/residual through NoiseMorpher
     StretchTransientMode transient_mode = StretchTransientMode::phase_reset;
-    int quality = 2;                ///< 0 draft (fast preview) .. 2 best
+    int quality = 2;                ///< <=0 draft (fast Hann-OLA preview); >=1 best
+                                    ///< (full phase vocoder). Only these two
+                                    ///< tiers exist today — 1 and 2 are identical.
 
     // Range MUST be sized up-front (plan §3.6 / §5): the underlying
     // RealtimePitchTimeProcessor clamps to [1/max, max] and allocates from these
@@ -155,7 +156,13 @@ public:
     /// Render the whole input into the caller-allocated output. `out_frames`
     /// MUST equal offline_stretch_output_frames(in_frames, opts.time_ratio).
     /// Deinterleaved float32; `in`/`out` are arrays of `channels()` pointers.
-    /// Returns false (with *err set, if provided) on a contract violation.
+    /// Returns false (with *err set, if provided) on a CONTRACT VIOLATION — all
+    /// such failures are caller/programmer errors (lifecycle, null pointers,
+    /// bounds, ratio/pitch outside the prepared range, wrong out_frames) and are
+    /// detected before any output is written. NOTE: this is NOT allocation-free
+    /// — process()/prepare() allocate scratch and may throw std::bad_alloc on a
+    /// very long input or extreme ratio; that is the only runtime failure mode
+    /// and it propagates as an exception rather than the bool/err contract.
     bool process(const float* const* in, long in_frames,
                  float* const* out, long out_frames,
                  const OfflineStretchOptions& opts,
