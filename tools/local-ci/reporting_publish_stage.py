@@ -55,6 +55,9 @@ def stage_desktop_publish_report(
     if not manifests:
         raise ValueError("Desktop publish requires at least one run manifest.")
 
+    # Lazy import avoids a reporting_publish <-> reporting_video import cycle.
+    from reporting_video import _proof_notes_from_manifest
+
     publish_dir = output_dir.expanduser() if output_dir else create_desktop_publish_bundle_fn(config)
     publish_dir.mkdir(parents=True, exist_ok=True)
     assets_root = publish_dir / "assets"
@@ -103,6 +106,8 @@ def stage_desktop_publish_report(
                 "completed_at": manifest.get("completed_at"),
                 "bundle_dir": manifest.get("artifacts", {}).get("bundle_dir"),
                 "interaction_mode": (manifest.get("interaction") or {}).get("mode"),
+                "video_proof_composition": manifest.get("video_proof_composition"),
+                "video_proof_notes": _proof_notes_from_manifest(manifest),
                 "artifacts": copied_artifacts,
             }
         )
@@ -122,6 +127,17 @@ def stage_desktop_publish_report(
     index_html = publish_dir / "index.html"
     atomic_write_text_fn(index_html, desktop_publish_index_html(index_payload))
 
+    # Video-proof review loop: emit the human review markdown + the
+    # review-package.json that `desktop review-issue` consumes. Imported lazily
+    # to avoid a reporting_publish <-> reporting_video import cycle.
+    from reporting_review import desktop_review_issue_body, desktop_review_package
+
+    review_markdown = publish_dir / "review.md"
+    atomic_write_text_fn(review_markdown, desktop_review_issue_body(index_payload, publish_dir=publish_dir))
+    review_package = publish_dir / "review-package.json"
+    review_package_payload = desktop_review_package(index_payload, publish_dir=publish_dir)
+    atomic_write_text_fn(review_package, json.dumps(review_package_payload, indent=2) + "\n")
+
     report = {
         "generated_at": index_payload["generated_at"],
         "label": index_payload["label"],
@@ -130,6 +146,8 @@ def stage_desktop_publish_report(
         "output_dir": str(publish_dir),
         "index_html": str(index_html),
         "index_json": str(index_json),
+        "review_markdown": str(review_markdown),
+        "review_package": str(review_package),
         "run_count": len(published_runs),
         "runs": published_runs,
     }
