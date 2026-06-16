@@ -272,6 +272,52 @@ def add_desktop_subcommands(sub: argparse._SubParsersAction) -> None:
     p_desktop_video_matrix.add_argument("--design-parity-native-image", help="Native screenshot/render to check and substitute into the one-shot design-proof command.")
     p_desktop_video_matrix.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 
+    p_desktop_video = desktop_sub.add_parser("video", help="Run a desktop action with video proof recording enabled")
+    p_desktop_video.add_argument("target", help="Desktop target name")
+    p_desktop_video.add_argument("--command", dest="launch_command", help="Quoted command to launch in the GUI session")
+    p_desktop_video.add_argument("--bundle-id", help="macOS bundle identifier to launch via `open -b`")
+    p_desktop_video.add_argument(
+        "--recipe",
+        choices=[
+            "audio-inspector-demo",
+            "standalone-interaction",
+            "reaper-plugin-editor",
+            "inspector-workflow",
+            "component-zoom",
+            "design-parity",
+        ],
+        help="Apply a named high-value proof recipe before running the desktop video action.",
+    )
+    p_desktop_video.add_argument("--plugin", help="Plugin name for plugin-host proof recipes")
+    p_desktop_video.add_argument("--plugin-format", choices=["vst3", "auv2", "auv3", "clap", "lv2"], help="Plugin format for plugin-host proof recipes")
+    p_desktop_video.add_argument("--host-app", help="Host application label for plugin-host proof recipes")
+    p_desktop_video.add_argument("--component-id", help="Component/view id for component-zoom proof recipes")
+    p_desktop_video.add_argument("--label", help="Optional artifact label")
+    p_desktop_video.add_argument("--output", help="Optional screenshot output path")
+    p_desktop_video.add_argument(
+        "--action",
+        choices=["smoke", "click", "inspect"],
+        default="click",
+        help="Desktop action to record (default: click)",
+    )
+    p_desktop_video.add_argument(
+        "--capture-ui-snapshot",
+        action="store_true",
+        help="Request a Pulp-owned ViewInspector dump when supported by the action/target.",
+    )
+    p_desktop_video.add_argument("--click", help="Click at content-relative X,Y after launch")
+    p_desktop_video.add_argument("--click-view-id", help="Click the center of the first visible ViewInspector node with this id")
+    p_desktop_video.add_argument("--click-view-type", help="Click the center of the first visible ViewInspector node with this type")
+    p_desktop_video.add_argument("--click-view-text", help="Click the center of the first visible ViewInspector node with this text")
+    p_desktop_video.add_argument("--click-view-label", help="Click the center of the first visible ViewInspector node with this label")
+    p_desktop_video.add_argument("--pulp-app-automation", action="store_true", help="Prefer a Pulp-owned in-app automation path when supported")
+    p_desktop_video.add_argument("--capture-before", action="store_true", help="Capture a before screenshot for smoke actions with interaction")
+    p_desktop_video.add_argument("--settle-secs", type=float, default=0.5, help="Seconds to wait after an interaction before the final screenshot (default: 0.5)")
+    p_desktop_video.add_argument("--timeout", type=float, default=15.0, help="Wait timeout in seconds (default: 15)")
+    p_desktop_video.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+    add_desktop_video_args(p_desktop_video)
+    add_desktop_source_args(p_desktop_video)
+
     p_desktop_inspect = desktop_sub.add_parser("inspect", help="Launch an app and capture screenshot + available UI state")
     p_desktop_inspect.add_argument("target", help="Desktop target name (for example: mac)")
     p_desktop_inspect.add_argument("--command", dest="launch_command", help="Quoted command to launch in the GUI session")

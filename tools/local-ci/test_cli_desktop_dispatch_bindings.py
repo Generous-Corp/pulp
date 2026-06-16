@@ -57,6 +57,7 @@ class CliDesktopDispatchBindingsTests(unittest.TestCase):
             "cmd_desktop_design_diff",
             "cmd_desktop_design_proof",
             "cmd_desktop_video_matrix",
+            "cmd_desktop_video",
         ]:
             bindings[name] = object()
         return bindings, captured
@@ -83,7 +84,7 @@ class CliDesktopDispatchBindingsTests(unittest.TestCase):
         self.assertIs(captured["desktop_args"], args)
         self.assertEqual(
             set(captured["desktop_commands"]),
-            {"install", "doctor", "status", "config", "recent", "proof", "publish", "cleanup", "smoke", "click", "inspect", "verdict", "review-issue", "review-status", "review-watch", "compose-video", "design-diff", "design-proof", "video-matrix"},
+            {"install", "doctor", "status", "config", "recent", "proof", "publish", "cleanup", "smoke", "click", "inspect", "verdict", "review-issue", "review-status", "review-watch", "compose-video", "design-diff", "design-proof", "video-matrix", "video"},
         )
         self.assertIs(captured["desktop_commands"]["install"], bindings["cmd_desktop_install"])
         self.assertIs(captured["desktop_commands"]["inspect"], bindings["cmd_desktop_inspect"])

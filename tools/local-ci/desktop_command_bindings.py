@@ -36,6 +36,11 @@ from desktop_video_compose_command_bindings import (
     cmd_desktop_design_proof,
     install_desktop_video_compose_command_helpers,
 )
+from desktop_video_action_command_bindings import (
+    DESKTOP_VIDEO_ACTION_COMMAND_EXPORTS,
+    cmd_desktop_video,
+    install_desktop_video_action_command_helpers,
+)
 from desktop_video_info_command_bindings import (
     DESKTOP_VIDEO_INFO_COMMAND_EXPORTS,
     cmd_desktop_video_matrix,
@@ -56,6 +61,7 @@ DESKTOP_COMMAND_EXPORTS = (
     *DESKTOP_REVIEW_COMMAND_EXPORTS,
     *DESKTOP_VIDEO_COMPOSE_COMMAND_EXPORTS,
     *DESKTOP_VIDEO_INFO_COMMAND_EXPORTS,
+    *DESKTOP_VIDEO_ACTION_COMMAND_EXPORTS,
 )
 
 
@@ -69,6 +75,7 @@ def install_desktop_command_helpers(
     review_names = tuple(name for name in names if name in DESKTOP_REVIEW_COMMAND_EXPORTS)
     compose_names = tuple(name for name in names if name in DESKTOP_VIDEO_COMPOSE_COMMAND_EXPORTS)
     info_names = tuple(name for name in names if name in DESKTOP_VIDEO_INFO_COMMAND_EXPORTS)
+    video_action_names = tuple(name for name in names if name in DESKTOP_VIDEO_ACTION_COMMAND_EXPORTS)
     known_names = set(DESKTOP_COMMAND_EXPORTS)
     unknown_names = tuple(name for name in names if name not in known_names)
 
@@ -78,5 +85,6 @@ def install_desktop_command_helpers(
     install_desktop_review_command_helpers(bindings, review_names)
     install_desktop_video_compose_command_helpers(bindings, compose_names)
     install_desktop_video_info_command_helpers(bindings, info_names)
+    install_desktop_video_action_command_helpers(bindings, video_action_names)
     if unknown_names:
         install_local_helpers(bindings, globals(), unknown_names)

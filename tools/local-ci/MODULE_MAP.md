@@ -15,6 +15,8 @@ and the matching contract tests in the same change.
 | `cli_parser_video.py` | Video-proof argument group (--record-video / --video-* / --capture-bundle-id) for the desktop smoke/click subcommands. | Argument dispatch, command execution, or video recording logic. |
 | `desktop_review_command_bindings.py` | Facade binding for the desktop review verdict command. | Verdict logic, recording, or report staging. |
 | `desktop_review_commands_cli.py` | Desktop video-proof review verdict command (record approved/needs-work on a run manifest, optional gh comment/close). | Recording, compose, report staging, or command dispatch. |
+| `desktop_video_action_command_bindings.py` | Facade binding for the desktop `video` action command (+ --run-in-terminal re-entry). | Recipe logic or action orchestration. |
+| `desktop_video_action_commands_cli.py` | Desktop `video` action command: apply a named proof recipe + force record/compose, then dispatch to smoke/click/inspect. | Smoke/click/inspect orchestration internals or command dispatch. |
 | `desktop_video_compose_command_bindings.py` | Facade bindings for the desktop compose-video/design commands. | Compose/diff logic or command dispatch. |
 | `desktop_video_compose_commands_cli.py` | Desktop compose-video / design-diff / design-proof commands (Remotion recompose + design-parity still proofs). | Recording, review verdicts, or command dispatch. |
 | `desktop_video_info_command_bindings.py` | Facade bindings for the desktop video info commands (video-matrix). | Matrix data/readiness logic or dispatch. |
