@@ -390,6 +390,31 @@ TEST_CASE("XDND file_uri_to_path handles file:// forms", "[view][dnd][xdnd]") {
     CHECK(file_uri_to_path("file://host").empty());
 }
 
+TEST_CASE("XDND path_to_file_uri encodes + round-trips (drag source)",
+          "[view][dnd][xdnd]") {
+    using namespace pulp::view::xdnd;
+    // file:// prefix + percent-escape of reserved/space bytes; '/' + unreserved kept.
+    CHECK(path_to_file_uri("/home/u/a.wav") == "file:///home/u/a.wav");
+    CHECK(path_to_file_uri("/home/u/my preset (1).json") ==
+          "file:///home/u/my%20preset%20%281%29.json");
+    CHECK(path_to_file_uri("").empty());
+
+    // Round-trips byte-exact with the sink decoder (spaces, parens, UTF-8 bytes).
+    for (const std::string& p : {std::string("/a/b.wav"),
+                                 std::string("/x/My File (2).aiff"),
+                                 std::string("/\xCF\x80/\xC3\xA9.wav")}) {  // /π/é.wav
+        CHECK(file_uri_to_path(path_to_file_uri(p)) == p);
+    }
+
+    // build_uri_list joins CRLF + skips empties; parse_uri_list recovers the set.
+    const std::string payload = build_uri_list({"/a/x.wav", "", "/b/y.aiff"});
+    CHECK(payload == "file:///a/x.wav\r\nfile:///b/y.aiff\r\n");
+    const auto back = parse_uri_list(payload);
+    REQUIRE(back.size() == 2);
+    CHECK(back[0] == "/a/x.wav");
+    CHECK(back[1] == "/b/y.aiff");
+}
+
 TEST_CASE("XDND parse_uri_list splits CRLF and skips comments/blanks/non-file",
           "[view][dnd][xdnd]") {
     using namespace pulp::view::xdnd;

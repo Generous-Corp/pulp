@@ -48,9 +48,11 @@
 #include <X11/Xresource.h>  // Xrm* — Xft.dpi lookup for HiDPI scale (L9)
 
 #include <atomic>
+#include <chrono>   // XDND source drag deadline
 #include <cstdint>
 #include <cstdlib>  // atof, malloc/free
 #include <cstring>
+#include <unistd.h>  // usleep (XDND source poll loop)
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -281,6 +283,14 @@ public:
         return {(pt.x - tx) / sx, (pt.y - ty) / sy};
     }
 
+    // Outbound file drag (XDND source). The host owns its child window, so it can
+    // be a standard XDND source — the X11 analogue of the macOS NSDraggingSession
+    // and the Windows OLE DoDragDrop producers. Self-contained: grabs the pointer
+    // and runs the XDND handshake until the drop completes or cancels.
+    bool start_file_drag(const FileDragRequest& request) override {
+        return run_xdnd_source(request);
+    }
+
 private:
     View& root_;
     Size size_;        // LOGICAL (DPI-independent) size; layout coordinate space
@@ -385,6 +395,157 @@ private:
 
     // Intern the XDND atoms and advertise the child window as an XDND-aware
     // target (version 5). Safe no-op without display_/child_.
+    // ── Outbound XDND drag source ────────────────────────────────────────────
+    // Read a window's advertised XdndAware protocol version (0 if not aware).
+    int xdnd_aware_version(Window w) const {
+        Atom type = None; int fmt = 0; unsigned long n = 0, after = 0;
+        unsigned char* data = nullptr;
+        int ver = 0;
+        if (XGetWindowProperty(display_, w, xa_XdndAware_, 0, 1, False, AnyPropertyType,
+                               &type, &fmt, &n, &after, &data) == Success) {
+            if (data && type != None && fmt == 32 && n >= 1)
+                ver = static_cast<int>(reinterpret_cast<long*>(data)[0]);
+        }
+        if (data) XFree(data);
+        return ver;
+    }
+
+    // The XdndAware target under a root-space pointer: descend to the deepest
+    // window, then walk up until an XdndAware ancestor is found.
+    Window xdnd_target_at(int rx, int ry, int* version_out) const {
+        Window root = RootWindow(display_, screen_);
+        Window cur = root, child = root;
+        int wx = 0, wy = 0;
+        while (child != None &&
+               XTranslateCoordinates(display_, root, cur, rx, ry, &wx, &wy, &child)) {
+            if (child == None) break;
+            cur = child;
+        }
+        for (Window w = cur; w != None;) {
+            int ver = xdnd_aware_version(w);
+            if (ver > 0) { if (version_out) *version_out = ver < 5 ? ver : 5; return w; }
+            Window r = 0, parent = 0, *kids = nullptr; unsigned int nk = 0;
+            if (!XQueryTree(display_, w, &r, &parent, &kids, &nk)) break;
+            if (kids) XFree(kids);
+            if (w == r || parent == None) break;
+            w = parent;
+        }
+        return None;
+    }
+
+    void xdnd_send(Window target, Atom message, long d0, long d1, long d2,
+                   long d3, long d4) const {
+        XEvent e{};
+        e.xclient.type = ClientMessage;
+        e.xclient.display = display_;
+        e.xclient.window = target;
+        e.xclient.message_type = message;
+        e.xclient.format = 32;
+        e.xclient.data.l[0] = d0; e.xclient.data.l[1] = d1; e.xclient.data.l[2] = d2;
+        e.xclient.data.l[3] = d3; e.xclient.data.l[4] = d4;
+        XSendEvent(display_, target, False, NoEventMask, &e);
+    }
+
+    // Serve our text/uri-list payload to a target that requested the selection.
+    void xdnd_serve_selection(const XSelectionRequestEvent& req,
+                              const std::string& uri_list) const {
+        XEvent note{};
+        note.xselection.type = SelectionNotify;
+        note.xselection.display = req.display;
+        note.xselection.requestor = req.requestor;
+        note.xselection.selection = req.selection;
+        note.xselection.target = req.target;
+        note.xselection.time = req.time;
+        note.xselection.property = None;
+        if (req.target == xa_text_uri_list_ && req.property != None) {
+            XChangeProperty(display_, req.requestor, req.property, req.target, 8,
+                            PropModeReplace,
+                            reinterpret_cast<const unsigned char*>(uri_list.data()),
+                            static_cast<int>(uri_list.size()));
+            note.xselection.property = req.property;
+        }
+        XSendEvent(display_, req.requestor, False, NoEventMask, &note);
+    }
+
+    // Run the XDND source handshake until the drop commits or cancels. Bounded by
+    // a wall-clock deadline so a buggy/unresponsive target can never wedge the
+    // grabbed pointer. Returns true if a target accepted the drop.
+    bool run_xdnd_source(const FileDragRequest& request) {
+        if (!display_ || !child_ || !request.valid()) return false;
+        const std::string uri_list = xdnd::build_uri_list(request.file_paths);
+        if (uri_list.empty()) return false;
+
+        XSetSelectionOwner(display_, xa_XdndSelection_, child_, CurrentTime);
+        if (XGetSelectionOwner(display_, xa_XdndSelection_) != child_) return false;
+
+        if (XGrabPointer(display_, child_, True,
+                         ButtonReleaseMask | PointerMotionMask,
+                         GrabModeAsync, GrabModeAsync, None, None,
+                         CurrentTime) != GrabSuccess) {
+            return false;
+        }
+
+        Window target = None;
+        int target_ver = 0;
+        bool accepted = false;  // last XdndStatus accept bit
+        bool dropped = false;   // we have sent XdndDrop
+        bool result = false;
+        const auto deadline =
+            std::chrono::steady_clock::now() + std::chrono::seconds(60);
+
+        XEvent ev;
+        while (std::chrono::steady_clock::now() < deadline) {
+            if (XPending(display_) == 0) { usleep(2000); continue; }
+            XNextEvent(display_, &ev);
+
+            if (ev.type == MotionNotify && !dropped) {
+                const int rx = ev.xmotion.x_root, ry = ev.xmotion.y_root;
+                int ver = 0;
+                const Window t = xdnd_target_at(rx, ry, &ver);
+                if (t != target) {
+                    if (target != None)
+                        xdnd_send(target, xa_XdndLeave_,
+                                  static_cast<long>(child_), 0, 0, 0, 0);
+                    target = t; target_ver = ver; accepted = false;
+                    if (target != None)
+                        xdnd_send(target, xa_XdndEnter_, static_cast<long>(child_),
+                                  (static_cast<long>(target_ver) << 24),
+                                  static_cast<long>(xa_text_uri_list_), 0, 0);
+                }
+                if (target != None)
+                    xdnd_send(target, xa_XdndPosition_, static_cast<long>(child_), 0,
+                              (rx << 16) | (ry & 0xFFFF),
+                              static_cast<long>(ev.xmotion.time),
+                              static_cast<long>(xa_XdndActionCopy_));
+            } else if (ev.type == ClientMessage) {
+                if (ev.xclient.message_type == xa_XdndStatus_) {
+                    accepted = (ev.xclient.data.l[1] & 1L) != 0;
+                } else if (ev.xclient.message_type == xa_XdndFinished_) {
+                    result = dropped && (ev.xclient.data.l[1] & 1L) != 0;
+                    break;
+                }
+            } else if (ev.type == SelectionRequest) {
+                if (ev.xselectionrequest.selection == xa_XdndSelection_)
+                    xdnd_serve_selection(ev.xselectionrequest, uri_list);
+            } else if (ev.type == ButtonRelease && ev.xbutton.button == Button1) {
+                if (target != None && accepted) {
+                    xdnd_send(target, xa_XdndDrop_, static_cast<long>(child_), 0,
+                              static_cast<long>(ev.xbutton.time), 0, 0);
+                    dropped = true;  // keep pumping for the serve + XdndFinished
+                } else {
+                    if (target != None)
+                        xdnd_send(target, xa_XdndLeave_,
+                                  static_cast<long>(child_), 0, 0, 0, 0);
+                    break;
+                }
+            }
+        }
+
+        XUngrabPointer(display_, CurrentTime);
+        XFlush(display_);
+        return result;
+    }
+
     void init_xdnd() {
         if (!display_ || !child_) return;
         xa_XdndAware_ = XInternAtom(display_, "XdndAware", False);
