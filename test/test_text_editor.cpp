@@ -306,8 +306,11 @@ TEST_CASE("TextEditor shift navigation extends and clears selection",
     REQUIRE(editor.has_selection());
     REQUIRE(editor.selected_text() == "ab");
 
+    // Plain Left over a forward selection [0,2] collapses to the START boundary
+    // (0) without moving an extra char — the standard text-field behavior
+    // move_caret() documents. (Right would collapse to the END boundary, 2.)
     REQUIRE(editor.on_key_event(key_event(KeyCode::left)));
-    REQUIRE(editor.caret_pos() == 1);
+    REQUIRE(editor.caret_pos() == 0);
     REQUIRE_FALSE(editor.has_selection());
 }
 
