@@ -235,6 +235,18 @@ on a busy `main` is *designed* to be superseded while queued — the
 supersession-immune **scheduled** run, cron `17 */8 * * *`, is the one that
 produces the green full-matrix upload that clears the coverage-stale watchdog.)
 
+The **os-windows** coverage leg is `continue-on-error` (best-effort). The
+instrumented MSVC build + ~9k instrumented tests + `llvm-cov` over 1000+
+objects exceeds the 150-min job cap on GitHub-hosted `windows-latest` (it is
+~1h on Linux/macOS), so it times out — and the staleness watchdog keys off a
+*successful run*, not per-OS Codecov flags, so a single hard Windows failure
+would otherwise keep a healthy full run red forever. Don't "fix" a red Windows
+coverage leg by chasing the timeout unless you've first made it genuinely fit
+the cap (a dedicated runner or a lighter report) — non-fatal is intentional.
+Real os-windows *correctness* bugs are still worth fixing (the ARG_MAX
+response-file + vanished-`-object` existence-filter fixes in `run_coverage.sh`
+were real); only the runtime/timeout is accepted as best-effort.
+
 ### Advisory cross-lane workflow: `macos-cross-advisory.yml`
 
 `.github/workflows/macos-cross-advisory.yml` is a path-scoped advisory

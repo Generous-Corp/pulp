@@ -363,6 +363,17 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.matrix-config.outputs.matrix) }}
     runs-on: ${{ fromJSON(matrix.runs_on_json) }}
+    # Windows coverage is best-effort and MUST NOT block a successful main
+    # coverage run. The instrumented MSVC build + ~9k instrumented tests +
+    # llvm-cov over 1000+ objects genuinely exceeds the 150-min cap on
+    # GitHub-hosted windows-latest (it is ~1h on Linux/macOS), so the
+    # os-windows leg times out. Its C++ coverage adds little unique signal
+    # over the Linux/macOS legs (same sources via llvm-cov), and the
+    # coverage-staleness watchdog (#3947) keys off a *successful run*, not
+    # per-OS flags — so letting Windows fail non-fatally lets a healthy
+    # full run conclude success and upload the other OS flags. If Windows
+    # ever fits the cap (faster runner / lighter report) it still uploads.
+    continue-on-error: ${{ matrix.os == 'windows' }}
     steps:
       - uses: actions/checkout@v5
         with:
