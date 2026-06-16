@@ -4,6 +4,7 @@
 #include <pulp/view/musical_typing.hpp>
 
 #include <functional>
+#include <span>
 
 namespace pulp::view {
 
@@ -36,13 +37,32 @@ public:
     // a host can set the base note / velocity or feed keys from its own path.
     MusicalTypingController& controller() { return controller_; }
 
-    // Computer-keyboard playing while focused: a w s e d f t g y h u j k o l p
-    // play notes, z/x shift the octave. Returns true when consumed.
+    // ── Host-driven integration (e.g. PulpTempoSampler) ──────────────────────
+    // Light keys from an EXTERNAL held-note set — host MIDI, an app-wide QWERTY
+    // monitor, clicks elsewhere. Absolute MIDI notes; a note lights every key
+    // that maps to it (the typing key at the current octave AND the piano key).
+    // This REPLACES the lit display, so the component never relies solely on its
+    // own key/mouse state. Pass an empty span to clear. Use when a host drives
+    // notes (typically with set_input_capture(false)).
+    void set_active_notes(std::span<const int> midi_notes);
+
+    // When false, the component does NOT capture computer-keyboard events, so a
+    // host that already feeds QWERTY (app-wide monitor → its own controller)
+    // won't double-trigger. It still plays + lights on CLICK and from
+    // set_active_notes. Default true (standalone playable). Also drops keyboard
+    // focusability so it won't steal first-responder key events.
+    void set_input_capture(bool capture);
+    bool input_capture() const { return input_capture_; }
+
+    // Computer-keyboard playing while focused (when input_capture is on):
+    // a w s e d f t g y h u j k o l p play notes, z/x shift the octave. Returns
+    // true when consumed (false when capture is off, so the host keeps the key).
     bool on_key_event(const KeyEvent& event) override;
     void on_focus_changed(bool gained) override;  // release held notes on blur
 
 private:
     MusicalTypingController controller_;
+    bool input_capture_ = true;   // false = host feeds QWERTY; we don't capture keys
     // Typing element (note == relative semitone 0..15) for a QWERTY semitone, or -1.
     int typing_element_for_semitone(int semitone) const;
     // MIDI note an element maps to: typing keys = base+octave+semitone, piano

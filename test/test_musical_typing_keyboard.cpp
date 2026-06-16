@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <span>
 #include <vector>
 
 using namespace pulp::view;
@@ -197,4 +198,43 @@ TEST_CASE("MusicalTypingKeyboard: focus loss releases held notes + clears highli
     kb.on_focus_changed(false);
     REQUIRE(offs == std::vector<int>{48});                  // note released
     REQUIRE(kb.element_value(typing_idx(kb, 0)) == 0.0f);   // highlight cleared
+}
+
+TEST_CASE("MusicalTypingKeyboard: set_input_capture(false) stops QWERTY capture",
+          "[view][musical-typing][wiring]") {
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    std::vector<int> ons;
+    kb.on_note_on = [&](int n, float) { ons.push_back(n); };
+    kb.set_input_capture(false);
+    REQUIRE_FALSE(kb.input_capture());
+
+    KeyEvent a{}; a.key = KeyCode::a; a.is_down = true;
+    REQUIRE_FALSE(kb.on_key_event(a));   // not consumed → host keeps the key
+    REQUIRE(ons.empty());                // no double-trigger from our path
+
+    kb.on_mouse_down({191.0f, 300.0f});  // clicks still play
+    kb.on_mouse_up({191.0f, 300.0f});
+    REQUIRE(ons == std::vector<int>{48});
+}
+
+TEST_CASE("MusicalTypingKeyboard: set_active_notes lights from an external held set",
+          "[view][musical-typing][wiring]") {
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    auto piano_idx = [&](int midi) {
+        for (int i = 0; i < kb.element_count(); ++i)
+            if (kb.element_note(i) == midi) return i;
+        return -1;
+    };
+    // C2 (48) held externally → lights BOTH the typing 'a' (semitone 0 @ base C2)
+    // and the piano C2 key (absolute 48); C4 (72) → the piano C4 key.
+    const int held[] = {48, 72};
+    kb.set_active_notes(held);
+    REQUIRE(kb.element_value(typing_idx(kb, 0)) == 1.0f);
+    REQUIRE(kb.element_value(piano_idx(48)) == 1.0f);
+    REQUIRE(kb.element_value(piano_idx(72)) == 1.0f);
+    REQUIRE(kb.element_value(piano_idx(60)) == 0.0f);   // not held → dark
+
+    kb.set_active_notes(std::span<const int>{});         // clear
+    REQUIRE(kb.element_value(typing_idx(kb, 0)) == 0.0f);
+    REQUIRE(kb.element_value(piano_idx(48)) == 0.0f);
 }

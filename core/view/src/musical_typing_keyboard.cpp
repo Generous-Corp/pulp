@@ -117,7 +117,27 @@ MusicalTypingKeyboard::MusicalTypingKeyboard()
     };
 }
 
+void MusicalTypingKeyboard::set_active_notes(std::span<const int> midi_notes) {
+    // Light every momentary key whose absolute MIDI is in the external held set;
+    // clear the rest. Host-driven display — independent of our own key/mouse state.
+    for (int i = 0; i < element_count(); ++i) {
+        if (element_kind(i) != DesignFrameElement::Kind::momentary) continue;
+        const int midi = midi_for_element(i);
+        bool held = false;
+        for (int n : midi_notes) if (n == midi) { held = true; break; }
+        set_element_value(i, held ? 1.0f : 0.0f);
+    }
+    request_repaint();
+}
+
+void MusicalTypingKeyboard::set_input_capture(bool capture) {
+    input_capture_ = capture;
+    set_focusable(capture);          // don't steal first-responder when host feeds keys
+    if (!capture) controller_.all_notes_off();  // stop our own QWERTY-held notes
+}
+
 bool MusicalTypingKeyboard::on_key_event(const KeyEvent& event) {
+    if (!input_capture_) return false;  // host feeds QWERTY itself — don't double-trigger
     const bool consumed = controller_.handle_key(event);  // QWERTY→note + z/x octave
     // Light the matching typing key (by relative semitone, octave-independent).
     const int semi = MusicalTypingController::semitone_for_key(event.key);
