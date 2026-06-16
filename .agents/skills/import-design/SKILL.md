@@ -814,7 +814,15 @@ a rect (x,y,w,h) + `options`/`selected_index`/`placeholder`.
   (typing row above a piano keyboard): their keys overlap in x but not in y, so
   without it a typing black key was mistaken for a notch on a piano key and drew
   a tall bar across the inter-keyboard gap. The notch bottom is clamped to the
-  key. Both are in `DesignFrameView` (`core/view/src/design_frame_view.cpp`).
+  key. (3) **match the design's own pressed paint, don't invent a flat color** —
+  the lit fill replicates the figma's pressed-key gradient (in the MTK export,
+  `paint36`: accent teal 26%→100% opacity, key top→bottom), set per key over its
+  own height via `set_fill_gradient_linear`. A flat fill reads as a uniform slab
+  and the key letter vanishes; the gradient's lighter top lets the letter show.
+  Footgun that caused exactly this: `canvas::Color` channels are **float 0–1**
+  (`Color::rgba8` takes 0–255 and converts) — assigning `c.a = 120` clamps to
+  fully opaque, NOT 47%. Build alpha variants with `Color::rgba(r, g, b, 0.26f)`.
+  All in `DesignFrameView` (`core/view/src/design_frame_view.cpp`).
 
 The `pulp-design-import-standalone` example has demo flags to capture overlay states
 headlessly: `--focus-search` (focus ring) and `--open-dropdown=SUBSTR` (opens
