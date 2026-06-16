@@ -19,10 +19,16 @@
 /// realtime core's validated numbers are realtime results — offline re-proves.
 ///
 /// ─────────────────────────────────────────────────────────────────────────
-/// PHASE 0 SCAFFOLD: this header defines the stable public API and compiles as
-/// an explicit, length-correct pass-through (exact at time_ratio == 1, pitch 0).
-/// The spectral orchestration and the offline refinements land in Phase 1+.
-/// Each unimplemented path is marked `// TODO(phaseN)`.
+/// STATUS: tempo stretch, duration-preserving pitch shift, the three formant
+/// modes (follow / preserve / shift-independent), repitch-linked "vinyl",
+/// independent R+S (single-pass follow / 2-pass preserve), the draft OLA
+/// preview (quality 0), and STN noise routing are all implemented and tested,
+/// with an EXACT output length guaranteed at every ratio. DEFERRED/GATED:
+/// StretchTransientMode::verbatim_relocate (the `transient_mode` field is
+/// currently inert — only phase-reset transient handling is active) and the
+/// native offline-quality path. Quality has NOT yet been benchmarked against
+/// the Rubber Band R3 bar — the metrics harness needs `rubberband` on PATH
+/// (see examples/offline-stretch/PHASE3-DISPOSITION.md).
 /// ─────────────────────────────────────────────────────────────────────────
 
 #include <pulp/signal/interpolator.hpp>

@@ -1,12 +1,17 @@
-// OfflineStretch — Phase 0 scaffold tests.
+// OfflineStretch tests.
 //
-// At this phase the engine is a length-correct pass-through: exact identity at
-// time_ratio == 1, and an honest placeholder (copy + zero-pad) otherwise. These
-// tests pin the parts of the contract that must hold for EVERY future phase:
+// The engine is fully implemented (tempo stretch, pitch shift, formant modes,
+// repitch-linked, independent R+S, draft OLA, STN routing). These tests pin the
+// contract that must hold for every ratio:
 //   - exact output length = round(in_frames * time_ratio) (loop grid-lock);
 //   - R=1, pitch 0 is a perfect null against the input;
-//   - the process() contract rejects misuse (unprepared, wrong out length).
-// The stretch-quality assertions arrive with the real engine in Phase 1+.
+//   - determinism (two runs are byte-identical, including the STN path);
+//   - stretch-quality bands (zero-crossing-rate: tempo preserves pitch, pitch
+//     shift doubles/halves frequency, repitch sinc passband);
+//   - the process() contract rejects misuse (unprepared, wrong out length,
+//     ratio/pitch outside the prepared range).
+// Quality is not yet compared against a reference (Rubber Band R3) — that
+// benchmark is deferred (needs `rubberband` on PATH).
 
 #include <catch2/catch_test_macros.hpp>
 
