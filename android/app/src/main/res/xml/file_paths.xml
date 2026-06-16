@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Paths the androidx FileProvider may hand out as content:// URIs for outbound
+     native file drag (View.startDragAndDrop). cache-path/dropped mirrors where
+     inbound drops are staged; files-path covers app-private documents. -->
+<paths>
+    <cache-path name="dropped" path="dropped/" />
+    <cache-path name="cache" path="." />
+    <files-path name="files" path="." />
+</paths>

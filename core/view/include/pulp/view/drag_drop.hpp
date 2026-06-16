@@ -121,6 +121,20 @@ struct FileDragRequest {
 // register_drop_target (macOS today; a no-op stub elsewhere).
 bool begin_file_drag(void* native_view, const FileDragRequest& request);
 
+// Process-global outbound file-drag backend for HOSTLESS platforms — Android,
+// where the view tree is a bare root View with no WindowHost / PluginViewHost,
+// so neither the host virtual nor the native-handle free function above can be
+// reached. The platform layer registers a backend (Android: a JNI up-call into
+// Kotlin's View.startDragAndDrop); View::start_file_drag() invokes it only as a
+// last resort, after the host paths decline. Returns the previous backend so a
+// caller can restore it. Pass nullptr to clear.
+using FileDragBackend = std::function<bool(const FileDragRequest&)>;
+FileDragBackend set_file_drag_backend(FileDragBackend backend);
+
+// Invoke the registered global backend; returns false if none is set. Used by
+// View::start_file_drag() — application code should call View::start_file_drag.
+bool invoke_file_drag_backend(const FileDragRequest& request);
+
 // ── Drag-drop registration ──────────────────────────────────────────────────
 
 // Register/unregister a native view for file drops (macOS NSView). See the

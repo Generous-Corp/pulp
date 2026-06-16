@@ -1218,9 +1218,13 @@ bool View::start_file_drag(const FileDragRequest& request) {
     } else if (plugin_view_host_) {
         native_view = plugin_view_host_->native_handle();
     }
-    if (!native_view) return false;
+    if (native_view) return begin_file_drag(native_view, request);
 
-    return begin_file_drag(native_view, request);
+    // Hostless platforms (Android: the tree is a bare root View with no
+    // Window/PluginViewHost) fall back to the process-global drag backend the
+    // platform layer registered — Android's is a JNI up-call into Kotlin's
+    // View.startDragAndDrop. Returns false when no backend is registered.
+    return invoke_file_drag_backend(request);
 }
 
 void View::simulate_hover(Point root_pos) {

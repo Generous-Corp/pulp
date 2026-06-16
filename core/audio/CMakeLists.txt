@@ -41,6 +41,8 @@ target_sources(pulp-audio PRIVATE
     src/onset_detector.cpp
     src/planar_audio_ring_buffer.cpp
     src/published_sample_store.cpp
+    src/streaming_sample_source.cpp
+    src/zone_layer_select.cpp
     src/realtime_sample_recorder.cpp
     src/rolling_audio_capture_buffer.cpp
     src/sample_asset_io.cpp

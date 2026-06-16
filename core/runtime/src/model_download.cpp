@@ -289,9 +289,16 @@ DownloadResult download_file(const DownloadRequest& req, const DownloadProgressF
         httplib::Client cli(cur_shp);
         cli.set_follow_location(false);
         cli.set_keep_alive(true);
+        // Always bound the CONNECT phase (see download_connect_timeout_seconds):
+        // without it, a blocked/unreachable endpoint falls back to cpp-httplib's
+        // 300s default and the download wedges at 0% with an unresponsive Cancel
+        // (the cancel/progress callback only runs once body streaming starts).
+        // The read/stream phase stays governed by timeout_seconds so large bodies
+        // aren't capped by this connect bound.
+        cli.set_connection_timeout(
+            download_connect_timeout_seconds(req.timeout_seconds), 0);
         if (req.timeout_seconds > 0) {
             cli.set_read_timeout(req.timeout_seconds, 0);
-            cli.set_connection_timeout(req.timeout_seconds, 0);
         }
         if (const char* ca = system_ca_path()) cli.set_ca_cert_path(ca);
         cli.enable_server_certificate_verification(true);

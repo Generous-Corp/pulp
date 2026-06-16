@@ -18,7 +18,9 @@ Run:  python3 tools/ci/test_tart_runner.py
 """
 from __future__ import annotations
 
+import json
 import os
+import re
 import subprocess
 import unittest
 from pathlib import Path
@@ -158,7 +160,13 @@ class ReuseSafetyTests(unittest.TestCase):
     def test_queue_gate_can_require_matching_labels(self) -> None:
         self.assertIn('MATCH_LABELS="${PULP_RUNNER_QUEUE_MATCH_LABELS:-0}"', self.body)
         self.assertIn("--queue-match-labels)", self.body)
-        self.assertIn("want.issubset(labels)", self.body)
+        # A VM that registers with `want` can serve a queued job iff the job's
+        # requested labels are a SUBSET of `want` (GitHub's matching rule —
+        # the runner may advertise extra labels). The reverse, want ⊆ labels,
+        # silently fails to boot whenever the runner carries an extra label
+        # (e.g. a per-host pulp-build-vm-secondary), so guard against it.
+        self.assertIn("labels.issubset(want)", self.body)
+        self.assertNotIn("want.issubset(labels)", self.body)
 
     def test_label_matched_queue_scan_covers_in_progress_runs(self) -> None:
         # A workflow whose early GitHub-hosted resolver/classify job runs first
@@ -168,6 +176,63 @@ class ReuseSafetyTests(unittest.TestCase):
         # statuses (mirrors the tartci macOS provider's loop).
         self.assertIn("for st in queued in_progress;", self.body)
         self.assertIn("runs?status=$st", self.body)
+
+
+class LabelMatchSemanticsTests(unittest.TestCase):
+    """Behavioral test of the --queue-match-labels matcher.
+
+    The label-matched queue gate embeds an inline Python snippet that decides,
+    for each queued job, whether THIS VM (which registers with the runner's
+    advertised labels) is allowed to serve it. We extract that exact snippet
+    from the script and run it so the assertion can't drift from the source,
+    and so an inverted subset check (the bug fixed alongside this test) is
+    caught by behavior, not just by grepping for a string.
+    """
+
+    def setUp(self) -> None:
+        body = SCRIPT.read_text(encoding="utf-8")
+        m = re.search(r"(import json, os, sys\nwant = \{.*?print\(n\)\n)",
+                      body, re.S)
+        self.assertIsNotNone(m, "label-match snippet not found in tart-runner.sh")
+        self.snippet = m.group(1)
+
+    def _count(self, runner_labels: list[str], jobs: list[list[str]]) -> int:
+        env = {**os.environ, "LABEL_JSON": json.dumps(runner_labels)}
+        stdin = "".join(json.dumps(j) + "\n" for j in jobs)
+        r = subprocess.run(["python3", "-c", self.snippet], input=stdin,
+                           capture_output=True, text=True, check=True, env=env)
+        return int(r.stdout.strip())
+
+    def test_extra_runner_label_still_matches_pool_label_job(self) -> None:
+        # The regression: a host that advertises the shared pool label PLUS a
+        # per-host label must still wake for a job requesting only the pool set.
+        runner = ["self-hosted", "macOS", "ARM64", "pulp-build",
+                  "pulp-build-vm", "pulp-build-vm-secondary"]
+        job = ["self-hosted", "macOS", "ARM64", "pulp-build", "pulp-build-vm"]
+        self.assertEqual(self._count(runner, [job]), 1)
+
+    def test_exact_match_counts(self) -> None:
+        labels = ["self-hosted", "macOS", "ARM64", "pulp-coverage-vm-macos"]
+        self.assertEqual(self._count(labels, [labels]), 1)
+
+    def test_job_needing_unavailable_label_does_not_match(self) -> None:
+        runner = ["self-hosted", "macOS", "ARM64", "pulp-coverage-vm-macos"]
+        job = ["self-hosted", "macOS", "ARM64", "pulp-build", "pulp-build-vm"]
+        self.assertEqual(self._count(runner, [job]), 0)
+
+    def test_match_is_case_insensitive(self) -> None:
+        runner = ["self-hosted", "macos", "arm64", "pulp-coverage-vm-macos"]
+        job = ["self-hosted", "macOS", "ARM64", "pulp-coverage-vm-macos"]
+        self.assertEqual(self._count(runner, [job]), 1)
+
+    def test_malformed_lines_are_skipped_not_counted(self) -> None:
+        runner = ["self-hosted", "macOS", "ARM64", "pulp-coverage-vm-macos"]
+        good = runner
+        env = {**os.environ, "LABEL_JSON": json.dumps(runner)}
+        stdin = "not json\n" + json.dumps(good) + "\n{ bad\n"
+        r = subprocess.run(["python3", "-c", self.snippet], input=stdin,
+                           capture_output=True, text=True, check=True, env=env)
+        self.assertEqual(int(r.stdout.strip()), 1)
 
 
 if __name__ == "__main__":

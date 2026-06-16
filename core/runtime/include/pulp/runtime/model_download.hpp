@@ -37,6 +37,23 @@ struct DownloadRequest {
     int timeout_seconds = 0;               ///< 0 ⇒ a sensible library default.
 };
 
+/// Connect-phase timeout (seconds) the downloader applies for a given request
+/// `timeout_seconds`. Always bounded (never 0), so an unreachable or blocked
+/// endpoint fails fast instead of hanging on the HTTP library's multi-minute
+/// connection-timeout default — the failure mode seen when a plug-in host
+/// sandboxes the audio-unit process's network (download appears stuck at 0%
+/// with an unresponsive Cancel, because the cancel/progress callback only runs
+/// once body streaming begins). The read/stream phase stays governed by
+/// `timeout_seconds` (0 ⇒ library default) so large bodies aren't capped here.
+inline int download_connect_timeout_seconds(int request_timeout_seconds) {
+    constexpr int kConnectTimeoutSeconds = 15;
+    return request_timeout_seconds > 0
+               ? (request_timeout_seconds < kConnectTimeoutSeconds
+                      ? request_timeout_seconds
+                      : kConnectTimeoutSeconds)
+               : kConnectTimeoutSeconds;
+}
+
 struct DownloadResult {
     bool ok = false;
     std::string error;

@@ -2069,6 +2069,14 @@ pulp_add_test_suite(pulp-test-audio LIBRARIES pulp::audio
 
 pulp_add_test_suite(pulp-test-system-volume LIBRARIES pulp::audio)
 
+# Streaming sample source: preload window + background-filled ring + RT-safe
+# sequential pull. Threaded case has an internal deadline; give headroom.
+pulp_add_test_suite(pulp-test-streaming-sample-source LIBRARIES pulp::audio
+    PROPERTIES TIMEOUT 60)
+
+# Multi-mic / velocity-layer / round-robin layered zone selection.
+pulp_add_test_suite(pulp-test-zone-layer-select LIBRARIES pulp::audio)
+
 # Excerpt window enumeration tests
 pulp_add_test_suite(pulp-test-audio-excerpt LIBRARIES pulp::audio)
 
