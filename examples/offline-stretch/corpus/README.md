@@ -61,9 +61,13 @@ never linked or vendored; see the clean-room ledger in
 ```bash
 # Optional but recommended — the R3 comparison lane:
 brew install rubberband            # provides the `rubberband` CLI
-# The discriminating metrics (attack sharpness, spectral flatness, crest) need
-# numpy; the harness still runs without it and reports those as "skipped".
-python3 -m venv .venv && .venv/bin/pip install numpy
+# Quality metrics use ESTABLISHED libraries (quality_battery.py): pyloudnorm
+# (ITU-R BS.1770 LUFS loudness-match gate), librosa (onset strength, HPSS
+# balance, spectral battery), essentia (inharmonicity, dynamic/spectral
+# complexity). Hand-rolled probes were retired after they gave wrong answers
+# (RMS-match hid a 4.4 LUFS gap; an envelope "attack" metric was fooled by
+# crest). Correctness checks (metrics.py: length/null/onset-timing) stay stdlib.
+python3 -m venv .venv && .venv/bin/pip install numpy librosa pyloudnorm soundfile essentia
 
 .venv/bin/python tools/capture_baseline.py \
   ../../build/examples/offline-stretch/stretchcli corpus/synthetic /tmp/baseline.json

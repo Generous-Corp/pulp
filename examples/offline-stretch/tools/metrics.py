@@ -181,88 +181,18 @@ def metrics(in_path, out_path, ratio):
         if ratios_db:
             result["pre_echo_db"] = round(sum(ratios_db) / len(ratios_db), 2)
 
-    if _np is None:
-        result["attack_sharpness"] = "skipped (no numpy)"
-        result["spectral_flatness"] = "skipped (no numpy)"
-        result["crest_db"] = "skipped (no numpy)"
-    else:
-        # Reference-free, artifact-specific probes (validated 2026-06-16 to
-        # discriminate Pulp from Rubber Band R3 on a real drum break). These are
-        # PRIMARY objective signals for stretch quality precisely because no
-        # length-aligned reference exists (PEAQ/ViSQOL are invalid for stretch).
-        a = _np.asarray(om, dtype=_np.float64)
-        result["attack_sharpness"] = round(_attack_sharpness(a, osr), 4)
-        result["spectral_flatness"] = round(_spectral_flatness(a), 4)
-        result["crest_db"] = round(_crest_db(a), 2)
-        # THE probe that captures the audible "robotic / time-stretchy" defect
-        # the magnitude metrics above are all blind to (validated 2026-06-16:
-        # Pulp 1.34 vs R3 1.10 vs source 1.23 on the drum break — the only metric
-        # that discriminated what the ear immediately hears). Phase artifact, so
-        # magnitude/envelope measures cannot see it.
-        result["phase_incoherence"] = round(_phase_incoherence(a), 4)
-    # TODO(track B): f0-track continuity (cents) on sustained tonal material.
+    # QUALITY metrics moved to quality_battery.py (established libraries:
+    # pyloudnorm/librosa/essentia). The previous hand-rolled probes here
+    # (attack-envelope "sharpness", spectral flatness, a custom phase-incoherence
+    # probe) gave WRONG conclusions on 2026-06-16 — RMS-matching hid a 4.4 LUFS
+    # gap, and the envelope "attack" metric was fooled by crest into calling
+    # smeared transients sharp (librosa onset-strength showed the opposite).
+    # This module now keeps only the STDLIB-deterministic CORRECTNESS checks
+    # above (length, identity-null, onset-timing, pre-echo) so CI needs no heavy
+    # deps; run quality_battery.py (dev venv) for the loudness-matched quality
+    # scoreboard.
 
     return result
-
-
-def _attack_sharpness(a, sr):
-    """Mean attack-envelope rise around detected onsets. Higher = crisper
-    transients; phase-vocoder smearing pulls it down. Reference-free."""
-    hop = max(1, int(sr * 0.002)); win = max(1, int(sr * 0.005))
-    env = _np.array([math.sqrt(float(_np.mean(a[i:i + win] ** 2)) + 1e-12)
-                     for i in range(0, len(a) - win, hop)])
-    if len(env) < 5:
-        return 0.0
-    flux = _np.diff(env); flux[flux < 0] = 0.0
-    thr = float(flux.mean() + 2.0 * flux.std())
-    ons = [i for i in range(1, len(flux) - 1)
-           if flux[i] > thr and flux[i] >= flux[i - 1] and flux[i] > flux[i + 1]]
-    rises = [float(env[o:o + 10].max() - env[max(0, o - 10):o].mean())
-             for o in ons if o > 10 and o + 10 < len(env)]
-    return float(_np.mean(rises)) if rises else 0.0
-
-
-def _spectral_flatness(a):
-    """Mean spectral flatness (geo/arith mean of power). Higher = more
-    broadband/noise texture preserved; phase vocoders tonalize noise and pull
-    it down ('noisy textures becoming synthetic'). Reference-free."""
-    NF = 2048; w = _np.hanning(NF); sf = []
-    for i in range(0, len(a) - NF, NF):
-        m = _np.abs(_np.fft.rfft(a[i:i + NF] * w)) ** 2 + 1e-12
-        sf.append(float(_np.exp(_np.mean(_np.log(m))) / _np.mean(m)))
-    return float(_np.mean(sf)) if sf else 0.0
-
-
-def _crest_db(a):
-    """Peak-to-RMS in dB. Far above the source = splice/click artifacts."""
-    peak = float(_np.max(_np.abs(a))) + 1e-9
-    r = math.sqrt(float(_np.mean(a ** 2)) + 1e-18)
-    return 20.0 * math.log10(peak / r)
-
-
-def _phase_incoherence(a, NF=1024, hop=256):
-    """Phase-vocoder 'phasiness' / robotic-timbre probe — the audible artifact
-    the magnitude metrics miss. A natural sinusoid has a STEADY frame-to-frame
-    phase advance, so the 2nd difference of unwrapped phase at a strong partial
-    is ~0; phase-vocoder smearing makes it erratic. Returns the magnitude-
-    weighted mean |2nd-diff of unwrapped phase| over energetic bins (higher =
-    more robotic). Reference-free."""
-    win = _np.hanning(NF)
-    X = _np.array([_np.fft.rfft(a[i:i + NF] * win)
-                   for i in range(0, len(a) - NF, hop)])
-    if X.shape[0] < 4:
-        return 0.0
-    mag = _np.abs(X)
-    floor = mag.mean() * 2.0
-    vals = []
-    for b in range(2, mag.shape[1] - 2):
-        col = mag[:, b]
-        if col.mean() < floor:
-            continue
-        d2 = _np.diff(_np.unwrap(_np.angle(X[:, b])), 2)
-        w = col[2:]
-        vals.append(float(_np.sum(_np.abs(d2) * w) / (float(_np.sum(w)) + 1e-9)))
-    return float(_np.mean(vals)) if vals else 0.0
 
 
 def main(argv):
