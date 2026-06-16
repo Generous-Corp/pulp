@@ -238,6 +238,40 @@ def add_desktop_subcommands(sub: argparse._SubParsersAction) -> None:
     p_desktop_design_proof.add_argument("--small-video-budget-mb", type=float, default=10.0, help="Attachment budget in decimal MB for the small video (default: 10)")
     p_desktop_design_proof.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 
+    p_desktop_video_matrix = desktop_sub.add_parser("video-matrix", help="Show the curated validation video proof demo matrix")
+    p_desktop_video_matrix.add_argument(
+        "--target",
+        choices=["mac", "ubuntu", "windows", "ios-simulator", "android-emulator"],
+        help="Filter matrix to one platform target.",
+    )
+    p_desktop_video_matrix.add_argument(
+        "--scenario",
+        choices=[
+            "standalone-interaction",
+            "audio-inspector-demo",
+            "reaper-plugin-editor",
+            "inspector-workflow",
+            "component-zoom",
+            "design-parity",
+            "ios-simulator",
+            "android-emulator",
+            "linux-xvfb-desktop",
+            "windows-session-agent-desktop",
+        ],
+        help="Filter matrix to one named scenario.",
+    )
+    p_desktop_video_matrix.add_argument(
+        "--status",
+        choices=["ready", "partial", "planned", "blocked"],
+        help="Filter by declared scenario status, or by machine-local readiness status when --check is used.",
+    )
+    p_desktop_video_matrix.add_argument("--markdown", action="store_true", help="Emit markdown suitable for a handoff or review issue")
+    p_desktop_video_matrix.add_argument("--check", action="store_true", help="Include lightweight machine-local readiness checks for each scenario")
+    p_desktop_video_matrix.add_argument("--design-parity-manifest", help="Existing run manifest to check and substitute into the design-parity compose command.")
+    p_desktop_video_matrix.add_argument("--design-parity-source-image", help="Source/reference image to check and substitute into the design-parity compose command.")
+    p_desktop_video_matrix.add_argument("--design-parity-native-image", help="Native screenshot/render to check and substitute into the one-shot design-proof command.")
+    p_desktop_video_matrix.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+
     p_desktop_inspect = desktop_sub.add_parser("inspect", help="Launch an app and capture screenshot + available UI state")
     p_desktop_inspect.add_argument("target", help="Desktop target name (for example: mac)")
     p_desktop_inspect.add_argument("--command", dest="launch_command", help="Quoted command to launch in the GUI session")

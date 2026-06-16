@@ -33,6 +33,7 @@ class LocalCiBootstrapModuleAliasesTests(unittest.TestCase):
             "_desktop_doctor",
             "_desktop_review_commands_cli",
             "_desktop_video_compose_commands_cli",
+            "_desktop_video_matrix_commands_cli",
             "_desktop_setup_commands_cli",
             "_evidence_cli",
             "_execution",
