@@ -744,6 +744,10 @@ elseif(WIN32)
         platform/win/accessibility_win.cpp
         platform/win/appearance_win.cpp
         platform/win/motion_preferences_win.cpp
+        # Standalone outbound file-drag backend (free begin_file_drag via OLE).
+        # Unconditional — DoDragDrop has no Skia/GPU dependency, so a non-GPU
+        # standalone build still drags files out. ole32 is linked below.
+        platform/win/drag_drop_win.cpp
     )
     # Win/Linux parity. When Skia is available, add the built-in Skia raster
     # screenshot backend and the native HWND PluginViewHost.
