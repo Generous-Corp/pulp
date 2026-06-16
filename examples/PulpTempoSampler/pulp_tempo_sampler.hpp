@@ -499,6 +499,11 @@ public:
 
     SamplerEditorRoot() {
         set_focusable(true);
+        // The waveform/keyboard editor renders through Skia, so request the GPU
+        // PluginViewHost in plugin formats. Without this, decide_gpu_host() picks
+        // the CPU CoreGraphics host (mode=autoui) and the Skia content renders
+        // poorly/blank in a DAW — the standalone already uses the GPU WindowHost.
+        set_requires_gpu_host(true);
         // Receive keys whether or not the editor holds focus: the host's
         // global-key hook fires on the window root every keystroke (standalone),
         // and on_key_event covers the focused path.
@@ -568,7 +573,7 @@ public:
             .name = "PulpTempoSampler",
             .manufacturer = "Pulp",
             .bundle_id = "com.pulp.tempo-sampler",
-            .version = "1.0.0",
+            .version = "1.0.2",
             .category = format::PluginCategory::Instrument,
             .input_buses = {},
             .output_buses = {{"Audio Out", 2}},
@@ -588,7 +593,9 @@ public:
         store.add_parameter({.id = kTempoPitch, .name = "Pitch", .unit = "st", .range = {-24, 24, 0, 1}});
         store.add_parameter({.id = kTempoFormant, .name = "Formant", .unit = "", .range = {0, 2, 1, 1}});
         store.add_parameter({.id = kTempoQuality, .name = "Quality", .unit = "", .range = {0, 2, 2, 1}});
-        store.add_parameter({.id = kTempoLoop, .name = "Loop", .unit = "", .range = {0, 1, 1, 1}});
+        // Default OFF (one-shot): a triggered slice plays once. The LOOP toggle
+        // enables Forward looping (held until note-off) for sustained/textural use.
+        store.add_parameter({.id = kTempoLoop, .name = "Loop", .unit = "", .range = {0, 1, 0, 1}});
         store.add_parameter({.id = kRootNote, .name = "Root Note", .unit = "",
                              .range = {static_cast<float>(kRootNoteMin),
                                        static_cast<float>(kRootNoteMax),
@@ -928,6 +935,25 @@ public:
             root->add_child(std::move(live));
         }
 
+        // LOOP toggle: enable/disable Forward looping for triggered slices
+        // (one-shot when off). Bound to kTempoLoop; region_for_note reads it per
+        // note (playback_mode = loop ? Forward : OneShot). Top-level for now;
+        // per-slice loop / reverse are a future UX.
+        {
+            auto loopBtn = std::make_unique<ToggleButton>();
+            loopBtn->set_label("LOOP");
+            loopBtn->set_font_size(10.0f);
+            loopBtn->set_corner_radius(6.0f);
+            loopBtn->set_on_background_color(teal);
+            loopBtn->set_on_text_color(bg900);
+            loopBtn->set_off_background_color(raised);
+            loopBtn->set_off_text_color(muted);
+            loopBtn->set_off_border_color(faint);
+            place(*loopBtn, 556, 316, 84, 26);
+            root->bindings.push_back(bind_parameter(*loopBtn, state(), kTempoLoop));
+            root->add_child(std::move(loopBtn));
+        }
+
         // On-screen interactive musical-typing keyboard. Hidden until ⌘K/Ctrl+K.
         // Added LAST so it paints on top as a floating panel. Click a key to
         // audition its slice (same path as a waveform-slice tap); the playhead
@@ -1103,6 +1129,24 @@ private:
         const long out_frames = signal::offline_stretch_output_frames(frames, R);
         if (out_frames <= 0) return;
 
+        // Refresh the slice boundaries into the stretched buffer FIRST, before the
+        // audio re-publish below. A sensitivity-only re-slice keeps the same
+        // time-ratio + audio, so these boundaries are valid for the CURRENT
+        // published buffer — and updating here means the keyboard trigger mapping
+        // follows the SENS slider even when the re-publish is skipped because a
+        // held voice still occupies the store slot (the bug: `if (!ok) return`
+        // used to bail before this update). region_for_note clamps any boundary
+        // past the live buffer length to silence, so a deferred-publish tempo
+        // change degrades safely rather than reading stale regions.
+        {
+            std::vector<long> scaled;
+            scaled.reserve(slices.size());
+            for (long s : slices)
+                scaled.push_back(std::min<long>(out_frames, static_cast<long>(std::llround(s * R))));
+            std::lock_guard<std::mutex> lock(slice_mutex_);
+            slices_stretched_ = std::move(scaled);
+        }
+
         std::vector<std::vector<float>> stretched(static_cast<size_t>(ch),
                                                   std::vector<float>(static_cast<size_t>(out_frames)));
         std::vector<const float*> inp(static_cast<size_t>(ch));
@@ -1131,15 +1175,8 @@ private:
                                                 host_sample_rate_, gen);
         }
         if (!ok) return;
-
-        // Scaled slice boundaries into the stretched buffer.
-        std::vector<long> scaled;
-        scaled.reserve(slices.size());
-        for (long s : slices) scaled.push_back(std::min<long>(out_frames, static_cast<long>(std::llround(s * R))));
-        {
-            std::lock_guard<std::mutex> lock(slice_mutex_);
-            slices_stretched_ = std::move(scaled);
-        }
+        // slices_stretched_ already refreshed above (before the publish), so a
+        // skipped re-publish never leaves the trigger mapping stale.
     }
 
     // ── Background worker ──

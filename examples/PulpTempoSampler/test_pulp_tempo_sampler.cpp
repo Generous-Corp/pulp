@@ -194,6 +194,49 @@ TEST_CASE("MIDI note outside the slice map is silent (no whole-sample fallback)"
     CHECK(inr > 1e-6);
 }
 
+// Changing SENS must reach the AUDIO trigger mapping (slices_stretched_), not
+// just the UI slice count (slices_orig_). A higher key plays at high sensitivity
+// (more slices) and goes silent at low sensitivity (fewer slices) — i.e. the
+// keyboard mapping follows the slider.
+TEST_CASE("sensitivity change reaches the keyboard trigger mapping", "[tempo-sampler]") {
+    Fixture f;
+    auto loop = percussive_loop(48000, 8);  // ~8 onsets available
+    const float* ch[1] = {loop.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    f.proc->set_loop_bpm_for_test(120.0);
+    std::vector<float> l(512), r(512);
+    process_block(*f.proc, 120.0, false, 0, l, r);
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+
+    auto plays = [&](int note) {
+        // Drain any one-shot voice still ringing from a previous trigger so we
+        // measure a FRESH note, not a lingering slice tail.
+        for (int b = 0; b < 80; ++b) process_block(*f.proc, 120.0, false, 0, l, r);
+        double e = 0.0;
+        for (int b = 0; b < 8; ++b) {
+            process_block(*f.proc, 120.0, b == 0, note, l, r);
+            for (int i = 0; i < 512; ++i) e += static_cast<double>(l[(size_t)i]) * l[(size_t)i];
+        }
+        return e;
+    };
+
+    const int root = 60;  // default C3
+
+    // High sensitivity -> several slices; key root+6 maps to a slice.
+    f.store.set_value(kOnsetSens, 1.0f);
+    f.proc->request_reanalyze();
+    REQUIRE(wait_for([&] { return f.proc->num_slices() >= 7; }));
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));  // let the re-render refresh slices_stretched_
+    CHECK(plays(root + 6) > 1e-6);   // root+6 triggers a slice
+
+    // Low sensitivity -> 1 slice; root+6 must now be SILENT (mapping followed SENS).
+    f.store.set_value(kOnsetSens, 0.0f);
+    f.proc->request_reanalyze();
+    REQUIRE(wait_for([&] { return f.proc->num_slices() == 1; }));
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    CHECK(plays(root + 6) < 1e-9);
+}
+
 TEST_CASE("render while playing is finite + stable (race)", "[tempo-sampler]") {
     Fixture f;
     auto buf = sine(220.0, 48000.0, 24000);
@@ -402,6 +445,13 @@ view::TextButton* find_button(view::View* v, const std::string& label) {
     return nullptr;
 }
 
+view::ToggleButton* find_toggle(view::View* v, const std::string& label) {
+    if (auto* t = dynamic_cast<view::ToggleButton*>(v); t && t->label() == label) return t;
+    for (std::size_t i = 0; i < v->child_count(); ++i)
+        if (auto* t = find_toggle(v->child_at(i), label)) return t;
+    return nullptr;
+}
+
 // RAII fake FileDialog backend so the Open-button path is testable headlessly
 // (no native panel). open_file() returns the given path.
 struct FakeFileDialog {
@@ -485,6 +535,27 @@ TEST_CASE("Open button loads a sample even when one is already loaded", "[tempo-
     }
     // The Open button loaded + sliced the new sample off-thread.
     REQUIRE(wait_for([&] { return f.proc->num_slices() >= 2; }));
+}
+
+// LOOP toggle: enable/disable Forward looping (default one-shot). Drive the REAL
+// toggle -> on_toggle -> bound kTempoLoop param.
+TEST_CASE("LOOP toggle flips the loop parameter (default one-shot)", "[tempo-sampler]") {
+    Fixture f;
+    auto buf = sine(440.0, 48000.0, 24000);
+    const float* ch[1] = {buf.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 24000, 48000.0));
+
+    auto editor = f.proc->create_view();
+    REQUIRE(editor);
+    auto* loop = find_toggle(editor.get(), "LOOP");
+    REQUIRE(loop != nullptr);
+
+    CHECK(f.store.get_value(kTempoLoop) < 0.5f);   // default: one-shot
+    const auto b = loop->local_bounds();
+    loop->on_mouse_down({b.width * 0.5f, b.height * 0.5f});  // -> on_toggle(true) -> set_value
+    CHECK(f.store.get_value(kTempoLoop) >= 0.5f);  // looping enabled
+    loop->on_mouse_down({b.width * 0.5f, b.height * 0.5f});  // toggle back off
+    CHECK(f.store.get_value(kTempoLoop) < 0.5f);
 }
 
 TEST_CASE("waveform scroll zooms in/out and pans", "[tempo-sampler]") {
