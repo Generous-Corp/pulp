@@ -637,6 +637,34 @@ void advance_anims(View* v, float dt) {
         y += 200.0f;
     }
 
+    // ── Interaction states — expanded · remove · editing ──────────────────
+    section("Interaction states");
+    {
+        // Output routing — a ComboBox shown EXPANDED (opened via a simulated
+        // click since open_dropdown() is internal).
+        label("OUTPUT ROUTING \xc2\xb7 EXPANDED", kMargin, y, 260.0f, 11.0f);
+        auto* cb = static_cast<ComboBox*>(add(std::make_unique<ComboBox>(), kMargin, y + 16.0f, 200.0f, 32.0f));
+        cb->set_items({"Stereo Out", "Mono Sum", "Bus 1 \xc2\xb7 Drums", "Bus 2 \xc2\xb7 Vox", "No Output"});
+        cb->set_selected(0);
+        { MouseEvent ev{}; ev.is_down = true; ev.position = {100.0f, 16.0f}; cb->on_mouse_event(ev); }
+
+        // Insert — a row with its remove/bypass menu shown.
+        label("INSERT \xc2\xb7 REMOVE MENU", kMargin + 280.0f, y, 240.0f, 11.0f);
+        add(std::make_unique<Badge>("EQ", Tone::info), kMargin + 280.0f, y + 16.0f, 70.0f, 28.0f);
+        { auto menu = std::make_unique<PopupMenu>();
+          menu->set_items({{1, "Bypass"}, {2, "Replace\xe2\x80\xa6"},
+                           PopupMenu::Item::make_separator(), {3, "Remove"}});
+          menu->set_anchor({0, 0});
+          add(std::move(menu), kMargin + 280.0f, y + 54.0f, 180.0f, 110.0f); }
+
+        // Value field — selected & editing (caret + accent ring).
+        label("VALUE FIELD \xc2\xb7 EDITING", kMargin + 540.0f, y, 240.0f, 11.0f);
+        auto* ve = static_cast<InlineValueEditor*>(add(std::make_unique<InlineValueEditor>(), kMargin + 540.0f, y + 16.0f, 110.0f, 30.0f));
+        ve->set_range(-60, 0); ve->set_decimals(1); ve->set_suffix(" dB"); ve->set_value(-12.0);
+        ve->begin_edit();
+        y += 200.0f;
+    }
+
     out_height = y + 24.0f;
     // Size the board so the window's Yoga pass lays it out to the full content
     // extent (its absolute children are positioned within this box).
