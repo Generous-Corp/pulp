@@ -4,7 +4,39 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+import shutil
 import subprocess
+
+
+def link_local_skia_build_for_prepared_source(root: Path, prepared_root: Path) -> str | None:
+    """Symlink the live checkout's prebuilt Skia into a prepared exact-SHA root.
+
+    Exact-SHA desktop sources are fresh ``git worktree`` checkouts without the
+    machine-local ``external/skia-build/`` static libraries, so a GPU/Skia build
+    (needed to record the design-tool / GPU demo) would otherwise fail. When the
+    live checkout has a usable Skia build, link it in; return the linked path or
+    ``None`` when no local Skia build is available.
+    """
+    local_skia = root / "external" / "skia-build"
+    skia_candidates = (
+        local_skia / "build" / "mac-gpu" / "lib" / "Release" / "libskia.a",
+        local_skia / "mac-gpu" / "lib" / "Release" / "libskia.a",
+        local_skia / "mac" / "lib" / "libskia.a",
+        local_skia / "lib" / "libskia.a",
+        local_skia / "libskia.a",
+    )
+    if not any(candidate.is_file() for candidate in skia_candidates):
+        return None
+    prepared_skia = prepared_root / "external" / "skia-build"
+    if any((prepared_skia / candidate.relative_to(local_skia)).is_file() for candidate in skia_candidates):
+        return str(prepared_skia)
+    if prepared_skia.is_symlink():
+        prepared_skia.unlink()
+    elif prepared_skia.exists():
+        shutil.rmtree(prepared_skia)
+    prepared_skia.parent.mkdir(parents=True, exist_ok=True)
+    prepared_skia.symlink_to(local_skia, target_is_directory=True)
+    return str(prepared_skia)
 
 
 def prepare_macos_exact_sha_source(
@@ -35,6 +67,7 @@ def prepare_macos_exact_sha_source(
             capture_output=True,
             text=True,
         )
+    link_local_skia_build_for_prepared_source(root, prepared_root)
     if source_request.get("prepare_command") and not reused:
         run = run_logged_command_fn(
             ["bash", "-lc", source_request["prepare_command"]],
