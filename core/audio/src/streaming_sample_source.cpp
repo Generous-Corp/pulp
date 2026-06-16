@@ -59,8 +59,22 @@ bool StreamingSampleSource::prepare(const StreamingSampleSourceConfig& config,
             preload_valid_ = got;
             total_frames_ = std::min(total_frames_, got);
             fully_resident_ = true;
+            // Re-clamp the loop window to the realized length; otherwise a
+            // resident loop would repeat frames past valid data (the preload
+            // buffer was allocated at the pre-shrink size, so this is silent
+            // tail, not an out-of-bounds read).
+            loop_start_ = std::min(loop_start_, total_frames_);
+            loop_end_ = std::min(loop_end_, total_frames_);
+            if (loop_end_ <= loop_start_) {
+                loop_start_ = 0;
+                loop_end_ = total_frames_;
+            }
         }
     }
+
+    // Effective stream end starts at the (now finalized) declared length; the
+    // background reader shrinks it if the source ends early mid-stream.
+    eos_frame_.store(total_frames_, std::memory_order_relaxed);
 
     if (!fully_resident_) {
         const std::uint64_t ring_capacity =
@@ -119,6 +133,7 @@ void StreamingSampleSource::release() noexcept {
     use_thread_ = false;
     play_pos_.store(0, std::memory_order_relaxed);
     reader_pos_.store(0, std::memory_order_relaxed);
+    eos_frame_.store(0, std::memory_order_relaxed);
     streamed_frames_.store(0, std::memory_order_relaxed);
     read_errors_.store(0, std::memory_order_relaxed);
     underrun_frames_.store(0, std::memory_order_relaxed);
@@ -133,6 +148,9 @@ bool StreamingSampleSource::reset() noexcept {
     streamed_frames_.store(0, std::memory_order_relaxed);
     read_errors_.store(0, std::memory_order_relaxed);
     underrun_frames_.store(0, std::memory_order_relaxed);
+    // Restore the optimistic end; a re-prime that hits an early source end will
+    // shrink it again.
+    eos_frame_.store(total_frames_, std::memory_order_relaxed);
 
     if (!fully_resident_) {
         ring_.reset();
@@ -163,6 +181,15 @@ void StreamingSampleSource::copy_from_preload(BufferView<float>& dest,
                     preload_.channel(ch).data() + soff,
                     count * sizeof(float));
     }
+    // Zero any surplus destination channels (dest wider than the source) over
+    // the copied range, matching the streamed path (PlanarAudioRingBuffer::read
+    // zero-fills surplus channels) so a mono source feeding a stereo voice bus
+    // doesn't leave stale data on the extra channel.
+    const std::uint32_t dest_ch =
+        static_cast<std::uint32_t>(dest.num_channels());
+    for (std::uint32_t ch = copy_ch; ch < dest_ch; ++ch) {
+        std::memset(dest.channel_ptr(ch) + doff, 0, count * sizeof(float));
+    }
 }
 
 std::uint64_t StreamingSampleSource::pull(BufferView<float> dest,
@@ -189,8 +216,12 @@ std::uint64_t StreamingSampleSource::pull(BufferView<float> dest,
             }
             segment_end = loop_end_;
         } else {
-            if (pos >= total_frames_) break;  // one-shot reached the end
-            segment_end = total_frames_;
+            // Use the effective end (may have been shrunk by the reader on an
+            // early source end) so a one-shot terminates at the real last frame
+            // instead of waiting forever for tail frames that never arrive.
+            const std::uint64_t end = eos_frame_.load(std::memory_order_acquire);
+            if (pos >= end) break;  // one-shot reached the end
+            segment_end = end;
         }
 
         const std::uint64_t to_segment_end = segment_end - pos;
@@ -264,8 +295,13 @@ std::uint64_t StreamingSampleSource::pump_background() noexcept {
         got = 0;
     }
     if (got == 0) {
-        // EOF or read error: stop trying so the reader thread doesn't spin.
+        // EOF or read error before the declared end. All frames [0, rpos) are
+        // already available (preload + what's in the ring), so rpos is the true
+        // length. Publish it so the audio thread terminates one-shot playback
+        // and reports finished() here instead of stalling on never-arriving
+        // tail frames. release-store pairs with the acquire-load in pull().
         read_errors_.fetch_add(1, std::memory_order_relaxed);
+        eos_frame_.store(rpos, std::memory_order_release);
         reader_pos_.store(total_frames_, std::memory_order_relaxed);
         return 0;
     }
@@ -293,7 +329,11 @@ void StreamingSampleSource::notify_reader() noexcept { cv_.notify_all(); }
 
 bool StreamingSampleSource::finished() const noexcept {
     if (loop_ && fully_resident_) return false;  // resident loop never ends
-    return play_pos_.load(std::memory_order_relaxed) >= total_frames_;
+    // Compare against the effective end so a stream that ended early (reader
+    // returned 0 mid-tail) still reports finished once its realized frames have
+    // played out — not only when play_pos_ reaches the optimistic declared total.
+    return play_pos_.load(std::memory_order_relaxed) >=
+           eos_frame_.load(std::memory_order_acquire);
 }
 
 StreamingSampleSource::Stats StreamingSampleSource::stats() const noexcept {

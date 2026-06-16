@@ -359,3 +359,79 @@ TEST_CASE("StreamingSampleSource honors a short reader return",
     REQUIRE(produced == realized);
     REQUIRE(src.finished());
 }
+
+TEST_CASE("StreamingSampleSource terminates when a streamed source ends early",
+          "[audio][streaming][issue-streaming]") {
+    // Regression: a NON-resident source whose reader returns 0 mid-tail (a decode
+    // error or short stream before the declared total) must still finish once its
+    // realized frames have played out — not stall forever zero-filling while
+    // finished() stays false (which would leak a sampler voice gated on
+    // finished()). The pre-fix code bumped the reader cursor to total_frames_ but
+    // left the audio thread comparing play_pos_ against the optimistic declared
+    // total, so finished() never fired.
+    const std::uint32_t channels = 1;
+    const std::uint64_t declared = 50000;
+    const std::uint64_t realized = 20000;  // reader yields this, then returns 0
+
+    StreamingSampleSourceConfig cfg;
+    cfg.channels = channels;
+    cfg.total_frames = declared;
+    cfg.preload_frames = 4096;            // non-resident: forces the streamed tail
+    cfg.ring_capacity_frames = 8192;
+    cfg.read_chunk_frames = 2048;
+    cfg.start_background_thread = false;  // deterministic manual pump
+
+    StreamingSampleSource src;
+    // The reader's own length is `realized`, so it returns 0 for start >= realized.
+    REQUIRE(src.prepare(cfg, make_synth_reader(channels, realized)));
+    REQUIRE_FALSE(src.fully_resident());
+
+    const std::uint64_t block = 512;
+    Buffer<float> out(channels, block);
+    std::uint64_t consumed = 0;
+    int iter = 0;
+    const int max_iters = 100000;
+    while (!src.finished() && iter++ < max_iters) {
+        while (src.pump_background() > 0) { /* keep the tail topped up */ }
+        const std::uint64_t got = src.pull(out.view(), block);
+        for (std::uint64_t i = 0; i < got; ++i)
+            REQUIRE(approx(out.channel(0)[i], expected_sample(consumed + i, 0)));
+        consumed += got;
+        if (got == 0) break;  // nothing more will ever come — finished() must be set
+    }
+    REQUIRE(src.finished());          // the bug: never became true before the fix
+    REQUIRE(consumed == realized);    // exactly the realized frames, in order
+    REQUIRE(src.stats().read_errors > 0);
+}
+
+TEST_CASE("StreamingSampleSource zero-fills surplus destination channels",
+          "[audio][streaming][issue-streaming]") {
+    // A mono source pulled into a stereo destination must leave the extra channel
+    // silent (matching the streamed ring path), not stale/garbage. Regression for
+    // the resident fast path, which previously copied only the source channels and
+    // left wider destination channels untouched.
+    const std::uint32_t src_ch = 1;
+    const std::uint64_t total = 2048;
+
+    StreamingSampleSourceConfig cfg;
+    cfg.channels = src_ch;
+    cfg.total_frames = total;
+    cfg.preload_frames = total;  // resident fast path
+    cfg.start_background_thread = false;
+
+    StreamingSampleSource src;
+    REQUIRE(src.prepare(cfg, make_synth_reader(src_ch, total)));
+    REQUIRE(src.fully_resident());
+
+    // Stereo destination, pre-dirtied on both channels.
+    Buffer<float> out(2, total);
+    for (std::uint64_t f = 0; f < total; ++f) {
+        out.channel(0)[f] = 123.0f;
+        out.channel(1)[f] = 123.0f;
+    }
+    REQUIRE(src.pull(out.view(), total) == total);
+    for (std::uint64_t f = 0; f < total; ++f) {
+        REQUIRE(approx(out.channel(0)[f], expected_sample(f, 0)));  // source channel
+        REQUIRE(out.channel(1)[f] == 0.0f);                         // zeroed surplus
+    }
+}

@@ -180,6 +180,15 @@ private:
 
     std::atomic<std::uint64_t> play_pos_{0};    ///< Audio-thread owned: next source frame to emit.
     std::atomic<std::uint64_t> reader_pos_{0};  ///< Background owned: next source frame to push.
+    // Effective end-of-stream in source frames: starts at total_frames_ and is
+    // shrunk by the background reader to the realized length if the FrameReader
+    // signals an early end/error mid-stream (a short/zero return before the
+    // declared total). The audio thread reads it to terminate one-shot playback
+    // and report finished() at the real end instead of stalling forever waiting
+    // for frames that will never arrive. Written only by the background reader,
+    // read by the audio thread — hence atomic (total_frames_ itself stays an
+    // immutable-after-prepare plain member that the audio thread can read freely).
+    std::atomic<std::uint64_t> eos_frame_{0};
     std::atomic<std::uint64_t> streamed_frames_{0};
     std::atomic<std::uint64_t> read_errors_{0};
     std::atomic<std::uint64_t> underrun_frames_{0};  ///< Audio-thread zero-fill on a streaming miss.
