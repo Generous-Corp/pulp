@@ -159,13 +159,27 @@ class ObjectDiscoveryTests(unittest.TestCase):
         # Cobertura XML. report/show/export must all read the object list from
         # an LLVM @response file instead.
         text = SCRIPT.read_text()
-        self.assertIn('printf \'%s\\n\' "${BINARIES[@]}" > "${OBJ_RSP}"', text,
+        self.assertIn('OBJ_RSP=', text,
                       "object list must be written to a response file")
+        self.assertIn('printf -- \'-object\\n%s\\n\' "${tok}" >> "${OBJ_RSP}"', text,
+                      "response file must be built one -object/path pair at a time")
         self.assertGreaterEqual(
             text.count('"@${OBJ_RSP}"'), 3,
             "llvm-cov report, show, and export must each pass objects via the "
             "@response file, not inline ${BINARIES[@]}",
         )
+
+    def test_objects_that_vanished_after_probe_are_dropped(self) -> None:
+        # An -object can disappear between the pre-flight probe and the report
+        # (a late-cleaned test-fixture .exe on Windows is the observed case).
+        # llvm-cov hard-fails the whole run on one missing -object, so the
+        # response-file builder must existence-check each path and drop the
+        # vanished ones rather than blackhole the os-windows leg.
+        text = SCRIPT.read_text()
+        self.assertIn('if [[ -f "${tok}" ]]; then', text,
+                      "response-file builder must drop objects that no longer exist")
+        self.assertIn("existence filter left zero -object entries", text,
+                      "an empty post-filter object set must fail loudly")
 
     def test_optional_ctest_args_are_threaded_into_ctest_invocation(self) -> None:
         self.assertTrue(
