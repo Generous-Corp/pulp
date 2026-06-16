@@ -42,6 +42,19 @@ struct StnConfig {
     /// a class when that class's filtered magnitude exceeds the other by
     /// this factor. 1.0 = binary Wiener-style split at the crossover.
     float beta = 2.0f;
+    /// Align the masks to the NEWEST pushed frame instead of the ring's
+    /// center frame. The centered evaluation is less biased (it sees future
+    /// frames) but lags the input by (time_median-1)/2 frames, so a caller
+    /// that applies the mask to the frame it just pushed (e.g. the noise-
+    /// morph split in RealtimePitchTimeProcessor) gets a STALE mask: at a
+    /// transient onset the newest frame holds the transient while the mask
+    /// still describes a pre-onset (mostly-noise) frame, so the onset's
+    /// broadband energy is misrouted into the noise path and decohered.
+    /// Causal mode evaluates the time-median as a trailing window ending at
+    /// the newest frame and the freq-median on that same frame, so the mask
+    /// and the frame it is applied to are aligned (latency 0). This is the
+    /// standard real-time HPSS approximation (trailing vs centered median).
+    bool causal = false;
 };
 
 /// Per-frame soft masks. Each spans num_bins and sums to ~1 per bin.
@@ -97,9 +110,14 @@ public:
         history_pos_ = (history_pos_ + 1) % th;
         if (history_filled_ < th) ++history_filled_;
 
-        // Horizontal (time) median → harmonic estimate, evaluated on the
-        // center frame of the ring (the most-overlapped position).
-        const int center = (history_pos_ + th / 2) % th;
+        // Horizontal (time) median → harmonic estimate. The time-median is
+        // order-independent over the filled ring (trailing window), so its
+        // value is the same either way; what differs is which frame the masks
+        // describe: the ring center (lower bias, lags the input) or the newest
+        // frame (causal, aligned to a caller that just pushed it).
+        const int center = config_.causal
+            ? (history_pos_ - 1 + th) % th
+            : (history_pos_ + th / 2) % th;
         const float* center_mag = history_.data() + static_cast<size_t>(center) * n;
         for (int k = 0; k < n; ++k) {
             int count = 0;
@@ -144,11 +162,15 @@ public:
     /// (time_median-1)/2 frames vs the newest pushed frame).
     const float* center_magnitude() const {
         const int th = config_.time_median;
-        const int center = (history_pos_ + th / 2) % th;
+        const int center = config_.causal
+            ? (history_pos_ - 1 + th) % th
+            : (history_pos_ + th / 2) % th;
         return history_.data() + static_cast<size_t>(center) * config_.num_bins;
     }
 
-    int latency_frames() const { return (config_.time_median - 1) / 2; }
+    int latency_frames() const {
+        return config_.causal ? 0 : (config_.time_median - 1) / 2;
+    }
 
     void reset() {
         std::fill(history_.begin(), history_.end(), 0.0f);

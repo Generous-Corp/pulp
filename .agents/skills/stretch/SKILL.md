@@ -59,8 +59,15 @@ resample, no EQ) vs `--character clean` (time-stretch).
 - **Adaptive FFT** (`recommend_window`): percussive→1024/128, bass/low→8192/512,
   else 4096/512. Override with `--fft/--hop`.
 - **STN noise-morphing is OFF by default** — it dulled every material ~400 centroid
-  points (muddy + "wind"). `--stn` to opt in for noisy textures (its HF loss is a
-  known bug to fix before re-enabling by default).
+  points (muddy + "wind"). `--stn` to opt in for noisy textures. Two correctness
+  fixes landed on the OPT-IN path (default stays `route_noise_stn=false`, settled by
+  the broader A/B): a CAUSAL StnConfig (the morph split applied the mask to the
+  newest pushed frame, but the decomposer evaluated medians on the ring's CENTER
+  frame — lagging ~(time_median-1)/2 frames, so a transient's broadband energy was
+  misrouted into the random-phase noise path and decohered) and a √(8/3) Hann WOLA
+  synthesis-gain (random-phase frames overlap-add incoherently while WOLA normalizes
+  for coherent summation → ~4-5 dB loss). The morpher still dulls tonal/transient
+  material, so it stays off by default; these only improve the opt-in path.
 - **Mandatory end-fade on varispeed** (tape doesn't hard-cut; a bare resample of a
   ringing tail ticks).
 - `--transient-sens X` raises the Röbel reset sensitivity (sharper attacks); off by

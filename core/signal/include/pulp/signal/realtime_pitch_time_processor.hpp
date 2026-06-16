@@ -190,6 +190,11 @@ public:
             stn_config.num_bins = spectral_bins;
             stn_config.time_median = quality ? 7 : 5;
             stn_config.freq_median = quality ? 11 : 7;
+            // The morph split applies the mask to the frame it just pushed, so
+            // align the mask to the newest frame. Centered masks lag by
+            // (time_median-1)/2 frames and misroute transient-onset energy into
+            // the noise path (decohering + level-losing percussive hits).
+            stn_config.causal = true;
             stn_.prepare(stn_config);
             noise_morphers_.resize(static_cast<size_t>(config.channels));
             // Same seed across channels → coherent (mono-safe) noise phase:
@@ -445,10 +450,20 @@ private:
         // are decorrelated and overlap-add to natural noise of the right
         // colour at any stretch ratio.
         if (morph) {
+            // Random-phase noise frames overlap-add INCOHERENTLY while the WOLA
+            // normalizes for COHERENT summation, so morphed noise renders ~4-5 dB
+            // too quiet (an energy-conservation bug: measured -4 to -8 LUFS total
+            // signal). Compensate by the Hann random-phase factor sqrt(8/3) ≈ 1.63
+            // (Hann mean-square), with a gentle overlap correction since denser
+            // overlap (time compression) loses a little more.
+            const float overlap = static_cast<float>(fft_size_) / static_cast<float>(hop);
+            const float noise_gain = std::sqrt(8.0f / 3.0f)
+                                   * std::pow(overlap / 8.0f, 0.08f);
             for (int ch = 0; ch < config_.channels; ++ch) {
                 std::complex<float>* f = frames[ch];
                 float* env = noise_env_.data() + static_cast<size_t>(ch) * bins;
                 NoiseMorpher& m = noise_morphers_[static_cast<size_t>(ch)];
+                m.set_synthesis_gain(noise_gain);
                 m.push_envelope(env);
                 m.synthesize(1.0f, noise_spec_.data());
                 for (int k = 0; k < bins; ++k) f[k] += noise_spec_[static_cast<size_t>(k)];
