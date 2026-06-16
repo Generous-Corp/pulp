@@ -102,6 +102,57 @@ TEST_CASE("StnDecomposer classifies broadband sustained energy as noise",
     REQUIRE(n_sum > t_sum);
 }
 
+TEST_CASE("StnDecomposer causal mode aligns the mask to the newest frame",
+          "[signal][stn]") {
+    // The noise-morph split applies the mask to the frame it just pushed, so a
+    // centered mask (which lags by (time_median-1)/2 frames) misroutes a
+    // transient onset's broadband energy into the noise path. Causal mode must
+    // describe the NEWEST frame: the same process() call that receives a burst
+    // must already classify it transient-dominant, with zero reported latency.
+    StnConfig base;
+    base.num_bins = kBins;
+    base.time_median = 9;
+    base.freq_median = 9;
+
+    StnConfig centered = base;            // default: centered, lagging
+    StnConfig causal = base;
+    causal.causal = true;
+
+    StnDecomposer stn_centered, stn_causal;
+    stn_centered.prepare(centered);
+    stn_causal.prepare(causal);
+
+    REQUIRE(stn_causal.latency_frames() == 0);
+    REQUIRE(stn_centered.latency_frames() == (base.time_median - 1) / 2);
+
+    auto quiet = tonal_frame(100, 0.0f);  // noise floor only
+    auto burst = broadband_frame(1.0f);
+
+    // Prime both with a steady run of quiet frames, then push ONE burst as the
+    // newest frame and inspect the mask returned by that very call.
+    for (int i = 0; i < 12; ++i) {
+        stn_centered.process(quiet.data());
+        stn_causal.process(quiet.data());
+    }
+    const StnMasks& m_centered = stn_centered.process(burst.data());
+    const StnMasks& m_causal = stn_causal.process(burst.data());
+
+    auto band_sum = [](const std::vector<float>& v) {
+        float s = 0.0f;
+        for (int k = 50; k < kBins - 50; ++k) s += v[static_cast<size_t>(k)];
+        return s;
+    };
+
+    // Causal: the burst is the newest frame and the mask sees it immediately —
+    // transient-dominant on this call.
+    REQUIRE(band_sum(m_causal.transients) > band_sum(m_causal.sines));
+    REQUIRE(band_sum(m_causal.transients) > band_sum(m_causal.noise));
+
+    // Centered: the same call still describes a pre-burst (quiet) frame, so the
+    // transient is NOT yet visible — proving the lag the causal mode removes.
+    REQUIRE(band_sum(m_centered.transients) < band_sum(m_causal.transients));
+}
+
 TEST_CASE("StnDecomposer masks partition to ~1 per bin", "[signal][stn]") {
     StnConfig config;
     config.num_bins = kBins;
