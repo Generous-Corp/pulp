@@ -108,6 +108,49 @@ class ReportingPublishStageTests(unittest.TestCase):
         self.assertIn("Gallery &lt;One&gt;", html_text)
         self.assertIn("mac&lt;&gt;/inspect", html_text)
 
+    def test_stage_writes_review_package_and_enriches_video_proof_runs(self) -> None:
+        bundle = self.root / "vbundle"
+        bundle.mkdir()
+        (bundle / "manifest.json").write_text('{"label":"video"}\n')
+        manifest = {
+            "target": "mac",
+            "action": "click",
+            "label": "video proof",
+            "completed_at": "2026-06-16T12:00:00+00:00",
+            "artifacts": {"bundle_dir": str(bundle)},
+            "interaction": {"mode": "desktop-event"},
+            "video_proof_notes": ["toggle flips"],
+            "video_proof_composition": {
+                "template": "component-zoom",
+                "focus": {"label": "Bypass"},
+            },
+        }
+        output_dir = self.publish_root() / "20260616-proof"
+
+        report = self.mod.stage_desktop_publish_report(
+            self.config,
+            [manifest],
+            output_dir=output_dir,
+            label="Proof",
+            create_desktop_publish_bundle_fn=lambda _config: output_dir,
+            now_iso_fn=lambda: "2026-06-16T12:01:00+00:00",
+            atomic_write_text_fn=self.atomic_write,
+            write_desktop_publish_rollups_fn=lambda _config: None,
+            publish_report_to_branch_fn=lambda _config, _report: {},
+        )
+
+        review_package_path = output_dir / "review-package.json"
+        review_markdown_path = output_dir / "review.md"
+        self.assertTrue(review_package_path.exists(), "publish must write review-package.json")
+        self.assertTrue(review_markdown_path.exists(), "publish must write review.md")
+        self.assertEqual(report["review_package"], str(review_package_path))
+        self.assertEqual(report["review_markdown"], str(review_markdown_path))
+        package = json.loads(review_package_path.read_text())
+        self.assertIsInstance(package, dict)
+        run = json.loads((output_dir / "index.json").read_text())["runs"][0]
+        self.assertEqual(run["video_proof_composition"]["focus"]["label"], "Bypass")
+        self.assertEqual(run["video_proof_notes"], ["toggle flips"])
+
 
 if __name__ == "__main__":
     unittest.main()
