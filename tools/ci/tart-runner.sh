@@ -190,7 +190,13 @@ for line in sys.stdin:
         labels = {s.lower() for s in json.loads(line)}
     except Exception:
         continue
-    if want.issubset(labels):
+    # GitHub assigns a job to a runner iff the runner advertises EVERY label
+    # the job requests; the runner may carry extra labels. So this VM, which
+    # registers with `want`, can serve a queued job iff the requested job
+    # labels are a subset of `want`. The reverse direction (want as a subset
+    # of the job labels) silently fails to boot when the runner carries an
+    # extra label such as a per-host pulp-build-vm-secondary.
+    if labels.issubset(want):
         n += 1
 print(n)
 '
