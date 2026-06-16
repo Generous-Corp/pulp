@@ -20,6 +20,8 @@ interactive version of this set (dark + light), build and run
 | `Knob` | Rotary parameter control | value 0–1, default, label, format fn, modulation rings (Saturn), custom SkSL shader, sprite strip, hover glow, wheel | `widgets.hpp` |
 | `Fader` | Linear parameter slider | value 0–1, orientation, thumb shape/size, skin overrides, shader/sprite, hover-grow, wheel | `widgets.hpp` |
 | `RangeSlider` | Min/max/step slider (HTML range) | min/max/step, orientation, accent, track thickness, quantize, hover-grow, wheel | `widgets.hpp` |
+| `DualRangeSlider` | Two-thumb min–max range slider | low/high values, no-cross clamp, orientation, accent, hover-grow, per-thumb drag | `widgets.hpp` |
+| `InlineValueEditor` | Inline readout that becomes an editor | label + value, click-to-type, range clamp + danger ring, suffix, change callback | `widgets.hpp` |
 | `PanControl` | Bipolar pan with centre detent | value −1..+1, hover-grow, wheel | `gap_widgets.hpp` |
 | `XYPad` | 2-D parameter surface | x/y 0–1, axis labels, drag + gesture callbacks | `widgets.hpp` |
 | `Toggle` | Animated on/off switch | on state, label, animated thumb + hover | `widgets.hpp` |
@@ -94,6 +96,7 @@ interactive version of this set (dark + light), build and run
 | `SpectrogramView` | Scrolling STFT spectrogram | push frames, history/freq config, colormap, dB range | `widgets.hpp` |
 | `EqCurveView` | Parametric EQ curve | draggable bands (freq/gain/Q/type), spectrum overlay, band callbacks | `eq_curve_view.hpp` |
 | `ChannelStrip` | Mixer strip | label, level + pan (draggable), meter, wheel, callbacks | `gap_widgets.hpp` |
+| `WaveformRecorder` | Three-state record/preview widget | armed / recording / captured states, live level, captured-waveform preview | `widgets.hpp` |
 | `ModulationMatrixWidget` | Mod source→dest matrix | sources/dests, route lines, selected-route depth/curve | `modulation_matrix_widget.hpp` |
 
 ## Containers & layout
@@ -101,6 +104,7 @@ interactive version of this set (dark + light), build and run
 | Widget | Purpose | Key capabilities | Header |
 |--------|---------|------------------|--------|
 | `Panel` | Styled container | background/border tokens, corner radius, border width | `widgets.hpp` |
+| `GroupBox` | Titled (optionally collapsible) container | title chip, collapse chevron, header-click toggle, child show/hide | `widgets.hpp` |
 | `ScrollView` | Scrollable container | direction, content size, smooth scroll, fading bars, wheel/track-page | `ui_components.hpp` |
 | `SplitView` | Resizable split pane | orientation, split fraction, min sizes, divider, change callback | `split_view.hpp` |
 | `ConcertinaPanel` | Accordion sections | sections (title+content), expand/collapse/toggle, exclusive mode | `concertina_panel.hpp` |
