@@ -8,6 +8,15 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v04340"></a>
+## [0.434.0] - 2026-06-16
+
+- feat(view): native file drag-out source on Windows (OLE) + Linux (XDND) ([#4073](https://github.com/danielraffel/pulp/pull/4073))
+- Sampler: LOOP toggle, GPU-host editor, sensitivity-mapping fix ([#4074](https://github.com/danielraffel/pulp/pull/4074))
+- ci(coverage): drop -object entries that vanish after the pre-flight probe ([#4075](https://github.com/danielraffel/pulp/pull/4075))
+- ci(coverage): pass llvm-cov objects via response file (fixes Windows ARG_MAX) ([#4070](https://github.com/danielraffel/pulp/pull/4070))
+- Sampler: interactive ⌘K keyboard, Open button, AU MIDI + slice-mapping fixes ([#4067](https://github.com/danielraffel/pulp/pull/4067))
+
 <a id="v04330"></a>
 ## [0.433.0] - 2026-06-15
 
@@ -4433,6 +4442,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.434.0]: https://github.com/danielraffel/pulp/releases/tag/v0.434.0
 [0.433.0]: https://github.com/danielraffel/pulp/releases/tag/v0.433.0
 [0.432.1]: https://github.com/danielraffel/pulp/releases/tag/v0.432.1
 [0.432.0]: https://github.com/danielraffel/pulp/releases/tag/v0.432.0
