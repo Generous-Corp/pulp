@@ -335,6 +335,8 @@ float DesignFrameView::element_value(int i) const {
         }
         case DesignFrameElement::Kind::text_field:
             return -1.0f;  // text is not a normalized value
+        case DesignFrameElement::Kind::momentary:
+            return e.value;  // pressed/lit flag (0 or 1)
     }
     return -1.0f;
 }
@@ -360,6 +362,10 @@ void DesignFrameView::set_element_value(int i, float v) {
         }
         case DesignFrameElement::Kind::text_field:
             return;  // not a normalized value
+        case DesignFrameElement::Kind::momentary:
+            // Light/clear the key via the native overlay; no on_element_changed.
+            e.value = (v > 0.5f) ? 1.0f : 0.0f;
+            break;
     }
     request_repaint();
 }
@@ -410,6 +416,21 @@ void DesignFrameView::paint(canvas::Canvas& canvas) {
     // transform hit_element() inverts, so knobs are hit where they're drawn.
     canvas.draw_svg(s, t.ox - panel_x_ * t.scale, t.oy - panel_y_ * t.scale,
                     svg_w_ * t.scale, svg_h_ * t.scale);
+
+    // Native overlay highlight for lit momentary keys (value>0.5): a translucent
+    // accent rect over the key's hit-region. Drawn ON TOP of the baked SVG — we
+    // never recolor SVG paths (that would fight every re-export). View-scoped.
+    auto hl = resolve_color("accent.primary", canvas::Color::rgba8(22, 218, 194));
+    hl.a = 120;
+    for (const auto& e : elements_) {
+        if (e.kind != DesignFrameElement::Kind::momentary || e.value <= 0.5f) continue;
+        if (e.view_group != -1 && active_view_group_ != -1 && e.view_group != active_view_group_)
+            continue;
+        const float rx = t.ox + (e.x - panel_x_) * t.scale;
+        const float ry = t.oy + (e.y - panel_y_) * t.scale;
+        canvas.set_fill_color(hl);
+        canvas.fill_rounded_rect(rx, ry, e.w * t.scale, e.h * t.scale, 3.0f);
+    }
 }
 
 int DesignFrameView::hit_element(Point pos) const {
@@ -418,10 +439,27 @@ int DesignFrameView::hit_element(Point pos) const {
     // Invert the paint transform: view px -> SVG coords.
     const float sx = panel_x_ + (pos.x - t.ox) / t.scale;
     const float sy = panel_y_ + (pos.y - t.oy) / t.scale;
+
+    // Momentary keys first: among rects containing the point, the SMALLEST-AREA
+    // wins (a narrow black key beats the white key it overlaps), order-independent
+    // so a re-export reorder can't change which key is hit. View-scoped.
+    int key = -1; float key_area = std::numeric_limits<float>::max();
+    for (int i = 0; i < static_cast<int>(elements_.size()); ++i) {
+        const auto& e = elements_[i];
+        if (e.kind != DesignFrameElement::Kind::momentary) continue;
+        if (e.view_group != -1 && active_view_group_ != -1 && e.view_group != active_view_group_)
+            continue;
+        if (sx >= e.x && sx < e.x + e.w && sy >= e.y && sy < e.y + e.h) {
+            const float area = e.w * e.h;
+            if (area < key_area) { key_area = area; key = i; }
+        }
+    }
+    if (key >= 0) return key;
+
+    // Knobs: nearest within hit_radius. (Overlay controls own their hits via their
+    // child widget — View::hit_test reaches children before this parent fallback.)
     int best = -1; float bd = std::numeric_limits<float>::max();
     for (int i = 0; i < static_cast<int>(elements_.size()); ++i) {
-        // Only knobs are hit here; overlay controls own their hits via their child
-        // widget (View::hit_test reaches children before this parent fallback).
         if (elements_[i].kind != DesignFrameElement::Kind::knob) continue;
         const float dx = sx - elements_[i].cx, dy = sy - elements_[i].cy;
         const float d = std::sqrt(dx * dx + dy * dy);
@@ -432,16 +470,37 @@ int DesignFrameView::hit_element(Point pos) const {
 
 void DesignFrameView::on_mouse_down(Point pos) {
     drag_ = hit_element(pos);
-    if (drag_ >= 0) {
-        drag_start_y_ = pos.y;
-        drag_start_value_ = elements_[drag_].value;
-        if (on_gesture_begin) on_gesture_begin(drag_);  // bracket the undo step
+    if (drag_ < 0) return;
+    if (elements_[drag_].kind == DesignFrameElement::Kind::momentary) {
+        elements_[drag_].value = 1.0f;            // light the key
+        request_repaint();
+        if (on_gesture_begin) on_gesture_begin(drag_);  // note-on
+        return;
     }
+    drag_start_y_ = pos.y;
+    drag_start_value_ = elements_[drag_].value;
+    if (on_gesture_begin) on_gesture_begin(drag_);  // bracket the undo step
 }
 
 void DesignFrameView::on_mouse_drag(Point pos) {
     if (drag_ < 0) return;
-    // Convert the vertical drag from view pixels into panel (design) space via the
+    if (elements_[drag_].kind == DesignFrameElement::Kind::momentary) {
+        const int hit = hit_element(pos);
+        if (hit == drag_) return;                 // still on the held key
+        // Glissando / drag-off: release the held key; press the new one if the
+        // pointer moved onto another momentary key.
+        elements_[drag_].value = 0.0f;
+        if (on_gesture_end) on_gesture_end(drag_);  // note-off (old)
+        drag_ = -1;
+        if (hit >= 0 && elements_[hit].kind == DesignFrameElement::Kind::momentary) {
+            drag_ = hit;
+            elements_[hit].value = 1.0f;
+            if (on_gesture_begin) on_gesture_begin(hit);  // note-on (new)
+        }
+        request_repaint();
+        return;
+    }
+    // Knob vertical drag: convert from view px into panel (design) space via the
     // same scale, so the turn sensitivity feels identical at any window size.
     const float scale = panel_transform(local_bounds()).scale;
     const float dy_design = scale > 0.0f ? (drag_start_y_ - pos.y) / scale : 0.0f;
@@ -453,8 +512,27 @@ void DesignFrameView::on_mouse_drag(Point pos) {
 }
 
 void DesignFrameView::on_mouse_up(Point /*pos*/) {
-    if (drag_ >= 0 && on_gesture_end) on_gesture_end(drag_);
+    if (drag_ >= 0) {
+        if (elements_[drag_].kind == DesignFrameElement::Kind::momentary) {
+            elements_[drag_].value = 0.0f;        // clear the key
+            request_repaint();
+        }
+        if (on_gesture_end) on_gesture_end(drag_);  // note-off / end undo step
+    }
     drag_ = -1;
+}
+
+void DesignFrameView::set_active_view_group(int group) {
+    if (group == active_view_group_) return;
+    // Release any held key in the outgoing view so notes don't stick on a mode
+    // switch (the contract's release-on-mode-switch edge).
+    if (drag_ >= 0 && elements_[drag_].kind == DesignFrameElement::Kind::momentary) {
+        elements_[drag_].value = 0.0f;
+        if (on_gesture_end) on_gesture_end(drag_);
+        drag_ = -1;
+    }
+    active_view_group_ = group;
+    request_repaint();
 }
 
 // ── DesignTabGroup ──────────────────────────────────────────────────────────
