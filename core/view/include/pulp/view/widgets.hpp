@@ -1599,4 +1599,93 @@ private:
     float smoothing_coeff_ = 0.1f; // Exponential smoothing
 };
 
+// ── WaveformRecorder ─────────────────────────────────────────────────────────
+// Three-state recorder control (Ink & Signal "Recorder" component). One widget
+// composes a filled waveform display, a bottom level meter with a draggable
+// threshold thumb, a center transport button, and a top-right status badge,
+// and re-skins all four for each state:
+//
+//   armed     — faint/empty waveform, red record dot, "READY" badge; the
+//               threshold thumb is draggable to arm the capture trigger.
+//   recording — waveform tinted with accent.error, stop square, live "REC"
+//               badge; the meter shows the incoming level but the thumb is
+//               locked (you can't re-arm mid-take).
+//   captured  — waveform in accent.primary (teal), play triangle, "CAPTURED"
+//               badge with a check; the meter is inert.
+//
+// Clicking the center transport button advances the state in the cycle
+// armed → recording → captured → armed and fires on_state_change plus the
+// matching transport callback (on_record / on_stop / on_play). All chrome is
+// drawn from theme tokens so it stays legible on the dark Ink & Signal theme.
+class WaveformRecorder : public View {
+public:
+    enum class State { armed, recording, captured };
+
+    WaveformRecorder() {
+        set_access_role(AccessRole::group);
+        set_focusable(true);
+    }
+
+    /// Transport state. Setting a new state repaints and fires on_state_change.
+    void set_state(State s);
+    State state() const { return state_; }
+    std::function<void(State)> on_state_change;
+
+    /// Normalized waveform samples (-1..1) drawn across the main area.
+    void set_waveform(std::vector<float> samples) {
+        waveform_ = std::move(samples);
+        request_repaint();
+    }
+    const std::vector<float>& waveform() const { return waveform_; }
+
+    /// Live input level (0..1) shown by the bottom meter fill.
+    void set_level(float level) {
+        float c = std::clamp(level, 0.0f, 1.0f);
+        if (c == level_) return;
+        level_ = c;
+        request_repaint();
+    }
+    float level() const { return level_; }
+
+    /// Capture threshold (0..1) marked by the draggable meter thumb. The setter
+    /// is silent (programmatic); user drags fire on_threshold_change.
+    void set_threshold(float threshold) {
+        float c = std::clamp(threshold, 0.0f, 1.0f);
+        if (c == threshold_) return;
+        threshold_ = c;
+        request_repaint();
+    }
+    float threshold() const { return threshold_; }
+    std::function<void(float)> on_threshold_change;
+
+    /// Optional transport-action callbacks, fired alongside the state advance.
+    std::function<void()> on_record;
+    std::function<void()> on_stop;
+    std::function<void()> on_play;
+
+    void paint(canvas::Canvas& canvas) override;
+    void on_mouse_down(Point pos) override;
+    void on_mouse_drag(Point pos) override;
+    void on_mouse_up(Point pos) override;
+
+private:
+    /// Bottom level-meter strip (the draggable threshold track).
+    Rect meter_rect_() const;
+    /// Main waveform area (between the badge row and the meter).
+    Rect waveform_rect_() const;
+    float transport_radius_() const;
+    Point transport_center_() const;
+    /// Button-driven cycle: fires the current state's transport callback,
+    /// then advances armed→recording→captured→armed (via set_state).
+    void advance_state_();
+    /// Map a local x within the meter to a threshold and fire on_threshold_change.
+    void update_threshold_from_x_(float x);
+
+    State state_ = State::armed;
+    std::vector<float> waveform_;
+    float level_ = 0.0f;
+    float threshold_ = 0.5f;
+    bool dragging_threshold_ = false;
+};
+
 } // namespace pulp::view

@@ -1310,6 +1310,8 @@ pulp_add_test_suite(pulp-test-modulation-matrix LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-modulation-matrix-widget LIBRARIES pulp::view)
 # Lasso selection overlay
 pulp_add_test_suite(pulp-test-lasso LIBRARIES pulp::view)
+# WaveformRecorder three-state recorder widget (Ink & Signal design system)
+pulp_add_test_suite(pulp-test-waveform-recorder LIBRARIES pulp::view)
 # Split pane layout widget
 pulp_add_test_suite(pulp-test-split-view LIBRARIES pulp::view)
 # CommandRegistry + KeyMappingEditor (Pulp-native names — planning slice 6.4)

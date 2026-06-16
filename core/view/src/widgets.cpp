@@ -1717,4 +1717,256 @@ void GroupBox::on_mouse_event(const MouseEvent& event) {
 // CorrelationMeter) moved to core/view/src/widgets/visualizers.cpp
 // in the 2026-05 Phase 2 (R2-6) batch.
 
+// ── WaveformRecorder ─────────────────────────────────────────────────────────
+
+namespace {
+constexpr float kRecorderPad = 16.0f;   // outer panel padding
+constexpr float kRecorderMeterH = 22.0f;  // bottom level-meter strip height
+constexpr float kRecorderBadgeRow = 34.0f;  // space reserved for the badge row
+}  // namespace
+
+Rect WaveformRecorder::meter_rect_() const {
+    auto b = local_bounds();
+    return {kRecorderPad,
+            b.height - kRecorderPad - kRecorderMeterH,
+            std::max(0.0f, b.width - 2 * kRecorderPad),
+            kRecorderMeterH};
+}
+
+Rect WaveformRecorder::waveform_rect_() const {
+    auto b = local_bounds();
+    float top = kRecorderPad + kRecorderBadgeRow;
+    float bottom = meter_rect_().y - 12.0f;
+    return {kRecorderPad, top,
+            std::max(0.0f, b.width - 2 * kRecorderPad),
+            std::max(0.0f, bottom - top)};
+}
+
+Point WaveformRecorder::transport_center_() const {
+    auto wf = waveform_rect_();
+    return {wf.x + wf.width * 0.5f, wf.y + wf.height * 0.5f};
+}
+
+float WaveformRecorder::transport_radius_() const {
+    auto wf = waveform_rect_();
+    return std::clamp(std::min(wf.width, wf.height) * 0.18f, 18.0f, 44.0f);
+}
+
+void WaveformRecorder::set_state(State s) {
+    if (s == state_) return;
+    state_ = s;
+    dragging_threshold_ = false;
+    request_repaint();
+    if (on_state_change) on_state_change(state_);
+}
+
+void WaveformRecorder::advance_state_() {
+    switch (state_) {
+        case State::armed:
+            if (on_record) on_record();
+            set_state(State::recording);
+            break;
+        case State::recording:
+            if (on_stop) on_stop();
+            set_state(State::captured);
+            break;
+        case State::captured:
+            if (on_play) on_play();
+            set_state(State::armed);
+            break;
+    }
+}
+
+void WaveformRecorder::update_threshold_from_x_(float x) {
+    auto m = meter_rect_();
+    if (m.width <= 0.0f) return;
+    float t = std::clamp((x - m.x) / m.width, 0.0f, 1.0f);
+    if (t == threshold_) return;
+    threshold_ = t;
+    request_repaint();
+    if (on_threshold_change) on_threshold_change(threshold_);
+}
+
+void WaveformRecorder::on_mouse_down(Point pos) {
+    // The center transport button takes priority over the meter.
+    Point c = transport_center_();
+    float r = transport_radius_();
+    float dx = pos.x - c.x;
+    float dy = pos.y - c.y;
+    if (dx * dx + dy * dy <= r * r) {
+        advance_state_();
+        return;
+    }
+    // The threshold thumb is only draggable while armed.
+    if (state_ == State::armed) {
+        auto m = meter_rect_();
+        if (pos.x >= m.x - 8.0f && pos.x <= m.x + m.width + 8.0f &&
+            pos.y >= m.y - 8.0f && pos.y <= m.y + m.height + 8.0f) {
+            dragging_threshold_ = true;
+            update_threshold_from_x_(pos.x);
+        }
+    }
+}
+
+void WaveformRecorder::on_mouse_drag(Point pos) {
+    if (dragging_threshold_ && state_ == State::armed)
+        update_threshold_from_x_(pos.x);
+}
+
+void WaveformRecorder::on_mouse_up(Point) {
+    dragging_threshold_ = false;
+}
+
+void WaveformRecorder::paint(canvas::Canvas& canvas) {
+    auto b = local_bounds();
+
+    // Theme tokens (Ink & Signal dark theme supplies the teal/coral/amber).
+    auto bg     = resolve_color("bg.surface",     canvas::Color::rgba8(36, 36, 36));
+    auto border = resolve_color("control.border", canvas::Color::rgba8(58, 58, 58));
+    auto text2  = resolve_color("text.secondary", canvas::Color::rgba8(138, 138, 138));
+    auto teal   = resolve_color("accent.primary", canvas::Color::rgba8(59, 130, 246));
+    auto coral  = resolve_color("accent.error",   canvas::Color::rgba8(239, 68, 68));
+    auto amber  = resolve_color("accent.warning", canvas::Color::rgba8(245, 158, 11));
+
+    // Panel background.
+    canvas.set_fill_color(bg);
+    canvas.fill_rounded_rect(0, 0, b.width, b.height, 14.0f);
+
+    // ── Waveform area ────────────────────────────────────────────────────
+    auto wf = waveform_rect_();
+    canvas.set_fill_color(canvas::Color::rgba(0, 0, 0, 0.18f));
+    canvas.fill_rounded_rect(wf.x, wf.y, wf.width, wf.height, 10.0f);
+
+    canvas::Color wave_color;
+    switch (state_) {
+        case State::armed:
+            wave_color = canvas::Color::rgba(text2.r, text2.g, text2.b, 0.30f);
+            break;
+        case State::recording: wave_color = coral; break;
+        case State::captured:  wave_color = teal;  break;
+    }
+
+    if (!waveform_.empty() && wf.width > 0.0f && wf.height > 0.0f) {
+        canvas.set_fill_color(wave_color);
+        float mid_y = wf.y + wf.height * 0.5f;
+        int cols = std::max(1, static_cast<int>(wf.width));
+        float bar_w = wf.width / static_cast<float>(cols);
+        size_t n = waveform_.size();
+        for (int i = 0; i < cols; ++i) {
+            size_t s0 = static_cast<size_t>((static_cast<float>(i) / cols) * n);
+            size_t s1 = static_cast<size_t>((static_cast<float>(i + 1) / cols) * n);
+            if (s1 <= s0) s1 = s0 + 1;
+            float peak = 0.0f;
+            for (size_t s = s0; s < s1 && s < n; ++s)
+                peak = std::max(peak, std::fabs(waveform_[s]));
+            float half = std::clamp(peak, 0.0f, 1.0f) * (wf.height * 0.45f);
+            float x = wf.x + static_cast<float>(i) * bar_w;
+            canvas.fill_rect(x, mid_y - half, std::max(1.0f, bar_w - 0.5f), half * 2.0f);
+        }
+    } else {
+        // Empty/armed: faint center baseline.
+        canvas.set_fill_color(canvas::Color::rgba(text2.r, text2.g, text2.b, 0.18f));
+        canvas.fill_rect(wf.x + 6.0f, wf.y + wf.height * 0.5f - 0.5f,
+                         std::max(0.0f, wf.width - 12.0f), 1.0f);
+    }
+
+    // ── Level meter + threshold thumb ────────────────────────────────────
+    auto m = meter_rect_();
+    float meter_r = m.height * 0.5f;
+    canvas.set_fill_color(canvas::Color::rgba(0, 0, 0, 0.30f));
+    canvas.fill_rounded_rect(m.x, m.y, m.width, m.height, meter_r);
+    if (level_ > 0.0f && m.width > 0.0f) {
+        canvas::Color fill = (state_ == State::recording) ? coral : teal;
+        if (state_ == State::captured)
+            fill = canvas::Color::rgba(teal.r, teal.g, teal.b, 0.35f);
+        canvas.set_fill_color(fill);
+        float fw = std::clamp(m.width * level_, meter_r * 2.0f, m.width);
+        canvas.fill_rounded_rect(m.x, m.y, fw, m.height, meter_r);
+    }
+    {
+        float tx = m.x + std::clamp(threshold_, 0.0f, 1.0f) * m.width;
+        float thumb_w = 6.0f;
+        float thumb_h = m.height + 10.0f;
+        float thumb_y = m.y - 5.0f;
+        canvas::Color thumb = (state_ == State::armed)
+            ? amber
+            : canvas::Color::rgba(text2.r, text2.g, text2.b, 0.5f);
+        canvas.set_fill_color(thumb);
+        canvas.fill_rounded_rect(tx - thumb_w * 0.5f, thumb_y, thumb_w, thumb_h, 3.0f);
+    }
+
+    // ── Transport button ─────────────────────────────────────────────────
+    Point c = transport_center_();
+    float r = transport_radius_();
+    canvas.set_fill_color(canvas::Color::rgba(0, 0, 0, 0.25f));
+    canvas.fill_circle(c.x, c.y, r + 3.0f);
+    canvas.set_fill_color(resolve_color("bg.primary", canvas::Color::rgba8(20, 20, 20)));
+    canvas.fill_circle(c.x, c.y, r);
+    canvas.set_stroke_color(border);
+    canvas.set_line_width(1.5f);
+    canvas.stroke_circle(c.x, c.y, r);
+
+    if (state_ == State::armed) {
+        // Red record dot.
+        canvas.set_fill_color(coral);
+        canvas.fill_circle(c.x, c.y, r * 0.42f);
+    } else if (state_ == State::recording) {
+        // Red stop square.
+        canvas.set_fill_color(coral);
+        float sq = r * 0.62f;
+        canvas.fill_rounded_rect(c.x - sq * 0.5f, c.y - sq * 0.5f, sq, sq, 3.0f);
+    } else {
+        // Teal play triangle.
+        canvas.set_fill_color(teal);
+        float tr = r * 0.5f;
+        canvas::Canvas::Point2D tri[3] = {
+            {c.x - tr * 0.6f, c.y - tr},
+            {c.x - tr * 0.6f, c.y + tr},
+            {c.x + tr,        c.y     },
+        };
+        canvas.fill_path(tri, 3);
+    }
+
+    // ── Status badge (top-right) ─────────────────────────────────────────
+    {
+        std::string label;
+        canvas::Color badge;
+        switch (state_) {
+            case State::armed:     label = "READY";    badge = amber; break;
+            case State::recording: label = "REC";      badge = coral; break;
+            case State::captured:  label = "CAPTURED"; badge = teal;  break;
+        }
+        canvas.set_font("Inter", 11.0f);
+        float badge_h = 22.0f;
+        float text_w = static_cast<float>(label.size()) * 7.0f;  // heuristic advance
+        float dot_w = (state_ == State::recording) ? 14.0f : 0.0f;
+        float check_w = (state_ == State::captured) ? 16.0f : 0.0f;
+        float badge_w = text_w + dot_w + check_w + 20.0f;
+        float bx = b.width - kRecorderPad - badge_w;
+        float by = kRecorderPad - 2.0f;
+        canvas.set_fill_color(canvas::Color::rgba(badge.r, badge.g, badge.b, 0.18f));
+        canvas.fill_rounded_rect(bx, by, badge_w, badge_h, badge_h * 0.5f);
+
+        float content_x = bx + 10.0f;
+        float badge_cy = by + badge_h * 0.5f;
+        if (state_ == State::recording) {
+            canvas.set_fill_color(badge);
+            canvas.fill_circle(content_x + 4.0f, badge_cy, 4.0f);
+            content_x += dot_w;
+        }
+        if (state_ == State::captured) {
+            canvas.set_stroke_color(badge);
+            canvas.set_line_width(2.0f);
+            canvas.stroke_line(content_x + 1.0f, badge_cy,
+                               content_x + 5.0f, badge_cy + 4.0f);
+            canvas.stroke_line(content_x + 5.0f, badge_cy + 4.0f,
+                               content_x + 12.0f, badge_cy - 4.0f);
+            content_x += check_w;
+        }
+        canvas.set_fill_color(badge);
+        canvas.fill_text_anchored(label, content_x, badge_cy,
+                                  canvas::Canvas::TextAnchor::GlyphCenter);
+    }
+}
+
 } // namespace pulp::view
