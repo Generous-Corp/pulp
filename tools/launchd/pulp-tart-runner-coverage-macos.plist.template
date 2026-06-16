@@ -2,23 +2,32 @@
 <!--
   Dedicated Tart macOS Coverage supervisor.
 
-  This is intentionally separate from the build/gate Tart runner:
+  Mirrors the working build/gate runner (com.danielraffel.pulp.tart-runner):
+  it drives the home-installed `tartci serve macos` tool with everything under
+  $HOME so launchd (macOS TCC) can read it. An earlier shape pointed
+  ProgramArguments + WorkingDirectory + TART_HOME at a repo worktree on
+  /Volumes/Workshop and launchd was denied ("Operation not permitted"); never
+  point a macOS LaunchAgent at /Volumes without a signed Full Disk Access helper.
+
+  Intentionally separate from the build/gate runner:
   - labels use pulp-coverage-vm-macos, never pulp-build or pulp-build-vm
-  - the queue gate wakes for the Coverage workflow, not Build and Test
+  - the queue gate wakes for the Coverage workflow, not "Build and Test"
   - repo routing uses PULP_COVERAGE_MACOS_RUNS_ON_JSON, not Namespace vars
+  - TARTCI_MACOS_VM_CAP=1: coverage runs one VM so it never consumes the
+    second slot the required `macos` gate may need on a shared host.
 
-  Install like the build runner template, replacing $PULP_REPO and $HOME with
-  absolute paths because launchd does not expand shell variables:
+  Prereq: install tartci into $HOME (tartci provides a $HOME/.local/bin/tartci
+  wrapper) and keep macOS goldens under $HOME/VMs — same as the build runner.
 
-    sed -e "s|\$PULP_REPO|$PWD|g" -e "s|\$HOME|$HOME|g" \
+  Install (launchd does not expand shell variables, so the install sed must
+  write absolute paths):
+
+    sed -e "s|\$HOME|$HOME|g" \
       tools/launchd/pulp-tart-runner-coverage-macos.plist.template \
       > ~/Library/LaunchAgents/com.danielraffel.pulp.tart-runner-coverage-macos.plist
 
-  Load:
-    launchctl load ~/Library/LaunchAgents/com.danielraffel.pulp.tart-runner-coverage-macos.plist
-
-  Stop:
-    launchctl unload ~/Library/LaunchAgents/com.danielraffel.pulp.tart-runner-coverage-macos.plist
+  Load:   launchctl load   ~/Library/LaunchAgents/com.danielraffel.pulp.tart-runner-coverage-macos.plist
+  Stop:   launchctl unload ~/Library/LaunchAgents/com.danielraffel.pulp.tart-runner-coverage-macos.plist
 -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -30,21 +39,16 @@
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>$PULP_REPO/tools/ci/tart-runner.sh</string>
+        <string>$HOME/.local/bin/tartci</string>
+        <string>serve</string>
+        <string>macos</string>
         <string>--loop</string>
-        <string>--workflow-name</string>
-        <string>Coverage</string>
         <string>--labels</string>
         <string>self-hosted,macOS,ARM64,pulp-coverage-vm-macos</string>
-        <string>--queue-match-labels</string>
-        <string>--name-prefix</string>
-        <string>pulp-coverage-macos</string>
-        <string>--slot</string>
-        <string>1</string>
     </array>
 
     <key>WorkingDirectory</key>
-    <string>$PULP_REPO</string>
+    <string>$HOME</string>
 
     <key>RunAtLoad</key>
     <true/>
@@ -53,17 +57,35 @@
     <true/>
 
     <key>StandardOutPath</key>
-    <string>$HOME/Library/Logs/pulp/tart-runner-coverage-macos.log</string>
+    <string>$HOME/Library/Logs/tartci/tart-runner-coverage-macos.log</string>
 
     <key>StandardErrorPath</key>
-    <string>$HOME/Library/Logs/pulp/tart-runner-coverage-macos.log</string>
+    <string>$HOME/Library/Logs/tartci/tart-runner-coverage-macos.log</string>
 
     <key>EnvironmentVariables</key>
     <dict>
+        <key>HOME</key>
+        <string>$HOME</string>
         <key>PATH</key>
-        <string>/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:/usr/bin:/bin</string>
+        <string>/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
         <key>TART_HOME</key>
-        <string>/Volumes/Workshop/VMs</string>
+        <string>$HOME/VMs</string>
+        <key>TARTCI_CI_CACHE</key>
+        <string>$HOME/.cache/pulp-ci</string>
+        <key>TARTCI_HOME</key>
+        <string>$HOME/.tartci</string>
+        <key>TARTCI_MACOS_GOLDEN</key>
+        <string>pulp-build-runner:latest</string>
+        <key>TARTCI_MACOS_VM_CAP</key>
+        <string>1</string>
+        <key>TARTCI_RUNNER_LABELS</key>
+        <string>self-hosted,macOS,ARM64,pulp-coverage-vm-macos</string>
+        <key>TARTCI_RUNNER_REPO</key>
+        <string>danielraffel/pulp</string>
+        <key>TARTCI_RUNNER_WORKFLOW_NAME</key>
+        <string>Coverage</string>
+        <key>TARTCI_RUNNER_QUEUE_MATCH_LABELS</key>
+        <string>1</string>
     </dict>
 </dict>
 </plist>
