@@ -353,6 +353,34 @@
         "core/format/include/pulp/format/headless.hpp",
         ".agents/skills/audio-headless-debug/**"
       ]
+    },
+    "video-proof": {
+      "paths": [
+        ".agents/skills/video-proof/**",
+        "docs/reference/desktop-video-proofs.md",
+        "tools/local-ci/video_artifacts.py",
+        "tools/local-ci/mobile_video_composition.py",
+        "tools/local-ci/reaper_video_recipe.py",
+        "tools/local-ci/simulator_video_commands_cli.py",
+        "tools/local-ci/android_video_commands_cli.py",
+        "tools/local-ci/pack_video_proof_tool.py",
+        "tools/local-ci/macos_terminal_runner.py",
+        "tools/local-ci/macos_terminal_proof.py",
+        "tools/local-ci/macos_window_video_select.py",
+        "tools/local-ci/macos_desktop_video.py",
+        "tools/local-ci/macos_desktop_action_video.py",
+        "tools/local-ci/macos_video_bindings.py",
+        "tools/local-ci/macos_desktop_smoke_video_dependency_bindings.py",
+        "tools/local-ci/reporting_video.py",
+        "tools/local-ci/reporting_review.py",
+        "tools/local-ci/io_utils_design_parity.py",
+        "tools/local-ci/cli_parser_video.py",
+        "tools/local-ci/desktop_review_commands_cli.py",
+        "tools/local-ci/desktop_review_command_bindings.py",
+        "tools/local-ci/remotion-proof/**",
+        "tools/local-ci/scripts/compose-video-proof.mjs",
+        "tools/local-ci/scripts/smoke-video-proof.mjs"
+      ]
     }
   }
 }
