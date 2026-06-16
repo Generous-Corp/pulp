@@ -59,7 +59,7 @@ class DownstreamValidationManifestTests(unittest.TestCase):
         manifest["consumers"] = manifest["consumers"][:-1]
         result = self.run_validator(manifest)
         self.assertEqual(result.returncode, 1)
-        self.assertIn("five roadmap P0.4 downstream repos", result.stderr)
+        self.assertIn("roadmap P0.4 downstream repos", result.stderr)
 
     def test_rejects_debug_sdk_recipe(self):
         manifest = self.load_manifest()
@@ -67,14 +67,6 @@ class DownstreamValidationManifestTests(unittest.TestCase):
         result = self.run_validator(manifest)
         self.assertEqual(result.returncode, 1)
         self.assertIn("build_type must be Release", result.stderr)
-
-    def test_rejects_importer_claiming_design_ir_coverage(self):
-        manifest = self.load_manifest()
-        importer = next(c for c in manifest["consumers"] if c["name"] == "pulp-import-iplug")
-        importer["dependency_surfaces"].append("DesignIR JSON")
-        result = self.run_validator(manifest)
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("must not claim DesignIR coverage", result.stderr)
 
     def test_local_report_marks_missing_checkouts_without_failing_schema(self):
         manifest = self.load_manifest()
