@@ -540,14 +540,26 @@ jobs:
         # finish in ~1h, far under the budget, so they are never affected.
         run: |
           budget=$(( 135 * 60 ))   # 135 min < 150-min job cap
+          budget_hit="${RUNNER_TEMP:-/tmp}/coverage-budget-hit"
+          rm -f "${budget_hit}"
           scripts/run_coverage.sh & cov=$!
           ( sleep "${budget}" \
               && echo "::warning::coverage suite hit the ${budget}s best-effort budget (expected on os-windows); terminating — leg is non-fatal." \
+              && : > "${budget_hit}" \
               && kill -TERM "${cov}" 2>/dev/null \
               && sleep 15 && kill -KILL "${cov}" 2>/dev/null ) & watch=$!
           set +e; wait "${cov}"; rc=$?; set -e
           kill -TERM "${watch}" 2>/dev/null || true
           wait "${watch}" 2>/dev/null || true
+          if [ -f "${budget_hit}" ]; then
+            # Best-effort timeout: drop any PARTIAL Cobertura/LCOV that the
+            # interrupted llvm-cov export may have left behind, so the verify +
+            # Codecov upload steps publish NOTHING for os-windows rather than a
+            # truncated, valid-looking number. A clean miss beats a wrong number.
+            rm -f build-coverage/coverage.cobertura.xml \
+                  build-coverage/coverage/coverage.lcov 2>/dev/null || true
+            rm -f "${budget_hit}"
+          fi
           exit "${rc}"
 
       - name: Install Python coverage tooling
