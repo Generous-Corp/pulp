@@ -17,6 +17,7 @@
 #include <android/native_window.h>
 #include <android/native_window_jni.h>
 #include <android/log.h>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -38,10 +39,19 @@
 
 namespace {
 
+// g_surface_view is written on the render thread (nativeOnSurfaceCreated) and
+// cleared on the UI thread (nativeOnSurfaceDestroyed) while a drag may read it
+// on the UI thread — guard all three with a mutex.
+std::mutex g_surface_view_mutex;
 pulp::android::GlobalRef g_surface_view;  // PulpSurfaceView
 
 bool android_start_file_drag(const std::vector<std::string>& paths) {
-    if (paths.empty() || !g_surface_view) return false;
+    if (paths.empty()) return false;
+    // Hold the lock for the whole up-call so the GlobalRef can't be deleted by a
+    // concurrent surfaceDestroyed mid-use. The call is short (Kotlin posts the
+    // actual startDragAndDrop to the UI loop).
+    std::lock_guard<std::mutex> lock(g_surface_view_mutex);
+    if (!g_surface_view) return false;
     JNIEnv* env = pulp::android::get_env();
     jobject view = g_surface_view.get();
     jclass cls = env->GetObjectClass(view);
@@ -54,6 +64,12 @@ bool android_start_file_drag(const std::vector<std::string>& paths) {
         env->NewObjectArray(static_cast<jsize>(paths.size()), str_cls, nullptr);
     for (jsize i = 0; i < static_cast<jsize>(paths.size()); ++i) {
         jstring s = env->NewStringUTF(paths[static_cast<size_t>(i)].c_str());
+        if (!s) {  // OOM → a pending exception; bail before the next JNI call aborts
+            env->ExceptionClear();
+            env->DeleteLocalRef(arr);
+            env->DeleteLocalRef(str_cls);
+            return false;
+        }
         env->SetObjectArrayElement(arr, i, s);
         env->DeleteLocalRef(s);
     }
@@ -91,7 +107,10 @@ Java_com_pulp_render_PulpSurfaceView_nativeOnSurfaceCreated(
     try {
         // Cache the PulpSurfaceView for outbound-drag up-calls and register the
         // process-global drag backend View::start_file_drag falls back to.
-        g_surface_view = pulp::android::GlobalRef(env, thiz);
+        {
+            std::lock_guard<std::mutex> lock(g_surface_view_mutex);
+            g_surface_view = pulp::android::GlobalRef(env, thiz);
+        }
         pulp::view::set_file_drag_backend([](const pulp::view::FileDragRequest& req) {
             return android_start_file_drag(req.file_paths);
         });
@@ -128,6 +147,15 @@ JNIEXPORT void JNICALL
 Java_com_pulp_render_PulpSurfaceView_nativeOnSurfaceDestroyed(
     JNIEnv* env, jobject thiz) {
     try {
+        // Drop the outbound-drag backend + cached view: the surface (and the
+        // view it up-calls) is going away. Symmetric with the surfaceCreated
+        // registration; avoids a post-destroy up-call into a detached view and
+        // leaving a stale GlobalRef whose dtor would DeleteGlobalRef at teardown.
+        pulp::view::set_file_drag_backend(nullptr);
+        {
+            std::lock_guard<std::mutex> lock(g_surface_view_mutex);
+            g_surface_view = pulp::android::GlobalRef{};
+        }
         pulp::render::android_surface_destroyed();
     } catch (const std::exception& e) {
         env->ThrowNew(env->FindClass("java/lang/RuntimeException"), e.what());

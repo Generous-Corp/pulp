@@ -206,8 +206,19 @@ class PulpSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
     // openable by path. Best-effort — returns null on any failure.
     private fun resolveUriToCacheFile(uri: Uri): String? {
         return try {
-            val name = queryDisplayName(uri) ?: "drop_${System.nanoTime()}"
-            val out = File(context.cacheDir, "dropped/$name").apply { parentFile?.mkdirs() }
+            // The display name comes from an EXTERNAL (source-app) content URI, so
+            // it is attacker-controlled: a name like "../databases/x" would escape
+            // cacheDir/dropped and let a malicious drag overwrite our private files.
+            // File(raw).name strips every path segment (and "..") to a bare leaf.
+            val raw = queryDisplayName(uri) ?: "drop_${System.nanoTime()}"
+            val name = File(raw).name.ifBlank { "drop_${System.nanoTime()}" }
+            val droppedDir = File(context.cacheDir, "dropped").apply { mkdirs() }
+            val out = File(droppedDir, name)
+            // Defence in depth: refuse anything that still resolves outside the dir.
+            if (!out.canonicalPath.startsWith(droppedDir.canonicalPath + File.separator)) {
+                Log.w(TAG, "Refusing dropped file outside cache: $raw")
+                return null
+            }
             context.contentResolver.openInputStream(uri)?.use { input ->
                 out.outputStream().use { input.copyTo(it) }
             } ?: return null

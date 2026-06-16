@@ -16,6 +16,8 @@
 
 #include <pulp/view/view.hpp>
 
+#include <mutex>
+
 namespace pulp::view {
 
 namespace {
@@ -138,17 +140,30 @@ bool dispatch_drop(View& root, DragSession& session, const DropData& data,
 // ── Process-global outbound drag backend (hostless platforms; Android) ───────
 
 namespace {
+// Guards g_file_drag_backend: it is set on the platform's surface/render thread
+// (Android registers it from nativeOnSurfaceCreated) but invoked from the UI
+// thread during a drag, so an unsynchronised std::function read could tear.
+std::mutex g_file_drag_backend_mutex;
 FileDragBackend g_file_drag_backend;
 }  // namespace
 
 FileDragBackend set_file_drag_backend(FileDragBackend backend) {
+    std::lock_guard<std::mutex> lock(g_file_drag_backend_mutex);
     FileDragBackend prev = std::move(g_file_drag_backend);
     g_file_drag_backend = std::move(backend);
     return prev;
 }
 
 bool invoke_file_drag_backend(const FileDragRequest& request) {
-    return g_file_drag_backend ? g_file_drag_backend(request) : false;
+    // Copy under the lock, then invoke unlocked — the backend may up-call into
+    // platform code (Android: a JNI call into Kotlin) and must not run holding
+    // the lock.
+    FileDragBackend backend;
+    {
+        std::lock_guard<std::mutex> lock(g_file_drag_backend_mutex);
+        backend = g_file_drag_backend;
+    }
+    return backend ? backend(request) : false;
 }
 
 #if !defined(__APPLE__)
