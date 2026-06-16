@@ -34,6 +34,8 @@ class LocalCiBootstrapModuleAliasesTests(unittest.TestCase):
             "_desktop_review_commands_cli",
             "_desktop_video_compose_commands_cli",
             "_desktop_serve_commands_cli",
+            "_desktop_video_prerequisites",
+            "_desktop_video_setup_commands_cli",
             "_desktop_video_action_commands_cli",
             "_desktop_video_matrix_commands_cli",
             "_desktop_setup_commands_cli",

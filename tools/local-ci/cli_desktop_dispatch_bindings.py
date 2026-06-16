@@ -50,6 +50,8 @@ def cmd_desktop(bindings: Mapping[str, Any], args: Any) -> int:
             "video-matrix": _binding(bindings, "cmd_desktop_video_matrix"),
             "video": _binding(bindings, "cmd_desktop_video"),
             "serve": _binding(bindings, "cmd_desktop_serve"),
+            "video-doctor": _binding(bindings, "cmd_desktop_video_doctor"),
+            "video-setup": _binding(bindings, "cmd_desktop_video_setup"),
         },
     )
 

@@ -26,6 +26,7 @@ class DesktopCommandBindingsTests(unittest.TestCase):
             *self.mod.DESKTOP_VIDEO_INFO_COMMAND_EXPORTS,
             *self.mod.DESKTOP_VIDEO_ACTION_COMMAND_EXPORTS,
             *self.mod.DESKTOP_SERVE_COMMAND_EXPORTS,
+            *self.mod.DESKTOP_VIDEO_SETUP_COMMAND_EXPORTS,
         )
 
         self.assertEqual(self.mod.DESKTOP_COMMAND_EXPORTS, expected)

@@ -23,6 +23,9 @@ and the matching contract tests in the same change.
 | `desktop_video_compose_commands_cli.py` | Desktop compose-video / design-diff / design-proof commands (Remotion recompose + design-parity still proofs). | Recording, review verdicts, or command dispatch. |
 | `desktop_video_info_command_bindings.py` | Facade bindings for the desktop video info commands (video-matrix). | Matrix data/readiness logic or dispatch. |
 | `desktop_video_matrix_commands_cli.py` | Desktop video-proof demo matrix command (curated scenarios + machine-local readiness checks). | Recording, compose, or command dispatch. |
+| `desktop_video_prerequisites.py` | Video-proof setup/doctor prerequisite checks, recorder-backend probe, remediations, install model, and report payloads. | Command dispatch, recording, or compose. |
+| `desktop_video_setup_command_bindings.py` | Facade bindings for the desktop video-doctor/video-setup commands. | Prerequisite logic or readiness checks. |
+| `desktop_video_setup_commands_cli.py` | Desktop video-doctor + video-setup commands (readiness report + first-run setup steps). | Prerequisite-check internals or command dispatch. |
 | `io_utils_design_parity.py` | Stdlib PNG codec and design-parity image diff summary. | Video recording, capture orchestration, or report publishing. |
 | `macos_desktop_action_video.py` | Video-only helpers for the macOS smoke flow (focus/marker summaries, reaper-recipe validation, pid/log waits). | Launch/capture sequencing or binding installation. |
 | `macos_desktop_smoke_video_dependency_bindings.py` | Video dependency callables for the macOS smoke facade. | Underlying recording logic or command dispatch. |
