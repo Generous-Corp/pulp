@@ -33,6 +33,8 @@ SCAN_DIRS = [
 ALLOWLISTED_OVERRIDES = {
     "text_editor_bg",        # TextEditor: distinct field bg; falls back to bg.surface
     "text_editor_focus_bg",  # TextEditor: distinct focus bg; falls back to bg.elevated
+    "border",                # TextEditor paint: hairline field border; falls back to a literal
+    "selection.bg",          # Table: selected-row background; falls back to a literal accent-blue
 }
 
 KEY_RE = re.compile(r'resolve_color\(\s*"([a-z][a-zA-Z0-9_.]*)"')
