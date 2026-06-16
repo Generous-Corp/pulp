@@ -527,7 +527,28 @@ jobs:
           # avoids macOS-runner ring-crate build failure (#785) without
           # losing C++ coverage data.
           PULP_SKIP_RUST_CLI: '1'
-        run: scripts/run_coverage.sh
+        # Bound the run with an INTERNAL budget below the job's
+        # `timeout-minutes: 150`. The os-windows instrumented build + ~9k tests
+        # + llvm-cov over 1000+ objects legitimately can't finish in the cap on
+        # windows-latest. A job-level *timeout* CANCELS the whole job, and a
+        # cancellation is NOT neutralised by `continue-on-error` (verified by a
+        # canary) — so the run would conclude `cancelled` and never clear the
+        # coverage-staleness watchdog. By killing the work ourselves before the
+        # cap, the step exits non-zero (a normal failure), which the job-level
+        # `continue-on-error: matrix.os=='windows'` DOES neutralise → the run
+        # concludes success and the other OS flags still upload. Linux/macOS
+        # finish in ~1h, far under the budget, so they are never affected.
+        run: |
+          budget=$(( 135 * 60 ))   # 135 min < 150-min job cap
+          scripts/run_coverage.sh & cov=$!
+          ( sleep "${budget}" \
+              && echo "::warning::coverage suite hit the ${budget}s best-effort budget (expected on os-windows); terminating — leg is non-fatal." \
+              && kill -TERM "${cov}" 2>/dev/null \
+              && sleep 15 && kill -KILL "${cov}" 2>/dev/null ) & watch=$!
+          set +e; wait "${cov}"; rc=$?; set -e
+          kill -TERM "${watch}" 2>/dev/null || true
+          wait "${watch}" 2>/dev/null || true
+          exit "${rc}"
 
       - name: Install Python coverage tooling
         # tools/scripts/** is a blind spot in the current dashboard:

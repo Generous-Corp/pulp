@@ -161,8 +161,10 @@ class ObjectDiscoveryTests(unittest.TestCase):
         text = SCRIPT.read_text()
         self.assertIn('OBJ_RSP=', text,
                       "object list must be written to a response file")
-        self.assertIn('printf -- \'-object\\n%s\\n\' "${tok}" >> "${OBJ_RSP}"', text,
-                      "response file must be built one -object/path pair at a time")
+        self.assertIn('printf -- \'-object\\n"%s"\\n\' "${tok}" >> "${OBJ_RSP}"', text,
+                      "response file must be built one -object/path pair at a time, "
+                      "with the path double-quoted so a workspace path containing a "
+                      "space stays a single -object argument")
         self.assertGreaterEqual(
             text.count('"@${OBJ_RSP}"'), 3,
             "llvm-cov report, show, and export must each pass objects via the "
@@ -180,6 +182,25 @@ class ObjectDiscoveryTests(unittest.TestCase):
                       "response-file builder must drop objects that no longer exist")
         self.assertIn("existence filter left zero -object entries", text,
                       "an empty post-filter object set must fail loudly")
+
+    def test_mass_object_drop_fails_loudly(self) -> None:
+        # The existence filter must not silently upload near-empty coverage when
+        # it drops a large fraction of objects (a broken build tree / discovery
+        # bug). A healthy run drops ~0-1; a mass drop must fail, not export
+        # coverage from the few survivors as if valid.
+        text = SCRIPT.read_text()
+        self.assertIn("TOTAL_OBJECTS=", text)
+        self.assertIn("VANISHED_OBJECTS * 100", text,
+                      "mass-drop guard must compare vanished against a percentage "
+                      "of the total object set")
+        self.assertIn("refusing to upload coverage from the survivors", text)
+
+    def test_response_file_paths_are_quoted_for_spaces(self) -> None:
+        # LLVM response files are whitespace-tokenized but honor double quotes;
+        # an unquoted path containing a space would split into bogus args.
+        text = SCRIPT.read_text()
+        self.assertIn('-object\\n"%s"\\n', text,
+                      "object paths in the response file must be double-quoted")
 
     def test_optional_ctest_args_are_threaded_into_ctest_invocation(self) -> None:
         self.assertTrue(

@@ -338,7 +338,12 @@ prev=""
 for tok in "${BINARIES[@]}"; do
     if [[ "${prev}" == "-object" ]]; then
         if [[ -f "${tok}" ]]; then
-            printf -- '-object\n%s\n' "${tok}" >> "${OBJ_RSP}"
+            # Quote the path: LLVM response files are whitespace-tokenized but
+            # honor double quotes, so a runner workdir containing a space
+            # (e.g. /Volumes/CI Builds/...) stays a single -object argument
+            # instead of splitting into bogus tokens. Harmless for the common
+            # space-free GitHub/self-hosted paths.
+            printf -- '-object\n"%s"\n' "${tok}" >> "${OBJ_RSP}"
             KEPT_OBJECTS=$((KEPT_OBJECTS + 1))
         else
             VANISHED_OBJECTS=$((VANISHED_OBJECTS + 1))
@@ -352,6 +357,18 @@ if [[ "${VANISHED_OBJECTS}" -gt 0 ]]; then
 fi
 if [[ "${KEPT_OBJECTS}" -eq 0 ]]; then
     echo "run_coverage.sh: existence filter left zero -object entries" >&2
+    exit 1
+fi
+# Mass-drop guard. A healthy run drops ~0-1 objects (a late-cleaned Windows
+# fixture). Losing a large fraction means object discovery or the build tree is
+# broken — and llvm-cov would otherwise happily export near-empty coverage from
+# the survivors and upload it as if it were valid (silently tanking the number).
+# Refuse instead. On the best-effort os-windows leg this just fails the leg
+# non-fatally; on Linux/macOS it correctly red-flags a broken run.
+TOTAL_OBJECTS=$((KEPT_OBJECTS + VANISHED_OBJECTS))
+if [[ "${VANISHED_OBJECTS}" -gt 25 \
+      && $((VANISHED_OBJECTS * 100)) -gt $((TOTAL_OBJECTS * 5)) ]]; then
+    echo "run_coverage.sh: ${VANISHED_OBJECTS}/${TOTAL_OBJECTS} -object entries vanished after the pre-flight probe (>5%) — refusing to upload coverage from the survivors; object discovery or the build tree is likely broken." >&2
     exit 1
 fi
 echo "=== Wrote ${KEPT_OBJECTS} -object tokens to a response file (avoids Windows ARG_MAX) ==="
