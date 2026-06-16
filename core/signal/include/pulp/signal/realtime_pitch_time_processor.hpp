@@ -392,12 +392,21 @@ private:
         // pitch/formant control downstream keeps working over the hold.
         freeze_.process_group(frames, config_.channels, bins);
 
-        // Morphing only helps when time/pitch scaling is actually engaged;
-        // at unity the baseline path is exactly transparent, so bypass the
-        // split (which would otherwise re-randomise the phase of low-energy
-        // bins and shallow the null).
+        // Morphing only helps when the phase vocoder is STRETCHING. Noise
+        // tonalization is a frame-spreading artifact: stretching moves analysis
+        // frames apart, so phase propagation imposes spurious horizontal phase
+        // correlation on stochastic content (Liao & Röbel, DAFx 2012), which the
+        // morph regenerates away. At unity there is nothing to fix; at
+        // COMPRESSION (stretch < 1) frames pack closer and the vocoder does not
+        // tonalize noise — verified: compressing white noise without morphing
+        // leaves its off-lag autocorrelation and spectral flatness unchanged.
+        // Morphing there is pure downside: it decorrelates coherent percussive
+        // energy, smearing attacks and losing level (measured on a drum break:
+        // gating morph to stretch-only recovers 0.75x onset 12.2 -> 17.8 and
+        // level -4.1 -> -2.4 dB toward the morph-off ceiling, with the >1x
+        // ratios untouched). So engage the split only when actually stretching.
         const bool morph =
-            config_.noise_morphing && std::abs(stretch - 1.0f) > 1e-4f;
+            config_.noise_morphing && stretch > 1.0f + 1e-4f;
 
         // Noise-morphing split: pull the noise component out of the vocoder
         // path so phase propagation only sees the sines+transients (which it

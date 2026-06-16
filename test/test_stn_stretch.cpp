@@ -167,6 +167,23 @@ TEST_CASE("Noise morphing is bypassed at unity (bit-identical to baseline)",
     REQUIRE(max_diff == 0.0f);
 }
 
+TEST_CASE("Noise morphing is bypassed under compression (stretch < 1)",
+          "[signal][stn-stretch]") {
+    // Tonalization is a stretch-only (frame-spreading) artifact; under
+    // compression the phase vocoder does not tonalize noise, so morphing there
+    // is pure downside (it decorrelates coherent energy). The split must be
+    // bypassed for ratio < 1, making the output bit-identical to the
+    // non-morphing path.
+    auto noise = white(96000, 0xBEEFu);
+    auto plain = stretch(noise, 0.75f, /*morph=*/false);
+    auto morph = stretch(noise, 0.75f, /*morph=*/true);
+    REQUIRE(plain.size() == morph.size());
+    float max_diff = 0.0f;
+    for (size_t i = 0; i < plain.size(); ++i)
+        max_diff = std::max(max_diff, std::abs(plain[i] - morph[i]));
+    REQUIRE(max_diff == 0.0f);
+}
+
 TEST_CASE("Noise morphing keeps stereo lanes coherent for identical input",
           "[signal][stn-stretch]") {
     // Shared morpher seeds → identical channels in == identical channels out,
