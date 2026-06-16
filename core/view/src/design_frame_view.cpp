@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <limits>
 #include <memory>
+#include <vector>
 
 namespace pulp::view {
 
@@ -422,14 +423,56 @@ void DesignFrameView::paint(canvas::Canvas& canvas) {
     // never recolor SVG paths (that would fight every re-export). View-scoped.
     auto hl = resolve_color("accent.primary", canvas::Color::rgba8(22, 218, 194));
     hl.a = 120;
+    canvas.set_fill_color(hl);
+    const bool group_scoped = active_view_group_ != -1;
+    auto in_view = [&](const DesignFrameElement& e) {
+        return e.view_group == -1 || !group_scoped || e.view_group == active_view_group_;
+    };
     for (const auto& e : elements_) {
         if (e.kind != DesignFrameElement::Kind::momentary || e.value <= 0.5f) continue;
-        if (e.view_group != -1 && active_view_group_ != -1 && e.view_group != active_view_group_)
-            continue;
+        if (!in_view(e)) continue;
         const float rx = t.ox + (e.x - panel_x_) * t.scale;
         const float ry = t.oy + (e.y - panel_y_) * t.scale;
-        canvas.set_fill_color(hl);
-        canvas.fill_rounded_rect(rx, ry, e.w * t.scale, e.h * t.scale, 3.0f);
+        const float rw = e.w * t.scale, rh = e.h * t.scale;
+        // A larger (white) key's highlight must not bleed teal over the black
+        // keys that notch into its top edge — otherwise lighting a white key
+        // swallows the neighbouring black keys. Collect every smaller momentary
+        // rect (same view) that overlaps this one in x and shares its top, then
+        // paint the highlight as bands that leave those channels dark.
+        struct Notch { float x0, x1, bottom; };
+        std::vector<Notch> notches;
+        const float my_area = e.w * e.h;
+        for (const auto& b : elements_) {
+            if (b.kind != DesignFrameElement::Kind::momentary || &b == &e) continue;
+            if (!in_view(b) || b.w * b.h >= my_area) continue;
+            if (b.x + b.w <= e.x || b.x >= e.x + e.w) continue;  // no x-overlap
+            if (b.y > e.y + 1.0f) continue;                       // not a top notch
+            notches.push_back({std::max(b.x, e.x), std::min(b.x + b.w, e.x + e.w),
+                               b.y + b.h});
+        }
+        if (notches.empty()) {
+            canvas.fill_rounded_rect(rx, ry, rw, rh, 3.0f);
+            continue;
+        }
+        std::sort(notches.begin(), notches.end(),
+                  [](const Notch& a, const Notch& c) { return a.x0 < c.x0; });
+        float cursor = e.x;
+        for (const auto& n : notches) {
+            if (n.x0 > cursor) {  // full-height band left of the notch
+                canvas.fill_rect(t.ox + (cursor - panel_x_) * t.scale, ry,
+                                 (n.x0 - cursor) * t.scale, rh);
+            }
+            const float nb = t.oy + (n.bottom - panel_y_) * t.scale;  // notch bottom
+            if (nb < ry + rh) {  // band below the black key
+                canvas.fill_rect(t.ox + (n.x0 - panel_x_) * t.scale, nb,
+                                 (n.x1 - n.x0) * t.scale, ry + rh - nb);
+            }
+            cursor = std::max(cursor, n.x1);
+        }
+        if (cursor < e.x + e.w) {  // full-height band right of the last notch
+            canvas.fill_rect(t.ox + (cursor - panel_x_) * t.scale, ry,
+                             (e.x + e.w - cursor) * t.scale, rh);
+        }
     }
 }
 

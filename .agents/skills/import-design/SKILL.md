@@ -791,6 +791,25 @@ a rect (x,y,w,h) + `options`/`selected_index`/`placeholder`.
   structurally (`detect_tab_group`): a row of ≥3 similar-width container children
   with short text labels; the child carrying a visible SOLID fill is the selected
   tab. `--select-tab=N` is the design-import-standalone demo flag for capturing it.
+- `momentary` → press/release primitive for keys / pads / drum triggers /
+  sustain / transport. `on_gesture_begin(i)` = note-on, `on_gesture_end(i)` =
+  note-off; `set_element_value(i, 1/0)` lights it via a NATIVE accent overlay
+  (the SVG is never recolored, so a re-export still skins it). Carries `note`
+  (typing keys = relative semitone 0..17, piano = absolute MIDI; consumers map
+  by `note`, never positional index — a re-export may reorder) and `view_group`
+  (per-view scope, e.g. typing=0 / piano=1; `set_active_view_group` releases any
+  held key so notes never stick across a mode switch). `MusicalTypingKeyboard`
+  is the reference consumer; its keys are code-defined (a rect table extracted
+  from the Figma frame), NOT discovered from SVG geometry — the faithful baked
+  SVG (dark) provides the pixels, the element list provides behavior. Gotchas:
+  (1) **smallest-area hit tiebreak** — among momentary rects containing the
+  point the smallest wins, so a narrow black key beats the white key it overlaps
+  (order-independent, survives re-export reordering). (2) **highlight must carve
+  out notches** — a lit white (larger) key's overlay rect would otherwise bleed
+  teal over the black keys notching its top, swallowing them; `paint()` subtracts
+  any smaller same-view momentary rect that overlaps in x and shares the top
+  edge, painting the highlight as bands that leave the black-key channels dark.
+  Both are in `DesignFrameView` (`core/view/src/design_frame_view.cpp`).
 
 The `pulp-design-import-standalone` example has demo flags to capture overlay states
 headlessly: `--focus-search` (focus ring) and `--open-dropdown=SUBSTR` (opens

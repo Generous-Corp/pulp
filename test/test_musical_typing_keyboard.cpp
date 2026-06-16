@@ -9,7 +9,22 @@
 #include <pulp/view/musical_typing_keyboard.hpp>
 #include <pulp/view/screenshot.hpp>
 
+#include <memory>
+#include <vector>
+
 using namespace pulp::view;
+
+namespace {
+using K = DesignFrameElement::Kind;
+// DesignFrameView (a View) is non-copyable/non-movable, so hand back a pointer.
+std::unique_ptr<MusicalTypingKeyboard> make_playable_kb() {
+    auto kb = std::make_unique<MusicalTypingKeyboard>();
+    // Bounds == panel size → identity transform (scale 1, no letterbox), so SVG
+    // coords map straight to view coords for spatial clicks.
+    kb->set_bounds({0, 0, kb->panel_width(), kb->panel_height()});
+    return kb;
+}
+}  // namespace
 
 TEST_CASE("MusicalTypingKeyboard loads its embedded faithful SVG", "[view][musical-typing]") {
     MusicalTypingKeyboard kbd;
@@ -31,4 +46,57 @@ TEST_CASE("MusicalTyping is registered in the pulp::design catalog", "[design][c
     REQUIRE(info != nullptr);
     REQUIRE(info->native_class == "pulp::view::MusicalTypingKeyboard");
     REQUIRE(info->category == pulp::design::Category::audio);
+}
+
+TEST_CASE("MusicalTypingKeyboard: 18 playable momentary keys, typing view active",
+          "[view][musical-typing][momentary]") {
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    REQUIRE(kb.element_count() == 18);
+    REQUIRE(kb.active_view_group() == 0);
+    for (int i = 0; i < kb.element_count(); ++i) {
+        REQUIRE(kb.element_kind(i) == K::momentary);
+        REQUIRE(kb.element_note(i) == i);  // array order == semitone 0..17
+    }
+}
+
+TEST_CASE("MusicalTypingKeyboard: white-key click plays its note",
+          "[view][musical-typing][momentary]") {
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    std::vector<int> begins, ends;
+    kb.on_gesture_begin = [&](int i) { begins.push_back(kb.element_note(i)); };
+    kb.on_gesture_end = [&](int i) { ends.push_back(kb.element_note(i)); };
+
+    // First white key 'a' (note 0): rect x[166,216] y[233,311]; click low-centre
+    // (below the black keys) so only the white key is under the point.
+    kb.on_mouse_down({191.0f, 300.0f});
+    REQUIRE(begins == std::vector<int>{0});
+    REQUIRE(kb.element_value(0) == 1.0f);   // lit while held
+    kb.on_mouse_up({191.0f, 300.0f});
+    REQUIRE(ends == std::vector<int>{0});
+    REQUIRE(kb.element_value(0) == 0.0f);
+}
+
+TEST_CASE("MusicalTypingKeyboard: black key wins the overlap (smallest area)",
+          "[view][musical-typing][momentary]") {
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    std::vector<int> begins;
+    kb.on_gesture_begin = [&](int i) { begins.push_back(kb.element_note(i)); };
+
+    // 'w' (note 1) rect x[203,233] y[233,287] overlaps white 'a' (note 0) in the
+    // band x[203,216]. A click there must pick the narrower black key.
+    kb.on_mouse_down({210.0f, 250.0f});
+    REQUIRE(begins == std::vector<int>{1});
+    kb.on_mouse_up({210.0f, 250.0f});
+}
+
+TEST_CASE("MusicalTypingKeyboard: set_element_value lights without firing change",
+          "[view][musical-typing][momentary]") {
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    bool changed = false;
+    kb.on_element_changed = [&](int, float) { changed = true; };
+    kb.set_element_value(5, 1.0f);          // light 'f' (note 5)
+    REQUIRE(kb.element_value(5) == 1.0f);
+    kb.set_element_value(5, 0.0f);
+    REQUIRE(kb.element_value(5) == 0.0f);
+    REQUIRE_FALSE(changed);                 // host->view push must not echo
 }

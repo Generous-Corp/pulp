@@ -19,6 +19,7 @@
 #include <pulp/view/gap_widgets.hpp>
 #include <pulp/view/midi_keyboard.hpp>
 #include <pulp/view/design_frame_view.hpp>  // FaithfulOverview (--overview reference)
+#include <pulp/view/musical_typing_keyboard.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/scroll_bar.hpp>
 #include <pulp/view/side_panel.hpp>
@@ -364,6 +365,42 @@ void advance_anims(View* v, float dt) {
         auto kbd = std::make_unique<MidiKeyboard>(); kbd->set_range(48, 72);
         add(std::move(kbd), kMargin + 160.0f, y + 40.0f, 740.0f, 90.0f);
         y += 150.0f;
+    }
+
+    // ── Musical typing keyboard — playable faithful-import primitive ──────
+    // The faithful Figma frame rendered 1:1 (DesignFrameView), with each
+    // typing key a `momentary` element: click/drag plays it, lighting the key
+    // via a native overlay (the SVG is never recolored). Wired here to a live
+    // "last note" readout to prove the gesture callbacks reach a consumer —
+    // the same hooks a sampler binds to MusicalTypingController. (Piano-view
+    // keys are a follow-up; the typing row is the interactive group.)
+    section("Musical typing keyboard — playable (faithful import)");
+    {
+        const float kw = kContentW;
+        const float kh = kw * 806.0f / 1400.0f;  // preserve panel aspect (no letterbox)
+        auto* readout = static_cast<Label*>(nullptr);
+        auto note_label = std::make_unique<Label>("Play a key \xe2\x80\x94 last note: \xe2\x80\x94");
+        note_label->set_font_size(13.0f);
+        readout = static_cast<Label*>(
+            add(std::move(note_label), kMargin, y, kContentW, 18.0f));
+        y += 24.0f;
+
+        auto kb = std::make_unique<MusicalTypingKeyboard>();
+        MusicalTypingKeyboard* kbp = kb.get();
+        // Map a typing-key semitone (0..17, relative to C) to a readable name.
+        auto name_for = [](int semitone) {
+            static const char* n[] = {"C", "C#", "D", "D#", "E", "F",
+                                      "F#", "G", "G#", "A", "A#", "B"};
+            int oct = 3 + semitone / 12;          // typing row starts at C3
+            return std::string(n[semitone % 12]) + std::to_string(oct);
+        };
+        kbp->on_gesture_begin = [kbp, readout, name_for](int i) {
+            const int note = kbp->element_note(i);
+            if (note >= 0 && readout)
+                readout->set_text("Play a key \xe2\x80\x94 last note: " + name_for(note));
+        };
+        add(std::move(kb), kMargin, y, kw, kh);
+        y += kh + 20.0f;
     }
 
     // ── Containers — Property panel · Channel strip (native, interactive) ──

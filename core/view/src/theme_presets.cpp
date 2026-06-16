@@ -358,6 +358,13 @@ static std::vector<ThemePreset> build_presets() {
             t.colors["accent.success"] = hex(0x3FCF77); // ink.leaf
             t.colors["accent.warning"] = hex(0xF6B847); // ink.amber
             t.colors["accent.text"]    = hex(on_ink);   // on-ink (text on bright fills)
+            // Faithful-import surfaces: the dark well behind a DesignFrameView
+            // frame and the piano/typing key fills. The baked SVG carries the
+            // pixels; these name the same colours so the catalog's reskin-token
+            // contract resolves (and a future native reskin has anchors).
+            t.colors["surface.panel"]  = hex(0x12161C); // faithful frame well
+            t.colors["key.white"]      = hex(0xF4F6F8); // keyboard white key
+            t.colors["key.black"]      = hex(0x1B222B); // keyboard black key
             t.strings["font.family"]   = "Jost";
             return t;
         };
