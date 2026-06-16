@@ -34,7 +34,7 @@ std::vector<float> white(int n, std::uint32_t seed) {
     return v;
 }
 
-RealtimePitchTimeConfig stretch_config(bool morph) {
+RealtimePitchTimeConfig stretch_config(bool morph, float noise_exp = 1.0f) {
     RealtimePitchTimeConfig c;
     c.mode = PitchTimeMode::time_stretch;
     c.quality = PitchTimeQuality::quality;
@@ -42,12 +42,14 @@ RealtimePitchTimeConfig stretch_config(bool morph) {
     c.max_block = 4096;
     c.max_time_ratio = 2.0f;
     c.noise_morphing = morph;
+    c.noise_mask_exponent = noise_exp;
     return c;
 }
 
-std::vector<float> stretch(const std::vector<float>& input, float ratio, bool morph) {
+std::vector<float> stretch(const std::vector<float>& input, float ratio, bool morph,
+                           float noise_exp = 1.0f) {
     RealtimePitchTimeProcessor proc;
-    proc.prepare(kSr, stretch_config(morph));
+    proc.prepare(kSr, stretch_config(morph, noise_exp));
     proc.set_time_ratio(ratio);
     std::vector<float> out;
     out.reserve(static_cast<size_t>(input.size() * ratio + 4096));
@@ -116,6 +118,39 @@ TEST_CASE("Noise morphing reduces tonalization of stretched noise",
     // Morphing decorrelates frame to frame, so the periodicity the phase
     // vocoder imposes on stretched noise is reduced.
     REQUIRE(morph_tonal < pv_tonal);
+}
+
+TEST_CASE("Noise-mask exponent keeps transients sharper than the soft mask",
+          "[signal][stn-stretch]") {
+    // A click train is broadband + brief: the STN soft noise mask assigns
+    // those onset bins partial noise membership, so with exponent 1 a chunk of
+    // each click's coherent energy is routed to the random-phase morph and
+    // decorrelated — smearing the attack. A higher exponent sharpens the gate
+    // so only confident-noise bins morph, leaving the clicks coherent. The
+    // stretched output should therefore keep a higher crest factor (peak / RMS)
+    // as the exponent rises.
+    std::vector<float> clicks(96000, 0.0f);
+    for (int i = 0; i < 96000; i += 2400) clicks[static_cast<size_t>(i)] = 0.9f; // 20 Hz impulses
+
+    auto crest = [](const std::vector<float>& v) {
+        double energy = 0.0;
+        float peak = 0.0f;
+        for (float s : v) { energy += static_cast<double>(s) * s; peak = std::max(peak, std::abs(s)); }
+        const double rms = std::sqrt(energy / std::max<size_t>(1, v.size()));
+        return rms > 1e-9 ? static_cast<float>(peak / rms) : 0.0f;
+    };
+
+    auto soft = stretch(clicks, 2.0f, /*morph=*/true, /*noise_exp=*/1.0f);
+    auto sharp = stretch(clicks, 2.0f, /*morph=*/true, /*noise_exp=*/4.0f);
+    REQUIRE(static_cast<int>(soft.size()) > 120000);
+    REQUIRE(static_cast<int>(sharp.size()) > 120000);
+
+    const float soft_crest = crest(soft);
+    const float sharp_crest = crest(sharp);
+    INFO("crest soft(exp=1)=" << soft_crest << "  sharp(exp=4)=" << sharp_crest);
+    REQUIRE(sharp_crest > soft_crest);
+    // Both stay finite and bounded.
+    for (float s : sharp) REQUIRE(std::isfinite(s));
 }
 
 TEST_CASE("Noise morphing is bypassed at unity (bit-identical to baseline)",

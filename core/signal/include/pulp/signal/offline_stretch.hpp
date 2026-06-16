@@ -60,6 +60,14 @@ struct OfflineStretchOptions {
     bool repitch_linked = false;    ///< true => pure resample (vinyl); pitch
                                     ///< follows time_ratio, spectral path skipped
     bool route_noise_stn = true;    ///< route noise/residual through NoiseMorpher
+    /// Sharpen the STN noise gate before morphing (`noise' = noise^exp`).
+    /// Offline favours transient fidelity: a conservative exponent keeps the
+    /// soft mask's confident-noise bins morphing while leaving ambiguous bins
+    /// that carry coherent percussive energy in the phase-propagated path,
+    /// measurably recovering attack crispness and level on drum/transient
+    /// material with no loss of spectral flatness. 1.0 = legacy (all soft
+    /// noise morphs). See RealtimePitchTimeConfig::noise_mask_exponent.
+    float noise_mask_exponent = 2.0f;
     StretchTransientMode transient_mode = StretchTransientMode::phase_reset;
     int quality = 2;                ///< 0 draft (fast preview) .. 2 best
 
@@ -121,6 +129,7 @@ public:
             cfg.max_pitch_semitones = 0.0f; // pitch is fixed in time_stretch mode
             cfg.transient_preservation = true;
             cfg.noise_morphing = sizing.route_noise_stn; // STN noise path (plan §4 routing)
+            cfg.noise_mask_exponent = sizing.noise_mask_exponent;
             engine_.prepare(sample_rate, cfg);
             latency_anchor_ = calibrate_anchor();
 
@@ -137,6 +146,7 @@ public:
             pcfg.true_envelope_iterations = 3;
             pcfg.transient_preservation = true;
             pcfg.noise_morphing = sizing.route_noise_stn;
+            pcfg.noise_mask_exponent = sizing.noise_mask_exponent;
             pitch_engine_.prepare(sample_rate, pcfg);
         }
     }

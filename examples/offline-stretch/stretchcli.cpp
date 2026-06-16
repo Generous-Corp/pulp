@@ -169,6 +169,7 @@ int render(const std::string& in, const std::string& out,
     pulp::signal::OfflineStretchOptions sizing;
     sizing.max_time_ratio = opts.max_time_ratio;
     sizing.max_pitch_semitones = opts.max_pitch_semitones;
+    sizing.route_noise_stn = opts.route_noise_stn; // --no-morph diagnostic
 
     pulp::signal::OfflineStretch eng;
     eng.prepare(static_cast<double>(data->sample_rate), static_cast<int>(nch), sizing);
@@ -222,6 +223,7 @@ int main(int argc, char** argv) {
         else if (a == "--formant") { bool ok; opts.formant_mode = parse_formant(next("--formant"), &ok);
                                      if (!ok) { std::fprintf(stderr, "error: bad --formant\n"); return 2; } }
         else if (a == "--repitch") opts.repitch_linked = true;
+        else if (a == "--no-morph") opts.route_noise_stn = false;
         else if (a == "--quality") opts.quality = std::atoi(next("--quality"));
         else if (a == "--max-ratio") opts.max_time_ratio = std::atof(next("--max-ratio"));
         else if (a == "--max-pitch") opts.max_pitch_semitones = std::atof(next("--max-pitch"));

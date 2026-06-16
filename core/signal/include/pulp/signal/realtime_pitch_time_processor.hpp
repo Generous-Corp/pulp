@@ -74,6 +74,17 @@ struct RealtimePitchTimeConfig {
     /// textures stay natural instead of "tonalizing." Adds an STN pass per
     /// frame; off by default to keep the baseline path unchanged.
     bool noise_morphing = false;
+    /// Exponent applied to the STN soft noise mask before routing energy to
+    /// the morph path (`noise' = noise^exp`). The soft mask assigns partial
+    /// noise membership to ambiguous bins; on transient-heavy material those
+    /// bins carry coherent percussive energy that morphing decorrelates,
+    /// smearing attacks and losing level. An exponent > 1 sharpens the gate
+    /// so only confident-noise bins (mask ≈ 1) morph while ambiguous bins
+    /// (mask ≈ 0.3–0.5) stay coherent — measured to recover transient
+    /// crispness and level toward the morph-off ceiling with no loss of
+    /// spectral flatness (noise transparency) on percussive material.
+    /// 1.0 = unchanged (every soft assignment morphs).
+    float noise_mask_exponent = 1.0f;
     /// Read the stretched stream with a Kaiser-windowed sinc kernel instead
     /// of Catmull-Rom cubic — far deeper stopband, so the resample step of
     /// pitch shifting folds back much less aliasing on large shifts and
@@ -404,8 +415,13 @@ private:
             for (int ch = 0; ch < config_.channels; ++ch) {
                 std::complex<float>* f = frames[ch];
                 float* env = noise_env_.data() + static_cast<size_t>(ch) * bins;
+                // Sharpen the noise gate (config_.noise_mask_exponent): only
+                // confident-noise bins morph; ambiguous bins carrying coherent
+                // percussive/tonal energy stay in the phase-propagated path.
+                const float nexp = config_.noise_mask_exponent;
                 for (int k = 0; k < bins; ++k) {
-                    const float nm = masks.noise[static_cast<size_t>(k)];
+                    float nm = masks.noise[static_cast<size_t>(k)];
+                    if (nexp != 1.0f) nm = std::pow(nm, nexp);
                     env[k] = std::abs(f[k]) * nm;
                     f[k] *= (1.0f - nm);
                 }
