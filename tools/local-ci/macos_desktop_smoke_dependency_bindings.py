@@ -18,6 +18,10 @@ from macos_desktop_smoke_process_dependency_bindings import (
     MACOS_DESKTOP_SMOKE_PROCESS_DEPENDENCY_EXPORTS,
     macos_desktop_smoke_process_dependencies,
 )
+from macos_desktop_smoke_video_dependency_bindings import (
+    MACOS_DESKTOP_SMOKE_VIDEO_DEPENDENCY_EXPORTS,
+    macos_desktop_smoke_video_dependencies,
+)
 from macos_desktop_smoke_window_dependency_bindings import (
     MACOS_DESKTOP_SMOKE_WINDOW_DEPENDENCY_EXPORTS,
     macos_desktop_smoke_window_dependencies,
@@ -30,6 +34,7 @@ MACOS_DESKTOP_SMOKE_FOCUSED_DEPENDENCY_EXPORTS = (
     *MACOS_DESKTOP_SMOKE_PROCESS_DEPENDENCY_EXPORTS,
     *MACOS_DESKTOP_SMOKE_WINDOW_DEPENDENCY_EXPORTS,
     *MACOS_DESKTOP_SMOKE_INTERACTION_DEPENDENCY_EXPORTS,
+    *MACOS_DESKTOP_SMOKE_VIDEO_DEPENDENCY_EXPORTS,
 )
 
 
@@ -39,6 +44,7 @@ def macos_desktop_smoke_dependencies(bindings: Mapping[str, Any]) -> dict[str, A
         **macos_desktop_smoke_process_dependencies(bindings),
         **macos_desktop_smoke_window_dependencies(bindings),
         **macos_desktop_smoke_interaction_dependencies(bindings),
+        **macos_desktop_smoke_video_dependencies(bindings),
     }
 
 

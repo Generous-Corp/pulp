@@ -60,6 +60,9 @@ def desktop_doctor_checks(
     platform: str | None = None,
     which_fn: Callable[[str], str | None] | None = None,
     probe_webdriver_endpoint_fn: Callable[..., dict] | None = None,
+    probe_macos_screencapture_fn: Callable[[], tuple[bool, str]] | None = None,
+    resolve_ffmpeg_path_fn: Callable[[], str] | None = None,
+    probe_macos_avfoundation_screen_fn: Callable[[str], tuple[bool, str]] | None = None,
 ) -> list[dict]:
     platform = platform or sys.platform
     which_fn = which_fn or shutil.which
@@ -88,6 +91,9 @@ def desktop_doctor_checks(
                 which_fn=which_fn,
                 macos_accessibility_trusted_fn=macos_accessibility_trusted_fn,
                 desktop_check_fn=desktop_check,
+                probe_macos_screencapture_fn=probe_macos_screencapture_fn,
+                resolve_ffmpeg_path_fn=resolve_ffmpeg_path_fn,
+                probe_macos_avfoundation_screen_fn=probe_macos_avfoundation_screen_fn,
             )
         )
     elif target["target_type"] == "ssh":

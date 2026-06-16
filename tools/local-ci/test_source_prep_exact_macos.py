@@ -94,6 +94,45 @@ class SourcePrepExactMacOSTests(unittest.TestCase):
         self.assertEqual(reused["launch_command"], f"{prepared_root}:./tool")
         self.assertEqual(logged, [])
 
+    def _write_local_skia(self) -> pathlib.Path:
+        libskia = self.repo / "external" / "skia-build" / "build" / "mac-gpu" / "lib" / "Release" / "libskia.a"
+        libskia.parent.mkdir(parents=True, exist_ok=True)
+        libskia.write_bytes(b"\x00")
+        return libskia
+
+    def test_link_skia_returns_none_without_local_build(self) -> None:
+        prepared = self.root / "prepared"
+        prepared.mkdir()
+        self.assertIsNone(self.mod.link_local_skia_build_for_prepared_source(self.repo, prepared))
+        self.assertFalse((prepared / "external" / "skia-build").exists())
+
+    def test_link_skia_symlinks_local_build_into_prepared_root(self) -> None:
+        self._write_local_skia()
+        prepared = self.root / "prepared"
+        prepared.mkdir()
+
+        linked = self.mod.link_local_skia_build_for_prepared_source(self.repo, prepared)
+
+        prepared_skia = prepared / "external" / "skia-build"
+        self.assertEqual(linked, str(prepared_skia))
+        self.assertTrue(prepared_skia.is_symlink())
+        self.assertTrue(
+            (prepared_skia / "build" / "mac-gpu" / "lib" / "Release" / "libskia.a").is_file()
+        )
+
+    def test_link_skia_reuses_existing_real_build(self) -> None:
+        self._write_local_skia()
+        prepared = self.root / "prepared"
+        existing = prepared / "external" / "skia-build" / "build" / "mac-gpu" / "lib" / "Release" / "libskia.a"
+        existing.parent.mkdir(parents=True, exist_ok=True)
+        existing.write_bytes(b"\x00")
+
+        linked = self.mod.link_local_skia_build_for_prepared_source(self.repo, prepared)
+
+        prepared_skia = prepared / "external" / "skia-build"
+        self.assertEqual(linked, str(prepared_skia))
+        self.assertFalse(prepared_skia.is_symlink())
+
 
 if __name__ == "__main__":
     unittest.main()

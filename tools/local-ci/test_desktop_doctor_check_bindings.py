@@ -34,6 +34,9 @@ class DesktopDoctorCheckBindingsTests(unittest.TestCase):
             "probe_windows_remote_tooling",
             "probe_windows_repo_checkout",
             "probe_webdriver_endpoint",
+            "probe_macos_screencapture",
+            "resolve_ffmpeg_path",
+            "probe_macos_avfoundation_screen",
         ]:
             bindings[name] = object()
         return bindings
@@ -68,6 +71,9 @@ class DesktopDoctorCheckBindingsTests(unittest.TestCase):
             "probe_windows_remote_tooling",
             "probe_windows_repo_checkout",
             "probe_webdriver_endpoint",
+            "probe_macos_screencapture",
+            "resolve_ffmpeg_path",
+            "probe_macos_avfoundation_screen",
         ]:
             self.assertIs(captured["kwargs"][f"{name}_fn"], bindings[name])
         self.assertEqual(captured["kwargs"]["platform"], "darwin")

@@ -40,6 +40,18 @@ def cmd_desktop(bindings: Mapping[str, Any], args: Any) -> int:
             "smoke": _binding(bindings, "cmd_desktop_smoke"),
             "click": _binding(bindings, "cmd_desktop_click"),
             "inspect": _binding(bindings, "cmd_desktop_inspect"),
+            "verdict": _binding(bindings, "cmd_desktop_verdict"),
+            "review-issue": _binding(bindings, "cmd_desktop_review_issue"),
+            "review-status": _binding(bindings, "cmd_desktop_review_status"),
+            "review-watch": _binding(bindings, "cmd_desktop_review_watch"),
+            "compose-video": _binding(bindings, "cmd_desktop_compose_video"),
+            "design-diff": _binding(bindings, "cmd_desktop_design_diff"),
+            "design-proof": _binding(bindings, "cmd_desktop_design_proof"),
+            "video-matrix": _binding(bindings, "cmd_desktop_video_matrix"),
+            "video": _binding(bindings, "cmd_desktop_video"),
+            "serve": _binding(bindings, "cmd_desktop_serve"),
+            "video-doctor": _binding(bindings, "cmd_desktop_video_doctor"),
+            "video-setup": _binding(bindings, "cmd_desktop_video_setup"),
         },
     )
 

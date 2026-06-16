@@ -4,7 +4,8 @@
 // Coverage tranche for issue #643. These tests stay on local registry,
 // discovery, archive extraction, uninstall, and command dispatch paths. They
 // intentionally avoid network downloads, Python package installs, and running
-// external tools from the registry.
+// external tools from the registry. The video-proof artifact install test uses
+// a tiny local zip.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -17,6 +18,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -113,9 +115,40 @@ void write_file(const fs::path& path, const std::string& body) {
     f << body;
 }
 
+std::string read_file(const fs::path& path) {
+    std::ifstream f(path);
+    return {std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
+}
+
 fs::path touch_file(const fs::path& path) {
     write_file(path, "fixture\n");
     return path;
+}
+
+std::string python_string_literal(const std::string& s) {
+    std::string out = "\"";
+    for (char c : s) {
+        if (c == '\\' || c == '"') out += '\\', out += c;
+        else if (c == '\n') out += "\\n";
+        else if (c == '\r') out += "\\r";
+        else out += c;
+    }
+    out += '"';
+    return out;
+}
+
+void create_zip_with_python(const fs::path& zip_path,
+                            const std::vector<std::pair<std::string, std::string>>& entries) {
+    auto script = zip_path.parent_path() / "make_zip.py";
+    std::ostringstream py;
+    py << "import zipfile\n";
+    py << "z = zipfile.ZipFile(" << std::quoted(zip_path.string()) << ", 'w')\n";
+    for (const auto& [name, body] : entries) {
+        py << "z.writestr(" << std::quoted(name) << ", " << python_string_literal(body) << ")\n";
+    }
+    py << "z.close()\n";
+    write_file(script, py.str());
+    REQUIRE(std::system(("/usr/bin/python3 " + script.string()).c_str()) == 0);
 }
 
 std::string system_shell_tool_id() {
@@ -169,6 +202,25 @@ fs::path write_registry_fixture(const fs::path& root) {
       "pip_package": "fixture_tool",
       "pinned_version": "4.5.6",
       "requires_tools": ["uv"]
+    },
+    "fixture-npm": {
+      "display_name": "Fixture npm",
+      "category": "developer_tool",
+      "description": "Local npm fixture",
+      "license": "MIT",
+      "install_method": "npm_package",
+      "npm_package_root": "tools/local-ci",
+      "npm_default_script": "smoke-video-proof",
+      "pinned_version": "0.0.0",
+      "install_scope": "machine",
+      "distribution_lane": "tool_addon",
+      "package_format": "not_pulp_add",
+      "artifact_status": "source_tree_iteration",
+      "artifact_policy": "fixture policy",
+      "artifact_pack_command": "python3 tools/local-ci/pack_video_proof_tool.py --json",
+      "artifact_pack_npm_script": "npm --prefix tools/local-ci run pack-video-proof-tool -- --json",
+      "artifact_verify_command": "python3 tools/local-ci/pack_video_proof_tool.py --verify <manifest> --json",
+      "artifact_manifest_schema": "pulp.video-proof-tool-package.v1"
     }
   }
 }
@@ -221,7 +273,7 @@ TEST_CASE("tool registry parses descriptors and reports malformed roots",
     auto loaded = load_tool_registry(registry_path);
     REQUIRE(loaded.error.empty());
     REQUIRE(loaded.registry.schema_version == 3);
-    REQUIRE(loaded.registry.tools.size() == 2);
+    REQUIRE(loaded.registry.tools.size() == 3);
 
     const auto& bin = loaded.registry.tools.at("fixture-bin");
     REQUIRE(bin.id == "fixture-bin");
@@ -243,6 +295,21 @@ TEST_CASE("tool registry parses descriptors and reports malformed roots",
     REQUIRE(py.requires_tools == std::vector<std::string>{"uv"});
     REQUIRE(py.managed_by_pulp);
     REQUIRE_FALSE(py.bundleable);
+
+    const auto& npm = loaded.registry.tools.at("fixture-npm");
+    REQUIRE(npm.install_method == "npm_package");
+    REQUIRE(npm.npm_package_root == "tools/local-ci");
+    REQUIRE(npm.npm_default_script == "smoke-video-proof");
+    REQUIRE(npm.pinned_version == "0.0.0");
+    REQUIRE(npm.install_scope == "machine");
+    REQUIRE(npm.distribution_lane == "tool_addon");
+    REQUIRE(npm.package_format == "not_pulp_add");
+    REQUIRE(npm.artifact_status == "source_tree_iteration");
+    REQUIRE(npm.artifact_policy == "fixture policy");
+    REQUIRE(npm.artifact_pack_command == "python3 tools/local-ci/pack_video_proof_tool.py --json");
+    REQUIRE(npm.artifact_pack_npm_script == "npm --prefix tools/local-ci run pack-video-proof-tool -- --json");
+    REQUIRE(npm.artifact_verify_command == "python3 tools/local-ci/pack_video_proof_tool.py --verify <manifest> --json");
+    REQUIRE(npm.artifact_manifest_schema == "pulp.video-proof-tool-package.v1");
 
     auto missing = load_tool_registry(tmp.path / "missing.json");
     REQUIRE(missing.registry.tools.empty());
@@ -349,6 +416,17 @@ TEST_CASE("tool registry accepts empty and partial descriptor shapes",
     REQUIRE(tool.display_name.empty());
     REQUIRE(tool.managed_by_pulp);
     REQUIRE_FALSE(tool.bundleable);
+    REQUIRE(tool.npm_package_root.empty());
+    REQUIRE(tool.npm_default_script.empty());
+    REQUIRE(tool.install_scope.empty());
+    REQUIRE(tool.distribution_lane.empty());
+    REQUIRE(tool.package_format.empty());
+    REQUIRE(tool.artifact_status.empty());
+    REQUIRE(tool.artifact_policy.empty());
+    REQUIRE(tool.artifact_pack_command.empty());
+    REQUIRE(tool.artifact_pack_npm_script.empty());
+    REQUIRE(tool.artifact_verify_command.empty());
+    REQUIRE(tool.artifact_manifest_schema.empty());
     REQUIRE(tool.binary_sources.count(current_platform_key()) == 1);
     REQUIRE(tool.binary_sources.at(current_platform_key()).binary_name.empty());
 }
@@ -469,6 +547,20 @@ TEST_CASE("tool lookup prefers pulp-managed binaries and python wrappers",
     REQUIRE(located_py.source == "pulp-managed");
     REQUIRE(located_py.path == wrapper);
 
+    ToolDescriptor npm;
+    npm.id = "npm-fixture";
+    npm.install_method = "npm_package";
+#ifdef _WIN32
+    auto npm_wrapper = pulp_home() / "tools" / "npm-packages" / npm.id / "run.bat";
+#else
+    auto npm_wrapper = pulp_home() / "tools" / "npm-packages" / npm.id / "run.sh";
+#endif
+    touch_file(npm_wrapper);
+    auto located_npm = locate_tool(npm);
+    REQUIRE(located_npm.found);
+    REQUIRE(located_npm.source == "pulp-managed");
+    REQUIRE(located_npm.path == npm_wrapper);
+
     auto missing = binary_tool("pulp-tool-registry-missing-binary-xyz");
     auto located_missing = locate_tool(missing);
     REQUIRE_FALSE(located_missing.found);
@@ -587,6 +679,101 @@ TEST_CASE("tool install helpers have deterministic local exits",
     REQUIRE_FALSE(missing_wrapper.ok);
     REQUIRE(missing_wrapper.binary_path == wrapper);
     REQUIRE(missing_wrapper.installed_version == py.pinned_version);
+
+    ToolDescriptor npm;
+    npm.id = "npm-tool";
+    npm.display_name = "npm Tool";
+    npm.install_method = "npm_package";
+    npm.npm_package_root = "tools/local-ci";
+    npm.npm_default_script = "smoke-video-proof";
+    npm.pinned_version = "0.0.0";
+#ifdef _WIN32
+    auto npm_wrapper = pulp_home() / "tools" / "npm-packages" / npm.id / "run.bat";
+#else
+    auto npm_wrapper = pulp_home() / "tools" / "npm-packages" / npm.id / "run.sh";
+#endif
+    touch_file(npm_wrapper);
+    auto cached_npm = install_npm_tool(npm, tmp.path / "repo" / "tools" / "packages" / "tool-registry.json", /*force=*/false);
+    REQUIRE(cached_npm.ok);
+    REQUIRE(cached_npm.binary_path == npm_wrapper);
+    REQUIRE(cached_npm.installed_version == npm.pinned_version);
+
+#ifndef _WIN32
+    auto fake_bin = tmp.path / "fake-bin";
+    auto fake_npm = fake_bin / "npm";
+    write_file(fake_npm, "#!/bin/sh\nexit 0\n");
+    auto fake_python = fake_bin / "python3";
+    write_file(fake_python, "#!/bin/sh\nexec /usr/bin/python3 \"$@\"\n");
+    fs::permissions(fake_npm,
+                    fs::perms::owner_exec | fs::perms::group_exec | fs::perms::others_exec,
+                    fs::perm_options::add);
+    fs::permissions(fake_python,
+                    fs::perms::owner_exec | fs::perms::group_exec | fs::perms::others_exec,
+                    fs::perm_options::add);
+    auto repo = tmp.path / "repo";
+    write_file(repo / "tools" / "local-ci" / "package.json",
+               "{\"scripts\":{\"smoke-video-proof\":\"node smoke.mjs\"}}\n");
+    write_file(repo / "tools" / "packages" / "tool-registry.json", "{}\n");
+    ScopedEnv path{"PATH", fs::path(fake_bin.string() + ":/usr/bin:/bin:/usr/local/bin")};
+    auto fresh_npm = npm;
+    fresh_npm.id = "fresh-npm-tool";
+    auto installed_npm = install_npm_tool(
+        fresh_npm,
+        repo / "tools" / "packages" / "tool-registry.json",
+        /*force=*/true);
+    REQUIRE(installed_npm.ok);
+    REQUIRE(fs::exists(installed_npm.binary_path));
+    const auto wrapper_text = read_file(installed_npm.binary_path);
+    REQUIRE(wrapper_text.find("smoke-video-proof") != std::string::npos);
+    const auto manifest_text =
+        read_file(installed_npm.binary_path.parent_path() / "manifest.json");
+    REQUIRE(manifest_text.find("\"method\": \"npm_package\"") != std::string::npos);
+    REQUIRE(manifest_text.find((repo / "tools" / "local-ci").string()) != std::string::npos);
+
+    auto artifact_repo = tmp.path / "artifact-repo";
+    auto artifact_registry = artifact_repo / "tools" / "packages" / "tool-registry.json";
+    write_file(artifact_registry, "{}\n");
+    write_file(artifact_repo / "tools" / "local-ci" / "pack_video_proof_tool.py",
+               "import sys\nprint('{\"ok\": true}')\nsys.exit(0)\n");
+    auto zip_path = tmp.path / "video-proof-artifact.zip";
+    create_zip_with_python(
+        zip_path,
+        {
+            {"tools/local-ci/package.json",
+             "{\"scripts\":{\"smoke-video-proof\":\"node smoke.mjs\"}}\n"},
+            {"tools/local-ci/package-lock.json", "{\"lockfileVersion\":3}\n"},
+            {"tools/local-ci/scripts/smoke-video-proof.mjs", "console.log('ok')\n"},
+        });
+    auto manifest_path = tmp.path / "video-proof-artifact.manifest.json";
+    write_file(manifest_path,
+               std::string("{\n") +
+                   "  \"schema\": \"pulp.video-proof-tool-package.v1\",\n" +
+                   "  \"tool_id\": \"artifact-npm-tool\",\n" +
+                   "  \"distribution_lane\": \"tool_addon\",\n" +
+                   "  \"package_format\": \"not_pulp_add\",\n" +
+                   "  \"artifact\": {\"path\": \"" + quote_json(zip_path.string()) + "\"}\n" +
+                   "}\n");
+    auto artifact_npm = npm;
+    artifact_npm.id = "artifact-npm-tool";
+    artifact_npm.artifact_verify_command =
+        "python3 tools/local-ci/pack_video_proof_tool.py --verify <manifest> --json";
+    auto installed_artifact = install_npm_tool(
+        artifact_npm,
+        artifact_registry,
+        /*force=*/true,
+        manifest_path);
+    INFO(installed_artifact.error);
+    REQUIRE(installed_artifact.ok);
+    const auto artifact_manifest_text =
+        read_file(installed_artifact.binary_path.parent_path() / "manifest.json");
+    REQUIRE(artifact_manifest_text.find("\"method\": \"npm_package_artifact\"") != std::string::npos);
+    REQUIRE(artifact_manifest_text.find("\"artifact_manifest\":") != std::string::npos);
+    REQUIRE(artifact_manifest_text.find("\"artifact_path\":") != std::string::npos);
+    REQUIRE(artifact_manifest_text.find("artifact-npm-tool") != std::string::npos);
+    REQUIRE(artifact_manifest_text.find("tools/npm-packages/artifact-npm-tool/package") != std::string::npos);
+    REQUIRE(artifact_manifest_text.find("pulp-video-proof-tool-artifact") == std::string::npos);
+    REQUIRE(fs::exists(installed_artifact.binary_path.parent_path() / "package" / "package.json"));
+#endif
 }
 
 TEST_CASE("tool install all succeeds with cached binary and python tools",
@@ -684,6 +871,11 @@ TEST_CASE("tool uninstall removes managed binary and python tool roots",
     REQUIRE(uninstall_tool("py-tool"));
     REQUIRE_FALSE(fs::exists(py_root));
 
+    auto npm_root = pulp_home() / "tools" / "npm-packages" / "npm-tool";
+    touch_file(npm_root / "run.sh");
+    REQUIRE(uninstall_tool("npm-tool"));
+    REQUIRE_FALSE(fs::exists(npm_root));
+
     REQUIRE_FALSE(uninstall_tool("missing-tool"));
 }
 
@@ -717,6 +909,23 @@ TEST_CASE("tool command handles local list path doctor and error branches",
       "description": "No source fixture",
       "install_method": "binary_download",
       "pinned_version": "1.0.0"
+    },
+    "video-proof": {
+      "display_name": "Video Proof",
+      "description": "npm package fixture",
+      "install_method": "npm_package",
+      "npm_package_root": "tools/local-ci",
+      "npm_default_script": "smoke-video-proof",
+      "pinned_version": "0.0.0",
+      "install_scope": "machine",
+      "distribution_lane": "tool_addon",
+      "package_format": "not_pulp_add",
+      "artifact_status": "source_tree_iteration",
+      "artifact_policy": "Keep video proof tooling outside projects.",
+      "artifact_pack_command": "python3 tools/local-ci/pack_video_proof_tool.py --json",
+      "artifact_pack_npm_script": "npm --prefix tools/local-ci run pack-video-proof-tool -- --json",
+      "artifact_verify_command": "python3 tools/local-ci/pack_video_proof_tool.py --verify <manifest> --json",
+      "artifact_manifest_schema": "pulp.video-proof-tool-package.v1"
     }
   }
 }
@@ -736,6 +945,61 @@ TEST_CASE("tool command handles local list path doctor and error branches",
         REQUIRE(cmd_tool({"list"}) == 0);
         REQUIRE(output.out.str().find("managed-cmd") != std::string::npos);
         REQUIRE(output.out.str().find("unavailable-cmd") != std::string::npos);
+        REQUIRE(output.out.str().find("video-proof") != std::string::npos);
+        REQUIRE(output.out.str().find("available") != std::string::npos);
+    }
+
+    {
+        ScopedOutput output;
+        REQUIRE(cmd_tool({"info", "video-proof", "--json"}) == 0);
+        REQUIRE(output.out.str().find("\"id\":\"video-proof\"") != std::string::npos);
+        REQUIRE(output.out.str().find("\"install_scope\":\"machine\"") != std::string::npos);
+        REQUIRE(output.out.str().find("\"distribution_lane\":\"tool_addon\"") != std::string::npos);
+        REQUIRE(output.out.str().find("\"package_format\":\"not_pulp_add\"") != std::string::npos);
+        REQUIRE(output.out.str().find("\"artifact_status\":\"source_tree_iteration\"") != std::string::npos);
+        REQUIRE(output.out.str().find("\"artifact_pack_command\":\"python3 tools/local-ci/pack_video_proof_tool.py --json\"") != std::string::npos);
+        REQUIRE(output.out.str().find("\"artifact_pack_npm_script\":\"npm --prefix tools/local-ci run pack-video-proof-tool -- --json\"") != std::string::npos);
+        REQUIRE(output.out.str().find("\"artifact_verify_command\":\"python3 tools/local-ci/pack_video_proof_tool.py --verify <manifest> --json\"") != std::string::npos);
+        REQUIRE(output.out.str().find("\"artifact_manifest_schema\":\"pulp.video-proof-tool-package.v1\"") != std::string::npos);
+        REQUIRE(output.out.str().find("\"installed\":false") != std::string::npos);
+    }
+
+    {
+        // Text (non-JSON) info path renders the descriptor fields.
+        ScopedOutput output;
+        REQUIRE(cmd_tool({"info", "video-proof"}) == 0);
+        const auto text = output.out.str();
+        REQUIRE(text.find("Install method: npm_package") != std::string::npos);
+        REQUIRE(text.find("Install scope: machine") != std::string::npos);
+        REQUIRE(text.find("Distribution lane: tool_addon") != std::string::npos);
+        REQUIRE(text.find("Package format: not_pulp_add") != std::string::npos);
+        REQUIRE(text.find("Artifact manifest schema: pulp.video-proof-tool-package.v1") != std::string::npos);
+        REQUIRE(text.find("Installed: no") != std::string::npos);
+    }
+
+    {
+        // Install with a missing artifact manifest fails at the existence check.
+        ScopedOutput output;
+        const auto missing = (tmp.path / "no-such-manifest.json").string();
+        REQUIRE(cmd_tool({"install", "video-proof", "--artifact-manifest", missing}) == 1);
+        REQUIRE(output.err.str().find("artifact manifest not found") != std::string::npos);
+    }
+
+    {
+        // Install with an existing manifest whose verifier script is absent (the
+        // temp repo has no tools/local-ci/pack_video_proof_tool.py) fails in the
+        // artifact verifier.
+        ScopedOutput output;
+        const auto manifest = tmp.path / "artifact-manifest.json";
+        write_file(manifest, "{}");
+        REQUIRE(cmd_tool({"install", "video-proof", "--artifact-manifest", manifest.string()}) == 1);
+        REQUIRE(output.err.str().find("artifact verifier script not found") != std::string::npos);
+    }
+
+    {
+        ScopedOutput output;
+        REQUIRE(cmd_tool({"info", "missing-cmd"}) == 1);
+        REQUIRE(output.err.str().find("Tool 'missing-cmd' not found") != std::string::npos);
     }
 
     {
@@ -760,8 +1024,23 @@ TEST_CASE("tool command handles local list path doctor and error branches",
         ScopedOutput output;
         REQUIRE(cmd_tool({"doctor"}) == 1);
         REQUIRE(output.out.str().find("Managed Command") != std::string::npos);
+        REQUIRE(output.out.str().find("Video Proof") != std::string::npos);
+        REQUIRE(output.out.str().find("pulp tool install video-proof") != std::string::npos);
         REQUIRE(output.out.str().find(std::string("not available for ") + platform) !=
                 std::string::npos);
+    }
+
+    {
+        ScopedOutput output;
+        REQUIRE(cmd_tool({"doctor", "video-proof"}) == 1);
+        REQUIRE(output.out.str().find("Video Proof") != std::string::npos);
+        REQUIRE(output.out.str().find("pulp tool install video-proof") != std::string::npos);
+    }
+
+    {
+        ScopedOutput output;
+        REQUIRE(cmd_tool({"doctor", "--run"}) == 1);
+        REQUIRE(output.err.str().find("Usage: pulp tool doctor") != std::string::npos);
     }
 
     {
@@ -774,6 +1053,13 @@ TEST_CASE("tool command handles local list path doctor and error branches",
         ScopedOutput output;
         REQUIRE(cmd_tool({"install", "missing-cmd"}) == 1);
         REQUIRE(output.err.str().find("Tool 'missing-cmd' not found") != std::string::npos);
+    }
+
+    {
+        ScopedOutput output;
+        REQUIRE(cmd_tool({"install", "managed-cmd", "--artifact-manifest", "video-proof.manifest.json"}) == 1);
+        REQUIRE(output.err.str().find("--artifact-manifest is only valid with npm_package tools") !=
+                std::string::npos);
     }
 
     {
@@ -868,6 +1154,83 @@ TEST_CASE("tool command reports and runs system path tools",
         REQUIRE(output.out.str().find("tool-system-out") != std::string::npos);
         REQUIRE(output.err.str().find("tool-system-err") != std::string::npos);
     }
+}
+
+TEST_CASE("tool command installs npm package tools through the registry",
+          "[cli][tool-registry][npm][video-proof]") {
+#ifdef _WIN32
+    SUCCEED("npm package install dispatch is covered on POSIX in this test.");
+#else
+    TempDir tmp;
+    ScopedEnv home{"PULP_HOME", tmp.path / "home"};
+    auto repo = tmp.path / "repo";
+    fs::create_directories(repo / "tools" / "packages");
+    ScopedCurrentPath cwd{repo};
+
+    write_file(repo / "tools" / "local-ci" / "package.json",
+               "{\"scripts\":{\"smoke-video-proof\":\"node smoke.mjs\"}}\n");
+    write_file(repo / "tools" / "packages" / "tool-registry.json", R"({
+  "schema_version": 1,
+  "tools": {
+    "video-proof": {
+      "display_name": "Video Proof",
+      "description": "npm package fixture",
+      "install_method": "npm_package",
+      "npm_package_root": "tools/local-ci",
+      "npm_default_script": "smoke-video-proof",
+      "pinned_version": "0.0.0",
+      "artifact_pack_command": "python3 tools/local-ci/pack_video_proof_tool.py --json",
+      "artifact_pack_npm_script": "npm --prefix tools/local-ci run pack-video-proof-tool -- --json",
+      "artifact_verify_command": "python3 tools/local-ci/pack_video_proof_tool.py --verify <manifest> --json",
+      "artifact_manifest_schema": "pulp.video-proof-tool-package.v1"
+    }
+  }
+}
+)");
+
+    auto fake_bin = tmp.path / "fake-bin";
+    auto fake_npm = fake_bin / "npm";
+    write_file(fake_npm, "#!/bin/sh\nexit 0\n");
+    fs::permissions(fake_npm,
+                    fs::perms::owner_exec | fs::perms::group_exec | fs::perms::others_exec,
+                    fs::perm_options::add);
+    ScopedEnv path{"PATH", fake_bin};
+
+    {
+        ScopedOutput output;
+        REQUIRE(cmd_tool({"install", "video-proof"}) == 0);
+        REQUIRE(output.out.str().find("Installed Video Proof 0.0.0") != std::string::npos);
+    }
+
+    auto wrapper = pulp_home() / "tools" / "npm-packages" / "video-proof" / "run.sh";
+    auto manifest = wrapper.parent_path() / "manifest.json";
+    REQUIRE(fs::exists(wrapper));
+    REQUIRE(fs::exists(manifest));
+    const auto manifest_text = read_file(manifest);
+    REQUIRE(manifest_text.find("\"artifact_pack_command\": \"python3 tools/local-ci/pack_video_proof_tool.py --json\"") != std::string::npos);
+    REQUIRE(manifest_text.find("\"artifact_pack_npm_script\": \"npm --prefix tools/local-ci run pack-video-proof-tool -- --json\"") != std::string::npos);
+    REQUIRE(manifest_text.find("\"artifact_verify_command\": \"python3 tools/local-ci/pack_video_proof_tool.py --verify <manifest> --json\"") != std::string::npos);
+    REQUIRE(manifest_text.find("\"artifact_manifest_schema\": \"pulp.video-proof-tool-package.v1\"") != std::string::npos);
+
+    {
+        ScopedOutput output;
+        REQUIRE(cmd_tool({"path", "video-proof"}) == 0);
+        REQUIRE(output.out.str().find(wrapper.string()) != std::string::npos);
+    }
+
+    {
+        ScopedOutput output;
+        REQUIRE(cmd_tool({"doctor", "video-proof"}) == 0);
+        REQUIRE(output.out.str().find("Video Proof") != std::string::npos);
+        REQUIRE(output.out.str().find("pulp tool doctor video-proof --run") != std::string::npos);
+    }
+
+    {
+        ScopedOutput output;
+        REQUIRE(cmd_tool({"doctor", "video-proof", "--run"}) == 0);
+        REQUIRE(output.out.str().find("Video Proof smoke check passed") != std::string::npos);
+    }
+#endif
 }
 
 TEST_CASE("tool command reports registry and argument failures deterministically",

@@ -442,7 +442,7 @@ class DesktopDoctorCliTests(unittest.TestCase):
         output = buf.getvalue()
         self.assertEqual(exit_code, 0)
         self.assertIn("WARN  accessibility:", output)
-        self.assertIn("Pulp app automation still works", output)
+        self.assertIn("Pulp app automation clicks still work without it", output)
 
 
 if __name__ == "__main__":

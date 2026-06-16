@@ -31,6 +31,9 @@ def desktop_doctor_checks(bindings: Mapping[str, Any], config: dict, target_name
         platform=_binding_attr(bindings, "sys", "platform"),
         which_fn=_binding(bindings, "shutil").which,
         probe_webdriver_endpoint_fn=_binding(bindings, "probe_webdriver_endpoint"),
+        probe_macos_screencapture_fn=_binding(bindings, "probe_macos_screencapture"),
+        resolve_ffmpeg_path_fn=_binding(bindings, "resolve_ffmpeg_path"),
+        probe_macos_avfoundation_screen_fn=_binding(bindings, "probe_macos_avfoundation_screen"),
     )
 
 

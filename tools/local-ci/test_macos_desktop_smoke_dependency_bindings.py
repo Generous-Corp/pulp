@@ -22,6 +22,7 @@ class MacosDesktopSmokeDependencyBindingsTests(unittest.TestCase):
             *self.mod.MACOS_DESKTOP_SMOKE_PROCESS_DEPENDENCY_EXPORTS,
             *self.mod.MACOS_DESKTOP_SMOKE_WINDOW_DEPENDENCY_EXPORTS,
             *self.mod.MACOS_DESKTOP_SMOKE_INTERACTION_DEPENDENCY_EXPORTS,
+            *self.mod.MACOS_DESKTOP_SMOKE_VIDEO_DEPENDENCY_EXPORTS,
         )
 
         self.assertEqual(self.mod.MACOS_DESKTOP_SMOKE_DEPENDENCY_EXPORTS, expected)
@@ -53,14 +54,20 @@ class MacosDesktopSmokeDependencyBindingsTests(unittest.TestCase):
                 "macos_desktop_smoke_interaction_dependencies",
                 return_value={"interaction": object()},
             ) as interaction_deps,
+            mock.patch.object(
+                self.mod,
+                "macos_desktop_smoke_video_dependencies",
+                return_value={"video": object()},
+            ) as video_deps,
         ):
             deps = self.mod.macos_desktop_smoke_dependencies(bindings)
 
-        self.assertEqual(set(deps), {"artifact", "process", "window", "interaction"})
+        self.assertEqual(set(deps), {"artifact", "process", "window", "interaction", "video"})
         artifact_deps.assert_called_once_with(bindings)
         process_deps.assert_called_once_with(bindings)
         window_deps.assert_called_once_with(bindings)
         interaction_deps.assert_called_once_with(bindings)
+        video_deps.assert_called_once_with(bindings)
 
     def test_install_dependency_helpers_preserves_unknown_fallback(self):
         bindings = {}

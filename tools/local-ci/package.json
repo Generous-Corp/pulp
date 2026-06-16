@@ -1,0 +1,19 @@
+{
+  "name": "pulp-local-ci-video-tools",
+  "private": true,
+  "description": "Developer-only local CI video proof tooling. Installed on demand; not shipped with Pulp.",
+  "version": "0.0.0",
+  "scripts": {
+    "compose-video-proof": "node scripts/compose-video-proof.mjs",
+    "pack-video-proof-tool": "python3 pack_video_proof_tool.py",
+    "smoke-video-proof": "node scripts/smoke-video-proof.mjs"
+  },
+  "devDependencies": {
+    "@remotion/bundler": "4.0.476",
+    "@remotion/renderer": "4.0.476",
+    "ffmpeg-static": "5.2.0",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "remotion": "4.0.476"
+  }
+}

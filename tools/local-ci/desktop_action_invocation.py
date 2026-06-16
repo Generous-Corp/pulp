@@ -41,7 +41,43 @@ def macos_desktop_action_runner(
         settle_secs=settle_secs,
         timeout_secs=args.timeout,
         source_request=source_request,
+        **_macos_video_kwargs(args),
     )
+
+
+def _macos_video_kwargs(args: argparse.Namespace) -> dict:
+    """Map parsed desktop-video flags onto run_macos_local_smoke kwargs.
+
+    The video flags only exist on the smoke/click parsers (added by
+    cli_parser_video.add_desktop_video_args), so each is read via getattr with
+    the run_macos_local_smoke default — non-video and non-macOS invocations are
+    unaffected. Flag dests differ from the run params (MB budgets convert to
+    bytes; --duration → video_duration_secs; --video-note → video_notes;
+    --video-audio → video_audio_source; --source-image/-label → video_source_*).
+    """
+    notes = getattr(args, "video_note", None)
+    return {
+        "record_video": getattr(args, "record_video", False),
+        "video_duration_secs": getattr(args, "video_duration", 8.0),
+        "video_fps": getattr(args, "video_fps", 30.0),
+        "video_audio_source": getattr(args, "video_audio", "none"),
+        "video_audio_file": getattr(args, "video_audio_file", None),
+        "video_audio_device": getattr(args, "video_audio_device", None),
+        "video_recorder": getattr(args, "video_recorder", "auto"),
+        "video_focus": getattr(args, "video_focus", "auto"),
+        "video_capture_target": getattr(args, "video_capture_target", "app"),
+        "capture_bundle_id": getattr(args, "capture_bundle_id", None),
+        "video_attachment_budget_bytes": int(getattr(args, "video_attachment_budget_mb", 100.0) * 1_000_000),
+        "small_video": getattr(args, "small_video", False),
+        "small_video_budget_bytes": int(getattr(args, "small_video_budget_mb", 10.0) * 1_000_000),
+        "compose_video_proof": getattr(args, "compose_video_proof", False),
+        "video_template": getattr(args, "video_template", None),
+        "video_source_image": getattr(args, "source_image", None),
+        "video_source_label": getattr(args, "source_label", None),
+        "video_title": getattr(args, "video_title", None),
+        "video_notes": list(notes) if notes else None,
+        "video_context": getattr(args, "video_context", None),
+    }
 
 
 def linux_desktop_action_runner(

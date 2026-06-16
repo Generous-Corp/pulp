@@ -49,6 +49,18 @@ class CliDesktopDispatchBindingsTests(unittest.TestCase):
             "cmd_desktop_smoke",
             "cmd_desktop_click",
             "cmd_desktop_inspect",
+            "cmd_desktop_verdict",
+            "cmd_desktop_review_issue",
+            "cmd_desktop_review_status",
+            "cmd_desktop_review_watch",
+            "cmd_desktop_compose_video",
+            "cmd_desktop_design_diff",
+            "cmd_desktop_design_proof",
+            "cmd_desktop_video_matrix",
+            "cmd_desktop_video",
+            "cmd_desktop_serve",
+            "cmd_desktop_video_doctor",
+            "cmd_desktop_video_setup",
         ]:
             bindings[name] = object()
         return bindings, captured
@@ -75,10 +87,11 @@ class CliDesktopDispatchBindingsTests(unittest.TestCase):
         self.assertIs(captured["desktop_args"], args)
         self.assertEqual(
             set(captured["desktop_commands"]),
-            {"install", "doctor", "status", "config", "recent", "proof", "publish", "cleanup", "smoke", "click", "inspect"},
+            {"install", "doctor", "status", "config", "recent", "proof", "publish", "cleanup", "smoke", "click", "inspect", "verdict", "review-issue", "review-status", "review-watch", "compose-video", "design-diff", "design-proof", "video-matrix", "video", "serve", "video-doctor", "video-setup"},
         )
         self.assertIs(captured["desktop_commands"]["install"], bindings["cmd_desktop_install"])
         self.assertIs(captured["desktop_commands"]["inspect"], bindings["cmd_desktop_inspect"])
+        self.assertIs(captured["desktop_commands"]["verdict"], bindings["cmd_desktop_verdict"])
 
     def test_install_cli_desktop_dispatch_helpers_wires_named_exports(self):
         bindings, captured = self._bindings()

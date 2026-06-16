@@ -38,10 +38,21 @@ struct ToolDescriptor {
     std::string install_method;  // "binary_download", "python_pip"
     std::map<std::string, BinarySource> binary_sources;
     std::string pip_package;     // for python_pip
+    std::string npm_package_root; // repo-relative package root for npm_package
+    std::string npm_default_script; // default script for npm_package wrapper
     std::string pinned_version;
     std::vector<std::string> requires_tools;
     bool managed_by_pulp = true;
     bool bundleable = false;
+    std::string install_scope;    // "machine", "project", or empty when legacy
+    std::string distribution_lane; // "tool_addon", "core", "pulp_add", etc.
+    std::string package_format;   // "not_pulp_add", "pulp_add", "kit", etc.
+    std::string artifact_status;  // "source_tree_iteration", "packaged", etc.
+    std::string artifact_policy;  // short user/agent-facing packaging note
+    std::string artifact_pack_command; // command that produces reviewable artifact metadata
+    std::string artifact_pack_npm_script; // npm script wrapper for artifact pack
+    std::string artifact_verify_command; // command that verifies a packed artifact manifest
+    std::string artifact_manifest_schema; // expected pack manifest schema id
 
     // ── Project-importer fields (optional) ──
     //
@@ -137,6 +148,10 @@ ToolInstallResult install_binary_tool(const ToolDescriptor& tool, bool force = f
 ToolInstallResult install_python_tool(const ToolDescriptor& tool,
                                        const ToolRegistry& registry,
                                        bool force = false);
+ToolInstallResult install_npm_tool(const ToolDescriptor& tool,
+                                   const fs::path& registry_path,
+                                   bool force = false,
+                                   const fs::path& artifact_manifest = {});
 bool uninstall_tool(const std::string& tool_id);
 
 // ── Archive Extraction ──

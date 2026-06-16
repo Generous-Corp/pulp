@@ -15,6 +15,13 @@ import desktop_artifacts as _desktop_artifacts
 import desktop_commands_cli as _desktop_commands_cli
 import desktop_cli as _desktop_cli
 import desktop_doctor as _desktop_doctor
+import desktop_review_commands_cli as _desktop_review_commands_cli
+import desktop_video_compose_commands_cli as _desktop_video_compose_commands_cli
+import desktop_serve_commands_cli as _desktop_serve_commands_cli
+import desktop_video_prerequisites as _desktop_video_prerequisites
+import desktop_video_setup_commands_cli as _desktop_video_setup_commands_cli
+import desktop_video_action_commands_cli as _desktop_video_action_commands_cli
+import desktop_video_matrix_commands_cli as _desktop_video_matrix_commands_cli
 import desktop_setup_commands_cli as _desktop_setup_commands_cli
 import evidence_cli as _evidence_cli
 import evidence_index as _evidence_index
@@ -29,10 +36,18 @@ import linux_desktop_action as _linux_desktop_action
 import linux_target as _linux_target
 import local_ci_commands_cli as _local_ci_commands_cli
 import logs_cli as _logs_cli
+import io_utils_design_parity as _io_utils_design_parity
 import macos_desktop as _macos_desktop
 import macos_desktop_action as _macos_desktop_action
+import macos_desktop_video as _macos_desktop_video
+import macos_terminal_proof as _macos_terminal_proof
+import macos_terminal_runner as _macos_terminal_runner
+import macos_window_video_select as _macos_window_video_select
 import notifications as _notifications
 import normalize as _normalize
+import reporting_review as _reporting_review
+import reporting_video as _reporting_video
+import video_artifacts as _video_artifacts
 import provenance as _provenance
 import queue_commands_cli as _queue_commands_cli
 import queue_lifecycle as _queue_lifecycle
@@ -64,6 +79,13 @@ BOOTSTRAP_MODULE_ALIASES = {
     "_desktop_commands_cli": _desktop_commands_cli,
     "_desktop_cli": _desktop_cli,
     "_desktop_doctor": _desktop_doctor,
+    "_desktop_review_commands_cli": _desktop_review_commands_cli,
+    "_desktop_video_compose_commands_cli": _desktop_video_compose_commands_cli,
+    "_desktop_serve_commands_cli": _desktop_serve_commands_cli,
+    "_desktop_video_prerequisites": _desktop_video_prerequisites,
+    "_desktop_video_setup_commands_cli": _desktop_video_setup_commands_cli,
+    "_desktop_video_action_commands_cli": _desktop_video_action_commands_cli,
+    "_desktop_video_matrix_commands_cli": _desktop_video_matrix_commands_cli,
     "_desktop_setup_commands_cli": _desktop_setup_commands_cli,
     "_evidence_cli": _evidence_cli,
     "_execution": _execution,
@@ -75,9 +97,17 @@ BOOTSTRAP_MODULE_ALIASES = {
     "_linux_target": _linux_target,
     "_local_ci_commands_cli": _local_ci_commands_cli,
     "_logs_cli": _logs_cli,
+    "_io_utils_design_parity": _io_utils_design_parity,
     "_macos_desktop": _macos_desktop,
     "_macos_desktop_action": _macos_desktop_action,
+    "_macos_desktop_video": _macos_desktop_video,
+    "_macos_terminal_proof": _macos_terminal_proof,
+    "_macos_terminal_runner": _macos_terminal_runner,
+    "_macos_window_video_select": _macos_window_video_select,
     "_notifications": _notifications,
+    "_reporting_review": _reporting_review,
+    "_reporting_video": _reporting_video,
+    "_video_artifacts": _video_artifacts,
     "_normalize": _normalize,
     "_provenance": _provenance,
     "_queue_commands_cli": _queue_commands_cli,
