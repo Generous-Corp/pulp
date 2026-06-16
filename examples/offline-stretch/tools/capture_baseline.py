@@ -42,7 +42,7 @@ SYNTHETIC = [
 # The reference-free fields lifted out of metrics() into each scoreboard row.
 _FIELDS = ("length_exact", "onset_timing_mean_ms", "onset_timing_max_ms",
            "pre_echo_db", "null_rms_db", "attack_sharpness",
-           "spectral_flatness", "crest_db")
+           "spectral_flatness", "crest_db", "phase_incoherence")
 
 
 def render_pulp(cli, src, dst, ratio):
@@ -115,15 +115,15 @@ def main(argv):
     print(f"OfflineStretch baseline vs Rubber Band R3 ({len(rows)} renders) -> {out_json}")
     print(f"  R3 lane: {baseline['rubberband_comparison']}")
     hdr = (f"{'file':22}{'ratio':>6}{'engine':>15}{'len':>5}"
-           f"{'attack↑':>9}{'flat↑':>8}{'crest':>7}{'onset_ms':>10}{'preEcho':>9}")
+           f"{'attack↑':>9}{'phase↓':>8}{'flat↑':>8}{'crest':>7}{'onset_ms':>10}")
     print(hdr)
     for r in rows:
         def s(v):
             return "-" if v is None or isinstance(v, str) else v
         print(f"{r['file']:22}{r['ratio']:>6}{r['engine']:>15}"
               f"{str(s(r['length_exact'])):>5}{str(s(r['attack_sharpness'])):>9}"
-              f"{str(s(r['spectral_flatness'])):>8}{str(s(r['crest_db'])):>7}"
-              f"{str(s(r['onset_timing_mean_ms'])):>10}{str(s(r['pre_echo_db'])):>9}")
+              f"{str(s(r['phase_incoherence'])):>8}{str(s(r['spectral_flatness'])):>8}"
+              f"{str(s(r['crest_db'])):>7}{str(s(r['onset_timing_mean_ms'])):>10}")
     return 0
 
 

@@ -194,6 +194,12 @@ def metrics(in_path, out_path, ratio):
         result["attack_sharpness"] = round(_attack_sharpness(a, osr), 4)
         result["spectral_flatness"] = round(_spectral_flatness(a), 4)
         result["crest_db"] = round(_crest_db(a), 2)
+        # THE probe that captures the audible "robotic / time-stretchy" defect
+        # the magnitude metrics above are all blind to (validated 2026-06-16:
+        # Pulp 1.34 vs R3 1.10 vs source 1.23 on the drum break — the only metric
+        # that discriminated what the ear immediately hears). Phase artifact, so
+        # magnitude/envelope measures cannot see it.
+        result["phase_incoherence"] = round(_phase_incoherence(a), 4)
     # TODO(track B): f0-track continuity (cents) on sustained tonal material.
 
     return result
@@ -232,6 +238,31 @@ def _crest_db(a):
     peak = float(_np.max(_np.abs(a))) + 1e-9
     r = math.sqrt(float(_np.mean(a ** 2)) + 1e-18)
     return 20.0 * math.log10(peak / r)
+
+
+def _phase_incoherence(a, NF=1024, hop=256):
+    """Phase-vocoder 'phasiness' / robotic-timbre probe — the audible artifact
+    the magnitude metrics miss. A natural sinusoid has a STEADY frame-to-frame
+    phase advance, so the 2nd difference of unwrapped phase at a strong partial
+    is ~0; phase-vocoder smearing makes it erratic. Returns the magnitude-
+    weighted mean |2nd-diff of unwrapped phase| over energetic bins (higher =
+    more robotic). Reference-free."""
+    win = _np.hanning(NF)
+    X = _np.array([_np.fft.rfft(a[i:i + NF] * win)
+                   for i in range(0, len(a) - NF, hop)])
+    if X.shape[0] < 4:
+        return 0.0
+    mag = _np.abs(X)
+    floor = mag.mean() * 2.0
+    vals = []
+    for b in range(2, mag.shape[1] - 2):
+        col = mag[:, b]
+        if col.mean() < floor:
+            continue
+        d2 = _np.diff(_np.unwrap(_np.angle(X[:, b])), 2)
+        w = col[2:]
+        vals.append(float(_np.sum(_np.abs(d2) * w) / (float(_np.sum(w)) + 1e-9)))
+    return float(_np.mean(vals)) if vals else 0.0
 
 
 def main(argv):
