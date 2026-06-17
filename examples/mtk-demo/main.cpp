@@ -65,6 +65,15 @@ int main(int argc, char** argv) {
     auto window = WindowHost::create(*kb, opts);
     if (!window) { std::fprintf(stderr, "failed to create window host\n"); return 1; }
     window->set_design_viewport(w, h);   // aspect-locked fit; piano mode letterboxes
+    window->set_fixed_aspect_ratio(w / h);
+    // Resize the window to fit the active frame on a piano⇄typing toggle: the
+    // window shrinks/grows in height, top-aligned (the 🎹/⌨ toggles stay put).
+    WindowHost* host = window.get();
+    kb->on_intrinsic_size_changed = [host](float nw, float nh) {
+        host->set_fixed_aspect_ratio(nw / nh);
+        host->set_design_viewport(nw, nh);
+        host->request_content_size(nw, nh);
+    };
     window->set_close_callback([]() {});
     std::printf("Musical Typing Keyboard demo — GPU window. Play with the mouse/keys; "
                 "close the window to exit.\n");

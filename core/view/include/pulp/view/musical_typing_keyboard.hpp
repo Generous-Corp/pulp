@@ -73,6 +73,14 @@ public:
     std::function<void(bool on)> on_sustain;
     std::function<void(float amount)> on_modulation;
 
+    // Fired when the toggle (or set_mode) swaps frames and the intrinsic size
+    // changes — piano mode (732×176) is shorter than typing (732×266). A host
+    // that sizes itself to the keyboard wires this to resize its window/pane to
+    // (w, h) (e.g. WindowHost::request_content_size + set_design_viewport), so
+    // the piano frame shrinks the window top-aligned and toggling back grows it.
+    // Carries the NEW frame's panel width/height.
+    std::function<void(float w, float h)> on_intrinsic_size_changed;
+
     // ── Host-driven integration (e.g. PulpTempoSampler) ──────────────────────
     // Light keys from an EXTERNAL held-note set — host MIDI, an app-wide QWERTY
     // monitor, clicks elsewhere. Absolute MIDI notes; a note lights every key

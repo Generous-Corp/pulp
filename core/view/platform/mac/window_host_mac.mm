@@ -2263,6 +2263,19 @@ public:
         }
     }
 
+    void request_content_size(float w, float h) override {
+        if (!window_ || w <= 0.0f || h <= 0.0f) return;
+        // Keep the TOP-LEFT corner fixed while the size changes (the toolbar +
+        // 🎹/⌨ toggles must not jump). NSWindow's origin is bottom-left, so
+        // capture the current top edge, resize the content, then re-anchor the
+        // origin so that top edge stays put — the window grows/shrinks downward.
+        NSRect frame = [window_ frame];
+        const CGFloat top = frame.origin.y + frame.size.height;
+        [window_ setContentSize:NSMakeSize(w, h)];
+        NSRect resized = [window_ frame];
+        [window_ setFrameOrigin:NSMakePoint(resized.origin.x, top - resized.size.height)];
+    }
+
     void set_design_viewport(float design_w, float design_h) override {
         design_viewport_w_ = design_w;
         design_viewport_h_ = design_h;

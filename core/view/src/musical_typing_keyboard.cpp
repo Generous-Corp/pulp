@@ -353,7 +353,11 @@ void MusicalTypingKeyboard::on_active_frame_changed() {
     // sustained chord doesn't visually vanish across the swap.
     controller_.all_notes_off();
     apply_held_notes();
-    update_readouts();   // the new frame's readouts (e.g. piano OCTAVE) reflect state
+    refresh_mod_lights();   // re-apply the latched modulation light on the new frame
+    update_readouts();      // the new frame's readouts (e.g. piano OCTAVE) reflect state
+    // The intrinsic size just changed (piano is shorter) — let a self-sizing host
+    // resize its window/pane to the new frame, top-aligned (toggles stay fixed).
+    if (on_intrinsic_size_changed) on_intrinsic_size_changed(panel_width(), panel_height());
 }
 
 void MusicalTypingKeyboard::set_input_capture(bool capture) {

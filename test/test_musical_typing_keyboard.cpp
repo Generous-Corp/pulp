@@ -537,6 +537,24 @@ TEST_CASE("MusicalTypingKeyboard: a command-button click plays no note",
     REQUIRE(ons.empty());
 }
 
+TEST_CASE("MusicalTypingKeyboard: a mode toggle reports the new intrinsic size",
+          "[view][musical-typing][toggle]") {
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    std::vector<std::pair<float, float>> sizes;
+    kb.on_intrinsic_size_changed = [&](float w, float h) { sizes.push_back({w, h}); };
+
+    kb.set_mode(Mode::piano);     // typing (732×266) → piano (732×176)
+    REQUIRE(sizes.size() == 1);
+    REQUIRE(sizes.back() == std::pair<float, float>{732.0f, 176.0f});
+    kb.set_mode(Mode::typing);    // back → grow to 732×266
+    REQUIRE(sizes.size() == 2);
+    REQUIRE(sizes.back() == std::pair<float, float>{732.0f, 266.0f});
+
+    // No spurious fire when set_mode targets the already-active frame.
+    kb.set_mode(Mode::typing);
+    REQUIRE(sizes.size() == 2);
+}
+
 TEST_CASE("MusicalTypingKeyboard: number-row keys 1–8 + tab are consumed",
           "[view][musical-typing][controls]") {
     auto kbp = make_playable_kb(); auto& kb = *kbp;
