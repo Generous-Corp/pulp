@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v04442"></a>
+## [0.444.2] - 2026-06-17
+
+- fix(view): harden hosted-editor key forward (resign fallback, scoped blur, event-keyed guard) ([#4153](https://github.com/danielraffel/pulp/pull/4153))
+
 <a id="v04441"></a>
 ## [0.444.1] - 2026-06-17
 
@@ -4525,6 +4530,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.444.2]: https://github.com/danielraffel/pulp/releases/tag/v0.444.2
 [0.444.1]: https://github.com/danielraffel/pulp/releases/tag/v0.444.1
 [0.444.0]: https://github.com/danielraffel/pulp/releases/tag/v0.444.0
 [0.443.0]: https://github.com/danielraffel/pulp/releases/tag/v0.443.0
