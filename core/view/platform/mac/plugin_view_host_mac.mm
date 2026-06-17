@@ -287,16 +287,32 @@ bool pulp_plugin_key_down(pulp::view::View* root, NSEvent* event) {
     ke.modifiers = pulp::view::mac_geometry::modifiers_from_ns_flags(event.modifierFlags);
     ke.is_down = true;
     ke.is_repeat = event.isARepeat;
-    fv->on_key_event(ke);  // backspace / arrows / enter (TextEditor handles these)
-    // Printable characters → text insertion. (Full IME / marked-text via
-    // NSTextInputClient is a follow-up; this covers ASCII + most Latin typing.)
-    NSString* chars = event.characters;
-    if (chars.length > 0) {
-        unichar c0 = [chars characterAtIndex:0];
-        if (c0 >= 0x20 && c0 != 0x7f) {
-            pulp::view::TextInputEvent te;
-            te.text = chars.UTF8String;
-            fv->on_text_input(te);
+    // Navigation / editing commands first (arrows, backspace, enter, escape, …).
+    // The return value tells us whether the editor already handled this key as a
+    // command — if so it must NOT also be inserted as text.
+    const bool consumed = fv->on_key_event(ke);
+
+    // Printable characters → text insertion, but only when the key was NOT
+    // consumed as a command above. Without the !consumed gate an arrow key both
+    // moves the caret AND inserts its character: macOS reports arrows/function
+    // keys as private-use codepoints (0xF700–0xF8FF, e.g. 0xF702 = left arrow),
+    // which are >= 0x20 and would otherwise pass the printable test and render
+    // as tofu (□) in the field (pulp: AU hosted-view key routing).
+    // (Full IME / marked-text via NSTextInputClient is a follow-up; this covers
+    // ASCII + most Latin typing.)
+    if (!consumed) {
+        NSString* chars = event.characters;
+        const NSEventModifierFlags cmd_ctrl =
+            NSEventModifierFlagCommand | NSEventModifierFlagControl;
+        const bool has_cmd_ctrl = (event.modifierFlags & cmd_ctrl) != 0;
+        if (chars.length > 0 && !has_cmd_ctrl) {
+            unichar c0 = [chars characterAtIndex:0];
+            const bool is_function_key = (c0 >= 0xF700 && c0 <= 0xF8FF);
+            if (c0 >= 0x20 && c0 != 0x7f && !is_function_key) {
+                pulp::view::TextInputEvent te;
+                te.text = chars.UTF8String;
+                fv->on_text_input(te);
+            }
         }
     }
     root->request_repaint();
@@ -349,11 +365,78 @@ static bool pulp_plugin_end_text_input(pulp::view::View* root) {
     return true;
 }
 
+// Route a Cmd-chord (⌘A / ⌘C / ⌘V / ⌘X / ⌘Z …) to the focused editor. macOS
+// delivers command-key equivalents through performKeyEquivalent: BEFORE keyDown:
+// — without this override the host (e.g. Logic) consumes ⌘A as its own
+// "Select All" and the embedded field never sees it, so select-all/copy/paste
+// appear dead in the plugin (pulp: AU hosted-view key routing). Scoped to THIS
+// editor's tree (focused_input_ is process-global). Returns true when consumed.
+bool pulp_plugin_key_equivalent(pulp::view::View* root, NSEvent* event) {
+  try {
+    if (!root) return false;
+    auto* fv = pulp_focus_under_root(root);
+    if (!fv) return false;
+    // Only intercept actual command chords; let everything else flow normally
+    // so host menu shortcuts (⌘W, ⌘Q, ⌘S) keep working.
+    if ((event.modifierFlags & NSEventModifierFlagCommand) == 0) return false;
+    pulp::view::KeyEvent ke;
+    ke.key = pulp::view::mac_geometry::key_code_from_ns(event.keyCode);
+    ke.modifiers = pulp::view::mac_geometry::modifiers_from_ns_flags(event.modifierFlags);
+    ke.is_down = true;
+    ke.is_repeat = event.isARepeat;
+    if (fv->on_key_event(ke)) {
+        root->request_repaint();
+        return true;
+    }
+    return false;
+  } catch (...) {
+    std::fprintf(stderr, "[plugin-view-host] performKeyEquivalent handler threw\n");
+    return false;
+  }
+}
+
+// Set the macOS cursor from the view under `local` (root coords). Mirrors the
+// standalone host's hover→NSCursor mapping (window_host_mac.mm) for the subset
+// that matters in a plugin editor — most importantly IBeam over a text field so
+// a focused/hovered TextEditor shows the expected i-beam (pulp: AU hosted-view
+// key routing). Unknown styles fall back to the arrow cursor.
+void pulp_plugin_apply_hover_cursor(pulp::view::View* root, pulp::view::Point local) {
+  try {
+    if (!root) return;
+    root->simulate_hover(local);
+    auto* target = root->hit_test(local);
+    if (!target) { [[NSCursor arrowCursor] set]; return; }
+    switch (target->cursor()) {
+        case pulp::view::View::CursorStyle::text:
+            [[NSCursor IBeamCursor] set]; break;
+        case pulp::view::View::CursorStyle::pointer:
+            [[NSCursor pointingHandCursor] set]; break;
+        case pulp::view::View::CursorStyle::crosshair:
+            [[NSCursor crosshairCursor] set]; break;
+        case pulp::view::View::CursorStyle::grab:
+            [[NSCursor openHandCursor] set]; break;
+        case pulp::view::View::CursorStyle::grabbing:
+            [[NSCursor closedHandCursor] set]; break;
+        case pulp::view::View::CursorStyle::not_allowed:
+            [[NSCursor operationNotAllowedCursor] set]; break;
+        case pulp::view::View::CursorStyle::horizontal_resize:
+            [[NSCursor resizeLeftRightCursor] set]; break;
+        case pulp::view::View::CursorStyle::vertical_resize:
+            [[NSCursor resizeUpDownCursor] set]; break;
+        default:
+            [[NSCursor arrowCursor] set]; break;
+    }
+  } catch (...) {
+    // A cursor update must never take down the host process.
+  }
+}
+
 } // namespace
 
 @implementation PulpPluginView {
     pulp::view::View* _dragTarget;  // captured at mouseDown, re-validated each event
     NSResponder* _priorResponder;   // identity-validated before use, never deref'd
+    NSTrackingArea* _trackingArea;  // hover tracking for the i-beam over text fields
 }
 
 - (BOOL)isFlipped { return NO; }
@@ -398,6 +481,15 @@ static bool pulp_plugin_end_text_input(pulp::view::View* root) {
     if (!pulp_plugin_key_down(self.rootView, event)) [super keyDown:event];
     [self syncKeyFocus];  // commit/escape may have ended text input — release
 }
+// Cmd-chords (⌘A/⌘C/⌘V/⌘X/⌘Z) arrive here BEFORE keyDown:; route them to the
+// focused editor so the host doesn't swallow them. See pulp_plugin_key_equivalent.
+- (BOOL)performKeyEquivalent:(NSEvent*)event {
+    if (pulp_plugin_key_equivalent(self.rootView, event)) {
+        [self setNeedsDisplay:YES];
+        return YES;
+    }
+    return [super performKeyEquivalent:event];
+}
 // Resolve a window-space event into root-view coords, applying the inverse
 // design-viewport transform when set so hit_test runs against design-space
 // coords. Identity when pointTransform is nil.
@@ -405,6 +497,27 @@ static bool pulp_plugin_end_text_input(pulp::view::View* root) {
     auto pt = pulp_plugin_local_point(self, event);
     if (self.pointTransform) pt = self.pointTransform(pt);
     return pt;
+}
+// Hover tracking so the cursor becomes an i-beam over a text field. The
+// tracking rect auto-follows the view bounds (NSTrackingInVisibleRect).
+- (void)updateTrackingAreas {
+    [super updateTrackingAreas];
+    if (_trackingArea) { [self removeTrackingArea:_trackingArea]; _trackingArea = nil; }
+    _trackingArea = [[NSTrackingArea alloc]
+        initWithRect:self.bounds
+             options:(NSTrackingMouseMoved | NSTrackingActiveInKeyWindow |
+                      NSTrackingInVisibleRect | NSTrackingCursorUpdate)
+               owner:self
+            userInfo:nil];
+    [self addTrackingArea:_trackingArea];
+}
+- (void)mouseMoved:(NSEvent*)event {
+    if (!self.rootView) return;
+    pulp_plugin_apply_hover_cursor(self.rootView, [self localPoint:event]);
+}
+- (void)cursorUpdate:(NSEvent*)event {
+    if (self.rootView) pulp_plugin_apply_hover_cursor(self.rootView, [self localPoint:event]);
+    else [super cursorUpdate:event];
 }
 - (void)mouseDown:(NSEvent*)event {
     if (!self.rootView) return;
@@ -966,6 +1079,7 @@ private:
 @implementation PulpGpuPluginView {
     pulp::view::View* _dragTarget;  // captured at mouseDown, re-validated each event
     NSResponder* _priorResponder;   // identity-validated before use, never deref'd
+    NSTrackingArea* _trackingArea;  // hover tracking for the i-beam over text fields
 }
 
 // Keyboard-focus contract — see PulpPluginView::acceptsFirstResponder above:
@@ -1001,12 +1115,42 @@ private:
     if (!pulp_plugin_key_down(self.rootView, event)) [super keyDown:event];
     [self syncKeyFocus];
 }
+// Cmd-chords (⌘A/⌘C/⌘V/⌘X/⌘Z) arrive here BEFORE keyDown:; route them to the
+// focused editor so the host doesn't swallow them. See pulp_plugin_key_equivalent.
+- (BOOL)performKeyEquivalent:(NSEvent*)event {
+    if (pulp_plugin_key_equivalent(self.rootView, event)) {
+        self.rootView ? self.rootView->request_repaint() : (void)0;
+        return YES;
+    }
+    return [super performKeyEquivalent:event];
+}
 // Resolve a window-space event into root-view coords, applying the inverse
 // design-viewport transform when set.
 - (pulp::view::Point)localPoint:(NSEvent*)event {
     auto pt = pulp_plugin_local_point(self, event);
     if (self.pointTransform) pt = self.pointTransform(pt);
     return pt;
+}
+// Hover tracking so the cursor becomes an i-beam over a text field. The
+// tracking rect auto-follows the view bounds (NSTrackingInVisibleRect).
+- (void)updateTrackingAreas {
+    [super updateTrackingAreas];
+    if (_trackingArea) { [self removeTrackingArea:_trackingArea]; _trackingArea = nil; }
+    _trackingArea = [[NSTrackingArea alloc]
+        initWithRect:self.bounds
+             options:(NSTrackingMouseMoved | NSTrackingActiveInKeyWindow |
+                      NSTrackingInVisibleRect | NSTrackingCursorUpdate)
+               owner:self
+            userInfo:nil];
+    [self addTrackingArea:_trackingArea];
+}
+- (void)mouseMoved:(NSEvent*)event {
+    if (!self.rootView) return;
+    pulp_plugin_apply_hover_cursor(self.rootView, [self localPoint:event]);
+}
+- (void)cursorUpdate:(NSEvent*)event {
+    if (self.rootView) pulp_plugin_apply_hover_cursor(self.rootView, [self localPoint:event]);
+    else [super cursorUpdate:event];
 }
 - (void)mouseDown:(NSEvent*)event {
     if (!self.rootView) return;
