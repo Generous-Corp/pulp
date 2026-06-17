@@ -60,7 +60,7 @@ struct BoxShadowKey {
         // a parsed/animated shadow param can reach inf/NaN. Map non-finite to a
         // fixed bucket and clamp so the *4 and the cast can't overflow int32.
         if (!std::isfinite(v)) return 0;
-        constexpr float kLimit = 4.0e8f;  // /4 ≈ 1e8, well inside int32 range
+        constexpr float kLimit = 4.0e8f;  // *4 ≈ 1.6e9, well inside int32 range
         if (v > kLimit) v = kLimit;
         else if (v < -kLimit) v = -kLimit;
         return static_cast<std::int32_t>(v * 4.0f + (v < 0 ? -0.5f : 0.5f));
