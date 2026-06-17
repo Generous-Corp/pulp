@@ -6,6 +6,7 @@
 // typing works, and it is discoverable in the pulp::design catalog.
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 
 #include <pulp/design/design_system.hpp>
 #include <pulp/view/musical_typing_keyboard.hpp>
@@ -45,6 +46,25 @@ int momentary_count(const MusicalTypingKeyboard& kb) {
         if (kb.element_kind(i) == K::momentary) ++n;
     return n;
 }
+// Note-bearing momentary keys only (note >= 0) — excludes the tagged control
+// momentary (sustain / pitch-bend / modulation, which carry note == -1).
+int note_key_count(const MusicalTypingKeyboard& kb) {
+    int n = 0;
+    for (int i = 0; i < kb.element_count(); ++i)
+        if (kb.element_kind(i) == K::momentary && kb.element_note(i) >= 0) ++n;
+    return n;
+}
+// Index of the first element with the given action/value tag, or -1.
+int tag_idx(const MusicalTypingKeyboard& kb, const std::string& tag) {
+    for (int i = 0; i < kb.element_count(); ++i)
+        if (kb.element_action(i) == tag) return i;
+    return -1;
+}
+// Press + release a number-row / tab key (momentary control).
+void tap_key(MusicalTypingKeyboard& kb, KeyCode k) {
+    KeyEvent e{}; e.key = k; e.is_down = true;  kb.on_key_event(e);
+                  e.is_down = false;            kb.on_key_event(e);
+}
 }  // namespace
 
 TEST_CASE("MusicalTypingKeyboard loads both embedded faithful SVGs", "[view][musical-typing]") {
@@ -77,7 +97,7 @@ TEST_CASE("MusicalTyping is registered in the pulp::design catalog", "[design][c
 TEST_CASE("MusicalTypingKeyboard: typing frame has 18 keys + 2 toggle buttons",
           "[view][musical-typing][momentary]") {
     auto kbp = make_playable_kb(); auto& kb = *kbp;
-    REQUIRE(momentary_count(kb) == 18);            // relative semitones 0..17
+    REQUIRE(note_key_count(kb) == 18);             // relative semitones 0..17
     for (int i = 0; i < 18; ++i) REQUIRE(kb.element_note(i) == i);
     // Two swap-link buttons (the 🎹/⌨ toggle).
     int swaps = 0;
@@ -358,7 +378,9 @@ TEST_CASE("MusicalTypingKeyboard: no baked-lit demo chord in the embedded SVGs",
     REQUIRE(count_teal(detail::musical_typing_piano_svg_b64()) <= 4);
 }
 
-// ── On-screen command controls (octave / velocity / sustain / pitch-bend) ───
+// ── On-screen command controls (octave / velocity) ─────────────────────────
+// octave/velocity are Kind::action; sustain / pitch-bend / modulation are tagged
+// Kind::momentary (tested in the Logic-faithful section below).
 
 TEST_CASE("MusicalTypingKeyboard: typing frame carries the command controls",
           "[view][musical-typing][controls]") {
@@ -366,13 +388,18 @@ TEST_CASE("MusicalTypingKeyboard: typing frame carries the command controls",
     int actions = 0;
     for (int i = 0; i < kb.element_count(); ++i)
         if (kb.element_kind(i) == K::action) ++actions;
-    REQUIRE(actions == 13);   // octave±, velocity±, sustain, 8 pitch-bend presets
-    // Piano frame has no command controls (just keys + the toggle).
+    REQUIRE(actions == 6);   // octave ± (×2: bottom + < > arrows), velocity ±
+    // The pitch-bend / sustain / modulation controls are tagged momentary, not
+    // actions: sustain + pb_down + pb_up + mod_0..mod_5 = 9 control momentary.
+    REQUIRE(note_key_count(kb) == 18);
+    REQUIRE(momentary_count(kb) == 18 + 9);
+    // Piano frame: keys + the < > octave arrows only, no other controls.
     kb.set_mode(Mode::piano);
     int piano_actions = 0;
     for (int i = 0; i < kb.element_count(); ++i)
         if (kb.element_kind(i) == K::action) ++piano_actions;
-    REQUIRE(piano_actions == 0);
+    REQUIRE(piano_actions == 2);   // < > overview arrows
+    REQUIRE(momentary_count(kb) == 36);   // 36 piano keys, no control momentary
 }
 
 TEST_CASE("MusicalTypingKeyboard: on-screen octave −/+ shift the played note",
@@ -404,26 +431,99 @@ TEST_CASE("MusicalTypingKeyboard: on-screen velocity −/+ adjust the controller
     REQUIRE(kb.controller().velocity < v1);
 }
 
-TEST_CASE("MusicalTypingKeyboard: sustain pad toggles and reports on_sustain",
-          "[view][musical-typing][controls]") {
-    auto kbp = make_playable_kb(); auto& kb = *kbp;
-    std::vector<bool> states;
-    kb.on_sustain = [&](bool on) { states.push_back(on); };
-    kb.on_mouse_down({54, 156}); kb.on_mouse_up({54, 156});  // sustain (21,110,66,92)
-    kb.on_mouse_down({54, 156}); kb.on_mouse_up({54, 156});
-    REQUIRE(states == std::vector<bool>{true, false});
-}
+// ── Logic-faithful controls: pitch-bend 1/2 momentary, modulation 3–8 latched,
+//    sustain (tab) hold. On-screen buttons and number-row keys share one path. ─
 
-TEST_CASE("MusicalTypingKeyboard: pitch-bend presets emit a normalized bend",
-          "[view][musical-typing][controls]") {
+TEST_CASE("MusicalTypingKeyboard: keys 1/2 are momentary pitch bend (down/up)",
+          "[view][musical-typing][controls][pitchbend]") {
     auto kbp = make_playable_kb(); auto& kb = *kbp;
     std::vector<float> bends;
     kb.on_pitch_bend = [&](float b) { bends.push_back(b); };
-    kb.on_mouse_down({126, 82}); kb.on_mouse_up({126, 82});  // pb_0 (108,63) → 0.0
-    kb.on_mouse_down({428, 82}); kb.on_mouse_up({428, 82});  // pb_7 (410,63) → 1.0
-    REQUIRE(bends.size() == 2);
-    REQUIRE(bends[0] == 0.0f);
-    REQUIRE(bends[1] == 1.0f);
+    const int down = tag_idx(kb, "pb_down");
+    const int up   = tag_idx(kb, "pb_up");
+    REQUIRE(down >= 0); REQUIRE(up >= 0);
+
+    KeyEvent e{}; e.key = KeyCode::num1; e.is_down = true; kb.on_key_event(e);  // hold 1
+    REQUIRE(bends.back() == -1.0f);             // full bend down while held
+    REQUIRE(kb.element_value(down) == 1.0f);    // lit while held
+    e.is_down = false; kb.on_key_event(e);                                     // release
+    REQUIRE(bends.back() == 0.0f);              // springs back to centre
+    REQUIRE(kb.element_value(down) == 0.0f);    // unlit
+
+    e.key = KeyCode::num2; e.is_down = true; kb.on_key_event(e);  // hold 2 → up
+    REQUIRE(bends.back() == 1.0f);
+    REQUIRE(kb.element_value(up) == 1.0f);
+    e.is_down = false; kb.on_key_event(e);
+    REQUIRE(bends.back() == 0.0f);
+}
+
+TEST_CASE("MusicalTypingKeyboard: pitch-bend pads mirror keys 1/2",
+          "[view][musical-typing][controls][pitchbend]") {
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    std::vector<float> bends;
+    kb.on_pitch_bend = [&](float b) { bends.push_back(b); };
+    kb.on_mouse_down({126, 82});                 // pb_down pad (108,63,36,38)
+    REQUIRE(bends.back() == -1.0f);
+    kb.on_mouse_up({126, 82});
+    REQUIRE(bends.back() == 0.0f);
+    kb.on_mouse_down({168, 82}); kb.on_mouse_up({168, 82});  // pb_up pad (150,63)
+    REQUIRE(bends == std::vector<float>{-1.0f, 0.0f, 1.0f, 0.0f});
+}
+
+TEST_CASE("MusicalTypingKeyboard: keys 3–8 are a latched modulation selector",
+          "[view][musical-typing][controls][modulation]") {
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    std::vector<float> mods;
+    kb.on_modulation = [&](float a) { mods.push_back(a); };
+    // Default is step 0 ("off") — its pad lit, others dark, before any input.
+    REQUIRE(kb.element_value(tag_idx(kb, "mod_0")) == 1.0f);
+    REQUIRE(kb.element_value(tag_idx(kb, "mod_3")) == 0.0f);
+
+    tap_key(kb, KeyCode::num8);                   // key 8 → step 5 (max)
+    REQUIRE(mods.back() == 1.0f);
+    REQUIRE(kb.element_value(tag_idx(kb, "mod_5")) == 1.0f);   // latched lit
+    REQUIRE(kb.element_value(tag_idx(kb, "mod_0")) == 0.0f);   // previous cleared
+
+    tap_key(kb, KeyCode::num5);                   // key 5 → step 2
+    REQUIRE(mods.back() == Catch::Approx(2.0f / 5.0f));
+    REQUIRE(kb.element_value(tag_idx(kb, "mod_2")) == 1.0f);   // selection persists
+    REQUIRE(kb.element_value(tag_idx(kb, "mod_5")) == 0.0f);
+}
+
+TEST_CASE("MusicalTypingKeyboard: modulation pads mirror keys 3–8 and latch",
+          "[view][musical-typing][controls][modulation]") {
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    std::vector<float> mods;
+    kb.on_modulation = [&](float a) { mods.push_back(a); };
+    // mod_3 pad sits at x=326 (200 + 3*42), y=63,36,38 → centre ~ (344,82).
+    kb.on_mouse_down({344, 82});
+    REQUIRE(mods.back() == Catch::Approx(3.0f / 5.0f));
+    kb.on_mouse_up({344, 82});
+    // Latches: still lit after the mouse-up cleared the momentary press.
+    REQUIRE(kb.element_value(tag_idx(kb, "mod_3")) == 1.0f);
+}
+
+TEST_CASE("MusicalTypingKeyboard: tab + sustain pad are a momentary hold",
+          "[view][musical-typing][controls][sustain]") {
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    std::vector<bool> states;
+    kb.on_sustain = [&](bool on) { states.push_back(on); };
+    const int pad = tag_idx(kb, "sustain");
+
+    KeyEvent e{}; e.key = KeyCode::tab; e.is_down = true; kb.on_key_event(e);  // hold tab
+    REQUIRE(states.back() == true);
+    REQUIRE(kb.element_value(pad) == 1.0f);     // lit while held
+    e.is_down = false; kb.on_key_event(e);                                    // release
+    REQUIRE(states.back() == false);
+    REQUIRE(kb.element_value(pad) == 0.0f);
+
+    // The pad mirrors the key: press-hold lights, release clears.
+    kb.on_mouse_down({54, 156});                 // sustain pad (21,110,66,92)
+    REQUIRE(states.back() == true);
+    REQUIRE(kb.element_value(pad) == 1.0f);
+    kb.on_mouse_up({54, 156});
+    REQUIRE(states.back() == false);
+    REQUIRE(kb.element_value(pad) == 0.0f);
 }
 
 TEST_CASE("MusicalTypingKeyboard: a command-button click plays no note",
@@ -432,6 +532,19 @@ TEST_CASE("MusicalTypingKeyboard: a command-button click plays no note",
     std::vector<int> ons;
     kb.on_note_on = [&](int n, float) { ons.push_back(n); };
     kb.on_mouse_down({171, 229}); kb.on_mouse_up({171, 229});  // octave_up
-    kb.on_mouse_down({54, 156});  kb.on_mouse_up({54, 156});   // sustain
+    kb.on_mouse_down({54, 156});  kb.on_mouse_up({54, 156});   // sustain pad
+    kb.on_mouse_down({126, 82});  kb.on_mouse_up({126, 82});   // pitch-bend pad
     REQUIRE(ons.empty());
+}
+
+TEST_CASE("MusicalTypingKeyboard: number-row keys 1–8 + tab are consumed",
+          "[view][musical-typing][controls]") {
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    for (KeyCode k : {KeyCode::num1, KeyCode::num2, KeyCode::num3, KeyCode::num4,
+                      KeyCode::num5, KeyCode::num6, KeyCode::num7, KeyCode::num8,
+                      KeyCode::tab}) {
+        KeyEvent e{}; e.key = k; e.is_down = true;
+        REQUIRE(kb.on_key_event(e));             // consumed (was ignored before)
+        e.is_down = false; kb.on_key_event(e);
+    }
 }

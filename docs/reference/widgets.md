@@ -148,3 +148,4 @@ interactive version of this set (dark + light), build and run
 | `Icon` | Built-in vector icons | type (image_upload/send/search/close) | `widgets.hpp` |
 | `ImageView` | Image display | file/resource/memory URIs, image cache, value-driven silhouette fill | `widgets.hpp` |
 | `SvgPathWidget` | Inline SVG `<path>` icon | path data, viewBox, fill/stroke, gradient, fill rule | `svg_path_widget.hpp` |
+| `LottieView` | Lottie / Bodymovin animation | JSON load, FrameClock playhead, reduced-motion honoring, opt-in (`PULP_LOTTIE`) | `lottie_view.hpp` |

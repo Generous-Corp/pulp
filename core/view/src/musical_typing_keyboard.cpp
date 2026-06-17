@@ -40,11 +40,15 @@ void append_toggle(std::vector<DesignFrameElement>& els) {
     add_swap(62, kTypingFrame);  // keyboard icon → typing mode (frame 0)
 }
 
-// The typing frame's on-screen command controls (action elements), in frame-0
-// (732×266) coords from Figma node 187:15: octave −/+ and velocity −/+ (the
-// bottom Z/X · C/V buttons), the sustain pad, and the 8 pitch-bend preset
-// buttons. Clicking one fires on_action(id); MusicalTypingKeyboard maps the id
-// to the controller (octave/velocity) or a callback (sustain/pitch-bend).
+// The typing frame's on-screen controls, in frame-0 (732×266) coords from Figma
+// node 187:15. Two kinds:
+//   • Kind::action — octave −/+ and velocity −/+ (bottom Z/X · C/V buttons) and
+//     the < > arrows flanking the overview strip. A click fires on_action(id),
+//     which drives the controller (octave/velocity).
+//   • Kind::momentary (with an action tag) — sustain pad, pitch-bend −/+ pads
+//     (keys 1/2), and the 6 modulation pads (keys 3–8). These light via the key
+//     overlay and route to control_press/control_release (pitch-bend momentary,
+//     sustain hold, modulation latched), mirroring the number-row keys.
 void append_controls(std::vector<DesignFrameElement>& els) {
     auto add = [&](std::string id, float x, float y, float w, float h) {
         DesignFrameElement e;
@@ -60,11 +64,25 @@ void append_controls(std::vector<DesignFrameElement>& els) {
     add("octave_up",   550, 23, 22, 24);
     add("vel_down",    321, 213, 32, 32);
     add("vel_up",      362, 213, 32, 32);
-    add("sustain",      21, 110, 66, 92);
-    // 8 pitch-bend preset buttons, left→right (the design's "− + off … max" row).
-    static const float pbx[] = {108, 150, 200, 242, 284, 326, 368, 410};
-    for (int i = 0; i < 8; ++i)
-        add("pb_" + std::to_string(i), pbx[i], 63, 36, 38);
+
+    // Pitch bend (buttons 1,2) + sustain are MOMENTARY (press/release, lit while
+    // held) → modelled as momentary elements with an action tag so the existing
+    // key-overlay lights them. Modulation (buttons 3–8) is a LATCHED selector,
+    // also momentary-tagged but re-lit on release to persist the selection.
+    auto add_mom = [&](std::string id, float x, float y, float w, float h) {
+        DesignFrameElement e;
+        e.kind = DesignFrameElement::Kind::momentary;
+        e.action = std::move(id);   // control tag (routes away from notes)
+        e.x = x; e.y = y; e.w = w; e.h = h;
+        els.push_back(e);
+    };
+    add_mom("sustain", 21, 110, 66, 92);
+    add_mom("pb_down", 108, 63, 36, 38);   // "−" / key 1
+    add_mom("pb_up",   150, 63, 36, 38);   // "+" / key 2
+    // Modulation 3..8 ("off" … "max"), keys 3-8 → mod_0 … mod_5.
+    static const float mx[] = {200, 242, 284, 326, 368, 410};
+    for (int i = 0; i < 6; ++i)
+        add_mom("mod_" + std::to_string(i), mx[i], 63, 36, 38);
 }
 
 // Live value readouts (Kind::value_label) over the design's baked OCTAVE / VEL /
@@ -191,52 +209,109 @@ MusicalTypingKeyboard::MusicalTypingKeyboard()
     controller_.on_note_on  = [this](int note, float vel) { if (on_note_on) on_note_on(note, vel); };
     controller_.on_note_off = [this](int note)            { if (on_note_off) on_note_off(note); };
 
-    // Clicking a key (DesignFrameView momentary gesture) plays its note too:
-    // typing keys follow base+octave, piano keys are absolute MIDI. (Swap-link
+    // A gesture on a momentary element is either a NOTE key (note >= 0, empty
+    // action) or a tagged CONTROL (pitch-bend / modulation / sustain — action set,
+    // note = −1). Route controls to control_press/release so on-screen buttons
+    // behave identically to the number-row keys; play notes otherwise. (Swap-link
     // toggle clicks are handled inside DesignFrameView and never reach here.)
     on_gesture_begin = [this](int i) {
+        const std::string& tag = element_action(i);
+        if (!tag.empty()) { control_press(tag); return; }
         const int n = midi_for_element(i);
         if (n >= 0 && on_note_on) on_note_on(n, controller_.velocity);
     };
     on_gesture_end = [this](int i) {
+        const std::string& tag = element_action(i);
+        if (!tag.empty()) { control_release(tag); return; }
         const int n = midi_for_element(i);
         if (n >= 0 && on_note_off) on_note_off(n);
     };
 
-    // On-screen command buttons (Kind::action) → controller state or a callback.
-    // octave/velocity drive the SAME controller the z/x·c/v keys do (so the next
-    // note reflects them); sustain + pitch-bend are surfaced as callbacks the
-    // host wires. (Modulation has no baked control in this design — the label is
-    // a placeholder — so on_modulation is defined for the contract but unwired.)
+    // On-screen command buttons (Kind::action) → controller state. octave/velocity
+    // drive the SAME controller the z/x·c/v keys do (so the next note reflects
+    // them). Pitch-bend, modulation, and sustain are momentary elements (handled
+    // by the gesture path above), NOT actions.
     on_action = [this](const std::string& a) {
         if (a == "octave_down")     controller_.set_octave_shift(controller_.octave_shift() - 1);
         else if (a == "octave_up")  controller_.set_octave_shift(controller_.octave_shift() + 1);
         else if (a == "vel_down")   controller_.velocity = std::clamp(controller_.velocity - kVelStep, 0.0f, 1.0f);
         else if (a == "vel_up")     controller_.velocity = std::clamp(controller_.velocity + kVelStep, 0.0f, 1.0f);
-        else if (a == "sustain") {  sustain_ = !sustain_; if (on_sustain) on_sustain(sustain_); }
-        else if (a.rfind("pb_", 0) == 0) {
-            // 8 preset buttons, left→right → a normalized 0..1 bend; the host maps
-            // it to its own bend range. Track the 1-based preset for the readout.
-            const int i = std::clamp(std::atoi(a.c_str() + 3), 0, 7);
-            pb_preset_ = i + 1;
-            if (on_pitch_bend) on_pitch_bend(static_cast<float>(i) / 7.0f);
-        }
-        update_readouts();   // reflect the new octave / velocity / pitch-bend value
+        update_readouts();   // reflect the new octave / velocity value
     };
 
     controller_.velocity = 98.0f / 127.0f;  // match the design's "VEL 98" default
+    refresh_mod_lights();                    // light the default modulation step (off)
     update_readouts();                       // seed the readouts to current state
 }
 
 void MusicalTypingKeyboard::update_readouts() {
     const std::string oct = note_name(controller_.base_note() + controller_.octave_shift() * 12);
     const int vel127 = static_cast<int>(std::lround(controller_.velocity * 127.0f));
+    // Logic-style signed pitch-bend readout: −20 / 0 / +20.
+    const std::string pb = pb_value_ > 0 ? "+" + std::to_string(pb_value_)
+                                         : std::to_string(pb_value_);
     for (int i = 0; i < element_count(); ++i) {
         if (element_kind(i) != DesignFrameElement::Kind::value_label) continue;
         const std::string& tag = element_action(i);
         if (tag == "octave")         set_element_text(i, oct);
         else if (tag == "velocity")  set_element_text(i, std::to_string(vel127));
-        else if (tag == "pitchbend") set_element_text(i, std::to_string(pb_preset_));
+        else if (tag == "pitchbend") set_element_text(i, pb);
+    }
+}
+
+int MusicalTypingKeyboard::element_for_action(const std::string& tag) const {
+    for (int i = 0; i < element_count(); ++i)
+        if (element_action(i) == tag) return i;
+    return -1;
+}
+
+void MusicalTypingKeyboard::control_press(const std::string& tag) {
+    const int e = element_for_action(tag);
+    if (tag == "pb_down") {
+        pb_value_ = -kPitchBendMax;
+        if (on_pitch_bend) on_pitch_bend(-1.0f);   // bipolar −1 (full bend down)
+        if (e >= 0) set_element_value(e, 1.0f);
+    } else if (tag == "pb_up") {
+        pb_value_ = kPitchBendMax;
+        if (on_pitch_bend) on_pitch_bend(1.0f);     // bipolar +1 (full bend up)
+        if (e >= 0) set_element_value(e, 1.0f);
+    } else if (tag == "sustain") {
+        sustain_ = true;
+        if (on_sustain) on_sustain(true);
+        if (e >= 0) set_element_value(e, 1.0f);
+    } else if (tag.rfind("mod_", 0) == 0) {
+        // Latched selector: pick this step (0 = off … 5 = max) and persist it.
+        mod_sel_ = std::clamp(std::atoi(tag.c_str() + 4), 0, 5);
+        if (on_modulation) on_modulation(static_cast<float>(mod_sel_) / 5.0f);
+        refresh_mod_lights();
+    }
+    update_readouts();
+    request_repaint();
+}
+
+void MusicalTypingKeyboard::control_release(const std::string& tag) {
+    const int e = element_for_action(tag);
+    if (tag == "pb_down" || tag == "pb_up") {
+        pb_value_ = 0;                              // momentary: spring back to centre
+        if (on_pitch_bend) on_pitch_bend(0.0f);
+        if (e >= 0) set_element_value(e, 0.0f);
+    } else if (tag == "sustain") {
+        sustain_ = false;                           // momentary hold: released on key-up
+        if (on_sustain) on_sustain(false);
+        if (e >= 0) set_element_value(e, 0.0f);
+    } else if (tag.rfind("mod_", 0) == 0) {
+        // Modulation LATCHES: the momentary press just auto-cleared this button's
+        // light on release — re-light the selected step so the selection persists.
+        refresh_mod_lights();
+    }
+    update_readouts();
+    request_repaint();
+}
+
+void MusicalTypingKeyboard::refresh_mod_lights() {
+    for (int i = 0; i < 6; ++i) {
+        const int e = element_for_action("mod_" + std::to_string(i));
+        if (e >= 0) set_element_value(e, i == mod_sel_ ? 1.0f : 0.0f);
     }
 }
 
@@ -261,6 +336,7 @@ void MusicalTypingKeyboard::apply_held_notes() {
     // our own key/mouse state.
     for (int i = 0; i < element_count(); ++i) {
         if (element_kind(i) != DesignFrameElement::Kind::momentary) continue;
+        if (element_note(i) < 0) continue;   // control momentary (pitch/mod/sustain) — not a note
         const int midi = midi_for_element(i);
         bool held = false;
         for (int n : held_notes_) if (n == midi) { held = true; break; }
@@ -288,6 +364,28 @@ void MusicalTypingKeyboard::set_input_capture(bool capture) {
 
 bool MusicalTypingKeyboard::on_key_event(const KeyEvent& event) {
     if (!input_capture_) return false;  // host feeds QWERTY itself — don't double-trigger
+    // Number row + tab mirror the on-screen controls exactly: 1/2 = momentary
+    // pitch bend (down/up), 3–8 = latched modulation selector (3 = off … 8 = max),
+    // tab = momentary sustain hold. Routed through the SAME control_press/release
+    // the click path uses, so keys and buttons stay in lockstep.
+    std::string tag;
+    switch (event.key) {
+        case KeyCode::num1: tag = "pb_down"; break;
+        case KeyCode::num2: tag = "pb_up";   break;
+        case KeyCode::num3: tag = "mod_0";   break;
+        case KeyCode::num4: tag = "mod_1";   break;
+        case KeyCode::num5: tag = "mod_2";   break;
+        case KeyCode::num6: tag = "mod_3";   break;
+        case KeyCode::num7: tag = "mod_4";   break;
+        case KeyCode::num8: tag = "mod_5";   break;
+        case KeyCode::tab:  tag = "sustain"; break;
+        default: break;
+    }
+    if (!tag.empty()) {
+        if (event.is_down) { if (!event.is_repeat) control_press(tag); }
+        else               control_release(tag);
+        return true;
+    }
     const bool consumed = controller_.handle_key(event);  // QWERTY→note + z/x octave
     // Light the matching typing key (by relative semitone, octave-independent).
     // No-op in piano mode (the frame has no typing keys), which is correct.

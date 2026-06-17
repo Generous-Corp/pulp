@@ -56,16 +56,19 @@ public:
     // a host can set the base note / velocity or feed keys from its own path.
     MusicalTypingController& controller() { return controller_; }
 
-    // ── On-screen control callbacks ──────────────────────────────────────────
+    // ── On-screen control callbacks (Logic-faithful) ─────────────────────────
     // The on-screen octave −/+ and velocity −/+ buttons drive the controller
     // directly (they change the next note's octave/velocity, no callback needed).
-    // These surface the controls that DON'T map to controller state:
-    //   • on_pitch_bend(0..1) — fired by the 8 pitch-bend preset buttons
-    //     (left→right); the host maps the normalized value to its bend range.
-    //   • on_sustain(bool)    — fired by the sustain pad (toggles).
-    //   • on_modulation(0..1) — defined for the integration contract, but the
-    //     current design has NO modulation control (the "Modulation" label is a
-    //     placeholder), so it is never fired until a design revision adds one.
+    // These surface the controls that DON'T map to controller state. Keys 1–8 and
+    // tab mirror the on-screen buttons exactly:
+    //   • on_pitch_bend(−1..+1) — keys 1 / 2 (and the −/+ pads) are MOMENTARY:
+    //     hold → full bend down (−1) / up (+1), release → 0 (spring to centre).
+    //     Bipolar; the host maps it to its bend range. Readout shows −20 / 0 / +20.
+    //   • on_sustain(bool)      — sustain pad / tab key, MOMENTARY hold: true while
+    //     held, false on release (lit while held).
+    //   • on_modulation(0..1)   — keys 3–8 (and the 6 mod pads) are a LATCHED
+    //     selector: 3 = off (0, default) … 8 = max (1). The selection persists and
+    //     highlights; 0..1 is mod_sel / 5.
     std::function<void(float bend)> on_pitch_bend;
     std::function<void(bool on)> on_sustain;
     std::function<void(float amount)> on_modulation;
@@ -104,11 +107,23 @@ private:
     MusicalTypingController controller_;
     bool input_capture_ = true;   // false = host feeds QWERTY; we don't capture keys
     bool sustain_ = false;        // sustain-pad toggle state (surfaced via on_sustain)
-    int pb_preset_ = 0;           // selected pitch-bend preset (0 = none) for the readout
+    int pb_value_ = 0;            // live pitch-bend display value (−20 / 0 / +20)
+    int mod_sel_ = 0;             // latched modulation selection (0 = "off" … 5 = "max")
     static constexpr float kVelStep = 1.0f / 16.0f;  // on-screen velocity −/+ increment
+    static constexpr int kPitchBendMax = 20;         // Logic-style ±20 readout extent
     // Refresh the live OCTAVE / VEL / PITCH BEND value_label readouts of the
     // active frame from current state. Called after any change + on frame swap.
     void update_readouts();
+    // Press/release of a tagged control (pitch-bend pb_down/pb_up momentary,
+    // modulation mod_N latched, sustain hold) — shared by the mouse-gesture and
+    // keyboard paths so on-screen buttons and keys behave identically.
+    void control_press(const std::string& tag);
+    void control_release(const std::string& tag);
+    // Re-light the selected modulation button (mod_sel_) and clear the others;
+    // call after a press auto-clears the momentary light on release.
+    void refresh_mod_lights();
+    // Index of the (first) element whose action tag == `tag`, or -1.
+    int element_for_action(const std::string& tag) const;
     // Last external held set from set_active_notes; re-applied after a frame swap
     // so the new frame reflects the host's still-held notes.
     std::vector<int> held_notes_;

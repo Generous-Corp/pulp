@@ -8,8 +8,10 @@
 //
 // In the window: click keys, type a w s e d f t g y h u j k o l p, z/x octave,
 // c/v velocity, click 🎹/⌨ to toggle piano/typing, the on-screen octave/velocity
-// buttons, sustain, and the pitch-bend presets. Readouts (OCTAVE/VEL/PITCH BEND)
-// track state live.
+// buttons. Logic-faithful controls: keys 1/2 (or the −/+ pads) are momentary
+// pitch bend; keys 3–8 (or the 6 pads) are a latched modulation selector (3 =
+// off … 8 = max); tab (or the pad) is a momentary sustain hold. Readouts
+// (OCTAVE / VEL / PITCH BEND) track state live.
 
 #include <pulp/design/design_system.hpp>      // ink_signal_theme
 #include <pulp/view/musical_typing_keyboard.hpp>
@@ -40,8 +42,9 @@ int main(int argc, char** argv) {
     kb->set_theme(pulp::design::ink_signal_theme(/*dark=*/true));
     kb->on_note_on  = [](int n, float v) { std::printf("note on  %-3d %-3s  vel %.2f\n", n, note_name(n).c_str(), v); };
     kb->on_note_off = [](int n)          { std::printf("note off %-3d %-3s\n", n, note_name(n).c_str()); };
-    kb->on_pitch_bend = [](float b)      { std::printf("pitch bend %.2f\n", b); };
+    kb->on_pitch_bend = [](float b)      { std::printf("pitch bend %+.2f\n", b); };
     kb->on_sustain    = [](bool on)      { std::printf("sustain %s\n", on ? "on" : "off"); };
+    kb->on_modulation = [](float a)      { std::printf("modulation %.2f\n", a); };
 
     const float w = kb->panel_width(), h = kb->panel_height();
 
