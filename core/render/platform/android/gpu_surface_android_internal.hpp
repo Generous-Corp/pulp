@@ -18,6 +18,9 @@
 
 #if defined(__ANDROID__)
 
+#include <string>
+#include <vector>
+
 struct ANativeWindow;
 
 namespace pulp::view {
@@ -46,6 +49,13 @@ void android_surface_destroyed();
 void android_touch_down(int pointer_id, float px_x, float px_y, float pressure);
 void android_touch_move(int pointer_id, float px_x, float px_y, float pressure);
 void android_touch_up(int pointer_id, float px_x, float px_y);
+
+// Native file drop into the View hierarchy. `paths` are absolute filesystem
+// paths the Kotlin layer resolved from the drag's ClipData content URIs
+// (copied into the app cache); `px_x/px_y` are the drop point in physical
+// pixels (converted to dp here, like touch). Routes through the shared
+// dispatch core (dispatch_drop) — the same path the mac/win/linux/iOS hosts use.
+void android_on_drop(const std::vector<std::string>& paths, float px_x, float px_y);
 
 // Shared touch-capture pointer. Defined in gpu_surface_android.cpp; cleared
 // directly by the nativeOnTouchCancel JNI export. Non-owning — valid only

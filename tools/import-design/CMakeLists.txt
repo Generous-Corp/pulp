@@ -27,6 +27,11 @@ target_link_libraries(pulp-design-import-bench PRIVATE
     pulp::state
     pulp::platform)
 
+# svg_probe — diagnostic: render an SVG via DesignFrameView (SkSVGDOM) to PNG.
+add_executable(pulp-svg-probe svg_probe.cpp)
+target_include_directories(pulp-svg-probe PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(pulp-svg-probe PRIVATE pulp::view pulp::state pulp::platform)
+
 # Link-order fix for libskia.a → fontconfig on Linux+GNU ld (#1986
 # follow-up): re-mention fontconfig AFTER pulp::view's transitive
 # skia::skia so the linker resolves SkFontMgr_New_FontConfig's Fc*

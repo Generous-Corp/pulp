@@ -16,6 +16,8 @@
 
 #include <pulp/view/view.hpp>
 
+#include <mutex>
+
 namespace pulp::view {
 
 namespace {
@@ -135,14 +137,43 @@ bool dispatch_drop(View& root, DragSession& session, const DropData& data,
     return false;
 }
 
-#if !defined(__APPLE__)
-// Outbound file drag is macOS-only today — the NSDraggingSession backend lives
-// in platform/mac/drag_drop_mac.mm, which is compiled only on macOS. On every
-// other platform View::start_file_drag (cross-platform, in view.cpp) still
-// references begin_file_drag, so provide a no-op here so it links and degrades
-// gracefully. Windows (IDataObject/DoDragDrop) and Linux (XDND) backends can
-// supply a real implementation in their own platform TU when they land; this
-// definition then drops out via the same __APPLE__-style guard.
+// ── Process-global outbound drag backend (hostless platforms; Android) ───────
+
+namespace {
+// Guards g_file_drag_backend: it is set on the platform's surface/render thread
+// (Android registers it from nativeOnSurfaceCreated) but invoked from the UI
+// thread during a drag, so an unsynchronised std::function read could tear.
+std::mutex g_file_drag_backend_mutex;
+FileDragBackend g_file_drag_backend;
+}  // namespace
+
+FileDragBackend set_file_drag_backend(FileDragBackend backend) {
+    std::lock_guard<std::mutex> lock(g_file_drag_backend_mutex);
+    FileDragBackend prev = std::move(g_file_drag_backend);
+    g_file_drag_backend = std::move(backend);
+    return prev;
+}
+
+bool invoke_file_drag_backend(const FileDragRequest& request) {
+    // Copy under the lock, then invoke unlocked — the backend may up-call into
+    // platform code (Android: a JNI call into Kotlin) and must not run holding
+    // the lock.
+    FileDragBackend backend;
+    {
+        std::lock_guard<std::mutex> lock(g_file_drag_backend_mutex);
+        backend = g_file_drag_backend;
+    }
+    return backend ? backend(request) : false;
+}
+
+#if !defined(__APPLE__) && !(defined(__linux__) && defined(PULP_HAS_X11))
+// Outbound file drag free-function backend, used by View::start_file_drag when
+// the tree is owned by a WindowHost (standalone app) rather than a plugin host.
+// Real backends live per platform: macOS NSDraggingSession (drag_drop_mac.mm)
+// and Linux XDND (drag_drop_linux.cpp, compiled when Xlib links — PULP_HAS_X11).
+// This no-op covers the platforms without one yet (Windows standalone, headless
+// Linux) so the cross-platform call site links and degrades gracefully; each new
+// backend extends the guard above as it lands.
 bool begin_file_drag(void* /*native_view*/, const FileDragRequest& /*request*/) {
     return false;
 }

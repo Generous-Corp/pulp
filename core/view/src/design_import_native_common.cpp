@@ -427,7 +427,7 @@ std::optional<NativeWidgetKind> kind_from_type(const IRNode& node,
         return NativeWidgetKind::label;
     if (type == "button" || type == "text_button")
         return NativeWidgetKind::text_button;
-    if (type == "toggle_button")
+    if (type == "toggle_button" || type == "toggle" || type == "switch")
         return NativeWidgetKind::toggle_button;
     if (type == "textarea" || type == "text_editor")
         return NativeWidgetKind::text_editor;
@@ -435,8 +435,26 @@ std::optional<NativeWidgetKind> kind_from_type(const IRNode& node,
         return NativeWidgetKind::checkbox;
     if (type == "input")
         return input_kind(node, path, diagnostics);
+    // Ink & Signal design-system vocabulary: a ComboBox in the library (and the
+    // common web select/dropdown idioms) all materialize as the native ComboBox.
+    // combo_box had no recognized type string before this — a real gap.
+    if (type == "combobox" || type == "combo_box" || type == "dropdown" ||
+        type == "select")
+        return NativeWidgetKind::combo_box;
     if (type == "slider" || type == "range")
         return NativeWidgetKind::fader;
+    // The 1-D PanControl is a linear value control; map it onto the native Fader
+    // until it earns a dedicated NativeWidgetKind (see vocabulary note below).
+    if (type == "pan" || type == "panner")
+        return NativeWidgetKind::fader;
+    // A Badge is a compact text pill; the faithful native carrier is a Label.
+    if (type == "badge" || type == "chip" || type == "tag" || type == "pill")
+        return NativeWidgetKind::label;
+    // Structural containers from the design system collapse onto the generic
+    // native View (their children import recursively).
+    if (type == "panel" || type == "sidebar" || type == "side_panel" ||
+        type == "toolbar" || type == "channel_strip" || type == "card")
+        return NativeWidgetKind::view;
     if (type == "knob")
         return NativeWidgetKind::knob;
     if (type == "fader")

@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 
 project(Pulp
-    VERSION 0.435.0
+    VERSION 0.440.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/danielraffel/pulp"
     LANGUAGES CXX C
@@ -86,6 +86,18 @@ option(PULP_REQUIRE_GPU_FOR_SDK
         shipping CG-only SDKs (pulp #1817)."
        OFF)
 option(PULP_TEXT_SHAPING "Enable SkParagraph text shaping (HarfBuzz/ICU via Skia). Default: ON when GPU enabled." ON)
+# Lottie / Bodymovin JSON animation playback via the bundled skottie module.
+# Opt-in (default OFF): builds that don't use it link nothing extra and the
+# LottieView/LottieAnimation symbols compile to no-ops. Auto-disabled at
+# configure time if the active Skia build ships no skottie module headers.
+option(PULP_LOTTIE "Enable Lottie animation playback via the bundled skottie module. Default: OFF." OFF)
+# Design-import authoring subsystem (importers, codegen, lock-to-source,
+# JSX-lock, runtime design-import). Default ON for dev/examples; release/ship
+# builds set OFF to strip the authoring cluster from shipped plugins (smaller
+# binary + attack surface). The runtime W3C token pair (importDesignTokens /
+# exportDesignTokens) stays compiled regardless (see core/view/src/w3c_tokens.cpp).
+# When OFF, WidgetBridge::install_runtime_import_handlers() becomes a no-op.
+option(PULP_ENABLE_DESIGN_IMPORT "Compile the design-import authoring subsystem. Default ON; release/ship OFF." ON)
 option(PULP_ENABLE_SWIFT "Enable Swift layer (Apple only)" OFF)
 # Dev inspector (Cmd+I overlay) in the standalone host. Default ON for
 # dev/examples builds. Release / standalone-ship builds should configure
@@ -94,7 +106,16 @@ option(PULP_ENABLE_SWIFT "Enable Swift layer (Apple only)" OFF)
 # the inspector, so this is standalone-only. The inspector also requires
 # GPU + desktop (PULP_HAS_INSPECT), which gates linking; this flag gates
 # the source-side wiring on top of that.
-option(PULP_ENABLE_INSPECTOR "Wire the dev inspector into the standalone host (dev/examples ON, release-ship OFF)" ON)
+#
+# Authoring-strip policy (§6a): the inspector is the in-plugin authoring /
+# MCP-reachable surface. The SDK release build (`pulp` CLI cli_sdk.cpp) and the
+# scaffolded project templates default it OFF so shipped plugins don't carry it
+# (smaller binary, smaller attack surface). A developer who deliberately wants an
+# inspectable / MCP-reachable plugin opts back in with -DPULP_ENABLE_INSPECTOR=ON
+# in their own plugin build. The standalone `pulp` CLI and the MCP server are
+# separate binaries and are NOT affected by this flag — bundling them alongside a
+# plugin distribution is a packaging choice, not a compile-time strip.
+option(PULP_ENABLE_INSPECTOR "Wire the dev inspector into the standalone host (dev/examples ON, release-ship OFF; the in-plugin authoring/MCP surface)" ON)
 # RT output-boundary audio probe in the standalone host — the data source for
 # the dev Audio Inspector window. Default ON for dev/examples; release /
 # standalone-ship builds configure -DPULP_ENABLE_AUDIO_PROBES=OFF. The probe's
@@ -260,6 +281,17 @@ add_subdirectory(tools/audio)
 # CI runs the test suite on macOS / Linux runners and the configure smoke
 # (Phase iOS-A) on the iPhoneSimulator SDK.
 if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
+    # The design-import test cluster (~40 targets) links the authoring symbols
+    # gated by PULP_ENABLE_DESIGN_IMPORT, and they are interleaved with other
+    # view tests. Rather than risk silently un-gating via a stray link, require
+    # the option ON to build the test suite. A stripped/shipped build uses
+    # PULP_BUILD_TESTS=OFF (and PULP_BUILD_EXAMPLES=OFF); run the full suite with
+    # the default PULP_ENABLE_DESIGN_IMPORT=ON.
+    if(NOT PULP_ENABLE_DESIGN_IMPORT)
+        message(FATAL_ERROR
+            "PULP_BUILD_TESTS=ON requires PULP_ENABLE_DESIGN_IMPORT=ON. "
+            "For a stripped build set -DPULP_BUILD_TESTS=OFF -DPULP_BUILD_EXAMPLES=OFF.")
+    endif()
     enable_testing()
     include(FetchContent)
     pulp_register_fetchcontent_source(Catch2 DIR catch2 REF v3.7.1)

@@ -18,7 +18,10 @@ struct DesignFrameElement {
     // `dropdown` / `tab_group` / `stepper` are NATIVE-OVERLAY: an opaque child
     // widget is positioned over the element's rect and replaces that baked SVG
     // region. `stepper` is a header value cycled in place by `< >` chevrons.
-    enum class Kind { knob, text_field, dropdown, tab_group, stepper };
+    // `momentary` is a press/release primitive (keys, pads, drum triggers,
+    // sustain, transport): on_gesture_begin(i)=press, on_gesture_end(i)=release;
+    // set_element_value(i,1/0) lights it via a NATIVE overlay, not SVG mutation.
+    enum class Kind { knob, text_field, dropdown, tab_group, stepper, momentary };
 
     Kind kind = Kind::knob;
 
@@ -42,6 +45,17 @@ struct DesignFrameElement {
     /// box (the overlay is inset past the leading icon, which stays visible).
     /// Empty → the default dark field color.
     std::string bg_color;
+
+    // ── momentary (keys / pads) ──────────────────────────────────────────
+    /// Raw parsed number: typing keys = relative semitone (0–15), piano keys =
+    /// absolute MIDI note. -1 = unset. Consumers map by this, NOT positional
+    /// index (a re-export may reorder elements). Uses the x/y/w/h rect as the
+    /// hit-region. `value` doubles as the pressed/lit flag (0 or 1).
+    int note = -1;
+    /// View scope for per-view keyboards (e.g. typing vs piano). hit_element only
+    /// tests momentary elements in the active view group (see set_active_view_group).
+    /// -1 = always active (ungrouped).
+    int view_group = -1;
 };
 
 // Remove the first <rect> in `svg` whose x/y/width/height match (within `tol`)
@@ -92,6 +106,17 @@ public:
     // or knob if out of range. Lets a binder treat knobs as continuous params
     // and dropdown/tab/stepper as normalized-index "choice" params.
     DesignFrameElement::Kind element_kind(int i) const;
+    // Raw note number of momentary element `i` (typing = relative semitone 0–15,
+    // piano = absolute MIDI), or -1. Consumers map by this, not positional index.
+    int element_note(int i) const {
+        return (i >= 0 && i < static_cast<int>(elements_.size())) ? elements_[i].note : -1;
+    }
+    // Active view group for per-view momentary keyboards (e.g. typing=0, piano=1).
+    // hit_element only tests momentary elements whose view_group is -1 or equals
+    // this. Switching it releases any held momentary key (note-off) so no notes
+    // stick across a mode change. -1 (default) = all groups active.
+    void set_active_view_group(int group);
+    int active_view_group() const { return active_view_group_; }
     // Normalized [0,1] value of element `i`, or -1 if out of range / not a
     // value-bearing control (text_field). For a knob this is its turn; for a
     // dropdown/tab_group/stepper it is the live selection mapped to
@@ -160,6 +185,7 @@ private:
     float panel_x_ = 0, panel_y_ = 0, panel_w_ = 0, panel_h_ = 0;  // crop, SVG coords
     int drag_ = -1;
     float drag_start_y_ = 0.0f, drag_start_value_ = 0.0f;
+    int active_view_group_ = -1;   ///< momentary view scope (-1 = all active)
 };
 
 // The native-overlay widget for a `tab_group` element: a compact segmented

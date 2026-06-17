@@ -473,3 +473,26 @@ TEST_CASE("model store: install_model rejects a bundle whose assets collide on f
     server.stop();
     fs::remove_all(root, cleanup_error);
 }
+
+// Regression: the connect phase must always be bounded, even at the default
+// timeout_seconds == 0. Before this, a blocked/unreachable endpoint (e.g. a DAW
+// that sandboxes the audio-unit process's network) fell back to cpp-httplib's
+// 300s connection-timeout default — the download wedged at 0% for ~5 minutes
+// with an unresponsive Cancel, because the cancel/progress callback only runs
+// once body streaming starts. download_connect_timeout_seconds() is the pure
+// policy the downloader applies; pin it so the connect can never be unbounded.
+TEST_CASE("model downloader: connect timeout is always bounded",
+          "[runtime][model][download][timeout]") {
+    using pulp::runtime::download_connect_timeout_seconds;
+    // Default (caller leaves timeout_seconds at 0): bounded, never 0/unbounded.
+    REQUIRE(download_connect_timeout_seconds(0) == 15);
+    // A caller-specified timeout shorter than the bound is respected as-is.
+    REQUIRE(download_connect_timeout_seconds(5) == 5);
+    REQUIRE(download_connect_timeout_seconds(15) == 15);
+    // A longer overall/read timeout still bounds the CONNECT phase to 15s
+    // (the read/stream phase keeps the caller's larger budget for big bodies).
+    REQUIRE(download_connect_timeout_seconds(30) == 15);
+    REQUIRE(download_connect_timeout_seconds(600) == 15);
+    // Defensive: a negative timeout is treated like the default, not unbounded.
+    REQUIRE(download_connect_timeout_seconds(-1) == 15);
+}

@@ -542,6 +542,13 @@ private:
         }
 
         XUngrabPointer(display_, CurrentTime);
+        // Relinquish XdndSelection ownership now the drag is over. The success
+        // path has already served the requestor before XdndFinished arrives, so
+        // dropping ownership here is safe; the timeout/cancel paths would
+        // otherwise leak ownership until the next drag re-claims it. (xdnd_target_at
+        // already validates XdndAware before XdndEnter, so no stray enter reaches
+        // a non-XDND app.)
+        XSetSelectionOwner(display_, xa_XdndSelection_, None, CurrentTime);
         XFlush(display_);
         return result;
     }

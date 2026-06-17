@@ -3,6 +3,7 @@
 #include <pulp/view/widget_bridge.hpp>
 #include "api_registry.hpp"
 
+#include <pulp/view/gap_widgets.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/ui_components.hpp>
 
@@ -69,6 +70,7 @@ void WidgetBridge::register_widget_value_content_api() {
         auto* v = widget(id);
         if (auto* e = dynamic_cast<TextEditor*>(v)) e->set_text(t);
         else if (auto* l = dynamic_cast<Label*>(v)) l->set_text(t);
+        else if (auto* b = dynamic_cast<Badge*>(v)) b->set_text(t);
         return choc::value::Value();
     });
 

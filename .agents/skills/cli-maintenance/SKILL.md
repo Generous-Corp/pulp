@@ -611,6 +611,31 @@ Reference: `feature/ship-oneoff-notarize` (2026-06-01). Files:
 selection, `share`), `test/test_cli_ship_shellout.cpp` `[oneoff]` cases,
 `.claude/commands/ship.md`, `.agents/skills/ship/SKILL.md`.
 
+### SDK build strips the dev authoring surface (§6a)
+
+`cli_sdk.cpp`'s release configure deliberately disables the developer-only
+surfaces so shipped SDKs / plugins don't carry them: it passes
+`-DPULP_ENABLE_AUDIO_PROBES=OFF` **and** `-DPULP_ENABLE_INSPECTOR=OFF` (the
+inspector is the in-plugin authoring / MCP-reachable surface). The scaffolded
+project templates (`tools/templates/.../build.gradle.kts.template`) mirror this.
+
+Keep the two flags together when editing the SDK configure command. A developer
+who deliberately wants an inspectable / MCP-reachable plugin re-enables it in
+their own plugin build with `-DPULP_ENABLE_INSPECTOR=ON`. The standalone `pulp`
+CLI and the MCP server (`tools/mcp/pulp_mcp.cpp`) are **separate binaries** —
+not compiled into a plugin — so this flag never strips them; bundling them
+alongside a plugin distribution is a packaging choice.
+
+The SDK build also passes `-DPULP_ENABLE_DESIGN_IMPORT=OFF`, which strips the
+design-import authoring cluster (importers, codegen, `lock_to_source`,
+`jsx_lock`, `token_lock`, runtime design-import) from shipped plugins. The
+runtime W3C token pair (`importDesignTokens` / `exportDesignTokens`, via
+`core/view/src/w3c_tokens.cpp`) stays compiled; `WidgetBridge::install_runtime_import_handlers()`
+becomes a no-op stub. Keep all three strip flags (audio-probes / inspector /
+design-import) together in the SDK configure command. Building the test suite
+requires `PULP_ENABLE_DESIGN_IMPORT=ON` (the CMake gate hard-errors otherwise);
+a stripped build uses `PULP_BUILD_TESTS=OFF`.
+
 ## Removing a CLI Command
 
 - [ ] Remove from `cmd_*.cpp` and command table in `pulp_cli.cpp`

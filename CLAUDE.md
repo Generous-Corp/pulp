@@ -966,6 +966,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `screenshot` | Faithful headless PNG capture: render_to_png Skia-vs-CoreGraphics backends, image-compositing trap, `--screenshot-backend`, capture_png |
 | `sdf-text` | SDF / MSDF / PSDF glyph atlases: building, sampling via SkSL, shared text-layout helpers |
 | `ship` | Sign / notarize / package / distribute Pulp plugins and apps across macOS / Windows / Android |
+| `skia-gpu-build` | Enable Skia+Dawn GPU builds: prebuilt skia-builder libs, headers-only worktree trap, `SKIA_DIR` reuse, `MacGpuWindowHost` verify, raster-fallback + GPU-wedge gotchas |
 | `streams` | `pulp::runtime::AsyncStream` selection, async-callback wiring without deadlock, backpressure |
 | `tart-ci` | Tart golden-VM macOS CI: layered goldens, ephemeral per-job runners, vm-image manifest, caching/rebake, host-keychain safety |
 | `threejs-bridge` | Native Dawn-backed Three.js: three.webgpu.js renderer, bridge tests, native demo capture |

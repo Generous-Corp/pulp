@@ -95,6 +95,10 @@ function createWidget(type: Type, id: string, parentId: string, props: Props): v
         case 'Checkbox':    call('createCheckbox', id, parentId); return;
         case 'Toggle':      call('createToggle', id, parentId); return;
         case 'Combo':       call('createCombo', id, parentId); return;
+        // Ink & Signal design-system widgets (Phase 8c).
+        case 'Badge':       call('createBadge', id, asText(props.children) ?? (props.text as string ?? ''), (props.tone as string) ?? 'neutral', parentId); return;
+        case 'Stepper':     call('createStepper', id, parentId); return;
+        case 'Pan':         call('createPan', id, parentId); return;
         case 'ListBox':     call('createListBox', id, parentId); return;
         case 'Canvas':      call('createCanvas', id, parentId); return;
         case 'Image':       call('createImage', id, parentId); return;
@@ -206,6 +210,9 @@ function createWidget(type: Type, id: string, parentId: string, props: Props): v
                 case 'meter':    call('createMeter', id, parentId); return;
                 case 'xypad':    call('createXYPad', id, parentId); return;
                 case 'listbox':  call('createListBox', id, parentId); return;
+                case 'badge':    call('createBadge', id, asText(props.children) ?? (props.text as string ?? ''), (props.tone as string) ?? 'neutral', parentId); return;
+                case 'stepper':  call('createStepper', id, parentId); return;
+                case 'pan':      call('createPan', id, parentId); return;
                 case 'icon':     call('createIcon', id, parentId); return;
                 case 'svg':      call('createCol', id, parentId); return;  // SVG = container; children paint
                 case 'path': {

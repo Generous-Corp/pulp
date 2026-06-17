@@ -94,12 +94,18 @@ export type {
     KnobProps, FaderProps, SpectrumProps, WaveformProps, MeterProps,
     ProgressProps, XYPadProps, CheckboxProps, ToggleProps, ComboProps,
     ListBoxProps, CanvasProps, ImageProps, IconProps, SvgPathProps,
-    SvgRectProps, SvgLineProps,
+    SvgRectProps, SvgLineProps, BadgeProps, StepperProps, PanProps,
     FlexDirection, FlexAlign, FlexAlignSelf, FlexJustify,
     FlexProps, StyleProps, BaseProps,
     IntrinsicElementMap, IntrinsicElementName,
     PulpContainer,
 } from './types.js';
+
+// ── Ink & Signal design-system catalog (Phase 8c) ──────────────────
+export {
+    inkSignalCatalog, findComponent, componentsByCategory, FIGMA_FILE_KEY,
+} from './design-system.js';
+export type { DesignComponent, DesignCategory } from './design-system.js';
 
 // ── Re-export the mock bridge for downstream tests ─────────────────
 export { createMockBridge } from './bridge.js';

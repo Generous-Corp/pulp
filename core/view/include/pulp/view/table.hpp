@@ -125,4 +125,13 @@ private:
     float scroll_offset_ = 0.0f;
 };
 
+/// Design-system alias. The Ink & Signal Figma library names this primitive
+/// "Table"; the Pulp framework widget is TableListBox. The alias lets
+/// design-system code use the Figma name without a breaking rename. See
+/// docs/reference/design-system-naming.md for the full Figma↔SDK name map.
+/// (No `class Table` exists in pulp::view — note `TableModel`/`TableColumn`
+/// here are the canonical pair; the unrelated data-only structs of the same
+/// name in table_model.hpp must not be co-included with this header.)
+using Table = TableListBox;
+
 }  // namespace pulp::view

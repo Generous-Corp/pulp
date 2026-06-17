@@ -73,6 +73,19 @@ Slice 6 (#551).
 
 ## GitHub workflow gotchas
 
+- **`test/CMakeLists.txt` is a frozen hotspot — bump its ceiling when you add a
+  test.** `hotspot_size_guard.json` freezes its LOC, but it is a *test
+  registration manifest* that legitimately grows whenever a new
+  `add_test` / `pulp_add_test_suite` lands. Adding a test fails the
+  `hotspot_size_guard` gate until you raise `max_loc` for `test/CMakeLists.txt`
+  in the same change (compress the registration first, then bump by the small
+  remaining delta). This is expected, not a smell — unlike source hotspots, the
+  fix is to raise the ceiling, not to split the file.
+- **Reskinnability ratchet (`token-coverage-ratchet` ctest).** Driven by
+  `tools/scripts/token_coverage_check.py`: fails if a `core/view/src` paint file
+  gains a NEW colour literal that is not a `resolve_color(...)` fallback. Mark a
+  deliberate material-effect literal `// token-lint:allow`; after intentionally
+  lowering a file's count, re-freeze with `--update-baseline`.
 - **Release builds must pass `-DPULP_BUILD_EXAMPLES=OFF`.** The
   `pulp-design-tool` example hard-fails CMake configure when `PULP_HAS_SKIA`
   is FALSE (belt-and-suspenders, code 78). `sign-and-release.yml` builds on a

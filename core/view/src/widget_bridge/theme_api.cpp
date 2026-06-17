@@ -1,7 +1,10 @@
 // widget_bridge/theme_api.cpp - theme registrations for WidgetBridge.
 
 #include <pulp/view/widget_bridge.hpp>
-#include <pulp/view/design_tokens.hpp>
+// Only the runtime W3C token pair is needed here; use the light always-compiled
+// header so the default theme API does not depend on the gated design-import
+// cluster (PULP_ENABLE_DESIGN_IMPORT).
+#include <pulp/view/w3c_tokens.hpp>
 #include "api_registry.hpp"
 
 #include <string>

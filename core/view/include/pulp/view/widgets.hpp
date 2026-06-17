@@ -334,6 +334,23 @@ public:
     void set_default_value(float v) { default_value_ = std::clamp(v, 0.0f, 1.0f); }
     float default_value() const { return default_value_; }
 
+    /// Skew / response curve (see RangeSlider::set_skew). 1 = linear (default);
+    /// <1 gives finer control near the low end (the law a frequency/time knob
+    /// wants). Value is normalized 0..1; set_skew_from_midpoint takes a
+    /// normalized midpoint. Applies to the value arc, dot, and drag; modulation
+    /// rings are unaffected.
+    void set_skew(float s) { skew_ = std::max(0.0001f, s); }
+    float skew() const { return skew_; }
+    void set_skew_from_midpoint(float mid_normalized) {
+        float p = std::clamp(mid_normalized, 1e-4f, 1.0f - 1e-4f);
+        skew_ = std::max(0.0001f, std::log(0.5f) / std::log(p));
+    }
+    float position_for_value() const { return skew_ == 1.0f ? value_ : std::pow(value_, skew_); }
+    float value_for_position(float p) const {
+        p = std::clamp(p, 0.0f, 1.0f);
+        return skew_ == 1.0f ? p : std::pow(p, 1.0f / skew_);
+    }
+
     void set_label(std::string text) {
         if (label_ == text) return;
         label_ = std::move(text);
@@ -389,8 +406,66 @@ public:
     void set_widget_schema(std::string json) { widget_schema_ = std::move(json); }
     const std::string& widget_schema() const { return widget_schema_; }
 
+    // ── Modulation rings (Saturn) ───────────────────────────────────────
+    // Thin concentric rings drawn OUTSIDE the value arc, one per modulation
+    // source. Matches the Figma "Knob Modulation" set (LFO / ENV / VEL / MACRO).
+    // Empty by default (a plain knob).
+    struct ModulationRing {
+        // Two INDEPENDENT signed offsets from the base value, one per arc end —
+        // dragging one handle moves only that end (not a symmetric grow/shrink
+        // off a single depth). Unipolar-positive: lo=0, hi>0. Unipolar-negative:
+        // lo<0, hi=0. Bipolar: lo<0, hi>0. The range is [base+lo, base+hi]; the
+        // endpoints sort themselves, so the two may cross without breaking paint.
+        float lo = 0.0f;             ///< low-end offset from base (−1..1)
+        float hi = 0.0f;             ///< high-end offset from base (−1..1)
+        canvas::Color color;         ///< per-source colour
+    };
+    void set_modulation_rings(std::vector<ModulationRing> rings) {
+        mod_rings_ = std::move(rings);
+        request_repaint();
+    }
+    const std::vector<ModulationRing>& modulation_rings() const { return mod_rings_; }
+
+    // Live modulation phase in [-1, 1] — the instantaneous output of the
+    // assigned source(s). Drives the indicator dot that rides the modulation
+    // arc, showing where the parameter actually IS right now. Set it from a
+    // master/macro control or animate it from the host (e.g. an LFO).
+    void set_modulation_phase(float p) {
+        float c = std::clamp(p, -1.0f, 1.0f);
+        if (c != mod_phase_) { mod_phase_ = c; request_repaint(); }
+    }
+    float modulation_phase() const { return mod_phase_; }
+
+    // The modulation range is [value+lo, value+hi] clipped to [0,1], sorted so
+    // the returned .first ≤ .second regardless of which end is which. Exposes the
+    // clipped endpoints of ring i for tests / hosts. Returns {lo_v, hi_v}.
+    std::pair<float, float> modulation_range(size_t ring) const;
+    // The live modulated value of ring i: phase≥0 sweeps toward base+hi, phase<0
+    // toward base+lo, clipped to [0,1].
+    float modulated_value(size_t ring) const;
+
+    // Fired when dragging a modulation-arc handle changes a ring's endpoints.
+    // Reports BOTH offsets (the dragged one moved, the other is unchanged).
+    std::function<void(int ring, float lo, float hi)> on_modulation_change;
+    // True while a modulation-arc handle is being dragged (vs the value).
+    bool dragging_modulation() const { return mod_drag_ring_ >= 0; }
+
+    // Scroll-wheel adjusts the value (hover + wheel).
+    bool wants_wheel_value() const override { return true; }
+    void on_wheel(float delta_y) override {
+        float nv = std::clamp(value_ + (-delta_y) * 0.004f, 0.0f, 1.0f);
+        if (nv != value_) { set_value(nv); if (on_change) on_change(value_); }
+    }
+
 private:
+    std::vector<ModulationRing> mod_rings_;
+    float mod_phase_ = 0.0f;       ///< live source value in [-1,1] (indicator)
+    int mod_drag_ring_ = -1;       ///< ring whose handle is being dragged (-1 none)
+    bool mod_drag_is_high_ = true; ///< dragging the high (vs low) handle
+    float mod_drag_last_angle_ = 0.0f;  ///< continuous (unwrapped) drag angle; the
+                                        ///< bottom gap is a hard wall — see on_mouse_drag
     float value_ = 0.0f;
+    float skew_ = 1.0f;            ///< 1 = linear; <1 = finer control at the low end
     float default_value_ = 0.5f;
     std::string label_;
     std::function<std::string(float)> format_;
@@ -485,6 +560,13 @@ public:
     }
     float value() const { return value_; }
 
+    // Scroll-wheel adjusts the value (hover + wheel).
+    bool wants_wheel_value() const override { return true; }
+    void on_wheel(float delta_y) override {
+        float nv = std::clamp(value_ + (-delta_y) * 0.004f, 0.0f, 1.0f);
+        if (nv != value_) { set_value(nv); if (on_change) on_change(value_); }
+    }
+
     void set_orientation(Orientation o) { orientation_ = o; }
     Orientation orientation() const { return orientation_; }
 
@@ -533,6 +615,23 @@ public:
     float hover_scale() const { return hover_thumb_scale_.value(); }
     void advance_animations(float dt);
 
+    /// Skew / response curve (see RangeSlider::set_skew). 1 = linear (default);
+    /// <1 gives finer control near the bottom of the fader. Value is normalized
+    /// 0..1, so set_skew_from_midpoint takes a normalized midpoint.
+    void set_skew(float s) { skew_ = std::max(0.0001f, s); }
+    float skew() const { return skew_; }
+    void set_skew_from_midpoint(float mid_normalized) {
+        float p = std::clamp(mid_normalized, 1e-4f, 1.0f - 1e-4f);
+        skew_ = std::max(0.0001f, std::log(0.5f) / std::log(p));
+    }
+    /// Track position [0,1] (skew-mapped) for the current value, and the
+    /// inverse used while dragging.
+    float position_for_value() const { return skew_ == 1.0f ? value_ : std::pow(value_, skew_); }
+    float value_for_position(float p) const {
+        p = std::clamp(p, 0.0f, 1.0f);
+        return skew_ == 1.0f ? p : std::pow(p, 1.0f / skew_);
+    }
+
     void set_custom_shader(std::string sksl) { custom_sksl_ = std::move(sksl); }
     void clear_custom_shader() { custom_sksl_.clear(); }
     bool has_custom_shader() const { return !custom_sksl_.empty(); }
@@ -547,8 +646,11 @@ public:
 
 private:
     float value_ = 0.0f;
+    float skew_ = 1.0f;   ///< 1 = linear; <1 = finer control at the low end
     Orientation orientation_ = Orientation::vertical;
-    ThumbShape thumb_shape_ = ThumbShape::circle;
+    // Ink & Signal faders use a slab/handle thumb by default (matches the Figma
+    // design language); callers can opt back to a circle per-widget.
+    ThumbShape thumb_shape_ = ThumbShape::rectangle;
     float thumb_width_ = 0.0f;
     float thumb_height_ = 0.0f;
     float thumb_corner_radius_ = 0.0f;
@@ -678,6 +780,14 @@ public:
     }
     float value() const { return value_; }
 
+    // Scroll-wheel adjusts the value (hover + wheel), scaled to the range.
+    bool wants_wheel_value() const override { return true; }
+    void on_wheel(float delta_y) override {
+        float prev = value_;
+        set_value(value_ + (-delta_y) * 0.004f * (max_ - min_));
+        if (value_ != prev && on_change) on_change(value_);
+    }
+
     void set_orientation(Orientation o) { orientation_ = o; }
     Orientation orientation() const { return orientation_; }
 
@@ -697,6 +807,19 @@ public:
     void set_track_thickness(float t) { track_thickness_ = std::max(1.0f, t); }
     float track_thickness() const { return track_thickness_; }
 
+    /// Skew / response curve. skew == 1 is linear (default). The drawn thumb
+    /// position is pow(valueProportion, skew); dragging is the inverse, so a
+    /// linear drag yields a perceptually non-linear value. skew < 1 gives more
+    /// travel (finer control) at the low end — the law a frequency or time
+    /// control wants. Matches JUCE's NormalisableRange skew convention.
+    void set_skew(float s) { skew_ = std::max(0.0001f, s); }
+    float skew() const { return skew_; }
+    /// Choose skew so `mid_value` lands at the middle of the track (position
+    /// 0.5). E.g. a 20 Hz–20 kHz slider with set_skew_from_midpoint(1000).
+    void set_skew_from_midpoint(float mid_value);
+    /// Track position [0,1] (skew-mapped) the thumb is drawn at for the value.
+    float position_for_value() const { return value_to_position_(); }
+
     /// Fired when the value changes — from drag, click, or set_value(). The
     /// callback receives the post-quantisation value, exactly the same
     /// number value() will return.
@@ -710,8 +833,13 @@ public:
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_event(const MouseEvent& event) override;
     void on_mouse_drag(Point pos) override;
+    void on_mouse_enter() override;
+    void on_mouse_leave() override;
+    void advance_animations(float dt) { hover_scale_.advance(dt); }
+    float hover_scale() const { return hover_scale_.value(); }
 
 private:
+    ValueAnimation hover_scale_{1.0f};  ///< thumb grows on hover (matches Fader)
     /// Convert a position along the track (0=start, 1=end) to a value
     /// after applying clamp + step quantisation.
     float position_to_value_(float t) const;
@@ -723,10 +851,15 @@ private:
     /// Common drag/click handler — `pos` is in local coordinates.
     void update_from_position_(Point pos);
 
+    /// Track position [0,1] the thumb is drawn at for the current value,
+    /// applying the skew curve.
+    float value_to_position_() const;
+
     float min_ = 0.0f;
     float max_ = 1.0f;
     float step_ = 0.0f;
     float value_ = 0.0f;
+    float skew_ = 1.0f;   ///< 1 = linear; <1 = finer control at the low end
     Orientation orientation_ = Orientation::horizontal;
     bool dragging_ = false;
     float track_thickness_ = 4.0f;
@@ -842,6 +975,14 @@ public:
     void set_corner_radius(float radius) { corner_radius_ = std::max(0.0f, radius); request_repaint(); }
     void set_font_size(float size) { font_size_ = std::max(1.0f, size); request_repaint(); }
 
+    /// Radio-group id (0 = independent toggle, the default). Sibling
+    /// ToggleButtons under the same parent that share a non-zero id are
+    /// mutually exclusive: clicking one turns it on and the others off, and
+    /// clicking the already-on one is a no-op (it stays selected). Matches
+    /// JUCE setRadioGroupId semantics (grouping is by shared parent).
+    void set_radio_group(int id) { radio_group_ = id; }
+    int radio_group() const { return radio_group_; }
+
     const std::optional<canvas::Color>& on_background_color_override() const { return on_background_color_; }
     const std::optional<canvas::Color>& off_background_color_override() const { return off_background_color_; }
     const std::optional<canvas::Color>& on_text_color_override() const { return on_text_color_; }
@@ -860,6 +1001,7 @@ public:
 
 private:
     bool on_ = false;
+    int radio_group_ = 0;   ///< 0 = independent; shared non-zero id = mutually exclusive
     std::string label_;
     std::optional<canvas::Color> on_background_color_;
     std::optional<canvas::Color> off_background_color_;
@@ -1247,6 +1389,129 @@ private:
     float border_width_ = 1.0f;
 };
 
+// ── GroupBox ───────────────────────────────────────────────────────────────
+// A titled container: rounded frame, a title chip at the top-left, and an
+// optional collapse chevron at the top-right. Collapsing hides the child
+// content (the caller sizes a collapsed box to header height). Matches the
+// Figma "Group Box" specimen (default / collapsible-expanded / collapsed /
+// empty-title-only). Children are added via add_child() and positioned by the
+// caller within the content area (origin = content_top()).
+class GroupBox : public View {
+public:
+    static constexpr float header_height = 30.0f;
+
+    void set_title(std::string t) { title_ = std::move(t); request_repaint(); }
+    const std::string& title() const { return title_; }
+
+    void set_collapsible(bool c) { collapsible_ = c; request_repaint(); }
+    bool collapsible() const { return collapsible_; }
+
+    // Collapsed hides all child content; expanded shows it. Fires on_toggle.
+    void set_collapsed(bool c);
+    bool collapsed() const { return collapsed_; }
+
+    // Y at which child content begins (below the header band).
+    float content_top() const { return header_height + 6.0f; }
+
+    std::function<void(bool collapsed)> on_toggle;
+
+    void paint(canvas::Canvas& canvas) override;
+    void on_mouse_event(const MouseEvent& event) override;
+
+private:
+    void apply_child_visibility();
+    std::string title_;
+    bool collapsible_ = false;
+    bool collapsed_ = false;
+};
+
+// ── DualRangeSlider ──────────────────────────────────────────────────────────
+// Two-thumb min↔max range selector (the Figma "Range Slider"): a track with a
+// filled segment between an independently-draggable low and high thumb. (The
+// single-thumb pulp::view::RangeSlider is a plain value slider; this is the
+// dual-handle variant.) Horizontal or vertical; optional disabled state.
+class DualRangeSlider : public View {
+public:
+    enum class Orientation { horizontal, vertical };
+    void set_orientation(Orientation o) { orientation_ = o; request_repaint(); }
+    void set_range(float min, float max) { min_ = min; max_ = std::max(min, max); clamp_(); }
+    void set_low(float v) { low_ = v; clamp_(); }
+    void set_high(float v) { high_ = v; clamp_(); }
+    float low() const { return low_; }
+    float high() const { return high_; }
+    float min_value() const { return min_; }
+    float max_value() const { return max_; }
+    void set_enabled(bool e) { enabled_ = e; request_repaint(); }
+    bool enabled() const { return enabled_; }
+    // When true, a dragged thumb stops at the other thumb instead of crossing it
+    // (low ≤ high always). Default false (ends move freely / may cross).
+    void set_no_cross(bool b) { no_cross_ = b; }
+    bool no_cross() const { return no_cross_; }
+
+    // Fired on a thumb drag with the (possibly-updated) low and high values.
+    std::function<void(float low, float high)> on_change;
+
+    void paint(canvas::Canvas& canvas) override;
+    void on_mouse_down(Point pos) override;
+    void on_mouse_drag(Point pos) override;
+    void on_mouse_up(Point pos) override;
+
+private:
+    void clamp_();
+    float pos_for_(float v) const;        // value → 0..1 along the track
+    float value_for_pos_(float t) const;  // 0..1 → value
+    float pointer_t_(Point pos) const;    // pointer → 0..1 along the track
+    void apply_(Point pos);               // move the active thumb to the pointer
+    Orientation orientation_ = Orientation::horizontal;
+    float min_ = 0.0f, max_ = 1.0f, low_ = 0.25f, high_ = 0.70f;
+    bool enabled_ = true;
+    bool no_cross_ = false;
+    int drag_ = -1;   // 0 = low thumb, 1 = high thumb, -1 = none
+};
+
+// ── InlineValueEditor ────────────────────────────────────────────────────────
+// A click-to-type numeric value readout (the Figma "Inline Value Editor"): shows
+// `value + suffix` idle; click to edit (caret), Enter commits, Esc cancels. A
+// committed value outside [min,max] shows a danger ring and is rejected. Pair it
+// with a Knob/Fader (the readout drives the control via on_change; the control
+// updates the readout via set_value). States: idle / editing / invalid / disabled.
+class InlineValueEditor : public View {
+public:
+    InlineValueEditor() { set_focusable(true); }
+
+    void set_value(double v) { value_ = v; request_repaint(); }
+    double value() const { return value_; }
+    void set_range(double min, double max) { min_ = min; max_ = max; }
+    void set_suffix(std::string s) { suffix_ = std::move(s); request_repaint(); }
+    void set_decimals(int d) { decimals_ = d; request_repaint(); }
+    void set_enabled(bool e) { enabled_ = e; if (!e) editing_ = false; request_repaint(); }
+    bool enabled() const { return enabled_; }
+    bool editing() const { return editing_; }
+    bool invalid() const { return invalid_; }
+
+    // Fired when a typed value is committed in range.
+    std::function<void(double)> on_change;
+
+    void begin_edit();
+    void commit_edit();
+    void cancel_edit();
+
+    void paint(canvas::Canvas& canvas) override;
+    void on_mouse_down(Point pos) override;
+    void on_text_input(const TextInputEvent& event) override;
+    bool on_key_event(const KeyEvent& event) override;
+    void on_focus_changed(bool gained) override;
+
+private:
+    std::string display_() const;     // value + suffix
+    double value_ = 0.0, min_ = -1e9, max_ = 1e9;
+    int decimals_ = 1;
+    std::string suffix_;
+    bool enabled_ = true, editing_ = false, invalid_ = false;
+    std::string edit_buffer_;
+    float blink_ = 0.0f;
+};
+
 // ── SpectrogramView ──────────────────────────────────────────────────────────
 // Scrolling time-frequency display. Each STFT frame becomes a column of
 // colored pixels, scrolling left as new frames arrive.
@@ -1332,6 +1597,95 @@ public:
 private:
     float display_correlation_ = 0.0f;
     float smoothing_coeff_ = 0.1f; // Exponential smoothing
+};
+
+// ── WaveformRecorder ─────────────────────────────────────────────────────────
+// Three-state recorder control (Ink & Signal "Recorder" component). One widget
+// composes a filled waveform display, a bottom level meter with a draggable
+// threshold thumb, a center transport button, and a top-right status badge,
+// and re-skins all four for each state:
+//
+//   armed     — faint/empty waveform, red record dot, "READY" badge; the
+//               threshold thumb is draggable to arm the capture trigger.
+//   recording — waveform tinted with accent.error, stop square, live "REC"
+//               badge; the meter shows the incoming level but the thumb is
+//               locked (you can't re-arm mid-take).
+//   captured  — waveform in accent.primary (teal), play triangle, "CAPTURED"
+//               badge with a check; the meter is inert.
+//
+// Clicking the center transport button advances the state in the cycle
+// armed → recording → captured → armed and fires on_state_change plus the
+// matching transport callback (on_record / on_stop / on_play). All chrome is
+// drawn from theme tokens so it stays legible on the dark Ink & Signal theme.
+class WaveformRecorder : public View {
+public:
+    enum class State { armed, recording, captured };
+
+    WaveformRecorder() {
+        set_access_role(AccessRole::group);
+        set_focusable(true);
+    }
+
+    /// Transport state. Setting a new state repaints and fires on_state_change.
+    void set_state(State s);
+    State state() const { return state_; }
+    std::function<void(State)> on_state_change;
+
+    /// Normalized waveform samples (-1..1) drawn across the main area.
+    void set_waveform(std::vector<float> samples) {
+        waveform_ = std::move(samples);
+        request_repaint();
+    }
+    const std::vector<float>& waveform() const { return waveform_; }
+
+    /// Live input level (0..1) shown by the bottom meter fill.
+    void set_level(float level) {
+        float c = std::clamp(level, 0.0f, 1.0f);
+        if (c == level_) return;
+        level_ = c;
+        request_repaint();
+    }
+    float level() const { return level_; }
+
+    /// Capture threshold (0..1) marked by the draggable meter thumb. The setter
+    /// is silent (programmatic); user drags fire on_threshold_change.
+    void set_threshold(float threshold) {
+        float c = std::clamp(threshold, 0.0f, 1.0f);
+        if (c == threshold_) return;
+        threshold_ = c;
+        request_repaint();
+    }
+    float threshold() const { return threshold_; }
+    std::function<void(float)> on_threshold_change;
+
+    /// Optional transport-action callbacks, fired alongside the state advance.
+    std::function<void()> on_record;
+    std::function<void()> on_stop;
+    std::function<void()> on_play;
+
+    void paint(canvas::Canvas& canvas) override;
+    void on_mouse_down(Point pos) override;
+    void on_mouse_drag(Point pos) override;
+    void on_mouse_up(Point pos) override;
+
+private:
+    /// Bottom level-meter strip (the draggable threshold track).
+    Rect meter_rect_() const;
+    /// Main waveform area (between the badge row and the meter).
+    Rect waveform_rect_() const;
+    float transport_radius_() const;
+    Point transport_center_() const;
+    /// Button-driven cycle: fires the current state's transport callback,
+    /// then advances armed→recording→captured→armed (via set_state).
+    void advance_state_();
+    /// Map a local x within the meter to a threshold and fire on_threshold_change.
+    void update_threshold_from_x_(float x);
+
+    State state_ = State::armed;
+    std::vector<float> waveform_;
+    float level_ = 0.0f;
+    float threshold_ = 0.5f;
+    bool dragging_threshold_ = false;
 };
 
 } // namespace pulp::view

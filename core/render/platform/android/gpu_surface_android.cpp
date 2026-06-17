@@ -8,6 +8,7 @@
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/theme.hpp>
 #include <pulp/view/input_events.hpp>
+#include <pulp/view/drag_drop.hpp>
 #include <pulp/view/script_engine.hpp>
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/accessibility.hpp>
@@ -991,6 +992,20 @@ void android_touch_up(int pointer_id, float px_x, float px_y) {
     g_captured_view->on_mouse_event(ev);
     g_captured_view->on_mouse_up(local);
     g_captured_view = nullptr;
+}
+
+void android_on_drop(const std::vector<std::string>& paths, float px_x, float px_y) {
+    if (!g_root_view || paths.empty()) return;
+    float dp_x = px_x / g_display_density;
+    float dp_y = px_y / g_display_density;
+    view::DropData data;
+    data.type = view::DropData::Type::files;
+    data.file_paths = paths;
+    // Android delivers one completed drop per gesture (no incremental hover
+    // routing here), so a function-local session is sufficient. dispatch_drop
+    // hit-tests g_root_view and routes to the first DropReceiver / View::on_drop.
+    static view::DragSession session;
+    view::dispatch_drop(*g_root_view, session, data, {dp_x, dp_y});
 }
 
 void android_surface_destroyed() {

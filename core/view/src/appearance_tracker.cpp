@@ -112,6 +112,20 @@ void ThemeManager::unlock() {
     if (theme_callback_) theme_callback_(active_theme());
 }
 
+void ThemeManager::set_mode(ThemeMode m) {
+    switch (m) {
+        case ThemeMode::system: unlock(); break;
+        case ThemeMode::light:  lock_appearance(Appearance::light); break;
+        case ThemeMode::dark:   lock_appearance(Appearance::dark); break;
+    }
+}
+
+ThemeMode ThemeManager::mode() const {
+    if (!tracker_.is_locked()) return ThemeMode::system;
+    return tracker_.locked_appearance() == Appearance::light ? ThemeMode::light
+                                                             : ThemeMode::dark;
+}
+
 bool ThemeManager::poll() {
     if (theme_locked_) return false;
 

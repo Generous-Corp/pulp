@@ -11,6 +11,9 @@ target_sources(pulp-canvas PRIVATE
     src/color.cpp
     src/recording_canvas.cpp
     src/svg.cpp
+    # Lottie playback. Always compiled; the body is a no-op unless PULP_LOTTIE
+    # is on AND the active Skia build ships the skottie module (detected below).
+    src/lottie_animation.cpp
     # Pulp #6.1 / 2026-05-24 macOS plugin-authoring plan — retained
     # VectorScene + SceneNode subtree built on top of `core/canvas::Path`
     # + the existing SkiaCanvas. Lets custom-paint widgets / SVG imports
@@ -118,6 +121,7 @@ if(PULP_HAS_SKIA)
         src/skia_canvas_mask.cpp
         src/skia_canvas_gradients.cpp
         src/skia_canvas_box_shadow.cpp
+        src/box_shadow_cache.cpp
         src/skia_canvas_opacity.cpp
         src/skia_canvas_shaders.cpp
         src/bundled_fonts.cpp
@@ -190,6 +194,35 @@ if(PULP_HAS_SKIA)
     endif()
     target_compile_definitions(pulp-canvas PUBLIC PULP_HAS_SKIA=1)
     target_include_directories(pulp-canvas PRIVATE ${SKIA_INCLUDE_DIRS})
+
+    # Opt-in Lottie playback (PULP_LOTTIE). skottie/sksg ship inside the Skia
+    # bundle and are already linked via skia::skia's glob, and the skottie
+    # include dir is already in SKIA_INCLUDE_DIRS — so enabling Lottie only adds
+    # a compile definition. Detection is a real try-link, not just a header
+    # check: some Skia bundles ship the skottie headers + archive but omit its
+    # SkJSON/skresources dependency, so skottie compiles but does not link. The
+    # try-link guarantees turning PULP_LOTTIE on can never break the build — it
+    # auto-disables (LottieView degrades to a no-op) on a bundle that can't link
+    # skottie, and lights up on one that can.
+    if(PULP_LOTTIE)
+        include(CheckCXXSourceCompiles)
+        set(CMAKE_REQUIRED_LIBRARIES skia::skia)
+        check_cxx_source_compiles("
+            #include \"modules/skottie/include/Skottie.h\"
+            int main() {
+                auto a = skottie::Animation::Builder().make(\"{}\", 2);
+                return a ? 0 : 1;
+            }
+        " PULP_SKOTTIE_LINKS)
+        unset(CMAKE_REQUIRED_LIBRARIES)
+        if(PULP_SKOTTIE_LINKS)
+            target_compile_definitions(pulp-canvas PUBLIC PULP_HAS_LOTTIE=1)
+            message(STATUS "Pulp: Lottie playback enabled (skottie links)")
+        else()
+            message(STATUS "Pulp: PULP_LOTTIE requested but this Skia bundle cannot "
+                           "link skottie (missing skjson/skresources) — Lottie disabled")
+        endif()
+    endif()
 
     # font_registry_stubs.cpp compiles direct icu::Locale / BreakIterator calls
     # when PULP_HAS_SKIA and ICU public headers are on the include path (true on
