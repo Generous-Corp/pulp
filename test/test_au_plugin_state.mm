@@ -1657,3 +1657,77 @@ TEST_CASE("detect_host_type — wrapper id wins when wrapper is recognised",
     REQUIRE(static_cast<int>(type) >= static_cast<int>(pulp::format::HostType::Unknown));
     REQUIRE(static_cast<int>(type) <= static_cast<int>(pulp::format::HostType::Other));
 }
+
+TEST_CASE("AU v3 editor parameter edit + gesture reach the host for automation",
+          "[au][auv3][params][automation]") {
+    @autoreleasepool {
+        AudioComponentDescription desc{};
+        desc.componentType = kAudioUnitType_Effect;
+        desc.componentSubType = 'TstE';
+        desc.componentManufacturer = 'Plup';
+
+        ScopedFactoryRegistration registration(create_effect_processor);
+
+        NSError* error = nil;
+        PulpAudioUnit* unit =
+            [[PulpAudioUnit alloc] initWithComponentDescription:desc
+                                                       options:0
+                                                         error:&error];
+        REQUIRE(unit != nil);
+        REQUIRE(error == nil);
+        auto* processor = g_last_effect_processor;
+        REQUIRE(processor != nullptr);
+
+        // The parameter tree must be RETAINED across calls: the host observes
+        // these exact AUParameter objects, so a per-call rebuild would push UI
+        // edits into throwaway objects and break automation recording.
+        AUParameterTree* tree = unit.parameterTree;
+        REQUIRE(tree != nil);
+        REQUIRE(tree == unit.parameterTree);
+
+        AUParameter* p = [tree parameterWithAddress:1];
+        REQUIRE(p != nil);
+
+        // Capture the host-visible automation events — what Logic's recorder sees.
+        auto events = std::make_shared<std::vector<std::pair<int, float>>>();
+        AUParameterObserverToken obs = [tree tokenByAddingParameterAutomationObserver:
+            ^(NSInteger count, const AUParameterAutomationEvent* evs) {
+                for (NSInteger i = 0; i < count; ++i)
+                    if (evs[i].address == 1)
+                        events->push_back({(int)evs[i].eventType, evs[i].value});
+            }];
+
+        // Drive exactly what parameter_binding.hpp emits from a widget drag:
+        // gesture begin → value change → gesture end, via the shared StateStore.
+        auto& store = processor->state();
+        const float before = p.value;
+        store.begin_gesture(1);
+        store.set_value(1, before + 3.0f);
+        store.end_gesture(1);
+
+        // UI → host write-back: the host AUParameter now reflects the edit. This
+        // is the load-bearing assertion — delivered synchronously, and what lets
+        // Logic read/record the moved value.
+        REQUIRE_THAT(p.value, Catch::Matchers::WithinAbs(before + 3.0, 0.01));
+
+        // The automation observer is delivered asynchronously (Apple batches the
+        // events onto the runloop), so pump it before asserting the recorder saw
+        // a Touch (begin), a Value, and a Release (end).
+        for (int i = 0; i < 25 && events->size() < 3; ++i)
+            [[NSRunLoop currentRunLoop]
+                runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.02]];
+
+        bool sawTouch = false, sawValue = false, sawRelease = false;
+        for (auto& e : *events) {
+            if (e.first == AUParameterAutomationEventTypeTouch) sawTouch = true;
+            if (e.first == AUParameterAutomationEventTypeValue) sawValue = true;
+            if (e.first == AUParameterAutomationEventTypeRelease) sawRelease = true;
+        }
+        CHECK(sawTouch);
+        CHECK(sawValue);
+        CHECK(sawRelease);
+
+        [tree removeParameterObserver:obs];
+        [unit release];
+    }
+}

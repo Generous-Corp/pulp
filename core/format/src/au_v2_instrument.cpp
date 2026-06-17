@@ -45,6 +45,34 @@ PulpAUInstrument::PulpAUInstrument(AudioComponentInstance ci)
                     param.range.default_value);
             }
 
+            // Gesture begin/end → host Begin/EndParameterChangeGesture, so the
+            // editor's drag start/stop bracket a clean automation pass (Touch/
+            // Latch). Mirrors the AU v2 effect adapter — was missing here, so the
+            // instrument recorded values without gesture boundaries.
+            store_.set_gesture_callbacks(
+                [this](state::ParamID id) {
+                    AudioUnitEvent event;
+                    std::memset(&event, 0, sizeof(event));
+                    event.mEventType = kAudioUnitEvent_BeginParameterChangeGesture;
+                    event.mArgument.mParameter.mAudioUnit = GetComponentInstance();
+                    event.mArgument.mParameter.mParameterID =
+                        static_cast<AudioUnitParameterID>(id);
+                    event.mArgument.mParameter.mScope = kAudioUnitScope_Global;
+                    event.mArgument.mParameter.mElement = 0;
+                    AUEventListenerNotify(nullptr, nullptr, &event);
+                },
+                [this](state::ParamID id) {
+                    AudioUnitEvent event;
+                    std::memset(&event, 0, sizeof(event));
+                    event.mEventType = kAudioUnitEvent_EndParameterChangeGesture;
+                    event.mArgument.mParameter.mAudioUnit = GetComponentInstance();
+                    event.mArgument.mParameter.mParameterID =
+                        static_cast<AudioUnitParameterID>(id);
+                    event.mArgument.mParameter.mScope = kAudioUnitScope_Global;
+                    event.mArgument.mParameter.mElement = 0;
+                    AUEventListenerNotify(nullptr, nullptr, &event);
+                });
+
             // UI -> host parameter notification, on the editing (main) thread.
             // An editor ParameterEdit fires this; it notifies the host so it
             // re-reads via GetParameter and records automation. NOT

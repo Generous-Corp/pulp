@@ -340,6 +340,15 @@ host via the gesture begin/end brackets (`set_gesture_callbacks`, UI thread) and
 an Audio-thread store listener that notifies on the editing thread with a
 `thread_local` echo guard so a host-originated `SetParameter` is not echoed back.
 
+**The instrument adapter (`au_v2_instrument.cpp`) now wires the same
+`set_gesture_callbacks` block** (it previously only had the value-change
+listener, so slider drags in an instrument editor recorded values but
+never bracketed them with `kAudioUnitEvent_BeginParameterChangeGesture` /
+`…EndParameterChangeGesture` — Logic would not arm a write pass). Mirror
+`au_v2_adapter.cpp`'s gesture block exactly: emit Begin on
+`begin_gesture`, End on `end_gesture`, both via `AUEventListenerNotify`
+with the `g_host_writing_param` echo guard.
+
 ## MIDI input is lock-free — no audio-thread mutex
 
 `HandleMIDIEvent`/`HandleSysEx` push to lock-free `SpscQueue<MidiEvent>` +

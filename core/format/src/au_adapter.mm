@@ -172,6 +172,14 @@ static int32_t block_relative_sample_offset(AUEventSampleTime event_sample_time,
     return static_cast<int32_t>(offset);
 }
 
+// Set while a host parameter write (implementorValueObserver) or our own
+// -setValue: push is in flight, so the inline StateStore listener that pushes UI
+// edits to the host doesn't echo the host's own value straight back (and so our
+// push doesn't loop back through implementorValueObserver → store → listener).
+// thread_local because the inline (Audio) listener runs synchronously on
+// whichever thread set the store, so set + check always pair on one thread.
+static thread_local bool g_au_v3_host_writing = false;
+
 } // namespace pulp::format::au
 
 // ── AUAudioUnit subclass ───────────────────────────────────────────────────
@@ -186,6 +194,16 @@ static int32_t block_relative_sample_offset(AUEventSampleTime event_sample_time,
     // of this plugin instance so DAW-hosted code can post work to the
     // main thread via pulp::events::MainThreadDispatcher::call_async().
     pulp::events::MainThreadDispatcher::Token _mainThreadToken;
+
+    // Parameter automation (UI → host recording). The AUParameterTree is built
+    // once and RETAINED — the host observes these exact AUParameter objects, so
+    // a per-call rebuild would push UI edits into throwaway objects the host
+    // isn't watching. _automationToken is the originator passed to
+    // -setValue:originator:… so our own implementorValueObserver isn't the
+    // recipient; _automationListener pushes StateStore edits back to the host.
+    AUParameterTree *_parameterTree;
+    AUParameterObserverToken _automationToken;
+    pulp::state::ListenerToken _automationListener;
 }
 
 /// Raw pointer to the host-owned Processor + StateStore. Used by the
@@ -376,6 +394,11 @@ static int32_t block_relative_sample_offset(AUEventSampleTime event_sample_time,
 - (BOOL)canProcessInPlace { return YES; }
 
 - (AUParameterTree *)parameterTree {
+    // Built once and retained: the host observes THESE AUParameter objects, so a
+    // per-call rebuild would push UI edits into throwaway objects the host isn't
+    // watching (breaking automation recording).
+    if (_parameterTree) return _parameterTree;
+
     auto params = _bridge.store.all_params();
     NSMutableArray<AUParameter *> *auParams = [NSMutableArray new];
 
@@ -412,8 +435,13 @@ static int32_t block_relative_sample_offset(AUEventSampleTime event_sample_time,
         // including the render thread. Use the RT-safe path so a Main
         // listener attached to this store doesn't trigger an EventLoop
         // dispatch lambda allocation on a possibly-audio thread.
+        //
+        // Guard the inline UI→host listener (below): this is the host's (or our
+        // own -setValue:) write, so it must NOT be echoed back to the host.
+        pulp::format::au::g_au_v3_host_writing = true;
         strongSelf->_bridge.store.set_value_rt(
             static_cast<pulp::state::ParamID>(param.address), value);
+        pulp::format::au::g_au_v3_host_writing = false;
     };
 
     tree.implementorValueProvider = ^AUValue(AUParameter *param) {
@@ -437,7 +465,64 @@ static int32_t block_relative_sample_offset(AUEventSampleTime event_sample_time,
         return [NSString stringWithFormat:@"%.2f", v];
     };
 
-    return tree;
+    // Retain: this file is MRC, and `tree` is autoreleased — without a retain it
+    // would dangle once the surrounding autorelease pool drains.
+    _parameterTree = [tree retain];
+
+    // Originator token: passed to -setValue:originator:… so the host's recording
+    // observer is notified while excluding the originator (a no-op observer we own).
+    _automationToken = [tree tokenByAddingParameterObserver:^(AUParameterAddress, AUValue) {}];
+
+    // ── UI → host: record automation when the editor moves a parameter ───────
+    // When a StateStore edit happens that did NOT come from the host, push it to
+    // the matching AUParameter so the host (Logic) records it. Registered as an
+    // Audio (inline) listener so it runs synchronously on whichever thread set
+    // the store: a UI edit fires it on the main thread (where -setValue: is
+    // valid), and a host write fires it with g_au_v3_host_writing set so it is
+    // suppressed. The render thread never writes the store outside the guarded
+    // implementorValueObserver, so -setValue: is never called from audio.
+    _automationListener = _bridge.store.add_listener(
+        [weakSelf](pulp::state::ParamID id, float value) {
+            if (pulp::format::au::g_au_v3_host_writing) return;
+            PulpAudioUnit* s = weakSelf;
+            if (!s || !s->_parameterTree) return;
+            AUParameter* p =
+                [s->_parameterTree parameterWithAddress:static_cast<AUParameterAddress>(id)];
+            if (!p) return;
+            pulp::format::au::g_au_v3_host_writing = true;
+            [p setValue:value
+              originator:s->_automationToken
+               atHostTime:0
+                eventType:AUParameterAutomationEventTypeValue];
+            pulp::format::au::g_au_v3_host_writing = false;
+        },
+        pulp::state::ListenerThread::Audio);
+
+    // ── Gesture begin/end → host Touch/Release (clean automation-pass bounds) ─
+    // The native widget binding (parameter_binding.hpp) fires begin_gesture on
+    // drag start and end_gesture on drag end; relay those as Touch / Release so
+    // Logic's Touch/Latch modes bracket the pass correctly. Inlined per lambda
+    // (no shared ObjC block) — MRC would not Block_copy a stack block captured by
+    // a C++ closure that outlives this scope.
+    auto sendGesture = [](PulpAudioUnit* s, pulp::state::ParamID id,
+                          AUParameterAutomationEventType type) {
+        if (!s || !s->_parameterTree) return;
+        AUParameter* p =
+            [s->_parameterTree parameterWithAddress:static_cast<AUParameterAddress>(id)];
+        if (!p) return;
+        pulp::format::au::g_au_v3_host_writing = true;
+        [p setValue:p.value originator:s->_automationToken atHostTime:0 eventType:type];
+        pulp::format::au::g_au_v3_host_writing = false;
+    };
+    _bridge.store.set_gesture_callbacks(
+        [weakSelf, sendGesture](pulp::state::ParamID id) {
+            sendGesture(weakSelf, id, AUParameterAutomationEventTypeTouch);
+        },
+        [weakSelf, sendGesture](pulp::state::ParamID id) {
+            sendGesture(weakSelf, id, AUParameterAutomationEventTypeRelease);
+        });
+
+    return _parameterTree;
 }
 
 // Item 3.1 — dual-tracked bypass.
@@ -509,6 +594,18 @@ static int32_t block_relative_sample_offset(AUEventSampleTime event_sample_time,
 // Item 6.4b — symmetric teardown of the MainThreadDispatcher backend
 // installed in init.
 - (void)dealloc {
+    // Tear down parameter-automation wiring while the C++ StateStore (_bridge) is
+    // still alive: drop the gesture callbacks + store listener that capture self,
+    // remove our host observer token, and release the retained (MRC) tree.
+    _bridge.store.set_gesture_callbacks({}, {});
+    _automationListener.reset();
+    if (_parameterTree && _automationToken) {
+        [_parameterTree removeParameterObserver:_automationToken];
+        _automationToken = nullptr;
+    }
+    [_parameterTree release];
+    _parameterTree = nil;
+
     if (_mainThreadToken != 0) {
         pulp::events::unregister_plugin_backend(_mainThreadToken);
         _mainThreadToken = 0;
