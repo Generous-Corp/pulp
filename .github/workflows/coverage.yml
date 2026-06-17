@@ -541,25 +541,33 @@ jobs:
         run: |
           budget=$(( 135 * 60 ))   # 135 min < 150-min job cap
           budget_hit="${RUNNER_TEMP:-/tmp}/coverage-budget-hit"
-          rm -f "${budget_hit}"
+          rm -f "${budget_hit}" 2>/dev/null || true
           scripts/run_coverage.sh & cov=$!
-          ( sleep "${budget}" \
-              && echo "::warning::coverage suite hit the ${budget}s best-effort budget (expected on os-windows); terminating — leg is non-fatal." \
-              && : > "${budget_hit}" \
-              && kill -TERM "${cov}" 2>/dev/null \
-              && sleep 15 && kill -KILL "${cov}" 2>/dev/null ) & watch=$!
+          # Watchdog. Steps are separated by ';' (NOT '&&') so a failed marker
+          # write or warning echo can NEVER skip the kill — terminating the suite
+          # before the job cap is the entire point. The marker is best-effort; the
+          # kill is mandatory.
+          ( sleep "${budget}"
+            echo "::warning::coverage suite hit the ${budget}s best-effort budget (expected on os-windows); terminating — leg is non-fatal."
+            : > "${budget_hit}" 2>/dev/null || true
+            kill -TERM "${cov}" 2>/dev/null || true
+            sleep 15
+            kill -KILL "${cov}" 2>/dev/null || true ) & watch=$!
           set +e; wait "${cov}"; rc=$?; set -e
           kill -TERM "${watch}" 2>/dev/null || true
           wait "${watch}" 2>/dev/null || true
-          if [ -f "${budget_hit}" ]; then
-            # Best-effort timeout: drop any PARTIAL Cobertura/LCOV that the
-            # interrupted llvm-cov export may have left behind, so the verify +
-            # Codecov upload steps publish NOTHING for os-windows rather than a
-            # truncated, valid-looking number. A clean miss beats a wrong number.
+          # Best-effort timeout cleanup. Trigger on EITHER the marker OR a
+          # signal-kill exit (143=SIGTERM, 137=SIGKILL — our watchdog's signals),
+          # so a marker-write that failed on a Windows RUNNER_TEMP path can't
+          # leave a PARTIAL Cobertura/LCOV for the verify + Codecov upload steps
+          # to publish as a truncated, valid-looking number. A clean miss beats a
+          # wrong number.
+          if [ -f "${budget_hit}" ] || [ "${rc}" -eq 143 ] || [ "${rc}" -eq 137 ]; then
+            echo "::warning::dropping any partial Cobertura/LCOV from the interrupted coverage run (best-effort os-windows)."
             rm -f build-coverage/coverage.cobertura.xml \
                   build-coverage/coverage/coverage.lcov 2>/dev/null || true
-            rm -f "${budget_hit}"
           fi
+          rm -f "${budget_hit}" 2>/dev/null || true
           exit "${rc}"
 
       - name: Install Python coverage tooling

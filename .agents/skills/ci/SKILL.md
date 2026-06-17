@@ -260,10 +260,16 @@ coverage suite step self-terminates at an **internal budget (135 min) below the
 job cap**, turning the would-be cancellation into a normal non-zero exit that
 the job-level `continue-on-error: matrix.os=='windows'` then absorbs → the run
 concludes `success`. Don't "simplify" this to bare `continue-on-error`; it will
-silently stop closing the watchdog. Real os-windows *correctness* bugs are
-still worth fixing (the ARG_MAX response-file + vanished-`-object`
-existence-filter + mass-drop guard in `run_coverage.sh` were real); only the
-runtime/timeout is accepted as best-effort.
+silently stop closing the watchdog. **And the watchdog that enforces the budget
+must separate its steps with `;`, NOT `&&`** — if the kill is `&&`-gated behind
+a `: > marker` write (which can fail on a Windows `RUNNER_TEMP` backslash path),
+a failed marker write short-circuits the chain and the suite is never killed,
+so the job hits the 150-min cap and is *cancelled* anyway. The kill is
+mandatory; the marker is best-effort (cleanup of any partial Cobertura also
+triggers on a 143/137 signal-kill exit, not just the marker). Real os-windows
+*correctness* bugs are still worth fixing (the ARG_MAX response-file +
+vanished-`-object` existence-filter + mass-drop guard in `run_coverage.sh` were
+real); only the runtime/timeout is accepted as best-effort.
 
 ### Advisory cross-lane workflow: `macos-cross-advisory.yml`
 
