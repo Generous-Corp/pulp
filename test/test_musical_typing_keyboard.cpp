@@ -294,3 +294,66 @@ TEST_CASE("MusicalTypingKeyboard: set_active_notes lights from an external held 
     REQUIRE(kb.element_value(note_idx(kb, 72)) == 1.0f);
     REQUIRE(kb.element_value(note_idx(kb, 60)) == 0.0f);    // not held → dark
 }
+
+// ── Review-hardening: frame swap must not strand notes or lit state ─────────
+
+TEST_CASE("MusicalTypingKeyboard: toggling mode releases a QWERTY-held note",
+          "[view][musical-typing][toggle][regression]") {
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    std::vector<int> ons, offs;
+    kb.on_note_on  = [&](int n, float) { ons.push_back(n); };
+    kb.on_note_off = [&](int n) { offs.push_back(n); };
+
+    KeyEvent a{}; a.key = KeyCode::a; a.is_down = true;   // hold 'a' = C2 (48)
+    kb.on_key_event(a);
+    REQUIRE(ons == std::vector<int>{48});
+    REQUIRE(offs.empty());
+
+    // Switch to piano mode while 'a' is still held — the typing frame goes away,
+    // so the note MUST be released (no stuck MIDI note).
+    kb.set_mode(Mode::piano);
+    REQUIRE(offs == std::vector<int>{48});
+}
+
+TEST_CASE("MusicalTypingKeyboard: external held set re-applies across a mode swap",
+          "[view][musical-typing][toggle][regression]") {
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    const int held[] = {48, 72};   // C2 + C4 held by the host
+    kb.set_active_notes(held);
+    // Typing mode shows only the typing 'a' (C2 @ base) lit.
+    REQUIRE(kb.element_value(note_idx(kb, 0)) == 1.0f);
+
+    // Toggle to piano WITHOUT the host re-pushing — the still-held chord must
+    // appear on the piano frame's keys (no vanish).
+    kb.set_mode(Mode::piano);
+    refit(kb);
+    REQUIRE(kb.element_value(note_idx(kb, 48)) == 1.0f);   // C2 piano key lit
+    REQUIRE(kb.element_value(note_idx(kb, 72)) == 1.0f);   // C4 piano key lit
+    REQUIRE(kb.element_value(note_idx(kb, 60)) == 0.0f);   // not held → dark
+}
+
+// Guard the neutralization (the embedded SVGs must NOT bake the design's
+// "selected keys shown" demo chord as lit key gradients — the live overlay owns
+// all pressed-state lighting). The only legit accent-teal (#16DAC2) left is the
+// toolbar active-icon + overview-strip highlight (3 each). A re-export that
+// re-bakes a lit key chord adds ≥2 teal stops per lit key, tripping this.
+namespace pulp::view::detail {
+const char* musical_typing_typing_svg_b64();
+const char* musical_typing_piano_svg_b64();
+}
+#include <pulp/runtime/base64.hpp>
+TEST_CASE("MusicalTypingKeyboard: no baked-lit demo chord in the embedded SVGs",
+          "[view][musical-typing][regression]") {
+    auto count_teal = [](const char* b64) {
+        auto bytes = pulp::runtime::base64_decode(b64);
+        REQUIRE(bytes);
+        std::string svg(bytes->begin(), bytes->end());
+        int n = 0;
+        for (size_t p = svg.find("#16DAC2"); p != std::string::npos;
+             p = svg.find("#16DAC2", p + 1)) ++n;
+        return n;
+    };
+    // Toolbar active-icon + overview highlight only — keys are resting.
+    REQUIRE(count_teal(detail::musical_typing_typing_svg_b64()) <= 4);
+    REQUIRE(count_teal(detail::musical_typing_piano_svg_b64()) <= 4);
+}

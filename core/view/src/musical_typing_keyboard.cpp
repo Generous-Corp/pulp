@@ -139,6 +139,13 @@ MusicalTypingKeyboard::Mode MusicalTypingKeyboard::mode() const {
 }
 
 void MusicalTypingKeyboard::set_active_notes(std::span<const int> midi_notes) {
+    // Remember the host's held set so a frame swap can re-apply it to the new
+    // frame's keys (on_active_frame_changed), then light the active frame.
+    held_notes_.assign(midi_notes.begin(), midi_notes.end());
+    apply_held_notes();
+}
+
+void MusicalTypingKeyboard::apply_held_notes() {
     // Light every momentary key (in the ACTIVE frame) whose absolute MIDI is in
     // the external held set; clear the rest. Host-driven display — independent of
     // our own key/mouse state.
@@ -146,10 +153,20 @@ void MusicalTypingKeyboard::set_active_notes(std::span<const int> midi_notes) {
         if (element_kind(i) != DesignFrameElement::Kind::momentary) continue;
         const int midi = midi_for_element(i);
         bool held = false;
-        for (int n : midi_notes) if (n == midi) { held = true; break; }
+        for (int n : held_notes_) if (n == midi) { held = true; break; }
         set_element_value(i, held ? 1.0f : 0.0f);
     }
     request_repaint();
+}
+
+void MusicalTypingKeyboard::on_active_frame_changed() {
+    // A mode swap (toggle button or set_mode) just changed the active frame.
+    // Release any QWERTY-held notes — the typing keys may no longer exist (piano
+    // mode), and the design's release-on-mode-switch edge applies here too — then
+    // re-light the new frame from the host's still-held external set so a
+    // sustained chord doesn't visually vanish across the swap.
+    controller_.all_notes_off();
+    apply_held_notes();
 }
 
 void MusicalTypingKeyboard::set_input_capture(bool capture) {
@@ -173,17 +190,18 @@ bool MusicalTypingKeyboard::on_key_event(const KeyEvent& event) {
 
 void MusicalTypingKeyboard::on_focus_changed(bool gained) {
     DesignFrameView::on_focus_changed(gained);
-    if (!gained) {  // release held notes + clear typing highlights so none stick
+    if (!gained) {
+        // Lost focus: release our QWERTY-held notes (you can't hold keys while
+        // unfocused), then re-apply the external held set so host-driven
+        // highlights persist while QWERTY-only highlights clear.
         controller_.all_notes_off();
-        for (int i = 0; i < element_count(); ++i)
-            if (element_kind(i) == DesignFrameElement::Kind::momentary && element_note(i) < 24)
-                set_element_value(i, 0.0f);
-        request_repaint();
+        apply_held_notes();
     }
 }
 
 int MusicalTypingKeyboard::typing_element_for_semitone(int semitone) const {
-    if (semitone < 0 || semitone >= 24) return -1;  // typing relative-semitone range
+    if (active_frame() != kTypingFrame) return -1;  // typing keys live in frame 0
+    if (semitone < 0) return -1;
     for (int i = 0; i < element_count(); ++i)
         if (element_kind(i) == DesignFrameElement::Kind::momentary && element_note(i) == semitone)
             return i;
@@ -193,7 +211,11 @@ int MusicalTypingKeyboard::typing_element_for_semitone(int semitone) const {
 int MusicalTypingKeyboard::midi_for_element(int index) const {
     const int note = element_note(index);
     if (note < 0) return -1;
-    if (note < 24)  // typing: relative semitone → base note + octave shift
+    // Discriminate by FRAME, not note magnitude: the typing frame's `note` is a
+    // relative semitone (resolved against base + octave); the piano frame's is an
+    // absolute MIDI note. (A magnitude threshold would misclassify a low piano
+    // octave, e.g. MIDI C-1..B0, as a typing semitone.)
+    if (active_frame() == kTypingFrame)
         return controller_.base_note() + controller_.octave_shift() * 12 + note;
     return note;    // piano: absolute MIDI
 }
