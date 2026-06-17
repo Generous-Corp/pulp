@@ -71,9 +71,10 @@ void append_controls(std::vector<DesignFrameElement>& els) {
     };
     add("octave_down", 114, 213, 32, 32);
     add("octave_up",   155, 213, 32, 32);
-    // The < > buttons flanking the top overview strip also step the octave.
+    // The < > buttons flanking the top overview strip also step the octave. The
+    // > moved right to ~689 after #82 widened the strip (chevron at x≈699).
     add("octave_down", 117, 23, 22, 24);
-    add("octave_up",   550, 23, 22, 24);
+    add("octave_up",   689, 23, 22, 24);
     add("vel_down",    321, 213, 32, 32);
     add("vel_up",      362, 213, 32, 32);
 
@@ -110,15 +111,15 @@ void append_readouts(std::vector<DesignFrameElement>& els, const char* who) {
         e.x = x; e.y = y; e.w = w; e.h = h;
         els.push_back(e);
     };
+    // The redundant top-right OCTAVE/VEL cluster was removed from the design
+    // (#82): the bottom-left readouts are the single source now. Piano shows no
+    // OCTAVE readout — the overview highlight reflects the range (Logic-style).
     if (std::string(who) == "typing") {
-        add("octave", 635, 26, 16, 19);   // top "OCTAVE C2"
         add("octave", 75, 219, 17, 21);   // bottom "OCTAVE C2"
-        add("velocity", 695, 26, 16, 19); // top "VEL 98"
         add("velocity", 282, 219, 17, 21);// bottom "VELOCITY 98"
         add("pitchbend", 90, 74, 8, 18);  // "PITCH BEND 0"
-    } else {  // piano
-        add("octave", 695, 26, 16, 19);   // "OCTAVE C2"
     }
+    // piano: no value_labels (range shown by the overview highlight only)
 }
 
 // MIDI note → pitch-class + octave, in the design's convention where C2 = 48
@@ -194,7 +195,7 @@ std::vector<DesignFrameElement> build_piano_frame() {
         els.push_back(e);
     };
     add_oct("octave_down", 117);
-    add_oct("octave_up", 610);
+    add_oct("octave_up", 689);   // strip widened after #82 (chevron at x≈699)
     append_readouts(els, "piano");   // live OCTAVE value (piano toolbar)
     return els;
 }
@@ -459,10 +460,12 @@ void MusicalTypingKeyboard::light_typing_semitone(int semitone, bool on) {
 bool MusicalTypingKeyboard::strip_geom(StripGeom& g) const {
     // Strip outline + teal-box geometry read from the faithful export (panel
     // coords). box_y/box_h are the rounded highlight's vertical band.
+    // strip_x1 = 677 in both frames after #82 removed the top-right OCTAVE/VEL
+    // cluster (the toolbar's flex reflowed the ribbon wider into the freed space).
     if (active_frame() == kTypingFrame)
-        g = {151.0f, 537.938f, 83.117f, 21.0f, 24.0f, 348.24f, 0.0f};
-    else  // piano strip is wider
-        g = {151.0f, 598.180f, 95.859f, 21.0f, 24.0f, 378.94f, 0.0f};
+        g = {151.0f, 677.0f, 83.117f, 21.0f, 24.0f, 348.24f, 0.0f};
+    else
+        g = {151.0f, 677.0f, 95.859f, 21.0f, 24.0f, 378.94f, 0.0f};
     // Fit the controller's ±4-octave range symmetrically within the box's travel
     // (the smaller of the left/right slack keeps it inside the strip both ways).
     const float half_box = g.box_w * 0.5f;

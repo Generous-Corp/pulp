@@ -572,8 +572,9 @@ TEST_CASE("MusicalTypingKeyboard: the overview highlight is coupled to z/x + the
     // z/x move the same octave the strip shows.
     KeyEvent x{}; x.key = KeyCode::x; x.is_down = true; kb.on_key_event(x);
     REQUIRE(kb.controller().octave_shift() == 1);
-    // The < > arrows (on_action octave_up/down) too — > arrow at (550,23,22,24).
-    kb.on_mouse_down({561.0f, 35.0f}); kb.on_mouse_up({561.0f, 35.0f});
+    // The < > arrows (on_action octave_up/down) too — > arrow at (689,23,22,24),
+    // right of the widened strip (#82). Click its chevron at ~700.
+    kb.on_mouse_down({700.0f, 35.0f}); kb.on_mouse_up({700.0f, 35.0f});
     REQUIRE(kb.controller().octave_shift() == 2);
 }
 

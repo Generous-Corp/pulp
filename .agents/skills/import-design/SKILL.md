@@ -83,6 +83,25 @@ re-exporting the node and re-embedding — never re-draw by hand. (Open follow-u
 teach the codegen/`--validate` path to emit/render `faithful_svg` as a
 DesignFrameView so the import itself is 1:1, not just the runtime.)
 
+**Multi-frame / post-processed components need a DEDICATED re-embed lane —
+`make_catalog_component.py` is single-frame and applies no neutralization.** The
+Musical Typing Keyboard is TWO frames (typing 187:15 / piano 187:349) AND its
+exported SVG is post-processed: the design bakes a "selected keys shown" demo
+chord as lit `#16DAC2` key gradients, which must be NEUTRALIZED to the resting
+key color (the live momentary overlay owns all pressed-state lighting) or the
+`[regression] no baked-lit demo chord` test trips. So it has its own
+`tools/import-design/reembed_mtk.py`: fetch both nodes via `/images?format=svg`,
+neutralize, emit the chunked-base64 cpp. Neutralization is content-based, not
+positional — a lit gradient is a `<linearGradient>` with both stops `#16DAC2` +
+a `0.26→1.0` opacity ramp; classify white (gradient y-extent ≥ 65 → `#EBEEF1`)
+vs black (< 65 → `#3A3F47`/`#16191E`) so it survives Figma edits. `--validate`
+asserts the decoded SVGs still match the committed file; it reproduces the prior
+hand-tuned embed byte-exact. **Gotcha:** removing a toolbar element (e.g. the
+top-right OCTAVE/VEL cluster) lets Figma's flex REFLOW siblings — the overview
+strip widened (right edge 151→677) and the `>` arrow moved (~550→689). Any
+hardcoded element/overlay coords in `musical_typing_keyboard.cpp` (strip bounds,
+arrow rects) must be re-derived from the regenerated SVG after such an edit.
+
 **Lesser gotchas:**
 - `--validate`'s "Similarity %" also breaks on **size mismatch** (it renders at
   `--render-size`, often 2× the reference) — always diff at matched dimensions
