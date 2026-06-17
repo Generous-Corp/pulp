@@ -11,6 +11,7 @@
 
 #include <cstdint>
 #include <cstdlib>
+#include <limits>
 #include <vector>
 
 using pulp::canvas::BoxShadowCache;
@@ -121,6 +122,47 @@ TEST_CASE("geometry change triggers a re-blur", "[canvas][shadow][cache]") {
     const auto s = cache.stats();
     CAPTURE(s.renders, s.hits);
     REQUIRE(s.renders == 2);
+}
+
+TEST_CASE("box shadow cache skips an oversized shadow (falls through to direct path)",
+          "[canvas][shadow][cache]") {
+    // Regression: a shadow whose device extent exceeds Skia's 16384px max must NOT
+    // be cached. The old code clamped the coverage surface to the max and stretched
+    // it across the destination (squished shadow); the fix returns nullptr from the
+    // render lambda so the caller falls through to the direct (uncached) path.
+    // Assert nothing gets cached (the lambda returned null → no entry stored).
+    auto& cache = BoxShadowCache::instance();
+    cache.clear();
+    cache.set_enabled(true);
+    cache.reset_stats();
+
+    const Color col = Color::rgba(0.0f, 0.0f, 0.0f, 0.5f);
+    // scale 240 * ~100px local extent ≈ 24000 device px > 16384 → oversized.
+    render_box_shadow_to_rgba(256, 256, 240.0f, 40, 40, 90, 70, 0, 6, 18, 2, col, 14,
+                              false);
+    REQUIRE(cache.stats().size == 0);  // oversized → not cached, no squished entry
+}
+
+TEST_CASE("BoxShadowKey::q handles non-finite and out-of-range inputs",
+          "[canvas][shadow][cache]") {
+    using pulp::canvas::BoxShadowKey;
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const float inf = std::numeric_limits<float>::infinity();
+
+    // Non-finite → a fixed bucket (0), never UB in the int cast.
+    REQUIRE(BoxShadowKey::q(nan) == 0);
+    REQUIRE(BoxShadowKey::q(inf) == 0);
+    REQUIRE(BoxShadowKey::q(-inf) == 0);
+
+    // Huge finite values are clamped to ±kLimit before the *4 and cast (no int32
+    // overflow / UB) — they map to the same bucket as the clamp boundary.
+    REQUIRE(BoxShadowKey::q(1.0e30f) == BoxShadowKey::q(4.0e8f));
+    REQUIRE(BoxShadowKey::q(-1.0e30f) == BoxShadowKey::q(-4.0e8f));
+
+    // Normal quantization is unaffected (1/4-unit buckets).
+    REQUIRE(BoxShadowKey::q(0.0f) == 0);
+    REQUIRE(BoxShadowKey::q(1.0f) == 4);
+    REQUIRE(BoxShadowKey::q(-1.0f) == -4);
 }
 
 #endif  // PULP_HAS_SKIA

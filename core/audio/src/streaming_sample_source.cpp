@@ -328,6 +328,12 @@ void StreamingSampleSource::reader_loop() noexcept {
 void StreamingSampleSource::notify_reader() noexcept { cv_.notify_all(); }
 
 bool StreamingSampleSource::finished() const noexcept {
+    // A zero-length source is immediately finished — there is nothing to play or
+    // loop over. This happens when a looping voice's preload read yields 0 frames
+    // (total_frames_ shrinks to 0); without this guard the resident-loop branch
+    // below would loop silence forever and never report finished, leaking the
+    // voice. (total_frames_ is immutable after prepare(), so this read is safe.)
+    if (total_frames_ == 0) return true;
     if (loop_ && fully_resident_) return false;  // resident loop never ends
     // Compare against the effective end so a stream that ended early (reader
     // returned 0 mid-tail) still reports finished once its realized frames have
