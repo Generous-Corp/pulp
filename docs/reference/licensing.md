@@ -134,21 +134,51 @@ See [AAX Setup](../guides/aax.md) for the supported local workflow.
 
 ### Optional Dependencies
 
-Fetched only when the corresponding CMake option or platform gate is enabled.
+Fetched or installed only when the corresponding CMake option, platform gate,
+or developer tool is used. Developer-only entries (e.g. the video-proof
+composer's `ffmpeg-static` and `Remotion`) are never bundled into Pulp or
+shipped in end-user plugins — Pulp commits only its own glue source and the
+packages are installed on demand via `npm`.
 
 | Name | License | Purpose | Link |
 |------|---------|---------|------|
 | **DRACO** | Apache-2.0 | Optional glTF mesh decompression; fetched only when `PULP_ENABLE_DRACO=ON` | [github.com/google/draco](https://github.com/google/draco) |
 | **Emscripten** | MIT | C++ to WebAssembly compiler (for WAMv2/WebCLAP) | [emscripten.org](https://emscripten.org) |
 | **fastgltf** | MIT | Optional native no-JS glTF/GLB parser; fetched only when `PULP_ENABLE_SCENE3D=ON` | [github.com/spnda/fastgltf](https://github.com/spnda/fastgltf) |
+| **ffmpeg-static** | Wrapper MIT; bundled FFmpeg binaries GPL/LGPL | Developer-only desktop video-proof composer (`tools/local-ci`); encodes captured frames to MP4 (a system `PULP_FFMPEG` works too). `npm`-installed on demand — never bundled or shipped in plugins | [github.com/eugeneware/ffmpeg-static](https://github.com/eugeneware/ffmpeg-static) |
 | **node-addon-api** | MIT | Node.js bindings via Node-API | [github.com/nodejs/node-addon-api](https://github.com/nodejs/node-addon-api) |
 | **pybind11** | BSD-3-Clause | Python bindings for HeadlessHost | [github.com/pybind/pybind11](https://github.com/pybind/pybind11) |
 | **react** | MIT | Peer dependency of `@pulp/react` (packages/pulp-react); npm-installed by plugin authors, never bundled into Pulp itself | [github.com/facebook/react](https://github.com/facebook/react) |
 | **react-reconciler** | MIT | Reconciler runtime wrapped by `@pulp/react` to drive `pulp::view::WidgetBridge`; npm-installed alongside the package | [github.com/facebook/react](https://github.com/facebook/react) |
+| **Remotion** | Remotion License (source-available; free under their tier, paid company license above it) | Developer-only desktop video-proof composer (`tools/local-ci`); turns automation run bundles into short annotated MP4s. `npm`-installed on demand — never bundled or shipped in plugins. Companies over Remotion's free tier need a license | [github.com/remotion-dev/remotion](https://github.com/remotion-dev/remotion) |
 | **scheduler** | MIT | Cooperative-scheduling runtime pulled in transitively by `react-reconciler` for `@pulp/react`; npm-installed | [github.com/facebook/react](https://github.com/facebook/react) |
 | **simdjson** | Apache-2.0 | JSON parser used by fastgltf; fetched only when `PULP_ENABLE_SCENE3D=ON` | [github.com/simdjson/simdjson](https://github.com/simdjson/simdjson) |
 | **three.js** | MIT | Native WebGPU bridge demos and tests; fetched only when `PULP_BUILD_TESTS` and `PULP_ENABLE_GPU` are ON | [github.com/mrdoob/three.js](https://github.com/mrdoob/three.js) |
 | **V8** | BSD-3-Clause | Optional JS engine backend, selected with `PULP_JS_ENGINE=v8` (default is QuickJS, JSC on Apple). Sealed prebuilt `libv8` (bundles ICU/zlib/Abseil internally — see NOTICE.md); fetched per-platform via `tools/scripts/fetch_v8_for_release.py`. iOS is JSC-only (V8 needs JIT) | [github.com/danielraffel/v8-builder](https://github.com/danielraffel/v8-builder) |
+
+### Developer-Only Tooling (not shipped)
+
+Building, testing, and reviewing Pulp uses developer-only tools that are **never
+bundled into Pulp or shipped in end-user plugins** — installed on demand via
+`npm`/`pip` and used under their own licenses. (The video-proof composer's
+`Remotion` and `ffmpeg-static` are listed under Optional Dependencies above.)
+Full inventory and boundary live in `DEPENDENCIES.md`.
+
+| Name | License | Purpose |
+|------|---------|---------|
+| **esbuild** | MIT | Build-time JS/TS bundler for `@pulp/react`, `pulp-import-ir`, the Figma plugin, and the Three.js bundle |
+| **TypeScript** | Apache-2.0 | Type-checking/build for the TypeScript packages and the Figma plugin |
+| **Vitest** | MIT | Unit tests for `@pulp/react` and `pulp-import-ir` |
+| **json-schema-to-typescript** | MIT | TypeScript type generation for the Figma plugin |
+| **fflate** | MIT | Deflate/zip in the developer-only Figma plugin |
+| **numpy** | BSD-3-Clause | Motion visual-analysis lane (`tools/motion/visual`) |
+| **Pillow** | HPND (BSD-style) | Image IO for the Motion visual-analysis lane |
+| **scikit-image** | BSD-3-Clause | Image metrics for the Motion visual-analysis lane |
+| **opencv-python** | Apache-2.0 | Optional affine estimation for the Motion visual-analysis lane (graceful fallback) |
+
+Type-only `@types/*` and `@figma/plugin-typings`, and environment-supplied
+prerequisites — the Rust toolchain (`cargo`/`rustc`), `yamllint` (GPL-3.0),
+`actionlint`, and Docker — are likewise developer/CI-only and never shipped.
 
 ## Standards and Specifications
 
@@ -168,6 +198,27 @@ Pulp implements or builds on these open standards:
 | [Web MIDI API](https://www.w3.org/TR/webmidi/) | W3C | Browser MIDI access |
 | [WebCLAP](https://github.com/WebCLAP) | WebCLAP | Portable CLAP plugins via WebAssembly |
 | [WebGPU](https://www.w3.org/TR/webgpu/) | W3C | GPU rendering API |
+
+Pulp's JS/React UI layer also targets the web-platform standards below. These
+are implemented as a deliberate, tracked **subset** (Pulp is Flexbox + Grid only
+by design — see the [layout model](layout-model.md)); per-property / per-API
+status lives in the project compatibility matrix, and `@pulp/react` provides a
+React-compatible renderer (via `react-reconciler`) over the same `WidgetBridge`.
+
+| Standard | Organization | Purpose |
+|----------|-------------|---------|
+| [CSS Flexible Box Layout Level 1](https://www.w3.org/TR/css-flexbox-1/) | W3C | UI layout — flexbox box model (via Yoga) |
+| [CSS Grid Layout Level 1](https://www.w3.org/TR/css-grid-1/) | W3C | UI layout — grid (partial; via Yoga) |
+| [CSS (visual properties)](https://www.w3.org/TR/CSS/) | W3C | Box model, color, typography, transform/transition subset applied to the view tree |
+| [HTML Canvas 2D Context](https://html.spec.whatwg.org/multipage/canvas.html) | WHATWG | 2D drawing API exposed to JS UIs (backed by Skia / CoreGraphics) |
+| [DOM & UI Events](https://dom.spec.whatwg.org/) | WHATWG | `document` / `Element` / event subset targeted by the JS UI layer |
+| [ECMAScript](https://tc39.es/ecma262/) | Ecma International (TC39) | JavaScript language for scripted UIs (engine-dependent: QuickJS / JSC / V8) |
+| [W3C Design Tokens (DTCG)](https://www.designtokens.org/) | W3C Community Group | Design-token interchange format (import / export) |
+| [Unicode Bidirectional Algorithm (UAX #9)](https://www.unicode.org/reports/tr9/) | Unicode Consortium | Bidirectional text layout (via SheenBidi) |
+| [glTF 2.0](https://www.khronos.org/gltf/) | Khronos Group | Optional 3D scene/asset format (Scene3D) |
+
+Google's [DESIGN.md](#design-formats-and-test-fixtures) (above) is an import
+**format**, not a standard.
 
 ## Projects That Inspired Pulp
 

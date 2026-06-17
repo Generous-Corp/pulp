@@ -4,6 +4,16 @@ Desktop automation can optionally record a short MP4 proof for macOS local
 targets. Video is for UX interactions where a still screenshot or before/after
 diff does not explain enough.
 
+!!! note "Developer convenience, not an SDK feature"
+    The video-proof composer is **developer-only tooling** in `tools/local-ci`
+    for reviewing automation runs. It is **not part of the Pulp SDK and is never
+    shipped in end-user plugins**. Pulp commits only its own glue source; the
+    third-party packages it drives — `Remotion` (source-available) and
+    `ffmpeg-static` (GPL/LGPL binaries), or a system `PULP_FFMPEG` — are
+    installed on demand via `npm` into a gitignored `node_modules`, never
+    vendored, and used under their own licenses. See
+    [licensing](licensing.md#optional-dependencies).
+
 ## Requirements
 
 - The desktop target should enable optional `video_capture`.
