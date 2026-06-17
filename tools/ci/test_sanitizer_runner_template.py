@@ -94,6 +94,15 @@ class SanitizerTemplateTests(unittest.TestCase):
         self.assertIn("--loop", args)
 
     # ── Contract 2: gate-protecting routing ──────────────────────────────────
+    def test_routes_provider_gh_off_personal_pat(self) -> None:
+        # The provider polls GitHub every VM_POLL seconds; on the shared personal
+        # PAT that is the dominant throttle. The lane MUST route through the
+        # GitHub-App CLI (TARTCI_GH_CLI=ghapp) so adding this VM to a host does
+        # not multiply the PAT throttle. (Regression: the lane shipped without
+        # this key, which would have polled on bare `gh`.)
+        self.assertEqual(self.env.get("TARTCI_GH_CLI"), "ghapp",
+                         "sanitizer lane must set TARTCI_GH_CLI=ghapp (off the PAT)")
+
     def test_dedicated_label_never_gate_pool(self) -> None:
         runner_labels = {s.strip() for s in
                          self.env["TARTCI_RUNNER_LABELS"].split(",")}
