@@ -30,6 +30,12 @@ android {
                     "-DPULP_BUILD_TESTS=OFF",
                     "-DPULP_BUILD_EXAMPLES=OFF",
                     "-DPULP_ENABLE_AUDIO_PROBES=OFF",
+                    // Dev inspector (in-plugin authoring / MCP-reachable surface)
+                    // stays out of shipped plugins. Set ON to keep it.
+                    "-DPULP_ENABLE_INSPECTOR=OFF",
+                    // Design-import authoring subsystem stays out of shipped
+                    // plugins (runtime W3C tokens kept). Set ON to keep it.
+                    "-DPULP_ENABLE_DESIGN_IMPORT=OFF",
                     "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
                 )
             }

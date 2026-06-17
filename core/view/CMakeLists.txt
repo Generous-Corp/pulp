@@ -320,6 +320,7 @@ endif()
 target_sources(pulp-view-core PRIVATE
     src/accessibility.cpp
     src/import_validation_bridge.cpp
+    src/lottie_view.cpp
     ${PULP_TEXT_ACCESSIBILITY_SOURCE}
     src/threejs_resources_stub.cpp
     src/table_model.cpp
@@ -353,26 +354,10 @@ target_sources(pulp-view-core PRIVATE
     src/ui_components.cpp
     src/context_menu.cpp
     src/scroll_bar.cpp
-    src/anchor_strategy.cpp
     src/relative_point.cpp
-    src/design_export.cpp
-    src/design_import.cpp
-    src/design_binding_metadata.cpp
-    src/design_ir_json.cpp
-    src/design_import_v0_tsx.cpp
-    src/design_import_native_common.cpp
-    src/design_cpp_codegen.cpp
-    src/design_swift_codegen.cpp
     src/css_gradient.cpp
-    src/design_tokens.cpp
-    src/design_codegen.cpp
-    src/design_fidelity.cpp
+    src/w3c_tokens.cpp
     src/widget_skin_derive.cpp
-    src/lock_to_source.cpp
-    src/jsx_lock.cpp
-    src/design_import_shortcuts.cpp
-    src/design_import_designmd.cpp
-    src/token_lock.cpp
     src/screenshot_compare.cpp
     src/screenshot_gpu.cpp
     src/app_framework.cpp
@@ -465,7 +450,6 @@ target_sources(pulp-view-script PRIVATE
     src/widget_bridge/metadata_api.cpp
     src/widget_bridge/platform_services_api.cpp
     src/widget_bridge/runtime_api.cpp
-    src/widget_bridge/runtime_import_api.cpp
     src/widget_bridge/state_binding_api.cpp
     src/widget_bridge/storage_assets_api.cpp
     src/widget_bridge/shader_api.cpp
@@ -489,9 +473,49 @@ target_sources(pulp-view-script PRIVATE
     src/widget_bridge_input.cpp
     src/hot_reload.cpp
     src/scripted_ui.cpp
-    src/claude_bundle.cpp
-    src/claude_bundle_sources.cpp
 )
+
+# ── Design-import authoring cluster (PULP_ENABLE_DESIGN_IMPORT) ───────────────
+# Importers, codegen, lock-to-source, JSX-lock, and the runtime design-import
+# opt-in. Gated out of shipped plugins; the runtime W3C token pair
+# (src/w3c_tokens.cpp) and the runtime widgets (canvas/svg/design_frame_view/
+# css_gradient/visualization/app_framework/widget_skin_derive) stay
+# always-compiled above. See planning/2026-06-15-design-import-gating-refactor.md.
+if(PULP_ENABLE_DESIGN_IMPORT)
+    target_sources(pulp-view-core PRIVATE
+        src/anchor_strategy.cpp
+        src/design_export.cpp
+        src/design_import.cpp
+        src/design_binding_metadata.cpp
+        src/design_ir_json.cpp
+        src/design_import_v0_tsx.cpp
+        src/design_import_native_common.cpp
+        src/design_cpp_codegen.cpp
+        src/design_swift_codegen.cpp
+        src/design_tokens.cpp
+        src/design_codegen.cpp
+        src/design_fidelity.cpp
+        src/lock_to_source.cpp
+        src/jsx_lock.cpp
+        src/design_import_shortcuts.cpp
+        src/design_import_designmd.cpp
+        src/token_lock.cpp
+    )
+    target_sources(pulp-view-script PRIVATE
+        src/widget_bridge/runtime_import_api.cpp
+        src/claude_bundle.cpp
+        src/claude_bundle_sources.cpp
+    )
+    target_compile_definitions(pulp-view-core PUBLIC PULP_HAS_DESIGN_IMPORT=1)
+    target_compile_definitions(pulp-view-script PUBLIC PULP_HAS_DESIGN_IMPORT=1)
+else()
+    # No-op WidgetBridge::install_runtime_import_handlers() so callers still link.
+    target_sources(pulp-view-script PRIVATE
+        src/widget_bridge/runtime_import_api_stub.cpp
+    )
+    target_compile_definitions(pulp-view-core PUBLIC PULP_HAS_DESIGN_IMPORT=0)
+    target_compile_definitions(pulp-view-script PUBLIC PULP_HAS_DESIGN_IMPORT=0)
+endif()
 
 # WebView support — compiled separately to avoid platform WebView runtime
 # auto-loading in plugin hosts. Only link into standalone apps, not
@@ -758,7 +782,12 @@ elseif(UNIX)
         target_sources(pulp-view-core PRIVATE src/screenshot_skia.cpp)
         find_package(X11)
         if(X11_FOUND)
-            target_sources(pulp-view-core PRIVATE platform/linux/plugin_view_host_linux.cpp)
+            target_sources(pulp-view-core PRIVATE
+                platform/linux/plugin_view_host_linux.cpp
+                # Standalone outbound file-drag backend (free begin_file_drag via
+                # XDND source). Gated with PULP_HAS_X11 so the drag_drop.cpp no-op
+                # drops out only when this real backend is compiled.
+                platform/linux/drag_drop_linux.cpp)
             target_link_libraries(pulp-view-core PRIVATE ${X11_LIBRARIES})
             target_include_directories(pulp-view-core PRIVATE ${X11_INCLUDE_DIR})
             target_compile_definitions(pulp-view-core PRIVATE PULP_HAS_X11=1)

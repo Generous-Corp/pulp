@@ -351,6 +351,38 @@ xcodebuild test -project ... -scheme AUv3Tests -sdk iphonesimulator
   `dismantleUIViewController(_:coordinator:)` hook, and capture the
   container VC weakly inside the closure as a second layer of safety.
 
+### Native drag-and-drop (UIDrop/UIDrag)
+
+- **iOS drag-and-drop is interaction-based, not the AppKit `NSDraggingSession`
+  model.** `plugin_view_host_ios.mm` installs a `PulpIOSDragDrop` coordinator
+  (conforms to `UIDropInteractionDelegate` + `UIDragInteractionDelegate`) on
+  BOTH host views (`PulpPluginUIView` CPU + `PulpMetalPluginView` GPU), bridging
+  to the same cross-platform dispatch core (`dispatch_drag_*` / `dispatch_drop`)
+  the mac/win/linux hosts use.
+- **`start_file_drag()` ARMS, it does not start.** UIKit begins a drag only from
+  the system long-press lift, which calls
+  `dragInteraction:itemsForBeginningSession:`. So `PluginViewHost::start_file_drag`
+  on iOS stages the `FileDragRequest.file_paths` and returns true; the next lift
+  consumes them (`itemsForBeginningSession` returns `@[]` when nothing is armed,
+  so no stray drags). This differs from AppKit, where `begin_file_drag` starts a
+  drag synchronously inside the mouse handler. A Pulp widget that wants outbound
+  drag must call `start_file_drag` during its own long-press handling.
+- **Drop coordinate transform differs by host.** The drop point
+  (`[session locationInView:hostView]`) is root-space directly on the CPU host
+  (identity transform) but must go through the Metal view's **live**
+  `pointTransform` (the inverse design-viewport map touches use) on the GPU host
+  — pass a block capturing the view weakly, not the transform value, so a
+  design-viewport change between install and drop is honoured.
+- **`performDrop` completion runs on the main queue** (UIKit guarantee), so it
+  touches the view tree safely — but capture the coordinator **weakly** and
+  re-check the root pointer inside the block: an async `loadObjectsOfClass:`
+  completion can outlive the host. The coordinator's `invalidate` (called from
+  both host dtors) nils the root so a late completion is a no-op.
+- **No headless test** — UIKit drag/drop is gesture-driven and can't be exercised
+  by the macOS Catch2 suite; validated by local Simulator compile
+  (`clang -fsyntax-only -target arm64-apple-ios…-simulator`) + manual gesture.
+  Same gesture-untestable category as touch input.
+
 ### Accessibility
 
 - `UIAccessibility` is the iOS equivalent of NSAccessibility. `accessibility_ios.mm`

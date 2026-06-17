@@ -162,10 +162,12 @@ class TestMain(unittest.TestCase):
         )
         if not template.is_file():
             self.skipTest(f"Android template missing at {template}")
-        self.assertIn(
-            "-DPULP_ENABLE_AUDIO_PROBES=OFF",
-            template.read_text(encoding="utf-8"),
-        )
+        text = template.read_text(encoding="utf-8")
+        self.assertIn("-DPULP_ENABLE_AUDIO_PROBES=OFF", text)
+        # Authoring strip: shipped plugins build without the dev inspector or
+        # the design-import authoring subsystem.
+        self.assertIn("-DPULP_ENABLE_INSPECTOR=OFF", text)
+        self.assertIn("-DPULP_ENABLE_DESIGN_IMPORT=OFF", text)
 
     def test_fails_on_missing_root(self) -> None:
         rc = vct.main(["--templates-root", "/nonexistent/path/xyz"])

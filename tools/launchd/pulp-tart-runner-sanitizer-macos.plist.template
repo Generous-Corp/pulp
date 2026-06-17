@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Dedicated Tart macOS Sanitizer supervisor (#4101).
+
+  Runs ONE advisory sanitizer leg (the TSan pilot; ASan/UBSan stay on macos-15
+  until a per-sanitizer capacity go/no-go clears each) on a local ephemeral VM,
+  the same home-path `tartci serve macos` shape as the build/gate runner.
+
+  ── PARKED BY DEFAULT — do NOT load this until BOTH are true ──────────────────
+    1. The tartci priority-aware idle gate is installed on this host (the
+       provider honours TARTCI_YIELD_TO_WORKFLOW_NAME / TARTCI_YIELD_TO_LABELS;
+       the `print-priority-demand` preflight exists). Re-sync tartci into
+       $HOME/.local/share/tartci first.
+    2. The host is in a quiet window (no hosted-runner storm) and the required
+       `macos` gate supervisor is confirmed healthy.
+  Until then this template ships installed-but-not-loaded, exactly like the
+  coverage plist sits parked. The repo-variable flip
+  (PULP_SANITIZER_TSAN_RUNS_ON_JSON) happens only AFTER a green
+  workflow_dispatch proof on this lane.
+
+  ── Why this is safe where the coverage lane was not (the 2026-06-16 lesson) ──
+  macOS allows only TWO running macOS guests per host (Apple's limit). Both
+  belong to the required `macos` build gate. The coverage lane took a third
+  conceptual slot: it shared TART_HOME with the gate, booted whenever the host
+  was idle, and then HELD a slot for ~1h — throttling the required gate to one
+  VM and ultimately wedging it. Backed out.
+
+  Two design choices prevent a repeat here:
+
+  - SHARED TART_HOME=$HOME/VMs (same store the gate runner uses). This keeps the
+    `running_macos_vms` count a TRUE host-wide semaphore, so gate + sanitizer can
+    never exceed Apple's 2-guest cap. (A *separate* store would hide this lane
+    from the gate's count and let total guests reach 3 → the 3rd `tart run`
+    fails. Sharing the store + the golden — pulp-build-runner:latest already
+    lives here — is correct AND avoids duplicating the ~150GB golden.)
+
+  - IDLE GATE via the tartci provider: TARTCI_YIELD_TO_WORKFLOW_NAME +
+    TARTCI_YIELD_TO_LABELS make this lane yield to the required gate. It boots
+    only when (a) it has queued "Sanitizer Tests" work, (b) a VM slot is free
+    (cap=1), AND (c) the "Build and Test" gate has NO queued/in-progress work.
+    Under a storm the gate always has work → this lane never boots → the gate
+    keeps both slots. In a genuine idle window it runs; if a gate burst arrives
+    mid-run the gate still gets ≥1 slot immediately and reclaims the 2nd when the
+    (single, advisory) sanitizer job finishes.
+
+  Like the coverage runner, this is intentionally separate from the gate runner:
+  - labels use pulp-sanitizer-vm-macos, never pulp-build / pulp-build-vm
+  - the queue gate wakes for the "Sanitizer Tests" workflow
+  - repo routing uses PULP_SANITIZER_TSAN_RUNS_ON_JSON, not Namespace vars
+  - TARTCI_MACOS_VM_CAP=1: one VM, and the idle gate yields it to the required
+    `macos` gate.
+
+  Prereq: install tartci into $HOME (provides $HOME/.local/bin/tartci) and keep
+  the macOS golden under $HOME/VMs — same as the build runner.
+
+  Install (launchd does not expand shell variables, so the install sed must
+  write absolute paths):
+
+    sed -e "s|\$HOME|$HOME|g" \
+      tools/launchd/pulp-tart-runner-sanitizer-macos.plist.template \
+      > ~/Library/LaunchAgents/com.danielraffel.pulp.tart-runner-sanitizer-macos.plist
+
+  Load:   launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.danielraffel.pulp.tart-runner-sanitizer-macos.plist
+  Stop:   launchctl bootout   gui/$(id -u)/com.danielraffel.pulp.tart-runner-sanitizer-macos
+
+  Reboot durability: RunAtLoad + KeepAlive keep this alive across crashes and
+  logins, but as a gui-domain LaunchAgent it only (re)loads after the console
+  user session is unlocked — on a FileVault-encrypted host it will NOT start
+  until someone unlocks the screen after a cold boot. Same caveat as the gate /
+  coverage / release runners; not unique to this lane.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.danielraffel.pulp.tart-runner-sanitizer-macos</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>$HOME/.local/bin/tartci</string>
+        <string>serve</string>
+        <string>macos</string>
+        <string>--loop</string>
+        <string>--labels</string>
+        <string>self-hosted,macOS,ARM64,pulp-sanitizer-vm-macos</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>$HOME</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>$HOME/Library/Logs/tartci/tart-runner-sanitizer-macos.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>$HOME/Library/Logs/tartci/tart-runner-sanitizer-macos.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>$HOME</string>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>TART_HOME</key>
+        <string>$HOME/VMs</string>
+        <key>TARTCI_CI_CACHE</key>
+        <string>$HOME/.cache/pulp-ci</string>
+        <key>TARTCI_HOME</key>
+        <string>$HOME/.tartci</string>
+        <key>TARTCI_MACOS_GOLDEN</key>
+        <string>pulp-build-runner:latest</string>
+        <key>TARTCI_MACOS_VM_CAP</key>
+        <string>1</string>
+        <key>TARTCI_RUNNER_LABELS</key>
+        <string>self-hosted,macOS,ARM64,pulp-sanitizer-vm-macos</string>
+        <key>TARTCI_RUNNER_REPO</key>
+        <string>danielraffel/pulp</string>
+        <key>TARTCI_RUNNER_WORKFLOW_NAME</key>
+        <string>Sanitizer Tests</string>
+        <key>TARTCI_YIELD_TO_WORKFLOW_NAME</key>
+        <string>Build and Test</string>
+        <key>TARTCI_YIELD_TO_LABELS</key>
+        <string>self-hosted,macOS,ARM64,pulp-build,pulp-build-vm</string>
+    </dict>
+</dict>
+</plist>
