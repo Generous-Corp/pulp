@@ -29,6 +29,7 @@
 
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/view/plugin_view_host.hpp>
+#include <pulp/view/text_editor.hpp>
 #include <pulp/view/view.hpp>
 
 #if defined(__APPLE__)
@@ -244,6 +245,129 @@ TEST_CASE("PluginViewHost (mac CPU) — focus is scoped per editor; a second "
         hostB->detach();
         hostA.reset();
         hostB.reset();
+        [window close];
+    }
+}
+
+// ── Hosted text-input key routing ────────────────────────────────────────────
+//
+// The embedded (AU/DAW) view must route keys like the standalone host does:
+//   • arrow keys NAVIGATE — they must NOT also be inserted as text. macOS
+//     reports arrows as private-use codepoints (0xF700–0xF8FF), so a naive
+//     "insert event.characters" path types tofu (□) into the field on every
+//     arrow press (the bug that motivated this file's key-routing fixes).
+//   • Shift+arrow EXTENDS the selection.
+//   • Printable keys insert.
+//   • ⌘A / ⌘C / ⌘V / ⌘X / ⌘Z arrive via performKeyEquivalent: (the host eats
+//     them otherwise) and must reach the focused editor — here, ⌘A select-all.
+//
+// Driven through the real -keyDown:/-performKeyEquivalent: overrides with
+// synthesized NSEvents, so this pins the actual hosted-view code path headless,
+// with no DAW.
+namespace {
+
+NSEvent* make_key_event(unsigned short keyCode,
+                        NSEventModifierFlags mods,
+                        NSString* chars) {
+    return [NSEvent keyEventWithType:NSEventTypeKeyDown
+                           location:NSZeroPoint
+                      modifierFlags:mods
+                          timestamp:0
+                       windowNumber:0
+                            context:nil
+                         characters:chars
+        charactersIgnoringModifiers:chars
+                          isARepeat:NO
+                            keyCode:keyCode];
+}
+
+// macOS function-key codepoints (what -[NSEvent characters] returns for arrows).
+constexpr unichar kNSLeftArrow = 0xF702;
+constexpr unichar kNSRightArrow = 0xF703;
+
+}  // namespace
+
+TEST_CASE("PluginViewHost (mac CPU) — hosted key routing: arrows navigate "
+          "without inserting tofu, ⌘A selects all, printable keys insert",
+          "[plugin-view-host][key-routing][mac][cpu]") {
+    @autoreleasepool {
+        FocusGuard guard;
+
+        NSWindow* window =
+            [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 400, 200)
+                                        styleMask:NSWindowStyleMaskBorderless
+                                          backing:NSBackingStoreBuffered
+                                            defer:NO];
+        if (!window || !window.contentView) {
+            SUCCEED("No Cocoa window — hosted key-routing test skipped.");
+            return;
+        }
+
+        View root;
+        PluginViewHost::Options opts;
+        opts.size = {400u, 200u};
+        opts.use_gpu = false;
+        auto host = PluginViewHost::create(root, opts);
+        REQUIRE(host != nullptr);
+        host->attach_to_parent((__bridge void*)window.contentView);
+
+        NSView* pulp_view = find_pulp_plugin_view(window.contentView);
+        REQUIRE(pulp_view != nil);
+
+        // A focused single-line editor inside the host's root tree.
+        auto editor_owned = std::make_unique<TextEditor>();
+        TextEditor* editor = editor_owned.get();
+        editor->set_text("abc");
+        root.add_child(std::move(editor_owned));
+        editor->claim_input_focus();
+        editor->set_caret_pos(0);
+        REQUIRE(View::focused_input_ == editor);
+
+        SECTION("right arrow moves the caret and inserts NO character") {
+            [pulp_view keyDown:make_key_event(
+                124, 0,
+                [NSString stringWithCharacters:&kNSRightArrow length:1])];
+            // The bug: the arrow's private-use codepoint got inserted as text.
+            REQUIRE(editor->text() == "abc");
+            REQUIRE(editor->caret_pos() == 1);
+            REQUIRE_FALSE(editor->has_selection());
+        }
+
+        SECTION("shift+right extends the selection, still no insertion") {
+            [pulp_view keyDown:make_key_event(
+                124, NSEventModifierFlagShift,
+                [NSString stringWithCharacters:&kNSRightArrow length:1])];
+            REQUIRE(editor->text() == "abc");
+            REQUIRE(editor->has_selection());
+        }
+
+        SECTION("left arrow at start stays put and inserts nothing") {
+            [pulp_view keyDown:make_key_event(
+                123, 0,
+                [NSString stringWithCharacters:&kNSLeftArrow length:1])];
+            REQUIRE(editor->text() == "abc");
+            REQUIRE(editor->caret_pos() == 0);
+        }
+
+        SECTION("printable key inserts text") {
+            editor->set_caret_pos(3);  // end
+            [pulp_view keyDown:make_key_event(7, 0, @"x")];  // keyCode 7 = 'x'
+            REQUIRE(editor->text() == "abcx");
+        }
+
+        SECTION("⌘A selects all via performKeyEquivalent") {
+            editor->set_caret_pos(0);
+            NSEvent* cmd_a =
+                make_key_event(0, NSEventModifierFlagCommand, @"a");  // 0 = 'a'
+            REQUIRE([pulp_view performKeyEquivalent:cmd_a] == YES);
+            REQUIRE(editor->has_selection());
+            auto [start, end] = editor->selection_range();
+            REQUIRE(start == 0);
+            REQUIRE(end == 3);
+        }
+
+        host->detach();
+        host.reset();
         [window close];
     }
 }
