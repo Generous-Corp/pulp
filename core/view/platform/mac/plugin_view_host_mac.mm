@@ -6,6 +6,7 @@
 #include <pulp/canvas/cg_canvas.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/view/input_events.hpp>
+#include <pulp/view/text_editor.hpp>  // focus-release affordance: single-line check
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/window_host.hpp>  // compute_design_viewport_transform
@@ -127,6 +128,10 @@ pulp::view::Point pulp_plugin_local_point(NSView* self, NSEvent* event) {
     return pulp::view::Point{static_cast<float>(p.x), h - static_cast<float>(p.y)};
 }
 
+// Forward declaration (defined below): the currently-focused input widget IF it
+// belongs to `root`'s tree, else nullptr. Used by the mouse-down focus protocol.
+static pulp::view::View* pulp_focus_under_root(pulp::view::View* root);
+
 // Dispatched handlers (on_click / on_mouse_* / on_pointer_event / on_drag) are
 // std::function callbacks — for a scripted UI they reach into the JS bridge and
 // CAN throw. If a C++ exception unwinds out of these functions it crosses the
@@ -142,7 +147,26 @@ void pulp_plugin_mouse_down(pulp::view::View* root, NSEvent* event,
     if (!*drag_target) return;
     using namespace pulp::view::mac_geometry;
     auto local = to_local(pt, *drag_target, root);
-    if ((*drag_target)->focusable()) (*drag_target)->claim_input_focus();
+    // Focus-change protocol — mirror the standalone host (window_host_mac.mm).
+    // Claiming input focus alone (the old behavior) routed typing to the widget
+    // but never set its VISUAL focus state, so an embedded text field showed no
+    // highlight border and no blinking caret in a DAW. Run the full protocol:
+    // blur the previously-focused widget, then focus the new one via
+    // on_focus_changed(true) (sets has_focus_ → border + caret-blink clock) and
+    // claim_input_focus (routes text). Scoped to THIS root (focused_input_ is
+    // process-global; never touch another open editor's focus).
+    {
+        auto* prev = pulp_focus_under_root(root);
+        if ((*drag_target)->focusable()) {
+            if (prev && prev != *drag_target) prev->on_focus_changed(false);
+            (*drag_target)->on_focus_changed(true);
+            (*drag_target)->claim_input_focus();
+        } else if (prev) {
+            // A click on a non-focusable target commits/closes any open type-in.
+            prev->on_focus_changed(false);
+            prev->release_input_focus();
+        }
+    }
 
     pulp::view::MouseEvent me;
     me.position = local;
@@ -313,6 +337,26 @@ bool pulp_plugin_key_down(pulp::view::View* root, NSEvent* event) {
                 te.text = chars.UTF8String;
                 fv->on_text_input(te);
             }
+        }
+    }
+
+    // Focus-release affordance — hand the keyboard back to the DAW. While a text
+    // field holds focus the editor view is first responder, so transport keys
+    // (Space, R, …) go to the field, not the host. Escape blurs any focused
+    // input; Tab/Return blur a single-line field (Return having just committed
+    // via on_return). Once focus clears, the caller's syncKeyFocus restores the
+    // host's prior first responder, so DAW shortcuts work again until the user
+    // re-focuses the field. (pulp: AU hosted-view key routing.)
+    {
+        bool blur = (ke.key == pulp::view::KeyCode::escape);
+        if (!blur && (ke.key == pulp::view::KeyCode::tab ||
+                      ke.key == pulp::view::KeyCode::enter)) {
+            auto* te = dynamic_cast<pulp::view::TextEditor*>(fv);
+            if (te && !te->multi_line) blur = true;
+        }
+        if (blur) {
+            fv->on_focus_changed(false);
+            fv->release_input_focus();
         }
     }
     root->request_repaint();

@@ -372,4 +372,104 @@ TEST_CASE("PluginViewHost (mac CPU) — hosted key routing: arrows navigate "
     }
 }
 
+// ── Focus affordance + release ───────────────────────────────────────────────
+//
+// Two host-keyboard-etiquette contracts the embedded view must honor:
+//   #1 A click that focuses a text field must set its VISUAL focus state
+//      (has_focus() → highlight border + blinking caret), not only route text.
+//      The old path called claim_input_focus() alone, so a DAW-embedded field
+//      took typing but showed no highlight/caret.
+//   #3 Escape (any input) and Tab/Return (single-line) must BLUR the field so
+//      focus_input clears — the host view then hands the keyboard back and DAW
+//      transport keys (Space/R) work again until the field is re-focused.
+namespace {
+
+NSEvent* make_left_mouse_down(NSPoint loc) {
+    return [NSEvent mouseEventWithType:NSEventTypeLeftMouseDown
+                             location:loc
+                        modifierFlags:0
+                            timestamp:0
+                         windowNumber:0
+                              context:nil
+                          eventNumber:0
+                           clickCount:1
+                             pressure:1.0];
+}
+
+}  // namespace
+
+TEST_CASE("PluginViewHost (mac CPU) — a click sets the field's visual focus "
+          "(has_focus), and Escape/Return blur it to return the keyboard",
+          "[plugin-view-host][focus-affordance][mac][cpu]") {
+    @autoreleasepool {
+        FocusGuard guard;
+
+        NSWindow* window =
+            [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 400, 200)
+                                        styleMask:NSWindowStyleMaskBorderless
+                                          backing:NSBackingStoreBuffered
+                                            defer:NO];
+        if (!window || !window.contentView) {
+            SUCCEED("No Cocoa window — focus-affordance test skipped.");
+            return;
+        }
+
+        View root;
+        PluginViewHost::Options opts;
+        opts.size = {400u, 200u};
+        opts.use_gpu = false;
+        auto host = PluginViewHost::create(root, opts);
+        REQUIRE(host != nullptr);
+        host->attach_to_parent((__bridge void*)window.contentView);
+        NSView* pulp_view = find_pulp_plugin_view(window.contentView);
+        REQUIRE(pulp_view != nil);
+
+        // A single-line editor filling the root so any in-bounds click hits it.
+        auto editor_owned = std::make_unique<TextEditor>();
+        TextEditor* editor = editor_owned.get();
+        editor->multi_line = false;
+        editor->set_text("hello");
+        editor->set_bounds({0, 0, 400, 200});
+        root.add_child(std::move(editor_owned));
+
+        SECTION("#1 click focuses the field — has_focus() becomes true") {
+            REQUIRE_FALSE(editor->has_focus());
+            [pulp_view mouseDown:make_left_mouse_down(NSMakePoint(200, 100))];
+            REQUIRE(View::focused_input_ == editor);  // text routing
+            REQUIRE(editor->has_focus());             // visual: border + caret
+        }
+
+        SECTION("#3 Escape blurs the focused field → keyboard returns to host") {
+            editor->on_focus_changed(true);
+            editor->claim_input_focus();
+            REQUIRE(editor->has_focus());
+            [pulp_view keyDown:make_key_event(53, 0, @"\x1b")];  // 53 = Escape
+            REQUIRE_FALSE(editor->has_focus());
+            REQUIRE(View::focused_input_ == nullptr);
+        }
+
+        SECTION("#3 Return blurs a single-line field but NOT a multi-line one") {
+            editor->on_focus_changed(true);
+            editor->claim_input_focus();
+            [pulp_view keyDown:make_key_event(36, 0, @"\r")];  // 36 = Return
+            REQUIRE_FALSE(editor->has_focus());  // single-line: committed + blurred
+
+            // Multi-line editor: Return inserts a newline, focus is retained.
+            auto ml_owned = std::make_unique<TextEditor>();
+            TextEditor* ml = ml_owned.get();
+            ml->multi_line = true;
+            ml->set_bounds({0, 0, 400, 200});
+            root.add_child(std::move(ml_owned));
+            ml->on_focus_changed(true);
+            ml->claim_input_focus();
+            [pulp_view keyDown:make_key_event(36, 0, @"\r")];
+            REQUIRE(ml->has_focus());  // multi-line keeps focus on Return
+        }
+
+        host->detach();
+        host.reset();
+        [window close];
+    }
+}
+
 #endif  // __APPLE__
