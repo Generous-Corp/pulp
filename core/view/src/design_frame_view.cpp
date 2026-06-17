@@ -585,7 +585,7 @@ void DesignFrameView::paint(canvas::Canvas& canvas) {
         if (e.kind != DesignFrameElement::Kind::value_label || e.text.empty()) continue;
         const float font = e.h * t.scale * 0.82f;  // ~rect height, like the baked glyph
         canvas.set_font("Inter", font);
-        canvas.set_fill_color(canvas::Color::rgba8(0xF3, 0xF6, 0xF9, 0xff));
+        canvas.set_fill_color(canvas::Color::rgba8(0xF3, 0xF6, 0xF9, 0xff));  // faithful readout ink  token-lint:allow
         const float tw = canvas.measure_text(e.text);
         const float rx = t.ox + (e.x - panel_x_) * t.scale;
         const float ry = t.oy + (e.y - panel_y_) * t.scale;
