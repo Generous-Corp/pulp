@@ -35,8 +35,11 @@ std::string note_name(int midi) {
 
 int main(int argc, char** argv) {
     const char* screenshot = nullptr;
-    for (int i = 1; i < argc; ++i)
+    int octave = 0;   // --octave N pre-shifts the octave (for render proofs)
+    for (int i = 1; i < argc; ++i) {
         if (!std::strcmp(argv[i], "--screenshot") && i + 1 < argc) screenshot = argv[++i];
+        else if (!std::strcmp(argv[i], "--octave") && i + 1 < argc) octave = std::atoi(argv[++i]);
+    }
 
     auto kb = std::make_unique<MusicalTypingKeyboard>();
     kb->set_theme(pulp::design::ink_signal_theme(/*dark=*/true));
@@ -45,6 +48,13 @@ int main(int argc, char** argv) {
     kb->on_pitch_bend = [](float b)      { std::printf("pitch bend %+.2f\n", b); };
     kb->on_sustain    = [](bool on)      { std::printf("sustain %s\n", on ? "on" : "off"); };
     kb->on_modulation = [](float a)      { std::printf("modulation %.2f\n", a); };
+
+    // Drive the octave the real way (z/x key events) so the readout label AND the
+    // overview highlight both reflect it — used for render proofs of #80.
+    for (int k = 0; k < std::abs(octave); ++k) {
+        KeyEvent e{}; e.key = octave > 0 ? KeyCode::x : KeyCode::z; e.is_down = true;
+        kb->on_key_event(e);
+    }
 
     const float w = kb->panel_width(), h = kb->panel_height();
 

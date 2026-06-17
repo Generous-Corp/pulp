@@ -537,6 +537,69 @@ TEST_CASE("MusicalTypingKeyboard: a command-button click plays no note",
     REQUIRE(ons.empty());
 }
 
+// ── Overview-strip octave control (#80): drag to set the octave, snap to C ──
+// bounds == panel → scale 1, origin (0,0), so panel coords map 1:1 to clicks.
+// Typing strip rest_center≈348.24, px/oct≈37.0 (travel/4). Each octave step is
+// a C boundary, so the snap == "always lands on a C range".
+
+TEST_CASE("MusicalTypingKeyboard: dragging the overview strip sets the octave (snap-C)",
+          "[view][musical-typing][overview]") {
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    std::vector<int> ons;
+    kb.on_note_on = [&](int n, float) { ons.push_back(n); };
+
+    // Press on the strip ~2 octaves right of centre (348.24 + 2*37 ≈ 422), y in
+    // the highlight band (21..45). Snaps to octave +2; plays no note.
+    kb.on_mouse_down({422.0f, 33.0f});
+    REQUIRE(kb.controller().octave_shift() == 2);
+    REQUIRE(ons.empty());
+    // 'a' now sounds C4 (48 + 24).
+    KeyEvent a{}; a.key = KeyCode::a; a.is_down = true; kb.on_key_event(a);
+    REQUIRE(ons.back() == 72);
+
+    // Drag far left → clamps to −4 (C-2 = 48 − 48 = MIDI 0).
+    kb.on_mouse_drag({120.0f, 33.0f});
+    REQUIRE(kb.controller().octave_shift() == -4);
+    // Drag far right → clamps to +4.
+    kb.on_mouse_drag({700.0f, 33.0f});
+    REQUIRE(kb.controller().octave_shift() == 4);
+    kb.on_mouse_up({700.0f, 33.0f});
+}
+
+TEST_CASE("MusicalTypingKeyboard: the overview highlight is coupled to z/x + the arrows",
+          "[view][musical-typing][overview]") {
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    // z/x move the same octave the strip shows.
+    KeyEvent x{}; x.key = KeyCode::x; x.is_down = true; kb.on_key_event(x);
+    REQUIRE(kb.controller().octave_shift() == 1);
+    // The < > arrows (on_action octave_up/down) too — > arrow at (550,23,22,24).
+    kb.on_mouse_down({561.0f, 35.0f}); kb.on_mouse_up({561.0f, 35.0f});
+    REQUIRE(kb.controller().octave_shift() == 2);
+}
+
+TEST_CASE("MusicalTypingKeyboard: the overview strip shows a grab cursor",
+          "[view][musical-typing][overview]") {
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    kb.on_hover_move({400.0f, 33.0f});          // over the strip band
+    REQUIRE(kb.cursor() == View::CursorStyle::grab);
+    kb.on_hover_move({400.0f, 300.0f});         // over the keys, not the strip
+    REQUIRE(kb.cursor() == View::CursorStyle::default_);
+    kb.on_mouse_down({400.0f, 33.0f});          // grabbing while dragging
+    REQUIRE(kb.cursor() == View::CursorStyle::grabbing);
+    kb.on_mouse_up({400.0f, 33.0f});
+}
+
+TEST_CASE("MusicalTypingKeyboard: a strip click does not play or light a key",
+          "[view][musical-typing][overview]") {
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    std::vector<int> ons;
+    kb.on_note_on = [&](int n, float) { ons.push_back(n); };
+    kb.on_mouse_down({350.0f, 33.0f});          // dead-centre of the strip
+    kb.on_mouse_up({350.0f, 33.0f});
+    REQUIRE(ons.empty());
+    REQUIRE(kb.controller().octave_shift() == 0);   // centre ⇒ octave 0
+}
+
 TEST_CASE("MusicalTypingKeyboard: a mode toggle reports the new intrinsic size",
           "[view][musical-typing][toggle]") {
     auto kbp = make_playable_kb(); auto& kb = *kbp;

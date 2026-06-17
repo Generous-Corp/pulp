@@ -1,4 +1,5 @@
 #include <pulp/view/musical_typing_keyboard.hpp>
+#include <pulp/canvas/canvas.hpp>
 #include <pulp/runtime/base64.hpp>
 
 #include <algorithm>
@@ -21,6 +22,17 @@ std::string decode(const char* b64) {
     if (auto bytes = runtime::base64_decode(b64))
         return std::string(bytes->begin(), bytes->end());
     return {};
+}
+
+// Decode an embedded SVG and remove the BAKED teal overview-highlight box (a
+// filtered <g> whose first drawn coord is the box's top-left). The live overlay
+// (MusicalTypingKeyboard::paint) owns that highlight so it can move with the
+// octave — a frozen baked box can't. `box_x` is the box left edge in panel
+// coords (typing 306.68, piano 331.008); the box top sits at y≈21–24.
+std::string decode_no_strip_box(const char* b64, float box_x) {
+    std::string svg = decode(b64);
+    suppress_svg_glow_at(svg, box_x - 1.5f, 20.0f, 5.0f, 6.0f);
+    return svg;
 }
 
 // The two 🎹/⌨ toggle icon-buttons baked into BOTH mode frames' toolbars, in
@@ -191,10 +203,10 @@ std::vector<DesignFrameElement> build_piano_frame() {
 MusicalTypingKeyboard::MusicalTypingKeyboard()
     // Frame 0 = typing mode (732×266). Pass the panel explicitly = the whole
     // frame so the standalone export shows edge-to-edge (no detect_panel guess).
-    : DesignFrameView(decode(detail::musical_typing_typing_svg_b64()),
+    : DesignFrameView(decode_no_strip_box(detail::musical_typing_typing_svg_b64(), 306.68f),
                       build_typing_frame(), 0, 0, 732, 266) {
     // Frame 1 = piano mode (732×176).
-    add_frame(decode(detail::musical_typing_piano_svg_b64()),
+    add_frame(decode_no_strip_box(detail::musical_typing_piano_svg_b64(), 331.008f),
               build_piano_frame(), 0, 0, 732, 176);
 
     set_focusable(true);            // accept computer-keyboard focus for typing
@@ -236,7 +248,8 @@ MusicalTypingKeyboard::MusicalTypingKeyboard()
         else if (a == "octave_up")  controller_.set_octave_shift(controller_.octave_shift() + 1);
         else if (a == "vel_down")   controller_.velocity = std::clamp(controller_.velocity - kVelStep, 0.0f, 1.0f);
         else if (a == "vel_up")     controller_.velocity = std::clamp(controller_.velocity + kVelStep, 0.0f, 1.0f);
-        update_readouts();   // reflect the new octave / velocity value
+        update_readouts();    // reflect the new octave / velocity value
+        request_repaint();    // move the overview highlight if the octave changed
     };
 
     controller_.velocity = 98.0f / 127.0f;  // match the design's "VEL 98" default
@@ -398,8 +411,9 @@ bool MusicalTypingKeyboard::on_key_event(const KeyEvent& event) {
         if (event.is_down && !event.is_repeat) light_typing_semitone(semi, true);
         else if (!event.is_down)               light_typing_semitone(semi, false);
     }
-    // z/x (octave) and c/v (velocity) change controller state the readouts show.
-    if (consumed && semi < 0) update_readouts();
+    // z/x (octave) and c/v (velocity) change controller state the readouts show;
+    // octave also moves the overview highlight.
+    if (consumed && semi < 0) { update_readouts(); request_repaint(); }
     return consumed;
 }
 
@@ -438,6 +452,125 @@ int MusicalTypingKeyboard::midi_for_element(int index) const {
 void MusicalTypingKeyboard::light_typing_semitone(int semitone, bool on) {
     const int i = typing_element_for_semitone(semitone);
     if (i >= 0) { set_element_value(i, on ? 1.0f : 0.0f); request_repaint(); }
+}
+
+// ── Overview-strip octave control ───────────────────────────────────────────
+
+bool MusicalTypingKeyboard::strip_geom(StripGeom& g) const {
+    // Strip outline + teal-box geometry read from the faithful export (panel
+    // coords). box_y/box_h are the rounded highlight's vertical band.
+    if (active_frame() == kTypingFrame)
+        g = {151.0f, 537.938f, 83.117f, 21.0f, 24.0f, 348.24f, 0.0f};
+    else  // piano strip is wider
+        g = {151.0f, 598.180f, 95.859f, 21.0f, 24.0f, 378.94f, 0.0f};
+    // Fit the controller's ±4-octave range symmetrically within the box's travel
+    // (the smaller of the left/right slack keeps it inside the strip both ways).
+    const float half_box = g.box_w * 0.5f;
+    const float left  = g.rest_center - (g.strip_x0 + half_box);
+    const float right = (g.strip_x1 - half_box) - g.rest_center;
+    g.px_per_octave = std::min(left, right) / 4.0f;
+    return true;
+}
+
+float MusicalTypingKeyboard::octave_box_left(const StripGeom& g, int shift) {
+    return g.rest_center + static_cast<float>(shift) * g.px_per_octave - g.box_w * 0.5f;
+}
+
+bool MusicalTypingKeyboard::point_over_strip(Point pos, const StripGeom& g,
+                                             float& panel_x) const {
+    const auto t = panel_transform(local_bounds());
+    if (t.scale <= 0.0f) return false;
+    const float px = (pos.x - t.ox) / t.scale;   // panel origin is (0,0)
+    const float py = (pos.y - t.oy) / t.scale;
+    panel_x = px;
+    constexpr float pad = 3.0f;
+    return px >= g.strip_x0 && px <= g.strip_x1 &&
+           py >= g.box_y - pad && py <= g.box_y + g.box_h + pad;
+}
+
+int MusicalTypingKeyboard::octave_for_strip_x(float panel_x, const StripGeom& g) {
+    const float steps = (panel_x - g.rest_center) / g.px_per_octave;
+    return std::clamp(static_cast<int>(std::lround(steps)), -4, 4);
+}
+
+void MusicalTypingKeyboard::paint(canvas::Canvas& canvas) {
+    DesignFrameView::paint(canvas);   // faithful SVG + key/control highlights
+    StripGeom g;
+    if (!strip_geom(g)) return;
+    const auto t = panel_transform(local_bounds());
+    if (t.scale <= 0.0f) return;
+    // The live highlight: a teal rounded rect at the octave-driven position,
+    // matching the design's box (15% teal fill + full-teal hairline border; a
+    // touch brighter while dragging). The baked box was suppressed at load.
+    const float vx = t.ox + octave_box_left(g, controller_.octave_shift()) * t.scale;
+    const float vy = t.oy + g.box_y * t.scale;
+    const float vw = g.box_w * t.scale, vh = g.box_h * t.scale;
+    const float r  = 3.0f * t.scale;
+    const auto teal = resolve_color("accent.primary", canvas::Color::rgba8(22, 218, 194));
+    canvas.set_fill_color(canvas::Color::rgba(teal.r, teal.g, teal.b,
+                                              dragging_strip_ ? 0.30f : 0.15f));
+    canvas.fill_rounded_rect(vx, vy, vw, vh, r);
+    canvas.set_stroke_color(canvas::Color::rgba(teal.r, teal.g, teal.b, 1.0f));
+    canvas.set_line_width(std::max(1.0f, 1.5f * t.scale));
+    canvas.stroke_rounded_rect(vx, vy, vw, vh, r);
+}
+
+void MusicalTypingKeyboard::on_mouse_down(Point pos) {
+    StripGeom g; float px;
+    if (strip_geom(g) && point_over_strip(pos, g, px)) {
+        dragging_strip_ = true;
+        set_cursor(CursorStyle::grabbing);
+        controller_.set_octave_shift(octave_for_strip_x(px, g));
+        update_readouts();
+        request_repaint();
+        return;   // a strip grab is not a key/toggle click
+    }
+    DesignFrameView::on_mouse_down(pos);
+}
+
+void MusicalTypingKeyboard::on_mouse_drag(Point pos) {
+    if (dragging_strip_) {
+        StripGeom g; float px;
+        if (strip_geom(g) && point_over_strip(pos, g, px)) {
+            controller_.set_octave_shift(octave_for_strip_x(px, g));
+        } else if (strip_geom(g)) {
+            // Dragged off the band vertically — still map by x (clamped) so the
+            // octave keeps tracking the pointer instead of sticking.
+            const auto t = panel_transform(local_bounds());
+            if (t.scale > 0.0f)
+                controller_.set_octave_shift(octave_for_strip_x((pos.x - t.ox) / t.scale, g));
+        }
+        update_readouts();
+        request_repaint();
+        return;
+    }
+    DesignFrameView::on_mouse_drag(pos);
+}
+
+void MusicalTypingKeyboard::on_mouse_up(Point pos) {
+    if (dragging_strip_) {
+        dragging_strip_ = false;
+        StripGeom g; float px;
+        set_cursor(strip_geom(g) && point_over_strip(pos, g, px)
+                       ? CursorStyle::grab : CursorStyle::default_);
+        request_repaint();
+        return;
+    }
+    DesignFrameView::on_mouse_up(pos);
+}
+
+void MusicalTypingKeyboard::on_hover_move(Point pos) {
+    StripGeom g; float px;
+    if (strip_geom(g) && point_over_strip(pos, g, px))
+        set_cursor(dragging_strip_ ? CursorStyle::grabbing : CursorStyle::grab);
+    else if (!dragging_strip_)
+        set_cursor(CursorStyle::default_);
+    DesignFrameView::on_hover_move(pos);
+}
+
+void MusicalTypingKeyboard::on_mouse_leave() {
+    if (!dragging_strip_) set_cursor(CursorStyle::default_);
+    DesignFrameView::on_mouse_leave();
 }
 
 }  // namespace pulp::view

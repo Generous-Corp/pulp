@@ -104,6 +104,19 @@ public:
     bool on_key_event(const KeyEvent& event) override;
     void on_focus_changed(bool gained) override;  // release held notes on blur
 
+    // ── Overview-strip octave control (Logic-style) ──────────────────────────
+    // The top overview strip's teal highlight is the canonical octave indicator:
+    // it tracks the octave (z/x, the < > arrows, AND dragging it), always snapping
+    // to a C boundary (each octave step is a C). Drag anywhere on the strip to set
+    // the octave; the cursor shows grab/grabbing over it. The highlight is drawn
+    // as a native overlay (the baked teal box is suppressed) so it can move.
+    void paint(canvas::Canvas& canvas) override;
+    void on_mouse_down(Point pos) override;
+    void on_mouse_drag(Point pos) override;
+    void on_mouse_up(Point pos) override;
+    void on_hover_move(Point pos) override;
+    void on_mouse_leave() override;
+
 protected:
     // On a mode swap (toggle button or set_mode): release any QWERTY-held notes
     // (so a held key can't sound forever after the typing frame goes away) and
@@ -117,8 +130,30 @@ private:
     bool sustain_ = false;        // sustain-pad toggle state (surfaced via on_sustain)
     int pb_value_ = 0;            // live pitch-bend display value (−20 / 0 / +20)
     int mod_sel_ = 0;             // latched modulation selection (0 = "off" … 5 = "max")
+    bool dragging_strip_ = false; // mid drag-to-octave on the overview strip
     static constexpr float kVelStep = 1.0f / 16.0f;  // on-screen velocity −/+ increment
     static constexpr int kPitchBendMax = 20;         // Logic-style ±20 readout extent
+
+    // Per-frame overview-strip geometry, in panel (732-wide) SVG coords. The
+    // teal highlight box (box_w wide, [box_y, box_y+box_h]) slides within the
+    // strip's [strip_x0, strip_x1]; rest_center is its centre at octave 0 and
+    // px_per_octave the step. Derived from the faithful export (typing node
+    // 187:15 / piano 187:349). NOTE: the strip currently depicts a partial range;
+    // the full C-2…G8 strip + C-only labels arrive with the Figma re-export (#82),
+    // at which point these constants re-tune — the drag/cursor/snap logic stays.
+    struct StripGeom {
+        float strip_x0, strip_x1, box_w, box_y, box_h, rest_center, px_per_octave;
+    };
+    // Fill `out` for the active frame's strip; false if the frame has no strip.
+    bool strip_geom(StripGeom& out) const;
+    // Left edge (panel coords) of the highlight box at the given octave shift.
+    static float octave_box_left(const StripGeom& g, int shift);
+    // Panel-x → octave shift, snapped to the nearest octave (each step is a C
+    // boundary — the "always snaps to a C range" rule) and clamped to ±4.
+    static int octave_for_strip_x(float panel_x, const StripGeom& g);
+    // If `pos` (view-local) is over the strip band, set `panel_x` to its panel-x
+    // and return true. Uses the shared panel_transform (panel origin is 0,0).
+    bool point_over_strip(Point pos, const StripGeom& g, float& panel_x) const;
     // Refresh the live OCTAVE / VEL / PITCH BEND value_label readouts of the
     // active frame from current state. Called after any change + on frame swap.
     void update_readouts();
