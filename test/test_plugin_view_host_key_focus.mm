@@ -467,6 +467,24 @@ TEST_CASE("PluginViewHost (mac CPU) — a click sets the field's visual focus "
             REQUIRE(ml->has_focus());  // multi-line keeps focus on Return
         }
 
+        SECTION("#3 Escape does NOT force-blur a non-text focusable widget") {
+            // A focusable NON-TextEditor view (e.g. a custom control that uses
+            // Escape for its own purpose) must keep focus on Escape — only text
+            // editors are force-blurred for the keyboard hand-back.
+            struct FocusableView : View { void paint(pulp::canvas::Canvas&) override {} };
+            auto fv_owned = std::make_unique<FocusableView>();
+            View* fv = fv_owned.get();
+            fv->set_focusable(true);
+            fv->set_bounds({0, 0, 400, 200});
+            root.add_child(std::move(fv_owned));
+            fv->on_focus_changed(true);
+            fv->claim_input_focus();
+            REQUIRE(View::focused_input_ == fv);
+            [pulp_view keyDown:make_key_event(53, 0, @"\x1b")];  // 53 = Escape
+            REQUIRE(fv->has_focus());                 // not force-blurred
+            REQUIRE(View::focused_input_ == fv);
+        }
+
         host->detach();
         host.reset();
         [window close];
