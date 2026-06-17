@@ -36,13 +36,16 @@ std::string note_name(int midi) {
 int main(int argc, char** argv) {
     const char* screenshot = nullptr;
     int octave = 0;   // --octave N pre-shifts the octave (for render proofs)
+    bool piano = false;
     for (int i = 1; i < argc; ++i) {
         if (!std::strcmp(argv[i], "--screenshot") && i + 1 < argc) screenshot = argv[++i];
         else if (!std::strcmp(argv[i], "--octave") && i + 1 < argc) octave = std::atoi(argv[++i]);
+        else if (!std::strcmp(argv[i], "--piano")) piano = true;
     }
 
     auto kb = std::make_unique<MusicalTypingKeyboard>();
     kb->set_theme(pulp::design::ink_signal_theme(/*dark=*/true));
+    if (piano) kb->set_mode(MusicalTypingKeyboard::Mode::piano);
     kb->on_note_on  = [](int n, float v) { std::printf("note on  %-3d %-3s  vel %.2f\n", n, note_name(n).c_str(), v); };
     kb->on_note_off = [](int n)          { std::printf("note off %-3d %-3s\n", n, note_name(n).c_str()); };
     kb->on_pitch_bend = [](float b)      { std::printf("pitch bend %+.2f\n", b); };

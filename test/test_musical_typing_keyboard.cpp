@@ -193,11 +193,11 @@ TEST_CASE("MusicalTypingKeyboard: piano white-key click plays its MIDI note",
     refit(kb);
     std::vector<int> begins;
     kb.on_gesture_begin = [&](int i) { begins.push_back(kb.element_note(i)); };
-    // Leftmost piano white key C2 (MIDI 48): rect x[28,60] y[70,148]; click
-    // low-centre (below the black keys) so only the white key is under it.
-    kb.on_mouse_down({44.0f, 140.0f});
+    // Leftmost piano white key C2 (MIDI 48): rect x[28,60] y[62,140] (−8 post-#82);
+    // click low-centre (below the black keys) so only the white key is under it.
+    kb.on_mouse_down({44.0f, 130.0f});
     REQUIRE(begins == std::vector<int>{48});
-    kb.on_mouse_up({44.0f, 140.0f});
+    kb.on_mouse_up({44.0f, 130.0f});
 }
 
 TEST_CASE("MusicalTypingKeyboard: set_element_value lights without firing change",
@@ -262,8 +262,8 @@ TEST_CASE("MusicalTypingKeyboard: clicking a key emits its MIDI note (both modes
     ons.clear();
     kb.set_mode(Mode::piano);
     refit(kb);
-    kb.on_mouse_down({495.0f, 140.0f});             // piano C4 (note 72, absolute)
-    kb.on_mouse_up({495.0f, 140.0f});
+    kb.on_mouse_down({495.0f, 130.0f});             // piano C4 (note 72, absolute; y −8)
+    kb.on_mouse_up({495.0f, 130.0f});
     REQUIRE(ons == std::vector<int>{72});
 }
 
@@ -548,9 +548,9 @@ TEST_CASE("MusicalTypingKeyboard: dragging the overview strip sets the octave (s
     std::vector<int> ons;
     kb.on_note_on = [&](int n, float) { ons.push_back(n); };
 
-    // Press on the full-range ruler ~2 octaves right of the octave-0 window
-    // centre (≈385 + 2*~50 ≈ 485), y in the strip band. Snaps to octave +2.
-    kb.on_mouse_down({485.0f, 33.0f});
+    // Press on the centered full-range ruler ~2 octaves right of the octave-0
+    // window centre (≈344 + 2*~37 ≈ 418), y in the strip band. Snaps to octave +2.
+    kb.on_mouse_down({418.0f, 30.0f});
     REQUIRE(kb.controller().octave_shift() == 2);
     REQUIRE(ons.empty());
     // 'a' now sounds C4 (48 + 24).
@@ -572,9 +572,9 @@ TEST_CASE("MusicalTypingKeyboard: the overview highlight is coupled to z/x + the
     // z/x move the same octave the strip shows.
     KeyEvent x{}; x.key = KeyCode::x; x.is_down = true; kb.on_key_event(x);
     REQUIRE(kb.controller().octave_shift() == 1);
-    // The < > arrows (on_action octave_up/down) too — > arrow at (689,23,22,24),
-    // right of the widened strip (#82). Click its chevron at ~700.
-    kb.on_mouse_down({700.0f, 35.0f}); kb.on_mouse_up({700.0f, 35.0f});
+    // The < > arrows (on_action octave_up/down) too — after #82 centered the
+    // strip the > arrow is at (571,17,22,24); click its chevron at ~582.
+    kb.on_mouse_down({582.0f, 29.0f}); kb.on_mouse_up({582.0f, 29.0f});
     REQUIRE(kb.controller().octave_shift() == 2);
 }
 
@@ -595,8 +595,8 @@ TEST_CASE("MusicalTypingKeyboard: a strip click does not play or light a key",
     auto kbp = make_playable_kb(); auto& kb = *kbp;
     std::vector<int> ons;
     kb.on_note_on = [&](int n, float) { ons.push_back(n); };
-    kb.on_mouse_down({385.0f, 33.0f});          // octave-0 window centre (≈385)
-    kb.on_mouse_up({385.0f, 33.0f});
+    kb.on_mouse_down({344.0f, 30.0f});          // octave-0 window centre (≈344)
+    kb.on_mouse_up({344.0f, 30.0f});
     REQUIRE(ons.empty());
     REQUIRE(kb.controller().octave_shift() == 0);   // centre ⇒ octave 0
 }

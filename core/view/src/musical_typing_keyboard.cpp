@@ -69,14 +69,15 @@ void append_controls(std::vector<DesignFrameElement>& els) {
         e.x = x; e.y = y; e.w = w; e.h = h;
         els.push_back(e);
     };
-    add("octave_down", 114, 213, 32, 32);
-    add("octave_up",   155, 213, 32, 32);
-    // The < > buttons flanking the top overview strip also step the octave. The
-    // > moved right to ~689 after #82 widened the strip (chevron at x≈699).
-    add("octave_down", 117, 23, 22, 24);
-    add("octave_up",   689, 23, 22, 24);
-    add("vel_down",    321, 213, 32, 32);
-    add("vel_up",      362, 213, 32, 32);
+    add("octave_down", 114, 205, 32, 32);
+    add("octave_up",   155, 205, 32, 32);
+    // The < > buttons flanking the (now centered) top overview strip step the
+    // octave. After #82 centered the strip, < ≈ chevron 150 → element x=139,
+    // > ≈ chevron 582 → element x=571 (typing).
+    add("octave_down", 139, 17, 22, 24);
+    add("octave_up",   571, 17, 22, 24);
+    add("vel_down",    321, 205, 32, 32);
+    add("vel_up",      362, 205, 32, 32);
 
     // Pitch bend (buttons 1,2) + sustain are MOMENTARY (press/release, lit while
     // held) → modelled as momentary elements with an action tag so the existing
@@ -89,13 +90,15 @@ void append_controls(std::vector<DesignFrameElement>& els) {
         e.x = x; e.y = y; e.w = w; e.h = h;
         els.push_back(e);
     };
-    add_mom("sustain", 21, 110, 66, 92);
-    add_mom("pb_down", 108, 63, 36, 38);   // "−" / key 1
-    add_mom("pb_up",   150, 63, 36, 38);   // "+" / key 2
+    // y shifted −8 vs the pre-#82 export (the toolbar shrank when the top-right
+    // readouts were removed, lifting every below-toolbar row by 8px).
+    add_mom("sustain", 21, 102, 66, 92);
+    add_mom("pb_down", 108, 55, 36, 38);   // "−" / key 1
+    add_mom("pb_up",   150, 55, 36, 38);   // "+" / key 2
     // Modulation 3..8 ("off" … "max"), keys 3-8 → mod_0 … mod_5.
     static const float mx[] = {200, 242, 284, 326, 368, 410};
     for (int i = 0; i < 6; ++i)
-        add_mom("mod_" + std::to_string(i), mx[i], 63, 36, 38);
+        add_mom("mod_" + std::to_string(i), mx[i], 55, 36, 38);
 }
 
 // Live value readouts (Kind::value_label) over the design's baked OCTAVE / VEL /
@@ -115,9 +118,9 @@ void append_readouts(std::vector<DesignFrameElement>& els, const char* who) {
     // (#82): the bottom-left readouts are the single source now. Piano shows no
     // OCTAVE readout — the overview highlight reflects the range (Logic-style).
     if (std::string(who) == "typing") {
-        add("octave", 75, 219, 17, 21);   // bottom "OCTAVE C2"
-        add("velocity", 282, 219, 17, 21);// bottom "VELOCITY 98"
-        add("pitchbend", 90, 74, 8, 18);  // "PITCH BEND 0"
+        add("octave", 75, 211, 17, 21);   // bottom "OCTAVE C2"  (y −8 post-#82)
+        add("velocity", 282, 211, 17, 21);// bottom "VELOCITY 98"
+        add("pitchbend", 90, 66, 8, 18);  // "PITCH BEND 0"
     }
     // piano: no value_labels (range shown by the overview highlight only)
 }
@@ -139,12 +142,12 @@ std::string note_name(int midi) {
 std::vector<DesignFrameElement> build_typing_frame() {
     struct K { int note; float x, y, w, h; };
     static const K keys[] = {
-        {0, 102, 117, 55, 78}, {1, 142, 117, 30, 54}, {2, 157, 117, 55, 78},
-        {3, 197, 117, 30, 54}, {4, 212, 117, 55, 78}, {5, 267, 117, 55, 78},
-        {6, 307, 117, 30, 54}, {7, 322, 117, 55, 78}, {8, 362, 117, 30, 54},
-        {9, 377, 117, 55, 78}, {10, 416, 117, 30, 54}, {11, 431, 117, 55, 78},
-        {12, 486, 117, 55, 78}, {13, 526, 117, 30, 54}, {14, 541, 117, 55, 78},
-        {15, 581, 117, 30, 54}, {16, 596, 117, 55, 78}, {17, 651, 117, 55, 78},
+        {0, 102, 109, 55, 78}, {1, 142, 109, 30, 54}, {2, 157, 109, 55, 78},
+        {3, 197, 109, 30, 54}, {4, 212, 109, 55, 78}, {5, 267, 109, 55, 78},
+        {6, 307, 109, 30, 54}, {7, 322, 109, 55, 78}, {8, 362, 109, 30, 54},
+        {9, 377, 109, 55, 78}, {10, 416, 109, 30, 54}, {11, 431, 109, 55, 78},
+        {12, 486, 109, 55, 78}, {13, 526, 109, 30, 54}, {14, 541, 109, 55, 78},
+        {15, 581, 109, 30, 54}, {16, 596, 109, 55, 78}, {17, 651, 109, 55, 78},
     };
     std::vector<DesignFrameElement> els;
     for (const auto& k : keys) {
@@ -166,18 +169,18 @@ std::vector<DesignFrameElement> build_typing_frame() {
 std::vector<DesignFrameElement> build_piano_frame() {
     struct K { int note; float x, y, w, h; };
     static const K keys[] = {
-        {48, 28, 70, 32, 78}, {49, 50, 64, 22, 58}, {50, 60, 70, 32, 78},
-        {51, 82, 64, 22, 58}, {52, 92, 70, 32, 78}, {53, 125, 70, 32, 78},
-        {54, 146, 64, 22, 58}, {55, 157, 70, 32, 78}, {56, 178, 64, 22, 58},
-        {57, 189, 70, 32, 78}, {58, 210, 64, 22, 58}, {59, 221, 70, 32, 78},
-        {60, 253, 70, 32, 78}, {61, 274, 64, 22, 58}, {62, 286, 70, 32, 78},
-        {63, 306, 64, 22, 58}, {64, 318, 70, 32, 78}, {65, 350, 70, 32, 78},
-        {66, 371, 64, 22, 58}, {67, 382, 70, 32, 78}, {68, 404, 64, 22, 58},
-        {69, 414, 70, 32, 78}, {70, 436, 64, 22, 58}, {71, 446, 70, 32, 78},
-        {72, 479, 70, 32, 78}, {73, 500, 64, 22, 58}, {74, 511, 70, 32, 78},
-        {75, 532, 64, 22, 58}, {76, 543, 70, 32, 78}, {77, 575, 70, 32, 78},
-        {78, 596, 64, 22, 58}, {79, 607, 70, 32, 78}, {80, 628, 64, 22, 58},
-        {81, 640, 70, 32, 78}, {82, 660, 64, 22, 58}, {83, 672, 70, 32, 78},
+        {48, 28, 62, 32, 78}, {49, 50, 56, 22, 58}, {50, 60, 62, 32, 78},
+        {51, 82, 56, 22, 58}, {52, 92, 62, 32, 78}, {53, 125, 62, 32, 78},
+        {54, 146, 56, 22, 58}, {55, 157, 62, 32, 78}, {56, 178, 56, 22, 58},
+        {57, 189, 62, 32, 78}, {58, 210, 56, 22, 58}, {59, 221, 62, 32, 78},
+        {60, 253, 62, 32, 78}, {61, 274, 56, 22, 58}, {62, 286, 62, 32, 78},
+        {63, 306, 56, 22, 58}, {64, 318, 62, 32, 78}, {65, 350, 62, 32, 78},
+        {66, 371, 56, 22, 58}, {67, 382, 62, 32, 78}, {68, 404, 56, 22, 58},
+        {69, 414, 62, 32, 78}, {70, 436, 56, 22, 58}, {71, 446, 62, 32, 78},
+        {72, 479, 62, 32, 78}, {73, 500, 56, 22, 58}, {74, 511, 62, 32, 78},
+        {75, 532, 56, 22, 58}, {76, 543, 62, 32, 78}, {77, 575, 62, 32, 78},
+        {78, 596, 56, 22, 58}, {79, 607, 62, 32, 78}, {80, 628, 56, 22, 58},
+        {81, 640, 62, 32, 78}, {82, 660, 56, 22, 58}, {83, 672, 62, 32, 78},
     };
     std::vector<DesignFrameElement> els;
     for (const auto& k : keys) {
@@ -191,11 +194,11 @@ std::vector<DesignFrameElement> build_piano_frame() {
     // The < > buttons flanking the piano overview strip step the octave.
     auto add_oct = [&](std::string id, float x) {
         DesignFrameElement e; e.kind = DesignFrameElement::Kind::action;
-        e.action = std::move(id); e.x = x; e.y = 23; e.w = 22; e.h = 24;
+        e.action = std::move(id); e.x = x; e.y = 17; e.w = 22; e.h = 24;
         els.push_back(e);
     };
-    add_oct("octave_down", 117);
-    add_oct("octave_up", 689);   // strip widened after #82 (chevron at x≈699)
+    add_oct("octave_down", 109);   // piano < chevron ≈120 → element x=109 (centered)
+    add_oct("octave_up", 601);     // piano > chevron ≈612 → element x=601
     append_readouts(els, "piano");   // live OCTAVE value (piano toolbar)
     return els;
 }
@@ -463,8 +466,7 @@ void MusicalTypingKeyboard::light_typing_semitone(int semitone, bool on) {
 // toolbars reflowed identically after #82 removed their right-side readouts).
 
 namespace {
-constexpr float kStripX0 = 151.0f, kStripX1 = 677.0f;  // strip interior, panel coords
-constexpr float kStripY  = 22.0f,  kStripH  = 22.0f;   // vertical band
+constexpr float kStripY  = 17.0f,  kStripH  = 24.0f;   // vertical band (post-#82 centering)
 constexpr int   kRulerLo = 0, kRulerHi = 127;          // C-2 … G8
 constexpr int   kPlaySpan = 17;                        // typing keys a..' = 18 semitones
 
@@ -479,12 +481,18 @@ bool key_is_black(int midi) {
     const int pc = midi % 12;
     return pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10;
 }
-float midi_to_strip_x(int midi) {
-    return kStripX0 + white_units(midi) / white_units(kRulerHi) * (kStripX1 - kStripX0);
+float midi_to_x(int midi, float x0, float x1) {
+    return x0 + white_units(midi) / white_units(kRulerHi) * (x1 - x0);
 }
 // Pitch-class + octave label in the C2=48 convention, C keys only ("C2", "C-1").
 std::string c_label(int midi) { return "C" + std::to_string(midi / 12 - 2); }
 }  // namespace
+
+void MusicalTypingKeyboard::strip_bounds(float& x0, float& x1) const {
+    // The ribbon is centered in the toolbar; each frame's natural width differs.
+    if (active_frame() == kTypingFrame) { x0 = 170.0f; x1 = 560.0f; }
+    else                                { x0 = 141.0f; x1 = 589.0f; }
+}
 
 bool MusicalTypingKeyboard::point_over_strip(Point pos, float& panel_x) const {
     const auto t = panel_transform(local_bounds());
@@ -492,16 +500,16 @@ bool MusicalTypingKeyboard::point_over_strip(Point pos, float& panel_x) const {
     const float px = (pos.x - t.ox) / t.scale;   // panel origin is (0,0)
     const float py = (pos.y - t.oy) / t.scale;
     panel_x = px;
+    float x0, x1; strip_bounds(x0, x1);
     constexpr float pad = 3.0f;
-    return px >= kStripX0 && px <= kStripX1 &&
-           py >= kStripY - pad && py <= kStripY + kStripH + pad;
+    return px >= x0 && px <= x1 && py >= kStripY - pad && py <= kStripY + kStripH + pad;
 }
 
 int MusicalTypingKeyboard::octave_for_strip_x(float panel_x) const {
-    // Map x to the octave whose playable window CENTRE is nearest, snapped to a C.
+    float x0, x1; strip_bounds(x0, x1);
     const int base = controller_.base_note();
-    const float c0 = (midi_to_strip_x(base) + midi_to_strip_x(base + kPlaySpan)) * 0.5f;
-    const float step = midi_to_strip_x(base + 12) - midi_to_strip_x(base);  // one octave
+    const float c0 = (midi_to_x(base, x0, x1) + midi_to_x(base + kPlaySpan, x0, x1)) * 0.5f;
+    const float step = midi_to_x(base + 12, x0, x1) - midi_to_x(base, x0, x1);  // one octave
     return std::clamp(static_cast<int>(std::lround((panel_x - c0) / step)), -4, 4);
 }
 
@@ -509,6 +517,7 @@ void MusicalTypingKeyboard::paint(canvas::Canvas& canvas) {
     DesignFrameView::paint(canvas);   // faithful SVG + key/control highlights
     const auto t = panel_transform(local_bounds());
     if (t.scale <= 0.0f) return;
+    float x0, x1; strip_bounds(x0, x1);
     auto vx = [&](float px) { return t.ox + px * t.scale; };
     auto vy = [&](float py) { return t.oy + py * t.scale; };
     const auto bg   = canvas::Color::rgba8(0xEB, 0xEE, 0xF1);          // strip key color
@@ -518,17 +527,17 @@ void MusicalTypingKeyboard::paint(canvas::Canvas& canvas) {
     // 1) Cover the baked partial ribbon with the strip background (seamless — same
     //    #EBEEF1), so only our full-range ruler shows.
     canvas.set_fill_color(bg);
-    canvas.fill_rect(vx(kStripX0), vy(kStripY), (kStripX1 - kStripX0) * t.scale, kStripH * t.scale);
+    canvas.fill_rect(vx(x0), vy(kStripY), (x1 - x0) * t.scale, kStripH * t.scale);
 
     // 2) Full-range marks: a white-key divider at each white key's left edge, and
     //    a short black bar for each black key.
     const float bw = std::max(1.0f, 1.0f * t.scale);   // divider width
-    const float kw = std::max(1.5f, 2.4f * t.scale);   // black-mark width
+    const float kw = std::max(1.5f, 2.2f * t.scale);   // black-mark width
     for (int m = kRulerLo; m <= kRulerHi; ++m) {
-        const float x = vx(midi_to_strip_x(m));
+        const float x = vx(midi_to_x(m, x0, x1));
         if (key_is_black(m)) {
             canvas.set_fill_color(blk);
-            canvas.fill_rect(x - kw * 0.5f, vy(kStripY), kw, kStripH * t.scale * 0.58f);
+            canvas.fill_rect(x - kw * 0.5f, vy(kStripY), kw, kStripH * t.scale * 0.55f);
         } else {
             canvas.set_fill_color(dark);
             canvas.fill_rect(x, vy(kStripY), bw, kStripH * t.scale);
@@ -536,19 +545,18 @@ void MusicalTypingKeyboard::paint(canvas::Canvas& canvas) {
     }
 
     // 3) C-only labels along the bottom of the strip.
-    const float lf = std::max(6.0f, 7.5f * t.scale);
+    const float lf = std::max(6.0f, 7.0f * t.scale);
     canvas.set_font("Inter", lf);
     canvas.set_fill_color(canvas::Color::rgba(0x16/255.f, 0x19/255.f, 0x1E/255.f, 0.55f));
     for (int m = kRulerLo; m <= kRulerHi; m += 12) {   // every C
-        const std::string s = c_label(m);
-        canvas.fill_text(s, vx(midi_to_strip_x(m)) + 1.5f, vy(kStripY + kStripH) - 1.5f);
+        canvas.fill_text(c_label(m), vx(midi_to_x(m, x0, x1)) + 1.5f, vy(kStripY + kStripH) - 1.5f);
     }
 
     // 4) Teal highlight spanning the current playable window [base+shift,
     //    base+shift+span], matching the design's box (15% fill + hairline border).
     const int lo = controller_.base_note() + controller_.octave_shift() * 12;
-    const float hx0 = vx(midi_to_strip_x(std::clamp(lo, kRulerLo, kRulerHi)));
-    const float hx1 = vx(midi_to_strip_x(std::clamp(lo + kPlaySpan, kRulerLo, kRulerHi)));
+    const float hx0 = vx(midi_to_x(std::clamp(lo, kRulerLo, kRulerHi), x0, x1));
+    const float hx1 = vx(midi_to_x(std::clamp(lo + kPlaySpan, kRulerLo, kRulerHi), x0, x1));
     const float r = 3.0f * t.scale;
     const auto teal = resolve_color("accent.primary", canvas::Color::rgba8(22, 218, 194));
     canvas.set_fill_color(canvas::Color::rgba(teal.r, teal.g, teal.b,
@@ -578,7 +586,7 @@ void MusicalTypingKeyboard::on_mouse_drag(Point pos) {
         if (!point_over_strip(pos, px)) {
             // Dragged off the band — still map by x so the octave keeps tracking.
             const auto t = panel_transform(local_bounds());
-            px = t.scale > 0.0f ? (pos.x - t.ox) / t.scale : kStripX0;
+            px = t.scale > 0.0f ? (pos.x - t.ox) / t.scale : 0.0f;
         }
         controller_.set_octave_shift(octave_for_strip_x(px));
         update_readouts();

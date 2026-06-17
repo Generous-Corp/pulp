@@ -138,6 +138,10 @@ private:
     // drawn procedurally in paint() over the design's strip background — white-key
     // dividers, black-key marks, C-only labels, and the teal highlight that spans
     // the current playable octave window. The baked partial ribbon is covered.
+    // The strip's horizontal extent (panel coords) for the active frame — the
+    // ribbon is centered in the toolbar and is a different width per frame (the
+    // typing/piano toolbars centered their own natural-width ribbons after #82).
+    void strip_bounds(float& x0, float& x1) const;
     // Panel-x → octave shift, snapped to the nearest octave (each step is a C
     // boundary — "always snaps to a C range"), clamped to the controller's ±4.
     int octave_for_strip_x(float panel_x) const;
