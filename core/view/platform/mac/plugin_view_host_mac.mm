@@ -479,10 +479,10 @@ void pulp_plugin_apply_hover_cursor(pulp::view::View* root, pulp::view::Point lo
 // frontmost. The DAW embeds our editor as a SUBVIEW of its own container view
 // in the SAME window, so we hand the key into the host's responder chain via
 // that parent view: make the host view first responder, deliver the key, then
-// take first responder back so the editor keeps receiving keys. Mirrors the
-// technique in JUCE's AU client (juce_audio_plugin_client_AU_1.mm). (An earlier
-// attempt forwarded to NSApp.mainWindow — a DIFFERENT window — which Logic
-// ignored.) Returns true when the event was handed off.
+// take first responder back so the editor keeps receiving keys. (Forwarding to
+// NSApp.mainWindow instead — a DIFFERENT window — does NOT work: Logic ignores
+// it; the in-window superview is the correct target.) Returns true when the
+// event was handed off.
 static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
   // Re-entrancy guard scoped to the IN-FLIGHT event (by timestamp), not a
   // blanket flag: delivering to the host can bounce the same event back through
@@ -1290,8 +1290,9 @@ private:
         self.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
 
         // BLACK-SCREEN ROOT CAUSE (pulp foreign-host-embed): a foreign DAW host
-        // that embeds us via juce::NSViewComponent adds our NSView as a subview
-        // of *its own* layer-backed content view. Per Apple's NSView docs,
+        // that embeds us adds our NSView as a subview of *its own* layer-backed
+        // content view (common for hosts whose editor wrapper is layer-backed).
+        // Per Apple's NSView docs,
         // "Creating a layer-backed view implicitly causes the entire view
         // hierarchy under that view to become layer-backed." So AppKit forces
         // THIS view layer-backed and — if we merely assign `self.layer` in init
@@ -1306,9 +1307,9 @@ private:
         // layer by returning it from -makeBackingLayer (the documented hook
         // AppKit calls to create the backing layer). This survives forced
         // layer-backing under any foreign parent: our CAMetalLayer IS the
-        // backing layer, never a wrapped sublayer. This is the same mechanism
-        // JUCE itself uses for its Metal peer. Trigger it now by requesting
-        // layer-backing; AppKit calls -makeBackingLayer synchronously.
+        // backing layer, never a wrapped sublayer. (This is the standard
+        // backing-layer hook for a Metal-backed NSView.) Trigger it now by
+        // requesting layer-backing; AppKit calls -makeBackingLayer synchronously.
         self.wantsLayer = YES;
     }
     return self;
