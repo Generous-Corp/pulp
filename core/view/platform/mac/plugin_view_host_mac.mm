@@ -480,10 +480,10 @@ void pulp_plugin_apply_hover_cursor(pulp::view::View* root, pulp::view::Point lo
 // frontmost. The DAW embeds our editor as a SUBVIEW of its own container view
 // in the SAME window, so we hand the key into the host's responder chain via
 // that parent view: make the host view first responder, deliver the key, then
-// take first responder back so the editor keeps receiving keys. Mirrors the
-// technique in JUCE's AU client (juce_audio_plugin_client_AU_1.mm). (An earlier
-// attempt forwarded to NSApp.mainWindow — a DIFFERENT window — which Logic
-// ignored.) Returns true when the event was handed off.
+// take first responder back so the editor keeps receiving keys. (Forwarding to
+// NSApp.mainWindow instead — a DIFFERENT window — does NOT work: Logic ignores
+// it; the in-window superview is the correct target.) Returns true when the
+// event was handed off.
 static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
   // Re-entrancy guard: delivering to the host can bounce back through our
   // keyDown: in some hosts. Never re-forward the same in-flight event.

@@ -1078,3 +1078,48 @@ same `#if PULP_ENABLE_AUDIO_PROBES` guard. Wiring gotchas:
   host's frame loop alive (`has_idle`), so the pump runs even when nothing
   else is animating. A custom view that reads the store directly each frame
   (not via `bind_parameter`) instead needs `View::set_continuous_repaint(true)`.
+
+## Hosted-editor text input & keyboard etiquette (macOS DAW)
+
+Hard-won lessons from making a text field in a hosted (AU/DAW) plugin editor
+behave like the standalone host. The hosted `NSView`
+(`PulpPluginView` / `PulpGpuPluginView` in `plugin_view_host_mac.mm`) does NOT
+get the standalone host's keyboard wiring for free — wire each of these:
+
+- **Focus highlight + blinking caret need `on_focus_changed(true)`, not just
+  `claim_input_focus()`.** `claim_input_focus()` only sets the process-global
+  text-routing slot (`focused_input_`), so typing works but the field shows no
+  highlight border and no caret (`has_focus_` stays false). On a focus click the
+  hosted mouse path must run the full protocol the standalone host runs: blur
+  the previously-focused widget (`on_focus_changed(false)`), then
+  `on_focus_changed(true)` + `claim_input_focus()` on the new one. The GPU host's
+  `FrameClock` then drives the caret blink. Symptom if missed: "typing works but
+  the AU field doesn't highlight / no i-beam caret" while the standalone is fine.
+
+- **Transport keys (Space/R) must be FORWARDED to the host, and the editor must
+  KEEP first responder to do it.** A DAW opens the editor in its own key window;
+  AppKit's responder chain stops there, so unconsumed keys never reach the host's
+  arrange window (user has to click off the plugin to regain transport). Two
+  parts, both required: (1) forward an unconsumed key to the host by handing it
+  to the editor's **in-window superview** (`[self superview]`) — make the host
+  view first responder, `keyDown:` it, then take first responder back.
+  Forwarding to `NSApp.mainWindow` (a DIFFERENT window) does NOT work — Logic
+  ignores it. (2) The editor must STAY first responder while shown so `keyDown:`
+  keeps firing — do NOT resign on blur. Resigning the moment a field blurs is
+  the classic bug: the forward then never runs and Space/R stay dead until the
+  plugin is backgrounded. The host still reclaims the keyboard via
+  `-resignFirstResponder:` when the user clicks one of its own controls (which
+  ends any open text input). This keep-FR + forward model also preserves
+  Logic Musical Typing (unconsumed note keys are forwarded to the host).
+
+- **Give the user a way OUT of the field.** Escape blurs any focused input;
+  Tab/Return blur a single-line field (Return after committing). On blur the
+  keyboard returns to the host via the forward above, so transport works again;
+  clicking back into the field re-captures keys for typing.
+
+- **Arrow with a selection collapses to the selection EDGE, no extra move.**
+  `TextEditor::move_caret` must, when there's a selection and Shift is NOT held,
+  collapse to the near edge in the arrow's direction (Right→end, Left→start)
+  WITHOUT advancing a cluster. Applying the delta first lands one cluster past
+  the selection (e.g. selecting a word and pressing → skips into the next word).
+  This is core editor behavior — fix it in `core/view`, not per-host.
