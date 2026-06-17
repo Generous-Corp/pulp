@@ -548,9 +548,9 @@ TEST_CASE("MusicalTypingKeyboard: dragging the overview strip sets the octave (s
     std::vector<int> ons;
     kb.on_note_on = [&](int n, float) { ons.push_back(n); };
 
-    // Press on the strip ~2 octaves right of centre (348.24 + 2*37 ≈ 422), y in
-    // the highlight band (21..45). Snaps to octave +2; plays no note.
-    kb.on_mouse_down({422.0f, 33.0f});
+    // Press on the full-range ruler ~2 octaves right of the octave-0 window
+    // centre (≈385 + 2*~50 ≈ 485), y in the strip band. Snaps to octave +2.
+    kb.on_mouse_down({485.0f, 33.0f});
     REQUIRE(kb.controller().octave_shift() == 2);
     REQUIRE(ons.empty());
     // 'a' now sounds C4 (48 + 24).
@@ -595,8 +595,8 @@ TEST_CASE("MusicalTypingKeyboard: a strip click does not play or light a key",
     auto kbp = make_playable_kb(); auto& kb = *kbp;
     std::vector<int> ons;
     kb.on_note_on = [&](int n, float) { ons.push_back(n); };
-    kb.on_mouse_down({350.0f, 33.0f});          // dead-centre of the strip
-    kb.on_mouse_up({350.0f, 33.0f});
+    kb.on_mouse_down({385.0f, 33.0f});          // octave-0 window centre (≈385)
+    kb.on_mouse_up({385.0f, 33.0f});
     REQUIRE(ons.empty());
     REQUIRE(kb.controller().octave_shift() == 0);   // centre ⇒ octave 0
 }

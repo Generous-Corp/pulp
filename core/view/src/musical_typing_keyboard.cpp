@@ -455,75 +455,116 @@ void MusicalTypingKeyboard::light_typing_semitone(int semitone, bool on) {
     if (i >= 0) { set_element_value(i, on ? 1.0f : 0.0f); request_repaint(); }
 }
 
-// ── Overview-strip octave control ───────────────────────────────────────────
+// ── Overview-strip octave control — full-range mini-piano ruler ─────────────
+// The strip is a full C-2…G8 (MIDI 0–127) piano overview drawn procedurally over
+// the design's #EBEEF1 strip background: white-key dividers, black-key marks,
+// C-only labels, and a teal highlight spanning the current playable window. The
+// baked partial ribbon is covered. Both frames share the same strip rect (the
+// toolbars reflowed identically after #82 removed their right-side readouts).
 
-bool MusicalTypingKeyboard::strip_geom(StripGeom& g) const {
-    // Strip outline + teal-box geometry read from the faithful export (panel
-    // coords). box_y/box_h are the rounded highlight's vertical band.
-    // strip_x1 = 677 in both frames after #82 removed the top-right OCTAVE/VEL
-    // cluster (the toolbar's flex reflowed the ribbon wider into the freed space).
-    if (active_frame() == kTypingFrame)
-        g = {151.0f, 677.0f, 83.117f, 21.0f, 24.0f, 348.24f, 0.0f};
-    else
-        g = {151.0f, 677.0f, 95.859f, 21.0f, 24.0f, 378.94f, 0.0f};
-    // Fit the controller's ±4-octave range symmetrically within the box's travel
-    // (the smaller of the left/right slack keeps it inside the strip both ways).
-    const float half_box = g.box_w * 0.5f;
-    const float left  = g.rest_center - (g.strip_x0 + half_box);
-    const float right = (g.strip_x1 - half_box) - g.rest_center;
-    g.px_per_octave = std::min(left, right) / 4.0f;
-    return true;
+namespace {
+constexpr float kStripX0 = 151.0f, kStripX1 = 677.0f;  // strip interior, panel coords
+constexpr float kStripY  = 22.0f,  kStripH  = 22.0f;   // vertical band
+constexpr int   kRulerLo = 0, kRulerHi = 127;          // C-2 … G8
+constexpr int   kPlaySpan = 17;                        // typing keys a..' = 18 semitones
+
+// White-key units from C-2 (MIDI 0): 7 per octave; black keys sit on the
+// half-unit between neighbours. Monotonic in MIDI, so it maps the keyboard to an
+// even white-key ruler (a piano-roll overview, like Logic's).
+float white_units(int midi) {
+    static const float wu[12] = {0, 0.5f, 1, 1.5f, 2, 3, 3.5f, 4, 4.5f, 5, 5.5f, 6};
+    return 7.0f * (midi / 12) + wu[midi % 12];
 }
-
-float MusicalTypingKeyboard::octave_box_left(const StripGeom& g, int shift) {
-    return g.rest_center + static_cast<float>(shift) * g.px_per_octave - g.box_w * 0.5f;
+bool key_is_black(int midi) {
+    const int pc = midi % 12;
+    return pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10;
 }
+float midi_to_strip_x(int midi) {
+    return kStripX0 + white_units(midi) / white_units(kRulerHi) * (kStripX1 - kStripX0);
+}
+// Pitch-class + octave label in the C2=48 convention, C keys only ("C2", "C-1").
+std::string c_label(int midi) { return "C" + std::to_string(midi / 12 - 2); }
+}  // namespace
 
-bool MusicalTypingKeyboard::point_over_strip(Point pos, const StripGeom& g,
-                                             float& panel_x) const {
+bool MusicalTypingKeyboard::point_over_strip(Point pos, float& panel_x) const {
     const auto t = panel_transform(local_bounds());
     if (t.scale <= 0.0f) return false;
     const float px = (pos.x - t.ox) / t.scale;   // panel origin is (0,0)
     const float py = (pos.y - t.oy) / t.scale;
     panel_x = px;
     constexpr float pad = 3.0f;
-    return px >= g.strip_x0 && px <= g.strip_x1 &&
-           py >= g.box_y - pad && py <= g.box_y + g.box_h + pad;
+    return px >= kStripX0 && px <= kStripX1 &&
+           py >= kStripY - pad && py <= kStripY + kStripH + pad;
 }
 
-int MusicalTypingKeyboard::octave_for_strip_x(float panel_x, const StripGeom& g) {
-    const float steps = (panel_x - g.rest_center) / g.px_per_octave;
-    return std::clamp(static_cast<int>(std::lround(steps)), -4, 4);
+int MusicalTypingKeyboard::octave_for_strip_x(float panel_x) const {
+    // Map x to the octave whose playable window CENTRE is nearest, snapped to a C.
+    const int base = controller_.base_note();
+    const float c0 = (midi_to_strip_x(base) + midi_to_strip_x(base + kPlaySpan)) * 0.5f;
+    const float step = midi_to_strip_x(base + 12) - midi_to_strip_x(base);  // one octave
+    return std::clamp(static_cast<int>(std::lround((panel_x - c0) / step)), -4, 4);
 }
 
 void MusicalTypingKeyboard::paint(canvas::Canvas& canvas) {
     DesignFrameView::paint(canvas);   // faithful SVG + key/control highlights
-    StripGeom g;
-    if (!strip_geom(g)) return;
     const auto t = panel_transform(local_bounds());
     if (t.scale <= 0.0f) return;
-    // The live highlight: a teal rounded rect at the octave-driven position,
-    // matching the design's box (15% teal fill + full-teal hairline border; a
-    // touch brighter while dragging). The baked box was suppressed at load.
-    const float vx = t.ox + octave_box_left(g, controller_.octave_shift()) * t.scale;
-    const float vy = t.oy + g.box_y * t.scale;
-    const float vw = g.box_w * t.scale, vh = g.box_h * t.scale;
-    const float r  = 3.0f * t.scale;
+    auto vx = [&](float px) { return t.ox + px * t.scale; };
+    auto vy = [&](float py) { return t.oy + py * t.scale; };
+    const auto bg   = canvas::Color::rgba8(0xEB, 0xEE, 0xF1);          // strip key color
+    const auto dark = canvas::Color::rgba(0, 0, 0, 0.16f);            // white-key divider
+    const auto blk  = canvas::Color::rgba(0x16/255.f, 0x19/255.f, 0x1E/255.f, 1.0f);
+
+    // 1) Cover the baked partial ribbon with the strip background (seamless — same
+    //    #EBEEF1), so only our full-range ruler shows.
+    canvas.set_fill_color(bg);
+    canvas.fill_rect(vx(kStripX0), vy(kStripY), (kStripX1 - kStripX0) * t.scale, kStripH * t.scale);
+
+    // 2) Full-range marks: a white-key divider at each white key's left edge, and
+    //    a short black bar for each black key.
+    const float bw = std::max(1.0f, 1.0f * t.scale);   // divider width
+    const float kw = std::max(1.5f, 2.4f * t.scale);   // black-mark width
+    for (int m = kRulerLo; m <= kRulerHi; ++m) {
+        const float x = vx(midi_to_strip_x(m));
+        if (key_is_black(m)) {
+            canvas.set_fill_color(blk);
+            canvas.fill_rect(x - kw * 0.5f, vy(kStripY), kw, kStripH * t.scale * 0.58f);
+        } else {
+            canvas.set_fill_color(dark);
+            canvas.fill_rect(x, vy(kStripY), bw, kStripH * t.scale);
+        }
+    }
+
+    // 3) C-only labels along the bottom of the strip.
+    const float lf = std::max(6.0f, 7.5f * t.scale);
+    canvas.set_font("Inter", lf);
+    canvas.set_fill_color(canvas::Color::rgba(0x16/255.f, 0x19/255.f, 0x1E/255.f, 0.55f));
+    for (int m = kRulerLo; m <= kRulerHi; m += 12) {   // every C
+        const std::string s = c_label(m);
+        canvas.fill_text(s, vx(midi_to_strip_x(m)) + 1.5f, vy(kStripY + kStripH) - 1.5f);
+    }
+
+    // 4) Teal highlight spanning the current playable window [base+shift,
+    //    base+shift+span], matching the design's box (15% fill + hairline border).
+    const int lo = controller_.base_note() + controller_.octave_shift() * 12;
+    const float hx0 = vx(midi_to_strip_x(std::clamp(lo, kRulerLo, kRulerHi)));
+    const float hx1 = vx(midi_to_strip_x(std::clamp(lo + kPlaySpan, kRulerLo, kRulerHi)));
+    const float r = 3.0f * t.scale;
     const auto teal = resolve_color("accent.primary", canvas::Color::rgba8(22, 218, 194));
     canvas.set_fill_color(canvas::Color::rgba(teal.r, teal.g, teal.b,
-                                              dragging_strip_ ? 0.30f : 0.15f));
-    canvas.fill_rounded_rect(vx, vy, vw, vh, r);
+                                              dragging_strip_ ? 0.30f : 0.16f));
+    canvas.fill_rounded_rect(hx0, vy(kStripY), hx1 - hx0, kStripH * t.scale, r);
     canvas.set_stroke_color(canvas::Color::rgba(teal.r, teal.g, teal.b, 1.0f));
     canvas.set_line_width(std::max(1.0f, 1.5f * t.scale));
-    canvas.stroke_rounded_rect(vx, vy, vw, vh, r);
+    canvas.stroke_rounded_rect(hx0, vy(kStripY), hx1 - hx0, kStripH * t.scale, r);
 }
 
 void MusicalTypingKeyboard::on_mouse_down(Point pos) {
-    StripGeom g; float px;
-    if (strip_geom(g) && point_over_strip(pos, g, px)) {
+    float px;
+    if (point_over_strip(pos, px)) {
         dragging_strip_ = true;
         set_cursor(CursorStyle::grabbing);
-        controller_.set_octave_shift(octave_for_strip_x(px, g));
+        controller_.set_octave_shift(octave_for_strip_x(px));
         update_readouts();
         request_repaint();
         return;   // a strip grab is not a key/toggle click
@@ -533,16 +574,13 @@ void MusicalTypingKeyboard::on_mouse_down(Point pos) {
 
 void MusicalTypingKeyboard::on_mouse_drag(Point pos) {
     if (dragging_strip_) {
-        StripGeom g; float px;
-        if (strip_geom(g) && point_over_strip(pos, g, px)) {
-            controller_.set_octave_shift(octave_for_strip_x(px, g));
-        } else if (strip_geom(g)) {
-            // Dragged off the band vertically — still map by x (clamped) so the
-            // octave keeps tracking the pointer instead of sticking.
+        float px;
+        if (!point_over_strip(pos, px)) {
+            // Dragged off the band — still map by x so the octave keeps tracking.
             const auto t = panel_transform(local_bounds());
-            if (t.scale > 0.0f)
-                controller_.set_octave_shift(octave_for_strip_x((pos.x - t.ox) / t.scale, g));
+            px = t.scale > 0.0f ? (pos.x - t.ox) / t.scale : kStripX0;
         }
+        controller_.set_octave_shift(octave_for_strip_x(px));
         update_readouts();
         request_repaint();
         return;
@@ -553,9 +591,8 @@ void MusicalTypingKeyboard::on_mouse_drag(Point pos) {
 void MusicalTypingKeyboard::on_mouse_up(Point pos) {
     if (dragging_strip_) {
         dragging_strip_ = false;
-        StripGeom g; float px;
-        set_cursor(strip_geom(g) && point_over_strip(pos, g, px)
-                       ? CursorStyle::grab : CursorStyle::default_);
+        float px;
+        set_cursor(point_over_strip(pos, px) ? CursorStyle::grab : CursorStyle::default_);
         request_repaint();
         return;
     }
@@ -563,8 +600,8 @@ void MusicalTypingKeyboard::on_mouse_up(Point pos) {
 }
 
 void MusicalTypingKeyboard::on_hover_move(Point pos) {
-    StripGeom g; float px;
-    if (strip_geom(g) && point_over_strip(pos, g, px))
+    float px;
+    if (point_over_strip(pos, px))
         set_cursor(dragging_strip_ ? CursorStyle::grabbing : CursorStyle::grab);
     else if (!dragging_strip_)
         set_cursor(CursorStyle::default_);
