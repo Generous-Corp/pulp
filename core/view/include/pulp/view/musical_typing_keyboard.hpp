@@ -56,6 +56,20 @@ public:
     // a host can set the base note / velocity or feed keys from its own path.
     MusicalTypingController& controller() { return controller_; }
 
+    // ── On-screen control callbacks ──────────────────────────────────────────
+    // The on-screen octave −/+ and velocity −/+ buttons drive the controller
+    // directly (they change the next note's octave/velocity, no callback needed).
+    // These surface the controls that DON'T map to controller state:
+    //   • on_pitch_bend(0..1) — fired by the 8 pitch-bend preset buttons
+    //     (left→right); the host maps the normalized value to its bend range.
+    //   • on_sustain(bool)    — fired by the sustain pad (toggles).
+    //   • on_modulation(0..1) — defined for the integration contract, but the
+    //     current design has NO modulation control (the "Modulation" label is a
+    //     placeholder), so it is never fired until a design revision adds one.
+    std::function<void(float bend)> on_pitch_bend;
+    std::function<void(bool on)> on_sustain;
+    std::function<void(float amount)> on_modulation;
+
     // ── Host-driven integration (e.g. PulpTempoSampler) ──────────────────────
     // Light keys from an EXTERNAL held-note set — host MIDI, an app-wide QWERTY
     // monitor, clicks elsewhere. Absolute MIDI notes; a note lights every key
@@ -89,6 +103,8 @@ protected:
 private:
     MusicalTypingController controller_;
     bool input_capture_ = true;   // false = host feeds QWERTY; we don't capture keys
+    bool sustain_ = false;        // sustain-pad toggle state (surfaced via on_sustain)
+    static constexpr float kVelStep = 1.0f / 16.0f;  // on-screen velocity −/+ increment
     // Last external held set from set_active_notes; re-applied after a frame swap
     // so the new frame reflects the host's still-held notes.
     std::vector<int> held_notes_;
