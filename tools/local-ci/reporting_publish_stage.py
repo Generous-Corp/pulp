@@ -125,7 +125,7 @@ def stage_desktop_publish_report(
     atomic_write_text_fn(index_json, json.dumps(index_payload, indent=2) + "\n")
 
     index_html = publish_dir / "index.html"
-    atomic_write_text_fn(index_html, desktop_publish_index_html(index_payload))
+    atomic_write_text_fn(index_html, desktop_publish_index_html(index_payload, publish_dir=publish_dir))
 
     # Video-proof review loop: emit the human review markdown + the
     # review-package.json that `desktop review-issue` consumes. Imported lazily

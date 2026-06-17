@@ -106,6 +106,11 @@ MusicalTypingKeyboard::MusicalTypingKeyboard()
               build_piano_frame(), 0, 0, 732, 176);
 
     set_focusable(true);            // accept computer-keyboard focus for typing
+    // The keyboard renders its faithful SVG via Canvas::draw_svg (Skia), which
+    // only composites on the GPU window host — on a CPU-only host the panel is
+    // blank. Declaring this lets an embedding app (e.g. a sampler) host it on
+    // the GPU surface automatically, without having to know the requirement.
+    set_requires_gpu_host(true);
     controller_.set_base_note(48);  // 'a' = C2, matching the design's OCTAVE C2
 
     // Computer keyboard → notes (controller) forwarded to the public note sink.
