@@ -7,6 +7,7 @@
 // Writes <out>/<name>-light.png and <out>/<name>-dark.png per component.
 
 #include <pulp/design/design_system.hpp>
+#include <pulp/view/musical_typing_keyboard.hpp>
 #include <pulp/view/screenshot.hpp>
 
 #include <cmath>
@@ -170,6 +171,23 @@ std::vector<Entry> entries() {
     add("Input", 240, 70, [](Cell& c) {
         auto ed = std::make_unique<TextEditor>(); ed->set_text("Cutoff");
         ed->set_bounds({20, 19, 200, 32}); c.add_child(std::move(ed));
+    });
+    // The Musical Typing Keyboard ships TWO mode frames; capture each so the
+    // contact sheet shows both the typing (732×266) and piano (732×176) faces
+    // the 🎹/⌨ toggle swaps between. A small held chord exercises the lit state.
+    add("MusicalTyping-Typing", 732, 266, [](Cell& c) {
+        auto kb = std::make_unique<MusicalTypingKeyboard>();
+        kb->set_mode(MusicalTypingKeyboard::Mode::typing);
+        const int held[] = {48, 51, 55};   // C2 D#2 G2 typed
+        kb->set_active_notes(held);
+        kb->set_bounds({0, 0, 732, 266}); c.add_child(std::move(kb));
+    });
+    add("MusicalTyping-Piano", 732, 176, [](Cell& c) {
+        auto kb = std::make_unique<MusicalTypingKeyboard>();
+        kb->set_mode(MusicalTypingKeyboard::Mode::piano);
+        const int held[] = {60, 64, 67};   // C4 E4 G4 chord
+        kb->set_active_notes(held);
+        kb->set_bounds({0, 0, 732, 176}); c.add_child(std::move(kb));
     });
     return e;
 }

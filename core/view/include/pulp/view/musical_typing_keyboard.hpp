@@ -8,6 +8,11 @@
 
 namespace pulp::view {
 
+// Frame indices for the two mode frames (DesignFrameView::set_active_frame
+// targets). Frame 0 is the typing keyboard, frame 1 the piano keyboard.
+inline constexpr int kTypingFrame = 0;
+inline constexpr int kPianoFrame = 1;
+
 // ── MusicalTypingKeyboard ────────────────────────────────────────────────────
 // Ink & Signal "Musical Typing Keyboard" catalog component (Category::audio).
 //
@@ -20,13 +25,24 @@ namespace pulp::view {
 //   • pressed keys light with the accent gradient (white + black), per design.
 // Wire on_note_on / on_note_off to a synth/sampler; everything else is internal.
 //
-// It is NOT a hand-painted widget: it renders the faithful, Figma-exported SVG
-// 1:1 through DesignFrameView (SkSVGDOM), lowered from Figma node 187:2 via the
-// faithful-vector lane (tools/import-design/figma_rest_export.py). Reskin via
-// that lane (re-export → re-embed), not by hand.
+// It is NOT a hand-painted widget: it renders TWO faithful, Figma-exported SVGs
+// 1:1 through DesignFrameView (SkSVGDOM) — one per Mode (typing = node 187:15,
+// piano = node 187:349), lowered via the faithful-vector lane
+// (tools/import-design/figma_rest_export.py). The toggle swaps which frame
+// renders (DesignFrameView::set_active_frame) and the view's intrinsic size.
+// Reskin via that lane (re-export → re-embed), not by hand.
 class MusicalTypingKeyboard : public DesignFrameView {
 public:
     MusicalTypingKeyboard();
+
+    // The two keyboard modes. typing = the QWERTY/computer-typing keyboard
+    // (frame 0); piano = the full piano keyboard (frame 1). The 🎹/⌨ toggle
+    // buttons baked into each frame switch between them on click; set_mode does
+    // it programmatically. Switching REDRAWS the content and changes the view's
+    // intrinsic size (typing is taller than piano), so the host re-lays-out.
+    enum class Mode { typing = kTypingFrame, piano = kPianoFrame };
+    void set_mode(Mode mode);
+    Mode mode() const;
 
     // Notes produced by typing (computer keyboard) OR clicking the keys.
     // `velocity` is 0..1. Wire to a synth/sampler note sink.

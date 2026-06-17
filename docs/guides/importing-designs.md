@@ -225,6 +225,48 @@ Token values can contain simple math: `"{spacing.base} * 2"` → resolves alias 
 
 The W3C parser handles tokens from: Tokens Studio, Specify, Figma Variables, Stitch Design Systems, Pencil Variables, and any DTCG-format tool.
 
+## Multi-Frame Components (mode toggles / swap links)
+
+Some components have more than one *state frame* — e.g. a keyboard with a
+**typing** mode and a **piano** mode, switched by a toggle button. A
+`DesignFrameView` can hold N frames and swap which one renders:
+
+- `add_frame(svg, elements, panel…)` registers an alternate frame (frame 0 is
+  the constructor's). Each frame has its own SVG, overlay elements, and panel
+  crop — and its own intrinsic size.
+- `set_active_frame(i)` swaps the rendered SVG **and** the view's intrinsic
+  size, then invalidates layout so the host re-sizes. It releases any held
+  momentary key first (no stuck notes across a swap).
+- A `DesignFrameElement` of kind **`swap`** is a swap-link button: clicking its
+  rect calls `set_active_frame(target_frame)`. This is how an in-design toggle
+  control (the 🎹/⌨ buttons in the Musical Typing Keyboard) drives the swap.
+
+### Worked example — re-importing two mode frames
+
+When a design stacks its states in one spec frame (to show them side-by-side),
+import each state **sub-frame** standalone — they become the swap targets:
+
+```bash
+# Typing mode (Figma node 187:15) and piano mode (187:349) of one component.
+python3 tools/import-design/figma_rest_export.py \
+  --file-key <KEY> --node 187:15  --out typing.pulp.json --faithful-vector
+python3 tools/import-design/figma_rest_export.py \
+  --file-key <KEY> --node 187:349 --out piano.pulp.json  --faithful-vector
+```
+
+Each export's faithful SVG (a `data:image/svg+xml;base64` asset in the
+`asset_manifest`) is embedded; the component adds both as frames and wires the
+toggle's buttons as `swap` elements. Re-importing a revised frame is the same
+command on the same node — re-export, re-embed, re-extract rects. See the
+[interaction-linking vocabulary](../../planning/2026-06-17-figma-interaction-linking-vocabulary.md)
+(swap / resize / modal / popover / navigate …) for naming the link in plain
+English at import time. (`MusicalTypingKeyboard` is the reference consumer.)
+
+> Hit-rects for a standalone sub-frame are in the sub-frame's own coordinate
+> space. Extract them from the node's `absoluteBoundingBox` geometry minus the
+> frame origin (the export adds a uniform shadow margin — 6px for these frames),
+> not by transcribing the combined-frame coordinates.
+
 ## Validation
 
 ### Automated Validation Loop
