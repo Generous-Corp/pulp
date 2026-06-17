@@ -399,10 +399,11 @@ void advance_anims(View* v, float dt) {
             if (readout) readout->set_text("Play a key \xe2\x80\x94 last note: " + midi_name(note));
         };
         // Default display mirrors the design's "selected keys shown" illustration
-        // for the typing mode — a held chord (A=C2, W=C#2, G=F#2, U=A2). The live
-        // overlay lights these; the keyboard stays interactive (clicking
-        // plays/lights others), and the toggle reveals the piano mode.
-        const int kTypingHeld[] = {48, 49, 54, 57};   // absolute MIDI at base C2
+        // for the typing mode — the held chord A·W·G·U (relative semitones
+        // 0·1·7·10 → MIDI 48·49·55·58 at base C2). The baked chord is neutralized
+        // in the embed, so the LIVE overlay owns this display; the keyboard stays
+        // interactive (clicking plays/lights others) and the toggle reveals piano.
+        const int kTypingHeld[] = {48, 49, 55, 58};   // A W G U at base C2
         kbp->set_active_notes(kTypingHeld);
         add(std::move(kb), kMargin, y, kw, kh);
         y += kh + 20.0f;

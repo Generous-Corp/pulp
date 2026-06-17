@@ -5,6 +5,7 @@
 
 #include <functional>
 #include <span>
+#include <vector>
 
 namespace pulp::view {
 
@@ -38,8 +39,10 @@ public:
     // The two keyboard modes. typing = the QWERTY/computer-typing keyboard
     // (frame 0); piano = the full piano keyboard (frame 1). The 🎹/⌨ toggle
     // buttons baked into each frame switch between them on click; set_mode does
-    // it programmatically. Switching REDRAWS the content and changes the view's
-    // intrinsic size (typing is taller than piano), so the host re-lays-out.
+    // it programmatically. Switching REDRAWS the content and changes the
+    // reported intrinsic size (typing is taller than piano) and requests a
+    // re-layout — a host that sizes to intrinsic_width()/height() resizes to
+    // match; a fixed-bounds host fits the new frame into its current size.
     enum class Mode { typing = kTypingFrame, piano = kPianoFrame };
     void set_mode(Mode mode);
     Mode mode() const;
@@ -76,13 +79,27 @@ public:
     bool on_key_event(const KeyEvent& event) override;
     void on_focus_changed(bool gained) override;  // release held notes on blur
 
+protected:
+    // On a mode swap (toggle button or set_mode): release any QWERTY-held notes
+    // (so a held key can't sound forever after the typing frame goes away) and
+    // re-apply the external held-note set to the NEW frame's keys (so a host's
+    // sustained chord doesn't visually vanish across the swap).
+    void on_active_frame_changed() override;
+
 private:
     MusicalTypingController controller_;
     bool input_capture_ = true;   // false = host feeds QWERTY; we don't capture keys
-    // Typing element (note == relative semitone 0..15) for a QWERTY semitone, or -1.
+    // Last external held set from set_active_notes; re-applied after a frame swap
+    // so the new frame reflects the host's still-held notes.
+    std::vector<int> held_notes_;
+    // Light every momentary key in the ACTIVE frame whose absolute MIDI is in
+    // `held_notes_`; clear the rest. Shared by set_active_notes + frame swaps.
+    void apply_held_notes();
+    // Typing element (note == relative semitone 0..17) for a QWERTY semitone, or -1.
     int typing_element_for_semitone(int semitone) const;
-    // MIDI note an element maps to: typing keys = base+octave+semitone, piano
-    // keys = their absolute note. Used so clicks emit the right note.
+    // MIDI note an element maps to: in the typing frame, base+octave+semitone; in
+    // the piano frame, the element's absolute MIDI note. Used so clicks emit the
+    // right note. Discriminates by active frame, NOT by note magnitude.
     int midi_for_element(int index) const;
     void light_typing_semitone(int semitone, bool on);
 };
