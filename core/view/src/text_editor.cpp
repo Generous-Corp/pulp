@@ -317,6 +317,21 @@ bool TextEditor::replace_selection_or_insert(std::string text, UndoCoalesce coal
 
 void TextEditor::move_caret(int delta, bool extend) {
     reset_preferred_horizontal();
+    // A plain arrow (no Shift) with an active selection COLLAPSES the selection
+    // to its edge in the direction of travel — without advancing an extra
+    // cluster. Right arrow → caret at the selection end; Left arrow → caret at
+    // the start. The old code always applied the delta first, so collapsing a
+    // selection and pressing → landed one cluster PAST the selection (e.g.
+    // skipping into the next word). Standard macOS/Windows text-edit behavior.
+    if (!extend && has_selection()) {
+        const int lo = std::min(selection_start_, selection_end_);
+        const int hi = std::max(selection_start_, selection_end_);
+        caret_position_ = (delta < 0) ? lo : hi;
+        selection_start_ = selection_end_ = caret_position_;
+        break_undo_coalescing();
+        keep_caret_solid();
+        return;
+    }
     caret_position_ = text_edit::move_clusters(text_, caret_position_, delta);
     if (extend)
         selection_end_ = caret_position_;

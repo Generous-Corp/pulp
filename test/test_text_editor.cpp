@@ -445,8 +445,12 @@ TEST_CASE("TextEditor shift navigation extends and clears selection",
     REQUIRE(editor.has_selection());
     REQUIRE(editor.selected_text() == "ab");
 
+    // A plain Left arrow with a selection collapses to the selection's LEFT
+    // edge (0) without advancing — matching macOS/Windows. (This previously
+    // asserted 1, which was the collapse-then-move-back bug users hit as
+    // "arrow skips a character past the selection".)
     REQUIRE(editor.on_key_event(key_event(KeyCode::left)));
-    REQUIRE(editor.caret_pos() == 1);
+    REQUIRE(editor.caret_pos() == 0);
     REQUIRE_FALSE(editor.has_selection());
 }
 
@@ -1077,4 +1081,54 @@ TEST_CASE("TextEditor select-on-focus selects all on focus", "[view][text_editor
     editor.on_focus_changed(true);
     REQUIRE(editor.has_selection());
     REQUIRE(editor.selected_text() == "Focus me");
+}
+
+// A plain arrow with an active selection collapses to the selection edge in the
+// direction of travel — WITHOUT advancing an extra cluster. Regression for the
+// "→ after selecting a word skips into the next word" bug (adds a space / lands
+// before the next word instead of at the selection end).
+TEST_CASE("TextEditor arrow collapses selection to its edge without moving",
+          "[view][text_editor][selection]") {
+    auto key = [](KeyCode code, uint16_t mods = 0) {
+        KeyEvent ev;
+        ev.key = code;
+        ev.modifiers = mods;
+        ev.is_down = true;
+        return ev;
+    };
+
+    SECTION("right arrow → caret at selection end (after 'analog'), no extra move") {
+        TextEditor editor;
+        editor.set_text("warm analog pads");
+        editor.set_selection(5, 11);  // "analog"
+        REQUIRE(editor.has_selection());
+        REQUIRE(editor.on_key_event(key(KeyCode::right)));
+        REQUIRE_FALSE(editor.has_selection());
+        REQUIRE(editor.caret_pos() == 11);  // right after the 'g', not into "pads"
+    }
+
+    SECTION("left arrow → caret at selection start") {
+        TextEditor editor;
+        editor.set_text("warm analog pads");
+        editor.set_selection(5, 11);
+        REQUIRE(editor.on_key_event(key(KeyCode::left)));
+        REQUIRE_FALSE(editor.has_selection());
+        REQUIRE(editor.caret_pos() == 5);  // start of "analog"
+    }
+
+    SECTION("collapse is independent of selection direction (anchor > active)") {
+        TextEditor editor;
+        editor.set_text("warm analog pads");
+        editor.set_selection(11, 5);  // selected right-to-left
+        REQUIRE(editor.on_key_event(key(KeyCode::right)));
+        REQUIRE(editor.caret_pos() == 11);
+    }
+
+    SECTION("no selection: arrow still advances one cluster") {
+        TextEditor editor;
+        editor.set_text("warm analog pads");
+        editor.set_caret_pos(5);
+        REQUIRE(editor.on_key_event(key(KeyCode::right)));
+        REQUIRE(editor.caret_pos() == 6);
+    }
 }

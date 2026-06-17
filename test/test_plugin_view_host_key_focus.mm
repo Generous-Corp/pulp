@@ -83,8 +83,8 @@ NSView* find_pulp_plugin_view(NSView* parent) {
 
 }  // namespace
 
-TEST_CASE("PluginViewHost (mac CPU) — releasing text-input focus restores the "
-          "host's prior first responder, and a host grab ends text input",
+TEST_CASE("PluginViewHost (mac CPU) — the editor keeps first responder to "
+          "forward keys; a host grab still ends text input",
           "[plugin-view-host][key-focus][mac][cpu]") {
     @autoreleasepool {
         FocusGuard guard;
@@ -117,17 +117,19 @@ TEST_CASE("PluginViewHost (mac CPU) — releasing text-input focus restores the 
         REQUIRE([window makeFirstResponder:host_field]);
         REQUIRE(window.firstResponder == host_field);
 
-        SECTION("claim takes the keyboard; release hands it BACK to the host "
-                "view, not nil") {
+        SECTION("claim takes the keyboard; release KEEPS first responder so the "
+                "view can forward non-text keys to the host") {
             root.claim_input_focus();
             [pulp_view syncKeyFocus];
             REQUIRE(window.firstResponder == pulp_view);
 
             root.release_input_focus();
             [pulp_view syncKeyFocus];
-            // The pre-claim responder is restored — this is what keeps
-            // Logic's Musical Typing alive after a type-in commit.
-            REQUIRE(window.firstResponder == host_field);
+            // New contract: the editor does NOT resign on blur — it stays the
+            // key interceptor and forwards non-text keys (DAW transport /
+            // Musical Typing) to the host. Resigning here is what left Space/R
+            // dead after the user left a field.
+            REQUIRE(window.firstResponder == pulp_view);
         }
 
         SECTION("host re-grab while a widget holds the slot ends its text "
@@ -143,29 +145,27 @@ TEST_CASE("PluginViewHost (mac CPU) — releasing text-input focus restores the 
 
             // resignFirstResponder must have ended the widget's text input:
             // slot cleared, focus-lost delivered (the widget commits its
-            // type-in there), and the editor no longer wants the keyboard.
+            // type-in there). The view itself still accepts first responder
+            // (it stays the key interceptor and forwards non-text keys back to
+            // the host), but it no longer holds the text-input slot.
             REQUIRE(View::focused_input_ == nullptr);
             REQUIRE(root.lost_count == 1);
-            REQUIRE_FALSE([pulp_view acceptsFirstResponder]);
+            REQUIRE([pulp_view acceptsFirstResponder]);  // always YES now
         }
 
-        SECTION("a prior responder that left the window degrades to nil — "
-                "no dangling restore") {
+        SECTION("the host can still reclaim the keyboard explicitly (clicks its "
+                "own control) — the editor does not fight it") {
             root.claim_input_focus();
             [pulp_view syncKeyFocus];
             REQUIRE(window.firstResponder == pulp_view);
 
-            // The saved prior responder disappears from the window's view
-            // tree while the widget holds the keyboard.
-            [host_field removeFromSuperview];
-
+            // Host makes one of its own views first responder. The editor must
+            // let it (it only re-grabs on a fresh focus interaction), so the
+            // host keeps the keyboard.
+            REQUIRE([window makeFirstResponder:host_field]);
             root.release_input_focus();
-            [pulp_view syncKeyFocus];
-            // Identity validation fails → restore falls back to nil (the
-            // window itself). The essential assertions: no crash, and the
-            // departed view did NOT become first responder.
-            REQUIRE(window.firstResponder != host_field);
-            REQUIRE(window.firstResponder != pulp_view);
+            [pulp_view syncKeyFocus];  // wants=false → no grab, no fight
+            REQUIRE(window.firstResponder == host_field);
         }
 
         host->detach();
@@ -224,10 +224,11 @@ TEST_CASE("PluginViewHost (mac CPU) — focus is scoped per editor; a second "
         rootA.claim_input_focus();
         REQUIRE(View::focused_input_ == &rootA);
 
-        // Editor A wants the keyboard; editor B must NOT — its root doesn't own
-        // the global focus slot.
+        // Both editors accept first responder (each is the key interceptor for
+        // its own window). The meaningful scoping is the TEXT-INPUT slot: only
+        // editor A owns it, so only editor A's syncKeyFocus grabs the keyboard.
         REQUIRE([viewA acceptsFirstResponder]);
-        REQUIRE_FALSE([viewB acceptsFirstResponder]);
+        REQUIRE([viewB acceptsFirstResponder]);
 
         // Editor B syncing focus must not steal first responder; editor A's does.
         [viewB syncKeyFocus];
