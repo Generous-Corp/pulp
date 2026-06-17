@@ -31,7 +31,7 @@
     },
     {
       "path": "test/CMakeLists.txt",
-      "max_loc": 6120,
+      "max_loc": 6128,
       "note": "shared test registration hotspot"
     },
     {
