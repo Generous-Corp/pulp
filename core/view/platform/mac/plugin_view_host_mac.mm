@@ -475,6 +475,31 @@ void pulp_plugin_apply_hover_cursor(pulp::view::View* root, pulp::view::Point lo
   }
 }
 
+// Forward a key the plugin did NOT consume to the DAW host, so transport keys
+// (Space = play/stop, R = record, …) keep working while a plugin editor is
+// frontmost. In a DAW like Logic the AU editor opens in its OWN key window;
+// AppKit's responder chain stops at that window, so unconsumed keys never reach
+// the host's arrange window and the user has to click away from the plugin to
+// regain transport. We re-dispatch the event to the host application's main
+// window (the arrange/document window, distinct from the editor's key window).
+// In-process AUv2 only: `NSApp` is the host, so `mainWindow` is the host's. For
+// an out-of-process AUv3 there is no host main window in this process and this
+// no-ops (returns false → normal [super keyDown:] fallback). Returns true when
+// the event was handed off.
+static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
+  @try {
+    NSWindow* host_main = NSApp.mainWindow;
+    NSWindow* mine = self.window;
+    if (host_main != nil && host_main != mine) {
+      [host_main sendEvent:event];
+      return true;
+    }
+  } @catch (...) {
+    // Never let a forwarding attempt crash the host.
+  }
+  return false;
+}
+
 } // namespace
 
 @implementation PulpPluginView {
@@ -522,7 +547,11 @@ void pulp_plugin_apply_hover_cursor(pulp::view::View* root, pulp::view::Point lo
     return [super resignFirstResponder];
 }
 - (void)keyDown:(NSEvent*)event {
-    if (!pulp_plugin_key_down(self.rootView, event)) [super keyDown:event];
+    if (!pulp_plugin_key_down(self.rootView, event)) {
+        // No focused field consumed it — try the DAW host (transport keys),
+        // then fall back to the normal responder chain.
+        if (!pulp_plugin_forward_key_to_host(self, event)) [super keyDown:event];
+    }
     [self syncKeyFocus];  // commit/escape may have ended text input — release
 }
 // Cmd-chords (⌘A/⌘C/⌘V/⌘X/⌘Z) arrive here BEFORE keyDown:; route them to the
@@ -1156,7 +1185,11 @@ private:
     return [super resignFirstResponder];
 }
 - (void)keyDown:(NSEvent*)event {
-    if (!pulp_plugin_key_down(self.rootView, event)) [super keyDown:event];
+    if (!pulp_plugin_key_down(self.rootView, event)) {
+        // No focused field consumed it — try the DAW host (transport keys),
+        // then fall back to the normal responder chain.
+        if (!pulp_plugin_forward_key_to_host(self, event)) [super keyDown:event];
+    }
     [self syncKeyFocus];
 }
 // Cmd-chords (⌘A/⌘C/⌘V/⌘X/⌘Z) arrive here BEFORE keyDown:; route them to the
