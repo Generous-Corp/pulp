@@ -357,3 +357,81 @@ TEST_CASE("MusicalTypingKeyboard: no baked-lit demo chord in the embedded SVGs",
     REQUIRE(count_teal(detail::musical_typing_typing_svg_b64()) <= 4);
     REQUIRE(count_teal(detail::musical_typing_piano_svg_b64()) <= 4);
 }
+
+// ── On-screen command controls (octave / velocity / sustain / pitch-bend) ───
+
+TEST_CASE("MusicalTypingKeyboard: typing frame carries the command controls",
+          "[view][musical-typing][controls]") {
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    int actions = 0;
+    for (int i = 0; i < kb.element_count(); ++i)
+        if (kb.element_kind(i) == K::action) ++actions;
+    REQUIRE(actions == 13);   // octave±, velocity±, sustain, 8 pitch-bend presets
+    // Piano frame has no command controls (just keys + the toggle).
+    kb.set_mode(Mode::piano);
+    int piano_actions = 0;
+    for (int i = 0; i < kb.element_count(); ++i)
+        if (kb.element_kind(i) == K::action) ++piano_actions;
+    REQUIRE(piano_actions == 0);
+}
+
+TEST_CASE("MusicalTypingKeyboard: on-screen octave −/+ shift the played note",
+          "[view][musical-typing][controls]") {
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    std::vector<int> ons;
+    kb.on_note_on = [&](int n, float) { ons.push_back(n); };
+    auto tap_a = [&] { KeyEvent e{}; e.key = KeyCode::a; e.is_down = true; kb.on_key_event(e);
+                       e.is_down = false; kb.on_key_event(e); };
+
+    kb.on_mouse_down({171, 229}); kb.on_mouse_up({171, 229});  // octave_up (155,213)
+    tap_a();
+    REQUIRE(ons.back() == 60);   // C3
+    kb.on_mouse_down({130, 229}); kb.on_mouse_up({130, 229});  // octave_down (114,213)
+    kb.on_mouse_down({130, 229}); kb.on_mouse_up({130, 229});
+    tap_a();
+    REQUIRE(ons.back() == 36);   // C1
+    REQUIRE(kb.controller().octave_shift() == -1);
+}
+
+TEST_CASE("MusicalTypingKeyboard: on-screen velocity −/+ adjust the controller",
+          "[view][musical-typing][controls]") {
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    const float v0 = kb.controller().velocity;
+    kb.on_mouse_down({378, 229}); kb.on_mouse_up({378, 229});  // vel_up (362,213)
+    REQUIRE(kb.controller().velocity > v0);
+    const float v1 = kb.controller().velocity;
+    kb.on_mouse_down({337, 229}); kb.on_mouse_up({337, 229});  // vel_down (321,213)
+    REQUIRE(kb.controller().velocity < v1);
+}
+
+TEST_CASE("MusicalTypingKeyboard: sustain pad toggles and reports on_sustain",
+          "[view][musical-typing][controls]") {
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    std::vector<bool> states;
+    kb.on_sustain = [&](bool on) { states.push_back(on); };
+    kb.on_mouse_down({54, 156}); kb.on_mouse_up({54, 156});  // sustain (21,110,66,92)
+    kb.on_mouse_down({54, 156}); kb.on_mouse_up({54, 156});
+    REQUIRE(states == std::vector<bool>{true, false});
+}
+
+TEST_CASE("MusicalTypingKeyboard: pitch-bend presets emit a normalized bend",
+          "[view][musical-typing][controls]") {
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    std::vector<float> bends;
+    kb.on_pitch_bend = [&](float b) { bends.push_back(b); };
+    kb.on_mouse_down({126, 82}); kb.on_mouse_up({126, 82});  // pb_0 (108,63) → 0.0
+    kb.on_mouse_down({428, 82}); kb.on_mouse_up({428, 82});  // pb_7 (410,63) → 1.0
+    REQUIRE(bends.size() == 2);
+    REQUIRE(bends[0] == 0.0f);
+    REQUIRE(bends[1] == 1.0f);
+}
+
+TEST_CASE("MusicalTypingKeyboard: a command-button click plays no note",
+          "[view][musical-typing][controls]") {
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    std::vector<int> ons;
+    kb.on_note_on = [&](int n, float) { ons.push_back(n); };
+    kb.on_mouse_down({171, 229}); kb.on_mouse_up({171, 229});  // octave_up
+    kb.on_mouse_down({54, 156});  kb.on_mouse_up({54, 156});   // sustain
+    REQUIRE(ons.empty());
+}

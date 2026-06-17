@@ -76,6 +76,10 @@ public:
     /// compute the MIDI note a typing key maps to for non-keyboard input (clicks).
     int octave_shift() const { return octave_shift_; }
 
+    /// Set the octave shift directly (clamped to a sane ±4-octave range). Lets an
+    /// on-screen octave −/+ control drive the same state the z/x keys do.
+    void set_octave_shift(int s) { octave_shift_ = std::clamp(s, -4, 4); }
+
     /// Release every held note (focus loss / capture disabled). Safe to call any
     /// time; a no-op when nothing is held.
     void all_notes_off() {

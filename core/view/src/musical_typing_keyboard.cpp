@@ -1,6 +1,8 @@
 #include <pulp/view/musical_typing_keyboard.hpp>
 #include <pulp/runtime/base64.hpp>
 
+#include <algorithm>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -37,6 +39,30 @@ void append_toggle(std::vector<DesignFrameElement>& els) {
     add_swap(62, kTypingFrame);  // keyboard icon → typing mode (frame 0)
 }
 
+// The typing frame's on-screen command controls (action elements), in frame-0
+// (732×266) coords from Figma node 187:15: octave −/+ and velocity −/+ (the
+// bottom Z/X · C/V buttons), the sustain pad, and the 8 pitch-bend preset
+// buttons. Clicking one fires on_action(id); MusicalTypingKeyboard maps the id
+// to the controller (octave/velocity) or a callback (sustain/pitch-bend).
+void append_controls(std::vector<DesignFrameElement>& els) {
+    auto add = [&](std::string id, float x, float y, float w, float h) {
+        DesignFrameElement e;
+        e.kind = DesignFrameElement::Kind::action;
+        e.action = std::move(id);
+        e.x = x; e.y = y; e.w = w; e.h = h;
+        els.push_back(e);
+    };
+    add("octave_down", 114, 213, 32, 32);
+    add("octave_up",   155, 213, 32, 32);
+    add("vel_down",    321, 213, 32, 32);
+    add("vel_up",      362, 213, 32, 32);
+    add("sustain",      21, 110, 66, 92);
+    // 8 pitch-bend preset buttons, left→right (the design's "− + off … max" row).
+    static const float pbx[] = {108, 150, 200, 242, 284, 326, 368, 410};
+    for (int i = 0; i < 8; ++i)
+        add("pb_" + std::to_string(i), pbx[i], 63, 36, 38);
+}
+
 // Typing-mode playable keys, frame-0 (732×266) coords extracted from Figma node
 // 187:15. `note` is the relative semitone (0..17) in the Logic-style
 // "a w s e d f t g y h u j k o l p ; '" row. Black keys are narrower/shorter, so
@@ -61,6 +87,7 @@ std::vector<DesignFrameElement> build_typing_frame() {
         els.push_back(e);
     }
     append_toggle(els);
+    append_controls(els);   // octave / velocity / sustain / pitch-bend (typing only)
     return els;
 }
 
@@ -127,6 +154,25 @@ MusicalTypingKeyboard::MusicalTypingKeyboard()
     on_gesture_end = [this](int i) {
         const int n = midi_for_element(i);
         if (n >= 0 && on_note_off) on_note_off(n);
+    };
+
+    // On-screen command buttons (Kind::action) → controller state or a callback.
+    // octave/velocity drive the SAME controller the z/x·c/v keys do (so the next
+    // note reflects them); sustain + pitch-bend are surfaced as callbacks the
+    // host wires. (Modulation has no baked control in this design — the label is
+    // a placeholder — so on_modulation is defined for the contract but unwired.)
+    on_action = [this](const std::string& a) {
+        if (a == "octave_down")     controller_.set_octave_shift(controller_.octave_shift() - 1);
+        else if (a == "octave_up")  controller_.set_octave_shift(controller_.octave_shift() + 1);
+        else if (a == "vel_down")   controller_.velocity = std::clamp(controller_.velocity - kVelStep, 0.0f, 1.0f);
+        else if (a == "vel_up")     controller_.velocity = std::clamp(controller_.velocity + kVelStep, 0.0f, 1.0f);
+        else if (a == "sustain") {  sustain_ = !sustain_; if (on_sustain) on_sustain(sustain_); }
+        else if (a.rfind("pb_", 0) == 0) {
+            // 8 preset buttons, left→right → a normalized 0..1 bend; the host maps
+            // it to its own bend range.
+            const int i = std::clamp(std::atoi(a.c_str() + 3), 0, 7);
+            if (on_pitch_bend) on_pitch_bend(static_cast<float>(i) / 7.0f);
+        }
     };
 }
 
