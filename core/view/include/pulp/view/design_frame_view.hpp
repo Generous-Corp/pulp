@@ -132,9 +132,13 @@ public:
     // is the importer's `swap` link target: a control whose job is to replace
     // the on-screen content with another frame (e.g. a piano⇄typing mode
     // toggle). set_active_frame swaps the rendered SVG, the overlay set, AND the
-    // view's intrinsic size, then invalidates layout so the host re-sizes to the
-    // new frame. add_frame returns the new frame's index; frame 0 is the one the
-    // constructor built. Switching frames releases any held momentary key.
+    // reported intrinsic size, then calls invalidate_layout() to REQUEST a
+    // re-layout. Whether the surface actually resizes is up to the host: a host
+    // that sizes to intrinsic_width()/height() follows the new frame; a
+    // fixed-bounds host keeps its size and the new frame is fit (letterboxed)
+    // into it — clicks still map correctly either way. add_frame returns the new
+    // frame's index; frame 0 is the constructor's. Switching releases any held
+    // momentary key (and subclasses can react via on_active_frame_changed).
     int add_frame(std::string svg, std::vector<DesignFrameElement> elements,
                   float panel_x = -1, float panel_y = -1,
                   float panel_w = -1, float panel_h = -1);
@@ -176,6 +180,15 @@ public:
     void on_mouse_down(Point pos) override;
     void on_mouse_drag(Point pos) override;
     void on_mouse_up(Point pos) override;
+
+protected:
+    // Called after the active frame changes (set_active_frame or the initial
+    // constructor activation). Subclasses override to react to a frame swap —
+    // e.g. release any of their own held input and re-apply external highlight
+    // state to the new frame's elements. Default: no-op. (Invoked from the
+    // constructor's activate_frame(0) too, where virtual dispatch resolves to
+    // this base no-op — subclass state isn't built yet.)
+    virtual void on_active_frame_changed() {}
 
 private:
     // Map a choice element's selected index to a normalized [0,1] value and back,

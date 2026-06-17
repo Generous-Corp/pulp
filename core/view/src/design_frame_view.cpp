@@ -255,6 +255,7 @@ void DesignFrameView::activate_frame(int index) {
     active_frame_ = index;
     build_overlays();
     invalidate_layout();
+    on_active_frame_changed();
 }
 
 int DesignFrameView::add_frame(std::string svg, std::vector<DesignFrameElement> elements,

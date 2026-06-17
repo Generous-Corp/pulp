@@ -257,10 +257,10 @@ python3 tools/import-design/figma_rest_export.py \
 Each export's faithful SVG (a `data:image/svg+xml;base64` asset in the
 `asset_manifest`) is embedded; the component adds both as frames and wires the
 toggle's buttons as `swap` elements. Re-importing a revised frame is the same
-command on the same node — re-export, re-embed, re-extract rects. See the
-[interaction-linking vocabulary](../../planning/2026-06-17-figma-interaction-linking-vocabulary.md)
-(swap / resize / modal / popover / navigate …) for naming the link in plain
-English at import time. (`MusicalTypingKeyboard` is the reference consumer.)
+command on the same node — re-export, re-embed, re-extract rects. Name the link
+in plain English at import time using the interaction-linking vocabulary (swap /
+resize / modal / popover / navigate / open-window / drawer); `swap` is the one
+used here. (`MusicalTypingKeyboard` is the reference consumer.)
 
 > Hit-rects for a standalone sub-frame are in the sub-frame's own coordinate
 > space. Extract them from the node's `absoluteBoundingBox` geometry minus the

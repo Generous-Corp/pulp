@@ -49,6 +49,19 @@
   - repo routing uses PULP_SANITIZER_TSAN_RUNS_ON_JSON, not Namespace vars
   - TARTCI_MACOS_VM_CAP=1: one VM, and the idle gate yields it to the required
     `macos` gate.
+  - TARTCI_GH_CLI=ghapp: route the provider's GitHub API traffic through the
+    GitHub-App CLI wrapper (separate rate-limit bucket), NOT the shared personal
+    PAT. Required — every host's per-poll calls are the dominant throttle; a
+    sanitizer VM left on bare `gh` would multiply it. (`ghapp` is on the PATH
+    above via $HOME/.local/bin.)
+
+  ── SHARED gate host vs DEDICATED host ───────────────────────────────────────
+  The TARTCI_YIELD_TO_* keys below are the idle gate, correct when this lane
+  SHARES a host with the required gate (e.g. an interim Mac Studio stint). On a
+  DEDICATED advisory host (e.g. the M1), DELETE both TARTCI_YIELD_TO_* keys: the
+  idle gate yields to repo-wide "Build and Test" demand, which on a dedicated box
+  (whose gate jobs run elsewhere) would needlessly idle it. Dedicated = idle gate
+  OFF; shared = idle gate ON. See the tart-ci skill.
 
   Prereq: install tartci into $HOME (provides $HOME/.local/bin/tartci) and keep
   the macOS golden under $HOME/VMs — same as the build runner.
@@ -114,6 +127,8 @@
         <string>$HOME/.cache/pulp-ci</string>
         <key>TARTCI_HOME</key>
         <string>$HOME/.tartci</string>
+        <key>TARTCI_GH_CLI</key>
+        <string>ghapp</string>
         <key>TARTCI_MACOS_GOLDEN</key>
         <string>pulp-build-runner:latest</string>
         <key>TARTCI_MACOS_VM_CAP</key>
