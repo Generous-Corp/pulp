@@ -143,10 +143,12 @@ TEST_CASE("PluginViewHost (mac CPU) — releasing text-input focus restores the 
 
             // resignFirstResponder must have ended the widget's text input:
             // slot cleared, focus-lost delivered (the widget commits its
-            // type-in there), and the editor no longer wants the keyboard.
+            // type-in there). The view itself still accepts first responder
+            // (it stays the key interceptor and forwards non-text keys back to
+            // the host), but it no longer holds the text-input slot.
             REQUIRE(View::focused_input_ == nullptr);
             REQUIRE(root.lost_count == 1);
-            REQUIRE_FALSE([pulp_view acceptsFirstResponder]);
+            REQUIRE([pulp_view acceptsFirstResponder]);  // always YES now
         }
 
         SECTION("a prior responder that left the window degrades to nil — "
@@ -224,10 +226,11 @@ TEST_CASE("PluginViewHost (mac CPU) — focus is scoped per editor; a second "
         rootA.claim_input_focus();
         REQUIRE(View::focused_input_ == &rootA);
 
-        // Editor A wants the keyboard; editor B must NOT — its root doesn't own
-        // the global focus slot.
+        // Both editors accept first responder (each is the key interceptor for
+        // its own window). The meaningful scoping is the TEXT-INPUT slot: only
+        // editor A owns it, so only editor A's syncKeyFocus grabs the keyboard.
         REQUIRE([viewA acceptsFirstResponder]);
-        REQUIRE_FALSE([viewB acceptsFirstResponder]);
+        REQUIRE([viewB acceptsFirstResponder]);
 
         // Editor B syncing focus must not steal first responder; editor A's does.
         [viewB syncKeyFocus];

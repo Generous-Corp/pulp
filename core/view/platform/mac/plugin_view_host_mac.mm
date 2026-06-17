@@ -477,24 +477,31 @@ void pulp_plugin_apply_hover_cursor(pulp::view::View* root, pulp::view::Point lo
 
 // Forward a key the plugin did NOT consume to the DAW host, so transport keys
 // (Space = play/stop, R = record, …) keep working while a plugin editor is
-// frontmost. In a DAW like Logic the AU editor opens in its OWN key window;
-// AppKit's responder chain stops at that window, so unconsumed keys never reach
-// the host's arrange window and the user has to click away from the plugin to
-// regain transport. We re-dispatch the event to the host application's main
-// window (the arrange/document window, distinct from the editor's key window).
-// In-process AUv2 only: `NSApp` is the host, so `mainWindow` is the host's. For
-// an out-of-process AUv3 there is no host main window in this process and this
-// no-ops (returns false → normal [super keyDown:] fallback). Returns true when
-// the event was handed off.
+// frontmost. The DAW embeds our editor as a SUBVIEW of its own container view
+// in the SAME window, so we hand the key into the host's responder chain via
+// that parent view: make the host view first responder, deliver the key, then
+// take first responder back so the editor keeps receiving keys. Mirrors the
+// technique in JUCE's AU client (juce_audio_plugin_client_AU_1.mm). (An earlier
+// attempt forwarded to NSApp.mainWindow — a DIFFERENT window — which Logic
+// ignored.) Returns true when the event was handed off.
 static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
+  // Re-entrancy guard: delivering to the host can bounce back through our
+  // keyDown: in some hosts. Never re-forward the same in-flight event.
+  static bool s_forwarding = false;
+  if (s_forwarding) return false;
   @try {
-    NSWindow* host_main = NSApp.mainWindow;
-    NSWindow* mine = self.window;
-    if (host_main != nil && host_main != mine) {
-      [host_main sendEvent:event];
-      return true;
-    }
+    NSView* host_view = self.superview;
+    NSWindow* win = self.window;
+    if (host_view == nil || win == nil) return false;
+    s_forwarding = true;
+    [win makeFirstResponder:host_view];
+    [host_view keyDown:event];
+    if (self.superview != nil && self.window != nil)
+      [self.window makeFirstResponder:self];
+    s_forwarding = false;
+    return true;
   } @catch (...) {
+    s_forwarding = false;
     // Never let a forwarding attempt crash the host.
   }
   return false;
@@ -509,16 +516,18 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
 }
 
 - (BOOL)isFlipped { return NO; }
-// Keyboard-focus contract (host-etiquette): a plugin editor must NOT hold the
-// host window's first responder except while one of its widgets is actively
-// receiving text input. An editor that grabs first responder on every click
-// swallows the host's keyboard routing — in Logic that silences Musical
-// Typing on software-instrument tracks the moment the user touches a plugin
-// control, until they refocus a host view (perceived as "adjusting the plugin
-// kills the instrument"). So: accept first responder only while a pulp widget
-// holds the input-focus slot, and hand focus back the moment it clears.
+// Keyboard-focus contract (host-etiquette). The editor stays first responder
+// while it is shown so it can INTERCEPT every key: keys for a focused text
+// field are consumed; everything else is forwarded back to the host (see
+// pulp_plugin_forward_key_to_host in -keyDown:). That forward is what lets the
+// host keep its keyboard routing — DAW transport (Space/R) AND Logic Musical
+// Typing on software-instrument tracks — even while a plugin control is
+// focused. (Previously this returned first-responder only while a widget held
+// the text-input slot, which fixed Musical Typing by NOT grabbing the keyboard
+// but left no path to hand transport keys back after the user left a field;
+// the forward supersedes that approach.)
 - (BOOL)acceptsFirstResponder {
-    return pulp_focus_under_root(self.rootView) != nullptr;
+    return YES;
 }
 - (void)syncKeyFocus {
     NSWindow* win = self.window;
@@ -1156,11 +1165,11 @@ private:
 }
 
 // Keyboard-focus contract — see PulpPluginView::acceptsFirstResponder above:
-// only hold the host window's first responder while a pulp widget is in
-// active text input, and hand it back the moment that ends, so the host's
-// own keyboard routing (e.g. Logic's Musical Typing) keeps working.
+// stay first responder while shown and INTERCEPT keys; consume keys for a
+// focused field and forward everything else back to the host (transport +
+// Musical Typing) via pulp_plugin_forward_key_to_host in -keyDown:.
 - (BOOL)acceptsFirstResponder {
-    return pulp_focus_under_root(self.rootView) != nullptr;
+    return YES;
 }
 - (void)syncKeyFocus {
     NSWindow* win = self.window;
