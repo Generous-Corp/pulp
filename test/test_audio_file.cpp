@@ -879,11 +879,14 @@ TEST_CASE("MemoryMappedAudioReader opens WAV files and reads frame ranges",
     REQUIRE_THAT(right[0], WithinAbs(-0.5f, 0.001f));
     REQUIRE_THAT(right[1], WithinAbs(-0.25f, 0.001f));
 
-    float mono[2] = {-9.0f, -9.0f};
+    // Destination must hold num_frames (8 here): read_frames fills the whole
+    // span — decoded frames followed by a zero-filled past-EOF tail.
+    float mono[8];
+    for (float& m : mono) m = -9.0f;
     float* mono_channel[] = {mono};
     REQUIRE(reader.read_frames(mono_channel, 1, 3, 8));
-    REQUIRE_THAT(mono[0], WithinAbs(0.75f, 0.001f));
-    REQUIRE_THAT(mono[1], WithinAbs(-9.0f, 0.001f));
+    REQUIRE_THAT(mono[0], WithinAbs(0.75f, 0.001f));  // last in-range frame
+    REQUIRE_THAT(mono[1], WithinAbs(0.0f, 0.001f));   // past EOF → zero-filled
 
     auto all = reader.read_all();
     REQUIRE(all.has_value());
@@ -932,7 +935,7 @@ TEST_CASE("MemoryMappedAudioReader fails closed for unsupported mapped files",
     std::filesystem::remove(text_path);
 }
 
-TEST_CASE("MemoryMappedAudioReader leaves destinations untouched past EOF",
+TEST_CASE("MemoryMappedAudioReader zero-fills destinations past EOF",
           "[audio][file][mmap][issue-640]") {
     auto path = unique_temp_audio_path("_mmap_eof.wav");
     std::filesystem::remove(path);
@@ -947,9 +950,11 @@ TEST_CASE("MemoryMappedAudioReader leaves destinations untouched past EOF",
 
     float dest[2] = {-7.0f, -8.0f};
     float* channels[] = {dest};
+    // Start entirely past EOF: read_frames still returns true and zero-fills the
+    // whole requested span so the caller always gets defined output.
     REQUIRE(reader.read_frames(channels, 1, 99, 2));
-    REQUIRE(dest[0] == -7.0f);
-    REQUIRE(dest[1] == -8.0f);
+    REQUIRE(dest[0] == 0.0f);
+    REQUIRE(dest[1] == 0.0f);
 
     reader.close();
     std::filesystem::remove(path);
