@@ -1,0 +1,70 @@
+// Musical Typing Keyboard — focused live demo. Opens a GPU window with JUST the
+// MusicalTypingKeyboard primitive so it can be played/dragged directly (no app
+// to build into). Notes + controls print to the terminal so the wiring is
+// visible. Headless: `--screenshot out.png` renders without opening a window.
+//
+//   ./build/examples/mtk-demo/pulp-mtk-demo                 # interactive window
+//   ./build/examples/mtk-demo/pulp-mtk-demo --screenshot /tmp/mtk.png
+//
+// In the window: click keys, type a w s e d f t g y h u j k o l p, z/x octave,
+// c/v velocity, click 🎹/⌨ to toggle piano/typing, the on-screen octave/velocity
+// buttons, sustain, and the pitch-bend presets. Readouts (OCTAVE/VEL/PITCH BEND)
+// track state live.
+
+#include <pulp/design/design_system.hpp>      // ink_signal_theme
+#include <pulp/view/musical_typing_keyboard.hpp>
+#include <pulp/view/screenshot.hpp>
+#include <pulp/view/window_host.hpp>
+
+#include <cstdio>
+#include <cstring>
+#include <memory>
+#include <string>
+
+using namespace pulp::view;
+
+namespace {
+std::string note_name(int midi) {
+    static const char* pc[] = {"C", "C#", "D", "D#", "E", "F",
+                               "F#", "G", "G#", "A", "A#", "B"};
+    return std::string(pc[((midi % 12) + 12) % 12]) + std::to_string(midi / 12 - 2);
+}
+}  // namespace
+
+int main(int argc, char** argv) {
+    const char* screenshot = nullptr;
+    for (int i = 1; i < argc; ++i)
+        if (!std::strcmp(argv[i], "--screenshot") && i + 1 < argc) screenshot = argv[++i];
+
+    auto kb = std::make_unique<MusicalTypingKeyboard>();
+    kb->set_theme(pulp::design::ink_signal_theme(/*dark=*/true));
+    kb->on_note_on  = [](int n, float v) { std::printf("note on  %-3d %-3s  vel %.2f\n", n, note_name(n).c_str(), v); };
+    kb->on_note_off = [](int n)          { std::printf("note off %-3d %-3s\n", n, note_name(n).c_str()); };
+    kb->on_pitch_bend = [](float b)      { std::printf("pitch bend %.2f\n", b); };
+    kb->on_sustain    = [](bool on)      { std::printf("sustain %s\n", on ? "on" : "off"); };
+
+    const float w = kb->panel_width(), h = kb->panel_height();
+
+    if (screenshot) {
+        kb->set_bounds({0, 0, w, h});
+        const bool ok = render_to_file(*kb, static_cast<uint32_t>(w), static_cast<uint32_t>(h),
+                                       screenshot, 2.0f, ScreenshotBackend::skia);
+        std::printf(ok ? "wrote %s\n" : "render failed (no Skia?)\n", screenshot);
+        return ok ? 0 : 1;
+    }
+
+    WindowOptions opts;
+    opts.title = "Musical Typing Keyboard — Pulp demo";
+    opts.width = w; opts.height = h;
+    opts.min_width = w; opts.min_height = 176.0f;  // piano mode is shorter
+    opts.resizable = true;
+    opts.use_gpu = true;     // GPU (Skia Graphite) — required for the faithful SVG
+    auto window = WindowHost::create(*kb, opts);
+    if (!window) { std::fprintf(stderr, "failed to create window host\n"); return 1; }
+    window->set_design_viewport(w, h);   // aspect-locked fit; piano mode letterboxes
+    window->set_close_callback([]() {});
+    std::printf("Musical Typing Keyboard demo — GPU window. Play with the mouse/keys; "
+                "close the window to exit.\n");
+    window->run_event_loop();
+    return 0;
+}

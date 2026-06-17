@@ -39,6 +39,7 @@ if(PULP_ENABLE_DESIGN_IMPORT)
     add_subdirectory(ink-signal-sampler)
     add_subdirectory(component-shots)
     add_subdirectory(ink-signal-showcase)
+    add_subdirectory(mtk-demo)
 endif()
 
 # Phase 6: PulpDrums (generative drum sequencer MIDI effect)

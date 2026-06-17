@@ -104,7 +104,11 @@ private:
     MusicalTypingController controller_;
     bool input_capture_ = true;   // false = host feeds QWERTY; we don't capture keys
     bool sustain_ = false;        // sustain-pad toggle state (surfaced via on_sustain)
+    int pb_preset_ = 0;           // selected pitch-bend preset (0 = none) for the readout
     static constexpr float kVelStep = 1.0f / 16.0f;  // on-screen velocity −/+ increment
+    // Refresh the live OCTAVE / VEL / PITCH BEND value_label readouts of the
+    // active frame from current state. Called after any change + on frame swap.
+    void update_readouts();
     // Last external held set from set_active_notes; re-applied after a frame swap
     // so the new frame reflects the host's still-held notes.
     std::vector<int> held_notes_;

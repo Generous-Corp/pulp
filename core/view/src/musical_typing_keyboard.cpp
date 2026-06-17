@@ -2,6 +2,7 @@
 #include <pulp/runtime/base64.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <string>
 #include <vector>
@@ -54,6 +55,9 @@ void append_controls(std::vector<DesignFrameElement>& els) {
     };
     add("octave_down", 114, 213, 32, 32);
     add("octave_up",   155, 213, 32, 32);
+    // The < > buttons flanking the top overview strip also step the octave.
+    add("octave_down", 117, 23, 22, 24);
+    add("octave_up",   550, 23, 22, 24);
     add("vel_down",    321, 213, 32, 32);
     add("vel_up",      362, 213, 32, 32);
     add("sustain",      21, 110, 66, 92);
@@ -61,6 +65,39 @@ void append_controls(std::vector<DesignFrameElement>& els) {
     static const float pbx[] = {108, 150, 200, 242, 284, 326, 368, 410};
     for (int i = 0; i < 8; ++i)
         add("pb_" + std::to_string(i), pbx[i], 63, 36, 38);
+}
+
+// Live value readouts (Kind::value_label) over the design's baked OCTAVE / VEL /
+// PITCH BEND numbers. The `action` field tags which value each shows so
+// update_readouts() can refresh them. Rects are the baked glyph boxes (build
+// suppresses the frozen glyphs there). `who` = "typing" (full set) or "piano"
+// (octave only — the piano toolbar shows just OCTAVE).
+void append_readouts(std::vector<DesignFrameElement>& els, const char* who) {
+    auto add = [&](std::string tag, float x, float y, float w, float h) {
+        DesignFrameElement e;
+        e.kind = DesignFrameElement::Kind::value_label;
+        e.action = std::move(tag);   // reused as the readout id
+        e.x = x; e.y = y; e.w = w; e.h = h;
+        els.push_back(e);
+    };
+    if (std::string(who) == "typing") {
+        add("octave", 635, 26, 16, 19);   // top "OCTAVE C2"
+        add("octave", 75, 219, 17, 21);   // bottom "OCTAVE C2"
+        add("velocity", 695, 26, 16, 19); // top "VEL 98"
+        add("velocity", 282, 219, 17, 21);// bottom "VELOCITY 98"
+        add("pitchbend", 90, 74, 8, 18);  // "PITCH BEND 0"
+    } else {  // piano
+        add("octave", 695, 26, 16, 19);   // "OCTAVE C2"
+    }
+}
+
+// MIDI note → pitch-class + octave, in the design's convention where C2 = 48
+// (so octave = midi/12 − 2): 48→"C2", 60→"C3", 36→"C1".
+std::string note_name(int midi) {
+    static const char* kPc[] = {"C", "C#", "D", "D#", "E", "F",
+                                "F#", "G", "G#", "A", "A#", "B"};
+    midi = std::clamp(midi, 0, 127);
+    return std::string(kPc[midi % 12]) + std::to_string(midi / 12 - 2);
 }
 
 // Typing-mode playable keys, frame-0 (732×266) coords extracted from Figma node
@@ -88,6 +125,7 @@ std::vector<DesignFrameElement> build_typing_frame() {
     }
     append_toggle(els);
     append_controls(els);   // octave / velocity / sustain / pitch-bend (typing only)
+    append_readouts(els, "typing");   // live OCTAVE / VEL / PITCH BEND values
     return els;
 }
 
@@ -119,6 +157,15 @@ std::vector<DesignFrameElement> build_piano_frame() {
         els.push_back(e);
     }
     append_toggle(els);
+    // The < > buttons flanking the piano overview strip step the octave.
+    auto add_oct = [&](std::string id, float x) {
+        DesignFrameElement e; e.kind = DesignFrameElement::Kind::action;
+        e.action = std::move(id); e.x = x; e.y = 23; e.w = 22; e.h = 24;
+        els.push_back(e);
+    };
+    add_oct("octave_down", 117);
+    add_oct("octave_up", 610);
+    append_readouts(els, "piano");   // live OCTAVE value (piano toolbar)
     return els;
 }
 }  // namespace
@@ -169,11 +216,28 @@ MusicalTypingKeyboard::MusicalTypingKeyboard()
         else if (a == "sustain") {  sustain_ = !sustain_; if (on_sustain) on_sustain(sustain_); }
         else if (a.rfind("pb_", 0) == 0) {
             // 8 preset buttons, left→right → a normalized 0..1 bend; the host maps
-            // it to its own bend range.
+            // it to its own bend range. Track the 1-based preset for the readout.
             const int i = std::clamp(std::atoi(a.c_str() + 3), 0, 7);
+            pb_preset_ = i + 1;
             if (on_pitch_bend) on_pitch_bend(static_cast<float>(i) / 7.0f);
         }
+        update_readouts();   // reflect the new octave / velocity / pitch-bend value
     };
+
+    controller_.velocity = 98.0f / 127.0f;  // match the design's "VEL 98" default
+    update_readouts();                       // seed the readouts to current state
+}
+
+void MusicalTypingKeyboard::update_readouts() {
+    const std::string oct = note_name(controller_.base_note() + controller_.octave_shift() * 12);
+    const int vel127 = static_cast<int>(std::lround(controller_.velocity * 127.0f));
+    for (int i = 0; i < element_count(); ++i) {
+        if (element_kind(i) != DesignFrameElement::Kind::value_label) continue;
+        const std::string& tag = element_action(i);
+        if (tag == "octave")         set_element_text(i, oct);
+        else if (tag == "velocity")  set_element_text(i, std::to_string(vel127));
+        else if (tag == "pitchbend") set_element_text(i, std::to_string(pb_preset_));
+    }
 }
 
 void MusicalTypingKeyboard::set_mode(Mode mode) {
@@ -213,6 +277,7 @@ void MusicalTypingKeyboard::on_active_frame_changed() {
     // sustained chord doesn't visually vanish across the swap.
     controller_.all_notes_off();
     apply_held_notes();
+    update_readouts();   // the new frame's readouts (e.g. piano OCTAVE) reflect state
 }
 
 void MusicalTypingKeyboard::set_input_capture(bool capture) {
@@ -231,6 +296,8 @@ bool MusicalTypingKeyboard::on_key_event(const KeyEvent& event) {
         if (event.is_down && !event.is_repeat) light_typing_semitone(semi, true);
         else if (!event.is_down)               light_typing_semitone(semi, false);
     }
+    // z/x (octave) and c/v (velocity) change controller state the readouts show.
+    if (consumed && semi < 0) update_readouts();
     return consumed;
 }
 
