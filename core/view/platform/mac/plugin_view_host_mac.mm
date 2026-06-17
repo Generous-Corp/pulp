@@ -378,7 +378,7 @@ bool pulp_plugin_key_down(pulp::view::View* root, NSEvent* event) {
 // restore matters: handing focus to nil instead of back to the host's own
 // view leaves hosts like Logic with dead keyboard routing (Musical Typing
 // stays silent after a type-in commit until the user resets the track).
-static NSResponder* pulp_plugin_live_prior_responder(NSResponder* saved, NSWindow* win) {
+[[maybe_unused]] static NSResponder* pulp_plugin_live_prior_responder(NSResponder* saved, NSWindow* win) {
     if (saved == nil || saved == (NSResponder*)win || win.contentView == nil) return nil;
     NSMutableArray<NSView*>* stack = [NSMutableArray arrayWithObject:win.contentView];
     while (stack.count > 0) {
@@ -534,15 +534,16 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
     if (!win) return;
     const bool wants = pulp_focus_under_root(self.rootView) != nullptr;
     if (wants && win.firstResponder != self) {
-        _priorResponder = win.firstResponder;  // remember whose keyboard we take
         [win makeFirstResponder:self];
-    } else if (!wants && win.firstResponder == self) {
-        // Return keys to the host's OWN view, not nil: Logic's Musical Typing
-        // routing dies if the responder it had is not restored.
-        NSResponder* prior = pulp_plugin_live_prior_responder(_priorResponder, win);
-        _priorResponder = nil;
-        [win makeFirstResponder:prior];
     }
+    // No resign-on-blur. The editor KEEPS first responder so it keeps
+    // intercepting keys and forwards the non-text ones to the host (DAW
+    // transport Space/R AND Musical Typing) via pulp_plugin_forward_key_to_host
+    // in -keyDown:. Resigning here is exactly what left Space/R dead after the
+    // user left a field — the keyboard went to the editor's own window with no
+    // path back. The host still reclaims the keyboard through
+    // -resignFirstResponder: when it makes one of its own views first responder
+    // (e.g. the user clicks a host control), which ends any open text input.
 }
 // The host moved the keyboard elsewhere (click on a host control, window
 // switching) while a widget still held text-input focus: close that text
@@ -1176,14 +1177,10 @@ private:
     if (!win) return;
     const bool wants = pulp_focus_under_root(self.rootView) != nullptr;
     if (wants && win.firstResponder != self) {
-        _priorResponder = win.firstResponder;  // remember whose keyboard we take
         [win makeFirstResponder:self];
-    } else if (!wants && win.firstResponder == self) {
-        // Return keys to the host's OWN view, not nil — see PulpPluginView.
-        NSResponder* prior = pulp_plugin_live_prior_responder(_priorResponder, win);
-        _priorResponder = nil;
-        [win makeFirstResponder:prior];
     }
+    // No resign-on-blur — keep first responder and forward non-text keys to the
+    // host. See PulpPluginView::syncKeyFocus for the rationale.
 }
 // Host took the keyboard while a type-in was open: close it, don't re-claim.
 // See PulpPluginView::resignFirstResponder.
