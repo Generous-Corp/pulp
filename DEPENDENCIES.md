@@ -85,6 +85,39 @@ These SDKs are not part of Pulp's redistributed dependency chain. Pulp may integ
 | ARA SDK | MIT-compatible (Celemony) | Optional ARA 2.x integration (pitch correction, spectral editing, clip-aware workflows) | Developer obtains independently (https://github.com/Celemony/ARA_SDK), keeps it out-of-tree, points `PULP_ARA_SDK_DIR` at it, and sets `PULP_ENABLE_ARA=ON`. Never bundled. |
 | ASIO SDK | Proprietary (Steinberg) | Optional ASIO device I/O integration | Developer obtains independently; never bundled or exported by Pulp |
 
+## Optional Developer Tooling (installed on demand, not bundled)
+
+These power **developer-only** tooling — building/testing the JS packages
+(`@pulp/react`, `pulp-import-ir`), the Figma plugin, the desktop video-proof
+composer (`tools/local-ci`), and the Motion visual-analysis lane
+(`tools/motion/visual`). They are **not part of the Pulp SDK and are never
+shipped in end-user plugins**. Pulp commits only its own source; these
+third-party packages are installed on demand (`npm` / `pip`) into ignored
+directories and used under their own licenses. Intentionally absent from
+`NOTICE.md` (which lists redistributed code only).
+
+| Tool | License | Used For | Pulp Boundary |
+|------|---------|----------|---------------|
+| esbuild | MIT | Build-time JS/TS bundler for `@pulp/react`, `pulp-import-ir`, the Figma plugin, and the Three.js IIFE bundle | `npm` devDependency, installed on demand; build-time only. Never committed, bundled, exported by `cmake --install`, shipped in plugins, or required by public CI. |
+| fflate | MIT | Deflate/zip in the developer-only Figma plugin (`tools/figma-plugin`) | Same boundary. |
+| ffmpeg-static | Wrapper MIT; bundled FFmpeg binaries GPL/LGPL | Encodes captured frames into the MP4 used by the video-proof composer | `npm` devDependency in `tools/local-ci`; runtime also accepts a system `PULP_FFMPEG`/`PATH` ffmpeg. Same boundary. |
+| json-schema-to-typescript | MIT | Generates TypeScript types from JSON Schema for the Figma plugin | Same boundary. |
+| numpy | BSD-3-Clause | Array ops for the Motion visual-analysis lane (`tools/motion/visual`) | `pip`, installed on demand; analysis-only, never bundled or shipped. |
+| opencv-python | Apache-2.0 | Optional affine estimation for the Motion visual-analysis lane (graceful PIL/FFT fallback when absent) | `pip` (optional); analysis-only, never bundled or shipped. |
+| Pillow | HPND (BSD-style) | Image IO for the Motion visual-analysis lane | `pip`; analysis-only, never bundled or shipped. |
+| Remotion | Remotion License (source-available; free under their tier, paid company license above it) | Composes annotated proof videos (`remotion`, `@remotion/bundler`, `@remotion/renderer`; also pulls MIT `react`/`react-dom`) | `npm` devDependency in `tools/local-ci`. Companies over Remotion's free tier need a Remotion license. Same boundary. |
+| scikit-image | BSD-3-Clause | Image metrics for the Motion visual-analysis lane | `pip`; analysis-only, never bundled or shipped. |
+| TypeScript | Apache-2.0 | Type-checking/build for `@pulp/react`, `pulp-import-ir`, and the Figma plugin | `npm` devDependency; build-time only. Same boundary. |
+| Vitest | MIT | Unit tests (with `@vitest/coverage-v8`) for `@pulp/react` and `pulp-import-ir` | `npm` devDependency; test-only. Same boundary. |
+
+**Type definitions and prerequisites (not pinned here):** the TypeScript
+packages also pull DefinitelyTyped `@types/*` and `@figma/plugin-typings`
+(type-only, MIT/DefinitelyTyped, never emitted into shipped code). Developer/CI
+prerequisites supplied by the environment — the Rust toolchain (`cargo`/`rustc`)
+for the experimental `pulp-rs` CLI and native-component examples, the CI linters
+`yamllint` (GPL-3.0) and `actionlint` (MIT), and Docker for the visual-harness
+image — are likewise developer/CI-supplied, never bundled, exported, or shipped.
+
 ## System / OS-Provided Dependencies (not bundled)
 
 These operating-system libraries, services, and frameworks are **not** part of

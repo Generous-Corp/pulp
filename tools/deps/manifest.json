@@ -204,6 +204,194 @@
       ]
     },
     {
+      "name": "ffmpeg-static",
+      "category": "developer-tooling",
+      "license": "ffmpeg-static wrapper MIT; bundled FFmpeg binaries GPL/LGPL depending on build",
+      "version": "5.2.0",
+      "source_kind": "developer-supplied",
+      "repository": "https://github.com/eugeneware/ffmpeg-static",
+      "upstream": { "kind": "none" },
+      "external_names": ["ffmpeg-static", "ffmpeg"],
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": false,
+      "notes": "Optional developer-only ffmpeg provider for the desktop video-proof composer (tools/local-ci). npm-installed on demand into a gitignored node_modules; the runtime resolver also accepts a system ffmpeg via PULP_FFMPEG/PATH. Never committed, bundled, exported by cmake --install, shipped in plugins, or required by public CI.",
+      "source_files": [
+        "tools/local-ci/package.json",
+        "tools/local-ci/package-lock.json",
+        "tools/local-ci/remotion-proof/README.md",
+        "DEPENDENCIES.md",
+        "docs/reference/licensing.md"
+      ]
+    },
+    {
+      "name": "esbuild",
+      "category": "developer-tooling",
+      "license": "MIT",
+      "version": "0.24.0+ (0.25.10 in tools/scripts)",
+      "source_kind": "npm",
+      "repository": "https://github.com/evanw/esbuild",
+      "upstream": { "kind": "none" },
+      "external_names": ["esbuild"],
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": false,
+      "notes": "Build-time JS/TS bundler for @pulp/react, pulp-import-ir, the Figma plugin, and the Three.js IIFE bundle. npm devDependency, installed on demand; build-time only, never bundled into Pulp or shipped in plugins.",
+      "source_files": [
+        "tools/scripts/package.json",
+        "tools/figma-plugin/package.json",
+        "packages/pulp-import-ir/package.json",
+        "packages/pulp-react/package.json",
+        "DEPENDENCIES.md",
+        "docs/reference/licensing.md"
+      ]
+    },
+    {
+      "name": "fflate",
+      "category": "developer-tooling",
+      "license": "MIT",
+      "version": "^0.8.3",
+      "source_kind": "npm",
+      "repository": "https://github.com/101arrowz/fflate",
+      "upstream": { "kind": "none" },
+      "external_names": ["fflate"],
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": false,
+      "notes": "Deflate/zip used by the developer-only Figma plugin (tools/figma-plugin). npm-installed on demand; never bundled into Pulp or shipped in plugins.",
+      "source_files": [
+        "tools/figma-plugin/package.json",
+        "DEPENDENCIES.md",
+        "docs/reference/licensing.md"
+      ]
+    },
+    {
+      "name": "json-schema-to-typescript",
+      "category": "developer-tooling",
+      "license": "MIT",
+      "version": "^15.0.0",
+      "source_kind": "npm",
+      "repository": "https://github.com/bcherny/json-schema-to-typescript",
+      "upstream": { "kind": "none" },
+      "external_names": ["json-schema-to-typescript"],
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": false,
+      "notes": "Generates TypeScript types from JSON Schema for the developer-only Figma plugin. npm devDependency, build-time only; never bundled or shipped.",
+      "source_files": [
+        "tools/figma-plugin/package.json",
+        "DEPENDENCIES.md",
+        "docs/reference/licensing.md"
+      ]
+    },
+    {
+      "name": "numpy",
+      "category": "developer-tooling",
+      "license": "BSD-3-Clause",
+      "version": ">=1.24",
+      "source_kind": "python-pip",
+      "repository": "https://github.com/numpy/numpy",
+      "upstream": { "kind": "none" },
+      "external_names": ["numpy"],
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": false,
+      "notes": "Array ops for the developer-only Motion visual-analysis lane (tools/motion/visual). pip-installed on demand; analysis-only, never bundled or shipped in plugin/app artifacts.",
+      "source_files": [
+        "tools/motion/visual/requirements.txt",
+        "DEPENDENCIES.md",
+        "docs/reference/licensing.md"
+      ]
+    },
+    {
+      "name": "opencv-python",
+      "category": "developer-tooling",
+      "license": "Apache-2.0",
+      "version": ">=4.8",
+      "source_kind": "python-pip",
+      "repository": "https://github.com/opencv/opencv-python",
+      "upstream": { "kind": "none" },
+      "external_names": ["opencv-python", "cv2"],
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": false,
+      "notes": "Optional affine first->last estimation for the Motion visual-analysis lane; the pipeline falls back to a PIL/FFT estimator when absent. pip-installed on demand; analysis-only, never bundled or shipped.",
+      "source_files": [
+        "tools/motion/visual/requirements-optional.txt",
+        "DEPENDENCIES.md",
+        "docs/reference/licensing.md"
+      ]
+    },
+    {
+      "name": "Pillow",
+      "category": "developer-tooling",
+      "license": "HPND (BSD-style)",
+      "version": ">=10.0",
+      "source_kind": "python-pip",
+      "repository": "https://github.com/python-pillow/Pillow",
+      "upstream": { "kind": "none" },
+      "external_names": ["Pillow", "PIL"],
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": false,
+      "notes": "Image IO for the developer-only Motion visual-analysis lane (tools/motion/visual). pip-installed on demand; analysis-only, never bundled or shipped.",
+      "source_files": [
+        "tools/motion/visual/requirements.txt",
+        "DEPENDENCIES.md",
+        "docs/reference/licensing.md"
+      ]
+    },
+    {
+      "name": "scikit-image",
+      "category": "developer-tooling",
+      "license": "BSD-3-Clause",
+      "version": ">=0.22",
+      "source_kind": "python-pip",
+      "repository": "https://github.com/scikit-image/scikit-image",
+      "upstream": { "kind": "none" },
+      "external_names": ["scikit-image", "skimage"],
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": false,
+      "notes": "Image metrics for the developer-only Motion visual-analysis lane (tools/motion/visual). pip-installed on demand; analysis-only, never bundled or shipped.",
+      "source_files": [
+        "tools/motion/visual/requirements.txt",
+        "DEPENDENCIES.md",
+        "docs/reference/licensing.md"
+      ]
+    },
+    {
+      "name": "TypeScript",
+      "category": "developer-tooling",
+      "license": "Apache-2.0",
+      "version": "^5.4.0 / ^5.6.0",
+      "source_kind": "npm",
+      "repository": "https://github.com/microsoft/TypeScript",
+      "upstream": { "kind": "none" },
+      "external_names": ["typescript"],
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": false,
+      "notes": "Type-checking and build for @pulp/react, pulp-import-ir, and the Figma plugin. npm devDependency, build-time only; never bundled or shipped.",
+      "source_files": [
+        "packages/pulp-react/package.json",
+        "packages/pulp-import-ir/package.json",
+        "tools/figma-plugin/package.json",
+        "DEPENDENCIES.md",
+        "docs/reference/licensing.md"
+      ]
+    },
+    {
+      "name": "Vitest",
+      "category": "developer-tooling",
+      "license": "MIT",
+      "version": "^1.6.0",
+      "source_kind": "npm",
+      "repository": "https://github.com/vitest-dev/vitest",
+      "upstream": { "kind": "none" },
+      "external_names": ["vitest", "@vitest/coverage-v8"],
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": false,
+      "notes": "Unit-test runner (with @vitest/coverage-v8) for @pulp/react and pulp-import-ir. npm devDependency, test-only; never bundled or shipped.",
+      "source_files": [
+        "packages/pulp-react/package.json",
+        "packages/pulp-import-ir/package.json",
+        "DEPENDENCIES.md",
+        "docs/reference/licensing.md"
+      ]
+    },
+    {
       "name": "Highway",
       "category": "runtime",
       "license": "Apache-2.0",
@@ -592,6 +780,26 @@
       "notes": "Cooperative-scheduling runtime pulled in transitively by react-reconciler for @pulp/react. npm-installed; never bundled into Pulp's C++ tree. Added 2026-04-29 under #1042.",
       "source_files": [
         "packages/pulp-react/package.json"
+      ]
+    },
+    {
+      "name": "Remotion",
+      "category": "developer-tooling",
+      "license": "Remotion License (source-available; free under Remotion's usage threshold, paid company license above it)",
+      "version": "4.0.476",
+      "source_kind": "developer-supplied",
+      "repository": "https://github.com/remotion-dev/remotion",
+      "upstream": { "kind": "none" },
+      "external_names": ["remotion", "@remotion/bundler", "@remotion/renderer"],
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": false,
+      "notes": "Optional developer-only video-proof composer (tools/local-ci) that turns desktop automation run bundles into short annotated MP4 proofs. npm-installed on demand into a gitignored node_modules (also pulls MIT react/react-dom); never committed, bundled, exported by cmake --install, shipped in plugins, or required by public CI. Source-available — companies over Remotion's free tier need a Remotion license to run the composer.",
+      "source_files": [
+        "tools/local-ci/package.json",
+        "tools/local-ci/package-lock.json",
+        "tools/local-ci/remotion-proof/README.md",
+        "DEPENDENCIES.md",
+        "docs/reference/licensing.md"
       ]
     },
     {
