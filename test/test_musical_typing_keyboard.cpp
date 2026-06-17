@@ -1,7 +1,9 @@
-// MusicalTypingKeyboard — Ink & Signal catalog component, faithful Figma SVG
-// rendered via DesignFrameView (the figma-plugin faithful-vector lane). These
-// pin: the embedded SVG loads (non-empty panel), the component renders
-// headlessly, and it is discoverable in the pulp::design catalog.
+// MusicalTypingKeyboard — Ink & Signal catalog component. TWO faithful Figma
+// mode frames (typing node 187:15 @732×266, piano node 187:349 @732×176)
+// rendered via DesignFrameView's multi-frame swap. These pin: both embedded
+// SVGs load, the component renders headlessly in each mode, the 🎹/⌨ toggle
+// swaps the frame AND the intrinsic size, per-mode keys play, computer-keyboard
+// typing works, and it is discoverable in the pulp::design catalog.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -18,30 +20,51 @@ using namespace pulp::view;
 
 namespace {
 using K = DesignFrameElement::Kind;
+using Mode = MusicalTypingKeyboard::Mode;
+
 // DesignFrameView (a View) is non-copyable/non-movable, so hand back a pointer.
+// Bounds == panel size → identity transform (scale 1, no letterbox), so SVG
+// coords map straight to view coords for spatial clicks. Re-fit after a mode
+// swap (the panel size changes).
 std::unique_ptr<MusicalTypingKeyboard> make_playable_kb() {
     auto kb = std::make_unique<MusicalTypingKeyboard>();
-    // Bounds == panel size → identity transform (scale 1, no letterbox), so SVG
-    // coords map straight to view coords for spatial clicks.
     kb->set_bounds({0, 0, kb->panel_width(), kb->panel_height()});
     return kb;
 }
+void refit(MusicalTypingKeyboard& kb) {
+    kb.set_bounds({0, 0, kb.panel_width(), kb.panel_height()});
+}
+int note_idx(const MusicalTypingKeyboard& kb, int note) {
+    for (int i = 0; i < kb.element_count(); ++i)
+        if (kb.element_kind(i) == K::momentary && kb.element_note(i) == note) return i;
+    return -1;
+}
+int momentary_count(const MusicalTypingKeyboard& kb) {
+    int n = 0;
+    for (int i = 0; i < kb.element_count(); ++i)
+        if (kb.element_kind(i) == K::momentary) ++n;
+    return n;
+}
 }  // namespace
 
-TEST_CASE("MusicalTypingKeyboard loads its embedded faithful SVG", "[view][musical-typing]") {
+TEST_CASE("MusicalTypingKeyboard loads both embedded faithful SVGs", "[view][musical-typing]") {
     MusicalTypingKeyboard kbd;
-    // DesignFrameView auto-detects the panel from the SVG's largest rect; a
-    // non-empty panel proves the embedded base64 SVG decoded and parsed.
-    REQUIRE(kbd.panel_width() > 0.0f);
-    REQUIRE(kbd.panel_height() > 0.0f);
+    REQUIRE(kbd.frame_count() == 2);
+    REQUIRE(kbd.mode() == Mode::typing);          // typing is the default frame
+    REQUIRE(kbd.panel_width() == 732.0f);
+    REQUIRE(kbd.panel_height() == 266.0f);        // typing frame intrinsic
 }
 
-TEST_CASE("MusicalTypingKeyboard renders headlessly", "[view][musical-typing]") {
+TEST_CASE("MusicalTypingKeyboard renders headlessly in both modes", "[view][musical-typing]") {
     MusicalTypingKeyboard kbd;
-    kbd.set_bounds({0.0f, 0.0f, 900.0f, 300.0f});
-    auto png = render_to_png(kbd, 900, 300, 1.0f, ScreenshotBackend::skia);
-    if (png.empty()) SKIP("Skia raster screenshot backend unavailable");  // no Skia (e.g. Windows CI)
-    REQUIRE(png.size() > 1000);  // a real PNG, not an empty/error buffer
+    refit(kbd);
+    auto typing = render_to_png(kbd, 732, 266, 1.0f, ScreenshotBackend::skia);
+    if (typing.empty()) SKIP("Skia raster screenshot backend unavailable");  // e.g. Windows CI
+    REQUIRE(typing.size() > 1000);
+    kbd.set_mode(Mode::piano);
+    refit(kbd);
+    auto piano = render_to_png(kbd, 732, 176, 1.0f, ScreenshotBackend::skia);
+    REQUIRE(piano.size() > 1000);
 }
 
 TEST_CASE("MusicalTyping is registered in the pulp::design catalog", "[design][catalog]") {
@@ -51,56 +74,84 @@ TEST_CASE("MusicalTyping is registered in the pulp::design catalog", "[design][c
     REQUIRE(info->category == pulp::design::Category::audio);
 }
 
-TEST_CASE("MusicalTypingKeyboard: typing + piano playable momentary keys",
+TEST_CASE("MusicalTypingKeyboard: typing frame has 18 keys + 2 toggle buttons",
           "[view][musical-typing][momentary]") {
     auto kbp = make_playable_kb(); auto& kb = *kbp;
-    // 18 typing keys (relative semitone 0..17) + 36 piano keys (chromatic
-    // C2..B4 = MIDI 48..83). Both keyboards render in the faithful frame and
-    // are playable at once.
-    REQUIRE(kb.element_count() == 18 + 36);
-    REQUIRE(kb.active_view_group() == 0);
-    for (int i = 0; i < kb.element_count(); ++i)
-        REQUIRE(kb.element_kind(i) == K::momentary);
-    // Typing row: array order == relative semitone.
+    REQUIRE(momentary_count(kb) == 18);            // relative semitones 0..17
     for (int i = 0; i < 18; ++i) REQUIRE(kb.element_note(i) == i);
-    // Piano row: the full chromatic span 48..83 is present, each exactly once.
+    // Two swap-link buttons (the 🎹/⌨ toggle).
+    int swaps = 0;
+    for (int i = 0; i < kb.element_count(); ++i)
+        if (kb.element_kind(i) == K::swap) ++swaps;
+    REQUIRE(swaps == 2);
+}
+
+TEST_CASE("MusicalTypingKeyboard: piano frame has the chromatic span C2..B4",
+          "[view][musical-typing][momentary]") {
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    kb.set_mode(Mode::piano);
+    REQUIRE(kb.mode() == Mode::piano);
+    REQUIRE(momentary_count(kb) == 36);
     std::vector<int> piano;
-    for (int i = 18; i < kb.element_count(); ++i) piano.push_back(kb.element_note(i));
+    for (int i = 0; i < kb.element_count(); ++i)
+        if (kb.element_kind(i) == K::momentary) piano.push_back(kb.element_note(i));
     std::sort(piano.begin(), piano.end());
     REQUIRE(piano.front() == 48);   // C2
     REQUIRE(piano.back() == 83);    // B4
-    REQUIRE(piano.size() == 36);
     for (int n = 48; n <= 83; ++n)
         REQUIRE(std::count(piano.begin(), piano.end(), n) == 1);
 }
 
-TEST_CASE("MusicalTypingKeyboard: piano white-key click plays its MIDI note",
-          "[view][musical-typing][momentary]") {
+TEST_CASE("MusicalTypingKeyboard: toggle swaps the frame AND the intrinsic size",
+          "[view][musical-typing][toggle]") {
     auto kbp = make_playable_kb(); auto& kb = *kbp;
-    std::vector<int> begins;
-    kb.on_gesture_begin = [&](int i) { begins.push_back(kb.element_note(i)); };
-    // Leftmost piano white key C2 (MIDI 48): rect x[90,120] y[456,535]; click
-    // low-centre (below the black keys) so only the white key is under the point.
-    kb.on_mouse_down({100.0f, 525.0f});
-    REQUIRE(begins == std::vector<int>{48});
-    kb.on_mouse_up({100.0f, 525.0f});
+    REQUIRE(kb.mode() == Mode::typing);
+    REQUIRE(kb.panel_height() == 266.0f);
+
+    // The 🎹 (piano-icon) button sits at SVG x[24,60] y[22,48] in BOTH frames;
+    // with bounds == panel it maps 1:1. Clicking it swaps to piano mode + resize.
+    std::vector<int> notes;
+    kb.on_note_on = [&](int n, float) { notes.push_back(n); };
+    kb.on_mouse_down({40.0f, 35.0f});
+    REQUIRE(kb.mode() == Mode::piano);
+    REQUIRE(kb.panel_height() == 176.0f);          // intrinsic size changed
+    REQUIRE(kb.panel_width() == 732.0f);
+    REQUIRE(notes.empty());                        // a toggle click plays no note
+
+    // The ⌨ (keyboard-icon) button at x[62,98] y[22,48] swaps back to typing.
+    refit(kb);
+    kb.on_mouse_down({80.0f, 35.0f});
+    REQUIRE(kb.mode() == Mode::typing);
+    REQUIRE(kb.panel_height() == 266.0f);
 }
 
-TEST_CASE("MusicalTypingKeyboard: white-key click plays its note",
+TEST_CASE("MusicalTypingKeyboard: set_mode swaps programmatically",
+          "[view][musical-typing][toggle]") {
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    kb.set_mode(Mode::piano);
+    REQUIRE(kb.mode() == Mode::piano);
+    REQUIRE(kb.active_frame() == kPianoFrame);
+    kb.set_mode(Mode::typing);
+    REQUIRE(kb.mode() == Mode::typing);
+    REQUIRE(kb.active_frame() == kTypingFrame);
+}
+
+TEST_CASE("MusicalTypingKeyboard: typing white-key click plays + lights",
           "[view][musical-typing][momentary]") {
     auto kbp = make_playable_kb(); auto& kb = *kbp;
     std::vector<int> begins, ends;
     kb.on_gesture_begin = [&](int i) { begins.push_back(kb.element_note(i)); };
     kb.on_gesture_end = [&](int i) { ends.push_back(kb.element_note(i)); };
 
-    // First white key 'a' (note 0): rect x[166,216] y[233,311]; click low-centre
-    // (below the black keys) so only the white key is under the point.
-    kb.on_mouse_down({191.0f, 300.0f});
+    // White key 'a' (note 0): rect x[102,157] y[117,195]. Click low-centre (below
+    // the black keys, which end at y=171) so only the white key is under it.
+    const int a = note_idx(kb, 0);
+    kb.on_mouse_down({120.0f, 185.0f});
     REQUIRE(begins == std::vector<int>{0});
-    REQUIRE(kb.element_value(0) == 1.0f);   // lit while held
-    kb.on_mouse_up({191.0f, 300.0f});
+    REQUIRE(kb.element_value(a) == 1.0f);
+    kb.on_mouse_up({120.0f, 185.0f});
     REQUIRE(ends == std::vector<int>{0});
-    REQUIRE(kb.element_value(0) == 0.0f);
+    REQUIRE(kb.element_value(a) == 0.0f);
 }
 
 TEST_CASE("MusicalTypingKeyboard: black key wins the overlap (smallest area)",
@@ -108,12 +159,25 @@ TEST_CASE("MusicalTypingKeyboard: black key wins the overlap (smallest area)",
     auto kbp = make_playable_kb(); auto& kb = *kbp;
     std::vector<int> begins;
     kb.on_gesture_begin = [&](int i) { begins.push_back(kb.element_note(i)); };
-
-    // 'w' (note 1) rect x[203,233] y[233,287] overlaps white 'a' (note 0) in the
-    // band x[203,216]. A click there must pick the narrower black key.
-    kb.on_mouse_down({210.0f, 250.0f});
+    // 'w' (note 1) rect x[142,172] y[117,171] overlaps white 'a' (x[102,157]) in
+    // the band x[142,157]. A click there must pick the narrower black key.
+    kb.on_mouse_down({150.0f, 140.0f});
     REQUIRE(begins == std::vector<int>{1});
-    kb.on_mouse_up({210.0f, 250.0f});
+    kb.on_mouse_up({150.0f, 140.0f});
+}
+
+TEST_CASE("MusicalTypingKeyboard: piano white-key click plays its MIDI note",
+          "[view][musical-typing][momentary]") {
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    kb.set_mode(Mode::piano);
+    refit(kb);
+    std::vector<int> begins;
+    kb.on_gesture_begin = [&](int i) { begins.push_back(kb.element_note(i)); };
+    // Leftmost piano white key C2 (MIDI 48): rect x[28,60] y[70,148]; click
+    // low-centre (below the black keys) so only the white key is under it.
+    kb.on_mouse_down({44.0f, 140.0f});
+    REQUIRE(begins == std::vector<int>{48});
+    kb.on_mouse_up({44.0f, 140.0f});
 }
 
 TEST_CASE("MusicalTypingKeyboard: set_element_value lights without firing change",
@@ -121,22 +185,15 @@ TEST_CASE("MusicalTypingKeyboard: set_element_value lights without firing change
     auto kbp = make_playable_kb(); auto& kb = *kbp;
     bool changed = false;
     kb.on_element_changed = [&](int, float) { changed = true; };
-    kb.set_element_value(5, 1.0f);          // light 'f' (note 5)
-    REQUIRE(kb.element_value(5) == 1.0f);
-    kb.set_element_value(5, 0.0f);
-    REQUIRE(kb.element_value(5) == 0.0f);
-    REQUIRE_FALSE(changed);                 // host->view push must not echo
+    const int f = note_idx(kb, 5);                 // 'f' (note 5)
+    kb.set_element_value(f, 1.0f);
+    REQUIRE(kb.element_value(f) == 1.0f);
+    kb.set_element_value(f, 0.0f);
+    REQUIRE(kb.element_value(f) == 0.0f);
+    REQUIRE_FALSE(changed);                         // host->view push must not echo
 }
 
 // ── Wiring: computer-keyboard play, octave, click→note, focus release ───────
-
-namespace {
-int typing_idx(const MusicalTypingKeyboard& kb, int semitone) {
-    for (int i = 0; i < kb.element_count(); ++i)
-        if (kb.element_note(i) == semitone) return i;
-    return -1;
-}
-}  // namespace
 
 TEST_CASE("MusicalTypingKeyboard: computer keyboard plays + lights typing keys",
           "[view][musical-typing][wiring]") {
@@ -148,11 +205,11 @@ TEST_CASE("MusicalTypingKeyboard: computer keyboard plays + lights typing keys",
     KeyEvent a{}; a.key = KeyCode::a; a.is_down = true;      // 'a' = C2 = MIDI 48
     REQUIRE(kb.on_key_event(a));
     REQUIRE(ons == std::vector<int>{48});
-    REQUIRE(kb.element_value(typing_idx(kb, 0)) == 1.0f);   // note-0 key lit
+    REQUIRE(kb.element_value(note_idx(kb, 0)) == 1.0f);     // note-0 key lit
     a.is_down = false;
     REQUIRE(kb.on_key_event(a));
     REQUIRE(offs == std::vector<int>{48});
-    REQUIRE(kb.element_value(typing_idx(kb, 0)) == 0.0f);
+    REQUIRE(kb.element_value(note_idx(kb, 0)) == 0.0f);
 
     // Cmd-chords are NOT consumed (host keeps its shortcuts).
     KeyEvent cmdA{}; cmdA.key = KeyCode::a; cmdA.is_down = true; cmdA.modifiers = kModCmd;
@@ -168,23 +225,25 @@ TEST_CASE("MusicalTypingKeyboard: z/x shift the typed octave",
     auto tap_a = [&] { KeyEvent e{}; e.key = KeyCode::a; e.is_down = true; kb.on_key_event(e);
                        e.is_down = false; kb.on_key_event(e); };
 
-    down(KeyCode::x);  tap_a();          // octave +1 → C3 (60)
+    down(KeyCode::x);  tap_a();                     // octave +1 → C3 (60)
     REQUIRE(ons.back() == 60);
-    down(KeyCode::z);  down(KeyCode::z); tap_a();  // back to -1 → C1 (36)
+    down(KeyCode::z);  down(KeyCode::z); tap_a();   // back to -1 → C1 (36)
     REQUIRE(ons.back() == 36);
 }
 
-TEST_CASE("MusicalTypingKeyboard: clicking a key emits its MIDI note",
+TEST_CASE("MusicalTypingKeyboard: clicking a key emits its MIDI note (both modes)",
           "[view][musical-typing][wiring]") {
     auto kbp = make_playable_kb(); auto& kb = *kbp;
     std::vector<int> ons;
     kb.on_note_on = [&](int n, float) { ons.push_back(n); };
-    kb.on_mouse_down({191.0f, 300.0f});  // typing 'a' (note 0) → C2 48
-    kb.on_mouse_up({191.0f, 300.0f});
+    kb.on_mouse_down({120.0f, 185.0f});             // typing 'a' (note 0) → C2 48
+    kb.on_mouse_up({120.0f, 185.0f});
     REQUIRE(ons == std::vector<int>{48});
     ons.clear();
-    kb.on_mouse_down({556.0f, 500.0f});  // piano C4 (note 72, absolute)
-    kb.on_mouse_up({556.0f, 500.0f});
+    kb.set_mode(Mode::piano);
+    refit(kb);
+    kb.on_mouse_down({495.0f, 140.0f});             // piano C4 (note 72, absolute)
+    kb.on_mouse_up({495.0f, 140.0f});
     REQUIRE(ons == std::vector<int>{72});
 }
 
@@ -194,10 +253,10 @@ TEST_CASE("MusicalTypingKeyboard: focus loss releases held notes + clears highli
     std::vector<int> offs;
     kb.on_note_off = [&](int n) { offs.push_back(n); };
     KeyEvent a{}; a.key = KeyCode::a; a.is_down = true; kb.on_key_event(a);  // hold C2
-    REQUIRE(kb.element_value(typing_idx(kb, 0)) == 1.0f);
+    REQUIRE(kb.element_value(note_idx(kb, 0)) == 1.0f);
     kb.on_focus_changed(false);
     REQUIRE(offs == std::vector<int>{48});                  // note released
-    REQUIRE(kb.element_value(typing_idx(kb, 0)) == 0.0f);   // highlight cleared
+    REQUIRE(kb.element_value(note_idx(kb, 0)) == 0.0f);     // highlight cleared
 }
 
 TEST_CASE("MusicalTypingKeyboard: set_input_capture(false) stops QWERTY capture",
@@ -212,29 +271,26 @@ TEST_CASE("MusicalTypingKeyboard: set_input_capture(false) stops QWERTY capture"
     REQUIRE_FALSE(kb.on_key_event(a));   // not consumed → host keeps the key
     REQUIRE(ons.empty());                // no double-trigger from our path
 
-    kb.on_mouse_down({191.0f, 300.0f});  // clicks still play
-    kb.on_mouse_up({191.0f, 300.0f});
+    kb.on_mouse_down({120.0f, 185.0f});  // clicks still play
+    kb.on_mouse_up({120.0f, 185.0f});
     REQUIRE(ons == std::vector<int>{48});
 }
 
 TEST_CASE("MusicalTypingKeyboard: set_active_notes lights from an external held set",
           "[view][musical-typing][wiring]") {
     auto kbp = make_playable_kb(); auto& kb = *kbp;
-    auto piano_idx = [&](int midi) {
-        for (int i = 0; i < kb.element_count(); ++i)
-            if (kb.element_note(i) == midi) return i;
-        return -1;
-    };
-    // C2 (48) held externally → lights BOTH the typing 'a' (semitone 0 @ base C2)
-    // and the piano C2 key (absolute 48); C4 (72) → the piano C4 key.
+    // Typing mode: C2 (48) held externally → lights the typing 'a' (semitone 0 @
+    // base C2). The piano keys live in the other frame, so only 'a' lights here.
     const int held[] = {48, 72};
     kb.set_active_notes(held);
-    REQUIRE(kb.element_value(typing_idx(kb, 0)) == 1.0f);
-    REQUIRE(kb.element_value(piano_idx(48)) == 1.0f);
-    REQUIRE(kb.element_value(piano_idx(72)) == 1.0f);
-    REQUIRE(kb.element_value(piano_idx(60)) == 0.0f);   // not held → dark
+    REQUIRE(kb.element_value(note_idx(kb, 0)) == 1.0f);
+    kb.set_active_notes(std::span<const int>{});            // clear
+    REQUIRE(kb.element_value(note_idx(kb, 0)) == 0.0f);
 
-    kb.set_active_notes(std::span<const int>{});         // clear
-    REQUIRE(kb.element_value(typing_idx(kb, 0)) == 0.0f);
-    REQUIRE(kb.element_value(piano_idx(48)) == 0.0f);
+    // Piano mode: the same held set lights the piano C2 + C4 keys.
+    kb.set_mode(Mode::piano);
+    kb.set_active_notes(held);
+    REQUIRE(kb.element_value(note_idx(kb, 48)) == 1.0f);
+    REQUIRE(kb.element_value(note_idx(kb, 72)) == 1.0f);
+    REQUIRE(kb.element_value(note_idx(kb, 60)) == 0.0f);    // not held → dark
 }

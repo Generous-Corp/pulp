@@ -184,18 +184,26 @@ bool suppress_svg_glyph_at(std::string& svg, float x, float y, float w, float h)
 }
 
 DesignFrameView::DesignFrameView(std::string svg, std::vector<DesignFrameElement> elements,
-                                 float panel_x, float panel_y, float panel_w, float panel_h)
-    : svg_(std::move(svg)), elements_(std::move(elements)) {
-    svg_intrinsic_size(svg_, svg_w_, svg_h_);
+                                 float panel_x, float panel_y, float panel_w, float panel_h) {
+    frames_.push_back(build_frame(std::move(svg), std::move(elements),
+                                  panel_x, panel_y, panel_w, panel_h));
+    activate_frame(0);
+}
+
+DesignFrameView::Frame DesignFrameView::build_frame(
+    std::string svg, std::vector<DesignFrameElement> elements,
+    float panel_x, float panel_y, float panel_w, float panel_h) const {
+    Frame f;
+    f.elements = std::move(elements);
+    svg_intrinsic_size(svg, f.svg_w, f.svg_h);
     if (panel_w > 0 && panel_h > 0) {
-        panel_x_ = panel_x; panel_y_ = panel_y; panel_w_ = panel_w; panel_h_ = panel_h;
+        f.panel_x = panel_x; f.panel_y = panel_y; f.panel_w = panel_w; f.panel_h = panel_h;
     } else {
-        detect_panel(svg_, svg_w_, svg_h_, panel_x_, panel_y_, panel_w_, panel_h_);
+        detect_panel(svg, f.svg_w, f.svg_h, f.panel_x, f.panel_y, f.panel_w, f.panel_h);
     }
-    if (panel_w_ <= 0 || panel_h_ <= 0) {  // fallback: the whole frame
-        panel_x_ = 0; panel_y_ = 0; panel_w_ = svg_w_; panel_h_ = svg_h_;
+    if (f.panel_w <= 0 || f.panel_h <= 0) {  // fallback: the whole frame
+        f.panel_x = 0; f.panel_y = 0; f.panel_w = f.svg_w; f.panel_h = f.svg_h;
     }
-    build_overlays();
 
     // Suppress each design's BAKED selected-tab highlight so the live
     // DesignTabGroup pill is the ONLY highlight ever shown — otherwise switching
@@ -204,13 +212,13 @@ DesignFrameView::DesignFrameView(std::string svg, std::vector<DesignFrameElement
     // remove it by geometry computed from the tab_group element (general — no
     // per-design constant). The strip background behind it remains, so the slot
     // reads as unselected until the live pill lands there.
-    for (const auto& e : elements_) {
+    for (const auto& e : f.elements) {
         if (e.kind != DesignFrameElement::Kind::tab_group || e.options.empty())
             continue;
         const int n = static_cast<int>(e.options.size());
         const float slot_w = e.w / static_cast<float>(n);
         const int sel = std::clamp(e.selected_index, 0, n - 1);
-        suppress_svg_rect(svg_, e.x + static_cast<float>(sel) * slot_w, e.y,
+        suppress_svg_rect(svg, e.x + static_cast<float>(sel) * slot_w, e.y,
                           slot_w, e.h);
         // Drop the BAKED tab digits so the live DesignTabGroup is the sole,
         // consistent renderer of them. Otherwise the live labels paint over the
@@ -221,10 +229,55 @@ DesignFrameView::DesignFrameView(std::string svg, std::vector<DesignFrameElement
         // group, the rest are plain <path>s; try the group first, then the path.
         for (int slot = 0; slot < n; ++slot) {
             const float cx = e.x + static_cast<float>(slot) * slot_w;
-            if (!suppress_svg_glow_at(svg_, cx, e.y, slot_w, e.h))
-                suppress_svg_glyph_at(svg_, cx, e.y, slot_w, e.h);
+            if (!suppress_svg_glow_at(svg, cx, e.y, slot_w, e.h))
+                suppress_svg_glyph_at(svg, cx, e.y, slot_w, e.h);
         }
     }
+    f.svg = std::move(svg);
+    return f;
+}
+
+void DesignFrameView::activate_frame(int index) {
+    if (index < 0 || index >= static_cast<int>(frames_.size())) return;
+    // Tear down the outgoing frame's overlay child widgets before swapping in
+    // the new element set (build_overlays indexes into elements_).
+    for (const auto& ov : overlays_)
+        if (ov.widget) remove_child(ov.widget);
+    overlays_.clear();
+    drag_ = -1;
+
+    const Frame& f = frames_[index];
+    svg_ = f.svg;
+    elements_ = f.elements;
+    svg_w_ = f.svg_w; svg_h_ = f.svg_h;
+    panel_x_ = f.panel_x; panel_y_ = f.panel_y;
+    panel_w_ = f.panel_w; panel_h_ = f.panel_h;
+    active_frame_ = index;
+    build_overlays();
+    invalidate_layout();
+}
+
+int DesignFrameView::add_frame(std::string svg, std::vector<DesignFrameElement> elements,
+                               float panel_x, float panel_y, float panel_w, float panel_h) {
+    frames_.push_back(build_frame(std::move(svg), std::move(elements),
+                                  panel_x, panel_y, panel_w, panel_h));
+    return static_cast<int>(frames_.size()) - 1;
+}
+
+void DesignFrameView::set_active_frame(int index) {
+    if (index == active_frame_ || index < 0 ||
+        index >= static_cast<int>(frames_.size()))
+        return;
+    // Release any held momentary key in the outgoing frame so notes don't stick
+    // across a swap (mirrors set_active_view_group's release-on-switch edge).
+    if (drag_ >= 0 && drag_ < static_cast<int>(elements_.size()) &&
+        elements_[drag_].kind == DesignFrameElement::Kind::momentary) {
+        elements_[drag_].value = 0.0f;
+        if (on_gesture_end) on_gesture_end(drag_);
+        drag_ = -1;
+    }
+    activate_frame(index);
+    request_repaint();
 }
 
 void DesignFrameView::build_overlays() {
@@ -338,6 +391,8 @@ float DesignFrameView::element_value(int i) const {
             return -1.0f;  // text is not a normalized value
         case DesignFrameElement::Kind::momentary:
             return e.value;  // pressed/lit flag (0 or 1)
+        case DesignFrameElement::Kind::swap:
+            return -1.0f;  // a swap-link button has no value
     }
     return -1.0f;
 }
@@ -367,6 +422,8 @@ void DesignFrameView::set_element_value(int i, float v) {
             // Light/clear the key via the native overlay; no on_element_changed.
             e.value = (v > 0.5f) ? 1.0f : 0.0f;
             break;
+        case DesignFrameElement::Kind::swap:
+            return;  // a swap-link button has no value to set
     }
     request_repaint();
 }
@@ -509,6 +566,14 @@ int DesignFrameView::hit_element(Point pos) const {
     // Momentary keys first: among rects containing the point, the SMALLEST-AREA
     // wins (a narrow black key beats the white key it overlaps), order-independent
     // so a re-export reorder can't change which key is hit. View-scoped.
+    // Swap-link buttons are always active (not view-scoped) and take precedence
+    // so a toggle never gets masked by an overlapping key region.
+    for (int i = 0; i < static_cast<int>(elements_.size()); ++i) {
+        const auto& e = elements_[i];
+        if (e.kind != DesignFrameElement::Kind::swap) continue;
+        if (sx >= e.x && sx < e.x + e.w && sy >= e.y && sy < e.y + e.h) return i;
+    }
+
     int key = -1; float key_area = std::numeric_limits<float>::max();
     for (int i = 0; i < static_cast<int>(elements_.size()); ++i) {
         const auto& e = elements_[i];
@@ -535,7 +600,13 @@ int DesignFrameView::hit_element(Point pos) const {
 }
 
 void DesignFrameView::on_mouse_down(Point pos) {
-    drag_ = hit_element(pos);
+    const int hit = hit_element(pos);
+    if (hit >= 0 && elements_[hit].kind == DesignFrameElement::Kind::swap) {
+        // Swap-link button: change the rendered frame; no drag, no note.
+        set_active_frame(elements_[hit].target_frame);
+        return;
+    }
+    drag_ = hit;
     if (drag_ < 0) return;
     if (elements_[drag_].kind == DesignFrameElement::Kind::momentary) {
         elements_[drag_].value = 1.0f;            // light the key

@@ -21,7 +21,10 @@ struct DesignFrameElement {
     // `momentary` is a press/release primitive (keys, pads, drum triggers,
     // sustain, transport): on_gesture_begin(i)=press, on_gesture_end(i)=release;
     // set_element_value(i,1/0) lights it via a NATIVE overlay, not SVG mutation.
-    enum class Kind { knob, text_field, dropdown, tab_group, stepper, momentary };
+    // `swap` is a SWAP-LINK button: clicking its rect calls set_active_frame
+    // (target_frame) — the importer's `swap` link (e.g. a mode toggle). It does
+    // not light or emit notes; it changes which frame the view renders.
+    enum class Kind { knob, text_field, dropdown, tab_group, stepper, momentary, swap };
 
     Kind kind = Kind::knob;
 
@@ -56,6 +59,11 @@ struct DesignFrameElement {
     /// tests momentary elements in the active view group (see set_active_view_group).
     /// -1 = always active (ungrouped).
     int view_group = -1;
+
+    // ── swap (swap-link button) ──────────────────────────────────────────
+    /// For Kind::swap: the frame index to activate when this button is clicked
+    /// (the `swap` link target). -1 = unset.
+    int target_frame = -1;
 };
 
 // Remove the first <rect> in `svg` whose x/y/width/height match (within `tol`)
@@ -117,6 +125,22 @@ public:
     // stick across a mode change. -1 (default) = all groups active.
     void set_active_view_group(int group);
     int active_view_group() const { return active_view_group_; }
+
+    // ── Multi-frame (swap) support ────────────────────────────────────────
+    // A DesignFrameView can hold N alternate frames — each its own SVG, typed
+    // overlay element list, and panel crop — and swap which one renders. This
+    // is the importer's `swap` link target: a control whose job is to replace
+    // the on-screen content with another frame (e.g. a piano⇄typing mode
+    // toggle). set_active_frame swaps the rendered SVG, the overlay set, AND the
+    // view's intrinsic size, then invalidates layout so the host re-sizes to the
+    // new frame. add_frame returns the new frame's index; frame 0 is the one the
+    // constructor built. Switching frames releases any held momentary key.
+    int add_frame(std::string svg, std::vector<DesignFrameElement> elements,
+                  float panel_x = -1, float panel_y = -1,
+                  float panel_w = -1, float panel_h = -1);
+    void set_active_frame(int index);
+    int active_frame() const { return active_frame_; }
+    int frame_count() const { return static_cast<int>(frames_.size()); }
     // Normalized [0,1] value of element `i`, or -1 if out of range / not a
     // value-bearing control (text_field). For a knob this is its turn; for a
     // dropdown/tab_group/stepper it is the live selection mapped to
@@ -161,8 +185,25 @@ private:
     // Sync a user choice change (overlay widget -> element + on_element_changed).
     void  notify_choice(int i, int selected);
     // Build the native-overlay child widgets (TextEditor / ComboBox / tabs) for
-    // the non-knob elements; called once from the constructor.
+    // the non-knob elements of the active frame; called when a frame activates.
     void build_overlays();
+
+    // One swappable frame. Holds the panel-detected + baked-tab-suppressed SVG,
+    // its overlay element list, and resolved panel crop. Frames are built once
+    // (build_frame) and copied into the active members by activate_frame.
+    struct Frame {
+        std::string svg;
+        std::vector<DesignFrameElement> elements;
+        float svg_w = 0.0f, svg_h = 0.0f;
+        float panel_x = 0.0f, panel_y = 0.0f, panel_w = 0.0f, panel_h = 0.0f;
+    };
+    // Run panel-detect + baked-tab suppression on raw inputs and return a Frame.
+    // Touches no member state (safe to call before/after activation).
+    Frame build_frame(std::string svg, std::vector<DesignFrameElement> elements,
+                      float panel_x, float panel_y, float panel_w, float panel_h) const;
+    // Tear down the active overlay widgets, copy frame `index` into the active
+    // members (svg_/elements_/panel_*), and rebuild overlays.
+    void activate_frame(int index);
     // The ONE transform shared by paint() and hit_element(): a uniform fit of the
     // panel into `bounds`, centered (letterbox when bounds aspect != panel
     // aspect). `scale` is panel→view; (ox,oy) is the view-space position of the
@@ -186,6 +227,8 @@ private:
     int drag_ = -1;
     float drag_start_y_ = 0.0f, drag_start_value_ = 0.0f;
     int active_view_group_ = -1;   ///< momentary view scope (-1 = all active)
+    std::vector<Frame> frames_;    ///< swappable frames; [0] is the constructor's
+    int active_frame_ = 0;         ///< index into frames_ currently rendered
 };
 
 // The native-overlay widget for a `tab_group` element: a compact segmented

@@ -639,6 +639,28 @@ per-range styling. Now:
   invalid UTF-8. Tests: `[view][import][text]` (incl. a multibyte case) + the
   figma exporter python tests (incl. an emoji/surrogate-pair case).
 
+### Multi-frame components & swap-link toggles (mode frames)
+
+A component with more than one state frame (e.g. a keyboard's typing vs piano
+mode, switched by an in-design toggle) maps to `DesignFrameView`'s multi-frame
+support, NOT a crop or a parallel view:
+
+- Export each state **sub-frame** standalone (`figma_rest_export.py --node
+  <sub-frame-id>`). When the design stacks the states in one spec frame to show
+  them at once, the sub-frames are the individual states — import each as its
+  own faithful SVG. `MusicalTypingKeyboard` (nodes 187:15 typing / 187:349
+  piano) is the reference: `DesignFrameView(svg0, …)` + `add_frame(svg1, …)`.
+- `set_active_frame(i)` swaps the rendered SVG AND the intrinsic size (the host
+  re-lays-out), releasing any held momentary key first.
+- The in-design toggle button is a `DesignFrameElement::Kind::swap` element with
+  `target_frame` set — a click calls `set_active_frame`. This is the importer's
+  `swap` link (see `planning/2026-06-17-figma-interaction-linking-vocabulary.md`
+  for the swap / resize / modal / popover / navigate verb set).
+- **Hit-rects are per-frame, in the sub-frame's own coords.** Pull them from the
+  Figma node's `absoluteBoundingBox` minus the frame origin; the standalone SVG
+  export adds a uniform shadow margin (6px for these frames). Do NOT transcribe
+  combined-frame coordinates — the standalone export re-origins everything.
+
 ### Design-import IR round-trip + review-hardening gotchas
 
 Lessons from the di-1..di-5 closeout review — keep these invariants:

@@ -372,12 +372,12 @@ void advance_anims(View* v, float dt) {
     // typing key a `momentary` element: click/drag plays it, lighting the key
     // via a native overlay (the SVG is never recolored). Wired here to a live
     // "last note" readout to prove the gesture callbacks reach a consumer —
-    // the same hooks a sampler binds to MusicalTypingController. (Piano-view
-    // keys are a follow-up; the typing row is the interactive group.)
-    section("Musical typing keyboard — playable (faithful import)");
+    // the same hooks a sampler binds to MusicalTypingController. The 🎹/⌨
+    // toggle (top-left) swaps to the piano mode frame (and resizes the panel).
+    section("Musical typing keyboard — playable, toggleable (faithful import)");
     {
         const float kw = kContentW;
-        const float kh = kw * 806.0f / 1400.0f;  // preserve panel aspect (no letterbox)
+        const float kh = kw * 266.0f / 732.0f;  // typing-frame aspect (no letterbox)
         auto* readout = static_cast<Label*>(nullptr);
         auto note_label = std::make_unique<Label>("Play a key \xe2\x80\x94 last note: \xe2\x80\x94");
         note_label->set_font_size(13.0f);
@@ -398,13 +398,12 @@ void advance_anims(View* v, float dt) {
         kbp->on_note_on = [readout, midi_name](int note, float) {
             if (readout) readout->set_text("Play a key \xe2\x80\x94 last note: " + midi_name(note));
         };
-        // Default display mirrors the design's "selected keys shown" illustration —
-        // a held chord (typing A W G U + piano C4/D#4). The live overlay lights
-        // these; the keyboard stays interactive (clicking plays/lights others).
-        const int kHeld[] = {0, 1, 7, 10, 72, 75};
-        for (int i = 0; i < kbp->element_count(); ++i)
-            for (int n : kHeld)
-                if (kbp->element_note(i) == n) kbp->set_element_value(i, 1.0f);
+        // Default display mirrors the design's "selected keys shown" illustration
+        // for the typing mode — a held chord (A=C2, W=C#2, G=F#2, U=A2). The live
+        // overlay lights these; the keyboard stays interactive (clicking
+        // plays/lights others), and the toggle reveals the piano mode.
+        const int kTypingHeld[] = {48, 49, 54, 57};   // absolute MIDI at base C2
+        kbp->set_active_notes(kTypingHeld);
         add(std::move(kb), kMargin, y, kw, kh);
         y += kh + 20.0f;
     }
