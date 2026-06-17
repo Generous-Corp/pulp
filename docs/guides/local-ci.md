@@ -776,19 +776,35 @@ nightly Intel workflow unless this one is deliberately retired.
 Each sanitizer job resolves independently. Setting one variable moves
 exactly that sanitizer; the others stay on their defaults.
 
-| Variable | Default label when unset | Example |
+| Variable | Default label when unset | Example (dedicated sanitizer VM label) |
 |---|---|---|
-| `PULP_SANITIZER_ASAN_RUNS_ON_JSON` | `macos-14` | `gh variable set PULP_SANITIZER_ASAN_RUNS_ON_JSON --body '["self-hosted","macos","arm64","sanitizer"]'` |
-| `PULP_SANITIZER_TSAN_RUNS_ON_JSON` | `macos-14` | `gh variable set PULP_SANITIZER_TSAN_RUNS_ON_JSON --body '["self-hosted","macos","arm64","sanitizer"]'` |
-| `PULP_SANITIZER_UBSAN_RUNS_ON_JSON` | `macos-14` | `gh variable set PULP_SANITIZER_UBSAN_RUNS_ON_JSON --body '["self-hosted","macos","arm64","sanitizer"]'` |
+| `PULP_SANITIZER_ASAN_RUNS_ON_JSON` | `macos-14` | `gh variable set PULP_SANITIZER_ASAN_RUNS_ON_JSON --body '["self-hosted","macOS","ARM64","pulp-sanitizer-vm-macos"]'` |
+| `PULP_SANITIZER_TSAN_RUNS_ON_JSON` | `macos-14` | `gh variable set PULP_SANITIZER_TSAN_RUNS_ON_JSON --body '["self-hosted","macOS","ARM64","pulp-sanitizer-vm-macos"]'` |
+| `PULP_SANITIZER_UBSAN_RUNS_ON_JSON` | `macos-14` | `gh variable set PULP_SANITIZER_UBSAN_RUNS_ON_JSON --body '["self-hosted","macOS","ARM64","pulp-sanitizer-vm-macos"]'` |
 | `PULP_SANITIZER_RTSAN_RUNS_ON_JSON` | `ubuntu-24.04` | `gh variable set PULP_SANITIZER_RTSAN_RUNS_ON_JSON --body '["self-hosted","linux","x64","sanitizer"]'` |
 
-**TSan is the first candidate to move.** The GitHub-hosted `macos-14`
-runner is 3 vCPU / 7 GB. A user's Mac is almost always much bigger, so
-the scoped TSan sweep (`-j1` serial under instrumentation) typically
-drops from ~45 min on GitHub-hosted to under 5 min on a well-resourced
-self-hosted runner. ASan / UBSan can stay on GitHub-hosted or move per
-your preference — the mechanism is the same for every sanitizer.
+The three macOS sanitizers (ASan/TSan/UBSan) carry a `--deny-labels
+pulp-build,pulp-build-vm` guard in `sanitizers.yml`'s resolver, so a
+sanitizer can **never** be misrouted onto the required-gate pool (the
+resolver hard-fails). They no longer read `PULP_NAMESPACE_BUILD_MACOS_*`
+either — the per-sanitizer var is the single switch (#4101).
+
+**Capacity finding (#4101) — localize at most one, and only TSan.**
+macOS allows only **two running macOS guests per host** (Apple's limit),
+and both belong to the required `macos` build gate. A local sanitizer VM
+is a *third* guest, so localizing is gated on the **tartci idle-gate**:
+the `pulp-sanitizer-vm-macos` lane shares `TART_HOME` with the gate (a real
+host-wide 2-guest semaphore) and yields its slot whenever the gate has
+queued/in-progress work — it can never starve the required check the way
+the coverage lane did. Pick **TSan**: it is the longest sanitizer (scoped
+`-j1` serial, ~45 min on the 3 vCPU `macos-14`) and the highest value for a
+real-time audio framework, and being single-core-bound it gains most from a
+local M-series runner. The other three stay on `macos-15`: the four run in
+**parallel** on GitHub but would **serialize** (~4×) on one cap=1 local lane,
+which is slower than hosted except during a hosted backlog. Full parallel
+local sanitizers would need a third macOS host. Roll out one sanitizer at a
+time, each behind a measured go/no-go (gate queue latency + matrix
+wall-clock).
 
 ### One-off overrides via `workflow_dispatch`
 
@@ -798,8 +814,14 @@ manual run:
 
 ```bash
 gh workflow run sanitizers.yml \
-  -f tsan_runner_selector_json='["self-hosted","macos","arm64","sanitizer"]'
+  -f tsan_runner_selector_json='["self-hosted","macOS","ARM64","pulp-sanitizer-vm-macos"]'
 ```
+
+Prove TSan green via this dispatch (with the `pulp-sanitizer-vm-macos`
+LaunchAgent loaded and the tartci idle-gate present) **before** setting
+`PULP_SANITIZER_TSAN_RUNS_ON_JSON`. The lane template is
+`tools/launchd/pulp-tart-runner-sanitizer-macos.plist.template` (ships
+parked — see its header for the load/quiet-window preconditions).
 
 `coverage.yml` accepts `linux_runner_selector_json`,
 `macos_runner_selector_json`, and `windows_runner_selector_json` inputs. The
