@@ -14,6 +14,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
+#include <system_error>
 #include <functional>
 #include <memory>
 #include <string>
@@ -204,6 +206,17 @@ int main(int argc, char** argv) {
             if (b == "skia") backend = ScreenshotBackend::skia;
             else if (b == "coregraphics") backend = ScreenshotBackend::coregraphics;
         }
+    }
+
+    // Create the output directory up front. Without this, render_to_file's
+    // ofstream silently fails to open and every cell reports "FAILED" — which
+    // reads as a render/Skia failure when it's just a missing directory.
+    std::error_code ec;
+    std::filesystem::create_directories(out, ec);
+    if (ec) {
+        std::fprintf(stderr, "could not create output dir '%s': %s\n",
+                     out.c_str(), ec.message().c_str());
+        return 1;
     }
 
     bool ok = true;
