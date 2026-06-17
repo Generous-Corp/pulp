@@ -393,7 +393,8 @@ float DesignFrameView::element_value(int i) const {
         case DesignFrameElement::Kind::momentary:
             return e.value;  // pressed/lit flag (0 or 1)
         case DesignFrameElement::Kind::swap:
-            return -1.0f;  // a swap-link button has no value
+        case DesignFrameElement::Kind::action:
+            return -1.0f;  // swap-link / command buttons have no value
     }
     return -1.0f;
 }
@@ -424,7 +425,8 @@ void DesignFrameView::set_element_value(int i, float v) {
             e.value = (v > 0.5f) ? 1.0f : 0.0f;
             break;
         case DesignFrameElement::Kind::swap:
-            return;  // a swap-link button has no value to set
+        case DesignFrameElement::Kind::action:
+            return;  // swap-link / command buttons have no value to set
     }
     request_repaint();
 }
@@ -567,11 +569,12 @@ int DesignFrameView::hit_element(Point pos) const {
     // Momentary keys first: among rects containing the point, the SMALLEST-AREA
     // wins (a narrow black key beats the white key it overlaps), order-independent
     // so a re-export reorder can't change which key is hit. View-scoped.
-    // Swap-link buttons are always active (not view-scoped) and take precedence
-    // so a toggle never gets masked by an overlapping key region.
+    // Swap-link + action command buttons are always active (not view-scoped) and
+    // take precedence so a toggle/control never gets masked by a key region.
     for (int i = 0; i < static_cast<int>(elements_.size()); ++i) {
         const auto& e = elements_[i];
-        if (e.kind != DesignFrameElement::Kind::swap) continue;
+        if (e.kind != DesignFrameElement::Kind::swap &&
+            e.kind != DesignFrameElement::Kind::action) continue;
         if (sx >= e.x && sx < e.x + e.w && sy >= e.y && sy < e.y + e.h) return i;
     }
 
@@ -605,6 +608,11 @@ void DesignFrameView::on_mouse_down(Point pos) {
     if (hit >= 0 && elements_[hit].kind == DesignFrameElement::Kind::swap) {
         // Swap-link button: change the rendered frame; no drag, no note.
         set_active_frame(elements_[hit].target_frame);
+        return;
+    }
+    if (hit >= 0 && elements_[hit].kind == DesignFrameElement::Kind::action) {
+        // Command button: fire the action; no drag, no note, no frame change.
+        if (on_action) on_action(elements_[hit].action);
         return;
     }
     drag_ = hit;

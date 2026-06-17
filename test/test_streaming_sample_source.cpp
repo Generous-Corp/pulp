@@ -435,3 +435,30 @@ TEST_CASE("StreamingSampleSource zero-fills surplus destination channels",
         REQUIRE(out.channel(1)[f] == 0.0f);                         // zeroed surplus
     }
 }
+
+TEST_CASE("StreamingSampleSource finishes a looping source that yields no frames",
+          "[audio][streaming][issue-streaming]") {
+    // Regression: a LOOPING voice whose preload read returns 0 frames (empty or
+    // failed source) shrinks total_frames_ to 0 and becomes resident. Without the
+    // zero-length guard, the resident-loop path would emit silence forever and
+    // finished() would never fire — leaking the voice. A zero-length source must
+    // report finished immediately, loop flag notwithstanding.
+    const std::uint32_t channels = 1;
+
+    StreamingSampleSourceConfig cfg;
+    cfg.channels = channels;
+    cfg.total_frames = 8000;
+    cfg.preload_frames = 8000;            // would be fully resident
+    cfg.loop = true;                       // looping
+    cfg.start_background_thread = false;
+
+    StreamingSampleSource src;
+    // Reader's realized length is 0 → preload read yields nothing.
+    REQUIRE(src.prepare(cfg, make_synth_reader(channels, 0)));
+    REQUIRE(src.total_frames() == 0);
+    REQUIRE(src.finished());  // the bug: looped silence forever before the fix
+
+    Buffer<float> out(channels, 256);
+    REQUIRE(src.pull(out.view(), 256) == 0);  // nothing to emit
+    REQUIRE(src.finished());                  // still finished after a pull
+}

@@ -8,6 +8,17 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v04440"></a>
+## [0.444.0] - 2026-06-17
+
+- feat(view): wire the MusicalTypingKeyboard on-screen controls ([#4146](https://github.com/danielraffel/pulp/pull/4146))
+- fix(examples): component-shots creates its --out directory ([#4142](https://github.com/danielraffel/pulp/pull/4142))
+
+<a id="v04430"></a>
+## [0.443.0] - 2026-06-17
+
+- fix(audio,canvas): post-review hardening + test coverage ([#4133](https://github.com/danielraffel/pulp/pull/4133))
+
 <a id="v04420"></a>
 ## [0.442.0] - 2026-06-17
 
@@ -4509,6 +4520,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.444.0]: https://github.com/danielraffel/pulp/releases/tag/v0.444.0
+[0.443.0]: https://github.com/danielraffel/pulp/releases/tag/v0.443.0
 [0.442.0]: https://github.com/danielraffel/pulp/releases/tag/v0.442.0
 [0.441.1]: https://github.com/danielraffel/pulp/releases/tag/v0.441.1
 [0.441.0]: https://github.com/danielraffel/pulp/releases/tag/v0.441.0

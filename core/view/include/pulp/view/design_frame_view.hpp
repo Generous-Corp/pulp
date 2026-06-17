@@ -24,7 +24,11 @@ struct DesignFrameElement {
     // `swap` is a SWAP-LINK button: clicking its rect calls set_active_frame
     // (target_frame) — the importer's `swap` link (e.g. a mode toggle). It does
     // not light or emit notes; it changes which frame the view renders.
-    enum class Kind { knob, text_field, dropdown, tab_group, stepper, momentary, swap };
+    // `action` is a momentary command button: clicking its rect fires
+    // on_action(action) — an in-design control (octave −/+, velocity, sustain,
+    // pitch-bend preset). It does not light, emit notes, or swap frames; it
+    // names an action the consumer maps to its own state.
+    enum class Kind { knob, text_field, dropdown, tab_group, stepper, momentary, swap, action };
 
     Kind kind = Kind::knob;
 
@@ -64,6 +68,11 @@ struct DesignFrameElement {
     /// For Kind::swap: the frame index to activate when this button is clicked
     /// (the `swap` link target). -1 = unset.
     int target_frame = -1;
+
+    // ── action (command button) ──────────────────────────────────────────
+    /// For Kind::action: the action id fired (on_action) when clicked, e.g.
+    /// "octave_up". Empty = unset. Uses the x/y/w/h rect as the hit-region.
+    std::string action;
 };
 
 // Remove the first <rect> in `svg` whose x/y/width/height match (within `tol`)
@@ -169,6 +178,10 @@ public:
     std::function<void(int index, float value)> on_element_changed;
     std::function<void(int index)> on_gesture_begin;
     std::function<void(int index)> on_gesture_end;
+    // Fired when a Kind::action command button is clicked — its `action` id. The
+    // consumer (e.g. MusicalTypingKeyboard) maps the id to its own state
+    // (octave/velocity/sustain/pitch-bend). UI thread.
+    std::function<void(const std::string& action)> on_action;
 
     // The panel is the view's natural size — a host should size its window to
     // this aspect so the design fills it with no letterbox (see paint()).
