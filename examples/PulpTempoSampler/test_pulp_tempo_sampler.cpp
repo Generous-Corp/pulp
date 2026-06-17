@@ -674,12 +674,13 @@ TEST_CASE("on-screen keyboard key click auditions a slice", "[tempo-sampler]") {
     (void)view::render_to_png(*editor, 760, 372, 1.0f, view::ScreenshotBackend::skia);
     REQUIRE(root->keyboard->local_bounds().width > 0);
 
-    // Click the first white key ("A" = slice 0). Keyboard coords are local
-    // (origin 0,0); x~50 is inside white key 0, y=150 is below the black keys.
-    view::MouseEvent down;
-    down.button = view::MouseButton::left; down.is_down = true;
-    down.position = {50.0f, 150.0f};
-    root->keyboard->on_mouse_event(down);
+    // The MusicalTypingKeyboard emits an absolute MIDI note on key click via
+    // on_note_on (the click→note hit-testing is the primitive's own tested job).
+    // The integration contract under test here is the wiring: a keyboard note
+    // reaches the same ui_note_on() path as typing/host-MIDI and triggers its
+    // slice. Fire the ROOT note (slice 0) through the wired callback.
+    REQUIRE(static_cast<bool>(root->keyboard->on_note_on));
+    root->keyboard->on_note_on(PulpTempoSamplerProcessor::kDefaultRootNote, 0.8f);
 
     std::vector<float> l(512), r(512);
     process_block(*f.proc, 120.0, false, 0, l, r);

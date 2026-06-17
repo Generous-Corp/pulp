@@ -33,11 +33,13 @@ int main(int argc, char** argv) {
     const char* out = "/tmp/pulp_tempo_sampler_ui.png";
     bool want_gpu = false;
     bool empty_state = false;  // --empty: render the drop call-to-action (no sample)
+    bool show_keyboard = false; // --keyboard: show the MusicalTypingKeyboard, render both modes
     for (int i = 1; i < argc; ++i) {
         const std::string arg(argv[i]);
         if (arg == "--gpu") want_gpu = true;
         else if (arg == "--raster") want_gpu = false;
         else if (arg == "--empty") empty_state = true;
+        else if (arg == "--keyboard") show_keyboard = true;
         else if (!arg.empty() && arg[0] != '-') out = argv[i];
     }
 
@@ -74,6 +76,41 @@ int main(int argc, char** argv) {
     }
 
     auto v = proc.create_view();
+
+    if (show_keyboard) {
+        // Show the on-screen MusicalTypingKeyboard and render BOTH modes (typing
+        // and piano) so the faithful Ink & Signal SVG + the toggle are verifiable
+        // headlessly. The keyboard is requires_gpu_host for LIVE host selection;
+        // the Skia raster/GPU capture paths still draw its SVG offscreen.
+        auto* root = dynamic_cast<examples::SamplerEditorRoot*>(v.get());
+        if (!root || !root->keyboard) {
+            std::printf("PulpTempoSampler: --keyboard: editor root/keyboard missing\n");
+            return 1;
+        }
+        root->keyboard->set_visible(true);
+        const std::string base = out;
+        const std::string stem =
+            base.size() > 4 && base.substr(base.size() - 4) == ".png"
+                ? base.substr(0, base.size() - 4) : base;
+        struct ModeShot { view::MusicalTypingKeyboard::Mode mode; const char* tag; };
+        const ModeShot shots[] = {
+            {view::MusicalTypingKeyboard::Mode::typing, "typing"},
+            {view::MusicalTypingKeyboard::Mode::piano, "piano"},
+        };
+        bool all_ok = true;
+        for (const auto& s : shots) {
+            root->keyboard->set_mode(s.mode);
+            root->layout_children();  // mode swap changes the keyboard's intrinsic size
+            const std::string path = stem + "_kbd_" + s.tag + ".png";
+            const bool ok = view::render_to_file(*v, 760, 372, path, 2.0f, backend);
+            std::printf("PulpTempoSampler keyboard [%s] %s: %s -> %s\n",
+                        backend == ScreenshotBackend::gpu ? "gpu" : "raster",
+                        s.tag, ok ? "OK" : "FAILED", path.c_str());
+            all_ok = all_ok && ok;
+        }
+        return all_ok ? 0 : 1;
+    }
+
     const bool ok = view::render_to_file(*v, 760, 372, out, 2.0f, backend);
     std::printf("PulpTempoSampler editor screenshot [%s]: %s (bpm=%.1f, slices=%zu) -> %s\n",
                 backend == ScreenshotBackend::gpu ? "gpu" : "raster",

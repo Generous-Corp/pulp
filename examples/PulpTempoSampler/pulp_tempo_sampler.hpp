@@ -28,6 +28,7 @@
 #include <pulp/view/buttons.hpp>
 #include <pulp/view/drag_drop.hpp>
 #include <pulp/view/musical_typing.hpp>
+#include <pulp/view/musical_typing_keyboard.hpp>
 #include <pulp/view/parameter_binding.hpp>
 #include <pulp/view/theme.hpp>
 #include <pulp/view/ui_components.hpp>
@@ -349,134 +350,6 @@ public:
     }
 };
 
-// Compact interactive musical-typing keyboard, Ink & Signal styled. Its 16 keys
-// ARE the QWERTY musical-typing map (slice idx = note - root): white keys
-// A S D F G H J K L, black keys W E T Y U O P, ~1.25 octave C..D#. Click a key
-// to audition that slice; the key under the playhead lights up, so typing, MIDI
-// and clicks all show. Toggled by ⌘K. This is the interactive companion to
-// MusicalTypingController; the faithful Figma SVG component stays the design
-// reference until it is re-exported with per-key interactive elements.
-class InteractiveKeyboard : public view::View {
-public:
-    std::function<void(int slice, bool on)> on_play_slice;  // click -> audition
-    std::function<int()> active_slice;                      // playhead slice or -1
-    std::function<std::string()> root_label;                // e.g. "C3"
-
-    InteractiveKeyboard() { set_continuous_repaint(true); }
-
-    void on_mouse_event(const view::MouseEvent& e) override {
-        if (e.is_wheel) return;
-        const bool ph = e.hasExplicitPhase();
-        const bool down = ph ? e.isPress() : e.is_down;
-        const bool up   = ph ? e.isRelease() : !e.is_down;
-        if (down && e.button == view::MouseButton::left) {
-            const int s = key_at(e.position.x, e.position.y);
-            if (s >= 0) { pressed_ = s; if (on_play_slice) on_play_slice(s, true); }
-        } else if (up && pressed_ >= 0) {
-            if (on_play_slice) on_play_slice(pressed_, false);
-            pressed_ = -1;
-        }
-    }
-
-    void paint(canvas::Canvas& c) override {
-        using canvas::Color;
-        auto b = local_bounds();
-        const Color panel  = Color::rgba8(0x1E, 0x25, 0x30);
-        const Color border = Color::rgba8(0x39, 0x41, 0x4A);
-        const Color wkey   = Color::rgba8(0xE9, 0xED, 0xF2);
-        const Color bkey   = Color::rgba8(0x2A, 0x32, 0x3D);
-        const Color teal   = Color::rgba8(0x16, 0xDA, 0xC2);
-        const Color ink    = Color::rgba8(0x16, 0x1A, 0x21);  // dark text (on light/active)
-        const Color wtxt   = Color::rgba8(0xD6, 0xDC, 0xE4);  // light text (on black keys)
-        const Color muted  = Color::rgba8(0x93, 0x9C, 0xA9);
-
-        c.set_fill_color(panel);
-        c.fill_rounded_rect(b.x, b.y, b.width, b.height, 12.f);
-        c.set_stroke_color(border); c.set_line_width(1.f);
-        c.stroke_rounded_rect(b.x, b.y, b.width, b.height, 12.f);
-
-        c.set_fill_color(muted);
-        c.set_font("JetBrains Mono", 11.f);
-        c.set_text_align(canvas::TextAlign::left);
-        c.fill_text("MUSICAL TYPING", b.x + 16.f, b.y + 24.f);
-        if (root_label) {
-            c.set_text_align(canvas::TextAlign::right);
-            c.fill_text("ROOT " + root_label(), b.x + b.width - 16.f, b.y + 24.f);
-        }
-
-        const int act = active_slice ? active_slice() : -1;
-        auto hot = [&](int i){ return i == pressed_ || i == act; };
-
-        // White keys, then black keys on top.
-        for (int i = 0; i < kNumKeys; ++i) {
-            if (is_black(i)) continue;
-            KRect r = white_rect(i);
-            c.set_fill_color(hot(i) ? teal : wkey);
-            c.fill_rounded_rect(r.x + 1.f, r.y, r.w - 2.f, r.h, 4.f);
-            c.set_fill_color(ink);
-            c.set_font("JetBrains Mono", 13.f);
-            c.set_text_align(canvas::TextAlign::center);
-            c.fill_text(letter(i), r.x + r.w * 0.5f, r.y + r.h - 12.f);
-        }
-        for (int i = 0; i < kNumKeys; ++i) {
-            if (!is_black(i)) continue;
-            KRect r = black_rect(i);
-            c.set_fill_color(hot(i) ? teal : bkey);
-            c.fill_rounded_rect(r.x, r.y, r.w, r.h, 3.f);
-            c.set_fill_color(hot(i) ? ink : wtxt);
-            c.set_font("JetBrains Mono", 11.f);
-            c.set_text_align(canvas::TextAlign::center);
-            c.fill_text(letter(i), r.x + r.w * 0.5f, r.y + r.h - 8.f);
-        }
-        c.set_text_align(canvas::TextAlign::left);
-    }
-
-private:
-    struct KRect { float x, y, w, h; };
-    static constexpr int kNumKeys = 16;
-
-    static const char* letter(int i) {
-        static const char* const L[16] =
-            {"A","W","S","E","D","F","T","G","Y","H","U","J","K","O","L","P"};
-        return (i >= 0 && i < 16) ? L[i] : "";
-    }
-    static bool is_black(int i) {
-        switch (i) {
-            case 1: case 3: case 6: case 8: case 10: case 13: case 15: return true;
-            default: return false;
-        }
-    }
-    static int white_count() { return 9; }
-    int white_index(int sliceidx) const {
-        int wi = 0; for (int i = 0; i < sliceidx; ++i) if (!is_black(i)) ++wi; return wi;
-    }
-    KRect keyarea() const {
-        auto b = local_bounds();
-        const float padx = 16.f, top = 40.f, bot = 16.f;
-        return {b.x + padx, b.y + top, b.width - 2 * padx, b.height - top - bot};
-    }
-    KRect white_rect(int sliceidx) const {
-        KRect g = keyarea(); float ww = g.w / static_cast<float>(white_count());
-        return {g.x + static_cast<float>(white_index(sliceidx)) * ww, g.y, ww, g.h};
-    }
-    KRect black_rect(int sliceidx) const {
-        KRect g = keyarea(); float ww = g.w / static_cast<float>(white_count());
-        const int wi = white_index(sliceidx - 1);  // sliceidx-1 is the preceding white
-        const float bw = ww * 0.6f, bh = g.h * 0.6f;
-        return {g.x + static_cast<float>(wi + 1) * ww - bw * 0.5f, g.y, bw, bh};
-    }
-    static bool inside(const KRect& r, float x, float y) {
-        return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
-    }
-    int key_at(float x, float y) const {
-        for (int i = 0; i < kNumKeys; ++i)
-            if (is_black(i)) { KRect r = black_rect(i); if (inside(r, x, y)) return i; }
-        for (int i = 0; i < kNumKeys; ++i)
-            if (!is_black(i)) { KRect r = white_rect(i); if (inside(r, x, y)) return i; }
-        return -1;
-    }
-    int pressed_ = -1;
-};
 
 // Editor root that owns the widget<->parameter bindings and store listeners.
 // They are destroyed (and their store listeners removed) before the View base
@@ -492,10 +365,22 @@ public:
     // current_root_note to the ROOT param.
     view::MusicalTypingController typing;
     std::function<int()> current_root_note;
-    // The on-screen interactive musical-typing keyboard. Hidden by default;
-    // ⌘K (Ctrl+K on Win/Linux) toggles it. Click keys to audition slices; the
-    // playhead key lights up so typing / MIDI / clicks all show.
-    InteractiveKeyboard* keyboard = nullptr;
+    // The on-screen MusicalTypingKeyboard (faithful Ink & Signal SVG, with the
+    // 🎹/⌨ piano⇄typing toggle). Hidden by default; ⌘K (Ctrl+K) toggles it. App
+    // feeds QWERTY via the `typing` controller (set_input_capture(false)), so the
+    // keyboard plays only on CLICK and lights from set_active_notes(). GPU host
+    // required (SVG via Skia). Click keys to audition the note's slice.
+    view::MusicalTypingKeyboard* keyboard = nullptr;
+
+    // External held-note set the keyboard lights from (typing + clicks). Pushed to
+    // keyboard->set_active_notes() on change so all input sources read on the keys.
+    std::vector<int> lit_notes;
+    void set_note_lit(int note, bool on) {
+        auto it = std::find(lit_notes.begin(), lit_notes.end(), note);
+        if (on) { if (it == lit_notes.end()) lit_notes.push_back(note); }
+        else if (it != lit_notes.end()) lit_notes.erase(it);
+        if (keyboard) keyboard->set_active_notes(lit_notes);
+    }
 
     SamplerEditorRoot() {
         set_focusable(true);
@@ -877,8 +762,20 @@ public:
         // into notes; base = ROOT so 'a' plays slice 0, 'w' slice 1, … Notes go
         // to the same lock-free UI->audio queue as host MIDI and slice clicks.
         root->current_root_note = [this] { return static_cast<int>(state().get_value(kRootNote)); };
-        root->typing.on_note_on = [this](int note, float vel) { ui_note_on(note, vel); };
-        root->typing.on_note_off = [this](int note) { ui_note_off(note); };
+        // QWERTY typing → audio AND lights the on-screen keyboard (set_note_lit
+        // pushes the held set to keyboard->set_active_notes()), so typing reads on
+        // the keys even though the keyboard itself doesn't capture QWERTY.
+        {
+            SamplerEditorRoot* rp = root.get();
+            root->typing.on_note_on = [this, rp](int note, float vel) {
+                ui_note_on(note, vel);
+                rp->set_note_lit(note, true);
+            };
+            root->typing.on_note_off = [this, rp](int note) {
+                ui_note_off(note);
+                rp->set_note_lit(note, false);
+            };
+        }
 
         // ── Footer: wired controls only ──
         // Root-note dropdown (slice 0 maps to this MIDI note; idx = note - root).
@@ -901,9 +798,15 @@ public:
                 state().end_gesture(kRootNote);
             };
             ComboBox* comboPtr = combo.get();
+            SamplerEditorRoot* rp = root.get();
             root->listeners.push_back(state().add_listener(
-                [comboPtr](state::ParamID id, float v) {
-                    if (id == kRootNote) comboPtr->set_selected_silent(static_cast<int>(v) / 12);
+                [comboPtr, rp](state::ParamID id, float v) {
+                    if (id != kRootNote) return;
+                    comboPtr->set_selected_silent(static_cast<int>(v) / 12);
+                    // Keep on-screen-keyboard click notes aligned to ROOT (typing
+                    // keys emit base+octave+semitone; the typing controller already
+                    // syncs per keypress, this covers clicks).
+                    if (rp->keyboard) rp->keyboard->controller().set_base_note(static_cast<int>(v));
                 },
                 state::ListenerThread::Main));
             place(*combo, 64, 316, 96, 26);
@@ -954,17 +857,31 @@ public:
             root->add_child(std::move(loopBtn));
         }
 
-        // On-screen interactive musical-typing keyboard. Hidden until ⌘K/Ctrl+K.
-        // Added LAST so it paints on top as a floating panel. Click a key to
-        // audition its slice (same path as a waveform-slice tap); the playhead
-        // key lights up so typing, MIDI and clicks all read on it.
+        // On-screen MusicalTypingKeyboard (faithful Ink & Signal SVG, 🎹/⌨ toggle).
+        // Hidden until ⌘K/Ctrl+K. Added LAST so it paints on top as a floating
+        // panel. set_input_capture(false): the app already feeds QWERTY through the
+        // `typing` controller above, so the keyboard plays only on CLICK and lights
+        // from set_active_notes(). A clicked key emits an absolute MIDI note → the
+        // same ui_note_on() path as typing/host-MIDI (the processor maps note →
+        // slice). Sized to the design's natural panel; the view letterboxes and
+        // re-lays-out when the in-UI toggle swaps modes (typing taller than piano).
         {
-            auto kbd = std::make_unique<InteractiveKeyboard>();
-            place(*kbd, 60, 86, 640, 196);
+            SamplerEditorRoot* rp = root.get();
+            auto kbd = std::make_unique<view::MusicalTypingKeyboard>();
+            kbd->set_input_capture(false);
+            kbd->set_requires_gpu_host(true);  // SVG via Skia needs the GPU host
+            kbd->controller().set_base_note(static_cast<int>(state().get_value(kRootNote)));
+            const float pw = kbd->panel_width(), ph = kbd->panel_height();
+            place(*kbd, 60, 86, pw > 0 ? pw : 640, ph > 0 ? ph : 196);
             kbd->set_visible(false);
-            kbd->on_play_slice = [this](int idx, bool on) { play_slice(idx, on); };
-            kbd->active_slice = [this] { int s = -1; float p = 0.0f; playhead(s, p); return s; };
-            kbd->root_label = [this] { return note_name(static_cast<int>(state().get_value(kRootNote))); };
+            kbd->on_note_on = [this, rp](int note, float vel) {
+                ui_note_on(note, vel);
+                rp->set_note_lit(note, true);
+            };
+            kbd->on_note_off = [this, rp](int note) {
+                ui_note_off(note);
+                rp->set_note_lit(note, false);
+            };
             root->keyboard = kbd.get();
             root->add_child(std::move(kbd));
         }
