@@ -541,7 +541,9 @@ TEST_CASE("TabPanel mouse selection paint and empty guard",
     RecordingCanvas canvas;
     tabs.paint(canvas);
     REQUIRE(canvas.count(DrawCommand::Type::fill_text) == 2);
-    REQUIRE(canvas.count(DrawCommand::Type::fill_rect) >= 3);
+    // Ink & Signal tab bar: tab-bar background + the active tab's teal underline
+    // (active state is an underline now, not a filled block).
+    REQUIRE(canvas.count(DrawCommand::Type::fill_rect) >= 2);
 }
 
 // ── ScrollView ───────────────────────────────────────────────────────────

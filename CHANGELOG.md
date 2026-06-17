@@ -8,6 +8,30 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v04400"></a>
+## [0.440.0] - 2026-06-17
+
+- feat(view,canvas,build): shadow cache, opt-in Lottie, authoring-strip + design-import gating ([#4079](https://github.com/danielraffel/pulp/pull/4079))
+
+<a id="v04390"></a>
+## [0.439.0] - 2026-06-16
+
+- feat(au): emit parameter automation to host from plugin editor edits ([#4110](https://github.com/danielraffel/pulp/pull/4110))
+- feat(audio): true ranged decode in MemoryMappedAudioReader ([#4080](https://github.com/danielraffel/pulp/pull/4080))
+- feat(view): Linux standalone outbound file drag (XDND source) ([#4106](https://github.com/danielraffel/pulp/pull/4106))
+- ci(sanitizers): route TSan pilot to a gate-safe local VM lane (#4101) ([#4108](https://github.com/danielraffel/pulp/pull/4108))
+
+<a id="v04380"></a>
+## [0.438.0] - 2026-06-17
+
+- feat(view): iOS native drag-and-drop (in + out) ([#4085](https://github.com/danielraffel/pulp/pull/4085))
+
+<a id="v04371"></a>
+## [0.437.1] - 2026-06-17
+
+- fix(view): release XdndSelection when an XDND outbound drag ends ([#4083](https://github.com/danielraffel/pulp/pull/4083))
+- feat(audio): streaming sample source + multi-mic zone selection ([#4077](https://github.com/danielraffel/pulp/pull/4077))
+
 <a id="v04370"></a>
 ## [0.437.0] - 2026-06-16
 
@@ -4460,6 +4484,10 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.440.0]: https://github.com/danielraffel/pulp/releases/tag/v0.440.0
+[0.439.0]: https://github.com/danielraffel/pulp/releases/tag/v0.439.0
+[0.438.0]: https://github.com/danielraffel/pulp/releases/tag/v0.438.0
+[0.437.1]: https://github.com/danielraffel/pulp/releases/tag/v0.437.1
 [0.437.0]: https://github.com/danielraffel/pulp/releases/tag/v0.437.0
 [0.436.0]: https://github.com/danielraffel/pulp/releases/tag/v0.436.0
 [0.435.0]: https://github.com/danielraffel/pulp/releases/tag/v0.435.0

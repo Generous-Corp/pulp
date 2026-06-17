@@ -92,4 +92,11 @@ private:
     static constexpr float kRadius = 4.0f;
 };
 
+/// Design-system alias. The Ink & Signal Figma library names this primitive
+/// "PopupMenu"; the Pulp framework class is ContextMenu. The alias lets
+/// design-system code use the Figma name without a breaking rename. See
+/// docs/reference/design-system-naming.md for the full Figma↔SDK name map.
+/// (No `class PopupMenu` exists in pulp::view, so this is collision-free.)
+using PopupMenu = ContextMenu;
+
 } // namespace pulp::view

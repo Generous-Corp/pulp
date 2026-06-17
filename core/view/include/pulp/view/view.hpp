@@ -71,7 +71,7 @@ public:
 
     // ── Theme ────────────────────────────────────────────────────────────
 
-    void set_theme(const Theme& theme) { theme_ = theme; }
+    void set_theme(const Theme& theme) { theme_ = theme; request_repaint(); }
     const Theme& theme() const { return theme_; }
 
     // Resolve a color: check own theme first, then walk up to parent
@@ -178,6 +178,13 @@ public:
     virtual void on_mouse_event(const MouseEvent& event) {
         if (on_pointer_event) on_pointer_event(event);
     }
+    /// True if this widget adjusts its VALUE on a scroll-wheel over it (knobs,
+    /// faders, sliders, steppers, pan). The host routes the wheel to such a
+    /// widget under the cursor instead of scrolling an enclosing ScrollView.
+    virtual bool wants_wheel_value() const { return false; }
+    /// Adjust the widget's value by a scroll-wheel delta (`delta_y` positive =
+    /// scrolled down). Only called when wants_wheel_value() is true.
+    virtual void on_wheel(float delta_y) { (void)delta_y; }
     /// Key event with modifiers and up/down state.
     /// Return true if handled (prevents propagation to parent).
     virtual bool on_key_event(const KeyEvent& event) { (void)event; return false; }

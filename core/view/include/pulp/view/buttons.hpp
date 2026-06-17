@@ -15,6 +15,12 @@ namespace pulp::view {
 
 class TextButton : public View {
 public:
+    // Visual variants matching the Ink & Signal design language. `secondary`
+    // (the default) is the historical neutral filled+border face, so existing
+    // UIs are unchanged; `primary` is an accent-filled call-to-action; `ghost`
+    // is transparent with accent text.
+    enum class Style { primary, secondary, ghost };
+
     TextButton() { set_access_role(AccessRole::toggle); set_focusable(true); }
     explicit TextButton(std::string label) : label_(std::move(label)) {
         set_access_role(AccessRole::toggle);
@@ -24,6 +30,9 @@ public:
 
     void set_label(std::string text) { label_ = std::move(text); set_access_label(label_); }
     const std::string& label() const { return label_; }
+
+    void set_style(Style s) { style_ = s; }
+    Style style() const { return style_; }
 
     void set_enabled(bool e) { enabled_ = e; }
     bool is_enabled() const { return enabled_; }
@@ -40,6 +49,7 @@ public:
 
 private:
     std::string label_;
+    Style style_ = Style::secondary;
     bool enabled_ = true;
     bool hovered_ = false;
     bool pressed_ = false;

@@ -3,6 +3,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/view/theme_presets.hpp>
 #include <pulp/view/theme_contrast.hpp>
+#include <pulp/view/design_tokens.hpp>
 
 using namespace pulp::view;
 
@@ -10,7 +11,7 @@ using namespace pulp::view;
 
 TEST_CASE("All presets are available", "[view][presets]") {
     auto& presets = all_presets();
-    REQUIRE(presets.size() == 37);
+    REQUIRE(presets.size() == 38);
 }
 
 TEST_CASE("Preset IDs are unique", "[view][presets]") {
@@ -233,11 +234,115 @@ TEST_CASE("Known presets exist", "[view][presets]") {
         "cyberpunk", "pastel-dreams", "clean-slate", "caffeine",
         "ocean-breeze", "retro-arcade", "midnight-bloom", "candyland",
         "northern-lights", "vintage-paper", "sunset-horizon",
-        "starry-night", "claude"
+        "starry-night", "claude", "ink-signal"
     };
 
     for (auto& id : expected) {
         INFO("Missing preset: " << id);
         REQUIRE(find_preset(id) != nullptr);
     }
+}
+
+// ── Ink & Signal (Pulp's flagship design language) ──────────────────────────
+// Seeded from assets/design-system/ink-signal/tokens/pulp.tokens.json. These
+// guard the "colors are exact by construction" claim (Phase 1 of the
+// Design-System-Import-Plan) plus the brand overrides and token round-trip.
+
+TEST_CASE("Ink & Signal preset exists with both appearances",
+          "[view][presets][ink-signal]") {
+    auto* p = find_preset("ink-signal");
+    REQUIRE(p != nullptr);
+    REQUIRE(p->name == "Ink & Signal");
+}
+
+TEST_CASE("Ink & Signal seeds the brand palette exactly",
+          "[view][presets][ink-signal]") {
+    auto* p = find_preset("ink-signal");
+    REQUIRE(p != nullptr);
+
+    auto dark = theme_from_preset(*p, true);
+    auto light = theme_from_preset(*p, false);
+
+    // Primary accent = signal teal (dark) / signal-deep (light) — exact.
+    REQUIRE(dark.color("accent.primary").value() == color_from_hex(0x16DAC2));
+    REQUIRE(light.color("accent.primary").value() == color_from_hex(0x10B6A3));
+
+    // Coral is the destructive/peak ink in both appearances — exact.
+    REQUIRE(dark.color("accent.error").value() == color_from_hex(0xFF5C4D));
+    REQUIRE(light.color("accent.error").value() == color_from_hex(0xFF5C4D));
+
+    // Cool graphite app surface (dark) — exact, no brown cast.
+    REQUIRE(dark.color("bg.primary").value() == color_from_hex(0x161A21));
+    REQUIRE(light.color("bg.primary").value() == color_from_hex(0xEDEFF2));
+
+    // Derived audio tokens follow the primary by construction.
+    REQUIRE(dark.color("knob.arc").value() == color_from_hex(0x16DAC2));
+    REQUIRE(dark.color("waveform.line").value() == color_from_hex(0x16DAC2));
+}
+
+TEST_CASE("Ink & Signal applies brand-faithful overrides",
+          "[view][presets][ink-signal]") {
+    auto* p = find_preset("ink-signal");
+    REQUIRE(p != nullptr);
+    auto dark = theme_from_preset(*p, true);
+    auto light = theme_from_preset(*p, false);
+
+    // Meters use the explicit leaf/amber/coral inks, not hue-shifted primary.
+    REQUIRE(dark.color("meter.green").value() == color_from_hex(0x3FCF77));
+    REQUIRE(dark.color("meter.yellow").value() == color_from_hex(0xF6B847));
+    REQUIRE(dark.color("meter.red").value() == color_from_hex(0xFF5C4D));
+
+    // Status accents likewise.
+    REQUIRE(dark.color("accent.success").value() == color_from_hex(0x3FCF77));
+    REQUIRE(dark.color("accent.warning").value() == color_from_hex(0xF6B847));
+
+    // on-ink: dark text that sits on bright accent fills (differs per mode).
+    REQUIRE(dark.color("accent.text").value() == color_from_hex(0x052320));
+    REQUIRE(light.color("accent.text").value() == color_from_hex(0x042420));
+
+    // Geometric Jost display/UI type.
+    REQUIRE(dark.string_token("font.family").value() == "Jost");
+    REQUIRE(light.string_token("font.family").value() == "Jost");
+}
+
+TEST_CASE("Ink & Signal honours its screenprint AA-contrast promise",
+          "[view][presets][ink-signal]") {
+    auto* p = find_preset("ink-signal");
+    REQUIRE(p != nullptr);
+    auto dark = theme_from_preset(*p, true);
+    auto light = theme_from_preset(*p, false);
+
+    // Body text on the app surface clears AA normal in both appearances.
+    REQUIRE(meets_contrast(dark.color("text.primary").value(),
+                           dark.color("bg.primary").value(),
+                           ContrastLevel::aa_normal));
+    REQUIRE(meets_contrast(light.color("text.primary").value(),
+                           light.color("bg.primary").value(),
+                           ContrastLevel::aa_normal));
+
+    // Dark on-ink text on the bright signal fill clears AA large (the
+    // "dark ink rides on bright accent fills" commitment).
+    REQUIRE(meets_contrast(dark.color("accent.text").value(),
+                           dark.color("accent.primary").value(),
+                           ContrastLevel::aa_large));
+}
+
+TEST_CASE("Ink & Signal round-trips through design tokens",
+          "[view][presets][ink-signal][import]") {
+    auto* p = find_preset("ink-signal");
+    REQUIRE(p != nullptr);
+    auto theme = theme_from_preset(*p, true);
+
+    // W3C canonical round-trip preserves the brand inks (two-segment token
+    // names survive the group prefix/round-trip).
+    auto w3c = parse_w3c_tokens(export_w3c_tokens(theme));
+    REQUIRE(w3c.colors.count("accent.primary") == 1);
+    REQUIRE(w3c.colors["accent.primary"] == color_from_hex(0x16DAC2));
+    REQUIRE(w3c.colors.count("meter.green") == 1);
+    REQUIRE(w3c.colors["meter.green"] == color_from_hex(0x3FCF77));
+
+    // Figma Variables round-trip (the designer-facing reskin surface).
+    auto figma = parse_figma_variables(export_figma_variables(theme));
+    REQUIRE(figma.colors.count("accent.primary") == 1);
+    REQUIRE(figma.colors["accent.primary"] == color_from_hex(0x16DAC2));
 }

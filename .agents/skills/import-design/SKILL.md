@@ -7,6 +7,94 @@ description: Import designs from Figma, Stitch, v0, Pencil, React Native, or Cla
 
 Import a design from an external tool (Figma, Stitch, v0, Pencil, React Native, Claude Design, or the experimental JSX runtime lane) into this Pulp project.
 
+## Figma → Pulp, faithful (1:1) — THE WORKING LANE (read first)
+
+When the goal is a **visually faithful (1:1)** import of a component that lives in
+the **Figma file** (e.g. the Ink & Signal library, file key `q9iDYZzg86YrOQKr6I3bY0`),
+use the **figma-plugin faithful-vector lane**. This is the lane that actually
+reproduces the design; the others below do NOT and waste hours:
+
+- ❌ **Do NOT hand-write a C++ `paint()`** to mimic the design. It is never 1:1
+  (SVG icons, gradients, shadows, pills) and is pure slop. The framework exists
+  to render the design, not to re-draw it by hand.
+- ❌ **Do NOT use `--from claude` for layout.** On a standalone/bundled HTML it
+  falls back to regex *text* extraction ("0 widgets, N labels", ~58% and it even
+  scrapes CSS comments) — no CSS layout, no geometry.
+
+**The lane that works (Figma is the source of truth):**
+```bash
+# 1) Export the Figma NODE to a scene (faithful vectors + geometry + assets).
+#    Token resolves from --token, $FIGMA_TOKEN, then ~/.config/pulp/figma-token.
+python3 tools/import-design/figma_rest_export.py \
+  --file-key q9iDYZzg86YrOQKr6I3bY0 --node 187:2 \
+  --out scene.pulp.json            # → "N nodes, faithful-vector SVG, interactive elements"
+
+# 2) Import the scene (the source-of-truth lane: audio-widget + library matching,
+#    faithful-vector render) and validate against the Figma render.
+build-gpu/tools/import-design/pulp-import-design \
+  --from figma-plugin --file scene.pulp.json --output ui.js \
+  --validate --screenshot-backend skia \
+  --reference <figma-node-render.png> --diff diff.png --render-size 1356x781
+```
+
+**THE #1 LESSON — `--validate` does NOT render the faithful SVG.** This is what
+cost hours. The scene's root carries `render_mode=faithful_svg` + the embedded
+SVG, and the **C++ runtime** honors it (`design_import_native_common.cpp` →
+`make_faithful_svg_frame` → `DesignFrameView`/SkSVGDOM, line ~1734). But
+`pulp import-design --validate` renders the **emitted native-widget JS**
+(`build_native_view_tree`/codegen materialization), NOT the faithful SVG — so it
+mis-lays composite vectors (e.g. piano black keys grouped/dropped) and reports
+~18/255 *even though the faithful render is pixel-perfect*. **Do not trust
+`--validate`'s number as the faithful fidelity.**
+
+**Validate the FAITHFUL render with `pulp-svg-probe`** (renders an SVG via
+`DesignFrameView`/SkSVGDOM, the real 1:1 path):
+```bash
+# extract the data:image/svg+xml base64 from scene.pulp.json → faithful.svg, then:
+build-gpu/tools/import-design/pulp-svg-probe faithful.svg out.png 1356 781
+python3 tools/figma-import/verify_region.py source.png out.png 80 9.0   # → ~1.08/255 = 1:1
+```
+This is how Musical Typing was proven 1:1 (1.08/255 vs the design). Pulp's
+SkSVGDOM **does** render Figma's effects-heavy SVG (67 filters, 61 masks)
+faithfully — the export and the SkSVGDOM render are both fine; only the
+native-materialize/codegen path is lossy.
+
+**One-command path (USE THIS): `tools/import-design/make_catalog_component.py`.**
+It runs the whole lane — exports the Figma node, embeds the faithful SVG (chunked
+base64), and emits the `DesignFrameView` subclass + the catalog/CMake/showcase
+paste-ins. Example:
+```bash
+python3 tools/import-design/make_catalog_component.py \
+  --name "Channel Strip" --class ChannelStripView --node 182:2 \
+  --category containers --usage "Pro channel strip…"
+```
+Then paste the printed lines into `core/view/CMakeLists.txt`, the
+`design_system.{hpp,cpp}` catalog, the showcase, and add a test
+(`test_faithful_specimens.cpp` pattern). Validate with `pulp-svg-probe` +
+`verify_region.py`. This is how Musical Typing, Channel Strip, and 7 specimen
+components were built — never hand-paint.
+
+**Under the hood: a 1:1 catalog component = subclass `DesignFrameView` with the embedded SVG.**
+See `core/view/{include/pulp/view,src}/musical_typing_keyboard*` +
+`design_system.cpp` catalog entry: the class is
+`MusicalTypingKeyboard : public DesignFrameView`, constructed from the
+base64-embedded Figma SVG (`musical_typing_keyboard_svg.cpp`). Reskin/extend by
+re-exporting the node and re-embedding — never re-draw by hand. (Open follow-up:
+teach the codegen/`--validate` path to emit/render `faithful_svg` as a
+DesignFrameView so the import itself is 1:1, not just the runtime.)
+
+**Lesser gotchas:**
+- `--validate`'s "Similarity %" also breaks on **size mismatch** (it renders at
+  `--render-size`, often 2× the reference) — always diff at matched dimensions
+  with `verify_region.py` (per-tile).
+- `--render-size` must match the node aspect or content letterboxes → inflated diff.
+- Skia backend is mandatory for image/asset compositing (`--screenshot-backend skia`).
+
+This pairs with the upstream Figma-import toolkit (`tools/figma-import/`, which
+captures the design HTML→Figma 1:1): **Figma is the single source** — design HTML
+→ Figma (figma-import) → Pulp (this lane). Keep both ends improving from each
+import's lessons.
+
 ## CRITICAL: pulp-design-tool requires the GPU host (PULP_HAS_SKIA)
 
 Before debugging *any* runtime-import resize / sizing / layout issue in `pulp-design-tool` or `/tmp/<App>.app`, verify the binary is using `MacGpuWindowHost`, not the CPU `MacWindowHost`. The design viewport pin, aspect-lock, and uniform paint-scale all live in `MacGpuWindowHost` (gated by `#ifdef PULP_HAS_SKIA` in `core/view/platform/mac/window_host_mac.mm`). When Skia isn't linked, `WindowHost::create()` returns `MacWindowHost`, where `set_design_viewport()` and `set_fixed_aspect_ratio()` are base-class no-ops — the example still builds and runs, but resize behaves as if every fix you've shipped is missing.
@@ -703,6 +791,78 @@ a rect (x,y,w,h) + `options`/`selected_index`/`placeholder`.
   structurally (`detect_tab_group`): a row of ≥3 similar-width container children
   with short text labels; the child carrying a visible SOLID fill is the selected
   tab. `--select-tab=N` is the design-import-standalone demo flag for capturing it.
+- `momentary` → press/release primitive for keys / pads / drum triggers /
+  sustain / transport. `on_gesture_begin(i)` = note-on, `on_gesture_end(i)` =
+  note-off; `set_element_value(i, 1/0)` lights it via a NATIVE accent overlay
+  (the SVG is never recolored, so a re-export still skins it). Carries `note`
+  (typing keys = relative semitone 0..17, piano = absolute MIDI; consumers map
+  by `note`, never positional index — a re-export may reorder) and `view_group`
+  (per-view scope, e.g. typing=0 / piano=1; `set_active_view_group` releases any
+  held key so notes never stick across a mode switch). `MusicalTypingKeyboard`
+  is the reference consumer; its keys are code-defined (a rect table extracted
+  from the Figma frame), NOT discovered from SVG geometry — the faithful baked
+  SVG (dark) provides the pixels, the element list provides behavior. Gotchas:
+  (1) **smallest-area hit tiebreak** — among momentary rects containing the
+  point the smallest wins, so a narrow black key beats the white key it overlaps
+  (order-independent, survives re-export reordering). (2) **highlight must carve
+  out notches** — a lit white (larger) key's overlay rect would otherwise bleed
+  teal over the black keys notching its top, swallowing them; `paint()` subtracts
+  any smaller same-view momentary rect that GENUINELY notches the key's top
+  (x-overlap, starts at/above the top, AND reaches down into the key), painting
+  the highlight as bands that leave the black-key channels dark. The reach-into
+  test is load-bearing when one frame shows two keyboards in the same view group
+  (typing row above a piano keyboard): their keys overlap in x but not in y, so
+  without it a typing black key was mistaken for a notch on a piano key and drew
+  a tall bar across the inter-keyboard gap. The notch bottom is clamped to the
+  key. (3) **match the design's own pressed paint, don't invent a flat color** —
+  the lit fill replicates the figma's pressed-key gradient (in the MTK export,
+  `paint36`: accent teal 26%→100% opacity, key top→bottom), set per key over its
+  own height via `set_fill_gradient_linear`. A flat fill reads as a uniform slab
+  and the key letter vanishes; the gradient's lighter top lets the letter show.
+  Footgun that caused exactly this: `canvas::Color` channels are **float 0–1**
+  (`Color::rgba8` takes 0–255 and converts) — assigning `c.a = 120` clamps to
+  fully opaque, NOT 47%. Build alpha variants with `Color::rgba(r, g, b, 0.26f)`.
+  All in `DesignFrameView` (`core/view/src/design_frame_view.cpp`).
+
+### Re-importing a design revision (round-trip)
+
+Designers WILL revise a frame and expect the change to flow back into Pulp.
+The round-trip is **figma frame → `figma_rest_export.py` → embed**, and the
+canonical source of the faithful frame is the **figma node**, NOT a design-system
+export folder. Hard-won steps (from re-importing the MTK after an even-spacing fix):
+
+1. **Find the source node.** It's in the embed's provenance header (e.g.
+   `musical_typing_keyboard_svg.cpp`: "Figma file `<key>` node `<id>`"). A
+   design-system HTML/CSS export folder (tokens, components, `*.html`) does NOT
+   contain the detailed frame SVG — only a schematic. Don't try to source the
+   faithful SVG from it.
+2. **If the node still returns the OLD design, the revision lives elsewhere.** A
+   byte-identical re-export means the figma node wasn't the thing edited (the
+   designer changed a different node, or only the HTML/CSS kit). Either get the
+   updated node's URL, or update the figma node yourself from the canonical spec
+   (see step 3), then export.
+3. **Map CSS intent → figma layout.** A folder's `flex` even-spacing
+   (`.mtk-keys { display:flex; padding:6px; gap:0 }`, keys `flex:1`) is NOT a
+   one-value figma fix. Figma auto-layout beds with FIXED-width, MIN-aligned
+   children + ABSOLUTE overlays need: symmetric padding **and** the flow children
+   set to fill (`resize` to `content/n`) **and** the absolute overlays
+   repositioned onto the new boundaries (`use_figma`). Verify with a figma
+   `get_screenshot` of the bed before exporting.
+4. **Export + regenerate the embed.** `figma_rest_export.py --file-key … --node …
+   --out scene.pulp.json --faithful-vector`. The frame SVG lands in the scene's
+   `asset_manifest` as `frame-svg-<node>` → an `assets/<hash>.svg` file (NOT an
+   inline JSON field). Base64-chunk it (≤8000 chars/literal) into the embed cpp,
+   matching the existing `kParts[]`+join format.
+5. **Re-extract interactive rects.** Geometry shifts on any spacing change. Re-run
+   the hit-rect extraction (path bounding boxes from the new SVG) and update the
+   element tables; positional index is NOT stable across a re-export.
+6. **Neutralize baked pressed/selected states.** A revision may bake a demo
+   "pressed" key (a teal gradient like `paint36`). For the interactive widget,
+   rewrite that gradient's stops to the resting fill (`#EBEEF1`→`white`) so the
+   live overlay owns every highlight — otherwise the widget shows a stuck-lit key.
+7. **Verify headless both ways.** Resting render: even spacing, no stuck keys. Lit
+   render: overlay lands exactly on the new key positions with the design's
+   pressed gradient.
 
 The `pulp-design-import-standalone` example has demo flags to capture overlay states
 headlessly: `--focus-search` (focus ring) and `--open-dropdown=SUBSTR` (opens
@@ -943,6 +1103,48 @@ codegen does not detect these names. The screenshot-parity fixtures contain no
 parity fixture, mirror the detection in the codegen (same lesson as the text
 vertical-centering split). Tests: `[combo-box]`, `[text-editor]` in
 `pulp-test-design-import-native-materializer`.
+
+#### `kind_from_type` Ink & Signal vocabulary (type-string aliases)
+
+`kind_from_type` (the `type`-string fallback, after `kind_from_name`) also
+recognizes the design-system / common-web component names so imported designs
+map onto native widgets instead of falling through to `native-unsupported-node`:
+`toggle`/`switch`→`toggle_button`; `combobox`/`combo_box`/`dropdown`/`select`→
+`combo_box` (note: before this, `combo_box` had a `kind` but **no** type string
+resolved to it — only the layer-NAME path above could reach it); `pan`/`panner`→
+`fader` (1-D linear control); `badge`/`chip`/`tag`/`pill`→`label`;
+`panel`/`sidebar`/`side_panel`/`toolbar`/`channel_strip`/`card`→`view`. Faithful
+dedicated `NativeWidgetKind`s for the remaining gap widgets (Stepper, Toast,
+InlineBanner, Dialog, Popover, EmptyState, Tab, ProgressBar) need new codegen
+emitters across the C++/Swift backends — a follow-up, not these aliases. Test:
+`[design-system]` in `pulp-test-design-import-native-common`. The `pulp::design`
+catalog (`pulp/design/design_system.hpp`) is the authoritative component→native
+mapping these aliases mirror.
+
+#### Native widget fidelity is inherited — keep token keys correct
+
+An imported design materializes these native widgets, so it inherits whatever
+the **native defaults** look like. The native widgets were converged to the
+Ink & Signal Figma source (Knob body+arc+dot, square Checkbox, teal Toggle,
+filled `TextButton::Style::primary`, slab Fader thumb, segmented Stepper, area
+Spectrum, bar Waveform, etc.), so a faithful import needs no per-instance skin
+for the common case — getting the native default right is what makes the import
+look right.
+
+The recurring failure mode here is a **wrong token key**: a widget that calls
+`resolve_color("typo_or_old.key", <hardcoded fallback>)` where the key isn't a
+real theme token compiles, paints the hardcoded fallback, and silently ignores
+the imported token set (the reskin never reaches it). This shipped the coral
+`ProgressBar`/`Tab` and several grey `CallOutBox`/`ListBox`/key-mapping bugs.
+Canonical keys are the `t.colors["…"]` names in `theme_presets.cpp` (dotted:
+`progress.fill`, `tab.active`, `text.primary`, `control.border`, `meter.green`,
+…) — never underscore/bare forms. Enforced by `tools/scripts/token_key_check.py`
+(`token-key-correctness` ctest) and, on Pillow lanes, the
+`component-visual-regression` per-primitive gate. See
+[docs/guides/design-tokens.md](../../../docs/guides/design-tokens.md) →
+"Use the *real* token key". GPU vs raster fill caveat: an area/shader fill
+(`Canvas::draw_waveform`) shows nothing on the CPU raster path — draw fills with
+raster primitives if they must render off-GPU (see the `skia-gpu-build` skill).
 
 ### Value-driven silhouette fill (illustration shapes — item 3)
 

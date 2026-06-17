@@ -14,8 +14,20 @@ void TableListBox::paint(canvas::Canvas& canvas) {
     // Scale columns to fit if they exceed the view width
     float scale = (total_w > w && total_w > 0) ? w / total_w : 1.0f;
 
+    // Theme tokens (with dark-mode fallbacks). Resolved once so a token/theme
+    // swap restyles the whole table — and, critically, so the fills use rgba8
+    // (0–255) not rgba (0–1), which the original code clamped to solid white.
+    const auto c_header   = resolve_color("bg.elevated",   canvas::Color::rgba8(45, 45, 55));
+    const auto c_headtext = resolve_color("text.secondary", canvas::Color::rgba8(180, 180, 195));
+    const auto c_accent   = resolve_color("accent.primary", canvas::Color::rgba8(120, 150, 255));
+    const auto c_border   = resolve_color("control.border", canvas::Color::rgba8(70, 70, 80));
+    const auto c_sel      = resolve_color("selection.bg",   canvas::Color::rgba8(60, 80, 140));
+    const auto c_row_even = resolve_color("bg.primary",     canvas::Color::rgba8(35, 35, 42));
+    const auto c_row_odd  = resolve_color("bg.surface",     canvas::Color::rgba8(40, 40, 48));
+    const auto c_celltext = resolve_color("text.primary",   canvas::Color::rgba8(210, 210, 220));
+
     // ── Draw header ─────────────────────────────────────────────────
-    canvas.set_fill_color(canvas::Color::rgba(45, 45, 55));
+    canvas.set_fill_color(c_header);
     canvas.fill_rect(0, 0, w, header_height_);
 
     float col_x = 0;
@@ -23,7 +35,7 @@ void TableListBox::paint(canvas::Canvas& canvas) {
         float col_w = columns_[c].width * scale;
 
         // Header text
-        canvas.set_fill_color(canvas::Color::rgba(180, 180, 195));
+        canvas.set_fill_color(c_headtext);
         canvas.set_font("system", 12.0f);
 
         float text_x = col_x + 6.0f;
@@ -34,19 +46,21 @@ void TableListBox::paint(canvas::Canvas& canvas) {
 
         canvas.fill_text(columns_[c].header, text_x, header_height_ * 0.7f);
 
-        // Sort indicator
+        // Sort indicator — anchored on the header's vertical midline via
+        // GlyphCenter so the arrow lines up with the header label instead of
+        // sitting high (the old baseline+4 offset placed the glyph above
+        // centre).
         if (c == sort_column_ && columns_[c].sortable) {
             float arrow_x = col_x + col_w - 14.0f;
-            float arrow_y = header_height_ * 0.5f;
-            canvas.set_fill_color(canvas::Color::rgba(120, 150, 255));
-            if (sort_ascending_)
-                canvas.fill_text("\xe2\x96\xb2", arrow_x, arrow_y + 4.0f);  // ▲
-            else
-                canvas.fill_text("\xe2\x96\xbc", arrow_x, arrow_y + 4.0f);  // ▼
+            canvas.set_fill_color(c_accent);
+            const char* glyph = sort_ascending_ ? "\xe2\x96\xb2"   // ▲
+                                                : "\xe2\x96\xbc";  // ▼
+            canvas.fill_text_anchored(glyph, arrow_x, header_height_ * 0.5f,
+                                      canvas::Canvas::TextAnchor::GlyphCenter);
         }
 
         // Column separator
-        canvas.set_stroke_color(canvas::Color::rgba(60, 60, 70));
+        canvas.set_stroke_color(c_border);
         canvas.set_line_width(1.0f);
         canvas.stroke_line(col_x + col_w, 0, col_x + col_w, header_height_);
 
@@ -54,7 +68,7 @@ void TableListBox::paint(canvas::Canvas& canvas) {
     }
 
     // Header bottom border
-    canvas.set_stroke_color(canvas::Color::rgba(70, 70, 80));
+    canvas.set_stroke_color(c_border);
     canvas.stroke_line(0, header_height_, w, header_height_);
 
     // ── Draw rows ───────────────────────────────────────────────────
@@ -72,17 +86,17 @@ void TableListBox::paint(canvas::Canvas& canvas) {
 
         // Row background
         if (r == selected_row_) {
-            canvas.set_fill_color(canvas::Color::rgba(60, 80, 140));
+            canvas.set_fill_color(c_sel);
         } else if (r % 2 == 0) {
-            canvas.set_fill_color(canvas::Color::rgba(35, 35, 42));
+            canvas.set_fill_color(c_row_even);
         } else {
-            canvas.set_fill_color(canvas::Color::rgba(40, 40, 48));
+            canvas.set_fill_color(c_row_odd);
         }
         canvas.fill_rect(0, row_y, w, row_height_);
 
         // Cell text
         col_x = 0;
-        canvas.set_fill_color(canvas::Color::rgba(210, 210, 220));
+        canvas.set_fill_color(c_celltext);
         canvas.set_font("system", 13.0f);
 
         for (int c = 0; c < column_count(); ++c) {

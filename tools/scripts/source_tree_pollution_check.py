@@ -100,6 +100,10 @@ ALLOWED_ROOT_PATHS = frozenset({
     # Top-level subsystem dirs
     "android",
     "apple",
+    # Design-system source assets (vendored token JSON/CSS + fidelity
+    # reference renders that core/view theming and import tooling consume).
+    # See planning/Design-System-Import-Plan.md Phase 0.
+    "assets",
     "bindings",
     "ci",
     "compat",

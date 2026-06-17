@@ -277,3 +277,43 @@ TEST_CASE("clear_baked_knob_antenna is a no-op when there is no antenna",
         for (int x = 8; x <= 31; ++x)
             REQUIRE(a(x, y) == 255);
 }
+
+TEST_CASE("native resolver recognizes the Ink & Signal design-system vocabulary",
+          "[view][import][native-resolver][design-system]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.stable_anchor_id = "root";
+
+    auto add = [&](const char* type) {
+        IRNode n;
+        n.type = type;
+        ir.root.children.push_back(n);
+    };
+    // Design-system / common-web aliases that must map to native widgets.
+    add("toggle");        // 0 → toggle_button
+    add("switch");        // 1 → toggle_button
+    add("combobox");      // 2 → combo_box (previously unmapped — real gap)
+    add("dropdown");      // 3 → combo_box
+    add("select");        // 4 → combo_box
+    add("pan");           // 5 → fader (1-D control)
+    add("badge");         // 6 → label (text pill)
+    add("panel");         // 7 → view (container)
+    add("channel_strip"); // 8 → view (container)
+    add("sidebar");       // 9 → view (container)
+
+    auto resolved = resolve_design_ir_native(ir, {});
+    REQUIRE(resolved.children.size() == 10);
+    REQUIRE(child(resolved, 0).kind == NativeWidgetKind::toggle_button);
+    REQUIRE(child(resolved, 1).kind == NativeWidgetKind::toggle_button);
+    REQUIRE(child(resolved, 2).kind == NativeWidgetKind::combo_box);
+    REQUIRE(child(resolved, 3).kind == NativeWidgetKind::combo_box);
+    REQUIRE(child(resolved, 4).kind == NativeWidgetKind::combo_box);
+    REQUIRE(child(resolved, 5).kind == NativeWidgetKind::fader);
+    REQUIRE(child(resolved, 6).kind == NativeWidgetKind::label);
+    REQUIRE(child(resolved, 7).kind == NativeWidgetKind::view);
+    REQUIRE(child(resolved, 8).kind == NativeWidgetKind::view);
+    REQUIRE(child(resolved, 9).kind == NativeWidgetKind::view);
+
+    // None of these should be flagged as an unsupported node anymore.
+    REQUIRE_FALSE(has_diag(resolved, "native-unsupported-node"));
+}

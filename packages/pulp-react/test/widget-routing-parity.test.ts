@@ -31,6 +31,10 @@ const WIDGET_ROUTING: ReadonlyArray<readonly [capitalized: string, expectedCreat
     ['XYPad', 'createXYPad'],
     ['ListBox', 'createListBox'],
     ['Icon', 'createIcon'],
+    // Ink & Signal design-system widgets (Phase 8c).
+    ['Badge', 'createBadge'],
+    ['Stepper', 'createStepper'],
+    ['Pan', 'createPan'],
 ];
 
 describe('@pulp/react widget routing parity sweep (2026-06-08)', () => {

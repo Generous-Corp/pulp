@@ -148,6 +148,50 @@ see commit `8a960d51 auv3: sidechain input bus + render-block routing
 `__weak` capture + `strongSelf` null-check pattern is deliberate —
 Obj-C blocks on `AUParameterTree` must not retain the audio unit.
 
+#### UI → host automation write-back
+
+For Logic (and any AUv3 host) to **record** automation when the user
+moves a slider in the plugin's own editor, edits have to flow *back out*
+through the `AUParameterTree` — observing the tree only carries host →
+plugin. The adapter closes the loop:
+
+- **Cache the tree.** `parameterTree` returns the same instance on every
+  call (`if (_parameterTree) return _parameterTree;`). The host's
+  automation-observer token is registered against *one* tree object; a
+  fresh tree per call would orphan the token and silently drop
+  automation. `_parameterTree` is `[tree retain]`-ed — **au_adapter.mm is
+  MRC, not ARC** (`-fno-objc-arc`), so the autoreleased tree must be
+  explicitly retained or it dangles and the next edit SIGSEGVs.
+- **Audio-thread store listener.** An inline
+  `store.add_listener(cb, ListenerThread::Audio)` fires on every param
+  change; the callback calls
+  `[param setValue:v originator:_automationToken
+   atHostTime:0 eventType:AUParameterAutomationEventTypeValue]` so the
+  host sees the new value at the right address.
+- **Gestures → Touch / Release.** `store.set_gesture_callbacks(begin,
+  end)` maps `begin_gesture`/`end_gesture` to
+  `AUParameterAutomationEventTypeTouch` and `…Release`. Without the
+  Touch/Release pair, Logic records values but won't arm a write pass.
+  The gesture callback is a **stateless C++ lambda** taking
+  `(PulpAudioUnit*, ParamID, eventType)` — an Obj-C stack-block captured
+  in a C++ `std::function` that outlives the scope would be use-after-
+  free under MRC (no automatic `Block_copy`).
+- **Loop guard.** A `thread_local bool g_au_v3_host_writing` wraps the
+  `implementorValueObserver` write. The store listener checks it and
+  skips the write-back when the change *originated* from the host, so a
+  host automation move doesn't echo straight back into the host.
+- **dealloc** must `set_gesture_callbacks({}, {})`, reset the listener
+  token, `removeParameterObserver:` the automation token, and
+  `[_parameterTree release]` — in that order — before the existing
+  `_mainThreadToken` teardown.
+
+Test: `test/test_au_plugin_state.mm` →
+`[au][auv3][params][automation]` drives
+`begin_gesture`/`set_value`/`end_gesture` through the real store and
+asserts a host-side `tokenByAddingParameterAutomationObserver` block
+observes Touch + Value + Release (async — pump the runloop until the
+event count reaches 3).
+
 ### Render block
 
 `- (AUInternalRenderBlock)internalRenderBlock` returns a block that

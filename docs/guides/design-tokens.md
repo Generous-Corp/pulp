@@ -292,3 +292,99 @@ Import into Figma using the [Tokens Studio](https://tokens.studio/) plugin. Chan
 4. **Name custom tokens with namespaces.** If you add plugin-specific tokens, prefix them: `mysynth.oscillator_color`, `mysynth.filter_glow`.
 
 5. **Test with all three built-in themes.** A UI that only looks good in dark mode is incomplete.
+
+## Reskinning Pulp end-to-end
+
+"Reskinning" means changing the look of every widget — colors, radii, type
+scale — by editing **tokens**, never by editing widget code. The guarantee that
+a reskin "just works" comes from one rule: **widgets resolve their appearance
+from theme tokens at paint time, and the design language is the only thing that
+varies.** Components (the Knob, Fader, WaveformEditor, Table…) are fixed, native,
+and trusted; only their skin changes.
+
+### The flow
+
+1. **Edit the token set** — either in Figma Variables (designer-facing) or
+   directly in a `theme.json` / Tokens-Studio JSON in the repo.
+2. **Import it** — `importDesignTokens(json)` (JS) or `parse_figma_variables` /
+   `parse_w3c_tokens` / `Theme::from_json` (C++).
+3. **Apply it** — `root->set_theme(theme)` (C++) or `applyTokenDiff(diff)` (JS).
+   `set_theme` repaints the surface, and because color lookups walk the parent
+   chain (`View::resolve_color`), every descendant that doesn't carry its own
+   theme restyles on the next paint. No recompile in the JS lane; one rebuild in
+   the baked C++ lane.
+
+### Semantic colors derive the rest
+
+A theme is seeded from ~16 **semantic** colors (background, foreground, primary,
+accent, destructive, the chart colors, …). The derivation layer
+(`derive_theme`) expands those into ~35 audio-specific tokens — `knob.arc`,
+`slider.fill`, `meter.green/yellow/red`, `waveform.line`, `tab.active`, and so
+on — so you restyle a whole instrument UI by changing a handful of inputs. A
+preset may add explicit overrides for tokens the derivation can't infer (e.g.
+brand-specific meter inks). The built-in **`ink-signal`** preset ("Ink &
+Signal", Pulp's flagship language) is the reference example of this:
+signal-teal primary, cool graphite surfaces, coral reserved for peak/danger,
+with leaf/amber meter overrides.
+
+### Make a widget reskinnable
+
+Resolve from a token with a sensible fallback, never a bare literal:
+
+```cpp
+// Good — themeable, with a fallback for the no-theme case:
+auto fill = resolve_color("control.fill", canvas::Color::rgba8(100, 150, 255));
+
+// Bad — ignores the theme; the widget can never be reskinned:
+auto fill = canvas::Color::rgba8(100, 150, 255);
+```
+
+Low-alpha **material effects** (drop shadows, a thin highlight stroke, a hover
+scrim) are *not* theme colors and may stay literal — they read as light/shadow,
+not brand. Everything that carries the design's identity (fills, text,
+accents, borders, meters) must resolve from a token.
+
+> Gotcha: `Color::rgba(r,g,b,a)` takes **0–1 floats** and clamps; `Color::rgba8`
+> takes **0–255 bytes**. Passing `rgba(120,160,255)` clamps every channel to
+> 1.0 and paints solid white. Use `rgba8` for byte values.
+
+### Use the *real* token key — a typo silently disables reskinning
+
+`resolve_color("key", fallback)` returns the fallback whenever `key` isn't a
+token in the active theme — including when `key` is a **typo or an old name**.
+The widget then compiles, renders the hardcoded fallback, and silently can't be
+reskinned. This shipped real bugs: a `ProgressBar` that resolved
+`"progress_track"` / `"accent"` (neither exists — the real names are
+`progress.track` / `progress.fill`) painted a permanent coral fill, and a
+`TabPanel` underline resolved `"accent"` and stayed coral instead of the teal
+`tab.active`.
+
+The canonical token names are exactly the `t.colors["…"]` keys assigned in
+`core/view/src/theme_presets.cpp` (`derive_theme` + the per-preset overrides) —
+dotted, e.g. `bg.surface`, `text.primary`, `control.border`, `meter.green`,
+`progress.fill`, `tab.active`. Never underscore (`tab_bar_bg`) or bare
+(`text`, `border`) forms.
+
+```cpp
+// Bad — "text"/"border"/"callout_bg" are NOT tokens; the fallback is permanent:
+resolve_color("text",   canvas::Color::hex(0xe0e0e0));   // -> text.primary
+resolve_color("border", canvas::Color::hex(0x3a3a5a));   // -> control.border / modal.border
+
+// Good:
+resolve_color("text.primary",   canvas::Color::hex(0xe0e0e0));
+resolve_color("modal.border",   canvas::Color::hex(0x3a3a5a));
+```
+
+This is **enforced**: `tools/scripts/token_key_check.py` (the
+`token-key-correctness` ctest) fails the build on any `resolve_color("…")` whose
+key isn't canonical. A deliberate widget-specific override token that *falls back
+to a canonical token* (e.g. `resolve_color("text_editor_bg", resolve_color("bg.surface", …))`)
+is allowed via that script's small `ALLOWLISTED_OVERRIDES` set.
+
+### Verifying a reskin
+
+- **Headless**: drive a widget through a `RecordingCanvas` and assert the fill
+  colors it emits track the theme (see `test/test_buttons.cpp`).
+- **Visual**: render with the Skia backend and diff against a reference
+  (`render_to_png(ScreenshotBackend::skia)`); the CoreGraphics backend does not
+  composite file-backed images, so use Skia for any asset-bearing UI.

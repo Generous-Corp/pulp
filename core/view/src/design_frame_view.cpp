@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <limits>
 #include <memory>
+#include <vector>
 
 namespace pulp::view {
 
@@ -335,6 +336,8 @@ float DesignFrameView::element_value(int i) const {
         }
         case DesignFrameElement::Kind::text_field:
             return -1.0f;  // text is not a normalized value
+        case DesignFrameElement::Kind::momentary:
+            return e.value;  // pressed/lit flag (0 or 1)
     }
     return -1.0f;
 }
@@ -360,6 +363,10 @@ void DesignFrameView::set_element_value(int i, float v) {
         }
         case DesignFrameElement::Kind::text_field:
             return;  // not a normalized value
+        case DesignFrameElement::Kind::momentary:
+            // Light/clear the key via the native overlay; no on_element_changed.
+            e.value = (v > 0.5f) ? 1.0f : 0.0f;
+            break;
     }
     request_repaint();
 }
@@ -410,6 +417,86 @@ void DesignFrameView::paint(canvas::Canvas& canvas) {
     // transform hit_element() inverts, so knobs are hit where they're drawn.
     canvas.draw_svg(s, t.ox - panel_x_ * t.scale, t.oy - panel_y_ * t.scale,
                     svg_w_ * t.scale, svg_h_ * t.scale);
+
+    // Native overlay highlight for lit momentary keys (value>0.5): the accent
+    // fill of the key's exact shape, drawn ON TOP of the baked SVG (we never
+    // recolor SVG paths — that would fight every re-export). The shape MUST
+    // match the faithful key: square top, rounded BOTTOM corners (the design's
+    // keys curve at the bottom, ~4 SVG units), and the top notched out around
+    // any black keys so a lit white key never swallows them. View-scoped.
+    //
+    // The FILL mirrors the design's own pressed-key paint (paint36 in the
+    // export): a vertical accent-teal gradient fading from 26% opacity at the
+    // key top to 100% at the bottom (the "light mint top, deep teal bottom"
+    // wash). It's set per key over the key's own height and applies identically
+    // to white and black keys, so a lit key looks exactly like the figma.
+    const auto teal = resolve_color("accent.primary", canvas::Color::rgba8(22, 218, 194));
+    const canvas::Color grad_cols[2] = {
+        canvas::Color::rgba(teal.r, teal.g, teal.b, 0.26f),  // top (offset 0)
+        canvas::Color::rgba(teal.r, teal.g, teal.b, 1.0f),   // bottom (offset 1)
+    };
+    const float grad_pos[2] = {0.0f, 1.0f};
+    const bool group_scoped = active_view_group_ != -1;
+    auto in_view = [&](const DesignFrameElement& e) {
+        return e.view_group == -1 || !group_scoped || e.view_group == active_view_group_;
+    };
+    const float kKeyCornerSvg = 4.0f;  // design's bottom-corner radius, SVG units
+    for (const auto& e : elements_) {
+        if (e.kind != DesignFrameElement::Kind::momentary || e.value <= 0.5f) continue;
+        if (!in_view(e)) continue;
+        const float rx = t.ox + (e.x - panel_x_) * t.scale;
+        const float ry = t.oy + (e.y - panel_y_) * t.scale;
+        const float rw = e.w * t.scale, rh = e.h * t.scale;
+        const float r = std::min({kKeyCornerSvg * t.scale, rw * 0.5f, rh * 0.5f});
+
+        // Collect every smaller momentary rect (same view) that GENUINELY notches
+        // this key's TOP: overlaps in x, starts at/above the top, AND extends down
+        // into the key. The reach-into test matters because a second keyboard in
+        // the same frame (the piano below the typing row) shares the view group and
+        // overlaps in x but not in y — its keys must NOT be mistaken for notches
+        // (that drew a tall bar across the inter-keyboard gap). Notch bottoms are
+        // clamped to the key. View-space x-spans, sorted left→right.
+        struct Notch { float x0, x1, bottom; };
+        std::vector<Notch> notches;
+        const float my_area = e.w * e.h;
+        for (const auto& b : elements_) {
+            if (b.kind != DesignFrameElement::Kind::momentary || &b == &e) continue;
+            if (!in_view(b) || b.w * b.h >= my_area) continue;
+            if (b.x + b.w <= e.x || b.x >= e.x + e.w) continue;  // no x-overlap
+            if (b.y > e.y + 2.0f) continue;                       // not a top notch
+            if (b.y + b.h <= e.y) continue;                       // must reach into the key
+            const float nx0 = std::max(b.x, e.x), nx1 = std::min(b.x + b.w, e.x + e.w);
+            const float nb = std::min(b.y + b.h, e.y + e.h);
+            notches.push_back({t.ox + (nx0 - panel_x_) * t.scale,
+                               t.ox + (nx1 - panel_x_) * t.scale,
+                               t.oy + (nb - panel_y_) * t.scale});
+        }
+        std::sort(notches.begin(), notches.end(),
+                  [](const Notch& a, const Notch& c) { return a.x0 < c.x0; });
+
+        // Per-key vertical gradient over the key's own height (top→bottom).
+        canvas.set_fill_gradient_linear(rx, ry, rx, ry + rh, grad_cols, grad_pos, 2);
+
+        // Build the key outline: top-left → across the top (dipping down and back
+        // up around each notch) → top-right → down → rounded bottom-right →
+        // across the bottom → rounded bottom-left → close.
+        canvas.begin_path();
+        canvas.move_to(rx, ry);
+        for (const auto& n : notches) {
+            canvas.line_to(n.x0, ry);
+            canvas.line_to(n.x0, n.bottom);
+            canvas.line_to(n.x1, n.bottom);
+            canvas.line_to(n.x1, ry);
+        }
+        canvas.line_to(rx + rw, ry);
+        canvas.line_to(rx + rw, ry + rh - r);
+        canvas.quad_to(rx + rw, ry + rh, rx + rw - r, ry + rh);
+        canvas.line_to(rx + r, ry + rh);
+        canvas.quad_to(rx, ry + rh, rx, ry + rh - r);
+        canvas.close_path();
+        canvas.fill_current_path();
+    }
+    canvas.clear_fill_gradient();
 }
 
 int DesignFrameView::hit_element(Point pos) const {
@@ -418,10 +505,27 @@ int DesignFrameView::hit_element(Point pos) const {
     // Invert the paint transform: view px -> SVG coords.
     const float sx = panel_x_ + (pos.x - t.ox) / t.scale;
     const float sy = panel_y_ + (pos.y - t.oy) / t.scale;
+
+    // Momentary keys first: among rects containing the point, the SMALLEST-AREA
+    // wins (a narrow black key beats the white key it overlaps), order-independent
+    // so a re-export reorder can't change which key is hit. View-scoped.
+    int key = -1; float key_area = std::numeric_limits<float>::max();
+    for (int i = 0; i < static_cast<int>(elements_.size()); ++i) {
+        const auto& e = elements_[i];
+        if (e.kind != DesignFrameElement::Kind::momentary) continue;
+        if (e.view_group != -1 && active_view_group_ != -1 && e.view_group != active_view_group_)
+            continue;
+        if (sx >= e.x && sx < e.x + e.w && sy >= e.y && sy < e.y + e.h) {
+            const float area = e.w * e.h;
+            if (area < key_area) { key_area = area; key = i; }
+        }
+    }
+    if (key >= 0) return key;
+
+    // Knobs: nearest within hit_radius. (Overlay controls own their hits via their
+    // child widget — View::hit_test reaches children before this parent fallback.)
     int best = -1; float bd = std::numeric_limits<float>::max();
     for (int i = 0; i < static_cast<int>(elements_.size()); ++i) {
-        // Only knobs are hit here; overlay controls own their hits via their child
-        // widget (View::hit_test reaches children before this parent fallback).
         if (elements_[i].kind != DesignFrameElement::Kind::knob) continue;
         const float dx = sx - elements_[i].cx, dy = sy - elements_[i].cy;
         const float d = std::sqrt(dx * dx + dy * dy);
@@ -432,16 +536,37 @@ int DesignFrameView::hit_element(Point pos) const {
 
 void DesignFrameView::on_mouse_down(Point pos) {
     drag_ = hit_element(pos);
-    if (drag_ >= 0) {
-        drag_start_y_ = pos.y;
-        drag_start_value_ = elements_[drag_].value;
-        if (on_gesture_begin) on_gesture_begin(drag_);  // bracket the undo step
+    if (drag_ < 0) return;
+    if (elements_[drag_].kind == DesignFrameElement::Kind::momentary) {
+        elements_[drag_].value = 1.0f;            // light the key
+        request_repaint();
+        if (on_gesture_begin) on_gesture_begin(drag_);  // note-on
+        return;
     }
+    drag_start_y_ = pos.y;
+    drag_start_value_ = elements_[drag_].value;
+    if (on_gesture_begin) on_gesture_begin(drag_);  // bracket the undo step
 }
 
 void DesignFrameView::on_mouse_drag(Point pos) {
     if (drag_ < 0) return;
-    // Convert the vertical drag from view pixels into panel (design) space via the
+    if (elements_[drag_].kind == DesignFrameElement::Kind::momentary) {
+        const int hit = hit_element(pos);
+        if (hit == drag_) return;                 // still on the held key
+        // Glissando / drag-off: release the held key; press the new one if the
+        // pointer moved onto another momentary key.
+        elements_[drag_].value = 0.0f;
+        if (on_gesture_end) on_gesture_end(drag_);  // note-off (old)
+        drag_ = -1;
+        if (hit >= 0 && elements_[hit].kind == DesignFrameElement::Kind::momentary) {
+            drag_ = hit;
+            elements_[hit].value = 1.0f;
+            if (on_gesture_begin) on_gesture_begin(hit);  // note-on (new)
+        }
+        request_repaint();
+        return;
+    }
+    // Knob vertical drag: convert from view px into panel (design) space via the
     // same scale, so the turn sensitivity feels identical at any window size.
     const float scale = panel_transform(local_bounds()).scale;
     const float dy_design = scale > 0.0f ? (drag_start_y_ - pos.y) / scale : 0.0f;
@@ -453,8 +578,27 @@ void DesignFrameView::on_mouse_drag(Point pos) {
 }
 
 void DesignFrameView::on_mouse_up(Point /*pos*/) {
-    if (drag_ >= 0 && on_gesture_end) on_gesture_end(drag_);
+    if (drag_ >= 0) {
+        if (elements_[drag_].kind == DesignFrameElement::Kind::momentary) {
+            elements_[drag_].value = 0.0f;        // clear the key
+            request_repaint();
+        }
+        if (on_gesture_end) on_gesture_end(drag_);  // note-off / end undo step
+    }
     drag_ = -1;
+}
+
+void DesignFrameView::set_active_view_group(int group) {
+    if (group == active_view_group_) return;
+    // Release any held key in the outgoing view so notes don't stick on a mode
+    // switch (the contract's release-on-mode-switch edge).
+    if (drag_ >= 0 && elements_[drag_].kind == DesignFrameElement::Kind::momentary) {
+        elements_[drag_].value = 0.0f;
+        if (on_gesture_end) on_gesture_end(drag_);
+        drag_ = -1;
+    }
+    active_view_group_ = group;
+    request_repaint();
 }
 
 // ── DesignTabGroup ──────────────────────────────────────────────────────────

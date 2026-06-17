@@ -303,6 +303,47 @@ TEST_CASE("View dimensions frame clock and repaint helpers resolve inherited sta
     REQUIRE(plugin_host.repaint_count == 1);
 }
 
+TEST_CASE("set_theme repaints and cascades to children",
+          "[view][theme][reskin]") {
+    // Design-System-Import-Plan Phase 2: a theme swap must invalidate the
+    // surface (previously set_theme updated the member silently) and the new
+    // tokens must reach descendants that resolve up the parent chain.
+    View root;
+    auto child = std::make_unique<View>();
+    View* child_ptr = child.get();
+    root.add_child(std::move(child));
+
+    DummyWindowHost window_host;
+    root.set_window_host(&window_host);
+    int before = window_host.repaint_count;
+
+    Theme theme_a;
+    theme_a.colors["accent.primary"] = color_from_hex(0x16DAC2);
+    root.set_theme(theme_a);
+
+    // The swap requested a repaint of the surface.
+    REQUIRE(window_host.repaint_count == before + 1);
+
+    // A child with no theme of its own resolves the root's token.
+    REQUIRE(child_ptr->resolve_color("accent.primary", color_from_hex(0x000000))
+            == color_from_hex(0x16DAC2));
+
+    // Swapping the root theme again restyles the child and repaints again.
+    Theme theme_b;
+    theme_b.colors["accent.primary"] = color_from_hex(0xFF5C4D);
+    root.set_theme(theme_b);
+    REQUIRE(window_host.repaint_count == before + 2);
+    REQUIRE(child_ptr->resolve_color("accent.primary", color_from_hex(0x000000))
+            == color_from_hex(0xFF5C4D));
+
+    // A child that sets its OWN theme keeps winning over the parent.
+    Theme child_theme;
+    child_theme.colors["accent.primary"] = color_from_hex(0x8B6CF5);
+    child_ptr->set_theme(child_theme);
+    REQUIRE(child_ptr->resolve_color("accent.primary", color_from_hex(0x000000))
+            == color_from_hex(0x8B6CF5));
+}
+
 TEST_CASE("View simulate_click dispatches to target", "[view][events]") {
     View root;
     root.set_bounds({0, 0, 200, 200});

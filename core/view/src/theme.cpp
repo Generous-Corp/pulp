@@ -54,8 +54,10 @@ static std::string color_to_hex(const Color& c) {
     return buf;
 }
 
-Theme Theme::from_json(const std::string& json) {
+Theme Theme::from_json(const std::string& input) {
     Theme theme;
+    // Forward-migrate older documents before reading tokens.
+    const std::string json = migrate_json(input, schema_version_of(input));
     auto root = choc::json::parse(json);
 
     if (root.hasObjectMember("colors")) {
@@ -85,8 +87,28 @@ Theme Theme::from_json(const std::string& json) {
     return theme;
 }
 
+int Theme::schema_version_of(const std::string& json) {
+    try {
+        auto root = choc::json::parse(json);
+        if (root.isObject() && root.hasObjectMember("schema_version"))
+            return static_cast<int>(root["schema_version"].getWithDefault<int64_t>(kSchemaVersion));
+    } catch (...) {
+        // Malformed input — let from_json's own parse surface the error.
+    }
+    return kSchemaVersion;  // version-less / legacy themes are treated as current
+}
+
+std::string Theme::migrate_json(const std::string& json, int from_version) {
+    // v1 is the first versioned schema, so there is nothing to migrate yet.
+    // Future non-additive schema changes add their step here, e.g.:
+    //   if (from_version < 2) json = rename_token(json, "accent", "brand");
+    (void)from_version;
+    return json;
+}
+
 std::string Theme::to_json() const {
     auto root = choc::value::createObject("");
+    root.addMember("schema_version", choc::value::createInt64(kSchemaVersion));
 
     auto colors_obj = choc::value::createObject("");
     for (auto& [k, v] : colors)

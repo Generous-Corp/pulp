@@ -11,7 +11,7 @@
   "hotspots": [
     {
       "path": "core/view/src/widget_bridge.cpp",
-      "max_loc": 1202,
+      "max_loc": 1204,
       "note": "WidgetBridge shell after registrar split; keep native JS API registration out"
     },
     {
@@ -31,7 +31,7 @@
     },
     {
       "path": "test/CMakeLists.txt",
-      "max_loc": 6080,
+      "max_loc": 6143,
       "note": "shared test registration hotspot"
     },
     {
@@ -86,7 +86,7 @@
     },
     {
       "path": "core/view/platform/mac/window_host_mac.mm",
-      "max_loc": 2791,
+      "max_loc": 2801,
       "note": "Mac window host lifecycle/capture/geometry hotspot"
     },
     {
@@ -106,7 +106,7 @@
     },
     {
       "path": "core/view/src/design_import_native_common.cpp",
-      "max_loc": 1998,
+      "max_loc": 2016,
       "note": "native materialization/import boundary hotspot"
     },
     {
@@ -116,8 +116,8 @@
     },
     {
       "path": "core/view/include/pulp/view/view.hpp",
-      "max_loc": 1670,
-      "note": "public view header trim candidate (+7 for View::start_file_drag outbound-drag public API + FileDragRequest fwd-decl; doc comment kept minimal)"
+      "max_loc": 1677,
+      "note": "public view header trim candidate (+7 for View::start_file_drag outbound-drag public API + FileDragRequest fwd-decl; +7 from design-system branch additions)"
     },
     {
       "path": "core/canvas/include/pulp/canvas/canvas.hpp",

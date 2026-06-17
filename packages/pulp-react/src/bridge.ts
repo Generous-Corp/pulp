@@ -31,6 +31,10 @@ declare global {
     function createMeter(id: string, parentId: string): void;
     function createXYPad(id: string, parentId: string): void;
     function createGrid(id: string, parentId: string): void;
+    // Ink & Signal design-system widgets (Phase 8c).
+    function createBadge(id: string, text: string, tone: string, parentId: string): void;
+    function createStepper(id: string, parentId: string): void;
+    function createPan(id: string, parentId: string): void;
 
     // ── Widget mutation ─────────────────────────────────────────────
     function removeWidget(id: string): void;
@@ -283,7 +287,10 @@ export function createMockBridge(): MockBridge {
         'createCheckbox', 'createToggle', 'createToggleButton', 'createCombo',
         'createListBox', 'createModal', 'createTextEditor', 'createScrollView',
         'createImage', 'createIcon', 'createProgress', 'createMeter', 'createXYPad',
-        'createGrid', 'removeWidget', 'moveWidget', 'insertChild',
+        'createGrid',
+        // Ink & Signal design-system widgets (Phase 8c).
+        'createBadge', 'createStepper', 'createPan',
+        'removeWidget', 'moveWidget', 'insertChild',
         'setFlex', 'setBackground', 'setBackgroundGradient', 'setBorder',
         // pulp #1517 — background sub-properties (mostly noop today).
         'setBackgroundAttachment', 'setBackgroundClip', 'setBackgroundOrigin',

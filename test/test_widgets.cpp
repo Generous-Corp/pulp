@@ -95,9 +95,11 @@ TEST_CASE("Knob renders arcs and indicator", "[view][widget]") {
     RecordingCanvas canvas;
     knob.paint(canvas);
 
-    // Should draw: track arc, value arc, thumb line, label text
+    // Ink & Signal knob: track arc + value arc, a raised body disc + a white
+    // dot pointer (fill_circle), and the label text. (The old thin-needle
+    // stroke_line was replaced by the dot pointer.)
     REQUIRE(canvas.count(DrawCommand::Type::stroke_arc) == 2);
-    REQUIRE(canvas.count(DrawCommand::Type::stroke_line) == 1);
+    REQUIRE(canvas.count(DrawCommand::Type::fill_circle) >= 1);
     REQUIRE(canvas.count(DrawCommand::Type::fill_text) >= 1);
 }
 
@@ -219,9 +221,10 @@ TEST_CASE("Fader renders track and thumb", "[view][widget]") {
     RecordingCanvas canvas;
     fader.paint(canvas);
 
-    // Track + fill = 2 rounded rects, thumb = 1 circle, label text
-    REQUIRE(canvas.count(DrawCommand::Type::fill_rounded_rect) == 2);
-    REQUIRE(canvas.count(DrawCommand::Type::fill_circle) == 1);
+    // Ink & Signal fader: track + fill + slab thumb = 3 rounded rects (the
+    // default thumb is a rounded slab, not a circle), plus the label text.
+    REQUIRE(canvas.count(DrawCommand::Type::fill_rounded_rect) == 3);
+    REQUIRE(canvas.count(DrawCommand::Type::fill_circle) == 0);
     REQUIRE(canvas.count(DrawCommand::Type::fill_text) >= 1);
 }
 
@@ -808,15 +811,16 @@ TEST_CASE("Skinned Fader honours derived thin track width (pulp #3191)",
 
 TEST_CASE("Unskinned Fader/Meter keep their default look (back-compat)",
           "[view][widget][issue-3191]") {
-    // Fader: no skin → circular thumb + 2 rounded rects (unchanged).
+    // Fader: no skin → the default Ink & Signal look is track + fill + slab
+    // thumb = 3 rounded rects, no circle thumb.
     Fader fader;
     fader.set_bounds({0, 0, 24, 200});
     fader.set_value(0.6f);
     REQUIRE_FALSE(fader.has_skin());
     RecordingCanvas fc;
     fader.paint(fc);
-    REQUIRE(fc.count(DrawCommand::Type::fill_circle) == 1);
-    REQUIRE(fc.count(DrawCommand::Type::fill_rounded_rect) == 2);
+    REQUIRE(fc.count(DrawCommand::Type::fill_circle) == 0);
+    REQUIRE(fc.count(DrawCommand::Type::fill_rounded_rect) == 3);
 
     // Meter: no gradient → default threshold path (rounded-rect bg + rect fill).
     Meter meter;
@@ -837,8 +841,8 @@ TEST_CASE("Fader horizontal orientation", "[view][widget]") {
     RecordingCanvas canvas;
     fader.paint(canvas);
 
-    REQUIRE(canvas.count(DrawCommand::Type::fill_rounded_rect) == 2);
-    REQUIRE(canvas.count(DrawCommand::Type::fill_circle) == 1);
+    REQUIRE(canvas.count(DrawCommand::Type::fill_rounded_rect) == 3);
+    REQUIRE(canvas.count(DrawCommand::Type::fill_circle) == 0);
 }
 
 TEST_CASE("Knob and Fader render loaded sprite strips",
@@ -1572,9 +1576,11 @@ TEST_CASE("WaveformView renders waveform", "[view][widget]") {
     RecordingCanvas canvas;
     waveform.paint(canvas);
 
-    // Background + center line + many waveform lines
+    // Background (rounded rect) + one center line + mirrored amplitude bars
+    // (the waveform is drawn as per-column fill_rect bars, not per-sample lines).
     REQUIRE(canvas.count(DrawCommand::Type::fill_rounded_rect) == 1);
-    REQUIRE(canvas.count(DrawCommand::Type::stroke_line) > 10);
+    REQUIRE(canvas.count(DrawCommand::Type::stroke_line) == 1);
+    REQUIRE(canvas.count(DrawCommand::Type::fill_rect) > 10);
 }
 
 TEST_CASE("WaveformView empty renders background only", "[view][widget]") {

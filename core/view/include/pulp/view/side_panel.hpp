@@ -127,4 +127,12 @@ private:
     Tween tween_;
 };
 
+/// Design-system alias. The Ink & Signal Figma library names this primitive
+/// "Sidebar"; the Pulp framework class predates that library and is called
+/// SidePanel. The alias lets design-system code use the Figma name without a
+/// breaking rename. See docs/reference/design-system-naming.md for the full
+/// Figma↔SDK name map. (No `class Sidebar` exists in pulp::view, so this is
+/// collision-free.)
+using Sidebar = SidePanel;
+
 } // namespace pulp::view

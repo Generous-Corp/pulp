@@ -10,6 +10,12 @@ namespace pulp::view {
 /// System appearance mode
 enum class Appearance { light, dark };
 
+/// User-facing theme preference. `system` follows the OS appearance live;
+/// `light`/`dark` pin it regardless of the OS. A developer who doesn't want to
+/// offer the choice simply leaves the manager in one mode and never exposes a
+/// control — there is no requirement to support all three.
+enum class ThemeMode { system, light, dark };
+
 /// Tracks OS-level appearance (light/dark mode) and auto-switches themes.
 ///
 /// On macOS, observes NSAppearance changes via NSApp effective appearance.
@@ -73,6 +79,13 @@ public:
 
     /// Unlock and resume automatic theme switching.
     void unlock();
+
+    /// User-facing theme preference. `set_mode(system)` resumes OS tracking;
+    /// `light`/`dark` pin the corresponding theme from the pair. This is the
+    /// recommended surface — it maps onto lock_appearance()/unlock() so the
+    /// `system`/`light`/`dark` choice round-trips cleanly via `mode()`.
+    void set_mode(ThemeMode m);
+    ThemeMode mode() const;
 
     /// Check if a specific theme is locked.
     bool is_locked() const { return theme_locked_ || tracker_.is_locked(); }

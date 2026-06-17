@@ -52,7 +52,11 @@ private:
     int last_note_ = 96;    // C7
     Orientation orientation_ = Orientation::horizontal;
     bool show_names_ = false;
-    Color highlight_color_{};
+    // Transparent sentinel (a==0) means "no explicit highlight set" — paint()
+    // then falls back to the theme's accent.primary for active keys. A default
+    // Color{} is OPAQUE black (a=1), which would make every pressed key render
+    // black instead of the accent; keep this explicitly transparent.
+    Color highlight_color_{0.0f, 0.0f, 0.0f, 0.0f};
 
     struct NoteState {
         float velocity = 0;

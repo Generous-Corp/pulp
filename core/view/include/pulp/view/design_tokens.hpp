@@ -7,31 +7,19 @@
 
 #include <pulp/view/design_ir.hpp>
 #include <pulp/view/theme.hpp>
+// parse_w3c_tokens / export_w3c_tokens live in their own always-compiled TU
+// (reached at runtime by the WidgetBridge theme API); re-exported here so
+// existing includers of this header still see them.
+#include <pulp/view/w3c_tokens.hpp>
 #include <string>
 #include <unordered_map>
 
 namespace pulp::view {
 
 // ── W3C Design Tokens ───────────────────────────────────────────────────
-
-/// Parse W3C Design Tokens JSON into a Pulp Theme.
-///
-/// W3C format:
-/// @code
-/// {
-///   "color": {
-///     "primary": { "$value": "#89B4FA", "$type": "color" },
-///     "bg": { "$value": "#1E1E2E", "$type": "color" }
-///   },
-///   "dimension": {
-///     "spacing-md": { "$value": "8px", "$type": "dimension" }
-///   }
-/// }
-/// @endcode
-Theme parse_w3c_tokens(const std::string& json);
-
-/// Export a Pulp Theme to W3C Design Tokens JSON format.
-std::string export_w3c_tokens(const Theme& theme);
+// parse_w3c_tokens / export_w3c_tokens are declared in <pulp/view/w3c_tokens.hpp>
+// (included above) — they are runtime-needed and not gated by
+// PULP_ENABLE_DESIGN_IMPORT.
 
 /// Export a Pulp Theme to CSS custom properties (variables).
 ///

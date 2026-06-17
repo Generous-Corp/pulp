@@ -6,10 +6,165 @@
 #if TARGET_OS_IOS
 
 #include <pulp/canvas/cg_canvas.hpp>
+#include <pulp/view/drag_drop.hpp>
 #import <UIKit/UIKit.h>
 #include <algorithm>
 #include <atomic>
+#include <string>
 #include <unordered_map>
+#include <vector>
+
+// ── PulpIOSDragDrop: UIDrop/UIDrag interaction delegate ──────────────────────
+//
+// Bridges UIKit's interaction-based drag-and-drop to Pulp's cross-platform
+// dispatch core (the same dispatch_drag_*/dispatch_drop used by the mac, win,
+// and linux hosts). INBOUND: a UIDropInteraction routes dropped file URLs into
+// dispatch_drop() at the drop point. OUTBOUND: a UIDragInteraction starts a
+// system drag carrying the files staged by PluginViewHost::start_file_drag().
+//
+// Paradigm note: UIKit drags are GESTURE-initiated (the system long-press lift
+// asks the delegate for items), so unlike AppKit's synchronous
+// NSDraggingSession, start_file_drag() cannot begin a drag itself — it ARMS the
+// payload that the next lift consumes. hostView + pointTransform convert a
+// UIView-space point to Pulp root space: identity for the CPU host, the inverse
+// design-viewport map for the GPU (Metal) host.
+@interface PulpIOSDragDrop : NSObject <UIDropInteractionDelegate, UIDragInteractionDelegate>
+- (instancetype)initWithRoot:(pulp::view::View*)root
+                    hostView:(UIView*)hostView
+              pointTransform:(pulp::view::Point (^)(pulp::view::Point))xform;
+// Arm an outbound drag with these absolute file paths; consumed by the next
+// UIKit drag lift. Returns YES if a non-empty payload was staged.
+- (BOOL)armOutboundDrag:(const std::vector<std::string>&)paths;
+// Drop the root pointer when the host tears down, so an in-flight async drop
+// completion never dereferences a destroyed view tree.
+- (void)invalidate;
+@end
+
+@implementation PulpIOSDragDrop {
+    pulp::view::View* _root;                       // not owned
+    __weak UIView* _hostView;
+    pulp::view::Point (^_xform)(pulp::view::Point);
+    pulp::view::DragSession _session;              // hover state for dispatch_drag_*
+    NSMutableArray<NSString*>* _pendingPaths;      // staged outbound payload
+    NSTimeInterval _armTime;                       // when _pendingPaths was staged
+}
+
+- (instancetype)initWithRoot:(pulp::view::View*)root
+                    hostView:(UIView*)hostView
+              pointTransform:(pulp::view::Point (^)(pulp::view::Point))xform {
+    if (self = [super init]) {
+        _root = root;
+        _hostView = hostView;
+        _xform = xform;
+        _pendingPaths = [NSMutableArray array];
+    }
+    return self;
+}
+
+- (void)invalidate { _root = nullptr; }
+
+- (pulp::view::Point)rootPointFor:(id<UIDropSession>)session {
+    CGPoint loc = [session locationInView:_hostView];
+    pulp::view::Point pt{static_cast<float>(loc.x), static_cast<float>(loc.y)};
+    if (_xform) pt = _xform(pt);
+    return pt;
+}
+
+- (BOOL)armOutboundDrag:(const std::vector<std::string>&)paths {
+    [_pendingPaths removeAllObjects];
+    NSFileManager* fm = [NSFileManager defaultManager];
+    for (const auto& p : paths) {
+        if (p.empty()) continue;
+        // Use the filesystem-representation inverse, not stringWithUTF8String:
+        // (which returns nil for a non-UTF8 path and would crash addObject:).
+        NSString* s = [fm stringWithFileSystemRepresentation:p.c_str() length:p.size()];
+        if (s) [_pendingPaths addObject:s];
+    }
+    _armTime = [NSProcessInfo processInfo].systemUptime;
+    return _pendingPaths.count > 0;
+}
+
+// ── UIDropInteractionDelegate (inbound) ──────────────────────────────────────
+
+- (BOOL)dropInteraction:(UIDropInteraction *)interaction
+       canHandleSession:(id<UIDropSession>)session {
+    return [session canLoadObjectsOfClass:[NSURL class]];
+}
+
+- (UIDropProposal *)dropInteraction:(UIDropInteraction *)interaction
+                   sessionDidUpdate:(id<UIDropSession>)session {
+    // Only advertise Copy when a DropReceiver / on_drop actually accepts the
+    // point — otherwise the whole view looks droppable and performDrop loads the
+    // files just to discard them. dispatch_drag_move forwards to the idempotent
+    // dispatch_drag_enter, which returns whether a receiver claimed the hover.
+    BOOL accepted = NO;
+    if (_root) {
+        pulp::view::DropData data;
+        data.type = pulp::view::DropData::Type::files;
+        // dispatch_drag_enter is idempotent (safe to call on every update) and
+        // returns whether a receiver claimed the hover.
+        accepted = pulp::view::dispatch_drag_enter(*_root, _session, data,
+                                                   [self rootPointFor:session]);
+    }
+    return [[UIDropProposal alloc]
+        initWithDropOperation:accepted ? UIDropOperationCopy : UIDropOperationCancel];
+}
+
+- (void)dropInteraction:(UIDropInteraction *)interaction
+         sessionDidExit:(id<UIDropSession>)session {
+    if (_root) pulp::view::dispatch_drag_exit(*_root, _session);
+}
+
+- (void)dropInteraction:(UIDropInteraction *)interaction
+            performDrop:(id<UIDropSession>)session {
+    if (!_root) return;
+    const pulp::view::Point pt = [self rootPointFor:session];
+    __weak PulpIOSDragDrop* weakSelf = self;
+    // Completion is delivered on the main queue (UIKit guarantee), so touching
+    // the view tree here is thread-safe.
+    [session loadObjectsOfClass:[NSURL class]
+                     completion:^(NSArray<__kindof id<NSItemProviderReading>> *objects) {
+        PulpIOSDragDrop* strongSelf = weakSelf;
+        if (!strongSelf || !strongSelf->_root) return;
+        pulp::view::DropData data;
+        data.type = pulp::view::DropData::Type::files;
+        for (id obj in objects) {
+            if (![obj isKindOfClass:[NSURL class]]) continue;
+            NSURL* url = (NSURL*)obj;
+            if (!url.isFileURL) continue;
+            if (const char* fs = url.fileSystemRepresentation)
+                data.file_paths.emplace_back(fs);
+        }
+        if (!data.file_paths.empty())
+            pulp::view::dispatch_drop(*strongSelf->_root, strongSelf->_session, data, pt);
+    }];
+}
+
+// ── UIDragInteractionDelegate (outbound) ─────────────────────────────────────
+
+- (NSArray<UIDragItem *> *)dragInteraction:(UIDragInteraction *)interaction
+                  itemsForBeginningSession:(id<UIDragSession>)session {
+    // Expire a stale arm: start_file_drag stages paths for the NEXT lift, but if
+    // that lift never comes (tap instead of drag, gesture cancelled), the payload
+    // must not silently attach to a later unrelated drag. Bound the window so a
+    // drag only carries freshly-armed files.
+    if (_pendingPaths.count > 0 &&
+        [NSProcessInfo processInfo].systemUptime - _armTime > 2.0) {
+        [_pendingPaths removeAllObjects];
+    }
+    if (_pendingPaths.count == 0) return @[];  // nothing armed → no drag begins
+    NSMutableArray<UIDragItem*>* items = [NSMutableArray array];
+    for (NSString* path in _pendingPaths) {
+        NSURL* url = [NSURL fileURLWithPath:path];
+        NSItemProvider* provider = [[NSItemProvider alloc] initWithContentsOfURL:url];
+        if (!provider) continue;
+        [items addObject:[[UIDragItem alloc] initWithItemProvider:provider]];
+    }
+    [_pendingPaths removeAllObjects];  // consume the staged payload
+    return items;
+}
+
+@end
 
 // ── PulpPluginUIView: UIView subclass for DAW embedding on iOS ──────────────
 
@@ -232,12 +387,32 @@ public:
             CGRect frame = CGRectMake(0, 0, size.width, size.height);
             view_ = [[PulpPluginUIView alloc] initWithFrame:frame];
             view_.rootView = &root_;
+            // Native drag-and-drop. The CPU view paints at logical 1:1, so a
+            // drop point in view space IS root space — no transform needed.
+            drag_drop_ = [[PulpIOSDragDrop alloc] initWithRoot:&root_
+                                                      hostView:view_
+                                                pointTransform:nil];
+            [view_ addInteraction:[[UIDropInteraction alloc] initWithDelegate:drag_drop_]];
+            UIDragInteraction* drag =
+                [[UIDragInteraction alloc] initWithDelegate:drag_drop_];
+            drag.enabled = YES;
+            [view_ addInteraction:drag];
         }
     }
 
     ~IOSPluginViewHost() override {
         root_.set_plugin_view_host(nullptr);
+        [drag_drop_ invalidate];
         detach();
+    }
+
+    // Arm an outbound file drag (drag audio out to Files / another app). On iOS
+    // the UIKit drag begins from the user's lift gesture, so this stages the
+    // payload for the next UIDragInteraction lift rather than starting a drag
+    // synchronously (see PulpIOSDragDrop). Returns false if no files are given.
+    bool start_file_drag(const FileDragRequest& request) override {
+        if (request.file_paths.empty()) return false;
+        return [drag_drop_ armOutboundDrag:request.file_paths] == YES;
     }
 
     NativeViewHandle native_handle() override {
@@ -308,6 +483,7 @@ private:
     View& root_;
     Size size_;
     PulpPluginUIView* view_ = nil;
+    PulpIOSDragDrop* drag_drop_ = nil;
 };
 
 // ── GPU-accelerated iOS plugin view host ─────────────────────────────────
@@ -607,6 +783,22 @@ public:
             metal_view_.onWindowChange = ^{ this->handle_window_change(); };
             metal_view_.onLayout = ^{ this->handle_layout(); };
 
+            // Native drag-and-drop. Map a drop point through the Metal view's
+            // LIVE pointTransform (the inverse design-viewport map touches use),
+            // captured weakly so a drop never resurrects a torn-down view.
+            __weak PulpMetalPluginView* weak_view = metal_view_;
+            drag_drop_ = [[PulpIOSDragDrop alloc] initWithRoot:&root_
+                                                      hostView:metal_view_
+                                                pointTransform:^pulp::view::Point(pulp::view::Point p) {
+                PulpMetalPluginView* v = weak_view;
+                return (v && v.pointTransform) ? v.pointTransform(p) : p;
+            }];
+            [metal_view_ addInteraction:[[UIDropInteraction alloc] initWithDelegate:drag_drop_]];
+            UIDragInteraction* drag =
+                [[UIDragInteraction alloc] initWithDelegate:drag_drop_];
+            drag.enabled = YES;
+            [metal_view_ addInteraction:drag];
+
             scale_ = current_scale();
             uint32_t pw = static_cast<uint32_t>(opts.size.width * scale_);
             uint32_t ph = static_cast<uint32_t>(opts.size.height * scale_);
@@ -654,6 +846,7 @@ public:
             metal_view_.rootView = nullptr;
             metal_view_.onWindowChange = nil;
             metal_view_.onLayout = nil;
+            [drag_drop_ invalidate];
         }
         skia_surface_.reset();
         gpu_surface_.reset();
@@ -661,6 +854,13 @@ public:
     }
 
     NativeViewHandle native_handle() override { return (__bridge void*)metal_view_; }
+
+    // Arm an outbound file drag — consumed by the next UIKit drag lift (UIKit
+    // drags are gesture-initiated; see PulpIOSDragDrop). Returns false if empty.
+    bool start_file_drag(const FileDragRequest& request) override {
+        if (request.file_paths.empty()) return false;
+        return [drag_drop_ armOutboundDrag:request.file_paths] == YES;
+    }
 
     void attach_to_parent(NativeViewHandle parent) override {
         @autoreleasepool {
@@ -815,6 +1015,7 @@ private:
     View& root_;
     Size size_;
     PulpMetalPluginView* metal_view_ = nil;
+    PulpIOSDragDrop* drag_drop_ = nil;
     std::unique_ptr<render::GpuSurface> gpu_surface_;
     std::unique_ptr<render::SkiaSurface> skia_surface_;
     FrameClock frame_clock_;

@@ -361,7 +361,13 @@ static void shape_with_glyph_fallback(SkCanvas* canvas,
         SkTextBlobBuilderRunHandler handler(r.text.c_str(), {0, 0});
         shaper->shape(r.text.c_str(), r.text.size(), rf, ltr,
                       SK_ScalarInfinity, &handler);
-        const float w = handler.endPoint().x();
+        // NOTE: handler.endPoint().x() returns 0 on the bundled Skia build, so
+        // the per-run advance MUST be measured from the font — otherwise every
+        // run draws at the same x and mixed-typeface text (e.g. "A → B", where
+        // "→" routes to a fallback face) renders overlapping/garbled. The blob
+        // keeps its own intra-run kerning; this width only spaces run-to-run.
+        const float w = rf.measureText(r.text.c_str(), r.text.size(),
+                                       SkTextEncoding::kUTF8);
         shaped.push_back({handler.makeBlob(), w});
         total_w += w;
     }

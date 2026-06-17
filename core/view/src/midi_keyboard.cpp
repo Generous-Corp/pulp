@@ -110,8 +110,11 @@ int MidiKeyboard::note_at_position(Point pos) const {
 
 void MidiKeyboard::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
-    auto white_color = resolve_color("bg.elevated", Color::rgba8(240, 240, 240));
-    auto black_color = resolve_color("bg.primary", Color::rgba8(30, 30, 30));
+    // Piano keys are physically white / black in any theme (like sheet music),
+    // so they don't follow the surface tokens — that made the naturals render
+    // dark in the dark theme. Fixed material colours; the active key uses accent.
+    auto white_color = Color::rgba8(236, 239, 243);  // token-lint:allow (natural keys are white)
+    auto black_color = Color::rgba8(22, 26, 33);     // token-lint:allow (sharp keys are black)
     auto active_color = highlight_color_.a > 0
         ? highlight_color_
         : resolve_color("accent.primary", Color::rgba8(100, 160, 255));
@@ -154,6 +157,7 @@ void MidiKeyboard::on_mouse_down(Point pos) {
         mouse_note_ = note;
         note_on(note, 0.8f);
         if (on_note_on) on_note_on(note, 0.8f);
+        request_repaint();  // show the active (accent) key immediately
     }
 }
 
@@ -171,6 +175,7 @@ void MidiKeyboard::on_mouse_drag(Point pos) {
         } else {
             mouse_note_ = -1;
         }
+        request_repaint();  // glissando: old key releases, new key lights
     }
 }
 
@@ -180,6 +185,7 @@ void MidiKeyboard::on_mouse_up(Point pos) {
         note_off(mouse_note_);
         if (on_note_off) on_note_off(mouse_note_);
         mouse_note_ = -1;
+        request_repaint();  // clear the active key on release
     }
 }
 

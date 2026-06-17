@@ -166,14 +166,14 @@ bool invoke_file_drag_backend(const FileDragRequest& request) {
     return backend ? backend(request) : false;
 }
 
-#if !defined(__APPLE__)
-// Outbound file drag is macOS-only today — the NSDraggingSession backend lives
-// in platform/mac/drag_drop_mac.mm, which is compiled only on macOS. On every
-// other platform View::start_file_drag (cross-platform, in view.cpp) still
-// references begin_file_drag, so provide a no-op here so it links and degrades
-// gracefully. Windows (IDataObject/DoDragDrop) and Linux (XDND) backends can
-// supply a real implementation in their own platform TU when they land; this
-// definition then drops out via the same __APPLE__-style guard.
+#if !defined(__APPLE__) && !(defined(__linux__) && defined(PULP_HAS_X11))
+// Outbound file drag free-function backend, used by View::start_file_drag when
+// the tree is owned by a WindowHost (standalone app) rather than a plugin host.
+// Real backends live per platform: macOS NSDraggingSession (drag_drop_mac.mm)
+// and Linux XDND (drag_drop_linux.cpp, compiled when Xlib links — PULP_HAS_X11).
+// This no-op covers the platforms without one yet (Windows standalone, headless
+// Linux) so the cross-platform call site links and degrades gracefully; each new
+// backend extends the guard above as it lands.
 bool begin_file_drag(void* /*native_view*/, const FileDragRequest& /*request*/) {
     return false;
 }

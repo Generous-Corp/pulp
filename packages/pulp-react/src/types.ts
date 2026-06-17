@@ -492,6 +492,28 @@ export interface ComboProps extends BaseProps {
     onChange?: (index: number) => void;
 }
 
+// ── Ink & Signal design-system widgets (Phase 8c) ───────────────────
+
+/// Compact status pill (counts, format/sample-rate chips). Text comes from
+/// the `text` prop or string children; `tone` selects the semantic colour.
+export interface BadgeProps extends BaseProps {
+    text?: string;
+    tone?: 'neutral' | 'info' | 'success' | 'warning' | 'danger';
+}
+
+/// `[−] value [+]` numeric stepper. `value` maps to setValue; the widget
+/// owns its min/max/step (set via setMin/setMax/setStep).
+export interface StepperProps extends BaseProps {
+    value?: number;
+    onChange?: (value: number) => void;
+}
+
+/// Bipolar 1-D pan control. `value` is −1 (hard left) .. +1 (hard right).
+export interface PanProps extends BaseProps {
+    value?: number;
+    onChange?: (value: number) => void;
+}
+
 export interface ListBoxProps extends BaseProps {
     options?: string[];
     selected?: number;
@@ -626,6 +648,9 @@ export interface IntrinsicElementMap {
     Checkbox: CheckboxProps;
     Toggle: ToggleProps;
     Combo: ComboProps;
+    Badge: BadgeProps;
+    Stepper: StepperProps;
+    Pan: PanProps;
     ListBox: ListBoxProps;
     Canvas: CanvasProps;
     Image: ImageProps;

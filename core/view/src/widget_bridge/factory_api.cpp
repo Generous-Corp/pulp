@@ -1,6 +1,7 @@
 #include <pulp/view/widget_bridge.hpp>
 #include "api_registry.hpp"
 
+#include <pulp/view/gap_widgets.hpp>
 #include <pulp/view/modal.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/ui_components.hpp>
@@ -382,6 +383,64 @@ void WidgetBridge::register_widget_factory_text_editor_api() {
             safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'change', '" + e + "')", "text change");
         };
         resolve_parent(pid)->add_child(std::move(ed));
+        return choc::value::createString(id);
+    });
+}
+
+void WidgetBridge::register_widget_factory_design_system_api() {
+    BridgeApiContext api{engine_};
+    auto tone_from = [](const std::string& s) {
+        if (s == "info") return Tone::info;
+        if (s == "success") return Tone::success;
+        if (s == "warning") return Tone::warning;
+        if (s == "danger") return Tone::danger;
+        return Tone::neutral;
+    };
+
+    // createBadge(id, text, tone, parentId) — Ink & Signal status pill.
+    register_bridge_function(api, "createBadge", [this, tone_from](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto text = args.get<std::string>(1, "");
+        auto tone = args.get<std::string>(2, "neutral");
+        auto pid = args.get<std::string>(3, "");
+        auto b = std::make_unique<Badge>(text, tone_from(tone));
+        b->set_id(id);
+        widgets_[id] = b.get();
+        resolve_parent(pid)->add_child(std::move(b));
+        return choc::value::createString(id);
+    });
+
+    // createStepper(id, parentId) — [-] value [+] numeric nudge.
+    register_bridge_function(api, "createStepper", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto pid = args.get<std::string>(1, "");
+        auto s = std::make_unique<Stepper>();
+        s->set_id(id);
+        auto* ptr = s.get();
+        widgets_[id] = ptr;
+        auto alive = callback_alive_;
+        auto* engine = &engine_;
+        s->on_change = [alive, engine, id](double v) {
+            safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'change', " + std::to_string(v) + ")", "stepper change");
+        };
+        resolve_parent(pid)->add_child(std::move(s));
+        return choc::value::createString(id);
+    });
+
+    // createPan(id, parentId) — bipolar 1-D pan (-1..+1).
+    register_bridge_function(api, "createPan", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto pid = args.get<std::string>(1, "");
+        auto p = std::make_unique<PanControl>();
+        p->set_id(id);
+        auto* ptr = p.get();
+        widgets_[id] = ptr;
+        auto alive = callback_alive_;
+        auto* engine = &engine_;
+        p->on_change = [alive, engine, id](float v) {
+            safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'change', " + std::to_string(v) + ")", "pan change");
+        };
+        resolve_parent(pid)->add_child(std::move(p));
         return choc::value::createString(id);
     });
 }

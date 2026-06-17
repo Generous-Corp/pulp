@@ -677,17 +677,21 @@ TEST_CASE("Design tool: waveform and spectrum previews render populated data", "
     REQUIRE(waveform2 != nullptr);
     REQUIRE(spectrum != nullptr);
 
+    // WaveformView now draws a mirrored bar thumbnail (fill_rect per column) and
+    // SpectrumView a filled area (vertical strips) — raster-friendly fills that
+    // show up on every backend, where the old GPU-only shader polyline did not.
+    // "Populated data" therefore means many fill columns, not stroke-line segments.
     pulp::canvas::RecordingCanvas waveform_canvas;
     waveform->paint(waveform_canvas);
-    REQUIRE(waveform_canvas.count(pulp::canvas::DrawCommand::Type::stroke_line) > 10);
+    REQUIRE(waveform_canvas.count(pulp::canvas::DrawCommand::Type::fill_rect) > 10);
 
     pulp::canvas::RecordingCanvas waveform_canvas2;
     waveform2->paint(waveform_canvas2);
-    REQUIRE(waveform_canvas2.count(pulp::canvas::DrawCommand::Type::stroke_line) > 10);
+    REQUIRE(waveform_canvas2.count(pulp::canvas::DrawCommand::Type::fill_rect) > 10);
 
     pulp::canvas::RecordingCanvas spectrum_canvas;
     spectrum->paint(spectrum_canvas);
-    REQUIRE(spectrum_canvas.count(pulp::canvas::DrawCommand::Type::stroke_line) > 3);
+    REQUIRE(spectrum_canvas.count(pulp::canvas::DrawCommand::Type::fill_rect) > 3);
 
     REQUIRE_NOTHROW(engine.evaluate(
         "applyTokenDiff(JSON.stringify({ colors: { "

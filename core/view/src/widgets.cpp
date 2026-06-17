@@ -183,6 +183,25 @@ static void render_schema(canvas::Canvas& canvas, const std::string& json,
 
 // ── Knob animation ──────────────────────────────────────────────────────────
 
+namespace {
+// Default-path knob geometry shared by paint() and modulation hit-testing so
+// the drawn handles and the draggable hit zones never diverge.
+struct KnobModGeom { float cx, cy, ring_r, arc_w, mod_w, mod_r_base; };
+KnobModGeom knob_mod_geom(const Rect& b, size_t ring_count) {
+    float cx = b.width * 0.5f, cy = b.height * 0.5f;
+    float full_r = std::min(cx, cy) - 3.0f;
+    float arc_w = std::max(3.0f, full_r * 0.13f);
+    float ring_r = ring_count == 0 ? (full_r - arc_w * 0.5f) : (full_r * 0.64f);
+    float mod_w = std::max(2.0f, full_r * 0.05f);
+    float mod_r_base = ring_r + arc_w * 0.5f + mod_w * 0.5f + 2.0f;
+    return {cx, cy, ring_r, arc_w, mod_w, mod_r_base};
+}
+float knob_value_to_angle(float v) {
+    return Knob::start_angle + std::clamp(v, 0.0f, 1.0f) * (Knob::end_angle - Knob::start_angle);
+}
+// Pointer position → normalized value along the 270° dial sweep.
+}  // namespace
+
 void Knob::on_mouse_enter() {
     float dur = resolve_dimension("motion.duration.fast", 0.08f);
     hover_glow_.animate_to(1.0f, dur, easing::ease_out_quad);
@@ -203,6 +222,35 @@ void Knob::on_mouse_event(const MouseEvent& event) {
 }
 
 void Knob::on_mouse_down(Point pos) {
+    // Modulation-arc handle hit-test FIRST: if the press lands on a ring's
+    // start/end handle, drag adjusts that ring's depth (not the base value),
+    // and we stay in absolute-coordinate mode (no relative-mouse capture).
+    if (!mod_rings_.empty()) {
+        auto g = knob_mod_geom(local_bounds(), mod_rings_.size());
+        float hit_r = std::max(3.0f, g.mod_w * 0.95f) + 4.0f;  // handle + slop
+        for (size_t i = 0; i < mod_rings_.size(); ++i) {
+            float mod_r = g.mod_r_base + static_cast<float>(i) * (g.mod_w + 2.0f);
+            // Use the RAW per-end offsets (not the sorted range) so the grabbed
+            // handle maps to the endpoint it actually is — that endpoint then
+            // moves independently of the other on drag.
+            const auto& m = mod_rings_[i];
+            float lo_v = std::clamp(value_ + m.lo, 0.0f, 1.0f);
+            float hi_v = std::clamp(value_ + m.hi, 0.0f, 1.0f);
+            float lo_a = knob_value_to_angle(lo_v), hi_a = knob_value_to_angle(hi_v);
+            float lx = g.cx + mod_r * std::cos(lo_a), ly = g.cy + mod_r * std::sin(lo_a);
+            float hx = g.cx + mod_r * std::cos(hi_a), hy = g.cy + mod_r * std::sin(hi_a);
+            float dl = std::hypot(pos.x - lx, pos.y - ly);
+            float dh = std::hypot(pos.x - hx, pos.y - hy);
+            if (dl <= hit_r || dh <= hit_r) {
+                mod_drag_ring_ = static_cast<int>(i);
+                mod_drag_is_high_ = dh <= dl;  // which END was grabbed
+                // Seed the continuous-angle tracker at the grabbed handle's
+                // current position so the drag can't cross the bottom gap.
+                mod_drag_last_angle_ = knob_value_to_angle(mod_drag_is_high_ ? hi_v : lo_v);
+                return;
+            }
+        }
+    }
     drag_start_y_ = pos.y;
     drag_start_value_ = value_;
     if (!gesture_active_) {
@@ -214,6 +262,7 @@ void Knob::on_mouse_down(Point pos) {
 }
 
 void Knob::on_mouse_up(Point) {
+    mod_drag_ring_ = -1;
     if (window_host())
         window_host()->set_mouse_relative_mode(false);
     if (gesture_active_) {
@@ -223,9 +272,42 @@ void Knob::on_mouse_up(Point) {
 }
 
 void Knob::on_mouse_drag(Point pos) {
-    // Drag up to increase, down to decrease. 150px = full range.
+    // Dragging a modulation handle moves ONLY the grabbed endpoint to the
+    // pointer's angle (offset = pointerValue − base, clipped to [−1,1]). The
+    // other endpoint stays fixed — no symmetric grow/shrink. The two ends may
+    // cross; modulation_range() sorts them, so the arc still draws correctly.
+    if (mod_drag_ring_ >= 0) {
+        constexpr float two_pi = 6.2831853f, pi = 3.14159265f;
+        auto g = knob_mod_geom(local_bounds(), mod_rings_.size());
+        // Track the drag angle CONTINUOUSLY (unwrapped relative to the last
+        // angle), then clamp to the live arc [start, end]. The bottom gap is a
+        // hard wall: pushing the pointer into or across it sticks the handle at
+        // the boundary on its current side instead of teleporting to the far
+        // end. To reach the other end the user must drag the long way (over the
+        // top), which never crosses the gap.
+        float raw = std::atan2(pos.y - g.cy, pos.x - g.cx);
+        while (raw - mod_drag_last_angle_ < -pi) raw += two_pi;
+        while (raw - mod_drag_last_angle_ >  pi) raw -= two_pi;
+        float clamped = std::clamp(raw, Knob::start_angle, Knob::end_angle);
+        mod_drag_last_angle_ = clamped;
+        float pv = (clamped - Knob::start_angle) / (Knob::end_angle - Knob::start_angle);
+        auto& m = mod_rings_[static_cast<size_t>(mod_drag_ring_)];
+        float& end = mod_drag_is_high_ ? m.hi : m.lo;
+        float off = std::clamp(pv - value_, -1.0f, 1.0f);
+        if (off != end) {
+            end = off;
+            request_repaint();
+            if (on_modulation_change) on_modulation_change(mod_drag_ring_, m.lo, m.hi);
+        }
+        return;
+    }
+    // Drag up to increase, down to decrease. 150px = full track. The delta is
+    // applied in POSITION space and mapped back through the skew curve, so a
+    // skewed knob drags perceptually-linearly (identical when skew is 1).
     float delta = (drag_start_y_ - pos.y) / 150.0f;
-    float new_val = std::clamp(drag_start_value_ + delta, 0.0f, 1.0f);
+    float start_pos = skew_ == 1.0f ? drag_start_value_
+                                    : std::pow(drag_start_value_, skew_);
+    float new_val = value_for_position(std::clamp(start_pos + delta, 0.0f, 1.0f));
     if (new_val != value_) {
         value_ = new_val;
         if (on_change) on_change(value_);
@@ -260,12 +342,10 @@ void Fader::on_mouse_down(Point pos) {
     if (!dragging_ && on_gesture_begin) on_gesture_begin();
     dragging_ = true;
     auto b = local_bounds();
-    float new_val;
-    if (orientation_ == Orientation::horizontal) {
-        new_val = std::clamp(pos.x / b.width, 0.0f, 1.0f);
-    } else {
-        new_val = std::clamp(1.0f - pos.y / b.height, 0.0f, 1.0f);
-    }
+    float p = orientation_ == Orientation::horizontal
+                  ? (b.width > 0 ? pos.x / b.width : 0.0f)
+                  : (b.height > 0 ? 1.0f - pos.y / b.height : 0.0f);
+    float new_val = value_for_position(p);
     if (new_val != value_) {
         value_ = new_val;
         if (on_change) on_change(value_);
@@ -281,12 +361,10 @@ void Fader::on_mouse_up(Point) {
 void Fader::on_mouse_drag(Point pos) {
     if (!dragging_) return;
     auto b = local_bounds();
-    float new_val;
-    if (orientation_ == Orientation::horizontal) {
-        new_val = std::clamp(pos.x / b.width, 0.0f, 1.0f);
-    } else {
-        new_val = std::clamp(1.0f - pos.y / b.height, 0.0f, 1.0f);
-    }
+    float p = orientation_ == Orientation::horizontal
+                  ? (b.width > 0 ? pos.x / b.width : 0.0f)
+                  : (b.height > 0 ? 1.0f - pos.y / b.height : 0.0f);
+    float new_val = value_for_position(p);
     if (new_val != value_) {
         value_ = new_val;
         if (on_change) on_change(value_);
@@ -386,6 +464,30 @@ static void draw_knob_captured_pointer(canvas::Canvas& canvas,
     canvas.set_stroke_color(color);
     canvas.set_line_width(width);
     canvas.stroke_line(ix, iy, ox, oy);
+}
+
+std::pair<float, float> Knob::modulation_range(size_t ring) const {
+    if (ring >= mod_rings_.size()) return {value_, value_};
+    const auto& m = mod_rings_[ring];
+    // Independent endpoints: [base+lo, base+hi], sorted so .first ≤ .second.
+    float a = std::clamp(value_ + m.lo, 0.0f, 1.0f);
+    float b = std::clamp(value_ + m.hi, 0.0f, 1.0f);
+    return {std::min(a, b), std::max(a, b)};
+}
+
+float Knob::modulated_value(size_t ring) const {
+    if (ring >= mod_rings_.size()) return value_;
+    const auto& m = mod_rings_[ring];
+    // The indicator rides STRICTLY between the two current endpoints: phase
+    // [-1,1] → t [0,1] interpolated from the low-offset end to the high-offset
+    // end. Because it's a convex blend of the two clamped endpoints, the dot
+    // always stays on the arc between them — even when the range is unipolar
+    // (base sits at one end) or the ends have been dragged past each other
+    // (lo > hi); it simply sweeps the other direction.
+    float lo_v = std::clamp(value_ + m.lo, 0.0f, 1.0f);
+    float hi_v = std::clamp(value_ + m.hi, 0.0f, 1.0f);
+    float t = (std::clamp(mod_phase_, -1.0f, 1.0f) + 1.0f) * 0.5f;
+    return lo_v + t * (hi_v - lo_v);
 }
 
 void Knob::paint(canvas::Canvas& canvas) {
@@ -613,40 +715,101 @@ void Knob::paint(canvas::Canvas& canvas) {
         //    stroke widths scale from the chrome body radius.
         draw_knob_indicator_notch(canvas, cx, cy, inner_r, body_r, value_);
     } else {
-        // ── Default C++ paint path ──────────────────────────────────────
+        // ── Default C++ paint path — Ink & Signal knob ───────────────────
+        // Solid raised body disc + full track ring + thick value arc + a
+        // white dot pointer on the dial face, matching the Figma design
+        // language (not a thin needle on a bare arc).
+        float full_r = std::min(cx, cy) - 3.0f;
+        float arc_w  = std::max(3.0f, full_r * 0.13f);   // thick ring
+        // With modulation rings present, shrink the main arc so the thin
+        // per-source rings fit in the band outside it (within full_r).
+        float ring_r = mod_rings_.empty() ? (full_r - arc_w * 0.5f) : (full_r * 0.64f);
+        float body_r = ring_r - arc_w * 0.5f - 2.0f;     // disc inside the ring
+        float value_angle = start_angle + position_for_value() * (end_angle - start_angle);
 
         // Hover glow ring (drawn behind everything)
         float glow = hover_glow_.value();
         if (glow > 0.01f) {
             auto accent = resolve_color("accent.primary", canvas::Color::rgba8(100, 150, 255));
             canvas.set_stroke_color(canvas::Color::rgba(accent.r, accent.g, accent.b,
-                                    static_cast<uint8_t>(40 * glow)));
-            canvas.set_line_width(6.0f);
-            canvas.stroke_arc(cx, cy, radius + 2.0f, start_angle, end_angle);
+                                    0.16f * glow));
+            canvas.set_line_width(arc_w + 6.0f);
+            canvas.stroke_arc(cx, cy, ring_r, start_angle, end_angle);
         }
 
-        // Track (background arc)
-        auto track_color = resolve_color("control.track", canvas::Color::rgba8(60, 60, 60));
-        canvas.set_stroke_color({track_color.r, track_color.g, track_color.b, track_color.a});
-        canvas.set_line_width(3.0f);
+        // Raised body disc
+        auto body_color = resolve_color("bg.elevated", canvas::Color::rgba8(38, 44, 54));
+        canvas.set_fill_color(body_color);
+        canvas.fill_circle(cx, cy, body_r);
+
+        // Subtle bevel ring framing the disc edge (matches the Figma knob's
+        // lighter rim between the body and the arc).
+        auto bevel = resolve_color("control.border", canvas::Color::rgba8(70, 78, 92));
+        canvas.set_stroke_color(canvas::Color::rgba(bevel.r, bevel.g, bevel.b, 0.6f));  // token-lint:allow (alpha blend of resolved token)
+        canvas.set_line_width(1.0f);
+        canvas.stroke_circle(cx, cy, body_r - 0.5f);
+
+        // Full track ring (background arc)
+        auto track_color = resolve_color("knob.arc.bg", canvas::Color::rgba8(60, 66, 78));
+        canvas.set_stroke_color(track_color);
+        canvas.set_line_width(arc_w);
         canvas.set_line_cap(canvas::LineCap::round);
-        canvas.stroke_arc(cx, cy, radius, start_angle, end_angle);
+        canvas.stroke_arc(cx, cy, ring_r, start_angle, end_angle);
 
-        // Value arc
-        float value_angle = start_angle + value_ * (end_angle - start_angle);
-        auto fill_color = resolve_color("control.fill", canvas::Color::rgba8(100, 150, 255));
-        canvas.set_stroke_color({fill_color.r, fill_color.g, fill_color.b, fill_color.a});
-        canvas.stroke_arc(cx, cy, radius, start_angle, value_angle);
+        // Value arc (accent)
+        auto fill_color = resolve_color("knob.arc", canvas::Color::rgba8(100, 150, 255));
+        canvas.set_stroke_color(fill_color);
+        canvas.stroke_arc(cx, cy, ring_r, start_angle, value_angle);
 
-        // Thumb indicator line
-        float thumb_x = cx + radius * 0.6f * std::cos(value_angle);
-        float thumb_y = cy + radius * 0.6f * std::sin(value_angle);
-        float inner_x = cx + radius * 0.3f * std::cos(value_angle);
-        float inner_y = cy + radius * 0.3f * std::sin(value_angle);
-        auto thumb_color = resolve_color("control.thumb", canvas::Color::rgba8(220, 220, 220));
-        canvas.set_stroke_color({thumb_color.r, thumb_color.g, thumb_color.b, thumb_color.a});
-        canvas.set_line_width(2.0f);
-        canvas.stroke_line(inner_x, inner_y, thumb_x, thumb_y);
+        // White dot pointer on the dial face near the rim
+        float dot_r = std::max(2.0f, full_r * 0.06f);
+        float dot_rad = body_r - dot_r - 2.0f;
+        float dot_x = cx + dot_rad * std::cos(value_angle);
+        float dot_y = cy + dot_rad * std::sin(value_angle);
+        auto thumb_color = resolve_color("knob.thumb", canvas::Color::rgba8(230, 230, 230));
+        canvas.set_fill_color(thumb_color);
+        canvas.fill_circle(dot_x, dot_y, dot_r);
+
+        // Modulation rings (Saturn) — one thin per-source arc outside the main
+        // arc. The arc shows the modulation RANGE centered on the base value
+        // ([value-|depth|, value+|depth|], clipped at the parameter limits). A
+        // dot at each end is a draggable handle (drag to set depth). A bright
+        // indicator dot rides the arc at the live modulated value (base +
+        // depth·phase), so you can see where the parameter actually is in real
+        // time as the source moves.
+        if (!mod_rings_.empty()) {
+            auto g = knob_mod_geom(b, mod_rings_.size());
+            float handle_r = std::max(3.0f, g.mod_w * 0.95f);
+            canvas.set_line_cap(canvas::LineCap::round);
+            for (size_t i = 0; i < mod_rings_.size(); ++i) {
+                const auto& m = mod_rings_[i];
+                float mod_r = g.mod_r_base + static_cast<float>(i) * (g.mod_w + 2.0f);
+                auto [lo, hi] = modulation_range(i);
+                float lo_a = knob_value_to_angle(lo);
+                float hi_a = knob_value_to_angle(hi);
+
+                // Faint full track + the colored range arc.
+                canvas.set_stroke_color(canvas::Color::rgba(m.color.r, m.color.g, m.color.b, 0.22f));  // token-lint:allow (per-source mod colour)
+                canvas.set_line_width(g.mod_w);
+                canvas.stroke_arc(g.cx, g.cy, mod_r, start_angle, end_angle);
+                canvas.set_stroke_color(m.color);
+                canvas.stroke_arc(g.cx, g.cy, mod_r, lo_a, hi_a);
+                // No end-cap handle dots by design — the arc's ends are still
+                // draggable (hit-tested in on_mouse_down), but only the live
+                // indicator dot below is drawn, riding between the two ends.
+
+                // Live modulated-value indicator: bright dot ringed in the
+                // source colour, riding the arc at base + depth·phase.
+                float la = knob_value_to_angle(modulated_value(i));
+                float lx = g.cx + mod_r * std::cos(la), ly = g.cy + mod_r * std::sin(la);
+                auto ind = resolve_color("knob.thumb", canvas::Color::rgba8(235, 235, 235));
+                canvas.set_fill_color(ind);
+                canvas.fill_circle(lx, ly, handle_r * 0.78f);
+                canvas.set_stroke_color(m.color);
+                canvas.set_line_width(2.0f);
+                canvas.stroke_circle(lx, ly, handle_r * 0.78f + 1.0f);
+            }
+        }
     }
 
     // Label below (always drawn, even with shader)
@@ -724,6 +887,9 @@ void Fader::paint(canvas::Canvas& canvas) {
             canvas.fill_rounded_rect(0, ty, track_length, track_thick, track_thick * 0.5f);
         }
     } else {
+        // Skew-mapped track position for the current value (== value_ when
+        // skew is linear, so the default look is unchanged).
+        const float pos = position_for_value();
 
         // ── Per-widget skin overrides (figma-plugin import) ────────────────
         // When the importer derived track / fill / thumb colours from the
@@ -779,11 +945,11 @@ void Fader::paint(canvas::Canvas& canvas) {
         canvas.set_fill_color({fill_color.r, fill_color.g, fill_color.b, fill_color.a});
 
         if (vert) {
-            float fill_height = value_ * track_length;
+            float fill_height = pos * track_length;
             float tx = (b.width - track_thick) * 0.5f;
             canvas.fill_rounded_rect(tx, track_length - fill_height, track_thick, fill_height, track_radius);
         } else {
-            float fill_width = value_ * track_length;
+            float fill_width = pos * track_length;
             float ty = (b.height - track_thick) * 0.5f;
             canvas.fill_rounded_rect(0, ty, fill_width, track_thick, track_radius);
         }
@@ -811,19 +977,19 @@ void Fader::paint(canvas::Canvas& canvas) {
             // is wide & short, so its height ≈ half its width.)
             const float skin_default_h = vert ? std::max(8.0f, skin_default_w * 0.5f)
                                               : std::min(b.height, track_width) * 0.62f;
-            const float default_w = skinned ? skin_default_w : (vert ? std::min(b.width, track_width) : 8.0f);
-            const float default_h = skinned ? skin_default_h : (vert ? 5.0f : std::min(b.height, track_width));
+            const float default_w = skinned ? skin_default_w : (vert ? std::min(b.width, track_width) : 10.0f);
+            const float default_h = skinned ? skin_default_h : (vert ? 9.0f : std::min(b.height, track_width));
             const float thumb_w = std::max(1.0f, (thumb_width_ > 0.0f ? thumb_width_ : default_w) * scale);
             const float thumb_h = std::max(1.0f, (thumb_height_ > 0.0f ? thumb_height_ : default_h) * scale);
             const float axis_half = (vert ? thumb_h : thumb_w) * 0.5f;
             const float usable = std::max(0.0f, track_length - 2.0f * axis_half);
-            const float axis_center = axis_half + (vert ? (1.0f - value_) : value_) * usable;
+            const float axis_center = axis_half + (vert ? (1.0f - pos) : pos) * usable;
             // Skinned slab defaults to a generously rounded corner when none
             // was provided (the captured thumb is a pill).
             const float skin_radius = std::min(thumb_w, thumb_h) * 0.5f;
             const float radius = thumb_corner_radius_ > 0.0f
                 ? std::min(thumb_corner_radius_, std::min(thumb_w, thumb_h) * 0.5f)
-                : (skinned ? skin_radius : 0.0f);
+                : skin_radius;  // pill ends by default (matches the Figma fader handle)
             float thumb_x, thumb_y;
             if (vert) {
                 thumb_x = (b.width - thumb_w) * 0.5f;
@@ -847,11 +1013,11 @@ void Fader::paint(canvas::Canvas& canvas) {
             //   usable = length - 2 * radius;  pos = radius + value * usable;
             if (vert) {
                 float usable = track_length - 2.0f * thumb_radius;
-                float thumb_y = thumb_radius + usable - value_ * usable;
+                float thumb_y = thumb_radius + usable - pos * usable;
                 canvas.fill_circle(b.width * 0.5f, thumb_y, thumb_radius);
             } else {
                 float usable = track_length - 2.0f * thumb_radius;
-                float thumb_x = thumb_radius + value_ * usable;
+                float thumb_x = thumb_radius + pos * usable;
                 canvas.fill_circle(thumb_x, b.height * 0.5f, thumb_radius);
             }
         }
@@ -901,11 +1067,28 @@ void RangeSlider::clamp_and_quantize_() {
     }
 }
 
+void RangeSlider::set_skew_from_midpoint(float mid_value) {
+    float lo = min_, hi = std::max(min_, max_);
+    if (hi <= lo) { skew_ = 1.0f; return; }
+    float prop = std::clamp((mid_value - lo) / (hi - lo), 1e-4f, 1.0f - 1e-4f);
+    skew_ = std::log(0.5f) / std::log(prop);
+    skew_ = std::max(0.0001f, skew_);
+}
+
+float RangeSlider::value_to_position_() const {
+    float lo = min_, hi = std::max(min_, max_);
+    float span = hi - lo;
+    float prop = span > 0.0f ? std::clamp((value_ - lo) / span, 0.0f, 1.0f) : 0.0f;
+    return skew_ == 1.0f ? prop : std::pow(prop, skew_);
+}
+
 float RangeSlider::position_to_value_(float t) const {
     float lo = min_;
     float hi = std::max(min_, max_);
     float clamped_t = std::clamp(t, 0.0f, 1.0f);
-    float v = lo + clamped_t * (hi - lo);
+    // Linear drag position → value proportion via the inverse skew curve.
+    float prop = skew_ == 1.0f ? clamped_t : std::pow(clamped_t, 1.0f / skew_);
+    float v = lo + prop * (hi - lo);
 
     if (step_ > 0.0f) {
         float steps = std::round((v - lo) / step_);
@@ -947,6 +1130,16 @@ void RangeSlider::on_mouse_drag(Point pos) {
     update_from_position_(pos);
 }
 
+void RangeSlider::on_mouse_enter() {
+    float dur = resolve_dimension("motion.duration.fast", 0.08f);
+    hover_scale_.animate_to(1.3f, dur, easing::ease_out_quad);
+}
+
+void RangeSlider::on_mouse_leave() {
+    float dur = resolve_dimension("motion.duration.fast", 0.08f);
+    hover_scale_.animate_to(1.0f, dur, easing::ease_out_quad);
+}
+
 void RangeSlider::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
     bool horiz = orientation_ == Orientation::horizontal;
@@ -965,11 +1158,10 @@ void RangeSlider::paint(canvas::Canvas& canvas) {
                                        : std::max(b.width,  1.0f));
 
     // Normalised position along the track, taking the (possibly-collapsed)
-    // [min,max] range into account.
+    // [min,max] range and the skew curve into account.
     float lo = min_;
     float hi = std::max(min_, max_);
-    float span = hi - lo;
-    float t = span > 0 ? std::clamp((value_ - lo) / span, 0.0f, 1.0f) : 0.0f;
+    float t = value_to_position_();
 
     // Background track.
     canvas.set_fill_color(track_color);
@@ -998,8 +1190,9 @@ void RangeSlider::paint(canvas::Canvas& canvas) {
 
     // Handle. Inset by handle radius so it never overshoots the bounds.
     canvas.set_fill_color(thumb_color);
-    float handle_radius = horiz ? std::min(b.height, 16.0f) * 0.5f
-                                : std::min(b.width,  16.0f) * 0.5f;
+    float handle_radius = (horiz ? std::min(b.height, 16.0f) * 0.5f
+                                 : std::min(b.width,  16.0f) * 0.5f)
+                          * hover_scale_.value();
     if (horiz) {
         float usable = std::max(0.0f, b.width - 2.0f * handle_radius);
         float hx = handle_radius + t * usable;
@@ -1052,8 +1245,12 @@ void Toggle::paint(canvas::Canvas& canvas) {
             canvas.fill_rounded_rect(sx, sy, switch_w, switch_h, switch_h * 0.5f);
         }
 
-        // Thumb circle — position animated between off and on
-        auto thumb_color = resolve_color("control.thumb", canvas::Color::rgba8(220, 220, 220));
+        // Thumb circle — position animated between off and on. The Ink & Signal
+        // toggle uses a dark ink knob on the teal track (Figma), not a white
+        // thumb; interpolate from the neutral off-thumb to dark ink as it turns on.
+        auto off_thumb = resolve_color("control.thumb", canvas::Color::rgba8(220, 220, 220));
+        auto on_thumb = resolve_color("accent.text", canvas::Color::rgba8(12, 20, 24));
+        auto thumb_color = off_thumb.interpolate(on_thumb, t);
         canvas.set_fill_color({thumb_color.r, thumb_color.g, thumb_color.b, thumb_color.a});
         float thumb_r = switch_h * 0.4f;
         float off_x = sx + switch_h * 0.5f;
@@ -1081,22 +1278,24 @@ void Checkbox::paint(canvas::Canvas& canvas) {
     float cy = b.height * 0.5f;
     float r = size * 0.35f;  // smaller radius to avoid clipping at bounds edge
 
+    // Rounded SQUARE (matches the Figma design language — not a circle).
+    float corner = r * 0.35f;
     if (checked_) {
-        // Filled circle
+        // Filled rounded square
         auto fill = resolve_color("control.fill", canvas::Color::rgba8(100, 150, 255));
         canvas.set_fill_color(fill);
-        canvas.fill_rounded_rect(cx - r, cy - r, r * 2, r * 2, r);
+        canvas.fill_rounded_rect(cx - r, cy - r, r * 2, r * 2, corner);
         // Check glyph (simple checkmark using lines)
         canvas.set_stroke_color(canvas::Color::rgba8(30, 30, 40));
         canvas.set_line_width(2.0f);
         canvas.stroke_line(cx - r * 0.35f, cy, cx - r * 0.05f, cy + r * 0.3f);
         canvas.stroke_line(cx - r * 0.05f, cy + r * 0.3f, cx + r * 0.4f, cy - r * 0.3f);
     } else {
-        // Stroked circle
+        // Stroked rounded square
         auto border = resolve_color("control.border", canvas::Color::rgba8(80, 80, 100));
         canvas.set_stroke_color(border);
         canvas.set_line_width(1.5f);
-        canvas.stroke_rounded_rect(cx - r, cy - r, r * 2, r * 2, r);
+        canvas.stroke_rounded_rect(cx - r, cy - r, r * 2, r * 2, corner);
     }
 }
 
@@ -1139,6 +1338,21 @@ void ToggleButton::paint(canvas::Canvas& canvas) {
 }
 
 void ToggleButton::on_mouse_down(Point) {
+    if (radio_group_ != 0) {
+        if (on_) return;            // clicking the active radio keeps it selected
+        set_on(true);
+        if (auto* p = parent()) {   // deselect siblings in the same group
+            for (size_t i = 0; i < p->child_count(); ++i) {
+                auto* sib = dynamic_cast<ToggleButton*>(p->child_at(i));
+                if (sib && sib != this && sib->radio_group_ == radio_group_ && sib->is_on()) {
+                    sib->set_on(false);
+                    if (sib->on_toggle) sib->on_toggle(false);
+                }
+            }
+        }
+        if (on_toggle) on_toggle(true);
+        return;
+    }
     set_on(!on_);
     if (on_toggle) on_toggle(on_);
 }
@@ -1215,9 +1429,544 @@ void Icon::paint(canvas::Canvas& canvas) {
     }
 }
 
+// ── InlineValueEditor ────────────────────────────────────────────────────────
+
+std::string InlineValueEditor::display_() const {
+    char buf[48];
+    std::snprintf(buf, sizeof buf, "%.*f", std::max(0, decimals_), value_);
+    return std::string(buf) + suffix_;
+}
+
+void InlineValueEditor::begin_edit() {
+    if (!enabled_ || editing_) return;
+    editing_ = true;
+    invalid_ = false;
+    blink_ = 0.0f;
+    char buf[48];
+    std::snprintf(buf, sizeof buf, "%.*f", std::max(0, decimals_), value_);
+    edit_buffer_ = buf;
+    request_repaint();
+}
+
+void InlineValueEditor::commit_edit() {
+    if (!editing_) return;
+    editing_ = false;
+    if (!edit_buffer_.empty()) {
+        try {
+            double v = std::stod(edit_buffer_);
+            if (v < min_ || v > max_) {
+                invalid_ = true;   // out of range: flag, keep the prior value
+            } else {
+                invalid_ = false;
+                value_ = v;
+                if (on_change) on_change(value_);
+            }
+        } catch (...) {
+            // unparseable → leave the value unchanged
+        }
+    }
+    request_repaint();
+}
+
+void InlineValueEditor::cancel_edit() {
+    editing_ = false;
+    invalid_ = false;
+    edit_buffer_.clear();
+    request_repaint();
+}
+
+void InlineValueEditor::on_mouse_down(Point) {
+    if (enabled_ && !editing_) begin_edit();
+}
+
+void InlineValueEditor::on_text_input(const TextInputEvent& event) {
+    if (!editing_) return;
+    for (char c : event.text)
+        if ((c >= '0' && c <= '9') || c == '.' || c == '-' || c == '+')
+            edit_buffer_ += c;
+    invalid_ = false;
+    request_repaint();
+}
+
+bool InlineValueEditor::on_key_event(const KeyEvent& event) {
+    if (!editing_ || !event.is_down) return false;
+    if (event.key == KeyCode::enter) { commit_edit(); return true; }
+    if (event.key == KeyCode::escape) { cancel_edit(); return true; }
+    if (event.key == KeyCode::backspace) {
+        if (!edit_buffer_.empty()) edit_buffer_.pop_back();
+        request_repaint();
+        return true;
+    }
+    return false;
+}
+
+void InlineValueEditor::on_focus_changed(bool gained) {
+    if (!gained && editing_) commit_edit();
+}
+
+void InlineValueEditor::paint(canvas::Canvas& canvas) {
+    auto b = local_bounds();
+    const float radius = 6.0f;
+    auto bg = resolve_color("bg.elevated", canvas::Color::rgba8(20, 24, 30));
+    auto fg = resolve_color("text.primary", canvas::Color::rgba8(220, 224, 230));
+    auto accent = resolve_color("accent.primary", canvas::Color::rgba8(22, 218, 194));
+    auto danger = resolve_color("accent.error", canvas::Color::rgba8(255, 92, 77));
+    auto border = resolve_color("control.border", canvas::Color::rgba8(60, 66, 78));
+    if (!enabled_) fg.a = 120;
+
+    canvas.set_fill_color(bg);
+    canvas.fill_rounded_rect(0, 0, b.width, b.height, radius);
+
+    auto ring = invalid_ ? danger : (editing_ ? accent : border);
+    canvas.set_stroke_color(ring);
+    canvas.set_line_width((editing_ || invalid_) ? 1.6f : 1.0f);
+    canvas.stroke_rounded_rect(0.8f, 0.8f, b.width - 1.6f, b.height - 1.6f, radius - 0.8f);
+
+    canvas.set_font("Inter", std::min(14.0f, b.height * 0.55f));
+    canvas.set_text_align(canvas::TextAlign::center);
+    const std::string txt = editing_ ? edit_buffer_ : display_();
+    canvas.set_fill_color(editing_ ? accent : fg);
+    canvas.fill_text_anchored(txt, b.width * 0.5f, b.height * 0.5f,
+                              canvas::Canvas::TextAnchor::GlyphCenter);
+    canvas.set_text_align(canvas::TextAlign::left);
+    // Caret is a SEPARATE blinking line just right of the (stable, centered)
+    // text — never part of the measured string, so the value doesn't jump or
+    // shift left/right as the caret blinks.
+    if (editing_) {
+        blink_ += 1.0f / 60.0f;
+        if (std::fmod(blink_, 1.06f) < 0.53f) {
+            float tw = canvas.measure_text(txt);
+            float cx = b.width * 0.5f + tw * 0.5f + 3.0f;
+            canvas.set_stroke_color(accent);
+            canvas.set_line_width(1.5f);
+            canvas.stroke_line(cx, b.height * 0.28f, cx, b.height * 0.72f);
+        }
+    }
+}
+
+// ── DualRangeSlider ──────────────────────────────────────────────────────────
+
+void DualRangeSlider::clamp_() {
+    low_ = std::clamp(low_, min_, max_);
+    high_ = std::clamp(high_, min_, max_);
+    request_repaint();
+}
+
+float DualRangeSlider::pos_for_(float v) const {
+    if (max_ <= min_) return 0.0f;
+    return std::clamp((v - min_) / (max_ - min_), 0.0f, 1.0f);
+}
+
+float DualRangeSlider::value_for_pos_(float t) const {
+    return min_ + std::clamp(t, 0.0f, 1.0f) * (max_ - min_);
+}
+
+void DualRangeSlider::paint(canvas::Canvas& canvas) {
+    auto b = local_bounds();
+    const bool horiz = orientation_ == Orientation::horizontal;
+    const float track = 4.0f, r = 7.0f;
+    auto track_color = resolve_color("control.track", canvas::Color::rgba8(58, 64, 74));
+    auto fill_color = resolve_color("control.fill", canvas::Color::rgba8(22, 218, 194));
+    auto thumb_color = resolve_color("control.thumb", canvas::Color::rgba8(232, 236, 242));
+    if (!enabled_) {
+        fill_color.a = 90; thumb_color.a = 130; track_color.a = 140;
+    }
+    const float tlo = pos_for_(std::min(low_, high_));
+    const float thi = pos_for_(std::max(low_, high_));
+
+    if (horiz) {
+        const float cy = b.height * 0.5f;
+        const float x0 = r, x1 = b.width - r, span = std::max(1.0f, x1 - x0);
+        canvas.set_fill_color(track_color);
+        canvas.fill_rounded_rect(x0, cy - track * 0.5f, span, track, track * 0.5f);
+        canvas.set_fill_color(fill_color);
+        canvas.fill_rounded_rect(x0 + tlo * span, cy - track * 0.5f, (thi - tlo) * span, track, track * 0.5f);
+        for (float t : {pos_for_(low_), pos_for_(high_)}) {
+            float cx = x0 + t * span;
+            canvas.set_fill_color(thumb_color);
+            canvas.fill_circle(cx, cy, r);
+            canvas.set_stroke_color(fill_color);
+            canvas.set_line_width(2.0f);
+            canvas.stroke_circle(cx, cy, r);
+        }
+    } else {
+        const float cx = b.width * 0.5f;
+        const float y0 = r, y1 = b.height - r, span = std::max(1.0f, y1 - y0);
+        // Vertical: min at the bottom, so invert the screen-y.
+        canvas.set_fill_color(track_color);
+        canvas.fill_rounded_rect(cx - track * 0.5f, y0, track, span, track * 0.5f);
+        canvas.set_fill_color(fill_color);
+        canvas.fill_rounded_rect(cx - track * 0.5f, y0 + (1.0f - thi) * span, track, (thi - tlo) * span, track * 0.5f);
+        for (float t : {pos_for_(low_), pos_for_(high_)}) {
+            float cy = y0 + (1.0f - t) * span;
+            canvas.set_fill_color(thumb_color);
+            canvas.fill_circle(cx, cy, r);
+            canvas.set_stroke_color(fill_color);
+            canvas.set_line_width(2.0f);
+            canvas.stroke_circle(cx, cy, r);
+        }
+    }
+}
+
+float DualRangeSlider::pointer_t_(Point pos) const {
+    auto b = local_bounds();
+    const float r = 7.0f;
+    if (orientation_ == Orientation::horizontal) {
+        float x0 = r, span = std::max(1.0f, b.width - 2 * r);
+        return std::clamp((pos.x - x0) / span, 0.0f, 1.0f);
+    }
+    float y0 = r, span = std::max(1.0f, b.height - 2 * r);
+    return std::clamp(1.0f - (pos.y - y0) / span, 0.0f, 1.0f);  // min at bottom
+}
+
+void DualRangeSlider::apply_(Point pos) {
+    float v = value_for_pos_(pointer_t_(pos));
+    // no_cross: a dragged thumb stops at the other (low ≤ high preserved).
+    if (drag_ == 0) low_ = no_cross_ ? std::min(v, high_) : v;
+    else if (drag_ == 1) high_ = no_cross_ ? std::max(v, low_) : v;
+    clamp_();
+    if (on_change) on_change(low_, high_);
+}
+
+void DualRangeSlider::on_mouse_down(Point pos) {
+    if (!enabled_) return;
+    float t = pointer_t_(pos);
+    // Grab the nearer thumb; tie favours the low thumb.
+    drag_ = (std::fabs(t - pos_for_(high_)) < std::fabs(t - pos_for_(low_))) ? 1 : 0;
+    apply_(pos);
+}
+
+void DualRangeSlider::on_mouse_drag(Point pos) {
+    if (drag_ >= 0) apply_(pos);
+}
+
+void DualRangeSlider::on_mouse_up(Point) {
+    drag_ = -1;
+}
+
+// ── GroupBox ───────────────────────────────────────────────────────────────
+
+void GroupBox::set_collapsed(bool c) {
+    if (c == collapsed_) return;
+    collapsed_ = c;
+    apply_child_visibility();
+    if (on_toggle) on_toggle(collapsed_);
+    request_repaint();
+}
+
+void GroupBox::apply_child_visibility() {
+    for (std::size_t i = 0; i < child_count(); ++i)
+        child_at(i)->set_visible(!collapsed_);
+}
+
+void GroupBox::paint(canvas::Canvas& canvas) {
+    auto b = local_bounds();
+    const float radius = 8.0f;
+    const float frame_h = collapsed_ ? GroupBox::header_height : b.height;
+
+    auto bg = resolve_color("bg.surface", canvas::Color::rgba8(30, 36, 46));
+    auto border = resolve_color("control.border", canvas::Color::rgba8(60, 66, 78));
+    auto fg = resolve_color("text.secondary", canvas::Color::rgba8(150, 156, 168));
+
+    canvas.set_fill_color(bg);
+    canvas.fill_rounded_rect(0, 0, b.width, frame_h, radius);
+    canvas.set_stroke_color(border);
+    canvas.set_line_width(1.0f);
+    canvas.stroke_rounded_rect(0.5f, 0.5f, b.width - 1.0f, frame_h - 1.0f, radius - 0.5f);
+
+    // Title chip (top-left): a filled pill with the uppercase title.
+    if (!title_.empty()) {
+        std::string up = title_;
+        for (auto& ch : up) if (ch >= 'a' && ch <= 'z') ch = static_cast<char>(ch - 32);
+        canvas.set_font("Inter", 11.0f);
+        canvas.set_text_align(canvas::TextAlign::left);
+        float tw = canvas.measure_text(up);
+        canvas.set_fill_color(resolve_color("bg.elevated", canvas::Color::rgba8(42, 48, 60)));
+        canvas.fill_rounded_rect(10.0f, 7.0f, tw + 18.0f, 18.0f, 5.0f);
+        canvas.set_fill_color(fg);
+        canvas.fill_text(up, 19.0f, 20.0f);
+    }
+
+    // Collapse chevron (top-right), drawn as strokes so it never tofus:
+    // ▾ when expanded, ▸ when collapsed.
+    if (collapsible_) {
+        const float cx = b.width - 18.0f, cy = GroupBox::header_height * 0.5f;
+        canvas.set_stroke_color(fg);
+        canvas.set_line_width(1.6f);
+        if (collapsed_) {                 // ▸ pointing right
+            canvas.stroke_line(cx - 2.0f, cy - 4.0f, cx + 2.0f, cy);
+            canvas.stroke_line(cx + 2.0f, cy, cx - 2.0f, cy + 4.0f);
+        } else {                          // ▾ pointing down
+            canvas.stroke_line(cx - 4.0f, cy - 2.0f, cx, cy + 2.0f);
+            canvas.stroke_line(cx, cy + 2.0f, cx + 4.0f, cy - 2.0f);
+        }
+    }
+}
+
+void GroupBox::on_mouse_event(const MouseEvent& event) {
+    // A click anywhere in the header band toggles collapse (when collapsible).
+    if (event.is_down && collapsible_ && event.position.y <= GroupBox::header_height) {
+        set_collapsed(!collapsed_);
+        return;
+    }
+    View::on_mouse_event(event);
+}
+
 // Visualizers (ImageView / Meter / XYPad / WaveformView /
 // SpectrumView / Panel / SpectrogramView / MultiMeter /
 // CorrelationMeter) moved to core/view/src/widgets/visualizers.cpp
 // in the 2026-05 Phase 2 (R2-6) batch.
+
+// ── WaveformRecorder ─────────────────────────────────────────────────────────
+
+namespace {
+constexpr float kRecorderPad = 16.0f;   // outer panel padding
+constexpr float kRecorderMeterH = 22.0f;  // bottom level-meter strip height
+constexpr float kRecorderBadgeRow = 34.0f;  // space reserved for the badge row
+}  // namespace
+
+Rect WaveformRecorder::meter_rect_() const {
+    auto b = local_bounds();
+    return {kRecorderPad,
+            b.height - kRecorderPad - kRecorderMeterH,
+            std::max(0.0f, b.width - 2 * kRecorderPad),
+            kRecorderMeterH};
+}
+
+Rect WaveformRecorder::waveform_rect_() const {
+    auto b = local_bounds();
+    float top = kRecorderPad + kRecorderBadgeRow;
+    float bottom = meter_rect_().y - 12.0f;
+    return {kRecorderPad, top,
+            std::max(0.0f, b.width - 2 * kRecorderPad),
+            std::max(0.0f, bottom - top)};
+}
+
+Point WaveformRecorder::transport_center_() const {
+    auto wf = waveform_rect_();
+    return {wf.x + wf.width * 0.5f, wf.y + wf.height * 0.5f};
+}
+
+float WaveformRecorder::transport_radius_() const {
+    auto wf = waveform_rect_();
+    return std::clamp(std::min(wf.width, wf.height) * 0.18f, 18.0f, 44.0f);
+}
+
+void WaveformRecorder::set_state(State s) {
+    if (s == state_) return;
+    state_ = s;
+    dragging_threshold_ = false;
+    request_repaint();
+    if (on_state_change) on_state_change(state_);
+}
+
+void WaveformRecorder::advance_state_() {
+    switch (state_) {
+        case State::armed:
+            if (on_record) on_record();
+            set_state(State::recording);
+            break;
+        case State::recording:
+            if (on_stop) on_stop();
+            set_state(State::captured);
+            break;
+        case State::captured:
+            if (on_play) on_play();
+            set_state(State::armed);
+            break;
+    }
+}
+
+void WaveformRecorder::update_threshold_from_x_(float x) {
+    auto m = meter_rect_();
+    if (m.width <= 0.0f) return;
+    float t = std::clamp((x - m.x) / m.width, 0.0f, 1.0f);
+    if (t == threshold_) return;
+    threshold_ = t;
+    request_repaint();
+    if (on_threshold_change) on_threshold_change(threshold_);
+}
+
+void WaveformRecorder::on_mouse_down(Point pos) {
+    // The center transport button takes priority over the meter.
+    Point c = transport_center_();
+    float r = transport_radius_();
+    float dx = pos.x - c.x;
+    float dy = pos.y - c.y;
+    if (dx * dx + dy * dy <= r * r) {
+        advance_state_();
+        return;
+    }
+    // The threshold thumb is only draggable while armed.
+    if (state_ == State::armed) {
+        auto m = meter_rect_();
+        if (pos.x >= m.x - 8.0f && pos.x <= m.x + m.width + 8.0f &&
+            pos.y >= m.y - 8.0f && pos.y <= m.y + m.height + 8.0f) {
+            dragging_threshold_ = true;
+            update_threshold_from_x_(pos.x);
+        }
+    }
+}
+
+void WaveformRecorder::on_mouse_drag(Point pos) {
+    if (dragging_threshold_ && state_ == State::armed)
+        update_threshold_from_x_(pos.x);
+}
+
+void WaveformRecorder::on_mouse_up(Point) {
+    dragging_threshold_ = false;
+}
+
+void WaveformRecorder::paint(canvas::Canvas& canvas) {
+    auto b = local_bounds();
+
+    // Theme tokens (Ink & Signal dark theme supplies the teal/coral/amber).
+    auto bg     = resolve_color("bg.surface",     canvas::Color::rgba8(36, 36, 36));
+    auto border = resolve_color("control.border", canvas::Color::rgba8(58, 58, 58));
+    auto text2  = resolve_color("text.secondary", canvas::Color::rgba8(138, 138, 138));
+    auto teal   = resolve_color("accent.primary", canvas::Color::rgba8(59, 130, 246));
+    auto coral  = resolve_color("accent.error",   canvas::Color::rgba8(239, 68, 68));
+    auto amber  = resolve_color("accent.warning", canvas::Color::rgba8(245, 158, 11));
+
+    // Panel background.
+    canvas.set_fill_color(bg);
+    canvas.fill_rounded_rect(0, 0, b.width, b.height, 14.0f);
+
+    // ── Waveform area ────────────────────────────────────────────────────
+    auto wf = waveform_rect_();
+    canvas.set_fill_color(canvas::Color::rgba(0, 0, 0, 0.18f));
+    canvas.fill_rounded_rect(wf.x, wf.y, wf.width, wf.height, 10.0f);
+
+    canvas::Color wave_color;
+    switch (state_) {
+        case State::armed:
+            wave_color = canvas::Color::rgba(text2.r, text2.g, text2.b, 0.30f);
+            break;
+        case State::recording: wave_color = coral; break;
+        case State::captured:  wave_color = teal;  break;
+    }
+
+    if (!waveform_.empty() && wf.width > 0.0f && wf.height > 0.0f) {
+        canvas.set_fill_color(wave_color);
+        float mid_y = wf.y + wf.height * 0.5f;
+        int cols = std::max(1, static_cast<int>(wf.width));
+        float bar_w = wf.width / static_cast<float>(cols);
+        size_t n = waveform_.size();
+        for (int i = 0; i < cols; ++i) {
+            size_t s0 = static_cast<size_t>((static_cast<float>(i) / cols) * n);
+            size_t s1 = static_cast<size_t>((static_cast<float>(i + 1) / cols) * n);
+            if (s1 <= s0) s1 = s0 + 1;
+            float peak = 0.0f;
+            for (size_t s = s0; s < s1 && s < n; ++s)
+                peak = std::max(peak, std::fabs(waveform_[s]));
+            float half = std::clamp(peak, 0.0f, 1.0f) * (wf.height * 0.45f);
+            float x = wf.x + static_cast<float>(i) * bar_w;
+            canvas.fill_rect(x, mid_y - half, std::max(1.0f, bar_w - 0.5f), half * 2.0f);
+        }
+    } else {
+        // Empty/armed: faint center baseline.
+        canvas.set_fill_color(canvas::Color::rgba(text2.r, text2.g, text2.b, 0.18f));
+        canvas.fill_rect(wf.x + 6.0f, wf.y + wf.height * 0.5f - 0.5f,
+                         std::max(0.0f, wf.width - 12.0f), 1.0f);
+    }
+
+    // ── Level meter + threshold thumb ────────────────────────────────────
+    auto m = meter_rect_();
+    float meter_r = m.height * 0.5f;
+    canvas.set_fill_color(canvas::Color::rgba(0, 0, 0, 0.30f));
+    canvas.fill_rounded_rect(m.x, m.y, m.width, m.height, meter_r);
+    if (level_ > 0.0f && m.width > 0.0f) {
+        canvas::Color fill = (state_ == State::recording) ? coral : teal;
+        if (state_ == State::captured)
+            fill = canvas::Color::rgba(teal.r, teal.g, teal.b, 0.35f);
+        canvas.set_fill_color(fill);
+        float fw = std::clamp(m.width * level_, meter_r * 2.0f, m.width);
+        canvas.fill_rounded_rect(m.x, m.y, fw, m.height, meter_r);
+    }
+    {
+        float tx = m.x + std::clamp(threshold_, 0.0f, 1.0f) * m.width;
+        float thumb_w = 6.0f;
+        float thumb_h = m.height + 10.0f;
+        float thumb_y = m.y - 5.0f;
+        canvas::Color thumb = (state_ == State::armed)
+            ? amber
+            : canvas::Color::rgba(text2.r, text2.g, text2.b, 0.5f);
+        canvas.set_fill_color(thumb);
+        canvas.fill_rounded_rect(tx - thumb_w * 0.5f, thumb_y, thumb_w, thumb_h, 3.0f);
+    }
+
+    // ── Transport button ─────────────────────────────────────────────────
+    Point c = transport_center_();
+    float r = transport_radius_();
+    canvas.set_fill_color(canvas::Color::rgba(0, 0, 0, 0.25f));
+    canvas.fill_circle(c.x, c.y, r + 3.0f);
+    canvas.set_fill_color(resolve_color("bg.primary", canvas::Color::rgba8(20, 20, 20)));
+    canvas.fill_circle(c.x, c.y, r);
+    canvas.set_stroke_color(border);
+    canvas.set_line_width(1.5f);
+    canvas.stroke_circle(c.x, c.y, r);
+
+    if (state_ == State::armed) {
+        // Red record dot.
+        canvas.set_fill_color(coral);
+        canvas.fill_circle(c.x, c.y, r * 0.42f);
+    } else if (state_ == State::recording) {
+        // Red stop square.
+        canvas.set_fill_color(coral);
+        float sq = r * 0.62f;
+        canvas.fill_rounded_rect(c.x - sq * 0.5f, c.y - sq * 0.5f, sq, sq, 3.0f);
+    } else {
+        // Teal play triangle.
+        canvas.set_fill_color(teal);
+        float tr = r * 0.5f;
+        canvas::Canvas::Point2D tri[3] = {
+            {c.x - tr * 0.6f, c.y - tr},
+            {c.x - tr * 0.6f, c.y + tr},
+            {c.x + tr,        c.y     },
+        };
+        canvas.fill_path(tri, 3);
+    }
+
+    // ── Status badge (top-right) ─────────────────────────────────────────
+    {
+        std::string label;
+        canvas::Color badge;
+        switch (state_) {
+            case State::armed:     label = "READY";    badge = amber; break;
+            case State::recording: label = "REC";      badge = coral; break;
+            case State::captured:  label = "CAPTURED"; badge = teal;  break;
+        }
+        canvas.set_font("Inter", 11.0f);
+        float badge_h = 22.0f;
+        float text_w = static_cast<float>(label.size()) * 7.0f;  // heuristic advance
+        float dot_w = (state_ == State::recording) ? 14.0f : 0.0f;
+        float check_w = (state_ == State::captured) ? 16.0f : 0.0f;
+        float badge_w = text_w + dot_w + check_w + 20.0f;
+        float bx = b.width - kRecorderPad - badge_w;
+        float by = kRecorderPad - 2.0f;
+        canvas.set_fill_color(canvas::Color::rgba(badge.r, badge.g, badge.b, 0.18f));
+        canvas.fill_rounded_rect(bx, by, badge_w, badge_h, badge_h * 0.5f);
+
+        float content_x = bx + 10.0f;
+        float badge_cy = by + badge_h * 0.5f;
+        if (state_ == State::recording) {
+            canvas.set_fill_color(badge);
+            canvas.fill_circle(content_x + 4.0f, badge_cy, 4.0f);
+            content_x += dot_w;
+        }
+        if (state_ == State::captured) {
+            canvas.set_stroke_color(badge);
+            canvas.set_line_width(2.0f);
+            canvas.stroke_line(content_x + 1.0f, badge_cy,
+                               content_x + 5.0f, badge_cy + 4.0f);
+            canvas.stroke_line(content_x + 5.0f, badge_cy + 4.0f,
+                               content_x + 12.0f, badge_cy - 4.0f);
+            content_x += check_w;
+        }
+        canvas.set_fill_color(badge);
+        canvas.fill_text_anchored(label, content_x, badge_cy,
+                                  canvas::Canvas::TextAnchor::GlyphCenter);
+    }
+}
 
 } // namespace pulp::view

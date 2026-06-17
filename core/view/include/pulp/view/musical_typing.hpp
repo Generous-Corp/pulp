@@ -72,6 +72,10 @@ public:
         return true;
     }
 
+    /// Current octave shift (in octaves; z/x decrement/increment). Lets a view
+    /// compute the MIDI note a typing key maps to for non-keyboard input (clicks).
+    int octave_shift() const { return octave_shift_; }
+
     /// Release every held note (focus loss / capture disabled). Safe to call any
     /// time; a no-op when nothing is held.
     void all_notes_off() {

@@ -30,6 +30,7 @@ Theme derive_theme(const SemanticColors& sc) {
     t.colors["accent.error"]     = sc.destructive;
     t.colors["accent.warning"]   = shift_hue(sc.primary, 30.0f);   // warm hue shift
     t.colors["accent.success"]   = shift_hue(sc.primary, -120.0f); // green hue shift
+    t.colors["accent.info"]      = sc.chart4;                      // distinct info hue (blue family)
 
     // Control tokens
     t.colors["control.track"]  = sc.muted;
@@ -332,6 +333,45 @@ static std::vector<ThemePreset> build_presets() {
         SC(0xfaf9f5, 0x3d3929, 0xfaf9f5, 0xc96442, 0xe9e6dc, 0xede9de, 0xe9e6dc, 0x141413, 0xdad9d4, 0xb4b2a7, 0xc96442, 0xb05730, 0x9c87f5, 0xded8c4, 0xdbd3f0, 0xb4552d),
         SC(0x262624, 0xc3c0b6, 0x262624, 0xd97757, 0xfaf9f5, 0x1b1b19, 0x1a1915, 0xef4444, 0x3e3e38, 0x52514a, 0xd97757, 0xb05730, 0x9c87f5, 0x1a1915, 0x2f2b48, 0xb4552d),
         {}, {}});
+
+    // ── Ink & Signal — Pulp's flagship design language ──────────────────────
+    // Seeded from assets/design-system/ink-signal/tokens/pulp.tokens.json (see
+    // its PROVENANCE.md). Signal-teal primary, cool graphite neutrals, luminous
+    // "ink" accents; coral is reserved for peak/danger and doubles as the focus
+    // ring. Dark-first with a paper-light twin. The overrides carry the brand's
+    // audio/status inks (leaf/amber meters, on-ink text on bright fills, Jost
+    // type) that the generic primary-hue derivation would otherwise approximate.
+    {
+        ThemePreset ink;
+        ink.id = "ink-signal";
+        ink.name = "Ink & Signal";
+        //               bg        fg        card      primary   secondary muted     accent    destruct  border    input     ring      chart1    chart2    chart3    chart4    chart5
+        ink.light = SC(0xEDEFF2, 0x14171C, 0xFFFFFF, 0x10B6A3, 0xE0E4E9, 0xD0D6DD, 0x8B6CF5, 0xFF5C4D, 0xB5BDC7, 0xE6E9EE, 0xFF5C4D, 0x16DAC2, 0x8B6CF5, 0xF6B847, 0x5E78FF, 0xFF7AA8);
+        ink.dark  = SC(0x161A21, 0xF3F6F9, 0x1E2530, 0x16DAC2, 0x28303C, 0x2A323D, 0x8B6CF5, 0xFF5C4D, 0x39414A, 0x0E1116, 0xFF5C4D, 0x16DAC2, 0x8B6CF5, 0xF6B847, 0x5E78FF, 0xFF7AA8);
+
+        // Brand-faithful overrides shared by both appearances; only the
+        // on-ink text colour differs (text that sits on a bright accent fill).
+        auto brand = [](uint32_t on_ink) {
+            Theme t;
+            t.colors["meter.green"]    = hex(0x3FCF77); // ink.leaf
+            t.colors["meter.yellow"]   = hex(0xF6B847); // ink.amber
+            t.colors["accent.success"] = hex(0x3FCF77); // ink.leaf
+            t.colors["accent.warning"] = hex(0xF6B847); // ink.amber
+            t.colors["accent.text"]    = hex(on_ink);   // on-ink (text on bright fills)
+            // Faithful-import surfaces: the dark well behind a DesignFrameView
+            // frame and the piano/typing key fills. The baked SVG carries the
+            // pixels; these name the same colours so the catalog's reskin-token
+            // contract resolves (and a future native reskin has anchors).
+            t.colors["surface.panel"]  = hex(0x12161C); // faithful frame well
+            t.colors["key.white"]      = hex(0xF4F6F8); // keyboard white key
+            t.colors["key.black"]      = hex(0x1B222B); // keyboard black key
+            t.strings["font.family"]   = "Jost";
+            return t;
+        };
+        ink.light_overrides = brand(0x042420);
+        ink.dark_overrides  = brand(0x052320);
+        p.push_back(std::move(ink));
+    }
 
     return p;
 }
