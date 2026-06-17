@@ -342,21 +342,20 @@ bool pulp_plugin_key_down(pulp::view::View* root, NSEvent* event) {
 
     // Focus-release affordance — hand the keyboard back to the DAW. While a text
     // field holds focus the editor view is first responder, so transport keys
-    // (Space, R, …) go to the field, not the host. Escape blurs any focused
-    // input; Tab/Return blur a single-line field (Return having just committed
-    // via on_return). Once focus clears, the caller's syncKeyFocus restores the
-    // host's prior first responder, so DAW shortcuts work again until the user
-    // re-focuses the field. (pulp: AU hosted-view key routing.)
-    {
-        bool blur = (ke.key == pulp::view::KeyCode::escape);
-        if (!blur && (ke.key == pulp::view::KeyCode::tab ||
-                      ke.key == pulp::view::KeyCode::enter)) {
-            auto* te = dynamic_cast<pulp::view::TextEditor*>(fv);
-            if (te && !te->multi_line) blur = true;
-        }
+    // (Space, R, …) go to the field, not the host. Escape blurs a focused TEXT
+    // EDITOR; Tab/Return blur a single-line one (Return having just committed via
+    // on_return). Once focus clears, syncKeyFocus / the forward path hands the
+    // keyboard back so DAW shortcuts work again until the field is re-focused.
+    // Scoped to TextEditor so a focusable NON-text widget (e.g. a custom view
+    // that uses Escape for its own purpose) is never force-blurred out from
+    // under itself. (pulp: AU hosted-view key routing.)
+    if (auto* te = dynamic_cast<pulp::view::TextEditor*>(fv)) {
+        const bool blur = (ke.key == pulp::view::KeyCode::escape) ||
+                          (!te->multi_line && (ke.key == pulp::view::KeyCode::tab ||
+                                               ke.key == pulp::view::KeyCode::enter));
         if (blur) {
-            fv->on_focus_changed(false);
-            fv->release_input_focus();
+            te->on_focus_changed(false);
+            te->release_input_focus();
         }
     }
     root->request_repaint();
@@ -485,23 +484,29 @@ void pulp_plugin_apply_hover_cursor(pulp::view::View* root, pulp::view::Point lo
 // attempt forwarded to NSApp.mainWindow — a DIFFERENT window — which Logic
 // ignored.) Returns true when the event was handed off.
 static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
-  // Re-entrancy guard: delivering to the host can bounce back through our
-  // keyDown: in some hosts. Never re-forward the same in-flight event.
-  static bool s_forwarding = false;
-  if (s_forwarding) return false;
+  // Re-entrancy guard scoped to the IN-FLIGHT event (by timestamp), not a
+  // blanket flag: delivering to the host can bounce the same event back through
+  // our keyDown:, which we must not re-forward. But if [host_view keyDown:]
+  // spins a nested event loop (host opens a modal in response to the key),
+  // UNRELATED later keys must still flow — a blanket bool would drop them until
+  // the loop unwinds. Comparing the event timestamp blocks only the same event.
+  static NSTimeInterval s_forwarding_ts = -1.0;
+  const NSTimeInterval ts = event.timestamp;
+  if (ts == s_forwarding_ts) return false;
+  const NSTimeInterval prev_ts = s_forwarding_ts;
   @try {
     NSView* host_view = self.superview;
     NSWindow* win = self.window;
     if (host_view == nil || win == nil) return false;
-    s_forwarding = true;
+    s_forwarding_ts = ts;
     [win makeFirstResponder:host_view];
     [host_view keyDown:event];
     if (self.superview != nil && self.window != nil)
       [self.window makeFirstResponder:self];
-    s_forwarding = false;
+    s_forwarding_ts = prev_ts;
     return true;
   } @catch (...) {
-    s_forwarding = false;
+    s_forwarding_ts = prev_ts;
     // Never let a forwarding attempt crash the host.
   }
   return false;
@@ -558,9 +563,19 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
 }
 - (void)keyDown:(NSEvent*)event {
     if (!pulp_plugin_key_down(self.rootView, event)) {
-        // No focused field consumed it — try the DAW host (transport keys),
-        // then fall back to the normal responder chain.
-        if (!pulp_plugin_forward_key_to_host(self, event)) [super keyDown:event];
+        // No focused field consumed it — try to hand it to the DAW host
+        // (transport keys), then fall back to the normal responder chain.
+        if (!pulp_plugin_forward_key_to_host(self, event)) {
+            [super keyDown:event];
+            // The forward couldn't run (no host superview to hand off to — e.g.
+            // an out-of-process view-service host). Don't hold the keyboard
+            // hostage: with no field focused, resign first responder so the
+            // window's normal responder chain / the host receive later keys,
+            // instead of every key dead-ending at this editor.
+            if (pulp_focus_under_root(self.rootView) == nullptr &&
+                self.window.firstResponder == self)
+                [self.window makeFirstResponder:nil];
+        }
     }
     [self syncKeyFocus];  // commit/escape may have ended text input — release
 }
@@ -1192,9 +1207,19 @@ private:
 }
 - (void)keyDown:(NSEvent*)event {
     if (!pulp_plugin_key_down(self.rootView, event)) {
-        // No focused field consumed it — try the DAW host (transport keys),
-        // then fall back to the normal responder chain.
-        if (!pulp_plugin_forward_key_to_host(self, event)) [super keyDown:event];
+        // No focused field consumed it — try to hand it to the DAW host
+        // (transport keys), then fall back to the normal responder chain.
+        if (!pulp_plugin_forward_key_to_host(self, event)) {
+            [super keyDown:event];
+            // The forward couldn't run (no host superview to hand off to — e.g.
+            // an out-of-process view-service host). Don't hold the keyboard
+            // hostage: with no field focused, resign first responder so the
+            // window's normal responder chain / the host receive later keys,
+            // instead of every key dead-ending at this editor.
+            if (pulp_focus_under_root(self.rootView) == nullptr &&
+                self.window.firstResponder == self)
+                [self.window makeFirstResponder:nil];
+        }
     }
     [self syncKeyFocus];
 }
