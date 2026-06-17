@@ -14,11 +14,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <vector>
 
 using pulp::signal::OfflineFormantMode;
 using pulp::signal::OfflineStretch;
 using pulp::signal::OfflineStretchOptions;
+using pulp::signal::StretchTransientMode;
 using pulp::signal::offline_stretch_output_frames;
 
 namespace {
@@ -27,6 +29,36 @@ std::vector<float> ramp(long n, float start = -0.9f, float step = 0.0011f) {
     std::vector<float> v(static_cast<size_t>(n));
     for (long i = 0; i < n; ++i) v[static_cast<size_t>(i)] = start + step * static_cast<float>(i);
     return v;
+}
+
+// A dense percussive burst train: an impulse plus a short broadband (decaying
+// deterministic-noise) tail at a steady spacing — representative of drum-fill
+// density, with exact known attacks. Onset relocation snaps to vocoder-detected
+// output attacks, which on the smeared output of SPARSE isolated clicks drift
+// past the snap radius (those gracefully fall back to the phase-vocoder); a
+// drum-fill density keeps the attacks within range, exercising the relocation.
+std::vector<float> burst_train(long n, double sr) {
+    std::vector<float> v(static_cast<size_t>(n), 0.0f);
+    const long step = static_cast<long>(0.090 * sr); // 90 ms spacing
+    const long decay = static_cast<long>(0.006 * sr);
+    std::uint32_t s = 0x1234567u; // deterministic LCG (no RNG => reproducible)
+    for (long start = step; start + decay < n; start += step) {
+        v[static_cast<size_t>(start)] += 0.9f; // sharp broadband impulse
+        for (long k = 0; k < decay; ++k) {
+            s = s * 1664525u + 1013904223u;
+            const float noise = static_cast<float>(s >> 9) * (1.0f / 8388608.0f) - 1.0f; // [-1,1)
+            const float env = std::exp(-static_cast<float>(k) / (0.0015f * static_cast<float>(sr)));
+            v[static_cast<size_t>(start + k)] += 0.6f * env * noise;
+        }
+    }
+    for (float& x : v) x = std::max(-0.99f, std::min(0.99f, x));
+    return v;
+}
+
+float peak_abs(const std::vector<float>& v) {
+    float p = 0.0f;
+    for (float s : v) p = std::max(p, std::fabs(s));
+    return p;
 }
 
 } // namespace
@@ -442,4 +474,46 @@ TEST_CASE("draft quality=0: fast OLA tempo, exact length, pitch preserved", "[of
     // repitched down to 667 Hz — a generous band confirms that for a draft.
     CHECK(fr > 880.0);
     CHECK(fr < 1120.0);
+}
+
+TEST_CASE("verbatim transient relocation sharpens attacks vs phase reset",
+          "[offline-stretch]") {
+    // A drum-like click train stretched 2x: phase_reset spreads each attack
+    // across the longer synthesis hop (softer peaks); verbatim_relocate copies
+    // the original attack through at the warped position, so its peaks survive.
+    const double sr = 44100.0;
+    const long n = static_cast<long>(sr) * 2;          // 2 s
+    auto in = burst_train(n, sr);
+    const float* ip[1] = {in.data()};
+
+    const long m = offline_stretch_output_frames(n, 2.0);
+    std::vector<float> out_pr(static_cast<size_t>(m)), out_rl(static_cast<size_t>(m));
+    float* op_pr[1] = {out_pr.data()};
+    float* op_rl[1] = {out_rl.data()};
+
+    OfflineStretch s;
+    s.prepare(sr, 1);
+    OfflineStretchOptions o;
+    o.time_ratio = 2.0;
+
+    std::string e;
+    o.transient_mode = StretchTransientMode::phase_reset;
+    REQUIRE(s.process(ip, n, op_pr, m, o, &e));
+    o.transient_mode = StretchTransientMode::verbatim_relocate;
+    REQUIRE(s.process(ip, n, op_rl, m, o, &e));
+
+    // Same exact length under both modes (loop grid-lock is non-negotiable).
+    REQUIRE(static_cast<long>(out_pr.size()) == m);
+    REQUIRE(static_cast<long>(out_rl.size()) == m);
+
+    // Relocation restores the verbatim attack, so its peak amplitude is at least
+    // as high as the phase-vocoded attack — and well above it on this material.
+    const float p_pr = peak_abs(out_pr);
+    const float p_rl = peak_abs(out_rl);
+    INFO("peak phase_reset=" << p_pr << "  verbatim=" << p_rl);
+    REQUIRE(p_rl > p_pr * 1.10f);
+
+    // Stays finite and bounded (no seam blow-ups from the crossfade).
+    for (float v : out_rl) REQUIRE(std::isfinite(v));
+    REQUIRE(p_rl < 2.0f);
 }

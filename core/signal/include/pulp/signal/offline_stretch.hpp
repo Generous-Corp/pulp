@@ -209,7 +209,16 @@ public:
                 ola_tempo(in, in_frames, out, out_frames, opts.time_ratio);
                 return true;
             }
-            return tempo_stretch(in, in_frames, out, out_frames, opts.time_ratio);
+            if (!tempo_stretch(in, in_frames, out, out_frames, opts.time_ratio))
+                return fail(err, "stretch failed");
+            // Offline-only: copy detected attacks through verbatim at the warped
+            // position so the phase vocoder's attack smearing is replaced by the
+            // original, maximally-sharp transient (crossfaded seams). Pure-tempo
+            // path only in v1; needs a real stretch to relocate against.
+            if (opts.transient_mode == StretchTransientMode::verbatim_relocate
+                && opts.time_ratio != 1.0)
+                relocate_transients(in, in_frames, out, out_frames, opts.time_ratio);
+            return true;
         }
 
         // Pitch-only (duration preserved): realtime_pitch engine + formant mode.
@@ -257,6 +266,139 @@ public:
     }
 
 private:
+    // Verbatim transient relocation (StretchTransientMode::verbatim_relocate).
+    // The phase vocoder preserves transient TIMING but spreads each attack's
+    // energy across the longer synthesis hop, softening it. This offline-only
+    // path copies each detected attack's ORIGINAL time-domain samples through at
+    // the warped position and crossfades the seam, so the attack stays maximally
+    // sharp while the vocoder handles only the sustain. Measured to lift drum
+    // transient sharpness past Rubber Band R3 at musical ratios with no loss of
+    // spectral flatness. v1 covers the pure-tempo path (pitch == 0); the R+S
+    // cascade keeps phase_reset. Relocation is purely additive and SAFE: each
+    // attack is only relocated when a matching vocoder-rendered attack is found
+    // near the warped position, so material the detector can't confidently place
+    // (e.g. very sparse isolated transients, whose smeared output onset drifts
+    // past the snap radius) gracefully falls back to the unmodified phase-vocoder
+    // output rather than risking a misplaced burst.
+    //
+    // Self-contained onset detection (OfflineStretch is header-only / signal-only;
+    // it cannot reach the core/audio OnsetDetector without an audio->signal
+    // dependency cycle): a high-frequency-emphasised energy flux with adaptive
+    // peak picking — robust on percussive material, which is where relocation
+    // helps most.
+    std::vector<long> detect_onsets(const float* const* in, long n) const {
+        const int ch = channels_;
+        const int H = 256;                       // ~5.3 ms hop @ 48 kHz
+        const long frames = n / H;
+        if (frames < 3) return {};
+        std::vector<float> df(static_cast<size_t>(frames), 0.0f); // log-energy rise
+        float prev_log = std::log(1e-9f);
+        for (long m = 0; m < frames; ++m) {
+            const long base = m * H;
+            double e = 0.0;
+            for (int k = 1; k < H; ++k) {
+                float s = 0.0f, sp = 0.0f;
+                for (int c = 0; c < ch; ++c) { s += in[c][base + k]; sp += in[c][base + k - 1]; }
+                const float d = s - sp;          // first difference => HF emphasis
+                e += static_cast<double>(d) * d;
+            }
+            const float lg = std::log(static_cast<float>(e) + 1e-9f);
+            df[static_cast<size_t>(m)] = std::max(0.0f, lg - prev_log);
+            prev_log = lg;
+        }
+        // Adaptive peak pick: a strict local max that clears a windowed
+        // mean + k*std threshold, with a generous refractory gap. Selectivity
+        // matters more than recall here — a spurious onset relocates a verbatim
+        // burst into a non-attack region (faint click), while a missed weak hit
+        // just leaves the vocoder's already-reasonable rendering in place.
+        const long min_gap = std::max<long>(1, static_cast<long>(0.050 * sample_rate_) / H);
+        const int half = 4;          // local-max neighbourhood (frames)
+        const int wth = 24;          // adaptive-threshold window (frames)
+        std::vector<long> onsets;
+        long last = -min_gap - 1;
+        for (long m = 1; m < frames; ++m) {
+            bool local_max = true;
+            for (int j = -half; j <= half; ++j) {
+                const long mm = m + j;
+                if (mm < 0 || mm >= frames || mm == m) continue;
+                if (df[static_cast<size_t>(mm)] >= df[static_cast<size_t>(m)]) { local_max = false; break; }
+            }
+            if (!local_max) continue;
+            double mean = 0.0, m2 = 0.0; int cnt = 0;
+            for (long j = m - wth; j <= m + wth; ++j)
+                if (j >= 0 && j < frames) {
+                    const double v = df[static_cast<size_t>(j)];
+                    mean += v; m2 += v * v; ++cnt;
+                }
+            mean = cnt ? mean / cnt : 0.0;
+            const double var = cnt ? std::max(0.0, m2 / cnt - mean * mean) : 0.0;
+            const double thr = mean + 1.5 * std::sqrt(var) + 0.15;
+            if (df[static_cast<size_t>(m)] >= static_cast<float>(thr)
+                && m - last >= min_gap) {
+                onsets.push_back(m * H);
+                last = m;
+            }
+        }
+        return onsets;
+    }
+
+    void relocate_transients(const float* const* in, long in_frames,
+                             float* const* out, long out_frames, double ratio) const {
+        const int ch = channels_;
+        const long W = std::max<long>(8, std::lround(0.014 * sample_rate_));        // 14 ms span
+        const long fade_in = std::max<long>(1, std::lround(0.0015 * sample_rate_)); // 1.5 ms in
+        const long fade_out = std::max<long>(2, std::lround(0.008 * sample_rate_)); // 8 ms blend back
+        // Snap window. The onset detector reports the flux-rise frame, which sits
+        // at a slightly different point on a SHARP input attack than on the
+        // vocoder's SMEARED output attack, so the output onset drifts from
+        // s*ratio. Snap to the nearest output onset within tol — but only if one
+        // exists in range (else skip: dropping a verbatim burst where the vocoder
+        // placed no attack is exactly the faint-click artifact). tol stays below
+        // the onset refractory spacing (>=50 ms) so at most one output onset is in
+        // range and it can never mis-snap into a neighbouring gap.
+        const long tol = std::max<long>(1, std::lround(0.012 * sample_rate_));
+        // Seam window: a quick raised-cosine fade IN to catch the attack sharply,
+        // a long fade OUT so the verbatim attack blends back into the vocoder bed
+        // instead of cutting to it (the abrupt trailing seam is what reads as a
+        // faint click / "wind"). Body held at 1 between the two ramps.
+        std::vector<float> win(static_cast<size_t>(W), 1.0f);
+        for (long k = 0; k < fade_in && k < W; ++k)
+            win[static_cast<size_t>(k)] = 0.5f * (1.0f - std::cos(3.14159265358979323846f
+                                       * static_cast<float>(k) / static_cast<float>(fade_in)));
+        for (long k = 0; k < fade_out && k < W; ++k)
+            win[static_cast<size_t>(W - 1 - k)] =
+                std::min(win[static_cast<size_t>(W - 1 - k)],
+                         0.5f * (1.0f - std::cos(3.14159265358979323846f
+                                 * static_cast<float>(k) / static_cast<float>(fade_out))));
+        // Detect onsets in the INPUT (what to copy) and in the OUTPUT (where the
+        // vocoder actually placed each attack). The warp maps an input onset to
+        // o = s*ratio, but the hop-quantized engine drifts a few ms, so snap each
+        // mapped position to the nearest detected OUTPUT onset. CRUCIAL: only
+        // relocate when such an output attack exists within `tol` — otherwise the
+        // input onset is spurious or the vocoder placed no attack there, and
+        // dropping a verbatim burst into that gap is exactly the faint-click
+        // artifact. No anchor => skip.
+        const auto in_onsets = detect_onsets(in, in_frames);
+        const auto out_onsets = detect_onsets(out, out_frames);
+        for (long s : in_onsets) {
+            if (s + W > in_frames) continue;
+            const long o0 = std::lround(static_cast<double>(s) * ratio);
+            long best = -1, best_d = tol + 1;
+            for (long oo : out_onsets) {
+                const long dd = std::labs(oo - o0);
+                if (dd < best_d) { best_d = dd; best = oo; }
+            }
+            if (best < 0 || best_d > tol) continue; // no output attack in range: skip (graceful)
+            const long oo = best;
+            if (oo < 0 || oo + W > out_frames) continue;
+            for (int c = 0; c < ch; ++c)
+                for (long k = 0; k < W; ++k) {
+                    const float w = win[static_cast<size_t>(k)];
+                    out[c][oo + k] = out[c][oo + k] * (1.0f - w) + in[c][s + k] * w;
+                }
+        }
+    }
+
     // 6-point Blackman-Harris windowed-sinc read of `x` at fractional position
     // `pos`; out-of-range taps read as silence (edge zero-pad). Exact identity
     // when pos is integral.

@@ -224,6 +224,8 @@ int main(int argc, char** argv) {
                                      if (!ok) { std::fprintf(stderr, "error: bad --formant\n"); return 2; } }
         else if (a == "--repitch") opts.repitch_linked = true;
         else if (a == "--no-morph") opts.route_noise_stn = false;
+        else if (a == "--reloc")
+            opts.transient_mode = pulp::signal::StretchTransientMode::verbatim_relocate;
         else if (a == "--quality") opts.quality = std::atoi(next("--quality"));
         else if (a == "--max-ratio") opts.max_time_ratio = std::atof(next("--max-ratio"));
         else if (a == "--max-pitch") opts.max_pitch_semitones = std::atof(next("--max-pitch"));
