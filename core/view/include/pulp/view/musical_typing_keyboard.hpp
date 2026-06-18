@@ -161,6 +161,9 @@ private:
     void refresh_mod_lights();
     // Index of the (first) element whose action tag == `tag`, or -1.
     int element_for_action(const std::string& tag) const;
+    // Light (on) or clear (off) every momentary control with `tag` — the tap-flash
+    // for octave/velocity/arrow buttons (mouse press or the z/x·c/v keys).
+    void flash_action(const std::string& tag, bool on);
     // Last external held set from set_active_notes; re-applied after a frame swap
     // so the new frame reflects the host's still-held notes.
     std::vector<int> held_notes_;

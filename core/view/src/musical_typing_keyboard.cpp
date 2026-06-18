@@ -62,27 +62,11 @@ void append_toggle(std::vector<DesignFrameElement>& els) {
 //     overlay and route to control_press/control_release (pitch-bend momentary,
 //     sustain hold, modulation latched), mirroring the number-row keys.
 void append_controls(std::vector<DesignFrameElement>& els) {
-    auto add = [&](std::string id, float x, float y, float w, float h) {
-        DesignFrameElement e;
-        e.kind = DesignFrameElement::Kind::action;
-        e.action = std::move(id);
-        e.x = x; e.y = y; e.w = w; e.h = h;
-        els.push_back(e);
-    };
-    add("octave_down", 114, 205, 32, 32);
-    add("octave_up",   155, 205, 32, 32);
-    // The < > buttons flanking the (now centered) top overview strip step the
-    // octave. After #82 centered the strip, < ≈ chevron 150 → element x=139,
-    // > ≈ chevron 582 → element x=571 (typing).
-    add("octave_down", 139, 17, 22, 24);
-    add("octave_up",   571, 17, 22, 24);
-    add("vel_down",    321, 205, 32, 32);
-    add("vel_up",      362, 205, 32, 32);
-
-    // Pitch bend (buttons 1,2) + sustain are MOMENTARY (press/release, lit while
-    // held) → modelled as momentary elements with an action tag so the existing
-    // key-overlay lights them. Modulation (buttons 3–8) is a LATCHED selector,
-    // also momentary-tagged but re-lit on release to persist the selection.
+    // ALL on-screen controls are MOMENTARY with an action tag, so they light on
+    // press and clear on release (a tap-flash) via the existing key overlay, and
+    // route through control_press/control_release. octave/velocity/< > fire their
+    // step on press; pitch-bend 1/2 are momentary holds; modulation 3–8 latch;
+    // sustain holds. (Tagged momentary carry note == −1 → never play a note.)
     auto add_mom = [&](std::string id, float x, float y, float w, float h) {
         DesignFrameElement e;
         e.kind = DesignFrameElement::Kind::momentary;
@@ -90,6 +74,15 @@ void append_controls(std::vector<DesignFrameElement>& els) {
         e.x = x; e.y = y; e.w = w; e.h = h;
         els.push_back(e);
     };
+    add_mom("octave_down", 114, 205, 32, 32);
+    add_mom("octave_up",   155, 205, 32, 32);
+    // The < > buttons flanking the (now centered) top overview strip step the
+    // octave. After #82 centered the strip, < ≈ chevron 150 → element x=139,
+    // > ≈ chevron 582 → element x=571 (typing).
+    add_mom("octave_down", 139, 17, 22, 24);
+    add_mom("octave_up",   571, 17, 22, 24);
+    add_mom("vel_down",    321, 205, 32, 32);
+    add_mom("vel_up",      362, 205, 32, 32);
     // y shifted −8 vs the pre-#82 export (the toolbar shrank when the top-right
     // readouts were removed, lifting every below-toolbar row by 8px).
     add_mom("sustain", 21, 102, 66, 92);
@@ -193,7 +186,7 @@ std::vector<DesignFrameElement> build_piano_frame() {
     append_toggle(els);
     // The < > buttons flanking the piano overview strip step the octave.
     auto add_oct = [&](std::string id, float x) {
-        DesignFrameElement e; e.kind = DesignFrameElement::Kind::action;
+        DesignFrameElement e; e.kind = DesignFrameElement::Kind::momentary;  // tap-flash
         e.action = std::move(id); e.x = x; e.y = 17; e.w = 22; e.h = 24;
         els.push_back(e);
     };
@@ -243,18 +236,11 @@ MusicalTypingKeyboard::MusicalTypingKeyboard()
         if (n >= 0 && on_note_off) on_note_off(n);
     };
 
-    // On-screen command buttons (Kind::action) → controller state. octave/velocity
-    // drive the SAME controller the z/x·c/v keys do (so the next note reflects
-    // them). Pitch-bend, modulation, and sustain are momentary elements (handled
-    // by the gesture path above), NOT actions.
-    on_action = [this](const std::string& a) {
-        if (a == "octave_down")     controller_.set_octave_shift(controller_.octave_shift() - 1);
-        else if (a == "octave_up")  controller_.set_octave_shift(controller_.octave_shift() + 1);
-        else if (a == "vel_down")   controller_.velocity = std::clamp(controller_.velocity - kVelStep, 0.0f, 1.0f);
-        else if (a == "vel_up")     controller_.velocity = std::clamp(controller_.velocity + kVelStep, 0.0f, 1.0f);
-        update_readouts();    // reflect the new octave / velocity value
-        request_repaint();    // move the overview highlight if the octave changed
-    };
+    // ALL on-screen controls are now tagged momentary (handled by the gesture
+    // path above → control_press/control_release), so there's no Kind::action
+    // element and no on_action handler: octave/velocity steps, the < > arrows,
+    // pitch-bend, modulation, and sustain all route through control_press, which
+    // also gives them a press tap-flash.
 
     controller_.velocity = 98.0f / 127.0f;  // match the design's "VEL 98" default
     refresh_mod_lights();                    // light the default modulation step (off)
@@ -282,9 +268,24 @@ int MusicalTypingKeyboard::element_for_action(const std::string& tag) const {
     return -1;
 }
 
+void MusicalTypingKeyboard::flash_action(const std::string& tag, bool on) {
+    // Light/clear EVERY momentary control with this tag (e.g. octave_down is both
+    // the bottom −/+ button AND the < arrow), so a tap or its key flashes them.
+    for (int i = 0; i < element_count(); ++i)
+        if (element_action(i) == tag) set_element_value(i, on ? 1.0f : 0.0f);
+    request_repaint();
+}
+
 void MusicalTypingKeyboard::control_press(const std::string& tag) {
     const int e = element_for_action(tag);
-    if (tag == "pb_down") {
+    if (tag == "octave_down" || tag == "octave_up") {
+        controller_.set_octave_shift(controller_.octave_shift() + (tag == "octave_up" ? 1 : -1));
+        flash_action(tag, true);   // light every button with this tag (bottom + arrow)
+    } else if (tag == "vel_down" || tag == "vel_up") {
+        controller_.velocity = std::clamp(
+            controller_.velocity + (tag == "vel_up" ? kVelStep : -kVelStep), 0.0f, 1.0f);
+        flash_action(tag, true);
+    } else if (tag == "pb_down") {
         pb_value_ = -kPitchBendMax;
         if (on_pitch_bend) on_pitch_bend(-1.0f);   // bipolar −1 (full bend down)
         if (e >= 0) set_element_value(e, 1.0f);
@@ -308,7 +309,10 @@ void MusicalTypingKeyboard::control_press(const std::string& tag) {
 
 void MusicalTypingKeyboard::control_release(const std::string& tag) {
     const int e = element_for_action(tag);
-    if (tag == "pb_down" || tag == "pb_up") {
+    if (tag == "octave_down" || tag == "octave_up" ||
+        tag == "vel_down" || tag == "vel_up") {
+        flash_action(tag, false);   // end the tap-flash (the step already fired on press)
+    } else if (tag == "pb_down" || tag == "pb_up") {
         pb_value_ = 0;                              // momentary: spring back to centre
         if (on_pitch_bend) on_pitch_bend(0.0f);
         if (e >= 0) set_element_value(e, 0.0f);
@@ -407,6 +411,19 @@ bool MusicalTypingKeyboard::on_key_event(const KeyEvent& event) {
         else               control_release(tag);
         return true;
     }
+    // z/x/c/v drive octave/velocity in the controller — also flash the matching
+    // on-screen button (tap-feedback parity with a mouse press). Held on key-down,
+    // cleared on key-up.
+    const char* btn = nullptr;
+    switch (event.key) {
+        case KeyCode::z: btn = "octave_down"; break;
+        case KeyCode::x: btn = "octave_up";   break;
+        case KeyCode::c: btn = "vel_down";    break;
+        case KeyCode::v: btn = "vel_up";      break;
+        default: break;
+    }
+    if (btn) flash_action(btn, event.is_down);
+
     const bool consumed = controller_.handle_key(event);  // QWERTY→note + z/x octave
     // Light the matching typing key (by relative semitone, octave-independent).
     // No-op in piano mode (the frame has no typing keys), which is correct.

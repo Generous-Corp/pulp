@@ -137,6 +137,13 @@ pulp::view::KeyCode key_code_from_ns(unsigned short code) {
         case 32: return KC::u; case 34: return KC::i; case 35: return KC::p;
         case 37: return KC::l; case 38: return KC::j; case 40: return KC::k;
         case 45: return KC::n; case 46: return KC::m;
+        // Number row (ANSI virtual keycodes) — needed for the Musical Typing
+        // Keyboard's 1/2 pitch-bend + 3–8 modulation keys; without these they
+        // arrive as `unknown` and the controls only respond to mouse clicks.
+        case 18: return KC::num1; case 19: return KC::num2; case 20: return KC::num3;
+        case 21: return KC::num4; case 23: return KC::num5; case 22: return KC::num6;
+        case 26: return KC::num7; case 28: return KC::num8; case 25: return KC::num9;
+        case 29: return KC::num0;
         case 36: return KC::enter; case 53: return KC::escape;
         case 48: return KC::tab; case 51: return KC::backspace;
         case 117: return KC::delete_;

@@ -111,10 +111,12 @@ TEST_CASE("MusicalTypingKeyboard: piano frame has the chromatic span C2..B4",
     auto kbp = make_playable_kb(); auto& kb = *kbp;
     kb.set_mode(Mode::piano);
     REQUIRE(kb.mode() == Mode::piano);
-    REQUIRE(momentary_count(kb) == 36);
+    REQUIRE(note_key_count(kb) == 36);              // 36 piano keys
+    REQUIRE(momentary_count(kb) == 36 + 2);         // + the < > octave arrows (tap-flash momentary)
     std::vector<int> piano;
     for (int i = 0; i < kb.element_count(); ++i)
-        if (kb.element_kind(i) == K::momentary) piano.push_back(kb.element_note(i));
+        if (kb.element_kind(i) == K::momentary && kb.element_note(i) >= 0)
+            piano.push_back(kb.element_note(i));   // note keys only (skip arrow momentary)
     std::sort(piano.begin(), piano.end());
     REQUIRE(piano.front() == 48);   // C2
     REQUIRE(piano.back() == 83);    // B4
@@ -379,8 +381,9 @@ TEST_CASE("MusicalTypingKeyboard: no baked-lit demo chord in the embedded SVGs",
 }
 
 // ── On-screen command controls (octave / velocity) ─────────────────────────
-// octave/velocity are Kind::action; sustain / pitch-bend / modulation are tagged
-// Kind::momentary (tested in the Logic-faithful section below).
+// ALL on-screen controls are now tagged Kind::momentary (so they tap-flash on
+// press): octave/velocity steppers, the < > arrows, sustain, pitch-bend, and the
+// modulation selector. There are no Kind::action elements.
 
 TEST_CASE("MusicalTypingKeyboard: typing frame carries the command controls",
           "[view][musical-typing][controls]") {
@@ -388,18 +391,37 @@ TEST_CASE("MusicalTypingKeyboard: typing frame carries the command controls",
     int actions = 0;
     for (int i = 0; i < kb.element_count(); ++i)
         if (kb.element_kind(i) == K::action) ++actions;
-    REQUIRE(actions == 6);   // octave ± (×2: bottom + < > arrows), velocity ±
-    // The pitch-bend / sustain / modulation controls are tagged momentary, not
-    // actions: sustain + pb_down + pb_up + mod_0..mod_5 = 9 control momentary.
+    REQUIRE(actions == 0);   // everything is tap-flash momentary now
+    // 18 note keys + 15 control momentary (octave ±×2 incl. < > arrows = 4,
+    // velocity ± = 2, sustain = 1, pitch-bend ± = 2, modulation ×6).
     REQUIRE(note_key_count(kb) == 18);
-    REQUIRE(momentary_count(kb) == 18 + 9);
-    // Piano frame: keys + the < > octave arrows only, no other controls.
+    REQUIRE(momentary_count(kb) == 18 + 15);
+    // Piano frame: 36 keys + the < > octave arrows.
     kb.set_mode(Mode::piano);
     int piano_actions = 0;
     for (int i = 0; i < kb.element_count(); ++i)
         if (kb.element_kind(i) == K::action) ++piano_actions;
-    REQUIRE(piano_actions == 2);   // < > overview arrows
-    REQUIRE(momentary_count(kb) == 36);   // 36 piano keys, no control momentary
+    REQUIRE(piano_actions == 0);
+    REQUIRE(note_key_count(kb) == 36);
+    REQUIRE(momentary_count(kb) == 36 + 2);   // + < > arrows
+}
+
+TEST_CASE("MusicalTypingKeyboard: z/x/c/v flash the matching on-screen button",
+          "[view][musical-typing][controls]") {
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    auto lit = [&](const char* tag) {
+        for (int i = 0; i < kb.element_count(); ++i)
+            if (kb.element_action(i) == tag) return kb.element_value(i) > 0.5f;
+        return false;
+    };
+    KeyEvent z{}; z.key = KeyCode::z; z.is_down = true; kb.on_key_event(z);
+    REQUIRE(lit("octave_down"));                 // held → button lit
+    z.is_down = false; kb.on_key_event(z);
+    REQUIRE_FALSE(lit("octave_down"));           // released → cleared
+    KeyEvent v{}; v.key = KeyCode::v; v.is_down = true; kb.on_key_event(v);
+    REQUIRE(lit("vel_up"));
+    v.is_down = false; kb.on_key_event(v);
+    REQUIRE_FALSE(lit("vel_up"));
 }
 
 TEST_CASE("MusicalTypingKeyboard: on-screen octave −/+ shift the played note",
