@@ -1919,6 +1919,19 @@ public:
                                         backing:NSBackingStoreBuffered
                                         defer:NO];
             [window_ setReleasedWhenClosed:NO];
+
+            // pulp #1382 follow-up — seed the WINDOW backing to the same dark
+            // fill as the CAMetalLayer (0x1E1E2E) and mark it opaque. The metal
+            // layer already seeds this color, but on the very first orderFront —
+            // before the first Metal frame presents — the window server can show
+            // the NSWindow's default (black) backing for a frame. A dark, opaque
+            // window backing makes that first-paint gap match the content instead
+            // of flashing black. Mirrors the CPU host above.
+            [window_ setOpaque:YES];
+            [window_ setBackgroundColor:[NSColor colorWithCalibratedRed:30.0/255.0
+                                                                  green:30.0/255.0
+                                                                   blue:46.0/255.0
+                                                                  alpha:1.0]];
             [window_ setTitle:[NSString stringWithUTF8String:options.title.c_str()]];
 
             // Apply multi-window type configuration (Phase 6)
