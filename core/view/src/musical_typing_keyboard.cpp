@@ -558,7 +558,11 @@ int MusicalTypingKeyboard::octave_for_strip_x(float panel_x) const {
     const int span = (active_frame() == kTypingFrame) ? kPlaySpan : kPianoSpan;
     const float c0 = (midi_to_x(base, x0, x1) + midi_to_x(base + span, x0, x1)) * 0.5f;
     const float step = midi_to_x(base + 12, x0, x1) - midi_to_x(base, x0, x1);  // one octave
-    return std::clamp(static_cast<int>(std::lround((panel_x - c0) / step)), -4, 4);
+    // Typing reaches +5 so its play-window top hits G8 on the strip; the piano
+    // window already saturates at +4 (piano_window_lo clamps to MIDI 92), so its
+    // far-right drag stops there.
+    const int top = (active_frame() == kTypingFrame) ? 5 : 4;
+    return std::clamp(static_cast<int>(std::lround((panel_x - c0) / step)), -4, top);
 }
 
 void MusicalTypingKeyboard::paint(canvas::Canvas& canvas) {

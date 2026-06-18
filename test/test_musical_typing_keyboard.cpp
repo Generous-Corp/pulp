@@ -601,9 +601,11 @@ TEST_CASE("MusicalTypingKeyboard: dragging the overview strip sets the octave (s
     // Drag far left → clamps to −4 (C-2 = 48 − 48 = MIDI 0).
     kb.on_mouse_drag({120.0f, 33.0f});
     REQUIRE(kb.controller().octave_shift() == -4);
-    // Drag far right → clamps to +4.
+    // Drag far right → clamps to +5 on the typing tab (its play-window top then
+    // reaches the strip's high end near G8; the −4..+5 range is asymmetric so the
+    // C-aligned window climbs as high as it can without overshooting MIDI 127).
     kb.on_mouse_drag({700.0f, 33.0f});
-    REQUIRE(kb.controller().octave_shift() == 4);
+    REQUIRE(kb.controller().octave_shift() == 5);
     kb.on_mouse_up({700.0f, 33.0f});
 }
 

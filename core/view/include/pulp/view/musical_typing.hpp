@@ -86,9 +86,12 @@ public:
     /// compute the MIDI note a typing key maps to for non-keyboard input (clicks).
     int octave_shift() const { return octave_shift_; }
 
-    /// Set the octave shift directly (clamped to a sane ±4-octave range). Lets an
-    /// on-screen octave −/+ control drive the same state the z/x keys do.
-    void set_octave_shift(int s) { octave_shift_ = std::clamp(s, -4, 4); }
+    /// Set the octave shift directly. Clamped to −4..+5: the asymmetric top end
+    /// lets the typing play-window's top reach G8 (MIDI 127) on the overview strip
+    /// (base C3 + 5 octaves = C8, and the 18-key window clamps its top to G8),
+    /// matching Logic's reach. Lets an on-screen octave −/+ control drive the same
+    /// state the z/x keys do.
+    void set_octave_shift(int s) { octave_shift_ = std::clamp(s, -4, 5); }
 
     /// Release every held note (focus loss / capture disabled). Safe to call any
     /// time; a no-op when nothing is held.
