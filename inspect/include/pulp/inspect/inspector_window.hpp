@@ -91,6 +91,11 @@ public:
     /// Refresh all tabs with latest data. Call once per frame.
     void refresh();
 
+    /// Programmatically select a tab by title (e.g. "Wiring") and refresh it.
+    /// For tools/tests that drive the inspector without a click. No-op if the
+    /// title doesn't match a tab.
+    void select_tab(std::string_view title);
+
     /// Called when a view is selected in the tree.
     ///
     /// WYSIWYG P2e two-way selection (maintainer correction: "we DO want to

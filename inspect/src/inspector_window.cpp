@@ -705,6 +705,10 @@ void InspectorWindow::refresh() {
     }
 }
 
+void InspectorWindow::select_tab(std::string_view title) {
+    if (tabs_ && tabs_->set_active_tab(title)) refresh();
+}
+
 // ── Elements refresh ────────────────────────────────────────────────────────
 
 std::size_t InspectorWindow::compute_tree_signature(const View* view) const {

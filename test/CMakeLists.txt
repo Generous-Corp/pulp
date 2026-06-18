@@ -4603,6 +4603,12 @@ if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
     catch_discover_tests(pulp-test-inspector-gpu-passes
         PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
 
+    # Wiring tab — lists design-sourced (Figma) overlays + wired/unwired badge.
+    add_executable(pulp-test-inspector-wiring test_inspector_wiring.cpp)
+    target_link_libraries(pulp-test-inspector-wiring PRIVATE pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-inspector-wiring
+        PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
+
     add_executable(pulp-test-inspector-source-jump test_inspector_source_jump.cpp)
     target_link_libraries(pulp-test-inspector-source-jump PRIVATE pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-inspector-source-jump
