@@ -596,3 +596,55 @@ TEST_CASE("scaffold characters render valid output (clean fallback)", "[offline-
         for (float v: out) REQUIRE(std::isfinite(v));
     }
 }
+
+// ── Fine-tune preset layer (StretchPreset) ────────────────────────────────────
+#include <pulp/signal/stretch_preset.hpp>
+using pulp::signal::StretchPreset;
+using pulp::signal::StretchCharacter;
+
+TEST_CASE("StretchPreset round-trips through text", "[offline-stretch][preset]") {
+    StretchPreset p;
+    p.name = "My Tape";
+    p.character = StretchCharacter::varispeed;
+    p.fft_size = 8192; p.analysis_hop = 512;
+    p.transient_sensitivity = 1.8f;
+    p.route_noise_stn = true;
+    p.relocate_transients = true;
+    const std::string txt = pulp::signal::preset_to_text(p);
+    StretchPreset q; std::string err;
+    REQUIRE(pulp::signal::preset_from_text(txt, q, &err));
+    CHECK(q.name == "My Tape");
+    CHECK(q.character == StretchCharacter::varispeed);
+    CHECK(q.fft_size == 8192);
+    CHECK(q.analysis_hop == 512);
+    CHECK(q.transient_sensitivity == 1.8f);
+    CHECK(q.route_noise_stn == true);
+    CHECK(q.relocate_transients == true);
+}
+
+TEST_CASE("StretchPreset applies to options and captures back", "[offline-stretch][preset]") {
+    StretchPreset p; p.character = StretchCharacter::varispeed; p.fft_size = 1024; p.transient_sensitivity = 2.0f;
+    OfflineStretchOptions o; o.time_ratio = 2.0; // caller's ratio is NOT a preset field
+    pulp::signal::apply_preset(o, p);
+    CHECK(o.character == StretchCharacter::varispeed);
+    CHECK(o.fft_size == 1024);
+    CHECK(o.transient_sensitivity == 2.0f);
+    CHECK(o.time_ratio == 2.0); // untouched by the preset
+    const StretchPreset back = pulp::signal::capture_preset(o, "roundtrip");
+    CHECK(back.character == StretchCharacter::varispeed);
+    CHECK(back.fft_size == 1024);
+}
+
+TEST_CASE("StretchPreset parsing is tolerant", "[offline-stretch][preset]") {
+    StretchPreset p; std::string err;
+    const std::string txt =
+        "# a comment\n\n  character = varispeed  \n"
+        "future_key = whatever\n"   // unknown key ignored
+        "route_noise_stn = yes\n";
+    REQUIRE(pulp::signal::preset_from_text(txt, p, &err));
+    CHECK(p.character == StretchCharacter::varispeed);
+    CHECK(p.route_noise_stn == true);
+    // malformed character value is a hard error
+    StretchPreset bad;
+    CHECK_FALSE(pulp::signal::preset_from_text("character = bogus\n", bad, &err));
+}
