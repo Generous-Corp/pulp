@@ -285,6 +285,37 @@ TEST_CASE("drop decodes an audio file off the audio thread", "[tempo-sampler]") 
     std::remove(path.c_str());
 }
 
+// Regression: the standalone main.cpp factory runs INSIDE StandaloneApp::start()
+// BEFORE start() binds the processor's StateStore. Queuing a command-line loop
+// there must not touch state() (a synchronous load_loop -> analyze_locked ->
+// state().get_value() dereferenced a null store and crashed before the window
+// ever painted — the "empty screen" the live GPU host showed). request_load_path
+// only stashes the path + sets a flag; the deferred worker (started in prepare(),
+// after the store is bound) does the decode/analyze. This mirrors that ordering.
+TEST_CASE("queued load before the state store is bound does not crash",
+          "[tempo-sampler][issue-empty-screen]") {
+    const std::string path = "/tmp/pulp_tempo_prebind_test.wav";
+    REQUIRE(write_wav(path, percussive_loop(48000, 4), 48000));
+
+    state::StateStore store;
+    auto proc = std::make_unique<PulpTempoSamplerProcessor>();
+    // Factory order: queue the loop while state_store_ is still null.
+    proc->request_load_path(path);
+    // start() order: bind the store, define params, THEN prepare() (start_worker).
+    proc->set_state_store(&store);
+    proc->define_parameters(store);
+    format::PrepareContext ctx;
+    ctx.sample_rate = 48000;
+    ctx.max_buffer_size = 512;
+    ctx.input_channels = 0;
+    ctx.output_channels = 2;
+    proc->prepare(ctx);  // worker starts here and picks up the queued path
+
+    REQUIRE(wait_for([&] { return proc->has_sample(); }));
+    REQUIRE(proc->num_slices() >= 2);  // analyzed/sliced once the store was bound
+    std::remove(path.c_str());
+}
+
 TEST_CASE("invalid drop path is a graceful no-op", "[tempo-sampler]") {
     Fixture f;
     f.proc->request_load_path("/tmp/this-does-not-exist-xyz.wav");
