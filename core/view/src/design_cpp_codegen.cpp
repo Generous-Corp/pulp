@@ -1,6 +1,8 @@
+#include <pulp/runtime/base64.hpp>
 #include <pulp/view/buttons.hpp>
 #include <pulp/view/canvas_widget.hpp>
 #include <pulp/view/design_import.hpp>
+#include <pulp/view/design_frame_view.hpp>
 #include <pulp/view/svg_path_widget.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/view.hpp>
@@ -1186,6 +1188,123 @@ PromotedChildHitPolicy promoted_widget_child_hit_policy(const IRNode& child,
     return PromotedChildHitPolicy::disabled;
 }
 
+// IR interactive-element kind → the generated DesignFrameElement::Kind token.
+// Mirrors to_frame_elements() in design_import_native_common.cpp so the codegen
+// and the runtime materializer lower the same overlay set.
+const char* frame_element_kind_token(InteractiveElementKind kind) {
+    switch (kind) {
+        case InteractiveElementKind::knob:       return "knob";
+        case InteractiveElementKind::dropdown:   return "dropdown";
+        case InteractiveElementKind::text_field: return "text_field";
+        case InteractiveElementKind::tab_group:  return "tab_group";
+        case InteractiveElementKind::stepper:    return "stepper";
+    }
+    return "knob";
+}
+
+// Emit a faithful_svg node as a DesignFrameView that renders the node's own
+// Figma SVG export 1:1 (SkSVGDOM) with the typed interactive overlays composited
+// on top — the same construction make_faithful_svg_frame() builds at runtime,
+// but lowered to static C++. The SVG is embedded as chunked base64 (no >64K
+// string literal) and decoded once at construction, matching the catalog
+// generator (tools/import-design/make_catalog_component.py).
+//
+// Returns true when it emitted the faithful construction (assigning `var`).
+// Returns false when the node is not faithful, has no svg_asset_id, or the asset
+// can't be resolved at codegen time — the caller then falls back to the normal
+// native-widget emit so the output always compiles and renders something.
+bool emit_faithful_frame(std::ostringstream& out,
+                         int depth,
+                         EmitContext& ctx,
+                         const std::string& var,
+                         const IRNode& node) {
+    if (node.render_mode != NodeRenderMode::faithful_svg || !node.svg_asset_id)
+        return false;
+    const IRAssetRef* asset = ctx.manifest.resolve(*node.svg_asset_id);
+    const std::string svg = asset ? resolve_svg_document(*asset) : std::string{};
+    if (svg.empty()) {
+        if (ctx.opts.include_comments)
+            emit_line(out, depth, ctx.opts.indent_spaces,
+                      "// faithful_svg asset '" + *node.svg_asset_id +
+                      "' unresolved at codegen time — falling back to native widgets");
+        return false;
+    }
+
+    if (ctx.opts.include_comments)
+        emit_line(out, depth, ctx.opts.indent_spaces,
+                  "// faithful_svg: render this node's own Figma SVG 1:1 via DesignFrameView");
+
+    // Embedded SVG: chunked base64, joined + decoded once.
+    const std::string b64 = runtime::base64_encode(svg);
+    emit_line(out, depth, ctx.opts.indent_spaces, "std::string " + var + "_svg;");
+    emit_line(out, depth, ctx.opts.indent_spaces, "{");
+    emit_line(out, depth + 1, ctx.opts.indent_spaces,
+              "static const char* const kParts[] = {");
+    constexpr std::size_t kChunk = 8000;
+    for (std::size_t i = 0; i < b64.size(); i += kChunk) {
+        const std::string piece = b64.substr(i, kChunk);
+        const bool last = (i + kChunk >= b64.size());
+        emit_line(out, depth + 2, ctx.opts.indent_spaces,
+                  cpp_string_literal(piece) + (last ? "" : ","));
+    }
+    emit_line(out, depth + 1, ctx.opts.indent_spaces, "};");
+    emit_line(out, depth + 1, ctx.opts.indent_spaces, "std::string b64;");
+    emit_line(out, depth + 1, ctx.opts.indent_spaces,
+              "for (const char* p : kParts) b64 += p;");
+    emit_line(out, depth + 1, ctx.opts.indent_spaces,
+              "if (auto bytes = pulp::runtime::base64_decode(b64))");
+    emit_line(out, depth + 2, ctx.opts.indent_spaces,
+              var + "_svg.assign(bytes->begin(), bytes->end());");
+    emit_line(out, depth, ctx.opts.indent_spaces, "}");
+
+    // Interactive overlays (knob / dropdown / text_field / tab_group / stepper).
+    emit_line(out, depth, ctx.opts.indent_spaces,
+              "std::vector<pulp::view::DesignFrameElement> " + var + "_els;");
+    for (const auto& e : node.interactive_elements) {
+        emit_line(out, depth, ctx.opts.indent_spaces, "{");
+        emit_line(out, depth + 1, ctx.opts.indent_spaces,
+                  "pulp::view::DesignFrameElement el;");
+        emit_line(out, depth + 1, ctx.opts.indent_spaces,
+                  std::string("el.kind = pulp::view::DesignFrameElement::Kind::") +
+                  frame_element_kind_token(e.kind) + ";");
+        emit_line(out, depth + 1, ctx.opts.indent_spaces,
+                  "el.cx = " + format_float(e.cx) + "; el.cy = " + format_float(e.cy) +
+                  "; el.hit_radius = " + format_float(e.hit_radius) + ";");
+        if (!e.svg_patch_d.empty())
+            emit_line(out, depth + 1, ctx.opts.indent_spaces,
+                      "el.needle_d = " + cpp_string_literal(e.svg_patch_d) + ";");
+        emit_line(out, depth + 1, ctx.opts.indent_spaces,
+                  "el.value = " + format_float(e.default_value) + ";");
+        emit_line(out, depth + 1, ctx.opts.indent_spaces,
+                  "el.x = " + format_float(e.x) + "; el.y = " + format_float(e.y) +
+                  "; el.w = " + format_float(e.w) + "; el.h = " + format_float(e.h) + ";");
+        if (!e.placeholder.empty())
+            emit_line(out, depth + 1, ctx.opts.indent_spaces,
+                      "el.placeholder = " + cpp_string_literal(e.placeholder) + ";");
+        if (!e.options.empty()) {
+            std::string opts = "el.options = {";
+            for (std::size_t i = 0; i < e.options.size(); ++i)
+                opts += (i ? ", " : " ") + cpp_string_literal(e.options[i]);
+            opts += " };";
+            emit_line(out, depth + 1, ctx.opts.indent_spaces, opts);
+        }
+        if (e.selected_index != 0)
+            emit_line(out, depth + 1, ctx.opts.indent_spaces,
+                      "el.selected_index = " + std::to_string(e.selected_index) + ";");
+        if (!e.bg_color.empty())
+            emit_line(out, depth + 1, ctx.opts.indent_spaces,
+                      "el.bg_color = " + cpp_string_literal(e.bg_color) + ";");
+        emit_line(out, depth + 1, ctx.opts.indent_spaces,
+                  var + "_els.push_back(std::move(el));");
+        emit_line(out, depth, ctx.opts.indent_spaces, "}");
+    }
+
+    emit_line(out, depth, ctx.opts.indent_spaces,
+              "auto " + var + " = std::make_unique<pulp::view::DesignFrameView>(std::move(" +
+              var + "_svg), std::move(" + var + "_els));");
+    return true;
+}
+
 void emit_node(std::ostringstream& out,
                EmitContext& ctx,
                const IRNode& node,
@@ -1208,8 +1327,12 @@ void emit_node(std::ostringstream& out,
             emit_line(out, depth, ctx.opts.indent_spaces, "// " + node.name);
         }
     }
-    emit_line(out, depth, ctx.opts.indent_spaces,
-              "auto " + var + " = " + widget_make_expr(node, resolved, ctx.manifest) + ";");
+    // A faithful_svg node renders its own SVG via DesignFrameView; the SVG is the
+    // whole subtree, so we skip the native widget body and child recursion below.
+    const bool faithful = emit_faithful_frame(out, depth, ctx, var, node);
+    if (!faithful)
+        emit_line(out, depth, ctx.opts.indent_spaces,
+                  "auto " + var + " = " + widget_make_expr(node, resolved, ctx.manifest) + ";");
     emit_line(out, depth, ctx.opts.indent_spaces,
               var + "->set_id(" + cpp_string_literal(resolved.id) + ");");
     if (node.stable_anchor_id && !node.stable_anchor_id->empty())
@@ -1227,10 +1350,15 @@ void emit_node(std::ostringstream& out,
                   var + "->set_access_label(" + cpp_string_literal(*label) + ");");
 
     emit_common_layout(out, depth, ctx, var, node, parent_direction);
-    emit_visual_style(out, depth, ctx, var, node.style);
-    emit_widget_specific(out, depth, ctx, var, node, resolved, ctx.manifest);
+    // Faithful frames carry their own visuals (the SVG) and interaction (the
+    // overlays), so the native style/widget/child emit is skipped entirely.
+    if (!faithful) {
+        emit_visual_style(out, depth, ctx, var, node.style);
+        emit_widget_specific(out, depth, ctx, var, node, resolved, ctx.manifest);
+    }
 
-    const auto count = std::min(node.children.size(), resolved.children.size());
+    const auto count = faithful ? std::size_t{0}
+                                : std::min(node.children.size(), resolved.children.size());
     const bool parent_owns_imported_child_hits =
         native_kind_owns_imported_child_hits(resolved.kind);
     for (std::size_t i = 0; i < count; ++i) {
@@ -1981,16 +2109,20 @@ CppExportResult generate_pulp_cpp(const DesignIR& ir,
     source << "#include " << cpp_string_literal(opts.header_filename) << "\n\n"
            << "#include <algorithm>\n"
            << "#include <memory>\n"
+           << "#include <string>\n"
            << "#include <string_view>\n"
            << "#include <utility>\n"
+           << "#include <vector>\n"
            << "#include <pulp/view/buttons.hpp>\n"
            << "#include <pulp/view/canvas_widget.hpp>\n"
            << "#include <pulp/view/css_gradient.hpp>\n"
+           << "#include <pulp/view/design_frame_view.hpp>\n"
            << "#include <pulp/view/svg_path_widget.hpp>\n"
            << "#include <pulp/view/text_editor.hpp>\n"
            << "#include <pulp/view/widgets.hpp>\n"
            << "#include <pulp/view/widgets/svg_line.hpp>\n"
-           << "#include <pulp/view/widgets/svg_rect.hpp>\n\n";
+           << "#include <pulp/view/widgets/svg_rect.hpp>\n"
+           << "#include <pulp/runtime/base64.hpp>\n\n";
 
     emit_namespace_open(source, opts.namespace_name);
     emit_tokens(source, ir, ctx);

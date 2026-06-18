@@ -79,9 +79,17 @@ See `core/view/{include/pulp/view,src}/musical_typing_keyboard*` +
 `design_system.cpp` catalog entry: the class is
 `MusicalTypingKeyboard : public DesignFrameView`, constructed from the
 base64-embedded Figma SVG (`musical_typing_keyboard_svg.cpp`). Reskin/extend by
-re-exporting the node and re-embedding — never re-draw by hand. (Open follow-up:
-teach the codegen/`--validate` path to emit/render `faithful_svg` as a
-DesignFrameView so the import itself is 1:1, not just the runtime.)
+re-exporting the node and re-embedding — never re-draw by hand. The **C++
+codegen** (`generate_pulp_cpp`) now lowers a `faithful_svg` node to a
+`DesignFrameView` — it embeds the node's SVG as chunked base64 (resolved via the
+shared `resolve_svg_document`, the same bytes the runtime materializer uses) and
+reconstructs the typed `interactive_elements` overlays, so the generated C++ is
+1:1, not just the runtime materializer. If the SVG asset can't be resolved at
+codegen time it falls back to the native widget emit (so the output always
+compiles). Remaining follow-ups: the **JS** emit path still lowers to native
+widgets (a faithful frame needs a JS-bridge primitive that doesn't exist yet),
+and `--validate` still renders the native-materialized output rather than the
+faithful SVG.
 
 **Multi-frame / post-processed components need a DEDICATED re-embed lane —
 `make_catalog_component.py` is single-frame and applies no neutralization.** The

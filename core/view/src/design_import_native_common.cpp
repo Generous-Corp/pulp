@@ -976,36 +976,10 @@ std::string svg_percent_decode(std::string_view in) {
     return out;
 }
 
-// Returns the SVG document text for a faithful_svg node's asset, or empty if it
-// can't be resolved. Handles `data:image/svg+xml[;base64],…` payloads and
-// on-disk files (local_path or a `file://` original_uri). Read at materialize
-// time — host-side, never on the audio/render thread.
-std::string resolve_svg_document(const IRAssetRef& asset) {
-    const std::string& uri = asset.original_uri;
-    if (uri.rfind("data:", 0) == 0) {
-        const auto comma = uri.find(',');
-        if (comma == std::string::npos) return {};
-        const std::string meta = uri.substr(5, comma - 5);
-        const std::string payload = uri.substr(comma + 1);
-        if (meta.find(";base64") != std::string::npos) {
-            if (auto decoded = runtime::base64_decode(payload))
-                return std::string(decoded->begin(), decoded->end());
-            return {};
-        }
-        return svg_percent_decode(payload);
-    }
-    auto read_file = [](const std::string& path) -> std::string {
-        std::ifstream f(path, std::ios::binary);
-        if (!f) return {};
-        return std::string(std::istreambuf_iterator<char>(f),
-                           std::istreambuf_iterator<char>());
-    };
-    if (asset.local_path && !asset.local_path->empty())
-        return read_file(*asset.local_path);
-    if (uri.rfind("file://", 0) == 0)
-        return read_file(uri.substr(7));
-    return {};
-}
+// resolve_svg_document is defined below in the named pulp::view namespace (it is
+// exported via design_import_native_common.hpp so the C++ codegen reuses it).
+// make_faithful_svg_frame (this anonymous namespace) calls it through that
+// header declaration.
 
 // Translate the IR's typed interactive overlays into DesignFrameView's element
 // list. Only `knob` exists today; new kinds map here as they land.
@@ -1811,6 +1785,37 @@ std::unique_ptr<View> materialize_error_view(const char* message,
 }
 
 } // namespace
+
+// Exported (design_import_native_common.hpp). Defined in the named namespace so
+// both the runtime materializer and the C++ codegen lower a faithful_svg node
+// from identical resolved bytes. Calls svg_percent_decode from the anonymous
+// namespace above (visible throughout this translation unit).
+std::string resolve_svg_document(const IRAssetRef& asset) {
+    const std::string& uri = asset.original_uri;
+    if (uri.rfind("data:", 0) == 0) {
+        const auto comma = uri.find(',');
+        if (comma == std::string::npos) return {};
+        const std::string meta = uri.substr(5, comma - 5);
+        const std::string payload = uri.substr(comma + 1);
+        if (meta.find(";base64") != std::string::npos) {
+            if (auto decoded = runtime::base64_decode(payload))
+                return std::string(decoded->begin(), decoded->end());
+            return {};
+        }
+        return svg_percent_decode(payload);
+    }
+    auto read_file = [](const std::string& path) -> std::string {
+        std::ifstream f(path, std::ios::binary);
+        if (!f) return {};
+        return std::string(std::istreambuf_iterator<char>(f),
+                           std::istreambuf_iterator<char>());
+    };
+    if (asset.local_path && !asset.local_path->empty())
+        return read_file(*asset.local_path);
+    if (uri.rfind("file://", 0) == 0)
+        return read_file(uri.substr(7));
+    return {};
+}
 
 const char* native_widget_kind_name(NativeWidgetKind kind) {
     switch (kind) {

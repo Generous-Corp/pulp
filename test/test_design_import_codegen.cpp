@@ -132,6 +132,131 @@ TEST_CASE("generate_pulp_cpp resolves figma-plugin asset_ref image sources",
     REQUIRE(result.source.find("set_image_source(\"file:///resolved/import/assets/3_43.png\")") != std::string::npos);
 }
 
+TEST_CASE("generate_pulp_cpp emits a DesignFrameView for a faithful_svg node",
+          "[view][import][cpp-codegen][faithful-svg]") {
+    DesignIR ir;
+    ir.source = DesignSource::figma_plugin;
+    ir.source_adapter = "figma-plugin";
+    ir.root.type = "frame";
+    ir.root.name = "Faithful Panel";
+    ir.root.style.width = 200.0f;
+    ir.root.style.height = 100.0f;
+    ir.root.render_mode = NodeRenderMode::faithful_svg;
+    ir.root.svg_asset_id = "panel-svg";
+
+    // A knob (SVG-patch) overlay and a dropdown (native) overlay.
+    IRInteractiveElement knob;
+    knob.kind = InteractiveElementKind::knob;
+    knob.cx = 50.0f; knob.cy = 60.0f; knob.hit_radius = 20.0f;
+    knob.svg_patch_d = "M0 0 L1 1";
+    knob.default_value = 0.25f;
+    ir.root.interactive_elements.push_back(knob);
+
+    IRInteractiveElement dd;
+    dd.kind = InteractiveElementKind::dropdown;
+    dd.x = 10.0f; dd.y = 10.0f; dd.w = 80.0f; dd.h = 20.0f;
+    dd.options = {"Sine", "Saw"};
+    dd.selected_index = 1;
+    ir.root.interactive_elements.push_back(dd);
+
+    IRAssetRef asset;
+    asset.asset_id = "panel-svg";
+    asset.original_uri =
+        "data:image/svg+xml,<svg xmlns=\"http://www.w3.org/2000/svg\" "
+        "width=\"200\" height=\"100\"><rect width=\"200\" height=\"100\" fill=\"#222\"/></svg>";
+    asset.mime = "image/svg+xml";
+    ir.asset_manifest.assets.push_back(asset);
+
+    const auto result = generate_pulp_cpp(ir, ir.asset_manifest, {});
+    // The faithful node lowers to a DesignFrameView built from the embedded
+    // (base64) SVG, not the native widget tree.
+    REQUIRE(result.source.find("std::make_unique<pulp::view::DesignFrameView>") != std::string::npos);
+    REQUIRE(result.source.find("pulp::runtime::base64_decode") != std::string::npos);
+    REQUIRE(result.source.find("#include <pulp/view/design_frame_view.hpp>") != std::string::npos);
+    // Both typed overlays are reconstructed.
+    REQUIRE(result.source.find("DesignFrameElement::Kind::knob") != std::string::npos);
+    REQUIRE(result.source.find("DesignFrameElement::Kind::dropdown") != std::string::npos);
+    REQUIRE(result.source.find("el.needle_d = \"M0 0 L1 1\"") != std::string::npos);
+    REQUIRE(result.source.find("el.options = {") != std::string::npos);
+    REQUIRE(result.source.find("el.selected_index = 1;") != std::string::npos);
+}
+
+TEST_CASE("generate_pulp_cpp falls back to native widgets when a faithful_svg asset is unresolved",
+          "[view][import][cpp-codegen][faithful-svg]") {
+    DesignIR ir;
+    ir.source = DesignSource::figma_plugin;
+    ir.source_adapter = "figma-plugin";
+    ir.root.type = "frame";
+    ir.root.name = "Faithful Panel (missing asset)";
+    ir.root.style.width = 120.0f;
+    ir.root.style.height = 80.0f;
+    ir.root.render_mode = NodeRenderMode::faithful_svg;
+    ir.root.svg_asset_id = "not-in-manifest";  // no matching IRAssetRef
+
+    const auto result = generate_pulp_cpp(ir, ir.asset_manifest, {});
+    // With no resolvable SVG, codegen must NOT emit a DesignFrameView; it falls
+    // back to the normal native emit so the output still compiles and renders.
+    REQUIRE(result.source.find("std::make_unique<pulp::view::DesignFrameView>") == std::string::npos);
+    REQUIRE(result.source.find("std::make_unique<pulp::view::View>") != std::string::npos);
+    REQUIRE(result.source.find("unresolved at codegen time") != std::string::npos);
+}
+
+TEST_CASE("generate_pulp_cpp emits all faithful overlay kinds and chunks a large SVG",
+          "[view][import][cpp-codegen][faithful-svg]") {
+    DesignIR ir;
+    ir.source = DesignSource::figma_plugin;
+    ir.source_adapter = "figma-plugin";
+    ir.root.type = "frame";
+    ir.root.name = "Faithful Panel (all overlays)";
+    ir.root.style.width = 400.0f;
+    ir.root.style.height = 300.0f;
+    ir.root.render_mode = NodeRenderMode::faithful_svg;
+    ir.root.svg_asset_id = "big-svg";
+
+    IRInteractiveElement tf;
+    tf.kind = InteractiveElementKind::text_field;
+    tf.x = 8.0f; tf.y = 8.0f; tf.w = 120.0f; tf.h = 24.0f;
+    tf.placeholder = "Name";
+    tf.bg_color = "#1A1A1A";
+    ir.root.interactive_elements.push_back(tf);
+
+    IRInteractiveElement tabs;
+    tabs.kind = InteractiveElementKind::tab_group;
+    tabs.x = 8.0f; tabs.y = 40.0f; tabs.w = 200.0f; tabs.h = 28.0f;
+    tabs.options = {"A", "B", "C"};
+    ir.root.interactive_elements.push_back(tabs);
+
+    IRInteractiveElement step;
+    step.kind = InteractiveElementKind::stepper;
+    step.x = 8.0f; step.y = 80.0f; step.w = 100.0f; step.h = 24.0f;
+    step.options = {"x1", "x2"};
+    ir.root.interactive_elements.push_back(step);
+
+    // A large SVG (> ~8KB base64) so the embed spans multiple chunk literals.
+    std::string svg = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"400\" height=\"300\">";
+    for (int i = 0; i < 400; ++i)
+        svg += "<rect x=\"0\" y=\"0\" width=\"400\" height=\"1\" fill=\"#202020\"/>";
+    svg += "</svg>";
+    REQUIRE(svg.size() > 6000);  // base64 (~4/3×) clears the 8000-char chunk size
+
+    IRAssetRef asset;
+    asset.asset_id = "big-svg";
+    asset.original_uri = "data:image/svg+xml," + svg;
+    asset.mime = "image/svg+xml";
+    ir.asset_manifest.assets.push_back(asset);
+
+    const auto result = generate_pulp_cpp(ir, ir.asset_manifest, {});
+    REQUIRE(result.source.find("std::make_unique<pulp::view::DesignFrameView>") != std::string::npos);
+    REQUIRE(result.source.find("DesignFrameElement::Kind::text_field") != std::string::npos);
+    REQUIRE(result.source.find("DesignFrameElement::Kind::tab_group") != std::string::npos);
+    REQUIRE(result.source.find("DesignFrameElement::Kind::stepper") != std::string::npos);
+    REQUIRE(result.source.find("el.placeholder = \"Name\"") != std::string::npos);
+    REQUIRE(result.source.find("el.bg_color = \"#1A1A1A\"") != std::string::npos);
+    // The base64 embed spans multiple chunk literals (the chunk loop ran > once):
+    // each interior chunk ends with a `",` line, so at least one is present.
+    REQUIRE(result.source.find("\",") != std::string::npos);
+}
+
 TEST_CASE("generate_pulp_cpp preserves figma-plugin bleed sprite geometry",
           "[view][import][cpp-codegen][figma-plugin][fidelity]") {
     DesignIR ir;
