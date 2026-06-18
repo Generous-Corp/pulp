@@ -1050,6 +1050,20 @@ to the local self-hosted runner through `PULP_LOCAL_MACOS_RUNS_ON_JSON` when
 that repo variable is set. Linux and Windows use GitHub-hosted runners and are
 advisory unless explicitly required by branch protection.
 
+**A slow / stuck PR is worth investigating before assuming runner saturation.**
+Saturation is possible (a real burst, or a wedged runner), but the required
+`macos` gate runs on the local Mac Studios (usually idle), so confirm it rather
+than assume it. Before concluding capacity:
+(1) check the required checks even registered — a Shipyard-App-opened PR does NOT
+auto-trigger `pull_request` workflows, so `ghapp workflow run build.yml --ref
+<branch>` + `… version-skill-check.yml --ref <branch>` are often needed;
+(2) check for a version-bump race (PR goes `DIRTY` on the `CMakeLists.txt`
+VERSION line — re-merge `main`); (3) only then verify capacity with
+`ghapp api repos/danielraffel/pulp/actions/runners` (`busy` per runner) —
+GitHub-*hosted* advisory lanes queue independently and don't block merge. Full
+diagnosis + the non-Shipyard fallback: the `ci` skill, "Diagnosing a slow /
+stuck PR."
+
 #### Runner priority (hard rule)
 
 **No Namespace.** Namespace cloud macOS runners are a *paid* overflow we do NOT

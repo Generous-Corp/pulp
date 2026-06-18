@@ -71,6 +71,46 @@ skill for the full banner contract and override knobs
 (`PULP_SKEW_CHECK_DISABLE`, `PULP_SKEW_CHECK_CACHE`). Release-discovery
 Slice 6 (#551).
 
+## Diagnosing a slow / stuck PR — investigate before assuming runner saturation
+
+When a PR sits without merging, don't ASSUME "the macOS CI pool is saturated"
+from a long-queued run — investigate. Saturation IS possible (a genuine burst, or
+a wedged/dead runner — see the `pulp-runner-ops` skill), so it's worth checking;
+just don't conclude it without evidence. In the 2026-06-18 case the cause turned
+out to be non-hardware (a misdiagnosis worth not repeating). Check in this order:
+
+1. **Did the required checks even register?** A PR opened by the **Shipyard GitHub
+   App** does NOT auto-trigger `pull_request` workflows, so the required `macos`
+   and `Enforce version & skill sync` checks never appear on the PR head SHA until
+   you dispatch them by hand:
+   ```bash
+   ghapp workflow run build.yml --ref <branch>             # posts the required `macos` check
+   ghapp workflow run version-skill-check.yml --ref <branch>  # posts `Enforce version & skill sync`
+   ```
+   This is the most common reason a Shipyard PR "sits." (`shipyard pr` dispatches
+   `build.yml` itself but you may still need `version-skill-check.yml`.) After a
+   new push the head SHA changes — re-dispatch on the new SHA.
+2. **Is it a version-bump race?** The other concurrent agent re-bumping `main`'s
+   `CMakeLists.txt VERSION` makes the PR `DIRTY` (conflict on the VERSION line).
+   Merge `origin/main` in, re-resolve the VERSION to one above main, push,
+   re-dispatch the checks.
+3. **Only THEN consider capacity — and verify, don't assume.** The required
+   `macos` gate runs on the **local self-hosted Mac Studios** (`pulp-studio-01/02/03`,
+   + the M5 overflow), which are usually idle. Confirm with:
+   ```bash
+   ghapp api repos/danielraffel/pulp/actions/runners \
+     | python3 -c "import sys,json;[print(r['name'],r['status'],'busy='+str(r['busy'])) for r in json.load(sys.stdin)['runners']]"
+   ```
+   If the Studios show `busy=False`, the pool is NOT saturated — say so. What DOES
+   queue independently is the **GitHub-hosted advisory lanes** (Linux, Windows,
+   sanitizers, coverage, android) on GitHub's shared pool; those are advisory, not
+   the required gate, so a long queue there does not block merge.
+
+**If you don't use Shipyard + the self-hosted Mac pool:** steps 1 and 3 are
+specific to that setup (App-dispatched workflows; local runners) — skip them. The
+tool-agnostic rule still holds: distinguish the *required* checks from *advisory*
+lanes, and verify a runner is actually busy before blaming capacity.
+
 ## GitHub workflow gotchas
 
 - **`test/CMakeLists.txt` is a frozen hotspot — bump its ceiling when you add a
