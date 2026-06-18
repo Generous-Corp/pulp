@@ -9,8 +9,6 @@ this path to the project's debugger settings:
     diagnostic messages" + load the file at debugger start.
 
 For LLDB on macOS / Linux, see tools/debug/pulp_lldb.py.
-
-Per sudara "Big List of JUCE Tips" #21.
 -->
 <AutoVisualizer xmlns="http://schemas.microsoft.com/vstudio/debugger/natvis/2010">
 

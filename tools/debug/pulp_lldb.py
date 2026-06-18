@@ -8,9 +8,6 @@ After loading, `p` / `frame variable` / `expr` on these types prints
 a structured summary instead of the default raw-bytes view.
 
 Mirrors tools/debug/pulp.natvis (which does the same job for MSVC).
-
-Slice 9 of planning/2026-05-18-rt-safety-and-debug-dx.md, per sudara
-"Big List of JUCE Tips" #21.
 """
 
 from __future__ import annotations

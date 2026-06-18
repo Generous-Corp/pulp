@@ -75,9 +75,9 @@ inline void dbg_var_emit_suffix() {
 // no-op in NDEBUG builds — leave call sites in your code while you're
 // chasing a bug, and they'll vanish when you flip to Release.
 //
-// Mirrors JUCE's `DBG_VAR` and Melatonin's `LOG_VAR` macros (sudara
-// "Big List of JUCE Tips", #26). Replaces ad-hoc `std::cout << "x=" <<
-// x` scaffolding.
+// A compile-away debug value-logging macro in the spirit of common
+// `DBG_VAR` / `LOG_VAR` helpers. Replaces ad-hoc
+// `std::cout << "x=" << x` scaffolding.
 #if defined(NDEBUG)
     #define PULP_DBG_VAR(...) ((void)0)
 #else
