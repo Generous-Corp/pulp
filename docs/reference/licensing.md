@@ -174,7 +174,7 @@ Full inventory and boundary live in `DEPENDENCIES.md`.
 | **numpy** | BSD-3-Clause | Motion visual-analysis lane (`tools/motion/visual`) |
 | **Pillow** | HPND (BSD-style) | Image IO for the Motion visual-analysis lane |
 | **scikit-image** | BSD-3-Clause | Image metrics for the Motion visual-analysis lane |
-| **opencv-python** | Apache-2.0 | Optional affine estimation for the Motion visual-analysis lane (graceful fallback) |
+| **opencv-python** | Apache-2.0 (OpenCV); packaging MIT | Optional affine estimation for the Motion visual-analysis lane (graceful fallback) |
 
 Type-only `@types/*` and `@figma/plugin-typings`, and environment-supplied
 prerequisites — the Rust toolchain (`cargo`/`rustc`), `yamllint` (GPL-3.0),

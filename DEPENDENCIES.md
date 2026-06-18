@@ -103,7 +103,7 @@ directories and used under their own licenses. Intentionally absent from
 | ffmpeg-static | Wrapper MIT; bundled FFmpeg binaries GPL/LGPL | Encodes captured frames into the MP4 used by the video-proof composer | `npm` devDependency in `tools/local-ci`; runtime also accepts a system `PULP_FFMPEG`/`PATH` ffmpeg. Same boundary. |
 | json-schema-to-typescript | MIT | Generates TypeScript types from JSON Schema for the Figma plugin | Same boundary. |
 | numpy | BSD-3-Clause | Array ops for the Motion visual-analysis lane (`tools/motion/visual`) | `pip`, installed on demand; analysis-only, never bundled or shipped. |
-| opencv-python | Apache-2.0 | Optional affine estimation for the Motion visual-analysis lane (graceful PIL/FFT fallback when absent) | `pip` (optional); analysis-only, never bundled or shipped. |
+| opencv-python | Apache-2.0 (OpenCV); packaging MIT | Optional affine estimation for the Motion visual-analysis lane (graceful PIL/FFT fallback when absent) | `pip` (optional); analysis-only, never bundled or shipped. |
 | Pillow | HPND (BSD-style) | Image IO for the Motion visual-analysis lane | `pip`; analysis-only, never bundled or shipped. |
 | Remotion | Remotion License (source-available; free under their tier, paid company license above it) | Composes annotated proof videos (`remotion`, `@remotion/bundler`, `@remotion/renderer`; also pulls MIT `react`/`react-dom`) | `npm` devDependency in `tools/local-ci`. Companies over Remotion's free tier need a Remotion license. Same boundary. |
 | scikit-image | BSD-3-Clause | Image metrics for the Motion visual-analysis lane | `pip`; analysis-only, never bundled or shipped. |

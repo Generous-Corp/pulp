@@ -301,7 +301,7 @@
     {
       "name": "opencv-python",
       "category": "developer-tooling",
-      "license": "Apache-2.0",
+      "license": "Apache-2.0 (OpenCV); opencv-python packaging MIT",
       "version": ">=4.8",
       "source_kind": "python-pip",
       "repository": "https://github.com/opencv/opencv-python",
