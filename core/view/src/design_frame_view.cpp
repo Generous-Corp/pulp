@@ -233,6 +233,16 @@ DesignFrameView::Frame DesignFrameView::build_frame(
                 suppress_svg_glyph_at(svg, cx, e.y, slot_w, e.h);
         }
     }
+    // Drop the baked glyphs behind each live value_label readout, so the live
+    // text (set_element_text) is the sole renderer and the readout tracks state
+    // instead of showing the design's frozen mockup value. A readout is several
+    // glyphs ("C2", "98") — remove every glyph whose first drawn coord falls in
+    // the rect (loop until none remain), bounded so a runaway can't spin.
+    for (const auto& e : f.elements) {
+        if (e.kind != DesignFrameElement::Kind::value_label) continue;
+        for (int guard = 0; guard < 8; ++guard)
+            if (!suppress_svg_glyph_at(svg, e.x, e.y, e.w, e.h)) break;
+    }
     f.svg = std::move(svg);
     return f;
 }
@@ -394,9 +404,18 @@ float DesignFrameView::element_value(int i) const {
             return e.value;  // pressed/lit flag (0 or 1)
         case DesignFrameElement::Kind::swap:
         case DesignFrameElement::Kind::action:
-            return -1.0f;  // swap-link / command buttons have no value
+        case DesignFrameElement::Kind::value_label:
+            return -1.0f;  // buttons / read-only labels have no normalized value
     }
     return -1.0f;
+}
+
+void DesignFrameView::set_element_text(int i, std::string text) {
+    if (i < 0 || i >= static_cast<int>(elements_.size())) return;
+    if (elements_[i].kind != DesignFrameElement::Kind::value_label) return;
+    if (elements_[i].text == text) return;
+    elements_[i].text = std::move(text);
+    request_repaint();
 }
 
 void DesignFrameView::set_element_value(int i, float v) {
@@ -426,7 +445,8 @@ void DesignFrameView::set_element_value(int i, float v) {
             break;
         case DesignFrameElement::Kind::swap:
         case DesignFrameElement::Kind::action:
-            return;  // swap-link / command buttons have no value to set
+        case DesignFrameElement::Kind::value_label:
+            return;  // buttons / read-only labels have no value to set
     }
     request_repaint();
 }
@@ -557,6 +577,22 @@ void DesignFrameView::paint(canvas::Canvas& canvas) {
         canvas.fill_current_path();
     }
     canvas.clear_fill_gradient();
+
+    // Live value_label readouts: the baked glyph at each rect was suppressed in
+    // build_frame, so paint the current `text` there (right-aligned, matching the
+    // design's right-aligned numeric readouts) at the panel scale.
+    for (const auto& e : elements_) {
+        if (e.kind != DesignFrameElement::Kind::value_label || e.text.empty()) continue;
+        const float font = e.h * t.scale * 0.82f;  // ~rect height, like the baked glyph
+        canvas.set_font("Inter", font);
+        canvas.set_fill_color(canvas::Color::rgba8(0xF3, 0xF6, 0xF9, 0xff));  // faithful readout ink  token-lint:allow
+        const float tw = canvas.measure_text(e.text);
+        const float rx = t.ox + (e.x - panel_x_) * t.scale;
+        const float ry = t.oy + (e.y - panel_y_) * t.scale;
+        const float rw = e.w * t.scale, rh = e.h * t.scale;
+        // Right-align in the rect; baseline ~78% down (cap-height centered).
+        canvas.fill_text(e.text, rx + rw - tw, ry + rh * 0.78f);
+    }
 }
 
 int DesignFrameView::hit_element(Point pos) const {

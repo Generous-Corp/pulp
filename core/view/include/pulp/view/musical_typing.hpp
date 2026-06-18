@@ -42,6 +42,7 @@ public:
     std::function<void(int note, float velocity)> on_note_on;
     std::function<void(int note)> on_note_off;
     float velocity = 0.8f;
+    static constexpr float kVelStep = 1.0f / 16.0f;  // c / v keyboard velocity step
 
     /// Feed a key event. Returns true iff it was a mapped note/octave key with no
     /// Cmd/Ctrl/Alt/Meta modifier (i.e. consumed). Everything else returns false
@@ -50,7 +51,16 @@ public:
         if (e.modifiers & (kModCmd | kModCtrl | kModAlt | kModMeta)) return false;
 
         if (e.key == KeyCode::z || e.key == KeyCode::x) {
-            if (e.is_down && !e.is_repeat) octave_shift_ += (e.key == KeyCode::x) ? 1 : -1;
+            if (e.is_down && !e.is_repeat)
+                set_octave_shift(octave_shift_ + (e.key == KeyCode::x ? 1 : -1));
+            return true;
+        }
+        // c / v lower / raise the velocity (the design's VELOCITY −c / +v keys),
+        // mirroring the z / x octave keys.
+        if (e.key == KeyCode::c || e.key == KeyCode::v) {
+            if (e.is_down && !e.is_repeat)
+                velocity = std::clamp(velocity + (e.key == KeyCode::v ? kVelStep : -kVelStep),
+                                      0.0f, 1.0f);
             return true;
         }
         const int semi = semitone_for_key(e.key);

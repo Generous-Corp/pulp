@@ -253,6 +253,17 @@ public:
     /// Keep window above all others.
     virtual void set_always_on_top(bool on_top) { (void)on_top; }
 
+    /// Request the native window resize so its CONTENT area becomes (w × h),
+    /// keeping the window's TOP-LEFT corner fixed (so a pinned toolbar / toggle
+    /// row doesn't jump). For content whose intrinsic size changes at runtime —
+    /// e.g. the Musical Typing Keyboard's piano⇄typing toggle (piano is shorter):
+    /// the window shrinks/grows in height, top-aligned, while the top-left
+    /// controls stay put. No-op on hosts that don't override (the content just
+    /// letterboxes within the current window). Callers that also use a design
+    /// viewport should update set_design_viewport()/set_fixed_aspect_ratio() to
+    /// the same (w, h) so paint scale and the OS aspect lock track the resize.
+    virtual void request_content_size(float w, float h) { (void)w; (void)h; }
+
     /// Set a fixed "design viewport". When set, the root view's bounds are
     /// pinned to (design_w x design_h) and paint applies an aspect-correct
     /// scale + letterbox translate to fit the current window size. Input

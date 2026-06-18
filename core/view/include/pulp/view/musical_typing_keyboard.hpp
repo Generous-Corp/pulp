@@ -56,19 +56,30 @@ public:
     // a host can set the base note / velocity or feed keys from its own path.
     MusicalTypingController& controller() { return controller_; }
 
-    // ── On-screen control callbacks ──────────────────────────────────────────
+    // ── On-screen control callbacks (Logic-faithful) ─────────────────────────
     // The on-screen octave −/+ and velocity −/+ buttons drive the controller
     // directly (they change the next note's octave/velocity, no callback needed).
-    // These surface the controls that DON'T map to controller state:
-    //   • on_pitch_bend(0..1) — fired by the 8 pitch-bend preset buttons
-    //     (left→right); the host maps the normalized value to its bend range.
-    //   • on_sustain(bool)    — fired by the sustain pad (toggles).
-    //   • on_modulation(0..1) — defined for the integration contract, but the
-    //     current design has NO modulation control (the "Modulation" label is a
-    //     placeholder), so it is never fired until a design revision adds one.
+    // These surface the controls that DON'T map to controller state. Keys 1–8 and
+    // tab mirror the on-screen buttons exactly:
+    //   • on_pitch_bend(−1..+1) — keys 1 / 2 (and the −/+ pads) are MOMENTARY:
+    //     hold → full bend down (−1) / up (+1), release → 0 (spring to centre).
+    //     Bipolar; the host maps it to its bend range. Readout shows −20 / 0 / +20.
+    //   • on_sustain(bool)      — sustain pad / tab key, MOMENTARY hold: true while
+    //     held, false on release (lit while held).
+    //   • on_modulation(0..1)   — keys 3–8 (and the 6 mod pads) are a LATCHED
+    //     selector: 3 = off (0, default) … 8 = max (1). The selection persists and
+    //     highlights; 0..1 is mod_sel / 5.
     std::function<void(float bend)> on_pitch_bend;
     std::function<void(bool on)> on_sustain;
     std::function<void(float amount)> on_modulation;
+
+    // Fired when the toggle (or set_mode) swaps frames and the intrinsic size
+    // changes — piano mode (732×176) is shorter than typing (732×266). A host
+    // that sizes itself to the keyboard wires this to resize its window/pane to
+    // (w, h) (e.g. WindowHost::request_content_size + set_design_viewport), so
+    // the piano frame shrinks the window top-aligned and toggling back grows it.
+    // Carries the NEW frame's panel width/height.
+    std::function<void(float w, float h)> on_intrinsic_size_changed;
 
     // ── Host-driven integration (e.g. PulpTempoSampler) ──────────────────────
     // Light keys from an EXTERNAL held-note set — host MIDI, an app-wide QWERTY
@@ -93,6 +104,19 @@ public:
     bool on_key_event(const KeyEvent& event) override;
     void on_focus_changed(bool gained) override;  // release held notes on blur
 
+    // ── Overview-strip octave control (Logic-style) ──────────────────────────
+    // The top overview strip's teal highlight is the canonical octave indicator:
+    // it tracks the octave (z/x, the < > arrows, AND dragging it), always snapping
+    // to a C boundary (each octave step is a C). Drag anywhere on the strip to set
+    // the octave; the cursor shows grab/grabbing over it. The highlight is drawn
+    // as a native overlay (the baked teal box is suppressed) so it can move.
+    void paint(canvas::Canvas& canvas) override;
+    void on_mouse_down(Point pos) override;
+    void on_mouse_drag(Point pos) override;
+    void on_mouse_up(Point pos) override;
+    void on_hover_move(Point pos) override;
+    void on_mouse_leave() override;
+
 protected:
     // On a mode swap (toggle button or set_mode): release any QWERTY-held notes
     // (so a held key can't sound forever after the typing frame goes away) and
@@ -104,7 +128,39 @@ private:
     MusicalTypingController controller_;
     bool input_capture_ = true;   // false = host feeds QWERTY; we don't capture keys
     bool sustain_ = false;        // sustain-pad toggle state (surfaced via on_sustain)
+    int pb_value_ = 0;            // live pitch-bend display value (−20 / 0 / +20)
+    int mod_sel_ = 0;             // latched modulation selection (0 = "off" … 5 = "max")
+    bool dragging_strip_ = false; // mid drag-to-octave on the overview strip
     static constexpr float kVelStep = 1.0f / 16.0f;  // on-screen velocity −/+ increment
+    static constexpr int kPitchBendMax = 20;         // Logic-style ±20 readout extent
+
+    // The overview strip is a full-range (C-2…G8 / MIDI 0–127) mini-piano ruler
+    // drawn procedurally in paint() over the design's strip background — white-key
+    // dividers, black-key marks, C-only labels, and the teal highlight that spans
+    // the current playable octave window. The baked partial ribbon is covered.
+    // The strip's horizontal extent (panel coords) for the active frame — the
+    // ribbon is centered in the toolbar and is a different width per frame (the
+    // typing/piano toolbars centered their own natural-width ribbons after #82).
+    void strip_bounds(float& x0, float& x1) const;
+    // Panel-x → octave shift, snapped to the nearest octave (each step is a C
+    // boundary — "always snaps to a C range"), clamped to the controller's ±4.
+    int octave_for_strip_x(float panel_x) const;
+    // If `pos` (view-local) is over the strip band, set `panel_x` to its panel-x
+    // and return true. Uses the shared panel_transform (panel origin is 0,0).
+    bool point_over_strip(Point pos, float& panel_x) const;
+    // Refresh the live OCTAVE / VEL / PITCH BEND value_label readouts of the
+    // active frame from current state. Called after any change + on frame swap.
+    void update_readouts();
+    // Press/release of a tagged control (pitch-bend pb_down/pb_up momentary,
+    // modulation mod_N latched, sustain hold) — shared by the mouse-gesture and
+    // keyboard paths so on-screen buttons and keys behave identically.
+    void control_press(const std::string& tag);
+    void control_release(const std::string& tag);
+    // Re-light the selected modulation button (mod_sel_) and clear the others;
+    // call after a press auto-clears the momentary light on release.
+    void refresh_mod_lights();
+    // Index of the (first) element whose action tag == `tag`, or -1.
+    int element_for_action(const std::string& tag) const;
     // Last external held set from set_active_notes; re-applied after a frame swap
     // so the new frame reflects the host's still-held notes.
     std::vector<int> held_notes_;

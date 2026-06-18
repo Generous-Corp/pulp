@@ -28,7 +28,11 @@ struct DesignFrameElement {
     // on_action(action) — an in-design control (octave −/+, velocity, sustain,
     // pitch-bend preset). It does not light, emit notes, or swap frames; it
     // names an action the consumer maps to its own state.
-    enum class Kind { knob, text_field, dropdown, tab_group, stepper, momentary, swap, action };
+    // `value_label` is a live read-only text overlay: it paints `text` over its
+    // rect (replacing a baked readout glyph that build suppresses), updated via
+    // set_element_text — e.g. an "OCTAVE C2" value that must track state.
+    enum class Kind { knob, text_field, dropdown, tab_group, stepper, momentary,
+                      swap, action, value_label };
 
     Kind kind = Kind::knob;
 
@@ -73,6 +77,12 @@ struct DesignFrameElement {
     /// For Kind::action: the action id fired (on_action) when clicked, e.g.
     /// "octave_up". Empty = unset. Uses the x/y/w/h rect as the hit-region.
     std::string action;
+
+    // ── value_label (live readout) ───────────────────────────────────────
+    /// For Kind::value_label: the live display string painted over the rect
+    /// (right-aligned to match the design's baked readouts). Updated via
+    /// set_element_text.
+    std::string text;
 };
 
 // Remove the first <rect> in `svg` whose x/y/width/height match (within `tol`)
@@ -128,6 +138,12 @@ public:
     int element_note(int i) const {
         return (i >= 0 && i < static_cast<int>(elements_.size())) ? elements_[i].note : -1;
     }
+    // The `action` id of element `i` (for Kind::action command buttons and the
+    // readout tag of Kind::value_label), or empty. Lets a consumer route by id.
+    const std::string& element_action(int i) const {
+        static const std::string kEmpty;
+        return (i >= 0 && i < static_cast<int>(elements_.size())) ? elements_[i].action : kEmpty;
+    }
     // Active view group for per-view momentary keyboards (e.g. typing=0, piano=1).
     // hit_element only tests momentary elements whose view_group is -1 or equals
     // this. Switching it releases any held momentary key (note-off) so no notes
@@ -165,6 +181,10 @@ public:
     // round(v * (count-1)) applied to the live overlay widget silently). Use for
     // automation/preset application so it doesn't echo back to the host.
     void set_element_value(int i, float v);
+    // Set the live text of a Kind::value_label element and repaint. No-op for
+    // other kinds / out of range. Use for readouts that must track state
+    // (octave / velocity / pitch-bend).
+    void set_element_text(int i, std::string text);
     // The native-overlay child widget for element `i`, or nullptr (e.g. for a
     // knob, or out of range). For tests/bindings.
     View* overlay_widget(int i) const;
@@ -203,6 +223,16 @@ protected:
     // this base no-op — subclass state isn't built yet.)
     virtual void on_active_frame_changed() {}
 
+    // The ONE transform shared by paint() and hit_element(): a uniform fit of the
+    // panel into `bounds`, centered (letterbox when bounds aspect != panel
+    // aspect). `scale` is panel→view; (ox,oy) is the view-space position of the
+    // panel's top-left. paint draws through it; hit_element inverts it — so a
+    // knob is hit exactly where it is drawn, at ANY host window aspect. Protected
+    // so a subclass that paints its own overlay (e.g. MusicalTypingKeyboard's
+    // movable overview-strip highlight) maps panel↔view through the SAME fit.
+    struct PanelTransform { float scale = 0.0f, ox = 0.0f, oy = 0.0f; };
+    PanelTransform panel_transform(const Rect& bounds) const;
+
 private:
     // Map a choice element's selected index to a normalized [0,1] value and back,
     // using its option count. Single source of truth for choice<->normalized.
@@ -230,13 +260,6 @@ private:
     // Tear down the active overlay widgets, copy frame `index` into the active
     // members (svg_/elements_/panel_*), and rebuild overlays.
     void activate_frame(int index);
-    // The ONE transform shared by paint() and hit_element(): a uniform fit of the
-    // panel into `bounds`, centered (letterbox when bounds aspect != panel
-    // aspect). `scale` is panel→view; (ox,oy) is the view-space position of the
-    // panel's top-left. paint draws through it; hit_element inverts it — so a
-    // knob is hit exactly where it is drawn, at ANY host window aspect.
-    struct PanelTransform { float scale = 0.0f, ox = 0.0f, oy = 0.0f; };
-    PanelTransform panel_transform(const Rect& bounds) const;
 
     int hit_element(Point pos) const;
 
