@@ -530,6 +530,15 @@ void DesignFrameView::paint(canvas::Canvas& canvas) {
                 wrap_thumb_translation(s, e.needle_d, 0.0f, target_y - e.cy);
             }
         }
+        else if (e.kind == DesignFrameElement::Kind::toggle && !e.needle_d.empty()) {
+            // A toggle WITH a dot marker is a switch: the baked dot position
+            // (e.cx) is the OFF state; flipping ON slides it to the mirror across
+            // the pill center (e.x + e.w/2). Using the mirror — rather than a
+            // fixed left/right end — preserves the design's rest state whichever
+            // side "off" sits on. The tint loop below recolours the track when on.
+            const float dx_on = 2.0f * e.x + e.w - 2.0f * e.cx;   // baked → mirror
+            wrap_thumb_translation(s, e.needle_d, e.value * dx_on, 0.0f);
+        }
     }
     const auto t = panel_transform(local_bounds());
     if (t.scale <= 0) return;

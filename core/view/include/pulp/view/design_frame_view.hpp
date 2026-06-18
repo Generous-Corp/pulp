@@ -37,6 +37,9 @@ struct DesignFrameElement {
     // right x+w; cx = baked center); otherwise vertical (value 1→top y, 0→bottom
     // y+h; cy = baked center). `toggle` is a click-to-flip button that tints its rect
     // (bg_color, value>=0.5=on) over the baked chrome so the label shows through.
+    // A toggle with `needle_d` set is a SWITCH: the dot (needle_d) sits at e.cx in
+    // its OFF state and slides to the mirror across the pill center (x + w/2) when
+    // on, in addition to the tint — so the design's rest state is preserved.
     enum class Kind { knob, fader, toggle, text_field, dropdown, tab_group,
                       stepper, momentary, swap, action, value_label };
 

@@ -692,6 +692,35 @@ TEST_CASE("DesignFrameView tints a toggle when it is on",
     CHECK(cmp.similarity < 0.999f);   // the active tint appears
 }
 
+TEST_CASE("DesignFrameView slides a switch dot to the on-side when toggled",
+          "[view][design-import][frame][svg]") {
+    // A toggle WITH a dot marker (needle_d) is a switch: the dot slides along
+    // the pill to the value's end. Render off vs on; the dot must visibly move.
+    const std::string svg =
+        R"SVG(<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg">)SVG"
+        R"SVG(<rect x="10" y="10" width="80" height="80" fill="#222222"/>)SVG"
+        R"SVG(<rect x="30" y="44" width="40" height="16" rx="8" fill="#444444"/>)SVG"
+        R"SVG(<circle id="switch dot" cx="38" cy="52" r="6" fill="white"/></svg>)SVG";
+    DesignFrameElement sw;
+    sw.kind = DesignFrameElement::Kind::toggle;
+    sw.needle_d = "id=\"switch dot\"";
+    sw.cx = 38; sw.cy = 52; sw.x = 30; sw.y = 44; sw.w = 40; sw.h = 16;
+    DesignFrameView off(svg, {sw}, 0, 0, 100, 100), on(svg, {sw}, 0, 0, 100, 100);
+    off.set_bounds({0, 0, 100, 100});
+    on.set_bounds({0, 0, 100, 100});
+    off.set_element_value(0, 0.0f);   // dot at the left
+    on.set_element_value(0, 1.0f);    // dot at the right
+    auto off_png = render_to_png(off, 100, 100, 2.0f, ScreenshotBackend::skia);
+    if (off_png.empty()) SKIP("Skia raster screenshot backend unavailable");
+    auto on_png = render_to_png(on, 100, 100, 2.0f, ScreenshotBackend::skia);
+    REQUIRE_FALSE(on_png.empty());
+    const auto cmp = compare_screenshots(off_png, on_png);
+    REQUIRE(cmp.valid);
+    if (cmp.similarity >= 0.999f)
+        SKIP("SVG (SkSVGDOM) rendering unavailable in this build");
+    CHECK(cmp.similarity < 0.999f);   // the dot slid + the track tinted
+}
+
 TEST_CASE("DesignFrameView rotates a <rect> indicator needle (tag-agnostic)",
           "[view][design-import][frame][svg]") {
     // wrap_needle_rotation must rotate a <rect> indicator, not only a <path>.
