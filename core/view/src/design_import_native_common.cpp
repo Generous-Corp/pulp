@@ -1013,6 +1013,9 @@ std::vector<DesignFrameElement> to_frame_elements(
         el.options = e.options;
         el.selected_index = e.selected_index;
         el.bg_color = e.bg_color;
+        // Carry the design-source node id to the live element so the inspector's
+        // Wiring lens can map a control back to its Figma node.
+        if (e.source_node_id) el.source_node_id = *e.source_node_id;
         out.push_back(std::move(el));
     }
     return out;

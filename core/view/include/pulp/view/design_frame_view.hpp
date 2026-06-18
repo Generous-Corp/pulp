@@ -106,6 +106,14 @@ struct DesignFrameElement {
     /// where a variable-width value must grow rightward into empty space, not
     /// leftward over the label.
     bool value_left_align = false;
+
+    // ── provenance (design-import) ───────────────────────────────────────
+    /// Source node id this overlay came from (e.g. a Figma node id like
+    /// "1273:33424"), copied from the IR's IRInteractiveElement during
+    /// materialization. Empty when the element wasn't lowered from a design
+    /// import. Lets a tool (the inspector's Wiring lens) map a live control back
+    /// to its design node — to flag "not wired up" and fetch that exact frame.
+    std::string source_node_id;
 };
 
 // Remove the first <rect> in `svg` whose x/y/width/height match (within `tol`)
