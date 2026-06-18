@@ -37,8 +37,15 @@ struct DesignFrameElement {
     // right x+w; cx = baked center); otherwise vertical (value 1→top y, 0→bottom
     // y+h; cy = baked center). `toggle` is a click-to-flip button that tints its rect
     // (bg_color, value>=0.5=on) over the baked chrome so the label shows through.
+    // A toggle with `needle_d` set is a SWITCH: the dot (needle_d) sits at e.cx in
+    // its OFF state and slides to the mirror across the pill center (x + w/2) when
+    // on, in addition to the tint — so the design's rest state is preserved.
+    // `xy_pad` is SVG-patch like `fader` but in 2D: dragging inside its rect
+    // [x,y,w,h] moves the puck element (needle_d) to follow — `value` is the X
+    // position (0→left, 1→right), `value_y` the Y (0→top, 1→bottom). cx/cy = the
+    // puck's baked center.
     enum class Kind { knob, fader, toggle, text_field, dropdown, tab_group,
-                      stepper, momentary, swap, action, value_label };
+                      stepper, momentary, swap, action, value_label, xy_pad };
 
     Kind kind = Kind::knob;
 
@@ -50,7 +57,8 @@ struct DesignFrameElement {
     // path around (cx, cy) by the value angle and re-renders — only the needle
     // moves; the rest of the chrome stays pixel-exact.
     std::string needle_d;
-    float value = 0.5f;        ///< 0..1
+    float value = 0.5f;        ///< 0..1  (xy_pad: the X axis)
+    float value_y = 0.5f;      ///< 0..1  (xy_pad: the Y axis, 0=top)
 
     // ── overlay controls (text_field / dropdown / tab_group / stepper) ────
     float x = 0.0f, y = 0.0f, w = 0.0f, h = 0.0f;  ///< element rect, SVG coords
