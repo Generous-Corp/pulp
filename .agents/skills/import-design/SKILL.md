@@ -751,6 +751,12 @@ Pieces, source-of-truth → runtime:
   hit_radius, svg_patch_d, default_value, source_node_id, **label**). These are
   source-side semantics filled by the importer, NOT inferred from the SVG.
   `InteractiveElementKind` is deliberately separate from `AudioWidgetType`.
+  - **`source_node_id` now survives to the live element.** `to_frame_elements()`
+    copies it onto `DesignFrameElement`, exposed at runtime via
+    `DesignFrameView::element_source_node_id(i)`. So a live overlay can be mapped
+    back to its design node — the dev inspector's **Wiring** tab (Cmd-I) uses this
+    to flag controls that came from Figma but aren't wired up, and to fetch the
+    matching frame. Previously only `stable_anchor_id` (`"figma:<id>"`) survived.
 - **Element labels (§2.1 auto-labeling)** — `label` is the human-readable
   parameter NAME a host shows (embed ABI v5 `PulpEmbedParamInfo.name`), taken
   from the control's source Figma **layer name** when meaningful. The REST lane's

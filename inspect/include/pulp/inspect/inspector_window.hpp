@@ -91,6 +91,11 @@ public:
     /// Refresh all tabs with latest data. Call once per frame.
     void refresh();
 
+    /// Programmatically select a tab by title (e.g. "Wiring") and refresh it.
+    /// For tools/tests that drive the inspector without a click. No-op if the
+    /// title doesn't match a tab.
+    void select_tab(std::string_view title);
+
     /// Called when a view is selected in the tree.
     ///
     /// WYSIWYG P2e two-way selection (maintainer correction: "we DO want to
@@ -159,12 +164,16 @@ private:
     std::unique_ptr<View> build_console_tab();
     std::unique_ptr<View> build_performance_tab();
     std::unique_ptr<View> build_state_tab();
+    std::unique_ptr<View> build_wiring_tab();
 
     // ── Refresh helpers ─────────────────────────────────────────────
     void refresh_elements();
     void refresh_console();
     void refresh_performance();
     void refresh_state();
+    // Walks the inspected tree for DesignFrameView overlays that carry a Figma
+    // source_node_id, lists each with its node id + kind + wired/unwired badge.
+    void refresh_wiring();
 
     void populate_tree_from_view(TreeNode& parent, View* view);
     void show_properties_for(View* view);
@@ -212,6 +221,9 @@ private:
     // State tab
     ScrollView* state_scroll_ = nullptr;
     View* state_list_ = nullptr;
+
+    ScrollView* wiring_scroll_ = nullptr;
+    View* wiring_list_ = nullptr;
 
     // Currently selected view (Elements tab)
     View* selected_view_ = nullptr;
