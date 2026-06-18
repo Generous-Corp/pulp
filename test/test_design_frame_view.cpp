@@ -580,6 +580,22 @@ TEST_CASE("DesignFrameView toggle click flips on/off", "[view][design-import][fr
     CHECK(v.element_value(0) == 0.0f);                    // flipped off
 }
 
+TEST_CASE("DesignFrameView flash toggle lights on press, clears on release",
+          "[view][design-import][frame]") {
+    // A flash command button (sample next/prev/random) lights while held and
+    // clears on release — unlike the default sticky toggle.
+    DesignFrameElement t;
+    t.kind = DesignFrameElement::Kind::toggle;
+    t.flash = true;
+    t.x = 30; t.y = 30; t.w = 20; t.h = 20; t.value = 0.0f;
+    DesignFrameView v(make_design_svg(), {t});
+    v.set_bounds({0, 0, 80, 80});
+    v.on_mouse_down({30, 30});                 // -> SVG (40,40), inside
+    CHECK(v.element_value(0) == 1.0f);         // lit on press
+    v.on_mouse_up({30, 30});
+    CHECK(v.element_value(0) == 0.0f);         // cleared on release (not sticky)
+}
+
 TEST_CASE("DesignFrameView horizontal fader drag adjusts the value",
           "[view][design-import][frame]") {
     // A wider-than-tall track is a horizontal slider: dragging right raises the
