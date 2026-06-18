@@ -37,10 +37,12 @@ int main(int argc, char** argv) {
     const char* screenshot = nullptr;
     int octave = 0;   // --octave N pre-shifts the octave (for render proofs)
     bool piano = false;
+    bool demo = false;   // --demo drives the whole control surface, then renders
     for (int i = 1; i < argc; ++i) {
         if (!std::strcmp(argv[i], "--screenshot") && i + 1 < argc) screenshot = argv[++i];
         else if (!std::strcmp(argv[i], "--octave") && i + 1 < argc) octave = std::atoi(argv[++i]);
         else if (!std::strcmp(argv[i], "--piano")) piano = true;
+        else if (!std::strcmp(argv[i], "--demo")) demo = true;
     }
 
     auto kb = std::make_unique<MusicalTypingKeyboard>();
@@ -57,6 +59,21 @@ int main(int argc, char** argv) {
     for (int k = 0; k < std::abs(octave); ++k) {
         KeyEvent e{}; e.key = octave > 0 ? KeyCode::x : KeyCode::z; e.is_down = true;
         kb->on_key_event(e);
+    }
+
+    // --demo: exercise EVERY control through the real input paths and hold them so
+    // a single render shows them all active at once (and the callbacks print). A
+    // proof that the whole surface is wired, not just static chrome.
+    if (demo) {
+        auto hold = [&](KeyCode k) { KeyEvent e{}; e.key = k; e.is_down = true; kb->on_key_event(e); };
+        std::puts("── driving the full control surface ──");
+        hold(KeyCode::x); hold(KeyCode::x);   // octave +2 → C4 (highlight moves)
+        hold(KeyCode::v);                     // velocity +1
+        hold(KeyCode::a); hold(KeyCode::d); hold(KeyCode::g);  // a 3-note chord (keys light)
+        hold(KeyCode::num2);                  // pitch bend UP (held → +20, pad lit)
+        hold(KeyCode::num6);                  // modulation step (latched, pad lit)
+        hold(KeyCode::tab);                   // sustain (held → lit)
+        std::puts("── rendering held state ──");
     }
 
     const float w = kb->panel_width(), h = kb->panel_height();
