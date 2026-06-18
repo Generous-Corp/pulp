@@ -19,40 +19,18 @@
 
 #include "pulp_tempo_sampler.hpp"
 
-#include <pulp/audio/audio_file.hpp>
-#include <pulp/audio/format_registry.hpp>
 #include <pulp/format/standalone.hpp>
 #include <pulp/runtime/log.hpp>
 
-#include <cstdint>
 #include <memory>
 #include <string>
 #include <string_view>
-#include <vector>
 
 namespace {
 
 // ProcessorFactory is a plain function pointer (not std::function), so the
 // factory must be captureless. Stash the loop path here for it to read.
 std::string g_loop_path;
-
-// Load a loop file into a freshly-created processor. Called from the factory so
-// the editor's create_view() sees a populated waveform on the first painted
-// frame — which is the frame the --screenshot path captures.
-void load_loop_into(pulp::examples::PulpTempoSamplerProcessor& ts,
-                    const std::string& path) {
-    auto data = pulp::audio::FormatRegistry::instance().read(path);
-    if (!data || data->empty()) {
-        pulp::runtime::log_error("PulpTempoSampler: could not read loop file '{}'", path);
-        return;
-    }
-    std::vector<const float*> ch(data->num_channels());
-    for (std::uint32_t c = 0; c < data->num_channels(); ++c)
-        ch[c] = data->channels[c].data();
-    ts.load_loop(ch.data(), static_cast<int>(data->num_channels()),
-                 static_cast<long>(data->num_frames()), data->sample_rate);
-    pulp::runtime::log_info("PulpTempoSampler: loaded loop, detecting tempo + slices");
-}
 
 } // namespace
 
@@ -76,14 +54,21 @@ int main(int argc, char** argv) {
     }
     g_loop_path = loop_path;
 
-    // Load the loop inside the factory so the editor renders the waveform on
-    // its first painted frame (run_with_editor builds the editor via the
-    // processor the factory returns). Captureless lambda → ProcessorFactory.
+    // Queue the command-line loop through the SAME deferred worker path a UI
+    // drop uses (request_load_path): the background worker decodes + analyzes it
+    // off the audio/UI threads. We must NOT decode synchronously here — the
+    // factory runs inside StandaloneApp::start() BEFORE it binds the processor's
+    // StateStore, so load_loop()'s analyze step (state().get_value(kOnsetSens))
+    // would dereference a null store and crash before the window ever paints.
+    // The worker only fires once prepare() → start_worker() runs, by which time
+    // start() has bound the store; the waveform then populates within a few
+    // frames (the --screenshot path waits screenshot_frame_delay frames for it).
+    // Captureless lambda → ProcessorFactory.
     format::StandaloneApp app([]() -> std::unique_ptr<format::Processor> {
         auto p = examples::create_pulp_tempo_sampler();
         if (!g_loop_path.empty()) {
             if (auto* ts = dynamic_cast<examples::PulpTempoSamplerProcessor*>(p.get()))
-                load_loop_into(*ts, g_loop_path);
+                ts->request_load_path(g_loop_path);
         }
         return p;
     });
