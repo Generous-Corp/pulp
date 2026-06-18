@@ -86,12 +86,14 @@ void append_controls(std::vector<DesignFrameElement>& els) {
     // y shifted −8 vs the pre-#82 export (the toolbar shrank when the top-right
     // readouts were removed, lifting every below-toolbar row by 8px).
     add_mom("sustain", 21, 102, 66, 92);
-    add_mom("pb_down", 108, 55, 36, 38);   // "−" / key 1
-    add_mom("pb_up",   150, 55, 36, 38);   // "+" / key 2
-    // Modulation 3..8 ("off" … "max"), keys 3-8 → mod_0 … mod_5.
+    // pitch-bend + modulation buttons: match the baked button rect exactly
+    // (y[53,85], h=32) so the press highlight registers ON the button, not ~8px
+    // below it.
+    add_mom("pb_down", 108, 53, 36, 32);   // "−" / key 1
+    add_mom("pb_up",   150, 53, 36, 32);   // "+" / key 2
     static const float mx[] = {200, 242, 284, 326, 368, 410};
     for (int i = 0; i < 6; ++i)
-        add_mom("mod_" + std::to_string(i), mx[i], 55, 36, 38);
+        add_mom("mod_" + std::to_string(i), mx[i], 53, 36, 32);
 }
 
 // Live value readouts (Kind::value_label) over the design's baked OCTAVE / VEL /
@@ -100,11 +102,12 @@ void append_controls(std::vector<DesignFrameElement>& els) {
 // suppresses the frozen glyphs there). `who` = "typing" (full set) or "piano"
 // (octave only — the piano toolbar shows just OCTAVE).
 void append_readouts(std::vector<DesignFrameElement>& els, const char* who) {
-    auto add = [&](std::string tag, float x, float y, float w, float h) {
+    auto add = [&](std::string tag, float x, float y, float w, float h, bool left = false) {
         DesignFrameElement e;
         e.kind = DesignFrameElement::Kind::value_label;
         e.action = std::move(tag);   // reused as the readout id
         e.x = x; e.y = y; e.w = w; e.h = h;
+        e.value_left_align = left;
         els.push_back(e);
     };
     // The redundant top-right OCTAVE/VEL cluster was removed from the design
@@ -113,7 +116,10 @@ void append_readouts(std::vector<DesignFrameElement>& els, const char* who) {
     if (std::string(who) == "typing") {
         add("octave", 75, 211, 17, 21);   // bottom "OCTAVE C2"  (y −8 post-#82)
         add("velocity", 282, 211, 17, 21);// bottom "VELOCITY 98"
-        add("pitchbend", 90, 66, 8, 18);  // "PITCH BEND 0"
+        // PITCH BEND value — LEFT-aligned just after the "PITCH BEND" label so a
+        // wide value (−20 / +20) grows rightward into empty space instead of
+        // overflowing left over the label.
+        add("pitchbend", 92, 66, 30, 18, /*left=*/true);
     }
     // piano: no value_labels (range shown by the overview highlight only)
 }
