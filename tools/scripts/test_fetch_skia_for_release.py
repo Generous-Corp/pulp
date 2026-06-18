@@ -103,6 +103,29 @@ class ExpectedLibraryPath(unittest.TestCase):
         with self.assertRaises(SystemExit):
             fetch_skia.expected_library_path("haiku-ppc")
 
+    def test_default_dest_root_unchanged(self):
+        # The release lane calls with no --dest; the path must stay under
+        # external/skia-build (backward-compatible default).
+        p = fetch_skia.expected_library_path("darwin-arm64")
+        self.assertTrue(str(p).startswith("external/skia-build/"))
+
+    def test_custom_dest_root(self):
+        # The shared-cache auto-provision passes --dest; the library path must
+        # be re-rooted there while keeping the build/<plat>-gpu/... layout.
+        p = fetch_skia.expected_library_path(
+            "darwin-arm64", "/home/u/.cache/pulp/skia-build"
+        )
+        self.assertEqual(
+            str(p),
+            "/home/u/.cache/pulp/skia-build/build/mac-gpu/lib/Release/libskia.a",
+        )
+
+    def test_main_rejects_dest_without_value(self):
+        self.assertEqual(
+            fetch_skia.main(["fetch_skia_for_release.py", "darwin-arm64", "--dest"]),
+            2,
+        )
+
     def test_ios_device_arm64_keeps_arch_subdir(self):
         # Phase iOS-D: device + simulator zips share build/ios-gpu/, so
         # the arch subdir under Release/ must be preserved (not flattened).
