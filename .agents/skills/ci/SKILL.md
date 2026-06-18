@@ -71,11 +71,13 @@ skill for the full banner contract and override knobs
 (`PULP_SKEW_CHECK_DISABLE`, `PULP_SKEW_CHECK_CACHE`). Release-discovery
 Slice 6 (#551).
 
-## Diagnosing a slow / stuck PR — it is almost never runner saturation
+## Diagnosing a slow / stuck PR — investigate before assuming runner saturation
 
-When a PR sits without merging, do NOT conclude "the macOS CI pool is saturated"
-from a long-queued run. That misdiagnosis happened 2026-06-18; the real causes
-were never hardware. Check in this order:
+When a PR sits without merging, don't ASSUME "the macOS CI pool is saturated"
+from a long-queued run — investigate. Saturation IS possible (a genuine burst, or
+a wedged/dead runner — see the `pulp-runner-ops` skill), so it's worth checking;
+just don't conclude it without evidence. In the 2026-06-18 case the cause turned
+out to be non-hardware (a misdiagnosis worth not repeating). Check in this order:
 
 1. **Did the required checks even register?** A PR opened by the **Shipyard GitHub
    App** does NOT auto-trigger `pull_request` workflows, so the required `macos`
