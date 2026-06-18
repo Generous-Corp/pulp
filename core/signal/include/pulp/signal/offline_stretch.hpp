@@ -51,8 +51,26 @@ enum class OfflineFormantMode { follow_pitch, preserve_original, shift_independe
 /// gated on the seam-quality + blind-A/B criteria in the plan (§6).
 enum class StretchTransientMode { phase_reset, verbatim_relocate };
 
+/// Character mode — the musically-distinct "engine per job" selector. Each has a
+/// different artifact signature; pick by material/taste.
+///   clean         — peak-lock phase vocoder + material-adaptive FFT (the default).
+///                   Natural, time != pitch. Best for tonal/melodic/sustained.
+///   varispeed     — pitch+time LINKED (pure resample) + speed-scaled tape head EQ.
+///                   Tape character, NO stretch artifacts. Pitch follows tempo.
+///   phase_vocoder — clean + verbatim transient relocation for extra punch.
+///                   SCAFFOLD: relocation seam handling is not solved yet, so this
+///                   currently renders as `clean` (see relocate_transients).
+///   granular      — grain/stutter texture. SCAFFOLD: not implemented, renders clean.
+enum class StretchCharacter { clean, varispeed, phase_vocoder, granular };
+
 /// Whole-input render options. See plan §5.
 struct OfflineStretchOptions {
+    /// Character mode (see StretchCharacter). Default `clean`. `varispeed` ignores
+    /// pitch_semitones (pitch is linked to time_ratio); the others honor it.
+    StretchCharacter character = StretchCharacter::clean;
+    /// Cross-engine: graft verbatim transients onto the stretched output for punch.
+    /// SCAFFOLD — the seam-clean implementation is future work; currently a no-op.
+    bool relocate_transients = false;
     double time_ratio = 1.0;        ///< output duration / input duration
     double pitch_semitones = 0.0;   ///< fractional allowed
     OfflineFormantMode formant_mode = OfflineFormantMode::preserve_original;
@@ -271,6 +289,14 @@ public:
         if (out_frames != expected)
             return fail(err, "out_frames must equal round(in_frames * time_ratio)");
 
+        // Character-mode dispatch. `varispeed` is pitch+time-linked (tape): a pure
+        // resample + a speed-scaled head EQ, no phase-vocoder artifacts. The
+        // `phase_vocoder` and `granular` characters are scaffolds — they fall
+        // through to the clean spectral path for now (relocate_transients is a
+        // documented no-op until the seam-clean relocation lands).
+        if (opts.character == StretchCharacter::varispeed)
+            return varispeed_render(in, in_frames, out, out_frames, opts.time_ratio);
+
         // Linked / vinyl mode: pure high-quality resample. Output sample i reads
         // input position i/ratio at a constant rate, so pitch tracks tempo
         // exactly (factor 1/ratio) and the output is exactly `expected` frames by
@@ -355,6 +381,96 @@ private:
         return Interpolator::sinc6(frac, at(i0 - 2), at(i0 - 1), at(i0),
                                    at(i0 + 1), at(i0 + 2), at(i0 + 3));
     }
+
+    // Varispeed (tape) render: pitch+time LINKED. Output sample i reads input
+    // position i/ratio at a constant rate (a pure mastering-grade resample — no
+    // phase-vocoder artifacts), then a speed-scaled head EQ colours it like a tape
+    // machine at that speed. Slowing down (ratio>1) loses highs and gains low-mid
+    // warmth; speeding up (ratio<1) brightens and thins. Exact identity at ratio 1.
+    bool varispeed_render(const float* const* in, long in_frames,
+                          float* const* out, long out_frames, double ratio) {
+        for (int c = 0; c < channels_; ++c)
+            for (long i = 0; i < out_frames; ++i)
+                out[c][i] = sample_sinc6(in[c], in_frames,
+                                         static_cast<double>(i) / ratio);
+        apply_head_eq(out, out_frames, ratio);
+        // Mandatory short end-fade (tape doesn't hard-cut). A bare resample of a
+        // source that ends mid-ring leaves an audible tick; a ~10 ms raised-cosine
+        // tail (+ 2 ms head) removes it and suits the tape character. Skipped at
+        // ratio 1 to keep varispeed an exact identity there.
+        if (ratio != 1.0) {
+            const double sr = sample_rate_ > 0 ? sample_rate_ : 48000.0;
+            const long fo = std::min<long>(static_cast<long>(0.010 * sr), out_frames / 4);
+            const long fi = std::min<long>(static_cast<long>(0.002 * sr), out_frames / 4);
+            constexpr double kPi = 3.14159265358979323846;
+            for (int c = 0; c < channels_; ++c) {
+                for (long i = 0; i < fi; ++i)
+                    out[c][i] *= static_cast<float>(0.5 - 0.5 * std::cos(kPi * i / fi));
+                for (long i = 0; i < fo; ++i)
+                    out[c][out_frames-1-i] *= static_cast<float>(0.5 - 0.5 * std::cos(kPi * i / fo));
+            }
+        }
+        return true;
+    }
+
+    // Speed-scaled tape head EQ: a low-mid head bump (warmth) + a head-gap HF
+    // shelf (dulling), both scaled by log2(ratio) so the colour tracks the speed.
+    // At ratio 1 every gain is 0 dB → exact bypass (varispeed stays a clean
+    // identity at unity). Two cascaded RBJ biquads per channel, double state.
+    void apply_head_eq(float* const* out, long n, double ratio) {
+        if (ratio == 1.0 || n <= 0) return; // unity = transparent
+        const double oct = std::log2(ratio);            // +1 per octave slower
+        const double sr = sample_rate_ > 0 ? sample_rate_ : 48000.0;
+        // Low-mid head bump (peaking) and head-gap HF loss (high shelf), clamped.
+        const double low_db = std::clamp(2.0 * oct, -3.0, 5.0);   // warmth when slow
+        const double hi_db  = std::clamp(-3.5 * oct, -10.0, 6.0); // dull when slow
+        Biquad bump = Biquad::peaking(140.0, 0.8, low_db, sr);
+        Biquad shelf = Biquad::high_shelf(4000.0, hi_db, sr);
+        for (int c = 0; c < channels_; ++c) {
+            bump.reset(); shelf.reset();
+            for (long i = 0; i < n; ++i) {
+                double s = static_cast<double>(out[c][i]);
+                s = bump.process(s);
+                s = shelf.process(s);
+                out[c][i] = static_cast<float>(s);
+            }
+        }
+    }
+
+    // Minimal RBJ biquad (double precision) for the head EQ. Direct-form I.
+    struct Biquad {
+        double b0 = 1, b1 = 0, b2 = 0, a1 = 0, a2 = 0;
+        double x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+        void reset() { x1 = x2 = y1 = y2 = 0; }
+        double process(double x) {
+            const double y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+            x2 = x1; x1 = x; y2 = y1; y1 = y; return y;
+        }
+        static Biquad from(double b0, double b1, double b2, double a0, double a1, double a2) {
+            Biquad q; q.b0 = b0 / a0; q.b1 = b1 / a0; q.b2 = b2 / a0;
+            q.a1 = a1 / a0; q.a2 = a2 / a0; return q;
+        }
+        static Biquad peaking(double f0, double q, double gain_db, double sr) {
+            const double A = std::pow(10.0, gain_db / 40.0);
+            const double w0 = 2.0 * 3.14159265358979323846 * f0 / sr;
+            const double cw = std::cos(w0), sw = std::sin(w0), alpha = sw / (2.0 * q);
+            return from(1 + alpha * A, -2 * cw, 1 - alpha * A,
+                        1 + alpha / A, -2 * cw, 1 - alpha / A);
+        }
+        static Biquad high_shelf(double f0, double gain_db, double sr) {
+            const double A = std::pow(10.0, gain_db / 40.0);
+            const double w0 = 2.0 * 3.14159265358979323846 * f0 / sr;
+            const double cw = std::cos(w0), sw = std::sin(w0);
+            const double alpha = sw / 2.0 * std::sqrt((A + 1 / A) * (1 / 0.9 - 1) + 2);
+            const double tsa = 2.0 * std::sqrt(A) * alpha;
+            return from(A * ((A + 1) + (A - 1) * cw + tsa),
+                        -2 * A * ((A - 1) + (A + 1) * cw),
+                        A * ((A + 1) + (A - 1) * cw - tsa),
+                        (A + 1) - (A - 1) * cw + tsa,
+                        2 * ((A - 1) - (A + 1) * cw),
+                        (A + 1) - (A - 1) * cw - tsa);
+        }
+    };
 
     // Measure the engine's input-domain time-stretch anchor L: an impulse at P
     // synthesizes its peak at (P - L)*r + L, so L = (P*r - peak)/(r - 1). Done
