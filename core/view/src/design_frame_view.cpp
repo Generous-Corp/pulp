@@ -410,7 +410,8 @@ float DesignFrameView::element_value(int i) const {
         case DesignFrameElement::Kind::knob:
         case DesignFrameElement::Kind::fader:
         case DesignFrameElement::Kind::toggle:
-            return e.value;
+        case DesignFrameElement::Kind::xy_pad:
+            return e.value;  // xy_pad: the X axis (value_y via the element directly)
         case DesignFrameElement::Kind::dropdown:
         case DesignFrameElement::Kind::tab_group:
         case DesignFrameElement::Kind::stepper: {
@@ -449,7 +450,8 @@ void DesignFrameView::set_element_value(int i, float v) {
         case DesignFrameElement::Kind::knob:
         case DesignFrameElement::Kind::fader:
         case DesignFrameElement::Kind::toggle:
-            e.value = std::clamp(v, 0.0f, 1.0f);
+        case DesignFrameElement::Kind::xy_pad:
+            e.value = std::clamp(v, 0.0f, 1.0f);  // xy_pad: sets X; value_y unchanged
             request_repaint();
             break;
         case DesignFrameElement::Kind::dropdown:
@@ -529,6 +531,13 @@ void DesignFrameView::paint(canvas::Canvas& canvas) {
                 const float target_y = e.y + (1.0f - e.value) * e.h;
                 wrap_thumb_translation(s, e.needle_d, 0.0f, target_y - e.cy);
             }
+        }
+        else if (e.kind == DesignFrameElement::Kind::xy_pad && !e.needle_d.empty()) {
+            // 2D puck: translate the puck element to (value, value_y) within the
+            // pad rect [x,y,w,h]. value 0→left/1→right, value_y 0→top/1→bottom.
+            const float target_x = e.x + e.value * e.w;
+            const float target_y = e.y + e.value_y * e.h;
+            wrap_thumb_translation(s, e.needle_d, target_x - e.cx, target_y - e.cy);
         }
         else if (e.kind == DesignFrameElement::Kind::toggle && !e.needle_d.empty()) {
             // A toggle WITH a dot marker is a switch: the baked dot position
@@ -698,6 +707,7 @@ int DesignFrameView::hit_element(Point pos) const {
         if (e.kind != DesignFrameElement::Kind::swap &&
             e.kind != DesignFrameElement::Kind::action &&
             e.kind != DesignFrameElement::Kind::fader &&
+            e.kind != DesignFrameElement::Kind::xy_pad &&
             e.kind != DesignFrameElement::Kind::toggle) continue;
         if (sx >= e.x && sx < e.x + e.w && sy >= e.y && sy < e.y + e.h) return i;
     }
@@ -755,6 +765,19 @@ void DesignFrameView::on_mouse_down(Point pos) {
         if (on_gesture_begin) on_gesture_begin(drag_);  // note-on
         return;
     }
+    if (elements_[drag_].kind == DesignFrameElement::Kind::xy_pad) {
+        // Jump the puck to the click; the drag then tracks it absolutely.
+        const auto t = panel_transform(local_bounds());
+        if (t.scale > 0.0f) {
+            auto& e = elements_[drag_];
+            const float sx = panel_x_ + (pos.x - t.ox) / t.scale;
+            const float sy = panel_y_ + (pos.y - t.oy) / t.scale;
+            e.value   = std::clamp((sx - e.x) / e.w, 0.0f, 1.0f);
+            e.value_y = std::clamp((sy - e.y) / e.h, 0.0f, 1.0f);
+            request_repaint();
+            if (on_element_changed) on_element_changed(drag_, e.value);
+        }
+    }
     drag_start_x_ = pos.x;
     drag_start_y_ = pos.y;
     drag_start_value_ = elements_[drag_].value;
@@ -777,6 +800,20 @@ void DesignFrameView::on_mouse_drag(Point pos) {
             if (on_gesture_begin) on_gesture_begin(hit);  // note-on (new)
         }
         request_repaint();
+        return;
+    }
+    if (elements_[drag_].kind == DesignFrameElement::Kind::xy_pad) {
+        // 2D puck: track the cursor absolutely within the pad rect.
+        const auto t = panel_transform(local_bounds());
+        if (t.scale > 0.0f) {
+            auto& e = elements_[drag_];
+            const float sx = panel_x_ + (pos.x - t.ox) / t.scale;
+            const float sy = panel_y_ + (pos.y - t.oy) / t.scale;
+            e.value   = std::clamp((sx - e.x) / e.w, 0.0f, 1.0f);
+            e.value_y = std::clamp((sy - e.y) / e.h, 0.0f, 1.0f);
+            request_repaint();
+            if (on_element_changed) on_element_changed(drag_, e.value);
+        }
         return;
     }
     // Knob/fader vertical drag: convert from view px into panel (design) space

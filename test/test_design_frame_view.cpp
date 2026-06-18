@@ -692,6 +692,50 @@ TEST_CASE("DesignFrameView tints a toggle when it is on",
     CHECK(cmp.similarity < 0.999f);   // the active tint appears
 }
 
+TEST_CASE("DesignFrameView xy_pad puck follows a 2D drag",
+          "[view][design-import][frame]") {
+    // Dragging inside an xy_pad rect moves the puck absolutely: value=X, value_y=Y.
+    DesignFrameElement xy;
+    xy.kind = DesignFrameElement::Kind::xy_pad;
+    xy.needle_d = "id=\"puck\"";
+    xy.cx = 30; xy.cy = 30; xy.x = 20; xy.y = 20; xy.w = 60; xy.h = 60;
+    DesignFrameView v(make_design_svg(), {xy});
+    v.set_bounds({0, 0, 100, 100});
+    v.on_mouse_down({30, 30});
+    v.on_mouse_drag({78, 78});   // SVG ~(78,78): value≈(78-20)/60≈0.97
+    CHECK(v.element_value(0) > 0.8f);
+    v.on_mouse_drag({22, 22});   // back toward top-left
+    CHECK(v.element_value(0) < 0.2f);
+}
+
+TEST_CASE("DesignFrameView xy_pad puck renders at its 2D position",
+          "[view][design-import][frame][svg]") {
+    const std::string svg =
+        R"SVG(<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg">)SVG"
+        R"SVG(<rect x="10" y="10" width="80" height="80" fill="#222222"/>)SVG"
+        R"SVG(<rect x="20" y="20" width="60" height="60" rx="4" fill="#333333"/>)SVG"
+        R"SVG(<circle id="puck" cx="30" cy="30" r="6" fill="#F56161"/></svg>)SVG";
+    DesignFrameElement a;
+    a.kind = DesignFrameElement::Kind::xy_pad;
+    a.needle_d = "id=\"puck\"";
+    a.cx = 30; a.cy = 30; a.x = 20; a.y = 20; a.w = 60; a.h = 60;
+    DesignFrameElement b = a;
+    a.value = 0.1f; a.value_y = 0.1f;   // puck top-left
+    b.value = 0.9f; b.value_y = 0.9f;   // puck bottom-right
+    DesignFrameView va(svg, {a}, 0, 0, 100, 100), vb(svg, {b}, 0, 0, 100, 100);
+    va.set_bounds({0, 0, 100, 100});
+    vb.set_bounds({0, 0, 100, 100});
+    auto pa = render_to_png(va, 100, 100, 2.0f, ScreenshotBackend::skia);
+    if (pa.empty()) SKIP("Skia raster screenshot backend unavailable");
+    auto pb = render_to_png(vb, 100, 100, 2.0f, ScreenshotBackend::skia);
+    REQUIRE_FALSE(pb.empty());
+    const auto cmp = compare_screenshots(pa, pb);
+    REQUIRE(cmp.valid);
+    if (cmp.similarity >= 0.999f)
+        SKIP("SVG (SkSVGDOM) rendering unavailable in this build");
+    CHECK(cmp.similarity < 0.999f);   // the puck moved diagonally
+}
+
 TEST_CASE("DesignFrameView slides a switch dot to the on-side when toggled",
           "[view][design-import][frame][svg]") {
     // A toggle WITH a dot marker (needle_d) is a switch: the dot slides along
