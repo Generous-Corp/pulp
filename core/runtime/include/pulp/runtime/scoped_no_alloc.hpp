@@ -22,11 +22,9 @@ namespace pulp::runtime {
 /// * The guard is a no-op in @c NDEBUG so it costs nothing in
 ///   release builds — same shape as @c PULP_DBG_ASSERT.
 ///
-/// Mirrors JUCE's @c JUCE_FORCE_DEBUG_ALLOCATIONS pattern and
-/// dedicated RT-safety libraries like radsan.
-///
-/// Sliced after sudara "Big List of JUCE Tips" #28: treat paint
-/// like the audio thread.
+/// Follows the same approach as dedicated RT-safety libraries like
+/// radsan, built on the principle that UI paint should be treated as
+/// carefully as the audio thread.
 class ScopedNoAlloc {
 public:
     // The ctor/dtor symbols are ALWAYS defined out-of-line so the

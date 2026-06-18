@@ -4,8 +4,8 @@
 // lives under <build>/generated/pulp/runtime/build_info.hpp and is
 // included via the standard `<pulp/runtime/build_info.hpp>` path.
 //
-// Per sudara "Big List of JUCE Tips" #9: a build stamp visible in
-// the running app is the cheapest "which version is this?" tool.
+// A build stamp visible in the running app is the cheapest
+// "which version is this?" tool.
 //
 #pragma once
 

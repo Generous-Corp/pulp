@@ -21,4 +21,4 @@ Types covered today:
 Adding a new type? Match its name in both files and keep them in
 sync — the natvis side runs MSVC's expression engine and the LLDB
 side runs Python, so they're parallel implementations, not shared
-code. Per sudara "Big List of JUCE Tips" #21.
+code.

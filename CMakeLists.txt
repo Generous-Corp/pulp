@@ -172,8 +172,6 @@ endif()
 # generator expression — these are the static-link variants. CMake
 # 3.15+ honors this via CMP0091 (set automatically by our minimum
 # version 3.24).
-#
-# Per sudara "Big List of JUCE Tips and Tricks" #27.
 if(MSVC)
     set(CMAKE_MSVC_RUNTIME_LIBRARY
         "MultiThreaded$<$<CONFIG:Debug>:Debug>"
