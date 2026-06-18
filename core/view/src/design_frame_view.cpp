@@ -590,8 +590,8 @@ void DesignFrameView::paint(canvas::Canvas& canvas) {
         const float rx = t.ox + (e.x - panel_x_) * t.scale;
         const float ry = t.oy + (e.y - panel_y_) * t.scale;
         const float rw = e.w * t.scale, rh = e.h * t.scale;
-        // Right-align in the rect; baseline ~78% down (cap-height centered).
-        canvas.fill_text(e.text, rx + rw - tw, ry + rh * 0.78f);
+        // Right-align in the rect (left-align if requested); baseline ~78% down.
+        canvas.fill_text(e.text, e.value_left_align ? rx : rx + rw - tw, ry + rh * 0.78f);
     }
 }
 

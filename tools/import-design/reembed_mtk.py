@@ -47,6 +47,11 @@ def neutralize(svg: str) -> str:
             body2 = body.replace("#16DAC2", "#EBEEF1")
         else:
             body2 = body.replace("#16DAC2", "#3A3F47", 1).replace("#16DAC2", "#16191E", 1)
+        # Drop the lit gradient's 0.26-opacity top stop so the neutralized key is
+        # SOLID — matching the resting keys (solid #EBEEF1 / #3A3F47→#16191E). The
+        # leftover 0.26 made a was-lit key's top translucent over the dark bed, so
+        # it read as gray (e.g. a gray E4) next to its solid neighbours.
+        body2 = body2.replace(' stop-opacity="0.26"', '')
         s = m.start("body") - m.start()
         e = m.end("body") - m.start()
         return m.group(0)[:s] + body2 + m.group(0)[e:]

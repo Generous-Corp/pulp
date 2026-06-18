@@ -95,8 +95,12 @@ neutralize, emit the chunked-base64 cpp. Neutralization is content-based, not
 positional — a lit gradient is a `<linearGradient>` with both stops `#16DAC2` +
 a `0.26→1.0` opacity ramp; classify white (gradient y-extent ≥ 65 → `#EBEEF1`)
 vs black (< 65 → `#3A3F47`/`#16191E`) so it survives Figma edits. `--validate`
-asserts the decoded SVGs still match the committed file; it reproduces the prior
-hand-tuned embed byte-exact. **Gotcha:** removing a toolbar element (e.g. the
+asserts the decoded SVGs still match the committed file. **Gotcha — strip the
+opacity:** the lit gradient's top stop is `0.26` opacity (the design's press
+fade). Neutralization must REMOVE that `stop-opacity="0.26"`, not just swap the
+hex — a resting key is SOLID `#EBEEF1`, so a was-lit key that keeps the `0.26`
+renders translucent over the dark bed and reads GRAY beside its solid neighbours
+(the "gray E4" report). **Gotcha — reflow:** removing a toolbar element (e.g. the
 top-right OCTAVE/VEL cluster) lets Figma's flex REFLOW siblings — the overview
 strip widened (right edge 151→677) and the `>` arrow moved (~550→689). Any
 hardcoded element/overlay coords in `musical_typing_keyboard.cpp` (strip bounds,
