@@ -59,7 +59,7 @@ void wrap_needle_rotation(std::string& svg, const std::string& needle_d,
                           float angle_deg, float cx, float cy) {
     const auto dp = svg.find(needle_d);
     if (dp == std::string::npos) return;
-    const auto start = svg.rfind("<path", dp);
+    const auto start = svg.rfind('<', dp);  // element start, any tag (rect/line/path)
     auto end = svg.find("/>", dp);
     if (start == std::string::npos || end == std::string::npos) return;
     end += 2;
@@ -67,6 +67,22 @@ void wrap_needle_rotation(std::string& svg, const std::string& needle_d,
     std::snprintf(open, sizeof(open), "<g transform=\"rotate(%.3f %.3f %.3f)\">",
                   angle_deg, cx, cy);
     svg.insert(end, "</g>");      // close first so `start` stays valid
+    svg.insert(start, open);
+}
+
+// Wrap the element containing `marker` in an SVG translate(dx, dy) — the fader
+// analog of wrap_needle_rotation (moves a thumb without disturbing the chrome).
+void wrap_thumb_translation(std::string& svg, const std::string& marker,
+                            float dx, float dy) {
+    const auto dp = svg.find(marker);
+    if (dp == std::string::npos) return;
+    const auto start = svg.rfind('<', dp);
+    auto end = svg.find("/>", dp);
+    if (start == std::string::npos || end == std::string::npos) return;
+    end += 2;
+    char open[96];
+    std::snprintf(open, sizeof(open), "<g transform=\"translate(%.3f %.3f)\">", dx, dy);
+    svg.insert(end, "</g>");
     svg.insert(start, open);
 }
 
@@ -392,6 +408,8 @@ float DesignFrameView::element_value(int i) const {
     const auto& e = elements_[i];
     switch (e.kind) {
         case DesignFrameElement::Kind::knob:
+        case DesignFrameElement::Kind::fader:
+        case DesignFrameElement::Kind::toggle:
             return e.value;
         case DesignFrameElement::Kind::dropdown:
         case DesignFrameElement::Kind::tab_group:
@@ -429,7 +447,10 @@ void DesignFrameView::set_element_value(int i, float v) {
     auto& e = elements_[i];
     switch (e.kind) {
         case DesignFrameElement::Kind::knob:
+        case DesignFrameElement::Kind::fader:
+        case DesignFrameElement::Kind::toggle:
             e.value = std::clamp(v, 0.0f, 1.0f);
+            request_repaint();
             break;
         case DesignFrameElement::Kind::dropdown:
         case DesignFrameElement::Kind::tab_group:
@@ -493,9 +514,16 @@ DesignFrameView::PanelTransform DesignFrameView::panel_transform(const Rect& b) 
 void DesignFrameView::paint(canvas::Canvas& canvas) {
     if (svg_.empty() || panel_w_ <= 0 || panel_h_ <= 0) return;
     std::string s = svg_;
-    for (const auto& e : elements_)
+    for (const auto& e : elements_) {
         if (e.kind == DesignFrameElement::Kind::knob && !e.needle_d.empty())
             wrap_needle_rotation(s, e.needle_d, (e.value - 0.5f) * kSweepDeg, e.cx, e.cy);
+        else if (e.kind == DesignFrameElement::Kind::fader && !e.needle_d.empty()) {
+            // Translate the thumb: value 1 → track top (e.y), value 0 → bottom
+            // (e.y + e.h). e.cy is the thumb's baked center y.
+            const float target_y = e.y + (1.0f - e.value) * e.h;
+            wrap_thumb_translation(s, e.needle_d, 0.0f, target_y - e.cy);
+        }
+    }
     const auto t = panel_transform(local_bounds());
     if (t.scale <= 0) return;
     // Map the panel's top-left (panel_x_, panel_y_) to (ox, oy) at `scale`; the
@@ -503,6 +531,29 @@ void DesignFrameView::paint(canvas::Canvas& canvas) {
     // transform hit_element() inverts, so knobs are hit where they're drawn.
     canvas.draw_svg(s, t.ox - panel_x_ * t.scale, t.oy - panel_y_ * t.scale,
                     svg_w_ * t.scale, svg_h_ * t.scale);
+
+    // Toggle buttons tint their rect when on, translucent over the baked chrome
+    // so the S/M/icon label shows through.
+    for (const auto& e : elements_) {
+        if (e.kind != DesignFrameElement::Kind::toggle || e.value < 0.5f) continue;
+        // Active tint: the design's own colour when it provides one (keeps
+        // faithful imports pixel-true), else the theme accent so a reskin
+        // recolours unspecified toggles instead of a baked-in default.
+        const auto accent = resolve_color("accent.primary", canvas::Color::rgba8(20, 184, 166));
+        unsigned r = accent.r8(), g = accent.g8(), b = accent.b8();
+        if (e.bg_color.size() == 7 && e.bg_color[0] == '#') {
+            r = std::strtoul(e.bg_color.substr(1, 2).c_str(), nullptr, 16);
+            g = std::strtoul(e.bg_color.substr(3, 2).c_str(), nullptr, 16);
+            b = std::strtoul(e.bg_color.substr(5, 2).c_str(), nullptr, 16);
+        }
+        // r/g/b come from the design colour or the theme accent above; 0x9c is
+        // the translucency over the baked chrome (not a hardcoded theme colour).
+        canvas.set_fill_color(canvas::Color::rgba8(static_cast<uint8_t>(r),  // token-lint:allow
+                              static_cast<uint8_t>(g), static_cast<uint8_t>(b), 0x9c));
+        canvas.fill_rounded_rect(t.ox + (e.x - panel_x_) * t.scale,
+                                 t.oy + (e.y - panel_y_) * t.scale,
+                                 e.w * t.scale, e.h * t.scale, 2.0f * t.scale);
+    }
 
     // Native overlay highlight for lit momentary keys (value>0.5): the accent
     // fill of the key's exact shape, drawn ON TOP of the baked SVG (we never
@@ -629,7 +680,9 @@ int DesignFrameView::hit_element(Point pos) const {
     for (int i = 0; i < static_cast<int>(elements_.size()); ++i) {
         const auto& e = elements_[i];
         if (e.kind != DesignFrameElement::Kind::swap &&
-            e.kind != DesignFrameElement::Kind::action) continue;
+            e.kind != DesignFrameElement::Kind::action &&
+            e.kind != DesignFrameElement::Kind::fader &&
+            e.kind != DesignFrameElement::Kind::toggle) continue;
         if (sx >= e.x && sx < e.x + e.w && sy >= e.y && sy < e.y + e.h) return i;
     }
 
@@ -670,6 +723,14 @@ void DesignFrameView::on_mouse_down(Point pos) {
         if (on_action) on_action(elements_[hit].action);
         return;
     }
+    if (hit >= 0 && elements_[hit].kind == DesignFrameElement::Kind::toggle) {
+        // Click-to-flip; no drag.
+        auto& e = elements_[hit];
+        e.value = e.value >= 0.5f ? 0.0f : 1.0f;
+        request_repaint();
+        if (on_element_changed) on_element_changed(hit, e.value);
+        return;
+    }
     drag_ = hit;
     if (drag_ < 0) return;
     if (elements_[drag_].kind == DesignFrameElement::Kind::momentary) {
@@ -701,12 +762,15 @@ void DesignFrameView::on_mouse_drag(Point pos) {
         request_repaint();
         return;
     }
-    // Knob vertical drag: convert from view px into panel (design) space via the
-    // same scale, so the turn sensitivity feels identical at any window size.
+    // Knob/fader vertical drag: convert from view px into panel (design) space
+    // via the same scale, so sensitivity feels identical at any window size. A
+    // fader tracks the cursor 1:1 over its travel; a knob uses a fixed turn rate.
     const float scale = panel_transform(local_bounds()).scale;
     const float dy_design = scale > 0.0f ? (drag_start_y_ - pos.y) / scale : 0.0f;
-    elements_[drag_].value =
-        std::clamp(drag_start_value_ + dy_design * 0.005f, 0.0f, 1.0f);
+    auto& el = elements_[drag_];
+    const float sens = (el.kind == DesignFrameElement::Kind::fader && el.h > 0.0f)
+                           ? 1.0f / el.h : 0.005f;
+    el.value = std::clamp(drag_start_value_ + dy_design * sens, 0.0f, 1.0f);
     request_repaint();
     // User-driven turn -> notify the binder (knob is value-bearing).
     if (on_element_changed) on_element_changed(drag_, elements_[drag_].value);

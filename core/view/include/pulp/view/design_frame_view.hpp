@@ -31,8 +31,12 @@ struct DesignFrameElement {
     // `value_label` is a live read-only text overlay: it paints `text` over its
     // rect (replacing a baked readout glyph that build suppresses), updated via
     // set_element_text — e.g. an "OCTAVE C2" value that must track state.
-    enum class Kind { knob, text_field, dropdown, tab_group, stepper, momentary,
-                      swap, action, value_label };
+    // `fader` is SVG-patch like `knob` but TRANSLATES its thumb element
+    // (needle_d) vertically by value over the track [y, y+h]; cy = the thumb's
+    // baked center. `toggle` is a click-to-flip button that tints its rect
+    // (bg_color, value>=0.5=on) over the baked chrome so the label shows through.
+    enum class Kind { knob, fader, toggle, text_field, dropdown, tab_group,
+                      stepper, momentary, swap, action, value_label };
 
     Kind kind = Kind::knob;
 

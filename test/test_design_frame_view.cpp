@@ -543,3 +543,130 @@ TEST_CASE("DesignFrameView exposes a choice control as a normalized param",
     v.set_element_value(0, 0.0f);
     CHECK(v.element_value(0) == Catch::Approx(0.0f));
 }
+
+// ── fader / toggle (faithful-vector overlay kinds reusing Pulp widgets) ──────
+
+TEST_CASE("DesignFrameView fader drag adjusts the value", "[view][design-import][frame]") {
+    // A fader thumb on a track [y=20, y+h=60]; dragging up raises the value 1:1.
+    DesignFrameElement f;
+    f.kind = DesignFrameElement::Kind::fader;
+    f.needle_d = "M50 38L50 30";   // any marker; value logic is independent of it
+    f.cy = 40; f.x = 30; f.y = 20; f.w = 20; f.h = 40;
+    f.value = 0.5f;
+    DesignFrameView v(make_design_svg(), {f});
+    v.set_bounds({0, 0, 80, 80});  // view->SVG offset is the panel origin (+10)
+    v.on_mouse_down({30, 30});     // -> SVG (40,40), inside the fader rect
+    v.on_mouse_drag({30, 10});     // drag up 20 design px over a 40px track
+    CHECK(v.element_value(0) > 0.9f);
+    v.on_mouse_up({30, 10});
+
+    // Drag down lowers it.
+    v.set_element_value(0, 0.5f);
+    v.on_mouse_down({30, 30});
+    v.on_mouse_drag({30, 50});
+    CHECK(v.element_value(0) < 0.1f);
+}
+
+TEST_CASE("DesignFrameView toggle click flips on/off", "[view][design-import][frame]") {
+    DesignFrameElement t;
+    t.kind = DesignFrameElement::Kind::toggle;
+    t.x = 30; t.y = 30; t.w = 20; t.h = 20;
+    t.value = 0.0f;
+    DesignFrameView v(make_design_svg(), {t});
+    v.set_bounds({0, 0, 80, 80});
+    v.on_mouse_down({30, 30}); v.on_mouse_up({30, 30});   // -> SVG (40,40), inside
+    CHECK(v.element_value(0) == 1.0f);                    // flipped on
+    v.on_mouse_down({30, 30}); v.on_mouse_up({30, 30});
+    CHECK(v.element_value(0) == 0.0f);                    // flipped off
+}
+
+TEST_CASE("DesignFrameView paints a fader thumb that translates with value",
+          "[view][design-import][frame][svg]") {
+    // The fader paint path translates the thumb element by value (the fader
+    // analog of needle rotation). Render two values; the thumb must visibly move.
+    const std::string svg =
+        R"SVG(<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg">)SVG"
+        R"SVG(<rect x="10" y="10" width="80" height="80" fill="#222222"/>)SVG"
+        R"SVG(<rect x="46" y="20" width="8" height="60" rx="4" fill="#444444"/>)SVG"
+        R"SVG(<path id="fader thumb" d="M44 48L56 48L56 52L44 52Z" fill="white"/></svg>)SVG";
+    DesignFrameElement f;
+    f.kind = DesignFrameElement::Kind::fader;
+    f.needle_d = "id=\"fader thumb\"";   // marker into the thumb element
+    f.cy = 50; f.x = 40; f.y = 20; f.w = 16; f.h = 60;  // baked center + track
+    DesignFrameView lo(svg, {f}, 0, 0, 100, 100), hi(svg, {f}, 0, 0, 100, 100);
+    lo.set_bounds({0, 0, 100, 100});
+    hi.set_bounds({0, 0, 100, 100});
+    lo.set_element_value(0, 0.1f);    // thumb near the bottom
+    hi.set_element_value(0, 0.9f);    // thumb near the top
+    auto lo_png = render_to_png(lo, 100, 100, 2.0f, ScreenshotBackend::skia);
+    if (lo_png.empty()) SKIP("Skia raster screenshot backend unavailable");
+    auto hi_png = render_to_png(hi, 100, 100, 2.0f, ScreenshotBackend::skia);
+    REQUIRE_FALSE(hi_png.empty());
+    const auto cmp = compare_screenshots(lo_png, hi_png);
+    REQUIRE(cmp.valid);
+    if (cmp.similarity >= 0.999f)
+        SKIP("SVG (SkSVGDOM) rendering unavailable in this build");
+    CHECK(cmp.similarity < 0.999f);   // the thumb visibly translated
+}
+
+TEST_CASE("DesignFrameView tints a toggle when it is on",
+          "[view][design-import][frame][svg]") {
+    // Toggle paint tints the rect translucently when value>=0.5. Two toggles
+    // exercise both tint sources: the design's own colour and the theme-accent
+    // default (used when the design supplies none).
+    const std::string svg =
+        R"SVG(<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg">)SVG"
+        R"SVG(<rect x="10" y="10" width="80" height="80" fill="#222222"/></svg>)SVG";
+    DesignFrameElement branded;       // design supplies the active colour
+    branded.kind = DesignFrameElement::Kind::toggle;
+    branded.x = 14; branded.y = 14; branded.w = 36; branded.h = 72;
+    branded.bg_color = "#33aa88";
+    DesignFrameElement themed;        // no colour → theme-accent default tint
+    themed.kind = DesignFrameElement::Kind::toggle;
+    themed.x = 50; themed.y = 14; themed.w = 36; themed.h = 72;
+    DesignFrameView off(svg, {branded, themed}, 0, 0, 100, 100);
+    DesignFrameView on(svg, {branded, themed}, 0, 0, 100, 100);
+    off.set_bounds({0, 0, 100, 100});
+    on.set_bounds({0, 0, 100, 100});
+    off.set_element_value(0, 0.0f);   // both off → no tint (default value is 0.5)
+    off.set_element_value(1, 0.0f);
+    on.set_element_value(0, 1.0f);    // both on → both tint
+    on.set_element_value(1, 1.0f);
+    auto off_png = render_to_png(off, 100, 100, 2.0f, ScreenshotBackend::skia);
+    if (off_png.empty()) SKIP("Skia raster screenshot backend unavailable");
+    auto on_png = render_to_png(on, 100, 100, 2.0f, ScreenshotBackend::skia);
+    REQUIRE_FALSE(on_png.empty());
+    const auto cmp = compare_screenshots(off_png, on_png);
+    REQUIRE(cmp.valid);
+    if (cmp.similarity >= 0.999f)
+        SKIP("raster rendering unavailable in this build");
+    CHECK(cmp.similarity < 0.999f);   // the active tint appears
+}
+
+TEST_CASE("DesignFrameView rotates a <rect> indicator needle (tag-agnostic)",
+          "[view][design-import][frame][svg]") {
+    // wrap_needle_rotation must rotate a <rect> indicator, not only a <path>.
+    const std::string svg =
+        R"SVG(<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg">)SVG"
+        R"SVG(<rect x="10" y="10" width="80" height="80" rx="4" fill="#cccccc"/>)SVG"
+        R"SVG(<circle cx="50" cy="50" r="20" fill="#8a97a6"/>)SVG"
+        R"SVG(<rect id="knob indicator" x="49" y="32" width="2" height="10" fill="white"/></svg>)SVG";
+    DesignFrameElement k;
+    k.kind = DesignFrameElement::Kind::knob;
+    k.cx = 50; k.cy = 50; k.hit_radius = 22;
+    k.needle_d = "id=\"knob indicator\"";   // marker into the <rect>, not a path d
+    DesignFrameView lo(svg, {k}), hi(svg, {k});
+    lo.set_bounds({0, 0, 80, 80});
+    hi.set_bounds({0, 0, 80, 80});
+    lo.set_element_value(0, 0.1f);
+    hi.set_element_value(0, 0.9f);
+    auto lo_png = render_to_png(lo, 80, 80, 2.0f, ScreenshotBackend::skia);
+    if (lo_png.empty()) SKIP("Skia raster screenshot backend unavailable");
+    auto hi_png = render_to_png(hi, 80, 80, 2.0f, ScreenshotBackend::skia);
+    REQUIRE_FALSE(hi_png.empty());
+    const auto cmp = compare_screenshots(lo_png, hi_png);
+    REQUIRE(cmp.valid);
+    if (cmp.similarity >= 0.999f)
+        SKIP("SVG (SkSVGDOM) rendering unavailable in this build");
+    CHECK(cmp.similarity < 0.999f);         // the rect needle visibly moved
+}
