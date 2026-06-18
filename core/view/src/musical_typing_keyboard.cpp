@@ -532,8 +532,11 @@ std::string c_label(int midi) { return "C" + std::to_string(midi / 12 - 2); }
 
 void MusicalTypingKeyboard::strip_bounds(float& x0, float& x1) const {
     // The ribbon is centered in the toolbar; each frame's natural width differs.
-    if (active_frame() == kTypingFrame) { x0 = 170.0f; x1 = 560.0f; }
-    else                                { x0 = 141.0f; x1 = 589.0f; }
+    // Exact strip-background rect edges (the white rounded rect), so the ruler,
+    // cover, and highlight fill it fully — at the top window the highlight then
+    // reaches the strip's right edge instead of leaving a sliver.
+    if (active_frame() == kTypingFrame) { x0 = 168.531f; x1 = 559.469f; }
+    else                                { x0 = 138.41f;  x1 = 589.59f; }
 }
 
 bool MusicalTypingKeyboard::point_over_strip(Point pos, float& panel_x) const {

@@ -533,6 +533,19 @@ void DesignFrameView::paint(canvas::Canvas& canvas) {
         const float rx = t.ox + (e.x - panel_x_) * t.scale;
         const float ry = t.oy + (e.y - panel_y_) * t.scale;
         const float rw = e.w * t.scale, rh = e.h * t.scale;
+
+        // Control buttons (note < 0: octave/velocity/< >/pitch-bend/modulation/
+        // sustain) are fully-rounded buttons, NOT piano keys — give them a
+        // rounded-rect press highlight on ALL corners. The key-shape path below
+        // (square top, rounded bottom, top notches) is for the actual keys; using
+        // it on a rounded button left a square top that read as "cut off".
+        if (e.note < 0) {
+            const float cr = std::min({6.0f * t.scale, rw * 0.5f, rh * 0.5f});
+            canvas.set_fill_gradient_linear(rx, ry, rx, ry + rh, grad_cols, grad_pos, 2);
+            canvas.fill_rounded_rect(rx, ry, rw, rh, cr);
+            continue;
+        }
+
         const float r = std::min({kKeyCornerSvg * t.scale, rw * 0.5f, rh * 0.5f});
 
         // Collect every smaller momentary rect (same view) that GENUINELY notches
