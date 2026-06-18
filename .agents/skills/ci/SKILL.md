@@ -81,6 +81,19 @@ Slice 6 (#551).
   in the same change (compress the registration first, then bump by the small
   remaining delta). This is expected, not a smell — unlike source hotspots, the
   fix is to raise the ceiling, not to split the file.
+- **Source hotspots (e.g. `core/view/src/design_cpp_codegen.cpp`) are frozen
+  too — bump the ceiling for a *coherent* feature, split when it's accretion.**
+  `hotspot_size_guard.json` also freezes large source files. When a single,
+  cohesive feature legitimately grows one (e.g. teaching the C++ codegen to emit
+  `faithful_svg` as a `DesignFrameView`), raise that file's `max_loc` in the same
+  PR — splitting a tightly-coupled emitter mid-feature would hurt readability
+  more than the extra LOC. Reserve the split for genuine grab-bag growth.
+  Editing `hotspot_size_guard.json` itself trips the `ci` skill-sync gate; the
+  ceiling bump is normally part of a non-`ci` feature PR, so either fold this
+  note's rationale into that PR or skip the `ci` gate with a
+  `Skill-Update: skip skill=ci reason="ceiling bump only"` trailer on the **tip**
+  commit (note: a later `chore: bump versions` commit from `shipyard pr` displaces
+  the tip, so updating this SKILL is the more robust path).
 - **Reskinnability ratchet (`token-coverage-ratchet` ctest).** Driven by
   `tools/scripts/token_coverage_check.py`: fails if a `core/view/src` paint file
   gains a NEW colour literal that is not a `resolve_color(...)` fallback. Mark a
