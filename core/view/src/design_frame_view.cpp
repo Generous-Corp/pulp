@@ -381,6 +381,12 @@ void DesignFrameView::notify_choice(int i, int selected) {
     if (on_element_changed) on_element_changed(i, choice_to_norm(i, selected));
 }
 
+Rect DesignFrameView::element_rect(int i) const {
+    if (i < 0 || i >= static_cast<int>(elements_.size())) return {0, 0, 0, 0};
+    const auto& e = elements_[i];
+    return {e.x, e.y, e.w, e.h};
+}
+
 float DesignFrameView::element_value(int i) const {
     if (i < 0 || i >= static_cast<int>(elements_.size())) return -1.0f;
     const auto& e = elements_[i];
@@ -527,6 +533,19 @@ void DesignFrameView::paint(canvas::Canvas& canvas) {
         const float rx = t.ox + (e.x - panel_x_) * t.scale;
         const float ry = t.oy + (e.y - panel_y_) * t.scale;
         const float rw = e.w * t.scale, rh = e.h * t.scale;
+
+        // Control buttons (note < 0: octave/velocity/< >/pitch-bend/modulation/
+        // sustain) are fully-rounded buttons, NOT piano keys — give them a
+        // rounded-rect press highlight on ALL corners. The key-shape path below
+        // (square top, rounded bottom, top notches) is for the actual keys; using
+        // it on a rounded button left a square top that read as "cut off".
+        if (e.note < 0) {
+            const float cr = std::min({6.0f * t.scale, rw * 0.5f, rh * 0.5f});
+            canvas.set_fill_gradient_linear(rx, ry, rx, ry + rh, grad_cols, grad_pos, 2);
+            canvas.fill_rounded_rect(rx, ry, rw, rh, cr);
+            continue;
+        }
+
         const float r = std::min({kKeyCornerSvg * t.scale, rw * 0.5f, rh * 0.5f});
 
         // Collect every smaller momentary rect (same view) that GENUINELY notches
@@ -590,8 +609,8 @@ void DesignFrameView::paint(canvas::Canvas& canvas) {
         const float rx = t.ox + (e.x - panel_x_) * t.scale;
         const float ry = t.oy + (e.y - panel_y_) * t.scale;
         const float rw = e.w * t.scale, rh = e.h * t.scale;
-        // Right-align in the rect; baseline ~78% down (cap-height centered).
-        canvas.fill_text(e.text, rx + rw - tw, ry + rh * 0.78f);
+        // Right-align in the rect (left-align if requested); baseline ~78% down.
+        canvas.fill_text(e.text, e.value_left_align ? rx : rx + rw - tw, ry + rh * 0.78f);
     }
 }
 

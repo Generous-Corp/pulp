@@ -83,6 +83,11 @@ struct DesignFrameElement {
     /// (right-aligned to match the design's baked readouts). Updated via
     /// set_element_text.
     std::string text;
+    /// value_label: left-align the text in the rect instead of right-aligning.
+    /// Use for a readout that follows a fixed label (e.g. "PITCH BEND <value>")
+    /// where a variable-width value must grow rightward into empty space, not
+    /// leftward over the label.
+    bool value_left_align = false;
 };
 
 // Remove the first <rect> in `svg` whose x/y/width/height match (within `tol`)
@@ -138,6 +143,10 @@ public:
     int element_note(int i) const {
         return (i >= 0 && i < static_cast<int>(elements_.size())) ? elements_[i].note : -1;
     }
+    // Panel-coord rect (x, y, w, h) of element `i`, or {0,0,0,0}. Lets a subclass
+    // position its own overlay relative to an element (e.g. the piano C-labels
+    // drawn under the C keys, which shift as the window moves).
+    Rect element_rect(int i) const;
     // The `action` id of element `i` (for Kind::action command buttons and the
     // readout tag of Kind::value_label), or empty. Lets a consumer route by id.
     const std::string& element_action(int i) const {
