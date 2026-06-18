@@ -8,6 +8,18 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v04460"></a>
+## [0.446.0] - 2026-06-18
+
+- fix(view): MTK number-row keys + tap-flash on octave/velocity/arrow buttons ([#4158](https://github.com/danielraffel/pulp/pull/4158))
+
+<a id="v04450"></a>
+## [0.445.0] - 2026-06-18
+
+- feat(view): live MTK readouts, c/v velocity keys, focused demo ([#4149](https://github.com/danielraffel/pulp/pull/4149))
+- docs(view): remove framework-name mentions from hosted-view comments ([#4157](https://github.com/danielraffel/pulp/pull/4157))
+- docs: inventory optional developer-only tooling + web-platform standards ([#4156](https://github.com/danielraffel/pulp/pull/4156))
+
 <a id="v04442"></a>
 ## [0.444.2] - 2026-06-17
 
@@ -4530,6 +4542,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.446.0]: https://github.com/danielraffel/pulp/releases/tag/v0.446.0
+[0.445.0]: https://github.com/danielraffel/pulp/releases/tag/v0.445.0
 [0.444.2]: https://github.com/danielraffel/pulp/releases/tag/v0.444.2
 [0.444.1]: https://github.com/danielraffel/pulp/releases/tag/v0.444.1
 [0.444.0]: https://github.com/danielraffel/pulp/releases/tag/v0.444.0
