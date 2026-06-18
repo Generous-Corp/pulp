@@ -767,6 +767,17 @@ Pieces, source-of-truth → runtime:
   node whose name contains the substring (frame-local center from its abs
   bbox), but those carry NO `svg_patch_d` (hit + value, no visual rotation),
   the honest fallback for a knob geometry missed.
+- **Rate limits (REST lane)** — every Figma GET in `figma_rest_export.py` routes
+  through `figma_get()`, which honors the `429 Retry-After` header (capped
+  exponential backoff when absent), retries transient 5xx + read-phase
+  timeouts/resets, and on a terminal 429 raises with the diagnostic headers
+  (rate-limit type / plan tier / upgrade link) instead of a traceback. **Watch
+  out:** `/images?format=svg` (frame SVG) and the PNG captures are Figma **Tier-1**
+  endpoints whose budget depends on the *plan of the file being requested* — a
+  Starter-plan file can throttle a Full-seat token hard. Don't fire ad-hoc
+  validation curls against `/images` next to an export; if you already have the
+  SVG/nodes JSON, feed them back via `--frame-svg` / `--node-json` to spend zero
+  budget on re-runs.
 - **Producer (plugin lane)** — the Figma plugin mirrors the REST lane in
   lockstep, faithful-vector default-on: `extractScene(nodes)` (defaults
   `faithfulVector:true`; pass `false` to opt out) or headless

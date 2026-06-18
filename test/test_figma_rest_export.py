@@ -520,5 +520,103 @@ class ElementLabelTest(unittest.TestCase):
         self.assertNotIn("label", elements[2])  # no overlapping named node
 
 
+class RateLimitRetryTest(unittest.TestCase):
+    """figma_get must honor Figma's 429 Retry-After (and back off) instead of
+    crashing on the first rate-limit — the regression that aborted exports
+    mid-run on the Tier-1 /images endpoint."""
+
+    class _Resp:
+        def __init__(self, body): self._body = body
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self): return self._body
+
+    class _RaiseOnRead:
+        # Models a connection that opens fine but fails mid-stream: urlopen()
+        # returns normally, then r.read() raises (urlopen does NOT wrap this).
+        def __init__(self, exc): self._exc = exc
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self): raise self._exc
+
+    @staticmethod
+    def _http_error(code, headers=None):
+        return frx.urllib.error.HTTPError(
+            "https://api.figma.com/x", code, "err", headers or {}, None)
+
+    def _patch_seq(self, seq):
+        # urlopen side-effect: raise Exception items, return response items.
+        import unittest.mock as mock
+        self.slept = []
+        def side(*a, **k):
+            item = seq.pop(0)
+            if isinstance(item, Exception):
+                raise item
+            return item
+        p1 = mock.patch.object(frx.urllib.request, "urlopen", side_effect=side)
+        p2 = mock.patch.object(frx.time, "sleep", side_effect=lambda s: self.slept.append(s))
+        p1.start(); p2.start()
+        self.addCleanup(p1.stop); self.addCleanup(p2.stop)
+
+    def test_honors_retry_after_then_succeeds(self):
+        self._patch_seq([self._http_error(429, {"Retry-After": "7"}), self._Resp(b"OK")])
+        out = frx.figma_get("https://api.figma.com/x", token="t", what="unit")
+        self.assertEqual(out, b"OK")
+        self.assertEqual(self.slept, [7])  # waited exactly the Retry-After seconds
+
+    def test_backoff_when_no_retry_after_header(self):
+        self._patch_seq([self._http_error(429), self._http_error(429), self._Resp(b"OK")])
+        out = frx.figma_get("https://api.figma.com/x", token="t", what="unit")
+        self.assertEqual(out, b"OK")
+        self.assertEqual(self.slept, [1, 2])  # capped exponential backoff: 2**0, 2**1
+
+    def test_raises_with_diagnostics_after_max_retries(self):
+        err = self._http_error(429, {"X-Figma-Rate-Limit-Type": "high",
+                                     "X-Figma-Plan-Tier": "starter"})
+        self._patch_seq([err, err, err])  # initial try + 2 retries all 429
+        with self.assertRaises(RuntimeError) as ctx:
+            frx.figma_get("https://api.figma.com/x", token="t", what="unit", max_retries=2)
+        msg = str(ctx.exception)
+        self.assertIn("rate-limited", msg)
+        self.assertIn("plan-tier=starter", msg)   # surfaces the documented diagnostics
+        self.assertEqual(len(self.slept), 2)       # retried exactly max_retries times
+
+    def test_5xx_is_retried(self):
+        self._patch_seq([self._http_error(503), self._Resp(b"OK")])
+        self.assertEqual(frx.figma_get("https://api.figma.com/x", what="unit"), b"OK")
+
+    def test_4xx_non_429_is_not_retried(self):
+        self._patch_seq([self._http_error(404)])
+        with self.assertRaises(frx.urllib.error.HTTPError):
+            frx.figma_get("https://api.figma.com/x", what="unit")
+        self.assertEqual(self.slept, [])
+
+    def test_read_phase_timeout_is_retried(self):
+        # urlopen() succeeds but the body read raises a raw TimeoutError (not a
+        # URLError); it must be caught and retried, not fatal.
+        self._patch_seq([self._RaiseOnRead(TimeoutError("read timed out")),
+                         self._Resp(b"OK")])
+        self.assertEqual(frx.figma_get("https://api.figma.com/x", what="unit"), b"OK")
+        self.assertEqual(self.slept, [1])
+
+    def test_connection_reset_is_retried(self):
+        self._patch_seq([self._RaiseOnRead(ConnectionResetError("reset")),
+                         self._Resp(b"OK")])
+        self.assertEqual(frx.figma_get("https://api.figma.com/x", what="unit"), b"OK")
+
+    def test_negative_retry_after_is_clamped_not_crashed(self):
+        # A negative Retry-After (clock skew / bad proxy) must NOT reach
+        # time.sleep (which raises ValueError on negatives) — clamp to 0.
+        self._patch_seq([self._http_error(429, {"Retry-After": "-5"}), self._Resp(b"OK")])
+        out = frx.figma_get("https://api.figma.com/x", token="t", what="unit")
+        self.assertEqual(out, b"OK")
+        self.assertEqual(self.slept, [0])
+
+    def test_absurd_retry_after_is_capped(self):
+        self._patch_seq([self._http_error(429, {"Retry-After": "99999"}), self._Resp(b"OK")])
+        frx.figma_get("https://api.figma.com/x", token="t", what="unit")
+        self.assertEqual(self.slept, [300])  # capped, never sleeps for a day
+
+
 if __name__ == "__main__":
     unittest.main()

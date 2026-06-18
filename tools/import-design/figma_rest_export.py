@@ -24,7 +24,72 @@ Usage:
   # or extract KEY/NODE from a URL:
   figma_rest_export.py --url 'https://figma.com/design/<KEY>/...?node-id=3-42' --out scene.pulp.json
 """
-import argparse, json, os, re, sys, urllib.parse, urllib.request
+import argparse, json, os, re, sys, time, urllib.error, urllib.parse, urllib.request
+
+# ── Rate-limit-aware HTTP ────────────────────────────────────────────────────
+# Figma's REST API throttles with a leaky-bucket and returns HTTP 429 with a
+# `Retry-After` header (integer seconds). The `/images` render endpoint (frame
+# SVG, PNG captures) is a strict Tier-1 endpoint whose budget depends on the
+# plan of the *file* being requested, so a naive single-shot GET reliably
+# crashes mid-export under any real usage. Every Figma GET routes through
+# `figma_get`, which honors `Retry-After` (falling back to capped exponential
+# backoff), retries transient 5xx / network blips, and on terminal 429 surfaces
+# the documented diagnostic headers (rate-limit type, plan tier, upgrade link).
+FIGMA_MAX_RETRIES = 6
+
+def figma_get(url, token=None, timeout=120, what="request", max_retries=FIGMA_MAX_RETRIES):
+    """GET `url`, returning the response body as bytes. Honors Retry-After on 429
+    and retries transient failures up to `max_retries` times before raising."""
+    RETRY_AFTER_CAP = 300  # never honor an absurd Retry-After (e.g. a misconfigured proxy)
+    headers = {"X-Figma-Token": token} if token else {}
+    attempt = 0
+    while True:
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return r.read()
+        except urllib.error.HTTPError as e:
+            transient = e.code == 429 or 500 <= e.code < 600
+            if not transient or attempt >= max_retries:
+                if e.code == 429:
+                    h = e.headers or {}
+                    raise RuntimeError(
+                        f"Figma {what}: rate-limited (HTTP 429) after {attempt} "
+                        f"retr{'y' if attempt == 1 else 'ies'}. "
+                        f"rate-limit-type={h.get('X-Figma-Rate-Limit-Type', '?')} "
+                        f"plan-tier={h.get('X-Figma-Plan-Tier', '?')} "
+                        f"upgrade={h.get('X-Figma-Upgrade-Link', '')}".rstrip()) from e
+                raise
+            wait = None
+            if e.code == 429:
+                try:
+                    wait = int((e.headers or {}).get("Retry-After", ""))
+                except (TypeError, ValueError):
+                    wait = None  # missing / non-integer / HTTP-date → fall back to backoff
+            if wait is None:
+                wait = 2 ** attempt  # exponential backoff
+            wait = max(0, min(wait, RETRY_AFTER_CAP))  # never negative, never absurdly long
+            attempt += 1
+            print(f"  {what}: HTTP {e.code}; retry {attempt}/{max_retries} in {wait}s"
+                  f"{' (Retry-After)' if e.code == 429 and 'Retry-After' in (e.headers or {}) else ''}",
+                  file=sys.stderr)
+            time.sleep(wait)
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+            # Transient network failure. urlopen() wraps connect-phase errors in
+            # URLError, but a read-phase timeout / reset during r.read() is raised
+            # raw (TimeoutError / ConnectionError are OSError, not URLError) — catch
+            # both so a mid-stream blip is retried, not fatal.
+            if attempt >= max_retries:
+                raise
+            wait = min(2 ** attempt, 30)
+            attempt += 1
+            reason = getattr(e, "reason", e)
+            print(f"  {what}: {reason}; retry {attempt}/{max_retries} in {wait}s", file=sys.stderr)
+            time.sleep(wait)
+
+def figma_get_json(url, token=None, timeout=120, what="request"):
+    """`figma_get` + JSON decode."""
+    return json.loads(figma_get(url, token=token, timeout=timeout, what=what))
 
 def hex2(v): return format(max(0, min(255, int(round(v)))), "02x")
 
@@ -333,15 +398,13 @@ def fetch_frame_svg(file_key, node_id, token):
     SVG document text (the faithful-vector source). scale=1 — SVG is resolution
     independent; the importer scales it to the view."""
     q = urllib.parse.quote(node_id)
-    req = urllib.request.Request(
+    data = figma_get_json(
         f"https://api.figma.com/v1/images/{file_key}?ids={q}&format=svg",
-        headers={"X-Figma-Token": token})
-    with urllib.request.urlopen(req, timeout=120) as r:
-        url = (json.load(r).get("images", {}) or {}).get(node_id)
+        token=token, what="frame SVG render")
+    url = (data.get("images", {}) or {}).get(node_id)
     if not url:
         return None
-    with urllib.request.urlopen(url, timeout=120) as r:
-        return r.read().decode("utf-8")
+    return figma_get(url, timeout=120, what="frame SVG download").decode("utf-8")
 
 def _has_child_containers(n):
     """True if the node is a layout CONTAINER (has child frames/instances/
@@ -475,19 +538,16 @@ def export_assets(file_key, ids, token, out_dir):
     for i in range(0, len(ids), CHUNK):
         batch = ids[i:i+CHUNK]
         q = ",".join(batch)
-        req = urllib.request.Request(
+        data = figma_get_json(
             f"https://api.figma.com/v1/images/{file_key}?ids={q}&format=png&scale=2",
-            headers={"X-Figma-Token": token})
-        with urllib.request.urlopen(req, timeout=60) as r:
-            data = json.load(r)
+            token=token, timeout=60, what="asset render")
         url_map.update(data.get("images", {}) or {})
     import hashlib
     for nid in ids:
         url = url_map.get(nid)
         if url:
             try:
-                with urllib.request.urlopen(url, timeout=60) as r:
-                    blob = r.read()
+                blob = figma_get(url, timeout=60, what=f"asset {nid} download")
                 # Content-address by sha256 of the bytes (matches the plugin's
                 # AssetCache, which keys + names assets by content_hash). This
                 # dedupes identical captures and lets the importer verify bytes,
@@ -524,11 +584,9 @@ def parse_url(url):
     return key, node
 
 def fetch_nodes(file_key, node_id, token):
-    req = urllib.request.Request(
+    return figma_get_json(
         f"https://api.figma.com/v1/files/{file_key}/nodes?ids={node_id}&geometry=paths",
-        headers={"X-Figma-Token": token})
-    with urllib.request.urlopen(req, timeout=120) as r:
-        return json.load(r)
+        token=token, what="file nodes")
 
 def resolve_image_fills(file_key, refs, token, out_dir):
     """Codex #3225 P2: resolve IMAGE-fill imageRefs into real assets. The image
@@ -539,18 +597,16 @@ def resolve_image_fills(file_key, refs, token, out_dir):
     a real relative path instead of a dangling pending hash."""
     import hashlib, os, urllib.request
     os.makedirs(os.path.join(out_dir, "assets"), exist_ok=True)
-    req = urllib.request.Request(f"https://api.figma.com/v1/files/{file_key}/images",
-                                 headers={"X-Figma-Token": token})
-    with urllib.request.urlopen(req, timeout=60) as r:
-        url_map = (json.load(r).get("meta") or {}).get("images", {}) or {}
+    data = figma_get_json(f"https://api.figma.com/v1/files/{file_key}/images",
+                          token=token, timeout=60, what="image fills")
+    url_map = (data.get("meta") or {}).get("images", {}) or {}
     manifest, ref_to_rel = [], {}
     for ref in refs:
         url = url_map.get(ref)
         if not url:
             continue
         try:
-            with urllib.request.urlopen(url, timeout=60) as r:
-                blob = r.read()
+            blob = figma_get(url, timeout=60, what=f"image fill {ref} download")
             digest = hashlib.sha256(blob).hexdigest()
             rel = f"assets/{digest}.png"
             open(os.path.join(out_dir, rel), "wb").write(blob)
