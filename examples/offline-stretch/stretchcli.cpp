@@ -169,6 +169,30 @@ int render(const std::string& in, const std::string& out,
     pulp::signal::OfflineStretchOptions sizing;
     sizing.max_time_ratio = opts.max_time_ratio;
     sizing.max_pitch_semitones = opts.max_pitch_semitones;
+    sizing.route_noise_stn = opts.route_noise_stn; // honor --no-stn at prepare()
+
+    // Material-adaptive STFT window/overlap: analyze the actual audio and pick a
+    // window suited to it (large+high-overlap for bass so low partials resolve;
+    // small for percussion so attacks stay sharp). Honor an explicit --fft/--hop
+    // override (0 = auto). Carried through opts too so the spectral paths size
+    // identically.
+    {
+        std::vector<const float*> ap(nch);
+        for (std::uint32_t c = 0; c < nch; ++c) ap[c] = data->channels[c].data();
+        const auto w = pulp::signal::OfflineStretch::recommend_window(
+            ap.data(), in_frames, static_cast<int>(nch),
+            static_cast<double>(data->sample_rate));
+        sizing.fft_size = opts.fft_size > 0 ? opts.fft_size : w.fft_size;
+        sizing.analysis_hop = opts.fft_size > 0 ? opts.analysis_hop : w.analysis_hop;
+        // Transient sensitivity stays at the engine default unless explicitly set
+        // (--transient-sens) — a fine-tune knob, not auto-applied, so the percussive
+        // output keeps matching the validated drum_pl reference.
+        sizing.transient_sensitivity = opts.transient_sensitivity;
+        std::fprintf(stderr, "[stretchcli] adaptive window: fft=%d hop=%d%s\n",
+                     sizing.fft_size ? sizing.fft_size : 4096,
+                     sizing.analysis_hop ? sizing.analysis_hop : 512,
+                     opts.fft_size > 0 ? " (manual)" : " (auto)");
+    }
 
     pulp::signal::OfflineStretch eng;
     eng.prepare(static_cast<double>(data->sample_rate), static_cast<int>(nch), sizing);
@@ -225,6 +249,11 @@ int main(int argc, char** argv) {
         else if (a == "--quality") opts.quality = std::atoi(next("--quality"));
         else if (a == "--max-ratio") opts.max_time_ratio = std::atof(next("--max-ratio"));
         else if (a == "--max-pitch") opts.max_pitch_semitones = std::atof(next("--max-pitch"));
+        else if (a == "--fft") opts.fft_size = std::atoi(next("--fft"));      // manual window override (0=auto)
+        else if (a == "--hop") opts.analysis_hop = std::atoi(next("--hop"));
+        else if (a == "--no-stn") opts.route_noise_stn = false;               // (default) bypass STN noise morph
+        else if (a == "--stn") opts.route_noise_stn = true;                   // opt into STN noise morph
+        else if (a == "--transient-sens") opts.transient_sensitivity = std::atof(next("--transient-sens"));
         else if (a == "--bpm-to") bpm_to = std::atof(next("--bpm-to"));
         else if (a == "--help" || a == "-h") { usage(); return 0; }
         else if (!a.empty() && a[0] == '-') { std::fprintf(stderr, "error: unknown flag %s\n", a.c_str()); usage(); return 2; }
