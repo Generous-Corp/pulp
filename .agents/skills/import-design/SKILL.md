@@ -751,6 +751,13 @@ Pieces, source-of-truth → runtime:
   frame-local center lands within the knob's hit radius (same coordinate
   convention as `_name_override_knobs`). unit/range are a follow-up — only the
   name flows today. Plugin-lane (TS) parity is the remaining lockstep item.
+- **Regex hardening (watch out):** the import codegen scans the source for JS
+  keyboard shortcuts (`extract_keyboard_shortcuts`, `design_import_shortcuts.cpp`).
+  Because the faithful-vector envelope embeds a ~1 MB base64 SVG data URI, any
+  unbounded leading-identifier regex over that source catastrophically
+  backtracks (the `\b(\w{1,64})` bound fixes it). When adding new source-scanning
+  regexes to the importer, bound/anchor the quantifiers — a 1 MB embedded asset
+  is the realistic input, not a few KB of JSX.
 - **Producer (REST lane)** — `figma_rest_export.py` (faithful-vector default-on;
   `--no-faithful-vector` for the legacy flat export) fetches
   the frame's own SVG (`/images?format=svg`, or `--frame-svg FILE` offline),
