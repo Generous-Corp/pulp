@@ -107,6 +107,59 @@ endif()
 
 # Skia Graphite — GPU-accelerated 2D rendering (BSD-3-Clause)
 # Pre-built via skia-builder (desktop) or build-skia-android.sh (Android)
+
+# Auto-provision Skia into a SHARED machine cache so every checkout/worktree
+# finds it without manual setup or a per-machine env var. Worktrees ship
+# headers-only Skia, so a fresh worktree (or a reconfigure that re-runs
+# detection) silently disables Skia and any render/install ships CG-only. When
+# GPU is requested, SKIA_DIR is unset, and the local external/skia-build has no
+# built libs, fetch the manifest-pinned Skia into ~/.cache/pulp/skia-build
+# (shared across all checkouts on this machine — one download serves every
+# worktree) and point SKIA_DIR at it. Idempotent: the fetch script skips the
+# download when the pinned asset is already unpacked. Disable with
+# -DPULP_SKIA_AUTOFETCH=OFF (release/CI lanes that manage Skia explicitly, or
+# offline builds that intend a CG-only fallback). Desktop only (Android/iOS
+# Skia comes from their own build scripts / bundled libs).
+option(PULP_SKIA_AUTOFETCH "Auto-fetch pinned Skia into a shared cache when missing" ON)
+if(PULP_ENABLE_GPU AND PULP_SKIA_AUTOFETCH AND NOT SKIA_DIR
+        AND NOT DEFINED ENV{SKIA_DIR} AND NOT ANDROID
+        AND NOT (CMAKE_SYSTEM_NAME STREQUAL "iOS"))
+    file(GLOB _pulp_local_skia "${CMAKE_SOURCE_DIR}/external/skia-build/build/*-gpu/lib/Release/libskia.a")
+    if(NOT _pulp_local_skia)
+        if(DEFINED ENV{PULP_SKIA_CACHE})
+            set(_pulp_skia_cache "$ENV{PULP_SKIA_CACHE}")
+        else()
+            set(_pulp_skia_cache "$ENV{HOME}/.cache/pulp/skia-build")
+        endif()
+        file(GLOB _pulp_cache_skia "${_pulp_skia_cache}/build/*-gpu/lib/Release/libskia.a")
+        if(NOT _pulp_cache_skia)
+            set(_pulp_skia_plat "")
+            if(APPLE)
+                set(_pulp_skia_plat "darwin-arm64")  # the only published mac asset
+            elseif(UNIX)
+                if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+                    set(_pulp_skia_plat "linux-arm64")
+                else()
+                    set(_pulp_skia_plat "linux-x64")
+                endif()
+            endif()
+            find_program(_pulp_python3 NAMES python3 python)
+            if(_pulp_skia_plat AND _pulp_python3)
+                message(STATUS "Skia: auto-provisioning ${_pulp_skia_plat} → ${_pulp_skia_cache} (PULP_SKIA_AUTOFETCH; one-time, shared)")
+                execute_process(
+                    COMMAND ${_pulp_python3} tools/scripts/fetch_skia_for_release.py
+                            ${_pulp_skia_plat} --dest "${_pulp_skia_cache}"
+                    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+                file(GLOB _pulp_cache_skia "${_pulp_skia_cache}/build/*-gpu/lib/Release/libskia.a")
+            endif()
+        endif()
+        if(_pulp_cache_skia)
+            set(SKIA_DIR "${_pulp_skia_cache}")
+            message(STATUS "Skia: using shared cache ${SKIA_DIR}")
+        endif()
+    endif()
+endif()
+
 set(PULP_HAS_SKIA FALSE)
 if(PULP_ENABLE_GPU)
     include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/FindSkia.cmake)

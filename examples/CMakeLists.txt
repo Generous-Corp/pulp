@@ -29,6 +29,9 @@ add_subdirectory(pulp-effect)
 # Phase 5: PulpCompressor (sidechain compressor validating multi-bus)
 add_subdirectory(pulp-compressor)
 
+# Bendr: pitch/time/freeze effect composed from public pulp::signal primitives
+add_subdirectory(bendr)
+
 # Phase 6: UI Preview (validates rendering pipeline) + the Ink & Signal
 # design-system examples. These depend on the design-import authoring
 # cluster, so they are skipped in stripped (PULP_ENABLE_DESIGN_IMPORT=OFF)

@@ -580,6 +580,55 @@ TEST_CASE("DesignFrameView toggle click flips on/off", "[view][design-import][fr
     CHECK(v.element_value(0) == 0.0f);                    // flipped off
 }
 
+TEST_CASE("DesignFrameView horizontal fader drag adjusts the value",
+          "[view][design-import][frame]") {
+    // A wider-than-tall track is a horizontal slider: dragging right raises the
+    // value, dragging left lowers it (the pan-slider case).
+    DesignFrameElement f;
+    f.kind = DesignFrameElement::Kind::fader;
+    f.needle_d = "M30 50L30 50";   // marker; value logic is independent of it
+    f.cx = 40; f.x = 20; f.y = 44; f.w = 40; f.h = 8;   // w>h → horizontal
+    f.value = 0.5f;
+    DesignFrameView v(make_design_svg(), {f});
+    v.set_bounds({0, 0, 80, 80});
+    v.on_mouse_down({30, 38});     // -> SVG (40,48), inside the track rect
+    v.on_mouse_drag({70, 38});     // drag right 40 design px over a 40px track
+    CHECK(v.element_value(0) > 0.9f);
+    v.on_mouse_up({70, 38});
+
+    v.set_element_value(0, 0.5f);
+    v.on_mouse_down({30, 38});
+    v.on_mouse_drag({10, 38});     // drag left
+    CHECK(v.element_value(0) < 0.1f);
+}
+
+TEST_CASE("DesignFrameView paints a horizontal fader thumb that translates in X",
+          "[view][design-import][frame][svg]") {
+    const std::string svg =
+        R"SVG(<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg">)SVG"
+        R"SVG(<rect x="10" y="10" width="80" height="80" fill="#222222"/>)SVG"
+        R"SVG(<rect x="20" y="48" width="60" height="4" rx="2" fill="#444444"/>)SVG"
+        R"SVG(<circle id="hthumb" cx="30" cy="50" r="6" fill="white"/></svg>)SVG";
+    DesignFrameElement f;
+    f.kind = DesignFrameElement::Kind::fader;
+    f.needle_d = "id=\"hthumb\"";
+    f.cx = 30; f.cy = 50; f.x = 20; f.y = 44; f.w = 60; f.h = 12;  // w>h → horizontal
+    DesignFrameView lo(svg, {f}, 0, 0, 100, 100), hi(svg, {f}, 0, 0, 100, 100);
+    lo.set_bounds({0, 0, 100, 100});
+    hi.set_bounds({0, 0, 100, 100});
+    lo.set_element_value(0, 0.1f);   // thumb near the left
+    hi.set_element_value(0, 0.9f);   // thumb near the right
+    auto lo_png = render_to_png(lo, 100, 100, 2.0f, ScreenshotBackend::skia);
+    if (lo_png.empty()) SKIP("Skia raster screenshot backend unavailable");
+    auto hi_png = render_to_png(hi, 100, 100, 2.0f, ScreenshotBackend::skia);
+    REQUIRE_FALSE(hi_png.empty());
+    const auto cmp = compare_screenshots(lo_png, hi_png);
+    REQUIRE(cmp.valid);
+    if (cmp.similarity >= 0.999f)
+        SKIP("SVG (SkSVGDOM) rendering unavailable in this build");
+    CHECK(cmp.similarity < 0.999f);   // the thumb visibly translated horizontally
+}
+
 TEST_CASE("DesignFrameView paints a fader thumb that translates with value",
           "[view][design-import][frame][svg]") {
     // The fader paint path translates the thumb element by value (the fader
@@ -641,6 +690,79 @@ TEST_CASE("DesignFrameView tints a toggle when it is on",
     if (cmp.similarity >= 0.999f)
         SKIP("raster rendering unavailable in this build");
     CHECK(cmp.similarity < 0.999f);   // the active tint appears
+}
+
+TEST_CASE("DesignFrameView xy_pad puck follows a 2D drag",
+          "[view][design-import][frame]") {
+    // Dragging inside an xy_pad rect moves the puck absolutely: value=X, value_y=Y.
+    DesignFrameElement xy;
+    xy.kind = DesignFrameElement::Kind::xy_pad;
+    xy.needle_d = "id=\"puck\"";
+    xy.cx = 30; xy.cy = 30; xy.x = 20; xy.y = 20; xy.w = 60; xy.h = 60;
+    DesignFrameView v(make_design_svg(), {xy});
+    v.set_bounds({0, 0, 100, 100});
+    v.on_mouse_down({30, 30});
+    v.on_mouse_drag({78, 78});   // SVG ~(78,78): value≈(78-20)/60≈0.97
+    CHECK(v.element_value(0) > 0.8f);
+    v.on_mouse_drag({22, 22});   // back toward top-left
+    CHECK(v.element_value(0) < 0.2f);
+}
+
+TEST_CASE("DesignFrameView xy_pad puck renders at its 2D position",
+          "[view][design-import][frame][svg]") {
+    const std::string svg =
+        R"SVG(<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg">)SVG"
+        R"SVG(<rect x="10" y="10" width="80" height="80" fill="#222222"/>)SVG"
+        R"SVG(<rect x="20" y="20" width="60" height="60" rx="4" fill="#333333"/>)SVG"
+        R"SVG(<circle id="puck" cx="30" cy="30" r="6" fill="#F56161"/></svg>)SVG";
+    DesignFrameElement a;
+    a.kind = DesignFrameElement::Kind::xy_pad;
+    a.needle_d = "id=\"puck\"";
+    a.cx = 30; a.cy = 30; a.x = 20; a.y = 20; a.w = 60; a.h = 60;
+    DesignFrameElement b = a;
+    a.value = 0.1f; a.value_y = 0.1f;   // puck top-left
+    b.value = 0.9f; b.value_y = 0.9f;   // puck bottom-right
+    DesignFrameView va(svg, {a}, 0, 0, 100, 100), vb(svg, {b}, 0, 0, 100, 100);
+    va.set_bounds({0, 0, 100, 100});
+    vb.set_bounds({0, 0, 100, 100});
+    auto pa = render_to_png(va, 100, 100, 2.0f, ScreenshotBackend::skia);
+    if (pa.empty()) SKIP("Skia raster screenshot backend unavailable");
+    auto pb = render_to_png(vb, 100, 100, 2.0f, ScreenshotBackend::skia);
+    REQUIRE_FALSE(pb.empty());
+    const auto cmp = compare_screenshots(pa, pb);
+    REQUIRE(cmp.valid);
+    if (cmp.similarity >= 0.999f)
+        SKIP("SVG (SkSVGDOM) rendering unavailable in this build");
+    CHECK(cmp.similarity < 0.999f);   // the puck moved diagonally
+}
+
+TEST_CASE("DesignFrameView slides a switch dot to the on-side when toggled",
+          "[view][design-import][frame][svg]") {
+    // A toggle WITH a dot marker (needle_d) is a switch: the dot slides along
+    // the pill to the value's end. Render off vs on; the dot must visibly move.
+    const std::string svg =
+        R"SVG(<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg">)SVG"
+        R"SVG(<rect x="10" y="10" width="80" height="80" fill="#222222"/>)SVG"
+        R"SVG(<rect x="30" y="44" width="40" height="16" rx="8" fill="#444444"/>)SVG"
+        R"SVG(<circle id="switch dot" cx="38" cy="52" r="6" fill="white"/></svg>)SVG";
+    DesignFrameElement sw;
+    sw.kind = DesignFrameElement::Kind::toggle;
+    sw.needle_d = "id=\"switch dot\"";
+    sw.cx = 38; sw.cy = 52; sw.x = 30; sw.y = 44; sw.w = 40; sw.h = 16;
+    DesignFrameView off(svg, {sw}, 0, 0, 100, 100), on(svg, {sw}, 0, 0, 100, 100);
+    off.set_bounds({0, 0, 100, 100});
+    on.set_bounds({0, 0, 100, 100});
+    off.set_element_value(0, 0.0f);   // dot at the left
+    on.set_element_value(0, 1.0f);    // dot at the right
+    auto off_png = render_to_png(off, 100, 100, 2.0f, ScreenshotBackend::skia);
+    if (off_png.empty()) SKIP("Skia raster screenshot backend unavailable");
+    auto on_png = render_to_png(on, 100, 100, 2.0f, ScreenshotBackend::skia);
+    REQUIRE_FALSE(on_png.empty());
+    const auto cmp = compare_screenshots(off_png, on_png);
+    REQUIRE(cmp.valid);
+    if (cmp.similarity >= 0.999f)
+        SKIP("SVG (SkSVGDOM) rendering unavailable in this build");
+    CHECK(cmp.similarity < 0.999f);   // the dot slid + the track tinted
 }
 
 TEST_CASE("DesignFrameView rotates a <rect> indicator needle (tag-agnostic)",

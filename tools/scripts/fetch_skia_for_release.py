@@ -93,7 +93,7 @@ _IOS_PRESERVE_ARCH_SUBDIR = {
 # Expected on-disk relative library path under external/skia-build/.
 # Matches the layout produced by skia-builder release zips and probed by
 # FindSkia.cmake's `${SKIA_DIR}/build/<plat>-gpu/lib/Release/` branch.
-def expected_library_path(matrix_platform: str) -> Path:
+def expected_library_path(matrix_platform: str, dest_root: str = "external/skia-build") -> Path:
     if matrix_platform.startswith("darwin"):
         plat_dir = "mac-gpu"
         lib_name = "libskia.a"
@@ -122,7 +122,7 @@ def expected_library_path(matrix_platform: str) -> Path:
         arch_subdir = "simulator-arm64"
     else:
         raise SystemExit(f"unknown matrix platform: {matrix_platform!r}")
-    parts = ["external/skia-build/build", plat_dir, "lib", "Release"]
+    parts = [dest_root, "build", plat_dir, "lib", "Release"]
     if arch_subdir:
         parts.append(arch_subdir)
     parts.append(lib_name)
@@ -143,10 +143,19 @@ def _version_doc_has_asset_digest(
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 2:
-        print(f"usage: {argv[0]} <matrix-platform>", file=sys.stderr)
+    dest_root = "external/skia-build"
+    args = argv[1:]
+    if "--dest" in args:
+        di = args.index("--dest")
+        if di + 1 >= len(args):
+            print(f"usage: {argv[0]} <matrix-platform> [--dest DIR]", file=sys.stderr)
+            return 2
+        dest_root = args[di + 1]
+        del args[di:di + 2]
+    if len(args) != 1:
+        print(f"usage: {argv[0]} <matrix-platform> [--dest DIR]", file=sys.stderr)
         return 2
-    matrix_platform = argv[1]
+    matrix_platform = args[0]
 
     if matrix_platform not in MATRIX_TO_MANIFEST:
         print(
@@ -192,7 +201,7 @@ def main(argv: list[str]) -> int:
 
     url = asset["url"]
     expected_sha = asset["sha256"]
-    expected_lib = expected_library_path(matrix_platform)
+    expected_lib = expected_library_path(matrix_platform, dest_root)
 
     print(f"Skia fetch: matrix={matrix_platform}, manifest={manifest_key}")
     print(f"  url: {url}")
@@ -210,7 +219,7 @@ def main(argv: list[str]) -> int:
     baked_dir = os.environ.get("SKIA_DIR", "").strip()
     if os.environ.get("PULP_USE_BAKED_SKIA") and baked_dir:
         baked_root = Path(baked_dir)
-        baked_lib = baked_root / expected_lib.relative_to("external/skia-build")
+        baked_lib = baked_root / expected_lib.relative_to(dest_root)
         baked_stamp = baked_root / ".skia-asset-sha256"
         if (baked_lib.is_file() and baked_stamp.is_file()
                 and baked_stamp.read_text(encoding="utf-8").strip() == expected_sha):
@@ -235,7 +244,7 @@ def main(argv: list[str]) -> int:
     # actually unpacked here, so the download is skipped only when that
     # sha matches the current pin — a pin bump changes expected_sha, the
     # stamp no longer matches, and the asset is re-fetched.
-    stamp_path = Path("external/skia-build/.skia-asset-sha256")
+    stamp_path = Path(dest_root) / ".skia-asset-sha256"
     if expected_lib.is_file():
         if (
             stamp_path.is_file()
@@ -253,7 +262,7 @@ def main(argv: list[str]) -> int:
             )
         else:
             asset_name = Path(urllib.parse.urlparse(url).path).name
-            version_path = Path("external/skia-build/VERSION.md")
+            version_path = Path(dest_root) / "VERSION.md"
             if _version_doc_has_asset_digest(version_path, asset_name, expected_sha):
                 stamp_path.write_text(expected_sha + "\n", encoding="utf-8")
                 print(
@@ -287,7 +296,7 @@ def main(argv: list[str]) -> int:
         return 1
     print(f"sha256 verified: {actual_sha}")
 
-    dest = Path("external/skia-build")
+    dest = Path(dest_root)
     dest.mkdir(parents=True, exist_ok=True)
     print(f"Unpacking → {dest}")
     with zipfile.ZipFile(zip_path) as zf:
@@ -354,7 +363,7 @@ def main(argv: list[str]) -> int:
             file=sys.stderr,
         )
         # Help the human debug.
-        print("Contents of external/skia-build/ (depth 3):", file=sys.stderr)
+        print(f"Contents of {dest_root}/ (depth 3):", file=sys.stderr)
         for p in sorted(dest.rglob("*"))[:50]:
             print(f"  {p}", file=sys.stderr)
         return 1

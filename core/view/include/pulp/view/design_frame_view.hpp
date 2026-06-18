@@ -32,11 +32,20 @@ struct DesignFrameElement {
     // rect (replacing a baked readout glyph that build suppresses), updated via
     // set_element_text — e.g. an "OCTAVE C2" value that must track state.
     // `fader` is SVG-patch like `knob` but TRANSLATES its thumb element
-    // (needle_d) vertically by value over the track [y, y+h]; cy = the thumb's
-    // baked center. `toggle` is a click-to-flip button that tints its rect
+    // (needle_d) by value over the track. Orientation follows the track shape:
+    // a wider-than-tall rect (w>h) is a HORIZONTAL slider (value 0→left x, 1→
+    // right x+w; cx = baked center); otherwise vertical (value 1→top y, 0→bottom
+    // y+h; cy = baked center). `toggle` is a click-to-flip button that tints its rect
     // (bg_color, value>=0.5=on) over the baked chrome so the label shows through.
+    // A toggle with `needle_d` set is a SWITCH: the dot (needle_d) sits at e.cx in
+    // its OFF state and slides to the mirror across the pill center (x + w/2) when
+    // on, in addition to the tint — so the design's rest state is preserved.
+    // `xy_pad` is SVG-patch like `fader` but in 2D: dragging inside its rect
+    // [x,y,w,h] moves the puck element (needle_d) to follow — `value` is the X
+    // position (0→left, 1→right), `value_y` the Y (0→top, 1→bottom). cx/cy = the
+    // puck's baked center.
     enum class Kind { knob, fader, toggle, text_field, dropdown, tab_group,
-                      stepper, momentary, swap, action, value_label };
+                      stepper, momentary, swap, action, value_label, xy_pad };
 
     Kind kind = Kind::knob;
 
@@ -48,7 +57,8 @@ struct DesignFrameElement {
     // path around (cx, cy) by the value angle and re-renders — only the needle
     // moves; the rest of the chrome stays pixel-exact.
     std::string needle_d;
-    float value = 0.5f;        ///< 0..1
+    float value = 0.5f;        ///< 0..1  (xy_pad: the X axis)
+    float value_y = 0.5f;      ///< 0..1  (xy_pad: the Y axis, 0=top)
 
     // ── overlay controls (text_field / dropdown / tab_group / stepper) ────
     float x = 0.0f, y = 0.0f, w = 0.0f, h = 0.0f;  ///< element rect, SVG coords
@@ -287,7 +297,7 @@ private:
     float svg_w_ = 0.0f, svg_h_ = 0.0f;            // SVG intrinsic size
     float panel_x_ = 0, panel_y_ = 0, panel_w_ = 0, panel_h_ = 0;  // crop, SVG coords
     int drag_ = -1;
-    float drag_start_y_ = 0.0f, drag_start_value_ = 0.0f;
+    float drag_start_x_ = 0.0f, drag_start_y_ = 0.0f, drag_start_value_ = 0.0f;
     int active_view_group_ = -1;   ///< momentary view scope (-1 = all active)
     std::vector<Frame> frames_;    ///< swappable frames; [0] is the constructor's
     int active_frame_ = 0;         ///< index into frames_ currently rendered

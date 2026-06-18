@@ -8,6 +8,19 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v04500"></a>
+## [0.450.0] - 2026-06-18
+
+- feat(view): sliding switch dot + xy_pad 2D puck for DesignFrameView ([#4180](https://github.com/danielraffel/pulp/pull/4180))
+- build: auto-provision Skia into a shared machine cache ([#4179](https://github.com/danielraffel/pulp/pull/4179))
+
+<a id="v04490"></a>
+## [0.449.0] - 2026-06-18
+
+- feat(view): horizontal fader orientation in DesignFrameView ([#4177](https://github.com/danielraffel/pulp/pull/4177))
+- feat(examples): add Bendr — pitch/time/freeze effect from pulp::signal primitives ([#4174](https://github.com/danielraffel/pulp/pull/4174))
+- fix(view): extend MTK typing octave reach to +5 (highlight nears G8) ([#4172](https://github.com/danielraffel/pulp/pull/4172))
+
 <a id="v04480"></a>
 ## [0.448.0] - 2026-06-17
 
@@ -4559,6 +4572,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.450.0]: https://github.com/danielraffel/pulp/releases/tag/v0.450.0
+[0.449.0]: https://github.com/danielraffel/pulp/releases/tag/v0.449.0
 [0.448.0]: https://github.com/danielraffel/pulp/releases/tag/v0.448.0
 [0.447.0]: https://github.com/danielraffel/pulp/releases/tag/v0.447.0
 [0.446.1]: https://github.com/danielraffel/pulp/releases/tag/v0.446.1
