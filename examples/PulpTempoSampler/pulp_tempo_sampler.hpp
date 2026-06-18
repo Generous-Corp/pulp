@@ -19,6 +19,7 @@
 #include <pulp/audio/sample_key_map.hpp>
 #include <pulp/audio/sample_slot_bank.hpp>
 #include <pulp/format/processor.hpp>
+#include <pulp/format/standalone_settings.hpp>
 #include <pulp/midi/message.hpp>
 #include <pulp/platform/file_dialog.hpp>
 #include <pulp/runtime/spsc_queue.hpp>
@@ -493,9 +494,25 @@ public:
     view::MusicalTypingController typing;
     std::function<int()> current_root_note;
     // The on-screen interactive musical-typing keyboard. Hidden by default;
-    // ⌘K (Ctrl+K on Win/Linux) toggles it. Click keys to audition slices; the
-    // playhead key lights up so typing / MIDI / clicks all show.
+    // ⌘K (Ctrl+K on Win/Linux) or the toolbar "Keyboard" button toggles it.
+    // Click keys to audition slices; the playhead key lights up so typing /
+    // MIDI / clicks all show.
     InteractiveKeyboard* keyboard = nullptr;
+    // Toolbar "Settings" button that opens the standalone Audio/MIDI panel. It is
+    // only meaningful in the standalone (the SDK settings chrome owns the panel);
+    // in a DAW the host owns device routing, so it is hidden. Visibility is
+    // resolved once the view is attached (see update_standalone_chrome_affordances).
+    view::TextButton* settings_button = nullptr;
+
+    // Reveal the "Settings" button only when hosted in the standalone settings
+    // chrome (a TabPanel ancestor carrying the Audio/MIDI Settings tab). Called
+    // from Processor::on_view_opened — by then the editor is parented into the
+    // chrome, so format::standalone_settings_available() can detect it. Cheap and
+    // allocation-free, so it is safe outside the paint no-alloc scope.
+    void update_standalone_chrome_affordances() {
+        if (settings_button)
+            settings_button->set_visible(format::standalone_settings_available(this));
+    }
 
     SamplerEditorRoot() {
         set_focusable(true);
@@ -847,6 +864,28 @@ public:
             root->add_child(std::move(btn));
         }
 
+        // Toolbar affordances next to "Open…": a "Settings" button that opens the
+        // standalone Audio/MIDI device panel, and a "Keyboard" button that toggles
+        // the on-screen musical-typing keyboard (same target as ⌘K). Both sit to
+        // the left of "Open…" within the clear strip past the title.
+        SamplerEditorRoot* root_ptr = root.get();
+        {
+            // Hidden until update_standalone_chrome_affordances() confirms we are
+            // hosted in the standalone settings chrome (no Audio/MIDI tab in a DAW).
+            auto btn = std::make_unique<TextButton>("Settings");
+            place(*btn, 476, 14, 82, 28);
+            btn->set_visible(false);
+            btn->on_click = [root_ptr] { format::open_standalone_settings(root_ptr); };
+            root->settings_button = btn.get();
+            root->add_child(std::move(btn));
+        }
+        {
+            auto btn = std::make_unique<TextButton>("Keyboard");
+            place(*btn, 566, 14, 82, 28);
+            btn->on_click = [root_ptr] { root_ptr->toggle_keyboard(); };
+            root->add_child(std::move(btn));
+        }
+
         // ── Waveform / drop area ── (enlarged now the mockup rows are gone).
         // Shows a "drop a sample" CTA when empty; the waveform + slice regions
         // when loaded. Click a slice (or musical-type) to audition it; drop or
@@ -971,6 +1010,15 @@ public:
 
         root->layout_children();
         return root;
+    }
+
+    // Once the editor is attached to the window (and, in the standalone, parented
+    // into the settings chrome), resolve chrome-dependent affordances — i.e.
+    // reveal the "Settings" button only when the Audio/MIDI panel is actually
+    // reachable. In a DAW there is no such chrome, so the button stays hidden.
+    void on_view_opened(view::View& view) override {
+        if (auto* root = dynamic_cast<SamplerEditorRoot*>(&view))
+            root->update_standalone_chrome_affordances();
     }
 
     // ── Audio thread ───────────────────────────────────────────────────────

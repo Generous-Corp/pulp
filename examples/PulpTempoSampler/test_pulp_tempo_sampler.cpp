@@ -9,10 +9,12 @@
 #include <catch2/catch_test_macros.hpp>
 #include "pulp_tempo_sampler.hpp"
 
+#include <pulp/format/settings_panel.hpp>
 #include <pulp/platform/file_dialog.hpp>
 #include <pulp/view/buttons.hpp>
 #include <pulp/view/drag_drop.hpp>
 #include <pulp/view/input_events.hpp>
+#include <pulp/view/ui_components.hpp>
 #if defined(__APPLE__)
 #include <pulp/view/screenshot.hpp>  // render_to_png: drives one layout+paint pass
 #endif
@@ -721,5 +723,78 @@ TEST_CASE("on-screen keyboard key click auditions a slice", "[tempo-sampler]") {
         for (int i = 0; i < 512; ++i) energy += l[static_cast<size_t>(i)] * l[static_cast<size_t>(i)];
     }
     CHECK(energy > 1e-6);  // a keyboard-key click actually triggered the slice
+}
+
+// Toolbar "Keyboard" button toggles the on-screen keyboard (the same target as
+// ⌘K), so the keyboard is reachable without a key chord. Drive the REAL button.
+TEST_CASE("toolbar Keyboard button toggles the on-screen keyboard", "[tempo-sampler]") {
+    Fixture f;
+    auto loop = percussive_loop(48000, 4);
+    const float* ch[1] = {loop.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+
+    auto editor = f.proc->create_view();
+    auto* root = dynamic_cast<SamplerEditorRoot*>(editor.get());
+    REQUIRE(root != nullptr);
+    REQUIRE(root->keyboard != nullptr);
+    REQUIRE_FALSE(root->keyboard->visible());  // hidden by default
+
+    // One layout+paint pass so the button has clickable geometry.
+    (void)view::render_to_png(*editor, 760, 372, 1.0f, view::ScreenshotBackend::skia);
+    view::TextButton* kbd_btn = find_button(editor.get(), "Keyboard");
+    REQUIRE(kbd_btn != nullptr);
+
+    const auto b = kbd_btn->local_bounds();
+    kbd_btn->on_mouse_down({b.width * 0.5f, b.height * 0.5f});  // -> on_click -> toggle
+    REQUIRE(root->keyboard->visible());                        // shown
+    kbd_btn->on_mouse_down({b.width * 0.5f, b.height * 0.5f});  // toggle back off
+    REQUIRE_FALSE(root->keyboard->visible());
+}
+
+// The "Settings" button is hidden in a plain (DAW) editor and revealed only when
+// the editor is hosted in the standalone settings chrome (a TabPanel ancestor
+// with an Audio/MIDI Settings tab). Clicking it switches the chrome to that tab.
+// This mirrors what make_standalone_editor_chrome() builds when
+// show_settings_tab=true, and what Processor::on_view_opened() drives live.
+TEST_CASE("Settings button reveals + opens the Audio/MIDI panel in the chrome",
+          "[tempo-sampler]") {
+    Fixture f;
+    auto loop = percussive_loop(48000, 4);
+    const float* ch[1] = {loop.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+
+    auto editor = f.proc->create_view();
+    auto* root = dynamic_cast<SamplerEditorRoot*>(editor.get());
+    REQUIRE(root != nullptr);
+    REQUIRE(root->settings_button != nullptr);
+    REQUIRE_FALSE(root->settings_button->visible());  // hidden outside the chrome
+
+    // Build the standalone-style chrome: tab-bar-less TabPanel, editor = tab 0,
+    // an Audio/MIDI Settings panel = tab 1.
+    auto chrome = std::make_unique<view::TabPanel>();
+    chrome->set_bounds({0, 0, 760, 372});
+    chrome->set_show_tab_bar(false);
+    chrome->add_tab("Editor", std::move(editor));
+    chrome->add_tab("Settings", std::make_unique<format::SettingsPanel>());
+
+    // Attach-time gating — Processor::on_view_opened() calls this live once the
+    // editor is parented into the chrome.
+    root->update_standalone_chrome_affordances();
+    REQUIRE(root->settings_button->visible());  // now reachable -> revealed
+
+    REQUIRE(chrome->active_tab() == 0);              // editor shown first
+    REQUIRE(root->settings_button->on_click);        // wired
+    root->settings_button->on_click();               // -> open_standalone_settings
+    REQUIRE(chrome->active_tab() == 1);              // switched to the Settings tab
+
+    // Visual proof: render the chrome on its Settings tab so the Audio/MIDI panel
+    // (device selectors, sample rate, buffer, meters, Done) is what's captured.
+    auto png = view::render_to_png(*chrome, 760, 372, 1.0f, view::ScreenshotBackend::skia);
+    REQUIRE(png.size() > 1000);
+    std::ofstream("/tmp/sampler_settings_panel.png", std::ios::binary)
+        .write(reinterpret_cast<const char*>(png.data()),
+               static_cast<std::streamsize>(png.size()));
 }
 #endif  // __APPLE__

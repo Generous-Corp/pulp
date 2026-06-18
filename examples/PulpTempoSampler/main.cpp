@@ -79,10 +79,15 @@ int main(int argc, char** argv) {
     config.output_channels = 2;
     config.input_channels = 0;
     config.persist_settings = false;
-    // Host the editor directly (no Settings-tab chrome) so it is the window root
-    // — the host's global-key hook fires on it, which is what makes musical
-    // typing work without the editor holding keyboard focus.
-    config.show_settings_tab = false;
+    // Wrap the editor in the SDK settings chrome so the user can reach the
+    // Audio/MIDI device panel (output device, sample rate, buffer, input meters,
+    // test signal). The editor's "Settings" button opens that panel via
+    // format::open_standalone_settings(); the panel's "Done" returns to the
+    // editor. Musical typing + ⌘K still reach the editor: the chrome forwards the
+    // window root's global-key hook down to the editor's handler (see
+    // standalone_editor_chrome.hpp), and route_global_keys() composes rather than
+    // clobbers, so the editor shortcut survives the Audio Inspector wiring.
+    config.show_settings_tab = true;
     config.headless = headless;
     config.screenshot_path = screenshot_path;
     app.set_config(config);

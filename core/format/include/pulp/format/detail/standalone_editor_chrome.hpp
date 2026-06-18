@@ -129,8 +129,23 @@ inline StandaloneEditorChrome make_standalone_editor_chrome(
     // root here. Harmless for editors that already size themselves (flex_grow
     // only claims remaining space). Fixes the Bendr-tracker #45 standalone squish.
     chrome.editor_root_->flex().flex_grow = 1.0f;
+    // The window host fires `on_global_key` on the WINDOW ROOT only. Once the
+    // editor is wrapped in this TabPanel the TabPanel becomes the window root,
+    // so an editor that installed its own `on_global_key` (e.g. a sampler's ⌘K
+    // keyboard toggle / musical typing, delivered host-wide via
+    // performKeyEquivalent:) would never be reached. Forward the root-level
+    // global keys down to the editor's handler so those shortcuts keep working
+    // in the settings-chrome standalone exactly as they do when the editor is
+    // hosted directly. `editor_raw` is owned by the TabPanel (as tab content)
+    // for the lifetime of this callback, so the capture stays valid.
+    view::View* editor_raw = chrome.editor_root_.get();
     tab_panel->add_tab("Editor", std::move(chrome.editor_root_));
     tab_panel->add_tab("Settings", std::move(settings_panel));
+    if (editor_raw) {
+        tab_panel->on_global_key = [editor_raw](const view::KeyEvent& event) -> bool {
+            return editor_raw->on_global_key ? editor_raw->on_global_key(event) : false;
+        };
+    }
     // No outer [Editor][Settings] tab bar — the editor reaches Settings via its own
     // control (e.g. a gear button) and the Settings panel has a Done back to the editor.
     // This keeps one level of tabs (the panel's own Audio/MIDI/<plugin> tabs).

@@ -390,6 +390,63 @@ TEST_CASE("route_global_keys installs registry dispatch as the root key path",
     reg.remove_handler(&handler);
 }
 
+// route_global_keys must COMPOSE with a handler the root already owns (e.g. an
+// editor's own shortcut hook) instead of clobbering it. The standalone shell
+// wires the Audio Inspector's registry onto the window root, which may already
+// carry an editor-supplied on_global_key (a sampler's ⌘K keyboard toggle); a
+// bare assignment silently dropped that handler. Registry commands win; anything
+// it doesn't claim falls through to the prior handler.
+TEST_CASE("route_global_keys composes with a pre-existing root handler",
+          "[view][command_registry][devtools-routing]") {
+    CommandRegistry reg;
+    reg.register_command({kCmdSave, "Save", "File", KeyCode::s, kModCmd});
+    CountingHandler handler({kCmdSave});
+    reg.add_handler(&handler);
+
+    View root;
+    int prior_calls = 0;
+    KeyCode prior_seen = KeyCode::unknown;
+    // Pre-existing editor handler: claims ⌘K, ignores everything else.
+    root.on_global_key = [&](const KeyEvent& e) -> bool {
+        ++prior_calls;
+        prior_seen = e.key;
+        return e.key == KeyCode::k && (e.modifiers & kModCmd);
+    };
+
+    route_global_keys(root, reg);
+
+    // A registered command (⌘S) is consumed by the registry; the prior handler
+    // never runs for it.
+    KeyEvent save;
+    save.key = KeyCode::s;
+    save.modifiers = kModCmd;
+    save.is_down = true;
+    REQUIRE(root.on_global_key(save));
+    REQUIRE(handler.calls_ == 1);
+    REQUIRE(prior_calls == 0);
+
+    // ⌘K is not a registry command, so it falls through to the prior handler,
+    // which claims it (this is the editor shortcut that used to go dead).
+    KeyEvent toggle;
+    toggle.key = KeyCode::k;
+    toggle.modifiers = kModCmd;
+    toggle.is_down = true;
+    REQUIRE(root.on_global_key(toggle));
+    REQUIRE(handler.calls_ == 1);   // registry didn't claim it
+    REQUIRE(prior_calls == 1);      // prior handler did
+    REQUIRE(prior_seen == KeyCode::k);
+
+    // An unclaimed chord falls through both and is left for normal delivery.
+    KeyEvent unbound;
+    unbound.key = KeyCode::z;
+    unbound.modifiers = kModCmd;
+    unbound.is_down = true;
+    REQUIRE_FALSE(root.on_global_key(unbound));
+    REQUIRE(prior_calls == 2);
+
+    reg.remove_handler(&handler);
+}
+
 TEST_CASE("InspectorWindow command handler toggles via the registry and "
           "does not dangle after destruction",
           "[view][command_registry][devtools-routing]") {

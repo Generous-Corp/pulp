@@ -36,7 +36,11 @@ if(PULP_BUILD_TESTS)
     # pulp::view. Link it only on macOS so the advisory Linux test lane doesn't
     # pull the desktop windowing stack (SDL3/X11) — mirrors the screenshot tool.
     if(APPLE AND (TARGET pulp::view OR TARGET Pulp::view))
-        target_link_libraries(pulp-tempo-sampler-test PRIVATE pulp::view)
+        # pulp::view for the WaveformDropView drop-target test; pulp::standalone
+        # for the SettingsPanel used by the Settings-chrome test. Both are
+        # Apple-gated in the source so the advisory Linux lane stays windowing-
+        # stack-free.
+        target_link_libraries(pulp-tempo-sampler-test PRIVATE pulp::view pulp::standalone)
     endif()
     target_include_directories(pulp-tempo-sampler-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     catch_discover_tests(pulp-tempo-sampler-test)
