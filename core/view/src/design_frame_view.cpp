@@ -381,6 +381,12 @@ void DesignFrameView::notify_choice(int i, int selected) {
     if (on_element_changed) on_element_changed(i, choice_to_norm(i, selected));
 }
 
+Rect DesignFrameView::element_rect(int i) const {
+    if (i < 0 || i >= static_cast<int>(elements_.size())) return {0, 0, 0, 0};
+    const auto& e = elements_[i];
+    return {e.x, e.y, e.w, e.h};
+}
+
 float DesignFrameView::element_value(int i) const {
     if (i < 0 || i >= static_cast<int>(elements_.size())) return -1.0f;
     const auto& e = elements_[i];

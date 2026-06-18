@@ -35,6 +35,16 @@ std::string decode_no_strip_box(const char* b64, float box_x) {
     return svg;
 }
 
+// Piano frame: also suppress the baked C2/C3/C4 key labels — they're static, but
+// the visible range is a sliding window, so MusicalTypingKeyboard::paint draws
+// dynamic "Cn" labels under whichever keys are Cs in the current window.
+std::string decode_piano() {
+    std::string svg = decode_no_strip_box(detail::musical_typing_piano_svg_b64(), 322.418f);
+    for (float lx : {41.4f, 266.7f, 492.1f})
+        suppress_svg_glyph_at(svg, lx - 2.0f, 125.0f, 9.0f, 10.0f);   // baked C2/C3/C4
+    return svg;
+}
+
 // The two 🎹/⌨ toggle icon-buttons baked into BOTH mode frames' toolbars, in
 // each frame's own (732-wide) coordinate space — they sit at the same spot in
 // both. The left (piano icon) swaps to the piano frame; the right (keyboard
@@ -209,8 +219,7 @@ MusicalTypingKeyboard::MusicalTypingKeyboard()
     : DesignFrameView(decode_no_strip_box(detail::musical_typing_typing_svg_b64(), 306.68f),
                       build_typing_frame(), 0, 0, 732, 266) {
     // Frame 1 = piano mode (732×176).
-    add_frame(decode_no_strip_box(detail::musical_typing_piano_svg_b64(), 331.008f),
-              build_piano_frame(), 0, 0, 732, 176);
+    add_frame(decode_piano(), build_piano_frame(), 0, 0, 732, 176);
 
     set_focusable(true);            // accept computer-keyboard focus for typing
     // The keyboard renders its faithful SVG via Canvas::draw_svg (Skia), which
@@ -473,7 +482,16 @@ int MusicalTypingKeyboard::midi_for_element(int index) const {
     // octave, e.g. MIDI C-1..B0, as a typing semitone.)
     if (active_frame() == kTypingFrame)
         return controller_.base_note() + controller_.octave_shift() * 12 + note;
-    return note;    // piano: absolute MIDI
+    // Piano: the 36 keys are a WINDOW over the full range — shift their absolute
+    // MIDI by the window's low note (octave-driven, clamped at the G8 top).
+    return piano_window_lo() + (note - controller_.base_note());
+}
+
+int MusicalTypingKeyboard::piano_window_lo() const {
+    // Low note of the visible 36-key window, octave-driven, clamped to [C-2(0),
+    // G8(127)-35=92] so the top window ends on G8 — a partial top (Logic-style
+    // "shift the keys"). Literals here: the ruler constants live further down.
+    return std::clamp(controller_.base_note() + controller_.octave_shift() * 12, 0, 92);
 }
 
 void MusicalTypingKeyboard::light_typing_semitone(int semitone, bool on) {
@@ -492,6 +510,7 @@ namespace {
 constexpr float kStripY  = 17.0f,  kStripH  = 24.0f;   // vertical band (post-#82 centering)
 constexpr int   kRulerLo = 0, kRulerHi = 127;          // C-2 … G8
 constexpr int   kPlaySpan = 17;                        // typing keys a..' = 18 semitones
+constexpr int   kPianoSpan = 35;                       // piano frame = 36 keys (C2..B4)
 
 // White-key units from C-2 (MIDI 0): 7 per octave; black keys sit on the
 // half-unit between neighbours. Monotonic in MIDI, so it maps the keyboard to an
@@ -531,7 +550,10 @@ bool MusicalTypingKeyboard::point_over_strip(Point pos, float& panel_x) const {
 int MusicalTypingKeyboard::octave_for_strip_x(float panel_x) const {
     float x0, x1; strip_bounds(x0, x1);
     const int base = controller_.base_note();
-    const float c0 = (midi_to_x(base, x0, x1) + midi_to_x(base + kPlaySpan, x0, x1)) * 0.5f;
+    // Snap to the octave whose visible-window CENTRE is nearest x. The window is
+    // wider on the piano tab (3 octaves) than typing (the ~1.5-octave play span).
+    const int span = (active_frame() == kTypingFrame) ? kPlaySpan : kPianoSpan;
+    const float c0 = (midi_to_x(base, x0, x1) + midi_to_x(base + span, x0, x1)) * 0.5f;
     const float step = midi_to_x(base + 12, x0, x1) - midi_to_x(base, x0, x1);  // one octave
     return std::clamp(static_cast<int>(std::lround((panel_x - c0) / step)), -4, 4);
 }
@@ -577,11 +599,36 @@ void MusicalTypingKeyboard::paint(canvas::Canvas& canvas) {
         canvas.fill_text(c_label(m), vx(midi_to_x(m, x0, x1)) + 1.5f, vy(kStripY + kStripH) - 1.5f);
     }
 
-    // 4) Teal highlight spanning the current playable window [base+shift,
-    //    base+shift+span], matching the design's box (15% fill + hairline border).
-    const int lo = controller_.base_note() + controller_.octave_shift() * 12;
-    const float hx0 = vx(midi_to_x(std::clamp(lo, kRulerLo, kRulerHi), x0, x1));
-    const float hx1 = vx(midi_to_x(std::clamp(lo + kPlaySpan, kRulerLo, kRulerHi), x0, x1));
+    // 3b) Piano tab: dynamic C-only key labels that FOLLOW the window — draw "Cn"
+    //     under each piano white key whose windowed MIDI is a C (the baked
+    //     C2/C3/C4 are suppressed at load). So sliding the selection relabels the
+    //     keyboard (C-2 reads C-2), and the partial top shows C6/C7/C8.
+    if (active_frame() == kPianoFrame) {
+        canvas.set_font("Inter", std::max(7.0f, 9.0f * t.scale));
+        canvas.set_fill_color(canvas::Color::rgba8(0x50, 0x59, 0x64));  // baked label ink  token-lint:allow
+        for (int i = 0; i < element_count(); ++i) {
+            if (element_kind(i) != DesignFrameElement::Kind::momentary || element_note(i) < 0) continue;
+            const int midi = midi_for_element(i);
+            if (midi % 12 != 0) continue;   // C keys only
+            const Rect r = element_rect(i);
+            canvas.fill_text("C" + std::to_string(midi / 12 - 2),
+                             vx(r.x + 13.0f), vy(r.y + r.height - 11.0f));
+        }
+    }
+
+    // 4) Teal highlight over the active frame's visible window: typing = the
+    //    ~1.5-octave play span; piano = the 3-octave key window (wider). 15% fill
+    //    + hairline border, matching the design's box.
+    int hlo, hhi;
+    if (active_frame() == kTypingFrame) {
+        hlo = controller_.base_note() + controller_.octave_shift() * 12;
+        hhi = hlo + kPlaySpan;
+    } else {
+        hlo = piano_window_lo();
+        hhi = hlo + kPianoSpan;
+    }
+    const float hx0 = vx(midi_to_x(std::clamp(hlo, kRulerLo, kRulerHi), x0, x1));
+    const float hx1 = vx(midi_to_x(std::clamp(hhi, kRulerLo, kRulerHi), x0, x1));
     const float r = 3.0f * t.scale;
     const auto teal = resolve_color("accent.primary", canvas::Color::rgba8(22, 218, 194));
     canvas.set_fill_color(canvas::Color::rgba(teal.r, teal.g, teal.b,        // token-lint:allow (derived from resolved accent)

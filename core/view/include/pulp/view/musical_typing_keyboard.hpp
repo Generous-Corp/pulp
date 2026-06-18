@@ -138,6 +138,12 @@ private:
     // drawn procedurally in paint() over the design's strip background — white-key
     // dividers, black-key marks, C-only labels, and the teal highlight that spans
     // the current playable octave window. The baked partial ribbon is covered.
+    // Piano tab: lowest MIDI of the visible 3-octave (36-key) window. The window
+    // slides over the full C-2…G8 range as the octave moves and CLAMPS at the top
+    // so it ends on G8 (MIDI 127) — a partial top, like Logic (the keys shift, not
+    // just the labels). The typing tab is unaffected (it keeps its narrow playable
+    // window). Used to remap the piano keys' MIDI, the labels, and the highlight.
+    int piano_window_lo() const;
     // The strip's horizontal extent (panel coords) for the active frame — the
     // ribbon is centered in the toolbar and is a different width per frame (the
     // typing/piano toolbars centered their own natural-width ribbons after #82).
