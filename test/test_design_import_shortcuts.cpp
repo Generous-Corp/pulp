@@ -16,6 +16,8 @@
 #include <pulp/state/store.hpp>
 #include <pulp/view/input_events.hpp>
 #include <algorithm>
+#include <chrono>
+#include <string>
 
 using pulp::view::CodeGenMode;
 using pulp::view::CodeGenOptions;
@@ -848,4 +850,25 @@ TEST_CASE("default shortcuts: apply_default_shortcuts win_linux maps File-menu c
     auto [csm, csw] = chord_for(DefaultShortcutPattern::cheatsheet);
     REQUIRE(csm.key == "?");          REQUIRE(csw.key == "?");
     REQUIRE(csm.modifiers.empty());   REQUIRE(csw.modifiers.empty());
+}
+
+TEST_CASE("extract_keyboard_shortcuts does not catastrophically backtrack on large embedded data",
+          "[design-import][shortcuts]") {
+    // A faithful-vector import embeds a ~1 MB base64 SVG data URI as a string.
+    // The old unbounded `(\w+)\.` regex re-scanned every position of every
+    // base64 word-run (O(n^2)) and hung the importer for minutes on a single
+    // design. With `\b(\w{1,64})` the scan is linear; this must finish fast and
+    // still pick up the one real shortcut after the blob.
+    std::string source(1'000'000, 'A');  // one long word-run (base64-like)
+    source += " const f = (e) => { if (e.key === 'Escape') x(); };";
+
+    const auto t0 = std::chrono::steady_clock::now();
+    auto out = extract_keyboard_shortcuts(source, "frame.svg");
+    const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - t0).count();
+
+    INFO("extract_keyboard_shortcuts on 1MB input took " << elapsed_ms << " ms");
+    REQUIRE(elapsed_ms < 2000);   // was minutes before the catastrophic-backtracking fix
+    REQUIRE(out.size() == 1);
+    REQUIRE(out[0].key == "Escape");
 }

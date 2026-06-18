@@ -151,7 +151,16 @@ std::vector<DetectedShortcut> extract_keyboard_shortcuts(
     //   e.code === 'X'   event.code === "X"
     // Quotes balanced; key/code is any non-empty sequence of [A-Za-z0-9_+-/]
     // (covers `Escape`, `Enter`, `ArrowLeft`, `+`, `/`, `F1`, `s`, etc.).
-    std::regex re(R"((\w+)\.(key|code)\s*===\s*(['"])([A-Za-z0-9_+\-/]+)\3)");
+    //
+    // The leading identifier is anchored at a word boundary and length-bounded
+    // (`\b(\w{1,64})`) rather than an unbounded `(\w+)`. Without that, std::regex
+    // catastrophically backtracks on long word-runs — e.g. a faithful-vector
+    // import embeds a ~1 MB base64 SVG data URI, and `(\w+)\.` re-scanned every
+    // position of every base64 run (O(n^2)), hanging the importer for minutes
+    // on a single design. A real JS object identifier before `.key`/`.code` is
+    // short, so the bound is lossless; the `\b` also lets the iterator skip
+    // mid-run positions in O(1).
+    std::regex re(R"(\b(\w{1,64})\.(key|code)\s*===\s*(['"])([A-Za-z0-9_+\-/]+)\3)");
 
     auto begin = std::sregex_iterator(source.begin(), source.end(), re);
     auto end = std::sregex_iterator{};
