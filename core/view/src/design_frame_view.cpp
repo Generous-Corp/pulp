@@ -518,10 +518,17 @@ void DesignFrameView::paint(canvas::Canvas& canvas) {
         if (e.kind == DesignFrameElement::Kind::knob && !e.needle_d.empty())
             wrap_needle_rotation(s, e.needle_d, (e.value - 0.5f) * kSweepDeg, e.cx, e.cy);
         else if (e.kind == DesignFrameElement::Kind::fader && !e.needle_d.empty()) {
-            // Translate the thumb: value 1 → track top (e.y), value 0 → bottom
-            // (e.y + e.h). e.cy is the thumb's baked center y.
-            const float target_y = e.y + (1.0f - e.value) * e.h;
-            wrap_thumb_translation(s, e.needle_d, 0.0f, target_y - e.cy);
+            // Translate the thumb along the track. Orientation is the track shape:
+            // a wider-than-tall rect is a horizontal slider (value 0 → left e.x,
+            // 1 → right e.x+e.w); otherwise vertical (value 1 → top e.y, 0 →
+            // bottom e.y+e.h). e.cx/e.cy is the thumb's baked center.
+            if (e.w > e.h) {
+                const float target_x = e.x + e.value * e.w;
+                wrap_thumb_translation(s, e.needle_d, target_x - e.cx, 0.0f);
+            } else {
+                const float target_y = e.y + (1.0f - e.value) * e.h;
+                wrap_thumb_translation(s, e.needle_d, 0.0f, target_y - e.cy);
+            }
         }
     }
     const auto t = panel_transform(local_bounds());
@@ -739,6 +746,7 @@ void DesignFrameView::on_mouse_down(Point pos) {
         if (on_gesture_begin) on_gesture_begin(drag_);  // note-on
         return;
     }
+    drag_start_x_ = pos.x;
     drag_start_y_ = pos.y;
     drag_start_value_ = elements_[drag_].value;
     if (on_gesture_begin) on_gesture_begin(drag_);  // bracket the undo step
@@ -766,11 +774,21 @@ void DesignFrameView::on_mouse_drag(Point pos) {
     // via the same scale, so sensitivity feels identical at any window size. A
     // fader tracks the cursor 1:1 over its travel; a knob uses a fixed turn rate.
     const float scale = panel_transform(local_bounds()).scale;
-    const float dy_design = scale > 0.0f ? (drag_start_y_ - pos.y) / scale : 0.0f;
     auto& el = elements_[drag_];
-    const float sens = (el.kind == DesignFrameElement::Kind::fader && el.h > 0.0f)
-                           ? 1.0f / el.h : 0.005f;
-    el.value = std::clamp(drag_start_value_ + dy_design * sens, 0.0f, 1.0f);
+    // A horizontal fader (wider track than tall) tracks the cursor in X (right =
+    // increase); a vertical fader / knob tracks Y (up = increase). Faders move
+    // 1:1 over their travel; knobs use a fixed turn rate.
+    const bool horizontal = el.kind == DesignFrameElement::Kind::fader && el.w > el.h;
+    float delta_design, sens;
+    if (horizontal) {
+        delta_design = scale > 0.0f ? (pos.x - drag_start_x_) / scale : 0.0f;
+        sens = el.w > 0.0f ? 1.0f / el.w : 0.005f;
+    } else {
+        delta_design = scale > 0.0f ? (drag_start_y_ - pos.y) / scale : 0.0f;
+        sens = (el.kind == DesignFrameElement::Kind::fader && el.h > 0.0f)
+                   ? 1.0f / el.h : 0.005f;
+    }
+    el.value = std::clamp(drag_start_value_ + delta_design * sens, 0.0f, 1.0f);
     request_repaint();
     // User-driven turn -> notify the binder (knob is value-bearing).
     if (on_element_changed) on_element_changed(drag_, elements_[drag_].value);

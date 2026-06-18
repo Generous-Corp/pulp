@@ -32,8 +32,10 @@ struct DesignFrameElement {
     // rect (replacing a baked readout glyph that build suppresses), updated via
     // set_element_text — e.g. an "OCTAVE C2" value that must track state.
     // `fader` is SVG-patch like `knob` but TRANSLATES its thumb element
-    // (needle_d) vertically by value over the track [y, y+h]; cy = the thumb's
-    // baked center. `toggle` is a click-to-flip button that tints its rect
+    // (needle_d) by value over the track. Orientation follows the track shape:
+    // a wider-than-tall rect (w>h) is a HORIZONTAL slider (value 0→left x, 1→
+    // right x+w; cx = baked center); otherwise vertical (value 1→top y, 0→bottom
+    // y+h; cy = baked center). `toggle` is a click-to-flip button that tints its rect
     // (bg_color, value>=0.5=on) over the baked chrome so the label shows through.
     enum class Kind { knob, fader, toggle, text_field, dropdown, tab_group,
                       stepper, momentary, swap, action, value_label };
@@ -287,7 +289,7 @@ private:
     float svg_w_ = 0.0f, svg_h_ = 0.0f;            // SVG intrinsic size
     float panel_x_ = 0, panel_y_ = 0, panel_w_ = 0, panel_h_ = 0;  // crop, SVG coords
     int drag_ = -1;
-    float drag_start_y_ = 0.0f, drag_start_value_ = 0.0f;
+    float drag_start_x_ = 0.0f, drag_start_y_ = 0.0f, drag_start_value_ = 0.0f;
     int active_view_group_ = -1;   ///< momentary view scope (-1 = all active)
     std::vector<Frame> frames_;    ///< swappable frames; [0] is the constructor's
     int active_frame_ = 0;         ///< index into frames_ currently rendered

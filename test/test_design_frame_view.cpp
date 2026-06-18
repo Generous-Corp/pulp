@@ -580,6 +580,55 @@ TEST_CASE("DesignFrameView toggle click flips on/off", "[view][design-import][fr
     CHECK(v.element_value(0) == 0.0f);                    // flipped off
 }
 
+TEST_CASE("DesignFrameView horizontal fader drag adjusts the value",
+          "[view][design-import][frame]") {
+    // A wider-than-tall track is a horizontal slider: dragging right raises the
+    // value, dragging left lowers it (the pan-slider case).
+    DesignFrameElement f;
+    f.kind = DesignFrameElement::Kind::fader;
+    f.needle_d = "M30 50L30 50";   // marker; value logic is independent of it
+    f.cx = 40; f.x = 20; f.y = 44; f.w = 40; f.h = 8;   // w>h → horizontal
+    f.value = 0.5f;
+    DesignFrameView v(make_design_svg(), {f});
+    v.set_bounds({0, 0, 80, 80});
+    v.on_mouse_down({30, 38});     // -> SVG (40,48), inside the track rect
+    v.on_mouse_drag({70, 38});     // drag right 40 design px over a 40px track
+    CHECK(v.element_value(0) > 0.9f);
+    v.on_mouse_up({70, 38});
+
+    v.set_element_value(0, 0.5f);
+    v.on_mouse_down({30, 38});
+    v.on_mouse_drag({10, 38});     // drag left
+    CHECK(v.element_value(0) < 0.1f);
+}
+
+TEST_CASE("DesignFrameView paints a horizontal fader thumb that translates in X",
+          "[view][design-import][frame][svg]") {
+    const std::string svg =
+        R"SVG(<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg">)SVG"
+        R"SVG(<rect x="10" y="10" width="80" height="80" fill="#222222"/>)SVG"
+        R"SVG(<rect x="20" y="48" width="60" height="4" rx="2" fill="#444444"/>)SVG"
+        R"SVG(<circle id="hthumb" cx="30" cy="50" r="6" fill="white"/></svg>)SVG";
+    DesignFrameElement f;
+    f.kind = DesignFrameElement::Kind::fader;
+    f.needle_d = "id=\"hthumb\"";
+    f.cx = 30; f.cy = 50; f.x = 20; f.y = 44; f.w = 60; f.h = 12;  // w>h → horizontal
+    DesignFrameView lo(svg, {f}, 0, 0, 100, 100), hi(svg, {f}, 0, 0, 100, 100);
+    lo.set_bounds({0, 0, 100, 100});
+    hi.set_bounds({0, 0, 100, 100});
+    lo.set_element_value(0, 0.1f);   // thumb near the left
+    hi.set_element_value(0, 0.9f);   // thumb near the right
+    auto lo_png = render_to_png(lo, 100, 100, 2.0f, ScreenshotBackend::skia);
+    if (lo_png.empty()) SKIP("Skia raster screenshot backend unavailable");
+    auto hi_png = render_to_png(hi, 100, 100, 2.0f, ScreenshotBackend::skia);
+    REQUIRE_FALSE(hi_png.empty());
+    const auto cmp = compare_screenshots(lo_png, hi_png);
+    REQUIRE(cmp.valid);
+    if (cmp.similarity >= 0.999f)
+        SKIP("SVG (SkSVGDOM) rendering unavailable in this build");
+    CHECK(cmp.similarity < 0.999f);   // the thumb visibly translated horizontally
+}
+
 TEST_CASE("DesignFrameView paints a fader thumb that translates with value",
           "[view][design-import][frame][svg]") {
     // The fader paint path translates the thumb element by value (the fader
