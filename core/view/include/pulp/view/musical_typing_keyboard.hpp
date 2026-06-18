@@ -129,6 +129,11 @@ private:
     bool input_capture_ = true;   // false = host feeds QWERTY; we don't capture keys
     bool sustain_ = false;        // sustain-pad toggle state (surfaced via on_sustain)
     int pb_value_ = 0;            // live pitch-bend display value (−20 / 0 / +20)
+    // Held pitch-bend keys (1=down, 2=up). Most-recently-pressed wins; releasing
+    // one falls back to the other if still held (not 0). 0 = none, -1 = down only,
+    // +1 = up only; when both held, pb_active_ holds the most recent (-1/+1).
+    bool pb_down_held_ = false, pb_up_held_ = false;
+    int pb_active_ = 0;           // most-recently-pressed of the held pair (-1/0/+1)
     int mod_sel_ = 0;             // latched modulation selection (0 = "off" … 5 = "max")
     bool dragging_strip_ = false; // mid drag-to-octave on the overview strip
     static constexpr float kVelStep = 1.0f / 16.0f;  // on-screen velocity −/+ increment
@@ -165,6 +170,10 @@ private:
     // Re-light the selected modulation button (mod_sel_) and clear the others;
     // call after a press auto-clears the momentary light on release.
     void refresh_mod_lights();
+    // Apply the current pitch-bend held-state: set the value to the most-recent
+    // held direction (pb_active_), fire on_pitch_bend, and light each pb button
+    // by whether its key is held (so a still-held button stays lit/active).
+    void apply_pitch_bend();
     // Index of the (first) element whose action tag == `tag`, or -1.
     int element_for_action(const std::string& tag) const;
     // Light (on) or clear (off) every momentary control with `tag` — the tap-flash

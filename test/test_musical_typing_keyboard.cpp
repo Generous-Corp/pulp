@@ -317,6 +317,20 @@ TEST_CASE("MusicalTypingKeyboard: set_active_notes lights from an external held 
     REQUIRE(kb.element_value(note_idx(kb, 60)) == 0.0f);    // not held → dark
 }
 
+TEST_CASE("MusicalTypingKeyboard: pitch bend respects a still-held button",
+          "[view][musical-typing][controls][pitchbend]") {
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    std::vector<float> bends;
+    kb.on_pitch_bend = [&](float b) { bends.push_back(b); };
+    auto down = [&](KeyCode k) { KeyEvent e{}; e.key = k; e.is_down = true; kb.on_key_event(e); };
+    auto up   = [&](KeyCode k) { KeyEvent e{}; e.key = k; e.is_down = false; kb.on_key_event(e); };
+
+    down(KeyCode::num2);  REQUIRE(bends.back() == 1.0f);    // hold 2 → +1
+    down(KeyCode::num1);  REQUIRE(bends.back() == -1.0f);   // press 1 (2 still held) → -1 wins
+    up(KeyCode::num1);    REQUIRE(bends.back() == 1.0f);    // release 1 → BACK to +1 (2 held), not 0
+    up(KeyCode::num2);    REQUIRE(bends.back() == 0.0f);    // release 2 → centre
+}
+
 TEST_CASE("MusicalTypingKeyboard: the piano window shifts its range with the octave",
           "[view][musical-typing][piano][overview]") {
     auto kbp = make_playable_kb(); auto& kb = *kbp;

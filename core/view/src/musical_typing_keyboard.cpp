@@ -129,7 +129,7 @@ void append_readouts(std::vector<DesignFrameElement>& els, const char* who) {
         // PITCH BEND value — LEFT-aligned just after the "PITCH BEND" label so a
         // wide value (−20 / +20) grows rightward into empty space instead of
         // overflowing left over the label.
-        add("pitchbend", 92, 66, 30, 18, /*left=*/true);
+        add("pitchbend", 89, 68, 18, 15, /*left=*/true);  // fits −20/+20 before the "1" button
     }
     // piano: no value_labels (range shown by the overview highlight only)
 }
@@ -301,13 +301,9 @@ void MusicalTypingKeyboard::control_press(const std::string& tag) {
             controller_.velocity + (tag == "vel_up" ? kVelStep : -kVelStep), 0.0f, 1.0f);
         flash_action(tag, true);
     } else if (tag == "pb_down") {
-        pb_value_ = -kPitchBendMax;
-        if (on_pitch_bend) on_pitch_bend(-1.0f);   // bipolar −1 (full bend down)
-        if (e >= 0) set_element_value(e, 1.0f);
+        pb_down_held_ = true; pb_active_ = -1; apply_pitch_bend();   // most recent wins
     } else if (tag == "pb_up") {
-        pb_value_ = kPitchBendMax;
-        if (on_pitch_bend) on_pitch_bend(1.0f);     // bipolar +1 (full bend up)
-        if (e >= 0) set_element_value(e, 1.0f);
+        pb_up_held_ = true; pb_active_ = 1; apply_pitch_bend();
     } else if (tag == "sustain") {
         sustain_ = true;
         if (on_sustain) on_sustain(true);
@@ -327,10 +323,14 @@ void MusicalTypingKeyboard::control_release(const std::string& tag) {
     if (tag == "octave_down" || tag == "octave_up" ||
         tag == "vel_down" || tag == "vel_up") {
         flash_action(tag, false);   // end the tap-flash (the step already fired on press)
-    } else if (tag == "pb_down" || tag == "pb_up") {
-        pb_value_ = 0;                              // momentary: spring back to centre
-        if (on_pitch_bend) on_pitch_bend(0.0f);
-        if (e >= 0) set_element_value(e, 0.0f);
+    } else if (tag == "pb_down") {
+        pb_down_held_ = false;                       // fall back to up if it's still held
+        pb_active_ = pb_up_held_ ? 1 : 0;
+        apply_pitch_bend();
+    } else if (tag == "pb_up") {
+        pb_up_held_ = false;                         // fall back to down if still held
+        pb_active_ = pb_down_held_ ? -1 : 0;
+        apply_pitch_bend();
     } else if (tag == "sustain") {
         sustain_ = false;                           // momentary hold: released on key-up
         if (on_sustain) on_sustain(false);
@@ -340,6 +340,16 @@ void MusicalTypingKeyboard::control_release(const std::string& tag) {
         // light on release — re-light the selected step so the selection persists.
         refresh_mod_lights();
     }
+    update_readouts();
+    request_repaint();
+}
+
+void MusicalTypingKeyboard::apply_pitch_bend() {
+    pb_value_ = pb_active_ * kPitchBendMax;                 // −20 / 0 / +20
+    if (on_pitch_bend) on_pitch_bend(static_cast<float>(pb_active_));  // −1 / 0 / +1
+    const int d = element_for_action("pb_down"), u = element_for_action("pb_up");
+    if (d >= 0) set_element_value(d, pb_down_held_ ? 1.0f : 0.0f);   // lit while held
+    if (u >= 0) set_element_value(u, pb_up_held_ ? 1.0f : 0.0f);
     update_readouts();
     request_repaint();
 }
@@ -523,8 +533,18 @@ bool key_is_black(int midi) {
     const int pc = midi % 12;
     return pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10;
 }
+// LEFT edge of a key's slot. The ruler spans white_units(kRulerHi)+1 units (the
+// highest key G8 occupies the LAST unit, so its right edge is at +1) — dividing
+// by that fills the strip and gives the top key real width (÷ the bare max
+// squished it to zero at the edge and shifted everything ~½ key).
+float kUnitMax() { return white_units(kRulerHi) + 1.0f; }
 float midi_to_x(int midi, float x0, float x1) {
-    return x0 + white_units(midi) / white_units(kRulerHi) * (x1 - x0);
+    return x0 + white_units(midi) / kUnitMax() * (x1 - x0);
+}
+// RIGHT edge of a (white) key's slot — used for the highlight's trailing edge so
+// it covers the whole last key instead of ending at that key's left edge.
+float midi_right_x(int midi, float x0, float x1) {
+    return x0 + (white_units(midi) + 1.0f) / kUnitMax() * (x1 - x0);
 }
 // Pitch-class + octave label in the C2=48 convention, C keys only ("C2", "C-1").
 std::string c_label(int midi) { return "C" + std::to_string(midi / 12 - 2); }
@@ -631,7 +651,7 @@ void MusicalTypingKeyboard::paint(canvas::Canvas& canvas) {
         hhi = hlo + kPianoSpan;
     }
     const float hx0 = vx(midi_to_x(std::clamp(hlo, kRulerLo, kRulerHi), x0, x1));
-    const float hx1 = vx(midi_to_x(std::clamp(hhi, kRulerLo, kRulerHi), x0, x1));
+    const float hx1 = vx(midi_right_x(std::clamp(hhi, kRulerLo, kRulerHi), x0, x1));
     const float r = 3.0f * t.scale;
     const auto teal = resolve_color("accent.primary", canvas::Color::rgba8(22, 218, 194));
     canvas.set_fill_color(canvas::Color::rgba(teal.r, teal.g, teal.b,        // token-lint:allow (derived from resolved accent)
