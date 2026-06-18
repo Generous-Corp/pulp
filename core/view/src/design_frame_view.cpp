@@ -750,9 +750,14 @@ void DesignFrameView::on_mouse_down(Point pos) {
         return;
     }
     if (hit >= 0 && elements_[hit].kind == DesignFrameElement::Kind::toggle) {
-        // Click-to-flip; no drag.
         auto& e = elements_[hit];
-        e.value = e.value >= 0.5f ? 0.0f : 1.0f;
+        if (e.flash) {
+            // Press-flash command button: light on press, clear on release.
+            e.value = 1.0f;
+            drag_ = hit;                 // so on_mouse_up clears it
+        } else {
+            e.value = e.value >= 0.5f ? 0.0f : 1.0f;  // sticky flip
+        }
         request_repaint();
         if (on_element_changed) on_element_changed(hit, e.value);
         return;
@@ -786,6 +791,7 @@ void DesignFrameView::on_mouse_down(Point pos) {
 
 void DesignFrameView::on_mouse_drag(Point pos) {
     if (drag_ < 0) return;
+    if (elements_[drag_].kind == DesignFrameElement::Kind::toggle) return;  // flash button — no drag
     if (elements_[drag_].kind == DesignFrameElement::Kind::momentary) {
         const int hit = hit_element(pos);
         if (hit == drag_) return;                 // still on the held key
@@ -845,6 +851,11 @@ void DesignFrameView::on_mouse_up(Point /*pos*/) {
         if (elements_[drag_].kind == DesignFrameElement::Kind::momentary) {
             elements_[drag_].value = 0.0f;        // clear the key
             request_repaint();
+        } else if (elements_[drag_].kind == DesignFrameElement::Kind::toggle
+                   && elements_[drag_].flash) {
+            elements_[drag_].value = 0.0f;        // press-flash: clear on release
+            request_repaint();
+            if (on_element_changed) on_element_changed(drag_, 0.0f);
         }
         if (on_gesture_end) on_gesture_end(drag_);  // note-off / end undo step
     }

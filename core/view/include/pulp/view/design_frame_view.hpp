@@ -59,6 +59,10 @@ struct DesignFrameElement {
     std::string needle_d;
     float value = 0.5f;        ///< 0..1  (xy_pad: the X axis)
     float value_y = 0.5f;      ///< 0..1  (xy_pad: the Y axis, 0=top)
+    /// toggle only: press-flash command button (sample next/prev/random, dice).
+    /// Lights with the tint on press and clears on release, instead of the
+    /// default sticky on/off flip — the right feel for a momentary command.
+    bool flash = false;
 
     // ── overlay controls (text_field / dropdown / tab_group / stepper) ────
     float x = 0.0f, y = 0.0f, w = 0.0f, h = 0.0f;  ///< element rect, SVG coords
