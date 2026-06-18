@@ -1988,7 +1988,22 @@ public:
         root_.set_frame_clock(nullptr);
     }
 
-    void show() override { [window_ makeKeyAndOrderFront:nil]; }
+    void show() override {
+        // Render one frame BEFORE ordering the window on screen so it appears
+        // already showing content — no black flash in the gap between
+        // makeKeyAndOrderFront and the first display-link tick. The GPU/Skia
+        // surfaces are created in the constructor and the root view is laid out,
+        // so the CAMetalLayer can acquire and present an off-screen drawable
+        // here. If begin_frame can't get a drawable off-screen, render_frame()
+        // no-ops (logged) and we just order front as before — no worse than the
+        // old behavior. Skip for an initially-hidden window (nothing to show).
+        if (!options_initially_hidden_ && gpu_surface_ && skia_surface_) {
+            needs_repaint_.store(true, std::memory_order_relaxed);
+            tracker_.invalidate_all();
+            render_frame();
+        }
+        [window_ makeKeyAndOrderFront:nil];
+    }
     void hide() override { [window_ orderOut:nil]; }
     bool is_visible() const override { return [window_ isVisible]; }
 

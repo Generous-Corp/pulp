@@ -104,6 +104,25 @@ notarization. `share` closes that gap in one step. Credentials resolve through
 the same chain as `pulp ship notarize` (App Store Connect API key preferred);
 without creds, the notarize step fails loudly rather than shipping unnotarized.
 
+**Signed + notarized is NOT the same as portable.** A perfectly signed, notarized
+`.app` still degrades on another machine if it reads an asset (SVG / JSON / image)
+from an absolute **build-tree** path at runtime — that path exists only on the
+build box. TRIAZ hit this (2026-06-18): `create_view()` did
+`std::ifstream(TRIAZ_FRAME_SVG)` where the macro was
+`"${CMAKE_CURRENT_SOURCE_DIR}/import/frames/mixer.frame.svg"`; the shared `.app`
+found nothing and fell back to the generic auto-Parameters panel on every Mac but
+the build box. It built, signed, notarized, and ran fine locally — nothing flagged
+it. Two defenses now exist:
+- **`pulp_assert_portable_bundle` (PulpPortable.cmake)** runs automatically on every
+  standalone `.app` build and WARNs (or fails, with `-DPULP_STRICT_PORTABLE=ON`) if
+  the binary bakes the source/build dir as a string. Set `PULP_STRICT_PORTABLE=ON`
+  for release/ship builds so a non-portable binary can't ship.
+- **The fix for a finding:** EMBED the asset — `pulp_embed_files(target FILES …)` →
+  `pulp::EmbeddedAsset::get("name")`, or `pulp_add_binary_data(...)` — so it's
+  compiled in. Never read an absolute build-tree path at runtime. (The faithful
+  design-import codegen already embeds; only hand-rolled `create_view` asset loads
+  bypass it.)
+
 The composable primitives underneath:
 - `pulp ship sign --path <app|dmg|bundle>` — sign exactly one artifact.
 - `pulp ship notarize --path <dmg|pkg|app>` — notarize + staple one artifact (repeatable).

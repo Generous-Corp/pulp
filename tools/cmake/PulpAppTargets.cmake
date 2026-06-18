@@ -47,6 +47,11 @@ function(_pulp_add_standalone target name bundle_id version)
     if(COMMAND target_copy_webgpu_binaries)
         target_copy_webgpu_binaries(${target}_Standalone)
     endif()
+    # Portability guard (runs AFTER the WebGPU dylib is bundled, so a correctly
+    # set-up standalone is clean): fail/warn if the binary bakes a build-tree
+    # absolute path — the "works on the build box, breaks when shared" footgun.
+    include("${CMAKE_CURRENT_FUNCTION_LIST_DIR}/PulpPortable.cmake")
+    pulp_assert_portable_bundle(${target}_Standalone)
     _pulp_attach_plugin_runtime_manifest(${target} ${target}_Standalone)
     # Linux+GNU-ld link-order fix: libskia.a → fontconfig. Same helper
     # used for pulp-cli (#1986) and pulp-import-design (#2018). Standalone
