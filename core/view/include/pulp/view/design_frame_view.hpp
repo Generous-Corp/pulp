@@ -179,6 +179,14 @@ public:
         static const std::string kEmpty;
         return (i >= 0 && i < static_cast<int>(elements_.size())) ? elements_[i].action : kEmpty;
     }
+    // The design-source node id of element `i` (e.g. a Figma node id), or empty
+    // when the element wasn't lowered from a design import. The inspector's
+    // Wiring lens reads this to map a live control back to its design node.
+    const std::string& element_source_node_id(int i) const {
+        static const std::string kEmpty;
+        return (i >= 0 && i < static_cast<int>(elements_.size())) ? elements_[i].source_node_id
+                                                                  : kEmpty;
+    }
     // Active view group for per-view momentary keyboards (e.g. typing=0, piano=1).
     // hit_element only tests momentary elements whose view_group is -1 or equals
     // this. Switching it releases any held momentary key (note-off) so no notes
