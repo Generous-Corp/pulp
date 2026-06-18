@@ -1,8 +1,10 @@
 // inspector_window.cpp — Tabbed inspector window implementation
 #include <pulp/inspect/inspector_window.hpp>
+#include <pulp/view/design_frame_view.hpp>
 
 #include <algorithm>
 #include <cstdio>
+#include <functional>
 #include <sstream>
 
 namespace pulp::inspect {
@@ -337,6 +339,7 @@ InspectorWindow::InspectorWindow() {
     tab_panel->add_tab("Console", build_console_tab());
     tab_panel->add_tab("Performance", build_performance_tab());
     tab_panel->add_tab("State", build_state_tab());
+    tab_panel->add_tab("Wiring", build_wiring_tab());
 
     tab_panel->set_active_tab(0);
     tab_panel->flex().flex_grow = 1;
@@ -649,6 +652,39 @@ std::unique_ptr<View> InspectorWindow::build_state_tab() {
     return root;
 }
 
+std::unique_ptr<View> InspectorWindow::build_wiring_tab() {
+    auto root = std::make_unique<View>();
+    root->flex().direction = FlexDirection::column;
+    root->flex().flex_grow = 1;
+    root->set_background_color(kBgPanel);
+
+    auto header = std::make_unique<View>();
+    header->flex().direction = FlexDirection::row;
+    header->flex().preferred_height = 28;
+    header->flex().flex_shrink = 0;
+    header->flex().padding = 4;
+    header->set_background_color(kBgSection);
+    auto title = std::make_unique<Label>("Wiring — design-sourced controls");
+    title->set_font_size(11);
+    title->flex().flex_grow = 1;
+    header->add_child(std::move(title));
+    root->add_child(std::move(header));
+
+    auto scroll = std::make_unique<ScrollView>();
+    scroll->flex().flex_grow = 1;
+    scroll->set_direction(ScrollView::Direction::vertical);
+    wiring_scroll_ = scroll.get();
+
+    auto list = std::make_unique<View>();
+    list->flex().direction = FlexDirection::column;
+    list->flex().flex_shrink = 0;
+    wiring_list_ = list.get();
+    scroll->add_child(std::move(list));
+
+    root->add_child(std::move(scroll));
+    return root;
+}
+
 // ── Data binding ────────────────────────────────────────────────────────────
 
 void InspectorWindow::set_inspected_root(View* root) {
@@ -664,6 +700,7 @@ void InspectorWindow::refresh() {
             case 1: refresh_console(); break;
             case 2: refresh_performance(); break;
             case 3: refresh_state(); break;
+            case 4: refresh_wiring(); break;
         }
     }
 }
@@ -1049,6 +1086,85 @@ void InspectorWindow::refresh_state() {
         float total_height = static_cast<float>(params.size()) * 49.0f;
         state_scroll_->set_content_size({300, total_height});
     }
+}
+
+// ── Wiring refresh ────────────────────────────────────────────────────────────
+
+namespace {
+const char* frame_element_kind_name(view::DesignFrameElement::Kind k) {
+    using K = view::DesignFrameElement::Kind;
+    switch (k) {
+        case K::knob:        return "knob";
+        case K::text_field:  return "text field";
+        case K::dropdown:    return "dropdown";
+        case K::tab_group:   return "tab group";
+        case K::stepper:     return "stepper";
+        case K::momentary:   return "momentary";
+        case K::swap:        return "swap";
+        case K::action:      return "action";
+        case K::value_label: return "value label";
+    }
+    return "?";
+}
+}  // namespace
+
+void InspectorWindow::refresh_wiring() {
+    if (!wiring_list_) return;
+
+    while (wiring_list_->child_count() > 0)
+        wiring_list_->remove_child(wiring_list_->child_at(0));
+
+    // Walk the inspected tree for DesignFrameView overlays and list each element
+    // that carries a design-source (Figma) node id. An element with an `action`
+    // tag is wired to a behavior; one without is a candidate for "not wired up"
+    // — the signal the developer annotates and we go fetch the Figma frame for.
+    int rows = 0;
+    std::function<void(view::View*)> walk = [&](view::View* v) {
+        if (!v) return;
+        if (auto* frame = dynamic_cast<view::DesignFrameView*>(v)) {
+            for (int i = 0; i < frame->element_count(); ++i) {
+                const std::string& node = frame->element_source_node_id(i);
+                if (node.empty()) continue;
+                const bool wired = !frame->element_action(i).empty();
+
+                auto row = std::make_unique<view::View>();
+                row->flex().direction = FlexDirection::column;
+                row->flex().preferred_height = 44;
+                row->flex().flex_shrink = 0;
+                row->flex().padding = 4;
+                row->set_background_color(kBgSection);
+
+                std::string line1 = std::string(wired ? "● " : "⚠ ") + node +
+                                    "  (" + frame_element_kind_name(frame->element_kind(i)) + ")";
+                row->add_child(make_prop_label(line1, 11));
+
+                std::string line2 = wired ? ("wired → " + frame->element_action(i))
+                                          : "NOT WIRED — click to note + fetch the Figma frame";
+                row->add_child(make_prop_label(line2, 10));
+
+                auto sep = std::make_unique<view::View>();
+                sep->flex().preferred_height = 1;
+                sep->flex().flex_shrink = 0;
+                sep->set_background_color(kBorder);
+
+                wiring_list_->add_child(std::move(row));
+                wiring_list_->add_child(std::move(sep));
+                ++rows;
+            }
+        }
+        for (int i = 0; i < v->child_count(); ++i) walk(v->child_at(i));
+    };
+    walk(inspected_root_);
+
+    if (rows == 0) {
+        auto empty = make_prop_label(
+            "No design-sourced controls in view. (Import a design via the "
+            "faithful-vector lane; overlays carry their Figma node id.)", 10);
+        wiring_list_->add_child(std::move(empty));
+    }
+
+    if (wiring_scroll_)
+        wiring_scroll_->set_content_size({300, static_cast<float>(rows) * 45.0f + 24.0f});
 }
 
 } // namespace pulp::inspect
