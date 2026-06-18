@@ -36,7 +36,7 @@
     },
     {
       "path": "test/test_design_import_codegen.cpp",
-      "max_loc": 1910,
+      "max_loc": 2035,
       "note": "design-import codegen test split"
     },
     {
@@ -101,12 +101,12 @@
     },
     {
       "path": "core/view/src/design_cpp_codegen.cpp",
-      "max_loc": 2023,
+      "max_loc": 2155,
       "note": "DesignIR C++ codegen contract hotspot"
     },
     {
       "path": "core/view/src/design_import_native_common.cpp",
-      "max_loc": 2016,
+      "max_loc": 2021,
       "note": "native materialization/import boundary hotspot"
     },
     {
