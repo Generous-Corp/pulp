@@ -317,6 +317,25 @@ TEST_CASE("MusicalTypingKeyboard: set_active_notes lights from an external held 
     REQUIRE(kb.element_value(note_idx(kb, 60)) == 0.0f);    // not held → dark
 }
 
+TEST_CASE("MusicalTypingKeyboard: the piano window shifts its range with the octave",
+          "[view][musical-typing][piano][overview]") {
+    auto kbp = make_playable_kb(); auto& kb = *kbp;
+    kb.set_mode(Mode::piano); refit(kb);
+    std::vector<int> ons;
+    kb.on_note_on = [&](int n, float) { ons.push_back(n); };
+    // Leftmost piano white key (rect x[28,60] y[62,140]); low-centre click.
+    auto click_left = [&] { kb.on_mouse_down({44.0f, 130.0f}); kb.on_mouse_up({44.0f, 130.0f}); };
+    auto shift = [&](KeyCode k, int n) { for (int i = 0; i < n; ++i) {
+        KeyEvent e{}; e.key = k; e.is_down = true; kb.on_key_event(e); } };
+
+    click_left();
+    REQUIRE(ons.back() == 48);            // octave 0 → window starts at C2 (48)
+    shift(KeyCode::z, 4); click_left();
+    REQUIRE(ons.back() == 0);             // −4 → window starts at C-2 (0)
+    shift(KeyCode::x, 8); click_left();   // back to +4 (top)
+    REQUIRE(ons.back() == 92);            // clamped: window ends on G8 (127), lo = 92
+}
+
 // ── Review-hardening: frame swap must not strand notes or lit state ─────────
 
 TEST_CASE("MusicalTypingKeyboard: toggling mode releases a QWERTY-held note",
