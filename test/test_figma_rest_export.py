@@ -658,5 +658,34 @@ class RateLimitRetryTest(unittest.TestCase):
         self.assertEqual(self.slept, [300])  # capped, never sleeps for a day
 
 
+class WidgetKindFromNameTest(unittest.TestCase):
+    """P2 resolver unification — whole-word match, in lockstep with the C++
+    detect_audio_widget and the TS audioWidgetKindFromName."""
+
+    def test_true_positives_match_whole_words(self):
+        self.assertEqual(frx.widget_kind_from_name("Cutoff Knob"), "knob")
+        self.assertEqual(frx.widget_kind_from_name("Knobs"), "knob")       # plural tolerated
+        self.assertEqual(frx.widget_kind_from_name("Volume Fader"), "fader")
+        self.assertEqual(frx.widget_kind_from_name("Main Slider"), "fader")
+        self.assertEqual(frx.widget_kind_from_name("VUMeter"), "meter")    # acronym split
+        self.assertEqual(frx.widget_kind_from_name("XY Pad"), "xy_pad")
+        self.assertEqual(frx.widget_kind_from_name("XYPad"), "xy_pad")
+        self.assertEqual(frx.widget_kind_from_name("Waveform"), "waveform")
+        self.assertEqual(frx.widget_kind_from_name("Spectrum"), "spectrum")
+
+    def test_substring_false_positives_are_rejected(self):
+        # These used to mis-resolve under the substring `in` match.
+        self.assertIsNone(frx.widget_kind_from_name("Dialog"))    # was knob ("dial")
+        self.assertIsNone(frx.widget_kind_from_name("Radial"))    # was knob ("dial")
+        self.assertIsNone(frx.widget_kind_from_name("Diameter"))  # was meter ("meter")
+        self.assertIsNone(frx.widget_kind_from_name("Parameter"))  # was meter ("meter")
+        self.assertIsNone(frx.widget_kind_from_name("Reverb"))
+
+    def test_tokenize_name_matches_cpp_boundaries(self):
+        self.assertEqual(frx._tokenize_name("VUMeter"), ["vu", "meter"])
+        self.assertEqual(frx._tokenize_name("Knob_1"), ["knob", "1"])
+        self.assertEqual(frx._tokenize_name("Dialog"), ["dialog"])
+
+
 if __name__ == "__main__":
     unittest.main()

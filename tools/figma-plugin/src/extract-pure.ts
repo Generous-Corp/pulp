@@ -131,14 +131,48 @@ export function mapAxisSize(v: FrameNode["layoutSizingHorizontal"]): ExtractedLa
 // components, or designs that use the audio widget visual without
 // installing the published library).
 
+// Whole-word tokenizer mirroring the C++ tokenize_name (design_import.cpp): split
+// on non-alphanumerics AND camelCase / acronym / digit boundaries, lowercased.
+// "VUMeter" -> [vu, meter]; "Knob_1" -> [knob, 1]; "Dialog" -> [dialog].
+export function tokenizeName(name: string): string[] {
+  const tokens: string[] = [];
+  let cur = "";
+  const flush = () => { if (cur) { tokens.push(cur); cur = ""; } };
+  for (let i = 0; i < name.length; i++) {
+    const c = name.charAt(i);
+    if (!/[a-z0-9]/i.test(c)) { flush(); continue; }
+    if (cur) {
+      const p = name.charAt(i - 1);
+      const next = i + 1 < name.length ? name.charAt(i + 1) : "";
+      let boundary = false;
+      if (/[a-z]/.test(p) && /[A-Z]/.test(c)) boundary = true;                            // aB -> a|B
+      else if (/[A-Z]/.test(p) && /[A-Z]/.test(c) && /[a-z]/.test(next)) boundary = true; // ABc -> A|Bc
+      else if (/[0-9]/.test(p) !== /[0-9]/.test(c)) boundary = true;                      // a1 / 1a
+      if (boundary) flush();
+    }
+    cur += c.toLowerCase();
+  }
+  flush();
+  return tokens;
+}
+
+// Recognize an audio widget by WHOLE-WORD name tokens (not substrings), mirroring
+// the C++ detect_audio_widget. The old substring match promoted any name
+// *containing* "dial"/"meter"/… — so "Dialog"/"Radial" became knobs and
+// "Parameter"/"Diameter" became meters. Token matching (tolerant of a simple
+// English plural, as the C++ `has` is) fixes those while keeping "xy_pad"/"XYPad"
+// and acronym names like "VUMeter".
 export function audioWidgetKindFromName(name: string): AudioWidgetKind | undefined {
-  const lower = name.toLowerCase();
-  if (lower.includes("knob") || lower.includes("dial")) return "knob";
-  if (lower.includes("fader") || lower.includes("slider")) return "fader";
-  if (lower.includes("meter") || lower.includes("level") || lower.includes("vu")) return "meter";
-  if (lower.includes("xypad") || lower.includes("xy_pad") || lower.includes("xy-pad")) return "xy_pad";
-  if (lower.includes("waveform")) return "waveform";
-  if (lower.includes("spectrum")) return "spectrum";
+  const toks: { [t: string]: true } = {};
+  const list = tokenizeName(name);
+  for (let i = 0; i < list.length; i++) toks[list[i]] = true;
+  const has = (w: string) => toks[w] === true || toks[w + "s"] === true;
+  if (has("knob") || has("dial")) return "knob";
+  if (has("fader") || has("slider")) return "fader";
+  if (has("meter") || has("level") || has("vu")) return "meter";
+  if (has("xypad") || (has("xy") && has("pad"))) return "xy_pad";
+  if (has("waveform") || has("oscilloscope")) return "waveform";
+  if (has("spectrum") || has("analyzer") || has("analyser")) return "spectrum";
   return undefined;
 }
 

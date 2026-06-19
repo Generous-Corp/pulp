@@ -329,14 +329,48 @@ def is_pure_vector_illustration(n):
 # meter — the figma-plugin lane default) at the node's own size, instead of
 # capturing its internal vectors as images (which suppresses recognition and
 # renders a misplaced raw sprite). Mirror this in the TS extractor (P2/P3).
+def _tokenize_name(name):
+    """Whole-word tokens mirroring the C++ tokenize_name (design_import.cpp):
+    split on non-alphanumerics AND camelCase / acronym / digit boundaries,
+    lowercased. "VUMeter" -> [vu, meter]; "Dialog" -> [dialog]."""
+    n = name or ""
+    tokens = []
+    cur = ""
+    for i, c in enumerate(n):
+        if not c.isalnum():
+            if cur:
+                tokens.append(cur); cur = ""
+            continue
+        if cur:
+            p = n[i - 1]
+            nxt = n[i + 1] if i + 1 < len(n) else ""
+            boundary = False
+            if p.islower() and c.isupper():
+                boundary = True
+            elif p.isupper() and c.isupper() and nxt.islower():
+                boundary = True
+            elif p.isdigit() != c.isdigit():
+                boundary = True
+            if boundary:
+                tokens.append(cur); cur = ""
+        cur += c.lower()
+    if cur:
+        tokens.append(cur)
+    return tokens
+
+
 def widget_kind_from_name(name):
-    low = (name or "").lower()
-    if "knob" in low or "dial" in low: return "knob"
-    if "fader" in low or "slider" in low: return "fader"
-    if "meter" in low or "vu" in low: return "meter"
-    if "xy" in low and "pad" in low: return "xy_pad"
-    if "waveform" in low: return "waveform"
-    if "spectrum" in low: return "spectrum"
+    # WHOLE-WORD match (not substring), mirroring the C++ detect_audio_widget — so
+    # "Dialog"/"Radial" no longer become knobs and "Diameter" no longer a meter.
+    toks = set(_tokenize_name(name))
+    def has(w):
+        return w in toks or (w + "s") in toks
+    if has("knob") or has("dial"): return "knob"
+    if has("fader") or has("slider"): return "fader"
+    if has("meter") or has("vu"): return "meter"
+    if (has("xy") and has("pad")) or has("xypad"): return "xy_pad"
+    if has("waveform"): return "waveform"
+    if has("spectrum"): return "spectrum"
     return None
 
 # ── Faithful-vector import (Plan B / B4) ────────────────────────────────────
