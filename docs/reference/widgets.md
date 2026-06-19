@@ -62,6 +62,7 @@ interactive version of this set (dark + light), build and run
 
 | Widget | Purpose | Key capabilities | Header |
 |--------|---------|------------------|--------|
+| `SegmentedControl` | Mutually-exclusive section selector | labelled segments, selected/hovered index, click + arrow-key selection, change callback | `ui_components.hpp` |
 | `TabPanel` | Tabbed container | tabs (title+content), active index, hide-bar card-stack mode, change callback | `ui_components.hpp` |
 | `Toolbar` | Tool bar of items | button/toggle/separator/spacer/custom items, orientation, enable/toggle by id | `toolbar.hpp` |
 | `Breadcrumb` | Breadcrumb trail | items, separator, push/pop/pop-to, navigate callback | `breadcrumb.hpp` |
