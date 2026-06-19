@@ -1,12 +1,11 @@
 // prop-applier-internal — shared plumbing for the per-domain prop
-// handlers (P5-NEW-A split of the former monolithic applyOne switch).
+// handlers.
 //
 // This module owns the bridge `call` helper and the file-local value
 // coercion helpers that more than one domain handler needs. Domain
 // modules (prop-applier-layout / -paint / -typography / -transform /
 // -events) import from here so the single `_pa_count` logging counter
-// stays shared — exactly as it was when `call` lived inside
-// prop-applier.ts.
+// stays shared across all domains.
 
 // Bridge globals are looked up through globalThis at call time so the
 // mock-bridge install path picks them up. See host-config.ts for the
@@ -30,8 +29,8 @@ export function call(name: string, ...args: unknown[]): void {
     fn(...args);
 }
 
-// pulp #1899 (gap #3) — resolve `var(--name [, fallback])` references in
-// string-valued style props before forwarding to the bridge.
+// Resolve `var(--name [, fallback])` references in string-valued style
+// props before forwarding to the bridge.
 //
 // The HTML-shim path (`core/view/js/css-parser.js`) already resolves
 // var() via the same lookup tiers, but the React-prop-applier lane

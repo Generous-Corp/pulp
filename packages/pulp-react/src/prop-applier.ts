@@ -17,13 +17,12 @@ import { applyTypographyProp } from './prop-applier-typography.js';
 import { applyTransformProp } from './prop-applier-transform.js';
 import { applyEventProp } from './prop-applier-events.js';
 
-// P5-NEW-A — the former monolithic `applyOne` switch is split into
-// per-domain handler modules (prop-applier-layout / -paint /
-// -typography / -transform / -events). `applyOne` below is now a thin
-// dispatcher that calls each in sequence until one claims the key.
-// The bridge `call` helper and the shared `_resolveVar` resolver live
-// in prop-applier-internal.ts so the domain modules share one logging
-// counter — exactly as it was when `call` lived in this file.
+// Per-domain handler modules own layout, paint, typography, transform,
+// and declarative event-routing props. `applyOne` below is the thin
+// dispatcher that calls each handler in sequence until one claims the
+// key. The bridge `call` helper and shared `_resolveVar` resolver live
+// in prop-applier-internal.ts so every domain shares one logging
+// counter.
 //
 // Bridge globals are still looked up through globalThis at call time
 // so the mock-bridge install path picks them up (see host-config.ts).
@@ -71,8 +70,8 @@ function eventNameFor(propName: string): string {
 /// Hover/pointer events the bridge gates behind registerHover(id).
 /// onMouseEnter/onMouseLeave + their pointer-event aliases all map to
 /// the bridge's mouseenter/mouseleave dispatch path; without
-/// registerHover, the C++ side never fires the events even though the
-/// JS listener is installed (pulp #1149).
+/// registerHover, the C++ side never fires the events even when the JS
+/// listener is installed.
 function isHoverEvent(eventName: string): boolean {
     return (
         eventName === 'mouseenter' ||
@@ -87,9 +86,9 @@ function isHoverEvent(eventName: string): boolean {
 /// to the bridge's `on_pointer_event` callback path; without
 /// `registerPointer`, the C++ side never wires the callback into the
 /// View even though the JS listener is installed via
-/// `on(id, 'pointerdown', fn)`. Spectr's FilterBank band drag was the
-/// canonical repro — see import-design SKILL.md gotcha #8 (pulp #1381,
-/// parallel to the existing isHoverEvent gating for #1149).
+/// `on(id, 'pointerdown', fn)`. This mirrors hover gating: installing
+/// the JS listener and arming the native dispatch path are separate
+/// bridge operations.
 function isPointerEvent(eventName: string): boolean {
     return (
         eventName === 'pointerdown' ||
@@ -104,8 +103,9 @@ function isPointerEvent(eventName: string): boolean {
 /// (`registerPointer`'s lambda early-returns on `is_wheel`, and
 /// `registerWheel`'s lambda early-returns on `!is_wheel`). Both can
 /// coexist on the same widget since each chains to the previous
-/// `on_pointer_event` lambda. Spectr's FilterBank zoom (onWheel
-/// handler) needs this separate gate (pulp #1387 gap #4).
+/// `on_pointer_event` lambda. Wheel handlers need this separate gate
+/// because pointer registration alone intentionally ignores wheel
+/// events.
 function isWheelEvent(eventName: string): boolean {
     return eventName === 'wheel';
 }
@@ -119,16 +119,14 @@ function applyEventHandler(id: string, key: string, value: unknown): void {
         call('registerHover', id);
     }
     if (isPointerEvent(eventName)) {
-        // pulp #1381 — without this call the bridge keeps the JS listener
-        // in its dispatch table but the View's on_pointer_event callback
-        // is never armed, and clicks never fire the React handler.
-        // Idempotent on the bridge side (replaces the lambda).
+        // Without this call the bridge keeps the JS listener in its
+        // dispatch table but the View's on_pointer_event callback is
+        // never armed. Idempotent on the bridge side.
         call('registerPointer', id);
     }
-    // pulp jsx-instrument-import 2026-05-17 — also arm the pointer
-    // dispatch path for mouse events (NOT onClick — that's the W3C
-    // click-on-release semantic which routes through on_click, and the
-    // pulp #1381 test asserts onClick alone never triggers registerPointer).
+    // Also arm the pointer dispatch path for mouse events. Do not do
+    // this for onClick: that is the W3C click-on-release semantic and
+    // routes through on_click.
     // Imported JSX bundles (Chainer's knobs/faders/XY pad) install
     // onMouseDown / onMouseMove / onMouseUp handlers that need to fire on
     // press, not release. Without this pre-fix, hit_test returns the
@@ -139,16 +137,14 @@ function applyEventHandler(id: string, key: string, value: unknown): void {
         call('registerPointer', id);
     }
     if (isWheelEvent(eventName)) {
-        // pulp #1387 gap #4 — Spectr's zoom-via-onWheel doesn't fire
-        // unless we explicitly arm the wheel dispatch path.
+        // Wheel dispatch is separately armed from pointer dispatch.
         call('registerWheel', id);
     }
-    // pulp #1352 — wrap the React handler in a synthetic-event factory so
-    // JSX consumers receive a React-DOM-shaped event object (with
+    // Wrap the React handler in a synthetic-event factory so JSX
+    // consumers receive a React-DOM-shaped event object (with
     // `currentTarget`, `target`, `preventDefault`, `nativeEvent.rawArgs`,
     // and event-type-specific fields) instead of the bridge's raw
-    // positional args (e.g. literal `0` for mouseenter). Without this,
-    // idiomatic handlers like
+    // positional args. Without this, idiomatic handlers like
     //   onMouseEnter={e => e.currentTarget.style.background = 'rgba(...)'}
     // crash with `Cannot read property 'style' of undefined`. See the
     // synthetic-event module header for the full surface and the
@@ -160,12 +156,12 @@ function applyEventHandler(id: string, key: string, value: unknown): void {
     });
 }
 
-/// pulp #1416 — emit one setSvgRect call carrying the full geometry
-/// (x, y, width, height). Driven by applyOne when ANY of the four
-/// geometry props change so the bridge never sees a partial update
-/// that would clobber unset axes back to zero. Reads current values
-/// from `props` (the live React props snapshot) and falls back to 0
-/// for un-set axes — matches SVG `<rect>` defaults.
+/// Emit one setSvgRect call carrying the full geometry (x, y, width,
+/// height). Driven by applyOne when any geometry prop changes so the
+/// bridge never sees a partial update that would clobber unset axes
+/// back to zero. Reads current values from `props` (the live React
+/// props snapshot) and falls back to 0 for unset axes, matching SVG
+/// `<rect>` defaults.
 function emitSvgRectGeometry(id: string, props: Record<string, unknown>): void {
     const x = typeof props.x === 'number' ? props.x as number : 0;
     const y = typeof props.y === 'number' ? props.y as number : 0;
@@ -174,8 +170,8 @@ function emitSvgRectGeometry(id: string, props: Record<string, unknown>): void {
     call('setSvgRect', id, x, y, w, h);
 }
 
-/// pulp #1416 — emit one setSvgLine call carrying the full geometry
-/// (x1, y1, x2, y2). Same partial-update guard as emitSvgRectGeometry.
+/// Emit one setSvgLine call carrying the full geometry (x1, y1, x2,
+/// y2). Same partial-update guard as emitSvgRectGeometry.
 function emitSvgLineGeometry(id: string, props: Record<string, unknown>): void {
     const x1 = typeof props.x1 === 'number' ? props.x1 as number : 0;
     const y1 = typeof props.y1 === 'number' ? props.y1 as number : 0;
@@ -186,15 +182,13 @@ function emitSvgLineGeometry(id: string, props: Record<string, unknown>): void {
 
 /// Apply a single prop to its corresponding bridge setter.
 ///
-/// P5-NEW-A — thin dispatcher over the per-domain handler modules.
-/// Each `applyXProp` returns true if it claimed the key. Domain keys
-/// are mutually exclusive (every prop belongs to exactly one domain),
-/// so the call order does not change which handler runs — it is
-/// byte-identical to the pre-split source-ordered switch. The
-/// type-dispatched widget/SVG props (`data` / `level` / `value` / `d`
-/// / `viewBox` / `fill` / `stroke` / `strokeWidth`) stay inline below
-/// because they route on `type`, not purely on `key`, and do not fit
-/// the layout/paint/typography/transform/events taxonomy.
+/// Thin dispatcher over the per-domain handler modules. Each
+/// `applyXProp` returns true if it claimed the key. Domain keys are
+/// mutually exclusive, so the call order does not change which handler
+/// runs. The type-dispatched widget/SVG props (`data` / `level` /
+/// `value` / `d` / `viewBox` / `fill` / `stroke` / `strokeWidth`) stay
+/// inline below because they route on `type`, not purely on `key`, and
+/// do not fit the layout/paint/typography/transform/events taxonomy.
 function applyOne(id: string, type: string, key: string, value: unknown, props?: Record<string, unknown>): void {
     if (value === undefined || value === null) {
         // No-op — Pulp has no "unset" for most setters; rely on React
@@ -203,12 +197,11 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         return;
     }
 
-    // pulp #1416 — SvgRect / SvgLine geometry props collide with View
-    // flex props (width/height) and event/positioning props (x/y), so
-    // dispatch on `type` BEFORE the generic flex routing. The geometry
-    // setters are atomic — one bridge call per rect/line carries the
-    // full quad of coords — to avoid partial updates clobbering the
-    // unset axes back to zero.
+    // SvgRect / SvgLine geometry props collide with View flex props
+    // (width/height) and event/positioning props (x/y), so dispatch on
+    // `type` BEFORE the generic flex routing. The geometry setters are
+    // atomic: one bridge call per rect/line carries the full quad of
+    // coords to avoid partial updates clobbering unset axes back to zero.
     if (type === 'SvgRect') {
         if (key === 'x' || key === 'y' || key === 'width' || key === 'height') {
             if (props) emitSvgRectGeometry(id, props);
@@ -223,30 +216,25 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
     }
 
     // Per-domain dispatch. The first handler that claims the key wins;
-    // since domain keys are disjoint this is equivalent to the
-    // pre-split single switch.
+    // since domain keys are disjoint this is deterministic.
     if (applyLayoutProp(id, key, value, props)) return;
     if (applyPaintProp(id, key, value)) return;
     if (applyTypographyProp(id, key, value, props)) return;
     if (applyTransformProp(id, key, value)) return;
     if (applyEventProp(id, key, value)) return;
 
-    // pulp parity-found (framework-importer #18) — `<img src="…">` /
-    // `<Image src="…">` must forward to the ImageView bridge via
-    // setImageSource, mirroring the non-React web-compat path
-    // (core/view/js/web-compat-element.js, pulp #1658). Before this the
-    // prop-applier created the Image widget (host-config createImage) but
-    // never dispatched `src`, so the emitted bundle had zero
-    // setImageSource calls and every <img> rendered as the empty "IMG"
-    // placeholder. Gate on the Image element types — host-config maps BOTH the
-    // lowercase `'img'` intrinsic (what design-import / the framework importer
-    // emit) AND the `'Image'` component to createImage, so accept both; a stray
-    // `src` on any other widget can't hit the ImageView-only setter. (The #18
-    // parity capture caught that gating on `'Image'` alone silently dropped
-    // every `<img>` — the runtime type is `'img'`.) The path is forwarded
-    // verbatim (already absolute on the design-import / importer path); C++
-    // setImageSource → ImageView::set_image_path resolves the rest, exactly as
-    // the web-compat path does — no JS-side resolution.
+    // `<img src="…">` / `<Image src="…">` must forward to the ImageView
+    // bridge via setImageSource, mirroring the non-React web-compat path
+    // in core/view/js/web-compat-element.js. Without this, the
+    // prop-applier creates the Image widget but never dispatches `src`,
+    // so the emitted bundle has zero setImageSource calls and every
+    // <img> renders as the empty "IMG" placeholder. Gate on the Image
+    // element types: host-config maps both the lowercase `'img'`
+    // intrinsic and the `'Image'` component to createImage, so accept
+    // both; a stray `src` on any other widget cannot hit the
+    // ImageView-only setter. The path is forwarded verbatim; C++
+    // setImageSource -> ImageView::set_image_path resolves the rest,
+    // exactly as the web-compat path does.
     if ((type === 'img' || type === 'Image') && key === 'src') {
         call('setImageSource', id, String(value));
         return;
@@ -265,26 +253,24 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
             return;
         case 'level':    return call('setMeterLevel', id, value as number);
         case 'value':
-            // Type-aware routing — bridge has separate setters per
-            // widget type. Codex P2 review on PR #779: setValue only
-            // handles knob/fader/toggle/checkbox; Progress wants
-            // setProgress, Spectrum/Waveform want setSpectrumData /
-            // setWaveformData (handled via 'data' prop already).
+            // Type-aware routing: the bridge has separate setters per
+            // widget type. setValue only handles knob/fader/toggle/
+            // checkbox; Progress wants setProgress, and Spectrum /
+            // Waveform use the 'data' prop handled above.
             if (type === 'Progress')   return call('setProgress', id, value as number);
             if (type === 'Meter')      return call('setMeterLevel', id, value as number);
             return call('setValue', id, value as number);
 
-        // SvgPath (pulp #994) — wires the SvgPathWidget bridge surface
-        // (createSvgPath / setSvgPath / setSvgViewBox / setSvgFill /
-        // setSvgStroke / setSvgStrokeWidth) through a typed JSX intrinsic.
+        // SvgPath wires the SvgPathWidget bridge surface through a
+        // typed JSX intrinsic.
         case 'd':            return call('setSvgPath', id, value as string);
         case 'viewBox': {
             // Array form `[w, h]` — the original wiring.
             if (Array.isArray(value) && value.length >= 2) {
                 return call('setSvgViewBox', id, value[0] as number, value[1] as number);
             }
-            // Wave 2 rn — SVG-spec string form `'min-x min-y w h'` (or
-            // `'w h'`). The bridge consumes width + height only today
+            // SVG-spec string form `'min-x min-y w h'` (or `'w h'`).
+            // The bridge consumes width + height only today
             // (the SvgPathWidget doesn't yet honor the min-x / min-y
             // origin offset — tracked as a separate paint-side gap),
             // so we extract the trailing two tokens as w/h. This makes
@@ -316,7 +302,7 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
     }
 }
 
-// ── normalizeHostProps (Phase 6 codex amendment #1) ─────────────────
+// ── normalizeHostProps ───────────────────────────────────────────────
 //
 // Imported React apps (Claude/Stitch/Figma/v0 bundles loaded via
 // @pulp/react/runtime-import) use HTML-style JSX:
@@ -355,12 +341,11 @@ export function normalizeHostProps(
         && (rawProps.className as string).length > 0;
     if (!hasStyle && !hasClassName) return rawProps;
 
-    // Codex P2 (Phase 6.1 review) — `Object.create(null)` so the prop
-    // map is prototype-free. With a plain `{}`, a malformed CSS rule
-    // (or hostile class-rules JSON) carrying `__proto__` / `constructor`
-    // / `prototype` keys would poison Object.prototype on Object.assign.
-    // The applier later iterates `Object.keys(out)` which is safe on
-    // a null-proto object.
+    // Use a null-prototype prop map so malformed CSS rules or hostile
+    // class-rules JSON carrying `__proto__` / `constructor` /
+    // `prototype` keys cannot poison Object.prototype through merges.
+    // The applier later iterates `Object.keys(out)`, which is safe on a
+    // null-prototype object.
     const out: Record<string, unknown> = Object.create(null);
 
     // Filter dangerous keys when merging untrusted provider output. The
@@ -401,10 +386,10 @@ export function normalizeHostProps(
 export function applyAllProps(instance: PulpInstance): void {
     const { id, type, props } = instance;
     logApply('applyAll', id, type, Object.keys(props).length);
-    // pulp #1416 — for SvgRect / SvgLine, emit the geometry call once
-    // up-front from the full props snapshot, then skip the per-prop
-    // dispatch for the four geometry keys (otherwise we'd issue four
-    // identical setSvgRect / setSvgLine calls during the loop).
+    // For SvgRect / SvgLine, emit the geometry call once up-front from
+    // the full props snapshot, then skip the per-prop dispatch for the
+    // four geometry keys. Otherwise we'd issue four identical
+    // setSvgRect / setSvgLine calls during the loop.
     let svgGeometryEmitted = false;
     if (type === 'SvgRect') {
         if (('x' in props) || ('y' in props) || ('width' in props) || ('height' in props)) {
@@ -442,10 +427,10 @@ export function applyChangedProps(
     const { id, type } = instance;
     let mutated = false;
 
-    // pulp #1416 — coalesce SvgRect / SvgLine geometry changes into a
-    // single setSvgRect / setSvgLine call sourced from the post-update
-    // props snapshot. Without this, four separate prop diffs would each
-    // try to emit a partial geometry update.
+    // Coalesce SvgRect / SvgLine geometry changes into a single
+    // setSvgRect / setSvgLine call sourced from the post-update props
+    // snapshot. Without this, four separate prop diffs would each try
+    // to emit a partial geometry update.
     const svgRectGeoChanged = type === 'SvgRect' && (
         oldProps.x !== newProps.x ||
         oldProps.y !== newProps.y ||
@@ -494,23 +479,22 @@ export function applyChangedProps(
             // Specific resets we can do meaningfully
             if (key === 'visible')  { call('setVisible', id, true); mutated = true; }
             if (key === 'opacity')  { call('setOpacity', id, 1.0); mutated = true; }
-            // pulp #1148 — overlay flipped off (or simply removed from
-            // props) must release the global overlay slot, otherwise the
-            // platform host keeps routing clicks to a stale popover.
+            // When overlay flips off or disappears from props, release
+            // the global overlay slot so the platform host does not keep
+            // routing clicks to a stale popover.
             if (key === 'overlay' && oldProps[key]) {
                 call('releaseOverlay', id);
                 mutated = true;
             }
-            // pulp #1925 — visual cluster keys must clear when they fall
-            // out of newProps. The conditional-spread idiom
+            // Visual cluster keys must clear when they fall out of
+            // newProps. The conditional-spread idiom
             //   style={{ ...base, ...(active ? activeStyle : {}) }}
             // contributes nothing to the spread on the inactive side, so
             // the active-only keys vanish from newProps but the bridge
             // keeps painting them. Reset to the canonical "no visual"
             // value here so the next paint reflects React's intent.
-            // Spectr's Settings Manager Preset chips + PatternRow rows
-            // are the original repro; any imported design (Stitch / v0 /
-            // Figma) using the same conditional-spread pattern needs it.
+            // Any imported design using the same conditional-spread
+            // pattern needs this reset path.
             if (key === 'background' || key === 'backgroundGradient') {
                 call('setBackground', id, 'transparent');
                 mutated = true;
@@ -532,10 +516,10 @@ export function applyChangedProps(
                 call('setTextColor', id, '');
                 mutated = true;
             }
-            // pulp parity-found (#18) — `<Image>` whose `src` is removed
-            // clears the ImageView back to the empty placeholder, matching
-            // the web-compat removeAttribute('src') reset semantics. Empty
-            // string is the bridge-side "no source" sentinel.
+            // `<Image>` whose `src` is removed clears the ImageView back
+            // to the empty placeholder, matching the web-compat
+            // removeAttribute('src') reset semantics. Empty string is the
+            // bridge-side "no source" sentinel.
             // `type` is typed as keyof IntrinsicElementMap (which lists 'Image'
             // but not the lowercase 'img' intrinsic — host-config routes 'img'
             // through its string-fallback switch). Cast for the 'img' compare so
