@@ -321,6 +321,21 @@ enum class InteractiveElementKind {
     // pair, not a down-chevron). Uses `options` + `selected_index` like a
     // dropdown, but steps through them in place instead of opening a popup.
     stepper,
+    // `swap` is a swap-link button: clicking its rect activates `target_frame`
+    // (a mode/page switch the design wires up).
+    swap,
+    // `action` is a command button: clicking its rect fires the named `action`
+    // (e.g. "octave_up") — the consumer maps the id to its own state. It does not
+    // light, emit notes, or swap frames.
+    action,
+    // `xy_pad` is SVG-patch like `fader` but 2D: dragging in its rect [x,y,w,h]
+    // moves the puck (svg_patch_d). `default_value` is the X (0→left, 1→right),
+    // `default_value_y` the Y (0→top, 1→bottom).
+    xy_pad,
+    // `value_label` is a live read-only text overlay painted over its rect (the
+    // design's baked readout). `text` is the initial string; `value_left_align`
+    // left-aligns it (for a "LABEL <value>" readout that grows rightward).
+    value_label,
 };
 
 // One source-identified interactive element overlaid on a faithful_svg render.
@@ -361,6 +376,23 @@ struct IRInteractiveElement {
     /// matches it exactly and the inset-past-the-icon edge is seamless. Empty →
     /// the default dark field color.
     std::string bg_color;
+
+    // ── swap / action / xy_pad / value_label ─────────────────────────────
+    /// swap only: the frame index to activate when clicked (-1 = unset).
+    /// Maps 1:1 to DesignFrameElement::target_frame.
+    int target_frame = -1;
+    /// action only: the command id fired on click (e.g. "octave_up"). Empty =
+    /// unset. Maps 1:1 to DesignFrameElement::action.
+    std::string action;
+    /// value_label only: the initial readout string painted over the rect.
+    /// Maps 1:1 to DesignFrameElement::text.
+    std::string text;
+    /// value_label only: left-align the readout (for a "LABEL <value>" overlay
+    /// whose value grows rightward). Maps 1:1 to DesignFrameElement::value_left_align.
+    bool value_left_align = false;
+    /// xy_pad only: initial normalized Y (0=top, 1=bottom). The X axis reuses
+    /// `default_value`. Maps to DesignFrameElement::value_y.
+    float default_value_y = 0.5f;
 
     /// Human-readable name for the control, taken from the design's own caption
     /// text (e.g. the "DEPTH" label under a knob). Empty when the importer found

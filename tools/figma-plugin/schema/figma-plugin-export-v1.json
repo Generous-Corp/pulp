@@ -164,7 +164,7 @@
       "properties": {
         "kind": {
           "type": "string",
-          "enum": ["knob", "fader", "toggle", "dropdown", "text_field", "tab_group", "stepper"],
+          "enum": ["knob", "fader", "toggle", "dropdown", "text_field", "tab_group", "stepper", "swap", "action", "xy_pad", "value_label"],
           "description": "Control type. The C++ materializer (to_frame_elements in design_import_native_common.cpp) maps each to a DesignFrameElement::Kind the runtime already backs."
         },
         "cx": { "type": "number", "description": "knob/fader/switch: pivot or baked-center X, SVG coords." },
@@ -173,6 +173,11 @@
         "svg_patch_d": { "type": "string", "description": "Generic patch target. knob rotates this `d` around (cx,cy); fader/xy_pad translate it by value; a toggle with this set is a switch whose dot is this path. Empty if none was identified." },
         "default_value": { "type": "number", "description": "Initial normalized value (0..1)." },
         "flash": { "type": "boolean", "description": "toggle only: a press-flash command button (lights on press, clears on release) instead of the default sticky on/off flip. Maps to DesignFrameElement::flash." },
+        "target_frame": { "type": "integer", "description": "swap only: the frame index this swap-link button activates on click. Maps to DesignFrameElement::target_frame." },
+        "action": { "type": "string", "description": "action only: the command id fired on click (e.g. \"octave_up\"). Maps to DesignFrameElement::action." },
+        "text": { "type": "string", "description": "value_label only: the initial readout string painted over the rect. Maps to DesignFrameElement::text." },
+        "value_left_align": { "type": "boolean", "description": "value_label only: left-align the readout (for a \"LABEL <value>\" overlay whose value grows rightward). Maps to DesignFrameElement::value_left_align." },
+        "default_value_y": { "type": "number", "description": "xy_pad only: initial normalized Y (0=top, 1=bottom); the X axis reuses default_value. Maps to DesignFrameElement::value_y." },
         "x": { "type": "number", "description": "Overlay box X (dropdown/text_field/tab_group/stepper/toggle, and fader/xy_pad track), SVG coords." },
         "y": { "type": "number", "description": "Overlay box Y, SVG coords." },
         "w": { "type": "number", "description": "Overlay box width, SVG coords." },
@@ -191,7 +196,7 @@
           "then": { "required": ["cx", "cy", "hit_radius"] }
         },
         {
-          "if": { "properties": { "kind": { "enum": ["fader", "toggle", "dropdown", "text_field", "tab_group", "stepper"] } }, "required": ["kind"] },
+          "if": { "properties": { "kind": { "enum": ["fader", "toggle", "dropdown", "text_field", "tab_group", "stepper", "swap", "action", "xy_pad", "value_label"] } }, "required": ["kind"] },
           "then": { "required": ["x", "y", "w", "h"] }
         }
       ]

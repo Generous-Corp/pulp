@@ -263,8 +263,12 @@ test("interactive_element schema accepts every producer-emitted kind (P1a)", () 
   const textField = { kind: "text_field", x: 0, y: 0, w: 80, h: 16, placeholder: "Search", bg_color: "#1c1d1d", source_node_id: "1:6" };
   const tabGroup = { kind: "tab_group", x: 0, y: 0, w: 120, h: 24, options: ["A", "B"], selected_index: 1, source_node_id: "1:7" };
   const stepper = { kind: "stepper", x: 0, y: 0, w: 90, h: 20, options: ["Preset 1"], selected_index: 0, source_node_id: "1:8" };
+  const swap = { kind: "swap", x: 0, y: 0, w: 60, h: 24, target_frame: 2, source_node_id: "1:9" };
+  const action = { kind: "action", x: 0, y: 0, w: 30, h: 24, action: "octave_up", source_node_id: "1:10" };
+  const xyPad = { kind: "xy_pad", x: 0, y: 0, w: 100, h: 100, default_value: 0.3, default_value_y: 0.7, source_node_id: "1:11" };
+  const valueLabel = { kind: "value_label", x: 0, y: 0, w: 80, h: 16, text: "-6.0 dB", value_left_align: true, source_node_id: "1:12" };
 
-  for (const el of [knob, fader, toggle, switchEl, dropdown, textField, tabGroup, stepper]) {
+  for (const el of [knob, fader, toggle, switchEl, dropdown, textField, tabGroup, stepper, swap, action, xyPad, valueLabel]) {
     assert.deepEqual(ieErrors(el), [], `kind '${el.kind}' should validate but didn't`);
   }
 });

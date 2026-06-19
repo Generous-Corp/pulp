@@ -323,6 +323,70 @@ TEST_CASE("DesignIR round-trips fader / toggle / switch interactive elements",
     REQUIRE(s2.flash == false);                            // sticky switch, flash omitted
 }
 
+TEST_CASE("DesignIR round-trips swap / action / xy_pad / value_label elements",
+          "[view][import][ir-v1][faithful-svg][p1b]") {
+    // P1b: these four close the rest of the IR<->runtime gap. The runtime backs
+    // each (DesignFrameElement target_frame / action / value_y / text); this
+    // proves they survive serialize -> parse -> serialize with their typed data.
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.render_mode = NodeRenderMode::faithful_svg;
+    ir.root.svg_asset_id = "asset-svg";
+
+    IRInteractiveElement swap;              // swap-link: clicking switches frames
+    swap.kind = InteractiveElementKind::swap;
+    swap.x = 10; swap.y = 10; swap.w = 60; swap.h = 24;
+    swap.target_frame = 3;
+    ir.root.interactive_elements.push_back(swap);
+
+    IRInteractiveElement act;               // command button (octave +)
+    act.kind = InteractiveElementKind::action;
+    act.x = 80; act.y = 10; act.w = 30; act.h = 24;
+    act.action = "octave_up";
+    ir.root.interactive_elements.push_back(act);
+
+    IRInteractiveElement pad;               // 2D xy pad
+    pad.kind = InteractiveElementKind::xy_pad;
+    pad.x = 10; pad.y = 50; pad.w = 120; pad.h = 120;
+    pad.cx = 70; pad.cy = 110;
+    pad.svg_patch_d = "M70 110l4 0";
+    pad.default_value = 0.25f;              // X
+    pad.default_value_y = 0.8f;             // Y
+    ir.root.interactive_elements.push_back(pad);
+
+    IRInteractiveElement lbl;               // live readout
+    lbl.kind = InteractiveElementKind::value_label;
+    lbl.x = 10; lbl.y = 180; lbl.w = 80; lbl.h = 16;
+    lbl.text = "0.0 dB";
+    lbl.value_left_align = true;
+    ir.root.interactive_elements.push_back(lbl);
+
+    const auto canonical = serialize_design_ir(ir);
+    const auto parsed = parse_design_ir_json(canonical);
+    REQUIRE(serialize_design_ir(parsed) == canonical);     // stable round-trip
+    REQUIRE(parsed.root.interactive_elements.size() == 4);
+
+    const auto& sw = parsed.root.interactive_elements[0];
+    REQUIRE(sw.kind == InteractiveElementKind::swap);
+    REQUIRE(sw.target_frame == 3);
+
+    const auto& a = parsed.root.interactive_elements[1];
+    REQUIRE(a.kind == InteractiveElementKind::action);
+    REQUIRE(a.action == "octave_up");
+
+    const auto& p = parsed.root.interactive_elements[2];
+    REQUIRE(p.kind == InteractiveElementKind::xy_pad);
+    REQUIRE(p.default_value == 0.25f);
+    REQUIRE(p.default_value_y == 0.8f);
+    REQUIRE(p.svg_patch_d == "M70 110l4 0");
+
+    const auto& l = parsed.root.interactive_elements[3];
+    REQUIRE(l.kind == InteractiveElementKind::value_label);
+    REQUIRE(l.text == "0.0 dB");
+    REQUIRE(l.value_left_align == true);
+}
+
 TEST_CASE("DesignIR diagnoses an unknown interactive kind instead of silent-knobbing",
           "[view][import][ir-v1][faithful-svg][p1a]") {
     // P1a acceptance: an unrecognized `kind` string must NOT be silently treated

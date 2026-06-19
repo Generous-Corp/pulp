@@ -92,22 +92,30 @@ and `--validate` still renders the native-materialized output rather than the
 faithful SVG.
 
 **Interactive-overlay kinds the IR carries end-to-end.** The faithful_svg
-`interactive_elements` IR (`InteractiveElementKind` in `design_ir.hpp`) now
-supports `knob, fader, toggle, dropdown, text_field, tab_group, stepper` — each
-maps 1:1 in `to_frame_elements()` (`design_import_native_common.cpp`) to the
-`DesignFrameElement::Kind` the runtime already backs, and the schema
-(`figma-plugin-export-v1.json` `interactive_element.kind`) accepts exactly that
-set. The schema segments `required` per-kind: `knob` needs `cx/cy/hit_radius`;
-the overlay kinds (and `fader`/`toggle`) need the box `x/y/w/h`. **fader** is
-SVG-patch like knob but translates `svg_patch_d` along the track; **toggle** is a
-click-to-flip rect, and a toggle WITH `svg_patch_d` is a switch (the dot is that
-path). When you add a new kind, touch the whole chain in one commit — schema →
-`gen-types` (`types.generated.ts`) → producer (`faithful-vector.ts`) → IR enum →
+`interactive_elements` IR (`InteractiveElementKind` in `design_ir.hpp`) supports
+`knob, fader, toggle, dropdown, text_field, tab_group, stepper, swap, action,
+xy_pad, value_label` — each maps 1:1 in `to_frame_elements()`
+(`design_import_native_common.cpp`) to the `DesignFrameElement::Kind` the runtime
+already backs, and the schema (`figma-plugin-export-v1.json`
+`interactive_element.kind`) accepts exactly that set. The schema segments
+`required` per-kind: `knob` needs `cx/cy/hit_radius`; every other kind needs the
+box `x/y/w/h`. Field map: **fader** translates `svg_patch_d` along the track;
+**toggle** is a click-to-flip rect (a toggle WITH `svg_patch_d` is a switch; with
+`flash` it is a press-flash command button); **swap** carries `target_frame`;
+**action** carries the command id `action`; **xy_pad** adds `default_value_y`
+(Y axis; X reuses `default_value`); **value_label** carries `text` +
+`value_left_align`. When you add a kind, touch the whole chain in one commit —
+schema → `gen-types` (`types.generated.ts`) → producer (`faithful-vector.ts`,
+incl. `detectOverlayControls` if it should auto-detect) → IR enum →
 `design_ir_json.cpp` parse/serialize → `to_frame_elements()` → the
-`design_cpp_codegen.cpp` token switch — or it silently degrades. An **unknown**
-kind string no longer silent-knobs: `interactive_kind_from_id` reports it
-unrecognized and the parser emits a `log_warn` (the full ordered resolution
-ladder + import report is the P7 work).
+`design_cpp_codegen.cpp` token switch + field emit — or it silently degrades.
+`detectOverlayControls` auto-emits swap/action/xy_pad/value_label from explicit
+whole-word node names (run AFTER the tuned dropdown/stepper/tab_group/text_field
+detectors so those always win); the richer node-tree signals (prototype reactions
+for swap, value patterns for value_label) land with P2's unified resolver. An
+**unknown** kind string no longer silent-knobs: `interactive_kind_from_id`
+reports it unrecognized and the parser emits a `log_warn` (the full ordered
+resolution ladder + import report is the P7 work).
 
 **Multi-frame / post-processed components need a DEDICATED re-embed lane —
 `make_catalog_component.py` is single-frame and applies no neutralization.** The

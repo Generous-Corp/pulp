@@ -11,7 +11,18 @@ export type InteractiveElement = {
   /**
    * Control type. The C++ materializer (to_frame_elements in design_import_native_common.cpp) maps each to a DesignFrameElement::Kind the runtime already backs.
    */
-  kind: "knob" | "fader" | "toggle" | "dropdown" | "text_field" | "tab_group" | "stepper";
+  kind:
+    | "knob"
+    | "fader"
+    | "toggle"
+    | "dropdown"
+    | "text_field"
+    | "tab_group"
+    | "stepper"
+    | "swap"
+    | "action"
+    | "xy_pad"
+    | "value_label";
   /**
    * knob/fader/switch: pivot or baked-center X, SVG coords.
    */
@@ -36,6 +47,26 @@ export type InteractiveElement = {
    * toggle only: a press-flash command button (lights on press, clears on release) instead of the default sticky on/off flip. Maps to DesignFrameElement::flash.
    */
   flash?: boolean;
+  /**
+   * swap only: the frame index this swap-link button activates on click. Maps to DesignFrameElement::target_frame.
+   */
+  target_frame?: number;
+  /**
+   * action only: the command id fired on click (e.g. "octave_up"). Maps to DesignFrameElement::action.
+   */
+  action?: string;
+  /**
+   * value_label only: the initial readout string painted over the rect. Maps to DesignFrameElement::text.
+   */
+  text?: string;
+  /**
+   * value_label only: left-align the readout (for a "LABEL <value>" overlay whose value grows rightward). Maps to DesignFrameElement::value_left_align.
+   */
+  value_left_align?: boolean;
+  /**
+   * xy_pad only: initial normalized Y (0=top, 1=bottom); the X axis reuses default_value. Maps to DesignFrameElement::value_y.
+   */
+  default_value_y?: number;
   /**
    * Overlay box X (dropdown/text_field/tab_group/stepper/toggle, and fader/xy_pad track), SVG coords.
    */

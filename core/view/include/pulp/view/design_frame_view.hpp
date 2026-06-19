@@ -179,6 +179,24 @@ public:
         static const std::string kEmpty;
         return (i >= 0 && i < static_cast<int>(elements_.size())) ? elements_[i].action : kEmpty;
     }
+    // The Y axis (0=top, 1=bottom) of an xy_pad element `i`, or 0.5. The X axis is
+    // element_value(i).
+    float element_value_y(int i) const {
+        return (i >= 0 && i < static_cast<int>(elements_.size())) ? elements_[i].value_y : 0.5f;
+    }
+    // The frame index a Kind::swap element activates on click, or -1 if unset.
+    int element_target_frame(int i) const {
+        return (i >= 0 && i < static_cast<int>(elements_.size())) ? elements_[i].target_frame : -1;
+    }
+    // The readout string of a Kind::value_label element `i`, or empty.
+    const std::string& element_text(int i) const {
+        static const std::string kEmpty;
+        return (i >= 0 && i < static_cast<int>(elements_.size())) ? elements_[i].text : kEmpty;
+    }
+    // Whether a Kind::value_label element `i` left-aligns its readout.
+    bool element_left_align(int i) const {
+        return (i >= 0 && i < static_cast<int>(elements_.size())) && elements_[i].value_left_align;
+    }
     // The design-source node id of element `i` (e.g. a Figma node id), or empty
     // when the element wasn't lowered from a design import. The inspector's
     // Wiring lens reads this to map a live control back to its design node.

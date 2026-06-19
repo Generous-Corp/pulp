@@ -1002,6 +1002,14 @@ std::vector<DesignFrameElement> to_frame_elements(
                 el.kind = DesignFrameElement::Kind::tab_group; break;
             case InteractiveElementKind::stepper:
                 el.kind = DesignFrameElement::Kind::stepper; break;
+            case InteractiveElementKind::swap:
+                el.kind = DesignFrameElement::Kind::swap; break;
+            case InteractiveElementKind::action:
+                el.kind = DesignFrameElement::Kind::action; break;
+            case InteractiveElementKind::xy_pad:
+                el.kind = DesignFrameElement::Kind::xy_pad; break;
+            case InteractiveElementKind::value_label:
+                el.kind = DesignFrameElement::Kind::value_label; break;
             case InteractiveElementKind::knob:
                 el.kind = DesignFrameElement::Kind::knob; break;
         }
@@ -1018,6 +1026,12 @@ std::vector<DesignFrameElement> to_frame_elements(
         el.options = e.options;
         el.selected_index = e.selected_index;
         el.bg_color = e.bg_color;
+        // swap / action / xy_pad / value_label data
+        el.target_frame = e.target_frame;
+        el.action = e.action;
+        el.text = e.text;
+        el.value_left_align = e.value_left_align;
+        el.value_y = e.default_value_y;
         // Carry the design-source node id to the live element so the inspector's
         // Wiring lens can map a control back to its Figma node.
         if (e.source_node_id) el.source_node_id = *e.source_node_id;

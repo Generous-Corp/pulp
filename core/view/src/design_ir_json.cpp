@@ -68,25 +68,33 @@ static const char* render_mode_id(NodeRenderMode m) {
 static InteractiveElementKind interactive_kind_from_id(const std::string& s,
                                                        bool* recognized = nullptr) {
     if (recognized) *recognized = true;
-    if (s == "knob")       return InteractiveElementKind::knob;
-    if (s == "fader")      return InteractiveElementKind::fader;
-    if (s == "toggle")     return InteractiveElementKind::toggle;
-    if (s == "dropdown")   return InteractiveElementKind::dropdown;
-    if (s == "text_field") return InteractiveElementKind::text_field;
-    if (s == "tab_group")  return InteractiveElementKind::tab_group;
-    if (s == "stepper")    return InteractiveElementKind::stepper;
+    if (s == "knob")        return InteractiveElementKind::knob;
+    if (s == "fader")       return InteractiveElementKind::fader;
+    if (s == "toggle")      return InteractiveElementKind::toggle;
+    if (s == "dropdown")    return InteractiveElementKind::dropdown;
+    if (s == "text_field")  return InteractiveElementKind::text_field;
+    if (s == "tab_group")   return InteractiveElementKind::tab_group;
+    if (s == "stepper")     return InteractiveElementKind::stepper;
+    if (s == "swap")        return InteractiveElementKind::swap;
+    if (s == "action")      return InteractiveElementKind::action;
+    if (s == "xy_pad")      return InteractiveElementKind::xy_pad;
+    if (s == "value_label") return InteractiveElementKind::value_label;
     if (recognized) *recognized = false;
     return InteractiveElementKind::knob;
 }
 static const char* interactive_kind_id(InteractiveElementKind k) {
     switch (k) {
-        case InteractiveElementKind::fader:      return "fader";
-        case InteractiveElementKind::toggle:     return "toggle";
-        case InteractiveElementKind::dropdown:   return "dropdown";
-        case InteractiveElementKind::text_field: return "text_field";
-        case InteractiveElementKind::tab_group:  return "tab_group";
-        case InteractiveElementKind::stepper:    return "stepper";
-        case InteractiveElementKind::knob:       break;
+        case InteractiveElementKind::fader:       return "fader";
+        case InteractiveElementKind::toggle:      return "toggle";
+        case InteractiveElementKind::dropdown:    return "dropdown";
+        case InteractiveElementKind::text_field:  return "text_field";
+        case InteractiveElementKind::tab_group:   return "tab_group";
+        case InteractiveElementKind::stepper:     return "stepper";
+        case InteractiveElementKind::swap:        return "swap";
+        case InteractiveElementKind::action:      return "action";
+        case InteractiveElementKind::xy_pad:      return "xy_pad";
+        case InteractiveElementKind::value_label: return "value_label";
+        case InteractiveElementKind::knob:        break;
     }
     return "knob";
 }
@@ -855,6 +863,12 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
             el.placeholder = get_string(e, "placeholder");
             el.bg_color = get_string(e, "bg_color");
             el.label = get_string(e, "label");
+            // swap / action / xy_pad / value_label fields.
+            el.target_frame = static_cast<int>(get_float(e, "target_frame", -1.0f));
+            el.action = get_string(e, "action");
+            el.text = get_string(e, "text");
+            el.value_left_align = get_bool(e, "value_left_align");
+            el.default_value_y = get_float(e, "default_value_y", 0.5f);
             if (e.hasObjectMember("options") && e["options"].isArray()) {
                 const auto opts = e["options"];
                 for (uint32_t j = 0; j < opts.size(); ++j)
@@ -1799,6 +1813,14 @@ static void write_ir_node_json(std::ostringstream& out, const IRNode& node,
                 }
                 out << ']';
             }
+            // swap / action / xy_pad / value_label fields — emitted only when set.
+            if (el.target_frame != -1)
+                write_int_member(out, ef, "target_frame", el.target_frame);
+            if (!el.action.empty()) write_string_member(out, ef, "action", el.action);
+            if (!el.text.empty()) write_string_member(out, ef, "text", el.text);
+            if (el.value_left_align) { write_key(out, ef, "value_left_align"); out << "true"; }
+            if (el.kind == InteractiveElementKind::xy_pad)
+                write_float_member(out, ef, "default_value_y", el.default_value_y);
             write_string_member(out, ef, "source_node_id", el.source_node_id);
             out << '}';
         }

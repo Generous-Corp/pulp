@@ -22,7 +22,11 @@ export type InteractiveElementKind =
   | "dropdown"
   | "text_field"
   | "tab_group"
-  | "stepper";
+  | "stepper"
+  | "swap"
+  | "action"
+  | "xy_pad"
+  | "value_label";
 
 export interface InteractiveElement {
   kind: InteractiveElementKind;
@@ -45,6 +49,12 @@ export interface InteractiveElement {
   selected_index?: number;
   placeholder?: string;
   bg_color?: string;  // text_field: the design's own field bg ("#RRGGBB")
+  // swap / action / xy_pad / value_label fields, in lockstep with the C++ parser.
+  target_frame?: number;   // swap: frame index activated on click
+  action?: string;         // action: command id fired on click
+  text?: string;           // value_label: initial readout string
+  value_left_align?: boolean;  // value_label: left-align the readout
+  default_value_y?: number;    // xy_pad: initial normalized Y (0=top)
 }
 
 // Minimal structural node shape detectOverlayControls needs. ExtractedFigmaNode
@@ -441,9 +451,73 @@ export function detectOverlayControls(
       return;  // leaf overlay
     }
 
+    // ── swap / action / xy_pad / value_label (P1b) ───────────────────────────
+    // Whole-word name-gated, and run AFTER the tuned dropdown/stepper/tab_group/
+    // text_field detectors in this visit() so they always win — these only claim
+    // a node the others left unclaimed, and only on an explicit name token, so a
+    // generic design never sprouts spurious overlays. (Knob detection is a
+    // separate geometry pass, parseFrameKnobs, not part of this precedence.) The
+    // full node-tree signals
+    // (prototype reactions for swap, value patterns for value_label, a command
+    // vocabulary for action) land with P2's unified resolver; this is the
+    // name-driven floor that proves the producer can emit each kind.
+    if (bb) {
+      const named = detectNamedControl(n, name, ntype, toSvg(bb));
+      if (named) { out.push(named); return; }
+    }
+
     for (let i = 0; i < kids.length; i++) visit(kids[i], n);
   }
 
   visit(root, null);
   return out;
+}
+
+// Whole-word test (ES5-conservative: no \b reliance on unicode, explicit
+// non-alphanumeric boundaries so "xy" matches "xy pad" but not "deoxy").
+function hasWord(s: string, w: string): boolean {
+  return new RegExp("(^|[^a-z0-9])" + w + "([^a-z0-9]|$)").test(s);
+}
+
+// Name-driven detection for the P1b kinds. `rect` is the node's SVG-space box.
+function detectNamedControl(
+  n: OverlayNode, name: string, ntype: string,
+  rect: [number, number, number, number],
+): InteractiveElement | null {
+  const sid = n.figma_node_id || "";
+  // xy_pad: a node explicitly named an XY pad.
+  if (hasWord(name, "xy") || name.indexOf("xypad") !== -1 ||
+      name.indexOf("xy pad") !== -1 || name.indexOf("xy-pad") !== -1) {
+    return { kind: "xy_pad", x: rect[0], y: rect[1], w: rect[2], h: rect[3], source_node_id: sid };
+  }
+  // swap-link: a node named a swap / mode switch. A trailing number ("swap 2")
+  // sets the target frame index.
+  if (hasWord(name, "swap")) {
+    const el: InteractiveElement = { kind: "swap", x: rect[0], y: rect[1], w: rect[2], h: rect[3], source_node_id: sid };
+    const m = /(\d+)\s*$/.exec(name);
+    if (m) el.target_frame = parseInt(m[1], 10);
+    return el;
+  }
+  // action command button: "action:octave_up" or a whole-word "action" name. The
+  // id is the command the consumer routes on, so take it from the ORIGINAL-case
+  // node name / text (never the lowercased detection copy). A bare "action" with
+  // no text yields an empty id so a consumer can detect an unconfigured button.
+  if (name.indexOf("action:") === 0 || hasWord(name, "action")) {
+    const orig = n.name || "";
+    const id = name.indexOf("action:") === 0
+      ? orig.substring("action:".length).replace(/^\s+|\s+$/g, "")
+      : (firstText(n) || "").replace(/^\s+|\s+$/g, "");
+    return { kind: "action", x: rect[0], y: rect[1], w: rect[2], h: rect[3], action: id, source_node_id: sid };
+  }
+  // value_label: a TEXT node DELIBERATELY named a readout. Gated on explicit
+  // markers ("readout" / "value_label"), NOT the bare word "value"/"display" —
+  // those are far too common on STATIC text layers to flip into a live overlay.
+  // (Richer content-pattern detection rides P2's unified resolver.)
+  if (ntype === "TEXT" &&
+      (hasWord(name, "readout") || name.indexOf("value_label") !== -1 ||
+       name.indexOf("value-label") !== -1 || name.indexOf("valuelabel") !== -1)) {
+    return { kind: "value_label", x: rect[0], y: rect[1], w: rect[2], h: rect[3],
+             text: firstText(n) || n.content || "", source_node_id: sid };
+  }
+  return null;
 }

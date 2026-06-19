@@ -936,6 +936,71 @@ TEST_CASE("materializer maps every interactive kind to its DesignFrameElement::K
                                       "native-materialize-faithful-svg-unresolved"));
 }
 
+TEST_CASE("materializer maps swap / action / xy_pad / value_label with their fields",
+          "[view][import][native-materializer][faithful-svg][p1b]") {
+    // P1b acceptance: each of the four new kinds materializes (JSON -> IR ->
+    // to_frame_elements -> DesignFrameView) to the matching runtime Kind AND
+    // carries its typed data (target_frame / action / value_y / text).
+    const std::string svg =
+        R"(<svg width="240" height="240" xmlns="http://www.w3.org/2000/svg">)"
+        R"(<rect x="10" y="10" width="220" height="220" fill="#1c1d1d"/></svg>)";
+
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.render_mode = NodeRenderMode::faithful_svg;
+    ir.root.svg_asset_id = "svg1";
+
+    IRInteractiveElement swap;
+    swap.kind = InteractiveElementKind::swap;
+    swap.x = 20; swap.y = 20; swap.w = 60; swap.h = 24; swap.target_frame = 2;
+    ir.root.interactive_elements.push_back(swap);
+
+    IRInteractiveElement act;
+    act.kind = InteractiveElementKind::action;
+    act.x = 20; act.y = 60; act.w = 30; act.h = 24; act.action = "octave_up";
+    ir.root.interactive_elements.push_back(act);
+
+    IRInteractiveElement pad;
+    pad.kind = InteractiveElementKind::xy_pad;
+    pad.x = 20; pad.y = 100; pad.w = 100; pad.h = 100;
+    pad.default_value = 0.3f; pad.default_value_y = 0.7f;
+    ir.root.interactive_elements.push_back(pad);
+
+    IRInteractiveElement lbl;
+    lbl.kind = InteractiveElementKind::value_label;
+    lbl.x = 20; lbl.y = 210; lbl.w = 80; lbl.h = 16; lbl.text = "-6.0 dB";
+    lbl.value_left_align = true;
+    ir.root.interactive_elements.push_back(lbl);
+
+    IRAssetRef asset;
+    asset.asset_id = "svg1";
+    asset.original_uri = "data:image/svg+xml;base64," + pulp::runtime::base64_encode(svg);
+    asset.mime = "image/svg+xml";
+    ir.asset_manifest.assets.push_back(asset);
+
+    std::vector<ImportDiagnostic> diagnostics;
+    auto root = build_native_view_tree(ir, ir.asset_manifest,
+                                       {.diagnostics_out = &diagnostics});
+    auto* frame = dynamic_cast<DesignFrameView*>(root.get());
+    REQUIRE(frame != nullptr);
+    REQUIRE(frame->element_count() == 4);
+    using FK = DesignFrameElement::Kind;
+    CHECK(frame->element_kind(0) == FK::swap);
+    CHECK(frame->element_kind(1) == FK::action);
+    CHECK(frame->element_kind(2) == FK::xy_pad);
+    CHECK(frame->element_kind(3) == FK::value_label);
+    // Every typed payload survives the IR -> DesignFrameElement copy — not just
+    // the Kind. A dropped field-copy in to_frame_elements would redden these.
+    CHECK(frame->element_target_frame(0) == 2);             // swap link target
+    CHECK(frame->element_action(1) == "octave_up");         // action command id
+    CHECK(frame->element_value(2) == Catch::Approx(0.3f));  // xy_pad X axis
+    CHECK(frame->element_value_y(2) == Catch::Approx(0.7f));// xy_pad Y axis
+    CHECK(frame->element_text(3) == "-6.0 dB");             // value_label readout
+    CHECK(frame->element_left_align(3) == true);            // value_label alignment
+    REQUIRE_FALSE(diagnostics_contain(diagnostics,
+                                      "native-materialize-faithful-svg-unresolved"));
+}
+
 TEST_CASE("baked native materializer forwards a sampled shape_fill_gradient",
           "[view][import][native-materializer][figma-plugin][fill]") {
     // The importer samples a shape illustration's OWN gradient and stamps
