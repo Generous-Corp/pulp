@@ -1,5 +1,3 @@
-// font_options.cpp — Pulp #2163 follow-up, Phase 1 / Slice 1.1.a.
-//
 // Hash implementation for FontOptions. Every field contributes; the
 // rule is "every cache keys on the full blob, never on a subset."
 
@@ -19,15 +17,14 @@ inline std::size_t mix(std::size_t seed, std::size_t v) noexcept {
 }
 
 inline std::size_t hash_float(float f) noexcept {
-    // Codex P2 on #2169: `FontOptions::operator==` is `= default`, which
-    // compares each float member with `==`. IEEE-754 says `+0.0f == -0.0f`,
-    // but their bit patterns differ (0x00000000 vs 0x80000000). Hashing
-    // the raw bits violates the hash/equality contract for
-    // `std::hash<FontOptions>` and can cause missed lookups or duplicate
-    // equivalent entries in unordered caches when signed zero appears in
-    // font option inputs. Canonicalize the sign-bit of zero BEFORE memcpy
-    // by working on the bit pattern directly — `if (f == 0.0f) f = 0.0f;`
-    // is unsafe because the compiler can optimize it away.
+    // `FontOptions::operator==` is `= default`, which compares each float
+    // member with `==`. IEEE-754 says `+0.0f == -0.0f`, but their bit patterns
+    // differ (0x00000000 vs 0x80000000). Hashing the raw bits violates the
+    // hash/equality contract for `std::hash<FontOptions>` and can cause missed
+    // lookups or duplicate equivalent entries in unordered caches when signed
+    // zero appears in font option inputs. Canonicalize the sign-bit of zero
+    // BEFORE memcpy by working on the bit pattern directly; `if (f == 0.0f)
+    // f = 0.0f;` is unsafe because the compiler can optimize it away.
     //
     // NaN hashes are intentionally not normalised — two NaN-bearing
     // FontOptions values that hash differently is benign (and `operator==`

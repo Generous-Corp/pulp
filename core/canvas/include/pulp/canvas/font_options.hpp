@@ -1,8 +1,5 @@
 // font_options.hpp
 //
-// Pulp #2163 follow-up — Phase 1 / Slice 1.1.a of the font-subsystem-hardening
-// v2 roadmap (see planning/2026-05-17-font-subsystem-hardening-v2.md).
-//
 // `FontOptions` is the typed, hashable blob that replaces today's
 // `(family_string, size, weight, slant)` tuple wherever the SDK needs to
 // describe what font to use. Every cache in the font subsystem must key on
@@ -15,9 +12,8 @@
 //   * Paint position (x, y) — that's an argument to ShapedText::paint_at.
 //   * TextAnchor — that's an argument to ShapedText::paint_at.
 // Folding either into FontOptions would force every cache miss to re-shape
-// on an anchor or position change. The Slice 1.2 `paint_at` API takes them
-// separately so the same `ShapedText` artifact can paint at any anchor
-// without re-shaping.
+// on an anchor or position change. The `paint_at` API takes them separately so
+// the same `ShapedText` artifact can paint at any anchor without re-shaping.
 //
 // This header is intentionally Skia-free so non-GPU translation units
 // (e.g. `core/view/` widgets) can construct FontOptions without dragging
@@ -45,16 +41,15 @@ enum class FontSlant : std::uint8_t {
 };
 
 /// Logical text direction. `Auto` defers to bidi analysis in the
-/// `TextRunPlanner` (Slice 1.2); `LTR`/`RTL` force a paragraph-level
-/// base direction.
+/// `TextRunPlanner`; `LTR`/`RTL` force a paragraph-level base direction.
 enum class BaseDirection : std::uint8_t {
     LTR,
     RTL,
     Auto,
 };
 
-/// Three fallback policies for the resolver cascade (Slice 1.1.a). Plugins
-/// pick at registration time:
+/// Three fallback policies for the resolver cascade. Plugins pick at
+/// registration time:
 ///   * `Deterministic` — registered → bundled → platform-`nullptr`-fallback.
 ///     Strictly identical across machines; what an audio plugin wants when
 ///     shipping a fixed visual. Ignores Core Text / DirectWrite / fontconfig
@@ -83,9 +78,9 @@ enum class HintingMode : std::uint8_t {
 };
 
 /// `Default` follows the existing `inside_non_opaque_layer()` heuristic
-/// (pulp #1899). The other modes force a specific AA path; observable in
-/// `MeasurementTrace` so designer-grade goldens (Phase 3 / Slice 3.2)
-/// catch unintended changes.
+/// for opacity-layer text edging. The other modes force a specific AA path;
+/// observable in `MeasurementTrace` so designer-grade goldens catch
+/// unintended changes.
 enum class AntiAliasMode : std::uint8_t {
     Default,
     LCD,
@@ -96,7 +91,7 @@ enum class AntiAliasMode : std::uint8_t {
 /// Color-font policy. `Auto` picks the best available format per glyph;
 /// the explicit modes force a single format (or monochrome) — useful when
 /// a designer needs deterministic output across backends with uneven
-/// COLR/CPAL support (see Phase 3 / Slice 3.1 tar pit).
+/// COLR/CPAL support.
 enum class ColorFontMode : std::uint8_t {
     Auto,
     Bitmap,
@@ -169,7 +164,7 @@ struct FontSynthesisPolicy {
 /// Carried inside `FontOptions` so cache keys include the scope, which
 /// in turn means a Plugin(A) registration cannot pollute Plugin(B)
 /// resolutions (and vice versa). The `View` kind powers hot-reload in
-/// the design-import workflow (Phase 2 / Slice 2.x).
+/// the design-import workflow.
 struct FontScopeId {
     enum class Kind : std::uint8_t { Global, Plugin, View };
 
@@ -221,13 +216,13 @@ struct FontOptions {
 
     // ── Variable-font axes ──────────────────────────────────────────────
     /// Each entry: (axis tag, value). The resolver consults these for
-    /// axis instancing (Phase 2 / Slice 2.3). Ordering is irrelevant for
-    /// resolution but preserved for trace fidelity.
+    /// axis instancing. Ordering is irrelevant for resolution but preserved
+    /// for trace fidelity.
     std::vector<VariationAxis> variation_axes;
 
     // ── Locale + direction ──────────────────────────────────────────────
     /// BCP-47 language tag (`""`, `"en"`, `"ja-JP"`, `"zh-Hans"`).
-    /// Drives ICU locale-aware shaping and line-break (Phase 2 / 2.4).
+    /// Drives ICU locale-aware shaping and line-break behavior.
     std::string locale;
     BaseDirection direction = BaseDirection::Auto;
 
