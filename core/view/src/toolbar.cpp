@@ -65,6 +65,21 @@ void Toolbar::set_enabled(std::string_view id, bool enabled) {
         if (item.id == id) { item.enabled = enabled; return; }
 }
 
+// Width a Custom item occupies along the bar: its view's flex preferred_width
+// when set, else the square item_size_. Shared by paint and hit-testing so
+// they always agree on layout.
+static float toolbar_custom_width(const ToolbarItem& item, float item_size) {
+    if (item.custom_view) {
+        float pw = item.custom_view->flex().preferred_width;
+        if (pw > 0.0f) return pw;
+    }
+    return item_size;
+}
+
+float Toolbar::custom_item_width(const ToolbarItem& item) const {
+    return toolbar_custom_width(item, item_size_);
+}
+
 void Toolbar::paint(canvas::Canvas& canvas) {
     float w = bounds().width, h = bounds().height;
 
@@ -100,14 +115,17 @@ void Toolbar::paint(canvas::Canvas& canvas) {
         float item_x = horiz ? pos : 0;
         float item_y = horiz ? 0 : pos;
 
-        // Custom view — paint it directly
+        // Custom view — paint it directly. A custom view sizes to its own
+        // flex preferred_width when set (e.g. a wide "120 BPM" readout) so it
+        // is not clamped to the square item_size_; falls back to item_size_.
         if (item.type == ToolbarItemType::Custom && item.custom_view) {
-            item.custom_view->set_bounds({item_x, item_y, item_size_, item_size_});
+            float cw = custom_item_width(item);
+            item.custom_view->set_bounds({item_x, item_y, cw, item_size_});
             canvas.save();
             canvas.translate(item_x, item_y);
             item.custom_view->paint(canvas);
             canvas.restore();
-            pos += item_size_ + spacing_;
+            pos += cw + spacing_;
             continue;
         }
 
@@ -133,8 +151,21 @@ void Toolbar::paint(canvas::Canvas& canvas) {
         canvas.set_fill_color(text_color);
         canvas.set_font("system", 11.0f);
 
-        // Center the first character of the label as an icon
-        std::string display = item.label.empty() ? "" : item.label.substr(0, 2);
+        // Center the leading glyph of the label as an icon. UTF-8 aware: a
+        // naive substr(0, 2) splits a multibyte codepoint (e.g. a 3-byte
+        // transport glyph ▶ / ↺) into invalid UTF-8, which aborts Skia text
+        // shaping. Take the first whole codepoint when the label leads with a
+        // multibyte sequence; otherwise keep the historic first-two-ASCII look.
+        std::string display;
+        if (!item.label.empty()) {
+            auto lead = static_cast<unsigned char>(item.label[0]);
+            if (lead < 0x80) {
+                display = item.label.substr(0, 2);
+            } else {
+                size_t n = (lead >= 0xF0) ? 4 : (lead >= 0xE0) ? 3 : 2;
+                display = item.label.substr(0, std::min(n, item.label.size()));
+            }
+        }
         float text_w = canvas.measure_text(display);
         if (horiz) {
             canvas.fill_text(display, item_x + (item_size_ - text_w) / 2.0f,
@@ -165,11 +196,13 @@ int Toolbar::hit_test_item(Point pos) const {
         if (item.type == ToolbarItemType::Spacer) { item_pos += 20.0f; continue; }
         if (item.type == ToolbarItemType::Separator) { item_pos += spacing_ * 2; continue; }
 
+        float span = (item.type == ToolbarItemType::Custom)
+                         ? custom_item_width(item) : item_size_;
         float coord = horiz ? pos.x : pos.y;
-        if (coord >= item_pos && coord < item_pos + item_size_)
+        if (coord >= item_pos && coord < item_pos + span)
             return i;
 
-        item_pos += item_size_ + spacing_;
+        item_pos += span + spacing_;
     }
     return -1;
 }
@@ -188,6 +221,8 @@ void Toolbar::on_mouse_down(Point pos) {
         for (int i = 0; i < idx; ++i) {
             if (items_[i].type == ToolbarItemType::Spacer) item_start += 20.0f;
             else if (items_[i].type == ToolbarItemType::Separator) item_start += spacing_ * 2;
+            else if (items_[i].type == ToolbarItemType::Custom)
+                item_start += custom_item_width(items_[i]) + spacing_;
             else item_start += item_size_ + spacing_;
         }
         Point local = {pos.x - (horiz ? item_start : 0),

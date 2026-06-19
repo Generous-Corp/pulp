@@ -80,6 +80,25 @@ public:
     // `view_size()` to publish min/max/preferred bounds for host-side
     // resize. See docs/guides/view-bridge.md for the full pattern.
     //
+    // Ink & Signal is Pulp's default design language for new apps. Adopt it by
+    // setting the theme on your root and opting widgets into the navigation
+    // variants — existing apps that do neither are unaffected:
+    //
+    //   #include <pulp/design/design_system.hpp>   // ink_signal_theme()
+    //
+    //   std::unique_ptr<pulp::view::View> create_view() override {
+    //       auto root = std::make_unique<pulp::view::View>();
+    //       root->set_theme(pulp::design::ink_signal_theme(/*dark=*/true));
+    //       auto tabs = std::make_unique<pulp::view::TabPanel>();
+    //       tabs->set_tab_bar_style(pulp::view::TabPanel::TabBarStyle::underline);
+    //       // … add tabs / a SegmentedControl / an accent ListBox nav …
+    //       root->add_child(std::move(tabs));
+    //       return root;
+    //   }
+    //
+    // Without a theme, widgets fall back to Ink & Signal-flavoured defaults; set
+    // the theme to get the full token set and to let users restyle via a theme.
+    //
     // std::unique_ptr<pulp::view::View> create_view() override {
     //     auto root = std::make_unique<pulp::view::View>();
     //     // build your custom widget hierarchy here …
