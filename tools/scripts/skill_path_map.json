@@ -293,6 +293,14 @@
         "examples/stream-*/**"
       ]
     },
+    "stretch": {
+      "paths": [
+        "core/signal/include/pulp/signal/offline_stretch.hpp",
+        "core/signal/include/pulp/signal/stretch_preset.hpp",
+        "core/signal/include/pulp/signal/realtime_pitch_time_processor.hpp",
+        "examples/offline-stretch/**"
+      ]
+    },
     "tart-ci": {
       "paths": [
         "tools/ci/tart-*.sh",

@@ -536,3 +536,115 @@ TEST_CASE("invalid fft override is ignored (falls back to default geometry)", "[
     REQUIRE(s.process(inp, n, outp, m, o, &err));
     for (float v : out) REQUIRE(std::isfinite(v));
 }
+
+// ── Character modes (StretchCharacter) ────────────────────────────────────────
+// clean (default) = spectral peak-lock; varispeed = pitch+time-linked resample +
+// speed-scaled tape head EQ; phase_vocoder/granular are scaffolds that render as
+// clean. These pin the API contract + the varispeed tape behaviour.
+TEST_CASE("varispeed: identity at ratio 1, exact length, tape EQ direction", "[offline-stretch]") {
+    using pulp::signal::StretchCharacter;
+    const double sr = 48000.0;
+    const long n = 24000;
+    const auto in = sine(n, sr, 220.0, 0.6f);
+    const float* inp[1] = {in.data()};
+    OfflineStretch s; s.prepare(sr, 1);
+
+    SECTION("ratio 1.0 is a (near) identity — head EQ bypasses at unity") {
+        OfflineStretchOptions o; o.character = StretchCharacter::varispeed; o.time_ratio = 1.0;
+        std::vector<float> out(static_cast<size_t>(n)); float* op[1] = {out.data()};
+        std::string e; REQUIRE(s.process(inp, n, op, n, o, &e));
+        double maxd = 0.0;
+        for (long i = 0; i < n; ++i) maxd = std::max(maxd, std::abs((double)out[(size_t)i]-(double)in[(size_t)i]));
+        CHECK(maxd < 1e-3); // pure resample at integer positions
+    }
+    SECTION("ratio != 1: exact length, finite, and slow=darker than fast") {
+        // HF brightness proxy: mean |first difference| / mean |sample|. Brighter
+        // (more HF) -> higher slew. Robust and FFT-free.
+        auto brightness = [&](const std::vector<float>& y) {
+            double slew=0, amp=0;
+            for (size_t i=1;i<y.size();++i){ slew+=std::abs((double)y[i]-(double)y[i-1]); amp+=std::abs((double)y[i]); }
+            return amp>0 ? slew/amp : 0.0;
+        };
+        OfflineStretchOptions slow; slow.character=StretchCharacter::varispeed; slow.time_ratio=2.0;
+        const long ms = offline_stretch_output_frames(n, 2.0);
+        std::vector<float> os(static_cast<size_t>(ms)); float* sp[1]={os.data()};
+        std::string e; REQUIRE(s.process(inp, n, sp, ms, slow, &e));
+        REQUIRE(static_cast<long>(os.size()) == ms);
+        for (float v: os) REQUIRE(std::isfinite(v));
+
+        OfflineStretchOptions fast; fast.character=StretchCharacter::varispeed; fast.time_ratio=0.5;
+        const long mf = offline_stretch_output_frames(n, 0.5);
+        std::vector<float> of(static_cast<size_t>(mf)); float* fp[1]={of.data()};
+        REQUIRE(s.process(inp, n, fp, mf, fast, &e));
+        // tape slow is duller than tape fast (head-gap HF loss scales with speed)
+        CHECK(brightness(os) < brightness(of));
+    }
+}
+
+TEST_CASE("scaffold characters render valid output (clean fallback)", "[offline-stretch]") {
+    using pulp::signal::StretchCharacter;
+    const double sr = 48000.0; const long n = 12000;
+    const auto in = sine(n, sr, 440.0, 0.5f);
+    const float* inp[1] = {in.data()};
+    OfflineStretch s; s.prepare(sr, 1);
+    for (auto ch : {StretchCharacter::phase_vocoder, StretchCharacter::granular}) {
+        OfflineStretchOptions o; o.character = ch; o.time_ratio = 1.5; o.relocate_transients = true;
+        const long m = offline_stretch_output_frames(n, 1.5);
+        std::vector<float> out(static_cast<size_t>(m)); float* op[1]={out.data()};
+        std::string e; REQUIRE(s.process(inp, n, op, m, o, &e));
+        REQUIRE(static_cast<long>(out.size()) == m);
+        for (float v: out) REQUIRE(std::isfinite(v));
+    }
+}
+
+// ── Fine-tune preset layer (StretchPreset) ────────────────────────────────────
+#include <pulp/signal/stretch_preset.hpp>
+using pulp::signal::StretchPreset;
+using pulp::signal::StretchCharacter;
+
+TEST_CASE("StretchPreset round-trips through text", "[offline-stretch][preset]") {
+    StretchPreset p;
+    p.name = "My Tape";
+    p.character = StretchCharacter::varispeed;
+    p.fft_size = 8192; p.analysis_hop = 512;
+    p.transient_sensitivity = 1.8f;
+    p.route_noise_stn = true;
+    p.relocate_transients = true;
+    const std::string txt = pulp::signal::preset_to_text(p);
+    StretchPreset q; std::string err;
+    REQUIRE(pulp::signal::preset_from_text(txt, q, &err));
+    CHECK(q.name == "My Tape");
+    CHECK(q.character == StretchCharacter::varispeed);
+    CHECK(q.fft_size == 8192);
+    CHECK(q.analysis_hop == 512);
+    CHECK(q.transient_sensitivity == 1.8f);
+    CHECK(q.route_noise_stn == true);
+    CHECK(q.relocate_transients == true);
+}
+
+TEST_CASE("StretchPreset applies to options and captures back", "[offline-stretch][preset]") {
+    StretchPreset p; p.character = StretchCharacter::varispeed; p.fft_size = 1024; p.transient_sensitivity = 2.0f;
+    OfflineStretchOptions o; o.time_ratio = 2.0; // caller's ratio is NOT a preset field
+    pulp::signal::apply_preset(o, p);
+    CHECK(o.character == StretchCharacter::varispeed);
+    CHECK(o.fft_size == 1024);
+    CHECK(o.transient_sensitivity == 2.0f);
+    CHECK(o.time_ratio == 2.0); // untouched by the preset
+    const StretchPreset back = pulp::signal::capture_preset(o, "roundtrip");
+    CHECK(back.character == StretchCharacter::varispeed);
+    CHECK(back.fft_size == 1024);
+}
+
+TEST_CASE("StretchPreset parsing is tolerant", "[offline-stretch][preset]") {
+    StretchPreset p; std::string err;
+    const std::string txt =
+        "# a comment\n\n  character = varispeed  \n"
+        "future_key = whatever\n"   // unknown key ignored
+        "route_noise_stn = yes\n";
+    REQUIRE(pulp::signal::preset_from_text(txt, p, &err));
+    CHECK(p.character == StretchCharacter::varispeed);
+    CHECK(p.route_noise_stn == true);
+    // malformed character value is a hard error
+    StretchPreset bad;
+    CHECK_FALSE(pulp::signal::preset_from_text("character = bogus\n", bad, &err));
+}

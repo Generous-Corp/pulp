@@ -19,6 +19,8 @@
 #include <pulp/audio/format_registry.hpp>
 #include <pulp/audio/onset_detector.hpp>
 #include <pulp/signal/offline_stretch.hpp>
+#include <pulp/signal/stretch_preset.hpp>
+#include <fstream>
 
 #include <algorithm>
 #include <cmath>
@@ -127,6 +129,16 @@ int analyze(const std::string& in) {
     return 0;
 }
 
+pulp::signal::StretchCharacter parse_character(const char* s, bool* ok) {
+    *ok = true;
+    if (std::strcmp(s, "clean") == 0) return pulp::signal::StretchCharacter::clean;
+    if (std::strcmp(s, "varispeed") == 0) return pulp::signal::StretchCharacter::varispeed;
+    if (std::strcmp(s, "phase_vocoder") == 0) return pulp::signal::StretchCharacter::phase_vocoder;
+    if (std::strcmp(s, "granular") == 0) return pulp::signal::StretchCharacter::granular;
+    *ok = false;
+    return pulp::signal::StretchCharacter::clean;
+}
+
 pulp::signal::OfflineFormantMode parse_formant(const char* s, bool* ok) {
     *ok = true;
     if (std::strcmp(s, "follow") == 0) return pulp::signal::OfflineFormantMode::follow_pitch;
@@ -232,6 +244,7 @@ int main(int argc, char** argv) {
     pulp::signal::OfflineStretchOptions opts;
     bool want_analyze = false;
     std::optional<double> bpm_to;
+    std::string save_preset_path;
 
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
@@ -254,10 +267,32 @@ int main(int argc, char** argv) {
         else if (a == "--no-stn") opts.route_noise_stn = false;               // (default) bypass STN noise morph
         else if (a == "--stn") opts.route_noise_stn = true;                   // opt into STN noise morph
         else if (a == "--transient-sens") opts.transient_sensitivity = std::atof(next("--transient-sens"));
+        else if (a == "--character") {
+            bool ok = false; opts.character = parse_character(next("--character"), &ok);
+            if (!ok) { std::fprintf(stderr, "error: --character must be clean|varispeed|phase_vocoder|granular\n"); return 2; }
+        }
+        else if (a == "--preset") {
+            const char* path = next("--preset");
+            std::ifstream f(path); std::stringstream ss; ss << f.rdbuf();
+            pulp::signal::StretchPreset p; std::string perr;
+            if (!f || !pulp::signal::preset_from_text(ss.str(), p, &perr)) {
+                std::fprintf(stderr, "error: --preset '%s': %s\n", path, perr.empty() ? "cannot read" : perr.c_str());
+                return 2;
+            }
+            pulp::signal::apply_preset(opts, p); // later flags can still override
+        }
+        else if (a == "--save-preset") save_preset_path = next("--save-preset");
         else if (a == "--bpm-to") bpm_to = std::atof(next("--bpm-to"));
         else if (a == "--help" || a == "-h") { usage(); return 0; }
         else if (!a.empty() && a[0] == '-') { std::fprintf(stderr, "error: unknown flag %s\n", a.c_str()); usage(); return 2; }
         else pos.push_back(a);
+    }
+
+    if (!save_preset_path.empty()) {
+        std::ofstream f(save_preset_path);
+        if (!f) { std::fprintf(stderr, "error: cannot write preset '%s'\n", save_preset_path.c_str()); return 2; }
+        f << pulp::signal::preset_to_text(pulp::signal::capture_preset(opts, "stretchcli"));
+        std::fprintf(stderr, "[stretchcli] wrote preset %s\n", save_preset_path.c_str());
     }
 
     if (want_analyze) {

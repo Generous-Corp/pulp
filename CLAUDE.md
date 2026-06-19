@@ -991,6 +991,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `ship` | Sign / notarize / package / distribute Pulp plugins and apps across macOS / Windows / Android |
 | `skia-gpu-build` | Enable Skia+Dawn GPU builds: prebuilt skia-builder libs, headers-only worktree trap, `SKIA_DIR` reuse, `MacGpuWindowHost` verify, raster-fallback + GPU-wedge gotchas |
 | `streams` | `pulp::runtime::AsyncStream` selection, async-callback wiring without deadlock, backpressure |
+| `stretch` | Offline time-stretch / pitch / varispeed: character modes, fine-tune presets, A/B eval toolkit, honest quality state |
 | `tart-ci` | Tart golden-VM macOS CI: layered goldens, ephemeral per-job runners, vm-image manifest, caching/rebake, host-keychain safety |
 | `threejs-bridge` | Native Dawn-backed Three.js: three.webgpu.js renderer, bridge tests, native demo capture |
 | `upgrade` | `pulp upgrade` guidance: release discovery, migration notes, breaking-change fixes |
@@ -999,7 +1000,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `vst3` | VST3 adapter: SingleComponentEffect, bus arrangement, param/MIDI routing, state, Steinberg SDK traps |
 | `webview-ui` | WebView UI: native bridge, embedded assets, directory-backed dev resources, WebView validation |
 
-29 skills as of 2026-06-15. When adding a new skill, append its row here and register the subsystem in `tools/scripts/skill_path_map.json`.
+30 skills as of 2026-06-17. When adding a new skill, append its row here and register the subsystem in `tools/scripts/skill_path_map.json`.
 
 ### Claude Code Plugin
 
