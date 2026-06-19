@@ -212,6 +212,18 @@ export interface Node {
    * When type=image, references asset_manifest.assets[*].asset_id
    */
   asset_ref?: string;
+  /**
+   * Faithful-vector lane (Plan B). 'faithful_svg' makes the C++ materializer render svg_asset_id via DesignFrameView with interactive_elements overlays, instead of widget-recognition. Maps to IRNode.render_mode.
+   */
+  render_mode?: "normal" | "faithful_svg";
+  /**
+   * When render_mode=faithful_svg, references the asset_manifest entry (mime image/svg+xml) holding this node's SVG export. Maps to IRNode.svg_asset_id.
+   */
+  svg_asset_id?: string;
+  /**
+   * Source-identified interactive overlays for a faithful_svg render. Maps to IRNode.interactive_elements.
+   */
+  interactive_elements?: InteractiveElement[];
   children?: Node[];
 }
 /**
@@ -331,4 +343,34 @@ export interface FigmaMetadata {
     [k: string]: string;
   };
   [k: string]: unknown;
+}
+/**
+ * One interactive overlay on a faithful_svg node (currently only knobs). Coordinates are in the SVG's own space.
+ */
+export interface InteractiveElement {
+  kind: "knob";
+  /**
+   * Pivot / hit center X, SVG coords.
+   */
+  cx: number;
+  /**
+   * Pivot / hit center Y, SVG coords.
+   */
+  cy: number;
+  /**
+   * Click-target radius, SVG coords.
+   */
+  hit_radius: number;
+  /**
+   * Exact `d` of the needle path to rotate; empty if none was identified.
+   */
+  svg_patch_d?: string;
+  /**
+   * Initial normalized value (0..1).
+   */
+  default_value?: number;
+  /**
+   * Figma node id (binding key).
+   */
+  source_node_id?: string;
 }
