@@ -86,9 +86,9 @@ public:
             // symptom was NEVER the AU type — that was the editor stealing the
             // host's keyboard (Logic Musical Typing), fixed in the SDK
             // plugin-view host focus contract (parts 1+2).
-            .accepts_midi = true,
             .input_buses = {{"Audio In", 2}},
             .output_buses = {{"Audio Out", 2}},
+            .accepts_midi = true,
         };
     }
 
