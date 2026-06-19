@@ -131,7 +131,19 @@ diagnostic — a custom control never blanks or silent-knobs. Schema requires
 `factory_id` for `kind=custom`. This is the piece a shared control PACKAGE (P8)
 registers into. Beyond the usual atomic chain, the two exhaustive
 `DesignFrameElement::Kind` switches in `design_frame_view.cpp`
-(`element_value`/`set_element_value`) need the `custom` case.
+(`element_value`/`set_element_value`) need the `custom` case, and the inspector's
+`frame_element_kind_name` switch in `inspect/src/inspector_window.cpp`.
+
+**Import report (P7).** `collect_import_report(ir.root)` (`design_import.hpp`)
+walks the IR's interactive elements and surfaces each control's resolution
+provenance — `{source_node_id, kind, resolution_rung, confidence_score,
+conflict_signals, verification_pass}` — plus summary counts (`conflicted` /
+`low_confidence` / `unresolved`) and `ok()`. `pulp import-design` prints the
+human summary (`import_report_to_text`) to STDERR for EVERY output mode (codegen
++ DesignIR-v1), writes the machine-readable JSON (`import_report_to_json`) when
+`--import-report <path>` is given, and `--fail-on-unresolved` makes a conflicted
+or inert control a nonzero (2) exit — the CI gate. So a low-confidence or
+conflicted control is SEEN at import time, never discovered later in the DAW.
 
 **Multi-frame / post-processed components need a DEDICATED re-embed lane —
 `make_catalog_component.py` is single-frame and applies no neutralization.** The

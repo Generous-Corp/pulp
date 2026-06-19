@@ -493,6 +493,66 @@ TEST_CASE("DesignIR round-trips a custom (Tier-3) interactive element",
     REQUIRE(p.custom_props == "{\"min\":0,\"max\":11}");
 }
 
+TEST_CASE("collect_import_report surfaces per-control resolution provenance (P7)",
+          "[view][import][ir-v1][faithful-svg][p7][report]") {
+    // P7 import report: walk the IR's interactive elements (recursively) and
+    // surface rung/confidence/conflicts/verification so a low-confidence or
+    // conflicted control is SEEN — with a CI-gateable summary.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.render_mode = NodeRenderMode::faithful_svg;
+
+    IRInteractiveElement clean;             // confident knob
+    clean.kind = InteractiveElementKind::knob;
+    clean.source_node_id = "1:1";
+    ir.root.interactive_elements.push_back(clean);
+
+    IRInteractiveElement conflicted;        // flagged: name/geometry conflict
+    conflicted.kind = InteractiveElementKind::knob;
+    conflicted.source_node_id = "1:2";
+    conflicted.resolution_rung = 2;
+    conflicted.confidence_score = 0.4f;
+    conflicted.conflict_signals = {"resolved kind knob expects square but geometry is stretched"};
+    conflicted.verification_pass = false;
+    ir.root.interactive_elements.push_back(conflicted);
+
+    // A nested child carrying an inert (rung 5) control — the recursion must find it.
+    IRNode child;
+    child.type = "frame";
+    IRInteractiveElement inert;
+    inert.kind = InteractiveElementKind::knob;
+    inert.source_node_id = "2:1";
+    inert.resolution_rung = 5;              // inert (warn) rung
+    inert.confidence_score = 0.2f;
+    child.interactive_elements.push_back(inert);
+    ir.root.children.push_back(child);
+
+    const auto report = collect_import_report(ir.root);  // default threshold 0.6
+    REQUIRE(report.controls.size() == 3);
+    REQUIRE(report.conflicted == 1);
+    REQUIRE(report.low_confidence == 2);   // 0.4 and 0.2 are below 0.6
+    REQUIRE(report.unresolved == 1);       // the rung-5 inert control
+    REQUIRE(report.ok() == false);         // conflicts + unresolved → CI gate fails
+
+    // JSON is well-formed and carries the summary + a conflict.
+    const auto json = import_report_to_json(report);
+    REQUIRE(json.find("\"total\":3") != std::string::npos);
+    REQUIRE(json.find("\"conflicted\":1") != std::string::npos);
+    REQUIRE(json.find("\"ok\":false") != std::string::npos);
+    REQUIRE(json.find("expects square but geometry is stretched") != std::string::npos);
+
+    // A fully-clean import passes the gate.
+    DesignIR clean_ir;
+    clean_ir.root.type = "frame";
+    IRInteractiveElement ok_el;
+    ok_el.kind = InteractiveElementKind::fader;
+    ok_el.source_node_id = "3:1";
+    clean_ir.root.interactive_elements.push_back(ok_el);
+    const auto clean_report = collect_import_report(clean_ir.root);
+    REQUIRE(clean_report.ok() == true);
+    REQUIRE(clean_report.conflicted == 0);
+}
+
 TEST_CASE("DesignIR serialization preserves parsed envelope version by default",
           "[view][import][ir-v1]") {
     auto parsed = parse_design_ir_json(R"json({

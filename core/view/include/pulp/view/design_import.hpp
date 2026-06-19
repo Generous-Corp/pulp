@@ -41,6 +41,39 @@ class TextEditor;
 class XYPad;
 class WaveformView;
 
+// ── P7 import report ─────────────────────────────────────────────────────────
+// Surfaces the per-control resolution provenance the IR carries (P7-F0/F2) so a
+// low-confidence or conflicted control is SEEN at import time — in the CLI and as
+// a machine-readable JSON a CI gate can threshold — instead of discovered later.
+struct ImportReportEntry {
+    std::string source_node_id;       ///< Figma node id (empty if unknown)
+    std::string kind;                 ///< resolved interactive-element kind
+    int resolution_rung = 0;          ///< 0=unset..5=inert (see InteractiveElementKind)
+    float confidence_score = 1.0f;    ///< 0..1
+    std::vector<std::string> conflict_signals;  ///< cross-signal conflicts
+    bool verification_pass = true;
+};
+
+struct ImportReport {
+    std::vector<ImportReportEntry> controls;
+    int conflicted = 0;       ///< controls with >=1 conflict signal
+    int low_confidence = 0;   ///< controls with confidence below the threshold
+    int unresolved = 0;       ///< controls resolved only at the inert rung (5)
+    /// True when the import is clean enough to pass a CI gate at the given policy
+    /// (no conflicts and nothing inert). low_confidence alone is advisory.
+    bool ok() const { return conflicted == 0 && unresolved == 0; }
+};
+
+// Walk a parsed DesignIR root and collect the resolution report over every
+// interactive element (recursively). `low_confidence_threshold` flags controls
+// whose confidence is below it (default 0.6).
+ImportReport collect_import_report(const IRNode& root,
+                                   float low_confidence_threshold = 0.6f);
+
+// Render an ImportReport as JSON (for a CI gate / tooling) or a human summary.
+std::string import_report_to_json(const ImportReport& report);
+std::string import_report_to_text(const ImportReport& report);
+
 struct NativeMaterializeOptions {
     bool apply_token_theme = true;
     bool preview_mode = false;
