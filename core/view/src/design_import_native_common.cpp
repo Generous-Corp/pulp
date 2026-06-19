@@ -1010,6 +1010,8 @@ std::vector<DesignFrameElement> to_frame_elements(
                 el.kind = DesignFrameElement::Kind::xy_pad; break;
             case InteractiveElementKind::value_label:
                 el.kind = DesignFrameElement::Kind::value_label; break;
+            case InteractiveElementKind::custom:
+                el.kind = DesignFrameElement::Kind::custom; break;
             case InteractiveElementKind::knob:
                 el.kind = DesignFrameElement::Kind::knob; break;
         }
@@ -1032,6 +1034,9 @@ std::vector<DesignFrameElement> to_frame_elements(
         el.text = e.text;
         el.value_left_align = e.value_left_align;
         el.value_y = e.default_value_y;
+        // custom (P7 Tier-3) — the factory id + opaque props.
+        el.factory_id = e.factory_id;
+        el.custom_props = e.custom_props;
         // Carry the design-source node id to the live element so the inspector's
         // Wiring lens can map a control back to its Figma node.
         if (e.source_node_id) el.source_node_id = *e.source_node_id;
@@ -1062,6 +1067,25 @@ std::unique_ptr<View> make_faithful_svg_frame(const IRNode& node,
             node,
             asset_id.empty() ? std::optional<std::string>("svg_asset_id") : std::nullopt));
         return nullptr;
+    }
+    // P7 Tier-3: a custom control whose factory isn't registered renders inert
+    // (the baked SVG underneath still shows). Diagnose it so the gap is SEEN and
+    // never becomes a silent knob.
+    for (const auto& ie : node.interactive_elements) {
+        if (ie.kind != InteractiveElementKind::custom) continue;
+        if (ie.factory_id.empty() || !has_design_control_factory(ie.factory_id)) {
+            diagnostics.push_back(diagnostic(
+                ImportDiagnosticSeverity::warning,
+                ImportDiagnosticKind::unsupported_property,
+                "native-materialize-custom-factory-unregistered",
+                std::string(path),
+                ie.factory_id.empty()
+                    ? "custom interactive element has no factory_id (renders inert)"
+                    : "custom interactive element factory '" + ie.factory_id +
+                          "' is not registered (renders inert)",
+                node,
+                std::nullopt));
+        }
     }
     auto frame = std::make_unique<DesignFrameView>(std::move(svg),
                                                    to_frame_elements(node.interactive_elements));

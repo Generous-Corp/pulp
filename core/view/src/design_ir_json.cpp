@@ -79,6 +79,7 @@ static InteractiveElementKind interactive_kind_from_id(const std::string& s,
     if (s == "action")      return InteractiveElementKind::action;
     if (s == "xy_pad")      return InteractiveElementKind::xy_pad;
     if (s == "value_label") return InteractiveElementKind::value_label;
+    if (s == "custom")      return InteractiveElementKind::custom;
     if (recognized) *recognized = false;
     return InteractiveElementKind::knob;
 }
@@ -94,6 +95,7 @@ static const char* interactive_kind_id(InteractiveElementKind k) {
         case InteractiveElementKind::action:      return "action";
         case InteractiveElementKind::xy_pad:      return "xy_pad";
         case InteractiveElementKind::value_label: return "value_label";
+        case InteractiveElementKind::custom:      return "custom";
         case InteractiveElementKind::knob:        break;
     }
     return "knob";
@@ -873,6 +875,9 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
             el.resolution_rung = static_cast<int>(get_float(e, "resolution_rung", 0.0f));
             el.confidence_score = get_float(e, "confidence_score", 1.0f);
             el.verification_pass = get_bool(e, "verification_pass", true);
+            // custom (P7 Tier-3) — registered native control.
+            el.factory_id = get_string(e, "factory_id");
+            el.custom_props = get_string(e, "custom_props");
             if (e.hasObjectMember("conflict_signals") && e["conflict_signals"].isArray()) {
                 const auto cs = e["conflict_signals"];
                 for (uint32_t j = 0; j < cs.size(); ++j)
@@ -1838,6 +1843,8 @@ static void write_ir_node_json(std::ostringstream& out, const IRNode& node,
             if (el.confidence_score != 1.0f)
                 write_float_member(out, ef, "confidence_score", el.confidence_score);
             if (!el.verification_pass) { write_key(out, ef, "verification_pass"); out << "false"; }
+            if (!el.factory_id.empty()) write_string_member(out, ef, "factory_id", el.factory_id);
+            if (!el.custom_props.empty()) write_string_member(out, ef, "custom_props", el.custom_props);
             if (!el.conflict_signals.empty()) {
                 write_key(out, ef, "conflict_signals");
                 out << '[';

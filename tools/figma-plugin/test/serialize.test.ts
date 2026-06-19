@@ -267,10 +267,18 @@ test("interactive_element schema accepts every producer-emitted kind (P1a)", () 
   const action = { kind: "action", x: 0, y: 0, w: 30, h: 24, action: "octave_up", source_node_id: "1:10" };
   const xyPad = { kind: "xy_pad", x: 0, y: 0, w: 100, h: 100, default_value: 0.3, default_value_y: 0.7, source_node_id: "1:11" };
   const valueLabel = { kind: "value_label", x: 0, y: 0, w: 80, h: 16, text: "-6.0 dB", value_left_align: true, source_node_id: "1:12" };
+  const custom = { kind: "custom", x: 0, y: 0, w: 60, h: 40, factory_id: "acme.spinner", custom_props: "{\"max\":11}", source_node_id: "1:13" };
 
-  for (const el of [knob, fader, toggle, switchEl, dropdown, textField, tabGroup, stepper, swap, action, xyPad, valueLabel]) {
+  for (const el of [knob, fader, toggle, switchEl, dropdown, textField, tabGroup, stepper, swap, action, xyPad, valueLabel, custom]) {
     assert.deepEqual(ieErrors(el), [], `kind '${el.kind}' should validate but didn't`);
   }
+});
+
+test("interactive_element schema requires factory_id for a custom control (P7 Tier-3)", () => {
+  // A custom control with no factory_id can't be built — the schema must reject it.
+  const errs = ieErrors({ kind: "custom", x: 0, y: 0, w: 60, h: 40 });
+  assert.ok(errs.some((e) => e.includes("'factory_id'")),
+    `custom must require factory_id, got:\n${errs.join("\n")}`);
 });
 
 test("interactive_element schema accepts the P7 import-report fields (F0)", () => {

@@ -465,6 +465,34 @@ TEST_CASE("DesignIR round-trips the P7 import-report fields (F0 carrier chain)",
     CHECK(canonical.find("resolution_rung\":0") == std::string::npos);
 }
 
+TEST_CASE("DesignIR round-trips a custom (Tier-3) interactive element",
+          "[view][import][ir-v1][faithful-svg][p7]") {
+    // P7 Tier-3: a registered-control element carries factory_id + opaque props
+    // through serialize -> parse -> serialize so the materializer can look up the
+    // factory. NOT collapsed to knob.
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.render_mode = NodeRenderMode::faithful_svg;
+    ir.root.svg_asset_id = "asset-svg";
+
+    IRInteractiveElement c;
+    c.kind = InteractiveElementKind::custom;
+    c.x = 10; c.y = 10; c.w = 60; c.h = 40;
+    c.factory_id = "acme.spinner";
+    c.custom_props = "{\"min\":0,\"max\":11}";
+    ir.root.interactive_elements.push_back(c);
+
+    const auto canonical = serialize_design_ir(ir);
+    const auto parsed = parse_design_ir_json(canonical);
+    REQUIRE(serialize_design_ir(parsed) == canonical);
+    REQUIRE(parsed.root.interactive_elements.size() == 1);
+    const auto& p = parsed.root.interactive_elements[0];
+    REQUIRE(p.kind == InteractiveElementKind::custom);
+    REQUIRE(p.factory_id == "acme.spinner");
+    REQUIRE(p.custom_props == "{\"min\":0,\"max\":11}");
+}
+
 TEST_CASE("DesignIR serialization preserves parsed envelope version by default",
           "[view][import][ir-v1]") {
     auto parsed = parse_design_ir_json(R"json({

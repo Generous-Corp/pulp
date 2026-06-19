@@ -1190,6 +1190,7 @@ const char* frame_element_kind_name(view::DesignFrameElement::Kind k) {
         case K::action:      return "action";
         case K::value_label: return "value label";
         case K::xy_pad:      return "xy pad";
+        case K::custom:      return "custom";
     }
     return "?";
 }

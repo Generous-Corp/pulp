@@ -22,7 +22,8 @@ export type InteractiveElement = {
     | "swap"
     | "action"
     | "xy_pad"
-    | "value_label";
+    | "value_label"
+    | "custom";
   /**
    * knob/fader/switch: pivot or baked-center X, SVG coords.
    */
@@ -83,6 +84,14 @@ export type InteractiveElement = {
    * P7 import report: whether render-level verification (overlay covers its node, type doesn't contradict the skin) passed. Defaults true.
    */
   verification_pass?: boolean;
+  /**
+   * kind=custom (P7 Tier-3): the id the native overlay factory is registered under (register_design_control_factory). Maps to DesignFrameElement::factory_id.
+   */
+  factory_id?: string;
+  /**
+   * kind=custom: opaque props handed to the factory (typically JSON); Pulp does not parse them. Maps to DesignFrameElement::custom_props.
+   */
+  custom_props?: string;
   /**
    * Overlay box X (dropdown/text_field/tab_group/stepper/toggle, and fader/xy_pad track), SVG coords.
    */

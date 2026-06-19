@@ -30,7 +30,8 @@ export type InteractiveElementKind =
   | "swap"
   | "action"
   | "xy_pad"
-  | "value_label";
+  | "value_label"
+  | "custom";
 
 export interface InteractiveElement {
   kind: InteractiveElementKind;
@@ -66,6 +67,9 @@ export interface InteractiveElement {
   confidence_score?: number;       // 0..1; 1.0 = unset/legacy
   conflict_signals?: string[];     // cross-signal conflicts (empty = none)
   verification_pass?: boolean;     // render verification passed (default true)
+  // custom (P7 Tier-3 registered control)
+  factory_id?: string;             // the registered native-overlay factory id
+  custom_props?: string;           // opaque props handed to the factory (e.g. JSON)
 }
 
 // Minimal structural node shape detectOverlayControls needs. ExtractedFigmaNode

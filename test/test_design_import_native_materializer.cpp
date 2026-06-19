@@ -1001,6 +1001,98 @@ TEST_CASE("materializer maps swap / action / xy_pad / value_label with their fie
                                       "native-materialize-faithful-svg-unresolved"));
 }
 
+namespace {
+// A trivial custom control used to prove the Tier-3 factory dispatch.
+struct TestCustomControl : pulp::view::View {};
+}  // namespace
+
+TEST_CASE("materializer builds a custom control via its registered factory (P7 Tier-3)",
+          "[view][import][native-materializer][faithful-svg][p7]") {
+    clear_design_control_factories();
+    bool called = false;
+    DesignControlContext seen;
+    register_design_control_factory("my.control", [&](const DesignControlContext& ctx) {
+        called = true; seen = ctx;
+        return std::make_unique<TestCustomControl>();
+    });
+
+    const std::string svg =
+        R"(<svg width="120" height="80" xmlns="http://www.w3.org/2000/svg">)"
+        R"(<rect x="10" y="10" width="100" height="60" fill="#1c1d1d"/></svg>)";
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.render_mode = NodeRenderMode::faithful_svg;
+    ir.root.svg_asset_id = "svg1";
+
+    IRInteractiveElement c;
+    c.kind = InteractiveElementKind::custom;
+    c.x = 20; c.y = 20; c.w = 40; c.h = 20;
+    c.factory_id = "my.control";
+    c.custom_props = "{\"gain\":0.7}";
+    c.default_value = 0.3f;
+    c.source_node_id = "9:1";
+    ir.root.interactive_elements.push_back(c);
+
+    IRAssetRef asset;
+    asset.asset_id = "svg1";
+    asset.original_uri = "data:image/svg+xml;base64," + pulp::runtime::base64_encode(svg);
+    asset.mime = "image/svg+xml";
+    ir.asset_manifest.assets.push_back(asset);
+
+    std::vector<ImportDiagnostic> diagnostics;
+    auto root = build_native_view_tree(ir, ir.asset_manifest,
+                                       {.diagnostics_out = &diagnostics});
+    auto* frame = dynamic_cast<DesignFrameView*>(root.get());
+    REQUIRE(frame != nullptr);
+    REQUIRE(frame->element_count() == 1);
+    CHECK(frame->element_kind(0) == DesignFrameElement::Kind::custom);
+    CHECK(called);
+    CHECK(seen.factory_id == "my.control");
+    CHECK(seen.props == "{\"gain\":0.7}");
+    CHECK(seen.source_node_id == "9:1");
+    CHECK(seen.default_value == Catch::Approx(0.3f));
+    // The factory's View is the live overlay.
+    CHECK(dynamic_cast<TestCustomControl*>(frame->overlay_widget(0)) != nullptr);
+    REQUIRE_FALSE(diagnostics_contain(diagnostics,
+                                      "native-materialize-custom-factory-unregistered"));
+    clear_design_control_factories();
+}
+
+TEST_CASE("an unregistered custom factory renders inert + diagnoses (P7 Tier-3)",
+          "[view][import][native-materializer][faithful-svg][p7]") {
+    clear_design_control_factories();  // ensure "missing" is not registered
+    const std::string svg =
+        R"(<svg width="120" height="80" xmlns="http://www.w3.org/2000/svg">)"
+        R"(<rect x="10" y="10" width="100" height="60" fill="#1c1d1d"/></svg>)";
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.render_mode = NodeRenderMode::faithful_svg;
+    ir.root.svg_asset_id = "svg1";
+
+    IRInteractiveElement c;
+    c.kind = InteractiveElementKind::custom;
+    c.x = 20; c.y = 20; c.w = 40; c.h = 20;
+    c.factory_id = "missing";
+    ir.root.interactive_elements.push_back(c);
+
+    IRAssetRef asset;
+    asset.asset_id = "svg1";
+    asset.original_uri = "data:image/svg+xml;base64," + pulp::runtime::base64_encode(svg);
+    asset.mime = "image/svg+xml";
+    ir.asset_manifest.assets.push_back(asset);
+
+    std::vector<ImportDiagnostic> diagnostics;
+    auto root = build_native_view_tree(ir, ir.asset_manifest,
+                                       {.diagnostics_out = &diagnostics});
+    auto* frame = dynamic_cast<DesignFrameView*>(root.get());
+    REQUIRE(frame != nullptr);
+    REQUIRE(frame->element_count() == 1);          // the element still exists (SVG renders)
+    CHECK(frame->element_kind(0) == DesignFrameElement::Kind::custom);
+    CHECK(frame->overlay_widget(0) == nullptr);     // inert — no overlay widget
+    CHECK(diagnostics_contain(diagnostics,
+                              "native-materialize-custom-factory-unregistered"));
+}
+
 TEST_CASE("baked native materializer forwards a sampled shape_fill_gradient",
           "[view][import][native-materializer][figma-plugin][fill]") {
     // The importer samples a shape illustration's OWN gradient and stamps

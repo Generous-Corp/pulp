@@ -117,6 +117,22 @@ for swap, value patterns for value_label) land with P2's unified resolver. An
 reports it unrecognized and the parser emits a `log_warn` (the full ordered
 resolution ladder + import report is the P7 work).
 
+**Custom controls (P7 Tier-3) — the `name→View` factory registry.** A genuinely
+novel control resolves to `kind=custom`, which carries a `factory_id` (+ opaque
+`custom_props`, typically JSON Pulp doesn't parse). The runtime
+`register_design_control_factory(id, factory)` (`design_frame_view.hpp`) maps an
+id to a `std::function<unique_ptr<View>(const DesignControlContext&)>`;
+`DesignFrameView::build_overlays` looks the factory up for a `Kind::custom`
+element and builds the overlay. **UI-thread-only** (registration at host startup,
+lookup at overlay build) — the registry has no locking by contract. If no factory
+is registered the element renders INERT (the baked SVG still shows) and
+`make_faithful_svg_frame` emits a `native-materialize-custom-factory-unregistered`
+diagnostic — a custom control never blanks or silent-knobs. Schema requires
+`factory_id` for `kind=custom`. This is the piece a shared control PACKAGE (P8)
+registers into. Beyond the usual atomic chain, the two exhaustive
+`DesignFrameElement::Kind` switches in `design_frame_view.cpp`
+(`element_value`/`set_element_value`) need the `custom` case.
+
 **Multi-frame / post-processed components need a DEDICATED re-embed lane —
 `make_catalog_component.py` is single-frame and applies no neutralization.** The
 Musical Typing Keyboard is TWO frames (typing 187:15 / piano 187:349) AND its

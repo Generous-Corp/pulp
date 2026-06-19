@@ -164,7 +164,7 @@
       "properties": {
         "kind": {
           "type": "string",
-          "enum": ["knob", "fader", "toggle", "dropdown", "text_field", "tab_group", "stepper", "swap", "action", "xy_pad", "value_label"],
+          "enum": ["knob", "fader", "toggle", "dropdown", "text_field", "tab_group", "stepper", "swap", "action", "xy_pad", "value_label", "custom"],
           "description": "Control type. The C++ materializer (to_frame_elements in design_import_native_common.cpp) maps each to a DesignFrameElement::Kind the runtime already backs."
         },
         "cx": { "type": "number", "description": "knob/fader/switch: pivot or baked-center X, SVG coords." },
@@ -182,6 +182,8 @@
         "confidence_score": { "type": "number", "description": "P7 import report: confidence (0..1) the resolved kind is correct. 1.0 = unset/legacy." },
         "conflict_signals": { "type": "array", "items": { "type": "string" }, "description": "P7 import report: cross-signal conflicts detected (e.g. name says knob but geometry is a wide track+thumb). Empty = none; non-empty flags the control for review." },
         "verification_pass": { "type": "boolean", "description": "P7 import report: whether render-level verification (overlay covers its node, type doesn't contradict the skin) passed. Defaults true." },
+        "factory_id": { "type": "string", "description": "kind=custom (P7 Tier-3): the id the native overlay factory is registered under (register_design_control_factory). Maps to DesignFrameElement::factory_id." },
+        "custom_props": { "type": "string", "description": "kind=custom: opaque props handed to the factory (typically JSON); Pulp does not parse them. Maps to DesignFrameElement::custom_props." },
         "x": { "type": "number", "description": "Overlay box X (dropdown/text_field/tab_group/stepper/toggle, and fader/xy_pad track), SVG coords." },
         "y": { "type": "number", "description": "Overlay box Y, SVG coords." },
         "w": { "type": "number", "description": "Overlay box width, SVG coords." },
@@ -200,8 +202,12 @@
           "then": { "required": ["cx", "cy", "hit_radius"] }
         },
         {
-          "if": { "properties": { "kind": { "enum": ["fader", "toggle", "dropdown", "text_field", "tab_group", "stepper", "swap", "action", "xy_pad", "value_label"] } }, "required": ["kind"] },
+          "if": { "properties": { "kind": { "enum": ["fader", "toggle", "dropdown", "text_field", "tab_group", "stepper", "swap", "action", "xy_pad", "value_label", "custom"] } }, "required": ["kind"] },
           "then": { "required": ["x", "y", "w", "h"] }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "custom" } }, "required": ["kind"] },
+          "then": { "required": ["factory_id"] }
         }
       ]
     },

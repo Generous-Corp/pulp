@@ -269,6 +269,12 @@ TEST_CASE("generate_pulp_cpp emits all faithful overlay kinds and chunks a large
     lbl.text = "-6.0 dB"; lbl.value_left_align = true;
     ir.root.interactive_elements.push_back(lbl);
 
+    IRInteractiveElement cst;            // P7 Tier-3: registered custom control
+    cst.kind = InteractiveElementKind::custom;
+    cst.x = 160.0f; cst.y = 120.0f; cst.w = 60.0f; cst.h = 40.0f;
+    cst.factory_id = "acme.spinner"; cst.custom_props = "{\"max\":11}";
+    ir.root.interactive_elements.push_back(cst);
+
     // A large SVG (> ~8KB base64) so the embed spans multiple chunk literals.
     std::string svg = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"400\" height=\"300\">";
     for (int i = 0; i < 400; ++i)
@@ -302,6 +308,9 @@ TEST_CASE("generate_pulp_cpp emits all faithful overlay kinds and chunks a large
     REQUIRE(result.source.find("el.text = \"-6.0 dB\"") != std::string::npos);             // readout
     REQUIRE(result.source.find("el.value_left_align = true;") != std::string::npos);       // label align
     REQUIRE(result.source.find("el.value_y = ") != std::string::npos);                     // xy_pad Y axis
+    REQUIRE(result.source.find("DesignFrameElement::Kind::custom") != std::string::npos);  // Tier-3
+    REQUIRE(result.source.find("el.factory_id = \"acme.spinner\"") != std::string::npos);  // factory id
+    REQUIRE(result.source.find("el.custom_props = ") != std::string::npos);                // opaque props
     // The base64 embed spans multiple chunk literals (the chunk loop ran > once):
     // each interior chunk ends with a `",` line, so at least one is present.
     REQUIRE(result.source.find("\",") != std::string::npos);

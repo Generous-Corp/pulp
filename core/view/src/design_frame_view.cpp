@@ -10,9 +10,35 @@
 #include <cstdlib>
 #include <limits>
 #include <memory>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace pulp::view {
+
+// ── Custom-control factory registry (P7 Tier-3) ──────────────────────────────
+// UI-thread-only (see the header contract), so a plain function-local static map
+// with no locking is correct: registration at startup and lookup at overlay
+// build both run on the UI thread.
+namespace {
+std::unordered_map<std::string, DesignControlFactory>& design_control_registry() {
+    static std::unordered_map<std::string, DesignControlFactory> registry;
+    return registry;
+}
+}  // namespace
+
+void register_design_control_factory(std::string factory_id,
+                                     DesignControlFactory factory) {
+    if (factory_id.empty() || !factory) return;
+    design_control_registry()[std::move(factory_id)] = std::move(factory);
+}
+
+bool has_design_control_factory(const std::string& factory_id) {
+    const auto& reg = design_control_registry();
+    return reg.find(factory_id) != reg.end();
+}
+
+void clear_design_control_factories() { design_control_registry().clear(); }
 
 namespace {
 
@@ -361,6 +387,23 @@ void DesignFrameView::build_overlays() {
                                       static_cast<int>(e.options.size()) - 1));
             stepper->on_select = [this, i](int idx) { notify_choice(i, idx); };
             widget = std::move(stepper);
+        } else if (e.kind == DesignFrameElement::Kind::custom) {
+            // P7 Tier-3: a registered native control. Build the overlay via the
+            // factory looked up under factory_id. If none is registered the
+            // element stays inert — the baked SVG underneath still renders, so a
+            // custom control never blanks (the importer diagnosed the gap at
+            // materialize time). UI-thread-only, matching the registry contract.
+            auto& reg = design_control_registry();
+            const auto it = reg.find(e.factory_id);
+            if (it != reg.end() && it->second) {
+                DesignControlContext ctx;
+                ctx.x = e.x; ctx.y = e.y; ctx.w = e.w; ctx.h = e.h;
+                ctx.factory_id = e.factory_id;
+                ctx.props = e.custom_props;
+                ctx.source_node_id = e.source_node_id;
+                ctx.default_value = e.value;
+                widget = it->second(ctx);
+            }
         }
         if (widget) {
             View* raw = widget.get();
@@ -430,7 +473,8 @@ float DesignFrameView::element_value(int i) const {
         case DesignFrameElement::Kind::swap:
         case DesignFrameElement::Kind::action:
         case DesignFrameElement::Kind::value_label:
-            return -1.0f;  // buttons / read-only labels have no normalized value
+        case DesignFrameElement::Kind::custom:
+            return -1.0f;  // buttons / labels / custom: no standard normalized value
     }
     return -1.0f;
 }
@@ -475,7 +519,8 @@ void DesignFrameView::set_element_value(int i, float v) {
         case DesignFrameElement::Kind::swap:
         case DesignFrameElement::Kind::action:
         case DesignFrameElement::Kind::value_label:
-            return;  // buttons / read-only labels have no value to set
+        case DesignFrameElement::Kind::custom:
+            return;  // buttons / labels / custom (factory owns its own state)
     }
     request_repaint();
 }

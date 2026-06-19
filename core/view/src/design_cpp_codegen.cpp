@@ -1204,6 +1204,7 @@ const char* frame_element_kind_token(InteractiveElementKind kind) {
         case InteractiveElementKind::action:      return "action";
         case InteractiveElementKind::xy_pad:      return "xy_pad";
         case InteractiveElementKind::value_label: return "value_label";
+        case InteractiveElementKind::custom:      return "custom";
     }
     return "knob";
 }
@@ -1317,6 +1318,12 @@ bool emit_faithful_frame(std::ostringstream& out,
         if (e.kind == InteractiveElementKind::xy_pad)
             emit_line(out, depth + 1, ctx.opts.indent_spaces,
                       "el.value_y = " + format_float(e.default_value_y) + ";");
+        if (!e.factory_id.empty())
+            emit_line(out, depth + 1, ctx.opts.indent_spaces,
+                      "el.factory_id = " + cpp_string_literal(e.factory_id) + ";");
+        if (!e.custom_props.empty())
+            emit_line(out, depth + 1, ctx.opts.indent_spaces,
+                      "el.custom_props = " + cpp_string_literal(e.custom_props) + ";");
         emit_line(out, depth + 1, ctx.opts.indent_spaces,
                   var + "_els.push_back(std::move(el));");
         emit_line(out, depth, ctx.opts.indent_spaces, "}");

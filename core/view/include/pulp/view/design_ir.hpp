@@ -336,6 +336,11 @@ enum class InteractiveElementKind {
     // design's baked readout). `text` is the initial string; `value_left_align`
     // left-aligns it (for a "LABEL <value>" readout that grows rightward).
     value_label,
+    // `custom` is a registered native control (P7 Tier-3): the materializer maps
+    // it to DesignFrameElement::Kind::custom, whose overlay is built by the
+    // factory registered under `factory_id` (+ opaque `custom_props`). Unmapped
+    // factory → inert render + an import diagnostic (never a silent knob).
+    custom,
 };
 
 // One source-identified interactive element overlaid on a faithful_svg render.
@@ -421,6 +426,14 @@ struct IRInteractiveElement {
     /// Whether render-level verification (overlay covers its node region, type
     /// doesn't visually contradict the skin) passed. true = passed/unchecked.
     bool verification_pass = true;
+
+    // ── custom (P7 Tier-3 registered control) ────────────────────────────
+    /// kind==custom only: the id the native overlay factory is registered under
+    /// (register_design_control_factory). Maps 1:1 to DesignFrameElement::factory_id.
+    std::string factory_id;
+    /// kind==custom only: opaque props handed to the factory (typically JSON).
+    /// Maps 1:1 to DesignFrameElement::custom_props.
+    std::string custom_props;
 
     std::optional<std::string> source_node_id;  ///< Figma node id (binding key)
 };
