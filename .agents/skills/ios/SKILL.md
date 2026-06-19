@@ -370,13 +370,16 @@ xcodebuild test -project ... -scheme AUv3Tests -sdk iphonesimulator
 - **Drop coordinate transform differs by host.** The drop point
   (`[session locationInView:hostView]`) is root-space directly on the CPU host
   (identity transform) but must go through the Metal view's **live**
-  `pointTransform` (the inverse design-viewport map touches use) on the GPU host
-  — pass a block capturing the view weakly, not the transform value, so a
-  design-viewport change between install and drop is honoured.
+  `pointTransform` (the inverse design-viewport map touches use) on the GPU host.
+  `plugin_view_host_ios.mm` currently compiles without ARC in the generated
+  iOS host-app CMake/Xcode path, so copy the transform block into the
+  coordinator ivar and release it in `dealloc`; storing the caller's stack
+  block directly can dangle after install.
 - **`performDrop` completion runs on the main queue** (UIKit guarantee), so it
-  touches the view tree safely — but capture the coordinator **weakly** and
-  re-check the root pointer inside the block: an async `loadObjectsOfClass:`
-  completion can outlive the host. The coordinator's `invalidate` (called from
+  touches the view tree safely — but keep the coordinator alive with explicit
+  MRC retain/release while the async `loadObjectsOfClass:` completion is
+  outstanding and re-check the root pointer inside the block. An async
+  completion can outlive the host; the coordinator's `invalidate` (called from
   both host dtors) nils the root so a late completion is a no-op.
 - **No headless test** — UIKit drag/drop is gesture-driven and can't be exercised
   by the macOS Catch2 suite; validated by local Simulator compile
