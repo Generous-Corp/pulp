@@ -2,15 +2,14 @@
 
 `pulp::view::EditorBridge` is the renderer-agnostic JSON message
 dispatcher that sits between a plugin editor (WebView panel today,
-native JS runtime via the [pulp #468](https://github.com/danielraffel/pulp/issues/468)
-import lane tomorrow) and the C++ processor. Each plugin registers
+native JS runtime import lane tomorrow) and the C++ processor. Each plugin registers
 its own per-message handlers; the framework owns the envelope parse,
 the type→handler dispatch, the response builders, and a standard
 error vocabulary.
 
-Lifted from Spectr's in-repo `editor_bridge` ([pulp #709](https://github.com/danielraffel/pulp/issues/709))
-so every plugin with an editor consumes the same dispatch path
-instead of reinventing it.
+The bridge keeps editor message dispatch shared across plugins so each editor
+does not need to reinvent envelope parsing, handler routing, and error response
+formatting.
 
 - Header: `core/view/include/pulp/view/editor_bridge.hpp`
 - Implementation: `core/view/src/editor_bridge.cpp`
@@ -41,8 +40,8 @@ Responses are always one of:
 `dispatch_json(...)` and `dispatch(...)` are `noexcept` and always
 emit a well-formed response envelope. Envelope-level failures fall
 into one of five categories. The on-the-wire `error` strings are
-substring-compatible with Spectr's existing test suite so the cutover
-is a drop-in (a hard acceptance criterion of pulp #709):
+substring-compatible with existing plugin-editor tests so framework-level
+dispatch can be adopted without changing plugin error assertions:
 
 | Category         | Trigger                                                 | On-the-wire substring             |
 |------------------|---------------------------------------------------------|-----------------------------------|
@@ -71,7 +70,7 @@ public:
     // Non-copyable AND non-movable. attach_webview / attach_native_runtime
     // install callbacks that reference this bridge instance, so moving an
     // attached bridge would dangle them. Construct in-place; static_asserts
-    // in the test suite lock this in. (Codex P1 review on PR #711.)
+    // in the test suite lock this in.
     EditorBridge(const EditorBridge&)            = delete;
     EditorBridge& operator=(const EditorBridge&) = delete;
     EditorBridge(EditorBridge&&)                 = delete;
@@ -140,11 +139,10 @@ the caller's perspective.
 
 ### `attach_native_runtime`
 
-Stub interface for the [pulp #468](https://github.com/danielraffel/pulp/issues/468)
-Claude Design import lane. The full wiring lands when `JsRuntime`
-exposes a `postMessage`-equivalent primitive that calls back into C++.
-Defining the interface here means #468 plugs in without designing a
-parallel dispatch model.
+Stub interface for the Claude Design import lane. The full wiring lands when
+`JsRuntime` exposes a `postMessage`-equivalent primitive that calls back into
+C++. Defining the interface here keeps native-runtime editors on the same
+dispatch model as WebView editors.
 
 ## Usage example
 

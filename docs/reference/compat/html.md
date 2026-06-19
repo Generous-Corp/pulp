@@ -10,19 +10,18 @@ The authoritative inventory is `compat.json` (`html/*` prefix).
 
 ## Generation
 
-Last refresh: **2026-05-04** against `origin/main` at SHA `a5f4f5ac`.
+The current table describes the checked-in `compat.json` inventory for the HTML
+surface.
 
 Spec walk:
 [MDN Element / HTMLElement](https://developer.mozilla.org/en-US/docs/Web/API/Element)
 + subclass attribute coverage, ARIA attrs, dataset, classList, the
 DocumentFragment shim, Event constructor surface.
 
-This section was previously a stub. The 2026-05-04 pass enumerated
-the tag-to-widget mapping, the Element surface (~40 properties /
-methods), the document surface, and the StyleSheet / inline `<style>`
-parser.
+The table covers the tag-to-widget mapping, the Element surface (~40 properties
+/ methods), the document surface, and the StyleSheet / inline `<style>` parser.
 
-## Counts (2026-05-07 — Wave 4 cleanup)
+## Counts
 
 Harness verdict (per `tools/harness/verifier`):
 
@@ -42,33 +41,26 @@ Catalog status counts (informational):
 | partial | 1 (`html/img` — deferred Skia codec) |
 | missing | 0 |
 
-## Wave 4 cleanup (2026-05-07)
+## Current support notes
 
-Catalog paperwork only; no JS or C++ source change. DIVERGE count
-dropped from **7 → 1** on the html surface (PASS% 86.4% → 96.6%).
+The catalog classifies behavior by current runtime contract, not by
+implementation history. Entries marked `supported` may still document explicit
+architectural non-goals when the supported surface is narrower than the full
+browser API.
 
-The Wave 3 PR #1641 had flipped `html/ARIA` and `html/document_querySelector`
-to `supported`, but those flips were silently clobbered by the Wave 3 css
-PR #1640 rebase before main caught up. Wave 4 restores them and finishes
-the architectural reclassification of the remaining 5 entries.
-
-Flipped to `supported` (status flip + emptied `unsupportedValues`; the
-caveats now live in `notes`):
-
-- **`html/ARIA`** — restoration of PR #1641. `aria-label` /
-  `role` route through `setAccessibilityLabel` /
+- **`html/ARIA`** — `aria-label` / `role` route through `setAccessibilityLabel` /
   `setAccessibilityRole` to `View::set_access_label_` /
   `_role_`. State routing (aria-pressed/checked/disabled/hidden) is
   partial-deferred-access-state; not part of the supported claim.
-- **`html/document_querySelector`** — restoration of PR #1641.
-  Selector engine covers tag / `.class` / `#id` / `[attr]` /
+- **`html/document_querySelector`** — selector engine covers tag / `.class` /
+  `#id` / `[attr]` /
   `[attr=v]` (incl. `^=`/`$=`/`*=`/`|=`/`~=`) / descendant
   (`a b`) / child (`a > b`) / compound forms. Pseudo-classes,
   pseudo-elements, sibling combinators, selector lists, and the
   case-insensitive flag are arch-no-cascade-engine.
 - **`html/StyleSheet_inline`** + **`html/style`** —
   arch-no-cascade-engine. The single-pass selector engine (extended
-  to `[attr]` / descendant / child by PR #1641) is the supported
+  to `[attr]` / descendant / child selectors) is the supported
   surface. `@media` / `@keyframes` / `@import` / `@font-face` /
   `@supports` are explicit non-goals; consumers reach for `@pulp/react`
   state-dependent components for media-query / keyframe needs.
@@ -77,7 +69,7 @@ caveats now live in `notes`):
   appendChild) is the supported surface; the W3C Range / Selection
   API is not modeled by design.
 - **`html/svg`** — arch-explicit-non-goal. The `<svg>` layout-leaf
-  shim (PR #1347) reserves flex space; rendered SVG paths route
+  shim reserves flex space; rendered SVG paths route
   through the `@pulp/react` `SvgPath` intrinsic (which is the
   canonical rendered-path API).
 
@@ -88,16 +80,12 @@ Retained at `partial` (genuinely deferred — not arch):
   slot until Skia decode lands. Will flip to `supported` once that
   pipeline ships.
 
-## Wave 1 drift cleanup + arch reclassification (2026-05-07)
+## Architectural reclassification
 
-Catalog/oracle paperwork only; no JS or C++ source change. Drift
-count dropped from 2 → 0 on the html surface.
-
-- **`html/dialog`** — flipped `supported` → `noop` to match the
-  harness verdict. `Element.show()` / `showModal()` / `close()` are
+- **`html/dialog`** — `Element.show()` / `showModal()` / `close()` are
   stored-only on the panel; modal dialog rendering is not in the
   paint pipeline today.
-- **`html/input`** — flipped `partial` → `supported`. `<input>` is
+- **`html/input`** — `<input>` is
   fully wired through `_ensureNative` -> bridge `createTextEditor` /
   `createFader` / `createCheckbox`.
 - **Architectural reclassification (5 entries, status retained):**
@@ -109,19 +97,15 @@ count dropped from 2 → 0 on the html surface.
     `arch-text-editor-owns-selection` (Pulp's text editor has its
     own selection model).
   - `html/img` — actual image src loading is
-    `partial-deferred-skia-codec` (gated on SkCodec wiring per pulp
-    #932 era); placeholder Label keeps the layout slot until Skia
-    decode lands.
+    `partial-deferred-skia-codec`; placeholder Label keeps the layout
+    slot until Skia decode lands.
   - `html/svg` — full SVG rasterization of children is
     `arch-explicit-non-goal` (createCol shim reserves layout space;
     use @pulp/react SvgPath intrinsic for rendered paths).
 
-## DIVERGE→PASS sweep (2026-05-07)
+## Compatibility fixes
 
-The 14 → 7 flip closed JS-side wiring gaps for 7 entries; the
-remaining 7 DIVERGE entries are genuine architectural work.
-
-Closed in this sweep:
+These entries are implemented by the current DOM-lite runtime:
 
 - **`html/Element_disabled`** — `el.disabled = true` now also calls
   `setEnabled(id, 0)` so the View flips its enabled flag.
@@ -145,7 +129,7 @@ Closed in this sweep:
   supported behavior; these accept input correctly. Specialized
   chrome (date pickers etc.) is a separate UX concern.
 
-Remaining DIVERGE after Wave 4 cleanup:
+Current divergent entry:
 
 | Entry | Why DIVERGE |
 |---|---|
@@ -156,7 +140,7 @@ Remaining DIVERGE after Wave 4 cleanup:
 | HTML tag | Widget | Notes |
 |---|---|---|
 | `div`, `section`, `article`, `aside`, `header`, `footer`, `nav`, `main` | `createCol` | Generic flow containers (column flex). |
-| `span`, `p`, `label` | `createLabel` | Confirmed 2026-05-04: text-content tags map to Label widget, not View. |
+| `span`, `p`, `label` | `createLabel` | Text-content tags map to Label widget, not View. |
 | `h1`–`h6` | `createLabel` + `setFontSize` + `setFontWeight` | Heading levels carry default size/weight per level. |
 | `button` | `createToggleButton` | Inherits ToggleButton — toggleable by default. |
 | `input` | `createTextEditor` (default), `createFader` (type=range), `createCheckbox` (type=checkbox) | |
@@ -165,36 +149,31 @@ Remaining DIVERGE after Wave 4 cleanup:
 | `canvas` | `createCanvas` | Use `getContext('2d')` or `getContext('webgpu')`. |
 | `progress` | `createProgress` | |
 | `hr` | `createCol` + 1px height + grey background | Visual divider. |
-| `img` | `createLabel` (placeholder) | HTML `width` / `height` attrs reserve flex space (PR #1347). |
-| `svg` | `createCol` | Layout-leaf placeholder; HTML width/height reserve space; child shapes do NOT render (PR #1347). For rendered SVG paths, use `<SvgPath>` from `@pulp/react`. |
+| `img` | `createLabel` (placeholder) | HTML `width` / `height` attrs reserve flex space. |
+| `svg` | `createCol` | Layout-leaf placeholder; HTML width/height reserve space; child shapes do NOT render. For rendered SVG paths, use `<SvgPath>` from `@pulp/react`. |
 | `details` | `createCol` | Toggle / summary semantics not modeled. |
 | `dialog` | `createPanel` + hidden | `showModal()` / `close()` not wired. |
-| `style` | `createCol` + hidden + textContent → CSS parser | PR #1345 added `:hover` selector support. |
+| `style` | `createCol` + hidden + textContent → CSS parser | `:hover` selector support is implemented. |
 
-## Recently changed
+## Current runtime behavior
 
-- `html/ARIA` (pulp #1434): catalog flipped `missing` → `partial` to
-  reflect that the storage half (round-trip through `setAttribute` /
-  `getAttribute`) works today; the platform-bridge routing half is
-  the actual gap and is tracked under #1476. No implementation
-  change.
-- `html/svg` (PR #1347, pulp #1147): inline `<svg>` is now a layout
+- `html/ARIA`: the storage half (round-trip through `setAttribute` /
+  `getAttribute`) works today; platform accessibility-state routing is
+  the remaining gap.
+- `html/svg`: inline `<svg>` is now a layout
   placeholder that honors the HTML `width` / `height` attributes.
-  Previously it collapsed to height 0 and broke flex siblings.
 - `html/span`, `html/p`, `html/label`: confirmed mapping to **Label**
-  widget (not View). Previously the matrix was ambiguous.
-- `html/style` (PR #1345, pulp #1149 part b): inline `<style>` text
+  widget (not View).
+- `html/style`: inline `<style>` text
   is parsed and applied; `:hover` rules are stashed and toggled on
   mouseenter/mouseleave.
-- `html/Element_addEventListener` for hover events (PR #1173,
-  pulp #1149 part a): `registerHover` is now called when a hover
+- `html/Element_addEventListener` for hover events:
+  `registerHover` is now called when a hover
   listener is registered, so the C++ side actually fires.
-- `html/Document_addEventListener` (pulp #2128 follow-up, PR #2139):
+- `html/Document_addEventListener`:
   `document.addEventListener` / `removeEventListener` /
   `dispatchEvent` are now real on the document object, where they
-  were previously installed as no-ops (pulp #2101 — silently dropped
-  to keep Three.js OrbitControls cleanup from throwing). The
-  platform Esc handler also fires a synthetic
+  were previously installed as no-ops. The platform Esc handler also fires a synthetic
   `document.dispatchEvent({type:'mousedown'})` so React click-outside
   popovers (`document.addEventListener('mousedown', onDoc)`) close
   without per-app wiring. `removeEventListener` still silently
