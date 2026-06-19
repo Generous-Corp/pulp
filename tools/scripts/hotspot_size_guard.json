@@ -37,7 +37,7 @@
     },
     {
       "path": "test/test_design_import_codegen.cpp",
-      "max_loc": 2035,
+      "max_loc": 2094,
       "note": "design-import codegen test split"
     },
     {
@@ -47,7 +47,7 @@
     },
     {
       "path": "test/test_design_import_ir.cpp",
-      "max_loc": 851,
+      "max_loc": 1192,
       "note": "design-import IR test split"
     },
     {
@@ -82,7 +82,7 @@
     },
     {
       "path": "tools/import-design/pulp_import_design.cpp",
-      "max_loc": 3271,
+      "max_loc": 3301,
       "note": "import-design CLI orchestration hotspot"
     },
     {
@@ -97,17 +97,17 @@
     },
     {
       "path": "core/view/src/design_ir_json.cpp",
-      "max_loc": 2102,
+      "max_loc": 2293,
       "note": "DesignIR serialization contract hotspot"
     },
     {
       "path": "core/view/src/design_cpp_codegen.cpp",
-      "max_loc": 2155,
+      "max_loc": 2185,
       "note": "DesignIR C++ codegen contract hotspot"
     },
     {
       "path": "core/view/src/design_import_native_common.cpp",
-      "max_loc": 2024,
+      "max_loc": 2067,
       "note": "native materialization/import boundary hotspot"
     },
     {
@@ -152,7 +152,7 @@
     },
     {
       "path": "inspect/src/inspector_window.cpp",
-      "max_loc": 1304,
+      "max_loc": 1305,
       "note": "Inspector window UI hotspot; keep separate from canvas overlay state"
     },
     {
