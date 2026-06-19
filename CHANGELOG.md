@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v04550"></a>
+## [0.455.0] - 2026-06-19
+
+- feat(offline-stretch): material-adaptive window + STN-off default ([#4178](https://github.com/danielraffel/pulp/pull/4178))
+- ci: enforce hotspot shrink ratchet ([#4206](https://github.com/danielraffel/pulp/pull/4206))
+
 <a id="v04540"></a>
 ## [0.454.0] - 2026-06-18
 
@@ -4597,6 +4603,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.455.0]: https://github.com/danielraffel/pulp/releases/tag/v0.455.0
 [0.454.0]: https://github.com/danielraffel/pulp/releases/tag/v0.454.0
 [0.453.0]: https://github.com/danielraffel/pulp/releases/tag/v0.453.0
 [0.452.0]: https://github.com/danielraffel/pulp/releases/tag/v0.452.0
