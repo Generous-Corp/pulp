@@ -8,6 +8,14 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v04580"></a>
+## [0.458.0] - 2026-06-19
+
+- docs(stretch): agent skill for the stretch engine, modes, presets, eval ([#4219](https://github.com/danielraffel/pulp/pull/4219))
+- docs(auv3): remove workflow archaeology ([#4229](https://github.com/danielraffel/pulp/pull/4229))
+- docs(auv2): remove workflow archaeology ([#4228](https://github.com/danielraffel/pulp/pull/4228))
+- ci: guard inspect hotspots ([#4227](https://github.com/danielraffel/pulp/pull/4227))
+
 <a id="v04570"></a>
 ## [0.457.0] - 2026-06-19
 
@@ -4629,6 +4637,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.458.0]: https://github.com/danielraffel/pulp/releases/tag/v0.458.0
 [0.457.0]: https://github.com/danielraffel/pulp/releases/tag/v0.457.0
 [0.456.2]: https://github.com/danielraffel/pulp/releases/tag/v0.456.2
 [0.456.1]: https://github.com/danielraffel/pulp/releases/tag/v0.456.1
