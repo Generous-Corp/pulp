@@ -358,6 +358,13 @@ static std::vector<ThemePreset> build_presets() {
             t.colors["accent.success"] = hex(0x3FCF77); // ink.leaf
             t.colors["accent.warning"] = hex(0xF6B847); // ink.amber
             t.colors["accent.text"]    = hex(on_ink);   // on-ink (text on bright fills)
+            // Navigation selected-row treatment (opt-in SelectionStyle::accent
+            // on TreeView / ListBox sidebar nav, Figma 227:1830 / 227:4196):
+            // a translucent signal-teal tint plus the teal label / left-edge.
+            // Only consumed by widgets that opt into the accent style, so this
+            // never alters a default-themed list or tree.
+            t.colors["nav.selected.bg"]   = Color::rgba8(22, 218, 194, 38);
+            t.colors["nav.selected.text"] = hex(0x16DAC2); // signal teal
             // Faithful-import surfaces: the dark well behind a DesignFrameView
             // frame and the piano/typing key fills. The baked SVG carries the
             // pixels; these name the same colours so the catalog's reskin-token

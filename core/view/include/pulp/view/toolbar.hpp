@@ -52,7 +52,10 @@ public:
     /// Add flexible spacer
     void add_spacer();
 
-    /// Add a custom view
+    /// Add a custom view. The item occupies its view's `flex().preferred_width`
+    /// along the bar when that is set (> 0) — e.g. a wide "120 BPM" readout —
+    /// otherwise the square `item_size_`. preferred_width defaults to 0, so
+    /// existing custom items are unaffected.
     void add_custom(std::string id, std::unique_ptr<View> view);
 
     /// Remove an item by ID
@@ -91,6 +94,7 @@ private:
     float item_size_ = 28.0f;
 
     int hit_test_item(Point pos) const;
+    float custom_item_width(const ToolbarItem& item) const;
 };
 
 }  // namespace pulp::view

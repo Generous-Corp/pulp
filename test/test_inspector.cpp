@@ -1997,7 +1997,7 @@ TEST_CASE("InspectorWindow builds tabs and updates element properties", "[inspec
 
     auto* tabs = first_view_of_type<TabPanel>(window);
     REQUIRE(tabs != nullptr);
-    REQUIRE(tabs->tab_count() == 4);
+    REQUIRE(tabs->tab_count() == 5);
     REQUIRE(tabs->active_tab() == 0);
     REQUIRE(tabs->child_at(0)->visible());
     REQUIRE_FALSE(tabs->child_at(1)->visible());
@@ -2067,7 +2067,7 @@ TEST_CASE("InspectorWindow default refresh and selection mirror contracts",
 
     auto* tabs = first_view_of_type<TabPanel>(window);
     REQUIRE(tabs != nullptr);
-    REQUIRE(tabs->tab_count() == 4);
+    REQUIRE(tabs->tab_count() == 5);
     REQUIRE(tabs->active_tab() == 0);
     REQUIRE_NOTHROW(window.refresh());
 

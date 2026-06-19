@@ -39,6 +39,13 @@ public:
     void set_separator(std::string sep) { separator_ = std::move(sep); }
     const std::string& separator() const { return separator_; }
 
+    /// Whether to paint the rounded `bg.surface` card behind the trail.
+    /// `true` (default) is the historic look. Set `false` for the flat Ink &
+    /// Signal treatment where crumbs sit directly on the surrounding panel
+    /// (Figma 227:1830). Opt-in; never changes the default.
+    void set_show_background(bool show) { show_background_ = show; }
+    bool show_background() const { return show_background_; }
+
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_down(Point pos) override;
 
@@ -47,6 +54,7 @@ public:
 private:
     std::vector<Item> items_;
     std::string separator_ = "/";
+    bool show_background_ = true;
 
     int item_at_position(Point pos) const;
 };
