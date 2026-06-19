@@ -139,6 +139,12 @@ lanes, and verify a runner is actually busy before blaming capacity.
   `Skill-Update: skip skill=ci reason="ceiling bump only"` trailer on the **tip**
   commit (note: a later `chore: bump versions` commit from `shipyard pr` displaces
   the tip, so updating this SKILL is the more robust path).
+- **Inspector hotspots are frozen too.** `hotspot_size_guard.json` watches newly
+  added `inspect/**` files and freezes the current inspector overlay, window,
+  domain handler, and tweak-store hotspots. When an inspector extraction shrinks
+  a tracked file, lower its `max_loc` to the exact new line count in the same
+  change. When a new overlay companion file triggers the large-file warning,
+  split it before it becomes another hotspot.
 - **Reskinnability ratchet (`token-coverage-ratchet` ctest).** Driven by
   `tools/scripts/token_coverage_check.py`: fails if a `core/view/src` paint file
   gains a NEW colour literal that is not a `resolve_color(...)` fallback. Mark a
@@ -2329,7 +2335,7 @@ The 2026-05-18 Pulp #2374 lesson: `PULP_SKIP_PREPUSH=1` on a NEW commit (not a r
 
 **CLI ↔ MCP parity (pulp #1997):** `tools/scripts/check_cli_mcp_parity.py` is the fourth invariant gate, added by pulp #1997. It enforces that every top-level CLI command added to `tools/cli/pulp_cli.cpp` either gets a matching `pulp_<command>` tool in `tools/mcp/pulp_mcp.cpp` OR an entry in `tools/scripts/cli_mcp_parity_baseline.json` with a one-line reason. Whole-tree check (no diff base needed) — runs as the `CLI ↔ MCP parity check` step in `version-skill-check.yml` in `--mode=report` (hard fail) and as a hint in `hooks/scripts/cli-plugin-sync.sh`. There is no commit-trailer bypass — the baseline file is itself the bypass mechanism. To intentionally defer MCP exposure for a new CLI command, add an entry to `cli_mcp_parity_baseline.json` in the same PR. The full guidance lives in the `cli-maintenance` skill ("Decide: does this need an MCP tool?").
 
-**Hotspot-size guard (P0.1 refactor roadmap):** `tools/scripts/hotspot_size_guard.py` hard-fails when a tracked monolith exceeds the frozen LOC ceiling in `tools/scripts/hotspot_size_guard.json`. It also warns, without blocking, when a newly added `core/**` or `tools/**` file is already over the configured warning threshold. Lower a ceiling in the same PR that shrinks a hotspot; only raise one when the PR explains why the growth is intentional and still reviewable.
+**Hotspot-size guard (P0.1 refactor roadmap):** `tools/scripts/hotspot_size_guard.py` hard-fails when a tracked monolith exceeds the frozen LOC ceiling in `tools/scripts/hotspot_size_guard.json`. It also warns, without blocking, when a newly added `core/**`, `tools/**`, or `inspect/**` file is already over the configured warning threshold. Lower a ceiling in the same PR that shrinks a hotspot; only raise one when the PR explains why the growth is intentional and still reviewable.
 
 `tools/cli/kit_commands.cpp` is frozen at its pre-split 3,927-line baseline.
 When extracting kit-command modules, follow `tools/cli/KIT_COMMANDS_MODULE_MAP.md`

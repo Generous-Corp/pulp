@@ -5,7 +5,8 @@
     "max_loc": 1000,
     "paths": [
       "core/**",
-      "tools/**"
+      "tools/**",
+      "inspect/**"
     ]
   },
   "hotspots": [
@@ -133,6 +134,36 @@
       "path": "tools/cli/kit_commands.cpp",
       "max_loc": 3927,
       "note": "kit/package trust-boundary monolith; split per tools/cli/KIT_COMMANDS_MODULE_MAP.md"
+    },
+    {
+      "path": "inspect/src/inspector_overlay.cpp",
+      "max_loc": 2616,
+      "note": "Inspector overlay facade hotspot; extract companions per INSPECT_MODULE_MAP.md"
+    },
+    {
+      "path": "inspect/src/inspector_overlay_paint.cpp",
+      "max_loc": 1540,
+      "note": "Inspector overlay paint hotspot; keep drawing separate from mutation"
+    },
+    {
+      "path": "inspect/include/pulp/inspect/inspector_overlay.hpp",
+      "max_loc": 1510,
+      "note": "Inspector overlay public header hotspot; reduce private state deliberately"
+    },
+    {
+      "path": "inspect/src/inspector_window.cpp",
+      "max_loc": 1304,
+      "note": "Inspector window UI hotspot; keep separate from canvas overlay state"
+    },
+    {
+      "path": "inspect/src/domain_handler.cpp",
+      "max_loc": 915,
+      "note": "Inspector protocol dispatch hub; preserve optional-source errors"
+    },
+    {
+      "path": "inspect/src/tweak_store.cpp",
+      "max_loc": 807,
+      "note": "Inspector tweak schema and disk contract hotspot"
     },
     {
       "path": "core/canvas/src/skia_canvas.cpp",
