@@ -66,7 +66,7 @@ So the entry macro is type-specific (`core/format/include/pulp/format/au_v2_entr
 
 **Three surfaces must agree** for an `aumf`, or the component is invalid: `descriptor().accepts_midi = true`, the `aumf` type (CMake `ACCEPTS_MIDI` or a hand-written `Info.plist.au`), **and** `PULP_AU_MIDI_PLUGIN` in the plugin's `au_v2_entry.cpp`. The dispatch contract is pinned by `test/test_au_v2_effect.cpp` (`[dispatch]` — asserts `AUMIDILookup` routes `kMusicDeviceMIDIEventSelect` and `AUBaseLookup` does not), so a regression to the base factory fails in CI instead of at auval/Logic time.
 
-**The `aumu` instrument variant is the same trap** (PulpTempoSampler hit it 2026-06-15): a `category = Instrument` plugin gets an `aumu` Info.plist from CMake, but if its `au_v2_entry.cpp` uses `PULP_AU_PLUGIN` (→ `AUBaseFactory`) instead of `PULP_AU_INSTRUMENT` (`#include <pulp/format/au_v2_instrument_entry.hpp>` → `AUMusicDeviceFactory`/`AUMusicLookup`), the host's `MusicDeviceMIDIEvent` returns **-4**. The plugin loads and plays UI-triggered audio (slice taps, on-screen keyboard — those bypass host MIDI via the UI→audio queue), so it looks fine, but **silently ignores all host MIDI in Logic/Ableton**. `auval -v aumu` catches it (`Test MIDI` fails); the same `[dispatch]` test now also pins `AUMusicLookup` carries the selector and `AUBaseLookup` does not. The factory name (`<ClassName>Factory`) is identical across both macros, so swapping `PULP_AU_PLUGIN` → `PULP_AU_INSTRUMENT` keeps the generated `Info.plist` factory reference valid.
+**The `aumu` instrument variant is the same trap** (seen with PulpTempoSampler): a `category = Instrument` plugin gets an `aumu` Info.plist from CMake, but if its `au_v2_entry.cpp` uses `PULP_AU_PLUGIN` (→ `AUBaseFactory`) instead of `PULP_AU_INSTRUMENT` (`#include <pulp/format/au_v2_instrument_entry.hpp>` → `AUMusicDeviceFactory`/`AUMusicLookup`), the host's `MusicDeviceMIDIEvent` returns **-4**. The plugin loads and plays UI-triggered audio (slice taps, on-screen keyboard — those bypass host MIDI via the UI→audio queue), so it looks fine, but **silently ignores all host MIDI in Logic/Ableton**. `auval -v aumu` catches it (`Test MIDI` fails); the same `[dispatch]` test now also pins `AUMusicLookup` carries the selector and `AUBaseLookup` does not. The factory name (`<ClassName>Factory`) is identical across both macros, so swapping `PULP_AU_PLUGIN` → `PULP_AU_INSTRUMENT` keeps the generated `Info.plist` factory reference valid.
 
 ### Flow
 
@@ -103,7 +103,7 @@ The instrument adapter (`core/format/src/au_v2_instrument.cpp`) uses the same `p
 
 ## Recent changes
 
-### Param-events sidecar + RT-safety guard (native-components Phase 3)
+### Param-events sidecar + RT-safety guard
 
 `ProcessBufferLists()` now `set_param_events(&param_events_)` before
 `processor_->process(...)` and wraps ONLY the process call in
@@ -117,7 +117,7 @@ plugin therefore won't receive sample-accurate params on AU v2 yet; that needs
 the AUv3 `AURenderEventParameter` model and is a follow-up. Do not synthesise an
 AU v2 param-event mapping by guessing.
 
-### ProcessBuffers dispatch (DSP runtime Phase 2)
+### ProcessBuffers dispatch
 
 `ProcessBufferLists()` now wraps the current main input/output buffers in a
 stack-owned `ProcessBuffers` block and calls the additive
@@ -128,7 +128,7 @@ override the richer overload can inspect AU v2 bus metadata directly. The AU v2
 instrument `Render()` path uses the same additive dispatch with an inactive,
 optional main input bus and the active output bus.
 
-### Latency / tail change notifications (PR #2934, item 3.11)
+### Latency / tail change notifications
 
 A Processor flags a mid-render latency or tail change via
 `flag_latency_changed()` / `flag_tail_changed()` (RT-safe atomic
@@ -145,7 +145,7 @@ the audio callback path. Tests live in
 
 ## Current Gaps
 
-- **MIDI output from AU v2 effects** is not wired yet (tracked as #626). `Processor::process()` can write to `midi_out`, but `PulpAUEffect` has no render-notify callback / `MIDIOutput` mixin that emits those events back to the host. Effects that declare `produces_midi = true` work in CLAP / VST3 but stay silent on AU v2. `descriptor.produces_midi` is *not* wired to a CMake flag yet — the AU type selection is driven entirely by `accepts_midi`.
+- **MIDI output from AU v2 effects** is not wired yet; `#626` tracks the missing render-notify / `MIDIOutput` path. `Processor::process()` can write to `midi_out`, but `PulpAUEffect` has no render-notify callback / `MIDIOutput` mixin that emits those events back to the host. Effects that declare `produces_midi = true` work in CLAP / VST3 but stay silent on AU v2. `descriptor.produces_midi` is *not* wired to a CMake flag yet — the AU type selection is driven entirely by `accepts_midi`.
 
 - **AU v3 parity** for MIDI on effects is not re-audited in this pass. If you touch `core/format/src/au_adapter.mm`, confirm the AUv3 `componentType` logic in `_pulp_add_auv3` still matches the fix in `_pulp_add_au`.
 
@@ -253,7 +253,7 @@ strippedStatus = inStatus & 0xF0   // -> HandleMIDIEvent's inStatus
 channel        = inStatus & 0x0F   // -> HandleMIDIEvent's inChannel
 ```
 
-The split happens for system messages (0xF0-0xFF) the same way as for channel-voice (0x80-0xEF). For 0xF8 (timing clock) the SDK calls `HandleMIDIEvent(inStatus=0xF0, inChannel=0x08, ...)`. The decoder MUST reassemble `(inStatus & 0xF0) | (inChannel & 0x0F)` regardless of the top nibble — special-casing system messages and returning `inStatus` unchanged turns every clock / start / stop / song-position into 0xF0 (sysex start). Codex review on PR #638 caught the buggy special case; the unit test in `test/test_au_v2_effect.cpp` now feeds the post-split shape (status=0xF0, channel=0x08) so the regression cannot reappear without flipping a test red.
+The split happens for system messages (0xF0-0xFF) the same way as for channel-voice (0x80-0xEF). For 0xF8 (timing clock) the SDK calls `HandleMIDIEvent(inStatus=0xF0, inChannel=0x08, ...)`. The decoder MUST reassemble `(inStatus & 0xF0) | (inChannel & 0x0F)` regardless of the top nibble — special-casing system messages and returning `inStatus` unchanged turns every clock / start / stop / song-position into 0xF0 (sysex start). The unit test in `test/test_au_v2_effect.cpp` now feeds the post-split shape (status=0xF0, channel=0x08) so the regression cannot reappear without flipping a test red.
 
 ### `AUSDK_RTSAFE` position with `override` — Xcode 16.4 incompat
 
@@ -263,7 +263,7 @@ The split happens for system messages (0xF0-0xFF) the same way as for channel-vo
 error: expected ';' at end of declaration list
 ```
 
-The attribute is a static-analysis hint only — dropping it from derived-class `override` declarations has no runtime effect. `PulpAUInstrument::HandleNoteOn/Off` (the reference pattern for AU v2) doesn't carry `AUSDK_RTSAFE` either. When writing a new AU v2 override that matches an `AUSDK_RTSAFE` base declaration, omit the attribute. Caught on CI's Coverage-macOS leg in PR #638 after the AU v2 effect MIDI fix landed without it.
+The attribute is a static-analysis hint only — dropping it from derived-class `override` declarations has no runtime effect. `PulpAUInstrument::HandleNoteOn/Off` (the reference pattern for AU v2) doesn't carry `AUSDK_RTSAFE` either. When writing a new AU v2 override that matches an `AUSDK_RTSAFE` base declaration, omit the attribute. This incompatibility surfaces on CI's Coverage-macOS leg.
 
 ### Editor `dealloc` ordering — never call `bridge->close()` explicitly
 
@@ -272,7 +272,7 @@ The attribute is a static-analysis hint only — dropping it from derived-class 
 1. `~PluginViewHost` runs first. The host calls `root_.set_plugin_view_host(nullptr)` to clear the View → host back-pointer. The View it references is still alive (still owned by `bridge->view_`), so the call is safe.
 2. `~ViewBridge` runs second. Its destructor calls `close()` → `Processor::on_view_closed(*view_raw_)` fires → `view_.reset()` destroys the View. The back-pointer was already cleared in step 1, so the View's own teardown can't reach a dead host.
 
-Calling `_ownership->bridge->close()` HERE explicitly (BEFORE `delete _ownership`) reverses that order: the View dies first, then `~PluginViewHost` dereferences a dangling `root_` reference and crashes the AU v2 editor close path. Codex P1 review on PR #653 caught this — the fix is to remove the explicit close, NOT to add it. Same rule applies to any future Cocoa-View ownership wrapper that mixes a `ViewBridge` and a `PluginViewHost` in the same C++ scope.
+Calling `_ownership->bridge->close()` HERE explicitly (BEFORE `delete _ownership`) reverses that order: the View dies first, then `~PluginViewHost` dereferences a dangling `root_` reference and crashes the AU v2 editor close path. The fix is to remove the explicit close, NOT to add it. Same rule applies to any future Cocoa-View ownership wrapper that mixes a `ViewBridge` and a `PluginViewHost` in the same C++ scope.
 
 ### Editor GPU host is auto-selected — don't hardcode `use_gpu`
 
@@ -283,7 +283,7 @@ made it fall back to AutoUi/CPU). It also wires `host->set_resize_callback(...)`
 because AU v2 has **no host size callback** — the DAW resizes the returned
 NSView directly, so native frame changes are forwarded to `bridge->resize()`
 through that seam. Full contract: the `view-bridge` skill's "GPU view host
-auto-selection" section. (GPU-plugin-view-host work, 2026-05.)
+auto-selection" section.
 
 ### AU v2 MUST advertise its Cocoa view, or the host shows its generic UI
 
@@ -371,7 +371,7 @@ note-input pattern (`HandleNoteOn`/`HandleNoteOff` → lock-free queue).
     - `test/test_au_v2_effect.cpp` — decode / sysex smoke
     - `test/cmake/test_au_v2_type_selection.cmake` — aumf/aufx/aumu/aumi mapping
 
-### AU v2 Cocoa view hands GpuSurface to ScriptedUiSession (Phase iOS-D.3b Slice 1)
+### AU v2 Cocoa view hands GpuSurface to ScriptedUiSession
 
 `au_v2_cocoa_view.mm` now calls
 `bridge->scripted_ui()->attach_gpu_surface(host->gpu_surface())` right
@@ -381,7 +381,7 @@ shim silently falls back to mocks. See the `view-bridge` skill's
 "GpuSurface plumbing into WidgetBridge" section for the cross-platform
 contract.
 
-## Host-quirks consumption (P3a, 2026-05-30)
+## Host-quirks consumption
 
 This adapter consumes the host-quirks ledger at init: it caches
 `resolved_quirks(detect_host_info().type, version)` once (the runtime
@@ -395,9 +395,10 @@ through the pure helper `pulp::format::reported_latency_samples(raw, quirks)`
 quirk is enforced, and passes through raw (wrapping the unsigned host field)
 when `PULP_HOST_QUIRKS=off`. See `docs/reference/host-quirks-policy.md`.
 
-## synthesize_bypass_parameter pass-through (host-quirks P3d, 2026-05-30)
+## synthesize_bypass_parameter pass-through
 
-This adapter had no bypass process path; P3d adds the full P3b behavior.
+This adapter synthesizes the host-quirks bypass parameter and short-circuits the
+process path when bypass is active.
 At init (clap_init / PulpAUEffect ctor) it calls
 `pulp::format::maybe_synthesize_bypass(store, host_quirks)` then detects the
 "Bypass" param (shared boolean-range heuristic: name=="Bypass", step>=1,
@@ -407,17 +408,16 @@ ProcessBufferLists) it short-circuits to a **null-guarded pass-through**
 and skips the Processor when the param value is >= 0.5 — mirroring the VST3
 processBlockBypassed path. `PULP_HOST_QUIRKS=off` synthesizes nothing
 (bypass_param_id stays 0). The pass-through MUST null-check each destination
-channel pointer (a bus can report channels with null buffers — see #178 /
-the #3240 sweep).
+channel pointer (a bus can report channels with null buffers).
 
-## Codex review fixes (#3226, #3246)
+## Instrument latency & bypass MIDI drain
 
-- **Instrument latency (#3226):** `PulpAUInstrument::GetLatency()` now routes
+- **Instrument latency:** `PulpAUInstrument::GetLatency()` now routes
   the processor's latency through `reported_latency_samples()` (clamped,
   policy-gated) instead of hardcoding 0.0 — instruments with lookahead get
   host PDC. MusicDeviceBase has no `GetSampleRate()`; read it from
   `GetOutput(0)->GetStreamFormat().mSampleRate` (guarded for pre-config).
-- **Bypass MIDI drain (#3246):** the `ProcessBufferLists` bypass
+- **Bypass MIDI drain:** the `ProcessBufferLists` bypass
   short-circuit now drains + DISCARDS `pending_midi_` under `midi_mutex_`
   before returning. Without it, MIDI received while bypassed accumulated and
   flooded the processor with stale notes/CCs the instant bypass turned off.
