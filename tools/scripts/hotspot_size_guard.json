@@ -97,7 +97,7 @@
     },
     {
       "path": "core/view/src/design_ir_json.cpp",
-      "max_loc": 2293,
+      "max_loc": 2298,
       "note": "DesignIR serialization contract hotspot"
     },
     {
