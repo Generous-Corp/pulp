@@ -76,8 +76,8 @@
     },
     {
       "path": "core/render/src/renderer3d.cpp",
-      "max_loc": 3642,
-      "note": "Renderer3D implementation hotspot"
+      "max_loc": 3474,
+      "note": "Renderer3D implementation hotspot after CPU value-type extraction"
     },
     {
       "path": "tools/import-design/pulp_import_design.cpp",
