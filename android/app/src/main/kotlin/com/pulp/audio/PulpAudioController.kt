@@ -10,7 +10,7 @@ import com.pulp.PulpApplication
 import com.pulp.PulpAudioService
 
 /**
- * Lifecycle controller for the foreground audio service (#333).
+ * Lifecycle controller for the foreground audio service.
  *
  * Android kills backgrounded apps' audio engines within seconds unless
  * a foreground service is running. PulpAudioService already defines
@@ -83,7 +83,7 @@ class PulpAudioController(private val context: Context) {
         // startForegroundService is the Android-8+ API; the service has
         // 5 seconds to call startForeground() from onStartCommand or the
         // system will ANR. PulpAudioService's onStartCommand handler
-        // (registered in the same commit) satisfies that contract.
+        // satisfies that contract.
         context.startForegroundService(intent)
         context.bindService(intent, connection, Context.BIND_AUTO_CREATE)
         running = true
@@ -105,11 +105,11 @@ class PulpAudioController(private val context: Context) {
         // unbind so the service can be reaped when no other clients
         // hold it.
         context.startService(intent)
-        // #500: Always attempt unbindService when running was true, not
-        // only when `bound` flipped true. `bound` is set by the async
-        // onServiceConnected callback; a start→stop sequence that races
-        // faster than the system dispatches the connection callback
-        // would leak the binding forever. unbindService throws
+        // Always attempt unbindService when running was true, not only
+        // when `bound` flipped true. `bound` is set by the async
+        // onServiceConnected callback; a start→stop sequence can race
+        // faster than the system dispatches the connection callback and
+        // otherwise leak the binding. unbindService throws
         // IllegalArgumentException if no matching registration exists —
         // catch-and-ignore is the documented safe pattern.
         try {
