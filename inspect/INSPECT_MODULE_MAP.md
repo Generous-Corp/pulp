@@ -22,7 +22,8 @@ inspector surface.
 
 Future inspector extraction PRs should preserve the contracts below or update
 this file, CMake wiring, tests, and any newly added hotspot ceilings in the same
-change. `inspect/` is not currently covered by `hotspot_size_guard.json`.
+change. `hotspot_size_guard.json` tracks the largest current inspect hotspots
+and watches newly added `inspect/**` files for large-file warnings.
 
 ## Dependency Tiers
 

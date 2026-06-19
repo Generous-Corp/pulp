@@ -69,6 +69,15 @@ class HotspotSizeGuardUnitTests(unittest.TestCase):
             self.assertEqual(hsg.main(["--mode", "hint"]), 0)
             self.assertEqual(hsg.main(["--mode", "report"]), 2)
 
+    def test_repo_hotspot_config_paths_exist(self) -> None:
+        root = THIS_DIR.parents[1]
+        config = hsg.load_config(root / "tools" / "scripts" / "hotspot_size_guard.json")
+
+        missing = [hotspot.path for hotspot in config.hotspots
+                   if not (root / hotspot.path).is_file()]
+
+        self.assertEqual(missing, [])
+
 
 class HotspotSizeGuardIntegrationTests(unittest.TestCase):
     def setUp(self) -> None:
