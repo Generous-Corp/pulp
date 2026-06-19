@@ -24,6 +24,7 @@ import {
   detectOverlayControls,
   decodeSvgBytes,
 } from "./faithful-vector";
+import { assessResolution } from "./resolve-control";
 import { extractTokens, type ExtractedTokens } from "./tokens";
 import {
   widgetKindByLibraryKey,
@@ -712,6 +713,20 @@ async function applyFaithfulVector(
     // (search/dropdown/stepper/tabs), mapped into the SVG's panel space — kept in
     // lockstep with the REST lane (figma_rest_export.py).
     const knobs = parseFrameKnobs(svg);
+    // P7 import report: knobs are GEOMETRY-detected (dome+needle in the SVG),
+    // with no node name — stamp them as affordance-resolved (rung 2) so the
+    // import report lists EVERY control, not just the overlays (which
+    // detectOverlayControls stamps itself). A geometric knob's bounds are its
+    // hit circle, so it is square by construction → no conflict, full confidence.
+    for (let ki = 0; ki < knobs.length; ki++) {
+      const k = knobs[ki];
+      const d = 2 * (k.hit_radius || 0);
+      const rep = assessResolution("knob", "", { w: d, h: d }, "affordance");
+      k.resolution_rung = rep.resolution_rung;
+      k.confidence_score = rep.confidence_score;
+      if (rep.conflict_signals.length > 0) k.conflict_signals = rep.conflict_signals;
+      if (!rep.verification_pass) k.verification_pass = false;
+    }
     const panel = parsePanelBounds(svg);
     const overlays = detectOverlayControls(
       node,

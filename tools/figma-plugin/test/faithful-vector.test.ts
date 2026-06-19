@@ -278,3 +278,34 @@ test("detectOverlayControls: P1b name gates do not fire on generic names", () =>
   assert.equal(els.filter((e) =>
     ["swap", "action", "xy_pad", "value_label"].indexOf(e.kind) !== -1).length, 0);
 });
+
+test("detectOverlayControls: stamps the P7 resolution report on every control (F2)", () => {
+  // A well-shaped xy_pad resolves cleanly; a deliberately mis-shaped one (named
+  // 'XY Pad' but a wide strip) is CAUGHT as a conflict in the live pipeline — the
+  // silent-knob stumble, surfaced.
+  const root = baseNode({
+    figma_type: "FRAME", figma_node_id: "3:42",
+    absolute_bounds: { x: 0, y: 0, w: 1000, h: 600 },
+    children: [
+      child("XY Pad", 20, 20, 120, 120, "good", []),    // genuinely square
+      child("XY Pad", 200, 20, 220, 20, "bad", []),      // named xy_pad but a wide strip
+    ],
+  });
+  const els = detectOverlayControls(root, [0, 0], [0, 0]);
+  const good = els.find((e) => e.source_node_id === "good");
+  const bad = els.find((e) => e.source_node_id === "bad");
+  assert.ok(good && bad, "both xy_pads detected");
+
+  // Clean one: confident, no conflict, resolved by its name token (rung 3).
+  assert.equal(good!.kind, "xy_pad");
+  assert.equal(good!.confidence_score, 1.0);
+  assert.equal(good!.resolution_rung, 3);
+  assert.ok(!good!.conflict_signals || good!.conflict_signals.length === 0);
+
+  // Mis-shaped one: flagged — best candidate still materialized, but recorded.
+  assert.equal(bad!.kind, "xy_pad");
+  assert.ok(bad!.confidence_score! < 1.0, "confidence demoted on the conflict");
+  assert.ok(bad!.conflict_signals && bad!.conflict_signals.length >= 1,
+    "a conflict is recorded for review");
+  assert.equal(bad!.verification_pass, false);
+});

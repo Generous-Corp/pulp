@@ -11,6 +11,10 @@
 // decode) — the Figma plugin sandbox tsconfig targets an older lib without
 // String.matchAll / includes / spread-of-typed-array.
 
+// P7-F2: the resolution self-check that records each control's provenance +
+// catches name/geometry conflicts. (Type-only the other direction, so no cycle.)
+import { assessResolution } from "./resolve-control";
+
 // The interactive-overlay kinds the schema (figma-plugin-export-v1.json
 // interactive_element.kind) accepts and the C++ materializer
 // (to_frame_elements) maps to a DesignFrameElement::Kind. Kept a literal union
@@ -262,8 +266,12 @@ export function detectOverlayControls(
   const subtreeEnd = new Map<OverlayNode, number>();
   const occluders: Array<[number, number, number, number, number]> = [];
   let _counter = 0;
+  // node id -> name, so the P7 post-pass can read the name signal for each
+  // emitted control (which only carries its source_node_id).
+  const nodeNameById: { [id: string]: string } = {};
   function scan(n: OverlayNode): number {
     const idx = _counter++;
+    if (n.figma_node_id) nodeNameById[n.figma_node_id] = n.name || "";
     paintIndex.set(n, idx);
     const b = n.absolute_bounds;
     if (b && opaqueCover(n)) occluders.push([idx, b.x, b.y, b.x + b.w, b.y + b.h]);
@@ -477,6 +485,23 @@ export function detectOverlayControls(
   }
 
   visit(root, null);
+
+  // ── P7-F2 resolution self-check ──────────────────────────────────────────
+  // Stamp each emitted control with its resolution provenance (rung / confidence
+  // / conflicts / verification). assessResolution cross-checks the name signal
+  // against the node's geometry, so a control whose name and shape disagree
+  // (the original silent-knob stumble) is FLAGGED — still materialized with the
+  // best candidate AND recorded for review — instead of shipped silently.
+  for (let i = 0; i < out.length; i++) {
+    const el = out[i];
+    const name = (el.source_node_id && nodeNameById[el.source_node_id]) || "";
+    // detectOverlayControls resolves by the design's own naming + structure.
+    const report = assessResolution(el.kind, name, { w: el.w || 0, h: el.h || 0 }, "name");
+    el.resolution_rung = report.resolution_rung;
+    el.confidence_score = report.confidence_score;
+    if (report.conflict_signals.length > 0) el.conflict_signals = report.conflict_signals;
+    if (!report.verification_pass) el.verification_pass = false;
+  }
   return out;
 }
 
