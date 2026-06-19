@@ -90,3 +90,44 @@ export function entryForKind(
 ): LibraryWidgetEntry | undefined {
   return widgetEntries.find((e) => e.kind === kind);
 }
+
+// ── Custom-control resolution (P8 — the package-fragment merge) ──────────────
+// A shared package (registry-schema `design_controls`) maps a Figma identity to
+// the `factory_id` its pulp::view::View registers (register_design_control_
+// factory). The importer MERGES the installed packages' fragments into one list
+// and resolves a node's identity to a factory_id — emitting a kind=custom
+// interactive element so the materializer builds the package's control. This is
+// the same precedence the built-in resolver uses: component-set key is
+// authoritative; the name prefix is the fallback.
+export interface DesignControlEntry {
+  factory_id: string;
+  component_set_key?: string;
+  name_prefix?: string;
+}
+
+/// Resolve a node's identity to a registered custom-control factory_id, or
+/// undefined when no package fragment matches. `entries` is the merged list from
+/// the installed packages' `design_controls`. Key match wins; name-prefix match
+/// (case-insensitive, prefix) is the fallback.
+export function customControlFactoryId(
+  componentKey: string | undefined | null,
+  name: string | undefined | null,
+  entries: ReadonlyArray<DesignControlEntry>,
+): string | undefined {
+  if (componentKey) {
+    for (const e of entries) {
+      if (e.component_set_key && e.component_set_key === componentKey) {
+        return e.factory_id;
+      }
+    }
+  }
+  if (name) {
+    const lower = name.toLowerCase();
+    for (const e of entries) {
+      if (e.name_prefix && lower.indexOf(e.name_prefix.toLowerCase()) === 0) {
+        return e.factory_id;
+      }
+    }
+  }
+  return undefined;
+}

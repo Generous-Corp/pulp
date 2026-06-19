@@ -57,7 +57,35 @@
           "type": "object",
           "additionalProperties": { "type": "string" }
         },
-        "verification": { "$ref": "#/definitions/verification" }
+        "verification": { "$ref": "#/definitions/verification" },
+        "design_controls": {
+          "type": "array",
+          "description": "P8: custom design-import controls this package registers. Each entry maps a Figma identity (component_set_key / name_prefix) to a factory_id the package's pulp::view::View registers via register_design_control_factory; the importer emits a kind=custom interactive element carrying that factory_id when a node matches. Presence of this field marks a package as a custom-control provider.",
+          "items": { "$ref": "#/definitions/design-control" }
+        }
+      }
+    },
+    "design-control": {
+      "type": "object",
+      "required": ["factory_id", "match"],
+      "additionalProperties": false,
+      "properties": {
+        "factory_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The id the package's View registers under (register_design_control_factory). Must match the id the importer stamps on the kind=custom element."
+        },
+        "match": {
+          "type": "object",
+          "description": "How an imported Figma node is identified as this control. component_set_key is authoritative; name_prefix is the fallback. At least one must be present.",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "component_set_key": { "type": "string", "minLength": 1, "description": "Figma ComponentSetNode.key — authoritative identity match." },
+            "name_prefix": { "type": "string", "minLength": 1, "description": "Node-name prefix fallback (e.g. \"Acme / Spinner\")." }
+          }
+        },
+        "description": { "type": "string" }
       }
     },
     "fetch": {
