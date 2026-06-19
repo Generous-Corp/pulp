@@ -77,7 +77,7 @@ class PulpMotionGeometryProbe internal constructor(
  *    view's window-space rect via `getLocationInWindow()` and forwards
  *    every change to `PulpMotion.updateGeometry`. PreDraw catches
  *    intra-frame translation / scroll that `OnGlobalLayoutListener`
- *    would miss (per Codex's locked-in design feedback).
+ *    would miss.
  *  - Publishes each [MotionMetric.Value] declared in [build] once at
  *    attach time. Live scalars should re-publish from your own
  *    state — the trace itself just owns geometry sampling.

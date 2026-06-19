@@ -3,10 +3,8 @@
 /// @file audio_device_manager.hpp
 /// AudioDeviceManager — persistence + MIDI hub + lifecycle / recovery.
 ///
-/// Phase A (item 1.2a, PR #2936): persistence + MIDI hub + smoothed
-/// CPU-load surface — all backend-agnostic, no platform listeners.
-///
-/// Phase B (item 1.2b, this slice):
+/// Backend-agnostic responsibilities:
+///   - Persistence + MIDI hub + smoothed CPU-load surface.
 ///   - Live device hotplug detection (the manager observes a
 ///     `pulp::audio::AudioSystem`'s device-change callback and
 ///     republishes a structured `DeviceChangeEvent` to its own
@@ -431,9 +429,9 @@ private:
     /// unsubscribe path is allowed to probe multiple maps with the
     /// same id, so the id must be globally unique across all maps —
     /// otherwise destroying one subscription token can erase an
-    /// unrelated subscription that happens to share the numeric id
-    /// (see issue #2976 / PR #2970 Codex finding). Atomic so callers
-    /// don't need to hold any particular mutex to allocate one.
+    /// unrelated subscription that happens to share the numeric id.
+    /// Atomic so callers don't need to hold any particular mutex to
+    /// allocate one.
     std::atomic<uint64_t>                        next_token_id_{1};
 
     mutable std::mutex                           midi_mu_;

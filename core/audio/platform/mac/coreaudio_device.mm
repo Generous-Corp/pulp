@@ -12,8 +12,8 @@ namespace pulp::audio::mac {
 namespace {
 
 // kAudioDevicePropertyIOThreadOSWorkgroup is declared in the macOS 11+
-// SDK but Apple's docs only guarantee a usable workgroup on macOS 13 /
-// iOS 16+. Phase B floor follows that guarantee.
+// SDK, but Apple's docs only guarantee a usable workgroup on macOS 13 /
+// iOS 16+, so this path follows that availability floor.
 constexpr AudioObjectPropertySelector kIOThreadWorkgroupSelector =
     kAudioDevicePropertyIOThreadOSWorkgroup;
 
@@ -449,7 +449,6 @@ OSStatus CoreAudioDevice::render_callback(
         // transient failure (e.g. workgroup setup hadn't completed yet
         // on the first render), so the audio thread could run the entire
         // session without workgroup membership or any RT priority bump.
-        // (Codex #2970 / 3305855151.)
         if (self->wg_join_.join_from_audio_thread()) {
             self->wg_joined_.store(true, std::memory_order_release);
         }

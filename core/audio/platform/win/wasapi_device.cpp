@@ -59,7 +59,6 @@ bool WasapiDevice::open(const DeviceConfig& config) {
     // count negotiated in Initialize). Capture packets are interleaved
     // at this stride regardless of what the user asked for, so the
     // deinterleave loop must use it as the per-frame source step.
-    // See #438 P1 Codex review on #386.
     engine_channels_ = static_cast<int>(mix_format->nChannels);
     config_.sample_rate = static_cast<double>(mix_format->nSamplesPerSec);
 
@@ -439,7 +438,7 @@ void WasapiDevice::render_thread_func() {
     }
 }
 
-// ── Capture thread (issue #243) ─────────────────────────────────────
+// ── Capture thread ──────────────────────────────────────────────────
 //
 // WASAPI capture is event-driven the same way render is: the buffer
 // event fires when a packet is ready. Each iteration we drain every
@@ -579,7 +578,7 @@ std::string WasapiDevice::wide_to_utf8(const std::wstring& wide) {
 
 // ── WasapiSystem ─────────────────────────────────────────────────────────
 
-// IMMNotificationClient — hotplug receiver for WASAPI (issue #243).
+// IMMNotificationClient — hotplug receiver for WASAPI.
 //
 // Windows calls our OnDeviceAdded / OnDeviceRemoved / OnDeviceStateChanged /
 // OnDefaultDeviceChanged on a background thread owned by mmdevapi. We
@@ -591,8 +590,7 @@ public:
 
     // IUnknown — COM refcounting is touched from mmdevapi's background
     // threads during hotplug, so the counter must be atomic. Plain
-    // `++`/`--` raced with the default-device-change thread. (Codex P1
-    // on the original PR.)
+    // `++`/`--` can race with the default-device-change thread.
     ULONG STDMETHODCALLTYPE AddRef() override  {
         return static_cast<ULONG>(
             refcount_.fetch_add(1, std::memory_order_acq_rel) + 1);
@@ -640,7 +638,7 @@ WasapiSystem::WasapiSystem() {
         return;
     }
 
-    // Register hotplug notifier (issue #243).
+    // Register hotplug notifier.
     notifier_ = new WasapiNotificationClient(this);
     if (FAILED(enumerator_->RegisterEndpointNotificationCallback(notifier_))) {
         runtime::log_warn("WASAPI: RegisterEndpointNotificationCallback failed; "

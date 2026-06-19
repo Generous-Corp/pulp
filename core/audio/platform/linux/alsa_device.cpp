@@ -158,7 +158,7 @@ void AlsaDevice::stop() {
     // aborts any outstanding read from this side of the stream so the
     // thread unwinds immediately. On playback the existing join-then-
     // drain order is fine because the render thread exits on its own
-    // fill cycle. See #438 P1 Codex review on #387.
+    // fill cycle.
     if (pcm_ && stream_ == SND_PCM_STREAM_CAPTURE) {
         snd_pcm_drop(pcm_);
     }
@@ -247,7 +247,7 @@ void AlsaDevice::render_thread_func() {
     }
 }
 
-// ── Capture thread (#20 / #215) ─────────────────────────────────────
+// ── Capture thread ──────────────────────────────────────────────────
 //
 // snd_pcm_readi blocks until period_size frames are available. We
 // recover from xruns the same way render does and hand the user a
@@ -398,7 +398,7 @@ std::unique_ptr<AudioDevice> AlsaSystem::create_device(const std::string& device
     // open actually fails with a stable error (ENODEV, ENOENT) and
     // capture succeeds. For anything else, leave the default PLAYBACK
     // — the subsequent start() call will surface a clear error if the
-    // device truly can't play back. See #438 P1 Codex review on #387.
+    // device truly can't play back.
     auto open_direction = [](const std::string& id,
                              snd_pcm_stream_t s) -> int {
         snd_pcm_t* pcm = nullptr;
@@ -466,9 +466,8 @@ void AlsaSystem::set_device_change_callback(DeviceChangeCallback cb) {
 #include "jack_device.hpp"  // JackSystem + jack_is_available
 #endif
 
-// Factory function — prefers JACK when a running server is detected.
-// Workstream 02 slice 2.2: previously unconditionally returned AlsaSystem
-// even when the JACK backend was compiled in, so JACK was dead code.
+// Factory function — prefers JACK when a running server is detected, then
+// falls back to ALSA when JACK is unavailable or not compiled in.
 namespace pulp::audio {
 
 std::unique_ptr<AudioSystem> create_audio_system() {

@@ -71,10 +71,10 @@ public:
                 //   - the output FramesPerBurst (Oboe's preferred cadence)
                 //   - the input FramesPerBurst (Oboe may deliver bursts)
                 //   - requested_buffer_size_ if the caller overrode it
-                // Then 4× for catch-up slack. Undersizing here was the
-                // #478 Codex P1 finding: a caller that sets
-                // requested_buffer_size_ > output burst (e.g. 1024 vs 192)
-                // would overflow the vector on the first read call.
+                // Then 4× for catch-up slack. A caller can set
+                // requested_buffer_size_ > output burst (e.g. 1024 vs 192),
+                // so undersizing here can overflow the vector on the first
+                // read call.
                 const int32_t out_burst = output_stream_->getFramesPerBurst();
                 const int32_t in_burst = input_stream_->getFramesPerBurst();
                 const int32_t max_frames = std::max({
@@ -107,10 +107,10 @@ public:
         // callback will now observe a fully-constructed input_buffer_ on
         // its first tick, not an in-progress resize.
         if (output_stream_->requestStart() != oboe::Result::OK) {
-            // #500 / #480: if we already started the input stream above,
-            // a failed output start left it running — every retry then
-            // leaked another input stream. Tear it down before returning
-            // failure so the caller sees a clean slate.
+            // If we already started the input stream above, a failed output
+            // start would leave it running and every retry would leak another
+            // input stream. Tear it down before returning failure so the
+            // caller sees a clean slate.
             if (input_stream_) {
                 input_stream_->requestStop();
                 input_stream_->close();
@@ -150,7 +150,7 @@ public:
     int64_t xrun_count() const { return xrun_count_.load(std::memory_order_relaxed); }
     bool is_bluetooth_active() const { return bluetooth_active_.load(std::memory_order_acquire); }
 
-    // #244: input-stream diagnostics. short_reads increments when
+    // Input-stream diagnostics. short_reads increments when
     // onAudioReady drains fewer frames than requested (warm-up, transient
     // drift); read_errors increments on a hard read failure that zero-filled
     // the block. Both are useful for UI-level input-health indicators.
@@ -217,7 +217,7 @@ private:
 #endif
 
         if (callback_) {
-            // #244: Drain the input stream on the same callback tick. Oboe's
+            // Drain the input stream on the same callback tick. Oboe's
             // recommended full-duplex pattern is to do a non-blocking read
             // on the output-stream callback — AAudio keeps the two streams
             // in step on a shared device period in practice.
@@ -329,10 +329,10 @@ private:
 
     // -- Stream creation --
 
-    // Workstream 02 #244: symmetric input-stream opener. Runs in parallel
-    // with the output stream when requested_input_channels_ > 0. Shares
-    // the same low-latency / exclusive configuration so the two streams
-    // stay in step with AAudio's MMAP path on Bluetooth and USB devices.
+    // Symmetric input-stream opener. Runs in parallel with the output stream
+    // when requested_input_channels_ > 0. Shares the same low-latency /
+    // exclusive configuration so the two streams stay in step with AAudio's
+    // MMAP path on Bluetooth and USB devices.
     bool open_input_stream() {
         oboe::AudioStreamBuilder builder;
         builder.setDirection(oboe::Direction::Input)
@@ -407,20 +407,20 @@ private:
     int32_t requested_sample_rate_ = 0;
     int32_t requested_buffer_size_ = 0;
     int32_t requested_channels_ = 2;
-    int32_t requested_input_channels_ = 0;  // #244: 0 = output-only
+    int32_t requested_input_channels_ = 0;  // 0 = output-only
 
     int32_t current_sample_rate_ = 48000;
     int32_t current_buffer_size_ = 256;
     int32_t current_channels_ = 2;
-    int32_t current_input_channels_ = 0;  // #244
+    int32_t current_input_channels_ = 0;
 
     std::atomic<int64_t> xrun_count_{0};
     int32_t last_reported_xruns_ = 0;
     std::atomic<int64_t> last_callback_duration_ns_{0};
 
-    // #244: persistent input-frame buffer. Allocated in start() (main
-    // thread); sized to cover 4× the burst so onAudioReady can drain
-    // without allocating. Accessed only on the audio thread.
+    // Persistent input-frame buffer. Allocated in start() (main thread);
+    // sized to cover 4× the burst so onAudioReady can drain without
+    // allocating. Accessed only on the audio thread.
     std::vector<float> input_buffer_;
     std::atomic<int64_t> input_short_reads_{0};
     std::atomic<int64_t> input_read_errors_{0};
