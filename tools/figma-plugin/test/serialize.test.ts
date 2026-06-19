@@ -273,6 +273,21 @@ test("interactive_element schema accepts every producer-emitted kind (P1a)", () 
   }
 });
 
+test("interactive_element schema accepts the P7 import-report fields (F0)", () => {
+  // A control carrying full resolution provenance validates against the schema.
+  const conflicted = {
+    kind: "knob", cx: 50, cy: 50, hit_radius: 20,
+    resolution_rung: 2, confidence_score: 0.55,
+    conflict_signals: ["name=knob but geometry is a wide track+thumb"],
+    verification_pass: false, source_node_id: "9:9",
+  };
+  assert.deepEqual(ieErrors(conflicted), [], "report-bearing element should validate");
+  // conflict_signals must be an array of strings — a bare string is rejected.
+  const bad = { kind: "knob", cx: 0, cy: 0, hit_radius: 1, conflict_signals: "oops" };
+  assert.ok(ieErrors(bad).some((e) => e.includes("expected type array")),
+    "conflict_signals must be an array");
+});
+
 test("interactive_element schema rejects an unknown kind (P1a)", () => {
   const errs = ieErrors({ kind: "wormhole", x: 0, y: 0, w: 10, h: 10 });
   assert.ok(errs.some((e) => e.includes("not in enum")), `expected enum rejection, got:\n${errs.join("\n")}`);

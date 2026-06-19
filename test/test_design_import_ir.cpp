@@ -415,6 +415,56 @@ TEST_CASE("DesignIR diagnoses an unknown interactive kind instead of silent-knob
     CHECK(ir.root.interactive_elements[1].kind == InteractiveElementKind::fader);
 }
 
+TEST_CASE("DesignIR round-trips the P7 import-report fields (F0 carrier chain)",
+          "[view][import][ir-v1][faithful-svg][p7]") {
+    // P7-F0: the resolution provenance (rung / confidence / conflicts /
+    // verification) must survive JSON->IR->JSON so a low-confidence or conflicted
+    // control is visible at the host materialize boundary, not just in the TS
+    // importer. (The LOGIC that fills these is P7-F2; this pins the carrier.)
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.render_mode = NodeRenderMode::faithful_svg;
+    ir.root.svg_asset_id = "asset-svg";
+
+    IRInteractiveElement conflicted;   // a control the ladder resolved with a conflict
+    conflicted.kind = InteractiveElementKind::knob;
+    conflicted.cx = 50; conflicted.cy = 50; conflicted.hit_radius = 20;
+    conflicted.resolution_rung = 2;            // resolved via Tier-1 affordance
+    conflicted.confidence_score = 0.55f;       // low confidence
+    conflicted.conflict_signals = {"name=knob but geometry is a wide track+thumb"};
+    conflicted.verification_pass = false;      // render verification flagged it
+    ir.root.interactive_elements.push_back(conflicted);
+
+    IRInteractiveElement clean;        // a confidently-resolved control (defaults)
+    clean.kind = InteractiveElementKind::fader;
+    clean.x = 10; clean.y = 10; clean.w = 8; clean.h = 80;
+    ir.root.interactive_elements.push_back(clean);
+
+    const auto canonical = serialize_design_ir(ir);
+    const auto parsed = parse_design_ir_json(canonical);
+    REQUIRE(serialize_design_ir(parsed) == canonical);     // stable round-trip
+    REQUIRE(parsed.root.interactive_elements.size() == 2);
+
+    const auto& c = parsed.root.interactive_elements[0];
+    REQUIRE(c.resolution_rung == 2);
+    REQUIRE(c.confidence_score == 0.55f);
+    REQUIRE(c.conflict_signals.size() == 1);
+    REQUIRE(c.conflict_signals[0] == "name=knob but geometry is a wide track+thumb");
+    REQUIRE(c.verification_pass == false);
+
+    // Defaults are lean: a clean control emits none of the report fields and
+    // parses back to the confident defaults.
+    const auto& k = parsed.root.interactive_elements[1];
+    REQUIRE(k.resolution_rung == 0);
+    REQUIRE(k.confidence_score == 1.0f);
+    REQUIRE(k.conflict_signals.empty());
+    REQUIRE(k.verification_pass == true);
+    // The clean element serialized none of the report keys (lean default).
+    CHECK(canonical.find("confidence_score") != std::string::npos);  // only the conflicted one
+    CHECK(canonical.find("resolution_rung\":0") == std::string::npos);
+}
+
 TEST_CASE("DesignIR serialization preserves parsed envelope version by default",
           "[view][import][ir-v1]") {
     auto parsed = parse_design_ir_json(R"json({

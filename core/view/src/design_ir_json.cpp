@@ -869,6 +869,17 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
             el.text = get_string(e, "text");
             el.value_left_align = get_bool(e, "value_left_align");
             el.default_value_y = get_float(e, "default_value_y", 0.5f);
+            // P7 import report (resolution provenance).
+            el.resolution_rung = static_cast<int>(get_float(e, "resolution_rung", 0.0f));
+            el.confidence_score = get_float(e, "confidence_score", 1.0f);
+            el.verification_pass = get_bool(e, "verification_pass", true);
+            if (e.hasObjectMember("conflict_signals") && e["conflict_signals"].isArray()) {
+                const auto cs = e["conflict_signals"];
+                for (uint32_t j = 0; j < cs.size(); ++j)
+                    if (cs[static_cast<int>(j)].isString())
+                        el.conflict_signals.push_back(
+                            std::string(cs[static_cast<int>(j)].toString()));
+            }
             if (e.hasObjectMember("options") && e["options"].isArray()) {
                 const auto opts = e["options"];
                 for (uint32_t j = 0; j < opts.size(); ++j)
@@ -1821,6 +1832,21 @@ static void write_ir_node_json(std::ostringstream& out, const IRNode& node,
             if (el.value_left_align) { write_key(out, ef, "value_left_align"); out << "true"; }
             if (el.kind == InteractiveElementKind::xy_pad)
                 write_float_member(out, ef, "default_value_y", el.default_value_y);
+            // P7 import report — emitted only when the ladder set them (lean otherwise).
+            if (el.resolution_rung != 0)
+                write_int_member(out, ef, "resolution_rung", el.resolution_rung);
+            if (el.confidence_score != 1.0f)
+                write_float_member(out, ef, "confidence_score", el.confidence_score);
+            if (!el.verification_pass) { write_key(out, ef, "verification_pass"); out << "false"; }
+            if (!el.conflict_signals.empty()) {
+                write_key(out, ef, "conflict_signals");
+                out << '[';
+                for (size_t j = 0; j < el.conflict_signals.size(); ++j) {
+                    if (j) out << ',';
+                    out << '"' << json_escape(el.conflict_signals[j]) << '"';
+                }
+                out << ']';
+            }
             write_string_member(out, ef, "source_node_id", el.source_node_id);
             out << '}';
         }

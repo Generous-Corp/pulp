@@ -55,6 +55,13 @@ export interface InteractiveElement {
   text?: string;           // value_label: initial readout string
   value_left_align?: boolean;  // value_label: left-align the readout
   default_value_y?: number;    // xy_pad: initial normalized Y (0=top)
+  // P7 import report (resolution provenance) — carried so a low-confidence or
+  // conflicted control is visible at the host materialize boundary, not just in
+  // the TS importer. The resolution LOGIC that fills these is P7-F2.
+  resolution_rung?: number;        // which ladder rung resolved this (0=unset..5=inert)
+  confidence_score?: number;       // 0..1; 1.0 = unset/legacy
+  conflict_signals?: string[];     // cross-signal conflicts (empty = none)
+  verification_pass?: boolean;     // render verification passed (default true)
 }
 
 // Minimal structural node shape detectOverlayControls needs. ExtractedFigmaNode

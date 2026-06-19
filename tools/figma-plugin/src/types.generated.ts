@@ -68,6 +68,22 @@ export type InteractiveElement = {
    */
   default_value_y?: number;
   /**
+   * P7 import report: which ladder rung resolved this control. 0=unset; 1=explicit identity; 2=Tier-1 affordance primitive; 3=name/token; 4=registered custom factory; 5=inert render + diagnostic.
+   */
+  resolution_rung?: number;
+  /**
+   * P7 import report: confidence (0..1) the resolved kind is correct. 1.0 = unset/legacy.
+   */
+  confidence_score?: number;
+  /**
+   * P7 import report: cross-signal conflicts detected (e.g. name says knob but geometry is a wide track+thumb). Empty = none; non-empty flags the control for review.
+   */
+  conflict_signals?: string[];
+  /**
+   * P7 import report: whether render-level verification (overlay covers its node, type doesn't contradict the skin) passed. Defaults true.
+   */
+  verification_pass?: boolean;
+  /**
    * Overlay box X (dropdown/text_field/tab_group/stepper/toggle, and fader/xy_pad track), SVG coords.
    */
   x?: number;

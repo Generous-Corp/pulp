@@ -401,6 +401,27 @@ struct IRInteractiveElement {
     /// PulpEmbedParamInfo.name); unit/range remain importer follow-ups.
     std::string label;
 
+    // ── P7 import report (resolution provenance) ─────────────────────────
+    // Carried from the importer (where all three signals — geometry/affordance,
+    // name/token, component identity — exist) THROUGH to the host materialize
+    // boundary, so a low-confidence or conflicted control is SEEN ("this might be
+    // wrong") instead of discovered in the DAW. The resolution LOGIC that fills
+    // these lives in the importer (P7-F2); this is the F0 carrier chain.
+    /// Which ladder rung resolved this control's interaction. 0 = not run through
+    /// the P7 ladder (legacy/unset); 1 = explicit identity (component/Code-Connect);
+    /// 2 = Tier-1 affordance-inferred primitive; 3 = name/token (whole-word);
+    /// 4 = registered custom factory; 5 = inert render + diagnostic (the warn).
+    int resolution_rung = 0;
+    /// Confidence the resolved kind is correct, 0..1. 1.0 = unset/legacy path.
+    float confidence_score = 1.0f;
+    /// Cross-signal conflicts detected at import (e.g. "name=knob but geometry is
+    /// a wide track+thumb"). Empty = no conflict. A non-empty list means the
+    /// control still materializes with the best candidate but is flagged for review.
+    std::vector<std::string> conflict_signals;
+    /// Whether render-level verification (overlay covers its node region, type
+    /// doesn't visually contradict the skin) passed. true = passed/unchecked.
+    bool verification_pass = true;
+
     std::optional<std::string> source_node_id;  ///< Figma node id (binding key)
 };
 
