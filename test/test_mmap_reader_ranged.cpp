@@ -9,7 +9,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
-#include <cstdlib>
+#include <cstdint>
+#include <filesystem>
 #include <string>
 #include <utility>
 #include <vector>
@@ -25,9 +26,12 @@ float expected_sample(std::uint64_t frame, std::uint32_t ch) {
            static_cast<float>(ch) * 0.1f;
 }
 
-std::string temp_wav(const char* name) {
-    const char* tmp = std::getenv("TMPDIR");
-    return std::string(tmp ? tmp : "/tmp") + "/" + name;
+std::string temp_wav(const char* suffix) {
+    static int counter = 0;
+    auto name = "pulp_mmap_ranged_test_"
+              + std::to_string(reinterpret_cast<std::uintptr_t>(&counter))
+              + "_" + std::to_string(counter++) + suffix;
+    return (std::filesystem::temp_directory_path() / name).string();
 }
 
 bool approx(float a, float b) { return std::fabs(a - b) < 3e-4f; }  // 16-bit PCM tolerance
@@ -37,7 +41,7 @@ bool approx(float a, float b) { return std::fabs(a - b) < 3e-4f; }  // 16-bit PC
 TEST_CASE("MemoryMappedAudioReader ranged read of a WAV", "[audio][mmap][ranged]") {
     const std::uint32_t channels = 2;
     const std::uint64_t total = 16000;
-    const std::string path = temp_wav("pulp_mmap_ranged_test.wav");
+    const std::string path = temp_wav(".wav");
 
     AudioFileData data;
     data.sample_rate = 48000;
