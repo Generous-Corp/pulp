@@ -264,6 +264,93 @@ TEST_CASE("DesignIR round-trips dropdown / text_field / tab_group overlay elemen
     REQUIRE(t.selected_index == 2);
 }
 
+TEST_CASE("DesignIR round-trips fader / toggle / switch interactive elements",
+          "[view][import][ir-v1][faithful-svg][p1a]") {
+    // P1a: fader + toggle close the IR<->runtime<->schema gap. The runtime
+    // (DesignFrameElement::Kind) already backs both; this proves they survive
+    // serialize -> parse -> serialize without collapsing to `knob`.
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.render_mode = NodeRenderMode::faithful_svg;
+    ir.root.svg_asset_id = "asset-svg";
+
+    IRInteractiveElement fader;             // SVG-patch thumb translated over a track
+    fader.kind = InteractiveElementKind::fader;
+    fader.x = 40; fader.y = 20; fader.w = 12; fader.h = 120;
+    fader.cx = 46; fader.cy = 80;
+    fader.svg_patch_d = "M46 80L46 70";
+    fader.default_value = 0.25f;
+    fader.label = "Level";
+    ir.root.interactive_elements.push_back(fader);
+
+    IRInteractiveElement toggle;            // press-flash command button (dice/random)
+    toggle.kind = InteractiveElementKind::toggle;
+    toggle.x = 10; toggle.y = 10; toggle.w = 44; toggle.h = 22;
+    toggle.default_value = 1.0f;
+    toggle.flash = true;                    // press-flash, not a sticky flip
+    ir.root.interactive_elements.push_back(toggle);
+
+    IRInteractiveElement sw;                // a toggle WITH a dot = a switch
+    sw.kind = InteractiveElementKind::toggle;
+    sw.x = 80; sw.y = 10; sw.w = 44; sw.h = 22;
+    sw.cx = 90; sw.cy = 21;
+    sw.svg_patch_d = "M90 21a3 3 0 106 0";
+    sw.default_value = 0.0f;
+    ir.root.interactive_elements.push_back(sw);
+
+    const auto canonical = serialize_design_ir(ir);
+    const auto parsed = parse_design_ir_json(canonical);
+    REQUIRE(serialize_design_ir(parsed) == canonical);     // stable round-trip
+    REQUIRE(parsed.root.interactive_elements.size() == 3);
+
+    const auto& f = parsed.root.interactive_elements[0];
+    REQUIRE(f.kind == InteractiveElementKind::fader);      // NOT collapsed to knob
+    REQUIRE(f.svg_patch_d == "M46 80L46 70");
+    REQUIRE(f.h == 120.0f);
+    REQUIRE(f.default_value == 0.25f);
+    REQUIRE(f.label == "Level");
+
+    const auto& tg = parsed.root.interactive_elements[1];
+    REQUIRE(tg.kind == InteractiveElementKind::toggle);
+    REQUIRE(tg.w == 44.0f);
+    REQUIRE(tg.svg_patch_d.empty());                       // a plain toggle has no dot
+    REQUIRE(tg.flash == true);                             // press-flash survives round-trip
+
+    const auto& s2 = parsed.root.interactive_elements[2];
+    REQUIRE(s2.kind == InteractiveElementKind::toggle);
+    REQUIRE(s2.svg_patch_d == "M90 21a3 3 0 106 0");       // switch keeps its dot path
+    REQUIRE(s2.flash == false);                            // sticky switch, flash omitted
+}
+
+TEST_CASE("DesignIR diagnoses an unknown interactive kind instead of silent-knobbing",
+          "[view][import][ir-v1][faithful-svg][p1a]") {
+    // P1a acceptance: an unrecognized `kind` string must NOT be silently treated
+    // as a working knob. Forward-compat is preserved (it still parses + renders
+    // as a knob so the import never blanks), and the parser log_warns (the full
+    // ordered ladder + structured import report is the P7 work). Here we pin the
+    // forward-compat fallback and that a sibling known element still parses.
+    const std::string envelope = R"json({
+      "format_version": "2026.05-figma-plugin-v1",
+      "provenance": {"adapter": "figma-plugin", "version": "test"},
+      "root": {
+        "type": "frame", "render_mode": "faithful_svg", "svg_asset_id": "a",
+        "interactive_elements": [
+          {"kind": "wormhole", "x": 0, "y": 0, "w": 10, "h": 10, "source_node_id": "9:9"},
+          {"kind": "fader", "x": 0, "y": 20, "w": 8, "h": 80, "svg_patch_d": "M4 80L4 70"}
+        ]
+      }
+    })json";
+    const auto ir = parse_figma_plugin_json(envelope);
+    REQUIRE(ir.root.interactive_elements.size() == 2);
+    // Unknown kind falls back to knob (render never blanks) — but it is the
+    // diagnosed floor, not a confident classification.
+    CHECK(ir.root.interactive_elements[0].kind == InteractiveElementKind::knob);
+    CHECK(ir.root.interactive_elements[0].source_node_id == "9:9");
+    // The known sibling is unaffected.
+    CHECK(ir.root.interactive_elements[1].kind == InteractiveElementKind::fader);
+}
+
 TEST_CASE("DesignIR serialization preserves parsed envelope version by default",
           "[view][import][ir-v1]") {
     auto parsed = parse_design_ir_json(R"json({

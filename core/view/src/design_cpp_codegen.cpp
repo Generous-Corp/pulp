@@ -1194,6 +1194,8 @@ PromotedChildHitPolicy promoted_widget_child_hit_policy(const IRNode& child,
 const char* frame_element_kind_token(InteractiveElementKind kind) {
     switch (kind) {
         case InteractiveElementKind::knob:       return "knob";
+        case InteractiveElementKind::fader:      return "fader";
+        case InteractiveElementKind::toggle:     return "toggle";
         case InteractiveElementKind::dropdown:   return "dropdown";
         case InteractiveElementKind::text_field: return "text_field";
         case InteractiveElementKind::tab_group:  return "tab_group";
@@ -1294,6 +1296,8 @@ bool emit_faithful_frame(std::ostringstream& out,
         if (!e.bg_color.empty())
             emit_line(out, depth + 1, ctx.opts.indent_spaces,
                       "el.bg_color = " + cpp_string_literal(e.bg_color) + ";");
+        if (e.flash)
+            emit_line(out, depth + 1, ctx.opts.indent_spaces, "el.flash = true;");
         emit_line(out, depth + 1, ctx.opts.indent_spaces,
                   var + "_els.push_back(std::move(el));");
         emit_line(out, depth, ctx.opts.indent_spaces, "}");

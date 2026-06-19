@@ -11,18 +11,32 @@
 // decode) — the Figma plugin sandbox tsconfig targets an older lib without
 // String.matchAll / includes / spread-of-typed-array.
 
+// The interactive-overlay kinds the schema (figma-plugin-export-v1.json
+// interactive_element.kind) accepts and the C++ materializer
+// (to_frame_elements) maps to a DesignFrameElement::Kind. Kept a literal union
+// — not `string` — so the producer can never emit a kind the schema forbids.
+export type InteractiveElementKind =
+  | "knob"
+  | "fader"
+  | "toggle"
+  | "dropdown"
+  | "text_field"
+  | "tab_group"
+  | "stepper";
+
 export interface InteractiveElement {
-  kind: string;
-  // knob (SVG-patch) fields
+  kind: InteractiveElementKind;
+  // knob / fader (SVG-patch) fields
   cx?: number;
   cy?: number;
   hit_radius?: number;
   svg_patch_d?: string;
   default_value?: number;
+  flash?: boolean;  // toggle: press-flash command button vs sticky on/off flip
   source_node_id?: string;
-  // overlay-control (text_field / dropdown / stepper / tab_group) fields, in SVG
-  // coords — kept in lockstep with the REST lane's detect_overlay_controls and
-  // the C++ parser (design_ir_json.cpp).
+  // overlay-control (text_field / dropdown / stepper / tab_group / toggle, and
+  // the fader track) fields, in SVG coords — kept in lockstep with the REST
+  // lane's detect_overlay_controls and the C++ parser (design_ir_json.cpp).
   x?: number;
   y?: number;
   w?: number;

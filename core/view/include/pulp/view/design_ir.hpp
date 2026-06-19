@@ -299,12 +299,20 @@ enum class NodeRenderMode {
 // Two materialization mechanisms (see DesignFrameView):
 //   - `knob` is SVG-PATCH: its needle path is rotated in the SVG and re-rendered
 //     (pixel-perfect, uses cx/cy/hit_radius/svg_patch_d/default_value).
+//   - `fader` is SVG-PATCH like `knob` but TRANSLATES its thumb (svg_patch_d) by
+//     value along the track box [x,y,w,h] (orientation follows the track shape).
+//   - `toggle` is a click-to-flip control over the box [x,y,w,h]; with
+//     svg_patch_d set it is a SWITCH whose moving dot is that path.
 //   - `dropdown` / `text_field` / `tab_group` / `stepper` are NATIVE-OVERLAY: an
 //     opaque child widget (ComboBox / TextEditor / tab group / < > stepper) is
 //     positioned over the element's `rect` and replaces that baked SVG region
 //     with a live control.
+// Every value here maps 1:1 to a DesignFrameElement::Kind in to_frame_elements()
+// (design_import_native_common.cpp); the runtime already backs all of them.
 enum class InteractiveElementKind {
     knob,
+    fader,
+    toggle,
     dropdown,
     text_field,
     tab_group,
@@ -326,9 +334,14 @@ struct IRInteractiveElement {
     float cy = 0.0f;
     float hit_radius = 0.0f;         ///< click-target radius, SVG coords
     /// Knob: the `d` of its needle path in the SVG (the patch target a drag
-    /// rotates around (cx, cy)).
+    /// rotates around (cx, cy)). fader/switch reuse this as the translated thumb.
     std::string svg_patch_d;
     float default_value = 0.5f;      ///< 0..1
+
+    /// toggle only: press-flash command button (sample next/prev/random, dice) —
+    /// lights on press, clears on release, instead of the sticky on/off flip.
+    /// Maps 1:1 to DesignFrameElement::flash. Defaults false (sticky toggle).
+    bool flash = false;
 
     // ── overlay controls (dropdown / text_field / tab_group) ─────────────
     /// Element bounding box in SVG coords — where the native overlay widget is

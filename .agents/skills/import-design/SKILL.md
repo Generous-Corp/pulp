@@ -91,6 +91,24 @@ widgets (a faithful frame needs a JS-bridge primitive that doesn't exist yet),
 and `--validate` still renders the native-materialized output rather than the
 faithful SVG.
 
+**Interactive-overlay kinds the IR carries end-to-end.** The faithful_svg
+`interactive_elements` IR (`InteractiveElementKind` in `design_ir.hpp`) now
+supports `knob, fader, toggle, dropdown, text_field, tab_group, stepper` — each
+maps 1:1 in `to_frame_elements()` (`design_import_native_common.cpp`) to the
+`DesignFrameElement::Kind` the runtime already backs, and the schema
+(`figma-plugin-export-v1.json` `interactive_element.kind`) accepts exactly that
+set. The schema segments `required` per-kind: `knob` needs `cx/cy/hit_radius`;
+the overlay kinds (and `fader`/`toggle`) need the box `x/y/w/h`. **fader** is
+SVG-patch like knob but translates `svg_patch_d` along the track; **toggle** is a
+click-to-flip rect, and a toggle WITH `svg_patch_d` is a switch (the dot is that
+path). When you add a new kind, touch the whole chain in one commit — schema →
+`gen-types` (`types.generated.ts`) → producer (`faithful-vector.ts`) → IR enum →
+`design_ir_json.cpp` parse/serialize → `to_frame_elements()` → the
+`design_cpp_codegen.cpp` token switch — or it silently degrades. An **unknown**
+kind string no longer silent-knobs: `interactive_kind_from_id` reports it
+unrecognized and the parser emits a `log_warn` (the full ordered resolution
+ladder + import report is the P7 work).
+
 **Multi-frame / post-processed components need a DEDICATED re-embed lane —
 `make_catalog_component.py` is single-frame and applies no neutralization.** The
 Musical Typing Keyboard is TWO frames (typing 187:15 / piano 187:349) AND its

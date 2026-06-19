@@ -159,18 +159,42 @@
     },
     "interactive_element": {
       "type": "object",
-      "description": "One interactive overlay on a faithful_svg node (currently only knobs). Coordinates are in the SVG's own space.",
-      "required": ["kind", "cx", "cy", "hit_radius"],
+      "description": "One interactive overlay on a faithful_svg node. The SVG underneath always renders; the overlay only adds interaction on top. `kind` selects the control: knob/fader/xy_pad translate or rotate `svg_patch_d`; the overlay kinds (dropdown/text_field/tab_group/stepper) and toggle position a control over [x,y,w,h]. Coordinates are in the SVG's own space.",
+      "required": ["kind"],
       "properties": {
-        "kind": { "type": "string", "enum": ["knob"] },
-        "cx": { "type": "number", "description": "Pivot / hit center X, SVG coords." },
-        "cy": { "type": "number", "description": "Pivot / hit center Y, SVG coords." },
-        "hit_radius": { "type": "number", "description": "Click-target radius, SVG coords." },
-        "svg_patch_d": { "type": "string", "description": "Exact `d` of the needle path to rotate; empty if none was identified." },
+        "kind": {
+          "type": "string",
+          "enum": ["knob", "fader", "toggle", "dropdown", "text_field", "tab_group", "stepper"],
+          "description": "Control type. The C++ materializer (to_frame_elements in design_import_native_common.cpp) maps each to a DesignFrameElement::Kind the runtime already backs."
+        },
+        "cx": { "type": "number", "description": "knob/fader/switch: pivot or baked-center X, SVG coords." },
+        "cy": { "type": "number", "description": "knob/fader/switch: pivot or baked-center Y, SVG coords." },
+        "hit_radius": { "type": "number", "description": "knob: click-target radius, SVG coords." },
+        "svg_patch_d": { "type": "string", "description": "Generic patch target. knob rotates this `d` around (cx,cy); fader/xy_pad translate it by value; a toggle with this set is a switch whose dot is this path. Empty if none was identified." },
         "default_value": { "type": "number", "description": "Initial normalized value (0..1)." },
+        "flash": { "type": "boolean", "description": "toggle only: a press-flash command button (lights on press, clears on release) instead of the default sticky on/off flip. Maps to DesignFrameElement::flash." },
+        "x": { "type": "number", "description": "Overlay box X (dropdown/text_field/tab_group/stepper/toggle, and fader/xy_pad track), SVG coords." },
+        "y": { "type": "number", "description": "Overlay box Y, SVG coords." },
+        "w": { "type": "number", "description": "Overlay box width, SVG coords." },
+        "h": { "type": "number", "description": "Overlay box height, SVG coords." },
+        "options": { "type": "array", "items": { "type": "string" }, "description": "dropdown/stepper: the shown value(s); tab_group: the tab labels." },
+        "selected_index": { "type": "integer", "description": "dropdown/tab_group/stepper: initially selected option index." },
+        "placeholder": { "type": "string", "description": "text_field: placeholder shown until typed." },
+        "bg_color": { "type": "string", "description": "text_field: the design's own field background (\"#RRGGBB\") so the overlay edge is seamless." },
+        "label": { "type": "string", "description": "Human-readable control name from the design's caption (e.g. \"DEPTH\"); the name a host surfaces for the generated parameter." },
         "source_node_id": { "type": "string", "description": "Figma node id (binding key)." }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "knob" } }, "required": ["kind"] },
+          "then": { "required": ["cx", "cy", "hit_radius"] }
+        },
+        {
+          "if": { "properties": { "kind": { "enum": ["fader", "toggle", "dropdown", "text_field", "tab_group", "stepper"] } }, "required": ["kind"] },
+          "then": { "required": ["x", "y", "w", "h"] }
+        }
+      ]
     },
     "attributes": {
       "type": "object",

@@ -3,6 +3,82 @@
 // Regenerate via: npm run gen-types
 
 /**
+ * One interactive overlay on a faithful_svg node. The SVG underneath always renders; the overlay only adds interaction on top. `kind` selects the control: knob/fader/xy_pad translate or rotate `svg_patch_d`; the overlay kinds (dropdown/text_field/tab_group/stepper) and toggle position a control over [x,y,w,h]. Coordinates are in the SVG's own space.
+ */
+export type InteractiveElement = {
+  [k: string]: unknown;
+} & {
+  /**
+   * Control type. The C++ materializer (to_frame_elements in design_import_native_common.cpp) maps each to a DesignFrameElement::Kind the runtime already backs.
+   */
+  kind: "knob" | "fader" | "toggle" | "dropdown" | "text_field" | "tab_group" | "stepper";
+  /**
+   * knob/fader/switch: pivot or baked-center X, SVG coords.
+   */
+  cx?: number;
+  /**
+   * knob/fader/switch: pivot or baked-center Y, SVG coords.
+   */
+  cy?: number;
+  /**
+   * knob: click-target radius, SVG coords.
+   */
+  hit_radius?: number;
+  /**
+   * Generic patch target. knob rotates this `d` around (cx,cy); fader/xy_pad translate it by value; a toggle with this set is a switch whose dot is this path. Empty if none was identified.
+   */
+  svg_patch_d?: string;
+  /**
+   * Initial normalized value (0..1).
+   */
+  default_value?: number;
+  /**
+   * toggle only: a press-flash command button (lights on press, clears on release) instead of the default sticky on/off flip. Maps to DesignFrameElement::flash.
+   */
+  flash?: boolean;
+  /**
+   * Overlay box X (dropdown/text_field/tab_group/stepper/toggle, and fader/xy_pad track), SVG coords.
+   */
+  x?: number;
+  /**
+   * Overlay box Y, SVG coords.
+   */
+  y?: number;
+  /**
+   * Overlay box width, SVG coords.
+   */
+  w?: number;
+  /**
+   * Overlay box height, SVG coords.
+   */
+  h?: number;
+  /**
+   * dropdown/stepper: the shown value(s); tab_group: the tab labels.
+   */
+  options?: string[];
+  /**
+   * dropdown/tab_group/stepper: initially selected option index.
+   */
+  selected_index?: number;
+  /**
+   * text_field: placeholder shown until typed.
+   */
+  placeholder?: string;
+  /**
+   * text_field: the design's own field background ("#RRGGBB") so the overlay edge is seamless.
+   */
+  bg_color?: string;
+  /**
+   * Human-readable control name from the design's caption (e.g. "DEPTH"); the name a host surfaces for the generated parameter.
+   */
+  label?: string;
+  /**
+   * Figma node id (binding key).
+   */
+  source_node_id?: string;
+};
+
+/**
  * Envelope emitted by the 'Design for Pulp' Figma plugin. Consumed by `pulp import-design --from figma-plugin --file <path>`. See planning/2026-05-28-pulp-figma-plugin-strategy.md §7.2 for the parser mapping to Pulp's DesignIR.
  */
 export interface PulpFigmaPluginExport {
@@ -343,34 +419,4 @@ export interface FigmaMetadata {
     [k: string]: string;
   };
   [k: string]: unknown;
-}
-/**
- * One interactive overlay on a faithful_svg node (currently only knobs). Coordinates are in the SVG's own space.
- */
-export interface InteractiveElement {
-  kind: "knob";
-  /**
-   * Pivot / hit center X, SVG coords.
-   */
-  cx: number;
-  /**
-   * Pivot / hit center Y, SVG coords.
-   */
-  cy: number;
-  /**
-   * Click-target radius, SVG coords.
-   */
-  hit_radius: number;
-  /**
-   * Exact `d` of the needle path to rotate; empty if none was identified.
-   */
-  svg_patch_d?: string;
-  /**
-   * Initial normalized value (0..1).
-   */
-  default_value?: number;
-  /**
-   * Figma node id (binding key).
-   */
-  source_node_id?: string;
 }

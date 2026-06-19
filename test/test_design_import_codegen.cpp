@@ -232,6 +232,19 @@ TEST_CASE("generate_pulp_cpp emits all faithful overlay kinds and chunks a large
     step.options = {"x1", "x2"};
     ir.root.interactive_elements.push_back(step);
 
+    IRInteractiveElement fader;          // P1a: SVG-patch thumb over a track
+    fader.kind = InteractiveElementKind::fader;
+    fader.x = 8.0f; fader.y = 120.0f; fader.w = 12.0f; fader.h = 80.0f;
+    fader.svg_patch_d = "M14 200L14 190";
+    fader.default_value = 0.4f;
+    ir.root.interactive_elements.push_back(fader);
+
+    IRInteractiveElement flashToggle;    // P1a: press-flash command button
+    flashToggle.kind = InteractiveElementKind::toggle;
+    flashToggle.x = 8.0f; flashToggle.y = 220.0f; flashToggle.w = 40.0f; flashToggle.h = 20.0f;
+    flashToggle.flash = true;
+    ir.root.interactive_elements.push_back(flashToggle);
+
     // A large SVG (> ~8KB base64) so the embed spans multiple chunk literals.
     std::string svg = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"400\" height=\"300\">";
     for (int i = 0; i < 400; ++i)
@@ -250,8 +263,12 @@ TEST_CASE("generate_pulp_cpp emits all faithful overlay kinds and chunks a large
     REQUIRE(result.source.find("DesignFrameElement::Kind::text_field") != std::string::npos);
     REQUIRE(result.source.find("DesignFrameElement::Kind::tab_group") != std::string::npos);
     REQUIRE(result.source.find("DesignFrameElement::Kind::stepper") != std::string::npos);
+    REQUIRE(result.source.find("DesignFrameElement::Kind::fader") != std::string::npos);
+    REQUIRE(result.source.find("DesignFrameElement::Kind::toggle") != std::string::npos);
     REQUIRE(result.source.find("el.placeholder = \"Name\"") != std::string::npos);
     REQUIRE(result.source.find("el.bg_color = \"#1A1A1A\"") != std::string::npos);
+    REQUIRE(result.source.find("el.needle_d = \"M14 200L14 190\"") != std::string::npos);  // fader thumb path
+    REQUIRE(result.source.find("el.flash = true;") != std::string::npos);                  // press-flash toggle
     // The base64 embed spans multiple chunk literals (the chunk loop ran > once):
     // each interior chunk ends with a `",` line, so at least one is present.
     REQUIRE(result.source.find("\",") != std::string::npos);

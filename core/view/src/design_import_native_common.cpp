@@ -990,6 +990,10 @@ std::vector<DesignFrameElement> to_frame_elements(
     for (const auto& e : elements) {
         DesignFrameElement el;
         switch (e.kind) {
+            case InteractiveElementKind::fader:
+                el.kind = DesignFrameElement::Kind::fader; break;
+            case InteractiveElementKind::toggle:
+                el.kind = DesignFrameElement::Kind::toggle; break;
             case InteractiveElementKind::dropdown:
                 el.kind = DesignFrameElement::Kind::dropdown; break;
             case InteractiveElementKind::text_field:
@@ -1007,6 +1011,7 @@ std::vector<DesignFrameElement> to_frame_elements(
         el.hit_radius = e.hit_radius;
         el.needle_d = e.svg_patch_d;
         el.value = e.default_value;
+        el.flash = e.flash;  // toggle: press-flash command vs sticky flip
         // overlay-control data (dropdown / text_field / tab_group)
         el.x = e.x; el.y = e.y; el.w = e.w; el.h = e.h;
         el.placeholder = e.placeholder;

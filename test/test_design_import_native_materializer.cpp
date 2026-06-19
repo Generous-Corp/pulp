@@ -864,6 +864,78 @@ TEST_CASE("faithful_svg flows producer envelope -> parse -> materialize -> Desig
                                       "native-materialize-faithful-svg-unresolved"));
 }
 
+TEST_CASE("materializer maps every interactive kind to its DesignFrameElement::Kind",
+          "[view][import][native-materializer][faithful-svg][p1a]") {
+    // P1a acceptance: fader + toggle + the already-emitted overlays each
+    // materialize (JSON -> IR -> to_frame_elements -> DesignFrameView) to the
+    // matching runtime Kind — no silent collapse to knob. The SVG underneath
+    // always renders; this asserts the INTERACTION wired on top is correct.
+    const std::string svg =
+        R"(<svg width="240" height="200" xmlns="http://www.w3.org/2000/svg">)"
+        R"(<rect x="10" y="10" width="220" height="180" fill="#1c1d1d"/></svg>)";
+
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.render_mode = NodeRenderMode::faithful_svg;
+    ir.root.svg_asset_id = "svg1";
+
+    auto add = [&](InteractiveElementKind k, float x, float y, float value) {
+        IRInteractiveElement el;
+        el.kind = k;
+        el.x = x; el.y = y; el.w = 40; el.h = 20;
+        el.cx = x + 6; el.cy = y + 6; el.hit_radius = 10;
+        el.svg_patch_d = "M0 0L0 1";
+        el.default_value = value;
+        if (k == InteractiveElementKind::dropdown ||
+            k == InteractiveElementKind::tab_group ||
+            k == InteractiveElementKind::stepper) {
+            el.options = {"A", "B"};
+        }
+        if (k == InteractiveElementKind::text_field) el.placeholder = "Search";
+        if (k == InteractiveElementKind::toggle) el.flash = true;
+        ir.root.interactive_elements.push_back(el);
+    };
+    using K = InteractiveElementKind;
+    // Distinct (non-default) values so a dropped field-copy in to_frame_elements
+    // would FAIL the value assertions below — not just the Kind mapping.
+    add(K::knob, 20, 20, 0.1f);
+    add(K::fader, 20, 50, 0.2f);
+    add(K::toggle, 20, 80, 0.3f);
+    add(K::dropdown, 20, 110, 0.4f);
+    add(K::text_field, 90, 20, 0.6f);
+    add(K::tab_group, 90, 50, 0.7f);
+    add(K::stepper, 90, 80, 0.8f);
+
+    IRAssetRef asset;
+    asset.asset_id = "svg1";
+    asset.original_uri = "data:image/svg+xml;base64," + pulp::runtime::base64_encode(svg);
+    asset.mime = "image/svg+xml";
+    ir.asset_manifest.assets.push_back(asset);
+
+    std::vector<ImportDiagnostic> diagnostics;
+    auto root = build_native_view_tree(ir, ir.asset_manifest,
+                                       {.diagnostics_out = &diagnostics});
+    auto* frame = dynamic_cast<DesignFrameView*>(root.get());
+    REQUIRE(frame != nullptr);
+    REQUIRE(frame->element_count() == 7);
+    using FK = DesignFrameElement::Kind;
+    CHECK(frame->element_kind(0) == FK::knob);
+    CHECK(frame->element_kind(1) == FK::fader);
+    CHECK(frame->element_kind(2) == FK::toggle);
+    CHECK(frame->element_kind(3) == FK::dropdown);
+    CHECK(frame->element_kind(4) == FK::text_field);
+    CHECK(frame->element_kind(5) == FK::tab_group);
+    CHECK(frame->element_kind(6) == FK::stepper);
+    // Carried render fields survive the IR -> DesignFrameElement copy (so the
+    // overlay actually renders, not just types correctly). A regression that
+    // dropped `el.value = e.default_value` would redden these.
+    CHECK(frame->element_value(0) == Catch::Approx(0.1f));  // knob
+    CHECK(frame->element_value(1) == Catch::Approx(0.2f));  // fader thumb position
+    CHECK(frame->element_value(2) == Catch::Approx(0.3f));  // toggle on/off state
+    REQUIRE_FALSE(diagnostics_contain(diagnostics,
+                                      "native-materialize-faithful-svg-unresolved"));
+}
+
 TEST_CASE("baked native materializer forwards a sampled shape_fill_gradient",
           "[view][import][native-materializer][figma-plugin][fill]") {
     // The importer samples a shape illustration's OWN gradient and stamps

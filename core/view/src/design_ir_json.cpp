@@ -13,6 +13,8 @@
 
 #include <pulp/view/design_import.hpp>
 
+#include <pulp/runtime/log.hpp>
+
 #include "design_binding_metadata.hpp"
 #include "design_import_internal.hpp"
 
@@ -58,16 +60,28 @@ static NodeRenderMode render_mode_from_id(const std::string& s) {
 static const char* render_mode_id(NodeRenderMode m) {
     return m == NodeRenderMode::faithful_svg ? "faithful_svg" : "normal";
 }
-// Unknown ids fall back to `knob` (the original kind) for forward-compat.
-static InteractiveElementKind interactive_kind_from_id(const std::string& s) {
-    if (s == "dropdown") return InteractiveElementKind::dropdown;
+// Maps a wire `kind` string to an InteractiveElementKind. Unknown ids fall back
+// to `knob` for forward-compat, but set `*recognized = false` so the caller can
+// diagnose a genuinely-unknown kind instead of silently shipping a wrong knob.
+// (P7 grows this into the full resolution ladder; here we just stop being
+// silent.) `recognized` may be null.
+static InteractiveElementKind interactive_kind_from_id(const std::string& s,
+                                                       bool* recognized = nullptr) {
+    if (recognized) *recognized = true;
+    if (s == "knob")       return InteractiveElementKind::knob;
+    if (s == "fader")      return InteractiveElementKind::fader;
+    if (s == "toggle")     return InteractiveElementKind::toggle;
+    if (s == "dropdown")   return InteractiveElementKind::dropdown;
     if (s == "text_field") return InteractiveElementKind::text_field;
-    if (s == "tab_group") return InteractiveElementKind::tab_group;
-    if (s == "stepper") return InteractiveElementKind::stepper;
+    if (s == "tab_group")  return InteractiveElementKind::tab_group;
+    if (s == "stepper")    return InteractiveElementKind::stepper;
+    if (recognized) *recognized = false;
     return InteractiveElementKind::knob;
 }
 static const char* interactive_kind_id(InteractiveElementKind k) {
     switch (k) {
+        case InteractiveElementKind::fader:      return "fader";
+        case InteractiveElementKind::toggle:     return "toggle";
         case InteractiveElementKind::dropdown:   return "dropdown";
         case InteractiveElementKind::text_field: return "text_field";
         case InteractiveElementKind::tab_group:  return "tab_group";
@@ -810,12 +824,28 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
             const auto e = arr[static_cast<int>(i)];
             if (!e.isObject()) continue;
             IRInteractiveElement el;
-            el.kind = interactive_kind_from_id(get_string(e, "kind", "knob"));
+            const std::string kind_str = get_string(e, "kind", "knob");
+            bool kind_recognized = true;
+            el.kind = interactive_kind_from_id(kind_str, &kind_recognized);
+            if (!kind_recognized) {
+                // Don't silently materialize an unknown control as a working
+                // knob — surface it so the import isn't quietly wrong. The full
+                // ordered ladder + import report lands in P7; this is the floor.
+                pulp::runtime::log_warn(
+                    "design-import: unknown interactive_element kind '{}' "
+                    "(node {}); falling back to knob render",
+                    kind_str,
+                    e.hasObjectMember("source_node_id") &&
+                            e["source_node_id"].isString()
+                        ? std::string(e["source_node_id"].toString())
+                        : std::string("?"));
+            }
             el.cx = get_float(e, "cx");
             el.cy = get_float(e, "cy");
             el.hit_radius = get_float(e, "hit_radius");
             el.svg_patch_d = get_string(e, "svg_patch_d");
             el.default_value = get_float(e, "default_value", 0.5f);
+            el.flash = get_bool(e, "flash");  // toggle: press-flash vs sticky
             // Overlay-control fields (dropdown / text_field / tab_group).
             el.x = get_float(e, "x");
             el.y = get_float(e, "y");
@@ -1748,6 +1778,7 @@ static void write_ir_node_json(std::ostringstream& out, const IRNode& node,
             write_float_member(out, ef, "hit_radius", el.hit_radius);
             if (!el.svg_patch_d.empty()) write_string_member(out, ef, "svg_patch_d", el.svg_patch_d);
             write_float_member(out, ef, "default_value", el.default_value);
+            if (el.flash) { write_key(out, ef, "flash"); out << "true"; }
             // Overlay-control fields — emitted only when set (knobs stay lean).
             if (el.x != 0.0f) write_float_member(out, ef, "x", el.x);
             if (el.y != 0.0f) write_float_member(out, ef, "y", el.y);
