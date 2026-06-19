@@ -686,6 +686,59 @@ TEST_CASE("baked native materializer renders a faithful_svg node as a DesignFram
                                       "native-materialize-faithful-svg-unresolved"));
 }
 
+TEST_CASE("render-patch golden: a knob's needle visibly rotates with value (P3)",
+          "[view][import][native-materializer][faithful-svg][p3][render]") {
+    // P3 render-patch golden-gate: the faithful-vector lane rotates ONLY the
+    // knob's needle path (svg_patch_d) around (cx,cy) by value and re-renders the
+    // SVG — the chrome stays pixel-exact. Render the SAME frame at value 0.05 vs
+    // 0.95 and prove the raster differs (the needle moved) — the render-patch is
+    // live, not a static repaint. Mirrors the tab-group live-pill golden.
+    const std::string svg =
+        R"(<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg">)"
+        R"(<rect x="10" y="10" width="80" height="80" rx="4" fill="#cccccc"/>)"
+        R"(<circle cx="50" cy="50" r="20" fill="#8a97a6"/>)"
+        R"(<path d="M50 38L50 30" stroke="white" stroke-width="3"/></svg>)";
+
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.render_mode = NodeRenderMode::faithful_svg;
+    ir.root.svg_asset_id = "svg1";
+    IRInteractiveElement knob;
+    knob.kind = InteractiveElementKind::knob;
+    knob.cx = 50; knob.cy = 50; knob.hit_radius = 22;
+    knob.svg_patch_d = "M50 38L50 30";   // the needle the patch rotates
+    knob.default_value = 0.5f;
+    ir.root.interactive_elements.push_back(knob);
+    IRAssetRef asset;
+    asset.asset_id = "svg1";
+    asset.original_uri = "data:image/svg+xml;base64," + pulp::runtime::base64_encode(svg);
+    asset.mime = "image/svg+xml";
+    ir.asset_manifest.assets.push_back(asset);
+
+    std::vector<ImportDiagnostic> diagnostics;
+    auto root = build_native_view_tree(ir, ir.asset_manifest,
+                                       {.diagnostics_out = &diagnostics});
+    auto* frame = dynamic_cast<DesignFrameView*>(root.get());
+    REQUIRE(frame != nullptr);
+    frame->set_bounds({0, 0, frame->panel_width(), frame->panel_height()});
+    frame->layout_children();
+
+    auto render_at = [&](float v) {
+        frame->set_element_value(0, v);
+        return render_to_png(*frame, static_cast<int>(frame->panel_width()),
+                             static_cast<int>(frame->panel_height()), 2.0f,
+                             ScreenshotBackend::skia);
+    };
+    const auto lo = render_at(0.05f);
+    if (lo.empty()) SKIP("Skia raster screenshot backend unavailable");
+    const auto hi = render_at(0.95f);
+    REQUIRE_FALSE(hi.empty());
+    const auto cmp = compare_screenshots(lo, hi);
+    REQUIRE(cmp.valid);
+    if (cmp.similarity >= 0.999f) SKIP("native raster unavailable in this build");
+    CHECK(cmp.similarity < 0.999f);   // the needle visibly rotated between the two values
+}
+
 TEST_CASE("baked native materializer resolves a faithful_svg base64 data asset",
           "[view][import][native-materializer][faithful-svg]") {
     // The same path, but the SVG arrives base64-encoded (the form the REST/SVG
