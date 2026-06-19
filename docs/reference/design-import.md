@@ -48,7 +48,7 @@ pulp import-design --from <source> [options]
 | `--preview` | Minimal widget styling for design comparison | — |
 | `--debug` | Output JSON report with metrics | — |
 | `--debug-output <path>` | Save debug JSON to file | stdout |
-| `--detect-only` | Detect (source, format-version, parser-version) without parsing — see [imports/](imports/index.md) (pulp #1031) | — |
+| `--detect-only` | Detect source, format-version, and parser-version without parsing; see [imports/](imports/index.md) for detection details. | — |
 | `--directory <path>` | Path to directory export (alternative to `--file`) | — |
 | `--compat <path>` | Override `compat.json` discovery | walk up from input |
 | `--report-new-format` | Emit a fingerprint-diff JSON for a new format-version. Implies `--detect-only` | — |
