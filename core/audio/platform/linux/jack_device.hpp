@@ -50,10 +50,8 @@ private:
 // Check if a JACK server is available
 bool jack_is_available();
 
-/// AudioSystem wrapper that routes create_device() to JackDevice.
-/// Workstream 02 slice 2.2 — previously no JackSystem existed, so the
-/// Linux factory unconditionally returned AlsaSystem even when a JACK
-/// server was running.
+/// AudioSystem wrapper that routes create_device() to JackDevice when
+/// the Linux factory selects a JACK-backed audio system.
 class JackSystem : public AudioSystem {
 public:
     std::vector<DeviceInfo> enumerate_devices() override;

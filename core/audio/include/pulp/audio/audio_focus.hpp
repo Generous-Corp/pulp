@@ -1,6 +1,6 @@
 #pragma once
 
-// Cross-platform audio-focus registry (#334).
+// Cross-platform audio-focus registry.
 //
 // Android's AudioManager.OnAudioFocusChangeListener fires lost / duck /
 // gained / lost-transient events when another app grabs the speaker
