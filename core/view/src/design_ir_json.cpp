@@ -2211,6 +2211,43 @@ ImportReport collect_import_report(const IRNode& root, float low_confidence_thre
     return report;
 }
 
+// P7 render-placement verification (structural half of the render-golden gate).
+static int verify_placement_visit(IRNode& node, float fw, float fh) {
+    int flagged = 0;
+    for (auto& e : node.interactive_elements) {
+        // A knob/fader/xy_pad carries its hit circle (hit_radius); the overlays
+        // carry a box (w,h). A control with neither can't render anywhere.
+        const bool has_box = e.w > 0.0f && e.h > 0.0f;
+        const bool has_radius = e.hit_radius > 0.0f;
+        std::string issue;
+        if (!has_box && !has_radius) {
+            issue = "control has no renderable extent (zero hit-radius and zero-area box)";
+        } else if (fw > 0.0f && fh > 0.0f) {
+            // Does the control's region fall ENTIRELY outside the frame [0,0,fw,fh]?
+            float x0, y0, x1, y1;
+            if (has_box) {
+                x0 = e.x; y0 = e.y; x1 = e.x + e.w; y1 = e.y + e.h;
+            } else {
+                x0 = e.cx - e.hit_radius; y0 = e.cy - e.hit_radius;
+                x1 = e.cx + e.hit_radius; y1 = e.cy + e.hit_radius;
+            }
+            if (x1 <= 0.0f || y1 <= 0.0f || x0 >= fw || y0 >= fh)
+                issue = "control falls entirely outside the frame render region";
+        }
+        if (!issue.empty()) {
+            e.verification_pass = false;
+            e.conflict_signals.push_back(issue);
+            ++flagged;
+        }
+    }
+    for (auto& c : node.children) flagged += verify_placement_visit(c, fw, fh);
+    return flagged;
+}
+
+int apply_placement_verification(IRNode& root, float frame_w, float frame_h) {
+    return verify_placement_visit(root, frame_w, frame_h);
+}
+
 std::string import_report_to_json(const ImportReport& r) {
     std::ostringstream out;
     out << "{\"summary\":{\"total\":" << r.controls.size()

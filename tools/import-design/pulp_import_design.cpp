@@ -2420,6 +2420,12 @@ int main(int argc, char* argv[]) {
     // import time. Printed to stderr (stdout may carry dry-run JSON);
     // --import-report writes the machine-readable JSON a CI gate can threshold;
     // --fail-on-unresolved makes a conflicted/inert control a nonzero exit.
+    // P7 render-placement verification (structural): flag overlays that can't
+    // render (degenerate extent) or fall entirely outside the frame, BEFORE the
+    // report collects verification_pass — so the report and the gate see it.
+    apply_placement_verification(ir.root,
+                                 ir.root.style.width.value_or(0.0f),
+                                 ir.root.style.height.value_or(0.0f));
     const auto import_report = collect_import_report(ir.root);
     if (!import_report.controls.empty())
         std::cerr << import_report_to_text(import_report);

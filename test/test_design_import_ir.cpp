@@ -553,6 +553,58 @@ TEST_CASE("collect_import_report surfaces per-control resolution provenance (P7)
     REQUIRE(clean_report.conflicted == 0);
 }
 
+TEST_CASE("apply_placement_verification flags degenerate + out-of-frame overlays (P7)",
+          "[view][import][ir-v1][faithful-svg][p7][report]") {
+    // P7 render-placement verification (structural): an overlay with no extent,
+    // or one that falls entirely outside the frame, can't render where it claims
+    // — flag it (verification_pass=false + a conflict) so the report/gate sees it.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.render_mode = NodeRenderMode::faithful_svg;
+    ir.root.style.width = 200.0f;     // frame region [0,0,200,100]
+    ir.root.style.height = 100.0f;
+
+    IRInteractiveElement good;        // a normal in-frame dropdown
+    good.kind = InteractiveElementKind::dropdown;
+    good.x = 10; good.y = 10; good.w = 80; good.h = 24; good.source_node_id = "1:1";
+    ir.root.interactive_elements.push_back(good);
+
+    IRInteractiveElement degenerate;  // zero-area box, no hit radius → can't render
+    degenerate.kind = InteractiveElementKind::text_field;
+    degenerate.x = 5; degenerate.y = 5; degenerate.w = 0; degenerate.h = 0;
+    degenerate.source_node_id = "1:2";
+    ir.root.interactive_elements.push_back(degenerate);
+
+    IRInteractiveElement off;         // entirely off to the right of the frame
+    off.kind = InteractiveElementKind::knob;
+    off.cx = 400; off.cy = 50; off.hit_radius = 10; off.source_node_id = "1:3";
+    ir.root.interactive_elements.push_back(off);
+
+    const int flagged = apply_placement_verification(ir.root, 200.0f, 100.0f);
+    REQUIRE(flagged == 2);
+    CHECK(ir.root.interactive_elements[0].verification_pass == true);   // good
+    CHECK(ir.root.interactive_elements[1].verification_pass == false);  // degenerate
+    CHECK(ir.root.interactive_elements[2].verification_pass == false);  // off-frame
+    CHECK(ir.root.interactive_elements[1].conflict_signals.size() == 1);
+    CHECK(ir.root.interactive_elements[2].conflict_signals[0].find("outside the frame")
+          != std::string::npos);
+
+    // The report then surfaces them and the gate would fail.
+    const auto report = collect_import_report(ir.root);
+    REQUIRE(report.controls.size() == 3);
+    REQUIRE(report.conflicted == 2);
+    REQUIRE(report.ok() == false);
+
+    // Unknown frame size (0) skips the bounds check but still catches degenerates.
+    DesignIR ir2;
+    ir2.root.type = "frame";
+    IRInteractiveElement off2;        // off-frame, but frame size unknown → not flagged
+    off2.kind = InteractiveElementKind::knob;
+    off2.cx = 400; off2.cy = 50; off2.hit_radius = 10;
+    ir2.root.interactive_elements.push_back(off2);
+    REQUIRE(apply_placement_verification(ir2.root, 0.0f, 0.0f) == 0);  // bounds unknown
+}
+
 TEST_CASE("DesignIR serialization preserves parsed envelope version by default",
           "[view][import][ir-v1]") {
     auto parsed = parse_design_ir_json(R"json({

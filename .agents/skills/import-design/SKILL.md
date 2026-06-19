@@ -144,6 +144,13 @@ human summary (`import_report_to_text`) to STDERR for EVERY output mode (codegen
 `--import-report <path>` is given, and `--fail-on-unresolved` makes a conflicted
 or inert control a nonzero (2) exit — the CI gate. So a low-confidence or
 conflicted control is SEEN at import time, never discovered later in the DAW.
+`apply_placement_verification(ir.root, frame_w, frame_h)` runs first (the
+structural half of the render-golden gate): it flags an overlay with no
+renderable extent (zero hit-radius AND zero-area box) or one entirely outside the
+frame region — setting `verification_pass=false` + a conflict so the report/gate
+catch it. Frame size 0 = "unknown" (skips the bounds half, keeps the
+degenerate-extent check). The full PIXEL-level golden diff is the render-path
+follow-up.
 
 **Multi-frame / post-processed components need a DEDICATED re-embed lane —
 `make_catalog_component.py` is single-frame and applies no neutralization.** The
