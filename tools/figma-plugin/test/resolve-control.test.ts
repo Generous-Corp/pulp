@@ -50,7 +50,8 @@ test("THE STUMBLE: a node named 'knob' with slider geometry is CAUGHT as a confl
 
 test("a dropdown box (stretched) is NOT a false conflict — overlays are unconstrained", () => {
   // The trap the taxonomy was redesigned to avoid: a dropdown's wide box must not
-  // be flagged just because it is stretched. expectedShape(dropdown)="any".
+  // be flagged just because it is stretched. expectedShape(dropdown)="stretched",
+  // so a 120×28 box is compatible (not a conflict).
   const r = assessResolution("dropdown", "Mode Dropdown", { w: 120, h: 28 });
   assert.deepEqual(r.conflict_signals, []);
   assert.equal(r.confidence_score, 1.0);

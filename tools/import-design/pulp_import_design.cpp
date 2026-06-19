@@ -2490,7 +2490,7 @@ int main(int argc, char* argv[]) {
             std::cout << cpp.source;
             std::cout << "\n=== Generated Pulp C++ binding manifest (" << paths.binding_manifest.string() << ") ===\n\n";
             std::cout << cpp.binding_manifest;
-            return 0;
+            return report_exit;   // honor --fail-on-unresolved on the cpp dry-run path
         }
 
         if (!write_files_atomically({
@@ -2510,7 +2510,7 @@ int main(int argc, char* argv[]) {
                   << counts.containers << " containers, " << counts.widgets << " widgets, "
                   << counts.text << " labels, " << ir.asset_manifest.assets.size() << " asset"
                   << (ir.asset_manifest.assets.size() == 1 ? "" : "s") << ")\n";
-        return 0;
+        return report_exit;   // honor --fail-on-unresolved on the cpp write path
     }
 
     if (artifact_emit == ArtifactEmit::swiftui) {

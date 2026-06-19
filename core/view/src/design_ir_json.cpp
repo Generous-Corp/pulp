@@ -2240,6 +2240,11 @@ static int verify_placement_visit(IRNode& node, float fw, float fh) {
             ++flagged;
         }
     }
+    // Overlays are checked against the ROOT faithful frame's region. The importer
+    // emits interactive_elements only on the single top-level faithful_svg node
+    // (children carry none), so the root frame is the correct coordinate space.
+    // If nested faithful_svg nodes ever carry their own overlays, pass each such
+    // node's own render dimensions here instead of inheriting the root's.
     for (auto& c : node.children) flagged += verify_placement_visit(c, fw, fh);
     return flagged;
 }
