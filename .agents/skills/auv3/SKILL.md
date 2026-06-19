@@ -86,7 +86,7 @@ The bridge struct `pulp::format::au::AUBridge` owns:
 
 ### Entry point: `PulpAUFactory` + `AUAudioUnitFactory`
 
-**macOS (Phase 3.5):** the .appex stub uses Apple's `_NSExtensionMain`
+**macOS:** the .appex stub uses Apple's `_NSExtensionMain`
 entry point. `NSExtensionPrincipalClass` in Info.plist points at
 `PulpAUMacViewController`, which adopts `AUAudioUnitFactory` directly
 — its `createAudioUnitWithComponentDescription:error:` allocs a
@@ -119,9 +119,7 @@ Inside `initWithComponentDescription:…`:
   `AUAudioUnitBus` — bus index 1. Hosts connect their sidechain source
   to bus index 1 and the render block pulls it from that index.
 
-This mirrors the CLAP / VST3 "bus 0 = main, bus 1 = sidechain" rule;
-see commit `8a960d51 auv3: sidechain input bus + render-block routing
-(workstream 01 slice 1.4b)`.
+This mirrors the CLAP / VST3 "bus 0 = main, bus 1 = sidechain" rule.
 
 ### Parameters: `AUParameterTree`
 
@@ -140,7 +138,6 @@ see commit `8a960d51 auv3: sidechain input bus + render-block routing
   atomic and pushes an SPSC event for `ListenerThread::Main` listeners;
   the editor drains via `store.pump_listeners()`. The generic path
   would heap-allocate the dispatch lambda on a possibly-audio thread.
-  See Slice 2 in `planning/2026-05-18-rt-safety-and-debug-dx.md`.
 - `implementorValueProvider` reads current values back from the store.
 - `implementorStringFromValueCallback` delegates to
   `ParamInfo::to_string` when provided, otherwise a `%.2f` fallback.
@@ -252,8 +249,8 @@ the AU-host-observed KVO property that ARA-aware hosts (Logic Pro 11+)
 read during scan. It returns
 `pulp::format::ara_companion_factory_for(nullptr)`, which is non-null
 in `PULP_HAS_ARA` builds where a Processor overrode
-`create_ara_document_controller()`. See commit `cb5812c1 ara(au):
-audioUnitARAFactory KVO property on PulpAudioUnit (#252)`.
+`create_ara_document_controller()`. Keep this property KVO-visible; it
+is the AU scan hook ARA-aware hosts inspect.
 
 ### iOS AUv3 extension
 
@@ -265,7 +262,7 @@ extension's loaded `AUAudioUnit` once KVO fires on
 `NSExtensionMain`-style Info.plist — see `docs/guides/ios-auv3-guidance.md`
 and the `ios` skill for the extension target wiring.
 
-### iOS AUv3 spawn-chain gotchas (learned the hard way 2026-05-27)
+### iOS AUv3 spawn-chain gotchas
 
 iOS AUv3 was historically "scaffolded but never actually loaded" — the
 CMake helper and HostApp template both had multiple bugs that silently
@@ -406,11 +403,13 @@ CMake Error at tools/cmake/PulpUtils.cmake:<line> (_pulp_add_auv3):
 ```
 
 only on the iOS toolchain configure, because the other leg
-(`pulp_add_plugin`) never exercises the wrapper. Caught on CI's
-Coverage-macOS leg in PR #638 when `ACCEPTS_MIDI` was added to
-`_pulp_add_auv3` but not threaded through `pulp_add_ios_auv3`.
+(`pulp_add_plugin`) never exercises the wrapper. Adding
+`ACCEPTS_MIDI` to `_pulp_add_auv3` without threading it through
+`pulp_add_ios_auv3` is the representative failure mode; the
+Coverage-macOS lane catches this class of mismatch because it
+configures the iOS wrapper path.
 
-## macOS AU v3 packaging — framework + stub .appex + container .app (Phase 3.5)
+## macOS AU v3 packaging — framework + stub .appex + container .app
 
 **Apple's architecture, not a Pulp invention. Get this wrong and you
 will spend an entire session debugging silent Pluginkit rejections.**
@@ -425,7 +424,7 @@ Apple's "Creating custom audio effects" sample doc states verbatim:
 
 iPlug2 ships the same 3-tier architecture. Pulp's macOS AU v3 lane
 (`tools/cmake/PulpAuv3.cmake`'s `_pulp_add_auv3_macos_*` helpers,
-Phase 3.5) follows this pattern exactly:
+on the macOS framework path) follows this pattern exactly:
 
 ```
 ChainerSynth.app/                                 ← container .app
@@ -647,7 +646,7 @@ rm -f ~/Library/Caches/AudioUnitCache/com.apple.audiounits.cache \
 which serves a cached in-memory view of the plist. Edit the XML
 directly while cfprefsd is killed.
 
-### Phase 3 / 3.5 view configuration plumbing
+### AU v3 view configuration plumbing
 
 `PulpAUMacViewController` + `PulpAUViewController` implement
 `AUAudioUnitFactory`, open `ViewBridge` against the AU's real
@@ -678,8 +677,8 @@ view to the design. Keep this limited to initial attach; manual host
 resize must continue through `viewDidLayout` without being forced back.
 
 **Do NOT implement `supportedViewConfigurations:` / `selectViewConfiguration:`
-for fixed-design editors.** (Verified in Logic 2026-05-29; replaced the earlier
-"accept a large-enough config" policy, which *caused* the bug.) Logic Pro sizes
+for fixed-design editors.** Verified in Logic; this replaced the
+earlier "accept a large-enough config" policy, which caused the bug. Logic Pro sizes
 AU v3 editors through the view-configuration path and offers ONLY oversized ~4:3
 configs (measured: 1024x768 / 1366x1024). The moment the AU returns *any*
 supported config, **Logic locks the editor window to that config's aspect ratio
@@ -710,7 +709,7 @@ restored (smaller) window — top + right cut off — until a manual resize or a
 window close+reopen snapped it tight. Reopen worked (the container already
 existed at the right size); only the very first open raced.
 
-Root cause (verified in Logic 2026-05-29): Logic hosts AU v3 **out-of-process**
+Root cause (verified in Logic): Logic hosts AU v3 **out-of-process**
 and does **not** push its restored window size to the extension's view on
 initial open — not via `viewDidLayout`, not via `setFrameSize:`, not via a
 `self.view.bounds` change during a ~0.5s poll. It embeds our view, leaves it at
@@ -732,7 +731,7 @@ born at the design size for a smaller first window. Mechanics in
    width|height-sizable + `frame = superview.bounds`) so AppKit sizes it to the
    host container on embed and every host resize.
    **⚠️ Do NOT use Auto Layout (`translatesAutoresizingMaskIntoConstraints=NO` +
-   edge constraints) to pin it — that CRASHED Ableton Live** (2026-05-29):
+   edge constraints) to pin it — that CRASHED Ableton Live**:
    when the host places the AU window, our `setFrameSize:` → `[super]` →
    `setNeedsLayout` engages the constraint engine (`-[NSWindow
    _postWindowNeedsLayout]`), which throws in that context and the uncaught
@@ -775,13 +774,14 @@ TOP (slack becomes a single bottom strip), reading like CLAP/VST3. It is **only*
 the AU path + only visible when there is vertical slack (no-op when the pane is
 design-aspect), and the SAME transform feeds paint AND input mapping
 (`window_to_root_point`) so clicks stay aligned. True pixel-fill parity is not
-achievable (AU can't negotiate the pane aspect). Verified in REAPER 2026-05-30.
+achievable (AU can't negotiate the pane aspect). Verified in REAPER.
 
 ### The `PULP_AUV3_PLUGIN()` macro replaces hardcoded force_link
 
-Pre-Phase 3.5, `au_entry.mm` called `pulp_gain_force_link()` to force
+Before the per-plugin AU v3 entry macro, `au_entry.mm` called
+`pulp_gain_force_link()` to force
 the linker to retain pulp-gain-specific static initializers. This
-broke AU v3 for every plugin OTHER than pulp-gain. Phase 3.5 ships
+broke AU v3 for every plugin OTHER than pulp-gain. The current adapter ships
 `<pulp/format/au_v3_entry.hpp>` with `PULP_AUV3_PLUGIN(factory_fn)`
 — place it in ONE `.cpp` per plugin (convention: `au_v3_entry.cpp`
 in the plugin's source dir). The CMake helper auto-discovers and
@@ -805,8 +805,8 @@ status == 0x2  → continue
 status == 0x3  → end
 ```
 
-As of macOS plan item 8.2, the sysex7 reassembly state machine no
-longer lives inline in `au_adapter.mm` — it now delegates to the
+The sysex7 reassembly state machine no longer lives inline in
+`au_adapter.mm` — it delegates to the
 shared `pulp::midi::UmpSysex7Reassembler`
 (`core/midi/include/pulp/midi/ump_sysex7_reassembler.hpp`) so the
 same battle-tested implementation backs every UMP-aware Pulp backend
@@ -817,12 +817,12 @@ the assembled sysex with `event->head.eventSampleTime`.
 
 When touching the AUv3 sysex path: prefer fixes inside the shared
 reassembler (and `test/test_ump_sysex7_reassembler.cpp`) over
-adapter-local patches. Two P1 invariants the adapter still owns
+adapter-local patches. Two critical invariants the adapter still owns
 itself remain unchanged and important:
 
 1. **Advance the word cursor by `ump_words`, not by 1.** A type-3
    message is 2 UMP words long; advancing by 1 makes the second
-   word's header nibble look like a new message header (`#292` P1).
+   word's header nibble look like a new message header.
    This lives in the `switch (mt)` block above the call to
    `reassembler.feed_packet`.
 2. **`reassembler.feed_packet` expects an already-type-3 packet** —
@@ -831,12 +831,12 @@ itself remain unchanged and important:
    nibble for cursor advance and re-checking would be redundant in
    the hot path.
 
-Sysex7 size is still 0..6 bytes per 2-word packet (#292 P2 —
-preserve message boundaries); the reassembler clamps to 6
+Sysex7 size is still 0..6 bytes per 2-word packet; preserve message
+boundaries. The reassembler clamps to 6
 defensively.
 
 Both invariants are tested by
-`test/test_ump_sysex7_reassembler.cpp` (the `#292 P1` test feeds a
+`test/test_ump_sysex7_reassembler.cpp` (the regression test feeds a
 contrived packet whose word1 begins with a nibble matching sysex7
 to prove word1 is never reparsed as a fresh word0). Touch the
 reassembler → add a test that exercises the boundary.
@@ -879,7 +879,7 @@ Pulp's `descriptor().tail_samples` is an integer sample count;
 return `0` — a `0` tail tells the host "this plugin emits nothing
 after input stops" and delay/reverb tails get chopped.
 
-### Bypass routing — auto-detected Bypass parameter (PR #2937)
+### Bypass routing — auto-detected Bypass parameter
 
 `initialize` auto-detects a plugin-declared "Bypass" parameter and
 routes both AU v3 bypass surfaces (the host's `bypass` AUValue and
@@ -895,7 +895,7 @@ MIDI FX don't leak notes. Diagnostic: read `pulpBypassParameterId`
 on `PulpAudioUnit` (also exposed from the shared `au_audio_unit.h`
 header) to confirm which ParamID got picked up.
 
-### Latency / tail change notifications (PR #2934, item 3.11)
+### Latency / tail change notifications
 
 A Processor flags a mid-render latency or tail change via
 `flag_latency_changed()` / `flag_tail_changed()` (RT-safe atomic
@@ -918,12 +918,12 @@ frames than `maximumFramesToRender` claimed.
 
 ### Factory entry point: use `PULP_AUV3_PLUGIN()`, NOT a hand-rolled force_link
 
-**Pre-Phase 3.5 (removed):** `au_entry.mm` called `pulp_gain_force_link()`
+**Removed legacy path:** `au_entry.mm` called `pulp_gain_force_link()`
 to force-retain pulp-gain's `au_register.cpp` static initializers.
 That symbol was hardcoded to pulp-gain and broke AU v3 for every
 other plugin.
 
-**Phase 3.5+:** every plugin includes a per-plugin `au_v3_entry.cpp`
+**Current path:** every plugin includes a per-plugin `au_v3_entry.cpp`
 in its source dir with:
 
 ```cpp
@@ -946,7 +946,7 @@ pre-allocated buffer array and validating hosts don't ask for more
 channels than the descriptor declares. Not a surround-readiness flag
 yet.
 
-### AU v3 native view plumbing (Phase 3.5)
+### AU v3 native view plumbing
 
 AU v3 uses `requestViewControllerWithCompletionHandler:` to fetch an
 `AUViewController`. macOS uses `PulpAUMacViewController` (in the
@@ -1006,7 +1006,7 @@ ordering is load-bearing:
 `_bridge, _viewHost, _fallbackView` destroyed `_fallbackView` before
 `_viewHost`; on the no-`audioUnit` preview path `_fallbackView` *is* the
 View `_viewHost->root_` references, so the host cleared a back-pointer into
-a freed View (GPU-plugin-view-host work, 2026-05; Codex P1).
+a freed View.
 
 Calling `_bridge->close()` HERE explicitly (before `[super dealloc]`)
 reverses that order: the View dies first, then `~PluginViewHost`
@@ -1066,7 +1066,7 @@ AUHost sample app (available from Apple's developer portal) or inside
 AUM / Cubasis to smoke-test instantiation + render. See the `ios`
 skill for device deploy.
 
-## Packaging — macOS appex + iOS device + Simulator (item 3.10)
+## Packaging — macOS appex + iOS device + Simulator
 
 The AU v3 packaging shape is **three distinct targets**, dispatched by
 `_pulp_add_auv3` in `tools/cmake/PulpAuv3.cmake`:
@@ -1084,9 +1084,9 @@ The AU v3 packaging shape is **three distinct targets**, dispatched by
    picks `iOS-Simulator-Entitlements.plist.template` instead. CMake
    detects the Simulator via `CMAKE_OSX_SYSROOT` matching
    `Simulator|iphonesimulator`. Mac Catalyst is **deliberately
-   excluded** (macOS plan 3.10 — "Catalyst is deferred post-MVP").
+   out of scope** for the current AU v3 lane.
 
-### Xcode-project generation: `pulp ship auv3-xcodeproj` (PR #2938, item 3.10)
+### Xcode-project generation: `pulp ship auv3-xcodeproj`
 
 Once `pulp_add_plugin(... FORMATS AUv3)` is wired, the developer
 flow for iterating on the AUv3 target in Xcode (instruments,
@@ -1106,8 +1106,7 @@ a **separate build dir** (default `build/xcode/<target>-<sdk>`) so
 it doesn't collide with the user's normal Ninja/Makefile cache. iOS
 SDKs pull in `tools/cmake/ios.toolchain.cmake` with the correct
 `IOS_PLATFORM` (OS for device, SIMULATOR64 for simulator). This is
-the closeout for item 3.10's deferred Xcode-project generation —
-the entitlement templates landed earlier in the same PR series.
+the supported Xcode iteration path for AU v3 targets.
 
 ### Install + cache-clear gotcha
 
@@ -1145,7 +1144,7 @@ Don't try to install an AU v3 `.appex` there.
 - `.agents/skills/clap/SKILL.md` and `.agents/skills/vst3/SKILL.md` —
   cross-format parity sanity-check for host-specific regressions.
 
-### iOS AUv3 controller hands GpuSurface to ScriptedUiSession (Phase iOS-D.3b Slice 1)
+### iOS AUv3 controller hands GpuSurface to ScriptedUiSession
 
 `au_view_controller_ios.mm` and `au_view_controller_mac.mm` both now
 call, immediately after `PluginViewHost::create()`:
@@ -1169,11 +1168,11 @@ Full cross-platform contract lives in the `view-bridge` skill's
 - `docs/guides/ios-auv3-guidance.md` — the human-facing iOS AUv3 guide.
 - `docs/guides/formats.md` — user-facing format overview + auval
   recipes.
-- Memory note: AAX-parity sweep — AU sysex (#288), VST3 sysex (#274),
-  CLAP sysex (#269) and AAX sysex (#239) all share the same
-  sidecar. Fixing one means checking the other three.
+- Cross-format sysex sidecar note: AU, VST3, CLAP, and AAX sysex
+  handling all share the same sidecar shape. Fixing one means checking
+  the other three.
 
-## Host-quirks consumption (P3a, 2026-05-30)
+## Host-quirks consumption
 
 This adapter consumes the host-quirks ledger at init: it caches
 `resolved_quirks(detect_host_info().type, version)` once (the runtime
@@ -1196,7 +1195,7 @@ cached `HostQuirks host_quirks` resolve fine — the struct is in-namespace.)
 The core lib doesn't compile this `.mm`, so only the AU target/test catches
 such errors — build `pulp-test-au-plugin-state`.
 
-## synthesize_bypass_parameter (host-quirks P3b, 2026-05-30)
+## synthesize_bypass_parameter
 
 When the plugin declares no Bypass parameter and the quirk is enforced,
 the adapter calls `pulp::format::maybe_synthesize_bypass(store, quirks)`
@@ -1208,4 +1207,4 @@ pass-through short-circuit honors it with no further wiring.
 `PULP_HOST_QUIRKS=off` synthesizes nothing. Existing "no-bypass" tests
 must set `kQuirkFilterOff` to keep that premise. (CLAP + AU v2 are NOT
 wired — they have no bypass process path; injecting a param there would
-appear-but-do-nothing, so they're a separate follow-up.)
+appear-but-do-nothing, so they need separate design work.)
