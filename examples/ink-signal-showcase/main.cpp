@@ -927,12 +927,13 @@ int main(int argc, char** argv) {
     opts.title = "Ink & Signal — Showcase";
     opts.width = static_cast<float>(W);
     opts.height = fit ? content_h : static_cast<float>(winH);
-    // Never let the window crop content horizontally: the board is a fixed
-    // kContentW-wide design, so pin the minimum width to the full content
-    // width (chrome on the right — Master strip, breadcrumb — was getting
-    // clipped when the window shrank below it). Vertical overflow is handled
-    // by the ScrollView, so the height minimum only needs to stay usable.
-    opts.min_width = static_cast<float>(W);
+    // The board is a fixed kContentW-wide design. Rather than pin the window to
+    // the full content width (which forced a wide minimum), the ScrollView below
+    // scrolls BOTH axes — so a window narrower than the content pans horizontally
+    // instead of cropping the right-side chrome (Master strip, breadcrumb). That
+    // lets the window shrink to a small min in both dimensions with the content
+    // fully reachable by scroll.
+    opts.min_width = 480.0f;
     opts.min_height = 480.0f;
     opts.use_gpu = true;        // GPU (Skia Graphite / Dawn) when available
 
@@ -950,8 +951,11 @@ int main(int argc, char** argv) {
         window->set_design_viewport(static_cast<float>(W), content_h);
     } else {
         // Default: wrap the board in a ScrollView so content scrolls
-        // (trackpad / wheel).
+        // (trackpad / wheel). Scroll BOTH axes — vertical for the tall gallery,
+        // horizontal so a window narrower than the fixed-width board pans
+        // instead of cropping the right-side chrome (see min_width above).
         scroll = std::make_unique<ScrollView>();
+        scroll->set_direction(ScrollView::Direction::both);
         scroll->set_theme(theme_mgr.active_theme());
         scroll->set_frame_clock(&clock);
         scroll->add_child(std::move(board));
