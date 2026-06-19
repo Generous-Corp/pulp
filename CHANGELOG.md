@@ -8,6 +8,16 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v04540"></a>
+## [0.454.0] - 2026-06-18
+
+- feat(view): add opt-in Ink & Signal navigation variants (#69) ([#4205](https://github.com/danielraffel/pulp/pull/4205))
+- docs: add current maintainability roadmap plan ([#4204](https://github.com/danielraffel/pulp/pull/4204))
+- feat(inspect): Wiring tab annotate loop — click → note → Reveal/Export ([#4200](https://github.com/danielraffel/pulp/pull/4200))
+- chore: raise hotspot ceilings for the Wiring-tab change ([#4196](https://github.com/danielraffel/pulp/pull/4196))
+- docs: clarify opencv-python license (OpenCV Apache-2.0; packaging MIT) ([#4198](https://github.com/danielraffel/pulp/pull/4198))
+- docs(ci): codify slow-PR diagnosis (it is almost never runner saturation) ([#4194](https://github.com/danielraffel/pulp/pull/4194))
+
 <a id="v04530"></a>
 ## [0.453.0] - 2026-06-18
 
@@ -4587,6 +4597,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.454.0]: https://github.com/danielraffel/pulp/releases/tag/v0.454.0
 [0.453.0]: https://github.com/danielraffel/pulp/releases/tag/v0.453.0
 [0.452.0]: https://github.com/danielraffel/pulp/releases/tag/v0.452.0
 [0.451.0]: https://github.com/danielraffel/pulp/releases/tag/v0.451.0

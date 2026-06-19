@@ -5671,6 +5671,9 @@ pulp_add_test_suite(pulp-test-iir-design LIBRARIES pulp::signal)
 # TreeView tests
 pulp_add_test_suite(pulp-test-tree-view LIBRARIES pulp::view)
 
+# Toolbar tests (UTF-8 icon-label extraction, custom-item width, hit-testing)
+pulp_add_test_suite(pulp-test-toolbar LIBRARIES pulp::view)
+
 # File browser, file tree, and multi-document panel tests
 pulp_add_test_suite(pulp-test-file-browser LIBRARIES pulp::view)
 

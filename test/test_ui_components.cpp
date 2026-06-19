@@ -1,9 +1,28 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/view/ui_components.hpp>
+#include <pulp/view/breadcrumb.hpp>
 #include <pulp/canvas/canvas.hpp>
+
+#include <memory>
 
 using namespace pulp::view;
 using namespace pulp::canvas;
+
+namespace {
+// True if any fill_rect command has the given width (f[2]); used to detect the
+// 3px accent left-edge bar and full-width selection fills without asserting on
+// theme-resolved colours.
+bool has_fill_rect_width(const RecordingCanvas& canvas, float w) {
+    for (const auto& c : canvas.commands())
+        if (c.type == DrawCommand::Type::fill_rect && c.f[2] == w) return true;
+    return false;
+}
+bool has_glyph(const RecordingCanvas& canvas, const std::string& g) {
+    for (const auto& c : canvas.commands())
+        if (c.type == DrawCommand::Type::fill_text && c.text == g) return true;
+    return false;
+}
+}  // namespace
 
 // ── ComboBox ─────────────────────────────────────────────────────────────
 
@@ -941,4 +960,171 @@ TEST_CASE("ListBox ignores boundary keys and out-of-range mouse presses",
     list.on_mouse_event(far_click);
     REQUIRE(list.selected() == 1);
     REQUIRE(selects == 0);
+}
+
+// ── SegmentedControl ───────────────────────────────────────────────────────
+
+TEST_CASE("SegmentedControl selection + on_change", "[view][segmented]") {
+    SegmentedControl seg;
+    seg.set_segments({"Amp", "EQ", "Comp", "Reverb"});
+    REQUIRE(seg.segments().size() == 4);
+    REQUIRE(seg.selected() == 0);
+
+    int changed = -1;
+    seg.on_change = [&](int i) { changed = i; };
+    seg.set_selected(2);
+    REQUIRE(seg.selected() == 2);
+    REQUIRE(changed == 2);
+
+    // set_selected_silent does not notify
+    changed = -1;
+    seg.set_selected_silent(1);
+    REQUIRE(seg.selected() == 1);
+    REQUIRE(changed == -1);
+
+    // out-of-range clamps to the last segment
+    seg.set_selected(99);
+    REQUIRE(seg.selected() == 3);
+}
+
+TEST_CASE("SegmentedControl click selects the segment under the cursor",
+          "[view][segmented]") {
+    SegmentedControl seg;
+    seg.set_segments({"A", "B", "C", "D"});
+    seg.set_bounds({0, 0, 200, 28});   // four 50px-wide segments
+
+    int changed = -1;
+    seg.on_change = [&](int i) { changed = i; };
+
+    MouseEvent e; e.position = {120.0f, 14.0f}; e.is_down = true;
+    seg.on_mouse_event(e);             // x=120 → segment index 2
+    REQUIRE(seg.selected() == 2);
+    REQUIRE(changed == 2);
+}
+
+TEST_CASE("SegmentedControl arrow keys move the selection", "[view][segmented]") {
+    SegmentedControl seg;
+    seg.set_segments({"A", "B", "C"});
+    seg.set_selected(1);
+
+    KeyEvent right; right.key = KeyCode::right; right.is_down = true;
+    REQUIRE(seg.on_key_event(right));
+    REQUIRE(seg.selected() == 2);
+
+    KeyEvent left; left.key = KeyCode::left; left.is_down = true;
+    REQUIRE(seg.on_key_event(left));
+    REQUIRE(seg.selected() == 1);
+}
+
+TEST_CASE("SegmentedControl paint: one label per segment + active pill",
+          "[view][segmented]") {
+    SegmentedControl seg;
+    seg.set_segments({"Amp", "EQ", "Comp"});
+    seg.set_selected(1);
+    seg.set_bounds({0, 0, 240, 28});
+
+    RecordingCanvas canvas;
+    seg.paint(canvas);
+    REQUIRE(canvas.count(DrawCommand::Type::fill_text) == 3);          // labels
+    REQUIRE(canvas.count(DrawCommand::Type::fill_rounded_rect) >= 2);  // track + pill
+    REQUIRE(canvas.count(DrawCommand::Type::stroke_rounded_rect) >= 1);// pill border
+}
+
+// ── TabPanel underline variant ──────────────────────────────────────────────
+
+TEST_CASE("TabPanel defaults to the filled tab bar", "[view][tab]") {
+    TabPanel t;
+    REQUIRE(t.tab_bar_style() == TabPanel::TabBarStyle::filled);
+}
+
+TEST_CASE("TabPanel underline style: no strip, full-width divider, teal marker",
+          "[view][tab]") {
+    auto make = [](TabPanel::TabBarStyle s) {
+        auto t = std::make_unique<TabPanel>();
+        t->set_tab_bar_style(s);
+        t->add_tab("Amp", std::make_unique<View>());
+        t->add_tab("Filter", std::make_unique<View>());
+        t->set_active_tab(0);
+        t->set_bounds({0, 0, 300, 80});
+        return t;
+    };
+
+    {   // filled — a full-width strip fill_rect at the top of the bar
+        auto t = make(TabPanel::TabBarStyle::filled);
+        RecordingCanvas canvas; t->paint(canvas);
+        bool strip = false;
+        for (const auto& c : canvas.commands())
+            if (c.type == DrawCommand::Type::fill_rect &&
+                c.f[1] == 0.0f && c.f[2] >= 299.0f) strip = true;
+        REQUIRE(strip);
+    }
+    {   // underline — no strip, but a full-width divider + the 2px teal marker
+        auto t = make(TabPanel::TabBarStyle::underline);
+        RecordingCanvas canvas; t->paint(canvas);
+        bool strip = false, divider = false, marker = false;
+        for (const auto& c : canvas.commands()) {
+            if (c.type == DrawCommand::Type::fill_rect &&
+                c.f[1] == 0.0f && c.f[2] >= 299.0f) strip = true;
+            if (c.type == DrawCommand::Type::stroke_line &&
+                c.f[0] <= 1.0f && c.f[2] >= 299.0f) divider = true;
+            if (c.type == DrawCommand::Type::fill_rect && c.f[3] == 2.0f) marker = true;
+        }
+        REQUIRE_FALSE(strip);
+        REQUIRE(divider);
+        REQUIRE(marker);
+    }
+}
+
+// ── ListBox accent selection + icons ────────────────────────────────────────
+
+TEST_CASE("ListBox defaults to the standard selection style", "[view][listbox]") {
+    ListBox list;
+    REQUIRE(list.selection_style() == ListBox::SelectionStyle::standard);
+}
+
+TEST_CASE("ListBox accent selection draws a 3px left bar + leading icon",
+          "[view][listbox]") {
+    ListBox list;
+    list.set_items({"Osc", "Filter", "Env"});
+    list.set_icons({"\xe2\x99\xaa", "\xe2\x99\xaa", "\xe2\x99\xaa"});
+    list.set_selection_style(ListBox::SelectionStyle::accent);
+    list.set_selected(1);
+    list.set_bounds({0, 0, 200, 120});
+
+    RecordingCanvas canvas; list.paint(canvas);
+    REQUIRE(has_fill_rect_width(canvas, 3.0f));   // teal left-edge bar
+    REQUIRE(has_glyph(canvas, "\xe2\x99\xaa"));    // icon glyph drawn
+}
+
+TEST_CASE("ListBox standard selection: full-width fill, no 3px bar",
+          "[view][listbox]") {
+    ListBox list;
+    list.set_items({"A", "B", "C"});
+    list.set_selected(1);
+    list.set_bounds({0, 0, 200, 120});
+
+    RecordingCanvas canvas; list.paint(canvas);
+    REQUIRE_FALSE(has_fill_rect_width(canvas, 3.0f));   // no accent bar
+    REQUIRE(has_fill_rect_width(canvas, 200.0f));       // full-width selected row
+}
+
+// ── Breadcrumb flat variant ─────────────────────────────────────────────────
+
+TEST_CASE("Breadcrumb defaults to showing its background card",
+          "[view][breadcrumb]") {
+    Breadcrumb b;
+    REQUIRE(b.show_background());
+}
+
+TEST_CASE("Breadcrumb show_background toggles the card", "[view][breadcrumb]") {
+    auto card_count = [](bool bg) {
+        Breadcrumb b;
+        b.set_show_background(bg);
+        b.set_items({{"A", {}}, {"B", {}}});
+        b.set_bounds({0, 0, 200, 32});
+        RecordingCanvas canvas; b.paint(canvas);
+        return canvas.count(DrawCommand::Type::fill_rounded_rect);
+    };
+    REQUIRE(card_count(true) >= 1);    // card present
+    REQUIRE(card_count(false) == 0);   // flat — no card
 }

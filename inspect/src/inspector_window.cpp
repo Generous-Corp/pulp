@@ -1,9 +1,17 @@
 // inspector_window.cpp — Tabbed inspector window implementation
 #include <pulp/inspect/inspector_window.hpp>
+#include <pulp/inspect/source_jump.hpp>          // launch_editor_url (Reveal in Figma)
 #include <pulp/view/design_frame_view.hpp>
+#include <pulp/view/buttons.hpp>                 // TextButton (Reveal / Export)
+#include <pulp/view/text_editor.hpp>             // note field
+
+#include <choc/text/choc_JSON.h>
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <functional>
 #include <sstream>
 
@@ -55,6 +63,14 @@ static bool view_is_in_tree(const View* root, const View* needle) {
 
 static std::string direction_str(FlexDirection d) {
     return d == FlexDirection::row ? "row" : "column";
+}
+
+// Default file the Wiring-tab Export button writes to (an agent reads it). Under
+// the user's cache dir so it's stable regardless of the app's CWD.
+static std::string default_wiring_export_path() {
+    const char* home = std::getenv("HOME");
+    std::string base = home ? std::string(home) + "/.cache/pulp" : "/tmp";
+    return base + "/wiring-annotations.json";
 }
 
 /// Create a styled property row: "key: value"
@@ -680,8 +696,72 @@ std::unique_ptr<View> InspectorWindow::build_wiring_tab() {
     list->flex().flex_shrink = 0;
     wiring_list_ = list.get();
     scroll->add_child(std::move(list));
-
     root->add_child(std::move(scroll));
+
+    // ── Bottom: selected-control detail + note + actions ──────────────────────
+    auto detail = std::make_unique<View>();
+    detail->flex().direction = FlexDirection::column;
+    detail->flex().preferred_height = 150;
+    detail->flex().flex_shrink = 0;
+    detail->flex().padding = 6;
+    detail->set_background_color(kBgSection);
+
+    auto dl = make_prop_label("Select a control above to annotate it.", 11);
+    wiring_detail_ = dl.get();
+    detail->add_child(std::move(dl));
+
+    auto note = std::make_unique<TextEditor>();
+    note->placeholder = "Note: what should this do? (e.g. animate, pops from frame X)";
+    note->flex().preferred_height = 52;
+    note->flex().flex_shrink = 0;
+    note->on_change = [this](const std::string& t) {
+        if (!wiring_selected_.empty()) wiring_notes_[wiring_selected_] = t;
+    };
+    wiring_note_editor_ = note.get();
+    detail->add_child(std::move(note));
+
+    auto actions = std::make_unique<View>();
+    actions->flex().direction = FlexDirection::row;
+    actions->flex().preferred_height = 26;
+    actions->flex().flex_shrink = 0;
+
+    auto reveal = std::make_unique<TextButton>("Reveal in Figma");
+    reveal->set_style(TextButton::Style::ghost);
+    reveal->on_click = [this] {
+        const std::string url = figma_reveal_url(wiring_selected_);
+        if (url.empty()) {
+            if (wiring_status_)
+                wiring_status_->set_text(wiring_selected_.empty()
+                    ? "Select a control first."
+                    : "Set a Figma file key (set_figma_file_key) to reveal.");
+            return;
+        }
+        std::string err;
+        const bool ok = launch_editor_url(url, &err);
+        if (wiring_status_)
+            wiring_status_->set_text(ok ? ("Revealed " + wiring_selected_ + " in Figma")
+                                        : ("Reveal failed: " + err));
+    };
+    actions->add_child(std::move(reveal));
+
+    auto exp = std::make_unique<TextButton>("Export JSON");
+    exp->set_style(TextButton::Style::ghost);
+    exp->on_click = [this] {
+        const std::string path = default_wiring_export_path();
+        const bool ok = export_wiring_annotations(path);
+        if (wiring_status_)
+            wiring_status_->set_text(ok ? ("Exported " + std::to_string(wiring_entries_.size())
+                                           + " controls → " + path)
+                                        : "Export failed.");
+    };
+    actions->add_child(std::move(exp));
+    detail->add_child(std::move(actions));
+
+    auto st = make_prop_label("", 10);
+    wiring_status_ = st.get();
+    detail->add_child(std::move(st));
+
+    root->add_child(std::move(detail));
     return root;
 }
 
@@ -1099,6 +1179,8 @@ const char* frame_element_kind_name(view::DesignFrameElement::Kind k) {
     using K = view::DesignFrameElement::Kind;
     switch (k) {
         case K::knob:        return "knob";
+        case K::fader:       return "fader";
+        case K::toggle:      return "toggle";
         case K::text_field:  return "text field";
         case K::dropdown:    return "dropdown";
         case K::tab_group:   return "tab group";
@@ -1107,6 +1189,7 @@ const char* frame_element_kind_name(view::DesignFrameElement::Kind k) {
         case K::swap:        return "swap";
         case K::action:      return "action";
         case K::value_label: return "value label";
+        case K::xy_pad:      return "xy pad";
     }
     return "?";
 }
@@ -1117,6 +1200,7 @@ void InspectorWindow::refresh_wiring() {
 
     while (wiring_list_->child_count() > 0)
         wiring_list_->remove_child(wiring_list_->child_at(0));
+    wiring_entries_.clear();
 
     // Walk the inspected tree for DesignFrameView overlays and list each element
     // that carries a design-source (Figma) node id. An element with an `action`
@@ -1130,33 +1214,27 @@ void InspectorWindow::refresh_wiring() {
                 const std::string& node = frame->element_source_node_id(i);
                 if (node.empty()) continue;
                 const bool wired = !frame->element_action(i).empty();
+                const std::string kind = frame_element_kind_name(frame->element_kind(i));
+                wiring_entries_.push_back({node, kind, wired});
 
-                auto row = std::make_unique<view::View>();
-                row->flex().direction = FlexDirection::column;
-                row->flex().preferred_height = 44;
-                row->flex().flex_shrink = 0;
-                row->flex().padding = 4;
-                row->set_background_color(kBgSection);
-
-                std::string line1 = std::string(wired ? "● " : "⚠ ") + node +
-                                    "  (" + frame_element_kind_name(frame->element_kind(i)) + ")";
-                row->add_child(make_prop_label(line1, 11));
-
-                std::string line2 = wired ? ("wired → " + frame->element_action(i))
-                                          : "NOT WIRED — click to note + fetch the Figma frame";
-                row->add_child(make_prop_label(line2, 10));
-
-                auto sep = std::make_unique<view::View>();
-                sep->flex().preferred_height = 1;
-                sep->flex().flex_shrink = 0;
-                sep->set_background_color(kBorder);
-
-                wiring_list_->add_child(std::move(row));
-                wiring_list_->add_child(std::move(sep));
+                const bool has_note =
+                    wiring_notes_.count(node) && !wiring_notes_.at(node).empty();
+                std::string label = std::string(wired ? "● " : "⚠ ") + node + "  (" + kind + ")  "
+                    + (wired ? ("→ " + frame->element_action(i)) : "NOT WIRED")
+                    + (has_note ? "   [note]" : "");
+                auto btn = std::make_unique<TextButton>(label);
+                // Selected row uses the accent style; the rest are flat list rows.
+                btn->set_style(node == wiring_selected_ ? TextButton::Style::primary
+                                                        : TextButton::Style::ghost);
+                btn->flex().preferred_height = 26;
+                btn->flex().flex_shrink = 0;
+                const std::string n = node;
+                btn->on_click = [this, n] { select_wiring_node(n); };
+                wiring_list_->add_child(std::move(btn));
                 ++rows;
             }
         }
-        for (int i = 0; i < v->child_count(); ++i) walk(v->child_at(i));
+        for (int i = 0; i < static_cast<int>(v->child_count()); ++i) walk(v->child_at(i));
     };
     walk(inspected_root_);
 
@@ -1168,7 +1246,59 @@ void InspectorWindow::refresh_wiring() {
     }
 
     if (wiring_scroll_)
-        wiring_scroll_->set_content_size({300, static_cast<float>(rows) * 45.0f + 24.0f});
+        wiring_scroll_->set_content_size({300, static_cast<float>(rows) * 27.0f + 8.0f});
+}
+
+void InspectorWindow::select_wiring_node(const std::string& node) {
+    wiring_selected_ = node;
+    if (wiring_note_editor_) {
+        auto it = wiring_notes_.find(node);
+        wiring_note_editor_->set_text(it != wiring_notes_.end() ? it->second : std::string());
+    }
+    if (wiring_detail_) {
+        std::string kind; bool wired = false, found = false;
+        for (const auto& e : wiring_entries_)
+            if (e.node == node) { kind = e.kind; wired = e.wired; found = true; break; }
+        wiring_detail_->set_text(found
+            ? ("Selected " + node + "  (" + kind + ")  — " + (wired ? "wired" : "NOT WIRED"))
+            : ("Selected " + node));
+    }
+    refresh_wiring();  // re-highlight the selected row
+}
+
+std::string InspectorWindow::figma_reveal_url(const std::string& node) const {
+    if (figma_file_key_.empty() || node.empty()) return {};
+    std::string n = node;
+    for (char& c : n) if (c == ':') c = '-';  // Figma URLs use node-id=1273-33424
+    return "https://www.figma.com/design/" + figma_file_key_ + "?node-id=" + n;
+}
+
+bool InspectorWindow::export_wiring_annotations(const std::string& path) const {
+    auto root = choc::value::createObject("wiring");
+    root.setMember("file_key", figma_file_key_);
+    auto arr = choc::value::createEmptyArray();
+    for (const auto& e : wiring_entries_) {
+        auto o = choc::value::createObject("");
+        o.setMember("node_id", e.node);
+        o.setMember("kind", e.kind);
+        o.setMember("wired", e.wired);
+        auto it = wiring_notes_.find(e.node);
+        o.setMember("note", it != wiring_notes_.end() ? it->second : std::string());
+        arr.addArrayElement(o);
+    }
+    root.setMember("annotations", arr);
+
+    std::error_code ec;
+    auto parent = std::filesystem::path(path).parent_path();
+    if (!parent.empty()) std::filesystem::create_directories(parent, ec);
+    const std::string tmp = path + ".tmp";
+    {
+        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+        if (!out) return false;
+        out << choc::json::toString(root, true);
+    }
+    std::filesystem::rename(tmp, path, ec);
+    return !ec;
 }
 
 } // namespace pulp::inspect

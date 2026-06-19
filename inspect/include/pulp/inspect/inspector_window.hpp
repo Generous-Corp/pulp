@@ -12,9 +12,12 @@
 
 #include <chrono>
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
+
+namespace pulp::view { class TextEditor; }  // wiring-tab note field (pointer only)
 
 namespace pulp::inspect {
 
@@ -96,6 +99,16 @@ public:
     /// title doesn't match a tab.
     void select_tab(std::string_view title);
 
+    /// Figma file key used to build "Reveal in Figma" URLs for Wiring-tab rows
+    /// (e.g. "q9iDYZzg86YrOQKr6I3bY0"). Without it, Reveal is a no-op + status hint.
+    void set_figma_file_key(std::string key) { figma_file_key_ = std::move(key); }
+
+    /// Write the Wiring-tab annotations (each design-sourced control's node id,
+    /// kind, wired flag, and the developer's note) to `path` as JSON, for an
+    /// agent to read and act on. Returns true on success. Also driven by the
+    /// tab's Export button.
+    bool export_wiring_annotations(const std::string& path) const;
+
     /// Called when a view is selected in the tree.
     ///
     /// WYSIWYG P2e two-way selection (maintainer correction: "we DO want to
@@ -174,6 +187,11 @@ private:
     // Walks the inspected tree for DesignFrameView overlays that carry a Figma
     // source_node_id, lists each with its node id + kind + wired/unwired badge.
     void refresh_wiring();
+    // Select a wiring row by node id: loads its note into the editor + updates
+    // the detail line. Shared by row clicks and tests.
+    void select_wiring_node(const std::string& node);
+    // Figma editor URL for a node id (file_key + node-id), or "" if no file key.
+    std::string figma_reveal_url(const std::string& node) const;
 
     void populate_tree_from_view(TreeNode& parent, View* view);
     void show_properties_for(View* view);
@@ -224,6 +242,16 @@ private:
 
     ScrollView* wiring_scroll_ = nullptr;
     View* wiring_list_ = nullptr;
+    TextEditor* wiring_note_editor_ = nullptr;  // note for the selected control
+    Label* wiring_detail_ = nullptr;            // selected node id + kind + state
+    Label* wiring_status_ = nullptr;            // export / reveal status line
+    std::string figma_file_key_;                // for Reveal-in-Figma URLs
+    std::string wiring_selected_;               // selected control's node id
+    std::map<std::string, std::string> wiring_notes_;  // node id → developer note
+    // Snapshot of the listed controls (rebuilt each refresh) so Export doesn't
+    // have to re-walk the tree.
+    struct WiringEntry { std::string node; std::string kind; bool wired = false; };
+    std::vector<WiringEntry> wiring_entries_;
 
     // Currently selected view (Elements tab)
     View* selected_view_ = nullptr;

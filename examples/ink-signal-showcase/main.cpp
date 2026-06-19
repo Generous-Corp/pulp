@@ -318,31 +318,48 @@ void advance_anims(View* v, float dt) {
     // ── Tabs · Toolbar · Breadcrumb · Tree · Scrollbar ─────────────────
     section("Navigation");
     {
+        const float y0 = y;
+        // Left column: underline tabs (Figma 227:1763) + segmented control.
         auto tabs = std::make_unique<TabPanel>();
+        tabs->set_tab_bar_style(TabPanel::TabBarStyle::underline);
         tabs->add_tab("Amp", std::make_unique<View>());
         tabs->add_tab("Filter", std::make_unique<View>());
         tabs->add_tab("FX", std::make_unique<View>());
         tabs->set_active_tab(0);
-        add(std::move(tabs), kMargin, y, 280.0f, 60.0f);
+        add(std::move(tabs), kMargin, y0, 280.0f, 44.0f);
 
+        auto seg = std::make_unique<SegmentedControl>();
+        seg->set_segments({"Amp", "EQ", "Comp", "Reverb"});
+        seg->set_selected(0);
+        add(std::move(seg), kMargin, y0 + 52.0f, 280.0f, 30.0f);
+
+        // Right column: transport toolbar (loop active = teal) + flat breadcrumb.
         auto tb = std::make_unique<Toolbar>();
         tb->add_button("play", "Play", [] {});
         tb->add_toggle("loop", "Loop", [](bool) {});
+        tb->set_toggled("loop", true);
         tb->add_separator();
         tb->add_button("rec", "Rec", [] {});
-        add(std::move(tb), kMargin + 320.0f, y, 280.0f, 40.0f);
+        add(std::move(tb), kMargin + 320.0f, y0, 280.0f, 40.0f);
 
         auto bc = std::make_unique<Breadcrumb>();
-        bc->set_items({{"Home", {}}, {"Synths", {}}, {"Bass", {}}});
-        add(std::move(bc), kMargin + 320.0f, y + 48.0f, 280.0f, 24.0f);
-        y += 72.0f;
+        bc->set_show_background(false);   // flat — Figma 227:1830
+        bc->set_items({{"Library", {}}, {"Reverb", {}}, {"Halls", {}}});
+        add(std::move(bc), kMargin + 320.0f, y0 + 52.0f, 280.0f, 24.0f);
+        y = y0 + 92.0f;
 
+        // Tree with accent selection + leaf icons (Figma 227:4196). Folders use
+        // the disclosure chevron; presets carry a ♪.
         auto tree = std::make_unique<TreeView>();
+        tree->set_selection_style(TreeView::SelectionStyle::accent);
         auto& root = tree->root();
-        auto& synths = root.add_child("Synths");
-        synths.add_child("Bass"); synths.add_child("Lead");
-        auto& fx = root.add_child("Effects");
-        fx.add_child("Reverb"); fx.add_child("Delay");
+        auto& synths = root.add_child("Synths"); synths.expanded = true;
+        synths.add_child("Bass").icon = "\xe2\x99\xaa";
+        synths.add_child("Lead").icon = "\xe2\x99\xaa";
+        auto& fx = root.add_child("Effects"); fx.expanded = true;
+        auto& rev = fx.add_child("Reverb"); rev.icon = "\xe2\x99\xaa";
+        fx.add_child("Delay").icon = "\xe2\x99\xaa";
+        tree->set_selected_node(&rev);
         add(std::move(tree), kMargin, y, 280.0f, 130.0f);
 
         auto sb = std::make_unique<ScrollBar>();
@@ -680,6 +697,18 @@ void advance_anims(View* v, float dt) {
                          PopupMenu::Item::make_separator(), {3, "Save As\xe2\x80\xa6"}});
         menu->set_anchor({0, 0});
         add(std::move(menu), kMargin + 110.0f, y, 180.0f, 104.0f);
+
+        // Labelled sidebar nav — the Figma "sidebar" (227:1830) reads as a
+        // labelled list with a teal-tinted selected row. Rendered with ListBox's
+        // opt-in accent selection + leading icons (the SidePanel above is the
+        // chrome-less slide container; this is the list it would host).
+        auto nav = std::make_unique<ListBox>();
+        nav->set_items({"Oscillators", "Filter", "Envelopes", "Effects"});
+        nav->set_icons({"\xe2\x99\xaa", "\xe2\x96\xa4", "\xe2\x9a\x99", "\xe2\x98\xb0"});
+        nav->set_selection_style(ListBox::SelectionStyle::accent);
+        nav->set_row_height(32.0f);
+        nav->set_selected(1);
+        add(std::move(nav), kMargin + 320.0f, y, 200.0f, 150.0f);
         y += 170.0f;
     }
 
