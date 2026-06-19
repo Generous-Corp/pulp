@@ -69,6 +69,11 @@ struct RealtimePitchTimeConfig {
     /// Phase reset at detected transients (Röbel DAFx 2003) — keeps
     /// attacks sharp under shift/stretch.
     bool transient_preservation = true;
+    /// Transient-detector sensitivity (0 = engine default 1.0). Higher fires the
+    /// Röbel phase reset on more onsets, so percussion keeps EVERY hit sharp
+    /// (a conservative detector softens some hits -> "transients move around").
+    /// OfflineStretch raises this for percussive material.
+    float transient_sensitivity = 0.0f;
     /// Route the noise component (STN decomposition) through NoiseMorpher
     /// instead of phase propagation, so stretched/shifted noise and
     /// textures stay natural instead of "tonalizing." Adds an STN pass per
@@ -79,6 +84,15 @@ struct RealtimePitchTimeConfig {
     /// pitch shifting folds back much less aliasing on large shifts and
     /// bright material. Costs 2*half taps per output sample; off by default.
     bool sinc_resampling = false;
+    /// Optional STFT geometry override (offline use). 0 = derive from `quality`
+    /// (4096/512). Set both to force a window/overlap suited to the material:
+    /// large windows (e.g. 8192/512 = 16× overlap) resolve closely-spaced low
+    /// partials so bass stretches without wobble; small windows (1024/128) give
+    /// the time resolution that keeps percussive transients natural. `fft_size`
+    /// must be a power of two ≥ 256; `analysis_hop` must divide it for COLA.
+    /// The realtime path leaves these 0; OfflineStretch picks them per input.
+    int fft_size = 0;
+    int analysis_hop = 0;
 };
 
 class RealtimePitchTimeProcessor {
@@ -101,6 +115,15 @@ public:
         const bool quality = config.quality == PitchTimeQuality::quality;
         fft_size_ = quality ? 4096 : 1024;
         analysis_hop_ = quality ? 512 : 256;
+        // Offline geometry override (material-adaptive window/overlap). Only
+        // honored when both are set and valid; the realtime path leaves them 0.
+        if (config.fft_size >= 256
+            && (config.fft_size & (config.fft_size - 1)) == 0
+            && config.analysis_hop > 0
+            && (config.fft_size % config.analysis_hop) == 0) {
+            fft_size_ = config.fft_size;
+            analysis_hop_ = config.analysis_hop;
+        }
 
         const float max_ratio = std::exp2(config.max_pitch_semitones / 12.0f);
         const float max_stretch =
@@ -121,6 +144,8 @@ public:
 
         TransientPhasePolicy::Config transient_config;
         transient_config.fft_size = fft_size_;
+        if (config.transient_sensitivity > 0.0f)
+            transient_config.sensitivity = config.transient_sensitivity;
         transient_.prepare(transient_config);
 
         FreezeHold::Config freeze_config;

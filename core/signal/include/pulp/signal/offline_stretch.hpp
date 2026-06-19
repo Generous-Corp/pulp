@@ -51,15 +51,41 @@ enum class OfflineFormantMode { follow_pitch, preserve_original, shift_independe
 /// gated on the seam-quality + blind-A/B criteria in the plan (§6).
 enum class StretchTransientMode { phase_reset, verbatim_relocate };
 
+/// Character mode — the musically-distinct "engine per job" selector. Each has a
+/// different artifact signature; pick by material/taste.
+///   clean         — peak-lock phase vocoder + material-adaptive FFT (the default).
+///                   Natural, time != pitch. Best for tonal/melodic/sustained.
+///   varispeed     — pitch+time LINKED (pure resample) + speed-scaled tape head EQ.
+///                   Tape character, NO stretch artifacts. Pitch follows tempo.
+///   phase_vocoder — clean + verbatim transient relocation for extra punch.
+///                   SCAFFOLD: relocation seam handling is not solved yet, so this
+///                   currently renders as `clean` (see relocate_transients).
+///   granular      — grain/stutter texture. SCAFFOLD: not implemented, renders clean.
+enum class StretchCharacter { clean, varispeed, phase_vocoder, granular };
+
 /// Whole-input render options. See plan §5.
 struct OfflineStretchOptions {
+    /// Character mode (see StretchCharacter). Default `clean`. `varispeed` ignores
+    /// pitch_semitones (pitch is linked to time_ratio); the others honor it.
+    StretchCharacter character = StretchCharacter::clean;
+    /// Cross-engine: graft verbatim transients onto the stretched output for punch.
+    /// SCAFFOLD — the seam-clean implementation is future work; currently a no-op.
+    bool relocate_transients = false;
     double time_ratio = 1.0;        ///< output duration / input duration
     double pitch_semitones = 0.0;   ///< fractional allowed
     OfflineFormantMode formant_mode = OfflineFormantMode::preserve_original;
     double formant_semitones = 0.0; ///< used only when formant_mode==shift_independently
     bool repitch_linked = false;    ///< true => pure resample (vinyl); pitch
                                     ///< follows time_ratio, spectral path skipped
-    bool route_noise_stn = true;    ///< route noise/residual through NoiseMorpher
+    // STN noise-morphing OFF by default. Measured (Python-vs-C++ A/B across
+    // bass/mix/vocal/drum at 0.75–3×): routing the residual through NoiseMorpher
+    // DULLS the output ~400 spectral-centroid points on every material — the muddy
+    // drum + the "wind"/modulation the validated Python prototype never had (it has
+    // no STN). Off restores the Python brightness (drum 2521→2953 ≈ source 2990).
+    // Opt back in per-render for genuinely noise-dominated textures where natural
+    // residual stretch matters more than HF brightness. (The morpher's HF loss is
+    // a separate bug to fix before re-enabling by default.)
+    bool route_noise_stn = false;   ///< route noise/residual through NoiseMorpher
     StretchTransientMode transient_mode = StretchTransientMode::phase_reset;
     int quality = 2;                ///< 0 draft (fast preview) .. 2 best
 
@@ -71,6 +97,22 @@ struct OfflineStretchOptions {
     // silently clamped — so a mis-sized render is a loud error, not a wrong result.
     double max_time_ratio = 4.0;      ///< supported stretch span is [1/max, max]
     double max_pitch_semitones = 24.0;
+
+    // Material-adaptive STFT geometry (plan §4 / ear-validated). The phase core
+    // is fixed at FFT 4096/512; that window is too SMALL to resolve closely-
+    // spaced low partials (bass stretches wobble) and too LARGE for percussive
+    // time resolution (drum attacks soften). Setting these picks a window suited
+    // to the input — large+high-overlap for bass, small for transients. 0 = keep
+    // the engine default. Use OfflineStretch::recommend_window() to choose them
+    // from the actual audio, then pass here at prepare().
+    int fft_size = 0;       ///< 0 = default (4096); else power-of-two ≥ 256
+    int analysis_hop = 0;   ///< 0 = default (512); must divide fft_size
+
+    // Transient-detector sensitivity (0 = engine default 1.0). Higher keeps EVERY
+    // percussion hit sharp; the default detector softens some hits ("transients
+    // move around"). recommend_window pairs a higher value with the percussive
+    // window; a caller can override.
+    float transient_sensitivity = 0.0f;
 };
 
 /// The exact, sample-accurate output length for an input of `in_frames` frames
@@ -120,7 +162,14 @@ public:
             cfg.max_time_ratio = static_cast<float>(max_time_ratio_ * max_pitch_ratio);
             cfg.max_pitch_semitones = 0.0f; // pitch is fixed in time_stretch mode
             cfg.transient_preservation = true;
+            cfg.transient_sensitivity = sizing.transient_sensitivity; // keep every hit sharp
             cfg.noise_morphing = sizing.route_noise_stn; // STN noise path (plan §4 routing)
+            // Material-adaptive window/overlap (ear-validated: fixes bass wobble
+            // and keeps drum transients natural; the realtime default is one size
+            // too small for bass and too large for percussion).
+            cfg.fft_size = sizing.fft_size;
+            cfg.analysis_hop = sizing.analysis_hop;
+            fft_size_ = sizing.fft_size;       // remembered for accessor/tests
             engine_.prepare(sample_rate, cfg);
             latency_anchor_ = calibrate_anchor();
 
@@ -145,6 +194,73 @@ public:
     double sample_rate() const noexcept { return sample_rate_; }
     double max_time_ratio() const noexcept { return max_time_ratio_; }
     double max_pitch_semitones() const noexcept { return max_pitch_semitones_; }
+    /// The STFT window actually in use (0 until prepare() with an override).
+    int fft_size() const noexcept { return fft_size_; }
+
+    /// Material-adaptive window/overlap recommendation. Analyzes the input and
+    /// returns the {fft_size, analysis_hop} to set on OfflineStretchOptions
+    /// before prepare(). Ear-validated geometry:
+    ///   percussive (high crest)        -> 1024 / 128  (time resolution: sharp,
+    ///                                     natural attacks)
+    ///   bass / low-fundamental-heavy   -> 8192 / 512  (16× overlap; resolves
+    ///                                     closely-spaced low partials so the
+    ///                                     stretch doesn't wobble)
+    ///   everything else                -> {0, 0}      (engine default 4096/512)
+    /// Order matters: a kick-heavy break is BOTH low and percussive — transients
+    /// win, or the long window smears every hit. `lo_band` is the energy fraction
+    /// below 200 Hz; `crest` is peak/mean of a short-window energy envelope.
+    struct Window { int fft_size; int analysis_hop; };
+    static Window recommend_window(const float* const* in, long frames,
+                                   int channels, double sample_rate) {
+        if (in == nullptr || frames <= 0 || channels < 1 || !(sample_rate > 0.0))
+            return {0, 0};
+        // Mono mix.
+        std::vector<double> x(static_cast<size_t>(frames), 0.0);
+        for (int c = 0; c < channels; ++c) {
+            const float* s = in[c];
+            if (!s) continue;
+            for (long i = 0; i < frames; ++i) x[static_cast<size_t>(i)] += s[i];
+        }
+        const double inv = 1.0 / channels;
+        for (auto& v : x) v *= inv;
+
+        // Crest of a 512-sample energy envelope (256 hop) = transient density.
+        const long W = 512, H = 256;
+        double e_sum = 0.0, e_max = 0.0; long e_cnt = 0;
+        for (long i = 0; i + W <= frames; i += H) {
+            double acc = 0.0;
+            for (long j = 0; j < W; ++j) { const double v = x[static_cast<size_t>(i + j)]; acc += v * v; }
+            const double rms = std::sqrt(acc / static_cast<double>(W) + 1e-12);
+            e_sum += rms; e_max = std::max(e_max, rms); ++e_cnt;
+        }
+        const double crest = e_cnt > 0 ? e_max / (e_sum / static_cast<double>(e_cnt) + 1e-12) : 0.0;
+
+        // Low-band fraction: RBJ 2nd-order lowpass @200 Hz, lowpassed energy /
+        // total energy. Avoids an FFT dependency in the header.
+        const double f0 = 200.0, q = 0.7071;
+        const double w0 = 2.0 * 3.14159265358979323846 * f0 / sample_rate;
+        const double cw = std::cos(w0), sw = std::sin(w0), alpha = sw / (2.0 * q);
+        const double b0 = (1.0 - cw) * 0.5, b1 = 1.0 - cw, b2 = (1.0 - cw) * 0.5;
+        const double a0 = 1.0 + alpha, a1 = -2.0 * cw, a2 = 1.0 - alpha;
+        const double nb0 = b0 / a0, nb1 = b1 / a0, nb2 = b2 / a0, na1 = a1 / a0, na2 = a2 / a0;
+        double z1 = 0.0, z2 = 0.0, lo_e = 0.0, tot_e = 0.0;
+        for (long i = 0; i < frames; ++i) {
+            const double in_s = x[static_cast<size_t>(i)];
+            const double out_s = nb0 * in_s + z1;
+            z1 = nb1 * in_s - na1 * out_s + z2;
+            z2 = nb2 * in_s - na2 * out_s;
+            lo_e += out_s * out_s; tot_e += in_s * in_s;
+        }
+        const double lo_band = tot_e > 0.0 ? lo_e / tot_e : 0.0;
+
+        // Percussive: 1024/128 — matches the validated Python "drum_pl" reference
+        // the user picked. (The earlier "wobble" that motivated a 2048 window was
+        // the STN noise path, not the window; with STN off, 1024 gives the sharp,
+        // bright drum attacks of the Python prototype.)
+        if (crest > 3.0)    return {1024, 128};  // percussive — time resolution, match Python ref
+        if (lo_band > 0.30) return {8192, 512};  // bass/low — resolve low partials
+        return {0, 0};                           // default 4096/512
+    }
 
     /// Render the whole input into the caller-allocated output. `out_frames`
     /// MUST equal offline_stretch_output_frames(in_frames, opts.time_ratio).
@@ -172,6 +288,14 @@ public:
         const long expected = offline_stretch_output_frames(in_frames, opts.time_ratio);
         if (out_frames != expected)
             return fail(err, "out_frames must equal round(in_frames * time_ratio)");
+
+        // Character-mode dispatch. `varispeed` is pitch+time-linked (tape): a pure
+        // resample + a speed-scaled head EQ, no phase-vocoder artifacts. The
+        // `phase_vocoder` and `granular` characters are scaffolds — they fall
+        // through to the clean spectral path for now (relocate_transients is a
+        // documented no-op until the seam-clean relocation lands).
+        if (opts.character == StretchCharacter::varispeed)
+            return varispeed_render(in, in_frames, out, out_frames, opts.time_ratio);
 
         // Linked / vinyl mode: pure high-quality resample. Output sample i reads
         // input position i/ratio at a constant rate, so pitch tracks tempo
@@ -257,6 +381,96 @@ private:
         return Interpolator::sinc6(frac, at(i0 - 2), at(i0 - 1), at(i0),
                                    at(i0 + 1), at(i0 + 2), at(i0 + 3));
     }
+
+    // Varispeed (tape) render: pitch+time LINKED. Output sample i reads input
+    // position i/ratio at a constant rate (a pure mastering-grade resample — no
+    // phase-vocoder artifacts), then a speed-scaled head EQ colours it like a tape
+    // machine at that speed. Slowing down (ratio>1) loses highs and gains low-mid
+    // warmth; speeding up (ratio<1) brightens and thins. Exact identity at ratio 1.
+    bool varispeed_render(const float* const* in, long in_frames,
+                          float* const* out, long out_frames, double ratio) {
+        for (int c = 0; c < channels_; ++c)
+            for (long i = 0; i < out_frames; ++i)
+                out[c][i] = sample_sinc6(in[c], in_frames,
+                                         static_cast<double>(i) / ratio);
+        apply_head_eq(out, out_frames, ratio);
+        // Mandatory short end-fade (tape doesn't hard-cut). A bare resample of a
+        // source that ends mid-ring leaves an audible tick; a ~10 ms raised-cosine
+        // tail (+ 2 ms head) removes it and suits the tape character. Skipped at
+        // ratio 1 to keep varispeed an exact identity there.
+        if (ratio != 1.0) {
+            const double sr = sample_rate_ > 0 ? sample_rate_ : 48000.0;
+            const long fo = std::min<long>(static_cast<long>(0.010 * sr), out_frames / 4);
+            const long fi = std::min<long>(static_cast<long>(0.002 * sr), out_frames / 4);
+            constexpr double kPi = 3.14159265358979323846;
+            for (int c = 0; c < channels_; ++c) {
+                for (long i = 0; i < fi; ++i)
+                    out[c][i] *= static_cast<float>(0.5 - 0.5 * std::cos(kPi * i / fi));
+                for (long i = 0; i < fo; ++i)
+                    out[c][out_frames-1-i] *= static_cast<float>(0.5 - 0.5 * std::cos(kPi * i / fo));
+            }
+        }
+        return true;
+    }
+
+    // Speed-scaled tape head EQ: a low-mid head bump (warmth) + a head-gap HF
+    // shelf (dulling), both scaled by log2(ratio) so the colour tracks the speed.
+    // At ratio 1 every gain is 0 dB → exact bypass (varispeed stays a clean
+    // identity at unity). Two cascaded RBJ biquads per channel, double state.
+    void apply_head_eq(float* const* out, long n, double ratio) {
+        if (ratio == 1.0 || n <= 0) return; // unity = transparent
+        const double oct = std::log2(ratio);            // +1 per octave slower
+        const double sr = sample_rate_ > 0 ? sample_rate_ : 48000.0;
+        // Low-mid head bump (peaking) and head-gap HF loss (high shelf), clamped.
+        const double low_db = std::clamp(2.0 * oct, -3.0, 5.0);   // warmth when slow
+        const double hi_db  = std::clamp(-3.5 * oct, -10.0, 6.0); // dull when slow
+        Biquad bump = Biquad::peaking(140.0, 0.8, low_db, sr);
+        Biquad shelf = Biquad::high_shelf(4000.0, hi_db, sr);
+        for (int c = 0; c < channels_; ++c) {
+            bump.reset(); shelf.reset();
+            for (long i = 0; i < n; ++i) {
+                double s = static_cast<double>(out[c][i]);
+                s = bump.process(s);
+                s = shelf.process(s);
+                out[c][i] = static_cast<float>(s);
+            }
+        }
+    }
+
+    // Minimal RBJ biquad (double precision) for the head EQ. Direct-form I.
+    struct Biquad {
+        double b0 = 1, b1 = 0, b2 = 0, a1 = 0, a2 = 0;
+        double x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+        void reset() { x1 = x2 = y1 = y2 = 0; }
+        double process(double x) {
+            const double y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+            x2 = x1; x1 = x; y2 = y1; y1 = y; return y;
+        }
+        static Biquad from(double b0, double b1, double b2, double a0, double a1, double a2) {
+            Biquad q; q.b0 = b0 / a0; q.b1 = b1 / a0; q.b2 = b2 / a0;
+            q.a1 = a1 / a0; q.a2 = a2 / a0; return q;
+        }
+        static Biquad peaking(double f0, double q, double gain_db, double sr) {
+            const double A = std::pow(10.0, gain_db / 40.0);
+            const double w0 = 2.0 * 3.14159265358979323846 * f0 / sr;
+            const double cw = std::cos(w0), sw = std::sin(w0), alpha = sw / (2.0 * q);
+            return from(1 + alpha * A, -2 * cw, 1 - alpha * A,
+                        1 + alpha / A, -2 * cw, 1 - alpha / A);
+        }
+        static Biquad high_shelf(double f0, double gain_db, double sr) {
+            const double A = std::pow(10.0, gain_db / 40.0);
+            const double w0 = 2.0 * 3.14159265358979323846 * f0 / sr;
+            const double cw = std::cos(w0), sw = std::sin(w0);
+            const double alpha = sw / 2.0 * std::sqrt((A + 1 / A) * (1 / 0.9 - 1) + 2);
+            const double tsa = 2.0 * std::sqrt(A) * alpha;
+            return from(A * ((A + 1) + (A - 1) * cw + tsa),
+                        -2 * A * ((A - 1) + (A + 1) * cw),
+                        A * ((A + 1) + (A - 1) * cw - tsa),
+                        (A + 1) - (A - 1) * cw + tsa,
+                        2 * ((A - 1) - (A + 1) * cw),
+                        (A + 1) - (A - 1) * cw - tsa);
+        }
+    };
 
     // Measure the engine's input-domain time-stretch anchor L: an impulse at P
     // synthesizes its peak at (P - L)*r + L, so L = (P*r - peak)/(r - 1). Done
@@ -477,6 +691,7 @@ private:
     int channels_ = 1;
     double max_time_ratio_ = 4.0;
     double max_pitch_semitones_ = 24.0;
+    int fft_size_ = 0;
     bool prepared_ = false;
 };
 
