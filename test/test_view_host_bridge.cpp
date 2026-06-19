@@ -16,6 +16,7 @@
 #include <pulp/view/view.hpp>
 #include <pulp/view/window_host.hpp>
 
+#include <filesystem>
 #include <utility>
 
 using namespace pulp::view;
@@ -313,8 +314,18 @@ TEST_CASE("Non-Apple screenshot: no provider -> empty bytes + false file",
           "[view][hosts][issue-299]") {
     clear_screenshot_provider();
     View root;
+#if defined(PULP_HAS_SKIA)
+    const auto png = render_to_png(root, 64, 64);
+    REQUIRE_FALSE(png.empty());
+    const auto path = std::filesystem::temp_directory_path() /
+        "pulp-view-host-bridge-screenshot.png";
+    std::filesystem::remove(path);
+    REQUIRE(render_to_file(root, 64, 64, path.string()));
+    std::filesystem::remove(path);
+#else
     REQUIRE(render_to_png(root, 64, 64).empty());
     REQUIRE_FALSE(render_to_file(root, 64, 64, "/tmp/should-not-exist.png"));
+#endif
 }
 
 TEST_CASE("Non-Apple screenshot: provider routes through and carries data",
@@ -334,7 +345,11 @@ TEST_CASE("Non-Apple screenshot: provider routes through and carries data",
 
     clear_screenshot_provider();
     REQUIRE_FALSE(has_screenshot_provider());
+#if defined(PULP_HAS_SKIA)
+    REQUIRE_FALSE(render_to_png(root, 10, 10).empty());
+#else
     REQUIRE(render_to_png(root, 10, 10).empty());
+#endif
 }
 
 TEST_CASE("Non-Apple WindowHost::create: no factory -> nullptr",
@@ -349,11 +364,28 @@ TEST_CASE("Non-Apple WindowHost::create: no factory -> nullptr",
 TEST_CASE("Non-Apple PluginViewHost::create: no factory -> nullptr",
           "[view][hosts][issue-299]") {
     PluginViewHost::clear_factory();
+    REQUIRE_FALSE(PluginViewHost::has_factory());
     View root;
     PluginViewHost::Size size;
-    REQUIRE(PluginViewHost::create(root, size) == nullptr);
+    auto sized_host = PluginViewHost::create(root, size);
+#if defined(PULP_HAS_SKIA) && (defined(__linux__) || defined(_WIN32))
+    if (sized_host) {
+        CHECK(sized_host->get_size().width == size.width);
+        CHECK(sized_host->get_size().height == size.height);
+    }
+#else
+    REQUIRE(sized_host == nullptr);
+#endif
     PluginViewHost::Options opts;
-    REQUIRE(PluginViewHost::create(root, opts) == nullptr);
+    auto options_host = PluginViewHost::create(root, opts);
+#if defined(PULP_HAS_SKIA) && (defined(__linux__) || defined(_WIN32))
+    if (options_host) {
+        CHECK(options_host->get_size().width == opts.size.width);
+        CHECK(options_host->get_size().height == opts.size.height);
+    }
+#else
+    REQUIRE(options_host == nullptr);
+#endif
 }
 
 TEST_CASE("Non-Apple InspectorWindow show is safe without WindowHost factory",

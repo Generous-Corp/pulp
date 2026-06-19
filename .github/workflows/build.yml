@@ -884,6 +884,28 @@ jobs:
             # via a PROCESSORS reservation on the device-opening suites in
             # test/CMakeLists.txt, so they are re-enabled here.
           fi
+          if [ "${RUNNER_OS}" = "Linux" ]; then
+            # Linux ARM64 PR runner, 2026-06-19: Skia is present, but the
+            # headless VM exposes an incompatible Vulkan device
+            # (/dev/dri/renderD128 -> VK_ERROR_INCOMPATIBLE_DRIVER) and no
+            # DISPLAY. That makes visual/golden assertions fail as runner
+            # capability checks, not as product regressions. Keep the rest of
+            # the Linux suite green while GPU/visual coverage lives in the
+            # dedicated visual lanes and macOS/Windows required gates.
+            exclude="${exclude}|AudioInspectorPanel renders a non-empty headless snapshot"
+            exclude="${exclude}|font v2 Slice 3\\.4"
+            exclude="${exclude}|baked native materializer makes a faithful_svg tab_group an interactive overlay"
+            exclude="${exclude}|ImageView value-driven silhouette fill scales with value"
+            exclude="${exclude}|DesignFrameView renders"
+            exclude="${exclude}|DesignTabGroup renders"
+            exclude="${exclude}|DesignStepper renders"
+            exclude="${exclude}|DesignStepper with a single option paints nothing"
+            exclude="${exclude}|DesignFrameView paints"
+            exclude="${exclude}|DesignFrameView tints"
+            exclude="${exclude}|DesignFrameView xy_pad puck renders"
+            exclude="${exclude}|DesignFrameView slides"
+            exclude="${exclude}|DesignFrameView rotates"
+          fi
           ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure -C Release -LE "$label_exclude" -j8 --timeout 120 --exclude-regex "$exclude"
 
       - name: Surface ctest failures (non-Windows)
