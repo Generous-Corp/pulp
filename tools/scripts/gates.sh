@@ -129,7 +129,8 @@ fi
 if [ -f "$HSG" ] && [ -f "$HSG_CFG" ]; then
     echo "" >&2
     echo "▸ hotspot-size guard" >&2
-    if ! "$PYTHON" "$HSG" --base "$BASE" --config "$HSG_CFG" --mode=report; then
+    if ! "$PYTHON" "$HSG" --base "$BASE" --config "$HSG_CFG" --mode=report \
+            --require-ceiling-reduction; then
         fail=1
     fi
 fi

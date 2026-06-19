@@ -188,7 +188,8 @@ fi
 # Hotspot size guard. Freezes known refactor hotspot LOC baselines and warns
 # on newly added large core/tools files before another monolith forms.
 if [ -f "$HSG" ] && [ -f "$HSG_CFG" ]; then
-    "$PYTHON" "$HSG" --base "$BASE" --config "$HSG_CFG" --mode=report
+    "$PYTHON" "$HSG" --base "$BASE" --config "$HSG_CFG" --mode=report \
+        --require-ceiling-reduction
     case $? in
         0) ;;
         1) fail=1 ;;

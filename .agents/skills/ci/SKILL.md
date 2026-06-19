@@ -128,6 +128,11 @@ lanes, and verify a runner is actually busy before blaming capacity.
   `faithful_svg` as a `DesignFrameView`), raise that file's `max_loc` in the same
   PR — splitting a tightly-coupled emitter mid-feature would hurt readability
   more than the extra LOC. Reserve the split for genuine grab-bag growth.
+  When a PR shrinks a tracked hotspot, lower that file's `max_loc` in
+  `hotspot_size_guard.json` to the new exact LOC in the same PR; the
+  `--require-ceiling-reduction` gate compares the merge-base blob against `HEAD`
+  for branch-touched tracked hotspots, so leaving headroom after a shrink fails
+  the pre-push/CI guard.
   Editing `hotspot_size_guard.json` itself trips the `ci` skill-sync gate; the
   ceiling bump is normally part of a non-`ci` feature PR, so either fold this
   note's rationale into that PR or skip the `ci` gate with a
