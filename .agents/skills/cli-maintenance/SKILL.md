@@ -102,6 +102,11 @@ Decision heuristics for "does this deserve MCP exposure":
   inspect/preview/approve/apply boundaries. Add those sub-tools to the
   `mcp_only` baseline with a reason that they are sub-tools of the umbrella CLI
   command, not missing top-level CLI peers.
+- `tools/cli/kit_commands.cpp` is a frozen refactor hotspot. Before moving kit
+  command code, follow `tools/cli/KIT_COMMANDS_MODULE_MAP.md`: keep manifest
+  validation, archive safety, publish policy, apply/remove mutation, profile
+  verification, and dispatch in separate modules, and lower the hotspot ceiling
+  when the split shrinks the monolith.
 
 The gate runs in three places, all pinned to the same script:
 

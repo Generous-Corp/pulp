@@ -130,6 +130,11 @@
       "note": "CLI common cleanup candidate"
     },
     {
+      "path": "tools/cli/kit_commands.cpp",
+      "max_loc": 3927,
+      "note": "kit/package trust-boundary monolith; split per tools/cli/KIT_COMMANDS_MODULE_MAP.md"
+    },
+    {
       "path": "core/canvas/src/skia_canvas.cpp",
       "max_loc": 1197,
       "note": "Skia canvas split stabilization candidate"
