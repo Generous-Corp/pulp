@@ -232,6 +232,49 @@ TEST_CASE("generate_pulp_cpp emits all faithful overlay kinds and chunks a large
     step.options = {"x1", "x2"};
     ir.root.interactive_elements.push_back(step);
 
+    IRInteractiveElement fader;          // P1a: SVG-patch thumb over a track
+    fader.kind = InteractiveElementKind::fader;
+    fader.x = 8.0f; fader.y = 120.0f; fader.w = 12.0f; fader.h = 80.0f;
+    fader.svg_patch_d = "M14 200L14 190";
+    fader.default_value = 0.4f;
+    ir.root.interactive_elements.push_back(fader);
+
+    IRInteractiveElement flashToggle;    // P1a: press-flash command button
+    flashToggle.kind = InteractiveElementKind::toggle;
+    flashToggle.x = 8.0f; flashToggle.y = 220.0f; flashToggle.w = 40.0f; flashToggle.h = 20.0f;
+    flashToggle.flash = true;
+    ir.root.interactive_elements.push_back(flashToggle);
+
+    IRInteractiveElement swap;           // P1b: swap-link button
+    swap.kind = InteractiveElementKind::swap;
+    swap.x = 60.0f; swap.y = 120.0f; swap.w = 60.0f; swap.h = 20.0f;
+    swap.target_frame = 2;
+    ir.root.interactive_elements.push_back(swap);
+
+    IRInteractiveElement act;            // P1b: command button
+    act.kind = InteractiveElementKind::action;
+    act.x = 60.0f; act.y = 150.0f; act.w = 30.0f; act.h = 20.0f;
+    act.action = "octave_up";
+    ir.root.interactive_elements.push_back(act);
+
+    IRInteractiveElement pad;            // P1b: xy pad
+    pad.kind = InteractiveElementKind::xy_pad;
+    pad.x = 60.0f; pad.y = 180.0f; pad.w = 80.0f; pad.h = 80.0f;
+    pad.default_value = 0.3f; pad.default_value_y = 0.7f;
+    ir.root.interactive_elements.push_back(pad);
+
+    IRInteractiveElement lbl;            // P1b: value readout
+    lbl.kind = InteractiveElementKind::value_label;
+    lbl.x = 60.0f; lbl.y = 270.0f; lbl.w = 80.0f; lbl.h = 16.0f;
+    lbl.text = "-6.0 dB"; lbl.value_left_align = true;
+    ir.root.interactive_elements.push_back(lbl);
+
+    IRInteractiveElement cst;            // P7 Tier-3: registered custom control
+    cst.kind = InteractiveElementKind::custom;
+    cst.x = 160.0f; cst.y = 120.0f; cst.w = 60.0f; cst.h = 40.0f;
+    cst.factory_id = "acme.spinner"; cst.custom_props = "{\"max\":11}";
+    ir.root.interactive_elements.push_back(cst);
+
     // A large SVG (> ~8KB base64) so the embed spans multiple chunk literals.
     std::string svg = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"400\" height=\"300\">";
     for (int i = 0; i < 400; ++i)
@@ -250,8 +293,24 @@ TEST_CASE("generate_pulp_cpp emits all faithful overlay kinds and chunks a large
     REQUIRE(result.source.find("DesignFrameElement::Kind::text_field") != std::string::npos);
     REQUIRE(result.source.find("DesignFrameElement::Kind::tab_group") != std::string::npos);
     REQUIRE(result.source.find("DesignFrameElement::Kind::stepper") != std::string::npos);
+    REQUIRE(result.source.find("DesignFrameElement::Kind::fader") != std::string::npos);
+    REQUIRE(result.source.find("DesignFrameElement::Kind::toggle") != std::string::npos);
+    REQUIRE(result.source.find("DesignFrameElement::Kind::swap") != std::string::npos);
+    REQUIRE(result.source.find("DesignFrameElement::Kind::action") != std::string::npos);
+    REQUIRE(result.source.find("DesignFrameElement::Kind::xy_pad") != std::string::npos);
+    REQUIRE(result.source.find("DesignFrameElement::Kind::value_label") != std::string::npos);
     REQUIRE(result.source.find("el.placeholder = \"Name\"") != std::string::npos);
     REQUIRE(result.source.find("el.bg_color = \"#1A1A1A\"") != std::string::npos);
+    REQUIRE(result.source.find("el.needle_d = \"M14 200L14 190\"") != std::string::npos);  // fader thumb path
+    REQUIRE(result.source.find("el.flash = true;") != std::string::npos);                  // press-flash toggle
+    REQUIRE(result.source.find("el.target_frame = 2;") != std::string::npos);              // swap link
+    REQUIRE(result.source.find("el.action = \"octave_up\"") != std::string::npos);         // command id
+    REQUIRE(result.source.find("el.text = \"-6.0 dB\"") != std::string::npos);             // readout
+    REQUIRE(result.source.find("el.value_left_align = true;") != std::string::npos);       // label align
+    REQUIRE(result.source.find("el.value_y = ") != std::string::npos);                     // xy_pad Y axis
+    REQUIRE(result.source.find("DesignFrameElement::Kind::custom") != std::string::npos);  // Tier-3
+    REQUIRE(result.source.find("el.factory_id = \"acme.spinner\"") != std::string::npos);  // factory id
+    REQUIRE(result.source.find("el.custom_props = ") != std::string::npos);                // opaque props
     // The base64 embed spans multiple chunk literals (the chunk loop ran > once):
     // each interior chunk ends with a `",` line, so at least one is present.
     REQUIRE(result.source.find("\",") != std::string::npos);

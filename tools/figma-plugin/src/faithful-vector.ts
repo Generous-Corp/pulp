@@ -11,18 +11,41 @@
 // decode) — the Figma plugin sandbox tsconfig targets an older lib without
 // String.matchAll / includes / spread-of-typed-array.
 
+// P7-F2: the resolution self-check that records each control's provenance +
+// catches name/geometry conflicts. (Type-only the other direction, so no cycle.)
+import { assessResolution } from "./resolve-control";
+
+// The interactive-overlay kinds the schema (figma-plugin-export-v1.json
+// interactive_element.kind) accepts and the C++ materializer
+// (to_frame_elements) maps to a DesignFrameElement::Kind. Kept a literal union
+// — not `string` — so the producer can never emit a kind the schema forbids.
+export type InteractiveElementKind =
+  | "knob"
+  | "fader"
+  | "toggle"
+  | "dropdown"
+  | "text_field"
+  | "tab_group"
+  | "stepper"
+  | "swap"
+  | "action"
+  | "xy_pad"
+  | "value_label"
+  | "custom";
+
 export interface InteractiveElement {
-  kind: string;
-  // knob (SVG-patch) fields
+  kind: InteractiveElementKind;
+  // knob / fader (SVG-patch) fields
   cx?: number;
   cy?: number;
   hit_radius?: number;
   svg_patch_d?: string;
   default_value?: number;
+  flash?: boolean;  // toggle: press-flash command button vs sticky on/off flip
   source_node_id?: string;
-  // overlay-control (text_field / dropdown / stepper / tab_group) fields, in SVG
-  // coords — kept in lockstep with the REST lane's detect_overlay_controls and
-  // the C++ parser (design_ir_json.cpp).
+  // overlay-control (text_field / dropdown / stepper / tab_group / toggle, and
+  // the fader track) fields, in SVG coords — kept in lockstep with the REST
+  // lane's detect_overlay_controls and the C++ parser (design_ir_json.cpp).
   x?: number;
   y?: number;
   w?: number;
@@ -31,6 +54,22 @@ export interface InteractiveElement {
   selected_index?: number;
   placeholder?: string;
   bg_color?: string;  // text_field: the design's own field bg ("#RRGGBB")
+  // swap / action / xy_pad / value_label fields, in lockstep with the C++ parser.
+  target_frame?: number;   // swap: frame index activated on click
+  action?: string;         // action: command id fired on click
+  text?: string;           // value_label: initial readout string
+  value_left_align?: boolean;  // value_label: left-align the readout
+  default_value_y?: number;    // xy_pad: initial normalized Y (0=top)
+  // P7 import report (resolution provenance) — carried so a low-confidence or
+  // conflicted control is visible at the host materialize boundary, not just in
+  // the TS importer. The resolution LOGIC that fills these is P7-F2.
+  resolution_rung?: number;        // which ladder rung resolved this (0=unset..5=inert)
+  confidence_score?: number;       // 0..1; 1.0 = unset/legacy
+  conflict_signals?: string[];     // cross-signal conflicts (empty = none)
+  verification_pass?: boolean;     // render verification passed (default true)
+  // custom (P7 Tier-3 registered control)
+  factory_id?: string;             // the registered native-overlay factory id
+  custom_props?: string;           // opaque props handed to the factory (e.g. JSON)
 }
 
 // Minimal structural node shape detectOverlayControls needs. ExtractedFigmaNode
@@ -231,8 +270,12 @@ export function detectOverlayControls(
   const subtreeEnd = new Map<OverlayNode, number>();
   const occluders: Array<[number, number, number, number, number]> = [];
   let _counter = 0;
+  // node id -> name, so the P7 post-pass can read the name signal for each
+  // emitted control (which only carries its source_node_id).
+  const nodeNameById: { [id: string]: string } = {};
   function scan(n: OverlayNode): number {
     const idx = _counter++;
+    if (n.figma_node_id) nodeNameById[n.figma_node_id] = n.name || "";
     paintIndex.set(n, idx);
     const b = n.absolute_bounds;
     if (b && opaqueCover(n)) occluders.push([idx, b.x, b.y, b.x + b.w, b.y + b.h]);
@@ -427,9 +470,90 @@ export function detectOverlayControls(
       return;  // leaf overlay
     }
 
+    // ── swap / action / xy_pad / value_label (P1b) ───────────────────────────
+    // Whole-word name-gated, and run AFTER the tuned dropdown/stepper/tab_group/
+    // text_field detectors in this visit() so they always win — these only claim
+    // a node the others left unclaimed, and only on an explicit name token, so a
+    // generic design never sprouts spurious overlays. (Knob detection is a
+    // separate geometry pass, parseFrameKnobs, not part of this precedence.) The
+    // full node-tree signals
+    // (prototype reactions for swap, value patterns for value_label, a command
+    // vocabulary for action) land with P2's unified resolver; this is the
+    // name-driven floor that proves the producer can emit each kind.
+    if (bb) {
+      const named = detectNamedControl(n, name, ntype, toSvg(bb));
+      if (named) { out.push(named); return; }
+    }
+
     for (let i = 0; i < kids.length; i++) visit(kids[i], n);
   }
 
   visit(root, null);
+
+  // ── P7-F2 resolution self-check ──────────────────────────────────────────
+  // Stamp each emitted control with its resolution provenance (rung / confidence
+  // / conflicts / verification). assessResolution cross-checks the name signal
+  // against the node's geometry, so a control whose name and shape disagree
+  // (the original silent-knob stumble) is FLAGGED — still materialized with the
+  // best candidate AND recorded for review — instead of shipped silently.
+  for (let i = 0; i < out.length; i++) {
+    const el = out[i];
+    const name = (el.source_node_id && nodeNameById[el.source_node_id]) || "";
+    // detectOverlayControls resolves by the design's own naming + structure.
+    const report = assessResolution(el.kind, name, { w: el.w || 0, h: el.h || 0 }, "name");
+    el.resolution_rung = report.resolution_rung;
+    el.confidence_score = report.confidence_score;
+    if (report.conflict_signals.length > 0) el.conflict_signals = report.conflict_signals;
+    if (!report.verification_pass) el.verification_pass = false;
+  }
   return out;
+}
+
+// Whole-word test (ES5-conservative: no \b reliance on unicode, explicit
+// non-alphanumeric boundaries so "xy" matches "xy pad" but not "deoxy").
+function hasWord(s: string, w: string): boolean {
+  return new RegExp("(^|[^a-z0-9])" + w + "([^a-z0-9]|$)").test(s);
+}
+
+// Name-driven detection for the P1b kinds. `rect` is the node's SVG-space box.
+function detectNamedControl(
+  n: OverlayNode, name: string, ntype: string,
+  rect: [number, number, number, number],
+): InteractiveElement | null {
+  const sid = n.figma_node_id || "";
+  // xy_pad: a node explicitly named an XY pad.
+  if (hasWord(name, "xy") || name.indexOf("xypad") !== -1 ||
+      name.indexOf("xy pad") !== -1 || name.indexOf("xy-pad") !== -1) {
+    return { kind: "xy_pad", x: rect[0], y: rect[1], w: rect[2], h: rect[3], source_node_id: sid };
+  }
+  // swap-link: a node named a swap / mode switch. A trailing number ("swap 2")
+  // sets the target frame index.
+  if (hasWord(name, "swap")) {
+    const el: InteractiveElement = { kind: "swap", x: rect[0], y: rect[1], w: rect[2], h: rect[3], source_node_id: sid };
+    const m = /(\d+)\s*$/.exec(name);
+    if (m) el.target_frame = parseInt(m[1], 10);
+    return el;
+  }
+  // action command button: "action:octave_up" or a whole-word "action" name. The
+  // id is the command the consumer routes on, so take it from the ORIGINAL-case
+  // node name / text (never the lowercased detection copy). A bare "action" with
+  // no text yields an empty id so a consumer can detect an unconfigured button.
+  if (name.indexOf("action:") === 0 || hasWord(name, "action")) {
+    const orig = n.name || "";
+    const id = name.indexOf("action:") === 0
+      ? orig.substring("action:".length).replace(/^\s+|\s+$/g, "")
+      : (firstText(n) || "").replace(/^\s+|\s+$/g, "");
+    return { kind: "action", x: rect[0], y: rect[1], w: rect[2], h: rect[3], action: id, source_node_id: sid };
+  }
+  // value_label: a TEXT node DELIBERATELY named a readout. Gated on explicit
+  // markers ("readout" / "value_label"), NOT the bare word "value"/"display" —
+  // those are far too common on STATIC text layers to flip into a live overlay.
+  // (Richer content-pattern detection rides P2's unified resolver.)
+  if (ntype === "TEXT" &&
+      (hasWord(name, "readout") || name.indexOf("value_label") !== -1 ||
+       name.indexOf("value-label") !== -1 || name.indexOf("valuelabel") !== -1)) {
+    return { kind: "value_label", x: rect[0], y: rect[1], w: rect[2], h: rect[3],
+             text: firstText(n) || n.content || "", source_node_id: sid };
+  }
+  return null;
 }

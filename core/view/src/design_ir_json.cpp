@@ -13,6 +13,8 @@
 
 #include <pulp/view/design_import.hpp>
 
+#include <pulp/runtime/log.hpp>
+
 #include "design_binding_metadata.hpp"
 #include "design_import_internal.hpp"
 
@@ -58,21 +60,43 @@ static NodeRenderMode render_mode_from_id(const std::string& s) {
 static const char* render_mode_id(NodeRenderMode m) {
     return m == NodeRenderMode::faithful_svg ? "faithful_svg" : "normal";
 }
-// Unknown ids fall back to `knob` (the original kind) for forward-compat.
-static InteractiveElementKind interactive_kind_from_id(const std::string& s) {
-    if (s == "dropdown") return InteractiveElementKind::dropdown;
-    if (s == "text_field") return InteractiveElementKind::text_field;
-    if (s == "tab_group") return InteractiveElementKind::tab_group;
-    if (s == "stepper") return InteractiveElementKind::stepper;
+// Maps a wire `kind` string to an InteractiveElementKind. Unknown ids fall back
+// to `knob` for forward-compat, but set `*recognized = false` so the caller can
+// diagnose a genuinely-unknown kind instead of silently shipping a wrong knob.
+// (P7 grows this into the full resolution ladder; here we just stop being
+// silent.) `recognized` may be null.
+static InteractiveElementKind interactive_kind_from_id(const std::string& s,
+                                                       bool* recognized = nullptr) {
+    if (recognized) *recognized = true;
+    if (s == "knob")        return InteractiveElementKind::knob;
+    if (s == "fader")       return InteractiveElementKind::fader;
+    if (s == "toggle")      return InteractiveElementKind::toggle;
+    if (s == "dropdown")    return InteractiveElementKind::dropdown;
+    if (s == "text_field")  return InteractiveElementKind::text_field;
+    if (s == "tab_group")   return InteractiveElementKind::tab_group;
+    if (s == "stepper")     return InteractiveElementKind::stepper;
+    if (s == "swap")        return InteractiveElementKind::swap;
+    if (s == "action")      return InteractiveElementKind::action;
+    if (s == "xy_pad")      return InteractiveElementKind::xy_pad;
+    if (s == "value_label") return InteractiveElementKind::value_label;
+    if (s == "custom")      return InteractiveElementKind::custom;
+    if (recognized) *recognized = false;
     return InteractiveElementKind::knob;
 }
 static const char* interactive_kind_id(InteractiveElementKind k) {
     switch (k) {
-        case InteractiveElementKind::dropdown:   return "dropdown";
-        case InteractiveElementKind::text_field: return "text_field";
-        case InteractiveElementKind::tab_group:  return "tab_group";
-        case InteractiveElementKind::stepper:    return "stepper";
-        case InteractiveElementKind::knob:       break;
+        case InteractiveElementKind::fader:       return "fader";
+        case InteractiveElementKind::toggle:      return "toggle";
+        case InteractiveElementKind::dropdown:    return "dropdown";
+        case InteractiveElementKind::text_field:  return "text_field";
+        case InteractiveElementKind::tab_group:   return "tab_group";
+        case InteractiveElementKind::stepper:     return "stepper";
+        case InteractiveElementKind::swap:        return "swap";
+        case InteractiveElementKind::action:      return "action";
+        case InteractiveElementKind::xy_pad:      return "xy_pad";
+        case InteractiveElementKind::value_label: return "value_label";
+        case InteractiveElementKind::custom:      return "custom";
+        case InteractiveElementKind::knob:        break;
     }
     return "knob";
 }
@@ -810,12 +834,28 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
             const auto e = arr[static_cast<int>(i)];
             if (!e.isObject()) continue;
             IRInteractiveElement el;
-            el.kind = interactive_kind_from_id(get_string(e, "kind", "knob"));
+            const std::string kind_str = get_string(e, "kind", "knob");
+            bool kind_recognized = true;
+            el.kind = interactive_kind_from_id(kind_str, &kind_recognized);
+            if (!kind_recognized) {
+                // Don't silently materialize an unknown control as a working
+                // knob — surface it so the import isn't quietly wrong. The full
+                // ordered ladder + import report lands in P7; this is the floor.
+                pulp::runtime::log_warn(
+                    "design-import: unknown interactive_element kind '{}' "
+                    "(node {}); falling back to knob render",
+                    kind_str,
+                    e.hasObjectMember("source_node_id") &&
+                            e["source_node_id"].isString()
+                        ? std::string(e["source_node_id"].toString())
+                        : std::string("?"));
+            }
             el.cx = get_float(e, "cx");
             el.cy = get_float(e, "cy");
             el.hit_radius = get_float(e, "hit_radius");
             el.svg_patch_d = get_string(e, "svg_patch_d");
             el.default_value = get_float(e, "default_value", 0.5f);
+            el.flash = get_bool(e, "flash");  // toggle: press-flash vs sticky
             // Overlay-control fields (dropdown / text_field / tab_group).
             el.x = get_float(e, "x");
             el.y = get_float(e, "y");
@@ -825,6 +865,26 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
             el.placeholder = get_string(e, "placeholder");
             el.bg_color = get_string(e, "bg_color");
             el.label = get_string(e, "label");
+            // swap / action / xy_pad / value_label fields.
+            el.target_frame = static_cast<int>(get_float(e, "target_frame", -1.0f));
+            el.action = get_string(e, "action");
+            el.text = get_string(e, "text");
+            el.value_left_align = get_bool(e, "value_left_align");
+            el.default_value_y = get_float(e, "default_value_y", 0.5f);
+            // P7 import report (resolution provenance).
+            el.resolution_rung = static_cast<int>(get_float(e, "resolution_rung", 0.0f));
+            el.confidence_score = get_float(e, "confidence_score", 1.0f);
+            el.verification_pass = get_bool(e, "verification_pass", true);
+            // custom (P7 Tier-3) — registered native control.
+            el.factory_id = get_string(e, "factory_id");
+            el.custom_props = get_string(e, "custom_props");
+            if (e.hasObjectMember("conflict_signals") && e["conflict_signals"].isArray()) {
+                const auto cs = e["conflict_signals"];
+                for (uint32_t j = 0; j < cs.size(); ++j)
+                    if (cs[static_cast<int>(j)].isString())
+                        el.conflict_signals.push_back(
+                            std::string(cs[static_cast<int>(j)].toString()));
+            }
             if (e.hasObjectMember("options") && e["options"].isArray()) {
                 const auto opts = e["options"];
                 for (uint32_t j = 0; j < opts.size(); ++j)
@@ -1748,6 +1808,7 @@ static void write_ir_node_json(std::ostringstream& out, const IRNode& node,
             write_float_member(out, ef, "hit_radius", el.hit_radius);
             if (!el.svg_patch_d.empty()) write_string_member(out, ef, "svg_patch_d", el.svg_patch_d);
             write_float_member(out, ef, "default_value", el.default_value);
+            if (el.flash) { write_key(out, ef, "flash"); out << "true"; }
             // Overlay-control fields — emitted only when set (knobs stay lean).
             if (el.x != 0.0f) write_float_member(out, ef, "x", el.x);
             if (el.y != 0.0f) write_float_member(out, ef, "y", el.y);
@@ -1765,6 +1826,31 @@ static void write_ir_node_json(std::ostringstream& out, const IRNode& node,
                 for (size_t j = 0; j < el.options.size(); ++j) {
                     if (j) out << ',';
                     out << '"' << json_escape(el.options[j]) << '"';
+                }
+                out << ']';
+            }
+            // swap / action / xy_pad / value_label fields — emitted only when set.
+            if (el.target_frame != -1)
+                write_int_member(out, ef, "target_frame", el.target_frame);
+            if (!el.action.empty()) write_string_member(out, ef, "action", el.action);
+            if (!el.text.empty()) write_string_member(out, ef, "text", el.text);
+            if (el.value_left_align) { write_key(out, ef, "value_left_align"); out << "true"; }
+            if (el.kind == InteractiveElementKind::xy_pad)
+                write_float_member(out, ef, "default_value_y", el.default_value_y);
+            // P7 import report — emitted only when the ladder set them (lean otherwise).
+            if (el.resolution_rung != 0)
+                write_int_member(out, ef, "resolution_rung", el.resolution_rung);
+            if (el.confidence_score != 1.0f)
+                write_float_member(out, ef, "confidence_score", el.confidence_score);
+            if (!el.verification_pass) { write_key(out, ef, "verification_pass"); out << "false"; }
+            if (!el.factory_id.empty()) write_string_member(out, ef, "factory_id", el.factory_id);
+            if (!el.custom_props.empty()) write_string_member(out, ef, "custom_props", el.custom_props);
+            if (!el.conflict_signals.empty()) {
+                write_key(out, ef, "conflict_signals");
+                out << '[';
+                for (size_t j = 0; j < el.conflict_signals.size(); ++j) {
+                    if (j) out << ',';
+                    out << '"' << json_escape(el.conflict_signals[j]) << '"';
                 }
                 out << ']';
             }
@@ -2097,6 +2183,116 @@ DesignIR parse_design_ir_json(const std::string& json) {
         ImportDiagnosticKind::legacy_field_shortcut));
     promote_interactive_frames(ir.root);
     return ir;
+}
+
+// ── P7 import report ─────────────────────────────────────────────────────────
+static void collect_report_visit(const IRNode& node, ImportReport& report,
+                                 float low_confidence_threshold) {
+    for (const auto& e : node.interactive_elements) {
+        ImportReportEntry entry;
+        entry.source_node_id = e.source_node_id.value_or("");
+        entry.kind = interactive_kind_id(e.kind);
+        entry.resolution_rung = e.resolution_rung;
+        entry.confidence_score = e.confidence_score;
+        entry.conflict_signals = e.conflict_signals;
+        entry.verification_pass = e.verification_pass;
+        if (!entry.conflict_signals.empty()) report.conflicted++;
+        if (entry.confidence_score < low_confidence_threshold) report.low_confidence++;
+        if (entry.resolution_rung == 5) report.unresolved++;  // inert (warn) rung
+        report.controls.push_back(std::move(entry));
+    }
+    for (const auto& c : node.children)
+        collect_report_visit(c, report, low_confidence_threshold);
+}
+
+ImportReport collect_import_report(const IRNode& root, float low_confidence_threshold) {
+    ImportReport report;
+    collect_report_visit(root, report, low_confidence_threshold);
+    return report;
+}
+
+// P7 render-placement verification (structural half of the render-golden gate).
+static int verify_placement_visit(IRNode& node, float fw, float fh) {
+    int flagged = 0;
+    for (auto& e : node.interactive_elements) {
+        // A knob/fader/xy_pad carries its hit circle (hit_radius); the overlays
+        // carry a box (w,h). A control with neither can't render anywhere.
+        const bool has_box = e.w > 0.0f && e.h > 0.0f;
+        const bool has_radius = e.hit_radius > 0.0f;
+        std::string issue;
+        if (!has_box && !has_radius) {
+            issue = "control has no renderable extent (zero hit-radius and zero-area box)";
+        } else if (fw > 0.0f && fh > 0.0f) {
+            // Does the control's region fall ENTIRELY outside the frame [0,0,fw,fh]?
+            float x0, y0, x1, y1;
+            if (has_box) {
+                x0 = e.x; y0 = e.y; x1 = e.x + e.w; y1 = e.y + e.h;
+            } else {
+                x0 = e.cx - e.hit_radius; y0 = e.cy - e.hit_radius;
+                x1 = e.cx + e.hit_radius; y1 = e.cy + e.hit_radius;
+            }
+            if (x1 <= 0.0f || y1 <= 0.0f || x0 >= fw || y0 >= fh)
+                issue = "control falls entirely outside the frame render region";
+        }
+        if (!issue.empty()) {
+            e.verification_pass = false;
+            e.conflict_signals.push_back(issue);
+            ++flagged;
+        }
+    }
+    // Overlays are checked against the ROOT faithful frame's region. The importer
+    // emits interactive_elements only on the single top-level faithful_svg node
+    // (children carry none), so the root frame is the correct coordinate space.
+    // If nested faithful_svg nodes ever carry their own overlays, pass each such
+    // node's own render dimensions here instead of inheriting the root's.
+    for (auto& c : node.children) flagged += verify_placement_visit(c, fw, fh);
+    return flagged;
+}
+
+int apply_placement_verification(IRNode& root, float frame_w, float frame_h) {
+    return verify_placement_visit(root, frame_w, frame_h);
+}
+
+std::string import_report_to_json(const ImportReport& r) {
+    std::ostringstream out;
+    out << "{\"summary\":{\"total\":" << r.controls.size()
+        << ",\"conflicted\":" << r.conflicted
+        << ",\"low_confidence\":" << r.low_confidence
+        << ",\"unresolved\":" << r.unresolved
+        << ",\"ok\":" << (r.ok() ? "true" : "false") << "},\"controls\":[";
+    for (size_t i = 0; i < r.controls.size(); ++i) {
+        const auto& c = r.controls[i];
+        if (i) out << ',';
+        out << "{\"source_node_id\":\"" << json_escape(c.source_node_id) << "\""
+            << ",\"kind\":\"" << c.kind << "\""
+            << ",\"resolution_rung\":" << c.resolution_rung
+            << ",\"confidence_score\":" << c.confidence_score
+            << ",\"verification_pass\":" << (c.verification_pass ? "true" : "false")
+            << ",\"conflict_signals\":[";
+        for (size_t j = 0; j < c.conflict_signals.size(); ++j) {
+            if (j) out << ',';
+            out << '"' << json_escape(c.conflict_signals[j]) << '"';
+        }
+        out << "]}";
+    }
+    out << "]}";
+    return out.str();
+}
+
+std::string import_report_to_text(const ImportReport& r) {
+    std::ostringstream out;
+    out << "import report: " << r.controls.size() << " control(s), "
+        << r.conflicted << " conflicted, " << r.low_confidence << " low-confidence, "
+        << r.unresolved << " unresolved (inert)\n";
+    for (const auto& c : r.controls) {
+        out << "  - " << (c.source_node_id.empty() ? "?" : c.source_node_id)
+            << "  kind=" << c.kind << " rung=" << c.resolution_rung
+            << " confidence=" << c.confidence_score
+            << (c.verification_pass ? "" : " [verify-FAIL]") << '\n';
+        for (const auto& cf : c.conflict_signals)
+            out << "      conflict: " << cf << '\n';
+    }
+    return out.str();
 }
 
 }  // namespace pulp::view

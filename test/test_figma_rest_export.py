@@ -441,6 +441,46 @@ class FaithfulVectorTest(unittest.TestCase):
         els = frx.detect_overlay_controls(root, (0.0, 0.0), (0.0, 0.0))
         self.assertEqual(len([e for e in els if e["kind"] == "tab_group"]), 1)
 
+    def test_emitted_overlay_kinds_conform_to_schema(self):
+        # P1a contract guard: the REST producer emits overlay kinds the knob-only
+        # schema used to forbid. The schema's interactive_element.kind enum must
+        # be a SUPERSET of every kind this producer can emit, and each emitted
+        # overlay must carry the per-kind required box [x,y,w,h] the schema's
+        # allOf branch demands. This pins the producer<->schema contract from the
+        # REST side so the drift the plan flagged can't silently return.
+        import json
+        schema_path = (REPO / "tools" / "figma-plugin" / "schema"
+                       / "figma-plugin-export-v1.json")
+        schema = json.loads(schema_path.read_text())
+        kind_enum = set(schema["$defs"]["interactive_element"]["properties"]["kind"]["enum"])
+        # Every kind the producers emit (knob + the overlays) plus the P1a additions.
+        self.assertTrue({"knob", "fader", "toggle", "dropdown", "text_field",
+                         "tab_group", "stepper"}.issubset(kind_enum))
+
+        # A fixture exercising dropdown + stepper + text_field + tab_group output.
+        figma_root = {
+            "id": "3:42", "absoluteBoundingBox": {"x": 0, "y": 0, "width": 1000, "height": 600},
+            "children": [
+                {"name": "Dropdown", "id": "d1", "type": "FRAME",
+                 "absoluteBoundingBox": {"x": 100, "y": 80, "width": 160, "height": 22},
+                 "children": [{"type": "TEXT", "characters": "Sine"},
+                              {"name": "expand_more", "type": "FRAME",
+                               "absoluteBoundingBox": {"x": 0, "y": 0, "width": 8, "height": 8}}]},
+                {"name": "Dropdown", "id": "st1", "type": "FRAME",
+                 "absoluteBoundingBox": {"x": 100, "y": 120, "width": 180, "height": 22},
+                 "children": [{"type": "TEXT", "characters": "Short Plucks"},
+                              {"name": "Frame 41", "type": "FRAME",
+                               "absoluteBoundingBox": {"x": 0, "y": 0, "width": 40, "height": 12}}]},
+            ],
+        }
+        els = frx.detect_overlay_controls(figma_root, (0.0, 0.0), (0.0, 0.0))
+        self.assertTrue(els)  # produced something
+        for e in els:
+            self.assertIn(e["kind"], kind_enum,
+                          f"producer emitted kind {e['kind']!r} the schema forbids")
+            for f in ("x", "y", "w", "h"):
+                self.assertIn(f, e, f"overlay {e['kind']!r} must carry required {f!r}")
+
 
 class FaithfulVectorDefaultTest(unittest.TestCase):
     """The faithful-vector lane (interactive overlays) must be the DEFAULT — a

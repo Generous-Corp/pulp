@@ -264,6 +264,347 @@ TEST_CASE("DesignIR round-trips dropdown / text_field / tab_group overlay elemen
     REQUIRE(t.selected_index == 2);
 }
 
+TEST_CASE("DesignIR round-trips fader / toggle / switch interactive elements",
+          "[view][import][ir-v1][faithful-svg][p1a]") {
+    // P1a: fader + toggle close the IR<->runtime<->schema gap. The runtime
+    // (DesignFrameElement::Kind) already backs both; this proves they survive
+    // serialize -> parse -> serialize without collapsing to `knob`.
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.render_mode = NodeRenderMode::faithful_svg;
+    ir.root.svg_asset_id = "asset-svg";
+
+    IRInteractiveElement fader;             // SVG-patch thumb translated over a track
+    fader.kind = InteractiveElementKind::fader;
+    fader.x = 40; fader.y = 20; fader.w = 12; fader.h = 120;
+    fader.cx = 46; fader.cy = 80;
+    fader.svg_patch_d = "M46 80L46 70";
+    fader.default_value = 0.25f;
+    fader.label = "Level";
+    ir.root.interactive_elements.push_back(fader);
+
+    IRInteractiveElement toggle;            // press-flash command button (dice/random)
+    toggle.kind = InteractiveElementKind::toggle;
+    toggle.x = 10; toggle.y = 10; toggle.w = 44; toggle.h = 22;
+    toggle.default_value = 1.0f;
+    toggle.flash = true;                    // press-flash, not a sticky flip
+    ir.root.interactive_elements.push_back(toggle);
+
+    IRInteractiveElement sw;                // a toggle WITH a dot = a switch
+    sw.kind = InteractiveElementKind::toggle;
+    sw.x = 80; sw.y = 10; sw.w = 44; sw.h = 22;
+    sw.cx = 90; sw.cy = 21;
+    sw.svg_patch_d = "M90 21a3 3 0 106 0";
+    sw.default_value = 0.0f;
+    ir.root.interactive_elements.push_back(sw);
+
+    const auto canonical = serialize_design_ir(ir);
+    const auto parsed = parse_design_ir_json(canonical);
+    REQUIRE(serialize_design_ir(parsed) == canonical);     // stable round-trip
+    REQUIRE(parsed.root.interactive_elements.size() == 3);
+
+    const auto& f = parsed.root.interactive_elements[0];
+    REQUIRE(f.kind == InteractiveElementKind::fader);      // NOT collapsed to knob
+    REQUIRE(f.svg_patch_d == "M46 80L46 70");
+    REQUIRE(f.h == 120.0f);
+    REQUIRE(f.default_value == 0.25f);
+    REQUIRE(f.label == "Level");
+
+    const auto& tg = parsed.root.interactive_elements[1];
+    REQUIRE(tg.kind == InteractiveElementKind::toggle);
+    REQUIRE(tg.w == 44.0f);
+    REQUIRE(tg.svg_patch_d.empty());                       // a plain toggle has no dot
+    REQUIRE(tg.flash == true);                             // press-flash survives round-trip
+
+    const auto& s2 = parsed.root.interactive_elements[2];
+    REQUIRE(s2.kind == InteractiveElementKind::toggle);
+    REQUIRE(s2.svg_patch_d == "M90 21a3 3 0 106 0");       // switch keeps its dot path
+    REQUIRE(s2.flash == false);                            // sticky switch, flash omitted
+}
+
+TEST_CASE("DesignIR round-trips swap / action / xy_pad / value_label elements",
+          "[view][import][ir-v1][faithful-svg][p1b]") {
+    // P1b: these four close the rest of the IR<->runtime gap. The runtime backs
+    // each (DesignFrameElement target_frame / action / value_y / text); this
+    // proves they survive serialize -> parse -> serialize with their typed data.
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.render_mode = NodeRenderMode::faithful_svg;
+    ir.root.svg_asset_id = "asset-svg";
+
+    IRInteractiveElement swap;              // swap-link: clicking switches frames
+    swap.kind = InteractiveElementKind::swap;
+    swap.x = 10; swap.y = 10; swap.w = 60; swap.h = 24;
+    swap.target_frame = 3;
+    ir.root.interactive_elements.push_back(swap);
+
+    IRInteractiveElement act;               // command button (octave +)
+    act.kind = InteractiveElementKind::action;
+    act.x = 80; act.y = 10; act.w = 30; act.h = 24;
+    act.action = "octave_up";
+    ir.root.interactive_elements.push_back(act);
+
+    IRInteractiveElement pad;               // 2D xy pad
+    pad.kind = InteractiveElementKind::xy_pad;
+    pad.x = 10; pad.y = 50; pad.w = 120; pad.h = 120;
+    pad.cx = 70; pad.cy = 110;
+    pad.svg_patch_d = "M70 110l4 0";
+    pad.default_value = 0.25f;              // X
+    pad.default_value_y = 0.8f;             // Y
+    ir.root.interactive_elements.push_back(pad);
+
+    IRInteractiveElement lbl;               // live readout
+    lbl.kind = InteractiveElementKind::value_label;
+    lbl.x = 10; lbl.y = 180; lbl.w = 80; lbl.h = 16;
+    lbl.text = "0.0 dB";
+    lbl.value_left_align = true;
+    ir.root.interactive_elements.push_back(lbl);
+
+    const auto canonical = serialize_design_ir(ir);
+    const auto parsed = parse_design_ir_json(canonical);
+    REQUIRE(serialize_design_ir(parsed) == canonical);     // stable round-trip
+    REQUIRE(parsed.root.interactive_elements.size() == 4);
+
+    const auto& sw = parsed.root.interactive_elements[0];
+    REQUIRE(sw.kind == InteractiveElementKind::swap);
+    REQUIRE(sw.target_frame == 3);
+
+    const auto& a = parsed.root.interactive_elements[1];
+    REQUIRE(a.kind == InteractiveElementKind::action);
+    REQUIRE(a.action == "octave_up");
+
+    const auto& p = parsed.root.interactive_elements[2];
+    REQUIRE(p.kind == InteractiveElementKind::xy_pad);
+    REQUIRE(p.default_value == 0.25f);
+    REQUIRE(p.default_value_y == 0.8f);
+    REQUIRE(p.svg_patch_d == "M70 110l4 0");
+
+    const auto& l = parsed.root.interactive_elements[3];
+    REQUIRE(l.kind == InteractiveElementKind::value_label);
+    REQUIRE(l.text == "0.0 dB");
+    REQUIRE(l.value_left_align == true);
+}
+
+TEST_CASE("DesignIR diagnoses an unknown interactive kind instead of silent-knobbing",
+          "[view][import][ir-v1][faithful-svg][p1a]") {
+    // P1a acceptance: an unrecognized `kind` string must NOT be silently treated
+    // as a working knob. Forward-compat is preserved (it still parses + renders
+    // as a knob so the import never blanks), and the parser log_warns (the full
+    // ordered ladder + structured import report is the P7 work). Here we pin the
+    // forward-compat fallback and that a sibling known element still parses.
+    const std::string envelope = R"json({
+      "format_version": "2026.05-figma-plugin-v1",
+      "provenance": {"adapter": "figma-plugin", "version": "test"},
+      "root": {
+        "type": "frame", "render_mode": "faithful_svg", "svg_asset_id": "a",
+        "interactive_elements": [
+          {"kind": "wormhole", "x": 0, "y": 0, "w": 10, "h": 10, "source_node_id": "9:9"},
+          {"kind": "fader", "x": 0, "y": 20, "w": 8, "h": 80, "svg_patch_d": "M4 80L4 70"}
+        ]
+      }
+    })json";
+    const auto ir = parse_figma_plugin_json(envelope);
+    REQUIRE(ir.root.interactive_elements.size() == 2);
+    // Unknown kind falls back to knob (render never blanks) — but it is the
+    // diagnosed floor, not a confident classification.
+    CHECK(ir.root.interactive_elements[0].kind == InteractiveElementKind::knob);
+    CHECK(ir.root.interactive_elements[0].source_node_id == "9:9");
+    // The known sibling is unaffected.
+    CHECK(ir.root.interactive_elements[1].kind == InteractiveElementKind::fader);
+}
+
+TEST_CASE("DesignIR round-trips the P7 import-report fields (F0 carrier chain)",
+          "[view][import][ir-v1][faithful-svg][p7]") {
+    // P7-F0: the resolution provenance (rung / confidence / conflicts /
+    // verification) must survive JSON->IR->JSON so a low-confidence or conflicted
+    // control is visible at the host materialize boundary, not just in the TS
+    // importer. (The LOGIC that fills these is P7-F2; this pins the carrier.)
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.render_mode = NodeRenderMode::faithful_svg;
+    ir.root.svg_asset_id = "asset-svg";
+
+    IRInteractiveElement conflicted;   // a control the ladder resolved with a conflict
+    conflicted.kind = InteractiveElementKind::knob;
+    conflicted.cx = 50; conflicted.cy = 50; conflicted.hit_radius = 20;
+    conflicted.resolution_rung = 2;            // resolved via Tier-1 affordance
+    conflicted.confidence_score = 0.55f;       // low confidence
+    conflicted.conflict_signals = {"name=knob but geometry is a wide track+thumb"};
+    conflicted.verification_pass = false;      // render verification flagged it
+    ir.root.interactive_elements.push_back(conflicted);
+
+    IRInteractiveElement clean;        // a confidently-resolved control (defaults)
+    clean.kind = InteractiveElementKind::fader;
+    clean.x = 10; clean.y = 10; clean.w = 8; clean.h = 80;
+    ir.root.interactive_elements.push_back(clean);
+
+    const auto canonical = serialize_design_ir(ir);
+    const auto parsed = parse_design_ir_json(canonical);
+    REQUIRE(serialize_design_ir(parsed) == canonical);     // stable round-trip
+    REQUIRE(parsed.root.interactive_elements.size() == 2);
+
+    const auto& c = parsed.root.interactive_elements[0];
+    REQUIRE(c.resolution_rung == 2);
+    REQUIRE(c.confidence_score == 0.55f);
+    REQUIRE(c.conflict_signals.size() == 1);
+    REQUIRE(c.conflict_signals[0] == "name=knob but geometry is a wide track+thumb");
+    REQUIRE(c.verification_pass == false);
+
+    // Defaults are lean: a clean control emits none of the report fields and
+    // parses back to the confident defaults.
+    const auto& k = parsed.root.interactive_elements[1];
+    REQUIRE(k.resolution_rung == 0);
+    REQUIRE(k.confidence_score == 1.0f);
+    REQUIRE(k.conflict_signals.empty());
+    REQUIRE(k.verification_pass == true);
+    // The clean element serialized none of the report keys (lean default).
+    CHECK(canonical.find("confidence_score") != std::string::npos);  // only the conflicted one
+    CHECK(canonical.find("resolution_rung\":0") == std::string::npos);
+}
+
+TEST_CASE("DesignIR round-trips a custom (Tier-3) interactive element",
+          "[view][import][ir-v1][faithful-svg][p7]") {
+    // P7 Tier-3: a registered-control element carries factory_id + opaque props
+    // through serialize -> parse -> serialize so the materializer can look up the
+    // factory. NOT collapsed to knob.
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.render_mode = NodeRenderMode::faithful_svg;
+    ir.root.svg_asset_id = "asset-svg";
+
+    IRInteractiveElement c;
+    c.kind = InteractiveElementKind::custom;
+    c.x = 10; c.y = 10; c.w = 60; c.h = 40;
+    c.factory_id = "acme.spinner";
+    c.custom_props = "{\"min\":0,\"max\":11}";
+    ir.root.interactive_elements.push_back(c);
+
+    const auto canonical = serialize_design_ir(ir);
+    const auto parsed = parse_design_ir_json(canonical);
+    REQUIRE(serialize_design_ir(parsed) == canonical);
+    REQUIRE(parsed.root.interactive_elements.size() == 1);
+    const auto& p = parsed.root.interactive_elements[0];
+    REQUIRE(p.kind == InteractiveElementKind::custom);
+    REQUIRE(p.factory_id == "acme.spinner");
+    REQUIRE(p.custom_props == "{\"min\":0,\"max\":11}");
+}
+
+TEST_CASE("collect_import_report surfaces per-control resolution provenance (P7)",
+          "[view][import][ir-v1][faithful-svg][p7][report]") {
+    // P7 import report: walk the IR's interactive elements (recursively) and
+    // surface rung/confidence/conflicts/verification so a low-confidence or
+    // conflicted control is SEEN — with a CI-gateable summary.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.render_mode = NodeRenderMode::faithful_svg;
+
+    IRInteractiveElement clean;             // confident knob
+    clean.kind = InteractiveElementKind::knob;
+    clean.source_node_id = "1:1";
+    ir.root.interactive_elements.push_back(clean);
+
+    IRInteractiveElement conflicted;        // flagged: name/geometry conflict
+    conflicted.kind = InteractiveElementKind::knob;
+    conflicted.source_node_id = "1:2";
+    conflicted.resolution_rung = 2;
+    conflicted.confidence_score = 0.4f;
+    conflicted.conflict_signals = {"resolved kind knob expects square but geometry is stretched"};
+    conflicted.verification_pass = false;
+    ir.root.interactive_elements.push_back(conflicted);
+
+    // A nested child carrying an inert (rung 5) control — the recursion must find it.
+    IRNode child;
+    child.type = "frame";
+    IRInteractiveElement inert;
+    inert.kind = InteractiveElementKind::knob;
+    inert.source_node_id = "2:1";
+    inert.resolution_rung = 5;              // inert (warn) rung
+    inert.confidence_score = 0.2f;
+    child.interactive_elements.push_back(inert);
+    ir.root.children.push_back(child);
+
+    const auto report = collect_import_report(ir.root);  // default threshold 0.6
+    REQUIRE(report.controls.size() == 3);
+    REQUIRE(report.conflicted == 1);
+    REQUIRE(report.low_confidence == 2);   // 0.4 and 0.2 are below 0.6
+    REQUIRE(report.unresolved == 1);       // the rung-5 inert control
+    REQUIRE(report.ok() == false);         // conflicts + unresolved → CI gate fails
+
+    // JSON is well-formed and carries the summary + a conflict.
+    const auto json = import_report_to_json(report);
+    REQUIRE(json.find("\"total\":3") != std::string::npos);
+    REQUIRE(json.find("\"conflicted\":1") != std::string::npos);
+    REQUIRE(json.find("\"ok\":false") != std::string::npos);
+    REQUIRE(json.find("expects square but geometry is stretched") != std::string::npos);
+
+    // A fully-clean import passes the gate.
+    DesignIR clean_ir;
+    clean_ir.root.type = "frame";
+    IRInteractiveElement ok_el;
+    ok_el.kind = InteractiveElementKind::fader;
+    ok_el.source_node_id = "3:1";
+    clean_ir.root.interactive_elements.push_back(ok_el);
+    const auto clean_report = collect_import_report(clean_ir.root);
+    REQUIRE(clean_report.ok() == true);
+    REQUIRE(clean_report.conflicted == 0);
+}
+
+TEST_CASE("apply_placement_verification flags degenerate + out-of-frame overlays (P7)",
+          "[view][import][ir-v1][faithful-svg][p7][report]") {
+    // P7 render-placement verification (structural): an overlay with no extent,
+    // or one that falls entirely outside the frame, can't render where it claims
+    // — flag it (verification_pass=false + a conflict) so the report/gate sees it.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.render_mode = NodeRenderMode::faithful_svg;
+    ir.root.style.width = 200.0f;     // frame region [0,0,200,100]
+    ir.root.style.height = 100.0f;
+
+    IRInteractiveElement good;        // a normal in-frame dropdown
+    good.kind = InteractiveElementKind::dropdown;
+    good.x = 10; good.y = 10; good.w = 80; good.h = 24; good.source_node_id = "1:1";
+    ir.root.interactive_elements.push_back(good);
+
+    IRInteractiveElement degenerate;  // zero-area box, no hit radius → can't render
+    degenerate.kind = InteractiveElementKind::text_field;
+    degenerate.x = 5; degenerate.y = 5; degenerate.w = 0; degenerate.h = 0;
+    degenerate.source_node_id = "1:2";
+    ir.root.interactive_elements.push_back(degenerate);
+
+    IRInteractiveElement off;         // entirely off to the right of the frame
+    off.kind = InteractiveElementKind::knob;
+    off.cx = 400; off.cy = 50; off.hit_radius = 10; off.source_node_id = "1:3";
+    ir.root.interactive_elements.push_back(off);
+
+    const int flagged = apply_placement_verification(ir.root, 200.0f, 100.0f);
+    REQUIRE(flagged == 2);
+    CHECK(ir.root.interactive_elements[0].verification_pass == true);   // good
+    CHECK(ir.root.interactive_elements[1].verification_pass == false);  // degenerate
+    CHECK(ir.root.interactive_elements[2].verification_pass == false);  // off-frame
+    CHECK(ir.root.interactive_elements[1].conflict_signals.size() == 1);
+    CHECK(ir.root.interactive_elements[2].conflict_signals[0].find("outside the frame")
+          != std::string::npos);
+
+    // The report then surfaces them and the gate would fail.
+    const auto report = collect_import_report(ir.root);
+    REQUIRE(report.controls.size() == 3);
+    REQUIRE(report.conflicted == 2);
+    REQUIRE(report.ok() == false);
+
+    // Unknown frame size (0) skips the bounds check but still catches degenerates.
+    DesignIR ir2;
+    ir2.root.type = "frame";
+    IRInteractiveElement off2;        // off-frame, but frame size unknown → not flagged
+    off2.kind = InteractiveElementKind::knob;
+    off2.cx = 400; off2.cy = 50; off2.hit_radius = 10;
+    ir2.root.interactive_elements.push_back(off2);
+    REQUIRE(apply_placement_verification(ir2.root, 0.0f, 0.0f) == 0);  // bounds unknown
+}
+
 TEST_CASE("DesignIR serialization preserves parsed envelope version by default",
           "[view][import][ir-v1]") {
     auto parsed = parse_design_ir_json(R"json({

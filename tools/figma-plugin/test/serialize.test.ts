@@ -174,6 +174,9 @@ function validate(value: any, sch: any, root: any, path: string, errors: string[
   if (sch.enum && !sch.enum.includes(value)) {
     errors.push(`${path}: value ${JSON.stringify(value)} not in enum ${JSON.stringify(sch.enum)}`);
   }
+  if ("const" in sch && value !== sch.const) {
+    errors.push(`${path}: value ${JSON.stringify(value)} !== const ${JSON.stringify(sch.const)}`);
+  }
   if (matchesType(value, "object") && value !== null) {
     if (Array.isArray(sch.required)) {
       for (const r of sch.required) {
@@ -193,6 +196,21 @@ function validate(value: any, sch: any, root: any, path: string, errors: string[
   }
   if (sch.type === "array" && Array.isArray(value) && sch.items) {
     value.forEach((el: any, i: number) => validate(el, sch.items, root, `${path}[${i}]`, errors));
+  }
+  // allOf — every subschema must hold (used for the interactive_element
+  // per-kind required-field segmentation).
+  if (Array.isArray(sch.allOf)) {
+    for (const sub of sch.allOf) validate(value, sub, root, path, errors);
+  }
+  // if/then/else — when `if` validates clean, apply `then`; otherwise `else`.
+  if (sch.if) {
+    const condErrors: string[] = [];
+    validate(value, sch.if, root, path, condErrors);
+    if (condErrors.length === 0) {
+      if (sch.then) validate(value, sch.then, root, path, errors);
+    } else if (sch.else) {
+      validate(value, sch.else, root, path, errors);
+    }
   }
 }
 
@@ -219,6 +237,80 @@ test("serialized knob validates against figma-plugin-export-v1 schema", () => {
   const nodeErrors: string[] = [];
   validate(rootOf(out), (schema as any).$defs.node, schema as any, "root", nodeErrors);
   assert.deepEqual(nodeErrors, [], `node schema violations:\n${nodeErrors.join("\n")}`);
+});
+
+// ---------------------------------------------------------------------------
+// P1a — the interactive_element schema must accept every kind the producers
+// already emit (the pre-existing drift: a knob-only enum + additionalProperties
+// :false rejected the overlay overlays that faithful-vector.ts / figma_rest_
+// export.py emit) PLUS the newly-added fader/toggle. Validates element objects
+// directly against $defs.interactive_element, including the per-kind required-
+// field segmentation (knob → cx/cy/hit_radius; overlays → x/y/w/h).
+// ---------------------------------------------------------------------------
+
+function ieErrors(el: any): string[] {
+  const errors: string[] = [];
+  validate(el, (schema as any).$defs.interactive_element, schema as any, "ie", errors);
+  return errors;
+}
+
+test("interactive_element schema accepts every producer-emitted kind (P1a)", () => {
+  const knob = { kind: "knob", cx: 50, cy: 50, hit_radius: 22, svg_patch_d: "M50 38L50 30", default_value: 0.5, source_node_id: "1:1" };
+  const fader = { kind: "fader", x: 10, y: 10, w: 8, h: 80, svg_patch_d: "M14 80L14 70", default_value: 0.3, cx: 14, cy: 75, source_node_id: "1:2" };
+  const toggle = { kind: "toggle", x: 10, y: 10, w: 40, h: 20, default_value: 1, flash: true, source_node_id: "1:3" };
+  const switchEl = { kind: "toggle", x: 10, y: 10, w: 40, h: 20, svg_patch_d: "M14 20a3 3 0 106 0", cx: 17, cy: 20, default_value: 0, source_node_id: "1:4" };
+  const dropdown = { kind: "dropdown", x: 0, y: 0, w: 60, h: 20, options: ["Sine"], selected_index: 0, source_node_id: "1:5" };
+  const textField = { kind: "text_field", x: 0, y: 0, w: 80, h: 16, placeholder: "Search", bg_color: "#1c1d1d", source_node_id: "1:6" };
+  const tabGroup = { kind: "tab_group", x: 0, y: 0, w: 120, h: 24, options: ["A", "B"], selected_index: 1, source_node_id: "1:7" };
+  const stepper = { kind: "stepper", x: 0, y: 0, w: 90, h: 20, options: ["Preset 1"], selected_index: 0, source_node_id: "1:8" };
+  const swap = { kind: "swap", x: 0, y: 0, w: 60, h: 24, target_frame: 2, source_node_id: "1:9" };
+  const action = { kind: "action", x: 0, y: 0, w: 30, h: 24, action: "octave_up", source_node_id: "1:10" };
+  const xyPad = { kind: "xy_pad", x: 0, y: 0, w: 100, h: 100, default_value: 0.3, default_value_y: 0.7, source_node_id: "1:11" };
+  const valueLabel = { kind: "value_label", x: 0, y: 0, w: 80, h: 16, text: "-6.0 dB", value_left_align: true, source_node_id: "1:12" };
+  const custom = { kind: "custom", x: 0, y: 0, w: 60, h: 40, factory_id: "acme.spinner", custom_props: "{\"max\":11}", source_node_id: "1:13" };
+
+  for (const el of [knob, fader, toggle, switchEl, dropdown, textField, tabGroup, stepper, swap, action, xyPad, valueLabel, custom]) {
+    assert.deepEqual(ieErrors(el), [], `kind '${el.kind}' should validate but didn't`);
+  }
+});
+
+test("interactive_element schema requires factory_id for a custom control (P7 Tier-3)", () => {
+  // A custom control with no factory_id can't be built — the schema must reject it.
+  const errs = ieErrors({ kind: "custom", x: 0, y: 0, w: 60, h: 40 });
+  assert.ok(errs.some((e) => e.includes("'factory_id'")),
+    `custom must require factory_id, got:\n${errs.join("\n")}`);
+});
+
+test("interactive_element schema accepts the P7 import-report fields (F0)", () => {
+  // A control carrying full resolution provenance validates against the schema.
+  const conflicted = {
+    kind: "knob", cx: 50, cy: 50, hit_radius: 20,
+    resolution_rung: 2, confidence_score: 0.55,
+    conflict_signals: ["name=knob but geometry is a wide track+thumb"],
+    verification_pass: false, source_node_id: "9:9",
+  };
+  assert.deepEqual(ieErrors(conflicted), [], "report-bearing element should validate");
+  // conflict_signals must be an array of strings — a bare string is rejected.
+  const bad = { kind: "knob", cx: 0, cy: 0, hit_radius: 1, conflict_signals: "oops" };
+  assert.ok(ieErrors(bad).some((e) => e.includes("expected type array")),
+    "conflict_signals must be an array");
+});
+
+test("interactive_element schema rejects an unknown kind (P1a)", () => {
+  const errs = ieErrors({ kind: "wormhole", x: 0, y: 0, w: 10, h: 10 });
+  assert.ok(errs.some((e) => e.includes("not in enum")), `expected enum rejection, got:\n${errs.join("\n")}`);
+});
+
+test("interactive_element schema enforces per-kind required fields (P1a)", () => {
+  // A knob missing its cx/cy/hit_radius fails (the knob allOf branch).
+  const knobMissing = ieErrors({ kind: "knob" });
+  assert.ok(knobMissing.some((e) => e.includes("'cx'")), `knob should require cx, got:\n${knobMissing.join("\n")}`);
+  // An overlay kind missing its x/y/w/h box fails (the overlay allOf branch).
+  const ddMissing = ieErrors({ kind: "dropdown", options: ["x"] });
+  assert.ok(ddMissing.some((e) => e.includes("'x'")), `dropdown should require x, got:\n${ddMissing.join("\n")}`);
+  // additionalProperties:false still bites a typo'd field.
+  const typo = ieErrors({ kind: "toggle", x: 0, y: 0, w: 10, h: 10, wobble: 3 });
+  assert.ok(typo.some((e) => e.includes("additionalProperties")), `expected additionalProperties rejection, got:\n${typo.join("\n")}`);
 });
 
 // ---------------------------------------------------------------------------

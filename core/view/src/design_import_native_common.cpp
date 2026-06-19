@@ -990,6 +990,10 @@ std::vector<DesignFrameElement> to_frame_elements(
     for (const auto& e : elements) {
         DesignFrameElement el;
         switch (e.kind) {
+            case InteractiveElementKind::fader:
+                el.kind = DesignFrameElement::Kind::fader; break;
+            case InteractiveElementKind::toggle:
+                el.kind = DesignFrameElement::Kind::toggle; break;
             case InteractiveElementKind::dropdown:
                 el.kind = DesignFrameElement::Kind::dropdown; break;
             case InteractiveElementKind::text_field:
@@ -998,6 +1002,16 @@ std::vector<DesignFrameElement> to_frame_elements(
                 el.kind = DesignFrameElement::Kind::tab_group; break;
             case InteractiveElementKind::stepper:
                 el.kind = DesignFrameElement::Kind::stepper; break;
+            case InteractiveElementKind::swap:
+                el.kind = DesignFrameElement::Kind::swap; break;
+            case InteractiveElementKind::action:
+                el.kind = DesignFrameElement::Kind::action; break;
+            case InteractiveElementKind::xy_pad:
+                el.kind = DesignFrameElement::Kind::xy_pad; break;
+            case InteractiveElementKind::value_label:
+                el.kind = DesignFrameElement::Kind::value_label; break;
+            case InteractiveElementKind::custom:
+                el.kind = DesignFrameElement::Kind::custom; break;
             case InteractiveElementKind::knob:
                 el.kind = DesignFrameElement::Kind::knob; break;
         }
@@ -1007,12 +1021,22 @@ std::vector<DesignFrameElement> to_frame_elements(
         el.hit_radius = e.hit_radius;
         el.needle_d = e.svg_patch_d;
         el.value = e.default_value;
+        el.flash = e.flash;  // toggle: press-flash command vs sticky flip
         // overlay-control data (dropdown / text_field / tab_group)
         el.x = e.x; el.y = e.y; el.w = e.w; el.h = e.h;
         el.placeholder = e.placeholder;
         el.options = e.options;
         el.selected_index = e.selected_index;
         el.bg_color = e.bg_color;
+        // swap / action / xy_pad / value_label data
+        el.target_frame = e.target_frame;
+        el.action = e.action;
+        el.text = e.text;
+        el.value_left_align = e.value_left_align;
+        el.value_y = e.default_value_y;
+        // custom (P7 Tier-3) — the factory id + opaque props.
+        el.factory_id = e.factory_id;
+        el.custom_props = e.custom_props;
         // Carry the design-source node id to the live element so the inspector's
         // Wiring lens can map a control back to its Figma node.
         if (e.source_node_id) el.source_node_id = *e.source_node_id;
@@ -1043,6 +1067,25 @@ std::unique_ptr<View> make_faithful_svg_frame(const IRNode& node,
             node,
             asset_id.empty() ? std::optional<std::string>("svg_asset_id") : std::nullopt));
         return nullptr;
+    }
+    // P7 Tier-3: a custom control whose factory isn't registered renders inert
+    // (the baked SVG underneath still shows). Diagnose it so the gap is SEEN and
+    // never becomes a silent knob.
+    for (const auto& ie : node.interactive_elements) {
+        if (ie.kind != InteractiveElementKind::custom) continue;
+        if (ie.factory_id.empty() || !has_design_control_factory(ie.factory_id)) {
+            diagnostics.push_back(diagnostic(
+                ImportDiagnosticSeverity::warning,
+                ImportDiagnosticKind::unsupported_property,
+                "native-materialize-custom-factory-unregistered",
+                std::string(path),
+                ie.factory_id.empty()
+                    ? "custom interactive element has no factory_id (renders inert)"
+                    : "custom interactive element factory '" + ie.factory_id +
+                          "' is not registered (renders inert)",
+                node,
+                std::nullopt));
+        }
     }
     auto frame = std::make_unique<DesignFrameView>(std::move(svg),
                                                    to_frame_elements(node.interactive_elements));

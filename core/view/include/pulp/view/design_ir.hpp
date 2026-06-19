@@ -299,12 +299,20 @@ enum class NodeRenderMode {
 // Two materialization mechanisms (see DesignFrameView):
 //   - `knob` is SVG-PATCH: its needle path is rotated in the SVG and re-rendered
 //     (pixel-perfect, uses cx/cy/hit_radius/svg_patch_d/default_value).
+//   - `fader` is SVG-PATCH like `knob` but TRANSLATES its thumb (svg_patch_d) by
+//     value along the track box [x,y,w,h] (orientation follows the track shape).
+//   - `toggle` is a click-to-flip control over the box [x,y,w,h]; with
+//     svg_patch_d set it is a SWITCH whose moving dot is that path.
 //   - `dropdown` / `text_field` / `tab_group` / `stepper` are NATIVE-OVERLAY: an
 //     opaque child widget (ComboBox / TextEditor / tab group / < > stepper) is
 //     positioned over the element's `rect` and replaces that baked SVG region
 //     with a live control.
+// Every value here maps 1:1 to a DesignFrameElement::Kind in to_frame_elements()
+// (design_import_native_common.cpp); the runtime already backs all of them.
 enum class InteractiveElementKind {
     knob,
+    fader,
+    toggle,
     dropdown,
     text_field,
     tab_group,
@@ -313,6 +321,26 @@ enum class InteractiveElementKind {
     // pair, not a down-chevron). Uses `options` + `selected_index` like a
     // dropdown, but steps through them in place instead of opening a popup.
     stepper,
+    // `swap` is a swap-link button: clicking its rect activates `target_frame`
+    // (a mode/page switch the design wires up).
+    swap,
+    // `action` is a command button: clicking its rect fires the named `action`
+    // (e.g. "octave_up") — the consumer maps the id to its own state. It does not
+    // light, emit notes, or swap frames.
+    action,
+    // `xy_pad` is SVG-patch like `fader` but 2D: dragging in its rect [x,y,w,h]
+    // moves the puck (svg_patch_d). `default_value` is the X (0→left, 1→right),
+    // `default_value_y` the Y (0→top, 1→bottom).
+    xy_pad,
+    // `value_label` is a live read-only text overlay painted over its rect (the
+    // design's baked readout). `text` is the initial string; `value_left_align`
+    // left-aligns it (for a "LABEL <value>" readout that grows rightward).
+    value_label,
+    // `custom` is a registered native control (P7 Tier-3): the materializer maps
+    // it to DesignFrameElement::Kind::custom, whose overlay is built by the
+    // factory registered under `factory_id` (+ opaque `custom_props`). Unmapped
+    // factory → inert render + an import diagnostic (never a silent knob).
+    custom,
 };
 
 // One source-identified interactive element overlaid on a faithful_svg render.
@@ -326,9 +354,14 @@ struct IRInteractiveElement {
     float cy = 0.0f;
     float hit_radius = 0.0f;         ///< click-target radius, SVG coords
     /// Knob: the `d` of its needle path in the SVG (the patch target a drag
-    /// rotates around (cx, cy)).
+    /// rotates around (cx, cy)). fader/switch reuse this as the translated thumb.
     std::string svg_patch_d;
     float default_value = 0.5f;      ///< 0..1
+
+    /// toggle only: press-flash command button (sample next/prev/random, dice) —
+    /// lights on press, clears on release, instead of the sticky on/off flip.
+    /// Maps 1:1 to DesignFrameElement::flash. Defaults false (sticky toggle).
+    bool flash = false;
 
     // ── overlay controls (dropdown / text_field / tab_group) ─────────────
     /// Element bounding box in SVG coords — where the native overlay widget is
@@ -349,12 +382,58 @@ struct IRInteractiveElement {
     /// the default dark field color.
     std::string bg_color;
 
+    // ── swap / action / xy_pad / value_label ─────────────────────────────
+    /// swap only: the frame index to activate when clicked (-1 = unset).
+    /// Maps 1:1 to DesignFrameElement::target_frame.
+    int target_frame = -1;
+    /// action only: the command id fired on click (e.g. "octave_up"). Empty =
+    /// unset. Maps 1:1 to DesignFrameElement::action.
+    std::string action;
+    /// value_label only: the initial readout string painted over the rect.
+    /// Maps 1:1 to DesignFrameElement::text.
+    std::string text;
+    /// value_label only: left-align the readout (for a "LABEL <value>" overlay
+    /// whose value grows rightward). Maps 1:1 to DesignFrameElement::value_left_align.
+    bool value_left_align = false;
+    /// xy_pad only: initial normalized Y (0=top, 1=bottom). The X axis reuses
+    /// `default_value`. Maps to DesignFrameElement::value_y.
+    float default_value_y = 0.5f;
+
     /// Human-readable name for the control, taken from the design's own caption
     /// text (e.g. the "DEPTH" label under a knob). Empty when the importer found
     /// no confident caption — consumers then fall back to the binding key. This is
     /// the name a host surfaces for the generated parameter (embed ABI v5
     /// PulpEmbedParamInfo.name); unit/range remain importer follow-ups.
     std::string label;
+
+    // ── P7 import report (resolution provenance) ─────────────────────────
+    // Carried from the importer (where all three signals — geometry/affordance,
+    // name/token, component identity — exist) THROUGH to the host materialize
+    // boundary, so a low-confidence or conflicted control is SEEN ("this might be
+    // wrong") instead of discovered in the DAW. The resolution LOGIC that fills
+    // these lives in the importer (P7-F2); this is the F0 carrier chain.
+    /// Which ladder rung resolved this control's interaction. 0 = not run through
+    /// the P7 ladder (legacy/unset); 1 = explicit identity (component/Code-Connect);
+    /// 2 = Tier-1 affordance-inferred primitive; 3 = name/token (whole-word);
+    /// 4 = registered custom factory; 5 = inert render + diagnostic (the warn).
+    int resolution_rung = 0;
+    /// Confidence the resolved kind is correct, 0..1. 1.0 = unset/legacy path.
+    float confidence_score = 1.0f;
+    /// Cross-signal conflicts detected at import (e.g. "name=knob but geometry is
+    /// a wide track+thumb"). Empty = no conflict. A non-empty list means the
+    /// control still materializes with the best candidate but is flagged for review.
+    std::vector<std::string> conflict_signals;
+    /// Whether render-level verification (overlay covers its node region, type
+    /// doesn't visually contradict the skin) passed. true = passed/unchecked.
+    bool verification_pass = true;
+
+    // ── custom (P7 Tier-3 registered control) ────────────────────────────
+    /// kind==custom only: the id the native overlay factory is registered under
+    /// (register_design_control_factory). Maps 1:1 to DesignFrameElement::factory_id.
+    std::string factory_id;
+    /// kind==custom only: opaque props handed to the factory (typically JSON).
+    /// Maps 1:1 to DesignFrameElement::custom_props.
+    std::string custom_props;
 
     std::optional<std::string> source_node_id;  ///< Figma node id (binding key)
 };

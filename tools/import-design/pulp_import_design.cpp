@@ -908,6 +908,9 @@ static void print_usage() {
     std::cout << "                    finds a skewed / unverifiable sprite (always warns)\n";
     std::cout << "  --reference <png> Compare render against a reference screenshot\n";
     std::cout << "  --diff <png>      Save visual diff image\n";
+    std::cout << "  --import-report <path>  Write the per-control resolution report (JSON) — rung,\n";
+    std::cout << "                    confidence, conflicts, verification — for review or a CI gate\n";
+    std::cout << "  --fail-on-unresolved    Exit nonzero (2) when a control is conflicted or inert\n";
     std::cout << "  --render-size WxH Render dimensions (default: 340x280)\n";
     std::cout << "  --bridge-output <path>  Path to write bridge handler scaffold (default: bridge_handlers.cpp,\n";
     std::cout << "                          only emitted for --from claude)\n";
@@ -1652,6 +1655,8 @@ int main(int argc, char* argv[]) {
     std::string export_format = "w3c";
     std::string reference_image;     // --reference: PNG of source design for validation
     std::string diff_output;         // --diff: output path for visual diff image
+    std::string import_report_path;  // --import-report: write the P7 resolution report JSON here
+    bool fail_on_unresolved = false; // --fail-on-unresolved: nonzero exit if a control is conflicted/inert
     bool dry_run = false;
     bool include_tokens = true;
     bool include_comments = true;
@@ -1758,6 +1763,10 @@ int main(int argc, char* argv[]) {
             validate = true;
         } else if (std::strcmp(argv[i], "--diff") == 0 && i + 1 < argc) {
             diff_output = argv[++i];
+        } else if (std::strcmp(argv[i], "--import-report") == 0 && i + 1 < argc) {
+            import_report_path = argv[++i];
+        } else if (std::strcmp(argv[i], "--fail-on-unresolved") == 0) {
+            fail_on_unresolved = true;
         } else if (std::strcmp(argv[i], "--render-size") == 0 && i + 1 < argc) {
             // Parse WxH
             std::string sz = argv[++i];
@@ -2405,6 +2414,27 @@ int main(int argc, char* argv[]) {
     if (!frame_name.empty()) ir.root.attributes["frame"] = frame_name;
     if (!screen_name.empty()) ir.root.attributes["screen"] = screen_name;
 
+    // P7 import report — surface every interactive control's resolution provenance
+    // (rung / confidence / conflicts / verification) for EVERY output mode (codegen
+    // and DesignIR-v1 alike), so a low-confidence or conflicted control is SEEN at
+    // import time. Printed to stderr (stdout may carry dry-run JSON);
+    // --import-report writes the machine-readable JSON a CI gate can threshold;
+    // --fail-on-unresolved makes a conflicted/inert control a nonzero exit.
+    // P7 render-placement verification (structural): flag overlays that can't
+    // render (degenerate extent) or fall entirely outside the frame, BEFORE the
+    // report collects verification_pass — so the report and the gate see it.
+    apply_placement_verification(ir.root,
+                                 ir.root.style.width.value_or(0.0f),
+                                 ir.root.style.height.value_or(0.0f));
+    const auto import_report = collect_import_report(ir.root);
+    if (!import_report.controls.empty())
+        std::cerr << import_report_to_text(import_report);
+    if (!import_report_path.empty() &&
+        !write_file(import_report_path, import_report_to_json(import_report)))
+        std::cerr << "warning: could not write import report to "
+                  << import_report_path << "\n";
+    const int report_exit = (fail_on_unresolved && !import_report.ok()) ? 2 : 0;
+
     if (artifact_emit == ArtifactEmit::ir_json) {
         const auto asset_options = make_asset_options(input_file,
                                                       input_url,
@@ -2419,7 +2449,7 @@ int main(int argc, char* argv[]) {
         const auto ir_json = serialize_design_ir(ir);
         if (dry_run) {
             std::cout << ir_json << "\n";
-            return 0;
+            return report_exit;
         }
         if (!write_file(output_file, ir_json)) return 1;
         if (pulp_zip_keepalive) finalize_pulp_zip_sidecar(*pulp_zip_keepalive);
@@ -2427,7 +2457,7 @@ int main(int argc, char* argv[]) {
                   << ir.asset_manifest.assets.size() << " asset"
                   << (ir.asset_manifest.assets.size() == 1 ? "" : "s")
                   << ")\n";
-        return 0;
+        return report_exit;
     }
 
     if (artifact_emit == ArtifactEmit::cpp) {
@@ -2460,7 +2490,7 @@ int main(int argc, char* argv[]) {
             std::cout << cpp.source;
             std::cout << "\n=== Generated Pulp C++ binding manifest (" << paths.binding_manifest.string() << ") ===\n\n";
             std::cout << cpp.binding_manifest;
-            return 0;
+            return report_exit;   // honor --fail-on-unresolved on the cpp dry-run path
         }
 
         if (!write_files_atomically({
@@ -2480,7 +2510,7 @@ int main(int argc, char* argv[]) {
                   << counts.containers << " containers, " << counts.widgets << " widgets, "
                   << counts.text << " labels, " << ir.asset_manifest.assets.size() << " asset"
                   << (ir.asset_manifest.assets.size() == 1 ? "" : "s") << ")\n";
-        return 0;
+        return report_exit;   // honor --fail-on-unresolved on the cpp write path
     }
 
     if (artifact_emit == ArtifactEmit::swiftui) {
@@ -3267,5 +3297,5 @@ int main(int argc, char* argv[]) {
     // code so callers/harness can tell it apart from a parse/IO error).
     if (pulp_zip_keepalive) finalize_pulp_zip_sidecar(*pulp_zip_keepalive);
     if (fidelity_failed) return 4;
-    return 0;
+    return report_exit;  // 0, or 2 under --fail-on-unresolved with a conflicted/inert control
 }

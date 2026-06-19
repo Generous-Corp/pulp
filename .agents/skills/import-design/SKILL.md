@@ -91,6 +91,67 @@ widgets (a faithful frame needs a JS-bridge primitive that doesn't exist yet),
 and `--validate` still renders the native-materialized output rather than the
 faithful SVG.
 
+**Interactive-overlay kinds the IR carries end-to-end.** The faithful_svg
+`interactive_elements` IR (`InteractiveElementKind` in `design_ir.hpp`) supports
+`knob, fader, toggle, dropdown, text_field, tab_group, stepper, swap, action,
+xy_pad, value_label` — each maps 1:1 in `to_frame_elements()`
+(`design_import_native_common.cpp`) to the `DesignFrameElement::Kind` the runtime
+already backs, and the schema (`figma-plugin-export-v1.json`
+`interactive_element.kind`) accepts exactly that set. The schema segments
+`required` per-kind: `knob` needs `cx/cy/hit_radius`; every other kind needs the
+box `x/y/w/h`. Field map: **fader** translates `svg_patch_d` along the track;
+**toggle** is a click-to-flip rect (a toggle WITH `svg_patch_d` is a switch; with
+`flash` it is a press-flash command button); **swap** carries `target_frame`;
+**action** carries the command id `action`; **xy_pad** adds `default_value_y`
+(Y axis; X reuses `default_value`); **value_label** carries `text` +
+`value_left_align`. When you add a kind, touch the whole chain in one commit —
+schema → `gen-types` (`types.generated.ts`) → producer (`faithful-vector.ts`,
+incl. `detectOverlayControls` if it should auto-detect) → IR enum →
+`design_ir_json.cpp` parse/serialize → `to_frame_elements()` → the
+`design_cpp_codegen.cpp` token switch + field emit — or it silently degrades.
+`detectOverlayControls` auto-emits swap/action/xy_pad/value_label from explicit
+whole-word node names (run AFTER the tuned dropdown/stepper/tab_group/text_field
+detectors so those always win); the richer node-tree signals (prototype reactions
+for swap, value patterns for value_label) land with P2's unified resolver. An
+**unknown** kind string no longer silent-knobs: `interactive_kind_from_id`
+reports it unrecognized and the parser emits a `log_warn` (the full ordered
+resolution ladder + import report is the P7 work).
+
+**Custom controls (P7 Tier-3) — the `name→View` factory registry.** A genuinely
+novel control resolves to `kind=custom`, which carries a `factory_id` (+ opaque
+`custom_props`, typically JSON Pulp doesn't parse). The runtime
+`register_design_control_factory(id, factory)` (`design_frame_view.hpp`) maps an
+id to a `std::function<unique_ptr<View>(const DesignControlContext&)>`;
+`DesignFrameView::build_overlays` looks the factory up for a `Kind::custom`
+element and builds the overlay. **UI-thread-only** (registration at host startup,
+lookup at overlay build) — the registry has no locking by contract. If no factory
+is registered the element renders INERT (the baked SVG still shows) and
+`make_faithful_svg_frame` emits a `native-materialize-custom-factory-unregistered`
+diagnostic — a custom control never blanks or silent-knobs. Schema requires
+`factory_id` for `kind=custom`. This is the piece a shared control PACKAGE (P8)
+registers into. Beyond the usual atomic chain, the two exhaustive
+`DesignFrameElement::Kind` switches in `design_frame_view.cpp`
+(`element_value`/`set_element_value`) need the `custom` case, and the inspector's
+`frame_element_kind_name` switch in `inspect/src/inspector_window.cpp`.
+
+**Import report (P7).** `collect_import_report(ir.root)` (`design_import.hpp`)
+walks the IR's interactive elements and surfaces each control's resolution
+provenance — `{source_node_id, kind, resolution_rung, confidence_score,
+conflict_signals, verification_pass}` — plus summary counts (`conflicted` /
+`low_confidence` / `unresolved`) and `ok()`. `pulp import-design` prints the
+human summary (`import_report_to_text`) to STDERR for EVERY output mode (codegen
++ DesignIR-v1), writes the machine-readable JSON (`import_report_to_json`) when
+`--import-report <path>` is given, and `--fail-on-unresolved` makes a conflicted
+or inert control a nonzero (2) exit — the CI gate. So a low-confidence or
+conflicted control is SEEN at import time, never discovered later in the DAW.
+`apply_placement_verification(ir.root, frame_w, frame_h)` runs first (the
+structural half of the render-golden gate): it flags an overlay with no
+renderable extent (zero hit-radius AND zero-area box) or one entirely outside the
+frame region — setting `verification_pass=false` + a conflict so the report/gate
+catch it. Frame size 0 = "unknown" (skips the bounds half, keeps the
+degenerate-extent check). The full PIXEL-level golden diff is the render-path
+follow-up.
+
 **Multi-frame / post-processed components need a DEDICATED re-embed lane —
 `make_catalog_component.py` is single-frame and applies no neutralization.** The
 Musical Typing Keyboard is TWO frames (typing 187:15 / piano 187:349) AND its

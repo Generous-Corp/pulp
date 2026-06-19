@@ -220,3 +220,92 @@ test("detectOverlayControls: finds a search text_field and a tab group", () => {
   assert.deepEqual(tabs[0].options, ["1", "2", "3", "4"]);
   assert.equal(tabs[0].selected_index, 2);  // the filled button
 });
+
+test("detectOverlayControls: emits swap / action / xy_pad / value_label from named nodes (P1b)", () => {
+  const readout = baseNode({
+    figma_type: "TEXT", name: "Cutoff Readout", figma_node_id: "v1", content: "1.2 kHz",
+    absolute_bounds: { x: 10, y: 200, w: 80, h: 16 },
+  });
+  const root = baseNode({
+    figma_type: "FRAME", figma_node_id: "3:42",
+    absolute_bounds: { x: 0, y: 0, w: 1000, h: 600 },
+    children: [
+      child("XY Pad", 20, 20, 120, 120, "xy1", []),
+      child("Swap 2", 200, 20, 60, 24, "sw1", []),
+      child("action:OctaveUp", 300, 20, 30, 24, "ac1", []),  // mixed case id
+      readout,
+    ],
+  });
+  const els = detectOverlayControls(root, [0, 0], [0, 0]);
+
+  const xy = els.find((e) => e.kind === "xy_pad");
+  assert.ok(xy, "xy_pad detected");
+  assert.deepEqual([xy!.x, xy!.y, xy!.w, xy!.h], [20, 20, 120, 120]);
+  assert.equal(xy!.source_node_id, "xy1");
+
+  const swap = els.find((e) => e.kind === "swap");
+  assert.ok(swap, "swap detected");
+  assert.equal(swap!.target_frame, 2);          // trailing number → frame index
+
+  const action = els.find((e) => e.kind === "action");
+  assert.ok(action, "action detected");
+  assert.equal(action!.action, "OctaveUp");      // ORIGINAL-case id from "action:<id>"
+
+  const label = els.find((e) => e.kind === "value_label");
+  assert.ok(label, "value_label detected");
+  assert.equal(label!.text, "1.2 kHz");          // the TEXT node's own characters
+  assert.equal(label!.source_node_id, "v1");
+});
+
+test("detectOverlayControls: P1b name gates do not fire on generic names", () => {
+  // A plain panel with unrelated names must NOT sprout swap/action/xy_pad/
+  // value_label overlays. Crucially a STATIC text layer literally named "Value"
+  // or "Display" must stay static — the gate requires a deliberate readout
+  // marker, not the bare common word.
+  const root = baseNode({
+    figma_type: "FRAME", figma_node_id: "3:42",
+    absolute_bounds: { x: 0, y: 0, w: 1000, h: 600 },
+    children: [
+      child("Deoxygenate", 20, 20, 80, 24, "n1", []),      // contains "xy" but not whole-word
+      child("Transaction Log", 120, 20, 80, 24, "n2", []), // contains "action" substring
+      baseNode({ figma_type: "TEXT", name: "Value", content: "5.0",
+                 figma_node_id: "n3", absolute_bounds: { x: 220, y: 20, w: 60, h: 16 } }),
+      baseNode({ figma_type: "TEXT", name: "Display", content: "Reverb",
+                 figma_node_id: "n4", absolute_bounds: { x: 300, y: 20, w: 60, h: 16 } }),
+    ],
+  });
+  const els = detectOverlayControls(root, [0, 0], [0, 0]);
+  assert.equal(els.filter((e) =>
+    ["swap", "action", "xy_pad", "value_label"].indexOf(e.kind) !== -1).length, 0);
+});
+
+test("detectOverlayControls: stamps the P7 resolution report on every control (F2)", () => {
+  // A well-shaped xy_pad resolves cleanly; a deliberately mis-shaped one (named
+  // 'XY Pad' but a wide strip) is CAUGHT as a conflict in the live pipeline — the
+  // silent-knob stumble, surfaced.
+  const root = baseNode({
+    figma_type: "FRAME", figma_node_id: "3:42",
+    absolute_bounds: { x: 0, y: 0, w: 1000, h: 600 },
+    children: [
+      child("XY Pad", 20, 20, 120, 120, "good", []),    // genuinely square
+      child("XY Pad", 200, 20, 220, 20, "bad", []),      // named xy_pad but a wide strip
+    ],
+  });
+  const els = detectOverlayControls(root, [0, 0], [0, 0]);
+  const good = els.find((e) => e.source_node_id === "good");
+  const bad = els.find((e) => e.source_node_id === "bad");
+  assert.ok(good && bad, "both xy_pads detected");
+
+  // Clean one: confident, no conflict, resolved by its name token (rung 3).
+  assert.equal(good!.kind, "xy_pad");
+  assert.equal(good!.confidence_score, 1.0);
+  assert.equal(good!.resolution_rung, 3);
+  assert.ok(!good!.conflict_signals || good!.conflict_signals.length === 0);
+
+  // Mis-shaped one: flagged — best candidate still materialized, but recorded.
+  assert.equal(bad!.kind, "xy_pad");
+  assert.ok(bad!.confidence_score! < 1.0, "confidence demoted on the conflict");
+  assert.ok(bad!.conflict_signals && bad!.conflict_signals.length >= 1,
+    "a conflict is recorded for review");
+  assert.equal(bad!.verification_pass, false);
+});
