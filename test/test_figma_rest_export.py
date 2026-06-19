@@ -13,15 +13,16 @@ frx = importlib.util.module_from_spec(spec); spec.loader.exec_module(frx)
 
 class FontCaptureTest(unittest.TestCase):
     def setUp(self):
-        frx.FONT_ASSETS.clear()
+        # P2: fonts accumulate in an explicit ExtractContext, not a module global.
+        self.ctx = frx.ExtractContext()
 
     def test_record_font_dedupes_by_family_style_weight(self):
-        frx._record_font({"type": "TEXT", "style": {"fontFamily": "Clash Grotesk", "fontWeight": 500}})
-        frx._record_font({"type": "TEXT", "style": {"fontFamily": "Clash Grotesk", "fontWeight": 500}})  # dup
-        frx._record_font({"type": "TEXT", "style": {"fontFamily": "Clash Grotesk", "fontWeight": 700}})  # diff weight
-        frx._record_font({"type": "TEXT", "style": {"fontFamily": "Inter", "fontWeight": 400, "italic": True}})
-        frx._record_font({"type": "TEXT", "style": {}})  # no family → ignored
-        out = list(frx.FONT_ASSETS.values())
+        frx._record_font({"type": "TEXT", "style": {"fontFamily": "Clash Grotesk", "fontWeight": 500}}, self.ctx)
+        frx._record_font({"type": "TEXT", "style": {"fontFamily": "Clash Grotesk", "fontWeight": 500}}, self.ctx)  # dup
+        frx._record_font({"type": "TEXT", "style": {"fontFamily": "Clash Grotesk", "fontWeight": 700}}, self.ctx)  # diff weight
+        frx._record_font({"type": "TEXT", "style": {"fontFamily": "Inter", "fontWeight": 400, "italic": True}}, self.ctx)
+        frx._record_font({"type": "TEXT", "style": {}}, self.ctx)  # no family → ignored
+        out = list(self.ctx.fonts.values())
         self.assertEqual(len(out), 3)
         clash = [f for f in out if f["family"] == "Clash Grotesk"]
         self.assertEqual({f["weight"] for f in clash}, {500, 700})
@@ -41,8 +42,8 @@ class FontCaptureTest(unittest.TestCase):
 
 
 class CodexP2FollowupTest(unittest.TestCase):
-    def setUp(self):
-        frx.FONT_ASSETS.clear(); frx.ASSET_IDS.clear(); frx.IMAGE_FILL_REFS.clear()
+    # P2: walk() is now driven via node_tree_to_ir(), which returns (ir, ctx) with
+    # explicit side-effect accumulators — no module globals to clear.
 
     def test_container_named_like_widget_not_promoted(self):
         # Codex #3234: a "Knob Row" frame holding Knob instances must NOT be
@@ -51,14 +52,40 @@ class CodexP2FollowupTest(unittest.TestCase):
                      "absoluteBoundingBox": {"x": 0, "y": 0, "width": 200, "height": 60},
                      "children": [{"type": "INSTANCE", "name": "Knob", "id": "1:2",
                                    "absoluteBoundingBox": {"x": 0, "y": 0, "width": 60, "height": 60}}]}
-        out = frx.walk(container, None, 0)
+        out, _ctx = frx.node_tree_to_ir(container)
         self.assertNotIn("audio_widget", out)        # not promoted
         self.assertTrue(out.get("children"))         # children preserved
         # A leaf knob instance (vector/group visual children) IS promoted.
         leaf = {"type": "INSTANCE", "name": "Knob Small", "id": "2:1",
                 "absoluteBoundingBox": {"x": 0, "y": 0, "width": 28, "height": 41},
                 "children": [{"type": "GROUP", "name": "g"}, {"type": "VECTOR", "name": "v"}]}
-        self.assertEqual(frx.walk(leaf, None, 0).get("audio_widget"), "knob")
+        self.assertEqual(frx.node_tree_to_ir(leaf)[0].get("audio_widget"), "knob")
+
+    def test_node_tree_to_ir_returns_side_effects_explicitly(self):
+        # P2 decomposition: walk()'s three side effects (asset ids, fonts, image
+        # fills) come back on the ExtractContext, not via module globals — and two
+        # independent calls don't leak into each other.
+        tree = {"type": "FRAME", "name": "Panel", "id": "0:1",
+                "absoluteBoundingBox": {"x": 0, "y": 0, "width": 100, "height": 100},
+                "fills": [{"type": "IMAGE", "imageRef": "img-abc"}],
+                "children": [
+                    {"type": "TEXT", "name": "label", "id": "0:2", "characters": "Hi",
+                     "absoluteBoundingBox": {"x": 0, "y": 0, "width": 40, "height": 16},
+                     "style": {"fontFamily": "Inter", "fontWeight": 600}},
+                    {"type": "VECTOR", "name": "icon", "id": "0:3",
+                     "absoluteBoundingBox": {"x": 0, "y": 0, "width": 24, "height": 24}},
+                ]}
+        ir, ctx = frx.node_tree_to_ir(tree)
+        self.assertEqual(ir["type"], "frame")
+        self.assertIn("img-abc", ctx.image_fills)            # IMAGE fill captured
+        self.assertEqual(ctx.asset_ids, ["0:3"])             # vector → PNG asset
+        self.assertEqual([f["family"] for f in ctx.fonts.values()], ["Inter"])
+        # A SECOND walk is independent — no cross-call leakage (the old global bug).
+        ir2, ctx2 = frx.node_tree_to_ir({"type": "FRAME", "name": "Empty", "id": "9:9",
+                                         "absoluteBoundingBox": {"x": 0, "y": 0, "width": 10, "height": 10}})
+        self.assertEqual(ctx2.asset_ids, [])
+        self.assertEqual(ctx2.fonts, {})
+        self.assertEqual(ctx2.image_fills, set())
 
     def test_parse_url_handles_percent_encoded_node_id(self):
         self.assertEqual(frx.parse_url("https://figma.com/design/KEY/x?node-id=3%3A42"), ("KEY", "3:42"))

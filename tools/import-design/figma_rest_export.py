@@ -151,7 +151,7 @@ def map_node_type(t):
 def first_visible(paints):
     return next((p for p in paints if p.get("visible", True) is not False), None)
 
-def extract_style(n):
+def extract_style(n, ctx=None):
     s = {}
     bb = n.get("absoluteBoundingBox")
     if bb:
@@ -174,7 +174,11 @@ def extract_style(n):
                 ih = f.get("imageRef") or f.get("imageHash")
                 if ih:
                     s["background_image"] = f"pending:{ih}"
-                    IMAGE_FILL_REFS.add(ih)  # resolved → real path after the walk
+                    # P2: accumulate into the explicit context (no module global).
+                    # ctx is None only on direct extract_style() calls (unit tests
+                    # that don't exercise image-fill resolution).
+                    if ctx is not None:
+                        ctx.image_fills.add(ih)  # resolved → real path after the walk
             elif t in ("GRADIENT_RADIAL", "GRADIENT_DIAMOND"):
                 g = gradient_radial_css(f)
                 if g: s["background_gradient"] = g
@@ -477,12 +481,22 @@ def extract_layout(n):
         l["width_mode"] = "fixed"; l["height_mode"] = "fixed"
     return l
 
-ASSET_IDS = []  # node ids to export as PNG via /images (filled during walk)
-FONT_ASSETS = {}  # (family, style, weight) -> {family, style, weight} (deduped, fill order)
-IMAGE_FILL_REFS = set()  # Figma imageRefs from IMAGE fills, resolved after the walk
+class ExtractContext:
+    """P2 — explicit accumulators for walk()'s side effects, replacing the old
+    module globals (ASSET_IDS / FONT_ASSETS / IMAGE_FILL_REFS). node_tree_to_ir()
+    creates one, threads it through walk()/extract_style()/_record_font(), and
+    returns it so the caller reads the outputs explicitly instead of reaching into
+    process-global state — the decomposed seam the plan calls for."""
+    __slots__ = ("asset_ids", "fonts", "image_fills")
 
-def _record_font(n):
-    """Collect a text node's font into FONT_ASSETS (deduped by family/style/weight).
+    def __init__(self):
+        self.asset_ids = []      # node ids to export as PNG via /images
+        self.fonts = {}          # (family, style, weight) -> entry (deduped, fill order)
+        self.image_fills = set()  # Figma imageRefs from IMAGE fills, resolved after the walk
+
+
+def _record_font(n, ctx):
+    """Collect a text node's font into ctx.fonts (deduped by family/style/weight).
     Mirrors the plugin's font_family_assets[] (#43a). REST exposes the family +
     weight; the bundled .ttf binary is NOT available via REST, so asset_id is
     omitted — the importer #43b path then keeps the family name (falls back to a
@@ -496,16 +510,26 @@ def _record_font(n):
     italic = bool(st.get("italic"))
     style = "Italic" if italic else "Regular"
     key = (family, style, weight)
-    if key not in FONT_ASSETS:
+    if key not in ctx.fonts:
         entry = {"family": family, "style": style, "weight": weight}
         if italic:
             entry["italic"] = True
-        FONT_ASSETS[key] = entry
+        ctx.fonts[key] = entry
 
-def walk(n, parent, z):
+
+def node_tree_to_ir(root):
+    """Walk a Figma node tree into the Pulp IR, returning (ir_node, ExtractContext)
+    so the side effects (asset ids / fonts / image fills) are EXPLICIT outputs —
+    no module globals. The decomposed seam (P2 'the real refactor')."""
+    ctx = ExtractContext()
+    ir = walk(root, None, 0, ctx)
+    return ir, ctx
+
+
+def walk(n, parent, z, ctx):
     ntype = n.get("type")
     t = map_node_type(ntype)
-    style = extract_style(n)
+    style = extract_style(n, ctx)
     layout = extract_layout(n)
     # Absolute positioning when parent isn't auto-layout (extract.ts:158-188)
     if parent is not None and not is_auto_layout(parent):
@@ -518,7 +542,7 @@ def walk(n, parent, z):
     if ntype == "TEXT":
         out["content"] = n.get("characters", "")
         extract_text_style(n, style)
-        _record_font(n)
+        _record_font(n, ctx)
         runs = extract_text_runs(n)
         if runs:
             out["runs"] = runs
@@ -542,10 +566,10 @@ def walk(n, parent, z):
     # Asset capture (extract.ts:268-322). Vector-like nodes → PNG asset_ref.
     # Pure-vector-illustration frames → whole-frame PNG, drop children.
     elif is_vector_like(ntype) and not tiny:
-        out["type"] = "image"; out["asset_ref"] = n["id"]; ASSET_IDS.append(n["id"]); captured = True
+        out["type"] = "image"; out["asset_ref"] = n["id"]; ctx.asset_ids.append(n["id"]); captured = True
     elif (ntype in ("FRAME", "GROUP") and n.get("children")
           and is_pure_vector_illustration(n)):
-        out["type"] = "image"; out["asset_ref"] = n["id"]; ASSET_IDS.append(n["id"]); captured = True
+        out["type"] = "image"; out["asset_ref"] = n["id"]; ctx.asset_ids.append(n["id"]); captured = True
 
     style = {k: v for k, v in style.items() if v not in (None, "")}
     layout = {k: v for k, v in layout.items() if v is not None}
@@ -557,7 +581,7 @@ def walk(n, parent, z):
     if not captured:  # illustration frames drop their children (rasterized whole)
         kids = [c for c in n.get("children", []) if c.get("visible", True) is not False]
         if kids:
-            out["children"] = [walk(c, n, i) for i, c in enumerate(kids)]
+            out["children"] = [walk(c, n, i, ctx) for i, c in enumerate(kids)]
     return out
 
 def export_assets(file_key, ids, token, out_dir):
@@ -1174,22 +1198,22 @@ def main():
 
     doc = json.load(open(args.node_json)) if args.node_json else fetch_nodes(file_key, node_id, token)
     root = doc["nodes"][node_id]["document"]
-    root_node = walk(root, None, 0)
+    root_node, ctx = node_tree_to_ir(root)
 
     out_dir = os.path.dirname(os.path.abspath(args.out))
     asset_manifest_entries = []
-    if not args.no_assets and token and ASSET_IDS:
-        print(f"exporting {len(ASSET_IDS)} assets via /images ...")
-        asset_manifest_entries = export_assets(file_key, ASSET_IDS, token, out_dir)
+    if not args.no_assets and token and ctx.asset_ids:
+        print(f"exporting {len(ctx.asset_ids)} assets via /images ...")
+        asset_manifest_entries = export_assets(file_key, ctx.asset_ids, token, out_dir)
         print(f"  captured {len(asset_manifest_entries)} PNGs")
     # Resolve IMAGE-fill imageRefs → real assets, rewrite the dangling pending:
     # markers (Codex #3225 P2). Even with --no-assets/--node-json we strip the
     # pending: placeholders so the envelope never carries a dead reference.
-    if IMAGE_FILL_REFS:
+    if ctx.image_fills:
         ref_to_rel = {}
         if not args.no_assets and token:
-            print(f"resolving {len(IMAGE_FILL_REFS)} image fill(s) ...")
-            fill_entries, ref_to_rel = resolve_image_fills(file_key, IMAGE_FILL_REFS, token, out_dir)
+            print(f"resolving {len(ctx.image_fills)} image fill(s) ...")
+            fill_entries, ref_to_rel = resolve_image_fills(file_key, ctx.image_fills, token, out_dir)
             asset_manifest_entries += fill_entries
             print(f"  resolved {len(fill_entries)} image fill(s)")
         _rewrite_image_fills(root_node, ref_to_rel)
@@ -1226,14 +1250,14 @@ def main():
         "library_manifest": None,
         "tokens": {"colors": {}, "dimensions": {}, "strings": {}},
         "asset_manifest": {"version": 1, "assets": asset_manifest_entries},
-        "font_family_assets": list(FONT_ASSETS.values()),
+        "font_family_assets": list(ctx.fonts.values()),
         "diagnostics": [],
         "root": root_node,
     }
     json.dump(envelope, open(args.out, "w"), indent=1)
-    if FONT_ASSETS:
-        print(f"  font_family_assets: {len(FONT_ASSETS)} families "
-              f"({', '.join(sorted({f['family'] for f in FONT_ASSETS.values()}))})")
+    if ctx.fonts:
+        print(f"  font_family_assets: {len(ctx.fonts)} families "
+              f"({', '.join(sorted({f['family'] for f in ctx.fonts.values()}))})")
     cnt = [0]
     def c(n):
         cnt[0] += 1
