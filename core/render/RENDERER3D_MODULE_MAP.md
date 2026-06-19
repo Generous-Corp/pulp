@@ -1,12 +1,14 @@
 # Renderer3D Module Map
 
-This map is the pre-extraction contract for splitting
-`core/render/src/renderer3d.cpp`. The file currently owns the complete native
-Renderer3D proof path in one 3,642-line translation unit: SceneData-to-CPU draw
-normalization, material and texture decoding, light/camera/animation metadata
-projection, Dawn device/target setup, WGSL shader and pipeline construction,
-per-primitive GPU upload, render-pass submission, readback, PNG encoding, and
-result-flag reporting.
+This map is the extraction contract for splitting `core/render/src/renderer3d.cpp`.
+The file still owns the native Renderer3D proof path in one 3,474-line
+translation unit, with shared CPU value types now isolated in the 182-line
+private `core/render/src/renderer3d_internal.hpp` header. Remaining work in the
+translation unit includes SceneData-to-CPU draw normalization, material and
+texture decoding, light/camera/animation metadata projection, Dawn
+device/target setup, WGSL shader and pipeline construction, per-primitive GPU
+upload, render-pass submission, readback, PNG encoding, and result-flag
+reporting.
 
 Future extraction PRs should preserve the contracts below or update this file,
 the focused renderer tests, and `tools/scripts/hotspot_size_guard.json` in the
@@ -17,22 +19,22 @@ same change.
 | Region | Current lines | Owns today | Extraction owner |
 | --- | --- | --- | --- |
 | Public facade | `core/render/include/pulp/render/renderer3d.hpp` | Render configs, render result flags, backend preference enum, and the two public `Renderer3D` entry points. | Keep public unless a later API review intentionally changes the surface. |
-| CPU draw types | `renderer3d.cpp` lines 37-206 | `SceneVertex`, `CpuTexture`, `CpuPrimitive`, pipeline key structs, CPU light/camera structs, normalization metadata, and deferred-feature structs. | `renderer3d_internal.hpp` plus the focused module that first needs each type. |
-| Scene graph metadata | `renderer3d.cpp` lines 207-806 | Node transform classification, camera/light feature detection, transformed light/camera selection, initial animation pose, unsupported-feature flags, and adapter-info recording. | `renderer3d_scene.{hpp,cpp}`. |
-| Material and texture normalization | `renderer3d.cpp` lines 807-1649 | Texture decode/fallbacks, sampler conversion, UV transforms, tangent derivation, SceneData primitive collection, material flag projection, texture route support, normalization bounds, alpha-sort depth, and render-packet error handling. | `renderer3d_materials.{hpp,cpp}` for material/texture rules and `renderer3d_scene.{hpp,cpp}` for render-packet traversal/normalization. |
-| Backend preference adapter | `renderer3d.cpp` lines 1654-1669 | Public `Renderer3DAdapterBackendPreference` to `GpuSurface::AdapterBackendPreference` mapping. | `renderer3d_gpu_upload.{hpp,cpp}` or a small internal helper in `renderer3d_internal.hpp`. |
-| Hardcoded cube proof | `renderer3d.cpp` lines 1671-2164 | Native Dawn smoke path, fixed cube geometry, hardcoded WGSL, offscreen targets, buffer/texture upload, pipeline creation, command submission, readback, PNG encoding, and structural result checks. | Leave in `renderer3d.cpp` until the SceneData path has focused helpers, then route through shared upload/pipeline/readback helpers. |
-| SceneData facade and result projection | `renderer3d.cpp` lines 2166-2445 | Public `render_scene_data` orchestration, render-result metadata aggregation, backend initialization, target allocation, and handoff into upload/pipeline/readback blocks. | Thin shell in `renderer3d.cpp` plus `renderer3d_scene_result.{hpp,cpp}` only if result aggregation remains large after scene/material extraction. |
-| SceneData shader and layout contract | `renderer3d.cpp` lines 2446-2818 | Uniform ABI, WGSL shader source, vertex attribute layout, depth state, and GPU primitive holder shape. | `renderer3d_pipeline.{hpp,cpp}`. |
-| SceneData GPU upload | `renderer3d.cpp` lines 2825-3484 | Per-primitive uniform, vertex/index buffer, texture, texture view, sampler, bind group, and pipeline-cache construction. | `renderer3d_gpu_upload.{hpp,cpp}` for resources and `renderer3d_pipeline.{hpp,cpp}` for pipeline-cache decisions. |
-| SceneData draw/readback | `renderer3d.cpp` lines 3485-3639 | Alpha-blend ordering, render pass, command encoder, texture-to-buffer copy, map/poll loop, compact-row copy, image statistics, PNG encoding, and final success/error synthesis. | `renderer3d_readback.{hpp,cpp}` for readback/statistics/PNG and `renderer3d_pipeline.{hpp,cpp}` for draw ordering if it is coupled to pipeline state. |
+| CPU draw types | `renderer3d_internal.hpp` lines 11-180 | `SceneVertex`, `CpuTexture`, `CpuPrimitive`, pipeline key structs, CPU light/camera structs, normalization metadata, and deferred-feature structs. | Extracted into the private shared header; focused modules should include it instead of re-declaring these records. |
+| Scene graph metadata | `renderer3d.cpp` lines 35-638 | Node transform classification, camera/light feature detection, transformed light/camera selection, initial animation pose, unsupported-feature flags, and adapter-info recording. | `renderer3d_scene.{hpp,cpp}`. |
+| Material and texture normalization | `renderer3d.cpp` lines 639-1488 | Texture decode/fallbacks, sampler conversion, UV transforms, tangent derivation, SceneData primitive collection, material flag projection, texture route support, normalization bounds, alpha-sort depth, and render-packet error handling. | `renderer3d_materials.{hpp,cpp}` for material/texture rules and `renderer3d_scene.{hpp,cpp}` for render-packet traversal/normalization. |
+| Backend preference adapter | `renderer3d.cpp` lines 1489-1502 | Public `Renderer3DAdapterBackendPreference` to `GpuSurface::AdapterBackendPreference` mapping. | `renderer3d_gpu_upload.{hpp,cpp}` or a small internal helper in `renderer3d_internal.hpp`. |
+| Hardcoded cube proof | `renderer3d.cpp` lines 1503-1998 | Native Dawn smoke path, fixed cube geometry, hardcoded WGSL, offscreen targets, buffer/texture upload, pipeline creation, command submission, readback, PNG encoding, and structural result checks. | Leave in `renderer3d.cpp` until the SceneData path has focused helpers, then route through shared upload/pipeline/readback helpers. |
+| SceneData facade and result projection | `renderer3d.cpp` lines 1999-2289 | Public `render_scene_data` orchestration, render-result metadata aggregation, backend initialization, target allocation, and handoff into upload/pipeline/readback blocks. | Thin shell in `renderer3d.cpp` plus `renderer3d_scene_result.{hpp,cpp}` only if result aggregation remains large after scene/material extraction. |
+| SceneData shader and layout contract | `renderer3d.cpp` lines 2290-2656 | Uniform ABI, WGSL shader source, vertex attribute layout, depth state, and GPU primitive holder shape. | `renderer3d_pipeline.{hpp,cpp}`. |
+| SceneData GPU upload | `renderer3d.cpp` lines 2657-3285 | Per-primitive uniform, vertex/index buffer, texture, texture view, sampler, bind group, and pipeline-cache construction. | `renderer3d_gpu_upload.{hpp,cpp}` for resources and `renderer3d_pipeline.{hpp,cpp}` for pipeline-cache decisions. |
+| SceneData draw/readback | `renderer3d.cpp` lines 3286-3474 | Alpha-blend ordering, render pass, command encoder, texture-to-buffer copy, map/poll loop, compact-row copy, image statistics, PNG encoding, and final success/error synthesis. | `renderer3d_readback.{hpp,cpp}` for readback/statistics/PNG and `renderer3d_pipeline.{hpp,cpp}` for draw ordering if it is coupled to pipeline state. |
 | Build/test wiring | `core/render/CMakeLists.txt`, `test/CMakeLists.txt` | Scene3D render build gates, probe executable, renderer3d test suite, probe route contracts, golden manifest checks, and native renderer boundary checks. | Update alongside each code move. |
 
 ## Target Modules
 
 | Module | Owns | Must not own |
 | --- | --- | --- |
-| `renderer3d_internal.hpp` | Shared internal value types and narrow helper declarations needed by more than one Renderer3D module: CPU draw structs, GPU primitive resource structs if shared, result/stat helper declarations, and feature-gated Dawn/Skia includes. | Public Renderer3D API, test-only helpers, scene parser types beyond `pulp::scene::SceneData`/render-packet data already consumed by the renderer, or standalone/probe CLI behavior. |
+| `renderer3d_internal.hpp` | Shared internal value types and narrow helper declarations needed by more than one Renderer3D module: CPU draw structs, GPU primitive resource structs if shared later, and result/stat helper declarations. | Public Renderer3D API, test-only helpers, scene parser types beyond `pulp::scene::SceneData`/render-packet data already consumed by the renderer, standalone/probe CLI behavior, or unnecessary Dawn/Skia includes. |
 | `renderer3d_scene.{hpp,cpp}` | SceneData traversal, render-packet consumption, world transform normalization, light/camera/animation/deferred-feature metadata, scene bounds/scale, alpha-sort depth inputs, and the conversion from SceneData primitives to CPU draw records. | Dawn/WebGPU resource creation, shader strings, render pipelines, PNG encoding, probe CLI parsing, glTF loading, or public SceneData parser ownership. |
 | `renderer3d_materials.{hpp,cpp}` | CPU material projection: texture decoding via Skia, fallback textures, sampler/filter conversion policy, UV transforms, tangent derivation, base-color/PBR/normal/occlusion/emissive feature flags, and material-related deferred-route flags. | Scene graph traversal, Dawn texture allocation, WGSL shader ownership, render-pass submission, public material parser data structures, or filesystem fixture loading. |
 | `renderer3d_gpu_upload.{hpp,cpp}` | Dawn device/queue/instance extraction, offscreen target allocation helpers, CPU-to-GPU buffer and texture upload, texture view and sampler creation, bind group creation, and backend preference mapping. | CPU SceneData interpretation, shader source, pipeline-cache policy, render-result feature aggregation not tied to upload completion, command submission/readback polling, or PNG encoding. |
@@ -126,9 +128,9 @@ Rules:
 
 ## Extraction Order
 
-1. Move CPU value types and narrow shared declarations into
-   `renderer3d_internal.hpp`. Keep the public header unchanged and ensure
-   CPU-only builds still see the same fallback behavior.
+1. Done: CPU value types and narrow shared declarations live in
+   `renderer3d_internal.hpp`. The public header remains unchanged and CPU-only
+   builds still use the same feature-gated fallback surface.
 2. Move SceneData traversal and render-packet normalization into
    `renderer3d_scene.{hpp,cpp}` while keeping the current
    `test_renderer3d_scene.cpp` and render-packet contract tests unchanged.
