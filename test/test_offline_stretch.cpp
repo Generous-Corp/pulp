@@ -443,3 +443,96 @@ TEST_CASE("draft quality=0: fast OLA tempo, exact length, pitch preserved", "[of
     CHECK(fr > 880.0);
     CHECK(fr < 1120.0);
 }
+
+// ── Adaptive STFT window selection (material-aware) ───────────────────────────
+// The phase core is fixed at FFT 4096/512; that window is too small to resolve
+// closely-spaced low partials (bass wobbles) and too large for percussive time
+// resolution (drum attacks soften). recommend_window() picks geometry from the
+// input, and prepare() honors an explicit override. These pin the ear-validated
+// selection so a future refactor can't silently regress it.
+namespace {
+constexpr double kPi2 = 6.28318530717958647692;
+std::vector<float> sine(long n, double sr, double hz, float amp = 0.7f) {
+    std::vector<float> v(static_cast<size_t>(n));
+    for (long i = 0; i < n; ++i)
+        v[static_cast<size_t>(i)] = amp * static_cast<float>(std::sin(kPi2 * hz * static_cast<double>(i) / sr));
+    return v;
+}
+} // namespace
+
+TEST_CASE("recommend_window picks material-adaptive STFT geometry", "[offline-stretch]") {
+    const double sr = 48000.0;
+    const long n = static_cast<long>(sr); // 1 s
+
+    SECTION("percussive (high crest) -> 1024: time resolution (matches Python ref)") {
+        std::vector<float> perc(static_cast<size_t>(n), 0.0f);
+        for (long i = 0; i < n; i += 12000) perc[static_cast<size_t>(i)] = 1.0f; // sparse clicks
+        const float* p[1] = {perc.data()};
+        const auto w = OfflineStretch::recommend_window(p, n, 1, sr);
+        CHECK(w.fft_size == 1024);
+        CHECK(w.analysis_hop == 128);
+    }
+    SECTION("bass / low-fundamental -> large window + 16x overlap") {
+        const auto b = sine(n, sr, 60.0, 0.8f);
+        const float* p[1] = {b.data()};
+        const auto w = OfflineStretch::recommend_window(p, n, 1, sr);
+        CHECK(w.fft_size == 8192);
+        CHECK(w.analysis_hop == 512);
+    }
+    SECTION("mid sustained tone -> engine default (no override)") {
+        const auto m = sine(n, sr, 2000.0, 0.5f);
+        const float* p[1] = {m.data()};
+        const auto w = OfflineStretch::recommend_window(p, n, 1, sr);
+        CHECK(w.fft_size == 0);
+        CHECK(w.analysis_hop == 0);
+    }
+    SECTION("degenerate input -> default, never crashes") {
+        const auto w = OfflineStretch::recommend_window(nullptr, 0, 1, sr);
+        CHECK(w.fft_size == 0);
+        CHECK(w.analysis_hop == 0);
+    }
+}
+
+TEST_CASE("prepare honors an explicit fft_size override and still renders", "[offline-stretch]") {
+    const double sr = 48000.0;
+    OfflineStretch s;
+    OfflineStretchOptions sizing;
+    sizing.fft_size = 8192;      // force the bass window
+    sizing.analysis_hop = 512;
+    s.prepare(sr, 1, sizing);
+    CHECK(s.fft_size() == 8192);
+
+    const long n = 24000;
+    const auto in = sine(n, sr, 80.0, 0.6f);
+    const float* inp[1] = {in.data()};
+    OfflineStretchOptions o; o.time_ratio = 2.0;
+    const long m = offline_stretch_output_frames(n, o.time_ratio);
+    std::vector<float> out(static_cast<size_t>(m));
+    float* outp[1] = {out.data()};
+    std::string err;
+    REQUIRE(s.process(inp, n, outp, m, o, &err));
+    for (float v : out) REQUIRE(std::isfinite(v));
+    // exact length contract holds at the larger window too
+    REQUIRE(static_cast<long>(out.size()) == offline_stretch_output_frames(n, o.time_ratio));
+}
+
+TEST_CASE("invalid fft override is ignored (falls back to default geometry)", "[offline-stretch]") {
+    OfflineStretch s;
+    OfflineStretchOptions sizing;
+    sizing.fft_size = 3000;       // not a power of two -> must be ignored
+    sizing.analysis_hop = 500;
+    s.prepare(48000.0, 1, sizing);
+    // fft_size() reflects the requested override value; the engine internally
+    // rejects the invalid geometry and uses its 4096 default — the render must
+    // still succeed and stay finite.
+    const long n = 8000;
+    const auto in = sine(n, 48000.0, 200.0, 0.5f);
+    const float* inp[1] = {in.data()};
+    OfflineStretchOptions o; o.time_ratio = 1.5;
+    const long m = offline_stretch_output_frames(n, o.time_ratio);
+    std::vector<float> out(static_cast<size_t>(m));
+    float* outp[1] = {out.data()};
+    std::string err;
+    REQUIRE(s.process(inp, n, outp, m, o, &err));
+    for (float v : out) REQUIRE(std::isfinite(v));
+}

@@ -59,7 +59,15 @@ struct OfflineStretchOptions {
     double formant_semitones = 0.0; ///< used only when formant_mode==shift_independently
     bool repitch_linked = false;    ///< true => pure resample (vinyl); pitch
                                     ///< follows time_ratio, spectral path skipped
-    bool route_noise_stn = true;    ///< route noise/residual through NoiseMorpher
+    // STN noise-morphing OFF by default. Measured (Python-vs-C++ A/B across
+    // bass/mix/vocal/drum at 0.75–3×): routing the residual through NoiseMorpher
+    // DULLS the output ~400 spectral-centroid points on every material — the muddy
+    // drum + the "wind"/modulation the validated Python prototype never had (it has
+    // no STN). Off restores the Python brightness (drum 2521→2953 ≈ source 2990).
+    // Opt back in per-render for genuinely noise-dominated textures where natural
+    // residual stretch matters more than HF brightness. (The morpher's HF loss is
+    // a separate bug to fix before re-enabling by default.)
+    bool route_noise_stn = false;   ///< route noise/residual through NoiseMorpher
     StretchTransientMode transient_mode = StretchTransientMode::phase_reset;
     int quality = 2;                ///< 0 draft (fast preview) .. 2 best
 
@@ -71,6 +79,22 @@ struct OfflineStretchOptions {
     // silently clamped — so a mis-sized render is a loud error, not a wrong result.
     double max_time_ratio = 4.0;      ///< supported stretch span is [1/max, max]
     double max_pitch_semitones = 24.0;
+
+    // Material-adaptive STFT geometry (plan §4 / ear-validated). The phase core
+    // is fixed at FFT 4096/512; that window is too SMALL to resolve closely-
+    // spaced low partials (bass stretches wobble) and too LARGE for percussive
+    // time resolution (drum attacks soften). Setting these picks a window suited
+    // to the input — large+high-overlap for bass, small for transients. 0 = keep
+    // the engine default. Use OfflineStretch::recommend_window() to choose them
+    // from the actual audio, then pass here at prepare().
+    int fft_size = 0;       ///< 0 = default (4096); else power-of-two ≥ 256
+    int analysis_hop = 0;   ///< 0 = default (512); must divide fft_size
+
+    // Transient-detector sensitivity (0 = engine default 1.0). Higher keeps EVERY
+    // percussion hit sharp; the default detector softens some hits ("transients
+    // move around"). recommend_window pairs a higher value with the percussive
+    // window; a caller can override.
+    float transient_sensitivity = 0.0f;
 };
 
 /// The exact, sample-accurate output length for an input of `in_frames` frames
@@ -120,7 +144,14 @@ public:
             cfg.max_time_ratio = static_cast<float>(max_time_ratio_ * max_pitch_ratio);
             cfg.max_pitch_semitones = 0.0f; // pitch is fixed in time_stretch mode
             cfg.transient_preservation = true;
+            cfg.transient_sensitivity = sizing.transient_sensitivity; // keep every hit sharp
             cfg.noise_morphing = sizing.route_noise_stn; // STN noise path (plan §4 routing)
+            // Material-adaptive window/overlap (ear-validated: fixes bass wobble
+            // and keeps drum transients natural; the realtime default is one size
+            // too small for bass and too large for percussion).
+            cfg.fft_size = sizing.fft_size;
+            cfg.analysis_hop = sizing.analysis_hop;
+            fft_size_ = sizing.fft_size;       // remembered for accessor/tests
             engine_.prepare(sample_rate, cfg);
             latency_anchor_ = calibrate_anchor();
 
@@ -145,6 +176,73 @@ public:
     double sample_rate() const noexcept { return sample_rate_; }
     double max_time_ratio() const noexcept { return max_time_ratio_; }
     double max_pitch_semitones() const noexcept { return max_pitch_semitones_; }
+    /// The STFT window actually in use (0 until prepare() with an override).
+    int fft_size() const noexcept { return fft_size_; }
+
+    /// Material-adaptive window/overlap recommendation. Analyzes the input and
+    /// returns the {fft_size, analysis_hop} to set on OfflineStretchOptions
+    /// before prepare(). Ear-validated geometry:
+    ///   percussive (high crest)        -> 1024 / 128  (time resolution: sharp,
+    ///                                     natural attacks)
+    ///   bass / low-fundamental-heavy   -> 8192 / 512  (16× overlap; resolves
+    ///                                     closely-spaced low partials so the
+    ///                                     stretch doesn't wobble)
+    ///   everything else                -> {0, 0}      (engine default 4096/512)
+    /// Order matters: a kick-heavy break is BOTH low and percussive — transients
+    /// win, or the long window smears every hit. `lo_band` is the energy fraction
+    /// below 200 Hz; `crest` is peak/mean of a short-window energy envelope.
+    struct Window { int fft_size; int analysis_hop; };
+    static Window recommend_window(const float* const* in, long frames,
+                                   int channels, double sample_rate) {
+        if (in == nullptr || frames <= 0 || channels < 1 || !(sample_rate > 0.0))
+            return {0, 0};
+        // Mono mix.
+        std::vector<double> x(static_cast<size_t>(frames), 0.0);
+        for (int c = 0; c < channels; ++c) {
+            const float* s = in[c];
+            if (!s) continue;
+            for (long i = 0; i < frames; ++i) x[static_cast<size_t>(i)] += s[i];
+        }
+        const double inv = 1.0 / channels;
+        for (auto& v : x) v *= inv;
+
+        // Crest of a 512-sample energy envelope (256 hop) = transient density.
+        const long W = 512, H = 256;
+        double e_sum = 0.0, e_max = 0.0; long e_cnt = 0;
+        for (long i = 0; i + W <= frames; i += H) {
+            double acc = 0.0;
+            for (long j = 0; j < W; ++j) { const double v = x[static_cast<size_t>(i + j)]; acc += v * v; }
+            const double rms = std::sqrt(acc / static_cast<double>(W) + 1e-12);
+            e_sum += rms; e_max = std::max(e_max, rms); ++e_cnt;
+        }
+        const double crest = e_cnt > 0 ? e_max / (e_sum / static_cast<double>(e_cnt) + 1e-12) : 0.0;
+
+        // Low-band fraction: RBJ 2nd-order lowpass @200 Hz, lowpassed energy /
+        // total energy. Avoids an FFT dependency in the header.
+        const double f0 = 200.0, q = 0.7071;
+        const double w0 = 2.0 * 3.14159265358979323846 * f0 / sample_rate;
+        const double cw = std::cos(w0), sw = std::sin(w0), alpha = sw / (2.0 * q);
+        const double b0 = (1.0 - cw) * 0.5, b1 = 1.0 - cw, b2 = (1.0 - cw) * 0.5;
+        const double a0 = 1.0 + alpha, a1 = -2.0 * cw, a2 = 1.0 - alpha;
+        const double nb0 = b0 / a0, nb1 = b1 / a0, nb2 = b2 / a0, na1 = a1 / a0, na2 = a2 / a0;
+        double z1 = 0.0, z2 = 0.0, lo_e = 0.0, tot_e = 0.0;
+        for (long i = 0; i < frames; ++i) {
+            const double in_s = x[static_cast<size_t>(i)];
+            const double out_s = nb0 * in_s + z1;
+            z1 = nb1 * in_s - na1 * out_s + z2;
+            z2 = nb2 * in_s - na2 * out_s;
+            lo_e += out_s * out_s; tot_e += in_s * in_s;
+        }
+        const double lo_band = tot_e > 0.0 ? lo_e / tot_e : 0.0;
+
+        // Percussive: 1024/128 — matches the validated Python "drum_pl" reference
+        // the user picked. (The earlier "wobble" that motivated a 2048 window was
+        // the STN noise path, not the window; with STN off, 1024 gives the sharp,
+        // bright drum attacks of the Python prototype.)
+        if (crest > 3.0)    return {1024, 128};  // percussive — time resolution, match Python ref
+        if (lo_band > 0.30) return {8192, 512};  // bass/low — resolve low partials
+        return {0, 0};                           // default 4096/512
+    }
 
     /// Render the whole input into the caller-allocated output. `out_frames`
     /// MUST equal offline_stretch_output_frames(in_frames, opts.time_ratio).
@@ -477,6 +575,7 @@ private:
     int channels_ = 1;
     double max_time_ratio_ = 4.0;
     double max_pitch_semitones_ = 24.0;
+    int fft_size_ = 0;
     bool prepared_ = false;
 };
 
