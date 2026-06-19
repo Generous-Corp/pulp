@@ -100,6 +100,19 @@ height, dispatches `ViewBridge::resize(...)`, and re-dispatches on each
 or rely on `Processor::on_view_resized(...)`, do not assume
 `editor_size()` is the last word after attach.
 
+Standalone resizes the host window per active settings-chrome tab. The
+Audio/MIDI `SettingsPanel` needs far more height than a fixed-size editor
+(query `SettingsPanel::preferred_height()` — header + inner Audio/MIDI tab
+bar + every Audio-tab row at full size), so a 372px-tall editor window
+squishes the device dropdowns to slivers. `run_with_editor()` wires the
+outer card-stack `TabPanel::on_tab_change` to drive the SAME design-viewport
+path the keyboard resize uses — `set_design_viewport` /
+`set_fixed_aspect_ratio` / `request_content_size` to `(editor_w, editor_h)`
+on the Editor tab and `(editor_w, SettingsPanel::preferred_height())` on the
+Settings tab. The editor tab keeps its exact declared size (no letterbox);
+the Settings tab reflows to fill its taller window. Guarded on
+`chrome.tab_panel()` so the editor-only chrome (no settings tab) is untouched.
+
 Standalone headless/test launches must not show or activate a native
 window. `StandaloneConfig::headless`, `PULP_HEADLESS`, `PULP_TEST_MODE`,
 `CI`, or `PULP_SCREENSHOT` route `run_with_editor()` through
