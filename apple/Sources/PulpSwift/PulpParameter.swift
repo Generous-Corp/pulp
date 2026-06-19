@@ -109,7 +109,7 @@ public final class PulpParameterStore: ObservableObject {
     }
 }
 
-// MARK: - Generated-view parameter resolution (Workstream B1)
+// MARK: - Generated-view parameter resolution
 
 /// How an exact-name parameter lookup resolves. There is no stable string
 /// param key in Pulp's state model today (StateStore indexes by numeric ID,
