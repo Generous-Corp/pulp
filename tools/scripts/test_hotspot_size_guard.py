@@ -87,7 +87,27 @@ class HotspotSizeGuardIntegrationTests(unittest.TestCase):
 
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def write_config(self, max_loc: int = 3, new_file_max: int = 5) -> None:
+    def write_config(
+        self,
+        max_loc: int = 3,
+        new_file_max: int = 5,
+        include_hotspot: bool = True,
+    ) -> None:
+        hotspots = []
+        if include_hotspot:
+            hotspots.append(
+                {
+                    "path": "core/view/src/widget_bridge.cpp",
+                    "max_loc": max_loc,
+                }
+            )
+        else:
+            hotspots.append(
+                {
+                    "path": "tools/scripts/other.py",
+                    "max_loc": max_loc,
+                }
+            )
         self.config.write_text(
             json.dumps(
                 {
@@ -96,12 +116,7 @@ class HotspotSizeGuardIntegrationTests(unittest.TestCase):
                         "max_loc": new_file_max,
                         "paths": ["core/**", "tools/**"],
                     },
-                    "hotspots": [
-                        {
-                            "path": "core/view/src/widget_bridge.cpp",
-                            "max_loc": max_loc,
-                        }
-                    ],
+                    "hotspots": hotspots,
                 }
             ),
             encoding="utf-8",
@@ -124,14 +139,18 @@ class HotspotSizeGuardIntegrationTests(unittest.TestCase):
             check=False,
         )
 
-    def commit_baseline(self) -> None:
+    def commit_baseline(self, *, max_loc: int = 3, contents: str = "a\nb\nc\n") -> None:
         hotspot = self.tmp / "core" / "view" / "src" / "widget_bridge.cpp"
         hotspot.parent.mkdir(parents=True)
-        hotspot.write_text("a\nb\nc\n", encoding="utf-8")
-        self.write_config(max_loc=3)
+        hotspot.write_text(contents, encoding="utf-8")
+        self.write_config(max_loc=max_loc)
         git(self.tmp, "add", ".")
         git(self.tmp, "commit", "-q", "-m", "baseline")
         git(self.tmp, "update-ref", "refs/remotes/origin/main", "HEAD")
+
+    def commit_all(self, message: str) -> None:
+        git(self.tmp, "add", ".")
+        git(self.tmp, "commit", "-q", "-m", message)
 
     def test_current_baseline_passes(self) -> None:
         self.commit_baseline()
@@ -150,6 +169,123 @@ class HotspotSizeGuardIntegrationTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 1)
         self.assertIn("4 LOC exceeds frozen ceiling 3", result.stderr)
+
+    def test_hotspot_shrink_reports_without_failing_by_default(self) -> None:
+        self.commit_baseline()
+        hotspot = self.tmp / "core" / "view" / "src" / "widget_bridge.cpp"
+        hotspot.write_text("a\nb\n", encoding="utf-8")
+        self.commit_all("shrink hotspot")
+
+        result = self.run_guard()
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("tracked hotspot shrink", result.stderr)
+        self.assertIn("3 -> 2 LOC", result.stderr)
+        self.assertIn("ceiling unchanged", result.stderr)
+
+    def test_require_ceiling_reduction_fails_when_shrink_keeps_old_ceiling(self) -> None:
+        self.commit_baseline()
+        hotspot = self.tmp / "core" / "view" / "src" / "widget_bridge.cpp"
+        hotspot.write_text("a\nb\n", encoding="utf-8")
+        self.commit_all("shrink hotspot")
+
+        result = self.run_guard("--require-ceiling-reduction")
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("missing hotspot ceiling reduction", result.stderr)
+        self.assertIn("shrank 3 -> 2 LOC but max_loc is 3", result.stderr)
+        self.assertIn("set max_loc to 2", result.stderr)
+
+    def test_require_ceiling_reduction_passes_when_shrink_lowers_ceiling(self) -> None:
+        self.commit_baseline()
+        hotspot = self.tmp / "core" / "view" / "src" / "widget_bridge.cpp"
+        hotspot.write_text("a\nb\n", encoding="utf-8")
+        self.write_config(max_loc=2)
+        self.commit_all("shrink hotspot and lower ceiling")
+
+        result = self.run_guard("--require-ceiling-reduction")
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("max_loc 3 -> 2", result.stderr)
+        self.assertIn("hotspot_size_guard: ok", result.stdout)
+
+    def test_require_ceiling_reduction_fails_when_ceiling_keeps_headroom(self) -> None:
+        self.commit_baseline(max_loc=5, contents="a\nb\nc\nd\ne\n")
+        hotspot = self.tmp / "core" / "view" / "src" / "widget_bridge.cpp"
+        hotspot.write_text("a\nb\nc\n", encoding="utf-8")
+        self.write_config(max_loc=4)
+        self.commit_all("shrink hotspot and leave ceiling slack")
+
+        result = self.run_guard("--require-ceiling-reduction")
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("shrank 5 -> 3 LOC but max_loc is 4", result.stderr)
+        self.assertIn("set max_loc to 3", result.stderr)
+
+    def test_require_ceiling_reduction_fails_when_shrink_removes_hotspot_entry(self) -> None:
+        self.commit_baseline()
+        hotspot = self.tmp / "core" / "view" / "src" / "widget_bridge.cpp"
+        hotspot.write_text("a\nb\n", encoding="utf-8")
+        self.write_config(include_hotspot=False)
+        self.commit_all("shrink hotspot and remove ceiling")
+
+        result = self.run_guard("--require-ceiling-reduction")
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("tracked hotspot removal", result.stderr)
+        self.assertIn("removed from config but still exists at 2 LOC", result.stderr)
+        self.assertIn("restore its entry", result.stderr)
+        self.assertIn("max_loc 2", result.stderr)
+
+    def test_require_ceiling_reduction_fails_when_untouched_hotspot_entry_is_removed(self) -> None:
+        self.commit_baseline()
+        self.write_config(include_hotspot=False)
+        self.commit_all("remove hotspot ceiling")
+
+        result = self.run_guard("--require-ceiling-reduction")
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("tracked hotspot removal", result.stderr)
+        self.assertIn("removed from config but still exists at 3 LOC", result.stderr)
+        self.assertIn("restore its entry", result.stderr)
+        self.assertIn("max_loc 3", result.stderr)
+
+    def test_require_ceiling_reduction_ignores_hotspot_drift_from_moving_base(self) -> None:
+        self.commit_baseline()
+        branch_tip = subprocess.run(
+            ["git", "-C", str(self.tmp), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+        hotspot = self.tmp / "core" / "view" / "src" / "widget_bridge.cpp"
+        hotspot.write_text("a\nb\nc\nd\n", encoding="utf-8")
+        self.write_config(max_loc=4)
+        self.commit_all("main grows hotspot")
+        git(self.tmp, "update-ref", "refs/remotes/origin/main", "HEAD")
+        git(self.tmp, "reset", "--hard", branch_tip)
+
+        result = self.run_guard("--require-ceiling-reduction")
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertNotIn("missing hotspot ceiling reduction", result.stderr)
+
+    def test_require_ceiling_reduction_skips_malformed_base_config(self) -> None:
+        hotspot = self.tmp / "core" / "view" / "src" / "widget_bridge.cpp"
+        hotspot.parent.mkdir(parents=True)
+        hotspot.write_text("a\nb\nc\n", encoding="utf-8")
+        self.config.write_text("{", encoding="utf-8")
+        self.commit_all("malformed baseline")
+        git(self.tmp, "update-ref", "refs/remotes/origin/main", "HEAD")
+
+        self.write_config()
+        self.commit_all("fix hotspot config")
+
+        result = self.run_guard("--require-ceiling-reduction")
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("shrink check skipped", result.stderr)
 
     def test_large_new_core_file_warns_without_failing(self) -> None:
         self.commit_baseline()

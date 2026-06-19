@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import json
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -45,6 +46,34 @@ class Config:
     new_file_warning: NewFileWarning | None
 
 
+@dataclass(frozen=True)
+class HotspotShrink:
+    path: str
+    base_loc: int
+    current_loc: int
+    base_max_loc: int
+    current_max_loc: int | None
+
+    @property
+    def ceiling_lowered(self) -> bool:
+        if self.current_max_loc is None:
+            return False
+        return self.current_max_loc < self.base_max_loc
+
+    @property
+    def ceiling_tracks_current_loc(self) -> bool:
+        if self.current_max_loc is None:
+            return False
+        return self.current_max_loc == self.current_loc
+
+
+@dataclass(frozen=True)
+class HotspotRemoval:
+    path: str
+    current_loc: int
+    base_max_loc: int
+
+
 def repo_root() -> Path | None:
     result = subprocess.run(
         ["git", "rev-parse", "--show-toplevel"],
@@ -69,8 +98,7 @@ def _positive_int(value: Any, field: str) -> int:
     return value
 
 
-def load_config(path: Path) -> Config:
-    raw_data = json.loads(path.read_text(encoding="utf-8"))
+def parse_config(raw_data: Any) -> Config:
     if not isinstance(raw_data, dict):
         raise ValueError("config root must be an object")
     raw = strip_meta(raw_data)
@@ -129,9 +157,58 @@ def load_config(path: Path) -> Config:
     return Config(hotspots=tuple(hotspots), new_file_warning=warning)
 
 
+def load_config(path: Path) -> Config:
+    return parse_config(json.loads(path.read_text(encoding="utf-8")))
+
+
 def count_lines(path: Path) -> int:
     with path.open("rb") as handle:
         return sum(1 for _ in handle)
+
+
+def count_blob_lines(data: bytes) -> int:
+    if not data:
+        return 0
+    return data.count(b"\n") + (0 if data.endswith(b"\n") else 1)
+
+
+def repo_relative_path(root: Path, path: Path) -> str | None:
+    try:
+        rel = path.resolve().relative_to(root.resolve())
+    except ValueError:
+        return None
+    return rel.as_posix()
+
+
+def git_show_bytes(ref: str, rel_path: str) -> bytes | None:
+    result = subprocess.run(
+        ["git", "show", f"{ref}:{rel_path}"],
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout
+
+
+def merge_base(base: str, head: str) -> str | None:
+    result = subprocess.run(
+        ["git", "merge-base", base, head],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip()
+
+
+def config_at_ref(ref: str, rel_path: str) -> Config | None:
+    raw = git_show_bytes(ref, rel_path)
+    if raw is None:
+        return None
+    try:
+        return parse_config(json.loads(raw.decode("utf-8")))
+    except (UnicodeDecodeError, ValueError, json.JSONDecodeError):
+        return None
 
 
 def added_files(base: str, head: str) -> list[str]:
@@ -149,6 +226,17 @@ def added_files(base: str, head: str) -> list[str]:
         if len(parts) >= 2 and parts[0] == "A":
             out.append(parts[1])
     return out
+
+
+def changed_files(base: str, head: str) -> set[str]:
+    result = subprocess.run(
+        ["git", "diff", "--name-only", f"{base}..{head}"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or "git diff failed")
+    return {line for line in result.stdout.splitlines() if line}
 
 
 def matches_any(path: str, patterns: tuple[str, ...]) -> bool:
@@ -194,6 +282,125 @@ def check_new_file_warnings(root: Path, config: Config, base: str, head: str) ->
     return warnings
 
 
+def git_tracked_files(patterns: tuple[str, ...]) -> list[str]:
+    result = subprocess.run(
+        ["git", "ls-files", *patterns],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or "git ls-files failed")
+    return [line for line in result.stdout.splitlines() if line]
+
+
+def unconfigured_large_files(root: Path, config: Config, limit: int = 10) -> list[tuple[str, int]]:
+    warning = config.new_file_warning
+    if warning is None:
+        return []
+
+    tracked_hotspots = {hotspot.path for hotspot in config.hotspots}
+    large_files: list[tuple[str, int]] = []
+    for rel_path in git_tracked_files(warning.paths):
+        if rel_path in tracked_hotspots:
+            continue
+        full_path = root / rel_path
+        if not full_path.is_file():
+            continue
+        if full_path.suffix not in LARGE_FILE_REPORT_EXTENSIONS:
+            continue
+        loc = count_lines(full_path)
+        if loc > warning.max_loc:
+            large_files.append((rel_path, loc))
+    return sorted(large_files, key=lambda item: (-item[1], item[0]))[:limit]
+
+
+NOTE_HISTORY_PATTERN = re.compile(
+    r"\b(PR|issue|Phase|phase|branch|slice)\b|#[0-9]+|[0-9]{4}-[0-9]{2}-[0-9]{2}"
+)
+LARGE_FILE_REPORT_EXTENSIONS = {
+    ".c",
+    ".cc",
+    ".cmake",
+    ".cpp",
+    ".h",
+    ".hpp",
+    ".js",
+    ".m",
+    ".md",
+    ".mm",
+    ".py",
+    ".rs",
+    ".sh",
+    ".swift",
+    ".ts",
+    ".tsx",
+}
+
+
+def historical_note_warnings(config: Config) -> list[str]:
+    warnings: list[str] = []
+    for hotspot in config.hotspots:
+        if hotspot.note and NOTE_HISTORY_PATTERN.search(hotspot.note):
+            warnings.append(f"{hotspot.path}: note may contain stale context: {hotspot.note}")
+    return warnings
+
+
+def hotspot_shrinks(
+    current: Config,
+    base: str,
+    head: str,
+    config_rel_path: str,
+) -> tuple[list[HotspotShrink], list[HotspotRemoval], list[str]]:
+    comparison_base = merge_base(base, head)
+    if comparison_base is None:
+        return [], [], [f"could not find merge-base for {base} and {head}; shrink check skipped"]
+    base_config = config_at_ref(comparison_base, config_rel_path)
+    if base_config is None:
+        return [], [], [
+            f"could not read base hotspot config at {comparison_base}:{config_rel_path}; shrink check skipped"
+        ]
+
+    base_hotspots = {hotspot.path: hotspot for hotspot in base_config.hotspots}
+    current_hotspots = {hotspot.path: hotspot for hotspot in current.hotspots}
+    touched = changed_files(comparison_base, head)
+    shrinks: list[HotspotShrink] = []
+    removals: list[HotspotRemoval] = []
+
+    for path, base_hotspot in base_hotspots.items():
+        current_hotspot = current_hotspots.get(path)
+        if current_hotspot is None:
+            current_blob = git_show_bytes(head, path)
+            if current_blob is not None:
+                removals.append(
+                    HotspotRemoval(
+                        path=path,
+                        current_loc=count_blob_lines(current_blob),
+                        base_max_loc=base_hotspot.max_loc,
+                    )
+                )
+            continue
+        if path not in touched:
+            continue
+        base_blob = git_show_bytes(comparison_base, path)
+        current_blob = git_show_bytes(head, path)
+        if base_blob is None or current_blob is None:
+            continue
+        base_loc = count_blob_lines(base_blob)
+        current_loc = count_blob_lines(current_blob)
+        if current_loc < base_loc:
+            shrinks.append(
+                HotspotShrink(
+                    path=path,
+                    base_loc=base_loc,
+                    current_loc=current_loc,
+                    base_max_loc=base_hotspot.max_loc,
+                    current_max_loc=current_hotspot.max_loc if current_hotspot is not None else None,
+                )
+            )
+
+    return shrinks, removals, []
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base", default="origin/main", help="git base for new-file warning checks")
@@ -210,6 +417,16 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="also fail on large newly added file warnings",
     )
+    parser.add_argument(
+        "--require-ceiling-reduction",
+        action="store_true",
+        help="fail when a changed tracked hotspot shrinks but its max_loc ceiling does not ratchet to the new LOC",
+    )
+    parser.add_argument(
+        "--show-inventory",
+        action="store_true",
+        help="print broad large-file and hotspot-note inventory hints; noisy by design, so not used by required gates",
+    )
     return parser
 
 
@@ -223,11 +440,23 @@ def main(argv: list[str] | None = None) -> int:
     config_path = Path(args.config)
     if not config_path.is_absolute():
         config_path = root / config_path
+    config_rel_path = repo_relative_path(root, config_path)
 
     try:
+        if config_rel_path is None:
+            raise ValueError("config path must be inside the repository for shrink checks")
         config = load_config(config_path)
         failures, notes = check_hotspots(root, config)
         warnings = check_new_file_warnings(root, config, args.base, args.head)
+        shrinks, removals, shrink_notes = hotspot_shrinks(
+            config, args.base, args.head, config_rel_path
+        )
+        if args.show_inventory:
+            large_unconfigured = unconfigured_large_files(root, config)
+            note_warnings = historical_note_warnings(config)
+        else:
+            large_unconfigured = []
+            note_warnings = []
     except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
         print(f"hotspot_size_guard: error: {exc}", file=sys.stderr)
         return 0 if args.mode == "hint" else 2
@@ -235,10 +464,49 @@ def main(argv: list[str] | None = None) -> int:
     if notes:
         for note in notes:
             print(f"hotspot_size_guard: note: {note}", file=sys.stderr)
+    if shrink_notes:
+        for note in shrink_notes:
+            print(f"hotspot_size_guard: note: {note}", file=sys.stderr)
 
     if warnings:
         print("hotspot_size_guard: large new-file warning(s):", file=sys.stderr)
         for warning in warnings:
+            print(f"  {warning}", file=sys.stderr)
+
+    if shrinks:
+        print("hotspot_size_guard: tracked hotspot shrink(s):", file=sys.stderr)
+        for shrink in shrinks:
+            if shrink.current_max_loc is None:
+                state = "ceiling removed"
+                current_max_loc = "removed"
+            else:
+                state = "ceiling lowered" if shrink.ceiling_lowered else "ceiling unchanged"
+                current_max_loc = str(shrink.current_max_loc)
+            print(
+                "  "
+                f"{shrink.path}: {shrink.base_loc} -> {shrink.current_loc} LOC; "
+                f"max_loc {shrink.base_max_loc} -> {current_max_loc} ({state})",
+                file=sys.stderr,
+            )
+
+    if removals:
+        print("hotspot_size_guard: tracked hotspot removal(s):", file=sys.stderr)
+        for removal in removals:
+            print(
+                "  "
+                f"{removal.path}: removed from config but still exists at "
+                f"{removal.current_loc} LOC; previous max_loc {removal.base_max_loc}",
+                file=sys.stderr,
+            )
+
+    if large_unconfigured:
+        print("hotspot_size_guard: largest unconfigured large file(s):", file=sys.stderr)
+        for rel_path, loc in large_unconfigured:
+            print(f"  {rel_path}: {loc} LOC exceeds warning threshold", file=sys.stderr)
+
+    if note_warnings:
+        print("hotspot_size_guard: hotspot note context warning(s):", file=sys.stderr)
+        for warning in note_warnings:
             print(f"  {warning}", file=sys.stderr)
 
     if failures:
@@ -249,6 +517,38 @@ def main(argv: list[str] | None = None) -> int:
 
     if warnings and args.warnings_as_errors:
         return 0 if args.mode == "hint" else 1
+
+    if args.require_ceiling_reduction:
+        if removals:
+            print("hotspot_size_guard: missing hotspot ceiling entry removal(s):", file=sys.stderr)
+            for removal in removals:
+                print(
+                    "  "
+                    f"{removal.path}: restore its entry in {config_rel_path} with "
+                    f"max_loc {removal.current_loc}, or delete the file in the same PR",
+                    file=sys.stderr,
+                )
+            return 0 if args.mode == "hint" else 1
+
+        missing_reductions = [
+            shrink for shrink in shrinks
+            if not shrink.ceiling_lowered or not shrink.ceiling_tracks_current_loc
+        ]
+        if missing_reductions:
+            print("hotspot_size_guard: missing hotspot ceiling reduction(s):", file=sys.stderr)
+            for shrink in missing_reductions:
+                if shrink.current_max_loc is None:
+                    current_state = "removed"
+                else:
+                    current_state = str(shrink.current_max_loc)
+                print(
+                    "  "
+                    f"{shrink.path}: shrank {shrink.base_loc} -> {shrink.current_loc} LOC "
+                    f"but max_loc is {current_state}; set max_loc to "
+                    f"{shrink.current_loc} in {config_rel_path}",
+                    file=sys.stderr,
+                )
+            return 0 if args.mode == "hint" else 1
 
     print("hotspot_size_guard: ok")
     return 0
