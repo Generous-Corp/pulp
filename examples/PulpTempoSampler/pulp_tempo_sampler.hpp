@@ -29,12 +29,14 @@
 #include <pulp/view/buttons.hpp>
 #include <pulp/view/drag_drop.hpp>
 #include <pulp/view/musical_typing.hpp>
+#include <pulp/view/musical_typing_keyboard.hpp>
 #include <pulp/view/parameter_binding.hpp>
 #include <pulp/view/theme.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/waveform_editor.hpp>
 #include <pulp/view/widgets.hpp>
+#include <pulp/view/window_host.hpp>
 
 #include <algorithm>
 #include <array>
@@ -350,133 +352,14 @@ public:
     }
 };
 
-// Compact interactive musical-typing keyboard, Ink & Signal styled. Its 16 keys
-// ARE the QWERTY musical-typing map (slice idx = note - root): white keys
-// A S D F G H J K L, black keys W E T Y U O P, ~1.25 octave C..D#. Click a key
-// to audition that slice; the key under the playhead lights up, so typing, MIDI
-// and clicks all show. Toggled by ⌘K. This is the interactive companion to
-// MusicalTypingController; the faithful Figma SVG component stays the design
-// reference until it is re-exported with per-key interactive elements.
-class InteractiveKeyboard : public view::View {
+// Invisible zero-chrome view that runs a callback once per frame (continuous
+// repaint). Used to poll the processor's loop generation so the footer TEMPO
+// box can default to the freshly-detected loop BPM (R≈1) when a new loop loads.
+class FrameTick : public view::View {
 public:
-    std::function<void(int slice, bool on)> on_play_slice;  // click -> audition
-    std::function<int()> active_slice;                      // playhead slice or -1
-    std::function<std::string()> root_label;                // e.g. "C3"
-
-    InteractiveKeyboard() { set_continuous_repaint(true); }
-
-    void on_mouse_event(const view::MouseEvent& e) override {
-        if (e.is_wheel) return;
-        const bool ph = e.hasExplicitPhase();
-        const bool down = ph ? e.isPress() : e.is_down;
-        const bool up   = ph ? e.isRelease() : !e.is_down;
-        if (down && e.button == view::MouseButton::left) {
-            const int s = key_at(e.position.x, e.position.y);
-            if (s >= 0) { pressed_ = s; if (on_play_slice) on_play_slice(s, true); }
-        } else if (up && pressed_ >= 0) {
-            if (on_play_slice) on_play_slice(pressed_, false);
-            pressed_ = -1;
-        }
-    }
-
-    void paint(canvas::Canvas& c) override {
-        using canvas::Color;
-        auto b = local_bounds();
-        const Color panel  = Color::rgba8(0x1E, 0x25, 0x30);
-        const Color border = Color::rgba8(0x39, 0x41, 0x4A);
-        const Color wkey   = Color::rgba8(0xE9, 0xED, 0xF2);
-        const Color bkey   = Color::rgba8(0x2A, 0x32, 0x3D);
-        const Color teal   = Color::rgba8(0x16, 0xDA, 0xC2);
-        const Color ink    = Color::rgba8(0x16, 0x1A, 0x21);  // dark text (on light/active)
-        const Color wtxt   = Color::rgba8(0xD6, 0xDC, 0xE4);  // light text (on black keys)
-        const Color muted  = Color::rgba8(0x93, 0x9C, 0xA9);
-
-        c.set_fill_color(panel);
-        c.fill_rounded_rect(b.x, b.y, b.width, b.height, 12.f);
-        c.set_stroke_color(border); c.set_line_width(1.f);
-        c.stroke_rounded_rect(b.x, b.y, b.width, b.height, 12.f);
-
-        c.set_fill_color(muted);
-        c.set_font("JetBrains Mono", 11.f);
-        c.set_text_align(canvas::TextAlign::left);
-        c.fill_text("MUSICAL TYPING", b.x + 16.f, b.y + 24.f);
-        if (root_label) {
-            c.set_text_align(canvas::TextAlign::right);
-            c.fill_text("ROOT " + root_label(), b.x + b.width - 16.f, b.y + 24.f);
-        }
-
-        const int act = active_slice ? active_slice() : -1;
-        auto hot = [&](int i){ return i == pressed_ || i == act; };
-
-        // White keys, then black keys on top.
-        for (int i = 0; i < kNumKeys; ++i) {
-            if (is_black(i)) continue;
-            KRect r = white_rect(i);
-            c.set_fill_color(hot(i) ? teal : wkey);
-            c.fill_rounded_rect(r.x + 1.f, r.y, r.w - 2.f, r.h, 4.f);
-            c.set_fill_color(ink);
-            c.set_font("JetBrains Mono", 13.f);
-            c.set_text_align(canvas::TextAlign::center);
-            c.fill_text(letter(i), r.x + r.w * 0.5f, r.y + r.h - 12.f);
-        }
-        for (int i = 0; i < kNumKeys; ++i) {
-            if (!is_black(i)) continue;
-            KRect r = black_rect(i);
-            c.set_fill_color(hot(i) ? teal : bkey);
-            c.fill_rounded_rect(r.x, r.y, r.w, r.h, 3.f);
-            c.set_fill_color(hot(i) ? ink : wtxt);
-            c.set_font("JetBrains Mono", 11.f);
-            c.set_text_align(canvas::TextAlign::center);
-            c.fill_text(letter(i), r.x + r.w * 0.5f, r.y + r.h - 8.f);
-        }
-        c.set_text_align(canvas::TextAlign::left);
-    }
-
-private:
-    struct KRect { float x, y, w, h; };
-    static constexpr int kNumKeys = 16;
-
-    static const char* letter(int i) {
-        static const char* const L[16] =
-            {"A","W","S","E","D","F","T","G","Y","H","U","J","K","O","L","P"};
-        return (i >= 0 && i < 16) ? L[i] : "";
-    }
-    static bool is_black(int i) {
-        switch (i) {
-            case 1: case 3: case 6: case 8: case 10: case 13: case 15: return true;
-            default: return false;
-        }
-    }
-    static int white_count() { return 9; }
-    int white_index(int sliceidx) const {
-        int wi = 0; for (int i = 0; i < sliceidx; ++i) if (!is_black(i)) ++wi; return wi;
-    }
-    KRect keyarea() const {
-        auto b = local_bounds();
-        const float padx = 16.f, top = 40.f, bot = 16.f;
-        return {b.x + padx, b.y + top, b.width - 2 * padx, b.height - top - bot};
-    }
-    KRect white_rect(int sliceidx) const {
-        KRect g = keyarea(); float ww = g.w / static_cast<float>(white_count());
-        return {g.x + static_cast<float>(white_index(sliceidx)) * ww, g.y, ww, g.h};
-    }
-    KRect black_rect(int sliceidx) const {
-        KRect g = keyarea(); float ww = g.w / static_cast<float>(white_count());
-        const int wi = white_index(sliceidx - 1);  // sliceidx-1 is the preceding white
-        const float bw = ww * 0.6f, bh = g.h * 0.6f;
-        return {g.x + static_cast<float>(wi + 1) * ww - bw * 0.5f, g.y, bw, bh};
-    }
-    static bool inside(const KRect& r, float x, float y) {
-        return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
-    }
-    int key_at(float x, float y) const {
-        for (int i = 0; i < kNumKeys; ++i)
-            if (is_black(i)) { KRect r = black_rect(i); if (inside(r, x, y)) return i; }
-        for (int i = 0; i < kNumKeys; ++i)
-            if (!is_black(i)) { KRect r = white_rect(i); if (inside(r, x, y)) return i; }
-        return -1;
-    }
-    int pressed_ = -1;
+    std::function<void()> on_tick;
+    FrameTick() { set_continuous_repaint(true); }
+    void paint(canvas::Canvas&) override { if (on_tick) on_tick(); }
 };
 
 // Editor root that owns the widget<->parameter bindings and store listeners.
@@ -493,16 +376,21 @@ public:
     // current_root_note to the ROOT param.
     view::MusicalTypingController typing;
     std::function<int()> current_root_note;
-    // The on-screen interactive musical-typing keyboard. Hidden by default;
-    // ⌘K (Ctrl+K on Win/Linux) or the toolbar "Keyboard" button toggles it.
-    // Click keys to audition slices; the playhead key lights up so typing /
-    // MIDI / clicks all show.
-    InteractiveKeyboard* keyboard = nullptr;
+    // Toggle the SDK MusicalTypingKeyboard's own secondary GPU window (Cmd-K /
+    // Ctrl+K, and the toolbar "Keyboard" button). The keyboard is NOT inline —
+    // the processor owns the window + primitive; create_view() wires this to
+    // PulpTempoSamplerProcessor::toggle_keyboard_window().
+    std::function<void()> on_toggle_keyboard;
     // Toolbar "Settings" button that opens the standalone Audio/MIDI panel. It is
     // only meaningful in the standalone (the SDK settings chrome owns the panel);
     // in a DAW the host owns device routing, so it is hidden. Visibility is
     // resolved once the view is attached (see update_standalone_chrome_affordances).
     view::TextButton* settings_button = nullptr;
+    // Footer TEMPO box (target-tempo override) + its loop-generation watermark.
+    // The FrameTick poller defaults the fader/readout to the detected loop BPM
+    // whenever a new loop is analyzed (generation bump), so R≈1 on load.
+    view::Fader* tempo_fader = nullptr;
+    std::uint64_t tempo_seen_gen_ = ~0ull;  // force a first sync
 
     // Reveal the "Settings" button only when hosted in the standalone settings
     // chrome (a TabPanel ancestor carrying the Audio/MIDI Settings tab). Called
@@ -532,19 +420,15 @@ public:
     // Release any held typing notes (e.g. on focus loss) so nothing sticks.
     void release_all_typing() { typing.all_notes_off(); }
 
-    // Show/hide the on-screen keyboard. Returns the new visibility.
-    bool toggle_keyboard() {
-        if (!keyboard) return false;
-        const bool show = !keyboard->visible();
-        keyboard->set_visible(show);
-        return show;
-    }
+    // Toggle the MusicalTypingKeyboard window (same target as the toolbar button).
+    void toggle_keyboard() { if (on_toggle_keyboard) on_toggle_keyboard(); }
 
 private:
     bool on_musical_key(const view::KeyEvent& e) {
-        // ⌘K (macOS) / Ctrl+K (Win/Linux): toggle the on-screen keyboard. Checked
-        // before the modifier-chord rejection below so the command-combo reaches
-        // here (the macOS host routes Cmd chords via performKeyEquivalent:).
+        // ⌘K (macOS) / Ctrl+K (Win/Linux): toggle the MusicalTypingKeyboard
+        // window. Checked before the modifier-chord rejection below so the
+        // command-combo reaches here (the macOS host routes Cmd chords via
+        // performKeyEquivalent:).
         const uint16_t toggle_mod = view::kModCmd | view::kModCtrl;
         if (e.key == view::KeyCode::k && (e.modifiers & toggle_mod) && e.is_down && !e.is_repeat) {
             toggle_keyboard();
@@ -744,7 +628,87 @@ public:
         pos_out = ui_play_pos_.load(std::memory_order_relaxed);
     }
 
+    // ── Musical-typing keyboard window (SDK primitive) ──────────────────────
+    // The keyboard's note sink: a MusicalTypingKeyboard emits ABSOLUTE MIDI
+    // notes (base = ROOT + octave + semitone). They go to the SAME lock-free
+    // UI→audio queue host MIDI / slice clicks use; region_for_note maps each to
+    // slice idx = note - root.
+    void sampler_note_on(int note, float velocity) { ui_note_on(note, velocity); }
+    void sampler_note_off(int note) { ui_note_off(note); }
+
+    /// Toggle the MusicalTypingKeyboard's OWN secondary GPU window. Called from
+    /// ⌘K and the toolbar "Keyboard" button (UI thread). Lazily creates the
+    /// window + primitive on first open; subsequent calls show/hide it. The
+    /// keyboard is the faithful Figma-SVG DesignFrameView, so the window MUST be
+    /// GPU (use_gpu = true) — a CPU host renders it blank (mirrors mtk-demo).
+    void toggle_keyboard_window() {
+        if (kb_window_ && kb_window_->is_visible()) { kb_window_->hide(); return; }
+        if (!kb_window_) {
+            kb_ = std::make_unique<view::MusicalTypingKeyboard>();
+            // The sampler editor already feeds QWERTY per-window; this keyboard
+            // lives in its OWN window, so it self-plays (input_capture default
+            // true) when focused without double-triggering the editor (whose
+            // global-key hook only fires while ITS window is key).
+            kb_->on_note_on  = [this](int note, float vel) { sampler_note_on(note, vel); };
+            kb_->on_note_off = [this](int note) { sampler_note_off(note); };
+            // 'a' plays slice 0 (note = ROOT). A live listener (create_view) keeps
+            // this synced if ROOT changes while the window is open.
+            kb_->controller().set_base_note(static_cast<int>(state().get_value(kRootNote)));
+
+            const float w = kb_->panel_width(), h = kb_->panel_height();
+            view::WindowOptions opts;
+            opts.title = "Musical Typing";
+            opts.use_gpu = true;            // faithful SVG needs the Skia Graphite host
+            opts.secondary_window = true;   // closing it never quits the standalone app
+            opts.width = w;  opts.height = h;
+            opts.min_width = w; opts.min_height = 176.0f;  // piano frame is shorter
+            opts.resizable = true;
+            kb_window_ = view::WindowHost::create(*kb_, opts);
+            if (!kb_window_) { kb_.reset(); return; }  // platform without a window host
+            // Aspect-locked design viewport (mirror mtk-demo); resize the window to
+            // fit the active frame on a piano⇄typing toggle.
+            kb_window_->set_design_viewport(w, h);
+            kb_window_->set_fixed_aspect_ratio(w / h);
+            view::WindowHost* host = kb_window_.get();
+            kb_->on_intrinsic_size_changed = [host](float nw, float nh) {
+                host->set_fixed_aspect_ratio(nw / nh);
+                host->set_design_viewport(nw, nh);
+                host->request_content_size(nw, nh);
+            };
+            kb_window_->set_close_callback([] {});
+        }
+        // Re-sync ROOT each open (it may have changed while the window was hidden).
+        if (kb_) kb_->controller().set_base_note(static_cast<int>(state().get_value(kRootNote)));
+        kb_window_->show();
+    }
+
     double detected_bpm() const { return loop_bpm_.load(std::memory_order_relaxed); }
+
+    // ── Target-tempo override (UI-driven) ──────────────────────────────────
+    // The standalone has no host transport to set a tempo, so a UI control (the
+    // footer TEMPO box) drives the target tempo the loop is stretched TO. 0 means
+    // "follow the host" (the default — preserves in-DAW host-sync for the headless
+    // path / plugin formats that never engage it). Any value in [20,400] pins the
+    // render denominator R = loop_bpm / target, so dragging it re-stretches the
+    // loop live and the slice regions refit. Off-audio-thread (UI) entry point.
+    static constexpr double kTargetBpmMin = 20.0;
+    static constexpr double kTargetBpmMax = 400.0;
+    void set_target_bpm(double bpm) {
+        const double clamped = std::clamp(bpm, kTargetBpmMin, kTargetBpmMax);
+        tempo_override_.store(clamped, std::memory_order_relaxed);
+        request_render(clamped);  // re-stretch to the new target now
+    }
+    /// The tempo the loop is currently stretched TO: the override when engaged,
+    /// else the last host/standalone tempo seen by the worker (default 120).
+    double effective_bpm() const {
+        const double o = tempo_override_.load(std::memory_order_relaxed);
+        return o > 0.0 ? o : pending_host_bpm_.load(std::memory_order_relaxed);
+    }
+    /// True once a UI target tempo is engaged (vs. following the host).
+    bool tempo_override_active() const {
+        return tempo_override_.load(std::memory_order_relaxed) > 0.0;
+    }
+
     std::size_t num_slices() const {
         std::lock_guard<std::mutex> lock(raw_mutex_);
         return slices_orig_.empty() ? 0 : slices_orig_.size() - 1;
@@ -882,9 +846,14 @@ public:
         {
             auto btn = std::make_unique<TextButton>("Keyboard");
             place(*btn, 566, 14, 82, 28);
+            // The button AND ⌘K hit the SAME path: SamplerEditorRoot::on_toggle_keyboard,
+            // which the processor points at toggle_keyboard_window() below.
             btn->on_click = [root_ptr] { root_ptr->toggle_keyboard(); };
             root->add_child(std::move(btn));
         }
+        // Both the "Keyboard" button and ⌘K (on_musical_key) route here: open/close
+        // the MusicalTypingKeyboard's own secondary GPU window.
+        root->on_toggle_keyboard = [this] { toggle_keyboard_window(); };
 
         // ── Waveform / drop area ── (enlarged now the mockup rows are gone).
         // Shows a "drop a sample" CTA when empty; the waveform + slice regions
@@ -918,6 +887,14 @@ public:
         root->current_root_note = [this] { return static_cast<int>(state().get_value(kRootNote)); };
         root->typing.on_note_on = [this](int note, float vel) { ui_note_on(note, vel); };
         root->typing.on_note_off = [this](int note) { ui_note_off(note); };
+        // Keep the keyboard-window's controller base note synced to ROOT while it
+        // is open, so its 'a' key always plays slice 0 (note = root) like the
+        // inline editor typing. toggle_keyboard_window() also sets it on open.
+        root->listeners.push_back(state().add_listener(
+            [this](state::ParamID id, float v) {
+                if (id == kRootNote && kb_) kb_->controller().set_base_note(static_cast<int>(v));
+            },
+            state::ListenerThread::Main));
 
         // ── Footer: wired controls only ──
         // Root-note dropdown (slice 0 maps to this MIDI note; idx = note - root).
@@ -925,7 +902,7 @@ public:
         // Root = octave (C-2..C8). Octave granularity keeps the dropdown short
         // enough to fit + flip above when needed (a 121-note chromatic list was
         // taller than the window and got clipped). idx -> MIDI note idx*12.
-        label(20, 320, 40, 18, "ROOT", faint, 10, 600, LabelAlign::left, true);
+        label(20, 320, 34, 18, "ROOT", faint, 10, 600, LabelAlign::left, true);
         {
             auto combo = std::make_unique<ComboBox>();
             std::vector<std::string> names;
@@ -945,17 +922,17 @@ public:
                     if (id == kRootNote) comboPtr->set_selected_silent(static_cast<int>(v) / 12);
                 },
                 state::ListenerThread::Main));
-            place(*combo, 64, 316, 96, 26);
+            place(*combo, 54, 316, 64, 26);
             root->add_child(std::move(combo));
         }
 
         // Onset-sensitivity fader: higher = more slices. Drag re-slices on the
         // worker (coalesced) via the kOnsetSens listener -> request_reanalyze().
-        label(176, 320, 44, 18, "SENS", faint, 10, 600, LabelAlign::left, true);
+        label(124, 320, 38, 18, "SENS", faint, 10, 600, LabelAlign::left, true);
         {
             auto fader = std::make_unique<Fader>();
             fader->set_orientation(Fader::Orientation::horizontal);
-            place(*fader, 220, 322, 150, 16);
+            place(*fader, 162, 322, 86, 16);
             root->bindings.push_back(bind_parameter(*fader, state(), kOnsetSens));
             root->add_child(std::move(fader));
             root->listeners.push_back(state().add_listener(
@@ -965,13 +942,73 @@ public:
                 state::ListenerThread::Main));
         }
 
+        // Target-tempo (TEMPO) box: the standalone has no host transport, so this
+        // fader drives the BPM the loop is stretched TO. 20..400 BPM maps to the
+        // fader's 0..1; dragging calls set_target_bpm() -> the worker re-renders,
+        // so the slice regions refit live. A live numeric readout sits to its
+        // right. The FrameTick below defaults both to the detected loop BPM (R≈1)
+        // whenever a new loop is analyzed. Mirrors the SENS fader + SLICES readout.
+        constexpr double kBpmMin = PulpTempoSamplerProcessor::kTargetBpmMin;  // 20
+        constexpr double kBpmMax = PulpTempoSamplerProcessor::kTargetBpmMax;  // 400
+        auto bpm_to_norm = [](double b) {
+            return static_cast<float>(std::clamp((b - kBpmMin) / (kBpmMax - kBpmMin), 0.0, 1.0));
+        };
+        auto norm_to_bpm = [](float v) {
+            return kBpmMin + static_cast<double>(std::clamp(v, 0.0f, 1.0f)) * (kBpmMax - kBpmMin);
+        };
+        label(256, 320, 50, 18, "TEMPO", faint, 10, 600, LabelAlign::left, true);
+        {
+            auto fader = std::make_unique<Fader>();
+            fader->set_orientation(Fader::Orientation::horizontal);
+            place(*fader, 306, 322, 86, 16);
+            fader->set_value(bpm_to_norm(detected_bpm() > 0.0 ? detected_bpm()
+                                                              : effective_bpm()));
+            fader->on_change = [this, norm_to_bpm](float v) {
+                set_target_bpm(norm_to_bpm(v));
+            };
+            root->tempo_fader = fader.get();
+            root->add_child(std::move(fader));
+        }
+        // Live BPM readout for the TEMPO fader (shows the engaged target tempo).
+        {
+            auto live = std::make_unique<LiveText>();
+            live->font_family = mono;
+            live->color = teal;
+            live->text = [this] {
+                return std::to_string(static_cast<int>(std::lround(effective_bpm()))) + " BPM";
+            };
+            place(*live, 398, 320, 64, 18);
+            root->add_child(std::move(live));
+        }
+
         // Live slice count (updates after a drop or a sensitivity change).
         {
             auto live = std::make_unique<LiveText>();
             live->font_family = mono;
             live->text = [this] { return "SLICES  " + std::to_string(num_slices()); };
-            place(*live, 390, 320, 140, 18);
+            place(*live, 468, 320, 84, 18);
             root->add_child(std::move(live));
+        }
+
+        // Per-frame poller: when a new loop is analyzed (generation bump), default
+        // the TEMPO fader + override to the detected loop BPM so it plays at its
+        // natural tempo (R≈1) until the user drags. Lives in the UI (not the
+        // processor) so the headless / plugin paths keep following the host tempo.
+        {
+            auto tick = std::make_unique<FrameTick>();
+            SamplerEditorRoot* rp = root.get();
+            tick->on_tick = [this, rp, bpm_to_norm] {
+                const std::uint64_t g = raw_generation();
+                if (g == rp->tempo_seen_gen_) return;
+                rp->tempo_seen_gen_ = g;
+                const double b = detected_bpm();
+                if (b > 0.0) {
+                    set_target_bpm(b);
+                    if (rp->tempo_fader) rp->tempo_fader->set_value(bpm_to_norm(b));
+                }
+            };
+            place(*tick, 0, 0, 0, 0);
+            root->add_child(std::move(tick));
         }
 
         // LOOP toggle: enable/disable Forward looping for triggered slices
@@ -988,25 +1025,15 @@ public:
             loopBtn->set_off_background_color(raised);
             loopBtn->set_off_text_color(muted);
             loopBtn->set_off_border_color(faint);
-            place(*loopBtn, 556, 316, 84, 26);
+            place(*loopBtn, 560, 316, 84, 26);
             root->bindings.push_back(bind_parameter(*loopBtn, state(), kTempoLoop));
             root->add_child(std::move(loopBtn));
         }
 
-        // On-screen interactive musical-typing keyboard. Hidden until ⌘K/Ctrl+K.
-        // Added LAST so it paints on top as a floating panel. Click a key to
-        // audition its slice (same path as a waveform-slice tap); the playhead
-        // key lights up so typing, MIDI and clicks all read on it.
-        {
-            auto kbd = std::make_unique<InteractiveKeyboard>();
-            place(*kbd, 60, 86, 640, 196);
-            kbd->set_visible(false);
-            kbd->on_play_slice = [this](int idx, bool on) { play_slice(idx, on); };
-            kbd->active_slice = [this] { int s = -1; float p = 0.0f; playhead(s, p); return s; };
-            kbd->root_label = [this] { return note_name(static_cast<int>(state().get_value(kRootNote))); };
-            root->keyboard = kbd.get();
-            root->add_child(std::move(kbd));
-        }
+        // The musical-typing keyboard is NOT inline anymore: the SDK primitive
+        // pulp::view::MusicalTypingKeyboard is hosted in its OWN secondary GPU
+        // window (⌘K / the "Keyboard" button → toggle_keyboard_window()), so it
+        // never overlaps the waveform editor.
 
         root->layout_children();
         return root;
@@ -1030,9 +1057,15 @@ public:
                  const format::ProcessContext& ctx) override {
         clear_output(output);
 
-        // Track host tempo; on change, ask the worker to re-render (RT-safe:
-        // just atomic stores + flag, no allocation/locks on the audio thread).
-        const double bpm = ctx.tempo_bpm > 0.0 ? ctx.tempo_bpm : 120.0;
+        // Track the effective tempo; on change, ask the worker to re-render
+        // (RT-safe: just atomic loads/stores + a flag, no allocation/locks on the
+        // audio thread). When the UI engages a target-tempo OVERRIDE (the footer
+        // TEMPO box / set_target_bpm), it wins over the host tempo — and we render
+        // to it, NOT the host value, so this per-block read can never clobber the
+        // user's pending_host_bpm_ back to the host's tempo.
+        const double host_bpm = ctx.tempo_bpm > 0.0 ? ctx.tempo_bpm : 120.0;
+        const double override_bpm = tempo_override_.load(std::memory_order_relaxed);
+        const double bpm = override_bpm > 0.0 ? override_bpm : host_bpm;
         if (ctx.tempo_changed || bpm != last_host_bpm_) {
             last_host_bpm_ = bpm;
             request_render(bpm);
@@ -1413,6 +1446,8 @@ private:
     std::atomic<bool> drop_flag_{false};
     std::atomic<std::uint64_t> raw_generation_{0};
     std::atomic<double> pending_host_bpm_{120.0};
+    // UI target-tempo override: 0 = follow host, else the BPM to stretch TO.
+    std::atomic<double> tempo_override_{0.0};
     std::mutex drop_mutex_;
     std::string pending_drop_path_;
 
@@ -1426,6 +1461,12 @@ private:
     std::atomic<int> ui_play_slice_{-1};
     std::atomic<float> ui_play_pos_{0.0f};  // 0..1 through the slice
     int last_note_ = -1;  // audio-thread only: most recent note_on
+
+    // Musical-typing keyboard window (SDK primitive), lazily created on first ⌘K /
+    // "Keyboard" toggle. UI-thread only. kb_ is declared BEFORE kb_window_ so the
+    // window (which holds a View& to kb_) destructs first.
+    std::unique_ptr<view::MusicalTypingKeyboard> kb_;
+    std::unique_ptr<view::WindowHost> kb_window_;
 };
 
 inline std::unique_ptr<format::Processor> create_pulp_tempo_sampler() {

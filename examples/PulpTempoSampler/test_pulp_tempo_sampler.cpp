@@ -16,6 +16,7 @@
 #include <pulp/view/input_events.hpp>
 #include <pulp/view/ui_components.hpp>
 #if defined(__APPLE__)
+#include <pulp/view/musical_typing_keyboard.hpp>  // the SDK keyboard primitive
 #include <pulp/view/screenshot.hpp>  // render_to_png: drives one layout+paint pass
 #endif
 
@@ -380,6 +381,79 @@ TEST_CASE("onset sensitivity changes the slice count", "[tempo-sampler]") {
     REQUIRE(f.proc->num_slices() > low);
 }
 
+// Item A: the footer TEMPO box drives a target-tempo override. Engaging it pins
+// the render denominator R = loop_bpm / target, so the published (tempo-matched)
+// buffer length is round(in * loop / target) — a faster target shortens it.
+TEST_CASE("target-bpm override re-stretches the published buffer length", "[tempo-sampler]") {
+    Fixture f;
+    auto loop = percussive_loop(48000, 4);
+    const float* ch[1] = {loop.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+    REQUIRE_FALSE(f.proc->tempo_override_active());  // follows host until engaged
+
+    // Pin the loop's source tempo so R is deterministic.
+    f.proc->set_loop_bpm_for_test(120.0);
+
+    // The store has 2 slots and is freed by audio-thread acks, so pump a block
+    // per poll (as a real host would) to keep slots flowing across re-renders.
+    std::vector<float> l(512), r(512);
+    auto pump_until = [&](long target_len) {
+        return wait_for([&] {
+            process_block(*f.proc, 120.0, false, 0, l, r);
+            return f.proc->published_frames() == target_len;
+        });
+    };
+
+    f.proc->set_target_bpm(200.0);  // faster target -> shorter buffer
+    REQUIRE(f.proc->tempo_override_active());
+    REQUIRE(f.proc->effective_bpm() == 200.0);
+    const long fast = static_cast<long>(std::llround(48000.0 * 120.0 / 200.0));  // 28800
+    REQUIRE(pump_until(fast));
+
+    f.proc->set_target_bpm(80.0);   // slower target -> longer buffer
+    const long slow = static_cast<long>(std::llround(48000.0 * 120.0 / 80.0));   // 72000
+    REQUIRE(pump_until(slow));
+    REQUIRE(slow > fast);
+
+    // Clamp to [20,400].
+    f.proc->set_target_bpm(5000.0);
+    REQUIRE(f.proc->effective_bpm() == 400.0);
+}
+
+// The per-block host-tempo read in process() must NOT clobber an engaged
+// override back to the host's tempo (the bug the override guards against).
+TEST_CASE("target-bpm override survives the per-block host tempo", "[tempo-sampler]") {
+    Fixture f;
+    auto loop = percussive_loop(48000, 4);
+    const float* ch[1] = {loop.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+    f.proc->set_loop_bpm_for_test(120.0);
+
+    f.proc->set_target_bpm(200.0);
+    // Drive several process() blocks at a DIFFERENT host tempo; the override wins.
+    std::vector<float> l(512), r(512);
+    for (int i = 0; i < 8; ++i) process_block(*f.proc, 90.0, false, 0, l, r);
+    const long expected = static_cast<long>(std::llround(48000.0 * 120.0 / 200.0));  // 28800
+    REQUIRE(wait_for([&] { return f.proc->published_frames() == expected; }));
+    const long host_len = static_cast<long>(std::llround(48000.0 * 120.0 / 90.0)); // 64000
+    REQUIRE(f.proc->published_frames() != host_len);
+    REQUIRE(f.proc->effective_bpm() == 200.0);
+}
+
+// Item B: the framework SettingsPanel reports a natural height taller than the
+// fixed sampler editor, so the standalone host can grow the window on the
+// Settings tab (instead of squishing the device dropdowns into 372px).
+TEST_CASE("settings panel natural height exceeds the editor height", "[tempo-sampler]") {
+    PulpTempoSamplerProcessor p;
+    const auto vs = p.view_size();
+    REQUIRE(format::SettingsPanel::preferred_height() >
+            static_cast<int>(vs.preferred_height));
+    // Room for header + inner tab bar + every Audio-tab row at full size.
+    REQUIRE(format::SettingsPanel::preferred_height() == 620);
+}
+
 TEST_CASE("plugin state round-trips the loaded sample (close/reopen)", "[tempo-sampler]") {
     auto loop = percussive_loop(48000, 4);
     const float* ch[1] = {loop.data()};
@@ -658,87 +732,71 @@ TEST_CASE("standalone musical typing: on_global_key plays a slice", "[tempo-samp
     CHECK(energy > 1e-6);  // typing produced audio through the wired editor
 }
 
-// ⌘K (Ctrl+K on Win/Linux) toggles the on-screen musical-typing keyboard. The
-// standalone host routes Cmd-chords via performKeyEquivalent: to on_global_key.
-TEST_CASE("Cmd+K toggles the on-screen keyboard overlay", "[tempo-sampler]") {
+// The SDK MusicalTypingKeyboard primitive (hosted in its own ⌘K window) feeds
+// the SAME lock-free UI->audio path host MIDI / slice clicks use. Wire it exactly
+// as toggle_keyboard_window() does and assert a note from on_note_on(rootMidi)
+// reaches the sampler and produces audio — no pixel coords, no window needed.
+TEST_CASE("musical-typing keyboard note routing reaches the sampler",
+          "[tempo-sampler]") {
     Fixture f;
     auto loop = percussive_loop(48000, 4);
     const float* ch[1] = {loop.data()};
     REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
     REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
-
-    auto editor = f.proc->create_view();
-    REQUIRE(editor);
-    auto* root = dynamic_cast<SamplerEditorRoot*>(editor.get());
-    REQUIRE(root != nullptr);
-    REQUIRE(root->keyboard != nullptr);
-    REQUIRE_FALSE(root->keyboard->visible());  // hidden by default
-
-    view::KeyEvent k; k.key = view::KeyCode::k; k.is_down = true; k.modifiers = view::kModCmd;
-    REQUIRE(root->on_global_key(k));           // ⌘K consumed
-    REQUIRE(root->keyboard->visible());        // shown
-
-    // Render the shown state to prove the embedded SVG paints inside the editor.
-    auto png = view::render_to_png(*editor, 760, 372, 1.0f, view::ScreenshotBackend::skia);
-    REQUIRE(png.size() > 1000);
-    std::ofstream("/tmp/sampler_keyboard_shown.png", std::ios::binary)
-        .write(reinterpret_cast<const char*>(png.data()), static_cast<std::streamsize>(png.size()));
-
-    REQUIRE(root->on_global_key(k));           // ⌘K again -> hide
-    REQUIRE_FALSE(root->keyboard->visible());
-}
-
-// Clicking a key on the on-screen keyboard auditions its slice (same path as a
-// waveform-slice tap). Drives the REAL widget -> on_play_slice -> audio.
-TEST_CASE("on-screen keyboard key click auditions a slice", "[tempo-sampler]") {
-    Fixture f;
-    auto loop = percussive_loop(48000, 4);
-    const float* ch[1] = {loop.data()};
-    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
-    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
-
-    auto editor = f.proc->create_view();
-    auto* root = dynamic_cast<SamplerEditorRoot*>(editor.get());
-    REQUIRE(root != nullptr);
-    REQUIRE(root->keyboard != nullptr);
-    // Show it first (the ⌘K flow): a hidden view lays out to zero size, so the
-    // keyboard must be visible to have clickable key geometry.
-    root->keyboard->set_visible(true);
-    (void)view::render_to_png(*editor, 760, 372, 1.0f, view::ScreenshotBackend::skia);
-    REQUIRE(root->keyboard->local_bounds().width > 0);
-
-    // Click the first white key ("A" = slice 0). Keyboard coords are local
-    // (origin 0,0); x~50 is inside white key 0, y=150 is below the black keys.
-    view::MouseEvent down;
-    down.button = view::MouseButton::left; down.is_down = true;
-    down.position = {50.0f, 150.0f};
-    root->keyboard->on_mouse_event(down);
 
     std::vector<float> l(512), r(512);
-    process_block(*f.proc, 120.0, false, 0, l, r);
+    process_block(*f.proc, 120.0, false, 0, l, r);  // publish at host tempo
     REQUIRE(wait_for([&] { return f.proc->published_frames() > 0; }));
+
+    // base = ROOT so the root note maps to slice 0 (idx = note - root).
+    const int root_note = static_cast<int>(f.store.get_value(kRootNote));
+    auto kb = std::make_unique<view::MusicalTypingKeyboard>();
+    kb->on_note_on  = [&](int note, float vel) { f.proc->sampler_note_on(note, vel); };
+    kb->on_note_off = [&](int note) { f.proc->sampler_note_off(note); };
+    kb->controller().set_base_note(root_note);
+
+    kb->on_note_on(root_note, 0.8f);  // the keyboard emits the root note
     double energy = 0.0;
     for (int blk = 0; blk < 8; ++blk) {
         process_block(*f.proc, 120.0, false, 0, l, r);
         for (int i = 0; i < 512; ++i) energy += l[static_cast<size_t>(i)] * l[static_cast<size_t>(i)];
+        for (float v : l) REQUIRE(std::isfinite(v));
     }
-    CHECK(energy > 1e-6);  // a keyboard-key click actually triggered the slice
+    kb->on_note_off(root_note);
+    CHECK(energy > 1e-6);  // keyboard note reached the sampler and produced audio
 }
 
-// Toolbar "Keyboard" button toggles the on-screen keyboard (the same target as
-// ⌘K), so the keyboard is reachable without a key chord. Drive the REAL button.
-TEST_CASE("toolbar Keyboard button toggles the on-screen keyboard", "[tempo-sampler]") {
+// ⌘K (Ctrl+K on Win/Linux) toggles the MusicalTypingKeyboard's OWN window. The
+// standalone host routes Cmd-chords via performKeyEquivalent: to on_global_key.
+// Intercept on_toggle_keyboard so the test asserts the route WITHOUT opening a
+// real GPU window (the live path is toggle_keyboard_window()).
+TEST_CASE("Cmd+K routes to the keyboard-window toggle", "[tempo-sampler]") {
     Fixture f;
-    auto loop = percussive_loop(48000, 4);
-    const float* ch[1] = {loop.data()};
-    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
-    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+    auto editor = f.proc->create_view();
+    REQUIRE(editor);
+    auto* root = dynamic_cast<SamplerEditorRoot*>(editor.get());
+    REQUIRE(root != nullptr);
+    REQUIRE(root->on_global_key);  // the hook the standalone host fires per key
+    int toggles = 0;
+    root->on_toggle_keyboard = [&] { ++toggles; };
 
+    view::KeyEvent k; k.key = view::KeyCode::k; k.is_down = true; k.modifiers = view::kModCmd;
+    REQUIRE(root->on_global_key(k));  // ⌘K consumed -> toggle
+    REQUIRE(toggles == 1);
+    REQUIRE(root->on_global_key(k));  // ⌘K again -> toggle
+    REQUIRE(toggles == 2);
+}
+
+// Toolbar "Keyboard" button hits the SAME toggle as ⌘K (no key chord needed).
+// Drive the REAL button; intercept on_toggle_keyboard to avoid opening a window.
+TEST_CASE("toolbar Keyboard button routes to the keyboard-window toggle",
+          "[tempo-sampler]") {
+    Fixture f;
     auto editor = f.proc->create_view();
     auto* root = dynamic_cast<SamplerEditorRoot*>(editor.get());
     REQUIRE(root != nullptr);
-    REQUIRE(root->keyboard != nullptr);
-    REQUIRE_FALSE(root->keyboard->visible());  // hidden by default
+    int toggles = 0;
+    root->on_toggle_keyboard = [&] { ++toggles; };
 
     // One layout+paint pass so the button has clickable geometry.
     (void)view::render_to_png(*editor, 760, 372, 1.0f, view::ScreenshotBackend::skia);
@@ -747,9 +805,7 @@ TEST_CASE("toolbar Keyboard button toggles the on-screen keyboard", "[tempo-samp
 
     const auto b = kbd_btn->local_bounds();
     kbd_btn->on_mouse_down({b.width * 0.5f, b.height * 0.5f});  // -> on_click -> toggle
-    REQUIRE(root->keyboard->visible());                        // shown
-    kbd_btn->on_mouse_down({b.width * 0.5f, b.height * 0.5f});  // toggle back off
-    REQUIRE_FALSE(root->keyboard->visible());
+    REQUIRE(toggles == 1);  // button hit the same toggle as ⌘K
 }
 
 // The "Settings" button is hidden in a plain (DAW) editor and revealed only when
@@ -796,5 +852,44 @@ TEST_CASE("Settings button reveals + opens the Audio/MIDI panel in the chrome",
     std::ofstream("/tmp/sampler_settings_panel.png", std::ios::binary)
         .write(reinterpret_cast<const char*>(png.data()),
                static_cast<std::streamsize>(png.size()));
+}
+
+// Item B visual proof: rendered at the SettingsPanel's natural height (the size
+// the standalone host grows the window to on the Settings tab), the device
+// dropdowns and meters lay out at full size instead of being squished into the
+// editor's 372px. Writes both the squished (372) and full-height captures so the
+// fix is visible side by side.
+TEST_CASE("settings panel renders un-squished at its preferred height",
+          "[tempo-sampler]") {
+    Fixture f;
+    auto loop = percussive_loop(48000, 4);
+    const float* ch[1] = {loop.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+
+    auto editor = f.proc->create_view();
+    auto chrome = std::make_unique<view::TabPanel>();
+    const int settings_h = format::SettingsPanel::preferred_height();
+    chrome->set_bounds({0, 0, 760, static_cast<float>(settings_h)});
+    chrome->set_show_tab_bar(false);
+    chrome->add_tab("Editor", std::move(editor));
+    chrome->add_tab("Settings", std::make_unique<format::SettingsPanel>());
+    chrome->set_active_tab(1);
+    REQUIRE(chrome->active_tab() == 1);
+
+    auto full = view::render_to_png(*chrome, 760, static_cast<uint32_t>(settings_h),
+                                    1.0f, view::ScreenshotBackend::skia);
+    REQUIRE(full.size() > 1000);
+    std::ofstream("/tmp/sampler_settings_full.png", std::ios::binary)
+        .write(reinterpret_cast<const char*>(full.data()),
+               static_cast<std::streamsize>(full.size()));
+
+    // For contrast, the squished render at the editor's height (the bug).
+    auto squished = view::render_to_png(*chrome, 760, 372, 1.0f,
+                                        view::ScreenshotBackend::skia);
+    REQUIRE(squished.size() > 1000);
+    std::ofstream("/tmp/sampler_settings_squished.png", std::ios::binary)
+        .write(reinterpret_cast<const char*>(squished.data()),
+               static_cast<std::streamsize>(squished.size()));
 }
 #endif  // __APPLE__
