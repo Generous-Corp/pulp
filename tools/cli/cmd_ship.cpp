@@ -53,11 +53,45 @@ static int unknown_ship_arg(const std::string& subcommand,
     return 2;
 }
 
+// Path to the non-interactive-signing doctor script (tools/scripts).
+static fs::path signing_doctor_script(const fs::path& root) {
+    return root / "tools" / "scripts" / "ensure_signing_ready.sh";
+}
+
+// Best-effort, quiet, idempotent preflight: materialize the dedicated signing
+// keychain + validate the .p8 notary key so codesign/notarytool never pop a
+// keychain/1Password prompt. Never fails the caller — if the doctor reports
+// not-ready, the subsequent sign/notarize surfaces the real error itself.
+static void run_signing_preflight(const fs::path& root) {
+    auto script = signing_doctor_script(root);
+    if (fs::exists(script))
+        run("/bin/bash \"" + script.string() + "\" --quiet >/dev/null 2>&1 || true");
+}
+
 int cmd_ship(const std::vector<std::string>& args) {
     auto root = find_project_root();
     if (root.empty()) {
         std::cerr << "Error: not in a Pulp project directory\n";
         return 1;
+    }
+
+    // Parse subcommand
+    std::string sub = args.empty() ? "help" : args[0];
+
+    // ── doctor: ensure non-interactive signing + notarization readiness ───────
+    // Runs the self-healing keychain/.p8 doctor. Independent of a build dir, so
+    // it is handled before the build-dir check below. Flags (--check-online,
+    // --print-env, --quiet) pass straight through.
+    if (sub == "doctor") {
+        auto script = signing_doctor_script(root);
+        if (!fs::exists(script)) {
+            std::cerr << "pulp ship doctor: missing " << script.string() << "\n";
+            return 1;
+        }
+        std::string cmd = "/bin/bash \"" + script.string() + "\"";
+        for (size_t i = 1; i < args.size(); ++i)
+            cmd += " \"" + args[i] + "\"";
+        return run(cmd);
     }
 
     auto build_dir = root / "build";
@@ -66,11 +100,9 @@ int cmd_ship(const std::vector<std::string>& args) {
         return 1;
     }
 
-    // Parse subcommand
-    std::string sub = args.empty() ? "help" : args[0];
-
     // ── sign ────────────────────────────────────────────────────────────────
     if (sub == "sign") {
+        run_signing_preflight(root);  // self-heal the dedicated keychain (no prompt)
         std::string identity, target, keystore_path, key_alias, store_pass, key_pass;
         std::string sign_path;  // --path: sign one explicit artifact (.app/.dmg/bundle)
         std::string entitlements = (root / "ship" / "templates" / "entitlements.plist").string();
@@ -1630,6 +1662,9 @@ int cmd_ship(const std::vector<std::string>& args) {
     std::cout << "             --url https://... --version 1.0.0 --notes \"...\"\n";
     std::cout << "  check      Check signing status of built plugins\n";
     std::cout << "             --target android  (check APK/AAB in artifacts/)\n";
+    std::cout << "  doctor     Make signing+notarization non-interactive (no keychain/1Password prompt)\n";
+    std::cout << "             --check-online  (validate the .p8 against Apple, refresh pulp-notary profile)\n";
+    std::cout << "             --print-env     (emit resolved identity/keychain handles; no secrets)\n";
     std::cout << "  auv3-xcodeproj  Generate an Xcode project for an AUv3 target\n";
     std::cout << "             <target> [--sdk iphonesimulator|iphoneos|macosx]\n";
     std::cout << "             [--output <dir>] [--open] [--dry-run]\n";

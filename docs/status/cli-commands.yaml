@@ -162,6 +162,18 @@ commands:
         args:
           - name: --target
             required: false
+      - name: doctor
+        summary: "Make signing+notarization non-interactive (no keychain/1Password prompt): self-heal the dedicated signing keychain and validate the file-based .p8 notary key. No build dir required. Run automatically as a best-effort preflight by `ship sign`."
+        args:
+          - name: --check-online
+            required: false
+            description: Also validate the .p8 against Apple (read-only) and refresh the pulp-notary keychain profile
+          - name: --print-env
+            required: false
+            description: Emit resolved identity/keychain/keypath handles (no secret values) for eval by callers
+          - name: --quiet
+            required: false
+            description: Emit only errors and the final status
       - name: share
         summary: "One-shot sign → wrap (.app → DMG) → notarize → staple → Gatekeeper-verify a single artifact for sharing (macOS)"
         args:

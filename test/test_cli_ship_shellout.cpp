@@ -290,7 +290,7 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     REQUIRE(r.exit_code == 0);
     // Help branch reached — every shipping subcommand must be listed.
     for (const char* sub : {"sign", "notarize", "package", "appcast",
-                            "check", "auv3-xcodeproj", "release", "share"}) {
+                            "check", "doctor", "auv3-xcodeproj", "release", "share"}) {
         INFO("ship help missing subcommand: " << sub);
         REQUIRE(contains(r.stdout_output, sub));
     }
@@ -327,6 +327,54 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     auto combined = r.stdout_output + r.stderr_output;
     REQUIRE(contains(combined, "Build directory not found"));
     REQUIRE(contains(combined, "pulp build"));
+
+    fs::remove_all(root);
+}
+
+// `pulp ship doctor` makes signing non-interactive. It is dispatched ABOVE the
+// build-dir guard (it must work before any build exists) and shells out to
+// tools/scripts/ensure_signing_ready.sh. We drop a stub script into the fake
+// project so the test exercises the dispatch + arg pass-through without touching
+// the real keychain or Apple.
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship doctor runs without a build dir and shells the readiness script",
+                 "[cli][shellout][ship][doctor]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("doctor-no-build", /*with_build_cache=*/false);
+    auto scripts = root / "tools" / "scripts";
+    fs::create_directories(scripts);
+    auto stub = scripts / "ensure_signing_ready.sh";
+    {
+        std::ofstream out(stub);
+        out << "#!/usr/bin/env bash\n"
+               "echo \"DOCTOR-STUB-RAN args=$*\"\n"
+               "exit 0\n";
+    }
+    fs::permissions(stub, fs::perms::owner_all | fs::perms::group_read |
+                              fs::perms::others_read);
+
+    auto r = run_pulp_in(root, {"ship", "doctor", "--check-online"});
+    REQUIRE_FALSE(r.timed_out);
+    auto combined = r.stdout_output + r.stderr_output;
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(contains(combined, "DOCTOR-STUB-RAN"));
+    REQUIRE(contains(combined, "--check-online"));          // arg pass-through
+    REQUIRE_FALSE(contains(combined, "Build directory not found"));  // ran above the guard
+
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship doctor reports a clear error when the readiness script is missing",
+                 "[cli][shellout][ship][doctor]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("doctor-missing-script", /*with_build_cache=*/false);
+
+    auto r = run_pulp_in(root, {"ship", "doctor"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 1);
+    REQUIRE(contains(r.stdout_output + r.stderr_output, "missing"));
+    REQUIRE(contains(r.stdout_output + r.stderr_output, "ensure_signing_ready.sh"));
 
     fs::remove_all(root);
 }

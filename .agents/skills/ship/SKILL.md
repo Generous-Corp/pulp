@@ -49,6 +49,45 @@ Advisory only — never blocks. Full contract + override knobs in the
 | `share` | macOS only | One-off: sign → wrap `.app` in DMG → notarize → staple → Gatekeeper-verify a single artifact for sharing |
 | `appcast` | All | Generate Sparkle-compatible XML update feed |
 | `check` | All | Verify signing status of built artifacts |
+| `doctor` | macOS | Make signing+notarization non-interactive: self-heal the dedicated signing keychain and validate the `.p8` notary key. No build dir required. |
+
+## Non-interactive signing (no keychain / 1Password prompt)
+
+On a workstation, `codesign` and `notarytool` can pop a macOS **keychain "allow
+access"** dialog or a **1Password** prompt — which silently wedges any headless,
+SSH, or CI sign. Two root causes, two durable fixes, both codified in
+`pulp ship doctor` (script: `tools/scripts/ensure_signing_ready.sh`):
+
+1. **Signing key in the *login* keychain** → `codesign`/1Password prompt. Fix:
+   sign from a **dedicated keychain** whose key is authorized for `codesign` via
+   `security set-key-partition-list`. The doctor creates/unlocks it, imports the
+   `.p12`, runs the partition-list step, and adds it to the search list — all
+   idempotent.
+2. **`notarytool` driven by a keychain *profile*** re-prompts when the login
+   keychain locks (and the profile periodically vanishes on churny hosts). Fix:
+   notarize from a **file-based App Store Connect `.p8` API key** — no keychain
+   at all. The doctor validates it; `--check-online` also re-mints the optional
+   `pulp-notary` convenience profile from the same `.p8`.
+
+```bash
+pulp ship doctor                 # heal + report; exit 0 = ready (offline, deterministic)
+pulp ship doctor --check-online  # also prove the .p8 against Apple (read-only) + refresh profile
+pulp ship doctor --print-env     # emit resolved identity/keychain/keypath handles (no secrets) for eval
+```
+
+`pulp ship sign` runs this doctor as a **best-effort, quiet preflight** so the
+hardened path is automatic. The doctor itself NEVER prints secret values.
+
+**Secrets live OUTSIDE the repo** (never committed), in
+`~/.config/pulp/secrets/` (override dir with `$PULP_SECRETS_DIR`):
+- `keychain.env` — `PULP_SIGN_KEYCHAIN`, `PULP_SIGN_KEYCHAIN_PW`, `PULP_SIGN_P12`,
+  `PULP_SIGN_P12_PW`, `PULP_SIGN_IDENTITY_HASH` (+ optional `…_INSTALLER_HASH`)
+- `notary.env` — `PULP_NOTARY_KEY_PATH` (`.p8`), `PULP_NOTARY_KEY_ID`,
+  `PULP_NOTARY_ISSUER_ID` (the same trio `notary_env.cpp` resolves for `notarize`)
+
+Each value may also come from the same-named environment variable; **env wins
+over the file**. If no dedicated keychain is configured, the doctor falls back to
+the login keychain and warns loudly that signing **may** prompt.
 
 ## Configuration
 

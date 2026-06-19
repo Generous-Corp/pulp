@@ -99,6 +99,29 @@ cmake -S . -B build -DPULP_SANITIZER=address
 ./build/pulp build --watch       # watch + rebuild loop
 ```
 
+### Non-interactive signing + notarization (no keychain / 1Password prompt)
+
+`codesign` / `notarytool` pop a macOS keychain "allow access" dialog or a
+1Password prompt when the signing key is in the *login* keychain or notarytool
+runs off a keychain *profile* — which wedges any headless / SSH / CI sign. The
+hardened, codified solution:
+
+```bash
+pulp ship doctor                 # self-heal: dedicated signing keychain + validate .p8 (offline)
+pulp ship doctor --check-online  # also prove the .p8 vs Apple (read-only) + refresh pulp-notary profile
+```
+
+`pulp ship doctor` (script: `tools/scripts/ensure_signing_ready.sh`, tests in
+`tools/scripts/test_ensure_signing_ready.sh`) materializes a **dedicated signing
+keychain** authorized for `codesign` via `set-key-partition-list` (never the
+login keychain / 1Password), and verifies a **file-based App Store Connect `.p8`
+notary key** (no keychain to lock or lose). `pulp ship sign` runs it as a
+best-effort quiet preflight. The working recipe: sign from the dedicated keychain
+with the identity hash + `--options runtime --timestamp` (inner dylibs/frameworks
+first), then `notarytool submit --key <.p8> --wait`, `stapler staple`, `spctl
+--assess`. **Secrets live in `~/.config/pulp/secrets/` (`keychain.env` +
+`notary.env`), never in the repo**; env vars of the same name override the files.
+
 After the Rust CLI cutover, source builds produce `./build/pulp` as
 the user-facing CLI and `./build/tools/cli/pulp-cpp` as the C++
 delegate for commands that still live in C++.

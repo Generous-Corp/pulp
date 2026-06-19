@@ -166,6 +166,16 @@ Same as above, focus on steps 2, 4, 5, 6, 7. Key risks:
   put the behavioral assertion in a platform-gated unit test (here:
   `test_linux_packaging.cpp`) rather than a cross-platform shellout, since the
   required macOS lane can't exercise the Linux-only branch.
+- A subcommand that must work BEFORE a build exists (e.g. `pulp ship doctor`,
+  which makes signing non-interactive) has to be dispatched *above*
+  `cmd_ship`'s `build/CMakeCache.txt` guard — that early-return fires first and
+  would otherwise reject it with "Build directory not found." Put such handlers
+  right after `find_project_root()`.
+- `pulp ship doctor` shells out to `tools/scripts/ensure_signing_ready.sh` (the
+  canonical logic + its own `test_ensure_signing_ready.sh`); the C++ side is a
+  thin pass-through, and `ship sign` invokes it as a **best-effort quiet
+  preflight** (`|| true`) so a doctor failure never masks the real sign error.
+  Keep secrets in `~/.config/pulp/secrets/`, never the repo.
 
 ### Rust CLI cutover path convention
 

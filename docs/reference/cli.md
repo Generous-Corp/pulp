@@ -817,6 +817,7 @@ pulp ship sign --identity "..." --entitlements path/to/entitlements.plist
 pulp ship sign --identity "..." --path MyApp.app   # sign one explicit artifact
 pulp ship package --version 1.0.0
 pulp ship check
+pulp ship doctor                                   # make signing non-interactive (no keychain/1Password prompt)
 pulp ship notarize --api-key ~/key.p8 --api-key-id ABC --api-issuer <uuid>
 pulp ship notarize --path MyApp-1.0.dmg            # notarize + staple one artifact
 pulp ship notarize --dry-run                       # print resolved argv, no submit
@@ -833,6 +834,9 @@ pulp ship share MyApp.app --identity "..."         # one-shot: sign+notarize+ver
 | `release`  | macOS one-command pipeline: sign → package → **notarize the .pkg/.dmg it builds** → staple |
 | `share`    | One-shot for sharing a single artifact: sign → wrap `.app` in DMG → notarize → staple → Gatekeeper-verify |
 | `check`    | Check signing status of all built plugins |
+| `doctor`   | Make signing+notarization non-interactive (no keychain/1Password prompt): self-heal the dedicated signing keychain and validate the file-based `.p8` notary key. Run automatically as a best-effort preflight by `sign`. |
+
+`doctor` materializes a dedicated signing keychain authorized for `codesign` (so the login keychain / 1Password is never consulted) and validates a file-based App Store Connect `.p8` notary key. `--check-online` also proves the `.p8` against Apple (read-only) and refreshes the optional `pulp-notary` keychain profile; `--print-env` emits resolved identity/keychain handles (no secret values). Secrets live in `~/.config/pulp/secrets/` (`keychain.env` + `notary.env`), never in the repo; same-named env vars override the files. No build directory is required.
 
 `sign` requires `--identity`. The default entitlements file is `ship/templates/entitlements.plist`.
 `--path` signs exactly one `.app`, `.dmg`, or plugin bundle instead of scanning the build dirs;

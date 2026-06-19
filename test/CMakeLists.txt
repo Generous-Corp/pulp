@@ -179,19 +179,19 @@ if(UNIX)
         TIMEOUT 600)
 endif()
 
-# retry_git_clone unit test (setup.sh helper). Guards the #425 P1
-# Codex fix — a partial clone target is scrubbed between retries so
-# attempt 2+ can actually re-run the network fetch.
+# retry_git_clone unit test (setup.sh helper, #425): a partial clone target is
+# scrubbed between retries so attempt 2+ re-runs the fetch. Same UNIX block runs
+# the ensure_signing_ready.sh doctor test (PATH-shims security/xcrun, hermetic).
 if(UNIX)
     add_test(NAME retry-git-clone
         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_retry_git_clone.sh)
     set_tests_properties(retry-git-clone PROPERTIES TIMEOUT 30)
+    add_test(NAME ensure-signing-ready
+        COMMAND bash ${CMAKE_SOURCE_DIR}/tools/scripts/test_ensure_signing_ready.sh)
+    set_tests_properties(ensure-signing-ready PROPERTIES TIMEOUT 60)
 endif()
-
-# Launcher unit test (pulp #1821) — verifies tools/mcp/pulp-mcp-launcher
-# resolves the source-tree build, falls back to $PATH, and emits a
-# readable diagnostic when neither is present. Hermetic (stages a
-# tempdir layout), no real binary required.
+# Launcher unit test (pulp #1821): tools/mcp/pulp-mcp-launcher resolves the
+# source build / $PATH fallback / diagnostic. Hermetic (tempdir), no real binary.
 if(UNIX)
     add_test(NAME pulp-mcp-launcher
         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_pulp_mcp_launcher.sh)
