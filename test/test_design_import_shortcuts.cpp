@@ -19,6 +19,10 @@
 #include <chrono>
 #include <string>
 
+#ifndef __has_feature
+#define __has_feature(x) 0
+#endif
+
 using pulp::view::CodeGenMode;
 using pulp::view::CodeGenOptions;
 using pulp::view::DesignIR;
@@ -867,8 +871,13 @@ TEST_CASE("extract_keyboard_shortcuts does not catastrophically backtrack on lar
     const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - t0).count();
 
+#if defined(__SANITIZE_ADDRESS__) || __has_feature(address_sanitizer)
+    constexpr long long max_elapsed_ms = 5000;
+#else
+    constexpr long long max_elapsed_ms = 2000;
+#endif
     INFO("extract_keyboard_shortcuts on 1MB input took " << elapsed_ms << " ms");
-    REQUIRE(elapsed_ms < 2000);   // was minutes before the catastrophic-backtracking fix
+    REQUIRE(elapsed_ms < max_elapsed_ms);   // was minutes before the catastrophic-backtracking fix
     REQUIRE(out.size() == 1);
     REQUIRE(out[0].key == "Escape");
 }

@@ -42,7 +42,7 @@
 
 @implementation PulpIOSDragDrop {
     pulp::view::View* _root;                       // not owned
-    __weak UIView* _hostView;
+    UIView* _hostView;                             // not owned; host invalidates before teardown
     pulp::view::Point (^_xform)(pulp::view::Point);
     pulp::view::DragSession _session;              // hover state for dispatch_drag_*
     NSMutableArray<NSString*>* _pendingPaths;      // staged outbound payload
@@ -55,13 +55,19 @@
     if (self = [super init]) {
         _root = root;
         _hostView = hostView;
-        _xform = xform;
-        _pendingPaths = [NSMutableArray array];
+        _xform = [xform copy];
+        _pendingPaths = [[NSMutableArray alloc] init];
     }
     return self;
 }
 
 - (void)invalidate { _root = nullptr; }
+
+- (void)dealloc {
+    [_xform release];
+    [_pendingPaths release];
+    [super dealloc];
+}
 
 - (pulp::view::Point)rootPointFor:(id<UIDropSession>)session {
     CGPoint loc = [session locationInView:_hostView];
@@ -119,13 +125,16 @@
             performDrop:(id<UIDropSession>)session {
     if (!_root) return;
     const pulp::view::Point pt = [self rootPointFor:session];
-    __weak PulpIOSDragDrop* weakSelf = self;
+    PulpIOSDragDrop* retainedSelf = [self retain];
     // Completion is delivered on the main queue (UIKit guarantee), so touching
     // the view tree here is thread-safe.
     [session loadObjectsOfClass:[NSURL class]
                      completion:^(NSArray<__kindof id<NSItemProviderReading>> *objects) {
-        PulpIOSDragDrop* strongSelf = weakSelf;
-        if (!strongSelf || !strongSelf->_root) return;
+        PulpIOSDragDrop* strongSelf = retainedSelf;
+        if (!strongSelf->_root) {
+            [retainedSelf release];
+            return;
+        }
         pulp::view::DropData data;
         data.type = pulp::view::DropData::Type::files;
         for (id obj in objects) {
@@ -137,6 +146,7 @@
         }
         if (!data.file_paths.empty())
             pulp::view::dispatch_drop(*strongSelf->_root, strongSelf->_session, data, pt);
+        [retainedSelf release];
     }];
 }
 
