@@ -3,7 +3,7 @@
 // PulpEffect — biquad filter effect with multiple parameter types
 // Validates: frequency parameter (wide range), resonance, stepped enum (filter type),
 // dry/wet mix, and more complex DSP than PulpGain.
-// Phase 5 validation: demonstrates parameter diversity across format adapters.
+// Demonstrates parameter diversity across format adapters.
 
 #include <pulp/format/processor.hpp>
 #include <cmath>
