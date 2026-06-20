@@ -11,7 +11,7 @@ import androidx.lifecycle.LifecycleService
 import com.pulp.audio.PulpAudioController
 
 /**
- * Foreground service for background audio processing (#333).
+ * Foreground service for background audio processing.
  *
  * Android kills backgrounded apps' audio engines within seconds unless
  * a foreground service is running. PulpAudioController drives this

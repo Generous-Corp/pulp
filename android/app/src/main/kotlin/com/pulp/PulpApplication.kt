@@ -25,7 +25,7 @@ class PulpApplication : Application(), LifecycleEventObserver {
             } catch (e: Throwable) {
                 android.util.Log.e(LOG_TAG, "PulpFileProvider init failed: ${e.message}")
             }
-            // Start MIDI device discovery (Phase 1 = USB MIDI input).
+            // Start MIDI device discovery.
             // PulpMidiManager registers for MidiManager device callbacks
             // and forwards received bytes to C++ via nativeOnMidiReceived.
             try {

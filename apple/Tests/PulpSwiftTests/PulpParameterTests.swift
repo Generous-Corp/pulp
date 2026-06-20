@@ -213,7 +213,7 @@ final class PulpParameterTests: XCTestCase {
         XCTAssertEqual(bridge.setCalls.count, before)  // nothing written
     }
 
-    // ── Generated-view name resolver (Workstream B1) ──────────────────────
+    // ── Generated-view name resolver ──────────────────────
 
     func testResolveParameterByExactNameResolvesAndReportsMissing() {
         installBridge(parameters: [

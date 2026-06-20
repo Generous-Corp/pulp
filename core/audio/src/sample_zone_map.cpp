@@ -71,7 +71,7 @@ bool SampleZoneMap::zone_valid(const SampleZone& zone) noexcept {
         return false;
     }
     // Pool-backed slice/loop validation needs a resolved pool sample's frame
-    // count; keep that out of the zone-only validator for this slice.
+    // count, so the zone-only validator only checks direct sample regions here.
     if (zone.slice_index != kNoSampleSliceIndex && !has_direct_sample) {
         return false;
     }

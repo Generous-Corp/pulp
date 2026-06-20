@@ -123,8 +123,8 @@ void release_view_scope(std::uint64_t view_id);
 /// For `requesting_scope.kind == Global`: returns `global_scope().generation()`.
 /// For `Plugin(id)`: returns a value combining `plugin_scope(id).generation()`
 ///   and `global_scope().generation()`.
-/// For `View(id)`: combines `view_scope(id)`, the active plugin scope
-///   (if any), and global.
+/// For `View(id)`: combines `view_scope(id).generation()` and
+///   `global_scope().generation()`.
 ///
 /// The returned value is monotonic — once it increases, it never goes
 /// down. Two consecutive calls with the same input may return different
