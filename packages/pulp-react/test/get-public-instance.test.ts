@@ -1,14 +1,13 @@
-// Pulp #468 — getPublicInstance returns a DOM-shim Element bound to
-// the native widget id. Imported React bundles call DOM-style methods
-// on ref.current (e.g. canvasRef.current.getContext('2d'),
-// wrapRef.current.getBoundingClientRect()). Without this shim, ref.current
-// is a plain Instance descriptor → methods like .getContext don't exist
-// → bundle's useEffect throws → infinite re-render loop.
+// getPublicInstance returns a DOM-shim Element bound to the native widget
+// id. Imported React bundles call DOM-style methods on ref.current (e.g.
+// canvasRef.current.getContext('2d'), wrapRef.current.getBoundingClientRect()).
+// Without this shim, ref.current is a plain Instance descriptor, methods like
+// .getContext do not exist, and bundle effects can enter a re-render loop.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { PulpHostConfig } from '../src/host-config.js';
 
-describe('getPublicInstance returns DOM-shim Element (pulp #468)', () => {
+describe('getPublicInstance returns DOM-shim Element', () => {
     const g = globalThis as Record<string, unknown>;
     let savedElement: unknown;
 
@@ -64,10 +63,10 @@ describe('getPublicInstance returns DOM-shim Element (pulp #468)', () => {
         expect(inst._dom).toBeDefined();
         expect((inst._dom as Record<string, unknown>)._nativeCreated).toBe(true);
         expect((inst._dom as Record<string, unknown>).__pulpId).toBe('k1');
-        // Codex P2 follow-up on #1859: the public .id property must be set
-        // on the shim — Element constructor seeds internal `_id` but the
-        // public `.id` getter is gated on `_userIdSet`, which only flips
-        // through the setter. ref.current.id should match the native id.
+        // The public .id property must be set on the shim. Element constructor
+        // seeds internal `_id`, but the public `.id` getter is gated on
+        // `_userIdSet`, which only flips through the setter. ref.current.id
+        // should match the native id.
         expect((inst._dom as Record<string, unknown>).id).toBe('k1');
     });
 
