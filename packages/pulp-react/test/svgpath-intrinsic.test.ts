@@ -1,9 +1,8 @@
-// Test for pulp #994 — @pulp/react SvgPath intrinsic.
+// Tests the @pulp/react SvgPath intrinsic bridge contract.
 //
-// The C++ side has shipped SvgPathWidget + bridge handlers (createSvgPath,
-// setSvgPath, setSvgViewBox, setSvgFill, setSvgFillRule, setSvgStroke,
-// setSvgStrokeWidth) since v0.61.0 (#965/#991; fillRule added in #3656).
-// This wires the React-side intrinsic so JSX
+// The native side exposes SvgPathWidget and the bridge handlers used here:
+// createSvgPath, setSvgPath, setSvgViewBox, setSvgFill, setSvgFillRule,
+// setSvgStroke, and setSvgStrokeWidth. React JSX such as
 // `<SvgPath d="..." viewBox={[w,h]} fill="#fff" fillRule="evenodd" stroke="#000" strokeWidth={1} />`
 // reaches the bridge.
 
@@ -17,7 +16,7 @@ function instance(id: string, type: string, props: Record<string, unknown>): Pul
     return { id, type, props } as PulpInstance;
 }
 
-describe('@pulp/react SvgPath intrinsic (pulp #994)', () => {
+describe('@pulp/react SvgPath intrinsic', () => {
     let bridge: MockBridge;
     beforeEach(() => {
         bridge = createMockBridge();
@@ -100,7 +99,7 @@ describe('@pulp/react SvgPath intrinsic (pulp #994)', () => {
         ]);
     });
 
-    it('forwards fillRule to setSvgFillRule (pulp #3656)', () => {
+    it('forwards fillRule to setSvgFillRule', () => {
         applyAllProps(instance('icon7b', 'SvgPath', {
             d: 'M0 0 L10 0 L10 10 Z M2 2 L8 2 L8 8 Z',
             fillRule: 'evenodd',
@@ -110,7 +109,7 @@ describe('@pulp/react SvgPath intrinsic (pulp #994)', () => {
         expect(setFR[0].args).toEqual(['icon7b', 'evenodd']);
     });
 
-    it('re-applies fillRule on commitUpdate when it changes (pulp #3656)', () => {
+    it('re-applies fillRule on commitUpdate when it changes', () => {
         applyChangedProps(
             instance('icon7c', 'SvgPath', {}),
             { d: 'M0 0 L1 1', fillRule: 'nonzero' },
