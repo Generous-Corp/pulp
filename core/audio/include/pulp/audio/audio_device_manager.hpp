@@ -1,27 +1,7 @@
 #pragma once
 
 /// @file audio_device_manager.hpp
-/// AudioDeviceManager — persistence + MIDI hub + lifecycle / recovery.
-///
-/// Phase A (item 1.2a, PR #2936): persistence + MIDI hub + smoothed
-/// CPU-load surface — all backend-agnostic, no platform listeners.
-///
-/// Phase B (item 1.2b, this slice):
-///   - Live device hotplug detection (the manager observes a
-///     `pulp::audio::AudioSystem`'s device-change callback and
-///     republishes a structured `DeviceChangeEvent` to its own
-///     subscribers; tests can inject events without an AudioSystem).
-///   - Default-device-change recovery (subscribers learn when the
-///     system default output/input flipped underneath them).
-///   - Sample-rate-change recovery (subscribers learn when the active
-///     device's sample rate changed).
-///   - xrun counter exposed via `xrun_count()` for UI polling.
-///   - MIDI endpoint lifetime tracking — `set_midi_endpoints()`
-///     records the current input/output endpoint snapshot and
-///     dispatches `MidiEndpointChange` events on add/remove.
-///   - Concurrent-callback shutdown — `latch_close()` blocks until
-///     every in-flight dispatch returns and turns subsequent
-///     dispatches into no-ops.
+/// AudioDeviceManager — persistence, MIDI routing, and lifecycle recovery.
 ///
 /// Responsibilities:
 ///   - Persists the user's selected audio device + sample rate + buffer
@@ -36,6 +16,14 @@
 ///   - Exposes a smoothed CPU-load signal (wraps
 ///     `pulp::audio::AudioProcessLoadMeasurer`) so a host UI can read
 ///     a stable percentage without poking the realtime callback.
+///   - Observes an `AudioSystem` device-change callback and republishes
+///     structured `DeviceChangeEvent` notifications for hotplug,
+///     default-device changes, sample-rate changes, and xruns.
+///   - Tracks MIDI endpoint snapshots with `set_midi_endpoints()` and
+///     dispatches `MidiEndpointChange` events on add/remove.
+///   - Makes shutdown explicit: `latch_close()` waits for in-flight
+///     dispatches to return and turns later dispatch attempts into
+///     no-ops.
 
 #include <pulp/audio/device.hpp>
 #include <pulp/audio/load_measurer.hpp>
@@ -64,7 +52,7 @@ namespace pulp::audio {
 /// `i` is enabled. Channels 64+ collapse onto bit 63 conservatively
 /// (Pulp targets stereo / multichannel-up-to-32, so this is fine for
 /// every shipping audio interface). Zero mask + non-zero channel count
-/// in `DeviceConfig` means "use the first N channels" (legacy default).
+/// in `DeviceConfig` means "use the first N channels".
 struct DeviceSelection {
     std::string output_device;
     std::string input_device;
@@ -431,9 +419,9 @@ private:
     /// unsubscribe path is allowed to probe multiple maps with the
     /// same id, so the id must be globally unique across all maps —
     /// otherwise destroying one subscription token can erase an
-    /// unrelated subscription that happens to share the numeric id
-    /// (see issue #2976 / PR #2970 Codex finding). Atomic so callers
-    /// don't need to hold any particular mutex to allocate one.
+    /// unrelated subscription that happens to share the numeric id.
+    /// Atomic so callers don't need to hold any particular mutex to
+    /// allocate one.
     std::atomic<uint64_t>                        next_token_id_{1};
 
     mutable std::mutex                           midi_mu_;
