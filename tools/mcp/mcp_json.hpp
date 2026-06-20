@@ -1,15 +1,13 @@
 // mcp_json.hpp — JSON-RPC 2.0 framing + minimal JSON field extraction
 // for the pulp-mcp server.
 //
-// Extracted from tools/mcp/pulp_mcp.cpp in the 2026-05 Phase 6 (B4)
-// refactor — first cut of the MCP typed-registry split. The pulp-mcp
-// server deliberately avoids an external JSON dependency; these are the
-// minimal building blocks for emitting JSON-RPC envelopes and pulling
-// scalar fields out of an incoming request.
+// The pulp-mcp server deliberately avoids an external JSON dependency;
+// these are the minimal building blocks for emitting JSON-RPC envelopes
+// and pulling scalar fields out of an incoming request.
 //
 // Helpers are header-inline so the framing layer can be shared by the
-// protocol handler and (in later B4 cuts) the per-domain tool modules
-// without an extra TU or ODR concern.
+// protocol handler and per-domain tool modules without an extra TU or
+// ODR concern.
 
 #pragma once
 
