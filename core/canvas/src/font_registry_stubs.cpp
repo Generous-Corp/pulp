@@ -1,12 +1,12 @@
-// font_registry_stubs.cpp — non-Skia fallback for the public font-registration
-// API + Skia-independent helpers in `pulp/canvas/bundled_fonts.hpp` (pulp #1150).
+// font_registry_stubs.cpp - non-Skia fallback for the public font-registration
+// API plus Skia-independent helpers in `pulp/canvas/bundled_fonts.hpp`.
 //
-// pulp #2163 — font v2 Slice 3.6. `cluster_step` is a UAX #29-lite
-// walker over UTF-8 input, byte-encoding-only (no Skia / no platform
-// dependency). It compiles in BOTH Skia and non-Skia builds; the rest
-// of this TU (`register_font` family, `validate_font_bytes`,
-// `register_font_woff2`) stays under the `#ifndef PULP_HAS_SKIA` guard
-// since those are stubs replaced by the real impls in
+// `cluster_step` is a UAX #29-lite walker over UTF-8 input with no Skia
+// or platform dependency. It compiles in both Skia and non-Skia builds;
+// the rest of this translation unit (`register_font` family,
+// `validate_font_bytes`, `register_font_woff2`) stays under the
+// `#ifndef PULP_HAS_SKIA` guard because those stubs are replaced by
+// the real implementations in
 // `bundled_fonts.cpp` when Skia is linked.
 
 #include <pulp/canvas/bundled_fonts.hpp>
@@ -18,8 +18,8 @@
 #include <string>
 #include <vector>
 
-// pulp #2163 — font v2 Slice 2.4. Probe for ICU's BreakIterator
-// headers. The bundled Skia binaries statically link `libskunicode_icu.a`
+// Probe for ICU's BreakIterator headers. The bundled Skia binaries
+// statically link `libskunicode_icu.a`
 // (so `SkUnicode_icu::makeBreakIterator` lives in libskia at link time),
 // but ICU's own public headers (`<unicode/brkiter.h>`) are *not* shipped
 // in `external/skia-build/include/`. Builds that happen to have a system
@@ -50,10 +50,10 @@ namespace {
 // naive walker this replaces.
 struct Utf8Decoded { std::uint32_t cp; std::size_t bytes; };
 
-// Codex review on PR #2185 (P2): validate every trailing byte is a
-// proper UTF-8 continuation (top two bits == 0b10) before accepting
-// a multi-byte scalar. Malformed inputs like `0xC2 0x41` must fall
-// back to {0,1} so cluster_step doesn't skip bytes on invalid UTF-8.
+// Validate every trailing byte is a proper UTF-8 continuation (top two
+// bits == 0b10) before accepting a multi-byte scalar. Malformed inputs
+// like `0xC2 0x41` must fall back to {0,1} so cluster_step does not skip
+// bytes on invalid UTF-8.
 inline bool is_utf8_cont(unsigned char b) noexcept {
     return (b & 0xC0u) == 0x80u;
 }
@@ -134,7 +134,7 @@ inline bool joins_after_zwj(std::uint32_t cp) noexcept {
     // Pictographic-ish ranges that are commonly ZWJ targets. Not a
     // full Unicode `Extended_Pictographic` table; covers BMP symbols
     // + emoji-block codepoints which is the practical 95% case for
-    // the corpus this slice targets.
+    // common UI text.
     if (cp >= 0x261D  && cp <= 0x270D)  return true;  // misc dingbats
     if (cp >= 0x2600  && cp <= 0x26FF)  return true;  // misc symbols
     if (cp >= 0x2700  && cp <= 0x27BF)  return true;  // dingbats
@@ -175,7 +175,7 @@ inline std::size_t cluster_boundary_after(const std::string& text, std::size_t i
     // pair). Without the parity check, `cluster_step` called mid-
     // sequence (e.g. inside `🇺🇸🇯🇵` at offset 4) would greedily
     // absorb the next RI and skip the boundary that exists between
-    // the two flags. (Codex review on PR #2185, P2.)
+    // the two flags.
     if (is_regional_indicator(base.cp)) {
         std::size_t preceding_ri_count = 0;
         std::size_t cursor_back = i;
@@ -224,7 +224,7 @@ inline std::size_t cluster_boundary_after(const std::string& text, std::size_t i
     return cursor;
 }
 
-// pulp #2163 — font v2 Slice 3.6. UAX #29-lite cluster boundaries.
+// UAX #29-lite cluster boundaries.
 // Always defined regardless of PULP_HAS_SKIA — pure UTF-8 walker.
 //
 // Backward direction implements the standard "scan from start" trick:
@@ -234,7 +234,7 @@ inline std::size_t cluster_boundary_after(const std::string& text, std::size_t i
 // boundaries until we cross `byte_offset`, then return the most
 // recent boundary strictly before it. O(n) per call but inputs are
 // label-sized; cursor APIs that need O(1) backward step can cache
-// boundaries via the Phase 1 UnicodeIndexMap.
+// boundaries alongside the text index map.
 std::size_t cluster_step(const std::string& text, std::size_t byte_offset,
                          bool forward) {
     if (forward) {
@@ -269,7 +269,7 @@ std::size_t cluster_step(const std::string& text, std::size_t byte_offset,
     }
 }
 
-// ── Slice 2.4 — locale-aware word + line breaking (pulp #2163) ─────────
+// ── Locale-aware word + line breaking ───────────────────────────────────
 //
 // The public surface (`word_break_step`, `line_break_opportunities`)
 // is always defined regardless of whether ICU's public headers are on
@@ -308,16 +308,15 @@ struct Utf8Utf16Bridge {
 };
 
 // Inline UTF-8 scalar decode used by the bridge. The anonymous-
-// namespace helper above is not reachable here (different TU scope);
-// keep this duplicate trivially small.
+// namespace helper above returns a codepoint + length pair; keep this
+// length-only ICU bridge helper separate and trivially small.
 //
-// pulp #2249 follow-up (Codex review P2): validate continuation bytes
-// match `0b10xxxxxx`. Without this, a malformed lead byte followed by
-// an ASCII byte (e.g. `0xC2 0x41`) would be parsed as a 2-byte scalar,
-// while ICU's `fromUTF8` substitutes U+FFFD and advances 1 byte —
-// desyncing the bridge. Match ICU's substitution length (1 byte) by
-// returning 1 for any sequence where the trailing bytes are not valid
-// UTF-8 continuation bytes.
+// Validate continuation bytes match `0b10xxxxxx`. Without this, a
+// malformed lead byte followed by an ASCII byte (e.g. `0xC2 0x41`)
+// would be parsed as a 2-byte scalar, while ICU's `fromUTF8` substitutes
+// U+FFFD and advances 1 byte, desyncing the bridge. Match ICU's
+// substitution length by returning 1 for any sequence where the trailing
+// bytes are not valid UTF-8 continuation bytes.
 inline bool is_utf8_continuation(unsigned char b) {
     return (b & 0xC0) == 0x80;
 }
@@ -377,13 +376,12 @@ inline Utf8Utf16Bridge build_bridge(const std::string& text) {
 
 inline std::size_t utf16_for_utf8(const Utf8Utf16Bridge& b,
                                   std::size_t utf8_offset) {
-    // pulp #2249 follow-up (Codex review P2): clamp byte offsets that
-    // land STRICTLY INSIDE a multi-byte UTF-8 scalar to the FLOOR
-    // UTF-16 index (the scalar that *contains* the offset), not the
-    // next scalar's start. ICU's `BreakIterator::following`/`preceding`
-    // are strictly after/before, so rounding up would cascade an
-    // off-by-one through every word-break call whose caller hands us
-    // a mid-codepoint cursor.
+    // Clamp byte offsets that land strictly inside a multi-byte UTF-8
+    // scalar to the floor UTF-16 index (the scalar that contains the
+    // offset), not the next scalar's start. ICU's
+    // `BreakIterator::following`/`preceding` are strictly after/before,
+    // so rounding up would cascade an off-by-one through every word-break
+    // call whose caller hands us a mid-codepoint cursor.
     //
     // Use upper_bound: the iterator points to the first scalar whose
     // UTF-8 start is *greater than* `utf8_offset`. Stepping back one
@@ -504,10 +502,10 @@ bool register_font_file(const std::string&, const std::string&) {
     return false;
 }
 
-// pulp #2163 — font v2 Slice 2.1 (non-Skia). register_font_url has
-// no register_font to land on, so every URL resolves to Failed.
-// Matches the contract of the Skia-side implementation: never block
-// the caller, always return a ready future.
+// Non-Skia register_font_url has no register_font implementation to land
+// on, so every URL resolves to Failed. Matches the contract of the
+// Skia-side implementation: never block the caller, always return a
+// ready future.
 std::future<FontState> register_font_url(const std::string&,
                                          const std::string&) {
     std::promise<FontState> p;
@@ -522,20 +520,16 @@ bool is_font_registered(const std::string&) {
 std::uint64_t font_registration_generation() noexcept { return 0; }
 void bump_font_registration_generation() noexcept {}
 
-// pulp #2163 — font v2 Slice 2.8 skeleton. See bundled_fonts.hpp.
 bool validate_font_bytes(const std::uint8_t* data, std::size_t size) {
-    // Non-Skia builds: accept any non-empty buffer. Real
-    // sanitizer arrives with the Phase 2 implementation slice.
+    // Non-Skia builds accept any non-empty buffer; there is no font parser
+    // available on this lane.
     return data != nullptr && size > 0;
 }
 
-// pulp #2163 — font v2 Slice 3.5 (non-Skia). Without Skia we can't
-// register a typeface even if we had a decoder, so the result is
-// always false. Still validates the WOFF2 magic bytes so the
-// "is this even a WOFF2 file?" test surface returns the same answer
-// on both Skia and non-Skia builds — that property keeps the
-// `register_font_woff2` test suite uniform regardless of how Skia
-// was configured.
+// Without Skia we cannot register a typeface even if a decoder is
+// available, so the result is always false. Still validate the WOFF2
+// magic bytes so the "is this even a WOFF2 file?" test surface returns
+// the same answer on both Skia and non-Skia builds.
 bool register_font_woff2(const std::uint8_t* woff2_data, std::size_t size,
                          const std::string&) {
     if (!woff2_data || size < 4) return false;
