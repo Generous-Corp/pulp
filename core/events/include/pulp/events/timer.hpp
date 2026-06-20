@@ -10,16 +10,16 @@ namespace pulp::events {
 
 // Timer bound to an EventLoop. Supports one-shot and repeating.
 //
-// Thread-safety + lifetime design (#414 / #687 / #716):
+// Thread-safety + lifetime design:
 //
 // - Mutable state (active, generation, callback, interval, loop ref) lives
 //   in a `shared_ptr<TimerImpl>` assigned exactly once at construction and
-//   never reassigned. That single-assignment avoids the #414 TSan race on
-//   the shared_ptr slot.
+//   never reassigned. That single-assignment avoids racing on the
+//   shared_ptr slot.
 // - Dispatch lambdas capture the shared_ptr by value. If the user-visible
 //   Timer is destroyed while the EventLoop still has a queued dispatch,
 //   the lambda's captured shared_ptr keeps TimerImpl alive until the
-//   lambda finishes. No UAF. (#716 — Codex P1 on #689.)
+//   lambda finishes.
 // - stop() bumps `generation` so any in-flight dispatch whose captured gen
 //   no longer matches returns early before calling the user callback.
 class Timer {

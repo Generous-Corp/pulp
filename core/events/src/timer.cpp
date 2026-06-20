@@ -12,7 +12,7 @@ struct Timer::Impl {
     // lambdas scheduled before stop() return early when they fire. Cheap
     // replacement for the previous shared_ptr<atomic<bool>> sentinel
     // which raced on the shared_ptr slot between start() (main thread)
-    // and schedule_next() (event-loop thread). See #687 / #414.
+    // and schedule_next() (event-loop thread).
     std::atomic<std::uint64_t> generation{0};
 
     Impl(EventLoop& l, Duration i, Callback cb, bool rep)
@@ -28,12 +28,12 @@ Timer::~Timer() {
     // Flip active + bump generation so any already-queued dispatch lambda
     // short-circuits. The lambdas hold their own shared_ptr<Impl> copies,
     // so Impl stays alive until they finish even though *our* impl_ is
-    // about to drop its reference — no UAF. See #716.
+    // about to drop its reference.
     stop();
 }
 
 void Timer::start() {
-    // Idempotent when already running. See #438 P1 Codex review on #428.
+    // Idempotent when already running.
     if (impl_->active.load(std::memory_order_acquire)) {
         return;
     }
@@ -65,7 +65,7 @@ void Timer::schedule_next(std::shared_ptr<Impl> impl, std::uint64_t gen) {
     // Capture the shared_ptr by value. If the owning Timer is destroyed
     // before this lambda fires, `impl` keeps the state alive until we
     // finish — the atomics return "inactive + generation moved on" and
-    // we exit without touching freed memory. #716 fix.
+    // we exit without touching freed memory.
     loop.dispatch_after(interval, [impl, gen]() {
         if (!impl->active.load(std::memory_order_acquire))
             return;
