@@ -137,7 +137,7 @@
     },
     {
       "path": "inspect/src/inspector_overlay.cpp",
-      "max_loc": 2616,
+      "max_loc": 2587,
       "note": "Inspector overlay facade hotspot; extract companions per INSPECT_MODULE_MAP.md"
     },
     {

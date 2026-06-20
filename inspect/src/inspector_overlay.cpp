@@ -1,9 +1,10 @@
 // inspector_overlay.cpp — Visual inspector overlay implementation
 //
-// Per-feature overlay clusters live in sibling TUs (roadmap P10-2):
-//   inspector_overlay_field_edit.cpp   — Phase 3b live-editable fields
-//   inspector_overlay_zoom.cpp         — Phase 3e 20× zoom loupe
-//   inspector_overlay_pass_viewer.cpp  — Phase 6.1 pass-attribution viewer
+// Per-feature overlay clusters live in sibling translation units:
+//   inspector_overlay_field_edit.cpp   — live-editable box-model fields
+//   inspector_overlay_paint.cpp        — overlay and panel painting
+//   inspector_overlay_zoom.cpp         — 20× zoom loupe
+//   inspector_overlay_pass_viewer.cpp  — per-pass attribution viewer
 // Shared overlay color constants are declared in
 // inspector_overlay_internal.hpp.
 
@@ -31,15 +32,11 @@
 
 namespace pulp::inspect {
 
-// Format a Color as a CSS hex string: "#rrggbb" when fully opaque,
-// "#rrggbbaa" otherwise. Lower-case, fixed-width — matches the hex
-// shape the JS bridge and pulp-tweaks.json already use for colors.
-
 // ── Constructor ─────────────────────────────────────────────────────────────
 
 InspectorOverlay::InspectorOverlay(View& root) : root_(root) {}
 
-// P2 two-IR-worlds shim: map a `layout.{position,left,top}` move tweak
+// Move-tweak namespace bridge: map a `layout.{position,left,top}` tweak
 // (or the bare leaf) onto live View setters so the move round-trips on
 // the C++/native runtime apply path, not just the TS/React path.
 bool apply_move_tweak_to_view(View& view,
@@ -109,8 +106,8 @@ BadgePlacement compute_badge_placement(float sel_x, float sel_y, float sel_h,
 
 void install_inspector_hooks(InspectorOverlay& inspector) {
     g_active_inspector = &inspector;
-    // Install all hooks via function pointers — no circular dependency
-    // WYSIWYG P2e: gate the overlay paint on the painting root. The overlay's
+    // Install all hooks via function pointers — no circular dependency.
+    // Gate overlay paint on the inspected root. The overlay's
     // selection box / handles / drop indicators are positioned in the inspected
     // root's coordinate space, so they must paint ONLY when the root being
     // painted is the inspected root. Without this gate the same overlay paints
@@ -126,8 +123,8 @@ void install_inspector_hooks(InspectorOverlay& inspector) {
     View::set_inspector_key_hook([&inspector](const KeyEvent& e) -> bool {
         return inspector.handle_key_event(e);
     });
-    // WYSIWYG P4 FIX 1 — window-gate the mouse hook, mirroring the paint-hook
-    // gate above. A secondary window (the floating InspectorWindow) routes its
+    // Window-gate the mouse hook, mirroring the paint-hook gate above. A
+    // secondary window (the floating InspectorWindow) routes its
     // own root as `event_root`; only events whose root is the inspected canvas
     // root may drive the overlay, otherwise hovering/clicking/dragging inside
     // the inspector window would highlight/affect the canvas. nullptr (root
@@ -138,12 +135,10 @@ void install_inspector_hooks(InspectorOverlay& inspector) {
                 return false;
             return inspector.handle_mouse_event(e);
         });
-    // WYSIWYG P5 FIX 2 — install the inline-text-edit hook here so the
-    // STANDALONE host (and any other install_inspector_hooks() caller) can
-    // actually deliver typed characters into a Text-tool edit. Without this
-    // the standalone path could enter edit state but never receive insertText
-    // characters — only ui-preview worked because it installs its own text
-    // hook lambda. Root-gated like the mouse/cursor hooks: text typed into a
+    // Install the inline-text-edit hook here so the standalone host (and any
+    // other install_inspector_hooks() caller) can
+    // actually deliver typed characters into a Text-tool edit. Root-gated like
+    // the mouse/cursor hooks: text typed into a
     // secondary window (the floating InspectorWindow) must not drive the
     // canvas overlay's inline edit. nullptr (root unknown, legacy/headless
     // caller) runs unconditionally.
@@ -153,8 +148,8 @@ void install_inspector_hooks(InspectorOverlay& inspector) {
                 return false;
             return inspector.handle_text_input(e);
         });
-    // WYSIWYG P5 FIX 2 — cursor-affordance hook for parity (move/resize cursor
-    // over a selected element). Same root gate; returns -1 to defer to the
+    // Cursor-affordance hook for move/resize cursor feedback over a selected
+    // element. Same root gate; returns -1 to defer to the
     // normal hit-view cursor() path when off the selection or in another
     // window.
     View::set_inspector_cursor_hook(
@@ -177,7 +172,7 @@ void InspectorOverlay::set_active(bool active) {
         // edit_target_view_ — cancel first so the buffer state is
         // cleared before we null out the target.
         if (!editing_field_.empty()) cancel_field_edit();
-        // P3 — drop any in-progress inline text edit so deactivating the
+        // Drop any in-progress inline text edit so deactivating the
         // inspector (incl. the Esc-deselect set_active(false)/(true)
         // cycle) never leaves a dangling text_edit_target_.
         if (text_editing()) cancel_text_edit();
@@ -186,19 +181,19 @@ void InspectorOverlay::set_active(bool active) {
         alt_hover_target_ = nullptr;
         distance_anchor_ = nullptr;
         editable_fields_.clear();
-        // Phase 3c — drop any pending eyedropper state with the
+        // Drop any pending eyedropper state with the
         // inspector so a stale swatch never paints on the next open.
         eyedropper_active_ = false;
         eyedropper_has_sample_ = false;
-        // Phase 3e — the loupe is a transient inspect tool; dismissing
+        // The loupe is a transient inspect tool; dismissing
         // the whole inspector also closes it so re-opening starts clean.
         zoom_active_ = false;
-        // Phase 5.2 — drop the reconciliation tab's laid-out rows so
+        // Drop the reconciliation tab's laid-out rows so
         // reconcile_row_count() reports 0 while the inspector is shut.
         // The R-key toggle state itself is left intact (mirrors how
         // the tweaks panel keeps tweaks_panel_visible_ across opens).
         reconcile_rows_.clear();
-        // Phase 6.2 — reset the atlas viewer's laid-out row count so
+        // Reset the atlas viewer's laid-out row count so
         // atlas_row_count() reports 0 while the inspector is shut. As
         // with the reconciliation tab the `A`-key toggle state is left
         // intact so re-opening the inspector restores the same tab.
@@ -206,16 +201,16 @@ void InspectorOverlay::set_active(bool active) {
     }
 }
 
-// ── Phase 3c — color eyedropper ─────────────────────────────────────────────
+// ── Color eyedropper ────────────────────────────────────────────────────────
 //
-// An eyedropper mode (E-key, mirroring Phase 3a's D-key for drag
-// handles) lets the user sample a color from the rendered UI and
+// Eyedropper mode (E key, alongside D for drag handles) lets the user
+// sample a color from the rendered UI and
 // apply it as a tweak to the selected view's color property.
 //
 // Two sampling paths, picked at runtime:
 //   1. Framebuffer readback — `Canvas::read_pixels()` returns the
 //      exact rendered pixel under the cursor. Implemented only on
-//      Skia raster surfaces (see canvas.hpp issue-916); when present
+//      Skia raster surfaces; when present
 //      it is authoritative because it captures gradients, borders,
 //      child paint, and theme blending the View tree alone can't.
 //   2. Resolved-style fallback — when readback is unavailable
@@ -227,7 +222,7 @@ void InspectorOverlay::set_active(bool active) {
 //      arbitrary pixels.
 //
 // On click the sampled color is emitted via emit_tweak_for_selection()
-// — the SAME path Phase 3a/3b gestures use — encoded as a "#rrggbb"
+// — the same path as other overlay gestures — encoded as a "#rrggbb"
 // hex string, source "inspector-eyedropper".
 
 void InspectorOverlay::set_eyedropper_active(bool active) {
@@ -280,10 +275,10 @@ bool InspectorOverlay::apply_eyedropper_pick() {
     return ok;
 }
 
-// ── Phase 0b PR-C-1: in-process gesture-tweak emission ─────────────────────
+// ── In-process gesture-tweak emission ──────────────────────────────────────
 //
 // Routes overlay-driven direct-manipulation edits (drag handles, color
-// pick, field edit — Phase 3a builds the actual UI on top of this) to
+// pick, field edit) to
 // the in-process TweakStore. The protocol path (Inspector.applyTweak
 // over TCP) still works for remote clients; this is the fast in-process
 // path that avoids JSON marshaling for overlay gestures.
@@ -306,10 +301,7 @@ bool InspectorOverlay::emit_tweak_for_selection(std::string_view property_path,
     return true;
 }
 
-// ── P3 — Figma-style tool palette + inline text editing ─────────────────────
-//
-// planning/2026-05-21-wysiwyg-direct-manipulation-extension.md
-// § "Future idea — Figma-style tool palette + inline text editing".
+// ── Figma-style tool palette + inline text editing ─────────────────────────
 
 void InspectorOverlay::set_tool(Tool t) {
     if (tool_ == t) return;
@@ -349,7 +341,7 @@ void InspectorOverlay::set_editable_text_of(View* v, const std::string& text) {
     }
 }
 
-// WYSIWYG P5 FIX 1 — confirm text_edit_target_ is still attached to the live
+// Confirm text_edit_target_ is still attached to the live
 // tree by walking from the root and comparing pointers. This NEVER
 // dereferences text_edit_target_ itself, so it is safe even if the target was
 // freed: a freed pointer simply won't be found among the live nodes. Returns
@@ -366,17 +358,17 @@ bool InspectorOverlay::text_edit_target_reachable() const {
     return contains(&root_);
 }
 
-// WYSIWYG P5 FIX 1 — drop the inline-text-edit state without touching the
+// Drop the inline-text-edit state without touching the
 // (possibly freed) target view. Used when the target leaves the tree.
 void InspectorOverlay::clear_text_edit_state() {
     text_edit_target_ = nullptr;
     text_edit_buffer_.clear();
     text_edit_original_.clear();
-    text_caret_ = 0;          // WYSIWYG T2 — drop caret/selection too
+    text_caret_ = 0;          // drop caret/selection too
     text_sel_anchor_ = 0;
 }
 
-// WYSIWYG sweep P1 — re-find a live view by stable anchor id (or nullptr).
+// Re-find a live view by stable anchor id (or nullptr).
 // EditHistory closures call this at undo/redo time so an anchored target that
 // survived a subtree rebuild resolves to the CURRENT live view rather than a
 // dangling raw pointer captured at gesture time.
@@ -385,7 +377,7 @@ View* InspectorOverlay::resolve_anchor(const std::string& anchor) const {
     return ViewInspector::find_by_anchor(root_, anchor);
 }
 
-// WYSIWYG sweep P1 — the anchor of the visible sibling immediately preceding
+// Return the anchor of the visible sibling immediately preceding
 // `child` under `parent` in flex-order, or "" for first-child / no parent /
 // un-anchored preceding sibling. Mirrors commit_reflow_drop's sibling ordering
 // (visible children sorted by flex().order, stable).
@@ -411,7 +403,7 @@ std::string InspectorOverlay::preceding_sibling_anchor(const View* parent,
     return prev->anchor_id();             // "" if the preceding sibling is un-anchored
 }
 
-// WYSIWYG sweep P1 — register a raw View* that an EditHistory closure captured
+// Register a raw View* that an EditHistory closure captured
 // because the view has NO anchor to re-find it by. De-duplicates so the list
 // stays small across coalesced gestures.
 void InspectorOverlay::track_raw_history_view(View* v) {
@@ -421,7 +413,7 @@ void InspectorOverlay::track_raw_history_view(View* v) {
     raw_history_views_.push_back(v);
 }
 
-// WYSIWYG sweep P1 — true if any tracked raw-pointer view has left the tree
+// True if any tracked raw-pointer view has left the tree
 // (so its captured closures would deref freed memory). Pointer-compare only —
 // never dereferences a tracked pointer.
 bool InspectorOverlay::any_raw_history_view_dangling() const {
@@ -448,15 +440,15 @@ bool InspectorOverlay::begin_text_edit(View* v) {
     text_edit_target_ = v;
     text_edit_original_ = editable_text_of(v);
     text_edit_buffer_ = text_edit_original_;
-    // WYSIWYG T2 — caret to the end of the seeded text, no selection, blink
-    // phase reset so the caret is immediately visible on entry.
+    // Put the caret at the end of the seeded text, with no selection, and reset
+    // blink state so the caret is immediately visible on entry.
     text_caret_ = text_edit_buffer_.size();
     text_sel_anchor_ = text_caret_;
     text_blink_ticks_ = 0;
     return true;
 }
 
-// ── WYSIWYG T2 — UTF-8 caret/selection helpers ──────────────────────────────
+// ── UTF-8 caret/selection helpers ──────────────────────────────────────────
 //
 // The edit buffer is a UTF-8 std::string. Caret offsets are byte indices kept
 // on codepoint boundaries. These mirror TextEditor's manipulation logic
@@ -650,7 +642,7 @@ void InspectorOverlay::text_delete_forward() {
 
 bool InspectorOverlay::commit_text_edit() {
     if (!text_editing()) return false;
-    // WYSIWYG P5 FIX 1 — if the edit target was destroyed mid-edit (e.g. a
+    // If the edit target was destroyed mid-edit (e.g. a
     // live React tree rebuild), do not deref it. Drop the edit state and bail.
     if (!text_edit_target_reachable()) {
         clear_text_edit_state();
@@ -669,7 +661,7 @@ bool InspectorOverlay::commit_text_edit() {
     // The TWEAK persists only for anchored (imported) views, but the UNDO of
     // the live View text must work even for an UN-anchored view (e.g. a
     // --script Chainer label with no anchor_id) — otherwise Cmd+Z can't
-    // restore edited text (maintainer QA). So push the EditHistory entry
+    // restore edited text. So push the EditHistory entry
     // whenever the text actually changed + history is wired, and gate ONLY the
     // tweak apply/restore on the anchor.
     const bool anchored = (tweak_store_ != nullptr) && !anchor.empty();
@@ -681,7 +673,7 @@ bool InspectorOverlay::commit_text_edit() {
         }
         if (edit_history_) {
             auto* self = this;
-            // WYSIWYG sweep P1 — for ANCHORED targets the closures re-find the
+            // For anchored targets the closures re-find the
             // live view by anchor at replay time (resolve_anchor → nullptr no-op
             // if a subtree rebuild freed it), so Cmd+Z after a live React rebuild
             // never derefs a dangling raw pointer. For UN-anchored targets there
@@ -723,14 +715,14 @@ bool InspectorOverlay::commit_text_edit() {
     text_edit_target_ = nullptr;
     text_edit_buffer_.clear();
     text_edit_original_.clear();
-    text_caret_ = 0;          // WYSIWYG T2
+    text_caret_ = 0;
     text_sel_anchor_ = 0;
     return emitted;
 }
 
 void InspectorOverlay::cancel_text_edit() {
     if (!text_editing()) return;
-    // WYSIWYG P5 FIX 1 — if the target was destroyed mid-edit, drop the edit
+    // If the target was destroyed mid-edit, drop the edit
     // state without touching freed memory (no revert to restore).
     if (!text_edit_target_reachable()) {
         clear_text_edit_state();
@@ -741,30 +733,29 @@ void InspectorOverlay::cancel_text_edit() {
     text_edit_target_ = nullptr;
     text_edit_buffer_.clear();
     text_edit_original_.clear();
-    text_caret_ = 0;          // WYSIWYG T2
+    text_caret_ = 0;
     text_sel_anchor_ = 0;
 }
 
 bool InspectorOverlay::handle_text_input(const TextInputEvent& event) {
     if (!active_ || !text_editing()) return false;
-    // WYSIWYG P5 FIX 1 — never write to a freed target. If the edited view
+    // Never write to a freed target. If the edited view
     // left the tree, drop the edit state and stop consuming text.
     if (!text_edit_target_reachable()) {
         clear_text_edit_state();
         return false;
     }
     if (event.text.empty()) return true;  // consume, nothing to append
-    // WYSIWYG T2 — insert at the caret (replacing any selection) rather than
+    // Insert at the caret (replacing any selection) rather than
     // blindly appending, so typing in the middle / over a shift-selection
     // behaves like a real text field.
     text_insert(event.text);
     return true;
 }
 
-// ── P2a — undo safety net helpers ───────────────────────────────────────────
+// ── Undo safety net helpers ─────────────────────────────────────────────────
 //
-// planning/2026-05-21-wysiwyg-direct-manipulation-extension.md § R2.2.
-// These capture the pre-gesture state at gesture START and restore it at
+// These capture the pre-gesture state at gesture start and restore it at
 // undo time. A gesture's EditHistory entry pairs:
 //   do_fn   = re-apply the after-state (idempotent — the drag already
 //             mutated the live view, so EditHistory::perform calling do_fn
@@ -788,7 +779,7 @@ InspectorOverlay::snapshot_layout(const View* v) const {
     s.has_left = v->has_left();
     s.has_top = v->has_top();
     s.scale = v->scale();
-    // P2i (Refinement B) — capture transform-origin + overflow so undo of a
+    // Capture transform-origin + overflow so undo of a
     // proportional resize reverts the top-left anchor and the box-clip.
     s.origin_x = v->transform_origin_x();
     s.origin_y = v->transform_origin_y();
@@ -813,9 +804,9 @@ void InspectorOverlay::restore_layout(View* v, const LayoutSnapshot& s) const {
     v->set_position(s.position);
     v->set_left(s.left, s.left_unit);
     v->set_top(s.top, s.top_unit);
-    // P2c — restore proportional-resize content scale.
+    // Restore proportional-resize content scale.
     v->set_scale(s.scale);
-    // P2i (Refinement B) — restore transform-origin + overflow so undo of a
+    // Restore transform-origin + overflow so undo of a
     // proportional resize removes the top-left anchor + box-clip we applied.
     v->set_transform_origin(s.origin_x, s.origin_y);
     v->set_overflow(s.overflow);
@@ -851,7 +842,7 @@ void InspectorOverlay::restore_tweaks(std::string_view anchor,
     }
 }
 
-// ── Phase 2 — drift detection ───────────────────────────────────────────────
+// ── Drift detection ─────────────────────────────────────────────────────────
 //
 // Walks the live view tree collecting every non-empty anchor_id, then
 // diffs the attached TweakStore against that anchor set. Tweaks whose
@@ -889,7 +880,7 @@ void InspectorOverlay::refresh_drift() {
     drifted_ = std::move(next);
 }
 
-// ── Phase 5.2 — reconciliation tab ──────────────────────────────────────────
+// ── Reconciliation tab ─────────────────────────────────────────────────────
 //
 // Classifies every stored tweak into one of three reconciliation
 // states (locked-to-source / drifted / unresolvable). The classifier
@@ -897,7 +888,7 @@ void InspectorOverlay::refresh_drift() {
 // it never mutates either, never spawns a process, and never throws.
 // It deliberately reuses the drift machinery's "anchor present in the
 // live tree" notion (TweakStore::DriftReason::anchor_not_found) so the
-// reconciliation tab and the Phase 2 drift drawer agree on what counts
+// reconciliation tab and the drift drawer agree on what counts
 // as orphaned.
 
 const char* InspectorOverlay::reconcile_status_str(ReconcileStatus status) {
@@ -975,7 +966,7 @@ Rect InspectorOverlay::view_bounds_in_root(const View* v) const {
     return {x, y, v->bounds().width, v->bounds().height};
 }
 
-// WYSIWYG caret RESIZE — product of this view's scale and all ancestor scales
+// Product of this view's scale and all ancestor scales
 // up to root_ (exclusive). Mirrors the cumulative `scale(s,s)` View::paint_all
 // applies down the subtree, so the inline-text-edit overlay can map unscaled
 // element-local caret offsets onto the rendered (scaled) glyphs.
@@ -989,7 +980,7 @@ float InspectorOverlay::effective_scale_in_root(const View* v) const {
     return s;
 }
 
-// ── Phase 3a — drag handle hit-test ────────────────────────────────────────
+// ── Drag handle hit-test ───────────────────────────────────────────────────
 // Each handle is an 8×8 box centered on a corner of the selected view's
 // bounds (root coords). We test against a slightly-larger 12×12 grab
 // rectangle for forgiving hit detection — corners are small targets,
@@ -1012,7 +1003,7 @@ InspectorOverlay::hit_test_drag_handle(Point pos) const {
     if (in_box(r.x + r.width,   r.y))              return DragCorner::ne;
     if (in_box(r.x,             r.y + r.height))   return DragCorner::sw;
     if (in_box(r.x + r.width,   r.y + r.height))   return DragCorner::se;
-    // Edge midpoint handles (WYSIWYG P2h) — single-axis resize.
+    // Edge midpoint handles are single-axis resize targets.
     if (in_box(midx,            r.y))              return DragCorner::n;
     if (in_box(midx,            r.y + r.height))   return DragCorner::s;
     if (in_box(r.x + r.width,   midy))             return DragCorner::e;
@@ -1020,7 +1011,7 @@ InspectorOverlay::hit_test_drag_handle(Point pos) const {
     return DragCorner::none;
 }
 
-// ── P2 — drag-to-move helpers ───────────────────────────────────────────────
+// ── Drag-to-move helpers ───────────────────────────────────────────────────
 
 bool InspectorOverlay::hit_test_body(Point pos) const {
     if (!selected_) return false;
@@ -1033,7 +1024,7 @@ bool InspectorOverlay::hit_test_body(Point pos) const {
            pos.y >= r.y && pos.y <= r.y + r.height;
 }
 
-// ── P2d — cursor affordances over the selected element ─────────────────────
+// ── Cursor affordances over the selected element ───────────────────────────
 // Continuous hover feedback so the user SEES move-vs-resize before pressing.
 // Mirrors the gesture hit-test order: a corner handle wins (diagonal resize
 // cursor), then the body (move cursor), else no override. During an ACTIVE
@@ -1127,7 +1118,7 @@ void InspectorOverlay::seed_move_origin(const View* v) {
 
     // Resolved per-edge border of the containing block (Yoga subtracts
     // border + inset + child-margin to position a defined inset; see
-    // AbsoluteLayout.cpp:209-224 and the plan's border-edge formula).
+    // AbsoluteLayout.cpp:209-224 and Yoga's border-edge formula).
     float block_border_left = 0.0f;
     float block_border_top = 0.0f;
     if (block) {
@@ -1150,7 +1141,7 @@ void InspectorOverlay::seed_move_origin(const View* v) {
                    - child_margin_top;
 }
 
-// ── P2c — reflow-aware move (drop-target resolution + commit) ───────────────
+// ── Reflow-aware move (drop-target resolution + commit) ────────────────────
 
 bool InspectorOverlay::is_self_or_ancestor(const View* ancestor,
                                            const View* v) {
@@ -1226,8 +1217,8 @@ void InspectorOverlay::resolve_drop_target(Point pos) {
     View* container = deepest_container(&root_);
     if (!container) return;
 
-    // The dragged element's current parent — used to distinguish a same-
-    // parent REORDER from a cross-parent REPARENT (drop INSIDE).
+    // The dragged element's current parent distinguishes a same-parent REORDER
+    // from a cross-parent REPARENT (drop INSIDE).
     View* dragged_parent = selected_->parent();
     drop_target_ = container;
     drop_inside_ = (container != dragged_parent);
@@ -1348,12 +1339,10 @@ bool InspectorOverlay::commit_reflow_drop(View* dragged) {
     std::stable_sort(others.begin(), others.end(),
         [](View* a, View* b) { return a->flex().order < b->flex().order; });
 
-    // WYSIWYG sweep P1 — capture each child's OLD order so we can persist a
-    // `layout.order` tweak for every node whose order actually changed (not
-    // just the dragged one). The order rewrite was previously live-only; the
-    // comment claiming it was "persisted elsewhere" was wrong. The tweak/lock
-    // path (T4 added `layout.order` to the allow-list) round-trips it into the
-    // generated source as `el.style.order`.
+    // Capture each child's old order so we can persist a `layout.order` tweak
+    // for every node whose order actually changed, not just the dragged one.
+    // The tweak/lock path round-trips `layout.order` into the generated source
+    // as `el.style.order`.
     auto record_old_order = [](View* v) { return std::pair<View*, int>{v, v->flex().order}; };
     std::vector<std::pair<View*, int>> old_orders;
     old_orders.reserve(others.size() + 1);
@@ -1432,7 +1421,7 @@ void InspectorOverlay::rebuild_flat_tree() {
     if (!in_tree(hovered_)) hovered_ = nullptr;
     if (!in_tree(distance_anchor_)) distance_anchor_ = nullptr;
     if (!in_tree(alt_hover_target_)) alt_hover_target_ = nullptr;
-    // WYSIWYG P5 FIX 1 — text_edit_target_ is a raw View* set during an inline
+    // text_edit_target_ is a raw View* set during an inline
     // edit. If the edited Label/TextEditor was destroyed during this rebuild
     // (e.g. a live React tree rebuild), clear the WHOLE text-edit state without
     // touching the freed view, so the next handle_text_input / Backspace /
@@ -1441,7 +1430,7 @@ void InspectorOverlay::rebuild_flat_tree() {
     if (text_edit_target_ && !in_tree(text_edit_target_))
         clear_text_edit_state();
 
-    // WYSIWYG sweep P1 — un-anchored EditHistory fallback. Anchored undo/redo
+    // Un-anchored EditHistory fallback. Anchored undo/redo
     // closures self-heal via resolve_anchor() at replay time, but closures that
     // captured a raw View* for an UN-anchored target (no anchor to re-find it
     // by) would deref freed memory if that view left the tree in this rebuild.
@@ -1465,7 +1454,7 @@ bool InspectorOverlay::handle_key_event(const KeyEvent& event) {
         return true;
     }
 
-    // P2a (undo safety net) — Cmd+Z undo / Cmd+Shift+Z (or Cmd+Y) redo,
+    // Cmd+Z undo / Cmd+Shift+Z (or Cmd+Y) redo,
     // bound only while the inspector is active and an EditHistory is wired.
     // Checked BEFORE the field-edit / toggle paths below so a manipulation
     // gesture is always reversible regardless of what other mode is on.
@@ -1488,7 +1477,7 @@ bool InspectorOverlay::handle_key_event(const KeyEvent& event) {
         }
     }
 
-    // P3 — inline text editing (Text tool) owns the keyboard while a
+    // Inline text editing (Text tool) owns the keyboard while a
     // text element's copy is being edited. Enter commits (live text +
     // a `text` tweak, one undoable unit), Esc cancels (restores the
     // original copy), Backspace trims the last UTF-8 codepoint. The
@@ -1508,14 +1497,14 @@ bool InspectorOverlay::handle_key_event(const KeyEvent& event) {
             set_tool(Tool::select);
             return true;
         }
-        // WYSIWYG P5 FIX 1 — guard against a target freed mid-edit for every
+        // Guard against a target freed mid-edit for every
         // mutating key path below.
         if (event.key == KeyCode::backspace) {
             if (!text_edit_target_reachable()) {
                 clear_text_edit_state();
                 return true;
             }
-            text_delete_backward();  // WYSIWYG T2 — selection-aware delete
+            text_delete_backward();  // selection-aware delete
             return true;
         }
         if (event.key == KeyCode::delete_) {
@@ -1526,7 +1515,7 @@ bool InspectorOverlay::handle_key_event(const KeyEvent& event) {
             text_delete_forward();
             return true;
         }
-        // WYSIWYG T2 — Cmd/Ctrl clipboard + select-all. Bound BEFORE the
+        // Cmd/Ctrl clipboard + select-all. Bound BEFORE the
         // return-false char passthrough so Cmd+A/C/V/X don't fall through to
         // insertText (which would type a literal 'a'/'c'/…). isMainModifier()
         // is Cmd on macOS, Ctrl elsewhere.
@@ -1542,7 +1531,7 @@ bool InspectorOverlay::handle_key_event(const KeyEvent& event) {
                 default: break;
             }
         }
-        // WYSIWYG T2 — caret movement. Shift extends the selection; the
+        // Caret movement. Shift extends the selection; the
         // Option/Alt modifier jumps by word. Up/Down map to start/end in
         // this single-line in-place edit.
         if (event.key == KeyCode::left || event.key == KeyCode::right) {
@@ -1572,56 +1561,41 @@ bool InspectorOverlay::handle_key_event(const KeyEvent& event) {
         return false;
     }
 
-    // Phase 3b — field-edit mode owns the keyboard while a numeric
+    // Field-edit mode owns the keyboard while a numeric
     // value is being edited. Esc cancels, Enter commits, Tab walks
     // to the next field; arrows nudge; digits/sign/decimal extend
-    // the buffer. The plain Escape-exits-inspector path below only
-    // fires when no edit is in progress (cancel_field_edit() leaves
-    // the inspector active so the user can keep poking around).
+    // the buffer. The plain Esc-deselect path below only fires when no edit is
+    // in progress (cancel_field_edit() leaves the inspector active so the user
+    // can keep poking around).
     if (active_ && !editing_field_.empty() && event.is_down) {
         if (handle_edit_key(event)) return true;
     }
 
-    // Escape: P1 drill-down "ascend to parent". When a non-root view is
-    // selected, Esc walks the selection UP to its parent so the user can
-    // reach a container after click landed on a deeply-nested child
-    // (click resolves to the deepest hittable element). Only when there
-    // is nothing left to ascend to (no selection, or selection is a
-    // direct child of root with no further useful parent) does Esc fall
-    // through to exit the inspector. Edit mode already consumed Esc above
-    // to cancel the edit, so this never fires mid-edit.
+    // Esc deselects in one press and keeps inspect mode active. Edit mode
+    // already consumed Esc above to cancel the edit, so this never fires
+    // mid-edit.
     if (active_ && event.key == KeyCode::escape && event.is_down) {
-        // Esc = DESELECT in one press, and STAY in inspect mode so hover +
-        // click keep working without a Cmd+I cycle. Only when nothing is
-        // selected does Esc exit the inspector. (Was: ascend-to-parent, which
-        // needed multiple Esc presses and then deactivated the overlay, so the
-        // user had to cycle Cmd+I to select again.)
+        // Esc = deselect in one press, and stay in inspect mode so hover +
+        // click keep working without a Cmd+I cycle.
         if (selected_) {
             // Cancel any in-progress field edit first so a stale
             // editing_field_ doesn't keep swallowing the keyboard /
             // pinning selection after the deselect.
-            // Deselect = the SAME clean reset the working Cmd+I cycle performs
-            // (set_active false→true). Manually clearing a subset of state left
-            // some gate set that the Cmd+I cycle clears via set_active(false)
-            // (editable_fields_, eyedropper_active_, zoom_active_, hovered_, …),
-            // so post-Esc hover + click stayed dead until the user cycled Cmd+I.
-            // Cycling the active flag here clears ALL transient state and
-            // re-enables, so hover highlights and a click re-selects immediately
-            // with no Cmd+I cycle. active_ ends true; the floating inspector
-            // window is unaffected (it's owned by the host, not set_active).
+            // Deselect via the same full set_active(false) -> set_active(true)
+            // cycle as Cmd+I so all transient state (editable_fields_,
+            // eyedropper_active_, zoom_active_, hovered_, etc.) is cleared and
+            // hover + click immediately work again. active_ ends true; the
+            // floating inspector window is unaffected because the host owns it.
             set_active(false);
             set_active(true);
         }
-        // Esc NEVER exits the inspector (use Cmd+I / the window close button
-        // for that). A second Esc with nothing selected is a NO-OP so the
-        // overlay stays active and hover + click keep working. This used to
-        // fall through to set_active(false), deactivating the overlay — so the
-        // user saw "1st Esc deselects, 2nd Esc kills hover/click until I cycle
-        // Cmd+I". Now Esc only ever deselects.
+        // Esc never exits the inspector (use Cmd+I / the window close button
+        // for that). A second Esc with nothing selected is a no-op so the
+        // overlay stays active and hover + click keep working.
         return true;
     }
 
-    // Phase 3a — D toggles drag-handles mode (no modifier; only when
+    // D toggles drag-handles mode (no modifier; only when
     // the inspector is active so a hotkey collision in a plain text
     // input doesn't accidentally flip drag mode).
     if (active_ && event.key == KeyCode::d && event.is_down &&
@@ -1630,7 +1604,7 @@ bool InspectorOverlay::handle_key_event(const KeyEvent& event) {
         return true;
     }
 
-    // Phase 6.1 — P toggles the per-pass attribution viewer (no
+    // P toggles the per-pass attribution viewer (no
     // modifier; only while active, same rationale as the D toggle).
     if (active_ && event.key == KeyCode::p && event.is_down &&
         event.modifiers == 0) {
@@ -1638,7 +1612,7 @@ bool InspectorOverlay::handle_key_event(const KeyEvent& event) {
         return true;
     }
 
-    // P3 — Figma-style tool palette. V selects the Select tool, T the
+    // Figma-style tool palette. V selects the Select tool, T the
     // Text tool (Figma convention). Both no-modifier, inspector-active,
     // and gated behind not-mid-edit (numeric field edit OR inline text
     // edit) so a V/T typed into an edit buffer never flips the tool.
@@ -1656,8 +1630,8 @@ bool InspectorOverlay::handle_key_event(const KeyEvent& event) {
         }
     }
 
-    // Phase 2.5 — Shift+T toggles the tweak management panel. The bare
-    // `T` key now selects the Text tool (P3), so the tweak-management
+    // Shift+T toggles the tweak management panel. The bare
+    // `T` key selects the Text tool, so the tweak-management
     // panel moved to Shift+T (a free, non-conflicting trigger). Guarded
     // behind not-editing so a Shift+T while editing doesn't flip it.
     if (active_ && editing_field_.empty() && !text_editing() &&
@@ -1667,7 +1641,7 @@ bool InspectorOverlay::handle_key_event(const KeyEvent& event) {
         return true;
     }
 
-    // Phase 5.1 — J jumps to the selected view's authored JSX source
+    // J jumps to the selected view's authored JSX source
     // (no modifier; inspector-active only — same collision-avoidance
     // discipline as the D drag toggle). Graceful no-op when there is
     // no selection or the selection has no source provenance.
@@ -1679,7 +1653,7 @@ bool InspectorOverlay::handle_key_event(const KeyEvent& event) {
         return true;
     }
 
-    // Phase 3c — E toggles eyedropper mode (no modifier; same opt-in
+    // E toggles eyedropper mode (no modifier; same opt-in
     // discipline as the D-key drag toggle above). Entering edit mode
     // already swallows keys before this point, so the E-key can't
     // collide with numeric-field editing.
@@ -1689,17 +1663,17 @@ bool InspectorOverlay::handle_key_event(const KeyEvent& event) {
         return true;
     }
 
-    // Phase 3e — Z toggles the 20× zoom loupe (no modifier; only when
-    // the inspector is active, same guard as the D-key path). D/E/T
-    // are already claimed by drag / eyedropper / panel, so Z is the
-    // natural free letter for "zoom".
+    // Z toggles the 20× zoom loupe (no modifier; only when
+    // the inspector is active, same guard as the D-key path). D/E/T/Shift+T
+    // are already claimed by drag / eyedropper / text / tweak panel, so Z is
+    // the natural free letter for "zoom".
     if (active_ && event.key == KeyCode::z && event.is_down &&
         event.modifiers == 0) {
         toggle_zoom();
         return true;
     }
 
-    // Phase 5.2 — R toggles the reconciliation tab (no modifier; only
+    // R toggles the reconciliation tab (no modifier; only
     // while the inspector is active, same opt-in discipline as the D /
     // E / P / Z toggles). Guarded behind not-editing so typing an 'r'
     // into a field-edit buffer can't flip the tab. D/E/T/J/P/Z are
@@ -1710,7 +1684,7 @@ bool InspectorOverlay::handle_key_event(const KeyEvent& event) {
         return true;
     }
 
-    // Phase 6.2 — A toggles the texture-atlas viewer tab (no modifier;
+    // A toggles the texture-atlas viewer tab (no modifier;
     // only while the inspector is active, same opt-in discipline as the
     // D / E / P / Z / R toggles). Guarded behind not-editing so typing
     // an 'a' into a field-edit buffer can't flip the tab. D/E/T/J/P/Z/R
@@ -1721,7 +1695,7 @@ bool InspectorOverlay::handle_key_event(const KeyEvent& event) {
         return true;
     }
 
-    // Phase 3 — M toggles the selection mode between follows_focus
+    // M toggles the selection mode between follows_focus
     // (click-to-select; the default) and follows_mouse (selection
     // tracks the pointer). No modifier; inspector-active only, and
     // guarded behind not-editing so typing an 'm' into a field-edit
@@ -1750,7 +1724,7 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
 
     auto pos = event.position;
 
-    // ── Gesture-phase resolution (WYSIWYG P2h) ─────────────────────
+    // ── Gesture-phase resolution ──────────────────────────────────
     // The move/resize gesture machines below need to distinguish a
     // PRESS (begin), a DRAG TICK (live update), and a RELEASE (commit).
     // Two callers feed events with OPPOSITE is_down conventions:
@@ -1758,10 +1732,8 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
     //     !is_down, release=is_down (no explicit phase set).
     //   * the mac platform host: press=down, drag=down, release=up,
     //     and now also sets MouseEvent::phase explicitly.
-    // Inferring from is_down alone made a live mac drag end its gesture
-    // on the first drag tick and fall through to selection (REGRESSION
-    // 1/2). We branch once here: trust the explicit phase when present,
-    // else keep the legacy inference so existing tests are unchanged.
+    // Trust the explicit phase when present; otherwise keep the legacy
+    // inference so existing tests and JUCE-style hosts are unchanged.
     //
     // `gesture_active` is whether a move OR resize is already in flight;
     // it decides how the legacy is_down value is read for THIS event.
@@ -1785,7 +1757,7 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
         is_release = false;
     }
 
-    // ── P3: Text tool — click a text element to edit its copy ──────
+    // ── Text tool: click a text element to edit its copy ───────────
     //
     // In Text-tool mode a canvas press on a text-bearing View (Label /
     // TextEditor) begins an inline copy edit of THAT element instead of
@@ -1812,7 +1784,7 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
         return true;  // Text tool owns canvas presses (no drag/select)
     }
 
-    // Phase 3e — the loupe re-centers on the cursor for EVERY mouse
+    // The loupe re-centers on the cursor for every mouse
     // event (move, press, release) while it's active. We only record
     // the position here; the actual pixel sample needs the live Canvas
     // and so happens in paint_zoom_panel(). Recording it for all event
@@ -1824,7 +1796,7 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
         zoom_sample_center_ = pos;
     }
 
-    // ── Phase 3c: eyedropper mode ──────────────────────────────────
+    // ── Eyedropper mode ────────────────────────────────────────────
     // When the eyedropper is armed it owns canvas-area mouse events:
     // moves sample the color under the cursor (driving the swatch),
     // a press applies the pick. It deliberately yields to the panel
@@ -1843,8 +1815,8 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
             // independent, so a click without a prior move still
             // picks a real color (covers headless / scripted use).
             //
-            // Codex P1 (#2434): the click must be authoritative on the
-            // click coordinate. Invalidate any prior sample FIRST — a
+            // The click must be authoritative on the click coordinate.
+            // Invalidate any prior sample FIRST — a
             // hover move or a paint_eyedropper_cursor() framebuffer
             // readback at the default/old cursor position may have left
             // a stale `eyedropper_sample_` with `eyedropper_has_sample_`
@@ -1873,7 +1845,7 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
         return false;  // don't consume moves — let hover effects run
     }
 
-    // ── Phase 3a: drag-handle gesture state machine ────────────────
+    // ── Drag-handle gesture state machine ─────────────────────────
     // The Pulp MouseEvent model uses is_down=true ONLY for the
     // initial press; subsequent moves AND the release both arrive
     // as is_down=false (JUCE convention). Without a distinct
@@ -1894,7 +1866,7 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
             // immediately re-target without a wasted click.
             active_drag_ = DragCorner::none;
 
-            // P2a: commit the completed resize as ONE undoable unit. The
+            // Commit the completed resize as ONE undoable unit. The
             // drag already mutated the live view + overwrote the tweaks on
             // each move tick, so the AFTER-state is whatever is live right
             // now — snapshot it for an idempotent do_fn, pair it with the
@@ -1948,20 +1920,19 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
             new_h = std::max(4.0f, new_h);
 
             if (resize_proportional_) {
-                // P2c — PROPORTIONAL resize (Shift). Instead of stretching
+                // Proportional resize (Shift). Instead of stretching
                 // the box, SCALE the container's content uniformly so the
                 // panel keeps its internal proportions. The box itself still
                 // grows (preferred_*) so the scaled content has room; the
                 // uniform set_scale() keeps children's relative layout.
                 //
-                // WYSIWYG P2i (Refinement B) — keep scaled content INSIDE the
-                // resize box. Two coupled fixes:
+                // Keep scaled content inside the resize box. Two coupled
+                // constraints enforce that:
                 //   1. Anchor the scale to the box's TOP-LEFT corner
                 //      (transform-origin 0,0) instead of the default center
                 //      (0.5,0.5). With a center origin the content scales
                 //      symmetrically about the middle and the top/left edges
-                //      grow OUT of the box (the "knob spilling past the
-                //      top-left corner" the maintainer saw). A top-left origin
+                //      grow OUT of the box. A top-left origin
                 //      makes content grow DOWN-RIGHT into the box, matching
                 //      the fixed top-left of drag_start_bounds_.
                 //   2. Pick the scale ratio from the SMALLER axis
@@ -2043,11 +2014,11 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
         }
     }
 
-    // Phase 3a: hand-off from selection to drag — if drag-handles
+    // Hand-off from selection to drag: if drag-handles
     // mode is enabled, a view is selected, and the press lands on a
     // drag handle, START the resize and consume. Handle-press wins over
-    // body-press (move) and over selection hit-testing (WYSIWYG P2h
-    // REGRESSION 2): the resize-start check is BEFORE the move-start
+    // body-press (move) and over selection hit-testing: the resize-start check
+    // is BEFORE the move-start
     // check below, which is BEFORE the canvas select path.
     if (is_press && active_drag_ == DragCorner::none && !move_active_ &&
         selected_) {
@@ -2058,11 +2029,11 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
             drag_start_bounds_ = view_bounds_in_root(selected_);
             drag_start_pref_w_ = selected_->flex().preferred_width;
             drag_start_pref_h_ = selected_->flex().preferred_height;
-            // P2c — Shift at press chooses PROPORTIONAL resize (scale the
+            // Shift at press chooses proportional resize (scale the
             // container's content) over plain box resize (reflow children).
             resize_proportional_ = event.isShiftDown();
             drag_start_scale_ = selected_->scale();
-            // P2a: capture the pre-resize View inputs + prior tweak values
+            // Capture the pre-resize View inputs + prior tweak values
             // so the commit (release) can push ONE undoable EditHistory
             // entry. No-op cost when edit_history_ is null — the captures
             // are cheap and the commit simply skips the perform() call.
@@ -2076,7 +2047,7 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
         }
     }
 
-    // ── P2: drag-to-move gesture state machine ─────────────────────
+    // ── Drag-to-move gesture state machine ─────────────────────────
     // Same press/move/release convention as the resize machine: while a
     // move is active, is_down=false events live-update + overwrite the
     // tweak batch, the next is_down=true ends the gesture. Runs BEFORE
@@ -2133,7 +2104,7 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
                             break;
                         }
                 }
-                // WYSIWYG T5 — capture the structural anchors BEFORE the commit
+                // Capture the structural anchors BEFORE the commit
                 // so the source-rewrite sink can lock the reparent into the
                 // generated artifact (and undo can re-derive the inverse). Empty
                 // when a view carries no design provenance — the sink only fires
@@ -2141,7 +2112,7 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
                 const std::string child_anchor = tgt->anchor_id();
                 const std::string old_parent_anchor =
                     before_parent ? before_parent->anchor_id() : std::string{};
-                // WYSIWYG sweep P1 — capture the BEFORE insertion slot (the
+                // Capture the BEFORE insertion slot (the
                 // anchor of the visible sibling tgt followed under its OLD
                 // parent, in flex-order) so undo can re-derive the inverse
                 // source rewrite at the right position, not always first-child.
@@ -2161,14 +2132,14 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
                     }
                     const std::string new_parent_anchor =
                         after_parent ? after_parent->anchor_id() : std::string{};
-                    // WYSIWYG sweep P1 — the AFTER insertion slot: the anchor of
+                    // Capture the AFTER insertion slot: the anchor of
                     // the visible sibling tgt now follows under the NEW parent
                     // (flex-order). Threaded into ReparentSourceEdit so the
                     // source rewrite drops the moved block at the dragged
                     // position instead of always as the parent's first child.
                     const std::string new_insert_after_anchor =
                         preceding_sibling_anchor(after_parent, tgt);
-                    // WYSIWYG T5 — emit a structural source rewrite ONLY for a
+                    // Emit a structural source rewrite ONLY for a
                     // genuine cross-parent reparent (the same-parent reorder is
                     // persisted as a layout.order tweak in commit_reflow_drop)
                     // where every anchor resolves and a sink is wired. The do_fn
@@ -2184,7 +2155,7 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
                         !new_parent_anchor.empty() &&
                         !old_parent_anchor.empty();
                     auto* self = this;
-                    // WYSIWYG sweep P1 — the reparent undo/redo closures must not
+                    // The reparent undo/redo closures must not
                     // capture raw View* that dangle after a live React SUBTREE
                     // rebuild (clear_edit_history only fires at ROOT replacement).
                     // Resolve each participant by its stable anchor at replay time
@@ -2267,7 +2238,7 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
             selected_->set_bounds(b);
             selected_->invalidate_layout();
 
-            // Emit the three move tweaks as ONE atomic batch (Risk 6):
+            // Emit the three move tweaks as ONE atomic batch:
             // a partial "left/top without position" state shifts a still-
             // relative node, so all three must persist together.
             if (tweak_store_ && !selected_->anchor_id().empty()) {
@@ -2290,7 +2261,7 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
             // container highlight). The actual reorder/reparent happens on
             // release (commit_reflow_drop). This keeps the dragged element
             // visually in place and the rest of the tree stable until commit.
-            // P2d (C): track the cursor for the follow-ghost so the drag reads
+            // Track the cursor for the follow-ghost so the drag reads
             // as smooth motion (the ghost is pure paint — no relayout here, so
             // the drop preview never flickers from re-layout churn).
             move_cursor_ = pos;
@@ -2299,14 +2270,14 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
         }
     }
 
-    // P2: hand-off from selection to MOVE — if dragging mode is enabled,
+    // Hand-off from selection to move: if dragging mode is enabled,
     // a view is selected, and the press lands on the view's BODY (not a
     // handle), START a move of THAT element. Guard grid children: a
     // direct child of a grid container ignores position/top/left, so
     // refuse with a clear affordance instead of a silently-broken drag.
     //
-    // WYSIWYG P2h REGRESSION 1: this body-press-of-selected → MOVE check
-    // MUST run before the canvas selection hit-test below. hit_test_body
+    // This body-press-of-selected → move check must run before the canvas
+    // selection hit-test below. hit_test_body
     // is scoped to the CURRENTLY-selected view's bounds, so a press on
     // the selected element begins a move of it (capturing a stable grab
     // offset) and consumes the event — it never re-runs selection
@@ -2314,7 +2285,7 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
     // route to the active-move branch above (move_active_), not here.
     if (is_press && active_drag_ == DragCorner::none && !move_active_ &&
         selected_ && hit_test_body(pos)) {
-        // P2c — the modifier picks the move MODE:
+        // The modifier picks the move mode:
         //   plain drag  → REFLOW-AWARE (reorder among siblings / reparent)
         //   ⌘-drag      → ABSOLUTE FLOAT (position:absolute + left/top)
         // The grid guard only applies to the float path: a grid child can't
@@ -2343,7 +2314,7 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
         move_start_pos_ = pos;
         drop_target_ = nullptr;
         drop_indicator_ = {};
-        // P2d (C): capture a STABLE grab offset + the element's size at press
+        // Capture a stable grab offset + the element's size at press
         // so the reflow-move ghost can follow the cursor smoothly (no teleport
         // on grab, constant ghost size, no per-tick relayout).
         {
@@ -2352,7 +2323,7 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
             move_ghost_ = sb;
             move_cursor_ = pos;
         }
-        // P2a: capture pre-move View inputs (position + insets + bounds)
+        // Capture pre-move View inputs (position + insets + bounds)
         // and prior values of the three move tweaks BEFORE seed_move_origin
         // / the first move tick converts the node to absolute, so undo can
         // restore the original layout + tweak state exactly. (Only the float
@@ -2370,8 +2341,8 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
 
     // Check if mouse is in the panel area
     if (point_in_panel(pos)) {
-        // Codex P2 follow-up on #2328: clear Alt-hover state before
-        // panel-entry early-return. Without this, moving from an
+        // Clear Alt-hover state before panel-entry early-return. Without this,
+        // moving from an
         // Alt-hovered view straight into the inspector panel leaves
         // `alt_hover_target_` pointing at the previous view and the
         // overlay keeps drawing the live distance line even though
@@ -2379,7 +2350,7 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
         alt_hover_target_ = nullptr;
 
         if (event.is_down) {
-            // Phase 2.5 — clicks on a tweak-row icon (bypass / lock /
+            // Clicks on a tweak-row icon (bypass / lock /
             // delete) in the management panel. Checked first so an
             // icon click never falls through to tree selection or
             // field-edit. The hit list (tweak_rows_) is populated by
@@ -2407,7 +2378,7 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
                             break;
                         }
                         case TweakAction::remove: {
-                            // P2a: capture the value being deleted FIRST so
+                            // Capture the value being deleted FIRST so
                             // the undo can re-apply it, then make the delete
                             // ONE undoable unit. Falls back to a plain
                             // remove when no EditHistory is wired.
@@ -2444,7 +2415,7 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
                 }
             }
 
-            // Phase 2 — a click on the drift-drawer header toggles the
+            // A click on the drift-drawer header toggles the
             // drawer expand/collapse. Checked first because the header
             // overlaps the props-section coordinate range; without
             // this the click would fall through to tree selection.
@@ -2457,7 +2428,7 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
                 return true;
             }
 
-            // Phase 3b — clicks on numeric values in the property
+            // Clicks on numeric values in the property
             // panel enter edit mode. The hit list is populated by the
             // most recent paint_props_section() call; we check it
             // BEFORE falling through to the tree-selection path so a
@@ -2515,7 +2486,7 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
     if (hit) {
         hovered_ = hit;
 
-        // Phase 3 — selection-mode toggle. In follows_mouse mode the
+        // Selection-mode toggle. In follows_mouse mode the
         // selection chases the pointer: every pointer-move re-selects
         // the hovered View (Figma-style "select on hover"). In the
         // default follows_focus mode the selection stays pinned and is
@@ -2535,7 +2506,7 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
         }
     }
 
-    // Phase 3f — Alt-hover sibling distance (Figma-style). Tracks the
+    // Alt-hover sibling distance (Figma-style). Tracks the
     // hovered View as an alt_hover_target_ whenever Alt is held AND a
     // selected_ exists; clears as soon as Alt is released. The dynamic
     // line paints from selected_ to alt_hover_target_ in
@@ -2546,12 +2517,12 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
         alt_hover_target_ = nullptr;
     }
 
-    // WYSIWYG P2h: only a genuine PRESS selects. A drag tick that reaches
+    // Only a genuine press selects. A drag tick that reaches
     // here (an explicit-phase drag begun on empty canvas where no move /
     // resize gesture engaged) carries is_down=true but is_press=false, so
-    // it must NOT re-run selection hit-testing every tick (that was the
-    // "selection jumps to another object mid-drag" REGRESSION 1). It is
-    // still consumed below so it never leaks to a widget. In the legacy
+    // it must NOT re-run selection hit-testing every tick; otherwise selection
+    // would jump to another object mid-drag. It is still consumed below so it
+    // never leaks to a widget. In the legacy
     // is_down convention is_press == event.is_down for a fresh (no active
     // gesture) event, so click-to-select is unchanged.
     if (is_press) {
@@ -2581,7 +2552,7 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
 }
 
 bool InspectorOverlay::point_in_panel(Point p) const {
-    // P1: in the minimal manipulate layer there is NO dev side-panel, so
+    // In the minimal manipulate layer there is no dev side-panel, so
     // the whole canvas is live for selection + drag. Reporting "not in
     // panel" everywhere keeps the move/resize gestures owning the canvas.
     if (manipulate_only_) return false;
@@ -2598,18 +2569,18 @@ const InspectorOverlay::TreeItem* InspectorOverlay::tree_item_at_y(float y) cons
 
 // ── Painting ────────────────────────────────────────────────────────────────
 
-// All paint_* methods (paint, paint_highlight, paint_box_model, the WYSIWYG
-// in-canvas text-edit overlay + caret/selection shaping, the move/resize drop
+// All paint_* methods (paint, paint_highlight, paint_box_model, the in-canvas
+// text-edit overlay + caret/selection shaping, the move/resize drop
 // indicator + drag ghost, panel/tree/props/stats/tweaks sections, the
 // reconcile/atlas tabs and drift drawer) plus the paint-only tweak_action_at
 // live in inspector_overlay_paint.cpp.
 
-// Phase 3b — the live-editable box-model fields (editable_field_at /
+// The live-editable box-model fields (editable_field_at /
 // read_field_value / write_field_value / begin_field_edit /
 // commit_field_edit / cancel_field_edit / apply_edit_buffer_to_view /
 // handle_edit_key) are defined in inspector_overlay_field_edit.cpp.
 
-// Phase 3e — the 20× zoom loupe (set_zoom_active / set_zoom_factor /
+// The 20× zoom loupe (set_zoom_active / set_zoom_factor /
 // resolve_view_color_at / update_zoom_sample / paint_zoom_panel) is
 // defined in inspector_overlay_zoom.cpp.
 
