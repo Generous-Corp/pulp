@@ -11,7 +11,7 @@
 
 namespace pulp::format::lv2_adapter {
 
-// ── URID feature resolution (workstream 01 slice 1.5) ────────────────────
+// ── URID feature resolution ───────────────────────────────────────────────
 
 LV2_URID_Map* find_urid_map(const LV2_Feature* const* features) {
     if (!features) return nullptr;
@@ -52,11 +52,10 @@ std::string generate_plugin_ttl(const PluginDescriptor& desc,
             // Effects don't need a specific subclass
             break;
         case PluginCategory::MidiEffect:
-            // MIDI processors are not format/unit converters; mapping to
-            // lv2:ConverterPlugin (#276) misled hosts that group by LV2
-            // class. lv2:UtilityPlugin + a more specific MIDIPlugin
-            // marker is the conventional placement for MIDI effects in
-            // the LV2 taxonomy.
+            // MIDI processors are not format/unit converters; hosts group by
+            // LV2 class. lv2:UtilityPlugin + a more specific MIDIPlugin
+            // marker is the conventional placement for MIDI effects in the
+            // LV2 taxonomy.
             ttl << " , lv2:UtilityPlugin , lv2:MIDIPlugin";
             break;
     }
