@@ -167,7 +167,7 @@
     },
     {
       "path": "core/canvas/src/skia_canvas.cpp",
-      "max_loc": 1197,
+      "max_loc": 1136,
       "note": "Skia canvas split stabilization candidate"
     }
   ]
