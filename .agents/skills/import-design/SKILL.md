@@ -388,13 +388,21 @@ mind when touching this:
 - **Recognized-widget gate.** Synthesis only fires when `audio_widget != none`.
   A generic/visual frame that happens to carry a `binding` attribute gets NO
   synthesized binding — it stays a generic node. Don't loosen this gate.
-- **`detect_audio_widget` matches whole WORD TOKENS, not substrings.** It
-  tokenizes the layer name on non-alnum + camelCase (acronym-aware, so
-  `VUMeter`→{vu,meter}) + letter↔digit, then matches whole tokens (simple
-  plural tolerated: `Knobs`→knob). This is deliberate: the old `find()` substring
-  match promoted `Dialog`/`Radial`→knob and `Parameter`/`Diameter`→meter (gap
-  survey). Don't revert to substring matching; add new keywords as tokens + a
-  false-positive regression case in `test_design_import.cpp`.
+- **Name→kind resolution matches whole WORD TOKENS, not substrings — in ALL
+  THREE lanes.** The C++ `detect_audio_widget`, the TS
+  `audioWidgetKindFromName` (`extract-pure.ts`), and the Python
+  `widget_kind_from_name` (`figma_rest_export.py`) all tokenize the layer name on
+  non-alnum + camelCase (acronym-aware, so `VUMeter`→{vu,meter}) + letter↔digit,
+  then match whole tokens (simple plural tolerated: `Knobs`→knob). The TS/Python
+  lanes were substring-based until the P2 resolver unification; all three now
+  share the boundary rule (mirrored, not one function — each has its own
+  vocabulary/return enum). This is deliberate: the old `find()`/`includes()`/`in`
+  substring match promoted `Dialog`/`Radial`→knob and `Parameter`/`Diameter`→meter
+  (gap survey). Don't revert any lane to substring matching; add new keywords as
+  tokens + a false-positive regression case (`test_design_import.cpp`,
+  `audio-widget-name.test.ts`, `test_figma_rest_export.py`). The faithful-vector
+  overlay lane's `kindFromName` (`resolve-control.ts`, P7) shares the same
+  whole-word convention for its own (InteractiveElementKind) vocabulary.
 - **Module/param split.** Split on the FIRST `.`: `"filter.cutoff_hz"` →
   `pulpBindingModule="filter"`, `pulpBindingParam="cutoff_hz"`,
   `pulpParamKey="filter.cutoff_hz"`. No dot → empty module, whole string is the

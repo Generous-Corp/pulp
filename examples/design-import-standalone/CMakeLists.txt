@@ -39,4 +39,17 @@ if(APPLE AND NOT PULP_IOS AND PULP_ENABLE_GPU)
         MACOSX_BUNDLE_GUI_IDENTIFIER "com.pulp.design-import-standalone"
         MACOSX_BUNDLE_SHORT_VERSION_STRING "0.1.0"
         MACOSX_BUNDLE_BUNDLE_VERSION "0.1.0")
+
+    # Native-only build hygiene (P5): this standalone uses ONLY the native
+    # faithful-vector design-import path (Skia draw_svg + native overlays), so a
+    # PULP_ENABLE_JS=OFF build must contain zero JS-engine / view-script symbols.
+    # Assert it at build time, mirroring the MacGpuWindowHost nm-check.
+    if(NOT PULP_ENABLE_JS)
+        add_custom_command(TARGET pulp-design-import-standalone POST_BUILD
+            COMMAND ${CMAKE_COMMAND}
+                -DBIN=$<TARGET_FILE:pulp-design-import-standalone>
+                -P ${CMAKE_SOURCE_DIR}/tools/cmake/AssertNoJsSymbols.cmake
+            VERBATIM
+            COMMENT "P5: verifying native-only build has no JS-engine symbols")
+    endif()
 endif()
