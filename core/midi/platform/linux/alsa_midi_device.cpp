@@ -100,7 +100,7 @@ private:
 
             // Parse raw MIDI bytes. Shared helper keeps the accumulator
             // logic testable across ALSA and any future raw-byte MIDI
-            // transport (see raw_midi_parser.hpp). #239 / #406.
+            // transport (see raw_midi_parser.hpp).
             parse_raw_midi_bytes(
                 reinterpret_cast<const uint8_t*>(buf),
                 static_cast<std::size_t>(n),
