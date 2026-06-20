@@ -174,7 +174,6 @@ public:
     /// before process(); plugins opting in to
     /// PluginDescriptor::supports_ump read it via ump(). Ownership stays
     /// with the caller; the buffer must outlive the process() block.
-    /// Workstream 02 slice 2.6.
     void attach_ump(class UmpBuffer* ump) { ump_ = ump; }
 
     /// Attached UmpBuffer or nullptr. A null return means "no UMP events
@@ -183,7 +182,7 @@ public:
     const class UmpBuffer* ump() const { return ump_; }
     class UmpBuffer* ump() { return ump_; }
 
-    // ── SysEx sidecar (workstream 01 — full MIDI vocabulary) ──────────────
+    // ── SysEx sidecar ────────────────────────────────────────────────────
     //
     // choc::midi::ShortMessage is fixed 3 bytes; system-exclusive payloads
     // can run to kilobytes. Sysex therefore travels in a parallel vector
