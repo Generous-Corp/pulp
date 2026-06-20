@@ -38,14 +38,14 @@
 // Pulp historically open-coded the same state machine inline in both
 // `core/format/src/au_adapter.mm` (AUv3 MIDIEventList path) and
 // `core/midi/platform/mac/coremidi_device.mm` (CoreMIDI 2.0 input
-// callback). Both implementations carry the same regression notes
-// (#239 / #292) and the same edge-case handling for orphaned
-// continue/end packets. Extracting the state machine here:
+// callback). Both implementations needed the same cursor-advance guard
+// and the same edge-case handling for orphaned continue/end packets.
+// Extracting the state machine here:
 //
 //   1. Eliminates duplicated state and bit-twiddling.
-//   2. Centralises the regression test for the #292 P1 bug ("second
-//      word's top nibble can masquerade as a new message header") and
-//      the #292 P2 boundary-preservation property.
+//   2. Centralises test coverage for the second word's top nibble not
+//      masquerading as a new message header, plus preservation of an
+//      unrelated in-progress stream when a complete packet interleaves.
 //   3. Gives future UMP-aware backends (WinRT MIDI 2.0, ALSA UMP,
 //      iOS CoreMIDI 2.0) a drop-in dependency.
 //
@@ -89,7 +89,7 @@ namespace pulp::midi {
 /// end span). Orphaned continue/end packets (i.e. arrival without a
 /// preceding start) are dropped silently — corrupting the downstream
 /// sink with a partial payload is worse than dropping one malformed
-/// sysex (#292 P2).
+/// sysex.
 using Sysex7EmitFn = void(*)(const std::vector<std::uint8_t>& payload,
                              void* user);
 
@@ -143,11 +143,10 @@ public:
         case 0x0: {
             // Complete single-packet sysex. Use a scratch vector so
             // the call doesn't disturb any partial in-progress state
-            // (per #292 P2 — an interleaved single-packet sysex must
-            // not eat a separate in-progress accumulator). This is
-            // genuinely possible: the UMP spec permits independent
-            // sysex streams on different groups to interleave through
-            // a single endpoint.
+            // when a complete packet interleaves with another stream's
+            // accumulator. This is genuinely possible: the UMP spec
+            // permits independent sysex streams on different groups to
+            // interleave through a single endpoint.
             scratch_.clear();
             extract_bytes(word0, word1, size, scratch_);
             if (!scratch_.empty() && emit) {
@@ -170,7 +169,7 @@ public:
                 extract_bytes(word0, word1, size, payload_);
                 return Status::continued;
             }
-            // Orphan continue — drop. See #292 P2.
+            // Orphan continue — drop.
             return Status::dropped;
         case 0x3:
             if (in_progress_) {
@@ -182,7 +181,7 @@ public:
                 in_progress_ = false;
                 return Status::ended;
             }
-            // Orphan end — drop. See #292 P2.
+            // Orphan end — drop.
             return Status::dropped;
         default:
             // Reserved / unknown status nibble. Per the spec, type-0x3
