@@ -16,8 +16,8 @@
  *
  * This is the *Processor-level* FFI. It is deliberately independent of
  * `SignalGraph` (contract decision 6): no graph, node, or host-chaining types
- * appear here. The future `pulp_node_v1` C ABI (Phase 6) reuses these
- * primitives but does not share this header.
+ * appear here. The `pulp_node_v1` C ABI reuses these primitives but does not
+ * share this header.
  *
  * ── Contract decisions encoded here (see the spec) ──
  *   1  ABI-shaped: every struct leads with `size` + `abi_version`.
