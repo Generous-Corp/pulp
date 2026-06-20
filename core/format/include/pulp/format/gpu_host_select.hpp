@@ -18,8 +18,6 @@
 // A developer building a Skia/Dawn/scripted editor gets the GPU host
 // automatically; they never hand-set a flag. Hardcoding `use_gpu=false` is
 // exactly the trap that made the ChainerSynth AU fall back to AutoUi/CPU.
-//
-// See `planning/2026-05-22-gpu-view-host-in-plugins.md`.
 
 namespace pulp::format {
 

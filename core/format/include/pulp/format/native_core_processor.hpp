@@ -2,7 +2,7 @@
 //
 // A C++ `pulp::format::Processor` that owns a native-language DSP core through
 // the language-neutral C ABI (pulp/native_components/native_core.h). This is
-// the SDK seam from Phase 2 of the native-component plan: a Rust / C / Zig core
+// the SDK seam for native-language DSP cores: a Rust / C / Zig core
 // implements the C ABI vtable; this adapter translates Pulp's C++ Processor
 // surface (StateStore params, ParameterEventQueue, BufferView, state blobs)
 // into the POD FFI structs and back.

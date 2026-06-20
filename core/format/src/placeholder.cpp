@@ -1,2 +1,2 @@
-// pulp-format: placeholder — replaced in Phase 2+
+// pulp-format: placeholder translation unit.
 namespace pulp::format {}
