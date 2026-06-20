@@ -62,9 +62,8 @@ tresult PLUGIN_API PulpPlugView::attached(void* parent, FIDString type) {
     // Pump the scripted UI session (async results, timers, rAF) per vsync.
     editor_host_->set_idle_callback(make_scripted_idle_pump(bridge_));
 
-    // Phase iOS-D.3b Slice 1 — route navigator.gpu / canvas.getContext
-    // ('webgpu') through the host's live GpuSurface. See
-    // planning/2026-05-29-ios-d3b-threejs-webgpu-program.md § Slice 1.
+    // Route navigator.gpu / canvas.getContext('webgpu') through the
+    // host's live GpuSurface.
     if (auto* scripted = bridge_.scripted_ui()) {
         scripted->attach_gpu_surface(editor_host_->gpu_surface());
         if (editor_host_->gpu_surface()) {
