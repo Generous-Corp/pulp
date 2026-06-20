@@ -112,8 +112,8 @@
     },
     {
       "path": "core/view/src/design_codegen.cpp",
-      "max_loc": 1997,
-      "note": "generated JS bridge contract hotspot"
+      "max_loc": 1961,
+      "note": "generated JS bridge contract hotspot; lowered after comment-hygiene cleanup"
     },
     {
       "path": "core/view/include/pulp/view/view.hpp",
