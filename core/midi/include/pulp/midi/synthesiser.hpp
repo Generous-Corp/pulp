@@ -114,8 +114,7 @@ public:
     /// here; when the envelope tail completes they should call
     /// `mark_inactive()` so the synth's free-voice scan can reclaim
     /// the slot. Keeps `note_.releasing` in sync with the `releasing_`
-    /// member so subclasses reading either path see the same state
-    /// (Codex P2 on #2870).
+    /// member so subclasses reading either path see the same state.
     virtual void on_note_off() {
         releasing_ = true;
         note_.releasing = true;
