@@ -1,4 +1,4 @@
-// web-compat.js — Web-native authoring layer for Pulp
+// web-compat-element.js — Element prelude for Pulp's web-native authoring layer
 // Loaded as a prelude after css-colors.js and css-parser.js
 // Depends on: bridge functions (createRow, createCol, createLabel, setFlex, etc.)
 //             css-parser.js (parseCSSLength, parseCSSColor, expandShorthand, parseTransform, parseTransition)
@@ -25,7 +25,7 @@ function __genId__() { return "__el_" + (__nextId__++) + "__"; }
 // by widget_bridge.cpp) to look up the JS Element for a native pointer
 // event and call dispatchEvent on it — bypassing the single-slot
 // __callbacks__[id:event] table that React-DOM's _registerNativeEvent
-// clobbers. Per Codex consult 2026-05-17.
+// clobbers.
 var __nativeElements__ = (typeof globalThis !== "undefined" && globalThis.__nativeElements__)
     ? globalThis.__nativeElements__ : {};
 if (typeof globalThis !== "undefined") globalThis.__nativeElements__ = __nativeElements__;
@@ -56,15 +56,15 @@ function Element(tagName, nativeId) {
     __nativeElements__[this._id] = this;
 }
 
-// pulp 2026-06-08 (routing-parity sweep) — shared lowercase widget-tag →
-// native-widget factory. `@pulp/react`'s capitalized widget intrinsics
+// Shared lowercase widget-tag → native-widget factory.
+// `@pulp/react`'s capitalized widget intrinsics
 // (<Knob>, <Fader>, …) lower to lowercase DOM tags (knob, fader, …) on the
 // live-JSX / web-compat path; this table routes each to the new-API
 // createX(id, …) bridge call that constructs the native widget AND wires its
 // callbacks. Single source of truth for `_ensureNative` (below); kept in
 // lockstep with the C++ `__domAppend` table (widget_bridge.cpp
 // make_widget_for_tag) and the `@pulp/react` host-config lowercase aliases —
-// the routing-parity sweep test asserts the surfaces agree. Closures (not
+// the routing-parity test asserts the surfaces agree. Closures (not
 // eager calls) so the bridge globals only need to exist at call time.
 var __widgetTagFactory__ = {
     knob:     function(id) { createKnob(id, ""); },
@@ -94,8 +94,8 @@ Element.prototype._ensureNative = function() {
     } else if (tag === "span" || tag === "p" || tag === "label") {
         createLabel(id, "", "");
         if (tag === "label") {
-            // pulp DIVERGE→PASS sweep — wire `<label for="x">` click
-            // routing to focus / toggle the labeled input. Note: this
+            // Wire `<label for="x">` click routing to focus / toggle the
+            // labeled input. Note: this
             // branch only runs in the createElement+later-mount path;
             // the appendChild fast path goes through __domAppend on the
             // C++ side and never re-enters JS, so we ALSO install the
@@ -103,8 +103,8 @@ Element.prototype._ensureNative = function() {
             this._installLabelForRouting();
         }
     } else if (tag === "svg") {
-        // pulp #1147 — inline SVGs in web-compat code (Spectr's mode-icon
-        // popover rows, React-rendered icons) are leaf containers. We
+        // Inline SVGs in web-compat code (Spectr's mode-icon popover rows,
+        // React-rendered icons) are leaf containers. We
         // don't ship an SVG renderer, but we MUST honor the HTML
         // `width`/`height` attributes so the flex parent reserves layout
         // space. Without this the row collapses to height:0 and the
@@ -112,8 +112,8 @@ Element.prototype._ensureNative = function() {
         // replay happens in the shared block below.
         createCol(id, "");
     } else if (tag === "rect") {
-        // pulp #1926 — SVG <rect> primitive. Spectr emits these for
-        // toggle-pill backgrounds and segmented-control fills.
+        // SVG <rect> primitive. Spectr emits these for toggle-pill
+        // backgrounds and segmented-control fills.
         // Geometry (x/y/width/height) + fill/stroke replayed below
         // through __replaySvgRectAttributes__.
         if (typeof createSvgRect === "function") {
@@ -122,8 +122,8 @@ Element.prototype._ensureNative = function() {
             createCol(id, "");
         }
     } else if (tag === "line") {
-        // pulp #1926 — SVG <line> primitive. Spectr uses these for
-        // analyzer-line indicators next to PEAK/AVG/BOTH/OFF and as
+        // SVG <line> primitive. Spectr uses these for analyzer-line
+        // indicators next to PEAK/AVG/BOTH/OFF and as
         // ruler ticks. Endpoints (x1/y1/x2/y2) + stroke replayed below.
         if (typeof createSvgLine === "function") {
             createSvgLine(id, "");
@@ -131,8 +131,8 @@ Element.prototype._ensureNative = function() {
             createCol(id, "");
         }
     } else if (tag === "circle") {
-        // pulp #1926 — SVG <circle> → SvgPath with synthesized `d`
-        // path. The path is computed in __replaySvgCircleAttributes__
+        // SVG <circle> maps to SvgPath with a synthesized `d` path.
+        // The path is computed in __replaySvgCircleAttributes__
         // from cx/cy/r attributes after mount.
         if (typeof createSvgPath === "function") {
             createSvgPath(id, "");
@@ -140,13 +140,12 @@ Element.prototype._ensureNative = function() {
             createCol(id, "");
         }
     } else if (tag === "path") {
-        // pulp #1899 — Spectr's React-rendered icon glyphs emit raw
+        // Spectr's React-rendered icon glyphs emit raw
         // `<svg><path d="..." stroke="currentColor" .../></svg>` JSX. The
         // SvgPath native widget + bridge surface (createSvgPath /
         // setSvgPath / setSvgStroke / setSvgFill / setSvgStrokeWidth)
-        // already exist (pulp #994 / #1416), but the web-compat shim
-        // routed `<path>` into the unknown-tag default (createCol),
-        // producing an empty box. Wire <path> directly to createSvgPath
+        // already exist, but routing `<path>` into the unknown-tag default
+        // (createCol) produces an empty box. Wire <path> directly to createSvgPath
         // and replay `d` / `stroke` / `stroke-width` / `fill` /
         // `viewBox` (inherited from the parent <svg>) through
         // __replaySvgPathAttributes__ at the end of this function.
@@ -178,13 +177,10 @@ Element.prototype._ensureNative = function() {
     } else if (tag === "input") {
         var t = this._type || "text";
         if (t === "range") {
-            // pulp #1899 — `<input type="range">` defaults to HORIZONTAL.
-            // HTML semantics (and Spectr's MorphSlider, Web Audio demos,
+            // `<input type="range">` defaults to horizontal. HTML semantics
+            // (and Spectr's MorphSlider, Web Audio demos,
             // CSS-Tricks / MDN examples) treat the range slider as
-            // horizontal unless an explicit hint says otherwise. Pulp
-            // previously hard-coded "vertical" which collapsed every
-            // imported web slider to a tall fader, painting nothing in
-            // the typical 90px-wide flex row.
+            // horizontal unless an explicit hint says otherwise.
             //
             // Heuristic (in priority order):
             //   1. `aria-orientation="vertical"` → vertical
@@ -203,14 +199,14 @@ Element.prototype._ensureNative = function() {
     } else if (tag === "select") {
         createCombo(id, "");
     } else if (Object.prototype.hasOwnProperty.call(__widgetTagFactory__, tag)) {
-        // pulp 2026-06-08 (routing-parity sweep) — lowercase `@pulp/react`
-        // widget intrinsics (<Knob>/<Fader>/<Toggle>/<Combo>/<Checkbox>/
+        // Lowercase `@pulp/react` widget intrinsics
+        // (<Knob>/<Fader>/<Toggle>/<Combo>/<Checkbox>/
         // <Spectrum>/<Waveform>/<Meter>/<XYPad>/<ListBox>/<Icon>) lower to
         // lowercase DOM tags in the live-JSX path. Route them to native
         // widgets via the shared __widgetTagFactory__ table (defined above),
-        // whose new-API createX(id, …) forms wire callbacks. Before this they
-        // fell to the createCol container default below — no drag, no
-        // on_change — so e.g. a knob never fired onChange. Keeps this surface
+        // whose new-API createX(id, …) forms wire callbacks. Routing through
+        // createCol would lose drag and on_change wiring, so e.g. a knob would
+        // never fire onChange. Keeps this surface
         // in lockstep with __domAppend (widget_bridge.cpp) and the
         // @pulp/react host-config lowercase map.
         __widgetTagFactory__[tag](id);
@@ -223,8 +219,8 @@ Element.prototype._ensureNative = function() {
         setFlex(id, "height", 1);
         setBackground(id, "#666666");
     } else if (tag === "img") {
-        // pulp #1658 — wire <img> to ImageView via createImage (was: createLabel
-        // placeholder). ImageView::paint shows an "IMG" placeholder when path
+        // Wire <img> to ImageView via createImage. ImageView::paint shows an
+        // "IMG" placeholder when path
         // is empty, then decodes via Skia draw_image_from_file once
         // setImageSource is called from setAttribute('src', …).
         createImage(id, "");
@@ -234,8 +230,8 @@ Element.prototype._ensureNative = function() {
         createPanel(id, "");
         setVisible(id, false);
     } else if (tag === "style") {
-        // pulp #1323 — `<style>` is a non-rendered CSS source. We still
-        // create a hidden native shell so DOM ops (appendChild,
+        // `<style>` is a non-rendered CSS source. We still create a hidden
+        // native shell so DOM ops (appendChild,
         // textContent flush, removeChild) keep working uniformly, but
         // mark the element so its textContent / appended Text-node
         // children are routed through the CSS-rule translator instead
@@ -249,19 +245,19 @@ Element.prototype._ensureNative = function() {
         createCol(id, "");
     }
 
-    // pulp #1147 — presentational `width`/`height` HTML attributes are
-    // replayed via __replayMediaAttributes__ once the native widget is
+    // Presentational `width`/`height` HTML attributes are replayed via
+    // __replayMediaAttributes__ once the native widget is
     // mounted (called from appendChild / insertBefore / _ensureNative).
     if (typeof __replayMediaAttributes__ === "function") {
         __replayMediaAttributes__(this);
     }
-    // pulp Wave 3 html.2 / #1476 — replay any ARIA attributes that were
-    // set on this element before the native widget existed.
+    // Replay any ARIA attributes that were set on this element before the
+    // native widget existed.
     if (typeof __replayAriaAttributes__ === "function") {
         __replayAriaAttributes__(this);
     }
-    // pulp #1926 — replay rect / line / circle SVG attributes captured
-    // pre-mount. React/JSX commits attributes before appendChild
+    // Replay rect / line / circle SVG attributes captured pre-mount.
+    // React/JSX commits attributes before appendChild
     // materializes the node, so by the time setAttribute('x', ...) /
     // ('x1', ...) / ('cx', ...) lands the bridge has no native id yet.
     // The replay functions flush geometry + fill / stroke / stroke-width
@@ -275,10 +271,10 @@ Element.prototype._ensureNative = function() {
     if (typeof __replaySvgCircleAttributes__ === "function") {
         __replaySvgCircleAttributes__(this);
     }
-    // pulp #1899 — replay <path> SVG attributes captured pre-mount
-    // (React/JSX commits attributes before appendChild materializes the
+    // Replay <path> SVG attributes captured pre-mount.
+    // React/JSX commits attributes before appendChild materializes the
     // node, so by the time setAttribute('d', ...) lands the bridge has
-    // no native id yet). __replaySvgPathAttributes__ flushes d / stroke
+    // no native id yet. __replaySvgPathAttributes__ flushes d / stroke
     // / stroke-width / fill from _attributes and inherits viewBox from
     // the parent <svg>.
     if (typeof __replaySvgPathAttributes__ === "function") {
@@ -286,17 +282,13 @@ Element.prototype._ensureNative = function() {
     }
 };
 
-// pulp #1899 — orientation heuristic for <input type="range">. Returns
-// "horizontal" (HTML default) or "vertical". Priority:
+// Orientation heuristic for <input type="range">. Returns "horizontal" (HTML
+// default) or "vertical". Priority:
 //   1. aria-orientation attribute explicitly says "vertical" (or "horizontal")
 //   2. inline style.height > inline style.width — BOTH must be inline-set;
 //      otherwise width may come from a flex parent (not visible here) and
-//      the comparison is meaningless. The earlier "hasH && !hasW → vertical"
-//      shortcut regressed horizontal sliders whose width came from layout
-//      (Codex P1 review of #1917).
+//      the comparison is meaningless.
 //   3. otherwise horizontal (the HTML / Web-Audio convention).
-// TODO: add test for #1917 P1 regression (horizontal slider with
-//       inline style.height but width supplied by flex parent).
 function __resolveRangeOrientation__(el) {
     if (!el) return "horizontal";
     var aria = el._attributes && el._attributes["aria-orientation"];
@@ -316,7 +308,7 @@ function __resolveRangeOrientation__(el) {
     return "horizontal";
 }
 
-// pulp #1917 (Codex P1) — SVG `currentColor` resolution.
+// SVG `currentColor` resolution.
 //
 // The SVG spec resolves `stroke="currentColor"` / `fill="currentColor"`
 // to the element's CSS `color` property at render time. The C++
@@ -337,8 +329,8 @@ function __resolveCurrentColor__(el) {
     return "black"; // SVG spec default
 }
 
-// pulp #1147 — shared helper that maps presentational HTML attributes
-// (width, height) on layout-leaf media tags (<svg>, <img>, <canvas>,
+// Shared helper that maps presentational HTML attributes (width, height) on
+// layout-leaf media tags (<svg>, <img>, <canvas>,
 // <video>) to flex preferred sizing. Idempotent — safe to call from
 // _ensureNative (createElement-then-flushAll path) AND from appendChild
 // (React/JSX setAttribute-before-mount path). Inline `style.width` still
@@ -357,8 +349,8 @@ function __replayMediaAttributes__(el) {
             var ph = parseFloat(h); if (ph === ph) setFlex(el._id, "height", ph);
         }
     }
-    // pulp #1658 — replay src for <img> elements through to setImageSource
-    // so the React/JSX setAttribute-before-mount path works (attributes
+    // Replay src for <img> elements through to setImageSource so the React/JSX
+    // setAttribute-before-mount path works (attributes
     // captured pre-mount in _attributes, flushed once the native widget
     // is created via _ensureNative or a later appendChild).
     if (tag === "img" && typeof setImageSource === "function") {
@@ -367,8 +359,8 @@ function __replayMediaAttributes__(el) {
     }
 }
 
-// pulp Wave 3 html.2 / #1476 — replay ARIA attributes (`aria-label` /
-// `role`) when the native widget comes online.  React/JSX commits
+// Replay ARIA attributes (`aria-label` / `role`) when the native widget comes
+// online. React/JSX commits
 // attributes before `appendChild` mounts the node, so by the time
 // `setAttribute('aria-label', ...)` runs the bridge has no native id
 // yet; we capture the value in `_attributes` (the existing path) and
@@ -385,8 +377,8 @@ function __replayAriaAttributes__(el) {
     if (role !== undefined && typeof setAccessibilityRole === "function") {
         setAccessibilityRole(el._id, String(role));
     }
-    // pulp #1737 — replay ARIA state attributes via setAccessibilityState.
-    // React commits attributes before mount, so we have to defer the
+    // Replay ARIA state attributes via setAccessibilityState. React commits
+    // attributes before mount, so we have to defer the
     // bridge call until _nativeCreated. Each state attribute routes
     // through one bridge fn; the C++ side dispatches by attr name.
     if (typeof setAccessibilityState === "function") {
@@ -401,8 +393,8 @@ function __replayAriaAttributes__(el) {
     }
 }
 
-// pulp #1926 — replay <rect> SVG attributes through the SvgRectWidget
-// bridge. Mirrors the pre-mount-replay pattern used for ARIA + media:
+// Replay <rect> SVG attributes through the SvgRectWidget bridge. Mirrors the
+// pre-mount-replay pattern used for ARIA + media:
 // React/JSX commits setAttribute() before appendChild materializes the
 // node, so the bridge has no native id when the attributes land. We
 // stash them in _attributes (the existing path) and flush them once
@@ -435,8 +427,8 @@ function __replaySvgRectAttributes__(el) {
     }
 }
 
-// pulp #1926 — replay <line> SVG attributes through the SvgLineWidget
-// bridge. SvgLineWidget has no fill semantics — only stroke /
+// Replay <line> SVG attributes through the SvgLineWidget bridge. SvgLineWidget
+// has no fill semantics — only stroke /
 // stroke-width matter alongside the (x1,y1,x2,y2) endpoints.
 function __replaySvgLineAttributes__(el) {
     if (!el || !el._nativeCreated || !el._attributes) return;
@@ -457,7 +449,7 @@ function __replaySvgLineAttributes__(el) {
         // stroke="none". Without explicit clearing, a JSX <line> that
         // omits `stroke` would paint an unwanted opaque-black stroke.
         // Explicitly drive the widget to the spec default when the
-        // attribute is absent or empty (#1928 review).
+        // attribute is absent or empty.
         if (a.stroke !== undefined && String(a.stroke).length > 0) {
             setSvgStroke(el._id, String(a.stroke));
         } else {
@@ -472,8 +464,8 @@ function __replaySvgLineAttributes__(el) {
     }
 }
 
-// pulp #1926 — replay <circle> attributes by synthesizing a `d` path
-// from cx/cy/r and feeding through the SvgPathWidget bridge. Two SVG
+// Replay <circle> attributes by synthesizing a `d` path from cx/cy/r and
+// feeding through the SvgPathWidget bridge. Two SVG
 // arc commands (each a half-circle, sweep flag = 0) draw the full
 // circumference and Z closes the loop:
 //   M (cx-r) cy
@@ -508,18 +500,17 @@ function __replaySvgCircleAttributes__(el) {
     }
 }
 
-// pulp #1899 — replay <path> SVG attributes captured pre-mount through
-// the SvgPathWidget bridge surface. React/JSX commits attributes before
+// Replay <path> SVG attributes captured pre-mount through the SvgPathWidget
+// bridge surface. React/JSX commits attributes before
 // `appendChild` materializes the node, mirroring the aria / media-attr
 // patterns above. Idempotent — safe to call from _ensureNative AND from
 // the appendChild fast path. Also inherits the parent <svg>'s viewBox
 // when set, matching the SVG spec (path coordinates live in the parent
 // viewBox's coordinate space).
 //
-// Attribute name handling: HTML attribute names lowercase via
-// setAttribute, but JSX often serializes camelCase `strokeWidth`. We
-// accept either spelling so the host-config (React intrinsic) and the
-// raw HTML/JSX path both work.
+// Attribute name handling: the DOM path lowercases HTML attribute names, while
+// the React host-config often emits camelCase such as strokeWidth / fillRule.
+// Accept either spelling so the host-config and raw HTML/JSX paths both work.
 function __replaySvgPathAttributes__(el) {
     if (!el || !el._nativeCreated || !el._attributes) return;
     if (el.tagName !== "PATH") return;
@@ -530,8 +521,8 @@ function __replaySvgPathAttributes__(el) {
         setSvgPath(el._id, String(a.d));
     }
     // stroke — color string. "none" / "" clears the stroke.
-    // pulp #1917 (Codex P1) — resolve `currentColor` against the CSS
-    // color cascade before dispatch; the C++ widget doesn't parse the
+    // Resolve `currentColor` against the CSS color cascade before dispatch;
+    // the C++ widget doesn't parse the
     // literal token. Fallback is "black" per SVG spec.
     if (a.stroke !== undefined && typeof setSvgStroke === "function") {
         var strokeVal = String(a.stroke);
@@ -556,8 +547,8 @@ function __replaySvgPathAttributes__(el) {
         setSvgFill(el._id, fillVal);
     }
     // fill-rule / fillRule — winding rule ("nonzero" | "evenodd").
-    // pulp #3656 — compound annular paths (a stroked ellipse lowered to
-    // `M…Z M…Z` by JUCE's SVGGraphicsContext) only render the hole under
+    // Compound annular paths (a stroked ellipse lowered to `M…Z M…Z` by
+    // JUCE's SVGGraphicsContext) only render the hole under
     // even-odd. Accept either the HTML hyphen spelling or the JSX
     // camelCase spelling, mirroring stroke-width / strokeWidth above.
     var fr = a["fill-rule"];
@@ -599,7 +590,7 @@ function __replaySvgPathAttributes__(el) {
 // React 18's reconciler reads `node.nodeType` (~55 call sites in
 // react-dom.development.js) and `node.nodeName` (~15 sites) on every DOM
 // mutation. Without these, the reconciler bails out before its first
-// commit. See pulp #468 (gap matrix).
+// commit.
 //
 // Constants per the DOM Level 1 spec:
 //   ELEMENT_NODE = 1, TEXT_NODE = 3, COMMENT_NODE = 8.
@@ -723,8 +714,8 @@ Object.defineProperty(Element.prototype, "textContent", {
     get: function() { return this._textContent; },
     set: function(v) {
         this._textContent = v || "";
-        // pulp #1323 — `<style>` element textContent is CSS source, not
-        // a label. Route it through the rule translator. We deliberately
+        // `<style>` element textContent is CSS source, not a label. Route it
+        // through the rule translator. We deliberately
         // skip `setText()` so the element stays invisible in the layout.
         if (this.tagName === "STYLE" || this._isStyleElement) {
             if (typeof _processStyleElement === "function") {
@@ -768,11 +759,11 @@ Object.defineProperty(Element.prototype, "hidden", {
 Object.defineProperty(Element.prototype, "disabled", {
     get: function() { return this._disabled; },
     set: function(v) {
-        // pulp DIVERGE→PASS sweep — wire the actual native widget
-        // disabled-state through `setEnabled` so the View::enabled_
-        // flag flips. Before, only the stylesheet flag changed
-        // (`:disabled` selectors picked it up) but the underlying
-        // widget kept handling pointer events / dispatching change.
+        // Wire the actual native widget disabled-state through `setEnabled`
+        // so the View::enabled_
+        // flag flips. The stylesheet flag alone lets `:disabled` selectors
+        // match but does not stop the underlying widget from handling pointer
+        // events / dispatching change.
         this._disabled = !!v;
         if (this._nativeCreated && typeof setEnabled === "function") {
             setEnabled(this._id, this._disabled ? 0 : 1);
@@ -782,18 +773,17 @@ Object.defineProperty(Element.prototype, "disabled", {
 });
 
 // ── <dialog> showModal / close / show ─────────────────────────────────────
-// pulp DIVERGE→PASS sweep — `<dialog>` previously created a hidden
-// Panel and exposed no JS surface for opening / closing. The DOM
+// `<dialog>` creates a hidden Panel and exposes the JS surface for opening /
+// closing. The DOM
 // `HTMLDialogElement` interface defines:
 //   show()      — non-modal open (no backdrop, no input trap)
 //   showModal() — modal open (backdrop, input trap, focus pull)
 //   close()     — close the dialog and dispatch 'close'
 // Pulp doesn't have a native modal-input-trap layer yet, so showModal
 // degrades to show() + the open attribute. The `::backdrop` pseudo-
-// element remains a roadmap item (separate paint-side concern). The
-// behavioral gap was that `dialog.show()` was a TypeError; this slice
-// exposes the methods so `addEventListener('close', ...)` consumers
-// can drive the open state and round-trip the open attribute.
+// element remains a separate paint-side concern. The methods let consumers
+// using `addEventListener('close', ...)` drive the open state and round-trip the
+// open attribute.
 
 Element.prototype.show = function() {
     if (this.tagName !== "DIALOG") return;
@@ -845,9 +835,8 @@ Object.defineProperty(Element.prototype, "open", {
             this._detailsOpen = willOpen;
             if (willOpen) this.setAttribute("open", "");
             else this.removeAttribute("open");
-            // Toggle visibility of children (other than the first
-            // <summary>, which always shows). Roadmap: when <summary>
-            // semantics land, hide children[1..] under closed details.
+            // Child visibility toggling is not yet wired. For now, re-run
+            // stylesheet matching so `details[open]` selectors update.
             this._reapplyStylesheets();
             var tevt = (typeof Event === "function")
                 ? new Event("toggle", { bubbles: false, cancelable: false })
@@ -866,8 +855,8 @@ Object.defineProperty(Element.prototype, "returnValue", {
 });
 
 // ── <label> for-attribute focus routing ─────────────────────────────────
-// pulp DIVERGE→PASS sweep — clicking a <label> with a `for` attribute
-// transfers focus / activation to the labeled element. We don't yet
+// Clicking a <label> with a `for` attribute transfers focus / activation to
+// the labeled element. We don't yet
 // have a unified focus layer but the bridge has setFocus() — wire the
 // click handler so the harness gap is closed at the JS layer.
 
@@ -1009,16 +998,16 @@ Element.prototype.setAttribute = function(name, value) {
     else if (name === "class") this.className = value;
     else if (name.indexOf("data-") === 0) {
         this._dataset[_camelCase(name.slice(5))] = value;
-        // pulp #1148 (slice b) — `data-overlay="true"` is the explicit
-        // author hint for the auto-overlay heuristic. Re-evaluate now
+        // `data-overlay="true"` is the explicit author hint for the
+        // auto-overlay heuristic. Re-evaluate now
         // so the bridge sees the claim/release immediately rather than
         // waiting for an unrelated style mutation to drive it.
         if (name === "data-overlay" && this.style && this.style._reevaluateOverlay) {
             this.style._reevaluateOverlay();
         }
     }
-    // pulp #2163 — font v2 Slice 2.5. The split element prelude is the
-    // runtime path for document.createElement(); keep it in lock-step
+    // The split element prelude is the runtime path for
+    // document.createElement(); keep it in lockstep
     // with the legacy web-compat.js bundle so HTML `dir` attributes
     // reach the same View::WritingDirection slot as CSS `direction`.
     else if (name === "dir" && typeof setDirection !== "undefined") {
@@ -1027,8 +1016,8 @@ Element.prototype.setAttribute = function(name, value) {
             setDirection(this._id, dv);
         }
     }
-    // pulp #1147 — HTML `width`/`height` attributes on layout-leaf
-    // elements (<svg>, <img>, <canvas>, <video>) are presentational
+    // HTML `width`/`height` attributes on layout-leaf elements
+    // (<svg>, <img>, <canvas>, <video>) are presentational
     // dimensions per the HTML spec. JSX/React encodes inline SVG sizes
     // this way (`<svg width="28" height="20">`), so we MUST translate
     // these to flex preferred sizing or the element collapses to 0
@@ -1047,8 +1036,8 @@ Element.prototype.setAttribute = function(name, value) {
             __replayMediaAttributes__(this);
         }
     }
-    // pulp DIVERGE→PASS sweep — `<label for="x">` click routing. The
-    // appendChild fast path goes through C++ `__domAppend` and skips
+    // `<label for="x">` click routing. The appendChild fast path goes through
+    // C++ `__domAppend` and skips
     // JS-side `_ensureNative`, so the install hook in _ensureNative
     // alone misses the React-style commit path. Install when the
     // `for` attribute lands on a LABEL element — idempotent because
@@ -1056,26 +1045,26 @@ Element.prototype.setAttribute = function(name, value) {
     else if (name === "for" && this.tagName === "LABEL") {
         this._installLabelForRouting();
     }
-    // pulp #1658 — `<img src="...">` routes to setImageSource on the
-    // ImageView native widget. ImageView::paint then decodes via
+    // `<img src="...">` routes to setImageSource on the ImageView native
+    // widget. ImageView::paint then decodes via
     // SkData::MakeFromFileName + SkImages::DeferredFromEncodedData
     // (Skia draw_image_from_file path). Idempotent: also replayed by
     // __replayMediaAttributes__ in the appendChild-after-setAttribute
-    // path. Only file:// and bare-path forms are wired today; data:
-    // URLs and http(s) fetch are deferred follow-ups (see #1658).
+    // path. Only file:// and bare-path forms are wired today; data: URLs and
+    // http(s) fetch remain unsupported.
     else if (name === "src" && this.tagName === "IMG") {
         if (this._nativeCreated && typeof setImageSource === "function") {
             setImageSource(this._id, String(value));
         }
     }
-    // pulp Wave 3 html.2 / #1476 — ARIA accessibility setters.
-    // `aria-label` / `role` round-trip through native View::access_label_
+    // ARIA accessibility setters. `aria-label` / `role` round-trip through
+    // native View::access_label_
     // and View::access_role_ so the macOS NSAccessibility bridge (and
     // the cross-platform AccessibilityTree snapshot) can read them.
     // Other ARIA attributes still store via _attributes for getAttribute
-    // round-tripping; only the two with a Pulp storage slot are
-    // forwarded today.  The bridge is a no-op when the widget hasn't
-    // been created yet — a follow-up appendChild path replays the
+    // round-tripping; only label/role and the state attributes below have
+    // native Pulp storage slots. The bridge is a no-op when the widget hasn't been
+    // created yet; the appendChild path replays the
     // attribute through the same code path.
     else if (name === "aria-label") {
         if (this._nativeCreated && typeof setAccessibilityLabel === "function") {
@@ -1087,20 +1076,19 @@ Element.prototype.setAttribute = function(name, value) {
             setAccessibilityRole(this._id, String(value));
         }
     }
-    // pulp #1737 — ARIA state attributes (aria-pressed/checked/disabled/
-    // hidden) route through setAccessibilityState. Same pre-mount
+    // ARIA state attributes (aria-pressed/checked/disabled/hidden) route
+    // through setAccessibilityState. Same pre-mount
     // capture pattern as aria-label / role above; __replayAriaAttributes__
     // flushes from _attributes when _nativeCreated flips. Other ARIA
-    // attributes still store via _attributes for getAttribute round-trip
-    // only — only the four with a Pulp View slot are forwarded.
+    // attributes still store via _attributes for getAttribute round-trip only.
     else if (name === "aria-pressed" || name === "aria-checked" ||
              name === "aria-disabled" || name === "aria-hidden") {
         if (this._nativeCreated && typeof setAccessibilityState === "function") {
             setAccessibilityState(this._id, name.slice(5), String(value));
         }
     }
-    // pulp #1899 — `<path d=... stroke=... stroke-width=... fill=...>`
-    // routes through the SvgPathWidget bridge. Idempotent: also replayed
+    // `<path d=... stroke=... stroke-width=... fill=...>` routes through the
+    // SvgPathWidget bridge. Idempotent: also replayed
     // by __replaySvgPathAttributes__ in the appendChild-after-setAttribute
     // path. We forward immediately if the widget already exists, and let
     // the replay flush from _attributes for the pre-mount case.
@@ -1117,7 +1105,7 @@ Element.prototype.setAttribute = function(name, value) {
                 setSvgFill(this._id, String(value));
             } else if ((name === "fill-rule" || name === "fillRule") &&
                        typeof setSvgFillRule === "function") {
-                // pulp #3656 — live winding-rule update on an existing path.
+                // Live winding-rule update on an existing path.
                 setSvgFillRule(this._id, String(value));
             } else if ((name === "stroke-width" || name === "strokeWidth") &&
                        typeof setSvgStrokeWidth === "function") {
@@ -1164,17 +1152,16 @@ Element.prototype.removeAttribute = function(name) {
     delete this._attributes[name];
     if (name.indexOf("data-") === 0) {
         delete this._dataset[_camelCase(name.slice(5))];
-        // pulp #1148 (slice b) — clearing `data-overlay` may release
-        // the auto-claim if no CSS shape still satisfies the heuristic.
+        // Clearing `data-overlay` may release the auto-claim if no CSS shape
+        // still satisfies the heuristic.
         if (name === "data-overlay" && was !== undefined &&
             this.style && this.style._reevaluateOverlay) {
             this.style._reevaluateOverlay();
         }
     }
-    // pulp #1641 followup — reset View::access_role_ / access_label_
-    // when role / aria-label are removed. Without this the slot stayed
-    // populated even after the author detached the attribute (a user-
-    // observable bug for assistive tech that reads stale state).
+    // Reset View::access_role_ / access_label_ when role / aria-label are
+    // removed, otherwise assistive tech can read stale native state after the
+    // author detaches the attribute.
     else if (name === "role" && this._nativeCreated &&
              typeof setAccessibilityRole === "function") {
         setAccessibilityRole(this._id, "");
@@ -1183,7 +1170,7 @@ Element.prototype.removeAttribute = function(name) {
              typeof setAccessibilityLabel === "function") {
         setAccessibilityLabel(this._id, "");
     }
-    // pulp #1737 — same reset semantics for ARIA state attributes.
+    // Same reset semantics for ARIA state attributes.
     // Empty string clears the View::access_*_ slot.
     else if ((name === "aria-pressed" || name === "aria-checked" ||
               name === "aria-disabled" || name === "aria-hidden") &&
@@ -1250,10 +1237,8 @@ Element.prototype.getRootNode = function() {
 // element OR a descendant. Walks `_parentElement` upward from `other`
 // until we hit `this`, the root, or a cycle. Required for click-outside
 // detection (the `ref.current.contains(e.target)` pattern in React
-// portals / ContextMenus). Pre-#1859 audit of Spectr's working bundle
-// found this missing from the modular Element shim, would have thrown
-// `TypeError: ref.current.contains is not a function` on
-// ContextMenu dismiss after #1859 lands the DOM-shim path.
+// portals / ContextMenus). Without this, the modular Element shim would throw
+// `TypeError: ref.current.contains is not a function` on ContextMenu dismiss.
 //
 // Treats non-Element arguments (text nodes, null, etc.) as `false` —
 // the contract is loose because most consumers feed e.target which is
@@ -1296,13 +1281,13 @@ function _reparentNative(child, parentId) {
                tag === "h4" || tag === "h5" || tag === "h6") {
         createLabel(id, child._textContent || "", parentId);
     } else if (tag === "svg") {
-        // pulp #1147 — same reasoning as _ensureNative: keep the
-        // SVG node as a layout container so child elements still
+        // Same reasoning as _ensureNative: keep the SVG node as a layout
+        // container so child elements still
         // attach. The width/height attributes are replayed by the
         // shared helper at the end of this function.
         createCol(id, parentId);
     } else if (tag === "path") {
-        // pulp #1899 — `<path>` reparent path mirrors _ensureNative.
+        // `<path>` reparent path mirrors _ensureNative.
         // SvgPath attribute replay runs at the end of this function.
         if (typeof createSvgPath === "function") {
             createSvgPath(id, parentId);
@@ -1313,8 +1298,8 @@ function _reparentNative(child, parentId) {
         createToggleButton(id, parentId);
     } else if (tag === "input") {
         var t = child._type || "text";
-        // pulp #1899 — horizontal-by-default range slider. See
-        // __resolveRangeOrientation__ in _ensureNative.
+        // Horizontal-by-default range slider. See __resolveRangeOrientation__
+        // in _ensureNative.
         if (t === "range") createFader(id, __resolveRangeOrientation__(child), parentId);
         else if (t === "checkbox") createCheckbox(id, parentId);
         else createTextEditor(id, parentId);
@@ -1332,8 +1317,8 @@ function _reparentNative(child, parentId) {
         setFlex(id, "height", 1);
         setBackground(id, "#666666");
     } else if (tag === "img") {
-        // pulp #1658 — see initial-mount img branch above. _reparentNative
-        // here covers the late-mount case (e.g. detached DOM that's later
+        // See initial-mount img branch above. _reparentNative here covers the
+        // late-mount case (e.g. detached DOM that's later
         // appended); same createImage routing so the bridge fn matches
         // the harness oracle's `expected_bridge_calls: ["createImage"]`.
         createImage(id, parentId);
@@ -1346,17 +1331,17 @@ function _reparentNative(child, parentId) {
 
     child._nativeCreated = true;
 
-    // pulp #1147 — replay presentational attributes after the native
-    // node is recreated so the new flex sizing matches the original.
+    // Replay presentational attributes after the native node is recreated so
+    // the new flex sizing matches the original.
     if (typeof __replayMediaAttributes__ === "function") {
         __replayMediaAttributes__(child);
     }
-    // pulp Wave 3 html.2 / #1476 — replay ARIA attributes after reparent.
+    // Replay ARIA attributes after reparent.
     if (typeof __replayAriaAttributes__ === "function") {
         __replayAriaAttributes__(child);
     }
-    // pulp #1899 — replay SvgPath attributes after reparent so the
-    // SvgPathWidget bridge sees d / stroke / stroke-width / fill /
+    // Replay SvgPath attributes after reparent so the SvgPathWidget bridge
+    // sees d / stroke / stroke-width / fill /
     // viewBox even if the path was constructed before mount.
     if (typeof __replaySvgPathAttributes__ === "function") {
         __replaySvgPathAttributes__(child);
