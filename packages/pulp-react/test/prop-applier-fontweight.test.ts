@@ -1,13 +1,13 @@
-// pulp #1434 batch 3 — verify the @pulp/react prop-applier translates
-// CSS / RN fontWeight keyword forms (`'normal'`, `'bold'`, `'lighter'`,
-// `'bolder'`) to numeric weights before reaching the bridge.
+// Verify the @pulp/react prop-applier translates CSS / RN fontWeight
+// keyword forms (`'normal'`, `'bold'`, `'lighter'`, `'bolder'`) to
+// numeric weights before reaching the bridge.
 //
-// Pre-fix: `Number('bold')` returned NaN, the bridge then defaulted to
-// 400 — silently mapping bold to normal. This drift is recorded in
-// compat.json (`css/fontWeight`) and mirrored on the JS CSS shim
-// (`web-compat-style-decl.js`). Both paths must agree so design-tool
-// exports (Figma, Stitch, v0, Claude Design) and React-Native style
-// objects produce the same Label::font_weight() result.
+// Raw Number(...) coercion would turn keyword weights into NaN before
+// the bridge's defensive default maps them back to 400. This translation
+// must stay aligned with compat.json (`css/fontWeight`) and the JS CSS
+// shim (`web-compat-style-decl.js`) so design-tool exports (Figma,
+// Stitch, v0, Claude Design) and React-Native style objects produce the
+// same Label::font_weight() result.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { applyChangedProps } from '../src/prop-applier.js';
@@ -39,7 +39,7 @@ function fontWeightCall(): { fn: string; args: unknown[] } | undefined {
     return bridge.calls.find((c) => c.fn === 'setFontWeight');
 }
 
-describe("prop-applier fontWeight keyword translation (pulp #1434 batch 3)", () => {
+describe("prop-applier fontWeight keyword translation", () => {
     it("'normal' keyword maps to 400", () => {
         applyChangedProps(makeInstance(), {}, { fontWeight: 'normal' });
         expect(fontWeightCall()?.args).toEqual(['k', 400]);
