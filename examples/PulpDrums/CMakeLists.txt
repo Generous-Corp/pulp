@@ -1,5 +1,5 @@
 # PulpDrums — generative drum sequencer MIDI effect
-# Validates: MIDI output, pattern sequencing, Phase 6 GPU UI
+# Validates: MIDI output, pattern sequencing, and plugin packaging
 
 if(PULP_BUILD_TESTS)
     add_executable(pulp-drums-test test_pulp_drums.cpp)

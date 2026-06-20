@@ -2,7 +2,7 @@
 
 // PulpDrums — generative drum sequencer MIDI effect
 // Validates: MIDI output, pattern sequencing, parameter system
-// Phase 6 validation example from the roadmap
+// Demonstrates the MIDI-effect path with scheduled note output.
 
 #include <pulp/format/processor.hpp>
 #include <array>
