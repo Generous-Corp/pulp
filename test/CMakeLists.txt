@@ -4253,11 +4253,10 @@ if(PULP_HAS_SKIA)
 endif()
 catch_discover_tests(pulp-test-canvas-cg-gradients)
 
-# CSS filter chain coverage (P5-2 follow-up — extracted from
-# test_canvas.cpp). pulp #1434 Phase A2-4: Skia-only pixel readback
-# (contrast / invert / opacity ordering with drop-shadow, set_filter
-# drop-shadow parser) + portable filter-chain matrix math
-# (contrast bias, invert maps, identity, opacity alpha scaling).
+# CSS filter chain coverage: Skia-only pixel readback (contrast /
+# invert / opacity ordering with drop-shadow, set_filter drop-shadow
+# parser) plus portable filter-chain matrix math (contrast bias,
+# invert maps, identity, opacity alpha scaling).
 add_executable(pulp-test-canvas-filter-chain test_canvas_filter_chain.cpp)
 target_link_libraries(pulp-test-canvas-filter-chain PRIVATE pulp::canvas Catch2::Catch2WithMain)
 if(PULP_HAS_SKIA)
