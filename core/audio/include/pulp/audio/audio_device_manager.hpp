@@ -4,7 +4,8 @@
 /// AudioDeviceManager — persistence + MIDI hub + lifecycle / recovery.
 ///
 /// Backend-agnostic responsibilities:
-///   - Persistence + MIDI hub + smoothed CPU-load surface.
+///   - Persistence + MIDI hub + smoothed CPU-load surface, without
+///     platform listener ownership.
 ///   - Live device hotplug detection (the manager observes a
 ///     `pulp::audio::AudioSystem`'s device-change callback and
 ///     republishes a structured `DeviceChangeEvent` to its own

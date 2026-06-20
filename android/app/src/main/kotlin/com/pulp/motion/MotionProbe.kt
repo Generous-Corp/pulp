@@ -75,9 +75,9 @@ class PulpMotionGeometryProbe internal constructor(
  *    provenance (set on the C bridge).
  *  - Installs a `ViewTreeObserver.OnPreDrawListener` that computes the
  *    view's window-space rect via `getLocationInWindow()` and forwards
- *    every change to `PulpMotion.updateGeometry`. PreDraw catches
- *    intra-frame translation / scroll that `OnGlobalLayoutListener`
- *    would miss.
+ *    every change to `PulpMotion.updateGeometry`. PreDraw samples after
+ *    layout but before rendering, so intra-frame translation / scroll
+ *    changes are visible even when layout bounds do not change.
  *  - Publishes each [MotionMetric.Value] declared in [build] once at
  *    attach time. Live scalars should re-publish from your own
  *    state — the trace itself just owns geometry sampling.

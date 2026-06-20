@@ -42,7 +42,8 @@ void apply_gain_ramp(BufferView<float> buffer, float start_gain, float end_gain)
 
 void clip(std::span<float> samples, float lo, float hi) {
     if (samples.empty()) return;
-    // `std::clamp` propagates NaN through the ordered comparisons, so
+    // `std::clamp` propagates NaN through the ordered comparisons. Highway's
+    // clamp path and simd_clamp's scalar tail both inherit that behavior, so
     // delegating directly would leak NaN into downstream audio.
     // Sanitize NaN → `lo` ourselves first, then delegate the clamp.
     for (auto& s : samples) {

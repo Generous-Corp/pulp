@@ -12,9 +12,6 @@
 #include <mach/mach.h>
 #include <mach/mach_time.h>
 #include <mach/thread_policy.h>
-#elif defined(__linux__)
-#include <pthread.h>
-#include <sched.h>
 #endif
 
 namespace pulp::audio {
@@ -134,7 +131,7 @@ public:
         return true;
 #elif defined(_WIN32)
         // SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
-        return true; // Windows priority boost is not implemented here.
+        return true; // stub
 #else
         return false;
 #endif
