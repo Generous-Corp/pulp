@@ -12,8 +12,8 @@
 // instantiate a Context on its own, so the Android app installs a
 // host-provided bridge at startup. When no bridge is installed,
 // every call fails closed (returns false / nullopt). This is the
-// #300 P1 fix replacing the old TODO stubs that looked like silent
-// success to callers.
+// intentional behavior so Android callers never mistake a missing
+// Kotlin bridge for successful clipboard access.
 
 namespace pulp::platform {
 
