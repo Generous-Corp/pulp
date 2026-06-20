@@ -1,13 +1,12 @@
-// pulp #1434 (Triage #12) — verify the @pulp/react prop-applier
-// dispatches `display: 'flex' | 'none'` to the right setVisible call.
+// Verify the @pulp/react prop-applier dispatches
+// `display: 'flex' | 'none'` to the right setVisible call.
 //
 // RN exports + Figma / v0.dev / Claude Design HTML routinely emit
 // `style={{ display: 'flex' }}` (the implicit default in pulp, but
 // the prop-applier shouldn't drop it as unknown) or `display: 'none'`
-// to hide a subtree. The yoga / CSS-shim side was wired for the
-// el.style proxy in #1422; this test guards the parallel RN-flavored
-// JSX path so RN consumers don't have to round-trip through el.style
-// (which costs a bridge call + DOM-lite proxy walk).
+// to hide a subtree. This test guards the RN-flavored JSX path so RN
+// consumers don't have to round-trip through el.style, which costs a
+// bridge call plus a DOM-lite proxy walk.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { applyChangedProps } from '../src/prop-applier.js';
@@ -39,7 +38,7 @@ function visibleCalls(b: MockBridge) {
     return b.calls.filter((c) => c.fn === 'setVisible');
 }
 
-describe('prop-applier display: flex / none (pulp #1434 Triage #12)', () => {
+describe('prop-applier display: flex / none', () => {
     it("display: 'none' calls setVisible(id, false)", () => {
         applyChangedProps(makeInstance(), {}, { display: 'none' });
         const calls = visibleCalls(bridge);
@@ -81,12 +80,11 @@ describe('prop-applier display: flex / none (pulp #1434 Triage #12)', () => {
     });
 });
 
-// pulp #1894 — `display: 'flex'` without an explicit `flexDirection`
-// must default to row (CSS spec), not column (Yoga / RN default).
-// Without this fallback, every `style={{ display: 'flex' }}` JSX
-// container imported via the flat-prop path collapses to a vertical
-// stack — first seen in Spectr's editor toolbar post-#1859.
-describe('prop-applier display: flex default direction (pulp #1894)', () => {
+// `display: 'flex'` without an explicit `flexDirection` must default
+// to row (CSS spec), not column (Yoga / RN default). Without this
+// fallback, every `style={{ display: 'flex' }}` JSX container imported
+// via the flat-prop path collapses to a vertical stack.
+describe('prop-applier display: flex default direction', () => {
     function flexDirectionCalls(b: MockBridge) {
         return b.calls.filter(
             (c) => c.fn === 'setFlex' && c.args[1] === 'direction',
@@ -168,11 +166,11 @@ describe('prop-applier display: flex default direction (pulp #1894)', () => {
         expect(flexDirectionCalls(bridge)).toHaveLength(0);
     });
 
-    // pulp #1898 (Codex review P2) — the prop-applier also accepts
-    // `direction` as a flex-direction alias (see the `case 'direction'`
-    // block in src/prop-applier.ts). The default-row suppression must
-    // honor that alias too, otherwise an explicit `direction: 'column'`
-    // gets clobbered by the default-row emit from display:flex.
+    // The prop-applier also accepts `direction` as a flex-direction
+    // alias (see the `case 'direction'` block in src/prop-applier.ts).
+    // The default-row suppression must honor that alias too, otherwise
+    // an explicit `direction: 'column'` gets clobbered by the default-row
+    // emit from display:flex.
     it("explicit direction: 'column' alias suppresses the default", () => {
         applyChangedProps(makeInstance(), {}, {
             display: 'flex',
