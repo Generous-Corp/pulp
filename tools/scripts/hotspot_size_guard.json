@@ -147,7 +147,7 @@
     },
     {
       "path": "inspect/include/pulp/inspect/inspector_overlay.hpp",
-      "max_loc": 1510,
+      "max_loc": 1491,
       "note": "Inspector overlay public header hotspot; reduce private state deliberately"
     },
     {
