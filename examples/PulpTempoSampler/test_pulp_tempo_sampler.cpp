@@ -1,4 +1,5 @@
-// PulpTempoSampler — headless integration tests (Phase 4.11).
+// PulpTempoSampler — headless integration tests for loop analysis, slicing,
+// tempo matching, and editor/audio interaction.
 //
 // Exercises the full instrument pipeline without a host: load loop -> detect
 // BPM + slices -> background OfflineStretch render to host tempo (generation-
