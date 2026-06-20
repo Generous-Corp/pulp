@@ -31,7 +31,7 @@ void RunningStatusParser::emit_short(uint8_t status, uint8_t d1, uint8_t d2) {
 
 void RunningStatusParser::reset() {
     running_status_ = 0;
-    current_system_common_ = 0;   // #202 P2: reset must drop this too
+    current_system_common_ = 0;   // reset also clears one-shot system-common state
     data_count_ = 0;
     data_expected_ = 0;
     in_sysex_ = false;
@@ -117,7 +117,7 @@ void RunningStatusParser::feed(const uint8_t* data, std::size_t size) {
                     // immediately and do NOT retain it as current_system_
                     // common. Otherwise a stray trailing data byte would
                     // pass the guard below and trigger a phantom extra
-                    // emission under the stale status. Fix per #202 P1.
+                    // emission under the stale status.
                     emit_short(b, 0, 0);
                     current_system_common_ = 0;
                 } else {
