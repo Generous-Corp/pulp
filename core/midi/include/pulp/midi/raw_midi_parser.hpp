@@ -23,7 +23,7 @@
 // F0 stream without sending F7 — common on disconnect or firmware
 // glitches. We drop the partial buffer and parse that status byte
 // as the start of a new message, rather than silently consuming the
-// next real message as sysex payload (#406 Codex P2).
+// next real message as SysEx payload.
 //
 // RT-safety contract:
 //
