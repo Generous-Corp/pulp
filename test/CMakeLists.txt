@@ -1166,7 +1166,7 @@ pulp_add_test_suite(pulp-test-osc-channel LIBRARIES pulp::osc)
 
 pulp_add_test_suite(pulp-test-json-rpc LIBRARIES pulp::runtime)
 
-# Validation harness tests (Phase 2)
+# Validation harness tests
 pulp_add_test_suite(pulp-test-validation-harness LIBRARIES pulp::format)
 
 # Plugin-contributed settings sections (MM-PR5) — SettingsPanel lives in pulp::standalone
