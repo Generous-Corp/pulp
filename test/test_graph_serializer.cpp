@@ -880,8 +880,8 @@ TEST_CASE("GraphSerializer round-trips registered custom node identity",
 }
 
 namespace {
-// A stateful custom type (Phase 5): instance holds a `level` serialized as 4
-// little-endian bytes via save/load_state.
+// A stateful custom type: instance holds a `level` serialized as 4 little-endian
+// bytes via save/load_state.
 struct SerLevel {
     float level = 1.0f;
 };
