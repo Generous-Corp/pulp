@@ -1,18 +1,14 @@
-// Test for pulp #1416 — @pulp/react SvgRect + SvgLine intrinsics.
+// Tests the @pulp/react SvgRect and SvgLine intrinsic bridge contracts.
 //
-// The C++ side ships SvgRectWidget + SvgLineWidget + bridge handlers
-// (createSvgRect / setSvgRect / createSvgLine / setSvgLine, plus the
-// shared setSvgFill / setSvgStroke / setSvgStrokeWidth setters made
-// polymorphic across all three SVG-primitive widget types). This wires
-// the React-side intrinsics so JSX
+// The native side exposes SvgRectWidget and SvgLineWidget plus the bridge
+// handlers used here: createSvgRect, setSvgRect, createSvgLine, setSvgLine,
+// setSvgFill, setSvgStroke, and setSvgStrokeWidth. React JSX such as
 //   <SvgRect x={10} y={20} width={50} height={30} fill="#f00" />
 //   <SvgLine x1={0} y1={0} x2={100} y2={100} stroke="#0f0" />
 // reach the bridge.
 //
-// Closes Spectr [G] (preset manager band-shape thumbnails currently
-// blank — MiniPreview renders <svg><rect> per band + <line>, dom-adapter
-// maps to <View>, and without these intrinsics the geometry props are
-// dropped silently).
+// SVG primitive intrinsics must preserve geometry props so design imports and
+// native previews can render rect and line shapes instead of dropping them.
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createMockBridge, type MockBridge } from '../src/bridge.js';
@@ -24,7 +20,7 @@ function instance(id: string, type: string, props: Record<string, unknown>): Pul
     return { id, type, props } as PulpInstance;
 }
 
-describe('@pulp/react SvgRect intrinsic (pulp #1416)', () => {
+describe('@pulp/react SvgRect intrinsic', () => {
     let bridge: MockBridge;
     beforeEach(() => {
         bridge = createMockBridge();
@@ -141,7 +137,7 @@ describe('@pulp/react SvgRect intrinsic (pulp #1416)', () => {
     });
 });
 
-describe('@pulp/react SvgLine intrinsic (pulp #1416)', () => {
+describe('@pulp/react SvgLine intrinsic', () => {
     let bridge: MockBridge;
     beforeEach(() => {
         bridge = createMockBridge();
@@ -227,7 +223,7 @@ describe('@pulp/react SvgLine intrinsic (pulp #1416)', () => {
     });
 });
 
-describe('@pulp/react SvgRect/SvgLine host-config attachment (pulp #1416)', () => {
+describe('@pulp/react SvgRect/SvgLine host-config attachment', () => {
     let bridge: MockBridge;
     beforeEach(() => {
         bridge = createMockBridge();
