@@ -126,7 +126,8 @@ function applyEventHandler(id: string, key: string, value: unknown): void {
     }
     // Also arm the pointer dispatch path for mouse events. Do not do
     // this for onClick: that is the W3C click-on-release semantic and
-    // routes through on_click.
+    // routes through on_click; prop-applier-direction.test.ts pins that
+    // onClick alone never calls registerPointer.
     // Imported JSX bundles (Chainer's knobs/faders/XY pad) install
     // onMouseDown / onMouseMove / onMouseUp handlers that need to fire on
     // press, not release. Without this pre-fix, hit_test returns the

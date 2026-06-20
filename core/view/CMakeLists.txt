@@ -1,12 +1,32 @@
+# PULP_ENABLE_JS — when OFF, pulp::view is NATIVE-ONLY: the JS scripting +
+# web-compat layer (pulp::view-script — QuickJS/JSC/V8 engine + the widget
+# bridge + the embedded JS preludes) is neither built nor linked, so a standalone
+# built on pulp::view contains zero JS-engine symbols and ships a smaller binary.
+# The faithful-vector design-import lane (native Skia draw_svg + native overlays)
+# and every native widget still work — view-core is self-contained and carries no
+# JS dependency (view-script depends on view-core, not the reverse). Default ON to
+# preserve the JS-scripted GPU UI path.
+option(PULP_ENABLE_JS "Build the JS scripting + web-compat layer (pulp::view-script)" ON)
+
 add_library(pulp-view-core)
 add_library(pulp::view-core ALIAS pulp-view-core)
+# Consumers (and view-core's own headers) gate any optional JS use on this.
+target_compile_definitions(pulp-view-core PUBLIC PULP_ENABLE_JS=$<BOOL:${PULP_ENABLE_JS}>)
 
 add_library(pulp-view-script)
 add_library(pulp::view-script ALIAS pulp-view-script)
 
 add_library(pulp-view src/placeholder.cpp)
 add_library(pulp::view ALIAS pulp-view)
-target_link_libraries(pulp-view PUBLIC pulp::view-script)
+if(PULP_ENABLE_JS)
+    target_link_libraries(pulp-view PUBLIC pulp::view-script)
+else()
+    # Native-only: link the JS-free core directly and keep view-script defined
+    # (so its still-evaluated config blocks below never dangle) but out of the
+    # default build and every binary, so no JS engine is compiled or shipped.
+    target_link_libraries(pulp-view PUBLIC pulp::view-core)
+    set_target_properties(pulp-view-script PROPERTIES EXCLUDE_FROM_ALL TRUE)
+endif()
 
 find_package(Python3 COMPONENTS Interpreter QUIET)
 
