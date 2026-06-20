@@ -1,11 +1,8 @@
-// pulp #1508 Codex audit (P1 #2) — animation* props must dispatch to
-// the animation API, not to the transition equivalents. The original
-// prop-applier wired `animationDuration` to `setTransitionDuration`,
-// which mutated *transition* timing on the same View. The fix routes
-// every animation* longhand through the legacy 2-arg `setAnimation`
-// control-token form — which the C++ bridge stages on the View's
-// pending-animation slot until the `name` token arrives and resolves
-// against the keyframes registry.
+// animation* props must dispatch to the animation API, not to the
+// transition equivalents. Every animation* longhand routes through the
+// legacy 2-arg `setAnimation` control-token form, which the native bridge
+// stages on the View's pending-animation slot until the `name` token arrives
+// and resolves against the keyframes registry.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { applyChangedProps } from '../src/prop-applier.js';
@@ -37,7 +34,7 @@ function callsOf(b: MockBridge, fn: string) {
     return b.calls.filter((c) => c.fn === fn);
 }
 
-describe('animation* props dispatch to setAnimation (pulp #1508 P1)', () => {
+describe('animation* props dispatch to setAnimation', () => {
     it('animationDuration goes to setAnimation, NOT setTransitionDuration', () => {
         applyChangedProps(makeInstance(), {}, { animationDuration: '250ms' });
         // Wrong dispatch — must NOT happen post-fix.
@@ -105,11 +102,8 @@ describe('animation* props dispatch to setAnimation (pulp #1508 P1)', () => {
         expect(anim[0].args).toEqual(['k', 'fade-in', 1.0, 1, 'normal']);
     });
 
-    // pulp #1434 Wave 3 css.3 — animationPlayState routing. The case
-    // was previously missing from prop-applier.ts (only the JS shim
-    // path forwarded the keyword), so React-side `animationPlayState`
-    // changes never reached the bridge at all. Now routed through the
-    // legacy 2-arg setAnimation control-token form.
+    // animationPlayState uses the same legacy 2-arg setAnimation
+    // control-token form as the other animation longhands.
     it('animationPlayState routes to setAnimation/play_state (paused)', () => {
         applyChangedProps(makeInstance(), {}, { animationPlayState: 'paused' });
         const anim = callsOf(bridge, 'setAnimation');
