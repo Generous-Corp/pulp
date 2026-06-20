@@ -1,4 +1,4 @@
-// Regression test for pulp #1292 — the React-dispatcher-null crash.
+// Regression test for the React-dispatcher-null crash.
 //
 // Root cause: when @pulp/react was published with React (and friends)
 // inlined inside dist/index.mjs, downstream consumers (esbuild bundling
@@ -31,7 +31,7 @@ import { resolve } from 'node:path';
 
 const distMjs = resolve(__dirname, '..', 'dist', 'index.mjs');
 
-describe('@pulp/react build output (pulp #1292)', () => {
+describe('@pulp/react build output', () => {
   it('dist/index.mjs exists and is small (no React inlined)', () => {
     const st = statSync(distMjs);
     // After externalizing react / react-reconciler / scheduler the bundle
@@ -48,7 +48,7 @@ describe('@pulp/react build output (pulp #1292)', () => {
     // No copy of react.production.min.js shipped inside the bundle.
     expect(src).not.toMatch(/react\.production\.min\.js/);
     // No ReactCurrentDispatcher object literal — that's the React
-    // module-internal singleton that pulp #1292 was creating two of.
+    // module-internal singleton that breaks when bundled twice.
     expect(src).not.toMatch(/ReactCurrentDispatcher\s*[:=]\s*\{/);
   });
 

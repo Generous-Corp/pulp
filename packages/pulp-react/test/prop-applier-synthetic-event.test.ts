@@ -1,8 +1,8 @@
-// Test for pulp #1352 — prop-applier must wrap JSX event handlers in a
-// synthetic-event factory so consumers see a React-DOM-shaped event
-// object (with `currentTarget`, `target`, `preventDefault`, etc.) and
-// event-type-specific fields (`clientX/Y`, `e.target.value`, `key`)
-// instead of the bridge's raw positional args.
+// Prop-applier must wrap JSX event handlers in a synthetic-event factory so
+// consumers see a React-DOM-shaped event object (with `currentTarget`,
+// `target`, `preventDefault`, etc.) and event-type-specific fields
+// (`clientX/Y`, `e.target.value`, `key`) instead of the bridge's raw
+// positional args.
 //
 // The bridge dispatches `__dispatch__('btn1', 'mouseenter', 0)` for
 // hover; idiomatic JSX handlers (`e => e.currentTarget.style.background = ...`)
@@ -30,7 +30,7 @@ function dispatch(bridge: MockBridge, id: string, eventName: string, ...rawArgs:
     return wrapper(...rawArgs);
 }
 
-describe('@pulp/react prop-applier — synthetic event factory (pulp #1352)', () => {
+describe('@pulp/react prop-applier — synthetic event factory', () => {
     let bridge: MockBridge;
     beforeEach(() => {
         bridge = createMockBridge();

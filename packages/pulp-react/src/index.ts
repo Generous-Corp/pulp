@@ -101,7 +101,7 @@ export type {
     PulpContainer,
 } from './types.js';
 
-// ── Ink & Signal design-system catalog (Phase 8c) ──────────────────
+// ── Ink & Signal design-system catalog ─────────────────────────────
 export {
     inkSignalCatalog, findComponent, componentsByCategory, FIGMA_FILE_KEY,
 } from './design-system.js';
@@ -111,7 +111,7 @@ export type { DesignComponent, DesignCategory } from './design-system.js';
 export { createMockBridge } from './bridge.js';
 export type { MockBridge, MockBridgeCall } from './bridge.js';
 
-// ── Keyboard shortcuts (pulp #135 Phase B) ─────────────────────────
+// ── Keyboard shortcuts ─────────────────────────────────────────────
 export {
     useShortcut,
     registerShortcut,

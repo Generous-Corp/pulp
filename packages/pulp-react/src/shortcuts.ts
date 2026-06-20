@@ -1,12 +1,11 @@
-// @pulp/react keyboard shortcut runtime injection (pulp #135 Phase B).
+// @pulp/react keyboard shortcut runtime injection.
 //
 // Counterpart to the pulp-import-design CLI's static codegen path
-// (pulp #2128). That path emits `registerShortcut(key, mod, cbName)`
-// + a separate top-level callback function into the generated ui.js.
-// This module gives React app authors the same surface at runtime via
-// a hook, plus clash detection so two parts of the app (or one app +
-// the import-design path) registering the same chord can be surfaced
-// instead of silently overwriting.
+// that emits `registerShortcut(key, mod, cbName)` + a separate top-level
+// callback function into the generated ui.js. This module gives React app
+// authors the same surface at runtime via a hook, plus clash detection so
+// two parts of the app (or one app + the import-design path) registering
+// the same chord can be surfaced instead of silently overwriting.
 //
 // Architecture: one dispatcher callback per unique (keyCode, modMask)
 // pair is registered C++-side. The dispatcher consults a JS-side
