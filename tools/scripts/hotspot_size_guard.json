@@ -17,7 +17,7 @@
     },
     {
       "path": "core/view/src/widget_bridge/canvas2d_api.cpp",
-      "max_loc": 1318,
+      "max_loc": 1294,
       "note": "WidgetBridge Canvas2D registrar split hotspot"
     },
     {
