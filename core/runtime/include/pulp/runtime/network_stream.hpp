@@ -56,9 +56,8 @@ private:
 /// buffer; `status_code()` and `headers()` are available once construction
 /// completes.
 ///
-/// HttpStream is currently read-only. Writing to an HttpStream is a
-/// Phase 4 feature (request-body streaming) and returns `Invalid` until
-/// then.
+/// HttpStream is currently read-only. Request bodies are provided up front
+/// by `post()`, so `write()` returns `Invalid`.
 class HttpStream : public Stream {
 public:
     struct Request {

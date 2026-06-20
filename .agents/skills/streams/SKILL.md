@@ -109,7 +109,7 @@ To add WebSocket, S3, or any other transport:
    document it so callers know to always wrap in `AsyncStream` with
    `auto_read = true`.
 
-## Message channels (Phase 4)
+## Message channels
 
 `MessageChannel` is the structured-message layer: one `send()` = one
 delivered message. Use it when the peer protocol doesn't tolerate
@@ -139,4 +139,4 @@ Patterns that are easy to get wrong:
 - Example: `examples/stream-demo/main.cpp`
 - Tests: `test/test_{stream,async_stream,network_stream,websocket_channel,osc_channel,json_rpc}.cpp` — copy these
   patterns for new transport tests
-- Feature plan: `planning/next-features-plan.md` § Feature 3 (Phase 1–4 landed)
+- Feature plan: `planning/next-features-plan.md` stream feature background

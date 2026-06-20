@@ -1149,15 +1149,15 @@ pulp_add_test_suite(pulp-test-ble-midi LIBRARIES pulp::midi)
 # suite runs on every platform via the virtual-endpoint half.
 pulp_add_test_suite(pulp-test-ump-session LIBRARIES pulp::midi)
 
-# AsyncStream tests (Phase 2)
+# AsyncStream tests
 pulp_add_test_suite(pulp-test-async-stream LIBRARIES pulp::runtime)
 
-# Network Stream tests (Phase 3)
+# Network Stream tests
 pulp_add_test_suite(pulp-test-network-stream
     LIBRARIES pulp::runtime pulp-cpp-httplib
     PROPERTIES RESOURCE_LOCK network-stream)
 
-# MessageChannel tests (Phase 4)
+# MessageChannel tests
 pulp_add_test_suite(pulp-test-memory-message-channel LIBRARIES pulp::runtime)
 
 pulp_add_test_suite(pulp-test-websocket-channel LIBRARIES pulp::runtime)
