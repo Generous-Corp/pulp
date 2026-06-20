@@ -66,7 +66,7 @@ void CoreGraphicsCanvas::restore() {
     if (save_depth_ > 0) --save_depth_;
 }
 
-// pulp #1368 — pop GState frames repeatedly until depth matches `target`.
+// Pop GState frames repeatedly until depth matches `target`.
 // CanvasWidget::paint() captures save_count() at entry and calls this at
 // exit so an unbalanced JS draw script (one that emitted a `ctx.save()`
 // but never reached its `ctx.restore()` due to an early-return path)
@@ -96,8 +96,8 @@ void CoreGraphicsCanvas::rotate(float radians) {
     CGContextRotateCTM(ctx_, radians);
 }
 
-// pulp #943 (#933 P1) — concat the supplied affine onto the current CTM, do
-// NOT replace it. View::paint_all() routes JS-supplied setTransform(id, ...)
+// Concat the supplied affine onto the current CTM, do NOT replace it.
+// View::paint_all() routes JS-supplied setTransform(id, ...)
 // through Canvas::concat_transform so the View's transform composes with the
 // parent View's transform (the bounds translate, outer transforms, etc.)
 // rather than wiping it. Mirrors SkCanvas::concat / SkiaCanvas::concat_transform.
@@ -116,8 +116,8 @@ void CoreGraphicsCanvas::concat_transform(float a, float b, float c,
     CGContextConcatCTM(ctx_, CGAffineTransformMake(a, b, c, d, e, f));
 }
 
-// pulp #1322 — JS-driven setTransform must compose onto the paint baseline
-// captured at CanvasWidget::paint() entry, mirroring SkiaCanvas's behavior.
+// JS-driven setTransform composes onto the paint baseline captured at
+// CanvasWidget::paint() entry, mirroring SkiaCanvas's behavior.
 // Without this override, the base-class no-op silently drops every JS
 // setTransform call on the CPU paint path (which is what standalone uses
 // when use_gpu=false), so any subsequent fill/stroke draws at the wrong
@@ -163,7 +163,7 @@ void CoreGraphicsCanvas::capture_paint_baseline_transform() {
     has_baseline_ = true;
 }
 
-// pulp #1368 round 2 — diagnostic CTM snapshot for `PULP_LOG_CANVAS_PAINT=1`.
+// Diagnostic CTM snapshot for `PULP_LOG_CANVAS_PAINT=1`.
 // Returns the current device matrix in CanvasRenderingContext2D affine order
 // (a, b, c, d, e, f) so the env-gated CanvasWidget::paint logging can record
 // what transform the inbound canvas has when paint() runs. CGAffineTransform
@@ -185,18 +185,17 @@ void CoreGraphicsCanvas::clip_rect(float x, float y, float w, float h) {
     CGContextClipToRect(ctx_, CGRectMake(x, y, w, h));
 }
 
-// pulp #1322 — clip() intersects the current clip region with the path
-// being built via begin_path/move_to/line_to/etc. Mirrors
+// clip() intersects the current clip region with the path being built via
+// begin_path/move_to/line_to/etc. Mirrors
 // CanvasRenderingContext2D.clip() and SkiaCanvas::clip(). Without the
 // override, the base-class no-op silently leaves the clip region wide open
 // so subsequent draws spill over their intended bounds.
 void CoreGraphicsCanvas::clip(FillRule rule) {
     if (!path_) return;
     CGContextAddPath(ctx_, path_);
-    // pulp Wave 2 cheap wiring — honour the JS-supplied fillRule arg
-    // (`ctx.clip('evenodd')`). CG distinguishes between CGContextClip
-    // (nonzero winding) and CGContextEOClip (even-odd) at the API
-    // surface; pre-Wave-2 the bridge always called CGContextClip.
+    // Honour the JS-supplied fillRule arg (`ctx.clip('evenodd')`). CG
+    // distinguishes between CGContextClip (nonzero winding) and
+    // CGContextEOClip (even-odd) at the API surface.
     if (rule == FillRule::evenodd) {
         CGContextEOClip(ctx_);
     } else {
@@ -243,13 +242,13 @@ void CoreGraphicsCanvas::set_line_join(LineJoin join) {
     CGContextSetLineJoin(ctx_, cg_join);
 }
 
-// pulp #1898 — Canvas2D ctx.setLineDash() / lineDashOffset on the CG backend.
+// Canvas2D ctx.setLineDash() / lineDashOffset on the CG backend.
 //
-// Background. The base Canvas virtual is a no-op `(void)`, so before this
-// override every dashed stroke on the macOS CPU paint path drew solid.
+// The base Canvas virtual is a no-op, so without this override dashed strokes
+// draw solid on the CG CPU path.
 // SkiaCanvas applies the pattern via SkDashPathEffect on the per-call
-// SkPaint (skia_canvas.cpp:1132-1209); CG has no per-paint dash state,
-// only the GState-resident pair set by CGContextSetLineDash. We therefore
+// SkPaint; CG has no per-paint dash state, only the GState-resident pair
+// set by CGContextSetLineDash. We therefore
 // store the intervals + phase on the canvas (mirroring Skia's fields) and
 // push/clear the CG dash phase around each stroke draw via
 // apply_line_dash_to_ctx() / reset_line_dash_on_ctx().
@@ -292,8 +291,8 @@ void CoreGraphicsCanvas::reset_line_dash_on_ctx() {
     CGContextSetLineDash(ctx_, 0.0, nullptr, 0);
 }
 
-// pulp #1371 — map every BlendMode value to its CGBlendMode counterpart and
-// push it into the current GState. The base Canvas default for set_blend_mode
+// Map every BlendMode value to its CGBlendMode counterpart and push it into
+// the current GState. The base Canvas default for set_blend_mode
 // is a no-op `(void)mode;`, so without this override every CG-backed CPU paint
 // silently lost the requested compositing op. SkiaCanvas::set_blend_mode in
 // core/canvas/src/skia_canvas.cpp is the working reference implementation —
@@ -325,7 +324,7 @@ static CGBlendMode to_cg_blend_mode(pulp::canvas::Canvas::BlendMode mode) {
         case BM::saturation:    return kCGBlendModeSaturation;
         case BM::color:         return kCGBlendModeColor;
         case BM::luminosity:    return kCGBlendModeLuminosity;
-        // Indices 16..26 — Porter-Duff compositing modes (issue-896).
+        // Indices 16..26 — Porter-Duff compositing modes.
         case BM::source_over:        return kCGBlendModeNormal;
         case BM::destination_over:   return kCGBlendModeDestinationOver;
         case BM::source_in:          return kCGBlendModeSourceIn;
@@ -358,8 +357,8 @@ void CoreGraphicsCanvas::fill_rect(float x, float y, float w, float h) {
     CGContextFillRect(ctx_, CGRectMake(x, y, w, h));
 }
 
-// pulp #929 — clearRect must replace destination pixels with transparent
-// black, not SrcOver-blend a transparent fill (which CoreGraphics would
+// clearRect must replace destination pixels with transparent black, not
+// SrcOver-blend a transparent fill (which CoreGraphics would
 // treat as a no-op the same way Skia does). CGContextClearRect zeroes
 // the alpha channel of the destination region directly, mirroring the
 // CanvasRenderingContext2D.clearRect spec for the CoreGraphics-backed
@@ -398,10 +397,8 @@ void CoreGraphicsCanvas::add_rounded_rect_path(float x, float y, float w, float 
 
 void CoreGraphicsCanvas::fill_rounded_rect(float x, float y, float w, float h, float radius) {
     add_rounded_rect_path(x, y, w, h, radius);
-    // pulp #1359 — gate on has_gradient_ so the active gradient paints the
-    // rounded rect, mirroring fill_rect / fill_current_path. Without this,
-    // a gradient set via set_fill_gradient_linear/_radial silently dropped
-    // back to apply_fill_color() (Spectr's CPU-mode FilterBank backplate).
+    // Gate on has_gradient_ so the active gradient paints the rounded rect,
+    // mirroring fill_rect / fill_current_path.
     if (has_gradient_) {
         CGContextSaveGState(ctx_);
         CGContextClip(ctx_);  // clip to the path we just built
@@ -427,9 +424,9 @@ void CoreGraphicsCanvas::stroke_rounded_rect(float x, float y, float w, float h,
 
 void CoreGraphicsCanvas::fill_circle(float cx, float cy, float radius) {
     const CGRect bounds = CGRectMake(cx - radius, cy - radius, radius * 2, radius * 2);
-    // pulp #1359 — when a gradient is active, build an ellipse path and clip
-    // to it so fill_with_active_paint() paints the gradient inside the circle.
-    // Mirrors fill_rect / fill_rounded_rect / fill_current_path.
+    // When a gradient is active, build an ellipse path and clip to it so
+    // fill_with_active_paint() paints the gradient inside the circle. Mirrors
+    // fill_rect / fill_rounded_rect / fill_current_path.
     if (has_gradient_) {
         CGContextSaveGState(ctx_);
         CGContextBeginPath(ctx_);
@@ -511,9 +508,8 @@ void CoreGraphicsCanvas::fill_path(const Point2D* points, size_t count) {
     for (size_t i = 1; i < count; ++i)
         CGContextAddLineToPoint(ctx_, points[i].x, points[i].y);
     CGContextClosePath(ctx_);
-    // pulp #1359 — honor active gradient on closed point-array fills, the
-    // direct CG parallel of SkiaCanvas::fill_path (#1353). Without this,
-    // shapes drawn via the Point2D* overload silently dropped the gradient.
+    // Honor active gradient on closed point-array fills, the direct CG
+    // parallel of SkiaCanvas::fill_path.
     if (has_gradient_) {
         CGContextSaveGState(ctx_);
         CGContextClip(ctx_);  // clip to the path we just built
@@ -607,11 +603,10 @@ void CoreGraphicsCanvas::fill_text(const std::string& text, float x, float y) {
         // Need to flip text back to render correctly.
         CGContextSaveGState(ctx_);
         if (has_gradient_) {
-            // pulp #1643/#1666 followup — gradient text on CG. Use the
-            // glyph silhouette as a clip mask, then paint the gradient
-            // through fill_with_active_paint(). Mirrors Skia's
-            // shader-based glyph fill via CGContextSetTextDrawingMode
-            // kCGTextClip + Draw* gradient call.
+            // Gradient text on CG uses the glyph silhouette as a clip mask,
+            // then paints the gradient through fill_with_active_paint().
+            // Mirrors Skia's shader-based glyph fill via
+            // CGContextSetTextDrawingMode kCGTextClip + Draw* gradient call.
             CGContextTranslateCTM(ctx_, draw_x, y);
             CGContextScaleCTM(ctx_, 1.0, -1.0);
             CGContextSetTextPosition(ctx_, 0, 0);
@@ -640,12 +635,11 @@ void CoreGraphicsCanvas::fill_text(const std::string& text, float x, float y) {
 void CoreGraphicsCanvas::fill_text_with_max_width(const std::string& text,
                                                    float x, float y,
                                                    float max_width) {
-    // pulp #1525 — Canvas2D `fillText(text, x, y, maxWidth)`. Same
-    // horizontal-squeeze approach as SkiaCanvas: measure naturally, and
-    // if the advance exceeds `max_width`, scale around the text origin
-    // before delegating to the unconstrained `fill_text` path. CoreText's
-    // glyph clusters are atomic CTRun units, so horizontal scaling
-    // preserves cluster integrity (matches the spec's HarfBuzz contract).
+    // Canvas2D `fillText(text, x, y, maxWidth)`. Same horizontal-squeeze
+    // approach as SkiaCanvas: measure naturally, and if the advance exceeds
+    // `max_width`, scale around the text origin before delegating to the
+    // unconstrained `fill_text` path. CoreText's glyph clusters are atomic
+    // CTRun units, so horizontal scaling preserves cluster integrity.
     if (max_width <= 0.0f || text.empty()) {
         fill_text(text, x, y);
         return;
@@ -666,11 +660,9 @@ void CoreGraphicsCanvas::fill_text_with_max_width(const std::string& text,
 
 void CoreGraphicsCanvas::stroke_text(const std::string& text, float x, float y,
                                       float max_width) {
-    // pulp #1525 — true outlined-glyph rendering via CoreText. We swap
-    // the text drawing mode to `kCGTextStroke` so each glyph outline is
-    // honoured with the active stroke colour + line width, instead of
-    // the pre-#1525 approximation that re-routed through fillText with
-    // strokeStyle as the fill colour.
+    // True outlined-glyph rendering via CoreText. We swap the text drawing
+    // mode to `kCGTextStroke` so each glyph outline is honoured with the
+    // active stroke colour + line width.
     @autoreleasepool {
         if (text.empty()) return;
         NSString* ns_text = ns_string_never_nil(text);
@@ -698,7 +690,7 @@ void CoreGraphicsCanvas::stroke_text(const std::string& text, float x, float y,
 
         CGContextSaveGState(ctx_);
 
-        // pulp #1525 — apply maxWidth squeeze around (x, y).
+        // Apply maxWidth squeeze around (x, y).
         if (max_width > 0.0f && text_width > max_width && text_width > 0) {
             const CGFloat scale = max_width / static_cast<CGFloat>(text_width);
             CGContextTranslateCTM(ctx_, x, y);
@@ -707,23 +699,17 @@ void CoreGraphicsCanvas::stroke_text(const std::string& text, float x, float y,
         }
 
         if (has_stroke_gradient_) {
-            // pulp #1666 — stroke gradient on glyph outlines: build a
-            // CGPath of every glyph in the line, route through
-            // stroke_with_active_paint() (which clips to the stroked
-            // outline + draws the gradient).
+            // Stroke gradient on glyph outlines: build a CGPath of every
+            // glyph in the line, route through stroke_with_active_paint()
+            // (which clips to the stroked outline + draws the gradient).
             //
-            // pulp #1747 (P1 Codex review on #1736) — the per-glyph
-            // CGAffineTransform must bake in BOTH the glyph offset AND
-            // the text-rendering transform (translate(draw_x, y) +
-            // scale(1, -1) to flip from CT's bottom-up glyph space into
-            // canvas-down space). Pre-fix the CTM was modified instead,
-            // which left the gradient endpoints evaluated in text-local
-            // space — same createLinearGradient stops produced different
-            // colors as text x-position changed, and vertical gradients
-            // rendered upside-down. With the transform baked into the
-            // path itself, the CTM stays the canvas-space identity (or
-            // whatever the caller had) and gradient endpoints land where
-            // the caller meant them to land.
+            // The per-glyph CGAffineTransform must bake in both the glyph
+            // offset and the text-rendering transform (translate(draw_x, y)
+            // + scale(1, -1) to flip from CT's bottom-up glyph space into
+            // canvas-down space). With the transform baked into the path
+            // itself, the CTM stays the canvas-space identity (or whatever
+            // the caller had) and gradient endpoints land where the caller
+            // meant them to land.
             CGMutablePathRef glyph_path = CGPathCreateMutable();
             CFArrayRef runs = CTLineGetGlyphRuns(line);
             CFIndex run_count = CFArrayGetCount(runs);
@@ -770,8 +756,8 @@ void CoreGraphicsCanvas::stroke_text(const std::string& text, float x, float y,
                                        stroke_color_.b, stroke_color_.a);
             CGContextSetTextDrawingMode(ctx_, kCGTextStroke);
 
-            // pulp #1898 — apply the active dash pattern around the glyph
-            // outline stroke. CTLineDraw in kCGTextStroke mode strokes each
+            // Apply the active dash pattern around the glyph outline stroke.
+            // CTLineDraw in kCGTextStroke mode strokes each
             // glyph's silhouette using the current GState dash, so this is
             // the correct injection point. The enclosing CGContextSaveGState
             // (above) snapshots the dash for us, but we still call the
@@ -856,17 +842,14 @@ float CoreGraphicsCanvas::text_x_for_byte(const std::string& text,
     return measure_text(text.substr(0, prefix_len));
 }
 
-// ── Canvas2D path builder (pulp #1322) ───────────────────────────────────────
+// ── Canvas2D path builder ────────────────────────────────────────────────────
 //
-// Background. CanvasWidget JS code drives draw via the HTML5 Canvas2D-style
-// path API: beginPath, moveTo, lineTo, quadTo, cubicTo, closePath, then
+// CanvasWidget JS code drives draw via the HTML5 Canvas2D-style path API:
+// beginPath, moveTo, lineTo, quadTo, cubicTo, closePath, then
 // fill() / stroke(). The base Canvas class default-implements every one of
 // these as a no-op so backends that don't have a real path builder still
 // compile, but it means the CoreGraphics CPU paint path used by Pulp's
-// standalone host (when use_gpu=false) silently dropped the entire JS draw
-// program. Spectr's FilterBank canvas issues 1800+ such commands per frame
-// and the result was a fully-white window — see the issue thread for the
-// full repro.
+// standalone host (when use_gpu=false) needs this concrete path storage.
 //
 // Implementation: mirror SkiaCanvas's approach but with CGMutablePath.
 // We hold a CGMutablePathRef per begin_path() call, append segments as
@@ -913,11 +896,9 @@ void CoreGraphicsCanvas::close_path() {
 
 void CoreGraphicsCanvas::fill_current_path(FillRule rule) {
     if (!path_) return;
-    // pulp Wave 2 cheap wiring — honour the JS-supplied fillRule arg
-    // (`ctx.fill('evenodd')`). CG splits nonzero (CGContextFillPath /
-    // CGContextClip) and even-odd (CGContextEOFillPath /
-    // CGContextEOClip) at the API surface; pre-Wave-2 the bridge
-    // unconditionally used the nonzero variant.
+    // Honour the JS-supplied fillRule arg (`ctx.fill('evenodd')`). CG splits
+    // nonzero (CGContextFillPath / CGContextClip) and even-odd
+    // (CGContextEOFillPath / CGContextEOClip) at the API surface.
     const bool eo = (rule == FillRule::evenodd);
     if (has_gradient_) {
         // Clip to the path, then draw the gradient; restore the clip.
@@ -939,12 +920,10 @@ void CoreGraphicsCanvas::fill_current_path(FillRule rule) {
             CGContextFillPath(ctx_);
         }
     }
-    // pulp #1806 — Canvas2D spec: `ctx.fill()` preserves the scratch path
-    // so a subsequent `ctx.stroke()` paints the outlined version of the
-    // filled shape. Previously this destroyed `path_` via `release_path()`,
-    // which silently dropped strokes after fills (SvgPathWidget compound
-    // paths, common JS canvas idiom). `begin_path()` correctly resets the
-    // path for callers that intend a fresh build.
+    // Canvas2D spec: `ctx.fill()` preserves the scratch path so a subsequent
+    // `ctx.stroke()` paints the outlined version of the filled shape.
+    // `begin_path()` correctly resets the path for callers that intend a
+    // fresh build.
 }
 
 void CoreGraphicsCanvas::stroke_current_path() {
@@ -952,17 +931,17 @@ void CoreGraphicsCanvas::stroke_current_path() {
     CGContextAddPath(ctx_, path_);
     if (has_stroke_gradient_) {
         stroke_with_active_paint();
-        // pulp #1806 — preserve path; see fill_current_path comment.
+        // Preserve path; see fill_current_path comment.
         return;
     }
     apply_stroke_color();
     apply_line_dash_to_ctx();
     CGContextStrokePath(ctx_);
     reset_line_dash_on_ctx();
-    // pulp #1806 — preserve path; see fill_current_path comment.
+    // Preserve path; see fill_current_path comment.
 }
 
-// ── pulp #1521 — native arc / arcTo / ellipse / roundRect path builders ──
+// ── Native arc / arcTo / ellipse / roundRect path builders ───────────────────
 //
 // Replaces the JS shim's bezier approximation with CG's native arc APIs:
 //   - CGPathAddArc          — cx/cy/r/start/end + clockwise flag
@@ -1073,8 +1052,8 @@ void CoreGraphicsCanvas::stroke_with_active_paint() {
     }
     // Convert path to its stroked outline + clip to it. Then draw gradient.
     CGContextSaveGState(ctx_);
-    // pulp #1898 — push the dash pattern before CGContextReplacePathWithStrokedPath
-    // so the stroked outline reflects the dash gaps. The Save/Restore frame
+    // Push the dash pattern before CGContextReplacePathWithStrokedPath so the
+    // stroked outline reflects the dash gaps. The Save/Restore frame
     // we just opened snapshots the dash and pops it on Restore, so this only
     // affects the stroked-path build itself (and the gradient draw inside the
     // clip is rect-fill semantics that ignore dash anyway).
@@ -1132,7 +1111,7 @@ void CoreGraphicsCanvas::stroke_with_active_paint() {
     CGContextRestoreGState(ctx_);
 }
 
-// pulp #1524 — Canvas2D ctx.createPattern on the CG backend.
+// Canvas2D ctx.createPattern on the CG backend.
 //
 // We decode the source image via ImageIO (CGImageSource) and stash the
 // CGImageRef. fill_with_active_paint() builds a CGPattern via
@@ -1207,12 +1186,11 @@ void CoreGraphicsCanvas::set_stroke_pattern(const std::string& image_src,
                                              PatternTileMode tile_x,
                                              PatternTileMode tile_y) {
     (void)image_src; (void)tile_x; (void)tile_y;
-    // Stroke patterns aren't wired through stroke_with_active_paint yet —
-    // strokes continue with the existing stroke_color_. File a follow-up
-    // if a CG-targeted plugin needs tiled stroke patterns.
+    // Stroke patterns are not wired through stroke_with_active_paint yet;
+    // strokes continue with the existing stroke_color_.
 }
 
-// pulp #1434 bridge-thin gap-fill — Canvas2D ctx.miterLimit.
+// Canvas2D ctx.miterLimit.
 // CGContextSetMiterLimit attaches the value to the current GState, so
 // save()/restore() snapshots and pops it naturally. Spec: non-positive
 // or non-finite values are silently ignored (matches CG behaviour for
@@ -1225,8 +1203,7 @@ void CoreGraphicsCanvas::set_miter_limit(float limit) {
     }
 }
 
-// pulp #1434 bridge-thin gap-fill — Canvas2D
-// imageSmoothingEnabled / imageSmoothingQuality. CG exposes the same
+// Canvas2D imageSmoothingEnabled / imageSmoothingQuality. CG exposes the same
 // concept via CGContextSetInterpolationQuality on the current GState.
 // We translate the spec's three quality levels onto CG's enum:
 //   low    = kCGInterpolationLow     (cheap bilinear)
@@ -1250,7 +1227,7 @@ void CoreGraphicsCanvas::set_image_smoothing(bool enabled,
     CGContextSetInterpolationQuality(ctx_, cg_q);
 }
 
-// pulp #1524 — sample the active conic colour stops at angle `t` in [0, 1],
+// Sample the active conic colour stops at angle `t` in [0, 1],
 // where t=0 corresponds to start_angle and t=1 wraps back to start_angle + 2π.
 // Returns four CGFloat RGBA components in straight (un-premultiplied) space.
 static void sample_conic_stops(const std::vector<pulp::canvas::Color>& colors,
@@ -1298,7 +1275,7 @@ static void sample_conic_stops(const std::vector<pulp::canvas::Color>& colors,
     out_rgba[3] = colors[n - 1].a;
 }
 
-// pulp #1524 — software-rasterise a conic (sweep) gradient image covering the
+// Software-rasterise a conic (sweep) gradient image covering the
 // supplied bounding rectangle. Each pixel's angle is computed as
 // atan2(y - cy, x - cx) - start_angle (mod 2π) and divided by 2π to give the
 // stop position. Returns nullptr on allocation failure.
@@ -1358,7 +1335,7 @@ static CGImageRef build_conic_gradient_image(
     return img;
 }
 
-// pulp #1524 — CGPattern draw callback. The `info` field is the CGImageRef
+// CGPattern draw callback. The `info` field is the CGImageRef
 // of the tile bitmap; CG will invoke this once per tile and we paint the
 // image filling the tile rect. CG owns the pattern's draw lifetime.
 static void cg_canvas_pattern_draw_tile(void* info, CGContextRef ctx) {
@@ -1488,8 +1465,8 @@ void CoreGraphicsCanvas::fill_with_active_paint() {
     const CGGradientDrawingOptions opts =
         kCGGradientDrawsBeforeStartLocation | kCGGradientDrawsAfterEndLocation;
     if (gradient_kind_ == GradientKind::radial_two_circles) {
-        // pulp #1524 — full two-circle form. (x0,y0,r0) is the start /
-        // inner circle; (x1,y1,r1) is the end / outer circle.
+        // Full two-circle form. (x0,y0,r0) is the start / inner circle;
+        // (x1,y1,r1) is the end / outer circle.
         CGContextDrawRadialGradient(ctx_,
             gradient,
             CGPointMake(grad_x0_, grad_y0_), grad_radius_inner_,
