@@ -97,13 +97,14 @@ void append_controls(std::vector<DesignFrameElement>& els) {
     // readouts were removed, lifting every below-toolbar row by 8px).
     add_mom("sustain", 21, 102, 66, 92);
     // pitch-bend + modulation buttons: match the baked button rect exactly
-    // (y[53,85], h=32) so the press highlight registers ON the button, not ~8px
-    // below it.
-    add_mom("pb_down", 108, 53, 36, 32);   // "−" / key 1
-    add_mom("pb_up",   150, 53, 36, 32);   // "+" / key 2
+    // (y[53,90], h=37) so the press highlight fills the WHOLE button — pixel-
+    // measured from the rendered SVG; an earlier h=32 left the bottom ~5px of
+    // the pad uncovered (a dark band under the lit teal).
+    add_mom("pb_down", 108, 53, 36, 37);   // "−" / key 1
+    add_mom("pb_up",   150, 53, 36, 37);   // "+" / key 2
     static const float mx[] = {200, 242, 284, 326, 368, 410};
     for (int i = 0; i < 6; ++i)
-        add_mom("mod_" + std::to_string(i), mx[i], 53, 36, 32);
+        add_mom("mod_" + std::to_string(i), mx[i], 53, 36, 37);
 }
 
 // Live value readouts (Kind::value_label) over the design's baked OCTAVE / VEL /

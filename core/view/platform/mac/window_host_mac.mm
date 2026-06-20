@@ -2003,6 +2003,16 @@ public:
             render_frame();
         }
         [window_ makeKeyAndOrderFront:nil];
+        // A SECONDARY GPU window is created via WindowHost::create and never
+        // enters run_event_loop() (only the primary window does), so it would
+        // otherwise have NO CVDisplayLink. Without one, needs_repaint_ set by
+        // repaint(), a DesignFrameView frame swap (request_repaint), or
+        // set_active_notes is never consumed — the surface only redraws on the
+        // one show() frame + direct input, so a piano⇄typing toggle resizes the
+        // window but never repaints the new frame. Start a per-window display
+        // link here, guarded so the primary (which already started its link in
+        // run_event_loop()) is untouched.
+        if (!display_link_) start_display_link();
     }
     void hide() override { [window_ orderOut:nil]; }
     bool is_visible() const override { return [window_ isVisible]; }
