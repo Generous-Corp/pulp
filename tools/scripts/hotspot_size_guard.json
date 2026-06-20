@@ -87,7 +87,7 @@
     },
     {
       "path": "core/view/platform/mac/window_host_mac.mm",
-      "max_loc": 2801,
+      "max_loc": 2725,
       "note": "Mac window host lifecycle/capture/geometry hotspot"
     },
     {
