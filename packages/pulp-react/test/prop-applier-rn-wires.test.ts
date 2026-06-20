@@ -1,7 +1,6 @@
-// pulp #1434 rn bridge-wires bundle (sub-agent #27 finding) — verify
-// @pulp/react prop-applier forwards 7 RN-style props to bridge fns
-// that already exist in C++ (widget_bridge.cpp). These were missing
-// JSX dispatch despite the bridge surface being ready.
+// The prop applier forwards these React Native style props to the
+// matching widget bridge functions. This suite protects the JSX
+// dispatch path for bridge surfaces that are implemented natively.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { applyChangedProps } from '../src/prop-applier.js';
@@ -33,7 +32,7 @@ function callOf(b: MockBridge, fn: string) {
     return b.calls.find((c) => c.fn === fn);
 }
 
-describe('rn bridge-wires bundle (pulp #1434 sub-agent #27)', () => {
+describe('React Native bridge prop forwarding', () => {
     it('backfaceVisibility forwards verbatim', () => {
         applyChangedProps(makeInstance(), {}, { backfaceVisibility: 'hidden' });
         expect(callOf(bridge, 'setBackfaceVisibility')?.args).toEqual(['k', 'hidden']);
@@ -44,7 +43,7 @@ describe('rn bridge-wires bundle (pulp #1434 sub-agent #27)', () => {
         expect(callOf(bridge, 'setCursor')?.args).toEqual(['k', 'pointer']);
     });
 
-    it('cursor handles col-resize keyword (post-Triage #7 fan-out)', () => {
+    it('cursor handles col-resize keyword', () => {
         applyChangedProps(makeInstance(), {}, { cursor: 'col-resize' });
         expect(callOf(bridge, 'setCursor')?.args).toEqual(['k', 'col-resize']);
     });
