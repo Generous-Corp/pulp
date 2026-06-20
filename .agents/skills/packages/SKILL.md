@@ -43,6 +43,22 @@ cat tools/packages/registry.json | python3 -m json.tool
 | ml | rtneural | Real-time neural network inference |
 | ui | fontaudio | Audio icon font |
 
+### Custom design-import controls (P8)
+
+A package that provides a custom control for the **design importer** declares it
+under the optional `design_controls` array on its registry entry
+(`registry-schema.json` → `design-control`). Each entry maps a Figma identity
+(`match.component_set_key` — authoritative — or `match.name_prefix` — fallback)
+to a `factory_id` the package's `pulp::view::View` registers at host startup via
+`register_design_control_factory` (see the `import-design` skill, P7 Tier-3). When
+an imported design's node matches, the importer emits a `kind=custom` interactive
+element carrying that `factory_id`, and `DesignFrameView::build_overlays` builds
+the package's control; an unregistered factory renders inert + diagnoses (never a
+silent knob). The TS resolver is `customControlFactoryId` in `library-registry.ts`
+(merge the installed packages' fragments, then resolve a node's identity). This is
+the "give-back" path's long tail: an obvious common control is promoted into core
+`pulp::view` + the shipped `library-manifest.json` instead.
+
 ## Adding a Package
 
 ```bash
