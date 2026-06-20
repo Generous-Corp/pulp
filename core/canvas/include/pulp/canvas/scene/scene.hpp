@@ -1,6 +1,5 @@
 // VectorScene — the root of Pulp's retained vector scene graph.
 //
-// Item 6.1 of `planning/2026-05-24-macos-plugin-authoring-plan.md`.
 // License-lineage note: the Pulp-side primitives use Pulp-native names
 // (`VectorScene`, `SceneNode`, `ScenePath`, `SceneShape`, `SceneImage`,
 // `SceneText`, `SceneGroup`) rather than any reference framework's
@@ -19,11 +18,11 @@
 //     want a one-to-one container per design-node so round-tripping
 //     stays predictable.
 //
-// Acceptance (from the plan):
-//   - SVG loads as a `VectorScene` or `SceneGroup` ✔
+// Current behavior:
+//   - SVG loads as a `VectorScene` or `SceneGroup`.
 //   - Mutating a child's opacity re-paints only that sub-tree's
-//     bounding box ✔ (see `take_dirty_rect()`)
-//   - Renders via existing SkiaCanvas (and CG / RecordingCanvas) ✔
+//     bounding box (see `take_dirty_rect()`).
+//   - Renders through the existing Canvas backends.
 #pragma once
 
 #include <pulp/canvas/scene/scene_group.hpp>
