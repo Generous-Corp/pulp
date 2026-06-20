@@ -12,8 +12,8 @@
   "hotspots": [
     {
       "path": "core/view/src/widget_bridge.cpp",
-      "max_loc": 1204,
-      "note": "WidgetBridge shell after registrar split; keep native JS API registration out"
+      "max_loc": 1160,
+      "note": "WidgetBridge shell after registrar split; lowered after comment-hygiene cleanup"
     },
     {
       "path": "core/view/src/widget_bridge/canvas2d_api.cpp",
