@@ -13,15 +13,12 @@ namespace pulp::view {
 
 namespace {
 
-// pulp #1368 round 2 — env-gated paint trace. When `PULP_LOG_CANVAS_PAINT=1`
+// Env-gated paint trace. When `PULP_LOG_CANVAS_PAINT=1`
 // is exported the live process logs one grep-able line per CanvasWidget paint
 // to stderr with the widget id, its bounds, and the inbound canvas CTM. The
-// Spectr filterbank repro (#1368) shows pr_1's first-instruction fillRect
-// landing in the title-bar region above the visible window — this trace is
-// the diagnostic that lets us confirm whether bounds_.y / CTM are off-window
-// vs. the widget never being painted at all. Returns false when the variable
-// is unset / "0" / empty so production builds incur a single getenv lookup
-// per paint and nothing else.
+// trace distinguishes off-window CTM/bounds problems from widgets that never
+// reach paint(). Returns false when the variable is unset / "0" / empty so
+// production builds incur a single getenv lookup per paint and nothing else.
 inline bool canvas_paint_logging_enabled() {
     const char* v = std::getenv("PULP_LOG_CANVAS_PAINT");
     if (!v || !*v) return false;
@@ -29,10 +26,10 @@ inline bool canvas_paint_logging_enabled() {
     return true;
 }
 
-// pulp #1368 follow-up — translate CanvasDrawCmd::Type to a stable, grep-able
+// Translate CanvasDrawCmd::Type to a stable, grep-able
 // short string so the env-gated trace can summarise commands_ without dragging
 // a heavyweight reflection helper into the hot path. Names mirror the enum
-// labels exactly so a Spectr-side `grep fill_rect` lines up with the source.
+// labels exactly so `grep fill_rect` lines up with the source.
 inline const char* canvas_cmd_type_name(CanvasDrawCmd::Type t) {
     switch (t) {
         case CanvasDrawCmd::Type::fill_rect: return "fill_rect";
@@ -98,7 +95,7 @@ inline const char* canvas_cmd_type_name(CanvasDrawCmd::Type t) {
         case CanvasDrawCmd::Type::set_filter: return "set_filter";
         case CanvasDrawCmd::Type::clear: return "clear";
         case CanvasDrawCmd::Type::clear_rect: return "clear_rect";
-        // pulp #1521 — native arc subpaths.
+        // Native arc subpaths.
         case CanvasDrawCmd::Type::path_arc: return "path_arc";
         case CanvasDrawCmd::Type::path_arc_to: return "path_arc_to";
         case CanvasDrawCmd::Type::path_ellipse: return "path_ellipse";
@@ -110,19 +107,17 @@ inline const char* canvas_cmd_type_name(CanvasDrawCmd::Type t) {
 } // namespace
 
 void CanvasWidget::paint(canvas::Canvas& canvas) {
-    // pulp #1368 round 2 — env-gated paint trace. Logged at entry, BEFORE any
+    // Env-gated paint trace. Logged at entry, BEFORE any
     // baseline / save_count snapshots so the line reflects the matrix the
     // parent View::paint_all chain handed us. Format is grep-able:
     //   [pulp:canvas-paint] id=<id> bounds=(x,y,w,h) ctm=[a,b,c,d,e,f]
     //       cmd_total=<N> cmds={fill_rect=42,stroke_path=15,...}
     //
-    // pulp #1368 follow-up — Spectr-agent narrowed the diagnosis to per-canvas
-    // surface compositing (pr_1's painted content discarded between sibling
-    // paints). The per-type summary distinguishes "rich command list processed
-    // but never composited" (cmd_total>0, varied types) from "silently
-    // truncated" (cmd_total tiny or 0). Tally is allocation-light: a single
-    // std::map walk gated behind the same env var, so production paints incur
-    // a single getenv lookup and nothing else.
+    // The per-type summary distinguishes "rich command list processed but never
+    // composited" (cmd_total>0, varied types) from "silently truncated"
+    // (cmd_total tiny or 0). Tally is allocation-light: a single std::map walk
+    // gated behind the same env var, so production paints incur a single getenv
+    // lookup and nothing else.
     if (canvas_paint_logging_enabled()) {
         const auto& b = bounds();
         const auto m = canvas.current_transform();
@@ -153,35 +148,26 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
     }
 
     // Snapshot the inbound device matrix so JS-driven setTransform() composes
-    // onto the parent View transform rather than overwriting it (issue-897
-    // P1 follow-up to issue-896).
+    // onto the parent View transform rather than overwriting it.
     canvas.capture_paint_baseline_transform();
     last_native_gpu_texture_draw_succeeded_ = false;
 
-    // pulp #1368 — defend against unbalanced JS save/restore. If the
+    // Defend against unbalanced JS save/restore. If the
     // draw script reaches an early-return path that skips a matching
     // `ctx.restore()`, the leftover save accumulates on the canvas's
     // GState stack every frame. The parent `View::paint_all`'s outer
     // `canvas.save()` / `canvas.restore()` only pops one level, so any
-    // surplus GState (transform, clip) leaks into sibling siblings'
-    // paint scopes and silently corrupts their drawing — concretely
-    // observed in pulp #1368 / Spectr filterbank where the main canvas
-    // child stopped painting visibly while an identically-configured
-    // overlay sibling kept working. Snapshot depth at entry, then pop
-    // back to it after replay so the parent always sees the canvas at
+    // surplus GState (transform, clip) leaks into sibling paint scopes
+    // and silently corrupts their drawing. Snapshot depth at entry, then
+    // pop back to it after replay so the parent always sees the canvas at
     // the depth it expects.
     //
-    // pulp #1368 (root cause, follow-up to the save/restore depth
-    // defense above) — the deeper bug behind the same issue: JS-driven
-    // `clearRect()` lowers to a kClear blend on the underlying surface
+    // JS-driven `clearRect()` lowers to a kClear blend on the underlying surface
     // (SkBlendMode::kClear / CGContextClearRect), which unconditionally
     // zeros destination texels regardless of the source alpha. With
-    // multiple sibling CanvasWidgets sharing the parent View's paint
-    // surface, sibling-2's clearRect at the start of its draw replay
-    // erases pixels sibling-1 just painted. Concretely Spectr's main
-    // canvas painted, then the overlay canvas's clearRect at frame
-    // start blew it away again — visible only because the ratio of
-    // visible-frames to invisible-frames depended on JSX ordering.
+    // multiple sibling CanvasWidgets sharing the parent View's paint surface,
+    // one sibling's clearRect at the start of its draw replay erases pixels
+    // another sibling just painted.
     //
     // HTML <canvas> semantics give every canvas its own backing store,
     // so clearRect on canvas A cannot affect canvas B. To match that,
@@ -199,8 +185,8 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
                           /*opacity=*/1.0f, /*blur_radius=*/0.0f);
     }
 
-    // pulp #929 — Canvas widget paint contract:
-    //   * The widget MUST NOT pre-fill its bounds with an opaque background
+    // Canvas widget paint contract:
+    //   * The widget MUST NOT fill its bounds with an opaque background
     //     before processing JS draw commands. The default state is fully
     //     transparent so the parent's paint surface (View::paint_self_and_children
     //     paints background + border before invoking this paint()) shows
@@ -209,7 +195,7 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
     //     fill_rect / clear command.
     //   * If the host caller wants a regression check, the test below records
     //     against a RecordingCanvas and asserts no full-bounds fill_rect was
-    //     emitted (test_canvas_widget.cpp [issue-929]).
+    //     emitted.
     // Do NOT add any unconditional fill / clear here.
 #ifdef PULP_HAS_SKIA
     if (native_gpu_texture_provider_) {
@@ -238,7 +224,7 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
             canvas.fill_rect(0, 0, bounds().width, bounds().height);
             break;
         case CanvasDrawCmd::Type::fill_rect:
-            // pulp #968 — when use_active_style is set the bridge's caller
+            // When use_active_style is set the bridge's caller
             // omitted the color arg (Canvas2D `ctx.fillRect(x,y,w,h)` shim),
             // so honour the active fillStyle (color OR gradient set most
             // recently on the canvas) instead of overwriting with cmd.color.
@@ -248,7 +234,7 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
             canvas.fill_rect(cmd.x, cmd.y, cmd.w, cmd.h);
             break;
         case CanvasDrawCmd::Type::stroke_rect:
-            // pulp #968 — same fallback as fill_rect, applied to strokeStyle.
+            // Same fallback as fill_rect, applied to strokeStyle.
             if (!cmd.use_active_style) {
                 canvas.set_stroke_color(cmd.color);
             }
@@ -282,14 +268,14 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
         // Text
         case CanvasDrawCmd::Type::fill_text:
             canvas.set_fill_color(cmd.color);
-            // pulp #1434 P1 — do NOT call canvas.set_font() / set_text_align
+            // Do NOT call canvas.set_font() / set_text_align
             // here. The JS shim's fillText path runs `_syncTextState()`
             // BEFORE canvasFillText, which records a `set_font` (legacy) or
             // `set_font_full` (rich CSS shorthand) cmd plus a
             // `set_text_align` cmd ahead of this fill_text cmd. Re-setting
-            // the font here clobbers the rich state — Skia's
-            // SkiaCanvas::set_font() resets weight/slant to normal/upright
-            // (canvas.cpp:567-575), so `ctx.font = "italic bold 18px Inter"`
+            // the font here clobbers the rich state: SkiaCanvas::set_font()
+            // resets weight/slant to normal/upright, so
+            // `ctx.font = "italic bold 18px Inter"`
             // would record set_font_full(weight=700, slant=1) and then
             // immediately have weight/slant reset to 400/0 here, rendering
             // the text as plain upright Regular even though the rich state
@@ -299,7 +285,7 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
             // back to left-align. Drop both calls — the prior state cmds
             // own the font + alignment.
             //
-            // pulp #1525 — route through the maxWidth-aware overload when
+            // Route through the maxWidth-aware overload when
             // the JS caller supplied `maxWidth` (cmd.w > 0). The Canvas
             // base class default forwards back to fill_text(text, x, y),
             // so backends without a custom override behave bit-for-bit
@@ -311,12 +297,12 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
             }
             break;
         case CanvasDrawCmd::Type::stroke_text:
-            // pulp #1525 — true outlined-glyph rendering. The JS shim's
+            // True outlined-glyph rendering. The JS shim's
             // strokeText path emits this distinct cmd so the bridge can
             // route through `Canvas::stroke_text` (Skia/CG override to
             // build a stroke paint and honour `lineWidth`). The base
             // class default still falls through to fill_text — preserving
-            // the pre-#1525 visual approximation on backends that haven't
+            // the older visual approximation on backends that haven't
             // adopted the new override yet (RecordingCanvas in tests).
             //
             // Stroke colour comes from the `set_stroke_color` cmd that
@@ -330,7 +316,7 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
             canvas.set_font(cmd.text, cmd.extra);
             break;
         case CanvasDrawCmd::Type::set_font_full:
-            // pulp #1434 — full CSS font shorthand. Weight stored in
+            // Full CSS font shorthand. Weight stored in
             // `cmd.x`, slant in `cmd.y`, letter_spacing in `cmd.x2`.
             // Skia's set_font_full honours weight / slant; CG falls
             // through to family+size via the base default.
@@ -373,10 +359,9 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
             canvas.close_path();
             break;
         case CanvasDrawCmd::Type::fill_path:
-            // pulp Wave 2 cheap wiring — thread the JS-supplied fillRule
+            // Thread the JS-supplied fillRule
             // (0 = nonzero, 1 = evenodd) recorded in cmd.int_val by
-            // widget_bridge.cpp's `canvasFillPath` reader. Pre-Wave-2
-            // the rule was always discarded here.
+            // canvas2d_api.cpp's `canvasFillPath` reader.
             canvas.fill_current_path(cmd.int_val == 1
                                          ? canvas::FillRule::evenodd
                                          : canvas::FillRule::nonzero);
@@ -407,20 +392,18 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
             canvas.clip_rect(cmd.x, cmd.y, cmd.w, cmd.h);
             break;
         case CanvasDrawCmd::Type::clip_path:
-            // Clip to current path (fill_current_path sets the clip)
+            // Rect-only fallback; bridge path clipping uses `clip` below.
             canvas.clip_rect(cmd.x, cmd.y, cmd.w, cmd.h); // fallback
             break;
         case CanvasDrawCmd::Type::set_transform:
             // Affine matrix laid out as cmd.x = a, cmd.y = b, cmd.w = c,
-            // cmd.h = d, cmd.x2 = e, cmd.y2 = f (issue-896).
+            // cmd.h = d, cmd.x2 = e, cmd.y2 = f.
             canvas.set_transform(cmd.x, cmd.y, cmd.w, cmd.h, cmd.x2, cmd.y2);
             break;
         case CanvasDrawCmd::Type::clip:
-            // Intersect clip with current path (issue-896).
-            // pulp Wave 2 cheap wiring — thread the JS-supplied fillRule
+            // Intersect clip with current path. Thread the JS-supplied fillRule
             // (0 = nonzero, 1 = evenodd) recorded in cmd.int_val by
-            // widget_bridge.cpp's `canvasClip` reader. Pre-Wave-2 the
-            // rule was always discarded here.
+            // canvas2d_api.cpp's `canvasClip` reader.
             canvas.clip(cmd.int_val == 1
                             ? canvas::FillRule::evenodd
                             : canvas::FillRule::nonzero);
@@ -433,7 +416,7 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
             canvas.stroke_arc(cmd.x, cmd.y, cmd.w, cmd.x2, cmd.y2); // cx, cy, radius, start, end
             break;
 
-        // pulp #1521 — native arc subpaths.
+        // Native arc subpaths.
         case CanvasDrawCmd::Type::path_arc:
             canvas.arc(cmd.x, cmd.y, cmd.extra,
                        cmd.x2, cmd.y2,
@@ -476,7 +459,7 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
             else canvas.set_text_align(canvas::TextAlign::left);
             break;
         case CanvasDrawCmd::Type::set_text_baseline:
-            // Stored for use by fill_text — applied before text draw
+            // Recorded by the bridge but not applied during replay yet.
             break;
 
         // Line cap/join
@@ -512,7 +495,7 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
                     cmd.gradient_colors.data(), cmd.gradient_positions.data(),
                     static_cast<int>(cmd.gradient_colors.size()));
             break;
-        // pulp #1524 — Canvas2D ctx.createRadialGradient(x0,y0,r0,x1,y1,r1)
+        // Canvas2D ctx.createRadialGradient(x0,y0,r0,x1,y1,r1)
         // two-circle form. Inner circle in (x, y, extra), outer in (x2, y2, w).
         case CanvasDrawCmd::Type::set_fill_gradient_radial_two_circles:
             if (!cmd.gradient_colors.empty())
@@ -522,10 +505,10 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
                     cmd.gradient_colors.data(), cmd.gradient_positions.data(),
                     static_cast<int>(cmd.gradient_colors.size()));
             break;
-        // pulp #1434 bridge-thin gap-fill — ctx.createConicGradient. Skia
-        // routes through SkGradientShader::MakeSweep; CG degrades to the
-        // first-stop colour (no native conic shader). Stops in the same
-        // gradient_colors / gradient_positions vectors as linear/radial.
+        // ctx.createConicGradient. Skia routes through
+        // SkGradientShader::MakeSweep; CoreGraphics software-rasterizes a
+        // conic image because it has no native conic shader. Stops use the
+        // same gradient_colors / gradient_positions vectors as linear/radial.
         case CanvasDrawCmd::Type::set_fill_gradient_conic:
             if (!cmd.gradient_colors.empty())
                 canvas.set_fill_gradient_conic(cmd.x, cmd.y, cmd.extra,
@@ -535,10 +518,9 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
         case CanvasDrawCmd::Type::clear_fill_gradient:
             canvas.clear_fill_gradient();
             break;
-        // pulp #1434 bridge-thin gap-fill — ctx.createPattern. Skia routes
-        // through SkShader::MakeImage with SkTileMode per axis (real tiled
-        // fill); CG degrades to the active fill colour (no native pattern
-        // shader). tile_x = bit 0, tile_y = bit 1: 0 = repeat, 1 = no-repeat.
+        // ctx.createPattern. Fill patterns route through backend image-pattern
+        // support (SkShader / CGPattern). tile_x = bit 0, tile_y = bit 1:
+        // 0 = repeat, 1 = no-repeat.
         case CanvasDrawCmd::Type::set_fill_pattern: {
             using Tile = canvas::Canvas::PatternTileMode;
             Tile tx = (cmd.int_val & 0x1) ? Tile::no_repeat : Tile::repeat;
@@ -553,7 +535,7 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
             canvas.set_stroke_pattern(cmd.text, tx, ty);
             break;
         }
-        // pulp Wave 3 c2d.7 — stroke gradients. Same dispatch shape as
+        // Stroke gradients. Same dispatch shape as
         // the fill counterparts, targeting the new
         // `Canvas::set_stroke_gradient_*` virtuals. SkiaCanvas overrides
         // populate `stroke_shader_`; the base default degrades to the
@@ -588,7 +570,7 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
             canvas.clear_stroke_gradient();
             break;
 
-        // Clear rect (pulp #929) — replace pixels with transparent black, do
+        // Clear rect: replace pixels with transparent black, do
         // not SrcOver-blend a transparent fill (which is a no-op). The
         // canvas::Canvas API exposes clear_rect with a kClear-equivalent
         // implementation per backend; this is what CanvasRenderingContext2D
@@ -597,7 +579,7 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
             canvas.clear_rect(cmd.x, cmd.y, cmd.w, cmd.h);
             break;
 
-        // Draw image — issue-916.
+        // Draw image.
         // The bridge stores the image source in cmd.text (file path or
         // "data:" URL) and the destination rect in cmd.{x,y,w,h}. We
         // first try the real image decode path on the active canvas
@@ -608,23 +590,18 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
         case CanvasDrawCmd::Type::draw_image: {
             bool drawn = false;
             const std::string& src = cmd.text;
-            // "data:image/png;base64,XXXX" — decode the base64 portion
-            // and feed the encoded bytes into draw_image_from_data().
+            // Data-URI image sources are not decoded on this replay path yet;
+            // they fall through to the placeholder below.
             constexpr std::string_view kDataUriPrefix = "data:";
             if (src.rfind(kDataUriPrefix, 0) == 0) {
                 auto comma = src.find(',');
                 if (comma != std::string::npos) {
                     std::string b64 = src.substr(comma + 1);
-                    // Minimal base64 decode — Pulp ships pulp::runtime::base64_decode,
-                    // but this path runs on the UI/audio thread and we don't
-                    // want to add another transitive include. The bridge
-                    // already validates and decodes data URIs before
-                    // recording the command (see widget_bridge.cpp), so
-                    // skip the decode here when present.
+                    // Payload is parsed only far enough to recognize the data URI.
                     (void)b64;
                 }
             } else if (!src.empty()) {
-                // pulp #1737 — when the JS caller used the 9-arg form,
+                // When the JS caller used the 9-arg form,
                 // the bridge stashed the source rect in x2/y2/x3/y3 and
                 // set has_source_rect. Route through the _rect overload
                 // so a sub-rectangle of the decoded image lands on the
@@ -651,7 +628,7 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
             break;
         }
 
-        // setLineDash (issue-916). Pattern lives in gradient_positions
+        // setLineDash. Pattern lives in gradient_positions
         // (an existing vector<float> reuse — avoids growing CanvasDrawCmd).
         case CanvasDrawCmd::Type::set_line_dash:
             canvas.set_line_dash(cmd.gradient_positions.data(),
@@ -659,7 +636,7 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
                                  cmd.extra);
             break;
 
-        // Canvas2D shadow* state (issue-1434 batch 7). Sticky values that
+        // Canvas2D shadow* state. Sticky values that
         // the underlying canvas honors on subsequent fill/stroke/text
         // draws. Stored in `color` (set_shadow_color) or `extra`
         // (set_shadow_blur / offset_x / offset_y) per the enum doc.
@@ -675,7 +652,7 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
         case CanvasDrawCmd::Type::set_shadow_offset_y:
             canvas.set_shadow_offset_y(cmd.extra);
             break;
-        // pulp #1434 bridge-thin gap-fill — Canvas2D ctx.miterLimit and
+        // Canvas2D ctx.miterLimit and
         // ctx.imageSmoothingEnabled / Quality. Sticky stroke / image state
         // pushed by the JS shim. SkiaCanvas / CoreGraphicsCanvas honour
         // them on the next stroke / drawImage; RecordingCanvas captures
@@ -693,7 +670,7 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
             break;
         }
 
-        // pulp #1520 — Canvas2D ctx.direction / ctx.filter sticky state.
+        // Canvas2D ctx.direction / ctx.filter sticky state.
         // Direction enum (0=ltr, 1=rtl, 2=inherit) packed into int_val;
         // filter raw CSS string in `text`. SkiaCanvas wraps the next
         // text/image draw with the corresponding shaper flag /
@@ -712,7 +689,7 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
             canvas.set_filter(cmd.text);
             break;
 
-        // putImageData (issue-916). Pixels packed in cmd.text as
+        // putImageData. Pixels packed in cmd.text as
         // raw RGBA bytes; int_val = width; x2 = height (as float, will round).
         case CanvasDrawCmd::Type::put_image_data: {
             int width  = cmd.int_val;
@@ -726,10 +703,10 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
         }
     }
 
-    // pulp #1368 — restore back to the depth captured at entry. This
+    // Restore back to the depth captured at entry. This
     // single call unconditionally pops:
     //   * any leftover `ctx.save()` the JS draw script forgot to match
-    //     with `ctx.restore()` (the original #1369 fix), AND
+    //     with `ctx.restore()`, AND
     //   * the per-canvas `save_layer()` opened above, so the offscreen
     //     layer is composited back into the parent surface via
     //     SrcOver — matching HTML <canvas> per-element backing-store
@@ -739,7 +716,7 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
     //     unconditionally zeros destination texels on the shared
     //     parent surface, erasing pixels that sibling canvases just
     //     painted. The single restore_to_count(N) handles both cases
-    //     uniformly: target N == pre-entry depth, so everything pushed
+    //     uniformly: target N == the entry depth, so everything pushed
     //     in this paint() — leftover JS saves + the save_layer — is
     //     popped together.
     //

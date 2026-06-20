@@ -2,7 +2,8 @@
 
 /// @file canvas_widget.hpp
 /// A View that replays recorded draw commands in paint().
-/// Full Canvas 2D API equivalent — JS records commands, C++ replays via Skia.
+/// Full Canvas 2D API equivalent — JS records commands, C++ replays through
+/// the active Canvas backend.
 
 #include <pulp/view/view.hpp>
 #include <pulp/canvas/canvas.hpp>
@@ -23,14 +24,14 @@ struct CanvasDrawCmd {
         stroke_line, stroke_arc,
         // Text
         fill_text, set_font, set_text_align, set_text_baseline,
-        // pulp #1525 — Canvas2D `strokeText(text, x, y, maxWidth)` recorded
+        // Canvas2D `strokeText(text, x, y, maxWidth)` recorded
         // as a distinct cmd so the paint loop can route it through the
         // dedicated `Canvas::stroke_text` (true outlined glyphs) instead
-        // of the pre-#1525 fillText-with-stroke-color approximation.
+        // of the older fillText-with-stroke-color approximation.
         // Layout: text in `text`, (x,y) in `x`/`y`, maxWidth in `w`
         // (0 = no limit), font size in `extra`, color in `color`.
         stroke_text,
-        // pulp #1434 — Canvas2D `ctx.font` full CSS font shorthand. The
+        // Canvas2D `ctx.font` full CSS font shorthand. The
         // legacy `set_font` only carries family + size; the JS shim now
         // parses `[<style>] [<variant>] [<weight>] <size>[/<lineHeight>]
         // <family>`. `set_font_full` carries the parsed weight / slant
@@ -42,7 +43,7 @@ struct CanvasDrawCmd {
         //   extra = size (px)
         //   x     = weight (100..900, cast to int)
         //   y     = slant (0=upright, 1=italic/oblique)
-        //   x2    = letter_spacing (0 from shorthand; reserved)
+        //   x2    = letter_spacing in px (0 when derived from `font`)
         set_font_full,
         // Style
         set_fill_color, set_stroke_color, set_line_width,
@@ -50,18 +51,18 @@ struct CanvasDrawCmd {
         set_global_alpha, set_blend_mode,
         // Gradient
         set_fill_gradient_linear, set_fill_gradient_radial, clear_fill_gradient,
-        /// pulp #1524 — Canvas2D `ctx.createRadialGradient(x0,y0,r0,x1,y1,r1)`
+        /// Canvas2D `ctx.createRadialGradient(x0,y0,r0,x1,y1,r1)`
         /// two-circle form. Inner circle (x0,y0,r0) packed as (x, y, extra),
         /// outer circle (x1,y1,r1) packed as (x2, y2, w). Routes to
         /// `set_fill_gradient_radial_two_circles` (Skia: MakeTwoPointConical;
         /// CG: full CGContextDrawRadialGradient with both circles).
         set_fill_gradient_radial_two_circles,
-        // pulp #1434 bridge-thin gap-fill — Canvas2D ctx.createConicGradient.
+        // Canvas2D ctx.createConicGradient.
         // cx/cy in (x, y), start_angle in `extra`, stops in
         // gradient_colors / gradient_positions (same shape as the
         // linear / radial entries above).
         set_fill_gradient_conic,
-        // pulp Wave 3 c2d.7 — Canvas2D `ctx.strokeStyle =
+        // Canvas2D `ctx.strokeStyle =
         // createLinearGradient(...) | createRadialGradient(...) |
         // createConicGradient(...)`. Field layout matches the fill
         // counterparts:
@@ -77,17 +78,17 @@ struct CanvasDrawCmd {
         set_stroke_gradient_radial_two_circles,
         set_stroke_gradient_conic,
         clear_stroke_gradient,
-        // pulp #1434 bridge-thin gap-fill — Canvas2D ctx.createPattern.
+        // Canvas2D ctx.createPattern.
         // Image source path / data URI in `text`, tile modes packed into
         // `int_val` (bit 0 = x, bit 1 = y; 0 = repeat, 1 = no-repeat).
-        // Skia routes through SkShader::MakeImage; CG degrades to the
-        // active fill colour (no CGPattern dance — file a follow-up if
-        // a CG-targeted plugin actually needs tiled patterns).
+        // Fill patterns route through the backend pattern implementation;
+        // stroke patterns fall back to solid stroke color on backends that
+        // do not support stroke-pattern shaders.
         set_fill_pattern, set_stroke_pattern,
         // Path
         begin_path, move_to, line_to, quad_to, cubic_to, close_path,
         fill_path, stroke_path, clip_path,
-        // pulp #1521 — native arc subpaths (replace JS bezier approx).
+        // Native arc subpaths.
         // Layout in CanvasDrawCmd:
         //   path_arc:        x=cx, y=cy, extra=radius,
         //                    x2=startAngle, y2=endAngle,
@@ -107,24 +108,24 @@ struct CanvasDrawCmd {
         save, restore,
         // Transform
         translate, scale, rotate, clip_rect,
-        set_transform,             // issue-896: replace transform with affine matrix
-        clip,                      // issue-896: intersect clip with current path
+        set_transform,             // replace transform with affine matrix
+        clip,                      // intersect clip with current path
         // Image
         draw_image,
-        // issue-916: Canvas2D API gap closures
+        // Canvas2D API gap closures
         set_line_dash,             ///< pattern in `gradient_positions`, phase in `extra`
         put_image_data,            ///< RGBA pixels in `text` (binary), int_val=width, x2=height (as int)
-        // issue-1434 batch 7: Canvas2D shadow* sticky state setters
+        // Canvas2D shadow* sticky state setters
         set_shadow_color,          ///< color in `color`
         set_shadow_blur,           ///< blur (px) in `extra`
         set_shadow_offset_x,       ///< dx (px) in `extra`
         set_shadow_offset_y,       ///< dy (px) in `extra`
-        // pulp #1434 bridge-thin gap-fill: ctx.miterLimit and
+        // ctx.miterLimit and
         // ctx.imageSmoothingEnabled / Quality. Sticky state pushed by
         // the JS shim before the next stroke / drawImage.
         set_miter_limit,           ///< limit in `extra`
         set_image_smoothing,       ///< enabled in `int_val` (0/1), quality in `extra` (0=low,1=med,2=high)
-        // pulp #1520 — Canvas2D ctx.direction / ctx.filter sticky state.
+        // Canvas2D ctx.direction / ctx.filter sticky state.
         // direction enum (0=ltr, 1=rtl, 2=inherit) in `int_val`; filter
         // raw CSS <filter-function-list> string in `text`. Pushed by
         // the JS shim before fillText / strokeText / fill / stroke /
@@ -144,7 +145,7 @@ struct CanvasDrawCmd {
     int int_val = 0;            // for enum values (text align, baseline, blend mode, cap, join)
     std::vector<canvas::Color> gradient_colors;    // for gradient stops
     std::vector<float> gradient_positions;          // gradient stop positions
-    /// pulp #968 — when true on a fill_rect / stroke_rect cmd, the paint
+    /// When true on a fill_rect / stroke_rect cmd, the paint
     /// loop must NOT call set_fill_color / set_stroke_color from `color`
     /// before drawing. The most recent set_fill_color, set_stroke_color,
     /// or set_fill_gradient_* on the underlying canvas stays active.
@@ -154,7 +155,7 @@ struct CanvasDrawCmd {
     /// gradients).
     bool use_active_style = false;
 
-    /// pulp #1737 — when true on a `draw_image` cmd, x2/y2/x3/y3 carry
+    /// When true on a `draw_image` cmd, x2/y2/x3/y3 carry
     /// the source rect (sx, sy, sw, sh) for the 9-arg
     /// `ctx.drawImage(img, sx,sy,sw,sh, dx,dy,dw,dh)` form. The renderer
     /// routes through `Canvas::draw_image_from_*_rect` so the source
@@ -180,16 +181,14 @@ public:
     CanvasWidget() = default;
 
     void clear_commands() { commands_.clear(); }
-    /// pulp #1387 gap #2 — NaN / ±Infinity defense at the recording
+    /// NaN / ±Infinity defense at the recording
     /// boundary. JS callers can produce non-finite numerics from any
     /// arithmetic mishap (divide-by-zero on a zero parent rect during a
     /// transient layout, NaN bubbling through pointer-event coords, etc).
     /// If a non-finite reaches Skia or CoreGraphics, it can taint the
     /// entire CGContext / Skia surface for the rest of the frame —
-    /// Spectr saw this as bands rendering as solid grey blobs after an
-    /// off-screen drag produced one NaN coord. Sanitize each cmd's
-    /// numeric fields to 0 on non-finite. The fields cover every coord
-    /// path the dispatch table consumes (move_to, line_to, quad/cubic,
+    /// Sanitize each cmd's numeric fields to 0 on non-finite. The fields
+    /// cover every coord path the dispatch table consumes (move_to, line_to, quad/cubic,
     /// rects, circles, arcs, text, transforms, clip, image draw).
     /// Color / int_val / text fields are unaffected. Sanitizing at the
     /// recording boundary means every backend (Skia GPU, CG CPU,
@@ -209,7 +208,7 @@ public:
         commands_.push_back(std::move(cmd));
     }
     size_t command_count() const { return commands_.size(); }
-    /// pulp #964 — accessor for tests asserting on the recorded JS command
+    /// Accessor for tests asserting on the recorded JS command
     /// stream. Read-only; the bridge owns mutation via add_command /
     /// clear_commands. Callers must not retain the reference past the next
     /// add_command / clear_commands call.
@@ -222,7 +221,7 @@ public:
     void paint(canvas::Canvas& canvas) override;
 
 private:
-    /// pulp #1387 gap #2 — return 0 on NaN / ±Infinity, value otherwise.
+    /// Return 0 on NaN / ±Infinity, value otherwise.
     /// Inlined helper kept in the header so the compiler folds it into
     /// the move-constructor copy in add_command. <cmath>'s std::isfinite
     /// is constexpr-safe and consteval-eligible on C++20 toolchains.
