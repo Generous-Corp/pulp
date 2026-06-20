@@ -3,11 +3,10 @@
 /// @file key_mapping_editor.hpp
 /// KeyMappingEditor — Pulp-native UI for rebinding command shortcuts.
 ///
-/// Pulp-native naming per planning/2026-05-24-macos-plugin-authoring-plan.md
-/// section 6.4. The editor is a `View` that lists every command registered
-/// with a `CommandRegistry`, shows each command's current chord, and lets
-/// the user pick a row + press a new chord to rebind. Changes are committed
-/// to the registry's `ShortcutMap` and persisted through
+/// The editor is a `View` that lists every command registered with a
+/// `CommandRegistry`, shows each command's current chord, and lets the user
+/// pick a row + press a new chord to rebind. Changes are committed to the
+/// registry's `ShortcutMap` and persisted through
 /// `pulp::state::ApplicationProperties::user_settings()` (or any caller-
 /// supplied `PropertiesFile`).
 ///
