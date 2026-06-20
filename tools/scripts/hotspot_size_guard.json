@@ -142,7 +142,7 @@
     },
     {
       "path": "inspect/src/inspector_overlay_paint.cpp",
-      "max_loc": 1540,
+      "max_loc": 1530,
       "note": "Inspector overlay paint hotspot; keep drawing separate from mutation"
     },
     {
