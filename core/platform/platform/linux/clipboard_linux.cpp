@@ -1,13 +1,9 @@
 // Linux clipboard implementation — shells out to system clipboard
 // utilities (`wl-copy`/`wl-paste` on Wayland, `xclip`/`xsel` on X11).
 //
-// #300: the old implementation returned `true` for set_text without
-// touching the OS clipboard, which was fake-success — copy/paste
-// looked to work inside Pulp but didn't reach other applications on
-// the user's desktop. This impl either really writes to the system
-// clipboard OR returns false so callers can detect the unsupported
-// case. No in-process shadow storage: if the tool is missing we say
-// so honestly.
+// This implementation either really writes to the system clipboard or returns
+// false so callers can detect the unsupported case. No in-process shadow
+// storage: if the tool is missing we say so honestly.
 //
 // Tooling detection is lazy (first-call stat) and cached. The tool
 // chosen at startup is the one used for the lifetime of the process —
@@ -57,10 +53,9 @@ const Tools& resolve_tools() {
         // fall back to X11 tools otherwise.
         const char* wayland = std::getenv("WAYLAND_DISPLAY");
         if (wayland && *wayland && which_exists("wl-copy") && which_exists("wl-paste")) {
-            // #320 Codex P1: wl-paste appends a newline by default.
-            // Pass -n so get_text() returns the exact bytes
-            // wl-copy received. xclip/xsel preserve bytes without
-            // a flag; only Wayland needs this.
+            // wl-paste appends a newline by default. Pass -n so get_text()
+            // returns the exact bytes wl-copy received. xclip/xsel preserve
+            // bytes without a flag; only Wayland needs this.
             return {Backend::wl_clipboard, "wl-copy", "wl-paste -n"};
         }
         if (which_exists("xclip")) {
@@ -134,23 +129,17 @@ std::optional<std::string> Clipboard::get_text() {
     std::lock_guard lock(mutex());
     const auto& tools = resolve_tools();
     if (tools.backend == Backend::none) return std::nullopt;
+    // Do not strip a trailing '\n'. xclip/wl-paste preserve the selection
+    // bytes as-is; content that legitimately ends with '\n' would lose a byte
+    // on round-trip if we stripped it.
     return capture_command(tools.paste_cmd);
-    // #309 Codex P2: do NOT strip a trailing '\n'. xclip/wl-paste
-    // preserve the selection bytes as-is — they don't synthesize a
-    // newline. Content that legitimately ends with '\n' would lose a
-    // byte on round-trip if we stripped. The previous comment in
-    // this function was wrong; preserving the byte stream is the
-    // correct round-trip for set_text/get_text.
 }
 
 bool Clipboard::has_text() {
-    // #309 Codex P2: "text present" must include the empty string,
-    // not treat it as absent. An application that set "" should
-    // observe has_text() == true. Report true iff the paste command
-    // succeeded — the pasted value's length is orthogonal to whether
-    // a text selection exists. On platforms where paste always
-    // succeeds (wl-paste -l / xclip -o return cleanly for empty
-    // selections), this tracks the native clipboard API semantics.
+    // "Text present" includes the empty string. An application that set ""
+    // should observe has_text() == true. Report true iff the paste command
+    // succeeded; the pasted value's length is orthogonal to whether a text
+    // selection exists.
     std::lock_guard lock(mutex());
     const auto& tools = resolve_tools();
     if (tools.backend == Backend::none) return false;
