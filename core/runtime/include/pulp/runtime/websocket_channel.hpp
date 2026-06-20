@@ -2,7 +2,7 @@
 
 // WebSocketChannel — RFC 6455 MessageChannel over TcpStream.
 //
-// Scope (Phase 4 of the Stream feature plan):
+// Scope:
 //   - Client handshake: `Upgrade: websocket`, Sec-WebSocket-Key / Accept
 //     validation (SHA-1 + base64 via pulp::runtime::crypto).
 //   - Server handshake: parse client upgrade, echo a 101 Switching

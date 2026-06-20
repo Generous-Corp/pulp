@@ -250,7 +250,7 @@ TEST_CASE("WebSocket accept_key rejects empty input gracefully",
 }
 
 TEST_CASE("WebSocketChannel rejects null and closed streams before handshake",
-          "[websocket][handshake][coverage][phase3]") {
+          "[websocket][handshake][coverage]") {
     REQUIRE(WebSocketChannel::connect(nullptr, "127.0.0.1", "/") == nullptr);
     REQUIRE(WebSocketChannel::accept(nullptr) == nullptr);
 
@@ -296,7 +296,7 @@ TEST_CASE("WebSocketChannel connect fails gracefully on non-WS peer",
 }
 
 TEST_CASE("WebSocketChannel rejects incorrect accept key",
-          "[websocket][handshake][issue-641]") {
+          "[websocket][handshake]") {
     Socket listener;
     REQUIRE(listener.create(SocketType::TCP));
     auto port = bind_loopback(listener, 47301);
@@ -425,7 +425,7 @@ TEST_CASE("WebSocketChannel echoes a >126-byte message (16-bit payload length)",
 }
 
 TEST_CASE("WebSocketChannel delivers binary send as binary message",
-          "[websocket][frame-kind][issue-641]") {
+          "[websocket][frame-kind]") {
     Socket listener;
     REQUIRE(listener.create(SocketType::TCP));
     auto port = bind_loopback(listener, 47401);
@@ -478,7 +478,7 @@ TEST_CASE("WebSocketChannel delivers binary send as binary message",
 }
 
 TEST_CASE("WebSocketChannel assembles fragmented text frames",
-          "[websocket][frame-kind][coverage][phase3]") {
+          "[websocket][frame-kind][coverage]") {
     Socket listener;
     REQUIRE(listener.create(SocketType::TCP));
     auto port = bind_loopback(listener, 47701);
@@ -541,7 +541,7 @@ TEST_CASE("WebSocketChannel assembles fragmented text frames",
 }
 
 TEST_CASE("WebSocketChannel reports unknown frame opcodes",
-          "[websocket][frame-kind][coverage][phase3]") {
+          "[websocket][frame-kind][coverage]") {
     Socket listener;
     REQUIRE(listener.create(SocketType::TCP));
     auto port = bind_loopback(listener, 47801);
@@ -598,7 +598,7 @@ TEST_CASE("WebSocketChannel reports unknown frame opcodes",
 }
 
 TEST_CASE("WebSocketChannel replies to ping frames with pong",
-          "[websocket][frame-kind][coverage][phase3]") {
+          "[websocket][frame-kind][coverage]") {
     Socket listener;
     REQUIRE(listener.create(SocketType::TCP));
     auto port = bind_loopback(listener, 47901);
@@ -647,7 +647,7 @@ TEST_CASE("WebSocketChannel replies to ping frames with pong",
 }
 
 TEST_CASE("WebSocketChannel echoes close frames and closes",
-          "[websocket][frame-kind][coverage][phase3]") {
+          "[websocket][frame-kind][coverage]") {
     Socket listener;
     REQUIRE(listener.create(SocketType::TCP));
     auto port = bind_loopback(listener, 48001);
@@ -702,7 +702,7 @@ TEST_CASE("WebSocketChannel echoes close frames and closes",
 }
 
 TEST_CASE("WebSocketChannel receives 64-bit payload length frames",
-          "[websocket][frame-length][issue-641]") {
+          "[websocket][frame-length]") {
     Socket listener;
     REQUIRE(listener.create(SocketType::TCP));
     auto port = bind_loopback(listener, 47501);
@@ -763,7 +763,7 @@ TEST_CASE("WebSocketChannel receives 64-bit payload length frames",
 }
 
 TEST_CASE("WebSocketChannel rejects frames above max_payload",
-          "[websocket][frame-length][issue-641]") {
+          "[websocket][frame-length]") {
     Socket listener;
     REQUIRE(listener.create(SocketType::TCP));
     auto port = bind_loopback(listener, 47601);
