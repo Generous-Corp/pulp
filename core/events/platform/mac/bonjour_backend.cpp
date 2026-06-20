@@ -13,11 +13,10 @@
 //     owning NetworkServiceDiscovery via notify_service_found /
 //     notify_service_lost, which mutate the dispatcher's cache and
 //     fire the user's std::function handlers.
-//   - The dispatcher itself is single-threaded (see the existing
-//     #310/#314 codex notes in volume_detector.cpp); ServiceBrowser /
-//     ServicePublisher own one NSD each, so there's no shared-state
-//     race here. Apps that share an NSD across threads must serialize
-//     externally — same contract as the rest of the dispatcher API.
+//   - The dispatcher itself expects serialized access. ServiceBrowser /
+//     ServicePublisher own one NSD each, so there's no shared-state race
+//     here. Apps that share an NSD across threads must serialize externally
+//     — same contract as the rest of the dispatcher API.
 //
 // Lifecycle:
 //   - stop() / unregister_service() call DNSServiceRefDeallocate on
