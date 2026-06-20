@@ -1,15 +1,10 @@
-// inspector_overlay_pass_viewer.cpp — Phase 6.1 per-pass GPU/render
-// attribution viewer for the visual inspector overlay.
+// Per-pass render attribution viewer for the visual inspector overlay.
 //
-// Extracted from inspector_overlay.cpp in the 2026-05 refactor (roadmap
-// P10-2). Pure mechanical move — the InspectorOverlay member methods
-// below are byte-identical to their previous definitions in
-// inspector_overlay.cpp; only their translation unit changed. The
-// file-local kPassTypeNames / kPassTypeColors tables stay private to
-// this TU. Shared color constants live in
-// inspector_overlay_internal.hpp; the structural constants
-// (kPassTypeCount, kPassHistoryFrames) are static-constexpr members of
-// InspectorOverlay reached through the public header.
+// The file-local kPassTypeNames / kPassTypeColors tables stay private to
+// this TU. Shared color constants live in inspector_overlay_internal.hpp;
+// the structural constants (kPassTypeCount, kPassHistoryFrames) are
+// static-constexpr members of InspectorOverlay reached through the public
+// header.
 
 #include "inspector_overlay_internal.hpp"
 
@@ -26,13 +21,12 @@
 
 namespace pulp::inspect {
 
-// ── Phase 6.1 — Per-pass GPU/render attribution viewer ──────────────────────
+// ── Per-pass render attribution viewer ──────────────────────────────────────
 //
 // Surfaces where render time goes, broken down by render pass, over a
 // rolling 60-frame window. Reads RenderPassManager's existing per-pass
-// PassStats — CPU wall-time + draw-call counts. True GPU timestamps are
-// deferred to Phase 6.5 (Dawn timestamp queries); the panel labels its
-// numbers "cpu" so the distinction is honest and explicit.
+// PassStats: CPU wall-time and draw-call counts. The panel labels its
+// numbers "cpu" so it does not imply GPU timestamp availability.
 
 namespace {
 
