@@ -1,7 +1,6 @@
-// pulp #1027 (audit PR #1166 finding #4) — verify the prop-applier routes
-// borderColor / borderWidth / borderRadius (and per-side flat props) to the
-// per-attribute bridge setters that preserve unset siblings, not the unified
-// setBorder(id, color, width, radius) that clobbers everything.
+// Verify that flat border props route to per-attribute bridge setters that
+// preserve unset siblings, not the unified setBorder(id, color, width, radius)
+// path used by the object-shape shorthand.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { applyChangedProps } from '../src/prop-applier.js';
