@@ -1,6 +1,6 @@
 #pragma once
 
-// SysExAccumulator (#86) — shared MIDI SysEx aggregation state machine.
+// SysExAccumulator — shared MIDI SysEx aggregation state machine.
 //
 // MIDI SysEx messages (F0 ... F7) can span multiple transport packets:
 // Android's MIDI API delivers raw bytes whenever they arrive, BLE MIDI
@@ -9,7 +9,7 @@
 // delivery. This accumulator buffers until F7 or an abort, then emits
 // the complete payload.
 //
-// State machine (per #406 + ALSA reference):
+// State machine:
 //
 //   Idle     --[F0]-->   Buffering
 //   Buffering --[data]->  Buffering (append)
@@ -159,7 +159,7 @@ private:
         // in 0xF8-0xFF *except F7* passes through without disturbing
         // the SysEx state machine. Treating 0xF9/0xFD as generic
         // status bytes aborted otherwise-valid SysEx on devices that
-        // forwarded the reserved codes (Codex P2 on PR #484 / #500).
+        // forward the reserved codes.
         //
         // Pass-through is safe because the accumulator only classifies
         // the byte — the caller's normal short-message path decides
