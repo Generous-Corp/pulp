@@ -1,13 +1,12 @@
-// pulp #1434 Triage #15 — verify the @pulp/react prop-applier forwards
-// `boxShadow` to the existing `setBoxShadow` bridge (or `clearBoxShadow`
-// on `null` / `undefined` / `'none'`). Three input shapes:
+// Verify the @pulp/react prop-applier forwards `boxShadow` to the
+// `setBoxShadow` bridge, or `clearBoxShadow` for clear sentinels. Three
+// input shapes are covered here:
 //
 //   1. CSS-spec single-shadow string: `'2px 4px 8px rgba(0,0,0,0.3)'`
 //   2. Object form (RN-style): `{ offsetX, offsetY, blur, color, ... }`
 //   3. Sentinel clear: `null` / `'none'` → `clearBoxShadow`
 //
-// Multi-shadow comma-separated lists are deferred — single-shadow path
-// lands first.
+// These cases pin the single-shadow path and clear behavior.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { applyChangedProps } from '../src/prop-applier.js';
@@ -39,7 +38,7 @@ function shadowCalls(b: MockBridge, fn: 'setBoxShadow' | 'clearBoxShadow') {
     return b.calls.filter((c) => c.fn === fn);
 }
 
-describe('prop-applier boxShadow (pulp #1434 Triage #15)', () => {
+describe('prop-applier boxShadow', () => {
     it('parses CSS string: dx dy blur color', () => {
         applyChangedProps(makeInstance(), {}, { boxShadow: '2px 4px 8px rgba(0,0,0,0.3)' });
         const calls = shadowCalls(bridge, 'setBoxShadow');
