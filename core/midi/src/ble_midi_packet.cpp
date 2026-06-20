@@ -75,7 +75,7 @@ bool BleMidiPacketDecoder::decode(const uint8_t* data, std::size_t size) {
     // packets would let a leading data byte in the next packet be
     // mis-emitted as a fabricated channel-voice event using the prior
     // packet's status. Sysex is the only state explicitly defined to
-    // span packets — we leave `sysex_buffer_` alone. Codex PR #3017 P2.
+    // span packets, so the in-flight `sysex_buffer_` is preserved.
     last_status_ = 0;
 
     std::size_t i = 1;
