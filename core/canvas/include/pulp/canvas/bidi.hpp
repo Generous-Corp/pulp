@@ -1,7 +1,5 @@
 #pragma once
 
-// Pulp item 6.8 / 2026-05-24 macOS plugin-authoring plan.
-//
 // BidiAnalyzer — paragraph-level Unicode Bidirectional Algorithm
 // implementation backed by SheenBidi (Apache-2.0). Produces logical-
 // to-visual run segmentation for Arabic / Hebrew / mixed-direction
@@ -78,9 +76,8 @@ public:
     /// Re-order `runs` (in logical order, as returned by analyze) into
     /// visual / paint order via UBA rules L1-L2. The implementation is
     /// a simplified L2 reverse-on-odd-level pass — sufficient for
-    /// single-line label paint, which is the consumer the 6.8 slice
-    /// targets. (TextEditor's multi-line wrap path stays on the
-    /// SkShaper / ICU iterator route in text_run_planner.cpp.)
+    /// single-line label paint. TextEditor's multi-line wrap path stays on the
+    /// SkShaper / ICU iterator route in text_run_planner.cpp.
     static std::vector<BidiRun> visual_order(const std::vector<BidiRun>& runs);
 
     /// True when the build links SheenBidi. Tests that need the real
