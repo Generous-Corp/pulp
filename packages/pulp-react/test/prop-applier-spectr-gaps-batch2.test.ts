@@ -1,9 +1,7 @@
-// 6 React-applier gaps surfaced by the runtime-import coverage sub-agent
-// (planning/runtime-import-spectr-coverage-2026-05-11.md). Each prop is
-// marked `supported` in compat.json (wired via web-compat-style-decl.js)
-// but the @pulp/react applier was missing the `case`, so JSX `style={{…}}`
-// silently dropped: outline (3 Spectr occurrences), overflowX/Y (3),
-// whiteSpace (2), textOverflow (1), backdropFilter (12), backgroundImage (1).
+// These props are supported by both the DOM-lite style adapter and
+// the React prop applier. This suite protects JSX style dispatch for
+// outline, overflow axes, text wrapping/overflow, backdrop filters,
+// and background gradients.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { applyChangedProps } from '../src/prop-applier.js';
@@ -33,7 +31,7 @@ function makeInstance(id: string = 'k'): PulpInstance {
 
 const callsOf = (b: MockBridge, fn: string) => b.calls.filter((c) => c.fn === fn);
 
-describe('prop-applier Spectr-gap batch 2 (6 React-applier gaps)', () => {
+describe('React prop forwarding for supported style gaps', () => {
     it('outline shorthand fans out to setOutlineWidth/Style/Color', () => {
         applyChangedProps(makeInstance(), {}, { outline: '2px solid #ff0000' });
         expect(callsOf(bridge, 'setOutlineWidth')[0].args).toEqual(['k', 2]);
@@ -94,8 +92,7 @@ describe('prop-applier Spectr-gap batch 2 (6 React-applier gaps)', () => {
         applyChangedProps(makeInstance(), {}, {
             backgroundImage: 'linear-gradient(90deg, red, blue)',
         });
-        // Codex P1 on #1831: setBackground only parses color tokens, so
-        // gradient strings must route to setBackgroundGradient.
+        // Gradients must route to setBackgroundGradient because setBackground handles color tokens.
         const sg = callsOf(bridge, 'setBackgroundGradient');
         expect(sg).toHaveLength(1);
         expect(sg[0].args[1]).toMatch(/^linear-gradient/);
@@ -119,9 +116,7 @@ describe('prop-applier Spectr-gap batch 2 (6 React-applier gaps)', () => {
     });
 
     it('background shorthand with gradient routes to setBackgroundGradient', () => {
-        // Same fix as backgroundImage — `background: linear-gradient(...)`
-        // was previously sent to setBackground (color-only) producing a
-        // bogus white background. Caught visually in Spectr's chip strip.
+        // Match backgroundImage routing so gradient shorthands do not clobber the color slot.
         applyChangedProps(makeInstance(), {}, {
             background: 'linear-gradient(to bottom, #111, #222)',
         });
