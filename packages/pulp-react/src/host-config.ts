@@ -1,13 +1,13 @@
 // host-config.ts — react-reconciler HostConfig targeting pulp::view::WidgetBridge.
 //
-// Design choices (validated by Codex consult + RepoPrompt review on 2026-04-25):
+// Design choices:
 //   - Mutation mode (Ink/R3F pattern), NOT persistence (RNS pattern)
 //   - isPrimaryRenderer: true (Pulp is standalone — no second renderer to coexist with)
 //   - shouldSetTextContent selectively (Label/Button/TextEditor only) — NOT a separate text-node type
 //   - Ink-style scheduler (supportsMicrotasks: true + queueMicrotask)
 //   - DEFER concurrent mode for v0
 //   - createInstance does NOT receive parent — attachment happens in appendChild/appendInitialChild
-//   - insertBefore requires View::insert_child(index) on the C++ side (pulp #772 bridge addition)
+//   - insertBefore routes same-parent reorders through the bridge's indexed insert path
 //   - Commit-time layout flush owned by the host config (resetAfterCommit), not the bridge
 
 import type { HostConfig } from 'react-reconciler';
@@ -95,7 +95,7 @@ function createWidget(type: Type, id: string, parentId: string, props: Props): v
         case 'Checkbox':    call('createCheckbox', id, parentId); return;
         case 'Toggle':      call('createToggle', id, parentId); return;
         case 'Combo':       call('createCombo', id, parentId); return;
-        // Ink & Signal design-system widgets (Phase 8c).
+        // Ink & Signal design-system widgets.
         case 'Badge':       call('createBadge', id, asText(props.children) ?? (props.text as string ?? ''), (props.tone as string) ?? 'neutral', parentId); return;
         case 'Stepper':     call('createStepper', id, parentId); return;
         case 'Pan':         call('createPan', id, parentId); return;
@@ -107,28 +107,18 @@ function createWidget(type: Type, id: string, parentId: string, props: Props): v
         case 'SvgRect':     call('createSvgRect', id, parentId); return;
         case 'SvgLine':     call('createSvgLine', id, parentId); return;
         default: {
-            // pulp jsx-instrument-import 2026-05-17 — lowercase HTML/SVG
-            // intrinsic aliases. Lets the reconciler handle Chainer-style
-            // raw JSX (<div>, <svg>, <path>, …) directly through the
-            // existing bridge widgets, mirroring the web-compat shim's
-            // _ensureNative tag → createX map. Per ChatGPT/Codex consult:
-            // the right architecture is react-konva/r3f-style direct
-            // reconciler wiring, not ReactDOM event delegation.
+            // Lowercase HTML/SVG intrinsic aliases let imported raw JSX
+            // (<div>, <svg>, <path>, ...) lower directly to bridge widgets,
+            // matching the web-compat shim's tag-to-createX map.
             const lower = String(type).toLowerCase();
             switch (lower) {
                 case 'div': case 'section': case 'article': case 'aside':
                 case 'header': case 'footer': case 'nav': case 'main':
                 case 'figure': case 'figcaption': case 'form': case 'ul':
                 case 'ol': case 'li': case 'dl': case 'dt': case 'dd': {
-                    // pulp jsx-instrument-import 2026-05-17 — when a div
-                    // contains ONLY string/number children (no nested
-                    // ReactElements), treat it as a text-bearing leaf
-                    // (createLabel with concatenated text). Matches browser
-                    // inline-text behavior: `<div>+{val} ct</div>` renders
-                    // text on one line, not as three stacked column siblings.
-                    // Chainer's detune display `{detuneC > 0 ? "+" : ""}{detuneC} ct`
-                    // depends on this — three text expressions were creating
-                    // three Labels in a column that wrapped vertically.
+                    // Pure text children become a single Label so imported
+                    // `<div>+{value} ct</div>`-style content renders inline
+                    // instead of as stacked synthetic Label siblings.
                     const txt = asText(props.children);
                     if (txt !== undefined && txt.length > 0) {
                         call('createLabel', id, txt, parentId);
@@ -142,15 +132,10 @@ function createWidget(type: Type, id: string, parentId: string, props: Props): v
                 case 'b': case 'i': case 'em': case 'strong': case 'small': case 'code':
                 case 'pre': case 'a': case 'td': case 'th': case 'title':
                 case 'text': case 'tspan': case 'desc': {
-                    // pulp jsx-instrument-import 2026-05-17 — text-bearing
-                    // tags need to be containers when they have ReactElement
-                    // children (e.g. Chainer's `<span>CHAINER /
-                    // <span>polywave ms-split</span></span>`). Pure-text
-                    // children → createLabel (leaf). Mixed/element children
-                    // → createCol so the reconciler can appendChild the
-                    // inner spans as siblings. The string portions get
-                    // their own synthetic Label instances via
-                    // createTextInstance.
+                    // Text-bearing inline tags are Labels for pure text and
+                    // containers for nested markup. That lets React append
+                    // inner spans/emphasis instead of flattening or dropping
+                    // the nested element content.
                     const txt = asText(props.children);
                     if (txt !== undefined) {
                         call('createLabel', id, txt, parentId);
@@ -192,14 +177,9 @@ function createWidget(type: Type, id: string, parentId: string, props: Props): v
                 case 'progress': call('createProgress', id, parentId); return;
                 case 'img':      call('createImage', id, parentId); return;
                 case 'canvas':   call('createCanvas', id, parentId); return;
-                // pulp routing-parity sweep 2026-06-08 — lowercase widget
-                // intrinsic aliases. These mirror the capitalized widget
-                // cases above (the source of truth) so a lowercase
-                // `<knob>` / `<fader>` / … tag dispatches to the SAME
-                // native createX bridge call instead of silently falling
-                // through to the createCol container fallback. (lowercase
-                // `select`/`progress`/`img`/`canvas` are already handled
-                // just above; widget-specific intrinsics added here.)
+                // Lowercase widget aliases mirror the capitalized widget
+                // cases so `<knob>` / `<fader>` / ... dispatch to the same
+                // native createX calls instead of the container fallback.
                 case 'knob':     call('createKnob', id, parentId); return;
                 case 'fader':    call('createFader', id, (props.orientation as 'vertical' | 'horizontal') ?? 'vertical', parentId); return;
                 case 'toggle':   call('createToggle', id, parentId); return;
@@ -217,27 +197,17 @@ function createWidget(type: Type, id: string, parentId: string, props: Props): v
                 case 'svg':      call('createCol', id, parentId); return;  // SVG = container; children paint
                 case 'path': {
                     call('createSvgPath', id, parentId);
-                    // pulp jsx-instrument-import 2026-05-17 — lowercase
-                    // <path>/<circle>/<line> children of <svg> have no
-                    // intrinsic flex sizing (JSX puts width/height on the
-                    // parent <svg>, children inherit via viewBox in a
-                    // real browser). SvgPathWidget::paint early-returns
-                    // when local_bounds is 0×0. Pin children to fill
-                    // their parent svg via position:absolute + inset:0.
+                    // SVG primitives have no intrinsic Yoga size; the JSX
+                    // width/height lives on the parent <svg>. Pin children
+                    // to the parent bounds so zero-sized primitives still
+                    // paint.
                     call('setPosition', id, 'absolute');
                     call('setTop', id, 0);
                     call('setLeft', id, 0);
                     call('setRight', id, 0);
                     call('setBottom', id, 0);
-                    // pulp jsx-instrument-import 2026-05-17 — fill-parent
-                    // makes the SVG primitive the topmost hit-test target,
-                    // shadowing the parent <svg>'s onMouseDown handler.
-                    // Set pointer-events: none so clicks fall through to
-                    // the parent <svg> which holds the JSX handler.
-                    // Matches browser SVG behavior where presentational
-                    // children of <svg> don't intercept events by default
-                    // (they need explicit pointer-events="visible" or
-                    // similar).
+                    // Presentational SVG children should not intercept
+                    // pointer events meant for the parent <svg> handler.
                     call('setPointerEvents', id, 'none');
                     return;
                 }
@@ -275,15 +245,8 @@ function createWidget(type: Type, id: string, parentId: string, props: Props): v
                     call('setLeft', id, 0);
                     call('setRight', id, 0);
                     call('setBottom', id, 0);
-                    // pulp jsx-instrument-import 2026-05-17 — fill-parent
-                    // makes the SVG primitive the topmost hit-test target,
-                    // shadowing the parent <svg>'s onMouseDown handler.
-                    // Set pointer-events: none so clicks fall through to
-                    // the parent <svg> which holds the JSX handler.
-                    // Matches browser SVG behavior where presentational
-                    // children of <svg> don't intercept events by default
-                    // (they need explicit pointer-events="visible" or
-                    // similar).
+                    // Presentational SVG children should not intercept
+                    // pointer events meant for the parent <svg> handler.
                     call('setPointerEvents', id, 'none');
                     return;
                 }
@@ -294,15 +257,8 @@ function createWidget(type: Type, id: string, parentId: string, props: Props): v
                     call('setLeft', id, 0);
                     call('setRight', id, 0);
                     call('setBottom', id, 0);
-                    // pulp jsx-instrument-import 2026-05-17 — fill-parent
-                    // makes the SVG primitive the topmost hit-test target,
-                    // shadowing the parent <svg>'s onMouseDown handler.
-                    // Set pointer-events: none so clicks fall through to
-                    // the parent <svg> which holds the JSX handler.
-                    // Matches browser SVG behavior where presentational
-                    // children of <svg> don't intercept events by default
-                    // (they need explicit pointer-events="visible" or
-                    // similar).
+                    // Presentational SVG children should not intercept
+                    // pointer events meant for the parent <svg> handler.
                     call('setPointerEvents', id, 'none');
                     return;
                 }
@@ -313,15 +269,8 @@ function createWidget(type: Type, id: string, parentId: string, props: Props): v
                     call('setLeft', id, 0);
                     call('setRight', id, 0);
                     call('setBottom', id, 0);
-                    // pulp jsx-instrument-import 2026-05-17 — fill-parent
-                    // makes the SVG primitive the topmost hit-test target,
-                    // shadowing the parent <svg>'s onMouseDown handler.
-                    // Set pointer-events: none so clicks fall through to
-                    // the parent <svg> which holds the JSX handler.
-                    // Matches browser SVG behavior where presentational
-                    // children of <svg> don't intercept events by default
-                    // (they need explicit pointer-events="visible" or
-                    // similar).
+                    // Presentational SVG children should not intercept
+                    // pointer events meant for the parent <svg> handler.
                     call('setPointerEvents', id, 'none');
                     return;
                 }
@@ -343,15 +292,9 @@ function createWidget(type: Type, id: string, parentId: string, props: Props): v
 function asText(children: unknown): string | undefined {
     if (typeof children === 'string') return children;
     if (typeof children === 'number') return String(children);
-    // pulp #71 — React passes `<button>{count}{" bands"}</button>` as the
-    // array `[count, " bands"]`. shouldSetTextContent already accepts mixed
-    // string/number arrays (it lowers them to text), but asText used to bail
-    // and return undefined, so commitUpdate's setText branch never fired and
-    // the button label froze at its first-render value (Spectr "32 bands"
-    // never advancing when the user picked a new count). Mirror
-    // shouldSetTextContent: skip null/undefined/boolean entries (React's
-    // standard "skip" sentinels), recurse on the rest, and bail only when an
-    // entry is a real element we can't flatten to a string.
+    // React passes `<button>{count}{" bands"}</button>` as an array of text
+    // fragments. Mirror shouldSetTextContent: skip React's empty sentinels,
+    // flatten text scalars, and bail only for real elements.
     if (Array.isArray(children)) {
         const parts: string[] = [];
         for (const c of children) {
@@ -362,44 +305,26 @@ function asText(children: unknown): string | undefined {
         }
         return parts.join('');
     }
-    // pulp jsx-instrument-import 2026-05-17 — ReactElement children
-    // (`<span>CHAINER / <span>polywave ms-split</span></span>` from
-    // Chainer's titlebar): return undefined HERE so shouldSetTextContent
-    // returns false and the reconciler instead walks the children as
-    // child node instances. The outer `<span>` then renders as a
-    // container (NOT a label that swallows the children), and the
-    // inner `<span>polywave ms-split</span>` gets its own createLabel.
-    // Pre-fix the outer span swallowed children as text → empty string,
-    // dropping the inner span's content entirely.
+    // ReactElement children are not flattenable text. Return undefined so
+    // shouldSetTextContent returns false and the reconciler walks nested
+    // markup as child instances.
     return undefined;
 }
 
 /// Element types that lower their string children to setText / createLabel
 /// rather than to a child node. shouldSetTextContent reads this set.
 ///
-/// pulp #109 — HTML-intrinsic JSX tags ALSO bear their own text. Without
-/// these aliases, React's host-config returned false from
-/// shouldSetTextContent('span', …), causing React to materialize a
-/// synthetic Label child for the string content. That synthetic child
-/// stacked on top of the outer span's own auto-derived text (createWidget
-/// pulls asText(props.children) into the Label dispatch), producing the
-/// 2026-05-11 Spectr regression where every <span>SPECTR</span> rendered
-/// as two overlapping "SPECTR" labels. Fix surfaces for EVERY imported
-/// design with raw HTML text tags, not just Spectr.
+/// HTML-intrinsic JSX tags also bear their own text. These aliases prevent
+/// React from materializing an extra synthetic Label child on top of the
+/// Label created by createWidget for pure text content.
 const TEXT_BEARING: Set<Type> = new Set([
     'Label', 'Button', 'TextEditor',
     'b', 'button', 'code', 'desc', 'em', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
     'i', 'label', 'li', 'p', 'pre', 'span', 'strong', 'td', 'text', 'th',
     'title', 'tspan',
-    // pulp jsx-instrument-import 2026-05-17 — container tags that
-    // host-config conditionally treats as text-leaves when their
-    // children are pure string/number. Without this, shouldSetTextContent
-    // returns false → React mounts the text children as separate
-    // synthetic Label widgets → duplicate text rendered on top of the
-    // createLabel we already made. The shouldSetTextContent check below
-    // still gates on children-are-pure-text (so divs with element
-    // children correctly route to createCol via createWidget's else
-    // branch).
+    // Container tags can be text leaves only when their children are pure
+    // string/number content. Element-bearing containers still route through
+    // createCol so React can mount the nested children.
     'div', 'section', 'article', 'aside', 'header', 'footer', 'nav', 'main',
     'figure', 'figcaption', 'form', 'ul', 'ol', 'dl', 'dt', 'dd',
 ] as Type[]);
@@ -457,26 +382,18 @@ export const PulpHostConfig: HostConfig<
         // CRITICAL: createInstance does NOT receive the parent. We construct
         // an unattached descriptor here and DEFER the bridge createX call
         // to appendInitialChild / appendChild, which DO receive the parent.
-        // (Codex + RepoPrompt review both flagged the original plan that
-        // tried createX(id, parent) here as the wrong lifecycle point.)
         // Flatten HTML/JSX-style `style` object + `className` string into
         // the flat-prop shape applyAllProps/applyChangedProps expect.
         // Native intrinsics already use flat props — normalizeHostProps
-        // is a no-op fast path for them. Runtime-import bundles
-        // (Claude/Stitch/Figma/v0/Pencil) reach prop-applier through here.
+        // is a no-op fast path for them. Runtime-import bundles reach
+        // prop-applier through here.
         const normalizedProps = normalizeHostProps(type, props as Record<string, unknown>);
         const id = (normalizedProps.id as string) ?? autoId(rootContainer);
-        // Phase 7 codex round 5 — public-instance is an Element shim.
-        // The bundle's refs (canvasRef.current, wrapRef.current) need
-        // DOM-element shape: getContext('2d'), getBoundingClientRect(),
-        // style setters, etc. Plain Instance descriptors fail the
-        // bundle's resize useEffect with "not a function" → infinite
-        // re-render loop. We instantiate the existing web-compat
-        // Element class (installed by the C++ runtime-import shims) and
-        // mark its native widget as already created (host-config will
-        // call createWidget later via materializeUnder). _ensureNative
-        // is a no-op once _nativeCreated=true, so DOM-shim methods
-        // route to the existing native widget by id.
+        // Public instances expose the web-compat Element shim when it is
+        // available. Refs need DOM-shaped methods such as getContext(),
+        // getBoundingClientRect(), style setters, and addEventListener().
+        // Mark the native widget as already created so shim methods route
+        // to the widget id that host-config materializes later.
         let domShim: unknown = null;
         try {
             const ElementCtor = (globalThis as Record<string, unknown>).Element as
@@ -485,14 +402,11 @@ export const PulpHostConfig: HostConfig<
             if (typeof ElementCtor === 'function') {
                 const shim = new ElementCtor(type, id);
                 shim._nativeCreated = true;
-                shim.__pulpId = id;  // non-enumerable backref (codex round 5)
-                // Codex P2 follow-up on #1859: Element constructor seeds
-                // internal `_id` but the public `.id` getter
-                // (web-compat-element.js:259) returns `""` until the SETTER
-                // runs (gated on `_userIdSet`). Calling the setter ensures
-                // `ref.current.id` matches the native widget id rather than
-                // appearing as an empty string — preserves prior observable
-                // behavior for any consumer that reads .id off the ref.
+                shim.__pulpId = id;
+                // The Element constructor seeds internal `_id`, but the
+                // public `.id` getter returns an empty string until the
+                // setter marks it user-visible. Calling the setter keeps
+                // `ref.current.id` aligned with the native widget id.
                 shim.id = id;
                 domShim = shim;
             }
@@ -515,14 +429,9 @@ export const PulpHostConfig: HostConfig<
         _hostContext,
         _internalHandle,
     ): TextInstance {
-        // Loose text inside a non-text-bearing parent — auto-wrap in a
-        // synthetic Label so we don't crash the render. Real apps using
-        // typed JSX intrinsics never hit this; the spectr#28 WebView
-        // parity port hits it because the extracted editor.html has raw
-        // text inside <span>/<div>/SVG nodes that lower to View parents
-        // through dom-adapter. Silent auto-wrap unblocks the render and
-        // lets the visible widgets land. Diagnostic warning still fires
-        // in dev builds.
+        // Loose text inside a non-text-bearing parent auto-wraps in a
+        // synthetic Label so imported DOM-shaped markup can still render
+        // instead of crashing on raw text nodes.
         if (text == null) return { id: 'text_empty', type: 'Label', props: {}, childIds: [], onBridge: false, pendingChildren: [] } as unknown as TextInstance;
         const id = autoId(rootContainer);
         // Intentionally returning a synthetic Label instance — the
@@ -540,15 +449,10 @@ export const PulpHostConfig: HostConfig<
     },
 
     shouldSetTextContent(type, props) {
-        // pulp #1836 P1 (Codex follow-up) — TEXT_BEARING marks a type as
-        // CAPABLE of bearing text directly, but the children must
-        // actually be string/number for React to skip the child-node
-        // path. For nested markup like <span><em>x</em></span>, the
-        // children prop is an element (or array of mixed nodes), so
-        // returning true here would cause React to drop the inner <em>.
-        // Mirror React DOM's behavior: only short-circuit when children
-        // are plain text scalars (string / number) or arrays of only
-        // string/number scalars.
+        // TEXT_BEARING marks a type as capable of bearing text directly,
+        // but React should skip the child-node path only for plain text.
+        // Nested markup like <span><em>x</em></span> must return false so
+        // React mounts the inner element.
         if (!TEXT_BEARING.has(type)) return false;
         const children = props?.children;
         if (children == null) return true;  // empty container is text-able
@@ -586,10 +490,9 @@ export const PulpHostConfig: HostConfig<
         const beforeIdx = parentInstance.childIds.indexOf(beforeChild.id);
         const sameParent = child.parentId === parentInstance.id && child.onBridge;
         if (sameParent) {
-            // Same-parent reorder — React shuffled keyed siblings.
-            // Call the bridge's insertChild(parent_id, child_id, index)
-            // (added in pulp PR #779) to update native order. Update
-            // our childIds bookkeeping too. Codex P1 review on PR #779.
+            // Same-parent reorder: React shuffled keyed siblings. Update
+            // childIds and use the bridge's indexed insert path to keep
+            // native order in sync.
             const oldIdx = parentInstance.childIds.indexOf(child.id);
             if (oldIdx >= 0) parentInstance.childIds.splice(oldIdx, 1);
             const insertIdx = beforeIdx >= 0 ? beforeIdx : parentInstance.childIds.length;
@@ -652,17 +555,11 @@ export const PulpHostConfig: HostConfig<
         // Unreachable — see createTextInstance.
     },
 
-    // pulp #1840 P1 (Codex follow-up) — React's mutation reconciler
-    // calls resetTextContent(instance) when shouldSetTextContent flips
-    // from true → false on an existing TEXT_BEARING node. Concretely,
-    // a transition like <span>hi</span> → <span><em>hi</em></span>:
-    // the old commit treated <span> as text-bearing and pushed "hi" via
-    // setText; the new commit needs the inner <em> child mounted, so
-    // React first asks the host to clear the stale text. Without this
-    // hook the reconciler can throw (or leave stale text un-cleared on
-    // hosts that tolerate the missing callback). Clear by calling
-    // setText(id, '') — which the bridge already handles as a no-op for
-    // non-text-capable types, so this is safe for the whole alias set.
+    // React's mutation reconciler calls resetTextContent when
+    // shouldSetTextContent flips from true to false on an existing
+    // TEXT_BEARING node, such as <span>hi</span> becoming
+    // <span><em>hi</em></span>. Clear stale text before the new child
+    // element mounts.
     resetTextContent(instance) {
         if (typeof g.setText === 'function') call('setText', instance.id, '');
     },
@@ -677,14 +574,9 @@ export const PulpHostConfig: HostConfig<
     },
 
     // ── Misc required no-ops / passthroughs ────────────────────────
-    // Phase 7 codex round 5 — return the DOM-shim element when
-    // available so the bundle's `ref.current.X` calls resolve to
-    // browser-DOM-shape methods (getContext, getBoundingClientRect,
-    // style setters, addEventListener, etc.). Falls back to the
-    // Instance descriptor for tests that run without the C++ shim
-    // chain. The PulpInstance return type is technically wrong (we
-    // return an Element or PulpInstance), but react-reconciler's
-    // types are inflexible here and we cast at the call site.
+    // Return the DOM-shim Element when available so `ref.current.X`
+    // calls resolve to browser-shaped methods. Fall back to the Instance
+    // descriptor in tests that run without the shim chain.
     getPublicInstance(instance) {
         const inst = instance as Instance & { _dom?: unknown };
         return (inst._dom ?? instance) as Instance;
@@ -759,14 +651,9 @@ function materialize(parent: Instance, child: Instance): void {
     materializeUnder(parent.id, child);
 }
 
-/// Phase 5.1 (inspector source-jump) — forward React's dev-mode
-/// `__source` prop ({ fileName, lineNumber, columnNumber }) to the
-/// native `setSource` bridge so the inspector can jump to the authoring
-/// JSX file:line. `__source` is inlined by Babel's automatic-runtime
-/// JSX dev transform; it is absent in production bundles, so this is a
-/// silent no-op there. `setSource` itself no-ops on an unknown widget
-/// id and an empty file path (see widget_bridge.cpp), so the guard here
-/// only avoids a needless bridge round-trip.
+/// Forward React's dev-mode `__source` prop to the native `setSource`
+/// bridge so the inspector can jump to the authoring JSX file:line.
+/// Production bundles omit `__source`, making this a silent no-op.
 function bindSourceLocation(child: Instance): void {
     const src = child.props.__source as
         | { fileName?: unknown; lineNumber?: unknown; columnNumber?: unknown }

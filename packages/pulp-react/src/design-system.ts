@@ -1,9 +1,9 @@
-// design-system.ts — the "Ink & Signal" component catalog for @pulp/react
-// (Design-System-Import-Plan Phase 8c). This mirrors the native C++ catalog in
-// `pulp/design/design_system.hpp`: rich, queryable metadata bridging each Figma
-// component to a JS-usable widget. JS authors and tooling use it to discover
-// what's available, which JSX intrinsic renders it, and which theme tokens a
-// reskin touches — without hardcoding the list.
+// design-system.ts — the "Ink & Signal" component catalog for @pulp/react.
+// This mirrors the native C++ catalog in `pulp/design/design_system.hpp`:
+// rich, queryable metadata bridging each Figma component to a JS-usable widget.
+// JS authors and tooling use it to discover what's available, which JSX
+// intrinsic renders it, and which theme tokens a reskin touches without
+// hardcoding the list.
 //
 // `jsxTag` is the @pulp/react intrinsic name when one exists (import it from
 // '@pulp/react'); `null` means the component is native-only today (no JSX
