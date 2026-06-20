@@ -245,7 +245,7 @@ TEST_CASE("WaveformEditor regions", "[view][waveform_editor]") {
     REQUIRE(editor.regions().empty());
 }
 
-TEST_CASE("WaveformRegion reports signed length", "[view][waveform_editor][coverage][phase3]") {
+TEST_CASE("WaveformRegion reports signed length", "[view][waveform_editor]") {
     WaveformRegion forward{100, 180, "Forward"};
     REQUIRE(forward.length() == 80);
 
@@ -253,7 +253,7 @@ TEST_CASE("WaveformRegion reports signed length", "[view][waveform_editor][cover
     REQUIRE(reversed.length() == -70);
 }
 
-TEST_CASE("WaveformEditor paint skips empty audio", "[view][waveform_editor][coverage][phase3]") {
+TEST_CASE("WaveformEditor paint skips empty audio", "[view][waveform_editor]") {
     WaveformEditor editor;
     editor.set_bounds({0, 0, 400, 150});
 
@@ -333,7 +333,7 @@ TEST_CASE("WaveformEditor key scrolls and release events are ignored", "[view][w
     REQUIRE(editor.visible_start() == 200);
 }
 
-TEST_CASE("WaveformEditor key Cmd+0 zooms to fit", "[view][waveform_editor][coverage][phase3]") {
+TEST_CASE("WaveformEditor key Cmd+0 zooms to fit", "[view][waveform_editor]") {
     WaveformEditor editor;
     auto data = make_sine(1000);
     editor.set_audio_data(data.data(), 1000, 44100.0f);
@@ -386,7 +386,7 @@ TEST_CASE("WaveformEditor mouse click and shift extend selection", "[view][wavef
     REQUIRE(cb_end == 500);
 }
 
-TEST_CASE("WaveformEditor mouse drag extends selection and release finalizes", "[view][waveform_editor][coverage][phase3]") {
+TEST_CASE("WaveformEditor mouse drag extends selection and release finalizes", "[view][waveform_editor]") {
     WaveformEditor editor;
     auto data = make_sine(1000);
     editor.set_audio_data(data.data(), 1000, 44100.0f);
