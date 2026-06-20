@@ -24,7 +24,7 @@ namespace {
 // name. The URI is what `plugin_slot_lv2.cpp` keys against when selecting
 // a descriptor at load time, and it's what graph_serializer rehydration
 // uses to re-find the plugin across sessions (filenames collide; URIs
-// don't). Issue #491 P2.
+// don't).
 //
 // We only support the common manifest.ttl shape:
 //   <URI> a lv2:Plugin ;  ...
@@ -98,8 +98,7 @@ std::string parse_lv2_plugin_uri(const std::string& bundle_dir) {
 // class's CID normalized to a 32-char lowercase hex string. Returns
 // empty string when moduleinfo.json is missing or unparseable — the
 // scanner then falls back to the directory stem. No dlopen, no
-// bundleEntry: safe to call across an entire plugin folder. Issue
-// #491 P2.
+// bundleEntry: safe to call across an entire plugin folder.
 std::string read_vst3_bundle_fuid(const std::string& path);
 
 std::vector<std::string> PluginScanner::default_paths(PluginFormat format) {
@@ -176,13 +175,13 @@ PluginInfo PluginScanner::scan_vst3_bundle(const std::string& path) {
     info.format = PluginFormat::VST3;
     info.name = fs::path(path).stem().string();
 
-    // Issue #491 P2: prefer the real VST3 FUID (`PClassInfo::cid`) over
-    // the display name so graph_serializer rehydration keys against a
-    // stable 32-char plugin identity. Two plugins that happen to share
-    // a display name (e.g. "Compressor.vst3") used to collide when the
-    // graph serialized and reloaded across sessions. We read the CID
-    // from Contents/Resources/moduleinfo.json — Steinberg's declarative
-    // bundle metadata — so we never dlopen the plugin at scan time.
+    // Prefer the real VST3 FUID (`PClassInfo::cid`) over the display name so
+    // graph_serializer rehydration keys against a stable 32-char plugin
+    // identity. Two plugins that happen to share a display name (e.g.
+    // "Compressor.vst3") would otherwise collide when the graph serializes
+    // and reloads across sessions. We read the CID from
+    // Contents/Resources/moduleinfo.json — Steinberg's declarative bundle
+    // metadata — so we never dlopen the plugin at scan time.
     std::string fuid = read_vst3_bundle_fuid(path);
     if (!fuid.empty()) {
         info.unique_id = std::move(fuid);
@@ -218,11 +217,11 @@ PluginInfo PluginScanner::scan_lv2_bundle(const std::string& path) {
     info.format = PluginFormat::LV2;
     info.name = fs::path(path).stem().string();
 
-    // Issue #491 P2: prefer the plugin URI from manifest.ttl. The URI is
-    // what plugin_slot_lv2.cpp uses at load time to select the correct
-    // descriptor, and what graph_serializer rehydration matches against
-    // across sessions. Falls back to the directory stem on parse failure
-    // so the scanner stays best-effort.
+    // Prefer the plugin URI from manifest.ttl. The URI is what
+    // plugin_slot_lv2.cpp uses at load time to select the correct descriptor,
+    // and what graph_serializer rehydration matches against across sessions.
+    // Falls back to the directory stem on parse failure so the scanner stays
+    // best-effort.
     std::string uri = parse_lv2_plugin_uri(path);
     if (!uri.empty()) {
         info.unique_id = std::move(uri);
@@ -248,10 +247,8 @@ std::vector<PluginInfo> PluginScanner::scan_directory(const std::string& dir,
         auto path = entry.path().string();
         if (!is_plugin_bundle(path, format)) continue;
 
-        // #271 Codex P1 follow-up: consult blacklist BEFORE opening the
-        // bundle, so a bundle that crashed us on a previous scan never
-        // gets dlopen'd again. Post-scan filtering (the prior impl) still
-        // opened the bundle and could crash the scanner on every run.
+        // Consult the blacklist before opening the bundle so an entry that
+        // crashed a previous scan is never dlopen'd again.
         if (blacklist && blacklist->is_blacklisted(path)) continue;
 
         switch (format) {
@@ -293,8 +290,7 @@ std::vector<PluginInfo> PluginScanner::scan(const ScanOptions& options) {
     int scanned = 0;
 
     auto scan_format = [&](PluginFormat fmt) {
-        // Codex 2026-04-21 review on #545: honor only_extra_paths so
-        // hermetic lanes (tests, offline tools) don't silently pull in
+        // Hermetic lanes can supply explicit scan roots without also walking
         // the machine's installed plugin collection.
         std::vector<std::string> paths;
         if (!options.only_extra_paths) {
@@ -306,10 +302,8 @@ std::vector<PluginInfo> PluginScanner::scan(const ScanOptions& options) {
             if (options.on_progress) {
                 options.on_progress(dir, scanned++, total_dirs);
             }
-            // Workstream 03 #246: pass the blacklist into scan_directory
-            // so bundles known to crash us never get dlopen'd. (Codex P1
-            // follow-up: old code filtered post-scan, which still
-            // crashed the scanner on the offending bundle every time.)
+            // Keep blacklist filtering inside scan_directory so skipped
+            // bundles are rejected before any format scanner can open them.
             auto found = scan_directory(dir, fmt, options.blacklist);
             all.insert(all.end(), found.begin(), found.end());
         }
@@ -323,7 +317,7 @@ std::vector<PluginInfo> PluginScanner::scan(const ScanOptions& options) {
     // AU enumeration uses CoreAudio's AudioComponentFindNext, which walks
     // the system component registry — `extra_paths` doesn't apply. Honor
     // `only_extra_paths` by skipping AU entirely when the caller wants a
-    // hermetic path-list scan. Codex 2026-04-21 review on #545.
+    // hermetic path-list scan.
     if (options.scan_au && !options.only_extra_paths) {
         auto au_plugins = scan_audio_units();
         all.insert(all.end(), au_plugins.begin(), au_plugins.end());

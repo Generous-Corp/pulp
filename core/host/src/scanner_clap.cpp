@@ -40,7 +40,7 @@ std::string resolve_clap_binary(const std::string& path) {
 
 uint32_t cap_clap_plugin_count(uint32_t count) noexcept {
     // No real CLAP bundle exposes thousands of plugins; clamp an untrusted
-    // count so a malformed factory can't drive an absurd allocation (#2703).
+    // count so a malformed factory can't drive an absurd allocation.
     constexpr uint32_t kMaxClapPluginsPerBundle = 1024;
     return count > kMaxClapPluginsPerBundle ? kMaxClapPluginsPerBundle : count;
 }
@@ -65,16 +65,11 @@ PluginInfo make_filename_fallback(const std::string& path) {
 //
 // EVERY call into the loaded bundle (entry->init, entry->get_factory,
 // factory->get_plugin_count, factory->get_plugin_descriptor) is
-// wrapped in try/catch because the plugin's static init or descriptor
-// accessor can throw arbitrary C++ exceptions across the C ABI of
-// CLAP. Pulp #812 surfaced exactly this: a Pulp-built plugin with a
-// malformed JSON config threw `choc::json::ParseError` from inside
-// its bridge code at dlopen time, the unhandled exception walked up
-// past the C boundary, and `pulp scan` aborted with SIGABRT —
-// killing the entire scan even though all the *other* plugins
-// scanned cleanly. The catch boundary turns those crashes into
-// per-plugin warnings + filename-fallback entries, so one bad
-// neighbor can't take down the whole report.
+// wrapped in try/catch because a plugin's static init or descriptor
+// accessor can throw arbitrary C++ exceptions across the CLAP C ABI.
+// The catch boundary turns those failures into per-plugin warnings +
+// filename-fallback entries, so one bad bundle cannot take down the
+// whole scan.
 //
 // `catch (...)` is the broad sweep deliberately: the throwing plugin
 // might use a different C++ runtime than this binary (e.g. statically-
@@ -88,19 +83,16 @@ std::vector<PluginInfo> scan_clap_bundle_descriptors(const std::string& path) {
     auto binary = resolve_clap_binary(path);
     void* handle = dlopen(binary.c_str(), RTLD_LAZY | RTLD_LOCAL);
     if (!handle) { // LCOV_EXCL_START
-        // Defensive #812 fallback. Triggered only when dlopen itself
-        // fails — a malformed/corrupt CLAP bundle. Same family as the
-        // try/catch blocks below: not reachable from a unit test that
-        // doesn't ship a deliberately-broken CLAP fixture. The user-
-        // visible surface is exercised by `pulp scan --no-load`
-        // (test_cli_shellout.cpp [issue-812]).
+        // Defensive fallback for malformed/corrupt CLAP bundles. Same family
+        // as the try/catch blocks below: not reachable from a unit test that
+        // doesn't ship a deliberately broken CLAP fixture. The user-visible
+        // surface is exercised by `pulp scan --no-load`.
         //
-        // ASan caught (PR #1862 macOS ARM64 lane, 2026-05-12): cache
-        // `dlerror()` in a local before the format call. POSIX
-        // dlerror() clears its internal state after every call, so a
-        // ternary `dlerror() ? dlerror() : "..."` calls it twice and
-        // the SECOND call returns nullptr. std::format's
-        // string_view(nullptr) ctor then runs strlen on null → SEGV.
+        // Cache `dlerror()` in a local before formatting the warning. POSIX
+        // dlerror() clears its internal state after every call, so a ternary
+        // `dlerror() ? dlerror() : "..."` calls it twice and the second call
+        // returns nullptr. std::format's string_view(nullptr) constructor can
+        // then run strlen on null.
         const char* err = dlerror();
         runtime::log_warn("CLAP scan: dlopen failed for '{}': {}",
                           binary, err ? err : "unknown");
@@ -110,8 +102,8 @@ std::vector<PluginInfo> scan_clap_bundle_descriptors(const std::string& path) {
 
     auto* entry = static_cast<const clap_plugin_entry_t*>(dlsym(handle, "clap_entry"));
     if (!entry || !entry->init || !entry->get_factory) { // LCOV_EXCL_START
-        // Defensive #812 fallback — bundle dlopen'd OK but doesn't
-        // expose a valid clap_entry. Same rationale as above.
+        // Defensive fallback: bundle dlopen'd OK but doesn't expose a valid
+        // clap_entry.
         runtime::log_warn("CLAP scan: no clap_entry in '{}'", binary);
         dlclose(handle);
         results.push_back(make_filename_fallback(path));
@@ -122,19 +114,16 @@ std::vector<PluginInfo> scan_clap_bundle_descriptors(const std::string& path) {
     try {
         init_ok = entry->init(path.c_str());
     } catch (const std::exception& e) { // LCOV_EXCL_START
-        // Defensive #812 guard. Triggered only when a plugin's
-        // static-init code throws across the C ABI of clap_entry —
-        // not reachable from a unit test that doesn't ship its own
-        // throwing CLAP fixture, so excluded from coverage. The
-        // user-visible benefit is exercised by `pulp scan --no-load`
-        // (see test_cli_shellout.cpp [issue-812]).
-        runtime::log_warn("CLAP scan: entry->init threw for '{}': {} (#812 guard)",
+        // Defensive boundary for plugins that throw across clap_entry.
+        // Excluded from coverage because it requires a throwing CLAP fixture;
+        // the user-visible benefit is exercised by `pulp scan --no-load`.
+        runtime::log_warn("CLAP scan: entry->init threw for '{}': {}",
                           path, e.what());
         dlclose(handle);
         results.push_back(make_filename_fallback(path));
         return results;
     } catch (...) {
-        runtime::log_warn("CLAP scan: entry->init threw unknown exception for '{}' (#812 guard)",
+        runtime::log_warn("CLAP scan: entry->init threw unknown exception for '{}'",
                           path);
         dlclose(handle);
         results.push_back(make_filename_fallback(path));
@@ -151,17 +140,15 @@ std::vector<PluginInfo> scan_clap_bundle_descriptors(const std::string& path) {
         factory = static_cast<const clap_plugin_factory_t*>(
             entry->get_factory(CLAP_PLUGIN_FACTORY_ID));
     } catch (const std::exception& e) { // LCOV_EXCL_START
-        runtime::log_warn("CLAP scan: get_factory threw for '{}': {} (#812 guard)",
+        runtime::log_warn("CLAP scan: get_factory threw for '{}': {}",
                           path, e.what());
     } catch (...) {
-        runtime::log_warn("CLAP scan: get_factory threw unknown exception for '{}' (#812 guard)",
+        runtime::log_warn("CLAP scan: get_factory threw unknown exception for '{}'",
                           path);
     } // LCOV_EXCL_STOP
 
     if (!factory || !factory->get_plugin_count || !factory->get_plugin_descriptor) { // LCOV_EXCL_START
-        // Defensive #812 fallback — factory pointer or its method
-        // table is unusable. Same rationale as the dlopen / clap_entry
-        // fallbacks above.
+        // Defensive fallback: factory pointer or its method table is unusable.
         try { entry->deinit(); } catch (...) {}
         dlclose(handle);
         if (results.empty()) results.push_back(make_filename_fallback(path));
@@ -172,17 +159,17 @@ std::vector<PluginInfo> scan_clap_bundle_descriptors(const std::string& path) {
     try {
         count = factory->get_plugin_count(factory);
     } catch (const std::exception& e) { // LCOV_EXCL_START
-        runtime::log_warn("CLAP scan: get_plugin_count threw for '{}': {} (#812 guard)",
+        runtime::log_warn("CLAP scan: get_plugin_count threw for '{}': {}",
                           path, e.what());
     } catch (...) {
-        runtime::log_warn("CLAP scan: get_plugin_count threw unknown exception for '{}' (#812 guard)",
+        runtime::log_warn("CLAP scan: get_plugin_count threw unknown exception for '{}'",
                           path);
     } // LCOV_EXCL_STOP
     // A malformed bundle can RETURN (not throw) an absurd count; reserve(count)
     // would then throw bad_alloc/length_error outside the per-bundle fallback
-    // and abort the whole scan (#2703). Cap it before use.
+    // and abort the whole scan. Cap it before use.
     if (uint32_t capped = cap_clap_plugin_count(count); capped != count) {
-        runtime::log_warn("CLAP scan: '{}' reported {} plugins; capping at {} (#2703 guard)",
+        runtime::log_warn("CLAP scan: '{}' reported {} plugins; capping at {}",
                           path, count, capped);
         count = capped;
     }
@@ -192,11 +179,11 @@ std::vector<PluginInfo> scan_clap_bundle_descriptors(const std::string& path) {
         try {
             desc = factory->get_plugin_descriptor(factory, i);
         } catch (const std::exception& e) { // LCOV_EXCL_START
-            runtime::log_warn("CLAP scan: get_plugin_descriptor[{}] threw for '{}': {} (#812 guard)",
+            runtime::log_warn("CLAP scan: get_plugin_descriptor[{}] threw for '{}': {}",
                               i, path, e.what());
             continue;
         } catch (...) {
-            runtime::log_warn("CLAP scan: get_plugin_descriptor[{}] threw unknown for '{}' (#812 guard)",
+            runtime::log_warn("CLAP scan: get_plugin_descriptor[{}] threw unknown for '{}'",
                               i, path);
             continue;
         } // LCOV_EXCL_STOP
@@ -215,7 +202,7 @@ std::vector<PluginInfo> scan_clap_bundle_descriptors(const std::string& path) {
         //
         // Category assignment runs in two passes so a plugin advertising
         // both `audio-effect` and `analyzer` gets the more specific
-        // Analyzer label regardless of feature string order (#198 P2).
+        // Analyzer label regardless of feature string order.
         info.is_instrument = false;
         info.is_effect = true;
         bool has_audio_effect_tag = false;
@@ -231,10 +218,9 @@ std::vector<PluginInfo> scan_clap_bundle_descriptors(const std::string& path) {
                     has_audio_effect_tag = true;
                 } else if (std::strcmp(*f, CLAP_PLUGIN_FEATURE_NOTE_EFFECT) == 0) {
                     info.category = "MidiEffect";
-                    // #198 P2: note-effects are still effects — they process
-                    // MIDI, just with no audio output. Before this fix
-                    // is_effect was cleared here so existing filters that
-                    // grouped by is_effect silently dropped MIDI effects.
+                    // Note-effects are still effects: they process MIDI, just
+                    // with no audio output. Keep them in existing filters that
+                    // group by is_effect.
                     info.is_effect = true;
                     info.is_instrument = false;
                     info.supports_midi_in = true;
@@ -259,7 +245,7 @@ std::vector<PluginInfo> scan_clap_bundle_descriptors(const std::string& path) {
     }
 
     try { entry->deinit(); } catch (...) { // LCOV_EXCL_START
-        runtime::log_warn("CLAP scan: entry->deinit threw for '{}' (#812 guard)", path);
+        runtime::log_warn("CLAP scan: entry->deinit threw for '{}'", path);
     } // LCOV_EXCL_STOP
     dlclose(handle);
     if (results.empty()) results.push_back(make_filename_fallback(path));
