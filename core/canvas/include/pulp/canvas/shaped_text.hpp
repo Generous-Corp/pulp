@@ -1,25 +1,16 @@
 // shaped_text.hpp
 //
-// Pulp #2163 follow-up — Phase 1 / Slice 1.2.a of the font-subsystem-
-// hardening v2 roadmap (planning/2026-05-17-font-subsystem-hardening-v2.md).
-//
 // `ShapedText` is the canonical artifact produced by `TextRunPlanner::shape`.
-// Both `TextShaper::prepare()` (measurement) and `SkiaCanvas::fill_text`
-// (paint) are intended to consume the SAME `ShapedText` instance — the
-// measurement pipeline computes line layout from the artifact's per-run
-// advances; the paint pipeline walks the same artifact's glyph IDs. They
-// cannot diverge. That's how v2 closes the v1 doc's "measurement ≠ paint"
-// killer gap.
+// Measurement and paint paths are intended to consume this same artifact:
+// measurement uses the per-run advances and line-break opportunities, while
+// paint can walk the same runs, clusters, and eventual glyph buffers. Keeping
+// the text artifact shared prevents layout and rendering from inventing
+// incompatible segmentation rules.
 //
-// Slice 1.2.a (this header) lays down the data structures + planner entry
-// point. The Phase 1 implementation wraps existing TextShaper / SkShaper
-// behind a single-run ShapedText so downstream consumers can be wired
-// without forcing the full bidi/script iterator replacement at the same
-// time. Slice 1.2.a finish (separate commit) swaps the trivial bidi/script
-// iterators for the real `SkShaper::MakeIcuBidiRunIterator` /
-// `MakeHbIcuScriptRunIterator` and emits multiple runs when warranted.
-// The data shape declared here doesn't change between the skeleton and
-// the finish — Phase 2 consumers can target it today.
+// `TextRunPlanner` fills this structure with resolved font traces, bidi/script
+// runs, UAX #29-lite grapheme clusters, heuristic line-break opportunities, and
+// UTF-8 / UTF-16 / cluster index maps. Glyph buffers remain optional until the
+// painting path asks SkShaper for per-glyph output.
 
 #pragma once
 
@@ -51,10 +42,9 @@ struct RunMetrics {
 
 /// One run inside a `ShapedText` — a maximal slice of the input text
 /// that shares (bidi level × script × language × resolved typeface ×
-/// applied features × applied variation axes). Slice 1.2.a skeleton
-/// emits one or more runs; the planner only splits when fallback
-/// changes the typeface mid-text (Latin + emoji within one input).
-/// The real bidi/script/cluster split arrives in Slice 1.2.a finish.
+/// applied features × applied variation axes). The current planner splits
+/// on bidi/script iterator boundaries when Skia's ICU-backed iterators are
+/// available, or on the fallback bidi analyzer when they are not.
 struct ShapedRun {
     ResolvedFont font;            ///< Resolved typeface + trace.
     RunMetrics   metrics;
@@ -84,24 +74,21 @@ struct ShapedRun {
 
 // ── Clusters + line breaks ───────────────────────────────────────────────
 
-/// One grapheme cluster in the input. Slice 1.2.a skeleton produces a
-/// simple per-codepoint cluster table; UAX #29 + ZWJ + RI-pair correct
-/// clustering arrives in 1.2.a finish (the multilingual torture corpus
-/// at `test/text_corpus/corpus.json` documents the discrepancy in
-/// `SCHEMA_NOTES.md`).
+/// One grapheme cluster in the input. The planner builds these with the
+/// shared `cluster_step()` walker so editor movement, selection, and text
+/// measurement use the same UTF-8 cluster ranges.
 struct ClusterEntry {
     std::uint32_t utf8_start  = 0;  ///< UTF-8 byte offset (start, inclusive).
     std::uint32_t utf8_end    = 0;  ///< UTF-8 byte offset (end, exclusive).
     std::uint32_t run_index   = 0;  ///< Index into `ShapedText::runs`.
-    std::uint32_t glyph_start = 0;  ///< First glyph in that run.
-    std::uint32_t glyph_count = 0;  ///< Number of glyphs belonging to this cluster.
+    std::uint32_t glyph_start = 0;  ///< First glyph in that run; 0 until glyph buffers are populated.
+    std::uint32_t glyph_count = 0;  ///< Glyph count for this cluster; 0 until glyph buffers are populated.
 };
 
-/// Line-break opportunity emitted by ICU's `BreakIterator`. Used by the
-/// line layout step (Slice 1.2.a finish + Phase 2 / Slice 2.4 locale-
-/// aware line breaking). Slice 1.2.a skeleton populates only the obvious
-/// whitespace + hard-newline breaks; ICU dictionary breaks for Thai /
-/// Japanese arrive in Phase 2.
+/// Line-break opportunity used by the line layout step. The planner currently
+/// emits hard-newline and whitespace break opportunities; a future ICU
+/// BreakIterator path can add locale-aware dictionary breaks without changing
+/// this data shape.
 struct LineBreakOpportunity {
     std::uint32_t utf8_offset = 0;
     enum class Kind : std::uint8_t {
@@ -112,16 +99,10 @@ struct LineBreakOpportunity {
 
 // ── Unicode index map ────────────────────────────────────────────────────
 
-/// Per the v2 plan tar pit #3: "Unicode indexing is a tax everywhere."
-/// JS counts UTF-16, ICU counts UTF-16-or-scalar-depending-on-API,
-/// HarfBuzz counts cluster, a11y APIs vary by platform, Pulp's internal
-/// storage is UTF-8. This index map is the single computed structure
-/// every consumer can convert through without re-computing offsets ad
-/// hoc.
-///
-/// Slice 1.2.a skeleton populates UTF-8 ↔ Unicode-scalar-offset only;
-/// UTF-16 (for JS / IME / macOS+Windows a11y) and cluster ↔ glyph
-/// range arrives in 1.2.a finish.
+/// JS counts UTF-16, ICU APIs vary between UTF-16 and scalar offsets,
+/// HarfBuzz reports cluster indices, accessibility APIs vary by platform,
+/// and Pulp's internal storage is UTF-8. This index map gives consumers a
+/// shared conversion table instead of making each path recompute offsets.
 struct UnicodeIndexMap {
     /// scalar_offsets[i] = UTF-8 byte index of the i-th Unicode
     /// scalar value (codepoint). One entry per codepoint plus a
@@ -129,11 +110,12 @@ struct UnicodeIndexMap {
     std::vector<std::uint32_t> scalar_offsets;
 
     /// utf16_offsets[i] = UTF-16 code-unit index of the i-th Unicode
-    /// scalar. Empty in the skeleton; populated in 1.2.a finish.
+    /// scalar. One entry per codepoint plus a sentinel equal to the total
+    /// UTF-16 code-unit count.
     std::vector<std::uint32_t> utf16_offsets;
 
-    /// utf8_byte → cluster index. One entry per UTF-8 byte. Empty in
-    /// the skeleton; populated in 1.2.a finish.
+    /// utf8_byte → cluster index. One entry per UTF-8 byte plus a trailing
+    /// sentinel equal to `clusters.size()`.
     std::vector<std::uint32_t> byte_to_cluster;
 
     std::size_t scalar_count() const noexcept {
@@ -158,14 +140,12 @@ struct ShapedText {
 
     /// Sum of per-run `advance_total`. The width the painter will
     /// produce when this `ShapedText` is rendered on a single line
-    /// without wrapping. Slice 1.3 parity harness asserts this
-    /// matches the painted pixel bbox within ±0.5 px.
+    /// without wrapping.
     float total_width = 0.0f;
 
     /// Worst-case ascent / descent / leading across all runs on a
     /// single notional line. Used for mixed-fontSize line layout
-    /// (max ascent + max descent) — the property v2 calls out
-    /// as Phase 1 / P0 (it's parity, not polish).
+    /// (max ascent + max descent).
     RunMetrics overall_metrics;
 
     bool empty() const noexcept { return runs.empty(); }

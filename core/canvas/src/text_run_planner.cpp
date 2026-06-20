@@ -1,14 +1,11 @@
-// text_run_planner.cpp — Pulp #2163 follow-up, Phase 1 / Slice 1.2.a.
+// text_run_planner.cpp
 //
-// Slice 1.2.a finish: real ICU/HarfBuzz iterators replace the trivial
-// single-run skeleton. Bidi level + script tag are computed per run via
+// Bidi level + script tag are computed per run via
 // `SkShaper::MakeIcuBiDiRunIterator` + `SkShaper::MakeHbIcuScriptRunIterator`
-// (available because `external/skia-build/build/mac-gpu/lib/Release/libskshaper.a`
-// statically links the ICU-backed builders — verified with `nm` at
-// implementation time). When Skia is not linked (PULP_HAS_SKIA undefined),
-// the planner falls back to a single run with bidi level / script tag
-// inferred from `FontOptions::direction`. The data shape produced is the
-// same in both paths; only the run count varies.
+// when Skia exposes the ICU-backed builders. When Skia is not linked
+// (PULP_HAS_SKIA undefined), the planner falls back to the lightweight
+// BidiAnalyzer path and emits compatible run records with script tags set to
+// Common.
 //
 // Cluster construction: the public `cluster_step()` walker
 // (font_registry_stubs.cpp) is UAX #29-lite — it knows ZWJ, regional-
@@ -16,8 +13,7 @@
 // modifiers, and Hangul T jamo. The planner walks it forward through
 // every run-spanning region to build `ShapedText::clusters` and the
 // `byte_to_cluster` index map. This is the same walker `TextEditor`'s
-// caret-motion uses (Slice 3.6) so the cluster boundaries the painter
-// and editor see are identical.
+// caret-motion uses, so editing and measurement share cluster boundaries.
 //
 // UnicodeIndexMap: scalar_offsets (per-codepoint UTF-8 byte offsets +
 // trailing sentinel), utf16_offsets (per-codepoint UTF-16 code unit
@@ -43,9 +39,7 @@
 #ifdef PULP_HAS_SKIA
 // The bundled Skia archive ships `libskshaper.a` + `libskunicode_icu.a`
 // with the ICU-backed bidi + HarfBuzz/ICU-backed script run-iterator
-// builders linked in (verified at impl time with
-// `nm libskshaper.a | grep MakeIcuBiDi`). The corresponding
-// declarations in `SkShaper.h` are gated by
+// builders linked in. The corresponding declarations in `SkShaper.h` are gated by
 // `SK_SHAPER_UNICODE_AVAILABLE` / `SK_SHAPER_HARFBUZZ_AVAILABLE`, which
 // upstream's prebuilt distribution doesn't pre-define for downstream
 // consumers. We define both *before* including the header so the
@@ -166,15 +160,15 @@ void populate_codepoint_offsets(std::string_view text, UnicodeIndexMap& map) {
     map.utf16_offsets.push_back(utf16_idx);
 }
 
-// Walk the public UAX #29 `cluster_step` (Slice 3.6) forward through
+// Walk the public UAX #29-lite `cluster_step` forward through
 // `text`, emitting one `ClusterEntry` per grapheme cluster. The walker
 // honors ZWJ, RI parity, virama+consonant, combining marks, skin-tone
 // modifiers, Hangul T jamo, and variation selectors. Each cluster
 // stores its UTF-8 byte range plus the run index it belongs to; glyph
-// counts and starts are intentionally left at 0 in this slice — the
+// counts and starts are intentionally left at 0 for now — the
 // painter does not consume them yet, and populating them requires
-// driving SkShaper end-to-end which is the Phase-2 follow-on. The
-// run index is computed by binary-searching `run_starts`.
+// driving SkShaper end-to-end. The run index is computed by searching
+// `run_starts`.
 void populate_clusters(std::string_view text,
                        const std::vector<std::size_t>& run_starts,
                        std::vector<ClusterEntry>& clusters,
@@ -226,9 +220,8 @@ void populate_clusters(std::string_view text,
 void populate_line_breaks(std::string_view text,
                           std::vector<LineBreakOpportunity>& out) {
     out.clear();
-    // Slice 1.2.a finish keeps the heuristic break opportunities; the
-    // ICU BreakIterator-driven path is Slice 2.4 (locale-aware line
-    // breaking) and consumes the same out array.
+    // Keep the current heuristic break opportunities in the same array an
+    // ICU BreakIterator-driven path can populate later.
     for (std::size_t i = 0; i < text.size(); ++i) {
         char c = text[i];
         if (c == '\n') {
@@ -305,7 +298,6 @@ segment_with_icu(std::string_view text, std::uint8_t base_level) {
         // remain valid for the just-consumed run. Substituting
         // base_level / 0 here would shape pure-RTL text as LTR and
         // drop the script tag for any final or single-script run.
-        // See Codex review on PR #2311.
         seg.bidi_level = bidi->currentLevel();
         seg.script_tag = scr->currentScript();
 
@@ -430,19 +422,15 @@ ShapedText TextRunPlanner::shape(std::string_view text,
     populate_codepoint_offsets(text, out.index_map);
     populate_line_breaks(text, out.line_breaks);
 
-    // Resolve the typeface via FontResolver (same path
-    // SkiaCanvas/TextShaper use post-Slice-1.1.a). The resolved
-    // ResolvedFont carries the trace + scope + generation we record
-    // on every run we emit.
+    // Resolve the typeface via FontResolver, matching the path used by
+    // SkiaCanvas/TextShaper. The resolved ResolvedFont carries the trace,
+    // scope, and generation we record on every run we emit.
     ResolvedFont resolved = FontResolver::instance().resolve_family_list(opts);
 
     if (text.empty()) {
-        // Preserve the pre-1.2.a-finish contract: even empty input
-        // yields exactly one zero-width run so callers can rely on
-        // `out.runs[0]` existing for ascender/leading queries on an
-        // empty label without branching on size. The test target
-        // pulp-test-font-options (TextRunPlanner handles empty text)
-        // asserts this shape.
+        // Even empty input yields exactly one zero-width run so callers can
+        // read `out.runs[0]` for ascender/leading queries on an empty label
+        // without branching on size.
         ShapedRun run;
         run.font          = std::move(resolved);
         run.logical_start = 0;
@@ -466,12 +454,10 @@ ShapedText TextRunPlanner::shape(std::string_view text,
     segments = segment_with_icu(text, base_level);
 #endif
     if (segments.empty()) {
-        // Non-Skia / ICU-iterator-construction-failed path. Item 6.8
-        // wires SheenBidi in here so Arabic / Hebrew / mixed-direction
-        // text still gets a paragraph-level bidi pass without ICU. The
-        // script tag stays 0 (script-iterator integration tracks
-        // separately — Pulp #2163 finish); what we gain is correct
-        // per-run embedding levels feeding the rest of the pipeline.
+        // Non-Skia / ICU-iterator-construction-failed path. BidiAnalyzer
+        // still gives Arabic / Hebrew / mixed-direction text paragraph-level
+        // embedding runs without ICU. Script tags stay 0 in this path because
+        // there is no non-Skia script iterator here.
         const auto bidi_dir =
             (opts.direction == BaseDirection::RTL)
                 ? BidiBaseDirection::RTL
@@ -540,12 +526,10 @@ ShapedText TextRunPlanner::shape(std::string_view text,
 
         std::string_view segment_view = text.substr(seg.start, seg.end - seg.start);
 
-        // Measurement uses the existing TextShaper path — the SkShaper
-        // glyph buffers + per-glyph advances are downstream consumers'
-        // job (Phase 2 / Slice 2.4 locale-aware line breaking exercises
-        // them). What matters here is that each run reports its own
-        // sub-string width so `total_width` is the sum of run widths,
-        // not a re-measurement of the whole input.
+        // Measurement uses the existing TextShaper path. Per-glyph buffers are
+        // populated by downstream consumers when they need glyph output; this
+        // pass only needs each run's sub-string width so `total_width` is the
+        // sum of run widths, not a re-measurement of the whole input.
         auto prepared = shaper.prepare(segment_view, family_str, opts.size);
         run.advance_total  = prepared.total_width();
         run.metrics.ascent  = prepared.ascent();
@@ -576,7 +560,6 @@ ShapedText TextRunPlanner::shape(std::string_view text,
     return out;
 }
 
-// pulp #2163 / font v2 Slice 3.7 — parallel shaping.
 // Fans shape() calls out via std::async(launch::async). Resolver,
 // FontFlightRecorder, and the per-planner cache are all thread-safe
 // (internal mutexes); ShapedText is owned-by-value so moving it out
