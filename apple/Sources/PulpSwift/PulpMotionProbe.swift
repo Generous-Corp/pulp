@@ -58,7 +58,7 @@ public struct PulpMotionTraceModifier: ViewModifier {
         // `pulpMotionTrace` attaches would otherwise race the global
         // ambient provenance slot. Serialize the set / publish / clear
         // triple under `PulpMotionRuntime.withAmbientProvenance` so
-        // each attach sees its own provenance stamp (issue #2150).
+        // each attach sees its own provenance stamp.
         PulpMotionRuntime.withAmbientProvenance(kind: "swiftui", id: name) {
             for metric in metrics {
                 switch metric.kind {
@@ -139,8 +139,8 @@ public final class PulpMotionGeometryProbe {
         self.name = name
         self.metricName = metric
         if PulpMotion.isTracingEnabled {
-            // Same race surface as `PulpMotionTraceModifier.attachIfNeeded`
-            // (issue #2150): serialize the set / register / clear under
+            // Same race surface as `PulpMotionTraceModifier.attachIfNeeded`:
+            // serialize the set / register / clear under
             // the runtime's ambient lock so concurrent UIKit / AppKit
             // probe constructions can't interleave ambient slot
             // mutations.
