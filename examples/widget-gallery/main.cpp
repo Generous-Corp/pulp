@@ -1,7 +1,7 @@
 // Widget Gallery — renders the Ink & Signal component gallery (every supported
 // primitive in one board) to PNG, headless. It triples as living documentation,
-// a reskin-preview surface, and the visual-regression corpus (Phase 6 diffs
-// these renders). Swap --preset / --theme to preview a reskin.
+// a reskin-preview surface, and the visual-regression corpus used to compare
+// theme/rendering changes. Swap --preset / --theme to preview a reskin.
 //
 //   pulp-widget-gallery --out /tmp/gallery [--theme light|dark|both] [--preset ink-signal]
 //
