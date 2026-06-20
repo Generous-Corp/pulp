@@ -10,8 +10,8 @@ namespace pulp::format {
 bool host_supports_ara() {
 #ifdef PULP_HAS_ARA
     // SDK is compiled in; actual host-query lives in the format-adapter
-    // companion factories (VST3 / AU / CLAP). Pulp-side availability is
-    // gated by those slices landing — workstream 06 slices 6.3..6.5.
+    // companion factories (VST3 / AU / CLAP). This Pulp-side helper stays
+    // conservative until adapters can query the active host.
     return false;
 #else
     return false;
@@ -55,4 +55,3 @@ const void* ara_companion_factory_for(AraDocumentController* /*controller*/) {
 #endif
 
 }  // namespace pulp::format
-
