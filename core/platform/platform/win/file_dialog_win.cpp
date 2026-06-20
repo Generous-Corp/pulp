@@ -1,4 +1,4 @@
-// Windows native file dialogs via the Vista+ IFileDialog COM API (#301 / W5).
+// Windows native file dialogs via the Vista+ IFileDialog COM API.
 //
 // Windows previously had no file_dialog impl — calls fell through to the
 // backend-routed stub and returned "no selection". This provides a real
@@ -8,9 +8,9 @@
 // per call (apartment-threaded) and torn down after, so the dialog works
 // regardless of the caller's COM state.
 //
-// Scope (MVP, matching the Linux portal backend): open one/many, save (with a
-// suggested name), and choose-folder. File-type filters and a preselected
-// folder are a follow-up — the dialog works without them. CLSIDs/IIDs are
+// Supported operations, matching the Linux portal backend: open one/many, save
+// with a suggested name, and choose-folder. File-type filters and a preselected
+// folder are not wired yet, but the dialog works without them. CLSIDs/IIDs are
 // resolved with __uuidof / IID_PPV_ARGS so we don't depend on the named GUID
 // constants in uuid.lib; only ole32 is linked.
 

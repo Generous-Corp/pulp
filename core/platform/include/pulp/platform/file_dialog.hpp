@@ -15,7 +15,7 @@ struct FileFilter {
 
 // Native file open/save dialogs.
 //
-// Platform notes (#301):
+// Platform notes:
 //   - macOS/iOS: native NSOpenPanel/NSSavePanel/UIDocumentPicker.
 //   - Windows/Linux/Android: requires a host-registered Backend via
 //     FileDialog::set_backend(). Without one, every call returns
@@ -50,7 +50,7 @@ public:
         const std::string& title = "Choose Folder",
         const std::string& default_path = "");
 
-    // ── Host-registered backend (#301) ──────────────────────────────────
+    // ── Host-registered backend ────────────────────────────────────────
     //
     // On platforms without a native built-in backend (Windows,
     // Linux, Android) the host app can install a backend that
