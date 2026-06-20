@@ -51,16 +51,14 @@ private:
 
 /// mDNS-based network service discovery (Bonjour/DNS-SD).
 ///
-/// **Status — experimental (#302).** The core/events module ships
-/// the API surface but no concrete backend. `browse()` with no
+/// **Status — experimental.** The core/events module ships
+/// the API surface; platform backends are optional. `browse()` with no
 /// backend installed is a no-op (does not claim running); nothing
 /// will ever be discovered until a host application installs a
 /// backend via `install_backend()`. `register_service()` without
 /// a backend returns false.
 ///
-/// A future follow-up will ship per-platform backends
-/// (Bonjour/dns-sd on mac, Avahi on Linux, WinRT on Windows,
-/// NsdManager on Android). Until then consumers that need real
+/// Consumers that need real
 /// mDNS must supply their own backend (e.g., linking an
 /// application-owned Bonjour wrapper and plumbing the callbacks).
 class NetworkServiceDiscovery {
@@ -97,7 +95,7 @@ public:
                                       std::string_view type,
                                       uint16_t port) = 0;
         /// Default implementation drops the TXT records and forwards
-        /// to the legacy 3-arg register_service. Backends with real
+        /// to the base three-argument register_service. Backends with real
         /// TXT support (e.g., Bonjour) override this method.
         virtual bool register_service(std::string_view name,
                                       std::string_view type,
