@@ -1,6 +1,5 @@
-// pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — verify
-// the LTR-only fast path: Start → Left, End → Right, inset / insetBlock
-// / insetInline shorthand fan-out.
+// Verify the LTR-only fast path: Start -> Left, End -> Right, and
+// inset / insetBlock / insetInline shorthand fan-out.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { applyChangedProps } from '../src/prop-applier.js';
@@ -32,7 +31,7 @@ function setFlexCalls(b: MockBridge, key: string) {
     return b.calls.filter((c) => c.fn === 'setFlex' && c.args[1] === key);
 }
 
-describe('rn logical-edge bundle (pulp #1434 sub-agent #27)', () => {
+describe('prop-applier logical-edge bundle', () => {
     it('marginStart routes to margin_left (LTR)', () => {
         applyChangedProps(makeInstance(), {}, { marginStart: 8 });
         expect(setFlexCalls(bridge, 'margin_left')[0].args).toEqual(['k', 'margin_left', 8]);
