@@ -9,13 +9,13 @@
 //      discover audio input/output port indices (lv2:AudioPort +
 //      lv2:InputPort / lv2:OutputPort, and lv2:index). We deliberately
 //      don't pull in lilv — that adds serd/sord/sratom/lilv (~15 MB of
-//      third-party copyleft-adjacent code) and the discovery is simple
-//      enough to get right with a regex for the MVP port set.
+//      third-party copyleft-adjacent code) and the discovery is bounded to the
+//      current audio-port host surface.
 //   4. Wires LV2_Descriptor's connect_port/activate/run/deactivate/cleanup
 //      into the PluginSlot interface.
 //
 // Parameter automation (lv2:ControlPort), MIDI (LV2 atom ports), worker
-// extension, state extension, and editors remain follow-up work.
+// extension, state extension, and editors are not exposed by this backend yet.
 
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/runtime/log.hpp>
@@ -323,8 +323,8 @@ public:
     int latency_samples() const override { return 0; }
     int tail_samples() const override { return 0; }
 
-    // Item 4.5 — typed plugin introspection. Surface the LV2 instance
-    // handle and URI so callers can reach into LV2 vendor extensions.
+    // Typed plugin introspection surfaces the LV2 instance handle and URI so
+    // callers can reach into LV2 vendor extensions.
     void accept(ExtensionsVisitor& visitor) const override {
         Lv2Extension ext;
         ext.instance = reinterpret_cast<void*>(instance_);
