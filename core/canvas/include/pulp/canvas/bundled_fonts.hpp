@@ -15,9 +15,9 @@
 // before falling back to a `matchFamilyStyle` query that depends on the host
 // system.
 //
-// Issue: pulp #932 — register external/fonts/*.ttf with SkFontMgr at startup
-// so that `canvas.set_font("JetBrains Mono", ...)` succeeds on a stock macOS
-// machine that doesn't have JetBrains Mono installed system-wide.
+// The embedded families are materialized through Skia on first lookup so
+// `canvas.set_font("JetBrains Mono", ...)` succeeds even on machines that
+// do not have JetBrains Mono installed system-wide.
 //
 // This header is only meaningful when `PULP_HAS_SKIA` is defined; without
 // Skia, bundled-font registration is a no-op.
@@ -40,7 +40,7 @@ class SkTypeface;
 
 namespace pulp::canvas {
 
-// ── Public font-registration API (pulp #1150) ───────────────────────────────
+// ── Public font-registration API ─────────────────────────────────────────
 // Plugin authors bundle their own .ttf/.otf files (e.g. via the CMake
 // `pulp_register_font(target NAME path/to/font.ttf [FAMILY "..."])` macro
 // or by hand-rolling pulp_add_binary_data) and call `register_font(...)`
@@ -65,11 +65,12 @@ namespace pulp::canvas {
 /// platform font manager was available, the family name was empty (and
 /// no override was supplied), or `PULP_HAS_SKIA` is not defined.
 ///
-/// Idempotent: calling `register_font` twice with the same family is
-/// safe — the second call replaces the first, but the typeface cache is
-/// invalidated so callers that already resolved the family see the new
-/// face on the next lookup. There is no `unregister_font` today; the
-/// expected lifetime is "process".
+/// Calling `register_font` repeatedly for one family is safe: each distinct
+/// Skia typeface is retained so Regular/Bold/Italic faces can share the same
+/// family key, while duplicate Skia identities are ignored. Successful
+/// registrations bump the font-generation counter so downstream caches flush
+/// on the next lookup. There is no `unregister_font` today; the expected
+/// lifetime is "process".
 bool register_font(const std::uint8_t* data, std::size_t size,
                    const std::string& family_override = "");
 
@@ -98,10 +99,9 @@ std::uint64_t font_registration_generation() noexcept;
 /// process-global font state outside `register_font(...)`.
 void bump_font_registration_generation() noexcept;
 
-// ── Phase 2 skeleton — async lifecycle + font security ──────────────────
-// pulp #2163 — font v2 Slices 2.1 / 2.8 surface declarations.
+// ── Async lifecycle + font validation ────────────────────────────────────
 
-/// Async font lifecycle state (Slice 2.1).
+/// Async font lifecycle state.
 enum class FontState : std::uint8_t {
     Pending,
     Loaded,
@@ -109,36 +109,35 @@ enum class FontState : std::uint8_t {
     Substituted,
 };
 
-/// Validate font bytes before handing them to Skia (Slice 2.8). Skeleton
-/// confirms Skia can parse the bytes; full sanitizer is the impl slice.
+/// Validate font bytes before handing them to Skia. Skia builds perform
+/// structural sfnt validation of the header, table directory, required tables,
+/// and critical table lengths; non-Skia builds accept any non-empty buffer
+/// because there is no parser available on that lane.
 bool validate_font_bytes(const std::uint8_t* data, std::size_t size);
 
-/// Slice 2.1 — async font lifecycle. Schedule a font registration from a
-/// URL or filesystem path and return a future that resolves to the
-/// final `FontState`. Supported URL forms:
+/// Schedule a font registration from a URL or filesystem path and return a
+/// future that resolves to the final `FontState`. Supported URL forms:
 ///   * `file:///abs/path/to/font.ttf` — decoded to an absolute path and
-///     dispatched to `register_font_file` via `std::async`.
-///   * `/abs/path/to/font.ttf` — treated as a local path, same dispatch.
+///     dispatched to `register_font_file` on a background worker.
+///   * `/abs/path/to/font.ttf` — treated as a local path, same background
+///     dispatch.
 ///   * `http://…` / `https://…` — resolved immediately to `Failed`
-///     until the in-tree HTTP fetcher is wired through Slice 2.1.b.
-///     Callers that need network fetches today should pre-download
-///     and call this entry point with a `file://` URL.
+///     because this API does not fetch network resources. Callers that need
+///     network fetches today should pre-download and call this entry point
+///     with a `file://` URL.
 ///
 /// The returned future never blocks the caller. Resolves to `Loaded` on
 /// success, `Failed` on any error (unreadable file, Skia rejection, or
-/// unsupported scheme). The async font cache lives at process scope so
-/// the future is safe to detach.
+/// unsupported scheme). Dropping the future is safe; the worker reports its
+/// result through a detached promise.
 std::future<FontState> register_font_url(const std::string& url,
                                          const std::string& family_override = "");
 
-// ── Phase 3 skeletons — color fonts, WOFF2, TextEditor cluster APIs ────
-// pulp #2163 — font v2 Slices 3.1, 3.5, 3.6 surface declarations. The
-// bodies arrive in the Phase 3 implementation slices; declarations live
-// here so Phase 3 callers can target a stable API now.
+// ── Compressed fonts + text boundary helpers ─────────────────────────────
 
-/// Slice 3.5 — register a WOFF2-compressed font at runtime. Gated on
-/// the Phase 2 sanitizer (validate_font_bytes); rejects malformed
-/// payloads cleanly.
+/// Register a WOFF2-compressed font at runtime. Rejects malformed payloads
+/// cleanly and validates the decompressed sfnt bytes before handing them to
+/// Skia.
 ///
 /// Behaviour today (security-gated, detection-only):
 ///   * Null / empty input → false.
@@ -155,48 +154,46 @@ std::future<FontState> register_font_url(const std::string& url,
 ///     and forwarded to `register_font(...)`.
 ///
 /// Vendoring an in-tree woff2/Brotli decoder is intentionally deferred:
-/// Pulp's MIT release stays free of large third-party blobs until a
-/// real workload demands one. See `planning/2026-05-18-font-hardening-
-/// phase23-execution-plan.md` Slice 3.5.
+/// Pulp's MIT release stays free of large third-party blobs until a real
+/// workload demands one.
 bool register_font_woff2(const std::uint8_t* woff2_data, std::size_t size,
                          const std::string& family_override = "");
 
-/// Slice 3.5 — runtime check for WOFF2 decoder availability. Returns
-/// `false` on builds where no Brotli/woff2 implementation is linked,
-/// meaning `register_font_woff2(...)` cannot succeed regardless of
-/// input. Callers can use this to fall back to a pre-decoded TTF/OTF
-/// payload registered via `register_font(...)` instead.
+/// Runtime check for WOFF2 decoder availability. Returns `false` on builds
+/// where no Brotli/woff2 implementation is linked, meaning
+/// `register_font_woff2(...)` cannot succeed regardless of input. Callers can
+/// use this to fall back to a pre-decoded TTF/OTF payload registered via
+/// `register_font(...)` instead.
 ///
 /// Available on every build (Skia or no Skia), so plugin startup can
 /// branch on it without `#ifdef`s leaking into user code.
 bool woff2_decoder_available() noexcept;
 
-/// Slice 3.6 — grapheme-aware cursor step for TextEditor. Returns the
-/// UTF-8 byte offset of the cluster boundary one step forward (or
-/// backward, when forward=false) from `byte_offset`. Skeleton uses a
-/// naive single-codepoint step; the implementation slice consults the
-/// Phase 1 UnicodeIndexMap for proper UAX #29 cluster boundaries (so
-/// 👨‍👩‍👧‍👦 moves in one step, not 7).
+/// Grapheme-aware cursor step for TextEditor. Returns the UTF-8 byte offset
+/// of the cluster boundary one step forward (or backward, when
+/// `forward=false`) from `byte_offset`. Always available and implemented as a
+/// UAX #29-lite UTF-8 walker, so common emoji ZWJ sequences, regional
+/// indicator pairs, combining marks, variation selectors, virama chains,
+/// skin-tone modifiers, and Hangul trailing jamo move as one cluster.
 std::size_t cluster_step(const std::string& text, std::size_t byte_offset,
                          bool forward = true);
 
-/// Slice 2.4 — locale-aware word break iterator. Returns the UTF-8
-/// byte offset of the next word boundary forward from `byte_offset`
-/// (or backward when forward=false). `locale` is a BCP-47 tag
-/// ("en-US", "ja-JP", ...). Empty locale falls back to ICU's root
-/// locale. When ICU is not linked the implementation returns the
-/// fallback `cluster_step()` result so callers can rely on the
-/// surface universally.
+/// Locale-aware word break iterator. Returns the UTF-8 byte offset of the next
+/// word boundary forward from `byte_offset` (or backward when
+/// `forward=false`). `locale` is a BCP-47 tag ("en-US", "ja-JP", ...). Empty
+/// locale falls back to ICU's root locale. When ICU's public BreakIterator
+/// headers are not available, the implementation returns the fallback
+/// `cluster_step()` result so callers can rely on the surface universally.
 std::size_t word_break_step(const std::string& text,
                             std::size_t byte_offset,
                             const std::string& locale = "",
                             bool forward = true);
 
-/// Slice 2.4 — find all line-break opportunities (UAX #14) in `text`.
-/// Returns UTF-8 byte offsets of every position where the renderer
-/// may legitimately wrap. Always includes the trailing offset == text.size().
-/// When ICU is not linked, this returns offsets at every ASCII space
-/// + the trailing offset, so the API still functions degraded.
+/// Find line-break opportunities in `text`. Returns UTF-8 byte offsets where
+/// the renderer may wrap and always includes the trailing offset ==
+/// text.size(). With ICU BreakIterator support this follows ICU's line-break
+/// iterator; otherwise it returns ASCII space/tab boundaries plus the trailing
+/// offset so the API still functions degraded.
 std::vector<std::size_t> line_break_opportunities(const std::string& text,
                                                   const std::string& locale = "");
 
@@ -206,11 +203,6 @@ std::vector<std::size_t> line_break_opportunities(const std::string& text,
 /// Android / FontConfig manager appropriate for the current OS, or nullptr
 /// on platforms where no manager is available. Lazily constructed; the
 /// same instance is returned for every call.
-///
-/// pulp #2163 / font v2 Slice 1.1.a — consolidates the five identical
-/// `SkFontMgr_New_*` switch blocks that previously lived inside
-/// `skia_canvas.cpp`, `text_shaper.cpp`, `sdf_atlas.cpp`,
-/// `bundled_fonts.cpp` (×2), and the seed copy in `font_resolver.cpp`.
 sk_sp<SkFontMgr> platform_font_manager();
 
 /// Look up a bundled typeface by family name (e.g. "Inter",
@@ -223,10 +215,9 @@ sk_sp<SkFontMgr> platform_font_manager();
 ///   * `mgr` is null (font manager not available on this platform), or
 ///   * No bundled font advertises the requested family name.
 ///
-/// `style` is ignored for now — the bundle currently ships a single weight
-/// per family — but the caller should still pass the requested style so that
-/// future bundle expansions (e.g. JetBrainsMono-Bold) can match without an
-/// API break.
+/// The bundle currently ships only Regular/Upright faces. Off-style requests
+/// return `nullptr` so the caller can continue to registered or platform font
+/// fallback for bold, italic, or otherwise unavailable variants.
 sk_sp<SkTypeface> match_bundled_typeface(SkFontMgr* mgr,
                                          const std::string& family,
                                          SkFontStyle style);
@@ -242,8 +233,6 @@ sk_sp<SkTypeface> match_bundled_typeface(SkFontMgr* mgr,
 sk_sp<SkTypeface> match_registered_typeface(const std::string& family,
                                             SkFontStyle style);
 
-/// pulp #2163 follow-up — variable-font weight instancing support.
-///
 /// Reports whether `face` exposes an OpenType `wght` (weight) variation
 /// axis, and if so writes the axis min / max / default design values.
 /// A static (non-variable) face, or a variable face with no `wght`
@@ -288,8 +277,6 @@ std::vector<RegisteredTypeface> registered_typefaces_snapshot();
 /// called.
 std::size_t bundled_font_count();
 
-/// pulp #2163 — programmatic glyph-coverage probe.
-///
 /// Resolves `family`+`weight`+`slant` through the registered → bundled →
 /// platform-font-manager cascade exactly as a real fill_text call would,
 /// then reports whether the resulting typeface contains a glyph for the
