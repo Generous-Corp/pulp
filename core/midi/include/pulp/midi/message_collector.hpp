@@ -115,9 +115,9 @@ public:
         // Walk the consumer-owned `pending_` ring first: any deferred-
         // future entry whose timestamp now fits the current block is
         // delivered. Entries that are still in the future stay put so
-        // a later block can consume them. (Pulled out of the queue so
-        // the consumer thread never writes back to the SPSC FIFO —
-        // Codex P1 on #2843.)
+        // a later block can consume them. Keeping these events out of
+        // the producer queue ensures the consumer thread never writes
+        // back to the SPSC FIFO it is draining.
         for (auto& slot : pending_) {
             if (slot.has_value() && slot->timestamp_seconds < block_end_seconds) {
                 deliver(*slot);
@@ -128,10 +128,9 @@ public:
 
         // Drain the queue. Events that fit the current block are
         // delivered immediately; future events are stashed in the
-        // consumer-owned pending ring. We KEEP draining even after a
+        // consumer-owned pending ring. Draining continues after a
         // future event lands so later in-block events still get
-        // delivered this block (Codex P1 on #2856 — earlier
-        // break-after-stash starved out-of-order in-block items).
+        // delivered when producer timestamps arrive out of order.
         //
         // The pending ring is sized (`kPendingSlots`) to absorb the
         // realistic Pulp workloads in one drain: UI clicks, scripting
