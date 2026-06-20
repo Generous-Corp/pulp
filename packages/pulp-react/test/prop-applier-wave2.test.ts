@@ -1,5 +1,5 @@
-// Wave 2 rn — verify the @pulp/react prop-applier closes the 17 cheap
-// value-coverage gaps the harness was flagging on the rn surface:
+// The React prop applier forwards these React Native-compatible value
+// forms to the bridge:
 //
 //   • length-value strings on `padding` / `margin` shorthands fan out
 //     to the per-edge bridge keys (which already accept percent + auto)
@@ -13,9 +13,8 @@
 //   • `cursor: 'auto'` and `textDecorationLine: 'underline line-through'`
 //     compound forms keep round-tripping verbatim
 //
-// Each [wave2-rn] band test asserts on the mock-bridge call shape so
-// the harness's prop-applier dispatch arc gets covered without spinning
-// up the full Pulp runtime.
+// Each group asserts on the mock-bridge call shape so prop-applier
+// dispatch stays covered without spinning up the full Pulp runtime.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { applyChangedProps, applyAllProps } from '../src/prop-applier.js';
@@ -51,7 +50,7 @@ function setFlexCallsKey(b: MockBridge, key: string) {
     return b.calls.filter((c) => c.fn === 'setFlex' && c.args[1] === key);
 }
 
-describe('[wave2-rn] padding shorthand string forms', () => {
+describe('React prop forwarding for padding shorthand string forms', () => {
     it("padding: '5%' fans out to four per-edge percent calls", () => {
         applyChangedProps(makeInstance(), {}, { padding: '5%' });
         // Numeric shorthand is bypassed; string fan-out hits per-edge keys.
@@ -79,7 +78,7 @@ describe('[wave2-rn] padding shorthand string forms', () => {
     });
 });
 
-describe('[wave2-rn] margin shorthand string forms', () => {
+describe('React prop forwarding for margin shorthand string forms', () => {
     it("margin: 'auto' fans out to four per-edge auto calls", () => {
         applyChangedProps(makeInstance(), {}, { margin: 'auto' });
         expect(setFlexCallsKey(bridge, 'margin_top')[0].args[2]).toBe('auto');
@@ -108,14 +107,14 @@ describe('[wave2-rn] margin shorthand string forms', () => {
     });
 });
 
-describe('[wave2-rn] width/height percent forwarding (rn.2 — already wired, regression coverage)', () => {
+describe('React prop forwarding for width/height percentages', () => {
     it("width: '50%' flows to setFlex(width, '50%')", () => {
         applyChangedProps(makeInstance(), {}, { width: '50%' });
         expect(setFlexCallsKey(bridge, 'width')).toEqual([{ fn: 'setFlex', args: ['k', 'width', '50%'] }]);
     });
 });
 
-describe('[wave2-rn] fontWeight numeric weights', () => {
+describe('React prop forwarding for numeric font weights', () => {
     function fwCall(): { fn: string; args: unknown[] } | undefined {
         return bridge.calls.find((c) => c.fn === 'setFontWeight');
     }
@@ -137,7 +136,7 @@ describe('[wave2-rn] fontWeight numeric weights', () => {
     });
 });
 
-describe('[wave2-rn] lineHeight unitless multiplier', () => {
+describe('React prop forwarding for lineHeight multipliers', () => {
     function lhCall(): { fn: string; args: unknown[] } | undefined {
         return bridge.calls.find((c) => c.fn === 'setLineHeight');
     }
@@ -171,14 +170,14 @@ describe('[wave2-rn] lineHeight unitless multiplier', () => {
     });
 });
 
-describe('[wave2-rn] cursor pass-through (auto + custom)', () => {
+describe('React prop forwarding for cursor values', () => {
     it("cursor: 'auto' forwards verbatim", () => {
         applyChangedProps(makeInstance(), {}, { cursor: 'auto' });
         expect(bridge.calls.find(c => c.fn === 'setCursor')?.args).toEqual(['k', 'auto']);
     });
 });
 
-describe('[wave2-rn] textDecorationLine compound', () => {
+describe('React prop forwarding for compound textDecorationLine', () => {
     it("'underline line-through' forwards verbatim to setTextDecoration", () => {
         applyChangedProps(makeInstance('k', 'Label'), {}, { textDecorationLine: 'underline line-through' });
         const c = bridge.calls.find(x => x.fn === 'setTextDecoration');
@@ -186,7 +185,7 @@ describe('[wave2-rn] textDecorationLine compound', () => {
     });
 });
 
-describe('[wave2-rn] boxShadow multi-shadow', () => {
+describe('React prop forwarding for multiple box shadows', () => {
     function shadowCalls() {
         return bridge.calls.filter((c) => c.fn === 'setBoxShadow');
     }
@@ -227,7 +226,7 @@ describe('[wave2-rn] boxShadow multi-shadow', () => {
     });
 });
 
-describe('[wave2-rn] borderRadius elliptical x/y', () => {
+describe('React prop forwarding for elliptical border radii', () => {
     it("borderRadius: { x: 10, y: 6 } degrades to averaged uniform 8", () => {
         applyChangedProps(makeInstance(), {}, { borderRadius: { x: 10, y: 6 } });
         expect(bridge.calls.find(c => c.fn === 'setBorderRadius')?.args).toEqual(['k', 8]);
@@ -244,7 +243,7 @@ describe('[wave2-rn] borderRadius elliptical x/y', () => {
     });
 });
 
-describe('[wave2-rn] viewBox SVG-style string form', () => {
+describe('React prop forwarding for SVG viewBox strings', () => {
     function vbCall(): { fn: string; args: unknown[] } | undefined {
         return bridge.calls.find((c) => c.fn === 'setSvgViewBox');
     }
