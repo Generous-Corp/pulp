@@ -21,11 +21,11 @@ jobs:
   # Resolve the macOS runner. When PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON
   # is set (the same repo variable build.yml uses for PR macOS routing
   # post-2026-05-18 cutover), route the release build through Namespace
-  # cloud runners instead of the GitHub-hosted macos-14 pool. Falls back
+  # cloud runners instead of the GitHub-hosted pool. Falls back
   # to macos-15 when unset: the Skia/Dawn chrome/m150 prebuilt toolchain links
   # macOS-15-only Metal symbols (e.g. MTLLogStateDescriptor), so the GPU tests
   # run at build time fail to dyld-load on macos-14 (broke every release since
-  # ~v0.456.2). release-cli.yml + the Build/Test gate already use macОS 15.
+  # ~v0.456.2). release-cli.yml + the Build/Test gate already use macOS 15.
   # Background: 2026-05-18 SDK starvation — GitHub-hosted macos-14 queue
   # backed up for hours and blocked v0.111..v0.134 from publishing
   # (compound with the supersede bug fixed in pulp #2238 and the Skia
@@ -64,20 +64,17 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # CI COVERAGE-GAP FIX: the macos-14 runner DEFAULTS to Xcode 15.4, whose
-      # Apple clang lacks C++20 P0960 (parenthesized aggregate init). The
-      # self-hosted PR `macos` lane uses a much newer clang that accepts it, so a
-      # CLI/import TU (tools/import-design/import_detect.cpp) compiled on every PR
-      # but FAILED to compile here — silently breaking every GitHub Release from
-      # ~v0.371 to v0.391 (tags kept being cut; only the release-cadence watchdog
-      # noticed the tags-without-Releases). Pinning latest-stable (Xcode 16.2 on
-      # macos-14) gives this build a P0960-capable clang at C++20 parity with the
-      # PR lane, so a construct that compiles on PR CI also compiles here. No OS-
-      # image change → the signing/notarization environment is untouched.
+      # CI COVERAGE-GAP FIX: this release job once ran on macos-14, whose default
+      # Xcode 15.4 Apple clang lacked C++20 P0960 (parenthesized aggregate init).
+      # The self-hosted PR `macos` lane used a newer clang, so a CLI/import TU
+      # (tools/import-design/import_detect.cpp) compiled on every PR but failed
+      # here, silently breaking every GitHub Release from ~v0.371 to v0.391. The
+      # job now falls back to macos-15, and still selects the newest installed
+      # Xcode 16.x so the release build stays at C++20 parity with the PR lane.
       - name: Select modern Xcode (C++20 parity with the PR lane)
         if: runner.os == 'macOS'
         run: |
-          # Pick the newest installed Xcode >= 16 (macos-14 ships 16.1 + 16.2).
+          # Pick the newest installed Xcode >= 16 on the selected macOS runner.
           # Shell-based on purpose: no third-party action dependency, and it
           # can't be blocked by an actions allowlist — the release must not be
           # held hostage to that. Falls back to the default Xcode only if none
