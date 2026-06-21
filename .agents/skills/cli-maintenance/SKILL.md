@@ -1813,3 +1813,14 @@ new transport field, new persisted key), update **both**:
 
 Test coverage lives in `test/test_standalone_transport_midi.cpp` —
 add a case there when you extend either surface.
+
+## Gotcha: MSVC caps a string literal at 16 KB (C2026) — split big embedded blobs
+
+`tools/mcp/pulp_mcp.cpp` `tools_list_json()` embeds the whole MCP tools-list JSON
+as one raw-string literal. MSVC errors `C2026 "string too big"` once a single
+literal exceeds 16384 bytes, which broke the Windows CLI leg of
+`release-cli.yml` (and thus releases) when the tools list grew. Clang/GCC have no
+such limit, so it builds fine locally and only fails on the Windows release lane.
+Fix: split into adjacent raw-string literals — `)JSON" R"JSON(` — which the
+compiler concatenates (output byte-identical). Keep each chunk well under 16 KB;
+when you add MCP tools, watch the literal size.

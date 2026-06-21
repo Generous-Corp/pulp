@@ -3033,3 +3033,16 @@ report and exits 0 — it does **not** open issues (no false-positive spam).
 Promoting it to auto-open tracking issues is a future opt-in. Detection
 lives in the pure `stale_entries()` fn (unit-tested in
 `tools/scripts/test_host_quirks_staleness.py`), so it needs no clock/network.
+
+## Gotcha: release macOS runner must be macOS 15 (Skia/Dawn m150 Metal symbols)
+
+`sign-and-release.yml` once fell back to `macos-14`. The Skia/Dawn **chrome/m150**
+prebuilt toolchain links macOS-15-only Metal symbols (e.g.
+`_OBJC_CLASS_$_MTLLogStateDescriptor`). GPU tests run at *build* time
+(`catch_discover_tests` executes the test binary for discovery), so on a
+`macos-14` runner they dyld-fail — "Symbol not found" — and every tagged release
+fails silently (tags get created by `auto-release.yml`, but no Release/binaries
+publish). Symptom: `release list` shows only stale drafts while `tags` keep
+climbing. Fix: route release macOS builds to `macos-15` (the Build/Test gate and
+`release-cli.yml` already do). When bumping the Skia pin, re-check the minimum
+runner OS for the new Metal/Dawn symbols.
