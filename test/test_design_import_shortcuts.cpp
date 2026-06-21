@@ -1,12 +1,13 @@
 // Tests for `extract_keyboard_shortcuts` + `serialize_detected_shortcuts`
-// in design_import.cpp. Verifies the static-scan path on representative
-// React patterns (inline JSX onKeyDown, window/document.addEventListener
-// keydown, modifier combinations) lifted from the Spectr editor source.
+// in design_import_shortcuts.cpp. Verifies the static-scan path on
+// representative React patterns (inline JSX onKeyDown,
+// window/document.addEventListener keydown, modifier combinations) lifted
+// from the Spectr editor source.
 //
 // The extractor is regex-driven and lexical only — it does NOT evaluate
 // handler bodies or resolve dynamic key references. Tests pin the
 // recognized forms + verify de-dup + verify modifier normalization
-// (metaKey || ctrlKey collapses to "meta", per the cross-platform idiom).
+// (`metaKey || ctrlKey` preserves both physical chords).
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/view/design_import.hpp>
@@ -59,12 +60,10 @@ TEST_CASE("extract_keyboard_shortcuts handles inline onKeyDown JSX", "[design-im
 }
 
 TEST_CASE("extract_keyboard_shortcuts captures meta + ctrl separately", "[design-import][shortcuts]") {
-    // Codex P1 review on #2119: the cross-platform `metaKey || ctrlKey`
-    // idiom now yields BOTH "meta" AND "ctrl" modifiers. generate_pulp_js
-    // emits a separate registerShortcut for each physical chord so a user
-    // can hit Cmd+S on macOS or Ctrl+S on Win/Linux and the synthetic
-    // event carries the right modifier flags. Previously the extractor
-    // collapsed to a single "meta", which broke Ctrl-only handlers.
+    // The cross-platform `metaKey || ctrlKey` idiom yields both modifiers.
+    // generate_pulp_js emits a separate registerShortcut for each physical
+    // chord so Cmd+S on macOS and Ctrl+S on Win/Linux both carry the right
+    // synthetic-event flags.
     auto out = extract_keyboard_shortcuts(
         R"JS(
             const onKey = (e) => {
@@ -83,10 +82,9 @@ TEST_CASE("extract_keyboard_shortcuts captures meta + ctrl separately", "[design
 }
 
 TEST_CASE("extract_keyboard_shortcuts captures Ctrl-only modifier", "[design-import][shortcuts]") {
-    // Codex P1 case from #2119: `e.ctrlKey && e.key === 's'` is a
-    // Win/Linux-only Ctrl+S binding. Pre-fix the extractor renamed it to
-    // "meta" and V2 codegen emitted Cmd-only registerShortcut + a synthetic
-    // event with `ctrlKey: false` — so the source handler never fired.
+    // `e.ctrlKey && e.key === 's'` is a Win/Linux-only Ctrl+S binding. It
+    // must stay distinct from the macOS `meta` chord so the synthetic event
+    // reaches the source handler with `ctrlKey: true`.
     auto out = extract_keyboard_shortcuts(
         R"JS(
             if (e.ctrlKey && e.key === 's') save();
@@ -225,8 +223,7 @@ TEST_CASE("modifier_strings_to_mask combines bits + 'meta' maps to kModCmd", "[d
     REQUIRE(modifier_strings_to_mask({"shift"}) == 1);              // kModShift
     REQUIRE(modifier_strings_to_mask({"ctrl"}) == 2);               // kModCtrl
     REQUIRE(modifier_strings_to_mask({"alt"}) == 4);                // kModAlt
-    // "meta" -> kModCmd (platform-primary) per the extractor's
-    // cross-platform metaKey||ctrlKey collapse. kModCmd is bit 4 = 16.
+    // "meta" -> kModCmd (platform-primary). kModCmd is bit 4 = 16.
     REQUIRE(modifier_strings_to_mask({"meta"}) == 16);
     REQUIRE(modifier_strings_to_mask({"meta", "shift"}) == 17);
     REQUIRE(modifier_strings_to_mask({"unknown-mod"}) == 0);        // dropped silently
@@ -299,9 +296,8 @@ TEST_CASE("generate_pulp_js with empty shortcuts emits no shortcut block", "[des
 }
 
 TEST_CASE("collect_modifiers scopes to enclosing if(...) only", "[design-import][shortcuts][v2]") {
-    // Pre-fix this returned ["meta", "alt", "shift"] for every Escape match
-    // because the modifier-detection window saw the modifier checks from
-    // sibling branches. Now it walks back only within the same if condition.
+    // The modifier scan walks back only within the same if condition so
+    // sibling branches do not contribute unrelated modifiers.
     auto out = extract_keyboard_shortcuts(
         R"JS(
             const onKey = (e) => {
@@ -316,8 +312,8 @@ TEST_CASE("collect_modifiers scopes to enclosing if(...) only", "[design-import]
     REQUIRE(out[0].modifiers.empty());  // bare check, no modifiers
     REQUIRE(out[1].key == "F");
     REQUIRE(out[2].key == "s");
-    // `metaKey || ctrlKey` now emits BOTH (Codex P1 #2119) so codegen can
-    // bind Cmd+S and Ctrl+S as distinct physical chords.
+    // `metaKey || ctrlKey` emits both modifiers so codegen can bind Cmd+S
+    // and Ctrl+S as distinct physical chords.
     REQUIRE(out[2].modifiers.size() == 2);
     auto s_has = [&](const std::string& m) {
         return std::find(out[2].modifiers.begin(), out[2].modifiers.end(), m)
@@ -328,10 +324,9 @@ TEST_CASE("collect_modifiers scopes to enclosing if(...) only", "[design-import]
 }
 
 TEST_CASE("key_string_to_keycode maps KeyboardEvent.code letter/digit forms", "[design-import][shortcuts][v2]") {
-    // Codex P2 review on #2119: the extractor pulls both `event.key` and
-    // `event.code` patterns. Without these mappings `event.code === 'KeyS'`
-    // and `event.code === 'Digit1'` fall through to 0 and codegen silently
-    // drops the shortcut.
+    // The extractor pulls both `event.key` and `event.code` patterns. Without
+    // these mappings `event.code === 'KeyS'` and `event.code === 'Digit1'`
+    // fall through to 0 and codegen silently drops the shortcut.
     REQUIRE(key_string_to_keycode("KeyS") == 's');
     REQUIRE(key_string_to_keycode("KeyA") == 'a');
     REQUIRE(key_string_to_keycode("KeyZ") == 'z');
@@ -347,12 +342,11 @@ TEST_CASE("key_string_to_keycode maps KeyboardEvent.code letter/digit forms", "[
 }
 
 TEST_CASE("generate_pulp_js emits two bindings for meta+ctrl cross-platform shortcut", "[design-import][shortcuts][v2]") {
-    // Codex P1 review on #2119: when the source author writes
-    // `(e.metaKey || e.ctrlKey) && e.key === 's'`, the codegen must emit
-    // both registerShortcut(kc, kModCmd, ...) and registerShortcut(kc,
-    // kModCtrl, ...) so the user gets Cmd+S on macOS and Ctrl+S on
-    // Win/Linux. Each handler thunk sets only the modifier flag that
-    // matches the physical chord, so the source handler's
+    // When the source author writes `(e.metaKey || e.ctrlKey) &&
+    // e.key === 's'`, codegen must emit both registerShortcut(kc, kModCmd,
+    // ...) and registerShortcut(kc, kModCtrl, ...) so the user gets Cmd+S on
+    // macOS and Ctrl+S on Win/Linux. Each handler thunk sets only the modifier
+    // flag that matches the physical chord, so the source handler's
     // `e.metaKey || e.ctrlKey` check sees the right flag.
     CodeGenOptions opts;
     opts.mode = CodeGenMode::bridge_native_js;
@@ -390,9 +384,8 @@ TEST_CASE("generate_pulp_js emits two bindings for meta+ctrl cross-platform shor
 }
 
 TEST_CASE("generate_pulp_js Ctrl-only emits ctrlKey:true synthetic event", "[design-import][shortcuts][v2]") {
-    // Codex P1 case: a Win/Linux-only `e.ctrlKey && e.key === 's'`
-    // handler must receive `ctrlKey: true` in the synthetic event so the
-    // source check passes.
+    // A Win/Linux-only `e.ctrlKey && e.key === 's'` handler must receive
+    // `ctrlKey: true` in the synthetic event so the source check passes.
     CodeGenOptions opts;
     opts.mode = CodeGenMode::bridge_native_js;
     opts.include_comments = false;
@@ -429,11 +422,9 @@ TEST_CASE("generate_pulp_js Ctrl-only emits ctrlKey:true synthetic event", "[des
 //     -> React-style window.addEventListener('keydown', ...) handler
 //        receives a synthetic event with the right flags.
 //
-// Pre-V2 the React handler never fired because the bundled JS never saw
-// the keypress at all (native intercept owned it).  V2's thunk closes
-// the loop by re-dispatching as a synthetic event.  This test pins
-// that loop end-to-end so a future change to either codegen or
-// dispatch can't silently break it.
+// Native shortcut interception must re-dispatch into the generated JS handler
+// as a synthetic event. This test pins that loop end-to-end so a future change
+// to either codegen or dispatch cannot silently break it.
 // ────────────────────────────────────────────────────────────────────────
 
 TEST_CASE("E2E roundtrip: extract -> codegen -> WidgetBridge -> React-style handler",
@@ -443,7 +434,7 @@ TEST_CASE("E2E roundtrip: extract -> codegen -> WidgetBridge -> React-style hand
 
     // 1. A representative React source — covers the patterns the user
     //    cares about: bare key (Escape), mode key (F with chord), and
-    //    the cross-platform save chord that motivated the Codex P1 fix.
+    //    the cross-platform save chord.
     const char* tsx_source = R"JS(
         const onKey = (e) => {
             if (e.key === 'Escape') closeAll();
@@ -543,8 +534,6 @@ TEST_CASE("E2E roundtrip: extract -> codegen -> WidgetBridge -> React-style hand
     REQUIRE(fired_field(2, "ctrlKey").getWithDefault<bool>(true)  == false);
 
     // Ctrl+S — the Win/Linux branch of the same source `||` check.
-    // Pre-Codex-P1 this would have done nothing because V1 normalized
-    // everything to "meta" and V2 only emitted the Cmd-mask binding.
     bridge.forward_key_event(static_cast<int>('s'), static_cast<uint16_t>(kModCtrl), true);
     REQUIRE(fired_count() == 4);
     REQUIRE(fired_field(3, "key").toString()         == "s");
@@ -561,9 +550,8 @@ TEST_CASE("E2E roundtrip: extract -> codegen -> WidgetBridge -> React-style hand
 }
 
 // ────────────────────────────────────────────────────────────────────────
-// Phase A — default shortcuts (source-matched). Heuristic detector +
-// apply step + collision behavior. Spec: planning/2026-05-16-default-
-// keyboard-shortcuts.md.
+// Default shortcuts (source-matched). Heuristic detector + apply step +
+// collision behavior.
 // ────────────────────────────────────────────────────────────────────────
 
 using pulp::view::DefaultShortcutPattern;
@@ -684,16 +672,10 @@ TEST_CASE("default shortcuts: extracted shortcut suppresses same-chord default",
 }
 
 TEST_CASE("default shortcuts: cross-platform extracted (meta+ctrl) suppresses default on both platforms",
-          "[design-import][shortcuts][defaults][codex-p1-2161]") {
-    // Codex P1 on PR #2161: when source contains the cross-platform idiom
-    // `e.metaKey || e.ctrlKey`, collect_modifiers emits a single extracted
-    // shortcut with BOTH "meta" and "ctrl" modifiers. Before the fix, the
-    // suppression chord only checked the macOS sig (",|meta") so the
-    // default still fired on top of the already-cross-platform extracted
-    // shortcut — and generate_pulp_js's meta+ctrl branch then emitted
-    // TWO bindings, yielding duplicate handlers for the same physical
-    // chord. Verify that the cross-platform sig now suppresses the
-    // default entirely.
+          "[design-import][shortcuts][defaults]") {
+    // Cross-platform extracted shortcuts carry both "meta" and "ctrl"
+    // modifiers. Default-shortcut suppression must check both physical chord
+    // signatures so generate_pulp_js does not emit duplicate handlers.
     pulp::view::DetectedShortcut cross_platform;
     cross_platform.key = ",";
     cross_platform.modifiers = {"meta", "ctrl"};
@@ -803,7 +785,7 @@ TEST_CASE("default shortcuts: E2E — codegen emits default thunks too",
     REQUIRE(js.find("key: ','") != std::string::npos);
 }
 
-TEST_CASE("default shortcuts: emitted JS escapes single-quote + backslash (Codex P1 #2128)",
+TEST_CASE("default shortcuts: emitted JS escapes single-quote + backslash",
           "[design-import][shortcuts][defaults][v2]") {
     // Widening key_string_to_keycode to accept all printable ASCII lets
     // `'` and `\` pass validation. Without escaping at emission time
@@ -830,9 +812,8 @@ TEST_CASE("default shortcuts: emitted JS escapes single-quote + backslash (Codex
 
 TEST_CASE("default shortcuts: apply_default_shortcuts win_linux maps File-menu chords correctly",
           "[design-import][shortcuts][defaults]") {
-    // P2 follow-up — every Cmd-on-mac default has a Ctrl-on-win/linux
-    // counterpart. Pin all four so a future re-map doesn't silently
-    // drop one platform.
+    // Every Cmd-on-mac default has a Ctrl-on-win/linux counterpart. Pin all
+    // four so a future remap does not silently drop one platform.
     auto chord_for = [&](DefaultShortcutPattern p) {
         pulp::view::DefaultShortcutCandidate c;
         c.pattern = p; c.target = "x"; c.confidence = "medium";

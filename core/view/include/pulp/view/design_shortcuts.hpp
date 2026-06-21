@@ -34,10 +34,10 @@ struct DetectedShortcut {
     /// handler dispatches on a runtime variable instead of a literal).
     std::string key;
 
-    /// Modifier names in the order they appeared in source: any of
-    /// `"shift"`, `"ctrl"`, `"alt"`, `"meta"`. `meta` covers both `metaKey`
-    /// (macOS Cmd) and `ctrlKey` when the source uses `e.metaKey || e.ctrlKey`
-    /// as the cross-platform shortcut idiom.
+    /// Modifier names normalized to the extractor's emission order:
+    /// `"meta"`, `"ctrl"`, `"alt"`, `"shift"`. The cross-platform
+    /// `e.metaKey || e.ctrlKey` idiom emits both `meta` and `ctrl` so codegen
+    /// can bind Cmd and Ctrl as distinct physical chords.
     std::vector<std::string> modifiers;
 
     /// Best-effort source location for the matched pattern, in `<file>:<line>`
@@ -66,29 +66,28 @@ struct DetectedShortcut {
 std::vector<DetectedShortcut> extract_keyboard_shortcuts(
     const std::string& source, const std::string& filename = "");
 
-/// Serialize a list of `DetectedShortcut`s to JSON. Stable ordering: sorted
-/// by (key, modifiers, source_location) so the artifact is deterministic
-/// across runs.
+/// Serialize a list of `DetectedShortcut`s to JSON in the caller-provided order.
+/// `extract_keyboard_shortcuts` already sorts by (key, modifiers,
+/// source_location) before returning its deterministic scan result.
 std::string serialize_detected_shortcuts(const std::vector<DetectedShortcut>& shortcuts);
 
-// ── Default shortcuts (pulp #2116 Phase A — source-matched only) ────────
+// ── Default shortcuts (source-matched only) ─────────────────────────────
 //
-// On top of the V1+V2 extractor (which captures shortcuts the developer
-// *already wrote*), the default-shortcuts pass adds bindings the developer
-// *would expect* per platform convention but didn't write: `Cmd+,` for
+// On top of the explicit-source extractor (which captures shortcuts the
+// developer *already wrote*), the default-shortcuts pass adds bindings the
+// developer *would expect* per platform convention but didn't write: `Cmd+,` for
 // Settings, `Cmd+?` / `F1` for Help, bare `?` for a shortcut cheatsheet,
 // `Cmd+S` for Save, etc.
 //
 // Hard rule: a wrong auto-binding is worse than no binding. The detector
-// requires AT LEAST TWO independent signals (component name, ARIA role,
-// modal heading, trigger icon, content shape) before firing, and emits a
-// `default_collision` entry instead of a binding when multiple modals
-// look like the same pattern.
+// requires AT LEAST TWO independent signals (component name, canonical name,
+// ARIA role/label, modal heading, content shape) before firing, and emits a
+// `default_collision` entry instead of a binding when multiple modals look like
+// the same pattern.
 //
 // What this pass does NOT cover: Pulp-framework-provided surfaces (Audio /
-// MIDI Settings tabs in standalone). Those need a separate codegen path
-// that drives the TabPanel select-tab API and are gated on the build mode
-// — tracked as Phase B in planning/2026-05-16-default-keyboard-shortcuts.md.
+// MIDI Settings tabs in standalone). Those need a separate codegen path that
+// drives the TabPanel select-tab API and is gated on the build mode.
 
 /// Which platform-convention surface a default binding maps to. Used by
 /// `detect_default_shortcuts` to label matches and by `generate_pulp_js`
@@ -141,11 +140,11 @@ struct DefaultShortcutScan {
 
 /// Static-scan a TSX/JS source string for components matching the
 /// platform-convention defaults table. Signals: component identifier
-/// (`SettingsModal`, `HelpDialog`, `ShortcutsCheatsheet`, etc.), `role=`
-/// attribute, `aria-label=` text, modal heading text, presence of
-/// `<kbd>` tags (cheatsheet disambiguator). Conservative — requires ≥2
-/// signals to fire; multiple-candidate matches go into `collisions` not
-/// `accepted`.
+/// (`SettingsModal`, `HelpDialog`, `ShortcutsCheatsheet`, etc.), canonical
+/// component name, `role=` attribute, `aria-label=` text, modal heading text,
+/// presence of `<kbd>` tags (cheatsheet disambiguator). Conservative —
+/// requires ≥2 signals to fire; multiple-candidate matches go into
+/// `collisions` not `accepted`.
 ///
 /// Already-extracted shortcuts (`existing_extracted`) suppress the same-
 /// chord default so a developer's hand-written binding always wins.
