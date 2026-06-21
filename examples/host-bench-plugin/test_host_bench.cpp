@@ -21,6 +21,10 @@
 #  include <unistd.h>
 #endif
 
+#ifndef PULP_HOST_BENCH_SOURCE_DIR
+#  error "PULP_HOST_BENCH_SOURCE_DIR must be defined by the host-bench test target"
+#endif
+
 using namespace pulp;
 using namespace pulp::examples;
 
@@ -110,7 +114,7 @@ struct BenchFixture {
 }  // namespace
 
 TEST_CASE("HostBench AU v2 package matches MIDI descriptor", "[bench][au]") {
-    const auto source_dir = std::filesystem::path(__FILE__).parent_path();
+    const auto source_dir = std::filesystem::path(PULP_HOST_BENCH_SOURCE_DIR);
 
     std::ifstream cmake_file(source_dir / "CMakeLists.txt");
     REQUIRE(cmake_file.good());

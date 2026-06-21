@@ -12,6 +12,8 @@ if(PULP_BUILD_TESTS)
         PRIVATE pulp::format Catch2::Catch2WithMain)
     target_include_directories(pulp-host-bench-test
         PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(pulp-host-bench-test
+        PRIVATE PULP_HOST_BENCH_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     catch_discover_tests(pulp-host-bench-test)
 endif()
 
