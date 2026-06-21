@@ -227,6 +227,26 @@ if [ -f "$DEPS_AUDIT" ]; then
     fi
 fi
 
+# Codecov config drift — codecov.yml's flags + components must mirror the live
+# core/* tree (no missing subsystem, no platform double-count) and its `ignore:`
+# list must mirror coverage_config.json's diff_cover_excludes. A new
+# core/<sub>/ subsystem landing without a codecov.yml edit silently drops its
+# coverage from the dashboard (graph/scene drifted this way) — so this runs
+# unconditionally, not diff-scoped. Sub-second; needs PyYAML — skip cleanly if
+# the local interpreter lacks it, since CI's codecov-config-validation job is
+# the authoritative gate.
+CODECOV_CFG_TEST="$ROOT/tools/scripts/test_codecov_config.py"
+CODECOV_COMP_TEST="$ROOT/tools/scripts/test_codecov_components.py"
+if [ -f "$CODECOV_CFG_TEST" ] && [ -f "$CODECOV_COMP_TEST" ]; then
+    if ! "$PYTHON" -c "import yaml" >/dev/null 2>&1; then
+        : # PyYAML missing locally — CI enforces this gate.
+    elif ! "$PYTHON" "$CODECOV_CFG_TEST" >/dev/null 2>&1 \
+            || ! "$PYTHON" "$CODECOV_COMP_TEST" >/dev/null 2>&1; then
+        echo "[pre-push] codecov-config: drift detected — codecov.yml is stale. Run \`python3 tools/scripts/test_codecov_config.py\` and \`python3 tools/scripts/test_codecov_components.py\` for details." >&2
+        fail=1
+    fi
+fi
+
 # Local diff-coverage check — mirror the CI `Diff coverage required` gate
 # (75% by default; threshold lives in tools/scripts/coverage_config.json).
 # We only run the script when the diff actually touches a mapped coverage
