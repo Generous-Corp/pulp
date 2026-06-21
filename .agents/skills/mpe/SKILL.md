@@ -13,8 +13,8 @@ see the extra buffer.
 
 ## When to reach for MPE
 
-- The synth is meant for Roli Seaboard / Linnstrument / Sensel Morph
-  / LinnStrument / KMI / similar per-note controllers.
+- The synth is meant for Roli Seaboard / LinnStrument / Sensel Morph /
+  KMI / similar per-note controllers.
 - You need polyphonic per-note pitch bend (not just a global bend).
 - You want pressure or CC 74 to modulate each voice independently.
 
@@ -28,7 +28,7 @@ If you only need monophonic aftertouch or a global mod wheel, plain
 | An MPE synth voice | Subclass `midi::MpeSynthVoice`, render your oscillator using `state().pitch_bend_semitones`, `state().pressure`, `state().timbre` |
 | An MPE synth plugin | `MpeVoiceAllocator<YourVoice>` inside the processor, dispatch `MpeBuffer` in `process()`, set `supports_mpe = true` or `node_capabilities.supports_mpe = true` in the descriptor |
 | A host that loads MPE plugins | Build an `MpeBuffer` from inbound MIDI (zone-aware) and hand it to `Processor::mpe_input()` — the CLAP adapter already does this |
-| Pure MIDI 2.0 UMP work | Out of scope — Phase 4 is deferred, see `planning/next-features-plan.md` |
+| Pure MIDI 2.0 UMP work | Out of scope — direct UMP-native MPE transport is deferred |
 
 ## The three-step pattern for a new MPE synth
 
@@ -137,7 +137,7 @@ responsible for incrementing on note-on and decrementing on note-off,
 **including the steal path** — see the test "MpeVoiceAllocator steal
 path decrements glide refcount" for the invariant.
 
-### UMP per-note management + assignable PNC (post #2860)
+### UMP per-note management + assignable PNC
 
 `MpeVoiceTracker` consumes the full MIDI 2.0 per-note expression
 surface:
@@ -161,10 +161,9 @@ surface:
   sounding note (state preserved for its lifecycle); reset is *armed*
   for the next note-on at the same (channel, note) index. Pulp does
   not yet maintain the armed-reset memory — D+S currently degrades to
-  detach-only on the live note (matches spec for the sounding note,
-  Codex P1 on #2860). The armed-future-reset slice is deferred
-  follow-up work; if you need the full D+S note-rotation flow, file
-  an issue with a controller reproducer.
+  detach-only on the live note, which matches the spec for the sounding note.
+  The armed-future-reset behavior is deferred follow-up work; if you need the
+  full D+S note-rotation flow, file an issue with a controller reproducer.
 
 If you're routing UMP into the tracker, use the factories on
 `UmpPacket`: `per_note_management(group, channel, note, flags)`,
@@ -175,12 +174,11 @@ inherit running state via `add_note`.
 
 ### Format adapter coverage
 
-As of the MPE Phase 1–3 merge (PR #135, #138), the CLAP adapter
-populates `MpeBuffer` from inbound MIDI. VST3 and AU adapters still
-forward plain MIDI only — they'll be wired in a later iteration. Until
-then, an MPE synth loaded as VST3/AU sees MIDI events but the
-`MpeBuffer` will be empty; the voice tracker inside the processor
-still works if you extract per-note data from `MidiBuffer` yourself.
+The CLAP adapter populates `MpeBuffer` from inbound MIDI. VST3 and AU
+adapters still forward plain MIDI only. Until those adapters gain direct
+`MpeBuffer` wiring, an MPE synth loaded as VST3/AU sees MIDI events but the
+`MpeBuffer` will be empty; the voice tracker inside the processor still works
+if you extract per-note data from `MidiBuffer` yourself.
 
 ### Realtime sidecar buffers are capacity-limited
 
@@ -205,20 +203,10 @@ large event vectors inside the processor no-allocation guard.
 - Tests: `test/test_mpe_voice_tracker.cpp`, `test/test_mpe_buffer.cpp`,
   `test/test_mpe_synth_voice.cpp` — invariants worth reading before
   touching the allocator or glide detector
-- Plan: `planning/next-features-plan.md` § Feature 2
 
-## What this skill does NOT cover
+## Related UMP and implementation surfaces
 
-- MIDI 2.0 UMP native path — Phase 4, deferred. When it lands,
-  `MpeBuffer` will have a lossless UMP round-trip and hosts with UMP
-  transport (CLAP draft, future VST3) will skip the 1.0 decode step.
-- VST3 / AU MPE routing — see "Format adapter coverage" above; the
-  host-side adapters that emit `MpeBuffer` are tracked in the hosting
-  plan, not here.
-- Hosting MPE plugins (MPE output, dispatching MPE into a loaded
-  plugin) — covered by the SignalGraph hosting work, not this skill.
-
-### UMP sysex7 reassembly (post macOS-plan 8.2)
+### UMP sysex7 reassembly
 
 UMP type-0x3 sysex7 reassembly is **not part of MpeVoiceTracker** —
 it's a separate per-stream state machine shared across every Pulp
@@ -234,8 +222,7 @@ UMP-aware backend (WinRT MIDI 2.0, ALSA UMP, iOS CoreMIDI 2.0),
 delegate sysex7 reassembly to `UmpSysex7Reassembler` rather than
 re-implementing the start / continue / end state machine inline —
 the AUv3 and macOS CoreMIDI backends do exactly that, and any drift
-between the two backends used to cause the `#239` / `#292` family
-of bugs.
+between the two backends corrupts multi-packet sysex streams.
 
 The reassembler's `feed_packet` is a function-pointer-callback
 API so it stays RT-safe in the audio render block; the
@@ -258,15 +245,15 @@ Time and System Common** (UMP Type 0x1: clock `0xF8`, start/stop,
 song-position `0xF2`, …) in addition to channel voice — system
 messages encode as Type 0x1 (NOT Type 0x2 MIDI 1.0 Channel Voice,
 which is malformed for them) and decode back to MIDI 1.0 short
-messages. So `ump_to_midi1` flattening a UMP buffer now yields
+messages. So `ump_to_midi1` flattening a UMP buffer yields
 clock/transport events, not channel-voice-only — don't assume a
 flattened buffer is note data. (SysEx Type 0x3 still routes through
 `UmpSysex7Reassembler`, above; per-note expression still goes through
 the MpeBuffer sidecar, not these converters.)
 
-### UMP Session / Endpoint / VirtualEndpoint (post macOS-plan 8.1)
+### UMP Session / Endpoint / VirtualEndpoint
 
-Pulp now exposes a Pulp-native UMP transport surface in
+Pulp exposes a Pulp-native UMP transport surface in
 `core/midi/include/pulp/midi/`:
 
 - `UmpEndpoint` (abstract) — id + direction (`can_receive` /
@@ -299,6 +286,23 @@ is installed, or the block's captured pointer dangles.
 
 ## Implementation note: where MpeVoiceTracker bodies live
 
-As of companion-track U-9 (2026-05-19), `MpeVoiceTracker`'s method bodies live in `core/midi/src/mpe_voice_tracker.cpp`, not inline in `core/midi/include/pulp/midi/mpe_voice_tracker.hpp`. The header keeps the class declaration + trivial inline getters; non-trivial methods (`process`, `set_config`, `reset`, `add_note`, `remove_note`, etc.) link from the .cpp.
+`MpeVoiceTracker`'s method bodies live in
+`core/midi/src/mpe_voice_tracker.cpp`, not inline in
+`core/midi/include/pulp/midi/mpe_voice_tracker.hpp`. The header keeps the
+class declaration + trivial inline getters; non-trivial methods (`process`,
+`set_config`, `reset`, `add_note`, `remove_note`, etc.) link from the .cpp.
 
-Practical effect: editing `MpeVoiceTracker` impl no longer recompiles every TU that includes the MPE header. If you're adding a new method, put trivial getters inline; put anything with branches/loops in the .cpp.
+Practical effect: editing `MpeVoiceTracker` implementation bodies only
+rebuilds the .cpp users. If you're adding a new method, put trivial
+getters inline; put anything with branches/loops in the .cpp.
+
+## What this skill does NOT cover
+
+- MIDI 2.0 UMP native path — deferred. When it lands, `MpeBuffer` will have
+  a lossless UMP round-trip and hosts with UMP transport will skip the 1.0
+  decode step.
+- VST3 / AU MPE routing — see "Format adapter coverage" above; the
+  host-side adapters that emit `MpeBuffer` are tracked in the hosting
+  plan, not here.
+- Hosting MPE plugins (MPE output, dispatching MPE into a loaded
+  plugin) — covered by the SignalGraph hosting work, not this skill.

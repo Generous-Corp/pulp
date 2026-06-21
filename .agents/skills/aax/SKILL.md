@@ -135,9 +135,9 @@ int32_t sysex_start_offset = 0;
 //   if byte == 0xF7 → flush accumulator as one MidiEvent, reset
 ```
 
-This matches the shape used for CLAP/VST3/AU/CoreMIDI/ALSA sysex (#239).
-See `core/format/src/aax_runtime.cpp::decode_midi_node` for the canonical
-implementation landed in #408.
+This matches the shape used for CLAP/VST3/AU/CoreMIDI/ALSA sysex. See
+`core/format/src/aax_runtime.cpp::decode_midi_node` for the canonical
+implementation.
 The AAX bypass MIDI-thru helper must copy sidecar payloads with
 `MidiBuffer::add_sysex_copy()`; `MidiBuffer::SysexPayload` is deliberately
 not a movable raw `std::vector`.
@@ -149,8 +149,8 @@ block, or stale sidecar payloads can be re-emitted by a later block.
 
 When adding or changing any AAX MIDI input path, exercise this against a
 multi-packet sysex vector (at least one packet across the 4-byte boundary
-and one terminator-only packet) in a unit test. Shipping without the test
-is the #290 "tests ship with fixes" rule.
+and one terminator-only packet) in a unit test. Adapter fixes should ship with
+the regression tests that prove the fixed behavior.
 
 ## Review Checklist
 
