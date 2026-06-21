@@ -13,9 +13,10 @@ This is intentional, not aspirational.
   `flex-basis`, `gap`, `order`, all variants.
 - **Grid** — `display: grid`, `grid-template-columns/rows`, `grid-area`,
   `grid-column/row`, `grid-auto-flow`, named lines, gap. Track sizing
-  supports fixed `px`, fractional `fr`, and `auto` today; `minmax()`
-  and `repeat()` are NOT yet implemented (`GridStyle::parse_template`
-  in `core/view/src/view.cpp`). Use explicit track lists for now.
+  supports fixed `px`, fractional `fr`, `auto`, and bounded `repeat(...)`
+  expansion (`GridStyle::parse_template` in `core/view/src/view.cpp`);
+  `minmax()` is not implemented. Use explicit track lists when `minmax()`
+  would otherwise be required.
 - **Position** — `position: absolute | relative | static | fixed`, with
   `top`/`right`/`bottom`/`left`/`inset`. Logical-edge variants
   (`marginInlineStart`, `paddingBlockEnd`, `start`, `end`) flip with
@@ -29,9 +30,10 @@ This is intentional, not aspirational.
 - **Modern web** — `transform`, `opacity`, `filter`, `clip-path`,
   `mix-blend-mode`, `box-shadow`, `text-shadow`, gradients, animations
   (frame-driven playback per `compat.json css/animation*`), transitions.
-  `mask` / `mask-image` are partial today — the bridge stores values
-  but paint-time mask compositing (`saveLayer` + `SkBlendMode::kDstIn`)
-  is deferred (#1540). See `compat.json` `css/mask*` for current status.
+  `mask` / `mask-image` are partial today: Skia composites mask layers with
+  `SkBlendMode::kDstIn`, while CoreGraphics, recording, and fallback canvas
+  backends use the plain layer path. See `compat.json` `css/mask*` for current
+  status.
 
 ## What Pulp does NOT support — by design
 

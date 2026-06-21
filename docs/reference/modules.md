@@ -213,7 +213,7 @@ worker->on_message = [](std::string_view result) { update_list(result); };
 | Action Broadcaster | `async_updater.hpp` | `broadcaster.send_action("file_open")` to all listeners |
 | Async Updater | `async_updater.hpp` | Coalesce rapid cross-thread triggers into one callback |
 | Event Loop | `event_loop.hpp` | `EventLoop loop; loop.dispatch([]{...}); loop.dispatch_after(100ms, []{...})` |
-| Service Discovery | `volume_detector.hpp` | mDNS/Bonjour API surface (experimental — requires host-supplied backend via `install_backend`; no built-in backend yet, see #302) |
+| Service Discovery | `volume_detector.hpp` | mDNS/Bonjour API surface (experimental — requires host-supplied backend via `install_backend`; no built-in backend) |
 | Timer | `timer.hpp` | `Timer t; t.start(100ms, []{...})` — periodic or one-shot |
 | Volume Detector | `volume_detector.hpp` | Poll for USB drive mount/unmount events |
 
@@ -749,7 +749,7 @@ float height = shaper.measure_height(prepared, 300.0f);  // Fast
 | PSDF text | `psdf_atlas.hpp` | Pseudo-SDF variant with vector-fallback helper for extreme zoom. |
 | SDF effects | `sdf_effects.hpp` | Design-token presets for outline / shadow / glow / bevel over any SDF atlas (SkSL effect module). |
 | SDF atlas cache | `sdf_atlas_cache.hpp` | Frame-based LRU glyph sharing across `fill_text_sdf` call-sites with dirty-rect upload hints. |
-| Path → SDF | `path_to_sdf.hpp` | Runtime EDT of a binary mask to produce an SDF for procedural shapes (Phase 5). |
+| Path → SDF | `path_to_sdf.hpp` | Runtime EDT of a binary mask to produce an SDF for procedural shapes. |
 
 ---
 
