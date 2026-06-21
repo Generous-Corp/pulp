@@ -1,7 +1,6 @@
 // editor_url.cpp — Inspector source-jump editor URI configuration.
 //
-// See `pulp/inspect/editor_url.hpp` for the public surface and the
-// design context (planning Phase 5.3).
+// See `pulp/inspect/editor_url.hpp` for the public surface and behavior.
 
 #include <pulp/inspect/editor_url.hpp>
 #include <pulp/runtime/system.hpp>

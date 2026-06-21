@@ -1,17 +1,14 @@
 // inspector_overlay_internal.hpp — PRIVATE shared declarations for the
 // inspector-overlay translation units.
 //
-// Created in the 2026-05 refactor (roadmap P10-2) that split the
-// per-feature overlay clusters out of inspector_overlay.cpp into
-// sibling TUs (field-edit, zoom loupe, pass-attribution viewer). The
-// public method declarations all live in
-// pulp/inspect/inspector_overlay.hpp; this header carries only the
-// file-local shared state that crosses the new TU boundary — the
-// overlay's color palette. The structural layout constants
-// (kRowHeight, kZoomGridCells, kPassTypeCount, …) are already
-// static-constexpr members of InspectorOverlay, so the split TUs reach
-// them through the public header and they are intentionally not
-// duplicated here.
+// Per-feature overlay clusters live in sibling TUs (field-edit, zoom
+// loupe, pass-attribution viewer). The public method declarations live
+// in pulp/inspect/inspector_overlay.hpp; this header carries only the
+// shared state that crosses that private TU boundary: the overlay's
+// color palette. The structural layout constants (kRowHeight,
+// kZoomGridCells, kPassTypeCount, …) are static-constexpr members of
+// InspectorOverlay, so the split TUs reach them through the public
+// header and they are intentionally not duplicated here.
 //
 // PRIVATE: lives under inspect/src/, not the public include tree
 // (inspect/include/).
@@ -30,8 +27,7 @@ using pulp::canvas::Color;
 
 // Format a Color as a CSS hex string (#rrggbb or #rrggbbaa). Shared across the
 // inspector-overlay TUs (used by the eyedropper pick path + the paint TU);
-// `inline` so each TU sees a single definition. P11-5 (#2647) — relocated from
-// a file-local static in inspector_overlay.cpp when paint_* split out.
+// `inline` so each TU sees a single definition.
 inline std::string color_to_hex(const Color& c) {
     std::ostringstream oss;
     oss << '#' << std::hex << std::nouppercase << std::setfill('0');
@@ -64,17 +60,17 @@ inline const Color kStatsBg          = Color::rgba(0.0f, 0.0f, 0.0f, 0.7f);
 inline const Color kStatsText        = Color::rgba(0.6f, 1.0f, 0.6f, 1.0f);
 inline const Color kStatsWarn        = Color::rgba(1.0f, 0.4f, 0.3f, 1.0f);
 
-// Phase 3b — editable-field visual treatment
+// Editable-field visual treatment.
 inline const Color kFieldEditCaret   = Color::rgba(0.95f, 0.6f, 0.2f, 1.0f);
 inline const Color kFieldEditUnder   = Color::rgba(0.95f, 0.6f, 0.2f, 0.9f);
 inline const Color kFieldEditBg      = Color::rgba(0.95f, 0.6f, 0.2f, 0.18f);
 
-// Phase 3c — eyedropper cursor swatch chrome
+// Eyedropper cursor swatch chrome.
 inline const Color kEyedropChromeBg  = Color::rgba(0.08f, 0.08f, 0.1f, 0.95f);
 inline const Color kEyedropBorder    = Color::rgba(1.0f, 1.0f, 1.0f, 0.85f);
 inline const Color kEyedropText      = Color::rgba(0.95f, 0.95f, 1.0f, 1.0f);
 
-// Phase 3e — zoom loupe visual treatment
+// Zoom loupe visual treatment.
 inline const Color kZoomPanelBg      = Color::rgba(0.06f, 0.06f, 0.08f, 0.97f);
 inline const Color kZoomBorder       = Color::rgba(0.25f, 0.5f, 1.0f, 0.9f);
 inline const Color kZoomGridLine     = Color::rgba(0.0f, 0.0f, 0.0f, 0.25f);

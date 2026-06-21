@@ -84,7 +84,7 @@ inline sk_sp<SkColorSpace> sk_color_space_from_webgpu_format(const std::string& 
     return SkColorSpace::MakeSRGB();
 }
 
-// ── Text / font helpers (R2-3 text split, 2026-05) ───────────────────────────
+// ── Text / font helpers ──────────────────────────────────────────────────────
 // Shared by skia_canvas.cpp and skia_canvas_text.cpp. The definitions
 // live in skia_canvas.cpp (they carry process-wide font-manager state
 // and are referenced by dozens of internal call sites there).

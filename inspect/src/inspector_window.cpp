@@ -47,11 +47,11 @@ static std::string format_rect(const Rect& r) {
 
 static std::string bool_str(bool v) { return v ? "true" : "false"; }
 
-// WYSIWYG P4 FIX 3 — reachability check used to validate that a saved raw
-// `View*` selection is still part of the live tree before any deref. The live
-// React tree can rebuild (e.g. Chainer's meters), destroying the previously
-// selected view; without this guard `show_properties_for(selected_view_)`
-// would deref freed memory. Walks `root`'s subtree for `needle`.
+// Reachability check used to validate that a saved raw `View*` selection is
+// still part of the live tree before any deref. The live React tree can rebuild
+// (e.g. Chainer's meters), destroying the previously selected view; without
+// this guard `show_properties_for(selected_view_)` would deref freed memory.
+// Walks `root`'s subtree for `needle`.
 static bool view_is_in_tree(const View* root, const View* needle) {
     if (!root || !needle) return false;
     if (root == needle) return true;
@@ -202,7 +202,7 @@ InspectorWindow::~InspectorWindow() {
     inspected_root_ = nullptr;
 }
 
-// ── P3 — Figma-style tool strip ─────────────────────────────────────────────
+// ── Figma-style tool strip ─────────────────────────────────────────────────
 //
 // A compact horizontal header strip with two tool buttons (pointer =
 // Select, "T" = Text). The active tool is highlighted. The strip reads
@@ -242,11 +242,12 @@ public:
         canvas.set_fill_color(kBorder);
         canvas.fill_rect(b.x, b.bottom() - 1, b.width, 1);
 
-        // WYSIWYG P5 FIX 3 — hover tooltip. The two tool buttons are
-        // custom-painted into this single View (no per-button child to attach
-        // a Tooltip widget to), so paint the tooltip inline near the hovered
-        // button. "Select (V)" / "Text (T)" surfaces the keyboard shortcut the
-        // overlay binds (bare V / T → InspectorOverlay::set_tool).
+        // Hover tooltip. The two tool buttons are custom-painted into
+        // this single View (no per-button child to attach a Tooltip
+        // widget to), so paint the tooltip inline near the hovered
+        // button. "Select (V)" / "Text (T)" surfaces the keyboard
+        // shortcut the overlay binds (bare V / T →
+        // InspectorOverlay::set_tool).
         if (hovered_button_ >= 0 && hovered_button_ < 2) {
             const char* tip = tooltip_for_button(hovered_button_);
             Rect r = button_rect(hovered_button_);
@@ -272,8 +273,8 @@ public:
     }
 
     void on_mouse_event(const MouseEvent& event) override {
-        // Track the hovered button for the inline tooltip (FIX 3). A press
-        // also picks the tool. event.position is local to this View.
+        // Track the hovered button for the inline tooltip. A press also
+        // picks the tool. event.position is local to this View.
         const int hit = button_at_local(event.position);
         hovered_button_ = hit;
         if (event.is_down && hit >= 0) {
@@ -281,12 +282,12 @@ public:
         }
     }
 
-    // WYSIWYG T1 — positioned hover. The platform host's mouse-move handler
-    // dispatches simulate_hover(), which now delivers on_hover_move() to the
-    // hit target in local coordinates. Without this the strip only received
-    // on_mouse_enter (no position), so hovered_button_ stayed -1 and the
-    // "Select (V)"/"Text (T)" tooltip never appeared. on_mouse_event still
-    // sets it on a press, but a hover with no button down took THIS path.
+    // Positioned hover. The platform host's mouse-move handler dispatches
+    // simulate_hover(), which delivers on_hover_move() to the hit target in
+    // local coordinates. Without this the strip only receives on_mouse_enter
+    // (no position), so hovered_button_ stays -1 and the "Select (V)" /
+    // "Text (T)" tooltip never appears. on_mouse_event still sets it on a
+    // press, but a hover with no button down takes this path.
     void on_hover_move(Point local_pos) override {
         hovered_button_ = button_at_local(local_pos);
     }
@@ -341,7 +342,7 @@ InspectorWindow::InspectorWindow() {
     flex().flex_grow = 1;
     set_background_color(kBgDark);
 
-    // P3 — tool strip header (above the tabs). Reads active_tool_ + fires
+    // Tool strip header (above the tabs). Reads active_tool_ and fires
     // on_tool_picked, both members of this window, so the strip stays in
     // sync with keyboard tool flips and drives the overlay on a click.
     auto strip = std::make_unique<ToolStrip>(&active_tool_, &on_tool_picked);
@@ -390,13 +391,11 @@ std::unique_ptr<View> InspectorWindow::build_elements_tab() {
     tree->on_select = [this](TreeNode& node) {
         if (node.user_data) {
             View* picked = static_cast<View*>(node.user_data);
-            // P2e two-way selection: a tree-row click is a real selection
-            // SOURCE. It highlights its own row (TreeView does that before
+            // Two-way selection: a tree-row click is a real selection
+            // source. It highlights its own row (TreeView does that before
             // firing on_select), shows the node's properties, and drives the
-            // SHARED selection via on_view_selected — which the host mirrors
-            // into the canvas overlay. The maintainer wants this: "we DO want
-            // to be able to tap and select an item in the inspector as it
-            // works today."
+            // shared selection via on_view_selected, which the host mirrors
+            // into the canvas overlay.
             //
             // Read-only mode (set_selection_readonly(true)) remains a supported
             // opt-out: a tree click then only shows properties and does NOT
@@ -593,7 +592,7 @@ std::unique_ptr<View> InspectorWindow::build_performance_tab() {
     frame_time_label_ = ft.get();
     root->add_child(std::move(ft));
 
-    // GPU render time (whole-recording, from Skia Graphite GpuStats — #2611)
+    // GPU render time (whole-recording, from Skia Graphite GpuStats).
     auto gpu = make_prop_label("GPU render: —", 13);
     gpu_render_label_ = gpu.get();
     root->add_child(std::move(gpu));
@@ -810,11 +809,11 @@ std::size_t InspectorWindow::compute_tree_signature(const View* view) const {
 void InspectorWindow::refresh_elements() {
     if (!tree_view_ || !inspected_root_) return;
 
-    // P2d (A) — anti-flicker. refresh_elements() runs on every idle tick
-    // (~30 Hz). Rebuilding the whole TreeView each tick clears then
-    // repopulates it, which flashes empty (the maintainer's "empty-content
-    // flicker"). Only rebuild when the tree's STRUCTURE actually changed;
-    // otherwise just refresh the property labels for the current selection.
+    // Anti-flicker. refresh_elements() runs on every idle tick (~30 Hz).
+    // Rebuilding the whole TreeView each tick clears then repopulates it,
+    // which flashes empty. Only rebuild when the tree's structure actually
+    // changed; otherwise just refresh the property labels for the current
+    // selection.
     std::size_t sig = compute_tree_signature(inspected_root_);
     bool structure_changed = (sig != tree_signature_) || tree_signature_ == 0;
 
@@ -833,18 +832,17 @@ void InspectorWindow::refresh_elements() {
         root_node.expanded = true;
 
         // Restore selection: find the new node matching the previously
-        // selected view. P2e — a canvas-driven reflection now highlights its
-        // row too (two-way selection), so the row is restored unconditionally
-        // after a structural rebuild. The stray-box leak is fixed in the paint
-        // hook, not by suppressing the row highlight.
+        // selected view. A canvas-driven reflection highlights its row too
+        // (two-way selection), so the row is restored unconditionally after a
+        // structural rebuild. The stray-box leak is fixed in the paint hook,
+        // not by suppressing the row highlight.
         if (saved_selection) {
             auto* restored = tree_view_->find_node_by_user_data(saved_selection);
             tree_view_->set_selected_node(restored);
-            // WYSIWYG P4 FIX 3 — if the previously selected view is gone from
-            // the rebuilt tree (no node carries it as user_data — e.g. the live
-            // React tree was rebuilt and the view destroyed), drop the stale
-            // raw pointer so the show_properties_for() deref below can't touch
-            // freed memory. Without this `selected_view_` lingered dangling.
+            // If the previously selected view is gone from the rebuilt tree
+            // (no node carries it as user_data — e.g. the live React tree was
+            // rebuilt and the view destroyed), drop the stale raw pointer so
+            // the show_properties_for() deref below can't touch freed memory.
             if (!restored) selected_view_ = nullptr;
         } else {
             tree_view_->set_selected_node(nullptr);
@@ -853,16 +851,16 @@ void InspectorWindow::refresh_elements() {
 
         // Size the TreeView to its full visible-content height and tell the
         // wrapping ScrollView, so an expanded hierarchy taller than the
-        // ~200px viewport scrolls instead of clipping (WYSIWYG P6 FIX 3).
+        // ~200px viewport scrolls instead of clipping.
         float h = tree_view_->content_height();
         tree_view_->flex().preferred_height = h;
         if (tree_scroll_) tree_scroll_->set_content_size({300, h});
     }
 
     // Refresh theme colors section. Only rebuilt when the tree structure
-    // changed (P2d anti-flicker) — theme tokens are effectively static across
-    // idle ticks, so clearing + repopulating the swatch rows every tick just
-    // adds churn. The first refresh (tree_signature_ was 0) always builds it.
+    // changed — theme tokens are effectively static across idle ticks, so
+    // clearing + repopulating the swatch rows every tick just adds churn. The
+    // first refresh (tree_signature_ was 0) always builds it.
     if (structure_changed && theme_section_ && inspected_root_) {
         auto* content = theme_section_->content();
         // Clear existing children: remove all by rebuilding
@@ -896,8 +894,8 @@ void InspectorWindow::refresh_elements() {
     }
 
     // If we still have a selected view, update its properties — but only after
-    // confirming it is still reachable from the inspected root (WYSIWYG P4
-    // FIX 3). A signature-stable tick (no rebuild above) can still race a view
+    // confirming it is still reachable from the inspected root. A
+    // signature-stable tick (no rebuild above) can still race a view
     // destruction the structure hash didn't catch, so validate before the
     // deref and drop the pointer if it's stale.
     if (selected_view_) {
@@ -934,14 +932,12 @@ void InspectorWindow::reflect_selection(View* view) {
     // Canvas → window mirror: track + display the node WITHOUT firing
     // on_view_selected (no feedback loop into the canvas selection).
     //
-    // P2e correction (revises P2d): a canvas-driven reflection MUST highlight
-    // the matching tree row AND show the node's properties. The maintainer
-    // clarified that two-way selection is wanted — clicking in the canvas
-    // should highlight the corresponding row/text in the inspector tree. The
-    // ONLY thing forbidden is a stray selection BOX painted at a random
-    // coordinate inside the inspector window; that leak is fixed in the
-    // paint-hook gate (it no longer paints the in-canvas overlay into the
-    // inspector window's surface), NOT by stripping the row highlight.
+    // A canvas-driven reflection must highlight the matching tree row and
+    // show the node's properties. Two-way selection is intentional: clicking
+    // in the canvas should highlight the corresponding row/text in the
+    // inspector tree. The only forbidden behavior is a stray selection box
+    // painted at a random coordinate inside the inspector window; that leak
+    // is fixed in the paint-hook gate, not by stripping the row highlight.
     selected_view_ = view;
     if (tree_view_) {
         auto* node = tree_view_->find_node_by_user_data(view);
@@ -1088,7 +1084,7 @@ void InspectorWindow::refresh_performance() {
     if (frame_time_label_)
         frame_time_label_->set_text("Frame time: " + format_float(total_ms, 2) + " ms");
     if (gpu_render_label_) {
-        // Whole-recording GPU render time (#2611). Honest about availability:
+        // Whole-recording GPU render time. Honest about availability:
         // unsupported adapters / no-sample-yet read as "unavailable", never a
         // fake 0.
         if (rpm_->gpu_render_timing_available())

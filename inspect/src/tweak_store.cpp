@@ -1,4 +1,4 @@
-// tweak_store.cpp — Phase 0b in-memory tweak table + Phase 1 disk persistence.
+// tweak_store.cpp — In-memory inspector tweak table and disk persistence.
 
 #include <pulp/inspect/tweak_store.hpp>
 
@@ -124,8 +124,8 @@ std::size_t TweakStore::apply_tweaks_batch(std::string_view anchor_id,
     {
         std::lock_guard lock(mtx_);
         // Take the lock ONCE for the whole batch and suspend auto-save so
-        // the individual key writes don't each flush disk (Risk 6). The
-        // single flush happens after the lock is released, below.
+        // the individual key writes don't each flush disk. The single
+        // flush happens after the lock is released, below.
         ++auto_save_suspend_depth_;
         auto& anchor_map = tweaks_[std::string(anchor_id)];
         for (auto& entry : entries) {
@@ -331,7 +331,7 @@ std::vector<std::string> TweakStore::locked_anchors() const {
     return out;
 }
 
-// ── Disk persistence (Phase 1) ──────────────────────────────────────────
+// ── Disk persistence ───────────────────────────────────────────────────
 
 std::string TweakStore::default_tweaks_path() {
     if (const char* env = std::getenv("PULP_TWEAKS_FILE"); env && *env) {
@@ -422,9 +422,9 @@ std::string TweakStore::to_json_locked() const {
     obj.addMember("bypassed", bypassed_obj);
 
     // locked: string[] — flat list of anchor ids the user marked as
-    // protected (Phase 2.5). Only emitted when non-empty so trivial
-    // files stay small and v1 readers that don't know about `locked`
-    // simply never see the key. Sorted for deterministic round-trips.
+    // protected. Only emitted when non-empty so trivial files stay
+    // small and v1 readers that don't know about `locked` simply never
+    // see the key. Sorted for deterministic round-trips.
     if (!locked_.empty()) {
         std::vector<std::string> sorted(locked_.begin(), locked_.end());
         std::sort(sorted.begin(), sorted.end());
@@ -557,8 +557,8 @@ TweakStore::from_json_locked(std::string_view json) {
         }
     }
 
-    // locked: string[] — Phase 2.5. Missing key is fine (v1 files
-    // without lock state). Non-string array elements are skipped.
+    // locked: string[]. Missing key is fine (v1 files without lock
+    // state). Non-string array elements are skipped.
     if (parsed.hasObjectMember("locked") && parsed["locked"].isArray()) {
         auto locked_arr = parsed["locked"];
         for (uint32_t i = 0; i < locked_arr.size(); ++i) {
@@ -606,7 +606,7 @@ TweakStore::DiskResult TweakStore::from_json(std::string_view json) {
     return from_json_locked(json);
 }
 
-// ── Drift detection (Phase 2) ───────────────────────────────────────────
+// ── Drift detection ────────────────────────────────────────────────────
 
 const char* TweakStore::drift_reason_str(DriftReason reason) {
     switch (reason) {
