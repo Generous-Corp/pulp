@@ -283,8 +283,8 @@ function _applyTypographyProp(decl, id, key, resolved, value) {
             }
             return true;
 
-        // text-indent — first-line indent. Storage-only; SkParagraph
-        // setTextIndent integration is the follow-up.
+        // text-indent — first-line indent. Storage-only; the SkParagraph paint
+        // path does not consume setTextIndent yet.
         case "textIndent": {
             var ti = resolveCSSLength(resolved);
             if (ti && typeof setTextIndent === "function") setTextIndent(id, ti.value);

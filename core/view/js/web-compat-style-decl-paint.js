@@ -164,7 +164,8 @@ function _applyPaintProp(decl, id, key, resolved, value) {
             setOpacity(id, parseFloat(resolved) || 0);
             return true;
 
-        // Box shadow: "2px 4px 8px rgba(0,0,0,0.3)" or "inset 2px 4px 8px ..." (issue-925)
+        // Box shadow: "2px 4px 8px rgba(0,0,0,0.3)" or
+        // "inset 2px 4px 8px ...".
         case "boxShadow": {
             if (resolved === "none" || resolved === "" || resolved == null) {
                 if (typeof clearBoxShadow === "function") clearBoxShadow(id);
@@ -242,12 +243,10 @@ function _applyPaintProp(decl, id, key, resolved, value) {
             return true;
         }
 
-        // CSS `mask-image`. Storage-only today; the
-        // paint pipeline does not yet composite a shader mask onto a
-        // saveLayer. Forwarding the value through to the bridge keeps
-        // the slot round-trippable so harness tests can assert the
-        // shim accepts the value, and so a future paint slice can
-        // honor it without a JS-side change.
+        // CSS `mask-image`. The bridge stores the value on the View;
+        // mask-capable paint backends consume supported forms (currently
+        // `url(...)` and `linear-gradient(...)`) and fall back to no-mask
+        // painting for unsupported or unparseable forms.
         case "maskImage": {
             if (typeof setMaskImage !== "function") return true;
             var miv = String(resolved).trim();
@@ -256,9 +255,8 @@ function _applyPaintProp(decl, id, key, resolved, value) {
             return true;
         }
 
-        // `mask-size` pairs with mask-image.
-        // Storage-only today; consumed by the future paint slice that
-        // wires the mask shader onto the saveLayer.
+        // `mask-size` pairs with mask-image and is consumed by mask-capable
+        // paint backends when the mask image resolves to a shader.
         case "maskSize": {
             if (typeof setMaskSize !== "function") return true;
             setMaskSize(id, String(resolved).trim());
@@ -279,8 +277,8 @@ function _applyPaintProp(decl, id, key, resolved, value) {
         }
 
         // CSS `object-fit` — controls fitting of <img> intrinsic
-        // size into its layout box. Storage-only today; ImageView
-        // paint-time consumption needs natural-size access (follow-up).
+        // size into its layout box. Image-like paint paths consume it
+        // when mapping source content into their bounds.
         case "objectFit": {
             if (typeof setObjectFit !== "function") return true;
             setObjectFit(id, String(resolved).trim());
@@ -288,7 +286,8 @@ function _applyPaintProp(decl, id, key, resolved, value) {
         }
 
         // CSS `object-position` — alignment of object-fit residual
-        // space. Pairs with object-fit. Storage-only today.
+        // space. Pairs with object-fit; image-like paint paths consume it
+        // to offset fitted content within the destination rect.
         case "objectPosition": {
             if (typeof setObjectPosition !== "function") return true;
             setObjectPosition(id, String(resolved).trim());
@@ -299,9 +298,10 @@ function _applyPaintProp(decl, id, key, resolved, value) {
         // sub-property out (it's the only longhand we support today)
         // and forward both the shorthand verbatim (so View::mask()
         // round-trips) and the extracted image to setMaskImage.
-        // The remaining longhands (mode / repeat / position / size /
-        // origin / clip / composite) are deferred — the saveLayer +
-        // SkBlendMode::kDstIn paint slice is the follow-up.
+        // The remaining shorthand longhands (mode / repeat / position /
+        // size / origin / clip / composite) are not fanned out of the
+        // shorthand yet; unsupported image forms are stored but fall
+        // back to no-mask painting.
         case "mask": {
             if (typeof setMask === "function") {
                 setMask(id, String(resolved));
@@ -315,8 +315,8 @@ function _applyPaintProp(decl, id, key, resolved, value) {
                     // radial-gradient(...) substring out and treat the
                     // rest as deferred sub-properties. Solid-color
                     // masks (`mask: black`) flow through verbatim too;
-                    // the bridge stores the value but doesn't paint it
-                    // yet.
+                    // unsupported forms are stored but fall back to
+                    // no-mask painting.
                     var imgm = mv.match(/(url\([^)]*\)|(?:linear|radial|conic)-gradient\([^)]*\))/);
                     setMaskImage(id, imgm ? imgm[1] : mv);
                 }

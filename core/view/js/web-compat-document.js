@@ -173,7 +173,7 @@ function _setupPseudoHover(el, props) {
 // suffixed with a single `:hover` / `:focus` / `:active` pseudo-class,
 // comma-separated selector lists, and `prop: value;` declarations.
 //
-// Out of scope for this slice (deferred follow-ups):
+// Out of scope for this conservative CSS-text parser:
 //   - Descendant / child / sibling combinators in the CSS-text input
 //     (the underlying matcher supports them via `_parseSelector` but
 //     bringing them through the text parser opens a larger correctness

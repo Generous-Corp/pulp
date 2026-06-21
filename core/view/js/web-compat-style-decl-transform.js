@@ -72,9 +72,9 @@ function _applyTransformProp(decl, id, key, resolved, value) {
                         f: t.args[5] !== undefined ? t.args[5] : 0,
                     };
                 }
-                // rotateX / rotateY / matrix3d / perspective: 2D View has
-                // no 3D rotation storage; silently dropped. Tracked for
-                // a follow-up issue (3D model on View).
+                // rotateX / rotateY / matrix3d / perspective: the 2D View
+                // transform surface has no 3D rotation storage, so these are
+                // silently dropped.
             }
             if (matrixCall && typeof setTransform !== "undefined") {
                 // Full-matrix path — 6-component bridge call. Skips the
@@ -182,10 +182,9 @@ function _applyTransformProp(decl, id, key, resolved, value) {
         // animation-play-state. Forwards the
         // CSS keyword (`running` | `paused`) through the existing
         // setAnimation control-token ABI so the bridge can route it to
-        // the staged_animation slot. The full pause/resume of the
-        // active_animations playback driver is the follow-up; storing
-        // the keyword today is enough for the catalog to claim partial
-        // and for round-trip validation.
+        // the staged_animation slot. The active_animations playback driver
+        // does not consume it yet; storing the keyword keeps the value
+        // round-trippable for validation.
         case "animationPlayState":
             if (typeof setAnimation === "function") setAnimation(id, "play_state", resolved);
             return true;

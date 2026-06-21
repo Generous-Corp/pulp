@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// Events + Pointer-capture (P5-7 follow-up — extracted from web-compat-element.js)
+// Events + Pointer-capture support extracted from web-compat-element.js
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 // Two coherent subsurfaces of the DOM Event surface:
@@ -351,11 +351,10 @@ function _dispatchEvent(target, event) {
     var el = target._parentElement;
     while (el) { path.unshift(el); el = el._parentElement; }
 
-    // pulp jsx-instrument-import diag 2026-05-17 — log every dispatch
-    // path for pointer/click/mouse events so we can see if the bubble
-    // chain reaches __root__ where React-DOM delegate is registered.
-    // Gated by globalThis.__pulpDebugDispatch__ to keep silent in
-    // normal runs.
+    // Debug-only dispatch logging for pointer/click/mouse events. Shows whether
+    // the bubble chain reaches __root__ where the React-DOM delegate is
+    // registered. Gated by globalThis.__pulpDebugDispatch__ to keep normal runs
+    // silent.
     if (globalThis.__pulpDebugDispatch__ && /^(click|mousedown|mouseup|pointerdown|pointerup)$/.test(event.type)) {
         var pathIds = path.map(function (e) { return e._id; }).join(">");
         var rootListeners = (__eventListeners__["__root__"]
