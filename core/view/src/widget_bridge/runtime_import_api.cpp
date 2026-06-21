@@ -18,14 +18,12 @@ namespace detail {
 std::string json_string_literal_for_widget_bridge(const std::string& s);
 } // namespace detail
 
-// ── Runtime design import (pulp #468 follow-up) ───────────────────
+// ── Runtime design import ──────────────────────────────────────────
 //
 // Registers __pulpRuntimeImport__(html, source) and
 // __pulpRuntimeSettle__(rounds) on the live bridge engine. The JS-side
 // `@pulp/react/runtime-import` calls these to evaluate a design bundle
-// in THIS engine (not a fresh one) — the key insight from the
-// pulp-runtime-import-FINAL-design.md alignment with codex: one engine,
-// one React, one reconciler.
+// in THIS engine (not a fresh one): one engine, one React, one reconciler.
 //
 // Architecturally distinct from the offline parse_claude_html_with_runtime
 // path which allocates a fresh sandbox for IR extraction. That path stays
@@ -58,12 +56,11 @@ void WidgetBridge::install_runtime_import_handlers() {
     };
 
     auto clear_err = [this]() {
-        // Codex P1 + P2 follow-ups on #1856: a stale error from a
-        // previous runtime-import attempt would otherwise leak into
-        // the next aggregation. Clear EVERY transient error global the
+        // A stale error from a previous runtime-import attempt would otherwise
+        // leak into the next aggregation. Clear every transient error global the
         // aggregator reads: __pulpRuntimeImportErr__ itself, the
-        // babel-transform / flushSync / createRoot-render slots, and
-        // any per-payload __pulpPayloadErr_*.
+        // babel-transform / flushSync / createRoot-render slots, and any
+        // per-payload __pulpPayloadErr_*.
         try {
             engine_.evaluate(
                 "(function(){"
@@ -158,22 +155,20 @@ void WidgetBridge::install_runtime_import_handlers() {
 
                 // The shared shim setup + payload eval logic lives in
                 // a helper that both this path and the offline path
-                // (parse_claude_html_with_runtime) can call. Phase 6 step 7
-                // factors that helper out. For now, inline the minimal
-                // sequence needed for a working runtime path: shims,
-                // asset eval, inline script eval. Skips buildDom +
-                // walkDomJson per the FINAL design.
+                // (parse_claude_html_with_runtime) can call. The runtime path
+                // only needs the live-engine sequence: shims, asset eval,
+                // inline script eval. It deliberately skips buildDom +
+                // walkDomJson because reconciliation is owned by the JS-side
+                // ReactDOM capture shim.
                 evaluate_claude_bundle_in_live_engine(*bundle);
-                // Codex P1 (Phase 6.1 review): the shared pipeline
-                // writes per-payload eval failures to
-                // `__pulpPayloadErr_<idx>__` and Babel-transform
-                // failures to `__pulpEvalErr__`, but JS callers (and
-                // Phase 6.3's runtime-import.ts) only read
-                // `__pulpRuntimeImportErr__`. Aggregate any soft errors
-                // into the runtime-error sink so they're visible to
-                // onError / lastError callers. Best-effort — if the
-                // engine is in a bad state, leave the existing err
-                // value (set by set_err / clear_err above) intact.
+                // The shared pipeline writes per-payload eval failures to
+                // `__pulpPayloadErr_<idx>__` and Babel-transform failures to
+                // `__pulpEvalErr__`, but JS callers read
+                // `__pulpRuntimeImportErr__`. Aggregate any soft errors into
+                // the runtime-error sink so they're visible to onError /
+                // lastError callers. Best-effort — if the engine is in a bad
+                // state, leave the existing err value (set by set_err /
+                // clear_err above) intact.
                 try {
                     auto v = engine_.evaluate(
                         "(function(){"
@@ -184,10 +179,10 @@ void WidgetBridge::install_runtime_import_handlers() {
                         "    errs.push('babel-transform: ' + globalThis.__pulpEvalErr__);"
                         "  if (typeof globalThis.__pulpFlushSyncErr__ === 'string' && globalThis.__pulpFlushSyncErr__.length)"
                         "    errs.push('flushSync: ' + globalThis.__pulpFlushSyncErr__);"
-                        // Codex P2 on #1856: run_claude_bundle_payload_pipeline
-                        // (design_import.cpp:1054) writes createRoot/render
-                        // failures here. Without this branch, render-time
-                        // exceptions never propagate to onError/lastError.
+                        // run_claude_bundle_payload_pipeline writes
+                        // createRoot/render failures here. Without this branch,
+                        // render-time exceptions never propagate to
+                        // onError/lastError.
                         "  if (typeof globalThis.__pulpCreateRootRenderErr__ === 'string' && globalThis.__pulpCreateRootRenderErr__.length)"
                         "    errs.push('createRoot/render: ' + globalThis.__pulpCreateRootRenderErr__);"
                         "  for (var key in globalThis) {"

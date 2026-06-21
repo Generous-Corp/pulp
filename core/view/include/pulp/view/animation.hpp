@@ -102,13 +102,13 @@ public:
         apply_motion_policy_at_start();
     }
 
-    // ── Motion provenance (Phase 9) ─────────────────────────────────
+    // ── Motion provenance ────────────────────────────────────────────
     //
     // Attach a `motion::Provenance` envelope to this tween. When
     // `publish(view, metric)` is called, the publish channel stamps
     // the envelope onto every emitted event so an offline reader can
-    // answer "what code created this tween?". Off by default — pre-
-    // Phase-9 tweens that don't call this method behave identically.
+    // answer "what code created this tween?". Off by default; tweens that
+    // don't call this method behave identically.
     //
     // The convenience `PULP_MOTION_TWEEN(...)` macro auto-fills
     // `source_file` / `source_line` from `std::source_location` at the
@@ -173,10 +173,10 @@ private:
     float elapsed_ = 0;
     float current_ = 0;
     EasingFunction ease_ = easing::linear;
-    motion::Provenance provenance_;  ///< Phase 9: opt-in attribution.
+    motion::Provenance provenance_;  ///< Opt-in attribution.
 };
 
-// ── PULP_MOTION_TWEEN (Phase 9) ─────────────────────────────────────────
+// ── PULP_MOTION_TWEEN ────────────────────────────────────────────────────
 //
 // Convenience macro: constructs a `Tween` and stamps a `motion::Provenance`
 // envelope with `source_kind = "tween"`, the supplied `source_id`, and

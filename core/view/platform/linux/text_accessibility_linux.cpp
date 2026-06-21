@@ -1,11 +1,11 @@
-// Linux AccessKit backend for TextAccessibilityNode (font v2 Slice 2.6).
+// Linux AccessKit backend for TextAccessibilityNode.
 //
-// SCAFFOLD-STUB-LEVEL backend. This file replaces the default "none"
-// implementation in core/view/src/text_accessibility.cpp on Linux builds
-// so accessibility_backend_name() returns "linux-accesskit-stub" instead
-// of "none" — giving the cross-platform layer a way to distinguish "no
-// platform a11y wiring at all" from "the Linux scaffold is present but
-// not yet talking to AccessKit".
+// Stub backend. This file replaces the default "none" implementation in
+// core/view/src/text_accessibility.cpp on Linux builds so
+// accessibility_backend_name() returns "linux-accesskit-stub" instead of
+// "none" — giving the cross-platform layer a way to distinguish "no platform
+// a11y wiring at all" from "the Linux backend is present but not yet talking to
+// AccessKit".
 //
 // The register / unregister / snapshot surface still routes through a
 // process-local std::unordered_map, mirroring the default backend, so:
@@ -16,30 +16,6 @@
 //      AccessKit wiring lands, the same call sites publish to AT-SPI
 //      automatically without any caller-side change.
 //
-// ── To flip this stub to a real AccessKit backend ─────────────────────────
-//
-// AccessKit project: https://github.com/AccessKit/accesskit
-// C bindings: https://github.com/AccessKit/accesskit/tree/main/bindings/c
-// AT-SPI adapter: https://github.com/AccessKit/accesskit/tree/main/platforms/linux
-//
-// Required wiring (deferred to a follow-up slice):
-//   1. Vendor or FetchContent the accesskit-c crate (BSD-licensed, MIT
-//      compatible per Pulp's LICENSE policy) into external/accesskit/.
-//      Build it with `cargo build --release -p accesskit_c` and link
-//      libaccesskit.a (or .so) into pulp-view via the platform-Linux leg
-//      of core/view/CMakeLists.txt.
-//   2. On init_accessibility(): construct an accesskit_unix_adapter via
-//      `accesskit_unix_adapter_new(...)` with the activation handler that
-//      returns the initial TreeUpdate (root node + all currently-
-//      registered TextAccessibilityNode entries).
-//   3. On register_text_accessibility_node(): build a TreeUpdate
-//      containing a single AccessKit node and call
-//      `accesskit_unix_adapter_update_if_active(adapter, update)`. Map
-//      TextAccessibilityRole → accesskit::Role per the table below.
-//   4. On unregister: emit a TreeUpdate that drops the node by id.
-//   5. On snapshot_accessibility_nodes(): the C++ shadow map already
-//      returns the cross-platform view; no AccessKit round-trip needed.
-//
 // Role mapping (for the eventual real backend):
 //   TextAccessibilityRole::Label      → accesskit::Role::Label
 //   TextAccessibilityRole::Button     → accesskit::Role::Button
@@ -47,10 +23,10 @@
 //   TextAccessibilityRole::Heading    → accesskit::Role::Heading
 //   TextAccessibilityRole::Other      → accesskit::Role::GenericContainer
 //
-// Until that work lands, this stub keeps the platform identifier honest:
-// `accessibility_backend_name()` returns the explicit "linux-accesskit-stub"
-// value, so screen-reader-validation tooling can detect that Linux is
-// scaffolded but not yet wired through to AT-SPI.
+// Until the AccessKit adapter is connected, this stub keeps the platform
+// identifier honest: `accessibility_backend_name()` returns the explicit
+// "linux-accesskit-stub" value, so screen-reader-validation tooling can detect
+// that Linux is not yet wired through to AT-SPI.
 
 #if defined(__linux__) && !defined(__ANDROID__)
 
@@ -97,7 +73,7 @@ Registry& registry() {
 }  // namespace
 
 std::string_view accessibility_backend_name() noexcept {
-    // Explicitly distinguishes the Linux scaffold from the default
+    // Explicitly distinguishes the Linux backend stub from the default
     // "none" backend, so external tooling can detect that the platform
     // build is wired in even though it doesn't talk to AT-SPI yet.
     // Flip to "linux-accesskit" when the AccessKit adapter actually

@@ -73,11 +73,10 @@ private:
 /// Builder for composing animation sequences and parallel groups
 class AnimatorSetBuilder {
 public:
-    /// Phase 9: assign a logical name to this animator set. Threaded
-    /// through to the `Runner`, which stamps it as
-    /// `source_kind="animator-set", source_id=<name>` on every emitted
-    /// publish event. Off by default — pre-Phase-9 builders that never
-    /// call `name()` produce events with no provenance.
+    /// Assign a logical name to this animator set. Threaded through to the
+    /// `Runner`, which stamps it as `source_kind="animator-set",
+    /// source_id=<name>` on every emitted publish event. Off by default;
+    /// builders that never call `name()` produce events with no provenance.
     AnimatorSetBuilder& name(std::string n) {
         name_ = std::move(n);
         return *this;
@@ -148,7 +147,8 @@ public:
                 steps_[current_]->advance(dt);
                 if (steps_[current_]->finished()) {
                     ++current_;
-                    // Carry leftover time to the next step
+                    // Start the next step on the same frame; this runner does
+                    // not track partial-frame leftover time per step.
                 } else {
                     break;
                 }
@@ -166,9 +166,9 @@ public:
                 s->reset();
         }
 
-        /// Phase 9: publish the runner's current scalar through the motion
-        /// publish channel, stamping the animator-set name (configured
-        /// via `AnimatorSetBuilder::name()`) as provenance.
+        /// Publish the runner's current scalar through the motion publish
+        /// channel, stamping the animator-set name (configured via
+        /// `AnimatorSetBuilder::name()`) as provenance.
         void publish(std::string view_name,
                      std::string metric_name,
                      double value,
@@ -197,7 +197,7 @@ public:
 private:
     std::vector<std::unique_ptr<AnimationStep>> steps_;
     std::unique_ptr<ParallelStep> parallel_;
-    std::string name_;  ///< Phase 9: motion-provenance source_id.
+    std::string name_;  ///< Motion-provenance source_id.
 };
 
 // ── Additional easing functions ─────────────────────────────────────────

@@ -1,6 +1,6 @@
 #pragma once
 
-// Accessibility tree snapshot (workstream 04 slice 4.4).
+// Accessibility tree snapshot.
 //
 // Walks a pulp::view::View subtree and produces a flat inventory of
 // (role, label, value, actions) tuples. Used by cross-platform a11y
@@ -32,10 +32,9 @@ struct AccessibilityNodeSnapshot {
     double current_value = 0.0;
     std::string value_string;
 
-    // pulp #1737 — ARIA state attributes. Tri-state per ARIA 1.2:
+    // ARIA state attributes. Tri-state per ARIA 1.2:
     // `true` / `false` / `mixed` / unset (empty string). Platform AT
-    // bridges (NSAccessibility today; AT-SPI / UIA when those land
-    // per pulp #217) read these to expose the toggle/checkbox state.
+    // bridges read these to expose the toggle/checkbox state.
     // Stored on View::access_pressed_/_checked_/_disabled_/_hidden_;
     // surfaced through this snapshot for the cross-platform tree path.
     std::string pressed;   // aria-pressed

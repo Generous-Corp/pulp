@@ -6,10 +6,7 @@
 /// import pipelines produce compatible anchors and the tweaks layer
 /// (pulp-tweaks.json) works for either path.
 ///
-/// Phase 0a of the inspector direct-manipulation roadmap
-/// (planning/2026-05-18-inspector-direct-manipulation-roadmap.md).
-///
-/// Three strategies, per the umbrella spec (issue #1307, sub-issue #1299):
+/// Three strategies are supported:
 ///   • content-hash — used by stitch / v0 / claude / generic HTML.
 ///                    Hash over (tag, role, normalized text, depth, sigIndex).
 ///   • path         — used by RN file exports / hand-edited code.
