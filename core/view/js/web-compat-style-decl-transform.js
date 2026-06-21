@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// CSSStyleDeclaration — transform domain handler (P5-5 split of _applyProperty)
+// CSSStyleDeclaration — transform domain handler split from _applyProperty
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 // Handles the transform / transition / animation CSS properties.
@@ -12,7 +12,7 @@ function _applyTransformProp(decl, id, key, resolved, value) {
     switch (key) {
         // Transform
         case "transform": {
-            // pulp #1434 Triage #9 — full CSS transform-function fan-out.
+            // full CSS transform-function fan-out.
             // Walk-once accumulator (mirrors the @pulp/react prop-applier
             // walker) so the within-string order produces a single set
             // of consolidated bridge calls instead of multiple
@@ -25,8 +25,8 @@ function _applyTransformProp(decl, id, key, resolved, value) {
             //   • rotateX / rotateY — pulp's 2D View has no 3D rotation
             //     storage; rotateZ aliases to setRotation.
             //   • matrix3d / perspective — ditto, no 3D model.
-            //   • matrix(a b c d tx ty) — 2D affine. Per Codex P1 audit,
-            //     dispatched directly to setTransform(id, a, b, c, d, e, f)
+            //   • matrix(a b c d tx ty) — 2D affine. Dispatched directly
+            //     to setTransform(id, a, b, c, d, e, f)
             //     to preserve all 6 components verbatim. The earlier
             //     decomposition to translate+uniform-scale+rotate dropped
             //     the c/d skew components on rotation matrices like
@@ -108,7 +108,7 @@ function _applyTransformProp(decl, id, key, resolved, value) {
             return true;
         }
 
-        // Transition (pulp #1434 Phase A2-1) — pass the full shorthand
+        // Transition — pass the full shorthand
         // string to the bridge, which parses it into a list of
         // TransitionSpecs (one per comma-separated entry; supports
         // duration / delay / easing / property + cubic-bezier + steps).
@@ -179,7 +179,7 @@ function _applyTransformProp(decl, id, key, resolved, value) {
         case "animationFillMode":
             if (typeof setAnimation === "function") setAnimation(id, "fill", resolved);
             return true;
-        // pulp #1434 A4 Bundle 2 — animation-play-state. Forwards the
+        // animation-play-state. Forwards the
         // CSS keyword (`running` | `paused`) through the existing
         // setAnimation control-token ABI so the bridge can route it to
         // the staged_animation slot. The full pause/resume of the

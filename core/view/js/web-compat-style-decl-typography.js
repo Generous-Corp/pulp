@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// CSSStyleDeclaration — typography domain handler (P5-5 split of _applyProperty)
+// CSSStyleDeclaration — typography domain handler split from _applyProperty
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 // Handles the text / font CSS properties: font-size / weight / style /
@@ -14,7 +14,7 @@
 function _applyTypographyProp(decl, id, key, resolved, value) {
     switch (key) {
         case "fontSize": {
-            // pulp Wave 2 css.2 — relative-unit & keyword expansion.
+            // Font-size relative-unit and keyword expansion.
             //   • em/rem/%   → resolve against parent / root font-size.
             //                  We don't have a real cascade context here
             //                  (the CSS shim is per-element with no
@@ -50,8 +50,8 @@ function _applyTypographyProp(decl, id, key, resolved, value) {
             return true;
         }
         case "fontWeight":
-            // pulp #1434 (batch 3) — translate CSS keyword forms to
-            // numeric weight before reaching the bridge. Numeric values
+            // Translate CSS keyword forms to numeric weight before
+            // reaching the bridge. Numeric values
             // ("400", "500") still flow through unchanged. The previous
             // `parseInt` path returned NaN for keywords, which fell back
             // to the `|| 400` default — silently mapping `"bold"` to
@@ -74,8 +74,8 @@ function _applyTypographyProp(decl, id, key, resolved, value) {
             setFontWeight(id, fwNumeric);
             return true;
         case "fontStyle":
-            // pulp Wave 2 css.4 — `oblique` (and `oblique <angle>`) aliases
-            // to `italic`. Skia distinguishes italic-vs-oblique only when
+            // `oblique` (and `oblique <angle>`) aliases to `italic`.
+            // Skia distinguishes italic-vs-oblique only when
             // the font has a slant (`slnt`) variation axis, which most
             // bundled fonts don't. The previous default-case behavior
             // forwarded `oblique` verbatim, which the bridge silently
@@ -88,7 +88,7 @@ function _applyTypographyProp(decl, id, key, resolved, value) {
             }
             return true;
         case "letterSpacing": {
-            // pulp Wave 2 css.2 — `normal` keyword + `em` unit.
+            // Letter-spacing `normal` keyword + `em` unit.
             //   • normal → 0 (CSS spec — no extra spacing)
             //   • em     → resolved against the same default font-size as
             //              fontSize above (14px).
@@ -107,7 +107,7 @@ function _applyTypographyProp(decl, id, key, resolved, value) {
             return true;
         }
         case "lineHeight": {
-            // pulp Wave 2 css.2 — accept three additional value forms:
+            // Accept three additional line-height value forms:
             //   • unitless multiplier ("1.5") → multiply by font-size
             //     (CSS spec — most common form). Pulp's Label expects a
             //     line-height in *pixels*; we resolve the multiplier
@@ -149,13 +149,12 @@ function _applyTypographyProp(decl, id, key, resolved, value) {
         case "textDecoration":
             setTextDecoration(id, resolved);
             return true;
-        // pulp #1434 (batch 3) — text-decoration longhands. CSS exposes
+        // text-decoration longhands. CSS exposes
         // the shorthand `text-decoration` plus three independent
         // longhands: `-line` / `-color` / `-style`. Routing each to its
         // own bridge setter (instead of coalescing into a shorthand
-        // string) means a previously-set sibling longhand is preserved
-        // — matching the per-attribute border-color/width fix from PR
-        // #1166 finding #4. Same pattern, same reasoning.
+        // string) means a previously-set sibling longhand is preserved.
+        // Same pattern and reasoning as the per-side border setters.
         case "textDecorationLine":
             // Reuse the shorthand setter — same line keyword surface
             // (underline / line-through / overline / none).
@@ -175,7 +174,7 @@ function _applyTypographyProp(decl, id, key, resolved, value) {
             setTextOverflow(id, resolved);
             return true;
 
-        // pulp #1514 — list-style cluster. Pulp doesn't model
+        // list-style cluster. Pulp doesn't model
         // <li>/<ul>/<ol> semantics; the bridge stores the values
         // verbatim. Marker glyph rendering is deferred — flipping
         // the catalog from `missing` to `partial` documents the
@@ -191,7 +190,7 @@ function _applyTypographyProp(decl, id, key, resolved, value) {
             var lsTokens = String(resolved).trim().split(/\s+/);
             var lsTypes = {
                 "none": 1, "disc": 1, "circle": 1, "square": 1, "decimal": 1,
-                // Counter-style keywords (pulp #1514). Storage-only on the
+                // Counter-style keywords. Storage-only on the
                 // bridge today; the shorthand parser still needs to route
                 // them to setListStyleType so the View round-trips honestly.
                 "decimal-leading-zero": 1,
@@ -264,23 +263,16 @@ function _applyTypographyProp(decl, id, key, resolved, value) {
             return true;
         }
 
-        // font-family — pulp #1151, font v2 Slice 1.1.a
+        // font-family fallback stack.
         // CSS font-family is a comma-separated fallback list, e.g.
         //   font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
         //
-        // Pre-Slice 1.1.a: the bridge split the list and passed only
-        // the FIRST family to setFontFamily. The remaining fallback
-        // names never reached the C++ side, so an author who wrote
-        // `'IBM Plex Mono', monospace` lost the `monospace` safety net
-        // and saw silent tofu when IBM Plex Mono wasn't installed.
-        //
-        // Post-Slice 1.1.a: pass the entire raw comma-list to
-        // setFontFamily verbatim. The C++ side (skia_canvas /
-        // text_shaper / sdf_atlas, now all routed through
-        // FontResolver) splits the list once and walks it cascade-style
-        // — registered → bundled → platform per family in order,
-        // emitting a FallbackTrace for every step. The full intent of
-        // the author's CSS font-family stack reaches the resolver.
+        // Pass the entire raw comma-list to setFontFamily verbatim. The
+        // C++ side (skia_canvas / text_shaper / sdf_atlas, now all routed
+        // through FontResolver) splits the list once and walks it
+        // cascade-style — registered → bundled → platform per family in
+        // order, emitting a FallbackTrace for every step. The full intent
+        // of the author's CSS font-family stack reaches the resolver.
         //
         // No JS-side trimming or quote-stripping is necessary anymore;
         // the resolver handles both. Passing the raw string preserves

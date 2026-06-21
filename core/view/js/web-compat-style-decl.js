@@ -5,7 +5,7 @@
 function CSSStyleDeclaration(el) {
     this._el = el;
     this._props = {};
-    // pulp #1148 (slice b) — auto-overlay heuristic state. Tracks whether
+    // auto-overlay heuristic state. Tracks whether
     // we've called `claimOverlay` for this element via the CSS-shape
     // detector so we can release exactly once on the inverse transition
     // (position -> static/relative, z-index -> below threshold,
@@ -16,7 +16,7 @@ function CSSStyleDeclaration(el) {
     this._autoOverlayClaimed = false;
 }
 
-// pulp #1148 (slice b) — z-index threshold above which an absolutely
+// z-index threshold above which an absolutely
 // positioned element is treated as a popover/overlay candidate. Web
 // authors typically use values like 1000 / 9999 for popovers and 1-3
 // for stacking-context shuffles within layouts; 10 is comfortably
@@ -26,7 +26,7 @@ function CSSStyleDeclaration(el) {
 // must NOT auto-claim because a claim hijacks click routing).
 var _PULP_AUTO_OVERLAY_Z_INDEX_THRESHOLD = 10;
 
-// pulp #1148 (slice b) — re-evaluate the auto-overlay heuristic for
+// re-evaluate the auto-overlay heuristic for
 // this element. Called whenever `position`, `zIndex`, or the
 // `data-overlay` hint changes. Conservative by design: opt-in only
 // when the CSS shape strongly signals a popover (position:absolute +
@@ -76,8 +76,8 @@ CSSStyleDeclaration.prototype._flushAll = function() {
 
 // Apply a single CSS property to the bridge.
 //
-// P5-5 — the former monolithic per-property `switch` is split into
-// per-domain handler modules (web-compat-style-decl-layout / -paint /
+// The former monolithic per-property `switch` is split into per-domain
+// handler modules (web-compat-style-decl-layout / -paint /
 // -typography / -transform / -misc), mirroring the @pulp/react
 // prop-applier split. `_applyProperty` below is now a thin dispatcher
 // that calls each `_applyXProp` handler in sequence until one claims
