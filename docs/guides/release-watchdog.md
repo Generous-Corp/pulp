@@ -354,3 +354,29 @@ contributors who touch CI workflows frequently.
   (tag was created), but the `feedback_silent_release_failure` memory
   in `~/.claude` documents the shape; a future Layer 4 could smoke-test
   the produced binary.
+
+## Layer 4 — `release-health.yml` (symptom-level escalation)
+
+The Layers 1–3 triad *detects* release breakage, but the 2026-06-19..21 outage
+showed two blind spots: alerts arrived as **per-version noise** (~16 separate
+issues, none signalling "this is now systemic") and **only as GitHub issues** — a
+surface the owner doesn't watch — so a loud, week-long outage stayed invisible.
+
+`release-health.yml` is the symptom-level catch-all. Every 2h it asks the only
+question that matters — *are PUBLISHED releases with binaries keeping pace with
+the version tags?* — so it covers **any** release-build failure (macOS leg,
+Windows/CLI leg, a future leg) without a watchdog per workflow. When the newest
+`CONSECUTIVE_THRESHOLD` tags (default 2) lack a non-draft release with ≥1 asset it:
+
+- **fails the job** → a RED scheduled check on the Actions dashboard that stays
+  red until releases recover (a passive surface you actually see),
+- maintains **ONE rolling, rising-severity issue** (label `release-health`) — no
+  per-version spam — and auto-closes it on recovery,
+- optionally posts to Discord **iff** the `RELEASE_ALERT_DISCORD_WEBHOOK` repo
+  secret is set. **Disabled by default**: the wiring ships inert; add the secret
+  to turn on the proactive push (tracked as a feature request).
+
+Auto-remediation is intentionally *not* in this layer — detect-and-escalate only,
+so a real bug (like the macos-14 runner config) is surfaced fast rather than
+masked. Auto-retry-once of a failed leg is a candidate follow-up for the
+per-workflow watchdogs.

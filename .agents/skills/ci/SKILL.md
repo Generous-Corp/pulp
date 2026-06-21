@@ -3045,3 +3045,14 @@ fallback to `macos-15` and keep selecting the newest installed Xcode 16.x
 (`release-cli.yml` and the Build/Test gate already use macOS 15). If the
 GitHub-hosted macOS image changes again, verify the fallback runner still has
 C++20 parity with the PR lane before changing release routing.
+
+## Release health escalation (`release-health.yml`)
+
+Beyond the auto-release/cadence/release-cli watchdogs, `release-health.yml`
+(every 2h) is the SYMPTOM-LEVEL catch-all: it fails RED + keeps ONE rolling
+`release-health`-labelled issue when the newest N tags (default 2) have no
+non-draft release with assets — i.e. published releases aren't keeping pace with
+tags, regardless of which leg broke. To debug a "release stuck" report: check
+this workflow's latest run + the open `release-health` issue, then the failing
+`sign-and-release.yml`/`release-cli.yml` legs for the newest tag. Discord push is
+wired but OFF unless the `RELEASE_ALERT_DISCORD_WEBHOOK` secret is set.
