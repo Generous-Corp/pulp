@@ -852,7 +852,7 @@ TEST_CASE("extract_keyboard_shortcuts does not catastrophically backtrack on lar
     const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - t0).count();
 
-#if defined(__SANITIZE_ADDRESS__) || __has_feature(address_sanitizer)
+#if defined(__SANITIZE_ADDRESS__) || __has_feature(address_sanitizer) || __has_feature(undefined_behavior_sanitizer)
     constexpr long long max_elapsed_ms = 5000;
 #else
     constexpr long long max_elapsed_ms = 2000;
