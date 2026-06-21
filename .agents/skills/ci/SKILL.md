@@ -686,6 +686,36 @@ ship cycles should use Shipyard. `local_ci.py` remains in the repo as
 a fallback but is scheduled for removal after a 2-week observation
 period (see danielraffel/pulp#120).
 
+**Prefer Shipyard for GitHub work — it dodges the personal `gh` rate
+limit.** Shipyard authenticates with its own **GitHub App token**
+(higher rate budget), so PR-create / check-watching / merge aren't bound
+by the developer's personal 5,000/hr `gh` budget — which is *shared*
+across interactive `gh`, Shipyard, and every self-hosted runner
+authenticating as the same user. Operational rules:
+
+- **`gh` "The token in keyring is invalid" / `gh auth status` failing /
+  `gh api` 403 "rate limit exceeded" is almost always a rate-limit FALSE
+  POSITIVE, not a broken token.** `gh auth status` validates by calling
+  the API; a rate-limited 403 gets mislabeled as an invalid token. Do
+  **not** `gh auth refresh` — it wastes a round-trip and fixes nothing.
+  First run `gh api rate_limit --jq .resources`. High `core.remaining`
+  (e.g. 4900/5000) *with* a 403 ⇒ the **secondary/abuse limit** (fires on
+  bursts / concurrent / expensive calls like `gh api .../git/trees/
+  ...?recursive=1`), which clears in ~1–5 min; a low `core.remaining` ⇒
+  the primary limit, resets at the top of the hour.
+- **`git push`/clone over HTTPS use a separate budget** and keep working
+  when `gh api` 403s — so push branches with `git`, then let `shipyard
+  pr` open the PR via its App token.
+- **`shipyard pr`'s local target-reachability probe still shells out to
+  local `gh auth status`,** so a rate-limited probe prints "Target 'mac'
+  (cloud) is unreachable / gh auth status failed". Push past it with
+  `--allow-unreachable-targets` (the required GitHub-Actions `macos` gate
+  still guards the merge). Do **not** `--skip-target mac` to dodge it —
+  `mac` is the only validation target, so skipping leaves none ("No
+  targets remain after --skip-target filtering").
+- Reduce burst: `git clone --depth 1` instead of recursive tree-API
+  dumps; space `gh` calls; never tight-loop `gh` (back off / schedule).
+
 ```bash
 # Primary: Shipyard
 shipyard run                              # validate current branch
