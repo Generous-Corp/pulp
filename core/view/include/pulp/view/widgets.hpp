@@ -24,14 +24,14 @@ namespace pulp::view {
 // Static or dynamic text display
 
 /// Text alignment for Label.
-/// pulp #1434 — `auto_` resolves at paint time to left (LTR) or right
-/// (RTL); pulp doesn't model RTL yet so `auto_` currently degrades to
+/// `auto_` resolves at paint time to left (LTR) or right (RTL);
+/// pulp doesn't model RTL yet so `auto_` currently degrades to
 /// `left`. `justify` wires through to the canvas `TextAlign::justify`
 /// enum value; SkParagraph kJustify rendering lands in a follow-up —
 /// existing canvas backends treat it as `left` until then. Both values
 /// are claimed in the rn/css catalog (Figma exports + Tailwind classes
 /// emit `auto` and `justify` routinely).
-/// `match_parent` (pulp #1434 follow-up) resolves at paint time by
+/// `match_parent` resolves at paint time by
 /// walking the View parent chain (via `inheritable_text_align()`) and
 /// adopting the first ancestor's resolved value. If no ancestor set
 /// one, falls back to `left` (the CSS spec default for `text-align`).
@@ -121,16 +121,15 @@ public:
     void set_multi_line(bool ml) { multi_line_ = ml; }
     bool multi_line() const { return multi_line_; }
 
-    /// CSS `line-clamp` / `-webkit-line-clamp` (pulp #1552). Maximum number
-    /// of visible text lines for a multi-line label; 0 disables clamping.
+    /// CSS `line-clamp` / `-webkit-line-clamp`. Maximum number of visible
+    /// text lines for a multi-line label; 0 disables clamping.
     /// When set on a `multi_line_` Label, paint() emits at most N lines
     /// (newline- or wrap-broken) and appends the U+2026 ellipsis to the
     /// trailing visible line if any source lines were dropped. Matches the
     /// CSS spec's "block-axis line clamp" behavior at the keyword level
     /// (no `none` token — set 0 to clear). Wiring is shared between
     /// `line-clamp` and `-webkit-line-clamp` in the JS shim and the
-    /// @pulp/react prop-applier (pulp #1434 catalog: both keys funnel
-    /// through the same case).
+    /// @pulp/react prop-applier; both keys funnel through the same case.
     void set_line_clamp(int n) { line_clamp_ = (n < 0) ? 0 : n; }
     int line_clamp() const { return line_clamp_; }
 
@@ -148,11 +147,11 @@ public:
     bool has_text_decoration_color() const { return has_decoration_color_; }
 
     /// CSS text-decoration-style: solid, double, dotted, dashed, wavy.
-    /// pulp #1434 — accepted via the JS CSS shim and the bridge so authors
-    /// can express the per-style longhand. Today the paint path always
-    /// renders as `solid`; the value is stored so future paint logic can
-    /// honor it without an API break (matches the spec's optional fallback
-    /// to solid for renderers that don't implement non-solid styles).
+    /// Accepted via the JS CSS shim and the bridge so authors can express
+    /// the per-style longhand. Today the paint path always renders as
+    /// `solid`; the value is stored so future paint logic can honor it
+    /// without an API break (matches the spec's optional fallback to solid
+    /// for renderers that don't implement non-solid styles).
     enum class TextDecorationStyle { solid, double_, dotted, dashed, wavy };
     void set_text_decoration_style(TextDecorationStyle s) { text_decoration_style_ = s; }
     TextDecorationStyle text_decoration_style() const { return text_decoration_style_; }
@@ -179,18 +178,17 @@ public:
 
     /// Width-aware height: shaper-true line count × line-height for a
     /// multi_line Label given the parent's available content width.
-    /// pulp-internal #74 — invoked by the Yoga measure callback when a
-    /// multi-line Label is laid out in a bounded-width parent (CSS
+    /// Invoked by the Yoga measure callback when a multi-line Label is laid
+    /// out in a bounded-width parent (CSS
     /// `flex: 1`, `width: 100%`, fixed-width section subtitles). Falls
     /// back to `intrinsic_height()` when `multi_line_` is false or
     /// `available_width <= 0`, so single-line labels and unbounded
     /// containers keep the legacy one-line metric.
     float measured_height(float available_width) const;
 
-    /// pulp #2163 / font-v2 Slice 1.1.b — baseline offset from the top
-    /// of the Label's measured box, used by Yoga's
+    /// Baseline offset from the top of the Label's measured box, used by Yoga's
     /// `YGNodeSetBaselineFunc` to honor `align-items: baseline` on
-    /// flex containers (CHAIN INFO baseline-alignment canary). Returns
+    /// flex containers. Returns
     /// `ascent + (leading / 2)` from `TextShaper::measure_metrics` so
     /// the value tracks the same per-(family, size) cache the painter
     /// uses; mixed-size text in a row therefore aligns on its true
@@ -257,7 +255,7 @@ private:
     float line_height_ = 0;       ///< 0=auto (font_size * 1.4)
     LabelAlign text_align_ = LabelAlign::left;
     bool multi_line_ = false;
-    int line_clamp_ = 0;          ///< pulp #1552: 0=no clamp, >=1=max lines
+    int line_clamp_ = 0;          ///< 0=no clamp, >=1=max lines
     TextTransform text_transform_ = TextTransform::none;
     TextDecoration text_decoration_ = TextDecoration::none;
     canvas::Color decoration_color_{};
@@ -308,19 +306,16 @@ public:
     void set_render_style(WidgetRenderStyle s) { render_style_ = s; }
     WidgetRenderStyle render_style() const { return render_style_; }
 
-    // pulp #73 — programmatic set_value MUST request_repaint() WHEN the
-    // value actually changes. The host's mouseDown handler invalidates
-    // after every input event, so user drags repaint correctly via that
-    // side channel; preset application (or any other JS-driven mutation
-    // through the bridge's setValue) goes through THIS code path and
-    // would otherwise leave the painted state stale until the next user
-    // input.
+    // Programmatic set_value() must request_repaint() when the value actually
+    // changes. The host's mouseDown handler invalidates after every input event,
+    // so user drags repaint correctly via that side channel; preset application
+    // and other JS-driven bridge mutations go through this code path and would
+    // otherwise leave the painted state stale until the next user input.
     //
-    // Codex P2 on PR #2013 — gate the invalidate on a real change.
-    // WidgetBridge::sync_from_store() and restore_values(...) call
-    // set_value()/set_on() in tight loops during sync/reload; firing a
-    // host repaint per call (even when the value is unchanged) burns
-    // wall-clock on large widget trees with no visible benefit.
+    // Gate the invalidation on a real change. WidgetBridge::sync_from_store()
+    // and restore_values(...) call set_value()/set_on() in tight loops during
+    // sync/reload; firing a host repaint per call when the value is unchanged
+    // burns wall-clock on large widget trees with no visible benefit.
     void set_value(float v) {
         float clamped = std::clamp(v, 0.0f, 1.0f);
         if (clamped == value_) return;
@@ -548,8 +543,8 @@ public:
     void set_render_style(WidgetRenderStyle s) { render_style_ = s; }
     WidgetRenderStyle render_style() const { return render_style_; }
 
-    // pulp #73 — see Knob::set_value rationale (incl. the no-change
-    // guard added per Codex P2 on PR #2013).
+    // Same programmatic repaint contract as Knob::set_value(), including the
+    // no-change guard for bridge sync/reload loops.
     void set_value(float v) {
         float clamped = std::clamp(v, 0.0f, 1.0f);
         if (clamped == value_) return;
@@ -677,13 +672,13 @@ public:
     void set_skin_fill_color(canvas::Color c)  { fill_color_  = c; has_skin_fill_  = true; request_repaint(); }
     void set_skin_thumb_color(canvas::Color c) { thumb_color_ = c; has_skin_thumb_ = true; request_repaint(); }
     void set_skin_thumb_border_color(canvas::Color c) { thumb_border_color_ = c; has_skin_thumb_border_ = true; request_repaint(); }
-    // pulp #3192 — outline of the empty track (the lighter edge the captured
-    // art draws around the dark channel). When set, the skinned fader strokes
-    // the track rect so it doesn't read as a flat dark slab.
+    // Outline of the empty track: the lighter edge the captured art draws
+    // around the dark channel. When set, the skinned fader strokes the track
+    // rect so it doesn't read as a flat dark slab.
     void set_skin_track_border_color(canvas::Color c) { track_border_color_ = c; has_skin_track_border_ = true; request_repaint(); }
-    // pulp #3191 — derived thin track width (logical px). When set, the skinned
-    // fader draws its track / fill at exactly this width (centred) instead of a
-    // fraction of the widget box, matching the captured art's narrow track.
+    // Derived thin track width (logical px). When set, the skinned fader draws
+    // its track / fill at exactly this width (centred) instead of a fraction of
+    // the widget box, matching the captured art's narrow track.
     void set_skin_track_width(float w) {
         if (w > 0.0f) { skin_track_width_ = w; has_skin_track_width_ = true; request_repaint(); }
     }
@@ -736,8 +731,6 @@ private:
 // not preprocess them. Quantisation happens inside the widget so JS-side
 // callers see the same value the renderer paints.
 //
-// pulp issue-966.
-
 class RangeSlider : public View {
 public:
     enum class Orientation { horizontal, vertical };
@@ -766,10 +759,9 @@ public:
     /// Set the current value. The value is clamped to [min,max] and
     /// quantised to the nearest step if step > 0.
     ///
-    /// pulp #73 — request_repaint() so programmatic preset application
-    /// reaches the screen, not just the next user-input event.
-    /// Codex P2 on PR #2013 — gate on actual change to avoid redundant
-    /// invalidations during sync_from_store / restore_values loops.
+    /// request_repaint() lets programmatic preset application reach the screen,
+    /// not just the next user-input event. Gate on actual changes to avoid
+    /// redundant invalidations during sync_from_store / restore_values loops.
     void set_value(float v) {
         float prev = value_;
         value_ = v;
@@ -923,8 +915,8 @@ class Checkbox : public View {
 public:
     Checkbox() { set_access_role(AccessRole::toggle); set_focusable(true); }
 
-    // pulp #73 — see Knob::set_value (incl. no-change guard from Codex
-    // P2 on PR #2013).
+    // Same programmatic repaint contract as Knob::set_value(), including the
+    // no-change guard for bridge sync/reload loops.
     void set_checked(bool v) {
         if (checked_ == v) return;
         checked_ = v;
@@ -948,8 +940,8 @@ class ToggleButton : public View {
 public:
     ToggleButton() { set_access_role(AccessRole::toggle); set_focusable(true); }
 
-    // pulp #73 — see Knob::set_value (incl. no-change guard from Codex
-    // P2 on PR #2013).
+    // Same programmatic repaint contract as Knob::set_value(), including the
+    // no-change guard for bridge sync/reload loops.
     void set_on(bool v) {
         if (on_ == v) return;
         on_ = v;
@@ -1170,7 +1162,7 @@ public:
     // wider dark housing slot; this ratio reproduces that inset so the rendered
     // bar isn't edge-to-edge paint. Derived from the captured asset
     // (colored-bar width / housing width); defaults to 1.0 (full width) when the
-    // importer didn't supply it. pulp #3191 follow-up.
+    // importer didn't supply it.
     void set_bar_fill_ratio(float r) {
         bar_fill_ratio_ = std::clamp(r, 0.05f, 1.0f);
         request_repaint();
@@ -1366,9 +1358,8 @@ public:
 
     void set_background_token(std::string token) { bg_token_ = std::move(token); }
     void set_border_token(std::string token) { border_token_ = std::move(token); }
-    // pulp #1731 Codex P1 — route through View::set_border_radius so the
-    // px slot painter actually reads is updated (and the pct slot is
-    // cleared, matching documented semantics).
+    // Route through View::set_border_radius so the px slot the painter reads is
+    // updated and the pct slot is cleared, matching documented semantics.
     void set_corner_radius(float r) { View::set_border_radius(r); }
     void set_border_width(float w) { border_width_ = w; }
 
