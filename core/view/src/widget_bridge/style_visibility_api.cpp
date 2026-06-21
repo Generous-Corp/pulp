@@ -23,16 +23,15 @@ void WidgetBridge::register_widget_style_visibility_api() {
 void WidgetBridge::register_widget_style_interaction_api() {
     BridgeApiContext api{engine_};
 
-    // setPointerEvents(id, "none"|"auto") - CSS pointer-events: skip in hit_test
-    // pulp #1026 - RN-shaped 4-valued pointerEvents:
+    // setPointerEvents(id, "none"|"auto") - CSS pointer-events: skip in hit_test.
+    // RN-shaped 4-valued pointerEvents:
     //   "auto"     - default, this view + children intercept events.
     //   "none"     - neither this view nor descendants intercept events.
     //   "box-only" - this view intercepts; children do NOT.
     //   "box-none" - this view does NOT intercept; children do.
-    // Pre-#1026 the bridge only honored auto / none and routed through
-    // set_hit_testable(); we keep that mapping for the binary cases for
-    // back-compat with existing scripts and additionally route the new
-    // four-valued enum via View::set_pointer_events().
+    // Keep set_hit_testable() in sync for the binary cases for back-compat
+    // with existing scripts, and route the four-valued enum via
+    // View::set_pointer_events().
     register_bridge_function(api, "setPointerEvents", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto mode = args.get<std::string>(1, "auto");
@@ -54,11 +53,9 @@ void WidgetBridge::register_widget_style_interaction_api() {
         return choc::value::Value();
     });
 
-    // pulp #1026 - RN backfaceVisibility ("visible"|"hidden"). Stored on
-    // the View for plumbing parity with @pulp/react. The flag is consumed
-    // by the paint path only when a 3D transform with negative Z is
-    // active; pulp's transform model is currently 2D-affine, so this is
-    // a no-op for painting today and reserved for future 3D support.
+    // RN backfaceVisibility ("visible"|"hidden"). Stored on the View for
+    // plumbing parity with @pulp/react. Pulp's transform model is currently
+    // 2D-affine, so this is a no-op for painting today.
     register_bridge_function(api, "setBackfaceVisibility", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto mode = args.get<std::string>(1, "visible");
@@ -83,20 +80,20 @@ void WidgetBridge::register_widget_style_interaction_api() {
 
     // setWhiteSpace(id, "normal"|"nowrap"|"pre"|"pre-wrap")
     //
-    // pulp #1410 - sets a generic `View::white_space_nowrap()` flag so
-    // ANY widget with a textual surface (Button, custom text-bearing
+    // Sets a generic `View::white_space_nowrap()` flag so ANY widget with a
+    // textual surface (Button, custom text-bearing
     // views, future TextEditor surfaces) and `TextShaper` consumers can
     // observe nowrap without dynamic_casting to Label. The original
     // Label::set_multi_line side-effect stays in lock-step so existing
-    // single-line Label paint paths (incl. #1407 ellipsis truncation)
+    // single-line Label paint paths, including ellipsis truncation,
     // keep working when only one of the flags is set.
     register_bridge_function(api, "setWhiteSpace", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto ws = args.get<std::string>(1, "normal");
         auto* v = id.empty() ? &root_ : widget(id);
         if (!v) return choc::value::Value();
-        // pulp #1737 - map keyword to View::WhiteSpaceMode enum.
-        // The set_white_space_mode setter also maintains the legacy
+        // Map keyword to View::WhiteSpaceMode enum. The set_white_space_mode
+        // setter also maintains the legacy
         // white_space_nowrap_ bool (true for nowrap + pre) so existing
         // consumers of white_space_nowrap() keep working.
         using M = View::WhiteSpaceMode;
@@ -108,8 +105,7 @@ void WidgetBridge::register_widget_style_interaction_api() {
         else if (ws == "break-spaces")  mode = M::break_spaces;
         // Unknown keyword falls back to normal (per CSS forward-compat).
         v->set_white_space_mode(mode);
-        // pulp #1737 (Codex P1 followup on #1786): Label.multi_line
-        // is TRUE for all modes except `nowrap`. Originally `pre`
+        // Label.multi_line is TRUE for all modes except `nowrap`. Originally `pre`
         // mapped to multi_line=false to match the CSS spec's
         // "no-soft-wrap" semantic, but Pulp's Label only emits hard
         // line breaks via the multi_line splitting path - single-line
@@ -122,7 +118,7 @@ void WidgetBridge::register_widget_style_interaction_api() {
         // the spec-critical "preserve newlines" by keeping
         // multi_line=true for `pre`. Long lines overflow horizontally
         // - a degraded but spec-correct behaviour. Soft-wrap
-        // suppression for `pre` is a Label-side follow-up.
+        // suppression for `pre` is not wired yet.
         if (auto* l = dynamic_cast<Label*>(widget(id))) {
             const bool wraps = (mode != M::nowrap);
             l->set_multi_line(wraps);
@@ -131,10 +127,8 @@ void WidgetBridge::register_widget_style_interaction_api() {
     });
 
     // setUserSelect(id, "auto"|"none"|"text"|"all"|"contain") - CSS
-    // user-select. Tier-2 follow-up to #1656 (which walked the catalog
-    // claim back to partial because this stub was a literal no-op).
-    // Now stores the keyword on View::user_select_ so widgets that
-    // participate in selection can read it. Unknown keywords map to
+    // user-select. Stores the keyword on View::user_select_ so widgets
+    // that participate in selection can read it. Unknown keywords map to
     // the spec default (auto).
     register_bridge_function(api, "setUserSelect", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");

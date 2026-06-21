@@ -72,10 +72,9 @@ void WidgetBridge::register_animation_style_api() {
         return choc::value::Value();
     });
 
-    // pulp #1434 Phase A2-1 - setTransition(id, "opacity 200ms ease, transform 300ms").
-    // Parses the full CSS shorthand into View::transitions_. PR 2 of
-    // the ladder will hook the prop-applier dispatcher to consult
-    // these specs when a property changes. PR 1 ships parser + storage.
+    // setTransition(id, "opacity 200ms ease, transform 300ms").
+    // Parses the full CSS shorthand into View::transitions_ so property
+    // application can consult the parsed transition specs when values change.
     register_bridge_function(api, "setTransition", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto css = args.get<std::string>(1, "");
@@ -171,8 +170,8 @@ void WidgetBridge::register_animation_style_api() {
     // Applied at View paint time as a concat onto the current canvas matrix
     // so it composes with parent transforms and child Views inherit it.
     // Layout (Yoga + hit-test) sees the un-transformed bounds: paint-only.
-    // Issue-930. Companion to canvasSetTransform from PR #897 (issue-896),
-    // but applied to the View's painting frame rather than a Canvas2D context.
+    // Companion to canvasSetTransform, but applied to the View's painting
+    // frame rather than a Canvas2D context.
     register_bridge_function(api, "setTransform", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto a = static_cast<float>(args.get<double>(1, 1.0));
@@ -188,7 +187,7 @@ void WidgetBridge::register_animation_style_api() {
 
     // clearTransform(id) - drop the affine matrix; the View reverts to its
     // CSS-transform scalars (translate/rotate/scale) only. Mirrors removing
-    // the inline `transform` property in CSS. Issue-930.
+    // the inline `transform` property in CSS.
     register_bridge_function(api, "clearTransform", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto* v = id.empty() ? &root_ : widget(id);
@@ -206,16 +205,14 @@ void WidgetBridge::register_animation_style_api() {
         return choc::value::Value();
     });
 
-    // pulp #1434 Phase A2-1 - defineKeyframes(name, stops_json_string).
+    // defineKeyframes(name, stops_json_string).
     // Stops are JSON-encoded for bridge simplicity:
     //   defineKeyframes('fade', JSON.stringify([
     //     { offset: 0,   properties: { opacity: '0' } },
     //     { offset: 1.0, properties: { opacity: '1' } },
     //   ]));
     // The CSS shim's @keyframes parser produces this shape directly.
-    // Populates the application-wide registry. PR 4 wires the registry
-    // into setAnimation playback; PR 1 ships parser + storage so the
-    // registry is consultable today.
+    // Populates the application-wide registry consulted by setAnimation.
     register_bridge_function(api, "defineKeyframes", [this](choc::javascript::ArgumentList args) {
         auto name = args.get<std::string>(0, "");
         auto stops_json = args.get<std::string>(1, "[]");
@@ -252,7 +249,7 @@ void WidgetBridge::register_animation_style_api() {
         return choc::value::Value();
     });
 
-    // pulp #1434 Phase A2-1 - setAnimation supports two ABIs.
+    // setAnimation supports two ABIs.
     //
     //   Positional (new, @pulp/react direct callers):
     //     setAnimation(id, animation_name, duration, iterations, direction)
@@ -270,10 +267,10 @@ void WidgetBridge::register_animation_style_api() {
     // the legacy path; otherwise treat as positional. The legacy path
     // accumulates state in View::staged_animation(); when `name` arrives
     // and resolves against the keyframes registry, we seed entries into
-    // active_animations() using the staged values. Codex audit on pulp
-    // #1508 caught the original handler dropping every web-compat call
-    // because "name"/"duration"/etc. were being treated as the
-    // animation_name token (registry lookup always missed).
+    // active_animations() using the staged values. Keep the token
+    // dispatch ahead of the positional path; otherwise web-compat
+    // longhand calls such as "name" / "duration" are mistaken for
+    // animation names and the keyframe registry lookup misses.
     register_bridge_function(api, "setAnimation", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto arg1 = args.get<std::string>(1, "");
@@ -330,9 +327,8 @@ void WidgetBridge::register_animation_style_api() {
             } else if (arg1 == "fill") {
                 staged.fill_mode = args.get<std::string>(2, "");
             } else if (arg1 == "play_state") {
-                // pulp #1434 A4 Bundle 2 - animation-play-state.
-                // Storage-only today; the playback driver pause/resume
-                // is the follow-up. Mirror to View's storage slot so
+                // Storage-only today; the playback driver does not pause or
+                // resume active animations yet. Mirror to View's storage slot so
                 // round-trip queries work without poking into the
                 // staged struct.
                 v->set_animation_play_state(args.get<std::string>(2, "running"));
@@ -343,13 +339,13 @@ void WidgetBridge::register_animation_style_api() {
         // Positional dispatch (new ABI).
         const auto& anim_name = arg1;
         auto duration = static_cast<float>(args.get<double>(2, 0.0));
-        (void)args.get<double>(3, 1.0);  // iterations, PR 4
-        (void)args.get<std::string>(4, "normal");  // direction, PR 4
+        (void)args.get<double>(3, 1.0);  // iterations, not driven by playback yet
+        (void)args.get<std::string>(4, "normal");  // direction, not driven by playback yet
         const auto* block = css_keyframes_registry_.find(anim_name);
         if (!block || block->stops.empty()) return choc::value::Value();
-        // Seed one Animation per property the first stop touches. PR 2
-        // specializes the value type per property and drives the
-        // tween via the frame clock.
+        // Seed one Animation per property the first stop touches. Playback
+        // currently records the parsed property and timing state; property-
+        // specific value interpolation remains owned by the frame driver.
         const auto& first = block->stops.front();
         for (const auto& [prop, _val] : first.properties) {
             CssAnimation a{};
@@ -374,10 +370,7 @@ void WidgetBridge::register_animation_style_api() {
     });
 
     // setSkew(id, x_deg, y_deg) - CSS transform: skewX() / skewY().
-    // pulp #1434 Triage #9 (transform fan-out) - View::set_skew has
-    // existed since the 2D View slot was added; this surface just
-    // had not been registered as a JS bridge fn until now. The CSS
-    // shim's parseTransform dispatches each axis independently
+    // The CSS shim's parseTransform dispatches each axis independently
     // (skewX(alpha) -> setSkew(id, alpha, 0); skewY(beta) -> setSkew(id, 0, beta));
     // when both appear in the same transform string the second
     // call's arg-pattern preserves the axis the first call set

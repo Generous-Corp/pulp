@@ -12,10 +12,9 @@ void WidgetBridge::register_widget_style_background_repeat_api() {
 
     // setBackgroundRepeat(id, kw) - CSS background-repeat keyword. Storage-
     // only on the View (no-op for solid-color backgrounds, which is the
-    // only currently rendered case). Future paint work for
-    // `background-image: url(...)` / repeating gradients consults the
-    // stored slot; setting the keyword today makes the round-trip work
-    // and lets authors express intent without dropping the prop silently.
+    // only currently rendered case). Keeping the slot makes the round-trip
+    // work for imported styles and gives future raster / gradient
+    // background paint code an explicit repeat keyword to consume.
     // Accepts: `repeat` / `repeat-x` / `repeat-y` / `no-repeat` /
     // `space` / `round`. Unknown / empty resets to "" (paint defaults to
     // CSS initial `repeat`).
@@ -31,11 +30,10 @@ void WidgetBridge::register_widget_style_background_repeat_api() {
 void WidgetBridge::register_widget_style_mask_object_api() {
     BridgeApiContext api{engine_};
 
-    // setMaskImage(id, value) - CSS `mask-image` (pulp #1515).
-    // Storage-only today; the saveLayer + SkBlendMode::kDstIn shader
-    // composite is a follow-up paint slice. The slot round-trips
-    // through View::mask_image() so harness tests can assert the
-    // bridge accepted the value.
+    // setMaskImage(id, value) - CSS `mask-image`.
+    // The bridge stores the value on the View; mask-capable paint backends
+    // consume the slot, while fallback backends still round-trip it through
+    // View::mask_image().
     register_bridge_function(api, "setMaskImage",
         [this](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
@@ -45,10 +43,10 @@ void WidgetBridge::register_widget_style_mask_object_api() {
             return choc::value::Value();
         });
 
-    // setMask(id, shorthand) - CSS `mask` shorthand (pulp #1515).
+    // setMask(id, shorthand) - CSS `mask` shorthand.
     // Stores the verbatim shorthand on the View; the JS shim
     // (web-compat-style-decl.js) is responsible for fanning out into
-    // the maskImage longhand. Storage-only today.
+    // the maskImage longhand.
     register_bridge_function(api, "setMask",
         [this](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
@@ -58,9 +56,8 @@ void WidgetBridge::register_widget_style_mask_object_api() {
             return choc::value::Value();
         });
 
-    // setMaskSize(id, value) - CSS `mask-size`, pairs with mask-image
-    // (pulp #1515 followup). Storage-only; consumed by the same
-    // future paint slice that wires the mask shader.
+    // setMaskSize(id, value) - CSS `mask-size`, stored with mask-image for
+    // paint paths that can apply a mask.
     register_bridge_function(api, "setMaskSize",
         [this](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
@@ -85,9 +82,9 @@ void WidgetBridge::register_widget_style_mask_object_api() {
             return choc::value::Value();
         });
 
-    // setObjectFit(id, value) - CSS `object-fit`. Storage-only today;
-    // the ImageView paint slice that consumes this needs access to
-    // the decoded image's natural size (planned follow-up).
+    // setObjectFit(id, value) - CSS `object-fit`. The bridge stores the
+    // keyword; visualizer/image-like paint paths consume it when mapping
+    // source content into their bounds.
     register_bridge_function(api, "setObjectFit",
         [this](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
@@ -97,8 +94,8 @@ void WidgetBridge::register_widget_style_mask_object_api() {
             return choc::value::Value();
         });
 
-    // setObjectPosition(id, value) - CSS `object-position`. Pairs
-    // with object-fit. Storage-only today.
+    // setObjectPosition(id, value) - CSS `object-position`. Stored with
+    // object-fit for paint paths that align content inside the destination rect.
     register_bridge_function(api, "setObjectPosition",
         [this](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
@@ -112,11 +109,10 @@ void WidgetBridge::register_widget_style_mask_object_api() {
 void WidgetBridge::register_widget_style_background_subproperty_api() {
     BridgeApiContext api{engine_};
 
-    // pulp #1517 - background sub-property setters. Storage-only today;
-    // see View::set_background_{attachment,clip,origin}() doc for the
-    // partial-vs-noop semantics. Wiring them here unblocks the JS shim
-    // path and lets the catalog honestly report `noop` / `partial`
-    // instead of `missing`.
+    // Background sub-property setters. See
+    // View::set_background_{attachment,clip,origin}() for the
+    // partial-vs-noop semantics; wiring them here lets the JS shim path
+    // round-trip these keywords instead of dropping them.
     register_bridge_function(api, "setBackgroundAttachment",
         [this](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
@@ -142,15 +138,10 @@ void WidgetBridge::register_widget_style_background_subproperty_api() {
             return choc::value::Value();
         });
 
-    // Wave 5 css.5 - setBackgroundPosition / setBackgroundSize. The JS
-    // shim (web-compat-style-decl.js cases backgroundPosition /
-    // backgroundSize) was already calling these as `typeof set... ===
-    // "function"` guards; without a registered bridge fn the calls were
-    // silent no-ops and the catalog claim of `supported` was a fiction.
-    // Storage-only landing here makes the round-trip honest (JS -> bridge
-    // -> View slot -> get_attribute pulls it back) and unblocks a future
-    // raster background-image paint slice - see View::set_background_*
-    // doc for the architectural caveat.
+    // setBackgroundPosition / setBackgroundSize. The JS shim calls these
+    // behind `typeof set... === "function"` guards; registering the bridge
+    // functions makes the round-trip explicit (JS -> bridge -> View slot ->
+    // get_attribute) while raster background-image paint remains deferred.
     register_bridge_function(api, "setBackgroundPosition",
         [this](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");

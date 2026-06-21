@@ -14,8 +14,6 @@
 namespace pulp::view {
 
 void WidgetBridge::register_runtime_api() {
-    // Phase 9: Runtime API gap closure.
-
     // __requestFrame__ - requestAnimationFrame implementation.
     // JS side stores callbacks in __frameCallbacks__ map, passes ID to C++.
     // C++ stores pending IDs and invokes them on next frame via __invokeFrame__.
@@ -29,8 +27,8 @@ void WidgetBridge::register_runtime_api() {
             "  var fn = __frameCallbacks__[id];"
             "  if (fn) { delete __frameCallbacks__[id]; fn(); }"
             "}"
-            // pulp #915 - timer registry for native setTimeout / setInterval.
-            // Callbacks live in JS (CHOC's NativeFunction can't carry JSValue
+            // Timer registry for native setTimeout / setInterval. Callbacks
+            // live in JS (CHOC's NativeFunction can't carry JSValue
             // arguments); native side tracks deadlines + repeat semantics
             // and pings these helpers when a timer expires.
             "var __timerCallbacks__ = Object.create(null);"
@@ -53,8 +51,8 @@ void WidgetBridge::register_runtime_api() {
         auto id = args.get<int>(0, 0);
         if (id > 0) {
             pending_frame_ids_.push_back(id);
-            // pulp #921 - signal the host so the next paint runs and
-            // service_frame_callbacks() drains the queue. Without this,
+            // Signal the host so the next paint runs and service_frame_callbacks()
+            // drains the queue. Without this,
             // requestAnimationFrame queues a callback but never asks the
             // host for a frame, so the canvas never repaints.
             request_repaint();
@@ -75,8 +73,7 @@ void WidgetBridge::register_runtime_api() {
         if (ids.empty()) {
             return choc::value::Value();
         }
-        // Phase 9: invoke each callback under its own ambient
-        // provenance. The script identity (set via
+        // Invoke each callback under its own ambient provenance. The script identity (set via
         // `load_script(code, script_id)` / `set_active_script_id`) is
         // prefixed onto the callback id so a published value emitted
         // from inside an rAF body inherits source_id =
@@ -105,8 +102,7 @@ void WidgetBridge::register_runtime_api() {
         return choc::value::Value();
     });
 
-    // Phase 9: motion observability - JS-side bridge for the publish
-    // channel + ambient provenance slot.
+    // JS-side bridge for the motion publish channel and ambient provenance slot.
     //
     // Exposes:
     //   motion.publishValue(viewName, metricName, value)
@@ -171,8 +167,8 @@ void WidgetBridge::register_runtime_api() {
         "void 0;"
     );
 
-    // pulp #915 - native setTimeout / setInterval scheduling. JS-side
-    // setTimeout/setInterval generate the id and stash the callback in
+    // Native setTimeout / setInterval scheduling. JS-side setTimeout/setInterval
+    // generate the id and stash the callback in
     // __timerCallbacks__; native tracks (id, deadline, repeat, interval)
     // so service_frame_callbacks() can fire expired timers without a
     // consumer-side shim.
@@ -245,7 +241,7 @@ void WidgetBridge::register_runtime_api() {
         return choc::value::Value();
     });
 
-    // P0: performance.now() - high-resolution monotonic time in milliseconds.
+    // performance.now() - high-resolution monotonic time in milliseconds.
     register_bridge_function(api, "__performanceNow__", [](choc::javascript::ArgumentList) {
         static auto start = std::chrono::steady_clock::now();
         auto now = std::chrono::steady_clock::now();

@@ -13,8 +13,8 @@ void WidgetBridge::register_widget_value_controls_api() {
 
     // setValue(id, value) -> set widget value
     // For Knob / Fader / Toggle this is normalised 0..1.
-    // For RangeSlider (issue-966) it's the raw value in [min,max]; the
-    // widget clamps + quantises against its own configured range.
+    // For RangeSlider it's the raw value in [min,max]; the widget clamps
+    // and quantises against its own configured range.
     register_bridge_function(api, "setValue", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto value = args.get<double>(1, 0);
@@ -62,7 +62,7 @@ void WidgetBridge::register_widget_value_controls_api() {
         return choc::value::createFloat64(0);
     });
 
-    // -- pulp issue-966: RangeSlider configuration setters -----------------
+    // RangeSlider configuration setters.
     // setMin/setMax/setStep mirror the HTMLInputElement attributes
     // `min`, `max`, `step`. Each one re-applies the widget's clamp +
     // quantisation pipeline so out-of-range values stay consistent.
@@ -91,8 +91,8 @@ void WidgetBridge::register_widget_value_controls_api() {
     });
 
     // setOrientation(id, "horizontal" | "vertical")
-    // Currently only RangeSlider (issue-966); future widgets that need
-    // an orientation can extend this dynamic_cast chain.
+    // RangeSlider and Fader consume this today; future widgets that need an
+    // orientation can extend this dynamic_cast chain.
     register_bridge_function(api, "setOrientation", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto orient = args.get<std::string>(1, "horizontal");

@@ -14,8 +14,8 @@ void WidgetBridge::register_widget_border_side_api(std::function<canvas::Color(c
     BridgeApiContext api{engine_};
     auto parseHexColor = std::move(parse_color);
 
-    // pulp #1026 - Per-side border color/width shorthands (RN parity).
-    // RN exposes `borderTopColor`, `borderTopWidth`, etc. as separate
+    // Per-side border color/width shorthands for RN parity. RN exposes
+    // `borderTopColor`, `borderTopWidth`, etc. as separate
     // style props; pulp's existing `setBorderSide(id, side, width, color)`
     // sets both at once which is awkward for a prop-by-prop applier. The
     // setBorderTop/Right/Bottom/Left{Color,Width} setters route through
@@ -25,15 +25,15 @@ void WidgetBridge::register_widget_border_side_api(std::function<canvas::Color(c
                               std::optional<canvas::Color> color,
                               std::optional<float> width) {
         if (!v) return;
-        // pulp #1026 - preserve the unrelated attribute when a per-side
-        // setter is called for only color OR only width, matching how
-        // RN's JSX prop-applier emits property updates one at a time.
-        // pulp #1566 - route through the split color-only / width-only
-        // setters so that `setBorderTopColor` does NOT mark the per-edge
-        // WIDTH as explicitly set (which would let a stale 0 override
-        // the uniform `borderWidth` shorthand). Symmetrically,
-        // `setBorderTopWidth(0)` MUST mark the edge as explicitly set so
-        // it overrides the shorthand on that edge per CSS / RN semantics.
+        // Preserve the unrelated attribute when a per-side setter is called
+        // for only color OR only width, matching how RN's JSX prop-applier
+        // emits property updates one at a time. Route through the split
+        // color-only / width-only setters so that `setBorderTopColor` does
+        // NOT mark the per-edge WIDTH as explicitly set (which would let a
+        // stale 0 override the uniform `borderWidth` shorthand).
+        // Symmetrically, `setBorderTopWidth(0)` MUST mark the edge as
+        // explicitly set so it overrides the shorthand on that edge per
+        // CSS / RN semantics.
         if (color.has_value()) {
             if (side == "top")         v->set_border_top_color(*color);
             else if (side == "right")  v->set_border_right_color(*color);

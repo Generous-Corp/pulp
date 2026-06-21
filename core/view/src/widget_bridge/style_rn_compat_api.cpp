@@ -15,8 +15,7 @@ void WidgetBridge::register_widget_style_rn_compat_api(
     BridgeApiContext api{engine_};
     auto parseHexColor = std::move(parse_color);
 
-    // pulp #1737 RN-OOS-fixup (audit 2026-05-11) — RN iOS-legacy
-    // shadow{Color,Offset,Opacity,Radius} per-attribute setters for
+    // RN iOS-legacy shadow{Color,Offset,Opacity,Radius} per-attribute setters for
     // box-shadow. Mirrors the textShadow* pattern above so a JSX prop
     // diff that touches one prop doesn't clobber the others. Modern
     // RN code uses `boxShadow` (CSS shorthand) — Pulp fully supports
@@ -58,8 +57,7 @@ void WidgetBridge::register_widget_style_rn_compat_api(
             return choc::value::Value();
         });
 
-    // pulp #1737 RN-OOS-fixup (audit 2026-05-11, final sweep) — RN's
-    // `includeFontPadding` is an Android-only legacy prop. Android's
+    // RN's `includeFontPadding` is an Android-only legacy prop. Android's
     // TextView paints extra vertical padding around text glyphs;
     // setting `includeFontPadding: false` removes it. Pulp's text-
     // shaping pipeline (Skia/SkParagraph) uses tight baseline-relative
@@ -74,10 +72,9 @@ void WidgetBridge::register_widget_style_rn_compat_api(
     //
     // Bridge fn stores the keyword on a View slot purely for round-
     // trip (element.style / style.X reading the value back). This
-    // mirrors the overscroll-behavior pattern (PR #1805): all keywords
-    // accepted, single consistent behavior produced, honest catalog
-    // claim of "supported as a CSS-spec subset where Pulp's behavior
-    // matches the dominant author intent".
+    // mirrors the overscroll-behavior pattern: all keywords accepted,
+    // single consistent behavior produced, and the catalog can report a
+    // CSS-spec subset where Pulp's behavior matches the dominant author intent.
     register_bridge_function(api, "setIncludeFontPadding",
         [this](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
@@ -89,7 +86,7 @@ void WidgetBridge::register_widget_style_rn_compat_api(
             return choc::value::Value();
         });
 
-    // pulp #1737 RN-OOS-fixup (#1812) — RN's `borderCurve` corner shape.
+    // RN's `borderCurve` corner shape.
     // `circular` (default) keeps the standard quarter-circle rounded
     // corner; `continuous` switches View::paint_all to the iOS-style
     // squircle approximation (super-ellipse path with extension factor
@@ -108,11 +105,10 @@ void WidgetBridge::register_widget_style_rn_compat_api(
             return choc::value::Value();
         });
 
-    // pulp #1737 RN-OOS-fixup (final round) — CSS `isolation` + RN
-    // `isolation` honest CSS-subset flip. Pulp's per-View render model
+    // CSS `isolation` + RN `isolation` subset. Pulp's per-View render model
     // is structurally isolated by default: each View with mix-blend-mode
-    // opens its own save_layer_with_blend composition (PR #1549) and
-    // composites back to its parent normally — there's no
+    // opens its own save_layer_with_blend composition and composites
+    // back to its parent normally — there's no
     // "cross-stacking-context blend leakage" that CSS isolation: isolate
     // is designed to prevent. Similarly, z-index is paint-order scoped
     // to siblings within a parent, so a child's z-index can't promote
@@ -124,8 +120,7 @@ void WidgetBridge::register_widget_style_rn_compat_api(
     // reads (el.style.isolation === "isolate"). Paint has no special
     // case because Pulp's existing per-View layering already provides
     // the isolation contract. Same CSS-subset pattern as
-    // overscrollBehavior, includeFontPadding, scrollBehavior from
-    // earlier this session.
+    // overscrollBehavior, includeFontPadding, and scrollBehavior.
     register_bridge_function(api, "setIsolation",
         [this](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
@@ -135,8 +130,7 @@ void WidgetBridge::register_widget_style_rn_compat_api(
             return choc::value::Value();
         });
 
-    // pulp #1737 RN-OOS-fixup (audit 2026-05-11) — RN's `elevation` is
-    // Android-only Material elevation (0–24dp). Pulp catalogs boxShadow
+    // RN's `elevation` is Android-only Material elevation (0–24dp). Pulp catalogs boxShadow
     // as the cross-platform equivalent; this shim translates elevation
     // to a single-shadow approximation of the Material dual-shadow
     // spec so consumers shipping unchanged RN-Android styles get a
@@ -174,8 +168,7 @@ void WidgetBridge::register_widget_style_rn_compat_api(
             return choc::value::Value();
         });
 
-    // pulp #1737 RN-OOS-fixup (audit 2026-05-11) — CSS scroll-behavior +
-    // overscroll-behavior. Stored on the View slot; ScrollView reads
+    // CSS scroll-behavior + overscroll-behavior. Stored on the View slot; ScrollView reads
     // scroll_behavior_ in scroll_by (auto → instant, else smooth) and
     // overscroll_behavior_ via the existing clamp_scroll_targets path
     // (Pulp already clamps at content bounds and doesn't scroll-chain
