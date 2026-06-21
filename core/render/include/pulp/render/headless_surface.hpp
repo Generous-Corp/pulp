@@ -46,8 +46,8 @@ public:
         float scale_factor = 1.0f;
         /// Background fill applied before the user paint callback runs.
         /// Defaults to opaque black so a no-op paint still produces a
-        /// deterministic frame (read-back uninitialized GPU memory is
-        /// not reproducible — see plan §6.7 acceptance).
+        /// deterministic frame; read-back uninitialized GPU memory is
+        /// not reproducible.
         uint8_t clear_r = 0;
         uint8_t clear_g = 0;
         uint8_t clear_b = 0;
