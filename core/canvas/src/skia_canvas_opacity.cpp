@@ -1,8 +1,7 @@
 // skia_canvas_opacity.cpp — Canvas2D save_layer + filter composition slice.
 //
-// Extracted from skia_canvas.cpp in the 2026-05 Phase 4 (R2-3 follow-up)
-// refactor. Covers the offscreen-layer / CSS opacity / CSS filter
-// composition surface:
+// Owns the Skia offscreen-layer / CSS opacity / CSS filter composition
+// surface:
 //
 //   - set_opacity(alpha) — per-draw alpha shim (full opacity uses
 //     save_layer instead).
@@ -19,8 +18,9 @@
 //     blur — pushes a layer whose source is the parent-canvas content
 //     pre-filtered, so subsequent draws composite over the blurred backdrop.
 //
-// pulp #1737 (Codex P2 sweep on #1791) — Skia headers MUST be included
-// BEFORE pulp/canvas/skia_canvas.hpp.
+// Skia headers MUST be included BEFORE pulp/canvas/skia_canvas.hpp. See
+// skia_canvas.cpp's head-of-file comment for the C++ name-lookup rule that
+// forces this ordering.
 
 #include <algorithm>
 #include <cmath>
@@ -81,17 +81,17 @@ void SkiaCanvas::save_layer(float x, float y, float w, float h,
 
     canvas_->saveLayer(&bounds, &layer_paint);
 
-    // pulp #1899 (gap #3) — record that this layer's destination is
-    // non-opaque so text-paint paths inside it use greyscale AA.
+    // Record that this layer's destination is non-opaque so text-paint paths
+    // inside it use greyscale AA.
     if (opacity < 1.0f) {
         non_opaque_layer_stack_.push_back(canvas_->getSaveCount());
     }
 }
 
-// pulp #1549 — saveLayer with explicit blend mode. The layer-paint's blend
-// mode is the one Skia uses when compositing the layer back onto its
-// parent at restore() time, which is exactly the CSS / RN
-// `mix-blend-mode` semantic ("isolate the subtree, then blend it back").
+// saveLayer with explicit blend mode. The layer-paint's blend mode is the one
+// Skia uses when compositing the layer back onto its parent at restore() time,
+// which is exactly the CSS / RN `mix-blend-mode` semantic ("isolate the
+// subtree, then blend it back").
 void SkiaCanvas::save_layer_with_blend(float x, float y, float w, float h,
                                        float opacity, float blur_radius,
                                        Canvas::BlendMode mode) {
@@ -113,15 +113,15 @@ void SkiaCanvas::save_layer_with_blend(float x, float y, float w, float h,
 
     canvas_->saveLayer(&bounds, &layer_paint);
 
-    // pulp #1899 (gap #3) — mirror save_layer(): track non-opaque layer
-    // so text inside it picks greyscale AA over LCD subpixel AA.
+    // Mirror save_layer(): track non-opaque layers so text inside them picks
+    // greyscale AA over LCD subpixel AA.
     if (opacity < 1.0f) {
         non_opaque_layer_stack_.push_back(canvas_->getSaveCount());
     }
 }
 
 
-// pulp #1434 Phase A2-4 — full CSS filter chain composition.
+// Full CSS filter chain composition.
 //
 // Builds an SkImageFilter chain from the structured FilterChainEntry
 // list. Color-matrix-based filters (brightness / contrast / grayscale
@@ -163,13 +163,12 @@ void SkiaCanvas::save_layer_with_filters(float x, float y, float w, float h,
             }
             case FilterChainEntry::Kind::opacity: {
                 // Per CSS — opacity(a) multiplies the alpha channel by
-                // a (0..1). Codex P2 #3195880608: this MUST remain in
-                // the composed chain at its original source-order
-                // position, because subsequent filters (e.g. drop-shadow)
-                // depend on the reduced alpha as their input. Folding
-                // it into the layer alpha would apply opacity AFTER the
-                // shadow was generated, which produces a different and
-                // incorrect result for `opacity(0.5) drop-shadow(...)`.
+                // a (0..1). This MUST remain in the composed chain at its
+                // original source-order position, because subsequent filters
+                // (e.g. drop-shadow) depend on the reduced alpha as their
+                // input. Folding it into the layer alpha would apply opacity
+                // AFTER the shadow was generated, which produces a different
+                // and incorrect result for `opacity(0.5) drop-shadow(...)`.
                 const float a = std::min(std::max(f.amount, 0.0f), 1.0f);
                 float m[20] = {
                     1, 0, 0, 0, 0,
@@ -196,10 +195,10 @@ void SkiaCanvas::save_layer_with_filters(float x, float y, float w, float h,
             }
             case FilterChainEntry::Kind::contrast: {
                 // Per CSS — c=amount, slope=c, intercept=0.5*(1-c).
-                // SkColorFilters::Matrix expects the translation column
-                // in 0..255 space (Codex P1 #3195880597), so the bias
-                // term is multiplied by 255 to land at mid-gray for
-                // contrast(0). The slope multipliers stay normalized.
+                // SkColorFilters::Matrix expects the translation column in
+                // 0..255 space, so the bias term is multiplied by 255 to land
+                // at mid-gray for contrast(0). The slope multipliers stay
+                // normalized.
                 const float c = f.amount;
                 const float t = 0.5f * (1.0f - c) * 255.0f;
                 float m[20] = {
@@ -246,8 +245,8 @@ void SkiaCanvas::save_layer_with_filters(float x, float y, float w, float h,
             case FilterChainEntry::Kind::invert: {
                 // Per CSS spec — amount=1 fully inverts, amount=0 is identity.
                 // SkColorFilters::Matrix expects the translation column in
-                // 0..255 space (Codex P1 #3195880597), so the bias term `a`
-                // is multiplied by 255 to map black->white at invert(1).
+                // 0..255 space, so the bias term `a` is multiplied by 255 to
+                // map black->white at invert(1).
                 const float a = std::min(std::max(f.amount, 0.0f), 1.0f);
                 const float k = 1.0f - 2.0f * a;
                 const float t = a * 255.0f;
@@ -333,7 +332,7 @@ void SkiaCanvas::save_layer_with_filters(float x, float y, float w, float h,
 
     canvas_->saveLayer(&bounds, &layer_paint);
 
-    // pulp #1899 (gap #3) — track non-opaque destination for text-edging.
+    // Track non-opaque destination for text-edging.
     if (opacity < 1.0f) {
         non_opaque_layer_stack_.push_back(canvas_->getSaveCount());
     }
@@ -341,9 +340,9 @@ void SkiaCanvas::save_layer_with_filters(float x, float y, float w, float h,
 
 void SkiaCanvas::save_backdrop_filter(float x, float y, float w, float h,
                                        float blur_radius) {
-    // CSS `backdrop-filter: blur(N)` (issue-926). Push a layer whose initial
-    // contents are the parent surface filtered through a Gaussian blur, so
-    // subsequent draws into this layer composite over the blurred backdrop.
+    // CSS `backdrop-filter: blur(N)`. Push a layer whose initial contents are
+    // the parent surface filtered through a Gaussian blur, so subsequent draws
+    // into this layer composite over the blurred backdrop.
     if (!canvas_) { save(); return; }
     if (blur_radius <= 0.0f) {
         // Degenerate: behave like a plain save() so the matching restore()

@@ -4,12 +4,9 @@
 // skia_canvas_mask). Internal to core/canvas/src; not part of the public
 // API.
 //
-// Background: PR #2183 (Phase 4 R2-3 follow-up) split skia_canvas.cpp
-// into per-feature TUs but left the shared static helpers
-// (`to_sk_color4f`, `skia_blend_mode_for`, the webgpu→SkColorType /
-// SkColorSpace mappers) only in skia_canvas.cpp. The split files
-// referenced them and failed to link. This header consolidates the
-// helpers as `inline` so every split TU sees the same definition.
+// Per-feature Skia canvas TUs share helpers such as `to_sk_color4f`,
+// `skia_blend_mode_for`, and the webgpu→SkColorType / SkColorSpace
+// mappers. Keep them inline here so every split TU sees the same definition.
 
 #pragma once
 

@@ -17,7 +17,7 @@ namespace pulp::render {
 /// (`GpuSurface::create_dawn() + native_surface_handle=nullptr` +
 /// `SkiaSurface::create`). Intended for CI golden tests and any other
 /// callsite that wants "render this scene to an RGBA / PNG buffer with
-/// no window". Spec: planning/2026-05-24-macos-plugin-authoring-plan.md §6.7.
+/// no window".
 ///
 /// The wrapper does NOT introduce a new render path — it just hides
 /// the begin_frame/end_frame ceremony and the GPU readback dance so a

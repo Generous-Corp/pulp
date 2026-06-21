@@ -209,24 +209,20 @@ public:
 
         // Register OnSubmittedWorkDone to release the storage buffers once the
         // GPU confirms the dispatch+copy submission completed. The readback
-        // buffer is still live (it's about to be MapAsync'd) — we release it
-        // synchronously after read_back() has Unmap'd it. See design doc
-        // planning/zero-copy-slice-1-design-2026-04-20.md "GPU-in-flight".
+        // buffer is still live (it's about to be MapAsync'd), so it is
+        // released synchronously after read_back() has Unmap'd it.
         schedule_pool_release({input_buf, output_buf});
 
         const bool ok = read_back(readback_buf, magnitudes, output_bytes);
 
-        // Codex 2026-04-21 review on #536 P1: only recycle on SUCCESS.
-        // On MapAsync timeout the GPU may still be mapping the buffer
-        // when this function returns; handing it back to the pool lets
-        // a subsequent call re-acquire and reuse it while the prior map
-        // is still in flight — a validation error / silent corruption
-        // risk under slow GPU workloads.
+        // Only recycle readback buffers on success. On MapAsync timeout the
+        // GPU may still be mapping the buffer when this function returns;
+        // handing it back to the pool could let a subsequent call re-acquire
+        // and reuse it while the prior map is still in flight.
         //
-        // Codex 2026-04-21 review on #560 (wave 2) P1: on failure we
-        // still must drop the pool's in_flight_ reference via discard(),
-        // otherwise repeated timeouts accumulate tracked handles and
-        // grow the pool without bound. discard() is a release() that
+        // On failure we still must drop the pool's in_flight_ reference via
+        // discard(), otherwise repeated timeouts accumulate tracked handles
+        // and grow the pool without bound. discard() is a release() that
         // skips the free-list recycle step.
         if (ok) {
             pool_->release(readback_buf);
@@ -293,13 +289,12 @@ public:
         schedule_pool_release({buf_a, buf_b, buf_result});
 
         const bool ok = read_back(readback_buf, result, bytes);
-        // Codex 2026-04-21 review on #536 P1 — matched to the magnitude
-        // path: only recycle on success. On read_back failure the GPU
-        // may still hold a mapping on this buffer.
+        // Match the magnitude path: only recycle on success. On read_back
+        // failure the GPU may still hold a mapping on this buffer.
         //
-        // Codex 2026-04-21 wave 2 P1 on #560: use discard() on failure
-        // so repeated timeouts don't accumulate tracked handles in
-        // in_flight_ — see compute_magnitude() for the full rationale.
+        // Use discard() on failure so repeated timeouts don't accumulate
+        // tracked handles in in_flight_; see compute_magnitude() for the full
+        // rationale.
         if (ok) {
             pool_->release(readback_buf);
         } else {
@@ -399,7 +394,7 @@ public:
         notes << "Backend: " << report.backend_name
               << ". Device sharing verified: compute buffers and command submission "
               << "work on the same Dawn device used by Skia Graphite. "
-              << "Phase 13 can proceed with shared-device Three.js bridge.";
+              << "Shared-device Three.js bridge prerequisites are satisfied.";
         report.notes = notes.str();
 
         return report;
@@ -619,14 +614,11 @@ private:
     // Pool of persistent staging buffers, keyed by usage bitmask. Replaces
     // per-call device_.CreateBuffer() in compute_magnitude / complex_multiply
     // to eliminate allocator churn. Created lazily in create_pipelines().
-    // Codex 2026-04-21 review on #536: the OnSubmittedWorkDone callback
-    // captures the pool pointer to return buffers post-submission. The
-    // callback can fire after `~DawnGpuCompute()` resets the pool in
-    // shared-device mode (where event processing continues outside this
-    // object). Owning the pool via `shared_ptr` and handing the callback
-    // a `weak_ptr` means a stale callback just drops its buffers (RAII
-    // dtor handles the wgpu::Buffer side) instead of dereferencing a
-    // dangling `pool_raw` pointer.
+    // OnSubmittedWorkDone callbacks can fire after `~DawnGpuCompute()` resets
+    // the pool in shared-device mode, where event processing continues outside
+    // this object. Owning the pool via `shared_ptr` and handing callbacks a
+    // `weak_ptr` means stale callbacks just drop their buffers (RAII dtor
+    // handles the wgpu::Buffer side) instead of dereferencing freed state.
     std::shared_ptr<detail::StagingBufferPool> pool_;
 
     bool create_pipelines() {
@@ -638,10 +630,9 @@ private:
 
         // Staging buffer pool: pre-allocated ring of persistent wgpu::Buffer
         // objects that replaces per-call device_.CreateBuffer() in the compute
-        // hot path. Planning reference:
-        // planning/zero-copy-slice-1-design-2026-04-20.md. Default cap of 8
-        // covers typical GPU dispatch depth (3–4 in flight) × per-call buffer
-        // count (2–3 inputs + output) with headroom.
+        // hot path. Default cap of 8 covers typical GPU dispatch depth (3-4 in
+        // flight) times per-call buffer count (2-3 inputs + output), with
+        // headroom.
         pool_ = std::make_shared<detail::StagingBufferPool>(device_, 8);
 
         initialized_ = true;
@@ -712,7 +703,7 @@ private:
     // (which are wgpu::Buffer ref-counted handles) to keep them alive until
     // the callback fires, and a weak_ptr to the pool so a callback that
     // outlives ~DawnGpuCompute() cleanly no-ops instead of dereferencing
-    // a dangling raw pointer. Codex 2026-04-21 review on #536 P1.
+    // freed state.
     void schedule_pool_release(std::vector<wgpu::Buffer> bufs) {
         if (!pool_ || bufs.empty()) return;
 

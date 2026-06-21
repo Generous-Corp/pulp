@@ -1,9 +1,8 @@
 // cg_canvas_gradients.mm — CoreGraphics gradient + pattern paint slice.
 //
-// Extracted from cg_canvas.mm in the 2026-05 Phase 4 (R2-3 mirror)
-// refactor. Pairs with core/canvas/src/skia_canvas_gradients.cpp on
-// the Skia side. Covers fill + stroke gradient builders (linear,
-// radial, conic, two-circles) for the CoreGraphics CPU path.
+// Pairs with core/canvas/src/skia_canvas_gradients.cpp on the Skia side.
+// Covers fill + stroke gradient builders (linear, radial, conic,
+// two-circles) for the CoreGraphics CPU path.
 //
 // `stroke_with_active_paint` and `fill_with_active_paint` remain in
 // cg_canvas.mm because they are the central dispatch points shared
@@ -63,7 +62,7 @@ void CoreGraphicsCanvas::set_fill_gradient_radial(float cx, float cy,
     gradient_kind_ = GradientKind::radial;
     gradient_is_radial_ = true;
     // Single-circle form: inner circle collapses to the centre with radius 0,
-    // outer circle is (cx, cy, radius). Matches the JS shim's pre-#1524
+    // outer circle is (cx, cy, radius). Matches the legacy single-circle
     // contract where createRadialGradient routed only the outer circle.
     grad_x0_ = cx; grad_y0_ = cy; grad_x1_ = cx; grad_y1_ = cy;
     grad_radius_inner_ = 0.0f;
@@ -72,12 +71,12 @@ void CoreGraphicsCanvas::set_fill_gradient_radial(float cx, float cy,
     grad_positions_.assign(positions, positions + count);
 }
 
-// pulp #1524 — true two-circle radial gradient. CGContextDrawRadialGradient
-// accepts (start_centre, start_radius, end_centre, end_radius), so we wire
-// both circles through unmodified. The previous bridge dropped (x0,y0,r0)
-// and used only the outer circle, which silently degraded centre-bloom-
-// only fills (Skia rendered the real two-point conical via MakeTwoPointConical;
-// CG produced a visibly different shape).
+// True two-circle radial gradient. CGContextDrawRadialGradient accepts
+// (start_centre, start_radius, end_centre, end_radius), so we wire both circles
+// through unmodified. The legacy single-circle bridge dropped (x0,y0,r0) and
+// used only the outer circle, which silently degraded centre-bloom-only fills
+// (Skia rendered the real two-point conical via MakeTwoPointConical; CG
+// produced a visibly different shape).
 void CoreGraphicsCanvas::set_fill_gradient_radial_two_circles(
         float x0, float y0, float r0,
         float x1, float y1, float r1,
@@ -97,12 +96,12 @@ void CoreGraphicsCanvas::set_fill_gradient_radial_two_circles(
     grad_positions_.assign(positions, positions + count);
 }
 
-// pulp #1524 — Canvas2D ctx.createConicGradient on the CG backend.
-// CoreGraphics has no native conic / sweep shader, so we record the conic
-// parameters here and software-rasterise a CGImage at fill time
-// (paint_conic_into_clip), interpolating colour stops by atan2 angle from
-// (cx, cy). The Skia backend uses SkShaders::SweepGradient — same
-// visual result, real two-stop+ sweep gradient.
+// Canvas2D ctx.createConicGradient on the CG backend. CoreGraphics has no
+// native conic / sweep shader, so we record the conic parameters here and
+// software-rasterise a CGImage at fill time (paint_conic_into_clip),
+// interpolating colour stops by atan2 angle from (cx, cy). The Skia backend
+// uses SkShaders::SweepGradient — same visual result, real two-stop+ sweep
+// gradient.
 void CoreGraphicsCanvas::set_fill_gradient_conic(float cx, float cy,
                                                   float start_angle,
                                                   const Color* colors,
@@ -136,10 +135,10 @@ void CoreGraphicsCanvas::clear_fill_gradient() {
     release_pattern_image();
 }
 
-// pulp #1666 — stroke gradient setters mirror the fill gradient ones
-// 1:1, populating the parallel `stroke_*` slots. The gradient itself is
-// painted at stroke time by stroke_with_active_paint() which clips to
-// the path and routes through the same CGGradientRef draw calls.
+// Stroke gradient setters mirror the fill gradient ones 1:1, populating the
+// parallel `stroke_*` slots. The gradient itself is painted at stroke time by
+// stroke_with_active_paint() which clips to the path and routes through the
+// same CGGradientRef draw calls.
 void CoreGraphicsCanvas::set_stroke_gradient_linear(float x0, float y0,
                                                      float x1, float y1,
                                                      const Color* colors,
@@ -206,14 +205,13 @@ void CoreGraphicsCanvas::clear_stroke_gradient() {
     stroke_grad_positions_.clear();
 }
 
-// pulp #1666 — paint a stroke through the active stroke gradient. Uses
-// the same approach as fill: create CGGradientRef from stroke_grad_colors_,
-// clip the context to the stroked path's outline (replace path mode), then
-// call CGContextDrawLinearGradient / CGContextDrawRadialGradient over the
-// clip's bounding rect. Conic falls back to apply_stroke_color (CG has no
-// native sweep; the rasterised conic image isn't worth the complexity for
-// stroked outlines which would need the conic image clipped to the stroke
-// silhouette).
+// Paint a stroke through the active stroke gradient. Uses the same approach as
+// fill: create CGGradientRef from stroke_grad_colors_, clip the context to the
+// stroked path's outline (replace path mode), then call
+// CGContextDrawLinearGradient / CGContextDrawRadialGradient over the clip's
+// bounding rect. Conic falls back to apply_stroke_color (CG has no native
+// sweep; the rasterised conic image isn't worth the complexity for stroked
+// outlines which would need the conic image clipped to the stroke silhouette).
 
 }  // namespace pulp::canvas
 

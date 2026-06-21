@@ -16,8 +16,8 @@ namespace pulp::render {
 
 /// GPU compute pipeline for non-rendering workloads (e.g. spectral processing).
 ///
-/// This is an EXPERIMENTAL exploration API for Phase 11 feasibility testing.
-/// It operates on a Dawn wgpu::Device shared with GpuSurface/SkiaSurface.
+/// Experimental API for background GPU compute work. It operates on a Dawn
+/// wgpu::Device shared with GpuSurface/SkiaSurface.
 ///
 /// Design constraints:
 /// - Never runs in the audio callback (upload/readback latency is too high)
@@ -61,7 +61,7 @@ public:
     virtual bool batch_magnitude(const float* complex_frames, float* magnitude_frames,
                                  uint32_t bins_per_frame, uint32_t num_frames) = 0;
 
-    // ── Device sharing verification (Phase 13 forward compatibility) ────
+    // ── Device sharing verification ──────────────────────────────────────
 
     struct DeviceSharingReport {
         bool device_obtained = false;
