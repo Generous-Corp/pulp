@@ -105,13 +105,20 @@ jobs:
             external/AudioUnitSDK
 
       - name: Configure
-        # -DPULP_BUILD_EXAMPLES=OFF: the release ships the CLI + plugins
-        # (build/VST3, build/CLAP, build/AU), never the example apps. The
-        # pulp-design-tool example hard-fails configure when PULP_HAS_SKIA is
-        # FALSE (this runner has no Skia), so building examples here aborts the
-        # whole sign-and-release run and no GitHub Release is published. Skip
-        # examples to match build.yml's release legs.
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -DPULP_BUILD_EXAMPLES=OFF -DPULP_ENABLE_AUDIO_PROBES=OFF
+        # -DPULP_BUILD_EXAMPLES=OFF: the pulp-design-tool example hard-fails
+        # configure when PULP_HAS_SKIA is FALSE (this runner has no Skia), so
+        # building examples here aborts the whole sign-and-release run and no
+        # GitHub Release is published. Skip examples to match build.yml's
+        # release legs. Tests are also disabled: this job packages artifacts
+        # and must not run Catch test discovery for GPU/display binaries on
+        # GitHub-hosted macOS release runners. Audio probes are development
+        # inspection surfaces and are not part of release artifacts.
+        run: >
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+          -DPULP_BUILD_EXAMPLES=OFF
+          -DPULP_BUILD_TESTS=OFF
+          -DPULP_ENABLE_AUDIO_PROBES=OFF
 
       - name: Build
         run: cmake --build build --config ${{ env.BUILD_TYPE }} -j$(sysctl -n hw.ncpu)
@@ -130,14 +137,12 @@ jobs:
       # on PR. The artifact smoke below is the headless-safe replacement gate.
 
       - name: Smoke built plugins (headless-safe — format entry point exported)
-        # Replacement for the removed unit-test re-run: confirm a BUILT plugin
-        # actually exports its format C-ABI entry, so a linkage regression that
-        # compiles-but-ships-a-dud is caught before publishing. Static symbol
-        # read (`nm`) — NO execution, so no GPU/display/audio needed (safe on the
-        # headless runner; that's why this, not dlopen+init or ctest). Zero
+        # If this release configuration produces CLAP artifacts, confirm each
+        # built plugin exports its format C-ABI entry. Static symbol read (`nm`)
+        # only: no GPU/display/audio needed on the headless runner. Zero
         # block-risk: FAILS only on a built .clap whose Mach-O lacks
-        # `clap_entry` (a real regression); if no artifact is found it WARNS and
-        # passes, so a path/setup miss can never re-block the release.
+        # `clap_entry`; if no artifact is found it WARNS and passes, so the
+        # examples-off release configuration can still publish appcast metadata.
         run: |
           set -uo pipefail
           shopt -s nullglob
@@ -271,17 +276,13 @@ jobs:
         # v1 is too old per actionlint (GH deprecated its runner version);
         # v2 uses the Node 20 runner and is a drop-in replacement.
         #
-        # pulp #1737 — only upload appcast.xml to the release page. The
-        # example plugin .pkg files (PulpEffect, PulpCompressor, PulpDrums,
-        # PulpGain, PulpPluck, PulpTone, PulpSynth, PulpSampler,
-        # PulpMpeSynth, AraPitchTracker — across AU/CLAP/VST3) still build
-        # in the steps above as smoke tests (catches regressions when the
-        # SDK touches examples/), and they're still uploaded to the
-        # workflow run via actions/upload-artifact for debugging. They are
-        # just NOT promoted to the user-facing release page, where they
-        # would imply they're production-quality installers ready to drop
-        # into ~/Library/Audio/Plug-Ins/. The SDK + CLI artifacts (pulp-*,
-        # pulp-sdk-*) are uploaded by .github/workflows/release-cli.yml.
+        # pulp #1737 — only upload appcast.xml to the release page. This
+        # workflow deliberately keeps example plugins out of the release
+        # configuration; if a future release configuration emits plugin .pkg
+        # artifacts, actions/upload-artifact above retains them for debugging,
+        # but they are still not promoted to the user-facing release page. The
+        # SDK + CLI artifacts (pulp-*, pulp-sdk-*) are uploaded by
+        # .github/workflows/release-cli.yml.
         uses: softprops/action-gh-release@v2
         with:
           files: artifacts/appcast.xml
