@@ -126,9 +126,9 @@ void WidgetBridge::register_layout_flex_api() {
             std::fprintf(stderr, "[flex-thrash] id=%s key=%s num=%.3f str='%s'\n",
                          id.c_str(), key.c_str(), val, sval.c_str());
         }
-        // Accept all flexDirection spellings used by CSS/RN and the bridge:
-        // 'row' / 'column', the bridge shorthand 'col', plus the reverse
-        // modes. Unknown values preserve the historical column fallback.
+        // Accept the flexDirection spellings used by CSS/RN: `row`,
+        // `column`, and the reverse modes. `column`, the bridge shorthand
+        // `col`, and unknown values all resolve to column.
         if (key == "direction") {
             auto dir = args.get<std::string>(2, "col");
             if (dir == "row")                 f.direction = FlexDirection::row;
