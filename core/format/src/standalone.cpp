@@ -17,13 +17,13 @@
 #include <fstream>
 #include <string_view>
 
-// WYSIWYG P6 FIX 5 — the dev inspector (Cmd+I overlay) is gated behind the
-// PULP_ENABLE_INSPECTOR compile flag (root CMake option, default ON for
-// dev/examples builds; release/standalone-ship builds set it OFF) so a
-// shipped standalone app does not expose the developer inspector to end
-// users. It additionally requires PULP_HAS_INSPECT (GPU + desktop, the link
-// gate) and a non-Android platform. PULP_STANDALONE_INSPECTOR folds all
-// three into one condition used by every inspector block below.
+// The dev inspector (Cmd+I overlay) is gated behind the PULP_ENABLE_INSPECTOR
+// compile flag (root CMake option, default ON for dev/examples builds;
+// release/standalone-ship builds set it OFF) so a shipped standalone app does
+// not expose the developer inspector to end users. It additionally requires
+// PULP_HAS_INSPECT (GPU + desktop, the link gate) and a non-Android platform.
+// PULP_STANDALONE_INSPECTOR folds all three into one condition used by every
+// inspector block below.
 #if !defined(PULP_ENABLE_INSPECTOR)
 #define PULP_ENABLE_INSPECTOR 1
 #endif
@@ -88,7 +88,7 @@ StandaloneApp::~StandaloneApp() {
 bool StandaloneApp::start() {
     // Create the processor once and reuse it across audio reconfigurations
     // (apply_config soft-restart). Recreating it on every settings change would
-    // dangle an editor ViewBridge holding a Processor& (#2693); parameters are
+    // dangle an editor ViewBridge holding a Processor&; parameters are
     // defined a single time so the StateStore isn't re-registered on restart.
     if (!processor_) {
         processor_ = factory_();
@@ -183,10 +183,10 @@ bool StandaloneApp::start() {
         silence_ptrs_[static_cast<size_t>(c)] = silence_buffer_.view().channel_ptr(static_cast<size_t>(c));
 
 #if PULP_ENABLE_AUDIO_PROBES
-    // Phase 5 — prepare the realtime output-boundary probe BEFORE the audio
-    // callback starts. This is the only place it allocates. Probe-enabled
-    // standalone builds keep a small last-N channel-0 ring so the developer
-    // Audio Inspector can paint a live waveform whether it was opened from
+    // Prepare the realtime output-boundary probe BEFORE the audio callback
+    // starts. This is the only place it allocates. Probe-enabled standalone
+    // builds keep a small last-N channel-0 ring so the developer Audio
+    // Inspector can paint a live waveform whether it was opened from
     // PULP_AUDIO_INSPECTOR at launch or toggled later by command. The ring is
     // sized to the panel's display capacity so one UI tick fills the trace.
     audio::AudioProbe::CaptureConfig probe_capture;
@@ -261,9 +261,9 @@ bool StandaloneApp::start() {
 
         // Collect pending MIDI from the hardware input thread (mutex-guarded
         // accumulator). UI / virtual-keyboard / scripting MIDI is delivered
-        // separately via `ui_midi_collector_` (item 3.5 — pulp::midi::
-        // MidiMessageCollector) which is lock-free and sample-accurate
-        // within the current block.
+        // separately via `ui_midi_collector_` (pulp::midi::
+        // MidiMessageCollector), which is lock-free and sample-accurate within
+        // the current block.
         midi::MidiBuffer midi_in, midi_out;
         {
             std::lock_guard lock(midi_mutex_);
@@ -271,9 +271,9 @@ bool StandaloneApp::start() {
             pending_midi_.clear();
         }
 
-        // Item 3.5 — drain UI-thread MIDI into this block at the correct
-        // sample offsets. The standalone host treats its own audio clock
-        // as the master timeline: block_start_seconds is
+        // Drain UI-thread MIDI into this block at the correct sample offsets.
+        // The standalone host treats its own audio clock as the master
+        // timeline: block_start_seconds is
         // `transport_position_samples / sample_rate`.
         const int64_t block_start_samples =
             transport_position_samples_.load(std::memory_order_relaxed);
@@ -353,8 +353,8 @@ bool StandaloneApp::start() {
                 ctx.buffer_size);
         }
 
-        // Item 3.5 / item 1.3 — populate the transport-related fields on
-        // ProcessContext from the standalone's built-in tempo source.
+        // Populate the transport-related fields on ProcessContext from the
+        // standalone's built-in tempo source.
         // The driver has no DAW providing transport, so it behaves like
         // one: tempo + time-signature are the user-chosen config values,
         // `position_beats` advances from the rolling sample clock at the
@@ -404,13 +404,12 @@ bool StandaloneApp::start() {
                 ctx.buffer_size);
         }
 #if PULP_ENABLE_AUDIO_PROBES
-        // Phase 5 — standalone processor-output boundary probe. Tap the
-        // processor's output immediately after render and before returning to
-        // the device callback. RT-safe: scalar-only, no allocation, no FFT.
-        // This is the boundary where "UI works, no sound" reports separate
-        // processor silence from output-boundary silence. Fill the
-        // pre-allocated const pointer array (no audio-thread allocation), then
-        // wrap it in a const view for analyze_output().
+        // Tap the processor's output immediately after render and before
+        // returning to the device callback. RT-safe: scalar-only, no
+        // allocation, no FFT. This is the boundary where "UI works, no sound"
+        // reports separate processor silence from output-boundary silence.
+        // Fill the pre-allocated const pointer array (no audio-thread
+        // allocation), then wrap it in a const view for analyze_output().
         analyze_output_probe();
 #endif
 
@@ -440,7 +439,7 @@ bool StandaloneApp::apply_config(const StandaloneConfig& new_config) {
     // Soft restart: tear down only the audio/MIDI devices and rebuild them for
     // the new config, KEEPING the processor instance (start() reuses it and
     // re-prepare()s it). A full stop()+start() would recreate the processor and
-    // dangle an editor ViewBridge holding a Processor& (#2693).
+    // dangle an editor ViewBridge holding a Processor&.
     if (was_running) stop_audio_keep_processor();
     config_ = new_config;
     constrain_audio_config(config_);
@@ -537,8 +536,7 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     auto& window_root = chrome.window_root();
 
     // Build WindowOptions from the bridge's cached ViewSize hints so
-    // min_width/min_height propagate to platform window hosts that
-    // honor them (#1362).
+    // min_width/min_height propagate to platform window hosts that honor them.
     auto opts = detail::make_standalone_window_options(
         size_hints, chrome, desc.name + " — Standalone", use_gpu);
     opts.initially_hidden = effective_config.headless;
@@ -579,8 +577,8 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
 #endif
 
 #if PULP_ENABLE_AUDIO_PROBES
-    // Phase 6 — Audio Inspector tool window. A SEPARATE floating window (sibling
-    // of the layout inspector, not a tab in it) that observes `output_probe_`.
+    // Audio Inspector tool window. A SEPARATE floating window (sibling of the
+    // layout inspector, not a tab in it) that observes `output_probe_`.
     // It dispatches its toggle (Cmd/Ctrl+Shift+A) through a shell-owned
     // CommandRegistry routed via `route_global_keys` — that writes
     // `window_root.on_global_key`, which is distinct from the layout inspector's
@@ -607,9 +605,9 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     // The inspector uses View::overlay_queue() for rendering and intercepts
     // key events through the root view's on_global_click callback for Cmd+I.
     //
-    // pulp #468 — extract the pre-screenshot idle work into a std::function
-    // so the headless screenshot block (further below) can compose with it
-    // instead of clobbering via a second set_idle_callback.
+    // Keep pre-screenshot idle work in a composable callback so the headless
+    // screenshot path can extend it instead of clobbering it with a second
+    // set_idle_callback.
     std::function<void()> pre_screenshot_idle;
 #if PULP_STANDALONE_INSPECTOR
     if (scripted_ui_ptr) {
@@ -705,7 +703,7 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     };
 #endif
 
-    // ── Headless one-shot screenshot (SDK-codified, pulp #468 follow-up) ──
+    // ── Headless one-shot screenshot ────────────────────────────────────────
     //
     // When `effective_config.screenshot_path` is non-empty (set via
     // config/env or forwarded `pulp run --screenshot` args), wait
@@ -876,7 +874,7 @@ void StandaloneApp::stop() {
     }
 }
 
-// ── Item 3.5 — persisted-config helpers ────────────────────────────────────
+// ── Persisted-config helpers ────────────────────────────────────────────────
 //
 // Keys live under the `standalone.*` namespace in the user properties file so
 // they don't collide with plugin-owned state. The format is the simple

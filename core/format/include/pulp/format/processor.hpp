@@ -34,8 +34,7 @@ struct ViewSize {
     uint32_t max_height = 0;  ///< 0 = unbounded
 
     /// When > 0, the host should hold this aspect ratio (width/height)
-    /// during interactive resize. Workstream 07 slice 7.5 pairs this
-    /// with pulp::view::ResizableShell, which owns the clamp + snap
+    /// during interactive resize. pulp::view::ResizableShell owns the clamp + snap
     /// arithmetic. 0 means "any ratio"; hosts then let the user drag
     /// freely within [min, max]. Typical values: 16.0/9.0, 4.0/3.0,
     /// preferred_width/preferred_height.
@@ -54,9 +53,8 @@ struct ViewSize {
 ///
 /// CLAP's `gui_can_resize` requires min > 0 (see clap_entry.hpp), so
 /// the derived min is what makes corner-drag resize work across all
-/// formats with no per-plugin override. Issue #2784 tracks the
-/// auto-sidecar path that will populate the inputs from
-/// `pulp import-design`.
+/// formats with no per-plugin override. A generated-plugin sidecar can
+/// populate these inputs once import-design supplies them.
 constexpr ViewSize view_size_from_design(uint32_t preferred_width,
                                           uint32_t preferred_height,
                                           uint32_t min_width = 0,
@@ -154,7 +152,7 @@ struct PluginDescriptor {
     /// that keeps running while the user switches apps, etc.). The
     /// host-app layer uses this flag to decide whether to set the
     /// `audio` UIBackgroundModes entitlement and keep the AVAudioSession
-    /// active in background. Workstream 05 slice 5.5.
+    /// active in background.
     ///
     /// Default false — most effects don't need background audio and
     /// setting the entitlement unnecessarily attracts App Store review
@@ -289,7 +287,7 @@ struct PrepareContext {
     PrepareResourceLimits resource_limits;
 };
 
-/// SMPTE video frame rate (item 1.3 macOS plan).
+/// SMPTE video frame rate.
 ///
 /// Used by `ProcessContext::frame_rate` so plugins that drive video sync
 /// or display SMPTE timecode can format positions correctly. `unknown` is
@@ -327,8 +325,7 @@ enum class RenderSpeedHint {
 /// Fields are populated by the host. Not all hosts provide all fields —
 /// check is_playing before using position data.
 ///
-/// Adapter sourcing (item 1.3 of the macOS plan; struct-only slice
-/// landed first, adapter wiring deferred to cross-cuts J / K / L / M):
+/// Adapter sourcing:
 ///
 /// - VST3 — `Vst::ProcessContext` (`SystemTime` →
 ///   `host_time_ns`, `ProjectTimeMusic` → `position_beats`,
@@ -398,10 +395,8 @@ struct ProcessContext {
     int time_sig_numerator = 4;
     int time_sig_denominator = 4;
 
-    // --- item 1.3 extensions (struct-only; adapter wiring deferred to
-    // J/K/L/M cross-cut). New fields default to "host did not provide"
-    // sentinels so existing adapters that don't populate them keep the
-    // pre-extension behaviour exactly. ---
+    // New fields default to "host did not provide" sentinels so adapters that
+    // don't populate them keep the pre-extension behaviour exactly.
 
     /// Bar index derived from `position_beats` + the active time
     /// signature. Hosts may already publish a precomputed bar (VST3
@@ -562,8 +557,6 @@ public:
     /// Release resources. Called on the host thread with audio stopped.
     virtual void release() {}
 
-    /// Tier B Slice 15 of planning/2026-05-18-rt-safety-and-debug-dx.md.
-    ///
     /// Pause processing for a heavy main-thread operation (preset load,
     /// convolution kernel reallocation, sample-rate change) that would
     /// otherwise need to either block in @c process() — fatal — or run
@@ -580,11 +573,10 @@ public:
     ///
     /// Threading: both hooks run on the host / main thread, never
     /// from @c process(). Format adapters do not currently call these
-    /// hooks automatically — that comes in a follow-up slice once the
-    /// canonical "suspend-then-load-preset" surface for each adapter
-    /// is settled. Today the hooks exist so a plug-in can wire its
-    /// own UI-thread "loading…" workflow against them and the adapter
-    /// integration is purely additive.
+    /// hooks automatically. Adapter integration stays additive once the
+    /// canonical "suspend-then-load-preset" surface for each format is
+    /// settled. Today the hooks exist so a plug-in can wire its own
+    /// UI-thread "loading..." workflow against them.
     ///
     /// Standard suspend/resume guard: while suspended a processor should stop
     /// touching shared real-time state so a host can safely reconfigure it.
@@ -618,7 +610,7 @@ public:
 
     /// Memory-pressure levels a host can surface to a plugin. Mirrors the
     /// broad shape of iOS didReceiveMemoryWarning + Windows low-memory
-    /// notifications + Android TrimMemory. Workstream 05 slice 5.3.
+    /// notifications + Android TrimMemory.
     enum class MemoryPressure {
         /// Hint only — trim obviously disposable caches, keep working set.
         Advisory,
@@ -636,7 +628,7 @@ public:
     ///
     /// Wiring:
     ///   iOS       — PulpAudioSessionBridge routes didReceiveMemoryWarning
-    ///               (slice 5.1 hooks this into the running processor).
+    ///               into the running processor.
     ///   macOS     — no-op today; host apps can still invoke manually to
     ///               test plugin behaviour.
     ///   Android   — ComponentCallbacks2.onTrimMemory (future slice).
@@ -657,10 +649,9 @@ public:
     /// vectors mean "the host did not propose buses on that side"
     /// (rare; treat as 'no opinion').
     ///
-    /// Workstream 03 item 3.7. Format adapters call this on the host
-    /// thread before applying the layout. Returning false rejects the
-    /// proposal and the adapter is expected to refuse the host's
-    /// `setBusArrangements` / equivalent call.
+    /// Format adapters call this on the host thread before applying the
+    /// layout. Returning false rejects the proposal and the adapter is
+    /// expected to refuse the host's `setBusArrangements` / equivalent call.
     struct BusesLayout {
         std::vector<int> inputs;
         std::vector<int> outputs;
@@ -679,7 +670,7 @@ public:
     ///
     /// Adapters fall back to the descriptor's declared bus count + the
     /// mono/stereo policy when a plugin doesn't override this hook,
-    /// which preserves the pre-item-3.7 behaviour exactly.
+    /// which preserves the prior default-acceptance behaviour exactly.
     virtual bool is_bus_layout_supported(const BusesLayout& layout) const {
         const auto desc = descriptor();
         if (!layout.inputs.empty() &&
@@ -694,7 +685,7 @@ public:
         return true;
     }
 
-    /// Item 3.11 — cross-adapter latency / tail change notifications.
+    /// Cross-adapter latency / tail change notifications.
     ///
     /// Called from `process()` on the audio thread when a plugin's
     /// latency or tail length changes mid-render (e.g. a linear-phase
@@ -708,7 +699,6 @@ public:
     ///
     /// **Audio-thread-safe.** Never call a host API from `process()`.
     ///
-    /// Workstream 03 item 3.11.
     void flag_latency_changed() noexcept {
         latency_changed_.store(true, std::memory_order_release);
     }
@@ -834,7 +824,6 @@ public:
 
     /// Called when the host's transport state transitions between
     /// playing and stopped, or jumps to a new position. Default no-op.
-    /// Workstream 01 slice 1.11.
     virtual void on_host_transport_changed(bool /*is_playing*/,
                                            double /*position_seconds*/) {}
     /// Called when the host's transport tempo changes. Default no-op.
@@ -842,10 +831,9 @@ public:
     /// call — delay sync recomputation, tempo-synced LFO rate caches,
     /// UI BPM read-outs. Runs on the main/UI thread; the audio thread
     /// keeps reading the current tempo from ProcessContext as usual.
-    /// Workstream 01 slice 1.10.
     virtual void on_host_tempo_changed(double /*new_tempo_bpm*/) {}
 
-    /// Optional ARA 2.x document-controller factory (workstream 06 slice 6.3).
+    /// Optional ARA 2.x document-controller factory.
     /// Plugins that opt in to ARA return a new AraDocumentController from
     /// this method; the format-adapter companion factory (VST3 / AU /
     /// CLAP) owns the instance and tears it down with the plugin.
@@ -959,8 +947,8 @@ private:
     const midi::MpeBuffer* mpe_input_ = nullptr;
     const midi::UmpBuffer* ump_input_ = nullptr;
     const state::ParameterEventQueue* param_events_ = nullptr;
-    // Item 3.11 — RT-safe pending flags published from process() and
-    // consumed by adapters on the host / main thread.
+    // RT-safe pending flags published from process() and consumed by adapters
+    // on the host / main thread.
     std::atomic<bool> latency_changed_{false};
     std::atomic<bool> tail_changed_{false};
 };

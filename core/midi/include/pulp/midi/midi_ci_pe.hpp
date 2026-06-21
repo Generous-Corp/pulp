@@ -119,9 +119,9 @@ pe_split_into_chunks(PeMessageType pe_type,
 /// Holds chunks until `total_chunks` have all been observed, then returns
 /// the concatenated payload and the (first) header.
 ///
-/// RT-safety contract (audited 2026-05-26 for plan item 8.4): every
-/// method mutates an `unordered_map` slot owning per-transfer `vector`s,
-/// and on completion concatenates payload bytes into the returned chunk.
+/// RT-safety contract (audited 2026-05-26): every method mutates an
+/// `unordered_map` slot owning per-transfer `vector`s, and on completion
+/// concatenates payload bytes into the returned chunk.
 /// Drive the reassembler from the same MIDI / main thread that decoded
 /// the SysEx envelope, never from the audio callback.
 class PeReassembler {
@@ -216,10 +216,10 @@ struct PeSubscription {
 ///   - `subscribers_of(resource)` is used by the responder when a
 ///     resource changes to fan out Notify messages.
 ///
-/// RT-safety contract (audited 2026-05-26 for plan item 8.4):
-/// every mutating method allocates; `subscribers_of()` allocates a
-/// fresh result vector even when nothing matches. Drive the manager
-/// from the same non-RT thread that drives PE message dispatch.
+/// RT-safety contract (audited 2026-05-26): every mutating method allocates;
+/// `subscribers_of()` allocates a fresh result vector even when nothing
+/// matches. Drive the manager from the same non-RT thread that drives PE
+/// message dispatch.
 class PeSubscriptionManager {
 public:
     /// NOT RT-safe — allocates a new `PeSubscription` (two
