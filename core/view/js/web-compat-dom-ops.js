@@ -1,17 +1,16 @@
 // DOM manipulation methods (small file for QuickJS compilation limit).
 //
-// pulp #745 — single source of truth for the prototype methods that
-// underpin web-compat DOM mutation. Earlier the same code lived twice:
-// in this file (embedded into web_compat_preludes_gen.hpp via embed_js.py)
-// AND inline in widget_bridge.cpp as `kDomOpsInit`. The two had drifted
-// — the inline copy carried DocumentFragment flatten paths from #468
-// Codex P1 that were never backported here, and the inline version was
-// the one actually evaluated, so this file was dead code that the build
-// happily included anyway. Now the file is the only copy.
+// Single source of truth for the prototype methods that underpin
+// web-compat DOM mutation. Earlier the same code lived twice: in this
+// file (embedded into web_compat_preludes_gen.hpp via embed_js.py) and
+// inline in widget_bridge.cpp as `kDomOpsInit`. The two had drifted,
+// and the inline version was the one actually evaluated, so this file
+// was dead code that the build still included. Now the file is the only
+// copy.
 //
 // Idempotency guard: callers may eval this script more than once
-// (constructor + manual reload, or the future #468 deferred-init
-// transition). The flag-on-prototype check makes a second eval a no-op
+// (constructor + manual reload, or a deferred-init transition). The
+// flag-on-prototype check makes a second eval a no-op
 // instead of re-defining the methods (which would also re-publish the
 // same logic but re-trigger any global side effects readers attach via
 // Object.defineProperty / proxies).
@@ -21,10 +20,10 @@ if (!Element.prototype.appendChild ||
 
     Element.prototype.appendChild = function(child) {
         if (!(child instanceof Element)) return child;
-        // DocumentFragment flatten (pulp #468 Codex P1): a fragment must
-        // splice its children into the parent — the fragment node itself
-        // never enters the tree. React 18's reconciler stages commits
-        // inside fragments; without this they show up as phantom wrappers.
+        // DocumentFragment flatten: a fragment must splice its children
+        // into the parent, and the fragment node itself never enters the
+        // tree. React 18's reconciler stages commits inside fragments;
+        // without this they show up as phantom wrappers.
         if (child._isDocumentFragment) {
             var kids = child._children.slice(0);
             child._children.length = 0;
@@ -35,11 +34,11 @@ if (!Element.prototype.appendChild ||
         child._parentElement = this;
         this._children.push(child);
         this._ensureNative();
-        // pulp #1899 — pass an optional widget-type hint to the C++
-        // __domAppend fast path so it can route `<input>` to the right
-        // native widget (Fader for type=range, Checkbox for type=checkbox).
-        // Computing the hint here is cheaper than re-entering JS from C++
-        // and avoids the QuickJS stack-overflow risk that motivated the
+        // Pass an optional widget-type hint to the C++ __domAppend fast
+        // path so it can route `<input>` to the right native widget
+        // (Fader for type=range, Checkbox for type=checkbox). Computing
+        // the hint here is cheaper than re-entering JS from C++ and
+        // avoids the QuickJS stack-overflow risk that motivated the
         // __domAppend fast path in the first place.
         var __domAppendHint = "";
         if (child.tagName === "INPUT") {
@@ -51,13 +50,11 @@ if (!Element.prototype.appendChild ||
             } else if (child._type === "checkbox") {
                 __domAppendHint = "checkbox";
             } else {
-                // pulp jsx-instrument-import (2026-05-17) — plain
-                // `<input>` (the default `_type` is "text") and the
-                // text-input subtypes (text/search/email/url/tel/password)
-                // route to a TextEditor on the C++ side. Pre-fix, all
-                // non-range/non-checkbox inputs fell through to a plain
-                // View, leaving Chainer's preset-name field (and any
-                // generic React `<input>`) non-editable.
+                // Plain `<input>` (the default `_type` is "text") and
+                // the text-input subtypes (text/search/email/url/tel/
+                // password) route to a TextEditor on the C++ side.
+                // Other non-range/non-checkbox inputs fall through to a
+                // plain View.
                 var t = child._type || "text";
                 if (t === "text" || t === "search" || t === "email" ||
                     t === "url"  || t === "tel"    || t === "password") {
@@ -68,26 +65,26 @@ if (!Element.prototype.appendChild ||
         __domAppend(this._id, child._id, child.tagName.toLowerCase(), __domAppendHint);
         child._nativeCreated = true;
         if (child._textContent) setText(child._id, child._textContent);
-        // pulp #1147 — replay presentational `width`/`height` HTML
-        // attributes that were captured before mount. React/JSX commits
-        // setAttribute() before appendChild(), and the C++ __domAppend
-        // path doesn't see those attributes — so a fresh SVG arrives
-        // here as 0×0 and the row collapses. Style flushAll() doesn't
-        // cover attribute paths, only `style.*`. Apply only to layout-
-        // leaf media tags so semantic block elements aren't surprised
-        // by stale presentational hints.
+        // Replay presentational `width`/`height` HTML attributes that
+        // were captured before mount. React/JSX commits setAttribute()
+        // before appendChild(), and the C++ __domAppend path doesn't
+        // see those attributes, so a fresh SVG arrives here as 0×0 and
+        // the row collapses. Style flushAll() doesn't cover attribute
+        // paths, only `style.*`. Apply only to layout-leaf media tags so
+        // semantic block elements aren't surprised by stale
+        // presentational hints.
         if (typeof __replayMediaAttributes__ === "function") {
             __replayMediaAttributes__(child);
         }
-        // pulp Wave 3 html.2 / #1476 — same flush for ARIA attributes
-        // (`aria-label` / `role`) captured before mount. Without this
-        // the React commit order (setAttribute -> appendChild) leaves
-        // the access slots empty even though _attributes carries them.
+        // Same flush for ARIA attributes (`aria-label` / `role`) captured
+        // before mount. Without this the React commit order
+        // (setAttribute -> appendChild) leaves the access slots empty
+        // even though _attributes carries them.
         if (typeof __replayAriaAttributes__ === "function") {
             __replayAriaAttributes__(child);
         }
-        // pulp #1926 — rect / line / circle SVG primitives. React/JSX
-        // commits setAttribute() before appendChild(), so geometry and
+        // Rect / line / circle SVG primitives. React/JSX commits
+        // setAttribute() before appendChild(), so geometry and
         // fill/stroke land on _attributes before the bridge sees the
         // native id. Flush them now that the native widget exists.
         if (typeof __replaySvgRectAttributes__ === "function") {
@@ -99,29 +96,26 @@ if (!Element.prototype.appendChild ||
         if (typeof __replaySvgCircleAttributes__ === "function") {
             __replaySvgCircleAttributes__(child);
         }
-        // pulp #1899 — replay SvgPath attributes (d / stroke /
-        // stroke-width / fill / viewBox-from-parent) for `<path>`
-        // elements. React commits these via setAttribute BEFORE the
-        // appendChild that materializes the native widget, so the
-        // SvgPathWidget is empty until this replay runs.
+        // Replay SvgPath attributes (d / stroke / stroke-width / fill /
+        // viewBox-from-parent) for `<path>` elements. React commits
+        // these via setAttribute BEFORE the appendChild that materializes
+        // the native widget, so the SvgPathWidget is empty until this
+        // replay runs.
         if (typeof __replaySvgPathAttributes__ === "function") {
             __replaySvgPathAttributes__(child);
         }
         child.style._flushAll();
         child._reapplyStylesheets();
 
-        // pulp jsx-instrument-import (2026-05-17) — auto-register
-        // native click + pointer events on EVERY appended element so
-        // React 17+'s root-delegated event system actually receives
-        // events. React attaches a single delegate listener to the
-        // root container; individual JSX elements never call
-        // addEventListener('click', fn), so pre-fix registerClick(id)
-        // / registerPointer(id) was never invoked and native NSEvents
-        // never reached the JS bubble chain. The shim's _dispatchEvent
-        // implements proper capture/bubble through _parentElement,
-        // so once native click/pointer fires `on(id, 'click')` we
-        // synthesize a DOM Event, dispatch on the target child Element,
-        // and the existing bubble walk delivers to React's root.
+        // Auto-register native click + pointer events on EVERY appended
+        // element so React 17+'s root-delegated event system receives
+        // events. React attaches a single delegate listener to the root
+        // container; individual JSX elements never call addEventListener
+        // ('click', fn). The shim's _dispatchEvent implements proper
+        // capture/bubble through _parentElement, so once native
+        // click/pointer fires `on(id, 'click')` we synthesize a DOM Event,
+        // dispatch on the target child Element, and the existing bubble
+        // walk delivers to React's root.
         //
         // Idempotent via _autoEventsRegistered flag.
         if (!child._autoEventsRegistered) {
@@ -182,11 +176,11 @@ if (!Element.prototype.appendChild ||
                 });
             }
         }
-        // pulp #1323 — `<style>` elements receive CSS via either direct
-        // textContent assignment or child Text nodes (React's reconciler
-        // takes the second path). When a Text-bearing child lands under a
-        // `<style>` parent, route the aggregated text through the CSS
-        // translator so `:hover` rules get registered.
+        // `<style>` elements receive CSS via either direct textContent
+        // assignment or child Text nodes; React's reconciler takes the
+        // second path. When a Text-bearing child lands under a `<style>`
+        // parent, route the aggregated text through the CSS translator so
+        // `:hover` rules get registered.
         if ((this.tagName === "STYLE" || this._isStyleElement)
                 && typeof _processStyleElement === "function") {
             var aggregated = "";
@@ -218,8 +212,8 @@ if (!Element.prototype.appendChild ||
 
     Element.prototype.insertBefore = function(newChild, refChild) {
         if (!refChild) return this.appendChild(newChild);
-        // DocumentFragment flatten (pulp #468 Codex P1): each child of
-        // the fragment is inserted at the ref position individually.
+        // DocumentFragment flatten: each child of the fragment is inserted
+        // at the ref position individually.
         if (newChild._isDocumentFragment) {
             var kids = newChild._children.slice(0);
             newChild._children.length = 0;
@@ -235,15 +229,15 @@ if (!Element.prototype.appendChild ||
         __domAppend(this._id, newChild._id, newChild.tagName.toLowerCase());
         newChild._nativeCreated = true;
         if (newChild._textContent) setText(newChild._id, newChild._textContent);
-        // pulp #1147 / Wave 3 html.2 — same pre-mount attribute replay
-        // path as appendChild, including ARIA attributes.
+        // Same pre-mount attribute replay path as appendChild, including
+        // ARIA attributes.
         if (typeof __replayMediaAttributes__ === "function") {
             __replayMediaAttributes__(newChild);
         }
         if (typeof __replayAriaAttributes__ === "function") {
             __replayAriaAttributes__(newChild);
         }
-        // pulp #1926 — see appendChild for rationale.
+        // See appendChild for the SVG primitive replay rationale.
         if (typeof __replaySvgRectAttributes__ === "function") {
             __replaySvgRectAttributes__(newChild);
         }
@@ -253,7 +247,7 @@ if (!Element.prototype.appendChild ||
         if (typeof __replaySvgCircleAttributes__ === "function") {
             __replaySvgCircleAttributes__(newChild);
         }
-        // pulp #1899 — see appendChild for rationale.
+        // See appendChild for the SvgPath replay rationale.
         if (typeof __replaySvgPathAttributes__ === "function") {
             __replaySvgPathAttributes__(newChild);
         }

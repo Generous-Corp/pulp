@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// CSSStyleDeclaration — misc domain handler (P5-5 split of _applyProperty)
+// CSSStyleDeclaration — misc domain handler split from _applyProperty
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 // Handles the interaction / scroll / 3D-OOS CSS properties that don't
@@ -64,7 +64,7 @@ function _applyMiscProp(decl, id, key, resolved, value) {
             // intentional no-op — see compat.json css/writingMode.
             return true;
 
-        // pulp #1737 RN-OOS-fixup (audit 2026-05-11) — CSS scroll-behavior +
+        // CSS scroll-behavior +
         // overscroll-behavior route to View slots that ScrollView reads.
         // Other scroll* properties (scrollMargin / scrollPadding /
         // scrollSnapType) remain catalog wontfix — they require a scroll-
