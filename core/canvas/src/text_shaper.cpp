@@ -33,7 +33,7 @@
 // back to a typeface-less default whose `measureText()` advance is
 // effectively zero. That collapses Label::intrinsic_width() and Yoga
 // reserves no horizontal space for the label, which paints into the
-// (now-tiny) box and clips. See pulp #945 (regression of #935 / #928).
+// now-tiny box and clips.
 #if defined(__APPLE__)
 #include "include/ports/SkFontMgr_mac_ct.h"
 #elif defined(_WIN32)
@@ -91,10 +91,10 @@ static ShapedLayout layout_from_segments(const std::vector<ShapedSegment>& segme
     ShapedLayout result;
     if (segments.empty()) return result;
 
-    // pulp #1410 — `white-space: nowrap` path. Force a single line that
+    // `white-space: nowrap` path. Force a single line that
     // includes every segment (including hard newlines flattened to
     // spaces, matching CSS nowrap behavior) so the caller sees the full
-    // intrinsic width and can decide to truncate via #1407's ellipsis.
+    // intrinsic width and can decide to truncate via ellipsis.
     // Skips the wrapping loop entirely so segments past `max_width` are
     // not silently dropped.
     if (max_lines == 1) {
@@ -123,7 +123,7 @@ static ShapedLayout layout_from_segments(const std::vector<ShapedSegment>& segme
             if (seg.is_newline) {
                 // CSS `white-space: nowrap` collapses hard breaks into
                 // a single space — both visually (materialized text)
-                // and in width (so #1407's overflow detection sees the
+                // and in width (so ellipsis overflow detection sees the
                 // collapsed advance).
                 w += whitespace_width;
                 if (materialize) line.text += ' ';
@@ -176,8 +176,8 @@ static ShapedLayout layout_from_segments(const std::vector<ShapedSegment>& segme
             width_at_break = current_width;
         }
 
-        // pulp #1737 — break-word / anywhere also need to fire when the
-        // over-wide segment is the FIRST on an empty line (current_width
+        // break-word / anywhere also need to fire when the over-wide
+        // segment is the FIRST on an empty line (current_width
         // == 0, but seg.width alone exceeds max_width). The legacy
         // `normal` path lets that overflow on its own line; break-word
         // and anywhere are supposed to slice it. Without this, e.g.
@@ -190,8 +190,8 @@ static ShapedLayout layout_from_segments(const std::vector<ShapedSegment>& segme
 
         if ((current_width + seg.width > max_width && current_width > 0) ||
             first_seg_overflows) {
-            // pulp #1737 — overflow-wrap / word-break decision point.
-            // CSS Text Module Level 3 §6.1:
+            // Overflow-wrap / word-break decision point. CSS Text Module
+            // Level 3 §6.1:
             //   - If a whitespace break opportunity exists on the current
             //     line, ALWAYS prefer it (matches `normal`, `break-word`,
             //     and `anywhere` — none of them split words when a soft
@@ -291,10 +291,8 @@ static ShapedLayout layout_from_segments(const std::vector<ShapedSegment>& segme
                     // The materialization loops downstream only walk
                     // `segments[j].text`, so leaving the remnant in
                     // current_width would silently drop the characters
-                    // when followed by ANY further segments (Codex P1
-                    // on #1795 / pulp #1737: "Preserve split-word
-                    // remainder before subsequent segments"). The
-                    // tradeoff: the remnant gets its own line instead
+                    // when followed by ANY further segments. The tradeoff:
+                    // the remnant gets its own line instead
                     // of combining with the following segment on the
                     // same visual line — minor cosmetic vs. data loss.
                     //
@@ -321,9 +319,8 @@ static ShapedLayout layout_from_segments(const std::vector<ShapedSegment>& segme
                 // cps == 0 falls through to legacy whole-segment path
             }
 
-            // Legacy `normal`-mode behavior: break at last whitespace or
-            // segment boundary (no inside-word breaks). Same path as
-            // pre-#1737.
+            // `normal`-mode behavior: break at last whitespace or segment
+            // boundary, with no inside-word breaks.
             int break_at = has_ws_break ? last_break : i;
             float break_width = has_ws_break ? width_at_break : current_width;
 
@@ -369,7 +366,7 @@ static ShapedLayout layout_from_segments(const std::vector<ShapedSegment>& segme
         y += line_height;
     }
 
-    // pulp #1410 — clamp to max_lines (>1) by dropping trailing lines.
+    // Clamp to max_lines (>1) by dropping trailing lines.
     // max_lines=1 already short-circuits at the top of the function.
     if (max_lines > 1 && static_cast<int>(result.lines.size()) > max_lines) {
         result.lines.resize(static_cast<std::size_t>(max_lines));
@@ -403,11 +400,10 @@ struct TextShaper::Impl {
     sk_sp<SkFontMgr> font_mgr;
     sk_sp<skia::textlayout::FontCollection> font_collection;
 
-    // pulp #2163 / font v2 Slice 1.1.a — platform font manager comes from
-    // the single canonical helper in bundled_fonts.cpp (exported via
-    // bundled_fonts.hpp). Without a manager, SkFontMgr::RefEmpty()
+    // The platform font manager comes from the canonical helper in
+    // bundled_fonts.cpp. Without a manager, SkFontMgr::RefEmpty()
     // returns no typefaces and `font.measureText()` reports near-zero
-    // advance, collapsing Label::intrinsic_width() (pulp #945).
+    // advance, collapsing Label::intrinsic_width().
 
     Impl() {
         font_mgr = platform_font_manager();
@@ -450,7 +446,7 @@ struct TextShaper::Impl {
     // keeps its tofu-width forever.
     std::uint64_t cached_generation = 0;
 
-    // pulp #2163 — metrics cache keyed by (font_family, font_size). Stores
+    // Metrics cache keyed by (font_family, font_size). Stores
     // SkFontMetrics-derived ascent/descent/leading once per typeface so
     // every measure_metrics call after the first is pure cache hit. Same
     // PreText "measure once, reuse forever" model as the segment cache.
@@ -465,8 +461,7 @@ struct TextShaper::Impl {
     std::mutex metrics_mutex;
 
 #ifdef PULP_HAS_TEXT_SHAPING
-    // pulp #2163 / font v2 Slice 1.1.a (caller migration) — typeface
-    // resolution now routes through FontResolver. Comma-list parsing
+    // Typeface resolution routes through FontResolver. Comma-list parsing
     // happens once inside the resolver; the registered → bundled →
     // platform cascade is shared with skia_canvas. Returns null when
     // no family matched and there's no platform fallback (non-Skia
@@ -520,8 +515,8 @@ struct TextShaper::Impl {
         if (font.getTypeface()) {
             SkFontMetrics m;
             font.getMetrics(&m);
-            // pulp #2163 — use fTop / fBottom (the WORST-CASE glyph
-            // bbox extents) rather than fAscent / fDescent (the
+            // Use fTop / fBottom (the WORST-CASE glyph bbox extents)
+            // rather than fAscent / fDescent (the
             // RECOMMENDED ascent/descent for Latin-only layout).
             //
             // The difference matters at small font sizes: fAscent is
@@ -543,24 +538,13 @@ struct TextShaper::Impl {
             box.ascent  = -top;           // worst-case distance above baseline (positive)
             box.descent =  bottom;        // worst-case distance below baseline (positive)
             box.leading =  m.fLeading > 0 ? m.fLeading : 0;
-            // pulp #2163 — Phase 1 exit (font v2 roadmap). Historical
-            // context: commit 2371479c3 added an empirical
-            // `0.5 * font_size` line-height margin on top of fTop/fBottom
-            // to fix small-font clipping in Chainer (CROSSOVER /
-            // MID / SIDE WIDTH titles at fontSize 7). The margin was a
-            // stopgap — the real cause was the y-semantics drift
-            // documented in v2 tar pit #9.
-            //
-            // After Slices 1.1.a (FontResolver) + 1.1.b (Yoga baseline
-            // channel) + 1.2.b (TextAnchor + paint_at) + 1.3 (parity
-            // harness asserting TextShaper ≡ SkFont::measureText within
-            // 0.5 px), the structural cause is fixed and the margin is
-            // unnecessary. Default behavior is now NO margin (raw
-            // fTop/fBottom). Opt back in to the legacy margin with
+            // Raw fTop/fBottom is now the default line box. The legacy
+            // empirical `0.5 * font_size` safety margin was a stopgap for
+            // small-font clipping before baseline and anchor semantics were
+            // aligned; TextShaper/SkFont parity coverage now guards that
+            // path, so the margin stays opt-in via
             // `PULP_FONT_LEGACY_SAFETY_MARGIN=1` for bisection or A/B
-            // regression triage; the opt-in goes away once the full
-            // multilingual torture-corpus harness ships in a follow-up
-            // and proves we've never needed it.
+            // regression triage.
             const bool legacy_margin =
                 std::getenv("PULP_FONT_LEGACY_SAFETY_MARGIN") != nullptr;
             const float safety = legacy_margin ? font_size * 0.5f : 0.0f;
@@ -606,11 +590,11 @@ struct TextShaper::Impl {
         // Real measurement via SkFont. Use the platform font manager
         // (CoreText/DirectWrite/fontconfig/Android) — RefEmpty() returns
         // no typefaces and silently produces ~0 advance widths, which
-        // is what regressed Label measurement in pulp #945.
+        // is what collapses Label measurements.
         SkFont font;
         sk_sp<SkTypeface> typeface;
 
-        // pulp #2163 — CSS font-family can be a comma-separated list
+        // CSS font-family can be a comma-separated list
         // ("'IBM Plex Mono', monospace"). Walk the list and return the
         // first family that resolves to a real typeface. Before this
         // fix, the whole string was used as a single family lookup,
@@ -632,8 +616,8 @@ struct TextShaper::Impl {
             }
             if (clean.empty()) return nullptr;
 
-            // pulp #1150 — plugin-registered typefaces win over the platform
-            // font manager so measurement matches paint (skia_canvas.cpp's
+            // Plugin-registered typefaces win over the platform font
+            // manager so measurement matches paint (skia_canvas.cpp's
             // get_cached_typeface honours the same precedence).
             auto tf = match_registered_typeface(clean, SkFontStyle::Normal());
             if (tf) return tf;
@@ -773,8 +757,8 @@ PreparedText TextShaper::prepare(std::string_view text, std::string_view font_fa
     PreparedText result;
     result.font_family_ = std::string(font_family);
     result.font_size_ = font_size;
-    // pulp #2163 — ask the impl for real SkFontMetrics-derived line
-    // height. Falls back to font_size * 1.5 only when there's no
+    // Ask the impl for real SkFontMetrics-derived line height. Falls back
+    // to font_size * 1.5 only when there's no
     // resolvable typeface (non-Skia build, empty font manager, etc.).
     // Cached per (family, size) so repeated layout calls hit pure
     // arithmetic — same PreText "measure once" guarantee that already

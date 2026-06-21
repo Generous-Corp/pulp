@@ -20,10 +20,9 @@
 
 namespace pulp::canvas {
 
-// pulp #2163 / font v2 Slice 1.1.a — `platform_font_manager()` lives in
-// bundled_fonts.cpp (exported via bundled_fonts.hpp); this compatibility shim
-// stays as `get_font_manager()` until the broader caller-migration pass moves
-// legacy internal call sites onto the resolver.
+// `platform_font_manager()` lives in bundled_fonts.cpp and is exported through
+// bundled_fonts.hpp. Keep this compatibility shim for legacy internal call
+// sites that still ask for `get_font_manager()`.
 sk_sp<SkFontMgr> get_font_manager() {
     return platform_font_manager();
 }
