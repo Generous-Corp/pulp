@@ -4,9 +4,8 @@
 // the corresponding bridge state instead of leaving the previous visual
 // value painted.
 //
-// This bites the conditional-spread idiom that Spectr's Settings Manager
-// Preset chips, PatternRow rows, and most imported designs (Stitch / v0
-// / Figma) use:
+// This bites the conditional-spread idiom that preset chips, pattern rows,
+// and imported designs use:
 //
 //   style={{ ...base, ...(active ? activeStyle : {}) }}
 //
@@ -131,7 +130,7 @@ describe('@pulp/react prop-applier — disappearing style keys', () => {
     });
 
     it('conditional-spread true → false: active-only background + border clear', () => {
-        // Mirrors Spectr Settings Manager Preset chip:
+        // Mirrors an active/inactive preset chip:
         //   style={{ ...base, ...(active ? activeStyle : {}) }}
         // Active state set background + borderColor; inactive drops them.
         const baseProps = { padding: 8, borderRadius: 4 };

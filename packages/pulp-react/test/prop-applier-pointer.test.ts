@@ -4,9 +4,8 @@
 //
 // Without registerPointer, the bridge keeps the JS listener in its dispatch
 // table but the View's on_pointer_event callback is never armed by the
-// native side, so clicks never fire the React handler. Spectr's FilterBank
-// band drag was the canonical repro — see spectr #32 + import-design
-// SKILL.md gotcha #8.
+// native side, so clicks never fire the React handler. Canvas band-drag
+// handlers with wheel zoom are the representative regression shape.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createMockBridge, type MockBridge } from '../src/bridge.js';
@@ -77,8 +76,8 @@ describe('@pulp/react prop-applier — pointer registration', () => {
     });
 
     it('calls both registerPointer and registerWheel when both pointer + wheel handlers present', () => {
-        // Spectr FilterBank shape: onPointerDown for band drag + onWheel
-        // for zoom. Both lambdas must be wired since each filters on
+        // Canvas band-drag shape: onPointerDown for drag + onWheel for zoom.
+        // Both lambdas must be wired since each filters on
         // me.is_wheel inversely.
         applyAllProps(instance('canvas2', 'Canvas', {
             onPointerDown: () => {},
@@ -177,7 +176,7 @@ describe('@pulp/react prop-applier — pointer registration', () => {
     });
 
     it('arms registerPointer + registerHover when both pointer and hover handlers present', () => {
-        // Spectr FilterBank wrap shape: hover-driven cursor + drag-driven gain
+        // Canvas interaction wrapper shape: hover-driven cursor + drag-driven gain
         // edits both attached to the same widget.
         applyAllProps(instance('wrap', 'View', {
             onPointerDown: () => {},

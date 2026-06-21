@@ -24,8 +24,8 @@ import { applyEventProp } from './prop-applier-events.js';
 // in prop-applier-internal.ts so every domain shares one logging
 // counter.
 //
-// Bridge globals are still looked up through globalThis at call time
-// so the mock-bridge install path picks them up (see host-config.ts).
+// The optional logging hook is looked up through globalThis at call time.
+// Bridge setters dispatch through `call()` in prop-applier-internal.ts.
 type AnyFn = (...args: unknown[]) => unknown;
 const g = globalThis as unknown as Record<string, AnyFn | undefined>;
 
@@ -127,11 +127,10 @@ function applyEventHandler(id: string, key: string, value: unknown): void {
     // Also arm the pointer dispatch path for mouse events. Do not do
     // this for onClick: that is the W3C click-on-release semantic and
     // routes through on_click.
-    // Imported JSX bundles (Chainer's knobs/faders/XY pad) install
-    // onMouseDown / onMouseMove / onMouseUp handlers that need to fire on
-    // press, not release. Without this pre-fix, hit_test returns the
-    // widget with has_pointer=no and the bridge's pointer event lambda
-    // never fires for mouse* event types.
+    // Imported JSX bundles install onMouseDown / onMouseMove / onMouseUp
+    // handlers that need to fire on press, not release. Without this,
+    // hit_test returns the widget with has_pointer=no and the bridge's
+    // pointer event lambda never fires for mouse* event types.
     if (eventName === 'mousedown' || eventName === 'mouseup' ||
         eventName === 'mousemove') {
         call('registerPointer', id);
@@ -304,8 +303,8 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
 
 // ── normalizeHostProps ───────────────────────────────────────────────
 //
-// Imported React apps (Claude/Stitch/Figma/v0 bundles loaded via
-// @pulp/react/runtime-import) use HTML-style JSX:
+// Imported React apps (design-tool or runtime-import bundles) use
+// HTML-style JSX:
 //   <div style={{ width: 100, color: 'red' }} className="card">
 // This flattens that to the shape applyAllProps/applyChangedProps
 // expect (flat `width: 100, color: 'red'` props).

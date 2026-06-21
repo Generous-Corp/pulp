@@ -1,9 +1,9 @@
 // Regression test for the React-dispatcher-null crash.
 //
 // Root cause: when @pulp/react was published with React (and friends)
-// inlined inside dist/index.mjs, downstream consumers (esbuild bundling
-// Spectr's editor.js) ended up with TWO copies of React in the final
-// IIFE — one inside the pre-bundled @pulp/react.mjs and one resolved
+// inlined inside dist/index.mjs, downstream consumers using esbuild ended
+// up with TWO copies of React in the final IIFE — one inside the
+// pre-bundled @pulp/react.mjs and one resolved
 // from the consumer's npm-installed `react` package via host-shims.
 //
 // React 18's dispatcher lives on a per-React-module singleton
@@ -23,7 +23,7 @@
 // This test guards the build output: if any of the four packages get
 // inlined back into the bundle (because someone removed an
 // `--external:` flag from the build script), the test fails before
-// the regression hits Spectr.
+// the regression reaches downstream plugins.
 
 import { describe, it, expect } from 'vitest';
 import { readFileSync, statSync } from 'node:fs';
@@ -35,8 +35,7 @@ describe('@pulp/react build output', () => {
   it('dist/index.mjs exists and is small (no React inlined)', () => {
     const st = statSync(distMjs);
     // After externalizing react / react-reconciler / scheduler the bundle
-    // is ~106 KB (was ~27 KB pre-shortcuts; the rest is prop-applier +
-    // host-config + intrinsics surface that accumulated over time).
+    // is ~106 KB for the prop-applier, host-config, and intrinsic surface.
     // If anyone re-inlines react it jumps to ~950 KB. A 130 KB ceiling
     // keeps a wide gap from a React-inlined bundle while leaving room
     // for the non-React surface to keep growing.

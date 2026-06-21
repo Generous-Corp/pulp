@@ -309,7 +309,7 @@ export interface StyleProps {
     /// `'none'` / `null` / `undefined` clears the slot.
     boxShadow?: BoxShadow | string | null;
     /// RN-style transform array. An array of single-property objects is
-    /// common in Figma / v0.dev / Claude Design exports. Wired ops:
+    /// common in design-tool exports. Wired ops:
     ///   • `translateX`, `translateY` — number, px
     ///   • `rotate`, `rotateZ` — `'45deg'` / `'1rad'` / numeric (deg)
     ///   • `scale` — uniform scalar

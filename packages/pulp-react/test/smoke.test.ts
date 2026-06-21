@@ -20,7 +20,7 @@ describe('@pulp/react smoke', () => {
   it('exposes the core intrinsic components', () => {
     // Spot-check a representative slice of the intrinsic surface that the
     // bridge contract is built around. If any of these disappear, downstream
-    // plugin code (Spectr et al.) breaks.
+    // plugin code breaks.
     expect(typeof pulpReact.View).toBe('function');
     expect(typeof pulpReact.Row).toBe('function');
     expect(typeof pulpReact.Col).toBe('function');

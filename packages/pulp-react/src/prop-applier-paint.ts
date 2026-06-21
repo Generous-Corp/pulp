@@ -162,7 +162,8 @@ export function applyPaintProp(
         //     `local` are noop (pulp doesn't model scroll contexts).
         //   • `backgroundClip` — `text` is the interesting variant
         //     (paint-time SkBlendMode::kSrcIn against text glyphs);
-        //     deferred to a future PR. Other values noop on solid bg.
+        //     not implemented in the current paint path. Other values noop
+        //     on solid bg.
         //   • `backgroundOrigin` — relevant only for repeating gradients;
         //     noop today.
         case 'backgroundAttachment': call('setBackgroundAttachment', id, value as string); return true;
@@ -410,12 +411,10 @@ export function applyPaintProp(
         // gradient backgrounds).
         case 'backgroundRepeat': call('setBackgroundRepeat', id, value as string); return true;
 
-        // RN iOS-legacy box-shadow longhands. Modern RN code uses
-        // `boxShadow` (CSS
-        // shorthand) which Pulp fully supports, but upstream RN still
-        // accepts shadowColor / shadowOffset / shadowOpacity /
-        // shadowRadius as cross-platform-ish style props (originally
-        // iOS-only, but Pulp implements them cross-platform via the
+        // React Native box-shadow longhands. Modern RN code uses
+        // `boxShadow` (CSS shorthand) which Pulp fully supports, but RN
+        // still accepts shadowColor / shadowOffset / shadowOpacity /
+        // shadowRadius as style props. Pulp implements them via the
         // unified BoxShadow struct on View). Each per-attribute setter
         // writes ONE slot of View::shadow_ in isolation so a JSX diff
         // that touches one prop doesn't clobber the others.

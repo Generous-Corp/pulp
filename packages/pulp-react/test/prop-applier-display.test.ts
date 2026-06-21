@@ -1,7 +1,7 @@
 // Verify the @pulp/react prop-applier dispatches
 // `display: 'flex' | 'none'` to the right setVisible call.
 //
-// RN exports + Figma / v0.dev / Claude Design HTML routinely emit
+// RN and design-tool exports routinely emit
 // `style={{ display: 'flex' }}` (the implicit default in pulp, but
 // the prop-applier shouldn't drop it as unknown) or `display: 'none'`
 // to hide a subtree. This test guards the RN-flavored JSX path so RN

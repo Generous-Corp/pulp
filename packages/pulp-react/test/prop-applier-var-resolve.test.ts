@@ -92,8 +92,7 @@ describe('React prop forwarding for var() token resolution', () => {
         const calls = callsOf('setFontFamily');
         expect(calls).toHaveLength(1);
         // The fallback is the literal string after the comma, trimmed.
-        // Quoted strings keep their quotes — Skia's font matcher strips
-        // them (issue-932 commit list test).
+        // Quoted strings keep their quotes; Skia's font matcher strips them.
         expect(calls[0].args[1]).toBe('"SF Mono"');
     });
 

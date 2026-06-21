@@ -2,10 +2,9 @@
 // verbatim to the bridge so Yoga's YGNodeStyleSetWidthAuto /
 // SetHeightAuto path is reached.
 //
-// Figma auto-layout "hug contents" frames, v0.dev intrinsic-sizing
-// cards, and Claude Design responsive containers all emit `width:
-// 'auto'` / `height: 'auto'`. Before this batch the bridge had no
-// 'auto' branch on setFlex(width|height); strings reached `(float)val`
+// Auto-layout frames, intrinsic-sizing cards, and responsive containers
+// routinely emit `width: 'auto'` / `height: 'auto'`. Before this batch
+// the bridge had no 'auto' branch on setFlex(width|height); strings reached `(float)val`
 // = NaN/0 and the node was effectively pinned to 0×0. The TS surface
 // already types width/height as `number | string`, so this test only
 // exercises the 'auto' string path through the existing code shape.

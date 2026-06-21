@@ -46,7 +46,7 @@ describe('host-config commitUpdate — array children on TEXT_BEARING', () => {
     });
 
     it('emits setText when [number, string] array changes value', () => {
-        // Mirrors Spectr's <button>{bandsCount}{" bands ▾"}</button>.
+        // Mirrors a button that combines a dynamic count and a static label.
         const inst = makeButton('bands_trigger', [32, ' bands ▾']);
         commitUpdate!(
             inst, null, 'button',

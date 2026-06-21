@@ -31,7 +31,7 @@ describe('parseShortcut', () => {
         expect(r.canonical).toBe('s');
     });
 
-    it('parses cmd+, (Spectr settings chord)', () => {
+    it('parses cmd+, (settings chord)', () => {
         const r = parseShortcut('cmd+,');
         expect(r.keyCode).toBe(','.charCodeAt(0));
         expect(r.modMask).toBe(MOD_CMD);
