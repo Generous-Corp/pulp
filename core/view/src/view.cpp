@@ -601,14 +601,14 @@ void View::paint_all(canvas::Canvas& canvas) {
         }
     }
 
-    // Focus ring — only show on text input widgets, not sliders/toggles/meters
-    // Matches CSS :focus-visible behavior (keyboard focus on text inputs)
+    // No generic focus ring is painted here; text-capable widgets provide
+    // their own focus affordance.
     if (has_focus_ && focusable_ &&
         access_role_ != AccessRole::slider &&
         access_role_ != AccessRole::toggle &&
         access_role_ != AccessRole::meter) {
-        // TextEditor handles its own focus border, so skip the generic ring
-        // for views that paint their own focus state
+        // Intentionally empty: TextEditor handles its own focus border, so
+        // skip the generic ring.
     }
 
     // End compositing layer (restore pops the saveLayer, compositing the subtree)
@@ -686,6 +686,7 @@ void View::simulate_drag(Point start, Point end, int steps) {
     if (pulp::view::motion::input_recording_enabled()) {
         const std::string id = target ? target->id() : std::string();
         std::vector<std::pair<std::string, double>> coords;
+        // Recorded coordinates are keyed fields; insertion order is not semantic.
         coords.emplace_back("end_x",   static_cast<double>(end.x));
         coords.emplace_back("end_y",   static_cast<double>(end.y));
         coords.emplace_back("start_x", static_cast<double>(start.x));
@@ -1257,9 +1258,8 @@ std::vector<GridTrack> GridStyle::parse_template(const std::string& tmpl, int de
     }
     if (!token.empty()) tokens.push_back(token);
 
-    // Parse a numeric prefix without throwing; std::stof on a non-numeric
-    // token (e.g. the CSS initial value `none`) used to throw out of
-    // WidgetBridge::load_script. Returns false for unparseable tokens.
+    // Parse a numeric prefix without throwing. Non-numeric tokens (e.g. the
+    // CSS initial value `none`) are skipped instead of propagating an exception.
     auto try_parse = [](const std::string& s, float& out) -> bool {
         try {
             size_t consumed = 0;
@@ -1466,7 +1466,7 @@ static void layout_grid(View& parent) {
         if (t.type == GridTrack::Type::fr && total_fr_w > 0) {
             col_widths[static_cast<size_t>(i)] = remaining_w * (t.value / total_fr_w);
         } else if (t.type == GridTrack::Type::auto_) {
-            // Auto: share remaining equally among auto tracks
+            // Auto: share remaining width using the current total column count.
             col_widths[static_cast<size_t>(i)] = remaining_w / std::max(1.0f, static_cast<float>(num_cols));
         }
     }
