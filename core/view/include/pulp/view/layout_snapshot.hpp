@@ -35,7 +35,7 @@ std::string dump_layout_tree(
     const View& root,
     const LayoutTreeSnapshotOptions& options = {});
 
-/// Compare two dump_layout_tree() JSON strings with the Phase 2 oracle rules:
+/// Compare two dump_layout_tree() JSON strings with the layout oracle rules:
 /// node kind/id/visibility/z-order/overflow must match exactly, numeric layout
 /// bounds must match exactly by default, and text-box dimensions allow a small
 /// tolerance for text measurement. Golden-file callers that compare snapshots
