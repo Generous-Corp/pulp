@@ -4,9 +4,7 @@
 /// The realtime-produced probe summary — the *shared schema* between the RT
 /// producer (`pulp::audio::AudioProbe`, the audio callback) and the non-RT
 /// consumers (UI / offline analysis). Producer and consumers share this data
-/// type only; they NEVER share an implementation path
-/// (`planning/2026-06-09-audio-observability-and-validation-harness-plan.md`,
-/// Section 4, "Two layers, one schema").
+/// type only; they never share an implementation path.
 ///
 /// `AudioProbeSnapshot` is POD-like and trivially copyable so it can ride a
 /// `runtime::TripleBuffer` (latest-wins summary) without allocation. It is

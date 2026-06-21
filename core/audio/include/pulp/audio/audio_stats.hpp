@@ -3,12 +3,9 @@
 /// @file audio_stats.hpp
 /// Small POD counter struct for release-safe audio observability.
 ///
-/// `AudioStats` is the always-available, minimal counter subset described in
-/// the audio observability harness plan
-/// (`planning/2026-06-09-audio-observability-and-validation-harness-plan.md`,
-/// Section 4 "Runtime Probe Infrastructure", "Release builds" tier). It is a
-/// trivially-copyable aggregate so it can be published lock-free and read on
-/// any thread.
+/// `AudioStats` is the always-available, minimal counter subset for release
+/// builds. It is a trivially-copyable aggregate so it can be published
+/// lock-free and read on any thread.
 ///
 /// OWNERSHIP BOUNDARY (do not relitigate without a code change):
 ///   - Signal-content counters — `callbacks`, `underruns`, `clipped_blocks`,

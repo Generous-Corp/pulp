@@ -40,8 +40,6 @@ struct PluginInfo {
     int num_inputs = 2;
     int num_outputs = 2;
 
-    // ── Richer metadata (workstream 03 slice 3.7) ────────────────────────
-    //
     // Each scanner populates the subset it can cheaply extract. Callers
     // filter plugins on these instead of parsing `name` strings. All
     // fields are additive — older cache blobs that don't carry them
@@ -76,25 +74,20 @@ struct ScanOptions {
     bool scan_lv2 = true;
     std::vector<std::string> extra_paths;  // Additional scan directories
 
-    // Codex 2026-04-21 review on #545: when a test or hermetic tool
-    // supplies explicit extra_paths and wants ONLY those searched (not
-    // the platform defaults that pull in the user's installed plugin
-    // collection), set this to true. Fixes the non-hermetic
-    // test_host_regression scan that otherwise walked every system
-    // VST3/AU/CLAP on the dev's machine and could execute arbitrary
-    // third-party `clap_entry` code during a CI run.
+    // Restrict scanning to `extra_paths`, skipping the platform defaults.
+    // Tests and hermetic tools use this so they never walk a user's installed
+    // plugin collection or execute third-party CLAP entry points.
     bool only_extra_paths = false;
 
     // Callback for progress reporting during scan
     using ProgressCallback = std::function<void(const std::string& current_path, int scanned, int total)>;
     ProgressCallback on_progress;
 
-    // Workstream 03 slice 3.3b (issue #246): optional blacklist of
-    // bundle paths the scanner should skip. Populated by a prior
-    // crash (recorded by the out-of-process pulp-scan-worker). When
-    // non-null, scan() short-circuits any bundle whose path
-    // ScanBlacklist::is_blacklisted reports true and pushes nothing
-    // into the result for it. Caller-owned; must outlive scan().
+    // Optional blacklist of bundle paths the scanner should skip, usually
+    // populated from a prior out-of-process scanner crash. When non-null,
+    // scan() short-circuits any path reported by ScanBlacklist::is_blacklisted
+    // and pushes nothing into the result for it. Caller-owned; must outlive
+    // scan().
     class ScanBlacklist* blacklist = nullptr;
 };
 
@@ -128,7 +121,7 @@ private:
 
 // Clamp an untrusted CLAP plugin count — a malformed bundle's factory can
 // return an absurd value that would make reserve()/iteration throw and abort
-// the whole scan (#2703). Exposed for testing.
+// the whole scan. Exposed for testing.
 uint32_t cap_clap_plugin_count(uint32_t count) noexcept;
 
 } // namespace pulp::host

@@ -3,8 +3,7 @@
 // AU v3 plug-ins live in a sandboxed `.appex`. The bundle's own
 // executable name (`PulpAUv3Extension`, `*.AppExtension`, etc.) does
 // NOT classify the host — the wrapping host's bundle id has to come
-// from Apple's host-service framework instead. Item 3.1 / DAW-quirks
-// row 22 / item 5.11.
+// from Apple's host-service framework instead.
 //
 // Order of preference, in approximate reliability:
 //   1. `AU_HOST_BUNDLE_ID` / `AU_HOST_IDENTIFIER` environment variables
@@ -59,7 +58,7 @@ std::string current_auv3_wrapper_identifier() {
         // The previous identifier-suffix check was always false in real
         // AUv3 extension processes, so this function leaked the
         // extension's own bundle id as if it were the host id, breaking
-        // downstream host classification. (Codex #2967 / 3305508749.)
+        // downstream host classification.
         NSBundle* main = [NSBundle mainBundle];
         NSString* main_id = main ? [main bundleIdentifier] : nil;
         NSString* main_path = main ? [main bundlePath] : nil;

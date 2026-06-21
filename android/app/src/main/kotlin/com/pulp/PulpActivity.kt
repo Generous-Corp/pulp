@@ -48,7 +48,7 @@ class PulpActivity : ComponentActivity() {
                     // space (already divided by content scale). Android's
                     // WindowInsetsCompat returns physical pixels — divide
                     // by display density so high-DPI devices don't get
-                    // 3x oversized insets.
+                    // oversized insets.
                     val density = resources.displayMetrics.density
                     nativeOnSafeAreaChanged(
                         bars.top    / density,
@@ -102,8 +102,8 @@ class PulpActivity : ComponentActivity() {
 
     // Map current display rotation to the Pulp C++ Orientation enum
     // values (declared in environment.hpp). Configuration.ORIENTATION_*
-    // collapses both landscape sides into LANDSCAPE; we use
-    // display.rotation to recover the side. Enum values:
+    // collapses both landscape sides into LANDSCAPE; use display.rotation
+    // to recover the side. Enum values:
     //   0 portrait, 1 portrait_upside_down,
     //   2 landscape_left, 3 landscape_right,
     //   4 flat, 5 unknown

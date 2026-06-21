@@ -79,15 +79,13 @@
 ///
 /// ## Tier status
 ///
-/// All of these flags are tagged `Speculative` in `HostQuirksMeta` as
-/// of this header extraction: they are documented from REAPER vendor
-/// docs + reproducer reports, with per-symptom isolation tests in
-/// `test/test_host_quirks.cpp` pinning the dispatch — but the in-DAW
-/// bench evidence (driving real REAPER 7.x sessions through Pulp's
-/// adapters) is still pending. Promote to `Validated` when the bench
-/// rows ship. `reaper_keyboard_only_space` remains `LessonOnly` since
-/// it ships as a 2026-05-25 iPlug2-audit catalog lesson without an
-/// in-tree bench yet.
+/// `HostQuirksMeta` now reflects a mixed evidence set. Rows backed by
+/// checked-in REAPER 7.x DAW-bench evidence are `Validated`; the
+/// remaining REAPER dispatch rows stay `Speculative` until their
+/// scenarios are bench-confirmed. The REAPER keyboard-only-Space and
+/// AU v3 in-process sizing rows remain `LessonOnly` because they are
+/// carried as iPlug2-audit catalog lessons without in-tree bench
+/// evidence.
 ///
 /// **Reference-Lineage**: cleanroom reproducer=macos-plan-item-5.8
 /// docs=https://www.reaper.fm/sdk/vst/vst_ext.php
@@ -128,7 +126,7 @@ inline void apply_reaper(HostQuirks& q, HostVersion /*v*/) {
 /// Populate REAPER keyboard-only-space flag onto `q`. Layered on top of
 /// `apply_reaper(...)` so the iPlug2-audit lesson can stay at a
 /// different validation tier (LessonOnly today) without changing the
-/// rest of the REAPER dispatch (Speculative).
+/// rest of the REAPER dispatch.
 inline void apply_reaper_keyboard(HostQuirks& q, HostVersion /*v*/) {
     q.reaper_keyboard_only_space = true;
 }
@@ -150,7 +148,7 @@ inline void apply_reaper_keyboard(HostQuirks& q, HostVersion /*v*/) {
 /// path.
 ///
 /// Reference: https://developer.apple.com/documentation/audiotoolbox/auaudiounit
-/// (in-process host extension contract) + Pulp issue #3044.
+/// (in-process host extension contract) plus the REAPER AU v3 sizing reproducer.
 inline void apply_reaper_auv3_in_process(HostQuirks& q, HostVersion /*v*/) {
     q.reaper_auv3_in_process_preferred_size_sync = true;
 }

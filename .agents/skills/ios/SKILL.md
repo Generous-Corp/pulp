@@ -13,7 +13,7 @@ requires:
 
 # iOS Skill
 
-Build, deploy, and debug Pulp on iOS — both standalone AUv3 host apps and AUv3 app extensions. This skill captures iOS-specific architecture and gotchas uncovered during the iOS Simulator bringup (PR #222, issue #218).
+Build, deploy, and debug Pulp on iOS — both standalone AUv3 host apps and AUv3 app extensions. This skill captures iOS-specific architecture, simulator workflows, AUv3 packaging, and GPU host gotchas.
 
 ## Architecture Overview
 
@@ -219,9 +219,10 @@ xcodebuild test -project ... -scheme AUv3Tests -sdk iphonesimulator
 
 ### Platform
 
-- **Deployment target ≥ 16.4** — iPhoneSimulator SDK 26.x marks `std::to_chars`
-  (`<format>`/`<charconv>` floating-point) as available only on iOS 16.3+. Anything
-  lower will fail with cryptic errors inside `__format/formatter_floating_point.h`.
+- **Deployment target floor is 16.3; recipes use 16.4** — iPhoneSimulator SDK
+  26.x marks `std::to_chars` (`<format>`/`<charconv>` floating-point) as
+  available only on iOS 16.3+. Anything lower will fail with cryptic errors
+  inside `__format/formatter_floating_point.h`.
 - **No `Cocoa.h`** — mac platform files (`clipboard_mac.mm`, `file_dialog_mac.mm`,
   `popup_menu_mac.mm`) must be excluded via `APPLE AND NOT IOS`. Link `UIKit`
   instead of `Cocoa` on iOS.
@@ -232,9 +233,8 @@ xcodebuild test -project ... -scheme AUv3Tests -sdk iphonesimulator
   device-level work that `AudioHardwarePropertyDefaultOutputDevice` and friends
   do on macOS. Gate with `PULP_HAS_COREAUDIO_DEVICE`.
 - **No FSEvents** — `choc_FileWatcher.h` pulls `FSEventStreamRef` which does not
-  exist on iOS. `hot_reload.hpp` must be gated on `NOT IOS` (or provided a no-op
-  iOS implementation). This is currently the last blocker for a full `pulp-view`
-  iOS build (as of PR #222).
+  exist on iOS. `hot_reload.hpp` is gated so the iOS path gets a no-op
+  `HotReloader`; keep file-watched hot reload off for AUv3 / HostApp builds.
 
 ### Toolchain
 
@@ -451,7 +451,7 @@ pulp_add_ios_host_app(PulpSineSynth_HostApp
     BUNDLE_ID         com.pulp.examples.sinesynth.host
     NAME              "PulpSineSynth"           # display name (defaults to target)
     VERSION           0.1.0                       # defaults to "1.0.0"
-    DEPLOYMENT_TARGET 16.4                        # defaults to 16.0
+    DEPLOYMENT_TARGET 16.4                        # defaults to 16.3
     # SOURCES ...                                 # optional override; default is the
                                                   # shipped HostApp/ SwiftUI template
 )
@@ -515,9 +515,10 @@ the user's iPad has no plugin" report.
 - ~~Full `pulp-view` iOS build requires gating `hot_reload.hpp`.~~ Done 2026-05-27: `choc::file::Watcher` (FSEventStream-based) is now `#if !TARGET_OS_IPHONE`-gated and `HotReloader` ships a no-op iOS stub.
 - ~~`pulp_add_ios_auv3()` ships the `.appex`; host-app target generation~~ Done in Phase iOS-B via `pulp_add_ios_host_app()`.
 - Device-target code signing is documented but not scripted.
-- Visual regression for iOS UIs not wired up yet (see #330, #249).
+- Visual regression for iOS UIs is not wired into CI yet; use simulator/device
+  screenshots for visual validation.
 
-## Gotchas
+## Platform Gotchas
 
 ### Cross-subsystem deps in `pulp-view-core` must hold on iOS
 
@@ -530,10 +531,9 @@ on iOS:
 
 1. Every `pulp::*` library that a view source `#include`s must be in
    the PUBLIC link list. The iOS lane catches this only if the smoke
-   actually builds the HostApp (it does as of 2026-05-27). A real
-   regression from PR #3059 was `visualizers.cpp` including
-   `<pulp/audio/audio_thumbnail.hpp>` without `pulp::audio` being
-   linked.
+   actually builds the HostApp. The typical failure mode is a view
+   source including a subsystem header, such as
+   `<pulp/audio/audio_thumbnail.hpp>`, without linking that subsystem.
 2. Any view header that includes `<pulp/host/...>` must wrap that
    include in `#if defined(__has_include) && __has_include(<pulp/host/...>)`
    so transitive consumers on iOS get a clean "feature absent" macro
@@ -647,9 +647,9 @@ See `templates/ios-auv3/HostApp/ContentView.swift` for the canonical
 SwiftUI host implementation that ships in the template; the
 `PulpAUv3EditorView` struct is the reference pattern.
 
-### iOS GPU host must run idle_callback inside the CADisplayLink tick (pulp #1402)
+### iOS GPU host must run idle_callback inside the CADisplayLink tick
 
-`IOSGpuWindowHost::tick()` (in `core/view/platform/ios/window_host_ios.mm`) is the per-vsync entry point and MUST invoke `idle_callback_()` BEFORE the `needs_repaint` check. Without this, JS `requestAnimationFrame` / `setTimeout` / async-result queues never fire on iOS GPU because `set_idle_callback` was inheriting the `WindowHost` base class no-op (parallel gap to the macOS one fixed in PR #1400 and the Android one in #1404).
+`IOSGpuWindowHost::tick()` (in `core/view/platform/ios/window_host_ios.mm`) is the per-vsync entry point and MUST invoke `idle_callback_()` BEFORE the `needs_repaint` check. Without this, JS `requestAnimationFrame` / `setTimeout` / async-result queues never fire on iOS GPU because `set_idle_callback` can otherwise behave like a no-op relative to the CADisplayLink loop.
 
 The fix is two pieces:
 1. Override `set_idle_callback` to store the callback in a non-atomic field (CADisplayLink fires on `mainRunLoop` so the read-and-invoke happens on main only — no atomic guard needed unlike macOS GPU's CV thread).
@@ -686,9 +686,11 @@ GPU-plugin-view-host work):
   `SkiaSurface::initialize` with `dawn_device`/`dawn_queue` Config fields that
   no longer exist. It compiled never because **no `ios-gpu` Skia libs are
   fetched**, so `PULP_HAS_SKIA` is OFF for iOS and the block is `#ifdef`'d out.
-  It now uses the current API (`GpuSurface::create_dawn()` + `SkiaSurface::create()`).
-  **This whole path is CI-unvalidated** until iOS Skia is fetched/built — verify
-  on a device/simulator.
+  It now uses the current API (`GpuSurface::create_dawn()` +
+  `SkiaSurface::create()`). This path is only validated where iOS Skia is
+  fetched and linked; the `examples/ios-auv3-jsc-threejs` path below is the
+  current simulator proof. Verify other AUv3 GPU-host changes on a
+  device/simulator.
 - **Embeddability matches mac:** display link starts on `-didMoveToWindow`
   (not `attach_to_parent`); `-layoutSubviews` re-syncs size/scale; `tick()`
   pumps `idle_callback_` first (the idle-pump-in-tick contract — keep it), then frame clock
@@ -699,10 +701,9 @@ GPU-plugin-view-host work):
 
 The `PulpThreeJsDemo` example runs real `three.webgpu.js` in JSC inside an
 AUv3 `.appex`, painting through `PulpMetalPluginView` → Dawn → Skia Graphite →
-CAMetalLayer. As of #3217 the rotating cube renders on the iOS Simulator (the
-plugin-view-host path above is no longer CI-unvalidated for this example — iOS
-Skia libs must be present: `external/skia-build/build/ios-gpu/.../libskia.a`,
-which the GPU build requires). Build with `-DPULP_ENABLE_GPU=ON
+CAMetalLayer. The rotating cube renders on the iOS Simulator when iOS Skia libs
+are present at `external/skia-build/build/ios-gpu/.../libskia.a`, which the GPU
+build requires. Build with `-DPULP_ENABLE_GPU=ON
 -DPULP_REQUIRE_GPU_FOR_SDK=ON` for iphonesimulator arm64; the host app
 auto-presents the editor.
 
@@ -807,9 +808,9 @@ upstream Skia/Dawn first-frame issue, not a Pulp regression.
 
 ### iOS GPU configure hard-fail — `PULP_REQUIRE_GPU_FOR_SDK`
 
-Phase iOS-D.1 extends the existing release-lane guard (pulp #1817) so
-the contradiction `PULP_REQUIRE_GPU_FOR_SDK=ON + PULP_ENABLE_GPU=OFF`
-hard-fails at configure time. Test:
+The release-lane guard makes the contradiction
+`PULP_REQUIRE_GPU_FOR_SDK=ON + PULP_ENABLE_GPU=OFF` hard-fail at
+configure time. Test:
 `bash test/cmake/test_require_gpu_for_sdk.sh <pulp-src>` — three
 cases (REQUIRE+ENABLE+missing-Skia fail; REQUIRE off succeeds;
 REQUIRE on + ENABLE off fails). Add a case here whenever a new flag
@@ -839,25 +840,27 @@ the full rationale.
 - `android` skill — parallel structure for Android NDK.
 - `view-bridge` skill — `au_v2_cocoa_view.mm` + `au_view_controller_ios.mm` linkage.
 - `ci` skill — how iOS builds integrate into PR validation (when added).
-- Issue #218 — AUv3 mobile validation workstream.
+- `threejs-bridge` skill — iOS WebGPU and Three.js runtime contracts.
 
-## Three.js inside AUv3 on iOS (iOS-D.3b program, 2026-05-29)
+## Three.js inside AUv3 on iOS
 
-Pulp ships a Three.js-on-iPad path inside AUv3 extensions via JSC + a Rollup-bundled IIFE wrapper for `three.webgpu.js`. The full bring-up was 6 slices (#3146 #3154 #3156 #3157 #3159 + the final demo) detailed in `planning/2026-05-29-ios-d3b-threejs-webgpu-program.md`. The non-obvious bits worth remembering:
+Pulp ships a Three.js-on-iPad path inside AUv3 extensions via JSC + an
+esbuild-bundled IIFE wrapper for `three.webgpu.js`. The non-obvious bits worth
+remembering:
 
 ### JSC's ESM module-loader API is NOT public on iOS
 
 `iPhoneOS.sdk/JavaScriptCore.framework/Headers/` ships **no** `JSScript.h`, **no** `JSModuleLoaderDelegate`, **no** `setModuleLoaderDelegate:`. Shipping any code path that uses those in an `.appex` risks App Store rejection at submission time. The supported path is:
 
-1. Bundle `three.webgpu.js` (ESM) at build time into a self-contained IIFE wrapper via `tools/scripts/bundle_threejs_for_jsc.mjs` — the script reads the pinned Three.js source, strips `export {...}` blocks + inline `export class/const/function`, registers all exported identifiers on `globalThis.THREE`.
-2. Load the resulting `three.iife.js` at runtime via `pulp::view::threejs_iife_source()` (`core/view/include/pulp/view/threejs_resources.hpp` + `core/view/src/threejs_resources_apple.mm`). The NSBundle loader walks up from `PulpAUViewController` to the `.appex` and reads `Resources/threejs/three.iife.js`.
+1. Bundle `three.webgpu.js` (ESM) at build time into a self-contained IIFE wrapper via `tools/scripts/bundle_threejs_for_jsc.mjs` — the script delegates ESM resolution and IIFE generation to esbuild, strips dev-only `http:` imports through an esbuild plugin, then wraps the namespace onto `globalThis.THREE`.
+2. Load the resulting `three.iife.js` at runtime via `pulp::view::threejs_iife_source()` (`core/view/include/pulp/view/threejs_resources.hpp` + `core/view/src/threejs_resources_apple.mm`). The NSBundle loader walks up from `PulpAUViewController` to the `.appex` and reads `threejs/three.iife.js`.
 3. JSC `evaluate()` the source — `THREE` lands on `globalThis`. No resolver needed.
 
 If you reach for `setModuleLoaderDelegate:` because it's mentioned in WebKit internal docs, stop. Use the IIFE path. Future contributors who don't see this note will spend a day discovering this on their own.
 
 ### Bundle invocation in CMake
 
-`tools/cmake/PulpAuv3.cmake` `_pulp_add_auv3_ios()` adds a `POST_BUILD` step that runs `node tools/scripts/bundle_threejs_for_jsc.mjs --input <threejs.webgpu.js> --output <appex>/Resources/threejs/three.iife.js`. The step is gated on `find_program(node)` — if Node.js is missing on the build host, the embed is skipped with a STATUS message and `pulp::view::threejs_iife_source()` returns `std::nullopt` at runtime (clean failure, not a build break).
+`tools/cmake/PulpAuv3.cmake` `_pulp_add_auv3_ios()` adds a `POST_BUILD` step that runs `node tools/scripts/bundle_threejs_for_jsc.mjs --input <threejs.webgpu.js> --output <appex>/threejs/three.iife.js`. The step is gated on `find_program(node)` — if Node.js is missing on the build host, the embed is skipped with a STATUS message and `pulp::view::threejs_iife_source()` returns `std::nullopt` at runtime (clean failure, not a build break).
 
 ### Log marker chain (grep these on iPad device walks)
 
@@ -895,7 +898,7 @@ Don't reach for "register a native function on the bridge that returns the IIFE 
 
 ### iOS bundle layout reminder
 
-`<appex>/threejs/three.iife.js` (flat). NOT `<appex>/Resources/threejs/three.iife.js` (that's the macOS layout; iOS bundles are flat). The slice 6 fix in PR #3163 corrected the bundler step; the runtime loader (`core/view/src/threejs_resources_apple.mm`) always queried the flat path. If you see "three.iife.js missing from bundle" from a successful build, double-check the POST_BUILD wrote under `<appex>/threejs/`, not `<appex>/Resources/threejs/`.
+`<appex>/threejs/three.iife.js` (flat). NOT `<appex>/Resources/threejs/three.iife.js` (that's the macOS layout; iOS bundles are flat). The runtime loader (`core/view/src/threejs_resources_apple.mm`) queries the flat path. If you see "three.iife.js missing from bundle" from a successful build, double-check the POST_BUILD wrote under `<appex>/threejs/`, not `<appex>/Resources/threejs/`.
 
 ### Per-example POST_BUILD copies
 

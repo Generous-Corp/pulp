@@ -1,7 +1,7 @@
-// pulp #1434 (#1518) — RN-style `flex: <number>` shorthand. RN spec
-// flattens a bare numeric `flex` to `{flexGrow: n, flexShrink: 1,
-// flexBasis: 0}` for positive `n`, distinct shapes for `0` and
-// negatives. CSS bare-number shorthand (`flex: 1` ≡ `flex: 1 1 0`)
+// RN-style `flex: <number>` shorthand. RN spec flattens a bare numeric
+// `flex` to `{flexGrow: n, flexShrink: 1, flexBasis: 0}` for positive
+// `n`, with distinct shapes for `0` and negatives. CSS bare-number
+// shorthand (`flex: 1` ≡ `flex: 1 1 0`)
 // is the same as RN's positive case, which is what consumers passing
 // JSX `flex={1}` overwhelmingly expect; our adapter is RN-flavored
 // so we honor RN semantics directly here. The `0` and negative cases
@@ -38,7 +38,7 @@ function flexCalls(b: MockBridge, slot: string) {
     return b.calls.filter((c) => c.fn === 'setFlex' && c.args[1] === slot);
 }
 
-describe('prop-applier flex shorthand (pulp #1518)', () => {
+describe('prop-applier flex shorthand', () => {
     it('flex={1} fans out to flex_grow=1 / flex_shrink=1 / flex_basis=0', () => {
         applyChangedProps(makeInstance(), {}, { flex: 1 } as never);
         expect(flexCalls(bridge, 'flex_grow')[0].args[2]).toBe(1);

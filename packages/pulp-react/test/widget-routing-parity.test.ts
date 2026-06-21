@@ -1,5 +1,4 @@
-// Routing-parity sweep for the @pulp/react widget intrinsics
-// (pulp routing-parity sweep 2026-06-08).
+// Routing-parity coverage for the @pulp/react widget intrinsics.
 //
 // This sweep verifies routing BREADTH: every widget intrinsic, both in
 // its CAPITALIZED canonical form (e.g. `Knob`) AND its lowercase HTML-
@@ -31,13 +30,13 @@ const WIDGET_ROUTING: ReadonlyArray<readonly [capitalized: string, expectedCreat
     ['XYPad', 'createXYPad'],
     ['ListBox', 'createListBox'],
     ['Icon', 'createIcon'],
-    // Ink & Signal design-system widgets (Phase 8c).
+    // Ink & Signal design-system widgets.
     ['Badge', 'createBadge'],
     ['Stepper', 'createStepper'],
     ['Pan', 'createPan'],
 ];
 
-describe('@pulp/react widget routing parity sweep (2026-06-08)', () => {
+describe('@pulp/react widget routing parity', () => {
     let bridge: MockBridge;
     beforeEach(() => {
         bridge = createMockBridge();

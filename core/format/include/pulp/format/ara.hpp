@@ -59,7 +59,6 @@ bool host_supports_ara();
 /// + PULP_ARA_SDK_DIR pointing at a valid checkout). Separate from
 /// host_supports_ara(): SDK-compiled-in is a build-time fact; host
 /// support is resolved at load time per format adapter.
-/// Workstream 06 slice 6.1.
 bool ara_sdk_compiled_in();
 
 /// Highest ARA API generation Pulp was compiled against. Returns 0 when
@@ -71,21 +70,20 @@ int ara_sdk_generation();
 /// Well-known extension id for the CLAP-ARA companion factory.
 /// Matches Celemony's convention for identifying the ARA extension
 /// inside a CLAP plugin's `clap_plugin::get_extension` callback.
-/// Workstream 06 slice 6.5 — the adapter surfaces this to CLAP hosts
-/// that know how to pair a CLAP plugin with an ARA document controller.
+/// The CLAP adapter surfaces this to hosts that know how to pair a
+/// CLAP plugin with an ARA document controller.
 constexpr const char* kClapAraFactoryExtension = "com.celemony.ara/clap-factory-v1";
 
 /// VST3 — `IPluginFactory3::setHostContext` attribute key under which
 /// ARA-aware hosts (Cubase, Studio One) advertise their ARA factory
 /// pointer. The VST3 entry reads it in `PulpVst3Processor::initialize`
 /// and calls `ara_companion_factory_for()` to surface the plugin side.
-/// Workstream 06 slice 6.3 — string is stable because hosts match exact.
+/// String is stable because hosts match it exactly.
 constexpr const char* kVst3AraFactoryContextKey = "com.celemony.ara/vst3-host-factory-v1";
 
 /// AU v3 — `AUAudioUnit.audioUnitARAFactory` property key. Logic Pro
 /// and other AU-ARA hosts observe this property to obtain the plugin's
 /// companion factory. Exposed through the PulpAudioUnit subclass.
-/// Workstream 06 slice 6.4.
 constexpr const char* kAuAraFactoryPropertyKey = "audioUnitARAFactory";
 
 /// Return an opaque pointer to an `ARA::ARAFactory`-compatible struct

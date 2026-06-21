@@ -1,23 +1,18 @@
 #pragma once
 
-// Signed Distance Field glyph atlas — exploration prototype for #76.
+// Signed Distance Field glyph atlas.
 //
 // The goal is resolution-independent text rendering: rasterize each
 // glyph once into a fixed-size SDF tile, then sample the atlas at
 // runtime with a smoothstep shader to produce a crisp edge at any
 // scale. Replaces the per-pixel-size bitmap atlas approach.
 //
-// This header defines the API. The implementation in sdf_atlas.cpp
-// produces SDF tiles by rasterizing the glyph at high resolution and
-// running a Euclidean distance transform (Felzenszwalb & Huttenlocher,
-// 2004) over the resulting mask. A future iteration will replace this
-// with FreeType's FT_RENDER_MODE_SDF for higher quality, or with a
-// multi-channel SDF (Chlumsky 2015) for sharper corners at extreme
-// magnifications.
-//
-// Status: exploration. The atlas is built and the SDF data is correct,
-// but the GPU sampling shader / canvas integration is not wired in
-// yet. See planning/android-sdf-glyph-atlas-76.md for the design.
+// This header defines the API. The implementation in sdf_atlas.cpp produces
+// SDF tiles by rasterizing the glyph at high resolution and running a
+// Euclidean distance transform (Felzenszwalb & Huttenlocher, 2004) over the
+// resulting mask. Canvas samples the atlas directly; software-renderer and
+// demo paths use the shared SDF text-quad helpers, and SkSL shaders share the
+// same sampler contract.
 
 #include <cstdint>
 #include <memory>

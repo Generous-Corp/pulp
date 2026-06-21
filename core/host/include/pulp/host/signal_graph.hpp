@@ -58,7 +58,7 @@ struct CustomNodeType {
     std::string default_name;
     CustomNodeProcessFn process;  // stateless (used when `create` is empty)
 
-    // ── Optional stateful lifecycle (Phase 5) ──────────────────────────────
+    // Optional stateful lifecycle.
     // When `create` is set, the graph owns ONE opaque instance per node (RAII
     // via `destroy`). `process_instance` runs instead of `process`, and
     // prepare/release/reset/save_state/load_state operate on that instance. All
@@ -104,7 +104,7 @@ struct Connection {
     bool audio_rate_modulation = false; // dense CV edge into an AudioRate param.
     bool sidechain = false;   // sidechain-edge: like a normal audio edge, but
                               // routes into one of the destination plugin's
-                              // sidechain-bus input ports (item 4.7). The
+                              // sidechain-bus input ports. The
                               // topological-sort + PDC treat sidechain as a
                               // hard edge — it is not a back-edge.
 
@@ -113,7 +113,7 @@ struct Connection {
     uint32_t automation_param_id  = 0;
     float automation_range_lo     = 0.0f;  // plain param domain
     float automation_range_hi     = 1.0f;  // plain param domain
-    float automation_smoothing_ms = 0.0f;  // per-source pre-mix slew (item 4.6)
+    float automation_smoothing_ms = 0.0f;  // per-source pre-mix slew
     AutomationMix automation_mix  = AutomationMix::Replace;
 
     bool operator==(const Connection& o) const {
@@ -157,8 +157,8 @@ struct GraphNode {
     std::string custom_type_id;
     int custom_type_version = 0;
 
-    // Phase 5 — opaque state for a stateful custom node. `custom_instance` is
-    // the live per-node object (RAII via the type's destroy), created on the UI
+    // Opaque state for a stateful custom node. `custom_instance` is the live
+    // per-node object (RAII via the type's destroy), created on the UI
     // thread in prepare() and captured into each compiled snapshot like a
     // plugin shared_ptr so old audio snapshots stay alive. `custom_state_blob`
     // is the serialized form, preserved even when the type is unresolved (so a
@@ -264,7 +264,7 @@ public:
                                       int num_outputs,
                                       const std::string& name);
 
-    // Phase 5 — opaque per-node state for stateful custom nodes.
+    // Opaque per-node state for stateful custom nodes.
     // custom_node_state() returns the live instance's save_state() when the node
     // is resolved + stateful, else the last-loaded blob (preserved for
     // unresolved nodes). Empty when `id` is not a custom node or has no state.
@@ -294,8 +294,8 @@ public:
     // audio connections.
     bool connect_midi(NodeId source, NodeId dest);
 
-    // Sidechain connection (item 4.7): routes a source's audio output port
-    // into the destination plugin's sidechain bus port. The destination
+    // Sidechain connection: routes a source's audio output port into the
+    // destination plugin's sidechain bus port. The destination
     // port is `dest_sidechain_port` — the caller supplies the absolute
     // port index on the destination node (the host knows how many main
     // input ports a plugin exposes via PluginInfo::num_inputs; sidechain
@@ -411,11 +411,11 @@ public:
     // the node is unknown or the graph is not prepared.
     int node_latency_samples(NodeId id) const;
 
-    // Set a parameter on a Plugin node at the graph level. The call is
-    // forwarded to PluginSlot::set_parameter(). Returns false if the node
-    // is not a Plugin node or has no loaded slot. This is the single-value
-    // knob — full automation-curve routing (one node's output driving
-    // another node's parameter over a block) is follow-up work.
+    // Set a single parameter value on a Plugin node at the graph level. The
+    // call is forwarded to PluginSlot::set_parameter(). Returns false if the
+    // node is not a Plugin node or has no loaded slot. For block-rate routing
+    // from graph audio into parameters, use connect_automation() or
+    // connect_audio_rate_modulation().
     bool set_node_parameter(NodeId id, uint32_t param_id, float value);
 
     // Read a parameter's current value from a Plugin node (returns 0.0f if
@@ -504,7 +504,7 @@ private:
         uint64_t midi_input_sequence_seen = 0;
 
         // Audio-rate modulation scratch. Each listed param gets one
-        // max-block-sized slice in audio_rate_param_data, filled immediately
+        // max-block-sized region in audio_rate_param_data, filled immediately
         // before the destination plugin processes.
         struct DenseAutomationAccum {
             float lo = 0.0f;
@@ -530,7 +530,7 @@ private:
         // destination can read it before the source writes the current block.
         std::vector<float> feedback_prev;  // size = max_block_size_
 
-        // Item 4.6 — per-source automation slew state. Holds the value
+        // Per-source automation slew state. Holds the value
         // we last delivered to the destination (post-slew, post range-
         // map) so the next block can resume ramping toward a new target
         // instead of snapping. `primed` tracks whether `last_value` has
@@ -577,8 +577,8 @@ private:
         std::unordered_map<NodeId, NodeShape> shapes;
         std::vector<OrderedRuntime> ordered_runtime;
         int max_block_size = 0;
-        double sample_rate = 0.0;  // item 4.6 — needed to convert
-                                   // automation_smoothing_ms into samples.
+        double sample_rate = 0.0;  // needed to convert automation_smoothing_ms
+                                   // into samples.
         int64_t total_latency_samples = 0;
         MidiBlockSnapshot midi_publish_scratch;
     };
@@ -620,7 +620,7 @@ private:
                                        const std::vector<Connection>& connections);
 };
 
-// ── Drag-add helper (item 4.3) ──────────────────────────────────────────
+// Drag-add helper.
 //
 // `add_plugin_node_from_drop` is the host-side companion to
 // `pulp::view::PluginManagerPanel::on_row_drag_start`. It attempts to

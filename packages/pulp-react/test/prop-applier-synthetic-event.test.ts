@@ -1,8 +1,8 @@
-// Test for pulp #1352 — prop-applier must wrap JSX event handlers in a
-// synthetic-event factory so consumers see a React-DOM-shaped event
-// object (with `currentTarget`, `target`, `preventDefault`, etc.) and
-// event-type-specific fields (`clientX/Y`, `e.target.value`, `key`)
-// instead of the bridge's raw positional args.
+// Prop-applier must wrap JSX event handlers in a synthetic-event factory so
+// consumers see a React-DOM-shaped event object (with `currentTarget`,
+// `target`, `preventDefault`, etc.) and event-type-specific fields
+// (`clientX/Y`, `e.target.value`, `key`) instead of the bridge's raw
+// positional args.
 //
 // The bridge dispatches `__dispatch__('btn1', 'mouseenter', 0)` for
 // hover; idiomatic JSX handlers (`e => e.currentTarget.style.background = ...`)
@@ -30,7 +30,7 @@ function dispatch(bridge: MockBridge, id: string, eventName: string, ...rawArgs:
     return wrapper(...rawArgs);
 }
 
-describe('@pulp/react prop-applier — synthetic event factory (pulp #1352)', () => {
+describe('@pulp/react prop-applier — synthetic event factory', () => {
     let bridge: MockBridge;
     beforeEach(() => {
         bridge = createMockBridge();
@@ -43,8 +43,8 @@ describe('@pulp/react prop-applier — synthetic event factory (pulp #1352)', ()
     it('onMouseEnter handler receives an event object (not literal 0)', () => {
         const handler = vi.fn();
         applyAllProps(instance('btn1', 'Button', { onMouseEnter: handler }));
-        // Bridge fires __dispatch__('btn1', 'mouseenter', 0) — see
-        // widget_bridge.cpp:1364.
+        // Bridge fires mouseenter with a literal placeholder; the synthetic
+        // event still provides currentTarget / target.
         dispatch(bridge, 'btn1', 'mouseenter', 0);
         expect(handler).toHaveBeenCalledTimes(1);
         const evt = handler.mock.calls[0][0];
@@ -80,8 +80,8 @@ describe('@pulp/react prop-applier — synthetic event factory (pulp #1352)', ()
     it('onChange exposes e.target.value from the bridge string arg', () => {
         const handler = vi.fn();
         applyAllProps(instance('te1', 'TextEditor', { onChange: handler }));
-        // Bridge fires __dispatch__('te1', 'change', 'hello') — see
-        // widget_bridge.cpp:1997.
+        // Bridge fires change with the new text value; expose it on
+        // target.value for React-style handlers.
         dispatch(bridge, 'te1', 'change', 'hello');
         expect(handler).toHaveBeenCalledTimes(1);
         const evt = handler.mock.calls[0][0];
@@ -92,7 +92,7 @@ describe('@pulp/react prop-applier — synthetic event factory (pulp #1352)', ()
     it('onPointerDown lifts clientX/clientY from the bridge data object', () => {
         const handler = vi.fn();
         applyAllProps(instance('p1', 'View', { onPointerDown: handler }));
-        // Bridge data shape from widget_bridge.cpp:1485-1501.
+        // Bridge data shape: object payload with client coordinates.
         dispatch(bridge, 'p1', 'pointerdown', {
             clientX: 142,
             clientY: 87,

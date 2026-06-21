@@ -1,6 +1,6 @@
-// Test for pulp #1381 — prop-applier must call registerPointer(id) when a
-// pointer-class event handler (onPointerDown / Move / Up / Cancel / Wheel)
-// is set, parallel to the existing registerHover call for hover events.
+// prop-applier must call registerPointer(id) when a pointer-class event handler
+// (onPointerDown / Move / Up / Cancel / Wheel) is set, parallel to the existing
+// registerHover call for hover events.
 //
 // Without registerPointer, the bridge keeps the JS listener in its dispatch
 // table but the View's on_pointer_event callback is never armed by the
@@ -17,7 +17,7 @@ function instance(id: string, type: string, props: Record<string, unknown>): Pul
     return { id, type, props } as PulpInstance;
 }
 
-describe('@pulp/react prop-applier — pointer registration (pulp #1381)', () => {
+describe('@pulp/react prop-applier — pointer registration', () => {
     let bridge: MockBridge;
     beforeEach(() => {
         bridge = createMockBridge();
@@ -65,8 +65,7 @@ describe('@pulp/react prop-applier — pointer registration (pulp #1381)', () =>
 
     it('calls registerWheel (NOT registerPointer) when onWheel is set', () => {
         // Wheel goes through a separate bridge call because the
-        // registerPointer lambda filters out is_wheel events. See pulp
-        // #1387 gap #4 (Spectr's zoom doesn't fire).
+        // registerPointer lambda filters out is_wheel events.
         applyAllProps(instance('w5', 'View', {
             onWheel: () => {},
         }));
@@ -159,7 +158,7 @@ describe('@pulp/react prop-applier — pointer registration (pulp #1381)', () =>
         expect(reg.length).toBe(0);
     });
 
-    it('routes style.overflow through setOverflow (pulp #1387 gap #1)', () => {
+    it('routes style.overflow through setOverflow', () => {
         applyAllProps(instance('row1', 'View', {
             overflow: 'hidden',
         }));

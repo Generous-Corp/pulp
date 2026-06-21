@@ -1,9 +1,6 @@
 // mcp_compat.hpp — project SDK-compatibility resolution for the
 // pulp-mcp server.
 //
-// Extracted from tools/mcp/pulp_mcp.cpp in the 2026-05 Phase 6 (B4)
-// refactor — second cut of the MCP typed-registry split.
-//
 // pulp-mcp ships independently of any given Pulp project. Before
 // dispatching a tool that touches a project, the server resolves the
 // project's pinned SDK version and refuses tools whose min-SDK floor

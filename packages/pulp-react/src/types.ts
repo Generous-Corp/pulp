@@ -15,12 +15,10 @@ export type FlexDirection = 'row' | 'col';
 export type FlexAlign = 'start' | 'center' | 'end' | 'stretch';
 export type FlexAlignSelf = 'start' | 'center' | 'end' | 'stretch' | 'auto';
 export type FlexJustify = 'start' | 'center' | 'end' | 'space-between' | 'space-around' | 'space-evenly';
-/// pulp #1434 (sub-agent #12 follow-up) — align-content controls
-/// multi-line flex cross-axis distribution. Yoga supports it natively
-/// via YGNodeStyleSetAlignContent. Accepts bare and prefixed CSS / RN
-/// spellings (`flex-start` / `flex-end`) plus the three space-*
-/// distributions (which only make sense on align-content, not
-/// align-items / align-self).
+/// Controls multi-line flex cross-axis distribution. Yoga supports this
+/// natively. Accepts bare and prefixed CSS / RN spellings
+/// (`flex-start` / `flex-end`) plus the three space-* distributions
+/// that only make sense on align-content, not align-items / align-self.
 export type FlexAlignContent =
     | 'start' | 'flex-start'
     | 'center'
@@ -33,53 +31,48 @@ export interface FlexProps {
     gap?: number;
     rowGap?: number;
     columnGap?: number;
-    /// Wave 2 rn — `padding` shorthand accepts either a number (px) or
-    /// a CSS-spec string with 1-4 space-separated tokens (`'5%'`,
+    /// `padding` shorthand accepts either a number (px) or a CSS-spec
+    /// string with 1-4 space-separated tokens (`'5%'`,
     /// `'10px 20px'`, `'10 20 30 40'`). String values fan out to the
     /// per-edge bridge keys; numeric values flow through the bridge
-    /// `padding` shorthand key as a single call (no behavior change).
+    /// `padding` shorthand key as a single call.
     padding?: number | string;
-    /// pulp #1434 (cross-surface mega-batch) — per-edge padding accepts
-    /// either a number (px) or a percent string ('5%' → percent of parent
-    /// main-axis size). Yoga padding does NOT support 'auto'.
+    /// Per-edge padding accepts either a number (px) or a percent string
+    /// (`'5%'` resolves against parent main-axis size). Yoga padding does
+    /// NOT support 'auto'.
     paddingTop?: number | string;
     paddingRight?: number | string;
     paddingBottom?: number | string;
     paddingLeft?: number | string;
-    /// pulp #1434 batch 4 — `paddingHorizontal` fans out to `paddingLeft` +
-    /// `paddingRight`.
-    /// pulp #1434 cross-surface mega-batch — accepts number (px) or
-    /// percent string ('5%'). Yoga padding has no 'auto' API.
+    /// `paddingHorizontal` fans out to `paddingLeft` + `paddingRight`.
+    /// Accepts number (px) or percent string (`'5%'`). Yoga padding has
+    /// no 'auto' API.
     paddingHorizontal?: number | string;
-    /// pulp #1434 batch 4 — `paddingVertical` fans out to `paddingTop` +
-    /// `paddingBottom`.
+    /// `paddingVertical` fans out to `paddingTop` + `paddingBottom`.
     paddingVertical?: number | string;
-    /// Wave 2 rn — `margin` shorthand accepts either a number (px) or
-    /// a CSS-spec string. String values fan out to the per-edge bridge
+    /// `margin` shorthand accepts either a number (px) or a CSS-spec
+    /// string. String values fan out to the per-edge bridge
     /// keys (which support `'5%'` percent and the `'auto'` keyword
     /// for centering via Yoga's YGNodeStyleSetMarginAuto). 1-4 tokens
     /// follow the standard CSS expansion rules.
     margin?: number | string;
-    /// pulp #1434 (cross-surface mega-batch) — per-edge margin accepts a
-    /// number (px), percent string ('5%' → percent of parent main-axis
-    /// size), or the keyword 'auto' (Yoga YGNodeStyleSetMarginAuto —
-    /// used for centering with `marginLeft: 'auto'` + `marginRight: 'auto'`).
+    /// Per-edge margin accepts a number (px), percent string (`'5%'`
+    /// resolves against parent main-axis size), or the keyword 'auto'
+    /// for Yoga centering with `marginLeft: 'auto'` +
+    /// `marginRight: 'auto'`.
     marginTop?: number | string;
     marginRight?: number | string;
     marginBottom?: number | string;
     marginLeft?: number | string;
-    /// pulp #1434 batch 4 — React Native shorthand alias. `marginHorizontal`
-    /// fans out to `marginLeft` + `marginRight` in the prop-applier; same
-    /// value applied to both edges. Useful for porting RN code as-is.
-    /// pulp #1434 cross-surface mega-batch — accepts number (px),
-    /// percent string ('5%'), or 'auto' (Yoga centering).
+    /// React Native shorthand alias. `marginHorizontal` fans out to
+    /// `marginLeft` + `marginRight` in the prop-applier, with the same
+    /// value applied to both edges. Accepts number (px), percent string
+    /// (`'5%'`), or 'auto' for Yoga centering.
     marginHorizontal?: number | string;
-    /// pulp #1434 batch 4 — `marginVertical` fans out to `marginTop` +
-    /// `marginBottom`.
+    /// `marginVertical` fans out to `marginTop` + `marginBottom`.
     marginVertical?: number | string;
-    /// pulp #1434 rn logical-edge bundle (sub-agent #27 finding) —
     /// CSS-spec-equivalent flow props. LTR-only fast path:
-    /// Start → Left, End → Right. RTL deferred to a future direction
+    /// Start → Left, End → Right. RTL mapping is deferred to a direction
     /// system. Values are number (px), percent string, or `'auto'` on
     /// margin (matches the per-edge surface).
     marginStart?: number | string;
@@ -99,27 +92,24 @@ export interface FlexProps {
     insetBlock?: number | string;
     /// CSS `inset-inline` → left + right (LTR).
     insetInline?: number | string;
-    /// pulp #1518 — RN-style `flex: <number>` shorthand. Positive `n`
-    /// expands to `{flexGrow: n, flexShrink: 1, flexBasis: 0}`; `0`
+    /// RN-style `flex: <number>` shorthand. Positive `n` expands to
+    /// `{flexGrow: n, flexShrink: 1, flexBasis: 0}`; `0`
     /// to `(0, 0, 'auto')`; negative to `(0, 1, 'auto')`. Matches RN
     /// semantics, which is what JSX `<View flex={1} />` consumers
     /// expect.
     flex?: number;
     flexGrow?: number;
     flexShrink?: number;
-    /// pulp #1434 (rn batch C) — accepts number (px), percentage string
-    /// (`'50%'`), or the keyword `'auto'`. The keyword maps to Yoga's
-    /// `YGNodeStyleSetFlexBasisAuto`; percent maps to
-    /// `YGNodeStyleSetFlexBasisPercent`.
+    /// Accepts number (px), percentage string (`'50%'`), or the keyword
+    /// `'auto'`. The keyword maps to Yoga's flex-basis auto path; percent
+    /// maps to Yoga's percent flex-basis path.
     flexBasis?: number | string;
-    /// pulp #1434 Triage #14 — accept boolean (legacy true/false) or
-    /// the CSS keyword string. `"wrap-reverse"` routes through Yoga's
-    /// YGWrapWrapReverse path; previously coerced to plain `wrap`.
+    /// Accepts boolean (legacy true/false) or the CSS keyword string.
+    /// `"wrap-reverse"` routes through Yoga's wrap-reverse path.
     flexWrap?: boolean | 'wrap' | 'nowrap' | 'no-wrap' | 'wrap-reverse';
     order?: number;
-    /// pulp #1434 (rn batch C) — number (px) or percent string
-    /// (`'100%'`). Yoga's percent API is dispatched on
-    /// `FlexStyle::dim_*.unit` in `yoga_layout.cpp`.
+    /// Number (px) or percent string (`'100%'`). Percent values use
+    /// Yoga's percent dimension path.
     width?: number | string;
     height?: number | string;
     minWidth?: number | string;
@@ -128,14 +118,12 @@ export interface FlexProps {
     maxHeight?: number | string;
     alignItems?: FlexAlign;
     alignSelf?: FlexAlignSelf;
-    /// pulp #1434 (sub-agent #12 follow-up) — multi-line flex cross-
-    /// axis distribution. Maps to `setFlex(id, 'align_content', ...)`
-    /// → Yoga's `YGNodeStyleSetAlignContent`. Only meaningful on a
-    /// flex container with `flexWrap: true`; on a single-line container
-    /// it has no visible effect.
+    /// Multi-line flex cross-axis distribution. Only meaningful on a flex
+    /// container with `flexWrap: true`; on a single-line container it has
+    /// no visible effect.
     alignContent?: FlexAlignContent;
     justifyContent?: FlexJustify;
-    /// pulp #1434 — width/height ratio for the cross axis. RN-compatible.
+    /// Width/height ratio for the cross axis. RN-compatible.
     /// When set on a View with `width: 100, aspectRatio: 1.5`, the layout
     /// produces `height = 100 / 1.5 ≈ 66.67`. When `height` is set instead,
     /// the width is derived. Pass `0` or omit to clear.
@@ -146,9 +134,8 @@ export interface FlexProps {
 export interface StyleProps {
     background?: string;            // hex; maps to setBackground
     backgroundGradient?: string;    // CSS-string; maps to setBackgroundGradient
-    /// pulp #1517 — CSS background sub-properties. Stored on the View
-    /// for round-tripping; paint impact partial today (see compat.json
-    /// css/backgroundAttachment / Clip / Origin).
+    /// CSS background sub-properties. Stored on the View for
+    /// round-tripping; paint impact is partial today.
     backgroundAttachment?: 'scroll' | 'fixed' | 'local';
     backgroundClip?: 'border-box' | 'padding-box' | 'content-box' | 'text';
     backgroundOrigin?: 'border-box' | 'padding-box' | 'content-box';
@@ -157,35 +144,34 @@ export interface StyleProps {
     borderRight?: { color: string; width: number };
     borderBottom?: { color: string; width: number };
     borderLeft?: { color: string; width: number };
-    // pulp #1027 — per-attribute (RN-style flat) border props. These map to
-    // the per-attribute bridge setters that mutate one slot in isolation,
-    // unlike `border:` which sets all three at once.
+    // Per-attribute (RN-style flat) border props. These map to bridge
+    // setters that mutate one slot in isolation, unlike `border:` which
+    // sets all three at once.
     borderColor?: string;
     borderWidth?: number;
-    /// Wave 2 rn — `borderRadius` accepts a uniform number (px) or
-    /// the RN Fabric elliptical `{ x, y }` form. The Skia paint side
-    /// currently honors a single uniform radius per corner, so the
-    /// elliptical input is degraded to the average of x and y; full
-    /// rrect rendering (SkRRect::setRectXY) is a deferred gap.
+    /// `borderRadius` accepts a uniform number (px) or the RN Fabric
+    /// elliptical `{ x, y }` form. The paint side currently honors a
+    /// single uniform radius per corner, so the elliptical input is
+    /// degraded to the average of x and y; true elliptical corner
+    /// rendering is deferred.
     borderRadius?: number | { x: number; y: number };
-    /// pulp #1434 Triage #10 — CSS / RN border-style keyword. Skia
-    /// installs SkDashPathEffect for `'dashed'` / `'dotted'`; other
-    /// named styles (`'double'`, `'groove'`, `'ridge'`, `'inset'`,
-    /// `'outset'`) currently degrade to solid (paint-side gap).
+    /// CSS / RN border-style keyword. `'dashed'` / `'dotted'` render as
+    /// dashed strokes; other named styles (`'double'`, `'groove'`,
+    /// `'ridge'`, `'inset'`, `'outset'`) currently degrade to solid
+    /// (paint-side gap).
     /// `'none'` / `'hidden'` skip the stroke entirely.
     borderStyle?: 'solid' | 'dashed' | 'dotted' | 'double' | 'groove'
                 | 'ridge' | 'inset' | 'outset' | 'none' | 'hidden';
-    /// pulp #1514 — CSS list-style cluster. Pulp doesn't model
-    /// HTML `<li>` / `<ul>` / `<ol>` semantics, so these props
-    /// round-trip the value to View slots without painting a
-    /// marker glyph today (catalog: `partial`). Marker glyph
-    /// rendering is the follow-up. `listStyle` is the shorthand
+    /// CSS list-style cluster. Pulp doesn't model HTML `<li>` / `<ul>` /
+    /// `<ol>` semantics, so these props round-trip the value to View slots
+    /// without painting a marker glyph today. Marker glyph rendering is
+    /// deferred. `listStyle` is the shorthand
     /// (`'<type> <position> <image>'` in any order).
     listStyle?: string;
     listStyleType?:
         | 'none' | 'disc' | 'circle' | 'square' | 'decimal'
-        // CSS Counter Styles Level 3 keywords (pulp #1514). Storage-only
-        // round-trip today; paint-side glyph rendering is the follow-up.
+        // CSS Counter Styles Level 3 keywords. Storage-only round-trip
+        // today; paint-side glyph rendering is deferred.
         | 'decimal-leading-zero'
         | 'lower-roman' | 'upper-roman'
         | 'lower-alpha' | 'upper-alpha'
@@ -201,20 +187,17 @@ export interface StyleProps {
     borderRightWidth?: number;
     borderBottomWidth?: number;
     borderLeftWidth?: number;
-    /// Wave 2 rn — per-corner radii also accept the RN Fabric
-    /// elliptical `{ x, y }` form (degraded to averaged uniform; see
-    /// `borderRadius` for the Skia rrect rationale).
+    /// Per-corner radii also accept the RN Fabric elliptical `{ x, y }`
+    /// form, degraded to averaged uniform radius; see `borderRadius`.
     borderTopLeftRadius?: number | { x: number; y: number };
     borderTopRightRadius?: number | { x: number; y: number };
     borderBottomLeftRadius?: number | { x: number; y: number };
     borderBottomRightRadius?: number | { x: number; y: number };
-    /// pulp #1519 — CSS / RN outline cluster. Outline is paint-only:
-    /// it draws OUTSIDE the border-box and does NOT take up Yoga
-    /// layout space. Style keyword set mirrors borderStyle (CSS spec
-    /// identical). dashed/dotted install SkDashPathEffect at stroke
-    /// time; double/groove/ridge/inset/outset currently degrade to
-    /// solid (paint-side gap, same as borderStyle); none/hidden /
-    /// zero-width skip the stroke.
+    /// CSS / RN outline cluster. Outline is paint-only: it draws OUTSIDE
+    /// the border-box and does NOT take up Yoga layout space. Style
+    /// keywords mirror borderStyle. dashed/dotted render as dashed
+    /// strokes; double/groove/ridge/inset/outset currently degrade to
+    /// solid. none/hidden / zero-width skip the stroke.
     outlineColor?: string;
     outlineOffset?: number;
     outlineStyle?: 'solid' | 'dashed' | 'dotted' | 'double' | 'groove'
@@ -222,39 +205,24 @@ export interface StyleProps {
     outlineWidth?: number;
     opacity?: number;
     visible?: boolean;
-    /// pulp #1434 rn bridge-wires bundle — 7 props that already had C++
-    /// bridge fns but no @pulp/react JSX dispatch. Each forwards the
-    /// keyword / string straight through to the matching setter.
-    /// (cursor / pointerEvents / userSelect superset of the small-wins
-    /// bundle (Triage #7 / #12 / #13) — types kept trimmed to the
-    /// actual bridge surface; broader CSS spec values are documented as
-    /// over-claims in the catalog.)
+    /// Forwards the keyword straight through to the matching bridge setter.
     backfaceVisibility?: 'hidden' | 'visible';
-    /// CSS `clip-path` (pulp #1515). Only the `path("...")` form is
-    /// honored at paint time today — Skia parses the SVG-path-d
-    /// string via `SkPath::FromSVGString` and installs the clip
-    /// before children paint. URL refs (`url(#clip-id)`) and named
-    /// shape forms (`circle()`, `inset()`, `polygon()`, `ellipse()`)
-    /// are deferred and forwarded as an empty slot; `none` / empty
-    /// clears.
+    /// CSS `clip-path`. Only the `path("...")` form is honored at paint
+    /// time today; URL refs (`url(#clip-id)`) and named shape forms
+    /// (`circle()`, `inset()`, `polygon()`, `ellipse()`) are deferred and
+    /// forwarded as an empty slot. `none` / empty clears.
     clipPath?: string;
     cursor?: string;
     filter?: string;
-    /// CSS `mask` shorthand (pulp #1515). Storage-only today; the
-    /// `mask-image` longhand is extracted from the shorthand value
-    /// and forwarded to the bridge alongside the shorthand itself.
-    /// The saveLayer + SkBlendMode::kDstIn shader composite is a
-    /// follow-up paint slice.
+    /// CSS `mask` shorthand. Storage-only today; @pulp/react forwards the
+    /// shorthand verbatim via `setMask`. Shader compositing is deferred.
     mask?: string;
-    /// CSS `mask-image` (pulp #1515). Storage-only today; the
-    /// shader composite is a follow-up paint slice.
+    /// CSS `mask-image`. Storage-only today; shader compositing is
+    /// deferred.
     maskImage?: string;
-    /// pulp #1549 — RN `mixBlendMode` (New Architecture only).
-    /// Forwards to `setMixBlendMode(id, kw)`; the bridge maps the W3C
-    /// blend-mode keyword set onto the canvas `BlendMode` enum and the
-    /// View paint path uses `save_layer_with_blend()` so the subtree
-    /// composites back through the requested mode. `'normal'` (or
-    /// unknown keywords) is a paint-time no-op.
+    /// RN `mixBlendMode` (New Architecture only). Forwards the W3C
+    /// blend-mode keyword set to the bridge. `'normal'` and unknown
+    /// keywords are paint-time no-ops.
     mixBlendMode?:
         | 'normal' | 'multiply' | 'screen' | 'overlay'
         | 'darken' | 'lighten' | 'color-dodge' | 'color-burn'
@@ -262,15 +230,15 @@ export interface StyleProps {
         | 'hue' | 'saturation' | 'color' | 'luminosity';
     pointerEvents?: 'auto' | 'none' | 'box-only' | 'box-none';
     textTransform?: 'none' | 'uppercase' | 'lowercase' | 'capitalize';
-    /// CSS `line-clamp` / `-webkit-line-clamp` (pulp #1552). Maximum
-    /// number of visible text lines on a multi-line Label; setting >0
+    /// CSS `line-clamp` / `-webkit-line-clamp`. Maximum number of
+    /// visible text lines on a multi-line Label; setting >0
     /// implicitly enables wrap on the bridge side. `0` disables clamp
     /// (CSS spec uses `none`; `0` is the numeric equivalent here).
     /// Both keys funnel through the same `setLineClamp` bridge fn.
     lineClamp?: number;
     webkitLineClamp?: number;
-    /// CSS `background-repeat` keyword (pulp #1552). Storage-only at
-    /// the View level today — paint-time honoring requires
+    /// CSS `background-repeat` keyword. Storage-only at the View level
+    /// today — paint-time honoring requires
     /// `background-image: url(...)` / repeating-gradient backgrounds
     /// which haven't landed yet. Accepts the standard CSS keyword set.
     backgroundRepeat?: 'repeat' | 'repeat-x' | 'repeat-y' | 'no-repeat'
@@ -281,19 +249,17 @@ export interface StyleProps {
     /// dispatching.
     transformOrigin?: string;
     userSelect?: 'none' | 'text' | 'all';
-    /// pulp #1434 Phase A2-3 — RN-style writing direction. Maps to
-    /// View::WritingDirection via the setDirection bridge fn. Yoga
-    /// propagates direction through layout (RTL flips flexDirection
-    /// 'row' visually); Skia paragraph_style picks up the same value
-    /// at text shape time. The CSS spec name `direction` already
-    /// routes through FlexProps in this codebase (`FlexDirection`
-    /// shorthand), so the JSX surface uses RN's `writingDirection`;
-    /// the `style.direction = 'rtl'` path goes through the el.style
-    /// adapter and reaches the same bridge fn.
+    /// RN-style writing direction. Yoga propagates direction through
+    /// layout (RTL flips flexDirection 'row' visually), and text shaping
+    /// uses the same value. The CSS spec name `direction` already routes
+    /// through FlexProps in this codebase (`FlexDirection` shorthand), so
+    /// the JSX surface uses RN's `writingDirection`; the
+    /// `style.direction = 'rtl'` path goes through the el.style adapter
+    /// and reaches the same bridge function.
     writingDirection?: 'ltr' | 'rtl' | 'auto' | 'inherit';
-    /// pulp #1434 Phase A2-1 — CSS transitions + animations.
-    /// `transition` accepts the full CSS shorthand string; longhand
-    /// fields apply uniformly across the parsed list.
+    /// CSS transitions + animations. `transition` accepts the full CSS
+    /// shorthand string; longhand fields apply uniformly across the
+    /// parsed list.
     transition?: string;
     transitionProperty?: string;
     transitionDuration?: number | string;
@@ -303,14 +269,14 @@ export interface StyleProps {
         | string; // also: 'cubic-bezier(...)', 'steps(N, end)'
     animationName?: string;
     animationDuration?: number | string;
-    /// pulp #1516 — CSS box-sizing. Web designs almost universally
-    /// reset to `border-box` via `* { box-sizing: border-box }`;
-    /// Yoga 3.x honors the spec via YGNodeStyleSetBoxSizing.
+    /// CSS box-sizing. Web designs almost universally reset to
+    /// `border-box` via `* { box-sizing: border-box }`; Yoga honors the
+    /// spec at layout time.
     boxSizing?: 'content-box' | 'border-box';
-    /// pulp #1434 Phase A2-2 — CSS Grid surface. Grid props live on
-    /// StyleProps so JSX can express `display: grid` layouts directly.
-    /// Bridge handles template-track parsing, named-area parsing, and
-    /// the grid-area shorthand.
+    /// CSS Grid surface. Grid props live on StyleProps so JSX can express
+    /// `display: grid` layouts directly. The bridge handles
+    /// template-track parsing, named-area parsing, and the grid-area
+    /// shorthand.
     gridTemplateColumns?: string;
     gridTemplateRows?: string;
     gridTemplateAreas?: string;
@@ -327,30 +293,30 @@ export interface StyleProps {
     gridGap?: number;
     gridColumnGap?: number;
     gridRowGap?: number;
-    /// CSS / RN `display` keyword (pulp #1434 Triage #12). `'none'`
-    /// hides the View (sets visible=false). `'flex'` is pulp's
-    /// implicit default and is accepted as a no-op confirmation. Other
-    /// keywords (`'block'` / `'inline-block'` / `'inline-flex'` /
-    /// `'grid'`) flow through the CSS shim only — for RN-flavored JSX
-    /// consumers, just `'flex'` / `'none'` are the meaningful values.
+    /// CSS / RN `display` keyword. `'none'` hides the View. `'flex'`
+    /// ensures the View is visible and, when no flexDirection / direction
+    /// / flexFlow is set, applies CSS's default flex-direction: row
+    /// because Pulp's Yoga default is column. Other keywords (`'block'` /
+    /// `'inline-block'` / `'inline-flex'` / `'grid'`) flow through the CSS
+    /// shim only; for RN-flavored JSX consumers, just `'flex'` / `'none'`
+    /// are the meaningful values.
     display?: 'flex' | 'none' | string;
-    /// CSS / RN `box-shadow` (pulp #1434 Triage #15). Accepts:
+    /// CSS / RN `box-shadow`. Accepts:
     /// - Object form (RN-style): `{ offsetX, offsetY, blur?, spread?, color, inset? }`.
-    /// - String form (CSS-spec single shadow): `'2px 4px 8px rgba(0,0,0,0.3)'`
-    ///   with optional `inset` keyword. Multi-shadow comma-separated
-    ///   lists are deferred — single-shadow path lands first.
+    /// - String form (CSS-spec shadow list): `'2px 4px 8px rgba(0,0,0,0.3)'`
+    ///   with optional `inset` keyword. Comma-separated multi-shadow
+    ///   lists dispatch one bridge call per parsed shadow.
     /// `'none'` / `null` / `undefined` clears the slot.
     boxShadow?: BoxShadow | string | null;
-    /// RN-style transform array (pulp #1434 Triage #9). An array of
-    /// single-property objects — Figma / v0.dev / Claude Design exports
-    /// emit this constantly. Wired ops:
+    /// RN-style transform array. An array of single-property objects is
+    /// common in Figma / v0.dev / Claude Design exports. Wired ops:
     ///   • `translateX`, `translateY` — number, px
     ///   • `rotate`, `rotateZ` — `'45deg'` / `'1rad'` / numeric (deg)
     ///   • `scale` — uniform scalar
-    ///   • `scaleX`, `scaleY` — last-write-wins (bridge has uniform
-    ///     setScale only; independent axes deferred)
+    ///   • `scaleX`, `scaleY` — last-write-wins because the bridge has
+    ///     uniform setScale only; independent axes are deferred
+    ///   • `skewX`, `skewY` — accumulated into one setSkew call
     /// Deferred (silently no-op):
-    ///   • `skewX`, `skewY` — bridge fn unregistered; follow-up
     ///   • `rotateX`, `rotateY`, `perspective`, `matrix` — 2D View
     ///     model has no 3D / matrix surface
     /// CSS-string form (`'translateX(10px) rotate(45deg)'`) is deferred
@@ -359,7 +325,7 @@ export interface StyleProps {
 }
 
 /// One entry in a `transform` array. RN spec: a single-property object
-/// per entry (you don't combine ops in one entry). pulp #1434 Triage #9.
+/// per entry; do not combine ops in one entry.
 export type TransformOp =
     | { translateX: number }
     | { translateY: number }
@@ -375,8 +341,8 @@ export type TransformOp =
     | { perspective: number }
     | { matrix: ReadonlyArray<number> };
 
-/// Object form of `boxShadow` for RN-flavored consumers (mirrors the
-/// `border` prop shape). pulp #1434 Triage #15.
+/// Object form of `boxShadow` for RN-flavored consumers. Mirrors the
+/// `border` prop shape.
 export interface BoxShadow {
     offsetX: number;
     offsetY: number;
@@ -399,8 +365,8 @@ export interface BaseProps extends FlexProps, StyleProps {
     key?: Key;
     /// Children — text or other intrinsics.
     children?: ReactNode;
-    /// pulp #1148 — opt this view in as the active click-eligible overlay.
-    /// When `true`, the prop-applier calls `claimOverlay(id)` on mount and
+    /// Opt this view in as the active click-eligible overlay. When `true`,
+    /// the prop-applier calls `claimOverlay(id)` on mount and
     /// `releaseOverlay(id)` on unmount. The platform window host routes
     /// any click that lands inside the view's window-rect to the overlay
     /// subtree first, so absolutely-positioned popovers built from
@@ -423,11 +389,10 @@ export type ModalProps = BaseProps & { open?: boolean };
 export interface LabelProps extends BaseProps {
     text?: string;
     textColor?: string;
-    /// CSS / RN `text-align`. `'auto'` and `'justify'` added in
-    /// pulp #1434. `'auto'` is writing-direction-relative (LTR-only
-    /// today). `'justify'` reaches canvas `TextAlign::justify`;
-    /// SkParagraph kJustify wiring is a follow-up — backends
-    /// approximate as left until then.
+    /// CSS / RN `text-align`. `'auto'` is writing-direction-relative
+    /// (LTR-only today). `'justify'` reaches canvas `TextAlign::justify`;
+    /// full paragraph justification is deferred, so backends approximate
+    /// as left until then.
     textAlign?: 'left' | 'center' | 'right' | 'auto' | 'justify';
 }
 
@@ -492,7 +457,7 @@ export interface ComboProps extends BaseProps {
     onChange?: (index: number) => void;
 }
 
-// ── Ink & Signal design-system widgets (Phase 8c) ───────────────────
+// ── Ink & Signal design-system widgets ──────────────────────────────
 
 /// Compact status pill (counts, format/sample-rate chips). Text comes from
 /// the `text` prop or string children; `tone` selects the semantic colour.
@@ -533,10 +498,10 @@ export interface IconProps extends BaseProps {
     name?: string;
 }
 
-/// Inline SVG path widget (pulp #994 / #991). Renders an `<svg><path/></svg>`
-/// from a path-data string + paint attributes. Use this for icon glyphs
-/// inside React-rendered UIs that previously sent raw `<svg>` markup
-/// (which the bridge has no DOM equivalent for).
+/// Inline SVG path widget. Renders an `<svg><path/></svg>` from a
+/// path-data string + paint attributes. Use this for icon glyphs inside
+/// React-rendered UIs that previously sent raw `<svg>` markup, which the
+/// bridge has no DOM equivalent for.
 export interface SvgPathProps extends BaseProps {
     /// SVG path-data string (the `d=` attribute on `<path>`).
     /// Supports M/m, L/l, H/h, V/v, C/c, S/s, Q/q, T/t, A/a, Z/z.
@@ -546,8 +511,8 @@ export interface SvgPathProps extends BaseProps {
     /// at paint time. Defaults to (0, 0) — i.e. the bridge will not
     /// scale and the path's native units determine size.
     ///
-    /// Wave 2 rn — also accepts the SVG-spec string form
-    /// `'min-x min-y w h'` (or `'w h'`). Common with Lucide /
+    /// Also accepts the SVG-spec string form `'min-x min-y w h'` (or
+    /// `'w h'`). Common with Lucide /
     /// Heroicons / Figma SVG exports. The bridge consumes width +
     /// height only today (the SvgPathWidget doesn't yet honor the
     /// min-x / min-y origin offset — paint-side gap), so the trailing
@@ -566,7 +531,7 @@ export interface SvgPathProps extends BaseProps {
     /// has lowered to a two-subpath `M…Z M…Z` fill (JUCE's
     /// `SVGGraphicsContext` does this for `Graphics::drawEllipse`); only
     /// even-odd winding renders the ring's hole, where nonzero paints a
-    /// solid disc. pulp #3656.
+    /// solid disc.
     fillRule?: 'nonzero' | 'evenodd';
     /// Gradient fill as a CSS `linear-gradient(...)` string — e.g.
     /// `"linear-gradient(to bottom, #ff0000, #0000ff)"`. When set
@@ -575,9 +540,8 @@ export interface SvgPathProps extends BaseProps {
     /// `Canvas::set_fill_gradient_linear`. Unparseable input silently
     /// falls back to the solid `fill`. Radial / conic gradients and the
     /// idiomatic `<SvgLinearGradient>` + `fill="url(#id)"` subtree form
-    /// are followups. (The C++ `setSvgFillGradient` bridge fn / widget
-    /// slot have existed since pulp #932 / #1737; this surfaces it as a
-    /// typed `@pulp/react` prop.)
+    /// are deferred. This exposes the existing bridge fill-gradient slot
+    /// as a typed `@pulp/react` prop.
     fillGradient?: string;
     /// Stroke color as hex or `"none"`.
     stroke?: string;
@@ -585,10 +549,9 @@ export interface SvgPathProps extends BaseProps {
     strokeWidth?: number;
 }
 
-/// Inline SVG `<rect>` widget (pulp #1416). Renders a rectangle with
-/// the configured x/y/width/height + fill/stroke. Pairs with SvgLine
-/// for chart-style and band-shape thumbnail UIs (Spectr [G] preset
-/// manager).
+/// Inline SVG `<rect>` widget. Renders a rectangle with the configured
+/// x/y/width/height + fill/stroke. Pairs with SvgLine for chart-style
+/// and band-shape thumbnail UIs.
 export interface SvgRectProps extends BaseProps {
     /// Rect origin x in widget-local units. Defaults to 0.
     x?: number;
@@ -607,10 +570,10 @@ export interface SvgRectProps extends BaseProps {
     strokeWidth?: number;
 }
 
-/// Inline SVG `<line>` widget (pulp #1416). Renders a 1-D line from
-/// (x1, y1) to (x2, y2) with the configured stroke + width. SVG
-/// `<line>` has no fill; for API consistency with `<rect>` and
-/// `<path>` the bridge exposes `fill` but it's a no-op for lines.
+/// Inline SVG `<line>` widget. Renders a 1-D line from (x1, y1) to
+/// (x2, y2) with the configured stroke + width. SVG `<line>` has no
+/// fill; for API consistency with `<rect>` and `<path>` the bridge
+/// exposes `fill` but it's a no-op for lines.
 export interface SvgLineProps extends BaseProps {
     /// Start endpoint x in widget-local units. Defaults to 0.
     x1?: number;
@@ -683,8 +646,8 @@ export interface PulpInstance {
     /// the bridge. Drained by attach() once onBridge flips true.
     /// Each entry is the child descriptor and the index it should land at.
     pendingChildren: Array<{ child: PulpInstance; index: number }>;
-    /// Phase 7 codex round 5 — DOM-shim element returned from
-    /// `getPublicInstance`. Imported bundles call DOM-style methods
+    /// DOM-shim element returned from `getPublicInstance`. Imported
+    /// bundles call DOM-style methods
     /// (`getContext('2d')`, `getBoundingClientRect()`, `style.X=`,
     /// `addEventListener`) on `ref.current`, which is what
     /// `getPublicInstance` returns. We instantiate the existing

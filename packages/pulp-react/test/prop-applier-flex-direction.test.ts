@@ -1,8 +1,7 @@
-// pulp #108 — verify @pulp/react prop-applier forwards `flexDirection`
-// (camelCase, the canonical RN/React JSX key) to the bridge. Without
-// this case, the prop fell through as unknown and Yoga's column default
-// remained — collapsing CSS-imported flex rows into vertical stacks
-// (2026-05-11 Spectr regression where header items piled at 0,0).
+// Verify @pulp/react prop-applier forwards `flexDirection` (camelCase,
+// the canonical RN/React JSX key) to the bridge. Without this routing,
+// Yoga's column default collapses CSS-imported flex rows into vertical
+// stacks.
 // `col` and `col-reverse` aliases normalize to the bridge vocabulary
 // `column` / `column-reverse`.
 
@@ -34,7 +33,7 @@ function makeInstance(id: string = 'k'): PulpInstance {
 
 const callsOf = (b: MockBridge, fn: string) => b.calls.filter((c) => c.fn === fn);
 
-describe('prop-applier flexDirection (pulp #108)', () => {
+describe('prop-applier flexDirection', () => {
     it('flexDirection=row dispatches setFlex(direction, row)', () => {
         applyChangedProps(makeInstance(), {}, { flexDirection: 'row' });
         const c = callsOf(bridge, 'setFlex');
@@ -54,7 +53,7 @@ describe('prop-applier flexDirection (pulp #108)', () => {
         expect(callsOf(bridge, 'setFlex')[0].args).toEqual(['k', 'direction', 'row-reverse']);
     });
 
-    it('flexDirection=col (RN/pulp historic alias) normalizes to column', () => {
+    it('flexDirection=col normalizes to column', () => {
         applyChangedProps(makeInstance(), {}, { flexDirection: 'col' });
         expect(callsOf(bridge, 'setFlex')[0].args).toEqual(['k', 'direction', 'column']);
     });

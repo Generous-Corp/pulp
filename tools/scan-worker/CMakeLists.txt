@@ -2,11 +2,9 @@
 #
 # The parent PluginScanner launches this binary per plugin bundle; if the
 # child crashes (SIGSEGV, abort, etc.) the parent records the bundle in
-# its ScanBlacklist (workstream 03 slice 3.3a) and continues with the
-# next candidate. The worker itself just links against pulp::host and
-# prints the scanned metadata as JSON on stdout.
-#
-# Workstream 03 slice 3.3b.
+# its ScanBlacklist and continues with the next candidate. The worker
+# itself just links against pulp::host and prints the scanned metadata
+# as JSON on stdout.
 if(IOS OR ANDROID)
     # Sandboxed platforms can't fork/exec a helper binary. Skip.
     return()

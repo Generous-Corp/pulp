@@ -53,7 +53,8 @@ consume `pulp/canvas/sdf_text.hpp`.
    only set when `libskia.a` links successfully, so the break can hide
    behind a headers-only pin — confirm by building `pulp-canvas`
    against a tree that ships `libskia.a` (e.g.
-   `SKIA_DIR=<other-worktree>/external/skia-build`). See #543.
+   `SKIA_DIR=<other-worktree>/external/skia-build`) so the compile path
+   exercises real Skia libraries, not just headers.
 
 ## Build + test loop
 

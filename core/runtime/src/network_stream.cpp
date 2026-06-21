@@ -126,8 +126,8 @@ StreamResult HttpStream::read(std::uint8_t* buffer, std::size_t size) {
 }
 
 StreamResult HttpStream::write(const std::uint8_t*, std::size_t) {
-    // HttpStream is read-only (response body). Request-body streaming is
-    // Phase 4 of the stream feature plan.
+    // HttpStream exposes response bodies as read-only streams; request bodies
+    // are provided up front by post().
     return StreamResult::fail(StreamError::Invalid);
 }
 

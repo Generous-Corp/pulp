@@ -1,11 +1,11 @@
 // Signal Graph implementation.
 //
-// Phase 0B: audio-thread reads happen against a CompiledGraph snapshot,
-// published via an atomic raw pointer. UI-thread topology mutations (add_*,
-// connect*, disconnect, remove_node) invalidate the snapshot; prepare()
-// rebuilds and publishes a fresh snapshot. Control-thread shared_ptr owners
-// keep retired snapshots alive until active process readers drain, avoiding
-// libstdc++'s lock-taking atomic shared_ptr path in process().
+// Audio-thread reads happen against a CompiledGraph snapshot published via an
+// atomic raw pointer. UI-thread topology mutations (add_*, connect*,
+// disconnect, remove_node) invalidate the snapshot; prepare() rebuilds and
+// publishes a fresh snapshot. Control-thread shared_ptr owners keep retired
+// snapshots alive until active process readers drain, avoiding libstdc++'s
+// lock-taking atomic shared_ptr path in process().
 // See signal_graph.hpp for the mutation protocol details.
 
 #include <pulp/host/signal_graph.hpp>
@@ -180,9 +180,9 @@ std::string custom_node_key(std::string_view type_id, int version) {
     return key;
 }
 
-// Phase 5 — make a per-node opaque instance owned via shared_ptr, with the
-// type's destroy callback as the deleter (RAII). Returns nullptr for stateless
-// types (no `create`).
+// Make a per-node opaque instance owned via shared_ptr, with the type's destroy
+// callback as the deleter (RAII). Returns nullptr for stateless types (no
+// `create`).
 std::shared_ptr<void> make_custom_instance(const CustomNodeType& type) {
     if (!type.create) return nullptr;
     void* raw = type.create();
@@ -1017,11 +1017,11 @@ SignalGraph::compile_(double sample_rate, int max_block_size) {
                                                     n.custom_type_version);
                 type && custom_type_matches_node_shape(*type, n)) {
                 if (n.custom_instance && type->process_instance) {
-                    // Phase 5 — bind the stateful processor. The lambda captures
-                    // the instance shared_ptr BY VALUE, so this snapshot keeps
-                    // the instance alive for its whole audio-thread lifetime
-                    // (same guarantee as cg->plugins[...] for plugin nodes). No
-                    // raw pointer into GraphNode is stored.
+                    // Bind the stateful processor. The lambda captures the
+                    // instance shared_ptr BY VALUE, so this snapshot keeps the
+                    // instance alive for its whole audio-thread lifetime (same
+                    // guarantee as cg->plugins[...] for plugin nodes). No raw
+                    // pointer into GraphNode is stored.
                     auto inst = n.custom_instance;
                     auto fn = type->process_instance;
                     cg->custom_processors[n.id] =
@@ -1175,9 +1175,9 @@ bool SignalGraph::prepare(double sample_rate, int max_block_size) {
         }
     }
 
-    // Phase 5 — create/prepare stateful custom-node instances on this (UI)
-    // thread before the snapshot is published, mirroring the plugin step above.
-    // A freshly-loaded state blob is applied exactly once via load_state.
+    // Create/prepare stateful custom-node instances on this UI thread before
+    // the snapshot is published, mirroring the plugin step above. A
+    // freshly-loaded state blob is applied exactly once via load_state.
     for (auto& n : nodes_) {
         if (n.type != NodeType::Custom) continue;
         const CustomNodeType* type =
@@ -1309,9 +1309,9 @@ void SignalGraph::release() {
     wait_for_retired_snapshots_();
 
     for (auto& n : nodes_) if (n.plugin) n.plugin->release();
-    // Phase 5 — release stateful custom instances (UI thread), mirroring the
-    // plugin release above. The instance object stays alive until its snapshots
-    // also drop; release() just lets the type free scratch.
+    // Release stateful custom instances on the UI thread, mirroring the plugin
+    // release above. The instance object stays alive until its snapshots also
+    // drop; release() just lets the type free scratch.
     for (auto& n : nodes_) {
         if (n.type != NodeType::Custom || !n.custom_instance) continue;
         if (const auto* type =
@@ -1491,12 +1491,12 @@ void SignalGraph::process(audio::BufferView<float>& output,
             case NodeType::Plugin: {
                 auto pit = cg->plugins.find(id);
                 if (pit == cg->plugins.end() || !pit->second) {
-                    // Issue #491 P2 bonus: graph_serializer rehydration
-                    // creates a "placeholder" Plugin node when the saved
-                    // plugin can't be resolved (missing / moved / wrong
-                    // format). Without an explicit branch here, output
-                    // scratch keeps whatever stale data it carried —
-                    // audible artifacts on the next AudioOutput gather.
+                    // GraphSerializer rehydration creates a placeholder Plugin
+                    // node when the saved plugin can't be resolved (missing,
+                    // moved, or wrong format). Without an explicit branch
+                    // here, output scratch keeps whatever stale data it
+                    // carried, causing audible artifacts on the next
+                    // AudioOutput gather.
                     // Deterministic fallback: pass input → output when
                     // channel counts match, zero-fill when they don't.
                     pass_through_or_zero(rt);
@@ -1557,12 +1557,12 @@ void SignalGraph::process(audio::BufferView<float>& output,
                         float mN = c.automation_range_lo
                             + sN * (c.automation_range_hi - c.automation_range_lo);
 
-                        // Item 4.6 — per-source linear slew. The user
-                        // declares automation_smoothing_ms; we limit how
-                        // far the delivered value can move per sample at
-                        // that ramp speed. State (last_value/primed)
-                        // lives on the parallel ConnectionDelay so it
-                        // survives the next block.
+                        // Per-source linear slew. The user declares
+                        // automation_smoothing_ms; we limit how far the
+                        // delivered value can move per sample at that ramp
+                        // speed. State (last_value/primed) lives on the
+                        // parallel ConnectionDelay so it survives the next
+                        // block.
                         if (c.automation_smoothing_ms > 0.0f
                             && cg->sample_rate > 0.0
                             && ci < cg->connection_delays.size()) {
@@ -1896,7 +1896,7 @@ float SignalGraph::node_gain(NodeId id) const {
     return n->gain;
 }
 
-// ── Drag-add helper (item 4.3) ──────────────────────────────────────────
+// Drag-add helper.
 NodeId add_plugin_node_from_drop(SignalGraph& graph,
                                  const PluginInfo& info,
                                  bool* loaded_out)

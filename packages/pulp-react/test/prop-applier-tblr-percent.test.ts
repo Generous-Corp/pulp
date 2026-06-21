@@ -1,15 +1,12 @@
-// pulp #1434 batch 6 — verify the @pulp/react prop-applier forwards
-// percent strings ('50%') verbatim to the bridge for the four View
-// positional fields (top/right/bottom/left). The bridge inspects
-// arg index 1 as a string, detects the '%' suffix, and routes through
-// Yoga's YGNodeStyleSetPositionPercent path.
+// The React prop applier forwards percent strings ('50%') verbatim
+// to the bridge for the four View positional fields (top/right/bottom/left).
+// The bridge inspects arg index 1 as a string, detects the '%' suffix,
+// and routes through Yoga's YGNodeStyleSetPositionPercent path.
 //
-// This is the JSX-side counterpart to PR #1426 (which routed width/height
-// percent through to Yoga). Figma absolute-positioned overlays, v0.dev
-// hero anchors, and Claude Design sticky elements all emit `top:'50%'`
-// etc. routinely; without this forwarding the layout collapses to numeric
-// 0 silently because `value as number` would coerce '50%' → NaN at the
-// bridge boundary.
+// Design imports and hand-authored JSX routinely use positional percent
+// anchors such as `top: '50%'`; without this forwarding the layout collapses
+// to numeric 0 silently because `value as number` would coerce '50%' to NaN
+// at the bridge boundary.
 //
 // Each test asserts that ONE positional prop emits ONE matching bridge
 // call, with the value forwarded as either a number (px path) or a
@@ -45,7 +42,7 @@ function callsFor(b: MockBridge, fn: string) {
     return b.calls.filter((c) => c.fn === fn);
 }
 
-describe('prop-applier top/right/bottom/left percent (pulp #1434 batch 6)', () => {
+describe('React prop forwarding for positional percent edges', () => {
     it("top: '50%' lands as a percent string on setTop", () => {
         applyChangedProps(makeInstance(), {}, { top: '50%' });
         const c = callsFor(bridge, 'setTop');
@@ -92,8 +89,7 @@ describe('prop-applier top/right/bottom/left percent (pulp #1434 batch 6)', () =
         //   <View style={{ position:'absolute', top:'50%', left:'50%',
         //                  transform:[{translateX:-50%}, {translateY:-50%}] }} />
         // We assert the four positional bridge calls fire — the transform
-        // legs are out of scope for this test (translateX/Y percent is
-        // a separate batch).
+        // legs are covered by transform-specific tests.
         applyChangedProps(makeInstance(), {}, {
             position: 'absolute',
             top: '50%',
@@ -109,8 +105,8 @@ describe('prop-applier top/right/bottom/left percent (pulp #1434 batch 6)', () =
     });
 
     it('zero is a real value (not a no-op) for both numeric and percent', () => {
-        // Spectr / Figma exports legitimately use top:0 to anchor an
-        // overlay at the top edge. Truthiness gating would drop it.
+        // Exports and hand-authored layouts legitimately use top:0 to
+        // anchor an overlay at the top edge. Truthiness gating would drop it.
         applyChangedProps(makeInstance('a'), {}, { top: 0 });
         expect(callsFor(bridge, 'setTop')[0].args).toEqual(['a', 0]);
 

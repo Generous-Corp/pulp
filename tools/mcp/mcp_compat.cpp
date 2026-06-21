@@ -1,9 +1,8 @@
 // mcp_compat.cpp — project SDK-compatibility resolution for pulp-mcp.
 //
-// Extracted from tools/mcp/pulp_mcp.cpp in the 2026-05 Phase 6 (B4)
-// refactor. See mcp_compat.hpp for the public surface; the SDK-version
-// parsing internals (pulp.toml / CMakeLists scanners, semver triple
-// parser, per-tool min-SDK table) stay file-local (static) here.
+// See mcp_compat.hpp for the public surface; the SDK-version parsing
+// internals (pulp.toml / CMakeLists scanners, semver triple parser,
+// per-tool min-SDK table) stay file-local here.
 
 #include "mcp_compat.hpp"
 #include "mcp_json.hpp"

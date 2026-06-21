@@ -1,10 +1,9 @@
-// Item 6.1 of `planning/2026-05-24-macos-plugin-authoring-plan.md`:
-// VectorScene retained scene graph. Acceptance criteria:
-//   1. SVG loads as a VectorScene / SceneGroup.
-//   2. Mutating a child's opacity re-paints only that sub-tree's
-//      bounding box.
-//   3. Renders through the existing Canvas API (RecordingCanvas here
-//      exercises the command stream without requiring Skia).
+// VectorScene retained scene graph coverage:
+//   - SVG loads as a VectorScene / SceneGroup.
+//   - Mutating a child's opacity re-paints only that sub-tree's
+//     bounding box.
+//   - Rendering goes through the Canvas API; RecordingCanvas exercises
+//     the command stream without requiring Skia.
 //
 // Pulp-native names — no reference-framework class-name lineage.
 
@@ -36,7 +35,7 @@ size_t count_op(const RecordingCanvas& rc, DrawCommand::Type t) {
 
 }  // namespace
 
-TEST_CASE("SceneRect united / map_rect math", "[canvas][scene][issue-2700]") {
+TEST_CASE("SceneRect united / map_rect math", "[canvas][scene]") {
     SceneRect empty{};
     REQUIRE(empty.empty());
 
@@ -69,7 +68,7 @@ TEST_CASE("SceneRect united / map_rect math", "[canvas][scene][issue-2700]") {
 }
 
 TEST_CASE("SceneShape local_bounds for each kind",
-          "[canvas][scene][issue-2700]") {
+          "[canvas][scene]") {
     auto rect = SceneShape::make_rect(5, 10, 30, 40);
     REQUIRE(approx_eq(rect->local_bounds(), SceneRect{5, 10, 30, 40}));
 
@@ -92,7 +91,7 @@ TEST_CASE("SceneShape local_bounds for each kind",
 }
 
 TEST_CASE("ScenePath bounds and command playback",
-          "[canvas][scene][issue-2700]") {
+          "[canvas][scene]") {
     ScenePath path;
     path.move_to(0, 0);
     path.line_to(100, 0);
@@ -116,7 +115,7 @@ TEST_CASE("ScenePath bounds and command playback",
 }
 
 TEST_CASE("SceneGroup union of child bounds + visibility",
-          "[canvas][scene][issue-2700]") {
+          "[canvas][scene]") {
     SceneGroup g;
     auto* a = static_cast<SceneShape*>(g.add_child(SceneShape::make_rect(0, 0, 10, 10)));
     auto* b = static_cast<SceneShape*>(g.add_child(SceneShape::make_rect(50, 60, 5, 5)));
@@ -134,8 +133,8 @@ TEST_CASE("SceneGroup union of child bounds + visibility",
 }
 
 TEST_CASE("VectorScene::from_svg_string populates a SceneGroup",
-          "[canvas][scene][issue-2700]") {
-    // Acceptance criterion #1: "an SVG loads as a VectorScene (or SceneGroup)".
+          "[canvas][scene]") {
+    // SVG input should populate the retained scene graph.
     const char* svg = R"(
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"
      width="100" height="100">
@@ -169,9 +168,9 @@ TEST_CASE("VectorScene::from_svg_string populates a SceneGroup",
 }
 
 TEST_CASE("Mutating a child's opacity yields a sub-tree-sized dirty rect",
-          "[canvas][scene][issue-2700]") {
-    // Acceptance criterion #2: "mutating one child's opacity re-paints
-    // only that sub-tree's bounding box".
+          "[canvas][scene]") {
+    // Mutating one child's opacity should repaint only that sub-tree's
+    // bounding box.
     VectorScene scene;
     auto* group = &scene.root();
 
@@ -213,7 +212,7 @@ TEST_CASE("Mutating a child's opacity yields a sub-tree-sized dirty rect",
 }
 
 TEST_CASE("Translating a child shifts the dirty rect to cover old + new",
-          "[canvas][scene][issue-2700]") {
+          "[canvas][scene]") {
     // The "old + new" union is what a host actually needs to clear the
     // previous pixels AND paint the new ones. Make sure we capture both.
     VectorScene scene;
@@ -235,7 +234,7 @@ TEST_CASE("Translating a child shifts the dirty rect to cover old + new",
 }
 
 TEST_CASE("SceneGroup add/remove child keeps parent pointer correct",
-          "[canvas][scene][issue-2700]") {
+          "[canvas][scene]") {
     SceneGroup g;
     auto* a = static_cast<SceneShape*>(
         g.add_child(SceneShape::make_rect(0, 0, 10, 10)));
@@ -247,7 +246,7 @@ TEST_CASE("SceneGroup add/remove child keeps parent pointer correct",
 }
 
 TEST_CASE("SceneText emits set_font + fill_text",
-          "[canvas][scene][issue-2700]") {
+          "[canvas][scene]") {
     SceneText text;
     text.set_text("hello");
     text.set_position(10, 20);
@@ -265,7 +264,7 @@ TEST_CASE("SceneText emits set_font + fill_text",
 }
 
 TEST_CASE("SceneImage emits draw_image_from_file when given a path",
-          "[canvas][scene][issue-2700]") {
+          "[canvas][scene]") {
     SceneImage img;
     img.set_file_path("/nonexistent.png");  // RecordingCanvas just records.
     img.set_rect(10, 10, 50, 50);
@@ -276,7 +275,7 @@ TEST_CASE("SceneImage emits draw_image_from_file when given a path",
 }
 
 TEST_CASE("Nested groups walk in depth-first order during paint",
-          "[canvas][scene][issue-2700]") {
+          "[canvas][scene]") {
     // Walker contract: child group with one rect paints inside parent
     // group's transform. We verify by counting fill_rect commands.
     VectorScene scene;
@@ -292,7 +291,7 @@ TEST_CASE("Nested groups walk in depth-first order during paint",
 }
 
 TEST_CASE("paint clears dirty + snapshots last_painted_bounds",
-          "[canvas][scene][issue-2700]") {
+          "[canvas][scene]") {
     VectorScene scene;
     auto* shape = static_cast<SceneShape*>(
         scene.root().add_child(SceneShape::make_rect(5, 5, 10, 10)));

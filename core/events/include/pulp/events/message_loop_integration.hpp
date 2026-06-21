@@ -8,9 +8,9 @@
 // or X11/Wayland event sources).
 //
 // Background:
-//   PR #2825 shipped `MainThreadDispatcher` — a process-wide bridge that
-//   lets any Pulp subsystem post work to whatever native main-thread queue
-//   a platform owner has registered. The macOS plugin-mode helper
+//   `MainThreadDispatcher` is a process-wide bridge that lets any Pulp
+//   subsystem post work to whatever native main-thread queue a platform
+//   owner has registered. The macOS plugin-mode helper
 //   (`plugin_main_thread.hpp`) adds a refcounted Cocoa backend so format
 //   adapters can register at instantiation time. This header sits one
 //   level up: it exposes the *kind* of native loop that's currently
@@ -33,19 +33,14 @@
 //     introspection* surface, not a re-implementation of every native
 //     loop API.
 //
-// Platform coverage (as of 2026-05-26):
-//   - macOS / iOS  — Cocoa NSRunLoop backend (shipped via #2825 + plugin
-//     helper in `plugin_main_thread.hpp`).
+// Platform coverage:
+//   - macOS / iOS  — Cocoa NSRunLoop backend via the plugin-mode helper
+//     in `plugin_main_thread.hpp`.
 //   - Windows      — MsgWaitForMultipleObjects backend pending; the
 //     dispatcher will report `MainLoopKind::None` until the standalone
 //     Win32 host or VST3 editor registers one.
 //   - Linux        — GLib / X11 / Wayland backends pending; same
 //     `MainLoopKind::None` story until a backend lands.
-//
-// The gap-doc rows that track per-OS backend implementations live in
-// `planning/2026-05-24-reference-framework-gap-analysis.md`. This header
-// is the long-promised *cross-platform API surface* — callers can adopt
-// it today and the OS-side backends light up as they ship.
 
 #include <pulp/events/main_thread_dispatcher.hpp>
 

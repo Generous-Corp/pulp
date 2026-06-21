@@ -12,8 +12,7 @@ namespace {
 
 // Parse an all-digits port. Returns nullopt on empty, non-digit, leading
 // sign, or > 65535. strtol() alone accepts trailing junk like "80abc",
-// which would silently parse as a valid URL — pinned by the Codex P2
-// review comment "Reject non-numeric URL ports".
+// which would silently parse as a valid URL.
 std::optional<uint16_t> parse_port(std::string_view text) {
     if (text.empty()) return std::nullopt;
     uint32_t value = 0;

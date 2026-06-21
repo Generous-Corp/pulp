@@ -1,6 +1,6 @@
 #pragma once
 
-// C++ adapter over ios_audio_session.h (workstream 05 slice 5.2).
+// C++ adapter over ios_audio_session.h.
 //
 // Wraps the C callback plumbing in a std::function-based subscription so
 // application code can subscribe without juggling raw function pointers

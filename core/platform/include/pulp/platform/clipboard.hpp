@@ -10,7 +10,7 @@ namespace pulp::platform {
 
 // Cross-platform clipboard access.
 //
-// Platform notes (#300):
+// Platform notes:
 //   - macOS/iOS: real NSPasteboard / UIPasteboard integration.
 //   - Windows: real OpenClipboard/SetClipboardData integration.
 //   - Linux: shells out to wl-copy/wl-paste (Wayland) or xclip/xsel
@@ -33,10 +33,9 @@ public:
     static bool set_data(const std::string& type, const std::vector<uint8_t>& data);
     static std::optional<std::vector<uint8_t>> get_data(const std::string& type);
 
-    // Android JNI bridge (#300). The Android app registers a bridge
-    // backed by Kotlin ClipboardManager calls; without one, the
-    // Android impl fails closed (returns false/nullopt) rather than
-    // fake-succeeding.
+    // Android JNI bridge. The Android app registers a bridge backed by
+    // Kotlin ClipboardManager calls; without one, the Android impl fails
+    // closed (returns false/nullopt) rather than fake-succeeding.
     struct AndroidBridge {
         std::function<bool(const std::string&)>       set_text;
         std::function<std::optional<std::string>()>   get_text;

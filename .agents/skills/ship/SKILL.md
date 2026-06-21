@@ -35,8 +35,8 @@ source "$(git rev-parse --show-toplevel)/tools/scripts/cli_version_check.sh"
 pulp_cli_version_check
 ```
 
-Advisory only — never blocks. Full contract + override knobs in the
-`upgrade` skill. Release-discovery Slice 6 (#551).
+Advisory only — never blocks. Full contract + override knobs live in the
+`upgrade` skill.
 
 ## Subcommands
 
@@ -472,7 +472,7 @@ still define every public notarization symbol from
 `pulp-test-codesign` links on Windows and the cross-platform API surface
 stays in lockstep with macOS/Linux.
 
-**signtool failure contract (W7, #295 lesson).** `codesign()` on Windows
+**signtool failure contract.** `codesign()` on Windows
 must never report success for an unusable signature: it rejects an empty
 identity/path up front (no `signtool sign /n ""`), and after signing it runs
 `signtool verify /pa` and returns false if verification fails — so a sign that
@@ -721,8 +721,7 @@ Root cause: `core/view/CMakeLists.txt` defaults `PULP_BUILD_WEBVIEW=OFF`,
 so any release SDK build that forgets to opt in will ship a
 `libpulp-view-core` / `pulp-view-core.lib` without the native WebView objects.
 
-Fix (active since pulp #695): keep the release SDK path aligned with the
-GitHub release workflow:
+Keep the release SDK path aligned with the GitHub release workflow:
 1. Configure release SDK builds with `-DPULP_BUILD_WEBVIEW=ON`.
 2. On Linux, install `libgtk-3-dev` and `libwebkit2gtk-4.1-dev` before
    configuring.
@@ -767,7 +766,7 @@ The shortened `v3.7.12` ref does not exist on Steinberg's repo and causes the
 tag-triggered macOS release job to fail immediately at `Clone VST3 SDK`, before
 configure, build, or signing begin.
 
-### Never run `validation` ctest tests in `sign-and-release.yml` (#720)
+### Never run `validation` ctest tests in `sign-and-release.yml`
 
 The `Test` step in `.github/workflows/sign-and-release.yml` MUST pass
 `-LE validation` to ctest. Without that flag, the suite includes
@@ -784,9 +783,8 @@ FATAL ERROR: didn't find the component
 ```
 
 The Test step then exits non-zero and the entire sign / notarize /
-publish pipeline silently fails. This is the failure mode that lost
-~30 consecutive sign-and-release runs across v0.20.x → v0.41.0 (see
-issue #720 for the full backlog).
+publish pipeline silently fails. This failure mode can block many
+consecutive tag-triggered release runs before anyone notices.
 
 The validation gates already run in `.github/workflows/validate.yml`
 on PR with the documented codesigning caveat. Re-running them in the
@@ -798,7 +796,7 @@ test that asserts `-LE validation` stays in the workflow; it is wired
 into `.github/workflows/workflow-lint.yml` so any future PR touching
 `.github/workflows/**` runs it automatically.
 
-### `sign-and-release.yml` must declare `contents: write` (#724)
+### `sign-and-release.yml` must declare `contents: write`
 
 Every release workflow that uses `softprops/action-gh-release@v2` with
 `generate_release_notes: true` — or that otherwise PATCHes the release
@@ -834,7 +832,7 @@ workflow, do the same. The regression test
 `tools/scripts/test_release_workflow_test_step.py` now includes
 `SignAndReleaseContentsWriteTest` to block reintroduction.
 
-### Skia-builder zip layout drift breaks the release matrix (#1962)
+### Skia-builder zip layout drift breaks the release matrix
 
 `release-cli.yml` fetches prebuilt Skia binaries via
 `tools/scripts/fetch_skia_for_release.py` after `setup.sh --deps-only`.
@@ -865,8 +863,7 @@ If the lib path has a NEW level (not arch — e.g. a config subdir like
 `Release/optimized/`), the flatten heuristic needs extending. The flat
 + single-arch-subdir layouts are the only two seen to date.
 
-**Also eyeball exposed symbols.** chrome/m144 broke release-cli's Linux
-leg a second way (#1970): the new Skia static lib re-exposes fontconfig
+**Also eyeball exposed symbols.** Some Skia static lib builds re-expose fontconfig
 symbols (`FcInitLoadConfigAndFonts`, `FcConfigGetSysRoot`,
 `FcPatternGetString` et al.) that the previous release kept private.
 `core/canvas/CMakeLists.txt` already has the

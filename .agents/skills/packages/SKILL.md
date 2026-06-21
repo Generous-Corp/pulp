@@ -102,7 +102,7 @@ Read these to answer questions about specific packages.
 
 Only MIT/BSD/Apache/ISC/zlib/BSL/public-domain packages are allowed. The registry enforces this. If a user asks about a GPL library, explain the incompatibility and suggest the MIT-licensed alternative from the registry.
 
-## Attribution Audit (2026-04-22)
+## Attribution Audit
 
 `tools/deps/audit.py` now runs **two** invariants under `--strict`:
 
@@ -113,9 +113,9 @@ Only MIT/BSD/Apache/ISC/zlib/BSL/public-domain packages are allowed. The registr
    `FetchContent_Declare`, `external/<dir>/`) must be represented in
    `manifest.json` via name or `external_names` alias.
 
-The completeness check closes the #582 class of miss where MkDocs
-Material landed with zero attribution coverage because the audit only
-verified cross-file consistency, not that declared deps were present.
+The completeness check prevents misses where a declared dependency lands with
+zero attribution coverage because the audit only verifies cross-file
+consistency, not that declared deps are present.
 
 When adding a dep, always touch all four attribution files (manifest,
 DEPENDENCIES, NOTICE, licensing) plus — if the CMake / pip / vendored
@@ -151,8 +151,8 @@ device, iOS simulator, visionOS device, visionOS simulator, mac-x86_64,
 and `Skia.xcframework` slices upstream does not. While upstream stays on
 m144, this fork is the active dependency; revisit when upstream catches up.
 
-iOS-specific layout gotcha (PR #3011): unlike the mac / linux / windows
-slices, the iOS zips ship libs under a per-arch subdir
+iOS-specific layout gotcha: unlike the mac / linux / windows slices, the iOS
+zips ship libs under a per-arch subdir
 (`build/ios-gpu/lib/Release/{device-arm64,simulator-arm64,simulator-x86_64}/libskia.a`)
 because the device and fat-simulator zips would otherwise collide on
 identical lib names when unpacked into one tree. `FindSkia.cmake` picks

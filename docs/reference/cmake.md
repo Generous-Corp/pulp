@@ -46,7 +46,7 @@ pulp_add_plugin(<target>
 | `AAX_NATIVE_CODE` | AAX only | -- | 4-character stable AAX Native identifier |
 | `SOURCES` | No | -- | Source files for the core object library |
 | `PROCESSOR_FACTORY` | No | -- | Factory function name (for generated entry points) |
-| `UI_SCRIPT` | No | -- | Path to a JavaScript UI entry file. Pulp passes it through to VST3, AU, CLAP, and Standalone targets via `PULP_UI_SCRIPT_PATH`. Scripted-editor loading is supported in those targets; live JS/theme reload is currently only runtime-validated in the Standalone macOS lane. |
+| `UI_SCRIPT` | No | -- | Path to a JavaScript UI entry file. Pulp passes it through to VST3, AU, CLAP, and Standalone targets via `PULP_UI_SCRIPT_PATH`. Scripted-editor loading is supported in those targets; the Standalone macOS lane owns runtime validation for live JS/theme reload. |
 | `CONTENT_CAPABILITIES` | No | -- | Runtime content capabilities the plugin actually consumes, such as `content.presets.v1`. Use this when the plugin can load installed content packs. Must be paired with `CONTENT_KINDS`. |
 | `CONTENT_KINDS` | No | -- | Content kinds accepted by the plugin: `presets`, `themes`, `samples`, `wavetables`. This lets users and agents reject mismatched packs before install. Must be paired with `CONTENT_CAPABILITIES`. |
 | `CONTENT_HOT_RELOAD_KINDS` | No | -- | Accepted content kinds the plugin can refresh immediately after install/update. Each value must also appear in `CONTENT_KINDS`. |
@@ -204,7 +204,7 @@ pulp_app_icon(<target>
 - Windows: generates an `.ico` plus `.rc` and links it into the executable
 - Android: writes launcher PNGs under `android/app/src/main/res-generated/`
 - Linux: records the selected PNG as the target's canonical app-icon asset via the `PULP_LINUX_APP_ICON` target property
-- iOS: records the selected PNG as `PULP_IOS_APP_ICON` and warns that asset-catalog emission is not implemented yet
+- iOS: records the selected PNG as `PULP_IOS_APP_ICON` and warns that asset-catalog emission is not implemented
 
 The selected source must be a PNG that is at least 1024×1024. Smaller inputs
 fail at configure time so a release doesn’t silently ship blurry assets.
@@ -260,9 +260,9 @@ The function delegates the byte-to-C-array encoding to the
 - Encoding runs at **build time**, not configure time. Editing a source
   asset and re-running `cmake --build` regenerates the embedded `.cpp`
   automatically — no `cmake -S/-B` reconfigure required.
-- Encoding is fast: a 1 MB asset finishes in well under a second. The
-  legacy in-CMake hex loop was effectively O(n²) and could pin a single
-  reconfigure at 100 % CPU for 10–22 minutes (issue #898).
+- Encoding is fast: a 1 MB asset finishes in well under a second. The older
+  in-CMake hex loop was effectively O(n²) and could pin a single reconfigure
+  at 100 % CPU for 10–22 minutes.
 - Python (`find_package(Python3 COMPONENTS Interpreter REQUIRED)`) is the
   only added build-time dependency; Python is already required elsewhere
   in the Pulp build.

@@ -14,17 +14,14 @@ target_sources(pulp-canvas PRIVATE
     # Lottie playback. Always compiled; the body is a no-op unless PULP_LOTTIE
     # is on AND the active Skia build ships the skottie module (detected below).
     src/lottie_animation.cpp
-    # Pulp #6.1 / 2026-05-24 macOS plugin-authoring plan — retained
-    # VectorScene + SceneNode subtree built on top of `core/canvas::Path`
-    # + the existing SkiaCanvas. Lets custom-paint widgets / SVG imports
-    # mutate a child and have the host repaint only that sub-tree's
-    # bounding box. Pulp-native names (no reference-framework lineage).
+    # VectorScene + SceneNode are built on top of core/canvas::Path and
+    # SkiaCanvas so custom-paint widgets and SVG imports can mutate one
+    # child while repainting only that subtree's bounding box.
     src/scene.cpp
     src/effects.cpp
     src/text_layout.cpp
     src/attributed_string.cpp
     src/text_shaper.cpp
-    # Item 6.8 / 2026-05-24 macOS plugin-authoring plan.
     # BidiAnalyzer wraps SheenBidi (Apache-2.0) to give
     # core/canvas::TextShaper a paragraph-level UBA pass that doesn't
     # depend on system ICU — the canonical fallback for iOS / Android /
@@ -41,34 +38,28 @@ target_sources(pulp-canvas PRIVATE
     # cluster — see the header for the contract.
     src/emoji_segmenter.cpp
     # font_registry_stubs.cpp provides non-Skia fallbacks for the public
-    # font-registration API (pulp #1150). The real implementations live in
+    # font-registration API. The real implementations live in
     # bundled_fonts.cpp, which is only compiled under PULP_HAS_SKIA. This
     # stub TU lets plugin startup code call register_font(...) on non-GPU
     # builds without guarding every call site.
     src/font_registry_stubs.cpp
-    # Pulp #2163 — Phase 1 / Slice 1.1.a of the font v2 roadmap. FontOptions
-    # is Skia-free; FontScope manages scope-level registrations + a
-    # monotonic generation counter; FontResolver is the canonical
-    # resolution path that will progressively absorb the legacy parsers in
-    # skia_canvas.cpp / text_shaper.cpp / bundled_fonts.cpp / sdf_atlas.cpp.
+    # FontOptions is Skia-free; FontScope manages scope-level registrations
+    # and a monotonic generation counter; FontResolver is the canonical
+    # resolution path shared by skia_canvas.cpp, text_shaper.cpp,
+    # bundled_fonts.cpp, and sdf_atlas.cpp.
     src/font_options.cpp
     src/font_scope.cpp
     src/font_resolver.cpp
-    # Pulp #2163 — Phase 1 / Slice 1.2.a. ShapedText is the canonical
-    # artifact produced by TextRunPlanner; both measurement
-    # (TextShaper) and paint (SkiaCanvas) consume the same instance
-    # so they cannot diverge. Skeleton wraps existing TextShaper
-    # internally; the real bidi/script iterator swap is the finish
-    # half of 1.2.a.
+    # ShapedText is the canonical artifact produced by TextRunPlanner; both
+    # measurement (TextShaper) and paint (SkiaCanvas) consume the same
+    # instance so they cannot diverge.
     src/text_run_planner.cpp
-    # Pulp #2163 — Phase 2 / Slice 2.2. FontFlightRecorder is the
-    # bounded process-global trace buffer that callers (the --font-
-    # trace CLI flag, the import-missing-font-advisor, debug overlays)
-    # drain to see every typeface resolution the resolver performed.
+    # FontFlightRecorder is the bounded process-global trace buffer that
+    # callers such as the --font-trace CLI flag, the missing-font advisor,
+    # and debug overlays drain to inspect typeface resolution.
     src/font_flight_recorder.cpp
-    # planning/2026-05-24 gap-doc row "PNG / JPEG / GIF codecs" —
-    # GIF (89a) + Baseline TIFF 6.0 readers/writers, Skia-free so
-    # they compile on every config (headless / GPU-off / no Skia).
+    # GIF89a and Baseline TIFF 6.0 readers/writers are Skia-free, so they
+    # compile on every config (headless / GPU-off / no Skia).
     # See include/pulp/canvas/image_codecs.hpp for the public API.
     src/image_codecs_gif.cpp
     src/image_codecs_tiff.cpp
@@ -79,7 +70,7 @@ if(PULP_HAS_TEXT_SHAPING)
     target_compile_definitions(pulp-canvas PRIVATE PULP_HAS_TEXT_SHAPING=1)
 endif()
 
-# Item 6.8: SheenBidi-backed BidiAnalyzer. PULP_HAS_SHEENBIDI is set by
+# SheenBidi-backed BidiAnalyzer. PULP_HAS_SHEENBIDI is set by
 # tools/cmake/PulpDependencies.cmake when the FetchContent step
 # succeeds. When undefined, bidi.cpp compiles to a single-run pass-
 # through that infers level from BidiBaseDirection only (LTR-correct).
@@ -136,7 +127,7 @@ if(PULP_HAS_SKIA)
     # (FreeType is not linked in), so we materialise these into SkTypefaces
     # via the platform font manager at runtime — see bundled_fonts.cpp.
     # Keep the SOURCES list aligned with the bundled_blobs() table in
-    # bundled_fonts.cpp; the C++ side names the symbols directly. Issue #932.
+    # bundled_fonts.cpp; the C++ side names the symbols directly.
     #
     # PulpEmbedData provides pulp_add_binary_data() in isolation from the
     # rest of PulpUtils.cmake (which fails fast unless format/view targets
@@ -250,11 +241,9 @@ if(PULP_HAS_SKIA)
             # Without this, the bare `FONTCONFIG_LIBRARIES=fontconfig`
             # string can fall through CMake's static-lib transitive
             # propagation without producing a `-lfontconfig` on the
-            # consumer's final ld line, and the chrome/m144 Skia
-            # archive's `SkFontMgr_New_FontConfig` (FcInit*, FcConfig*,
-            # FcPattern*, FcGetVersion, FcFontSet*) fails to resolve at
-            # pulp-cpp link time. Closes the linux-x64 leg of release-cli's
-            # backfill matrix (#1962, #1970 follow-up).
+            # consumer's final ld line, and the chrome/m144 Skia archive's
+            # `SkFontMgr_New_FontConfig` (FcInit*, FcConfig*, FcPattern*,
+            # FcGetVersion, FcFontSet*) fails to resolve at pulp-cpp link time.
             pkg_check_modules(FONTCONFIG IMPORTED_TARGET fontconfig)
             if(FONTCONFIG_FOUND)
                 target_link_libraries(pulp-canvas PUBLIC PkgConfig::FONTCONFIG)

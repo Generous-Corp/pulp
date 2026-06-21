@@ -37,9 +37,8 @@ std::optional<uint16_t> parse_port(std::string_view text) {
     return static_cast<uint16_t>(value);
 }
 
-// Companion-track U-8 (planning/2026-05-17-refactor-roadmap-final.md).
-// Consolidates host:port parsing previously duplicated across
-// connect(), create_server(), server.start(), and server.stop().
+// Shared socket endpoint parser for connect(), create_server(),
+// server.start(), and server.stop().
 //
 // Behavior:
 // - "host:port"  → {host, port}

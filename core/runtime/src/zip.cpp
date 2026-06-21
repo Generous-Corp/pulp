@@ -112,8 +112,8 @@ std::optional<std::vector<uint8_t>> inflate_raw(const uint8_t* data, size_t size
 // Like inflate_raw, but for a deflate stream that may be followed by trailing
 // bytes (e.g. a gzip trailer + the next member's header). Reports how many
 // input bytes were consumed up to and including MZ_STREAM_END so the caller
-// can continue past the stream. Codex P2 on PR #747 — required for
-// concatenated RFC 1952 gzip members.
+// can continue past the stream. Required for concatenated RFC 1952 gzip
+// members.
 std::optional<std::vector<uint8_t>> inflate_raw_consumed(
         const uint8_t* data, size_t size, size_t* consumed_in) {
     if (data == nullptr || size == 0)
@@ -201,8 +201,8 @@ std::optional<std::vector<uint8_t>> gzip_compress(const uint8_t* data, size_t si
 std::optional<std::vector<uint8_t>> gzip_decompress(const uint8_t* data, size_t size) {
     // RFC 1952 gzip path — detect via magic bytes 0x1f 0x8b.
     //
-    // Loop over concatenated members (Codex P2 on PR #747). RFC 1952 §2.2
-    // permits a gzip file to contain multiple members back-to-back; tools
+    // Loop over concatenated members. RFC 1952 §2.2 permits a gzip file to
+    // contain multiple members back-to-back; tools
     // like `pigz`, `cat a.gz b.gz`, and gzip producers that split streams
     // emit them. Each member has its own header + deflate stream + 8-byte
     // trailer (CRC32 + ISIZE). The output is the concatenation of every

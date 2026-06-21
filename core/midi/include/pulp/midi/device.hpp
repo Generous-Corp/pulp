@@ -34,7 +34,7 @@ public:
     /// this as a no-op; callers can still register safely. Backends
     /// that DO support it (Win mmeapi MIM_LONGDATA, future CoreMIDI
     /// reassembly, ALSA SND_SEQ_EVENT_SYSEX) call this BEFORE open()
-    /// to register the receiver. #19 / #239.
+    /// to register the receiver.
     virtual void set_sysex_callback(MidiSysexCallback /*cb*/) {}
 };
 

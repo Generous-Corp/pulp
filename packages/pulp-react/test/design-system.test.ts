@@ -1,6 +1,6 @@
-// Tests for the Ink & Signal design-system catalog (Phase 8c). Verifies the
-// catalog is well-formed and that every jsxTag it names is a real exported
-// @pulp/react intrinsic — so the metadata can't drift from the actual bindings.
+// Tests for the Ink & Signal design-system catalog. Verifies the catalog is
+// well-formed and that every jsxTag it names is a real exported @pulp/react
+// intrinsic, so the metadata can't drift from the actual bindings.
 
 import { describe, it, expect } from 'vitest';
 import {
@@ -58,7 +58,7 @@ describe('Ink & Signal design-system catalog', () => {
         expect(FIGMA_FILE_KEY).toBe('q9iDYZzg86YrOQKr6I3bY0');
     });
 
-    it('the three Phase-8c gap widgets are JS-bound', () => {
+    it('Badge, Stepper, and Pan are JS-bound', () => {
         for (const name of ['Badge', 'Stepper', 'Pan']) {
             const c = findComponent(name);
             expect(c, name).toBeDefined();

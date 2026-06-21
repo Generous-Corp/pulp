@@ -1,11 +1,5 @@
-// widgets/<name>.cpp — extracted from core/view/src/widgets.cpp in the
-// 2026-05 Phase 2 (R2-6) batch. The 2,081-line widgets monolith was
-// adding 20+ touches/60 days and producing constant cross-widget merge
-// conflicts; splitting per major widget gives each its own conflict
-// surface.
-//
-// Per Codex's R2-6 risk callout, no header changes — every public
-// declaration stays in core/view/include/pulp/view/widgets.hpp.
+// Visualizer widget implementations split from widgets.cpp. Public
+// declarations stay in core/view/include/pulp/view/widgets.hpp.
 
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/animation.hpp>
@@ -83,26 +77,26 @@ void ImageView::paint(canvas::Canvas& canvas) {
         return;
     }
 
-    // Workstream 07 B4: when an ImageCache is attached, consult it.
-    // The cache owns decode + eviction; the view just renders whatever
-    // the cache hands back. A null DecodedImage means decode-in-progress
-    // or permanent failure, in which case we fall through to the
-    // path-as-text placeholder so the UI never shows a blank rect.
+    // When an ImageCache is attached, consult it. The cache owns decode +
+    // eviction; the view just renders whatever the cache hands back. A null
+    // DecodedImage means decode-in-progress or permanent failure, in which case
+    // we fall through to the path-as-text placeholder so the UI never shows a
+    // blank rect.
     if (cache_) {
         const auto* decoded = cache_->get(path_);
         if (decoded && decoded->native_handle) {
             // Hand the opaque native handle to the canvas. Backends that
             // know how to interpret it (CoreGraphics → CGImageRef,
             // Skia → SkImage*) blit it; others no-op and we fall through
-            // to the filename placeholder. Workstream 07 slice B4/#255.
+            // to the filename placeholder.
             canvas.draw_image(decoded->native_handle, 0, 0, b.width, b.height);
             emit_silhouette_fill(strip_scheme(path_));
             return;
         }
     }
 
-    // pulp #1658 — decode-on-paint via the canvas's draw_image_from_file
-    // primitive. Skia's implementation uses SkData::MakeFromFileName +
+    // Decode on paint via the canvas's draw_image_from_file primitive.
+    // Skia's implementation uses SkData::MakeFromFileName +
     // SkImages::DeferredFromEncodedData (deferred decode through SkCodec).
     // Backends that don't implement this primitive (some headless tests)
     // return false and we fall through to the filename-as-text placeholder
@@ -117,10 +111,9 @@ void ImageView::paint(canvas::Canvas& canvas) {
         fs_path = fs_path.substr(kFileScheme.size());
     }
 
-    // pulp #1737 — honour CSS `object-fit` + `object-position`.
-    // Probe intrinsic image dimensions; if the backend can't measure
-    // (no decode primitive on this platform) fall back to the
-    // pre-#1737 stretch-to-bounds path (= object-fit: fill).
+    // Honour CSS `object-fit` + `object-position`. Probe intrinsic image
+    // dimensions; if the backend can't measure (no decode primitive on this
+    // platform) fall back to the stretch-to-bounds path (= object-fit: fill).
     float img_w = 0.0f, img_h = 0.0f;
     bool has_intrinsic =
         !fs_path.empty() &&
@@ -142,7 +135,8 @@ void ImageView::paint(canvas::Canvas& canvas) {
         }
 
         // `none` — natural size, no scaling. Crop or letterbox both axes.
-        // Centre by default; refined below by object-position parsing.
+        // Centre by default; object-position refines letterboxed placement
+        // below while the crop window stays centered.
         if (fit == "none") {
             float dw = std::min(b.width,  img_w);
             float dh = std::min(b.height, img_h);
@@ -196,8 +190,8 @@ void ImageView::paint(canvas::Canvas& canvas) {
     if (has_intrinsic) {
         auto [dst, src] = compute_fit();
 
-        // pulp #1737 — apply `object-position` as a percentage offset.
-        // CSS spec lets the value be lengths or percentages; the JS
+        // Apply `object-position` as a percentage offset. CSS spec lets the
+        // value be lengths or percentages; the JS
         // shim normalises to a `<x>% <y>%` two-token string before
         // routing through setObjectPosition. Anything we can't parse
         // collapses to "50% 50%" (the spec default), which keeps the
@@ -276,9 +270,9 @@ void ImageView::paint(canvas::Canvas& canvas) {
             dst.y = slack_y * (py / 100.0f);
         }
 
-        // Route via the source-rect overload when `none` / `cover` / a
-        // non-identity src was computed. The dst-only path stays for
-        // the simple `fill` / `contain` cases (full src rect).
+        // Route via the source-rect overload only when `none` cropped the image
+        // (non-identity src). Full-source modes such as `fill`, `contain`,
+        // `cover`, and `scale-down` use the dst-only path.
         bool drawn = false;
         if (src.x != 0.0f || src.y != 0.0f ||
             std::abs(src.width  - img_w) > 0.001f ||
@@ -446,7 +440,6 @@ void Meter::paint(canvas::Canvas& canvas) {
             canvas.set_fill_color(green.interpolate(red, t));
             canvas.fill_rect(0, static_cast<float>(y), b.width, 1);
         }
-        // Round corners by clipping (approximate with rounded rect overlay)
         return;
     }
 
@@ -703,8 +696,8 @@ void WaveformView::paint(canvas::Canvas& canvas) {
     auto wave_color = resolve_color("waveform.line", canvas::Color::rgba8(100, 180, 250));
     auto fill_color = resolve_color("waveform.fill", canvas::Color::rgba(wave_color.r, wave_color.g, wave_color.b, 56.0f/255.0f));
 
-    // Thumbnail path (Pulp #2843 / item 6.12): render decimated min/max
-    // peaks straight from the cached thumbnail without re-decoding audio.
+    // Thumbnail path: render decimated min/max peaks straight from the cached
+    // thumbnail without re-decoding audio.
     if (thumbnail_ != nullptr && !thumbnail_->empty()) {
         // Center line
         auto center_color = resolve_color("waveform.grid", canvas::Color::rgba8(50, 50, 60));
@@ -919,7 +912,7 @@ void Panel::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
     auto bg = resolve_color(bg_token_, canvas::Color::rgba8(45, 45, 60));
     canvas.set_fill_color(bg);
-    // pulp #1663 — resolve the effective uniform radius (px or %).
+    // Resolve the effective uniform radius (px or %).
     const float eff_radius = effective_corner_radius(b.width, b.height);
     canvas.fill_rounded_rect(0, 0, b.width, b.height, eff_radius);
 

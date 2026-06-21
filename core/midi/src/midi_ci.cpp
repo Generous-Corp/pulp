@@ -58,7 +58,6 @@ std::size_t CiDiscovery::notify(std::string_view resource,
     // are emitted — return 0, not `subscribers.size()`. Callers using
     // the return for delivery accounting / retry would otherwise be
     // told everything succeeded when in fact nothing was sent.
-    // Regression: #2959 / Codex comment 3305288220.
     if (!on_pe_notify) return 0;
     std::size_t delivered = 0;
     for (const auto& sub : subscribers) {
@@ -74,7 +73,7 @@ std::vector<uint8_t> CiDiscovery::create_discovery_inquiry() const {
     msg.push_back(0xF0);
     msg.push_back(0x7E);
     msg.push_back(0x7F);  // All devices
-    msg.push_back(0x0D);  // CI sub-ID #1
+    msg.push_back(0x0D);  // MIDI-CI sub-ID byte
     msg.push_back(static_cast<uint8_t>(CiMessageType::DiscoveryInquiry));
 
     // CI version
@@ -394,7 +393,7 @@ void CiDiscovery::handle_notify(const uint8_t* data, size_t size) {
     // PropertyNotify addressed to another peer would still fire local
     // handlers and apply/surface updates for the wrong session/resource.
     // Other handlers (Subscribe, Discovery, InquireProperties, …) gate
-    // identically at data+10. Regression: Codex #2959 comment 3305288207.
+    // identically at data+10.
     MUID source = read_muid(data + 6);
     MUID dest = read_muid(data + 10);
     if (!dest.is_broadcast() && !(dest == local_info_.muid)) return;

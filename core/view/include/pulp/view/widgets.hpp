@@ -54,9 +54,9 @@ public:
         // A plain set_text() supersedes any per-range styled runs from a
         // prior set_attributed_string(): the old spans index into the OLD
         // string and are stale. Drop them so paint() takes the single-style
-        // path for the new text. (Codex #3336.)
+        // path for the new text.
         has_attributed_ = false;
-        // WYSIWYG P5 FIX 4 — the Yoga measure callback (yoga_measure ->
+        // The Yoga measure callback (yoga_measure ->
         // Label::intrinsic_width / measured_height) re-runs TextShaper::prepare
         // keyed on the CURRENT text_, so a text change re-shapes correctly —
         // but only if a re-layout is actually triggered. Mark this Label's
@@ -123,9 +123,9 @@ public:
 
     /// CSS `line-clamp` / `-webkit-line-clamp` (pulp #1552). Maximum number
     /// of visible text lines for a multi-line label; 0 disables clamping.
-    /// When set on a `multi_line_` Label, paint() emits at most N
-    /// newline-separated lines and replaces the trailing visible line with
-    /// the U+2026 ellipsis if any source lines were dropped. Matches the
+    /// When set on a `multi_line_` Label, paint() emits at most N lines
+    /// (newline- or wrap-broken) and appends the U+2026 ellipsis to the
+    /// trailing visible line if any source lines were dropped. Matches the
     /// CSS spec's "block-axis line clamp" behavior at the keyword level
     /// (no `none` token — set 0 to clear). Wiring is shared between
     /// `line-clamp` and `-webkit-line-clamp` in the JS shim and the
@@ -171,10 +171,10 @@ public:
     /// Intrinsic height based on font size and line height.
     /// issue-969: walks the inheritance cascade so an unset font_size
     /// picks up an ancestor View's setInheritableFontSize value.
-    /// pulp-internal #74: returns lh × (newline-count + 1) for
-    /// multi_line labels so Yoga reserves space for every explicit
-    /// `\n`-delimited line. Soft-wrap (multi_line + bounded width) is
-    /// handled by the width-aware `measured_height()` overload below.
+    /// Counts visible explicit `\n`-delimited lines for multi_line labels,
+    /// ignoring a trailing newline and honoring `line_clamp_` when set.
+    /// Soft-wrap (multi_line + bounded width) is handled by the width-aware
+    /// `measured_height()` overload below.
     float intrinsic_height() const override;
 
     /// Width-aware height: shaper-true line count × line-height for a
@@ -314,9 +314,7 @@ public:
     // side channel; preset application (or any other JS-driven mutation
     // through the bridge's setValue) goes through THIS code path and
     // would otherwise leave the painted state stale until the next user
-    // input. The user's "preset-applied band-shape outline missing"
-    // symptom was exactly this gap — the new state was stored but
-    // never reached the screen.
+    // input.
     //
     // Codex P2 on PR #2013 — gate the invalidate on a real change.
     // WidgetBridge::sync_from_store() and restore_values(...) call
@@ -919,7 +917,7 @@ private:
 };
 
 // ── Checkbox ────────────────────────────────────────────────────────────────
-// Circular checkbox with check glyph
+// Rounded-square checkbox with check glyph
 
 class Checkbox : public View {
 public:
@@ -1014,7 +1012,7 @@ private:
 };
 
 // ── Icon ────────────────────────────────────────────────────────────────────
-// Simple vector icons drawn with canvas strokes
+// Simple vector icons drawn with canvas strokes and fills
 
 class Icon : public View {
 public:
@@ -1363,9 +1361,7 @@ private:
 
 class Panel : public View {
 public:
-    // pulp #1731 Codex P1 — Panel used to shadow View::corner_radius_
-    // with its own field that paint() never read. Constructor now seeds
-    // the View-side slot so the default 8px rounding actually paints.
+    // Seed the View-side radius slot so the default 8px rounding paints.
     Panel() { View::set_border_radius(8.0f); }
 
     void set_background_token(std::string token) { bg_token_ = std::move(token); }

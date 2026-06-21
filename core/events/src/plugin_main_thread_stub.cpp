@@ -1,6 +1,7 @@
-// No-op plugin-main-thread backend for non-Apple platforms (item 6.4b macOS
-// plan). Windows + Linux have their own message-loop integration paths and
-// will get dedicated backends in gap-doc Phase 1.
+// No-op plugin-main-thread backend for non-Apple platforms. Windows and Linux
+// plugin hosts use their own message-loop integration paths, so this stub keeps
+// adapter code cross-platform while leaving the dispatcher in its no-backend
+// state unless a platform owner registers one.
 
 #include <pulp/events/plugin_main_thread.hpp>
 

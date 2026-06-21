@@ -1149,15 +1149,15 @@ pulp_add_test_suite(pulp-test-ble-midi LIBRARIES pulp::midi)
 # suite runs on every platform via the virtual-endpoint half.
 pulp_add_test_suite(pulp-test-ump-session LIBRARIES pulp::midi)
 
-# AsyncStream tests (Phase 2)
+# AsyncStream tests
 pulp_add_test_suite(pulp-test-async-stream LIBRARIES pulp::runtime)
 
-# Network Stream tests (Phase 3)
+# Network Stream tests
 pulp_add_test_suite(pulp-test-network-stream
     LIBRARIES pulp::runtime pulp-cpp-httplib
     PROPERTIES RESOURCE_LOCK network-stream)
 
-# MessageChannel tests (Phase 4)
+# MessageChannel tests
 pulp_add_test_suite(pulp-test-memory-message-channel LIBRARIES pulp::runtime)
 
 pulp_add_test_suite(pulp-test-websocket-channel LIBRARIES pulp::runtime)
@@ -1166,7 +1166,7 @@ pulp_add_test_suite(pulp-test-osc-channel LIBRARIES pulp::osc)
 
 pulp_add_test_suite(pulp-test-json-rpc LIBRARIES pulp::runtime)
 
-# Validation harness tests (Phase 2)
+# Validation harness tests
 pulp_add_test_suite(pulp-test-validation-harness LIBRARIES pulp::format)
 
 # Plugin-contributed settings sections (MM-PR5) — SettingsPanel lives in pulp::standalone
@@ -4253,11 +4253,10 @@ if(PULP_HAS_SKIA)
 endif()
 catch_discover_tests(pulp-test-canvas-cg-gradients)
 
-# CSS filter chain coverage (P5-2 follow-up — extracted from
-# test_canvas.cpp). pulp #1434 Phase A2-4: Skia-only pixel readback
-# (contrast / invert / opacity ordering with drop-shadow, set_filter
-# drop-shadow parser) + portable filter-chain matrix math
-# (contrast bias, invert maps, identity, opacity alpha scaling).
+# CSS filter chain coverage: Skia-only pixel readback (contrast /
+# invert / opacity ordering with drop-shadow, set_filter drop-shadow
+# parser) plus portable filter-chain matrix math (contrast bias,
+# invert maps, identity, opacity alpha scaling).
 add_executable(pulp-test-canvas-filter-chain test_canvas_filter_chain.cpp)
 target_link_libraries(pulp-test-canvas-filter-chain PRIVATE pulp::canvas Catch2::Catch2WithMain)
 if(PULP_HAS_SKIA)

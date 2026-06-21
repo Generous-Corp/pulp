@@ -11,14 +11,14 @@
 //   pulp config set update.check_interval_hours 24
 //   pulp config set import_design.default_mode baked
 //   pulp config set import_design.default_emit ir-json
+//   pulp config set claude.send_user_file off
 //   pulp config list
 //
-// Slice 5 (#550) wires the auto/prompt/manual/off modes into the
-// invocation path in pulp_cli.cpp and clears the 24h snooze on any
-// mode change (a mode change means the user has re-engaged with
-// update management, so suppressing further notices would be wrong).
-// Slice 5 also reserves the `update.bump_projects` key for Slice 7 —
-// Slice 7 (#564) is where the actual project-bump behavior lands.
+// `update.mode` is wired into the invocation path in pulp_cli.cpp and
+// clears the 24h snooze on any mode change (a mode change means the
+// user has re-engaged with update management, so suppressing further
+// notices would be wrong). `update.bump_projects` is shared with the
+// post-upgrade project-bump nudge in cmd_upgrade.cpp.
 
 #include "cli_common.hpp"
 #include "update_check.hpp"
@@ -65,11 +65,8 @@ bool is_allowed_key(const std::string& section, const std::string& key) {
         return key == "mode" ||
                key == "check_interval_hours" ||
                key == "channel" ||
-               // Slice 5 (#550) reserves this key for Slice 7 (#564)
-               // which implements per-project SDK bump behavior.
-               // Accepting it now lets users configure ahead of time;
-               // Slice 7 will make the value functional. Allowed:
-               // prompt | auto | off. Default: prompt.
+               // Controls the post-upgrade project-bump nudge.
+               // Allowed: prompt | auto | off. Default: prompt.
                key == "bump_projects";
     }
     if (section == "import_design") {
@@ -111,8 +108,6 @@ std::string validate_value(const std::string& section,
         return "update.channel must be one of: stable, beta";
     }
     if (section == "update" && key == "bump_projects") {
-        // Reserved for Slice 7 (#564). Values locked now so Slice 7
-        // doesn't have to re-open the allow-list on day one.
         if (value == "prompt" || value == "auto" || value == "off") return {};
         return "update.bump_projects must be one of: prompt, auto, off";
     }
@@ -145,7 +140,7 @@ int usage() {
     std::cout << "  update.check_interval_hours   default: 24\n";
     std::cout << "  update.channel                stable | beta                 (default: stable)\n";
     std::cout << "  update.bump_projects          prompt | auto | off           (default: prompt)\n";
-    std::cout << "                                [reserved — Slice 7 (#564) implements the behavior]\n";
+    std::cout << "                                controls post-upgrade project bump nudge\n";
     std::cout << "\nSupported keys (import_design section):\n";
     std::cout << "  import_design.default_mode    live | baked                  (default: live)\n";
     std::cout << "  import_design.default_emit    js | ir-json | cpp            (default: js)\n";

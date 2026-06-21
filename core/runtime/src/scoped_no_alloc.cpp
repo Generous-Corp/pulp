@@ -9,7 +9,7 @@ thread_local int g_depth = 0;
 // Symbol always defined so mixed-mode linking (Release SDK + Debug
 // downstream consumer, or vice versa) doesn't see a header that
 // emits a call to a symbol the archive omits. The body is the
-// no-op variant under NDEBUG. Codex P1 on PR #2316.
+// no-op variant under NDEBUG.
 ScopedNoAlloc::ScopedNoAlloc() noexcept {
 #ifndef NDEBUG
     ++g_depth;

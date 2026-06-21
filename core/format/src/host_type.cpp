@@ -60,10 +60,10 @@ HostType host_type_from_process_name(std::string_view process_name) {
     if (name.find("bitwig") != std::string::npos) return HostType::Bitwig;
     if (name.find("maschine") != std::string::npos) return HostType::Maschine;
     if (name.find("audacity") != std::string::npos || name.find("tenacity") != std::string::npos) return HostType::AudacityTenacity;
-    // MOTU Digital Performer's macOS process is "DP11" / "DP10" /
-    // "Digital Performer"; the Windows build is just "Digital
-    // Performer.exe". Match the canonical name first, then the
-    // short DP-prefixed form. Pulp #3046.
+    // MOTU Digital Performer's macOS process may use a short
+    // DP-prefixed name or "Digital Performer"; the Windows build is
+    // just "Digital Performer.exe". Match the canonical name first,
+    // then the short DP-prefixed form.
     if (name.find("digital performer") != std::string::npos
         || name.find("digitalperformer") != std::string::npos
         || name == "dp11" || name == "dp10" || name == "dp12") return HostType::DigitalPerformer;
@@ -87,9 +87,9 @@ HostType host_type_from_auv3_wrapper(std::string_view wrapper_identifier) {
     std::string id = to_lower(wrapper_identifier);
 
     // Logic Pro family — bundle ids + XPC wrapper names. MainStage
-    // historically shares the Logic Pro DAW-quirk family (auv3 cross-host
-    // row 21 dual-tracked bypass, channel-strip plumbing), so we fold it
-    // into HostType::LogicPro rather than introducing a separate enum.
+    // historically shares the Logic Pro DAW-quirk family (dual-tracked
+    // bypass, channel-strip plumbing), so we fold it into
+    // HostType::LogicPro rather than introducing a separate enum.
     if (id.find("com.apple.logic") != std::string::npos) return HostType::LogicPro;
     if (id.find("com.apple.mainstage") != std::string::npos) return HostType::LogicPro;
     if (id.find("auhostingservicexpc_arrow") != std::string::npos) return HostType::LogicPro;
@@ -115,10 +115,9 @@ std::string current_auv3_wrapper_identifier() { return {}; }
 
 HostType detect_host_type() {
 #ifdef __APPLE__
-    // DAW-quirks row 22 — when running as an AU v3 extension prefer the
-    // wrapper-reported identifier (`detect_host_type` on iOS / sandboxed
-    // macOS extensions will otherwise classify our own `.appex`
-    // executable name as Unknown).
+    // When running as an AU v3 extension, prefer the wrapper-reported
+    // identifier; iOS / sandboxed macOS extensions otherwise classify
+    // their own `.appex` executable name as Unknown.
     auto wrapper_id = current_auv3_wrapper_identifier();
     if (!wrapper_id.empty()) {
         HostType wrapped = host_type_from_auv3_wrapper(wrapper_id);

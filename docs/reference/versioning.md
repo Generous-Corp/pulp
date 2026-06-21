@@ -2,7 +2,7 @@
 
 Short answer:
 
-> **Pulp's version = `project(Pulp VERSION …)` in `CMakeLists.txt`.** Today that is the number released on the GitHub Releases page. Everything else is a derivative surface.
+> **Pulp's version = `project(Pulp VERSION …)` in `CMakeLists.txt`.** That is the number the release pipeline publishes on the GitHub Releases page. Everything else is a derivative surface.
 
 ## The three surfaces
 
@@ -61,7 +61,7 @@ If `auto-release.yml` sees `SDK_BEFORE == SDK_AFTER` (version didn't move on tha
 - Check `tools/shipyard.toml` is pinned to a current shipyard version (`./tools/install-shipyard.sh --status`).
 - Check that `auto-release.yml` has run for the most recent version-bumping merge (`gh run list --workflow=auto-release.yml`).
 - Confirm the tip commit doesn't carry a `Release: skip …` trailer — that intentionally suppresses tagging.
-- Release workflows run on tag push, so a failed `release-cli.yml` run leaves the tag in place but no Release published; in that case re-running the workflow from the Actions UI is the fix.
+- Release workflows run on tag push, so a failed `release-cli.yml` run leaves the tag in place but no Release published. Inspect the failed matrix leg, fix the blocker, then re-dispatch `release-cli.yml` for the existing tag.
 
 ### The two `fatal: could not read Username` root causes
 
@@ -70,7 +70,7 @@ If `auto-release.yml` fails at the `actions/checkout` step with `fatal: could no
 1. **PAT scope** — the fine-grained `RELEASE_BOT_TOKEN` PAT is missing this repo in its *Selected repositories* list. Fine-grained PATs are strictly scoped; reusing the same token across multiple repos requires listing every consumer up front (or cutting a separate PAT per repo). Fix: edit the token at <https://github.com/settings/personal-access-tokens>, add the repo, save — no secret rotation needed.
 2. **Secret value drift** — the `RELEASE_BOT_TOKEN` secret on the repo holds a different token value than the one you edited. This happens when the secret was seeded from an earlier PAT that was later revoked or replaced. Diagnose by comparing `gh secret list` timestamp against the PAT's regeneration time; resolve by running `gh secret set RELEASE_BOT_TOKEN` with the current token.
 
-Both scenarios surface the same error message, so rule them out in order. See shipyard's [`RELEASING.md`](https://github.com/danielraffel/Shipyard/blob/main/RELEASING.md) (clarified in shipyard [#45](https://github.com/danielraffel/Shipyard/pull/45) + [#46](https://github.com/danielraffel/Shipyard/pull/46)) for the provisioning walk-through; guided PAT provisioning to prevent the mis-setup is tracked in shipyard [#48](https://github.com/danielraffel/Shipyard/issues/48).
+Both scenarios surface the same error message, so rule them out in order. See shipyard's [`RELEASING.md`](https://github.com/danielraffel/Shipyard/blob/main/RELEASING.md) for the provisioning walk-through.
 
 ## See also
 - `tools/scripts/versioning.json` — machine-readable config consumed by `version_bump_check.py` and `skill_sync_check.py`.

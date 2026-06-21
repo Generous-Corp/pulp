@@ -1,14 +1,12 @@
-// pulp #1434 (rn batch C) — verify the @pulp/react prop-applier
-// forwards dimension props as `number | string` so percent strings
-// (`'50%'`) and the `'auto'` keyword (flexBasis) reach the bridge
-// verbatim. The bridge's setFlex case for each dimension key
-// dispatches percent values to Yoga's
+// Verify the @pulp/react prop-applier forwards dimension props as
+// `number | string` so percent strings (`'50%'`) and the `'auto'`
+// keyword for flexBasis reach the bridge verbatim. The bridge's setFlex
+// case for each dimension key dispatches percent values to Yoga's
 // `YGNodeStyleSet{Width,Height,Min*,Max*,FlexBasis}Percent` API and
 // `'auto'` to `YGNodeStyleSetFlexBasisAuto`.
 //
-// Before this batch, the prop-applier cast `value as number` for these
-// keys, which silently coerced strings to NaN at the bridge boundary
-// and dropped the percent / auto signal entirely.
+// Numeric-only forwarding silently coerced strings to NaN at the bridge
+// boundary and dropped the percent / auto signal entirely.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { applyChangedProps } from '../src/prop-applier.js';
@@ -40,7 +38,7 @@ function flexCalls(b: MockBridge, slot: string) {
     return b.calls.filter((c) => c.fn === 'setFlex' && c.args[1] === slot);
 }
 
-describe('prop-applier dimension percent strings (pulp #1434 batch C)', () => {
+describe('prop-applier dimension percent strings', () => {
     it.each([
         ['width',     'width'],
         ['height',    'height'],

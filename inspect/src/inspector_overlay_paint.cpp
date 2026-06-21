@@ -1,14 +1,11 @@
-// InspectorOverlay paint methods, split out of inspector_overlay.cpp (P11-5,
-// #2647) to bring the parent under the 2,000-line target. Follows the #2555
-// internal-header pattern: shared palette + color_to_hex live in
-// inspector_overlay_internal.hpp. Includes the parent's own helper anon-namespace
-// (preview_value/abbreviate_anchor) used only by these paint routines.
+// InspectorOverlay paint methods. Shared palette + color_to_hex are defined in
+// inspector_overlay_internal.hpp; this TU also defines the file-local
+// preview_value / abbreviate_anchor helpers used only by these paint routines.
 //
-// WYSIWYG (feature/wysiwyg-and-gpu-render-time) adds the in-canvas text-edit
-// overlay (paint_text_edit_overlay), the move/resize drop indicator and drag
-// ghost (paint_drop_indicator / paint_drag_ghost), and caret/selection shaping
-// that re-measures via Label::text_edit_metrics — hence the widgets.hpp /
-// text_editor.hpp includes below.
+// Covers the in-canvas text-edit overlay (paint_text_edit_overlay), the
+// move/resize drop indicator and drag ghost (paint_drop_indicator /
+// paint_drag_ghost), and caret/selection shaping that re-measures via
+// Label::text_edit_metrics, hence the widgets.hpp / text_editor.hpp includes.
 #include "inspector_overlay_internal.hpp"
 
 #include <pulp/inspect/inspector_overlay.hpp>
@@ -33,43 +30,43 @@ namespace pulp::inspect {
 void InspectorOverlay::paint(Canvas& canvas) {
     if (!active_) return;
 
-    // Phase 6.1 — sample the render-pass manager into the rolling
-    // attribution history once per frame. Cheap, no-op when no RPM is
-    // attached, and de-duplicated against frame_count() so multiple
-    // paints of the same frame don't inflate the history.
+    // Sample the render-pass manager into the rolling attribution history once
+    // per frame. Cheap, no-op when no RPM is attached, and de-duplicated
+    // against frame_count() so multiple paints of the same frame don't inflate
+    // the history.
     capture_pass_frame();
 
     rebuild_flat_tree();
 
-    // P1 — minimal manipulate layer: paint ONLY the selection box +
-    // handles (no dev side-panel, no box-model bands, no distance lines).
-    // The floating InspectorWindow is the inspect/tree/props surface; the
-    // in-canvas overlay here is the bare manipulation layer.
+    // Minimal manipulate layer: paint ONLY the selection box + handles (no dev
+    // side-panel, no box-model bands, no distance lines). The floating
+    // InspectorWindow is the inspect/tree/props surface; the in-canvas overlay
+    // here is the bare manipulation layer.
     if (manipulate_only_) {
         paint_highlight(canvas);
         paint_drop_indicator(canvas);
         paint_drag_ghost(canvas);
-        paint_text_edit_overlay(canvas);  // WYSIWYG T2 — caret/selection
+        paint_text_edit_overlay(canvas);  // caret/selection overlay
         return;
     }
 
-    // Phase 2 — populate the drift list on the first paint after the
-    // inspector goes active so the drawer is never empty just because
-    // the host forgot to call refresh_drift() explicitly.
+    // Populate the drift list on the first paint after the inspector goes
+    // active so the drawer is never empty just because the host forgot to call
+    // refresh_drift() explicitly.
     if (!drift_refreshed_once_) refresh_drift();
     paint_highlight(canvas);
     paint_drop_indicator(canvas);
     paint_drag_ghost(canvas);
     paint_distance_lines(canvas);
     if (selected_) paint_box_model(canvas, selected_);
-    paint_text_edit_overlay(canvas);  // WYSIWYG T2 — caret/selection overlay
+    paint_text_edit_overlay(canvas);  // caret/selection overlay
     paint_panel(canvas);
-    // Phase 3c — eyedropper swatch paints above the panel and
-    // highlights so the sampled color is never occluded.
+    // The eyedropper swatch paints above the panel and highlights so the
+    // sampled color is never occluded.
     paint_eyedropper_cursor(canvas);
-    // Phase 3e — the loupe paints LAST so its magnified grid sits on
-    // top of everything (including the props panel and the eyedropper
-    // swatch), like a physical loupe resting on the design surface.
+    // The loupe paints LAST so its magnified grid sits on top of everything
+    // (including the props panel and the eyedropper swatch), like a physical
+    // loupe resting on the design surface.
     if (zoom_active_) paint_zoom_panel(canvas);
 }
 
@@ -144,18 +141,18 @@ void InspectorOverlay::paint_eyedropper_cursor(Canvas& canvas) {
     canvas.restore();
 }
 
-// WYSIWYG T2 — paint the caret + selection as a LIGHT overlay on the live
-// in-place edit. Deliberately NOT a styled input box: the live View text keeps
-// its real-UI look; we only layer a blinking caret line + a translucent
-// selection band on top, positioned by measuring the buffer prefix in the
-// target's own font. Single-line model (the in-place edit is one logical run).
+// Paint the caret + selection as a LIGHT overlay on the live in-place edit.
+// Deliberately NOT a styled input box: the live View text keeps its real-UI
+// look; we only layer a blinking caret line + a translucent selection band on
+// top, positioned by measuring the buffer prefix in the target's own font.
+// Single-line model (the in-place edit is one logical run).
 void InspectorOverlay::paint_text_edit_overlay(Canvas& canvas) {
     if (!text_editing() || !text_edit_target_reachable()) return;
 
     const Rect r = view_bounds_in_root(text_edit_target_);
     canvas.save();
 
-    // ── Label branch — WYSIWYG caret/selection ────────────────────────────
+    // ── Label branch — paint-accurate caret/selection ─────────────────────
     // The Label painter resolves INHERITED size/weight/letter-spacing, a
     // family fallback ("Inter"), slant, text-transform, and an alignment-
     // dependent draw origin. Re-measuring here with the Label's OWN fields
@@ -166,7 +163,7 @@ void InspectorOverlay::paint_text_edit_overlay(Canvas& canvas) {
     if (auto* lbl = dynamic_cast<const Label*>(text_edit_target_)) {
         const auto m = lbl->text_edit_metrics(canvas, text_edit_buffer_);
 
-        // WYSIWYG caret RESIZE — text_edit_metrics is computed at the UNSCALED
+        // Caret resize: text_edit_metrics is computed at the UNSCALED
         // font in element-local space, but View::paint_all renders this
         // subtree under the cumulative `scale(s,s)` of the target + ancestors
         // (a proportional / Shift resize sets View::set_scale() rather than
@@ -175,7 +172,7 @@ void InspectorOverlay::paint_text_edit_overlay(Canvas& canvas) {
         // uses about the transform-origin. With the default-or-top-left origin
         // this collapses to s*local; a non-zero origin pins that point.
         // Without this, an enlarged field drew the caret short by the scale
-        // factor (maintainer QA: caret a glyph or two before the text end).
+        // factor (the caret landed a glyph or two before the text end).
         const float s = effective_scale_in_root(lbl);
         const float ox_px = lbl->bounds().width  * lbl->transform_origin_x();
         const float oy_px = lbl->bounds().height * lbl->transform_origin_y();
@@ -236,8 +233,8 @@ void InspectorOverlay::paint_text_edit_overlay(Canvas& canvas) {
 
     // The text origin is the target's left edge; align the caret band to the
     // TOP of the box (where top-aligned label text renders), NOT the box
-    // center — otherwise growing the box floats the caret far below the actual
-    // text (maintainer QA). (Was: r.y + (r.height - band_h) * 0.5f.)
+    // center, otherwise growing the box floats the caret far below the actual
+    // text.
     const float text_x = r.x;
     const float band_h = std::min(r.height, font_size * 1.3f);
     const float band_y = r.y;
@@ -267,7 +264,7 @@ void InspectorOverlay::paint_text_edit_overlay(Canvas& canvas) {
 }
 
 void InspectorOverlay::paint_highlight(Canvas& canvas) {
-    // P2d (D) — drop-indicator clarity. A selected-but-idle element must show
+    // Drop-indicator clarity. A selected-but-idle element must show
     // exactly ONE selection affordance (the orange outline + handles), not the
     // orange selection PLUS a blue hover box. The blue hover highlight is a
     // distinct "what would I select" affordance; while a view is selected we
@@ -297,9 +294,9 @@ void InspectorOverlay::paint_highlight(Canvas& canvas) {
         canvas.set_line_width(1.5f);
         canvas.stroke_rect(r.x, r.y, r.width, r.height);
 
-        // Tooltip (type + W×H badge). WYSIWYG P6 FIX 2 — flip below the
-        // selection when there's no room above (the badge would slide under
-        // the window title bar and clip), and clamp x to the window edges.
+        // Tooltip (type + W×H badge). Flip below the selection when there's
+        // no room above (the badge would slide under the window title bar and
+        // clip), and clamp x to the window edges.
         auto type = ViewInspector::type_name(*hovered_);
         auto label = type + " " + std::to_string(static_cast<int>(r.width))
                    + "×" + std::to_string(static_cast<int>(r.height));
@@ -315,10 +312,10 @@ void InspectorOverlay::paint_highlight(Canvas& canvas) {
         canvas.fill_text(label, bp.x + 4, bp.y + 13);
     }
 
-    // WYSIWYG QA BUG 4 — while an inline text edit is active on the selected
-    // element, the orange resize box + handles obstruct the text and resize is
-    // meaningless mid-edit. Draw a SUBTLE thin blue outline (no fill, no
-    // handles) instead; the caret + blue selection band come from
+    // While an inline text edit is active on the selected element, the orange
+    // resize box + handles obstruct the text and resize is meaningless
+    // mid-edit. Draw a SUBTLE thin blue outline (no fill, no handles) instead;
+    // the caret + blue selection band come from
     // paint_text_edit_overlay(). Gated purely on text_editing() so selecting
     // in Select mode is unchanged.
     if (selected_ && selection_uses_subtle_edit_outline()) {
@@ -338,8 +335,8 @@ void InspectorOverlay::paint_highlight(Canvas& canvas) {
         canvas.set_line_width(2.0f);
         canvas.stroke_rect(r.x, r.y, r.width, r.height);
 
-        // Phase 3a — drag handles. Only when dragging mode is on (opt-
-        // in via D key). Four 8×8 filled squares at the corners. The
+        // Drag handles. Only when dragging mode is on (opt-in via D key). Four
+        // 8×8 filled squares at the corners. The
         // actively-dragged corner paints in a brighter shade so the
         // user sees which handle they grabbed even if the cursor
         // moves slightly off the original target.
@@ -361,7 +358,7 @@ void InspectorOverlay::paint_highlight(Canvas& canvas) {
             paint_handle(r.x + r.width,   r.y,              DragCorner::ne);
             paint_handle(r.x,             r.y + r.height,   DragCorner::sw);
             paint_handle(r.x + r.width,   r.y + r.height,   DragCorner::se);
-            // WYSIWYG P2h — edge midpoint handles (single-axis resize).
+            // Edge midpoint handles (single-axis resize).
             const float mx = r.x + r.width * 0.5f;
             const float my = r.y + r.height * 0.5f;
             paint_handle(mx,              r.y,              DragCorner::n);
@@ -370,16 +367,16 @@ void InspectorOverlay::paint_highlight(Canvas& canvas) {
             paint_handle(r.x,             my,               DragCorner::w);
         }
 
-        // P2 grid guard affordance: when a body-drag was refused because
-        // the selected view's parent is a grid container, surface a clear
-        // "can't move grid child" badge near the top-left of the box so
-        // the no-op isn't mysterious.
+        // Grid guard affordance: when a body-drag was refused because the
+        // selected view's parent is a grid container, surface a clear "can't
+        // move grid child" badge near the top-left of the box so the no-op
+        // isn't mysterious.
         if (move_refused_grid_) {
             const std::string msg = "grid child - move disabled";
             canvas.set_font("monospace", kFontSize);
             float tw = canvas.measure_text(msg);
-            // WYSIWYG P6 FIX 2 — flip below + edge-clamp like the hover badge
-            // so it doesn't clip under the window top.
+            // Flip below and edge-clamp like the hover badge so it doesn't
+            // clip under the window top.
             constexpr float kBadgeH = 16.0f;
             auto bp = compute_badge_placement(r.x, r.y, r.height, tw + 10,
                                               kBadgeH, root_.bounds().width,
@@ -474,7 +471,7 @@ void InspectorOverlay::paint_distance_lines(Canvas& canvas) {
     // Existing: Alt+click sticky distance-anchor mode
     paint_one(distance_anchor_, selected_);
 
-    // Phase 3f: Alt-hover sibling distance (Figma-style spacing reveal).
+    // Alt-hover sibling distance (Figma-style spacing reveal).
     // While Alt is held during hover, dynamically paint a line from the
     // current selection to the view under the cursor. The two modes can
     // coexist — sticky anchor + live hover — for richer measurement.
@@ -548,16 +545,13 @@ void InspectorOverlay::paint_panel(Canvas& canvas) {
 
     float stats_y = root_h - kStatsBarHeight;
 
-    // Helper: paint the middle "props" region. Phase 6.1 — when the
-    // per-pass attribution viewer is toggled on (P-key), it takes over
-    // this region instead of the property panel; the tree section above
-    // is untouched so the user keeps navigation context. Phase 5.2 —
-    // the reconciliation tab (R-key) takes over the same region with
-    // the same discipline. Phase 6.2 — the texture-atlas viewer (A-key)
-    // is the third tab to claim this region. Precedence when multiple
-    // are toggled, oldest surface wins: pass viewer > reconciliation >
-    // atlas viewer > props. The losers' cached row counts are reset so
-    // reconcile_row_count() / atlas_row_count() never report a stale
+    // Helper: paint the middle "props" region. The per-pass attribution viewer
+    // (P-key), reconciliation tab (R-key), and texture-atlas viewer (A-key)
+    // each take over this region instead of the property panel; the tree
+    // section above is untouched so the user keeps navigation context.
+    // Precedence when multiple are toggled, oldest surface wins: pass viewer >
+    // reconciliation > atlas viewer > props. The losers' cached row counts are
+    // reset so reconcile_row_count() / atlas_row_count() never report a stale
     // layout for a tab that did not paint this frame.
     auto paint_middle = [&](float x, float y, float w, float h) {
         if (pass_viewer_enabled_) {
@@ -578,9 +572,9 @@ void InspectorOverlay::paint_panel(Canvas& canvas) {
     };
 
     if (tweaks_panel_visible_) {
-        // Phase 2.5 layout: tree (top third), props (middle third),
-        // tweaks management panel (bottom third). When the panel is
-        // hidden the legacy two-section layout is used (below).
+        // Three-section layout: tree (top third), props (middle third), tweaks
+        // management panel (bottom third). When the panel is hidden the
+        // two-section layout is used (below).
         float section_h = (stats_y) / 3.0f;
 
         float cursor_y = 4.0f;
@@ -590,9 +584,9 @@ void InspectorOverlay::paint_panel(Canvas& canvas) {
         canvas.set_stroke_color(Color::rgba(0.3f, 0.3f, 0.35f, 0.5f));
         canvas.stroke_line(panel_x + 8, props_y, root_w - 8, props_y);
 
-        // Phase 2 — drift drawer sits directly under the tree divider.
-        // Paints nothing (and returns 0) when there is no drift, so the
-        // props section is unaffected on the happy path.
+        // The drift drawer sits directly under the tree divider. Paints
+        // nothing (and returns 0) when there is no drift, so the props section
+        // is unaffected on the happy path.
         float drift_h = paint_drift_drawer(canvas, panel_x + 8, props_y + 4,
                                            panel_width_ - 16);
         paint_middle(panel_x + 8, props_y + 4 + drift_h,
@@ -604,7 +598,7 @@ void InspectorOverlay::paint_panel(Canvas& canvas) {
         paint_tweaks_section(canvas, panel_x + 8, tweaks_y + 4,
                              panel_width_ - 16, stats_y - tweaks_y - 8);
     } else {
-        // Legacy two-section layout (pre-2.5).
+        // Two-section layout when the tweaks panel is hidden.
         tweak_rows_.clear();
         float tree_height = root_h * 0.5f;
         float cursor_y = 4.0f;
@@ -614,9 +608,9 @@ void InspectorOverlay::paint_panel(Canvas& canvas) {
         canvas.set_stroke_color(Color::rgba(0.3f, 0.3f, 0.35f, 0.5f));
         canvas.stroke_line(panel_x + 8, props_y, root_w - 8, props_y);
 
-        // Phase 2 — drift drawer sits directly under the tree divider.
-        // Paints nothing (and returns 0) when there is no drift, so the
-        // props section is unaffected on the happy path.
+        // The drift drawer sits directly under the tree divider. Paints
+        // nothing (and returns 0) when there is no drift, so the props section
+        // is unaffected on the happy path.
         float drift_h = paint_drift_drawer(canvas, panel_x + 8, props_y + 4,
                                            panel_width_ - 16);
         paint_middle(panel_x + 8, props_y + 4 + drift_h,
@@ -688,13 +682,12 @@ void InspectorOverlay::paint_props_section(Canvas& canvas, float x, float y, flo
     float line_y = y + 4;
     float line_h = 15.0f;
 
-    // Phase 0b PR-C-2 — dot indicator for properties with local tweaks.
-    // When the TweakStore (PR-A) has an entry for this view's anchor at
-    // the given dotted path, paint a small orange dot in the gutter to
-    // the LEFT of the label. The label/value text remains untouched so
-    // the row still reads cleanly without color. The dot stays small
-    // (3px radius) so the panel doesn't pulse with visual noise when
-    // many tweaks are active. Designed to live next to (not over) the
+    // Dot indicator for properties with local tweaks. When the TweakStore has
+    // an entry for this view's anchor at the given dotted path, paint a small
+    // orange dot in the gutter to the LEFT of the label. The label/value text
+    // remains untouched so the row still reads cleanly without color. The dot
+    // stays small (3px radius) so the panel doesn't pulse with visual noise
+    // when many tweaks are active. Designed to live next to (not over) the
     // existing label column at x.
     auto has_tweak = [&](std::string_view path) -> bool {
         if (!tweak_store_) return false;
@@ -729,10 +722,10 @@ void InspectorOverlay::paint_props_section(Canvas& canvas, float x, float y, flo
         line_y += line_h;
     };
 
-    // Phase 3b — emit one editable numeric row. Reserves a click-hit
-    // rect in editable_fields_ keyed by dotted property path. If this
-    // is the row currently being edited, draws the live edit_buffer_
-    // text with a thin underline + caret instead of the static value.
+    // Emit one editable numeric row. Reserves a click-hit rect in
+    // editable_fields_ keyed by dotted property path. If this is the row
+    // currently being edited, draws the live edit_buffer_ text with a thin
+    // underline + caret instead of the static value.
     auto draw_editable = [&](const std::string& label,
                              const std::string& field_path,
                              float value,
@@ -747,11 +740,11 @@ void InspectorOverlay::paint_props_section(Canvas& canvas, float x, float y, flo
         Rect hit{value_x, line_y, value_w, line_h};
         editable_fields_.push_back({field_path, hit, value});
 
-        // Phase 0b PR-C-2 — dot indicator coexists with Phase 3b edit
-        // mode. The tweak-path here matches the field_path the editable
-        // emits on commit, so an edit immediately shows a dot next time
-        // the panel paints (and clears when bypassed). Drawn before the
-        // label so the label/value text remains untouched.
+        // Dot indicator coexists with editable-field mode. The tweak-path here
+        // matches the field_path the editable emits on commit, so an edit
+        // immediately shows a dot next time the panel paints (and clears when
+        // bypassed). Drawn before the label so the label/value text remains
+        // untouched.
         if (!field_path.empty() && has_tweak(field_path)) {
             canvas.set_fill_color(Color::rgba(1.0f, 0.5f, 0.0f, 0.9f));
             canvas.fill_circle(x - 6, line_y + 8, 3);
@@ -786,10 +779,10 @@ void InspectorOverlay::paint_props_section(Canvas& canvas, float x, float y, flo
             canvas.stroke_line(value_x, line_y + line_h - 1,
                                value_x + value_w, line_y + line_h - 1);
         } else {
-            // Non-edit state: just the value text. The hit-rect is
-            // invisible — Phase 3b intentionally keeps the chrome
-            // minimal; a hover-cursor hint is future-work for the
-            // platform host (see editable_field_at()).
+            // Non-edit state: just the value text. The hit-rect is invisible;
+            // editable-field mode intentionally keeps the chrome minimal; a
+            // hover-cursor hint is future-work for the platform host (see
+            // editable_field_at()).
             canvas.set_fill_color(kPanelText);
             canvas.fill_text(formatted_value, value_x, line_y + 11);
         }
@@ -801,7 +794,7 @@ void InspectorOverlay::paint_props_section(Canvas& canvas, float x, float y, flo
     auto type = ViewInspector::type_name(*selected_);
     draw_heading(type + (selected_->id().empty() ? "" : " #" + selected_->id()));
 
-    // Phase 5.1 — authored-source row. When the selected view carries a
+    // Authored-source row. When the selected view carries a
     // `__source` provenance record (set via the JS bridge's setSource()
     // for JSX-imported views), show "file:line" and a hint that the J
     // hotkey jumps to it. Hidden entirely for non-imported views so the
@@ -827,12 +820,12 @@ void InspectorOverlay::paint_props_section(Canvas& canvas, float x, float y, flo
     draw_label("absolute", std::to_string(static_cast<int>(abs.x)) + ", " +
                std::to_string(static_cast<int>(abs.y)));
 
-    // Visibility (not editable in Phase 3b — Phase 0b PR-C-2 adds dot)
+    // Visibility is not editable here, but still shows the tweak dot.
     draw_label("visible", selected_->visible() ? "true" : "false", "paint.visible");
 
-    // Phase 3b editable: opacity (always present, default 1.0).
-    // Phase 0b PR-C-2: draw_editable now also paints the tweak dot when
-    // style.opacity has a TweakStore entry.
+    // Editable: opacity (always present, default 1.0).
+    // draw_editable also paints the tweak dot when style.opacity has a
+    // TweakStore entry.
     {
         float op = selected_->opacity();
         std::ostringstream oss;
@@ -857,9 +850,9 @@ void InspectorOverlay::paint_props_section(Canvas& canvas, float x, float y, flo
     if (f.flex_shrink != 1.0f) draw_label("shrink", std::to_string(f.flex_shrink), "layout.shrink");
     if (f.gap > 0) draw_label("gap", std::to_string(static_cast<int>(f.gap)), "layout.gap");
 
-    // Phase 3b editable: width / height — uses preferred_width /
-    // preferred_height which are the Yoga flex INPUTS (Codex Phase 3
-    // correction: set_bounds is an output that Yoga overwrites).
+    // Editable: width / height edit flex INPUTS
+    // (preferred_width / preferred_height); set_bounds is layout OUTPUT that
+    // Yoga overwrites each pass.
     {
         std::ostringstream oss;
         oss << static_cast<int>(f.preferred_width);
@@ -871,7 +864,7 @@ void InspectorOverlay::paint_props_section(Canvas& canvas, float x, float y, flo
         draw_editable("height", "layout.height", f.preferred_height, oss.str());
     }
 
-    // Phase 3b editable: padding (uniform). Per-side editing is a
+    // Editable: padding (uniform). Per-side editing is a
     // future enhancement — exposed via the per-side rows below when
     // per-side overrides are already in use, otherwise the uniform
     // single field is the clean common case.
@@ -881,7 +874,7 @@ void InspectorOverlay::paint_props_section(Canvas& canvas, float x, float y, flo
         draw_editable("padding", "layout.padding", f.padding, oss.str());
     }
 
-    // Phase 3b editable: margin (uniform).
+    // Editable: margin (uniform).
     {
         std::ostringstream oss;
         oss << static_cast<int>(f.margin);
@@ -962,11 +955,10 @@ void InspectorOverlay::paint_stats_bar(Canvas& canvas, float x, float y, float w
         canvas.fill_text("No render stats", x + 8, y + 16);
     }
 
-    // Phase 3c — active-mode hint. Drag (D) and eyedropper (E) are
-    // mutually informative; show whichever is armed so the user
-    // remembers a non-default canvas mode is in effect. Placed at the
-    // bar midpoint so it never overlaps the left-aligned frame-time
-    // readout or the right-aligned view count.
+    // Active-mode hint. Drag (D) and eyedropper (E) are mutually informative;
+    // show whichever is armed so the user remembers a non-default canvas mode
+    // is in effect. Placed at the bar midpoint so it never overlaps the
+    // left-aligned frame-time readout or the right-aligned view count.
     if (eyedropper_active_ || dragging_enabled_) {
         canvas.set_fill_color(kFieldEditCaret);
         const char* mode = eyedropper_active_ ? "\xe2\x97\x89 eyedropper"
@@ -980,11 +972,11 @@ void InspectorOverlay::paint_stats_bar(Canvas& canvas, float x, float y, float w
     canvas.fill_text(std::to_string(count) + " views", x + w - 60, y + 16);
 }
 
-// Phase 6.1 — the per-pass GPU/render attribution viewer
-// (capture_pass_frame / pass_attribution / paint_pass_attribution) is
-// defined in inspector_overlay_pass_viewer.cpp.
+// The per-pass GPU/render attribution viewer (capture_pass_frame /
+// pass_attribution / paint_pass_attribution) is defined in
+// inspector_overlay_pass_viewer.cpp.
 
-// ── Phase 2.5 — Tweak management panel (Photoshop-layers style) ─────────────
+// ── Tweak management panel (Photoshop-layers style) ────────────────────────
 //
 // Lists every tweak in the attached TweakStore, grouped by anchor.
 // Each tweak is a "layer" with three per-tweak controls:
@@ -1214,22 +1206,21 @@ InspectorOverlay::tweak_action_at(Point p, std::size_t& out_row) const {
     return TweakAction::none;
 }
 
-// ── Phase 5.2 — Reconciliation tab ──────────────────────────────────────────
+// ── Reconciliation tab ─────────────────────────────────────────────────────
 //
 // A read-only report tab (R-key) showing, per tweak, whether the edit
 // will survive a fresh design re-import. It classifies every stored
 // tweak via reconcile_report() and renders one row each with a
-// color-coded status badge. Like the Phase 6.1 pass viewer it takes
-// over the property-panel region; unlike the tweak management panel it
-// has no interactive controls — it is purely informational, so there
-// are no hit-rects to record.
+// color-coded status badge. Like the pass viewer it takes over the
+// property-panel region; unlike the tweak management panel it has no
+// interactive controls — it is purely informational, so there are no hit-rects
+// to record.
 
 void InspectorOverlay::paint_reconcile_tab(Canvas& canvas, float x, float y,
                                            float w, float h) {
     // Status badge colors — green = reconciled (safe), amber = drift
     // (runtime-only), red = unresolvable (orphaned). The amber/red pair
-    // matches the Phase 2 drift drawer so the two surfaces read
-    // consistently.
+    // matches the drift drawer so the two surfaces read consistently.
     const Color kLockedColor = Color::rgba(0.35f, 0.85f, 0.45f, 1.0f);
     const Color kDriftColor  = Color::rgba(0.95f, 0.65f, 0.25f, 1.0f);
     const Color kUnresColor  = Color::rgba(0.95f, 0.40f, 0.38f, 1.0f);
@@ -1321,16 +1312,15 @@ void InspectorOverlay::paint_reconcile_tab(Canvas& canvas, float x, float y,
     canvas.restore();
 }
 
-// ── Phase 6.2 — Texture atlas viewer ────────────────────────────────────────
+// ── Texture atlas viewer ───────────────────────────────────────────────────
 //
 // A read-only GPU-perf observability tab that answers "is my SDF atlas
 // thrashing?". It renders the render layer's texture-atlas inventory —
 // per-atlas dimensions, page count, live entry count, and a shelf-packer
-// occupancy bar. Like the Phase 6.1 pass viewer and Phase 5.2
-// reconciliation tab it takes over the property-panel region; it has no
-// interactive controls (purely informational), so there are no hit-rects
-// to record. Degrades gracefully to a "GPU atlas unavailable" line when
-// no inventory is wired (headless / GPU-off builds).
+// occupancy bar. Like the pass viewer and reconciliation tab it takes over the
+// property-panel region; it has no interactive controls (purely informational),
+// so there are no hit-rects to record. Degrades gracefully to a "GPU atlas
+// unavailable" line when no inventory is wired (headless / GPU-off builds).
 
 void InspectorOverlay::paint_atlas_tab(Canvas& canvas, float x, float y,
                                        float w, float h) {
@@ -1428,7 +1418,7 @@ void InspectorOverlay::paint_atlas_tab(Canvas& canvas, float x, float y,
     canvas.restore();
 }
 
-// ── Phase 2 — Drift drawer ──────────────────────────────────────────────────
+// ── Drift drawer ────────────────────────────────────────────────────────────
 //
 // A collapsible warning panel that lists tweaks whose anchor / property
 // no longer maps to the live design. Header is always shown when drift
@@ -1491,8 +1481,8 @@ float InspectorOverlay::paint_drift_drawer(Canvas& canvas, float x, float y,
     for (std::size_t i = 0; i < shown_rows; ++i) {
         const auto& d = drifted_[i];
 
-        // Left red marker stripe — matches Phase 2.5's planned
-        // drift-row styling so the two panels read consistently.
+        // Left red marker stripe matches the tweak-row styling so the two
+        // panels read consistently.
         canvas.set_fill_color(kDriftBorder);
         canvas.fill_rect(x, row_y + 2, 2.0f, kDriftRowH - 4);
 

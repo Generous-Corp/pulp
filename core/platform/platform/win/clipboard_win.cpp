@@ -3,10 +3,9 @@
 // The previous implementation stored text/data in process-local maps
 // (`g_text`/`g_data`), which fake-succeeded: copy/paste looked to work inside
 // Pulp but never reached the system clipboard, so other applications saw
-// nothing (the #300 anti-pattern this file now fixes for Windows, mirroring
-// the Linux clipboard's honest wl-copy/xclip path). This impl talks to the OS
-// clipboard or returns false/nullopt so callers can detect the unsupported
-// case (e.g. a session with no window station). No in-process shadow storage.
+// nothing. This implementation talks to the OS clipboard or returns
+// false/nullopt so callers can detect the unsupported case (e.g. a session with
+// no window station). No in-process shadow storage.
 //
 // Text is exchanged as CF_UNICODETEXT (UTF-16), converted to/from UTF-8 at the
 // boundary. Binary blobs use a per-type registered clipboard format

@@ -1,4 +1,4 @@
-// pulp #135 Phase B — runtime keyboard shortcut injection tests.
+// Runtime keyboard shortcut injection tests.
 //
 // Pins the parser, the C++-bridge call shape, and the clash-detection
 // contract. The hook itself is tested by mounting a real React tree

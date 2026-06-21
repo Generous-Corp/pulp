@@ -1,12 +1,3 @@
-// widgets/<name>.cpp — extracted from core/view/src/widgets.cpp in the
-// 2026-05 Phase 2 (R2-6) batch. The 2,081-line widgets monolith was
-// adding 20+ touches/60 days and producing constant cross-widget merge
-// conflicts; splitting per major widget gives each its own conflict
-// surface.
-//
-// Per Codex's R2-6 risk callout, no header changes — every public
-// declaration stays in core/view/include/pulp/view/widgets.hpp.
-
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/animation.hpp>
 #include <pulp/view/frame_clock.hpp>
@@ -26,35 +17,29 @@ namespace pulp::view {
 // ── Label ────────────────────────────────────────────────────────────────────
 
 float Label::intrinsic_height() const {
-    // issue-969: cascade font_size before computing height so descendants
-    // of a parent that called setInheritableFontSize report a height that
-    // actually matches what paint() will draw.
+    // Cascade font_size before computing height so descendants of a parent
+    // that called setInheritableFontSize report a height that matches what
+    // paint() will draw.
     float effective_font_size = font_size_;
     if (!has_own_font_size_) {
         if (auto inh = inheritable_font_size(); inh.has_value())
             effective_font_size = inh.value();
     }
 
-    // pulp #2163 / font v2 Slice 1.2.b — prefer the shaper's real
-    // metrics (worst-case ascent + descent from SkFontMetrics fTop/
-    // fBottom + empirical safety margin gated by
-    // PULP_FONT_NO_SAFETY_MARGIN) over the legacy `font_size * 1.6` /
-    // `font_size * 1.4` multiplier from pulp-internal #76. Real
-    // metrics make `intrinsic_height` track what paint() actually
-    // draws (the same shaper cache feeds Label::paint baseline math
-    // and the Yoga measure callback), and let the env-var-gated
-    // empirical margin actually affect intrinsic box sizes — which is
-    // the prerequisite for the Slice 1.3 parity harness retiring it
-    // entirely. Falls back to the legacy multiplier only when the
-    // shaper hasn't resolved real metrics (no Skia / family
-    // unresolvable).
+    // Prefer the shaper's real metrics (worst-case ascent + descent from
+    // SkFontMetrics fTop/fBottom plus the PULP_FONT_NO_SAFETY_MARGIN-gated
+    // empirical safety margin) over the `font_size * 1.6` / `font_size * 1.4`
+    // multiplier. Real metrics make `intrinsic_height` track what paint()
+    // draws, because the same shaper cache feeds Label::paint baseline math
+    // and the Yoga measure callback. Falls back to the multiplier only when
+    // the shaper hasn't resolved real metrics (no Skia / family unresolvable).
     //
-    // pulp-internal #76 history: small fonts (< 12px) had
-    // `font_size * 1.6` instead of `font_size * 1.4` because Inter's
-    // typographic ascent+descent was ~13px at fs=10 and the painter's
-    // GPU clip-rect shaved descenders. Real fTop/fBottom metrics
-    // already cover that case (they include caps + descenders by
-    // construction) plus the empirical safety margin.
+    // Small fonts (< 12px) use `font_size * 1.6` instead of
+    // `font_size * 1.4` because the fixed-multiplier fallback needs extra
+    // headroom at small sizes, where a 1.4 line box left descenders clipped
+    // under the GPU clip-rect. Real fTop/fBottom metrics already cover that
+    // case (they include caps + descenders by construction) plus the empirical
+    // safety margin.
     std::string effective_family = font_family_;
     if (effective_family.empty()) {
         if (auto inh = inheritable_font_family(); inh.has_value())
@@ -75,13 +60,11 @@ float Label::intrinsic_height() const {
         lh = effective_font_size * lh_mult;
     }
 
-    // pulp-internal #74 — when the Label is multi_line, the reserved
-    // height must reflect the number of lines paint() will emit, not a
-    // hard-coded one-line metric. Otherwise Yoga reserves only `lh` of
-    // vertical room and the parent (overflow:hidden on the toolbar / row
-    // gap on Settings-modal section subtitles) clips every line after
-    // the first. Spectr's Settings-modal description paragraphs are the
-    // motivating case.
+    // When the Label is multi_line, the reserved height must reflect the
+    // number of lines paint() will emit, not a hard-coded one-line metric.
+    // Otherwise Yoga reserves only `lh` of vertical room and the parent
+    // (overflow:hidden on the toolbar / row gap on Settings-modal section
+    // subtitles) clips every line after the first.
     //
     // The \n count is the lower bound here. Soft-wrap (no \n but text
     // exceeds the available width) needs the width Yoga passes to the
@@ -96,14 +79,13 @@ float Label::intrinsic_height() const {
         for (char c : text_) {
             if (c == '\n') ++line_count;
         }
-        // pulp #1969 Codex P2 — don't reserve a phantom line for a trailing
-        // newline. Label::paint()'s `\n`-split loop emits one line per
-        // *non-trailing* `\n` plus the final segment, so `"Title\n"` paints
-        // exactly one visible line. If we keep the naive `\n`-count + 1
-        // here, Yoga reserves extra vertical whitespace that paint never
-        // fills, breaking CSS-style vertical-align centering and shifting
-        // siblings down. Matches the line-box counting CSS uses for
-        // `white-space: pre`.
+        // Don't reserve a phantom line for a trailing newline.
+        // Label::paint()'s `\n`-split loop emits one line per non-trailing
+        // `\n` plus the final segment, so `"Title\n"` paints exactly one
+        // visible line. If we keep the naive `\n`-count + 1 here, Yoga
+        // reserves extra vertical whitespace that paint never fills, breaking
+        // CSS-style vertical-align centering and shifting siblings down.
+        // Matches the line-box counting CSS uses for `white-space: pre`.
         if (text_.back() == '\n') --line_count;
         // Honor line-clamp if explicitly set — paint() will only emit
         // `line_clamp_` lines, so reserving more height is wasteful and
@@ -116,15 +98,12 @@ float Label::intrinsic_height() const {
 }
 
 float Label::measured_height(float available_width) const {
-    // pulp-internal #74 — width-aware height for multi_line Labels with
-    // soft-wrap. The Yoga measure callback receives the available width
-    // during layout, which is the only place we can run the shaper to
-    // figure out how many lines a soft-wrap block will actually produce.
-    // Without this hook, Yoga reserves exactly one line `lh` and any
-    // wrapped line past the first paints into sibling territory and is
-    // visually clipped (Spectr Settings modal section subtitles, any
-    // dropdown label, any flex-row chrome that uses bounded-width
-    // multi-line text).
+    // Width-aware height for multi_line Labels with soft-wrap. The Yoga
+    // measure callback receives the available width during layout, which is
+    // the only place we can run the shaper to figure out how many lines a
+    // soft-wrap block will actually produce. Without this hook, Yoga reserves
+    // exactly one line `lh` and any wrapped line past the first paints into
+    // sibling territory and is visually clipped.
     //
     // Contract:
     //   • single-line labels                 → intrinsic_height() (legacy).
@@ -143,8 +122,8 @@ float Label::measured_height(float available_width) const {
         if (auto inh = inheritable_font_size(); inh.has_value())
             effective_font_size = inh.value();
     }
-    // Match intrinsic_height's small-font multiplier (pulp-internal #76)
-    // so the measured line height is consistent with what paint() draws.
+    // Match intrinsic_height's small-font multiplier so the measured line
+    // height is consistent with what paint() draws.
     const float lh_mult = effective_font_size < 12.0f ? 1.6f : 1.4f;
     const float lh = line_height_ > 0 ? line_height_ : effective_font_size * lh_mult;
 
@@ -173,9 +152,9 @@ float Label::measured_height(float available_width) const {
     auto& shaper = canvas::global_text_shaper();
     auto prepared = shaper.prepare(display_text, family, effective_font_size);
 
-    // Use the same break_mode pulp paint uses (CSS word-break / overflow-
-    // wrap; Label paint reads `View::word_break()` at draw time, the
-    // measure path mirrors that decision).
+    // Use the same break_mode paint uses (CSS word-break / overflow-wrap;
+    // Label paint reads `View::word_break()` at draw time, the measure path
+    // mirrors that decision).
     const std::string wb = word_break();
     canvas::BreakMode break_mode = canvas::BreakMode::normal;
     if      (wb == "break-word") break_mode = canvas::BreakMode::break_word;
@@ -189,16 +168,10 @@ float Label::measured_height(float available_width) const {
 }
 
 float Label::baseline_y() const {
-    // pulp #2163 / font-v2 Slice 1.1.b — baseline offset from the top
-    // of the Label's box, used by Yoga's YGNodeSetBaselineFunc to
-    // honor `align-items: baseline` on flex containers. The CHAIN INFO
-    // panel in Chainer (#2163) is the canonical canary: bold labels
-    // (OSC / ENV / XOVER / ...) and description text (polywave generator
-    // / ADSR shaper / ...) share a flex row but render top-aligned
-    // because Yoga's measure callback today returns only width+height,
-    // never a baseline. Without that channel, `align-items: baseline`
-    // silently degrades to top-align of unequal-height boxes — exactly
-    // the visible misalignment we're fixing.
+    // Baseline offset from the top of the Label's box, used by Yoga's
+    // YGNodeSetBaselineFunc to honor `align-items: baseline` on flex
+    // containers. Without that channel, `align-items: baseline` silently
+    // degrades to top-align of unequal-height boxes.
     //
     // The baseline of a single line of text sits at `ascent` distance
     // below the top of the worst-case glyph box (SkFontMetrics::fTop
@@ -220,7 +193,7 @@ float Label::baseline_y() const {
 
     // Skia's SkFontMetrics-derived ascent (PreparedText::ascent() flips
     // SkFontMetrics::fAscent positive). The painter computes baseline_y
-    // from the same prepared metrics — see widgets/label.cpp paint() —
+    // from the same prepared metrics — see paint() —
     // so what Yoga sees here matches where the glyphs actually land.
     // For a Label with no text we still need a sensible baseline so a
     // baseline-aligned row of widgets (some text, some not) doesn't
@@ -231,28 +204,25 @@ float Label::baseline_y() const {
     float ascent = prepared.ascent();
     if (ascent <= 0.0f) {
         // Fallback when shaper metrics aren't real (no Skia, family
-        // unresolvable): use the same 0.85 × font_size heuristic that
-        // pre-#2163 paint code used. Better than returning 0 and
-        // collapsing the baseline-aligned row.
+        // unresolvable): use the 0.85 × font_size heuristic. Better than
+        // returning 0 and collapsing the baseline-aligned row.
         ascent = effective_font_size * 0.85f;
     }
     return ascent;
 }
 
 float Label::intrinsic_width() const {
-    // issue-928: report the natural shaped-text width so Yoga reserves
-    // enough horizontal space for the full label content. Without this,
-    // long labels in flex-row containers (e.g. Spectr's "ZOOMABLE FILTER
-    // BANK" header) inherit a small parent width and clip mid-word.
+    // Report the natural shaped-text width so Yoga reserves enough horizontal
+    // space for the full label content. Without this, long labels in flex-row
+    // containers inherit a small parent width and clip mid-word.
     //
     // For multi-line labels we deliberately return 0 so the parent
     // container's available width drives line wrapping instead of the
     // single-line text width.
     if (text_.empty() || multi_line_) return 0;
 
-    // issue-969: intrinsic measurement must match what paint() will
-    // actually draw, so honor the same own→inherited cascade for
-    // font_size and letter_spacing.
+    // Intrinsic measurement must match what paint() will actually draw, so
+    // honor the same own→inherited cascade for font_size and letter_spacing.
     float effective_font_size = font_size_;
     if (!has_own_font_size_) {
         if (auto inh = inheritable_font_size(); inh.has_value())
@@ -264,14 +234,14 @@ float Label::intrinsic_width() const {
             effective_letter_spacing = inh.value();
     }
 
-    // pulp #943 P2 / #945: when paint() rotates the text 90° the
-    // horizontal footprint is just the line height, not the shaped
-    // string advance. Reporting the advance here makes Yoga reserve
-    // far too much width for vertical labels and starves siblings.
+    // When paint() rotates the text 90°, the horizontal footprint is just the
+    // line height, not the shaped string advance. Reporting the advance here
+    // makes Yoga reserve far too much width for vertical labels and starves
+    // siblings.
     bool vertical = (text_direction_ == canvas::TextDirection::top_to_bottom ||
                      text_direction_ == canvas::TextDirection::bottom_to_top);
     if (vertical) {
-        // pulp-internal #76 — same small-font-size bump as intrinsic_height.
+        // Same small-font-size bump as intrinsic_height.
         const float lh_mult = effective_font_size < 12.0f ? 1.6f : 1.4f;
         return std::ceil(line_height_ > 0 ? line_height_ : effective_font_size * lh_mult);
     }
@@ -301,15 +271,13 @@ float Label::intrinsic_width() const {
     // to a character-width estimator otherwise — same fallback that
     // Canvas::measure_text() uses on the recording / non-Skia backends.
     //
-    // pulp #2163 — must use the Label's actual font_family, not a
-    // hardcoded "Inter". Different families have very different
-    // metrics: monospaced fonts (IBM Plex Mono ~0.6em per glyph) are
-    // ~20% wider than proportional Inter (~0.5em average) at the same
-    // size. Under-reserving width caused imported designs (Chainer JSX)
-    // to clip labels like "XOVER → lo_freq" to "XOVER → lo_fre" — Yoga
-    // reserved Inter's width while the painter drew the requested
-    // family's. Mirror paint()'s precedence: font_family_ if set, else
-    // inheritable_font_family() cascade, else default "Inter".
+    // Use the Label's actual font_family, not a hardcoded "Inter". Different
+    // families have very different metrics: monospaced fonts such as IBM Plex
+    // Mono are materially wider than proportional Inter at the same size.
+    // Under-reserving width clips imported labels (for example,
+    // "XOVER → lo_freq") because Yoga reserves Inter's width while the painter
+    // draws the requested family. Mirror paint()'s precedence: font_family_ if
+    // set, else inheritable_font_family() cascade, else default "Inter".
     std::string effective_family = font_family_;
     if (effective_family.empty()) {
         if (auto inh = inheritable_font_family(); inh.has_value())
@@ -324,8 +292,7 @@ float Label::intrinsic_width() const {
     // Letter-spacing adds extra advance per glyph break that isn't
     // captured by HarfBuzz shaping. Count UTF-8 *code points*, not
     // bytes — using `size()` over-applies spacing on multibyte input
-    // (CJK, accented Latin, emoji) and inflates intrinsic width
-    // (pulp #943 P2 #935 finding 2).
+    // (CJK, accented Latin, emoji) and inflates intrinsic width.
     if (effective_letter_spacing != 0 && !display_text.empty()) {
         std::size_t glyph_count = 0;
         for (unsigned char c : display_text) {
@@ -342,9 +309,9 @@ float Label::intrinsic_width() const {
     return std::ceil(width);
 }
 
-// pulp WYSIWYG caret-x — shared style/origin resolver. paint() and
-// text_edit_metrics() both call this so the inspector edit overlay's
-// caret/selection geometry can never drift from the rendered glyphs.
+// Shared style/origin resolver for paint() and text_edit_metrics(). Both call
+// this so the inspector edit overlay's caret/selection geometry can never
+// drift from the rendered glyphs.
 // Resolves the inherited size/weight/letter-spacing cascade, the family
 // fallback ("Inter"), slant, and the full text-align resolution (own →
 // inherited → match-parent walk → auto). `baseline_y` is the SINGLE-LINE
@@ -371,7 +338,7 @@ Label::ResolvedTextStyle Label::resolve_text_style() const {
     rs.family = font_family_.empty() ? std::string("Inter") : font_family_;
     rs.font_slant = font_style_;
 
-    // text-align cascade — own value wins, else inherited (issue-969).
+    // text-align cascade — own value wins, else inherited.
     LabelAlign align = text_align_;
     if (!has_own_text_align_) {
         if (auto inh = inheritable_text_align(); inh.has_value()) {
@@ -385,7 +352,7 @@ Label::ResolvedTextStyle Label::resolve_text_style() const {
         }
     }
     // match-parent resolution — walk ancestors for the first non-5 SET
-    // value (pulp #1434 / Codex P1 on #1879). Mirrors paint() exactly.
+    // value. Mirrors paint() exactly.
     if (align == LabelAlign::match_parent) {
         LabelAlign parent_resolved = LabelAlign::left;
         for (auto* anc = parent(); anc != nullptr; anc = anc->parent()) {
@@ -445,11 +412,11 @@ std::string Label::apply_text_transform(const std::string& in) const {
     return out;
 }
 
-// pulp #1737 — translate the CSS font-variant CSV → SkShaper Feature tags and
-// apply them to the canvas. Wires the storage-only View::font_variant_ slot
-// into the active paint. Empty CSV → clear features so the previous view's
-// settings don't bleed across paint calls. Each CSS keyword maps to its
-// OpenType feature tag (per CSS Fonts Module 4 §7.3):
+// Translate the CSS font-variant CSV to SkShaper Feature tags and apply them
+// to the canvas. Wires the storage-only View::font_variant_ slot into the
+// active paint. Empty CSV clears features so the previous view's settings
+// don't bleed across paint calls. Each CSS keyword maps to its OpenType
+// feature tag (per CSS Fonts Module 4 §7.3):
 //   tabular-nums       → tnum
 //   small-caps         → smcp
 //   oldstyle-nums      → onum
@@ -542,7 +509,7 @@ Label::TextEditMetrics Label::text_edit_metrics(canvas::Canvas& canvas,
 }
 
 LabelAlign Label::resolve_effective_align_() {
-    // issue-969: text-align cascade. Own value wins, otherwise inherited.
+    // text-align cascade. Own value wins, otherwise inherited.
     LabelAlign effective = text_align_;
     if (!has_own_text_align_) {
         if (auto inh = inheritable_text_align(); inh.has_value()) {
@@ -555,10 +522,10 @@ LabelAlign Label::resolve_effective_align_() {
             else effective = LabelAlign::left;
         }
     }
-    // pulp #1434 — resolve `match-parent` at paint time: the computed value
-    // matches the parent's resolved text-align. Walk the ancestor chain
-    // manually (skipping intermediate match-parent ancestors); fall back to
-    // `left` (CSS default) if no ancestor sets a concrete value. See PR #1879.
+    // Resolve `match-parent` at paint time: the computed value matches the
+    // parent's resolved text-align. Walk the ancestor chain manually (skipping
+    // intermediate match-parent ancestors); fall back to `left` (CSS default)
+    // if no ancestor sets a concrete value.
     if (effective == LabelAlign::match_parent) {
         LabelAlign parent_resolved = LabelAlign::left;
         for (auto* anc = parent(); anc != nullptr; anc = anc->parent()) {
@@ -575,8 +542,8 @@ LabelAlign Label::resolve_effective_align_() {
         }
         effective = parent_resolved;
     }
-    // pulp #1434 — `auto` is writing-direction-relative; Pulp is LTR-only for
-    // now, so `auto` degrades to `left`.
+    // `auto` is writing-direction-relative; Pulp is LTR-only for now, so
+    // `auto` degrades to `left`.
     if (effective == LabelAlign::auto_) effective = LabelAlign::left;
     return effective;
 }
@@ -592,7 +559,7 @@ void Label::paint_attributed_(canvas::Canvas& canvas) {
     const float baseline = bounds().height * 0.5f + fs * 0.32f;
     // Each span is drawn left-anchored at an explicit x, so honor text-align
     // by shifting the STARTING x rather than the canvas anchor (which only
-    // positions a single draw call). Measure the full run first. (Codex #3336.)
+    // positions a single draw call). Measure the full run first.
     canvas.set_text_align(canvas::TextAlign::left);
     float total = 0.0f;
     for (const auto& s : spans) {
@@ -621,7 +588,7 @@ void Label::paint(canvas::Canvas& canvas) {
     // multi-line / unstyled falls through to the single-style path below.
     if (has_attributed_ && !multi_line_) { paint_attributed_(canvas); return; }
 
-    // issue-969: CSS-style typography cascade. For each property:
+    // CSS-style typography cascade. For each property:
     //   1. Use the Label's own value if explicitly set.
     //   2. Otherwise walk up the parent chain via View::inheritable_*().
     //   3. Otherwise fall back to the existing theme/default behavior.
@@ -651,16 +618,16 @@ void Label::paint(canvas::Canvas& canvas) {
             effective_letter_spacing = inh.value();
     }
 
-    // pulp #927 — propagate setFontFamily / setFontWeight / setLetterSpacing
-    // through to the canvas backend so JS calls actually change rasterised
-    // glyphs. Empty font_family_ falls back to the default theme face.
+    // Propagate setFontFamily / setFontWeight / setLetterSpacing through to
+    // the canvas backend so JS calls actually change rasterised glyphs. Empty
+    // font_family_ falls back to the default theme face.
     const std::string& family = font_family_.empty() ? std::string("Inter") : font_family_;
     canvas.set_font_full(family, effective_font_size, effective_font_weight,
                           font_style_, effective_letter_spacing);
 
-    // pulp #1737 — apply the CSS font-variant CSV as SkShaper OpenType feature
-    // tags. Factored into apply_font_features() so text_edit_metrics() shapes
-    // the caret with the IDENTICAL features (WYSIWYG caret invariant).
+    // Apply the CSS font-variant CSV as SkShaper OpenType feature tags.
+    // Factored into apply_font_features() so text_edit_metrics() shapes the
+    // caret with the IDENTICAL features (WYSIWYG caret invariant).
     apply_font_features(canvas);
 
     // Apply text-transform
@@ -695,28 +662,24 @@ void Label::paint(canvas::Canvas& canvas) {
     }
 
     // Vertical alignment
-    // pulp-internal #76 — match intrinsic_height's small-font-size bump so
-    // multi-line / shaper-wrapped layout uses the same line-box height
-    // that Yoga reserved. Without matching here, an fs=10 multi-line
-    // label would size to 16px boxes but paint at 14px line height and
-    // siblings would not align.
+    // Match intrinsic_height's small-font-size bump so multi-line /
+    // shaper-wrapped layout uses the same line-box height that Yoga reserved.
+    // Without matching here, an fs=10 multi-line label would size to 16px
+    // boxes but paint at 14px line height and siblings would not align.
     const float lh_mult = effective_font_size < 12.0f ? 1.6f : 1.4f;
     float lh = line_height_ > 0 ? line_height_ : effective_font_size * lh_mult;
 
-    // pulp #1737 PR-2 / #1924 — CSS `white-space` / `overflow-wrap` /
-    // `word-break` soft-wrap path. Route any multi-line, bounded-width
-    // Label through TextShaper so CSS default `white-space: normal`
-    // soft-wraps at word boundaries (whitespace), and `break-word` /
-    // `anywhere` additionally split inside over-wide words.
+    // CSS `white-space` / `overflow-wrap` / `word-break` soft-wrap path.
+    // Route any multi-line, bounded-width Label through TextShaper so CSS
+    // default `white-space: normal` soft-wraps at word boundaries
+    // (whitespace), and `break-word` / `anywhere` additionally split inside
+    // over-wide words.
     //
-    // Pre-#1924 this gate also required `break_mode != normal`, which
-    // meant the default mode skipped the shaper and never soft-wrapped —
-    // dropdown labels (and any other multi_line Label without an
-    // explicit word-break) overflowed their container instead of
-    // wrapping. TextShaper's `BreakMode::normal` already preserves the
-    // legacy "whole-word overflow for a single unbroken word" behavior
-    // (see test_text_shaper.cpp [issue-1737]), so removing the gate
-    // brings Label in line with the CSS spec without regressing the
+    // Default `normal` mode also routes through TextShaper, so Labels without
+    // an explicit word-break still soft-wrap at whitespace. TextShaper's
+    // `BreakMode::normal` preserves whole-word overflow for a single unbroken
+    // word (pinned by the BreakMode::normal cases in test_text_shaper.cpp),
+    // which keeps Label in line with the CSS spec without regressing the
     // single-long-word case.
     //
     // The shaped layout is computed ONCE here and reused both for the
@@ -739,23 +702,21 @@ void Label::paint(canvas::Canvas& canvas) {
             prepared, bounds().width, lh, /*max_lines=*/0, break_mode);
     }
 
-    // pulp #1552 — when line-clamp drops source lines, the painted block
-    // height must reflect the *visible* line count, not the full newline
-    // count. Otherwise vertical-align: center / bottom positions the
-    // block as if the hidden lines were still rendered, leaving the
-    // visible lines offset upward (Codex P2 on PR #1573).
+    // When line-clamp drops source lines, the painted block height must
+    // reflect the visible line count, not the full newline count. Otherwise
+    // vertical-align: center / bottom positions the block as if the hidden
+    // lines were still rendered, leaving the visible lines offset upward.
     //
-    // pulp #1737 PR-2 — `source_lines` for the soft-wrap path is the
-    // shaped layout's line count (which already accounts for inside-word
-    // breaks). For the legacy path it stays count('\n') + 1.
+    // `source_lines` for the soft-wrap path is the shaped layout's line count
+    // (which already accounts for inside-word breaks). For the legacy path it
+    // stays count('\n') + 1.
     //
-    // pulp #1969 Codex P2 — drop a trailing newline before counting in the
-    // legacy path. The split-and-emit loop below stops once `pos ==
-    // display_text.size()`, so a trailing `\n` doesn't actually paint an
-    // extra line — but feeding the inflated count into `text_h` would
-    // mis-position vertical-align: center/bottom. The shaper path doesn't
-    // need a fix here because shaped_layout.line_count is the count the
-    // shaper actually produced.
+    // Drop a trailing newline before counting in the legacy path. The
+    // split-and-emit loop below stops once `pos == display_text.size()`, so a
+    // trailing `\n` doesn't actually paint an extra line — but feeding the
+    // inflated count into `text_h` would mis-position vertical-align:
+    // center/bottom. The shaper path doesn't need a fix here because
+    // shaped_layout.line_count is the count the shaper actually produced.
     int source_lines = multi_line_
         ? (use_shaper_wrap
                ? std::max(1, shaped_layout.line_count)
@@ -788,9 +749,9 @@ void Label::paint(canvas::Canvas& canvas) {
             break;
     }
 
-    // issue-969 / pulp #1434 — text-align cascade with `auto` + `match-parent`
-    // fully resolved. Shared with paint_attributed_() so per-range styled text
-    // honors the same alignment. (Codex #3336.)
+    // text-align cascade with `auto` + `match-parent` fully resolved. Shared
+    // with paint_attributed_() so per-range styled text honors the same
+    // alignment.
     const LabelAlign effective_text_align = resolve_effective_align_();
 
     float x = 0;
@@ -809,37 +770,36 @@ void Label::paint(canvas::Canvas& canvas) {
             x = bounds().width;
             break;
         case LabelAlign::justify:
-            // pulp #1434 — emit canvas TextAlign::justify so backends
-            // that wire SkParagraph kJustify can render true justified
-            // text. RecordingCanvas / CG fall back to left-alignment
-            // semantics (no kerning-controlled space distribution).
-            // Anchor x at 0 so the first line's leading edge matches a
-            // left-aligned label.
+            // Emit canvas TextAlign::justify so backends that wire
+            // SkParagraph kJustify can render true justified text.
+            // RecordingCanvas / CG fall back to left-alignment semantics (no
+            // kerning-controlled space distribution). Anchor x at 0 so the
+            // first line's leading edge matches a left-aligned label.
             canvas.set_text_align(canvas::TextAlign::justify);
             break;
     }
 
-    // pulp #1407 — track the actually-painted single-line string so the
-    // decoration block below measures the truncated text, not the
-    // original. Multi-line keeps using display_text since it paints the
-    // full string across multiple draw calls.
+    // Track the actually-painted single-line string so the decoration block
+    // below measures the truncated text, not the original. Multi-line keeps
+    // using display_text since it paints the full string across multiple draw
+    // calls.
     std::string draw_text = display_text;
     if (!multi_line_) {
-        // pulp #1407 — CSS `text-overflow: ellipsis`. Truncate with U+2026
-        // when the measured text exceeds the content-box, regardless of
-        // text-align (CSS truncates at the trailing edge for all three).
-        // UTF-8-safe via codepoint binary-search in truncate_to_width().
+        // CSS `text-overflow: ellipsis`. Truncate with U+2026 when the
+        // measured text exceeds the content-box, regardless of text-align
+        // (CSS truncates at the trailing edge for all three). UTF-8-safe via
+        // codepoint binary-search in truncate_to_width().
         if (text_overflow_ellipsis())
             draw_text = truncate_to_width(canvas, display_text, bounds().width);
         canvas.fill_text(draw_text, x, baseline_y);
     } else {
-        // pulp #1552 — CSS `line-clamp` / `-webkit-line-clamp`. When the
-        // clamp count is set and the text would emit more lines than
-        // allowed, paint at most N lines and append the U+2026 ellipsis
-        // to the last visible line if any source lines were dropped.
-        // 0 disables clamping (matches CSS spec; spec uses `none`).
-        // visible_lines / source_lines / text_h are computed earlier so
-        // vertical-align positioning reflects the clamped block height.
+        // CSS `line-clamp` / `-webkit-line-clamp`. When the clamp count is
+        // set and the text would emit more lines than allowed, paint at most N
+        // lines and append the U+2026 ellipsis to the last visible line if any
+        // source lines were dropped. 0 disables clamping (matches CSS spec;
+        // spec uses `none`). visible_lines / source_lines / text_h are
+        // computed earlier so vertical-align positioning reflects the clamped
+        // block height.
         const bool need_ellipsis = (line_clamp_ > 0 && source_lines > line_clamp_);
 
         // Start from the clamped baseline so the first visible line
@@ -848,12 +808,12 @@ void Label::paint(canvas::Canvas& canvas) {
         int emitted = 0;
 
         if (use_shaper_wrap) {
-            // pulp #1737 PR-2 — shaped-layout iteration path. TextShaper
-            // already split display_text into shaped_layout.lines using
-            // the active BreakMode (break-word / anywhere). Iterate
-            // those lines instead of `\n`-splitting. Line-clamp +
-            // ellipsis logic is identical — driven by source_lines
-            // (= shaped_layout.line_count) and visible_lines.
+            // Shaped-layout iteration path. TextShaper already split
+            // display_text into shaped_layout.lines using the active
+            // BreakMode (break-word / anywhere). Iterate those lines instead
+            // of `\n`-splitting. Line-clamp + ellipsis logic is identical,
+            // driven by source_lines (= shaped_layout.line_count) and
+            // visible_lines.
             for (const auto& shaped_line : shaped_layout.lines) {
                 if (emitted >= visible_lines) break;
                 std::string line = shaped_line.text;
@@ -865,10 +825,10 @@ void Label::paint(canvas::Canvas& canvas) {
                 ++emitted;
             }
         } else {
-            // Legacy `\n`-only split path — bit-identical to pre-#1737.
-            // Used when bounds().width is 0 / unbounded (the shaper has
-            // no max_width to break against). Existing consumers see
-            // exactly the previous behavior in that case.
+            // Legacy `\n`-only split path. Used when bounds().width is 0 /
+            // unbounded (the shaper has no max_width to break against).
+            // Existing consumers see exactly the previous behavior in that
+            // case.
             size_t pos = 0;
             while (pos < display_text.size()) {
                 if (emitted >= visible_lines) break;
@@ -877,10 +837,10 @@ void Label::paint(canvas::Canvas& canvas) {
                 std::string line = display_text.substr(pos, nl - pos);
                 // Last visible line under a clamp that truncated source lines:
                 // append U+2026 (UTF-8: 0xE2 0x80 0xA6) to signal truncation.
-                // pulp #1552 — matches the CSS "block-axis ellipsis" intent
-                // for line-clamp (the spec ties this to text-overflow: ellipsis;
-                // pulp's Label honors that intent without requiring the
-                // separate text-overflow keyword to also be set).
+                // Matches the CSS "block-axis ellipsis" intent for
+                // line-clamp. The spec ties this to text-overflow: ellipsis;
+                // Label honors that intent without requiring the separate
+                // text-overflow keyword to also be set.
                 if (need_ellipsis && (emitted + 1 == visible_lines)) {
                     line.append("\xe2\x80\xa6");
                 }
@@ -897,9 +857,8 @@ void Label::paint(canvas::Canvas& canvas) {
         auto dec_color = has_decoration_color_ ? decoration_color_ : text_color;
         canvas.set_stroke_color(dec_color);
         canvas.set_line_width(1.0f);
-        // pulp #1407 — measure the actually-drawn (possibly truncated)
-        // text so a decoration line on an ellipsised label doesn't
-        // escape past the visible glyphs.
+        // Measure the actually-drawn (possibly truncated) text so a decoration
+        // line on an ellipsised label doesn't escape past the visible glyphs.
         float text_w = canvas.measure_text(draw_text);
         float draw_x = x;
         if (effective_text_align == LabelAlign::center) draw_x = x - text_w * 0.5f;
@@ -915,13 +874,12 @@ void Label::paint(canvas::Canvas& canvas) {
 
     if (vertical) canvas.restore();
 
-    // pulp #1737 (Codex P1 on #1791) — clear font_features at end of
-    // paint so subsequent widgets in the same paint pass don't inherit
-    // this Label's OpenType state. The canvas keeps font_features as
-    // mutable canvas-level state, and TextButton / TextEditor / sibling
-    // Labels that call measure_text/fill_text without setting features
-    // would otherwise pick up tnum/smcp/etc. from the previous
-    // fontVariant-bearing Label, causing unintended typography drift
+    // Clear font_features at end of paint so subsequent widgets in the same
+    // paint pass don't inherit this Label's OpenType state. The canvas keeps
+    // font_features as mutable canvas-level state, and TextButton /
+    // TextEditor / sibling Labels that call measure_text/fill_text without
+    // setting features would otherwise pick up tnum/smcp/etc. from the
+    // previous fontVariant-bearing Label, causing unintended typography drift
     // outside that label's box.
     canvas.clear_font_features();
 }

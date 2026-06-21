@@ -141,11 +141,11 @@ TEST_CASE("PulpDrums golden: tempo change changes MIDI density",
 // sequencer fires. Regression guard against a future change that
 // accidentally reads/writes the audio buffer in the MIDI path.
 //
-// Codex P2 on PR #379: the old single-block version never fired a
-// step event (samples_per_step ≈ 3600 at 200 BPM 48 kHz, block=512),
-// so the "while sequencing" promise wasn't exercised. We now loop
-// blocks until midi_out has non-zero size at least once — and keep
-// asserting bit-exact pass-through on every block.
+// A single block can finish before the next sequencer step
+// (samples_per_step ≈ 3600 at 200 BPM 48 kHz, block=512), so the
+// "while sequencing" promise is only exercised after looping until
+// midi_out has non-zero size at least once. Keep asserting bit-exact
+// pass-through on every block.
 TEST_CASE("PulpDrums golden: audio is bit-exact pass-through while sequencing",
           "[examples][drums][golden][issue-356]") {
     HeadlessHost host(create_pulp_drums);

@@ -25,7 +25,7 @@ similar frameworks) feature-detect on construction:
 
 | Surface | Where | Why |
 |---------|-------|-----|
-| `Element.nodeType` (=1) / `nodeName` (=tagName) | `web-compat-element.js` | React reconciler walks every node; bails before first commit without these (pulp #468) |
+| `Element.nodeType` (=1) / `nodeName` (=tagName) | `web-compat-element.js` | React reconciler walks every node and bails before first commit without DOM-compatible node identity. |
 | `Element.ELEMENT_NODE` / `TEXT_NODE` / `COMMENT_NODE` constants | `web-compat-element.js` | `node.ELEMENT_NODE === 1` fast-paths in React |
 | `createTextNode` → nodeType=3 + nodeName='#text' + `data`/`nodeValue` mirrors | `web-compat-document.js` | DOM Level 1 text-node spec; React's text-update path |
 | `createComment` → nodeType=8, `createDocumentFragment` → nodeType=11 | `web-compat-document.js` | React portal sentinels + batched commits |
@@ -35,10 +35,10 @@ similar frameworks) feature-detect on construction:
 | `queueMicrotask` (Promise-based shim) | `web-compat-scheduler.js` | React 18 concurrent scheduler |
 | `MessageChannel` + `MessagePort` (microtask-deferred postMessage) | `web-compat-scheduler.js` | React 18 scheduler prefers MC; falls back to setTimeout if missing (perf cliff, not a blocker) |
 | `URLSearchParams` polyfill | `web-compat-scheduler.js` | React error-source URL parsing |
-| `requestAnimationFrame` / `cancelAnimationFrame` (driven by native `__requestFrame__`) | `web-compat-scheduler.js` | Bundled-React frameworks reference the standard names; without this each consumer ships a ~80-line `shim.js` (pulp #915) |
-| `setTimeout` / `clearTimeout` / `setInterval` / `clearInterval` (driven by native `__scheduleTimer__` deadline tracker) | `web-compat-scheduler.js` | React's scheduler yield path + plugin code; setTimeout(fn, 0) drains via microtask, positive delays drain in `service_frame_callbacks()` (pulp #915) |
-| `performance.now()` (driven by native `__performanceNow__`) | `web-compat-scheduler.js` | Bundled-React modules read `performance.now` at module-eval time before the legacy `window.performance` shim is reachable (pulp #915) |
-| Mirror block onto `window` (rAF/cAF/sT/cT/sI/cI/MC/qM/perf) | `web-compat-scheduler.js` | React 18's scheduler reads `window.setTimeout` / `window.requestAnimationFrame` specifically; the global must be reachable through both names (pulp #915) |
+| `requestAnimationFrame` / `cancelAnimationFrame` (driven by native `__requestFrame__`) | `web-compat-scheduler.js` | Bundled-React frameworks reference the standard names; without this each consumer has to carry its own scheduler shim. |
+| `setTimeout` / `clearTimeout` / `setInterval` / `clearInterval` (driven by native `__scheduleTimer__` deadline tracker) | `web-compat-scheduler.js` | React's scheduler yield path + plugin code; setTimeout(fn, 0) drains via microtask, positive delays drain in `service_frame_callbacks()`. |
+| `performance.now()` (driven by native `__performanceNow__`) | `web-compat-scheduler.js` | Bundled-React modules read `performance.now` at module-eval time before the legacy `window.performance` shim is reachable. |
+| Mirror block onto `window` (rAF/cAF/sT/cT/sI/cI/MC/qM/perf) | `web-compat-scheduler.js` | React 18's scheduler reads `window.setTimeout` / `window.requestAnimationFrame` specifically; the global must be reachable through both names. |
 
 When adding new framework support, check the engine capability
 comparison before assuming a polyfill is missing — the entry above is
@@ -47,11 +47,11 @@ exhaustive for React 18 dev. Add new files to `core/view/CMakeLists.txt`'s
 `core/view/src/widget_bridge.cpp` (`embed_js.cmake` only embeds the
 constants; the bridge constructor evaluates them).
 
-### Canvas2D surface coverage (issue-916, issue-964)
+### Canvas2D surface coverage
 
 `web-compat-canvas.js` exposes `CanvasRenderingContext2D.prototype`
-with the standard methods plus the gap-list closures from issue-916
-and the FilterBank-parity additions from issue-964:
+with the standard methods plus the gap-list closures and FilterBank-parity
+additions that keep common Canvas2D calls from silently no-oping:
 
 | Method | Notes |
 |--------|-------|
@@ -60,18 +60,18 @@ and the FilterBank-parity additions from issue-964:
 | `setLineDash([…])` / `getLineDash()` | Even-length patterns are taken verbatim; odd-length patterns are duplicated per the HTML5 spec. Phase comes from `lineDashOffset`. |
 | `getImageData(x,y,w,h)` | Returns `{data: Uint8ClampedArray, width, height}`. The bridge currently returns zero-filled pixels (no live surface handle from JS-call context); consumers that need real pixels should round-trip through a render-host integration. |
 | `putImageData(img, dx, dy)` | Decodes the typed array to base64 across the bridge and applies via `Canvas::write_pixels` on backends that implement it (Skia today). |
-| `save()` / `restore()` (#964) | Forward to `canvasSave` / `canvasRestore`. JS-side caches of last-pushed text/line/global state are invalidated on save so the next draw re-pushes — the bridge captures the matching state on the C++ side via SkCanvas::save. |
-| `translate` / `scale` / `rotate` / `setTransform` / `resetTransform` / `transform` (#964) | Forward to `canvasTranslate` / `canvasScale` / `canvasRotate` / `canvasSetTransform`. `transform` is best-effort: pure translation forwards to `canvasTranslate`; other matrices are silently dropped (the bridge has no concat primitive). `setTransform` accepts the (a,b,c,d,e,f) form and the single-DOMMatrix form. |
-| `arc(cx,cy,r,a0,a1,ccw)` / `ellipse` (#964) | Approximated as cubic-Bezier segments (4-segment unit-circle scaling) so the path participates in `fill()` / `stroke()` / `clip()`. `arcTo` is a conservative two-segment lineTo approximation — sufficient for rounded marquee corners, not fidelity-critical. |
-| `bezierCurveTo` / `quadraticCurveTo` / `rect` / `roundRect` (#964) | Forward to `canvasCubicTo` / `canvasQuadTo` / repeated `canvasLineTo`. `rect` emits an explicit closing lineTo back to the start so the resulting subpath is closed. `roundRect` honours the uniform-radius case; non-uniform `radii[]` falls back to `radii[0]`. |
-| `clip(fillRule)` (#964) | Calls `canvasClip` (issue-896 path-based clip). The fill rule is dropped — Pulp's bridge currently ignores even-odd vs nonzero, matching SkCanvas defaults. |
-| `fillText(text,x,y)` / `strokeText` (#964) | `fillText` syncs global / text state and forwards to `canvasFillText` with the active fillStyle's colour (or first gradient stop). `strokeText` falls back to `fillText` with the strokeStyle colour — Pulp's bridge has no stroke-text command. |
-| `createLinearGradient` / `createRadialGradient` / `createConicGradient` (#964) | Return a `CanvasGradient` object with `_kind`, `_params`, `_stops`, and an `addColorStop(offset, color)` method. Gradients are NOT pushed to the bridge until they're assigned to `fillStyle` / `strokeStyle` AND a draw fires — `_applyFillStyle()` flushes via `canvasSetLinearGradient` / `canvasSetRadialGradient`. Conic gradients return an empty linear placeholder (Skia conic-gradient plumbing not yet wired). |
-| `fillStyle` / `strokeStyle` (#964) | Plain fields. `_applyFillStyle()` runs before every fill draw and flushes either a string colour (via `canvasSetFillColor`) OR a gradient (via `canvasSetLinearGradient` / `canvasSetRadialGradient`), tracking `_activeFillKind` so a subsequent string assignment first calls `canvasClearGradient`. Stroke gradients fall back to the first colour stop (no stroke-gradient bridge today). |
-| `globalAlpha` / `globalCompositeOperation` / `font` / `textAlign` / `textBaseline` / `lineCap` / `lineJoin` (#964) | Plain fields. Pushed to the bridge via `_syncGlobalState` / `_syncTextState` / `_syncLineState` lazy helpers — they only emit a `canvas*` call when the value differs from the last-sent cache, and the cache is invalidated on `save()` / `restore()`. |
-| `createPattern` (#964) | Returns `null` per spec when patterns aren't available. Pulp's bridge has no pattern primitive yet; revisit when a plugin actually needs one. |
+| `save()` / `restore()` | Forward to `canvasSave` / `canvasRestore`. JS-side caches of last-pushed text/line/global state are invalidated on save so the next draw re-pushes — the bridge captures the matching state on the C++ side via SkCanvas::save. |
+| `translate` / `scale` / `rotate` / `setTransform` / `resetTransform` / `transform` | Forward to `canvasTranslate` / `canvasScale` / `canvasRotate` / `canvasSetTransform`. `transform` is best-effort: pure translation forwards to `canvasTranslate`; other matrices are silently dropped (the bridge has no concat primitive). `setTransform` accepts the (a,b,c,d,e,f) form and the single-DOMMatrix form. |
+| `arc(cx,cy,r,a0,a1,ccw)` / `ellipse` | Approximated as cubic-Bezier segments (4-segment unit-circle scaling) so the path participates in `fill()` / `stroke()` / `clip()`. `arcTo` is a conservative two-segment lineTo approximation — sufficient for rounded marquee corners, not fidelity-critical. |
+| `bezierCurveTo` / `quadraticCurveTo` / `rect` / `roundRect` | Forward to `canvasCubicTo` / `canvasQuadTo` / repeated `canvasLineTo`. `rect` emits an explicit closing lineTo back to the start so the resulting subpath is closed. `roundRect` honours the uniform-radius case; non-uniform `radii[]` falls back to `radii[0]`. |
+| `clip(fillRule)` | Calls `canvasClip`. The fill rule is dropped — Pulp's bridge currently ignores even-odd vs nonzero, matching SkCanvas defaults. |
+| `fillText(text,x,y)` / `strokeText` | `fillText` syncs global / text state and forwards to `canvasFillText` with the active fillStyle's colour (or first gradient stop). `strokeText` falls back to `fillText` with the strokeStyle colour — Pulp's bridge has no stroke-text command. |
+| `createLinearGradient` / `createRadialGradient` / `createConicGradient` | Return a `CanvasGradient` object with `_kind`, `_params`, `_stops`, and an `addColorStop(offset, color)` method. Gradients are NOT pushed to the bridge until they're assigned to `fillStyle` / `strokeStyle` AND a draw fires — `_applyFillStyle()` flushes via `canvasSetLinearGradient` / `canvasSetRadialGradient`. Conic gradients return an empty linear placeholder (Skia conic-gradient plumbing not yet wired). |
+| `fillStyle` / `strokeStyle` | Plain fields. `_applyFillStyle()` runs before every fill draw and flushes either a string colour (via `canvasSetFillColor`) OR a gradient (via `canvasSetLinearGradient` / `canvasSetRadialGradient`), tracking `_activeFillKind` so a subsequent string assignment first calls `canvasClearGradient`. Stroke gradients fall back to the first colour stop (no stroke-gradient bridge today). |
+| `globalAlpha` / `globalCompositeOperation` / `font` / `textAlign` / `textBaseline` / `lineCap` / `lineJoin` | Plain fields. Pushed to the bridge via `_syncGlobalState` / `_syncTextState` / `_syncLineState` lazy helpers — they only emit a `canvas*` call when the value differs from the last-sent cache, and the cache is invalidated on `save()` / `restore()`. |
+| `createPattern` | Returns `null` per spec when patterns aren't available. Pulp's bridge has no pattern primitive yet; revisit when a plugin actually needs one. |
 
-#### Why the shim must export every Canvas2D method (#964)
+#### Why the shim must export every Canvas2D method
 
 If any common method (`save`, `setTransform`, `createLinearGradient`,
 `globalAlpha` setter, …) is missing from `CanvasRenderingContext2D.prototype`,
@@ -206,7 +206,7 @@ FindV8 resolves the fetched artifact automatically — no `V8_INCLUDE_DIR`/
 local-experiment overrides** (point at a hand-built V8). `V8_DIR` points at
 a baked V8 (golden VMs: `V8_DIR=~/pulp-v8-build`).
 
-**Two behavior rules (Codex review, 2026-06):**
+**Two behavior rules:**
 - `PULP_JS_ENGINE=auto` **never** pulls in V8 — V8 is strictly opt-in via
   `=v8`. (Previously `auto` + `V8_INCLUDE_DIR` silently enabled it.)
 - `PULP_JS_ENGINE=v8` on **iOS** is a configure-time `FATAL_ERROR` — V8
@@ -359,7 +359,7 @@ the V8 provider section above.)
 > *build* tree (missing) → SIGABRT. Stage the template into the build dir or
 > build without ccache. Unrelated to V8.
 
-### Web-API global registration is hybrid native+JS by design (#915)
+### Web-API global registration is hybrid native+JS by design
 
 CHOC's `NativeFunction` signature can only carry `choc::value::Value` arguments — JS function values don't round-trip through it. So even though `requestAnimationFrame` / `setTimeout` / `setInterval` look like they "should" be C++-only bindings, the callbacks themselves have to live in a JS-side registry (`__frameCallbacks__`, `__timerCallbacks__`).
 
@@ -382,15 +382,15 @@ dropped. Three.js's WebGPUBackend uploads all geometry via
 `createBuffer({mappedAtCreation:true})` → `new T(getMappedRange()).set(...)` →
 `unmap()`, so vertex/index buffers arrived all-zero and meshes collapsed to a
 point — only `queue.writeBuffer`-backed uniforms survived. See the
-threejs-bridge skill for the full #3217 chronology.
+threejs-bridge skill for the full runtime chronology.
 
-### setTimeout(fn, 0) takes the microtask path, not the timer queue (#915)
+### setTimeout(fn, 0) takes the microtask path, not the timer queue
 
 `setTimeout(fn, 0)` deliberately bypasses `__scheduleTimer__` and routes through `Promise.resolve().then(...)` so it drains on the next `pump_message_loop()` call. This matches React's scheduler expectations and makes tests deterministic (no host frame loop needed). Positive-delay timeouts go through the native deadline tracker and only fire when `service_frame_callbacks()` runs.
 
 If a consumer reports "my setTimeout(fn, 1) never fires", check that the host is actually calling `service_frame_callbacks()` from its frame loop — that's the drain hook for non-zero delays.
 
-### `display: flex` defaults to `flex-direction: row` (CSS web-compat, #1147)
+### `display: flex` defaults to `flex-direction: row`
 
 Pulp's underlying widgets default to `FlexDirection::column` (RN convention). The CSS web platform default for `display: flex` is `flex-direction: row` — children lay out horizontally. Imported / extracted designs assume the web default, so `web-compat-style-decl.js` explicitly emits `setFlex(id, 'direction', 'row')` whenever a `CSSStyleDeclaration` resolves `display: flex` and the consumer has NOT also declared `flexDirection`, `flex-direction`, or a `flexFlow` shorthand that includes a direction token.
 
@@ -405,23 +405,23 @@ The setter trap stores into `_props` BEFORE `_applyProperty` runs, so the displa
 
 Not changed by this fix: `createCol` / `createRow` / `createPanel` C++ paths preserve their explicit direction; typed React props in `pulp-react/prop-applier.ts` route directly through bridge setters and don't touch `style`.
 
-### CSS-shim gap fills — translator vs. bridge contract (#1434)
+### CSS-shim gap fills — translator vs. bridge contract
 
 Three classes of "silent drop" recur in `web-compat-style-decl.js`. When
 adding a CSS property, walk all three before declaring done:
 
 1. **Missing `case "X":`** — the property is nowhere in the switch, so
    `el.style.X = ...` writes to `_props[X]` and never reaches the
-   bridge. Harness verdict: NOT-IMPL. Examples: `backdropFilter`
-   (pulp #1434 batch 3 — bridge `setBackdropFilter` was wired by
-   pulp #1366, the JS route was the only missing piece).
+   bridge. Harness verdict: NOT-IMPL. Example: `backdropFilter`
+   already had a bridge `setBackdropFilter`, but still needed the
+   JS route.
 
 2. **Coalesced shorthand only** — the shorthand routes (e.g.
    `textDecoration`) but the longhands (`textDecorationLine` /
    `-Color` / `-Style`) silently no-op. Per-attribute longhands MUST
    route to per-attribute bridge setters so a previously-set sibling
-   isn't clobbered — the same pattern as the per-side border fix
-   from PR #1166 finding #4. Don't try to coalesce three independent
+   isn't clobbered — the same pattern as the per-side border setters.
+   Don't try to coalesce three independent
    property assignments into a single `setX(id, line, color, style)`
    call; the JS shim iterates assignments in source order, so the
    first call would always overwrite the next two with defaults.
@@ -481,11 +481,11 @@ state, follow this checklist or you'll land a silent no-op:
    when Skia / CG have nothing to do, RecordingCanvas is what the
    canvas2d-shim tests assert against.
 
-This pattern landed for shadow* (#1434), miter / image-smoothing
-(#1434 bridge-thin), and direction / filter (#1520). Copy the same
-shape for the next canvas2d catalog setter.
+This pattern is now used for `shadow*`, miter / image-smoothing,
+direction, and filter setters. Copy the same shape for the next
+canvas2d catalog setter.
 
-### String-valued custom CSS properties (`var(--mono)` etc., #1899)
+### String-valued custom CSS properties (`var(--mono)` etc.)
 
 `setProperty('--name', value)` in `web-compat-style-decl.js` (and the
 mirror in `web-compat.js`) has THREE tiers, not the original two:
@@ -543,11 +543,11 @@ re-registrations across `WidgetBridge` (function, host-object, and
 promise-function names) and is the cheapest tripwire if a split-up
 registration module forgets the contract.
 
-## ESM support per engine (iOS-D.3b 2026-05-29)
+## ESM support per engine
 
 | Engine | Public ESM API | Status |
 |---|---|---|
-| **V8** (`libnode` on macOS, version-suffixed) | `import.meta`, dynamic `import()`, `setModuleLoaderDelegate`-equivalent | ✅ Full ESM. Used by `examples/threejs-native-demo/main.cpp:221` for macOS Three.js. |
+| **V8** (pinned sealed `libv8` on desktop/Android) | `import.meta`, dynamic `import()`, `setModuleLoaderDelegate`-equivalent | Full ESM. Used by `examples/threejs-native-demo/main.cpp` for macOS Three.js. |
 | **JSC** (system framework on iOS) | NO public ESM module loader on iOS | ❌ `JSScript.h` + `JSModuleLoaderDelegate` are private. Shipping them in an `.appex` risks App Store rejection. |
 | **JSC** (system framework on macOS) | `JSScript` exposed via framework headers | 🟡 Available, but typically unused since macOS uses V8. |
 | **QuickJS** (vendored under `external/quickjs/`) | Full ESM via `JS_NewModule*` | ✅ Used as a fallback when V8 is unavailable + jitless V8 isn't an option. |
@@ -557,7 +557,7 @@ registration module forgets the contract.
 
 **Bundler implementation note**: The bundler delegates to esbuild (pinned in `tools/scripts/package.json` at 0.25.10). The earlier regex-only pass could not resolve sibling `import { ... } from "./three.core.js"` statements that Three.js's webgpu entry depends on, which caused JSC parse errors at runtime ("expecting `(`"). esbuild handles ESM resolution + http: import stripping out of the box. The bundler auto-installs esbuild on first run via `npm install --prefix tools/scripts/` when `node_modules/esbuild` is missing — no manual setup needed.
 
-See `planning/2026-05-29-ios-d3b-threejs-webgpu-program.md` for the full 6-slice bring-up and `.agents/skills/{ios,threejs-bridge}/SKILL.md` for the runtime contract.
+See `.agents/skills/{ios,threejs-bridge}/SKILL.md` for the runtime contract.
 
 ## Diagnostics for silent JS failures
 
@@ -587,6 +587,6 @@ If `self` is undefined, libraries set their context to `null` and crash with `Ty
 
 When `WidgetBridge` evaluates user JS via `eval_or_throw`, the catch chain re-throws as `std::runtime_error("failed to evaluate <name>: <err>")`. A cross-translation-unit `std::exception` typeinfo mismatch can cause the caller's `catch(const std::exception&)` to fall through to `catch(...)`, which then loses the original message. The fix: `runtime::log_error("PULP_EVAL_THROW: name={} js_len={} ..._error={}", ...)` is called *before* re-throwing in all three catch branches, so the JS error reaches the log regardless of whether the downstream catch matches. Grep `PULP_EVAL_THROW` to find the actual error text when "unknown exception" surfaces upstream.
 
-### The web-compat preludes are engine-agnostic — a green V8/macOS test does NOT prove the JSC/iOS path (#3217)
+### The web-compat preludes are engine-agnostic — a green V8/macOS test does NOT prove the JSC/iOS path
 
-The `web-compat-*.js` mocks (`web-compat-document-gpu-mock.js` etc.) are loaded identically under QuickJS, JSC, and V8 — so a *logic* bug in a mock behaves the same on every engine, but the surrounding native path may not. A WebGPU-mock `writeBuffer` bug (treating a TypedArray `dataOffset`/`size` as bytes instead of element counts) shipped undetected because the macOS V8 `[threejs][gpu][phase13]` smoke does a one-shot Skia **pixel readback** and renders green, while the live iOS AUv3 path renders black for an *unrelated* reason (`SkiaSurface::begin_frame()` silently falling back to the offscreen surface — see #3217). Two lessons: (1) when you change a `web-compat-*.js` mock, add a focused assertion of the exact code path you touched (the smoke's whole-array `writeBuffer` masked the explicit five-arg element-count form); (2) "green on the V8 headless lane" is necessary but not sufficient for the JSC/iOS live present path — that path has no CI coverage and must be verified on a device/simulator screenshot, never inferred from the readback test.
+The `web-compat-*.js` mocks (`web-compat-document-gpu-mock.js` etc.) are loaded identically under QuickJS, JSC, and V8 — so a *logic* bug in a mock behaves the same on every engine, but the surrounding native path may not. A WebGPU-mock `writeBuffer` bug (treating a TypedArray `dataOffset`/`size` as bytes instead of element counts) can pass the macOS V8 headless smoke because that lane does a one-shot Skia **pixel readback**, while the live iOS AUv3 path depends on the presentable swapchain. Two lessons: (1) when you change a `web-compat-*.js` mock, add a focused assertion of the exact code path you touched (the smoke's whole-array `writeBuffer` masked the explicit five-arg element-count form); (2) "green on the V8 headless lane" is necessary but not sufficient for the JSC/iOS live present path — that path must be verified on a device/simulator screenshot, never inferred from the readback test.

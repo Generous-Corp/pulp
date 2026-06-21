@@ -40,11 +40,9 @@ inline LV2_Handle instantiate(
 {
     if (!g_factory) return nullptr;
 
-    // Resolve LV2_URID_Map — required by any real LV2 host. Pre-production
-    // fix (workstream 01 slice 1.5): we previously ignored the features
-    // array entirely, which would cause real hosts to fail to load the
-    // plugin in surprising ways. Now we fail instantiation loudly and
-    // return nullptr so the host surfaces a clear error.
+    // Resolve LV2_URID_Map, required by any real LV2 host. Fail instantiation
+    // loudly and return nullptr when the feature is absent so the host surfaces
+    // a clear error.
     LV2_URID_Map* urid_map = lv2_adapter::find_urid_map(features);
     if (!urid_map) {
         pulp::runtime::log_warn(
@@ -107,11 +105,11 @@ inline void connect_port(LV2_Handle handle, uint32_t port, void* data) {
     int audio_in_end = inst->num_audio_inputs;
     int audio_out_end = audio_in_end + inst->num_audio_outputs;
     int control_end = audio_out_end + inst->num_params;
-    // MIDI atom ports follow control ports. A plug-in with accepts_midi
-    // gets one atom input port at index control_end. Workstream 01 #241.
+    // MIDI atom ports follow control ports. A plug-in with accepts_midi gets
+    // one atom input port at index control_end.
     int atom_in_end = control_end + (inst->accepts_midi ? 1 : 0);
-    // #491: plug-ins with produces_midi get one atom output port right
-    // after the (optional) input. TTL emits these in the same order in
+    // Plug-ins with produces_midi get one atom output port right after the
+    // (optional) input. TTL emits these in the same order in
     // generate_plugin_ttl(), so the host's port index matches.
     int atom_out_end = atom_in_end + (inst->produces_midi ? 1 : 0);
 
@@ -138,13 +136,13 @@ inline void activate(LV2_Handle) {
     // Nothing needed — processor is prepared at instantiation
 }
 
-// #491: write a MidiBuffer into an LV2_Atom_Sequence output port. Uses
-// the standard lv2_atom_sequence_clear + append_event helpers. On entry
-// the host's out_seq->atom.size carries the buffer capacity; clear()
-// resets it to sizeof(body) and append_event() increments it per event.
-// Events that don't fit are dropped, not truncated — matches every
-// other format adapter's overflow behavior. Exposed non-static for unit
-// testing; all arguments validated so missing URIDs are a no-op.
+// Write a MidiBuffer into an LV2_Atom_Sequence output port. Uses the standard
+// lv2_atom_sequence_clear + append_event helpers. On entry the host's
+// out_seq->atom.size carries the buffer capacity; clear() resets it to
+// sizeof(body) and append_event() increments it per event. Events that don't
+// fit are dropped, not truncated, matching every other format adapter's
+// overflow behavior. Exposed non-static for unit testing; all arguments
+// validated so missing URIDs are a no-op.
 inline void write_midi_out_to_sequence(
     LV2_Atom_Sequence* out_seq,
     LV2_URID urid_atom_sequence,
@@ -225,10 +223,9 @@ inline void run(LV2_Handle handle, uint32_t n_samples) {
         .outputs = ProcessBusBufferSet<float>(output_buses),
     };
 
-    // MIDI: parse the connected LV2_Atom_Sequence (if any) and promote
-    // each MidiEvent into the Processor's MidiBuffer. Sysex atoms are
-    // currently ignored here; the CLAP/VST3/AU sysex sidecar wiring in
-    // issue #239 is the in-progress path for variable-length events.
+    // MIDI: parse the connected LV2_Atom_Sequence (if any) and promote each
+    // MidiEvent into the Processor's MidiBuffer. Sysex atoms are currently
+    // ignored here; LV2 variable-length event support is not wired yet.
     midi::MidiBuffer midi_in, midi_out;
     if (inst->midi_in_atom && inst->urid_atom_sequence && inst->urid_midi_event) {
         const auto* seq = static_cast<const LV2_Atom_Sequence*>(inst->midi_in_atom);
@@ -256,9 +253,9 @@ inline void run(LV2_Handle handle, uint32_t n_samples) {
     proc_ctx.process_mode = format::ProcessMode::Realtime;
     proc_ctx.render_speed_hint = format::RenderSpeedHint::Realtime;
 
-    // Phase 3 — uniform param-events contract + RT-safety guard (mirrors VST3).
-    // The queue carries no atom-sourced events yet; control-port params still
-    // flow via store. Wrap only the process call in ScopedNoAlloc.
+    // Uniform param-events contract + RT-safety guard. The queue carries no
+    // atom-sourced events yet; control-port params still flow via store. Wrap
+    // only the process call in ScopedNoAlloc.
     inst->param_events.clear();
     inst->processor->set_param_events(&inst->param_events);
     {
@@ -266,10 +263,7 @@ inline void run(LV2_Handle handle, uint32_t n_samples) {
         inst->processor->process(process_buffers, midi_in, midi_out, proc_ctx);
     }
 
-    // #491: serialize outgoing MIDI back to the LV2 atom output port.
-    // Prior to this, any Processor that populated midi_out (arpeggiator,
-    // note generator, MIDI-effect passthrough) had its events silently
-    // dropped when hosted via LV2.
+    // Serialize outgoing MIDI back to the LV2 atom output port.
     write_midi_out_to_sequence(
         static_cast<LV2_Atom_Sequence*>(inst->midi_out_atom),
         inst->urid_atom_sequence,

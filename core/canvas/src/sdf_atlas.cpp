@@ -215,7 +215,7 @@ GlyphMetrics glyph_metrics_skia(const sk_sp<SkTypeface>& face,
         font.unicharsToGlyphs(SkSpan<const SkUnichar>(&uni, 1),
                               SkSpan<SkGlyphID>(&gid, 1));
     }
-    if (gid == 0) return m;  // .notdef — still emit advance below
+    if (gid == 0) return m;  // .notdef
 
     SkScalar advance = 0;
     SkRect bounds{};

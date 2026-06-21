@@ -1,5 +1,5 @@
 # Pulp example projects
-# Each example validates a phase of the framework
+# Each example exercises a framework path or integration surface.
 
 # Local-only dev: chainer-synth lives in this dir gitignored when present,
 # used for AU v3 / GPU editor validation. Not shipped on main.
@@ -7,7 +7,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/chainer-synth/CMakeLists.txt")
     add_subdirectory(chainer-synth)
 endif()
 
-# Phase 2-3: PulpGain (trivial gain plugin)
+# PulpGain: minimal gain effect plugin
 add_subdirectory(pulp-gain)
 
 # PulpRustGain — a Rust DSP core packaged as a CLAP plugin (native-components
@@ -20,22 +20,21 @@ endif()
 # Speculative → Validated. See docs/validation/daw-bench/.
 add_subdirectory(host-bench-plugin)
 
-# Phase 4: PulpTone (oscillator synth + musical typing)
+# PulpTone: oscillator synth with musical typing
 add_subdirectory(pulp-tone)
 
-# Phase 5: PulpEffect (filter with parameters and state)
+# PulpEffect: filter with parameters and state
 add_subdirectory(pulp-effect)
 
-# Phase 5: PulpCompressor (sidechain compressor validating multi-bus)
+# PulpCompressor: sidechain compressor validating multi-bus
 add_subdirectory(pulp-compressor)
 
 # Bendr: pitch/time/freeze effect composed from public pulp::signal primitives
 add_subdirectory(bendr)
 
-# Phase 6: UI Preview (validates rendering pipeline) + the Ink & Signal
-# design-system examples. These depend on the design-import authoring
-# cluster, so they are skipped in stripped (PULP_ENABLE_DESIGN_IMPORT=OFF)
-# builds.
+# UI Preview and Ink & Signal examples exercise the rendering pipeline and
+# design-system imports. These depend on the design-import authoring cluster,
+# so they are skipped in stripped (PULP_ENABLE_DESIGN_IMPORT=OFF) builds.
 if(PULP_ENABLE_DESIGN_IMPORT)
     add_subdirectory(ui-preview)
     add_subdirectory(widget-gallery)
@@ -45,16 +44,16 @@ if(PULP_ENABLE_DESIGN_IMPORT)
     add_subdirectory(mtk-demo)
 endif()
 
-# Phase 6: PulpDrums (generative drum sequencer MIDI effect)
+# PulpDrums: generative drum sequencer MIDI effect
 add_subdirectory(PulpDrums)
 
-# Phase 7: PulpSynth (macro oscillator with DSP library)
+# PulpSynth: macro oscillator with DSP library
 add_subdirectory(PulpSynth)
 
 # MPE demo: MPE-aware sine synth validating the per-note expression path
 add_subdirectory(mpe-synth)
 
-# Phase 17: PulpSampler (audio file sampler with MIDI + ADSR)
+# PulpSampler: audio file sampler with MIDI + ADSR
 add_subdirectory(PulpSampler)
 
 # OfflineStretch dev harness: stretchcli (file in -> render -> file out, --analyze)
@@ -63,10 +62,10 @@ add_subdirectory(offline-stretch)
 # PulpTempoSampler — tempo-matching sampler built on the offline stretch engine
 add_subdirectory(PulpTempoSampler)
 
-# Phase 18: PulpPluck (Karplus-Strong synth — same code runs native + WASM)
+# PulpPluck: Karplus-Strong synth that runs native and WASM
 add_subdirectory(pulp-pluck)
 
-# FAUST DSL examples (Phase 3: offline codegen → Processor)
+# FAUST DSL examples: offline codegen to Processor
 add_subdirectory(faust-gain)
 add_subdirectory(faust-filter)
 add_subdirectory(faust-tremolo)
@@ -90,7 +89,7 @@ add_subdirectory(gpu-demo)
 # SDF Text Demo: Resolution-independent text with bloom post-effect
 add_subdirectory(sdf-text-demo)
 
-# Feature 5 Phase 1: plugin hosting validation — loads a real CLAP plugin.
+# Plugin hosting validation: loads a real CLAP plugin.
 # iOS App Store policy disallows dlopen of arbitrary third-party plugins,
 # so `pulp::host` is intentionally omitted from iOS builds (root
 # CMakeLists.txt gates `add_subdirectory(core/host)` with NOT IOS).
@@ -112,27 +111,27 @@ if(PULP_ENABLE_DESIGN_IMPORT)
     add_subdirectory(design-import-standalone)
 endif()
 
-# TextEditor keyboard input test (Phase 21.1)
+# TextEditor keyboard input test
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/text-input-test/CMakeLists.txt)
     add_subdirectory(text-input-test)
 endif()
 
-# Phase 7: simple floating WebView palette proof
+# Simple floating WebView palette proof
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/webview-palette/CMakeLists.txt)
     add_subdirectory(webview-palette)
 endif()
 
-# Phase 7: plugin-editor WebView proof (macOS hosts only)
+# Plugin-editor WebView proof (macOS hosts only)
 if(APPLE AND NOT PULP_IOS AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/webview-plugin/CMakeLists.txt)
     add_subdirectory(webview-plugin)
 endif()
 
-# Phase 7: optional Monaco WebView proof (requires prebundled Monaco assets)
+# Optional Monaco WebView proof (requires prebundled Monaco assets)
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/webview-monaco/CMakeLists.txt)
     add_subdirectory(webview-monaco)
 endif()
 
-# Phase 13: Three.js native GPU demo (requires GPU + three.js)
+# Three.js native GPU demo (requires GPU + three.js)
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/threejs-native-demo/CMakeLists.txt)
     add_subdirectory(threejs-native-demo)
 endif()
@@ -150,25 +149,23 @@ endif()
 # Streams feature demo (unified Stream / AsyncStream / HttpStream)
 add_subdirectory(stream-demo)
 
-# iOS AUv3 example (workstream 05 slice 5.1) — gated on CMAKE_SYSTEM_NAME=iOS
+# iOS AUv3 examples — gated on CMAKE_SYSTEM_NAME=iOS
 if(IOS)
     add_subdirectory(ios-auv3-synth)
-    # Phase iOS-D.1 — minimal 2D GPU AUv3 proof
-    # (planning/2026-05-24-auv3-ios-validation.md).
+    # Minimal 2D GPU AUv3 proof.
     add_subdirectory(ios-auv3-gpu-smoke)
-    # Phase iOS-D.2 — Chainer-style JS-UI shape (title + Knob + Meter)
-    # rendered through the same iPad GPU path, with the AUv3 editor
+    # Chainer-style JS-UI shape (title + Knob + Meter) rendered through
+    # the same iPad GPU path, with the AUv3 editor
     # mounted inside the SwiftUI HostApp via UIViewControllerRepresentable.
     add_subdirectory(ios-auv3-chainer)
-    # Phase iOS-D.3c — Three.js rotating-cube AUv3 demo. Uses the
-    # iOS-D.3b plumbing (GpuSurface attach, three.iife.js bundler,
-    # presentable swapchain flag, queue.submit marker) to paint a
-    # real three.webgpu.js scene inside the editor pane.
-    # (planning/2026-05-29-ios-d3b-threejs-webgpu-program.md § 11).
+    # Three.js rotating-cube AUv3 demo. Uses the iOS GPU editor path
+    # (GpuSurface attach, three.iife.js bundler, presentable swapchain
+    # flag, queue.submit marker) to paint a real three.webgpu.js scene
+    # inside the editor pane.
     add_subdirectory(ios-auv3-jsc-threejs)
 endif()
 
-# ARA pitch tracker example (workstream 06 slice A3)
+# ARA pitch tracker example
 if(NOT ANDROID AND NOT IOS)
     add_subdirectory(ara-pitch-tracker)
 endif()

@@ -10,15 +10,15 @@
 // the BLE link as a normal MIDI port (matching the system CoreMIDI
 // behaviour for OS-paired BLE peripherals).
 //
-// Scope of this slice (per planning/2026-05-24 gap-doc row):
+// Current backend scope:
 //   • Scan-and-discover loop with deduplicated peripherals,
 //     RSSI, last_seen, and is_paired snapshots.
 //   • Connect with state-machine callbacks (Connecting → Connected
 //     | Failed, with translated BleMidiError).
 //   • Inbound MIDI byte stream routed through BleMidiPacketDecoder.
-//   • Outbound encode + GATT write helper (used by future
-//     MidiOutput backend; this slice does not yet register the
-//     output port with CoreMIDI).
+//   • Outbound encode + GATT write helper. The output side still
+//     exposes synthesized port ids rather than registered CoreMIDI
+//     virtual output endpoints.
 //
 // Pairing UI is deliberately not surfaced here — Apple ships
 // CABTMIDICentralViewController (iOS) for that flow and the macOS
@@ -270,8 +270,8 @@ public:
             std::lock_guard<std::mutex> lock(mu_);
             auto it = peripherals_.find(id);
             if (it != peripherals_.end()) {
-                // Synthesize the MIDI port ids; future slices will
-                // register CoreMIDI virtual endpoints and use the
+                // Synthesize the MIDI port ids until the output side
+                // registers CoreMIDI virtual endpoints and can use the
                 // assigned MIDIUniqueID instead.
                 it->second.midi_input_port_id  = "ble-midi-in:" + id;
                 it->second.midi_output_port_id = "ble-midi-out:" + id;

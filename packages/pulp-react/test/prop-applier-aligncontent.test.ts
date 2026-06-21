@@ -1,5 +1,5 @@
-// pulp #1434 (sub-agent #12 follow-up) — verify the @pulp/react
-// prop-applier forwards `alignContent` to the bridge.
+// Verify the @pulp/react prop-applier forwards `alignContent` to the
+// bridge.
 //
 // align-content is multi-line flex cross-axis distribution. Yoga
 // supports it natively via YGNodeStyleSetAlignContent; before this
@@ -44,7 +44,7 @@ function flexCalls(b: MockBridge, slot: string) {
     return b.calls.filter((c) => c.fn === 'setFlex' && c.args[1] === slot);
 }
 
-describe('prop-applier alignContent (pulp #1434 sub-agent #12 follow-up)', () => {
+describe('prop-applier alignContent', () => {
     it.each([
         'start',
         'flex-start',

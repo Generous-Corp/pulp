@@ -76,10 +76,9 @@ uint32_t ifd_short(const Ifd& e, const ByteOrder& bo) {
     // In little-endian files the low 2 bytes hold the value; in big-endian
     // files the high 2 bytes hold it. We already byte-swapped the full
     // 32-bit field through bo.u32() on read, so the SHORT now occupies the
-    // high half on big-endian and the low half on little-endian.
-    //
-    // Regression: Codex PR #3017 review — the previous `& 0xFFFF` returned
-    // 0 for big-endian inline SHORT values, breaking baseline MM TIFFs.
+    // high half on big-endian and the low half on little-endian. A plain
+    // `& 0xFFFF` would drop big-endian inline SHORTs to 0 and break baseline
+    // MM TIFFs.
     if (bo.little) {
         return e.value_or_offset & 0xFFFF;
     }

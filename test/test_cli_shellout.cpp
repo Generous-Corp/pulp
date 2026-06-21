@@ -723,6 +723,17 @@ TEST_CASE("pulp config set/get/list round-trips isolated update settings",
     REQUIRE(set_channel.exit_code == 0);
     REQUIRE(set_channel.stdout_output.find("Set update.channel = beta") != std::string::npos);
 
+    auto list_default_bump_projects = run_pulp({"config", "list"}, 10000);
+    REQUIRE_FALSE(list_default_bump_projects.timed_out);
+    REQUIRE(list_default_bump_projects.exit_code == 0);
+    REQUIRE(list_default_bump_projects.stdout_output.find("update.bump_projects = prompt")
+            != std::string::npos);
+
+    auto set_bump_projects = run_pulp({"config", "set", "update.bump_projects", "auto"}, 10000);
+    REQUIRE_FALSE(set_bump_projects.timed_out);
+    REQUIRE(set_bump_projects.exit_code == 0);
+    REQUIRE(set_bump_projects.stdout_output.find("Set update.bump_projects = auto") != std::string::npos);
+
     auto set_import_mode = run_pulp({"config", "set", "import_design.default_mode", "baked"}, 10000);
     REQUIRE_FALSE(set_import_mode.timed_out);
     REQUIRE(set_import_mode.exit_code == 0);
@@ -742,13 +753,14 @@ TEST_CASE("pulp config set/get/list round-trips isolated update settings",
     REQUIRE(list.stdout_output.find("update.mode = manual") != std::string::npos);
     REQUIRE(list.stdout_output.find("update.check_interval_hours = 24") != std::string::npos);
     REQUIRE(list.stdout_output.find("update.channel = beta") != std::string::npos);
-    REQUIRE(list.stdout_output.find("update.bump_projects = prompt") != std::string::npos);
+    REQUIRE(list.stdout_output.find("update.bump_projects = auto") != std::string::npos);
     REQUIRE(list.stdout_output.find("import_design.default_mode = baked") != std::string::npos);
     REQUIRE(list.stdout_output.find("import_design.default_emit = cpp") != std::string::npos);
     REQUIRE(config_body.find("[update]") != std::string::npos);
     REQUIRE(config_body.find("[import_design]") != std::string::npos);
     REQUIRE(config_body.find("mode = \"manual\"") != std::string::npos);
     REQUIRE(config_body.find("channel = \"beta\"") != std::string::npos);
+    REQUIRE(config_body.find("bump_projects = \"auto\"") != std::string::npos);
     REQUIRE(config_body.find("default_mode = \"baked\"") != std::string::npos);
     REQUIRE(config_body.find("default_emit = \"cpp\"") != std::string::npos);
 }

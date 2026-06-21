@@ -1,6 +1,5 @@
 // SceneNode — abstract base of Pulp's retained vector scene graph.
 //
-// Item 6.1 of `planning/2026-05-24-macos-plugin-authoring-plan.md`.
 // License-lineage note: the Pulp scene-graph primitives use Pulp-native
 // names (`VectorScene`, `SceneNode`, `ScenePath`, `SceneShape`,
 // `SceneImage`, `SceneText`, `SceneGroup`) rather than any reference

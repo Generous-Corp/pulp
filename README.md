@@ -205,10 +205,10 @@ extend the framework, or to build a plugin against source); see
 
 ### Help wanted (no Pulp internals required)
 
-Two high-impact ways to contribute that don't require digging into the framework:
+Two high-impact ways to contribute without digging into the framework:
 
-- **[#3040 — Run PulpHostBench in your DAW](https://github.com/danielraffel/pulp/issues/3040)** — ~30 min per DAW. Install a small plugin, follow a numbered script, attach the resulting log. Graduates DAW-quirk rows from `Speculative` → `Validated`. Priority hosts: Logic, Reaper (CLAP), Live, Bitwig.
-- **[#3042 — AAX support: Avid SDK access](https://github.com/danielraffel/pulp/issues/3042)** — Pulp's AAX/ProTools lane is blocked on Avid Developer Program approval. If you have access (or are willing to apply), comment so we can coordinate adapter validation.
+- **[#3040 — Run PulpHostBench in your DAW](https://github.com/danielraffel/pulp/issues/3040)** — ~30 min per DAW. Install a small plugin, follow a numbered script, attach the resulting log. Graduates DAW-quirk rows from `Speculative` → `Validated`. Highest-value coverage remains Logic, Live, Bitwig, and unvalidated Reaper scenarios.
+- **[#3042 — Validate AAX with an Avid SDK setup](https://github.com/danielraffel/pulp/issues/3042)** — AAX is optional and requires a developer-supplied Avid SDK plus DigiShell/AAX Validator. If you have Avid access and can run local Pro Tools validation, comment so we can verify the adapter and host-quirk rows.
 
 ### Workflow
 

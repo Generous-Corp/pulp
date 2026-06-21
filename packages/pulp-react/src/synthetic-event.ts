@@ -1,4 +1,4 @@
-// synthetic-event.ts — pulp #1352
+// Synthetic event bridge for JSX handlers.
 //
 // JSX consumers expect React-DOM-style SyntheticEvent objects with
 // `currentTarget`, `target`, `preventDefault`, etc. The bridge's
@@ -19,10 +19,10 @@
 // the web-compat `__elements__` map (they bypass `document.createElement`),
 // so we cannot reuse the web-compat Element class here.
 //
-// Coexistence with #1345's CSS `:hover` translation: that path already
-// synthesizes proper events via web-compat-element's `_makeEvent` +
-// `_dispatchEvent`. JSX-direct handlers bypass that pipeline entirely;
-// this module is the matching synthesis for the prop-applier `on()` lane.
+// Coexistence with CSS `:hover` translation: that path already synthesizes
+// proper events via web-compat-element's `_makeEvent` + `_dispatchEvent`.
+// JSX-direct handlers bypass that pipeline entirely; this module is the
+// matching synthesis for the prop-applier `on()` lane.
 
 type AnyFn = (...args: unknown[]) => unknown;
 
@@ -47,16 +47,16 @@ function makeStyleProxy(id: string): Record<string, unknown> {
         // visibility: 'hidden' | 'visible' — matches CSS, not the inverse `hidden`.
         visibility: (v) => callBridge('setVisible', id, String(v) !== 'hidden'),
         // Border shorthands route to the per-attribute bridge setters
-        // that preserve unset siblings (pulp #1027).
+        // that preserve unset siblings.
         borderColor: (v) => callBridge('setBorderColor', id, String(v)),
         borderWidth: (v) => callBridge('setBorderWidth', id, Number(v)),
         borderRadius: (v) => callBridge('setBorderRadius', id, Number(v)),
         // Text
         color: (v) => callBridge('setTextColor', id, String(v)),
         fontSize: (v) => callBridge('setFontSize', id, Number(v)),
-        // pulp #1434 Phase A2-5 — bridge forwards comma-separated CSS
-        // family lists; first non-empty wins. Whole-list resolution is
-        // gated on pulp #932.
+        // The bridge forwards comma-separated CSS family lists; first
+        // non-empty family wins. Whole-list resolution belongs to the
+        // font resolver, not this event-time style proxy.
         fontFamily: (v) => callBridge('setFontFamily', id, String(v)),
         // Layout — minimal subset; matches what setFlex accepts.
         width: (v) => callBridge('setFlex', id, 'width', Number(v)),
@@ -97,10 +97,10 @@ function makeElementWrapper(id: string): SyntheticElementWrapper {
         id,
         _id: id, // mirrors web-compat Element naming for cross-compat consumers
         style: makeStyleProxy(id),
-        // pulp #1352: setAttribute/getAttribute are common in DOM-shaped
-        // code; we accept the writes but don't persist them — there is
-        // no HTML attribute layer in Pulp. JSX prop-applier is the
-        // canonical write path.
+        // setAttribute/getAttribute are common in DOM-shaped code; we
+        // accept the writes but don't persist them — there is no HTML
+        // attribute layer in Pulp. JSX prop-applier is the canonical
+        // write path.
         setAttribute(_name: string, _value: string): void { /* no-op */ },
         getAttribute(_name: string): string | null { return null; },
     };
@@ -162,10 +162,8 @@ export interface SyntheticEvent {
     scale: number;
     rotation: number;
     // Wheel event — bridge sends {deltaX, deltaY, clientX, clientY}
-    // as an object (since SDK 0.78.4). Without these fields the
-    // wheel handler in React JSX (`e.deltaY > 0 ? zoomOut() : zoomIn()`)
-    // reads NaN. See pulp #1XXX (Spectr trackpad-zoom regression
-    // post-GPU-path migration).
+    // as an object. Without these fields React JSX wheel handlers such
+    // as `e.deltaY > 0 ? zoomOut() : zoomIn()` read NaN.
     deltaX: number;
     deltaY: number;
     deltaZ: number;
@@ -230,8 +228,8 @@ export function makeSyntheticEvent(
         if (typeof d.clientY === 'number') evt.clientY = d.clientY;
         if (typeof d.offsetX === 'number') evt.offsetX = d.offsetX;
         if (typeof d.offsetY === 'number') evt.offsetY = d.offsetY;
-        // pulp #1XXX — wheel events arrive as {deltaX, deltaY, clientX, clientY}.
-        // Surface the deltas so JSX `onWheel` handlers (`e.deltaY > 0 …`) work.
+        // Wheel events arrive as {deltaX, deltaY, clientX, clientY}. Surface
+        // the deltas so JSX `onWheel` handlers (`e.deltaY > 0 ...`) work.
         if (typeof d.deltaX === 'number') evt.deltaX = d.deltaX;
         if (typeof d.deltaY === 'number') evt.deltaY = d.deltaY;
         if (typeof d.deltaZ === 'number') evt.deltaZ = d.deltaZ;

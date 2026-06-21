@@ -1,12 +1,9 @@
 // test_command_registry.cpp — coverage for the Pulp-native CommandRegistry,
 // CommandHandler, CommandInfo, ShortcutMap, and KeyMappingEditor primitives.
 //
-// Section 6.4 of planning/2026-05-24-macos-plugin-authoring-plan.md:
-//   "a Pulp app registers commands + key bindings; keypress routes to the
-//    focused command handler; rebind UI persists via
-//    pulp::state::ApplicationProperties."
-//
-// Each test below pins one row of that contract.
+// A Pulp app registers commands + key bindings; keypresses route to the
+// focused command handler; the rebind UI persists through
+// pulp::state::ApplicationProperties.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -61,7 +58,7 @@ std::string temp_props_path(const char* suffix) {
 } // namespace
 
 TEST_CASE("CommandRegistry registers commands and binds default chords",
-          "[view][command_registry][issue-6.4]") {
+          "[view][command_registry]") {
     CommandRegistry reg;
 
     CommandInfo open{kCmdOpen, "Open File", "File", KeyCode::o, kModCmd};
@@ -80,7 +77,7 @@ TEST_CASE("CommandRegistry registers commands and binds default chords",
 }
 
 TEST_CASE("CommandRegistry re-registration replaces existing info",
-          "[view][command_registry][issue-6.4]") {
+          "[view][command_registry]") {
     CommandRegistry reg;
     reg.register_command({kCmdOpen, "Open", "File"});
     reg.register_command({kCmdOpen, "Open File…", "File"});
@@ -89,7 +86,7 @@ TEST_CASE("CommandRegistry re-registration replaces existing info",
 }
 
 TEST_CASE("CommandRegistry dispatch walks handler chain top-to-bottom",
-          "[view][command_registry][issue-6.4]") {
+          "[view][command_registry]") {
     CommandRegistry reg;
     reg.register_command({kCmdOpen, "Open", "File"});
 
@@ -113,7 +110,7 @@ TEST_CASE("CommandRegistry dispatch walks handler chain top-to-bottom",
 }
 
 TEST_CASE("CommandRegistry::dispatch_key_event routes through ShortcutMap",
-          "[view][command_registry][issue-6.4]") {
+          "[view][command_registry]") {
     CommandRegistry reg;
     reg.register_command({kCmdOpen, "Open", "File", KeyCode::o, kModCmd});
 
@@ -140,7 +137,7 @@ TEST_CASE("CommandRegistry::dispatch_key_event routes through ShortcutMap",
 }
 
 TEST_CASE("CommandRegistry remove_handler stops dispatching to it",
-          "[view][command_registry][issue-6.4]") {
+          "[view][command_registry]") {
     CommandRegistry reg;
     reg.register_command({kCmdOpen, "Open", "File"});
 
@@ -160,7 +157,7 @@ TEST_CASE("CommandRegistry remove_handler stops dispatching to it",
 }
 
 TEST_CASE("ShortcutMap binds, unbinds, and lists chords",
-          "[view][command_registry][issue-6.4]") {
+          "[view][command_registry]") {
     ShortcutMap map;
     map.bind(KeyCode::o, kModCmd, kCmdOpen);
     map.bind(KeyCode::f5, 0, kCmdOpen);   // two chords → same command
@@ -192,7 +189,7 @@ TEST_CASE("ShortcutMap binds, unbinds, and lists chords",
 }
 
 TEST_CASE("ShortcutMap rebinding replaces the previous owner",
-          "[view][command_registry][issue-6.4]") {
+          "[view][command_registry]") {
     ShortcutMap map;
     map.bind(KeyCode::o, kModCmd, kCmdOpen);
     map.bind(KeyCode::o, kModCmd, kCmdSave);   // steal the chord
@@ -200,7 +197,7 @@ TEST_CASE("ShortcutMap rebinding replaces the previous owner",
 }
 
 TEST_CASE("ShortcutMap persists through PropertiesFile round-trip",
-          "[view][command_registry][issue-6.4]") {
+          "[view][command_registry]") {
     ShortcutMap map;
     map.bind(KeyCode::o, kModCmd, kCmdOpen);
     map.bind(KeyCode::s, kModCmd, kCmdSave);
@@ -229,7 +226,7 @@ TEST_CASE("ShortcutMap persists through PropertiesFile round-trip",
 }
 
 TEST_CASE("CommandRegistry loaded ShortcutMap takes priority over defaults",
-          "[view][command_registry][issue-6.4]") {
+          "[view][command_registry]") {
     // The header documents: "load() before register_command so user
     // rebindings take priority." This pins that ordering.
     pulp::state::PropertiesFile props;
@@ -249,7 +246,7 @@ TEST_CASE("CommandRegistry loaded ShortcutMap takes priority over defaults",
 }
 
 TEST_CASE("KeyMappingEditor: click row + press chord rebinds and persists",
-          "[view][command_registry][issue-6.4]") {
+          "[view][command_registry]") {
     CommandRegistry reg;
     reg.register_command({kCmdOpen, "Open", "File", KeyCode::o, kModCmd});
     reg.register_command({kCmdSave, "Save", "File", KeyCode::s, kModCmd});
@@ -293,7 +290,7 @@ TEST_CASE("KeyMappingEditor: click row + press chord rebinds and persists",
 }
 
 TEST_CASE("KeyMappingEditor::rebind() bypasses capture",
-          "[view][command_registry][issue-6.4]") {
+          "[view][command_registry]") {
     CommandRegistry reg;
     reg.register_command({kCmdOpen, "Open", "File", KeyCode::o, kModCmd});
     KeyMappingEditor editor(reg);
@@ -316,7 +313,7 @@ TEST_CASE("KeyMappingEditor::rebind() bypasses capture",
 }
 
 TEST_CASE("KeyMappingEditor accepts_text_input toggles with capture",
-          "[view][command_registry][issue-6.4]") {
+          "[view][command_registry]") {
     CommandRegistry reg;
     reg.register_command({kCmdOpen, "Open", "File"});
     KeyMappingEditor editor(reg);
@@ -328,7 +325,7 @@ TEST_CASE("KeyMappingEditor accepts_text_input toggles with capture",
 }
 
 TEST_CASE("format_chord renders modifiers in canonical order",
-          "[view][command_registry][issue-6.4]") {
+          "[view][command_registry]") {
     REQUIRE(format_chord(KeyCode::s, kModCmd) == "Cmd+S");
     REQUIRE(format_chord(KeyCode::o, kModCmd | kModShift) == "Shift+Cmd+O");
     REQUIRE(format_chord(KeyCode::f5, 0) == "F5");

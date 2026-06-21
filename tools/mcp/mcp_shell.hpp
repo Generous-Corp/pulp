@@ -1,10 +1,9 @@
 // mcp_shell.hpp — shell-execution + project-root helpers for pulp-mcp.
 //
-// Extracted from tools/mcp/pulp_mcp.cpp in the 2026-05 Phase 6 (B4)
-// refactor. Both the tool handlers (mcp_tools.cpp) and the protocol
-// dispatcher (pulp_mcp.cpp) shell out to the `pulp` CLI and need to
-// locate the enclosing project root, so these two helpers live in a
-// shared header rather than being duplicated.
+// Both the tool handlers (mcp_tools.cpp) and the protocol dispatcher
+// (pulp_mcp.cpp) shell out to the `pulp` CLI and need to locate the
+// enclosing project root, so these helpers live in a shared header
+// rather than being duplicated.
 
 #pragma once
 

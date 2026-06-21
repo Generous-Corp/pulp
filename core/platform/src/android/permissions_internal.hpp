@@ -4,9 +4,9 @@
 //   - permissions.cpp           (JNI callback sink, set_permission_callback)
 //   - permissions_backend.cpp   (pulp::platform backend that forwards results)
 //
-// The Kotlin host still calls the legacy nativeOnPermissionResult JNI
-// function; this header just gives the two C++ TUs one definition of the
-// enum + callback signature to share.
+// The Kotlin host calls nativeOnPermissionResult through JNI; this
+// header gives the two C++ TUs one definition of the enum + callback
+// signature to share.
 
 namespace pulp::android {
 

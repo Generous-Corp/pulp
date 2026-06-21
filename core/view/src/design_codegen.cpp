@@ -1,5 +1,4 @@
-// design_codegen.cpp — design-IR → code generators, extracted from
-// design_import.cpp in the 2026-05 Phase 6 (A3) refactor.
+// design_codegen.cpp — design-IR → code generators.
 //
 // Two code-generation backends plus the shared public entry point:
 //
@@ -9,7 +8,6 @@
 //   * generate_pulp_js()        — public dispatch over CodeGenOptions.
 //
 // Definitions only; declarations stay in pulp/view/design_import.hpp.
-// Relocated so codegen work no longer recompiles the whole importer.
 
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/design_fidelity.hpp>
@@ -35,9 +33,6 @@ namespace pulp::view {
 /// Claude Design HTML file would otherwise emit raw newlines into the JS
 /// source — JavaScript treats that as an unterminated string. Mirror the
 /// standard JS string-escape rules so any user text round-trips safely.
-///
-/// Used only by the codegen backends — moved here from design_import.cpp
-/// in the Phase 6 A3 split.
 std::string js_single_quote_escape(const std::string& s) {
     std::string out;
     out.reserve(s.size() + 4);
@@ -120,8 +115,8 @@ static const char* align_to_css(LayoutAlign a) {
 // Emit a text node's content as per-range <span>s (web-compat). Runs that
 // override style become styled <span> children; the gaps between them are
 // appended as plain text so they inherit the node's dominant style. Offsets are
-// byte indices into text_content (UTF-16 surrogate handling is a follow-up;
-// callers/tests use byte-safe ranges).
+// byte indices into text_content (UTF-16 surrogate handling is intentionally
+// out of scope here; callers/tests use byte-safe ranges).
 static void emit_web_text_runs(std::ostringstream& ss, const std::string& ind,
                                const std::string& var, const IRNode& node) {
     const std::string& text = node.text_content;
@@ -198,7 +193,7 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
 
     std::string ind = indent(depth, opts.indent_spaces);
 
-    // Phase 0a: anchor trail comment so the runtime inspector can map
+    // Emit an anchor trail comment so the runtime inspector can map
     // a generated element back to its stable_anchor_id (tweaks-layer key).
     // Comments are gated on opts.include_comments so minified codegen
     // strips them automatically.
@@ -356,8 +351,7 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
     // too (mirrors generate_native_node). The web-compat <img> emits the style
     // box directly, so the emitted geometry is exactly s.width/s.height. The
     // widget/text slot checks depend on native-emitted geometry and don't map
-    // 1:1 to web-compat output; full web-compat coverage is tracked as a
-    // hardening follow-up (see planning/2026-05-31-import-coverage-hardening-plan.md).
+    // 1:1 to web-compat output.
     if (node.type == "image" && opts.fidelity_report && s.width && s.height) {
         run_fidelity_checks({node, var, *s.width, *s.height, FidelityElement::image},
                             *opts.fidelity_report);
@@ -374,21 +368,20 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
     if (!parent_var.empty())
         ss << ind << parent_var << ".appendChild(" << var << ");\n";
 
-    // Phase 0b: bind the anchor to the live widget so the inspector
+    // Bind the anchor to the live widget so the inspector
     // can key tweaks against it. Emitted unconditionally (NOT gated on
     // include_comments) — the inspector needs the anchor to function
     // even in minified bundles. js_single_quote_escape() is defensive;
     // anchors are typically [a-z0-9:/-] but adapters can supply
     // anything.
     //
-    // Codex P1 (#2303 follow-up): in web-compat codegen the JS variable
-    // name is NOT the bridge widget id — `document.createElement` (web-
-    // compat.js) auto-generates an internal `__el_N__` id and exposes
-    // it as `<var>._id`. setAnchor must receive that id, not the JS
-    // variable name, otherwise the bridge's `widget(id)` lookup misses
-    // and the anchor wiring silently no-ops. Pass `<var>._id` so the
-    // bridge finds the right widget regardless of whether the user
-    // also called setId() on the element.
+    // In web-compat codegen the JS variable name is NOT the bridge widget
+    // id: `document.createElement` (web-compat.js) auto-generates an
+    // internal `__el_N__` id and exposes it as `<var>._id`. setAnchor
+    // must receive that id, not the JS variable name, otherwise the
+    // bridge's `widget(id)` lookup misses and the anchor wiring silently
+    // no-ops. Pass `<var>._id` so the bridge finds the right widget even
+    // when user code also called setId() on the element.
     if (node.stable_anchor_id && !node.stable_anchor_id->empty()) {
         ss << ind << "setAnchor(" << var << "._id, '"
            << js_single_quote_escape(*node.stable_anchor_id) << "');\n";
@@ -639,7 +632,7 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
                << js_single_quote_escape(*st.mask_size) << "');\n";
     };
 
-    // Phase 0a: emit the anchor trail in bridge-native-JS codegen too. Same
+    // Emit the anchor trail in bridge-native-JS codegen too. Same
     // gate + format as generate_node(), so downstream tooling has one
     // pattern to grep for regardless of which codegen mode produced
     // the JS.
@@ -647,14 +640,11 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
         !node.stable_anchor_id->empty()) {
         ss << ind << "// @pulp-anchor " << *node.stable_anchor_id << "\n";
     }
-    // Phase 0b: TODO — emit `setAnchor(id, anchor)` calls in this
-    // bridge-native-JS codegen path too. The web-compat path
-    // (generate_node) is wired; bridge-native-JS has many early returns
-    // and several create call sites, so a small follow-up PR will
-    // factor that out cleanly. For now, bridge-native-JS imports do not
-    // bind anchors to live widgets — affects inspector tweaks for
-    // imports that opted into native codegen. Web-compat is the
-    // default mode, so most imports are unaffected.
+    // Bridge-native-JS currently does not emit setAnchor(id, anchor) calls.
+    // The web-compat path (generate_node) is wired; bridge-native-JS has many
+    // early returns and several create call sites. Imports that opt into native
+    // codegen do not bind anchors to live widgets for inspector tweaks.
+    // Web-compat is the default mode, so most imports are unaffected.
 
     // Audio widgets use native widget API
     if (node.audio_widget != AudioWidgetType::none) {
@@ -722,8 +712,7 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
         // the imported widget reads like the reference: the widget label, then
         // the formatted value, then a small grey sub-stack of min / max / units /
         // binding (decreasing emphasis, grey #6c7086). Emitted below the widget
-        // inside its column. Fully generalizable from metadata. pulp #3192
-        // follow-up (value-stack reconstruction).
+        // inside its column. Fully generalizable from metadata.
         auto units_attr = node.attributes.find("units");
         std::string units_text = (units_attr != node.attributes.end()) ? units_attr->second : std::string();
         auto binding_attr = node.attributes.find("binding");
@@ -780,8 +769,7 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
         // auto-layout row that already arranges siblings) does the layout.
         // Wrapping in a col with +20 padding for absent labels makes the col
         // taller than the parent's hugged row height, breaking Yoga's flex
-        // layout (Track A regression on a knob row: the wrapper was
-        // 28x61 / 62x111 / 28x61 inside a 158x91 parent).
+        // layout.
         bool needs_label_wrapper = !label_text.empty() || !value_text.empty() || has_value_stack;
 
         // Create a wrapper column for the widget + value label (only when
@@ -806,9 +794,8 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
             //   2. node.style.width / height — figma-plugin lane sets these
             //      to the actual Figma instance bounds.
             //   3. kMinKnobSize fallback for purely heuristic detections.
-            // The previous default-min behavior stretched skinned knobs to
-            // 56x56 regardless of source size; with sprite-strip skins
-            // (Track A) that distorted the PNG and overlapped neighbors.
+            // Keeps skinned knobs at source size so sprite-strip PNGs are not
+            // stretched or allowed to overlap neighboring widgets.
             float shape_w = node.style.width.value_or(kMinKnobSize);
             float shape_h = node.style.height.value_or(kMinKnobSize);
             if (node.attributes.count("shape_width"))
@@ -860,17 +847,16 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
                 }
             }
             ss << ind << "setValue('" << id << "', " << knob_norm << ");\n";
-            // Track A3 — attach a designer-supplied sprite-strip skin when the
-            // figma-plugin CLI lane (or anyone else) pre-resolved an asset_path
-            // onto this knob node. Frame count defaults to 1 (static body);
-            // a multi-frame strip lets the indicator rotate by value.
+            // Attach a designer-supplied sprite-strip skin when the figma-plugin
+            // CLI lane (or anyone else) pre-resolved an asset_path onto this knob
+            // node. Frame count defaults to 1 (static body); a multi-frame strip
+            // lets the indicator rotate by value.
             //
-            // Track D (alt-button): when opts.use_silver_knobs is true,
-            // emit the native-vector silver render style instead. The
-            // sprite-strip PNG path is skipped — the chrome look comes
-            // from canvas primitives + radial gradient + indicator notch
-            // (WidgetRenderStyle::silver). Crisp at any size, no PNG
-            // bleed, no GPU texture upload.
+            // When opts.use_silver_knobs is true, emit the native-vector silver
+            // render style instead. The sprite-strip PNG path is skipped — the
+            // chrome look comes from canvas primitives + radial gradient +
+            // indicator notch (WidgetRenderStyle::silver). Crisp at any size,
+            // no PNG bleed, no GPU texture upload.
             //
             // Per-node override: a Figma node name ending in "@sprite"
             // or "@silver" overrides the global default for THIS knob
@@ -1114,7 +1100,7 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
                     ss << ind << "setMeterColors('" << id << "', '" << bg << "', '"
                        << grad_it->second << "');\n";
                 }
-                // pulp #3191 follow-up — colored-bar/housing width ratio. Insets
+                // pulp #3191 — colored-bar/housing width ratio. Insets
                 // the gradient bar so it reads as a recessed fill in the wider
                 // dark housing, matching the captured meter's structure.
                 if (node.attributes.count("skin_meter_bar_ratio")) {
@@ -1236,7 +1222,7 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
         // Image node → createImage + setImageSource. Honors absolute positioning
         // emitted from the figma-plugin lane. asset_path is pre-resolved to an
         // absolute filesystem path by the CLI's asset resolution pass; nodes
-        // missing the attribute (legacy callers with bare type=image) fall
+        // missing the attribute (bare type=image callers) fall
         // through with no source set.
         if (opts.include_comments && !node.name.empty() && depth > 0)
             ss << ind << "// " << node.name << "\n";
@@ -1260,7 +1246,7 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
         // which is unreliable for scaled component instances (e.g. a knob
         // whose render_bounds aspect is 1.81 while its PNG is 0.87) — is not
         // trusted for
-        // sizing. Falls back to legacy box sizing when no core data exists.
+        // sizing. Falls back to the declared box size when no core data exists.
         const float box_w = node.style.width.value_or(0.0f);
         const float box_h = node.style.height.value_or(0.0f);
         auto attr_f = [&](const char* k) -> float {
@@ -1366,14 +1352,9 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
         emit_position_if_absolute(id);
         emit_node_visual_overrides(id);
 
-        // Honour the IR-declared height when present. Pre-fix this branch
-        // unconditionally recomputed from font_size, which clobbered Figma's
-        // own label box height — and any absolute-positioned label that
-        // expected to be CENTRED in a slot relied on its own height matching
-        // the slot. Visible bug: the SEARCH input's text+icon sit at design
-        // y=5 / y=6 with IR heights 17 / 15; clobbering the text height to
-        // 14 shifted its glyph baseline up so it no longer aligned with the
-        // icon centre.
+        // Honour the IR-declared height when present; absolute-positioned labels
+        // that are centered in a slot rely on the emitted height matching that
+        // slot rather than being recomputed from font size alone.
         float font_h = node.style.font_size.value_or(14.0f);
         bool ir_height_is_explicit = node.style.height.has_value();
         float label_h = ir_height_is_explicit
@@ -1453,13 +1434,6 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
             // here: forcing its narrow hug-width as a hard wrap box would make
             // it wrap when Pulp's font metrics run a hair wider than Figma's,
             // breaking a title that the design drew on one line.
-            // Multi-line only when the box clears ~TWO line boxes. Keying on
-            // font_h * 1.6 false-fired on single-line text whose Figma box
-            // carries normal line-box padding (e.g. an 8px "Search" in a 17px
-            // box: 17 > 8*1.6=12.8), which flipped it to multi-line and pushed
-            // the vertically-centered baseline down. Use the IR's own
-            // line_height (fallback font_h*1.4) × 1.8 so one line + padding
-            // doesn't trip it. Generalizable: reads Figma's declared metrics.
             // Multi-line only when the box clears ~1.8 line boxes. Prefer the
             // IR's declared line_height; when absent assume a tight font*1.2
             // (a single rendered line), NOT font*1.4 — the looser fallback let
@@ -1634,11 +1608,9 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
         if (node.style.border_radius)
             ss << ind << "setCornerRadius('" << id << "', 'All', " << *node.style.border_radius << ");\n";
         // Emit border (Figma frame stroke) as setBorder(id, color, width).
-        // The codegen was previously dropping these — visible effect:
-        // column frames inside a gradient panel each carry a 1px
-        // rgba(0,0,0,0.1) border that Figma renders as the thin vertical
-        // separators between columns. The
-        // bridge's parseColor accepts both hex and rgba(...) so we can
+        // Column frames inside a gradient panel can carry a 1px rgba(...)
+        // border that Figma renders as the thin vertical separators between
+        // columns. The bridge's parseColor accepts both hex and rgba(...), so
         // pass border_color verbatim from the IR.
         if (node.style.border_color && node.style.border_width &&
             *node.style.border_width > 0.0f) {
@@ -1648,8 +1620,7 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
                << *node.style.border_width << ", " << br << ");\n";
         }
         if (!node.style.box_shadow.empty()) {
-            // The IR carries parsed CSS box-shadow layers (pulp #41), so we no
-            // longer re-tokenize the raw string here. The bridge's
+            // The IR carries parsed CSS box-shadow layers (pulp #41). The bridge's
             // setBoxShadow(id, ox, oy, blur, spread, color, inset?) takes a
             // single drop shadow; emit the first layer (CSS paints the first
             // layer on top). An omitted color falls back to the bridge's
@@ -1669,11 +1640,9 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
         // Recurse children.
         // For space_between rows with TWO OR MORE text children (the canonical
         // "label … value" or "key … units" pattern), right-align the LAST
-        // text child so the value hugs the right edge. The earlier version
-        // applied this to single-text-child rows too, which misfired on
-        // dropdowns like ENVELOPE → "Short Plucks" + chevrons-image:
-        // Short Plucks was the only text and got right-aligned within its
-        // own min-width box, pushing the visible glyphs onto the chevrons.
+        // text child so the value hugs the right edge. Single-text-child rows
+        // keep their own alignment so dropdown labels do not right-align into
+        // trailing image controls.
         bool is_space_between = is_row && node.layout.justify == LayoutAlign::space_between;
         int text_child_count = 0;
         if (is_space_between) {
@@ -1777,7 +1746,7 @@ std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
         ss << "\n";
     }
 
-    // Phase 9: tag the bundle with a motion-observability provenance
+    // Tag the bundle with a motion-observability provenance
     // envelope so any animation it drives (view.animate, CSS transitions,
     // rAF publishes) inherits source_kind="design-import",
     // source_id="<vendor>:<root-node-or-file>". The native bridge falls
@@ -1852,7 +1821,7 @@ std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
         ss << "\n";
     }
 
-    // pulp #2116 V2 — auto-imported keyboard shortcuts. Strategy A:
+    // Auto-imported keyboard shortcuts:
     // register a native intercept per detected chord; the handler thunk
     // re-dispatches a synthetic W3C keydown into __dispatch__ so the
     // original React handlers in the bundled JS (which still own the
@@ -1872,13 +1841,9 @@ std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
         // physical chord we're intercepting — so the bundled React
         // handler's `e.ctrlKey`, `e.metaKey`, `e.metaKey || e.ctrlKey`
         // checks all see the right state.
-        // Escape a key string for a single-quoted JS literal. Codex P1 on
-        // #2128: widening `key_string_to_keycode` to accept all printable
-        // ASCII let characters like `'` and `\` pass validation, but the
-        // generator interpolates them raw into `key: '...'`. A source
-        // with `e.key === "'"` produces syntactically-invalid JS and the
-        // whole script fails to load. Escape backslash + single-quote at
-        // emission time so any future printable-key default is safe too.
+        // Escape a key string for a single-quoted JS literal. Printable keys can
+        // include characters like `'` and `\`; escape them at emission time so
+        // generated shortcut thunks remain valid JS.
         auto js_escape_single_quoted = [](const std::string& in) {
             std::string out;
             out.reserve(in.size() + 2);
@@ -1921,11 +1886,10 @@ std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
                 continue;
             }
 
-            // Codex P1 on #2119: preserve Ctrl-only / Meta-only / cross-
-            // platform `metaKey||ctrlKey` intent. If BOTH modifiers were
-            // collected we emit two bindings so the user can hit either
-            // physical chord (Cmd on macOS, Ctrl on Win/Linux) and each
-            // synthetic event carries the right modifier flags.
+            // Preserve Ctrl-only / Meta-only / cross-platform `metaKey||ctrlKey`
+            // intent. If BOTH modifiers were collected we emit two bindings so
+            // the user can hit either physical chord (Cmd on macOS, Ctrl on
+            // Win/Linux) and each synthetic event carries the right modifier flags.
             bool has_meta = false, has_ctrl = false;
             for (const auto& m : s.modifiers) {
                 if (m == "meta") has_meta = true;

@@ -3,7 +3,7 @@
 // The Windows MIDI Services SDK's `Microsoft.Windows.Devices.Midi2`
 // projection exposes native MIDI 2.0 endpoints (Universal MIDI Packets),
 // `MidiEndpointDeviceWatcher` hotplug, and high-resolution `MidiClock`
-// timestamps. The legacy mmeapi backend in winmidi_device.cpp truncates
+// timestamps. The WinMM mmeapi backend in winmidi_device.cpp truncates
 // MIDI 2.0 UMP, has no hotplug, and requires manual SysEx reassembly. This
 // TU is the real WinRT consumer.
 //

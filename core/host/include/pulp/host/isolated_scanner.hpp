@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-// Crash-isolated plugin scanner (macOS plan item 4.1).
+// Crash-isolated plugin scanner.
 //
 // Loads a single plugin bundle in a CHILD PROCESS via the canonical
 // `pulp::platform::ChildProcess` API + the pre-existing
@@ -10,8 +10,7 @@
 // `ScanResult` with a structured `ScanStatus` instead of taking down
 // the host.
 //
-// Builds on PR #2815 (ChildProcess) and workstream 03 slice 3.3b
-// (`pulp-scan-worker` binary).
+// Uses the `pulp-scan-worker` binary.
 //
 // Usage:
 //   pulp::host::IsolatedPluginScanner s{worker_path};

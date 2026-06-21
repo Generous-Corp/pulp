@@ -1,6 +1,6 @@
-// pulp #1514 — verify the @pulp/react prop-applier dispatches the
-// list-style cluster (listStyle / listStyleType / listStyleImage /
-// listStylePosition) to the correct bridge fns. Pulp doesn't model
+// Verify the @pulp/react prop-applier dispatches the list-style cluster
+// (listStyle / listStyleType / listStyleImage / listStylePosition) to
+// the correct bridge fns. Pulp doesn't model
 // HTML <li>/<ul>/<ol> semantics; the bridge stores the values
 // verbatim on the View so a future paint pass (or future
 // semantic-list surface) can honor them. The catalog status is
@@ -36,7 +36,7 @@ function callsFor(b: MockBridge, fn: string) {
     return b.calls.filter((c) => c.fn === fn);
 }
 
-describe('prop-applier list-style cluster (pulp #1514)', () => {
+describe('prop-applier list-style cluster', () => {
     it('listStyleType forwards each keyword verbatim', () => {
         for (const t of ['none', 'disc', 'circle', 'square', 'decimal'] as const) {
             const inst = makeInstance(t, 'View');

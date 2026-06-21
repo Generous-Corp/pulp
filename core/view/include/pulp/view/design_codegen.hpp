@@ -40,24 +40,23 @@ struct CodeGenOptions {
     /// override via `@sprite` or `@silver` suffix on the Figma layer name.
     bool use_silver_knobs = true;
 
-    /// pulp #3191 — when true (default), recognised faders/meters are emitted
-    /// with a value-driven skin DERIVED from the captured asset (track / fill /
-    /// thumb colours for a fader; gradient stops for a meter) so they render
-    /// like the captured Figma art while the thumb/level still move with their
-    /// bound value. When false (`--fader-style=default` / `--meter-style=default`)
+    /// When true (default), recognised faders/meters are emitted with a
+    /// value-driven skin derived from the captured asset (track / fill / thumb
+    /// colours for a fader; gradient stops for a meter) so they render like the
+    /// captured Figma art while the thumb/level still move with their bound
+    /// value. When false (`--fader-style=default` / `--meter-style=default`)
     /// they fall back to the plain native look. The derived style attributes
     /// are stamped onto the node by the import CLI's asset-resolution pass.
     bool skin_faders = true;
     bool skin_meters = true;
 
-    /// pulp #2116 V2 — shortcuts pulled from the source by
-    /// `extract_keyboard_shortcuts(...)` (Strategy A: synthetic keydown
-    /// re-dispatch). The generator emits one `registerShortcut(...)` plus
-    /// a matching `__pulpShortcutHandler_N` thunk per entry. The thunk
-    /// calls `__dispatch__('__global__', 'keydown', {...})` so the
-    /// original React handlers in the bundled JS still own the closure
-    /// state — we just intercept the OS chord and re-fire the synthetic
-    /// keydown into the engine. Empty vector = no shortcut emission.
+    /// Shortcuts pulled from the source by `extract_keyboard_shortcuts(...)`.
+    /// The generator emits one `registerShortcut(...)` plus a matching
+    /// `__pulpShortcutHandler_N` thunk per entry. The thunk calls
+    /// `__dispatch__('__global__', 'keydown', {...})` so the original React
+    /// handlers in the bundled JS still own the closure state; native shortcut
+    /// interception just re-fires the synthetic keydown into the engine. Empty
+    /// vector = no shortcut emission.
     std::vector<DetectedShortcut> shortcuts;
 
     /// Optional fidelity-report sink. When non-null, codegen runs every
@@ -153,9 +152,10 @@ int key_string_to_keycode(const std::string& key);
 
 /// Combine modifier strings (`"shift"`, `"ctrl"`, `"alt"`, `"meta"`)
 /// into the bitmask `registerShortcut` consumes. `"meta"` maps to
-/// `kModCmd` (the platform-primary modifier) per the cross-platform
-/// idiom captured in `extract_keyboard_shortcuts` (metaKey || ctrlKey
-/// collapses to "meta"). Unknown strings are silently dropped.
+/// `kModCmd` (the platform-primary modifier). `"ctrl"` maps separately to
+/// `kModCtrl`, including when `extract_keyboard_shortcuts` captures both
+/// modifiers from the `metaKey || ctrlKey` idiom. Unknown strings are silently
+/// dropped.
 int modifier_strings_to_mask(const std::vector<std::string>& mods);
 
 } // namespace pulp::view

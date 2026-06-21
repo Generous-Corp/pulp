@@ -44,8 +44,8 @@ bridge.close()                    // fires Processor::on_view_closed iff attache
 ```
 
 **Do not** fire `on_view_opened` before the host has actually attached
-the view to a native parent. That was PR #140's Codex P2 finding — if
-attach fails after `open()`, a naive implementation would fire
+the view to a native parent. If attach fails after `open()`, a naive
+implementation would fire
 `on_view_opened` then destroy without a matching `on_view_closed` and
 the plugin would leak host-window-dependent resources. `ViewBridge`
 guarantees balance **only when the adapter honors the two-step
@@ -214,7 +214,7 @@ polls the same `StateStore`; there is no explicit broadcast step.
 Phase 4's `attach_remote_view(url)` (WebSocket-backed) will land as a
 `ViewRole::Remote` secondary view.
 
-## ⚠️ TRACKPAD / SCROLL-WHEEL ZOOM SILENTLY BROKEN — 3 bugs in one stack (2026-05-10)
+## Trackpad / Scroll-Wheel Zoom Event Path
 
 **Searchable keywords**: trackpad zoom, scroll-wheel zoom, mouse wheel, "1.00x zoom" stuck, deltaY missing, deltaY=0, wheel event not firing, FilterBank zoom, Spectr zoom, onWheel, addEventListener('wheel'), registerWheel never called, wheel bubble, ancestor not receiving wheel, canvas-child captures wheel, wheel handler short-circuits.
 
@@ -259,8 +259,8 @@ So a view that registered both gets both halves; a view that registered
 only one ignores the other. ScrollView ancestor still takes precedence
 and stops the walk. (`core/view/platform/mac/window_host_mac.mm`.)
 
-### Bug C: wheel-event payload missing `clientX/clientY/deltaY` (already fixed in #1792)
-Already addressed earlier in the PR: bridge emits
+### Bug C: wheel-event payload must include `clientX/clientY/deltaY`
+The bridge emits
 `{deltaX, deltaY, clientX, clientY}` as an object (not positional args)
 so the `@pulp/react` synthetic-event shim's `isPlainObject(rawArgs[0])`
 branch can lift the fields. Without this, even after Bugs A+B were
@@ -306,7 +306,7 @@ int main(int argc, char** argv) {
 
 Build: `clang -framework ApplicationServices -o /tmp/scroll-event /tmp/scroll-event.c`. Posts real CGEvent scroll-wheel events that reach `NSView::scrollWheel:`. Use `/tmp/scroll-event 30 5` to inject 30 scroll-up events.
 
-## ⚠️ STALE-HEADER ABI MISMATCH — silent crash at first paint (2026-05-10)
+## Stale-Header ABI Mismatch
 
 **Searchable keywords**: silent crash, "Standalone: editor window open"
 then exit, segfault inside `WidgetBridge::register_api()::$_NNN`,
@@ -379,8 +379,8 @@ fresh lib instead of segfaulting at first paint.
    ObjC selector, CLAP / VST3 constructor param).
 4. **Hard-coding `editor_size()` when you actually want resize
    bounds.** Prefer `pulp_add_plugin(... DESIGN_WIDTH N DESIGN_HEIGHT N)`
-   over a per-plugin `view_size()` override for imported-design plugins
-   (issue #2784 stage A) — the macros flow into the default
+   over a per-plugin `view_size()` override for imported-design plugins;
+   the macros flow into the default
    `Processor::view_size()` via `format::view_size_from_design(...)`,
    which derives `min = preferred * 2/3` and `max = 2 * preferred`. The
    derived `min > 0` is what makes CLAP's `gui_can_resize` engage.
@@ -392,7 +392,7 @@ fresh lib instead of segfaulting at first paint.
    responsible for forwarding `min_width`/`min_height` (and
    `preferred_*`) into its window/host options. The standalone
    adapter centralizes this in `detail::make_standalone_window_options`
-   so the chrome-height shift is applied consistently (#1362). Other
+   so the chrome-height shift is applied consistently. Other
    adapters wiring an OS window (e.g. host apps registering a
    `WindowHost::Factory`) need the same propagation; reading only
    `preferred_*` leaves the OS host with a zero minimum and lets
@@ -412,8 +412,7 @@ fresh lib instead of segfaulting at first paint.
    Host idle paths must call BOTH (`poll_async_results()` first, then
    `service_frame_callbacks()`). Calling only the first drops timer
    callbacks on the floor — `setTimeout(fn, 100)` queues forever and
-   only fires when an unrelated event happens to pump the message
-   loop (pulp #1412, regression of PRs #1400/#1404/#1405).
+   only fires when an unrelated event happens to pump the message loop.
    `ScriptedUiSession::poll()` does this pair on Mac/iOS standalone;
    `core/render/platform/android/gpu_surface_android.cpp::android_render_frame()`
    does the same pair on Android. Tests live under `[issue-1412]` in
@@ -425,8 +424,8 @@ fresh lib instead of segfaulting at first paint.
    BEFORE the C++ host frees itself. DAWs routinely retain the
    returned NSView after disposal (attach_to_parent hands it to the
    DAW's view hierarchy); a later `mouseDown:` would otherwise invoke
-   the block on freed memory. Same shape as the #2502 deferred-click
-   teardown token. Test: `pulp-test-plugin-view-host-design-viewport`
+   the block on freed memory. This is the same ownership shape as the
+   deferred-click teardown token. Test: `pulp-test-plugin-view-host-design-viewport`
    has the dtor-clears-pointTransform regression case.
 8. **`paint_overlays` MUST run inside the design-viewport transform.**
    ComboBox dropdowns, claimed overlays, and the inspector layer all
@@ -509,11 +508,9 @@ owns the View. The host's destructor can then safely call
 Calling `bridge->close()` explicitly inside dealloc reverses that
 order — the View dies first, the host's `~PluginViewHost` then
 dereferences a dangling `root_` reference, and AU editor close
-crashes the host process. Codex P1 review on PR #653 caught the
-crash; the fix was to remove the explicit close (PR #667 / pulp
-`fix/au-editor-uaf-on-close`). Don't reintroduce it. The full
-rationale lives in the `auv2`, `auv3`, and `ios` skills since those
-files are dual-/triple-mapped.
+crashes the host process. Do not reintroduce an explicit close in the
+AU dealloc path. The full rationale lives in the `auv2`, `auv3`, and
+`ios` skills since those files are dual-/triple-mapped.
 
 ### Standalone editor lane DOES need explicit `bridge->close()` before `stop()`
 
@@ -542,7 +539,7 @@ ordering (AU pattern, no explicit close), or does the lane have a
 return path that bypasses the window-close callback (standalone
 pattern, explicit close before processor teardown)?
 
-## EditorBridge — JSON message dispatch over the editor lifecycle (pulp #709)
+## EditorBridge — JSON message dispatch over the editor lifecycle
 
 `pulp::format::ViewBridge` (this skill) handles **when** the editor
 exists. `pulp::view::EditorBridge` handles **what messages flow
@@ -569,19 +566,18 @@ private:
 Key invariants:
 
 - **Renderer-agnostic.** `attach_webview(WebViewPanel&)` today;
-  `attach_native_runtime(JsRuntime&, "<handler_name>")` for the pulp
-  #468 native-JS-runtime import lane. Same handler registrations.
+  `attach_native_runtime(JsRuntime&, "<handler_name>")` for the
+  native-JS-runtime import lane. Same handler registrations.
 - **Explicit WebView teardown.** `detach_webview(WebViewPanel&)`
   clears the callback installed by `attach_webview`. Use it when the
   bridge and `WebViewPanel` are side-by-side members and you want to
-  sever queued WebView messages before native detach or panel
-  destruction (#726).
+  sever queued WebView messages before native detach or panel destruction.
 - **noexcept dispatch.** `dispatch_json(...)` and `dispatch(...)` are
   `noexcept` and always return a well-formed JSON response envelope —
   handler exceptions become `{"ok":false,"error":"internal error"}`.
 - **Standard envelope error vocabulary** (substring-compatible with
   Spectr's existing test suite — that compatibility is load-bearing
-  for the Spectr cutover acceptance criterion in #709):
+  for the Spectr cutover acceptance criterion):
   - `malformed_json` — JSON parse failed / root not object
   - `unknown_type` — no handler registered
   - `missing_field` — envelope missing/empty/non-string `type`
@@ -675,12 +671,11 @@ fire — they are always-global by design and must work even when an
 editor has focus.
 
 The focus signal is `View::focused_input_` (the same static slot the
-macOS PulpView already maintains for text-input dispatch, #1708)
+macOS PulpView already maintains for text-input dispatch)
 **narrowed** by `View::accepts_text_input()`. The slot is populated
 for ANY focusable widget — Knob, Button, ListBox, TextEditor — via the
 window-host focus path, so checking just `focused_input_ != nullptr`
-would wrongly kill bare-key shortcuts after clicking a knob (Codex P1
-finding on #2120). The virtual `accepts_text_input()` returns false by
+would wrongly kill bare-key shortcuts after clicking a knob. The virtual `accepts_text_input()` returns false by
 default; only `TextEditor` (and any future text-input widget) overrides
 to true.
 
@@ -862,7 +857,7 @@ window-sized layout would briefly flash before the next paint reset.
 
 See `test_plugin_view_host_design_viewport.mm` for the wiring proof.
 
-## GpuSurface plumbing into WidgetBridge — late-attach contract (Phase iOS-D.3b Slice 1)
+## GpuSurface Plumbing Into WidgetBridge
 
 Adapter editor-attach paths that wire a scripted UI (`ScriptedUiSession`)
 MUST hand the host's live `render::GpuSurface*` to the bridge so the
@@ -906,11 +901,24 @@ want WebGPU JS plumbing must override the virtual too.
 Coverage: `pulp-test-widget-bridge "[gpu-surface-plumbing]"` (ctor +
 late-attach + idempotence + detach) and `pulp-test-scripted-ui
 "[gpu-surface-plumbing]"` (session-level forwarding). A live-Dawn
-counterpart belongs in Phase iOS-D.3b Slice 3
-(`[jsc][navigator-gpu][live]`).
+counterpart should use the `[jsc][navigator-gpu][live]` test path when it lands.
 
-See `planning/2026-05-29-ios-d3b-threejs-webgpu-program.md` § Slice 1
+See `planning/2026-05-29-ios-d3b-threejs-webgpu-program.md`
 for the full rationale.
+
+**Why this matters:** Without this plumbing, format adapters silently route
+Three.js + WebGPU canvas calls to mock adapters in production plug-ins. Do not
+bypass it — if you're writing a new format adapter or plugin host, route your
+live `GpuSurface*` through `ScriptedUiSession::attach_gpu_surface()` (or
+`WidgetBridge::attach_gpu_surface()` if you don't have a session yet).
+
+**`presentable` flag**: `WidgetBridge`'s `__gpuCanvasConfigureImpl` and
+`__gpuCanvasDescribeCurrentTextureImpl` both expose a `presentable` boolean to
+JS. `true` iff `gpu_surface_->has_surface()` is true (i.e., the surface has a
+real swapchain, not just an offscreen texture). Three.js draws to a
+`presentable=false` canvas land in a silent offscreen render that's not
+composited to the visible AUv3 editor. Always check this flag in any new GPU
+bridge code path.
 
 ## References
 
@@ -920,31 +928,15 @@ for the full rationale.
 - `core/format/include/pulp/format/processor.hpp` — `create_view`,
   `view_size`, `on_view_*`
 - `core/format/include/pulp/format/remote_view_session.hpp` — Phase 4
-- `core/view/include/pulp/view/editor_bridge.hpp` — EditorBridge API (#709)
+- `core/view/include/pulp/view/editor_bridge.hpp` — EditorBridge API
 - `core/view/src/editor_bridge.cpp` — EditorBridge implementation
 - `docs/guides/view-bridge.md` — user-facing guide
-- `docs/reference/editor-bridge.md` — EditorBridge reference (#709)
+- `docs/reference/editor-bridge.md` — EditorBridge reference
 - `docs/reference/remote-view-protocol.md` — Phase 4 wire format
 - `examples/view-bridge-demo/main.cpp` — runnable headless demo
 - `test/test_remote_view.cpp` — loopback tests for the remote protocol
-- `test/test_editor_bridge.cpp` — EditorBridge unit tests (#709)
+- `test/test_editor_bridge.cpp` — EditorBridge unit tests
 - `planning/next-features-plan.md` § Feature 1 — phase tracking
-
-## GpuSurface plumbing into WidgetBridge (iOS-D.3b Slice 1, 2026-05-29)
-
-Slice 1 of the iOS-D.3b program (PR #3146 @ `3e15f61cb`) added the cross-platform contract for plugin hosts to pass their live `GpuSurface*` to the bridge. All format adapters (AUv3 iOS/macOS, VST3, CLAP, AU v2) now route the surface through `ScriptedUiSession::attach_gpu_surface()` → `WidgetBridge::attach_gpu_surface()`.
-
-**Public APIs added:**
-- `PluginViewHost::gpu_surface() const` — virtual, returns the host's live surface (nullable). Overridden by each platform's plugin view host.
-- `WidgetBridge::attach_gpu_surface(render::GpuSurface*)` — idempotent + nullable. Late-attach is supported (slice-1 contract case 4): JS-side `__describeNativeAdapterImpl()` flips from mock to native after a non-null attach.
-- `WidgetBridge::has_native_gpu_bridge() const` — reflects whether the attached surface exposes a real Dawn-native bridge (not just any non-null pointer).
-- `ScriptedUiSession::attach_gpu_surface(...)` — the call format adapters use; routes to the underlying bridge.
-
-**Why this matters:** Before slice 1, only `examples/threejs-native-demo/main.cpp:230` ever passed the surface. Format adapters had no path to do so, which silently routed Three.js + WebGPU canvas calls to mock adapters in production plug-ins. Don't bypass this plumbing — if you're writing a new format adapter or plugin host, route your live `GpuSurface*` through `ScriptedUiSession::attach_gpu_surface()` (or `WidgetBridge::attach_gpu_surface()` if you don't have a session yet).
-
-**`presentable` flag** (iOS-D.3b Slice 4): `WidgetBridge`'s `__gpuCanvasConfigureImpl` and `__gpuCanvasDescribeCurrentTextureImpl` both expose a `presentable` boolean to JS. `true` iff `gpu_surface_->has_surface()` is true (i.e., the surface has a real swapchain, not just an offscreen texture). Three.js draws to a `presentable=false` canvas land in a silent offscreen render that's not composited to the visible AUv3 editor. Always check this flag in any new GPU bridge code path.
-
-See `planning/2026-05-29-ios-d3b-threejs-webgpu-program.md` for the full 6-slice program.
 
 ## Plugin-contributed settings sections
 

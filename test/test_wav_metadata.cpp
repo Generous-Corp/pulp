@@ -1,6 +1,5 @@
 // test_wav_metadata.cpp — round-trip tests for BWAV / iXML / ASWG / ACID
-// metadata. Covers item 6.11 of the 2026-05-24 macOS plugin authoring
-// plan.
+// metadata.
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -82,7 +81,7 @@ bool bwav_eq(const BwavMetadata& a, const BwavMetadata& b) {
 
 } // namespace
 
-TEST_CASE("BWAV bext chunk round-trips through encode/decode", "[audio][wav][metadata][bwav][issue-6_11]") {
+TEST_CASE("BWAV bext chunk round-trips through encode/decode", "[audio][wav][metadata][bwav]") {
     auto src = make_bwav_fixture();
     auto bytes = encode_bext_chunk(src);
     // Fixed header (602) + coding_history length.
@@ -93,7 +92,7 @@ TEST_CASE("BWAV bext chunk round-trips through encode/decode", "[audio][wav][met
     REQUIRE(bwav_eq(src, *rt));
 }
 
-TEST_CASE("BWAV bext truncates over-long fixed strings without UB", "[audio][wav][metadata][bwav][issue-6_11]") {
+TEST_CASE("BWAV bext truncates over-long fixed strings without UB", "[audio][wav][metadata][bwav]") {
     BwavMetadata src;
     src.description = std::string(400, 'x'); // overflow 256-byte slot
     src.originator = std::string(60, 'y');   // overflow 32-byte slot
@@ -107,13 +106,13 @@ TEST_CASE("BWAV bext truncates over-long fixed strings without UB", "[audio][wav
     CHECK(rt->origination_date == "2026-05-24");
 }
 
-TEST_CASE("BWAV decode rejects undersized payload", "[audio][wav][metadata][bwav][issue-6_11]") {
+TEST_CASE("BWAV decode rejects undersized payload", "[audio][wav][metadata][bwav]") {
     std::vector<uint8_t> garbage(64, 0xAB);
     auto rt = decode_bext_chunk(garbage.data(), garbage.size());
     REQUIRE_FALSE(rt.has_value());
 }
 
-TEST_CASE("ACID chunk round-trips through encode/decode", "[audio][wav][metadata][acid][issue-6_11]") {
+TEST_CASE("ACID chunk round-trips through encode/decode", "[audio][wav][metadata][acid]") {
     auto src = make_acid_fixture();
     auto bytes = encode_acid_chunk(src);
     REQUIRE(bytes.size() == 24);
@@ -130,13 +129,13 @@ TEST_CASE("ACID chunk round-trips through encode/decode", "[audio][wav][metadata
     CHECK_THAT(rt->tempo_bpm, WithinAbs(src.tempo_bpm, 1e-4f));
 }
 
-TEST_CASE("ACID decode rejects undersized payload", "[audio][wav][metadata][acid][issue-6_11]") {
+TEST_CASE("ACID decode rejects undersized payload", "[audio][wav][metadata][acid]") {
     std::vector<uint8_t> tiny(12, 0);
     auto rt = decode_acid_chunk(tiny.data(), tiny.size());
     REQUIRE_FALSE(rt.has_value());
 }
 
-TEST_CASE("Full WAV metadata file round-trip with all four chunk kinds", "[audio][wav][metadata][issue-6_11]") {
+TEST_CASE("Full WAV metadata file round-trip with all four chunk kinds", "[audio][wav][metadata]") {
     auto path = scratch_file("full");
     WavMetadata src;
     src.bwav = make_bwav_fixture();
@@ -168,7 +167,7 @@ TEST_CASE("Full WAV metadata file round-trip with all four chunk kinds", "[audio
     std::filesystem::remove(path, ec);
 }
 
-TEST_CASE("read_wav_metadata returns empty struct for WAV with no metadata", "[audio][wav][metadata][issue-6_11]") {
+TEST_CASE("read_wav_metadata returns empty struct for WAV with no metadata", "[audio][wav][metadata]") {
     auto path = scratch_file("bare");
     WavMetadata empty; // no bwav/acid/ixml/axml
     REQUIRE(write_wav_metadata(path.string(), empty, 44100, 2, 24));
@@ -184,7 +183,7 @@ TEST_CASE("read_wav_metadata returns empty struct for WAV with no metadata", "[a
     std::filesystem::remove(path, ec);
 }
 
-TEST_CASE("read_wav_metadata fails cleanly on non-existent path", "[audio][wav][metadata][issue-6_11]") {
+TEST_CASE("read_wav_metadata fails cleanly on non-existent path", "[audio][wav][metadata]") {
     auto missing = std::filesystem::temp_directory_path()
                  / "pulp-wav-metadata-this-does-not-exist-xyz.wav";
     std::error_code ec;
@@ -193,7 +192,7 @@ TEST_CASE("read_wav_metadata fails cleanly on non-existent path", "[audio][wav][
     REQUIRE_FALSE(rt.has_value());
 }
 
-TEST_CASE("read_wav_metadata fails on non-RIFF data", "[audio][wav][metadata][issue-6_11]") {
+TEST_CASE("read_wav_metadata fails on non-RIFF data", "[audio][wav][metadata]") {
     auto path = scratch_file("notriff");
     {
         std::ofstream out(path, std::ios::binary);
@@ -205,7 +204,7 @@ TEST_CASE("read_wav_metadata fails on non-RIFF data", "[audio][wav][metadata][is
     std::filesystem::remove(path, ec);
 }
 
-TEST_CASE("replace_metadata_in_file preserves fmt/data and rewrites chunks", "[audio][wav][metadata][issue-6_11]") {
+TEST_CASE("replace_metadata_in_file preserves fmt/data and rewrites chunks", "[audio][wav][metadata]") {
     auto path = scratch_file("inplace");
 
     WavMetadata initial;
@@ -247,7 +246,7 @@ TEST_CASE("replace_metadata_in_file preserves fmt/data and rewrites chunks", "[a
     std::filesystem::remove(path, ec);
 }
 
-TEST_CASE("Unknown chunks survive a read+write round-trip", "[audio][wav][metadata][issue-6_11]") {
+TEST_CASE("Unknown chunks survive a read+write round-trip", "[audio][wav][metadata]") {
     auto path = scratch_file("unknown");
 
     WavMetadata src;

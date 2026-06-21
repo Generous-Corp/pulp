@@ -43,7 +43,7 @@ export const Checkbox = (props: CheckboxProps): ReactElement => createElement('C
 export const Toggle = (props: ToggleProps): ReactElement => createElement('Toggle' as unknown as 'div', props as unknown as object);
 export const Combo = (props: ComboProps): ReactElement => createElement('Combo' as unknown as 'div', props as unknown as object);
 
-// Ink & Signal design-system widgets (Phase 8c).
+// Ink & Signal design-system widgets.
 export const Badge = (props: BadgeProps): ReactElement => createElement('Badge' as unknown as 'div', props as unknown as object);
 export const Stepper = (props: StepperProps): ReactElement => createElement('Stepper' as unknown as 'div', props as unknown as object);
 export const Pan = (props: PanProps): ReactElement => createElement('Pan' as unknown as 'div', props as unknown as object);

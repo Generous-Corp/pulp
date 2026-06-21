@@ -422,8 +422,8 @@ std::string GraphSerializer::to_json(
             custom_obj.addMember(
                 "version",
                 (int64_t)(n.custom_type_version > 0 ? n.custom_type_version : 1));
-            // Phase 5 — opaque custom-node state (live instance's save_state, or
-            // the preserved blob for unresolved nodes). Omitted when empty so
+            // Opaque custom-node state: the live instance's save_state(), or
+            // the preserved blob for unresolved nodes. Omitted when empty so
             // stateless process-only nodes serialize byte-for-byte as before.
             if (auto state = graph.custom_node_state(n.id); !state.empty()) {
                 custom_obj.addMember("state_b64", b64_encode(state));
@@ -453,7 +453,7 @@ std::string GraphSerializer::to_json(
         co.addMember("midi",        c.midi);
         co.addMember("automation",  c.automation);
         co.addMember("audio_rate_modulation", c.audio_rate_modulation);
-        // Item 4.7 — sidechain flag is additive; absent in older blobs.
+        // Sidechain flag is additive; absent in older blobs.
         co.addMember("sidechain",   c.sidechain);
         if (c.automation || c.audio_rate_modulation) {
             co.addMember("auto_param_id",  (int64_t)c.automation_param_id);
@@ -550,9 +550,9 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                         new_id = graph.add_unresolved_custom_node(
                             type_id, version, in_ch, out_ch, name);
                     }
-                    // Phase 5 — restore opaque custom-node state. Applied to a
-                    // resolved node's instance on its next prepare(); for an
-                    // unresolved node the blob is preserved so a re-save keeps it.
+                    // Restore opaque custom-node state. Applied to a resolved
+                    // node's instance on its next prepare(); for an unresolved
+                    // node the blob is preserved so a re-save keeps it.
                     if (new_id != 0 && nv.hasObjectMember("custom")) {
                         const auto& cv2 = nv["custom"];
                         if (cv2.hasObjectMember("state_b64")) {

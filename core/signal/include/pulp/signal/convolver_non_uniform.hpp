@@ -34,9 +34,9 @@
 ///   • short noise burst through a 4 096-tap IR matches the
 ///     direct-convolution reference within float epsilon.
 ///
-/// Background IR swap: a follow-up will mirror the uniform
-/// convolver's `ConvolverIrSwapper` for non-uniform IRs. Today,
-/// `load_ir()` rebuilds both stages inline (off-RT-thread).
+/// IR loading: unlike the uniform convolver, this class does not provide a
+/// background swapper. `load_ir()` rebuilds both stages inline and must be
+/// called off the audio thread.
 
 #include <pulp/signal/convolver.hpp>
 #include <pulp/signal/convolver_messages.hpp>

@@ -1,11 +1,6 @@
-// inspector_overlay_zoom.cpp — Phase 3e 20× zoom loupe for the visual
-// inspector overlay.
+// Pixel loupe for the visual inspector overlay.
 //
-// Extracted from inspector_overlay.cpp in the 2026-05 refactor (roadmap
-// P10-2). Pure mechanical move — the InspectorOverlay member methods
-// below are byte-identical to their previous definitions in
-// inspector_overlay.cpp; only their translation unit changed. Shared
-// color constants live in inspector_overlay_internal.hpp; the
+// Shared color constants live in inspector_overlay_internal.hpp; the
 // structural zoom constants (kZoomGridCells, kZoomFactorMin/Max,
 // kZoomReadoutH, kZoomPanelMargin) are static-constexpr members of
 // InspectorOverlay reached through the public header.
@@ -24,7 +19,7 @@
 
 namespace pulp::inspect {
 
-// ── Phase 3e — 20× zoom loupe ───────────────────────────────────────────────
+// ── Pixel loupe ─────────────────────────────────────────────────────────────
 //
 // A digital loupe: a fixed-corner panel showing the pixels under the
 // cursor blown up by `zoom_factor_`, with a center crosshair on the

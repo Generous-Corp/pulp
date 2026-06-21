@@ -218,7 +218,6 @@ private:
     // either by another listener during the same dispatch or by a
     // different thread calling `Token::reset()`. Using shared_ptr so
     // the copy in `publish` and the live list share the same flag.
-    // See #403 Codex P1 review.
     struct Entry {
         uint64_t id;
         Listener fn;
@@ -252,7 +251,6 @@ void start_environment_observer_linux();
 #if defined(_WIN32)
 void start_environment_observer_win();
 #endif
-// void start_environment_observer_android(); // follow-up
 
 // Use Apple's TargetConditionals.h macro rather than the CMake-defined
 // PULP_IOS variable — the CMake iOS branch adds environment_ios.mm to
@@ -261,7 +259,6 @@ void start_environment_observer_win();
 // try to link start_environment_observer_mac() (which is not in the
 // iOS source set). TARGET_OS_IPHONE is always defined on Apple via
 // TargetConditionals.h and is 1 only for iOS/tvOS/watchOS.
-// See #438 P1 Codex review on #445.
 inline void start_environment_observer() {
 #if defined(__APPLE__) && TARGET_OS_IPHONE
     start_environment_observer_ios();

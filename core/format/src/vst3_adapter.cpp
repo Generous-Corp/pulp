@@ -34,17 +34,12 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
     auto result = SingleComponentEffect::initialize(context);
     if (result != kResultOk) return result;
 
-    // ARA host-context probe (workstream 06 A2b, issue #251).
-    // An ARA-aware VST3 host (Cubase, Studio One) queries IHostApplication
-    // from `context` and publishes its ARA factory under the well-known key
-    // pulp::format::kVst3AraFactoryContextKey. We log the detection so the
-    // release-cli path proves host-context propagation; plug-ins opt in to
-    // ARA by overriding Processor::create_ara_document_controller() — the
-    // adapter's only job is to surface Pulp's factory via setHostContext-
-    // style negotiation. The companion factory pointer itself is returned
-    // by ara_companion_factory_for(); full IAttributeList round-tripping
-    // of the host's factory pointer lands in the ARA 49-callback slice
-    // (#253) where it can actually be exercised.
+    // An ARA-aware VST3 host (Cubase, Studio One) queries
+    // IHostApplication from `context` and publishes its ARA factory under
+    // the well-known key pulp::format::kVst3AraFactoryContextKey. Plugins
+    // opt in to ARA by overriding Processor::create_ara_document_controller();
+    // the adapter surfaces Pulp's companion factory through VST3 host
+    // context negotiation.
     if (context) {
         FUnknownPtr<IHostApplication> host_app(context);
         if (host_app) {
@@ -63,10 +58,9 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
     processor_ = factory_();
     if (!processor_) return kInternalError;
 
-    // Resolve host accommodations once (host-quirks plan, P3). Cross-host
-    // cheap defenses (e.g. clamp_latency_to_nonneg) fire regardless of the
-    // detected DAW; host-specific quirks key off the detected host. The
-    // runtime policy (PULP_HOST_QUIRKS env / set_host_quirk_policy API)
+    // Resolve host accommodations once. Cross-host defenses such as
+    // clamp_latency_to_nonneg apply regardless of the detected DAW;
+    // host-specific quirks key off the detected host. The runtime policy
     // applies here via resolved_quirks().
     {
         const auto host_info = detect_host_info();
@@ -77,12 +71,9 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
     processor_->set_state_store(&store_);
     processor_->define_parameters(store_);
 
-    // synthesize_bypass_parameter (host-quirks P3b): if the plugin
-    // declared no Bypass parameter, inject an automatable one BEFORE the
-    // parameter-registration loop below — that loop then detects the
-    // synthesized "Bypass" (boolean range), tags it kIsBypass, and caches
-    // bypass_param_id_, so process()'s pass-through path honors it with no
-    // further wiring. No-op when the quirk is filtered out.
+    // If a host accommodation synthesizes a bypass parameter, inject it
+    // before parameter registration so the loop below tags it kIsBypass
+    // and caches bypass_param_id_. No-op when the accommodation is off.
     maybe_synthesize_bypass(store_, quirks_);
 
     // Wire gesture callbacks to VST3 host
@@ -131,9 +122,9 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
             step_count = 1;
             if (param.name == "Bypass") {
                 flags |= ParameterInfo::kIsBypass;
-                // Item 3.2 — remember which ParamID carries kIsBypass so
-                // process() can short-circuit to pass-through audio
-                // without invoking the Processor when the host sets it.
+                // Remember which ParamID carries kIsBypass so process()
+                // can short-circuit to pass-through audio without
+                // invoking the Processor when the host sets it.
                 bypass_param_id_ = param.id;
             }
         }
@@ -155,19 +146,18 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
     runtime::log_info("VST3: initialized '{}' with {} parameters",
                       desc.name, store_.param_count());
 
-    // Item 6.4b — opt this plugin instance into the process-wide
-    // MainThreadDispatcher backend. On macOS this installs (or refcount-
-    // bumps) a Cocoa backend posting to `dispatch_get_main_queue`, so
-    // host-callback dispatches and any view-side code can post work to
-    // the DAW's main thread via `pulp::events::MainThreadDispatcher::call_async`.
+    // Opt this plugin instance into the process-wide MainThreadDispatcher
+    // backend. On macOS this installs or refcounts a Cocoa backend
+    // posting to `dispatch_get_main_queue`, so host callbacks and view
+    // code can post work to the DAW's main thread.
     main_thread_token_ = pulp::events::register_plugin_backend();
 
     return kResultOk;
 }
 
 tresult PLUGIN_API PulpVst3Processor::terminate() {
-    // Item 6.4b — symmetric teardown of the MainThreadDispatcher backend
-    // installed in initialize().
+    // Symmetric teardown of the MainThreadDispatcher backend installed in
+    // initialize().
     if (main_thread_token_ != 0) {
         pulp::events::unregister_plugin_backend(main_thread_token_);
         main_thread_token_ = 0;
@@ -197,8 +187,6 @@ tresult PLUGIN_API PulpVst3Processor::setBusArrangements(
     SpeakerArrangement* inputs, int32 numIns,
     SpeakerArrangement* outputs, int32 numOuts)
 {
-    // Dynamic bus-arrangement negotiation (issue #240).
-    //
     // VST3 hosts call this when the project's channel layout changes
     // (e.g. loading a stereo project over a mono plugin slot) and
     // expect the plug-in to either accept the request and apply it
@@ -222,9 +210,8 @@ tresult PLUGIN_API PulpVst3Processor::setBusArrangements(
     }
 
     // Only mono + stereo are translatable to a Processor::BusesLayout
-    // proposal today; any other arrangement is "unsupported" by
-    // definition. Item 3.7 — the Processor also gets a veto on the
-    // proposed mono/stereo layout via is_bus_layout_supported().
+    // proposal today; any other arrangement is unsupported by definition.
+    // The Processor also gets a veto on the proposed mono/stereo layout.
     auto is_mono_stereo = [](SpeakerArrangement a) {
         return a == SpeakerArr::kMono || a == SpeakerArr::kStereo;
     };
@@ -259,15 +246,11 @@ tresult PLUGIN_API PulpVst3Processor::setBusArrangements(
     };
 
     if (!natively_supported) {
-        // CRITICAL (Codex review on #3235): when the arrangement is a
-        // mono/stereo layout the processor EXPLICITLY vetoed via
-        // is_bus_layout_supported(), honor that veto — it encodes a real
-        // contract (e.g. linked main/sidechain channel counts, stereo-only
-        // output) and there are no "extra" channels the silence
-        // accommodation could neutralize. Running process() under a layout
-        // the processor rejected would be a correctness bug, not an
-        // accommodation. This is also the exact pre-P3c behavior, so
-        // mono/stereo proposals are unaffected by the quirk.
+        // When the arrangement is a mono/stereo layout the processor
+        // explicitly vetoed, honor that veto. It encodes a real contract
+        // such as linked main/sidechain channel counts or stereo-only
+        // output, and there are no extra channels the silence
+        // accommodation could neutralize.
         if (all_mono_stereo) {
             runtime::log_info(
                 "VST3 setBusArrangements: rejected processor-vetoed mono/stereo "
@@ -276,14 +259,12 @@ tresult PLUGIN_API PulpVst3Processor::setBusArrangements(
             return kResultFalse;
         }
 
-        // silence_unsupported_bus_arrangements (host-quirks P3c): the
-        // arrangement is NOT expressible as mono/stereo (e.g. 5.1) — a
-        // genuinely-exotic layout with more channels than the processor
-        // produces. Rather than failing, accept it and emit silence on the
-        // extra channels: process() clamps the processor's views to its
-        // prepared (descriptor-default) counts and zero-fills the host's
-        // surplus channels, so the processor never reads/writes past what
-        // prepare() allocated. PULP_HOST_QUIRKS=off preserves the reject.
+        // The arrangement is not expressible as mono/stereo, such as 5.1,
+        // but the host policy can request graceful silence instead of
+        // rejection. process() clamps the processor's views to prepared
+        // descriptor-default counts and zero-fills the host's surplus
+        // channels so the processor never reads or writes past what
+        // prepare() allocated.
         if (!quirks_.silence_unsupported_bus_arrangements) {
             runtime::log_info(
                 "VST3 setBusArrangements: rejected unsupported layout "
@@ -323,8 +304,8 @@ tresult PLUGIN_API PulpVst3Processor::setupProcessing(ProcessSetup& setup) {
 
     processor_->prepare(ctx);
 
-    // Cache what the processor's buffers are prepared for — the silence
-    // accommodation (P3c) clamps process() views to these counts.
+    // Cache what the processor's buffers are prepared for; the silence
+    // accommodation clamps process() views to these counts.
     native_in_ = in_ch;
     native_out_ = out_ch;
 
@@ -344,10 +325,9 @@ tresult PLUGIN_API PulpVst3Processor::setActive(TBool state) {
 
 uint32 PLUGIN_API PulpVst3Processor::getLatencySamples() {
     if (!processor_) return 0;
-    // clamp_latency_to_nonneg (host-quirks P3): VST3 reports latency as
-    // unsigned, so a negative latency_samples() would wrap to a huge value
-    // without the clamp. When the quirk is filtered out (PULP_HOST_QUIRKS=
-    // off) the raw value passes through.
+    // VST3 reports latency as unsigned, so a negative latency_samples()
+    // would wrap to a huge value without the host-quirk clamp. When the
+    // quirk is filtered out, the raw value passes through.
     return static_cast<uint32>(
         reported_latency_samples(processor_->latency_samples(), quirks_));
 }
@@ -407,8 +387,8 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
 
     // Bus 0 routes to main input/output; bus 1 routes to
     // Processor::set_sidechain(). Additional input buses beyond index 1
-    // are ignored — the Processor API exposes a single sidechain slot.
-    // Workstream 01 slice 1.2 (mirror of CLAP slice 1.1).
+    // are ignored because the Processor API exposes a single sidechain
+    // slot.
     int in_channels = 0;
     int out_channels = 0;
     int sc_channels = 0;
@@ -425,7 +405,7 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     // non-null sidechain then would hand processors null pointers they
     // would happily dereference. Require an active channel-buffer array
     // with a non-null first pointer before accepting the sidechain; fall
-    // back to nullptr otherwise. Fix per #178 review.
+    // back to nullptr otherwise.
     if (data.numInputs > 1 &&
         data.inputs[1].numChannels > 0 &&
         data.inputs[1].channelBuffers32 &&
@@ -445,8 +425,8 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
         }
     }
     // Secondary output buses are zero-filled so hosts do not read
-    // uninitialised memory on multi-out instruments. Full multi-out
-    // routing to the Processor is a separate audit-5.2 slice.
+    // uninitialised memory on multi-out instruments. The Processor API
+    // currently exposes only the main output bus.
     for (int32 b = 1; b < data.numOutputs; ++b) {
         auto& bus = data.outputs[b];
         for (int32 ch = 0; ch < bus.numChannels; ++ch) {
@@ -457,14 +437,12 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
         }
     }
 
-    // silence_unsupported_bus_arrangements (host-quirks P3c): the host
-    // accepted an arrangement the processor does NOT natively support, so
-    // the processor was prepare()'d for native_in_/native_out_ channels
-    // only (setupProcessing uses descriptor defaults). Hand the processor
-    // exactly those counts, and zero-fill ALL of the host's main-bus
-    // OUTPUT channels first so the ones the processor doesn't write emit
-    // silence instead of uninitialised memory. No-op when the arrangement
-    // is natively supported (the common path).
+    // If the host accepted an arrangement the processor does not natively
+    // support, the processor was prepare()'d for native_in_/native_out_
+    // channels only. Hand the processor exactly those counts, and
+    // zero-fill all host main-bus output channels first so channels the
+    // processor does not write emit silence instead of uninitialised
+    // memory.
     int proc_in = in_channels;
     int proc_out = out_channels;
     if (silence_unsupported_active_) {
@@ -509,23 +487,17 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
         .outputs = ProcessBusBufferSet<float>(output_buses),
     };
 
-    // Item 3.2 — VST3 `processBlockBypassed` behaviour. When the plugin
-    // declared a Bypass parameter (kIsBypass) and the current normalized
+    // VST3 `processBlockBypassed` behaviour. When the current bypass
     // value is >= 0.5, the adapter does the pass-through itself instead
-    // of asking the Processor. Effects copy main input → main output;
-    // instruments / generators zero-fill. MIDI output stays empty so a
-    // bypassed MIDI FX does not leak notes into the host bus. Matches
-    // every shipping DAW's expectation that a bypassed plugin is a wire.
+    // of asking the Processor. Effects copy main input to main output;
+    // instruments and generators zero-fill. MIDI output stays empty so a
+    // bypassed MIDI FX does not leak notes into the host bus.
     if (bypass_param_id_ != 0 &&
         store_.get_value(bypass_param_id_) >= 0.5f) {
         for (int ch = 0; ch < out_channels; ++ch) {
             // A VST3 bus can report numChannels > 0 while individual
-            // channelBuffers32[ch] entries are null (see the #178 note
-            // above); the destination must be null-checked before we
-            // write to it. This guard mirrors the silence-accommodation
-            // path — important now that synthesize_bypass_parameter (P3b)
-            // makes this short-circuit reachable for plugins that never
-            // declared a Bypass param.
+            // channelBuffers32[ch] entries are null; null-check before
+            // writing. This guard mirrors the silence-accommodation path.
             if (output_ptrs_[ch] == nullptr) continue;
             if (ch < in_channels && input_ptrs_[ch] != nullptr) {
                 std::memcpy(output_ptrs_[ch], input_ptrs_[ch],
@@ -562,10 +534,10 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
                     midi_in.add(me);
                 } else if (evt.type == Event::kDataEvent
                            && evt.data.type == DataEvent::kMidiSysEx) {
-                    // Workstream 01 #239 VST3 half: route kData/kMidiSysEx
-                    // payloads into MidiBuffer's variable-length sidecar.
-                    // VST3 delivers the raw F0..F7 bytes in evt.data.bytes
-                    // with length in evt.data.size.
+                    // Route kData/kMidiSysEx payloads into MidiBuffer's
+                    // variable-length sidecar. VST3 delivers the raw
+                    // F0..F7 bytes in evt.data.bytes with length in
+                    // evt.data.size.
                     if (evt.data.bytes && evt.data.size > 0) {
                         midi_in.add_sysex(
                             std::vector<uint8_t>(
@@ -606,24 +578,23 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
             ctx.time_sig_denominator = pc->timeSigDenominator;
         }
 
-        // Item 1.3 — cycle / loop. kCycleValid covers cycleStartMusic +
-        // cycleEndMusic; kCycleActive indicates the host is currently
-        // looping. Both must be set for the loop range to be meaningful.
+        // kCycleValid covers cycleStartMusic + cycleEndMusic; kCycleActive
+        // indicates the host is currently looping. Both must be set for
+        // the loop range to be meaningful.
         ctx.is_looping = (state & Steinberg::Vst::ProcessContext::kCycleActive) != 0;
         if (state & Steinberg::Vst::ProcessContext::kCycleValid) {
             ctx.loop_start_beats = pc->cycleStartMusic;
             ctx.loop_end_beats = pc->cycleEndMusic;
         }
 
-        // Item 1.3 — host clock for video sync.
+        // Host clock for video sync.
         if (state & Steinberg::Vst::ProcessContext::kSystemTimeValid) {
             ctx.host_time_ns = pc->systemTime;
         }
 
-        // Item 1.3 — SMPTE frame rate enum. VST3 reports it as an
-        // integer framesPerSecond plus pulldown / drop flags. Map the
-        // documented combinations from the FrameRate doc comment in
-        // ivstprocesscontext.h onto Pulp's FrameRate enum.
+        // SMPTE frame rate enum. VST3 reports it as an integer
+        // framesPerSecond plus pulldown / drop flags. Map the documented
+        // combinations from the VST3 FrameRate docs onto Pulp's enum.
         if (state & Steinberg::Vst::ProcessContext::kSmpteValid) {
             const auto fps = pc->frameRate.framesPerSecond;
             const auto fr_flags = pc->frameRate.flags;
@@ -635,24 +606,21 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
             // unit-testable without pulling the Steinberg VST3 SDK into
             // the test binary. Critically, 59.94 (= 60 + pulldown) MUST
             // NOT map to fps_60 — that bug broke SMPTE math in plugins
-            // that trust ctx.frame_rate. (Regression: #2963 / Codex
-            // comment 3305434120.)
+            // that trust ctx.frame_rate.
             ctx.frame_rate = pulp::format::detail::vst3_frame_rate(
                 static_cast<int>(fps), pulldown, drop);
         }
 
-        // Item 1.3 — bar index. Derive from position_beats + time-sig.
-        // VST3 also exposes `barPositionMusic` directly when
-        // kBarPositionValid is set, but it's the quarter-note position
-        // of the last bar start, not a bar *index* — so deriving
-        // matches the documented `ProcessContext::bar` contract and
-        // stays consistent with the AU/CLAP paths that have no
-        // host-precomputed bar.
+        // Derive bar index from position_beats + time-sig. VST3 also
+        // exposes `barPositionMusic` directly when kBarPositionValid is
+        // set, but that is the quarter-note position of the last bar
+        // start, not a bar index. Deriving matches `ProcessContext::bar`
+        // and stays consistent with the AU/CLAP paths.
         pulp::format::detail::derive_bar_from_beats(ctx);
     }
 
-    // Item 1.3 — diff against the previous block to populate the three
-    // change flags. Stateful; updates `playhead_prev_` in place.
+    // Diff against the previous block to populate the transport change
+    // flags. Stateful; updates `playhead_prev_` in place.
     pulp::format::detail::compute_playhead_changes(ctx, playhead_prev_);
 
     // Snapshot parameter values before processing so we can detect
@@ -664,10 +632,8 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     }
     processor_->set_param_events(&param_events_);
 
-    // Process! Wrap the plugin call in a ScopedNoAlloc so any debug
-    // hooks (operator new override, sanitizer integration) can flag
-    // a plugin that allocates on the audio thread. See Slice 4 in
-    // planning/2026-05-18-rt-safety-and-debug-dx.md.
+    // Wrap the plugin call in a ScopedNoAlloc so debug hooks can flag a
+    // plugin that allocates on the audio thread.
     {
         pulp::runtime::ScopedNoAlloc no_alloc_guard;
         processor_->process(process_buffers, midi_in, midi_out, ctx);
@@ -694,12 +660,11 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
         }
     }
 
-    // Item 3.11 — publish latency / tail changes the processor flagged
-    // during process(). VST3's IComponentHandler::restartComponent is
-    // documented as safe to call from the host's audio callback — the
-    // handler is expected to queue it for main-thread delivery. We
-    // still drain the atomic flag with acquire/release semantics so
-    // process() never has to take a lock or allocate.
+    // Publish latency / tail changes the processor flagged during
+    // process(). VST3's IComponentHandler::restartComponent is documented
+    // as safe to call from the host's audio callback; the handler is
+    // expected to queue it for main-thread delivery. We still drain the
+    // atomic flag so process() never has to take a lock or allocate.
     if (componentHandler) {
         int32 flags = 0;
         if (processor_->consume_latency_changed_flag()) flags |= kLatencyChanged;

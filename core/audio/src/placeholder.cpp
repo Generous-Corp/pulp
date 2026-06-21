@@ -1,2 +1,2 @@
-// pulp-audio: placeholder — replaced in Phase 2+
+// Placeholder translation unit for the pulp::audio namespace.
 namespace pulp::audio {}

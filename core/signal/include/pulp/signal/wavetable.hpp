@@ -13,11 +13,11 @@
 /// "wavetable evolution" patches where a 0..1 position knob sweeps
 /// between several base waveforms.
 ///
-/// Built-in factories (`make_sine`, `make_saw`, `make_square`,
-/// `make_triangle`) generate fully bandlimited stacks across the
-/// audible range using direct harmonic synthesis: each band caps
-/// harmonics at `sample_rate / 2 / max_freq` so alias energy stays
-/// below the band's playback ceiling.
+/// Built-in factories (`make_saw`, `make_square`, `make_triangle`)
+/// generate fully bandlimited stacks across the audible range using
+/// direct harmonic synthesis: each band caps harmonics so the top
+/// harmonic at that band's playback ceiling stays at or below Nyquist
+/// (`sample_rate / 2`). `make_sine` is the degenerate single-band case.
 
 #include <algorithm>
 #include <cmath>
@@ -48,7 +48,7 @@ struct WavetableEntry {
 /// long enough to keep transitions click-free.
 class Wavetable {
 public:
-    /// Length of the band-switch crossfade in samples. ~3 ms at
+    /// Length of the band-switch crossfade in samples. ~2.7 ms at
     /// 48 kHz — well below the cycle of even the lowest audible
     /// frequency, so it does not smear transients.
     static constexpr std::size_t kCrossfadeSamples = 128;
@@ -82,9 +82,9 @@ public:
             // Begin a crossfade. If a previous fade is still in flight,
             // capture its current source + target + remaining samples
             // so the new fade can blend FROM the actually-audible mix
-            // rather than jumping back to the previous target (Codex P1
-            // on #2865 — rapid retunes lost continuity, producing the
-            // click the crossfade was meant to prevent).
+            // rather than jumping back to the previous target. Rapid
+            // retunes must preserve continuity so the crossfade does
+            // not introduce the click it is meant to prevent.
             if (crossfade_samples_remaining_ > 0) {
                 in_flight_source_ = crossfade_source_;
                 in_flight_target_ = target_band_;
@@ -120,8 +120,7 @@ public:
             // Source for the new fade. If a previous fade was still
             // in flight when this one started, sample the in-flight
             // blend at its progress ratio so the new fade begins from
-            // the actually-audible mix instead of the in-flight target
-            // (Codex P1 on #2865).
+            // the actually-audible mix instead of the in-flight target.
             float source_sample;
             if (has_in_flight_ && in_flight_remaining_ > 0) {
                 const float old_t = 1.0f
@@ -196,7 +195,7 @@ private:
     int crossfade_source_ = 0;
     std::size_t crossfade_samples_remaining_ = 0;
     // Captured in-flight fade state so rapid retunes blend FROM the
-    // actually-audible mix (Codex P1 on #2865).
+    // actually-audible mix.
     bool has_in_flight_ = false;
     int in_flight_source_ = 0;
     int in_flight_target_ = 0;
@@ -295,10 +294,9 @@ inline std::vector<WavetableEntry> build_wavetable_band_stack(
         float reference_sample_rate,
         HarmonicAmp&& harmonic_amp) {
     if (num_bands == 0) return {};
-    // Codex P2 on #2865 — non-positive sample rates produce
-    // clamped_ceiling <= 0 and then a NaN/-inf in the std::floor →
-    // size_t cast (UB). Public factories accept arbitrary inputs, so
-    // short-circuit on invalid sample rates here.
+    // Non-positive sample rates produce clamped_ceiling <= 0 and then
+    // a NaN/-inf in the std::floor -> size_t cast (UB). Public factories
+    // accept arbitrary inputs, so short-circuit on invalid sample rates here.
     if (!(reference_sample_rate > 0.0f)) return {};
     const float nyquist = reference_sample_rate * 0.5f;
     constexpr float kBaseFreq = 20.0f;
@@ -325,9 +323,8 @@ inline std::vector<WavetableEntry> build_wavetable_band_stack(
 
 inline Wavetable Wavetable::make_sine(std::size_t table_length,
                                        float reference_sample_rate) {
-    // Codex P2 on #2865 — guard against non-positive sample rates so
-    // the returned Wavetable has a well-defined (empty) band stack
-    // rather than a band with a negative ceiling.
+    // Guard against non-positive sample rates so the returned Wavetable has a
+    // well-defined empty band stack rather than a band with a negative ceiling.
     if (!(reference_sample_rate > 0.0f)) return Wavetable();
     std::vector<WavetableEntry> bands;
     bands.push_back(WavetableEntry{

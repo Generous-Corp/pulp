@@ -6,8 +6,7 @@ description: |
   fixes (CMake macro renames, API surface changes, config file moves).
   Handles "upgrade pulp", "what's new", "migrate my project", "show
   breaking changes", and the `/upgrade` slash command. Pairs with the
-  embedded migration index shipped in the CLI binary (release-discovery
-  Slice 3, #571).
+  embedded migration index shipped in the CLI binary.
 requires:
   tools:
     - pulp
@@ -57,7 +56,7 @@ comparisons. Do not hand-swap binaries in user/system locations.
 The C++ `cmd_upgrade.cpp` path still matters for pre-cutover users
 upgrading into a Rust release: it must copy the archive's sibling
 payloads, including `pulp-cpp`, before replacing the running `pulp`
-binary (#1673).
+binary.
 
 `pulp upgrade --notes` prints migration notes for the hop without
 downloading anything. `pulp upgrade --notes --json` emits the same data
@@ -71,15 +70,14 @@ the Pulp source checkout as a consumer project.
 
 ### `pulp upgrade` updates BOTH CLI and SDK by default
 
-Pre-#2087 `pulp upgrade` only swapped the CLI binary. Users who ran it
-then built a project that still resolved its (months-old) SDK and
-silently missed every framework fix in between (the Spectr incident
-2026-05-15). Post-#2087:
+Older `pulp upgrade` releases only swapped the CLI binary. Users who ran them
+then built a project that still resolved its months-old SDK and silently missed
+framework fixes. Current behavior:
 
 - Default: fetch latest CLI binary + run `pulp sdk install --version
   <new>` immediately after the swap, so the matching SDK lands at
   `~/.pulp/sdk/<new>/` in the same invocation.
-- `--cli-only` flag keeps the pre-#2087 behavior for the rare case
+- `--cli-only` flag keeps the CLI-only behavior for the rare case
   where a user wants the new CLI paired with their current SDK.
 - The SDK install is best-effort: a transient network failure logs a
   warning and tells the user to retry with `pulp sdk install`. The CLI
@@ -120,7 +118,7 @@ shell. So after an upgrade the user may need to restart their shell or
 the `cli-maintenance` skill for the implementation
 (`upgrade_install::ensure_dir_on_path`).
 
-### Plugin ↔ CLI skew banner (Slice 6, #551)
+### Plugin ↔ CLI skew banner
 
 Before running any `pulp` command, source the shared skew-check helper
 so the user sees a single-line hint when the installed CLI is older
@@ -198,8 +196,8 @@ pulp upgrade
 The default `pulp upgrade` path must refresh through GitHub and report
 the new tag immediately. Then run `pulp upgrade --install --to X.Y.Z`
 in an isolated install directory and confirm a follow-up `pulp upgrade`
-reports both `Installed` and `Latest` as the new version. This catches
-the stale-cache failure from #1685 before the release is announced.
+reports both `Installed` and `Latest` as the new version. This catches stale
+release-cache failures before the release is announced.
 
    Stable-shape output (do NOT rename these keys — they are a public
    surface the skill depends on, see `tools/cli/migration_index.hpp`):
@@ -309,7 +307,7 @@ the body.
 
 **Pattern.** A subcommand is renamed (e.g. `pulp check` → `pulp doctor`),
 a flag changes shape (`--sign-key` → `--ed25519-key`), or an exit code
-semantic changes (silent-success → loud-failure as in #295 / #560).
+semantic changes (for example, silent-success → loud-failure).
 
 **What to do.** If the user has CI scripts (`ci/`, `.github/workflows`,
 `tools/local-ci/`, team-specific shell scripts), grep those for the
@@ -321,8 +319,8 @@ grep -rn "pulp <old-command>\|--<old-flag>" ci/ .github/ tools/ || true
 
 ## Bypass trailers
 
-Slice 4 itself doesn't add new bypass trailers — it consumes Slice 3's.
-But users will ask about trailers around upgrade-triggered PRs, so keep
+This flow does not add new bypass trailers, but users will ask about trailers
+around upgrade-triggered PRs, so keep
 the syntax handy (full table in `CLAUDE.md` → "Versioning & Skill-Sync
 Policy"):
 
@@ -366,12 +364,11 @@ skill AND the slash command AND the test in the same PR.
 
 ## References
 
-- Design: `planning/release-discovery-ux-design-2026-04-20.md` Section C + Slice 4
+- Design: `planning/release-discovery-ux-design-2026-04-20.md` Section C
 - CLI surface: `tools/cli/cmd_upgrade.cpp`, `tools/cli/migration_index.hpp`
 - Migration doc schema: `docs/migrations/README.md`
-- Slice 1 (diagnostics): #546 (`pulp doctor --versions`)
-- Slice 2 (update check): #562 (`pulp upgrade --check-only`)
-- Slice 3 (migration index): #571 (`pulp upgrade --notes --json`)
-- Slice 4 (this skill): #549
-- Slice 6 (plugin ↔ CLI skew): #551 (`min_cli_version` +
-  `tools/scripts/cli_version_check.sh` + `plugin_min_cli` JSON field)
+- Diagnostics: `pulp doctor --versions`
+- Update check: `pulp upgrade --check-only`
+- Migration index: `pulp upgrade --notes --json`
+- Plugin ↔ CLI skew: `min_cli_version`,
+  `tools/scripts/cli_version_check.sh`, and the `plugin_min_cli` JSON field

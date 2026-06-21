@@ -1,4 +1,4 @@
-// Linux adapter for the unified Environment API (#342).
+// Linux adapter for the unified Environment API.
 //
 // Linux desktop has no single OS-level "environment changed" channel
 // the way macOS (NSApp), Windows (WM_*) and the mobile platforms do.
@@ -23,8 +23,8 @@
 // This is a minimal adapter — pure-stdlib + libX11/Xrandr where
 // available. It's deliberately heuristic: full XSettings would pull
 // in libxsettings-client; full Wayland output info needs the
-// wl_registry dance. Both can land in a follow-up if a real desktop
-// integration needs more fidelity.
+// wl_registry dance; this minimal adapter intentionally avoids that extra
+// dependency until a real desktop integration needs more fidelity.
 
 #if defined(__linux__) && !defined(__ANDROID__)
 
@@ -177,7 +177,7 @@ public:
         // (or an unloaded plugin module) doesn't destroy a still-
         // joinable std::thread — which calls std::terminate(). The
         // 5 s sleep means worst-case we block for 5 s at shutdown;
-        // acceptable for a singleton observer. See #438 P1 / #444.
+        // acceptable for a singleton observer.
         running_.store(false, std::memory_order_release);
         if (poll_thread_.joinable()) {
             poll_thread_.join();

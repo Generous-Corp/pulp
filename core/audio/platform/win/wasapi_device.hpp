@@ -29,7 +29,7 @@ namespace pulp::audio::win {
 // synchronise externally — same model as the rest of the AudioSystem
 // interface, which is direction-agnostic at the device level.
 //
-// ── WASAPI mode coverage (gap-doc Phase 0 audit, 2026-05-26) ─────────────
+// ── WASAPI mode coverage ─────────────────────────────────────────────────
 //
 // `IAudioClient::Initialize` is invoked with `AUDCLNT_SHAREMODE_SHARED`
 // + `AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_NOPERSIST`
@@ -62,7 +62,7 @@ namespace pulp::audio::win {
 // its loop) and fires the AudioSystem device-change notification so the host
 // can re-open the device at the new format. Transparent in-place reopen is
 // deliberately NOT attempted — clean-stop + notify is the contract, matching
-// the hotplug notifier (issue #243).
+// the hotplug notifier.
 class WasapiDevice : public AudioDevice {
 public:
     explicit WasapiDevice(IMMDevice* device, EDataFlow flow = eRender);
@@ -143,7 +143,7 @@ private:
     std::vector<float*> channel_ptrs_;
 };
 
-class WasapiNotificationClient;  // fwd, issue #243 hotplug
+class WasapiNotificationClient;  // hotplug notifier
 
 class WasapiSystem : public AudioSystem {
 public:
@@ -159,11 +159,11 @@ public:
 
 private:
     IMMDeviceEnumerator* enumerator_ = nullptr;
-    // Workstream 02 #243: IMMNotificationClient receives OS events when
-    // audio endpoints are added/removed/activated/deactivated. We own
-    // one instance per WasapiSystem and forward OnDeviceAdded etc. to
-    // AudioSystem::fire_device_change so UI code can refresh its device
-    // list without polling.
+    // IMMNotificationClient receives OS events when audio endpoints are
+    // added/removed/activated/deactivated. We own one instance per
+    // WasapiSystem and forward OnDeviceAdded etc. to
+    // AudioSystem::fire_device_change so UI code can refresh its device list
+    // without polling.
     WasapiNotificationClient* notifier_ = nullptr;
     bool com_initialized_ = false;
 };

@@ -83,8 +83,8 @@ struct. It owns:
   unconditionally because real hosts mix transports — notes via
   `CLAP_EVENT_NOTE_*` and CCs via `CLAP_EVENT_MIDI2` is common, and
   skipping the synthesis when MIDI2 is present silently drops the
-  note half from the UMP buffer (Codex P1 review on PR #627). See
-  Gotchas. `clap_activate()` reserves and capacity-limits this sidecar.
+  note half from the UMP buffer. See Gotchas. `clap_activate()` reserves
+  and capacity-limits this sidecar.
 - `ara_controller` — lazily created on the first host query for the
   ARA companion-factory extension.
 - `bridge` + `editor_host` + `editor_visible` — gated on
@@ -131,8 +131,8 @@ the installed `EventLoop`, and that dispatch lambda allocates on the
 firing thread — fatal for the audio thread. `set_value_rt()` writes the
 atomic + pushes an event on a non-allocating SPSC queue; the editor's
 UI tick drains via `store.pump_listeners()`. Audio listeners still fire
-inline (caller asserts RT-safety). See Slice 2 in
-`planning/2026-05-18-rt-safety-and-debug-dx.md`.
+inline (caller asserts RT-safety), so audio-thread listeners must be
+trivial, non-allocating, and bounded.
 
 Do not collapse inbound CLAP parameter automation to a single last point.
 `clap_process` appends every `CLAP_EVENT_PARAM_VALUE` to
@@ -162,7 +162,7 @@ uninitialised memory to hosts.
 
 ### MIDI: short messages, sysex, note-expression, UMP
 
-Inbound event decode in `clap_process()` (as of PR #627):
+Inbound event decode in `clap_process()`:
 
 ```
 CLAP_EVENT_NOTE_ON / _NOTE_OFF → MidiEvent::note_on / note_off
@@ -195,8 +195,8 @@ equivalents and narrowed back per-voice by the tracker:
 Non-MPE descriptors drop note-expression events with a one-time
 debug log. See the `mpe` skill for tracker details.
 
-**Outbound MIDI** (the processor's `midi_out` — previously dropped):
-short messages emit as `CLAP_EVENT_MIDI`, sysex entries as
+**Outbound MIDI**: the processor's `midi_out` emits short messages as
+`CLAP_EVENT_MIDI` and sysex entries as
 `CLAP_EVENT_MIDI_SYSEX`, both via `out_events->try_push`.
 `sample_offset` carries through to `header.time`. The sysex
 `clap_event_midi_sysex_t.buffer` field is non-owning — the backing
@@ -252,7 +252,7 @@ host has attached" protocol.
 Window API negotiation is compile-time platform-switched to Cocoa /
 Win32 / X11.
 
-### Proportional resize with aspect lock (2026-05)
+### Proportional resize with aspect lock
 
 `gui_can_resize` returns `true`. `gui_get_resize_hints` advertises
 `preserve_aspect_ratio=true` with `aspect_ratio_{width,height}` set to
@@ -272,14 +272,13 @@ cannot offer it because the DAW resizes the returned NSView directly
 with no host-side `gui_can_resize` analogue. Cross-format design lives
 in the `view-bridge` skill.
 
-`gui_create` no longer hardcodes `Options::use_gpu`; it calls
+`gui_create` calls
 `pulp::format::decide_gpu_host(*bridge)` so a Skia/Dawn/scripted editor
 auto-selects the GPU `PluginViewHost`, wires the per-vsync scripted idle pump
 (`make_scripted_idle_pump`), and screams via `warn_if_unexpected_cpu_fallback`
 on a silent CPU fallback. CLAP's `gui_set_size` already resizes the bridge +
 host, so no extra resize seam is needed (unlike AU v2). Full contract: the
 `view-bridge` skill's "GPU view host auto-selection" section.
-(GPU-plugin-view-host work, 2026-05.)
 
 ### ARA companion factory
 
@@ -289,7 +288,7 @@ companion factory pointer. Only instantiates when the Processor
 overrode `create_ara_document_controller()` — plugins that don't
 participate in ARA return `nullptr` naturally. See the `ara` skill.
 
-### Bypass routing — auto-detected (PR #2937)
+### Bypass routing — auto-detected
 
 CLAP doesn't model "bypass" as a first-class extension the way VST3
 (`kIsBypass`) or AU v3 (`AUAudioUnitBypass`) do — hosts treat a
@@ -301,7 +300,7 @@ without invoking `Processor::process`. MIDI output stays empty so
 bypassed MIDI FX don't leak notes — same contract the VST3 and AU v3
 adapters honour.
 
-### Latency / tail change notifications (PR #2934, item 3.11)
+### Latency / tail change notifications
 
 A Processor flags a mid-render latency or tail change via
 `flag_latency_changed()` / `flag_tail_changed()` (RT-safe atomic
@@ -336,7 +335,7 @@ internal preset sources are ignored and return false.
 
 ## Gotchas
 
-### Sidechain `data32` can be null — guard before routing (#277)
+### Sidechain `data32` can be null — guard before routing
 
 A host may report `audio_inputs_count > 1` but hand the adapter a null
 `data32` pointer (bus deactivated). A loose translation of "bus exists
@@ -354,8 +353,8 @@ if (sc_bus.data32) {
 }
 ```
 
-The VST3 adapter carries the same guard (`#178` review). Mirror both
-whenever reshaping the sidechain path.
+The VST3 adapter carries the same guard for null bus channel pointers.
+Mirror both whenever reshaping the sidechain path.
 
 ### Reset modulation offsets **every** buffer
 
@@ -376,7 +375,7 @@ param edits that happen at block boundaries.
 ### Secondary output buses must be zero-filled
 
 Multi-out instruments that don't route to bus ≥ 1 leave those output
-buffers whatever the host's last tenant wrote. The adapter now zeroes
+buffers whatever the host's last tenant wrote. The adapter zeroes
 every secondary output channel every block — do not skip this even for
 "only bus 0 used" plugins; some hosts reuse memory across plugin
 slots.
@@ -402,17 +401,17 @@ The adapter handles every host shape: pure MIDI 1.0 (`CLAP_EVENT_NOTE_*`
    runs when `ump_enabled`. This is load-bearing — keep the clear
    up-front so the buffer reflects only the current block.
 2. During event decode, `CLAP_EVENT_MIDI2` packets are appended
-   directly to `self->ump_buffer` (sets `host_delivered_ump = true`
-   as a hint, no longer used for gating).
+   directly to `self->ump_buffer`. `host_delivered_ump` is retained as
+   observability only; it must not gate MIDI 1.0 synthesis.
 3. After the decode loop, `midi1_to_ump(midi_in, self->ump_buffer)`
-   ALWAYS runs when `ump_enabled`. The earlier "skip when host
-   delivered any MIDI2" branch (PR #627 v1) silently dropped the
-   note half of mixed streams from the UMP buffer — Codex P1 review
-   on PR #627 caught this. CLAP guarantees a spec-conformant host
-   won't redundantly encode the same logical event in two
-   transports, so unconditional synthesis doesn't double-deliver.
+   ALWAYS runs when `ump_enabled`. Skipping synthesis when the host
+   delivered any MIDI2 silently drops the note half of mixed streams from
+   the UMP buffer. CLAP guarantees a spec-conformant host won't redundantly
+   encode the same logical event in two transports, so unconditional
+   synthesis doesn't double-deliver.
 
-See `#141` / `#139` for the UMP buffer shape.
+The UMP buffer shape lives in `core/midi/include/pulp/midi/ump_buffer.hpp`
+and the CLAP adapter's `ump_buffer` sidecar.
 
 ### CLAP event types are enumerators, not preprocessor macros
 
@@ -422,8 +421,7 @@ and `#ifdef` on an enum always evaluates false. Use
 `#if defined(CLAP_VERSION_GE) && CLAP_VERSION_GE(1, 1, 0)` (or the
 release that introduced the event) instead. Same trap applies to any
 future `CLAP_EVENT_*` additions — the CLAP header does not define
-them as macros. See PR #627's `clap_adapter.cpp` for the canonical
-guard shape.
+them as macros. Use the guard shape in `core/format/src/clap_adapter.cpp`.
 
 ### GUI layout must match across CLAP TUs
 
@@ -451,8 +449,8 @@ binary.
 
 ### AAX-parity sweep
 
-AAX and CLAP share CLAP's sysex-sidecar pattern (#239). When you
-change the CLAP sysex accumulator, the AAX adapter
+AAX and CLAP share the same sysex-sidecar pattern. When you change the
+CLAP sysex accumulator, the AAX adapter
 (`core/format/src/aax_runtime.cpp`) and the VST3 / AU halves need to
 stay in sync — see the memory note on AAX-parity.
 
@@ -475,7 +473,7 @@ Covered sites today:
 If you add a third in-events dispatch (e.g. a transport-event loop,
 or a new extension's callback), add the same guard. Test pattern:
 `test_clap_entry.cpp` → "CLAP params_flush ignores events outside
-the core namespace [issue-743]".
+the core namespace [issue-743]" (the bracketed token is the Catch2 test tag).
 
 ### `clap_ostream::write` may short-write — loop state_save
 
@@ -532,9 +530,8 @@ the GUI callbacks fail closed if a host cached the extension pointer.
 
 Real-DAW validation (Bitwig, Reaper, FL Studio, Studio One) requires
 a license + manual install, so the CI proxy is
-`test/test_clap_host_validation.cpp` (item 3.4 of the macOS plugin
-authoring plan). It pins the four contracts hosts have historically
-broken on:
+`test/test_clap_host_validation.cpp`. It pins the four contracts hosts
+have historically broken on:
 
 1. Plugin id + parameter id + range stability across instances.
 2. `CLAP_EVENT_PARAM_MOD` does NOT bleed across blocks — the adapter
@@ -552,7 +549,7 @@ before a host scan does.
 ## Cross-references
 
 - `.agents/skills/view-bridge/SKILL.md` — editor open / attach /
-  close protocol; CLAP was the reference wiring in PR #140.
+  close protocol; CLAP is the reference wiring for this adapter family.
 - `.agents/skills/mpe/SKILL.md` — MPE sidecar contract. CLAP is the
   canonical consumer.
 - `.agents/skills/ara/SKILL.md` — ARA SDK setup and companion-factory
@@ -565,16 +562,16 @@ before a host scan does.
 - Memory note: CHOC-first policy — prefer `choc::midi` helpers over
   hand-rolled MIDI decode when touching the adapter.
 
-### CLAP editor hands GpuSurface to ScriptedUiSession (Phase iOS-D.3b Slice 1)
+### CLAP editor hands GpuSurface to ScriptedUiSession
 
-`clap_entry.hpp::gui_create` now calls
+`clap_entry.hpp::gui_create` calls
 `p->bridge->scripted_ui()->attach_gpu_surface(p->editor_host->gpu_surface())`
 right after `PluginViewHost::create()` succeeds. Without this, a
 CLAP plugin whose UI uses Three.js or raw WebGPU JS renders black —
 the JS shim silently falls back to mocks. See the `view-bridge` skill's
 "GpuSurface plumbing into WidgetBridge" section.
 
-## Host-quirks consumption (P3a, 2026-05-30)
+## Host-quirks consumption
 
 This adapter consumes the host-quirks ledger at init: it caches
 `resolved_quirks(detect_host_info().type, version)` once (the runtime
@@ -588,10 +585,9 @@ through the pure helper `pulp::format::reported_latency_samples(raw, quirks)`
 quirk is enforced, and passes through raw (wrapping the unsigned host field)
 when `PULP_HOST_QUIRKS=off`. See `docs/reference/host-quirks-policy.md`.
 
-## synthesize_bypass_parameter pass-through (host-quirks P3d, 2026-05-30)
+## synthesize_bypass_parameter pass-through
 
-This adapter had no bypass process path; P3d adds the full P3b behavior.
-At init (clap_init / PulpAUEffect ctor) it calls
+At init (clap_init / PulpAUEffect ctor), the adapter calls
 `pulp::format::maybe_synthesize_bypass(store, host_quirks)` then detects the
 "Bypass" param (shared boolean-range heuristic: name=="Bypass", step>=1,
 0..1) into a cached `bypass_param_id`. In the audio callback (clap_process /
@@ -600,5 +596,4 @@ ProcessBufferLists) it short-circuits to a **null-guarded pass-through**
 and skips the Processor when the param value is >= 0.5 — mirroring the VST3
 processBlockBypassed path. `PULP_HOST_QUIRKS=off` synthesizes nothing
 (bypass_param_id stays 0). The pass-through MUST null-check each destination
-channel pointer (a bus can report channels with null buffers — see #178 /
-the #3240 sweep).
+channel pointer because a bus can report channels with null buffers.

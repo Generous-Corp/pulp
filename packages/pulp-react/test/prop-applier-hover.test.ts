@@ -1,7 +1,7 @@
-// Test for pulp #1149 — prop-applier must call registerHover(id) when a
-// hover-class event handler (onMouseEnter / onMouseLeave / pointer aliases)
-// is set, otherwise the native bridge never fires the corresponding
-// events even though the JS listener is installed.
+// prop-applier must call registerHover(id) when a hover-class event handler
+// (onMouseEnter / onMouseLeave / pointer aliases) is set, otherwise the
+// native bridge never fires the corresponding events even though the JS
+// listener is installed.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createMockBridge, type MockBridge } from '../src/bridge.js';
@@ -12,7 +12,7 @@ function instance(id: string, type: string, props: Record<string, unknown>): Pul
     return { id, type, props } as PulpInstance;
 }
 
-describe('@pulp/react prop-applier — hover registration (pulp #1149)', () => {
+describe('@pulp/react prop-applier — hover registration', () => {
     let bridge: MockBridge;
     beforeEach(() => {
         bridge = createMockBridge();

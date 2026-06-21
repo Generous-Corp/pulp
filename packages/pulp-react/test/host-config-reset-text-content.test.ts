@@ -1,9 +1,7 @@
-// pulp #1840 P1 follow-up — React's mutation reconciler calls
-// resetTextContent(instance) when shouldSetTextContent flips from
-// true → false on an existing TEXT_BEARING node. Without this host
-// hook the reconciler throws or leaves stale text on the node.
-// Reproduce the transition by calling the hook directly through the
-// PulpHostConfig surface and asserting setText('') fires on the bridge.
+// React's mutation reconciler calls resetTextContent(instance) when
+// shouldSetTextContent flips from true to false on an existing TEXT_BEARING
+// node. Reproduce that transition through PulpHostConfig and assert
+// setText('') fires on the bridge.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { PulpHostConfig } from '../src/host-config.js';
@@ -34,7 +32,7 @@ function makeInstance(id: string, type: PulpInstance['type'] = 'Label'): PulpIns
 const callsOf = (b: MockBridge, fn: string) =>
     b.calls.filter((c) => c.fn === fn);
 
-describe('host-config resetTextContent (pulp #1840 P1 Codex follow-up)', () => {
+describe('host-config resetTextContent', () => {
     const fn = PulpHostConfig.resetTextContent as
         ((instance: PulpInstance) => void) | undefined;
 

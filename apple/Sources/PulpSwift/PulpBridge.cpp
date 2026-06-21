@@ -328,9 +328,8 @@ void pulp_motion_update_geometry(int trace_id,
         pulp::view::motion::PublishOptions opts;
         opts.epsilon = 0.1;
         opts.precision = 2;
-        // Use the trace's registered view_name (Codex #2168 P1, also
-        // tracked as #2149). Hardcoding "swiftui" lost the trace
-        // identity in fixtures and made it impossible to correlate
+        // Use the trace's registered view_name. Hardcoding "swiftui"
+        // loses the trace identity and makes it impossible to correlate
         // out-of-band metrics with their owning SwiftUI/UIKit view.
         pulp::view::motion::publish_components(
             trace_view_name.empty() ? std::string("swiftui") : trace_view_name,

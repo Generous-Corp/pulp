@@ -2,20 +2,19 @@
 // JSON serialization + key-string ↔ keycode mapping for the
 // design-import pipeline.
 //
-// Extracted from design_import.cpp in the 2026-05 A3 refactor (first
-// cut). Splits the keyboard-shortcut concern off the 4670-line
-// design_import.cpp monolith. The full A3 split (claude_bundle.cpp,
-// design_codegen.cpp, design_tokens.cpp) is tracked as the A3
-// follow-up.
-//
-// Public API (declared in pulp/view/design_import.hpp):
+// Public API (declared in design_shortcuts.hpp / design_codegen.hpp and
+// included by the design_import.hpp umbrella):
 //   * extract_keyboard_shortcuts(source, filename) → vector<DetectedShortcut>
 //   * serialize_detected_shortcuts(...)            → JSON string
 //   * key_string_to_keycode(key)                   → KeyCode int / 0
 //   * modifier_strings_to_mask(mods)               → bitmask of kMod*
+//   * detect_default_shortcuts(...)                → default shortcut scan
+//   * apply_default_shortcuts(...)                 → generated handler wiring
+//   * serialize_default_shortcut_scan(...)         → JSON scan report
 //
 // File-local helpers (anonymous namespace): line_for_offset,
-// collect_modifiers, extract_handler_excerpt.
+// collect_modifiers, extract_handler_excerpt, pattern_name, icontains,
+// collect_component_names, pattern_keywords, score_signals.
 
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/input_events.hpp>
@@ -46,14 +45,10 @@ int line_for_offset(const std::string& source, size_t offset) {
     return line;
 }
 
-// Walk a window around the matched key check and pull every modifier
-// reference the surrounding boolean expression touches. `e.metaKey` or
-// `event.metaKey` is "meta"; the `e.metaKey || e.ctrlKey` cross-platform
-// idiom maps to a single "meta" entry (de-duped) because both flags fire
-// the same Pulp shortcut on macOS vs other hosts. Window size chosen
-// empirically — long enough to cover multi-line `&&`/`||` chains in
-// React handler bodies, short enough to avoid bleeding into the next
-// statement.
+// Scope to the enclosing `if (...)` condition and pull every modifier
+// reference the boolean expression touches. `e.metaKey || e.ctrlKey`
+// yields both physical chords; later codegen emits one shortcut for Cmd
+// hosts and one for Ctrl hosts.
 std::vector<std::string> collect_modifiers(const std::string& source, size_t key_offset) {
     // Scope the scan to the enclosing `if (...)` condition only — walking
     // a fixed character window backward picks up modifier checks from
@@ -62,8 +57,8 @@ std::vector<std::string> collect_modifiers(const std::string& source, size_t key
     // depth, until we find the unbalanced `(` that opens this match's
     // enclosing condition (depth crosses to 1 going left from a balanced
     // expression). Bound the search with a generous backward window for
-    // safety against multi-line conditions; never bleed past a `;` `}` or
-    // `=>` at depth 0.
+    // safety against multi-line conditions; never bleed past a `;`, `{`, or
+    // `}` at depth 0.
     constexpr size_t kMaxBack = 400;
     size_t back_start = key_offset > kMaxBack ? key_offset - kMaxBack : 0;
 
@@ -78,8 +73,9 @@ std::vector<std::string> collect_modifiers(const std::string& source, size_t key
         } else if (depth == 0 && (c == ';' || c == '{' || c == '}')) {
             // Crossed a statement boundary without finding an open `(` —
             // the match isn't inside an `if (...)` (could be a JSX prop
-            // value or a bare expression). Fall back to a tight 40-char
-            // window so multi-modifier inline conditions still resolve.
+            // value or a bare expression). Use the statement boundary as the
+            // scan start so inline modifier checks in the same expression
+            // still resolve.
             scope_start = i;
             break;
         }
@@ -94,14 +90,12 @@ std::vector<std::string> collect_modifiers(const std::string& source, size_t key
         }
         mods.push_back(m);
     };
-    // Emit `meta` and `ctrl` separately (Codex P1 review on #2119). The
-    // common cross-platform `e.metaKey || e.ctrlKey` idiom yields BOTH
-    // entries; generate_pulp_js() detects that combination and emits two
-    // registerShortcut calls (one per physical chord). When the source
-    // author writes only `e.ctrlKey` (Win/Linux-only) or only `e.metaKey`
-    // (macOS-only), we preserve that intent — earlier collapse turned
-    // every Ctrl-only handler into a Cmd-only binding and dropped the
-    // ctrlKey flag in the synthetic event.
+    // Emit `meta` and `ctrl` separately. The common cross-platform
+    // `e.metaKey || e.ctrlKey` idiom yields both entries; generate_pulp_js()
+    // detects that combination and emits two registerShortcut calls (one per
+    // physical chord). When the source author writes only `e.ctrlKey`
+    // (Win/Linux-only) or only `e.metaKey` (macOS-only), preserve that
+    // intent so Ctrl-only handlers do not turn into Cmd-only bindings.
     if (ctx.find(".metaKey") != std::string::npos) add("meta");
     if (ctx.find(".ctrlKey") != std::string::npos) add("ctrl");
     if (ctx.find(".altKey")  != std::string::npos) add("alt");
@@ -182,8 +176,8 @@ std::vector<DetectedShortcut> extract_keyboard_shortcuts(
 
     // De-dupe identical (key, modifiers) pairs — multiple checks in the
     // same source for the same chord (e.g. nested branches) shouldn't
-    // produce duplicate manifest entries. Keep first occurrence (lowest
-    // source location), which is what stable sort preserves.
+    // produce duplicate manifest entries. The source-location tiebreaker
+    // makes the lowest location sort first.
     std::sort(out.begin(), out.end(), [](const auto& a, const auto& b) {
         if (a.key != b.key) return a.key < b.key;
         if (a.modifiers != b.modifiers) return a.modifiers < b.modifiers;
@@ -231,12 +225,11 @@ int key_string_to_keycode(const std::string& key) {
         }
     }
 
-    // KeyboardEvent.code letter / digit forms (Codex P2 on #2119). The
-    // extractor pulls `event.code === 'KeyS'` and `event.code === 'Digit1'`
-    // patterns; before this they fell through to 0 and the codegen loop
-    // skipped the whole entry as "unmapped". Map them to the same ASCII
-    // codes single-char keys produce, so downstream code (registerShortcut
-    // mask + synthetic event payload) treats both forms identically.
+    // KeyboardEvent.code letter / digit forms. The extractor pulls
+    // `event.code === 'KeyS'` and `event.code === 'Digit1'` patterns. Map
+    // them to the same ASCII codes single-char keys produce, so downstream
+    // code (registerShortcut mask + synthetic event payload) treats both
+    // forms identically instead of skipping them as unmapped.
     if (key.size() == 4 && (key[0] == 'K' || key[0] == 'k') &&
         (key[1] == 'e' || key[1] == 'E') && (key[2] == 'y' || key[2] == 'Y')) {
         char c = key[3];
@@ -293,16 +286,14 @@ int modifier_strings_to_mask(const std::vector<std::string>& mods) {
         if (m == "shift") mask |= kModShift;
         else if (m == "ctrl") mask |= kModCtrl;
         else if (m == "alt")  mask |= kModAlt;
-        // The extractor's "meta" already collapses `metaKey || ctrlKey`
-        // (cross-platform idiom). Map to kModCmd — the platform-primary
-        // modifier — so Cmd on macOS and Ctrl on other platforms both
-        // resolve through the same shortcut entry.
+        // `meta` is the platform-primary modifier; map it to kModCmd.
+        // `ctrl`, when present, maps separately to kModCtrl.
         else if (m == "meta") mask |= kModCmd;
     }
     return mask;
 }
 
-// ── Default shortcuts (Phase A: source-matched) ─────────────────────────
+// ── Default shortcuts (source-matched) ──────────────────────────────────
 
 namespace {
 
@@ -378,9 +369,8 @@ std::vector<std::string> collect_component_names(const std::string& source) {
 }
 
 // Map a pattern to the keyword set the component name + ARIA + heading
-// signals should match.  Order matters for cheatsheet vs help disambig:
-// cheatsheet is checked first; if it matches AND <kbd> appears nearby,
-// it's a cheatsheet; otherwise help/about/docs wins on prose modals.
+// signals should match. Cheatsheet candidates require <kbd> evidence; a
+// kbd-less ShortcutsModal is demoted instead of auto-bound as a cheatsheet.
 const std::vector<std::string>& pattern_keywords(DefaultShortcutPattern p) {
     static const std::vector<std::string> kw_settings    = {"settings", "preferences", "preference", "options"};
     static const std::vector<std::string> kw_help        = {"help", "about", "documentation", "docs"};
@@ -439,9 +429,8 @@ std::vector<std::string> score_signals(
             for (const auto& kind : kinds) {
                 if (comp == root + kind) return true;
             }
-            // Also accept the canonical name itself with no suffix
-            // (HelpPopover is a kind already; same root). Reject single-
-            // word "Settings" alone — too generic.
+            // Reject single-word roots such as "Settings" alone; they are too
+            // generic without a canonical UI-kind suffix.
         }
         return false;
     };
@@ -538,21 +527,18 @@ DefaultShortcutScan detect_default_shortcuts(
     // Track which (key, mods) chords are already claimed by an extracted
     // shortcut.  Extracted always wins — we suppress same-chord defaults.
     //
-    // Codex P1 on PR #2161: source code containing the cross-platform
-    // idiom `e.metaKey || e.ctrlKey` causes `collect_modifiers` to emit a
-    // single extracted shortcut whose `modifiers` set contains BOTH
-    // "meta" and "ctrl". Earlier the suppression chord was only ever the
-    // macOS variant (e.g. ",|meta"), so a default check against ",|meta"
-    // failed to match the extracted's "meta+ctrl" sig and the default
-    // still fired — yielding duplicate `registerShortcut` handlers when
-    // generate_pulp_js later split the default into both physical chords.
+    // Source code containing the cross-platform `e.metaKey || e.ctrlKey`
+    // idiom causes `collect_modifiers` to emit a single extracted shortcut
+    // whose modifier set contains both "meta" and "ctrl". Suppress defaults
+    // against both physical chord signatures so generate_pulp_js does not
+    // emit duplicate registerShortcut handlers.
     //
-    // Fix: store BOTH single-modifier variants in the claims set when an
-    // extracted shortcut carries the meta+ctrl cross-platform idiom.
-    // That way the per-platform chord_for() check below catches both
-    // pattern variants and the default is suppressed for both physical
-    // chords. Non-cross-platform extracted shortcuts (meta-only or
-    // ctrl-only) keep their original single-modifier sig.
+    // Store both single-modifier variants in the claims set when an extracted
+    // shortcut carries the meta+ctrl cross-platform idiom. That way the
+    // per-platform chord_for() check below catches both pattern variants and
+    // suppresses the default for both physical chords. Non-cross-platform
+    // extracted shortcuts (meta-only or ctrl-only) keep their original
+    // single-modifier signature.
     auto extracted_claims = std::set<std::string>{};
     for (const auto& s : existing_extracted) {
         std::vector<std::string> mods_sorted = s.modifiers;
@@ -586,10 +572,9 @@ DefaultShortcutScan detect_default_shortcuts(
         extracted_claims.insert(sig_for(mods_sorted));
     }
     auto chord_for = [](DefaultShortcutPattern p) -> std::string {
-        // Used only for the extracted-shortcut collision check, so always
-        // use the macOS chord (extracted shortcuts in the source already
-        // collapse cross-platform via the meta||ctrl idiom — handled by
-        // the meta+ctrl branch in the claim builder above).
+        // Used only for the extracted-shortcut collision check, so always use
+        // the macOS chord. Extracted cross-platform shortcuts also claim the
+        // Ctrl variant in the meta+ctrl branch above.
         switch (p) {
             case DefaultShortcutPattern::settings:   return ",|meta";
             case DefaultShortcutPattern::help:       return "?|meta";
@@ -666,8 +651,8 @@ std::vector<DetectedShortcut> apply_default_shortcuts(
                 else     { s.key = "F1"; s.modifiers = {}; }
                 break;
             case DefaultShortcutPattern::cheatsheet:
-                // Bare `?` cross-platform. Focus-guard (#2120) suppresses
-                // it while a TextEditor has focus, so it's safe.
+                // Bare `?` cross-platform. The focus guard suppresses it
+                // while a TextEditor has focus, so it is safe.
                 s.key = "?";  s.modifiers = {};
                 break;
             case DefaultShortcutPattern::new_file:

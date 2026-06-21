@@ -1,22 +1,21 @@
 #pragma once
 
-// Plugin-mode main-thread cooperation (item 6.4b macOS plan, post-PR-#2825).
+// Plugin-mode main-thread cooperation.
 //
-// PR #2825 delivered the cross-platform `MainThreadDispatcher` contract; on
-// standalone macOS apps `WindowHost::create()` registers a Cocoa backend that
-// posts to `dispatch_get_main_queue()`. In plugin mode (AU v3 / VST3 / CLAP
-// loaded inside a DAW like Logic / Cubase / Bitwig), there is no Pulp window
-// — the DAW owns the main `NSApplication`/`CFRunLoop`. Without an explicit
-// registration, `MainThreadDispatcher::call_async` returns false and any
-// adapter-side code that asks "please run this on the host's main thread"
-// silently no-ops.
+// Standalone macOS apps register a Cocoa `MainThreadDispatcher` backend from
+// `WindowHost::create()` so cross-subsystem work can post to
+// `dispatch_get_main_queue()`. In plugin mode (AU v3 / VST3 / CLAP loaded
+// inside a DAW like Logic / Cubase / Bitwig), there is no Pulp window — the DAW
+// owns the main `NSApplication`/`CFRunLoop`. Without an explicit registration,
+// `MainThreadDispatcher::call_async` returns false and adapter-side code that
+// asks "please run this on the host's main thread" no-ops.
 //
 // The helpers in this header let format adapters and plugin instance owners
 // register a process-wide Cocoa backend at instantiation time and unregister
 // it at teardown. On non-macOS platforms the calls degrade to no-ops so
 // adapter code can call them unconditionally; the dispatcher then simply
 // stays in its "no backend" state on those platforms (Windows / Linux own
-// their own message-loop integration paths — see gap-doc Phase 1).
+// their own message-loop integration paths).
 //
 // Reference-counted under the hood — call register_plugin_backend() once
 // per loaded plugin instance, and `unregister_plugin_backend()` once on

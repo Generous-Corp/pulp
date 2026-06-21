@@ -1,10 +1,10 @@
 // Audio Unit v2 plugin slot (macOS only).
 //
 // Loads an AU v2 effect/instrument via AudioComponent APIs, exposes the
-// PluginSlot interface, and drives audio through AudioUnitRender. Scope
-// for Phase 1: stereo in/out, parameter metadata, bypass, basic
-// activation. MIDI routing to instruments is Phase 2; editor view,
-// state save/restore via ClassInfo, and sidechain ports land later.
+// PluginSlot interface, and drives audio through AudioUnitRender. The backend
+// covers stereo in/out, parameter metadata, bypass, activation, MIDI routing,
+// and state save/restore via ClassInfo. Editor views and sidechain ports are
+// not exposed by this backend yet.
 //
 // Identified by {componentType, componentSubType, componentManufacturer}
 // encoded into PluginInfo.unique_id as "TYPE:SUBT:MANU" (OSType 4CCs).
@@ -313,9 +313,9 @@ public:
         return 0;
     }
 
-    // Item 4.5 — typed plugin introspection. Surface the AudioUnit
-    // instance and its component description so callers can talk directly
-    // to AudioToolbox / use vendor-specific properties.
+    // Typed plugin introspection surfaces the AudioUnit instance and its
+    // component description so callers can talk directly to AudioToolbox or
+    // use vendor-specific properties.
     void accept(ExtensionsVisitor& visitor) const override {
         AudioUnitExtension ext;
         ext.component_instance = au_;

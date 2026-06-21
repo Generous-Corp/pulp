@@ -40,14 +40,14 @@ static void clear_midi_event_buffers(PulpClapPlugin& self) {
 // member alignment, so `reinterpret_cast<const Foo*>(hdr)` can yield a
 // pointer that violates alignof(Foo) — access to any 8-byte member
 // (e.g. `double velocity` in `clap_event_note_t`) is then UB. UBSan
-// caught this at clap_adapter.cpp:200 via test_clap_midi_events.cpp:772.
-// See #688. memcpy into a stack local guarantees proper alignment.
+// caught this in the CLAP MIDI event tests. memcpy into a stack local
+// guarantees proper alignment.
 template <typename T>
 static T load_event(const clap_event_header_t* hdr) {
     // Guard against a short/malformed host event: copying sizeof(T) bytes when
-    // hdr->size < sizeof(T) reads past the event (OOB / UB on the audio thread,
-    // #2691). Copy only the bytes the host actually provided; the rest stay
-    // zero-initialised. (memcpy-into-a-stack-local also fixes alignment, #688.)
+    // hdr->size < sizeof(T) reads past the event (OOB / UB on the audio
+    // thread). Copy only the bytes the host actually provided; the rest stay
+    // zero-initialised. memcpy-into-a-stack-local also fixes alignment.
     T out{};
     std::memcpy(&out, hdr, std::min(static_cast<std::size_t>(hdr->size), sizeof(T)));
     return out;
@@ -60,17 +60,17 @@ bool clap_init(const clap_plugin_t* plugin) {
     self->processor->set_state_store(&self->store);
     self->processor->define_parameters(self->store);
 
-    // Resolve host accommodations once (host-quirks plan, P3) via the
-    // runtime policy (PULP_HOST_QUIRKS env / set_host_quirk_policy API).
+    // Resolve host accommodations once via the runtime policy
+    // (PULP_HOST_QUIRKS env / set_host_quirk_policy API).
     {
         const auto host_info = detect_host_info();
         self->host_quirks = resolved_quirks(host_info.type, host_info.version);
     }
 
-    // synthesize_bypass_parameter (host-quirks P3d): inject an automatable
-    // Bypass param when the plugin declared none, then detect it (the same
-    // boolean-range heuristic VST3/AU use) so clap_process() can honor it
-    // with a pass-through short-circuit. No-op when the quirk is off.
+    // Inject an automatable Bypass param when the plugin declared none, then
+    // detect it (the same boolean-range heuristic VST3/AU use) so
+    // clap_process() can honor it with a pass-through short-circuit. No-op
+    // when the quirk is off.
     maybe_synthesize_bypass(self->store, self->host_quirks);
     for (const auto& p : self->store.all_params()) {
         if (p.name == "Bypass" && p.range.step >= 1.0f &&
@@ -80,13 +80,13 @@ bool clap_init(const clap_plugin_t* plugin) {
         }
     }
 
-    // Item 6.4b — opt this plugin instance into the process-wide
-    // MainThreadDispatcher backend. On macOS this installs (or refcount-
-    // bumps) a Cocoa backend posting to `dispatch_get_main_queue`, so any
-    // `MainThreadDispatcher::call_async` posted while a Pulp CLAP plugin
-    // is loaded inside the DAW reaches the host's main thread. On non-mac
-    // platforms this is a no-op (returns 0) and the dispatcher stays in
-    // "no backend" state until a platform-specific path lands.
+    // Opt this plugin instance into the process-wide MainThreadDispatcher
+    // backend. On macOS this installs (or refcount-bumps) a Cocoa backend
+    // posting to `dispatch_get_main_queue`, so any
+    // `MainThreadDispatcher::call_async` posted while a Pulp CLAP plugin is
+    // loaded inside the DAW reaches the host's main thread. On non-mac
+    // platforms this is a no-op (returns 0) and the dispatcher stays in "no
+    // backend" state until a platform-specific path lands.
     self->main_thread_token = pulp::events::register_plugin_backend();
 
     // Create PresetManager from plugin descriptor
@@ -116,8 +116,8 @@ bool clap_init(const clap_plugin_t* plugin) {
 
 void clap_destroy(const clap_plugin_t* plugin) {
     auto* self = get_self(plugin);
-    // Item 6.4b — symmetric teardown of the MainThreadDispatcher backend
-    // installed in clap_init().
+    // Symmetric teardown of the MainThreadDispatcher backend installed in
+    // clap_init().
     if (self->main_thread_token != 0) {
         pulp::events::unregister_plugin_backend(self->main_thread_token);
         self->main_thread_token = 0;
@@ -157,7 +157,6 @@ bool clap_activate(const clap_plugin_t* plugin, double sr, uint32_t, uint32_t ma
     // the first block after a deactivate / reactivate (or reset) would
     // spuriously raise tempo_changed / time_sig_changed /
     // transport_changed against the prior session's last block.
-    // Regression: #2963 / Codex comment 3305434127.
     self->playhead_prev = {};
     return true;
 }
@@ -268,9 +267,6 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     // Bus 0 routes to the main input/output; bus 1 (when present) routes to
     // Processor::set_sidechain(). Additional input buses beyond index 1 are
     // currently ignored — the Processor API exposes a single sidechain slot.
-    // Workstream 01 slice 1.1: previously only bus 0 was routed and
-    // set_sidechain() was never called; sidechain compressors could not
-    // function through the CLAP adapter.
     int in_channels = 0, out_channels = 0;
     int sc_channels = 0;
 
@@ -282,9 +278,9 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     }
     if (process->audio_inputs_count > 1) {
         auto& sc_bus = process->audio_inputs[1];
-        // #277: guard against a host that reports a sidechain bus but
-        // hands us a null data32 pointer (bus deactivated). Mirrors the
-        // defensive guard the VST3 adapter already has.
+        // Guard against a host that reports a sidechain bus but hands us a null
+        // data32 pointer (bus deactivated). Mirrors the defensive guard the
+        // VST3 adapter already has.
         if (sc_bus.data32) {
             sc_channels = (std::min)(static_cast<int>(sc_bus.channel_count), kMaxChannels);
             for (int ch = 0; ch < sc_channels; ++ch) {
@@ -578,10 +574,10 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
             ctx.time_sig_denominator = static_cast<int>(tr->tsig_denom);
         }
 
-        // Item 1.3 — cycle / loop range. CLAP gates this on
-        // CLAP_TRANSPORT_IS_LOOP_ACTIVE; loop_start_beats /
-        // loop_end_beats are CLAP fixed-point `clap_beattime` so they
-        // convert through the same factor as song_pos_beats.
+        // Cycle / loop range. CLAP gates this on CLAP_TRANSPORT_IS_LOOP_ACTIVE;
+        // loop_start_beats / loop_end_beats are CLAP fixed-point
+        // `clap_beattime` so they convert through the same factor as
+        // song_pos_beats.
         ctx.is_looping = (flags & CLAP_TRANSPORT_IS_LOOP_ACTIVE) != 0;
         if (ctx.is_looping) {
             ctx.loop_start_beats =
@@ -590,25 +586,25 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
                 static_cast<double>(tr->loop_end_beats) / CLAP_BEATTIME_FACTOR;
         }
 
-        // Item 1.3 — bar index. CLAP exposes `bar_number` directly
-        // (bar at song pos 0 has bar 0), so prefer that over deriving
-        // from beats. Hosts that don't supply a beats timeline leave
-        // `bar_number` at 0, which matches the documented default.
+        // Bar index. CLAP exposes `bar_number` directly (bar at song pos 0 has
+        // bar 0), so prefer that over deriving from beats. Hosts that don't
+        // supply a beats timeline leave `bar_number` at 0, which matches the
+        // documented default.
         if (flags & CLAP_TRANSPORT_HAS_BEATS_TIMELINE) {
             ctx.bar = static_cast<int64_t>(tr->bar_number);
         } else {
             pulp::format::detail::derive_bar_from_beats(ctx);
         }
 
-        // Item 1.3 — host clock / SMPTE frame rate are intentionally
-        // left at the documented "host did not provide" sentinels:
-        // CLAP 1.2.2's `clap_event_transport` carries neither field.
-        // `ctx.host_time_ns` stays 0, `ctx.frame_rate` stays
-        // FrameRate::unknown — plugin authors must check before use.
+        // Host clock / SMPTE frame rate are intentionally left at the
+        // documented "host did not provide" sentinels: CLAP 1.2.2's
+        // `clap_event_transport` carries neither field. `ctx.host_time_ns`
+        // stays 0, `ctx.frame_rate` stays FrameRate::unknown; plugin authors
+        // must check before use.
     }
 
-    // Item 1.3 — diff against the previous block to populate the three
-    // change flags. Stateful; updates `self->playhead_prev` in place.
+    // Diff against the previous block to populate the three change flags.
+    // Stateful; updates `self->playhead_prev` in place.
     pulp::format::detail::compute_playhead_changes(ctx, self->playhead_prev);
 
     // Snapshot parameter values to detect plugin-side changes
@@ -646,7 +642,7 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     // and CCs via CLAP_EVENT_MIDI2, expecting both halves to reach a
     // supports_ump processor. The earlier "skip midi1_to_ump when any
     // MIDI2 was delivered" branch silently dropped the note half of
-    // those mixed streams from the UMP buffer (Codex review on PR #627).
+    // those mixed streams from the UMP buffer.
     //
     // Convert midi_in → UMP unconditionally so a supports_ump processor
     // sees the union. The CLAP spec guarantees the host won't redundantly
@@ -668,12 +664,11 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     // hooks (operator new override, sanitizer integration) can flag
     // a plugin that allocates on the audio thread. The guard is a
     // thread-local counter — zero cost in NDEBUG, ~1 ns in debug.
-    // See planning/2026-05-18-rt-safety-and-debug-dx.md Slice 4.
-    // synthesize_bypass_parameter (host-quirks P3d): when the Bypass param
-    // (declared or synthesized) is engaged, the adapter does the pass-through
-    // itself — copy main input → main output (null-guarded), zero any output
-    // channel without a matching input — and skips the Processor entirely.
-    // Mirrors the VST3 processBlockBypassed behavior.
+    // When the Bypass param (declared or synthesized) is engaged, the adapter
+    // does the pass-through itself: copy main input -> main output
+    // (null-guarded), zero any output channel without a matching input, and
+    // skip the Processor entirely. Mirrors the VST3 processBlockBypassed
+    // behavior.
     const bool bypassed = self->bypass_param_id != 0 &&
                           self->store.get_value(self->bypass_param_id) >= 0.5f;
     if (bypassed) {
@@ -726,10 +721,9 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
         // block. The earlier two-pass shape (all shorts, then all sysex)
         // sorted shorts internally but emitted the entire sysex tail
         // afterward, which violated the contract whenever a sysex
-        // scheduled at offset N preceded a short scheduled at offset
-        // N+1 (Codex P2 review on PR #627). Hosts that strictly enforce
-        // the ordering reject out-of-order events; lenient hosts get
-        // wrong timing.
+        // scheduled at offset N preceded a short scheduled at offset N+1. Hosts
+        // that strictly enforce the ordering reject out-of-order events;
+        // lenient hosts get wrong timing.
         //
         // Merge the two streams in (sample_offset, kind) order and
         // push as we go. midi_out's short and sysex vectors are each
@@ -788,12 +782,12 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
         }
     }
 
-    // Item 3.11 — if the processor flagged a latency / tail change
-    // during this block, ask the host to schedule a main-thread
-    // callback. The actual `clap_host_latency->changed()` /
-    // `clap_host_tail->changed()` push runs from clap_on_main_thread()
-    // so we never call host APIs from process(). Peek (don't consume)
-    // so the on_main_thread handler still sees the same edge.
+    // If the processor flagged a latency / tail change during this block, ask
+    // the host to schedule a main-thread callback. The actual
+    // `clap_host_latency->changed()` / `clap_host_tail->changed()` push runs
+    // from clap_on_main_thread() so we never call host APIs from process().
+    // Peek (don't consume) so the on_main_thread handler still sees the same
+    // edge.
     if (self->host && self->host->request_callback && self->processor &&
         (self->processor->latency_change_pending() ||
          self->processor->tail_change_pending())) {
@@ -831,10 +825,10 @@ const void* clap_get_extension(const clap_plugin_t* plugin, const char* id) {
         if (std::strcmp(id, CLAP_EXT_PRESET_LOAD_COMPAT) == 0) return &s_preset_load;
     }
 
-    // ARA companion factory (workstream 06 slice 6.5). Lazily instantiate
-    // the controller the first time an ARA-aware host asks for it, then
-    // hand back the factory pointer. Returns nullptr if the plugin did
-    // not override create_ara_document_controller().
+    // ARA companion factory. Lazily instantiate the controller the first time
+    // an ARA-aware host asks for it, then hand back the factory pointer.
+    // Returns nullptr if the plugin did not override
+    // create_ara_document_controller().
     if (std::strcmp(id, kClapAraFactoryExtension) == 0) {
         // Guard: hosts may query extensions before clap_init populated
         // self->processor. The factory is process-global so we can still
@@ -850,11 +844,10 @@ const void* clap_get_extension(const clap_plugin_t* plugin, const char* id) {
 }
 
 void clap_on_main_thread(const clap_plugin_t* plugin) {
-    // Item 3.11 — drain RT-safe pending flags the processor may have
-    // set during process() and republish to the host on the main
-    // thread. CLAP hosts call request_callback() in response to the
-    // process_status flag we set when a flag becomes pending, and
-    // this entrypoint runs on the main thread.
+    // Drain RT-safe pending flags the processor may have set during process()
+    // and republish to the host on the main thread. CLAP hosts call
+    // request_callback() in response to the process_status flag we set when a
+    // flag becomes pending, and this entrypoint runs on the main thread.
     auto* self = get_self(plugin);
     if (!self || !self->processor || !self->host) return;
 

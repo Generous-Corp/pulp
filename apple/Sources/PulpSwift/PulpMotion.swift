@@ -160,7 +160,7 @@ public enum PulpMotionRuntime {
     /// Separate ambient-provenance lock so SwiftUI `PulpMotionProbe`
     /// attaches that briefly set + clear the C-side ambient slot can
     /// serialize without contending with backend installation. See
-    /// `withAmbientProvenance(...)` below — issue #2150.
+    /// `withAmbientProvenance(...)` below.
     private static let ambientLock = NSLock()
     private static var _backend = PulpMotionBackend()
 
@@ -185,7 +185,7 @@ public enum PulpMotionRuntime {
     /// (`kind`, `id`, `file`, `line`) and unconditionally cleared on
     /// exit. The set / body / clear triple runs under a dedicated lock
     /// so two SwiftUI view bodies in the same runloop tick can't
-    /// interleave ambient slot mutations (issue #2150). The body should
+    /// interleave ambient slot mutations. The body should
     /// be short — typically just the publish calls that need the
     /// ambient stamp. The C ABI ambient slot is itself unsynchronized
     /// across runtimes, so this guard only protects Swift-side

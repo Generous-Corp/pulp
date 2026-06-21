@@ -1,20 +1,16 @@
 // font_resolver.hpp
 //
-// Pulp #2163 follow-up — Phase 1 / Slice 1.1.a of the font-subsystem-
-// hardening v2 roadmap.
-//
 // `FontResolver` is the canonical resolution path: one parser, one
 // cascade, one set of fallback semantics. Every text-rendering or text-
 // measurement caller in the SDK (SkiaCanvas, TextShaper, bundled_fonts,
 // sdf_atlas, examples/ui-preview, the JS web-compat layer) talks to
-// this resolver. The five separate parsers/cascades that existed in
-// `feature/jsx-instrument-rebased@2371479c3` are eliminated.
+// this resolver. Legacy split parsers/cascades are kept out of the
+// public paint and measurement paths.
 //
 // The resolver returns a `ResolvedFont` describing not just the chosen
 // typeface but also *how* it was chosen: which scope owned it, which
 // step of the cascade matched, whether faux-synthesis was applied. That
-// trace data feeds the `FontFlightRecorder` (Slice 1.3) and the
-// import-missing-font-advisor (companion doc).
+// trace data feeds the `FontFlightRecorder` and missing-font advice.
 //
 // This header forward-declares `SkTypeface`; the implementation pulls
 // in Skia. Non-GPU translation units can include this header to obtain
@@ -42,7 +38,7 @@ namespace pulp::canvas {
 
 #ifdef PULP_HAS_SKIA
 
-// ── AA / hinting policy (font v2 Slice 3.2) ──────────────────────────────
+// ── AA / hinting policy ─────────────────────────────────────────────────
 //
 // Pure enum-to-enum translation from the platform-neutral FontOptions modes
 // (HintingMode, AntiAliasMode) to Skia's paint flags (SkFont::Edging,
@@ -53,34 +49,29 @@ namespace pulp::canvas {
 // locks, no Skia globals touched).
 //
 // Mapping rules (locked by test_font_aa_hinting):
-//   * AntiAliasMode::Default     → kAntiAlias (the existing in_non_opaque_layer
-//                                  heuristic in SkiaCanvas can still pick
-//                                  kSubpixelAntiAlias when it knows the
-//                                  destination is opaque; callers that want
-//                                  to bypass the heuristic explicitly opt in
-//                                  via LCD / Grayscale / NoAA).
+//   * AntiAliasMode::Default     → nullopt (caller keeps the
+//                                  opacity-layer text edging heuristic).
 //   * AntiAliasMode::LCD         → kSubpixelAntiAlias
 //   * AntiAliasMode::Grayscale   → kAntiAlias
 //   * AntiAliasMode::NoAA        → kAlias
 //
-//   * HintingMode::PlatformDefault → kNormal (Skia's documented default for
-//                                    sk_app + most platform back-ends).
+//   * HintingMode::PlatformDefault → nullopt (caller preserves the
+//                                     backend/platform default).
 //   * HintingMode::None            → kNone
 //   * HintingMode::Slight          → kSlight
 //   * HintingMode::Normal          → kNormal
 //   * HintingMode::Full            → kFull
 
-// Codex review on PR #2186 (P2): `AntiAliasMode::Default` is documented as
-// "follow the inside_non_opaque_layer() heuristic" (#1899) and
-// `HintingMode::PlatformDefault` as "let the platform pick". Hard-coding
-// either to a single Skia value erases the per-caller branch.
+// `AntiAliasMode::Default` follows the caller's opacity-layer text edging
+// heuristic, and `HintingMode::PlatformDefault` preserves the backend's own
+// default. Hard-coding either to a single Skia value erases the per-caller
+// branch.
 //
 // Both helpers now return `std::optional`: `Default` / `PlatformDefault`
 // resolve to `nullopt` ("caller decides"); explicit modes resolve to the
 // fixed Skia enum. The convenience `ResolvedFont::sk_edging()` /
-// `sk_hinting()` accessors below pick a safe fallback for callers that
-// don't have an opaque-surface signal handy — but the structured path
-// keeps the heuristic intact.
+// `sk_hinting()` accessors below preserve that optional result so
+// callers can keep their own opacity / backend-default branches intact.
 
 constexpr std::optional<SkFont::Edging> sk_edging_for(AntiAliasMode mode) noexcept {
     switch (mode) {
@@ -161,13 +152,12 @@ struct ResolvedFont {
     /// AA/hinting policy carried over from the originating `FontOptions`.
     /// Recorded at resolve time so paint paths can derive Skia flags
     /// without round-tripping through the original options blob.
-    /// (font v2 Slice 3.2)
     AntiAliasMode aa_mode      = AntiAliasMode::Default;
     HintingMode   hinting_mode = HintingMode::PlatformDefault;
 
     /// Color-font mode carried from `FontOptions`. Determines whether
     /// the painter should render color glyphs (COLR/CPAL, SVG-in-OT,
-    /// bitmap emoji) when the typeface supports them. (Slice 3.1)
+    /// bitmap emoji) when the typeface supports them.
     ColorFontMode color_font_mode = ColorFontMode::Auto;
 
     bool has_typeface() const noexcept {
@@ -185,8 +175,8 @@ struct ResolvedFont {
 #ifdef PULP_HAS_SKIA
     /// Skia `SkFont::Edging` for the recorded `aa_mode`, or
     /// `std::nullopt` for `AntiAliasMode::Default` (caller decides
-    /// — typically by branching on `inside_non_opaque_layer()` per
-    /// #1899). See `sk_edging_for(AntiAliasMode)` for the mapping.
+    /// — typically by branching on the opacity-layer text edging
+    /// heuristic). See `sk_edging_for(AntiAliasMode)` for the mapping.
     std::optional<SkFont::Edging> sk_edging() const noexcept {
         return sk_edging_for(aa_mode);
     }
@@ -199,8 +189,8 @@ struct ResolvedFont {
     }
 #endif
 
-    /// pulp #2163 / font v2 Slice 3.1 — does the resolved typeface
-    /// carry color-glyph tables? Checks for any of:
+    /// Does the resolved typeface carry color-glyph tables? Checks for
+    /// any of:
     ///   `COLR` — v0/v1 vector color (Microsoft / OpenType)
     ///   `CPAL` — color palette companion to COLR
     ///   `CBDT` / `CBLC` — bitmap color emoji (Google / Apple)
@@ -237,9 +227,9 @@ public:
     /// synthesized and returns the closest-style real face.
     ResolvedFont resolve_family_list(const FontOptions& options);
 
-    /// Character-level fallback. Called by the run planner (Slice 1.2)
-    /// when a cluster's primary face has no glyph for one of its
-    /// codepoints. Tries each face in the family stack first, then
+    /// Character-level fallback. Called by the run planner when a
+    /// cluster's primary face has no glyph for one of its codepoints.
+    /// Tries each face in the family stack first, then
     /// `SkFontMgr::matchFamilyStyleCharacter` (i.e. honors the platform
     /// font manager's per-codepoint fallback heuristics in
     /// `Native`/`Hybrid` modes; refuses heuristic fallback in
@@ -253,14 +243,13 @@ public:
     /// bumps baked into cache keys.
     void clear_cache();
 
-    /// pulp #2163 — font v2 Slice 3.3 (variable-font animation).
     /// Cap the resolver cache so per-frame axis-instance variation
     /// (60fps animation across `wght` 100→900 = 60 distinct cache
     /// keys per second per animation) doesn't grow unbounded. Default
     /// 256 entries — enough to hold a handful of animations + the
     /// static set, small enough that the LRU eviction reliably fires
     /// on real animations. Setting 0 disables the cap (back to the
-    /// pre-3.3 unbounded behavior). Setting a value shrinks the cache
+    /// previous unbounded behavior). Setting a value shrinks the cache
     /// immediately if it's currently over the new cap.
     void set_cache_capacity(std::size_t entries);
     std::size_t cache_capacity() const noexcept;
@@ -270,9 +259,8 @@ public:
     std::size_t cache_size() const noexcept;
 
     /// Implementation detail — exposed publicly only so the
-    /// slice-3.3 LRU helper (`cache_put_locked_impl` in
-    /// font_resolver.cpp) can reach the nested type. The struct
-    /// definition still lives in the .cpp; this is name-only.
+    /// LRU helper in font_resolver.cpp can reach the nested type. The
+    /// struct definition still lives in the .cpp; this is name-only.
     struct Impl;
 
 private:

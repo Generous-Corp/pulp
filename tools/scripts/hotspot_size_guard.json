@@ -12,12 +12,12 @@
   "hotspots": [
     {
       "path": "core/view/src/widget_bridge.cpp",
-      "max_loc": 1204,
-      "note": "WidgetBridge shell after registrar split; keep native JS API registration out"
+      "max_loc": 1160,
+      "note": "WidgetBridge shell after registrar split; lowered after comment-hygiene cleanup"
     },
     {
       "path": "core/view/src/widget_bridge/canvas2d_api.cpp",
-      "max_loc": 1318,
+      "max_loc": 1294,
       "note": "WidgetBridge Canvas2D registrar split hotspot"
     },
     {
@@ -32,7 +32,7 @@
     },
     {
       "path": "test/CMakeLists.txt",
-      "max_loc": 6152,
+      "max_loc": 6151,
       "note": "shared test registration hotspot"
     },
     {
@@ -87,7 +87,7 @@
     },
     {
       "path": "core/view/platform/mac/window_host_mac.mm",
-      "max_loc": 2801,
+      "max_loc": 2735,
       "note": "Mac window host lifecycle/capture/geometry hotspot"
     },
     {
@@ -112,17 +112,17 @@
     },
     {
       "path": "core/view/src/design_codegen.cpp",
-      "max_loc": 1997,
-      "note": "generated JS bridge contract hotspot"
+      "max_loc": 1961,
+      "note": "generated JS bridge contract hotspot; lowered after comment-hygiene cleanup"
     },
     {
       "path": "core/view/include/pulp/view/view.hpp",
-      "max_loc": 1677,
+      "max_loc": 1612,
       "note": "public view header trim candidate (+7 for View::start_file_drag outbound-drag public API + FileDragRequest fwd-decl; +7 from design-system branch additions)"
     },
     {
       "path": "core/canvas/include/pulp/canvas/canvas.hpp",
-      "max_loc": 1537,
+      "max_loc": 1535,
       "note": "public canvas header trim candidate (+UTF-8 codepoint clamp in text_x_for_byte, prevents nil-NSString host-process crash)"
     },
     {
@@ -137,17 +137,17 @@
     },
     {
       "path": "inspect/src/inspector_overlay.cpp",
-      "max_loc": 2616,
+      "max_loc": 2587,
       "note": "Inspector overlay facade hotspot; extract companions per INSPECT_MODULE_MAP.md"
     },
     {
       "path": "inspect/src/inspector_overlay_paint.cpp",
-      "max_loc": 1540,
+      "max_loc": 1530,
       "note": "Inspector overlay paint hotspot; keep drawing separate from mutation"
     },
     {
       "path": "inspect/include/pulp/inspect/inspector_overlay.hpp",
-      "max_loc": 1510,
+      "max_loc": 1491,
       "note": "Inspector overlay public header hotspot; reduce private state deliberately"
     },
     {
@@ -167,7 +167,7 @@
     },
     {
       "path": "core/canvas/src/skia_canvas.cpp",
-      "max_loc": 1197,
+      "max_loc": 1136,
       "note": "Skia canvas split stabilization candidate"
     }
   ]

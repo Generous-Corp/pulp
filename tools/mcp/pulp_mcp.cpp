@@ -26,10 +26,10 @@
 
 namespace fs = std::filesystem;
 
-// JSON-RPC framing + field extraction extracted to mcp_json.hpp, and
-// project SDK-compat resolution to mcp_compat.hpp, in the Phase 6 (B4)
-// refactor. Pull the helpers into file scope so the rest of this TU
-// keeps its existing unqualified call sites.
+// JSON-RPC framing + field extraction live in mcp_json.hpp, and project
+// SDK-compat resolution lives in mcp_compat.hpp. Pull the helpers into
+// file scope so the rest of this TU keeps its existing unqualified call
+// sites.
 using pulp_mcp::json_string;
 using pulp_mcp::json_error;
 using pulp_mcp::json_result;
@@ -44,8 +44,8 @@ using pulp_mcp::resolve_project_sdk_version;
 using pulp_mcp::compare_semver;
 using pulp_mcp::compat_error_payload;
 using pulp_mcp::handle_compat;
-// Shell-execution + tool handlers extracted to mcp_shell.hpp /
-// mcp_tools.{hpp,cpp} in the Phase 6 (B4) refactor.
+// Shell-execution + tool handlers live in mcp_shell.hpp /
+// mcp_tools.{hpp,cpp}.
 using pulp_mcp::exec;
 using pulp_mcp::find_project_root;
 using pulp_mcp::shell_quote;
@@ -100,7 +100,7 @@ static std::string tools_list_json() {
 {"name":"pulp_kit_remove","description":"Remove an installed kit using only constrained lock-recorded kit paths under pulp-kits/<kit-id>/ plus known generated lock/CMake files. Requires yes=true.","inputSchema":{"type":"object","required":["id","yes"],"properties":{"id":{"type":"string","description":"Installed kit id"},"yes":{"type":"boolean","description":"Must be true after ownership review"}}}},
 {"name":"pulp_kit_pack","description":"Pack a local kit/content manifest directory into a .pulpkit or .pulpcontent archive with files.sha256.json.","inputSchema":{"type":"object","required":["path"],"properties":{"path":{"type":"string","description":"Path to a kit directory or pulp.package.json"},"output":{"type":"string","description":"Archive output path"}}}},
 {"name":"pulp_kit_publish_check","description":"Run the metadata-only kit publish dry-run gate for a local kit directory, manifest, or .pulpkit archive. Rejects content-pack manifests; enforces strict manifest validation, license inventory, NOTICE-compatible license files via exports.licenses, human review, validation profiles, kind-specific evidence, and optional signed registry-manifest verification. Does not publish remotely.","inputSchema":{"type":"object","required":["path"],"properties":{"path":{"type":"string","description":"Path to a kit directory, pulp.package.json, or .pulpkit archive"},"registry_manifest":{"type":"string","description":"Optional local pulp-registry-manifest-v1 JSON to verify against the package manifest"}}}},
-{"name":"pulp_kit_init","description":"Scaffold a local developer kit manifest. Phase 1 only writes metadata; it does not install or apply anything.","inputSchema":{"type":"object","required":["kind","id"],"properties":{"kind":{"type":"string","enum":["source","ui-kit","template"],"description":"Developer fixture manifest kind"},"id":{"type":"string","description":"Package id"},"name":{"type":"string","description":"Display name"},"dir":{"type":"string","description":"Directory to write pulp.package.json into"},"force":{"type":"boolean","description":"Overwrite an existing manifest"}}}},
+{"name":"pulp_kit_init","description":"Scaffold a local developer kit manifest. Writes metadata only; it does not install or apply anything.","inputSchema":{"type":"object","required":["kind","id"],"properties":{"kind":{"type":"string","enum":["source","ui-kit","template"],"description":"Developer fixture manifest kind"},"id":{"type":"string","description":"Package id"},"name":{"type":"string","description":"Display name"},"dir":{"type":"string","description":"Directory to write pulp.package.json into"},"force":{"type":"boolean","description":"Overwrite an existing manifest"}}}},
 {"name":"pulp_content","description":"Umbrella wrapper for data-only content-pack subcommands. .pulpcontent archives must include files.sha256.json. Use validate/preview/list/reveal/rescan freely; install/update/remove require yes=true after review.","inputSchema":{"type":"object","required":["subcommand"],"properties":{"subcommand":{"type":"string","enum":["validate","preview","install","update","list","rescan","remove","uninstall","reveal"],"description":"Content subcommand to run"},"path":{"type":"string","description":"Path for validate/preview/install/update"},"plugin_runtime":{"type":"string","description":"Path to trusted pulp.plugin-runtime.json for preview"},"plugin":{"type":"string","description":"Target plugin id"},"id":{"type":"string","description":"Installed content package id for remove/reveal"},"package_id":{"type":"string","description":"Installed content package id for remove/reveal"},"version":{"type":"string","description":"Optional content package version"},"root":{"type":"string","description":"Optional content data root override"},"yes":{"type":"boolean","description":"Required for install/update/remove after review"}}}},
 {"name":"pulp_content_validate","description":"Validate a local .pulpcontent archive or content-pack directory without executing package code. Archives must include files.sha256.json, every payload file must be listed there, and hashes must match.","inputSchema":{"type":"object","required":["path"],"properties":{"path":{"type":"string","description":"Path to .pulpcontent archive or content-pack directory"}}}},
 {"name":"pulp_content_preview","description":"Preview content-pack compatibility and reload policy against a trusted plugin runtime manifest without installing anything. Archives must include files.sha256.json.","inputSchema":{"type":"object","required":["path","plugin_runtime"],"properties":{"path":{"type":"string","description":"Path to .pulpcontent archive or content-pack directory"},"plugin_runtime":{"type":"string","description":"Path to trusted pulp.plugin-runtime.json"},"plugin":{"type":"string","description":"Optional expected target plugin id"}}}},
@@ -148,10 +148,8 @@ static std::string tools_list_json() {
 // contain embedded `\n` or `\r`. Several response builders use
 // multi-line R"JSON(...)" raw strings for readability. Strip those
 // here so every wire-bound response is a single line.
-//
-// B4 (2026-05): moved out of main()'s I/O loop into a free function +
-// applied at the bottom of handle_request, so the contract holds for
-// every caller — not just main's stdio path. Pinned by
+// The function is applied at the bottom of handle_request, so the
+// contract holds for every caller, not just main's stdio path. Pinned by
 // `test/test_mcp_server.cpp` "MCP wire output never contains embedded
 // newlines" [issue-2091].
 static std::string compact_for_wire(std::string s) {
@@ -507,8 +505,8 @@ int main(int argc, char* argv[]) {
 
     // MCP spec: messages on the stdio transport are delimited by
     // newlines and MUST NOT contain embedded `\n` or `\r`. The
-    // newline-stripping contract now lives inside `handle_request`
-    // itself (B4 2026-05), so callers here just pass through.
+    // newline-stripping contract lives inside `handle_request` itself,
+    // so callers here just pass through.
 
     std::string line;
     while (std::getline(std::cin, line)) {
