@@ -6,7 +6,7 @@
 // playhead (frame index), and re-emits the prefix of events with
 // `frame <= playhead` to a caller-supplied Sink each time the playhead
 // moves. This is sufficient for design-review timeline scrubbing and CI
-// artifact triage — the live-overlay drawing layer is Phase 11+.
+// artifact triage; live overlay drawing belongs to a separate layer.
 //
 // Inspector dispatch:
 //   Motion.loadFixture { path }    → load events, reset playhead to 0

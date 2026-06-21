@@ -1,11 +1,9 @@
 // editor_url.hpp — Inspector source-jump editor URI configuration.
 //
-// Phase 5.3 of the inspector source-jump roadmap
-// (planning/2026-05-19-inspector-phase5-source-jump-spike.md). This is the
-// smallest concrete slice — the configuration plumbing for *which* editor
-// URI scheme to use when a future Phase 5.1 source-jump action wants to
-// open a file:line in the user's editor. No jumping happens here; this
-// file only deals with the template and its substitution.
+// This is the configuration plumbing for which editor URI scheme to use
+// when source-jump opens a file:line in the user's editor. The actual
+// jump action lives in source_jump.hpp; this file deals with the
+// template and its substitution.
 //
 // Common editor URL templates (any of these are valid `editor_url_template`
 // values for `InspectorConfig`):
@@ -34,9 +32,9 @@
 namespace pulp::inspect {
 
 /// Inspector runtime configuration. Currently scoped to source-jump
-/// editor URI plumbing (Phase 5.3). Future inspector-wide settings
-/// (e.g. theme, default tab) can be added here without churning the
-/// per-component constructors.
+/// editor URI plumbing. Future inspector-wide settings (e.g. theme,
+/// default tab) can be added here without churning the per-component
+/// constructors.
 struct InspectorConfig {
     /// URL template used to open a source file in the user's editor.
     /// Recognized substitution tokens: `{path}`, `{line}`, `{col}`.

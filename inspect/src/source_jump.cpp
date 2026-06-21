@@ -1,7 +1,6 @@
 // source_jump.cpp — Inspector source-jump implementation.
 //
-// See pulp/inspect/source_jump.hpp for the public surface and the
-// design context (planning Phase 5.1).
+// See pulp/inspect/source_jump.hpp for the public surface and behavior.
 
 #include <pulp/inspect/source_jump.hpp>
 #include <pulp/view/view.hpp>
@@ -148,7 +147,7 @@ SourceJumpResult resolve_source_jump(const InspectorConfig& config,
         return result;
     }
 
-    // Apply the env override / config / default precedence (Phase 5.3).
+    // Apply the env override / config / default precedence.
     auto effective = effective_editor_url(config);
     std::string err;
     if (!validate_editor_url_template(effective.template_str, &err)) {

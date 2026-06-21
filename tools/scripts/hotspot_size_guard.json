@@ -152,12 +152,12 @@
     },
     {
       "path": "inspect/src/inspector_window.cpp",
-      "max_loc": 1305,
+      "max_loc": 1301,
       "note": "Inspector window UI hotspot; keep separate from canvas overlay state"
     },
     {
       "path": "inspect/src/domain_handler.cpp",
-      "max_loc": 915,
+      "max_loc": 912,
       "note": "Inspector protocol dispatch hub; preserve optional-source errors"
     },
     {

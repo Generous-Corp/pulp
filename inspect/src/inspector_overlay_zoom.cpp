@@ -138,17 +138,16 @@ void InspectorOverlay::paint_zoom_panel(Canvas& canvas) {
     // middle) so the loupe still communicates "this is where you're
     // sampling".
     //
-    // Edge clamping (codex P2 #2464): a window centered on a cursor
-    // within `half` pixels of any canvas edge would put `ox`/`oy`
-    // negative or push `ox+cells`/`oy+cells` past the surface — Skia's
-    // readPixels() rejects an out-of-bounds source rect outright, so
-    // the WHOLE block dropped to checkerboard exactly where pixel
-    // inspection matters most. Clamp the read origin so the full
-    // `cells × cells` window stays in-bounds; the magnified region
-    // shifts slightly near edges but still shows real device pixels.
-    // The sample pixel may then sit off-center within the grid, so the
-    // crosshair below tracks its actual cell (cross_gx/cross_gy)
-    // instead of assuming the middle.
+    // Edge clamping: a window centered on a cursor within `half` pixels
+    // of any canvas edge would put `ox`/`oy` negative or push
+    // `ox+cells`/`oy+cells` past the surface. Skia's readPixels()
+    // rejects an out-of-bounds source rect outright, so the whole block
+    // would drop to checkerboard exactly where pixel inspection matters
+    // most. Clamp the read origin so the full `cells × cells` window
+    // stays in-bounds; the magnified region shifts slightly near edges
+    // but still shows real device pixels. The sample pixel may then sit
+    // off-center within the grid, so the crosshair below tracks its
+    // actual cell (cross_gx/cross_gy) instead of assuming the middle.
     const int   cw = static_cast<int>(root_.bounds().width);
     const int   ch = static_cast<int>(root_.bounds().height);
     int ox = static_cast<int>(zoom_sample_center_.x) - half;
