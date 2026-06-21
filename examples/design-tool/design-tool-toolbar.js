@@ -118,7 +118,7 @@ function buildToolbarStatePills() {
                 }
                 activeState = idx;
                 setText("status-text", "State: " + stateNames[idx]);
-                // #50: Apply state overrides to preview components
+                // Apply state overrides to preview components
                 applyStateToPreview(idx);
             });
         })(sp);
@@ -126,7 +126,7 @@ function buildToolbarStatePills() {
 }
 buildToolbarStatePills();
 
-// #50: Apply state overrides to preview components
+// Apply state overrides to preview components
 function applyStateToPreview(stateIdx) {
     // 0=Default, 1=Hover, 2=Focus, 3=Disabled, 4=Error
     // Reset all to default first
@@ -317,7 +317,7 @@ function buildToolbarActionsAndLeftPanelControls() {
     setBorder("left-panel", APP_BORDER, 1, 0);
     setScrollContentSize("left-panel", 310, 900);
 
-    // Issue 9: Color System section matching HTML reference
+    // Color System section matching HTML reference
     createCol("color-section", "left-panel");
     setFlex("color-section", "padding", 10);
     setFlex("color-section", "padding_right", 18);
@@ -330,7 +330,7 @@ function buildToolbarActionsAndLeftPanelControls() {
     setTextColor("cs-title", APP_ACCENT);
     setFlex("cs-title", "height", 14);
 
-    // #55: Template selector row
+    // Template selector row
     createRow("template-row", "color-section");
     setFlex("template-row", "height", 22);
     setFlex("template-row", "gap", 6);
@@ -347,7 +347,7 @@ function buildToolbarActionsAndLeftPanelControls() {
     setFlex("template-selector", "flex_grow", 1);
     setFlex("template-selector", "height", 22);
     setSelected("template-selector", 0);
-    // #56: ? info button
+    // Template info button
     createLabel("template-help", "?", "template-row");
     setFontSize("template-help", 10);
     setTextColor("template-help", APP_TEXT_DIM);
@@ -434,7 +434,7 @@ function buildToolbarActionsAndLeftPanelControls() {
         showHelpModal("Mode", "Dark mode maps lighter shades to text and surfaces over dark backgrounds. Light mode inverts the relationship so semantic ramps still read correctly.");
     });
 
-    // Issue 9: 5 palette rows — each with base color dot + name + 11-shade mini ramp
+    // Five palette rows, each with base color dot + name + 11-shade mini ramp
     // (shade ramps are built dynamically by buildShadeRamps below)
 
     // Hue fader (compact)
@@ -494,7 +494,7 @@ function buildToolbarActionsAndLeftPanelControls() {
 buildToolbarActionsAndLeftPanelControls();
 
 // Token groups
-// D5: Expanded token registry (50+ semantic tokens matching HTML reference)
+// Expanded token registry (50+ semantic tokens matching HTML reference)
 var tokenGroups = [
     { name: "Background", tokens: ["bg.primary", "bg.secondary", "bg.surface", "bg.elevated"] },
     { name: "Text", tokens: ["text.primary", "text.secondary", "text.disabled", "text.link"] },
@@ -653,7 +653,7 @@ function buildTokenList() {
         setFlex(gid, "padding_top", 4);
         setFlex(gid, "gap", 2);
 
-        // D7: Styled group headers — uppercase, accent colored
+        // Styled group headers: uppercase, accent colored
         createLabel(gid + "-title", group.name, gid);
         setFontSize(gid + "-title", 9);
         setTextColor(gid + "-title", APP_ACCENT);
@@ -707,7 +707,7 @@ function buildTokenList() {
             setTextColor(resetId + "-lbl", APP_TEXT_DIM);
             setPointerEvents(resetId + "-lbl", "none");
 
-            // D1: hex input field
+            // Hex input field
             var hexId = tid + "-hex";
             createTextEditor(hexId, tid);
             setPlaceholder(hexId, "#000000");
@@ -718,14 +718,14 @@ function buildTokenList() {
             setFlex(hexId, "height", 20);
             setFontSize(hexId, 10);
 
-            // D7: hover highlight on token row
+            // Hover highlight on token row
             registerHover(tid);
             (function(rowId) {
                 on(rowId, 'mouseenter', function() { setBackground(rowId, '#ffffff08'); });
                 on(rowId, 'mouseleave', function() { setBackground(rowId, 'transparent'); });
             })(tid);
 
-            // D1: click swatch → open token popup
+            // Click swatch to open token popup
             registerClick(swatchId);
             (function(tokenName, sid, gi, ti) {
                 on(sid, 'click', function() {
@@ -739,7 +739,7 @@ function buildTokenList() {
                 });
             })(group.tokens[t], resetId);
 
-            // D1: hex input → apply on Enter
+            // Hex input applies on Enter
             (function(tokenName, hid) {
                 on(hid, 'return', function(text) {
                     var hex = text.trim();

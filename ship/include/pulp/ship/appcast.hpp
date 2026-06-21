@@ -60,10 +60,9 @@ struct KeyPair {
 // Returns std::nullopt when signing is unavailable OR when inputs are
 // invalid (unreadable file, malformed key). Callers MUST treat nullopt
 // as a hard failure and refuse to produce an unsigned appcast. Returning
-// an empty string silently was the #295 P0 bug — it looked like a
-// successful sign to the CLI but emitted `edSignature=""` into the
-// appcast, which Sparkle then parsed as "not signed yet" while operators
-// believed they had shipped a signed update.
+// an empty string silently looks like a successful sign to the CLI but
+// emits `edSignature=""` into the appcast, which Sparkle then parses as
+// "not signed yet" while operators believe they shipped a signed update.
 std::optional<std::string> sign_file_ed25519(const std::string& file_path,
                                              const std::string& private_key_b64);
 

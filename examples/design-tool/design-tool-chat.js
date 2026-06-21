@@ -1,4 +1,4 @@
-// Issue 2: image upload via file dialog
+// Image upload via file dialog
 var uploadedImagePath = "";
 var uploadedImageName = "";
 var REFERENCE_IMAGE_EXTENSIONS = "png;jpg;jpeg;gif;webp;bmp;tif;tiff;heic;heif";
@@ -202,7 +202,7 @@ function buildChatControlsAndToast() {
         updateChatInputSizing(text);
     });
 
-    // #49: Send button with proper icon sizing
+    // Send button with proper icon sizing
     createCol("send-btn", "chat-input-row");
     setFlex("send-btn", "width", 32);
     setFlex("send-btn", "height", 32);
@@ -219,7 +219,7 @@ function buildChatControlsAndToast() {
     setFlex("send-cancel-icon", "height", 14);
     setPointerEvents("send-cancel-icon", "none");
     setVisible("send-cancel-icon", false);
-    // Issue 3: hover state for send button
+    // Hover state for send button
     registerHover("send-btn");
     on("send-btn", "mouseenter", function() {
         if (chatRequestPending) {
@@ -252,7 +252,7 @@ function buildChatControlsAndToast() {
     createLabel("status-schema", "pulp-theme/v1", "status-bar");
 
     // ═══════════════════════════════════════════════════════════════════
-    // D7: Toast notification system
+    // Toast notification system
     // ═══════════════════════════════════════════════════════════════════
     createCol("toast-overlay", "");
     setPosition("toast-overlay", "absolute");
@@ -459,7 +459,7 @@ styleStatusSchema();
 // ═══════════════════════════════════════════════════════════════════
 // Inspector: Cmd+click detection
 // ═══════════════════════════════════════════════════════════════════
-// Issue 6: Cmd+click inspector with chat context scoping
+// Cmd+click inspector with chat context scoping
 var inspectedComponent = null;
 
 function clearInspectedComponent() {
@@ -591,7 +591,7 @@ wireInspectorAndGlobalKeys();
 // Chat logic
 // ═══════════════════════════════════════════════════════════════════
 
-// Issue 8: Track cumulative chat height for proper scroll sizing
+// Track cumulative chat height for proper scroll sizing
 var chatTotalHeight = 62; // welcome + hint + gap baseline
 var chatTypingVisible = false;
 var chatTypingPhase = 0;
@@ -720,16 +720,16 @@ function addChatMessage(role, text) {
     var hasRestore = (role === "assistant");
     chatHistory.push({ role: role, text: text });
 
-    // Issue 8: Better height estimation — wider chars-per-line for 230px width
+    // Better height estimation: wider chars-per-line for 230px width
     var charsPerLine = 25;
     var lineCount = Math.max(1, Math.ceil(text.length / charsPerLine));
     var msgHeight = 16 + lineCount * 16 + (hasRestore ? 24 : 0) + 20;
 
     createCol(id, "chat-thread");
     setFlex(id, "height", msgHeight);
-    setFlex(id, "flex_shrink", 0);  // Issue 8: prevent squishing
+    setFlex(id, "flex_shrink", 0);  // Prevent squishing
     setFlex(id, "padding", 10);
-    setFlex(id, "padding_right", 16);  // Issue 8: clear scrollbar
+    setFlex(id, "padding_right", 16);  // Clear scrollbar
     setFlex(id, "gap", 4);
     setBorder(id, APP_BORDER, 1, 8);
     if (role === "user") {
@@ -766,7 +766,7 @@ function addChatMessage(role, text) {
         })(snapshot, restoreId);
     }
 
-    // Issue 1: multi-line label for wrapping
+    // Multi-line label for wrapping
     createLabel(id + "-text", text, id);
     setFontSize(id + "-text", 12);
     setFlex(id + "-text", "flex_grow", 1);
@@ -1998,8 +1998,7 @@ wireChatInputAndPresetSelector();
 // ═══════════════════════════════════════════════════════════════════
 // Export/Import buttons
 // ═══════════════════════════════════════════════════════════════════
-// D4: Multi-format export
-// #57: expanded export formats including W3C tokens and style preset payloads
+// Multi-format export, including W3C tokens and style preset payloads
 var exportFormats = ["JSON", "CSS Vars", "OKLCH", "C++ Header", "C++ Palette", "W3C Tokens", "Style Preset"];
 var activeExportFormat = 0;
 var exportPopupOpen = false;
