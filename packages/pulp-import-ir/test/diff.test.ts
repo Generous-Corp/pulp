@@ -1,4 +1,4 @@
-// pulp #1486 — diff() unit tests.
+// diff() unit tests.
 
 import { describe, it, expect } from 'vitest';
 import { diff } from '../src/diff.js';

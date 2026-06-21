@@ -1,4 +1,4 @@
-// pulp #1486 — anchor strategy unit tests.
+// Anchor strategy unit tests.
 
 import { describe, it, expect } from 'vitest';
 import { hashCodeAsString, generateAnchorId, assignAnchors } from '../src/anchors.js';
@@ -139,14 +139,12 @@ describe('assignAnchors', () => {
         expect(childAnchors[2]).toBe('View[0]/Button[2]');
     });
 
-    // pulp #1499 follow-up — Codex P1: duplicate-sibling content-hash
-    // collision. Two siblings with identical {tag, role, text} (and
-    // therefore identical depth) used to produce the same anchor,
-    // which silently broke tweak routing and made `diff()` lossy.
+    // Duplicate siblings with identical {tag, role, text} and depth need
+    // distinct content-hash anchors so tweak routing and diff() remain lossless.
     // The discriminator is the Nth occurrence of the same signature
     // among earlier siblings — stable across re-imports of the same
     // source HTML, distinct for each duplicate.
-    it('content-hash disambiguates duplicate siblings (#1499 follow-up)', () => {
+    it('content-hash disambiguates duplicate siblings', () => {
         const root = {
             tag: 'View',
             children: [
