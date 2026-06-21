@@ -3034,15 +3034,14 @@ Promoting it to auto-open tracking issues is a future opt-in. Detection
 lives in the pure `stale_entries()` fn (unit-tested in
 `tools/scripts/test_host_quirks_staleness.py`), so it needs no clock/network.
 
-## Gotcha: release macOS runner must be macOS 15 (Skia/Dawn m150 Metal symbols)
+## Gotcha: sign-and-release fallback must be macOS 15
 
-`sign-and-release.yml` once fell back to `macos-14`. The Skia/Dawn **chrome/m150**
-prebuilt toolchain links macOS-15-only Metal symbols (e.g.
-`_OBJC_CLASS_$_MTLLogStateDescriptor`). GPU tests run at *build* time
-(`catch_discover_tests` executes the test binary for discovery), so on a
-`macos-14` runner they dyld-fail — "Symbol not found" — and every tagged release
-fails silently (tags get created by `auto-release.yml`, but no Release/binaries
-publish). Symptom: `release list` shows only stale drafts while `tags` keep
-climbing. Fix: route release macOS builds to `macos-15` (the Build/Test gate and
-`release-cli.yml` already do). When bumping the Skia pin, re-check the minimum
-runner OS for the new Metal/Dawn symbols.
+`sign-and-release.yml` once fell back to GitHub-hosted `macos-14`, whose default
+Xcode 15.4 Apple clang lacked C++20 P0960 (parenthesized aggregate init). The
+self-hosted PR `macos` lane used a newer clang, so CLI/import translation units
+compiled on every PR but failed only in the tagged release path; tags kept
+advancing while no Release/binaries published. Fix: route the GitHub-hosted
+fallback to `macos-15` and keep selecting the newest installed Xcode 16.x
+(`release-cli.yml` and the Build/Test gate already use macOS 15). If the
+GitHub-hosted macOS image changes again, verify the fallback runner still has
+C++20 parity with the PR lane before changing release routing.

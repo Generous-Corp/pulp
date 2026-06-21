@@ -21,11 +21,10 @@ jobs:
   # Resolve the macOS runner. When PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON
   # is set (the same repo variable build.yml uses for PR macOS routing
   # post-2026-05-18 cutover), route the release build through Namespace
-  # cloud runners instead of the GitHub-hosted pool. Falls back
-  # to macos-15 when unset: the Skia/Dawn chrome/m150 prebuilt toolchain links
-  # macOS-15-only Metal symbols (e.g. MTLLogStateDescriptor), so the GPU tests
-  # run at build time fail to dyld-load on macos-14 (broke every release since
-  # ~v0.456.2). release-cli.yml + the Build/Test gate already use macOS 15.
+  # cloud runners instead of the GitHub-hosted pool. Falls back to macos-15
+  # when unset: the release build needs a modern Xcode 16.x Apple clang for
+  # C++20 parity with the PR lane, and release-cli.yml + the Build/Test gate
+  # already use macOS 15.
   # Background: 2026-05-18 SDK starvation — GitHub-hosted macos-14 queue
   # backed up for hours and blocked v0.111..v0.134 from publishing
   # (compound with the supersede bug fixed in pulp #2238 and the Skia
