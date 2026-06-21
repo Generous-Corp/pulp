@@ -76,7 +76,7 @@ public:
         // Steady-state OLA window-energy at a fully-overlapped sample for
         // the analysis hop. Used to floor the per-sample normalization so
         // partial-overlap samples at stream edges taper to zero instead of
-        // being amplified by division by a near-zero coverage (pulp #3975).
+        // being amplified by division by a near-zero coverage.
         // The floor sits far below any real body coverage (down to a 4x
         // sparser synthesis hop), so body samples normalize unchanged.
         double steady = 0.0;
@@ -307,7 +307,7 @@ private:
     int num_bins_ = 0;
     int ring_size_ = 0;
     int ring_mask_ = 0;
-    float min_norm_ = 1e-9f;  // OLA coverage floor for edge taper (#3975)
+    float min_norm_ = 1e-9f;  // OLA coverage floor for stream-edge taper
 
     std::vector<float> input_ring_;     // channels * fft_size
     std::vector<float> output_ring_;    // channels * ring_size

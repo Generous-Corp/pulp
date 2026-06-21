@@ -9,9 +9,9 @@
 // but produces files round-trippable through the in-tree decoder, any
 // browser, and ImageMagick/identify.
 //
-// Acceptance test for the planning gap-doc row: encode → decode round
-// trip yields bit-identical RGBA8 buffers (within the palette
-// quantisation error for the writer case; the decoder is exact).
+// Round-trip invariant: encode → decode yields bit-identical RGBA8
+// buffers within the writer's palette-quantisation error; the decoder
+// is exact.
 
 #include <pulp/canvas/image_codecs.hpp>
 
@@ -233,7 +233,7 @@ void apply_disposal(GifState& state,
             // screen background index resolved against the GLOBAL color
             // table. If a transparent index was active, the cleared region
             // becomes transparent. Otherwise it becomes the global
-            // background color, NOT transparent black (Codex PR #3017 P2).
+            // background color, not transparent black.
             uint8_t br = 0, bg = 0, bb = 0, ba = 0;
             const bool transparent_active =
                 (state.transparent_index >= 0) &&

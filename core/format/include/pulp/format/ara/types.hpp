@@ -1,13 +1,12 @@
 #pragma once
 
-// ARA 2.x core type layer (workstream 06 slice 6.2).
+// ARA 2.x core type layer.
 //
 // SDK-independent mirrors of the ARA concepts a Pulp plugin needs to author
-// against. The companion factory layer (slices 6.3..6.5 — VST3, AU, CLAP)
-// translates between these types and the Celemony ARA SDK's C interface.
-// Plugin authors only ever see the Pulp types; the SDK header is never
-// re-exported from a Pulp public header so that PULP_HAS_ARA gating stays
-// invisible to consumers.
+// against. The companion factory layer translates between these types and the
+// Celemony ARA SDK's C interface for VST3, AU, and CLAP. Plugin authors only
+// ever see the Pulp types; the SDK header is never re-exported from a Pulp
+// public header so that PULP_HAS_ARA gating stays invisible to consumers.
 //
 // All identifiers are opaque integer handles (ARAObjectRef-like): they are
 // minted by the host and Pulp passes them back through callbacks. Pulp
@@ -59,7 +58,7 @@ struct AraAudioModification {
 
 /// Tempo + meter context shared by one or more region sequences. Pulp
 /// surfaces only the fields plugins commonly read — chord/key/scale
-/// readers can be added when a slice needs them.
+/// readers can be added when plugins need them.
 struct AraTempoEntry {
     double position_seconds = 0.0;
     double position_quarters = 0.0;
@@ -85,12 +84,12 @@ struct AraRegionSequence {
     int colour_argb = 0;          ///< Track colour, AARRGGBB; 0 if unset
 };
 
-/// A playback region maps a slice of an audio modification onto the
+/// A playback region maps a span of an audio modification onto the
 /// host's timeline. All four time fields are in seconds, matching ARA's
 /// ARAPlaybackRegionProperties contract. Earlier drafts modelled the
 /// modification-time pair as int64 samples, which would have forced
 /// sample-rate-dependent conversion in every adapter and dropped
-/// fractional-time precision (#185 review).
+/// fractional-time precision.
 struct AraPlaybackRegion {
     PlaybackRegionId id = 0;
     AudioModificationId modification_id = 0;

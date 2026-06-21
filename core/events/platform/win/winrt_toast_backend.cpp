@@ -11,20 +11,19 @@
 //     (`SHGetPropertyStoreForWindow` + `IApplicationActivationManager`).
 //
 // Both of those impose significant packaging requirements on plugin
-// hosts that simply embed Pulp as a library, so the gap-doc scoping
-// for this slice is *local notifications only* with the Windows path
-// landing as a runtime-detected scaffold:
+// hosts that simply embed Pulp as a library, so the Windows backend is
+// currently a runtime-detected scaffold:
 //
 //   * At process start we attempt to LoadLibrary `combase.dll`. If the
 //     OS resolves it, we register a backend that reports
-//     `is_available() == false` (no real toast surface yet) but with
-//     `backend_id() == "winrt-toast-scaffold"` so the gap-doc audit
-//     can confirm the platform was probed.
-//   * Calling `post_local_notification` returns 0 and the gap-doc row
-//     stays "Partial" until the full COM-activator integration ships.
+//     `is_available() == false` because there is no real toast surface yet,
+//     but exposes `backend_id() == "winrt-toast-scaffold"` so diagnostics can
+//     confirm the platform was probed.
+//   * Calling `post_local_notification` returns 0 until full COM-activator
+//     integration is available.
 //
 // This keeps the Windows build green without lying about delivered
-// notifications, and gives the follow-up work a clearly-named
+// notifications, and gives the eventual WinRT implementation a clearly-named
 // extension point.
 
 #include <pulp/events/push_notifications.hpp>

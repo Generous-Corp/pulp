@@ -1,10 +1,8 @@
-// font_resolver.cpp — Pulp #2163 follow-up, Phase 1 / Slice 1.1.a.
+// font_resolver.cpp
 //
-// First-cut implementation of the canonical resolver. For Slice 1.1.a
-// the resolver is wired in as the single entry point but its body
-// delegates to the existing match cascade in `bundled_fonts.cpp` /
-// `skia_canvas.cpp`. Subsequent slices replace those delegations with
-// scope-aware lookups and emit richer fallback traces.
+// Canonical resolver implementation. It is the single entry point for
+// font-family resolution and delegates to the registered-font map, bundled
+// fonts, and the platform font manager while emitting fallback traces.
 //
 // The header is Skia-free for non-GPU consumers; this .cpp is the
 // translation unit that bridges to Skia under `PULP_HAS_SKIA`.
@@ -46,8 +44,8 @@ const char* to_string(FallbackOrigin o) noexcept {
 
 // ── FontResolver::Impl ───────────────────────────────────────────────────
 
-// pulp #2163 — font v2 Slice 3.3. The resolver cache is LRU-with-cap
-// so variable-font animations (60fps `wght` interpolation produces 60
+// The resolver cache is LRU-with-cap so variable-font animations
+// (60fps `wght` interpolation produces 60
 // distinct keys/sec) don't grow unbounded. Default cap is 256 entries
 // — a small static UI has ~10-30 cached faces, animations spike then
 // settle, and the LRU eviction keeps the working set in cache.
@@ -127,12 +125,8 @@ SkFontStyle to_sk_style(const FontOptions& opts) {
     return SkFontStyle(sk_weight, sk_width, sk_slant);
 }
 
-// Bridge to legacy cascade (skia_canvas.cpp `get_cached_typeface_single`)
-// is not yet symbol-visible from here. For Slice 1.1.a we use the public
-// `match_registered_typeface` + `match_bundled_typeface` + SkFontMgr
-// path directly so this TU compiles standalone. The migration of
-// `skia_canvas.cpp` to call THIS resolver instead happens in Slice 1.1.a
-// part 2.
+// Keep this TU self-contained by using the public registered-font,
+// bundled-font, and SkFontMgr paths directly.
 
 ResolvedFont resolve_one_family(const std::string& family,
                                 const FontOptions& opts,
@@ -142,14 +136,13 @@ ResolvedFont resolve_one_family(const std::string& family,
     ResolvedFont r;
     r.scope = opts.scope;
     r.generation = merged_generation_for(opts.scope);
-    // Slice 3.2: AA / hinting policy travels alongside the resolved face.
+    // AA / hinting policy travels alongside the resolved face.
     r.aa_mode = opts.aa_mode;
     r.hinting_mode = opts.hinting_mode;
-    // Slice 3.1: color-font policy travels alongside the resolved face.
+    // Color-font policy travels alongside the resolved face.
     r.color_font_mode = opts.color_font_mode;
 
-    // 1) Registered (scoped). Phase 1.1.a only consults the global
-    //    registered map; per-scope storage arrives in 1.1.b.
+    // 1) Registered. Current storage consults the global registered map.
     if (auto tf = match_registered_typeface(family, sk_style)) {
         SkString actual;
         tf->getFamilyName(&actual);
@@ -222,10 +215,9 @@ ResolvedFont resolve_one_family(const std::string& family,
 
 } // namespace
 
-// pulp #2163 — Slice 3.3 helper. Insert `resolved` into the LRU
-// cache under `key`. Promotes existing entries to the back. Evicts
-// the oldest entry when the cap is exceeded. Caller must hold
-// `impl.mtx`.
+// Insert `resolved` into the LRU cache under `key`. Promotes existing
+// entries to the back. Evicts the oldest entry when the cap is exceeded.
+// Caller must hold `impl.mtx`.
 static void cache_put_locked(FontResolver::Impl& impl,
                              std::size_t key,
                              const ResolvedFont& resolved) {
@@ -247,8 +239,7 @@ static void cache_put_locked(FontResolver::Impl& impl,
 }
 
 ResolvedFont FontResolver::resolve_family_list(const FontOptions& options) {
-    // Codex review on PR #2191 (P2): record on every successful
-    // resolve path, not just the family_stack branch.
+    // Record every successful resolve path, not just the family-stack branch.
     auto record_event = [](const std::string& requested, const ResolvedFont& r) {
         if (!r.resolved()) return;
         FontFlightRecorder::instance().record_fallback({
@@ -286,21 +277,20 @@ ResolvedFont FontResolver::resolve_family_list(const FontOptions& options) {
     ResolvedFont resolved;
     resolved.scope = options.scope;
     resolved.generation = merged_generation_for(options.scope);
-    // pulp #2163 — font v2 Slice 3.2. AA / hinting policy carried straight
-    // out of FontOptions onto the ResolvedFont so paint paths derive Skia
-    // flags from one canonical source. See `sk_edging_for` / `sk_hinting_for`
-    // in font_resolver.hpp for the enum translation.
+    // AA / hinting policy is carried straight out of FontOptions onto the
+    // ResolvedFont so paint paths derive Skia flags from one canonical source.
+    // See `sk_edging_for` / `sk_hinting_for` in font_resolver.hpp for the enum
+    // translation.
     resolved.aa_mode = options.aa_mode;
     resolved.hinting_mode = options.hinting_mode;
-    // pulp #2163 / Slice 3.1 — color-font policy travels onto the
-    // ResolvedFont so paint paths can branch on color_font_active().
+    // Color-font policy travels onto the ResolvedFont so paint paths can
+    // branch on color_font_active().
     resolved.color_font_mode = options.color_font_mode;
 
-    // pulp #2163 — font v2 Slice 2.3. After a face resolves, if the
-    // caller requested variation axes (`font-variation-settings`),
-    // clone the typeface with those axes applied so the cache holds
-    // one entry per distinct axis instance (the FontOptions hash
-    // already keys on variation_axes — this just applies them).
+    // After a face resolves, if the caller requested variation axes
+    // (`font-variation-settings`), clone the typeface with those axes applied
+    // so the cache holds one entry per distinct axis instance (the FontOptions
+    // hash already keys on variation_axes — this just applies them).
     constexpr SkFourByteTag kWghtTag = SkSetFourByteTag('w', 'g', 'h', 't');
     auto apply_variation_axes = [&](sk_sp<SkTypeface> face) -> sk_sp<SkTypeface> {
         if (!face) return face;
@@ -314,8 +304,6 @@ ResolvedFont FontResolver::resolve_family_list(const FontOptions& options) {
                 caller_set_wght = true;
         }
 
-        // pulp #2163 follow-up — synthetic `wght` from CSS font-weight.
-        //
         // A variable font registered/resolved at its default instance
         // (e.g. Funnel Display @ 400) must honour `font-weight: 700` by
         // instancing its `wght` axis, not by falling back to a heavier
@@ -386,17 +374,17 @@ ResolvedFont FontResolver::resolve_family_list(const FontOptions& options) {
 ResolvedFont FontResolver::resolve_character_fallback(const FontOptions& options,
                                                      const ResolvedFont& primary,
                                                      std::uint32_t codepoint) {
-    // Slice 1.1.a stub: ask the platform font manager for a face that
-    // covers `codepoint`. Slice 1.2 enriches this with cluster-aware
-    // selection and locale-influenced ranking.
+    // Ask the platform font manager for a face that covers `codepoint`.
+    // Locale is passed through when available so platform fallback can
+    // influence ranking.
     ResolvedFont r;
     r.scope = options.scope;
     r.generation = merged_generation_for(options.scope);
-    // Slice 3.2: char-fallback faces carry the same AA / hinting policy
-    // as the primary so paint paths stay consistent across the run.
+    // Char-fallback faces carry the same AA / hinting policy as the primary
+    // so paint paths stay consistent across the run.
     r.aa_mode = options.aa_mode;
     r.hinting_mode = options.hinting_mode;
-    // Slice 3.1: char-fallback also inherits color-font policy.
+    // Char-fallback also inherits color-font policy.
     r.color_font_mode = options.color_font_mode;
 
     sk_sp<SkFontMgr> mgr = platform_font_manager();
@@ -423,7 +411,7 @@ ResolvedFont FontResolver::resolve_character_fallback(const FontOptions& options
         r.origin = FallbackOrigin::PlatformChar;
         r.trace.push_back({primary.actual_family, FallbackOrigin::PlatformChar,
                            true, r.actual_family, "char fallback"});
-        // Codex review on PR #2191 (P2): record char-fallback resolves too.
+        // Record char-fallback resolves too.
         FontFlightRecorder::instance().record_fallback({
             primary.actual_family.empty() ? std::string("<char-fallback>")
                                           : primary.actual_family,
@@ -505,15 +493,15 @@ ResolvedFont FontResolver::resolve_character_fallback(const FontOptions& options
 #endif // PULP_HAS_SKIA
 
 // Color-font predicates — Skia-conditional method bodies that compile
-// in both Skia and non-Skia builds. (Slice 3.1)
+// in both Skia and non-Skia builds.
 
 #ifdef PULP_HAS_SKIA
 namespace {
 
-// pulp #2243 follow-up (Codex review P2): enumerate which specific
-// color tables a typeface carries so `color_font_active()` can honor
-// explicit `ColorFontMode` requests strictly (Bitmap / COLR / SVG must
-// match the requested table, not just *some* color table).
+// Enumerate which specific color tables a typeface carries so
+// `color_font_active()` can honor explicit `ColorFontMode` requests strictly
+// (Bitmap / COLR / SVG must match the requested table, not just *some* color
+// table).
 //
 // Tags packed big-endian:
 constexpr SkFontTableTag kCOLR = 0x434F4C52u;
@@ -565,11 +553,10 @@ bool ResolvedFont::color_font_active() const noexcept {
     if (color_font_mode == ColorFontMode::ForceMonochrome) return false;
     if (!typeface) return false;
     const ColorTablePresence p = scan_color_tables(typeface.get());
-    // pulp #2243 follow-up (Codex review P2): explicit modes are
-    // STRICT — they request a specific color format, so the typeface
-    // must carry that specific table. Treating explicit modes as
-    // Auto-equivalent silently degrades to "any color table will do",
-    // which contradicts the ColorFontMode contract.
+    // Explicit modes are strict: they request a specific color format, so the
+    // typeface must carry that specific table. Treating explicit modes as
+    // Auto-equivalent silently degrades to "any color table will do", which
+    // contradicts the ColorFontMode contract.
     switch (color_font_mode) {
         case ColorFontMode::Auto:           return p.any_color;
         case ColorFontMode::Bitmap:         return p.bitmap;

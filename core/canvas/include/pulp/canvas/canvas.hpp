@@ -646,12 +646,11 @@ public:
 
     /// Full CSS filter-chain layer save.
     /// Each entry in `chain` is one filter function; the canvas backend
-    /// composes them via `SkImageFilters::Compose` (Skia) or, for
-    /// CG-only paths, falls back to whichever entries the platform can
-    /// render natively. Default impl falls through to `save_layer` with
-    /// any blur entries collapsed to a single radius — preserves the
-    /// blur-only behavior that platforms without filter-chain support
-    /// already had.
+    /// composes them via `SkImageFilters::Compose` (Skia). Default impl
+    /// falls through to `save_layer`, summing blur entries into a single
+    /// radius and multiplying opacity() entries into the layer alpha —
+    /// preserves the blur+opacity behavior that platforms without
+    /// filter-chain support already had.
     struct FilterChainEntry {
         enum class Kind {
             blur,
@@ -677,8 +676,7 @@ public:
                                           float opacity,
                                           const FilterChainEntry* chain,
                                           int count) {
-        // Fallback: collapse to single-blur save_layer (prior behavior
-        // for platforms without filter-chain support).
+        // Fallback: collapse blur + opacity filters into a plain save_layer.
         float blur = 0.0f;
         for (int i = 0; i < count; ++i) {
             if (chain[i].kind == FilterChainEntry::Kind::blur) {
@@ -770,10 +768,10 @@ public:
     ///                  font-independent). Use when laying out
     ///                  uniform-sized glyph grids.
     ///
-    /// Default implementation translates `y` into baseline-y using
-    /// `measure_text`-style metrics and delegates to `fill_text`. Skia
-    /// override uses SkFontMetrics directly so the anchor lands on the
-    /// exact pixel the parity harness asserts.
+    /// Default implementation ignores `anchor` and treats `y` as the
+    /// baseline, delegating straight to `fill_text`. Backends with font
+    /// metrics override to translate `y` into a per-anchor baseline-y so
+    /// glyphs land on the exact pixel the parity harness asserts.
     enum class TextAnchor {
         Baseline,
         GlyphTop,
@@ -842,18 +840,18 @@ public:
     // OpenType feature flags for font-variant. Each
     // FontFeature is a 4-byte tag (e.g. "tnum" / "smcp" / "onum" /
     // "lnum" / "pnum") + an on/off value (0 disables, 1 enables).
-    // Skia's SkShaper accepts these via the 8-arg shape() overload
-    // and applies them at HarfBuzz shape time. The default impl is
-    // a no-op (CG / Recording canvases ignore); SkiaCanvas overrides
-    // to capture into a vector consumed by the shape calls in
-    // fill_text / stroke_text / fill_text_with_max_width.
+    // SkiaCanvas applies these via SkParagraph TextStyle::addFontFeature
+    // inside make_paragraph(), at HarfBuzz shape time. The default impl
+    // is a no-op (CG / Recording canvases ignore); SkiaCanvas captures
+    // into a vector consumed by the make_paragraph() calls behind
+    // fill_text / stroke_text / measure_text.
     struct FontFeature {
         uint32_t tag;    // 4-byte big-endian tag (use make_font_feature_tag).
         uint32_t value;  // 0 = disable, 1 = enable, higher = feature-specific.
     };
-    /// Builds a SkShaper-compatible 4-byte tag from a 4-char string. Caller
-    /// supplies exactly 4 ASCII chars (e.g. "tnum"). Tags shorter than 4
-    /// chars are right-padded with spaces (HarfBuzz convention).
+    /// Builds a 4-byte big-endian OpenType tag from a 4-char string. Caller
+    /// supplies exactly 4 ASCII chars (e.g. "tnum"); shorter strings are a
+    /// compile error.
     static constexpr uint32_t make_font_feature_tag(const char (&s)[5]) {
         return (static_cast<uint32_t>(static_cast<uint8_t>(s[0])) << 24) |
                (static_cast<uint32_t>(static_cast<uint8_t>(s[1])) << 16) |
@@ -935,8 +933,8 @@ public:
 
     // 9-arg drawImage(img, sx,sy,sw,sh, dx,dy,dw,dh) source-rect
     // slicing. Default impl delegates to the dst-only form (loses the slice);
-    // Skia + CG override to use drawImageRect(src, dst) / CGContextDrawImage
-    // on a CGImageCreateWithImageInRect-cropped sub-image.
+    // Skia overrides to use drawImageRect(src, dst); other backends keep
+    // the destination-only fallback.
     virtual bool draw_image_from_file_rect(const std::string& path,
                                             float sx, float sy, float sw, float sh,
                                             float dx, float dy, float dw, float dh) {
@@ -954,8 +952,8 @@ public:
     /// so backends without image decode just leave them at 0 and callers
     /// short-circuit to "use destination bounds" (the previous behaviour).
     /// Used by ImageView::paint to honour CSS object-fit / object-position
-    /// and by canvas2d sprite sizing. Default returns false; Skia + CG
-    /// override to consult their decoder.
+    /// and by canvas2d sprite sizing. Default returns false; Skia overrides
+    /// to consult its decoder.
     virtual bool measure_image_from_file(const std::string& path,
                                           float& out_width, float& out_height) {
         (void)path;

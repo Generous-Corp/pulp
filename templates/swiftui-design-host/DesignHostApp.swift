@@ -1,5 +1,4 @@
-// Generic SwiftUI host scaffold for a Pulp design-imported view (Workstream B5
-// of planning/2026-06-02-design-token-export-and-swiftui-path.md).
+// Generic SwiftUI host scaffold for a Pulp design-imported view.
 //
 // `pulp import-design --mode baked --emit swiftui` writes three files:
 //   - <RootView>.swift          — the generated `ImportedPulpView` (a `View`

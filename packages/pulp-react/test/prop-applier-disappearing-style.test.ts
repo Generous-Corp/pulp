@@ -1,8 +1,8 @@
-// pulp #1925 — disappearing-style-key resets in applyChangedProps.
+// Disappearing-style-key resets in applyChangedProps.
 //
-// Pre-#1925, applyChangedProps only reset visible/opacity/overlay when a
-// key fell out of newProps; the rest of the visual cluster (background,
-// border, textColor, per-side borders) silently kept their last value.
+// When a style key falls out of newProps, applyChangedProps must clear
+// the corresponding bridge state instead of leaving the previous visual
+// value painted.
 //
 // This bites the conditional-spread idiom that Spectr's Settings Manager
 // Preset chips, PatternRow rows, and most imported designs (Stitch / v0
@@ -48,7 +48,7 @@ function makeInstance(id: string = 'chip', type: string = 'View'): PulpInstance 
     };
 }
 
-describe('@pulp/react prop-applier — disappearing style keys (pulp #1925)', () => {
+describe('@pulp/react prop-applier — disappearing style keys', () => {
     it('clears background when the key falls out of newProps', () => {
         applyChangedProps(
             makeInstance('c1'),

@@ -117,7 +117,6 @@ void Environment::publish(const EnvironmentState& next) {
         // Token::reset() between the snapshot and now, entry.active
         // is false and we must skip — otherwise the callback fires
         // against captures whose owner has already been destroyed.
-        // See #403 Codex P1.
         if (entry.active
             && !entry.active->load(std::memory_order_acquire)) {
             continue;

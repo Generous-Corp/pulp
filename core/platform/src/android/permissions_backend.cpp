@@ -61,11 +61,10 @@ std::vector<Pending>& pending_queue() {
 }
 
 void on_permission_result(pulp::android::Permission ap, bool granted) {
-    // Codex 2026-04-21 review on #539 P2: dispatch EVERY pending request
-    // for this permission, not just the first match. Multiple callers
-    // can race to request the same permission before the OS result
-    // returns; under the old code only one got its callback invoked
-    // and the rest leaked forever, violating the exactly-once contract.
+    // Dispatch every pending request for this permission, not just
+    // the first match. Multiple callers can race to request the same
+    // permission before the OS result returns; each registered
+    // callback must still observe exactly one result.
     // Collect all matching callbacks under the lock, then fire them
     // outside the lock so a reentrant call can't deadlock.
     std::vector<RequestCallback> callbacks;

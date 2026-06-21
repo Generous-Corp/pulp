@@ -1,19 +1,17 @@
 #pragma once
 
 /// @file audio_probe.hpp
-/// Realtime-safe audio output probe (the RT *producer* in the harness plan's
-/// two-layer split). `AudioProbe::analyze_output()` is callable from the audio
-/// callback and satisfies a strict RT ABI: no allocation, no std::vector
-/// growth, no locks, no file I/O, no logging, no exceptions, no UI/host/package
-/// callbacks, and NO FFT/STFT. It performs only bounded per-block scalar work
-/// (peak, RMS accumulate, clip count, NaN/Inf count, silence-run) and publishes
-/// the latest summary through a `runtime::TripleBuffer<AudioProbeSnapshot>`.
+/// Realtime-safe audio output probe. `AudioProbe::analyze_output()` is callable
+/// from the audio callback and satisfies a strict RT ABI: no allocation, no
+/// std::vector growth, no locks, no file I/O, no logging, no exceptions, no
+/// UI/host/package callbacks, and no FFT/STFT. It performs only bounded
+/// per-block scalar work (peak, RMS accumulate, clip count, NaN/Inf count,
+/// silence-run) and publishes the latest summary through a
+/// `runtime::TripleBuffer<AudioProbeSnapshot>`.
 ///
-/// See `planning/2026-06-09-audio-observability-and-validation-harness-plan.md`
-/// Section 4 "Runtime Probe Infrastructure". Do NOT model this on
-/// `pulp::view::VisualizationBridge` — that path runs STFT and returns
-/// std::vector copies inside the callback (it is explicitly quarantined as
-/// non-RT-safe). The RT-safe scalar contract lives here.
+/// Do not model this on `pulp::view::VisualizationBridge`: that path runs STFT
+/// and returns std::vector copies inside the callback, so it is not RT-safe.
+/// The RT-safe scalar contract lives here.
 ///
 /// Gating: the whole probe lives behind `PULP_ENABLE_AUDIO_PROBES`. The
 /// release-safe counter subset (`AudioStats`) is always available without this
@@ -93,8 +91,8 @@ public:
     /// Copy up to `max_frames` of the most recent captured channel-0 history
     /// into `dst` (UI/worker thread). Returns the number of frames written.
     /// Only meaningful when capture was enabled at prepare(). Non-RT; intended
-    /// for the consumer side. Kept as the legacy convenience reader over the
-    /// first channel of the multichannel capture ring.
+    /// for the consumer side. This is the single-channel convenience reader
+    /// over the first channel of the multichannel capture ring.
     int read_capture(float* dst, int max_frames);
 
     /// Copy up to `max_frames` of the most recent captured multichannel history

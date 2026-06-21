@@ -66,13 +66,10 @@ public:
         return param_events_;
     }
 
-    /// Item 3.2 — bypass-wiring diagnostic. Returns the StateStore
-    /// ParamID the adapter routes VST3's `kIsBypass` parameter to
-    /// (`process()` short-circuits to pass-through when this parameter's
-    /// value is >= 0.5). Returns 0 when the plugin did not declare a
-    /// "Bypass" parameter; in that case the VST3 adapter does not
-    /// synthesize one (VST3 hosts that need a bypass automation lane
-    /// rely on the plugin declaring it). Used by item 3.2 tests.
+    /// Returns the StateStore ParamID the adapter routes VST3's
+    /// `kIsBypass` parameter to. `process()` short-circuits to
+    /// pass-through when this parameter's value is >= 0.5. Returns 0
+    /// when no bypass parameter is available.
     state::ParamID bypass_parameter_id() const { return bypass_param_id_; }
 
     // IComponent (state)
@@ -89,47 +86,43 @@ private:
     // Working buffers
     std::vector<float*> input_ptrs_;
     std::vector<float*> output_ptrs_;
-    // Second input bus routed to Processor::set_sidechain() (workstream 01
-    // slice 1.2). Only input bus 1 is consumed; additional buses are
-    // ignored because the Processor API exposes a single sidechain slot.
+    // Second input bus routed to Processor::set_sidechain(). Only input
+    // bus 1 is consumed; additional buses are ignored because the
+    // Processor API exposes a single sidechain slot.
     std::vector<float*> sidechain_ptrs_;
 
     // Parameter output: snapshot values before process to detect plugin-side changes
     std::vector<float> param_snapshot_;
     state::ParameterEventQueue param_events_;
 
-    // Item 3.2 — Cached parameter ID of the plugin-declared "Bypass"
-    // parameter (the one we tag with kIsBypass in initialize()). 0 when
-    // none — process() then never short-circuits.
+    // Cached parameter ID of the VST3 bypass parameter. 0 when none is
+    // available, so process() never short-circuits.
     state::ParamID bypass_param_id_ = 0;
 
     // Host accommodations, resolved once in initialize() via the runtime
     // policy (env / API / compile default). Adapters consult these flags
-    // instead of hardcoding DAW workarounds (host-quirks plan, P3).
+    // instead of hardcoding DAW workarounds.
     HostQuirks quirks_{};
 
-    // silence_unsupported_bus_arrangements (host-quirks P3c). The
-    // processor is always prepare()'d with the DESCRIPTOR-DEFAULT channel
-    // counts (see setupProcessing), so these cache what the processor's
-    // buffers are sized for. When setBusArrangements accepts an
-    // arrangement the processor does NOT natively support (only because
-    // the quirk is enforced), `silence_unsupported_active_` is set; then
-    // process() hands the processor only its prepared channel counts and
-    // zero-fills the host's extra channels rather than letting the
-    // processor read/write past what prepare() allocated.
+    // The processor is always prepare()'d with the descriptor-default
+    // channel counts (see setupProcessing), so these cache what the
+    // processor's buffers are sized for. When setBusArrangements accepts
+    // an arrangement the processor does not natively support, process()
+    // hands the processor only its prepared channel counts and zero-fills
+    // the host's extra channels.
     int native_in_ = 0;
     int native_out_ = 0;
     bool silence_unsupported_active_ = false;
 
-    // Item 1.3 — previous-block transport snapshot used to derive the
+    // Previous-block transport snapshot used to derive the
     // `tempo_changed` / `time_sig_changed` / `transport_changed` flags
-    // on `ProcessContext`. Default-constructed (no previous block) so
-    // the first process() call after construction reports no changes.
+    // on `ProcessContext`. Default-constructed so the first process()
+    // call after construction reports no changes.
     detail::PlayheadSnapshot playhead_prev_{};
 
-    // Item 6.4b — MainThreadDispatcher backend token. Acquired in
-    // initialize(), released in terminate(). On macOS this lets adapter-
-    // side and view-side code marshal work onto the DAW's main thread via
+    // MainThreadDispatcher backend token. Acquired in initialize(),
+    // released in terminate(). On macOS this lets adapter-side and
+    // view-side code marshal work onto the DAW's main thread via
     // `pulp::events::MainThreadDispatcher::call_async`.
     pulp::events::MainThreadDispatcher::Token main_thread_token_ = 0;
 };

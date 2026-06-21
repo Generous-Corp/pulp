@@ -41,8 +41,7 @@ static const char* const kPulpAUCocoaViewClassName = PULP_STRINGIFY(PULP_AU_COCO
 // fetched from the host's PulpAUEffect via the private
 // `kPulpEditorContextProperty`. Creating a second Processor for the
 // view (the pre-ViewBridge behavior) silently desynchronized parameter
-// state between the audio thread and the UI; see the plan for Feature 1
-// Phase 3 and au_v2_adapter.{hpp,cpp}.
+// state between the audio thread and the UI; the live adapter owns both.
 
 struct PulpAUEditorOwnership {
     std::unique_ptr<pulp::format::ViewBridge> bridge;
@@ -63,8 +62,7 @@ struct PulpAUEditorOwnership {
 }
 - (void)dealloc {
     if (_ownership) {
-        // Destruction-order contract (Codex P1 review on PR #653):
-        //
+        // Destruction-order contract:
         // PulpAUEditorOwnership declares `bridge` first, then `host`.
         // C++ destroys members in REVERSE declaration order, so:
         //   1. ~unique_ptr<PluginViewHost> runs first. Its destructor
@@ -161,9 +159,8 @@ static const char kOwnershipKey = 0;
     // below); the wrapper destroys host (stops the display link) before bridge.
     host->set_idle_callback(format::make_scripted_idle_pump(*bridge));
 
-    // Phase iOS-D.3b Slice 1 — route navigator.gpu / canvas.getContext
-    // ('webgpu') through the host's live GpuSurface. See
-    // planning/2026-05-29-ios-d3b-threejs-webgpu-program.md § Slice 1.
+    // Route navigator.gpu / canvas.getContext('webgpu') through the host's
+    // live GpuSurface.
     if (auto* scripted = bridge->scripted_ui()) {
         scripted->attach_gpu_surface(host->gpu_surface());
         if (host->gpu_surface()) {

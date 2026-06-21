@@ -1,14 +1,10 @@
-// font_scope.cpp — Pulp #2163 follow-up, Phase 1 / Slice 1.1.a-b.
+// font_scope.cpp
 //
-// Skeletal scope storage. For Slice 1.1.a the implementation is
-// minimal: scopes track a monotonic generation counter and a list of
-// registered family names. The actual Skia typeface storage continues
-// to live in `bundled_fonts.cpp` (the existing global registry) — this
-// file is the seam that lets us migrate registrations into named
-// scopes incrementally without breaking back-compat.
-//
-// Slice 1.1.b will expand this to wire generation bumps into the Yoga
-// measure-callback invalidation path.
+// Font scopes track a monotonic generation counter and the family names
+// registered through each scope. The actual Skia typeface storage still
+// lives in `bundled_fonts.cpp` through the global registry path; this
+// file provides the named-scope seam used by callers and cache keys
+// while preserving back-compat with existing global registrations.
 
 #include "pulp/canvas/font_scope.hpp"
 #include "pulp/canvas/bundled_fonts.hpp"
@@ -43,17 +39,16 @@ void FontScope::bump_generation() {
 
 bool FontScope::register_font(const std::uint8_t* data, std::size_t size,
                               const std::string& family_override) {
-    // For Slice 1.1.a, the Global scope delegates to the existing
-    // `pulp::canvas::register_font` free function (in bundled_fonts.cpp).
-    // Plugin / View scopes record the family name but don't yet have
-    // scope-isolated typeface storage — that's Slice 1.1.b.
+    // The Global scope delegates to the existing
+    // `pulp::canvas::register_font` free function in bundled_fonts.cpp.
+    // Plugin and View scopes record the family name but still use the
+    // global typeface path until scope-isolated storage is available.
     bool ok = false;
     if (id_.kind == FontScopeId::Kind::Global) {
         ok = ::pulp::canvas::register_font(data, size, family_override);
     } else {
-        // Stub: invoke the global path so the typeface is loadable, then
-        // record the family name in this scope. Real per-scope storage
-        // arrives in 1.1.b.
+        // Invoke the global path so the typeface is loadable, then
+        // record the family name in this scope.
         ok = ::pulp::canvas::register_font(data, size, family_override);
     }
     if (ok && !family_override.empty()) {
@@ -80,12 +75,10 @@ bool FontScope::is_registered(const std::string& family) const {
     return impl_->registered_families.find(family) != impl_->registered_families.end();
 }
 
-// pulp #2163 — font v2 Slice 2.7 implementation. The budget caps three
-// caches: (a) FontResolver's typeface cache entries scoped to this
-// scope, (b) TextShaper's segment-width cache (cleared on overage —
-// the segments rebuild lazily), (c) Skia's global strike cache (set
-// via SkGraphics::SetFontCacheLimit when ANY scope is over budget,
-// because the strike cache is process-wide).
+// The budget caps three cache pressures: (a) FontResolver's typeface
+// cache entries scoped to this scope, (b) TextShaper's segment-width
+// cache (cleared on overage, then rebuilt lazily), and (c) Skia's
+// global strike cache (a process-wide cache).
 //
 // Eviction model: on each register_*() / set_memory_budget() call, if
 // the scope is over budget, prune the resolver cache for this scope
@@ -107,9 +100,8 @@ void FontScope::prune_to_budget() {
     const std::size_t budget = memory_budget_.load(std::memory_order_acquire);
     if (budget == 0) return;  // 0 disables the budget.
 
-    // Resolver cache eviction — scopes a clear_cache() call. The resolver
-    // doesn't yet expose per-scope partial eviction; the implementation
-    // slice for that lives alongside this commit's smaller-scope clear.
+    // Resolver cache eviction goes through clear_cache() because the
+    // resolver does not yet expose per-scope partial eviction.
     // Cost: full cache rebuild on next lookup; cheap because cascade is
     // small and already-cached at the Skia level.
     FontResolver::instance().clear_cache();
@@ -179,9 +171,9 @@ std::uint64_t merged_generation_for(FontScopeId requesting) {
         total += plugin_scope(requesting.id).generation();
     } else if (requesting.kind == FontScopeId::Kind::View) {
         total += view_scope(requesting.id).generation();
-        // Phase 1 stub: view scopes don't yet remember their owning
-        // plugin. Slice 1.1.b will wire that link so view bumps also
-        // observe their plugin scope.
+        // View scopes do not yet remember their owning plugin. Until
+        // that link exists, view generation changes only observe the
+        // view and global scopes.
     }
     return total;
 }

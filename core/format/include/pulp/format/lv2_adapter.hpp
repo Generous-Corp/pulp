@@ -25,10 +25,10 @@ static constexpr int kMaxChannels = 8;
 struct PulpLv2Instance {
     std::unique_ptr<Processor> processor;
     state::StateStore store;
-    // Phase 3 — param-events sidecar, set on the Processor each run() so the
-    // contract is uniform across formats. LV2 control-port values are applied
-    // through `store` as before; this queue carries no events yet (atom-based
-    // sample-accurate param events are a follow-up), but it gives the Processor
+    // Param-events sidecar, set on the Processor each run() so the contract is
+    // uniform across formats. LV2 control-port values are applied through
+    // `store` as before; this queue carries no events yet (atom-based
+    // sample-accurate param events are future work), but it gives the Processor
     // a non-null queue and pairs with the RT-safety guard around process().
     state::ParameterEventQueue param_events;
     ProcessorFactory factory;
@@ -48,32 +48,27 @@ struct PulpLv2Instance {
     int num_params = 0;
     std::vector<state::ParamID> param_ids;  // Maps control port index → ParamID
 
-    // URID feature resolution (workstream 01 slice 1.5). The LV2 host passes
-    // an LV2_URID_Map feature in instantiate(); we cache the map function
-    // plus the URIDs we need at runtime so inner-loop code does not call
-    // map() on hot paths. All fields are 0 when the feature is absent —
-    // instantiate() returns nullptr in that case, so real plugin code
-    // always sees non-zero values here.
+    // URID feature resolution. The LV2 host passes an LV2_URID_Map feature in
+    // instantiate(); we cache the map function plus the URIDs we need at
+    // runtime so inner-loop code does not call map() on hot paths. All fields
+    // are 0 when the feature is absent; instantiate() returns nullptr in that
+    // case, so real plugin code always sees non-zero values here.
     LV2_URID_Map* urid_map = nullptr;
     LV2_URID urid_midi_event = 0;      // LV2_MIDI__MidiEvent
     LV2_URID urid_atom_sequence = 0;   // LV2_ATOM__Sequence
     LV2_URID urid_atom_chunk = 0;      // LV2_ATOM__Chunk
 
-    // Workstream 01 #241: atom-port MIDI. When the plug-in declares
-    // accepts_midi, the host connects an LV2_Atom_Sequence buffer to
-    // the port after the control ports. run() iterates it, extracts
-    // MIDI events whose atom `type` field is urid_midi_event, and
-    // feeds them to the Processor.
+    // Atom-port MIDI input. When the plug-in declares accepts_midi, the host
+    // connects an LV2_Atom_Sequence buffer to the port after the control
+    // ports. run() iterates it, extracts MIDI events whose atom `type` field is
+    // urid_midi_event, and feeds them to the Processor.
     bool accepts_midi = false;
     void* midi_in_atom = nullptr;
 
-    // #491: parallel output-atom port for plugins that emit MIDI. The
-    // TTL manifest already declared this port when produces_midi was
-    // set, but run() never serialized the Processor's midi_out buffer
-    // into it — silently dropping every outgoing event. The host pre-
-    // sizes the buffer via lv2:minimumSize and signals capacity in the
-    // atom.size field on entry to run(); the plugin overwrites the
-    // sequence using the lv2_atom_sequence_clear + append_event helpers.
+    // Parallel output-atom port for plugins that emit MIDI. The host pre-sizes
+    // the buffer via lv2:minimumSize and signals capacity in the atom.size
+    // field on entry to run(); the plugin overwrites the sequence using the
+    // lv2_atom_sequence_clear + append_event helpers.
     bool produces_midi = false;
     void* midi_out_atom = nullptr;
 };

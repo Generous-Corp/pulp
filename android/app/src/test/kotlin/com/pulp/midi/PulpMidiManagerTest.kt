@@ -113,11 +113,11 @@ class PulpMidiManagerTest {
 
     @Test
     fun resolveTransportTypeReturnsBytestreamOnPre33() {
-        // Codex P2 on PR #1275 — drive BOTH SDK branches deterministically
-        // through the static helper, so the test catches a regression on
-        // either side regardless of the JVM's reported SDK_INT.
+        // Drive both SDK branches deterministically through the static
+        // helper, so the test catches a regression on either side regardless
+        // of the JVM's reported SDK_INT.
         val deviceInfo = mock<MidiDeviceInfo>()
-        // The pre-33 branch never reads defaultProtocol, but stub it
+        // The pre-33 branch never reads defaultProtocol, but populate it
         // anyway so a future change that accidentally calls it on
         // older SDKs would surface as a wrong-transport assertion
         // rather than a silent fallback.

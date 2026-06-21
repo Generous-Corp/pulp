@@ -1,4 +1,4 @@
-// JSX-reachability contract (pulp #3656 follow-up).
+// JSX-reachability contract.
 //
 // The C++ test_widget_bridge_api_contracts.cpp checks that every native
 // bridge fn in core/view/src/widget_bridge_api_manifest.tsv is registered

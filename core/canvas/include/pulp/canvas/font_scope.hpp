@@ -1,8 +1,5 @@
 // font_scope.hpp
 //
-// Pulp #2163 follow-up — Phase 1 / Slice 1.1.a-b of the font-subsystem-
-// hardening v2 roadmap.
-//
 // A `FontScope` is a named owner of font registrations. Three built-in
 // scopes exist:
 //
@@ -12,7 +9,7 @@
 //     into the same host see *only* their own registrations plus the
 //     Global scope; they cannot pollute each other's resolution.
 //   * `Scope::View(id)` — per-view overrides. Used by design-import hot
-//     reload (Phase 2) and by `pulp-ui-preview --font` flags.
+//     reload and by `pulp-ui-preview --font` flags.
 //
 // Resolution (in `FontResolver::resolve_*`) walks scopes in this order:
 //
@@ -23,10 +20,10 @@
 // `registry_generation` field of `FontOptions` so every downstream cache
 // key is correctly invalidated when *any* applicable scope mutates.
 //
-// Phase 1 / Slice 1.1.b acceptance: a generation bump in Plugin(A) must
-// not dirty measure callbacks belonging to Plugin(B). This is enforced
-// by `merged_generation_for(FontScopeId)` returning a value that only
-// changes when scopes the caller actually consults change.
+// A generation bump in Plugin(A) must not dirty measure callbacks
+// belonging to Plugin(B). This is enforced by `merged_generation_for`
+// returning a value that only changes when scopes the caller actually
+// consults change.
 
 #pragma once
 
@@ -73,11 +70,11 @@ public:
     /// scopes; that's the resolver's job.
     bool is_registered(const std::string& family) const;
 
-    /// pulp #2163 — Phase 2 / Slice 2.7 implementation. Memory budget
-    /// (in bytes) for caches owned by this scope: FontResolver
-    /// typeface cache, TextShaper segment cache, Skia strike cache
-    /// pressure. `0` (default) disables the budget. Setting a non-zero
-    /// budget triggers an immediate `prune_to_budget()`.
+    /// Memory budget (in bytes) for caches associated with this scope:
+    /// FontResolver typeface entries, TextShaper segment cache pressure,
+    /// and Skia strike cache pressure. `0` (default) disables the
+    /// budget. Setting a non-zero budget triggers an immediate
+    /// `prune_to_budget()`.
     void set_memory_budget(std::size_t bytes);
     std::size_t memory_budget() const noexcept;
 

@@ -5,10 +5,8 @@
 // Skia (the default Pulp decode path via SkImages::DeferredFromEncodedData)
 // covers PNG / JPEG / WebP / BMP / ICO in the m144 prebuilt that Pulp pins,
 // but does NOT compile in the GIF decoder by default and ships no TIFF
-// codec at all. The planning gap-doc row
-//   "PNG / JPEG / GIF codecs — GIF/TIFF/SVG/PDF image codecs missing"
-// in planning/2026-05-24-reference-framework-gap-analysis.md (P2) calls for
-// dedicated reader/writer entry points.
+// codec at all. This header fills that gap with dedicated reader/writer
+// entry points.
 //
 // This header provides a Skia-free public surface that:
 //   • Decodes GIF87a / GIF89a (single frame + animation frames + LZW + LCT)
@@ -19,7 +17,7 @@
 //     8-bit Grayscale / RGB / RGBA, BitsPerSample=8) into RGBA8. Wider
 //     TIFF coverage (LZW, JPEG-in-TIFF, multi-strip stitching) would
 //     require libtiff which is heavyweight and only ~MIT-compatible
-//     under its custom permissive licence; not pulled in for this slice.
+//     under its custom permissive licence; not pulled in here.
 //   • Encodes uncompressed Baseline TIFF (RGB / RGBA) and a static
 //     GIF89a (single global palette, 256-colour quantisation via simple
 //     median-cut). Writer paths are intended for editor / asset export
@@ -32,8 +30,8 @@
 // Animation: GifReader::decode_first() decodes a single frame for
 // callers that only want the cover image (matches existing
 // SkImages::DeferredFromEncodedData behaviour). GifReader::decode_all()
-// returns every frame in order plus per-frame delays (centi-seconds
-// per the GIF89a spec) for animated UI elements.
+// returns every frame in order plus per-frame delays in milliseconds;
+// the GIF89a wire format stores centi-seconds, which the codec converts.
 
 #include <cstddef>
 #include <cstdint>
@@ -86,7 +84,7 @@ public:
 /// global colour table built via median-cut quantisation. Useful
 /// for editor exports and tests; runtime callers that want
 /// animation should compose multiple frames via a higher-level
-/// helper (not provided in this slice).
+/// helper (not provided here).
 class GifWriter {
 public:
     /// Encode the raster as a standalone GIF89a file. Returns the
@@ -105,7 +103,7 @@ public:
 /// Returns nullopt for anything outside that envelope. Callers that
 /// need broader coverage should integrate libtiff at the application
 /// layer (Pulp does not bundle libtiff to keep the dependency
-/// footprint small — see planning gap-doc for rationale).
+/// footprint small).
 class TiffReader {
 public:
     static std::optional<DecodedRaster> decode(const uint8_t* data,

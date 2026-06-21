@@ -1,7 +1,6 @@
-// pulp #1552 — line-clamp / -webkit-line-clamp / background-repeat
-// JSX dispatch. The C++ bridge fns (setLineClamp, setBackgroundRepeat)
-// landed in the same PR; these tests pin the prop-applier dispatch
-// shape so a future refactor can't silently drop the keys.
+// Line-clamp / -webkit-line-clamp / background-repeat JSX dispatch.
+// These tests pin the prop-applier dispatch shape so a future refactor
+// can't silently drop the keys.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { applyChangedProps } from '../src/prop-applier.js';
@@ -33,7 +32,7 @@ function callOf(b: MockBridge, fn: string) {
     return b.calls.find((c) => c.fn === fn);
 }
 
-describe('line-clamp + background-repeat dispatch (pulp #1552)', () => {
+describe('line-clamp + background-repeat dispatch', () => {
     it('lineClamp forwards numeric count to setLineClamp', () => {
         applyChangedProps(makeInstance(), {}, { lineClamp: 3 });
         expect(callOf(bridge, 'setLineClamp')?.args).toEqual(['k', 3]);

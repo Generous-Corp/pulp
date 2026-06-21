@@ -15,10 +15,9 @@ namespace pulp::runtime {
 /// * Pulp's audio (@c Processor::process) and paint
 ///   (@c View::paint_all) paths are wrapped in @c ScopedNoAlloc, so
 ///   the contract is enforced uniformly.
-/// * Sanitizers / debug allocator hooks query
+/// * Sanitizers / debug allocator hooks can query
 ///   @c is_in_no_alloc_scope() and abort / log if an allocation
-///   sneaks into the scope. We provide an opt-in hook library for
-///   that in a follow-up; today the class is the contract surface.
+///   sneaks into the scope. This class is the contract surface.
 /// * The guard is a no-op in @c NDEBUG so it costs nothing in
 ///   release builds — same shape as @c PULP_DBG_ASSERT.
 ///
@@ -35,7 +34,6 @@ public:
     // calls to symbols the Release archive didn't ship). The body of
     // each ctor/dtor is conditional on NDEBUG inside scoped_no_alloc.cpp
     // — the symbol exists in both modes but does nothing in Release.
-    // Codex P1 on PR #2316.
     ScopedNoAlloc() noexcept;
     ~ScopedNoAlloc() noexcept;
 

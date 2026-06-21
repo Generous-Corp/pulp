@@ -2,7 +2,7 @@
 
 // PulpTone — simple oscillator synth with MIDI input
 // Validates: audio output, MIDI input, note handling, parameter system
-// Phase 4 validation example from the roadmap
+// Demonstrates the instrument format path used by format-adapter smoke tests.
 
 #include <pulp/format/processor.hpp>
 #include <cmath>

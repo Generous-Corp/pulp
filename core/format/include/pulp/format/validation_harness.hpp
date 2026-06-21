@@ -125,7 +125,7 @@ public:
     //
     // Screenshot and inspector capture are delegated to an external
     // provider callback so the harness stays free of a direct view-
-    // library dependency (#298). Register a provider before calling
+    // library dependency. Register a provider before calling
     // capture_screenshot()/capture_inspector() — without one, the
     // entry is reported as `skip` with a clear "no provider attached"
     // message. Callers must never confuse skip with pass.
@@ -155,9 +155,8 @@ public:
 
     /// Compare two screenshot files and generate a diff entry.
     /// Today this does a byte-level file comparison — pixel-level
-    /// diffing (with a tolerance) is a follow-up once a PNG codec
-    /// is available to the format layer. A real pixel diff always
-    /// produces pass/fail, never skip.
+    /// diffing (with a tolerance) requires a PNG codec in the format
+    /// layer. A real pixel diff always produces pass/fail, never skip.
     ReportEntry compare_screenshots(const std::filesystem::path& reference,
                                      const std::filesystem::path& rendered);
 
@@ -226,9 +225,9 @@ private:
     midi::MidiBuffer pending_midi_in_;
     bool prepared_ = false;
 
-    // #298 capture delegation. Unset by default; callers register a
-    // provider backed by the view layer (or a test fake) before
-    // invoking capture_screenshot / capture_inspector.
+    // Capture delegation is unset by default; callers register a provider
+    // backed by the view layer (or a test fake) before invoking
+    // capture_screenshot / capture_inspector.
     CaptureScreenshotProvider screenshot_provider_;
     CaptureInspectorProvider  inspector_provider_;
 

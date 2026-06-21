@@ -38,13 +38,12 @@ struct PulpClapPlugin {
     ProcessorFactory factory;
 
     // Host accommodations, resolved once in clap_init() via the runtime
-    // policy. Adapters consult these instead of hardcoding workarounds
-    // (host-quirks plan, P3).
+    // policy. Adapters consult these instead of hardcoding workarounds.
     HostQuirks host_quirks{};
 
-    // Cached ParamID of the "Bypass" parameter (plugin-declared or
-    // synthesized via synthesize_bypass_parameter, host-quirks P3d). 0 when
-    // none — clap_process() then never short-circuits to pass-through.
+    // Cached ParamID of the "Bypass" parameter, plugin-declared or synthesized
+    // via synthesize_bypass_parameter. 0 when none; clap_process() then never
+    // short-circuits to pass-through.
     state::ParamID bypass_param_id = 0;
 
     // Stored at create_plugin() time so the adapter can publish
@@ -61,9 +60,9 @@ struct PulpClapPlugin {
     // Pre-allocated buffers — no heap allocation on audio thread
     float* output_ptrs[kMaxChannels] = {};
     const float* input_ptrs[kMaxChannels] = {};
-    // Second input bus routed to Processor::set_sidechain() (workstream 01
-    // slice 1.1). Up to kMaxChannels. Additional input buses beyond index 1
-    // are currently ignored — the Processor API is single-sidechain today.
+    // Second input bus routed to Processor::set_sidechain(). Up to
+    // kMaxChannels. Additional input buses beyond index 1 are currently
+    // ignored; the Processor API is single-sidechain today.
     const float* sidechain_ptrs[kMaxChannels] = {};
 
     // Parameter snapshot for detecting plugin-side changes during process
@@ -95,8 +94,8 @@ struct PulpClapPlugin {
     // Preset management (optional — set by plugins that provide presets)
     std::unique_ptr<state::PresetManager> preset_manager;
 
-    // ARA document controller (optional — Processor opts in by overriding
-    // create_ara_document_controller(). Workstream 06 slice 6.5).
+    // ARA document controller (optional; Processor opts in by overriding
+    // create_ara_document_controller()).
     // Lives for the plugin's lifetime once created; surfaced through
     // get_extension(kClapAraFactoryExtension).
     std::unique_ptr<AraDocumentController> ara_controller;
@@ -111,17 +110,17 @@ struct PulpClapPlugin {
 #endif
     bool editor_visible = false;
 
-    // Item 1.3 — previous-block transport snapshot used to derive the
-    // `tempo_changed` / `time_sig_changed` / `transport_changed` flags
-    // on `ProcessContext`. Default-constructed (no previous block) so
-    // the first process() call after activation reports no changes.
+    // Previous-block transport snapshot used to derive the `tempo_changed` /
+    // `time_sig_changed` / `transport_changed` flags on `ProcessContext`.
+    // Default-constructed (no previous block) so the first process() call after
+    // activation reports no changes.
     detail::PlayheadSnapshot playhead_prev{};
 
-    // Item 6.4b — process-wide MainThreadDispatcher backend token. Acquired
-    // in clap_init() so adapter callsites (e.g. host-callback dispatches
-    // posted via `clap_host->request_callback()`) and any view-side code
-    // can use `pulp::events::MainThreadDispatcher::call_async` to marshal
-    // work onto the DAW's main thread. Released in clap_destroy().
+    // Process-wide MainThreadDispatcher backend token. Acquired in clap_init()
+    // so adapter callsites (e.g. host-callback dispatches posted via
+    // `clap_host->request_callback()`) and any view-side code can use
+    // `pulp::events::MainThreadDispatcher::call_async` to marshal work onto
+    // the DAW's main thread. Released in clap_destroy().
     pulp::events::MainThreadDispatcher::Token main_thread_token = 0;
 };
 

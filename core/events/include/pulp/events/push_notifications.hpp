@@ -2,7 +2,7 @@
 
 // pulp::events::PushNotifications — cross-platform local notification surface.
 //
-// Scope (this slice):
+// Supported operations:
 //   * Local notifications: `post_local_notification(title, body, category)`
 //     posts a notification immediately through the host platform's user-
 //     notification surface.
@@ -11,7 +11,7 @@
 //   * Tap handler: `set_handler(callback)` registers a callback that fires
 //     when the user activates a delivered notification.
 //
-// Deferred (follow-up work, tracked in the gap doc):
+// Not currently implemented by the built-in backends:
 //   * Remote / push notifications via APNs (Apple) and FCM (Android).
 //   * Notification categories with custom action buttons.
 //   * Scheduled / time-triggered notifications.
@@ -77,7 +77,7 @@ public:
     virtual bool is_available() const = 0;
 
     /// Short identifier of the active backend ("user-notifications", "libnotify",
-    /// "winrt-toast", or "none"). Useful for diagnostics + the gap-doc audit.
+    /// "winrt-toast", or "none"). Useful for diagnostics and host reports.
     virtual std::string backend_id() const = 0;
 
     /// Ask the OS for permission to post notifications. The callback fires once

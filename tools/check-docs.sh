@@ -219,7 +219,7 @@ if [ -x "$ROOT/tools/check_status_ladder.py" ]; then
     fi
 fi
 
-# ── Generated-table drift check (workstream 08 slice 8.3) ─────────────────────
+# ── Generated-table drift check ───────────────────────────────────────────────
 if [ -x "$ROOT/tools/docs_generate.py" ]; then
     echo "Checking generated-table drift in capabilities.md..."
     if ! python3 "$ROOT/tools/docs_generate.py" check; then

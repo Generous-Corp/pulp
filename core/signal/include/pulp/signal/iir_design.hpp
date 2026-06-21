@@ -365,7 +365,7 @@ private:
     // ── Elliptic (Cauer) implementation ──────────────────────────────────
     //
     // Real-modulus Jacobi machinery is provided by `special_functions.hpp`
-    // (Pulp's shared analytic toolbox, shipped in #2958):
+    // (Pulp's shared analytic toolbox):
     //   • special::elliptic_K(m)          AGM
     //   • special::jacobi_sncndn(u, m, …) NR §6.12 AGM back-substitution
     //   • special::jacobi_asn(x, m)       Carlson R_F inverse
@@ -449,8 +449,7 @@ private:
         // but `jacobi_asn` clamps its input to [−1, 1]. For any reasonable
         // ripple spec (Rp < ~3 dB ⇒ ε < 1 ⇒ 1/ε > 1), the input was
         // silently clamped to 1 and v0 collapsed to a constant independent
-        // of the user-supplied passband_ripple_db — i.e. the API stopped
-        // honoring its main ripple parameter (#2964, Codex 3305447117).
+        // of the user-supplied passband_ripple_db.
         //
         // The real `sc⁻¹(w, m')` for w ≥ 0, m' ∈ (0,1) can be reduced to a
         // domain-safe asn call. From sc² = sn²/cn² = sn²/(1−sn²):

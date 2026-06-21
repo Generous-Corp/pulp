@@ -1,21 +1,19 @@
 // prop-applier-paint — visual-style props: background, border,
-// outline, shadow, list-style, opacity/visibility, filters, masks
-// (P5-NEW-A split of the former monolithic applyOne switch).
+// outline, shadow, list-style, opacity/visibility, filters, masks.
 //
 // `applyPaintProp(id, key, value)` returns true if it handled the key,
-// false otherwise. Behavior is byte-identical to the matching cases in
-// the pre-split prop-applier switch — same bridge calls in the same
-// order.
+// false otherwise. Each handled prop emits the bridge calls expected by
+// the corresponding paint/style contract.
 
 import { call, _resolveVar } from './prop-applier-internal.js';
 
-// pulp #1434 (Triage #15) — parse a CSS-spec single-shadow `box-shadow`
-// string. Mirrors the regex in `core/view/js/web-compat-style-decl.js`
+// Parse a CSS-spec single-shadow `box-shadow` string. Mirrors the
+// regex in `core/view/js/web-compat-style-decl.js`
 // (the DOM-lite path) so the @pulp/react path produces identical
 // dispatch shape.
 //
-// Wave 2 rn — added comma-separated multi-shadow support:
-// `_splitMultiShadow` walks the string respecting paren depth (so an
+// `_splitMultiShadow` adds comma-separated multi-shadow support by
+// walking the string with paren depth, so an
 // `rgba(0,0,0,0.3)` color literal inside one shadow doesn't get cut by
 // its internal commas). Each substring then flows through the existing
 // single-shadow parser; the prop-applier dispatches one setBoxShadow
@@ -57,7 +55,7 @@ function _parseBoxShadow(s: string): _ParsedBoxShadow | null {
     };
 }
 
-// Wave 2 rn — split a comma-separated multi-shadow string into individual
+// Split a comma-separated multi-shadow string into individual
 // single-shadow substrings. Respects paren depth so commas inside a
 // `rgba(...)` color literal don't split a single shadow. Returns the
 // list of trimmed substrings (or `[s.trim()]` for a single shadow with
@@ -79,8 +77,8 @@ function _splitMultiShadow(s: string): string[] {
     return out.filter((x) => x.length > 0);
 }
 
-// Wave 2 rn — coerce a borderRadius value (uniform number OR RN
-// Fabric elliptical `{ x, y }` object) to the single number the
+// Coerce a borderRadius value (uniform number or RN Fabric elliptical
+// `{ x, y }` object) to the single number the
 // Skia paint backend currently honors. The RN Fabric form differs x
 // from y to draw an ellipse-shaped corner; the bridge / Skia path
 // today only takes a uniform radius, so we average x and y as the
@@ -95,7 +93,7 @@ function _coerceRadius(value: unknown): number | string {
         return (x + y) / 2;
     }
     if (typeof value === 'string') {
-        // pulp #1663 — preserve "%" suffix so the bridge can route to
+        // Preserve "%" suffixes so the bridge can route to
         // percent-aware paint-time resolution. Other unit suffixes (px,
         // em, etc.) collapse to a plain number as before.
         const trimmed = value.trim();
@@ -124,8 +122,8 @@ export function applyPaintProp(
         // by Spectr's 2026-05-11 live render — chip strip's
         // `background: linear-gradient(to bottom, ...)` painted white, making
         // the white SPECTR / ZOOMABLE FILTER BANK / axis labels invisible.
-        // Mirrors the same gradient-detection fix applied to backgroundImage
-        // below (Codex P1 on #1831).
+        // Mirrors the same gradient-detection path applied to
+        // backgroundImage below.
         case 'background': {
             const sval = String(value);
             if (/(linear|radial|conic)-gradient\(/i.test(sval)) {
@@ -133,7 +131,7 @@ export function applyPaintProp(
                 return true;
             }
             if (/^\s*url\s*\(/i.test(sval)) return true;
-            // pulp #1899 (gap #3) — resolve var() for solid-color backgrounds
+            // Resolve var() for solid-color backgrounds
             // (`background: var(--panel)`). Gradient strings keep their
             // raw value because the gradient parser handles var() itself
             // via the C++ shim.
@@ -147,7 +145,7 @@ export function applyPaintProp(
         // gradient strings here and route to the gradient bridge instead;
         // otherwise inputs like `linear-gradient(...)` collapse to a bogus
         // color parse. `url(...)` has no image bridge today — drop quietly
-        // rather than corrupting the color slot. (Codex P1 on #1831.)
+        // rather than corrupting the color slot.
         case 'backgroundImage': {
             const sval = String(value);
             if (/(linear|radial|conic)-gradient\(/i.test(sval)) {
@@ -157,12 +155,12 @@ export function applyPaintProp(
             if (/^\s*url\s*\(/i.test(sval)) {
                 return true;
             }
-            // pulp #1899 (gap #3) — mirror `background` above.
+            // Mirror `background` above.
             call('setBackground', id, _resolveVar(sval) as string);
             return true;
         }
-        // pulp #1517 — background sub-properties. The bridge stores the
-        // keyword on the View slot. Paint impact today is partial:
+        // Background sub-properties. The bridge stores the keyword on
+        // the View slot. Paint impact today is partial:
         //   • `backgroundAttachment` — `scroll` is conformant; `fixed` /
         //     `local` are noop (pulp doesn't model scroll contexts).
         //   • `backgroundClip` — `text` is the interesting variant
@@ -178,15 +176,15 @@ export function applyPaintProp(
             call('setBorder', id, b.color, b.width ?? 1, b.radius ?? 0);
             return true;
         }
-        // pulp #1027 (audit PR #1166 finding #4) — RN-style flat border props.
-        // These MUST route through the per-attribute bridge setters so a
+        // RN-style flat border props. These must route through the
+        // per-attribute bridge setters so a
         // commitUpdate that touches only one of them preserves the others.
         // Lowering them onto the unified `setBorder(id, color, width, radius)`
         // would clobber the unset slots back to 0/empty.
         case 'borderColor':  call('setBorderColor', id, _resolveVar(value) as string); return true;
         case 'borderWidth':  call('setBorderWidth', id, value as number); return true;
-        // Wave 2 rn — `borderRadius` accepts the RN Fabric elliptical
-        // form `{ x, y }`. The Skia paint backend currently takes a
+        // `borderRadius` accepts the RN Fabric elliptical form `{ x,
+        // y }`. The Skia paint backend currently takes a
         // single uniform radius per corner (no rrect ellipse axes), so
         // we degrade the elliptical input by averaging x and y — the
         // closest visual fidelity for the common Fabric usage where x
@@ -194,13 +192,13 @@ export function applyPaintProp(
         // a paint-side rrect (Skia SkRRect::setRectXY) and remains a
         // deferred gap. Numeric values flow through unchanged.
         case 'borderRadius': call('setBorderRadius', id, _coerceRadius(value)); return true;
-        // pulp #1434 Triage #10 — borderStyle keyword passes verbatim
-        // to setBorderStyle. Bridge maps to View::BorderStyle. Skia
+        // borderStyle keyword passes verbatim to setBorderStyle. Bridge
+        // maps to View::BorderStyle. Skia
         // installs the dash effect for `dashed` / `dotted`; other
         // named styles currently degrade to solid.
         case 'borderStyle':  call('setBorderStyle', id, value as string); return true;
-        // pulp #1514 — list-style cluster. Pulp doesn't model
-        // <li>/<ul>/<ol> semantics, so the bridge stores the value
+        // list-style cluster. Pulp doesn't model <li>/<ul>/<ol>
+        // semantics, so the bridge stores the value
         // verbatim on the View and a future paint pass renders the
         // marker. Today the catalog is `partial` (stored, not
         // painted). The shorthand `listStyle` parses on the JS side
@@ -240,8 +238,8 @@ export function applyPaintProp(
         case 'borderBottom': { const b = value as { color: string; width: number }; call('setBorderSide', id, 'bottom', b.width, b.color); return true; }
         case 'borderLeft':   { const b = value as { color: string; width: number }; call('setBorderSide', id, 'left', b.width, b.color); return true; }
         // RN per-side flat props — route to the per-side bridge setters
-        // that already preserve the unrelated attribute (see widget_bridge
-        // applyBorderSide helper introduced in pulp #1026).
+        // that already preserve the unrelated attribute (see the
+        // widget_bridge applyBorderSide helper).
         case 'borderTopColor':       call('setBorderTopColor', id, _resolveVar(value) as string); return true;
         case 'borderRightColor':     call('setBorderRightColor', id, _resolveVar(value) as string); return true;
         case 'borderBottomColor':    call('setBorderBottomColor', id, _resolveVar(value) as string); return true;
@@ -250,15 +248,15 @@ export function applyPaintProp(
         case 'borderRightWidth':     call('setBorderRightWidth', id, value as number); return true;
         case 'borderBottomWidth':    call('setBorderBottomWidth', id, value as number); return true;
         case 'borderLeftWidth':      call('setBorderLeftWidth', id, value as number); return true;
-        // Wave 2 rn — per-corner radii accept the RN Fabric elliptical
-        // `{ x, y }` form too (degraded to averaged uniform radius;
+        // Per-corner radii accept the RN Fabric elliptical `{ x, y }`
+        // form too (degraded to averaged uniform radius;
         // see `borderRadius` above for the rrect rationale).
         case 'borderTopLeftRadius':     call('setBorderTopLeftRadius', id, _coerceRadius(value)); return true;
         case 'borderTopRightRadius':    call('setBorderTopRightRadius', id, _coerceRadius(value)); return true;
         case 'borderBottomLeftRadius':  call('setBorderBottomLeftRadius', id, _coerceRadius(value)); return true;
         case 'borderBottomRightRadius': call('setBorderBottomRightRadius', id, _coerceRadius(value)); return true;
-        // pulp #1519 — RN outline cluster. Paint-time ring drawn OUTSIDE
-        // the border-box (no Yoga layout impact). Each prop routes to its
+        // RN outline cluster. Paint-time ring is drawn outside the
+        // border-box (no Yoga layout impact). Each prop routes to its
         // own per-attribute bridge fn so a JSX prop diff that touches one
         // outline-* preserves the others. Style keyword set mirrors
         // borderStyle (CSS spec is identical).
@@ -280,15 +278,15 @@ export function applyPaintProp(
         }
         case 'opacity':      call('setOpacity', id, value as number); return true;
         case 'visible':      call('setVisible', id, value as boolean); return true;
-        // pulp #1434 (Triage #15) — `boxShadow` accepts:
-        //  • `null` / `undefined` / `'none'` → clearBoxShadow
+        // `boxShadow` accepts:
+        //  • `null` / `undefined` / `'none'` -> clearBoxShadow
         //  • String form (`'2px 4px 8px rgba(0,0,0,0.3)'` with optional
         //    `inset`) — parsed inline below.
         //  • Object form `{ offsetX, offsetY, blur?, spread?, color,
         //    inset? }` — dispatched directly.
         //
-        // Wave 2 rn — multi-shadow comma-separated string lists are now
-        // wired: we split on commas (respecting paren depth so a color
+        // Multi-shadow comma-separated string lists are split on
+        // commas (respecting paren depth so a color
         // literal like `rgba(0,0,0,0.3)` doesn't get cut), then dispatch
         // one setBoxShadow per parsed shadow. CSS spec layers the first
         // shadow on TOP (closest to viewer); the bridge applies them in
@@ -298,8 +296,8 @@ export function applyPaintProp(
                 call('clearBoxShadow', id);
                 return true;
             }
-            // Wave 4 rn — RN Fabric `BoxShadowValue[]` array form. Each
-            // element is `{ offsetX, offsetY, color, blurRadius?,
+            // RN Fabric `BoxShadowValue[]` array form. Each element is
+            // `{ offsetX, offsetY, color, blurRadius?,
             // spreadDistance?, inset? }` (RN spec field names; CSS
             // box-shadow uses `blur` / `spread`). The bridge takes one
             // dispatch per shadow; we clear first to avoid append-only
@@ -369,7 +367,6 @@ export function applyPaintProp(
             return true;
         }
 
-        // pulp #1434 rn logical-edge bundle (sub-agent #27 finding) —
         // RN's logical border-width edges. Route to the per-side bridge
         // setter that preserves the unrelated attribute (color) — same
         // pattern as borderLeftWidth / borderRightWidth.
@@ -382,15 +379,13 @@ export function applyPaintProp(
             return true;
         }
 
-        // pulp #1434 rn bridge-wires bundle (sub-agent #27 finding) —
-        // RN-style props that already had C++ bridge fns registered
-        // but no `@pulp/react` prop-applier dispatch. Each forwards
+        // RN-style props with direct C++ bridge functions. Each forwards
         // the keyword / string straight through to the matching setter.
         case 'backfaceVisibility': call('setBackfaceVisibility', id, value as string); return true;
         case 'cursor':             call('setCursor', id, value as string); return true;
         case 'filter':             call('setFilter', id, value as string); return true;
-        // pulp #1515 — CSS clip-path / mask cluster. The bridge fns
-        // store the value on the View; Skia paint side honors
+        // CSS clip-path / mask cluster. The bridge fns store the value
+        // on the View; Skia paint side honors
         // `clip-path: path("...")` via SkPath::FromSVGString. Other
         // clip-path forms (URL refs, named shapes) and mask painting
         // (saveLayer + SkBlendMode::kDstIn) are deferred. The
@@ -403,25 +398,24 @@ export function applyPaintProp(
         // CSS `appearance` — Pulp paints all widgets custom, so this
         // is observably storage-only. Slot exists for round-trip.
         case 'appearance':         call('setAppearance', id, value as string); return true;
-        // CSS `object-fit` / `object-position` — image fitting.
-        // Storage-only today; ImageView paint follow-up.
+        // CSS `object-fit` / `object-position` image fitting. Storage-only
+        // today; ImageView paint can consume the stored slot later.
         case 'objectFit':          call('setObjectFit', id, value as string); return true;
         case 'objectPosition':     call('setObjectPosition', id, value as string); return true;
-        // pulp #1549 — RN `mixBlendMode` (RN 0.76 New Architecture).
-        // Forwards the W3C blend-mode keyword string to
+        // RN `mixBlendMode` forwards the W3C blend-mode keyword string to
         // `setMixBlendMode`; the bridge keyword→enum table lives at
         // widget_bridge.cpp::setMixBlendMode.
         case 'mixBlendMode':       call('setMixBlendMode', id, value as string); return true;
         case 'pointerEvents':      call('setPointerEvents', id, value as string); return true;
         case 'userSelect':         call('setUserSelect', id, value as string); return true;
 
-        // pulp #1552 — backgroundRepeat is storage-only at the View layer
-        // (paint-time honoring is a follow-up for url() / repeating
+        // backgroundRepeat is storage-only at the View layer
+        // (paint-time honoring is deferred for url() / repeating
         // gradient backgrounds).
         case 'backgroundRepeat': call('setBackgroundRepeat', id, value as string); return true;
 
-        // pulp #1737 RN-OOS-fixup (audit 2026-05-11) — RN iOS-legacy
-        // box-shadow longhand. Modern RN code uses `boxShadow` (CSS
+        // RN iOS-legacy box-shadow longhands. Modern RN code uses
+        // `boxShadow` (CSS
         // shorthand) which Pulp fully supports, but upstream RN still
         // accepts shadowColor / shadowOffset / shadowOpacity /
         // shadowRadius as cross-platform-ish style props (originally
@@ -441,8 +435,8 @@ export function applyPaintProp(
         case 'shadowOpacity': call('setShadowOpacity', id, value as number); return true;
         case 'shadowRadius':  call('setShadowRadius',  id, value as number); return true;
 
-        // pulp #1737 RN-OOS-fixup final sweep — RN's Android-only
-        // `elevation` (Material Design 0..24dp). The bridge shim
+        // RN's Android-only `elevation` (Material Design 0..24dp). The
+        // bridge shim
         // translates the elevation value to a Material-approximated
         // single-shadow BoxShadow so consumers shipping unchanged
         // RN-Android styles render a visible shadow on every Pulp
@@ -450,28 +444,28 @@ export function applyPaintProp(
         // Pulp's cross-platform translation is a strict improvement.
         case 'elevation':     call('setElevation', id, value as number); return true;
 
-        // pulp #1737 RN-OOS-fixup (#1812) — RN's `borderCurve` corner
-        // shape. `circular` (default) keeps Pulp's standard rounded
+        // RN's `borderCurve` corner shape. `circular` (default) keeps
+        // Pulp's standard rounded
         // corner; `continuous` switches the View paint to the iOS-
         // style squircle approximation (super-ellipse path). Authors
         // shipping iOS-aesthetic designs with `borderCurve: 'continuous'`
         // now get the visible squircle on every Pulp platform.
         case 'borderCurve':       call('setBorderCurve', id, value as string); return true;
 
-        // pulp #1737 RN-OOS-fixup (final round) — RN's `isolation`.
-        // Pulp's per-View paint model is structurally isolated by
+        // RN's `isolation`. Pulp's per-View paint model is structurally
+        // isolated by
         // default (per-View save_layer_with_blend composition + paint-
         // order-scoped z-index), matching the dominant author intent
         // of `isolation: isolate`. Honest CSS-subset claim: both
         // keywords round-trip; behavior matches `isolate` regardless.
         case 'isolation':         call('setIsolation', id, value as string); return true;
 
-        // pulp #1434 (rn NOT-IMPL bundle 1) — RN's `experimental_backgroundImage`
-        // (New Architecture only) accepts a CSS gradient string. Route
+        // RN's `experimental_backgroundImage` (New Architecture only)
+        // accepts a CSS gradient string. Route
         // through the existing setBackgroundGradient bridge fn — same
         // shape, same parser. RN also allows an array-of-objects gradient
         // form on Fabric; that shape is NOT supported here (gradient
-        // strings only). Catalog flips missing → partial.
+        // strings only).
         case 'experimental_backgroundImage':
             call('setBackgroundGradient', id, value as string);
             return true;

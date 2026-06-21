@@ -1,16 +1,14 @@
-// pulp #1434 (sub-agent #12 follow-up) — verify the @pulp/react
-// prop-applier forwards `'auto'` for width/height verbatim to the
-// bridge so Yoga's YGNodeStyleSetWidthAuto / SetHeightAuto path is
-// reached.
+// Verify the @pulp/react prop-applier forwards `'auto'` for width/height
+// verbatim to the bridge so Yoga's YGNodeStyleSetWidthAuto /
+// SetHeightAuto path is reached.
 //
 // Figma auto-layout "hug contents" frames, v0.dev intrinsic-sizing
 // cards, and Claude Design responsive containers all emit `width:
 // 'auto'` / `height: 'auto'`. Before this batch the bridge had no
 // 'auto' branch on setFlex(width|height); strings reached `(float)val`
 // = NaN/0 and the node was effectively pinned to 0×0. The TS surface
-// already typed width/height as `number | string` from the percent
-// follow-up (#1434 batch C), so this test only exercises the
-// 'auto' string path through the existing code shape.
+// already types width/height as `number | string`, so this test only
+// exercises the 'auto' string path through the existing code shape.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { applyChangedProps } from '../src/prop-applier.js';
@@ -42,7 +40,7 @@ function flexCalls(b: MockBridge, slot: string) {
     return b.calls.filter((c) => c.fn === 'setFlex' && c.args[1] === slot);
 }
 
-describe("prop-applier width/height 'auto' (pulp #1434 sub-agent #12 follow-up)", () => {
+describe("prop-applier width/height 'auto'", () => {
     it("forwards width: 'auto' verbatim to setFlex(width)", () => {
         applyChangedProps(makeInstance(), {}, { width: 'auto' });
         const calls = flexCalls(bridge, 'width');

@@ -1,4 +1,4 @@
-// pulp #1148 — generalized overlay-click routing.
+// Generalized overlay-click routing.
 //
 // `<View overlay>` opts a JSX View in as the active click-eligible
 // overlay so the platform window host (window_host_mac.mm and siblings)
@@ -38,7 +38,7 @@ function makeInstance(id: string = 'popover', type: string = 'View'): PulpInstan
     };
 }
 
-describe('@pulp/react prop-applier — overlay routing (pulp #1148)', () => {
+describe('@pulp/react prop-applier — overlay routing', () => {
     it('applyAllProps calls claimOverlay when overlay=true', () => {
         applyAllProps({ ...makeInstance('p1'), props: { overlay: true } });
         const claims = bridge.calls.filter((c) => c.fn === 'claimOverlay');

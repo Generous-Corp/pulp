@@ -1,6 +1,6 @@
 #pragma once
 
-// MIDI 1.0 running-status byte-stream parser (workstream 02 slice 2.5).
+// MIDI 1.0 running-status byte-stream parser.
 //
 // Platform MIDI backends (ALSA raw MIDI, Win32 mmeapi MIM_LONGDATA, BLE
 // MIDI) deliver raw bytes — status bytes may be omitted when they would

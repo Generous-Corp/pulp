@@ -1,4 +1,4 @@
-// pulp #468 — headless screenshot capture helper for StandaloneApp.
+// Headless screenshot capture helper for StandaloneApp.
 //
 // Factored out of standalone.cpp so the capture state machine (frame
 // counter + one-shot guard + capture/write/close composition) is

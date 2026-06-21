@@ -1,6 +1,6 @@
 #pragma once
 
-// Background plugin scanning (workstream 03 slice 3.2).
+// Background plugin scanning.
 //
 // Wraps any scan function in a worker-thread driver with cooperative
 // cancellation and progress callbacks. Settings-panel UIs subscribe to

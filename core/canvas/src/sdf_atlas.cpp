@@ -1,4 +1,4 @@
-// SDF glyph atlas — exploration implementation for #76.
+// SDF glyph atlas.
 //
 // Algorithm:
 //   1. For each requested codepoint, rasterize a binary mask at
@@ -167,19 +167,16 @@ std::vector<std::uint8_t> rasterize_placeholder(char32_t codepoint, int w, int h
 }
 
 #if PULP_HAS_SKIA
-// pulp #2163 / font v2 Slice 1.1.a — platform font manager comes from
-// the single canonical helper in bundled_fonts.cpp; this TU-local shim
-// preserves the existing call sites until the broader caller-migration
-// pass routes them through the resolver.
+// Platform font managers come from the shared canvas helper so SDF atlas
+// fallback resolution uses the same OS-specific construction as canvas text.
 sk_sp<SkFontMgr> make_font_mgr() {
     return platform_font_manager();
 }
 
 sk_sp<SkTypeface> resolve_typeface(const std::string& font_family) {
-    // pulp #2163 / font v2 Slice 1.1.a — was a platform-only
-    // matchFamilyStyle (ignored plugin-registered + bundled). Now
-    // routes through FontResolver so the SDF atlas path sees the
-    // same cascade as Skia text rendering. Closes v1 doc gap §1.6.
+    // Route through FontResolver so the SDF atlas path sees the same
+    // plugin-registered, bundled, and platform cascade as Skia text
+    // rendering.
     FontOptions opts;
     if (!font_family.empty()) opts.family_stack.push_back(font_family);
     auto resolved = FontResolver::instance().resolve_family_list(opts);
@@ -211,15 +208,15 @@ GlyphMetrics glyph_metrics_skia(const sk_sp<SkTypeface>& face,
         // Use the SkSpan-taking overload: it is always available in
         // chrome/m144 and newer Skia, whereas the (ptr, count) overload
         // is gated behind SK_SUPPORT_UNSPANNED_APIS and disappears on
-        // Skia builds that compile with that macro undefined. See #543.
+        // Skia builds that compile with that macro undefined.
         font.unicharsToGlyphs(SkSpan<const SkUnichar>(&uni, 1),
                               SkSpan<SkGlyphID>(&gid, 1));
     }
-    if (gid == 0) return m;  // .notdef — still emit advance below
+    if (gid == 0) return m;  // .notdef
 
     SkScalar advance = 0;
     SkRect bounds{};
-    // Same SkSpan migration for getWidthsBounds — see #543.
+    // Same SkSpan portability constraint for getWidthsBounds.
     font.getWidthsBounds(SkSpan<const SkGlyphID>(&gid, 1),
                          SkSpan<SkScalar>(&advance, 1),
                          SkSpan<SkRect>(&bounds, 1),
@@ -236,7 +233,7 @@ GlyphMetrics glyph_metrics_skia(const sk_sp<SkTypeface>& face,
 
 // Skia-backed glyph rasterizer.
 //
-// Builds a temporary SkBitmap of size w × h, paints the requested
+// Builds a scratch SkBitmap of size w × h, paints the requested
 // codepoint into the centre using the requested font, and reads back
 // the alpha channel as a binary mask. Returns an empty vector if the
 // font cannot be loaded so the caller can fall back to the
@@ -245,9 +242,8 @@ std::vector<std::uint8_t> rasterize_skia(const std::string& font_family,
                                           char32_t codepoint,
                                           int base_size,
                                           int w, int h, int padding) {
-    // pulp #2163 / font v2 Slice 1.1.a — same migration as
-    // resolve_typeface above: use FontResolver so plugin-registered
-    // and bundled fonts are honored by the SDF rasterizer path.
+    // Use FontResolver so plugin-registered and bundled fonts are honored by
+    // the SDF rasterizer path.
     sk_sp<SkTypeface> face;
     {
         FontOptions opts;

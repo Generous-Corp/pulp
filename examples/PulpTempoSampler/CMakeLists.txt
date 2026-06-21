@@ -18,7 +18,7 @@ pulp_add_plugin(PulpTempoSampler
     ACCEPTS_MIDI
 )
 
-# Headless editor screenshot (Phase 5 UX). macOS-only dev tool: it uses the
+# Headless editor screenshot. macOS-only dev tool: it uses the
 # CoreGraphics/Skia raster capture path and would otherwise pull the Linux
 # windowing stack (SDL3/X11/Wayland) into the advisory Linux lane.
 if(APPLE AND (TARGET pulp::view OR TARGET Pulp::view))

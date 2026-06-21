@@ -1,20 +1,16 @@
-// pulp #1434 batch 4 — verify the @pulp/react prop-applier fans out
-// React Native shorthand aliases (marginHorizontal, marginVertical,
-// paddingHorizontal, paddingVertical) to the per-edge bridge setters.
+// The prop applier fans out React Native shorthand aliases
+// (marginHorizontal, marginVertical, paddingHorizontal, paddingVertical)
+// to the per-edge bridge setters.
 //
-// Pulp's value is broad import-readiness from {Figma, Pencil.dev, v0,
-// Claude Design HTML, RN, generic HTML/CSS/React}. RN code commonly
-// writes `style={{ marginHorizontal: 8 }}` and expects the framework to
-// decompose the shorthand to marginLeft + marginRight on the underlying
-// layout. Without a fan-out path the alias was silently dropped at the
-// JSX entry point, so RN snippets ported verbatim lost their padding /
-// margin information. The fan-out lands at two layers:
+// React Native code commonly writes `style={{ marginHorizontal: 8 }}`
+// and expects the framework to decompose the shorthand to marginLeft +
+// marginRight on the underlying layout. Pulp supports that import path
+// by fanning out aliases at two layers:
 //
 //   - core/view/js/web-compat-style-decl.js — DOM-lite el.style adapter
-//     (covered by harness coverage on the css/* surface).
+//     covered by harness coverage on the css/* surface.
 //   - packages/pulp-react/src/prop-applier.ts — @pulp/react JSX
-//     intrinsic (covered by *this* test file plus the harness rn/*
-//     surface adapter).
+//     intrinsic covered by this test file plus the harness rn/* surface.
 //
 // Each test asserts that ONE alias triggers exactly TWO setFlex calls
 // targeting the matching per-edge slots with the supplied value.
@@ -49,7 +45,7 @@ function flexCalls(b: MockBridge, slot: string) {
     return b.calls.filter((c) => c.fn === 'setFlex' && c.args[1] === slot);
 }
 
-describe('prop-applier RN shorthand aliases (pulp #1434 batch 4)', () => {
+describe('React Native shorthand alias forwarding', () => {
     it('marginHorizontal fans out to margin_left + margin_right', () => {
         applyChangedProps(makeInstance(), {}, { marginHorizontal: 8 });
 

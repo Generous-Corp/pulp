@@ -3,10 +3,10 @@
 // Shared SDF/MSDF text rendering options and pen-position helpers.
 //
 // These live in a dedicated header (not sdf_atlas.hpp) because both the
-// single-channel SdfAtlas path and the multi-channel MsdfAtlas path in
-// Phase 2 share the same sampler uniforms and the same pen-snapping
-// policy. Keeping them here avoids a circular include between the atlas
-// headers and the canvas text entry points.
+// single-channel SdfAtlas path and the multi-channel MsdfAtlas path share
+// the same sampler uniforms and the same pen-snapping policy. Keeping them
+// here avoids a circular include between the atlas headers and the canvas
+// text entry points.
 
 #include <cmath>
 #include <string>
@@ -58,7 +58,7 @@ struct SdfTextOptions {
 // Apply the pen-snapping policy to a fractional pen position. The
 // returned coordinate is the "effective" pen position that glyph quads
 // should be built from. Separated from the canvas because demos, tests,
-// and Phase 2 MSDF sites all share the same rule.
+// and SDF/MSDF call sites all share the same rule.
 inline float snap_pen_x(float x, SdfPenSnap policy) {
     switch (policy) {
         case SdfPenSnap::Free:
@@ -103,8 +103,9 @@ struct SdfTextQuad {
 //
 // `AtlasT` must expose: `glyph(c) → const Glyph*`, `base_size()`, and
 // `Glyph` must carry atlas_x/atlas_y/width/height/bearing_x/bearing_y/advance.
-// Both `SdfAtlas` and `MsdfAtlas` (and `PsdfAtlas` via inheritance) satisfy
-// this structural contract without further adaptation.
+// `SdfAtlas`, `MsdfAtlas`, and `PsdfAtlas` satisfy this structural contract
+// without further adaptation; `PsdfAtlas` inherits the contract from
+// `SdfAtlas`.
 template <typename AtlasT>
 inline std::vector<SdfTextQuad> build_text_quads(const AtlasT& atlas,
                                                  const std::u32string& text,
@@ -148,12 +149,11 @@ inline std::vector<SdfTextQuad> build_text_quads(const AtlasT& atlas,
 // families have distinct, type-checked entry points even though the
 // quad-building math is shared. Neither touches a GPU context directly;
 // adapters consume the returned quads through their own textured-quad
-// submission path. This is the Phase 2 completion of the
-// "`fill_text_msdf()` in Canvas" checkbox in the plan.
+// submission path.
 
 // Single templated entry point; callers include the concrete atlas
 // header (`sdf_atlas.hpp`, `msdf_atlas.hpp`, `psdf_atlas.hpp`) before
-// calling. Named aliases below keep call sites self-documenting while
+// calling. Named wrappers below keep call sites self-documenting while
 // the template below does the actual work.
 template <typename AtlasT>
 inline std::vector<SdfTextQuad>

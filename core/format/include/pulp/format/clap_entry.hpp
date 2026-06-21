@@ -195,8 +195,8 @@ inline void params_flush(const clap_plugin_t* plugin, const clap_input_events_t*
         // guard in clap_adapter.cpp's process() dispatch loops.
         if (hdr->space_id != CLAP_CORE_EVENT_SPACE_ID) continue;
         // memcpy into a stack local to avoid UBSan "misaligned address"
-        // when hdr isn't aligned to the struct's alignof (e.g. 8 for
-        // clap_event_param_value_t's `double value`). #688.
+        // when hdr isn't aligned to the struct's alignof (for example,
+        // 8 for clap_event_param_value_t's `double value`).
         if (hdr->type == CLAP_EVENT_PARAM_VALUE) {
             clap_event_param_value_t ev;
             std::memcpy(&ev, hdr, sizeof(ev));
@@ -248,9 +248,9 @@ inline const clap_plugin_note_ports_t note_ports_ext = {
 inline uint32_t latency_get(const clap_plugin_t* plugin) {
     auto* self = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
     if (!self->processor) return 0;
-    // clamp_latency_to_nonneg (host-quirks P3): CLAP reports latency as
-    // unsigned; clamp a negative latency_samples() to 0 unless the quirk
-    // is filtered out (PULP_HOST_QUIRKS=off).
+    // CLAP reports latency as unsigned; clamp a negative
+    // latency_samples() to 0 unless the quirk is filtered out
+    // (PULP_HOST_QUIRKS=off).
     return static_cast<uint32_t>(
         reported_latency_samples(self->processor->latency_samples(),
                                  self->host_quirks));
@@ -330,9 +330,8 @@ inline bool gui_create(const clap_plugin_t* plugin, const char*, bool) {
         warn_if_unexpected_cpu_fallback(gpu, p->editor_host.get());
         // Pump the scripted UI session (async results, timers, rAF) per vsync.
         p->editor_host->set_idle_callback(make_scripted_idle_pump(*p->bridge));
-        // Phase iOS-D.3b Slice 1 — route navigator.gpu / canvas.getContext
-        // ('webgpu') through the host's live GpuSurface. See
-        // planning/2026-05-29-ios-d3b-threejs-webgpu-program.md § Slice 1.
+        // Route navigator.gpu / canvas.getContext('webgpu') through
+        // the host's live GpuSurface instead of the JS mock path.
         if (auto* scripted = p->bridge->scripted_ui()) {
             scripted->attach_gpu_surface(p->editor_host->gpu_surface());
             if (p->editor_host->gpu_surface()) {
@@ -395,8 +394,8 @@ inline bool gui_get_size(const clap_plugin_t* plugin, uint32_t* width, uint32_t*
     return true;
 }
 
-// Editor resize negotiation (Phase 3): the plugin advertises proportional
-// resize locked to the editor's design aspect. The host's design viewport
+// Editor resize negotiation: the plugin advertises proportional resize
+// locked to the editor's design aspect. The host's design viewport
 // (set in gui_create) scales content to fit the host window without
 // re-layout — so any (w, h) the DAW lands on still looks correct.
 // Resize capability is declared by non-zero min_width/min_height in
@@ -600,8 +599,8 @@ inline const clap_plugin_t* create_plugin(const clap_plugin_factory_t*,
 
     auto* instance = new clap_adapter::PulpClapPlugin();
     instance->factory = g_factory;
-    // Item 3.11 — keep the host pointer so clap_on_main_thread() can
-    // republish latency / tail changes the processor flagged.
+    // Keep the host pointer so clap_on_main_thread() can republish
+    // latency / tail changes the processor flagged.
     instance->host = host;
     instance->plugin = {
         .desc = &g_clap_desc,

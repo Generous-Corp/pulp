@@ -225,7 +225,7 @@ bool jack_is_available() {
     return false;
 }
 
-// ── JackSystem (workstream 02 slice 2.2) ───────────────────────────────
+// ── JackSystem device enumeration ─────────────────────────────────────
 
 std::vector<DeviceInfo> JackSystem::enumerate_devices() {
     // JACK exposes a single logical "server" as the device. Sample rate

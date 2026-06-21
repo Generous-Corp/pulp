@@ -1,11 +1,6 @@
-// inspector_overlay_field_edit.cpp — Phase 3b live-editable box-model
-// fields for the visual inspector overlay.
+// Live-editable box-model fields for the visual inspector overlay.
 //
-// Extracted from inspector_overlay.cpp in the 2026-05 refactor (roadmap
-// P10-2). Pure mechanical move — the InspectorOverlay member methods
-// below are byte-identical to their previous definitions in
-// inspector_overlay.cpp; only their translation unit changed. Shared
-// color constants live in inspector_overlay_internal.hpp; the
+// Shared color constants live in inspector_overlay_internal.hpp; the
 // structural layout constants are static-constexpr members of
 // InspectorOverlay reached through the public header.
 
@@ -23,16 +18,15 @@
 
 namespace pulp::inspect {
 
-// ── Phase 3b — Live-editable box-model fields ───────────────────────────────
+// ── Live-editable box-model fields ──────────────────────────────────────────
 //
 // Click on a numeric value in the property panel → enter edit mode.
 // Typed digits / decimal / sign extend the buffer; arrows nudge (±1
 // plain, ±10 Shift, ±100 Cmd matching Figma); Enter commits (tweak
 // + persisted); Esc cancels (revert); Tab commits + moves to the
-// next editable field. The tweak is emitted via the SAME
-// emit_tweak_for_selection() path Phase 3a drag-handles use, so
-// downstream persistence (Phase 1 disk write) gets both gestures for
-// free.
+// next editable field. The tweak is emitted through the same
+// emit_tweak_for_selection() path used by pointer-driven layout edits, so
+// downstream persistence receives both gestures through one store path.
 //
 // Real-time preview: we write to the underlying View (flex().padding
 // = N etc.) on every keystroke + arrow nudge so Yoga reflows live —
@@ -173,10 +167,9 @@ static char key_to_char(KeyCode k, bool shift) {
     // We treat the keys as both their unshifted and shifted symbols
     // for "." and "-" because Pulp's KeyCode enum doesn't define
     // separate "period" / "minus" entries — platform code dispatches
-    // them via text-input. Phase 3b accepts numeric editing only;
-    // digits cover 99% of use. Decimal entry on platforms without a
-    // text-input path can be added by extending KeyCode (filed as a
-    // follow-up in the PR body if it becomes a real ask).
+    // them via text-input. Numeric editing accepts digits through this
+    // keyboard path; decimal entry on platforms without a text-input
+    // path can be added by extending KeyCode.
     (void)shift;
     return 0;
 }

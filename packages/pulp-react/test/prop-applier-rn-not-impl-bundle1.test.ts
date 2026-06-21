@@ -1,21 +1,17 @@
-// pulp #1434 (rn NOT-IMPL bundle 1) — close 8 rn-surface NOT-IMPL
-// entries on the @pulp/react prop-applier:
+// React Native compatibility props covered by the @pulp/react prop applier:
 //
-//   1. boxSizing                 — already wired to setBoxSizing (#1545);
-//                                  this file pins the dispatch.
+//   1. boxSizing                 — routes to setBoxSizing.
 //   2. direction                 — value-disambiguated. Writing-direction
 //                                  keywords (ltr/rtl/inherit/auto) route
-//                                  to setDirection (#1506); flexDirection
+//                                  to setDirection; flexDirection
 //                                  aliases ('row' / 'column' / etc.) keep
 //                                  routing to setFlex(direction).
 //   3. experimental_backgroundImage — RN gradient string aliased to
 //                                     setBackgroundGradient.
-//   4. fontVariant               — OpenType feature array → CSV string,
-//                                  forwarded to a planned setFontVariant
-//                                  bridge fn (paint deferred).
+//   4. fontVariant               — OpenType feature array -> CSV string,
+//                                  forwarded to setFontVariant.
 //   5. textDecorationLine        — aliased to setTextDecoration.
-//   6. textShadowColor           — per-attribute slot (bridge fn pending
-//                                  on #1548 feature branch).
+//   6. textShadowColor           — per-attribute shadow color slot.
 //   7. textShadowOffset          — { width, height } → (dx, dy).
 //   8. textShadowRadius          — px number forwarded.
 
@@ -49,7 +45,7 @@ function callOf(b: MockBridge, fn: string) {
     return b.calls.find((c) => c.fn === fn);
 }
 
-describe('rn NOT-IMPL bundle 1 — boxSizing (pulp #1545)', () => {
+describe('React Native boxSizing forwarding', () => {
     it('boxSizing "border-box" routes to setBoxSizing', () => {
         applyChangedProps(makeInstance(), {}, { boxSizing: 'border-box' });
         expect(callOf(bridge, 'setBoxSizing')?.args).toEqual(['k', 'border-box']);
@@ -61,7 +57,7 @@ describe('rn NOT-IMPL bundle 1 — boxSizing (pulp #1545)', () => {
     });
 });
 
-describe('rn NOT-IMPL bundle 1 — direction (pulp #1506)', () => {
+describe('React Native direction forwarding', () => {
     it('direction "ltr" routes to setDirection (writing direction)', () => {
         applyChangedProps(makeInstance(), {}, { direction: 'ltr' });
         expect(callOf(bridge, 'setDirection')?.args).toEqual(['k', 'ltr']);
@@ -87,8 +83,7 @@ describe('rn NOT-IMPL bundle 1 — direction (pulp #1506)', () => {
     });
 
     it('direction "row" still routes to setFlex(direction) — backward compat with FlexProps alias', () => {
-        // Pinned by prop-applier-direction.test.ts:60 since pulp #1434
-        // Phase A2-3. The value-disambiguation MUST preserve this.
+        // Value-disambiguation must preserve the existing FlexProps alias path.
         applyChangedProps(makeInstance(), {}, { direction: 'row' });
         expect(
             bridge.calls.find((c) => c.fn === 'setFlex' && c.args[1] === 'direction')?.args,
@@ -105,7 +100,7 @@ describe('rn NOT-IMPL bundle 1 — direction (pulp #1506)', () => {
     });
 });
 
-describe('rn NOT-IMPL bundle 1 — experimental_backgroundImage', () => {
+describe('React Native experimental_backgroundImage forwarding', () => {
     it('linear-gradient string forwards to setBackgroundGradient', () => {
         const grad = 'linear-gradient(to right, #ff0000, #0000ff)';
         applyChangedProps(makeInstance(), {}, { experimental_backgroundImage: grad });
@@ -119,7 +114,7 @@ describe('rn NOT-IMPL bundle 1 — experimental_backgroundImage', () => {
     });
 });
 
-describe('rn NOT-IMPL bundle 1 — fontVariant', () => {
+describe('React Native fontVariant forwarding', () => {
     it('array of OpenType feature tokens joins to CSV and forwards to setFontVariant', () => {
         applyChangedProps(makeInstance(), {}, {
             fontVariant: ['small-caps', 'tabular-nums'],
@@ -136,7 +131,7 @@ describe('rn NOT-IMPL bundle 1 — fontVariant', () => {
     });
 });
 
-describe('rn NOT-IMPL bundle 1 — textDecorationLine', () => {
+describe('React Native textDecorationLine forwarding', () => {
     it('"underline" routes to setTextDecoration', () => {
         applyChangedProps(makeInstance(), {}, { textDecorationLine: 'underline' });
         expect(callOf(bridge, 'setTextDecoration')?.args).toEqual(['k', 'underline']);
@@ -163,7 +158,7 @@ describe('rn NOT-IMPL bundle 1 — textDecorationLine', () => {
     });
 });
 
-describe('rn NOT-IMPL bundle 1 — textShadow cluster (pulp #1548)', () => {
+describe('React Native textShadow prop forwarding', () => {
     it('textShadowColor forwards a CSS-color string', () => {
         applyChangedProps(makeInstance(), {}, { textShadowColor: '#80808080' });
         expect(callOf(bridge, 'setTextShadowColor')?.args).toEqual(['k', '#80808080']);

@@ -1,6 +1,6 @@
 #pragma once
 
-// ExtensionsVisitor — typed plugin introspection (item 4.5).
+// ExtensionsVisitor — typed plugin introspection.
 //
 // PluginSlot intentionally abstracts the format (VST3, AU, CLAP, LV2) so that
 // host code can drive any plugin through a single interface. Sometimes,

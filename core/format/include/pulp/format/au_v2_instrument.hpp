@@ -76,7 +76,7 @@ private:
     std::unique_ptr<Processor> processor_;
     state::StateStore store_;
 
-    // Host accommodations, resolved once at init (host-quirks plan, P3).
+    // Host accommodations, resolved once at init via the runtime policy.
     HostQuirks host_quirks_{};
     std::vector<float*> output_ptrs_;
 
@@ -88,9 +88,9 @@ private:
     // HandleNoteOn/Off; single consumer = Render). No audio-thread mutex.
     runtime::SpscQueue<midi::MidiEvent, 1024> midi_in_queue_;
 
-    // Item 1.3 — previous-block transport snapshot used to derive the
-    // change flags on `ProcessContext`. Default-constructed so the
-    // first Render() call after Initialize() reports no changes.
+    // Previous-block transport snapshot used to derive change flags on
+    // `ProcessContext`. Default-constructed so the first Render() call
+    // after Initialize() reports no changes.
     detail::PlayheadSnapshot playhead_prev_{};
 };
 

@@ -55,8 +55,7 @@ message(STATUS "Pulp ${PROJECT_VERSION} — platform: ${PULP_PLATFORM}")
 # (pulp::host, the CLI binary, plugin scanners) that we deliberately skip on
 # mobile. Forcing tests OFF on iOS also prevents downstream example
 # CMakeLists from invoking `catch_discover_tests` when the Catch2 include
-# was never loaded for that target. See 2026-05-24 AUv3 iOS validation plan
-# Phase iOS-A.
+# was never loaded for that target.
 if(CMAKE_SYSTEM_NAME STREQUAL "iOS" OR ANDROID)
     option(PULP_BUILD_TESTS "Build unit tests" OFF)
 else()
@@ -129,7 +128,7 @@ option(PULP_ENABLE_AAX "Enable optional AAX support with a developer-supplied SD
 option(PULP_ENABLE_ARA "Enable optional ARA 2.x support with a developer-supplied Celemony SDK" OFF)
 option(PULP_FETCHCONTENT_UPDATES_DISCONNECTED "Avoid implicit FetchContent updates during configure" ON)
 option(PULP_USE_SHARED_FETCHCONTENT_SOURCES "Prefer machine-local shared source caches for FetchContent dependencies" ON)
-option(PULP_BENCHMARK "Enable zero-copy benchmark perf counters (Slice 0 of #516). Tooling-only; OFF by default so production builds see zero overhead." OFF)
+option(PULP_BENCHMARK "Enable zero-copy benchmark perf counters. Tooling-only; OFF by default so production builds see zero overhead." OFF)
 if(PULP_BENCHMARK)
     add_compile_definitions(PULP_BENCHMARK)
 endif()
@@ -197,8 +196,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAAX.cmake)
 pulp_configure_aax_sdk()
 
 # ── Third-Party Dependencies ────────────────────────────────────────────────
-# Extracted to tools/cmake/PulpDependencies.cmake in the 2026-05 Phase 3
-# (C2) refactor.
+# Shared dependency setup lives in tools/cmake/PulpDependencies.cmake.
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpDependencies.cmake)
 
 # ── Android NDK Support ───────────────────────────────────────────────────
@@ -321,12 +319,10 @@ if(NOT ANDROID AND NOT IOS AND PULP_ENABLE_GPU)
     add_subdirectory(tools/cli)
 endif()
 
-# ── Rust CLI (Phase 8 binary swap, issues #686 / #767) ────────────────────
+# ── Rust CLI (experimental desktop bridge) ────────────────────────────────
 # Bridges `cargo build` for the experimental Rust CLI port into the
 # CMake build graph. Coexists with pulp-cli (the C++ binary) — both
-# install side-by-side under `${CMAKE_INSTALL_BINDIR}`. PR #2 of the
-# swap pair flips the user-facing default; this file is the no-op
-# build-graph scaffolding (PR #1).
+# install side-by-side under `${CMAKE_INSTALL_BINDIR}`.
 #
 # Mirror the EXACT desktop guard used for tools/cli above — both the
 # `NOT ANDROID AND NOT IOS` mobile-skip AND the `PULP_ENABLE_GPU`
@@ -334,8 +330,7 @@ endif()
 # GPU-off jobs still pull cargo into the default `all` build whenever
 # cargo happens to be on PATH, introducing unrelated Rust-toolchain
 # / network failures (and minutes of cargo build time) in lanes that
-# intentionally disable the CLI/GPU paths. Codex review on PR #778
-# (CMakeLists:523) flagged the missing guard as a P2.
+# intentionally disable the CLI/GPU paths.
 if(NOT ANDROID AND NOT IOS AND PULP_ENABLE_GPU
    AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/experimental/pulp-rs/CMakeLists.txt")
     add_subdirectory(experimental/pulp-rs)
@@ -349,7 +344,7 @@ endif()
 # ── Screenshot Tool ────────────────────────────────────────────────────────
 add_subdirectory(tools/screenshot)
 
-# ── Out-of-process plugin scan worker (workstream 03 slice 3.3b) ──────────
+# ── Out-of-process plugin scan worker ─────────────────────────────────────
 if(NOT IOS AND NOT ANDROID)
     add_subdirectory(tools/scan-worker)
 endif()
@@ -434,8 +429,8 @@ if(ANDROID)
 
     # TalkBack accessibility JNI entry points live in pulp-view
     # (core/view/platform/android/accessibility_android.cpp). pulp-view is
-    # not whole-archived — whole-archiving it pulls in SDL3's JNI_OnLoad
-    # and duplicates ours (see closed PR #148). Instead, force-reference
+    # not whole-archived — doing so pulls in SDL3's JNI_OnLoad and
+    # duplicates ours. Instead, force-reference
     # each Java_com_pulp_accessibility_* symbol so the linker keeps the
     # containing object file. This preserves just the JNI exports without
     # dragging SDL3 into the JNI closure. Without this the app hits
@@ -456,8 +451,7 @@ if(ANDROID)
 endif()
 
 # ── SDK Install Rules ──────────────────────────────────────────────────────
-# Extracted to tools/cmake/PulpInstallRules.cmake in the 2026-05 Phase 3
-# (C2) refactor.
+# Shared SDK install/export rules live in tools/cmake/PulpInstallRules.cmake.
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInstallRules.cmake)
 
 # ── Linux fontconfig post-pass ──────────────────────────────────────────

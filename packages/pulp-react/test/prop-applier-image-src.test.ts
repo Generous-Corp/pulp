@@ -1,21 +1,14 @@
-// pulp parity-found (framework-importer #18) — the @pulp/react
-// prop-applier created the Image widget (host-config createImage) and
-// declared the bridge surface, but never dispatched the `src` prop to
-// setImageSource. The emitted bundle had createImage calls and ZERO
-// setImageSource calls, so every <img>/<Image> rendered as the empty
-// "IMG" placeholder (in the design-import path AND the framework
-// importer). This mirrors the non-React fix in
-// core/view/js/web-compat-element.js (pulp #1658).
+// Verify that Image src props reach the ImageView bridge surface.
 //
 // These tests assert:
-//   1. applyAllProps(<Image src=…>) dispatches setImageSource with the
+//   1. applyAllProps(<Image src=...>) dispatches setImageSource with the
 //      resolved (verbatim, absolute) path.
 //   2. Changing `src` re-dispatches setImageSource with the new path.
 //   3. Removing `src` clears the ImageView (empty-string sentinel).
-//   4. The path is forwarded verbatim — absolute paths (design-import /
-//      importer convention) pass through untouched.
-//   5. A stray `src` on a non-Image widget does NOT reach the
-//      ImageView-only setter (the `type === 'Image'` gate).
+//   4. The path is forwarded verbatim: absolute paths from import flows pass
+//      through untouched.
+//   5. A stray `src` on a non-Image widget does not reach the ImageView-only
+//      setter.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createMockBridge, type MockBridge } from '../src/bridge.js';
@@ -30,7 +23,7 @@ function imageSourceCalls(b: MockBridge) {
     return b.calls.filter((c) => c.fn === 'setImageSource');
 }
 
-describe('@pulp/react prop-applier — <Image src> → setImageSource (#18)', () => {
+describe('@pulp/react prop-applier - <Image src> to setImageSource', () => {
     let bridge: MockBridge;
     beforeEach(() => {
         bridge = createMockBridge();
@@ -103,10 +96,10 @@ describe('@pulp/react prop-applier — <Image src> → setImageSource (#18)', ()
         expect(imageSourceCalls(bridge)).toHaveLength(0);
     });
 
-    // host-config maps BOTH the lowercase `<img>` intrinsic AND the `<Image>`
+    // host-config maps both the lowercase `<img>` intrinsic and the `<Image>`
     // component to createImage, so the prop-applier must accept both element
-    // types. The #18 parity capture proved gating on `'Image'` alone dropped
-    // every real `<img>` (runtime type `'img'`).
+    // types. Gating only on `'Image'` would drop real `<img>` elements because
+    // their runtime type is `'img'`.
     it('dispatches setImageSource for both the img intrinsic and the Image component', () => {
         applyAllProps(instance('imgLower', 'img', { src: '/abs/a.png' }));
         applyAllProps(instance('imgUpper', 'Image', { src: '/abs/b.png' }));

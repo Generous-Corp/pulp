@@ -1,45 +1,41 @@
 // prop-applier-transform — transform / transform-origin plus CSS
-// transition + animation timing props (P5-NEW-A split of the former
-// monolithic applyOne switch).
+// transition + animation timing props.
 //
 // `applyTransformProp(id, key, value)` returns true if it handled the
-// key, false otherwise. Behavior is byte-identical to the matching
-// cases in the pre-split prop-applier switch — same bridge calls in
-// the same order. Transitions and animations are grouped here because
-// they describe time-based mutation of (mostly) transform/paint state.
+// key, false otherwise. Transitions and animations are grouped here
+// because they describe time-based mutation of mostly transform and
+// paint state.
 
 import { call } from './prop-applier-internal.js';
 
-// pulp #1434 (Triage #9) — RN's `transform` is an array of single-property
-// objects (`[{translateX:10},{rotate:'45deg'},{scale:1.5}]`). Figma /
-// v0.dev / Claude Design exports emit this constantly. The bridge has
+// RN's `transform` is an array of single-property objects
+// (`[{translateX:10},{rotate:'45deg'},{scale:1.5}]`). The bridge has
 // setTranslate / setRotation / setScale (uniform), so the array-walker
-// accumulates a per-render snapshot inside one pass and emits at most
-// three consolidated calls. Within-array merging means
+// accumulates a per-render snapshot inside one pass and emits consolidated
+// calls. Within-array merging means
 // `[{translateX:10},{translateY:20}]` produces ONE setTranslate(10,20)
 // instead of two clobbering ones (the latter would zero the unrelated
 // axis on each call). RN semantics also say each render's array is a
 // complete description — absent fields reset to identity, so we don't
 // carry state across renders.
 //
-// Bridge gaps (deferred — TODOs + follow-up issue):
-//   • setScale is uniform-only — independent scaleX/scaleY axes can't
+// Current 2D bridge limits:
+//   • setScale is uniform-only; independent scaleX/scaleY axes can't
 //     round-trip. We approximate: scale > scaleX > scaleY in priority,
 //     last-write-wins within the array; if scaleX≠scaleY we emit the
 //     last seen and document the limitation.
-//   • rotateX/rotateY/perspective/matrix3d — 3D / matrix transforms not
+//   • rotateX/rotateY/perspective/matrix3d: 3D / matrix transforms not
 //     modeled in pulp's 2D View (no perspective; rotation is Z-axis
-//     only). Silently dropped with TODO.
-//   • matrix(a b c d tx ty) — 2D affine; the CSS shim decomposes to
+//     only). Silently dropped.
+//   • matrix(a b c d tx ty): 2D affine; the CSS shim decomposes to
 //     translate + uniform-scale + rotate components. The @pulp/react
 //     RN array surface doesn't have a matrix entry today (RN spec:
 //     only translateX/Y, scale, scaleX/Y, rotate/Z, skewX/Y), so the
 //     walker just silently drops `matrix`/`matrix3d` for parity.
 //
-// Triage #9 fan-out (this PR) — `setSkew` is now a registered bridge
-// function (View::set_skew has existed since the 2D slot was added).
-// The walker dispatches skewX/skewY by accumulating both axes and
-// emitting one consolidated setSkew(id, x_deg, y_deg) call.
+// `setSkew` is a registered bridge function. The walker dispatches
+// skewX/skewY by accumulating both axes and emitting one consolidated
+// setSkew(id, x_deg, y_deg) call.
 interface _TransformSnapshot {
     tx: number;
     ty: number;
@@ -53,7 +49,7 @@ interface _TransformSnapshot {
     haveSkew: boolean;
 }
 
-// Parse `'45deg'` / `'0.785rad'` / `45` (numeric) → degrees.
+// Parse `'45deg'` / `'0.785rad'` / `45` (numeric) to degrees.
 function _parseAngleDegrees(v: unknown): number {
     if (typeof v === 'number') return v;
     const s = String(v).trim();
@@ -67,8 +63,8 @@ function _parseAngleDegrees(v: unknown): number {
     return n;
 }
 
-// pulp #1434 rn bridge-wires bundle — parse a CSS transform-origin
-// string into two fractional coordinates (0..1) the bridge expects.
+// Parse a CSS transform-origin string into two fractional coordinates
+// (0..1) the bridge expects.
 // Accepts `'center'`, `'left top'`, `'NN%'` percentages, and `'NNpx'`
 // pixel offsets (the latter assumed to be on a unit-bound View — so
 // values just clamp). Falls back to {0.5, 0.5} on unrecognized input.
@@ -138,13 +134,13 @@ function _walkTransformArray(arr: ReadonlyArray<unknown>): _TransformSnapshot {
                 break;
             case 'scaleX':
             case 'scaleY':
-                // Bridge has uniform setScale only; last-write-wins.
-                // pulp follow-up will add setScaleXY for independent axes.
+                // Bridge has uniform setScale only; last-write-wins keeps
+                // independent-axis input deterministic until the bridge has
+                // separate scale axes.
                 snap.scale = typeof v === 'number' ? v : parseFloat(String(v));
                 snap.haveScale = true;
                 break;
-            // pulp #1434 Triage #9 fan-out — skewX / skewY now reach the
-            // bridge via the freshly-registered setSkew(id, x_deg, y_deg).
+            // skewX / skewY reach the bridge through setSkew(id, x_deg, y_deg).
             // Both axes accumulate independently; one consolidated call
             // emits at dispatch time.
             case 'skewX':
@@ -155,9 +151,8 @@ function _walkTransformArray(arr: ReadonlyArray<unknown>): _TransformSnapshot {
                 snap.skewY = _parseAngleDegrees(v);
                 snap.haveSkew = true;
                 break;
-            // 3D / matrix ops — not modeled in pulp's 2D View. Silently
-            // drop. pulp follow-up tracks if/when 3D transforms are
-            // introduced.
+            // 3D / matrix ops are not modeled in pulp's 2D View, so this
+            // surface silently drops them.
             case 'rotateX':
             case 'rotateY':
             case 'perspective':
@@ -188,8 +183,8 @@ export function applyTransformProp(
             return true;
         }
 
-        // pulp #1434 Triage #9 — RN array transform.
-        // RN's transform is an array of single-property objects:
+        // RN array transform. RN's transform is an array of single-property
+        // objects:
         //   transform: [
         //     { translateX: 10 }, { translateY: 20 },
         //     { rotate: '45deg' }, { scale: 1.5 },
@@ -211,18 +206,16 @@ export function applyTransformProp(
             if (snap.haveTranslate) call('setTranslate', id, snap.tx, snap.ty);
             if (snap.haveRotate)    call('setRotation', id, snap.rotateDeg);
             if (snap.haveScale)     call('setScale', id, snap.scale);
-            // pulp #1434 Triage #9 fan-out — setSkew is now a registered
-            // bridge fn; emit one consolidated call that captures both
-            // axes accumulated in the walker.
+            // Emit one consolidated bridge call that captures both skew axes
+            // accumulated in the walker.
             if (snap.haveSkew)      call('setSkew', id, snap.skewX, snap.skewY);
             return true;
         }
 
-        // pulp #1434 Phase A2-1 — CSS transitions. The bridge parses
-        // the full shorthand into a list of TransitionSpecs that the
-        // dispatcher (PR 2 of the ladder) consults when a property
-        // changes. Longhand fields apply uniformly across the parsed
-        // list (CSS spec semantics).
+        // CSS transitions. The bridge parses the full shorthand into a list
+        // of TransitionSpecs that the dispatcher consults when a property
+        // changes. Longhand fields apply uniformly across the parsed list
+        // (CSS spec semantics).
         case 'transition':                call('setTransition', id, value as string); return true;
         case 'transitionProperty':        call('setTransitionProperty', id, value as string); return true;
         case 'transitionDuration': {
@@ -250,19 +243,15 @@ export function applyTransformProp(
         }
         case 'transitionTimingFunction':  call('setTransitionTimingFunction', id, value as string); return true;
 
-        // pulp #1434 Phase A2-1 — CSS animations. animation-name
-        // resolves through the keyframes registry populated by
-        // defineKeyframes; PR 4 wires the playback driver. The
-        // shorthand path takes a single name + duration; longhand
-        // props can be split out by the host as needed.
+        // CSS animations. animation-name resolves through the keyframes
+        // registry populated by defineKeyframes. The shorthand path takes a
+        // single name + duration; longhand props can be split out by the host
+        // as needed.
         case 'animationName':   call('setAnimation', id, value as string, 1.0, 1, 'normal'); return true;
-        // Codex audit on pulp #1508 (P1): animationDuration was
-        // dispatched to setTransitionDuration here, which mutated
-        // *transition* timing on the same View instead of *animation*
-        // timing. Route through the legacy 2-arg setAnimation control-
-        // token form (`setAnimation(id, 'duration', seconds)`) so the
-        // bridge stages it on the View's pending-animation slot
-        // alongside animationName / animationDelay / etc.
+        // animationDuration must route through animation timing, not
+        // transition timing. The legacy 2-arg setAnimation control-token
+        // form stages it on the View's pending-animation slot alongside
+        // animationName / animationDelay / etc.
         case 'animationDuration': {
             if (typeof value === 'number') {
                 call('setAnimation', id, 'duration', value);
@@ -298,11 +287,10 @@ export function applyTransformProp(
         case 'animationFillMode':
             call('setAnimation', id, 'fill', value as string);
             return true;
-        // pulp #1434 Wave 3 css.3 — animation-play-state. Routes
-        // through the legacy 2-arg setAnimation control-token form so
-        // the bridge stores the keyword on View::animation_play_state_;
-        // View::tick_animations honors `paused` by skipping the
-        // timeline advance (web spec semantic).
+        // animation-play-state routes through the legacy 2-arg setAnimation
+        // control-token form so the bridge stores the keyword on
+        // View::animation_play_state_; View::tick_animations honors `paused`
+        // by skipping the timeline advance (web spec semantic).
         case 'animationPlayState':
             call('setAnimation', id, 'play_state', value as string);
             return true;

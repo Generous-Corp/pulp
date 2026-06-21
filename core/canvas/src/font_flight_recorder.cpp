@@ -1,4 +1,4 @@
-// font_flight_recorder.cpp — Pulp #2163, font v2 Slice 2.2.
+// font_flight_recorder.cpp
 
 #include "pulp/canvas/font_flight_recorder.hpp"
 

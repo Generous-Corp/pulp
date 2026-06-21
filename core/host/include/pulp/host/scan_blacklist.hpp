@@ -1,11 +1,11 @@
 #pragma once
 
-// Scan blacklist (workstream 03 slice 3.3a) — companion to HostScanCache.
+// Scan blacklist companion to HostScanCache.
 //
-// When a plugin crashes the scanner, the out-of-process scan worker
-// (slice 3.3b, lands separately) records the plugin path + its (mtime,
-// size) pair here. Subsequent scans skip blacklisted entries entirely
-// so one bad plugin can't loop the entire scan on every startup.
+// When a plugin crashes the scanner, the out-of-process scan worker records
+// the plugin path + its (mtime, size) pair here. Subsequent scans skip
+// blacklisted entries entirely so one bad plugin can't loop the entire scan
+// on every startup.
 //
 // Format is a newline-delimited text file — one entry per line — so a
 // user can hand-edit if they want to retry a blacklisted plugin. Lines

@@ -23,7 +23,7 @@ std::uint64_t next_import_binding_instance_id() {
     return next.fetch_add(1, std::memory_order_relaxed);
 }
 
-// Build a per-corner rounded-rect path on the canvas (issue-1026). When any
+// Build a per-corner rounded-rect path on the canvas. When any
 // of setBorderTopLeftRadius / TopRight / BottomLeft / BottomRight has been
 // called on the View, the four corners can have independent radii — which
 // the canvas's single-radius fill_rounded_rect / stroke_rounded_rect APIs
@@ -86,8 +86,8 @@ void build_per_corner_rounded_rect_path(
     canvas.close_path();
 }
 
-// pulp #1737 RN-OOS-fixup (#1812) — iOS "continuous" corner shape
-// (squircle / super-ellipse approximation). Apple's continuousCornerShape
+// iOS "continuous" corner shape (squircle / super-ellipse approximation).
+// Apple's continuousCornerShape
 // extends the corner curve to ~1.528R from each side of the vertex with
 // a flatter cubic profile — visually smoother than the standard
 // quarter-circle rounded corner. We approximate via:
@@ -155,42 +155,34 @@ View::View()
       import_binding_lifetime_token_(std::make_shared<const std::uint64_t>(
           import_binding_instance_id_)) {}
 
-// View destructor, moved out of <pulp/view/view.hpp> in the Phase 4 R2-2
-// header-diet first cut. Stays virtual + public so vtable layout + SDK
-// contract are unchanged.
+// View destructor stays out-of-line while remaining virtual + public so vtable
+// layout + SDK contract are unchanged.
 View::~View() {
-    // pulp #1148 — clear the overlay slot if this dying View holds it.
-    // Without this, an unmounted React popover leaves a dangling
-    // pointer that the platform window host would dereference on
-    // the next click.
+    // Clear the overlay slot if this dying View holds it. Without this, an
+    // unmounted React popover leaves a dangling pointer that the platform
+    // window host would dereference on the next click.
     if (active_overlay_ == this) active_overlay_ = nullptr;
-    // pulp #1708 — clear the input-focus slot if this dying View holds
-    // it. Without this, a React unmount of the focused widget (e.g.,
-    // closing a Settings modal) leaves the platform host's focused-
-    // view pointer dangling; the next keypress crashes via
-    // dynamic_cast on freed memory in -[PulpView focusedTextEditor].
+    // Clear the input-focus slot if this dying View holds it. Without this, a
+    // React unmount of the focused widget leaves the platform host's
+    // focused-view pointer dangling; the next keypress crashes via dynamic_cast
+    // on freed memory in -[PulpView focusedTextEditor].
     if (focused_input_ == this) focused_input_ = nullptr;
 }
 
 void View::paint_all(canvas::Canvas& canvas) {
     if (!visible_) return;
 
-    // Slice 4: treat paint like the audio thread. Any allocation inside
-    // this scope is a real-time-safety bug. The guard is a thread-local
-    // counter in debug builds (compiles away under NDEBUG). Pulp's
-    // sanitizer / debug-allocator hooks (opt-in, follow-up slice) read
+    // Treat paint like the audio thread. Any allocation inside this scope is a
+    // real-time-safety bug. The guard is a thread-local counter in debug builds
+    // and compiles away under NDEBUG; sanitizer / debug-allocator hooks read
     // pulp::runtime::is_in_no_alloc_scope() to detect violations.
     pulp::runtime::ScopedNoAlloc no_alloc_guard;
 
-    // Phase 3d (Codex P2 follow-up on #2338): time the WHOLE paint_all
-    // body — background, border, gradients, clipping, shadows, layer
-    // setup, the paint() override, AND inset shadows / outlines /
-    // layer restores. The previous implementation timed only the
-    // paint(canvas) call, which made styled containers with no
-    // override (the common case — frames with a background color
-    // dominate a frame) report ~0ns self time. With the outer-scope
-    // timer, self_ns = (outer total) - (children total), which
-    // correctly attributes framework drawing to the view.
+    // Time the whole paint_all body: background, border, gradients, clipping,
+    // shadows, layer setup, the paint() override, inset shadows, outlines, and
+    // layer restores. With the outer-scope timer,
+    // self_ns = (outer total) - (children total), which correctly attributes
+    // framework drawing to the view.
     auto outer_t0 = std::chrono::steady_clock::now();
     std::chrono::nanoseconds children_dt{0};
 
@@ -221,23 +213,23 @@ void View::paint_all(canvas::Canvas& canvas) {
         if (scale_ != 1.0f)
             canvas.scale(scale_, scale_);
 
-        // Skew via scale hack (true skew needs matrix — approximate for now)
-        // TODO: add canvas.skew() for proper CSS skew()
+        // Skew is not applied on this scalar transform path. Skew-only views
+        // still enter this block but render unchanged; callers needing true CSS
+        // skew should use the affine transform matrix path below.
 
         canvas.translate(-ox, -oy);
     }
 
-    // Full 2D affine transform matrix (issue-930). Composed onto the current
-    // canvas matrix via concat_transform so parent transforms still apply
-    // and children inherit. Used by setTransform(id,a,b,c,d,e,f) from JS,
-    // primarily for translateX(-50%) centering and future animation.
+    // Full 2D affine transform matrix. Composed onto the current canvas matrix
+    // via concat_transform so parent transforms still apply and children
+    // inherit. Used by setTransform(id,a,b,c,d,e,f) from JS, including
+    // translateX(-50%) centering.
     //
-    // pulp #1026 — transform-origin now applies to the matrix path too,
-    // BUT only when the caller has explicitly called setTransformOrigin.
-    // Existing setTransform() call sites that never touched the origin
-    // continue to get a plain concat (backward-compat with #930). When
-    // an explicit origin is set, the canvas op equivalent of "transform
-    // around origin (ox, oy)" is
+    // transform-origin applies to the matrix path only when the caller has
+    // explicitly called setTransformOrigin. setTransform() call sites that
+    // never touched the origin continue to get a plain concat. When an explicit
+    // origin is set, the canvas op equivalent of "transform around origin
+    // (ox, oy)" is
     //   translate(ox, oy) ; concat(M) ; translate(-ox, -oy).
     if (has_transform_matrix_) {
         const bool apply_origin = origin_explicit_;
@@ -250,7 +242,7 @@ void View::paint_all(canvas::Canvas& canvas) {
         if (apply_origin) canvas.translate(-ox, -oy);
     }
 
-    // CSS `backdrop-filter: blur(N)` (issue-926). A separate compositing layer
+    // CSS `backdrop-filter: blur(N)`. A separate compositing layer
     // whose initial content is the parent surface blurred — sits BELOW the
     // widget's own opacity/filter layer so background, border, and children
     // composite over the frosted backdrop. Paired with the matching restore()
@@ -262,20 +254,18 @@ void View::paint_all(canvas::Canvas& canvas) {
     }
 
     // Compositing layer for opacity, blur, or post-effects.
-    // pulp #936 P1 / #949 — both the outset box-shadow and the overflow
-    // clip must be pushed AFTER this saveLayer so that the view's
-    // own opacity / filter layer contains them. Pre-fix, the outset
-    // shadow was painted onto the parent's compositing context (before
-    // saveLayer) which broke CSS opacity stacking and could mask
-    // subsequent child-layer content on certain Skia paths.
-    // pulp #1549 — `mix-blend-mode` forces a saveLayer the same way
-    // opacity / filter does so the subtree composites back through the
-    // requested blend mode at restore() time. Default `BlendMode::normal`
-    // is a paint-time no-op (kSrcOver) and stays out of `needs_layer`.
+    // Both the outset box-shadow and the overflow clip must be pushed after
+    // this saveLayer so that the view's own opacity / filter layer contains
+    // them; otherwise CSS opacity stacking can be wrong and subsequent
+    // child-layer content can be masked on some Skia paths.
+    // `mix-blend-mode` forces a saveLayer the same way opacity / filter does so
+    // the subtree composites back through the requested blend mode at restore()
+    // time. Default `BlendMode::normal` is a paint-time no-op (kSrcOver) and
+    // stays out of `needs_layer`.
     const bool needs_blend_layer = has_non_default_blend_mode();
-    // pulp #1737 / #1515 — CSS mask-image opens a compositing layer so
-    // the masked subtree paints into an offscreen buffer that the mask
-    // shader composites against via kDstIn at restore time.
+    // CSS mask-image opens a compositing layer so the masked subtree paints
+    // into an offscreen buffer that the mask shader composites against via
+    // kDstIn at restore time.
     const bool needs_mask_layer = !mask_image_.empty() && mask_image_ != "none";
     bool needs_layer = (opacity_ < 1.0f) || (filter_blur_ > 0.0f)
                        || !filter_chain_.empty() || needs_layer_
@@ -286,25 +276,21 @@ void View::paint_all(canvas::Canvas& canvas) {
         if (effect_) {
             effect_->configure_layer(canvas, 0, 0, bounds_.width, bounds_.height);
         } else if (needs_mask_layer) {
-            // pulp #1737 / #1515 — CSS mask-image + mask-size composite.
-            // SkiaCanvas: opens layer + queues mask shader, restore()
-            // applies the mask via SkBlendMode::kDstIn before closing.
-            // RecordingCanvas / CG / fallback backends route through
-            // the default impl which collapses to plain save_layer
-            // (mask silently bypassed — pre-#1737 behavior). The
-            // mask layer takes precedence over filter / blend wraps
-            // here because the mask is the OUTERMOST composite per
-            // CSS Masking Module Level 1 spec; nested filter/blend
-            // belongs INSIDE the masked content (a follow-up slice
-            // can stack save_layer_with_mask + save_layer_with_filters
-            // when both are set on the same view).
+            // CSS mask-image + mask-size composite. SkiaCanvas opens a layer
+            // and queues a mask shader; restore() applies the mask via
+            // SkBlendMode::kDstIn before closing. RecordingCanvas / CG /
+            // fallback backends route through the default implementation,
+            // which collapses to plain save_layer and bypasses the mask. The
+            // mask layer takes precedence over filter / blend wraps here
+            // because the mask is the outermost composite per CSS Masking
+            // Module Level 1; nested filter/blend belongs inside the masked
+            // content.
             canvas.save_layer_with_mask(0, 0, bounds_.width, bounds_.height,
                                          opacity_, mask_image_, mask_size_);
         } else if (!filter_chain_.empty()) {
-            // pulp #1434 Phase A2-4 — full CSS filter chain. Translate
-            // View::FilterOp into canvas::FilterChainEntry (parallel
-            // shape) and hand off to the canvas backend; Skia composes
-            // via SkImageFilters, CG falls back to blur-only.
+            // Full CSS filter chain. Translate View::FilterOp into
+            // canvas::FilterChainEntry and hand off to the canvas backend;
+            // Skia composes via SkImageFilters, CG falls back to blur-only.
             std::vector<pulp::canvas::Canvas::FilterChainEntry> chain;
             chain.reserve(filter_chain_.size());
             for (const auto& op : filter_chain_) {
@@ -335,8 +321,7 @@ void View::paint_all(canvas::Canvas& canvas) {
                                             opacity_, chain.data(),
                                             static_cast<int>(chain.size()));
         } else if (needs_blend_layer) {
-            // pulp #1549 — saveLayer with explicit blend mode for
-            // CSS / RN `mix-blend-mode`.
+            // saveLayer with explicit blend mode for CSS / RN `mix-blend-mode`.
             canvas.save_layer_with_blend(0, 0, bounds_.width, bounds_.height,
                                          opacity_, filter_blur_, mix_blend_mode_);
         } else {
@@ -360,26 +345,22 @@ void View::paint_all(canvas::Canvas& canvas) {
     }
 
     // Clip only when overflow:hidden / overflow:scroll is explicitly
-    // opted into. Default is overflow:visible (CSS default, pulp #972)
+    // opted into. Default is overflow:visible (CSS default)
     // so absolutely-positioned popover/dropdown children that extend
     // outside the parent's content bounds still paint. `scroll` clips
     // the painted box like `hidden` per CSS spec — we don't have a
     // scrollbar layer yet, but the layout-side overflow propagation
     // is wired through Yoga so descendants measure correctly.
     if (overflow_ == Overflow::hidden || overflow_ == Overflow::scroll) {
-        // pulp-internal #70 — marker overflow tolerance. Common
-        // imported-design pattern: an XY pad (or similar drag-driven
-        // widget) sets overflow:hidden on the container AND positions
-        // a circular dot at left:cx-r, top:cy-r where (cx,cy) is the
-        // value-driven center. At edge values (0 or 1) half the dot
-        // sits outside the container's content bounds and gets
-        // chopped by the strict CSS clip — visually broken for an
-        // explicit interactive marker. Detect circle-markers
-        // (position:absolute, near-square bounds with border-radius
-        // ≥ 40% of the smaller dimension) and expand the clip rect
-        // just enough to admit them. Non-marker children (text,
-        // images, panels) still clip normally because they don't
-        // match the circle heuristic.
+        // Marker overflow tolerance. Common imported-design pattern: an XY pad
+        // or similar drag-driven widget sets overflow:hidden on the container
+        // and positions a circular dot at left:cx-r, top:cy-r where (cx,cy) is
+        // the value-driven center. At edge values (0 or 1) half the dot sits
+        // outside the container's content bounds and gets chopped by the strict
+        // CSS clip. Detect circle-markers (position:absolute, near-square
+        // bounds with border-radius >= 40% of the smaller dimension) and expand
+        // the clip rect just enough to admit them. Non-marker children still
+        // clip normally because they don't match the circle heuristic.
         float marker_pad = 0.0f;
         for (const auto& child : children_) {
             if (!child || !child->visible_) continue;
@@ -411,31 +392,27 @@ void View::paint_all(canvas::Canvas& canvas) {
         }
     }
 
-    // CSS `clip-path: path("...")` (pulp #1515). The View's local
-    // coordinate space is (0,0)→(bounds_.width, bounds_.height) at
-    // this point — the SVG-path-d string is interpreted in that
-    // space, matching CSS where `clip-path` is anchored at the
-    // border-box origin. The Skia backend parses via
-    // SkPath::FromSVGString and intersects the canvas clip;
-    // RecordingCanvas captures a `clip_path_svg` command for tests;
-    // backends without a path parser silently no-op. The clip is
-    // released by the matching `canvas.restore()` at the end of
-    // paint_all (no separate save() needed — the outer
-    // `canvas.save()` at function entry already covers it).
+    // CSS `clip-path: path("...")`. The View's local coordinate space is
+    // (0,0)→(bounds_.width, bounds_.height) at this point, so the SVG-path-d
+    // string is interpreted in the border-box coordinate space. The Skia
+    // backend parses via SkPath::FromSVGString and intersects the canvas clip;
+    // RecordingCanvas captures a `clip_path_svg` command for tests; backends
+    // without a path parser silently no-op. The clip is released by the
+    // matching `canvas.restore()` at the end of paint_all; the outer
+    // `canvas.save()` at function entry already covers it.
     if (!clip_path_.empty())
         canvas.clip_path_svg(clip_path_);
 
-    // Per-corner border-radius (issue-1026): when any of the
+    // Per-corner border-radius: when any of the
     // setBorderTopLeftRadius / TopRight / BottomLeft / BottomRight setters
     // has been called we paint backgrounds and the border via a path
     // approximating each corner independently. Otherwise we keep using the
     // canvas's optimized fill_rounded_rect / stroke_rounded_rect with the
     // uniform corner_radius_.
     //
-    // pulp #1737 RN-OOS-fixup (#1812) — `borderCurve: continuous` (RN
-    // iOS-style squircle) forces the path-based path generator regardless
-    // of per-corner state, because the canvas's optimized
-    // fill_rounded_rect uses circular corners only.
+    // `borderCurve: continuous` (RN iOS-style squircle) forces the path-based
+    // path generator regardless of per-corner state, because the canvas's
+    // optimized fill_rounded_rect uses circular corners only.
     const bool use_continuous = (border_curve_ == BorderCurve::continuous);
     const bool use_per_corner = has_corner_radii_ || use_continuous;
     // Inline dispatcher: pick the path generator (per-corner circular vs
@@ -449,10 +426,10 @@ void View::paint_all(canvas::Canvas& canvas) {
         }
     };
 
-    // pulp #1731 Codex P1 — paint sites must read effective_* which honor
-    // the percent slots (corner_radius_pct_, corner_radii_pct_[]). Reading
-    // the raw px slots makes `setBorderRadius('50%')` and per-corner
-    // percent setters silently no-op.
+    // Paint sites must read effective_* so percent slots
+    // (corner_radius_pct_, corner_radii_pct_[]) resolve against the box size.
+    // Reading the raw px slots makes `setBorderRadius('50%')` and per-corner
+    // percent setters no-op.
     const float eff_r = effective_corner_radius(bounds_.width, bounds_.height);
     const float eff_tl = effective_corner_radius_tl(bounds_.width, bounds_.height);
     const float eff_tr = effective_corner_radius_tr(bounds_.width, bounds_.height);
@@ -508,13 +485,11 @@ void View::paint_all(canvas::Canvas& canvas) {
         }
     }
 
-    // Paint border if set
-    // pulp #1434 Triage #10 — border-style honored at paint time.
+    // Paint border if set. border-style is honored at paint time:
     // `none` / `hidden` short-circuit; `dashed` / `dotted` install a
     // SkDashPathEffect via canvas.set_line_dash(...) before stroking.
     // Other named styles (`double` / `groove` / `ridge` / `inset` /
-    // `outset`) currently degrade to solid — Skia / CG plumbing for
-    // those is a follow-up paint slice.
+    // `outset`) currently degrade to solid.
     if (has_border_ && border_width_ > 0
             && border_style_ != BorderStyle::none
             && border_style_ != BorderStyle::hidden) {
@@ -552,19 +527,16 @@ void View::paint_all(canvas::Canvas& canvas) {
         }
     }
 
-    // Widget-specific painting. (Phase 3d timing moved to wrap the
-    // whole paint_all body — see outer_t0 at the top + write-back at
-    // the bottom. This means `paint(canvas)` no-op overrides on
-    // styled containers still get accurate self-time attribution.)
+    // Widget-specific painting. The outer timer wraps the whole paint_all body,
+    // so `paint(canvas)` no-op overrides on styled containers still get
+    // accurate self-time attribution.
     paint(canvas);
 
-    // Paint children — pulp #972. CSS z-index ordering: stable-sort
+    // Paint children. CSS z-index ordering: stable-sort
     // ascending by z_index() so siblings with equal z keep insertion
     // order (CSS painting-order rule). Higher z paints later, ending
-    // up visually on top. The default z_index_ is 0, so views that
-    // never call set_z_index() retain insertion order — no behaviour
-    // change for legacy plugins. setZIndex() on the JS bridge has
-    // existed as a no-op until now; this hooks it up.
+    // up visually on top. The default z_index_ is 0, so views that never call
+    // set_z_index() retain insertion order.
     auto paint_order = sorted_children_by_z_index();
     auto children_t0 = std::chrono::steady_clock::now();
     for (View* child : paint_order) {
@@ -584,7 +556,7 @@ void View::paint_all(canvas::Canvas& canvas) {
                                eff_r);
     }
 
-    // CSS / RN outline (pulp #1519). Paints OUTSIDE the border-box and
+    // CSS / RN outline. Paints OUTSIDE the border-box and
     // does NOT take up Yoga layout space (parent never reserves room
     // for it). The stroke is centered on the inflated rect, so the
     // visual outline edge lies at offset (outline_offset + outline_width)
@@ -643,18 +615,17 @@ void View::paint_all(canvas::Canvas& canvas) {
     if (needs_layer)
         canvas.restore();
 
-    // End backdrop-filter layer (issue-926). Composites the widget's own
+    // End backdrop-filter layer. Composites the widget's own
     // opacity layer over the blurred parent backdrop.
     if (needs_backdrop_layer)
         canvas.restore();
 
     canvas.restore();
 
-    // Phase 3d timing write-back (Codex P2 #2338 follow-up). Outer
-    // delta covers all framework drawing + paint() + inset shadows +
-    // layer restores. Subtract children to get true self-time even
-    // when the view has no paint() override. Saturating cast at
-    // uint32_t max (~4.29s) so a pathological frame doesn't wrap.
+    // Timing write-back. Outer delta covers all framework drawing + paint() +
+    // inset shadows + layer restores. Subtract children to get true self-time
+    // even when the view has no paint() override. Saturating cast at uint32_t
+    // max (~4.29s) so a pathological frame doesn't wrap.
     auto outer_dt = std::chrono::steady_clock::now() - outer_t0;
     auto total_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(outer_dt).count();
     auto children_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(children_dt).count();
@@ -668,10 +639,10 @@ void View::paint_all(canvas::Canvas& canvas) {
 
 void View::simulate_click(Point root_pos) {
     auto* target = hit_test(root_pos);
-    // Phase 10: record the synthetic input into the active motion
-    // fixture BEFORE dispatch so replay sees the same target lookup
-    // the original recording captured (target id is what we resolve,
-    // not "wherever this click would land at replay time").
+    // Record the synthetic input into the active motion fixture before
+    // dispatch so replay sees the same target lookup the original recording
+    // captured: target id is what we resolve, not "wherever this click would
+    // land at replay time".
     if (pulp::view::motion::input_recording_enabled()) {
         const std::string id = target ? target->id() : std::string();
         std::vector<std::pair<std::string, double>> coords;
@@ -692,17 +663,16 @@ void View::simulate_click(Point root_pos) {
 
     target->on_mouse_down(local);
     target->on_mouse_up(local);
-    // pulp #1067 — DOM-style click bubbling. `hit_test` returns the deepest
+    // DOM-style click bubbling. `hit_test` returns the deepest
     // hit-testable view, which for `<button onClick=...>Label</button>` is
     // the inner Label child. Walk up the parent chain to find the nearest
     // ancestor with a registered handler. Mirrors the same bubble pass the
     // mac mouseUp path performs (see core/view/platform/mac/window_host_mac.mm).
     //
-    // pulp #1171 (Codex P2 on #1073) — bound the bubble walk to `this`
-    // (inclusive). Walking past the receiver into ancestors outside its
-    // subtree leaks synthetic clicks across component boundaries — a
-    // false-positive hazard for tests / tooling that simulate
-    // interaction on isolated subtrees.
+    // Bound the bubble walk to `this` (inclusive). Walking past the receiver
+    // into ancestors outside its subtree leaks synthetic clicks across
+    // component boundaries, a false-positive hazard for tests / tooling that
+    // simulate interaction on isolated subtrees.
     View* click_target = target;
     while (click_target && !click_target->on_click) {
         if (click_target == this) break;  // stop at receiver, even if no handler
@@ -841,8 +811,8 @@ std::vector<View*> View::sorted_children_by_z_index() const {
     std::vector<View*> result;
     result.reserve(children_.size());
     for (const auto& child : children_) result.push_back(child.get());
-    // Stable sort so siblings with equal z_index() retain insertion
-    // order (CSS painting-order rule, pulp #972).
+    // Stable sort so siblings with equal z_index() retain insertion order
+    // (CSS painting-order rule).
     std::stable_sort(result.begin(), result.end(),
         [](const View* a, const View* b) {
             return a->z_index() < b->z_index();
@@ -853,7 +823,7 @@ std::vector<View*> View::sorted_children_by_z_index() const {
 View* View::hit_test(Point local_point) {
     if (!visible_ || !enabled_ || !hit_testable_) return nullptr;
 
-    // React Native pointerEvents (issue-1026):
+    // React Native pointerEvents:
     //   none      — neither this view nor children intercept events.
     //   box_none  — this view is invisible to hit-testing but children
     //               can still receive events (descend, but never return self).
@@ -862,7 +832,7 @@ View* View::hit_test(Point local_point) {
     //   auto_     — default behavior.
     if (pointer_events_ == PointerEvents::none) return nullptr;
 
-    // Check children topmost-first (pulp #972). With z-index honored,
+    // Check children topmost-first. With z-index honored,
     // "topmost" means highest z_index — and at equal z, latest insertion
     // — so iterate the z-sorted paint order in reverse. Without this,
     // a high-z popover could render on top yet have clicks fall through
@@ -879,9 +849,8 @@ View* View::hit_test(Point local_point) {
             // For overflow:visible, expand the hit area on all four sides
             // to include content that extends beyond the child's bounds
             // (e.g. dropdowns/popovers that grow downward, leftward, etc.).
-            // The 500px slack is symmetric so left-extending popovers
-            // (e.g. the Spectr bands picker) get hit-tested correctly —
-            // see pulp #1148 for the original right/down-only asymmetry.
+            // The 500px slack is symmetric so popovers that extend in any
+            // direction get hit-tested correctly.
             bool in_bounds = child->local_bounds().contains(child_point);
             if (!in_bounds && child->overflow() == Overflow::visible) {
                 auto lb = child->local_bounds();
@@ -920,9 +889,9 @@ std::vector<View::OverlayRequest>& View::overlay_queue() {
 // to avoid circular dependency (view → inspect).
 static std::function<void(canvas::Canvas&, View*)> s_inspector_paint_hook;
 static std::function<bool(const KeyEvent&)> s_inspector_key_hook;
-// WYSIWYG P4 FIX 1 — mouse/text/cursor hooks now carry the event's root View
-// (mirroring the paint hook's painting_root) so the installed hook can gate to
-// the inspected canvas root and ignore a secondary window's events.
+// Mouse/text/cursor hooks carry the event's root View, mirroring the paint
+// hook's painting_root, so the installed hook can gate to the inspected canvas
+// root and ignore a secondary window's events.
 static std::function<bool(const MouseEvent&, View*)> s_inspector_mouse_hook;
 static std::function<bool(const TextInputEvent&, View*)> s_inspector_text_hook;
 
@@ -962,19 +931,19 @@ int View::call_inspector_cursor_hook(const MouseEvent& e, View* event_root) {
                                    : -1;
 }
 
-// pulp #1148 — generalized overlay-click routing.
+// Generalized overlay-click routing.
 View* View::active_overlay_ = nullptr;
 
-// pulp #1708 — global input-focus slot. Auto-cleared by ~View() when the
-// focused widget is destroyed, preventing use-after-free in the platform
-// window host's keyDown handler.
+// Global input-focus slot. Auto-cleared by ~View() when the focused widget is
+// destroyed, preventing use-after-free in the platform window host's keyDown
+// handler.
 View* View::focused_input_ = nullptr;
 
-// pulp #1361 — dismiss-path release. Pulls the slot, then fires the
-// dismissed View's `on_overlay_dismissed` callback so React state can
-// sync. Order matters: clear the slot FIRST so a callback that calls
-// claim_overlay() on a replacement popover doesn't immediately get
-// nulled out by our subsequent clear.
+// Dismiss-path release. Pulls the slot, then fires the dismissed View's
+// `on_overlay_dismissed` callback so React state can sync. Order matters:
+// clear the slot first so a callback that calls claim_overlay() on a
+// replacement popover doesn't immediately get nulled out by our subsequent
+// clear.
 void View::dismiss_active_overlay() {
     View* victim = active_overlay_;
     if (!victim) return;
@@ -986,7 +955,7 @@ void View::dismiss_active_overlay() {
 
 namespace {
 
-// pulp #1320 — recursively expand a child's painted-bounds contribution
+// Recursively expand a child's painted-bounds contribution
 // up through any `overflow:visible` descendants. Returns the bounding
 // rect (in window coords) of `v` and every transitive descendant whose
 // chain back to `v` is entirely overflow:visible. A descendant inside
@@ -1040,8 +1009,8 @@ bool View::overlay_contains(Point window_pt) const {
         return true;
     }
 
-    // pulp #1320 — extend the hit area to include the painted bounding
-    // box of any `overflow:visible` descendants. CSS `overflow:visible`
+    // Extend the hit area to include the painted bounding box of any
+    // `overflow:visible` descendants. CSS `overflow:visible`
     // semantics: a child painting outside the parent is still
     // visible/clickable. Without this, a popover positioned via
     // `position:absolute; top: 28; right: 0` extends LEFTWARD beyond
@@ -1073,10 +1042,10 @@ void View::paint_overlays(canvas::Canvas& canvas, View* painting_root) {
     queue.clear();
 
     // Inspector paint hook — called after all overlays, topmost layer.
-    // `painting_root` is forwarded so the hook can gate (WYSIWYG P2e): the
-    // in-canvas overlay must paint its selection box / handles / drop
-    // indicators ONLY on the inspected root, never into the floating
-    // InspectorWindow's own root at the overlay's root coordinates.
+    // `painting_root` is forwarded so the hook can gate to the inspected root:
+    // the in-canvas overlay must paint its selection box / handles / drop
+    // indicators only on that root, never into the floating InspectorWindow's
+    // own root at the overlay's root coordinates.
     if (s_inspector_paint_hook) {
         s_inspector_paint_hook(canvas, painting_root);
     }
@@ -1096,7 +1065,7 @@ float View::resolve_dimension(const std::string& name, float fallback) const {
     return fallback;
 }
 
-// ── CSS-style typography inheritance (issue-969) ────────────────────────
+// ── CSS-style typography inheritance ─────────────────────────────────────
 //
 // Each inheritable_*() walks the chain own → parent → … → root, returning
 // the first ancestor that has a value. nullopt means no one in the chain
@@ -1183,11 +1152,10 @@ void View::request_repaint() {
     // no-op — paint is already on the way for the initial mount, or
     // there's no surface to paint to yet.
     //
-    // Slice 16 — route through WindowHost::mark_dirty(), the canonical
-    // "set a dirty flag, repaint on the next vblank" path. When a
-    // RenderLoop is attached this coalesces N change notifications in one
-    // frame into a single vsync-paced repaint; otherwise mark_dirty()
-    // degrades to a direct repaint() (unchanged behavior).
+    // Route through WindowHost::mark_dirty(), the canonical "set a dirty flag,
+    // repaint on the next vblank" path. When a RenderLoop is attached this
+    // coalesces N change notifications in one frame into a single vsync-paced
+    // repaint; otherwise mark_dirty() degrades to a direct repaint().
     if (window_host_) {
         window_host_->mark_dirty();
     } else if (plugin_view_host_) {
@@ -1247,8 +1215,8 @@ void View::simulate_hover(Point root_pos) {
     }
     if (target) {
         target->set_hovered(true);
-        // WYSIWYG T1 — also deliver a positioned hover sample so a widget can
-        // track WHICH sub-region of itself the pointer is over (e.g. the
+        // Also deliver a positioned hover sample so a widget can track which
+        // sub-region of itself the pointer is over (e.g. the
         // inspector ToolStrip's per-button tooltip, which set_hovered() alone
         // can't drive because on_mouse_enter carries no coordinate). Convert
         // the root-space point into the target's local space by subtracting
@@ -1291,7 +1259,7 @@ std::vector<GridTrack> GridStyle::parse_template(const std::string& tmpl, int de
 
     // Parse a numeric prefix without throwing; std::stof on a non-numeric
     // token (e.g. the CSS initial value `none`) used to throw out of
-    // WidgetBridge::load_script (#2704). Returns false for unparseable tokens.
+    // WidgetBridge::load_script. Returns false for unparseable tokens.
     auto try_parse = [](const std::string& s, float& out) -> bool {
         try {
             size_t consumed = 0;
@@ -1344,7 +1312,7 @@ std::vector<GridTrack> GridStyle::parse_template(const std::string& tmpl, int de
 }
 
 std::vector<GridStyle::NamedArea> GridStyle::parse_template_areas(const std::string& css) {
-    // pulp #1434 Phase A2-2 — parse CSS grid-template-areas:
+    // Parse CSS grid-template-areas:
     //   "'header header header' 'main side side' 'footer footer footer'"
     // Each single-quoted segment is one row; cells are space-separated.
     // Adjacent cells with the same name (in the same row OR across
@@ -1634,9 +1602,8 @@ float View::intrinsic_height() const {
     // Containers: sum visible children's heights + gaps (CSS auto height behavior)
     if (children_.empty()) return 0;
 
-    // pulp #1434 (rn batch B) — column_reverse is still a column-axis
-    // container for the auto-height calculation; only true row
-    // containers skip child-summed height.
+    // column_reverse is still a column-axis container for the auto-height
+    // calculation; only true row containers skip child-summed height.
     bool is_col = (flex_.direction == FlexDirection::column ||
                    flex_.direction == FlexDirection::column_reverse);
     if (!is_col) return 0;  // Row containers don't auto-height from children
@@ -1688,8 +1655,8 @@ void View::layout_children() {
     float pl = flex_.padding_left >= 0 ? flex_.padding_left : flex_.padding;
     area = {area.x + pl, area.y + pt, area.width - pl - pr, area.height - pt - pb};
 
-    // pulp #1434 (rn batch B) — row_reverse is still a row-axis
-    // container; only the visual order of children is reversed.
+    // row_reverse is still a row-axis container; only the visual order of
+    // children is reversed.
     bool is_row = (flex_.direction == FlexDirection::row ||
                    flex_.direction == FlexDirection::row_reverse);
     float main_size = is_row ? area.width : area.height;
@@ -1848,11 +1815,10 @@ void View::layout_children() {
             case FlexAlign::end:
                 cross_pos += avail_cross - l.cross_size;
                 break;
-            // pulp #1434 (rn batch B) — baseline alignment in the manual
-            // (non-Yoga) layout fallback approximates as start since
-            // glyph baseline metrics aren't surfaced here. Yoga's
-            // YGAlignBaseline path is the correct rendering when
-            // PULP_HAS_YOGA is on (the default).
+            // Baseline alignment in the manual (non-Yoga) layout fallback
+            // approximates as start since glyph baseline metrics aren't
+            // surfaced here. Yoga's YGAlignBaseline path is the correct
+            // rendering when PULP_HAS_YOGA is on (the default).
             case FlexAlign::baseline:
                 break;
         }

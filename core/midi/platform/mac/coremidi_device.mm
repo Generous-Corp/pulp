@@ -24,10 +24,9 @@ public:
             kMIDIProtocol_1_0, &port_,
             ^(const MIDIEventList* evtlist, void* __nullable) {
                 // Walk UMP messages by their declared word size (MIDI 2.0
-                // spec M2-104-UM). Workstream 01 slice 1.6 — previously
-                // we incremented one word at a time and only handled type
-                // 0x02, so a type-0x04 packet's second word would have
-                // been mis-parsed as a new message header.
+                // spec M2-104-UM) so multi-word packets advance the cursor
+                // as a single message. Otherwise a type-0x04 packet's
+                // second word can be mis-parsed as a new message header.
                 static constexpr uint8_t kWordsByType[16] = {
                     1, 1, 1, 2, 2, 4, 4, 1,
                     2, 2, 2, 3, 3, 4, 4, 4
@@ -63,13 +62,11 @@ public:
                         } else if (type == 0x03) {
                             // SysEx7 (UMP type 3) — reassemble multi-
                             // packet payloads via the shared
-                            // UmpSysex7Reassembler. macOS plan 8.2
-                            // extracted the previously inline #292 fix
-                            // to a single, tested class shared with
-                            // the AUv3 adapter; reassembler state
-                            // lives on this CoreMidiInput so a
-                            // multi-packet sysex spanning callback
-                            // invocations accumulates correctly.
+                            // UmpSysex7Reassembler. The reassembler state
+                            // lives on this CoreMidiInput so a multi-packet
+                            // sysex spanning callback invocations accumulates
+                            // correctly and shares the tested state machine
+                            // with the AUv3 adapter.
                             const uint32_t word1 =
                                 packet->words[wordIdx + 1];
                             struct EmitCtx {
@@ -87,7 +84,8 @@ public:
                                 word, word1, emit, &ctx);
                         }
                         // Other UMP types (utility, system, SysEx8,
-                        // stream, flex) intentionally skipped this slice.
+                        // stream, flex) are ignored by this MIDI 1.0 input
+                        // adapter for now.
                         wordIdx += words_in_message;
                     }
                     packet = MIDIEventPacketNext(packet);

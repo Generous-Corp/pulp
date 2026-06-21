@@ -1,5 +1,3 @@
-// test_bidi_text.cpp — Pulp item 6.8 / 2026-05-24 macOS plugin-authoring plan.
-//
 // Exercises core/canvas::BidiAnalyzer (SheenBidi-backed paragraph
 // Unicode Bidirectional Algorithm) and verifies that the
 // TextRunPlanner non-ICU fallback path emits correct bidi runs for
@@ -60,12 +58,12 @@ std::string concat3(std::string_view a, std::string_view b, std::string_view c) 
 
 }  // namespace
 
-TEST_CASE("BidiAnalyzer empty input is empty", "[bidi][issue-6.8]") {
+TEST_CASE("BidiAnalyzer empty input is empty", "[bidi]") {
     auto bp = BidiAnalyzer::analyze("", BidiBaseDirection::Auto);
     REQUIRE(bp.runs.empty());
 }
 
-TEST_CASE("BidiAnalyzer pure-Latin is one LTR run", "[bidi][issue-6.8]") {
+TEST_CASE("BidiAnalyzer pure-Latin is one LTR run", "[bidi]") {
     auto bp = BidiAnalyzer::analyze("Hello, world!", BidiBaseDirection::Auto);
     REQUIRE(bp.runs.size() == 1);
     REQUIRE(bp.runs[0].level == 0);
@@ -74,7 +72,7 @@ TEST_CASE("BidiAnalyzer pure-Latin is one LTR run", "[bidi][issue-6.8]") {
 }
 
 TEST_CASE("BidiAnalyzer pure-Hebrew has base level 1 and an RTL run",
-          "[bidi][issue-6.8]") {
+          "[bidi]") {
     auto bp = BidiAnalyzer::analyze(kHebrewShalom, BidiBaseDirection::Auto);
     REQUIRE_FALSE(bp.runs.empty());
 
@@ -96,7 +94,7 @@ TEST_CASE("BidiAnalyzer pure-Hebrew has base level 1 and an RTL run",
 }
 
 TEST_CASE("BidiAnalyzer pure-Arabic has base level 1 and an RTL run",
-          "[bidi][issue-6.8]") {
+          "[bidi]") {
     auto bp = BidiAnalyzer::analyze(kArabicMarhaba, BidiBaseDirection::Auto);
     REQUIRE_FALSE(bp.runs.empty());
 
@@ -111,7 +109,7 @@ TEST_CASE("BidiAnalyzer pure-Arabic has base level 1 and an RTL run",
 }
 
 TEST_CASE("BidiAnalyzer mixed Latin + Arabic emits multiple runs",
-          "[bidi][issue-6.8]") {
+          "[bidi]") {
     // "Hello مرحبا world" — Latin prefix, Arabic middle, Latin suffix.
     const std::string mixed = concat3(kLatinHello, kArabicMarhaba, kLatinWorld);
     auto bp = BidiAnalyzer::analyze(mixed, BidiBaseDirection::Auto);
@@ -155,7 +153,7 @@ TEST_CASE("BidiAnalyzer mixed Latin + Arabic emits multiple runs",
 }
 
 TEST_CASE("BidiAnalyzer Latin + Hebrew emits multiple runs",
-          "[bidi][issue-6.8]") {
+          "[bidi]") {
     const std::string mixed = concat3(kLatinHello, kHebrewShalom, kLatinWorld);
     auto bp = BidiAnalyzer::analyze(mixed, BidiBaseDirection::Auto);
 
@@ -179,7 +177,7 @@ TEST_CASE("BidiAnalyzer Latin + Hebrew emits multiple runs",
     }
 }
 
-TEST_CASE("BidiAnalyzer respects forced base direction", "[bidi][issue-6.8]") {
+TEST_CASE("BidiAnalyzer respects forced base direction", "[bidi]") {
     // Forcing RTL on a Latin-only string still gives base_level = 1
     // even though all individual runs are LTR (level 0). This is the
     // UBA rule P3 surface — useful for an editor where the user picked
@@ -199,7 +197,7 @@ TEST_CASE("BidiAnalyzer respects forced base direction", "[bidi][issue-6.8]") {
 }
 
 TEST_CASE("BidiAnalyzer visual_order reverses RTL-only paragraph",
-          "[bidi][issue-6.8]") {
+          "[bidi]") {
     // Three runs at level 1 (all RTL) — visual order should reverse
     // them so the rightmost logical run paints first.
     std::vector<BidiRun> runs = {
@@ -215,7 +213,7 @@ TEST_CASE("BidiAnalyzer visual_order reverses RTL-only paragraph",
 }
 
 TEST_CASE("BidiAnalyzer visual_order leaves LTR runs alone",
-          "[bidi][issue-6.8]") {
+          "[bidi]") {
     std::vector<BidiRun> runs = {
         {0,  4, 0},
         {4,  6, 0},
@@ -227,7 +225,7 @@ TEST_CASE("BidiAnalyzer visual_order leaves LTR runs alone",
 }
 
 TEST_CASE("BidiAnalyzer visual_order reverses RTL island inside LTR",
-          "[bidi][issue-6.8]") {
+          "[bidi]") {
     // Mixed Latin-Hebrew-Latin: logical order is L0, L1, L0; visual
     // order keeps L0 runs in place but the L1 run stays in the middle
     // (single RTL run reverses trivially to itself). The interesting
@@ -247,7 +245,7 @@ TEST_CASE("BidiAnalyzer visual_order reverses RTL island inside LTR",
 }
 
 TEST_CASE("TextRunPlanner emits multiple runs for mixed Latin+Arabic",
-          "[bidi][issue-6.8][planner]") {
+          "[bidi][planner]") {
     // Even on builds without Skia (non-ICU path), the new SheenBidi
     // fallback should let the planner emit more than one run for
     // mixed-direction text. Under PULP_HAS_SKIA the ICU path also

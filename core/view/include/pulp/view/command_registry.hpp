@@ -4,11 +4,10 @@
 /// CommandRegistry + CommandHandler + CommandInfo + ShortcutMap — Pulp-native
 /// command dispatch and keyboard-shortcut routing.
 ///
-/// Pulp-native naming per the license-lineage note in
-/// `planning/2026-05-24-macos-plugin-authoring-plan.md` section 6.4: the
-/// primitives are deliberately *not* named after any reference framework's
-/// classes. The behavior contract is "a key event finds the topmost focused
-/// handler that claims a command and dispatches to it".
+/// The primitives are named for Pulp's command model rather than mirroring
+/// any reference framework's class names. The behavior contract is "a key
+/// event finds the topmost focused handler that claims a command and
+/// dispatches to it".
 ///
 /// ## Architecture
 ///
@@ -44,7 +43,7 @@
 ///   (a) call `dispatch_key_event` BEFORE the normal `on_key_event`
 ///       delivery — global shortcuts win;
 ///   (b) call it AFTER — focused widget wins, with the registry as a
-///       fall-through (the macOS-MVP plan's default).
+///       fall-through after focused-widget handling.
 ///
 /// ## Persistence
 ///

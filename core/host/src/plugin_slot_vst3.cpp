@@ -2,9 +2,9 @@
 //
 // Loads a .vst3 bundle, resolves GetPluginFactory, creates the first audio
 // processor class, and wires the PluginSlot interface onto IComponent +
-// IAudioProcessor. Minimum viable host — covers audio pass-through with
-// stereo 2-in/2-out, latency reporting, and bypass. Parameter automation,
-// state serialization, MIDI routing, and editor views are follow-up work.
+// IAudioProcessor. The host covers audio pass-through with stereo 2-in/2-out,
+// latency reporting, bypass, parameter edits, MIDI note events, and state
+// serialization. Editor views are not exposed by this backend yet.
 
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/runtime/log.hpp>
@@ -22,7 +22,7 @@
 #include <pluginterfaces/vst/ivstparameterchanges.h>
 #include <pluginterfaces/base/ibstream.h>
 
-// Hosting helpers — workstream 03 slice 3.5.
+// SDK helper containers used for block-local event and parameter queues.
 #include <public.sdk/source/vst/hosting/parameterchanges.h>
 #include <public.sdk/source/vst/hosting/eventlist.h>
 
@@ -187,10 +187,9 @@ public:
         processor_->setProcessing(true);
         max_block_size_ = max_block_size;
         active_ = true;
-        // #307 Codex P1 follow-up: reserve both pending-edit vectors
-        // so the audio-thread swap + drain cycle never hits a
-        // grow-and-copy allocation. One slot per advertised
-        // parameter is the worst case when every knob moves in a
+        // Reserve both pending-edit vectors so the audio-thread swap + drain
+        // cycle never hits a grow-and-copy allocation. One slot per
+        // advertised parameter is the worst case when every knob moves in a
         // single block.
         {
             std::lock_guard<std::mutex> lock(pending_host_edits_mu_);
@@ -250,11 +249,10 @@ public:
         ctx.sampleRate = sample_rate_;
         ctx.state      = Vst::ProcessContext::kPlaying;
 
-        // Build VST3 event list from Pulp's MidiBuffer. Workstream 03 3.5 —
-        // previously midi_in was discarded, so instruments loaded in the
-        // host received no MIDI. Maps note_on/note_off; other event types
-        // (CC, pitchbend, aftertouch) will follow when the host queue
-        // itself carries them — MidiBuffer today is choc::ShortMessage only.
+        // Build the VST3 event list from Pulp's MidiBuffer. The current host
+        // queue carries short MIDI messages, so this maps note_on/note_off
+        // and leaves richer event types to the queue layer that can represent
+        // them explicitly.
         in_events_.clear();
         for (auto it = midi_in.begin(); it != midi_in.end(); ++it) {
             const auto& me = *it;
@@ -294,27 +292,21 @@ public:
         // we round-trip via controller_->plainParamToNormalized().
         in_param_changes_.clearQueue();
 
-        // #297 drain: pull any host-originated set_parameter edits that
-        // arrived since the previous block. Delivered as time=0 points.
-        // try_lock so the audio thread never blocks on the host side;
-        // if contended, edits ride to the next process() call.
+        // Drain host-originated set_parameter edits that arrived since the
+        // previous block. Delivered as time=0 points. try_lock keeps the
+        // audio thread from blocking on the host side; if contended, edits
+        // ride to the next process() call.
         //
-        // #307 Codex P1 follow-up: the old impl kept pending_host_edits_
-        // as an unordered_map<uint32_t, ParamValue> and called .clear()
-        // under lock on the audio thread — stdlib unordered_map::clear()
-        // may deallocate bucket nodes, which violates RT-safety.
-        //
-        // Fix: two-buffer swap. The host thread writes into
-        // pending_host_edits_ (a std::vector<PendingEdit> with reserved
-        // capacity). The audio thread, under try_lock, std::swaps it
-        // with drain_scratch_ (also reserved) in O(1) — just swaps the
-        // internal pointers, no allocation. Lock goes out of scope; the
-        // audio thread iterates drain_scratch_ outside the lock to push
-        // CLAP_EVENT_PARAM_VALUE, then calls drain_scratch_.clear()
-        // which for std::vector is element destruction only — vector
-        // capacity is preserved by the standard, and ParamValue +
-        // uint32_t are trivially destructible so clear() compiles to
-        // "set size = 0". RT-safe by construction.
+        // The two-buffer swap keeps this RT-safe. The host thread writes
+        // into pending_host_edits_ (a std::vector<PendingEdit> with reserved
+        // capacity). The audio thread, under try_lock, std::swaps it with
+        // drain_scratch_ (also reserved) in O(1) -- just swaps the internal
+        // pointers, no allocation. Lock goes out of scope; the audio thread
+        // iterates drain_scratch_ outside the lock to push parameter points,
+        // then calls drain_scratch_.clear(), which for std::vector is element
+        // destruction only. Vector capacity is preserved by the standard, and
+        // ParamValue plus uint32_t are trivially destructible, so clear()
+        // compiles to "set size = 0". RT-safe by construction.
         if (controller_) {
             std::unique_lock<std::mutex> lock(pending_host_edits_mu_,
                                               std::try_to_lock);
@@ -384,19 +376,18 @@ public:
 
     void set_parameter(uint32_t id, float plain_value) override {
         if (!controller_) return;
-        // #297: host-originated edits must reach the processor. Mirror
-        // into the controller (for UI/state reads) AND queue a
-        // normalized point-at-time-0 edit for the next process() block
-        // to deliver via IParameterChanges.
+        // Host-originated edits must reach the processor. Mirror into the
+        // controller for UI/state reads and queue a normalized point-at-time-0
+        // edit for the next process() block to deliver via IParameterChanges.
         Vst::ParamValue norm =
             controller_->plainParamToNormalized(id, plain_value);
         controller_->setParamNormalized(id, norm);
 
-        // #307 Codex P1 follow-up: pending edits live in a reserved-
-        // capacity std::vector. Coalesce on the host side (linear scan)
-        // so the audio-thread drain stays allocation-free. set_parameter
-        // is user-gesture rate, not sample rate, so linear coalesce is
-        // cheap; the RT-safety win on the audio thread is worth it.
+        // Pending edits live in a reserved-capacity std::vector. Coalesce on
+        // the host side (linear scan) so the audio-thread drain stays
+        // allocation-free. set_parameter is user-gesture rate, not sample
+        // rate, so linear coalesce is cheap; the RT-safety win on the audio
+        // thread is worth it.
         std::lock_guard<std::mutex> lock(pending_host_edits_mu_);
         for (auto& e : pending_host_edits_) {
             if (e.id == id) { e.normalized = norm; return; }
@@ -444,9 +435,9 @@ public:
         return (int)processor_->getTailSamples();
     }
 
-    // Item 4.5 — typed plugin introspection. Surface the IComponent and
-    // related VST3 interfaces so callers that link against the SDK can
-    // reach into vendor extensions without round-tripping through `void*`.
+    // Typed plugin introspection surfaces the IComponent and related VST3
+    // interfaces so callers that link against the SDK can reach into vendor
+    // extensions without round-tripping through `void*`.
     void accept(ExtensionsVisitor& visitor) const override {
         Vst3Extension ext;
         ext.component = component_;
@@ -556,11 +547,10 @@ private:
     Vst::IAudioProcessor* processor_ = nullptr;
     Vst::IEditController* controller_ = nullptr;
     std::vector<HostParamInfo> params_;
-    // #297 + #307 Codex P1 follow-up: host set_parameter edits.
-    // Vector-backed so the audio thread's drain is allocation-free —
-    // std::swap(pending, drain_scratch_) is O(1); drain_scratch_.clear()
-    // preserves capacity. Coalescing happens on the host side in
-    // set_parameter (linear scan). Both vectors reserve() at
+    // Host set_parameter edits. Vector-backed so the audio thread's drain is
+    // allocation-free: std::swap(pending, drain_scratch_) is O(1) and
+    // drain_scratch_.clear() preserves capacity. Coalescing happens on the
+    // host side in set_parameter (linear scan). Both vectors reserve() at
     // prepare() time based on the plugin's parameter count.
     struct PendingEdit {
         uint32_t id;
@@ -571,8 +561,8 @@ private:
     std::vector<PendingEdit>    drain_scratch_;        // drained by audio
     std::vector<float*> in_ptrs_;
     std::vector<float*> out_ptrs_;
-    // Workstream 03 slice 3.5 — pre-allocated event/param buffers so the
-    // process callback never heap-allocates.
+    // Pre-allocated event/param buffers so the process callback never
+    // heap-allocates.
     Vst::EventList in_events_;
     Vst::ParameterChanges in_param_changes_;
     std::atomic<bool> bypassed_{false};
@@ -597,8 +587,8 @@ std::unique_ptr<PluginSlot> load_vst3_plugin(const PluginInfo& info) {
     auto* entry_fn = (bool (*)(void*))dlsym(handle, "bundleEntry");
     if (entry_fn) {
         // Without a real CFBundleRef, pass nullptr; most plugins tolerate
-        // this, though a few require a proper CFBundle. Adding CFBundle
-        // support is a follow-up.
+        // this, though a few require a proper CFBundle. Plugins that require
+        // CFBundle-backed initialization are not supported by this loader yet.
         entry_fn(nullptr);
     }
 #else

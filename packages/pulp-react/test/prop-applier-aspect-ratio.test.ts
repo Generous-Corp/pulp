@@ -1,7 +1,6 @@
-// pulp #1434 batch 5 — verify the @pulp/react prop-applier routes
-// `aspectRatio` through `setFlex(id, "aspect_ratio", value)`. Mirrors RN's
-// flex-prop surface so design-tool exports (Figma fixed-ratio frames,
-// v0/Claude Design hero images, RN image cards) reach the bridge.
+// Verify the @pulp/react prop-applier routes `aspectRatio` through
+// `setFlex(id, "aspect_ratio", value)`. Mirrors RN's flex-prop surface so
+// design-tool exports with fixed-ratio frames and image cards reach the bridge.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { applyChangedProps } from '../src/prop-applier.js';
@@ -29,7 +28,7 @@ function makeInstance(id: string = 'k', type: string = 'View'): PulpInstance {
     };
 }
 
-describe('prop-applier aspectRatio (pulp #1434)', () => {
+describe('prop-applier aspectRatio', () => {
     it('aspectRatio number routes through setFlex with snake-case key', () => {
         applyChangedProps(makeInstance(), {}, { aspectRatio: 1.5 });
         const call = bridge.calls.find(

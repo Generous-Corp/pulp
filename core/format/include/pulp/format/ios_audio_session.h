@@ -1,7 +1,7 @@
 #ifndef PULP_FORMAT_IOS_AUDIO_SESSION_H
 #define PULP_FORMAT_IOS_AUDIO_SESSION_H
 
-// C ABI bridge for iOS AVAudioSession ↔ Pulp C++ (workstream 05 slice 5.2).
+// C ABI bridge for iOS AVAudioSession <-> Pulp C++.
 //
 // The Swift layer (apple/Sources/PulpSwift/PulpAudioSession.swift) observes
 // AVAudioSession notifications and forwards them through this C function

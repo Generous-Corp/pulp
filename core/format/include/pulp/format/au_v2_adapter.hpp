@@ -244,32 +244,27 @@ private:
     // param writes/notifications never run on the render thread. See ctor.
     state::ListenerToken ui_push_listener_;
 
-    // Sample-accurate parameter-event sidecar, set on the Processor each block
-    // so the param-events contract is uniform across formats (VST3/CLAP/AUv3
-    // already provide it). AU v2's AUEffectBase has no scheduled/ramped
-    // parameter event source today, so this queue is empty: host parameter
-    // changes still reach the Processor through `store_` (StateStore) exactly as
-    // before — this adds the uniform API + the RT-safety guard without changing
-    // existing behaviour. Sample-accurate AU v2 param sourcing is a follow-up
-    // (AUv3 has the AURenderEventParameter model).
+    // Parameter-event sidecar, set on the Processor each block so the
+    // param-events contract is uniform across formats. AU v2's AUEffectBase
+    // has no scheduled/ramped parameter event source today, so this queue is
+    // empty: host parameter changes still reach the Processor through `store_`
+    // exactly as before.
     state::ParameterEventQueue param_events_;
 
     // Host accommodations, resolved once in the constructor via the
-    // runtime policy (host-quirks plan, P3).
+    // runtime policy.
     HostQuirks host_quirks_{};
 
     // Cached ParamID of the "Bypass" parameter (plugin-declared or
-    // synthesized via synthesize_bypass_parameter, host-quirks P3d). 0 when
-    // none — ProcessBufferLists then never short-circuits to pass-through.
+    // synthesized by host-quirk policy). 0 when none is available, so
+    // ProcessBufferLists never short-circuits to pass-through.
     state::ParamID bypass_param_id_ = 0;
     std::vector<const float*> input_ptrs_;
     std::vector<float*> output_ptrs_;
 
-    // Item 1.3 — previous-block transport snapshot used to derive the
-    // change flags (tempo_changed / time_sig_changed /
-    // transport_changed) on `ProcessContext`. Default-constructed (no
-    // previous block) so the first process() call after init reports
-    // no changes.
+    // Previous-block transport snapshot used to derive change flags on
+    // `ProcessContext`. Default-constructed so the first process() call
+    // after init reports no changes.
     detail::PlayheadSnapshot playhead_prev_{};
 
     // MIDI input path — AU v2 effects that declare accepts_midi are packaged as

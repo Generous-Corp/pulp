@@ -1,8 +1,7 @@
-// pulp #1434 Triage #10 — verify the @pulp/react prop-applier forwards
-// `borderStyle` keyword strings verbatim to the bridge's setBorderStyle.
-// Bridge maps to View::BorderStyle and Skia honors dashed / dotted via
-// SkDashPathEffect at stroke time. Other named styles currently degrade
-// to solid (paint-side gap, tracked for follow-up).
+// Verify the @pulp/react prop-applier forwards `borderStyle` keyword strings
+// verbatim to the bridge's setBorderStyle. Bridge maps to View::BorderStyle
+// and Skia honors dashed / dotted via SkDashPathEffect at stroke time. Other
+// named styles currently degrade to solid.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { applyChangedProps } from '../src/prop-applier.js';
@@ -34,7 +33,7 @@ function styleCalls(b: MockBridge) {
     return b.calls.filter((c) => c.fn === 'setBorderStyle');
 }
 
-describe('prop-applier borderStyle (pulp #1434 Triage #10)', () => {
+describe('prop-applier borderStyle', () => {
     it('forwards "solid" verbatim', () => {
         applyChangedProps(makeInstance(), {}, { borderStyle: 'solid' });
         expect(styleCalls(bridge)).toHaveLength(1);

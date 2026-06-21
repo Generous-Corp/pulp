@@ -1,4 +1,4 @@
-// Clipboard bridge no-op on non-Android platforms (#300).
+// Clipboard bridge no-op on non-Android platforms.
 //
 // The Android bridge API on Clipboard::set_android_bridge /
 // clear_android_bridge is public so callers don't need to guard

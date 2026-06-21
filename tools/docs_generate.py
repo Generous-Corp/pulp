@@ -14,9 +14,7 @@ Modes:
 
 Registered generators (`id:`):
   - limitations  — renders the `limitations:` block from
-                   docs/status/support-matrix.yaml (workstream 08 slice 8.5)
-
-Part of workstream 08 slice 8.3.
+                   docs/status/support-matrix.yaml
 """
 from __future__ import annotations
 

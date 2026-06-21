@@ -123,11 +123,10 @@ public:
     using DeviceChangeCallback = std::function<void()>;
 
     /// Default implementation stores the callback in a base-class slot.
-    /// Non-macOS backends that gain real hotplug probing in later slices
-    /// (workstream 02 — WASAPI IMMNotificationClient, ALSA udev monitor,
-    /// Win32 MIDI DeviceWatcher, ALSA seq monitor) call `fire_device_change()`
-    /// when a change is detected. Backends with richer semantics can still
-    /// override this entirely.
+    /// Platform hotplug notifiers such as WASAPI IMMNotificationClient,
+    /// ALSA udev monitors, Win32 MIDI DeviceWatcher, and ALSA seq monitors
+    /// call `fire_device_change()` when a change is detected. Backends with
+    /// richer semantics can still override this entirely.
     virtual void set_device_change_callback(DeviceChangeCallback cb) {
         std::lock_guard<std::mutex> lock(device_change_callback_mutex_);
         if (cb) {
@@ -149,12 +148,8 @@ public:
     /// a pointer to an AudioSystem and invoke this method from an
     /// OS callback thread. C++ `protected` would require the access
     /// to go through the notifier's own derived-class `this`, which
-    /// doesn't apply here. MSVC enforces this strictly and failed
-    /// to build #281's WASAPI hotplug path (C2248 in
-    /// wasapi_device.cpp:339–341), silently breaking release-cli.yml
-    /// on Windows x64 for v0.15.0 and v0.16.0 tags. Clang/GCC were
-    /// lenient; making this public matches the design intent the
-    /// doc comment always described.
+    /// doesn't apply here. MSVC enforces this strictly; making this public
+    /// matches the design intent of the platform notifier callbacks.
     void fire_device_change() {
         std::shared_ptr<DeviceChangeCallback> callback;
         {

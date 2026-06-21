@@ -1,15 +1,11 @@
-// pulp #109 — verify host-config's shouldSetTextContent recognizes
-// HTML-intrinsic text-bearing tags. Without these aliases, React's
-// host-config returned false from shouldSetTextContent('span', …),
-// causing React to materialize a synthetic Label child for the string
-// content. That synthetic child stacked on top of the outer span's
-// own auto-derived text — the 2026-05-11 Spectr regression where every
-// <span>SPECTR</span> rendered as two overlapping "SPECTR" labels.
+// Verify host-config's shouldSetTextContent recognizes HTML-intrinsic
+// text-bearing tags. These aliases keep React from materializing an extra
+// synthetic Label child on top of the Label created by createWidget.
 
 import { describe, it, expect } from 'vitest';
 import { PulpHostConfig } from '../src/host-config.js';
 
-describe('host-config shouldSetTextContent (pulp #109 — TEXT_BEARING)', () => {
+describe('host-config shouldSetTextContent (TEXT_BEARING)', () => {
     const fn = PulpHostConfig.shouldSetTextContent as
         (type: string, props: Record<string, unknown>) => boolean;
 
@@ -28,13 +24,9 @@ describe('host-config shouldSetTextContent (pulp #109 — TEXT_BEARING)', () => 
     });
 
     it('user-named components (View, Panel) are NOT text-bearing', () => {
-        // pulp #2163 — div / section / article / etc were added to
-        // TEXT_BEARING so imported JSX (Chainer's `<div>CROSSOVER</div>`
-        // section titles) render as Labels instead of empty Cols.
-        // shouldSetTextContent still gates on actual text content
-        // (children must be pure string/number), so an element-bearing
-        // div still routes to createCol — see the children-aware
-        // tests below.
+        // Container tags can be text-bearing for pure text content, but
+        // shouldSetTextContent still gates on actual string/number children
+        // so element-bearing containers route through createCol.
         //
         // Non-HTML user components (uppercase names like View, Panel)
         // remain non-text-bearing regardless of children, since they
@@ -44,12 +36,10 @@ describe('host-config shouldSetTextContent (pulp #109 — TEXT_BEARING)', () => 
     });
 
     it('HTML container tags (div, section, article) are text-bearing when children are pure text', () => {
-        // pulp #2163 — extended TEXT_BEARING to cover container tags so
-        // imported designs with `<div>section title</div>` render the
-        // text as a Label rather than creating an empty Col + a separate
-        // text Label sibling (which would double up the rendering).
-        // Empty children also short-circuits to true (text-able empty
-        // container, no element to mount).
+        // Imported designs with `<div>section title</div>` render the text
+        // as a Label rather than an empty Col plus a separate text Label.
+        // Empty children also short-circuit to true because there is no
+        // element to mount.
         expect(fn('div', {})).toBe(true);
         expect(fn('section', {})).toBe(true);
         expect(fn('article', {})).toBe(true);
@@ -65,11 +55,10 @@ describe('host-config shouldSetTextContent (pulp #109 — TEXT_BEARING)', () => 
         expect(fn('Span', {})).toBe(false);
     });
 
-    // pulp #1836 P1 (Codex follow-up) — TEXT_BEARING marks a type as
-    // CAPABLE of bearing text, but children must actually be string/number
-    // for React to skip the child-node path. Nested markup must NOT
-    // short-circuit or the inner element gets dropped.
-    describe('children-aware short-circuit (P1 Codex follow-up)', () => {
+    // TEXT_BEARING marks a type as capable of bearing text, but children
+    // must actually be string/number for React to skip the child-node path.
+    // Nested markup must not short-circuit or the inner element gets dropped.
+    describe('children-aware short-circuit', () => {
         it('plain string child returns true', () => {
             expect(fn('span', { children: 'hello' })).toBe(true);
             expect(fn('p', { children: 'paragraph' })).toBe(true);

@@ -62,26 +62,19 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
     // Canvas 2D API — full CanvasRenderingContext2D equivalent
-    // pulp #964 — Two registered names for the same handler:
+    // Two registered names for the same handler:
     //   * `canvasRect`     — legacy direct-bridge name used by hand-written
     //                        examples (`canvasRect(id, x, y, w, h, "#fff")`).
     //   * `canvasFillRect` — the name the HTML5 Canvas2D shim emits for
-    //                        `ctx.fillRect()` (see core/view/js/web-compat-canvas.js).
-    // Pre-#964 only `canvasRect` was registered, so every `ctx.fillRect()`
-    // from the web-compat shim silently no-op'd at the typeof guard
-    // (`if (typeof canvasFillRect === "function")`). That dropped every
-    // full-bounds opaque fillRect — e.g. the Spectr FilterBank's clear-to-
-    // background fill — without surfacing any error. Path-based draws
-    // (`canvasFillPath`, `canvasStrokePath`) and `canvasStrokeRect` happened
-    // to be wired correctly so they kept working, which is why the bug
-    // looked like "compositing eats the canvas surface" instead of
-    // "fillRect is silently dropped".
+    //                        `ctx.fillRect()`.
+    // Keep both names so hand-written bridge users and the web-compat shim
+    // hit the same fill_rect command path.
     auto canvasRectHandler = [this, parseColor](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::fill_rect;
             cmd.x=(float)args.get<double>(1,0); cmd.y=(float)args.get<double>(2,0);
             cmd.w=(float)args.get<double>(3,0); cmd.h=(float)args.get<double>(4,0);
-            // pulp #968 — when no color arg was passed (or it was the empty
+            // When no color arg was passed (or it was the empty
             // string), honour the active fillStyle (color OR gradient) on
             // the canvas widget. This makes a JS shim like
             //   fillRect(x,y,w,h) { call('canvasFillRect', id, x,y,w,h); }
@@ -106,7 +99,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::stroke_rect;
             cmd.x=(float)args.get<double>(1,0); cmd.y=(float)args.get<double>(2,0);
             cmd.w=(float)args.get<double>(3,0); cmd.h=(float)args.get<double>(4,0);
-            // pulp #968 — same active-style fallback as canvasRect, applied
+            // Same active-style fallback as canvasRect, applied
             // to strokeStyle. Width arg (index 6) is unaffected.
             const std::string color_str = args.get<std::string>(5, "");
             if (args.size() < 6 || color_str.empty()) {
@@ -150,44 +143,37 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
 
         CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::fill_text;
 
-        // pulp #1899 — accept BOTH calling conventions.
+        // Accept BOTH calling conventions.
         //
         // Pulp's web-compat-canvas.js shim emits the 7-arg form:
         //   canvasFillText(id, text, x, y, size, color, maxWidth)
         //
-        // Third-party shims bundled with imported designs (e.g. Spectr's
-        // native-react/canvas2d-shim.ts:269) emit a 4-arg form with text
-        // LAST:
+        // Third-party shims bundled with imported designs can emit a 4-arg
+        // form with text LAST:
         //   canvasFillText(id, x, y, text)
         //
         // Both are valid JS-side surface contracts. Detect by checking
         // whether slot 1 is a string (web-compat form) or a number
         // (legacy / third-party form). Without this branch, the 4-arg
-        // form silently drops all text — every fillText() that flowed
-        // through the third-party shim recorded an empty fill_text cmd,
-        // which fill_text() in skia_canvas then skipped via the
-        // `if (text.empty()) return;` early-out. Net effect: bars + grid
-        // rendered (other commands), but every axis label / overlay
-        // text was invisible.
+        // form records an empty fill_text command and drops the intended text.
         std::string slot1_str = args.get<std::string>(1, "");
         const bool is_4arg_form = (args.numArgs == 4) && slot1_str.empty();
 
         if (is_4arg_form) {
             // canvasFillText(id, x, y, text). Third-party shims that emit
-            // this form (e.g. Spectr's canvas2d-shim.ts:269) often do NOT
-            // call canvasSetFont first, so the CanvasWidget's command
-            // buffer has no `set_font` command ahead of this `fill_text`.
+            // this form often do NOT call canvasSetFont first, so the
+            // CanvasWidget's command buffer has no `set_font` command ahead
+            // of this `fill_text`.
             // At paint time, CGCanvas / SkiaCanvas would create a font
             // with font_size_ = 0 (the canvas's default) → glyphs are
             // 0-pt → text draws invisibly. Inject a default set_font
             // command so the replay establishes a sane font state before
             // this fill_text command renders.
             //
-            // pulp #1901 review (Codex P1): only inject the default
-            // set_font when no prior font state has been recorded on
-            // this canvas. Scanning the recorded command stream is the
-            // canvas's only source of "prior state" — there is no
-            // separate accessor. If a caller already issued
+            // Only inject the default set_font when no prior font state has
+            // been recorded on this canvas. Scanning the recorded command
+            // stream is the canvas's only source of "prior state" — there is
+            // no separate accessor. If a caller already issued
             // canvasSetFont / canvasSetFontFull, preserve their state
             // (no override). Same rationale for cmd.color below: a
             // prior canvasSetFillColor (or fill-gradient/pattern) must
@@ -241,7 +227,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
             cmd.y     = (float)args.get<double>(3, 0);
             cmd.extra = (float)args.get<double>(4, 14);
             cmd.color = parseColor(args.get<std::string>(5, "#fff"));
-            // pulp #1525 — maxWidth threaded as 7th arg in CSS px;
+            // maxWidth threaded as 7th arg in CSS px;
             // `<= 0` or absent means "no constraint".
             cmd.w     = (float)args.get<double>(6, 0.0);
         }
@@ -250,13 +236,10 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    // pulp #1525 — dedicated stroke_text bridge entry. Pre-#1525 the JS
-    // shim's `ctx.strokeText` path re-routed through `canvasFillText`
-    // with the strokeStyle as the fill colour — visually approximate
-    // but spec-incompatible (no real outlined glyphs, lineWidth ignored).
-    // canvasStrokeText records a distinct stroke_text cmd so the paint
-    // loop can route it through `Canvas::stroke_text` for true outlined
-    // rendering on backends that override it (Skia, CG).
+    // Dedicated stroke_text bridge entry. canvasStrokeText records a distinct
+    // stroke_text cmd so the paint loop can route it through
+    // `Canvas::stroke_text` for true outlined rendering on backends that
+    // override it (Skia, CG).
     //
     // Args: (id, text, x, y, fontSize, color, maxWidth?). Color carries
     // strokeStyle; lineWidth is set ahead of the call by the JS shim's
@@ -311,7 +294,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    // pulp #1434 — Canvas2D `ctx.font` full CSS font shorthand. The JS
+    // Canvas2D `ctx.font` full CSS font shorthand. The JS
     // shim parses `[<style>] [<variant>] [<weight>] <size>[/<lineHeight>]
     // <family>` and dispatches here when the parse extracts more than the
     // legacy size+family. Args: (id, family, size, weight, slant,
@@ -389,13 +372,9 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
 
     register_bridge_function(api, "canvasFillPath", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
-            // pulp DIVERGE→PASS sweep — read the optional fillRule int
-            // (0 = nonzero, 1 = evenodd) so the spec arg actually
-            // threads into the recorded command. The skia / cg paint
-            // sides already key on int_val for fill_path / clip;
-            // before this read the value was always 0 even when JS
-            // passed `1`. (Pairs with [issue-1522] test which had been
-            // failing since landing because the wiring got missed.)
+            // Read the optional fillRule int (0 = nonzero, 1 = evenodd)
+            // so the spec arg threads into the recorded command. The
+            // Skia / CG paint sides key on int_val for fill_path / clip.
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::fill_path;
             cmd.int_val = static_cast<int>(args.get<double>(1, 0));
             c->add_command(cmd);
@@ -410,7 +389,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    // pulp #1521 — native arc subpaths. Each replaces the JS shim's
+    // Native arc subpaths. Each replaces the JS shim's
     // bezier approximation so Skia / CG see real arc geometry. Args:
     //   canvasPathArc(id, cx, cy, radius, startAngle, endAngle,
     //                 anticlockwise:0/1)
@@ -526,7 +505,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
 
     // Path builder API from JS
     register_bridge_function(api, "beginPath", [](choc::javascript::ArgumentList) {
-        // Store path commands for deferred rendering via CanvasWidget
+        // Legacy no-op; CanvasWidget path replay uses canvasBeginPath.
         return choc::value::Value();
     });
 
@@ -539,7 +518,8 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         auto strokeHex = args.get<std::string>(3, "");
         auto lineW = static_cast<float>(args.get<double>(4, 1.0));
         (void)id; (void)pathStr; (void)fillHex; (void)strokeHex; (void)lineW;
-        // TODO: parse SVG-like path string and render via CanvasWidget
+        // Intentionally unimplemented legacy helper; Canvas2D shims use
+        // canvasMoveTo / canvasLineTo / canvasFillPath instead.
         return choc::value::Value();
     });
 
@@ -547,7 +527,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     register_bridge_function(api, "measureText", [](choc::javascript::ArgumentList args) {
         auto text = args.get<std::string>(0, "");
         auto size = static_cast<float>(args.get<double>(1, 14.0));
-        // Return approximate metrics (exact when Skia canvas is available)
+        // Return approximate metrics. Exact per-canvas metrics use canvasMeasureText.
         float width = static_cast<float>(text.size()) * size * 0.6f;
         float ascent = size * 0.75f;
         float descent = size * 0.25f;
@@ -560,7 +540,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return result;
     });
 
-    // P1: Canvas gradient fills
+    // Canvas gradient fills
     register_bridge_function(api, "canvasSetLinearGradient", [this, parseColor](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_fill_gradient_linear;
@@ -590,7 +570,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    // pulp #1524 — true two-circle radial gradient. Skia routes through
+    // True two-circle radial gradient. Skia routes through
     // SkGradientShader::MakeTwoPointConical; CG routes through
     // CGContextDrawRadialGradient with both circles wired (the prior
     // single-circle bridge silently dropped (x0, y0, r0) which broke
@@ -626,7 +606,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    // pulp Wave 3 c2d.7 — `ctx.strokeStyle = createLinearGradient(...)`.
+    // `ctx.strokeStyle = createLinearGradient(...)`.
     // Mirror of canvasSetLinearGradient targeting the new
     // `Canvas::set_stroke_gradient_linear` virtual. The JS shim's
     // _applyStrokeStyle dispatches here when the bridge fn is present;
@@ -709,9 +689,9 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    // pulp #1434 bridge-thin gap-fill — ctx.createConicGradient. Skia
-    // already exposes set_fill_gradient_conic via SkGradientShader::MakeSweep
-    // (skia_canvas.cpp line ~917); CG degrades to the first-stop colour.
+    // ctx.createConicGradient. Skia routes through
+    // SkGradientShader::MakeSweep; CoreGraphics software-rasterizes the
+    // conic sweep into a cached CGImage.
     // Args: (id, cx, cy, startAngle, color1, pos1, color2, pos2, ...)
     register_bridge_function(api, "canvasSetConicGradient", [this, parseColor](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
@@ -728,11 +708,9 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    // pulp #1434 bridge-thin gap-fill — ctx.createPattern. Skia path
-    // routes through SkShader::MakeImage with SkTileMode per axis (real
-    // tiled fill); CG path degrades to the active fill colour because
-    // CG has no first-class pattern shader without CGPattern dance —
-    // same shape as the conic-gradient fallback.
+    // ctx.createPattern. Fill patterns route through backend image-pattern
+    // support (SkShader / CGPattern). Stroke patterns remain a separate
+    // command because some backends support fills without stroke patterns.
     //
     // Args: (id, src, tile_x, tile_y)
     //   src      — image source (file path, "data:" URL, or "" for clear)
@@ -772,7 +750,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    // pulp #1434 bridge-thin gap-fill — ctx.miterLimit. Sticky stroke
+    // ctx.miterLimit. Sticky stroke
     // state honoured by SkPaint::setStrokeMiter (Skia) and
     // CGContextSetMiterLimit (CG). Spec: non-positive / non-finite
     // values are silently ignored — backends do the clamp.
@@ -786,7 +764,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    // pulp #1434 bridge-thin gap-fill — ctx.imageSmoothingEnabled +
+    // ctx.imageSmoothingEnabled +
     // ctx.imageSmoothingQuality. Sticky paint flag honoured on the next
     // drawImage. Skia translates to SkSamplingOptions, CG to
     // CGContextSetInterpolationQuality.
@@ -805,7 +783,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    // pulp #1520 — Canvas2D ctx.direction. Sticky text-shaping state
+    // Canvas2D ctx.direction. Sticky text-shaping state
     // honoured by the SkShaper / HarfBuzz path on the next fillText
     // / strokeText. The shim coerces unknown strings to "ltr" before
     // hitting the bridge, so we accept the resolved enum directly.
@@ -821,13 +799,11 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    // pulp #1520 — Canvas2D ctx.filter. Sticky CSS <filter-function-list>
+    // Canvas2D ctx.filter. Sticky CSS <filter-function-list>
     // string applied to subsequent fill/stroke/text/image draws. Skia
     // parses into an SkImageFilter chain (blur, grayscale, sepia, …);
     // RecordingCanvas captures the raw string for harness assertions;
-    // CG / minimal backends store the value but render unfiltered until
-    // a follow-up wires the parser through (#1503 owns the View-side
-    // parser; canvas2d shares it as it lands).
+    // CG / minimal backends accept the no-op default and render unfiltered.
     // Args: (id, cssFilterString) — "none" disables.
     register_bridge_function(api, "canvasSetFilter", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
@@ -838,7 +814,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    // P1: Canvas arc — for pie charts, circular progress, arcs
+    // Canvas arc — for pie charts, circular progress, arcs
     register_bridge_function(api, "canvasArc", [this, parseColor](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::stroke_arc;
@@ -854,7 +830,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    // P1: Canvas textAlign / textBaseline
+    // Canvas textAlign / textBaseline
     register_bridge_function(api, "canvasSetTextAlign", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_text_align;
@@ -875,7 +851,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    // P1: Canvas clearRect
+    // Canvas clearRect
     register_bridge_function(api, "canvasClearRect", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::clear_rect;
@@ -886,7 +862,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    // P1: Canvas clipRect (was in enum but never registered)
+    // Canvas clipRect
     register_bridge_function(api, "canvasClipRect", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::clip_rect;
@@ -897,7 +873,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    // P2: Canvas fillRoundedRect / strokeRoundedRect / strokeCircle (existed in C++ but no JS bridge)
+    // Canvas fillRoundedRect / strokeRoundedRect / strokeCircle
     register_bridge_function(api, "canvasFillRoundedRect", [this, parseColor](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::fill_rounded_rect;
@@ -935,7 +911,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    // P2: Canvas globalAlpha
+    // Canvas globalAlpha
     register_bridge_function(api, "canvasSetGlobalAlpha", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_global_alpha;
@@ -945,7 +921,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    // P2: Canvas lineCap / lineJoin
+    // Canvas lineCap / lineJoin
     register_bridge_function(api, "canvasSetLineCap", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_line_cap;
@@ -967,7 +943,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     });
 
     // CSS globalCompositeOperation → Canvas::BlendMode index. Returns -1
-    // for unknown strings so callers can no-op gracefully (issue-896).
+    // for unknown strings so callers can no-op gracefully.
     auto cssCompositeOpToBlendModeIndex = [](const std::string& mode) -> int {
         // Indices below MUST match Canvas::BlendMode in core/canvas/include/pulp/canvas/canvas.hpp.
         if (mode == "source-over")      return 16; // also accepted at index 0 (normal)
@@ -1000,7 +976,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return -1; // unknown — caller treats as no-op
     };
 
-    // P3: Canvas globalCompositeOperation (blend mode) — back-compat alias
+    // Canvas globalCompositeOperation (blend mode) — back-compat alias
     register_bridge_function(api, "canvasSetBlendMode", [this, cssCompositeOpToBlendModeIndex](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             auto mode = args.get<std::string>(1, "source-over");
@@ -1014,7 +990,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     });
 
     // canvasGlobalCompositeOperation — full CanvasRenderingContext2D
-    // globalCompositeOperation surface (issue-896). Accepts every standard
+    // globalCompositeOperation surface. Accepts every standard
     // CSS string and falls back to no-op on unknown values.
     register_bridge_function(api, "canvasGlobalCompositeOperation", [this, cssCompositeOpToBlendModeIndex](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
@@ -1029,8 +1005,8 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     });
 
     // canvasSetTransform(id, a, b, c, d, e, f) — replace current transform
-    // with the affine matrix (issue-896). Used for devicePixelRatio scaling
-    // (ctx.setTransform(scale, 0, 0, scale, 0, 0)) and Spectr FilterBank.
+    // with the affine matrix. Used for devicePixelRatio scaling
+    // (ctx.setTransform(scale, 0, 0, scale, 0, 0)).
     register_bridge_function(api, "canvasSetTransform", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_transform;
@@ -1045,9 +1021,9 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    // canvasClip(id, fillRule?) — intersect clip region with current path (issue-896).
-    // pulp DIVERGE→PASS sweep — also threads optional fillRule int (0 =
-    // nonzero, 1 = evenodd). Same as canvasFillPath above.
+    // canvasClip(id, fillRule?) — intersect clip region with current path.
+    // Also threads optional fillRule int (0 = nonzero, 1 = evenodd).
+    // Same packing as canvasFillPath above.
     register_bridge_function(api, "canvasClip", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::clip;
@@ -1063,7 +1039,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
 
     // Canvas drawImage(canvasId, imagePath, dx, dy, dw, dh)
     //   or 9-arg form: canvasDrawImage(id, path, dx,dy,dw,dh, sx,sy,sw,sh)
-    // pulp #1737 — when args[6..9] are present the JS shim is using the
+    // When args[6..9] are present the JS shim is using the
     // source-rect 9-arg form. Bridge stashes it in x2/y2/x3/y3 + sets
     // has_source_rect; the canvas_widget renderer routes through the
     // _rect overload so the source sub-rectangle lands on the dst rect.
@@ -1091,7 +1067,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
     });
 
     // ═══════════════════════════════════════════════════════════════════
-    // Canvas2D API gap closures (issue-916)
+    // Canvas2D API gap closures
     // ═══════════════════════════════════════════════════════════════════
 
     // canvasMeasureText(id, text, fontFamily, fontSize) →
@@ -1131,7 +1107,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
 
         // (void)c — measureText doesn't need to mutate the canvas. Calling
         // with a missing id still returns a valid metrics object so callers
-        // can pre-measure before getContext('2d').
+        // can measure before getContext('2d').
         (void)widget(args.get<std::string>(0, ""));
 
         auto result = choc::value::createObject("");
@@ -1189,7 +1165,7 @@ void WidgetBridge::register_canvas2d_api(std::function<canvas::Color(const std::
         return choc::value::Value();
     });
 
-    // ── Canvas2D shadow* state (issue-1434 batch 7) ─────────────────────────
+    // ── Canvas2D shadow* state ──────────────────────────────────────────────
     //
     // Sticky drop-shadow state that wraps subsequent fill/stroke/text
     // draws — matching `CanvasRenderingContext2D.shadowColor` /

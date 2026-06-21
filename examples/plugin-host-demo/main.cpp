@@ -13,10 +13,10 @@
 //   pulp-plugin-host-demo --manage             # headless plugin-manager UX
 //                                              # (issue #494 demo)
 //
-// This is a validation harness for Feature 5 Phase 1. It is not a DAW —
-// there is no audio device I/O, no UI, no graph editor. Those land in
-// later phases. The point is to prove a real third-party plugin loads
-// and processes audio through Pulp's host abstraction.
+// This is a validation harness for loading real plugins through Pulp's host
+// abstraction. It is not a DAW: there is no audio device I/O, no UI, and no
+// graph editor. The point is to prove a real third-party plugin loads and
+// processes audio through the same host boundary used by richer surfaces.
 
 #include <pulp/audio/buffer.hpp>
 #include <pulp/host/plugin_slot.hpp>
@@ -145,8 +145,8 @@ public:
     }
     void add_search_path(PluginFormat, std::string) override {
         // The live scanner uses default_paths(); a per-user path list is
-        // Workstream 03 slice 3.8 territory. Left as a no-op here so the
-        // demo surface mirrors the real widget API.
+        // a host integration concern. Left as a no-op here so the demo
+        // surface mirrors the real widget API.
     }
     void remove_search_path(PluginFormat, const std::string&) override {}
 
@@ -154,15 +154,13 @@ public:
         if (scanning_.exchange(true)) return;
         if (worker_.joinable()) worker_.join();
 
-        // Codex 2026-04-21 review on #538: `ScanBlacklist` is backed by
-        // an unsynchronized `unordered_map`. Passing `&blacklist_` into
-        // the scan worker while the UI thread mutates the same map via
-        // `set_blacklisted()` is a data race — undefined behaviour and
-        // potentially a crash. Take an immutable snapshot under our own
-        // mutex before handing it to the worker so the UI thread's
-        // writes can't collide with the scanner's reads. The live
-        // `blacklist_` is still the source of truth for persistence and
-        // the next scan; this snapshot is scan-scoped.
+        // `ScanBlacklist` is backed by an unsynchronized `unordered_map`.
+        // Passing `&blacklist_` into the scan worker while the UI thread
+        // mutates the same map via `set_blacklisted()` is a data race. Take
+        // an immutable snapshot under our own mutex before handing it to the
+        // worker so the UI thread's writes can't collide with the scanner's
+        // reads. The live `blacklist_` is still the source of truth for
+        // persistence and the next scan; this snapshot is scan-scoped.
         auto blacklist_snapshot = std::make_shared<pulp::host::ScanBlacklist>();
         {
             std::lock_guard<std::mutex> lk(mu_);
@@ -203,12 +201,11 @@ public:
         // the generic rescan. A richer implementation would call into
         // pulp-scan-worker for the one bundle.
         //
-        // Codex 2026-04-21 wave 2 P1 on #560: `std::mutex` is NOT
-        // recursive; calling `start_rescan()` while still holding `mu_`
-        // self-deadlocks the UI thread (the no-arg overload takes the
-        // same lock on entry via is_scanning()/worker_ manipulation).
-        // Release the lock before re-entering the parameterless
-        // overload so the UI thread can actually reach the scanner
+        // `std::mutex` is not recursive; calling `start_rescan()` while
+        // still holding `mu_` self-deadlocks the UI thread because the no-arg
+        // overload takes the same lock on entry via is_scanning()/worker_
+        // manipulation. Release the lock before re-entering the
+        // parameterless overload so the UI thread can reach the scanner
         // worker.
         {
             std::lock_guard<std::mutex> lk(mu_);
@@ -236,14 +233,12 @@ public:
         }
     }
     void reveal_in_file_manager(const std::string& path) override {
-        // Codex 2026-04-21 review on #538: the earlier version built a
-        // shell string by concatenating the path and ran `std::system`,
-        // which breaks quoting on any legitimate path containing a
-        // single quote (or worse, crafted metacharacters). Switch to
-        // `pulp::platform::ChildProcess` — argv-based spawn, no shell
-        // interpolation. Non-blocking fire-and-forget via the existing
-        // `run` helper with a tight timeout so a hung GUI can't pin the
-        // demo thread.
+        // Use `pulp::platform::ChildProcess` for argv-based spawn with no
+        // shell interpolation. Building a shell string from the path breaks
+        // quoting on legitimate paths containing quotes and exposes command
+        // injection on crafted metacharacters. Keep this non-blocking via the
+        // existing `run` helper with a tight timeout so a hung GUI can't pin
+        // the demo thread.
         using pulp::platform::ChildProcess;
         pulp::platform::ProcessOptions opts;
         opts.timeout_ms = 5'000;

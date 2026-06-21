@@ -170,7 +170,7 @@ public:
             for (int ch = 0; ch < num_channels; ++ch) {
                 float s = channels[ch][i];
                 // Non-finite samples (NaN/Inf) would poison RMS/LUFS/integrated
-                // accumulators irrecoverably (#2695). Treat them as silence.
+                // accumulators irrecoverably. Treat them as silence.
                 if (!std::isfinite(s)) s = 0.0f;
                 float abs_s = std::abs(s);
 

@@ -204,7 +204,7 @@ bool write_view_tree(const std::string& path, View& root, int width, int height)
 
 #ifdef PULP_BENCHMARK
 
-// ── Zero-copy benchmark mode (Slice 0 of #516) ──────────────────────────────
+// ── Zero-copy benchmark mode ────────────────────────────────────────────────
 //
 // Headless frame-paced loop that drives VisualizationBridge with a
 // deterministic sine sweep. No WindowHost is created. Emits a JSON
@@ -212,8 +212,8 @@ bool write_view_tree(const std::string& path, View& root, int width, int height)
 // `--output=<path>` file.
 //
 // NOTE: the JSON key naming is deliberately mixed:
-//   - `audio_to_triplebuffer_copy`  (no _us suffix — legacy consumer)
-//   - `triplebuffer_publish_latency` (no _us suffix — legacy consumer)
+//   - `audio_to_triplebuffer_copy`  (no _us suffix — existing consumers)
+//   - `triplebuffer_publish_latency` (no _us suffix — existing consumers)
 //   - `gpu_upload_us`, `gpu_readback_us`, `gpu_dispatch_us`,
 //     `total_frame_us` (with _us suffix)
 // bench_diff.py has already shipped and consumes these exact field
@@ -723,13 +723,10 @@ int main(int argc, char* argv[]) {
         bridge.load_script("if (typeof __pulpRuntimeSettle__ === 'function') __pulpRuntimeSettle__(64);");
         std::cout << "Loaded script: " << script_path << "\n";
 
-        // ── Phase 1 instrumentation (pulp jsx-instrument-import / interactivity
-        // diagnosis 2026-05-17) — dump React-DOM root delegate state after
-        // settle. Per Codex/RepoPrompt: most-likely break is React-DOM never
-        // attaching its delegated listeners on document.body (= __root__).
-        // Empty result here means the issue is pre-dispatch (Phase 7); non-
-        // empty means the bridge between native dispatch and DOM event
-        // bubbling is the gap.
+        // Dump React-DOM root delegate state after settle. Empty output here
+        // means React-DOM never attached delegated listeners on document.body
+        // (`__root__`), so the issue is pre-dispatch. Non-empty output means
+        // the gap is between native dispatch and DOM event bubbling.
         try {
             std::ostringstream js;
             js << "(function(){"
@@ -1104,17 +1101,15 @@ int main(int argc, char* argv[]) {
                 if (out) out << r.source;
             });
     }
-    // WYSIWYG P4 FIX 5 — the EditHistory's undo closures capture raw View*
-    // pointers that would dangle if the inspected tree were rebuilt/re-imported
-    // before undo. The host MUST call inspector.clear_edit_history() at any
-    // root-replacement seam (right after a re-import, before re-wiring the new
-    // tree). ui-preview builds a single static `root` once and has NO re-import
-    // path, so there is no such seam here and nothing to wire — the static tree
-    // is never swapped, so captured pointers stay valid for the process
-    // lifetime. A host with hot-reload / runtime-import (e.g. design-tool) is
-    // responsible for calling clear_edit_history() on its reload callback.
-    // TODO(wysiwyg-p4-followup): replace the capture-and-clear approach with
-    // anchor-id resolution at undo time (see InspectorOverlay::clear_edit_history).
+    // EditHistory undo closures capture raw View* pointers that would dangle if
+    // the inspected tree were rebuilt/re-imported before undo. Hosts that
+    // replace the root must call inspector.clear_edit_history() at that seam
+    // before re-wiring the new tree. ui-preview builds a single static `root`
+    // once and has no re-import path, so captured pointers stay valid for the
+    // process lifetime. A host with hot-reload / runtime-import (e.g.
+    // design-tool) is responsible for calling clear_edit_history() on its
+    // reload callback. Anchor-id resolution at undo time would remove the
+    // capture-and-clear requirement; see InspectorOverlay::clear_edit_history.
     if (pulp::runtime::get_env("PULP_INSPECTOR")) {
         inspector.set_active(true);
     }
@@ -1204,8 +1199,8 @@ int main(int argc, char* argv[]) {
     WindowOptions opts;
     // Title from the imported script's filename when --script is given,
     // otherwise the demo default. Imported JSX/TSX files like
-    // ChainerInstrument.jsx → "ChainerInstrument" (drop directory +
-    // extension). Per user UX feedback 2026-05-17.
+    // ChainerInstrument.jsx map to "ChainerInstrument" by dropping directory
+    // and extension.
     if (!script_path.empty()) {
         std::filesystem::path p(script_path);
         opts.title = p.stem().string();
@@ -1213,20 +1208,15 @@ int main(int argc, char* argv[]) {
     } else {
         opts.title = "Pulp Animation Preview";
     }
-    // Wire the parsed --size through to the live window. Pre-fix this
-    // was hardcoded 360x480, ignoring --size entirely — imported JSX
-    // (pulp import-design --from jsx) ended up materialising at the
-    // requested viewport for headless paint but the live window stayed
-    // at the demo size. Codex consult 2026-05-17 flagged this as the
-    // first preview bug to fix.
+    // Wire the parsed --size through to the live window so imported JSX
+    // materialises at the same viewport for both headless paint and live
+    // preview.
     opts.width = render_w;
     opts.height = render_h;
-    // pulp jsx-instrument-import — use GPU rendering by default for the
-    // live preview path. Imported JSX bundles ship SVG (knob rings,
-    // waveform paths, chain-viz arrows) that benefit from Skia GPU;
-    // CPU rasterization is fine for static screenshots but the live
-    // path should match production plugin hosting which is GPU. Per
-    // user 2026-05-17.
+    // Use GPU rendering by default for the live preview path. Imported JSX
+    // bundles ship SVG (knob rings, waveform paths, chain-viz arrows) that
+    // benefit from Skia GPU; CPU rasterization is fine for static screenshots,
+    // but the live path should match production plugin hosting.
     opts.use_gpu = true;
 
     // Design viewport for imported designs. Resolve a fixed design size and,
@@ -1517,11 +1507,11 @@ int main(int argc, char* argv[]) {
         iopts.height = static_cast<float>(opts.height);
         iopts.resizable = true;
         iopts.use_gpu = false;
-        // WYSIWYG P4 FIX 4 — the inspector is a SECONDARY window: closing it
-        // (window-button or Cmd+I) leaves the main canvas + app running; only
-        // closing the primary main window stops the app. The deferred teardown
-        // below (inspector_close_pending) still runs off the close stack so
-        // there's no UAF.
+        // The inspector is a secondary window: closing it (window-button or
+        // Cmd+I) leaves the main canvas + app running; only closing the primary
+        // main window stops the app. The deferred teardown below
+        // (inspector_close_pending) still runs off the close stack so there's
+        // no UAF.
         iopts.secondary_window = true;
         inspector_window = WindowHost::create(*inspector_view_ptr, iopts);
         if (inspector_window) {
@@ -1632,11 +1622,11 @@ int main(int argc, char* argv[]) {
 
     View::set_inspector_mouse_hook([&](const MouseEvent& e, View* event_root) -> bool {
         if (!inspector.is_active()) return false;
-        // WYSIWYG P4 FIX 1 — window-gate. The platform host passes the event's
+        // Window-gate: the platform host passes the event's
         // own window root; ignore events from any window other than the main
         // canvas root so hovering/clicking/dragging inside the floating
         // InspectorWindow never highlights/affects the canvas. nullptr (root
-        // unknown, legacy/headless caller) runs unconditionally.
+        // unknown, compatibility/headless caller) runs unconditionally.
         if (event_root && event_root != &root) return false;
         // Overlay first: it handles drag-handle resize + body-drag move and
         // canvas selection. If it consumes the event, mirror the (possibly
@@ -1659,8 +1649,8 @@ int main(int argc, char* argv[]) {
     View::set_inspector_text_hook([&](const pulp::view::TextInputEvent& e,
                                       View* event_root) -> bool {
         if (!inspector.is_active()) return false;
-        // WYSIWYG P4 FIX 1 — window-gate: text typed into a secondary window
-        // must not drive the canvas overlay's inline Text-tool edit.
+        // Window-gate: text typed into a secondary window must not drive the
+        // canvas overlay's inline Text-tool edit.
         if (event_root && event_root != &root) return false;
         bool consumed = inspector.handle_text_input(e);
         if (consumed) {
@@ -1676,13 +1666,13 @@ int main(int argc, char* argv[]) {
 
     View::set_inspector_paint_hook(
         [&](pulp::canvas::Canvas& canvas, View* painting_root) {
-            // WYSIWYG P2e Fix 1 — paint-leak gate. The overlay paints the
+            // Paint-leak gate: the overlay paints the
             // selection box + handles + drop indicators in the MAIN canvas
             // root's coordinate space. Paint ONLY when the root being painted
             // is that inspected root (`root`), never when the floating
             // InspectorWindow paints its own root — otherwise the overlay's box
             // leaks into the inspector window at a stray coordinate. nullptr
-            // (legacy/headless caller, root unknown) paints unconditionally.
+            // (compatibility/headless caller, root unknown) paints unconditionally.
             if (painting_root && painting_root != &root) return;
             inspector.paint(canvas);
         });
@@ -1696,8 +1686,8 @@ int main(int argc, char* argv[]) {
     // normal cursor) when inactive or the pointer is off the selection.
     View::set_inspector_cursor_hook([&](const MouseEvent& e, View* event_root) -> int {
         if (!inspector.is_active()) return -1;
-        // WYSIWYG P4 FIX 1 — window-gate: a mouse-move inside a secondary
-        // window must not drive the canvas overlay's cursor affordance.
+        // Window-gate: a mouse-move inside a secondary window must not drive
+        // the canvas overlay's cursor affordance.
         if (event_root && event_root != &root) return -1;
         return inspector.cursor_style_for(e.position);
     });

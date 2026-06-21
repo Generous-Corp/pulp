@@ -1,10 +1,8 @@
-// pulp #1899 (gap #3) — `var(--name)` references in string-valued
-// style props must be resolved BEFORE the value reaches the bridge.
+// `var(--name)` references in string-valued style props must be
+// resolved before the value reaches the bridge.
 // The raw string "var(--mono)" gives Skia's font matcher nothing to
 // match against, so the literal flows through silently and the rendered
-// text falls back to a proportional sans (Spectr top-bar "faint label"
-// symptom, compounded by the opacity-layer LCD AA degradation handled
-// on the C++ side).
+// text falls back to a proportional sans.
 //
 // Resolution tiers (first hit wins): __pulpCssVars registry →
 // getStringToken bridge → getMotionToken bridge → explicit fallback →
@@ -41,7 +39,7 @@ function callsOf(name: string) {
     return bridge.calls.filter((c) => c.fn === name);
 }
 
-describe('prop-applier var() resolution (pulp #1899 gap #3)', () => {
+describe('React prop forwarding for var() token resolution', () => {
     it('fontFamily: var(--mono) resolves via __pulpCssVars registry', () => {
         (globalThis as Record<string, unknown>).__pulpCssVars = {
             mono: 'JetBrains Mono',

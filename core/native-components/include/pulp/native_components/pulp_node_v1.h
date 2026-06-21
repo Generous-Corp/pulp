@@ -2,8 +2,8 @@
  * pulp/native_components/pulp_node_v1.h — Pulp public node ABI, generation 1.
  *
  * The stable, language-neutral C contract a precompiled custom `SignalGraph`
- * node implements (Rust, C, Zig, generated DSP). Derived from the Phase 5
- * source-level `CustomNodeType` experience (lifecycle + opaque state +
+ * node implements (Rust, C, Zig, generated DSP). Derived from the
+ * source-level `CustomNodeType` contract (lifecycle + opaque state +
  * serialization) and frozen here as `pulp_node_v1`.
  *
  * SCOPE: custom `SignalGraph` nodes only. This is NOT the Processor-level FFI

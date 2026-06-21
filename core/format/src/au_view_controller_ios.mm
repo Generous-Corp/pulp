@@ -82,8 +82,7 @@
     // AU. Returning self.audioUnit unconditionally (as this method previously
     // did) left the AU nil and the host opened a generic-view editor over a
     // dead AU. Apple's docs and the AUViewController sample both create the
-    // AU here. See planning/2026-05-23-auv3-macos-ui-phase35.md
-    // "P0: AudioUnit instance ownership".
+    // AU here so the host receives a live unit before the editor is built.
     PulpAudioUnit *au = [[PulpAudioUnit alloc] initWithComponentDescription:desc
                                                                        error:error];
     if (!au) return nil;
@@ -164,9 +163,8 @@
 
     self.preferredContentSize = CGSizeMake(w, h);
 
-    // Auto-select the GPU host for a scripted / GPU-backed editor (P5) via the
-    // shared decision helper, using the Options overload. The preview/fallback
-    // case (no bridge) stays on the default CPU host.
+    // Auto-select the GPU host for scripted / GPU-backed editors via the shared
+    // decision helper. The preview/fallback case stays on the default CPU host.
     pulp::view::PluginViewHost::Options opts;
     opts.size = {w, h};
     const char* mode = "fallback";
@@ -178,10 +176,9 @@
         if (_viewHost) {
             pulp::format::warn_if_unexpected_cpu_fallback(gpu, _viewHost.get());
             _viewHost->set_idle_callback(pulp::format::make_scripted_idle_pump(*_bridge));
-            // Phase iOS-D.3b Slice 1: hand the host's live GpuSurface to the
-            // scripted-UI session so JS navigator.gpu / canvas.getContext
-            // ('webgpu') routes through Pulp's Dawn instance instead of mocks.
-            // See planning/2026-05-29-ios-d3b-threejs-webgpu-program.md § Slice 1.
+            // Hand the host's live GpuSurface to the scripted-UI session so
+            // JS navigator.gpu / canvas.getContext('webgpu') routes through
+            // Pulp's Dawn instance instead of mocks.
             if (auto* scripted = _bridge->scripted_ui()) {
                 scripted->attach_gpu_surface(_viewHost->gpu_surface());
                 if (_viewHost->gpu_surface()) {
@@ -209,7 +206,6 @@
     // pane bounds (resizeEditorToViewBounds drives set_size + bridge resize)
     // lets a responsive scene fill edge-to-edge. A fixed-design editor that
     // genuinely needs letterboxing can call set_design_viewport itself.
-    // (#3286 follow-up — full-width responsive editor.)
 
     _viewHost->attach_to_parent((__bridge void*)self.view);
     if (_bridge) _bridge->notify_attached();
@@ -248,8 +244,7 @@
 }
 
 - (void)dealloc {
-    // Destruction-order contract (Codex P1 review on PR #653; fallback-path
-    // UAF fix, GPU-plugin-view-host):
+    // Destruction-order contract:
     //
     // PulpAUViewController declares its ivars in order:
     //     _bridge       (ViewBridge — owns the View tree on the success path)

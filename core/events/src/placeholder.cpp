@@ -1,2 +1,2 @@
-// pulp-events: placeholder — replaced in Phase 2+
+// Minimal translation unit anchoring the pulp-events namespace.
 namespace pulp::events {}

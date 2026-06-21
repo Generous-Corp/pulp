@@ -1,19 +1,13 @@
 // text_run_planner.hpp
 //
-// Pulp #2163 follow-up — Phase 1 / Slice 1.2.a of the font-subsystem-
-// hardening v2 roadmap.
-//
 // `TextRunPlanner` is the entry point that converts an input string +
 // `FontOptions` into a `ShapedText` artifact. Both measurement and paint
-// pipelines consume the same artifact; that's how v2 closes the v1 doc's
-// "measurement ≠ paint" killer gap.
-//
-// Slice 1.2.a skeleton (this file): the planner is a thin wrapper over
-// the existing TextShaper / SkShaper path. It emits one ShapedRun for
-// the input (no real bidi/script split) and a per-codepoint cluster
-// table (no UAX #29 grouping yet). Downstream consumers can target the
-// declared API today; the bidi/script/cluster correctness work happens
-// in 1.2.a finish without changing the API surface.
+// pipelines are intended to consume the same artifact, keeping text metrics,
+// run segmentation, and cluster boundaries aligned across layout and rendering.
+// The planner resolves the font cascade, splits text into bidi/script runs when
+// ICU-backed SkShaper iterators are available, builds grapheme-cluster and
+// Unicode index maps, and falls back to a single compatible run on non-Skia
+// builds.
 
 #pragma once
 
@@ -48,14 +42,12 @@ public:
     /// because `options.registry_generation` is part of the key.
     ShapedText shape(std::string_view text, const FontOptions& options);
 
-    /// pulp #2163 / font v2 Slice 3.7 — parallel shaping (opportunistic).
     /// Shape N independent inputs in parallel and return the artifacts
     /// in input order. Same output as N sequential `shape()` calls.
     /// Uses `std::async(launch::async, ...)` to fan out work; the
-    /// resolver, FontShapedTextResult, and FontFlightRecorder are all
-    /// thread-safe (internal mutexes). The cache lookup happens once
-    /// per future, so duplicate inputs across the batch coalesce as
-    /// expected.
+    /// resolver, FontFlightRecorder, and per-planner cache are all
+    /// synchronized internally. The cache lookup happens once per future,
+    /// so duplicate inputs across the batch coalesce as expected.
     ///
     /// The serial `shape()` API is preferred for one-off labels; this
     /// batch entry point is intended for design-tool panels, docs

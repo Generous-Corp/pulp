@@ -81,7 +81,7 @@ public:
             return false;
         }
 
-        // Prepare and queue SysEx receive buffers (#19 / #239).
+        // Prepare and queue SysEx receive buffers.
         // Four 4 KB buffers — enough headroom for typical device
         // dumps without flooding the driver. Driver returns each
         // via MIM_LONGDATA when full or when an F7 arrives; we
@@ -124,14 +124,12 @@ public:
             return;
         }
         if (handle_) {
-            // Set the closing flag BEFORE midiInReset so any
-            // MIM_LONGDATA callback fired during reset (or already in
-            // flight when stop() races with an arriving SysEx) skips
-            // the midiInAddBuffer re-queue. Without this, a re-queued
-            // header collides with the unprepare/close sequence and
-            // either leaks (MIDIERR_STILLPLAYING) or invalidates
-            // memory the callback's still walking. See #438 P1
-            // Codex review on #388.
+            // Set the closing flag before midiInReset so callbacks
+            // fired during reset, or already in flight while stop()
+            // races with an arriving SysEx, skip the midiInAddBuffer
+            // re-queue. Without this, a re-queued header collides
+            // with unprepare/close and can stay in MIDIERR_STILLPLAYING
+            // or invalidate memory the callback is still walking.
             closing_.store(true, std::memory_order_release);
             midiInStop(handle_);
             // midiInReset returns any pending SysEx buffers via
@@ -196,11 +194,11 @@ private:
                     self->qpc_seconds_since_open());
             }
 
-            // Re-arm the buffer for the next packet — but skip if the
+            // Re-arm the buffer for the next packet, but skip if the
             // device is closing. midiInReset can deliver the last
             // batch of buffers with non-zero dwBytesRecorded; re-queuing
-            // them races with the unprepare/close sequence and can
-            // leave headers MIDIERR_STILLPLAYING. See #438 P1 / #388.
+            // them races with unprepare/close and can leave headers
+            // MIDIERR_STILLPLAYING.
             if (self->closing_.load(std::memory_order_acquire)) return;
             hdr->dwBytesRecorded = 0;
             midiInAddBuffer(self->handle_, hdr, sizeof(*hdr));
@@ -237,7 +235,7 @@ private:
     SysexSlot          sysex_slots_[kSysexSlots]{};
     // closing_ guards the MIM_LONGDATA / MIM_LONGERROR re-queue paths
     // during close() so a callback racing with midiInReset doesn't add
-    // a buffer that's about to be unprepared. See #438 P1 / #388.
+    // a buffer that's about to be unprepared.
     std::atomic<bool>  closing_{false};
     // Non-empty when this input is a BLE-MIDI port routed through the
     // BleMidiPortRegistry rather than an mmeapi device.

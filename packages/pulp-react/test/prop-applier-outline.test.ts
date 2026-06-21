@@ -1,13 +1,10 @@
-// pulp #1519 — verify the @pulp/react prop-applier forwards the RN
-// outline cluster (outlineColor / outlineOffset / outlineStyle /
-// outlineWidth) verbatim to the matching bridge setOutlineX fns.
+// The prop applier forwards each outline attribute verbatim to its
+// matching bridge setter.
 //
 // Outline is a paint-time ring drawn OUTSIDE the border-box and does
 // NOT take up Yoga layout space (no parent reservation). Each prop
 // must route through its own per-attribute bridge fn so a JSX prop
-// diff that touches one outline-* preserves the others — same shape
-// as the borderColor / borderWidth / borderStyle cluster (#1027 +
-// #1434 Triage #10).
+// diff that touches one outline-* attribute preserves the others.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { applyChangedProps } from '../src/prop-applier.js';
@@ -39,7 +36,7 @@ function callsFor(b: MockBridge, fn: string) {
     return b.calls.filter((c) => c.fn === fn);
 }
 
-describe('prop-applier outline cluster (pulp #1519)', () => {
+describe('outline prop forwarding', () => {
     it('forwards outlineColor verbatim', () => {
         applyChangedProps(makeInstance(), {}, { outlineColor: '#ff8800' });
         const calls = callsFor(bridge, 'setOutlineColor');

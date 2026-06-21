@@ -76,9 +76,8 @@ struct StreamingSampleSourceConfig {
     /// refill step). Clamped to the ring capacity. Ignored when fully resident.
     std::uint64_t read_chunk_frames = 8192;
 
-    /// Loop the playback. Honored only for fully-resident sources in this
-    /// version; streamed sources play once and then report finished(). (Streamed
-    /// looping is a documented follow-up — see the guide.)
+    /// Loop the playback. Honored only for fully-resident sources; streamed
+    /// sources play once and then report finished().
     bool loop = false;
     std::uint64_t loop_start = 0;        ///< Loop start frame (resident-loop only).
     std::uint64_t loop_end = 0;          ///< Loop end frame, exclusive; 0 means total_frames.

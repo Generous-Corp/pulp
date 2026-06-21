@@ -6,9 +6,10 @@
 // so we can iterate over every bundled .ttf without scraping CMake state at
 // runtime.
 //
-// If `PULP_HAS_SKIA` is not defined we still ship a translation unit so the
-// header has *something* to link against in non-GPU builds; the entry points
-// are gated on the same macro.
+// Skia-dependent registration and lookup paths in this file are gated behind
+// `PULP_HAS_SKIA`. Most non-Skia public stubs live in font_registry_stubs.cpp,
+// alongside the Skia-independent text-boundary helpers; the generation
+// read/bump stubs stay below because callers use them unconditionally.
 
 #include <pulp/canvas/bundled_fonts.hpp>
 #include <pulp/canvas/font_resolver.hpp>
@@ -36,11 +37,10 @@
 #include "include/core/SkString.h"
 #include "include/core/SkTypeface.h"
 
-// Platform font manager — paths mirror core/canvas/src/skia_canvas_fonts.cpp.
-// Needed by the public `register_font` API so plugin authors can register
-// their own .ttf/.otf files without the rest of `pulp::canvas` having to
-// inject a font manager. Keep this matrix in sync with the `get_font_manager()`
-// shim in skia_canvas_fonts.cpp.
+// Platform font manager used by the public `register_font` API so plugin
+// authors can register .ttf/.otf bytes without callers injecting a manager.
+// Keep this OS matrix as the single canvas-side source for CoreText,
+// DirectWrite, Android, and fontconfig construction.
 #if defined(__APPLE__)
 #include "include/ports/SkFontMgr_mac_ct.h"
 #elif defined(_WIN32)
@@ -136,11 +136,11 @@ sk_sp<SkTypeface> match_bundled_typeface(SkFontMgr* mgr,
     if (it == cache.end()) return nullptr;
 
     // The bundle currently ships only Regular/Upright faces. If the caller
-    // wants something else (bold, italic, …) we MUST return nullptr so the
+    // wants something else (bold, italic, ...) return nullptr so the
     // skia_canvas typeface lookup keeps walking and lets
     // SkFontMgr::matchFamilyStyle pick a system-installed bold/italic
-    // variant — otherwise #932 silently regresses #927's weight/slant
-    // honouring (Codex P2 on PR #956).
+    // variant. Otherwise bundled fonts would hijack off-style requests and
+    // break CSS weight/slant matching.
     SkFontStyle have = it->second->fontStyle();
     if (have.weight() != style.weight() || have.slant() != style.slant()) {
         return nullptr;
@@ -152,7 +152,7 @@ std::size_t bundled_font_count() {
     return bundled_blobs().size();
 }
 
-// ── Plugin-registered font registry (pulp #1150) ─────────────────────────────
+// ── Plugin-registered font registry ──────────────────────────────────────
 // Bundled fonts are baked in at build time and live forever in the binary;
 // plugin-registered fonts come at runtime from `register_font(...)`. They
 // share lookup mechanics (cache by family name, style-aware miss to keep
@@ -162,16 +162,10 @@ std::size_t bundled_font_count() {
 
 namespace {
 
-// pulp #2163 — register_font is called per-typeface, often N times for
-// the same family (one per weight/slant variant) when a developer drops
-// a folder full of TTFs. Before #2163 this map kept exactly one face
-// per family name, so a later "IBM Plex Mono" registration silently
-// overwrote a previous one — the Italic could end up keyed under the
-// family while a Regular request landed on the Italic and was
-// rejected by match_registered_typeface's style filter, returning
-// nullptr. Now we keep every registered face per family and let
-// match_registered_typeface pick the best style match (exact first,
-// then closest).
+// register_font is called per typeface, often once per weight/slant variant
+// when a developer drops a folder full of TTFs. Keep every registered face per
+// family so match_registered_typeface can pick the best style match instead of
+// letting a later face silently replace an earlier one.
 struct RegisteredEntry {
     std::vector<sk_sp<SkTypeface>> faces;
 };
@@ -202,11 +196,9 @@ void bump_generation() noexcept {
 
 } // namespace
 
-// pulp #2163 / font v2 Slice 1.1.a — single canonical platform-font-manager
-// helper, exported from `bundled_fonts.hpp`. Replaces the five inline
-// SkFontMgr_New_* switch blocks that previously lived in skia_canvas.cpp,
-// text_shaper.cpp, sdf_atlas.cpp, bundled_fonts.cpp (×2), and the seed
-// copy in font_resolver.cpp.
+// Single canonical platform-font-manager helper, exported from
+// `bundled_fonts.hpp`, so canvas/font code shares one OS switch for CoreText,
+// DirectWrite, Android, and fontconfig managers.
 sk_sp<SkFontMgr> platform_font_manager() {
     static sk_sp<SkFontMgr> mgr;
     static bool tried = false;
@@ -258,9 +250,9 @@ sk_sp<SkTypeface> match_registered_typeface(const std::string& family,
     auto it = map.find(family);
     if (it == map.end() || it->second.faces.empty()) return nullptr;
 
-    // pulp #2163 — pass 1: exact match on weight + slant. This is the
-    // ideal path: caller asked for Regular/Upright, a Regular/Upright
-    // is registered, hand it back unchanged.
+    // Pass 1: exact match on weight + slant. This is the ideal path: caller
+    // asked for Regular/Upright, a Regular/Upright is registered, hand it back
+    // unchanged.
     for (const auto& f : it->second.faces) {
         if (!f) continue;
         SkFontStyle have = f->fontStyle();
@@ -269,33 +261,15 @@ sk_sp<SkTypeface> match_registered_typeface(const std::string& family,
         }
     }
 
-    // pulp #2163 — pass 2: best-effort closest match, BUT only within a
-    // tight tolerance. The pre-#2163 contract returned nullptr here so
-    // skia_canvas's cascade could walk on to matchFamilyStyle (which
-    // synthesizes faux bold / picks a system Bold). That contract was
-    // fine when the registry held one face per family; #2163 then
-    // loosened it for multi-face registration (e.g. Light + Bold +
-    // SemiBold of the same family) so a Regular request would still
-    // land on a near-neighbour instead of forcing a system-default
-    // fallback that breaks Unicode coverage (the original tofu symptom).
-    //
-    // But an UNBOUNDED closest match overcorrects: a family registered
-    // with ONLY a Regular/Upright face would still satisfy a Bold or
-    // Italic request, hijacking every weight/slant variant of the family
-    // and masking the real system Bold/Italic. That is exactly the
-    // regression the bundled-font matcher above guards against — see the
-    // Codex P2 review on PR #956 and the style-miss assertions in
-    // test_canvas_fonts.cpp ("register_font_file resolves a custom family
-    // through Skia (#1150)").
-    //
-    // The fix keeps the multi-face heuristic but bounds it: a registered
-    // face only substitutes for the requested style when the slant
-    // matches exactly AND the weight gap is within one ~CSS weight step
-    // (200 units — Regular↔SemiBold, Light↔Regular, etc. count as a
-    // genuine match; Regular↔Bold, a 400-unit gap, does not). A request
-    // whose slant or weight is genuinely off-style returns nullptr so the
-    // skia_canvas cascade keeps walking to match_bundled_typeface /
-    // SkFontMgr::matchFamilyStyle.
+    // Pass 2: best-effort closest match, but only within a tight tolerance.
+    // Multi-face registrations should let a Regular request land on a nearby
+    // family member such as SemiBold instead of forcing a system fallback that
+    // loses Unicode coverage. An unbounded closest match overcorrects: a
+    // family registered with only a Regular/Upright face would still satisfy a
+    // Bold or Italic request, hijacking every weight/slant variant and masking
+    // the real system Bold/Italic. Bound the heuristic to same-slant faces
+    // within one approximate CSS weight step; genuinely off-style requests
+    // return nullptr so the cascade keeps walking.
     constexpr int kMaxWeightGap = 200;
     sk_sp<SkTypeface> best;
     int best_gap = std::numeric_limits<int>::max();
@@ -309,9 +283,9 @@ sk_sp<SkTypeface> match_registered_typeface(const std::string& family,
     }
     if (best) return best;
 
-    // pulp #2163 follow-up — pass 3: variable-font weight eligibility.
+    // Pass 3: variable-font weight eligibility.
     //
-    // A registered VARIABLE font is stored as one typeface at its default
+    // A registered variable font is stored as one typeface at its default
     // `wght` instance (e.g. Funnel Display defaults to 400). A request for
     // a far-off weight (700) fails passes 1-2 above because the static
     // weight gap (300) exceeds kMaxWeightGap. But the face can actually
@@ -319,9 +293,9 @@ sk_sp<SkTypeface> match_registered_typeface(const std::string& family,
     // heavier system fallback (which loses the design's typeface entirely),
     // return the base variable face so the resolver can `makeClone` it at
     // the requested weight. Same slant is still required; the wght axis
-    // only governs weight, not slant. Static faces are untouched (they
-    // have no wght axis), so the #1150 / #956 fallback contract for
-    // single-static-Regular families is preserved.
+    // only governs weight, not slant. Static faces are untouched (they have
+    // no wght axis), so single-static-Regular families keep returning
+    // nullptr for truly off-style requests.
     for (const auto& f : it->second.faces) {
         if (!f) continue;
         if (f->fontStyle().slant() != style.slant()) continue;
@@ -375,12 +349,11 @@ bool register_font(const std::uint8_t* data, std::size_t size,
 
     {
         std::lock_guard<std::mutex> guard(registered_mutex());
-        // pulp #2163 — append rather than overwrite. The lookup side
-        // picks the best style match across all registered faces for
-        // this family. Idempotency: skip if this exact typeface ptr is
-        // already present (same Skia identity), but allow multiple
-        // physically-distinct faces (a Regular + Italic + Bold trio is
-        // the normal case for "drop the font family folder in").
+        // Append rather than overwrite. The lookup side picks the best style
+        // match across all registered faces for this family. Idempotency: skip
+        // if this exact typeface ptr is already present (same Skia identity),
+        // but allow multiple physically-distinct faces (a Regular + Italic +
+        // Bold trio is the normal case for "drop the font family folder in").
         auto& entry = registered_fonts()[family];
         bool dup = false;
         for (const auto& existing : entry.faces) {
@@ -407,9 +380,9 @@ bool register_font_file(const std::string& path,
 
 namespace {
 
-// pulp #2163 — font v2 Slice 2.1. Case-insensitive prefix match used
-// for scheme detection. The URL grammar (RFC 3986 §3.1) is
-// case-insensitive for the scheme, so "FILE://" must match "file://".
+// Case-insensitive prefix match used for scheme detection. The URL grammar
+// (RFC 3986 §3.1) is case-insensitive for the scheme, so "FILE://" must match
+// "file://".
 bool starts_with_ci(std::string_view value, std::string_view prefix) {
     if (value.size() < prefix.size()) return false;
     for (std::size_t i = 0; i < prefix.size(); ++i) {
@@ -446,9 +419,9 @@ std::string extract_file_path(const std::string& url) {
 
 std::future<FontState> register_font_url(const std::string& url,
                                          const std::string& family_override) {
-    // HTTP(S): real fetch lands in Slice 2.1.b. Today, surface the
-    // unsupported scheme as Failed so callers can branch on it
-    // without blocking the main thread.
+    // HTTP(S): this API does not fetch network resources. Surface the
+    // unsupported scheme as Failed so callers can branch on it without
+    // blocking the main thread.
     if (starts_with_ci(url, "http://") || starts_with_ci(url, "https://")) {
         std::promise<FontState> p;
         p.set_value(FontState::Failed);
@@ -469,27 +442,18 @@ std::future<FontState> register_font_url(const std::string& url,
         path = url;
     }
 
-    // pulp #2246 follow-up (Codex review): `std::async(std::launch::async, ...)`
-    // returns a future whose destructor BLOCKS the caller until the task
-    // completes when the future is dropped without `.get()` / `.wait()`.
-    // That contradicts the docstring above ("safe to detach"). Switch to
-    // the promise + detached-thread pattern: the caller's future is decoupled
-    // from the worker thread, so dropping it is genuinely non-blocking. If
-    // the future goes out of scope before the worker finishes, the promise's
-    // value is set into a moved-from broken-promise sink and the worker
-    // exits cleanly without touching the caller's stack.
+    // `std::async(std::launch::async, ...)` returns a future whose destructor
+    // blocks the caller until the task completes when the future is dropped
+    // without `.get()` / `.wait()`. Use a promise + detached-thread pattern so
+    // dropping the caller's future is genuinely non-blocking.
     auto promise = std::make_shared<std::promise<FontState>>();
     std::future<FontState> fut = promise->get_future();
     std::thread([promise, path = std::move(path), family_override]() mutable {
-        // Wrap the whole worker body in a catch-all. Codex review on
-        // PR #2308 flagged that `register_font_file()` can throw (e.g.
-        // a vector allocation backed by `tellg()` for a huge / sparse
-        // file), and an exception escaping this detached `std::thread`
-        // calls `std::terminate`. The pre-#2308 `std::async` path kept
-        // the exception in the future state; this path documents
-        // futures as safe-to-drop, so any escape would crash callers
-        // who took us at our word. Convert every escape to
-        // `FontState::Failed` and signal via the promise.
+        // Wrap the whole worker body in a catch-all. `register_font_file()`
+        // can throw (for example, a vector allocation backed by `tellg()` for
+        // a huge or sparse file), and an exception escaping a detached thread
+        // calls `std::terminate`. This API documents futures as safe to drop,
+        // so convert every escape to `FontState::Failed`.
         FontState state = FontState::Failed;
         try {
             state = register_font_file(path, family_override)
@@ -517,13 +481,10 @@ FontProbe probe_font_glyph(const std::string& family,
 
     if (family.empty()) return out;
 
-    // pulp #2163 / font v2 Slice 1.1.a — was a hand-rolled cascade that
-    // mirrored get_cached_typeface_single. Now routes through
-    // FontResolver so the probe sees exactly what fill_text would
-    // resolve to. The resolver's cache is keyed on the full
-    // FontOptions blob so a probe call doesn't "pollute" — it
-    // pre-populates a key a subsequent real call would have hit
-    // anyway.
+    // Route through FontResolver so the probe sees exactly what fill_text
+    // would resolve to. The resolver's cache is keyed on the full FontOptions
+    // blob, so a probe call only pre-populates a key a subsequent real call
+    // would have hit anyway.
     FontOptions opts;
     opts.family_stack.push_back(family);
     opts.weight = static_cast<float>(weight);
@@ -545,7 +506,7 @@ bool is_font_registered(const std::string& family) {
     return map.find(family) != map.end();
 }
 
-// pulp #2163 — font v2 Slice 3.5. WOFF2 runtime decoding.
+// WOFF2 runtime decoding.
 //
 // Pulp doesn't currently vendor Brotli or the Google `woff2` library,
 // and the prebuilt Skia we ship is configured without its WOFF2
@@ -553,9 +514,8 @@ bool is_font_registered(const std::string& family) {
 // decompression step is gated on `__has_include(<woff2/decode.h>)` —
 // if a downstream build vendors `external/woff2/` and links it into
 // `pulp-canvas`, the real path lights up automatically; otherwise the
-// surface stays at "structural-detect + fail cleanly", which is still
-// a strict improvement over the pre-3.5 unconditional `return false`
-// because callers can now distinguish "not a WOFF2 file" from
+// surface stays at "structural-detect + fail cleanly", so callers can
+// distinguish "not a WOFF2 file" from
 // "WOFF2 file but no decoder linked" via `woff2_decoder_available()`.
 //
 // WOFF2 file signature is the 4-byte tag 'wOF2' = 0x77_4F_46_32 read
@@ -600,9 +560,8 @@ bool register_font_woff2(const std::uint8_t* woff2_data, std::size_t size,
     // can pre-size the output buffer, and `ConvertWOFF2ToTTF` for the
     // actual decompress. A WOFF2 header capping at 30MB is plenty for
     // any reasonable plugin font; reject anything larger to keep the
-    // memory pressure bounded against hostile payloads. The Phase 2
-    // sanitizer (`validate_font_bytes`) runs on the decompressed sfnt
-    // before we touch Skia.
+    // memory pressure bounded against hostile payloads. validate_font_bytes()
+    // runs on the decompressed sfnt before we touch Skia.
     constexpr std::size_t kMaxDecompressed = 30u * 1024u * 1024u;
     std::size_t out_size = woff2::ComputeWOFF2FinalSize(woff2_data, size);
     if (out_size == 0 || out_size > kMaxDecompressed) return false;
@@ -631,9 +590,8 @@ void bump_font_registration_generation() noexcept {
     bump_generation();
 }
 
-// pulp #2163 — font v2 Slice 2.8 implementation. Structural TTF/OTF
-// sanitizer. Validates the file header + table directory before
-// handing bytes to Skia. Catches:
+// Structural TTF/OTF sanitizer. Validates the file header + table directory
+// before handing bytes to Skia. Catches:
 //   * truncated headers / files smaller than 12 bytes
 //   * bad sfnt magic (not TTF / OTF / Mac TrueType / Type 1)
 //   * malformed table directory (numTables claims more bytes than file
@@ -644,10 +602,9 @@ void bump_font_registration_generation() noexcept {
 //
 // What this catches but per-table checksum verification doesn't:
 // truncated tables, integer-overflow attempts in length fields,
-// missing critical tables. The full per-table checksum gate (full
-// Chromium-ots port) is a follow-up; this MVP rejects the practical
-// attack surface a plugin developer would actually drop into
-// `register_font`.
+// missing critical tables. A future per-table checksum gate can tighten this
+// further; this structural pass rejects the practical attack surface a plugin
+// developer would actually drop into `register_font`.
 
 namespace {
 
@@ -694,9 +651,9 @@ bool validate_font_bytes(const std::uint8_t* data, std::size_t size) {
     constexpr std::uint32_t kName = 0x6E616D65u; // 'name'
     constexpr std::uint32_t kCmap = 0x636D6170u; // 'cmap'
     constexpr std::uint32_t kMaxp = 0x6D617870u; // 'maxp'
-    // Codex #2177 P1 review: presence is not enough — a malformed
-    // font can list required tables with length=0 and still pass.
-    // Enforce minimum lengths derived from the OpenType spec.
+    // Presence is not enough: a malformed font can list required tables with
+    // length=0 and still pass. Enforce minimum lengths derived from the
+    // OpenType spec.
     //   head: 54 (full table)
     //   name: 6  (numNameRecords + storageOffset + format)
     //   cmap: 4  (version + numTables)

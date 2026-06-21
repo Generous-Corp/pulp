@@ -1,16 +1,14 @@
-// pulp #1434 Triage #9 — verify the @pulp/react prop-applier walks the
-// RN-style `transform` array and dispatches the consolidated
-// setTranslate / setRotation / setScale bridge calls.
+// The React prop applier walks the RN-style `transform` array and
+// dispatches consolidated setTranslate / setRotation / setScale bridge calls.
 //
 // The walker accumulates a {tx, ty, rotateDeg, scale} snapshot in one
 // pass, then emits ONE call per axis-of-transform that the user
 // specified. Within-array merging means [{translateX:10},{translateY:20}]
 // produces ONE setTranslate(10, 20) — not two clobbering calls.
 //
-// Bridge gaps (silently no-op): skewX/skewY (no setSkew bridge fn),
-// rotateX/rotateY/perspective/matrix (no 3D in pulp's 2D View). Tests
-// guard the silent-drop behavior so a future bridge wiring flagging
-// these as failures is the intended signal to update.
+// Unsupported 3D transforms silently no-op because Pulp's View is a 2D
+// surface. Tests guard that behavior so future bridge wiring has an
+// explicit signal to update expectations.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { applyChangedProps } from '../src/prop-applier.js';
@@ -42,7 +40,7 @@ function callsOf(b: MockBridge, fn: 'setTranslate' | 'setRotation' | 'setScale')
     return b.calls.filter((c) => c.fn === fn);
 }
 
-describe('prop-applier transform array (pulp #1434 Triage #9)', () => {
+describe('React prop forwarding for transform arrays', () => {
     it('translateX-only dispatches one setTranslate(x, 0)', () => {
         applyChangedProps(makeInstance(), {}, { transform: [{ translateX: 10 }] });
         const calls = callsOf(bridge, 'setTranslate');
@@ -171,11 +169,9 @@ describe('prop-applier transform array (pulp #1434 Triage #9)', () => {
         expect(callsOf(bridge, 'setScale')).toHaveLength(0);
     });
 
-    it('skewX + skewY accumulate into ONE setSkew (Triage #9 fan-out)', () => {
-        // pulp #1434 Triage #9 fan-out — setSkew is now a registered
-        // bridge fn; the walker accumulates both axes and emits one
-        // consolidated call. Previously this entry asserted silent
-        // drop because the bridge fn didn't exist.
+    it('skewX + skewY accumulate into ONE setSkew call', () => {
+        // setSkew is a registered bridge function; the walker accumulates
+        // both axes and emits one consolidated call.
         const bcalls = (b: MockBridge, fn: string) => b.calls.filter((c) => c.fn === fn);
         applyChangedProps(makeInstance(), {}, {
             transform: [{ skewX: '10deg' }, { skewY: '5deg' }],
