@@ -305,7 +305,7 @@ namespace {
 // Probe an ALSA device for its real per-direction channel maximum by
 // briefly opening it in non-blocking mode and reading hw_params. Falls
 // back to 0 if the device can't be probed (busy, missing, no support
-// for that direction). #20 — replaces the hardcoded `2` placeholder.
+// for that direction), instead of reporting a placeholder channel count.
 unsigned probe_max_channels(const std::string& id, snd_pcm_stream_t stream) {
     snd_pcm_t* pcm = nullptr;
     if (snd_pcm_open(&pcm, id.c_str(), stream, SND_PCM_NONBLOCK) < 0) {

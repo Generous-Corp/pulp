@@ -183,11 +183,10 @@ int compare_versions(const std::string& a, const std::string& b) {
 //   - unreadable file
 //   - private key that decodes to neither 32 nor 64 bytes
 //   - any signing-call failure
-// Callers MUST treat nullopt as a hard failure (#295). Earlier
-// behaviour wrote an empty `edSignature=""` into the appcast and
-// logged success — Sparkle then parsed the unsigned release as
-// "not signed yet" while operators believed they had shipped a
-// signed update. Tracking issue is the same #295.
+// Callers MUST treat nullopt as a hard failure. Earlier behaviour wrote
+// an empty `edSignature=""` into the appcast and logged success; Sparkle
+// then parsed the unsigned release as "not signed yet" while operators
+// believed they had shipped a signed update.
 
 namespace {
 

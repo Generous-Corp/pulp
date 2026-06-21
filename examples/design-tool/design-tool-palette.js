@@ -1028,7 +1028,7 @@ function buildOppositeModeButton() {
 }
 buildOppositeModeButton();
 
-// #60: Save/Load palette buttons
+// Save/Load palette buttons
 function serializePaletteConfiguration() {
     return JSON.stringify({
         title: getText("theme-name-label"),
