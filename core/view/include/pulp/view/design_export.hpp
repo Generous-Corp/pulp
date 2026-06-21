@@ -62,10 +62,10 @@ public:
     static std::string to_wgsl_uniforms(const Theme& theme, const std::string& struct_name = "ThemeUniforms");
 };
 
-// ── Phase 3 (gated on pulp #1307): DESIGN.md emitter ─────────────────────
+// ── DESIGN.md emitter ─────────────────────────────────────────────────────
 //
-// `export_designmd` is the shared write path behind two upcoming
-// surfaces:
+// `export_designmd` is the shared write path for serializing a Theme back into
+// a DESIGN.md-shaped document:
 //
 //   1. `pulp import-design --from <source> --update-design-md` — merges
 //      an external re-import (Figma / Stitch / v0 / Pencil / Claude)
@@ -75,11 +75,9 @@ public:
 //   2. `pulp design` on save — captures the live editor's Theme state
 //      back into DESIGN.md.
 //
-// This phase is GATED on #1307 (reimport-safe loop). Until anchor-stable
-// IDs and 3-way merge semantics land there, the function below throws
-// `std::logic_error("export_designmd is gated on pulp #1307")`. The
-// signature is fixed so callers can already wire against it; the body
-// fills in when the gate clears.
+// This API is intentionally gated until anchor-stable IDs and 3-way merge
+// semantics are available. Until then, the function below throws
+// `std::logic_error("export_designmd is gated on pulp #1307")`.
 
 struct DesignMdProseHints {
     // Optional verbatim prose for each canonical section (Overview,
@@ -91,7 +89,7 @@ struct DesignMdProseHints {
     std::string name_override;
 };
 
-/// Phase 3 placeholder. Implementation lands when pulp #1307 closes.
+/// Export DESIGN.md text or throw while the DESIGN.md merge path is gated.
 std::string export_designmd(const Theme& theme,
                              const DesignMdProseHints& hints = {});
 

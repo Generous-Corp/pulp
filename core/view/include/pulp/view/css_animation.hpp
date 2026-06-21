@@ -1,5 +1,3 @@
-// pulp #1434 Phase A2-1 — CSS animations + transitions infrastructure.
-//
 // CSS-spec types — `transition` shorthand parser, easing curves
 // matching the CSS Animations Module Level 1 vocabulary, the
 // AnimatableProperty enum the dispatcher consults, and the
@@ -9,15 +7,6 @@
 // colliding: this file is the CSS-driven side, that file is the
 // host-app-driven side.
 //
-// Multi-PR ladder per the umbrella spec:
-//   PR 1 (this PR): infrastructure + transition shorthand wiring +
-//                   bridge foundation. No frame-driven playback yet.
-//   PR 2: Property-typed tween functions tied into the rAF idle pump.
-//   PR 3: Transition shorthand parser end-to-end + setTransition
-//         bridge integration with the prop-applier.
-//   PR 4: @keyframes registry + animation-name resolver.
-//   PR 5: Catalog flips + end-to-end tests.
-
 #pragma once
 
 #include <cctype>
@@ -53,7 +42,6 @@ struct CssEasing {
     /// `linear`. Default-constructed CssEasing matches the spec so
     /// declarations like `transition: opacity 200ms` (no explicit
     /// timing token) animate with the right curve out of the box.
-    /// Codex audit on pulp #1508 caught this as a P2.
     Kind kind = Kind::ease;
     /// Cubic-bezier control points. Default initializes to the `ease`
     /// curve (cubic-bezier(0.25, 0.1, 0.25, 1)) so the matrix view of
@@ -125,8 +113,8 @@ struct CssEasing {
     }
 };
 
-/// Property whose values can be tweened. The set is closed; PR 2 of
-/// the ladder ships the per-type tween dispatchers.
+/// Property whose values can be tweened. The set is closed; dispatchers map
+/// these enum values onto property-specific interpolation and setters.
 enum class AnimatableProperty {
     opacity,
     background_color,
@@ -165,7 +153,7 @@ struct TransitionSpec {
     float delay_seconds = 0.0f;
     CssEasing easing{};
 
-    /// Phase 9 — source attribution. Filled in by
+    /// Source attribution. Filled in by
     /// `parse_transition_shorthand_with_provenance(...)` so an offline
     /// motion-trace reader can answer "what CSS file / line defined this
     /// transition?". Empty when parsed via the legacy entry point.
@@ -196,16 +184,14 @@ struct TransitionSpec {
 
 /// One running animation. Lifecycle: created when a property changes
 /// and a TransitionSpec matches; ticks each frame via `tick()`;
-/// finishes when `elapsed >= delay + duration`. PR 2 wires the
-/// dispatcher to call setOpacity / setTranslate / etc. with the
-/// tweened scalar.
+/// finishes when `elapsed >= delay + duration`. The dispatcher applies the
+/// tweened scalar to the target property.
 struct CssAnimation {
     AnimatableProperty property = AnimatableProperty::none;
     TransitionSpec spec{};
-    /// Start + end values are property-typed; PR 1 carries floats since
-    /// every supported property reduces to a float scalar after
-    /// component decomposition (color → 4 floats handled separately
-    /// by PR 2's color-typed dispatcher).
+    /// Start + end values are property-typed; supported properties reduce to a
+    /// float scalar after component decomposition (color channels are tweened
+    /// separately by the color-typed dispatcher).
     float start_value = 0.0f;
     float end_value = 0.0f;
     float elapsed_seconds = 0.0f;
@@ -265,8 +251,8 @@ struct CssAnimation {
         return start_value + (end_value - start_value) * p;
     }
 
-    /// Phase 9: publish the current eased value through the motion publish
-    /// channel, stamping `spec.motion_provenance()` (source_kind=
+    /// Publish the current eased value through the motion publish channel,
+    /// stamping `spec.motion_provenance()` (source_kind=
     /// "css-transition", source_id=<property name>, file/line from the
     /// CSS parser) onto the emitted event.
     void publish(std::string view_name,
@@ -292,13 +278,14 @@ struct CssAnimation {
     }
 };
 
-/// One @keyframe stop. PR 4 wires the value-type registry; PR 1 ships
-/// the raw-string carrier so the registry is consultable today.
+/// One @keyframe stop. Values are stored as raw strings so the registry can
+/// preserve CSS spellings until the property-specific value layer consumes
+/// them.
 struct CssKeyframe {
     /// Position along the timeline: 0.0 = from, 1.0 = to. CSS percent
     /// keyframes (`50%`) are stored as 0.5.
     float offset = 0.0f;
-    /// Property → value snapshots. PR 4 specializes the value type.
+    /// Property → value snapshots.
     std::vector<std::pair<std::string /*prop*/, std::string /*raw value*/>> properties;
 };
 
@@ -525,12 +512,11 @@ inline std::vector<TransitionSpec> parse_transition_shorthand(const std::string&
     return out;
 }
 
-/// Phase 9: parse a `transition` shorthand AND stamp each emitted
-/// `TransitionSpec` with the source attribution (CSS file path + line
-/// number, or React/JS component file:line when the CSS came from an
-/// inline `style="..."`). The legacy `parse_transition_shorthand()`
-/// entry point continues to work unchanged for callers that don't have
-/// or don't care about a source location.
+/// Parse a `transition` shorthand AND stamp each emitted `TransitionSpec` with
+/// the source attribution (CSS file path + line number, or React/JS component
+/// file:line when the CSS came from an inline `style="..."`). The legacy
+/// `parse_transition_shorthand()` entry point continues to work unchanged for
+/// callers that don't have or don't care about a source location.
 inline std::vector<TransitionSpec> parse_transition_shorthand_with_provenance(
     const std::string& css,
     std::string source_file,

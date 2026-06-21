@@ -1,9 +1,7 @@
 #pragma once
 
 /// @file token_lock.hpp
-/// Phase 4c of the inspector direct-manipulation roadmap
-/// (planning/2026-05-18-inspector-direct-manipulation-roadmap.md):
-/// **token lock-to-source via DESIGN.md export**.
+/// Token lock-to-source via DESIGN.md export.
 ///
 /// When a user makes an inspector tweak that corresponds to a design
 /// *token* — a palette color, a spacing-scale step, a corner radius, a
@@ -12,26 +10,24 @@
 /// the design tool (Figma / Stitch / v0 / Pencil / Claude) picks up the
 /// fixed token rather than re-introducing the stale one.
 ///
-/// This is the token-level sibling of Phase 4a (lock-to-source for
-/// generated TSX) and Phase 4b (JSX/TSX AST patch). Where 4a/4b rewrite
-/// *element* source, 4c rewrites a single *token value* in the YAML
-/// frontmatter of DESIGN.md.
+/// This is the token-level sibling of generated-source locking and authored
+/// JSX/TSX locking. Those mechanisms rewrite *element* source; this one
+/// rewrites a single *token value* in the YAML frontmatter of DESIGN.md.
 ///
 /// Design rationale — why a surgical text rewrite, not `export_designmd`:
 ///   `export_designmd(Theme, ...)` (design_export.hpp) re-emits a whole
-///   DESIGN.md from a Theme and is gated on pulp #1307. Even ungated it
-///   would be the wrong tool here: it cannot preserve the author's prose
-///   sections, comment placement, key ordering, or original dimension
-///   spelling ("1.5rem" vs "24px"). Locking ONE token must not reflow
-///   the entire file. So `lock_token_in_designmd` instead parses the
-///   frontmatter to *locate* the token, then performs a minimal
-///   value-only edit on the original text — every other byte of the
-///   file (prose, comments, ordering, indentation) is preserved.
+///   DESIGN.md from a Theme. That would be the wrong tool here: it cannot
+///   preserve the author's prose sections, comment placement, key ordering, or
+///   original dimension spelling ("1.5rem" vs "24px"). Locking ONE token must
+///   not reflow the entire file. So `lock_token_in_designmd` instead parses the
+///   frontmatter to *locate* the token, then performs a minimal value-only edit
+///   on the original text — every other byte of the file (prose, comments,
+///   ordering, indentation) is preserved.
 ///
-/// Conservatism contract (mirrors Phase 4a error handling): if the token
-/// cannot be located *unambiguously* in DESIGN.md the lock FAILS with a
-/// clear message rather than guessing. A failed lock leaves DESIGN.md
-/// byte-identical and the tweak untouched in `pulp-tweaks.json`.
+/// Conservatism contract: if the token cannot be located *unambiguously* in
+/// DESIGN.md the lock FAILS with a clear message rather than guessing. A failed
+/// lock leaves DESIGN.md byte-identical and the tweak untouched in
+/// `pulp-tweaks.json`.
 
 #include <optional>
 #include <string>
@@ -42,7 +38,8 @@ namespace pulp::view {
 // ── Token classification ────────────────────────────────────────────────
 //
 // Not every inspector tweak is a token. A one-off element edit ("make
-// THIS knob 4px wider") is an element tweak — it goes through Phase 4a/4b.
+// THIS knob 4px wider") is an element tweak handled by the source-locking
+// paths.
 // A token tweak edits a value the *whole design system* shares.
 //
 // Two signals classify a tweak as token-typed, in priority order:
@@ -58,11 +55,10 @@ namespace pulp::view {
 // Element-only paths (`paint.*`, `layout.*`, `text.*`) never classify as
 // tokens; `classify_token_tweak` returns std::nullopt for them.
 
-/// The four canonical DESIGN.md frontmatter token groups Phase 4c can
-/// lock into. `components` is intentionally excluded — a component entry
-/// is a *reference bundle*, not a primitive token value, and locking one
-/// would mean rewriting a `{group.name}` reference, which Phase 4c does
-/// not attempt.
+/// The four canonical DESIGN.md frontmatter token groups this engine can lock
+/// into. `components` is intentionally excluded — a component entry is a
+/// *reference bundle*, not a primitive token value, and locking one would mean
+/// rewriting a `{group.name}` reference, which this engine does not attempt.
 enum class TokenGroup {
     colors,      ///< `colors:` map — hex string values.
     spacing,     ///< `spacing:` map — dimension values.
@@ -90,9 +86,9 @@ struct TokenTarget {
 /// @param property_path  The tweak's dotted property path.
 ///
 /// Returns a populated TokenTarget when the tweak addresses a DESIGN.md
-/// token, std::nullopt when it is an element-only tweak (the Phase 4a/4b
-/// domain). Classification is purely structural — it does NOT check
-/// whether the token actually exists in any DESIGN.md.
+/// token, std::nullopt when it is an element-only tweak. Classification is
+/// purely structural — it does NOT check whether the token actually exists in
+/// any DESIGN.md.
 std::optional<TokenTarget> classify_token_tweak(const std::string& anchor_id,
                                                  const std::string& property_path);
 

@@ -1,8 +1,8 @@
 #pragma once
 
 // Sampler starter — a real, runnable sampler UI assembled entirely from the
-// Ink & Signal design-system components (Design-System-Import-Plan Phase 8d).
-// It is the proof that the ingested system (Phase 8a–8c) is genuinely usable:
+// Ink & Signal design-system components. It proves the ingested system is
+// genuinely usable:
 // someone who wants to build a sampler picks components out of pulp::design and
 // gets a themed, reskinnable UI with no bespoke painting.
 //

@@ -1,7 +1,6 @@
 #pragma once
 
 // Cross-platform entry point for the OS-native accessibility provider.
-// Workstream 04 slices 4.1 (Windows UIA) + 4.2 (Linux AT-SPI).
 //
 // Each platform ships its own `accessibility_<platform>.cpp` that
 // defines `init_accessibility(View&, void* native_window)`. The header
@@ -54,7 +53,7 @@ void accessibility_tree_changed(void* handle);
 /// sentinel handle. Cheap when no assistive tech is connected.
 void accessibility_pump(void* handle);
 
-// ── Phase 2 event-raising surface (#247) ────────────────────────────────
+// ── Event-raising surface ────────────────────────────────────────────────
 //
 // Widgets call these when their accessibility-relevant state changes so
 // the platform provider can raise the matching OS event. A no-op on

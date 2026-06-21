@@ -29,14 +29,14 @@ namespace motion {
 
 enum class GeometrySource {
     Layout,        ///< Yoga-computed bounds, ignoring paint-time transforms.
-    Presentation,  ///< After paint_all() composition. Phase 0 falls back to Layout.
+    Presentation,  ///< After paint_all() composition; currently falls back to Layout.
 };
 
 enum class GeometrySpace {
     ViewLocal,    ///< Origin at the target view's top-left, in its own frame.
     ViewGlobal,   ///< Root-view coordinate space.
-    Window,       ///< Phase 0: same as ViewGlobal. Phase 2 adds window origin.
-    Screen,       ///< Phase 0: same as ViewGlobal. Phase 2 adds screen offset.
+    Window,       ///< Currently same as ViewGlobal; reserved for window origin.
+    Screen,       ///< Currently same as ViewGlobal; reserved for screen offset.
 };
 
 enum class GeometryProperty {
@@ -67,13 +67,12 @@ struct TraceOptions {
     int fps = 15;
 };
 
-// ── Provenance envelope (Phase 7) ────────────────────────────────────
+// ── Provenance envelope ──────────────────────────────────────────────
 //
 // Opaque metadata describing *where* a trace came from. Carried on
 // TraceStarted (trace-level) and on burst Start events (burst-level).
-// Phase 7 ships the shape + plumbing; the richer adapters that fill
-// it from each animation surface (Tween / CSS / AnimatorSet / JS rAF
-// / design-import) land in Phase 9.
+// Animation surfaces (Tween / CSS / AnimatorSet / JS rAF / design-import)
+// can fill this envelope to make offline traces explainable.
 
 struct Provenance {
     std::string source_kind;   ///< "tween" | "css-transition" | "animator-set"
@@ -105,7 +104,7 @@ struct SampleEvent {
         Start,         ///< Burst opened (value drifted off baseline / last
                        ///< stable).
         End,           ///< Burst closed (value stabilized). Carries deltas.
-        Input,         ///< Recorded `View::simulate_*` interaction (Phase 10).
+        Input,         ///< Recorded `View::simulate_*` interaction.
                        ///< Carries `input_kind` ("click" / "drag" / "hover"),
                        ///< the target view's id() if any, and root-space
                        ///< coordinates in `components`. Replayed by
@@ -133,7 +132,7 @@ struct SampleEvent {
     std::vector<std::pair<std::string, double>> components;  ///< Sorted by name.
     std::vector<std::pair<std::string, double>> deltas;      ///< End events only.
 
-    // ── Input fields (Phase 10, populated only when `kind == Input`) ─
+    // ── Input fields (populated only when `kind == Input`) ───────────
     //
     // `input_kind` is one of `"click"`, `"drag"`, `"hover"`. `view_id`
     // is the recorded target's `View::id()` (empty when the recorder
@@ -153,7 +152,7 @@ struct SampleEvent {
 /// Render the canonical `[PulpMotion][view][metric] ...` line for a sample event.
 std::string format_line(const SampleEvent& e);
 
-// ── Publish channel (Phase 3) ────────────────────────────────────────
+// ── Publish channel ──────────────────────────────────────────────────
 //
 // `publish_value()` is the entry point for any code that wants to make
 // its scalar / structured values observable without taking a
@@ -168,22 +167,19 @@ std::string format_line(const SampleEvent& e);
 //   - When `Coordinator::firehose()` is true, the published value fans
 //     out as a Sample event to every installed sink, with the same
 //     epsilon / Start/End burst semantics as sampler-driven traces.
-//   - When `firehose()` is false and no subscription is wired (Phase 5
-//     adds the subscription filter), publish is also a no-op.
+//   - When `firehose()` is false and no subscription is wired, publish
+//     is also a no-op.
 //
-// Filter-scoped subscriptions land in Phase 5 alongside the
-// `pulp motion trace --selector <id>` CLI surface; the publish channel
-// is the underlying primitive both modes share.
+// The publish channel is the underlying primitive for trace subscribers
+// and firehose-style diagnostics.
 
 struct PublishOptions {
     int precision = 3;
     double epsilon = 0.0001;
-    /// Phase 9: optional Provenance envelope. When set, the publish
-    /// channel stamps each emitted event (Baseline / Start / Sample / End)
-    /// with this provenance so an offline reader can answer "what
-    /// animation surface drove this value?" Empty by default — pre-Phase-9
-    /// callers that omit this field continue emitting events with the
-    /// envelope unset (backwards compatible).
+    /// Optional Provenance envelope. When set, the publish channel stamps
+    /// each emitted event (Baseline / Start / Sample / End) with this
+    /// provenance so an offline reader can answer "what animation surface
+    /// drove this value?" Empty by default for backward compatibility.
     Provenance provenance;
 };
 
@@ -200,7 +196,7 @@ void publish_components(std::string view_name,
                         std::vector<std::pair<std::string, double>> components,
                         PublishOptions opts = {});
 
-// ── Ambient provenance (Phase 9) ─────────────────────────────────────
+// ── Ambient provenance ───────────────────────────────────────────────
 //
 // Some animation surfaces (JS rAF, design-import codegen) don't easily
 // thread a `PublishOptions{ .provenance = ... }` through every call site.
@@ -217,7 +213,7 @@ void set_ambient_provenance(Provenance p);
 void clear_ambient_provenance();
 Provenance current_ambient_provenance();
 
-// ── Record / replay fixtures (Phase 5) ───────────────────────────────
+// ── Record / replay fixtures ─────────────────────────────────────────
 //
 // A fixture is the on-disk form of a motion stream — one JSONL event
 // per line, preceded by a header line carrying the schema version. The
@@ -234,16 +230,15 @@ Provenance current_ambient_provenance();
 //   - `assert_matches(golden, captured, opts)` compares two fixtures
 //     and returns a structured diff agents can act on.
 //
-// Fixture schema v2 header (Phase 8 — `policy` + `duration_scale`
-// additive fields):
+// Fixture schema v2 header:
 //   {"motion_fixture_version":2,
 //    "policy":"full|reduced|off",
 //    "duration_scale":1.0}
 //
 // `policy` / `duration_scale` are optional. When absent, the loader
 // defaults `policy` to `"full"` and `duration_scale` to `1.0` —
-// pre-Phase-8 v2 fixtures still load. When `make_fixture_sink` writes
-// a fresh fixture it snapshots `MotionPreferences::current()` /
+// earlier v2 fixtures still load. When `make_fixture_sink` writes a fresh
+// fixture it snapshots `MotionPreferences::current()` /
 // `current_duration_scale()` at first event.
 
 constexpr int kFixtureSchemaVersion = 2;
@@ -320,7 +315,7 @@ FixtureDiff assert_matches(const FixtureHeader& golden_header,
                            const std::vector<SampleEvent>& captured,
                            FixtureMatchOptions opts = {});
 
-// ── Assertion helpers (Phase 5) ──────────────────────────────────────
+// ── Assertion helpers ────────────────────────────────────────────────
 //
 // Each helper operates on a flat sequence of scalars extracted from
 // the captured events. Use `extract_scalar(events, view, metric, comp)`
@@ -405,19 +400,17 @@ Sink make_fixture_sink(std::string path);
 /// Returns the number of events replayed, or `-1` on parse error.
 int replay_fixture(const std::string& path, const Sink& sink);
 
-// ── Input recording / replay (Phase 10) ──────────────────────────────
+// ── Input recording / replay ─────────────────────────────────────────
 //
-// Phase 10 wires `View::simulate_click` / `simulate_drag` /
-// `simulate_hover` into the same fixture stream that carries motion
-// samples. Recording is opt-in: nothing changes about simulate_* until
-// a caller installs a recorder, after which every simulate_* dispatch
-// emits an `Input` `SampleEvent` to the Coordinator's sinks (so the
-// already-installed `make_fixture_sink(path)` captures inputs alongside
-// samples). Replay reads the fixture, walks the view tree by `id()` to
-// reattach each input to a live target, and re-invokes the matching
-// `View::simulate_*`. The motion fixture that emerges from the replay
-// — when paired with the same animation primitives — matches the
-// originally-recorded one.
+// `View::simulate_click` / `simulate_drag` / `simulate_hover` can feed the same
+// fixture stream that carries motion samples. Recording is opt-in: nothing
+// changes about simulate_* until a caller installs a recorder, after which every
+// simulate_* dispatch emits an `Input` `SampleEvent` to the Coordinator's sinks
+// (so the already-installed `make_fixture_sink(path)` captures inputs alongside
+// samples). Replay reads the fixture, walks the view tree by `id()` to reattach
+// each input to a live target, and re-invokes the matching `View::simulate_*`.
+// The motion fixture that emerges from the replay — when paired with the same
+// animation primitives — matches the originally-recorded one.
 //
 // Layered intent:
 //   - `make_input_recorder(path)` is a one-call companion to
@@ -528,8 +521,8 @@ public:
     TraceBuilder& multi(std::string name, std::vector<Component> components,
                         int precision = 3, double epsilon = 0.0001);
 
-    /// Geometry metric over a target view. Phase 0 implements
-    /// `source = Layout`; `Presentation` falls back to Layout.
+    /// Geometry metric over a target view. `Presentation` currently falls back
+    /// to `Layout`.
     TraceBuilder& geometry(std::string name,
                            pulp::view::View& target,
                            std::vector<GeometryProperty> props
@@ -607,8 +600,8 @@ public:
     void set_tracing_enabled(bool on);
     bool tracing_enabled() const noexcept;
 
-    /// Filter-scope firehose toggle. Reserved for Phase 3 (animation auto-trace).
-    /// Phase 0 stores and exposes the flag; nothing consumes it yet.
+    /// Filter-scope firehose toggle. Stored and exposed for diagnostics that
+    /// want publish-channel events without explicit metric subscriptions.
     void set_firehose(bool on);
     bool firehose() const noexcept;
 
@@ -626,7 +619,7 @@ public:
     /// Cumulative count of SampleEvents dispatched since `reset()`. For tests.
     std::size_t emitted_event_count() const noexcept;
 
-    // ── Phase 3: publish-channel internals ────────────────────────────
+    // ── Publish-channel internals ─────────────────────────────────────
     /// Called by `publish_value` / `publish_components`. Public so the
     /// free functions can reach it without becoming friends; callers
     /// should prefer the `publish_*` free functions for forward
@@ -636,13 +629,13 @@ public:
                           std::vector<std::pair<std::string, double>> components,
                           PublishOptions opts);
 
-    // ── Phase 9: ambient provenance internals ─────────────────────────
+    // ── Ambient provenance internals ──────────────────────────────────
     /// Called by `set_ambient_provenance` / `clear_ambient_provenance`.
     /// Callers should prefer the free functions for forward compatibility.
     void set_ambient_provenance_internal(Provenance p);
     Provenance current_ambient_provenance_internal() const;
 
-    // ── Phase 10: input recording dispatch ───────────────────────────
+    // ── Input recording dispatch ──────────────────────────────────────
     /// Stamp `e` with the bound FrameClock's `t`/`frame` and dispatch
     /// it to every installed sink. Called by `record_simulated_input`.
     void dispatch_input_event(SampleEvent e);
