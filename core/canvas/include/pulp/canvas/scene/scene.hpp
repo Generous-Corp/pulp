@@ -14,9 +14,8 @@
 //     wants a structured destination so the host can address individual
 //     shapes — toggle visibility, swap a fill, animate a transform —
 //     without re-parsing.
-//   - Future design-tool import paths (`tools/cli/import-design` family)
-//     want a one-to-one container per design-node so round-tripping
-//     stays predictable.
+//   - Design-tool imports need a one-to-one container per design node so
+//     round-tripping stays predictable.
 //
 // Current behavior:
 //   - SVG loads as a `VectorScene` or `SceneGroup`.

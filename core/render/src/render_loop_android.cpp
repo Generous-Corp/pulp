@@ -1,9 +1,8 @@
 // Android RenderLoop — AChoreographer-backed vblank source.
 //
-// Slice 16, planning/2026-05-18-rt-safety-and-debug-dx.md. AChoreographer
-// is Android's native vsync callback (API 24+); it pumps cleanly on
-// 60/90/120 Hz and VRR displays. The existing standalone Choreographer
-// pacer lives in core/render/platform/android/choreographer_android.cpp;
+// AChoreographer is Android's native vsync callback (API 24+); it pumps
+// cleanly on 60/90/120 Hz and VRR displays. The existing standalone
+// Choreographer pacer lives in core/render/platform/android/choreographer_android.cpp;
 // this is the RenderLoop-shaped wrapper wired into RenderLoop::create().
 //
 // AChoreographer_getInstance() is thread/looper-sensitive: it must be

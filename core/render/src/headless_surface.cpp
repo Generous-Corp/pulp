@@ -1,7 +1,5 @@
-// headless_surface.cpp — CI-friendly wrapper around the existing
-// offscreen Dawn/Skia path. Spec: planning/2026-05-24-macos-plugin-
-// authoring-plan.md §6.7 ("upgrade Headless GpuSurface from Partial →
-// Full — capability already exists; this is wrapping").
+// headless_surface.cpp — CI-friendly wrapper around the existing offscreen
+// Dawn/Skia path.
 //
 // We deliberately do NOT introduce a new render path here. All of the
 // real GPU work continues to live in `GpuSurface::create_dawn()` +

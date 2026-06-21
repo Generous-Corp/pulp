@@ -20,9 +20,8 @@ enum class RenderPassType {
 /// Statistics for a single render pass.
 ///
 /// `time_ms` is CPU wall-time measured around the pass's draw-call
-/// submission — it is what the inspector Performance tab has always
-/// shown. Phase 6.5 adds `gpu_time_ms`: the *true* GPU-side execution
-/// time of the pass, sampled via Dawn timestamp queries
+/// submission. `gpu_time_ms` is the true GPU-side execution time of the pass,
+/// sampled via Dawn timestamp queries
 /// (`pulp::render::GpuTimestamps`). The two numbers diverge exactly
 /// where perf bugs hide — a pass cheap on the CPU but expensive on the
 /// GPU (overdraw, expensive shaders) is invisible without the GPU clock.
@@ -38,9 +37,9 @@ struct PassStats {
     float gpu_time_ms = 0;    ///< True GPU execution time (ms); see gpu_time_valid.
     bool  gpu_time_valid = false;  ///< Whether gpu_time_ms holds a real sample.
 
-    /// Explicit alias for the CPU number. Phase 6.5 introduced the
-    /// CPU-vs-GPU split; `cpu_time_ms()` makes call sites that want the
-    /// CPU clock self-documenting without changing the wire field name.
+    /// Explicit alias for the CPU number. `cpu_time_ms()` makes call sites
+    /// that want the CPU clock self-documenting without changing the wire
+    /// field name.
     float cpu_time_ms() const { return time_ms; }
 };
 
@@ -83,7 +82,7 @@ public:
         over_budget_ = (budget_ms_ > 0 && total_time_ms_ > budget_ms_);
     }
 
-    /// Phase 6.5: feed a resolved GPU-side duration into a pass.
+    /// Feed a resolved GPU-side duration into a pass.
     ///
     /// GPU timestamp queries are resolved one frame after the pass that
     /// wrote them was submitted, so this is called by the GPU-timestamp
@@ -117,8 +116,7 @@ public:
     /// render clock is whole-recording, not per-pass, so this is the honest
     /// place to record it. `valid` should reflect
     /// `WindowHost::gpu_render_timing_available()`. Negative durations are
-    /// clamped to "invalid". See
-    /// `planning/2026-05-21-gpu-timestamp-readback-proposal.md`.
+    /// clamped to "invalid".
     void set_gpu_render_time_ms(float ms, bool valid) {
         if (valid && ms >= 0.0f) {
             gpu_render_time_ms_ = ms;

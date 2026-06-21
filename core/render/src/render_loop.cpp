@@ -11,7 +11,8 @@
 //   Windows — WindowsRenderLoop  : DwmFlush vblank wait    (this file)
 //   Linux   — TimerRenderLoop    : conscious timer fallback (this file)
 //
-// Slice 16, planning/2026-05-18-rt-safety-and-debug-dx.md.
+// RenderLoopState owns the shared coalescing behavior; native subclasses only
+// provide the pacing source.
 
 #include <pulp/render/render_loop.hpp>
 #include <pulp/runtime/log.hpp>
@@ -157,7 +158,7 @@ public:
     bool is_running() const override { return state_.is_running(); }
 
     // Reports timer once DwmFlush() has failed, so callers using
-    // render_loop_backend_is_vsync() can detect the fallback (Codex P2 #2580).
+    // render_loop_backend_is_vsync() can detect the fallback.
     RenderLoopBackend backend() const override {
         return backend_tracker_.effective_backend();
     }

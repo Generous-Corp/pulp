@@ -6,8 +6,8 @@
 
 namespace pulp::render {
 
-// Slice 16 — tracks whether a compositor-vblank wait (Windows DwmFlush) has
-// degraded to the timer fallback so backend() reports the effective backend.
+// Tracks whether a compositor-vblank wait (Windows DwmFlush) has degraded to
+// the timer fallback so backend() reports the effective backend.
 //
 // The Windows loop waits on DwmFlush() for vblank pacing; when DWM is
 // unavailable (Server Core, remote session, headless) DwmFlush() fails and

@@ -1,15 +1,14 @@
 // cg_canvas_shadow.mm — CoreGraphics drop-shadow state slice.
 //
-// Extracted from cg_canvas.mm in the 2026-05 Phase 4 (R2-3 mirror)
-// refactor. Pairs with core/canvas/src/skia_canvas_box_shadow.cpp on
-// the Skia side. Covers the four Canvas2D `ctx.shadow*` setters plus
-// the apply_shadow_to_context() rebuild helper.
+// Pairs with core/canvas/src/skia_canvas_box_shadow.cpp on the Skia side.
+// Covers the four Canvas2D `ctx.shadow*` setters plus the
+// apply_shadow_to_context() rebuild helper.
 //
 // CG owns the sticky shadow state via its GState stack —
 // CGContextSetShadowWithColor snapshots into the current GState, and a
 // later CGContextRestoreGState restores whatever shadow was active in
 // the parent frame. This matches Canvas2D save()/restore() semantics
-// for `ctx.shadow*` exactly (issue-1434 batch 7).
+// for `ctx.shadow*` exactly.
 
 #include <pulp/canvas/cg_canvas.hpp>
 

@@ -137,16 +137,13 @@ public:
         // it does (same scope).
         //
         // - TimestampQuery: lets Skia Graphite report per-recording GPU
-        //   render time via GpuStats(kElapsedTime). Phase 6.5.
+        //   render time via GpuStats(kElapsedTime).
         // - IndirectFirstInstance: lets WebGPU consumers (notably
         //   Three.js's WebGPURenderer) issue drawIndexed / draw calls
         //   with non-zero firstInstance. Without this the Three.js
         //   render path validates as "First instance must be zero" and
-        //   every command buffer is dropped — every frame paints
-        //   nothing. iOS-D.3c proved this empirically by surfacing the
-        //   exact validation message via the JS-side
-        //   unhandledrejection tracker (issue #3206). Apple Metal
-        //   supports the feature; iOS Sim with the Metal backend
+        //   every command buffer is dropped — every frame paints nothing.
+        //   Apple Metal supports the feature; iOS Sim with the Metal backend
         //   typically advertises it.
         std::vector<wgpu::FeatureName> required_device_features;
         if (adapter_.HasFeature(wgpu::FeatureName::TimestampQuery)) {
@@ -162,20 +159,20 @@ public:
             device_desc.requiredFeatures = required_device_features.data();
         }
 
-        // iOS-D.3c (#3217): enable Dawn's `skip_validation` +
-        // `allow_unsafe_apis` toggles on iOS Simulator only. The Sim's Metal
-        // SoftwareRenderer advertises IndirectFirstInstance but Dawn's spec
-        // validator still rejects Skia/Graphite's per-frame instanced draws
-        // every frame; the rejected CommandBuffer poisons the queue and the
-        // visible CAMetalLayer never gets painted. The toggle bypasses the
-        // spec validator so the actual Metal draw runs. Production iPad keeps
-        // validation on — Apple GPU honors the feature natively.
+        // Enable Dawn's `skip_validation` + `allow_unsafe_apis` toggles on iOS
+        // Simulator only. The Sim's Metal SoftwareRenderer advertises
+        // IndirectFirstInstance but Dawn's spec validator still rejects
+        // Skia/Graphite's per-frame instanced draws every frame; the rejected
+        // CommandBuffer poisons the queue and the visible CAMetalLayer never
+        // gets painted. The toggle bypasses the spec validator so the actual
+        // Metal draw runs. Production iPad keeps validation on because Apple
+        // GPU honors the feature natively.
         std::vector<const char*> enabled_toggles;
         wgpu::DawnTogglesDescriptor toggles_desc{};
 #if defined(TARGET_OS_SIMULATOR) && TARGET_OS_SIMULATOR
         enabled_toggles.push_back("skip_validation");
         enabled_toggles.push_back("allow_unsafe_apis");
-        runtime::log_info("GpuSurface: iOS Sim — enabling skip_validation + allow_unsafe_apis Dawn toggles (#3217)");
+        runtime::log_info("GpuSurface: iOS Sim — enabling skip_validation + allow_unsafe_apis Dawn toggles");
         toggles_desc.enabledToggleCount = enabled_toggles.size();
         toggles_desc.enabledToggles = enabled_toggles.data();
         device_desc.nextInChain = &toggles_desc;
@@ -184,14 +181,12 @@ public:
         device_desc.SetUncapturedErrorCallback(
             [](const wgpu::Device&, wgpu::ErrorType type, wgpu::StringView message) {
                 std::string msg(message.data, message.length);
-                // iOS-D.3c (#3217): filter known-benign Dawn first-frame /
-                // per-frame instanced-draw noise. Skia Graphite emits
-                // firstInstance>0 instanced draws every frame on iOS Sim;
-                // Dawn validates as a warning but the underlying Metal draw
-                // still runs (planning/2026-05-29-ios-d3b-threejs-webgpu-program.md:316
-                // documents `First instance (1) must be zero` as expected
-                // first-frame noise per iOS-D.1). Pre-filter so the noise
-                // doesn't drown out real WebGPU errors in the runtime log.
+                // Filter known-benign Dawn first-frame / per-frame
+                // instanced-draw noise. Skia Graphite emits firstInstance>0
+                // instanced draws every frame on iOS Sim; Dawn validates as a
+                // warning but the underlying Metal draw still runs. Pre-filter
+                // so the noise doesn't drown out real WebGPU errors in the
+                // runtime log.
                 if (msg.find("First instance") != std::string::npos &&
                     msg.find("must be zero") != std::string::npos) {
                     return;
@@ -229,14 +224,12 @@ public:
         runtime::log_info("GpuSurface: Dawn initialized (surface: {})",
             surface_ ? "presentable" : "offscreen-only");
 
-        // Phase iOS-D.1 hard-fail gate
-        // (planning/2026-05-28-ios-d-gpu-auv3-crosscheck.md): log the Dawn
-        // backend type that actually came up. Tests / CI scrape this line
-        // to assert `backend_type=Metal` on Apple platforms; a missing or
-        // unexpected backend means GPU init silently fell back to a
-        // different adapter (Null, OpenGL emulation, etc.) and the editor
-        // is rendering through CPU. The adapter info is queried after
-        // device creation so the result reflects the real selection.
+        // Log the Dawn backend type that actually came up. Tests / CI scrape
+        // this line to assert `backend_type=Metal` on Apple platforms; a
+        // missing or unexpected backend means GPU init silently fell back to a
+        // different adapter (Null, OpenGL emulation, etc.) and the editor is
+        // rendering through CPU. The adapter info is queried after device
+        // creation so the result reflects the real selection.
         if (adapter_) {
             wgpu::AdapterInfo dawn_info{};
             adapter_.GetInfo(&dawn_info);
@@ -399,7 +392,7 @@ private:
 #elif defined(__linux__)
         // Linux: native_handle is a pointer to a GpuSurface::X11NativeHandle
         // (Display* + Window). A bare Window id is not enough — Dawn's Xlib
-        // surface source needs both (#3329). Wayland is not wired yet.
+        // surface source needs both. Wayland is not wired yet.
         if (auto* x11 = static_cast<X11NativeHandle*>(native_handle);
             x11 && x11->display && x11->window) {
             wgpu::SurfaceDescriptor surface_desc{};

@@ -8,7 +8,7 @@
 #include <memory>
 #include <thread>
 
-// Phase 6.5 — Dawn GPU timestamp queries.
+// Dawn GPU timestamp queries.
 //
 // The header (`gpu_timestamps.hpp`) carries the pure tick→ms conversion
 // math and the `decode_resolved_ticks` byte-decode seam, both unit-
