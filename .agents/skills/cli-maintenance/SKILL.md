@@ -77,7 +77,7 @@ python3 tools/scripts/cli_sync_check.py
 python3 tools/scripts/check_cli_mcp_parity.py --mode=report
 ```
 
-### 8. Decide: does this need an MCP tool? (pulp #1997)
+### 8. Decide: does this need an MCP tool?
 
 Every top-level CLI command is checked for MCP parity by
 `tools/scripts/check_cli_mcp_parity.py`. The check enforces an
@@ -558,7 +558,7 @@ to the **`cli-maintenance`** skill (because the path map owns
 updates the slash command + the topical skill but leaves
 cli-maintenance untouched still trips skill-sync. Keep this section
 present so the gate stays satisfiable by the topical edit alone.
-pulp #709 / `--from claude` is the worked example.
+`--from claude` is the worked example.
 
 ### Adding a credential flag backed by an env-file (`pulp ship notarize` pattern)
 
@@ -840,7 +840,7 @@ honors `PULP_NO_MODIFY_PATH=1` (same opt-out as `install.sh`) and is idempotent
 profile-selection logic, keep it in sync with `tools/install/install.sh`'s PATH
 block so the two install surfaces agree.
 
-## `pulp run --headless / --screenshot / --frames / --watch` (#914)
+## `pulp run --headless / --screenshot / --frames / --watch`
 
 `tools/cli/cmd_run.cpp` plus the shared parser in
 `tools/cli/cmd_run_parse.cpp` (`parse_run_options` / `assemble_launch_args`)
@@ -863,7 +863,7 @@ expose four CI-friendly flags on top of the basic launch path:
 
 The CLI parser is unit-tested in `test/test_cli_run_options.cpp`
 (parse + forwarding contract) and end-to-end shell-out coverage lives
-in `test/test_cli_shellout.cpp` (`[issue-914]` tag), which exercises
+in `test/test_cli_shellout.cpp`, which exercises
 the discover-binary → launch-with-flags → PNG-on-disk path against the
 fixture binary in `test/fixtures/cli_run_fixture.cpp`.
 
@@ -913,7 +913,7 @@ Gotchas:
 - **Exit code still follows `failed > 0` first.** `--strict` only
   adds "OR any skipped-missing-tool" on top. Genuine validator
   failures still fail without `--strict`.
-- **Validator-discovery preflight (#743).** Before launching any
+- **Validator-discovery preflight.** Before launching any
   validator binary, `pulp validate` runs the same discovery used by
   `pulp doctor --validators` and aborts cleanly if any candidate has
   a broken code signature (the "ripped from .app bundle" pattern,
@@ -922,7 +922,7 @@ Gotchas:
   add it to the priority list in `tools/cli/validator_discovery.cpp`
   so the preflight covers it.
 
-### `pulp doctor --validators` (#743)
+### `pulp doctor --validators`
 
 Discovers `auval` / `pluginval` / `clap-validator` across well-known
 paths (system → cask app bundle → PATH → `~/.cargo/bin`) and verifies
@@ -1009,16 +1009,15 @@ Gotchas:
 
 - **Don't bake the version into the asset filename.** The version sits in
   the release *tag* (path segment `v<version>`), not in the file name.
-  PR #377 / issue #352 was the bug where the filename contained the
-  version and every upgrade 404'd. `test_cli_upgrade_url.cpp` explicitly
-  fails if the version reappears in the filename.
+  `test_cli_upgrade_url.cpp` explicitly fails if the version reappears
+  in the filename because that shape makes every upgrade URL miss the
+  uploaded asset.
 - **Use `x64`, not `x86_64`.** The release workflow uploads under `x64`.
 - **Install sibling payloads before replacing `pulp`.** Phase 8+
   archives contain Rust `pulp`, `pulp-cpp`, and the runtime library.
   Pre-cutover C++ CLIs still run `cmd_upgrade.cpp` during that hop, so
   the helper in `upgrade_install.hpp` must copy `pulp-cpp` and other
-  top-level payload files next to the current binary before self-replace
-  (#1673).
+  top-level payload files next to the current binary before self-replace.
 - **If you change `upgrade_url.hpp`, update the regression test in the
   same PR.** Both live at HEAD; drift between them is the whole reason
   the header exists.
@@ -1041,7 +1040,7 @@ file). When changing scanner.scan() signatures, update cmd_host.cpp's
 ScanOptions construction in lockstep — the cross-format loop builds an
 options struct per iteration.
 
-#### `pulp scan --no-load` (#812)
+#### `pulp scan --no-load`
 
 Filesystem-only enumeration mode. The default `pulp scan` opens each
 discovered bundle via `dlopen` to read entry-point metadata; one
@@ -1052,7 +1051,7 @@ the scanner. `pulp scan --help` short-circuits before plugin
 enumeration so users can discover the flag even when the underlying
 scan path is broken.
 
-#### Cross-binary `pulp project bump` ↔ `undo` parity (#244)
+#### Cross-binary `pulp project bump` ↔ `undo` parity
 
 C++ and Rust both serialize `bump-undo-*.json` records but with
 slightly different field sets — Rust writes a transient `notes:[...]`
@@ -1063,7 +1062,7 @@ keep both writers + the C++ parser in lockstep, and add a fixture-
 level test in `test/test_cli_project_bump.cpp` that round-trips both
 directions.
 
-#### `pulp projects list --json` (#244)
+#### `pulp projects list --json`
 
 The Rust binary always had a `--json` lane; the C++ port for parity
 landed via `70e94dd7`. `pulp projects` is the only `projects`
@@ -1093,7 +1092,7 @@ a `ParameterEventQueue`. When adding new CLI hosting commands, include
 have no automation to deliver. See `docs/reference/host-thread-rules.md`
 for the full contract.
 
-## `pulp projects` + registry wiring (#499 / #552 Slice 1b)
+## `pulp projects` + registry wiring
 
 `pulp projects list/add/remove` live in `tools/cli/cmd_projects.cpp`.
 The JSON file at `~/.pulp/projects.json` (or `$PULP_HOME/projects.json`)
@@ -1134,7 +1133,7 @@ Gotchas:
   (`\bpulp_add_[A-Za-z0-9_]+\s*\(`). Matches any `pulp_add_*` macro
   the SDK introduces without requiring a new entry here.
 
-## `pulp project bump` / `pulp project undo` (#499 / #564 Slice 7)
+## `pulp project bump` / `pulp project undo`
 
 `pulp project bump` and `pulp project undo` live in
 `tools/cli/cmd_project.cpp` and delegate to the pure-logic core in
@@ -1148,9 +1147,9 @@ Gotchas:
 - In legacy source-embedded projects, bump reads `CMakeLists.txt`,
   locates the first Pulp pin (FetchContent GIT_TAG,
   `pulp_add_project(VERSION ...)`, or `project(NAME VERSION ...)`),
-  rewrites it atomically, records an undo batch, and prints Slice 3
-  (#548) migration notes for the hop.
-- `--all` iterates `~/.pulp/projects.json` (Slice 1b #552).
+  rewrites it atomically, records an undo batch, and prints migration
+  notes for the hop.
+- `--all` iterates `~/.pulp/projects.json`.
 - Undo reads `bump-undo-<timestamp>.json` and reverts each bumped
   entry's recorded edits. New undo files may contain multiple edits
   across `pulp.toml` and `CMakeLists.txt`; legacy one-edit files are
@@ -1206,9 +1205,13 @@ Gotchas:
   bump-all test cases to "bump all ..." instead of "--all ...".
 - **Post-upgrade hook respects `update.bump_projects`.**
   `cmd_upgrade.cpp` reads the key (default `prompt`) and either
-  prints the `pulp project bump --all` hint or stays quiet on
-  `off`. The actual exec-into-new-binary lands in a follow-up; this
-  slice just wires the nudge.
+  prints the `pulp project bump --all` hint or stays quiet on `off`.
+  `auto` is accepted for config compatibility but must not claim
+  automatic execution until a new-binary follow-up actually runs the bump.
+  If automatic execution is added later, it must run from the
+  just-installed binary on a later invocation; the old Windows process
+  must not try to spawn `project bump` while `pulp.exe` is still being
+  replaced.
 - **Git-clean gate uses `git -C <proj> status --porcelain`.** If
   git isn't on PATH, `cmake_is_dirty()` returns false — we refuse
   to block on a missing tool. `--force-dirty` is the explicit
@@ -1217,12 +1220,11 @@ Gotchas:
   old pin as `from`.** That captures the widest set of applicable
   notes when different projects were on different versions.
 
-## `pulp doctor --versions` — version diagnostics (#499 Slice 1)
+## `pulp doctor --versions` — version diagnostics
 
-The first slice of the release-discovery UX (issue #499) is a pure
-diagnostic that short-circuits the doctor pipeline: it prints
-CLI/SDK/Plugin versions side-by-side plus advisory skew warnings and
-always exits 0. Lives in `tools/cli/version_diag.{hpp,cpp}` with
+This release-discovery diagnostic short-circuits the doctor pipeline:
+it prints CLI/SDK/Plugin versions side-by-side plus advisory skew warnings
+and always exits 0. Lives in `tools/cli/version_diag.{hpp,cpp}` with
 `cmd_doctor` as the only caller.
 
 Gotchas:
@@ -1307,7 +1309,7 @@ to `PROJECT_VERSION` via `tools/mcp/pulp_mcp_version.h.in`. Hardcoding a
 new version string there will be silently overridden by the configure
 step; bump the project version instead.
 
-## `pulp doctor --caches` — FetchContent cache health (#744)
+## `pulp doctor --caches` — FetchContent cache health
 
 Like `--versions`, `--caches` is a dedicated diagnostic that
 short-circuits the doctor pipeline. It scans Pulp's shared FetchContent
@@ -1378,17 +1380,17 @@ Gotchas:
   "is_symlink", "resolved_target", "declared_ref", "cached_ref",
   "dep_name", "reason", "remediation", "fixable"}]}`. `status`
   values are `healthy`, `dangling-symlink`, `stale-commit`,
-  `root-owned`, `unknown`. Don't rename keys; scripts and the
-  rust-cli port (#740 family) parse them by name.
+  `root-owned`, `unknown`. Don't rename keys; scripts and the Rust
+  CLI port parse them by name.
 
 Adjacent modules to coordinate with: `tools/cmake/PulpFetchContent.cmake`
 (the cache-root and sanitize-suffix logic — `default_cache_root` and
 `sanitize_ref` in `fetchcontent_cache.cpp` MUST mirror it), and the
 build / test commands that call `cache_preflight_check`.
 
-## `pulp config` + update-check (#499 Slice 2 / #547)
+## `pulp config` + update-check
 
-Slice 2 wires a 24h update-check cache plus a config surface for
+This wires a 24h update-check cache plus a config surface for
 `~/.pulp/config.toml`. Key layout:
 
 - **`tools/cli/update_check.{hpp,cpp}`** — pure-logic core. No
@@ -1434,10 +1436,10 @@ Gotchas:
   trailers live on the tip commit. Do NOT split with blank lines —
   `git interpret-trailers --parse` treats them as non-trailers.
 
-## Mode enforcement + pending-upgrade (#499 Slice 5 / #550)
+## Mode enforcement + pending-upgrade
 
-Slice 5 wires all four `update.mode` values into the dispatch path in
-`pulp_cli.cpp` and adds the auto-mode staging + Windows tombstone
+All four `update.mode` values are wired into the dispatch path in
+`pulp_cli.cpp`, including auto-mode staging and Windows tombstone
 cleanup. Key layout:
 
 - **`tools/cli/update_mode.{hpp,cpp}`** — pure-logic core: `Mode` enum,
@@ -1470,8 +1472,8 @@ cleanup. Key layout:
   change is itself an act of re-engagement with update management,
   so an existing 24h snooze would otherwise silence the new mode's
   behavior. Also adds the `update.bump_projects` allow-list entry
-  (values: `prompt | auto | off`, default `prompt`) as a **reserved
-  stub for Slice 7 (#564)** — accept it now, implement in Slice 7.
+  (values: `prompt | auto | off`, default `prompt`) used by the
+  post-upgrade project-bump nudge.
 - **Banner shapes** (locked, tested verbatim in `test_cli_update_mode.cpp`):
   - manual: `Pulp vX.Y.Z available (you have vA.B.C). Run \`pulp upgrade\` when you're ready.`
   - auto staged: `Pulp vX.Y.Z downloaded. The upgrade will complete on your next \`pulp\` invocation.`
@@ -1498,15 +1500,15 @@ Gotchas specific to Slice 5:
   `banner_shown_for_version` counter. The snooze file is written by
   (a) `cmd_config` on mode change (as a clear) and (b) the
   `/upgrade` Claude skill on explicit decline. Nowhere else.
-- **`update.bump_projects` is an accept-only stub in Slice 5.**
-  Don't wire behavior for it yet; Slice 7 (#564) owns that. If you're
-  tempted to check the value here, stop — it should round-trip
-  through `pulp config get/set` only.
+- **`update.bump_projects` is consumed after successful upgrade.**
+  `prompt` and `auto` print the `pulp project bump --all` hint, while
+  `off` stays quiet. Keep
+  `cmd_config` validation, the `cmd_upgrade` hook, `docs/reference/cli.md`,
+  and shell-out coverage in sync.
 
-## Migration notes + `pulp upgrade --notes` (#499 Slice 3 / #548)
+## Migration notes + `pulp upgrade --notes`
 
-Slice 3 extends `cmd_upgrade` with an embedded, per-release migration
-index. The table is generated at CMake configure time from
+`cmd_upgrade` carries an embedded, per-release migration index. The table is generated at CMake configure time from
 `docs/migrations/*.md` and compiled into the binary so upgrade notes
 are always in lock-step with the shipped version — no runtime
 download, no filesystem scan.
@@ -1576,7 +1578,7 @@ Gotchas:
   explicitly `#include <cstddef>`, `<sstream>`, `<string>`, `<vector>`,
   `<tuple>`. Don't rely on libc++ giving you those transitively.
 
-## SDK cache filenames — version pin (pulp #1814)
+## SDK cache filenames — version pin
 
 `pulp install` (and the underlying `pulp cache fetch skia`) used to write
 the downloaded SDK tarball to `~/.pulp/cache/pulp-sdk-<platform>.tar.gz` —
@@ -1639,7 +1641,7 @@ Gotchas:
     - `validate-build.sh` keeps Debug — that's the validator's job (catches debug-only assertion failures).
     - `cli_common.cpp`'s SDK install path already used Release.
   Follow-up scope (not done yet): `pulp build --debug` / `--release` that force a reconfigure of an existing `build/` directory.
-- **`pulp sdk available` + newer-SDK banner cache contract** (2026-05, #22/#23). `pulp sdk available` shells out to curl for the GitHub `/releases?per_page=30` endpoint and parses `tag_name` entries — no JSON dep. `maybe_print_newer_sdk_banner(installed)` caches the latest release at `~/.pulp/cache/latest_release.txt` (line 1 = version, line 2 = Unix timestamp) with a 24h TTL and a 2s curl timeout. The cache is best-effort — if curl fails the banner just doesn't print this run. Wired into `pulp sdk status` only; `pulp build` and `pulp create` deliberately stay quiet on the hot path. To invalidate the cache: `rm ~/.pulp/cache/latest_release.txt`.
+- **`pulp sdk available` + newer-SDK banner cache contract.** `pulp sdk available` shells out to curl for the GitHub `/releases?per_page=30` endpoint and parses `tag_name` entries — no JSON dep. `maybe_print_newer_sdk_banner(installed)` caches the latest release at `~/.pulp/cache/latest_release.txt` (line 1 = version, line 2 = Unix timestamp) with a 24h TTL and a 2s curl timeout. The cache is best-effort — if curl fails the banner just doesn't print this run. Wired into `pulp sdk status` only; `pulp build` and `pulp create` deliberately stay quiet on the hot path. To invalidate the cache: `rm ~/.pulp/cache/latest_release.txt`.
 - **`tools/cli/cli_doctor_helpers.cpp` owns doctor check bodies** (2026-05, R2-4). The 971-line doctor block moved out of `cli_common.cpp` into its own TU. Public API (`DoctorCheck` struct + `run_doctor_*` functions) stays in `cli_common.hpp`; no new public header was added (Codex risk callout: don't replace one catch-all surface with another). When adding a new doctor check, edit `cli_doctor_helpers.cpp` only.
 - **`pulp doctor list` + `--only <name>`** (2026-05, R2-8). `pulp doctor list` enumerates available checks; `pulp doctor --only <substring>` case-insensitive filter runs a subset. Works across modes (`pulp doctor android list`, `pulp doctor --only emulator`). Filter logic lives in `cmd_doctor.cpp`, not in the helpers TU — the `DoctorCheck` vector returned by `run_doctor_checks` already IS the registry. No new struct or registration step needed when adding a check.
 - **Validator commands must suppress editor hosts.** Any CLI path that shells out to `auval`, `pluginval`, `clap-validator`, or `vstvalidator` must run the command with `PULP_DISABLE_PLUGIN_EDITOR=1 PULP_HEADLESS=1 PULP_TEST_MODE=1`. This is part of the launch-safety contract: validation should never open a native plugin editor or OS window on a user/agent machine.
@@ -1669,7 +1671,7 @@ Notes for CLI maintenance:
   logs `build=debug|release` on the `[plugin-gpu-host]` adapter line and warns
   once on Debug, so a host log immediately shows which build was loaded.
 
-## `pulp build --install` + `--skip-validation` (PR #2932, items 7.4 / 7.4b / 7.5)
+## `pulp build --install` + `--skip-validation`
 
 The documented `build → validate → install` pipeline now exists as
 real CLI flags rather than implied tooling. `tools/cli/cmd_build.cpp`
@@ -1705,7 +1707,7 @@ Gotchas:
   Policy" — a plugin that crashes a DAW during scan is worse than no
   plugin at all. The validation gate is non-optional in normal use.
 
-## `pulp ship auv3-xcodeproj` (PR #2938, item 3.10)
+## `pulp ship auv3-xcodeproj`
 
 Thin wrapper over `cmake -G Xcode` that generates an Xcode project
 for an AUv3 target without disturbing the user's regular Ninja /
