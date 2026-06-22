@@ -1,7 +1,4 @@
 // Inspector texture-atlas viewer tests.
-//
-// Kept as a separate test binary so atlas viewer regressions stay isolated
-// from the broader inspector overlay tests.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -17,8 +14,7 @@ using namespace pulp::inspect;
 
 namespace {
 
-// Count RecordingCanvas fill_text commands whose text contains `needle`.
-// Duplicated here so the atlas-viewer cluster is self-contained.
+// Intentionally local: keeps atlas-viewer canvas helpers isolated to this test binary.
 int count_text_containing(const pulp::canvas::RecordingCanvas& canvas,
                           std::string_view needle) {
     int n = 0;

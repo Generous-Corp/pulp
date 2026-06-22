@@ -1,8 +1,5 @@
 // Inspector source-jump tests: view provenance, overlay J hotkey, and
 // DomainHandler config propagation.
-//
-// Kept as a separate test binary so source-jump behavior stays easy to
-// diagnose without loading the full inspector test suite.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -19,8 +16,7 @@ using namespace pulp::inspect;
 
 namespace {
 
-// Scoped env-var guard duplicated here so the source-jump cluster is
-// self-contained.
+// Intentionally local: keeps source-jump env state isolated to this test binary.
 struct ScopedEnv {
     explicit ScopedEnv(std::string name) : name_(std::move(name)) {
         if (const char* prev = std::getenv(name_.c_str())) {

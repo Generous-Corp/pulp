@@ -1,7 +1,4 @@
 // Inspector drift drawer and reconciliation tab tests.
-//
-// Kept as a separate test binary so tweak-drift and reconciliation behavior
-// stays isolated from the broader inspector overlay tests.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -19,7 +16,7 @@ using namespace pulp::inspect;
 
 namespace {
 
-// Local KeyEvent factory so the drift/reconcile cluster is self-contained.
+// Intentionally local: keeps drift/reconcile input helpers isolated to this test binary.
 KeyEvent make_key(KeyCode k, bool is_down = true, uint16_t mods = 0) {
     KeyEvent e;
     e.key = k;
@@ -217,9 +214,9 @@ TEST_CASE("InspectorOverlay: collapsed drawer hides rows but keeps the header",
 // The reconciliation tab (R-key) classifies every stored tweak into
 // locked-to-source / drifted / unresolvable and renders a read-only
 // report. It builds on the TweakStore lock set and the live view tree's
-// anchor set. These
-// tests drive it headless: build a scene, seed tweaks, toggle the tab
-// with R, paint into a RecordingCanvas, and assert the classification.
+// anchor set. These tests drive it headless: build a scene, seed tweaks,
+// toggle the tab with R, paint into a RecordingCanvas, and assert the
+// classification.
 
 namespace {
 

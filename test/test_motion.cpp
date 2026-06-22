@@ -1,6 +1,6 @@
 /// @file test_motion.cpp
-/// Catch2 unit tests for pulp::view::motion (Phase 0: coordinator,
-/// FrameClock binding, emission semantics, accumulator-gated FPS,
+/// Catch2 unit tests for pulp::view::motion (coordinator, FrameClock
+/// binding, emission semantics, accumulator-gated FPS,
 /// Start/Sample/End burst framing, deltas, sinks, geometry walker).
 
 #include <pulp/view/motion.hpp>
@@ -549,9 +549,7 @@ TEST_CASE("format_line Start/End markers include frame + time", "[motion]") {
             "[PulpMotion][X][y] -- End burst=3 frame=50 t=2.000000 -- xDelta=10.00 yDelta=-5.00");
 }
 
-// ── Emitted-event counter ────────────────────────────────────────────
-
-// ── Presentation geometry walker (Phase 2) ───────────────────────────
+// ── Presentation geometry walker ─────────────────────────────────────
 
 namespace {
 double find_component(const std::vector<std::pair<std::string, double>>& comps,
@@ -727,7 +725,7 @@ TEST_CASE("Presentation walker handles ScrollView ancestor offset",
     REQUIRE(find_component(comps, "minY") == Approx(50.f).margin(0.5));
 }
 
-// ── Publish channel (Phase 3) ────────────────────────────────────────
+// ── Publish channel ──────────────────────────────────────────────────
 
 TEST_CASE("publish_value is a no-op when firehose is off", "[motion][publish]") {
     Fixture fx;
@@ -830,7 +828,7 @@ TEST_CASE("publish_value respects epsilon threshold",
     REQUIRE(change_events == 2);
 }
 
-// ── Fixture record / replay (Phase 5) ────────────────────────────────
+// ── Fixture record / replay ──────────────────────────────────────────
 
 namespace {
 std::string tmp_fixture_path(const std::string& tag) {
@@ -978,7 +976,7 @@ TEST_CASE("assert_matches: component drift produces a diff item",
     std::remove(path2.c_str());
 }
 
-// ── Assertion helpers (Phase 5) ──────────────────────────────────────
+// ── Assertion helpers ────────────────────────────────────────────────
 
 TEST_CASE("extract_scalar pulls only the named (view, metric, comp)",
           "[motion][assert]") {
