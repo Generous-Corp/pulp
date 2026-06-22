@@ -1,4 +1,4 @@
-# Phase iOS-D.1 — minimal 2D GPU AUv3 proof on iOS.
+# Minimal 2D GPU AUv3 proof on iOS.
 #
 # The smallest possible AU effect whose view renders a single animated
 # 2D primitive through Skia/Dawn on iOS, proving that the GPU plugin
@@ -20,8 +20,8 @@
 #   GpuSurface: Dawn initialized
 #   GpuSurface: backend_type=Metal
 #
-# See planning/2026-05-24-auv3-ios-validation.md Phase iOS-D and the
-# Codex crosscheck at planning/2026-05-28-ios-d-gpu-auv3-crosscheck.md.
+# Use this target to verify that the AUv3 editor reaches the iOS
+# Metal/Dawn path and presents visible GPU output inside the HostApp.
 
 if(NOT IOS)
     return()

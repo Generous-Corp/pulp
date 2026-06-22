@@ -1,6 +1,6 @@
 #pragma once
 
-// Phase iOS-D.3c — Three.js rotating-cube AUv3 demo.
+// Three.js rotating-cube AUv3 demo.
 //
 // A near-silent effect plug-in whose editor pane runs `three.webgpu.js`
 // via JSC on top of Pulp's Dawn/Metal `GpuSurface`. The audio path is
@@ -9,7 +9,7 @@
 // The Processor owns its own `ScriptedUiSession` and exposes it via
 // `active_scripted_ui()` so the iOS AU view controller can route the
 // host `PluginViewHost::gpu_surface()` into the bridge after
-// `PluginViewHost::create` returns (iOS-D.3b Slice 1 wiring).
+// `PluginViewHost::create` returns.
 //
 // Success log markers (search syslog/Xcode console):
 //   - `[plugin-gpu-host] GpuSurface attached to WidgetBridge via ScriptedUiSession (iOS AUv3)`
@@ -27,8 +27,9 @@
 //     failure is obvious without a console attach.
 //   - scene.js missing → similar placeholder.
 //
-// See `planning/2026-05-29-ios-d3b-threejs-webgpu-program.md` § 11 for
-// the program closeout this demo feeds.
+// Use this example to verify that the AUv3 editor can load the bundled
+// Three.js IIFE, attach Pulp's presentable GPU surface, and submit a
+// WebGPU frame on device.
 
 #include <pulp/format/processor.hpp>
 #include <pulp/view/scripted_ui.hpp>

@@ -1,4 +1,4 @@
-# Phase iOS-D.2 — Chainer-style iOS AUv3 example.
+# Chainer-style iOS AUv3 example.
 #
 # Builds:
 #   - PulpChainerIos.appex   (AU v3 extension, MH_EXECUTE, NSExtensionMain)
@@ -23,7 +23,8 @@
 #   PULP_EDITOR_REQUESTED: requestViewController -> present
 #   PULP_EDITOR_MOUNTED: AUv3 view controller attached to HostApp container
 #
-# See planning/2026-05-24-auv3-ios-validation.md Phase iOS-D.
+# Use this target to verify HostApp editor mounting, AU parameter
+# propagation, and Skia/Dawn rendering through a real plug-in UI shape.
 
 if(NOT IOS)
     return()

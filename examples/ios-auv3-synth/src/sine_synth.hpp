@@ -1,9 +1,9 @@
 #pragma once
 
-// Minimal sine-wave instrument for the iOS AUv3 example (workstream 05
-// slice 5.1). One "frequency" parameter plus a gate that's opened by
-// any note-on MIDI event. Lives in the example tree on purpose — it is
-// NOT part of the framework API.
+// Minimal sine-wave instrument for the iOS AUv3 example. One
+// "frequency" parameter plus a gate that's opened by any note-on MIDI
+// event. Lives in the example tree on purpose — it is NOT part of the
+// framework API.
 
 #include <pulp/format/processor.hpp>
 

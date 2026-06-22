@@ -5,8 +5,8 @@
 # target is silently skipped so developers on other platforms don't
 # hit missing-framework errors.
 #
-# Workstream 05 slice 5.1. See docs/guides/ios-auv3-guidance.md for the
-# deployment-form trade-offs this example is built around.
+# See docs/guides/ios-auv3-guidance.md for the deployment-form trade-offs
+# this example is built around.
 
 if(NOT IOS)
     return()
@@ -28,10 +28,10 @@ pulp_add_ios_auv3(
         src/au_v3_entry.cpp
 )
 
-# Phase iOS-B HostApp wrapper — required for iOS Simulator install +
-# physical iPad deployment. Embeds the AUv3 .appex into a SwiftUI HostApp
-# whose ContentView instantiates the plug-in via AVAudioUnitComponentManager
-# so end-to-end discovery + audio render is verifiable outside GarageBand.
+# HostApp wrapper required for iOS Simulator install and physical iPad
+# deployment. Embeds the AUv3 .appex into a SwiftUI HostApp whose ContentView
+# instantiates the plug-in via AVAudioUnitComponentManager so end-to-end
+# discovery and audio render are verifiable outside GarageBand.
 # See docs/getting-started/ios-deployment.md for the deploy recipe.
 pulp_add_ios_host_app(PulpSineSynth_HostApp
     AUV3_EXTENSION    PulpSineSynth_AUv3

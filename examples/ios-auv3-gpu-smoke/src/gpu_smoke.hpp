@@ -1,6 +1,6 @@
 #pragma once
 
-// Phase iOS-D.1 — minimal 2D GPU AUv3 proof.
+// Minimal 2D GPU AUv3 proof.
 //
 // A near-silent effect plug-in whose only job is to install a custom
 // view that draws ONE animated 2D primitive through the Skia/Dawn path.
@@ -16,8 +16,8 @@
 //   - log line: `GpuSurface: backend_type=Metal`
 //   - visible animated quad rotating at the centre of the editor.
 //
-// See planning/2026-05-24-auv3-ios-validation.md Phase iOS-D and
-// the Codex crosscheck at planning/2026-05-28-ios-d-gpu-auv3-crosscheck.md.
+// Use this example to verify that an AUv3 editor can reach the iOS
+// Metal/Dawn path and present visible GPU output inside the host app.
 
 #include <pulp/format/processor.hpp>
 
