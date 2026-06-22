@@ -1,4 +1,4 @@
-// test_font_locale_shaping.cpp — Pulp #2163, font v2 Slice 2.4.
+// test_font_locale_shaping.cpp — locale-aware text segmentation.
 //
 // Locale-aware word + line break surface. When ICU's public headers
 // are on the include path (`__has_include(<unicode/brkiter.h>)`), the
@@ -109,8 +109,8 @@ TEST_CASE("word_break_step: backward from end yields offset < end", "[font][loca
     REQUIRE(out < s.size());
 }
 
-// pulp #2249 follow-up (Codex review P2): byte offsets that land
-// strictly inside a multi-byte UTF-8 scalar must be mapped to the
+// Regression for pulp #2249: byte offsets that land strictly inside
+// a multi-byte UTF-8 scalar must be mapped to the
 // FLOOR UTF-16 index (the scalar that contains the offset), not the
 // next scalar's start. With the pre-fix `lower_bound` mapping a
 // mid-codepoint cursor jumped *past* the codepoint, and the off-by-
@@ -143,9 +143,9 @@ TEST_CASE("word_break_step: mid-codepoint cursor rounds down to cluster boundary
     }
 }
 
-// pulp #2249 follow-up (Codex review P2): malformed UTF-8 lead bytes
-// whose continuation bytes don't match `0b10xxxxxx` must be advanced
-// by exactly 1 byte (matching ICU's U+FFFD substitution length). A
+// Regression for pulp #2249: malformed UTF-8 lead bytes whose
+// continuation bytes don't match `0b10xxxxxx` must be advanced by
+// exactly 1 byte (matching ICU's U+FFFD substitution length). A
 // pre-fix `utf8_scalar_len` that accepted `0xC2 0x41` as a 2-byte
 // scalar desynced the bridge: build_bridge advanced 2, ICU advanced
 // 1, and subsequent byte→UTF-16 lookups returned wrong offsets.

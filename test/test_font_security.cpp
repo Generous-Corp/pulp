@@ -1,4 +1,4 @@
-// test_font_security.cpp — Pulp #2163, font v2 Slice 2.8.
+// test_font_security.cpp — font-byte validation and rejection paths.
 //
 // Verifies validate_font_bytes rejects structurally malformed TTF/OTF
 // inputs without crashing, and accepts a known-good bundled font.

@@ -1,4 +1,4 @@
-// Linux AccessKit TextAccessibilityNode backend tests (font v2 Slice 2.6).
+// Linux AccessKit TextAccessibilityNode backend tests.
 //
 // Compile-gated on Linux (excluding Android, which uses a different
 // platform-a11y path via TalkBack). The Pulp CI matrix currently runs
@@ -38,8 +38,8 @@ TEST_CASE("TextAccessibilityNode linux backend: skipped (non-Linux host)",
 // platform/linux/text_accessibility_linux.cpp. Returns the integer value
 // of the accesskit::Role enumerator that the eventual real backend will
 // pass to AccessKit's C API. Keeping the mapping pinned in a test
-// means the follow-up PR that flips the stub to a live backend cannot
-// silently drift the role contract.
+// means a future live-backend replacement cannot silently drift the
+// role contract.
 extern "C" int pulp_text_accessibility_role_linux(int pulp_role);
 
 TEST_CASE("TextAccessibilityNode linux backend reports 'linux-accesskit-stub'",

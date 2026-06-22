@@ -1,4 +1,4 @@
-// test_font_rendering_goldens_d3d.cpp — Font v2 Slice 3.4
+// test_font_rendering_goldens_d3d.cpp — D3D12 font rendering golden scaffold.
 // (Cross-backend rendering goldens — Skia GPU Direct3D 12 lane, SCAFFOLD).
 //
 // Sibling of `test_font_rendering_goldens.cpp` (Skia raster),
@@ -16,7 +16,7 @@
 //   * The Skia GPU backend on D3D12 (Graphite-D3D / GrD3DBackend,
 //     depending on Skia point release) produces text rasters in the
 //     same neighbourhood as the raster, Metal, and Vulkan lanes for
-//     the three Slice 3.4 reference strings (`"Hello"` / Inter / 14 px,
+//     the three golden reference strings (`"Hello"` / Inter / 14 px,
 //     `"日本語"` / Inter / 14 px CJK fallback, `"Hello world"` /
 //     JetBrains Mono / 12 px).
 //   * The D3D12 pipeline is deterministic in-process — same surface,
@@ -57,8 +57,8 @@
 //     runner. There is no Windows runner in the required gate set.
 //   * The GitHub-hosted Windows runner is advisory, not required, and
 //     does not currently have Skia-with-D3D linked.
-//   * Adding a Windows D3D runner is tracked separately (Slice 3.4
-//     follow-up work). Until that lane exists, building this TU
+//   * Adding a Windows D3D runner is tracked as future D3D golden-lane
+//     work. Until that lane exists, building this TU
 //     against D3D symbols would only burn CI roundtrips on
 //     "couldn't find <d3d12.h>" failures.
 //
