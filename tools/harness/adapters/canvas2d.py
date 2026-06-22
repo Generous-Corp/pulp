@@ -1,4 +1,4 @@
-"""Canvas2D surface adapter — week 1 deliverable.
+"""Canvas2D surface adapter.
 
 Classifies each `canvas2d/*` entry in compat.json against four layers of
 evidence:
@@ -9,9 +9,9 @@ evidence:
    that caps the achievable status.
 2. The catalog payload (`mapsTo`, `supportedValues`, `unsupportedValues`,
    `notes`) — what the catalog claims pulp does today.
-3. The C++ bridge surface (`core/view/src/widget_bridge.cpp`'s
-   `register_function("canvasX", ...)` calls) — the truth-of-record for
-   what actually reaches the native side.
+3. The C++ bridge source (`core/view/src/widget_bridge/canvas2d_api.cpp`,
+   with the manifest as a last-resort fallback when source registrations cannot
+   be scanned) — the truth-of-record for what actually reaches the native side.
 4. The JS shim (`core/view/js/web-compat-canvas.js`) — the
    `CanvasRenderingContext2D.prototype.X` and `CanvasGradient.prototype.X`
    declarations + tracked attribute fields.
@@ -105,7 +105,14 @@ class Canvas2dAdapter(AdapterBase):
     def __init__(self, repo_root: Path):
         super().__init__(repo_root)
         self._oracle = self._load_oracle()
-        self._bridge_text = self._read("core/view/src/widget_bridge.cpp")
+        self._bridge_manifest_text = self._read("core/view/src/widget_bridge_api_manifest.tsv")
+        self._bridge_text = "\n".join(
+            self._read(rel)
+            for rel in (
+                "core/view/src/widget_bridge.cpp",
+                "core/view/src/widget_bridge/canvas2d_api.cpp",
+            )
+        )
         # P5-6 + P5-6 follow-up extracted prelude content out of the original
         # web-compat-canvas.js into sibling files (matrix helper, image API,
         # native-GPU helpers). The shim text the adapter reasons about is the
@@ -146,10 +153,42 @@ class Canvas2dAdapter(AdapterBase):
 
     # ── Bridge / shim surface introspection ──────────────────────────
 
-    def _extract_bridge_fns(self) -> set[str]:
-        """Set of `canvas*` function names actually `register_function`'d."""
-        names = set(re.findall(r'register_function\("(canvas[A-Za-z_]+)"', self._bridge_text))
+    def _extract_manifest_bridge_fns(self) -> set[str]:
+        """Set of `canvas*` bridge function names listed for Canvas2D."""
+        names = set()
+        for line in self._bridge_manifest_text.splitlines():
+            if not line.strip() or line.startswith("#"):
+                continue
+            cols = line.split("\t")
+            if len(cols) >= 3 and cols[1] == "canvas2d" and cols[2] == "function":
+                name = cols[0].strip()
+                if name.startswith("canvas"):
+                    names.add(name)
         return names
+
+    def _extract_source_bridge_fns(self) -> set[str]:
+        """Set of `canvas*` bridge function names registered in C++ source."""
+        names = set()
+        names.update(
+            re.findall(
+                r'register_function\(\s*"(canvas[A-Za-z0-9_]+)"',
+                self._bridge_text,
+            )
+        )
+        names.update(
+            re.findall(
+                r'register_bridge_function\([^,\n]*,\s*"(canvas[A-Za-z0-9_]+)"',
+                self._bridge_text,
+            )
+        )
+        return names
+
+    def _extract_bridge_fns(self) -> set[str]:
+        """Set of `canvas*` bridge function names registered for Canvas2D."""
+        source_names = self._extract_source_bridge_fns()
+        if source_names:
+            return source_names
+        return self._extract_manifest_bridge_fns()
 
     def _extract_shim_methods(self) -> set[str]:
         """CanvasRenderingContext2D.prototype.X + CanvasGradient.prototype.X identifiers."""
@@ -224,8 +263,8 @@ class Canvas2dAdapter(AdapterBase):
         # 1. If the oracle doesn't define this entry, it's OOS — the
         #    canvas2d catalog includes Pulp-specific extensions like
         #    _native_canvasFillCircle and getContext_webgpu, which we
-        #    EXPECT in the oracle. Anything missing from the oracle
-        #    is genuinely out of scope for week-1 measurement.
+        #    EXPECT in the oracle. Anything missing from the oracle is outside
+        #    the tracked Canvas2D compatibility surface.
         oracle_entry = self._oracle["entries"].get(prop)
         if oracle_entry is None:
             return Result(
@@ -296,8 +335,8 @@ class Canvas2dAdapter(AdapterBase):
             )
 
         # 4. Bridge presence check. If the oracle says "this entry should route
-        #    through canvasX" we verify canvasX is actually `register_function`'d
-        #    in widget_bridge.cpp.
+        #    through canvasX" we verify canvasX is registered in the bridge
+        #    manifest or split Canvas2D bridge source.
         missing_bridge = [b for b in oracle_bridge if b not in self._bridge_fns]
         if oracle_bridge and missing_bridge:
             return Result(
@@ -305,7 +344,7 @@ class Canvas2dAdapter(AdapterBase):
                 status=Status.NOT_IMPL,
                 detail=(
                     f"oracle expects bridge fns {oracle_bridge!r} for {prop!r}; "
-                    f"missing from widget_bridge.cpp: {missing_bridge}"
+                    f"missing from Canvas2D bridge manifest/source: {missing_bridge}"
                 ),
                 unmatched_supported=missing_bridge,
             )
