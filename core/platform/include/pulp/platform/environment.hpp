@@ -269,7 +269,7 @@ inline void start_environment_observer() {
 #elif defined(_WIN32)
     start_environment_observer_win();
 #endif
-    // Other platforms wire their adapters in follow-up PRs; until then
+    // Other platforms can add adapters later; until then
     // their hosts simply see the EnvironmentState defaults.
 }
 

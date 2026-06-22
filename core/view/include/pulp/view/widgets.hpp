@@ -82,7 +82,7 @@ public:
     bool has_attributed_string() const { return has_attributed_; }
     std::size_t attributed_span_count() const { return attributed_runs_.spans().size(); }
 
-    // issue-969: each setter marks the corresponding has_own_* flag so
+    // Each setter marks the corresponding has_own_* flag so
     // paint() can distinguish "default value" from "explicitly set" and
     // fall through to inheritable_*() for unset properties.
     void set_font_size(float size) { font_size_ = size; has_own_font_size_ = true; }
@@ -112,7 +112,7 @@ public:
     LabelAlign text_align() const { return text_align_; }
     bool has_own_text_align() const { return has_own_text_align_; }
 
-    // issue-969: explicit text color override on the Label itself. When
+    // Explicit text color override on the Label itself. When
     // set, overrides any inherited typography color and the theme token.
     void set_text_color(canvas::Color c) { text_color_ = c; has_own_text_color_ = true; }
     bool has_own_text_color() const { return has_own_text_color_; }
@@ -158,7 +158,7 @@ public:
 
     void paint(canvas::Canvas& canvas) override;
 
-    /// Intrinsic width — measured text width (issue-928).
+    /// Intrinsic width — measured text width.
     /// Uses TextShaper (HarfBuzz/SkParagraph) when available, otherwise
     /// falls back to the same character-width estimate the base Canvas
     /// uses. This lets Yoga reserve enough horizontal space for the full
@@ -168,7 +168,7 @@ public:
     float intrinsic_width() const override;
 
     /// Intrinsic height based on font size and line height.
-    /// issue-969: walks the inheritance cascade so an unset font_size
+    /// Walks the inheritance cascade so an unset font_size
     /// picks up an ancestor View's setInheritableFontSize value.
     /// Counts visible explicit `\n`-delimited lines for multi_line labels,
     /// ignoring a trailing newline and honoring `line_clamp_` when set.
@@ -263,7 +263,7 @@ private:
     TextDecorationStyle text_decoration_style_ = TextDecorationStyle::solid;
     canvas::TextDirection text_direction_ = canvas::TextDirection::left_to_right;
     canvas::TextVerticalAlign vertical_align_ = canvas::TextVerticalAlign::top;
-    // issue-969: explicit-vs-inherited tracking. Fields keep their default
+    // Explicit-vs-inherited tracking. Fields keep their default
     // values until a setter is called; the has_own_* flag tells paint()
     // whether to honor the field or fall through to View::inheritable_*().
     canvas::Color text_color_{};
@@ -1231,9 +1231,8 @@ private:
 //   set_thumbnail(...)  — points the widget at a pre-decoded
 //                         `pulp::audio::AudioThumbnail`. Paint reads peak
 //                         pairs from the cached level instead of decoding
-//                         per redraw. Pulp item 6.12 — wire AudioThumbnail
-//                         into existing WaveformView without inventing a
-//                         new widget.
+//                         per redraw, wiring AudioThumbnail into the existing
+//                         WaveformView without inventing a new widget.
 //
 // This remains a display-only waveform widget. Sampler/editor behaviors
 // such as trim handles, fade curves, loop regions, slice markers, playheads,
@@ -1265,7 +1264,7 @@ public:
     void set_data(std::vector<float> samples);
 
     // Wire the widget to read peak (min, max) pairs from a pre-decoded
-    // `AudioThumbnail` (Pulp item 6.12). The shared_ptr overload is the
+    // `AudioThumbnail`. The shared_ptr overload is the
     // editor/cache-safe path: the widget retains the CPU thumbnail summary
     // while it may paint from it. Setting a thumbnail clears any raw sample
     // buffer.

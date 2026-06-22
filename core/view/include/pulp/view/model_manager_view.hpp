@@ -1,6 +1,6 @@
 #pragma once
 
-// ModelManagerView (MM-PR3) — the "you need a model" manager UI. Lists available +
+// ModelManagerView — the "you need a model" manager UI. Lists available +
 // installed models with their status, shows per-row download progress + cancel, and
 // exposes Download / Resume / Set-default / Remove actions via callbacks the host wires
 // to runtime::install_model / activate_model / remove_model. A header "Done" closes back

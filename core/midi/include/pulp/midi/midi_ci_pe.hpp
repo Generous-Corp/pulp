@@ -15,8 +15,9 @@
 //   payload_data      : N bytes Mcoded7-encoded resource bytes
 //
 // Pulp implements the framing + Mcoded7 + JSON-header construction here.
-// zlib payload encoding (MIDI-CI v1.2 §6.3) is out-of-scope for this slice
-// and is tracked in the follow-up note in the spec doc.
+// Optional zlib payload encoding (MIDI-CI v1.2 §6.3) is exposed through
+// pe_compress()/pe_decompress(); those helpers operate on payload bytes only
+// and do not touch the SysEx envelope or Mcoded7 framing.
 //
 // This file is intentionally header-only-ish: it owns no I/O. The caller
 // drives SysEx in/out around it.
@@ -119,7 +120,7 @@ pe_split_into_chunks(PeMessageType pe_type,
 /// Holds chunks until `total_chunks` have all been observed, then returns
 /// the concatenated payload and the (first) header.
 ///
-/// RT-safety contract (audited 2026-05-26): every method mutates an
+/// RT-safety contract: every method mutates an
 /// `unordered_map` slot owning per-transfer `vector`s, and on completion
 /// concatenates payload bytes into the returned chunk.
 /// Drive the reassembler from the same MIDI / main thread that decoded
@@ -216,7 +217,7 @@ struct PeSubscription {
 ///   - `subscribers_of(resource)` is used by the responder when a
 ///     resource changes to fan out Notify messages.
 ///
-/// RT-safety contract (audited 2026-05-26): every mutating method allocates;
+/// RT-safety contract: every mutating method allocates;
 /// `subscribers_of()` allocates a fresh result vector even when nothing
 /// matches. Drive the manager from the same non-RT thread that drives PE
 /// message dispatch.
@@ -232,13 +233,13 @@ public:
 
     /// NOT RT-safe — allocates the result `std::vector<PeSubscription>`,
     /// even when the call ends up empty (the return value still owns a
-    /// 0-capacity vector header). Match what `notify()` already does
-    /// and call this from a non-audio thread.
+    /// 0-capacity vector header). Use it from the same non-audio thread
+    /// that drives PE message dispatch.
     std::vector<PeSubscription> subscribers_of(std::string_view resource) const;
 
-    /// RT-safe. Returns a reference; no allocation. The underlying
-    /// vector mutates on other threads — readers should treat the
-    /// reference as a snapshot, not a live view.
+    /// Non-owning live view of the registry. No allocation, but not RT-safe:
+    /// callers must use it from the same non-audio thread that owns
+    /// subscription mutation.
     const std::vector<PeSubscription>& all() const { return subs_; }
 
 private:

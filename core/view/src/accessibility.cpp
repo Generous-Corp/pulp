@@ -42,7 +42,7 @@ std::string AccessibilityValueInterface::get_value_string() const {
     return out.str();
 }
 
-// ── Live-region announcements (workstream 04 slice 4.3) ─────────────────
+// ── Live-region announcements ────────────────────────────────────────────
 
 namespace {
     AnnouncementSink& current_sink() {
