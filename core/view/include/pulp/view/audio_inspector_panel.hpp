@@ -6,8 +6,8 @@
 /// balance, and a device/runtime summary.
 ///
 /// This panel owns its OWN state model. It consumes the shared probe schema
-/// (`pulp::audio::AudioProbeSnapshot` + `AudioStats`) and `MultiChannelMeter`
-/// L/R match, and is deliberately NOT coupled to the layout inspector's
+/// (`pulp::audio::AudioProbeSnapshot` + `AudioStats`) and is deliberately NOT
+/// coupled to the layout inspector's
 /// view-tree / property internals. The window shell
 /// (`AudioInspectorWindow`) polls a probe once per UI tick and pushes the
 /// copied snapshot in via `update()`; the panel never touches the realtime
