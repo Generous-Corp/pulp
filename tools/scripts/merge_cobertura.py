@@ -63,7 +63,7 @@ from pathlib import Path
 # the cobertura because its IGNORE_REGEX matched on `/test/` only and
 # the Windows path separator is `\` — after this script normalises
 # backslashes to forward slashes (above), the same regex applies
-# cleanly. Codex P1 follow-up on PR #660.
+# cleanly. Regression guard for #660.
 _IGNORE_RE = re.compile(
     r"(^|/)(_deps|external|test|[Cc]atch2|build|build-coverage|examples|fetchcontent-src)/"
 )
@@ -78,8 +78,8 @@ class CorruptCoberturaError(Exception):
 
     Distinguished from "missing or empty" so the workflow can hard-fail
     on malformed coverage uploads rather than silently falling through
-    to the diff-cover empty-XML path. Codex review on PR #660 caught
-    that the previous shape (any exit 1 → tolerated) let
+    to the diff-cover empty-XML path. Regression coverage for #660
+    catches the previous shape where any exit 1 was tolerated and let
     ``ParseError`` corrupt-artifact failures bypass the required 75%
     diff-coverage gate.
     """
@@ -121,7 +121,7 @@ def parse_xml(path: Path) -> dict[str, dict[int, int]]:
         # Windows), and silently reports 0% coverage. Real production
         # code shipped through PR #660 hit this; reverting the merge
         # to the Linux-only XML masks it but reintroduces issue #635.
-        # See Codex P1 follow-up on PR #660.
+        # Regression guard for #660.
         filename = filename.replace("\\", "/")
         # Drop paths the coverage pipeline doesn't consider source-code-
         # under-test (test/, _deps/, external/, etc.). The per-OS
@@ -237,7 +237,7 @@ def render(merged: dict[str, dict[int, int]]) -> ET.ElementTree:
 #: empty-report fallback. Real failures (parse errors, IO errors,
 #: programming bugs) deliberately use exit code 1 (uncaught exceptions
 #: + the default Python behaviour) so they fail the required gate.
-#: Codex P1 review on PR #660 — see the docstring of the
+#: Regression guard for #660 — see the docstring of the
 #: `CorruptCoberturaError` class.
 EXIT_ALL_INPUTS_MISSING = 2
 
@@ -258,7 +258,7 @@ def main(argv: list[str] | None = None) -> int:
         except CorruptCoberturaError as exc:
             # Don't add to `missing` — a corrupt file is NOT the same as
             # a missing one. We collect them, then exit 1 below so the
-            # CI gate fails loudly. See Codex P1 on PR #660.
+            # CI gate fails loudly. Regression guard for #660.
             corrupt.append(str(exc))
             continue
         if not data:

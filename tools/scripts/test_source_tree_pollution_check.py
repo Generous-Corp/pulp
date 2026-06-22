@@ -82,7 +82,7 @@ class SourceTreePollutionTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stderr)
 
     def test_accepts_uppercase_project_keyword(self) -> None:
-        """pulp #1763 followup (Codex P2) — CMake command names are
+        """Regression guard for #1763: CMake command names are
         case-insensitive. PROJECT(Pulp ...) and project (Pulp ...) with
         whitespace before ( are valid; the original substring check
         rejected both."""
@@ -102,7 +102,7 @@ class SourceTreePollutionTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stderr)
 
     def test_fails_closed_on_invalid_git_diff_base(self) -> None:
-        """pulp #1761 followup (Codex P1) — git diff failures must
+        """Regression guard for #1761: git diff failures must
         block the push, not silently succeed. Original behaviour
         returned an empty list when --base couldn't be resolved,
         defeating the hard-block contract."""
@@ -175,7 +175,7 @@ class SourceTreePollutionTests(unittest.TestCase):
 
 
 class RootAllowlistTests(unittest.TestCase):
-    """Companion-track U-1 — tests for --mode=root-allowlist."""
+    """Tests for --mode=root-allowlist."""
 
     def setUp(self) -> None:
         self.tmpdir = tempfile.mkdtemp(prefix="pulp-pollution-root-test-")

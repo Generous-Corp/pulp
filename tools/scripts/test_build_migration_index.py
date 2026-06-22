@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Fixture tests for tools/scripts/build_migration_index.py.
 
-Regression coverage for the Codex post-merge sweep wave 3 findings on
-PR #571 (release-discovery Slice 3):
+Regression coverage for the migration-index validation fixes from
+PR #571:
 
 - P2: `bool("false")` is True — if a schema-incorrect `breaking = "false"`
   (quoted string) slipped through, the codegen silently emitted a
@@ -64,7 +64,7 @@ class LoadEntryValidation(unittest.TestCase):
             self.assertEqual(e.summary, "s")
 
     def test_string_value_rejected_for_boolean_field(self):
-        # Codex P2: bool("false") is True.
+        # Regression guard: bool("false") is True.
         with tempfile.TemporaryDirectory() as td:
             tmp = pathlib.Path(td)
             doc = _write_doc(
@@ -78,7 +78,7 @@ class LoadEntryValidation(unittest.TestCase):
             self.assertEqual(ctx.exception.code, 2)
 
     def test_non_semver_version_rejected(self):
-        # Codex P2: silent (0,0,0) sort + runtime hop-filter drops entry.
+        # Regression guard: silent (0,0,0) sort + runtime hop-filter drops entry.
         # SEMVER_RE deliberately allows prerelease/build suffixes like
         # "0.27.0-rc.1" or "0.27.0.beta" — those are rejected as
         # "not semver" in the stricter sense, but the generator has

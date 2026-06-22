@@ -3,7 +3,7 @@
 #
 # run_asan.sh already enables UBSan alongside ASan (via
 # -fsanitize=address,undefined), which is the usual case. This
-# separate wrapper exists for two reasons (Codex P2 on #317):
+# separate wrapper exists for two reasons:
 # 1. ASan has higher overhead and can mask signed-overflow / null-
 #    deref patterns that UBSan alone catches faster.
 # 2. Some UBSan checks collide with ASan's shadow memory; running

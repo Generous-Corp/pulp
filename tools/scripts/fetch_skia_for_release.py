@@ -18,7 +18,7 @@ Usage:
 
 Where `<matrix-platform>` is one of the release-cli.yml matrix values:
     darwin-arm64, linux-x64, linux-arm64, windows-x64, windows-arm64,
-    ios-device-arm64, ios-simulator-arm64-x86_64 (Phase iOS-D scaffold)
+    ios-device-arm64, ios-simulator-arm64-x86_64
 
 iOS slices intentionally keep the per-arch subdir under
 `build/ios-gpu/lib/Release/` (device-arm64, simulator-arm64,
@@ -73,7 +73,6 @@ MATRIX_TO_MANIFEST = {
     "linux-arm64": "linux-arm64",
     "windows-x64": "win-x64",
     "windows-arm64": "win-arm64",
-    # Phase iOS-D scaffold (planning/2026-05-24-auv3-ios-validation.md):
     # iOS device + simulator slices share the build/ios-gpu/lib/Release/
     # tree but keep their arch subdir intact (see expected_library_path
     # and the post-unpack flatten guard).
@@ -107,7 +106,7 @@ def expected_library_path(matrix_platform: str, dest_root: str = "external/skia-
         lib_name = "skia.lib"
         arch_subdir = ""
     elif matrix_platform == "ios-device-arm64":
-        # Phase iOS-D: device + simulator share build/ios-gpu/ and keep
+        # Device + simulator share build/ios-gpu/ and keep
         # their arch subdir under Release/ to avoid filename collisions.
         plat_dir = "ios-gpu"
         lib_name = "libskia.a"

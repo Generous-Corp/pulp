@@ -205,8 +205,8 @@ class ShipyardPinCheckTests(unittest.TestCase):
             self.assertIn("No workflows declare SHIPYARD_VERSION", stderr.getvalue())
 
     def test_required_workflow_exists_but_missing_pin_is_failure(self) -> None:
-        """Codex P1 (PR #2131): a required workflow that exists but
-        no longer declares SHIPYARD_VERSION must hard-fail. Otherwise
+        """A required workflow that exists but no longer declares
+        SHIPYARD_VERSION must hard-fail (#2131). Otherwise
         an accidental removal goes green and the pin is silently
         unenforced everywhere. Override REQUIRED_PIN_WORKFLOWS in the
         shim so the test uses our fixture filenames."""
