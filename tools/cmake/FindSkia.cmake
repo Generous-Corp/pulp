@@ -41,7 +41,8 @@ endif()
 #   - iphoneos SDK            → device-arm64
 #   - iphonesimulator SDK on arm64 host → simulator-arm64
 #   - iphonesimulator SDK on x86_64 host → simulator-x86_64
-# Phase iOS-D gate (planning/2026-05-24-auv3-ios-validation.md).
+# iOS Skia uses the active SDK and requested architecture to choose the
+# matching per-arch archive directory.
 if(APPLE)
     if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
         set(_skia_platform "ios")
@@ -49,7 +50,7 @@ if(APPLE)
         # CMAKE_OSX_SYSROOT names the active SDK; CMAKE_OSX_ARCHITECTURES
         # names the slice. Both are set by ios.toolchain.cmake.
         #
-        # Multi-arch handling (Codex PR #3011 review):
+        # Multi-arch handling:
         # ios.toolchain.cmake defaults CMAKE_OSX_ARCHITECTURES to
         # "arm64;x86_64" for the simulator (with ONLY_ACTIVE_ARCH=NO),
         # meaning a universal simulator build expects BOTH slices to
@@ -86,8 +87,7 @@ if(APPLE)
                     "(or x86_64), with -DCMAKE_XCODE_ATTRIBUTE_ONLY_ACTIVE_ARCH=YES.\n"
                     "  - Pre-fatten Skia with lipo: combine the two arch "
                     "directories into a universal `simulator/libskia.a` and "
-                    "set SKIA_DIR at it directly.\n"
-                    "Phase iOS-D plumbing (planning/2026-05-24-auv3-ios-validation.md)."
+                    "set SKIA_DIR at it directly."
                 )
             elseif(_has_arm64)
                 set(_skia_ios_arch "simulator-arm64")
@@ -255,10 +255,7 @@ if(EXISTS "${SKIA_LIBRARY}" AND EXISTS "${_skia_include_dir}")
             # cross builds. The native macOS toolchain auto-links libobjc
             # via clang's driver, so adding it here is a no-op for native
             # builds and a fix for the cross lane.
-            # See planning/2026-05-24-linux-hosted-macos-arm64-cross-lane.md.
-            #
-            # iOS / macOS framework split (Phase iOS-D.1, crosscheck
-            # planning/2026-05-28-ios-d-gpu-auv3-crosscheck.md):
+            # iOS / macOS framework split:
             #   * macOS exposes IOKit; iOS does not (UIKit replaces it),
             #     and linking `-framework IOKit` against the iPhoneOS /
             #     iPhoneSimulator SDK fails with "framework not found".

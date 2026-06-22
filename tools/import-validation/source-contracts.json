@@ -556,7 +556,7 @@
         {
           "url": "https://ui.shadcn.com/docs/registry",
           "kind": "docs",
-          "proves": "shadcn registry shape that Pulp's v0 parser deliberately rejects in PR1.",
+          "proves": "shadcn registry shape that Pulp's v0 parser deliberately rejects.",
           "last_verified": "2026-05-14",
           "recheck_interval_days": 90
         },
@@ -806,7 +806,7 @@
         {
           "url": "planning/2026-05-17-jsx-instrument-import.md",
           "kind": "spec",
-          "proves": "Spec for the JSX runtime-import experimental slice (Phase A) \u2014 defines fixture shape, transform pipeline, and round-trip contract.",
+          "proves": "Spec for the JSX runtime-import contract: defines fixture shape, transform pipeline, and round-trip contract.",
           "last_verified": "2026-05-21",
           "recheck_interval_days": null
         },

@@ -5,7 +5,7 @@
 // `<home>/<subsystem>/models/<id>.json` for per-model install metadata), the
 // installed/active queries, list (over a caller-supplied registry), and activate.
 // Parameterized by `subsystem` (e.g. "audio", "magenta") so multiple consumers share
-// one mechanism. The downloader (install) lands in a follow-up (MM-PR2).
+// one mechanism. Install/remove stream checkpoints through the runtime downloader.
 
 #include <filesystem>
 #include <functional>
@@ -81,7 +81,7 @@ ActivateModelResult activate_model(const std::vector<ModelEntry>& registry, std:
 std::string to_json(const ModelListResult& result);
 std::string to_json(const ActivateModelResult& result);
 
-// ---- install / remove (MM-PR2: built on the streaming downloader) -------------------
+// ---- install / remove (streaming, resumable, sha256-verified downloader) -----------
 
 struct InstallModelResult {
     bool ok = false;

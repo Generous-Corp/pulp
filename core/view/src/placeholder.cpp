@@ -1,2 +1,2 @@
-// pulp-view: placeholder — replaced in Phase 2+
+// pulp-view: placeholder translation unit (no symbols yet).
 namespace pulp::view {}

@@ -37,8 +37,8 @@ endif()
 
 # Resolve PulpUtils.cmake's sibling helper dirs without reaching into
 # CMAKE_SOURCE_DIR (which is the *consumer's* source tree when this
-# file is loaded via find_package, not Pulp's). Pulp #2087 piggyback —
-# CMAKE_CURRENT_LIST_DIR at top level is this file's own dir, so we
+# file is loaded via find_package, not Pulp's). CMAKE_CURRENT_LIST_DIR
+# at top level is this file's own dir, so we
 # probe both possible layouts (in-tree source build + installed SDK)
 # before falling back. The fallback path is kept as a last-resort
 # escape hatch for stale checkouts that haven't run `cmake --install`.
@@ -759,7 +759,7 @@ endfunction()
 
 # ── Internal: VST3 target ────────────────────────────────────────────────
 
-# Phase 3 (R2-9) split: per-format / AUv3 / app target helpers
+# Per-format / AUv3 / app target helpers
 # live in focused modules now. PulpUtils.cmake stays the
 # public include shim so external `find_package(Pulp)` users
 # get the full surface via a single include.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Phase 6.6.4 Google Stitch runtime-import validation harness.
+# Google Stitch runtime-import validation harness.
 #
 # The parser lane is local-first: parser/dispatch tests, a parser-emitted
 # runtime render, and diff coverage must pass before a PR is pushed.
@@ -9,7 +9,7 @@ set -euo pipefail
 
 PULP_DIR="${PULP_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 
-# pulp #2087 lesson — refuse to run on a stale checkout. Bypass with
+# Refuse to run on a stale checkout. Bypass with
 # PULP_FRESHNESS_BYPASS=1 to validate a feature branch's code instead.
 if ! ( cd "$PULP_DIR" && "$PULP_DIR/tools/scripts/check_workspace_freshness.sh" ); then
   echo "ERROR: refusing to run validation against stale checkout" >&2
@@ -149,7 +149,7 @@ green "captured Stitch runtime render: $OUT"
 
 if [[ ! -f "$REFERENCE" ]]; then
   yellow "reference screenshot not found: $REFERENCE"
-  yellow "Phase 6.6.4 screenshot diff skipped; use the captured render as the reference once reviewed."
+  yellow "Stitch screenshot diff skipped; use the captured render as the reference once reviewed."
   exit 77
 fi
 

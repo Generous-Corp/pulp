@@ -1,2 +1,2 @@
-// pulp-platform: placeholder — replaced in Phase 2+
+// pulp-platform: placeholder translation unit (no symbols yet).
 namespace pulp::platform {}

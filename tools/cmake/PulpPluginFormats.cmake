@@ -1,6 +1,6 @@
 # PulpPluginFormats.cmake — per-format plugin packaging helpers.
 #
-# Extracted from PulpUtils.cmake in the 2026-05 Phase 3 (R2-9) refactor.
+# Plugin-format helpers shared by source builds and installed SDK consumers.
 # Each `_pulp_add_<format>` function is called by `pulp_add_plugin()` (in
 # PulpUtils.cmake) when the requested format is enabled. They handle
 # bundle structure, manifest generation, code-signing entitlements, and
@@ -16,10 +16,10 @@
 # AUv3 (which has its own iOS extension shape) lives in PulpAuv3.cmake.
 # Standalone + app targets live in PulpAppTargets.cmake.
 #
-# Codex R2-9 risk callout: external consumers configure via
-# `find_package(Pulp)` which loads PulpUtils.cmake; that file must
-# `include()` this one transitively so the helpers are visible to
-# user-side `pulp_add_plugin(... FORMATS vst3 clap)` calls.
+# External consumers configure via `find_package(Pulp)` which loads
+# PulpUtils.cmake; that file must `include()` this one transitively so the
+# helpers are visible to user-side `pulp_add_plugin(... FORMATS vst3 clap)`
+# calls.
 
 function(_pulp_add_vst3 target name bundle_id version manufacturer category)
     if(NOT _PULP_VST3_SDK_DIR OR NOT _PULP_VST3_SDK_TARGET)

@@ -54,9 +54,9 @@ enum class SizingMode { fixed, hug, fill };
 
 /// A single CSS `box-shadow` layer. CSS `box-shadow` is a comma-separated
 /// list of these layers (painted first-to-last, so the first sits on top);
-/// `IRStyle::box_shadow` keeps them in author order. Before pulp #41 the IR
-/// stored the whole declaration as one opaque string, which silently dropped
-/// every layer past the first — multi-shadow designs lost their stack.
+/// `IRStyle::box_shadow` keeps them in author order; collapsing the declaration
+/// into one opaque string would drop every layer past the first, losing the
+/// multi-shadow stack.
 struct IRBoxShadow {
     float offset_x = 0.0f;
     float offset_y = 0.0f;
@@ -101,7 +101,7 @@ struct IRStyle {
     std::optional<std::string> backdrop_filter;
     // CSS clip-path / mask. The engine (View::set_clip_path / set_mask /
     // set_mask_image / set_mask_size) + the setClipPath/setMask* bridge
-    // (pulp #1515) consume these; sources that carry them — and Figma mask
+    // consume these; sources that carry them — and Figma mask
     // layers once the extractor emits a clip-path — survive the IR.
     std::optional<std::string> clip_path;
     std::optional<std::string> mask;                   // `mask` shorthand
@@ -229,11 +229,10 @@ std::vector<IRBoxShadow> parse_css_box_shadow(const std::string& css);
 /// reconstructing from the parsed fields. Empty input yields an empty string.
 std::string box_shadow_to_css(const std::vector<IRBoxShadow>& shadows);
 
-// ── Phase 0a (planning/2026-05-18-inspector-direct-manipulation-roadmap.md):
-// additive identity fields on IRNode. The TS-side @pulp/import-ir package
-// already defines the canonical shape; the C++ IR lags. Phase 0a is
-// deliberately additive — IRStyle/IRLayout migration to TS-style
-// paint/text/layout is a separate ~1-month effort tracked elsewhere.
+// ── Additive identity fields on IRNode ────────────────────────────────────
+// The TS-side @pulp/import-ir package already defines the canonical shape.
+// These fields are deliberately additive; IRStyle/IRLayout migration to
+// TS-style paint/text/layout is tracked separately.
 //
 // stable_anchor_id is the key the tweaks layer (pulp-tweaks.json) uses to
 // match user edits back to nodes across re-imports. Computed by the
@@ -336,7 +335,7 @@ enum class InteractiveElementKind {
     // design's baked readout). `text` is the initial string; `value_left_align`
     // left-aligns it (for a "LABEL <value>" readout that grows rightward).
     value_label,
-    // `custom` is a registered native control (P7 Tier-3): the materializer maps
+    // `custom` is a registered native control: the materializer maps
     // it to DesignFrameElement::Kind::custom, whose overlay is built by the
     // factory registered under `factory_id` (+ opaque `custom_props`). Unmapped
     // factory → inert render + an import diagnostic (never a silent knob).
@@ -403,17 +402,17 @@ struct IRInteractiveElement {
     /// text (e.g. the "DEPTH" label under a knob). Empty when the importer found
     /// no confident caption — consumers then fall back to the binding key. This is
     /// the name a host surfaces for the generated parameter (embed ABI v5
-    /// PulpEmbedParamInfo.name); unit/range remain importer follow-ups.
+    /// PulpEmbedParamInfo.name); unit/range are not carried here yet.
     std::string label;
 
-    // ── P7 import report (resolution provenance) ─────────────────────────
+    // ── Import report (resolution provenance) ────────────────────────────
     // Carried from the importer (where all three signals — geometry/affordance,
     // name/token, component identity — exist) THROUGH to the host materialize
     // boundary, so a low-confidence or conflicted control is SEEN ("this might be
     // wrong") instead of discovered in the DAW. The resolution LOGIC that fills
-    // these lives in the importer (P7-F2); this is the F0 carrier chain.
+    // these lives in the importer; this struct carries it to materialization.
     /// Which ladder rung resolved this control's interaction. 0 = not run through
-    /// the P7 ladder (legacy/unset); 1 = explicit identity (component/Code-Connect);
+    /// the resolver ladder (legacy/unset); 1 = explicit identity (component/Code-Connect);
     /// 2 = Tier-1 affordance-inferred primitive; 3 = name/token (whole-word);
     /// 4 = registered custom factory; 5 = inert render + diagnostic (the warn).
     int resolution_rung = 0;
@@ -427,7 +426,7 @@ struct IRInteractiveElement {
     /// doesn't visually contradict the skin) passed. true = passed/unchecked.
     bool verification_pass = true;
 
-    // ── custom (P7 Tier-3 registered control) ────────────────────────────
+    // ── custom (registered control) ──────────────────────────────────────
     /// kind==custom only: the id the native overlay factory is registered under
     /// (register_design_control_factory). Maps 1:1 to DesignFrameElement::factory_id.
     std::string factory_id;
@@ -452,12 +451,12 @@ struct IRNode {
     float audio_default = 0.5f;
     // True when the source explicitly carried a min/max range (vs the 0..1
     // defaults). Lets the codegen reconstruct the value/range display stack only
-    // for widgets that actually declared a range. pulp #3192 follow-up.
+    // for widgets that actually declared a range.
     bool has_audio_range = false;
     std::vector<IRNode> children;
     std::unordered_map<std::string, std::string> attributes;  // Extra metadata
 
-    // ── Phase 0a additive identity fields ────────────────────────────────
+    // ── Additive identity fields ─────────────────────────────────────────
     /// Stable anchor for the tweaks layer. Empty until an anchor strategy
     /// has populated it (call assign_anchors() in anchor_strategy.hpp).
     std::optional<std::string> stable_anchor_id;
@@ -479,7 +478,7 @@ struct IRNode {
     /// Optional; adapters may leave empty when the source is binary or large.
     std::optional<std::string> raw_source;
 
-    // ── Faithful-vector import (Plan B) ──────────────────────────────────
+    // ── Faithful-vector import ───────────────────────────────────────────
     /// How this node materializes. `faithful_svg` renders `svg_asset_id` via
     /// DesignFrameView and overlays `interactive_elements`; `normal` keeps the
     /// existing widget/sprite path. Per-node so the two lanes coexist.

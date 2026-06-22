@@ -126,7 +126,7 @@ public:
     view::AudioBridge& output_meter_bridge() { return output_meter_bridge_; }
 
 #if PULP_ENABLE_AUDIO_PROBES
-    /// Realtime output-boundary probe (Phase 5). Observes the processor output
+    /// Realtime output-boundary probe. Observes the processor output
     /// at the "standalone processor-output boundary" — immediately after
     /// `processor_->process(...)` and before the device callback returns. This
     /// is the first wired probe stage for the "UI works, no sound" report. A
@@ -138,14 +138,14 @@ public:
     audio::AudioSystem* audio_system() { return audio_system_.get(); }
     midi::MidiSystem* midi_system() { return midi_system_.get(); }
 
-    // Item 3.5 — UI-thread MIDI injection. Virtual-keyboard widgets, scripting
+    // UI-thread MIDI injection. Virtual-keyboard widgets, scripting
     // hooks, and test harnesses push MIDI events through this collector;
     // the audio callback drains them into each block's MidiBuffer at the
     // correct sample offsets. Identical thread-safety surface that
     // pulp::midi::MidiMessageCollector documents — push_now is non-blocking.
     midi::MidiMessageCollector<>& ui_midi_collector() { return ui_midi_collector_; }
 
-    // Item 3.5 — Persist + restore StandaloneConfig under
+    // Persist + restore StandaloneConfig under
     // ApplicationProperties so `pulp run` opens the user's last device,
     // sample-rate, buffer-size, MIDI input, and built-in transport
     // settings on the next launch. Returns false when the storage layer
@@ -160,7 +160,7 @@ public:
 private:
     // Tear down the audio + MIDI devices but KEEP the processor instance alive.
     // apply_config() uses this so a settings change does not recreate the
-    // Processor out from under an editor ViewBridge holding a Processor& (#2693).
+    // Processor out from under an editor ViewBridge holding a Processor&.
     void stop_audio_keep_processor();
 
     ProcessorFactory factory_;
@@ -179,7 +179,7 @@ private:
     midi::MidiMessageCollector<> ui_midi_collector_;
     std::atomic<bool> running_{false};
 
-    // Item 3.5 — built-in transport state (the standalone "host").
+    // Built-in transport state (the standalone "host").
     // `transport_position_samples_` advances atomically on the audio
     // thread; `transport_block_time_seconds_` is derived by the audio
     // callback (`position_samples / sample_rate`) and is what
@@ -191,7 +191,7 @@ private:
     view::AudioBridge input_meter_bridge_;
     view::AudioBridge output_meter_bridge_;
 #if PULP_ENABLE_AUDIO_PROBES
-    // Phase 5 realtime output-boundary probe. prepare()d in start() with the
+    // Realtime output-boundary probe. prepare()d in start() with the
     // device's channel/buffer/rate; analyze_output() is called from the audio
     // callback right after processor render. RT-safe (scalar-only).
     audio::AudioProbe output_probe_;
@@ -199,7 +199,7 @@ private:
     // allocation). Sized in start() to the output channel count.
     std::vector<const float*> output_probe_ptrs_;
 
-    // Developer Audio Inspector tool window (Phase 6). A separate floating
+    // Developer Audio Inspector tool window. A separate floating
     // window that reads `output_probe_.latest()` each UI tick and renders the
     // live meters / waveform / probe-stage status. Lives on the app so it
     // outlives the idle callback that polls it; `output_probe_` is declared

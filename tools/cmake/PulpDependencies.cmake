@@ -1,19 +1,16 @@
 # PulpDependencies.cmake — third-party dependency setup for the Pulp
 # in-tree build.
 #
-# Extracted from the root CMakeLists.txt in the 2026-05 Phase 3 (C2)
-# refactor. Owns FetchContent declarations, optional-SDK probing
-# (VST3 / AU / CLAP / LV2 / AAX / WebGPU / Skia), and CHOC inclusion.
+# Owns FetchContent declarations, optional-SDK probing (VST3 / AU / CLAP /
+# LV2 / AAX / WebGPU / Skia), and CHOC inclusion.
 #
 # Called once from the root CMakeLists.txt after platform detection
 # and options are set; produces the cache variables and IMPORTED
 # targets the core subsystems depend on. Mutates PULP_HAS_* feature
 # flags so downstream subsystems can branch on availability.
 #
-# Codex C2 risk callout: configure-output + installed SDK manifest
-# must be byte-stable before/after — every line preserved verbatim
-# from the original location (L107-435 of CMakeLists.txt at
-# d1df9788a).
+# Configure output and the installed SDK manifest should remain byte-stable
+# when dependency setup moves between CMake modules.
 
 # ── Third-Party Dependencies ────────────────────────────────────────────────
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpFetchContent.cmake)
@@ -241,13 +238,13 @@ if(PULP_ENABLE_GPU AND PULP_REQUIRE_GPU_FOR_SDK AND NOT PULP_HAS_SKIA)
         "fetch) or set PULP_ENABLE_GPU=OFF if you intend a CG-only build.")
 endif()
 
-# Phase iOS-D.1 — `PULP_REQUIRE_GPU_FOR_SDK=ON + PULP_ENABLE_GPU=OFF` is a
+# `PULP_REQUIRE_GPU_FOR_SDK=ON + PULP_ENABLE_GPU=OFF` is a
 # misconfiguration: the consumer asked the release lane to enforce GPU but
 # then disabled it. Without this guard the configure succeeded, the
 # resulting tarball silently #ifdef'd out the GPU code path, and downstream
 # consumers got the same CG-only fallback the option exists to prevent —
 # defeating the whole purpose of the flag. Fail loudly at configure time.
-# (planning/2026-05-28-ios-d-gpu-auv3-crosscheck.md, hard-fail-on-CPU rule.)
+# hard-fail-on-CPU rule.
 if(PULP_REQUIRE_GPU_FOR_SDK AND NOT PULP_ENABLE_GPU)
     message(FATAL_ERROR
         "PULP_REQUIRE_GPU_FOR_SDK=ON but PULP_ENABLE_GPU=OFF — these "

@@ -68,7 +68,7 @@ DesignIR parse_claude_html(const std::string& html);
 // system. Unlike the other import sources, it does NOT describe a screen
 // or a renderable artifact — it carries tokens and prose rationale. The
 // parser populates IR token maps; the IR root node is left empty (no
-// children, type "frame"). Phase 1 deliberately does NOT scaffold a
+// children, type "frame"). It deliberately does NOT scaffold a
 // placeholder UI tree; that would imply scaffold quality Pulp cannot yet
 // deliver. Spec: https://github.com/google-labs-code/design.md
 //
@@ -94,7 +94,7 @@ struct DesignMdParseResult {
     DesignIR ir;
     std::vector<DesignMdDiagnostic> diagnostics;
     // Sections seen in the body, in the order they appeared. Used by the
-    // Phase 2 section-order lint rule.
+    // section-order lint rule.
     std::vector<std::string> sections;
     bool had_frontmatter = false;
     // Names of color tokens (the part after "colors.") that were
@@ -116,7 +116,7 @@ DesignMdParseResult parse_designmd(const std::string& markdown);
 /// for parity with the other source adapters' signatures.
 DesignIR parse_designmd_yaml(const std::string& markdown);
 
-// ── Phase 2: lint, diff, and Tailwind export ────────────────────────────
+// ── Lint, diff, and Tailwind export ─────────────────────────────────────
 //
 // These surfaces let DESIGN.md slot into CI gates the same way
 // @google/design.md's TypeScript CLI does, without taking on its JS

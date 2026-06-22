@@ -1,6 +1,6 @@
 # PulpAppTargets.cmake — standalone audio app + generic app targets.
 #
-# Extracted from PulpUtils.cmake in the 2026-05 Phase 3 (R2-9) refactor.
+# App-target helpers shared by source builds and installed SDK consumers.
 # Both `_pulp_add_standalone` (the standalone audio-host shell used by
 # `pulp_add_plugin(... FORMATS standalone)`) and `pulp_add_app`
 # (generic non-plugin Pulp apps) live here.
@@ -67,9 +67,8 @@ function(_pulp_add_standalone target name bundle_id version)
     # own dir — i.e., the in-tree tools/cmake/ during a source build,
     # and ~/.pulp/sdk/<ver>/lib/cmake/Pulp/ after install. The sibling
     # PulpLinkFontconfig.cmake ships alongside via root CMakeLists.txt's
-    # install(FILES) block. Pulp #2087 piggyback — pre-fix this broke
-    # every Linux/Android consumer since CMAKE_SOURCE_DIR resolved to
-    # the consumer's source tree.
+    # install(FILES) block. Using CMAKE_SOURCE_DIR here broke Linux/Android
+    # consumers because it resolved to the consumer's source tree.
     include("${CMAKE_CURRENT_FUNCTION_LIST_DIR}/PulpLinkFontconfig.cmake")
     pulp_link_fontconfig_after_skia(${target}_Standalone)
 endfunction()
@@ -116,8 +115,8 @@ endfunction()
 # include() preserves the existing public surface of `include(PulpUtils)`.
 include("${CMAKE_CURRENT_LIST_DIR}/PulpEmbedData.cmake")
 
-# pulp_register_font() — public font-registration macro for plugin authors
-# (pulp #1150). Lives in its own file so SDK consumers who only want
+# pulp_register_font() — public font-registration macro for plugin authors.
+# Lives in its own file so SDK consumers who only want
 # pulp_add_binary_data don't pay for the extra includes/parsing, and so the
 # install layout can ship the font macro alongside the rest of the Pulp
 # CMake helpers.

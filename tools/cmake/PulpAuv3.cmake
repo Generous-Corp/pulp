@@ -4,9 +4,9 @@
 #
 # 1. iOS app extension (PULP_IOS) — single .appex inside the iOS HostApp.
 #    The .appex carries the AU code directly. Same layout that's shipped
-#    via pulp_add_ios_auv3() since Phase 3.
+#    via pulp_add_ios_auv3().
 #
-# 2. macOS framework-inside-container (Phase 3.5) — Apple's "Creating
+# 2. macOS framework-inside-container — Apple's "Creating
 #    custom audio effects" sample architecture. The AU code lives in a
 #    separate .framework bundle; the .appex is a stub that links the
 #    framework via AudioComponentBundle. Both are embedded in a tiny
@@ -305,7 +305,7 @@ function(_pulp_add_auv3_macos_host target name bundle_id version)
     add_custom_target(${host_target}_Embed ALL DEPENDS "${embed_sentinel}")
 endfunction()
 
-# ── iOS monolithic .appex (legacy Phase 3 shape) ──────────────────────────
+# ── iOS monolithic .appex ─────────────────────────────────────────────────
 function(_pulp_add_auv3_ios target name bundle_id version manufacturer manufacturer_code plugin_code au_type au_tag au_version_int auv3_entry)
     # iOS App Extension target: MUST be add_executable (MH_EXECUTE) not
     # add_library MODULE (MH_BUNDLE). PluginKit posix_spawn's the .appex's
@@ -452,10 +452,9 @@ function(_pulp_add_auv3_ios target name bundle_id version manufacturer manufactu
     endif()
     _pulp_attach_plugin_runtime_manifest(${target} ${target}_AUv3)
 
-    # iOS-D.3b Slice 3: Embed three.iife.js + web-compat-three-shim.js
-    # into the .appex `threejs/` subdirectory so the JSC engine can load
-    # Three.js via plain `evaluate()` at runtime (iOS public JSC API
-    # has no ESM module loader — see slice 2 / Codex pass-1 finding).
+    # Embed three.iife.js + web-compat-three-shim.js into the .appex
+    # `threejs/` subdirectory so the JSC engine can load Three.js via plain
+    # `evaluate()` at runtime (iOS public JSC API has no ESM module loader).
     #
     # iOS bundle layout is FLAT: `[NSBundle resourcePath]` IS the
     # bundle root, NOT `<appex>/Resources/` (that is macOS-only).
@@ -463,9 +462,8 @@ function(_pulp_add_auv3_ios target name bundle_id version manufacturer manufactu
     # uses `[bundle pathForResource:@"three.iife" ofType:@"js"
     #                inDirectory:@"threejs"]`, which resolves to
     # `<resourcePath>/threejs/three.iife.js` = `<appex>/threejs/...`.
-    # Slice 3 originally wrote to `<appex>/Resources/threejs/` and
-    # NSBundle silently failed to locate the file at runtime (post-merge
-    # review on PR #3156). Writing under `<appex>/threejs/` directly
+    # Writing under `<appex>/Resources/threejs/` makes NSBundle silently fail
+    # to locate the file at runtime. Writing under `<appex>/threejs/` directly
     # aligns the build-time layout with the runtime lookup.
     #
     # The bundler script runs at build time, reading the pinned
@@ -515,7 +513,7 @@ function(_pulp_add_auv3_ios target name bundle_id version manufacturer manufactu
     endif()
 endfunction()
 
-# ── pulp_add_ios_auv3 (public iOS helper, unchanged from Phase 3) ─────────
+# ── pulp_add_ios_auv3 (public iOS helper) ─────────────────────────────────
 # Public helper for iOS AUv3 app-extension targets. See top-of-file
 # header comment for the iOS vs macOS packaging split.
 function(pulp_add_ios_auv3)

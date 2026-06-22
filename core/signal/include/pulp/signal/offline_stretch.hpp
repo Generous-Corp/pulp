@@ -11,18 +11,17 @@
 /// to an EXACT output length, non-causal (look-ahead) transient handling, and
 /// (gated) verbatim transient relocation.
 ///
-/// Design + task plan: planning/Sampler-Offline-Stretch-Build-Plan.md.
-///
 /// Tiering: this orchestration is the v1 BASELINE. The realtime core is
 /// hop-quantized and causal; if measured quality fails the Rubber Band R3 bar
-/// (see the metrics harness), the plan opens a native offline path. The
-/// realtime core's validated numbers are realtime results — offline re-proves.
+/// (see the metrics harness), this API can grow a native offline path. The
+/// realtime core's validated numbers are realtime results; offline must prove
+/// its own quality.
 ///
 /// ─────────────────────────────────────────────────────────────────────────
-/// PHASE 0 SCAFFOLD: this header defines the stable public API and compiles as
-/// an explicit, length-correct pass-through (exact at time_ratio == 1, pitch 0).
-/// The spectral orchestration and the offline refinements land in Phase 1+.
-/// Each unimplemented path is marked `// TODO(phaseN)`.
+/// Current baseline: tempo stretch, pitch shift, varispeed, and linked resample
+/// routes are implemented over the realtime spectral primitives. The identity
+/// route remains exact at `time_ratio == 1` and `pitch_semitones == 0`; offline
+/// refinements such as seam-clean transient relocation remain gated.
 /// ─────────────────────────────────────────────────────────────────────────
 
 #include <pulp/signal/interpolator.hpp>
@@ -37,7 +36,7 @@ namespace pulp::signal {
 
 /// Formant behaviour for the spectral modes. signal::FormantMode on main is
 /// only {follow, preserve} and cannot express the three-way behaviour we need,
-/// so this is an offline-specific enum (plan §5). Each value maps to a concrete
+/// so this is an offline-specific enum. Each value maps to a concrete
 /// SpectralEnvelopeShifter `warp` at wiring time (the shifter exposes a single
 /// warp knob, not a mode enum):
 ///   follow_pitch        -> warp = 1                       (formants ride the shift)
@@ -48,7 +47,7 @@ enum class OfflineFormantMode { follow_pitch, preserve_original, shift_independe
 
 /// Transient strategy. `phase_reset` uses the (causal) TransientPhasePolicy
 /// Röbel reset; `verbatim_relocate` is the offline-only copy-through path,
-/// gated on the seam-quality + blind-A/B criteria in the plan (§6).
+/// gated on seam-quality and blind-A/B acceptance criteria.
 enum class StretchTransientMode { phase_reset, verbatim_relocate };
 
 /// Character mode — the musically-distinct "engine per job" selector. Each has a
@@ -63,7 +62,7 @@ enum class StretchTransientMode { phase_reset, verbatim_relocate };
 ///   granular      — grain/stutter texture. SCAFFOLD: not implemented, renders clean.
 enum class StretchCharacter { clean, varispeed, phase_vocoder, granular };
 
-/// Whole-input render options. See plan §5.
+/// Whole-input render options.
 struct OfflineStretchOptions {
     /// Character mode (see StretchCharacter). Default `clean`. `varispeed` ignores
     /// pitch_semitones (pitch is linked to time_ratio); the others honor it.
@@ -89,7 +88,7 @@ struct OfflineStretchOptions {
     StretchTransientMode transient_mode = StretchTransientMode::phase_reset;
     int quality = 2;                ///< 0 draft (fast preview) .. 2 best
 
-    // Range MUST be sized up-front (plan §3.6 / §5): the underlying
+    // Range MUST be sized up-front: the underlying
     // RealtimePitchTimeProcessor clamps to [1/max, max] and allocates from these
     // bounds at prepare(). The sampler's tempo ratios (host_bpm/loop_bpm)
     // routinely exceed 0.5–2×, so the defaults are wider than the realtime
@@ -98,7 +97,7 @@ struct OfflineStretchOptions {
     double max_time_ratio = 4.0;      ///< supported stretch span is [1/max, max]
     double max_pitch_semitones = 24.0;
 
-    // Material-adaptive STFT geometry (plan §4 / ear-validated). The phase core
+    // Material-adaptive STFT geometry (ear-validated). The phase core
     // is fixed at FFT 4096/512; that window is too SMALL to resolve closely-
     // spaced low partials (bass stretches wobble) and too LARGE for percussive
     // time resolution (drum attacks soften). Setting these picks a window suited
@@ -136,7 +135,7 @@ public:
     /// before process(). Allocation happens here, not in process(). `sizing`
     /// fixes the supported range: process() ratios must stay within
     /// [1/max_time_ratio, max_time_ratio] and |pitch| within max_pitch_semitones
-    /// (plan §3.6). Defaults give a [0.25×, 4×] / ±24 st envelope; pass wider
+    /// at prepare(). Defaults give a [0.25×, 4×] / ±24 st envelope; pass wider
     /// bounds before rendering extreme tempo matches.
     void prepare(double sample_rate, int channels,
                  const OfflineStretchOptions& sizing = {}) {
@@ -163,7 +162,7 @@ public:
             cfg.max_pitch_semitones = 0.0f; // pitch is fixed in time_stretch mode
             cfg.transient_preservation = true;
             cfg.transient_sensitivity = sizing.transient_sensitivity; // keep every hit sharp
-            cfg.noise_morphing = sizing.route_noise_stn; // STN noise path (plan §4 routing)
+            cfg.noise_morphing = sizing.route_noise_stn; // STN noise path
             // Material-adaptive window/overlap (ear-validated: fixes bass wobble
             // and keeps drum transients natural; the realtime default is one size
             // too small for bass and too large for percussion).
@@ -277,7 +276,7 @@ public:
         if (out == nullptr && out_frames > 0) return fail(err, "null output");
         if (!(opts.time_ratio > 0.0))         return fail(err, "time_ratio must be > 0");
 
-        // Range is fixed at prepare() — reject, never silently clamp (plan §3.6).
+        // Range is fixed at prepare() — reject, never silently clamp.
         if (opts.time_ratio > max_time_ratio_ || opts.time_ratio < 1.0 / max_time_ratio_)
             return fail(err, "time_ratio outside the prepared range [1/max, max]; "
                              "widen OfflineStretchOptions::max_time_ratio at prepare()");
@@ -310,8 +309,8 @@ public:
             return true;
         }
 
-        // Pitch shifting / formant / STN are Phase 2. Route pitch==0 through the
-        // tempo-only spectral path; ratio==1 is the exact identity fast path.
+        // Route pitch==0 through the tempo-only spectral path; ratio==1 is the
+        // exact identity fast path.
         const bool pitch_off = std::abs(opts.pitch_semitones) < 1e-12;
         if (pitch_off && opts.time_ratio == 1.0) {
             for (int c = 0; c < channels_; ++c)
@@ -335,8 +334,8 @@ public:
         const int ch = channels_;
         const double P = std::exp2(opts.pitch_semitones / 12.0);
         if (opts.formant_mode == OfflineFormantMode::follow_pitch) {
-            // Single spectral pass (plan §4.2): stretch by R*P with pitch
-            // preserved, then resample reading at step P — which shifts pitch by
+            // Single spectral pass: stretch by R*P with pitch preserved, then
+            // resample reading at step P — which shifts pitch by
             // +S, drags formants along (follow), and lands at duration R. One
             // phase-vocoder pass + one interpolation, not two cascaded PV passes.
             const double eff = opts.time_ratio * P;
@@ -357,7 +356,7 @@ public:
         // SpectralEnvelopeShifter) then tempo. Two phase-vocoder passes — the
         // honest cost of keeping formants fixed while both R and S change with
         // the current per-mode engine API (a true single-pass R+P needs the
-        // engine-internal combination — plan §4 escape hatch).
+        // engine-internal combination).
         std::vector<std::vector<float>> inter(static_cast<size_t>(ch),
                                               std::vector<float>(static_cast<size_t>(in_frames)));
         std::vector<float*> pp(static_cast<size_t>(ch));
@@ -556,8 +555,8 @@ private:
     // stream, trims the stretched pad (content alignment), then copies EXACTLY
     // out_frames from the aligned start (a continuous stream => clean truncation,
     // exact length, no boundary click). Offline: allocates scratch per call. The
-    // residual sub-hop coverage error vs a true distributed-hop scheduler is the
-    // documented Phase-1 limitation (plan §4.1 / P1.4).
+    // residual sub-hop coverage error vs a true distributed-hop scheduler is a
+    // documented limitation of the realtime-core route.
     bool tempo_stretch(const float* const* in, long in_frames,
                        float* const* out, long out_frames, double ratio) {
         const int ch = channels_;

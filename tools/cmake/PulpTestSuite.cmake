@@ -1,7 +1,6 @@
 # PulpTestSuite.cmake — shared helper for declaring Catch2 unit-test binaries.
 #
-# Extracted in the 2026-05 Phase 3 (R2-7) refactor to slim down
-# test/CMakeLists.txt (2,648 lines, 289 add_executable() blocks). The
+# Keeps test/CMakeLists.txt from owning thousands of repeated target lines. The
 # common 3-line pattern
 #
 #     add_executable(pulp-test-X test_X.cpp)
@@ -16,8 +15,8 @@
 # catch_discover_tests() wiring in one place so future Catch2-config
 # changes only need to touch this helper.
 #
-# Validation goal (Codex risk callout): normalized `ctest -N -V` output
-# stays identical for every migrated test. The helper always uses the
+# Validation goal: normalized `ctest -N -V` output stays identical for every
+# migrated test. The helper always uses the
 # `pulp-test-<name>` convention and always links Catch2WithMain, so
 # discovered test names and properties are preserved byte-for-byte
 # unless an EXTRA_PROPERTIES override is passed in.
