@@ -1,6 +1,6 @@
 //! `pulp-rs tool` — list / install / uninstall / path / run / doctor.
 //!
-//! # Phase 6d scope
+//! # Runtime shape
 //!
 //! Everything **except** `install` is ported Rust-native:
 //!
@@ -11,12 +11,13 @@
 //! | `path`      | Ported      | Prints absolute path via `locate_tool`.      |
 //! | `run`       | Ported      | Exec via `Spawner`.                          |
 //! | `doctor`    | Ported      | Health report per tool.                      |
-//! | `install`   | **Stubbed** | Prints notice; archive download + extraction |
-//! |             |             | needs `ureq` + `tar` + `zip` crates.         |
+//! | `install`   | Delegated   | Uses `pulp-cpp` when available; otherwise    |
+//! |             |             | prints the Rust fallback notice.             |
 //!
-//! The install stub still dispatches (so `pulp-rs tool install <id>`
-//! returns a clean "not yet ported" exit code, not an "unknown
-//! subcommand" error). See `tool_registry.cpp` for the reference.
+//! The install branch still dispatches (so `pulp tool install <id>`
+//! delegates to `pulp-cpp` when available, or returns a clean "not
+//! yet ported" exit code instead of an "unknown subcommand" error).
+//! See `tool_registry.cpp` for the reference.
 
 use std::io::Write;
 
@@ -220,10 +221,10 @@ fn status_label(
 }
 
 fn install(_id: Option<&str>, _all: bool, out: &mut impl Write) -> Result<i32> {
-    // Phase 7: archive download + tar/zip/xz extraction + xattr
-    // cleanup is ~500 LOC of new deps (tar + flate2 + zip). Delegate
-    // to pulp-cpp when present; print the pre-Phase-7 stub when it's
-    // not on PATH so CI/sandboxed callers see a clear error.
+    // Archive download + tar/zip/xz extraction + xattr cleanup is
+    // ~500 LOC of new deps (tar + flate2 + zip). Delegate to pulp-cpp
+    // when present; print the stub when it's not on PATH so
+    // CI/sandboxed callers see a clear error.
     let argv = crate::fallthrough::current_argv_tail();
     match crate::fallthrough::delegate(&argv)? {
         crate::fallthrough::Outcome::Delegated(rc) => Ok(rc),
@@ -518,7 +519,7 @@ mod tests {
         }
     }
 
-    // ── #45 coverage uplift slice 8 — tool.rs parse_sub edges ─────
+    // ── tool.rs parse_sub edge coverage ───────────────────────────
 
     #[test]
     fn parse_sub_no_args_returns_help() {

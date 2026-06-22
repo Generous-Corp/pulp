@@ -2,18 +2,18 @@
 //!
 //! # Why a trait, not `std::process::Command` directly
 //!
-//! Most Phase 6 commands (`pr`, `build`, `run`, `test`, `docs`) are
-//! thin orchestrators that spawn another tool (`shipyard`, `cmake`,
-//! `ctest`, a built app binary). If we called `Command` inline, every
-//! integration test would either have to shell out (slow, brittle) or
-//! pull in a custom `$PATH` shim (platform-specific, hostile to CI).
+//! Several CLI commands (`pr`, `build`, `run`, `test`, `docs`) are thin
+//! orchestrators that spawn another tool (`shipyard`, `cmake`, `ctest`,
+//! a built app binary). If we called `Command` inline, every integration
+//! test would either have to shell out (slow, brittle) or pull in a
+//! custom `$PATH` shim (platform-specific, hostile to CI).
 //!
 //! The [`Spawner`] trait fixes that: production code constructs a
 //! [`SystemSpawner`] that really runs the child; tests construct a
 //! `RecordingSpawner` (see the `testing` submodule) that captures
-//! the invocation and returns a canned exit code. The port picks up
-//! the same pattern the `update::Fetcher` trait established in
-//! Phase 5, just applied to subprocesses.
+//! the invocation and returns a canned exit code. This uses the same
+//! test-seam pattern as the `update::Fetcher` trait, just applied to
+//! subprocesses.
 //!
 //! # What the interface captures
 //!
@@ -24,10 +24,9 @@
 //! - `cwd`     — optional working directory. `None` means "inherit".
 //!
 //! stdin/stdout/stderr are always inherited. Capturing output adds
-//! complexity we don't need for any Phase 6 command — the two C++
-//! sites that capture (`pulp pr`'s `shipyard --version` probe and
-//! `pulp doctor`'s `git branch --show-current`) both fall outside
-//! Phase 6 scope.
+//! complexity the current subprocess-backed call sites do not need;
+//! probe code that must inspect child output uses direct
+//! `Command::output` calls outside this trait.
 //!
 //! # Non-zero exit behaviour
 //!
@@ -195,7 +194,7 @@ pub fn which(name: &str) -> Option<PathBuf> {
 pub(crate) mod testing {
     //! Test-only helpers shared across modules. A `RecordingSpawner`
     //! that writes every invocation into a `RefCell<Vec<_>>` is enough
-    //! for every Phase 6 call site.
+    //! for the current subprocess-backed command tests.
 
     use std::cell::RefCell;
 

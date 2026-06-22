@@ -9,30 +9,27 @@
 //! easier to test and easier to read.
 //!
 //! The split with `cmd::dev` / `cmd::docs` / `cmd::design` /
-//! `cmd::create` (deferred in Phase 6) is deliberate — those
-//! commands bring subsystems the orchestrators don't touch (watch
-//! loops, docs index YAML, template tree, `design_binding`).
+//! `cmd::create` is deliberate — those commands bring subsystems the
+//! orchestrators don't touch (watch loops, docs index YAML, template
+//! tree, `design_binding`).
 //!
-//! # What's ported
+//! # Command coverage
 //!
-//! | Command     | Status in Phase 6                                        |
-//! |-------------|----------------------------------------------------------|
-//! | `build`     | Ported without `--watch`. Configure + build via `cmake`. |
-//! | `test`      | Ported — delegates to `ctest --output-on-failure`.       |
-//! | `run`       | Ported — finds a standalone binary under `build/`.       |
-//! | `clean`     | Ported — `rm -rf build/`.                                |
-//! | `status`    | Ported (partial) — reports root/branch/build/mode.        |
-//! | `cache`     | Ported status + clean subcommands. `fetch` stays on C++. |
+//! | Command  | Runtime behavior                                           |
+//! |----------|------------------------------------------------------------|
+//! | `build`  | Configure + build via `cmake`; watch/validate delegate.    |
+//! | `test`   | Delegates to `ctest --output-on-failure`.                  |
+//! | `run`    | Finds a standalone binary under `build/`.                  |
+//! | `clean`  | Removes `build/`.                                         |
+//! | `status` | Reports root/branch/build/mode and SDK details.            |
+//! | `cache`  | Status + clean are Rust-native; `fetch` delegates to C++.  |
 //!
-//! # `build` simplifications vs C++
+//! # `build` delegation vs C++
 //!
-//! - **No `--watch`.** The C++ watcher is a cross-platform `FSEvents` /
-//!   `ReadDirectoryChangesW` / inotify polyfill. Reimplementing that
-//!   properly is a multi-day port; re-shelling every change in a
-//!   while-loop would work on macOS but be pathological on Linux.
-//!   Phase 6 documents the gap and defers. The watch surface lives
-//!   in `cmd_build`'s own `watch_loop` which the C++ `dev` command
-//!   also consumes.
+//! - **`--watch` delegates.** The C++ watcher is a cross-platform
+//!   `FSEvents` / `ReadDirectoryChangesW` / inotify polyfill. The Rust
+//!   path keeps normal configure/build native, but forwards watch mode
+//!   to `pulp-cpp`.
 //! - **No `--local` SDK build path.** That path calls
 //!   `ensure_checkout_sdk` which runs `setup.sh --deps-only` and a
 //!   bespoke `cmake --install` chain. The Rust port assumes a
@@ -52,25 +49,25 @@ use crate::project::{self, ActiveProject};
 
 /// Flag surface for `pulp-rs build`.
 ///
-/// `--watch`, `--test`, `--test-filter`, and `--validate` are parsed
-/// here for completeness, but the `watch_mode` variants are rejected
-/// in [`build`] with a clear error pointing to the C++ binary.
+/// `--watch` and `--validate` delegate to `pulp-cpp` for the C++
+/// watcher and validator chain. `--test` stays Rust-native and runs
+/// `ctest` after a successful build.
 #[derive(Debug, Default, Clone)]
 pub struct BuildArgs {
     /// Extra args to pass to `cmake --build` (e.g. `--target`, `-j`).
     pub passthrough: Vec<String>,
     /// Forced JS engine selection (`auto|quickjs|jsc|v8`).
     pub js_engine: Option<String>,
-    /// `--watch` — deferred, prints a stub notice when set.
+    /// `--watch` — delegates to `pulp-cpp` when set.
     pub watch: bool,
     /// `--test` — run `ctest` after a successful build.
     pub test: bool,
     /// `--validate` — run plugin validators after a successful build
-    /// (also deferred; needs `cmd::validate` port).
+    /// (delegates to `pulp-cpp`; needs validator-chain parity to run
+    /// Rust-native).
     pub validate: bool,
     /// `--check-identity` — verify `.pulp/identity.lock` matches the
-    /// current plugin identity before configuring. Implements Track
-    /// 3.12 of the macOS plugin-authoring plan.
+    /// current plugin identity before configuring.
     pub check_identity: bool,
     /// `--allow-identity-change` — paired with `--check-identity`,
     /// treats drift as a soft warning instead of failing the build.
@@ -121,9 +118,8 @@ pub fn build<S: Spawner>(
 ///
 /// # Errors
 ///
-/// [`CliError::Other`] when `cmake`/`ctest` exits non-zero. The
-/// child exit code also propagates as the return value of the
-/// successful case so callers can forward to the shell.
+/// Propagates spawn/fallthrough failures. Non-zero child exit codes
+/// are returned as `Ok(rc)` so callers can forward them to the shell.
 pub fn build_with<S: Spawner>(
     proj: &ActiveProject,
     args: &BuildArgs,
@@ -131,8 +127,8 @@ pub fn build_with<S: Spawner>(
     out: &mut impl Write,
 ) -> Result<i32> {
     if args.check_identity {
-        // Track 3.12: refuse to configure / build when the project's
-        // current plugin identity has drifted from `.pulp/identity.lock`
+        // Refuse to configure / build when the project's current
+        // plugin identity has drifted from `.pulp/identity.lock`
         // without `--allow-identity-change`. Runs early so a doomed
         // build doesn't waste a configure step.
         let cmake = proj.root.join("CMakeLists.txt");
@@ -146,20 +142,20 @@ pub fn build_with<S: Spawner>(
     }
 
     if args.watch {
-        // Phase 7: route --watch through the C++ binary if it's on
-        // PATH, otherwise fall back to the "not ported" stub so
-        // users in a Rust-only sandbox still see a clear error.
+        // Route --watch through the C++ binary if it's on PATH,
+        // otherwise fall back to the stub so users in a Rust-only
+        // sandbox still see a clear error.
         let cpp_argv = crate::fallthrough::current_argv_tail();
         let stub = "pulp-rs build --watch: watch loop is not ported; install pulp-cpp to enable.";
         let rc = crate::fallthrough::delegate_or_stub(&cpp_argv, stub)?;
         return Ok(rc);
     }
     if args.validate {
-        // Phase 7: delegate the entire `build --validate` invocation
-        // to pulp-cpp so the validator chain (pluginval / auval /
+        // Delegate the entire `build --validate` invocation to
+        // pulp-cpp so the validator chain (pluginval / auval /
         // clap-validator) runs against the same build. Fall back to
         // a warning + continued Rust build when pulp-cpp is absent,
-        // preserving pre-Phase-7 behaviour for Rust-only sandboxes.
+        // preserving behavior for Rust-only sandboxes.
         let cpp_argv = crate::fallthrough::current_argv_tail();
         match crate::fallthrough::delegate(&cpp_argv)? {
             crate::fallthrough::Outcome::Delegated(rc) => return Ok(rc),
@@ -285,7 +281,7 @@ pub fn parse_run_args(args: &[String]) -> RunArgs {
 ///
 /// Search roots:
 /// - `build/bin/`  for standalone product projects.
-/// - `build/examples/*/` for in-repo examples.
+/// - `build/examples/*/`, then `build/bin/`, for in-repo examples.
 ///
 /// When `target` is `Some`, the filename must match stem-or-full.
 /// When `None`, the first executable regular file that passes
@@ -916,7 +912,7 @@ pub fn parse_cache_sub(args: &[String]) -> Result<CacheSub> {
 /// # Errors
 ///
 /// [`CliError::Other`] when the home dir can't be resolved or a
-/// fetch is requested (deferred).
+/// fetch is requested and cannot be delegated.
 pub fn cache(sub: &CacheSub, json: bool, out: &mut impl Write) -> Result<()> {
     let home = pulp_home().ok_or_else(|| {
         CliError::Other(
@@ -958,8 +954,8 @@ pub fn cache_with_home(
         CacheSub::Status => do_cache_status(home, json, out),
         CacheSub::Clean => do_cache_clean(home, json, out),
         CacheSub::Fetch(_) => {
-            // Phase 7: delegate to pulp-cpp; fall back to the stub
-            // message when the legacy binary is unavailable.
+            // Delegate to pulp-cpp; fall back to the stub message
+            // when the C++ binary is unavailable.
             let cpp_argv = crate::fallthrough::current_argv_tail();
             let stub_msg = "pulp-rs cache fetch: download + platform detect not ported; \
                             install pulp-cpp to enable.";
@@ -1427,7 +1423,7 @@ mod tests {
         assert!(matches!(err, CliError::BadUsage(_)));
     }
 
-    // ── #45 coverage uplift slice 12 — orchestrate parse + run_cmd ─
+    // ── orchestrate parse + run_cmd coverage ──────────────────────
 
     #[test]
     fn parse_run_args_handles_no_args_returns_default() {

@@ -2,16 +2,14 @@
 //!
 //! # Scope
 //!
-//! Phase 6 ports only the *happy path* of the C++ shim: locate
-//! `shipyard` on `$PATH`, spawn it with forwarded args, return the
-//! child's exit code. The native fallback implementation in
-//! `cmd_pr.cpp` (git porcelain + skill-sync + version-bump + gh pr
-//! create + shipyard ship) is deliberately NOT ported — it exists on
-//! the C++ side purely as a debug escape hatch for when `shipyard`
-//! itself is broken, and porting five separate subprocess flows
-//! would balloon this file past 500 LOC for near-zero user value.
-//! If a user hits `pulp pr --native` on the Rust binary we print a
-//! clear "not ported — use the C++ binary" message and exit 2.
+//! The Rust-native path locates `shipyard` on `$PATH`, spawns it with
+//! forwarded args, and returns the child's exit code. The native
+//! fallback implementation in `cmd_pr.cpp` (git porcelain +
+//! skill-sync + version-bump + gh pr create + shipyard ship) remains
+//! on the C++ side as a debug escape hatch for when `shipyard` itself
+//! is broken. If a user hits `pulp pr --native` on the Rust binary,
+//! we delegate to `pulp-cpp` when available and otherwise print a
+//! clear "not ported" message.
 //!
 //! # `shipyard` version-pin enforcement
 //!
@@ -92,9 +90,9 @@ pub fn run_with<S: Spawner>(
     out: &mut impl Write,
 ) -> Result<i32> {
     if args.native {
-        // Phase 7: the native fallback orchestrates skill-sync +
-        // version-bump + `gh pr create` + `shipyard ship` in one
-        // sequence — non-trivial to port. Delegate to pulp-cpp if
+        // The native fallback orchestrates skill-sync + version-bump
+        // + `gh pr create` + `shipyard ship` in one sequence, so it
+        // stays on the C++ delegate. Delegate to pulp-cpp if
         // available; stub otherwise.
         let cpp_argv = crate::fallthrough::current_argv_tail();
         let stub = "pulp-rs pr --native: fallback not ported; install pulp-cpp to enable.";
@@ -223,11 +221,11 @@ mod tests {
 
     #[test]
     fn native_flag_errors_out() {
-        // Phase 7: `--native` delegates to pulp-cpp when present.
-        // In the test environment pulp-cpp isn't on PATH, so we
-        // expect the "fallthrough unavailable" stub exit path —
-        // stderr gets the user-facing "install pulp-cpp" hint, and
-        // the error is `BadUsage("fallthrough unavailable")`.
+        // `--native` delegates to pulp-cpp when present. In the test
+        // environment pulp-cpp isn't on PATH, so we expect the
+        // "fallthrough unavailable" stub exit path — stderr gets the
+        // user-facing "install pulp-cpp" hint, and the error is
+        // `BadUsage("fallthrough unavailable")`.
         let args = PrArgs {
             native: true,
             forward: vec![],
@@ -279,7 +277,7 @@ mod tests {
         );
     }
 
-    // ── #45 coverage uplift slice 13 — pr.rs cushion ────────────────
+    // ── pr.rs coverage cushion ─────────────────────────────────────
 
     #[test]
     fn read_pinned_shipyard_version_returns_none_when_no_version_line() {

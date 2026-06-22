@@ -1,6 +1,6 @@
 //! `pulp-rs docs` — local documentation reader.
 //!
-//! # Phase 6d scope
+//! # Supported subcommands
 //!
 //! - `index` — Ported (walks `docs/status/docs-index.yaml`).
 //! - `search <query>` — Ported (recursive grep + fuzzy fallback).
@@ -1102,7 +1102,7 @@ mod tests {
         assert_eq!(fuzzy_score("render", "zzzz"), 0);
     }
 
-    // ── #45 coverage uplift slice 3 ────────────────────────────────
+    // ── docs.rs coverage cushion ──────────────────────────────────
     //
     // docs.rs was at 58.15% line — 352 missing lines, second-largest
     // gap after pkg.rs. Existing tests cover parse_sub for the simple

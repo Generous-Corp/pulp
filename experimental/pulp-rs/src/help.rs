@@ -12,9 +12,8 @@
 //!
 //! Duplicating the command table between those sites is exactly how
 //! drift enters: someone adds a Rust-only subcommand, the suggester
-//! forgets about it, the help banner forgets about it, and a month
-//! later the post-implementation audit (see `UPSTREAM_SYNC.md`) finds
-//! the drift. One inventory, one writer — no drift.
+//! forgets about it, and the help banner forgets about it. One
+//! inventory, one writer — no drift.
 //!
 //! # Layout
 //!
@@ -34,10 +33,9 @@
 //! # Parity posture
 //!
 //! The Rust port's banner intentionally mirrors the C++ banner even
-//! when the subcommand isn't ported yet. The user still invokes
-//! `pulp`/`pulp-rs` expecting the same surface; a "ported or not"
-//! distinction belongs in `UPSTREAM_SYNC.md`, not in user-visible
-//! output.
+//! when a subcommand is delegated. The user still invokes `pulp`
+//! expecting the same surface; Rust-native vs delegated distinctions
+//! should not leak into user-visible output.
 
 use std::io::Write;
 

@@ -1,6 +1,6 @@
 //! `pulp-rs design` — launch the design-tool binary against a script.
 //!
-//! # What's ported in Phase 6d
+//! # Runtime shape
 //!
 //! The C++ `cmd_design` command does three things in sequence:
 //!
@@ -19,9 +19,9 @@
 //! and skip the cache-root disagreement probe — which matters only
 //! when someone passes `--build-dir` pointing at an unrelated checkout.
 //!
-//! `--watch` is **stubbed**: prints a notice and falls through to the
-//! one-shot launch path. The C++ binary still owns the live-reload
-//! loop. Mirrors the `dev` command's stubbing decision.
+//! `--watch` delegates to `pulp-cpp` when available because the C++
+//! binary still owns the live-reload loop. Rust-only sandboxes fall
+//! back to a notice plus the one-shot launch path.
 
 #![allow(clippy::map_unwrap_or, clippy::option_if_let_else)]
 
@@ -35,7 +35,8 @@ use crate::project;
 /// Parsed design-command arguments.
 #[derive(Debug, Default, Clone)]
 pub struct DesignArgs {
-    /// `--watch` / `-w` — stubbed in Phase 6d; prints notice, runs once.
+    /// `--watch` / `-w` — delegates to `pulp-cpp` when available;
+    /// otherwise prints a notice and runs once.
     pub watch: bool,
     /// `--build-dir <path>` override.
     pub build_dir: Option<PathBuf>,
@@ -152,7 +153,7 @@ pub fn resolve_binding(cwd: &Path, args: &DesignArgs) -> Result<DesignBinding> {
             },
         ),
         None => (
-            // P8-NEW split: design-tool.js was replaced by per-concern
+            // design-tool.js was replaced by per-concern
             // design-tool-*.js modules. The host resolves the entry's
             // directory and loads every module in order, so the entry
             // module (design-tool-core.js) is the canonical default.
@@ -263,9 +264,9 @@ pub fn run<S: Spawner>(
     };
 
     if args.watch {
-        // Phase 7: watch loop needs `notify` + debounced rebuild.
-        // Delegate to pulp-cpp when available; otherwise fall back
-        // to the pre-Phase-7 behaviour (warning + one-shot launch).
+        // The watch loop needs `notify` + debounced rebuild. Delegate
+        // to pulp-cpp when available; otherwise fall back to a warning
+        // plus one-shot launch.
         let cpp_argv = crate::fallthrough::current_argv_tail();
         match crate::fallthrough::delegate(&cpp_argv)? {
             crate::fallthrough::Outcome::Delegated(rc) => return Ok(rc),
@@ -399,7 +400,7 @@ mod tests {
         assert!(err.to_string().contains("Auto-binding only works"));
     }
 
-    // ── run() integration paths (#45 coverage uplift) ───────────────────
+    // ── run() integration paths ─────────────────────────────────────────
 
     #[test]
     fn run_errors_when_resolved_script_missing() {

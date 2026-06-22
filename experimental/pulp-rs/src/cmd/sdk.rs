@@ -1,9 +1,8 @@
 //! `pulp-rs sdk {status,clean,install}` — SDK cache management.
 //!
-//! # Scope
+//! # Runtime shape
 //!
-//! Phase 6 ports two of the three C++ subcommands (`cmd_sdk.cpp`) to
-//! Rust:
+//! Two SDK-cache subcommands are Rust-native:
 //!
 //! - **`status`** — enumerate installed SDK versions under
 //!   `$PULP_HOME/sdk/` (download cache) and `$PULP_HOME/sdk-local/`
@@ -11,7 +10,8 @@
 //! - **`clean`** — remove both cache roots plus the scratch build
 //!   dir. Pure filesystem.
 //!
-//! **`install` is stubbed.** A real port requires:
+//! **`install` delegates to `pulp-cpp` when available.** A Rust-native
+//! implementation would require:
 //!
 //! - Platform detection (`detect_platform` in the C++ CLI picks
 //!   `macos-arm64` / `linux-x64` / etc. from `uname`).
@@ -21,18 +21,17 @@
 //! - `--local` mode that invokes `setup.sh`/`setup.ps1` and runs
 //!   `cmake --install` to produce an SDK tree.
 //!
-//! All of that is ~250 LOC of new production code plus fixture
-//! infrastructure (mock tarballs, fake platform detection).
-//! Phase 6's 500 LOC budget can't absorb it without crowding out
-//! the simpler command ports. [`run`] emits a deliberate
-//! "not ported" notice when `install` is requested and exits 2.
+//! All of that is ~250 LOC of production code plus fixture
+//! infrastructure (mock tarballs, fake platform detection). [`run`]
+//! emits a deliberate "not ported" notice when `install` is requested
+//! and the C++ delegate is unavailable.
 //!
 //! # Note on the `list / use / remove` nomenclature
 //!
-//! The Phase 6 scope doc mentions `list / use / remove` subcommands,
-//! but the live C++ CLI (`tools/cli/cmd_sdk.cpp` at the anchor SHA)
-//! exposes `install / status / clean`. The Rust port matches the
-//! actual C++ surface so parity fixtures align.
+//! Earlier planning notes mentioned `list / use / remove` subcommands,
+//! but the live C++ CLI exposes `install / status / clean`. The Rust
+//! surface matches the actual C++ command names so parity fixtures
+//! align.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -51,7 +50,7 @@ pub enum Sub {
     Status,
     /// Remove all SDK cache roots.
     Clean,
-    /// Stubbed — see module docs.
+    /// Delegated to `pulp-cpp` when available; otherwise stubbed.
     Install,
 }
 
@@ -99,10 +98,9 @@ pub fn run_with_home(sub: Sub, home: &Path, json: bool, out: &mut impl Write) ->
         Sub::Clean => do_clean(home, json, out),
         // `install` isn't Rust-native yet — download + tar-extract +
         // optional `--local` build-from-checkout flow is ~400 LOC of
-        // new code + fixtures. Phase 7 delegates to `pulp-cpp`
-        // transparently so users see no difference; if the legacy
-        // binary isn't on PATH, we fall back to the pre-Phase-7
-        // "not ported" message and exit 2.
+        // code + fixtures. Delegate to `pulp-cpp` transparently; if
+        // the C++ binary isn't on PATH, fall back to the "not ported"
+        // message and exit 2.
         Sub::Install => install_via_fallthrough(out),
     }
 }
@@ -439,7 +437,7 @@ mod tests {
         assert!(matches!(err, CliError::BadUsage(_)));
     }
 
-    // ── #45 coverage uplift slice 9 — sdk.rs parse + status edges ─
+    // ── sdk.rs parse + status edge coverage ───────────────────────
 
     #[test]
     fn parse_sub_no_args_returns_help() {

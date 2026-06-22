@@ -6,8 +6,8 @@
 //! `pulp::host::PluginScanner` and `pulp::host::PluginSlot`, which
 //! dlopen each candidate, parse CLAP/VST3/AU metadata in-process, and
 //! emit a rich `PluginInfo` per entry (name, vendor, version, unique
-//! ID). Phase 6b **does not** port that — it would violate the "no FFI
-//! into `pulp::*`" rule for the Rust prototype.
+//! ID). Rust does not port that deep scan path because it would violate
+//! the "no FFI into `pulp::*`" rule for the CLI crate.
 //!
 //! Instead, this module enumerates on-disk plugin files in the known
 //! system paths and prints their filenames. The **output shape**
@@ -23,8 +23,7 @@
 //!
 //! The only difference is the `name` column: the C++ path reads the
 //! CLAP factory to get a human-readable product name, while the Rust
-//! stub uses the file basename (sans extension). That's noted in
-//! `UPSTREAM_SYNC.md` as a Ported-partial limitation.
+//! file-enumeration path uses the file basename (sans extension).
 //!
 //! # Supported formats and paths
 //!
@@ -36,11 +35,10 @@
 //! | AUv3   | `.appex`   | Same as AU (AU and AUv3 share the Components tree)              |
 //! | LV2    | `.lv2`     | `~/.lv2`, `/usr/lib/lv2`, `/usr/local/lib/lv2`                  |
 //!
-//! AUv3 is deliberately omitted from the scan output today — the C++
-//! scanner can separate them via `AudioComponent` metadata; the Rust
-//! stub can't tell `.component` AU v2 from `.appex` AU v3 apart
-//! without reading the bundle's `Info.plist`, and that extra I/O isn't
-//! warranted for a Phase 6b stub.
+//! AUv3 bundles are enumerated by their `.appex` extension under the
+//! Components tree. The Rust path still avoids deeper
+//! `AudioComponent` metadata reads, so the report is a file inventory
+//! rather than a host-validated plug-in catalog.
 
 // `doc_markdown` flags format names (AUv3, AU, VST3) as missing
 // backticks — they're domain terms, not Rust items.

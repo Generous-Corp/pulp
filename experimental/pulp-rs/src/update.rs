@@ -3,10 +3,9 @@
 //! # Scope
 //!
 //! This module owns every responsibility the C++ `update_check.cpp`
-//! holds *except* the actual binary swap (`fs::rename` the new tarball
-//! into place). Phase 5 intentionally stops short of that step because
-//! it's impossible to test safely from `cargo test` — we'd be
-//! overwriting the test binary itself. The scope delivered here:
+//! holds *except* binary replacement. The real install path lives in
+//! [`crate::install`] so `cargo test` never risks overwriting the test
+//! binary itself. The scope here:
 //!
 //! - [`CacheEntry`] — on-disk shape of `~/.pulp/update-cache.json`.
 //! - [`read_cache`] / [`write_cache`] — atomic JSON I/O.

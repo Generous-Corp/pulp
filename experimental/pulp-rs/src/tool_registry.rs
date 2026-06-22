@@ -35,9 +35,10 @@
 //! - Reader + struct model ported fully.
 //! - `locate_tool` ported — checks `$PULP_HOME/tools/<id>/` first,
 //!   then `python-envs/<id>/run.sh`, then `$PATH`.
-//! - `install` is still stubbed with a pointer at the C++ binary: archive
+//! - `install` stays on the C++ delegate when available: archive
 //!   download + extraction needs `ureq` + `tar` + `zip` crates plus
-//!   platform-specific chmod, so the Rust side keeps the fallback explicit.
+//!   platform-specific chmod, so Rust keeps an explicit fallback
+//!   message for sandboxed runs without `pulp-cpp`.
 
 use std::collections::BTreeMap;
 use std::fs;
