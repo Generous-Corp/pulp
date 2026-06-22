@@ -1,4 +1,4 @@
-// Phase 3c color-eyedropper tests, split from test_inspector.cpp (P11-5, #2647).
+// Inspector color-eyedropper tests.
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -31,7 +31,7 @@
 using namespace pulp::view;
 using namespace pulp::inspect;
 
-// ── Phase 3c — color eyedropper ───────────────────────────────────────────
+// ── Color eyedropper ───────────────────────────────────────────────────────
 //
 // Eyedropper mode (E key) samples a color from the rendered UI and
 // applies it as a tweak to the selected view's color property. With
@@ -212,10 +212,10 @@ TEST_CASE("InspectorOverlay Phase 3c: click refreshes stale hover sample",
 
 TEST_CASE("InspectorOverlay Phase 3c: click never commits a stale sample",
           "[inspect][overlay][phase3c][regression]") {
-    // Codex P1 (#2434): pressing E and clicking on empty canvas must
-    // not write a stale color into the tweak store. A prior sample can
-    // be left behind by an earlier hover (or by paint_eyedropper_cursor
-    // sampling from the default cursor position before any mouse-move).
+    // Regression cover for #2434: pressing E and clicking on empty canvas must
+    // not write a stale color into the tweak store. A prior sample can be left
+    // behind by an earlier hover, or by paint_eyedropper_cursor sampling from
+    // the default cursor position before any mouse-move.
     // When the click lands where the resolved-style fallback finds no
     // background-colored view, the resample fails — and the pick must
     // no-op rather than commit the stale color from the old position.
@@ -332,4 +332,3 @@ TEST_CASE("InspectorOverlay Phase 3c: paint draws swatch when armed",
     s.overlay.paint(canvas);  // must not crash; swatch chrome drawn
     REQUIRE(s.overlay.eyedropper_active());
 }
-
