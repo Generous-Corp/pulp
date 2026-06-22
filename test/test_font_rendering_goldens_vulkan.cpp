@@ -1,4 +1,4 @@
-// test_font_rendering_goldens_vulkan.cpp — Font v2 Slice 3.4
+// test_font_rendering_goldens_vulkan.cpp — Vulkan font rendering golden scaffold.
 // (Cross-backend rendering goldens — Skia GPU Vulkan lane, SCAFFOLD).
 //
 // Sibling of `test_font_rendering_goldens.cpp` (Skia raster) and
@@ -15,7 +15,7 @@
 //   * The Skia GPU backend on Vulkan (Graphite-Vk / GrVkBackend
 //     depending on Skia point release) produces text rasters in the
 //     same neighbourhood as the raster and Metal lanes for the three
-//     Slice 3.4 reference strings (`"Hello"` / Inter / 14 px,
+//     golden reference strings (`"Hello"` / Inter / 14 px,
 //     `"日本語"` / Inter / 14 px CJK fallback, `"Hello world"` /
 //     JetBrains Mono / 12 px).
 //   * The Vulkan pipeline is deterministic in-process — same surface,
@@ -61,8 +61,8 @@
 //     gate set.
 //   * The GitHub-hosted Linux runner is advisory, not required, and
 //     does not currently have Skia-with-Vulkan linked.
-//   * Adding a Vulkan runner is tracked separately (Slice 3.4
-//     follow-up work). Until that lane exists, building this TU
+//   * Adding a Vulkan runner is tracked as future Vulkan golden-lane
+//     work. Until that lane exists, building this TU
 //     against Vulkan symbols would only burn CI roundtrips on
 //     "couldn't find <vulkan/vulkan.h>" failures.
 //

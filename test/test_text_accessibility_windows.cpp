@@ -1,4 +1,4 @@
-// Windows UIA TextAccessibilityNode backend tests (font v2 Slice 2.6).
+// Windows UIA TextAccessibilityNode backend tests.
 //
 // Compile-gated on _WIN32. The Pulp CI matrix doesn't currently exercise
 // the Windows lane on every PR (macOS is the only required gate), so

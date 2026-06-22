@@ -1,4 +1,4 @@
-// test_cluster_step.cpp — Pulp #2163, font v2 Slice 3.6.
+// test_cluster_step.cpp — UTF-8 grapheme cluster stepping.
 //
 // UAX #29-lite cluster_step behavior: emoji ZWJ family steps as one,
 // regional-indicator flag pairs step as one, Devanagari virama

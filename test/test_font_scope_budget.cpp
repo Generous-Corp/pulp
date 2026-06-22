@@ -1,4 +1,4 @@
-// test_font_scope_budget.cpp — Pulp #2163, font v2 Slice 2.7.
+// test_font_scope_budget.cpp — FontScope cache budget enforcement.
 //
 // Verifies that FontScope::set_memory_budget triggers a
 // prune-to-budget operation that evicts the resolver cache so
