@@ -7,7 +7,7 @@
 # experimental/pulp-rs/CMakeLists.txt's cargo/rustc discovery, but for an FFI
 # staticlib (pulp-rs is a CLI crate and forbids FFI — it is NOT the precedent).
 #
-# Cross-platform link traps preempted (per the Phase 1 design review):
+# Cross-platform link traps this helper handles:
 #   * crate-type = ["staticlib"], panic = "abort", PIC via -C relocation-model=pic
 #   * reference an exported symbol directly (no --whole-archive / -force_load)
 #   * link Threads / ${CMAKE_DL_LIBS} / m AFTER the Rust archive on Linux

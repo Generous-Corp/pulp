@@ -17,7 +17,7 @@
 # without per-subsystem drift. External FetchContent deps (Skia, Dawn,
 # mbedTLS, QuickJS, etc.) are compiled separately and not affected.
 #
-# Full design + phased rollout:
+# Full coverage/sanitizer design:
 # planning/coverage-sanitizers-spec-2026-04-16.md (private submodule).
 
 include_guard(GLOBAL)
@@ -30,7 +30,7 @@ endif()
 
 # Coverage requires Clang for BOTH C and C++ compilers. If CC is
 # gcc while CXX is clang++, the coverage flags produce incompatible
-# profraw shapes and llvm-cov can't merge them. #317 Codex P2.
+# profraw shapes and llvm-cov can't merge them.
 if(NOT (CMAKE_CXX_COMPILER_ID MATCHES "Clang"))
     message(FATAL_ERROR
         "PULP_ENABLE_COVERAGE requires Clang for C++ "

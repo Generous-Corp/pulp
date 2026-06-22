@@ -13,10 +13,10 @@
 
 namespace fs = std::filesystem;
 
-// Roadmap item P11-1 split `cmd_project.cpp` into focused sibling TUs.
-// This test exercises the anonymous-namespace helpers (`bump_one`,
-// `parse_bump_options`, …) plus the public `cmd_project` dispatcher
-// without shelling out, so it includes every TU in the family.
+// `cmd_project.cpp` is split into focused sibling TUs. This test exercises
+// the `project_detail` helpers (`bump_one`, `parse_bump_options`, ...) plus
+// the public `cmd_project` dispatcher without shelling out, so it includes
+// every TU in the family.
 #include "../tools/cli/cmd_project_common.cpp"
 #include "../tools/cli/cmd_project_bump.cpp"
 #include "../tools/cli/cmd_project_undo.cpp"
@@ -168,7 +168,7 @@ void require_run_ok(const std::string& cmd) {
     REQUIRE(run(cmd) == 0);
 }
 
-// A set GIT_DIR/GIT_WORK_TREE in the environment OVERRIDES `git -C <dir>`
+// GIT_DIR/GIT_WORK_TREE set in the environment OVERRIDE `git -C <dir>`
 // discovery. When this binary runs under a git hook or `shipyard` (which
 // inject those vars), the throwaway `git -C <tempdir>` commands below would
 // commit "initial" / branch / flip core.bare on the SOURCE worktree instead of
@@ -990,10 +990,9 @@ TEST_CASE("cli common delegates fail cleanly before shelling out",
         ScopedCwd cwd(repo);
         CapturedStreams capture;
         REQUIRE(delegate_to_build_binary("tools/missing-tool", {"--flag"}, "--prepend") == 1);
-        // pulp #-friction-1+#-friction-2 — error message switched from
-        // "not built" to "helper not found" + a cmake --build hint when
-        // the delegate began resolving from argv[0] before the project
-        // root. Match against the stable "helper not found" prefix.
+        // Match the stable "helper not found" prefix. The longer diagnostic
+        // may include a build hint depending on how argv[0] resolves before
+        // the project root is found.
         REQUIRE(capture.err.str().find("helper not found") != std::string::npos);
     }
 }

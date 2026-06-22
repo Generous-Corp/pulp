@@ -61,8 +61,8 @@ from tools.harness.visual import runner as visual_runner  # noqa: E402
 
 # Re-export the focused validator modules' public symbols so existing
 # ``from tools.harness.verifier import ...`` imports keep working. These
-# modules were extracted from this file in roadmap item P9-3 as a pure
-# mechanical move — zero behavior change.
+# modules were extracted from this file as a pure mechanical move — zero
+# behavior change.
 from tools.harness.verify_evidence import (  # noqa: E402,F401
     _TEST_CASE_FULL_PATTERN,
     _TEST_CASE_INDEX_CACHE,

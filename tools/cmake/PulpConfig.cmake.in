@@ -1,12 +1,8 @@
 # PulpConfig.cmake — find_package(Pulp) support for installed SDK consumers.
 #
-# 2026-05 B3 refactor: PulpConfig is now a thin coordinator. The
-# previous 322-line monolith mixed package init, platform detection,
-# IMPORTED-target recreation, debug-SDK guard, and WebGPU import-lib
-# recovery in a single file — every regression in one of those areas
-# (e.g. the five `PkgConfig::*` target-recreation fixes in #2087's
-# follow-up trail) was a hot-path edit on a brittle file. Each
-# concern now lives in its own focused module, all under
+# PulpConfig is a thin coordinator. Package init, platform detection,
+# IMPORTED-target recreation, debug-SDK guards, and WebGPU import-lib
+# recovery each live in focused sibling modules under
 # `${CMAKE_CURRENT_LIST_DIR}/`, all installed alongside this file.
 
 @PACKAGE_INIT@

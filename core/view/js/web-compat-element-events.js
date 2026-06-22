@@ -10,10 +10,10 @@
 //      object's eventPhase / currentTarget / preventDefault / stopPropagation
 //      / stopImmediatePropagation pieces.
 //
-//   2. Pointer capture (P2b). Element.prototype setPointerCapture /
-//      releasePointerCapture / hasPointerCapture against the document-scoped
-//      pointer-capture registry, plus the lostpointercapture / pointercancel
-//      synthetic events that the bridge dispatches when capture is released.
+//   2. Pointer capture. Element.prototype setPointerCapture /
+//      releasePointerCapture against the document-scoped pointer-capture
+//      registry, plus the pointercancel synthetic event the bridge dispatches
+//      when capture is released.
 //
 // Embed order: loaded AFTER web-compat-element.js so the Element constructor
 // + prototype are already defined when the extracted prototype overrides
@@ -151,11 +151,11 @@ Element.prototype._registerNativeEvent = function(type) {
         // The native side fires a single `drop` callback with type +
         // payload data when a drop completes; we synthesize a
         // DragEvent-shaped object so CSS-style consumers' handlers
-        // receive an event with .dataTransfer-like `_dropData`. Full
-        // multi-stage dragstart/drag/dragend lifecycle (with native
-        // drag-image rendering) remains a roadmap item — this slice
-        // covers the common "register me as a drop target" usage so
-        // `addEventListener('drop', fn)` is no longer a silent no-op.
+        // receive an event with .dataTransfer-like `_dropData`. This covers
+        // the common "register me as a drop target" usage so
+        // `addEventListener('drop', fn)` is no longer a silent no-op; it does
+        // not implement a full multi-stage drag lifecycle or native drag-image
+        // rendering.
         if (typeof registerDrop === "function") {
             // The bridge expects a callback NAME (not a function); pin
             // a synthetic per-element callback that fires our DOM
@@ -416,4 +416,3 @@ function _dispatchEvent(target, event) {
     event.eventPhase = 0;
     event.currentTarget = null;
 }
-

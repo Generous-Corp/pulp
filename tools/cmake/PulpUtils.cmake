@@ -709,7 +709,7 @@ function(pulp_add_plugin target)
                 "${_aax_dir}/${PLUGIN_PLUGIN_NAME}.aaxplugin")
     endif()
 
-    # ── AUv3 install (item 3.10 macOS plan) ──────────────────────────────
+    # ── AUv3 install ─────────────────────────────────────────────────────
     # The AU v3 packaging shape on macOS is a containing .app that holds
     # the .appex + its framework. macOS discovers AU v3 extensions via
     # Launch Services + PlugInKit, so the .app belongs in /Applications

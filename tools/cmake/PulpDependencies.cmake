@@ -358,7 +358,7 @@ if(EXISTS "${VST3_SDK_DIR}/pluginterfaces")
         "${VST3_SDK_DIR}/public.sdk/source/vst/vstsinglecomponenteffect.cpp"
         "${VST3_SDK_DIR}/public.sdk/source/common/pluginview.cpp"
         "${VST3_SDK_DIR}/public.sdk/source/common/commoniids.cpp"
-        # Hosting helpers used by the VST3 plugin slot (workstream 03 3.5).
+        # Hosting helpers used by the VST3 plugin slot scanner.
         "${VST3_SDK_DIR}/public.sdk/source/vst/hosting/parameterchanges.cpp"
         "${VST3_SDK_DIR}/public.sdk/source/vst/hosting/eventlist.cpp"
     )
@@ -518,8 +518,7 @@ if(TARGET mbedcrypto)
 endif()
 
 # SheenBidi (Apache-2.0) — Unicode Bidirectional Algorithm implementation.
-# Item 6.8 of the 2026-05-24 macOS plugin-authoring plan. Adds a Pulp-owned
-# bidi engine independent of system ICU; consumed by
+# Pulp-owned bidi engine independent of system ICU; consumed by
 # core/canvas::BidiAnalyzer to derive paragraph-level bidi runs for
 # Arabic / Hebrew shaping in non-Skia / non-ICU builds (iOS, headless,
 # minimal-toolchain hosts). The Skia-linked path in text_run_planner.cpp

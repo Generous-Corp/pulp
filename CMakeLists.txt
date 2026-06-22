@@ -132,7 +132,7 @@ option(PULP_BENCHMARK "Enable zero-copy benchmark perf counters. Tooling-only; O
 if(PULP_BENCHMARK)
     add_compile_definitions(PULP_BENCHMARK)
 endif()
-# Item 4.2 — opt-in suite that drives real third-party plugin binaries
+# Opt-in suite that drives real third-party plugin binaries
 # (Surge XT / Vital / OB-Xd / Dexed) through the host stack. OFF by default
 # so the public CI matrix never depends on third-party download mirrors;
 # developers and dedicated lanes flip it on with
@@ -161,7 +161,7 @@ else()
         "$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-Wno-unused-parameter>")
 endif()
 
-# ── Windows runtime library (Tier A Slice 12) ──────────────────────────────
+# ── Windows runtime library ────────────────────────────────────────────────
 # Statically link the MSVC runtime so redistributed Pulp binaries don't
 # require the user to have the matching Visual C++ Redistributable
 # installed. Without this, the default is the dynamic /MD runtime and
@@ -231,8 +231,8 @@ add_subdirectory(core/native-components)
 # Skipping the subdirectory also dodges a libc++ availability error on the
 # iPhoneSimulator SDK: `scanner_clap.cpp` calls `runtime::log_warn(...)`,
 # which `std::format`-instantiates over arithmetic types — including
-# `long double to_chars`, marked unavailable on iOS. Tracked in the
-# 2026-05-24 AUv3 iOS validation plan (Phase iOS-A blocker).
+# `long double to_chars`, marked unavailable on iOS. Keep host support out of
+# iOS until the AUv3 validation path has an iOS-safe scanner/link strategy.
 if(NOT IOS)
     add_subdirectory(core/host)
 endif()
@@ -274,8 +274,8 @@ add_subdirectory(tools/audio)
 # Tests are not built on iOS or Android — they assume a desktop POSIX shell,
 # linkable hosting libraries (pulp::host scans VST3/CLAP plugins on disk),
 # and a CTest harness that doesn't run inside a sandboxed iOS .app. Mobile
-# CI runs the test suite on macOS / Linux runners and the configure smoke
-# (Phase iOS-A) on the iPhoneSimulator SDK.
+# CI runs the test suite on macOS / Linux runners and the iPhoneSimulator
+# configure smoke separately.
 if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
     # The design-import test cluster (~40 targets) links the authoring symbols
     # gated by PULP_ENABLE_DESIGN_IMPORT, and they are interleaved with other
