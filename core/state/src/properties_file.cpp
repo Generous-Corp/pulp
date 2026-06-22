@@ -103,10 +103,35 @@ bool PropertiesFile::save_to(const std::string& dest) const {
     for (auto& [key, value] : values_)
         obj.addMember(key, value);
     std::string json = choc::json::toString(obj, true);
-    std::ofstream file(dest);
-    if (!file) return false;
-    file << json;
-    return file.good();
+
+    // Atomic save: write to a sibling temp file, fully flush it, then rename it
+    // onto the destination. A crash, power loss, or full disk mid-write
+    // therefore leaves the previously-saved settings intact rather than
+    // truncating them — settings/preset files are user data, so a partial
+    // write must never clobber a known-good file. Mirrors the temp-then-rename
+    // convention already used by skp_capture and audio_thumbnail_cache.
+    const std::string tmp_path = dest + ".tmp";
+    {
+        std::ofstream file(tmp_path);
+        if (!file) return false;
+        file << json;
+        file.flush();
+        if (!file.good()) {
+            file.close();
+            std::error_code ec;
+            std::filesystem::remove(tmp_path, ec);
+            return false;
+        }
+    }  // ofstream destructor closes the temp file before the rename.
+
+    std::error_code ec;
+    std::filesystem::rename(tmp_path, dest, ec);
+    if (ec) {
+        std::error_code rm_ec;
+        std::filesystem::remove(tmp_path, rm_ec);
+        return false;
+    }
+    return true;
 }
 
 std::optional<std::string> PropertiesFile::get_string(std::string_view key) const {
