@@ -37,7 +37,7 @@ locally for now.
 | AAX | Optional on macOS/Windows |
 | Standalone | Yes |
 | WAMv2 (Browser) | Yes |
-| WebCLAP (WASM) | Yes |
+| WebCLAP (WASM) | Experimental helper path; no checked-in PulpGain WCLAP target yet |
 
 ## Supported Platforms
 
