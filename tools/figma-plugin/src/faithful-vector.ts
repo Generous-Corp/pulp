@@ -165,7 +165,7 @@ export function decodeSvgBytes(bytes: Uint8Array): string {
 // Ported from tools/import-design/figma_rest_export.py's detect_overlay_controls
 // + parse_panel_bounds. Detects search (text_field), dropdown, < > stepper, and
 // tab_group controls from the source NODE TREE (names/structure/bounds) — more
-// reliable than SVG glyphs (Codex review). Node coords map into the exported
+// reliable than SVG glyphs. Node coords map into the exported
 // SVG's space: svg = (node_abs - root_abs) + panel_origin, because the node tree
 // is frame-local while the SVG export adds the drop-shadow margin. The output
 // shape matches the REST lane + the C++ parser (design_ir_json.cpp) exactly, so
@@ -492,9 +492,9 @@ export function detectOverlayControls(
   // ── Resolution self-check ────────────────────────────────────────────────
   // Stamp each emitted control with its resolution provenance (rung / confidence
   // / conflicts / verification). assessResolution cross-checks the name signal
-  // against the node's geometry, so a control whose name and shape disagree
-  // (the original silent-knob stumble) is FLAGGED — still materialized with the
-  // best candidate AND recorded for review — instead of shipped silently.
+  // against the node's geometry, so a control whose name and shape disagree is
+  // flagged while still materialized with the best candidate and recorded for
+  // review instead of shipped silently.
   for (let i = 0; i < out.length; i++) {
     const el = out[i];
     const name = (el.source_node_id && nodeNameById[el.source_node_id]) || "";

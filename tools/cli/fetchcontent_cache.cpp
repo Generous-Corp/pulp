@@ -446,7 +446,7 @@ bool blocks_preflight(const std::vector<CacheEntry>& entries) {
     // leftover `<dep>-<oldref>` dirs are simply ignored or refetched.
     // Only states that genuinely prevent a successful configure/build
     // should gate the preflight (see fetchcontent_cache.hpp for the
-    // full rationale and the Codex P1 review on PR #753).
+    // full rationale).
     for (const auto& e : entries) {
         switch (e.status) {
             case CacheStatus::Dangling:
@@ -514,7 +514,7 @@ int render_preflight(const std::vector<CacheEntry>& entries,
     // Preflight only blocks on states that genuinely break configure
     // (dangling symlinks, root-owned dirs, unknown). Stale-ref dirs
     // are surfaced by `pulp doctor --caches` but never gate the build
-    // — see blocks_preflight() and the Codex P1 review on PR #753.
+    // — see blocks_preflight().
     if (!blocks_preflight(entries)) return 0;
     out << "pulp: FetchContent cache has unhealthy entries — would fail at "
            "configure time:\n";

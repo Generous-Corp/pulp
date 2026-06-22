@@ -7,7 +7,7 @@
 // the returned value IS the envelope plus serialised asset bytes,
 // suitable for assembling into a `.pulp.zip` outside the sandbox.
 //
-// Purpose (#3225-era reframe): the official REST headless path lives at
+// Purpose: the official REST headless path lives at
 // `tools/import-design/figma_rest_export.py`. This bundle is the
 // *plugin-side* conformance oracle — it produces byte-identical output to
 // the published plugin's `Export to Pulp`, so the conformance test in
