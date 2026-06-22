@@ -1,8 +1,5 @@
-// test_widget_bridge_wave2_cheap.cpp — extracted from test_widget_bridge.cpp
-// in the 2026-05 Phase 5 (P5-1 follow-up) refactor.
-//
-// "Wave 2 cheap-wiring" — two bundles of compat.json partial → supported
-// closures from the Wave 2 cleanup pass:
+// WidgetBridge Wave 2 cheap-wiring tests: two bundles of compat.json
+// partial → supported closures from the Wave 2 cleanup pass:
 //
 //   1. canvas2d cheap wiring (DIVERGE → PASS). JS-evaluates a single
 //      CanvasRenderingContext2D method/property, asserts on the

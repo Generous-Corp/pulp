@@ -1,7 +1,4 @@
-// test_widget_bridge_rn_oos_fixup.cpp — extracted from test_widget_bridge.cpp
-// in the 2026-05 Phase 5 (P5-1 follow-up) refactor.
-//
-// pulp #1737 RN-OOS-fixup (catalog audit 2026-05-11).
+// WidgetBridge RN-OOS fixup tests for pulp #1737.
 //
 // Multiple final-sweep entries from the RN-OOS catalog reconciliation:
 //   * Material shim's rn/elevation

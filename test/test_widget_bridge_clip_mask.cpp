@@ -1,7 +1,4 @@
-// test_widget_bridge_clip_mask.cpp — extracted from test_widget_bridge.cpp
-// in the 2026-05 Phase 5 (P5-1 follow-up) refactor.
-//
-// pulp #1515 — clip-path + mask cluster.
+// WidgetBridge clip-path + mask tests for pulp #1515.
 //
 // Round-trips the CSS clip-path + mask family through the JS shim,
 // CSS translator, and bridge into View's mask slots:
@@ -520,4 +517,3 @@ TEST_CASE("border-box vs content-box layout math via Yoga",
     REQUIRE_THAT(cb->bounds().width,  WithinAbs(120.0f, 0.5f));
     REQUIRE_THAT(cb->bounds().height, WithinAbs(120.0f, 0.5f));
 }
-

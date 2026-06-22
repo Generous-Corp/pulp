@@ -1,11 +1,7 @@
-// test_canvas_widget_sanitize.cpp — extracted from test_canvas_widget.cpp
-// in the 2026-05 Phase 5 P5-3 follow-up refactor.
-//
 // CanvasWidget::add_command numeric-sanitization cluster (pulp #1387
 // gap #2). Pins the contract that JS-supplied NaN / ±Infinity values
 // land as 0 in the recorded draw command, while finite values are
-// preserved exactly. Originally lived as a contiguous block inside
-// test_canvas_widget.cpp.
+// preserved exactly.
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
@@ -146,4 +142,3 @@ TEST_CASE("CanvasWidget::add_command preserves finite values exactly",
 // (which round-trips ctx.shadow* -> canvasSetShadow* bridge calls). Here we
 // exercise the widget-internal dispatch (the leg that converts CanvasDrawCmd
 // into Canvas:: virtual calls) directly.
-
