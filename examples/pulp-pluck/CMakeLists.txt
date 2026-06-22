@@ -12,6 +12,14 @@ pulp_add_plugin(PulpPluck
     MANUFACTURER_CODE "Pulp"
 )
 
+# Processor tests
+if(PULP_BUILD_TESTS)
+    add_executable(pulp-pluck-test test_pulp_pluck.cpp)
+    target_link_libraries(pulp-pluck-test PRIVATE pulp::format Catch2::Catch2WithMain)
+    target_include_directories(pulp-pluck-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    catch_discover_tests(pulp-pluck-test)
+endif()
+
 # CLAP dlopen test
 if(PULP_HAS_CLAP AND APPLE)
     add_test(

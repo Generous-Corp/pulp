@@ -39,7 +39,7 @@ These examples explore features that are not yet stable across all platforms.
 All examples build as part of the standard CMake build:
 
 ```bash
-cmake -B build
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 

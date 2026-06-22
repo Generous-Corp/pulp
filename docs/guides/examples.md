@@ -78,6 +78,36 @@ Features:
 - Modulation parameters
 - Polyphonic voice handling
 
+## PulpSampler
+
+**Path**: `examples/PulpSampler/`
+**Type**: Instrument
+**Formats**: CLAP
+**Purpose**: An audio-file sampler with MIDI triggering, ADSR envelope, and
+pitch control. Validates sample loading, multi-voice playback, and sampler
+state round-trips.
+
+Features:
+- Audio file sample loading
+- MIDI note triggering with velocity
+- ADSR envelope and pitch control
+- Multi-voice polyphony
+
+## PulpPluck
+
+**Path**: `examples/pulp-pluck/`
+**Type**: Instrument
+**Formats**: VST3, AU v2, CLAP
+**Purpose**: A Karplus-Strong plucked-string synthesizer. Validates the
+instrument plugin path with a compact physical-modeling processor that also
+feeds the web demo lane.
+
+Features:
+- Plucked-string synthesis
+- MIDI note input
+- Decay, brightness, and volume parameters
+- Native plugin targets plus WAM demo reuse
+
 ## UI Preview
 
 **Path**: `examples/ui-preview/`
@@ -154,10 +184,11 @@ the bounded subset.
 
 ## Building Examples
 
-All examples are built as part of the main build:
+CMake-backed examples are built as part of the main build. Source-only Cmajor
+and JSFX examples use the lane-specific validators below.
 
 ```bash
-cmake -B build
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 
