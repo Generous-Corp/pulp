@@ -99,13 +99,14 @@ CppExportResult generate_pulp_cpp(const DesignIR& ir,
                                   const IRAssetManifest& manifest,
                                   const CppExportOptions& opts = {});
 
-// ── Baked SwiftUI (Workstream B1) ───────────────────────────────────────
+// ── Baked SwiftUI code generation ───────────────────────────────────────
 //
 // `--emit swiftui` lowers the same baked DesignIR to native SwiftUI — a
 // fourth lowering alongside DOM/native-JS/baked-C++. Baked-only: SwiftUI is a
-// compiled declarative target with no Pulp JS-runtime story. B1 is an MVP
-// skeleton (stacks / Text / fixed frame-padding-background / knob+slider+
-// toggle + a code-first PulpTheme partition + a minimal name-keyed binding).
+// compiled declarative target with no Pulp JS-runtime story. The current
+// emitter covers stacks / Text / fixed frame-padding-background /
+// knob+slider+toggle + a code-first PulpTheme partition + a minimal
+// name-keyed binding.
 
 struct SwiftExportOptions {
     /// Generated root `View` struct name. Sanitized to a Swift type name; an
@@ -117,8 +118,8 @@ struct SwiftExportOptions {
     bool emit_theme = true;            ///< emit the PulpTheme.swift partition
     bool emit_binding_manifest = true; ///< emit the minimal SwiftUI binding manifest
     int indent_spaces = 4;
-    /// Optional fidelity sink (parity with CodeGenOptions). B1 does not yet
-    /// populate SwiftUI-specific layout issues — that is B2.
+    /// Optional fidelity sink (parity with CodeGenOptions). SwiftUI-specific
+    /// layout issues are not populated yet.
     std::vector<FidelityIssue>* fidelity_report = nullptr;
 };
 
@@ -133,7 +134,7 @@ struct SwiftExportResult {
 /// a `<root_view_name>` View plus a `<theme_type_name>` token partition. The
 /// generated View binds knob/slider/toggle controls to `PulpParameter`s via the
 /// `PulpParameterResolving` protocol (exact `PulpParameter.name` match — there
-/// is no stable string param key today; see the B1 plan).
+/// is no stable string param key today).
 SwiftExportResult generate_pulp_swift(const DesignIR& ir,
                                       const IRAssetManifest& manifest,
                                       const SwiftExportOptions& opts = {});

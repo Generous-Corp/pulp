@@ -1,8 +1,7 @@
 #pragma once
 
 /// @file audio_doctor_artifacts.hpp
-/// JSON curve artifacts for the offline Audio Doctor (harness Phase 7,
-/// slice 1).
+/// JSON curve artifacts for the offline Audio Doctor.
 ///
 /// The Doctor's response/THD curves are its reviewable outputs: a human, CI,
 /// or future AI tool can read a stable JSON document instead of re-running the

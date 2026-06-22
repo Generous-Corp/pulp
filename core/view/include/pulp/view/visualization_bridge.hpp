@@ -20,16 +20,14 @@
 /// — never this class — when you need an output-boundary probe that satisfies
 /// the strict RT ABI (no allocation, no FFT/STFT, no locks, no vector growth).
 /// Reuse this bridge's UI-side rendering if you like, but never its
-/// callback-side analysis. See the harness plan
-/// (`planning/2026-06-09-audio-observability-and-validation-harness-plan.md`,
-/// Section 4 "Runtime Probe Infrastructure").
+/// callback-side analysis.
 ///
 /// Audio thread calls process(). UI thread reads latest data.
 /// Spectrum/meter/waveform publication uses TripleBuffer (latest-value), but
 /// the *analysis* feeding it (STFT) is not allocation-free — see above.
 ///
-/// Forward-compatible with Phase 13 Three.js bridge: the same data published
-/// here is accessible from JS via AudioBridge → widget_bridge.cpp bindings.
+/// The same data published here is accessible from JS via AudioBridge →
+/// widget_bridge.cpp bindings.
 
 #include <pulp/runtime/triple_buffer.hpp>
 #include <pulp/signal/stft.hpp>
@@ -40,12 +38,12 @@
 #include <algorithm>
 #include <vector>
 
-// Codex P1 on PR #526 / #500: the public view header must NOT include
-// pulp/render/bench/perf_counters.hpp — it leaks render include paths
-// through every view consumer under PULP_BENCHMARK, even those that
-// don't link pulp::render. Forward-declare instead; the non-trivial
-// process() body that actually dereferences PerfCounters lives in
-// visualization_bridge.cpp, which DOES include the render header.
+// The public view header must NOT include
+// pulp/render/bench/perf_counters.hpp — it leaks render include paths through
+// every view consumer under PULP_BENCHMARK, even those that don't link
+// pulp::render. Forward-declare instead; the non-trivial process() body that
+// actually dereferences PerfCounters lives in visualization_bridge.cpp, which
+// DOES include the render header.
 #ifdef PULP_BENCHMARK
 namespace pulp::render::bench {
 struct PerfCounters;
@@ -142,7 +140,7 @@ public:
     /// Defined out-of-line in visualization_bridge.cpp so the benchmark
     /// counter paths can dereference `render::bench::PerfCounters`
     /// fields without leaking the render include path through this
-    /// public header (Codex P1 on PR #526 / #500).
+    /// public header.
     void process(const float* const* channels, int num_channels, int num_samples);
 
 #ifdef PULP_BENCHMARK

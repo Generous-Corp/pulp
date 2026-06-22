@@ -3,8 +3,6 @@
 /// @file audio_metrics.hpp
 /// Deterministic offline signal metrics for rendered audio buffers.
 ///
-/// PR 1A of the audio observability harness
-/// (planning/2026-06-09-audio-observability-and-validation-harness-plan.md).
 /// Test/tool layer only — analyzes buffers that have already left the audio
 /// thread (typically rendered through `pulp::format::HeadlessHost`). Nothing
 /// here is realtime-safe or intended to run inside an audio callback.
@@ -99,13 +97,13 @@ struct FrequencyEstimate {
 /// Confidence is 1 − (period standard deviation / mean period), clamped to
 /// [0, 1]. Suited to near-periodic, single-pitch signals (test tones,
 /// oscillator output). Not a pitch detector for harmonically dense or noisy
-/// material — use the offline FFT analyzers for that (later slice). Needs at
-/// least three crossings; returns {0.0, 0.0} otherwise.
+/// material — use the offline FFT analyzers for that. Needs at least three
+/// crossings; returns {0.0, 0.0} otherwise.
 FrequencyEstimate estimate_frequency(std::span<const float> samples,
                                      double sample_rate);
 
-/// Compact, agent-readable signal summary (the plan's "Describe The Signal"
-/// use case). Multi-line text; stable field ordering for diffing.
+/// Compact, agent-readable signal summary. Multi-line text; stable field
+/// ordering for diffing.
 std::string summarize(const BufferMetrics& metrics,
                       const FrequencyEstimate& frequency = {});
 
