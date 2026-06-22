@@ -240,12 +240,11 @@ test("serialized knob validates against figma-plugin-export-v1 schema", () => {
 });
 
 // ---------------------------------------------------------------------------
-// P1a — the interactive_element schema must accept every kind the producers
-// already emit (the pre-existing drift: a knob-only enum + additionalProperties
-// :false rejected the overlay overlays that faithful-vector.ts / figma_rest_
-// export.py emit) PLUS the newly-added fader/toggle. Validates element objects
-// directly against $defs.interactive_element, including the per-kind required-
-// field segmentation (knob → cx/cy/hit_radius; overlays → x/y/w/h).
+// The interactive_element schema must accept every kind the producers emit. This
+// catches drift where the schema rejects overlay elements that faithful-vector.ts
+// / figma_rest_export.py emit. Validates element objects directly against
+// $defs.interactive_element, including the per-kind required-field segmentation
+// (knob -> cx/cy/hit_radius; overlays -> x/y/w/h).
 // ---------------------------------------------------------------------------
 
 function ieErrors(el: any): string[] {
@@ -314,13 +313,12 @@ test("interactive_element schema enforces per-kind required fields (P1a)", () =>
 });
 
 // ---------------------------------------------------------------------------
-// #43c — user-supplied font bundling. When a UserFontCache carries a TTF
-// for a (family, style) tuple matching a font_family_assets entry, the
-// serializer must:
+// User-supplied font bundling. When a UserFontCache carries a TTF for a (family,
+// style) tuple matching a font_family_assets entry, the serializer must:
 //   1. Stamp the entry with the cache's `asset_id`.
 //   2. Add a corresponding entry to `asset_manifest.assets` so the zip
 //      writer packages the bytes as `assets/<hash>.ttf`.
-//   3. Leave NON-matching entries untouched (metadata-only per #43a-rev).
+//   3. Leave NON-matching entries untouched (metadata-only).
 // ---------------------------------------------------------------------------
 
 import { UserFontCache } from "../src/user-fonts";
@@ -362,7 +360,7 @@ test("serializeExport stamps user-supplied font asset_id (#43c)", async () => {
     `local_path should end in .ttf, got ${fontAssets[0].local_path}`,
   );
 
-  // 3 — the metadata-only path (#43a-rev) still works when no cache is given.
+  // The metadata-only path still works when no cache is given.
   const noCacheOut = serializeExport([knobNode()], [], ctx({
     fontFamilyAssets,
   })) as Record<string, any>;
@@ -396,10 +394,9 @@ test("UserFontCache sniffs SFNT magic for font/ttf vs font/otf (#43c)", async ()
 });
 
 // ---------------------------------------------------------------------------
-// #43c follow-up — input validation hardening (filed after self-review).
-// Pulp's "no silent failures" rule: drag-drop UX gaps that let an empty /
-// corrupt blob into the asset cache get caught here, not at runtime three
-// systems away.
+// User-font input validation hardening. Pulp's "no silent failures" rule:
+// drag-drop UX gaps that let an empty / corrupt blob into the asset cache get
+// caught here, not at runtime three systems away.
 // ---------------------------------------------------------------------------
 
 test("UserFontCache rejects 0-byte drops (#43c hardening)", async () => {
@@ -489,4 +486,3 @@ test("serializeExport does NOT emit userfont-orphan when every cached font is re
     "no orphan diagnostic when every cached font matches a catalogue entry",
   );
 });
-

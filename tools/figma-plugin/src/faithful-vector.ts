@@ -1,4 +1,4 @@
-// Faithful-vector import (Plan B / B4b) — geometry auto-detect of knobs in an
+// Faithful-vector import: geometry auto-detect of knobs in an
 // exported frame SVG, ported from the vector-knob PoC and the C++ DesignFrameView
 // convention (kept in lockstep with tools/import-design/figma_rest_export.py's
 // parse_frame_knobs). A knob DOME is a gradient-filled <circle> (fill="url(",
@@ -11,8 +11,8 @@
 // decode) — the Figma plugin sandbox tsconfig targets an older lib without
 // String.matchAll / includes / spread-of-typed-array.
 
-// P7-F2: the resolution self-check that records each control's provenance +
-// catches name/geometry conflicts. (Type-only the other direction, so no cycle.)
+// The resolution self-check records each control's provenance and catches
+// name/geometry conflicts. Type-only the other direction, so no cycle.
 import { assessResolution } from "./resolve-control";
 
 // The interactive-overlay kinds the schema (figma-plugin-export-v1.json
@@ -60,14 +60,13 @@ export interface InteractiveElement {
   text?: string;           // value_label: initial readout string
   value_left_align?: boolean;  // value_label: left-align the readout
   default_value_y?: number;    // xy_pad: initial normalized Y (0=top)
-  // P7 import report (resolution provenance) — carried so a low-confidence or
-  // conflicted control is visible at the host materialize boundary, not just in
-  // the TS importer. The resolution LOGIC that fills these is P7-F2.
+  // Resolution provenance — carried so a low-confidence or conflicted control is
+  // visible at the host materialize boundary, not just in the TS importer.
   resolution_rung?: number;        // which ladder rung resolved this (0=unset..5=inert)
   confidence_score?: number;       // 0..1; 1.0 = unset/legacy
   conflict_signals?: string[];     // cross-signal conflicts (empty = none)
   verification_pass?: boolean;     // render verification passed (default true)
-  // custom (P7 Tier-3 registered control)
+  // Registered custom control.
   factory_id?: string;             // the registered native-overlay factory id
   custom_props?: string;           // opaque props handed to the factory (e.g. JSON)
 }
@@ -270,8 +269,8 @@ export function detectOverlayControls(
   const subtreeEnd = new Map<OverlayNode, number>();
   const occluders: Array<[number, number, number, number, number]> = [];
   let _counter = 0;
-  // node id -> name, so the P7 post-pass can read the name signal for each
-  // emitted control (which only carries its source_node_id).
+  // node id -> name, so the post-pass can read the name signal for each emitted
+  // control (which only carries its source_node_id).
   const nodeNameById: { [id: string]: string } = {};
   function scan(n: OverlayNode): number {
     const idx = _counter++;
@@ -470,16 +469,16 @@ export function detectOverlayControls(
       return;  // leaf overlay
     }
 
-    // ── swap / action / xy_pad / value_label (P1b) ───────────────────────────
+    // ── swap / action / xy_pad / value_label ────────────────────────────────
     // Whole-word name-gated, and run AFTER the tuned dropdown/stepper/tab_group/
     // text_field detectors in this visit() so they always win — these only claim
     // a node the others left unclaimed, and only on an explicit name token, so a
     // generic design never sprouts spurious overlays. (Knob detection is a
     // separate geometry pass, parseFrameKnobs, not part of this precedence.) The
-    // full node-tree signals
-    // (prototype reactions for swap, value patterns for value_label, a command
-    // vocabulary for action) land with P2's unified resolver; this is the
-    // name-driven floor that proves the producer can emit each kind.
+    // Full node-tree signals (prototype reactions for swap, value patterns for
+    // value_label, a command vocabulary for action) belong in the unified
+    // resolver; this is the name-driven floor that proves the producer can emit
+    // each kind.
     if (bb) {
       const named = detectNamedControl(n, name, ntype, toSvg(bb));
       if (named) { out.push(named); return; }
@@ -490,7 +489,7 @@ export function detectOverlayControls(
 
   visit(root, null);
 
-  // ── P7-F2 resolution self-check ──────────────────────────────────────────
+  // ── Resolution self-check ────────────────────────────────────────────────
   // Stamp each emitted control with its resolution provenance (rung / confidence
   // / conflicts / verification). assessResolution cross-checks the name signal
   // against the node's geometry, so a control whose name and shape disagree
@@ -515,7 +514,7 @@ function hasWord(s: string, w: string): boolean {
   return new RegExp("(^|[^a-z0-9])" + w + "([^a-z0-9]|$)").test(s);
 }
 
-// Name-driven detection for the P1b kinds. `rect` is the node's SVG-space box.
+// Name-driven detection for overlay kinds. `rect` is the node's SVG-space box.
 function detectNamedControl(
   n: OverlayNode, name: string, ntype: string,
   rect: [number, number, number, number],
@@ -548,7 +547,7 @@ function detectNamedControl(
   // value_label: a TEXT node DELIBERATELY named a readout. Gated on explicit
   // markers ("readout" / "value_label"), NOT the bare word "value"/"display" —
   // those are far too common on STATIC text layers to flip into a live overlay.
-  // (Richer content-pattern detection rides P2's unified resolver.)
+  // Richer content-pattern detection belongs in the unified resolver.
   if (ntype === "TEXT" &&
       (hasWord(name, "readout") || name.indexOf("value_label") !== -1 ||
        name.indexOf("value-label") !== -1 || name.indexOf("valuelabel") !== -1)) {
