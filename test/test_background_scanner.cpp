@@ -1,4 +1,4 @@
-// Unit tests for the background plugin scanner (workstream 03 slice 3.2).
+// Unit tests for the background plugin scanner.
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/host/background_scanner.hpp>

@@ -1,5 +1,5 @@
-// Tests for the Pulp → Linux ATK / AT-SPI mapping table
-// (workstream 04 slice 4.2a).
+// Tests for the Pulp → Linux ATK / AT-SPI mapping table.
+// Pure-constant ATK mapping checks.
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/view/platform/atk_mapping.hpp>

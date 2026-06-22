@@ -1,7 +1,7 @@
-// Unit tests for the iOS AVAudioSession ↔ C++ bridge (workstream 05 slice 5.2).
+// Unit tests for the iOS AVAudioSession ↔ C++ bridge.
 // Platform-agnostic: these run on every platform; the Swift side is
 // exercised by iOS integration tests once the bridge is wired into a
-// real AUv3 example (workstream 05 slice 5.1).
+// real AUv3 example.
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/format/ios_audio_session.hpp>

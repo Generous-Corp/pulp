@@ -1,4 +1,4 @@
-// Processor::on_host_tempo_changed hook tests (workstream 01 slice 1.10).
+// Processor::on_host_tempo_changed hook tests.
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/format/processor.hpp>
