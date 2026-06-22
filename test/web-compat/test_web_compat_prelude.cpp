@@ -1038,11 +1038,10 @@ TEST_CASE("WebCompat: setSkew bridge fn registered", "[webcompat][bridge][issue-
     REQUIRE(std::string(result.getWithDefault<std::string_view>("")) == "function");
 }
 
-// pulp #1434 Triage #9 P1 fix (Codex post-merge audit) —
 // matrix(a,b,c,d,tx,ty) must dispatch to setTransform with all 6
-// components verbatim, NOT decompose to translate+uniform-scale+rotate
-// (which silently dropped c/d skew components on rotation matrices and
-// could mask zero-scale collapses).
+// components verbatim, NOT decompose to translate+uniform-scale+rotate.
+// Decomposition loses c/d skew components on rotation matrices and can
+// mask zero-scale collapses.
 
 TEST_CASE("WebCompat: matrix() preserves all 6 components verbatim",
           "[webcompat][bridge][issue-1434-tx][issue-1434-tx-p1]") {
@@ -1373,9 +1372,9 @@ TEST_CASE("WebCompat: var() with nested var() in fallback resolves through balan
     auto plain = env.engine.evaluate("_resolveVar('16px solid red')");
     REQUIRE(std::string(plain.getWithDefault<std::string_view>("")) == "16px solid red");
 
-    // 7. Depth-cap behavior (Codex P2 on PR C): a chain that would
-    //    recurse past the cap (8) must NOT crash, must NOT silently
-    //    truncate, must NOT spin forever. It returns the unresolved
+    // 7. Depth-cap behavior: a chain that would recurse past the cap
+    //    (8) must NOT crash, must NOT silently truncate, must NOT spin
+    //    forever. It returns the unresolved
     //    inner fallback as a literal (graceful unresolved
     //    passthrough). Construct a 10-deep nested fallback chain
     //    (depth 10 > cap 8) and verify the resolver doesn't blow
@@ -1480,13 +1479,10 @@ TEST_CASE("WebCompat: StyleSheet attach applies rules to existing elements (issu
     REQUIRE(detached.getWithDefault<bool>(true) == false);
 }
 
-// pulp #1737 (Codex P2 followup #2 on #1773): :root pseudo-class
-// must remain wired in _matchesPseudoClass for stylesheet matching.
-// Codex caught a regression where my earlier removal (intended only
-// for the querySelector path, where :root is unreachable due to
-// _findMatch starting from root._children) silently broke
-// `:root { ... }` style application via StyleSheet._applyTo. CSS
-// token / theme patterns regressed.
+// :root pseudo-class must remain wired in _matchesPseudoClass for
+// stylesheet matching. QuerySelector starts from root._children, but
+// StyleSheet._applyTo needs :root to match the body element so
+// `:root { ... }` token / theme rules apply.
 TEST_CASE("WebCompat: :root pseudo applies stylesheet rules to body element",
           "[webcompat][css-pseudo][issue-1737][issue-1773-followup]") {
     TestEnvironment env;
@@ -1504,12 +1500,11 @@ TEST_CASE("WebCompat: :root pseudo applies stylesheet rules to body element",
     REQUIRE(std::string(applied.getWithDefault<std::string_view>("")) == "7px");
 }
 
-// pulp #1737 (Codex P2 followup #3 on #1779): `:root` must match the
-// actual document root (body), NOT any element with a null parent.
-// Pre-fix the matcher returned true for `!el._parentElement`, which
-// also matched DETACHED elements (createElement before appendChild),
-// leaking `:root { ... }` styles into normal nodes when they were
-// later inserted. Tied to identity check `el === __bodyElement__`.
+// `:root` must match the actual document root (body), NOT any element
+// with a null parent. Matching `!el._parentElement` also matches
+// detached elements (createElement before appendChild), leaking
+// `:root { ... }` styles into normal nodes when they are later
+// inserted. The matcher must use `el === __bodyElement__`.
 TEST_CASE("WebCompat: :root pseudo does not match detached elements",
           "[webcompat][css-pseudo][issue-1737][issue-1779-followup]") {
     TestEnvironment env;
@@ -1549,12 +1544,11 @@ TEST_CASE("WebCompat: :root pseudo does not match detached elements",
 //   - The shape is {value, unit} matching parseCSSLength (so the
 //     56 web-compat-style-decl.js call sites swap 1:1).
 //   - calc-family operands that are all-percent preserve unit='%'
-//     so the bridge routes through the percent path (Codex P2 on
-//     PR #1576 — was misapplying calc(50%) as absolute px).
+//     so the bridge routes through the percent path instead of
+//     misapplying calc(50%) as absolute px.
 //   - Malformed calc-family inputs (`calc()`, `min()`, `max()`,
 //     `clamp()` with empty parens) return null instead of crashing
-//     the engine via infinite recursion in evaluateCalc (Codex P1
-//     on PR #1576).
+//     the engine via infinite recursion in evaluateCalc.
 //   - Defense-in-depth: the inner nested-function regex in
 //     evaluateCalc also requires non-empty operands so a malformed
 //     value reaching evaluateCalc directly doesn't blow the stack.
@@ -1683,10 +1677,10 @@ TEST_CASE("resolveCSSLength: non-calc invalid inputs return null (parseCSSLength
 
 TEST_CASE("resolveCSSLength: signed percentages + whitespace operands preserve unit='%'",
           "[webcompat][css-parser][issue-1576]") {
-    // Codex pre-push tweak — the all-percent shortcut must work for
-    // negative percentages and operand strings that have leading or
-    // trailing whitespace inside the parens. `_splitCalcArgs` already
-    // trims; `bareRe` already accepts `-?` — these tests pin both.
+    // The all-percent shortcut must work for negative percentages and
+    // operand strings that have leading or trailing whitespace inside
+    // the parens. `_splitCalcArgs` already trims; `bareRe` already
+    // accepts `-?` — these tests pin both.
     TestEnvironment env;
     auto eval_pair = [&](const std::string& expr) {
         auto u = std::string(env.engine
@@ -1718,14 +1712,13 @@ TEST_CASE("resolveCSSLength: signed percentages + whitespace operands preserve u
 
 TEST_CASE("resolveCSSLength: mixed-unit calc fallthrough documented (resolves to px, not deferred)",
           "[webcompat][css-parser][issue-1576][fallback-behaviour]") {
-    // Codex pre-push tweak: rather than silently mis-route mixed-unit
-    // calc-family expressions, pin the documented fallback. Pulp has
-    // no deferred-resolution layer (no separate layout pass for CSS
-    // calc), so mixed-unit expressions resolve to px at the JS layer
-    // using the supplied ctx. Consumers who need percent-aware
-    // layout-time calc need a different mechanism; this test pins
-    // the "fall through to px" choice so a future change can't
-    // silently flip it.
+    // Rather than silently mis-route mixed-unit calc-family
+    // expressions, pin the documented fallback. Pulp has no
+    // deferred-resolution layer (no separate layout pass for CSS calc),
+    // so mixed-unit expressions resolve to px at the JS layer using the
+    // supplied ctx. Consumers who need percent-aware layout-time calc
+    // need a different mechanism; this test pins the "fall through to
+    // px" choice so a future change can't silently flip it.
     TestEnvironment env;
     auto eval_pair = [&](const std::string& expr) {
         auto u = std::string(env.engine
@@ -1754,9 +1747,9 @@ TEST_CASE("resolveCSSLength: mixed-unit calc fallthrough documented (resolves to
 
 TEST_CASE("resolveCSSLength: calc-family preserves vh/vw/em/rem/vmin/vmax/ch when all operands share one unit",
           "[webcompat][css-parser][issue-1576][issue-1862]") {
-    // Codex P1 on PR #1862: the percent-only fast path was discarding
-    // unit info for `calc(10vh)` / `min(1em, 2em)` etc., routing them
-    // as plain px through the bridge. Bridge callers like
+    // The single-unit fast path must preserve unit info for
+    // `calc(10vh)` / `min(1em, 2em)` etc. instead of routing them as
+    // plain px through the bridge. Bridge callers like
     //   top/right/bottom/left, fontSize, padding, margin
     // need the original unit to do property-specific conversion. Pin
     // every unit parseCSSLength understands.
@@ -1829,17 +1822,17 @@ TEST_CASE("resolveCSSLength: calc-family preserves vh/vw/em/rem/vmin/vmax/ch whe
     // `ch` is a CSS unit but NOT one parseCSSLength supports — the
     // helper intentionally rejects it so the helper-supported unit
     // set stays aligned with the bare-length parser. Falls through
-    // to evaluateCalc → px (Codex P2 review).
+    // to evaluateCalc → px.
     auto chFall = eval_pair("resolveCSSLength('calc(3ch)')");
     REQUIRE(chFall.first == "px");
 }
 
 TEST_CASE("resolveCSSLength: malformed calc-family operands fall through to px",
           "[webcompat][css-parser][issue-1862]") {
-    // Codex P2 review: the bare-operand regex must not accept
-    // malformed numbers like `.`, `..`, `1.2.3`. Pin the fallthrough
-    // behavior so a future regression can't silently route a NaN as
-    // `{value: NaN, unit: '<unit>'}`.
+    // The bare-operand regex must not accept malformed numbers like
+    // `.`, `..`, `1.2.3`. Pin the fallthrough behavior so a future
+    // regression can't silently route a NaN as `{value: NaN, unit:
+    // '<unit>'}`.
     TestEnvironment env;
     auto eval_pair = [&](const std::string& expr) {
         auto u = std::string(env.engine
@@ -1877,15 +1870,15 @@ TEST_CASE("resolveCSSLength: malformed calc-family operands fall through to px",
 // ─── Tier 2 + catalog-flip closures (2026-05-12) ────────────────────────────
 
 // css/lineClamp + css/webkitLineClamp honest reclass: the `none` keyword
-// is the CSS-spec way to disable line clamping. The JS dispatcher at
-// web-compat-style-decl.js:1791-1794 routes
-// `setLineClamp(id, parseInt(resolved) || 0)`, which turns 'none' into
-// the bridge's disable signal (0). Pin via the REAL dispatcher path
-// (Codex P2 review on PR #1870): mock `setLineClamp` to record calls,
-// then drive `el.style.lineClamp = 'none'` and assert the bridge was
-// called with id=<elementId> and n=0. Asserting only the parseInt
-// arithmetic in isolation would pass even if the dispatcher stopped
-// routing through setLineClamp at all — this test catches that.
+// is the CSS-spec way to disable line clamping. The
+// lineClamp/webkitLineClamp dispatcher case routes `setLineClamp(id,
+// parseInt(resolved) || 0)`, which turns 'none' into the bridge's
+// disable signal (0). Pin via the REAL dispatcher path by mocking
+// `setLineClamp` to record calls, then driving
+// `el.style.lineClamp = 'none'` and asserting the bridge was called
+// with id=<elementId> and n=0. Asserting only the parseInt arithmetic in
+// isolation would pass even if the dispatcher stopped routing through
+// setLineClamp at all — this test catches that.
 TEST_CASE("WebCompat: el.style.lineClamp = 'none' routes through dispatcher to setLineClamp(id, 0)",
           "[webcompat][issue-1552][coverage]") {
     TestEnvironment env;
@@ -1897,7 +1890,7 @@ TEST_CASE("WebCompat: el.style.lineClamp = 'none' routes through dispatcher to s
             globalThis.__lcCalls.push([id, n]);
         };
         // appendChild flips _nativeCreated so _applyProperty actually
-        // dispatches instead of early-returning at line 80.
+        // dispatches instead of taking the unattached-element guard.
         var __lcEl = document.createElement('div');
         document.body.appendChild(__lcEl);
         globalThis.__lcInternalId = __lcEl._id;
@@ -1917,8 +1910,8 @@ TEST_CASE("WebCompat: el.style.lineClamp = 'none' routes through dispatcher to s
     auto noneN = env.engine.evaluate("__lcCalls[0][1]").getWithDefault<double>(-1.0);
     REQUIRE(noneN == 0.0);
 
-    // Same routing for the `-webkit-line-clamp` alias property
-    // (web-compat-style-decl.js:1791-1794 shares the case block).
+    // Same routing for the `-webkit-line-clamp` alias property,
+    // which shares the lineClamp case block.
     env.eval("__lcEl.style.webkitLineClamp = 'none';");
     auto webkitLen = env.engine.evaluate("__lcCalls.length").getWithDefault<double>(-1.0);
     REQUIRE(webkitLen == 2.0);
@@ -1933,12 +1926,10 @@ TEST_CASE("WebCompat: el.style.lineClamp = 'none' routes through dispatcher to s
     REQUIRE(numN == 3.0);
 }
 
-// css/__hover_pseudo honest reclass: :focus and :active pseudo-classes
-// route through the StyleSheet engine's `_applyStyles` switch
-// (web-compat-document.js:68-74). The compat.json notes "not yet wired"
-// is stale — both have been wired since pulp #1149 part-b. Pin the
-// end-to-end path: a real StyleSheet with `:focus` / `:active` rules
-// attaches and the pseudo-setup runs.
+// :focus and :active pseudo-classes route through the StyleSheet
+// pseudo-class dispatch in web-compat-document.js. Pin the end-to-end
+// path: a real StyleSheet with `:focus` / `:active` rules attaches and
+// the pseudo-setup helpers run.
 TEST_CASE("WebCompat: StyleSheet with :focus rule wires _setupPseudoFocus end-to-end",
           "[webcompat][issue-1149][coverage]") {
     TestEnvironment env;

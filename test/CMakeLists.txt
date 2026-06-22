@@ -9,7 +9,7 @@ target_link_libraries(pulp-test-build-check PRIVATE pulp::platform pulp::runtime
 add_test(NAME build-check COMMAND pulp-test-build-check)
 
 if(Python3_Interpreter_FOUND)
-    # Reskinnability ratchet (Phase 2): fail on a NEW hardcoded theme colour.
+    # Reskinnability ratchet: fail on a NEW hardcoded theme colour.
     add_test(NAME token-coverage-ratchet COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/token_coverage_check.py")
 
@@ -18,7 +18,7 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME token-key-correctness COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/token_key_check.py")
 
-    # Phase 6 fidelity harness: pure-Python diff-core self-test (always runs) +
+    # Fidelity harness: pure-Python diff-core self-test (always runs) +
     # the end-to-end gallery visual regression (skips=77 without binary/Pillow).
     add_test(NAME gallery-diff-selftest
         COMMAND ${Python3_EXECUTABLE} -m unittest test_gallery_visual_diff
@@ -135,7 +135,7 @@ set_tests_properties(cmake-fetchcontent-base-dir PROPERTIES
     LABELS "cmake;fetchcontent;windows;issue-4039"
     TIMEOUT 30)
 
-# Install-layout regression for issue-905 follow-up: when the SDK is
+# Install-layout regression for issue #905: when the SDK is
 # installed via `cmake --install`, the Python encoder MUST be bundled
 # alongside PulpUtils.cmake so find_package(Pulp) consumers can call
 # pulp_add_binary_data without seeing a missing-script error. Runs
@@ -156,9 +156,10 @@ set_tests_properties(cmake-pulp-install-layout PROPERTIES
 # PulpAuv3.cmake / PulpPluginFormats.cmake from _PULP_FORMAT_SOURCE_DIR.
 # Without au_view_controller_mac.mm in the installed SDK, downstream
 # pulp_add_plugin(FORMATS AUv3 ...) builds on macOS fail with a
-# missing-source error. Tracked by the Linux/macOS Chainer gap-closure
-# plan (planning/2026-05-24-linux-macos-chainer-gap-closure-plan.md,
-# Phase 0/3).
+# missing-source error. The test keeps the installed SDK's AUv3 helper
+# source layout aligned with the source-tree build.
+# It runs against the staged install tree, not the source checkout, so
+# missing install rules fail before a consumer project sees them.
 add_test(NAME cmake-pulp-install-format-sources
     COMMAND ${CMAKE_COMMAND}
         -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
@@ -269,7 +270,7 @@ if(UNIX)
     set_tests_properties(inject-claude-prefs-hook PROPERTIES TIMEOUT 15)
 endif()
 
-# pulp #2087 (slice 1) — install.sh must install CLI + matching SDK in one
+# pulp #2087 — install.sh must install CLI + matching SDK in one
 # shot, and the closing message must document upgrade/pinning. Without
 # this, fresh-install users silently end up with a current CLI on top of
 # whatever ancient SDK was previously cached at ~/.pulp/sdk/.
@@ -353,7 +354,7 @@ if(UNIX)
         LABELS "android;smoke;manual")
 endif()
 
-# Validation contract tests (Phase 1 — schema and reality snapshot)
+# Validation contract tests — schema and reality snapshot
 add_executable(pulp-test-validation-contract test_validation_contract.cpp)
 target_link_libraries(pulp-test-validation-contract PRIVATE Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-validation-contract)
@@ -1055,7 +1056,7 @@ pulp_add_test_suite(pulp-test-pulp-node-v1
     SOURCES test_pulp_node_v1.cpp
     LIBRARIES pulp::native-components pulp::runtime)
 
-# Phase 7 — signed node-pack loader. Build a real loadable node MODULE and a
+# Signed node-pack loader. Build a real loadable node MODULE and a
 # test that signs its manifest (Ed25519) then verifies trusted load + every
 # rejection path (untrusted/bad-sig/hash-mismatch/abi-mismatch/missing). Desktop
 # only: pulp::host (and dlopen) is compiled out on iOS.
@@ -1091,7 +1092,7 @@ if(PULP_BUILD_NATIVE_COMPONENT_RUST_TESTS AND NOT WIN32)
         SOURCES test_rust_dsp_ffi.cpp native_components/rt_intercept_test_support.cpp
         LIBRARIES pulp::native-components pulp::runtime pulp-noop-rust-core)
 
-    # Phase 2b: a real Rust gain DSP core driven through the C++
+    # Real Rust gain DSP core driven through the C++
     # NativeCoreProcessor adapter — proves native audio end-to-end.
     pulp_add_cargo_staticlib(
         NAME pulp-gain-rust-core
@@ -1102,7 +1103,7 @@ if(PULP_BUILD_NATIVE_COMPONENT_RUST_TESTS AND NOT WIN32)
         SOURCES test_rust_dsp_processor.cpp
         LIBRARIES pulp::format pulp-gain-rust-core)
 
-    # Phase 6: a Rust node implementing the public pulp_node_v1 ABI, proving a C
+    # Rust node implementing the public pulp_node_v1 ABI, proving a C
     # node and a Rust node load through the same contract.
     pulp_add_cargo_staticlib(
         NAME pulp-node-rust
@@ -1127,11 +1128,12 @@ pulp_add_test_suite(pulp-test-frame-fill LIBRARIES pulp::audio)
 # the cross-platform helper that replaced ALSA's hardcoded 0.0 stamps.
 pulp_add_test_suite(pulp-test-midi-monotonic-clock LIBRARIES pulp::midi)
 
-# planning/2026-05-24 gap-doc row "BLE MIDI" — BLE-MIDI 1.0 packet
-# codec + cross-platform BleMidiCentral factory contract. The
+# BLE-MIDI 1.0 packet codec + cross-platform BleMidiCentral factory contract. The
 # CoreBluetooth backend's live discovery / pairing path is exercised
 # manually (requires a real adapter + a paired peripheral); these
 # tests pin the deterministic codec + the stub central behaviour.
+# Keeping the codec tests host-independent lets every CI lane validate
+# timestamp/running-status handling without Bluetooth hardware.
 pulp_add_test_suite(pulp-test-ble-midi LIBRARIES pulp::midi)
 
 # macOS plan 8.1: UmpSession + UmpEndpoint + VirtualUmpEndpoint —
@@ -1172,7 +1174,7 @@ pulp_add_test_suite(pulp-test-aax-model LIBRARIES pulp::format)
 # Appcast/auto-update tests
 pulp_add_test_suite(pulp-test-appcast LIBRARIES pulp::ship)
 
-# Sparkle Ed25519 sign/verify (macOS plan item 7.3)
+# Sparkle Ed25519 sign/verify
 pulp_add_test_suite(pulp-test-sparkle-verify LIBRARIES pulp::ship pulp::runtime)
 
 # Android package/signing tests (host-side fake SDK/toolchain only)
@@ -1209,13 +1211,13 @@ catch_discover_tests(pulp-test-sync PROPERTIES LABELS slow)
 # License and BigInteger tests
 pulp_add_test_suite(pulp-test-license LIBRARIES pulp::runtime pulp-cpp-httplib)
 
-# License v1 -> v2 migration (macOS plan item 7.2)
+# License v1 -> v2 migration
 pulp_add_test_suite(pulp-test-license-migration LIBRARIES pulp::runtime)
 
 # MIDI CI tests
 pulp_add_test_suite(pulp-test-midi-ci LIBRARIES pulp::midi)
 
-# MIDI CI Property Exchange (PE) tests — issue-84, plan item 8.4
+# MIDI CI Property Exchange (PE) tests — issue #84
 pulp_add_test_suite(pulp-test-midi-ci-pe LIBRARIES pulp::midi)
 
 # AU v2 effect adapter MIDI-input tests — guards the 2026-04-22 fix that
@@ -1252,7 +1254,7 @@ if(APPLE AND NOT PULP_IOS AND PULP_HAS_AUSDK)
     catch_discover_tests(pulp-test-au-v2-cocoa-ui)
 endif()
 
-# iOS AVAudioSession bridge (workstream 05 slice 5.2)
+# iOS AVAudioSession bridge
 pulp_add_test_suite(pulp-test-ios-audio-session LIBRARIES pulp::format)
 if(NOT PULP_IOS)
     add_executable(pulp-test-pulp-bridge test_pulp_bridge.cpp)
@@ -1262,20 +1264,20 @@ if(NOT PULP_IOS)
     )
     catch_discover_tests(pulp-test-pulp-bridge)
 endif()
-# ARA scaffolding (workstream 06 slice 6.1)
+# ARA scaffolding
 pulp_add_test_suite(pulp-test-ara LIBRARIES pulp::format)
-# CLAP ARA extension end-to-end (workstream 06 A2a). This suite instantiates
+# CLAP ARA extension end-to-end. This suite instantiates
 # PulpClapPlugin directly, so it must see the same layout as pulp-format's
 # desktop CLAP adapter TU.
 pulp_add_test_suite(pulp-test-clap-ara-extension
     LIBRARIES pulp::format
     COMPILE_DEFINITIONS PULP_CLAP_GUI=1)
-# Processor ARA hook (workstream 06 slice 6.3a)
+# Processor ARA hook
 pulp_add_test_suite(pulp-test-processor-ara-hook LIBRARIES pulp::format)
 # Processor bus-layout validation + processBlock precision contract +
-# latency / tail change notification (workstream 03 items 3.7, 3.8, 3.11).
+# latency / tail change notification.
 pulp_add_test_suite(pulp-test-processor-layout-latency LIBRARIES pulp::format)
-# Item 1.3 AudioPlayHead transport-extension helpers used by every
+# AudioPlayHead transport-extension helpers used by every
 # format adapter (VST3, AU v2 / v3, CLAP) to derive `ProcessContext::bar`
 # and the three change flags (tempo_changed / time_sig_changed /
 # transport_changed) once per block.
@@ -1293,11 +1295,11 @@ target_include_directories(pulp-test-xcode-developer-path PRIVATE
 )
 target_link_libraries(pulp-test-xcode-developer-path PRIVATE Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-xcode-developer-path)
-# TableModel data/sort layer (workstream 07 slice 7.3)
+# TableModel data/sort layer
 pulp_add_test_suite(pulp-test-table-model LIBRARIES pulp::view)
-# ModulationMatrix data model (workstream 07 slice 7.1)
+# ModulationMatrix data model
 pulp_add_test_suite(pulp-test-modulation-matrix LIBRARIES pulp::view)
-# ModulationMatrixWidget canvas widget (workstream 07 slice B5)
+# ModulationMatrixWidget canvas widget
 pulp_add_test_suite(pulp-test-modulation-matrix-widget LIBRARIES pulp::view)
 # Lasso selection overlay
 pulp_add_test_suite(pulp-test-lasso LIBRARIES pulp::view)
@@ -1306,36 +1308,36 @@ pulp_add_test_suite(pulp-test-waveform-recorder LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-design-frame-momentary LIBRARIES pulp::view)
 # Split pane layout widget
 pulp_add_test_suite(pulp-test-split-view LIBRARIES pulp::view)
-# CommandRegistry + KeyMappingEditor (Pulp-native names — planning slice 6.4)
+# CommandRegistry + KeyMappingEditor (Pulp-native names)
 pulp_add_test_suite(pulp-test-command-registry LIBRARIES pulp::view pulp::state)
-# Audio Inspector developer tool window (audio observability harness Phase 6)
+# Audio Inspector developer tool window
 pulp_add_test_suite(pulp-test-audio-inspector-window LIBRARIES pulp::view pulp::audio)
-# PluginDescriptor vendor_url + vendor_email (workstream 01 slice 1.8)
+# PluginDescriptor vendor_url + vendor_email
 pulp_add_test_suite(pulp-test-vendor-url LIBRARIES pulp::format)
-# Image cache + ImageView↔ImageCache wiring (workstream 07 slices 7.4, B4)
+# Image cache + ImageView↔ImageCache wiring
 pulp_add_test_suite(pulp-test-image-cache LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-image-view-cache LIBRARIES pulp::view)
-# Accessibility tree snapshot (workstream 04 slice 4.4)
+# Accessibility tree snapshot
 pulp_add_test_suite(pulp-test-accessibility-tree LIBRARIES pulp::view)
-# Text-accessibility scaffold (font v2 Slice 2.6)
+# Text-accessibility scaffold
 pulp_add_test_suite(pulp-test-text-accessibility LIBRARIES pulp::view)
-# macOS NSAccessibility backend for TextAccessibilityNode (font v2 Slice 2.6 macOS)
+# macOS NSAccessibility backend for TextAccessibilityNode
 if(APPLE AND NOT PULP_IOS)
     add_executable(pulp-test-text-accessibility-macos test_text_accessibility_macos.mm)
     target_link_libraries(pulp-test-text-accessibility-macos
         PRIVATE pulp::view Catch2::Catch2WithMain "-framework AppKit")
     catch_discover_tests(pulp-test-text-accessibility-macos)
 endif()
-# Windows UIA backend (font v2 Slice 2.6) — compile-gated on _WIN32 in the
+# Windows UIA backend — compile-gated on _WIN32 in the
 # source. The sentinel test case keeps the binary present + named
 # consistently on non-Windows hosts so ctest output stays stable.
 pulp_add_test_suite(pulp-test-text-accessibility-windows LIBRARIES pulp::view)
-# Linux AccessKit backend (font v2 Slice 2.6) — compile-gated on
+# Linux AccessKit backend — compile-gated on
 # __linux__ && !__ANDROID__; sentinel on other hosts.
 pulp_add_test_suite(pulp-test-text-accessibility-linux LIBRARIES pulp::view)
-# A/B compare (workstream 07 slice 7.2)
+# A/B compare
 pulp_add_test_suite(pulp-test-ab-compare LIBRARIES pulp::view)
-# ViewSize::aspect_ratio field (workstream 07 slice 7.5b)
+# ViewSize::aspect_ratio field
 pulp_add_test_suite(pulp-test-view-size-aspect LIBRARIES pulp::format)
 
 # pulp #59/#63/#64/#65 — WindowHost::set_design_viewport pure-math
@@ -1380,13 +1382,13 @@ if(APPLE AND NOT PULP_IOS)
 endif()
 target_link_libraries(pulp-test-view-host-bridge PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-view-host-bridge)
-# Scan blacklist (workstream 03 slice 3.3a)
+# Scan blacklist
 add_executable(pulp-test-scan-blacklist test_scan_blacklist.cpp)
 target_link_libraries(pulp-test-scan-blacklist PRIVATE pulp::host Catch2::Catch2WithMain)
 # `slow` (#1589): file-mtime sleep loops (rebuilt-plugin-not-blacklisted
 # flow waits on filesystem timestamp resolution). Each test ~1s.
 catch_discover_tests(pulp-test-scan-blacklist PROPERTIES LABELS slow)
-# Crash-isolated scanner (macOS plan item 4.1). Skipped on iOS/Android
+# Crash-isolated scanner. Skipped on iOS/Android
 # where pulp-scan-worker isn't built (sandboxed platforms can't fork).
 if(NOT IOS AND NOT ANDROID)
     add_executable(pulp-isolated-scanner-crash-helper
@@ -1410,52 +1412,52 @@ if(NOT IOS AND NOT ANDROID)
         pulp-isolated-scanner-crash-helper)
     catch_discover_tests(pulp-test-isolated-scanner)
 endif()
-# Hosted editor API (workstream 03 slice 3.4)
+# Hosted editor API
 pulp_add_test_suite(pulp-test-hosted-editor LIBRARIES pulp::host)
-# HostedEditor → WindowHost attachment migration (item 4.4 macOS plan)
+# HostedEditor → WindowHost attachment migration
 pulp_add_test_suite(pulp-test-hosted-editor-migration LIBRARIES pulp::view pulp::host)
-# CFRunLoop cooperation — plugin-mode MainThreadDispatcher (item 6.4b macOS plan)
+# CFRunLoop cooperation — plugin-mode MainThreadDispatcher
 pulp_add_test_suite(pulp-test-cfrunloop-cooperation LIBRARIES pulp::events)
 if(APPLE)
     target_link_libraries(pulp-test-cfrunloop-cooperation PRIVATE "-framework CoreFoundation")
 endif()
-# High-level window classes (item 6.5 macOS plan)
+# High-level window classes
 pulp_add_test_suite(pulp-test-document-window LIBRARIES pulp::view)
-# Accessibility announcements (workstream 04 slice 4.3)
+# Accessibility announcements
 pulp_add_test_suite(pulp-test-announce LIBRARIES pulp::view)
-# ARA core type layer (workstream 06 slice 6.2)
+# ARA core type layer
 pulp_add_test_suite(pulp-test-ara-types LIBRARIES pulp::format)
-# Processor on_host_transport_changed hook (workstream 01 slice 1.11)
+# Processor on_host_transport_changed hook
 pulp_add_test_suite(pulp-test-transport-hook LIBRARIES pulp::format)
-# Scan cache (workstream 03 slice 3.1)
+# Scan cache
 add_executable(pulp-test-scan-cache test_scan_cache.cpp)
 target_link_libraries(pulp-test-scan-cache PRIVATE pulp::host Catch2::Catch2WithMain)
 # `slow` (#1589): each scenario waits for filesystem mtime resolution
 # (~1s each on every platform). Excluded from PR fast-CI.
 catch_discover_tests(pulp-test-scan-cache PROPERTIES LABELS slow)
-# Processor memory-pressure hook (workstream 05 slice 5.3)
+# Processor memory-pressure hook
 pulp_add_test_suite(pulp-test-memory-pressure LIBRARIES pulp::format)
-# iOS background-audio descriptor flag (workstream 05 slice 5.5)
+# iOS background-audio descriptor flag
 pulp_add_test_suite(pulp-test-ios-background-audio-flag LIBRARIES pulp::format)
 
-# MidiBuffer UMP sidecar (workstream 02 slice 2.6a)
+# MidiBuffer UMP sidecar
 pulp_add_test_suite(pulp-test-midi-buffer-ump LIBRARIES pulp::midi)
-# MidiBuffer SysEx sidecar (workstream 01 — full MIDI vocabulary)
+# MidiBuffer SysEx sidecar — full MIDI vocabulary
 pulp_add_test_suite(pulp-test-midi-buffer-sysex LIBRARIES pulp::midi)
 # Win MIDI MIM_LONGDATA SysEx + QPC timestamps (#19 / #245 partial; cross-platform, Win cases #ifdef _WIN32).
 pulp_add_test_suite(pulp-test-winmidi-sysex LIBRARIES pulp::midi)
 # WinRT MIDI 2.0 (UMP) backend — W3 (UMP↔MIDI1 + shared sysex7 reassembly + F0..F7 framing; WinRT TU opt-in via PULP_HAS_WINRT_MIDI, #error-guarded off non-Windows).
 pulp_add_test_suite(pulp-test-winrt-midi LIBRARIES pulp::midi)
-# Accessibility provider cross-platform entry (workstream 04 slices 4.1 + 4.2)
+# Accessibility provider cross-platform entry
 pulp_add_test_suite(pulp-test-accessibility-provider LIBRARIES pulp::view)
-# PluginDescriptor validation (workstream 01 slice 1.9)
+# PluginDescriptor validation
 pulp_add_test_suite(pulp-test-descriptor-validation LIBRARIES pulp::format)
-# PluginInfo metadata shape (workstream 03 slice 3.7)
+# PluginInfo metadata shape
 pulp_add_test_suite(pulp-test-plugin-info-metadata LIBRARIES pulp::host)
-# A11y role mapping tables — UIA (slice 4.1a) + AT-SPI (slice L7a-2)
+# A11y role mapping tables — UIA + AT-SPI
 pulp_add_test_suite(pulp-test-uia-mapping LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-atspi-mapping LIBRARIES pulp::view)
-# AudioSystem hotplug base plumbing (workstream 02 slice 2.7)
+# AudioSystem hotplug base plumbing
 pulp_add_test_suite(pulp-test-audio-system-hotplug LIBRARIES pulp::audio)
 
 # WASAPI capture path (#243). Windows-only; cross-platform stub keeps
@@ -4291,25 +4293,25 @@ catch_discover_tests(pulp-test-canvas-emoji)
 # SDF glyph atlas exploration (#76)
 pulp_add_test_suite(pulp-test-sdf-atlas LIBRARIES pulp::canvas)
 
-# MSDF glyph atlas (Phase 2 scaffold)
+# MSDF glyph atlas
 pulp_add_test_suite(pulp-test-msdf-atlas LIBRARIES pulp::canvas)
 
-# PSDF glyph atlas + vector-fallback (Phase 3 scaffold)
+# PSDF glyph atlas + vector fallback
 pulp_add_test_suite(pulp-test-psdf-atlas LIBRARIES pulp::canvas)
 
 # Shared SDF/MSDF text helpers (pen snap + build_text_quads + fill_text_*)
 pulp_add_test_suite(pulp-test-sdf-text LIBRARIES pulp::canvas)
 
-# SDF effects layer (Phase 4 — host-side API + presets)
+# SDF effects layer — host-side API + presets
 pulp_add_test_suite(pulp-test-sdf-effects LIBRARIES pulp::canvas)
 
-# Runtime SDF atlas cache (Phase 5 — LRU + frame-based eviction)
+# Runtime SDF atlas cache — LRU + frame-based eviction
 pulp_add_test_suite(pulp-test-sdf-atlas-cache LIBRARIES pulp::canvas)
 
 # Software SDF renderer (end-to-end headless raster)
 pulp_add_test_suite(pulp-test-sdf-software-renderer LIBRARIES pulp::canvas)
 
-# Runtime path → SDF conversion (Phase 5 — on-device SDF generation)
+# Runtime path → SDF conversion — on-device SDF generation
 pulp_add_test_suite(pulp-test-path-to-sdf LIBRARIES pulp::canvas)
 
 # View and layout tests
@@ -4358,7 +4360,7 @@ target_include_directories(pulp-test-gpu-graph PRIVATE
 target_link_libraries(pulp-test-gpu-graph PRIVATE Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-gpu-graph)
 
-# Phase 6.5: Dawn GPU timestamp queries. The pure tick->ms resolution
+# Dawn GPU timestamp queries. The pure tick->ms resolution
 # math plus the CPU-only GpuTimestamps stub compile without a GPU link,
 # so this builds the gpu_timestamps.cpp translation unit directly (it
 # falls back to the no-op stub when PULP_HAS_SKIA is undefined). Live-
@@ -4428,7 +4430,7 @@ if(PULP_ENABLE_GPU)
     target_link_libraries(pulp-test-rendering-integration PRIVATE pulp::view pulp::render pulp::state Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-rendering-integration)
 
-    # Slice 16 — WindowHost::mark_dirty() VBlank-locked safe-repaint routing.
+    # WindowHost::mark_dirty() VBlank-locked safe-repaint routing.
     # Needs both pulp::view (mark_dirty / attach_render_loop) and
     # pulp::render (RenderLoop factory), so it gates on PULP_ENABLE_GPU.
     add_executable(pulp-test-window-host-repaint test_window_host_repaint.cpp)
@@ -4456,7 +4458,7 @@ pulp_add_test_suite(pulp-test-sprite-strip LIBRARIES pulp::view)
 # Edit history (global undo) tests
 pulp_add_test_suite(pulp-test-edit-history LIBRARIES pulp::state)
 
-# macOS plan Batch P — HostQuirks scaffolding + HostVersion detection
+# HostQuirks scaffolding + HostVersion detection
 pulp_add_test_suite(pulp-test-host-version LIBRARIES pulp::format)
 pulp_add_test_suite(pulp-test-host-quirks LIBRARIES pulp::format)
 
@@ -4474,52 +4476,51 @@ if(Python3_Interpreter_FOUND)
         TIMEOUT 30)
 endif()
 
-# macOS plan Batch B (partial: mixers) — DryWetMixer + Panner pan laws
+# DryWetMixer + Panner pan laws
 pulp_add_test_suite(pulp-test-pan-mix-laws LIBRARIES pulp::signal)
 
-# macOS plan Batch E (partial) — UMP per-note + JR Clock
+# UMP per-note + JR Clock
 pulp_add_test_suite(pulp-test-ump-extensions LIBRARIES pulp::midi)
 
-# macOS plan Batch D (partial) — HMAC + AEAD primitives
+# HMAC + AEAD primitives
 pulp_add_test_suite(pulp-test-hmac-aead LIBRARIES pulp::runtime)
 
-# macOS plan Batch G (partial) — Compressor sidechain HPF + lookahead
+# Compressor sidechain HPF + lookahead
 pulp_add_test_suite(pulp-test-compressor-sidechain LIBRARIES pulp::signal)
 
-# macOS plan Batch R — ARA scaffold validation
+# ARA scaffold validation
 pulp_add_test_suite(pulp-test-ara-scaffold LIBRARIES pulp::format)
 
-# macOS plan Batch E remainder — MIDI 1.0 backend audit (item 8.6)
+# MIDI 1.0 backend audit
 pulp_add_test_suite(pulp-test-midi1-backend-audit LIBRARIES pulp::midi)
 
-# macOS plan Batch C — BufferOps SIMD helpers (item 1.6)
+# BufferOps SIMD helpers
 pulp_add_test_suite(pulp-test-buffer-ops LIBRARIES pulp::audio pulp::runtime)
 
-# macOS plan Batch E remainder — MpeVoiceTracker per-note management +
-# assignable PNC consumption (item 8.5b)
+# MpeVoiceTracker per-note management + assignable PNC consumption
 pulp_add_test_suite(pulp-test-mpe-tracker-per-note-management LIBRARIES pulp::midi)
 
-# macOS plan Batch G — Wavetable oscillator (item 2.6)
+# Wavetable oscillator
 pulp_add_test_suite(pulp-test-wavetable LIBRARIES pulp::signal)
 
-# macOS plan Batch C — Resampler (item 1.7)
+# Resampler
 pulp_add_test_suite(pulp-test-resampler LIBRARIES pulp::signal)
 
-# macOS plan Batch B — Polyphase IIR half-band filter (item 2.2)
+# Polyphase IIR half-band filter
 pulp_add_test_suite(pulp-test-halfband-iir LIBRARIES pulp::signal)
 
-# macOS plan Batch G — Generic Synthesiser polyphony (item 2.5)
+# Generic Synthesiser polyphony
 pulp_add_test_suite(pulp-test-synthesiser
     SOURCES test_synthesiser.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::midi)
 
-# macOS plan Batch C — SampleConverter (item 1.5)
+# SampleConverter
 pulp_add_test_suite(pulp-test-sample-converter LIBRARIES pulp::audio)
 
-# macOS plan Batch C — AudioSource hierarchy (item 1.8)
+# AudioSource hierarchy
 pulp_add_test_suite(pulp-test-audio-source LIBRARIES pulp::audio)
 
-# macOS plan Batch A — Foundations
+# Foundation DSP/runtime/state tests
 pulp_add_test_suite(pulp-test-dc-blocker LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-denormal LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-normalisable-range LIBRARIES pulp::state)
@@ -5974,14 +5975,14 @@ pulp_add_test_suite(pulp-test-style-pack LIBRARIES pulp::view)
 # stubs for design-tool C++ classes that never shipped. The design tool
 # landed as JS via core/view/js/web-compat* and widget_bridge's
 # applyTokenDiff JS binding; there is no C++ surface to verify here.
-# Removed in PR #290/#357 follow-up; file a new focused test if a C++
+# File a new focused test if a C++
 # token-diff or Showcase class is ever added.
 
-# WindowManager multi-window framework tests (Phase 6)
+# WindowManager multi-window framework tests
 pulp_add_test_suite(pulp-test-window-manager LIBRARIES pulp::view)
 
 # Multi-window rendering fairness + per-window RenderLoop isolation
-# (planning §6.6 — macOS-plan item 6.6). Mirrors pulp-test-render-loop:
+# Mirrors pulp-test-render-loop:
 # compiles render_loop.cpp directly with PULP_RENDER_LOOP_FORCE_TIMER=1 so
 # the test runs headlessly on every host (GPU off / no native vsync source).
 add_executable(pulp-test-multi-window
@@ -5998,7 +5999,7 @@ target_link_libraries(pulp-test-multi-window PRIVATE
     Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-multi-window)
 
-# ── Phase 9: Theme management, widgets, asset system ────────────────────────
+# ── Theme management, widgets, asset system ─────────────────────────────────
 
 # Theme contrast utilities (WCAG AA)
 pulp_add_test_suite(pulp-test-theme-contrast LIBRARIES pulp::view)
@@ -6009,16 +6010,16 @@ pulp_add_test_suite(pulp-test-theme-presets LIBRARIES pulp::view)
 # Button widgets — theme-token wiring + rgba()-clamp bug-fix regression guard
 pulp_add_test_suite(pulp-test-buttons LIBRARIES pulp::view)
 
-# Gap widgets (Phase 4) — Badge/Banner/Toast/EmptyState/Stepper/Pan/Popover/Dialog/ChannelStrip
+# Gap widgets — Badge/Banner/Toast/EmptyState/Stepper/Pan/Popover/Dialog/ChannelStrip
 pulp_add_test_suite(pulp-test-gap-widgets LIBRARIES pulp::view)
 
-# Widget gallery (Phase 5) — themed board of every primitive; builds + renders
+# Widget gallery — themed board of every primitive; builds + renders
 pulp_add_test_suite(pulp-test-widget-gallery LIBRARIES pulp::view)
 
-# Design system (Phase 8a) — pulp::design umbrella module + component catalog
+# Design system — pulp::design umbrella module + component catalog
 pulp_add_test_suite(pulp-test-design-system LIBRARIES pulp::view)
 
-# Sampler starter (Phase 8d) — real sampler UI built from the design catalog
+# Sampler starter — real sampler UI built from the design catalog
 pulp_add_test_suite(pulp-test-sampler-starter LIBRARIES pulp::view)
 
 # Design-system interaction — verifies the widgets are wired (knob moves, etc.)
@@ -6041,18 +6042,19 @@ pulp_add_test_suite(pulp-test-view-layout-widgets LIBRARIES pulp::view)
 # Asset manager and resource system
 pulp_add_test_suite(pulp-test-asset-manager LIBRARIES pulp::view)
 
-# Web-compat test suite (Phase 6: CSS parsing, layout, events, visual regression)
+# Web-compat test suite — CSS parsing, layout, events, visual regression
 add_subdirectory(web-compat)
 
-# ── Zero-copy benchmark (Slice 0 of #516) ──────────────────────────────────
+# ── Zero-copy benchmark ─────────────────────────────────────────────────────
 #
 # Tooling-only tests, gated on PULP_BENCHMARK. The perf-counter unit
 # test links pulp::render, which is only added to the build when
 # PULP_ENABLE_GPU=ON (see root CMakeLists.txt). Gating the test on the
 # render target's presence lets -DPULP_BENCHMARK=ON -DPULP_ENABLE_GPU=OFF
-# configure cleanly without a missing-target error (Codex P2 on PR #526
-# / #500). The integration test shell-outs to pulp-ui-preview which is
-# currently Apple-desktop-only (same guard as the target).
+# configure cleanly without a missing-target error. The integration
+# test shell-outs to pulp-ui-preview which is currently
+# Apple-desktop-only (same guard as the target).
+# Benchmark coverage remains opt-in so normal test builds stay cheap.
 if(PULP_BENCHMARK AND TARGET pulp-render)
     add_executable(pulp-test-bench-perf-counters test_bench_perf_counters.cpp)
     target_link_libraries(pulp-test-bench-perf-counters PRIVATE
@@ -6078,12 +6080,10 @@ endif()
 # paint_scene, mouse-coordinate inverse mapping, resize → contentsScale)
 # that today are structurally untestable from plain Catch2.
 #
-# Phase B-1 (this PR): ships the harness scaffold + a smoke test proving
-#   the hidden window / capture_back_buffer_png contract.
-# Phase B-2 (next PR): migrates one PR-#1984 invariant as the first real
-#   consumer, and adds simulate_mouse exercise.
-#
-# Plan: planning/2026-05-14-mac-platform-test-harness.md (planning sub).
+# Covers the hidden window / capture_back_buffer_png contract plus
+# synthetic mouse, wheel, and context-menu consumers.
+# The target is macOS+Skia-only because it drives real NSWindow and
+# CAMetalLayer objects rather than a mock platform backend.
 if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA)
     add_executable(pulp-test-mac-platform-harness
         test_mac_platform_harness.cpp

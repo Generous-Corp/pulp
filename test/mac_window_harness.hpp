@@ -11,18 +11,15 @@
 ///   2. synthesize AppKit mouse events against its real content view,
 ///   3. read deterministic back-buffer PNG bytes.
 ///
-/// The harness lives in `test/` only — never installed into the SDK. The
-/// production seam it depends on (`WindowHost::capture_back_buffer_png`)
-/// is the only public API addition.
+/// The harness lives in `test/` only — never installed into the SDK. Its
+/// primary production seam is `WindowHost::capture_back_buffer_png`.
 ///
-/// First customer (Phase B-1, this PR): a smoke test that proves the
-/// harness can construct a hidden GPU window and the back-buffer capture
-/// path returns non-empty bytes. Phase B-2 will migrate one PR-#1984
-/// invariant (e.g. set_design_viewport overlay-inside-transform) to the
-/// harness as the first "real" consumer.
+/// Current consumers cover hidden GPU-window construction, back-buffer
+/// PNG capture, and synthetic mouse/wheel/context-menu routing through
+/// the real AppKit content view.
 ///
-/// Plan: planning/2026-05-14-mac-platform-test-harness.md (planning
-/// submodule).
+/// Planning context lives in
+/// planning/2026-05-14-mac-platform-test-harness.md.
 
 #include <pulp/view/input_events.hpp>
 #include <pulp/view/window_host.hpp>
