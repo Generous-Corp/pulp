@@ -1,6 +1,7 @@
 #include <pulp/state/preset_manager.hpp>
 #include <pulp/state/content_registry.hpp>
 #include <pulp/runtime/system.hpp>
+#include <choc/text/choc_JSON.h>
 #include <fstream>
 #include <sstream>
 #include <algorithm>
@@ -88,27 +89,55 @@ bool PresetManager::save(const std::string& name, const std::string& folder) {
 
     auto path = dir / (name + ".json");
 
-    // Serialize state
-    auto state_data = store_.serialize();
-
-    // Write JSON preset file
-    std::ofstream f(path);
-    if (!f.is_open()) return false;
-
-    f << "{\n";
-    f << "  \"name\": \"" << name << "\",\n";
-    f << "  \"manufacturer\": \"" << manufacturer_ << "\",\n";
-    f << "  \"plugin\": \"" << plugin_name_ << "\",\n";
-    f << "  \"version\": " << store_.state_version() << ",\n";
-    f << "  \"parameters\": {";
+    // Serialize the preset into a buffer first so the file can be written
+    // atomically below. Metadata strings are emitted through choc's JSON string
+    // escaper so a name / manufacturer / plugin containing a quote, backslash,
+    // or control character can never produce a corrupt (unparseable) file.
+    // Parameter-name keys are left raw to stay compatible with load()'s
+    // raw-key string scan.
+    std::ostringstream out;
+    out << "{\n";
+    out << "  \"name\": " << choc::json::getEscapedQuotedString(name) << ",\n";
+    out << "  \"manufacturer\": " << choc::json::getEscapedQuotedString(manufacturer_) << ",\n";
+    out << "  \"plugin\": " << choc::json::getEscapedQuotedString(plugin_name_) << ",\n";
+    out << "  \"version\": " << store_.state_version() << ",\n";
+    out << "  \"parameters\": {";
 
     auto params = store_.all_params();
     for (size_t i = 0; i < params.size(); ++i) {
-        if (i > 0) f << ",";
-        f << "\n    \"" << params[i].name << "\": " << store_.get_value(params[i].id);
+        if (i > 0) out << ",";
+        out << "\n    \"" << params[i].name << "\": " << store_.get_value(params[i].id);
     }
-    f << "\n  }\n";
-    f << "}\n";
+    out << "\n  }\n";
+    out << "}\n";
+    const std::string body = out.str();
+
+    // Atomic write: stage to a sibling temp file, fully flush it, then rename it
+    // onto the destination. A crash / power loss / full disk mid-write therefore
+    // leaves any previously-saved preset intact instead of truncating it.
+    // Mirrors PropertiesFile::save_to and the skp_capture / audio_thumbnail_cache
+    // temp-then-rename convention.
+    fs::path tmp = path;
+    tmp += ".tmp";
+    {
+        std::ofstream f(tmp);
+        if (!f.is_open()) return false;
+        f << body;
+        f.flush();
+        if (!f.good()) {
+            f.close();
+            std::error_code ec;
+            fs::remove(tmp, ec);
+            return false;
+        }
+    }
+    std::error_code ec;
+    fs::rename(tmp, path, ec);
+    if (ec) {
+        std::error_code rm_ec;
+        fs::remove(tmp, rm_ec);
+        return false;
+    }
 
     current_name_ = name;
     unsaved_changes_ = false;
