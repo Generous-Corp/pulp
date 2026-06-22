@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v04595"></a>
+## [0.459.5] - 2026-06-22
+
+- fix(state): make PresetManager save atomic and JSON-safe ([#4493](https://github.com/danielraffel/pulp/pull/4493))
+- docs(web): correct experimental plugin target docs ([#4492](https://github.com/danielraffel/pulp/pull/4492))
+
 <a id="v04594"></a>
 ## [0.459.4] - 2026-06-22
 
@@ -4734,6 +4740,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.459.5]: https://github.com/danielraffel/pulp/releases/tag/v0.459.5
 [0.459.4]: https://github.com/danielraffel/pulp/releases/tag/v0.459.4
 [0.459.3]: https://github.com/danielraffel/pulp/releases/tag/v0.459.3
 [0.459.2]: https://github.com/danielraffel/pulp/releases/tag/v0.459.2
