@@ -1,14 +1,10 @@
-// test_cli_shellout_lifecycle.cpp — extracted from test_cli_shellout.cpp
-// in the 2026-05 Phase 5 P5-4 follow-up refactor.
-//
 // CLI lifecycle-command shell-out tests — pulp doctor, pulp dev,
 // pulp design, pulp sdk, pulp upgrade. All five commands sit in the
 // "lifecycle / diagnostics" surface of the CLI: they help users
 // inspect and maintain their dev environment rather than building or
-// shipping a plugin. Bundling them keeps the parent TU under the
-// < 2,000-line P5-4 target while preserving their shared shell-out
-// contract (PULP_HOME tmpdir + binary_exists guard + ProcessResult
-// stdout/exit_code assertions).
+// shipping a plugin. They share the shell-out contract: PULP_HOME
+// tmpdir, binary_exists guard, and ProcessResult stdout/exit_code
+// assertions.
 
 #include "test_cli_shellout_helpers.hpp"
 

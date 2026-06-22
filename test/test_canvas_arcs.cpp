@@ -1,6 +1,3 @@
-// test_canvas_arcs.cpp — extracted from test_canvas.cpp in the
-// 2026-05 Phase 5 (P5-2 follow-up) refactor.
-//
 // pulp #1521 — native arc / arcTo / ellipse / roundRect cluster.
 //
 // Two contiguous sub-clusters under the same arc/path-primitive

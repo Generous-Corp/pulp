@@ -1,13 +1,11 @@
-// test_cli_shellout_helpers.hpp — shared helpers for the test_cli_shellout
-// suite and its sibling TUs extracted in the Phase 5 P5-4 refactor.
+// Shared helpers for the test_cli_shellout suite and its sibling TUs.
 //
 // Per CLAUDE.md: shell-out CLI tests assert exit code + stderr content
 // against the built binary. These helpers wrap the platform-specific
 // env-var / process / path plumbing every shell-out test repeats.
 //
 // Helpers are header-inline so each translation unit can include this
-// without ODR issues. They were previously living in an anonymous
-// namespace inside test_cli_shellout.cpp.
+// without ODR issues.
 
 #pragma once
 

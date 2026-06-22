@@ -1,14 +1,11 @@
-// test_canvas2d_shim_late.cpp — extracted from test_canvas2d_shim.cpp
-// in the 2026-05 Phase 5 (P5-2 follow-up) refactor.
-//
-// Post-Wave-2 Canvas2D shim coverage. Each cluster pins runtime path
-// for entries that landed under specific issues:
+// Canvas2D shim coverage. Each cluster pins runtime paths for entries
+// that landed under specific issues:
 //
 //   * #1525 — fillText / strokeText maxWidth + glyph cluster handling
 //   * #1521 — arc-as-path cluster (DIVERGE → PASS)
 //   * #1520 — ctx.direction / ctx.filter
 //   * #1526 — catalog hygiene round-trip for already-supported properties
-//   * Wave 4 c2d cleanup — lineDashOffset re-flushes on assignment
+//   * lineDashOffset re-flushes on assignment
 //   * #1527 — getTransform / resetTransform + isPointInPath / isPointInStroke
 
 #include <catch2/catch_test_macros.hpp>
@@ -35,10 +32,8 @@ using namespace pulp::view;
 using namespace pulp::state;
 
 // Local copies of run_in_bridge + ScriptedBridge — file-static in the
-// parent test_canvas2d_shim.cpp. Duplicated here per the extracted-TU
-// pattern. Updating one without the other is a documented gotcha; this
-// is the same trade-off the canvas2d-wave2 + svg + other widget-bridge
-// splits already accept.
+// parent test_canvas2d_shim.cpp. Updating one without the other is a
+// documented gotcha.
 namespace {
 
 std::string run_in_bridge(const std::string& js) {
@@ -776,13 +771,11 @@ TEST_CASE("Canvas2D direction + filter cache invalidates on save/restore",
 //
 // Ten entries — globalAlpha, lineCap, lineJoin, lineDashOffset,
 // textAlign, textBaseline, globalCompositeOperation, quadraticCurveTo,
-// bezierCurveTo, arc — were cataloged in PR #1366 / wired in PR #1348 /
-// fanned out across #1480 (line cap/join paint plumbing) and the pre-
-// existing FilterBank repro suite. Their bridge-side coverage is split
-// across the issue-964 cases above, but no single test exercises the
-// 10-as-a-set as the catalog claims. This test pins each one's full
-// round-trip through the JS shim → bridge → CanvasWidget command stream
-// so a regression in any of them surfaces directly under [issue-1526].
+// bezierCurveTo, arc — have bridge-side coverage split across the
+// issue-964 cases above, but no single test exercises the 10-as-a-set
+// as the catalog claims. This test pins each one's full round-trip
+// through the JS shim → bridge → CanvasWidget command stream so a
+// regression in any of them surfaces directly under [issue-1526].
 TEST_CASE("Canvas2D shim flushes the 10-entry catalog set to the bridge",
           "[view][canvas2d][issue-1526]") {
     ScriptedBridge env;
@@ -969,17 +962,17 @@ TEST_CASE("Canvas2D shim getter round-trip for the 10-entry catalog set",
         "methods-ok");
 }
 
-// ── Wave 4 c2d cleanup — lineDashOffset re-flushes on assignment ─────────
+// ── lineDashOffset re-flushes on assignment ─────────────────────────────
 //
 // HTML5 spec: ctx.lineDashOffset is a sticky phase property; assigning to
 // it must shift the dash phase on subsequent strokes without requiring a
-// redundant setLineDash call. Pre-Wave-4 the field was tracked locally
-// but only sent on the next setLineDash, so phase mutations between
-// draws were silently dropped.
+// redundant setLineDash call. The field used to be tracked locally but
+// only sent on the next setLineDash, so phase mutations between draws
+// were silently dropped.
 //
-// Wave 4 converted lineDashOffset to an Object.defineProperty getter/
-// setter pair: the setter re-pushes the active dash pattern via
-// canvasSetLineDash with the new phase. Verify that:
+// lineDashOffset now uses an Object.defineProperty getter/setter pair:
+// the setter re-pushes the active dash pattern via canvasSetLineDash
+// with the new phase. Verify that:
 //   1. The default (lineDashOffset=0) reads back as 0.
 //   2. Assigning a new value with a pattern in place re-pushes
 //      canvasSetLineDash with the new phase.

@@ -1,7 +1,4 @@
-// test_widget_bridge_html_aria.cpp — extracted from test_widget_bridge.cpp
-// in the 2026-05 Phase 5 (P5-1 follow-up) refactor.
-//
-// Wave 3 html bundle — two coherent compat surfaces:
+// HTML compatibility bundle — two coherent surfaces:
 //
 //   1. ARIA attribute routing (#1476 / html.2). aria-label and role
 //      attributes flow through the html-compat shim into View's
@@ -40,11 +37,11 @@ using namespace pulp::view;
 using namespace pulp::state;
 using Catch::Matchers::WithinAbs;
 
-// ── pulp Wave 3 html bundle (ARIA + querySelector) ─────────────────────
+// ── HTML bundle (ARIA + querySelector) ──────────────────────────────────
 //
-// Wave 3 html.2 / #1476: aria-label / role attributes flow through the
+// pulp #1476: aria-label / role attributes flow through the
 // html-compat shim into View::access_label_ / View::access_role_ slots
-// that the macOS NSAccessibility bridge already consumes.  Wave 3 html.3:
+// that the macOS NSAccessibility bridge already consumes.
 // document.querySelector accepts attribute selectors, compound selectors,
 // and descendant / child combinators in addition to the previously
 // supported tag/.class/#id forms.

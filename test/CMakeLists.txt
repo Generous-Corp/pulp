@@ -4203,13 +4203,12 @@ target_compile_definitions(pulp-test-canvas PRIVATE
     "PULP_TEST_FONT_PATH=\"${CMAKE_SOURCE_DIR}/external/fonts/Inter-Regular.ttf\"")
 catch_discover_tests(pulp-test-canvas)
 
-# Canvas CG-paths tests (P5-2 follow-up — extracted from test_canvas.cpp,
-# 2026-05). Apple-only TU covering pulp #943 / #933 concat_transform,
-# pulp #1322 Canvas2D path API (fill + curves + stroke + gradients),
-# fill_rect / fill_path with active gradient, pulp #1368 save/restore
-# tracking, and pulp #1322 BlendMode every-value round-trip. Companion
-# to test_canvas_cg_gradients.cpp; the non-Apple parts stay in
-# test_canvas.cpp.
+# Canvas CG-paths tests. Apple-only TU covering pulp #943 / #933
+# concat_transform, pulp #1322 Canvas2D path API (fill + curves +
+# stroke + gradients), fill_rect / fill_path with active gradient,
+# pulp #1368 save/restore tracking, and pulp #1322 BlendMode
+# every-value round-trip. Companion to test_canvas_cg_gradients.cpp;
+# the non-Apple parts stay in test_canvas.cpp.
 add_executable(pulp-test-canvas-cg-paths test_canvas_cg_paths.cpp)
 target_link_libraries(pulp-test-canvas-cg-paths PRIVATE pulp::canvas Catch2::Catch2WithMain)
 if(APPLE)
@@ -4217,11 +4216,10 @@ if(APPLE)
 endif()
 catch_discover_tests(pulp-test-canvas-cg-paths)
 
-# Canvas font tests (P5-2 first cut — extracted from test_canvas.cpp).
-# Covers pulp #932 (bundled-font registration via match_bundled_typeface)
-# + pulp #1150 (public register_font(path) API). Shares the
-# PULP_TEST_FONT_PATH compile def so test fixtures find the bundled
-# Inter-Regular.ttf regardless of CWD.
+# Canvas font tests. Covers pulp #932 (bundled-font registration via
+# match_bundled_typeface) + pulp #1150 (public register_font(path)
+# API). Shares the PULP_TEST_FONT_PATH compile def so test fixtures find
+# the bundled Inter-Regular.ttf regardless of CWD.
 add_executable(pulp-test-canvas-fonts test_canvas_fonts.cpp)
 target_link_libraries(pulp-test-canvas-fonts PRIVATE pulp::canvas Catch2::Catch2WithMain)
 # pulp::canvas exports PULP_HAS_SKIA=1 as a PUBLIC compile def when Skia
@@ -4240,11 +4238,11 @@ target_compile_definitions(pulp-test-canvas-fonts PRIVATE
     "PULP_TEST_VARIABLE_FONT_PATH=\"${CMAKE_SOURCE_DIR}/external/fonts/FunnelDisplay-VariableFont_wght.ttf\"")
 catch_discover_tests(pulp-test-canvas-fonts)
 
-# CG-degraded gradient + pattern cluster (P5-2 follow-up — extracted from
-# test_canvas.cpp). Apple-only TU: every TEST_CASE drives CoreGraphics
-# directly to prove the CoreGraphicsCanvas fallback honours the canvas2d
-# spec (pulp #1524) — conic / two-circle radial / pattern + gradient-
-# anchored fill/stroke text + line-dash CG paths.
+# CG-degraded gradient + pattern cluster. Apple-only TU: every
+# TEST_CASE drives CoreGraphics directly to prove the CoreGraphicsCanvas
+# fallback honours the canvas2d spec (pulp #1524) — conic / two-circle
+# radial / pattern + gradient-anchored fill/stroke text + line-dash CG
+# paths.
 add_executable(pulp-test-canvas-cg-gradients test_canvas_cg_gradients.cpp)
 target_link_libraries(pulp-test-canvas-cg-gradients PRIVATE pulp::canvas Catch2::Catch2WithMain)
 if(PULP_HAS_SKIA)
@@ -4265,11 +4263,10 @@ if(PULP_HAS_SKIA)
 endif()
 catch_discover_tests(pulp-test-canvas-filter-chain)
 
-# Canvas arcs / path-primitive Skia rasterization fixtures (P5-2
-# follow-up — extracted from test_canvas.cpp). pulp #1521 native
-# arc / arcTo / ellipse / roundRect cluster: RecordingCanvas captures
-# of native primitives + Skia rasterization fixtures (full / half
-# circle arc matches reference SkPath::arcTo, arc_to collinear
+# Canvas arcs / path-primitive Skia rasterization fixtures. pulp #1521
+# native arc / arcTo / ellipse / roundRect cluster: RecordingCanvas
+# captures of native primitives + Skia rasterization fixtures (full /
+# half circle arc matches reference SkPath::arcTo, arc_to collinear
 # lineTos, round_rect 4-corner radii, ellipse rotation contour
 # continuity).
 add_executable(pulp-test-canvas-arcs test_canvas_arcs.cpp)
@@ -4592,9 +4589,8 @@ if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
     catch_discover_tests(pulp-test-inspector
         PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
 
-    # Inspector test split (Phase-5 oversized-test-file refactor): four
-    # concern-scoped sibling TUs carved verbatim out of test_inspector.cpp
-    # — GPU pass attribution, source-jump, drift/reconcile, atlas viewer.
+    # Inspector sibling TUs: GPU pass attribution, source-jump,
+    # drift/reconcile, and atlas viewer.
     # Each mirrors pulp-test-inspector's exact registration (own executable
     # + catch_discover_tests, same libraries, same NO_LAUNCH env guard).
     add_executable(pulp-test-inspector-gpu-passes test_inspector_gpu_passes.cpp)
@@ -4635,9 +4631,8 @@ if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
             PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
     endif()
 
-    # P11-5 (#2647): three more concern-scoped sibling TUs carved verbatim out
-    # of test_inspector.cpp to bring the 3,126-line parent under the 2,000-line
-    # target (now 1,859). Same registration as pulp-test-inspector.
+    # Additional inspector sibling TUs (#2647). Same registration as
+    # pulp-test-inspector.
     add_executable(pulp-test-inspector-domains test_inspector_domains.cpp)
     target_link_libraries(pulp-test-inspector-domains PRIVATE pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-inspector-domains
@@ -4696,43 +4691,39 @@ pulp_add_test_suite(pulp-test-widget-bridge-api-contracts
 pulp_add_test_suite(pulp-test-widget-bridge-no-gpu-gates
     COMPILE_DEFINITIONS PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 
-# Widget bridge — runtime-import handlers (pulp #468 follow-up).
-# Split out of test_widget_bridge.cpp in the Phase 5 P5-1 first cut so
-# the 14k-line god-test file shrinks toward per-surface modules.
+# Widget bridge — runtime-import handlers (pulp #468).
 pulp_add_test_suite(pulp-test-widget-bridge-runtime-import LIBRARIES pulp::view)
 
-# Widget bridge — Canvas2D surface (P5-1 continuation).
-# Covers canvasSetTransform / canvasClip / canvasGlobalCompositeOperation
-# (issue-896), canvasMeasureText / canvasSetLineDash / canvasDrawImage /
+# Widget bridge — Canvas2D surface. Covers canvasSetTransform /
+# canvasClip / canvasGlobalCompositeOperation (issue-896),
+# canvasMeasureText / canvasSetLineDash / canvasDrawImage /
 # canvasGetImageData / canvasPutImageData (issue-916), and pulp #1899 /
 # #1901 4-arg canvasFillText prior-state preservation.
 pulp_add_test_suite(pulp-test-widget-bridge-canvas2d LIBRARIES pulp::view)
 
-# Widget bridge — Yoga layer (P5-1 follow-up). Three coherent clusters:
-# (1) pulp #1434 rn-batch-C dimension percent strings (width/height +
-# min/max via Yoga's percent API), (2) pulp #1545 flexBasis%
-# promotion (basis "NN%" + "flex 1 1 NN%" decomposition), (3) pulp
-# #1434 rn-batch-B yoga value-aliasing (flexDirection /
-# justifyContent / alignItems / alignSelf / order / flexWrap value
-# translations).
+# Widget bridge — Yoga layer. Three coherent clusters: (1) pulp #1434
+# dimension percent strings (width/height + min/max via Yoga's percent
+# API), (2) pulp #1545 flexBasis% promotion (basis "NN%" +
+# "flex 1 1 NN%" decomposition), (3) pulp #1434 yoga value-aliasing
+# (flexDirection / justifyContent / alignItems / alignSelf / order /
+# flexWrap value translations).
 pulp_add_test_suite(pulp-test-widget-bridge-yoga LIBRARIES pulp::view)
 
-# Widget bridge — Canvas2D Wave 2 cheap-wiring surface (P5-1 follow-up).
+# Widget bridge — Canvas2D Wave 2 cheap-wiring surface.
 # Covers canvas2d/fill + canvas2d/clip evenodd, canvas2d/roundRect
 # 4-corner radii, canvas2d/ellipse rotation, canvas2d/strokeText
 # dedicated-command routing — the five Wave 2 partial → supported
 # compat.json entries.
 pulp_add_test_suite(pulp-test-widget-bridge-canvas2d-wave2 LIBRARIES pulp::view)
 
-# Widget bridge — yoga logical-edge fan-out + A4 OOS pins (P5-1
-# follow-up). pulp #1542 yoga logical-edge (marginInline/Block +
-# paddingInline/Block + inset shorthand) + pulp #1434 A4 Bundles 2-7
-# css NOT-IMPL closure catalog hygiene.
+# Widget bridge — yoga logical-edge fan-out + A4 OOS pins. pulp #1542
+# yoga logical-edge (marginInline/Block + paddingInline/Block + inset
+# shorthand) + pulp #1434 CSS NOT-IMPL closure catalog hygiene.
 pulp_add_test_suite(pulp-test-widget-bridge-yoga-a4-oos LIBRARIES pulp::view)
 
-# Widget bridge — Wave 2 cheap-wiring (P5-1 follow-up). Bundles the
-# Wave 2 canvas2d cheap wiring (DIVERGE → PASS) + Wave 2 css value-
-# coverage wiring entries from compat.json's Wave 2 cleanup pass.
+# Widget bridge — Wave 2 cheap-wiring. Bundles the Canvas2D cheap
+# wiring (DIVERGE → PASS) + CSS value-coverage wiring entries from
+# compat.json's Wave 2 cleanup pass.
 pulp_add_test_suite(pulp-test-widget-bridge-wave2-cheap LIBRARIES pulp::view)
 
 # Widget bridge — RN style-prop bridge primitives (P5-1 follow-up,
