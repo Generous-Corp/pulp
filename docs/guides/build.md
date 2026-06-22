@@ -13,7 +13,7 @@
 
 ```bash
 ./setup.sh                                    # bootstrap deps
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug  # configure
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release  # configure
 cmake --build build -j$(nproc)                # build
 ctest --test-dir build --output-on-failure    # test
 ```

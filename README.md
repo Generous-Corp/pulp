@@ -122,7 +122,8 @@ See [docs/agent-integrations.md](docs/agent-integrations.md) for details on each
 git clone https://github.com/danielraffel/pulp.git
 cd pulp
 ./setup.sh                                    # bootstrap deps
-cmake -S . -B build && cmake --build build    # build
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release  # configure
+cmake --build build                            # build
 ctest --test-dir build --output-on-failure    # test
 ```
 
