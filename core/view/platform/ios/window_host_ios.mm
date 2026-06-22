@@ -382,13 +382,12 @@ private:
 
 // Close the `namespace pulp::view {` opened around IOSWindowHost so the
 // Skia / Dawn / runtime headers below resolve at the global ::pulp::*
-// scope. Phase iOS-D.1: previously the includes were emitted INSIDE the
-// open namespace, which nested everything as
-// `pulp::view::pulp::render::*` and made every later use of
-// `render::GpuSurface` fail to resolve (it became
-// `pulp::view::render::GpuSurface`, which does not exist). The bug went
-// undetected because no iOS build had `PULP_HAS_SKIA` defined until
-// Phase iOS-D.1 wired the iOS Skia/Dawn link.
+// scope. When these includes live INSIDE the open namespace, everything
+// is nested as `pulp::view::pulp::render::*`, which makes every later use
+// of `render::GpuSurface` fail to resolve (it becomes
+// `pulp::view::render::GpuSurface`, which does not exist). The bug only
+// affects GPU-enabled iOS builds because CPU-only iOS builds never
+// include these headers.
 }  // namespace pulp::view
 
 #ifdef PULP_HAS_SKIA
@@ -553,7 +552,7 @@ public:
             // factory, not std::make_unique. SkiaSurface::create() takes
             // a GpuSurface& and a Config struct that exposes only width,
             // height, and scale_factor (it queries the GPU side for the
-            // Dawn device/queue handles internally). Phase iOS-D.1.
+            // Dawn device/queue handles internally).
             gpu_surface_ = render::GpuSurface::create_dawn();
             if (!gpu_surface_) {
                 runtime::log_error("iOS GPU: GpuSurface::create_dawn() returned null, "

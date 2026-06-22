@@ -130,14 +130,12 @@ public:
     // pointer at construction (or via a later attach call) and forwards it
     // to __describeNativeAdapterImpl / __createNativeAdapterImpl /
     // __gpuCanvasConfigureImpl. Without a real surface here, those native
-    // impls return mocks and JS-rendered 3D output is black (per
-    // `threejs-bridge` skill's "gpu_surface MUST be passed to WidgetBridge"
-    // gotcha and Phase iOS-D.3b Slice 1).
+    // impls return mocks and JS-rendered 3D output is black. Always pass
+    // the GPU surface to WidgetBridge when constructing a scripted GPU view.
     //
     // Lifetime: the GpuSurface is owned by the PluginViewHost. Consumers
     // capture the raw pointer; the WidgetBridge must be destroyed before
-    // the host. See planning/2026-05-29-ios-d3b-threejs-webgpu-program.md
-    // § Slice 1 risks.
+    // the host.
     virtual render::GpuSurface* gpu_surface() const { return nullptr; }
 
     // Native-frame resize notification. AU v2 has no host size callback — the

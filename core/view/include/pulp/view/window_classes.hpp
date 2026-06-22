@@ -1,11 +1,11 @@
 #pragma once
 
-// High-level window classes (item 6.5 macOS plan).
+// High-level window classes.
 //
-// PR #2844 landed the canonical low-level `WindowHost` contract (native chrome,
-// `attach_native_child_view`, multi-window via WindowManager). Item 6.5 sits
-// on top: three Pulp-native window classes that cover the three patterns a
-// standalone app — or a plugin's secondary window — needs in practice:
+// The low-level `WindowHost` contract owns native chrome,
+// `attach_native_child_view`, and multi-window plumbing via WindowManager.
+// These Pulp-native wrappers cover the three window patterns a standalone app
+// — or a plugin's secondary window — needs in practice:
 //
 //   - `DocumentWindow` — a top-level document/editor window with a menu bar,
 //     a content area that hosts a View tree, and a close-confirmation hook

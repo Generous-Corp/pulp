@@ -503,9 +503,8 @@ private:
 // `pulp::view::pulp::render::*` and Metal's Objective-C `@protocol`
 // declarations land inside a C++ namespace, which the compiler rejects
 // ("Objective-C declarations may only appear in global scope"). The
-// bug was inert before Phase iOS-D.1 because no iOS configure had
-// `PULP_HAS_SKIA` defined; turning Skia on for iOS surfaced it
-// immediately.
+// bug is specific to GPU-enabled iOS configures because CPU-only iOS
+// builds never include these headers.
 }  // namespace pulp::view
 
 #ifdef PULP_HAS_SKIA
@@ -942,7 +941,6 @@ public:
                skia_surface_->is_available();
     }
 
-    // Phase iOS-D.3b Slice 1 (planning/2026-05-29-ios-d3b-threejs-webgpu-program.md).
     // Mirrors WindowHost::gpu_surface() so a scripted UI mounted inside an
     // AUv3 editor can route navigator.gpu / canvas.getContext('webgpu')
     // through the same wgpu::Surface that paints the editor.
@@ -1192,7 +1190,7 @@ std::unique_ptr<PluginViewHost> PluginViewHost::create(View& root, const Options
             return host;
         }
         // GPU init failed — fall back to the CoreGraphics host so the editor
-        // never disappears (item 9). The runtime scream-guard in the adapter
+        // never disappears. The runtime scream-guard in the adapter
         // (`warn_if_unexpected_cpu_fallback`) logs the mismatch loudly.
         host.reset();
     }
