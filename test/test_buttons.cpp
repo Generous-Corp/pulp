@@ -27,10 +27,10 @@ bool is_white(Color c) { return c.r8() == 255 && c.g8() == 255 && c.b8() == 255;
 
 }  // namespace
 
-// Design-System-Import-Plan Phase 2 (reskinnability): the button widgets used
-// to hardcode their colours — and HyperlinkButton/ArrowButton/ResizableCorner
-// passed 0–255 ints to Color::rgba() (which takes 0–1 floats and clamps), so
-// they rendered solid white. These guard the bug fix + token wiring.
+// Reskinnability regression: the button widgets used to hardcode their
+// colours — and HyperlinkButton/ArrowButton passed 0–255 ints to
+// Color::rgba() (which takes 0–1 floats and clamps), so they rendered
+// solid white. These guard the bug fix + token wiring.
 
 TEST_CASE("HyperlinkButton renders its link colour, not clamped white",
           "[view][buttons][reskin]") {

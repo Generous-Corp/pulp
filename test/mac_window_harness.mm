@@ -89,7 +89,7 @@ NSEvent* build_event(NSWindow* window,
     }
 
     if (type == NSEventTypeScrollWheel) {
-        // Codex review (PR #2009): `+[NSEvent mouseEventWithType:]` does
+        // Regression (PR #2009): `+[NSEvent mouseEventWithType:]` does
         // NOT carry scrolling deltas — the produced event reports
         // `scrollingDeltaX/Y == 0`, so the synthetic scroll falls
         // through `PulpView::scrollWheel:` as a no-op and tests pass
@@ -105,7 +105,7 @@ NSEvent* build_event(NSWindow* window,
             static_cast<int32_t>(ev.scroll_delta_x),
             0);
         if (!cge) return nil;
-        // Codex P2 on PR #2015 — set the CGEvent location so
+        // Regression (PR #2015) — set the CGEvent location so
         // `event.locationInWindow` lands at the harness-requested
         // coordinates instead of the current OS cursor position.
         // PulpView::scrollWheel: hit-tests from locationInWindow, so
@@ -220,7 +220,7 @@ bool simulate_mouse(pulp::view::WindowHost& host, const SimulatedMouse& event) {
         NSEvent* nsevent = build_event(window, content, event);
         if (!nsevent) return false;
 
-        // Codex review (PR #2009): `build_event` correctly stamped
+        // Regression (PR #2009): `build_event` correctly stamped
         // NSEventType{Right,Other}Mouse* based on `event.button`, but the
         // dispatch below previously routed every phase through
         // `mouseDown:`/`mouseUp:`/`mouseDragged:`. That meant a right-

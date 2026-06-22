@@ -872,7 +872,7 @@ TEST_CASE("mac harness honors caller-provided window options size",
     REQUIRE(content.height >= 400);
 }
 
-// ── Codex review P2 fixes (PR #2009) ────────────────────────────────────
+// ── Regression contract: scroll deltas + button routing (PR #2009) ───────
 //
 // Before these fixes:
 //   1. `build_event` constructed scroll wheel events via

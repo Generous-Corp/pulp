@@ -305,8 +305,8 @@ TEST_CASE("View dimensions frame clock and repaint helpers resolve inherited sta
 
 TEST_CASE("set_theme repaints and cascades to children",
           "[view][theme][reskin]") {
-    // Design-System-Import-Plan Phase 2: a theme swap must invalidate the
-    // surface (previously set_theme updated the member silently) and the new
+    // Regression: a theme swap must invalidate the surface (previously
+    // set_theme updated the member silently) and the new
     // tokens must reach descendants that resolve up the parent chain.
     View root;
     auto child = std::make_unique<View>();
@@ -1088,7 +1088,7 @@ TEST_CASE("View per-corner radii setters flip has_corner_radii",
     REQUIRE_THAT(v.corner_radius_br(), WithinAbs(2.0f,  1e-5f));
 }
 
-// pulp #1171 (Codex P2 on #1044) — uniform set_border_radius() followed
+// pulp #1171 (#1044) — uniform set_border_radius() followed
 // by a single per-corner override must NOT zero the other three corners.
 // Previously: set_border_radius(10); set_corner_radius_tl(2);
 // rendered as {2, 0, 0, 0}, silently discarding the uniform 10.
@@ -1129,7 +1129,7 @@ TEST_CASE("simulate_click bubble does NOT walk past `this` receiver",
     // outer has on_click set. root + child have no on_click.
     // Calling root->simulate_click(...) MUST NOT bubble up to outer —
     // that would leak the synthetic click across component boundaries
-    // (the bug Codex flagged on #1073).
+    // (the bug flagged on #1073).
     View outer;
     outer.set_bounds({0, 0, 200, 200});
     bool outer_clicked = false;
@@ -1537,7 +1537,7 @@ TEST_CASE("View::last_paint_*_ns updates on every paint cycle",
     REQUIRE(v->last_paint_self_ns() > 0u);
 }
 
-// Codex P2 follow-up on #2338: paint timing must cover framework-owned
+// Regression (#2338): paint timing must cover framework-owned
 // drawing (background fills, borders, gradients, layer setup) — not
 // just the paint(canvas) override. A styled View with no paint()
 // override should still report non-zero last_paint_self_ns because
