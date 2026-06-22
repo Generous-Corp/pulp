@@ -1,14 +1,14 @@
 #pragma once
 
 /// @file audio_doctor.hpp
-/// Scenario-driven offline "Audio Doctor" analyzers (harness Phase 7, slice 1).
+/// Scenario-driven offline "Audio Doctor" analyzers.
 ///
 /// The Doctor is the top harness layer: it sits ABOVE scenarios and drives a
 /// processor through `RenderScenario`, then runs the buffer-level spectrum
 /// analyzers in `pulp-audio-analysis` (audio_spectrum.hpp) over the rendered
 /// output to answer the "is this DSP behaving correctly?" questions an
 /// interactive analyzer answers visually — magnitude/frequency response and
-/// harmonic distortion in this slice.
+/// harmonic distortion.
 ///
 /// This header owns only the scenario wiring (stimulus synthesis + render);
 /// the windowing/FFT/THD/response math lives in `audio_spectrum.hpp` so the

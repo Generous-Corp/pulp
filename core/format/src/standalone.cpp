@@ -185,10 +185,11 @@ bool StandaloneApp::start() {
 #if PULP_ENABLE_AUDIO_PROBES
     // Prepare the realtime output-boundary probe BEFORE the audio callback
     // starts. This is the only place it allocates. Probe-enabled standalone
-    // builds keep a small last-N channel-0 ring so the developer Audio
-    // Inspector can paint a live waveform whether it was opened from
-    // PULP_AUDIO_INSPECTOR at launch or toggled later by command. The ring is
-    // sized to the panel's display capacity so one UI tick fills the trace.
+    // builds keep a small last-N multichannel ring so the developer Audio
+    // Inspector can paint a live waveform (channel 0 drives the Signal trace)
+    // whether it was opened from PULP_AUDIO_INSPECTOR at launch or toggled
+    // later by command. The ring is sized to the panel's display capacity so
+    // one UI tick fills the trace.
     audio::AudioProbe::CaptureConfig probe_capture;
     constexpr int kMaxScopeWindowSamples = 16384;
     const int scope_capture_frames = config_.audio_scope_json_path.empty()

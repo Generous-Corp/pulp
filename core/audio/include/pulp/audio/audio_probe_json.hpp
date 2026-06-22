@@ -34,7 +34,8 @@ std::string_view audio_probe_stage_name(AudioProbeStage stage);
 /// offline Audio Doctor artifacts). The object always carries:
 ///   stage, sample_rate, block_size, channel_count, sequence_number,
 ///   peak_max, rms_max, peak_dbfs, rms_dbfs, clip_count, nan_inf_count,
-///   clipped_blocks, nan_blocks, silence_run_blocks, callbacks.
+///   clipped_blocks, nan_blocks, silence_run_blocks, callbacks, underruns,
+///   device_xruns, cpu_overloads.
 /// `peak_dbfs` / `rms_dbfs` are `null` when the corresponding linear value is 0.
 std::string audio_probe_snapshot_to_json(const AudioProbeSnapshot& snapshot,
                                          const AudioStats& stats,

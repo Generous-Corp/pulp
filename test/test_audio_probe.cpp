@@ -1,4 +1,4 @@
-// test_audio_probe.cpp — Phase 5 RT-probe acceptance.
+// test_audio_probe.cpp — RT-probe acceptance.
 //
 // GATE 2: an allocation-counting test (RtAllocationProbe) asserting ZERO
 // allocations across N analyze_output() calls after prepare(). Plus correctness

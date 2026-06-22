@@ -1,6 +1,6 @@
-// audio_doctor.cpp — scenario-driven Audio Doctor wiring (harness Phase 7,
-// slice 1). Synthesizes the stimulus, drives the processor through
-// RenderScenario, then delegates all spectral math to the buffer-level
+// audio_doctor.cpp — scenario-driven Audio Doctor wiring. Synthesizes the
+// stimulus, drives the processor through RenderScenario, then delegates all
+// spectral math to the buffer-level
 // analyzers in pulp-audio-analysis (audio_spectrum.cpp). The per-analyzer
 // determinism contracts live in audio_spectrum.hpp.
 
