@@ -20,13 +20,13 @@ enum class ScreenshotBackend {
 
 // Render a view tree to a PNG image buffer (headless, no window needed).
 //
-// Platform support (#299):
-//   - macOS/iOS: native CoreGraphics-backed capture.
-//   - Windows/Linux/Android: no built-in backend. The host app
-//     (or a future platform-specific module) registers a provider
-//     via set_screenshot_provider(). Without one, returns empty
-//     vector / false — explicitly "unsupported" rather than the
-//     pre-#299 silent-empty-bytes bug.
+// Platform support:
+//   - macOS: native CoreGraphics-backed capture.
+//   - iOS: provider-backed fallback only; no native capture backend yet.
+//   - Windows/Linux: built-in Skia raster backend when Skia is available.
+//   - Android or builds without a native backend: the host app registers a
+//     provider via set_screenshot_provider(). Without one, returns empty
+//     vector / false explicitly.
 //
 // Callers can probe has_screenshot_provider() to distinguish
 // "no backend installed" from "render failed".

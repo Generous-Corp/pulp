@@ -1,21 +1,20 @@
-// Non-native-platform screenshot fallback (#299 + #313).
+// Non-native-platform screenshot fallback.
 //
 // The provider-registration API (set/clear/has_screenshot_provider)
 // is always compiled. The render_to_png / render_to_file
 // implementations are compiled when no platform-native impl exists
 // for this build:
 //   - macOS:  screenshot_mac.mm provides native, stubs not compiled here.
-//   - iOS:    no iOS-native screenshot impl yet — stub compiled (#19 P1).
+//   - iOS:    no iOS-native screenshot impl yet — stub compiled.
 //   - Other:  stub compiled.
 //
 // When the stub path is active, render_* delegates to the registered
 // provider; without one, it returns empty / false explicitly so
 // callers can distinguish "unsupported" from "render failed".
 //
-// Codex P2 on #313 follow-up: the provider callback is NOT invoked
-// under the registration mutex. We copy the callback to a local
-// under lock, release, then call. If the callback takes long
-// (real screenshot capture) or re-enters set/clear/has, the mutex
+// The provider callback is NOT invoked under the registration mutex. We copy
+// the callback to a local under lock, release, then call. If the callback
+// takes long (real screenshot capture) or re-enters set/clear/has, the mutex
 // is free.
 
 #include <pulp/view/screenshot.hpp>
@@ -54,7 +53,7 @@ bool has_screenshot_provider() {
 }
 
 // Shared provider-invocation helper. Copies the registered provider out under
-// the lock (#313 Codex P2: never call it while holding the mutex), releases,
+// the lock (never call it while holding the mutex), releases,
 // then invokes. `*had_provider` reports whether a provider was installed so
 // callers can distinguish "no provider, fall back" from "provider returned
 // empty (render failed)". Used by both the no-Skia fallback render path below

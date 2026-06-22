@@ -12,7 +12,7 @@
 // stem-based unique_id. Graph_serializer rehydration already
 // tolerates stem IDs (that was the pre-fix behaviour across the
 // board); this change only upgrades plugins that already declare
-// their identity. Issue #491 P2.
+// their identity.
 
 #include <pulp/runtime/log.hpp>
 

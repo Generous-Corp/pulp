@@ -1,9 +1,9 @@
 #pragma once
 
-// Shared helpers for item 1.3 — AudioPlayHead transport-extension adapter wiring.
+// Shared helpers for AudioPlayHead transport-extension adapter wiring.
 //
 // Each format adapter (VST3, AU v2, AU v3, CLAP, AAX) populates the
-// item-1.3 fields on `ProcessContext` from its host's playhead API. The
+// transport fields on `ProcessContext` from its host's playhead API. The
 // derived fields — bar index from beats + time signature, the three
 // change-flags (tempo / time-sig / transport), and transport-jump metadata
 // computed against the

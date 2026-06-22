@@ -1,10 +1,10 @@
-// Cross-platform text accessibility scaffold (font v2 Slice 2.6).
+// Cross-platform text accessibility scaffold.
 //
 // Implements the default "none" backend: a process-local mutex-guarded
 // table of TextAccessibilityNode entries keyed by id. Per-platform
-// backends (NSAccessibility, UIA, AccessKit) overlay this in future
-// slices; until they land, this gives the text-paint sites a stable API
-// surface to call against and gives tests a snapshot they can introspect.
+// backends (NSAccessibility, UIA, AccessKit) can overlay this; the default
+// backend gives text-paint sites a stable API surface to call against and gives
+// tests a snapshot they can introspect.
 
 #include <pulp/view/text_accessibility.hpp>
 

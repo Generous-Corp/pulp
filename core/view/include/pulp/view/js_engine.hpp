@@ -25,9 +25,9 @@ using LogCallback = std::function<void(std::string_view level, std::string_view 
 using NativeFunction = std::function<choc::value::Value(const choc::value::Value* args, size_t num_args)>;
 using NativePromiseFunction = NativeFunction;
 
-// First host-object slice: native-backed global objects with snapshot properties
+// Native-backed global objects with snapshot properties
 // and native method callbacks. This is intentionally smaller than a full opaque
-// proxy / HostObject API, but it gives later bridge phases a truthful native
+// proxy / HostObject API, but it gives the bridge a truthful native
 // object seam to build on.
 struct HostObjectProperty {
     std::string name;

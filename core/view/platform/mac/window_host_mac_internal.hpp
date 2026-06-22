@@ -2,16 +2,13 @@
 // geometry / coordinate / event-translation helpers used by
 // window_host_mac.mm.
 //
-// Extracted in the R2-5 refactor (split of the oversized
-// window_host_mac.mm translation unit). The implementations live in
-// window_host_mac_geometry.mm. Only consumed by window_host_mac.mm —
-// not part of the public SDK surface.
+// Split out of the oversized window_host_mac.mm translation unit. The
+// implementations live in window_host_mac_geometry.mm. Only consumed by
+// window_host_mac.mm — not part of the public SDK surface.
 //
-// Per the R2-5 spec (Codex risk callout: Obj-C++ ivars): only free
-// functions / file-local statics that do NOT touch PulpView ivars or
-// any Obj-C instance state are extracted. The PulpView @implementation
-// block, its ivars, and its category/delegate methods stay in
-// window_host_mac.mm.
+// Only free functions / file-local statics that do NOT touch PulpView ivars
+// or any Obj-C instance state are extracted. The PulpView @implementation
+// block, its ivars, and its category/delegate methods stay in window_host_mac.mm.
 
 #pragma once
 

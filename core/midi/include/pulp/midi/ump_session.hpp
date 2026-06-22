@@ -2,11 +2,10 @@
 
 // UmpSession — Pulp's MIDI 2.0 UMP session handle.
 //
-// macOS plan item 8.1 (Session half). One `UmpSession` per app or
-// plugin instance. On macOS it owns the underlying `MIDIClientRef`
-// (CoreMIDI 2.0). On platforms that don't yet have a UMP backend
-// the session degrades to virtual-endpoints-only, which is enough
-// for unit tests and for in-process loopback.
+// One `UmpSession` per app or plugin instance. On macOS it owns the
+// underlying `MIDIClientRef` (CoreMIDI 2.0). On platforms that don't yet
+// have a UMP backend the session degrades to virtual-endpoints-only, which
+// is enough for unit tests and for in-process loopback.
 //
 // Design notes:
 //   - The session is the only entity that knows how to talk to the
@@ -18,9 +17,10 @@
 //     existing `MidiSystem::set_port_change_callback()` already
 //     handles hotplug for the legacy MIDI 1.0 stream, and re-running
 //     `enumerate()` is cheap.
-//   - Virtual endpoints are returned as `std::shared_ptr` so a test
-//     can hold them past the session's lifetime if needed (the
-//     session's weak refs let it skip them during teardown).
+//   - Virtual endpoints are returned as `std::shared_ptr` so a test can keep
+//     a direct handle. The session holds its own `shared_ptr`s and closes /
+//     drops them during teardown; a caller-retained handle keeps the endpoint
+//     object alive after that.
 
 #include <pulp/midi/ump_endpoint.hpp>
 #include <pulp/midi/ump_virtual_endpoint.hpp>

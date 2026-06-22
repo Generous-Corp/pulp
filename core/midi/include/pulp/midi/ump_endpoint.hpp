@@ -2,8 +2,7 @@
 
 // UMP Endpoint — abstract handle to a MIDI 2.0 UMP source/destination.
 //
-// macOS plan item 8.1 (Endpoint half). Lives in `pulp::midi`. A UMP
-// endpoint is a single bidirectional logical port — on CoreMIDI 2.0 it
+// A UMP endpoint is a single bidirectional logical port — on CoreMIDI 2.0 it
 // wraps a `MIDIEndpointRef`, on Windows it wraps a MIDIEndpointConnection
 // (WinRT MIDI 2.0), on Linux it wraps an ALSA Rawmidi UMP node. The
 // Pulp surface is intentionally OS-agnostic: callers see UmpPacket in,

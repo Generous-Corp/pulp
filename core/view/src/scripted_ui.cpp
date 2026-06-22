@@ -38,9 +38,9 @@ ScriptedUiSession::ScriptedUiSession(View& root, state::StateStore& store, Scrip
 
 ScriptedUiSession::~ScriptedUiSession() = default;
 
-// Phase iOS-D.3b Slice 1 — late-attach of the host's GpuSurface. Hosts
-// (e.g. au_view_controller_ios.mm) call this AFTER PluginViewHost::create
-// returns, so the JS-side navigator.gpu / canvas.getContext('webgpu')
+// Late-attach of the host's GpuSurface. Hosts (e.g. au_view_controller_ios.mm)
+// call this AFTER PluginViewHost::create returns, so the JS-side navigator.gpu
+// / canvas.getContext('webgpu')
 // shim routes through Pulp's live Dawn instance instead of a mock.
 void ScriptedUiSession::attach_gpu_surface(render::GpuSurface* gpu_surface) {
     gpu_surface_ = gpu_surface;

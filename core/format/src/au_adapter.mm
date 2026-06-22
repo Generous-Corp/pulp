@@ -3,7 +3,7 @@
 // Built from Apple AudioToolbox documentation
 //
 // ─────────────────────────────────────────────────────────────────────────
-// Per-method audit checklist (macOS plan item 3.1)
+// Per-method audit checklist
 // ─────────────────────────────────────────────────────────────────────────
 //
 // Each `PulpAudioUnit` override below is audited against three axes:
@@ -25,7 +25,7 @@
 //  │ tailTime                                 │ seconds   │ KVO/main     │ NO           │
 //  │ supportsUserPresets                      │ BOOL=NO   │ main         │ NO (const)   │
 //  │ canProcessInPlace                        │ BOOL=YES  │ main + audio │ NO (const)   │
-//  │ parameterTree                            │ AUParam…  │ main         │ YES (per call) │
+//  │ parameterTree                            │ AUParam…  │ main         │ YES (first call) │
 //  │ shouldBypassEffect                       │ BOOL      │ main + audio │ NO (atomic)  │
 //  │ setShouldBypassEffect:                   │ void      │ main + audio │ NO (RT-safe) │
 //  │ allocateRenderResourcesAndReturnError:   │ BOOL      │ main         │ YES (init)   │
@@ -128,7 +128,7 @@ struct AUBridge {
     } sidechain_abl = {};
     // Backing buffer for the sidechain pull — AURenderPullInputBlock writes
     // into this on each process call. Keeps the audio thread allocation-free
-    // (sized at init to match max_frames * kMaxChannels).
+    // (sized to max_frames * kMaxChannels during render-resource allocation).
     std::vector<float> sidechain_storage;
     state::ParameterEventQueue param_events;
 

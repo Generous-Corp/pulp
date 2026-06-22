@@ -166,8 +166,7 @@ struct AvahiApi {
                                 size_t*) = nullptr;
     // Binary-safe TXT-record append. Unlike `*_new_from_array`, which
     // takes NUL-terminated "key=value" strings, `add_pair_arbitrary` takes
-    // an explicit value-length so embedded NUL bytes survive. Codex PR
-    // #3003 P2.
+    // an explicit value-length so embedded NUL bytes survive.
     AvahiStringList* (*string_list_add_pair_arbitrary)(
         AvahiStringList*, const char* /*key*/,
         const uint8_t* /*value*/, size_t /*value_size*/) = nullptr;
@@ -177,7 +176,7 @@ struct AvahiApi {
     // buffers that must be released via avahi_free (not libc ::free) —
     // libc free only works when Avahi happened to wrap libc, and
     // allocator-wrapped builds (jemalloc/tcmalloc preload, custom builds)
-    // crash on the mismatch. Codex PR #3003 P2.
+    // crash on the mismatch.
     void (*avahi_free)(void*) = nullptr;
 };
 
@@ -215,7 +214,7 @@ bool load_api(pulp::runtime::DynamicLibrary& lib, AvahiApi& api) {
     ok &= get(api.string_list_get_next, "avahi_string_list_get_next");
     ok &= get(api.string_list_get_pair, "avahi_string_list_get_pair");
     // string_list_add_pair_arbitrary and avahi_free are required for
-    // binary-safe TXT (Codex PR #3003 P2). If either symbol is missing
+    // binary-safe TXT. If either symbol is missing
     // the host avahi-client is severely truncated; fall through to the
     // "no Avahi" path rather than corrupt TXT bytes or mismatch the
     // allocator.
@@ -281,7 +280,6 @@ public:
         // Tear down any prior browse so callers can browse() again.
         {
             std::lock_guard<std::mutex> lock(state_mutex_);
-            // Snapshot for use after unlock.
         }
         stop_browse();
 
@@ -326,7 +324,7 @@ public:
         // TxtRecords) survive. The previous code formatted records as
         // "key=value" NUL-terminated strings into
         // avahi_string_list_new_from_array, which truncated values at the
-        // first NUL byte. Codex PR #3003 P2.
+        // first NUL byte.
         AvahiStringList* strlst = nullptr;
         for (const auto& [k, v] : txt) {
             strlst = api_.string_list_add_pair_arbitrary(
@@ -509,7 +507,7 @@ private:
                             // to honor the allocator contract. ::free
                             // happened to work only when Avahi was wrapping
                             // libc; allocator-preload setups crashed on
-                            // the mismatch. Codex PR #3003 P2.
+                            // the mismatch.
                             self->api_.avahi_free(key);
                             if (value) self->api_.avahi_free(value);
                         }
