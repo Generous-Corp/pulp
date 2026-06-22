@@ -4,10 +4,8 @@
 Version-bump arithmetic and the `apply_bumps` writer used by
 `--mode=apply` (and by `pulp pr`) to rewrite version files in place.
 
-Extracted from `version_bump_check.py` (P9-NEW refactor, 2026-05) as a
-pure mechanical split — bodies are byte-identical to their previous
-in-file definitions. `version_bump_check.py` re-exports every public
-symbol so external importers and the CLI entrypoint are unaffected.
+`version_bump_check.py` re-exports every public symbol from this module
+so external importers and the CLI entrypoint are unaffected.
 """
 
 from __future__ import annotations
@@ -24,13 +22,11 @@ from version_bump_surfaces import (
 )
 
 
-# Patchable-helper indirection (P9-NEW split, 2026-05). See the matching
-# comment in `version_bump_heuristics.py` — `apply_bumps` resolves
-# `already_bumped` / `version_at_base` / `write_version` / `subprocess`
-# through the `version_bump_check` entrypoint so
-# `test_version_bump_check_extra.py`'s `mock.patch.object(vbc, ...)`
-# stubs keep taking effect after the module split. Deferred import
-# avoids the entrypoint↔cluster import cycle.
+# Patchable-helper indirection. See the matching comment in
+# `version_bump_heuristics.py`; `apply_bumps` resolves `already_bumped` /
+# `version_at_base` / `write_version` / `subprocess` through the
+# `version_bump_check` entrypoint so entrypoint-level patches keep taking
+# effect. Deferred import avoids the entrypoint↔cluster import cycle.
 def _vbc():
     try:
         import version_bump_check as _v
@@ -104,16 +100,16 @@ def apply_bumps(
         for vf in v.surface.version_files:
             if _write_version(repo, vf, new_ver):
                 edited.append(vf.path)
-        # CHANGELOG.md is intentionally NOT written here (C1, 2026-05).
-        # Ownership moved to Shipyard post-tag sync via
+        # CHANGELOG.md is intentionally NOT written here. Ownership lives
+        # with Shipyard post-tag sync via
         # `.github/workflows/post-tag-sync.yml` and the
         # `shipyard changelog regenerate` command. PR-side stub insertion
-        # was the source of repeated multi-PR-train rebases: PR A and PR
-        # B both insert `## [0.105.0]` headers, the first one merges, the
-        # second one conflicts on the same line. Letting Shipyard own the
-        # full regen at tag time eliminates the conflict class entirely.
-        # `versioning.json` still carries each surface's `changelog`
-        # field — Shipyard reads it.
+        # creates repeated multi-PR-train rebases: PR A and PR B both
+        # insert `## [0.105.0]` headers, the first one merges, the second
+        # one conflicts on the same line. Letting Shipyard own the full
+        # regen at tag time eliminates the conflict class entirely.
+        # `versioning.json` still carries each surface's `changelog` field;
+        # Shipyard reads it.
     # Stage for commit so callers see them in `git status`.
     if edited:
         _subprocess = _h("subprocess")

@@ -5,10 +5,8 @@ Per-surface bump-level inference: git-diff helpers, glob filtering,
 conventional-commit classification, the path/content heuristic, trailer
 override parsing, and the `assess_surfaces` pipeline that fuses them.
 
-Extracted from `version_bump_check.py` (P9-NEW refactor, 2026-05) as a
-pure mechanical split — bodies are byte-identical to their previous
-in-file definitions. `version_bump_check.py` re-exports every public
-symbol so external importers and the CLI entrypoint are unaffected.
+`version_bump_check.py` re-exports every public symbol from this module
+so external importers and the CLI entrypoint are unaffected.
 """
 
 from __future__ import annotations
@@ -18,7 +16,7 @@ import subprocess
 from pathlib import Path
 from typing import Iterable
 
-# Shared substrate (2026-05 refactor batch).
+# Shared gate helpers.
 from gate_common import (
     git_range_trailers,
     matches_any as _matches_any,
@@ -33,18 +31,15 @@ from version_bump_surfaces import (
 )
 
 
-# Patchable-helper indirection (P9-NEW split, 2026-05). The previous
-# single-file layout let `test_version_bump_check_extra.py` mock helpers
-# via `mock.patch.object(version_bump_check, "<helper>")` and have the
-# patch take effect inside `heuristic_for_surface` / `assess_surfaces`.
-# After the module split a direct `from ... import` would freeze the
-# reference, so the cluster pipeline resolves git/whitespace helpers
-# through the `version_bump_check` entrypoint module at call time. The
-# import is deferred to avoid the `version_bump_check → cluster` import
-# cycle; by the time these functions run, the entrypoint is fully
-# loaded. Falls back to this module's own definitions when the
-# entrypoint isn't importable (e.g. cluster module exercised in
-# isolation).
+# Patchable-helper indirection. Tests and external callers may patch
+# helpers on the `version_bump_check` entrypoint; resolving through that
+# module at call time keeps those patches visible inside
+# `heuristic_for_surface` / `assess_surfaces`. The import is deferred to
+# avoid the `version_bump_check → cluster` import cycle; by the time these
+# functions run, the entrypoint is fully loaded. Falls back to this
+# module's own definitions when the entrypoint isn't importable (e.g.
+# cluster module exercised in isolation). The compatibility tests in
+# test_version_bump_check_extra.py depend on this entrypoint-level patching.
 def _vbc():
     try:
         import version_bump_check as _v
@@ -216,11 +211,11 @@ def surface_trailer_override(
     The documented trailer grammar accepts `patch`, `minor`, `major`, and
     `skip`. The internal `LEVELS` tuple includes the sentinel `"none"`
     so the heuristic pipeline can compare ranks, but `none` is NOT a
-    valid trailer value — accepting it would let
+    valid trailer value; accepting it would let
     `Version-Bump: <surface>=none` silently downgrade a real `minor` /
-    `major` heuristic to "no bump needed", bypassing the gate. Codex
-    review on PR #629 caught this. Reject `none` here as defense-in-
-    depth; the call site at `assess_surfaces` also filters it out.
+    `major` heuristic to "no bump needed", bypassing the gate. Reject
+    `none` here as defense-in-depth; the call site at `assess_surfaces`
+    also filters it out.
     """
     for v in trailers.get(trailer_key.lower(), []):
         m = re.search(rf"{re.escape(surface_name)}\s*=\s*([A-Za-z]+)", v)
@@ -230,12 +225,12 @@ def surface_trailer_override(
         if level == "none":
             continue
         # pulp #1054 — `skip` levels MUST carry a non-empty
-        # `reason="..."` (the level itself doesn't document intent —
-        # the reason does). Mirrors the unscoped-form enforcement at
-        # `_range_has_version_bump_skip_trailer()` (Codex P2 #1310 →
-        # PR #1315). Per-surface `<surface>=patch|minor|major` levels
-        # are explicit bump verdicts and don't need a reason — the
-        # level itself is the documented intent.
+        # `reason="..."` (the level itself doesn't document intent; the
+        # reason does). Mirrors the unscoped-form enforcement at
+        # `_range_has_version_bump_skip_trailer()`. Per-surface
+        # `<surface>=patch|minor|major` levels are explicit bump verdicts
+        # and don't need a reason; the level itself is the documented
+        # intent.
         if level == "skip":
             rm = re.search(r'reason\s*=\s*"([^"]+)"', v)
             if not (rm and rm.group(1).strip()):
@@ -273,7 +268,7 @@ def assess_surfaces(
         # `minor`, `major`, `skip`). Including "none" here would let
         # `Version-Bump: <surface>=none` silently downgrade a real
         # `minor` / `major` heuristic verdict to "no bump needed",
-        # bypassing the gate. See Codex review on PR #629.
+        # bypassing the gate.
         explicit_level = override in LEVELS and override != "none"
 
         if skip_requested:

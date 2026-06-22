@@ -2,11 +2,8 @@
 """Version-bump gate — Surface cluster.
 
 Surface/version-file domain model + config loading + version-file I/O.
-Extracted from `version_bump_check.py` (P9-NEW refactor, 2026-05) as a
-pure mechanical split: the function/class bodies are byte-identical to
-their previous in-file definitions. `version_bump_check.py` imports and
-re-exports every public symbol here, so external importers and the CLI
-entrypoint are unaffected.
+`version_bump_check.py` imports and re-exports every public symbol here,
+so external importers and the CLI entrypoint are unaffected.
 
 Holds:
     - LEVELS, the bump-rank tuple shared across the pipeline
@@ -25,21 +22,19 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-# Shared substrate (2026-05 refactor batch). `_strip_meta` is the
-# version-bump-specific alias for `strip_meta`; we keep the public alias
-# so other callers in this file (and any external imports) don't break.
+# Shared gate helpers. `_strip_meta` is the version-bump-specific alias
+# for `strip_meta`; keep the public alias so callers in this file and any
+# external imports don't break.
 from gate_common import (
     strip_meta as _strip_meta,
 )
 
 
-# Patchable-helper indirection (P9-NEW split, 2026-05). See the matching
-# comment in `version_bump_heuristics.py` — `already_bumped` resolves
+# Patchable-helper indirection. See the matching comment in
+# `version_bump_heuristics.py`; `already_bumped` resolves
 # `version_at_base` through the `version_bump_check` entrypoint so
-# `test_version_bump_check_extra.py`'s `mock.patch.object(vbc,
-# "version_at_base")` keeps taking effect inside `already_bumped` after
-# the module split (pre-split both lived in one module). Deferred import
-# avoids the entrypoint↔cluster import cycle.
+# entrypoint-level patches keep taking effect. Deferred import avoids the
+# entrypoint↔cluster import cycle.
 def _vbc():
     try:
         import version_bump_check as _v
