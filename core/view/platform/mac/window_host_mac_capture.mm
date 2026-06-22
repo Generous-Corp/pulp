@@ -1,8 +1,8 @@
 // window_host_mac_capture.mm — PNG / capture helpers for the macOS
-// window host. Extracted from window_host_mac.mm.
+// window host.
 //
-// Only free functions that don't touch PulpView ivars are extracted;
-// PulpView's @implementation and ivars stay in window_host_mac.mm.
+// Only free functions that don't touch PulpView ivars live here; PulpView's
+// @implementation and ivars stay in window_host_mac.mm.
 
 #include "window_host_mac_capture.h"
 

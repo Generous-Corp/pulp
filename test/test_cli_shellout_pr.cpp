@@ -306,7 +306,7 @@ TEST_CASE("pulp pr delegates to shipyard with forwarded arguments",
     // Report the version the pulp CLI's skew check expects (tools/shipyard.toml
     // pin), stripped of the leading 'v' since that's what `shipyard --version`
     // emits in practice. Reading dynamically keeps the test honest across pin
-    // bumps — the old hardcoded "0.46.0" broke on the v0.56.2 bump.
+    // bumps.
     std::string version = pinned_shipyard_version_for_test();
     if (!version.empty() && version[0] == 'v') version.erase(0, 1);
     {

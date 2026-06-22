@@ -1,11 +1,11 @@
 // window_host_mac_capture.h — private forward declarations for the PNG /
 // capture helpers used by window_host_mac.mm.
 //
-// The implementations live in window_host_mac_capture.mm. Only consumed by
-// window_host_mac.mm — not part of the public SDK surface.
+// The implementations live in window_host_mac_capture.mm. This header is only
+// consumed by window_host_mac.mm and is not part of the public SDK surface.
 //
-// Only free functions that don't touch PulpView ivars are extracted. The
-// PulpView @implementation block and its ivars stay in window_host_mac.mm.
+// Only free functions that don't touch PulpView ivars live here. The PulpView
+// @implementation block and its ivars stay in window_host_mac.mm.
 
 #pragma once
 

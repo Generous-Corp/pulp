@@ -295,14 +295,10 @@ TEST_CASE("Canvas2D fillText with maxWidth horizontally squeezes raster output",
     REQUIRE(rightmost <= 5 + 60 + 6);
 }
 
-// Codex P2 (PR #1555): SkiaCanvas::stroke_text built its stroke paint
-// via make_stroke_paint() but never called apply_stroke_state(), so
-// ctx.lineJoin / ctx.lineCap / ctx.miterLimit / ctx.strokeStyle pattern
-// shaders were silently dropped on strokeText only — every other stroke
-// primitive honoured them. This test renders a heavy-stroke glyph twice
-// against identical surfaces, once with the default (miter) line join
-// and once with LineJoin::round, and asserts the rasters differ. With
-// the apply_stroke_state call missing, both paths would resolve to the
+// SkiaCanvas::stroke_text must apply sticky stroke state. The test renders a
+// heavy-stroke glyph twice against identical surfaces, once with the default
+// (miter) line join and once with LineJoin::round, and asserts the rasters
+// differ. If stroke_text skips apply_stroke_state(), both paths resolve to the
 // same default-join SkPaint and produce identical pixels.
 TEST_CASE("SkiaCanvas::stroke_text honors sticky line_join state",
           "[canvas][skia][issue-1525-fix]") {
@@ -772,8 +768,8 @@ TEST_CASE("Canvas2D direction + filter cache invalidates on save/restore",
 // Ten entries — globalAlpha, lineCap, lineJoin, lineDashOffset,
 // textAlign, textBaseline, globalCompositeOperation, quadraticCurveTo,
 // bezierCurveTo, arc — have bridge-side coverage split across the
-// issue-964 cases above, but no single test exercises the 10-as-a-set
-// as the catalog claims. This test pins each one's full round-trip
+// issue-964 cases in test_canvas2d_shim.cpp, but no single test exercises the
+// 10-as-a-set as the catalog claims. This test pins each one's full round-trip
 // through the JS shim → bridge → CanvasWidget command stream so a
 // regression in any of them surfaces directly under [issue-1526].
 TEST_CASE("Canvas2D shim flushes the 10-entry catalog set to the bridge",
@@ -1388,10 +1384,8 @@ TEST_CASE("Canvas2D getTransform DOMMatrix scaleSelf + isIdentity recompute",
 
 TEST_CASE("Canvas2D getTransform DOMMatrix rotateSelf takes degrees [issue-1730]",
           "[view][canvas2d][issue-1527][issue-1730][dommatrix-mutators]") {
-    // Codex P1 on #1730: rotateSelf() input is DEGREES per the
-    // DOMMatrix spec (https://drafts.fxtf.org/geometry/#dom-dommatrix-rotateself).
-    // Previously this test passed Math.PI/2 and expected a 90deg
-    // rotation — that documented the BUG. Now we pass 90 (degrees).
+    // rotateSelf() input is DEGREES per the DOMMatrix spec:
+    // https://drafts.fxtf.org/geometry/#dom-dommatrix-rotateself
     auto result = run_in_bridge(R"(
         var c = document.createElement('canvas');
         c.id = 'probe'; document.body.appendChild(c);
@@ -1426,7 +1420,7 @@ TEST_CASE("Canvas2D DOMMatrix rotateSelf(180) flips signs [issue-1730]",
 
 TEST_CASE("Canvas2D DOMMatrix rotateSelf() omitted arg defaults to 0 [issue-1730]",
           "[view][canvas2d][issue-1730][dommatrix-mutators]") {
-    // Codex P1 on #1730: omitted angle defaults to 0 — must not be NaN.
+    // Omitted angle defaults to 0 — must not be NaN.
     auto result = run_in_bridge(R"(
         var c = document.createElement('canvas');
         c.id = 'probe'; document.body.appendChild(c);
@@ -1440,8 +1434,8 @@ TEST_CASE("Canvas2D DOMMatrix rotateSelf() omitted arg defaults to 0 [issue-1730
 
 TEST_CASE("Canvas2D DOMMatrix scaleSelf() omitted args default to identity [issue-1730]",
           "[view][canvas2d][issue-1730][dommatrix-mutators]") {
-    // Codex P2 on #1730: spec says scaleX defaults to 1 when omitted,
-    // scaleY defaults to scaleX when omitted. Was producing NaN before.
+    // Per spec, scaleX defaults to 1 when omitted and scaleY defaults to
+    // scaleX when omitted.
     auto result = run_in_bridge(R"(
         var c = document.createElement('canvas');
         c.id = 'probe'; document.body.appendChild(c);
@@ -1476,11 +1470,9 @@ TEST_CASE("Canvas2D getTransform DOMMatrix translateSelf affine compose",
 
 TEST_CASE("Canvas2D DOMMatrix singular inverse: all 16 components are NaN [issue-1730]",
           "[view][canvas2d][issue-1730][dommatrix-mutators]") {
-    // Codex P2 follow-up on #1754: spec says ALL 16 matrix components
-    // become NaN for a non-invertible inverse. Constructor only NaN'd
-    // the 2D aliases; m13/m14/m23/m24/m31..m34/m43/m44 stayed at
-    // constructor-default identity. toFloat32Array/toFloat64Array
-    // would return mixed finite/NaN, violating the contract.
+    // Per spec, ALL 16 matrix components become NaN for a non-invertible
+    // inverse. toFloat32Array/toFloat64Array must not return a mixed
+    // finite/NaN matrix.
     auto result = run_in_bridge(R"(
         var c = document.createElement('canvas');
         c.id = 'probe'; document.body.appendChild(c);
@@ -1499,9 +1491,8 @@ TEST_CASE("Canvas2D DOMMatrix singular inverse: all 16 components are NaN [issue
 
 TEST_CASE("Canvas2D DOMMatrix toJSON honors actual is2D [issue-1730]",
           "[view][canvas2d][issue-1730][dommatrix-mutators]") {
-    // Codex P2 follow-up on #1754: toJSON used to hardcode is2D=true;
-    // a singular-inverse result has is2D=false but JSON serialization
-    // would lose the inversion-failure indicator.
+    // A singular-inverse result has is2D=false; JSON serialization must keep
+    // that inversion-failure indicator.
     auto result = run_in_bridge(R"(
         var c = document.createElement('canvas');
         c.id = 'probe'; document.body.appendChild(c);
@@ -1520,11 +1511,9 @@ TEST_CASE("Canvas2D DOMMatrix toJSON honors actual is2D [issue-1730]",
 
 TEST_CASE("Canvas2D DOMMatrix inverse round-trips identity; singular yields NaN matrix [issue-1730]",
           "[view][canvas2d][issue-1527][issue-1730][dommatrix-mutators]") {
-    // Codex P1 on #1730: per spec
-    // (https://drafts.fxtf.org/geometry/#dom-dommatrixreadonly-inverse),
-    // a non-invertible matrix produces a matrix with NaN components and
-    // is2D=false. It does NOT throw. The previous test asserted "throws
-    // TypeError" — that was documenting the BUG.
+    // Per spec, a non-invertible matrix produces a matrix with NaN components
+    // and is2D=false. It does NOT throw:
+    // https://drafts.fxtf.org/geometry/#dom-dommatrixreadonly-inverse
     auto result = run_in_bridge(R"(
         var c = document.createElement('canvas');
         c.id = 'probe'; document.body.appendChild(c);
