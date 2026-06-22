@@ -1,9 +1,9 @@
 // SceneImage — retained image / bitmap node.
 //
-// Item 6.1 / Pulp-native names. The actual pixel source is provided by
-// the caller as either a decoded RGBA byte buffer (CPU-side) or a path
-// to a file the underlying Canvas backend will decode on demand. The
-// node carries a destination rect; the walker emits the matching
+// The actual pixel source is provided by the caller as either a decoded
+// RGBA byte buffer (CPU-side) or a path to a file the underlying Canvas
+// backend will decode on demand. The node carries a destination rect;
+// the walker emits the matching
 // `Canvas::draw_image_from_*` call.
 #pragma once
 

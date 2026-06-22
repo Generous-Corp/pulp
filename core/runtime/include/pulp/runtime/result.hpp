@@ -115,8 +115,6 @@ public:
     // Strong exception guarantee. If T's or E's copy/move ctor throws,
     // the destination is left holding its previous value — the old
     // member is only destroyed AFTER the new one is fully constructed.
-    // Pinned by the Codex P2 review comment "Preserve Result object
-    // when assignment construction throws".
     Result& operator=(const Result& other) {
         if (this != &other) {
             if (other.has_value_) {

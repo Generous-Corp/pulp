@@ -22,9 +22,7 @@
 // acquire/release ordering. Multi-producer / multi-consumer usage requires
 // external synchronization.
 //
-// Usage mirrors JUCE's `AbstractFifo` — see the [Reference Framework Gap
-// Analysis](planning/2026-05-24-reference-framework-gap-analysis.md) row for
-// AbstractFifo for context. This is the "abstract index-pair" sibling to
+// Usage mirrors JUCE's `AbstractFifo`. This is the "abstract index-pair" sibling to
 // `SpscQueue<T,N>` (which IS a queue + owns storage via choc FIFO) and
 // `TripleBuffer<T>` (which publishes a single latest value).
 
@@ -114,8 +112,7 @@ public:
         // True modulo wrap. The previous `next -= capacity_` only handled
         // a single overflow span, so an oversized `num_written` (caller
         // error past the prepared sum) could leave `next` >= capacity_
-        // and subsequent prepare_* calls would return invalid indices
-        // (Codex PR #2985 review).
+        // and subsequent prepare_* calls would return invalid indices.
         int next = (w + num_written) % capacity_;
         if (next < 0) next += capacity_;
         write_pos_.store(next, std::memory_order_release);
@@ -158,8 +155,8 @@ public:
     void finish_read(int num_read) noexcept {
         if (num_read <= 0) return;
         const int r = read_pos_.load(std::memory_order_relaxed);
-        // True modulo wrap — mirror the finish_write fix so an oversized
-        // num_read does not leave the cursor out of range (Codex PR #2985).
+        // True modulo wrap — mirror finish_write so an oversized num_read
+        // does not leave the cursor out of range.
         int next = (r + num_read) % capacity_;
         if (next < 0) next += capacity_;
         read_pos_.store(next, std::memory_order_release);

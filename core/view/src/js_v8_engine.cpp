@@ -9,7 +9,7 @@
 //         [-DV8_LIBRARY_PATH=/full/path/to/libv8_monolith_or_libnode]
 //
 // V8 provides JIT compilation, making it suitable for heavy workloads like
-// Three.js scene graphs (Phase 13). QuickJS is the portable fallback.
+// Three.js scene graphs. QuickJS is the portable fallback.
 
 #include <pulp/view/js_engine.hpp>
 

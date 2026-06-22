@@ -1,4 +1,4 @@
-// Cross-platform Skia raster screenshot backend (#3329 Win/Linux parity).
+// Cross-platform Skia raster screenshot backend.
 //
 // Apple has a native CoreGraphics + Skia screenshot path in
 // platform/mac/screenshot_mac.mm. On Windows/Linux there was previously NO

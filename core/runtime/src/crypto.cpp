@@ -169,7 +169,7 @@ std::optional<std::vector<uint8_t>> hmac_with_md(
     std::vector<uint8_t> tag(out_size, 0);
     // Propagate the return code of every HMAC step so an alloc / bad-
     // input / build-config failure surfaces as nullopt instead of a
-    // silently-zero tag (Codex P1 on #2841).
+    // silently-zero tag.
     int rc = mbedtls_md_hmac_starts(&ctx, key, key_size);
     if (rc == 0) rc = mbedtls_md_hmac_update(&ctx, data, data_size);
     if (rc == 0) rc = mbedtls_md_hmac_finish(&ctx, tag.data());

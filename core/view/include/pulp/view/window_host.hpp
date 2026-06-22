@@ -57,7 +57,7 @@ struct WindowOptions {
 
 // Native window that hosts a View tree and renders it.
 //
-// Platform support (#299):
+// Platform support:
 //   - macOS: native NSWindow-backed impl in window_host_mac.mm, including
 //     native content handles and child-view attach/bounds/detach.
 //   - iOS: native UIWindow-backed impl in window_host_ios.mm. The standalone
@@ -78,9 +78,9 @@ public:
     // Create a window hosting the given view tree
     static std::unique_ptr<WindowHost> create(View& root, const WindowOptions& options);
 
-    // Host-registered factory (#299). Installed by the platform
-    // layer of a host app on non-Apple targets. Apple targets use
-    // the built-in native impl and ignore the factory.
+    // Host-registered factory. Installed by the platform layer of a host app
+    // on non-Apple targets. Apple targets use the built-in native impl and
+    // ignore the factory.
     using Factory = std::function<std::unique_ptr<WindowHost>(
         View& root, const WindowOptions& options)>;
     static void set_factory(Factory factory);

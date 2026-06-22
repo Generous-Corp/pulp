@@ -1,10 +1,10 @@
 // SceneText — retained text node.
 //
-// Item 6.1 / Pulp-native names. Holds the string + family/size + paint;
-// at paint time emits `Canvas::set_font` + `Canvas::fill_text` (or
-// `stroke_text`) so any backend with font support (Skia, CG) renders
-// it natively. The widget side (`pulp::view::Label`) is the caller that
-// drives the canonical TextShaper measure-once pipeline; SceneText
+// Holds the string + family/size + paint; at paint time emits
+// `Canvas::set_font` + `Canvas::fill_text` (or `stroke_text`) so any
+// backend with font support (Skia, CG) renders it natively. The widget
+// side (`pulp::view::Label`) is the caller that drives the canonical
+// TextShaper measure-once pipeline; SceneText
 // stays intentionally thin so that a vector scene serialized from SVG
 // or design-tool import has somewhere to land its `<text>` element.
 #pragma once

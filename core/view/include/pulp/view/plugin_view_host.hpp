@@ -37,19 +37,20 @@ public:
 
     // Create a plugin view host for the given view tree.
     //
-    // Platform support (#299):
+    // Platform support:
     //   - macOS: NSView-backed impl in plugin_view_host_mac.mm, including
     //     native child-view attach/bounds/detach.
     //   - iOS: UIView-backed impl in plugin_view_host_ios.mm, including
     //     native child-view attach/bounds/detach.
-    //   - Windows/Linux/Android: no built-in impl — host app registers a
-    //     factory via set_factory(). Without a factory, create() returns
-    //     nullptr explicitly.
+    //   - Windows/Linux: native child-window hosts are registered on demand.
+    //   - Android or custom hosts: host app registers a factory via
+    //     set_factory(). Without a factory, create() returns nullptr
+    //     explicitly.
     static std::unique_ptr<PluginViewHost> create(View& root, Size size);
     static std::unique_ptr<PluginViewHost> create(View& root, const Options& options);
 
-    // Host-registered factory (#299). Installed by the host app's
-    // platform layer on non-Apple targets.
+    // Host-registered factory. Installed by built-in platform hosts or by
+    // embedding apps on targets without a built-in host.
     using Factory = std::function<std::unique_ptr<PluginViewHost>(
         View& root, const Options& options)>;
     static void set_factory(Factory factory);
