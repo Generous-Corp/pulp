@@ -541,30 +541,6 @@ commands:
         description: CI-friendly alias for --dry-run.
     docs: reference/cli.md#fmt
 
-  - name: config
-    status: usable
-    summary: Manage global developer configuration (~/.pulp/config.toml).
-    subcommands:
-      - name: init
-        summary: Create config from template (safe — never overwrites)
-        args:
-          - name: --force
-            required: false
-      - name: set
-        summary: Set a config value (e.g., signing.apple.identity)
-        args:
-          - name: key
-            kind: positional
-            required: true
-          - name: value
-            kind: positional
-            required: true
-      - name: show
-        summary: Show current non-comment config values
-      - name: path
-        summary: Print config file path
-    docs: reference/cli.md#config
-
   - name: coverage
     status: experimental
     summary: Local coverage tooling. Mirrors CI's `Diff coverage required` gate via `tools/scripts/local_diff_cover.sh`; threshold + filters live in `tools/scripts/coverage_config.json` (single source of truth shared with `.github/workflows/coverage.yml`).
