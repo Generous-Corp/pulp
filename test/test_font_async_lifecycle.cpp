@@ -1,4 +1,4 @@
-// test_font_async_lifecycle.cpp — Pulp #2163, font v2 Slice 2.1.
+// test_font_async_lifecycle.cpp — async font URL lifecycle coverage.
 //
 // Verifies register_font_url(...) returns a future that resolves to
 // the expected FontState for each URL scheme:
@@ -29,10 +29,10 @@ using namespace std::chrono_literals;
 
 namespace {
 
-// Write a bundled Inter blob to a temp file we can hand to
-// register_font_url. We could call into the bundled-font table
-// directly, but a real on-disk round-trip exercises the actual
-// register_font_file path the future dispatches to.
+// Write readable-but-invalid bytes to a temp file so register_font_url
+// exercises the file-input failure path. Skia builds reach the async
+// register_font_file worker; non-Skia builds return the ready Failed
+// stub result.
 std::string write_temp_dummy_font_bytes() {
     auto tmp = std::filesystem::temp_directory_path() / "pulp_font_async_test.ttf";
     std::ofstream f(tmp, std::ios::binary);
@@ -125,12 +125,11 @@ TEST_CASE("register_font_url: unsupported schemes are treated as plain paths",
     REQUIRE(fut.get() == FontState::Failed);
 }
 
-// pulp #2308 follow-up (Codex review P2): the detached worker calls
-// register_font_file(), which can throw — for example, a vector
-// allocation backed by `tellg()` on a huge sparse file. An exception
-// escaping a detached `std::thread` calls `std::terminate` and kills
-// the host process. The contract callers were sold is "drop the
-// future and you get a Failed result, never a crash."
+// Detached workers call register_font_file(), which can throw — for
+// example, a vector allocation backed by `tellg()` on a huge sparse
+// file. An exception escaping a detached `std::thread` calls
+// `std::terminate` and kills the host process. The public contract is
+// "drop the future and you get a Failed result, never a crash."
 //
 // This test creates a sparse file with a 10 TiB logical size on
 // filesystems that support it (APFS, ext4, NTFS sparse). When
@@ -176,15 +175,9 @@ TEST_CASE("register_font_url: detached worker survives allocation throw",
     fs::remove(tmp, ec);
 }
 
-// pulp #2246 follow-up (Codex review P1): the docstring on
-// register_font_url promises "the future is safe to detach", but the
-// pre-fix implementation used `std::async(std::launch::async, ...)`
-// whose returned future's destructor BLOCKS the caller until the
-// task completes if dropped without `.get()` / `.wait()`. That made
-// the docstring a lie. Verify the post-fix behavior: scheduling a
-// long-running registration and then dropping the future must NOT
-// block the caller — the test must complete promptly even though
-// the worker thread is still running in the background.
+// register_font_url promises "the future is safe to detach". Verify
+// that scheduling a registration and then dropping the future does not
+// block the caller; the worker may still be running in the background.
 TEST_CASE("register_font_url: dropping the future does not block the caller",
           "[font][async][issue-2246]") {
     namespace fs = std::filesystem;

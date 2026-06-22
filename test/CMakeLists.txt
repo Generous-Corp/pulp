@@ -1528,29 +1528,28 @@ pulp_add_test_suite(pulp-test-image-codecs-extended LIBRARIES pulp::canvas)
 # pass-through stub.
 pulp_add_test_suite(pulp-test-bidi-text LIBRARIES pulp::canvas)
 
-# pulp #2163 / font v2 Slice 2.7 — FontScope memory-budget eviction.
+# FontScope memory-budget eviction.
 pulp_add_test_suite(pulp-test-font-scope-budget LIBRARIES pulp::canvas)
 
-# pulp #2163 / font v2 Slice 2.8 — TTF/OTF structural sanitizer.
+# TTF/OTF structural sanitizer.
 # Gated on PULP_HAS_SKIA: the non-Skia stub in font_registry_stubs.cpp
 # accepts any non-empty buffer, so the rejection cases false-negative.
-# (Codex review on PR #2177, P2.)
 if(PULP_HAS_SKIA)
     pulp_add_test_suite(pulp-test-font-security LIBRARIES pulp::canvas)
 endif()
 
-# pulp #2163 / font v2 Slice 2.3 — variable axis wiring.
+# Variable axis wiring.
 # Gated on PULP_HAS_SKIA: FontResolver::resolve_family_list returns
 # NotFound when Skia is absent, so the has_typeface() assertions
-# false-negative. (Codex review on PR #2180, P1.)
+# false-negative.
 if(PULP_HAS_SKIA)
     pulp_add_test_suite(pulp-test-font-variable-axes LIBRARIES pulp::canvas)
 endif()
 
-# pulp #2163 / font v2 Slice 3.6 — UAX #29-lite cluster_step.
+# UAX #29-lite cluster_step.
 pulp_add_test_suite(pulp-test-cluster-step LIBRARIES pulp::canvas)
 
-# pulp #2163 / font v2 Slice 2.4 — locale-aware word + line breaking.
+# Locale-aware word + line breaking.
 # The surface always links: when ICU's <unicode/brkiter.h> is on the
 # include path the assertions exercise the real UAX #14 path against
 # the SkUnicode_icu symbols bundled in libskia.a; otherwise the
@@ -1558,7 +1557,7 @@ pulp_add_test_suite(pulp-test-cluster-step LIBRARIES pulp::canvas)
 # English-only expectations still hold.
 pulp_add_test_suite(pulp-test-font-locale-shaping LIBRARIES pulp::canvas)
 
-# pulp #2163 / font v2 Slice 3.2 — AA / hinting / subpixel policy centralization.
+# AA / hinting / subpixel policy centralization.
 add_executable(pulp-test-font-aa-hinting test_font_aa_hinting.cpp)
 target_link_libraries(pulp-test-font-aa-hinting PRIVATE pulp::canvas Catch2::Catch2WithMain)
 if(PULP_HAS_SKIA)
@@ -1566,24 +1565,24 @@ if(PULP_HAS_SKIA)
 endif()
 catch_discover_tests(pulp-test-font-aa-hinting)
 
-# pulp #2163 / font v2 Slice 2.2 — FontFlightRecorder + JSON drain.
+# FontFlightRecorder + JSON drain.
 add_executable(pulp-test-font-flight-recorder test_font_flight_recorder.cpp)
 target_link_libraries(pulp-test-font-flight-recorder PRIVATE pulp::canvas Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-font-flight-recorder)
 
-# pulp #2163 / font v2 Slice 3.3 — variable-font axis-animation LRU cache.
+# Variable-font axis-animation LRU cache.
 add_executable(pulp-test-font-axis-animation test_font_axis_animation.cpp)
 target_link_libraries(pulp-test-font-axis-animation PRIVATE pulp::canvas Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-font-axis-animation)
 
-# pulp #2163 / font v2 Slice 3.7 — parallel shaping via TextRunPlanner::shape_batch.
+# Parallel shaping via TextRunPlanner::shape_batch.
 add_executable(pulp-test-text-run-planner-parallel test_text_run_planner_parallel.cpp)
 target_link_libraries(pulp-test-text-run-planner-parallel PRIVATE pulp::canvas Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-text-run-planner-parallel)
 
-# pulp #2163 / font v2 Slice 1.2.a finish — real ICU bidi + script run
-# iterators. Verifies multi-run shaping on bidi / script boundaries and
-# UAX #29 cluster grouping (ZWJ, regional-indicator-pair, virama,
+# Real ICU bidi + script run iterators. Verifies multi-run shaping on
+# bidi / script boundaries plus UAX #29 cluster grouping (ZWJ,
+# regional-indicator-pair, virama,
 # combining marks). Cluster-grouping cases run on every build; the
 # bidi / script cases auto-skip under non-Skia builds via SUCCEED.
 #
@@ -1598,19 +1597,19 @@ if(PULP_HAS_SKIA)
 endif()
 catch_discover_tests(pulp-test-text-run-planner-icu)
 
-# pulp #2163 / font v2 Slice 2.1 — async font lifecycle (register_font_url).
+# Async font lifecycle (register_font_url).
 add_executable(pulp-test-font-async-lifecycle test_font_async_lifecycle.cpp)
 target_link_libraries(pulp-test-font-async-lifecycle PRIVATE pulp::canvas Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-font-async-lifecycle)
 
-# pulp #2163 / font v2 Slice 3.5 — WOFF2 runtime decoding (security-gated).
+# WOFF2 runtime decoding (security-gated).
 # Structural rejection + decoder-availability probe; no Skia link
 # required because the negative paths are universal.
 add_executable(pulp-test-font-woff2 test_font_woff2.cpp)
 target_link_libraries(pulp-test-font-woff2 PRIVATE pulp::canvas Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-font-woff2)
 
-# pulp #2163 / font v2 Slice 3.1 — color-font predicate on ResolvedFont.
+# Color-font predicate on ResolvedFont.
 # Gated on PULP_HAS_SKIA — the predicate returns false without a real
 # typeface so the resolver-bound assertions can't fire on non-Skia.
 if(PULP_HAS_SKIA)
@@ -1624,19 +1623,19 @@ add_executable(pulp-test-font-options test_font_options.cpp)
 target_link_libraries(pulp-test-font-options PRIVATE pulp::canvas Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-font-options)
 
-# pulp #2163 — font v2 Slice 1.3 measurement-paint parity harness.
+# Measurement-paint parity harness.
 # Asserts TextShaper predictions match Skia's measured advance within
 # 0.5px for a hand-picked sample set representative of CHAIN INFO /
-# CROSSOVER bugs. Full multilingual torture corpus (test/text_corpus/
+# CROSSOVER bugs. The full multilingual corpus (test/text_corpus/
 # corpus.json) loader + per-TextAnchor bbox assertions land alongside
-# the JSON parser link in a follow-up.
+# a future JSON parser link.
 if(PULP_HAS_SKIA)
     add_executable(pulp-test-parity test_parity.cpp)
     target_link_libraries(pulp-test-parity PRIVATE pulp::canvas Catch2::Catch2WithMain skia::skia)
     catch_discover_tests(pulp-test-parity)
 endif()
 
-# Font v2 Slice 3.4 — cross-backend rendering goldens.
+# Cross-backend font rendering goldens.
 # Catches font-cascade / hinting / AA regressions in the Skia
 # raster path before they land. Uses a structural digest (width,
 # height, opaque-pixel count, darkness sum) with ±5% tolerance
@@ -1655,7 +1654,7 @@ if(PULP_HAS_SKIA)
     catch_discover_tests(pulp-test-font-rendering-goldens)
 endif()
 
-# Font v2 Slice 3.4 — Skia GPU lane (Dawn → Metal on macOS-arm64).
+# Skia GPU font rendering lane (Dawn → Metal on macOS-arm64).
 # Sibling of `pulp-test-font-rendering-goldens` (raster). Same
 # three strings, same structural digest, ±15% tolerance to absorb
 # Graphite/Metal subpixel + AA drift. Gated at compile time on
@@ -1711,7 +1710,7 @@ if(PULP_HAS_SKIA AND APPLE AND PULP_ENABLE_GPU)
     endif()
 endif()
 
-# Font v2 Slice 3.4 — Skia GPU Vulkan lane (SCAFFOLD).
+# Skia GPU Vulkan font rendering lane (scaffold).
 # Sibling of `pulp-test-font-rendering-goldens-gpu` (Metal). The Vulkan
 # lane is intentionally OFF by default: there is no Vulkan-capable
 # runner in Pulp's required gate set today, so building this target
@@ -1721,10 +1720,10 @@ endif()
 # Tolerance for the raster↔Vulkan cross-backend probe is ±20 % —
 # see the test header for the rationale.
 option(PULP_VULKAN_AVAILABLE
-    "Build the Skia GPU Vulkan rendering-goldens scaffold (font v2 \
-Slice 3.4 follow-up). Requires Skia built with skia_use_vulkan=true \
-and a working Vulkan ICD on the host. OFF on every Pulp CI lane \
-today; flip ON when a Vulkan-capable runner exists."
+    "Build the Skia GPU Vulkan rendering-goldens scaffold. Requires \
+Skia built with skia_use_vulkan=true and a working Vulkan ICD on the \
+host. OFF on every Pulp CI lane today; flip ON when a Vulkan-capable \
+runner exists."
     OFF)
 if(PULP_HAS_SKIA AND (UNIX AND NOT APPLE OR WIN32) AND PULP_VULKAN_AVAILABLE)
     add_executable(pulp-test-font-rendering-goldens-vulkan
@@ -1739,7 +1738,7 @@ if(PULP_HAS_SKIA AND (UNIX AND NOT APPLE OR WIN32) AND PULP_VULKAN_AVAILABLE)
     catch_discover_tests(pulp-test-font-rendering-goldens-vulkan)
 endif()
 
-# Font v2 Slice 3.4 — Skia GPU Direct3D 12 lane (SCAFFOLD).
+# Skia GPU Direct3D 12 font rendering lane (scaffold).
 # Sibling of `pulp-test-font-rendering-goldens-gpu` (Metal). The D3D
 # lane is intentionally OFF by default: there is no Windows D3D
 # runner in Pulp's required gate set today, so building this target
@@ -1749,10 +1748,9 @@ endif()
 # raster↔D3D cross-backend probe is ±20 % — see the test header for
 # the rationale.
 option(PULP_D3D_AVAILABLE
-    "Build the Skia GPU Direct3D 12 rendering-goldens scaffold \
-(font v2 Slice 3.4 follow-up). Requires Skia built with \
-skia_use_direct3d=true on Windows. OFF on every Pulp CI lane \
-today; flip ON when a Windows D3D runner exists."
+    "Build the Skia GPU Direct3D 12 rendering-goldens scaffold. \
+Requires Skia built with skia_use_direct3d=true on Windows. OFF on \
+every Pulp CI lane today; flip ON when a Windows D3D runner exists."
     OFF)
 if(PULP_HAS_SKIA AND WIN32 AND PULP_D3D_AVAILABLE)
     add_executable(pulp-test-font-rendering-goldens-d3d

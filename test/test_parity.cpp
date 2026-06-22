@@ -1,4 +1,4 @@
-// test_parity.cpp — Pulp #2163 follow-up, font v2 Slice 1.3.
+// test_parity.cpp — font measurement/paint parity.
 //
 // Measurement-paint parity harness. Asserts that
 // `TextShaper::prepare(text, family, size).total_width()` matches
@@ -9,14 +9,12 @@
 // asserts the architectural invariant the v2 plan calls "the
 // killer" gap: measure equals paint, every frame, every script.
 //
-// V1 (this commit): width parity only, hand-picked sample set
+// Current coverage is width parity over a hand-picked sample set
 // representative of the CHAIN INFO / CROSSOVER / MID-SIDE-WIDTH
-// bugs that drove the v2 plan. The full multilingual torture
-// corpus (60 entries in test/text_corpus/corpus.json) loader +
-// per-TextAnchor bbox assertions arrive in the next iteration of
-// this file once we have a JSON parser linked into the test
-// target. This MVP proves the parity property is testable and
-// guards the regressions Slice 1.3 was specifically created for.
+// regressions that drove this harness. The fuller 60-entry multilingual
+// corpus lives in test/text_corpus/corpus.json; wiring that loader and
+// per-TextAnchor bbox assertions needs a JSON parser linked into this
+// test target.
 
 #include <catch2/catch_test_macros.hpp>
 
