@@ -1,12 +1,12 @@
-// OfflineStretch — Phase 0 scaffold tests.
+// OfflineStretch tests.
 //
-// At this phase the engine is a length-correct pass-through: exact identity at
-// time_ratio == 1, and an honest placeholder (copy + zero-pad) otherwise. These
-// tests pin the parts of the contract that must hold for EVERY future phase:
+// These tests pin the contract and quality bands for the implemented engine:
 //   - exact output length = round(in_frames * time_ratio) (loop grid-lock);
 //   - R=1, pitch 0 is a perfect null against the input;
-//   - the process() contract rejects misuse (unprepared, wrong out length).
-// The stretch-quality assertions arrive with the real engine in Phase 1+.
+//   - deterministic renders for independent runs;
+//   - tempo/pitch/repitch quality bounds;
+//   - the process() contract rejects misuse before writing output.
+// Output quality is not yet compared against an external reference renderer.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -85,7 +85,7 @@ TEST_CASE("process writes exactly the contracted output length", "[offline-stret
 
     std::string err;
     REQUIRE(s.process(inp, n, outp, expected, opts, &err));
-    // Placeholder body must have written every output sample (no stale fill).
+    // The render must have written every output sample (no stale fill).
     bool any_stale = false;
     for (float v : out) if (v == 1234.0f) { any_stale = true; break; }
     CHECK_FALSE(any_stale);
@@ -202,8 +202,8 @@ TEST_CASE("repitch_linked: exact length, R=1 identity, sine tracks i/ratio", "[o
             e += d * d; ++cnt;
         }
         // sinc6 is a 6-tap windowed sinc: ~-48 dB passband accuracy on a 1 kHz
-        // tone. Confirms repitch reads the correct positions; a Kaiser-sinc
-        // (Resampler, 96 dB) upgrade for repitch is a P6 quality item.
+        // tone. Confirms repitch reads the correct positions; upgrading repitch
+        // to the 96 dB Kaiser-sinc Resampler remains a quality improvement.
         CHECK(std::sqrt(e / cnt) < 2.5e-3);
     }
 }
@@ -539,8 +539,9 @@ TEST_CASE("invalid fft override is ignored (falls back to default geometry)", "[
 
 // ── Character modes (StretchCharacter) ────────────────────────────────────────
 // clean (default) = spectral peak-lock; varispeed = pitch+time-linked resample +
-// speed-scaled tape head EQ; phase_vocoder/granular are scaffolds that render as
-// clean. These pin the API contract + the varispeed tape behaviour.
+// speed-scaled tape head EQ; phase_vocoder/granular are reserved modes that
+// currently render as clean. These pin the API contract + the varispeed tape
+// behaviour.
 TEST_CASE("varispeed: identity at ratio 1, exact length, tape EQ direction", "[offline-stretch]") {
     using pulp::signal::StretchCharacter;
     const double sr = 48000.0;
