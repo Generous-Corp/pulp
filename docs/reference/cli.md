@@ -1617,6 +1617,25 @@ Supported Claude Code plugin keys:
   injection. Read at session start by
   `hooks/scripts/inject-claude-prefs.sh`.
 
+### coverage
+
+**Status**: experimental
+
+Run local coverage tooling that mirrors CI's `Diff coverage required` gate.
+
+```bash
+pulp coverage                  # show coverage tooling help
+pulp coverage diff             # run the full local diff-coverage check
+pulp coverage diff TARGET ...  # build specific test targets before checking
+```
+
+`pulp coverage diff` shells out to `tools/scripts/local_diff_cover.sh`.
+Thresholds and file filters live in `tools/scripts/coverage_config.json`, the
+same source consumed by the GitHub Actions coverage workflow.
+
+Set `PULP_SKIP_DIFF_COVER=1` for docs-only or workflow-only changes where the
+diff-coverage build is intentionally out of scope.
+
 ### clean
 
 **Status**: usable
