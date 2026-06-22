@@ -1,8 +1,4 @@
-// test_widget_bridge_css_animations.cpp — extracted from
-// test_widget_bridge.cpp in the 2026-05 Phase 5 (P5-1 follow-up)
-// refactor.
-//
-// pulp #1434 Phase A2-1 — CSS animations + transitions surface.
+// WidgetBridge CSS animations + transitions tests for pulp #1434.
 // Round-trips the full CSS-Animations + CSS-Transitions shim through
 // the bridge: animation-name / -duration / -delay / -iteration-count
 // / -direction / -fill-mode / -timing-function / -play-state and the

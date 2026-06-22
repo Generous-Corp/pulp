@@ -1,6 +1,5 @@
-// test_view_corner_radius.cpp — extracted from test_view.cpp in the
-// 2026-05 Phase 5 (P5-3 first cut) refactor. Covers the pulp #1731
-// corner-radius cluster: percent uniform + per-corner radius math,
+// View corner-radius tests for the pulp #1731 cluster: percent uniform +
+// per-corner radius math,
 // reflow-on-bounds-change, Panel default radius, view border stroke +
 // outline honoring percent radius, box-shadow path reading the
 // percent-resolved radius.

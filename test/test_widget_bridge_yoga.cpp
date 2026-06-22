@@ -1,7 +1,4 @@
-// test_widget_bridge_yoga.cpp — extracted from test_widget_bridge.cpp
-// in the 2026-05 Phase 5 (P5-1 follow-up) refactor.
-//
-// Yoga-layer bridge tests, three coherent clusters from compat.json:
+// WidgetBridge Yoga-layer tests, three coherent clusters from compat.json:
 //
 //   1. pulp #1434 (rn batch C) — dimension percent strings
 //      CSS width / height / minWidth / minHeight / maxWidth / maxHeight

@@ -1,8 +1,5 @@
 // Tests for WidgetBridge runtime-import handlers (pulp #468 follow-up).
 //
-// Extracted from test/test_widget_bridge.cpp in the 2026-05-17 Phase 5
-// P5-1 first cut. See planning/2026-05-17-refactor-roadmap-year.md.
-//
 // Contract for WidgetBridge::install_runtime_import_handlers() — the
 // C++ side of @pulp/react/runtime-import. These tests don't depend on
 // a real Claude bundle (parse_claude_bundle returns nullopt for

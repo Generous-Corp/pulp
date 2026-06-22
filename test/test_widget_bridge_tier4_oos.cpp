@@ -1,7 +1,4 @@
-// test_widget_bridge_tier4_oos.cpp — extracted from test_widget_bridge.cpp
-// in the 2026-05 Phase 5 (P5-1 follow-up) refactor.
-//
-// pulp #1434 / Tier-4 — OOS no-op + fallback pins.
+// WidgetBridge Tier-4 OOS no-op and fallback tests for pulp #1434.
 //
 // Two clusters from the Tier-4 (out-of-scope / catalog hygiene) sweep:
 //   1. OOS 3D / generated-content / scroll-snap pin — properties Pulp
@@ -172,4 +169,3 @@ TEST_CASE("CSSStyleDeclaration silent-accepts 6 perf-hint/interaction CSS proper
     REQUIRE(p->visible());
     REQUIRE(p->flex().direction == FlexDirection::row);
 }
-

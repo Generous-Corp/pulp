@@ -1,8 +1,4 @@
-// test_widget_bridge_css_misc.cpp — extracted from test_widget_bridge.cpp
-// in the 2026-05 Phase 5 P5-1 follow-up refactor.
-//
-// CSS-misc bridge tests — two small but coherent CSS clusters that
-// together push test_widget_bridge.cpp under the 3,000-line P5-1 target:
+// WidgetBridge CSS-misc tests: two small but coherent CSS clusters.
 //
 //   * pulp #1434 batch 3: text-decoration longhands.
 //     setTextDecorationColor / setTextDecorationLine / setTextDecorationStyle
@@ -262,4 +258,3 @@ TEST_CASE("WidgetBridge setBackgroundRepeat round-trips keyword on View",
     bridge.load_script("setBackgroundRepeat('panel', '')");
     REQUIRE(panel->background_repeat().empty());
 }
-

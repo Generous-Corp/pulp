@@ -1,7 +1,4 @@
-// test_widget_bridge_css_grid.cpp — extracted from test_widget_bridge.cpp
-// in the 2026-05 Phase 5 (P5-1 follow-up) refactor.
-//
-// pulp #1434 Phase A2-2 — CSS Grid extended surface.
+// WidgetBridge CSS Grid tests for pulp #1434.
 // Round-trips the CSS Grid shim through the bridge:
 // grid-template-columns / grid-template-rows / grid-template-areas,
 // grid-column / grid-row / grid-area placement shorthand, grid gap
@@ -154,4 +151,3 @@ TEST_CASE("CSSStyleDeclaration forwards gridTemplateAreas",
     REQUIRE(bridge.widget("a")->grid().template_areas.size() == 3);
     REQUIRE(bridge.widget("a")->grid().auto_flow == GridStyle::AutoFlow::column);
 }
-
