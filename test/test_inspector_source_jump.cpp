@@ -1,11 +1,8 @@
-// Inspector — Phase 5.1 / 5.3 source-jump tests (View provenance + overlay
-// J hotkey + DomainHandler config propagation).
+// Inspector source-jump tests: view provenance, overlay J hotkey, and
+// DomainHandler config propagation.
 //
-// Split verbatim out of test/test_inspector.cpp (Phase-5 oversized-test-file
-// refactor). The TEST_CASE blocks are byte-identical to their originals;
-// only the file/binary they live in changed.
-//
-// planning/2026-05-19-inspector-phase5-source-jump-spike.md § Phase 5.1.
+// Kept as a separate test binary so source-jump behavior stays easy to
+// diagnose without loading the full inspector test suite.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -22,8 +19,8 @@ using namespace pulp::inspect;
 
 namespace {
 
-// Scoped env-var guard (verbatim copy of the helper from test_inspector.cpp;
-// duplicated here so the source-jump cluster is self-contained).
+// Scoped env-var guard duplicated here so the source-jump cluster is
+// self-contained.
 struct ScopedEnv {
     explicit ScopedEnv(std::string name) : name_(std::move(name)) {
         if (const char* prev = std::getenv(name_.c_str())) {

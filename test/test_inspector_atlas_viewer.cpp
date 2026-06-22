@@ -1,10 +1,7 @@
-// Inspector — Phase 6.2 texture-atlas viewer tests.
+// Inspector texture-atlas viewer tests.
 //
-// Split verbatim out of test/test_inspector.cpp (Phase-5 oversized-test-file
-// refactor). The TEST_CASE blocks are byte-identical to their originals;
-// only the file/binary they live in changed.
-//
-// Spec: planning/2026-05-19-inspector-phase6-gpu-perf-spike.md § Phase 6.2.
+// Kept as a separate test binary so atlas viewer regressions stay isolated
+// from the broader inspector overlay tests.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -21,8 +18,7 @@ using namespace pulp::inspect;
 namespace {
 
 // Count RecordingCanvas fill_text commands whose text contains `needle`.
-// Verbatim copy of the helper from test_inspector.cpp's Phase 6.1 block;
-// duplicated here so the atlas-viewer cluster is self-contained.
+// Duplicated here so the atlas-viewer cluster is self-contained.
 int count_text_containing(const pulp::canvas::RecordingCanvas& canvas,
                           std::string_view needle) {
     int n = 0;
