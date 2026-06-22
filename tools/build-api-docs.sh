@@ -4,7 +4,7 @@
 #
 # Injects the current SDK version from CMakeLists.txt (`project(Pulp VERSION x.y.z)`)
 # as Doxygen's PROJECT_NUMBER so `/api/` always shows the right version instead
-# of the stale literal baked into docs/doxygen/Doxyfile. (#577 PR 4.)
+# of the stale literal baked into docs/doxygen/Doxyfile.
 
 set -euo pipefail
 
