@@ -249,9 +249,7 @@ public:
                                               ButtonHandler handler = {});
 
     /// "Warning" alert with a single OK button — sibling of `info` /
-    /// `error` (closes the gap-doc Phase 3 row
-    /// "TooltipWindow + BubbleMessageComponent + AlertWindow styled"
-    /// for the warning variant).
+    /// `error`.
     static std::unique_ptr<AlertWindow> warning(const std::string& title,
                                                 const std::string& message,
                                                 ButtonHandler handler = {});

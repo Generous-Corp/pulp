@@ -1,6 +1,6 @@
 #pragma once
 
-// Linux AT-SPI2 mapping for Pulp AccessRole (workstream 04 slice L7a-2).
+// Linux AT-SPI2 mapping for Pulp AccessRole.
 //
 // Pure-constant header — no AT-SPI / ATK runtime dependency — so the same
 // mapping compiles on every platform and can be unit-tested offline. The Linux

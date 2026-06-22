@@ -1038,8 +1038,8 @@ public:
     }
     const std::string& image_path() const { return path_; }
 
-    /// URI-keyed image source (workstream 07 B4). Accepts file://,
-    /// resource://, or memory://sha256=<hex>. When an ImageCache is
+    /// URI-keyed image source. Accepts file://, resource://, or
+    /// memory://sha256=<hex>. When an ImageCache is
     /// attached via set_image_cache(), paint() consults it instead of
     /// re-reading the file; the cache owns decode + eviction.
     void set_image_source(const std::string& uri) {

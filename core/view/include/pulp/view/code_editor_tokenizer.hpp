@@ -2,8 +2,7 @@
 
 /// @file code_editor_tokenizer.hpp
 /// Lightweight per-language tokenizers for `CodeEditor` syntax
-/// highlighting (closes the gap-doc Phase 4 row "CodeEditor language
-/// coverage").
+/// highlighting.
 ///
 /// Each call to `tokenize_line(line, language)` walks a single source
 /// line and returns a flat list of `Token` spans the editor can color.

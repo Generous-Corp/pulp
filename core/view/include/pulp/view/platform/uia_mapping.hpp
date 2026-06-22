@@ -1,6 +1,6 @@
 #pragma once
 
-// Windows UIA mapping for Pulp AccessRole (workstream 04 slice 4.1a).
+// Windows UIA mapping for Pulp AccessRole.
 //
 // Pure-constant header — no UIAutomationCore.h dependency — so the same
 // mapping compiles on every platform and can be unit-tested offline.
@@ -112,7 +112,7 @@ constexpr bool role_supports_value(View::AccessRole role) {
     return false;
 }
 
-// ── Per-widget fragment runtime IDs (Phase 3) ────────────────────────
+// ── Per-widget fragment runtime IDs ───────────────────────────────────
 //
 // Every UIA fragment must return a process-stable runtime ID so clients
 // can compare element identity across calls. The first element of a

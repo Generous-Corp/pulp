@@ -2,9 +2,9 @@
 //!
 //! # Scope
 //!
-//! Phase 4 ports `projects list` — human and `--json` output — with
-//! parity against the C++ human output. `add` and `remove` are NOT
-//! ported yet; they stay on the C++ binary until a later phase.
+//! Implements `projects list`, `projects add`, `projects remove`, and
+//! `projects prune`, with human output plus `--json` support where the
+//! Rust CLI owns a structured response.
 //!
 //! # JSON shape
 //!

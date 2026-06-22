@@ -1,6 +1,6 @@
 #pragma once
 
-// Modulation-matrix canvas widget — workstream 07 slice B5.
+// Modulation-matrix canvas widget.
 //
 // Thin View that visualises a ModulationMatrix: draws source nodes on
 // the left, destinations on the right, and one line per route with a
@@ -8,10 +8,10 @@
 // destination adds a route. Clicking an existing route's line removes
 // it.
 //
-// This slice lands the visualisation + hit-testing scaffolding. Per-
-// route depth sliders and curve dropdowns are a follow-up; for now the
-// widget adds routes at depth = 1.0 and the depth is edited via any
-// other UI the plug-in exposes.
+// The widget owns visualisation + hit-testing. It adds routes at
+// depth = 1.0 by default; selected route depth and curve are mutable
+// through the public setters so plugins can wire their own external
+// controls.
 
 #include <pulp/view/modulation_matrix.hpp>
 #include <pulp/view/view.hpp>

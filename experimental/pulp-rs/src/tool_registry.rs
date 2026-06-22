@@ -30,15 +30,14 @@
 //! }
 //! ```
 //!
-//! # Phase 6d scope
+//! # Rust-native scope
 //!
 //! - Reader + struct model ported fully.
 //! - `locate_tool` ported — checks `$PULP_HOME/tools/<id>/` first,
 //!   then `python-envs/<id>/run.sh`, then `$PATH`.
-//! - `install` stubbed with a pointer at the C++ binary: archive
+//! - `install` is still stubbed with a pointer at the C++ binary: archive
 //!   download + extraction needs `ureq` + `tar` + `zip` crates plus
-//!   platform-specific chmod, adding ~500 LOC of dep surface that
-//!   isn't worth it for a Phase 8 swap-day blocker.
+//!   platform-specific chmod, so the Rust side keeps the fallback explicit.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -407,7 +406,7 @@ mod tests {
         }
     }
 
-    // ── #45 coverage uplift slice 11 — tool_registry.rs final ─────
+    // ── Registry loading coverage ──────────────────────────────────
 
     #[test]
     fn load_parses_tool_registry_json_and_imprints_id() {

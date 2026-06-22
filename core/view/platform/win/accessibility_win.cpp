@@ -1,8 +1,6 @@
 // Windows UI Automation accessibility provider.
 //
-// Phase 1 (earlier): HWND + root + UiaClientsAreListening probe.
-//
-// Phase 2 (#247):
+// Root provider:
 // - IRawElementProviderSimple on the root (host provider) so UIA clients
 //   can discover the process. WM_GETOBJECT handler returns this via
 //   UiaReturnRawElementProvider.
@@ -11,8 +9,8 @@
 //   (UiaClientsAreListening() == FALSE) — the cheap path matters because
 //   widgets call them on every parameter nudge.
 //
-// Phase 3 (this slice): per-widget fragments. Each accessible View is
-// exposed as a PulpFragmentProvider implementing IRawElementProviderFragment
+// Per-widget fragments: each accessible View is exposed as a
+// PulpFragmentProvider implementing IRawElementProviderFragment
 // (Navigate / GetRuntimeId / get_BoundingRectangle / get_FragmentRoot)
 // and IRawElementProviderSimple (GetPatternProvider / GetPropertyValue).
 // The root host provider becomes the IRawElementProviderFragmentRoot, so
@@ -58,10 +56,9 @@ class PulpFragmentProvider;
 // Returning BSTR through VARIANT hands ownership to UIA.
 
 static BSTR make_bstr(const std::string& s) {
-    // Convert UTF-8 to UTF-16 for COM. MultiByteToWideChar returns
-    // length including terminator; SysAllocStringLen expects length
-    // without terminator (matching the UTF-16 character count minus
-    // the NUL it allocates itself).
+    // Convert UTF-8 to UTF-16 for COM. Passing an explicit byte count
+    // makes MultiByteToWideChar return the UTF-16 length without a
+    // terminator, which is exactly what SysAllocStringLen expects.
     if (s.empty()) return SysAllocString(L"");
     int wlen = MultiByteToWideChar(CP_UTF8, 0, s.data(),
                                     static_cast<int>(s.size()),
