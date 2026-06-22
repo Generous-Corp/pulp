@@ -236,10 +236,3 @@ TEST_CASE("SkiaCanvas skips shadow when fully transparent or zero",
     REQUIRE(px.b == 255);
 }
 #endif  // PULP_HAS_SKIA
-
-// ── pulp #1520 — Canvas2D ctx.direction / ctx.filter dispatch ────────────
-//
-// Asserts that the CanvasWidget paint loop forwards the new
-// `set_direction` / `set_filter` commands through to the underlying
-// canvas (here, RecordingCanvas) so the JS shim's setter intent reaches
-// the active backend on every frame.

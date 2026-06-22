@@ -79,15 +79,14 @@ struct ScriptedBridge {
 
 // ── pulp #1525 — fillText / strokeText maxWidth + glyph cluster handling ──
 //
-// Promotion target: 2 DIVERGE → PASS for canvas2d/fillText and
-// canvas2d/strokeText. Pre-#1525 the JS shim accepted `maxWidth` as a
-// 4th arg but discarded it (`void maxWidth;`) and `strokeText` re-routed
-// through `fillText` with the strokeStyle as the fill colour — visually
-// approximate but spec-incompatible (no real outlined glyphs, no
-// horizontal squeeze).
+// The catalog marks canvas2d/fillText and canvas2d/strokeText as supported.
+// Pre-#1525 the JS shim accepted `maxWidth` as a 4th arg but discarded it
+// (`void maxWidth;`) and `strokeText` re-routed through `fillText` with the
+// strokeStyle as the fill colour — visually approximate but spec-incompatible
+// (no real outlined glyphs, no horizontal squeeze).
 //
-// These tests cover the full JS → bridge → CanvasDrawCmd surface so the
-// catalog can flip from `partial` to `supported`.
+// These tests cover the full JS → bridge → CanvasDrawCmd surface that backs
+// the supported catalog entries.
 
 TEST_CASE("Canvas2D fillText threads maxWidth through to bridge",
           "[view][canvas2d][issue-1525]") {
@@ -517,10 +516,9 @@ TEST_CASE("Canvas2D roundRect shim accepts {x,y} elliptical corner",
 
 // ── pulp #1520 — Canvas2D ctx.direction / ctx.filter ────────────────────
 //
-// canvas2d/direction and canvas2d/filter were the last two NOT-IMPL
-// entries in compat.json's canvas2d catalog. This block flips them to
-// `partial` by routing the JS shim through the bridge and into Skia's
-// SkShaper / SkImageFilter chain. The tests below exercise:
+// canvas2d/direction and canvas2d/filter are supported by routing the JS shim
+// through the bridge and into Skia's SkShaper / SkImageFilter chain. The tests
+// below exercise:
 //   * round-trip getter/setter on the JS shim
 //   * defensive coercion of unknown direction strings
 //   * sticky flush of direction setter before fillText

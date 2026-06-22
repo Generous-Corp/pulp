@@ -629,8 +629,8 @@ TEST_CASE("CSSStyleDeclaration translates whiteSpace to setWhiteSpace bridge cal
 }
 
 // pulp #1423 — `width: '100%'` and `height: '100%'` propagate through the
-// CSS translator and bridge to Yoga's percent API. Spectr uses the
-// `width:'100%'` form at spectr-editor-extracted.js:2377 and :3414.
+// CSS translator and bridge to Yoga's percent API. Spectr's generated editor
+// bundle uses the `width:'100%'` form.
 TEST_CASE("CSS width/height percent strings propagate to Yoga via setFlex",
           "[view][bridge][css][issue-1423]") {
     ScriptEngine engine;
