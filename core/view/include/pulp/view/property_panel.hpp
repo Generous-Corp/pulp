@@ -3,8 +3,7 @@
 /// @file property_panel.hpp
 /// PropertyPanel — typed property editor with Boolean / Choice / Slider
 /// / Button / MultiChoice / Text variants and optional `PropertiesFile`
-/// persistence (closes the gap-doc Phase 4 row
-/// "PreferencesPanel + PropertyPanel widgets").
+/// persistence.
 ///
 /// `PropertyPanel` is a sister widget to `PreferencesPanel`: while
 /// PreferencesPanel manages "which page is shown", PropertyPanel hosts

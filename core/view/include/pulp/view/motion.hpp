@@ -67,7 +67,7 @@ struct TraceOptions {
     int fps = 15;
 };
 
-// ── Provenance envelope ──────────────────────────────────────────────
+// ── Provenance envelope ───────────────────────────────────────────────
 //
 // Opaque metadata describing *where* a trace came from. Carried on
 // TraceStarted (trace-level) and on burst Start events (burst-level).

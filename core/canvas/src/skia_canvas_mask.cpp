@@ -1,4 +1,4 @@
-// skia_canvas_mask.cpp — CSS mask-image / mask-size paint slice.
+// skia_canvas_mask.cpp — CSS mask-image / mask-size painting.
 //
 // Owns Skia-backed CSS mask-image / mask-size painting so mask-specific
 // parsing and composition stay isolated from the rest of the Canvas2D
@@ -54,7 +54,7 @@
 
 namespace pulp::canvas {
 
-// ── CSS mask-image + mask-size paint slice ──────────────────────────────
+// ── CSS mask-image + mask-size painting ─────────────────────────────────
 //
 // Supported mask inputs are parsed into a shader and applied on restore()
 // with the CSS kDstIn composite. Unsupported or unparseable forms fall
@@ -264,7 +264,7 @@ sk_sp<SkShader> parse_linear_gradient_mask(const std::string& value,
 //   `<n>%`        → (n/100, n/100)
 //   `<n>% <m>%`   → (n/100, m/100)
 //   `<n>px <m>px` → (n/w, m/h)
-//   `<n>px`       → (n/w, n/h)
+//   `<n>px`       → (n/w, n/w)
 //
 // Returns (1, 1) for unrecognized input — safe default that matches CSS
 // `mask-size: auto` behavior (cover the box).

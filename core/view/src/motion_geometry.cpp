@@ -1,10 +1,8 @@
 // motion_geometry.cpp — geometry-walker + scroll-geometry helpers for
-// the motion subsystem, extracted from motion.cpp in the 2026-05
-// refactor.
+// the motion subsystem.
 //
-// The Layout/Presentation geometry walker (Phase 2) and the
-// scroll-geometry helpers: 2D affine matrix math, local→global View
-// transforms, axis-aligned bounding boxes, and the resolve_geometry /
+// Owns 2D affine matrix math, local→global View transforms, axis-aligned
+// bounding boxes, and the resolve_geometry /
 // extract_property / extract_scroll_property / property_name /
 // fmt_double entry points the motion Coordinator consumes.
 //
@@ -196,9 +194,8 @@ Rect resolve_geometry(pulp::view::View& v,
     if (space == GeometrySpace::ViewLocal) {
         return { 0.0f, 0.0f, v.bounds().width, v.bounds().height };
     }
-    // Window and Screen collapse onto ViewGlobal in Phase 2.
-    // Phase 6 adds window-origin / screen-origin offsets when the host
-    // exposes them.
+    // Window and Screen currently collapse onto ViewGlobal; a host that
+    // exposes window-origin / screen-origin offsets can layer them here.
     return (source == GeometrySource::Presentation)
                ? presentation_rect_in_global(v)
                : layout_rect_in_global(v);

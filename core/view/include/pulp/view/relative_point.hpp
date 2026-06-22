@@ -2,10 +2,8 @@
 
 // RelativePoint — expression-based positioning primitive.
 //
-// Closes the "Relative coordinates" P3 row in
-// planning/2026-05-24-reference-framework-gap-analysis.md. Pulp's flex +
-// grid layout covers ~95% of real layouts; RelativePoint fills the
-// remaining "I want this anchored to another element's edge" cases
+// Pulp's flex + grid layout covers most authored layouts; RelativePoint
+// fills the remaining "I want this anchored to another element's edge" cases
 // without forcing a full constraint solver.
 //
 // Grammar:
