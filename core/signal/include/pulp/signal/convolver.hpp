@@ -66,13 +66,12 @@ public:
     bool try_swap_ir(ConvolverIrSwapper& swapper) {
         // Gate the swap on retire-ring capacity FIRST so the audio
         // thread never has to free the displaced IR inline if the
-        // ring is saturated (Codex P1 on #2881 — single-slot retired_
-        // would let the audio thread deallocate when 2+ swaps
-        // happened between drain_old() calls). Refusing the swap
-        // when the ring is full is RT-safe: pending stays in the
-        // swapper for the next try_swap_ir attempt; in-flight state_
-        // continues uninterrupted; worker thread catches up on its
-        // next drain tick.
+        // ring is saturated. A single retired slot would let the audio
+        // thread deallocate when 2+ swaps happened between drain_old()
+        // calls. Refusing the swap when the ring is full is RT-safe:
+        // pending stays in the swapper for the next try_swap_ir attempt;
+        // in-flight state_ continues uninterrupted; worker thread catches
+        // up on its next drain tick.
         if (state_ && !swapper.has_retire_capacity()) {
             return false;
         }
