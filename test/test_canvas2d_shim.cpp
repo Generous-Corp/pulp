@@ -1160,13 +1160,13 @@ TEST_CASE("Canvas2D measureText reads the parsed shorthand size + family",
     REQUIRE(result == "object|number|true");
 }
 
-// ─── Codex audit fixes (PR #1495) ─────────────────────────────────────────────
+// ─── Font shorthand unit parsing + fill_text replay regressions ───────────────
 
 TEST_CASE("Canvas2D _parseFontShorthand: pt unit converts to px (1pt = 4/3 px)",
           "[view][canvas2d][issue-1434]") {
-    // Codex P2 audit (PR #1495 comment 3192815904): `12pt Inter` must NOT
-    // be treated as `12px Inter`. CSS specifies 1pt = 1/72in and the canvas
-    // shim resolves at the conventional 96dpi root, so 1pt = 4/3 px.
+    // `12pt Inter` must NOT be treated as `12px Inter`. CSS specifies
+    // 1pt = 1/72in; the canvas shim resolves at the conventional
+    // 96dpi root, so 1pt = 4/3 px.
     // 12pt → 16px exactly.
     auto result = run_in_bridge(R"(
         var p = CanvasRenderingContext2D._parseFontShorthand('12pt Inter');
@@ -1177,11 +1177,11 @@ TEST_CASE("Canvas2D _parseFontShorthand: pt unit converts to px (1pt = 4/3 px)",
 
 TEST_CASE("Canvas2D _parseFontShorthand: em unit converts to px (1em = 16px)",
           "[view][canvas2d][issue-1434]") {
-    // Codex P2 audit (PR #1495 comment 3192815904): `1.2em Inter` was
-    // parsed as `1.2px Inter`, producing severely undersized text and
-    // wrong measureText widths. Canvas2D has no DOM cascade, so em
-    // resolves against a fixed 16px root — same default browsers + every
-    // headless Canvas2D shim use. 1.2em → 19.2px.
+    // `1.2em Inter` was parsed as `1.2px Inter`, producing severely
+    // undersized text and wrong measureText widths. Canvas2D has no
+    // DOM cascade, so em resolves against a fixed 16px root — same
+    // default browsers + every headless Canvas2D shim use.
+    // 1.2em → 19.2px.
     auto result = run_in_bridge(R"(
         var p = CanvasRenderingContext2D._parseFontShorthand('1.2em Inter');
         return [p.family, p.size].join('|');
@@ -1191,10 +1191,9 @@ TEST_CASE("Canvas2D _parseFontShorthand: em unit converts to px (1em = 16px)",
 
 TEST_CASE("Canvas2D _parseFontShorthand: rem unit converts to px (1rem = 16px)",
           "[view][canvas2d][issue-1434]") {
-    // Codex P2 audit (PR #1495 comment 3192815904): `1rem Inter` was
-    // parsed as `1px Inter`. rem resolves against the document root,
-    // which canvas2d doesn't have — fall back to the conventional 16px
-    // root font size. 1rem → 16px; 2rem → 32px.
+    // `1rem Inter` was parsed as `1px Inter`. rem resolves against the
+    // document root, which canvas2d doesn't have — fall back to the
+    // conventional 16px root font size. 1rem → 16px; 2rem → 32px.
     auto result = run_in_bridge(R"(
         var a = CanvasRenderingContext2D._parseFontShorthand('1rem Inter');
         var b = CanvasRenderingContext2D._parseFontShorthand('2rem Inter');
@@ -1216,10 +1215,10 @@ TEST_CASE("Canvas2D _parseFontShorthand: pt + bold + family round-trip",
 
 TEST_CASE("Canvas2D fill_text replay preserves rich set_font_full state",
           "[view][canvas2d][issue-1434]") {
-    // Codex P1 audit (PR #1495 comment 3192815903): the legacy fill_text
-    // replay path in CanvasWidget::paint() called canvas.set_font(family,
-    // size) immediately before drawing, which reset weight/slant to
-    // normal/upright (SkiaCanvas::set_font(), canvas.cpp:567-575). That
+    // The legacy fill_text replay path in CanvasWidget::paint() called
+    // canvas.set_font(family, size) immediately before drawing, which
+    // reset weight/slant to normal/upright (SkiaCanvas::set_font(),
+    // canvas.cpp:567-575). That
     // clobbered the rich state captured by the immediately-prior
     // set_font_full cmd, so `ctx.font = "italic bold 18px Inter"`
     // followed by `ctx.fillText(...)` rendered as plain Regular upright
@@ -1299,7 +1298,7 @@ TEST_CASE("Canvas2D fill_text replay preserves rich set_font_full state",
 
 TEST_CASE("Canvas2D ctx.font with em produces correctly-scaled set_font_full size",
           "[view][canvas2d][issue-1434]") {
-    // Codex P2 end-to-end: `ctx.font = "1.5em Inter"` should record a
+    // `ctx.font = "1.5em Inter"` should record a
     // set_font_full with size = 1.5 * 16 = 24, NOT size=1.5.
     ScriptedBridge env;
     env.load(R"(
@@ -1627,4 +1626,3 @@ TEST_CASE("Canvas2D pattern set_fill_pattern reaches Skia without throwing",
     REQUIRE(any_painted);
 }
 #endif  // PULP_HAS_SKIA (closing the gradient/pattern test block above)
-

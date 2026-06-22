@@ -714,8 +714,8 @@ TEST_CASE("gzip_decompress rejects truncated member trailers and empty members",
                                   header_and_trailer_only.size()).has_value());
 }
 
-// Codex P2 on PR #747: RFC 1952 §2.2 permits multiple gzip members
-// concatenated back-to-back. Tools like pigz, `cat a.gz b.gz`, and
+// RFC 1952 §2.2 permits multiple gzip members concatenated back-to-back.
+// Tools like pigz, `cat a.gz b.gz`, and
 // any producer that splits streams emit them. The decoder must inflate
 // each member and concatenate the outputs, not treat the whole input as
 // one member.

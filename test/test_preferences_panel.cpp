@@ -1,5 +1,4 @@
 // PreferencesPanel sidebar-of-pages container tests
-// (closes the gap-doc P3 row "PreferencesPanel").
 //
 // Validates the page registry + active-page selection contract:
 //   - add_page wires content into the View tree,

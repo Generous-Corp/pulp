@@ -105,9 +105,8 @@ TEST_CASE("Audio matrix: PulpGain unity gain bit-exact across SR x block",
             // 8192 is the smallest multiple of every block size we
             // sweep (including 4096) that guarantees the largest cell
             // runs at least two full-size blocks rather than short-
-            // blocking the last call to min(block, total-pos). Codex
-            // P2 on PR #378 flagged that the earlier total=2048
-            // silently short-blocked the 4096 cell.
+            // blocking the last call to min(block, total-pos). The
+            // earlier total=2048 silently short-blocked the 4096 cell.
             constexpr int total = 8192;
             auto in_L = make_sine_vec(total, 440.0f, sr);
             auto in_R = make_sine_vec(total, 660.0f, sr);

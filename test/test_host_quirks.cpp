@@ -1249,8 +1249,7 @@ TEST_CASE("kHostQuirksMeta tags the 4 new iPlug2-audit rows correctly",
 
 
 // ─────────────────────────────────────────────────────────────────────
-// P2: runtime policy gate + per-quirk override + field enumeration.
-// (host-quirks integration plan → 2026-05-30-host-quirks-enforcement-goal)
+// Runtime policy gate, per-quirk override, and field enumeration.
 // ─────────────────────────────────────────────────────────────────────
 
 #include <algorithm>

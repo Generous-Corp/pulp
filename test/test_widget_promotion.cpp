@@ -151,8 +151,8 @@ TEST_CASE("widget_promotion: pass is idempotent — second invocation is a no-op
 
 TEST_CASE("widget_promotion: promoted parent stops descendant promotion — no nested buttons",
           "[import][widget][issue-1814]") {
-    // Codex P2 on PR #1824 — a clickable container with clickable
-    // children must not produce nested <button> elements. The
+    // A clickable container with clickable children must not produce
+    // nested <button> elements. The
     // generated UI relies on the promoted parent's click handler to
     // cover the whole subtree; nested buttons would break click/focus
     // semantics.
@@ -178,8 +178,8 @@ TEST_CASE("widget_promotion: promoted parent stops descendant promotion — no n
 
 TEST_CASE("widget_promotion: iterative walker handles deep IR without stack blowup",
           "[import][widget][issue-1814]") {
-    // Codex P2 on PR #1824 — the prior implementation called itself
-    // recursively despite a comment claiming "iterative walk." On a
+    // The prior implementation called itself recursively despite a
+    // comment claiming "iterative walk." On a
     // 5000-deep linear IR (within reason for some Figma exports
     // post-flatten), recursive descent would stack-overflow on most
     // hosts. The worklist-based pass should handle it cleanly.

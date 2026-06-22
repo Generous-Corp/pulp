@@ -1,6 +1,6 @@
-// Tests for Workstream 03 items 3.7, 3.8, and 3.11 — bus-layout
-// validation, processBlock precision contract, and the cross-adapter
-// RT-safe latency / tail change notification pattern.
+// Tests for bus-layout validation, the processBlock precision contract,
+// and the cross-adapter RT-safe latency / tail change notification
+// pattern.
 //
 // These tests exercise the Processor-side API surface only. Adapter-
 // specific wiring (VST3 setBusArrangements, AU PropertyChanged, CLAP
@@ -204,7 +204,7 @@ TEST_CASE("Processor::process is declared with float-precision BufferView. "
     SUCCEED("process() ran with float buffers");
 }
 
-// ── Phase 2 — additive multi-bus process surface ──────────────────────────
+// ── Additive multi-bus process surface ───────────────────────────────────
 
 TEST_CASE("ProcessBuffers exposes main and sidechain buses without owning audio",
           "[processor][process-buffers][phase2]") {
@@ -435,7 +435,7 @@ TEST_CASE("Processor multi-bus overload no-ops when no active main output exists
     REQUIRE(processor.simple_process_calls == 0);
 }
 
-// ── Phase 2 — runtime mode contract ───────────────────────────────────────
+// ── Runtime mode contract ─────────────────────────────────────────────────
 
 TEST_CASE("ProcessContext defaults to realtime mode with explicit helper predicates",
           "[processor][process-context][phase2]") {
