@@ -222,7 +222,7 @@ std::vector<Project> read_registry(const fs::path& registry_json) {
                         auto field = j.read_string();
                         j.skip_ws();
                         if (!j.match(':')) break;
-                        // Codex 2026-04-21 wave 2 P1 on #563: the schema
+                        // #563: the schema
                         // documents unknown fields as forward-compatible,
                         // so a future writer is allowed to emit e.g.
                         // `"meta": {...}` or `"pinned": true`. If we
@@ -327,7 +327,7 @@ std::vector<Project> add_project(const fs::path& registry_json,
         projects.push_back(std::move(p));
     }
 
-    // Codex 2026-04-21 wave 2 P2 on #563: previous version dropped the
+    // #563: previous version dropped the
     // `write_registry()` return value, so callers saw a successful
     // in-memory upsert even when the backing store failed to persist
     // (unwritable $PULP_HOME, missing parent directory, etc.). Surface

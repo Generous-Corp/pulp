@@ -184,7 +184,7 @@ constexpr QuirkFilter default_policy_filter() noexcept {
 #endif
 }
 
-// ── Runtime policy layer (P2) ─────────────────────────────────────────
+// ── Runtime policy layer ──────────────────────────────────────────────
 //
 // Layered on TOP of the compile-time default above. Precedence (highest
 // first): per-quirk override > set_host_quirk_policy() (API) >

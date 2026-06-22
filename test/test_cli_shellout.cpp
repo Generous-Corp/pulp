@@ -526,7 +526,7 @@ TEST_CASE("pulp cache usage and parser errors are deterministic",
 
 TEST_CASE("pulp config <unknown-subcommand> exits non-zero with a diagnostic",
           "[cli][shellout][codex-562]") {
-    // Codex 2026-04-21 wave 2 P2 on #562: `pulp config foo` previously
+    // #562: `pulp config foo` previously
     // fell through to usage() which returned 0, so scripts/CI could
     // not detect a typo'd subcommand. The new behaviour returns
     // exit code 2 with an "Unknown config subcommand" diagnostic on
@@ -1565,9 +1565,9 @@ TEST_CASE("pulp create validates parser errors before scaffolding",
 // cmd_validate now parses flags up-front and rejects unknown flags
 // with exit code 2 — that gives us a testable distinction between
 // "known flag, can't run because no project" and "unknown flag"
-// without needing a real build tree. Codex P2 on PR #381 correctly
-// flagged that the prior version of this test couldn't tell the two
-// apart: unknown flags were silently ignored, so the assertion would
+// without needing a real build tree. The prior version of this test
+// couldn't tell the two apart (#381): unknown flags were silently ignored,
+// so the assertion would
 // pass even if --strict handling were removed.
 TEST_CASE("pulp validate --strict is a recognized flag",
           "[cli][shellout][validate][issue-356]") {
@@ -1792,7 +1792,7 @@ TEST_CASE("pulp build validates js engine option before compatibility checks",
 // recognized subcommands; bogus subcommand fails with exit 2 + Usage.
 
 
-// Issue #550 Slice 5: `update.mode = off` must produce zero network
+// Issue #550: `update.mode = off` must produce zero network
 // traffic and zero banner output. We can't directly observe the
 // network inside ctest, but we CAN verify that (a) the command
 // finishes well under the anonymous-GitHub round-trip latency (caching
@@ -1856,7 +1856,7 @@ TEST_CASE("pulp with update.mode=off never prints a banner",
     REQUIRE(r.stderr_output.find("downloaded") == std::string::npos);
 }
 
-// Issue #550 Slice 5: `update.mode = manual` prints the one-liner
+// Issue #550: `update.mode = manual` prints the one-liner
 // once per version. The banner shape is locked — it must differ from
 // the prompt-mode banner so users (and shell scripts) can tell them
 // apart. Same PULP_HOME scratch-dir trick as the off-mode test.
@@ -1906,7 +1906,7 @@ TEST_CASE("pulp with update.mode=manual prints the manual notice",
     REQUIRE(r.stderr_output.find("99.99.99") != std::string::npos);
 }
 
-// Issue #564 Slice 7: `pulp project bump --help` must be wired at the
+// Issue #564: `pulp project bump --help` must be wired at the
 // dispatch level. Any future regression where the `project` command
 // falls out of the dispatch table fails loudly here — same class of
 // silent-failure bug that motivated the rest of this file.
@@ -2037,7 +2037,7 @@ TEST_CASE("pulp project unpin switches a pinned project to floating mode",
     fs::remove_all(base);
 }
 
-// Issue #564 Slice 7: `pulp project bump --dry-run` rejects an
+// Issue #564: `pulp project bump --dry-run` rejects an
 // invalid --to value with a diagnostic. No writes happen.
 TEST_CASE("pulp project bump rejects non-semver --to",
           "[cli][shellout][issue-564]") {
@@ -2172,7 +2172,7 @@ TEST_CASE("pulp project bump updates standalone SDK pins and undo reverts them",
 }
 
 
-// #591 Codex P2 / wave-4 sweep: `pulp docs build-site` must resolve
+// #591: `pulp docs build-site` must resolve
 // `mkdocs.yml` from the project root, not the caller's CWD. This test
 // invokes the CLI from inside a subdirectory (`tools/`) and asserts
 // that the composed mkdocs command references the repo-root config —
@@ -2195,7 +2195,7 @@ TEST_CASE("pulp docs build-site resolves mkdocs.yml from project root",
     // Walk up from the test CWD (<build>/test) to the repo root, then
     // drop into tools/ — a real subdirectory that exists in every
     // Pulp checkout. This mirrors the "user runs `pulp docs
-    // build-site` from inside tools/" scenario Codex flagged.
+    // build-site` from inside tools/" scenario.
     fs::path repo_root = fs::current_path() / ".." / "..";
     repo_root = fs::weakly_canonical(repo_root);
     if (!fs::exists(repo_root / "mkdocs.yml")) {

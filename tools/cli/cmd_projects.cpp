@@ -69,7 +69,7 @@ int do_list(bool json_mode) {
         // see identical output regardless of which binary served the
         // call. The Rust port already implemented this; the C++ port
         // silently ignored the flag and printed human text — caught by the
-        // post-Phase-8 cross-binary parity probe.
+        // cross-binary parity probe.
         std::cout << "{\n  \"registry\": \""
                   << json_escape(reg.generic_string()) << "\",\n  \"projects\": [";
         for (size_t i = 0; i < projects.size(); ++i) {
@@ -147,7 +147,7 @@ int do_add(const std::vector<std::string>& args) {
     name = target.filename().string();
 
     auto reg = prjreg::registry_path();
-    // Codex 2026-04-21 wave 2 P2 on #563: surface registry write
+    // #563: surface registry write
     // failures so an unwritable ~/.pulp doesn't silently present as
     // success. The in-memory update still returns the refreshed list,
     // but the caller deserves to know the file wasn't persisted.

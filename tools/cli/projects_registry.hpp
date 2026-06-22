@@ -62,7 +62,7 @@ bool write_registry(const fs::path& registry_json,
 // `write_registry()` actually persisted the update; callers that
 // surface user-visible confirmation ("Project registered at ...")
 // should check it so a failed write doesn't silently present as
-// success. Codex 2026-04-21 wave 2 P2 on #563.
+// success (#563).
 std::vector<Project> add_project(const fs::path& registry_json,
                                  const fs::path& project_path,
                                  const std::string& project_name,

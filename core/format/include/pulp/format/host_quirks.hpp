@@ -391,16 +391,16 @@ HostQuirks make_quirks_for_validated_only(HostType type, HostVersion version);
 /// helper and constructing their own `HostQuirks` via
 /// `make_quirks_for(...)` + `apply_filter(...)`.
 ///
-/// Since P2 this routes through `resolved_quirks(...)`, so the runtime
+/// This routes through `resolved_quirks(...)`, so the runtime
 /// policy (env / API / per-quirk override) applies here too. With no
 /// runtime override set, the effective filter is the compile-time
-/// default, so behavior is unchanged from before P2.
+/// default.
 HostQuirks detect_quirks();
 
-// ── Runtime policy (P2) ───────────────────────────────────────────────
+// ── Runtime policy ────────────────────────────────────────────────────
 //
 // The compile-time `PULP_HOST_QUIRKS_DEFAULT_POLICY` option sets the
-// baseline tier filter. P2 layers a runtime override on top so a user
+// baseline tier filter. A runtime override layers on top so a user
 // who doesn't trust a quirk can dial it back without recompiling, while
 // the default stays ON (validated quirks enforced). Precedence, highest
 // first:
@@ -461,12 +461,12 @@ struct QuirkFieldStatus {
 /// `pulp doctor` to render the host-quirks table.
 std::vector<QuirkFieldStatus> enumerate_quirk_fields(const HostQuirks& q);
 
-/// The single entry adapters consume (P3): build the host's quirks, apply
+/// The single entry adapters consume: build the host's quirks, apply
 /// the runtime base filter (`resolve_quirk_policy`), then layer per-quirk
 /// overrides. Equivalent to `make_quirks_for` + the runtime policy.
 HostQuirks resolved_quirks(HostType type, HostVersion version);
 
-// ── Accommodation application helpers (P3) ────────────────────────────
+// ── Accommodation application helpers ─────────────────────────────────
 //
 // Small pure helpers that apply a single quirk to a value, so format
 // adapters share one tested implementation instead of open-coding the

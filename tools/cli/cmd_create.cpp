@@ -834,7 +834,7 @@ int cmd_create(const std::vector<std::string>& args) {
     // in non-CI mode so we don't clutter CI-driven scaffold output.
     {
         auto reg = pulp::cli::projects_registry::registry_path();
-        // Codex 2026-04-21 wave 2 P2 on #563: check the write result
+        // #563: check the write result
         // rather than blindly printing "Registered" — otherwise a
         // failed `write_registry()` in an unwritable $PULP_HOME
         // surfaces as "registered" to the user but the project is

@@ -55,7 +55,7 @@ bool split_dotted_key(const std::string& in,
 
 // Allowed sections/keys. Kept narrow so `pulp config set foo.bar baz`
 // doesn't silently introduce a typo'd key. Add entries here when new
-// slices need new knobs.
+// features need new knobs.
 bool is_allowed_key(const std::string& section, const std::string& key) {
     if (section == "pr") {
         return key == "workflow";
@@ -304,7 +304,7 @@ int cmd_config(const std::vector<std::string>& args) {
         return 0;
     }
 
-    // Codex 2026-04-21 wave 2 P2 on #562: previous version returned
+    // #562: previous version returned
     // `usage()` (which exits 0) on unknown subcommands, making invalid
     // invocations like `pulp config foo` look successful to scripts
     // and CI. Print help to stderr and return a non-zero exit so
