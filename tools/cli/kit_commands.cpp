@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 //
-// kit_commands.cpp — Phase 1 metadata-only Pulp package/kit commands.
+// kit_commands.cpp — metadata-only Pulp package/kit commands.
 // This file intentionally performs no package execution: no CMake, JS,
 // scripts, dylibs, or tool hooks are invoked while validating or inspecting.
 

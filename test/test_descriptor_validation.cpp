@@ -1,4 +1,4 @@
-// validate_descriptor() tests (workstream 01 slice 1.9).
+// validate_descriptor() tests.
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/format/descriptor_validation.hpp>

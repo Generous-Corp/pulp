@@ -1,21 +1,16 @@
-// pulp #1499 follow-up — Codex P1: lowerClaudeDesignHtml infinite loop
-// when `preserveRawSource: false`. parseFragment used to compute parser
-// advance from `node.rawHtml.length`, but `makeNode` deliberately
-// stores `rawHtml: ''` in non-preserve mode; consumed length became 0
-// and the cursor never moved on tag-shaped input. The fix tracks the
-// consumed outer-tag length independently of whether `rawHtml` is
-// retained on the BuildNode.
+// lowerClaudeDesignHtml must track consumed outer-tag length independently
+// of whether `rawHtml` is retained on the BuildNode. In non-preserve mode
+// `makeNode` stores `rawHtml: ''`, so parser progress cannot depend on
+// `node.rawHtml.length`.
 
 import { describe, it, expect } from 'vitest';
 import { lowerClaudeDesignHtml } from '../src/adapters/claude-design-html/lower.js';
 
-describe('lowerClaudeDesignHtml — preserveRawSource: false (#1499 follow-up)', () => {
+describe('lowerClaudeDesignHtml — preserveRawSource: false', () => {
     it('terminates on a multi-child fragment without preserving raw source', async () => {
-        // The pre-fix behavior was an infinite loop on this exact
-        // shape (root wraps multiple <div>s and parseFragment walks
-        // them one at a time). If this regresses, vitest's
-        // per-test timeout will fail the suite hard rather than
-        // hanging indefinitely.
+        // This shape can hang if parser progress is tied to retained rawHtml.
+        // If it regresses, vitest's per-test timeout fails the suite hard
+        // rather than hanging indefinitely.
         const html = `<div><span>one</span><span>two</span></div>`;
         const ir = await Promise.race([
             lowerClaudeDesignHtml(html, { preserveRawSource: false }),
@@ -30,10 +25,9 @@ describe('lowerClaudeDesignHtml — preserveRawSource: false (#1499 follow-up)',
 
     it('terminates on a multi-root fragment when raw source is dropped', async () => {
         // Multi-root path: the synthetic-wrapper-View case forces
-        // parseFragment to drive the loop directly, which is the
-        // surface the original infinite-loop bug bit on. We use
-        // different opening and closing tags so matchSingleOuterTag
-        // does NOT collapse the input into a single root.
+        // parseFragment to drive the loop directly. We use different
+        // opening and closing tags so matchSingleOuterTag does NOT collapse
+        // the input into a single root.
         const html = `<header>a</header><section>b</section><footer>c</footer>`;
         const ir = await Promise.race([
             lowerClaudeDesignHtml(html, { preserveRawSource: false }),

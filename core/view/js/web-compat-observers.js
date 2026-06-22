@@ -8,8 +8,8 @@
 // real Intersection / Mutation / Resize / Performance reporting against our
 // virtual DOM.
 //
-// See pulp #468 (gap matrix) for the full list and the per-API call counts
-// against react-dom.development.js.
+// The browser-API gap matrix tracks the full list and the per-API call
+// counts against react-dom.development.js.
 
 (function () {
     function NoOpObserver() {

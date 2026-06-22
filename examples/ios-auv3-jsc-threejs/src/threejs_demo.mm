@@ -183,11 +183,10 @@ std::unique_ptr<pulp::view::View> PulpThreeJsDemo::create_view() {
     root->set_requires_gpu_host(true);
 
     // ── 1. Read the bundled Three.js IIFE source ────────────────────
-    // The iOS-D.3b Slice 2/3 bundler writes
-    // `<appex>/threejs/three.iife.js`. If the build host didn't have
-    // Node.js (or the bundler step was skipped) the source returns
-    // nullopt — fall through to the placeholder script instead of
-    // crashing the AUv3 extension.
+    // The iOS AUv3 bundler writes `<appex>/threejs/three.iife.js`. If
+    // the build host didn't have Node.js (or the bundler step was
+    // skipped) the source returns nullopt — fall through to the
+    // placeholder script instead of crashing the AUv3 extension.
     auto iife_source = pulp::view::threejs_iife_source();
     std::string combined;
     if (iife_source) {

@@ -1,4 +1,4 @@
-// Windows UI Automation backend for TextAccessibilityNode (font v2 Slice 2.6).
+// Windows UI Automation backend for TextAccessibilityNode.
 //
 // Replaces the default "none" backend defined in
 // core/view/src/text_accessibility.cpp on Windows builds. Painted text
@@ -6,25 +6,23 @@
 // surfaced to Narrator (and other UIA clients) as a real
 // IRawElementProviderSimple keyed by the caller-stable node id.
 //
-// Scope: SCAFFOLD-LEVEL provider. Each registered node vends a minimal
-// IRawElementProviderSimple wrapper that reports the configured Name,
-// ControlType, and an "IsControlElement"/"IsContentElement" pair so UIA
-// clients see the element as participating in both trees. The provider
-// instances are owned by an std::unordered_map<id, ComPtr<...>>; the COM
-// refcount mirrors that ownership (registry holds the +1, UIA can AddRef
-// transiently when handing the provider to a client).
+// Current scope: each registered node vends a minimal IRawElementProviderSimple
+// wrapper that reports the configured Name, ControlType, and an
+// "IsControlElement"/"IsContentElement" pair so UIA clients see the element as
+// participating in both trees. The provider instances are owned by an
+// std::unordered_map<id, ComPtr<...>>; the COM refcount mirrors that ownership
+// (registry holds the +1, UIA can AddRef transiently when handing the provider
+// to a client).
 //
-// Out of scope (deliberately) on this slice:
+// Not implemented yet:
 // - ITextProvider2 / ITextRangeProvider implementations. The header
-//   contract mentions them as the eventual target, but the scaffold ships
+//   contract mentions them as the eventual target, but this backend exposes
 //   only the discovery surface (ControlType + Name) so screen readers see
 //   *something* through the same registry the cross-platform shadow
-//   exposes. ITextProvider2 is the obvious follow-up once the painted-
-//   text sites start registering selection ranges in earnest.
+//   exposes.
 // - IRawElementProviderFragment tree walk. The existing
 //   accessibility_win.cpp wires the root host provider into WM_GETOBJECT;
-//   text providers don't appear in the fragment tree yet. The follow-up
-//   slice that adds per-widget fragment providers will plug these in.
+//   text providers don't appear in the fragment tree yet.
 //
 // Memory model: each PulpTextAccessibilityProvider is reference-counted
 // via std::atomic<LONG>. The registry holds a single +1 reference per
@@ -33,8 +31,7 @@
 // when they hand it back across the COM boundary; that ref is dropped
 // when the client releases its copy.
 //
-// Linux AccessKit is deferred — see platform/linux/text_accessibility_linux.cpp
-// for that backend's scaffold state.
+// Linux AccessKit has its own platform backend stub.
 
 #ifdef _WIN32
 
@@ -95,7 +92,7 @@ BSTR make_bstr(const std::string& s) {
 //
 // The class is final so the inheritance chain doesn't accidentally grow;
 // the IRawElementProviderSimple vtable is the only COM surface this
-// scaffold needs.
+// backend needs.
 class PulpTextAccessibilityProvider final : public IRawElementProviderSimple {
 public:
     explicit PulpTextAccessibilityProvider(const TextAccessibilityNode& node)
@@ -139,8 +136,7 @@ public:
 
     IFACEMETHODIMP GetPatternProvider(PATTERNID /*patternId*/,
                                        IUnknown** pRetVal) override {
-        // Scaffold-only: no patterns advertised yet. ITextProvider2 lands
-        // in the follow-up slice; returning nullptr here is the documented
+        // No patterns advertised yet. Returning nullptr here is the documented
         // way to tell UIA the pattern is not supported.
         if (!pRetVal) return E_POINTER;
         *pRetVal = nullptr;
@@ -157,7 +153,6 @@ public:
         // backing strings / role while we read them. Holding the lock
         // for the snapshot copy keeps the critical section bounded;
         // BSTR allocation runs against the local snapshot outside it.
-        // (Codex P2 on PR #2326.)
         TextAccessibilityNode snap;
         {
             std::lock_guard<std::mutex> lock(node_mu_);
@@ -243,8 +238,7 @@ public:
     // tech caches provider pointers; preserving identity across updates
     // keeps client-side state coherent. node_mu_ serialises this with
     // concurrent GetPropertyValue() / control_type() / node() calls
-    // that may be running on UIA callback threads (Codex P2 on
-    // PR #2326).
+    // that may be running on UIA callback threads.
     void update_node(const TextAccessibilityNode& node) {
         std::lock_guard<std::mutex> lock(node_mu_);
         node_ = node;

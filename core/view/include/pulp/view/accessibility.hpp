@@ -122,7 +122,7 @@ public:
     }
 };
 
-// ── Live-region announcements (workstream 04 slice 4.3) ─────────────────
+// ── Live-region announcements ───────────────────────────────────────────
 
 /// Politeness level for a live-region announcement. Mirrors the WAI-ARIA
 /// `aria-live` values: polite announcements wait for the current reader
@@ -141,8 +141,8 @@ enum class AnnouncementPriority {
 ///   macOS   — NSAccessibilityAnnouncementRequestedNotification
 ///   iOS     — UIAccessibilityPostNotification(AnnouncementNotification)
 ///   Android — Kotlin-side TalkBack TYPE_ANNOUNCEMENT (pending)
-///   Windows — UIA UiaRaiseNotificationEvent (pending, workstream 04 4.1)
-///   Linux   — AT-SPI object:announcement (pending, workstream 04 4.2)
+///   Windows — UIA UiaRaiseNotificationEvent (not wired yet)
+///   Linux   — AT-SPI object:announcement (not wired yet)
 void announce_accessibility(std::string_view text,
                             AnnouncementPriority priority = AnnouncementPriority::Polite);
 

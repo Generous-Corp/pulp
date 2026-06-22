@@ -268,7 +268,7 @@ Sink make_buffer_sink(std::vector<SampleEvent>* buffer) {
     };
 }
 
-// ── Publish channel (Phase 3) ────────────────────────────────────────
+// ── Publish channel ──────────────────────────────────────────────────
 
 void publish_value(std::string view_name,
                    std::string metric_name,
@@ -290,7 +290,7 @@ void publish_components(std::string view_name,
                                              std::move(components), opts);
 }
 
-// ── Ambient provenance (Phase 9) ─────────────────────────────────────
+// ── Ambient provenance ────────────────────────────────────────────────
 //
 // The ambient slot lives on the Coordinator's State (under its mutex)
 // so concurrent publishes from any sink-fed thread see a coherent
@@ -319,7 +319,7 @@ struct PerMetricState {
     std::vector<std::pair<std::string, double>> motion_start;
     bool has_baseline = false;
     bool in_motion = false;
-    int next_burst_id = 1;       // Phase 7: assigned at each Start.
+    int next_burst_id = 1;       // Assigned at each Start.
     int current_burst_id = 0;    // 0 between bursts; set on Start.
 };
 
@@ -328,7 +328,7 @@ struct ActiveTrace {
     std::shared_ptr<TraceBuilder::Spec> spec;
     std::vector<PerMetricState> metrics;
     double accum_seconds = 0.0;
-    bool needs_trace_started = true;  // Phase 7: emit TraceStarted on first tick.
+    bool needs_trace_started = true;  // Emit TraceStarted on first tick.
 };
 
 struct PublishKey {
@@ -366,8 +366,8 @@ struct Coordinator::State {
     // sampler-driven trace map above so publishes and sampled traces
     // don't interfere even on the same view/metric name.
     std::map<PublishKey, PublishState> publish_states;
-    // Phase 9: ambient publish provenance. Set via
-    // `set_ambient_provenance` and stamped onto publishes whose
+    // Ambient publish provenance. Set via `set_ambient_provenance`
+    // and stamped onto publishes whose
     // PublishOptions::provenance is empty. Single global slot — intended
     // for single-threaded scripted contexts.
     Provenance ambient_provenance;
@@ -595,7 +595,7 @@ void Coordinator::on_tick(float dt) {
         }
 
         for (auto& [trace_id, trace] : state_->traces) {
-            // Phase 7: emit TraceStarted once per trace on its first tick.
+            // Emit TraceStarted once per trace on its first tick.
             if (trace.needs_trace_started) {
                 SampleEvent ev;
                 ev.kind = SampleEvent::Kind::TraceStarted;
@@ -721,7 +721,7 @@ void Coordinator::on_tick(float dt) {
     }
 }
 
-// ── Coordinator::publish_internal (Phase 3) ───────────────────────────
+// ── Coordinator::publish_internal ─────────────────────────────────────
 //
 // Defined after on_tick so `components_differ` (anonymous namespace
 // above) is in scope.
@@ -735,8 +735,7 @@ void Coordinator::publish_internal(std::string view_name,
 
     // Same Baseline / Start / Sample / End burst-framing semantics as
     // the sampler-driven coordinator path, just keyed by (view, metric)
-    // and only running when firehose is on (Phase 3 scope; Phase 5 adds
-    // filter-scoped subscriptions that match without firehose).
+    // and only running when firehose is on.
     std::vector<std::pair<Sink, SampleEvent>> pending;
     {
         std::lock_guard<std::mutex> lock(state_->mtx);
@@ -759,9 +758,9 @@ void Coordinator::publish_internal(std::string view_name,
             pstate.epsilon = opts.epsilon;
         }
 
-        // Phase 9: resolve effective provenance. Explicit opts.provenance
-        // wins; otherwise fall back to the coordinator's ambient slot.
-        // Empty stays empty so pre-Phase-9 callers see no behavior change.
+        // Resolve effective provenance. Explicit opts.provenance wins;
+        // otherwise fall back to the coordinator's ambient slot. Empty
+        // stays empty for callers that do not opt into provenance.
         const Provenance effective_prov =
             opts.provenance.is_set() ? opts.provenance
                                      : state_->ambient_provenance;
@@ -776,13 +775,13 @@ void Coordinator::publish_internal(std::string view_name,
             e.t_seconds = t_now;
             e.frame = f_now;
             e.precision = pstate.precision;
-            // Phase 7: publish channel uses trace_id = 0 (reserved).
+            // Publish channel uses trace_id = 0 (reserved).
             // metric_id = 0; (view_name, metric_name) already identifies
             // the metric. burst_id increments per (view, metric).
             e.trace_id = 0;
             e.metric_id = 0;
             e.burst_id = pstate.current_burst_id;
-            e.provenance = effective_prov;  // Phase 9
+            e.provenance = effective_prov;
             e.components = std::move(comps);
             e.deltas = std::move(deltas);
             for (const auto& [sid, sink] : state_->sinks) {
@@ -829,7 +828,7 @@ void Coordinator::publish_internal(std::string view_name,
     for (auto& [sink, ev] : pending) sink(ev);
 }
 
-// ── Coordinator::dispatch_input_event (Phase 10) ─────────────────────
+// ── Coordinator::dispatch_input_event ────────────────────────────────
 
 void Coordinator::dispatch_input_event(SampleEvent e) {
     std::vector<std::pair<Sink, SampleEvent>> pending;
@@ -855,7 +854,7 @@ void Coordinator::dispatch_input_event(SampleEvent e) {
     for (auto& [sink, ev] : pending) sink(ev);
 }
 
-// ── Fixture record / replay (Phase 5) ────────────────────────────────
+// ── Fixture record / replay ──────────────────────────────────────────
 
 namespace {
 
@@ -965,9 +964,8 @@ std::string serialize_event(const SampleEvent& e) {
     if (e.provenance.is_set()) {
         ss << ",\"provenance\":" << serialize_provenance(e.provenance);
     }
-    // Phase 10: input fields only emitted on Input events so existing
-    // motion lines stay byte-for-byte identical with pre-Phase-10
-    // captures.
+    // Input fields only emit on Input events so ordinary motion lines
+    // stay byte-for-byte compatible with older captures.
     if (e.kind == SampleEvent::Kind::Input) {
         ss << ",\"input_kind\":\"" << json_escape(e.input_kind) << "\""
            << ",\"view_id\":\"" << json_escape(e.view_id) << "\"";
@@ -1384,10 +1382,10 @@ FixtureDiff assert_matches(const std::vector<SampleEvent>& golden,
         diff.differences.push_back(item);
     }
 
-    // Phase 7 — ID-keyed grouping. For each (view, metric, kind,
-    // trace_id, metric_id, burst_id) group, compare in arrival order
-    // within the group. Bursts that appear in different order across
-    // fixtures still match if their identity matches.
+    // ID-keyed grouping: for each (view, metric, kind, trace_id,
+    // metric_id, burst_id) group, compare in arrival order within the
+    // group. Bursts that appear in different order across fixtures still
+    // match if their identity matches.
     std::map<EventKey, std::vector<const SampleEvent*>> g_groups;
     std::map<EventKey, std::vector<const SampleEvent*>> c_groups;
     for (const auto& e : golden)   g_groups[key_of(e)].push_back(&e);
@@ -1681,7 +1679,7 @@ double local_step_outlier_ratio(const std::vector<ScalarSample>& samples,
     return max_ratio;
 }
 
-// ── Input recording / replay (Phase 10) ──────────────────────────────
+// ── Input recording / replay ─────────────────────────────────────────
 //
 // Recording: View::simulate_* calls `record_simulated_input` which —
 // when at least one InputRecorder is alive — builds an `Input`
@@ -1781,7 +1779,7 @@ InputRecorder make_input_recorder(std::string path) {
     return InputRecorder(sink_id);
 }
 
-// ── replay_inputs (Phase 10b) ────────────────────────────────────────
+// ── replay_inputs ────────────────────────────────────────────────────
 //
 // Walks a fixture, locates each Input's target by `view_id` (DFS from
 // `root_view`), advances `frame_clock` to the recorded timestamp, and

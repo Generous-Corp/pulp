@@ -55,8 +55,8 @@ void WidgetBridge::register_dom_api() {
         }
         // Create the appropriate widget type based on HTML tag.
         //
-        // pulp #1147 - this fast-path bypasses the JS-side `_ensureNative`
-        // for performance + QuickJS stack reasons, but it MUST mirror the
+        // This fast-path bypasses the JS-side `_ensureNative` for performance
+        // and QuickJS stack reasons, but it MUST mirror the
         // tag->widget mapping in `web-compat-element.js` or web-compat
         // semantics drift between the createElement+appendChild path and
         // the React-style commit path that goes through here.
@@ -75,8 +75,8 @@ void WidgetBridge::register_dom_api() {
             });
             child = std::move(canvas);
         } else if (tag == "rect") {
-            // pulp #1926 - SVG primitives other than <path>. Spectr's
-            // bottom-toolbar mini-icons (segmented mode toggles, analyzer
+            // SVG primitives other than <path>. Spectr's bottom-toolbar
+            // mini-icons (segmented mode toggles, analyzer
             // pills) emit lowercase <rect> / <line> / <circle> inside the
             // parent <svg>. Without this routing they fall through to the
             // unknown-tag default and paint nothing.
@@ -88,15 +88,15 @@ void WidgetBridge::register_dom_api() {
             l->set_id(childId);
             child = std::move(l);
         } else if (tag == "circle") {
-            // pulp #1926 - no dedicated SvgCircleWidget; map to SvgPath
-            // and synthesize a `d` arc in JS (web-compat-element.js
+            // No dedicated SvgCircleWidget; map to SvgPath and synthesize a
+            // `d` arc in JS (web-compat-element.js
             // __replaySvgCircleAttributes__) from cx/cy/r.
             auto svg = std::make_unique<SvgPathWidget>();
             svg->set_id(childId);
             child = std::move(svg);
         } else if (tag == "path") {
-            // pulp #1899 - mirror the JS-side _ensureNative routing:
-            // `<path>` (typically inside an `<svg>`) materializes as the
+            // Mirror the JS-side _ensureNative routing: `<path>` (typically
+            // inside an `<svg>`) materializes as the
             // SvgPathWidget so the d / stroke / stroke-width / fill /
             // viewBox attribute replay actually paints. Without this
             // branch the React/JSX commit path (which goes through
@@ -106,12 +106,11 @@ void WidgetBridge::register_dom_api() {
             svg->set_id(childId);
             child = std::move(svg);
         } else if (tag == "input") {
-            // pulp #1899 - `<input>` needs the JS-side `_type` to pick a
-            // widget. JS callers pass it through the optional 4th `hint`
+            // `<input>` needs the JS-side `_type` to pick a widget.
+            // JS callers pass it through the optional 4th `hint`
             // arg ("range:horizontal", "range:vertical", "checkbox", "text").
             // Without a hint, fall back to a plain View so the element
-            // still receives child/style ops (matches pre-2026-05-17
-            // behavior for unhinted inputs).
+            // still receives child/style ops.
             auto hint = args.get<std::string>(3, "");
             if (hint == "range:horizontal" || hint == "range:vertical") {
                 auto fader = std::make_unique<Fader>();
@@ -125,11 +124,9 @@ void WidgetBridge::register_dom_api() {
                 cb->set_id(childId);
                 child = std::move(cb);
             } else if (hint == "text") {
-                // pulp jsx-instrument-import (2026-05-17) - plain text
-                // `<input>` (and text-like subtypes: search / email / url
+                // Plain text `<input>` (and text-like subtypes: search / email / url
                 // / tel / password) materialize as a TextEditor so they
-                // accept keyboard input. Pre-fix, Chainer's preset-name
-                // field landed as a non-editable View; per Codex review.
+                // accept keyboard input instead of becoming a non-editable View.
                 auto te = std::make_unique<TextEditor>();
                 te->set_id(childId);
                 child = std::move(te);
@@ -139,8 +136,8 @@ void WidgetBridge::register_dom_api() {
                 child = std::move(v);
             }
         } else if (auto widget_for_tag = make_widget_for_tag(tag, childId)) {
-            // pulp 2026-06-08 (routing-parity sweep) - route lowercase
-            // `@pulp/react` widget intrinsics (knob/fader/toggle/combo/
+            // Route lowercase `@pulp/react` widget intrinsics
+            // (knob/fader/toggle/combo/
             // checkbox/spectrum/waveform/meter/xypad/listbox/icon, plus the
             // select/progress/img HTML aliases) to native widgets here in the
             // React-commit fast path. `<Knob>` etc. lower to lowercase DOM
@@ -159,8 +156,8 @@ void WidgetBridge::register_dom_api() {
             if (tag == "div" || tag == "section" || tag == "article" || tag == "aside" ||
                 tag == "header" || tag == "footer" || tag == "nav" || tag == "main")
                 v->flex().direction = FlexDirection::column;
-            // pulp #1147 - <svg> is a layout-leaf media element. Default
-            // direction stays column so child <path>/<g> attaches; the
+            // <svg> is a layout-leaf media element. Default direction stays
+            // column so child <path>/<g> attaches; the
             // presentational width/height attributes are replayed via
             // setFlex() on the JS side (see web-compat-element.js
             // setAttribute() path).

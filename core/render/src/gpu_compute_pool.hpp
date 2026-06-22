@@ -5,8 +5,6 @@
 // creation in DawnGpuCompute to eliminate allocator churn on Dawn backends
 // (Metal / D3D12 / Vulkan).
 //
-// Design reference: planning/zero-copy-slice-1-design-2026-04-20.md
-//
 // Threading: acquire() / release() are mutex-guarded. The mutex is only
 // held for pool bookkeeping — no GPU calls are made under the lock, so
 // contention is minimal in the audio/compute hot path.
@@ -169,12 +167,11 @@ public:
     // reclaim its in_flight_ slot so subsequent acquire()s don't
     // accumulate tracked handles and grow the pool unboundedly.
     //
-    // Codex 2026-04-21 review on #560: the previous fix for #536
-    // skipped release() on timeout but left the buffer tracked in
-    // in_flight_ forever; over a long run of timeouts (the exact
-    // scenario #536 targets) the map grew without bound. discard()
-    // drops the pool's reference so the wgpu::Buffer lands on the
-    // normal refcounted teardown path once the GPU stops mapping it.
+    // A timeout path must not call release(), because the GPU may still hold
+    // the mapping, but it also must not leave the buffer tracked in
+    // in_flight_ forever. discard() drops the pool's reference so the
+    // wgpu::Buffer lands on the normal refcounted teardown path once the GPU
+    // stops mapping it.
     void discard(const wgpu::Buffer& buf) {
         if (!buf) return;
         const std::uint64_t key = usage_key(buf.GetUsage());

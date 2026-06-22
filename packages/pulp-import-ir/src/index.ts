@@ -1,10 +1,9 @@
-// pulp #1486 — public surface for @pulp/import-ir.
+// Public surface for @pulp/import-ir.
 //
-// Phase 1 spike: types + content-hash anchors + Claude Design HTML
-// adapter + tweaks layer + JSX-like tree map. CLI integration
-// (`pulp import design path/x.html`) lives downstream; this package
-// stays renderer-agnostic so adapters (Figma MCP, Pencil, Mitosis, …)
-// can land independently against the same IR contract.
+// Exposes the typed IR, content-hash anchors, Claude Design HTML adapter,
+// tweaks layer, diffing, and JSX-like tree map. The package stays
+// renderer-agnostic so adapters (Figma MCP, Pencil, Mitosis, etc.) can
+// share the same IR contract.
 
 export * from './types.js';
 export {

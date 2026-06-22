@@ -73,7 +73,7 @@ test("entryForKind + LIBRARY_VERSION are wired from the manifest", () => {
   assert.equal(knob.name_prefix, "Pulp / Knob");
 });
 
-// ── P8: custom-control resolution from merged package fragments ──────────────
+// ── Custom-control resolution from merged package fragments ─────────────────
 const dcEntries: DesignControlEntry[] = [
   { factory_id: "acme.spinner", component_set_key: "1:2abc", name_prefix: "Acme / Spinner" },
   { factory_id: "acme.xy", name_prefix: "Acme / XY" },

@@ -14,6 +14,8 @@
 #   - node-ABI (Processor/PluginSlot virtual methods are append-only)
 #   - hotspot-size (known refactor hotspots must not exceed frozen LOC baselines)
 #   - deps-audit (catches DEPENDENCIES.md / NOTICE.md drift)
+#   - codecov-config (codecov.yml flags/components mirror the live core/* tree
+#     with no double-counts, and its ignore list mirrors diff_cover_excludes)
 #
 # Does NOT run:
 #   - local diff-coverage (slow — builds the cov target, hits ring crate
@@ -62,6 +64,8 @@ HSG_CFG="$ROOT/tools/scripts/hotspot_size_guard.json"
 CFG="$ROOT/tools/scripts/versioning.json"
 DEPS_AUDIT="$ROOT/tools/deps/audit.py"
 IMPORT_PROV="$ROOT/tools/scripts/check_import_provenance.py"
+CODECOV_CFG_TEST="$ROOT/tools/scripts/test_codecov_config.py"
+CODECOV_COMP_TEST="$ROOT/tools/scripts/test_codecov_components.py"
 
 if [ ! -f "$VBC" ] || [ ! -f "$SSC" ] || [ ! -f "$CFG" ]; then
     echo "gates.sh: gate scripts not found (expected at tools/scripts/)" >&2
@@ -147,7 +151,32 @@ if [ -f "$DEPS_AUDIT" ]; then
     fi
 fi
 
-# ── 7. import-provenance (opt-in) ──────────────────────────────────────────
+# ── 7. codecov-config drift ────────────────────────────────────────────────
+# Global invariant — runs unconditionally (not diff-scoped), because the
+# usual way codecov.yml goes stale is a NEW core/<sub>/ subsystem landing
+# with no codecov.yml edit at all (graph/scene drifted onto main exactly
+# this way). The contract tests assert codecov.yml's flags + components
+# mirror the live core/* tree with no double-counts, and that its `ignore:`
+# list mirrors coverage_config.json's diff_cover_excludes. Sub-second.
+# Needs PyYAML; skip cleanly if the local interpreter lacks it (CI's
+# codecov-config-validation job is the authoritative gate).
+if [ -f "$CODECOV_CFG_TEST" ] && [ -f "$CODECOV_COMP_TEST" ]; then
+    echo "" >&2
+    echo "▸ codecov-config drift (flags/components mirror core/*; ignore mirrors diff_cover_excludes)" >&2
+    if ! "$PYTHON" -c "import yaml" >/dev/null 2>&1; then
+        echo "  codecov-config: skipped (PyYAML not installed locally; CI enforces it)." >&2
+    elif ! "$PYTHON" "$CODECOV_CFG_TEST" >/dev/null 2>&1 \
+            || ! "$PYTHON" "$CODECOV_COMP_TEST" >/dev/null 2>&1; then
+        echo "  codecov-config: drift detected — codecov.yml is stale. Run:" >&2
+        echo "    python3 tools/scripts/test_codecov_config.py" >&2
+        echo "    python3 tools/scripts/test_codecov_components.py" >&2
+        fail=1
+    else
+        echo "  codecov-config: ok" >&2
+    fi
+fi
+
+# ── 8. import-provenance (opt-in) ──────────────────────────────────────────
 # Audits that any emitted/migrated project carries a well-formed clean-room
 # provenance marker. No-op for normal Pulp-repo pushes; set
 # PULP_IMPORT_PROVENANCE_DIRS (space-separated project dirs) on a PR that lands

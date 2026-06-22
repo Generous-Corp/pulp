@@ -79,8 +79,8 @@ pub fn green() -> &'static str {
 
 /// `\x1b[31m` (red) or empty string.
 ///
-/// Added in Phase 6b so the `project bump` / `project undo` failure
-/// paths can colour "failed" the same red as the C++ CLI.
+/// Used by `project bump` / `project undo` failure paths to color
+/// "failed" the same red as the C++ CLI.
 #[must_use]
 pub fn red() -> &'static str {
     if enabled() {
@@ -92,8 +92,8 @@ pub fn red() -> &'static str {
 
 /// `\x1b[36m` (cyan) or empty string.
 ///
-/// Added in Phase 6b for `project bump --dry-run` "would bump"
-/// markers — matches the C++ report colour.
+/// Used by `project bump --dry-run` "would bump" markers; matches
+/// the C++ report color.
 #[must_use]
 pub fn cyan() -> &'static str {
     if enabled() {
@@ -105,7 +105,7 @@ pub fn cyan() -> &'static str {
 
 /// `\x1b[1m` (bold) or empty string.
 ///
-/// Added in Phase 6b for the `pulp project bump` report header.
+/// Used by the `pulp project bump` report header.
 #[must_use]
 pub fn bold() -> &'static str {
     if enabled() {

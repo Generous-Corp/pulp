@@ -1,13 +1,12 @@
 #pragma once
 
-// Modulation-matrix data model (workstream 07 slice 7.1).
+// Modulation-matrix data model.
 //
 // Pure data layer — stores a set of source→destination modulation routes
-// with per-route depth / bipolar / curve. The canvas widget (drag-connect,
-// depth sliders, bipolar toggles) lands in a follow-up slice; this header
-// keeps the data model reusable by code paths that aren't UI (e.g. batch
-// preset tools) and lets the audio engine read routes without pulling in
-// view/ headers.
+// with per-route depth / bipolar / curve. The canvas widget owns drag-connect,
+// depth sliders, and bipolar toggles elsewhere; this header keeps the data
+// model reusable by code paths that aren't UI (e.g. batch preset tools) and
+// lets the audio engine read routes without pulling in view/ headers.
 //
 // IDs are plugin-supplied opaque integers. By convention sources use
 // Processor parameter IDs or MPE expression tags, and destinations use

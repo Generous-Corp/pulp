@@ -157,8 +157,7 @@ struct ListenerRegistry : std::enable_shared_from_this<ListenerRegistry> {
                 // would otherwise capture allocates on the firing thread;
                 // capturing a weak_ptr is also non-trivial, so this path
                 // stays unsafe on the audio thread. Use notify_rt() from
-                // format-adapter audio callbacks — see Slice 2 in
-                // planning/2026-05-18-rt-safety-and-debug-dx.md.
+                // format-adapter audio callbacks.
                 std::weak_ptr<ListenerRegistry> weak_self = weak_from_this();
                 const auto entry_id = entry.id;
                 loop->dispatch([weak_self, entry_id, param_id, value]() {

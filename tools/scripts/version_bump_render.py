@@ -4,10 +4,8 @@
 `render_report` turns the per-surface `Verdict` list into the
 human-readable report and the report-mode exit code.
 
-Extracted from `version_bump_check.py` (P9-NEW refactor, 2026-05) as a
-pure mechanical split — the body is byte-identical to its previous
-in-file definition. `version_bump_check.py` re-exports the symbol so
-external importers and the CLI entrypoint are unaffected.
+`version_bump_check.py` re-exports this module's public reporting helper
+so external importers and the CLI entrypoint are unaffected.
 """
 
 from __future__ import annotations
@@ -21,12 +19,11 @@ from version_bump_surfaces import (
 )
 
 
-# Patchable-helper indirection (P9-NEW split, 2026-05). See the matching
-# comment in `version_bump_heuristics.py` — `render_report` resolves
-# `already_bumped` through the `version_bump_check` entrypoint so
-# `test_version_bump_check_extra.py`'s `mock.patch.object(vbc, ...)`
-# stubs keep taking effect after the module split. Deferred import
-# avoids the entrypoint↔cluster import cycle.
+# Patchable-helper indirection. See the matching comment in
+# `version_bump_heuristics.py`; `render_report` resolves `already_bumped`
+# through the `version_bump_check` entrypoint so entrypoint-level patches
+# keep taking effect. Deferred import avoids the entrypoint↔cluster import
+# cycle.
 def _vbc():
     try:
         import version_bump_check as _v
@@ -67,12 +64,12 @@ def render_report(
         all_bumped = all(bumped for _, bumped in per_file)
         any_bumped = any(bumped for _, bumped in per_file)
 
-        # C3 (2026-05): intent-trailer model. When the diff has an explicit
+        # Intent-trailer mode. When the diff has an explicit
         # `Version-Bump: <surface>=<patch|minor|major>` trailer AND
-        # `--accept-intent-trailers` is on, the gate treats the trailer as
-        # the bump declaration and does NOT require the version files to
-        # already be moved. Merge-time automation rewrites the files on
-        # merge using the next-available version from main, so two PRs
+        # `--accept-intent-trailers` is on, the gate treats the trailer
+        # as the bump declaration and does NOT require the version files
+        # to already be moved. Merge-time automation rewrites the files
+        # on merge using the next-available version from main, so two PRs
         # both declaring `sdk=minor` don't race on the exact number.
         # Defaults to OFF until Shipyard / merge automation wires it up.
         intent_declared = (

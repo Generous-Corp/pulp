@@ -14,11 +14,9 @@ use pulp_rs::help;
 
 #[derive(Parser, Debug)]
 #[command(
-    // Phase 8 binary swap (#767 / #686): the user-facing binary name
-    // is now `pulp` (was `pulp-rs`). The Cargo `[[bin]] name` was
-    // also flipped in the same diff so `target/release/pulp` is what
-    // ships. The C++ CLI is now `pulp-cpp` and is reached via the
-    // fallthrough wrapper or via the `PULP_USE_CPP=1` rollback.
+    // User-facing source builds produce `target/release/pulp`.
+    // The C++ CLI is installed as `pulp-cpp` and is reached via the
+    // fallthrough wrapper or the `PULP_USE_CPP=1` rollback.
     name = "pulp",
     about = "Pulp audio plugin framework CLI (Rust binary; C++ delegate is `pulp-cpp`)",
     disable_version_flag = true,
@@ -40,75 +38,75 @@ enum Command {
     Help,
 
     /// Print installed CLI + plugin versions, or `bump <component>`
-    /// / `check [--with-bump-check]`. Phase 5 for `show`, Phase 6e
-    /// for `bump` / `check`.
+    /// / `check [--with-bump-check]`.
     Version(PkgTailArgs),
 
-    /// Environment diagnostics. Phase 2 ports `--versions --json`.
+    /// Environment diagnostics; Rust-native for `--versions --json`.
     Doctor(DoctorArgs),
 
-    /// Manage the `~/.pulp/projects.json` registry. Phase 4 ports `list`.
+    /// Manage the `~/.pulp/projects.json` registry.
     Projects(ProjectsArgs),
 
-    /// Per-project SDK pin: `bump`, `undo`. Phase 6b.
+    /// Per-project SDK pin: `bump`, `undo`.
     Project(ProjectArgs),
 
-    /// Scan system paths for VST3 / AU / CLAP / LV2 plug-ins. Phase 6b
-    /// (file-enumeration stub — see `UPSTREAM_SYNC.md`).
+    /// Scan system paths for VST3 / AU / CLAP / LV2 plug-ins using
+    /// file enumeration rather than deep plug-in metadata.
     Scan(ScanArgs),
 
-    /// Read + write `~/.pulp/config.toml`. Phase 5.
+    /// Read + write `~/.pulp/config.toml`.
     Config(ConfigArgs),
 
-    /// Check / stage a CLI upgrade. Phase 5.
+    /// Check / stage a CLI upgrade.
     Upgrade(UpgradeArgs),
 
-    /// Delegate to `shipyard pr`. Phase 6.
+    /// Delegate to `shipyard pr`.
     Pr(PrArgs),
 
-    /// Manage the Pulp SDK cache (`status`, `clean`). Phase 6.
+    /// Manage the Pulp SDK cache (`status`, `clean`).
     Sdk(SdkArgs),
 
-    /// Configure + build via `cmake`. Phase 6 (no `--watch`).
+    /// Configure + build via `cmake`; watch/validate branches
+    /// delegate to `pulp-cpp` when available.
     Build(BuildArgs),
 
-    /// Run `ctest --output-on-failure`. Phase 6.
+    /// Run `ctest --output-on-failure`.
     Test(TestArgs),
 
-    /// Launch a standalone binary from the build tree. Phase 6.
+    /// Launch a standalone binary from the build tree.
     Run(RunArgs),
 
-    /// Remove the `build/` directory. Phase 6.
+    /// Remove the `build/` directory.
     Clean,
 
-    /// Print a short project-status summary. Phase 6.
+    /// Print a short project-status summary.
     Status,
 
-    /// Manage the `$PULP_HOME/cache/` directory. Phase 6.
+    /// Manage the `$PULP_HOME/cache/` directory.
     Cache(CacheArgs),
 
-    /// Add a registry package to the project. Phase 6c.
+    /// Add a registry package to the project.
     Add(PkgTailArgs),
 
-    /// Remove an installed package. Phase 6c.
+    /// Remove an installed package.
     Remove(PkgTailArgs),
 
-    /// List installed packages (`--json` optional). Phase 6c.
+    /// List installed packages (`--json` optional).
     List(PkgTailArgs),
 
-    /// Fuzzy-search the package registry. Phase 6c.
+    /// Fuzzy-search the package registry.
     Search(PkgTailArgs),
 
-    /// Check / apply registry package upgrades. Phase 6c.
+    /// Check / apply registry package upgrades.
     Update(PkgTailArgs),
 
-    /// Recommend packages by description / file / alternative. Phase 6c.
+    /// Recommend packages by description / file / alternative.
     Suggest(PkgTailArgs),
 
-    /// Manage `[project].targets` in pulp.toml. Phase 6c.
+    /// Manage `[project].targets` in pulp.toml.
     Target(PkgTailArgs),
 
-    /// Dependency audit: internal flags, or delegate to `tools/audit.py`. Phase 6c.
+    /// Dependency audit: internal flags, or delegate to `tools/audit.py`.
     Audit(PkgTailArgs),
 
     /// Inspect and apply local Pulp package manifests. Delegates to C++.
@@ -119,32 +117,32 @@ enum Command {
     #[command(disable_help_flag = true)]
     Content(PkgTailArgs),
 
-    /// Unified development loop: configure + build (+ optional test /
-    /// run). Phase 6d — watch loop stubbed.
+    /// Unified development loop: delegates live-watch workflows to
+    /// `pulp-cpp`, with a Rust one-shot fallback.
     Dev(PkgTailArgs),
 
-    /// Scaffold a new plugin project. Phase 6d — `--ci` non-interactive
-    /// path ported; interactive path rejects.
+    /// Scaffold a new plugin project. The `--ci` non-interactive path
+    /// is Rust-native; the interactive wizard delegates to `pulp-cpp`.
     #[command(disable_help_flag = true)]
     Create(PkgTailArgs),
 
     /// Local documentation reader: `index`, `search`, `open`, `show`,
-    /// `check`, `build-site`, `build-api`. Phase 6d.
+    /// `check`, `build-site`, `build-api`.
     Docs(PkgTailArgs),
 
-    /// Launch the design tool binary against a script. Phase 6d —
-    /// `--watch` stubbed.
+    /// Launch the design tool binary against a script; live-watch
+    /// workflows delegate to `pulp-cpp` when available.
     Design(PkgTailArgs),
 
     /// Manage third-party tools (`list`, `install`, `uninstall`, `path`,
-    /// `run`, `doctor`). Phase 6d — `install` stubbed.
+    /// `run`, `doctor`). Archive installation delegates to `pulp-cpp`.
     Tool(PkgTailArgs),
 
     /// Agent-facing wrappers around the inspector `Motion.*`
     /// protocol — record / stop / snapshot / list-traces /
     /// load-fixture / scrub / play / pause / cost. Pairs with the
-    /// `/motion` slash command and the `pulp_motion_*` MCP tools
-    /// (pulp #2153). Off by default — requires a running inspector
+    /// `/motion` slash command and the `pulp_motion_*` MCP tools.
+    /// Off by default — requires a running inspector
     /// (PULP_MOTION_SERVER=1).
     #[command(name = "motion")]
     Motion(PkgTailArgs),
@@ -152,8 +150,7 @@ enum Command {
     /// Manage `.pulp/identity.lock` — the committed pin of each
     /// plugin's AU 4CC, manufacturer code, AAX product code,
     /// optional VST3 FUID, and optional CLAP plugin id. See
-    /// `docs/reference/identity-lock.md` and Track 3.12 of the
-    /// macOS plugin-authoring plan.
+    /// `docs/reference/identity-lock.md`.
     Identity(PkgTailArgs),
 }
 
@@ -304,16 +301,12 @@ struct CacheArgs {
 }
 
 fn main() -> ExitCode {
-    // Phase 8 rollback lever. When `$PULP_USE_CPP=1` is set, skip the
-    // Rust dispatch entirely and exec the C++ binary with the user's
-    // full argv unchanged. Lets anyone who gets burned by a Rust-side
-    // regression post-swap revert to the pre-swap behaviour with a
-    // single `export`, no reinstall required.
+    // Rollback lever. When `$PULP_USE_CPP=1` is set, skip the Rust
+    // dispatch entirely and exec the C++ binary with the user's full
+    // argv unchanged.
     //
-    // Dormant pre-swap: `PULP_USE_CPP=1` with no `pulp-cpp` binary on
-    // PATH prints a clear "install pulp-cpp to enable rollback"
-    // message and exits 2. Post-swap the installer lands both
-    // binaries side-by-side, so this path just works.
+    // If `pulp-cpp` is not on PATH, print a clear "install pulp-cpp
+    // to enable rollback" message and exit 2.
     if std::env::var_os("PULP_USE_CPP").is_some_and(|v| !v.is_empty()) {
         return force_cpp_fallthrough();
     }
@@ -738,12 +731,11 @@ fn clap_exit_code(err: &clap::error::Error) -> ExitCode {
     use clap::error::ErrorKind;
     match err.kind() {
         ErrorKind::InvalidSubcommand | ErrorKind::UnknownArgument => {
-            // Phase 7 fix (Phase 8 gate): commands the Rust dispatch
-            // doesn't declare (`ship`, `validate`, `host`, `audio`,
-            // `inspect`, `import-design`, `export-tokens`,
-            // `design-debug`, plus any future C++-only
-            // subcommand) must still work for users and the Pulp
-            // Claude plugin. Route them through pulp-cpp when
+            // Commands the Rust dispatch doesn't declare (`ship`,
+            // `validate`, `host`, `audio`, `inspect`, `import-design`,
+            // `export-tokens`, `design-debug`, plus any future
+            // C++-only subcommand) must still work for users and the
+            // Pulp Claude plugin. Route them through pulp-cpp when
             // available before falling back to the fuzzy suggester.
             let argv: Vec<String> = std::env::args().skip(1).collect();
             if let Ok(pulp_rs::fallthrough::Outcome::Delegated(rc)) =

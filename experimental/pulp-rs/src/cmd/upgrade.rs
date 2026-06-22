@@ -2,10 +2,10 @@
 //!
 //! # Scope
 //!
-//! Phase 5 ports the *discovery* half of the C++ `pulp upgrade` path:
-//! check for a newer release, print the delta, stage a pending-upgrade
-//! marker, and install a release binary when requested. Tests use a
-//! dry-run override so they never hot-swap the running test binary.
+//! Rust owns release discovery and installation: check for a newer
+//! release, print the delta, stage a pending-upgrade marker, and
+//! install a release binary when requested. Tests use a dry-run
+//! override so they never hot-swap the running test binary.
 //!
 //! # Flag surface
 //!
@@ -13,7 +13,7 @@
 //! --check-only   Report cached latest-release; do not install.
 //! --notes        Print migration notes for the upgrade hop.
 //! --json         Emit structured output on a per-flag basis.
-//! --install      (Stub) Place a "pending upgrade" marker and exit.
+//! --install      Download and install the selected release.
 //! ```
 //!
 //! Environment overrides:
@@ -80,7 +80,7 @@ pub struct UpgradeArgs {
     pub notes: bool,
     /// `--json` — emit structured output where applicable.
     pub json: bool,
-    /// `--install` — stage a pending-upgrade marker (stub).
+    /// `--install` — download and install the selected release.
     pub install: bool,
     /// `--from X` — override installed-version probe.
     pub from_override: Option<String>,
@@ -308,8 +308,8 @@ fn do_check_only<F: Fetcher>(args: &UpgradeArgs, fetcher: &F, out: &mut impl Wri
         // Suppress the "Run --install" hint when we're already on the
         // install path — `do_install` calls `do_check_only` first to
         // refresh the cache, and printing the hint right before the
-        // success line is confusing UX. Also drop the stale "(stub)"
-        // suffix — the Phase 8 install path is no longer a stub.
+        // success line is confusing UX. Also avoid the stale "(stub)"
+        // suffix because the install path is real now.
         if !args.install {
             writeln!(
                 out,
@@ -323,17 +323,15 @@ fn do_check_only<F: Fetcher>(args: &UpgradeArgs, fetcher: &F, out: &mut impl Wri
     Ok(())
 }
 
-/// Real install path — Phase 8 fix for the dual-binary swap.
+/// Real install path for the dual-binary Rust/C++ layout.
 ///
-/// Before Phase 8 this delegated to `pulp-cpp upgrade --install`,
-/// which self-replaced the running C++ binary with the file named
-/// `pulp` from the release tarball. After the swap that file is the
-/// **Rust** binary, so the delegate would clobber `pulp-cpp` and break
-/// the fallthrough chain on every upgrade. We own the install now:
+/// The C++ self-replace flow swaps the running binary with the file
+/// named `pulp` from the release tarball. In the dual-binary layout
+/// that file is the Rust binary, so delegating would clobber
+/// `pulp-cpp` and break the fallthrough chain. Rust owns the install:
 /// download the tarball, extract, and replace both `pulp` (self) and
-/// the sibling `pulp-cpp` (when the archive ships it). Pre-swap
-/// single-binary tarballs still flow through this path — the cpp slot
-/// is a no-op then.
+/// the sibling `pulp-cpp` when the archive ships it. Single-binary
+/// tarballs still flow through this path; the cpp slot is a no-op.
 ///
 /// Test / sandbox short-circuits:
 ///
@@ -509,7 +507,7 @@ fn effective_installed(args: &UpgradeArgs) -> String {
 /// fool the comparison. Public for the CLI binary's use only;
 /// internal code already routes through [`SemverCompat`].
 #[must_use]
-#[allow(dead_code)] // surface-reserving export for Phase 6
+#[allow(dead_code)] // surface-reserving export for external callers
 pub fn normalise(v: &str) -> String {
     SemverCompat::parse(v).raw
 }
@@ -849,9 +847,8 @@ mod tests {
 
     /// Real install path via the tarball-dir test seam — no network,
     /// no extraction, but the dual-binary swap logic runs end-to-end.
-    /// Verifies the Phase 8 fix: `pulp` and `pulp-cpp` both land in
-    /// the planned destinations and the legacy delegate path is no
-    /// longer touched.
+    /// Verifies that `pulp` and `pulp-cpp` both land in the planned
+    /// destinations and the legacy delegate path is no longer touched.
     #[test]
     fn install_replaces_both_binaries_via_tarball_dir_seam() {
         let (_td, _g) = isolated_env();
@@ -979,7 +976,7 @@ mod tests {
         assert!(cache.last_check_epoch_sec >= 42);
     }
 
-    // ── #45 coverage uplift slice 10 — upgrade.rs parse + helpers ─
+    // ── upgrade.rs parse + helper coverage ────────────────────────
 
     #[test]
     fn parse_args_default_is_empty() {

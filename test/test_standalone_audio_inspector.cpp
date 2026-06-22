@@ -1,6 +1,5 @@
 // test_standalone_audio_inspector.cpp — the standalone-host wiring proof for
-// the developer Audio Inspector (audio observability harness Phase 6,
-// planning/2026-06-09-audio-inspector-separate-tool-window-proposal.md).
+// the developer Audio Inspector.
 //
 // The window tests in test_audio_inspector_window.cpp prove the window in
 // isolation. This file proves the SEAM the standalone host owns: the exact

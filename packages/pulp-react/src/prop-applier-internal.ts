@@ -37,9 +37,8 @@ export function call(name: string, ...args: unknown[]): void {
 // bypasses that — it forwards the raw `style.fontFamily` value straight
 // into `setFontFamily`. The string "var(--mono)" then reached Skia's
 // font matcher as a literal family name, returned no match, and fell
-// through to a proportional sans (visible as the Spectr top-bar "faint
-// label" symptom — labels rendered in the wrong typeface AND in a layer
-// that degraded the LCD AA, compounding the faintness).
+// through to a proportional sans. Labels rendered in the wrong typeface,
+// and the fallback layer degraded LCD antialiasing.
 //
 // Resolution tiers (first hit wins):
 //   1. `globalThis.__pulpCssVars[name]` — developer-set runtime

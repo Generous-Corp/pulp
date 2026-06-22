@@ -1,7 +1,7 @@
-// P2 resolver unification — audioWidgetKindFromName must match WHOLE WORDS, not
-// substrings, in lockstep with the C++ detect_audio_widget (design_import.cpp)
-// and the Python widget_kind_from_name. The old substring match produced the
-// false positives this pins shut.
+// audioWidgetKindFromName must match whole words, not substrings, in lockstep
+// with the C++ detect_audio_widget (design_import.cpp) and the Python
+// widget_kind_from_name. The old substring match produced the false positives
+// this pins shut.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

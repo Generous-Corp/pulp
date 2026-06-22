@@ -1,6 +1,6 @@
 /// @file test_motion_preferences.cpp
-/// Catch2 unit tests for pulp::view::MotionPreferences (Phase 8a) and the
-/// Tween / ValueAnimation honoring of MotionPolicy (Phase 8b).
+/// Catch2 unit tests for pulp::view::MotionPreferences and Tween /
+/// ValueAnimation honoring of MotionPolicy.
 
 #include <pulp/view/motion_preferences.hpp>
 #include <pulp/view/animation.hpp>

@@ -1,4 +1,4 @@
-// pulp #1486 — tweaks layer unit tests.
+// Tweaks layer unit tests.
 
 import { describe, it, expect } from 'vitest';
 import {

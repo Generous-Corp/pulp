@@ -1,10 +1,9 @@
 // Cross-platform UMP Session — virtual endpoint registry + dispatch.
 //
-// macOS plan item 8.1. The OS-backed half (CoreMIDI 2.0 client +
-// physical endpoint open) lives in `platform/mac/ump_session_coremidi.mm`
-// and is wired in via the `os_backend_*` weak hooks declared at the
-// bottom of this file. On platforms without an OS backend the hooks
-// are no-ops and the session is virtual-endpoints-only — which is
+// The OS-backed half (CoreMIDI 2.0 client + physical endpoint open) lives in
+// `platform/mac/ump_session_coremidi.mm` and is installed at runtime through
+// `register_ump_os_backend()`. On platforms without an OS backend the vtable's
+// function pointers stay null and the session is virtual-endpoints-only —
 // exactly what the headless test target exercises.
 //
 // Threading:
@@ -12,8 +11,9 @@
 //     the impl mutex.
 //   - `enumerate_endpoints` snapshots under the same mutex and copies
 //     out, so callers iterate without holding it.
-//   - `open_endpoint` is mutex-free for the virtual lookup; the OS
-//     backend manages its own state.
+//   - `open_endpoint` takes the impl mutex only for the virtual-endpoint
+//     lookup, then releases it before delegating to the OS backend, which
+//     manages its own state.
 
 #include <pulp/midi/ump_session.hpp>
 
@@ -95,8 +95,8 @@ struct UmpSession::Impl {
     // target.
     std::unordered_map<std::string, std::vector<std::string>> wires;
 
-    // True iff the OS backend (e.g. CoreMIDI 2.0) was successfully
-    // initialised. Set by `os_backend_init`; reset by `os_backend_shutdown`.
+    // True iff the OS backend (e.g. CoreMIDI 2.0) initialised successfully.
+    // Set from `vtable().init()` in the constructor.
     bool os_active = false;
 
     // Opaque OS backend state (CoreMIDI MIDIClientRef wrapper etc.).
@@ -105,10 +105,9 @@ struct UmpSession::Impl {
     void* os_state = nullptr;
 };
 
-// OS backend hook table. Each platform implementation strong-overrides
-// these by installing the vtable from a static initialiser; if no backend
-// file is linked, the no-op defaults stay in place and the session
-// reports `os_backend_active() == false`.
+// OS backend hook table. Each platform implementation installs the vtable from
+// a static initialiser; if no backend file is linked, the no-op defaults stay
+// in place and the session reports `os_backend_active() == false`.
 
 namespace ump_os {
 
@@ -140,9 +139,9 @@ UmpSession::~UmpSession() {
     if (impl_->os_active && ump_os::vtable().shutdown) {
         ump_os::vtable().shutdown(impl_->os_state);
     }
-    // Virtual endpoints close themselves when the shared_ptr drops, but
-    // explicitly closing them here makes lifetime ordering obvious for
-    // anyone reading a crash log.
+    // Virtual endpoints are destroyed when the last shared_ptr drops, but
+    // explicitly closing them here makes lifetime ordering obvious for anyone
+    // reading a crash log.
     std::lock_guard<std::mutex> lk(impl_->mu);
     for (auto& [_, ep] : impl_->virtuals) {
         if (ep) ep->close();

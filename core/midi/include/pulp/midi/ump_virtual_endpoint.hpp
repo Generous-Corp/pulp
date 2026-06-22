@@ -2,8 +2,7 @@
 
 // VirtualUmpEndpoint — purely in-process UMP endpoint.
 //
-// macOS plan item 8.1 (VirtualEndpoint half). A `VirtualUmpEndpoint`
-// is a `UmpEndpoint` with no OS handle: packets sent into it are
+// A `VirtualUmpEndpoint` is a `UmpEndpoint` with no OS handle: packets sent into it are
 // queued and re-delivered to the registered receive callback
 // synchronously inside `send()`. This is the workhorse for
 // headless tests (the CoreMIDI side rejects connections without a

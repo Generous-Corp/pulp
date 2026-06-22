@@ -173,7 +173,7 @@ static void print_usage() {
     std::cout << "  pulp status             # Show project info\n";
 }
 
-// ── Update-check dispatch (Slice 2 #547 + Slice 5 #550 of #499) ─────────────
+// ── Update-check dispatch ──────────────────────────────────────────────────
 //
 // Before we dispatch the user's command, we optionally:
 //   1. Complete any pending auto-mode upgrade staged by a previous
@@ -192,7 +192,7 @@ static void print_usage() {
 //      download and write ~/.pulp/pending-upgrade so the next
 //      invocation completes the swap.
 //
-// Slice 5 (#550) scope:
+// Current mode-enforcement scope:
 //   - All four modes wired into the invocation path.
 //   - ~/.pulp/pending-upgrade marker (read on next invocation).
 //   - ~/.pulp/update-snooze (24h) for prompt-mode decline.
@@ -310,10 +310,10 @@ void kick_background_refresh(const fs::path& cache_path) {
 // network fetch is delegated to a detached thread so we don't block
 // the user's command.
 //
-// Slice 5's wiring intentionally stops short of actually downloading
-// the tarball — cmd_upgrade already owns that code and we don't want
-// to duplicate the signature/platform arch matrix. The marker we drop
-// here is the signal for the next invocation (or the user's next
+// This wiring intentionally stops short of actually downloading the
+// tarball — cmd_upgrade already owns that code and we don't want to
+// duplicate the signature/platform arch matrix. The marker we drop here
+// is the signal for the next invocation (or the user's next
 // `pulp upgrade`) to perform the swap. This preserves the Section G
 // non-goal "no binary is ever replaced without the user's session
 // touching `pulp` again".

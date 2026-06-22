@@ -461,7 +461,7 @@ mod tests {
         assert!(s.contains("nothing to audit"));
     }
 
-    // ── #45 coverage uplift slice 6 — audit.rs follow-on ──────────
+    // ── audit.rs follow-on coverage ───────────────────────────────
 
     #[test]
     fn dots_helper_pads_to_width() {

@@ -50,11 +50,11 @@ Heuristics (per surface, deliberately conservative):
 
 Uses JSON configs (zero-dep).
 
-Module layout (P9-NEW refactor, 2026-05): the Surface / heuristics /
-apply / render clusters live in focused sibling modules and are
-re-exported here so this file stays the byte-identical CLI entrypoint.
-External importers (`skill_sync_check.py` and the test suite) keep
-using `from version_bump_check import ...` unchanged.
+Module layout: the Surface / heuristics / apply / render clusters live
+in focused sibling modules and are re-exported here so this file remains
+the stable CLI and import entrypoint. External importers
+(`skill_sync_check.py` and the test suite) keep using
+`from version_bump_check import ...` unchanged.
 
     version_bump_surfaces.py    Surface domain model, config loading,
                                 version-file I/O
@@ -73,9 +73,9 @@ import subprocess  # noqa: F401  (re-exported for external importers)
 import sys
 from pathlib import Path
 
-# Shared substrate (2026-05 refactor batch). `_strip_meta` is the
-# version-bump-specific alias for `strip_meta`; we keep the public alias
-# so other callers in this file (and any external imports) don't break.
+# Shared gate helpers. `_strip_meta` is the version-bump-specific alias
+# for `strip_meta`; keep the public alias so callers in this file and any
+# external imports don't break.
 from gate_common import (
     repo_root,
     git_diff_names,
@@ -87,12 +87,10 @@ from gate_common import (
     strip_meta as _strip_meta,
 )
 
-# ── Re-exported cluster symbols (P9-NEW split) ──────────────────────────
-# These modules carry the byte-identical bodies of the functions/classes
-# that previously lived inline in this file. Keep every public name
-# re-exported so `from version_bump_check import X` keeps working for
-# skill_sync_check.py, test_gates.py, test_version_bump_check_extra.py
-# and any external caller.
+# ── Re-exported cluster symbols ─────────────────────────────────────────
+# Keep every public name re-exported so `from version_bump_check import X`
+# keeps working for skill_sync_check.py, test_gates.py,
+# test_version_bump_check_extra.py and any external caller.
 
 from version_bump_surfaces import (
     LEVELS,
@@ -265,12 +263,12 @@ def check_fix_feat_requires_bump(
 
 
 def main(argv: list[str]) -> int:
-    # B1 (2026-05): if invoked as `version_bump_check.py classify-subject
-    # <subject>`, exit 0 when the subject matches the fix/feat regex and
-    # 1 otherwise. This lets .github/workflows/auto-release.yml's
-    # stranded-fix detector call the script for classification instead
-    # of duplicating `_FIX_FEAT_TITLE_RE` inline (the duplication was a
-    # documented lock-step drift risk).
+    # If invoked as `version_bump_check.py classify-subject <subject>`,
+    # exit 0 when the subject matches the fix/feat regex and 1 otherwise.
+    # This lets .github/workflows/auto-release.yml's stranded-fix detector
+    # call the script for classification instead of duplicating
+    # `_FIX_FEAT_TITLE_RE` inline (the duplication was a documented
+    # lock-step drift risk).
     if len(argv) >= 2 and argv[0] == "classify-subject":
         return 0 if _is_fix_or_feat_title(argv[1]) else 1
 

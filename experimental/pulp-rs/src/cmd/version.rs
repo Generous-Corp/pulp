@@ -3,13 +3,11 @@
 //!
 //! # Scope
 //!
-//! Phase 5's warmup port delivered the `show` lane only. Phase 6e adds
-//! the remaining two subcommands so the Rust port matches the C++
-//! surface at `tools/cli/cmd_version.cpp`:
+//! Rust matches the C++ surface at `tools/cli/cmd_version.cpp`:
 //!
 //! | Subcommand | Port status |
 //! |------------|-------------|
-//! | `show` (default) | Ported — human + `--json` identical to Phase 5. |
+//! | `show` (default) | Ported — human output + `--json`. |
 //! | `bump <major|minor|patch> [--plugin]` | Ported — CMakeLists.txt rewrite + CHANGELOG heading insert + footer hint. |
 //! | `check [--with-bump-check]` | Ported — SDK / AU plist / CHANGELOG / plugin.json / marketplace.json consistency; `--with-bump-check` delegates to `tools/scripts/version_bump_check.py --mode=report`. |
 //!
@@ -166,8 +164,8 @@ pub fn dispatch<S: Spawner>(
 
 // ── show ─────────────────────────────────────────────────────────────
 
-/// Pre-Phase-6e entry point; kept for back-compat with callers that
-/// hardcode the flag-only surface.
+/// Flag-only entry point kept for back-compat with callers that
+/// hardcode the original `version --json` surface.
 ///
 /// # Errors
 ///
@@ -185,8 +183,7 @@ fn show(json: bool, out: &mut impl Write) -> Result<()> {
         return Ok(());
     }
 
-    // Phase 8 binary swap (#767 / #686): user-facing label is now
-    // `pulp` (was `pulp-rs (prototype)`). The C++ delegate is `pulp-cpp`.
+    // User-facing label is `pulp`; the C++ delegate is `pulp-cpp`.
     writeln!(out, "pulp v{}", snap.cli.raw).map_err(io_err)?;
     if !snap.plugin.raw.is_empty() {
         writeln!(out, "Claude plugin: v{}", snap.plugin.raw).map_err(io_err)?;
@@ -820,7 +817,7 @@ mod tests {
         assert_eq!(rc, 1);
     }
 
-    // ── #45 coverage uplift slice 5 — version.rs helpers ──────────
+    // ── version.rs helper coverage ────────────────────────────────
     //
     // The pure helpers below the dispatch surface (read_plugin_version,
     // rewrite_plugin_version, rewrite_first_occurrence,

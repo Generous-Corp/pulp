@@ -30,9 +30,8 @@ namespace {
 
 // Populate a ProjectEntry for a given root by reading the project's
 // sdk_version (CMakeLists.txt for source-tree projects, pulp.toml
-// otherwise) and cli_min_version. Mirrors the Slice 1 logic for the
-// active project but applied to each registered/scanned entry.
-// Issue #552.
+// otherwise) and cli_min_version. Mirrors active-project version
+// detection for each registered/scanned entry (#552).
 pulp::cli::version_diag::ProjectEntry make_project_entry(
     const fs::path& root, const std::string& display_name,
     bool scanned)
@@ -56,7 +55,7 @@ pulp::cli::version_diag::ProjectEntry make_project_entry(
     return e;
 }
 
-// ── Host-quirks reporting (host-quirks integration plan, P2) ──────────
+// ── Host-quirks reporting ────────────────────────────────────────────
 //
 // Surfaces the runtime host-quirks state so a user can see whether Pulp
 // is enforcing DAW accommodations, under which policy, and from where
@@ -141,15 +140,15 @@ int cmd_doctor(const std::vector<std::string>& args) {
     bool fix_mode = false;
     bool ci_mode = false;
     bool dry_run = false;
-    bool versions_mode = false;   // --versions: issue #499 Slice 1
+    bool versions_mode = false;   // --versions: issue #499
     bool validators_mode = false; // --validators: issue #743
-    bool scan_parents = false;    // --scan-parents: issue #552 Slice 1b
+    bool scan_parents = false;    // --scan-parents: issue #552
     bool caches_mode = false;     // --caches: issue #744
-    bool au_cache_mode = false;   // --au-cache (Slice 11): refresh macOS AU registrar
+    bool au_cache_mode = false;   // --au-cache: refresh macOS AU registrar
     bool json_mode = false;       // --json (works with --versions and --caches)
-    bool list_mode = false;       // --list / `pulp doctor list` (R2-8)
-    bool host_quirks_mode = false; // --host-quirks / `pulp doctor quirks` (host-quirks P2)
-    std::string only_filter;      // --only <name> (R2-8)
+    bool list_mode = false;       // --list / `pulp doctor list`
+    bool host_quirks_mode = false; // --host-quirks / `pulp doctor quirks`
+    std::string only_filter;      // --only <name>
     for (size_t i = 0; i < args.size(); ++i) {
         const auto& arg = args[i];
         if (arg == "--fix") fix_mode = true;
@@ -185,7 +184,7 @@ int cmd_doctor(const std::vector<std::string>& args) {
         }
     }
 
-    // R2-8: `pulp doctor list` is a synonym for `--list`. Lets users
+    // `pulp doctor list` is a synonym for `--list`. Lets users
     // discover available check names before passing one to --only.
     if (mode == "list") {
         list_mode = true;
@@ -212,7 +211,7 @@ int cmd_doctor(const std::vector<std::string>& args) {
         return 2;
     }
 
-    // `pulp doctor --au-cache` (Tier A Slice 11) — macOS-only.
+    // `pulp doctor --au-cache` — macOS-only.
     //
     // macOS's `AudioComponentRegistrar` caches Audio Unit `Info.plist`
     // metadata aggressively. After a rebuild that changes a property
@@ -397,11 +396,11 @@ int cmd_doctor(const std::vector<std::string>& args) {
         return vd::compute_exit_code(reports);
     }
 
-    // `pulp doctor --versions` is a dedicated diagnostic (issue #499
-    // Slice 1). It short-circuits the rest of the doctor pipeline on
-    // purpose — skew warnings are advisory and must not gate the
-    // environment-readiness exit code, so mixing the two would just
-    // confuse scripts that parse doctor's output.
+    // `pulp doctor --versions` is a dedicated diagnostic (#499). It
+    // short-circuits the rest of the doctor pipeline on purpose — skew
+    // warnings are advisory and must not gate the environment-readiness
+    // exit code, so mixing the two would just confuse scripts that
+    // parse doctor's output.
     if (versions_mode) {
         using pulp::cli::version_diag::VersionReport;
         VersionReport report;
@@ -413,9 +412,9 @@ int cmd_doctor(const std::vector<std::string>& args) {
             standalone_mode ? fs::path{} : active_root);
         report.plugin_json_path = plugin_json;
         report.plugin = pulp::cli::version_diag::read_plugin_version(plugin_json);
-        // Slice 6 (#551): pick up the plugin's declared `min_cli_version`
-        // so the diagnostic surfaces plugin ↔ CLI skew alongside the
-        // existing project ↔ CLI checks.
+        // Pick up the plugin's declared `min_cli_version` so the
+        // diagnostic surfaces plugin ↔ CLI skew alongside the existing
+        // project ↔ CLI checks (#551).
         report.plugin_min_cli =
             pulp::cli::version_diag::read_plugin_min_cli_version(plugin_json);
 
@@ -437,10 +436,10 @@ int cmd_doctor(const std::vector<std::string>& args) {
                 pulp::cli::version_diag::read_project_cli_min_version(active_root);
         }
 
-        // Per-project registry (issue #552 Slice 1b). The registry is
-        // authoritative; only `pulp projects add/remove` and
-        // `pulp create` mutate it. We dedupe against the active
-        // project so it isn't shown twice in the diagnostic.
+        // Per-project registry (#552). The registry is authoritative;
+        // only `pulp projects add/remove` and `pulp create` mutate it.
+        // We dedupe against the active project so it isn't shown twice
+        // in the diagnostic.
         auto reg_path = pulp::cli::projects_registry::registry_path();
         auto registered = pulp::cli::projects_registry::read_registry(reg_path);
         std::vector<fs::path> seen_paths;
@@ -563,23 +562,15 @@ int cmd_doctor(const std::vector<std::string>& args) {
         std::cout << "\n";
     }
 
-    // R2-8 `--list`: enumerate available check names by running with a
-    // pseudo-filter that matches no check, then re-enumerate from a
-    // hardcoded discovery pass. Simpler: pass an unmatched filter so
-    // the result is empty, then list the names statically. Even simpler:
-    // for `list`, run with the empty filter (full set, expensive) just
-    // to get names. That's still cheap on a fresh machine because
-    // probes return fast when tools are absent. But Codex P2 wants
-    // `list` to be free. Workaround: when listing, only iterate
-    // hardcoded short-circuit by running with a sentinel filter that
-    // a separate "names-only" code path could honor. For now keep the
-    // pragmatic behavior — listing runs the probes once. Optimizing
-    // list-only is queued as a follow-up.
+    // `--list`: enumerate available check names by running the probes
+    // once and printing their names. That's still cheap on a fresh
+    // machine because probes return fast when tools are absent. A
+    // names-only path would avoid even that work, but this keeps the
+    // listing behavior simple and aligned with the real check set.
     std::vector<DoctorCheck> checks;
-    // R2-8 P2 fix (Codex on #2145): pass the filter into the run
-    // functions so individual probes can short-circuit. Previous
-    // implementation ran every probe then filtered the output —
-    // which defeated the speed promise of `--only`.
+    // Pass the filter into the run functions so individual probes can
+    // short-circuit; `--only` must avoid running unrelated probes, not
+    // just hide their output.
     const std::string filter_for_run = list_mode ? std::string{} : only_filter;
     if (mode == "android")    checks = run_doctor_android_checks(filter_for_run);
     else if (mode == "ios")   checks = run_doctor_ios_checks(filter_for_run);
@@ -598,10 +589,10 @@ int cmd_doctor(const std::vector<std::string>& args) {
         return 0;
     }
 
-    // R2-8 `--only`: empty-checks-after-filter means the filter
-    // didn't match anything. The probes already short-circuited
-    // (see filter_for_run above) so this is purely a usability
-    // signal, not work avoidance.
+    // `--only`: empty-checks-after-filter means the filter didn't
+    // match anything. The probes already short-circuited (see
+    // filter_for_run above) so this is purely a usability signal, not
+    // work avoidance.
     if (!only_filter.empty() && checks.empty()) {
         std::cerr << "pulp doctor --only: no check matched '" << only_filter << "'.\n";
         std::cerr << "Run `pulp doctor list` to see available checks.\n";

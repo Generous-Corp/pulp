@@ -3,9 +3,7 @@
 
 Path/content heuristic, conventional-commit classification, trailer
 overrides, glob matching, revert suppression. Mirrors
-`version_bump_heuristics.py`. Split from `test_gates.py` (P9-NEW
-refactor, 2026-05); test bodies are byte-identical to their previous
-definitions.
+`version_bump_heuristics.py`.
 
 Runs standalone (`python3 tools/scripts/test_version_bump_heuristics.py`)
 or as part of the aggregate suite via `test_gates.py`.

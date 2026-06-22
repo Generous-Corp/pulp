@@ -17,8 +17,8 @@ void WidgetBridge::register_svg_api(std::function<canvas::Color(const std::strin
     BridgeApiContext api{engine_};
     auto parseHexColor = std::move(parse_color);
 
-    // pulp #965 - SvgPathWidget bridge. Mirrors the API surface of
-    // CanvasWidget but for inline <svg><path> icons. JS registers the
+    // SvgPathWidget bridge. Mirrors the API surface of CanvasWidget but for
+    // inline <svg><path> icons. JS registers the
     // widget and pushes its path-data + paint attributes; the native
     // widget parses path-data once on set_path() and replays as Canvas2D
     // path commands inside paint().
@@ -51,11 +51,10 @@ void WidgetBridge::register_svg_api(std::function<canvas::Color(const std::strin
         return choc::value::Value();
     });
 
-    // pulp #1416 - setSvgFill / setSvgStroke / setSvgStrokeWidth are
-    // polymorphic across all SVG-primitive widgets so JSX consumers see
-    // a uniform fill/stroke surface. SvgPathWidget is the legacy path
-    // (#965 / #994); SvgRectWidget and SvgLineWidget mirror the API with
-    // the same hex / "none" / strokeWidth semantics.
+    // setSvgFill / setSvgStroke / setSvgStrokeWidth are polymorphic across
+    // all SVG-primitive widgets so JSX consumers see a uniform fill/stroke
+    // surface. SvgRectWidget and SvgLineWidget mirror the path API with the
+    // same hex / "none" / strokeWidth semantics.
     register_bridge_function(api, "setSvgFill", [this, parseHexColor](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto hex = args.get<std::string>(1, "");
@@ -63,10 +62,9 @@ void WidgetBridge::register_svg_api(std::function<canvas::Color(const std::strin
         if (auto* w = dynamic_cast<SvgPathWidget*>(widget(id))) {
             if (clear) w->clear_fill();
             else       w->set_fill_color(parseHexColor(hex));
-            // pulp #932 / #1737 PR-4 - solid color path wins over any
-            // previous gradient. Clear the gradient slot so a later
-            // re-render with a solid fill doesn't accidentally pick
-            // up a stale linear-gradient string.
+            // Solid color path wins over any previous gradient. Clear the
+            // gradient slot so a later re-render with a solid fill doesn't
+            // accidentally pick up a stale linear-gradient string.
             w->clear_fill_gradient();
         } else if (auto* r = dynamic_cast<SvgRectWidget*>(widget(id))) {
             if (clear) r->clear_fill();
@@ -77,8 +75,8 @@ void WidgetBridge::register_svg_api(std::function<canvas::Color(const std::strin
         return choc::value::Value();
     });
 
-    // pulp #932 / #1737 PR-4 - gradient-fill bridge fn for SvgPathWidget.
-    // Accepts a CSS linear-gradient string verbatim; the widget parses
+    // Gradient-fill bridge fn for SvgPathWidget. Accepts a CSS
+    // linear-gradient string verbatim; the widget parses
     // it at paint time. Intended JSX usage: `<SvgLinearGradient id="g"
     // stops={...}>` + `<SvgPath fill="url(#g)" .../>`; prop-applier
     // resolves the gradient JSX to a CSS string and calls this fn.
@@ -95,8 +93,8 @@ void WidgetBridge::register_svg_api(std::function<canvas::Color(const std::strin
         return choc::value::Value();
     });
 
-    // pulp #3656 - fill-rule (nonzero | evenodd) for SvgPathWidget.
-    // JUCE's SVGGraphicsContext lowers a stroked ellipse to a compound
+    // fill-rule (nonzero | evenodd) for SvgPathWidget. Some importers lower
+    // a stroked ellipse to a compound
     // annular `M…Z M…Z` fill that only renders the ring's hole under
     // even-odd winding; surfacing the prop lets a captured editor ship
     // those paths verbatim. SvgPath-only - SvgRect / SvgLine have no
@@ -142,8 +140,8 @@ void WidgetBridge::register_svg_api(std::function<canvas::Color(const std::strin
         return choc::value::Value();
     });
 
-    // pulp #1416 - SvgRectWidget bridge. Mirrors createSvgPath /
-    // setSvgPath. Geometry is local to the widget origin (not
+    // SvgRectWidget bridge. Mirrors createSvgPath / setSvgPath. Geometry is
+    // local to the widget origin (not
     // bounds()-translated). x/y default to 0, w/h default to 0 so an
     // unset rect is invisible by default.
     register_bridge_function(api, "createSvgRect", [this](choc::javascript::ArgumentList args) {
@@ -169,8 +167,8 @@ void WidgetBridge::register_svg_api(std::function<canvas::Color(const std::strin
         return choc::value::Value();
     });
 
-    // pulp #1416 - SvgLineWidget bridge. Mirrors createSvgPath /
-    // setSvgRect. Endpoints are local to the widget origin.
+    // SvgLineWidget bridge. Mirrors createSvgPath / setSvgRect. Endpoints
+    // are local to the widget origin.
     register_bridge_function(api, "createSvgLine", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto pid = args.get<std::string>(1, "");

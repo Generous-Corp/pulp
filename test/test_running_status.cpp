@@ -1,5 +1,4 @@
-// Tests for the MIDI 1.0 running-status byte-stream parser
-// (workstream 02 slice 2.5).
+// Tests for the MIDI 1.0 running-status byte-stream parser.
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/midi/running_status.hpp>

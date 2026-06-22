@@ -1,21 +1,17 @@
 #pragma once
 
 /// @file jsx_lock.hpp
-/// Phase 4b — Lock-to-source, Path B (hand-authored JSX/TSX patch).
-///
-/// Spec: planning/2026-05-18-inspector-direct-manipulation-roadmap.md,
-///       "Phase 4 — Lock-to-source" / "Phase 4b — Path B (JSX/TSX AST
-///       patch via element instrumentation)". GitHub issue #1308.
+/// Lock-to-source support for hand-authored JSX/TSX.
 ///
 /// The inspector's direct-manipulation edits land in a tweaks layer
 /// (`pulp-tweaks.json`, keyed by `stable_anchor_id`). "Lock to source" is
 /// the explicit, opt-in promotion of a tweak back into the *authored*
 /// source so the change survives a fresh re-import.
 ///
-/// Where Phase 4a (`lock_to_source.hpp`) rewrites the *generated*
-/// web-compat JS that `pulp import-design` emits, Phase 4b handles the
-/// other half of the lock-to-source contract: the user is running a
-/// **live React bundle** built from a hand-authored JSX/TSX file
+/// Where `lock_to_source.hpp` rewrites the *generated* web-compat JS that
+/// `pulp import-design` emits, this header handles the other half of the
+/// lock-to-source contract: the user is running a **live React bundle** built
+/// from a hand-authored JSX/TSX file
 /// (`pulp import-design --from jsx`, `--execute-bundle`). That JSX/TSX
 /// is the user's own source — there is no generated artifact to rewrite.
 ///
@@ -30,11 +26,11 @@
 ///
 /// ## Patch strategy — surgical, not a full AST re-emit
 ///
-/// Phase 4a and 4c deliberately do *minimal* rewrites: they locate the
-/// exact span that owns the value and rewrite only that span, preserving
-/// every other byte (prose, comments, formatting, key order). Phase 4b
-/// mirrors that discipline. It is NOT a general JSX-to-JSX AST printer.
-/// It performs a tightly-scoped, anchored text edit:
+/// The lock-to-source engines deliberately do *minimal* rewrites: they locate
+/// the exact span that owns the value and rewrite only that span, preserving
+/// every other byte (prose, comments, formatting, key order). This is NOT a
+/// general JSX-to-JSX AST printer. It performs a tightly-scoped, anchored text
+/// edit:
 ///
 ///   * `style={{ padding: 8, background: '#888' }}` — the engine finds
 ///     the matching object property inside the inline-style literal and
@@ -42,15 +38,13 @@
 ///   * `width={80}` / `width="80"` / `color="#888"` — a bare prop whose
 ///     value is a literal: the engine rewrites the literal in place.
 ///
-/// Codex's caveat on the roadmap (lines 126-128, 483, 524) is explicit:
-/// Path B AST patching must not balloon into a multi-quarter parser.
-/// Anything the engine cannot patch *safely and unambiguously* — a
-/// spread (`style={{ ...base }}`), a computed key, a non-literal value
-/// (`padding={gap * 2}`, `color={theme.fg}`), a className-driven style,
-/// a duplicate anchor — is reported as a typed failure so the caller
-/// leaves the tweak in the sidecar with a "too dynamic to lock" message.
+/// Anything the engine cannot patch *safely and unambiguously* — a spread
+/// (`style={{ ...base }}`), a computed key, a non-literal value (`padding={gap *
+/// 2}`, `color={theme.fg}`), a className-driven style, a duplicate anchor — is
+/// reported as a typed failure so the caller leaves the tweak in the sidecar
+/// with a "too dynamic to lock" message.
 ///
-/// ## Conservatism contract (mirrors Phase 4a/4c)
+/// ## Conservatism contract
 ///
 /// If the target element or prop cannot be located *unambiguously*, the
 /// lock FAILS and the source is returned byte-identical. The engine
@@ -65,7 +59,7 @@ namespace pulp::view {
 
 /// A single tweak to promote into authored JSX/TSX source. Mirrors the
 /// tuple the inspector tweak-store keys on: `(anchor_id, property_path)`
-/// → `value`, identical in shape to `LockToSourceTweak` (Phase 4a).
+/// → `value`, identical in shape to `LockToSourceTweak`.
 struct JsxLockTweak {
     /// The tweak's `stable_anchor_id` — matched against the element's
     /// injected `data-pulp-anchor="<id>"` attribute.
@@ -153,11 +147,11 @@ std::optional<std::string>
 jsx_lock_property_to_key(const std::string& property_path);
 
 /// Heuristic guard: does `source` look like *hand-authored* JSX/TSX (as
-/// opposed to a Pulp-generated web-compat artifact)? Phase 4b only locks
-/// into authored source; a file that carries the `generate_pulp_js`
-/// banner or an `@generated` marker belongs to Phase 4a instead. Returns
-/// true when the source contains JSX (`<Tag …>` / `</Tag>` / `<Tag/>`)
-/// and is NOT flagged generated.
+/// opposed to a Pulp-generated web-compat artifact)? This path only locks into
+/// authored source; a file that carries the `generate_pulp_js` banner or an
+/// `@generated` marker belongs to `lock_to_source.hpp` instead. Returns true
+/// when the source contains JSX (`<Tag …>` / `</Tag>` / `<Tag/>`) and is NOT
+/// flagged generated.
 bool is_authored_jsx_source(const std::string& source);
 
 /// Locate the JSX element carrying `data-pulp-anchor="<tweak.anchor_id>"`

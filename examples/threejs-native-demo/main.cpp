@@ -1530,20 +1530,19 @@ std::vector<uint8_t> capture_demo_offscreen_png(DemoEnvironment& env,
 
 #ifdef PULP_BENCHMARK
 
-// ── Zero-copy benchmark mode (Slice 0.5 of #516) ────────────────────────────
+// ── Zero-copy benchmark mode ────────────────────────────────────────────────
 //
 // Drives the *real* JS→GPU upload path: Three.js BufferGeometry +
 // BufferAttribute(Float32Array, 3), with `needsUpdate = true` per
 // frame so the vertex buffer is re-uploaded via queue.WriteBuffer.
-// This exercises the upload code touched in #535 (the same code path
-// a real JS-scripted plugin UI would use), not the C++-driven
-// VisualizationBridge path. Headless: no WindowHost, offscreen Dawn
-// surface only. Emits JSON with the Slice 0 schema plus the new
-// Slice 0.5 fields (base64_decode_us, gpu_buffer_upload_count,
-// gpu_buffer_bytes_resident_peak).
+// This exercises the same upload code path a real JS-scripted plugin UI
+// would use, not the C++-driven VisualizationBridge path. Headless: no
+// WindowHost, offscreen Dawn surface only. Emits JSON with the benchmark
+// schema fields base64_decode_us, gpu_buffer_upload_count, and
+// gpu_buffer_bytes_resident_peak.
 //
-// MB-fraction is computed exactly as requested by the re-evaluation
-// plan: (base64_decode_us + gpu_upload_us) / frame_budget_us.
+// MB-fraction is computed as:
+//   (base64_decode_us + gpu_upload_us) / frame_budget_us.
 
 struct ParticleBenchmarkConfig {
     bool enabled = false;
@@ -1569,11 +1568,10 @@ std::string current_iso8601_utc_threejs() {
 }
 
 std::string current_short_sha_threejs() {
-    // Codex 2026-04-21 review on #541: MSVC's CRT exposes the pipe
-    // helpers as `_popen` / `_pclose`; bare `popen` / `pclose` are
-    // POSIX spellings that don't link on Windows. Mirror the pattern
-    // already used in tools/mcp/pulp_mcp.cpp so `PULP_BENCHMARK`-enabled
-    // Windows builds don't fail to link.
+    // MSVC's CRT exposes the pipe helpers as `_popen` / `_pclose`;
+    // bare `popen` / `pclose` are POSIX spellings that don't link on
+    // Windows. Mirror the pattern already used in tools/mcp/pulp_mcp.cpp
+    // so `PULP_BENCHMARK`-enabled Windows builds don't fail to link.
 #if defined(_WIN32)
     std::FILE* pipe = _popen("git rev-parse --short HEAD 2>NUL", "r");
 #else
@@ -1752,7 +1750,7 @@ std::string make_particle_benchmark_harness() {
 int run_particle_benchmark(const ParticleBenchmarkConfig& cfg) {
     using namespace pulp::view;
 
-    std::cout << "Pulp zero-copy particle benchmark (Slice 0.5)\n"
+    std::cout << "Pulp zero-copy particle benchmark\n"
               << "  widget:         " << cfg.widget << "\n"
               << "  particle count: " << cfg.particle_count << "\n"
               << "  seconds:        " << cfg.seconds << "\n"
@@ -1764,15 +1762,14 @@ int run_particle_benchmark(const ParticleBenchmarkConfig& cfg) {
         return 2;
     }
 
-    // Codex 2026-04-21 review on #541: this harness is particle-only for
-    // the Slice 0.5 re-eval. `--widget=<anything-else>` used to silently
-    // run the particle workload while writing the user-supplied label
-    // into the output JSON, which corrupts benchmark comparisons. Reject
-    // any unsupported value up front so baselines stay honest.
+    // This harness is particle-only. `--widget=<anything-else>` used to
+    // silently run the particle workload while writing the user-supplied
+    // label into the output JSON, which corrupts benchmark comparisons.
+    // Reject any unsupported value up front so baselines stay honest.
     if (cfg.widget != "particles") {
         std::cerr << "Unsupported --widget=\"" << cfg.widget
                   << "\"; only 'particles' is implemented in this lane.\n"
-                  << "Add a real harness before re-enabling. (Codex #541)\n";
+                  << "Add a real harness before re-enabling.\n";
         return 2;
     }
 
@@ -1783,42 +1780,6 @@ int run_particle_benchmark(const ParticleBenchmarkConfig& cfg) {
 
     const int width = 820;
     const int height = 560;
-    const auto gltf_box_url = mode == DemoMode::gltf_box ? ensure_gltf_box_asset_url() : std::string();
-
-    if (capture_path) {
-        DemoEnvironment env(static_cast<float>(width), static_cast<float>(height));
-        env.initialize_offscreen_gpu(static_cast<float>(width), static_cast<float>(height));
-        if (!env.has_native_gpu()) {
-            std::cerr << "Native Dawn adapter unavailable on this host/backend\n";
-            return 1;
-        }
-
-        if (mode != DemoMode::cube && mode != DemoMode::gltf_box) {
-            env.enable_audio_source(mode == DemoMode::reverb);
-        }
-
-        std::string error;
-        if (!load_demo(env, width, height, mode, error, particle_count, gltf_box_url)) {
-            std::cerr << error << "\n";
-            return 1;
-        }
-
-        prime_demo_frames(env, mode == DemoMode::cube ? 4 : 10);
-        env.root.layout_children();
-        std::cout << "Three.js native demo ready (" << demo_mode_name(mode) << "): "
-                  << eval_string(env.engine, "JSON.stringify(globalThis.__pulpThreeDemoState)") << "\n";
-
-        std::string capture_error;
-        const auto png = capture_demo_offscreen_png(env, width, height, capture_error);
-        if (png.empty()) {
-            std::cerr << (capture_error.empty() ? "Demo capture failed" : capture_error) << "\n";
-            return 1;
-        }
-        write_binary_file(*capture_path, png);
-        std::cout << "Captured demo frame: " << capture_path->string() << "\n";
-        return 0;
-    }
-
     DemoEnvironment env(static_cast<float>(width), static_cast<float>(height));
     env.initialize_offscreen_gpu(static_cast<float>(width), static_cast<float>(height));
     if (!env.has_native_gpu()) {
@@ -1864,7 +1825,7 @@ int run_particle_benchmark(const ParticleBenchmarkConfig& cfg) {
             "String(__pulpBenchLastResult)");
         const auto last = std::string(probe.getWithDefault<std::string_view>("?"));
         if (last != "true") {
-            std::cerr << "Benchmark harm-up upload returned '" << last
+            std::cerr << "Benchmark warm-up upload returned '" << last
                       << "' — native bridge rejected the draw payload.\n"
                       << "Build was likely configured without PULP_HAS_SKIA "
                       << "(check CMake: SKIA_DIR must point to a complete Skia tree).\n";
@@ -1928,7 +1889,7 @@ int run_particle_benchmark(const ParticleBenchmarkConfig& cfg) {
     per_upload_us.addMember("bytes_avg",
                             snap.cpu_to_gpu_bytes_total / u);
 
-    // MB-fraction per the re-evaluation plan:
+    // MB-fraction:
     //   (base64_decode_us + gpu_upload_us) / frame_budget_us
     // where the us values are per-frame averages.
     const double per_frame_decode_us = snap.base64_decode_total_us / n;
@@ -2002,7 +1963,7 @@ bool load_demo(DemoEnvironment& env, int width, int height, DemoMode mode,
     // frame clock (normally driven by the windowed NSTimer/run_event_loop) never
     // ticks, so any rAF registered by three.webgpu.js / OrbitControls during the
     // `await renderer.init()` chain never fires and the module promise stays
-    // pending. Fixes #542.
+    // pending.
     for (int i = 0; i < 1024; ++i) {
         env.advance_sources(1.0f / 60.0f);
         if (env.bridge) env.bridge->service_frame_callbacks();
@@ -2022,9 +1983,8 @@ bool load_demo(DemoEnvironment& env, int width, int height, DemoMode mode,
     // `service_frame_callbacks()` here — rAF self-rearms, so draining
     // frames would render 64 real frames of animation before `load_demo`
     // returns, skewing initial capture state (frame counter, scene age).
-    // Codex 2026-04-21 review on #553. The hang itself is fixed by the
-    // bounded service_frame_callbacks pump above (#542), not by this
-    // drain.
+    // The hang itself is fixed by the bounded service_frame_callbacks pump
+    // above, not by this drain.
     for (int i = 0; i < 64; ++i) {
         env.engine.pump_message_loop();
     }
@@ -2050,7 +2010,7 @@ bool load_demo(DemoEnvironment& env, int width, int height, DemoMode mode,
 
 // Emit a machine-parseable identity block proving exactly which JS runtime and
 // GPU adapter this binary is actually running on. Used by the strict provider-
-// identity CTest and the #30 A/B report. Brings up a real V8 ScriptEngine and a
+// identity CTest and provider report. Brings up a real V8 ScriptEngine and a
 // real offscreen Dawn surface so every field is observed, not assumed.
 int print_engine_identity(int width, int height) {
     const bool has_v8 = is_engine_available(JsEngineType::v8);

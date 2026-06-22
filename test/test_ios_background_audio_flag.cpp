@@ -1,5 +1,5 @@
-// Verifies the PluginDescriptor::ios_requires_background_audio flag
-// (workstream 05 slice 5.5). The host-app layer consumes the flag to
+// Verifies the PluginDescriptor::ios_requires_background_audio flag.
+// The host-app layer consumes the flag to
 // decide whether to request the iOS `audio` UIBackgroundModes
 // entitlement and keep AVAudioSession active in background.
 

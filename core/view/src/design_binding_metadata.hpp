@@ -1,17 +1,15 @@
 // design_binding_metadata.hpp — typed model of the `pulp*` native-binding
 // attribute contract.
 //
-// Created in the 2026-05-29 frontend-IR refactor (PR-3). Before this, the
-// stringly-typed `pulp*` attributes that carry the native-C++ binding
-// contract were read by hand in three places — the v0/TSX writer
+// The stringly-typed `pulp*` attributes that carry the native-C++ binding
+// contract are consumed in three places — the v0/TSX writer
 // (design_import_v0_tsx.cpp), the widget-semantics reader
 // (design_import_native_common.cpp), and the C++ codegen / binding-manifest
-// emitter (design_cpp_codegen.cpp) — each re-enumerating the ~45 `pulp*`
-// keys with ad-hoc `attr(node, "pulp...")` calls. NativeBindingMetadata is
-// the single typed model: one parse() reads the attributes, one serialize()
-// writes them back. Field presence/absence and exact string values round-trip
-// byte-identically, so the emitted attribute strings and the generated
-// binding-manifest JSON are unchanged.
+// emitter (design_cpp_codegen.cpp). NativeBindingMetadata is the single typed
+// model: one parse() reads the attributes, one serialize() writes them back.
+// Field presence/absence and exact string values round-trip byte-identically,
+// so the emitted attribute strings and the generated binding-manifest JSON are
+// unchanged.
 //
 // PRIVATE: lives under core/view/src/, not the installed include tree. Do not
 // reference from headers outside core/view/src/.

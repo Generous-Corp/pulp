@@ -1,7 +1,8 @@
 // macOS / iOS PushNotifications backend.
 //
 // Wraps `UNUserNotificationCenter` from `UserNotifications.framework`.
-// Local-only in this slice — remote push (APNs registration tokens,
+// Current backend scope is local notifications only; remote push
+// (APNs registration tokens,
 // `application:didRegisterForRemoteNotificationsWithDeviceToken:`,
 // silent push) is deferred until a real APNs integration ships.
 //

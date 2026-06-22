@@ -1,14 +1,10 @@
-// pulp #1486 — IR → JSX-equivalent intrinsics → @pulp/react prop-applier
-// dispatch (§10 Q7 of the spec, user-locked decision: duplicative-but-safe
-// route through the well-tested code path).
+// IR → JSX-equivalent intrinsics → @pulp/react prop-applier dispatch.
 //
-// Phase 1 spike: this is the SKELETON. The real wiring lives in the
-// CLI's `pulp import design` flow and uses @pulp/react's React
-// renderer. This file isolates the IR → React-tree translation so
-// downstream consumers (CLI / tests) don't have to know the IR shape.
+// This file isolates the IR → React-tree translation so renderers and tests
+// can consume a stable JSX-like tree without depending on the raw IR shape.
 //
 // The translation is a pure tree map: each IRNode becomes a `{ tag,
-// props, children }` shape that a downstream renderer can feed into
+// props, children }` shape that a renderer can feed into
 // `React.createElement` (or any equivalent tree-builder). Returning a
 // concrete JSX-equivalent shape rather than React elements lets the
 // IR package stay decoupled from a specific React version.
@@ -38,8 +34,8 @@ export interface JSXLikeNode {
  *   - text leaf content becomes the `text` prop on Label / Button.
  *   - children recurse.
  *   - meta.role becomes a data-pulp-role marker on the props map for
- *     diagnostics; non-mappable IR fields ride through unchanged so a
- *     future renderer iteration can pick them up.
+ *     diagnostics; non-mappable IR fields ride through unchanged for
+ *     renderer-specific handling.
  */
 export function toJSXLikeTree(node: IRNode): JSXLikeNode {
     const props: Record<string, unknown> = {};

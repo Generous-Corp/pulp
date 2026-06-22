@@ -1,6 +1,3 @@
-// test_canvas_widget_shadow.cpp — extracted from test_canvas_widget.cpp
-// in the 2026-05 Phase 5 P5-3 follow-up refactor.
-//
 // CanvasWidget + SkiaCanvas Canvas2D shadow-state cluster. Pins:
 //
 //   * CanvasWidget replays sticky Canvas2D shadow setters before each
@@ -152,9 +149,7 @@ TEST_CASE("CanvasWidget shadow setters can be cleared mid-stream",
 
 #ifdef PULP_HAS_SKIA
 
-// Shared raster-pixel probe. This file was extracted from
-// test_canvas_widget.cpp in the Phase 5 P5-3 split (#2418) but never
-// carried sample_pixel — the loose end pulp #2462 tracked.
+// Shared raster-pixel probe for the Skia pixel-readback tests below.
 #include "canvas_pixel_probe.hpp"
 using pulp::canvas_test::Pixel;
 using pulp::canvas_test::sample_pixel;
@@ -241,11 +236,3 @@ TEST_CASE("SkiaCanvas skips shadow when fully transparent or zero",
     REQUIRE(px.b == 255);
 }
 #endif  // PULP_HAS_SKIA
-
-// ── pulp #1520 — Canvas2D ctx.direction / ctx.filter dispatch ────────────
-//
-// Asserts that the CanvasWidget paint loop forwards the new
-// `set_direction` / `set_filter` commands through to the underlying
-// canvas (here, RecordingCanvas) so the JS shim's setter intent reaches
-// the active backend on every frame.
-

@@ -142,11 +142,10 @@ public:
         }
 
         // Deliver MIDI input via MusicDeviceMIDIEvent, AU v2's sample-
-        // accurate MIDI write path. Workstream 03 slice 3.6 — previously
-        // midi_in was discarded, so hosted AU instruments received no
-        // MIDI. Skips malformed messages (length outside [1..3] or no
-        // status byte) to avoid polluting the plugin with garbage, same
-        // validation the AUv3 adapter adopted in PR #179.
+        // accurate MIDI write path. Without this, hosted AU instruments
+        // receive no MIDI. Skips malformed messages (length outside [1..3] or
+        // no status byte) to avoid polluting the plugin with garbage, matching
+        // the AUv3 adapter's validation.
         for (auto it = midi_in.begin(); it != midi_in.end(); ++it) {
             const auto& me = *it;
             const auto& m = me.message;
@@ -155,7 +154,7 @@ public:
             // Clamp to [0, num_samples - 1]. SignalGraph::inject_midi
             // forwards caller-provided offsets without normalization, so
             // a >= num_samples value can sneak in; AU rejects or mistimes
-            // such events. Fix per #191 review.
+            // such events.
             int32_t offset = me.sample_offset;
             if (offset < 0) offset = 0;
             if (offset >= num_samples) offset = num_samples - 1;
@@ -279,13 +278,13 @@ public:
         return st == noErr;
     }
 
-    bool has_editor() const override { return false; }      // Phase 4
+    bool has_editor() const override { return false; }
 #if defined(__GNUC__) || defined(__clang__)
 #  pragma clang diagnostic push
 #  pragma clang diagnostic ignored "-Wdeprecated-declarations"
 #endif
-    void* create_editor_view() override { return nullptr; } // Phase 4
-    void destroy_editor_view() override {}                  // Phase 4
+    void* create_editor_view() override { return nullptr; }
+    void destroy_editor_view() override {}
 #if defined(__GNUC__) || defined(__clang__)
 #  pragma clang diagnostic pop
 #endif

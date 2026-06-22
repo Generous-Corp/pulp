@@ -7,7 +7,7 @@ configure_file(
     "${CMAKE_CURRENT_BINARY_DIR}/pulp_version_gen.h"
     @ONLY)
 
-# ── Migration index codegen (release-discovery Slice 3, #548) ───────────────
+# ── Migration index codegen (#548) ──────────────────────────────────────────
 #
 # Scan docs/migrations/*.md at configure time, parse the TOML
 # frontmatter, and emit a C++ source file holding the embedded
@@ -106,13 +106,12 @@ add_executable(pulp-cli
     mac_runtime_validators.cpp
     install_paths_mac.cpp
     "${_pulp_migration_index_src}")
-# Phase 8 binary swap (#767 / #686): the C++ CLI was historically the
-# user-facing `pulp` binary. With the Rust binary now ready, the C++
-# side renames to `pulp-cpp` and the Rust binary takes the `pulp`
-# slot. Rollback for users: `PULP_USE_CPP=1 pulp …` execs into
-# `pulp-cpp` (handled at the top of `experimental/pulp-rs/src/main.rs`).
-# The CMake target name (`pulp-cli`) does NOT change — only the file
-# basename — so all ctest entries below keep working.
+# The C++ CLI was historically the user-facing `pulp` binary. The Rust
+# binary now takes the `pulp` slot and this target emits `pulp-cpp`.
+# Rollback for users: `PULP_USE_CPP=1 pulp ...` execs into `pulp-cpp`
+# (handled at the top of `experimental/pulp-rs/src/main.rs`). The CMake
+# target name (`pulp-cli`) does NOT change, only the file basename, so
+# all ctest entries below keep working.
 set_target_properties(pulp-cli PROPERTIES OUTPUT_NAME "pulp-cpp")
 target_compile_features(pulp-cli PRIVATE cxx_std_20)
 target_link_libraries(pulp-cli PRIVATE pulp::runtime pulp::tool-audio pulp::audio-analysis pulp::ship pulp::view pulp::format pulp::inspect pulp::host)
@@ -211,9 +210,9 @@ if(PULP_BUILD_TESTS)
         ENVIRONMENT "${_pulp_cli_doctor_ctest_env}"
         PASS_REGULAR_EXPRESSION "Pulp Doctor")
 
-    # Issue #499 Slice 1: `pulp doctor --versions` must print the
-    # version diagnostics header and exit 0 regardless of skew — skew
-    # warnings are advisory, not failures.
+    # `pulp doctor --versions` must print the version diagnostics header
+    # and exit 0 regardless of skew — skew warnings are advisory, not
+    # failures.
     add_test(NAME cli-doctor-versions
         COMMAND pulp-cli doctor --versions
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
@@ -250,13 +249,12 @@ if(PULP_BUILD_TESTS)
         ENVIRONMENT "${_pulp_cli_doctor_ctest_env}"
         PASS_REGULAR_EXPRESSION "Validators")
 
-    # host-quirks integration plan P2: `pulp doctor --host-quirks` renders
-    # the runtime host-quirks policy section and exits 0. These tests pin
-    # the effective-policy line per PULP_HOST_QUIRKS value — a fresh
-    # process each time, so the env-var parse cache starts cold. The
-    # source label ("PULP_HOST_QUIRKS env") only appears on the policy
-    # line, so the regex can't collide with the override-hint line that
-    # always lists off|validated-only|all.
+    # `pulp doctor --host-quirks` renders the runtime host-quirks policy
+    # section and exits 0. These tests pin the effective-policy line per
+    # PULP_HOST_QUIRKS value — a fresh process each time, so the env-var
+    # parse cache starts cold. The source label ("PULP_HOST_QUIRKS env")
+    # only appears on the policy line, so the regex can't collide with
+    # the override-hint line that always lists off|validated-only|all.
     add_test(NAME cli-doctor-host-quirks
         COMMAND pulp-cli doctor --host-quirks
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
@@ -448,19 +446,19 @@ if(PULP_BUILD_TESTS)
     set_tests_properties(cli-no-new-alias PROPERTIES
         PASS_REGULAR_EXPRESSION "Unknown command")
 
-    # Issue #940 Slice 1: `pulp loop --help` always renders the focus-mode
-    # help banner and exits 0. Behaviour-level tests for --status / --off
-    # / --platform live in test/test_cli_shellout.cpp under [issue-940].
+    # `pulp loop --help` always renders the focus-mode help banner and
+    # exits 0. Behaviour-level tests for --status / --off / --platform
+    # live in test/test_cli_shellout.cpp under [issue-940].
     add_test(NAME cli-loop-help
         COMMAND pulp-cli loop --help
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     set_tests_properties(cli-loop-help PROPERTIES
         PASS_REGULAR_EXPRESSION "leveraged-prototype focus mode")
 
-    # Issue #552 Slice 1b: `pulp projects` help path should always
-    # print a usage banner listing list/add/remove. The test uses a
-    # throwaway PULP_HOME so it doesn't mutate the developer's real
-    # registry when invoked from `ctest`.
+    # `pulp projects` help path should always print a usage banner
+    # listing list/add/remove. The test uses a throwaway PULP_HOME so it
+    # doesn't mutate the developer's real registry when invoked from
+    # `ctest`.
     add_test(NAME cli-projects-help
         COMMAND pulp-cli projects --help
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")

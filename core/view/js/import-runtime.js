@@ -1,5 +1,5 @@
 // import-runtime.js — DOM construction + walker for the
-// `--execute-bundle` Claude Design import lane (pulp #468).
+// `--execute-bundle` Claude Design import lane.
 //
 // Two responsibilities, both gated behind the `__pulpImportRuntime__`
 // global so they don't pollute the runtime when the harness isn't in

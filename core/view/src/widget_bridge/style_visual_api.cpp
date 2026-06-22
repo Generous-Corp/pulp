@@ -24,10 +24,10 @@ void WidgetBridge::register_widget_style_shadow_api(
     std::function<canvas::Color(const std::string&)> parse_color) {
     BridgeApiContext api{engine_};
 
-    // pulp #1026 - RN-shaped shadow primitive. RN's View style-prop names
-    // are { shadowColor, shadowOffset: {x,y}, shadowOpacity, shadowRadius }
-    // and do not carry spread or inset. Lower these onto the existing pulp
-    // #925 box-shadow primitive while leaving setBoxShadow unchanged.
+    // RN-shaped shadow primitive. RN's View style-prop names are
+    // { shadowColor, shadowOffset: {x,y}, shadowOpacity, shadowRadius } and
+    // do not carry spread or inset. Lower these onto the existing box-shadow
+    // primitive while leaving setBoxShadow unchanged.
     register_bridge_function(api, "setShadow", [this, parse_color](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto hex = args.get<std::string>(1, "#000000ff");

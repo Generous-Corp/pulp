@@ -10,23 +10,19 @@ namespace pulp::view {
 void WidgetBridge::register_list_style_api() {
     BridgeApiContext api{engine_};
 
-    // pulp #1514 - list-style cluster (listStyle / listStyleType /
-    // listStyleImage / listStylePosition). Pulp doesn't model
-    // <li>/<ul>/<ol> semantics, so the bridge stores the values
-    // verbatim on the View so a later paint pass (or a future
-    // semantic-list surface) can honor them. Marker glyph rendering
-    // is the follow-up; this PR flips the catalog out of `missing`
-    // by wiring the round-trip + JS shorthand parsing.
+    // list-style cluster (listStyle / listStyleType / listStyleImage /
+    // listStylePosition). Pulp doesn't model <li>/<ul>/<ol> semantics, so
+    // the bridge stores the values verbatim on the View for round-trip and
+    // future marker rendering.
     //
     // setListStyleType(id, "disc"|"circle"|"square"|"decimal"|"none"
     //                       |"decimal-leading-zero"|"lower-roman"|"upper-roman"
     //                       |"lower-alpha"|"upper-alpha"|"lower-latin"|"upper-latin"
     //                       |"lower-greek"|"armenian"|"georgian").
     //
-    // The counter-style keywords (lower-roman, etc.) are stored verbatim
-    // on the View::ListStyleType enum today; paint-side glyph rendering
-    // is the follow-up (pulp #1514). Unknown keywords fall back to `disc`
-    // to match the longstanding default.
+    // The counter-style keywords (lower-roman, etc.) are stored on the
+    // View::ListStyleType enum; marker glyph rendering is not wired yet.
+    // Unknown keywords fall back to `disc` to match the longstanding default.
     register_bridge_function(api, "setListStyleType", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto s = args.get<std::string>(1, "disc");

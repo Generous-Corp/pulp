@@ -1,7 +1,7 @@
-// test_editor_url.cpp — Inspector Phase 5.3 editor URI plumbing.
+// test_editor_url.cpp — Inspector editor URI plumbing.
 //
 // Covers the format helper, env-vs-config-vs-default precedence,
-// template validation, and the two new protocol methods
+// template validation, and the protocol methods
 // (`Inspector.setEditorUrlTemplate` / `Inspector.getEditorUrlTemplate`).
 
 #include <catch2/catch_test_macros.hpp>
@@ -22,7 +22,7 @@ using namespace pulp::inspect;
 namespace {
 
 // Scoped env var setter — restores prior state on destruction so tests
-// stay order-independent. The Phase 5.3 env override is global state,
+// stay order-independent. The editor URL env override is global state,
 // so any test that mutates it must clean up.
 struct ScopedEnv {
     explicit ScopedEnv(std::string name) : name_(std::move(name)) {
@@ -255,7 +255,7 @@ TEST_CASE("DomainHandler::set_config swaps the template without touching env",
             == "cursor://file/{path}:{line}");
 }
 
-// ── Phase 5.1: source-jump resolution ──────────────────────────────────────
+// ── Source-jump resolution ─────────────────────────────────────────────────
 
 TEST_CASE("resolve_source_jump formats the URL for a view with provenance",
           "[inspect][source-jump]") {
@@ -361,7 +361,7 @@ TEST_CASE("launch_editor_url rejects an empty URL", "[inspect][source-jump]") {
     REQUIRE_FALSE(launch_editor_url(""));
 }
 
-// ── Phase 5.1: PULP_INSPECTOR_NO_LAUNCH guard ──────────────────────────────
+// ── PULP_INSPECTOR_NO_LAUNCH guard ─────────────────────────────────────────
 //
 // Regression cover for the unexpected-editor-launch bug: a non-interactive
 // run (test binary, CI) that hits the real-launch path (dry_run=false)
@@ -462,7 +462,7 @@ TEST_CASE("jump_to_source non-dry launch is guarded in headless mode",
     REQUIRE(result.error.find("PULP_HEADLESS") != std::string::npos);
 }
 
-// ── Phase 5.1: Inspector.jumpToSource protocol round-trip ──────────────────
+// ── Inspector.jumpToSource protocol round-trip ─────────────────────────────
 
 TEST_CASE("Inspector.jumpToSource resolves an anchored view in dryRun",
           "[inspect][source-jump][protocol]") {

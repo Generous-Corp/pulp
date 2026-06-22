@@ -207,8 +207,8 @@ std::string capture_shipyard_version(const std::string& shipyard_bin);
 
 // Write/update `key = "value"` under `[section]` in ~/.pulp/config.toml.
 // Creates the file if missing. Preserves all other content verbatim.
-// Release-discovery Slice 2 (#547) surface — used by `pulp config set`
-// and by the banner-suppression bookkeeping inside cmd_upgrade.
+// Used by `pulp config set` and by the banner-suppression bookkeeping
+// inside cmd_upgrade.
 bool write_user_config_value(const std::string& section,
                              const std::string& key,
                              const std::string& value);
@@ -255,11 +255,10 @@ struct DoctorCheck {
     bool optional = false;
 };
 
-// `only_filter` (R2-8 P2 follow-up): case-insensitive substring. When
-// non-empty, individual probes whose name doesn't match are SKIPPED —
-// no process spawn, no file IO — so `pulp doctor --only git` actually
-// runs only git probes instead of running everything and filtering the
-// output (the original R2-8 shape, which Codex flagged on PR #2145).
+// `only_filter`: case-insensitive substring. When non-empty,
+// individual probes whose name doesn't match are SKIPPED — no process
+// spawn, no file IO — so `pulp doctor --only git` runs only git probes
+// instead of running everything and filtering the output.
 std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool standalone_mode,
                                            const std::string& only_filter = {});
 

@@ -1,15 +1,12 @@
 #!/usr/bin/env bash
-# Phase 6.6.2 v0.dev runtime-import validation harness.
-#
-# This is staged before the parser lands so the C-1 PR has a repeatable
-# command once #1859 and #1863 are merged. It intentionally does not
-# capture a golden screenshot by itself; provide one with --reference.
+# v0.dev runtime-import validation harness. It intentionally does not capture
+# a golden screenshot by itself; provide one with --reference.
 
 set -euo pipefail
 
 PULP_DIR="${PULP_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 
-# pulp #2087 lesson — refuse to run on a stale checkout. Bypass with
+# Refuse to run on a stale checkout. Bypass with
 # PULP_FRESHNESS_BYPASS=1 to validate a feature branch's code instead.
 if ! ( cd "$PULP_DIR" && "$PULP_DIR/tools/scripts/check_workspace_freshness.sh" ); then
   echo "ERROR: refusing to run validation against stale checkout" >&2
@@ -117,7 +114,7 @@ fi
 
 if [[ ! -f "$REFERENCE" ]]; then
   yellow "reference screenshot not found: $REFERENCE"
-  yellow "Phase 6.6.2 screenshot diff is skipped until a v0 runtime render is captured."
+  yellow "v0 screenshot diff skipped; provide a reviewed reference render."
   exit 77
 fi
 

@@ -1,13 +1,13 @@
-// test_widget_bridge_svg.cpp — extracted from test_widget_bridge.cpp
-// in the 2026-05 Phase 5 (P5-1 follow-up) refactor.
-//
-// SVG widget JS-bridge integration, three coherent compat surfaces:
+// WidgetBridge integration coverage for SVG widgets, Canvas2D shims, and CSS
+// style translation:
 //
 //   1. pulp #965 — SvgPathWidget JS bridge integration.
 //   2. pulp #1416 — SvgRectWidget + SvgLineWidget JS bridge integration.
 //   3. Compound-path SVG icons (Spectr PEAK / AVG / BOTH / OFF) —
 //      regression-pins the parser's enumeration of every M and L across
 //      disjoint subpaths, separate from the main #965 cluster.
+//   4. Canvas2D and CSS style shims used by bridge-created widgets
+//      (#968, #1410, #1423, #1434, #1737).
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -558,9 +558,8 @@ TEST_CASE("WidgetBridge setWhiteSpace routes all 6 CSS keywords to WhiteSpaceMod
         bool expected_multi_line;
         bool expected_nowrap_bool;
     } cases[] = {
-        // pulp #1737 (Codex P1 followup on #1786): `pre` keeps
-        // multi_line=true so newlines render. The spec's "no-soft-
-        // wrap" semantic for `pre` is a Label-side follow-up;
+        // For pulp #1737, `pre` keeps multi_line=true so newlines render. The
+        // spec's "no-soft-wrap" semantic for `pre` is a Label-side follow-up;
         // newline preservation is the spec-critical part.
         {"normal",       M::normal,       true,  false},
         {"nowrap",       M::nowrap,       false, true },
@@ -583,11 +582,8 @@ TEST_CASE("WidgetBridge setWhiteSpace routes all 6 CSS keywords to WhiteSpaceMod
     REQUIRE(label->white_space_mode() == M::normal);
     REQUIRE(label->multi_line());
 
-    // pulp #1737 (Codex P2 followup on #1786): the legacy
-    // set_white_space_nowrap() setter MUST keep the WhiteSpaceMode
-    // enum in sync. Pre-fix, the legacy setter only touched the bool
-    // and left the enum stale (still `normal` after a `set_white_space_nowrap(true)`
-    // call), violating the stated backward-compat contract.
+    // The legacy set_white_space_nowrap() setter MUST keep the WhiteSpaceMode
+    // enum in sync with the bool for backward compatibility.
     label->set_white_space_nowrap(true);
     REQUIRE(label->white_space_mode() == M::nowrap);
     REQUIRE(label->white_space_nowrap());
@@ -633,8 +629,8 @@ TEST_CASE("CSSStyleDeclaration translates whiteSpace to setWhiteSpace bridge cal
 }
 
 // pulp #1423 — `width: '100%'` and `height: '100%'` propagate through the
-// CSS translator and bridge to Yoga's percent API. Spectr uses the
-// `width:'100%'` form at spectr-editor-extracted.js:2377 and :3414.
+// CSS translator and bridge to Yoga's percent API. Spectr's generated editor
+// bundle uses the `width:'100%'` form.
 TEST_CASE("CSS width/height percent strings propagate to Yoga via setFlex",
           "[view][bridge][css][issue-1423]") {
     ScriptEngine engine;
@@ -870,4 +866,3 @@ TEST_CASE("WidgetBridge SvgPath compound multi-subpath parses every segment",
     REQUIRE(moves == 10);
     REQUIRE(lines == 10);
 }
-

@@ -1,11 +1,9 @@
-// Cross-format parity-harness SKELETON.
+// Cross-format parity harness support.
 //
-// Phase 1 ships the shape only: a reference-processor concept plus the
-// event-case matrix the future harness will run identically across VST3 / AU /
-// CLAP / LV2 (Phase 3 fills in per-format execution). It exists now so the
-// Phase 2 prototype is written against a stable fixture surface and the
-// Phase 2->3 ordering hazard is removed. There is intentionally NO format
-// execution here yet.
+// Reference-processor concept plus the event-case matrix the future harness
+// will run identically across VST3 / AU / CLAP / LV2. This keeps fixture
+// identity stable before per-format execution exists. There is intentionally NO
+// format execution here yet.
 #pragma once
 
 #include <cstdint>
@@ -14,9 +12,9 @@
 namespace pulp::native_components::test {
 
 // The matrix of behaviours a single reference processor must exhibit identically
-// across every format. Phase 3's harness asserts each case; a format that
-// genuinely cannot represent a case records `Unsupported` (an explicit skip),
-// never a silent pass.
+// across every format. The harness asserts each case; a format that genuinely
+// cannot represent a case records `Unsupported` (an explicit skip), never a
+// silent pass.
 enum class EventCase : std::uint8_t {
     Effect,            // stereo in/out, no MIDI
     InstrumentMidi,    // MIDI in -> audio out
@@ -45,8 +43,8 @@ struct ReferenceProcessorSpec {
     EventCase primary_case;
 };
 
-// The set of reference processors the full harness will eventually drive. Phase
-// 1 declares them; Phase 3 wires the per-format runners.
+// The set of reference processors the full harness will eventually drive.
+// Per-format runners are wired separately.
 inline constexpr ReferenceProcessorSpec kReferenceProcessors[] = {
     {"ref.gain", "Reference Gain", EventCase::Effect},
     {"ref.synth", "Reference Synth", EventCase::InstrumentMidi},

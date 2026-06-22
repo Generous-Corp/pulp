@@ -1,6 +1,3 @@
-// test_cli_shellout_loop.cpp — extracted from test_cli_shellout.cpp
-// in the 2026-05 Phase 5 P5-4 refactor.
-//
 // `pulp loop` shell-out tests. Covers the surface that
 // doesn't depend on a live watch loop (the watch-loop interactions are
 // tested by `pulp dev`'s harness):

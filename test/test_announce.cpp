@@ -1,7 +1,7 @@
-// Unit tests for the cross-platform live-region announcement API
-// (workstream 04 slice 4.3). Verifies the sink plumbing — platform-specific
+// Unit tests for the cross-platform live-region announcement API.
+// Verifies the sink plumbing — platform-specific
 // backends (NSAccessibilityPostNotification, UIA, AT-SPI) get covered as
-// they land in slices 4.1 / 4.2.
+// those backends land.
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/view/accessibility.hpp>

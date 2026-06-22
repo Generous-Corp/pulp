@@ -1,17 +1,14 @@
-// test_widget_bridge_canvas2d_bridge_fns.cpp — extracted from
-// test_widget_bridge.cpp in the 2026-05 Phase 5 (P5-1 follow-up) refactor.
-//
 // Canvas2D bridge-fn cluster — three closely related bridge entry-points
 // that thread JS-side Canvas2D semantics through the WidgetBridge into
 // the native canvas pipeline:
 //
-//   * pulp #1434 — canvasSetFontFull bridge fn. Threads CSS-font
-//     shorthand (font-style, font-variant, font-weight, font-size,
-//     line-height, font-family) into the canvas pipeline.
-//   * pulp #1522 — Canvas2D fillRule arg. fillRule="evenodd"|"nonzero"
+//   * canvasSetFontFull bridge fn. Threads CSS-font shorthand (font-style,
+//     font-variant, font-weight, font-size, line-height, font-family) into the
+//     canvas pipeline.
+//   * Canvas2D fillRule arg. fillRule="evenodd"|"nonzero"
 //     threads through the dedicated canvasFill / canvasClip bridge fns.
-//   * pulp #1520 — canvasSetDirection / canvasSetFilter bridge fns.
-//     Routes canvas direction and filter-chain shim through the bridge.
+//   * canvasSetDirection / canvasSetFilter bridge fns. Routes canvas direction
+//     and filter-chain shim through the bridge.
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -44,7 +41,7 @@ static pulp::view::CanvasWidget* canvasFromBridge(pulp::view::WidgetBridge& brid
     return dynamic_cast<pulp::view::CanvasWidget*>(bridge.widget(nativeId));
 }
 
-// ── pulp #1434 — canvasSetFontFull bridge fn ─────────────────────────────
+// ── canvasSetFontFull bridge fn ──────────────────────────────────────────
 //
 // The Canvas2D shim's full CSS font shorthand parser dispatches through
 // `canvasSetFontFull(id, family, size, weight, slant, letterSpacing)`.
@@ -126,13 +123,11 @@ TEST_CASE("WidgetBridge canvasSetFontFull replays through Canvas::set_font_full"
     REQUIRE_THAT(full->f[2], WithinAbs(0.0f, 1e-5f));    // slant=upright
 }
 
-// pulp #1434 (sub-agent #12 follow-up) — align_content multi-line
-// flex cross-axis distribution. Yoga supports it natively via
-// YGNodeStyleSetAlignContent; the gap was a missing FlexStyle field
-// + setter wiring. Round-trip every value the bridge accepts so a
-// regression in either the parser, the FlexStyle field, or the
-// space-* sibling enum gets caught here rather than silently
-// reverting Yoga to the default FlexStart.
+// align_content multi-line flex cross-axis distribution. Yoga supports it
+// natively via YGNodeStyleSetAlignContent. Round-trip every value the bridge
+// accepts so a regression in either the parser, the FlexStyle field, or the
+// space-* sibling enum gets caught here rather than silently reverting Yoga to
+// the default FlexStart.
 TEST_CASE("setFlex align_content accepts start / end / center / stretch / space-* aliases",
           "[view][bridge][css][issue-1434-aligncontent]") {
     ScriptEngine engine;
@@ -167,10 +162,9 @@ TEST_CASE("setFlex align_content accepts start / end / center / stretch / space-
     REQUIRE(sp("i") == AcSpace::space_evenly);
 }
 
-// pulp #1434 (sub-agent #12 follow-up) — width: 'auto' routes through
-// the bridge's setFlex string path to FlexStyle.dim_width.unit =
-// DimensionUnit::auto_. yoga_layout.cpp dispatches on that to
-// YGNodeStyleSetWidthAuto. The percent path remains intact, and
+// width: 'auto' routes through the bridge's setFlex string path to
+// FlexStyle.dim_width.unit = DimensionUnit::auto_. yoga_layout.cpp dispatches
+// on that to YGNodeStyleSetWidthAuto. The percent path remains intact, and
 // numeric values still flow through the px branch.
 TEST_CASE("setFlex width accepts 'auto' keyword and routes to dim_width.auto_",
           "[view][bridge][css][issue-1434-auto]") {
@@ -224,10 +218,9 @@ TEST_CASE("setFlex height accepts 'auto' keyword and routes to dim_height.auto_"
     REQUIRE_THAT(fc.dim_height.value, WithinAbs(25.0f, 0.001f));
 }
 
-// pulp #1434 (sub-agent #12 follow-up) — verify the CSS shim path
-// also forwards 'auto' for width/height. The DOM-lite el.style
-// adapter must produce the same FlexStyle.dim_*.unit = auto_ result
-// as the direct setFlex(id, 'width', 'auto') path.
+// Verify the CSS shim path also forwards 'auto' for width/height. The DOM-lite
+// el.style adapter must produce the same FlexStyle.dim_*.unit = auto_ result as
+// the direct setFlex(id, 'width', 'auto') path.
 TEST_CASE("CSSStyleDeclaration forwards width/height auto to bridge",
           "[view][bridge][css][issue-1434-auto]") {
     ScriptEngine engine;
@@ -247,7 +240,7 @@ TEST_CASE("CSSStyleDeclaration forwards width/height auto to bridge",
     REQUIRE(fa.dim_height.unit == DimensionUnit::auto_);
 }
 
-// ── pulp #1522 — Canvas2D fillRule arg threads through bridge fns ───────
+// ── Canvas2D fillRule arg threads through bridge fns ────────────────────
 //
 // `canvasFillPath` and `canvasClip` accept an optional fillRule int
 // (0 = nonzero/winding, 1 = evenodd). The bridge stores it on
@@ -317,7 +310,7 @@ TEST_CASE("WidgetBridge canvasFillPath / canvasClip thread fillRule int_val",
     REQUIRE(clip_int_vals[1] == 0);   // default nonzero
 }
 
-// ── pulp #1520 — canvasSetDirection / canvasSetFilter bridge fns ────────
+// ── canvasSetDirection / canvasSetFilter bridge fns ─────────────────────
 //
 // These two register_function entries are the only direct surface
 // between the Canvas2D ctx.direction / ctx.filter setters and the
@@ -443,4 +436,3 @@ TEST_CASE("WidgetBridge canvasSetFilter chain replays through to the recording c
     REQUIRE(saw_filter);
     REQUIRE(saw_direction);
 }
-

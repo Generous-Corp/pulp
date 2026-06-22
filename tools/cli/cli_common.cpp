@@ -936,11 +936,6 @@ bool aax_validator_passed(const std::string& output) {
     return false;
 }
 
-// Doctor checks (run_doctor_checks, run_doctor_android_checks,
-// run_doctor_ios_checks) moved to tools/cli/cli_doctor_helpers.cpp
-// in the 2026-05 Phase 2 (R2-4) batch. Public API stays in
-// cli_common.hpp.
-
 // ── Script/Binary Delegation ────────────────────────────────────────────────
 
 int delegate_to_python_script(const fs::path& relative_script,

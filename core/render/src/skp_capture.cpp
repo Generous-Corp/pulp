@@ -92,8 +92,7 @@ sk_sp<SkImage> rasterize_texture_image(SkImage* image,
 
 // Serialize-side image proc. SkPicture::serialize() drops embedded
 // SkImages to nullptr by default (documented in SkPicture.h); this
-// PNG-encodes them so atlas/image draws survive into the .skp. This is
-// the contract the Phase 6.4 spike pinned in test_skia_surface.cpp.
+// PNG-encodes them so atlas/image draws survive into the .skp.
 //
 // Raster images PNG-encode directly. A GPU-texture-backed image cannot:
 // SkPngEncoder must read its pixels off the GPU first. We rasterize it

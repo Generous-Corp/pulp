@@ -1,8 +1,8 @@
 // iOS RenderLoop — CADisplayLink-backed vblank source.
 //
-// Slice 16, planning/2026-05-18-rt-safety-and-debug-dx.md. Mirrors the
-// macOS CVDisplayLink path in render_loop.cpp but uses CADisplayLink,
-// which is the iOS-native vsync callback (CVDisplayLink is macOS-only).
+// Mirrors the macOS CVDisplayLink path in render_loop.cpp but uses
+// CADisplayLink, which is the iOS-native vsync callback (CVDisplayLink is
+// macOS-only).
 //
 // The CADisplayLink is added to the main run loop in NSRunLoopCommonModes
 // so it keeps ticking during scroll/track tracking. Its target fires on

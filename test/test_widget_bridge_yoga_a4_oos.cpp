@@ -1,7 +1,5 @@
-// test_widget_bridge_yoga_a4_oos.cpp — extracted from test_widget_bridge.cpp
-// in the 2026-05 Phase 5 (P5-1 follow-up) refactor.
-//
-// Two compat surfaces sharing a "catalog hygiene + Yoga fan-out" theme:
+// WidgetBridge Yoga A4/OOS tests for two compat surfaces sharing a
+// "catalog hygiene + Yoga fan-out" theme:
 //
 //   1. pulp #1542 — yoga logical-edge fan-out. Pin marginInline/Block
 //      + paddingInline/Block + inset shorthand through CSS translator
@@ -531,4 +529,3 @@ TEST_CASE("CSS logical-edge longhands route to LTR physical edges",
     auto pb = bridge.widget("p")->bounds();
     REQUIRE_THAT(cb.x - pb.x, WithinAbs(10.0f, 0.5f));
 }
-

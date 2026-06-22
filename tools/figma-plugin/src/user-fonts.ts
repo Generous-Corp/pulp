@@ -1,11 +1,11 @@
-// #43c — User-supplied font cache for the drag-drop escape hatch.
+// User-supplied font cache for the drag-drop escape hatch.
 //
 // The Figma plugin API intentionally does not expose font byte access (see
-// #43a-rev redesign note). Users with non-system fonts (custom foundry
-// faces, restricted-license families like Clash Grotesk) supply the
-// `.ttf` / `.otf` file via a drag-drop zone in the plugin UI. The UI
-// reads bytes via FileReader and forwards them to the sandbox; this
-// module is the sandbox-side store.
+// the runtime font-catalogue contract). Users with non-system fonts (custom
+// foundry faces, restricted-license families like Clash Grotesk) supply the
+// `.ttf` / `.otf` file via a drag-drop zone in the plugin UI. The UI reads
+// bytes via FileReader and forwards them to the sandbox; this module is the
+// sandbox-side store.
 //
 // Storage shape: keyed by `family|style` (the same tuple
 // `font_family_assets` entries are deduped on), value carries the

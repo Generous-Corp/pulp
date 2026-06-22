@@ -1,8 +1,8 @@
 // projects_registry.hpp — `~/.pulp/projects.json` project registry
 //
-// Issue #499 / #552 (Slice 1b): authoritative registry of known Pulp
-// projects, populated by `pulp create` on successful scaffold and by
-// explicit `pulp projects add/remove` commands. Lives alongside
+// Authoritative registry of known Pulp projects, populated by
+// `pulp create` on successful scaffold and by explicit
+// `pulp projects add/remove` commands. Lives alongside
 // version_diag.{hpp,cpp} and is deliberately link-free of cli_common so
 // the unit test binary can exercise it standalone.
 //

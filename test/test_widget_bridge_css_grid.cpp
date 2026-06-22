@@ -1,8 +1,4 @@
-// test_widget_bridge_css_grid.cpp — extracted from test_widget_bridge.cpp
-// in the 2026-05 Phase 5 (P5-1 follow-up) refactor.
-//
-// pulp #1434 Phase A2-2 — CSS Grid extended surface.
-// Round-trips the CSS Grid shim through the bridge:
+// WidgetBridge CSS Grid tests. Round-trips the CSS Grid shim through the bridge:
 // grid-template-columns / grid-template-rows / grid-template-areas,
 // grid-column / grid-row / grid-area placement shorthand, grid gap
 // (row-gap, column-gap, gap), justify-* / align-* / place-*
@@ -32,13 +28,11 @@ using namespace pulp::view;
 using namespace pulp::state;
 using Catch::Matchers::WithinAbs;
 
-// ── pulp #1434 Phase A2-2 — CSS Grid extended surface ──────────────────
+// ── CSS Grid extended surface ──────────────────────────────────────────
 //
-// PR 1 of the multi-PR ladder. Builds on Pulp's existing grid layout
-// (template_columns/rows + per-child column/row spans + col/row gaps)
-// to add: grid-auto-columns, grid-auto-rows, grid-auto-flow,
-// grid-template-areas (named-area parsing), grid-area shorthand
-// (named token vs `row / col / row / col` numeric form).
+// Builds on Pulp's existing grid layout (template_columns/rows + per-child
+// column/row spans + col/row gaps) to add grid-auto-columns, grid-auto-rows,
+// grid-auto-flow, grid-template-areas, and grid-area shorthand.
 
 TEST_CASE("setGrid auto_columns / auto_rows / auto_flow",
           "[view][bridge][css][issue-1434-grid]") {
@@ -154,4 +148,3 @@ TEST_CASE("CSSStyleDeclaration forwards gridTemplateAreas",
     REQUIRE(bridge.widget("a")->grid().template_areas.size() == 3);
     REQUIRE(bridge.widget("a")->grid().auto_flow == GridStyle::AutoFlow::column);
 }
-

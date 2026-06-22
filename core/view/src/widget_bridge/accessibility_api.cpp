@@ -21,8 +21,8 @@ void WidgetBridge::register_accessibility_api() {
     // NSAccessibility bridge in core/view/platform/mac/accessibility_mac.mm
     // and the cross-platform AccessibilityTree snapshot in
     // accessibility_tree.cpp). Linux AT-SPI / Windows UIA platform
-    // routing remains a separate concern (#217): the bridge entry point
-    // is platform-agnostic; JS-side authors can rely on the same surface
+    // routing remains a platform concern: the bridge entry point is
+    // platform-agnostic; JS-side authors can rely on the same surface
     // on every platform and the storage round-trips through getAttribute
     // either way.
     //
@@ -78,11 +78,10 @@ void WidgetBridge::register_accessibility_api() {
         return choc::value::Value();
     });
 
-    // pulp #1737 - ARIA state attributes (aria-pressed / aria-checked /
-    // aria-disabled / aria-hidden). Tri-state per ARIA 1.2: `true` /
+    // ARIA state attributes (aria-pressed / aria-checked / aria-disabled /
+    // aria-hidden). Tri-state per ARIA 1.2: `true` /
     // `false` / `mixed` / unset. We store the raw string the JS shim
-    // hands us so platform AT bridges (NSAccessibility today; AT-SPI /
-    // UIA when those land per pulp #217) can read it back verbatim.
+    // hands us so platform AT bridges can read it back verbatim.
     // Single bridge fn rather than four; `attr` selects the slot.
     register_bridge_function(api, "setAccessibilityState",
                              [this](choc::javascript::ArgumentList args) {

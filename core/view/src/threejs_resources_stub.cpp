@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 //
-// threejs_resources_stub.cpp — iOS-D.3b Slice 2.
+// threejs_resources_stub.cpp — non-iOS Three.js resource stub.
 //
 // Non-iOS implementation of `pulp::view::threejs_iife_source()`.
 // On every platform that is NOT iOS / iOS Simulator we return

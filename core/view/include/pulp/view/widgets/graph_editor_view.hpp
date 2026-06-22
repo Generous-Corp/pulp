@@ -8,8 +8,6 @@
 // invalidates the SignalGraph's CompiledGraph snapshot, so the audio thread
 // transitions through one block of silence and back without tearing.
 //
-// Phase 2 of planning/signal-graph-followups-plan.md.
-//
 // iOS skip: pulp::host is not linked on iOS (App Store policy disallows
 // dlopen of third-party plugins). `__has_include` short-circuits the entire
 // declaration on platforms where the host headers are not on the include

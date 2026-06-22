@@ -1,4 +1,4 @@
-// test_font_rendering_goldens.cpp — Font v2 Slice 3.4
+// test_font_rendering_goldens.cpp — cross-backend font rendering goldens.
 // (Cross-backend rendering goldens).
 //
 // Captures a small, fast, deterministic golden hash of three
@@ -42,8 +42,8 @@
 //     the same process must produce *bit-identical* pixels.
 //     If that ever fails, it's a render-pipeline non-determinism
 //     bug (e.g. uninitialised glyph-cache state, racy lazy init)
-//     and not a golden-file issue. Per the Slice 3.4 brief:
-//     STOP and escalate to codex-consult.
+//     and not a golden-file issue. Stop and escalate to codex-consult
+//     rather than relaxing the golden.
 //
 //  5. On mismatch we dump the actual bitmap to a stable path
 //     so a developer can eyeball the diff. We bypass
@@ -286,8 +286,8 @@ TEST_CASE("font v2 Slice 3.4 — golden Inter 14px CJK 日本語 on raster",
     // case so this test stays a useful guard on the platforms
     // that DO have a CJK fallback.
     //
-    // pulp #2261 follow-up (Codex review P1): use a DETERMINISTIC
-    // probe instead of the post-render `opaque_pixels < 20`
+    // Regression for pulp #2261: use a DETERMINISTIC probe instead
+    // of the post-render `opaque_pixels < 20`
     // threshold. The threshold approach is unsound because Skia's
     // `fill_text` paints the `.notdef` glyph (tofu boxes) when no
     // CJK face is found — those tofu pixels easily exceed 20,

@@ -1,4 +1,4 @@
-// iOS-D.3c scene.js — rotating Three.js cube via THREE.WebGPURenderer.
+// Rotating Three.js cube via THREE.WebGPURenderer.
 //
 // Runs AFTER the build-time-bundled `three.iife.js` (which registers
 // `globalThis.THREE`) and `web-compat-three-shim.js` have been
@@ -15,10 +15,11 @@
 //   - PULP_THREE_RENDER: 60-frame avg <ms>/<FPS>
 //
 // On the iOS path the JS engine is JSC interpreter-only (no JIT in
-// .appex extensions). iOS-D.3a measured Three.js scene-graph traversal
-// at ~230 FPS @ 2000 cubes on the iPad Pro 11" 3rd-gen, so a single
-// cube has effectively zero CPU cost — anything below 60 FPS points
-// at the GPU bridge (presentable swapchain, queue.submit), not at JS.
+// .appex extensions). Prior device measurements put Three.js
+// scene-graph traversal well above 60 FPS on the target iPad class, so
+// a single cube has effectively zero CPU cost — anything below 60 FPS
+// points at the GPU bridge (presentable swapchain, queue.submit), not
+// at JS.
 
 (function () {
     "use strict";
@@ -122,8 +123,7 @@
     eyebrow.style.color = "#7dd3fc";
     eyebrow.style.fontSize = "12px";
     eyebrow.style.fontWeight = "600";
-    // iOS-D.3c (#3217 follow-up): clamp the eyebrow to the shell width so the
-    // long "Pulp · iOS-D.3c · JSC + three.webgpu.js" label wraps instead of
+    // Clamp the eyebrow to the shell width so the long label wraps instead of
     // overflowing the rounded shell on narrow editor sizes (AUM, split-view).
     eyebrow.style.maxWidth = "100%";
     eyebrow.style.overflowWrap = "break-word";
@@ -148,8 +148,8 @@
         "THREE.WebGPURenderer painting through Pulp's Dawn/Metal surface inside an AUv3 .appex.";
     subtitle.style.color = "#cbd5e1";
     subtitle.style.fontSize = "13px";
-    // iOS-D.3c (#3217): clamp subtitle to fit the shell width on narrow
-    // editor sizes (AUM, iPad split-view, Logic AUv3 small-window mode).
+    // Clamp subtitle to fit the shell width on narrow editor sizes
+    // (AUM, iPad split-view, Logic AUv3 small-window mode).
     subtitle.style.margin = "4px 0 8px 0";
     subtitle.style.maxWidth = "100%";
     subtitle.style.overflowWrap = "break-word";
@@ -241,10 +241,10 @@
 
     var camera = new THREE.PerspectiveCamera(
         60, canvasWidth / canvasHeight, 0.1, 100);
-    // iOS-D.3c polish (task 1 — fill the canvas): pull the camera in from 2.4
-    // to 1.7 and grow the cube from 0.9 to 1.0 so the rotating cube fills most
-    // of the canvas card. At z=1.7 with a 60° vertical FOV the visible
-    // half-height at the cube plane is 1.7·tan(30°) ≈ 0.98, comfortably larger
+    // Pull the camera in from 2.4 to 1.7 and grow the cube from 0.9 to 1.0 so
+    // the rotating cube fills most of the canvas card. With a 60° vertical FOV
+    // at z=1.7, the visible half-height at the cube plane is
+    // 1.7·tan(30°) ≈ 0.98, comfortably larger
     // than the cube's worst-case half-extent at a 45° spin (≈0.87 across the
     // face diagonal), so it never clips at the rotation extremes.
     camera.position.z = 1.7;
@@ -256,8 +256,8 @@
     scene.add(cube);
     globalThis.__pulpThreeDemoMesh = cube;
 
-    // iOS-D.3c polish (task 4 — touch orbit). OrbitControls is bundled into
-    // three.iife.js alongside three.webgpu.js (see
+    // Touch orbit. OrbitControls is bundled into three.iife.js alongside
+    // three.webgpu.js (see
     // tools/scripts/bundle_threejs_for_jsc.mjs), so it is exposed as
     // THREE.OrbitControls. Drag-rotate and pinch-zoom reach JS via the iOS
     // AUv3 touch→pointer-event bridge added in
@@ -335,12 +335,11 @@
     function onceFirstFrame() {
         if (firstFrameSubmitted) return;
         firstFrameSubmitted = true;
-        // The iOS-D.3b acceptance criteria call this marker out by
-        // name — emit it through console.info so it lands in
+        // Emit this marker through console.info so it lands in
         // `runtime::log_info`, the same logging path the rest of the
-        // PULP_* markers use. Searching syslog for the exact string
-        // is how iPad device walk-throughs confirm Three.js made it
-        // all the way to a real submitted command buffer.
+        // PULP_* markers use. Searching syslog for the exact string is
+        // how iPad device walk-throughs confirm Three.js made it all
+        // the way to a real submitted command buffer.
         console.info("PULP_THREE_RENDER: first frame submitted");
         backendMetric.textContent =
             (renderer.backend && renderer.backend.constructor)

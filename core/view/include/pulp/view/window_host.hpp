@@ -46,7 +46,7 @@ struct WindowOptions {
     /// after the main window closed.
     bool secondary_window = false;
 
-    // ── Multi-window hints (Phase 6) ────────────────────────────────────
+    // ── Multi-window hints ──────────────────────────────────────────────
     // These are used by WindowManager to configure platform-specific
     // window behavior. Callers creating standalone windows can ignore them.
 
@@ -57,7 +57,7 @@ struct WindowOptions {
 
 // Native window that hosts a View tree and renders it.
 //
-// Platform support (#299):
+// Platform support:
 //   - macOS: native NSWindow-backed impl in window_host_mac.mm, including
 //     native content handles and child-view attach/bounds/detach.
 //   - iOS: native UIWindow-backed impl in window_host_ios.mm. The standalone
@@ -78,9 +78,9 @@ public:
     // Create a window hosting the given view tree
     static std::unique_ptr<WindowHost> create(View& root, const WindowOptions& options);
 
-    // Host-registered factory (#299). Installed by the platform
-    // layer of a host app on non-Apple targets. Apple targets use
-    // the built-in native impl and ignore the factory.
+    // Host-registered factory. Installed by the platform layer of a host app
+    // on non-Apple targets. Apple targets use the built-in native impl and
+    // ignore the factory.
     using Factory = std::function<std::unique_ptr<WindowHost>(
         View& root, const WindowOptions& options)>;
     static void set_factory(Factory factory);
@@ -98,7 +98,7 @@ public:
     // native invalidation call (setNeedsDisplay, InvalidateRect, …).
     virtual void repaint() = 0;
 
-    // ── Slice 16: VBlank-locked safe-repaint ────────────────────────────
+    // ── VBlank-locked safe-repaint ──────────────────────────────────────
     //
     // The canonical pattern for "something changed, the UI needs to redraw"
     // is *"set a dirty flag, repaint on the next frame"* rather than the
@@ -147,10 +147,9 @@ public:
     ///
     /// This is render-recording time (Skia Graphite's whole-recording
     /// GpuStats elapsed time as exposed by `SkiaSurface::gpu_render_time_ms()`),
-    /// NOT total frame time and NOT a per-pass number. See
-    /// `planning/2026-05-21-gpu-timestamp-readback-proposal.md`. GPU-backed
-    /// platform hosts forward this from their `SkiaSurface`; the base and
-    /// CPU/non-GPU hosts return 0.
+    /// NOT total frame time and NOT a per-pass number. GPU-backed platform
+    /// hosts forward this from their `SkiaSurface`; the base and CPU/non-GPU
+    /// hosts return 0.
     virtual double gpu_render_time_ms() const { return 0.0; }
 
     /// Whether whole-recording GPU render timing is available this run — the
@@ -363,7 +362,7 @@ public:
     virtual void set_mouse_relative_mode(bool enabled) { (void)enabled; }
 
 private:
-    // Slice 16 — optional vblank-paced RenderLoop driven by mark_dirty().
+    // Optional vblank-paced RenderLoop driven by mark_dirty().
     render::RenderLoop* render_loop_ = nullptr;
 };
 

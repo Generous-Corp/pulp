@@ -14,8 +14,8 @@ void WidgetBridge::register_widget_outline_api(std::function<canvas::Color(const
     BridgeApiContext api{engine_};
     auto parseHexColor = std::move(parse_color);
 
-    // pulp #1519 - CSS / RN outline cluster. Outline is paint-time only:
-    // it does NOT take up Yoga layout space (parent never reserves room
+    // CSS / RN outline cluster. Outline is paint-time only: it does NOT
+    // take up Yoga layout space (parent never reserves room
     // for it). Each setter mutates one slot in isolation so a JSX prop
     // diff that touches only `outlineColor` doesn't clobber `outlineWidth`.
     // Skia paint inflates the box by (offset + width/2) and strokes with
@@ -26,7 +26,7 @@ void WidgetBridge::register_widget_outline_api(std::function<canvas::Color(const
     // setOutlineColor(id, hex) - accepts the same color forms as
     // setBackground / setBorderColor (#hex / rgb() / named), plus the
     // CSS `currentColor` keyword which resolves to the View's text
-    // color via the inheritable cascade (#1710).
+    // color via the inheritable cascade.
     register_bridge_function(api, "setOutlineColor", [this, parseHexColor](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto hex = args.get<std::string>(1, "");
@@ -34,13 +34,12 @@ void WidgetBridge::register_widget_outline_api(std::function<canvas::Color(const
         if (!v || hex.empty()) return choc::value::Value();
         // CSS `currentColor`: resolve to the element's own computed text
         // color first, then the inheritable cascade, then theme fallback.
-        // Order matters - pulp #1728 Codex P2: a Label that set its own
-        // `color` via setTextColor stores it in `Label::text_color_`
-        // (`has_own_text_color_=true`) and does NOT touch the inheritable
-        // slot, so `inheritable_text_color()` would skip the Label and
-        // climb to the parent's inheritable color. CSS semantics: an
-        // element's own `color` always wins over inheritance for that
-        // element's `currentColor`.
+        // Order matters: a Label that set its own `color` via setTextColor
+        // stores it in `Label::text_color_` (`has_own_text_color_=true`) and
+        // does NOT touch the inheritable slot, so `inheritable_text_color()`
+        // would skip the Label and climb to the parent's inheritable color.
+        // CSS semantics: an element's own `color` always wins over
+        // inheritance for that element's `currentColor`.
         std::string lower;
         lower.reserve(hex.size());
         for (char c : hex) lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));

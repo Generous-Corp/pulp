@@ -1,7 +1,5 @@
-// headless_surface.cpp — CI-friendly wrapper around the existing
-// offscreen Dawn/Skia path. Spec: planning/2026-05-24-macos-plugin-
-// authoring-plan.md §6.7 ("upgrade Headless GpuSurface from Partial →
-// Full — capability already exists; this is wrapping").
+// headless_surface.cpp — CI-friendly wrapper around the existing offscreen
+// Dawn/Skia path.
 //
 // We deliberately do NOT introduce a new render path here. All of the
 // real GPU work continues to live in `GpuSurface::create_dawn()` +
@@ -78,7 +76,7 @@ public:
 
         // Deterministic background fill. Without this the GPU texture
         // we read back may contain uninitialized memory and the PNG
-        // bytes won't be reproducible across reruns (plan §6.7 acceptance).
+        // bytes won't be reproducible across reruns.
         canvas->set_fill_color(canvas::Color::rgba8(
             config_.clear_r, config_.clear_g, config_.clear_b, config_.clear_a));
         canvas->fill_rect(0.0f, 0.0f,

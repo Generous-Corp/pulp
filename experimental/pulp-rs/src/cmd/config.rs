@@ -83,9 +83,8 @@ pub enum Sub {
 pub fn parse_sub(args: &[String]) -> Result<Sub> {
     let Some(head) = args.first() else {
         // Bare `pulp-rs config` matches C++'s `args.empty()` branch:
-        // print usage + exit 0. #562 Codex P2 kept the NON-empty
-        // unknown-subcommand path at exit 2, which is preserved
-        // below.
+        // print usage + exit 0. Non-empty unknown-subcommand input
+        // still exits 2, preserving the C++ contract fixed in #562.
         return Ok(Sub::Help);
     };
     let tail = &args[1..];
@@ -252,9 +251,9 @@ fn do_set(path: &Path, dotted: &str, new_value: &str, out: &mut impl Write) -> R
     writeln!(out, "Set {section}.{key} = {new_value}").map_err(|e| CliError::io("<stdout>", e))?;
     writeln!(out, "    {}", path.display()).map_err(|e| CliError::io("<stdout>", e))?;
 
-    // Slice 5 (#550): a mode change means the user has re-engaged
-    // with update management. Clear the 24h snooze so the new mode
-    // takes effect on the next invocation. Without this, a user who
+    // A mode change means the user has re-engaged with update
+    // management (#550). Clear the 24h snooze so the new mode takes
+    // effect on the next invocation. Without this, a user who
     // dismissed a banner yesterday and switches to `auto` today would
     // still wait 24h for the first auto-download attempt.
     //

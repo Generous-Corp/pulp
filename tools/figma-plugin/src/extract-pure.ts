@@ -1,22 +1,17 @@
-// Pure, host-neutral helpers split out of `extract.ts` (P2 — see
-// planning/figma-import-coordination-log.md 22:50Z roadmap).
+// Pure, host-neutral helpers shared by the UI plugin and headless extractor.
 //
 // Every function here operates on types only (SceneNode shape, RGBA,
 // Paint, GradientPaint, FrameNode axis enums) — no `await
 // figma.X.Async()`, no `getBytesAsync`, no `exportAsync`. Anything
 // pulling bytes through the Figma Plugin API stays in `extract.ts`.
 //
-// **Why split this out:** the extractor has two real consumers — the
-// UI plugin (`code.ts`) and the headless bundle (`headless.ts`) — and
-// a structural neighbour, Agent A's Python REST port at
-// `tools/import-design/figma_rest_export.py`, which mirrors these
-// helpers field-for-field. Co-locating the pure logic makes drift
-// between the two language ports visible in one file and reduces the
-// surface area future provider abstractions (`NodeProvider`,
-// `AssetProvider`, etc.) have to thread through.
-//
-// **No behaviour change.** Functions kept verbatim; only `export`
-// added so `extract.ts` can re-import them.
+// The extractor has two real consumers — the UI plugin (`code.ts`) and the
+// headless bundle (`headless.ts`) — plus a structural neighbour, the Python REST
+// port at `tools/import-design/figma_rest_export.py`, which mirrors these
+// helpers field-for-field. Co-locating the pure logic makes drift between the
+// language ports visible in one file and reduces the surface area future
+// provider abstractions (`NodeProvider`, `AssetProvider`, etc.) have to thread
+// through.
 
 import type { ExtractedFigmaNode, ExtractedLayout } from "./extract-model";
 import type { AudioWidgetKind } from "./extract-model";
@@ -75,7 +70,7 @@ export function mapNodeType(n: SceneNode): string {
       return "frame";
     case "COMPONENT":
     case "COMPONENT_SET":
-      return "frame"; // Phase 3 will promote recognized instances to widget kinds
+      return "frame"; // recognized instances are promoted to widget kinds later
     case "INSTANCE":
       return "frame"; // ditto
     case "TEXT":
@@ -213,8 +208,7 @@ export function isPureVectorIllustration(node: SceneNode): boolean {
 // ──────────────────────────────────────────────────────────────────────────
 // Font catalogue — walks the post-extraction IR (not the Figma scene),
 // so it's already host-neutral and operates only on ExtractedFigmaNode
-// trees. Emitted as the envelope's top-level `font_family_assets` per
-// #43a-rev.
+// trees. Emitted as the envelope's top-level `font_family_assets`.
 
 export function collectFontFamilyAssets(roots: ExtractedFigmaNode[]): FontFamilyAsset[] {
   const seen = new Map<string, FontFamilyAsset>();

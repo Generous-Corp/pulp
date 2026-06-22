@@ -1,12 +1,10 @@
-# Phase iOS-D.3c — Three.js rotating-cube AUv3 demo on iPad.
+# Three.js rotating-cube AUv3 demo on iPad.
 #
-# This is the "use the iOS-D.3b plumbing for real" demo: a near-silent
-# AU effect plug-in whose editor pane loads `three.webgpu.js` (via the
-# build-time IIFE bundle) inside JSC, then paints a rotating cube
-# through Pulp's Dawn/Metal surface stack.
+# This is the AUv3 Three.js GPU demo: a near-silent AU effect plug-in whose
+# editor pane loads `three.webgpu.js` (via the build-time IIFE bundle) inside
+# JSC, then paints a rotating cube through Pulp's Dawn/Metal surface stack.
 #
-# The plumbing this exercises landed in iOS-D.3b across PRs #3146,
-# #3154, #3156, #3157, #3159, #3163:
+# The plumbing this exercises:
 #   - `PluginViewHost::gpu_surface()` + `WidgetBridge::attach_gpu_surface`
 #   - `pulp::view::threejs_iife_source()` — NSBundle loader for
 #     `<appex>/threejs/three.iife.js`
@@ -38,8 +36,9 @@
 #   PULP_THREE_SHIM: webgpu-renderer-present
 #   PULP_THREE_RENDER: first frame submitted
 #
-# See `planning/2026-05-29-ios-d3b-threejs-webgpu-program.md` § 11 for
-# the program closeout and the iOS-D.4 entry gate this demo feeds.
+# Use this target to verify that the AUv3 editor can load the bundled
+# Three.js IIFE, attach Pulp's presentable GPU surface, and submit a
+# WebGPU frame on device.
 
 if(NOT IOS)
     return()

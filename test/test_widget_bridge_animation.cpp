@@ -1,11 +1,7 @@
-// test_widget_bridge_animation.cpp — extracted from test_widget_bridge.cpp
-// in the 2026-05 Phase 5 P5-1 follow-up refactor.
-//
 // Bridge animation API tests. Covers the bridge ↔ MotionEngine plumbing
 // for setMotionToken, animate(), the Web Animations API surface
 // (Element.animate(...) / KeyframeEffect), motion provenance, and the
-// pulp-motion-bench harness output. Self-contained cluster from
-// test_widget_bridge.cpp — about 800 lines of contiguous animation tests.
+// pulp-motion-bench harness output.
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>

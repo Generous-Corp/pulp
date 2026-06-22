@@ -1,4 +1,4 @@
-// web-compat-runtime-apis.js — Phase 9 runtime API shims
+// web-compat-runtime-apis.js — runtime API shims
 //
 // Extracted verbatim from the legacy web-compat.js bundle. Provides the
 // browser runtime globals: performance, navigator.clipboard, localStorage /
@@ -9,7 +9,7 @@
 // (tools/harness/adapters/html.py).
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Phase 9: Runtime APIs
+// Runtime APIs
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // performance.now() — high-resolution monotonic time

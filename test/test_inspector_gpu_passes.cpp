@@ -1,10 +1,4 @@
-// Inspector — Phase 6.1 GPU render-pass attribution tests.
-//
-// Split verbatim out of test/test_inspector.cpp (Phase-5 oversized-test-file
-// refactor). The TEST_CASE blocks are byte-identical to their originals;
-// only the file/binary they live in changed.
-//
-// Spec: planning/2026-05-19-inspector-phase6-gpu-perf-spike.md § Phase 6.1.
+// Inspector GPU render-pass attribution tests.
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -289,7 +283,7 @@ TEST_CASE("InspectorOverlay Phase 6.1: viewer renders per-pass rows",
     REQUIRE(count_text_containing(canvas, "background") >= 1);
     REQUIRE(count_text_containing(canvas, "content") >= 1);
     // Honesty note about CPU vs GPU timing is surfaced.
-    REQUIRE(count_text_containing(canvas, "Phase 6.5") >= 1);
+    REQUIRE(count_text_containing(canvas, "wall-clock, not GPU") >= 1);
     // "effects" never rendered — must NOT show a row for it.
     REQUIRE(count_text_containing(canvas, "effects") == 0);
 }
@@ -305,6 +299,7 @@ TEST_CASE("InspectorOverlay Phase 6.1: viewer reports missing RPM gracefully",
 
     pulp::canvas::RecordingCanvas canvas;
     overlay.paint(canvas);
+    REQUIRE(count_text_containing(canvas, "wall-clock, not GPU") >= 1);
     REQUIRE(count_text_containing(canvas, "No RenderPassManager") >= 1);
 }
 

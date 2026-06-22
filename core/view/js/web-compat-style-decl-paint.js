@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// CSSStyleDeclaration — paint domain handler (P5-5 split of _applyProperty)
+// CSSStyleDeclaration — paint domain handler split from _applyProperty
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 // Handles the paint-surface CSS properties: colors, borders, opacity,
@@ -9,9 +9,9 @@
 // claimed the key, false otherwise. Each `case` body is byte-identical
 // to the matching arm of the pre-split `_applyProperty` switch.
 //
-// `decl` carries the CSSStyleDeclaration `this`; the scrollBehavior /
-// isolation cases read `decl.__pulpId__`. Embed order: loaded AFTER
-// web-compat-style-decl.js (the dispatcher).
+// `decl` carries the CSSStyleDeclaration `this`; the isolation case reads
+// `decl.__pulpId__`. Embed order: loaded AFTER web-compat-style-decl.js
+// (the dispatcher).
 
 function _applyPaintProp(decl, id, key, resolved, value) {
     switch (key) {
@@ -27,8 +27,7 @@ function _applyPaintProp(decl, id, key, resolved, value) {
             return true;
         }
 
-        // Border
-        // pulp #1027 (audit PR #1166 finding #4) — these used to lower onto
+        // Border attributes used to lower onto
         // the unified `setBorder(id, color, width, radius)` which clobbers
         // ALL three slots on every call. Setting `borderRadius` then
         // `borderColor` would silently drop the radius back to 0. The
@@ -37,12 +36,12 @@ function _applyPaintProp(decl, id, key, resolved, value) {
         // routing to them preserves the unset siblings — matching CSS
         // semantics.
         case "borderRadius": {
-            // pulp Wave 2 css.2 — accept `%` values. Pulp's setBorderRadius
-            // is scalar (no percent unit on the View slot), so we treat
+            // Accept `%` values. Pulp's setBorderRadius is scalar (no
+            // percent unit on the View slot), so we treat
             // the percent value as a px-equivalent best-effort: 50% on a
             // 200x100 box would historically be 100/50px, but we don't
-            // have the box size here. The catalog flips %/elliptical to
-            // `partial` honest. Users wanting a circle should use a
+            // have the box size here. The catalog marks %/elliptical
+            // support as `partial` to stay honest. Users wanting a circle should use a
             // numeric radius >= half their min(width, height).
             var br = resolveCSSLength(resolved);
             if (br) setBorderRadius(id, br.value);
@@ -67,14 +66,13 @@ function _applyPaintProp(decl, id, key, resolved, value) {
             return true;
         }
         case "borderWidth": {
-            // pulp Wave 2 css.2 — keyword expansion for `thin` / `medium` /
+            // Keyword expansion for `thin` / `medium` /
             // `thick` (CSS Backgrounds & Borders L3 named widths). Browser
             // defaults vary slightly but the canonical values are 1 / 3 /
             // 5px (Chromium / WebKit ship 1 / 3 / 5; Firefox uses 1 / 3 /
-            // 5 too). We pick 1 / 2 / 4 to match the original Wave 2 plan
-            // — slightly thinner than browsers but a reasonable visual
-            // ladder for our 1x DPI default. Authors who want exact
-            // browser parity can pass numeric px values.
+            // 5 too). We pick 1 / 2 / 4 — slightly thinner than browsers
+            // but a reasonable visual ladder for our 1x DPI default.
+            // Authors who want exact browser parity can pass numeric px values.
             var bwResolved = String(resolved).trim().toLowerCase();
             if (bwResolved === "thin")   { setBorderWidth(id, 1); return true; }
             if (bwResolved === "medium") { setBorderWidth(id, 2); return true; }
@@ -83,8 +81,8 @@ function _applyPaintProp(decl, id, key, resolved, value) {
             if (bw) setBorderWidth(id, bw.value);
             return true;
         }
-        // pulp #1434 Triage #10 — borderStyle keyword passes verbatim to
-        // setBorderStyle. The bridge maps to View::BorderStyle. Skia
+        // borderStyle keyword passes verbatim to setBorderStyle. The
+        // bridge maps to View::BorderStyle. Skia
         // installs SkDashPathEffect for dashed/dotted; other named
         // styles currently degrade to solid (paint-side gap).
         case "borderStyle": {
@@ -105,8 +103,8 @@ function _applyPaintProp(decl, id, key, resolved, value) {
             }
             return true;
         }
-        // pulp #1027 (audit PR #1166 finding #4) — per-side flat props
-        // (RN parity). Route to setBorderTop/Right/Bottom/Left{Color,Width}
+        // Per-side flat props (RN parity). Route to
+        // setBorderTop/Right/Bottom/Left{Color,Width}
         // which preserve the OTHER attribute on the View (see
         // applyBorderSide in widget_bridge.cpp). Calling setBorderSide
         // with a placeholder 0/"" for the unset slot would clobber it.
@@ -166,7 +164,8 @@ function _applyPaintProp(decl, id, key, resolved, value) {
             setOpacity(id, parseFloat(resolved) || 0);
             return true;
 
-        // Box shadow: "2px 4px 8px rgba(0,0,0,0.3)" or "inset 2px 4px 8px ..." (issue-925)
+        // Box shadow: "2px 4px 8px rgba(0,0,0,0.3)" or
+        // "inset 2px 4px 8px ...".
         case "boxShadow": {
             if (resolved === "none" || resolved === "" || resolved == null) {
                 if (typeof clearBoxShadow === "function") clearBoxShadow(id);
@@ -196,7 +195,7 @@ function _applyPaintProp(decl, id, key, resolved, value) {
             setFilter(id, resolved);
             return true;
 
-        // pulp #1434 (batch 3) — backdrop-filter route. The bridge
+        // backdrop-filter route. The bridge
         // setter is numeric (`setBackdropFilter(id, blur_px)`), so we
         // parse a `blur(Npx)` substring out of the CSS value. This
         // matches what `setFilter` already does on the bridge side
@@ -219,7 +218,7 @@ function _applyPaintProp(decl, id, key, resolved, value) {
             return true;
         }
 
-        // pulp #1515 — CSS `clip-path` cluster. The bridge only honors
+        // CSS `clip-path` cluster. The bridge only honors
         // the `path("...")` form (Skia parses via SkPath::FromSVGString
         // and installs the clip on paint). URL refs (`url(#id)`) and
         // named shape forms (`circle()`, `inset()`, `polygon()`,
@@ -244,12 +243,10 @@ function _applyPaintProp(decl, id, key, resolved, value) {
             return true;
         }
 
-        // pulp #1515 — CSS `mask-image`. Storage-only today; the
-        // paint pipeline does not yet composite a shader mask onto a
-        // saveLayer. Forwarding the value through to the bridge keeps
-        // the slot round-trippable so harness tests can assert the
-        // shim accepts the value, and so a future paint slice can
-        // honor it without a JS-side change.
+        // CSS `mask-image`. The bridge stores the value on the View;
+        // mask-capable paint backends consume supported forms (currently
+        // `url(...)` and `linear-gradient(...)`) and fall back to no-mask
+        // painting for unsupported or unparseable forms.
         case "maskImage": {
             if (typeof setMaskImage !== "function") return true;
             var miv = String(resolved).trim();
@@ -258,9 +255,8 @@ function _applyPaintProp(decl, id, key, resolved, value) {
             return true;
         }
 
-        // pulp #1515 followup — `mask-size` pairs with mask-image.
-        // Storage-only today; consumed by the future paint slice that
-        // wires the mask shader onto the saveLayer.
+        // `mask-size` pairs with mask-image and is consumed by mask-capable
+        // paint backends when the mask image resolves to a shader.
         case "maskSize": {
             if (typeof setMaskSize !== "function") return true;
             setMaskSize(id, String(resolved).trim());
@@ -281,8 +277,8 @@ function _applyPaintProp(decl, id, key, resolved, value) {
         }
 
         // CSS `object-fit` — controls fitting of <img> intrinsic
-        // size into its layout box. Storage-only today; ImageView
-        // paint-time consumption needs natural-size access (follow-up).
+        // size into its layout box. Image-like paint paths consume it
+        // when mapping source content into their bounds.
         case "objectFit": {
             if (typeof setObjectFit !== "function") return true;
             setObjectFit(id, String(resolved).trim());
@@ -290,20 +286,22 @@ function _applyPaintProp(decl, id, key, resolved, value) {
         }
 
         // CSS `object-position` — alignment of object-fit residual
-        // space. Pairs with object-fit. Storage-only today.
+        // space. Pairs with object-fit; image-like paint paths consume it
+        // to offset fitted content within the destination rect.
         case "objectPosition": {
             if (typeof setObjectPosition !== "function") return true;
             setObjectPosition(id, String(resolved).trim());
             return true;
         }
 
-        // pulp #1515 — CSS `mask` shorthand. Parse the image
+        // CSS `mask` shorthand. Parse the image
         // sub-property out (it's the only longhand we support today)
         // and forward both the shorthand verbatim (so View::mask()
         // round-trips) and the extracted image to setMaskImage.
-        // The remaining longhands (mode / repeat / position / size /
-        // origin / clip / composite) are deferred — the saveLayer +
-        // SkBlendMode::kDstIn paint slice is the follow-up.
+        // The remaining shorthand longhands (mode / repeat / position /
+        // size / origin / clip / composite) are not fanned out of the
+        // shorthand yet; unsupported image forms are stored but fall
+        // back to no-mask painting.
         case "mask": {
             if (typeof setMask === "function") {
                 setMask(id, String(resolved));
@@ -317,8 +315,8 @@ function _applyPaintProp(decl, id, key, resolved, value) {
                     // radial-gradient(...) substring out and treat the
                     // rest as deferred sub-properties. Solid-color
                     // masks (`mask: black`) flow through verbatim too;
-                    // the bridge stores the value but doesn't paint it
-                    // yet.
+                    // unsupported forms are stored but fall back to
+                    // no-mask painting.
                     var imgm = mv.match(/(url\([^)]*\)|(?:linear|radial|conic)-gradient\([^)]*\))/);
                     setMaskImage(id, imgm ? imgm[1] : mv);
                 }
@@ -338,7 +336,7 @@ function _applyPaintProp(decl, id, key, resolved, value) {
             return true;
         }
 
-        // pulp #1517 — background sub-props.
+        // background sub-props.
         // - backgroundAttachment: only `scroll` is the conformant default in
         //   pulp's non-scrolling layout model. `fixed` / `local` need a
         //   scroll-context coupling we don't model — accept verbatim and
@@ -371,9 +369,9 @@ function _applyPaintProp(decl, id, key, resolved, value) {
             return true;
 
         // outline: "2px solid blue" — fan-out to the per-attribute
-        // bridge fns introduced in pulp #1519 (setOutlineColor /
-        // setOutlineStyle / setOutlineWidth). Falls back to legacy
-        // setOutline if the new ones aren't registered (older bridge).
+        // bridge fns (setOutlineColor / setOutlineStyle / setOutlineWidth).
+        // Falls back to legacy setOutline if the new ones aren't registered
+        // (older bridge).
         case "outline": {
             var op = resolved.match(/([\d.]+)px\s+(\w+)\s+(.+)/);
             if (op) {
@@ -404,7 +402,7 @@ function _applyPaintProp(decl, id, key, resolved, value) {
             }
             return true;
         }
-        // pulp #1519 — outline-offset / outline-style now have dedicated
+        // outline-offset / outline-style now have dedicated
         // bridge setters. Outline doesn't take Yoga layout space, so the
         // CSS path mirrors borderStyle keyword set verbatim.
         case "outlineOffset": {
@@ -440,14 +438,14 @@ function _applyPaintProp(decl, id, key, resolved, value) {
             return true;
 
         // mix-blend-mode — already wired via setMixBlendMode bridge fn
-        // (#1549). Mirroring the RN surface so CSS authors get the same
+        // Mirroring the RN surface so CSS authors get the same
         // 16-keyword set.
         case "mixBlendMode":
             if (typeof setMixBlendMode === "function") setMixBlendMode(id, resolved);
             return true;
 
-        // pulp #1737 RN-OOS-fixup (final round) — CSS isolation honest
-        // CSS-subset flip. Pulp's per-View save_layer_with_blend model
+        // CSS `isolation` honest CSS-subset flip. Pulp's per-View
+        // save_layer_with_blend model
         // is structurally isolated by default (each blended View has
         // its own composition layer; z-index is paint-order scoped to
         // siblings within a parent), so the keyword round-trips to a

@@ -129,10 +129,9 @@ public:
     /// value differs from the last polled value.
     /// @return True if the value changed since the last poll.
     ///
-    /// @note Soft-deprecated (Slice 16, RT-Safety + Debug DX roadmap). The
-    ///       canonical pattern is no longer periodic polling: a parameter
-    ///       change should *set a dirty flag* and the UI should *repaint on
-    ///       the next vblank* via `WindowHost::mark_dirty()` —
+    /// @note Soft-deprecated. The canonical pattern is no longer periodic
+    ///       polling: a parameter change should *set a dirty flag* and the UI
+    ///       should *repaint on the next vblank* via `WindowHost::mark_dirty()` —
     ///       see `pulp::render::RenderLoop` and `WindowHost::mark_dirty()`.
     ///       `poll()` stays supported for existing callers and for hosts
     ///       without a vblank-driven loop, but new code should prefer the

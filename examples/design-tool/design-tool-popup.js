@@ -1,6 +1,6 @@
 
 // ═══════════════════════════════════════════════════════════════════
-// D1: Token Palette Picker Popup
+// Token Palette Picker Popup
 // ═══════════════════════════════════════════════════════════════════
 var TOKEN_POPUP_W = 280;
 
@@ -158,7 +158,7 @@ function buildTokenPopupControls() {
         closeTokenPopup();
     });
 
-    // #62: Token alpha (opacity) fader
+    // Token alpha (opacity) fader
     createRow("tp-alpha-row", "token-popup");
     setFlex("tp-alpha-row", "height", 20);
     setFlex("tp-alpha-row", "gap", 6);
@@ -242,7 +242,7 @@ function buildTokenPopupCustomToggle() {
 }
 buildTokenPopupCustomToggle();
 
-// D2: Gamut triangle canvas — rendered as grid of colored rectangles
+// Gamut triangle canvas, rendered as grid of colored rectangles
 var GAMUT_W = 50;  // columns (lightness steps)
 var GAMUT_H = 30;  // rows (chroma steps)
 var GAMUT_MAX_C = 0.4;
@@ -594,7 +594,7 @@ function updatePopupState(tokenName) {
     setValue("tp-alpha-fdr", hexAlpha(hex));
     setText("tp-alpha-val", hexAlpha(hex).toFixed(1));
     setOpacity("tp-token-modified", isTokenModified(tokenName) ? 1.0 : 0.0);
-    // D2: Sync HCL faders and gamut triangle
+    // Sync HCL faders and gamut triangle
     if (tpCustomOpen) {
         var oklch = OklchEngine.hexToOklch(hex);
         updateTokenPopupCustomUi(oklch, oklch.H, true, true);
@@ -715,7 +715,7 @@ function wireAccentHueAndSelectors() {
     createCol("center-panel", "main-area");
     setFlex("center-panel", "flex_grow", 1);
     setFlex("center-panel", "flex_shrink", 1);
-    setFlex("center-panel", "min_width", 420);  // Issue 5: prevent scrollbar behind content
+    setFlex("center-panel", "min_width", 420);  // Prevent scrollbar behind content
     setFlex("center-panel", "padding", 16);
     setFlex("center-panel", "gap", 8);
     setBackground("center-panel", APP_BG);

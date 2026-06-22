@@ -108,8 +108,8 @@ InspectorMessage DomainHandler::handle_inspector(const InspectorMessage& req) {
         return make_response(req.id, choc::json::toString(obj, false));
     }
 
-    // ── Phase 0b: applyTweak / listTweaks / clearTweaks / setBypass ──
-    // All four require a TweakStore wired in (set_tweak_store(...)).
+    // ── Tweak storage RPCs ─────────────────────────────────────────
+    // Tweak RPCs require a TweakStore wired in (set_tweak_store(...)).
     // Schema mirrors the TS @pulp/import-ir/src/tweaks.ts TweaksFile.
     if (req.method == methods::kInspectorApplyTweak) {
         if (!tweak_store_) return make_error(req.id, "No tweak store attached");
@@ -143,7 +143,7 @@ InspectorMessage DomainHandler::handle_inspector(const InspectorMessage& req) {
 
         // Build the response as { tweaks: { anchor: { path: value } },
         // bypassed: { anchor: true | [paths] } } — mirrors the on-disk
-        // TweaksFile schema Phase 1 will adopt.
+        // TweaksFile schema.
         auto tweaks_obj = choc::value::createObject("");
         std::unordered_map<std::string, choc::value::Value> anchor_objs;
         for (auto& rec : records) {
@@ -159,14 +159,12 @@ InspectorMessage DomainHandler::handle_inspector(const InspectorMessage& req) {
         }
 
         auto bypassed_obj = choc::value::createObject("");
-        // Codex P2 follow-up on #2300: include bypass-only anchors.
-        // Previously `all_anchors` was populated solely from `records`,
-        // so a setBypass call on an anchor that had no active tweaks
-        // (or whose tweaks were later cleared via Inspector.clearTweaks
-        // without clearing the bypass) never surfaced in the response.
-        // Walk both the tweak-record anchors AND the TweakStore's
-        // bypassed anchors so the protocol can round-trip every bypass
-        // state — critical for the Phase 1 disk-persistence path.
+        // Include bypass-only anchors. A setBypass call on an anchor
+        // that had no active tweaks, or whose tweaks were later cleared
+        // via Inspector.clearTweaks without clearing the bypass, must
+        // still surface in the response. Walk both the tweak-record
+        // anchors and the TweakStore's bypassed anchors so the protocol
+        // can round-trip every bypass state.
         std::unordered_set<std::string> all_anchors;
         for (auto& rec : records) all_anchors.insert(rec.anchor_id);
         for (auto& anchor : tweak_store_->bypassed_anchors())
@@ -186,8 +184,8 @@ InspectorMessage DomainHandler::handle_inspector(const InspectorMessage& req) {
             }, *b);
         }
 
-        // Phase 2.5: surface the `locked` overlay so the management
-        // panel and disk-persistence path can round-trip lock state.
+        // Surface the `locked` overlay so the management panel and
+        // disk-persistence path can round-trip lock state.
         auto locked_arr = choc::value::createEmptyArray();
         for (auto& anchor : tweak_store_->locked_anchors())
             locked_arr.addArrayElement(choc::value::createString(anchor));
@@ -232,7 +230,7 @@ InspectorMessage DomainHandler::handle_inspector(const InspectorMessage& req) {
             return make_error(req.id, "Invalid params for Inspector.clearTweaks");
         }
     }
-    // ── Phase 1: loadTweaks / saveTweaks / setAutoSave ──
+    // ── Tweak disk persistence RPCs ────────────────────────────────
     if (req.method == methods::kInspectorLoadTweaks) {
         if (!tweak_store_) return make_error(req.id, "No tweak store attached");
         std::string path;
@@ -315,11 +313,11 @@ InspectorMessage DomainHandler::handle_inspector(const InspectorMessage& req) {
         return make_response(req.id, choc::json::toString(resp, false));
     }
 
-    // ── Phase 5.3: editor URI plumbing for the future source-jump ───
+    // ── Editor URL template RPCs ───────────────────────────────────
     // setEditorUrlTemplate validates and stores; getEditorUrlTemplate
     // reports the effective template and where it came from
-    // (env / config / default). No actual jumping happens yet — that's
-    // Phase 5.1 (see planning/2026-05-19-inspector-phase5-source-jump-spike.md).
+    // (env / config / default). Actual jumping is handled by
+    // Inspector.jumpToSource below.
     if (req.method == methods::kInspectorSetEditorUrlTemplate) {
         try {
             auto params = choc::json::parse(req.params_json);
@@ -335,8 +333,8 @@ InspectorMessage DomainHandler::handle_inspector(const InspectorMessage& req) {
                 return make_error(req.id,
                     std::string("Inspector.setEditorUrlTemplate: ") + err);
             config_.editor_url_template = tmpl;
-            // Phase 5.1 — keep the overlay's `J`-hotkey config in sync
-            // so a runtime template change reaches both jump paths.
+            // Keep the overlay's `J`-hotkey config in sync so a runtime
+            // template change reaches both jump paths.
             if (overlay_) overlay_->set_config(config_);
             auto resp = choc::value::createObject("");
             resp.addMember("ok", choc::value::createBool(true));
@@ -362,7 +360,7 @@ InspectorMessage DomainHandler::handle_inspector(const InspectorMessage& req) {
         return make_response(req.id, choc::json::toString(resp, false));
     }
 
-    // ── Phase 5.1: Inspector.jumpToSource ───────────────────────────
+    // ── Inspector.jumpToSource ─────────────────────────────────────
     // Resolve a view's authored source location and open the user's
     // editor at file:line. Params (all optional):
     //   anchorId : design-import anchor of the target view. When
@@ -456,7 +454,7 @@ InspectorMessage DomainHandler::handle_inspector(const InspectorMessage& req) {
             return make_error(req.id, "Invalid params for Inspector.setBypass");
         }
     }
-    // ── Phase 2.5: setLocked — mirrors setBypass for the lock overlay ──
+    // ── setLocked mirrors setBypass for the lock overlay ───────────
     if (req.method == methods::kInspectorSetLocked) {
         if (!tweak_store_) return make_error(req.id, "No tweak store attached");
         try {
@@ -609,7 +607,7 @@ InspectorMessage DomainHandler::handle_performance(const InspectorMessage& req) 
             obj.addMember("budget_ms", choc::value::createFloat64(rpm_->budget()));
             obj.addMember("over_budget", choc::value::createBool(rpm_->over_budget()));
 
-            // Phase 6.5: per-pass timing now carries both clocks.
+            // Per-pass timing carries both clocks.
             //  - `time_ms`/`cpu_time_ms`: CPU wall-time around draw
             //    submission (unchanged; legacy `time_ms` kept for
             //    back-compat with overlay consumers).
@@ -631,14 +629,14 @@ InspectorMessage DomainHandler::handle_performance(const InspectorMessage& req) 
             obj.addMember("gpu_timing_available",
                           choc::value::createBool(rpm_->has_gpu_timing()));
 
-            // Follow-up #2611: frame-level, whole-recording GPU *render* time
-            // (Skia Graphite GpuStats elapsed time), distinct from the
+            // Frame-level, whole-recording GPU *render* time (Skia
+            // Graphite GpuStats elapsed time), distinct from the
             // per-pass `gpu_time_ms` above. The per-pass numbers are
-            // Dawn-timestamp-query per-pass durations; this is the GPU clock
-            // for the entire render recording, which is the only granularity
-            // the Graphite path exposes. `gpu_render_timing_available` gates
-            // it just like the per-pass `gpu_timing_available`. See
-            // planning/2026-05-21-gpu-timestamp-readback-proposal.md.
+            // Dawn-timestamp-query per-pass durations; this is the GPU
+            // clock for the entire render recording, which is the only
+            // granularity the Graphite path exposes.
+            // `gpu_render_timing_available` gates it just like the
+            // per-pass `gpu_timing_available`.
             obj.addMember("gpu_render_time_ms",
                           choc::value::createFloat64(rpm_->gpu_render_time_ms()));
             obj.addMember("gpu_render_timing_available",
@@ -652,10 +650,9 @@ InspectorMessage DomainHandler::handle_performance(const InspectorMessage& req) 
         // Tracking is always on when RenderPassManager exists
         return make_response(req.id, R"({"tracking":true})");
     }
-    // Tier A Slice 6: per-repaint "flash" overlay. Wraps
-    // DirtyTracker::set_debug_overlay(). When no tracker is wired
-    // we report the toggle as unavailable so the UI can grey it out
-    // instead of silently dropping clicks.
+    // Per-repaint "flash" overlay. Wraps DirtyTracker::set_debug_overlay().
+    // When no tracker is wired we report the toggle as unavailable so the
+    // UI can grey it out instead of silently dropping clicks.
     if (req.method == methods::kPerfGetRepaintFlash) {
         auto obj = choc::value::createObject("");
         if (dirty_) {
@@ -843,7 +840,7 @@ InspectorMessage DomainHandler::handle_capture(const InspectorMessage& req) {
     return make_error(req.id, "Unknown Capture method: " + req.method);
 }
 
-// ── LiveConstant domain (Tier A Slice 13) ──────────────────────────────────
+// ── LiveConstant domain ───────────────────────────────────────────────────
 //
 // Wires PULP_LIVE_CONSTANT(name, default, min, max) to the inspector
 // via three RPC methods. No host setter is required — the registry

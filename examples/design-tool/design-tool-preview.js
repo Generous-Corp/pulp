@@ -326,7 +326,7 @@ function buildPreviewWaveformAndMeters() {
 }
 buildPreviewWaveformAndMeters();
 
-// D3: Card grid matching HTML reference — Empty, Loading, Ready (OK badge), Error (! badge)
+// Card grid matching HTML reference: Empty, Loading, Ready (OK badge), Error (! badge)
 var cardDefs = [
     { id: "card-1", label: "Empty", bg: APP_PANEL, border: APP_BORDER, badge: null },
     { id: "card-2", label: "Loading", bg: APP_PANEL, border: APP_BORDER, badge: null, loading: true },
@@ -926,8 +926,7 @@ function buildRightPanelChat() {
     setFlex("model-top-row", "align_items", "center");
     setFlex("model-top-row", "justify_content", "space-between");
 
-    // #51: Context badge with accent styling
-    // Chat context badge
+    // Chat context badge with accent styling
     createRow("context-badge", "model-top-row");
     setFlex("context-badge", "height", 22);
     setFlex("context-badge", "width", 136);
@@ -1063,8 +1062,7 @@ function buildRightPanelChat() {
     setFlex("chat-input-row", "flex_shrink", 0);
     setFlex("chat-input-row", "gap", 6);
 
-    // Upload button with hover state (Issue 3)
-    // #49: Upload button with proper icon sizing
+    // Upload button with hover state and proper icon sizing
     createCol("upload-btn", "chat-input-row");
     setFlex("upload-btn", "width", 32);
     setFlex("upload-btn", "height", 32);

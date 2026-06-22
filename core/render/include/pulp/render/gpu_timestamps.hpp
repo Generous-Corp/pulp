@@ -10,7 +10,7 @@
 
 namespace pulp::render {
 
-/// Phase 6.5 — Dawn GPU timestamp queries.
+/// Dawn GPU timestamp queries.
 ///
 /// WebGPU exposes GPU-side timing through a `wgpu::QuerySet` of
 /// `QueryType::Timestamp`. The pure conversion helpers below are live;
@@ -199,8 +199,7 @@ enum class GpuTimestampSupport {
 ///   4. `read_back()` returns the resolved ticks `resolve()` populated;
 ///      feed them through `resolve_pass_timings` + `apply_pass_timings`.
 ///
-/// The 1-frame readback lag is inherent to GPU timestamp queries and is
-/// accepted by the spike spec (Phase 6.5, "1-frame lag is unavoidable").
+/// The 1-frame readback lag is inherent to GPU timestamp queries.
 class GpuTimestamps {
 public:
     GpuTimestamps();

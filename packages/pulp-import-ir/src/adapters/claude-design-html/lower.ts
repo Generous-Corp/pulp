@@ -1,12 +1,11 @@
-// pulp #1486 — Claude Design HTML adapter (Phase 1 spike target).
+// Claude Design HTML adapter.
 //
 // Lowers a Claude-Design-style HTML payload (a single document or a
-// fragment) into an IRNode tree. Uses content-hash anchors per §4.4.
+// fragment) into an IRNode tree. Uses content-hash anchors.
 //
-// First-spike scope: structural translation + the most common style
-// properties. Anything not yet typed is preserved verbatim under
-// `raw_source.outerHtml` so a future Pulp version can re-walk the
-// source without a re-import.
+// Handles structural translation and common inline-style properties.
+// Anything not yet typed is preserved verbatim under `raw_source.outerHtml`
+// so callers can re-walk the original source without a re-import.
 
 import type {
     IRNode,
@@ -38,12 +37,10 @@ interface BuildNode extends PreAnchorIRNode {
 /**
  * Lower a Claude Design HTML string (or fragment) into an IRNode tree.
  *
- * The payload is parsed via a small DOM-like walker that the Phase 1
- * spike implements without depending on a full HTML parser — Claude
- * Design output is well-formed enough that a regex-driven walker
- * suffices for the first spike. A real implementation would lean on
- * `parse5` or `htmlparser2`; that lands when we move to a real
- * parser-driven adapter (Phase 2).
+ * The payload is parsed via a small DOM-like walker without depending on a
+ * full HTML parser. Claude Design output is well-formed enough for the
+ * current regex-driven walker; broader malformed HTML support should use
+ * a parser such as `parse5` or `htmlparser2`.
  */
 export async function lowerClaudeDesignHtml(
     rawHtml: string,
@@ -100,15 +97,14 @@ function materialize(
 
 // ── HTML parser ───────────────────────────────────────────────────────
 //
-// Phase 1: a regex-driven walker over a small subset of HTML that
-// covers what Claude Design generates. We accept:
+// Regex-driven walker over the subset of HTML that Claude Design generates.
+// We accept:
 //   <tag attr="..." style="...">…</tag>
 //   <tag />            — self-closing
 //   text runs between tags
 //
 // We do NOT yet handle: DOCTYPE, comments, CDATA, scripts, attributes
-// without quotes, malformed nesting (assumes well-formed). Phase 2
-// swaps to parse5.
+// without quotes, or malformed nesting. This path assumes well-formed input.
 
 interface ParsedTag {
     tagName: string;
@@ -123,7 +119,7 @@ const ATTR = /([a-zA-Z-]+)="([^"]*)"/g;
 
 function parseHtmlToBuildNode(html: string, preserveRawSource: boolean): BuildNode {
     // If the input has multiple roots, wrap them in an implicit View
-    // (the spec's "fragment becomes a synthetic root" pattern).
+    // so fragments become a synthetic root.
     // We try to find a single outer tag first; if that consumes the
     // whole input, use it as the root, otherwise wrap.
     const trimmed = html.trim();
@@ -176,9 +172,8 @@ function buildFromTag(
         );
     }
 
-    // Find the matching close-tag. Phase 1 simplification: assumes
-    // well-formed, no same-tag nesting that would confuse us. (Phase 2
-    // uses parse5 and this concern goes away.)
+    // Find the matching close-tag. This assumes well-formed input with no
+    // same-tag nesting that would confuse the lightweight walker.
     const closeTag = `</${tagName}>`;
     const closeIdx = findMatchingCloseTag(src, contentStart, tagName);
     if (closeIdx < 0) {
@@ -506,7 +501,7 @@ function extractLayout(
         out.overflow = overflow as TypedLayout['overflow'];
         any = true;
     }
-    void attrs; // reserved for future data-* layout extensions
+    void attrs; // reserved for data-* layout extensions
     return any ? out : undefined;
 }
 

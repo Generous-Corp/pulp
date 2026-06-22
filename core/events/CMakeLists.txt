@@ -21,7 +21,7 @@ target_sources(pulp-events PRIVATE
     src/in_app_purchase.cpp
 )
 
-# Item 6.4b — plugin-mode main-thread cooperation. macOS gets a Cocoa
+# Plugin-mode main-thread cooperation. macOS gets a Cocoa
 # (`dispatch_get_main_queue`) backend so plugin adapters can opt the
 # process into MainThreadDispatcher without owning a Pulp WindowHost.
 # Other platforms get a no-op stub; their own message-loop integration

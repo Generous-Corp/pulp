@@ -5,16 +5,15 @@
 // prefers `MessageChannel` for cross-task fan-out so it can yield back to
 // the host between renders. When MessageChannel is missing it falls back to
 // `setTimeout(0)` — still functional, just less granular. For the import-
-// time first-commit harvest (pulp #468) we don't need real concurrency,
+// time first-commit harvest we don't need real concurrency,
 // only the constructor plus port wiring so React's feature-detect resolves
 // to its preferred path.
 //
-// pulp #915 — animation-frame and timer globals are now registered here
+// animation-frame and timer globals are now registered here
 // (driven by the underscored `__requestFrame__` / `__scheduleTimer__`
 // natives that WidgetBridge::register_api installs) so consumer bundles
-// don't need a JS shim that re-aliases `__requestFrame__` ⇄
-// `requestAnimationFrame`. The deletion of spectr's ~80-line shim.js
-// hangs off this slot.
+// don't need a JS shim that re-aliases `__requestFrame__` to
+// `requestAnimationFrame`.
 //
 // This shim is intentionally thin: the message queue is drained on the
 // next microtask via `Promise.resolve().then`. That keeps the scheduling
@@ -43,7 +42,7 @@
         };
     }
 
-    // ── requestAnimationFrame / cancelAnimationFrame (pulp #915) ─────────
+    // ── requestAnimationFrame / cancelAnimationFrame ─────────
     // Wraps the native __requestFrame__ id-allocator + __frameCallbacks__
     // table that WidgetBridge installs in its preamble. Standard names go
     // on globalThis directly so consumers don't need a shim.
@@ -62,7 +61,7 @@
         };
     }
 
-    // ── setTimeout / clearTimeout / setInterval / clearInterval (#915) ───
+    // ── setTimeout / clearTimeout / setInterval / clearInterval ──────────
     // Driven by the native deadline tracker (__scheduleTimer__) so the
     // frame loop fires positive-delay timers without the consumer having
     // to chain rAF ticks. setTimeout(fn, 0) bypasses native scheduling
@@ -105,7 +104,7 @@
         globalThis.clearInterval = globalThis.clearTimeout;
     }
 
-    // ── performance.now() (pulp #915) ────────────────────────────────────
+    // ── performance.now() ────────────────────────────────────
     // Bundled-React frameworks read `performance.now` at module-eval
     // time; without it the bundle ReferenceErrors before the bridge has
     // a chance to install the legacy window.performance shim.
@@ -189,7 +188,7 @@
     // checks `window.postMessage` specifically — and in this runtime
     // `window` is a distinct object created in web-compat-document.js, so
     // assigning on globalThis alone doesn't cover the check. Mirror onto
-    // both. (pulp #468 Codex P2.)
+    // both.
     if (typeof globalThis.postMessage !== "function") {
         globalThis.postMessage = function () {};
     }
@@ -202,11 +201,10 @@
     // Real browser frames give nested windows a `parent` that points at the
     // embedding frame; standalone top-level windows have `window.parent ===
     // window`. Imported React designs commonly call
-    // `window.parent.postMessage(...)` for cross-frame messaging (4 sites
-    // in Spectr's edit-mode bridge alone); without a self-reference, the
-    // property access throws TypeError and the calling effect is silently
-    // dead. We're always a top-level window in this runtime, so the
-    // self-reference is spec-correct.
+    // `window.parent.postMessage(...)` for cross-frame messaging; without
+    // a self-reference, the property access throws TypeError and the calling
+    // effect is silently dead. We're always a top-level window in this
+    // runtime, so the self-reference is spec-correct.
     if (typeof globalThis.window === "object" && globalThis.window !== null
             && typeof globalThis.window.parent === "undefined") {
         globalThis.window.parent = globalThis.window;
@@ -334,7 +332,7 @@
         globalThis.URLSearchParams = URLSearchParams;
     }
 
-    // ── Mirror standard names onto `window` (pulp #915) ──────────────────
+    // ── Mirror standard names onto `window` ──────────────────
     // web-compat-document.js installs a `window` object before this file
     // runs and pre-populates it with its own requestAnimationFrame /
     // cancelAnimationFrame closures. React's scheduler reads

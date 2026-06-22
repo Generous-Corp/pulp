@@ -5,9 +5,8 @@ export type PulpFigmaUIMessage =
   | { type: "report-file-key"; fileKey: string | null }
   | { type: "get-selection-summary" }
   | { type: "export" }
-  /// #43c — user dragged a TTF/OTF onto the plugin UI to satisfy a
-  /// non-system font. `bytes` is the raw font file as a number[]
-  /// (postMessage-safe transit).
+  /// User dragged a TTF/OTF onto the plugin UI to satisfy a non-system font.
+  /// `bytes` is the raw font file as a number[] (postMessage-safe transit).
   | {
       type: "user-font";
       family: string;
@@ -15,9 +14,8 @@ export type PulpFigmaUIMessage =
       bytes: number[];
       filename: string;
     }
-  /// #43c — UI asks the sandbox to scan the current selection's text
-  /// nodes and report back the unique font tuples so it can render
-  /// per-family drop zones.
+  /// UI asks the sandbox to scan the current selection's text nodes and report
+  /// back the unique font tuples so it can render per-family drop zones.
   | { type: "scan-fonts" }
   | { type: "close" };
 
@@ -43,15 +41,13 @@ export type PulpSandboxMessage =
   | { type: "pong"; figmaVersion: string; editorType: string; documentName: string }
   | { type: "selection-summary"; count: number; names: string[]; firstTypeIfAny: string | null }
   | { type: "progress"; stage: "extracting" | "serializing"; message: string }
-  /// #43c — sandbox responds to scan-fonts with the unique
-  /// (family, style, weight?, italic?) tuples referenced by the
-  /// current selection's text nodes, plus a flag for which are
-  /// already bundled via a user drop.
+  /// Sandbox responds to scan-fonts with the unique (family, style, weight?,
+  /// italic?) tuples referenced by the current selection's text nodes, plus a
+  /// flag for which are already bundled via a user drop.
   | { type: "fonts-detected"; fonts: FontFamilyAssetSummary[] }
-  /// #43c — sandbox acknowledges a user-font upload. The UI uses this
-  /// to flip the row to "✓ bundled" state. `asset_id` is the
-  /// content-hashed handle the envelope will carry on the matching
-  /// font_family_assets entry.
+  /// Sandbox acknowledges a user-font upload. The UI uses this to flip the row
+  /// to "✓ bundled" state. `asset_id` is the content-hashed handle the envelope
+  /// will carry on the matching font_family_assets entry.
   | { type: "user-font-staged"; family: string; style: string; asset_id: string }
   | {
       type: "export-result";

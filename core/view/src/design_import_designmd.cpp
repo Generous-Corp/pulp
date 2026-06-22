@@ -9,12 +9,12 @@
 // What this file parses:
 //   - YAML frontmatter (between `---` fences) → IR token maps via yaml-cpp.
 //   - `## Section` headings in the Markdown body → ordered section list
-//     (the Phase 2 section-order lint rule reads this).
+//     (the section-order lint rule reads this).
 //
 // What this file does NOT do:
 //   - Emit a UI tree. DESIGN.md describes a *system*, not a *screen*. The
-//     IR root node is left empty (type "frame", no children). The Phase 1
-//     CLI deliberately does not write a ui.js file when the source is
+//     IR root node is left empty (type "frame", no children). The CLI
+//     deliberately does not write a ui.js file when the source is
 //     designmd; see tools/import-design/pulp_import_design.cpp for the
 //     dispatch arm.
 
@@ -614,7 +614,7 @@ DesignIR parse_designmd_yaml(const std::string& markdown) {
     return parse_designmd(markdown).ir;
 }
 
-// ── Phase 2: lint, diff, Tailwind export ─────────────────────────────────
+// ── Lint, diff, Tailwind export ──────────────────────────────────────────
 
 namespace {
 
@@ -745,7 +745,7 @@ std::vector<DesignMdDiagnostic> lint_designmd(const DesignMdParseResult& parsed)
     // its resolved hex value before lint runs, so a post-hoc scan of
     // tokens.strings would see zero refs and flag every used color as
     // orphan. The referenced_color_tokens set captures the references
-    // before resolution erases them. (Fixes Codex P1 on PR #1934.)
+    // before resolution erases them.
     {
         std::unordered_set<std::string> referenced(
             parsed.referenced_color_tokens.begin(),
@@ -975,11 +975,10 @@ std::string export_tailwind_v3_json(const DesignMdParseResult& parsed) {
     }
     o << "\n  }";
 
-    // Typography mappings (Codex P2 on PR #1934).
-    // Emit one Tailwind v3 theme group per typography field across all
-    // levels. Each group is `{<level>: <value>, ...}` mirroring the
-    // shape `@google/design.md`'s `export --format json-tailwind`
-    // produces, so downstream tooling can swap implementations.
+    // Typography mappings. Emit one Tailwind v3 theme group per typography
+    // field across all levels. Each group is `{<level>: <value>, ...}`
+    // mirroring the shape `@google/design.md`'s `export --format
+    // json-tailwind` produces, so downstream tooling can swap implementations.
     auto typo = group_typography(t);
     static const std::vector<std::string> typo_groups{
         "fontFamily", "fontSize", "fontWeight", "lineHeight", "letterSpacing"};
@@ -1013,8 +1012,8 @@ std::string export_tailwind_v4_css(const DesignMdParseResult& parsed) {
         if (prefix == "rounded") o << "  --radius-" << suffix << ": " << value << "px;\n";
         if (prefix == "spacing") o << "  --spacing-" << suffix << ": " << value << "px;\n";
     }
-    // Typography → Tailwind v4 token namespaces (Codex P2 on PR #1934).
-    // `--font-*` for family, `--text-*` for size, `--leading-*` for
+    // Typography → Tailwind v4 token namespaces. `--font-*` for family,
+    // `--text-*` for size, `--leading-*` for
     // line-height, `--tracking-*` for letter-spacing, `--font-weight-*`
     // for weight. Matches `@google/design.md`'s `export --format
     // css-tailwind` namespace conventions.

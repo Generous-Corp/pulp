@@ -70,8 +70,8 @@ function extOfMime(m: string): string {
     case "image/gif": return "gif";
     case "image/webp": return "webp";
     case "image/svg+xml": return "svg";
-    // #43c — user-supplied font assets ride alongside image assets in
-    // the same bundle list; the zip writer needs to recognise them.
+    // User-supplied font assets ride alongside image assets in the same bundle
+    // list; the zip writer needs to recognise them.
     case "font/ttf": return "ttf";
     case "font/otf": return "otf";
     case "font/woff": return "woff";
@@ -80,10 +80,9 @@ function extOfMime(m: string): string {
   }
 }
 
-// #43c — font drop-zone state. `bundled` reflects sandbox confirmation
-// (we asked for a stage and got back `user-font-staged`); the row
-// turns green when this fires. Keyed by the same `family|style` tuple
-// the sandbox uses.
+// Font drop-zone state. `bundled` reflects sandbox confirmation (we asked for a
+// stage and got back `user-font-staged`); the row turns green when this fires.
+// Keyed by the same `family|style` tuple the sandbox uses.
 const bundledFonts = new Set<string>();
 const fontKey = (family: string, style: string): string => `${family}|${style}`;
 

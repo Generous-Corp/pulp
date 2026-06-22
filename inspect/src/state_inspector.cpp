@@ -15,9 +15,7 @@ StateInspector::StateInspector(StateStore& store)
     //
     // Capture `this` directly: ListenerToken's destructor removes
     // the listener before `this` is destroyed, so the callback can
-    // safely dereference inspector members. This replaces the
-    // pre-Slice-3 shared_ptr alive-guard pattern that was needed
-    // when StateStore had no removal API.
+    // safely dereference inspector members.
     listener_token_ = store_.add_listener(
         [this](ParamID id, float value) {
             ParamChange change{id, value, std::chrono::steady_clock::now()};

@@ -26,7 +26,7 @@ target_sources(pulp-format PRIVATE
     # `Darwin`) under an iphoneos/iphonesimulator cross-build, so the old
     # Darwin-only gate dropped these TUs and left detect_host_version /
     # current_auv3_wrapper_identifier undefined when the iOS AUv3 linked
-    # pulp-format (#3217). Both .mm files use only Foundation and are
+    # pulp-format. Both .mm files use only Foundation and are
     # iOS-safe.
     $<$<PLATFORM_ID:Darwin,iOS,tvOS,watchOS>:src/host_type_mac.mm>
     src/host_version.cpp
@@ -190,7 +190,7 @@ if(APPLE)
     endif()
 endif()
 
-# ── ARA 2.x (workstream 06 slice 6.1) ────────────────────────────────────────
+# ── ARA 2.x ──────────────────────────────────────────────────────────────────
 # Celemony's ARA SDK is developer-supplied; not bundled. Point
 # PULP_ARA_SDK_DIR at a local checkout of https://github.com/Celemony/ARA_SDK
 # and set PULP_ENABLE_ARA=ON to enable the integration.

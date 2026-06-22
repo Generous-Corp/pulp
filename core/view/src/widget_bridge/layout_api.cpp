@@ -116,8 +116,9 @@ void WidgetBridge::register_layout_flex_api() {
         if (!v) return choc::value::Value();
         auto& f = v->flex();
         auto val = args.get<double>(2, 0);
-        // Slider/drag jitter diagnostic. When PULP_DEBUG_FLEX_THRASH=1, log
-        // every setFlex call so per-frame style churn during a drag is visible.
+        // Slider/drag jitter diagnostic. When PULP_DEBUG_FLEX_THRASH is set to
+        // any value, log every setFlex call so per-frame style churn during a
+        // drag is visible.
         // The getenv result is cached on first call and only emits when enabled.
         static const bool flex_thrash_log = std::getenv("PULP_DEBUG_FLEX_THRASH") != nullptr;
         if (flex_thrash_log) {
@@ -139,10 +140,10 @@ void WidgetBridge::register_layout_flex_api() {
         else if (key == "gap") f.gap = (float)val;
         else if (key == "padding") f.padding = (float)val;
         // Per-edge padding accepts either a number ("10" -> px) or a
-        // percentage string ("5%" -> percent of parent main-axis size). Yoga
-        // padding does not support "auto", so unrecognized strings fall
-        // through to the px path with the parsed numeric value, or 0 on total
-        // parse failure. Mirrors width/height/min/max patterns.
+        // percentage string ("5%" -> percent of the parent's width / inline
+        // size). Yoga padding does not support "auto", so unrecognized strings
+        // fall through to the px path with the parsed numeric value, or 0 on
+        // total parse failure. Mirrors width/height/min/max patterns.
         else if (key == "padding_top") {
             auto sval = args.get<std::string>(2, "");
             if (!sval.empty() && sval.back() == '%') {
@@ -336,10 +337,11 @@ void WidgetBridge::register_layout_flex_api() {
                 f.dim_max_height.unit = pulp::view::DimensionUnit::px;
             }
         }
-        // Aspect ratio is the width/height ratio. A value <= 0 or NaN clears
-        // the slot, matching CSS `aspect-ratio: auto`; a finite positive value
-        // pins it. The CSS shim parses both `1.5` and `16/9` before reaching
-        // here, and @pulp/react accepts `aspectRatio` directly as a number.
+        // Aspect ratio is the width/height ratio. Any non-finite or
+        // non-positive value clears the slot, matching CSS `aspect-ratio: auto`;
+        // a finite positive value pins it. The CSS shim parses both `1.5` and
+        // `16/9` before reaching here, and @pulp/react accepts `aspectRatio`
+        // directly as a number.
         else if (key == "aspect_ratio" || key == "aspectRatio") {
             if (val > 0.0 && std::isfinite(val)) f.aspect_ratio = (float)val;
             else f.aspect_ratio.reset();
@@ -347,10 +349,10 @@ void WidgetBridge::register_layout_flex_api() {
         // Margin
         else if (key == "margin") f.margin = (float)val;
         // Per-edge margin accepts a number ("10" -> px), a percentage string
-        // ("5%" -> percent of parent main-axis size), or "auto" for Yoga's
-        // YGNodeStyleSetMarginAuto path. Yoga supports `auto` on margin only,
-        // not padding. yoga_layout.cpp dispatches on dim_margin_*.unit; the
-        // legacy float field uses -1 as a sentinel so uniform `margin`
+        // ("5%" -> percent of the parent's width / inline size), or "auto" for
+        // Yoga's YGNodeStyleSetMarginAuto path. Yoga supports `auto` on margin
+        // only, not padding. yoga_layout.cpp dispatches on dim_margin_*.unit;
+        // the legacy float field uses -1 as a sentinel so uniform `margin`
         // consumers keep working.
         else if (key == "margin_top") {
             auto sval = args.get<std::string>(2, "");
@@ -702,8 +704,9 @@ void WidgetBridge::register_layout_box_model_api() {
     // CSS box-sizing keyword. Yoga's `YGNodeStyleSetBoxSizing` honors the spec,
     // so record the enum on FlexStyle and let `build_yoga_subtree` route it
     // through.
-    // Default `content-box` matches the CSS spec; web designs typically
-    // reset to `border-box` via `* { box-sizing: border-box }`.
+    // The unset FlexStyle default is `border-box` to match Yoga/imported web
+    // layout convention; this setter maps absent or unknown keywords to
+    // `content-box`, the CSS-spec keyword default.
     register_bridge_function(api, "setBoxSizing", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto kw = args.get<std::string>(1, "content-box");
@@ -725,7 +728,7 @@ void WidgetBridge::register_layout_box_model_api() {
 void WidgetBridge::register_layout_position_api() {
     BridgeApiContext api{engine_};
 
-    // setPosition(id, "static"/"relative"/"absolute"/"fixed") — CSS position
+    // setPosition(id, "static"/"relative"/"absolute"/"fixed"/"sticky") — CSS position
     // Instrument under PULP_DEBUG_FLEX_THRASH so we can see whether JSX
     // `position: "absolute"` reaches the bridge. When runtime React imports
     // miss this path, inline absolute children render at the wrong place.

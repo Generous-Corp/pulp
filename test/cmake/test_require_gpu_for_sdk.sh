@@ -108,11 +108,10 @@ echo "OK case 2: PULP_REQUIRE_GPU_FOR_SDK=OFF (default) configures without Skia"
 
 # ── Case 3: PULP_REQUIRE_GPU_FOR_SDK=ON + PULP_ENABLE_GPU=OFF contradicts ─
 #
-# Phase iOS-D.1 added an inverse guard (planning/2026-05-28-ios-d-gpu-auv3-
-# crosscheck.md): asking the release lane to enforce GPU while disabling
-# it is a misconfiguration that the SDK consumer can never recover from.
-# Without this guard the previous Case 1 was the only enforcement, and a
-# release lane that flipped both flags would silently ship a CG-only SDK.
+# Asking the release lane to enforce GPU while disabling it is a
+# misconfiguration that the SDK consumer can never recover from. Without
+# this guard, a release lane that flipped both flags would silently ship
+# a CG-only SDK.
 case3_build="${tmp_root}/case3-require-on-gpu-off"
 case3_log="${tmp_root}/case3.log"
 

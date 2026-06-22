@@ -1,8 +1,8 @@
-// Plan B / B4b: the faithful-vector lane for the Figma plugin. Exercises the
-// geometry knob auto-detector + the sandbox-safe SVG byte decode, and asserts
-// serialize.ts emits the render_mode / svg_asset_id / interactive_elements the
-// C++ materializer (DesignFrameView) consumes. Kept in lockstep with the REST
-// lane (tools/import-design/figma_rest_export.py + test_figma_rest_export.py).
+// Faithful-vector lane for the Figma plugin. Exercises the geometry knob
+// auto-detector + sandbox-safe SVG byte decode, and asserts serialize.ts emits
+// the render_mode / svg_asset_id / interactive_elements the C++ materializer
+// (DesignFrameView) consumes. Kept in lockstep with the REST lane
+// (tools/import-design/figma_rest_export.py + test_figma_rest_export.py).
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

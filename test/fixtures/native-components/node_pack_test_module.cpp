@@ -1,6 +1,6 @@
 // A minimal pulp_node_v1 node built as a loadable MODULE (.dylib/.so/.dll) for
-// the Phase 7 node-pack loader test. Exports pulp_node_v1_entry with default
-// visibility so dlsym/GetProcAddress can resolve it.
+// the node-pack loader test. Exports pulp_node_v1_entry with default visibility
+// so dlsym/GetProcAddress can resolve it.
 
 #if defined(_WIN32)
 #define PULP_NODE_V1_EXPORT __declspec(dllexport)

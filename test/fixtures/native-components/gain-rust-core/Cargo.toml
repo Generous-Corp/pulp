@@ -1,5 +1,5 @@
-# Real Rust DSP core (a stereo gain) for the Phase 2b end-to-end proof: a native
-# Rust core that actually processes audio through the C ABI, driven by the C++
+# Real Rust DSP core (a stereo gain) for the end-to-end proof: a native Rust core
+# that actually processes audio through the C ABI, driven by the C++
 # NativeCoreProcessor adapter. TEST FIXTURE — built only under
 # PULP_BUILD_NATIVE_COMPONENT_RUST_TESTS (default OFF).
 [package]

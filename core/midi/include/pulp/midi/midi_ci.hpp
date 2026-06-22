@@ -139,8 +139,8 @@ struct ProfileDetails {
 
 /// MIDI-CI Discovery manager — handles CI message exchange.
 ///
-/// RT-safety contract (audited 2026-05-26 for plan item 8.4):
-/// Every public method is annotated below. As a rule, CI is a UI/main
+/// RT-safety contract (audited 2026-05-26): every public method is annotated
+/// below. As a rule, CI is a UI/main
 /// thread surface (SysEx is slow, JSON parsing allocates, subscription
 /// state mutates). Call from the audio thread only methods explicitly
 /// tagged RT-safe.
@@ -310,7 +310,7 @@ public:
 
     /// Fires when a Subscribe peer should receive a Notify. Set this
     /// to wire the manager's fan-out to the actual MIDI transport.
-    /// macOS plan §8.4 — Subscribe/Notify dispatcher.
+    /// Subscribe/Notify dispatcher.
     ///
     /// The callback itself is invoked from `notify()` / `handle_notify()`
     /// and is therefore on the same thread as those calls — NOT the

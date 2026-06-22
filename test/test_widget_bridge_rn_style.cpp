@@ -1,7 +1,4 @@
-// test_widget_bridge_rn_style.cpp — extracted from test_widget_bridge.cpp
-// in the 2026-05 Phase 5 (P5-1 follow-up) refactor.
-//
-// pulp #1026 — React Native style-prop bridge primitives.
+// WidgetBridge React Native style-prop tests for pulp #1026.
 //
 // The 4 RN-shaped style functions that flow through the bridge into
 // View's geometry / shadow / transform / opacity slots:
@@ -663,4 +660,3 @@ TEST_CASE("CSSStyleDeclaration display: contents is a safe arch-deferred no-op",
     // because the dispatcher doesn't have a `contents` branch.
     REQUIRE(p_contents->flex().direction == FlexDirection::row);
 }
-

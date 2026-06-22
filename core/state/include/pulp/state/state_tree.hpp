@@ -37,7 +37,7 @@ using ChildListener = std::function<void(StateTree& parent, StateTree& child, in
 
 /// Reactive tree node — each node has a type name, properties, and children.
 ///
-/// Thread-safety contract (gap-doc Phase 0 audit, 2026-05-26):
+/// Thread-safety contract:
 ///   StateTree is **not thread-safe**. Every public method below — including
 ///   const accessors like get() and property_names() — touches non-atomic
 ///   members (`properties_`, `children_`, listener vectors) without internal
@@ -190,9 +190,7 @@ public:
     /// detaches them, but the cloned tree itself stays usable as a
     /// snapshot.
     ///
-    /// Closes the gap-doc Phase 3 row "Single-process StateTree deep
-    /// clone w/ listener wiring (currently IPC-only
-    /// StateTreeSynchroniser)". Mirrors:
+    /// Mirrors mutations from this tree into the same-process clone:
     ///   - `set(key, v)` and `remove(key)` (typed property mutations)
     ///   - `add_child(c)` (appended children are themselves deep-copied
     ///     AND wired recursively, so deep mutations propagate)

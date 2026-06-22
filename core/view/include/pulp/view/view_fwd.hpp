@@ -1,10 +1,9 @@
 // view_fwd.hpp — slim forward declarations for the pulp::view core types.
 //
-// Created in the 2026-05 Phase 4 R2-2 header-diet slice (Codex-consulted
-// alternative to a full PIMPL refactor; see
-// planning/2026-05-17-refactor-roadmap-year.md for the rationale —
-// PIMPL would break SDK ABI for 64 derived classes, so we take the
-// safer header-diet path).
+// Header-diet alternative to a full PIMPL refactor: PIMPL would break SDK
+// ABI for public derived classes, so files that only need pointers or
+// references should include this lighter declaration surface instead of
+// <pulp/view/view.hpp>.
 //
 // Use this header when a file only needs to:
 //

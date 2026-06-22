@@ -47,7 +47,7 @@ struct PulpClapPlugin {
     state::ParamID bypass_param_id = 0;
 
     // Stored at create_plugin() time so the adapter can publish
-    // latency / tail change notifications (item 3.11) back to the
+    // latency / tail change notifications back to the
     // host. `clap_on_main_thread()` consumes the processor's pending
     // flags and calls `clap_host_latency->changed()` /
     // `clap_host_tail->changed()` — never from process() itself.

@@ -56,7 +56,7 @@ void NativeCoreProcessor::host_log(void*, int32_t, const char*, std::size_t) {
 }
 int32_t NativeCoreProcessor::host_push_midi_out(void*,
                                                 const pulp_native_midi_event_v1*) {
-    // MIDI-out bridging is deferred (MidiBuffer::add allocates); drop for now.
+    // MIDI-out bridging is not implemented here because MidiBuffer::add allocates.
     return 0;
 }
 void NativeCoreProcessor::host_notify_latency_changed(void* ctx) {
@@ -85,8 +85,8 @@ PluginDescriptor NativeCoreProcessor::descriptor() const {
     d.supports_mpe = (nd->capabilities & PULP_NATIVE_CAP_MPE) != 0;
     d.supports_ump = (nd->capabilities & PULP_NATIVE_CAP_UMP) != 0;
     d.tail_samples = static_cast<int>(nd->tail_frames);
-    // Bus counts come from the descriptor; channel counts default to stereo
-    // (renegotiated via the bus-layout path in a later slice).
+    // Bus counts come from the descriptor; channel counts default to stereo until
+    // bus-layout renegotiation is wired.
     d.input_buses.clear();
     for (uint32_t i = 0; i < nd->default_input_bus_count; ++i) {
         d.input_buses.push_back({"Input " + std::to_string(i + 1), 2, false});
@@ -262,7 +262,7 @@ void NativeCoreProcessor::process(audio::BufferView<float>& audio_output,
     proc.abi_version = PULP_NATIVE_CORE_ABI_VERSION;
     proc.audio = &io;
     proc.params = &view;
-    proc.midi = nullptr;  // MIDI bridging deferred
+    proc.midi = nullptr;  // MIDI bridging is not implemented here.
     proc.context = &pctx;
 
     if (core_->process(instance_, &proc) != PULP_NATIVE_OK) {

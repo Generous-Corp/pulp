@@ -41,8 +41,8 @@ bool codesign(const std::string& path, const std::string& identity,
               const std::string& entitlements) {
     (void)entitlements; // Not used on Windows
     // Reject an empty identity (or path) up front. `signtool sign /n ""` can
-    // otherwise latch onto an unintended cert or appear to no-op "successfully"
-    // — the #295 lesson: never emit an unusable/empty signature silently.
+    // otherwise latch onto an unintended cert or appear to no-op "successfully";
+    // never emit an unusable or empty signature silently.
     if (identity.empty() || path.empty()) return false;
 
     std::string cmd = "signtool sign /n \"" + identity + "\" /t http://timestamp.digicert.com"

@@ -1,6 +1,3 @@
-// test_widgets_label.cpp — extracted from test_widgets.cpp in the
-// 2026-05 Phase 5 (P5-3 follow-up) refactor.
-//
 // Label widget coverage (the largest single-widget cluster in
 // test_widgets.cpp). Covers text rendering / intrinsic_width /
 // intrinsic_height / line-height multiplier (#76) / line_clamp /

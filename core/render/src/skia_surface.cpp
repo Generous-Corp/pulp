@@ -81,12 +81,12 @@ public:
             return false;
         }
 
-        // Phase 6.5 (re-scoped) — probe whether Graphite can report
-        // per-recording GPU render time on this device. Graphite backs
-        // kElapsedTime with Dawn timestamp queries, so it only advertises the
-        // stat when the shared device enabled `timestamp-query` (GpuSurface
-        // requests it when the adapter offers it). GpuStatsFlags has no
-        // bitmask operators, so test via the underlying uint32_t.
+        // Probe whether Graphite can report per-recording GPU render time on
+        // this device. Graphite backs kElapsedTime with Dawn timestamp queries,
+        // so it only advertises the stat when the shared device enabled
+        // `timestamp-query` (GpuSurface requests it when the adapter offers it).
+        // GpuStatsFlags has no bitmask operators, so test via the underlying
+        // uint32_t.
         gpu_elapsed_supported_ =
             (static_cast<std::uint32_t>(context_->supportedGpuStats()) &
              static_cast<std::uint32_t>(skgpu::GpuStatsFlags::kElapsedTime)) != 0;
@@ -171,11 +171,10 @@ public:
             skgpu::graphite::InsertRecordingInfo info;
             info.fRecording = recording.get();
 
-            // Phase 6.5 (re-scoped) — request GPU render time for this
-            // recording. The callback fires on a later submit/completion (so
-            // the value lags ~1 frame); it captures `this`, which is kept
-            // alive by the destructor drain. Only request when supported so
-            // unsupported devices pay nothing.
+            // Request GPU render time for this recording. The callback fires
+            // on a later submit/completion (so the value lags ~1 frame); it
+            // captures `this`, which is kept alive by the destructor drain.
+            // Only request when supported so unsupported devices pay nothing.
             if (gpu_elapsed_supported_) {
                 info.fGpuStatsFlags = skgpu::GpuStatsFlags::kElapsedTime;
                 info.fFinishedContext = this;
@@ -325,11 +324,11 @@ public:
     }
 
 private:
-    // Graphite finished-with-stats callback (Phase 6.5 re-scoped). Fires on
-    // the thread pumping GPU completion (render thread, via Context::submit)
-    // once the GPU finishes the recording. Stores the elapsed time (ns) into
-    // the cross-thread tracker; treats a failed callback or zero elapsed as
-    // "no sample" so the last good value is retained.
+    // Graphite finished-with-stats callback. Fires on the thread pumping GPU
+    // completion (render thread, via Context::submit) once the GPU finishes
+    // the recording. Stores the elapsed time (ns) into the cross-thread
+    // tracker; treats a failed callback or zero elapsed as "no sample" so the
+    // last good value is retained.
     static void on_gpu_stats(skgpu::graphite::GpuFinishedContext ctx,
                              skgpu::CallbackResult result,
                              const skgpu::GpuStats& stats) {
@@ -343,7 +342,7 @@ private:
     uint32_t width_ = 0, height_ = 0;
     float scale_ = 1.0f;
 
-    // Phase 6.5 (re-scoped) — GPU render time via Graphite GpuStats.
+    // GPU render time via Graphite GpuStats.
     bool gpu_elapsed_supported_ = false;  ///< Set once in init() from supportedGpuStats().
     GpuRenderTimeTracker gpu_render_tracker_;  ///< Latest sample; written by on_gpu_stats().
 

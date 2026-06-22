@@ -1,4 +1,4 @@
-// Scan blacklist tests (workstream 03 slice 3.3a).
+// Scan blacklist tests.
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/host/scan_blacklist.hpp>

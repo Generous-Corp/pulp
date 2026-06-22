@@ -1,4 +1,4 @@
-# Reference no-op native DSP core for the opt-in Phase 1 Rust lane.
+# Reference no-op native DSP core for the opt-in Rust lane.
 #
 # This is a TEST FIXTURE, not a shipped crate. It proves the canonical C ABI
 # (core/native-components/include/pulp/native_components/native_core.h) links and

@@ -17,7 +17,7 @@ namespace pulp::render {
 /// (`GpuSurface::create_dawn() + native_surface_handle=nullptr` +
 /// `SkiaSurface::create`). Intended for CI golden tests and any other
 /// callsite that wants "render this scene to an RGBA / PNG buffer with
-/// no window". Spec: planning/2026-05-24-macos-plugin-authoring-plan.md §6.7.
+/// no window".
 ///
 /// The wrapper does NOT introduce a new render path — it just hides
 /// the begin_frame/end_frame ceremony and the GPU readback dance so a
@@ -46,8 +46,8 @@ public:
         float scale_factor = 1.0f;
         /// Background fill applied before the user paint callback runs.
         /// Defaults to opaque black so a no-op paint still produces a
-        /// deterministic frame (read-back uninitialized GPU memory is
-        /// not reproducible — see plan §6.7 acceptance).
+        /// deterministic frame; read-back uninitialized GPU memory is
+        /// not reproducible.
         uint8_t clear_r = 0;
         uint8_t clear_g = 0;
         uint8_t clear_b = 0;

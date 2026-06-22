@@ -17,10 +17,10 @@ const LIBRARY_MANIFEST: LibraryManifestSnapshot = {
 
 let knownFileKey: string | null = null;
 
-/// #43c — sandbox-side store of user-dropped TTF/OTF bytes, keyed by
-/// (family, style). Survives across export attempts within a single
-/// plugin session so the user can drop, preview, export, drop more,
-/// re-export. Discarded when the plugin closes.
+/// Sandbox-side store of user-dropped TTF/OTF bytes, keyed by (family, style).
+/// Survives across export attempts within a single plugin session so the user
+/// can drop, preview, export, drop more, re-export. Discarded when the plugin
+/// closes.
 const userFonts = new UserFontCache();
 
 figma.showUI(__html__, { width: 360, height: 540, themeColors: true });
@@ -117,8 +117,8 @@ async function handleExport(): Promise<void> {
   // Hand the assets to the UI as { content_hash, mime, bytes } records.
   // Bytes are transferred as plain arrays to keep postMessage compatibility;
   // the UI converts back to Uint8Array for the zip writer. The user-font
-  // entries (#43c) ride in the same bundle list — the UI doesn't need to
-  // distinguish them; the zip writer picks the file extension from mime.
+  // entries ride in the same bundle list — the UI doesn't need to distinguish
+  // them; the zip writer picks the file extension from mime.
   const assetBundles = [
     ...result.assets.entries().map((a) => ({
       content_hash: a.content_hash,
@@ -150,12 +150,11 @@ async function handleExport(): Promise<void> {
   });
 }
 
-/// #43c — walk the current selection, collect the unique (family, style,
-/// weight?, italic?) tuples referenced by text nodes, and reply with a
-/// `fonts-detected` message annotated with which entries already have
-/// user-supplied bytes in the cache. The same logic the export path
-/// uses (collectFontFamilyAssets) — invoked early so the UI can render
-/// drop zones before the user commits to a full export.
+/// Walk the current selection, collect the unique (family, style, weight?,
+/// italic?) tuples referenced by text nodes, and reply with a `fonts-detected`
+/// message annotated with which entries already have user-supplied bytes in the
+/// cache. Invoked early so the UI can render drop zones before the user commits
+/// to a full export.
 async function handleScanFonts(): Promise<void> {
   const sel = figma.currentPage.selection;
   if (sel.length === 0) {
@@ -173,9 +172,9 @@ async function handleScanFonts(): Promise<void> {
   reply({ type: "fonts-detected", fonts });
 }
 
-/// #43c — user dropped a TTF/OTF onto the UI. Store in the cache and
-/// ack with the asset_id so the UI can flip the row state. The cache
-/// survives until plugin close.
+/// User dropped a TTF/OTF onto the UI. Store it in the cache and ack with the
+/// asset_id so the UI can flip the row state. The cache survives until plugin
+/// close.
 async function handleUserFont(msg: {
   family: string;
   style: string;

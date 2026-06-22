@@ -1,13 +1,9 @@
 // design_ir_json.cpp — DesignIR JSON serialize / deserialize band.
 //
-// Extracted verbatim from design_import.cpp in the 2026-05-29 frontend-IR
-// refactor (PR-1, planning/2026-05-29-frontend-ir-refactor-plan.md). This
-// is a relocation-only split: the JSON helpers, serialize_design_ir, and
-// parse_design_ir_json moved here unchanged. Four helpers
-// (parse_ir_node, parse_ir_tokens, make_import_diagnostic,
-// is_asset_reference_key) are promoted from static to external linkage
-// because the asset pipeline / source parsers that remain in
-// design_import.cpp call them; their declarations live in
+// JSON helpers, serialize_design_ir, and parse_design_ir_json live here. Four
+// helpers (parse_ir_node, parse_ir_tokens, make_import_diagnostic,
+// is_asset_reference_key) have external linkage because the asset pipeline /
+// source parsers in design_import.cpp call them; their declarations live in
 // design_import_internal.hpp. promote_interactive_frames stays defined in
 // design_import.cpp and is declared in that same header.
 
@@ -63,8 +59,7 @@ static const char* render_mode_id(NodeRenderMode m) {
 // Maps a wire `kind` string to an InteractiveElementKind. Unknown ids fall back
 // to `knob` for forward-compat, but set `*recognized = false` so the caller can
 // diagnose a genuinely-unknown kind instead of silently shipping a wrong knob.
-// (P7 grows this into the full resolution ladder; here we just stop being
-// silent.) `recognized` may be null.
+// `recognized` may be null.
 static InteractiveElementKind interactive_kind_from_id(const std::string& s,
                                                        bool* recognized = nullptr) {
     if (recognized) *recognized = true;
@@ -101,7 +96,7 @@ static const char* interactive_kind_id(InteractiveElementKind k) {
     return "knob";
 }
 
-// ── box-shadow parse / serialize (pulp #41) ─────────────────────────────
+// ── box-shadow parse / serialize ────────────────────────────────────────
 //
 // CSS `box-shadow` is a comma-separated list of layers; each layer is
 // `[inset] <ox> <oy> [<blur> [<spread>]] <color>` with lengths in arbitrary
@@ -569,11 +564,9 @@ void normalize_figma_plugin_binding(IRNode& node) {
     md.serialize(node);
 }
 
-// ── parse_ir_node post-passes (pulp #41 extraction) ─────────────────────
-// These ran as inline blocks at the tail of parse_ir_node; pulled out into
-// named functions so each rule reads as one testable unit. Behavior is
-// unchanged from the inline versions (the shadow snap now reads the parsed
-// IRBoxShadow layers instead of re-parsing the raw CSS string each time).
+// ── parse_ir_node post-passes ────────────────────────────────────────────
+// Named post-parse rules. The shadow snap reads parsed IRBoxShadow layers
+// instead of re-parsing the raw CSS string each time.
 
 // Shadow-driven sibling snap. When a frame has a downward drop shadow and an
 // absolutely-positioned sibling sits just below it with a small gap, the gap
@@ -753,12 +746,11 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
         if (!node.text_runs.empty()) break;
     }
 
-    // Phase 0a (planning/2026-05-18-inspector-direct-manipulation-roadmap.md):
-    // capture the source-native ID so the `adapter` anchor strategy can use
-    // it as its anchor. Figma + Pencil + Mitosis-style exports all carry an
-    // ID under one of these field names; first non-empty wins. Sources
-    // without native IDs (Stitch HTML, v0 TSX, Claude HTML) leave this
-    // empty and fall through to the content-hash strategy.
+    // Capture the source-native ID so the `adapter` anchor strategy can use it
+    // as its anchor. Figma + Pencil + Mitosis-style exports all carry an ID
+    // under one of these field names; first non-empty wins. Sources without
+    // native IDs (Stitch HTML, v0 TSX, Claude HTML) leave this empty and fall
+    // through to the content-hash strategy.
     for (const char* k : {"id", "nodeId", "node_id", "source_node_id", "sourceNodeId"}) {
         if (!obj.hasObjectMember(k)) continue;
         auto v = obj[k];
@@ -839,8 +831,7 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
             el.kind = interactive_kind_from_id(kind_str, &kind_recognized);
             if (!kind_recognized) {
                 // Don't silently materialize an unknown control as a working
-                // knob — surface it so the import isn't quietly wrong. The full
-                // ordered ladder + import report lands in P7; this is the floor.
+                // knob — surface it so the import isn't quietly wrong.
                 pulp::runtime::log_warn(
                     "design-import: unknown interactive_element kind '{}' "
                     "(node {}); falling back to knob render",
@@ -871,11 +862,11 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
             el.text = get_string(e, "text");
             el.value_left_align = get_bool(e, "value_left_align");
             el.default_value_y = get_float(e, "default_value_y", 0.5f);
-            // P7 import report (resolution provenance).
+            // Import report (resolution provenance).
             el.resolution_rung = static_cast<int>(get_float(e, "resolution_rung", 0.0f));
             el.confidence_score = get_float(e, "confidence_score", 1.0f);
             el.verification_pass = get_bool(e, "verification_pass", true);
-            // custom (P7 Tier-3) — registered native control.
+            // custom — registered native control.
             el.factory_id = get_string(e, "factory_id");
             el.custom_props = get_string(e, "custom_props");
             if (e.hasObjectMember("conflict_signals") && e["conflict_signals"].isArray()) {
@@ -955,7 +946,7 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
     // Top-level `asset_ref` (figma-plugin lane stamps it directly on the node,
     // not under `attributes`). Promote it into node.attributes so the import
     // CLI's asset-resolution pass can resolve it to a file path — this feeds
-    // both the knob sprite-strip skin and the #3191 fader/meter skin sampling.
+    // both the knob sprite-strip skin and fader/meter skin sampling.
     // Don't overwrite an attributes-nested asset_ref if one was already set.
     if (obj.hasObjectMember("asset_ref") && obj["asset_ref"].isString() &&
         node.attributes.find("asset_ref") == node.attributes.end()) {
@@ -965,7 +956,7 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
 
     // SVG path geometry — preserve the path-data string under a canonical key
     // so codegen can lower vector/path/svg_path nodes to a native SvgPathWidget
-    // instead of silently dropping them (the dropped-vector invariant, #3275).
+    // instead of silently dropping them.
     // Multi-spelling so Pencil / Stitch / v0 / Claude / RN SVG exports all
     // survive (the figma lane rasterizes vectors to PNG, so this serves the
     // path-carrying sources). First non-empty wins; an attributes-nested
@@ -1236,7 +1227,7 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
         }
     }
 
-    // Shadow-driven sibling snap (extracted — pulp #41).
+    // Shadow-driven sibling snap.
     snap_absolute_siblings_under_shadow(node);
 
     // ── Connector-line spanning rule ────────────────────────────────────
@@ -1322,7 +1313,7 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
         }
     }
 
-    // Tail post-passes, extracted into named functions (pulp #41).
+    // Tail post-passes, extracted into named functions.
     detect_node_audio_widget(node, explicit_audio_widget);
     parse_shape_stroke_color(node, obj);
     extract_widget_shape_dims(node);
@@ -1837,7 +1828,7 @@ static void write_ir_node_json(std::ostringstream& out, const IRNode& node,
             if (el.value_left_align) { write_key(out, ef, "value_left_align"); out << "true"; }
             if (el.kind == InteractiveElementKind::xy_pad)
                 write_float_member(out, ef, "default_value_y", el.default_value_y);
-            // P7 import report — emitted only when the ladder set them (lean otherwise).
+            // Import report fields — emitted only when set (lean otherwise).
             if (el.resolution_rung != 0)
                 write_int_member(out, ef, "resolution_rung", el.resolution_rung);
             if (el.confidence_score != 1.0f)
@@ -2185,7 +2176,7 @@ DesignIR parse_design_ir_json(const std::string& json) {
     return ir;
 }
 
-// ── P7 import report ─────────────────────────────────────────────────────────
+// ── import report ────────────────────────────────────────────────────────────
 static void collect_report_visit(const IRNode& node, ImportReport& report,
                                  float low_confidence_threshold) {
     for (const auto& e : node.interactive_elements) {
@@ -2211,7 +2202,7 @@ ImportReport collect_import_report(const IRNode& root, float low_confidence_thre
     return report;
 }
 
-// P7 render-placement verification (structural half of the render-golden gate).
+// Render-placement verification (structural half of the render-golden gate).
 static int verify_placement_visit(IRNode& node, float fw, float fh) {
     int flagged = 0;
     for (auto& e : node.interactive_elements) {

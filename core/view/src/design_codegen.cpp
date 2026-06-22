@@ -27,7 +27,7 @@
 namespace pulp::view {
 
 /// Escape a string for emission inside a JavaScript single-quoted literal
-/// (pulp #81). The codegen backends emit calls like
+/// The codegen backends emit calls like
 /// `createLabel('<id>', '<text>', '<parent>')` where the middle arg is
 /// arbitrary user text. A multi-line `<style>` block imported from a
 /// Claude Design HTML file would otherwise emit raw newlines into the JS
@@ -280,10 +280,10 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
     // Apply visual styles
     auto& s = node.style;
     auto emit_str = [&](const char* prop, const std::optional<std::string>& val) {
-        // Escape the value — raw CSS (esp. clip-path / mask, which can carry
-        // url("...") with quotes) must not break out of the JS string literal
-        // (#3288 P2). js_single_quote_escape is a no-op for the common
-        // quote-free keyword/color values, so this is regression-safe.
+        // Escape raw CSS values. clip-path and mask can carry url("...") with
+        // quotes, and must not break out of the JS string literal.
+        // js_single_quote_escape is a no-op for the common quote-free
+        // keyword/color values, so this is regression-safe.
         if (val) ss << ind << var << ".style." << prop << " = '"
                     << js_single_quote_escape(*val) << "';\n";
     };
@@ -362,7 +362,7 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
     if (!node.text_runs.empty() && !node.text_content.empty())
         emit_web_text_runs(ss, ind, var, node);
     else if (!node.text_content.empty())
-        ss << ind << var << ".textContent = '" << js_single_quote_escape(node.text_content) << "';\n";  // pulp #81
+        ss << ind << var << ".textContent = '" << js_single_quote_escape(node.text_content) << "';\n";
 
     // Append to parent
     if (!parent_var.empty())
@@ -612,7 +612,7 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
     // clip-path, and the mask shorthand / image / size (View::set_clip_path /
     // set_mask / set_mask_image / set_mask_size). mix-blend-mode is
     // parse-normalized (normal / pass-through dropped); the clip/mask values
-    // are raw CSS the bridge parses (pulp #1515).
+    // are raw CSS the bridge parses.
     auto emit_node_visual_overrides = [&](const std::string& target_id) {
         const auto& st = node.style;
         if (st.mix_blend_mode && !st.mix_blend_mode->empty())
@@ -1002,19 +1002,19 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
                 float lo = node.audio_min, hi = node.audio_max;
                 if (hi > lo) fader_norm = std::clamp((node.audio_default - lo) / (hi - lo), 0.0f, 1.0f);
             }
-            // Prefer the captured thumb position when the sampler recovered it
-            // (#3191): an audio fader's value→position map is non-linear, so the
+            // Prefer the captured thumb position when the sampler recovered it:
+            // an audio fader's value→position map is non-linear, so the
             // linear seed above lands the thumb wrong; the captured position
             // reproduces where the design drew it.
             if (auto pit = node.attributes.find("skin_thumb_position");
                 pit != node.attributes.end() && !pit->second.empty())
                 fader_norm = std::clamp(std::stof(pit->second), 0.0f, 1.0f);
             ss << ind << "setValue('" << id << "', " << fader_norm << ");\n";
-            // pulp #3191 — value-driven skin derived from the captured asset.
-            // The importer sampled the PNG's track/fill/thumb colours; emit
-            // setFaderSkin so the native fader renders the captured look while
-            // the thumb still moves with setValue(). No per-instance hardcoding
-            // — every value comes from node.attributes stamped by the sampler.
+            // Value-driven skin derived from the captured asset. The importer
+            // sampled the PNG's track/fill/thumb colours; emit setFaderSkin so
+            // the native fader renders the captured look while the thumb still
+            // moves with setValue(). No per-instance hardcoding: every value
+            // comes from node.attributes stamped by the sampler.
             if (opts.skin_faders) {
                 auto attr = [&](const char* k) -> std::string {
                     auto it = node.attributes.find(k);
@@ -1028,16 +1028,16 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
                     ss << ind << "setFaderSkin('" << id << "', '"
                        << tc << "', '" << fc << "', '" << thc << "', '" << tbc << "');\n";
                 }
-                // pulp #3191 — derived thin track width (logical px). Drives the
-                // fader's track/fill thickness so it draws the narrow captured
-                // line instead of a fraction of the (wide) widget box.
+                // Derived thin track width (logical px). Drives the fader's
+                // track/fill thickness so it draws the narrow captured line
+                // instead of a fraction of the wide widget box.
                 if (node.attributes.count("skin_track_width")) {
                     ss << ind << "setFaderTrackWidth('" << id << "', "
                        << node.attributes.at("skin_track_width") << ");\n";
                 }
-                // pulp #3192 — derived empty-track outline colour. Strokes the
-                // track rect so the empty channel above the thumb shows the
-                // captured edge instead of a flat dark slab.
+                // Derived empty-track outline colour. Strokes the track rect
+                // so the empty channel above the thumb shows the captured edge
+                // instead of a flat dark slab.
                 std::string tbo = attr("skin_track_border_color");
                 if (!tbo.empty()) {
                     ss << ind << "setFaderTrackBorder('" << id << "', '" << tbo << "');\n";
@@ -1080,16 +1080,16 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
                 float lo = node.audio_min, hi = node.audio_max;
                 if (hi > lo) meter_norm = std::clamp((node.audio_default - lo) / (hi - lo), 0.0f, 1.0f);
             }
-            // Prefer the captured fill level when recovered (#3191) — matches
-            // where the design filled the meter rather than a linear dB map.
+            // Prefer the captured fill level when recovered; it matches where
+            // the design filled the meter rather than a linear dB map.
             if (auto lit = node.attributes.find("skin_fill_level");
                 lit != node.attributes.end() && !lit->second.empty())
                 meter_norm = std::clamp(std::stof(lit->second), 0.0f, 1.0f);
             ss << ind << "setMeterLevel('" << id << "', " << meter_norm << ", " << meter_norm << ");\n";
-            // pulp #3191 — value-driven gradient skin sampled from the captured
-            // meter PNG. setMeterColors hands the meter the recovered gradient
-            // stops (low→high); the meter redraws them CLIPPED to the level so
-            // the fill still animates with setMeterLevel(). No hardcoding.
+            // Value-driven gradient skin sampled from the captured meter PNG.
+            // setMeterColors hands the meter the recovered gradient stops
+            // (low→high); the meter redraws them CLIPPED to the level so the
+            // fill still animates with setMeterLevel(). No hardcoding.
             if (opts.skin_meters) {
                 auto grad_it = node.attributes.find("skin_meter_gradient");
                 if (grad_it != node.attributes.end() && !grad_it->second.empty()) {
@@ -1100,9 +1100,9 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
                     ss << ind << "setMeterColors('" << id << "', '" << bg << "', '"
                        << grad_it->second << "');\n";
                 }
-                // pulp #3191 — colored-bar/housing width ratio. Insets
-                // the gradient bar so it reads as a recessed fill in the wider
-                // dark housing, matching the captured meter's structure.
+                // Colored-bar/housing width ratio. Insets the gradient bar so
+                // it reads as a recessed fill in the wider dark housing,
+                // matching the captured meter's structure.
                 if (node.attributes.count("skin_meter_bar_ratio")) {
                     ss << ind << "setMeterBarRatio('" << id << "', "
                        << node.attributes.at("skin_meter_bar_ratio") << ");\n";
@@ -1348,7 +1348,7 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
 
     if (is_text) {
         // Text node → createLabel with explicit height (Yoga requirement)
-        ss << ind << "createLabel('" << id << "', '" << js_single_quote_escape(node.text_content) << "', " << pid << ");\n";  // pulp #81
+        ss << ind << "createLabel('" << id << "', '" << js_single_quote_escape(node.text_content) << "', " << pid << ");\n";
         emit_position_if_absolute(id);
         emit_node_visual_overrides(id);
 
@@ -1620,7 +1620,7 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
                << *node.style.border_width << ", " << br << ");\n";
         }
         if (!node.style.box_shadow.empty()) {
-            // The IR carries parsed CSS box-shadow layers (pulp #41). The bridge's
+            // The IR carries parsed CSS box-shadow layers. The bridge's
             // setBoxShadow(id, ox, oy, blur, spread, color, inset?) takes a
             // single drop shadow; emit the first layer (CSS paints the first
             // layer on top). An omitted color falls back to the bridge's
@@ -1780,7 +1780,7 @@ std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
 
     ss << "setTheme('dark');\n\n";
 
-    // Register bundled (non-system) fonts (#43b) BEFORE any setFontFamily, so a
+    // Register bundled (non-system) fonts BEFORE any setFontFamily, so a
     // family like "Clash Grotesk" / "Inter" resolves to the shipped face
     // instead of silently falling back to a same-named system font (or a
     // generic). resolved_path is the absolute .ttf/.otf path stamped by the
@@ -1830,7 +1830,7 @@ std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
     // semantics each stay in their natural home.
     if (!opts.shortcuts.empty()) {
         if (opts.include_comments) {
-            ss << "// Auto-imported keyboard shortcuts (pulp #2116). Each\n"
+            ss << "// Auto-imported keyboard shortcuts. Each\n"
                << "// registerShortcut binds a native chord intercept; the\n"
                << "// __pulpShortcutHandler_N thunk re-dispatches the\n"
                << "// synthetic keydown so the original React handler in\n"

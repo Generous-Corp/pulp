@@ -1,24 +1,20 @@
-// skia_canvas_mask.cpp — CSS mask-image / mask-size paint slice.
+// skia_canvas_mask.cpp — CSS mask-image / mask-size painting.
 //
-// Extracted from skia_canvas.cpp in the 2026-05 Phase 4 (R2-3 first cut)
-// refactor. The 3,586-line monolith has been the source of repeated
-// merge conflicts (40 touches/60 days) — pulling the bottom-of-file
-// mask section into its own TU isolates mask-specific edits.
+// Owns Skia-backed CSS mask-image / mask-size painting so mask-specific
+// parsing and composition stay isolated from the rest of the Canvas2D
+// backend.
 //
-// Phase 1 ships linear-gradient + radial-gradient mask shapes. url() and
-// other shapes fall through to the no-mask path (save_layer) — content
-// renders unchanged, mask is silently bypassed (matches pre-#1737
-// behavior where the catalog claim was storage-only). Phase 2 (followup)
-// can add url(<file_path>) via image_cache and url(#elementRef) via the
-// SVG-defs registry that pulp #932 PR-2 also needs.
+// Supported mask inputs are parsed into a shader and applied on restore()
+// with the CSS kDstIn composite. Unsupported or unparseable forms fall
+// through to the no-mask path: content still renders, but no mask is applied.
 //
 // CSS Masking Module Level 1 §5 specifies the kDstIn composite — see
 // SkiaCanvas::restore() in skia_canvas.cpp for the matching close-side
 // composite.
 
-// pulp #1737 (Codex P2 sweep on #1791) — Skia headers MUST be included
-// BEFORE pulp/canvas/skia_canvas.hpp. See skia_canvas.cpp head-of-file
-// comment for the C++ name-lookup rule that forces this ordering.
+// Skia headers MUST be included BEFORE pulp/canvas/skia_canvas.hpp. See
+// skia_canvas.cpp's head-of-file comment for the C++ name-lookup rule that
+// forces this ordering.
 
 #include <algorithm>
 #include <cctype>
@@ -58,14 +54,11 @@
 
 namespace pulp::canvas {
 
-// ── pulp #1737 / #1515 — CSS mask-image + mask-size paint slice ─────────
+// ── CSS mask-image + mask-size painting ─────────────────────────────────
 //
-// Phase 1 ships linear-gradient + radial-gradient mask shapes. url() and
-// other shapes fall through to the no-mask path (save_layer) — content
-// renders unchanged, mask is silently bypassed (matches pre-#1737
-// behavior where the catalog claim was storage-only). Phase 2 (followup)
-// can add url(<file_path>) via image_cache and url(#elementRef) via the
-// SVG-defs registry that pulp #932 PR-2 also needs.
+// Supported mask inputs are parsed into a shader and applied on restore()
+// with the CSS kDstIn composite. Unsupported or unparseable forms fall
+// through to the no-mask path: content still renders, but no mask is applied.
 //
 // CSS Masking Module Level 1 §5 specifies the kDstIn composite — see
 // SkiaCanvas::restore() for the matching close-side composite.
@@ -167,7 +160,7 @@ std::optional<SkColor> parse_color_token(const std::string& s, size_t& i) {
 // shader sized to the bounds (x,y,w,h). Returns nullptr for unparseable
 // input — caller falls back to the no-mask path.
 //
-// Phase 1 supports a deliberately narrow subset:
+// Supports a deliberately narrow subset:
 //   linear-gradient(<dir>, <color> [, <color>]+)
 // where <dir> is one of: `to top`, `to bottom`, `to left`, `to right`,
 // or an angle like `<n>deg`. Defaults to `to bottom` if no direction
@@ -237,8 +230,8 @@ sk_sp<SkShader> parse_linear_gradient_mask(const std::string& value,
         if (!col) return nullptr;
         colors.push_back(SkColor4f::FromColor(*col));
         mask_skip_ws(inner, k);
-        // Skip optional position (we ignore explicit positions in
-        // Phase 1 — CSS even-distribution is the default fallback).
+        // Skip optional position; CSS even-distribution is the default
+        // fallback.
         while (k < inner.size() && inner[k] != ',' && inner[k] != ')') ++k;
         if (k < inner.size() && inner[k] == ',') { ++k; mask_skip_ws(inner, k); }
     }
@@ -265,13 +258,13 @@ sk_sp<SkShader> parse_linear_gradient_mask(const std::string& value,
 //   `auto`        → (1, 1)
 //   `cover`       → (1, 1) — for a single shader fill, "cover" and the
 //                  default both fill the box. (Non-square mask images
-//                  would diverge here, but for the gradient-only Phase 1
-//                  the simplification is safe — see notes.)
+//                  diverge here, but for shader masks that already fill
+//                  the box the simplification is safe.)
 //   `contain`     → (1, 1) — same simplification rationale.
 //   `<n>%`        → (n/100, n/100)
 //   `<n>% <m>%`   → (n/100, m/100)
 //   `<n>px <m>px` → (n/w, m/h)
-//   `<n>px`       → (n/w, n/h)
+//   `<n>px`       → (n/w, n/w)
 //
 // Returns (1, 1) for unrecognized input — safe default that matches CSS
 // `mask-size: auto` behavior (cover the box).
@@ -376,11 +369,10 @@ void SkiaCanvas::save_layer_with_mask(float x, float y, float w, float h,
                                       const std::string& mask_size) {
     if (!canvas_) { save(); return; }
 
-    // pulp #1737 / #1515 — apply mask-size by scaling the effective
-    // box passed to the gradient parser. mask-size = "50% 100%" makes
-    // the gradient cover half the width but the full height; the mask
-    // alpha outside that scaled region is zero (kClamp on the shader
-    // edges — content there gets clipped by kDstIn).
+    // Apply mask-size by scaling the effective box passed to the mask shader
+    // parser. mask-size = "50% 100%" makes the mask cover half the width but
+    // the full height; alpha outside that scaled region is zero, so content
+    // there gets clipped by kDstIn.
     const auto [wf, hf] = parse_mask_size(mask_size, w, h);
     const float scaled_w = w * wf;
     const float scaled_h = h * hf;
@@ -394,16 +386,15 @@ void SkiaCanvas::save_layer_with_mask(float x, float y, float w, float h,
     }
     // Other forms (radial-gradient / none / unparseable) drop to the
     // no-mask path: the layer opens with content opacity, restore() sees
-    // no pending mask shader and just closes plainly. Net behavior =
-    // pre-#1737 (no mask applied) — safe regression-free fallback.
+    // no pending mask shader and just closes plainly. Net behavior is the
+    // no-mask fallback.
 
     SkRect bounds = SkRect::MakeXYWH(x, y, w, h);
     SkPaint outer_paint;
     if (opacity < 1.0f) outer_paint.setAlphaf(opacity);
     canvas_->saveLayer(&bounds, &outer_paint);
 
-    // pulp #1899 (gap #3) — non-opaque text-edging tracking, mirrors
-    // the other save_layer* variants.
+    // Non-opaque text-edging tracking mirrors the other save_layer* variants.
     if (opacity < 1.0f) {
         non_opaque_layer_stack_.push_back(canvas_->getSaveCount());
     }

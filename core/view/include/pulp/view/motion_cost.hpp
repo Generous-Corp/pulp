@@ -58,8 +58,8 @@ struct CostSample {
     /// frame. Sorted ascending. Empty when no motion is active.
     std::vector<int> active_trace_ids;
 
-    /// Provenance envelopes (Phase 9) for each entry in
-    /// `active_trace_ids`, in the same order. Entries without
+    /// Provenance envelopes for each entry in `active_trace_ids`,
+    /// in the same order. Entries without
     /// provenance carry a default-constructed Provenance.
     std::vector<Provenance> active_provenance;
 };

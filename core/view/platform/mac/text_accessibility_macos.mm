@@ -1,4 +1,4 @@
-// macOS NSAccessibility backend for TextAccessibilityNode (font v2 Slice 2.6).
+// macOS NSAccessibility backend for TextAccessibilityNode.
 //
 // Replaces the default "none" backend defined in
 // core/view/src/text_accessibility.cpp on Apple platforms. Painted text
@@ -13,8 +13,8 @@
 // so snapshot_accessibility_nodes() stays a pure cross-platform read —
 // callers don't have to round-trip through NSAccessibility selectors.
 //
-// Windows UIA + Linux AccessKit are deferred to follow-up PRs and stay
-// on the default "none" backend.
+// Windows UIA and Linux AccessKit have their own platform-specific
+// translation units.
 
 #include <TargetConditionals.h>
 #if TARGET_OS_OSX || TARGET_OS_IPHONE
@@ -45,8 +45,7 @@
 // UIAccessibilityElement), so the iOS leg keeps the registry as a thin
 // C++ shadow only. The accessibility_backend_name() still returns
 // "macos-ax" on macOS; on iOS we deliberately return "none" so the
-// platform-level UIAccessibility wiring (a future slice) can detect the
-// gap.
+// platform-level UIAccessibility wiring can detect the gap.
 
 #if TARGET_OS_OSX
 
@@ -202,8 +201,8 @@ std::string_view accessibility_backend_name() noexcept {
 #if TARGET_OS_OSX
     return "macos-ax";
 #else
-    // iOS lane still rides the default "none" surface; the
-    // UIAccessibility overlay is a follow-up slice.
+    // iOS lane still rides the default "none" surface; UIAccessibility
+    // overlay wiring is not implemented here.
     return "none";
 #endif
 }

@@ -141,10 +141,10 @@ sk_sp<skia::textlayout::FontCollection> TextFontContext::font_collection() const
         }
     }
 
-    // pulp #2163 follow-up — bridge user-registered fonts into the
-    // SkParagraph font collection. Without this, fonts registered via
-    // `register_font` / `register_font_file` (e.g. an imported Figma
-    // design's "Funnel Display" / "Clash Grotesk Variable") resolve only
+    // Bridge user-registered fonts into the SkParagraph font collection.
+    // Without this, fonts registered via `register_font` /
+    // `register_font_file` (e.g. an imported Figma design's
+    // "Funnel Display" / "Clash Grotesk Variable") resolve only
     // on the Canvas2D fillText / FontResolver path; every Label renders
     // through SkParagraph, which previously only saw the platform
     // SkFontMgr and silently fell back to a system face. Register each

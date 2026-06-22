@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// Events + Pointer-capture (P5-7 follow-up — extracted from web-compat-element.js)
+// Events + Pointer-capture support extracted from web-compat-element.js
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 // Two coherent subsurfaces of the DOM Event surface:
@@ -10,10 +10,10 @@
 //      object's eventPhase / currentTarget / preventDefault / stopPropagation
 //      / stopImmediatePropagation pieces.
 //
-//   2. Pointer capture (P2b). Element.prototype setPointerCapture /
-//      releasePointerCapture / hasPointerCapture against the document-scoped
-//      pointer-capture registry, plus the lostpointercapture / pointercancel
-//      synthetic events that the bridge dispatches when capture is released.
+//   2. Pointer capture. Element.prototype setPointerCapture /
+//      releasePointerCapture against the document-scoped pointer-capture
+//      registry, plus the pointercancel synthetic event the bridge dispatches
+//      when capture is released.
 //
 // Embed order: loaded AFTER web-compat-element.js so the Element constructor
 // + prototype are already defined when the extracted prototype overrides
@@ -130,10 +130,10 @@ Element.prototype._registerNativeEvent = function(type) {
             self.dispatchEvent(_makeEvent("blur", self));
         });
     } else if (type === "wheel") {
-        // pulp DIVERGE→PASS sweep — `el.addEventListener('wheel', fn)`
-        // routes through the bridge `registerWheel` / `__dispatch__`
-        // path. Before, only the explicit `registerWheel(id)` API was
-        // accessible from JS — DOM consumers got no surface at all.
+        // `el.addEventListener('wheel', fn)` routes through the bridge
+        // `registerWheel` / `__dispatch__` path so DOM consumers can use
+        // the standard listener surface instead of the explicit
+        // `registerWheel(id)` API.
         if (typeof registerWheel === "function") registerWheel(id);
         on(id, "wheel", function(dx, dy) {
             var evt = _makeEvent("wheel", self, {});
@@ -146,16 +146,16 @@ Element.prototype._registerNativeEvent = function(type) {
     } else if (type === "dragstart" || type === "drag" || type === "dragend" ||
                type === "dragenter" || type === "dragover" || type === "dragleave" ||
                type === "drop") {
-        // pulp DIVERGE→PASS sweep — DOM-style drag/drop event types
-        // are surfaced through the existing bridge `registerDrop` API.
+        // DOM-style drag/drop event types are surfaced through the existing
+        // bridge `registerDrop` API.
         // The native side fires a single `drop` callback with type +
         // payload data when a drop completes; we synthesize a
         // DragEvent-shaped object so CSS-style consumers' handlers
-        // receive an event with .dataTransfer-like `_dropData`. Full
-        // multi-stage dragstart/drag/dragend lifecycle (with native
-        // drag-image rendering) remains a roadmap item — this slice
-        // covers the common "register me as a drop target" usage so
-        // `addEventListener('drop', fn)` is no longer a silent no-op.
+        // receive an event with .dataTransfer-like `_dropData`. This covers
+        // the common "register me as a drop target" usage so
+        // `addEventListener('drop', fn)` is no longer a silent no-op; it does
+        // not implement a full multi-stage drag lifecycle or native drag-image
+        // rendering.
         if (typeof registerDrop === "function") {
             // The bridge expects a callback NAME (not a function); pin
             // a synthetic per-element callback that fires our DOM
@@ -174,7 +174,7 @@ Element.prototype._registerNativeEvent = function(type) {
     }
 };
 
-// ── Pointer capture (P2b) ───────────────────────────────────────────────
+// ── Pointer capture ─────────────────────────────────────────────────────
 
 Element.prototype.setPointerCapture = function(pointerId) {
     if (typeof nativeSetPointerCapture === "function")
@@ -204,7 +204,7 @@ function _makeEvent(type, target, data) {
     // DOM event and the native event payload.
     ev.nativeEvent = ev;
 
-    // Position fields (P1)
+    // Position fields
     ev.clientX = d.clientX || 0;
     ev.clientY = d.clientY || 0;
     ev.offsetX = d.offsetX || 0;
@@ -231,7 +231,7 @@ function _makeEvent(type, target, data) {
         return !!{ Control: this.ctrlKey, Shift: this.shiftKey, Alt: this.altKey, Meta: this.metaKey }[k];
     };
 
-    // Pointer (P2)
+    // Pointer
     ev.pointerId = d.pointerId || 0;
     ev.pointerType = d.pointerType || "mouse";
     ev.isPrimary = d.isPrimary !== undefined ? d.isPrimary : true;
@@ -242,12 +242,12 @@ function _makeEvent(type, target, data) {
     ev.tiltY = d.tiltY || 0;
     ev.twist = d.twist || 0;
 
-    // Stylus (P3)
+    // Stylus
     ev.pressure = d.pressure !== undefined ? d.pressure : 0.5;
     ev.altitudeAngle = d.altitudeAngle || 0;
     ev.azimuthAngle = d.azimuthAngle || 0;
 
-    // Gesture (P4)
+    // Gesture
     ev.scale = d.scale !== undefined ? d.scale : 1;
     ev.rotation = d.rotation || 0;
     ev.detail = d.detail !== undefined ? d.detail : null;
@@ -256,7 +256,7 @@ function _makeEvent(type, target, data) {
     ev.deltaZ = d.deltaZ || 0;
     ev.deltaMode = d.deltaMode || 0;
 
-    // Coalesced/predicted (P5)
+    // Coalesced/predicted
     ev._coalesced = d._coalesced || null;
     ev._predicted = d._predicted || null;
     ev.getCoalescedEvents = function () { return this._coalesced || [this]; };
@@ -277,9 +277,8 @@ function _makeEvent(type, target, data) {
     return ev;
 }
 
-// pulp DIVERGE→PASS sweep — `new Event(name, init)` constructor surface.
-// Userland `new Event('foo')` produces an object that round-trips
-// through `Element.dispatchEvent`. Mirrors the DOM Event interface
+// `new Event(name, init)` produces an object that round-trips through
+// `Element.dispatchEvent`. Mirrors the DOM Event interface
 // minimally — type / bubbles / cancelable / stopPropagation /
 // preventDefault — which is what the harness gap was about. The
 // `_makeEvent` factory above stays the canonical path for events
@@ -351,11 +350,10 @@ function _dispatchEvent(target, event) {
     var el = target._parentElement;
     while (el) { path.unshift(el); el = el._parentElement; }
 
-    // pulp jsx-instrument-import diag 2026-05-17 — log every dispatch
-    // path for pointer/click/mouse events so we can see if the bubble
-    // chain reaches __root__ where React-DOM delegate is registered.
-    // Gated by globalThis.__pulpDebugDispatch__ to keep silent in
-    // normal runs.
+    // Debug-only dispatch logging for pointer/click/mouse events. Shows whether
+    // the bubble chain reaches __root__ where the React-DOM delegate is
+    // registered. Gated by globalThis.__pulpDebugDispatch__ to keep normal runs
+    // silent.
     if (globalThis.__pulpDebugDispatch__ && /^(click|mousedown|mouseup|pointerdown|pointerup)$/.test(event.type)) {
         var pathIds = path.map(function (e) { return e._id; }).join(">");
         var rootListeners = (__eventListeners__["__root__"]
@@ -417,4 +415,3 @@ function _dispatchEvent(target, event) {
     event.eventPhase = 0;
     event.currentTarget = null;
 }
-

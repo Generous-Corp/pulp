@@ -1,13 +1,11 @@
 #pragma once
 
-// Image cache — workstream 07 slice 7.4.
+// Image cache.
 //
-// The plan calls out `ImageView` as `partial` because it renders a
-// placeholder instead of decoding actual bytes. The real Skia decode
-// path lives behind the existing PULP_HAS_SKIA gate; this slice adds
-// the cache that both Skia-backed and stub paths will consume. A
-// memory-pressure trim hook (workstream 05 slice 5.3) lets the host
-// evict everything rebuildable when the OS asks.
+// URI-keyed cache for decoded images consumed by ImageView and related
+// paint paths. The cache is backend-agnostic: callers provide decode and
+// release callbacks, while the cache owns lookup, stats, LRU trimming, and
+// clear-on-memory-pressure behavior.
 //
 // Keys:
 //   string URI ("file:///…", "resource://…", "memory://sha256=…")

@@ -1,13 +1,10 @@
 // source_jump.hpp — Inspector source-jump: resolve a view's authored
 // source location and open it in the user's editor.
 //
-// Phase 5.1 of the inspector source-jump roadmap
-// (planning/2026-05-19-inspector-phase5-source-jump-spike.md).
-//
-// This is the concrete "jump to source" action. Phase 5.3 already
-// shipped the editor-URI *configuration* (pulp/inspect/editor_url.hpp);
-// Phase 0b wired a `source_loc` onto `pulp::view::View` from React's
-// `__source` prop. This file ties them together:
+// This is the concrete "jump to source" action. The editor-URI
+// configuration lives in pulp/inspect/editor_url.hpp; source locations
+// are recorded on `pulp::view::View` from React's `__source` prop. This
+// file ties them together:
 //
 //   1. resolve_source_jump() — given a config + a View's recorded
 //      source location, format the editor URL via format_editor_url().

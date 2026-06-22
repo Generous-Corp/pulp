@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// Native GPU canvas helpers (P5-6 first cut — extracted from web-compat-canvas.js)
+// Native GPU canvas helpers extracted from web-compat-canvas.js.
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 // Per the U-2 export map, the web-compat-canvas.js file (2,117 lines)
@@ -508,9 +508,9 @@ function __createGPUCanvasContext(canvasEl) {
                 nativeCanvasId: context.canvas && context.canvas._id ? context.canvas._id : ""
             });
             bridgedTexture._nativeBridge = !!nativeTexture.nativeBridge;
-            // iOS-D.3c (#3217): stamp the canvas id directly onto the
-            // texture so its `createView()` propagates the bridge identity
-            // into the GPUTextureView attachment that encoder.draw inspects.
+            // Stamp the canvas id directly onto the texture so its `createView()`
+            // propagates the bridge identity into the GPUTextureView attachment
+            // that encoder.draw inspects.
             bridgedTexture._nativeCanvasId =
                 (context.canvas && context.canvas._id) ? context.canvas._id : "";
             return bridgedTexture;

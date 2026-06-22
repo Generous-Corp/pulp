@@ -1,5 +1,5 @@
-// P7-F2 — the control-resolution self-check. These tests pin the loop that would
-// have CAUGHT the original silent-knob stumble.
+// Control-resolution self-check. These tests pin the loop that would have caught
+// the original silent-knob stumble.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -37,9 +37,9 @@ test("shapeClass classifies bounds into square vs stretched", () => {
 });
 
 test("THE STUMBLE: a node named 'knob' with slider geometry is CAUGHT as a conflict", () => {
-  // The exact failure mode P7 exists to prevent: the importer resolved a knob (by
-  // name), but the bounds are a wide track. assessResolution must flag it and drop
-  // confidence — NOT silently ship a knob.
+  // Exact failure mode: the importer resolved a knob by name, but the bounds are
+  // a wide track. assessResolution must flag it and drop confidence, not silently
+  // ship a knob.
   const r = assessResolution("knob", "Filter Knob", { w: 220, h: 22 });
   assert.ok(r.conflict_signals.length >= 1, "a conflict must be recorded");
   assert.ok(r.conflict_signals.some((c) => c.indexOf("knob") !== -1 && c.indexOf("stretched") !== -1),

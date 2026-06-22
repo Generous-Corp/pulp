@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Warn-only checks for Pulp import source contracts.
 
-The registry is intentionally additive in PR1. This checker reports drift, but
+The registry is intentionally additive. This checker reports drift, but
 does not fail unless --strict is passed by a focused self-test or a human.
 """
 
@@ -281,7 +281,7 @@ def _check_dispatch_and_symbols(
         _add(findings, "invalid-parser-file", source, "parser.file must be a string")
         parser_file = "core/view/src/design_import.cpp"
     # Runtime parsers may live in a file extracted out of design_import.cpp
-    # (the P6-A3 refactor split the static parsers from the runtime ones).
+    # Static parsers and runtime parsers live in separate translation units.
     # When parser.runtime_file is set, the runtime symbol — and an
     # explicit-runtime-parser dispatch symbol — resolve against it, while
     # parser.static stays bound to parser.file.

@@ -1,6 +1,6 @@
 #pragma once
 
-// A/B compare (workstream 07 slice 7.2).
+// A/B compare.
 //
 // Two-slot state snapshot component backed by pulp::state::StateStore's
 // serialize/deserialize contract. Plugin UIs wire an ABCompare over their

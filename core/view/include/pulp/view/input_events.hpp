@@ -81,9 +81,9 @@ enum class PointerType : uint8_t {
 /// `is_down=false`, release=`is_down=true` (JUCE-style), while a real
 /// platform host naturally delivers press=down, drag=down, release=up. A
 /// consumer that infers press/drag/release from `is_down` alone therefore
-/// behaves OPPOSITELY between the two callers (pulp WYSIWYG P2h: a live mac
-/// drag ended its move/resize gesture on the FIRST drag tick and fell
-/// through to re-selection). `phase` lets a host state the gesture phase
+/// behaves OPPOSITELY between the two callers: a live mac drag ended its
+/// move/resize gesture on the FIRST drag tick and fell through to
+/// re-selection. `phase` lets a host state the gesture phase
 /// unambiguously. `automatic` (the default) preserves the legacy is_down
 /// inference for callers that don't set it.
 enum class MousePhase : uint8_t {
@@ -127,7 +127,7 @@ struct MouseEvent {
     bool isWheel() const      { return is_wheel; }
     bool isPrimary() const    { return pointer_id == 0; }
 
-    // ── Gesture-phase resolution (pulp WYSIWYG P2h) ─────────────────
+    // ── Gesture-phase resolution ─────────────────────────────────────
     // When `phase` is set explicitly (a real platform host), use it.
     // When it is `automatic` (legacy / headless callers that only set
     // `is_down`), keep the historical inference: `is_down` events that

@@ -14,18 +14,17 @@
 //! Android SDK/NDK detection, iOS/Xcode tooling, SDK/plugin directory
 //! sanity, `--fix` auto-remediation, `--ci` machine-readable output,
 //! `--dry-run` + `--scan-parents` traversal. Porting that surface
-//! before the Phase 8 swap would double the Rust crate's LOC. The
-//! Phase 7 fallthrough wrapper handles the rest transparently — when
-//! `pulp-cpp` is on PATH, the user sees the full C++ doctor. When
-//! it's not (Rust-only sandbox, CI), they see a clear "install
-//! pulp-cpp to enable" message and exit 2.
+//! in Rust would double the crate's LOC. The fallthrough wrapper
+//! handles the rest transparently — when `pulp-cpp` is on PATH, the
+//! user sees the full C++ doctor. When it's not (Rust-only sandbox,
+//! CI), they see a clear "install pulp-cpp to enable" message and
+//! exit 2.
 //!
 //! # `--versions` human lane caveat
 //!
 //! `doctor --versions` without `--json` should print a short
-//! human-readable table. That lane isn't ported in Phase 2 (the JSON
-//! shape was the parity-critical path). Phase 7 delegates it via the
-//! same fallthrough — the C++ binary handles the human rendering.
+//! human-readable table. That lane delegates via the same fallthrough;
+//! the C++ binary handles the human rendering.
 
 use std::io::Write;
 
@@ -51,7 +50,7 @@ pub fn run(versions: bool, json: bool, out: &mut impl Write) -> Result<()> {
 
     // Everything else (default doctor, --versions human lane, --fix,
     // --ci, --dry-run, --scan-parents, android, ios) lands on the C++
-    // binary via the Phase 7 fallthrough wrapper.
+    // binary via the fallthrough wrapper.
     let argv = crate::fallthrough::current_argv_tail();
     let stub = "pulp-rs doctor: only `--versions --json` is ported in Rust; \
                 install pulp-cpp to run the full doctor.";

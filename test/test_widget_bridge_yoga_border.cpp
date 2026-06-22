@@ -1,11 +1,8 @@
-// test_widget_bridge_yoga_border.cpp — extracted from
-// test_widget_bridge.cpp in the 2026-05 Phase 5 (P5-1 follow-up) refactor.
-//
-// pulp #1543 — Yoga borderWidth wiring. Pulp's borders were already
-// painted as a Skia stroke via `View::set_border_*`, but Yoga never knew
-// about them. `apply_border_widths` in `core/view/src/yoga_layout.cpp`
-// now calls `YGNodeStyleSetBorder` so the layout engine subtracts the
-// border from the declared dimension the same way it subtracts padding.
+// WidgetBridge Yoga borderWidth tests for pulp #1543. Pulp's borders were
+// already painted as a Skia stroke via `View::set_border_*`, but Yoga never
+// knew about them. `apply_border_widths` in `core/view/src/yoga_layout.cpp`
+// now calls `YGNodeStyleSetBorder` so the layout engine subtracts the border
+// from the declared dimension the same way it subtracts padding.
 //
 // Yoga 3.x's default box-sizing is `border-box`, which is Pulp's
 // pre-#1516 implicit behavior; the companion content-box test lives
@@ -186,4 +183,3 @@ TEST_CASE("setBorderTopColor preserves uniform borderWidth shorthand",
     REQUIRE_THAT(child->bounds().width,  WithinAbs(80.0f, 0.5f));
     REQUIRE_THAT(child->bounds().height, WithinAbs(80.0f, 0.5f));
 }
-

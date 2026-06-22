@@ -1,15 +1,15 @@
-// P7-F2 — control-resolution self-check for the faithful-vector lane.
+// Control-resolution self-check for the faithful-vector lane.
 //
 // The original stumble was a slider/button silently materialized as a `knob`:
 // a MISSING VERIFICATION LOOP, not just a missing kind. This module computes the
 // control kind from INDEPENDENT signals and cross-checks them, so a mismatch is
 // CAUGHT (lowered confidence + a recorded conflict) instead of silently shipped.
-// It fills the P7 import-report fields (resolution_rung / confidence_score /
+// It fills the import-report fields (resolution_rung / confidence_score /
 // conflict_signals / verification_pass) the F0 chain carries to the host.
 //
-// Signals available in THIS lane: geometry/affordance (node bounds) and
-// name/token (the node name). Component identity is the P2/extract.ts lane; when
-// it lands it slots in as rung 1 ahead of these.
+// Signals available in this lane: geometry/affordance (node bounds) and
+// name/token (the node name). Component identity slots in as rung 1 ahead of
+// these when available.
 //
 // ES5-conservative (the Figma plugin sandbox tsconfig targets an older lib).
 

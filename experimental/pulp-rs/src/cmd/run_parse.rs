@@ -1,12 +1,12 @@
-//! Pure flag parser for `pulp-rs run`. Direct port of
-//! `tools/cli/cmd_run_parse.cpp` from the C++ side (Pulp #914 / PR #917).
+//! Pure flag parser for `pulp-rs run`. Mirrors
+//! `tools/cli/cmd_run_parse.cpp` from the C++ side.
 //!
 //! Kept dependency-free so unit tests don't need to drag in the
 //! orchestrator or its filesystem helpers — same split the C++ side
 //! uses (parser is in its own translation unit so test_cli_run_options
 //! doesn't link cli_common).
 //!
-//! # Surface ported from #914
+//! # Supported surface
 //!
 //! - `--headless` — render offscreen. Forwarded as `--headless` arg
 //!   AND `PULP_HEADLESS=1` env var so binaries that only read one
@@ -36,7 +36,7 @@ pub struct RunOptions {
     /// Optional positional target name.
     pub target_name: String,
 
-    // #914 flags
+    // Headless-render flags.
     /// `--headless` (or implied by `--screenshot`).
     pub headless: bool,
     /// `--screenshot <path>` (path is empty when not requested).

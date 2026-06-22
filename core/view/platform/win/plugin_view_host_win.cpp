@@ -1,6 +1,6 @@
 // Windows (HWND) PluginViewHost — native child-window editor host for the
-// foreign-host embed SDK + the VST3/CLAP adapters on Windows (#3329 Win/Linux
-// parity). Mirrors the macOS MacGpuPluginViewHost shape (NSView -> child HWND,
+// foreign-host embed SDK + the VST3/CLAP adapters on Windows. Mirrors the
+// macOS MacGpuPluginViewHost shape (NSView -> child HWND,
 // CAMetalLayer -> HWND-backed Dawn surface).
 //
 // Two render paths share one class:

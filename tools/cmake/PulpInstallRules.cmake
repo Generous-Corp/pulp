@@ -1,7 +1,6 @@
 # PulpInstallRules.cmake — SDK install + export rules.
 #
-# Extracted from the root CMakeLists.txt in the 2026-05 Phase 3 (C2)
-# refactor. Owns `install()` calls, `export(TARGETS ...)`, the
+# Owns `install()` calls, `export(TARGETS ...)`, the
 # `sdk_build_type.txt` marker generation, PulpConfig + PulpConfigVersion
 # write, and CMake helper-script installation.
 #
@@ -10,8 +9,8 @@
 # pulp::view / pulp::format / pulp::ship that the subsystem
 # CMakeLists.txt files define).
 #
-# Codex C2 risk callout: configure output + the installed SDK
-# manifest must be byte-stable before/after.
+# Configure output and the installed SDK manifest should remain byte-stable
+# when install rules move between CMake modules.
 
 # ── SDK Install Rules ──────────────────────────────────────────────────────
 # cmake --install build --prefix <staging> produces a complete Pulp SDK
@@ -36,8 +35,7 @@ set(PULP_SDK_TARGETS
 # pulp-signal-fft-backend is the optional multi-backend FFT facade. It's
 # defined in core/signal/CMakeLists.txt and ships a public header
 # (`pulp/signal/fft_backend.hpp`). Without this export, find_package(Pulp)
-# consumers can include the header but cannot link the symbols
-# (Codex PR #3021 P2).
+# consumers can include the header but cannot link the symbols.
 if(TARGET pulp-signal-fft-backend)
     list(APPEND PULP_SDK_TARGETS pulp-signal-fft-backend)
 endif()
@@ -246,7 +244,7 @@ install(FILES
 # source tree (tools/cmake/PulpUtils.cmake → tools/cmake/scripts/…) and
 # must keep working in the installed tree (lib/cmake/Pulp/PulpUtils.cmake
 # → lib/cmake/Pulp/scripts/…). Install the encoder alongside PulpUtils.cmake
-# so find_package(Pulp) consumers can use the function (issue-905 follow-up).
+# so find_package(Pulp) consumers can use the function.
 install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/encode_binary_data.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/check_portable_binary.py"

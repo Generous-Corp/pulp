@@ -1,4 +1,4 @@
-// pulp #1486 — 5-scenario validation harness (§4 of the spec).
+// 5-scenario validation harness.
 //
 //   S1 Pure regen, no source change                  → tweaks survive
 //   S2 Designer changed colors, structure preserved  → tweaks survive
@@ -6,9 +6,8 @@
 //   S4 Designer deleted a tweaked section            → drift flags orphaned tweak
 //   S5 Designer reordered sections                   → content-hash strategy survives
 //
-// Acceptance for the Phase 1 spike: 4 of 5 pass. (S5 with content-hash
-// is expected to pass because the hash is depth+text-driven, not
-// path-driven.)
+// S5 with content-hash is expected to pass because the hash is
+// depth+text-driven, not path-driven.
 
 import { describe, it, expect } from 'vitest';
 import {
@@ -20,7 +19,7 @@ import {
     type IRNode,
 } from '../../src/index.js';
 
-// Minimal HTML fixtures. Phase 1's adapter handles inline `style`
+// Minimal HTML fixtures. The adapter handles inline `style`
 // attributes — these fixtures exercise the typed paint / text fields.
 const HOMEPAGE_V1 = `
 <div>
@@ -223,7 +222,7 @@ describe('S5 — Designer reordered sections', () => {
 
 // ── Acceptance summary ───────────────────────────────────────────────
 
-describe('Phase 1 acceptance — 4-of-5 scenarios pass', () => {
+describe('scenario harness smoke', () => {
     it('all five scenarios run without throwing', async () => {
         // Smoke check the harness itself: every scenario completes.
         await lowerClaudeDesignHtml(HOMEPAGE_V1);

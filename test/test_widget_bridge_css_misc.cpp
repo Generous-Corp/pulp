@@ -1,13 +1,9 @@
-// test_widget_bridge_css_misc.cpp — extracted from test_widget_bridge.cpp
-// in the 2026-05 Phase 5 P5-1 follow-up refactor.
+// WidgetBridge CSS-misc tests: two small but coherent CSS clusters.
 //
-// CSS-misc bridge tests — two small but coherent CSS clusters that
-// together push test_widget_bridge.cpp under the 3,000-line P5-1 target:
-//
-//   * pulp #1434 batch 3: text-decoration longhands.
+//   * text-decoration longhands.
 //     setTextDecorationColor / setTextDecorationLine / setTextDecorationStyle
 //     each store the value on Label via WidgetBridge.
-//   * pulp #1552: line-clamp + background-repeat.
+//   * line-clamp + background-repeat.
 //     setLineClamp pins clamp count on Label; backgroundRepeat /
 //     backgroundPosition / backgroundSize round-trip through the bridge.
 
@@ -22,7 +18,7 @@ using namespace pulp::view;
 using namespace pulp::state;
 using Catch::Matchers::WithinAbs;
 
-// ── pulp #1434 batch 3: text-decoration longhands ────────────────────────────
+// ── text-decoration longhands ───────────────────────────────────────────────
 
 TEST_CASE("WidgetBridge setTextDecorationColor stores color on Label",
           "[view][bridge][issue-1434-batch-3]") {
@@ -77,8 +73,7 @@ TEST_CASE("WidgetBridge setTextDecorationStyle stores enum on Label",
 
 TEST_CASE("WidgetBridge text-decoration longhand setters preserve siblings",
           "[view][bridge][issue-1434-batch-3]") {
-    // Mirrors the per-attribute border-fix from PR #1166 finding #4 —
-    // setting one longhand must not clobber a previously-set sibling.
+    // Setting one longhand must not clobber a previously-set sibling.
     ScriptEngine engine;
     View root;
     root.set_bounds({0, 0, 400, 300});
@@ -99,7 +94,7 @@ TEST_CASE("WidgetBridge text-decoration longhand setters preserve siblings",
     REQUIRE(lab->text_decoration_style() == Label::TextDecorationStyle::wavy);
 }
 
-// ── pulp #1552: line-clamp + background-repeat ──────────────────────────────
+// ── line-clamp + background-repeat ─────────────────────────────────────────
 
 TEST_CASE("WidgetBridge setLineClamp stores count on Label",
           "[view][bridge][issue-1552]") {
@@ -179,11 +174,9 @@ TEST_CASE("Label line-clamp shrinks text_h for vertical-align centering",
           "[view][bridge][issue-1552]") {
     using namespace pulp::canvas;
 
-    // Codex P2 on PR #1573 — vertical positioning previously used the
-    // *source* newline count for text_h, so a 5-line label clamped to 2
-    // visible lines was offset upward as if the hidden lines still
-    // occupied space. Verify the first visible line's y reflects a
-    // 2-line block centered in the bounds, not a 5-line block.
+    // Vertical positioning must use the visible line count for text_h, so a
+    // 5-line label clamped to 2 visible lines is centered as a 2-line block,
+    // not as if the hidden lines still occupied space.
 
     constexpr float kBoundsH = 200.0f;
     constexpr float kFontSize = 14.0f;
@@ -262,4 +255,3 @@ TEST_CASE("WidgetBridge setBackgroundRepeat round-trips keyword on View",
     bridge.load_script("setBackgroundRepeat('panel', '')");
     REQUIRE(panel->background_repeat().empty());
 }
-

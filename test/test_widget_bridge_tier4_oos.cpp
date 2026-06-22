@@ -1,9 +1,6 @@
-// test_widget_bridge_tier4_oos.cpp — extracted from test_widget_bridge.cpp
-// in the 2026-05 Phase 5 (P5-1 follow-up) refactor.
+// WidgetBridge OOS no-op and fallback tests.
 //
-// pulp #1434 / Tier-4 — OOS no-op + fallback pins.
-//
-// Two clusters from the Tier-4 (out-of-scope / catalog hygiene) sweep:
+// Two out-of-scope / catalog-hygiene clusters:
 //   1. OOS 3D / generated-content / scroll-snap pin — properties Pulp
 //      deliberately doesn't paint (3D transforms, ::before/::after
 //      generated content, scroll-snap-type / -align). Tests pin the
@@ -35,22 +32,20 @@ using namespace pulp::view;
 using namespace pulp::state;
 using Catch::Matchers::WithinAbs;
 
-// ── pulp #1434 / Tier-4 — OOS 3D / generated-content / scroll-snap pin ───────
+// ── OOS 3D / generated-content / scroll-snap pin ───────────────────────────
 //
-// Closes 10 arch-deferred coverage-gap rows (planning/coverage-gaps/) by
-// pinning their silent-accept behavior. The bundle covers everything that
-// is out of Pulp's UI scope per CLAUDE.md (audio plugin + cross-platform
-// native panels — no 3D perspective projection, no pseudo-element generated
-// content, no web-style scroll-snap containers):
+// Pin silent-accept behavior for properties that are out of Pulp's UI scope per
+// CLAUDE.md (audio plugin + cross-platform native panels — no 3D perspective
+// projection, no pseudo-element generated content, no web-style scroll-snap
+// containers):
 //
 //   3D transform       (3): backfaceVisibility, perspective, perspectiveOrigin
 //   generated content  (4): content, counterIncrement, counterReset, quotes
 //   scroll snap        (3): scrollMargin, scrollPadding, scrollSnapType
 //
-// Companion to the Yoga-arch ceiling test above; same pin shape, different
-// rationale. Catches any future refactor of web-compat-style-decl.js that
-// would start throwing for unknown properties (import sources commonly emit
-// scroll-snap + generated-content CSS even though Pulp doesn't honor them).
+// Catches any future refactor of web-compat-style-decl.js that would start
+// throwing for unknown properties; import sources commonly emit scroll-snap and
+// generated-content CSS even though Pulp doesn't honor them.
 TEST_CASE("CSSStyleDeclaration silent-accepts 10 OOS 3D/content/scroll properties as no-ops",
           "[view][bridge][css][issue-1434][arch-deferred][oos-3d-content-scroll]") {
     ScriptEngine engine;
@@ -93,9 +88,8 @@ TEST_CASE("CSSStyleDeclaration silent-accepts 10 OOS 3D/content/scroll propertie
     REQUIRE(p->flex().direction == FlexDirection::row);
 }
 
-// ── pulp #1434 / Tier-4 — perf hints + interaction misc pin (Bundle-C) ───────
+// ── perf hints + interaction misc pin ───────────────────────────────────────
 //
-// Closes 7 arch-deferred coverage-gap rows. Final bundle of the Tier-4 sweep.
 // Covers:
 //   perf-hint    (3): contain, contentVisibility, willChange
 //   interaction  (2): resize, touchAction
@@ -114,13 +108,11 @@ TEST_CASE("CSSStyleDeclaration silent-accepts 6 perf-hint/interaction CSS proper
     StateStore store;
     WidgetBridge bridge(engine, root, store);
 
-    // Codex P2 (PR #1904): route through the real public CSS surface
-    // (`el.style.<prop> = value` for camelCase + `style.setProperty()`
-    // for kebab-case CSS names) rather than calling `_applyProperty`
-    // on a synthetic `{_id, _nativeCreated}` literal. The synthetic
-    // path bypasses the Proxy / setProperty plumbing that real callers
-    // (web-compat-element, dom-adapter, design importers) use, so a
-    // future regression in that plumbing would not have been caught.
+    // Route through the real public CSS surface (`el.style.<prop> = value` for
+    // camelCase + `style.setProperty()` for kebab-case CSS names) rather than
+    // calling `_applyProperty` on a synthetic `{_id, _nativeCreated}` literal.
+    // The synthetic path bypasses the Proxy / setProperty plumbing that real
+    // callers use, so a future regression in that plumbing would not be caught.
     //
     // Mix of surfaces exercised:
     //   - `style.<camelCase> = ...`      — for props in __cssProperties__
@@ -172,4 +164,3 @@ TEST_CASE("CSSStyleDeclaration silent-accepts 6 perf-hint/interaction CSS proper
     REQUIRE(p->visible());
     REQUIRE(p->flex().direction == FlexDirection::row);
 }
-

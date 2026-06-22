@@ -1,12 +1,12 @@
 // skia_canvas_gradients.cpp — Canvas2D gradient + pattern fillStyle/strokeStyle slice.
 //
-// Extracted from skia_canvas.cpp in the 2026-05 Phase 4 (R2-3 follow-up)
-// refactor. Covers linear / radial / conic / two-circles gradient
-// builders for fill + stroke, plus image-pattern repeat-mode plumbing.
+// Owns the Skia implementations for Canvas2D fill/stroke gradients
+// (linear, radial, conic, and two-circles) plus image-pattern repeat-mode
+// plumbing.
 //
-// pulp #1737 (Codex P2 sweep on #1791) — Skia headers MUST be included
-// BEFORE pulp/canvas/skia_canvas.hpp. See skia_canvas.cpp head-of-file
-// comment for the C++ name-lookup rule that forces this ordering.
+// Skia headers MUST be included BEFORE pulp/canvas/skia_canvas.hpp. See
+// skia_canvas.cpp's head-of-file comment for the C++ name-lookup rule that
+// forces this ordering.
 //
 // Skia's gradient API moved during the m149 window. This TU routes through
 // skia_gradient_compat.hpp so Pulp uses the public packaged header surface
@@ -81,8 +81,8 @@ void SkiaCanvas::set_fill_gradient_conic(float cx, float cy, float start_angle,
     has_gradient_ = gradient_shader_ != nullptr;
 }
 
-// pulp #1524 — Canvas2D `ctx.createRadialGradient(x0,y0,r0,x1,y1,r1)` two-circle
-// form. Skia renders the real two-point-conical gradient via
+// Canvas2D `ctx.createRadialGradient(x0,y0,r0,x1,y1,r1)` two-circle form.
+// Skia renders the real two-point-conical gradient via
 // SkShaders::TwoPointConicalGradient, honouring an offset / sized inner
 // circle (the existing single-circle path silently dropped (x0,y0,r0)).
 void SkiaCanvas::set_fill_gradient_radial_two_circles(
@@ -102,7 +102,7 @@ void SkiaCanvas::clear_fill_gradient() {
     has_gradient_ = false;
 }
 
-// ── Stroke gradients (pulp Wave 3 c2d.7) ────────────────────────────────────
+// ── Stroke gradients ────────────────────────────────────────────────────────
 //
 // Mirror of the fill-gradient setters above, targeting `stroke_shader_`.
 // `apply_stroke_state` already attaches `stroke_shader_` to the active
@@ -156,7 +156,7 @@ void SkiaCanvas::clear_stroke_gradient() {
     stroke_shader_ = nullptr;
 }
 
-// ── Patterns (pulp #1434 bridge-thin gap-fill) ──────────────────────────────
+// ── Patterns ────────────────────────────────────────────────────────────────
 //
 // Canvas2D `ctx.createPattern(image, repetition)` returns a CanvasPattern
 // the shim assigns to fillStyle / strokeStyle. The shim then invokes

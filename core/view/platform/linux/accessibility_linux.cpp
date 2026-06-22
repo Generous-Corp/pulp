@@ -18,9 +18,8 @@
 //     GetChildren returns the top-level accessible Views.
 //   * /org/a11y/atspi/accessible/<n> — one object PER accessible View
 //     (org.a11y.atspi.Accessible + org.a11y.atspi.Component), built by a
-//     depth-first walk of the View tree (L7b). The Socket.Embed handshake
-//     against the registry (L7a-2) still links the application up to the
-//     desktop.
+//     depth-first walk of the View tree. The Socket.Embed handshake against
+//     the registry links the application up to the desktop.
 //
 // The per-widget tree is rebuilt on accessibility_tree_changed(), which also
 // emits org.a11y.atspi.Event.Object.ChildrenChanged. Slider/meter Views that
@@ -30,7 +29,7 @@
 // set_current_value, the same path a user adjust takes). The notify_* hooks emit
 // the matching org.a11y.atspi.Event.Object signals (StateChanged "focused",
 // PropertyChange "accessible-value" / "accessible-name") so a listening registry
-// re-reads the changed object (L7c).
+// re-reads the changed object.
 //
 // Tree-walk model (mirrors mac collect_accessible / Windows build_fragment_nodes):
 // depth-first; every View with a non-none AccessRole becomes one accessible
@@ -709,13 +708,13 @@ struct AtspiProvider {
             });
     }
 
-    // ── Per-object Event.Object signals (L7c) ─────────────────────────────────
+    // ── Per-object Event.Object signals ──────────────────────────────────────
     //
-    // AT-SPI's object events all share the body signature (siiva{sv}): a detail
-    // string, two int32 details, an any_data variant, and a trailing a{sv}
-    // properties map (always empty here — the registry re-reads the source via
-    // Properties.Get). The signal is emitted FROM the changed object's own path
-    // so a listener knows which accessible changed; `member` is the event class
+    // Most object notifications we emit share the body signature (siiva{sv}):
+    // a detail string, two int32 details, an any_data variant, and a trailing
+    // a{sv} properties map. ChildrenChanged uses the separate (siiv(so)) body
+    // above. The signal is emitted FROM the changed object's own path so a
+    // listener knows which accessible changed; `member` is the event class
     // ("StateChanged" / "PropertyChange"). `fill_variant` writes the any_data
     // value (the new state/value/name); the helper frames the rest.
     void emit_object_event(int index, const char* member,
@@ -811,7 +810,7 @@ void* init_accessibility(View& root, void* /*native_window*/) {
     // calls hang the AT. The handle exposes pump(); a host with an event loop
     // calls accessibility_pump() each frame / on a timer (wired in the SDL
     // standalone host's run_event_loop). The X11 plugin-view host has no
-    // internal loop (the DAW pumps) and is left to a future slice.
+    // internal loop because the DAW owns pumping.
     return provider.release();
 }
 

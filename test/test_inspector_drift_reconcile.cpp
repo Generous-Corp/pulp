@@ -1,10 +1,4 @@
-// Inspector — drift drawer (Phase 2) + reconciliation tab (Phase 5.2) tests.
-//
-// Split verbatim out of test/test_inspector.cpp (Phase-5 oversized-test-file
-// refactor). The TEST_CASE blocks are byte-identical to their originals;
-// only the file/binary they live in changed.
-//
-// Spec: planning/2026-05-18-inspector-direct-manipulation-roadmap.md.
+// Inspector drift drawer and reconciliation tab tests.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -22,8 +16,7 @@ using namespace pulp::inspect;
 
 namespace {
 
-// Verbatim copy of the KeyEvent factory from test_inspector.cpp; duplicated
-// here so the drift/reconcile cluster is self-contained.
+// Intentionally local: keeps drift/reconcile input helpers isolated to this test binary.
 KeyEvent make_key(KeyCode k, bool is_down = true, uint16_t mods = 0) {
     KeyEvent e;
     e.key = k;
@@ -34,14 +27,12 @@ KeyEvent make_key(KeyCode k, bool is_down = true, uint16_t mods = 0) {
 
 }  // namespace
 
-// ── Phase 2 — drift drawer ──────────────────────────────────────────────
+// ── Drift drawer ────────────────────────────────────────────────────────
 //
 // The drift drawer is a collapsible warning panel inside the inspector
 // overlay that lists tweaks whose anchor_id no longer resolves to a live
 // view. It is populated by refresh_drift(), which walks the live view
 // tree's anchor set and diffs it against the attached TweakStore.
-// Spec: planning/2026-05-18-inspector-direct-manipulation-roadmap.md
-// (Phase 2).
 namespace {
 
 // True if any fill_text command's text contains `needle`.
@@ -218,14 +209,14 @@ TEST_CASE("InspectorOverlay: collapsed drawer hides rows but keeps the header",
     REQUIRE_FALSE(canvas_has_text(canvas, "layout.width"));
 }
 
-// ── Phase 5.2 — reconciliation tab ────────────────────────────────────────
+// ── Reconciliation tab ────────────────────────────────────────────────────
 //
 // The reconciliation tab (R-key) classifies every stored tweak into
 // locked-to-source / drifted / unresolvable and renders a read-only
-// report. It builds on the Phase 4a lock-to-source state (the
-// TweakStore lock set) and the live view tree's anchor set. These
-// tests drive it headless: build a scene, seed tweaks, toggle the tab
-// with R, paint into a RecordingCanvas, and assert the classification.
+// report. It builds on the TweakStore lock set and the live view tree's
+// anchor set. These tests drive it headless: build a scene, seed tweaks,
+// toggle the tab with R, paint into a RecordingCanvas, and assert the
+// classification.
 
 namespace {
 

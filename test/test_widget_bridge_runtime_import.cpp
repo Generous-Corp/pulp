@@ -1,7 +1,4 @@
-// Tests for WidgetBridge runtime-import handlers (pulp #468 follow-up).
-//
-// Extracted from test/test_widget_bridge.cpp in the 2026-05-17 Phase 5
-// P5-1 first cut. See planning/2026-05-17-refactor-roadmap-year.md.
+// Tests for WidgetBridge runtime-import handlers.
 //
 // Contract for WidgetBridge::install_runtime_import_handlers() — the
 // C++ side of @pulp/react/runtime-import. These tests don't depend on
@@ -410,7 +407,7 @@ TEST_CASE("WidgetBridge install_runtime_import_handlers is idempotent",
     REQUIRE(result.getWithDefault<std::string>("") == "function");
 }
 
-// Codex P1 follow-up on PR #1856 — every transient error global cleared.
+// Every transient error global must be cleared between runtime-import attempts.
 // Reason: the aggregator (in the runtime-import callback path) joins
 // __pulpRuntimeImportErr__, __pulpEvalErr__, __pulpFlushSyncErr__, and
 // any __pulpPayloadErr_<key>__. If clear_err() only resets the first

@@ -1,6 +1,5 @@
-// test_widget_bridge_canvas2d.cpp — extracted from test_widget_bridge.cpp
-// in the 2026-05 Phase 5 (P5-1 continuation) refactor. Covers the
-// Canvas2D bridge surface end-to-end through CanvasWidget::paint:
+// WidgetBridge Canvas2D tests covering the bridge surface end-to-end through
+// CanvasWidget::paint:
 //
 //   - canvasSetTransform / canvasClip / canvasGlobalCompositeOperation
 //     (issue-896): the bridge records a CanvasDrawCmd, paint() replays it
@@ -8,9 +7,7 @@
 //     canvasGetImageData / canvasPutImageData (issue-916)
 //   - pulp #1899 / #1901 — 4-arg canvasFillText preserves prior state
 //
-// Tests share fixtures with test_widget_bridge.cpp (the parent TU still
-// owns the smaller widget surfaces); this slice peels off the canvas2d
-// concern as one of P5-1's per-surface splits.
+// Tests share fixtures with the smaller WidgetBridge surface clusters.
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -1278,4 +1275,3 @@ TEST_CASE("WidgetBridge canvasGetImageData returns a TextMetrics-like object "
     // 4*4*4 == 64 bytes for the RGBA array.
     REQUIRE(length.getWithDefault<double>(-1.0) == 64);
 }
-

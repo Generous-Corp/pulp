@@ -1,4 +1,4 @@
-// Phase 2b — serialize an extracted scene into the v1 JSON envelope declared in
+// Serialize an extracted scene into the v1 JSON envelope declared in
 // schema/figma-plugin-export-v1.json. This is mostly a passthrough since the
 // extractor's in-memory model already mirrors the envelope shape; the
 // serializer's job is to add the envelope-level fields (format_version,
@@ -18,16 +18,16 @@ export interface SerializeContext {
   libraryManifest?: LibraryManifestSnapshot;
   assets: AssetCache;
   tokens: ExtractedTokens;
-  /// Deduplicated font catalogue produced by extractScene (#43a-rev).
+  /// Deduplicated font catalogue produced by extractScene.
   /// Empty array → no text nodes in the selection (or no font names
   /// captured). Emitted at envelope root as `font_family_assets`.
   fontFamilyAssets?: FontFamilyAsset[];
-  /// #43c — user-supplied font bytes captured via the drag-drop UI.
+  /// User-supplied font bytes captured via the drag-drop UI.
   /// When present, every `font_family_assets` entry whose (family, style)
   /// matches a cache entry gets `asset_id` stamped, and the bytes flow
   /// through the asset_manifest into the `.pulp.zip`. Optional — empty
   /// or undefined cache is a no-op (the envelope still emits the
-  /// metadata-only catalogue per #43a-rev).
+  /// metadata-only catalogue).
   userFonts?: UserFontCache;
 }
 
@@ -42,7 +42,7 @@ export function serializeExport(
   diagnostics: ExtractedDiagnostic[],
   ctx: SerializeContext,
 ): unknown {
-  // #43c orphan-font check — if the user dropped a TTF/OTF for
+  // Orphan-font check: if the user dropped a TTF/OTF for
   // (family, style) tuples that don't appear in font_family_assets
   // (drop happened before scan, or selection changed before export),
   // the bytes still ride in asset_manifest but no catalogue entry
@@ -115,7 +115,7 @@ export function serializeExport(
           width: a.width,
           height: a.height,
         })),
-        // #43c — user-supplied fonts ride alongside the image / vector
+        // User-supplied fonts ride alongside the image / vector
         // assets in the same manifest. The local_path always ends in
         // .ttf / .otf so the zip writer and downstream consumers can
         // pick them out by extension without re-sniffing the mime.
@@ -129,12 +129,12 @@ export function serializeExport(
         })),
       ],
     },
-    // #43a-rev: top-level font catalogue. Each entry holds the family
+    // Top-level font catalogue. Each entry holds the family
     // name + style + (optional) weight + (optional) italic flag for every
     // font referenced by text nodes. `asset_id` is populated only by the
-    // drag-drop escape hatch (#43c) for user-supplied TTF bundling — the
+    // drag-drop escape hatch for user-supplied TTF bundling — the
     // Figma plugin API does not expose font binaries directly. Runtime
-    // (Agent A's #43b) consumes via Skia's SkFontMgr system-font matcher
+    // consumer uses via Skia's SkFontMgr system-font matcher
     // with the bundled OFL set as fallback.
     font_family_assets: stampUserFonts(ctx.fontFamilyAssets ?? [], ctx.userFonts),
     diagnostics: diagnostics.map(toEnvelopeDiagnostic),
@@ -163,10 +163,10 @@ function extOfFontMime(mime: string): string {
   }
 }
 
-/// #43c — for every font_family_assets entry, if the user has
+/// For every font_family_assets entry, if the user has
 /// supplied a matching (family, style) cache entry, stamp it with
 /// the cached asset_id. Pure function; the original list is preserved
-/// otherwise so the metadata-only catalogue from #43a-rev is unchanged
+/// otherwise so the metadata-only catalogue is unchanged
 /// when no user fonts are present.
 function stampUserFonts(
   fonts: FontFamilyAsset[],
@@ -189,7 +189,7 @@ function toEnvelopeNode(n: ExtractedFigmaNode): unknown {
   if (n.content !== undefined) out.content = n.content;
   if (n.asset_ref) out.asset_ref = n.asset_ref;
 
-  // Faithful-vector (Plan B / B4b) — emit the render-mode + SVG asset + typed
+  // Faithful-vector: emit the render-mode + SVG asset + typed
   // interactive overlays the C++ materializer consumes (parse_ir_node already
   // reads these keys). Only present on a faithful_svg node.
   if (n.render_mode) out.render_mode = n.render_mode;
@@ -198,7 +198,7 @@ function toEnvelopeNode(n: ExtractedFigmaNode): unknown {
     out.interactive_elements = n.interactive_elements;
   }
 
-  // Phase 3 — emit audio-widget metadata at the IR node root. The C++
+  // Emit audio-widget metadata at the IR node root. The C++
   // parser (design_ir_json.cpp::parse_ir_node) reads:
   //   audio_widget  → IRNode.audio_widget enum
   //   label         → IRNode.audio_label
@@ -215,10 +215,9 @@ function toEnvelopeNode(n: ExtractedFigmaNode): unknown {
     const attrs: Record<string, string> = {};
     if (n.audio_units !== undefined) attrs.units = n.audio_units;
     if (n.audio_binding !== undefined) attrs.binding = n.audio_binding;
-    // Phase 5: XYPad carries a second-axis binding alongside the primary
-    // `binding`. Lands in IRNode.attributes.binding_y; codegen consumes
-    // when the audio_widget="xy_pad" branch is wired up to route two
-    // parameter targets (see planning/2026-05-30-figma-import-fidelity-coordination.md).
+    // XYPad carries a second-axis binding alongside the primary `binding`.
+    // Lands in IRNode.attributes.binding_y; codegen consumes it when
+    // audio_widget="xy_pad" routes two parameter targets.
     if (n.audio_binding_y !== undefined) attrs.binding_y = n.audio_binding_y;
     out.attributes = attrs;
   }

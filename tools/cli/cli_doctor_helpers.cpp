@@ -1,17 +1,9 @@
 // cli_doctor_helpers.cpp — `pulp doctor` check implementations.
 //
-// Extracted from cli_common.cpp in the 2026-05 Phase 2 (R2-4) batch.
-// The 971-line doctor block is the single largest concern in the
-// cli_common monolith; pulling it into its own TU drops cli_common
-// to ~1700 lines and isolates doctor-specific edits.
-//
-// Public API stays declared in `cli_common.hpp` (DoctorCheck struct,
-// run_doctor_checks, run_doctor_android_checks, run_doctor_ios_checks)
-// — extracted code here is the implementation, not new API. Per the
-// Codex R2-4 risk callout, no new public header is introduced.
-//
-// Phase 2 follow-up (R2-8) will refactor the bodies of run_doctor_checks
-// here into a DoctorCheck registry.
+// Public API stays declared in `cli_common.hpp` (DoctorCheck struct and
+// the run_doctor_* entry points). This translation unit owns the
+// implementation details so doctor-specific edits do not churn the
+// shared CLI helpers.
 
 #include "cli_common.hpp"
 #include "package_registry.hpp"
@@ -30,11 +22,10 @@
 
 namespace fs = std::filesystem;
 
-// R2-8 P2 follow-up: case-insensitive substring filter helper. When
-// `only_filter` is empty, returns true (probes always run). Otherwise
-// probes whose name doesn't match are skipped — no process spawn, no
-// file IO. Codex's P2 on PR #2145 flagged the original "display
-// filter" shape as defeating the targeted-check contract.
+// Case-insensitive substring filter helper. When `only_filter` is
+// empty, returns true (probes always run). Otherwise probes whose name
+// doesn't match are skipped — no process spawn, no file IO. This keeps
+// `pulp doctor --only` targeted instead of display-only.
 bool doctor_check_matches_only_filter(const std::string& only_filter,
                                       const std::string& check_name) {
     if (only_filter.empty()) return true;
@@ -45,8 +36,7 @@ bool doctor_check_matches_only_filter(const std::string& only_filter,
     return b.find(a) != std::string::npos;
 }
 
-// File-local helper, lifted from cli_common.cpp in the R2-4 extraction
-// since only the doctor checks below use it.
+// File-local helper used only by the doctor checks below.
 namespace {
 std::string first_line(std::string text) {
     auto newline = text.find_first_of("\r\n");
@@ -1052,4 +1042,3 @@ std::vector<DoctorCheck> run_doctor_ios_checks(const std::string& only_filter) {
     return checks;
 #endif
 }
-

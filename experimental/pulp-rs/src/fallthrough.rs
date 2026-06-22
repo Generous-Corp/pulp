@@ -1,9 +1,9 @@
-//! `pulp-cpp` fallthrough — Phase 7 of the Rust port.
+//! `pulp-cpp` fallthrough for Rust CLI delegate paths.
 //!
 //! # Why
 //!
-//! Phase 6d/6e landed Rust entrypoints for every user-visible
-//! subcommand, but several branches are deliberately deferred:
+//! Rust owns the user-facing `pulp` binary, but several branches still
+//! live on the C++ delegate:
 //! network-heavy install paths (`sdk install`, `cache fetch skia`,
 //! `upgrade install`), filesystem-watch loops (`build --watch`, `dev
 //! --watch`, `design --watch`), interactive wizards (`create` default
@@ -12,18 +12,17 @@
 //! `tool install` archive extraction, and the Shipyard-adjacent
 //! `pr --native` path.
 //!
-//! Rather than hand-port every deferred branch before Phase 8 can
-//! swap the binary, this module lets the Rust `pulp` binary exec the
-//! legacy C++ `pulp-cpp` binary for those branches. The user sees a
-//! single CLI; internally we delegate the last 8% transparently.
+//! Rather than duplicating those implementations in Rust, this module
+//! lets the Rust `pulp` binary exec `pulp-cpp` for those branches. The
+//! user sees a single CLI; internally we delegate the remaining C++
+//! surfaces transparently.
 //!
-//! # The Phase 8 swap expects
+//! # Install layout
 //!
-//! 1. The legacy C++ binary is renamed `pulp-cpp` at install time.
-//! 2. The Rust binary is installed as `pulp` (this crate, renamed
-//!    from `pulp-rs` on swap day).
-//! 3. This module resolves `pulp-cpp` on `PATH` and execs it with
-//!    the original argv.
+//! 1. The C++ binary is installed as `pulp-cpp`.
+//! 2. The Rust binary is installed as `pulp`.
+//! 3. This module resolves `pulp-cpp` next to the running binary or
+//!    on `PATH` and execs it with the original argv.
 //!
 //! # Recursion guard
 //!
@@ -38,7 +37,7 @@
 //!
 //! - `PULP_RS_NO_FALLTHROUGH=1` — disable delegation globally. The
 //!   Rust binary prints its "not ported" message and exits 2 as it
-//!   did in Phase 6d.
+//!   does in Rust-only sandboxes.
 //! - `PULP_DEBUG=1` — print the resolved child + argv on stderr
 //!   before exec.
 
@@ -47,9 +46,8 @@ use std::path::{Path, PathBuf};
 use crate::error::{CliError, Result};
 use crate::proc::{Invocation, Spawner, SystemSpawner};
 
-/// Name of the legacy C++ binary the wrapper delegates to after the
-/// Phase 8 swap. Configurable via `PULP_RS_CPP_BINARY` for staging
-/// environments where the pre-swap binary is still called `pulp`.
+/// Name of the C++ binary the wrapper delegates to. Configurable via
+/// `PULP_RS_CPP_BINARY` for staging environments.
 pub const DEFAULT_CPP_BINARY: &str = "pulp-cpp";
 
 /// Env flag the child uses to detect that it was spawned by its own

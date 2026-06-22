@@ -1,7 +1,4 @@
-// test_widget_bridge_css_per_edge.cpp — extracted from test_widget_bridge.cpp
-// in the 2026-05 Phase 5 (P5-1 follow-up) refactor.
-//
-// pulp #1434 (cross-surface mega-batch) — per-edge margin/padding.
+// WidgetBridge per-edge margin/padding tests for pulp #1434.
 //
 // Pins the bridge ↔ Yoga node ↔ ParsedStyle plumbing for per-edge
 // margin/padding (marginTop, marginRight, marginBottom, marginLeft, and
@@ -578,4 +575,3 @@ TEST_CASE("CSSStyleDeclaration forwards marginTop percent + auto verbatim",
     REQUIRE(fb.dim_margin_left.unit  == DimensionUnit::auto_);
     REQUIRE(fb.dim_margin_right.unit == DimensionUnit::auto_);
 }
-

@@ -19,8 +19,8 @@ namespace {
 
 // View subclass with one animated 2D primitive driven off FrameClock.
 // Flags `requires_gpu_host=true` so decide_gpu_host() routes through the
-// Metal/Dawn PluginViewHost on iOS — that's the path Phase iOS-D.1 is
-// proving end-to-end.
+// Metal/Dawn PluginViewHost on iOS — the path this smoke validates end
+// to end.
 class GpuSmokeView : public pulp::view::View {
 public:
     GpuSmokeView() {

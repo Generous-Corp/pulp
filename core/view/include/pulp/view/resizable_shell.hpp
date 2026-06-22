@@ -1,7 +1,7 @@
 #pragma once
 
-// ResizableShell — plugin-window size constraints + aspect-ratio lock +
-// saved-size persistence (workstream 07 slice 7.5).
+// ResizableShell — plugin-window size constraints, aspect-ratio lock,
+// and saved-size persistence.
 //
 // Plugin shells (VST3 IPlugViewContentScaleSupport, AU fit-in-window,
 // CLAP clap_plugin_gui.adjust_size) all need the same three behaviours:

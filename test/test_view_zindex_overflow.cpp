@@ -1,7 +1,4 @@
-// test_view_zindex_overflow.cpp — extracted from test_view.cpp in the
-// 2026-05 Phase 5 (P5-3 follow-up) refactor.
-//
-// Two coherent View paint-order surfaces:
+// View z-index and overflow tests for two coherent paint-order surfaces:
 //
 //   1. pulp #972 — z-index paint order
 //      `sorted_children_by_z_index` returns insertion order at default

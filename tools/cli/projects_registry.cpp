@@ -1,8 +1,6 @@
 // projects_registry.cpp — Implementation of the `~/.pulp/projects.json`
 // registry. See projects_registry.hpp for the design contract.
 //
-// Issue #499 / #552 Slice 1b.
-
 #include "projects_registry.hpp"
 
 #include <algorithm>

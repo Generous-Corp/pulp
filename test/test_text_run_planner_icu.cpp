@@ -1,4 +1,4 @@
-// test_text_run_planner_icu.cpp — Pulp #2163, font v2 Slice 1.2.a finish.
+// test_text_run_planner_icu.cpp — ICU-backed text-run planning.
 //
 // Real ICU bidi + script run iterators. Verifies that
 // `TextRunPlanner::shape` emits multiple `ShapedRun`s on bidi /
@@ -122,7 +122,7 @@ TEST_CASE("planner — script split for Hello 日本語 world",
 #endif
 }
 
-// ── Single-run bidi: pure-RTL Hebrew keeps RTL level (Codex review on #2311) ─
+// ── Regression for #2311: pure-RTL Hebrew keeps RTL level ───────────────
 //
 // `"שלום"` is one bidi run AND one script run. SkShaper iterators report
 // `atEnd()` true after the first consume(), but `currentLevel()` still
@@ -149,7 +149,7 @@ TEST_CASE("planner — single-run RTL preserves bidi level after atEnd",
 #endif
 }
 
-// ── Single-run script: pure CJK keeps Hani tag after atEnd (Codex review on #2311) ─
+// ── Regression for #2311: pure CJK keeps Hani tag after atEnd ───────────
 //
 // `"日本語"` is one script run. After consume() the script iterator's
 // `atEnd()` returns true, but `currentScript()` still reports 'Hani'
@@ -181,7 +181,7 @@ TEST_CASE("planner — single-run CJK preserves script tag after atEnd",
 //
 // `"क्ष"` decomposes as ka (U+0915) + virama (U+094D) + ssa (U+0937).
 // UAX #29 says: virama joins the following consonant into one extended
-// grapheme cluster. cluster_step (Slice 3.6) already implements this;
+// grapheme cluster. cluster_step already implements this;
 // the planner must surface it in `ShapedText::clusters`.
 TEST_CASE("planner — Devanagari virama: क्ष is one cluster",
           "[font][planner][cluster][issue-2163]") {
@@ -256,7 +256,7 @@ TEST_CASE("planner — combining mark é is one cluster",
 // Every UTF-16 surface (JS, IME, macOS / Windows a11y) needs UTF-16
 // code-unit offsets. Every cluster surface (TextEditor caret motion,
 // IME composition, selection) needs `byte_to_cluster`. Both are
-// populated by Slice 1.2.a finish.
+// populated by the ICU shaping path.
 TEST_CASE("planner — UnicodeIndexMap utf16_offsets + byte_to_cluster",
           "[font][planner][index-map][issue-2163]") {
     SECTION("BMP-only Latin: utf16_offsets parallel scalar_offsets") {

@@ -379,10 +379,6 @@ pub fn find_toml_pin_site(source: &str, key: &str, kind: PinKind) -> PinSite {
     PinSite::default()
 }
 
-/// Rewrite the pin literal at [`PinSite`] to `new_pin`. Preserves the
-/// `v` prefix preference via `new_pin_style_has_v`.
-///
-/// Returns `None` when the site is [`PinKind::Unknown`] or when the
 /// Dispatch to the right pin-site finder based on [`PinKind`]. Mirrors
 /// the C++ `site_for_kind` helper used by the undo path. The two
 /// TOML-keyed variants ([`PinKind::PulpTomlSdkVersion`],
@@ -411,6 +407,10 @@ pub fn site_for_kind(source: &str, kind: PinKind) -> PinSite {
     }
 }
 
+/// Rewrite the pin literal at [`PinSite`] to `new_pin`. Preserves the
+/// `v` prefix preference via `new_pin_style_has_v`.
+///
+/// Returns `None` when the site is [`PinKind::Unknown`] or when the
 /// byte span no longer matches the captured text (defensive — the
 /// caller might have mutated the source between scan and write).
 #[must_use]
@@ -1013,7 +1013,7 @@ mod tests {
         assert!(json.get("old_value_style_has_v").is_some());
     }
 
-    // ── pulp#740 Slice C: standalone helpers ──────────────────────────
+    // ── standalone helper coverage ───────────────────────────────────
 
     #[test]
     fn find_find_package_pulp_version_locates_required_call() {

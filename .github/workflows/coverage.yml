@@ -103,6 +103,34 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # ── Codecov config drift gate (screams on stale codecov.yml) ───────────
+  # codecov.yml's flags + components must mirror the live core/* tree, and
+  # its `ignore:` list must mirror coverage_config.json's diff_cover_excludes
+  # so the Codecov bot and the Pulp diff-cover gate count the same lines.
+  # When a new core/<sub>/ subsystem lands without a matching flag+component,
+  # its coverage is silently dropped from the sliced dashboard; when a
+  # platform subtree isn't `!`-excluded it gets double-counted; when the
+  # two ignore lists drift the bot fires a false low-patch-coverage check.
+  # All three are pure-config faults invisible to a normal build, so this
+  # job runs on every PR with no native build and fails loudly on drift.
+  # These contract tests (test_codecov_config.py / test_codecov_components.py)
+  # were authored alongside #1055 but were never wired into a gate — the
+  # graph/scene subsystems drifted onto main undetected until this job
+  # existed. Keep it cheap and unconditional.
+  codecov-config-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Install PyYAML
+        run: python3 -m pip install --upgrade pyyaml
+      - name: Validate codecov.yml mirrors the live tree + diff-cover excludes
+        run: |
+          python3 tools/scripts/test_codecov_config.py
+          python3 tools/scripts/test_codecov_components.py
+
   # ── Detect iOS-relevant changes (closes #1887) ─────────────────────────
   # Companion to #1876, which path-filtered the shipyard validation lane
   # via `--label-exclude slow` in `.shipyard/config.toml`. The GH-Actions

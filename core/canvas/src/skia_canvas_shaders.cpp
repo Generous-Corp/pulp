@@ -1,7 +1,6 @@
 // skia_canvas_shaders.cpp — GPU shader-driven paint slices.
 //
-// Extracted from skia_canvas.cpp in the 2026-05 Phase 4 (R2-3 follow-up)
-// refactor. Bundles four GPU/SkSL-driven concerns into one TU:
+// Owns four GPU/SkSL-driven Canvas paint paths:
 //
 //   - GPU SDF Shape Primitives — kSDFShapeSkSL runtime effect + the
 //     draw_sdf_shape / draw_sdf_ring / draw_sdf_rect family.
@@ -12,8 +11,9 @@
 //   - GPU Waveform — kWaveformSkSL + draw_waveform() / draw_spectrum_bars()
 //     for shader-driven 1D-texture waveform rendering.
 //
-// pulp #1737 (Codex P2 sweep on #1791) — Skia headers MUST be included
-// BEFORE pulp/canvas/skia_canvas.hpp.
+// Skia headers MUST be included BEFORE pulp/canvas/skia_canvas.hpp. See
+// skia_canvas.cpp's head-of-file comment for the C++ name-lookup rule that
+// forces this ordering.
 
 #include <algorithm>
 #include <cmath>
@@ -41,8 +41,7 @@
 #include "include/core/SkTileMode.h"
 #include "include/effects/SkImageFilters.h"
 #include "include/effects/SkRuntimeEffect.h"
-// pulp #2183 hot-fix: WebGPU/Graphite native-texture wrap path was
-// missing these heavy includes after the split.
+// WebGPU/Graphite native-texture wrapping needs these Graphite/Dawn includes.
 #include "include/gpu/GpuTypes.h"                  // skgpu::Origin
 #include "include/gpu/graphite/BackendTexture.h"
 #include "include/gpu/graphite/Image.h"            // SkImages::WrapTexture
@@ -335,14 +334,10 @@ bool SkiaCanvas::draw_native_dawn_texture(void* texture_handle,
                                           float y,
                                           float w,
                                           float h) {
-    // iOS-D.3c (#3217): implement the WebGPU canvas → Skia blit. The
-    // bridge gives canvas widgets a `wgpu::Texture*` provider (see
-    // widget_bridge.cpp:1027-1029 and :3265/:3666); CanvasWidget::paint()
-    // routes through here. Until this function returned `true` the
-    // Three.js cube rendered to an invisible offscreen texture; the
-    // CAMetalLayer surface stayed blank. Codex's plan in issue #3217:
-    // wrap the Dawn texture as a graphite::BackendTexture, materialize
-    // as an SkImage, draw into the current canvas.
+    // WebGPU canvas widgets provide a `wgpu::Texture*` that must be wrapped
+    // as a Graphite backend texture, materialized as an SkImage, and drawn
+    // into the current Skia canvas. Returning true tells the widget paint path
+    // that the offscreen Dawn texture reached the presentable surface.
     if (!canvas_ || !recorder_ || !texture_handle || width == 0 || height == 0) {
         return false;
     }

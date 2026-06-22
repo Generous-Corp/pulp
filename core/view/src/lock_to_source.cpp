@@ -1,7 +1,4 @@
-// lock_to_source.cpp — Phase 4a Lock-to-source, Path A engine.
-//
-// Spec: planning/2026-05-18-inspector-direct-manipulation-roadmap.md,
-//       "Phase 4a — Path A (generated TSX rewrite)".
+// lock_to_source.cpp — generated-artifact lock-to-source engine.
 //
 // Definitions only; declarations live in pulp/view/lock_to_source.hpp.
 //
@@ -146,7 +143,7 @@ std::string escape_js_single(const std::string& s) {
     return out;
 }
 
-// WYSIWYG T5 — locate the [begin, end) line range of the element block whose
+// Locate the [begin, end) line range of the element block whose
 // `// @pulp-anchor <id>` comment matches `anchor_id`. begin is the line AFTER
 // the anchor comment; end is the next anchor comment / blank line / EOF. Sets
 // anchor_line to the comment's index. Returns false when the anchor is absent.
@@ -173,7 +170,7 @@ bool find_anchor_block(const std::vector<std::string>& lines,
     return true;
 }
 
-// WYSIWYG T5 — extract the `const <var> =` declaration's variable name from an
+// Extract the `const <var> =` declaration's variable name from an
 // element block, or empty if the block has no readable declaration.
 std::string block_var_name(const std::vector<std::string>& lines,
                            std::size_t block_begin, std::size_t block_end) {
@@ -187,7 +184,7 @@ std::string block_var_name(const std::vector<std::string>& lines,
     return {};
 }
 
-// WYSIWYG T5 — width of a line's leading-whitespace prefix (tabs count as one
+// Width of a line's leading-whitespace prefix (tabs count as one
 // column each; the importer emits spaces, so this is just the space count).
 std::size_t indent_width(const std::string& line) {
     std::size_t i = 0;
@@ -195,7 +192,7 @@ std::size_t indent_width(const std::string& line) {
     return i;
 }
 
-// WYSIWYG T5 — find the FULL source subtree of the element anchored at
+// Find the full source subtree of the element anchored at
 // `anchor_line`. The web-compat codegen (design_codegen.cpp generate_node) is
 // depth-first: a parent's block is emitted, then each child's block recursively,
 // each child more-indented than its parent. An element's complete subtree is
@@ -237,7 +234,7 @@ bool find_subtree_range(const std::vector<std::string>& lines,
     return true;
 }
 
-// WYSIWYG T4 — turn an InspectorOverlay tweak value into the literal text
+// Turn an InspectorOverlay tweak value into the literal text
 // that should appear inside the generated `el.style.<name> = '<text>'`. Most
 // paths emit their value verbatim (a color, a "120px" dimension, "absolute").
 // The exception is `transform.scale`, whose tweak value is a bare scale
@@ -270,7 +267,7 @@ lock_property_to_style_name(const std::string& property_path) {
         if (head == "paint" || head == "style" || head == "layout") {
             leaf = property_path.substr(dot + 1);
         } else if (head == "transform") {
-            // WYSIWYG T4 — the proportional-resize gesture persists its
+            // The proportional-resize gesture persists its
             // content scale under `transform.scale` (an InspectorOverlay
             // tweak, see inspector_overlay.cpp). It maps onto the CSS
             // `el.style.transform` surface (the value wrapper in
@@ -290,7 +287,7 @@ lock_property_to_style_name(const std::string& property_path) {
     // flat `el.style.<name>` rewrite.
     if (leaf.find('.') != std::string::npos) return std::nullopt;
 
-    // WYSIWYG T4 — `transform.*` collapses onto the single `transform`
+    // `transform.*` collapses onto the single `transform`
     // style property regardless of the sub-name (scale / rotate / …); the
     // value wrapper in lock_tweak_into_source builds the CSS function form.
     if (transform_ns) return std::string("transform");
@@ -315,7 +312,7 @@ lock_property_to_style_name(const std::string& property_path) {
         "padding", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
         "margin", "marginTop", "marginRight", "marginBottom", "marginLeft",
         "justifyContent", "alignItems", "flexWrap", "flexGrow",
-        // WYSIWYG T4 — `order` (CSS flex reorder). The reflow-aware
+        // `order` (CSS flex reorder). The reflow-aware
         // drag-to-reorder gesture rewrites flex().order; locking it to
         // source persists the new sibling order as `el.style.order`.
         "order",
@@ -436,7 +433,7 @@ LockResult lock_tweak_into_source(const std::string& source,
         }
     }
 
-    // WYSIWYG T4 — wrap a bare transform.scale factor into scale(<n>) before
+    // Wrap a bare transform.scale factor into scale(<n>) before
     // escaping; all other paths emit their value verbatim.
     const std::string formatted =
         format_lock_value(tweak.property_path, tweak.value);
@@ -498,7 +495,7 @@ LockResult lock_tweak_into_source(const std::string& source,
     return result;
 }
 
-// WYSIWYG T5 — structural reparent. Rewrite the dragged element's appendChild
+// Structural reparent. Rewrite the dragged element's appendChild
 // receiver so the generated source wires it under the new parent's element.
 LockResult reparent_in_source(const std::string& source,
                               const ReparentToSourceEdit& edit) {
@@ -572,7 +569,7 @@ LockResult reparent_in_source(const std::string& source,
         return result;
     }
 
-    // ── WYSIWYG T5 (gap #2): physically relocate the child's source block ────
+    // ── Physically relocate the child's source block ────────────────────────
     // The appendChild receiver rewrite alone changes the LIVE DOM parent
     // (createElement + appendChild are order-independent once the receiver is
     // correct). But to produce well-formed source that round-trips through a
@@ -698,7 +695,7 @@ LockResult reparent_in_source(const std::string& source,
             }
             insert_at = j;
 
-            // WYSIWYG sweep P1 — honor the requested insertion SLOT. When the
+            // Honor the requested insertion slot. When the
             // edit names a preceding sibling, drop the moved block right after
             // THAT sibling's subtree instead of as the parent's first child, so
             // the source order matches the position the user dragged to. The

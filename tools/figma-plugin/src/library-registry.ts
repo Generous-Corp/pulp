@@ -1,4 +1,4 @@
-// library-registry.ts — Phase 3 (planning/2026-05-28-pulp-figma-plugin-strategy.md §8)
+// Pulp Figma library registry.
 //
 // Loads tools/figma-plugin/library-manifest.json at build time and exposes
 // typed lookups for:
@@ -91,7 +91,7 @@ export function entryForKind(
   return widgetEntries.find((e) => e.kind === kind);
 }
 
-// ── Custom-control resolution (P8 — the package-fragment merge) ──────────────
+// ── Custom-control resolution ───────────────────────────────────────────────
 // A shared package (registry-schema `design_controls`) maps a Figma identity to
 // the `factory_id` its pulp::view::View registers (register_design_control_
 // factory). The importer MERGES the installed packages' fragments into one list

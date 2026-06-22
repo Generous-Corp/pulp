@@ -5,11 +5,9 @@
 //!
 //! Every `pulp motion <verb>` subcommand is sugar over one
 //! `pulp-cpp inspect --command Motion.<verb> --params <JSON>` call.
-//! The MCP wrapper (`tools/mcp/pulp_mcp.cpp`) shipped this exact
-//! routing pattern for `pulp_motion_*` tools (PR #2153); the CLI
-//! commands here are a cargo-cult of that approach so users get the
-//! same Motion surface from a terminal that an MCP-driven agent gets
-//! from a tool call.
+//! The MCP wrapper (`tools/mcp/pulp_mcp.cpp`) uses the same routing
+//! pattern for `pulp_motion_*` tools; the CLI commands here keep the
+//! terminal Motion surface aligned with the MCP tool surface.
 //!
 //! Subcommands (and the inspector method each one forwards to):
 //!
@@ -23,7 +21,7 @@
 //! | `scrub <FRAME>`                 | `Motion.scrubTo`        |
 //! | `play`                          | `Motion.play`           |
 //! | `pause`                         | `Motion.pause`          |
-//! | `cost enable` / `cost disable`  | `Motion.enable/disable` |
+//! | `cost enable` / `cost disable`  | `Motion.enableCost` / `Motion.disableCost` |
 //!
 //! # Why we delegate to `pulp-cpp inspect`
 //!
@@ -537,7 +535,7 @@ impl InspectorTalker for SystemInspector {
 ///
 /// 1. `pulp-cpp` on `$PATH` (post-cutover install layout).
 /// 2. The Rust `pulp` binary on `$PATH` *only if* it can fall
-///    through to `pulp-cpp` (Phase 7 fallthrough). The Rust binary
+///    through to `pulp-cpp` via fallthrough. The Rust binary
 ///    itself doesn't implement `inspect` natively yet, so we don't
 ///    pick `target/release/pulp` here — that would just bounce back
 ///    through unknown-subcommand fallthrough.

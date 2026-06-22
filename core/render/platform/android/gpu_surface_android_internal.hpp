@@ -1,14 +1,13 @@
 // gpu_surface_android_internal.hpp — PRIVATE shared declarations for the
 // Android GPU-surface translation units.
 //
-// Created in the P8-1 refactor that split the JNI `extern "C"` bridge out
-// of gpu_surface_android.cpp into gpu_surface_android_jni.cpp. The JNI
-// layer is a thin forwarder: every export calls one of the `android_*`
-// entry points below (already external-linkage free functions in
-// gpu_surface_android.cpp) — except nativeOnTouchCancel, which clears the
-// shared touch-capture pointer directly. That one global (g_captured_view)
-// is the only file-local static promoted to external linkage for the
-// split; all paint/lifecycle state stays private to gpu_surface_android.cpp.
+// Shared by gpu_surface_android.cpp and gpu_surface_android_jni.cpp. This
+// header declares the render entry points that the JNI bridge calls after any
+// Java-boundary work it owns, such as GlobalRef management, ANativeWindow
+// conversion, drag-backend registration, and drop-path marshalling.
+// nativeOnTouchCancel clears the shared touch-capture pointer directly; that
+// pointer (g_captured_view) is the only cross-TU state exposed here. All paint
+// and lifecycle state stays private to gpu_surface_android.cpp.
 //
 // PRIVATE: lives under core/render/platform/android/, not the public
 // include tree. Not part of the installed SDK surface — do not reference

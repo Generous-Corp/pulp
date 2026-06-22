@@ -1,11 +1,10 @@
 //! `pulp upgrade --install` — download + dual-binary self-replace.
 //!
-//! Phase 8 swap blocker fix: post-swap, the user-facing `pulp` is the
-//! Rust binary and `pulp-cpp` is the C++ delegate. The legacy C++
-//! upgrade path self-replaces the running binary with whatever is named
-//! `pulp` in the release tarball — which after the swap is the Rust
-//! binary. Delegating to it would clobber `pulp-cpp` and break the
-//! fallthrough chain.
+//! In the dual-binary layout, the user-facing `pulp` is the Rust
+//! binary and `pulp-cpp` is the C++ delegate. The legacy C++ upgrade
+//! path self-replaces the running binary with whatever is named `pulp`
+//! in the release tarball; delegating to it would clobber `pulp-cpp`
+//! and break the fallthrough chain.
 //!
 //! This module owns the install path on the Rust side. It downloads the
 //! release tarball, extracts both binaries, and atomically replaces the

@@ -7,7 +7,7 @@
 // the returned value IS the envelope plus serialised asset bytes,
 // suitable for assembling into a `.pulp.zip` outside the sandbox.
 //
-// Purpose (#3225-era reframe): the official REST headless path lives at
+// Purpose: the official REST headless path lives at
 // `tools/import-design/figma_rest_export.py`. This bundle is the
 // *plugin-side* conformance oracle — it produces byte-identical output to
 // the published plugin's `Export to Pulp`, so the conformance test in
@@ -44,10 +44,10 @@ const LIBRARY_MANIFEST: LibraryManifestSnapshot = {
 };
 
 declare const TARGET_NODE_ID: string | undefined;
-// Faithful-vector lane (Plan B / B4b) — the DEFAULT. Each top-level frame
-// exports its own SVG and renders via DesignFrameView with auto-detected
-// INTERACTIVE overlays, instead of the legacy widget-recognition rebuild. The
-// injected prelude sets FAITHFUL_VECTOR = false to opt out (legacy flat tree).
+// Faithful-vector lane: the default. Each top-level frame exports its own SVG
+// and renders via DesignFrameView with auto-detected interactive overlays,
+// instead of the legacy widget-recognition rebuild. The injected prelude sets
+// FAITHFUL_VECTOR = false to opt out (legacy flat tree).
 declare const FAITHFUL_VECTOR: boolean | undefined;
 
 interface HeadlessAssetBundle {
@@ -105,10 +105,10 @@ async function run(): Promise<HeadlessResult> {
     figma.fileKey ??
     `local-${encodeURIComponent(figma.root.name).slice(0, 32)}`;
 
-  // The published plugin supports drag-drop user fonts (#43c); the headless
-  // path has no UI, so the cache is always empty. We pass an empty cache
-  // so the serializer's metadata-only path runs (matches the byte shape
-  // of an "Export to Pulp" with no user fonts supplied).
+  // The published plugin supports drag-drop user fonts; the headless path has no
+  // UI, so the cache is always empty. We pass an empty cache so the serializer's
+  // metadata-only path runs (matches the byte shape of an "Export to Pulp" with
+  // no user fonts supplied).
   const userFonts = new UserFontCache();
 
   const envelope = serializeExport(result.roots, result.diagnostics, {

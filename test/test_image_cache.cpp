@@ -1,4 +1,4 @@
-// ImageCache tests (workstream 07 slice 7.4).
+// ImageCache tests.
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/view/image_cache.hpp>

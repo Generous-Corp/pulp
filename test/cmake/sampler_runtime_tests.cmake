@@ -6,7 +6,7 @@ pulp_add_test_suite(pulp-test-transport-quantizer LIBRARIES pulp::format)
 # Sample asset drop target adapter over cheap extension classification.
 pulp_add_test_suite(pulp-test-sample-asset-drop-target LIBRARIES pulp::view)
 
-# Additive process-block contract for graph/offline/sampler runtime slices.
+# Additive process-block contract for graph/offline/sampler runtime paths.
 pulp_add_test_suite(pulp-test-process-block LIBRARIES pulp::format)
 
 # Release-safe no-allocation probes for graph/event/sampler DSP hot paths.
@@ -122,6 +122,6 @@ endif()
 pulp_add_test_suite(pulp-test-graph-runtime-executor
     LIBRARIES pulp::format)
 
-# ProcessBlock to legacy Processor::process() adapter for migration slices.
+# ProcessBlock to legacy Processor::process() adapter for migration compatibility.
 pulp_add_test_suite(pulp-test-processor-block-adapter
     LIBRARIES pulp::format)

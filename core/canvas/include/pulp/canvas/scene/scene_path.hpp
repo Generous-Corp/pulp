@@ -1,7 +1,7 @@
 // ScenePath — retained cubic-Bezier path node.
 //
-// Item 6.1 / Pulp-native names. Replaces "stream path commands at every
-// paint" with "build once, paint many" by holding the path operations
+// Replaces "stream path commands at every paint" with "build once,
+// paint many" by holding the path operations
 // in a flat command buffer keyed off of `core/canvas::Canvas`'s existing
 // `begin_path` / `move_to` / `line_to` / `quad_to` / `cubic_to` /
 // `close_path` calls. The buffer feeds back to the same Canvas API at

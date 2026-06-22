@@ -1,6 +1,6 @@
 // Linux (X11) PluginViewHost — native child-window editor host for the
-// foreign-host embed SDK + the VST3/CLAP adapters on Linux (#3329 Win/Linux
-// parity). Mirrors the macOS/Windows hosts (NSView/HWND -> X11 child Window).
+// foreign-host embed SDK + the VST3/CLAP adapters on Linux. Mirrors the
+// macOS/Windows hosts (NSView/HWND -> X11 child Window).
 //
 // Render paths (one class):
 //   - GPU: a Dawn surface built from the child X11 window via the typed
@@ -14,8 +14,8 @@
 //     (the embed's render_to_rgba path is the primary VM proof; this host's
 //     capture is the live-window analog).
 //
-// X11 caveats (Codex review): a bare Window id is not enough for Dawn — we keep
-// a Display*. We open our own connection with XOpenDisplay(nullptr) for the
+// X11 caveats: a bare Window id is not enough for Dawn — we keep a Display*.
+// We open our own connection with XOpenDisplay(nullptr) for the
 // proof-level path; robust DAW interop would take the host's Display from the
 // format adapter. There is no internal event loop here — the host pumps its own
 // X connection; we only create/reparent/map/blit on the UI thread. Visual is

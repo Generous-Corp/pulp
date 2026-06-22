@@ -184,8 +184,8 @@ extern "C" fn suspend(inst: *mut c_void) -> i32 {
     PULP_NATIVE_OK
 }
 extern "C" fn reset(_inst: *mut c_void) {}
-// No-op process: passthrough is a Phase 2 concern (golden audio). Here we only
-// prove the call links and dispatches RT-safely (no alloc/log/panic).
+// No-op process: passthrough/golden-audio is out of scope for this fixture.
+// Here we only prove the call links and dispatches RT-safely (no alloc/log/panic).
 extern "C" fn process(_inst: *mut c_void, _io: *const c_void) -> i32 {
     PULP_NATIVE_OK
 }

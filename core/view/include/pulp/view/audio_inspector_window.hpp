@@ -3,13 +3,11 @@
 /// @file audio_inspector_window.hpp
 /// Separate developer Audio Inspector tool window — live signal observability
 /// (meters, probe-stage status, copied waveform, L/R level-match/balance,
-/// device summary) built on the Phase 5 realtime probe.
+/// device summary) built on the realtime output-boundary probe.
 ///
 /// This is a SIBLING of `InspectorWindow` (the layout inspector), not a tab
 /// inside it. The two tools share window / command / visual primitives but own
-/// independent state models (see
-/// `planning/2026-06-09-audio-inspector-separate-tool-window-proposal.md`,
-/// "Why Separate"). Both dispatch through a shell-owned `CommandRegistry`; this
+/// independent state models. Both dispatch through a shell-owned `CommandRegistry`; this
 /// window never assigns `View::on_global_key` directly.
 ///
 /// Mirrors `InspectorWindow`'s structure exactly:

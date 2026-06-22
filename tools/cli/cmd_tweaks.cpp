@@ -1,4 +1,4 @@
-// cmd_tweaks.cpp — `pulp tweaks diff` subcommand (Inspector Phase 2).
+// cmd_tweaks.cpp — `pulp tweaks diff` subcommand.
 //
 // Compares the inspector tweak sidecar (pulp-tweaks.json) against a
 // design snapshot and reports which stored tweaks still apply cleanly,
@@ -7,7 +7,6 @@
 // the inspector overlay's drift drawer — same TweakStore::diff() logic
 // underneath, so the two surfaces never disagree.
 // Spec: planning/2026-05-18-inspector-direct-manipulation-roadmap.md
-//       (Phase 2 — Drift UI + CLI).
 //
 // The design snapshot is supplied via `--design <file>`, a small JSON
 // "anchors manifest" in one of three accepted shapes:

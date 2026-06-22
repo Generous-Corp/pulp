@@ -1,15 +1,10 @@
-// Phase 2a — Figma scene walker.
+// Figma scene walker.
 //
 // Walks a Figma selection and produces an `ExtractedFigmaNode` tree matching the
 // shape declared in schema/figma-plugin-export-v1.json. This is the in-memory
-// model that downstream phases consume:
-//   - Phase 2b serializes it to JSON
-//   - Phase 3 mutates it to swap library-component frames into widget nodes
-//
-// SLICE 1 of Phase 2a (this file): geometry, frames + auto-layout, text +
-// dominant typography, basic style (fills as flat color or linear gradient,
-// strokes, corner radius, opacity, blend mode), and recursive children.
-// Images / vectors / instance-component-key lookup defer to slice 2.
+// model serialized to JSON and consumed by the design importer. It captures
+// geometry, frames + auto-layout, text + dominant typography, style, recursive
+// children, assets, vector exports, and library component metadata.
 
 import type {
   ExtractedFigmaNode,
@@ -31,8 +26,6 @@ import {
   widgetKindByNamePrefix,
   LIBRARY_VERSION,
 } from "./library-registry";
-// P2 — pure, host-neutral helpers split for clarity + maintainability.
-// Behaviour-unchanged from when these lived inline here.
 import {
   paintToColor,
   rgbaToCss,
@@ -55,9 +48,9 @@ export interface ExtractOptions {
   includeHidden?: boolean;
   /// Max nodes before the walker bails out with a diagnostic (perf safety).
   maxNodes?: number;
-  /// Faithful-vector lane (Plan B / B4b): export each top-level frame's own
-  /// SVG and render it pixel-faithfully via DesignFrameView, with knobs
-  /// auto-detected from the SVG. Off by default (the widget-recognition lane).
+  /// Export each top-level frame's own SVG and render it pixel-faithfully via
+  /// DesignFrameView, with knobs auto-detected from the SVG. Off by default
+  /// for the widget-recognition lane.
   faithfulVector?: boolean;
 }
 
@@ -69,16 +62,16 @@ export interface ExtractResult {
   nodeCount: number;
   /// True if maxNodes was hit and the result is incomplete.
   truncated: boolean;
-  /// Captured assets (slice 2). Empty when no fills/vectors were exported.
+  /// Captured image/vector assets. Empty when no fills/vectors were exported.
   assets: AssetCache;
   /// Captured design tokens from Figma variables.
   tokens: ExtractedTokens;
   /// Deduplicated list of every font family/style/weight tuple referenced
   /// by text nodes in the extracted tree. Drives Pulp's runtime font
-  /// resolution (#43a-rev / #43b). Note: Figma's plugin API does NOT
+  /// resolution. Note: Figma's plugin API does NOT
   /// expose font binaries — `asset_id` stays empty for plain captures;
   /// it's populated only when the user supplies a TTF via the drag-drop
-  /// escape hatch (#43c, follow-up).
+  /// escape hatch.
   font_family_assets: FontFamilyAsset[];
 }
 
@@ -97,7 +90,7 @@ export interface FontFamilyAsset {
   /// variants without re-parsing the style string.
   italic?: boolean;
   /// Set only when the user supplied a TTF/OTF via the drag-drop escape
-  /// hatch (#43c, follow-up). Points into the envelope's
+  /// hatch. Points into the envelope's
   /// `asset_manifest` so the runtime can locate the bundled font file.
   asset_id?: string;
 }
@@ -164,8 +157,8 @@ export async function extractScene(
 /// Order is stable: families appear in first-encounter order, styles
 /// within a family in first-encounter order. That stability matters for
 /// snapshot tests that compare envelope output.
-// `collectFontFamilyAssets` moved to ./extract-pure.ts (P2). Behaviour-identical;
-// imported above. Kept the call site in `extractScene` unchanged.
+// Font-family collection stays in extract-pure.ts so this file stays focused on
+// async Figma API calls and tree assembly.
 
 // ──────────────────────────────────────────────────────────────────────────
 // Internal walker
@@ -266,24 +259,23 @@ async function walk(
     extractTextStyle(node as TextNode, ex.style, ctx);
   }
 
-  // INSTANCE: capture component metadata so Phase 3 can recognize Pulp library widgets.
+  // INSTANCE: capture component metadata so Pulp library widgets can be recognized.
   if (node.type === "INSTANCE") {
     await captureInstanceMetadata(node as InstanceNode, ex, ctx);
 
-    // Phase 3 — Pulp Library component recognition.
+    // Pulp Library component recognition.
     //
     // Recognition order:
     //   1. Authoritative key-based match: ex.component_key matches a
     //      Pulp-library component_set_key from library-manifest.json.
-    //      This is the canonical Phase 3 path — designs that pulled in
+    //      This is the canonical path — designs that pulled in
     //      the published Pulp library hit this regardless of layer name.
     //   2. Name-prefix fallback: name starts with a manifest-registered
     //      prefix (e.g. "Pulp / Knob"). Lets designs use the convention
     //      without depending on the published library file.
     //   3. Permissive name match: the broader audioWidgetKindFromName()
     //      heuristic ("knob" / "fader" / "meter" appearing anywhere in
-    //      the name) — preserves pre-Phase-3 behaviour for sprite-strip
-    //      detection on ad-hoc designs.
+    //      the name) — preserves sprite-strip detection on ad-hoc designs.
     //
     // The first match wins. When a library or prefix match fires we
     // also stamp ex.library_version so the importer can tell apart
@@ -340,7 +332,7 @@ async function walk(
     }
   }
 
-  // Vector-like nodes → SVG asset export (Phase 2a slice 2).
+  // Vector-like nodes → exported asset.
   const isVectorLike =
     node.type === "VECTOR" ||
     node.type === "BOOLEAN_OPERATION" ||
@@ -406,8 +398,6 @@ async function walk(
 
 // ──────────────────────────────────────────────────────────────────────────
 // Type mapping
-
-// `mapNodeType` moved to ./extract-pure.ts (P2). Behaviour-identical.
 
 // ──────────────────────────────────────────────────────────────────────────
 // Geometry
@@ -511,12 +501,12 @@ function extractStyle(n: SceneNode, ctx: WalkCtx): ExtractedStyle {
       } else if (first.type === "GRADIENT_LINEAR") {
         s.background_gradient = gradientToCss(first as GradientPaint);
       } else if (first.type === "IMAGE") {
-        // Slice 2: extract image fill bytes via Figma's imageHash, cache by sha256.
+        // Extract image fill bytes via Figma's imageHash, cache by sha256.
         const imgHash = (first as ImagePaint).imageHash;
         if (imgHash) {
           // Schedule asset capture; rejoined via a microtask so we don't block this synchronous walk.
           // Note: extractStyle is synchronous; the caller will retroactively call
-          // captureImageFill via the deferred path. For slice 2, we mark with a placeholder
+          // captureImageFill via the deferred path. Mark with a placeholder
           // and use a side-channel — but the simpler thing is to make extractStyle async-aware.
           // SEE: image fills are wired via captureImageFillsForNode after style extraction.
           s.background_image = `pending:${imgHash}`;
@@ -591,8 +581,8 @@ function extractStyle(n: SceneNode, ctx: WalkCtx): ExtractedStyle {
 }
 
 function extractTextStyle(t: TextNode, s: ExtractedStyle, ctx: WalkCtx): void {
-  // Read the "first character" style as the dominant style. Per-range
-  // emission is a follow-up.
+  // Read the "first character" style as the dominant style; range-specific
+  // emission is not wired through this envelope yet.
   const charLen = t.characters.length;
   if (charLen === 0) return;
   if (typeof t.fontSize === "number") s.font_size = t.fontSize;
@@ -629,9 +619,9 @@ function extractTextStyle(t: TextNode, s: ExtractedStyle, ctx: WalkCtx): void {
       delete s.background_color;
     }
   }
-  // Per-range note for follow-up
+  // Detect once range-specific font capture is wired.
   if (charLen > 0) {
-    const hasMultiRangeFonts = false; // TODO slice 2: scan getRangeFontName
+    const hasMultiRangeFonts = false; // TODO: scan getRangeFontName
     if (hasMultiRangeFonts) {
       pushDiag(ctx, "info", "text-ranges-flattened", "capture_partial",
         "Mixed font ranges in text node flattened to dominant style.");
@@ -671,10 +661,6 @@ function extractLayout(n: SceneNode, ctx: WalkCtx): ExtractedLayout {
   return l;
 }
 
-// `mapPrimaryAxisAlign`, `mapCounterAxisAlign`, `mapAxisSize`, `paintToColor`,
-// `rgbaToCss`, `hex2`, `gradientToCss`, `gradientFallbackFlat` all moved to
-// ./extract-pure.ts (P2). Behaviour-identical.
-
 // ──────────────────────────────────────────────────────────────────────────
 // Diagnostic helpers
 
@@ -688,11 +674,11 @@ function pushDiag(
   ctx.diagnostics.push({ severity, code, kind, message, path: pathOf(ctx) });
 }
 
-// Faithful-vector capture (Plan B / B4b): export the frame's own SVG, register
-// it as an image/svg+xml asset, and attach the render-mode + auto-detected
-// interactive knobs the C++ DesignFrameView consumes. A capture failure leaves
-// the node on the normal widget-recognition lane (diagnostic only) — the import
-// degrades, it never blanks.
+// Faithful-vector capture: export the frame's own SVG, register it as an
+// image/svg+xml asset, and attach the render-mode + auto-detected interactive
+// knobs the C++ DesignFrameView consumes. A capture failure leaves the node on
+// the normal widget-recognition lane (diagnostic only) — the import degrades, it
+// never blanks.
 async function applyFaithfulVector(
   node: ExtractedFigmaNode,
   sceneNode: SceneNode,
@@ -713,11 +699,10 @@ async function applyFaithfulVector(
     // (search/dropdown/stepper/tabs), mapped into the SVG's panel space — kept in
     // lockstep with the REST lane (figma_rest_export.py).
     const knobs = parseFrameKnobs(svg);
-    // P7 import report: knobs are GEOMETRY-detected (dome+needle in the SVG),
-    // with no node name — stamp them as affordance-resolved (rung 2) so the
-    // import report lists EVERY control, not just the overlays (which
-    // detectOverlayControls stamps itself). A geometric knob's bounds are its
-    // hit circle, so it is square by construction → no conflict, full confidence.
+    // Knobs are geometry-detected (dome+needle in the SVG), with no node name.
+    // Stamp them as affordance-resolved so the import report lists every
+    // control, not just the overlays. A geometric knob's bounds are its hit
+    // circle, so it is square by construction: no conflict, full confidence.
     for (let ki = 0; ki < knobs.length; ki++) {
       const k = knobs[ki];
       const d = 2 * (k.hit_radius || 0);
@@ -742,10 +727,10 @@ function pathOf(ctx: WalkCtx): string {
   return ctx.pathStack.join("");
 }
 
-/// Phase 3 — read the structured audio-widget properties (label, min,
-/// max, value, units, binding) off `ex.component_properties` and stamp
-/// them onto `ex.audio_*` fields so the serializer can emit them at the
-/// IR node root for design_import.cpp::parse_ir_node to consume.
+/// Read the structured audio-widget properties (label, min, max, value, units,
+/// binding) off `ex.component_properties` and stamp them onto `ex.audio_*`
+/// fields so the serializer can emit them at the IR node root for
+/// design_import.cpp::parse_ir_node to consume.
 ///
 /// componentProperties keys carry a "#<unique-id>" suffix (e.g.
 /// "binding#01:02"); we match on the prefix before the "#".
@@ -785,20 +770,14 @@ function extractAudioPropsFromComponentProperties(
   if (units !== undefined && units.length > 0) ex.audio_units = units;
   const binding = getRawString("binding");
   if (binding !== undefined && binding.length > 0) ex.audio_binding = binding;
-  // Phase 5: XYPad has a second binding for the Y axis. Only the XYPad
-  // library variant defines this property; other widgets fall through.
+  // XYPad has a second binding for the Y axis. Only the XYPad library variant
+  // defines this property; other widgets fall through.
   const binding_y = getRawString("binding_y");
   if (binding_y !== undefined && binding_y.length > 0) ex.audio_binding_y = binding_y;
 }
 
-/// Detect audio widget kind from an instance's main-component name. Used
-/// to flatten widget instances to a PNG skin (Track A2). Patterns match
-/// Pulp's IR-side detect_audio_widget() (core/view/src/design_import.cpp).
-// `audioWidgetKindFromName` and `isPureVectorIllustration` moved to
-// ./extract-pure.ts (P2). Behaviour-identical.
-
 // ──────────────────────────────────────────────────────────────────────────
-// Instance metadata capture (Phase 2a slice 2)
+// Instance metadata capture
 
 async function captureInstanceMetadata(
   inst: InstanceNode,

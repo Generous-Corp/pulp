@@ -8,6 +8,51 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v04593"></a>
+## [0.459.3] - 2026-06-22
+
+- docs(source): clean format cli and figma comment breadcrumbs ([#4463](https://github.com/danielraffel/pulp/pull/4463))
+- docs(source): clean runtime and view comment breadcrumbs ([#4462](https://github.com/danielraffel/pulp/pull/4462))
+- docs(source): clean model and event comment breadcrumbs ([#4461](https://github.com/danielraffel/pulp/pull/4461))
+- docs(source): clean Priority B source comment breadcrumbs ([#4460](https://github.com/danielraffel/pulp/pull/4460))
+- docs(source): clean iOS AUv3 example comment breadcrumbs ([#4459](https://github.com/danielraffel/pulp/pull/4459))
+- docs(source): clean view host comment breadcrumbs ([#4458](https://github.com/danielraffel/pulp/pull/4458))
+- docs(source): clean test harness comment breadcrumbs ([#4457](https://github.com/danielraffel/pulp/pull/4457))
+- docs(source): clean tooling comment breadcrumbs ([#4456](https://github.com/danielraffel/pulp/pull/4456))
+- docs(source): clean core provenance comments ([#4455](https://github.com/danielraffel/pulp/pull/4455))
+- docs(source): clean view comment breadcrumbs ([#4454](https://github.com/danielraffel/pulp/pull/4454))
+- docs(cli): clean Rust CLI comment breadcrumbs ([#4453](https://github.com/danielraffel/pulp/pull/4453))
+- docs(source): clean view and cli comment breadcrumbs ([#4452](https://github.com/danielraffel/pulp/pull/4452))
+- docs(source): clean view and midi comment breadcrumbs ([#4451](https://github.com/danielraffel/pulp/pull/4451))
+- docs(source): clean core and tooling comment breadcrumbs ([#4450](https://github.com/danielraffel/pulp/pull/4450))
+- feature/source comment hygiene batch 20260622 n ([#4449](https://github.com/danielraffel/pulp/pull/4449))
+- feature/source comment hygiene batch 20260622 m ([#4448](https://github.com/danielraffel/pulp/pull/4448))
+- docs(source): clean figma plugin comment breadcrumbs ([#4447](https://github.com/danielraffel/pulp/pull/4447))
+- docs(source): clean web-compat JS comment breadcrumbs ([#4446](https://github.com/danielraffel/pulp/pull/4446))
+- docs(source): clean layout geometry comment breadcrumbs ([#4445](https://github.com/danielraffel/pulp/pull/4445))
+- docs(source): clean widget bridge comment breadcrumbs ([#4444](https://github.com/danielraffel/pulp/pull/4444))
+- docs(source): clean core view comment breadcrumbs ([#4443](https://github.com/danielraffel/pulp/pull/4443))
+- docs(source): clean inspect comment breadcrumbs ([#4442](https://github.com/danielraffel/pulp/pull/4442))
+- chore(source): batch comment hygiene and benchmark cleanup ([#4441](https://github.com/danielraffel/pulp/pull/4441))
+- docs(canvas): clean text font comment breadcrumbs ([#4440](https://github.com/danielraffel/pulp/pull/4440))
+- docs(import-ir): clean stale comments and fix HostBench test path ([#4439](https://github.com/danielraffel/pulp/pull/4439))
+- docs(react): clean stale comment breadcrumbs ([#4438](https://github.com/danielraffel/pulp/pull/4438))
+- docs(view): clean web-compat JS comment breadcrumbs ([#4437](https://github.com/danielraffel/pulp/pull/4437))
+- docs(format): clean audio and MIDI comment breadcrumbs ([#4436](https://github.com/danielraffel/pulp/pull/4436))
+- ci: fix codecov coverage drift and gate it so it screams on regress ([#4435](https://github.com/danielraffel/pulp/pull/4435))
+- docs(render): remove stale headless surface plan breadcrumb ([#4434](https://github.com/danielraffel/pulp/pull/4434))
+- docs(render): clean canvas/render comment breadcrumbs ([#4433](https://github.com/danielraffel/pulp/pull/4433))
+- docs(view): clean widget/codegen comment breadcrumbs ([#4430](https://github.com/danielraffel/pulp/pull/4430))
+
+<a id="v04592"></a>
+## [0.459.2] - 2026-06-21
+
+- docs(skill): clean import-design comment breadcrumbs ([#4429](https://github.com/danielraffel/pulp/pull/4429))
+- fix(ci): route release signing to macos-15 ([#4427](https://github.com/danielraffel/pulp/pull/4427))
+- fix/release unblock 20260620 ([#4426](https://github.com/danielraffel/pulp/pull/4426))
+- feature/comment hygiene batch open 20260620 ([#4425](https://github.com/danielraffel/pulp/pull/4425))
+- docs(ci): prefer Shipyard for GitHub work; gh 'invalid token' is usually a rate limit ([#4097](https://github.com/danielraffel/pulp/pull/4097))
+
 <a id="v04591"></a>
 ## [0.459.1] - 2026-06-20
 
@@ -4657,6 +4702,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.459.3]: https://github.com/danielraffel/pulp/releases/tag/v0.459.3
+[0.459.2]: https://github.com/danielraffel/pulp/releases/tag/v0.459.2
 [0.459.1]: https://github.com/danielraffel/pulp/releases/tag/v0.459.1
 [0.459.0]: https://github.com/danielraffel/pulp/releases/tag/v0.459.0
 [0.458.0]: https://github.com/danielraffel/pulp/releases/tag/v0.458.0

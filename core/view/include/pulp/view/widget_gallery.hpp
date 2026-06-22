@@ -1,11 +1,11 @@
 #pragma once
 
 // Widget gallery — a single themed view tree that lays out every supported
-// primitive (core widgets + Phase-4 gap widgets) in one scrollable board.
+// primitive in one scrollable board.
 // It is three things at once (Design-System-Import-Plan §9):
 //   * living documentation of what Pulp's UI supports,
 //   * the reskin preview surface (swap the theme, everything restyles),
-//   * the visual-regression corpus (Phase 6 renders this per theme and diffs).
+//   * the visual-regression corpus for themed render diffs.
 //
 // Returned root is sized to GALLERY_WIDTH × the height it computes; render it
 // headlessly with render_to_png / render_to_file, or mount it in a window.

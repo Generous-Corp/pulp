@@ -1,4 +1,4 @@
-// cmd_project_undo.cpp — `pulp project undo` (roadmap item P11-1).
+// cmd_project_undo.cpp — `pulp project undo`.
 //
 //   pulp project undo                     Revert the newest bump batch
 //   pulp project undo <timestamp>         Revert a specific batch

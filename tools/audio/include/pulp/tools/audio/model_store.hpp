@@ -1,6 +1,6 @@
 #pragma once
 
-// The generic model store now lives in pulp::runtime. tools/audio keeps these
+// The generic model store lives in pulp::runtime. tools/audio keeps these
 // thin wrappers (subsystem = "audio") so the CLI / MCP surface is unchanged.
 
 #include <filesystem>

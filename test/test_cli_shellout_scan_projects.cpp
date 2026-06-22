@@ -1,6 +1,3 @@
-// test_cli_shellout_scan_projects.cpp — extracted from test_cli_shellout.cpp
-// in the 2026-05 Phase 5 P5-4 refactor.
-//
 // `pulp projects list` and `pulp scan` shell-out tests:
 //
 //   * `pulp projects list --json` emits valid JSON for empty + non-empty

@@ -1,7 +1,6 @@
 // project_bump.cpp — Pure-logic surface for `pulp project bump` / undo.
 //
-// Release-discovery Slice 7 (#564 / parent #499). See
-// `project_bump.hpp` for the design contract and schema.
+// See `project_bump.hpp` for the design contract and schema.
 
 #include "project_bump.hpp"
 

@@ -1,5 +1,4 @@
-// cmd_project_bump.cpp — `pulp project pin` / `pulp project bump`
-// (roadmap item P11-1).
+// cmd_project_bump.cpp — `pulp project pin` / `pulp project bump`.
 //
 // The command surface wraps the pure-logic core in
 // project_bump.{hpp,cpp} and fans it out across per-project and
@@ -17,9 +16,9 @@
 //
 // Every successful `bump` writes `~/.pulp/bump-undo-<timestamp>.json`
 // so a mistaken bump is always one command away from recovery.
-// Migration notes (Slice 3 #548) surface after a successful bump so
-// users see "pulp_add_au_v3 was renamed to pulp_add_auv3" (or
-// whatever the hop introduced) inline with the bump report.
+// Migration notes surface after a successful bump so users see
+// "pulp_add_au_v3 was renamed to pulp_add_auv3" (or whatever the hop
+// introduced) inline with the bump report.
 
 #include "cmd_project_internal.hpp"
 #include "migration_index.hpp"
@@ -384,7 +383,7 @@ void print_report(const pb::UndoBatch& batch, bool dry_run) {
               << failed  << " failed\n";
 }
 
-// ── Migration notes (Slice 3 integration) ───────────────────────────────────
+// ── Migration notes ─────────────────────────────────────────────────────────
 //
 // After the batch lands, surface any applicable migration notes for
 // the highest "from" version we bumped (older end of each hop).

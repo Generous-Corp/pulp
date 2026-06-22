@@ -1,9 +1,7 @@
 // cmd_project_internal.hpp — private shared surface for the `pulp project`
 // sub-command translation units.
 //
-// Roadmap item P11-1: `cmd_project.cpp` was a single ~1,047-line file
-// holding the bump/pin, undo, and unpin handlers plus a pile of shared
-// pin-rewrite helpers. It is split into focused sibling TUs:
+// `cmd_project.cpp` is split into focused sibling TUs:
 //
 //   cmd_project.cpp          — dispatcher (`cmd_project`) + `do_unpin`
 //   cmd_project_common.cpp   — shared pin-file / project-root helpers

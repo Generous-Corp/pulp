@@ -1,5 +1,5 @@
-// design_tokens.cpp — design-token import/export, extracted from
-// design_import.cpp in the 2026-05 Phase 6 (A3) refactor.
+// design_tokens.cpp — design-token import/export extracted from
+// design_import.cpp.
 //
 // The design-token surface converts between Pulp's Theme and the three
 // external token formats Pulp interoperates with:

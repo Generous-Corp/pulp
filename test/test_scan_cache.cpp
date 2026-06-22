@@ -1,4 +1,4 @@
-// Unit tests for HostScanCache (workstream 03 slice 3.1).
+// Unit tests for HostScanCache.
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/host/scan_cache.hpp>

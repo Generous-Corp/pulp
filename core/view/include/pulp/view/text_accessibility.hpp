@@ -1,6 +1,6 @@
 #pragma once
 
-// Cross-platform text accessibility scaffold (font v2 Slice 2.6).
+// Cross-platform text accessibility surface.
 //
 // Most of Pulp's painted text bypasses the platform a11y APIs
 // (NSAccessibility on macOS, UIA on Windows, AccessKit on Linux) because
@@ -10,9 +10,9 @@
 // and a registration entry point — plus a no-op default backend that
 // stores nodes in a process-local table.
 //
-// The full per-platform glue (NSAccessibility selectors, UIA com objects,
-// AccessKit serialization) is intentionally out of scope here; that lands
-// in follow-up slices that overlay this default backend.
+// Platform backends overlay the default registry when available
+// (NSAccessibility on macOS, UIA on Windows, AccessKit on Linux). The
+// default backend remains useful for tests and unsupported platforms.
 
 #include <cstddef>
 #include <cstdint>

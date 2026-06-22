@@ -1,14 +1,14 @@
-// pulp #1486 — stable_anchor_id strategies (§4 of the spec).
+// stable_anchor_id strategies.
 //
 // Three strategies:
 //   • content-hash — used by Claude Design HTML / Stitch / generic HTML.
-//                     Hash over (tag, role, normalized text, depth).
+//                     Hash over (tag, role, normalized text, depth, sibling discriminator).
 //   • path        — used by RN file exports / hand-edited code.
-//                    `Frame[2]/Section[0]/Button#0` w/ tiebreak.
+//                    `Tag[idx]/Tag[idx]/...`, e.g. `Frame[0]/Button[1]`.
 //   • adapter     — used by Figma / Pencil / Mitosis (sources with native IDs).
 //
-// Phase 1 spike: content-hash + path (adapter strategy is a thin
-// passthrough that the adapter populates during lower()).
+// content-hash + path are implemented here; adapter strategy is a thin
+// passthrough that the adapter populates during lower().
 
 import type { IRNode, AnchorStrategy } from './types.js';
 
@@ -19,7 +19,7 @@ import type { IRNode, AnchorStrategy } from './types.js';
 //
 // We re-implement here rather than vendor — the algorithm is ~30 lines
 // and the upstream surface is liable to change in ways unrelated to
-// Pulp's needs (per CLAUDE.md "pattern lift, no vendoring").
+// Pulp's needs.
 export function hashCodeAsString(input: unknown): string {
     const str = stableStringify(input);
     // FNV-1a 32-bit. Fast, stable, low collision rate at the scale we
@@ -224,7 +224,7 @@ function countSiblingTags(
     return counter;
 }
 
-// Default per-source strategy, per §4.4 of the spec.
+// Default per-source strategy.
 export const DEFAULT_ANCHOR_STRATEGY: Record<string, AnchorStrategy> = {
     'figma-mcp': 'adapter',
     'figma-zip': 'adapter',

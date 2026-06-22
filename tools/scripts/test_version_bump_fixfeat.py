@@ -4,9 +4,7 @@
 The PR-title fix/feat-needs-bump guard (issue #1009). These exercise the
 helpers (`_is_fix_or_feat_title`, `_range_has_bump_commit`,
 `_range_has_version_bump_skip_trailer`, `check_fix_feat_requires_bump`)
-that remain in `version_bump_check.py` alongside `main()`. Split from
-`test_gates.py` (P9-NEW refactor, 2026-05); test bodies are
-byte-identical to their previous definitions.
+that remain in `version_bump_check.py` alongside `main()`.
 
 Runs standalone (`python3 tools/scripts/test_version_bump_fixfeat.py`)
 or as part of the aggregate suite via `test_gates.py`.

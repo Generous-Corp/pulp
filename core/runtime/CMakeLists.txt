@@ -1,7 +1,7 @@
 add_library(pulp-runtime)
 add_library(pulp::runtime ALIAS pulp-runtime)
 
-# ── pulp/runtime/build_info.hpp (Tier A Slice 7) ───────────────────────────
+# ── pulp/runtime/build_info.hpp ────────────────────────────────────────────
 # Generated at configure time so the running binary can stamp itself with
 # the CMake build type, an ISO 8601 configure timestamp, and the short git
 # SHA (plus a dirty-tree flag). A ready-to-display build label is the cheapest
@@ -46,7 +46,7 @@ endif()
 # Stamp label composition must still produce a useful value in that
 # case: it falls back to "config@build" with the SHA + ISO timestamp
 # still appearing, so the inspector / About dialog never renders an
-# information-free label. Codex P2 on PR #2335.
+# information-free label.
 set(PULP_BUILD_STAMP "${PULP_VERSION}")
 set(_pulp_build_label "${PULP_BUILD_TYPE}")
 if(NOT _pulp_build_label)
@@ -70,7 +70,7 @@ configure_file(
 # after `cmake --install` can `#include <pulp/runtime/build_info.hpp>`
 # the same way they do during a source-tree build. PulpInstallRules.cmake
 # only globs core/*/include for the canonical headers; the build-time-
-# generated header has to be installed explicitly. Codex P2 on PR #2335.
+# generated header has to be installed explicitly.
 install(
     FILES "${_pulp_build_info_path}"
     DESTINATION include/pulp/runtime)

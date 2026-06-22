@@ -34,8 +34,7 @@ if(EXISTS "${_pulp_sdk_build_type_marker}")
     # the user's spelling on disk, so `-DCMAKE_BUILD_TYPE=debug` /
     # `DeBuG` are valid Debug builds whose marker won't STREQUAL
     # "Debug". Normalize to lowercase before comparing — otherwise
-    # the guard silently no-ops on a real Debug install (Codex P1 on
-    # PR #1828).
+    # the guard silently no-ops on a real Debug install.
     string(TOLOWER "${_pulp_sdk_build_type}" _pulp_sdk_build_type_lc)
     if(_pulp_sdk_build_type_lc STREQUAL "debug")
         if(PULP_ALLOW_DEBUG_SDK)

@@ -26,10 +26,10 @@ public:
 
     // ── Data sources (all optional) ─────────────────────────────────
     void set_root_view(view::View* root) { root_ = root; }
-    /// Attach the overlay. Phase 5.1: also seeds the overlay's
-    /// source-jump config with the handler's current config so the `J`
-    /// hotkey matches `Inspector.jumpToSource`. Out-of-line for the
-    /// same reason as set_config().
+    /// Attach the overlay. Also seeds the overlay's source-jump config
+    /// with the handler's current config so the `J` hotkey matches
+    /// `Inspector.jumpToSource`. Out-of-line for the same reason as
+    /// set_config().
     void set_overlay(InspectorOverlay* overlay);
     void set_state_inspector(StateInspector* state) { state_ = state; }
     void set_console_capture(ConsoleCapture* console) { console_ = console; }
@@ -39,19 +39,19 @@ public:
     void set_render_pass_manager(render::RenderPassManager* rpm) { rpm_ = rpm; }
     void set_tweak_store(TweakStore* store) { tweak_store_ = store; }
 
-    /// Tier A Slice 6: wire the per-frame dirty tracker so the inspector's
-    /// Performance tab can toggle `DirtyTracker::set_debug_overlay()` at
-    /// runtime. The host installs the tracker once during plugin / app
-    /// init; if unset, the toggle silently no-ops.
+    /// Wire the per-frame dirty tracker so the inspector's Performance
+    /// tab can toggle `DirtyTracker::set_debug_overlay()` at runtime.
+    /// The host installs the tracker once during plugin / app init; if
+    /// unset, the toggle silently no-ops.
     void set_dirty_tracker(render::DirtyTracker* dirty) { dirty_ = dirty; }
 
     // ── Inspector-wide config ───────────────────────────────────────
-    /// Replace the runtime config (Phase 5.3: editor_url_template).
-    /// Mutating accessors below (e.g. Inspector.setEditorUrlTemplate)
-    /// update this in place. Phase 5.1: also pushes the config to the
-    /// attached overlay (if any) so the `J` source-jump hotkey and the
-    /// protocol `Inspector.jumpToSource` share one template. Defined
-    /// out-of-line so the header doesn't need the overlay's definition.
+    /// Replace the runtime config. Mutating accessors below (e.g.
+    /// Inspector.setEditorUrlTemplate) update this in place. Also
+    /// pushes the config to the attached overlay (if any) so the `J`
+    /// source-jump hotkey and the protocol `Inspector.jumpToSource`
+    /// share one template. Defined out-of-line so the header doesn't
+    /// need the overlay's definition.
     void set_config(InspectorConfig config);
     const InspectorConfig& config() const { return config_; }
     InspectorConfig& mutable_config() { return config_; }

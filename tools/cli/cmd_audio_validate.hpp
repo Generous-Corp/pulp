@@ -1,9 +1,9 @@
 // cmd_audio_validate.hpp — `pulp audio validate <verb>` dispatch.
 //
-// The validation namespace nested under `pulp audio` (harness Phase 7). It
-// analyzes captured WAVs and stored artifact bundles using the reusable
-// pulp::audio-analysis lib — it does NOT instantiate a Processor (the generic
-// CLI is not tied to a plugin; live render is a separate slice). Verbs:
+// The validation namespace nested under `pulp audio` analyzes captured WAVs
+// and stored artifact bundles using the reusable pulp::audio-analysis lib —
+// it does NOT instantiate a Processor because the generic CLI is not tied to
+// a plugin. Verbs:
 //   summarize <file.wav> [--json]          — agent-readable signal summary
 //   doctor    <file.wav> [--thd] [--response f1,f2,...] [options]
 //   compare   <a.wav> <b.wav> [--mode null|spectral] [--tolerance <dbfs>]

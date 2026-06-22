@@ -61,15 +61,14 @@ struct ContentView: View {
                 ParameterRow(param: p)
             }
 
-            // Phase iOS-D.2 — mount the AUv3 extension's own view inside
-            // the HostApp so the Skia/Dawn-rendered plug-in editor
+            // Mount the AUv3 extension's own view inside the HostApp so
+            // the Skia/Dawn-rendered plug-in editor
             // (PulpAUViewController on iOS) is actually visible in the
             // SwiftUI shell, not just instantiated for audio render.
             //
-            // Without this block the iOS-D.1 GPU smoke proves the AU loaded
-            // and rendered to its own UIView, but the HostApp window stayed
-            // a SwiftUI-only screen with no visible editor — the "I can see
-            // the rotating quad in the Simulator" deliverable lives here.
+            // Without this block the AU can load and render to its own UIView,
+            // but the HostApp window stays a SwiftUI-only screen with no
+            // visible editor.
             #if os(iOS)
             // Let the editor fill the whole pane below the controls instead of
             // sitting at its intrinsic preferredContentSize (the plug-in's
@@ -103,8 +102,8 @@ struct ContentView: View {
             // Discover() returns 0 matches in that window, and without a
             // retry the host stays stuck on "(no Pulp AUv3 found)" until
             // the user kills + relaunches the app — which is the exact UX
-            // failure the iOS-D.3c walkthrough hit on every fresh
-            // devicectl install. Wire two recovery paths:
+            // failure seen during fresh devicectl installs. Wire two
+            // recovery paths:
             //
             // 1. Observe `AVAudioUnitComponentManager`'s
             //    `RegistrationsChangedNotification` (Apple's documented
@@ -194,9 +193,9 @@ private struct ParameterRow: View {
 
 #if os(iOS)
 
-// Phase iOS-D.2 — SwiftUI bridge that hosts the AUv3 extension's editor
-// (PulpAUViewController) inside the HostApp via
-// UIViewControllerRepresentable. The extension is loaded out-of-process
+// SwiftUI bridge that hosts the AUv3 extension's editor
+// (PulpAUViewController) inside the HostApp via UIViewControllerRepresentable.
+// The extension is loaded out-of-process
 // (PulpAUv3Host.discover()), so AVAudioUnit.requestViewController fetches
 // the view controller across the XPC connection. We park the returned
 // VC inside a container UIViewController so SwiftUI's layout pass can
@@ -316,8 +315,8 @@ final class PulpAUv3Host: ObservableObject {
     private var instantiationInFlight: Bool = false
 
 #if os(iOS)
-    // Phase iOS-D.2 — editor view controller fetched via
-    // AUAudioUnit.requestViewController. We hold the most recent VC and
+    // Editor view controller fetched via AUAudioUnit.requestViewController.
+    // We hold the most recent VC and
     // notify subscribers so the SwiftUI container can re-mount when the
     // extension finishes loading after the HostApp view tree exists.
     //
@@ -522,8 +521,8 @@ final class PulpAUv3Host: ObservableObject {
                     print("PULP_MIDI_BLOCK: \(self.midiBlock != nil ? "ready" : "unavailable")")
                 }
 
-                // Phase iOS-D.2 — fetch the extension's view controller.
-                // AUv3 on iOS surfaces UI as a UIViewController via
+                // Fetch the extension's view controller. AUv3 on iOS surfaces
+                // UI as a UIViewController via
                 // requestViewControllerWithCompletionHandler:; SwiftUI's
                 // UIViewControllerRepresentable hosts the result so the
                 // Skia/Dawn-rendered plug-in editor (PulpAUViewController)

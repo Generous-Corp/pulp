@@ -1,7 +1,7 @@
-// Phase 6 cross-language proof (opt-in, PULP_BUILD_NATIVE_COMPONENT_RUST_TESTS):
-// a Rust node implementing pulp_node_v1 loads through the SAME contract the
-// always-built C node uses (test_pulp_node_v1.cpp). Proves the public node ABI
-// is genuinely language-neutral.
+// Opt-in cross-language proof (PULP_BUILD_NATIVE_COMPONENT_RUST_TESTS): a Rust
+// node implementing pulp_node_v1 loads through the SAME contract the always-built
+// C node uses (test_pulp_node_v1.cpp). Proves the public node ABI is genuinely
+// language-neutral.
 
 #include <pulp/native_components/pulp_node_v1.h>
 #include <pulp/native_components/pulp_node_v1.hpp>

@@ -1,6 +1,5 @@
 # PulpIosHostApp.cmake — Generate an iOS SwiftUI HostApp .app bundle that
-# embeds a Pulp AUv3 .appex extension (Phase iOS-B of the AUv3 iOS
-# validation plan, planning/2026-05-24-auv3-ios-validation.md).
+# embeds a Pulp AUv3 .appex extension.
 #
 # Why this exists:
 #   pulp_add_ios_auv3() (PulpAuv3.cmake) builds the .appex extension only.

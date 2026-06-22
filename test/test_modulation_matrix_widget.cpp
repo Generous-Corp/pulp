@@ -1,4 +1,4 @@
-// ModulationMatrixWidget interaction test — workstream 07 B5.
+// ModulationMatrixWidget interaction test.
 //
 // Headless: simulates mouse clicks against a small widget and verifies
 // the underlying ModulationMatrix receives the expected routes. No

@@ -35,31 +35,31 @@ set(PULP_JS_PRELUDES
     ${CMAKE_CURRENT_SOURCE_DIR}/js/css-colors.js
     ${CMAKE_CURRENT_SOURCE_DIR}/js/css-parser.js
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-element.js
-    # P5-7 follow-up — Events + Pointer-capture (P2b) extracted from
-    # web-compat-element.js. Loaded AFTER the parent so the Element
+    # Events + Pointer-capture extracted from web-compat-element.js.
+    # Loaded AFTER the parent so the Element
     # constructor + prototype are already defined when the extracted
     # prototype overrides install.
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-element-events.js
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-canvas.js
-    # P5-6 first cut — native GPU helpers extracted from
-    # web-compat-canvas.js. Loaded AFTER the parent so the
+    # Native GPU helpers extracted from web-compat-canvas.js.
+    # Loaded AFTER the parent so the
     # CanvasRenderingContext2D constructor + window.pulp.gpu surface
     # are in scope when GPU consumers call getContext("webgpu").
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-canvas-gpu.js
-    # P5-6 follow-up — _PulpCanvasMatrix DOMMatrix-compat helper.
+    # _PulpCanvasMatrix DOMMatrix-compat helper.
     # CanvasRenderingContext2D.getTransform() instantiates this lazily
     # at call time so embed order relative to canvas.js is flexible.
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-canvas-matrix.js
-    # P5-6 follow-up — Canvas2D API gap-closure methods (issue-916):
+    # Canvas2D API gap-closure methods:
     # measureText / drawImage / setLineDash / getLineDash /
     # getImageData / putImageData. Loaded AFTER the parent so the
     # CanvasRenderingContext2D constructor is in scope.
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-canvas-image.js
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-style-decl.js
-    # P5-5 — per-domain `_applyProperty` handler modules. The former
-    # monolithic per-CSS-property switch is split into layout / paint /
-    # typography / transform / misc handlers; web-compat-style-decl.js's
-    # `_applyProperty` is now a thin dispatcher that calls each in turn.
+    # Per-domain `_applyProperty` handler modules. Layout / paint /
+    # typography / transform / misc handlers stay split by ownership;
+    # web-compat-style-decl.js's `_applyProperty` is a thin dispatcher that
+    # calls each in turn.
     # These are plain function declarations referenced by the dispatcher
     # at call time, so they MUST embed AFTER web-compat-style-decl.js
     # (and before any consumer that triggers a style apply).
@@ -68,20 +68,20 @@ set(PULP_JS_PRELUDES
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-style-decl-typography.js
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-style-decl-transform.js
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-style-decl-misc.js
-    # P5-5 first cut — _cssToFlex + __cssProperties__ IIFE +
+    # _cssToFlex + __cssProperties__ IIFE +
     # setProperty/getPropertyValue/removeProperty. Loaded AFTER
     # web-compat-style-decl.js so the CSSStyleDeclaration constructor
     # + _applyProperty prototype method are in scope when the IIFE
     # walks the property list and installs reflection.
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-style-decl-helpers.js
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-document.js
-    # P5-7 first cut — CSS selector engine extracted from
-    # web-compat-document.js. Loaded AFTER the parent so document +
+    # CSS selector engine extracted from web-compat-document.js.
+    # Loaded AFTER the parent so document +
     # Element are in scope when underscore-prefixed selector helpers
     # are dispatched from document.querySelector / .querySelectorAll.
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-document-selectors.js
-    # P5-7 follow-up — WebGPU mock factories extracted from
-    # web-compat-document.js. Loaded AFTER the parent so GPU* usage
+    # WebGPU mock factories extracted from web-compat-document.js.
+    # Loaded AFTER the parent so GPU* usage
     # constants installed by document.js (GPUTextureUsage etc.) are in
     # scope when the factory bodies resolve them at call time.
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-document-gpu-mock.js
@@ -94,24 +94,23 @@ set(PULP_JS_PRELUDES
 set(PULP_JS_EMBEDDED_HEADER ${CMAKE_CURRENT_BINARY_DIR}/web_compat_preludes_gen.hpp)
 set(PULP_JS_EMBEDDED_SOURCE ${CMAKE_CURRENT_BINARY_DIR}/web_compat_preludes_gen.cpp)
 
-# pulp #1382 — embed_js.cmake's `string(SUBSTRING)` chunker operates on
+# embed_js.cmake's `string(SUBSTRING)` chunker operates on
 # BYTES, so a 12000-byte chunk boundary that lands inside a UTF-8
 # multi-byte codepoint splits the codepoint mid-sequence. The result
 # is a generated file with invalid UTF-8 at chunk boundaries; MSVC
 # then mis-parses the trailing `)__JS__"` delimiter, walks past it
 # into the next R"__JS__()__JS__" header, and reports C2026 ("string
-# too big") on the runaway literal. Used to be a non-issue when the
-# JS preludes were ASCII-only; the css-colors / css-parser / canvas
-# files now contain UTF-8 (em-dashes, smart quotes) that can land on
-# any byte boundary.
+# too big") on the runaway literal. The JS preludes contain UTF-8
+# (em-dashes, smart quotes), so chunk boundaries can land on any byte
+# boundary.
 #
 # The Python implementation (embed_js.py) slices on Python str, which
 # is char-aware, so chunk boundaries always fall between codepoints.
-# Switch to that.
+# Use that implementation for generated prelude sources.
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
-# P8-5 (#2641) — split the embedded preludes into an extern-linked TU so a
-# JS-prelude edit no longer recompiles the 9.7k-line widget_bridge.cpp.
+# Split the embedded preludes into an extern-linked TU so a
+# JS-prelude edit no longer recompiles the large widget_bridge.cpp.
 #
 # * The DECLARATION header is generated here at *configure* time from the
 #   prelude file list, written only-if-changed. Its content depends only on
@@ -183,9 +182,8 @@ target_include_directories(pulp-view-script
 set(PULP_JS_ENGINE "auto" CACHE STRING "JS engine backend (auto|quickjs|jsc|v8)")
 set_property(CACHE PULP_JS_ENGINE PROPERTY STRINGS auto quickjs jsc v8)
 # Advanced local-experiment overrides only — normal v8 builds need none (FindV8
-# resolves external/v8-build or a baked $V8_DIR). The former Homebrew-libnode
-# provider search (v8_monolith/node/versioned libnode glob) was removed: when v8
-# is selected, the provider is the pinned sealed libv8, nothing else.
+# resolves external/v8-build or a baked $V8_DIR). When v8 is selected, the
+# provider is the pinned sealed libv8, nothing else.
 set(V8_LIBRARY_PATH "" CACHE FILEPATH "Advanced: full path to a V8 runtime library (local experiments)")
 
 # ── V8 provider-identity reporting (additive) ────────────────────────────────
@@ -225,7 +223,7 @@ unset(_pulp_ubsan_enabled)
 # external/v8-build/<platform>/, fetched by tools/scripts/fetch_v8_for_release.py).
 # js_v8_engine.cpp is ALWAYS compiled; it is #ifdef PULP_HAS_V8 internally and
 # becomes a stub when V8 is not linked. V8 is linked ONLY when explicitly selected
-# with PULP_JS_ENGINE=v8 — `auto` never silently pulls in V8 (Codex review P2).
+# with PULP_JS_ENGINE=v8 — `auto` never silently pulls in V8.
 list(APPEND PULP_JS_ENGINE_SOURCES src/js_v8_engine.cpp)
 if(PULP_JS_ENGINE STREQUAL "v8")
     # iOS cannot JIT — V8 is forbidden in iOS apps / AUv3 extensions. Hard error,
@@ -285,7 +283,7 @@ if(APPLE)
     list(APPEND PULP_JS_ENGINE_SOURCES src/js_jsc_engine.mm)
 endif()
 
-# iOS-D.3b Slice 2: NSBundle-based loader for the embedded Three.js
+# NSBundle-based loader for the embedded Three.js
 # IIFE bundle. Only compiled on iOS / iOS Simulator; desktop/macOS
 # lanes use src/threejs_resources_stub.cpp (always returns nullopt).
 if(APPLE AND PULP_IOS)
@@ -297,9 +295,8 @@ if(PULP_HAS_V8_ACTUAL)
     target_compile_definitions(pulp-view-script PRIVATE PULP_HAS_V8=1)
 
     # Provider identity, consumed by V8Engine::provider_kind()/provider_path()/
-    # expected_runtime_version(). These describe WHERE the V8 runtime came from
-    # (sealed v8-builder seal vs Homebrew libnode vs a self-built monolith),
-    # independent of the runtime version V8 reports at startup.
+    # expected_runtime_version(). These describe the sealed v8-builder artifact
+    # independently of the runtime version V8 reports at startup.
     target_compile_definitions(pulp-view-script PRIVATE
         PULP_V8_PROVIDER_KIND="${PULP_V8_PROVIDER_KIND}"
         PULP_V8_PROVIDER_PATH="${PULP_V8_PROVIDER_PATH}"
@@ -316,7 +313,7 @@ elseif(PULP_JS_ENGINE STREQUAL "v8" AND PULP_HAS_V8_ACTUAL)
 endif()
 # auto → QuickJS default (backward compatible with all existing code)
 
-# Slice 2.6: per-platform TextAccessibilityNode backend selection.
+# Per-platform TextAccessibilityNode backend selection.
 # Each platform leg overrides the cross-platform "none" default at link
 # time by compiling a platform-specific TU INSTEAD of the default
 # src/text_accessibility.cpp. The platform TUs export the same symbols
@@ -500,7 +497,7 @@ target_sources(pulp-view-script PRIVATE
 # opt-in. Gated out of shipped plugins; the runtime W3C token pair
 # (src/w3c_tokens.cpp) and the runtime widgets (canvas/svg/design_frame_view/
 # css_gradient/visualization/app_framework/widget_skin_derive) stay
-# always-compiled above. See planning/2026-06-15-design-import-gating-refactor.md.
+# always-compiled above.
 if(PULP_ENABLE_DESIGN_IMPORT)
     target_sources(pulp-view-core PRIVATE
         src/anchor_strategy.cpp
@@ -542,7 +539,7 @@ endif()
 # AU/VST3/CLAP plugins.
 # The ObjC runtime loads WebKit on dylib load if any WKWebView references exist,
 # which crashes Logic Pro's sandboxed AUHostingServiceXPC process.
-# ── Linux AT-SPI accessibility (workstream 04, L7) ──────────────────────────
+# ── Linux AT-SPI accessibility ─────────────────────────────────────────────
 #
 # Pulp publishes accessibility info to Linux screen readers (Orca) by
 # implementing the AT-SPI2 *wire protocol* directly over D-Bus
@@ -575,7 +572,7 @@ if(PULP_BUILD_WEBVIEW)
     endif()
 else()
     # Backend detector honors the documented "none if disabled" contract
-    # (Codex PR #3016 P2): when WebView is excluded from the build,
+    # When WebView is excluded from the build,
     # detect_webview_backend() must return "none" so callers can
     # distinguish "build excluded WebView" from "OS has no WebView".
     target_compile_definitions(pulp-view-core PUBLIC PULP_BUILD_WEBVIEW=0)
@@ -613,7 +610,7 @@ target_link_libraries(pulp-view-core PUBLIC pulp::canvas pulp::events pulp::stat
 # `pulp/host/scanner.hpp`, so consumers that instantiate it on desktop still
 # need the symbol — link there. iOS AUv3 .appex bundles never instantiate
 # the panel, so dropping the PUBLIC dep there is safe and unblocks the
-# 2026-05-24 iOS AUv3 validation Phase iOS-A build smoke.
+# iOS AUv3 build smoke.
 if(NOT IOS)
     target_link_libraries(pulp-view-core PUBLIC pulp::host)
     # graph_editor_view.cpp uses host::SignalGraph / host::Connection / host::GraphNode
@@ -625,7 +622,7 @@ if(NOT IOS)
     target_sources(pulp-view-core PRIVATE src/graph_editor_view.cpp)
 endif()
 target_link_libraries(pulp-view-script PUBLIC pulp::view-core)
-# pulp #468 — design_import.cpp uses pulp::runtime::base64_decode +
+# design_import.cpp uses pulp::runtime::base64_decode +
 # gzip_decompress to unpack Claude Design's base64-gzip envelope.
 # PUBLIC because the public header model_manager_view.hpp includes
 # <pulp/runtime/model_store.hpp> (exposes runtime::ModelListResult in its API),
@@ -647,7 +644,7 @@ if(APPLE)
 endif()
 
 if(WIN32)
-    # Note: popen/pclose defines removed — using pulp::platform::ChildProcess instead
+    # Process spawning routes through pulp::platform::ChildProcess.
 endif()
 
 # Yoga layout engine (MIT)
@@ -675,8 +672,7 @@ if(APPLE)
             platform/ios/window_host_ios.mm
             platform/ios/plugin_view_host_ios.mm
             platform/ios/accessibility_ios.mm
-            # #299 + #313 Codex P1 follow-up: bridge stubs compile
-            # on iOS too. They provide set_factory /
+            # Bridge stubs compile on iOS too. They provide set_factory /
             # set_screenshot_provider / has_* registration APIs
             # unconditionally; create/render impls stay gated by
             # their own #if checks so the iOS-native window +
@@ -692,7 +688,7 @@ if(APPLE)
             "-framework CoreGraphics"
             "-framework QuartzCore"
         )
-        # Phase iOS-D.1 — wire iOS GPU window host (window_host_ios.mm's
+        # Wire iOS GPU window host (window_host_ios.mm's
         # IOSGpuWindowHost branch). Mirrors the mac branch below:
         # `pulp::render` exposes Dawn / Skia Graphite + the GpuSurface
         # interface, and the Metal framework backs the CAMetalLayer.
@@ -716,8 +712,8 @@ if(APPLE)
             platform/mac/accessibility_mac.mm
             platform/mac/appearance_mac.mm
             platform/mac/motion_preferences_mac.mm
-            # #299: host-backend registration APIs. The stub files
-            # compile set_factory/set_screenshot_provider etc.
+            # Host-backend registration APIs. The stub files compile
+            # set_factory/set_screenshot_provider etc.
             # unconditionally; only the create/render impls are
             # gated by `#if !defined(__APPLE__)`. Including them
             # here surfaces the registration API on mac without
@@ -753,8 +749,8 @@ elseif(WIN32)
         platform/win/appearance_win.cpp
         platform/win/motion_preferences_win.cpp
     )
-    # Win/Linux parity (#3329). When Skia is available, add the built-in
-    # Skia raster screenshot backend and the native HWND PluginViewHost.
+    # Win/Linux parity. When Skia is available, add the built-in Skia raster
+    # screenshot backend and the native HWND PluginViewHost.
     # plugin_view_host_stub.cpp stays (it owns the always-compiled
     # set_factory/has_factory registration API + the factory-dispatching
     # create()); the native impl registers ITSELF as the factory via
@@ -771,9 +767,8 @@ elseif(WIN32)
         set_source_files_properties(src/plugin_view_host_stub.cpp PROPERTIES
             COMPILE_DEFINITIONS PULP_HAS_PLATFORM_PLUGIN_VIEW_HOST=1)
     endif()
-    # Workstream 04 #247 phase 1: UIAutomationCore for
-    # UiaClientsAreListening and (in phase 2) UiaReturnRawElementProvider +
-    # UiaRaiseStructureChangedEvent.
+    # UIAutomationCore for UiaClientsAreListening plus
+    # UiaReturnRawElementProvider + UiaRaiseStructureChangedEvent.
     target_link_libraries(pulp-view-core PRIVATE uiautomationcore)
     # OLE drag-drop on the plugin-host child HWND (WinPluginViewHost):
     # ole32 = OleInitialize/RegisterDragDrop/ReleaseStgMedium; shell32 =
@@ -793,9 +788,9 @@ elseif(UNIX)
         src/window_host_stub.cpp
         platform/linux/accessibility_linux.cpp
     )
-    # Win/Linux parity (#3329). Same split as the WIN32 branch: when Skia is
-    # available add the built-in Skia raster screenshot backend and the native
-    # X11 PluginViewHost (which registers itself via
+    # Win/Linux parity. Same split as the WIN32 branch: when Skia is available
+    # add the built-in Skia raster screenshot backend and the native X11
+    # PluginViewHost (which registers itself via
     # register_platform_plugin_view_host()). The X11 host links Xlib; missing
     # X11 dev headers degrade to the headless-render-only path.
     if(PULP_HAS_SKIA)
@@ -819,20 +814,16 @@ elseif(UNIX)
             message(STATUS "Pulp: X11 not found — Linux PluginViewHost limited to headless render")
         endif()
     endif()
-    # Linux AT-SPI (workstream 04, L7) needs no link deps: accessibility_linux.cpp
+    # Linux AT-SPI needs no link deps: accessibility_linux.cpp
     # speaks the AT-SPI2 wire protocol directly over pulp::platform::DBus
     # (libdbus-1 dlopen'd). No atk-bridge-2.0 / libatspi at build time.
 endif()
 
 # Link against render for native GPU bridge (Three.js, WebGPU canvas).
-# Codex P1 on PR #526 / #500: previously visualization_bridge.hpp
-# directly included pulp/render/bench/perf_counters.hpp under
-# PULP_BENCHMARK, which forced this link to go PUBLIC and leaked the
-# render include tree through every view consumer. The header now
-# forward-declares PerfCounters and the dereferencing code lives in
-# visualization_bridge.cpp — so the link stays PRIVATE regardless of
-# PULP_BENCHMARK, and downstream targets that only use view APIs do
-# NOT need to link pulp::render when PULP_BENCHMARK is enabled.
+# visualization_bridge.hpp forward-declares PerfCounters and the dereferencing
+# code lives in visualization_bridge.cpp, so the link stays PRIVATE regardless
+# of PULP_BENCHMARK. Downstream targets that only use view APIs do NOT need to
+# link pulp::render when PULP_BENCHMARK is enabled.
 if(TARGET pulp-render)
     target_link_libraries(pulp-view-core PRIVATE pulp::render)
     target_link_libraries(pulp-view-script PRIVATE pulp::render)
@@ -848,7 +839,7 @@ if(TARGET pulp-render)
     if(PULP_HAS_SKIA)
         target_compile_definitions(pulp-view-core PRIVATE PULP_VIEW_HAS_GPU_CAPTURE=1)
     endif()
-    # Slice 16 — when pulp-render is linked, WindowHost::mark_dirty() can
+    # When pulp-render is linked, WindowHost::mark_dirty() can
     # route dirty marks through a vblank-paced RenderLoop. GPU-off builds
     # (sanitizer matrix) have no pulp-render target, so mark_dirty() there
     # degrades to a direct repaint(); the define gates that cleanly.

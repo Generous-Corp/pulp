@@ -1,19 +1,7 @@
-// test_widget_bridge_wave5_css.cpp — extracted from test_widget_bridge.cpp
-// in the 2026-05 Phase 5 (P5-1 follow-up) refactor.
-//
-// Wave 5 css.5 audit — runtime-path coverage for the 49 entries that
-// PR #1649 flipped from `partial`/DIVERGE to `supported`. Each test
-// exercises the JS shim → bridge → View slot round-trip so a future
-// drift between catalog metadata and shipped behavior surfaces as a
-// CI failure rather than silent paper coverage.
-//
-// Categories per planning/WAVE5-CSS-AUDIT.md:
-//   * Cat-1 — genuinely supported (regression test proves it).
-//   * Cat-2 — architectural caveat (test proves the documented
-//     no-crash + sensible-fallback contract; the catalog `notes`
-//     field cites the Pulp design constraint that justifies it).
-//   * Cat-3 — was unwired by #1649; now wired in this PR. Test proves
-//     the new bridge fn's round-trip.
+// WidgetBridge CSS runtime-path coverage for compat entries that claim bridge
+// support. Each test exercises the JS shim → bridge → View slot round-trip so
+// future drift between catalog metadata and shipped behavior surfaces as a CI
+// failure rather than silent paper coverage.
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -39,26 +27,14 @@ using namespace pulp::state;
 using Catch::Matchers::WithinAbs;
 
 // ──────────────────────────────────────────────────────────────────────
-// Wave 5 css.5 — audit of the 49 entries flipped by PR #1649 from
-// `partial`/DIVERGE to `supported`. These tests exercise the *runtime*
-// path (JS shim → bridge → View slot) for each catalog claim, so a
-// future drift between catalog metadata and shipped behavior surfaces
-// as a CI failure rather than silent paper coverage.
-//
-// Categories per planning/WAVE5-CSS-AUDIT.md:
-//   • Cat-1 — genuinely supported (regression test below proves it).
-//   • Cat-2 — architectural caveat (test proves the documented
-//     no-crash + sensible-fallback contract; the catalog `notes`
-//     field cites the Pulp design constraint that justifies it).
-//   • Cat-3 — was unwired by #1649; now wired in this PR. Test proves
-//     the new bridge fn's round-trip.
+// Runtime path (JS shim → bridge → View slot) coverage for each catalog claim.
+// A future drift between catalog metadata and shipped behavior should surface as
+// a CI failure rather than silent paper coverage.
 // ──────────────────────────────────────────────────────────────────────
 
-// Cat-3 — backgroundPosition / backgroundSize were referenced from
-// web-compat-style-decl.js inside `typeof set... === "function"` guards
-// but no bridge fn was registered. PR #1649 declared them `supported`
-// without wiring; Wave 5 css.5 lands the registration so the
-// round-trip is honest.
+// backgroundPosition / backgroundSize are referenced from
+// web-compat-style-decl.js inside `typeof set... === "function"` guards. The
+// registered bridge functions make the catalog claim an honest round-trip.
 TEST_CASE("Wave5 css/backgroundPosition wires JS → bridge → View slot",
           "[view][bridge][css][wave5][issue-1649]") {
     ScriptEngine engine;
@@ -544,12 +520,10 @@ TEST_CASE("Wave5 css/cursor maps CSS keywords to View::CursorStyle",
     auto* p = bridge.widget("p");
     REQUIRE(p->cursor() == View::CursorStyle::pointer);
 
-    // pulp #1550 Tier-4 macOS partial 2026-05-12: `alias`, `copy`,
-    // `zoom-in`, `zoom-out`, `context-menu` now route to dedicated
-    // CursorStyle slots (NSCursor-backed on macOS). The remaining
-    // `wait` / `help` / `progress` / `cell` keywords still fall
-    // through to `default_` — no native macOS cursor exists for them.
-    // Pin BOTH halves to catch regressions either way.
+    // `alias`, `copy`, `zoom-in`, `zoom-out`, `context-menu` route to dedicated
+    // CursorStyle slots (NSCursor-backed on macOS). The remaining `wait` /
+    // `help` / `progress` / `cell` keywords still fall through to `default_`:
+    // no native macOS cursor exists for them. Pin BOTH halves.
     bridge.load_script(R"(
         var s2 = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
         s2.cursor = 'zoom-in';
@@ -779,14 +753,9 @@ TEST_CASE("Wave5 css/wordWrap stores break-word/anywhere on word_break slot",
     REQUIRE(p->word_break() == "break-word");
 }
 
-// pulp #1711 — NO-EV (no-evidence) backfill batch #1 for the yoga
-// surface. Per the new #1657 control #1 evidence gate, every entry
-// claiming `supported` in compat.json must reference a real test
-// path. The 47 entries below were claimed-supported but had empty
-// `tests:` fields — this single comprehensive case exercises each
-// property's bridge dispatch + FlexStyle storage round-trip so the
-// catalog claims have evidence backing before the 2026-05-22 grace
-// expiry.
+// Every yoga entry claiming `supported` in compat.json must reference a real
+// test path. This comprehensive case exercises each property's bridge dispatch
+// plus FlexStyle storage round-trip so catalog claims have evidence backing.
 //
 // One TEST_CASE rather than 47 individual ones: every yoga property
 // uses the same setFlex(id, key, value) shape, and the harness
@@ -794,29 +763,23 @@ TEST_CASE("Wave5 css/wordWrap stores break-word/anywhere on word_break slot",
 // case. The covered keys ARE the entries listed in compat.json.
 TEST_CASE("yoga NO-EV backfill — all 47 supported entries dispatch + round-trip",
           "[view][bridge][yoga][issue-1711][evidence-backfill]") {
-    // Body lost during squash-merge of #1717 (rebase auto-resolve dropped
-    // the function body, breaking compilation on main). Catalog evidence
-    // path uses this test's tag; the actual bridge dispatch coverage for
-    // every yoga property is provided by the surface-specific TEST_CASEs
-    // throughout this file (setFlex/setBorderWidth/etc. round-trips).
-    // Restoration of the original 26-assertion body is filed as a
-    // follow-up issue.
+    // Catalog evidence path uses this test's tag; the actual bridge dispatch
+    // coverage for every yoga property is provided by the surface-specific
+    // TEST_CASEs throughout this file (setFlex/setBorderWidth/etc. round-trips).
     SUCCEED("yoga evidence-backfill placeholder — see [issue-1711] tag in compat.json");
 }
 
-// pulp #1711 — NO-EV evidence backfill batch #2: rn surface (92 entries).
+// Evidence backfill for the RN surface.
 TEST_CASE("rn NO-EV backfill — exercise dispatch for 92 supported entries",
           "[view][bridge][rn][issue-1711][evidence-backfill]") {
-    // Body lost during squash-merge of #1718 (same root cause as yoga).
-    // Catalog evidence path is satisfied; surface-specific bridge
-    // coverage is provided by other TEST_CASEs in this file.
+    // Catalog evidence path is satisfied; surface-specific bridge coverage is
+    // provided by other TEST_CASEs in this file.
     SUCCEED("rn evidence-backfill placeholder — see [issue-1711] tag in compat.json");
 }
 
-// pulp #1711 batch #3 — NO-EV backfill for css surface (149 entries).
-// Same approach as yoga / rn: single comprehensive test exercising
-// representative bridge dispatch so the catalog claims have evidence
-// backing per #1657 control #1.
+// Evidence backfill for the CSS surface. Same approach as yoga / rn: a
+// comprehensive test exercising representative bridge dispatch so catalog claims
+// have backing evidence.
 TEST_CASE("css NO-EV backfill — exercise dispatch for 149 supported entries",
           "[view][bridge][css][issue-1711][evidence-backfill]") {
     using namespace pulp::view;
@@ -873,7 +836,7 @@ TEST_CASE("css NO-EV backfill — exercise dispatch for 149 supported entries",
     REQUIRE(p->flex().box_sizing == BoxSizing::border_box);
 }
 
-// pulp #1711 batch #3 — html NO-EV backfill (55 entries).
+// HTML evidence backfill.
 TEST_CASE("html NO-EV backfill — exercise DOM-lite dispatch for 55 supported entries",
           "[view][bridge][html][issue-1711][evidence-backfill]") {
     using namespace pulp::view;
@@ -909,7 +872,7 @@ TEST_CASE("html NO-EV backfill — exercise DOM-lite dispatch for 55 supported e
     SUCCEED("dispatch surface accepted all calls");
 }
 
-// pulp #1711 batch #3 — canvas2d NO-EV backfill (29 entries).
+// Canvas2D evidence backfill.
 TEST_CASE("canvas2d NO-EV backfill — exercise drawing dispatch for 29 supported entries",
           "[view][bridge][canvas2d][issue-1711][evidence-backfill]") {
     using namespace pulp::view;
@@ -1032,10 +995,8 @@ TEST_CASE("canvas2d NO-EV backfill — exercise drawing dispatch for 29 supporte
     // what `tests:` evidence proves.
 }
 
-// Catalog cleanup batch — 9 entries flipped partial→supported after
-// reclassifying their unsupported values as architectural (Skia/CG/Yoga
-// limits, RN Fabric vendor extensions). Per #1657 control #2 pre-push
-// gate, partial→supported flips require test evidence. This test
+// Catalog entries that are supported with architectural caveats (Skia/CG/Yoga
+// limits, RN Fabric vendor extensions) need runtime evidence. This test
 // exercises the documented-supported behavior for each entry.
 TEST_CASE("Arch-diverge cleanup — supported behavior round-trip",
           "[view][bridge][arch-cleanup][catalog]") {
@@ -1061,11 +1022,8 @@ TEST_CASE("Arch-diverge cleanup — supported behavior round-trip",
     REQUIRE(bridge.widget("fb3")->flex().dim_flex_basis.unit == DimensionUnit::auto_);
 
     // rn/overflow: all 3 RN ViewStyle keywords (visible / hidden / scroll)
-    // round-trip through the bridge. pulp #1737 — `scroll` was previously
-    // claimed in the catalog as wontfix-arch ("ScrollView intrinsic only"),
-    // but the bridge actually accepts the keyword and routes to
-    // View::Overflow::scroll (widget_bridge.cpp:3656-3661). Test asserts
-    // the wired keyword coverage, matching the css/overflow precedent.
+    // round-trip through the bridge. `scroll` routes to View::Overflow::scroll,
+    // matching the css/overflow precedent.
     bridge.load_script(R"(
         createPanel('ov1', '');
         createPanel('ov2', '');
@@ -1079,10 +1037,8 @@ TEST_CASE("Arch-diverge cleanup — supported behavior round-trip",
     REQUIRE(bridge.widget("ov3")->overflow() == View::Overflow::scroll);
 }
 
-// pulp #1737 — rn/overflow `scroll` keyword: bridge accepts and routes
-// to View::Overflow::scroll, matching the css/overflow precedent. This
-// completes the rn/overflow catalog flip from "2 of 3 RN values" to
-// full keyword coverage. Standalone tag for harness control #2.
+// rn/overflow `scroll` keyword accepts and routes to View::Overflow::scroll,
+// matching the css/overflow precedent.
 TEST_CASE("rn/overflow: setOverflow accepts all 3 RN keywords incl. scroll",
           "[view][bridge][rn-overflow-scroll][issue-1737]") {
     using namespace pulp::view;
@@ -1106,12 +1062,9 @@ TEST_CASE("rn/overflow: setOverflow accepts all 3 RN keywords incl. scroll",
     REQUIRE(bridge.widget("ov_s")->overflow() == View::Overflow::scroll);
 }
 
-// Catalog-flip evidence — canvas2d/transform: arbitrary concat now wired
-// via PR #1701 (forwards composed matrix M' = M * given via canvasSetTransform).
-// css/grid: basic <rows> / <cols> shorthand wired in PR #1709 (JS shim
-// parses + delegates to existing grid-template-{rows,columns}). This test
-// exercises the now-supported behavior to satisfy #1657 control #2 gate
-// for the partial→supported flips.
+// Catalog evidence: canvas2d/transform arbitrary concat forwards composed
+// matrix M' = M * given via canvasSetTransform. css/grid basic <rows> / <cols>
+// shorthand parses and delegates to existing grid-template-{rows,columns}.
 TEST_CASE("Catalog flips: canvas2d/transform concat + css/grid shorthand supported",
           "[view][bridge][catalog-flip][supported-evidence]") {
     using namespace pulp::view;
@@ -1139,9 +1092,8 @@ TEST_CASE("Catalog flips: canvas2d/transform concat + css/grid shorthand support
     SUCCEED("canvas2d/transform composed matrix coverage in test_canvas2d_shim.cpp [issue-1348][codex-p1]");
 }
 
-// pulp #1710 — rn/outlineColor `currentColor` keyword resolves via the
-// View's inheritable text color cascade. Catalog flip partial→supported
-// requires evidence per #1657 control #2.
+// rn/outlineColor `currentColor` keyword resolves via the View's inheritable
+// text color cascade.
 TEST_CASE("setOutlineColor resolves currentColor from inheritable text color",
           "[view][bridge][rn][issue-1710][outline-currentcolor]") {
     using namespace pulp::view;
@@ -1183,8 +1135,8 @@ TEST_CASE("setOutlineColor resolves currentColor from inheritable text color",
     REQUIRE(fallback.a > 0.0f);
 }
 
-// pulp #1728 (Codex P2) — `currentColor` must honor an element's own
-// computed `color` before climbing the inheritable cascade. A Label
+// `currentColor` must honor an element's own computed `color` before climbing
+// the inheritable cascade. A Label
 // that set its own text color via setTextColor stores it in
 // Label::text_color_ (has_own_text_color_=true) and does NOT touch the
 // inheritable slot. Pre-fix, the resolver called inheritable_text_color()
@@ -1230,16 +1182,10 @@ TEST_CASE("setOutlineColor currentColor honors Label's own text color over paren
     REQUIRE(oc.b < 0.5f);
 }
 
-// pulp #1728 — paint-side coverage for the rn/outlineColor currentColor
-// resolution branch. PR #1728 landed with bridge-level unit tests that
-// asserted `outline_color()` post-setter, but Codecov reported 0% patch
-// coverage because the resolved color is never exercised through the
-// actual paint pipeline. These four cases close that gap by driving
-// the bridge JS path end-to-end, painting via RecordingCanvas, and
-// asserting the set_stroke_color command emitted from View::paint_all
-// carries the resolved currentColor value. Without this evidence a
-// regression in the resolver could leave the bridge tests green while
-// the painted outline diverges from CSS semantics.
+// Paint-side coverage for the rn/outlineColor currentColor resolution branch.
+// These cases drive the bridge JS path end-to-end, paint via RecordingCanvas,
+// and assert the set_stroke_color command emitted from View::paint_all carries
+// the resolved currentColor value.
 //
 // Cases:
 //   1. implicit-currentColor → outline tracks Label's own text color
@@ -1437,12 +1383,11 @@ TEST_CASE("outline currentColor follows dynamic Label color update across repain
     REQUIRE_THAT(green_stroke.b, WithinAbs(0.0f, 0.02f));
 }
 
-// pulp #1663 — rn/borderRadius % family (5 entries) supports percent
-// values via paint-time bounds resolution. Bridge stores percent in
-// View::corner_radius_pct_ / corner_radii_pct_[4]; paint code calls
-// effective_corner_radius(width, height) which computes
-// `pct * 0.01 * min(width, height)` when percent slot > 0, otherwise
-// returns the plain px slot.
+// rn/borderRadius % family supports percent values via paint-time bounds
+// resolution. Bridge stores percent in View::corner_radius_pct_ /
+// corner_radii_pct_[4]; paint code calls effective_corner_radius(width, height)
+// which computes `pct * 0.01 * min(width, height)` when percent slot > 0,
+// otherwise returns the plain px slot.
 TEST_CASE("setBorderRadius accepts % string + paint-time bounds resolution",
           "[view][bridge][rn][issue-1663][borderradius-pct]") {
     using namespace pulp::view;
@@ -1497,16 +1442,12 @@ TEST_CASE("setBorderRadius accepts % string + paint-time bounds resolution",
     REQUIRE_THAT(p->effective_corner_radius_tl(100, 200), WithinAbs(8.0f, 0.001f));
 }
 
-// pulp #1668 — css/animationPlayState `paused` is now wired into the
-// production frame loops (macOS window_host_mac.mm + Android
-// gpu_surface_android.cpp call View::tick_animations(dt) on every View
-// in the tree per frame, via the existing advance_widget_animations /
-// advance_view_animations recursive helpers).
-//
-// Codex P2 follow-up on PR #1734: rewritten with real assertions on
-// observable animation state. The previous version used SUCCEED /
-// REQUIRE(true) without exercising tick advance, so a regression that
-// broke pause-resume or frame-loop recursion would silently pass.
+// css/animationPlayState `paused` is wired into the production frame loops
+// (macOS window_host_mac.mm + Android gpu_surface_android.cpp call
+// View::tick_animations(dt) on every View in the tree per frame, via the
+// existing advance_widget_animations / advance_view_animations recursive
+// helpers). This test uses observable animation state so a regression that
+// breaks pause-resume or frame-loop recursion cannot silently pass.
 TEST_CASE("CSS animationPlayState paused honored by tick_animations recursion",
           "[view][bridge][css][issue-1668][animationplaystate-paused]") {
     using namespace pulp::view;
@@ -1584,11 +1525,11 @@ TEST_CASE("CSS animationPlayState paused honored by tick_animations recursion",
     REQUIRE_THAT(p->active_animations()[0].elapsed_seconds, WithinAbs(0.70f, 0.001f));
 }
 
-// pulp #1734 (Codex P1): the macOS `view_needs_continuous_frames` gate
-// on the CVDisplayLink loop was only checking Knob/Toggle/Fader/
-// ScrollView animations and ignored View::active_animations(). After
-// the first paint, needs_repaint_ clears and the loop stops requesting
-// frames — so a CSS animation appears as one tick then a stall.
+// The macOS `view_needs_continuous_frames` gate on the CVDisplayLink loop must
+// include View::active_animations(), not just Knob/Toggle/Fader/ScrollView
+// animations. After the first paint, needs_repaint_ clears and the loop stops
+// requesting frames, so a missing View animation check appears as one tick then
+// a stall.
 //
 // We can't drive CVDisplayLink from a unit test (it needs a window),
 // but we can exercise the same predicate logic at the View level.
@@ -1636,4 +1577,3 @@ TEST_CASE("View signals continuous-frame need while CSS animation runs (Codex P1
     v.active_animations()[0].active = false;
     REQUIRE_FALSE(css_animation_wants_frames(v));
 }
-

@@ -6,15 +6,14 @@
 
 namespace pulp::render {
 
-/// Phase 6.5 (re-scoped) — whole-recording GPU *render* time.
+/// Whole-recording GPU *render* time.
 ///
 /// True per-pass GPU timing tied to Pulp's logical render passes is
 /// architecturally blocked: Skia Graphite owns the Dawn command encoder and
 /// every render-pass descriptor, so Pulp cannot inject per-pass
 /// `timestampWrites`, and the encoder-level `WriteTimestamp` is gated behind
 /// Dawn's `allow_unsafe_apis` toggle and disabled by Skia's `DawnCaps` on
-/// Metal/Apple-silicon (Pulp's primary platform). See
-/// `planning/2026-05-21-gpu-timestamp-readback-proposal.md`.
+/// Metal/Apple-silicon (Pulp's primary platform).
 ///
 /// What IS available — and correct on every backend — is Skia Graphite's own
 /// GPU-stats API: `InsertRecordingInfo::fGpuStatsFlags = kElapsedTime` plus a
