@@ -130,10 +130,10 @@ Element.prototype._registerNativeEvent = function(type) {
             self.dispatchEvent(_makeEvent("blur", self));
         });
     } else if (type === "wheel") {
-        // pulp DIVERGE→PASS sweep — `el.addEventListener('wheel', fn)`
-        // routes through the bridge `registerWheel` / `__dispatch__`
-        // path. Before, only the explicit `registerWheel(id)` API was
-        // accessible from JS — DOM consumers got no surface at all.
+        // `el.addEventListener('wheel', fn)` routes through the bridge
+        // `registerWheel` / `__dispatch__` path so DOM consumers can use
+        // the standard listener surface instead of the explicit
+        // `registerWheel(id)` API.
         if (typeof registerWheel === "function") registerWheel(id);
         on(id, "wheel", function(dx, dy) {
             var evt = _makeEvent("wheel", self, {});
@@ -146,8 +146,8 @@ Element.prototype._registerNativeEvent = function(type) {
     } else if (type === "dragstart" || type === "drag" || type === "dragend" ||
                type === "dragenter" || type === "dragover" || type === "dragleave" ||
                type === "drop") {
-        // pulp DIVERGE→PASS sweep — DOM-style drag/drop event types
-        // are surfaced through the existing bridge `registerDrop` API.
+        // DOM-style drag/drop event types are surfaced through the existing
+        // bridge `registerDrop` API.
         // The native side fires a single `drop` callback with type +
         // payload data when a drop completes; we synthesize a
         // DragEvent-shaped object so CSS-style consumers' handlers
@@ -174,7 +174,7 @@ Element.prototype._registerNativeEvent = function(type) {
     }
 };
 
-// ── Pointer capture (P2b) ───────────────────────────────────────────────
+// ── Pointer capture ─────────────────────────────────────────────────────
 
 Element.prototype.setPointerCapture = function(pointerId) {
     if (typeof nativeSetPointerCapture === "function")
@@ -204,7 +204,7 @@ function _makeEvent(type, target, data) {
     // DOM event and the native event payload.
     ev.nativeEvent = ev;
 
-    // Position fields (P1)
+    // Position fields
     ev.clientX = d.clientX || 0;
     ev.clientY = d.clientY || 0;
     ev.offsetX = d.offsetX || 0;
@@ -231,7 +231,7 @@ function _makeEvent(type, target, data) {
         return !!{ Control: this.ctrlKey, Shift: this.shiftKey, Alt: this.altKey, Meta: this.metaKey }[k];
     };
 
-    // Pointer (P2)
+    // Pointer
     ev.pointerId = d.pointerId || 0;
     ev.pointerType = d.pointerType || "mouse";
     ev.isPrimary = d.isPrimary !== undefined ? d.isPrimary : true;
@@ -242,12 +242,12 @@ function _makeEvent(type, target, data) {
     ev.tiltY = d.tiltY || 0;
     ev.twist = d.twist || 0;
 
-    // Stylus (P3)
+    // Stylus
     ev.pressure = d.pressure !== undefined ? d.pressure : 0.5;
     ev.altitudeAngle = d.altitudeAngle || 0;
     ev.azimuthAngle = d.azimuthAngle || 0;
 
-    // Gesture (P4)
+    // Gesture
     ev.scale = d.scale !== undefined ? d.scale : 1;
     ev.rotation = d.rotation || 0;
     ev.detail = d.detail !== undefined ? d.detail : null;
@@ -256,7 +256,7 @@ function _makeEvent(type, target, data) {
     ev.deltaZ = d.deltaZ || 0;
     ev.deltaMode = d.deltaMode || 0;
 
-    // Coalesced/predicted (P5)
+    // Coalesced/predicted
     ev._coalesced = d._coalesced || null;
     ev._predicted = d._predicted || null;
     ev.getCoalescedEvents = function () { return this._coalesced || [this]; };
@@ -277,9 +277,8 @@ function _makeEvent(type, target, data) {
     return ev;
 }
 
-// pulp DIVERGE→PASS sweep — `new Event(name, init)` constructor surface.
-// Userland `new Event('foo')` produces an object that round-trips
-// through `Element.dispatchEvent`. Mirrors the DOM Event interface
+// `new Event(name, init)` produces an object that round-trips through
+// `Element.dispatchEvent`. Mirrors the DOM Event interface
 // minimally — type / bubbles / cancelable / stopPropagation /
 // preventDefault — which is what the harness gap was about. The
 // `_makeEvent` factory above stays the canonical path for events

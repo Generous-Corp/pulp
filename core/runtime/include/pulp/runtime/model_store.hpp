@@ -1,6 +1,6 @@
 #pragma once
 
-// Generic model store/state primitive (promoted from tools/audio). Owns the on-disk
+// Generic model store/state primitive. Owns the on-disk
 // layout under PULP_HOME (`<home>/<subsystem>/model-state.json` for the active model,
 // `<home>/<subsystem>/models/<id>.json` for per-model install metadata), the
 // installed/active queries, list (over a caller-supplied registry), and activate.
@@ -60,7 +60,7 @@ struct ActivateModelResult {
 };
 
 // PULP_HOME resolution: explicit override → $PULP_HOME → $HOME/.pulp (USERPROFILE on
-// Windows). NOTE (path policy, see plan): a sandboxed AUv3/iOS host may not have HOME
+// Windows). NOTE (path policy): a sandboxed AUv3/iOS host may not have HOME
 // access — callers in those contexts should pass an explicit container path.
 std::filesystem::path resolve_pulp_home(const std::filesystem::path& override_path = {});
 
