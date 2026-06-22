@@ -69,10 +69,10 @@ const IRAssetRef* IRAssetManifest::resolve(std::string_view asset_id) const {
     return nullptr;
 }
 
-/// Phase 9: motion provenance vendor key. Matches the `source` token
-/// the import CLI accepts, lowercased + slash-friendly so the resulting
-/// `source_id` (e.g. "figma:LevelMeter/Panel") is easy to grep through
-/// fixtures. Stable across releases — fixtures depend on these strings.
+/// Motion provenance vendor key. Matches the `source` token the import CLI
+/// accepts, lowercased + slash-friendly so the resulting `source_id`
+/// (e.g. "figma:LevelMeter/Panel") is easy to grep through fixtures. Stable
+/// across releases — fixtures depend on these strings.
 const char* design_source_vendor_key(DesignSource source) {
     switch (source) {
         case DesignSource::figma:    return "figma";
@@ -138,22 +138,22 @@ std::size_t promote_interactive_frames(IRNode& root) {
 DesignIR parse_claude_html(const std::string& html) {
     // Claude Design exports the same HTML+CSS shape as other web tools,
     // so parse with the existing Stitch HTML pipeline and re-tag the
-    // source. Per pulp #468 (manual-export framing), users hand the
-    // exported HTML over directly — no Anthropic API integration.
+    // source. Users hand the exported HTML over directly — no Anthropic API
+    // integration.
     auto ir = parse_stitch_html(html);
     ir.source = DesignSource::claude;
     ir.source_adapter = "claude-design-html";
-    // Phase 0a: re-tag provenance after the Stitch parser stamped it.
-    // Anchors were already assigned by parse_stitch_html with the
-    // content-hash strategy — same strategy claude-design-html uses
-    // (see DEFAULT_ANCHOR_STRATEGY in anchors.ts), so we don't reassign.
+    // Re-tag provenance after the Stitch parser stamped it. Anchors were
+    // already assigned by parse_stitch_html with the content-hash strategy —
+    // same strategy claude-design-html uses (see DEFAULT_ANCHOR_STRATEGY in
+    // anchors.ts), so we don't reassign.
     // parse_stitch_html always populates provenance on both its JSON and
     // regex-fallback paths, so the optional is always set here.
     if (ir.root.provenance) ir.root.provenance->adapter = "claude-design-html";
     return ir;
 }
 
-// ── Claude Design classname extraction (pulp #1035) ─────────────────────
+// ── Claude Design classname extraction ───────────────────────────────────
 //
 // Mirrors Spectr's `tools/extract-html-bundle/extract.mjs` classname
 // pass: pull every `<style>...</style>` block, parse the CSS rules, and
@@ -455,9 +455,7 @@ std::string serialize_claude_classnames(const ClaudeClassNameRules& rules) {
 
 // Keyboard-shortcut extraction (extract_keyboard_shortcuts,
 // serialize_detected_shortcuts, key_string_to_keycode,
-// modifier_strings_to_mask) moved to design_import_shortcuts.cpp
-// in the 2026-05 A3 refactor first cut. See planning/
-// 2026-05-16-refactor-ops-high-leverage.md.
+// modifier_strings_to_mask) moved to design_import_shortcuts.cpp.
 
 
 
@@ -1927,7 +1925,7 @@ void refresh_design_ir_asset_manifest(DesignIR& ir,
 // ── Source adapters ─────────────────────────────────────────────────────
 
 DesignIR parse_figma_plugin_json(const std::string& json) {
-    // Envelope shape (planning/2026-05-28-pulp-figma-plugin-strategy.md §7.2):
+    // Figma-plugin envelope shape:
     //   { format_version, parser_version, compat_schema_version,
     //     provenance: {adapter, version, source_uri, exported_at},
     //     library_manifest?: {...},
@@ -1963,7 +1961,7 @@ DesignIR parse_figma_plugin_json(const std::string& json) {
     else if (parsed.hasObjectMember("assetManifest"))
         ir.asset_manifest = parse_asset_manifest(parsed["assetManifest"]);
 
-    // font_family_assets[] (#43a) — bundled fonts the importer registers (#43b)
+    // font_family_assets[] — bundled fonts the importer registers
     // so setFontFamily resolves to the bundled face, not a system fallback.
     {
         auto read_str = [](const choc::value::ValueView& o, const char* k) -> std::string {
@@ -2026,12 +2024,12 @@ DesignIR parse_figma_json(const std::string& json) {
     if (root.hasObjectMember("tokens"))
         ir.tokens = parse_ir_tokens(root["tokens"]);
 
-    // Phase 0a: tag the root with adapter provenance + confidence, then
-    // assign stable_anchor_id values via the adapter strategy. Figma
-    // exports carry native layer UUIDs that parse_ir_node populates into
-    // source_node_id; the adapter strategy prefixes those with "figma:".
-    // Nodes that don't have a native ID (rare in Figma) silently fall
-    // through to the content-hash branch inside compute_anchor_id.
+    // Tag the root with adapter provenance + confidence, then assign
+    // stable_anchor_id values via the adapter strategy. Figma exports carry
+    // native layer UUIDs that parse_ir_node populates into source_node_id; the
+    // adapter strategy prefixes those with "figma:". Nodes that don't have a
+    // native ID (rare in Figma) silently fall through to the content-hash
+    // branch inside compute_anchor_id.
     ir.root.provenance = IRProvenance{"figma", "1", /*source_uri=*/{}};
     ir.root.confidence = IRConfidence::pass;
     promote_interactive_frames(ir.root);
@@ -2093,7 +2091,7 @@ DesignIR parse_stitch_html(const std::string& html) {
         ir.root.attributes["htmlAsset" + index] = std::move(asset_uris[i].uri);
     }
 
-    // Phase 0a: assign anchors to the regex-extracted tree.
+    // Assign anchors to the regex-extracted tree.
     ir.root.provenance = IRProvenance{"stitch-html", "1", {}};
     ir.root.confidence = IRConfidence::diverge;  // regex fallback is lossy
     ir.fallback_reason = "input was not JSON; used regex HTML text extraction";
@@ -2126,8 +2124,8 @@ DesignIR parse_pencil_json(const std::string& json) {
     if (root.hasObjectMember("variables"))
         ir.tokens = parse_ir_tokens(root["variables"]);
 
-    // Phase 0a: Pencil MCP nodes carry a stable `id` that parse_ir_node
-    // populates into source_node_id; the adapter strategy uses it directly.
+    // Pencil MCP nodes carry a stable `id` that parse_ir_node populates into
+    // source_node_id; the adapter strategy uses it directly.
     ir.root.provenance = IRProvenance{"pencil", "1", {}};
     ir.root.confidence = IRConfidence::pass;
     promote_interactive_frames(ir.root);

@@ -1,10 +1,6 @@
-// Phase 4b — Lock-to-source, Path B (hand-authored JSX/TSX patch).
+// Lock-to-source tests for hand-authored JSX/TSX patching.
 //
-// Spec: planning/2026-05-18-inspector-direct-manipulation-roadmap.md,
-//       "Phase 4b — Path B (JSX/TSX AST patch via element
-//       instrumentation)". GitHub issue #1308.
-//
-// These tests prove the contract the roadmap calls for:
+// These tests prove the lock-to-source contract:
 //   tweak (anchor_id → property_path → value)
 //     → jsx_lock_tweak_into_source
 //     → the authored JSX/TSX now carries the new value at the right span
