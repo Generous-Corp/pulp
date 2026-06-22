@@ -1,4 +1,4 @@
-// pulp #2128 follow-up — pin WidgetBridge::dispatch_global_key.
+// Pin WidgetBridge::dispatch_global_key.
 //
 // Architecture in brief:
 //

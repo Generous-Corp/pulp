@@ -178,7 +178,7 @@ TEST_CASE("CSSStyleDeclaration fontStyle oblique aliases to italic",
 // (improperly-merged) TEST_CASE opener for evenodd-clip. The canonical
 // fontStyle oblique→italic test is the next TEST_CASE below. Stubbed to
 // allow compile; the evenodd-clip canvas2d coverage exists in the
-// dedicated Wave 2 canvas2d block above (line ~8369). Wave 5 cleanup.
+// dedicated Wave 2 canvas2d block. Wave 5 cleanup.
 TEST_CASE("CSSStyleDeclaration fontStyle oblique aliases to italic (Wave 2 dup)",
           "[view][bridge][css][wave2-css][.skip-corrupt-1638]") {
     SUCCEED("title duplicated; canonical body is in the next TEST_CASE below");

@@ -1,5 +1,5 @@
-// WidgetBridge CSS animations + transitions tests for pulp #1434.
-// Round-trips the full CSS-Animations + CSS-Transitions shim through
+// WidgetBridge CSS animations + transitions tests. Round-trips the full
+// CSS-Animations + CSS-Transitions shim through
 // the bridge: animation-name / -duration / -delay / -iteration-count
 // / -direction / -fill-mode / -timing-function / -play-state and the
 // `animation` shorthand decomposition; transition-property /
@@ -29,15 +29,13 @@ using namespace pulp::view;
 using namespace pulp::state;
 using Catch::Matchers::WithinAbs;
 
-// ── pulp #1434 Phase A2-1 — CSS animations + transitions ──────────────
+// ── CSS animations + transitions ───────────────────────────────────────
 //
-// PR 1 of the multi-PR ladder. Establishes the CssEasing /
-// AnimatableProperty / TransitionSpec / CssAnimation /
-// CssKeyframesRegistry types + the parse_transition_shorthand parser
-// + the bridge surface (setTransition / setTransitionProperty /
-// setTransitionDuration / setTransitionDelay /
-// setTransitionTimingFunction / defineKeyframes / setAnimation). PRs
-// 2-5 ladder on this substrate to wire frame-driven playback.
+// Establishes the CssEasing / AnimatableProperty / TransitionSpec /
+// CssAnimation / CssKeyframesRegistry types plus the
+// parse_transition_shorthand parser and bridge surface (setTransition /
+// setTransitionProperty / setTransitionDuration / setTransitionDelay /
+// setTransitionTimingFunction / defineKeyframes / setAnimation).
 
 TEST_CASE("parse_transition_shorthand: single property",
           "[view][bridge][css][issue-1434-anim]") {
@@ -231,8 +229,7 @@ TEST_CASE("setAnimation seeds Animation from registry",
     REQUIRE_THAT(anims[0].spec.duration_seconds, WithinAbs(0.4f, 0.001f));
 }
 
-// pulp #1508 Codex audit (P1 #1) — legacy control-token ABI.
-// `setAnimation(id, "name", animName)` is the path
+// Legacy control-token ABI: `setAnimation(id, "name", animName)` is the path
 // web-compat-style-decl.js takes for `style.animationName = ...` and
 // for the `animation:` shorthand. Pre-fix the new positional handler
 // greedily took arg1 as anim_name, so the registry lookup missed on
@@ -267,9 +264,8 @@ TEST_CASE("setAnimation legacy control-token: name resolves against registry",
     REQUIRE(anims[0].spec.easing.kind == CssEasing::Kind::ease_in_out);
 }
 
-// pulp #1508 Codex audit (P1 #1) — legacy control-token form must not
-// look up "duration" in the keyframes registry. Pre-fix this would
-// silently no-op; post-fix it stages duration on the View.
+// Legacy control-token form must not look up "duration" in the keyframes
+// registry; it should stage duration on the View.
 TEST_CASE("setAnimation legacy control-token: duration stages without registry hit",
           "[view][bridge][css][issue-1434-anim]") {
     ScriptEngine engine;
@@ -287,10 +283,10 @@ TEST_CASE("setAnimation legacy control-token: duration stages without registry h
     REQUIRE(v->active_animations().empty());
 }
 
-// pulp #1508 Codex audit (P2) — TransitionSpec default easing must be
-// CSS `ease`, not `linear`. CSS spec for transition-timing-function
-// defaults to `ease`; declarations like `transition: opacity 200ms`
-// (no explicit easing token) must inherit that default.
+// TransitionSpec default easing must be CSS `ease`, not `linear`. CSS spec for
+// transition-timing-function defaults to `ease`; declarations like
+// `transition: opacity 200ms` (no explicit easing token) must inherit that
+// default.
 TEST_CASE("TransitionSpec default-constructed easing == CSS ease",
           "[view][bridge][css][issue-1434-anim]") {
     TransitionSpec spec{};
@@ -303,9 +299,9 @@ TEST_CASE("TransitionSpec default-constructed easing == CSS ease",
     REQUIRE(specs[0].easing.kind == CssEasing::Kind::ease);
 }
 
-// pulp #1434 Phase A2-5 — fontFamily accepts a CSS comma-separated
-// list and picks the first non-empty family. Outer quotes (single or
-// double) are stripped per CSS spec. Whitespace is trimmed.
+// fontFamily accepts a CSS comma-separated list and picks the first non-empty
+// family. Outer quotes (single or double) are stripped per CSS spec. Whitespace
+// is trimmed.
 TEST_CASE("setFontFamily parses comma-separated list and strips quotes",
           "[view][bridge][css][issue-1434-fontfamily]") {
     ScriptEngine engine;
@@ -329,21 +325,18 @@ TEST_CASE("setFontFamily parses comma-separated list and strips quotes",
     auto* l3 = dynamic_cast<Label*>(bridge.widget("t3"));
     auto* l4 = dynamic_cast<Label*>(bridge.widget("t4"));
     REQUIRE(l1); REQUIRE(l2); REQUIRE(l3); REQUIRE(l4);
-    // pulp #1737 (#932 followup): bridge now stores the CSS comma-list
-    // verbatim — SkiaCanvas resolution walks the whole list at paint
-    // time. Pre-fix the bridge stripped to the first family; tests
-    // were assert against that legacy behaviour. Updated to reflect
-    // the new contract: Label.font_family() carries the full list.
+    // Bridge stores the CSS comma-list verbatim. SkiaCanvas resolution walks
+    // the whole list at paint time, so Label.font_family() carries the full
+    // list.
     REQUIRE(l1->font_family() == "Inter Tight, system-ui, sans-serif");
     REQUIRE(l2->font_family() == "\"JetBrains Mono\", Menlo");
     REQUIRE(l3->font_family() == "'Helvetica Neue', Arial");
     REQUIRE(l4->font_family() == "   ,  Roboto  , Arial");
 }
 
-// pulp #1434 Phase A2-5 — when fontFamily is set on a non-Label
-// container View, the value lands in the inheritable_font_family_
-// slot so child Labels can read it via the parent walk. Mirrors the
-// existing letter_spacing / font_weight cascade pattern.
+// When fontFamily is set on a non-Label container View, the value lands in the
+// inheritable_font_family_ slot so child Labels can read it via the parent walk.
+// Mirrors the existing letter_spacing / font_weight cascade pattern.
 TEST_CASE("setFontFamily on container View populates inheritable slot",
           "[view][bridge][css][issue-1434-fontfamily]") {
     ScriptEngine engine;
@@ -360,16 +353,14 @@ TEST_CASE("setFontFamily on container View populates inheritable slot",
     REQUIRE(panel != nullptr);
     auto inh = panel->inheritable_font_family();
     REQUIRE(inh.has_value());
-    // pulp #1737 (#932 followup): inheritable slot now carries the
-    // full CSS comma-list verbatim (was stripped to first family
-    // pre-fix). SkiaCanvas resolution walks the list at paint time.
+    // Inheritable slot carries the full CSS comma-list verbatim. SkiaCanvas
+    // resolution walks the list at paint time.
     REQUIRE(*inh == "\"Custom Display\", sans-serif");
 }
 
-// pulp #1434 Phase A2-5 — CSS shim el.style.fontFamily forwards the
-// comma-separated list straight through to the bridge fn, where the
-// list-parsing happens. Verifies the @pulp/react CSS shim wires the
-// new prop without dropping it.
+// CSS shim el.style.fontFamily forwards the comma-separated list straight
+// through to the bridge fn, where the list-parsing happens. Verifies the
+// @pulp/react CSS shim wires the prop without dropping it.
 TEST_CASE("CSSStyleDeclaration forwards font-family to bridge",
           "[view][bridge][css][issue-1434-fontfamily]") {
     ScriptEngine engine;

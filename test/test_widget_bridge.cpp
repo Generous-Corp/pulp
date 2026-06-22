@@ -224,8 +224,8 @@ TEST_CASE("WidgetBridge legacy geometry factories wire widget callbacks",
     REQUIRE(toggle_value == 1.0);
 }
 
-// Phase 0b: setAnchor() bridge call binds an anchor to a live widget so
-// the inspector can key tweaks back to the originating source element.
+// setAnchor() binds an anchor to a live widget so the inspector can key tweaks
+// back to the originating source element.
 TEST_CASE("WidgetBridge setAnchor binds the anchor to the live widget",
           "[view][bridge][anchor]") {
     ScriptEngine engine;
@@ -498,15 +498,12 @@ TEST_CASE("WidgetBridge range slider drag dispatches change event",
     REQUIRE_THAT(val, WithinAbs(0.5, 0.05));
 }
 
-// pulp 2026-06-08 (jsx-live-knob-drag-fix) — `@pulp/react`'s `<Knob>` lowers to
-// a lowercase `knob` DOM element in the live-JSX path
-// (`pulp import-design --from jsx --mode live --emit js`, run via
+// `@pulp/react`'s `<Knob>` lowers to a lowercase `knob` DOM element in the
+// live-JSX path (`pulp import-design --from jsx --mode live --emit js`, run via
 // `Standalone --pulp-bundle`). The React-commit fast path creates that element
 // through the C++ `__domAppend` handler, NOT through `createKnob` or JS
-// `_ensureNative`. Before this fix `knob` fell through to the plain-View
-// default: no rotary `on_mouse_drag`, no `on_change`, so dragging did nothing
-// and the React-side `onChange` never fired. This is the headless test whose
-// absence let the routing gap hide. See planning/for-matt-svg-response.md.
+// `_ensureNative`. A lowercase `knob` must route to the native Knob surface so
+// rotary drag and React-side `onChange` fire.
 TEST_CASE("WidgetBridge __domAppend routes <knob> tag to a draggable native Knob",
           "[view][bridge][jsx-live-knob-drag-fix]") {
     ScriptEngine engine;
@@ -697,13 +694,10 @@ TEST_CASE("WidgetBridge stale click callbacks are inert after bridge destruction
     REQUIRE_NOTHROW(global_click_handler("button", 0x10));
 }
 
-// pulp #1006 — JSX `onClick={fn}` flows through @pulp/react's prop-applier
-// into a bare `on(id, 'click', fn)` bridge call (no addEventListener,
-// no registerClick). Before the fix, this stored the JS callback in
-// __callbacks__ but never wired View::on_click on the native side, so
-// real NSEvent / Win32 mouse events fired View::on_mouse_down/up but
-// never dispatched 'click' through the bridge — the React handler
-// silently dropped on the floor.
+// JSX `onClick={fn}` flows through @pulp/react's prop-applier into a bare
+// `on(id, 'click', fn)` bridge call (no addEventListener, no registerClick).
+// That path must wire View::on_click on the native side so real NSEvent / Win32
+// mouse events dispatch 'click' through the bridge.
 TEST_CASE("WidgetBridge on(id,'click',fn) auto-wires View::on_click", "[view][bridge][issue-1006]") {
     ScriptEngine engine;
     View root;
@@ -741,12 +735,12 @@ TEST_CASE("WidgetBridge on(id,'click',fn) auto-wires View::on_click", "[view][br
     REQUIRE(engine.evaluate("clicks").getWithDefault<int>(-1) == 2);
 }
 
-// pulp #1006 — repeated `on(id, 'click', fn)` calls (which @pulp/react
-// performs on every commitUpdate) must remain idempotent on the native
-// side. registerClick is overwriting-by-design (it stores its lambda
-// on view->on_click), but registerPointer chains (each call wraps the
-// previous handler). The auto-wire in `on()` guards re-registration
-// via __nativeRegistered__ so pointer events don't grow an O(N) chain.
+// Repeated `on(id, 'click', fn)` calls (which @pulp/react performs on every
+// commitUpdate) must remain idempotent on the native side. registerClick is
+// overwriting-by-design (it stores its lambda on view->on_click), but
+// registerPointer chains (each call wraps the previous handler). The auto-wire
+// in `on()` guards re-registration via __nativeRegistered__ so pointer events
+// don't grow an O(N) chain.
 TEST_CASE("WidgetBridge on() native registration is idempotent", "[view][bridge][issue-1006]") {
     ScriptEngine engine;
     View root;
@@ -779,8 +773,8 @@ TEST_CASE("WidgetBridge on() native registration is idempotent", "[view][bridge]
     REQUIRE(count == 1);
 }
 
-// Touch orbit (#3217 follow-up): a widget's pointer move/up must reach
-// DOCUMENT-level listeners, not just the widget's own. Three.js OrbitControls
+// Touch orbit requires a widget's pointer move/up to reach DOCUMENT-level
+// listeners, not just the widget's own. Three.js OrbitControls
 // registers its drag/pinch move+up handlers on `domElement.ownerDocument`
 // after pointerdown, so without document delivery the canvas sees the initial
 // press but no subsequent moves and touch orbit/pinch is inert. The element
@@ -1145,11 +1139,10 @@ TEST_CASE("WidgetBridge pointer, gesture, capture, and shortcut APIs dispatch to
             pointer_move_x = e.offsetX;
             pointer_move_y = e.offsetY;
         });
-        // pulp #1XXX — wheel events are dispatched as an object
-        // {deltaX, deltaY, clientX, clientY} (not positional args), so the
-        // @pulp/react synthetic-event shim's isPlainObject(a0) branch
-        // can lift the fields. JSX `onWheel(e => e.deltaY)` depends on
-        // this shape.
+        // Wheel events are dispatched as an object {deltaX, deltaY, clientX,
+        // clientY} (not positional args), so the @pulp/react synthetic-event
+        // shim's isPlainObject(a0) branch can lift the fields. JSX
+        // `onWheel(e => e.deltaY)` depends on this shape.
         on('surface', 'wheel', function(e) {
             wheel_x = e.deltaX;
             wheel_y = e.deltaY;
@@ -1195,10 +1188,9 @@ TEST_CASE("WidgetBridge pointer, gesture, capture, and shortcut APIs dispatch to
     REQUIRE_THAT(engine.evaluate("pointer_down_pressure").getWithDefault<double>(0.0), WithinAbs(0.75, 0.001));
     REQUIRE_THAT(engine.evaluate("pointer_down_client_x").getWithDefault<double>(0.0), WithinAbs(107.0, 0.001));
     REQUIRE_THAT(engine.evaluate("pointer_down_offset_x").getWithDefault<double>(0.0), WithinAbs(7.0, 0.001));
-    // pulp #1XXX — W3C MouseEvent.button: right=2 (unchanged), but the
-    // earlier raw-enum path coincidentally also emitted 2 for right.
-    // The button=0/1/2 contract test covering the regression cause
-    // (left=0, not 1) lives in the "W3C button mapping" test below.
+    // W3C MouseEvent.button: right=2. The button=0/1/2 contract test covering
+    // the regression cause (left=0, not 1) lives in the "W3C button mapping"
+    // test below.
     REQUIRE(engine.evaluate("pointer_down_button").getWithDefault<int>(0) == 2);
     REQUIRE(engine.evaluate("pointer_down_mods").toString() == "true:true:true:true");
 
@@ -1246,9 +1238,8 @@ TEST_CASE("WidgetBridge pointer, gesture, capture, and shortcut APIs dispatch to
                              static_cast<uint16_t>(kModCtrl | kModCmd),
                              true);
     REQUIRE(engine.evaluate("shortcut_count").getWithDefault<int>(0) == 0);
-    // pulp #1XXX — `e.key` is a W3C UIEvent.key string ('a', not 97).
-    // JSX handlers compare `e.key === 'Escape'` / `'a'` and the previous
-    // raw-int dispatch broke every such comparison.
+    // `e.key` is a W3C UIEvent.key string ('a', not 97). JSX handlers compare
+    // `e.key === 'Escape'` / `'a'`, so raw integer dispatch breaks them.
     REQUIRE(engine.evaluate("global_key").toString() == "a");
     REQUIRE(engine.evaluate("global_mods").getWithDefault<int>(0) == static_cast<int>(kModCtrl | kModCmd));
 
@@ -1428,11 +1419,9 @@ TEST_CASE("WidgetBridge style and layout setters update native view state",
     REQUIRE_FALSE(panel->hit_testable());
     REQUIRE(panel->background_token() == "bg.raised");
     REQUIRE(panel->border_token() == "accent.primary");
-    // pulp #1731 P1 — Panel::set_corner_radius now routes through the
-    // same View slot setBorder() writes to. setPanelStyle(..., 9, ...)
-    // on JS line 90 was followed by setBorder(..., 2, 6) on line 92, so
-    // last-write-wins yields 6. Previously Panel kept a shadowed 9 that
-    // paint() never read — the on-screen radius was always the View slot.
+    // Panel::set_corner_radius routes through the same View slot setBorder()
+    // writes to. setPanelStyle(..., 9, ...) is followed by setBorder(..., 2, 6),
+    // so last-write-wins yields 6 and paint reads the View slot.
     REQUIRE_THAT(panel->corner_radius(), WithinAbs(6.0f, 0.001f));
     REQUIRE_THAT(panel->border_width(), WithinAbs(2.0f, 0.001f));
     REQUIRE(panel->has_background_color());
@@ -1494,10 +1483,9 @@ TEST_CASE("WidgetBridge style and layout setters update native view state",
     REQUIRE(engine.evaluate("missing_preset_type").toString() == "undefined");
 }
 
-// pulp #1549 — RN `mixBlendMode` (RN 0.76 New Architecture). The bridge
-// fn `setMixBlendMode` maps W3C blend-mode keywords to the canvas
-// BlendMode enum on the View slot; the @pulp/react prop-applier dispatch
-// is exercised by packages/pulp-react/test/prop-applier-mix-blend-mode.test.ts.
+// RN `mixBlendMode` maps W3C blend-mode keywords to the canvas BlendMode enum
+// on the View slot; the @pulp/react prop-applier dispatch is exercised by
+// packages/pulp-react/test/prop-applier-mix-blend-mode.test.ts.
 TEST_CASE("WidgetBridge setMixBlendMode keyword -> BlendMode mapping",
           "[view][bridge][issue-1549]") {
     using BM = pulp::canvas::Canvas::BlendMode;
@@ -1536,15 +1524,14 @@ TEST_CASE("WidgetBridge setMixBlendMode keyword -> BlendMode mapping",
         {"saturation",  BM::saturation},
         {"color",       BM::color},
         {"luminosity",  BM::luminosity},
-        // pulp #1549 closure (Tier 2 reclass 2026-05-12): `plus-lighter`
-        // is the W3C draft's additive composite (min(A+B, 1) per channel,
-        // same math as SkBlendMode::kPlus). Bridge mapping to BM::lighter
-        // is spec-correct — reclassed as supported.
+        // `plus-lighter` is the W3C draft's additive composite (min(A+B, 1)
+        // per channel, same math as SkBlendMode::kPlus). Bridge mapping to
+        // BM::lighter is spec-correct.
         //
-        // `plus-darker` is a documented DIVERGENCE pinned for honesty
-        // (Codex P2 review on PR #1870): W3C draft defines it as the
-        // MULTIPLICATIVE variant, but Pulp (and Chromium) route it to
-        // additive kPlus along with `plus-lighter`. The View slot ends
+        // `plus-darker` is a documented DIVERGENCE pinned for honesty:
+        // W3C draft defines it as the MULTIPLICATIVE variant, but Pulp
+        // (and Chromium) route it to additive kPlus along with `plus-lighter`.
+        // The View slot ends
         // up at BM::lighter, but `plus-darker` stays in compat.json's
         // unsupportedValues because callers don't get the spec
         // composite. Pin the observable bridge behavior so a future
@@ -1678,11 +1665,9 @@ TEST_CASE("WidgetBridge restore_values handles missing snapshot entries graceful
     REQUIRE(bridge.widget("old-widget") == nullptr);
 }
 
-// Issue #491 P2: __gpuComputeDispatchImpl used to ignore the
-// `bufferDataBase64` field in the bindGroups payload, so JS compute
-// shaders always ran against zeroed buffers. The fix decodes base64 and
-// uploads via queue.WriteBuffer. Without a live Dawn device we can't
-// run the full pipeline, but we can exercise the parse + base64 decode
+// __gpuComputeDispatchImpl decodes `bufferDataBase64` from the bindGroups
+// payload and uploads via queue.WriteBuffer. Without a live Dawn device we
+// can't run the full pipeline, but we can exercise the parse + base64 decode
 // branch to confirm it doesn't throw or crash on well-formed input.
 TEST_CASE("WidgetBridge __gpuComputeDispatchImpl parses bufferDataBase64 payload",
           "[view][bridge][gpu][issue-491]") {
@@ -1834,13 +1819,12 @@ TEST_CASE("WidgetBridge applyShader reports results and marks targets active",
                  WithinAbs(1.0f, 0.001f));
 }
 
-// ── setTransform on a View (issue-930) ────────────────────────────────────
+// ── setTransform on a View ────────────────────────────────────────────────
 //
-// The View-level companion to canvasSetTransform from PR #897. Used 1× today
-// by the CSS adapter for translateX(-50%) modal centering and is foundational
-// for future widget animation. Apply an affine matrix to a View; paint_all()
-// concats it onto the canvas matrix so parent transforms compose and child
-// Views inherit it. Layout is paint-only — hit-test and Yoga ignore it.
+// The View-level companion to canvasSetTransform applies an affine matrix to a
+// View. paint_all() concats it onto the canvas matrix so parent transforms
+// compose and child Views inherit it. Layout is paint-only — hit-test and Yoga
+// ignore it.
 TEST_CASE("WidgetBridge setTransform stores affine matrix on the target View",
           "[view][bridge][transform][issue-930]") {
     ScriptEngine engine;
@@ -1883,10 +1867,10 @@ TEST_CASE("WidgetBridge setTransform stores affine matrix on the target View",
 
 // ── issue-926: setBackdropFilter ─────────────────────────────────────────────
 
-// pulp #1517 — background sub-properties round-trip through the bridge
-// onto storage-only View slots. Paint impact today is partial (only
-// the keyword is stored; the box-clip / scroll-attachment paint paths
-// haven't landed). The test asserts the wire-through, not paint.
+// Background sub-properties round-trip through the bridge onto storage-only
+// View slots. Paint impact today is partial (only the keyword is stored; the
+// box-clip / scroll-attachment paint paths haven't landed). The test asserts
+// the wire-through, not paint.
 TEST_CASE("WidgetBridge background sub-properties round-trip onto View slots",
           "[view][bridge][issue-1517]") {
     ScriptEngine engine;
@@ -1912,8 +1896,8 @@ TEST_CASE("WidgetBridge background sub-properties round-trip onto View slots",
     REQUIRE(p->background_clip() == "border-box");
 }
 
-// pulp #1517 — CSSStyleDeclaration shim forwards camelCase background
-// sub-properties to the bridge setters.
+// CSSStyleDeclaration forwards camelCase background sub-properties to the
+// bridge setters.
 TEST_CASE("CSSStyleDeclaration forwards background sub-props to bridge",
           "[view][bridge][css][issue-1517]") {
     ScriptEngine engine;
@@ -2088,9 +2072,9 @@ TEST_CASE("View::paint_all dispatches outset shadow before clip, "
     SECTION("outset shadow paints before clip_rect") {
         View v;
         v.set_bounds({0, 0, 100, 50});
-        // pulp #972 — overflow now defaults to visible (no clip_rect).
-        // This test specifically asserts the shadow / clip_rect ordering
-        // contract, so opt-in to clipping explicitly.
+        // Overflow defaults to visible (no clip_rect). This test specifically
+        // asserts the shadow / clip_rect ordering contract, so opt in to
+        // clipping explicitly.
         v.set_overflow(View::Overflow::hidden);
         v.set_box_shadow(0, 14, 40, 0, Color::rgba8(0, 0, 0, 160), /*inset=*/false);
 
@@ -2169,13 +2153,13 @@ TEST_CASE("Canvas::draw_box_shadow CPU fallback approximates shadow as "
     REQUIRE(backing.count(DrawCommand::Type::fill_rounded_rect) >= 5);
 }
 
-// ── pulp #1434 Triage #11 — textAlign 'auto' + 'justify' ────────────────────
+// ── textAlign 'auto' + 'justify' ────────────────────────────────────────────
 //
 // Bridge accepts five textAlign values now. The CSS shim and
 // @pulp/react prop-applier pass values through verbatim; bridge maps
 // to LabelAlign. `auto` resolves at paint-time (LTR-only today).
 // `justify` reaches canvas TextAlign::justify; SkParagraph kJustify
-// integration lands in a follow-up.
+// integration is still a paint-side gap.
 
 TEST_CASE("setTextAlign accepts left / center / right / start / end / auto / justify",
           "[view][bridge][issue-1434-textalign-11]") {
@@ -2250,7 +2234,7 @@ TEST_CASE("Label paints with TextAlign::left when textAlign='auto' (LTR fallback
     REQUIRE(saw_left);
 }
 
-// ── pulp #1434 follow-up (css/textAlign coverage gap) — match-parent ─────
+// ── textAlign match-parent ────────────────────────────────────────────────
 //
 // CSS spec: `match-parent` resolves to the parent's *computed*
 // `text-align`. Pulp wires this at paint time by walking the View parent
@@ -2326,13 +2310,10 @@ TEST_CASE("Label with textAlign='match-parent' falls back to left when no ancest
     REQUIRE(saw_left);
 }
 
-// Codex P1 on PR #1879 (2026-05-12): when an INTERMEDIATE ancestor in
-// the chain has text-align: match-parent itself, the walk must
-// continue past it to find the first non-match-parent value upstream.
-// The original implementation stopped at parent.inheritable_text_align()
-// returning 5 and degraded the child to `left` — wrong for a chain
-// like grandparent=center → parent=match-parent → label=match-parent
-// which should resolve to center.
+// When an intermediate ancestor in the chain has text-align: match-parent
+// itself, the walk must continue past it to find the first non-match-parent
+// value upstream. A chain like grandparent=center → parent=match-parent →
+// label=match-parent should resolve to center, not fall back to left.
 TEST_CASE("Label with match-parent walks past intermediate match-parent ancestor",
           "[view][widget][css][issue-1434][issue-1879][coverage]") {
     // Build: grandparent(center) → parent(match-parent) → label(match-parent).
@@ -2426,18 +2407,15 @@ TEST_CASE("setTextAlign on a container View accepts match-parent (encoded as 5)"
     REQUIRE(inh.value() == 5);
 }
 
-// ── pulp #1434 small-wins bundle (Triage #7 + #14) ──────────────────────
+// ── cursor keywords and flex-wrap reverse ─────────────────────────────────
 //
-// Triage #7: cursor enum fan-out — extended setCursor case ladder maps
-// the full CSS cursor keyword set to the existing View::CursorStyle
-// slots (axis-aligned + diagonal resize aliases, move/all-scroll →
-// multi-directional, none/hidden → invisible).
+// setCursor maps the full CSS cursor keyword set to the existing
+// View::CursorStyle slots (axis-aligned + diagonal resize aliases,
+// move/all-scroll → multi-directional, none/hidden → invisible).
 //
-// Triage #14: flexWrap reverse — flex_wrap is now a tri-state enum
-// (no_wrap / wrap / wrap_reverse) routed through Yoga's
-// YGWrapWrapReverse for the previously-inexpressible CSS
-// `flex-wrap: wrap-reverse` mode. Bridge accepts the keyword strings
-// alongside the legacy 0/1 numeric path.
+// flex_wrap is a tri-state enum (no_wrap / wrap / wrap_reverse) routed through
+// Yoga's YGWrapWrapReverse for CSS `flex-wrap: wrap-reverse`. Bridge accepts
+// the keyword strings alongside the legacy 0/1 numeric path.
 
 TEST_CASE("setCursor maps the full CSS keyword set",
           "[view][bridge][css][issue-1434-bundle]") {
@@ -2472,13 +2450,11 @@ TEST_CASE("setCursor maps the full CSS keyword set",
     REQUIRE(bridge.widget("j")->cursor() == CS::default_);
 }
 
-// pulp #1550 Tier-4 macOS partial 2026-05-12: five CSS cursor keywords
-// (`alias` / `copy` / `zoom-in` / `zoom-out` / `context-menu`) now
-// route to dedicated `View::CursorStyle` slots so the macOS dispatch
-// in `window_host_mac.mm` can pick a real `NSCursor`. The other four
-// previously-unsupported keywords (`wait` / `help` / `progress` /
-// `cell`) stay collapsed to `default_` because macOS has no native
-// cursor for them. Pin both halves.
+// Five CSS cursor keywords (`alias` / `copy` / `zoom-in` / `zoom-out` /
+// `context-menu`) route to dedicated `View::CursorStyle` slots so the macOS
+// dispatch in `window_host_mac.mm` can pick a real `NSCursor`. The other four
+// keywords (`wait` / `help` / `progress` / `cell`) stay collapsed to `default_`
+// because macOS has no native cursor for them. Pin both halves.
 TEST_CASE("setCursor wires 5 macOS-backed keywords to dedicated CursorStyle slots",
           "[view][bridge][issue-1550][coverage]") {
     ScriptEngine engine;
@@ -2592,7 +2568,7 @@ TEST_CASE("flex-flow shorthand recognizes wrap-reverse",
     REQUIRE(f.direction == FlexDirection::row);
 }
 
-// ── pulp #1434 Triage #10 — borderStyle dashed/dotted ─────────────────────
+// ── borderStyle dashed/dotted ─────────────────────────────────────────────
 //
 // Bridge maps the CSS border-style keyword to View::BorderStyle. Skia
 // installs SkDashPathEffect at stroke time for `dashed` / `dotted`;
@@ -2710,15 +2686,12 @@ TEST_CASE("border-style: none short-circuits the stroke",
     }
 }
 
-// ── pulp #1434 Phase A2-3 — RTL writing direction ─────────────────────
+// ── RTL writing direction ────────────────────────────────────────────────
 //
 // setDirection maps the CSS keyword to View::WritingDirection. Yoga
-// honors at layout (YGNodeStyleSetDirection); Skia paragraph_style
-// honors at text shape time (Phase A2-3 follow-up). LTR-only fast
-// path on the @pulp/react logical-edge bundle (#1497) stays in effect
-// until a separate slice plumbs the direction resolver into the
-// prop-applier; this PR establishes the View enum + bridge fn + Yoga
-// dispatch substrate.
+// honors at layout (YGNodeStyleSetDirection); Skia paragraph_style honors at
+// text shape time. The @pulp/react logical-edge bundle remains LTR-only until a
+// separate change plumbs the direction resolver into the prop-applier.
 
 TEST_CASE("setDirection maps each keyword to the right enum",
           "[view][bridge][css][issue-1434-rtl]") {
@@ -2809,13 +2782,10 @@ TEST_CASE("HTML dir attribute forwards to View writing direction",
     REQUIRE(std::string(attr.getWithDefault<std::string_view>("")) == "sideways");
 }
 
-// pulp #1434 Phase A2-3 — Codex P1 (PR #1506, comment 3196031661):
-// `auto_` on a non-root view must map to YGDirectionInherit so an
-// RTL ancestor actually flows into descendants. Previously,
-// build_yoga_subtree called view.resolved_direction() which collapses
-// `auto_` to ltr unconditionally, so the descendant's yoga node was
-// pinned to YGDirectionLTR and any grandchildren flowed LTR even when
-// the grandparent was set to RTL.
+// `auto_` on a non-root view must map to YGDirectionInherit so an RTL ancestor
+// actually flows into descendants. If build_yoga_subtree collapses `auto_` to
+// ltr unconditionally, the descendant's yoga node is pinned to YGDirectionLTR
+// and grandchildren flow LTR even when the grandparent is RTL.
 //
 // Verification path:
 //   grandparent (rtl, row)
@@ -2883,7 +2853,7 @@ TEST_CASE("auto_ direction inherits RTL from grandparent through yoga",
     REQUIRE_THAT(b->bounds().x, WithinAbs(90.0f,  0.5f));
 }
 
-// ── pulp #1514 — list-style cluster bridge round-trip ────────────────────
+// ── list-style cluster bridge round-trip ─────────────────────────────────
 //
 // Pulp doesn't model HTML <li>/<ul>/<ol> semantics; the bridge stores
 // the list-style values verbatim on the View so a future paint pass
@@ -2931,11 +2901,9 @@ TEST_CASE("setListStyleType unknown keyword falls back to disc (issue-1514)",
     REQUIRE(bridge.widget("x")->list_style_type() == View::ListStyleType::disc);
 }
 
-// pulp #1514 — extend the counter-style keyword set (lower-roman /
-// upper-roman / lower-alpha / etc.). Storage-only round-trip; paint-side
-// glyph rendering is the follow-up. The bar for this slice is the bridge
-// stores each keyword on its own View::ListStyleType slot so the catalog
-// can flip from `missing` to `supported-with-gaps`.
+// Counter-style keywords (lower-roman / upper-roman / lower-alpha / etc.) are
+// storage-only round-trips; paint-side glyph rendering is a separate gap. The
+// bridge stores each keyword on its own View::ListStyleType slot.
 TEST_CASE("setListStyleType maps counter-style keywords to enum slots (issue-1514)",
           "[view][bridge][css][issue-1514][coverage]") {
     ScriptEngine engine;
@@ -2967,9 +2935,9 @@ TEST_CASE("setListStyleType maps counter-style keywords to enum slots (issue-151
     REQUIRE(bridge.widget("ge")->list_style_type() == L::georgian);
 }
 
-// pulp #1514 — listStyle shorthand routes counter-style keywords to
-// setListStyleType (not silently dropped). Regression guard for the
-// `lsTypes` table in web-compat-style-decl.js.
+// listStyle shorthand routes counter-style keywords to setListStyleType (not
+// silently dropped). Regression guard for the `lsTypes` table in
+// web-compat-style-decl.js.
 TEST_CASE("listStyle shorthand routes counter-style keywords (issue-1514)",
           "[view][bridge][css][issue-1514][coverage]") {
     ScriptEngine engine;
@@ -3077,7 +3045,7 @@ TEST_CASE("listStyle shorthand parses type / position / image in any order (issu
     REQUIRE(bridge.widget("c")->list_style_type() == View::ListStyleType::none);
 }
 
-// ── pulp #1434 Phase A2-4 — CSS filter chain ─────────────────────────
+// ── CSS filter chain ───────────────────────────────────────────────────
 //
 // setFilter walks the function-chain string (e.g. "blur(4px)
 // brightness(0.8) saturate(1.2) drop-shadow(2px 2px 4px black)")
@@ -3248,15 +3216,13 @@ TEST_CASE("filter chain triggers save_layer_with_filters at paint",
 }
 
 
-// ── Phase iOS-D.3b Slice 1: GpuSurface late-attach into WidgetBridge ────────
-// planning/2026-05-29-ios-d3b-threejs-webgpu-program.md § Slice 1
+// ── GpuSurface late-attach into WidgetBridge ───────────────────────────────
 //
-// These tests pin the new attach_gpu_surface() / has_native_gpu_bridge()
-// API and the ScriptedUiSession-side plumbing. They DO NOT need a real
-// Dawn surface — passing nullptr exercises the detach/idempotent paths,
-// and passing the same pointer twice exercises the idempotence guard.
-// A live-surface companion test belongs in slice 3 ([jsc][navigator-gpu][live])
-// where Dawn is available.
+// These tests pin the attach_gpu_surface() / has_native_gpu_bridge() API and
+// the ScriptedUiSession-side plumbing. They DO NOT need a real Dawn surface:
+// passing nullptr exercises the detach/idempotent paths, and passing the same
+// pointer twice exercises the idempotence guard. Live-surface coverage belongs
+// in the `[jsc][navigator-gpu][live]` lane where Dawn is available.
 
 TEST_CASE("WidgetBridge gpu_surface late-attach is idempotent and nullable",
           "[widget_bridge][gpu-surface-plumbing][issue-ios-d3b-slice1]") {
@@ -3314,8 +3280,8 @@ TEST_CASE("WidgetBridge gpu_surface late-attach is idempotent and nullable",
     engine.pump_message_loop();
     REQUIRE(engine.evaluate("globalThis.__lateAttachAdapterNative")
                 .getWithDefault<bool>(false));
-    // The live counterpart test in slice 3 will run the same path with real
-    // Dawn handles, not only descriptor-level test data.
+    // The live counterpart test runs the same path with real Dawn handles, not
+    // only descriptor-level test data.
 
     // 5. attach_gpu_surface(same-ptr) is idempotent (no-op fast-path).
     bridge->attach_gpu_surface(&native_surface);
@@ -3332,13 +3298,11 @@ TEST_CASE("WidgetBridge gpu_surface late-attach is idempotent and nullable",
 
 TEST_CASE("WidgetBridge __gpuQueueSubmitImpl returns boolean for all engine inputs",
           "[widget_bridge][gpu-queue][ios-d3b-slice5]") {
-    // iOS-D.3b Slice 5: pin the engine-agnostic contract of
-    // __gpuQueueSubmitImpl — must return a JS-side boolean for every
-    // input shape, never throw / return undefined / return a type that
-    // JSC would coerce surprisingly. This is the canonical "bridge
-    // survived the call" check that the buffered-skips probe in
-    // web-compat-gpu-buffered.js relies on. The wgpu device-side
-    // success path is exercised by the live tests; this case pins the
+    // __gpuQueueSubmitImpl must return a JS-side boolean for every input shape,
+    // never throw / return undefined / return a type that JSC would coerce
+    // surprisingly. This is the canonical "bridge survived the call" check that
+    // the buffered-skips probe in web-compat-gpu-buffered.js relies on. The wgpu
+    // device-side success path is exercised by live tests; this case pins the
     // input-validation surface so a regression returning undefined
     // (falsy-coerced) doesn't silently break the bridge.
     pulp::view::ScriptEngine engine;
@@ -3371,10 +3335,9 @@ TEST_CASE("WidgetBridge __gpuQueueSubmitImpl returns boolean for all engine inpu
 
 TEST_CASE("WidgetBridge __gpuCanvasConfigureImpl surfaces presentable flag",
           "[widget_bridge][gpu-canvas][ios-d3b-slice4]") {
-    // iOS-D.3b Slice 4: the configure result must carry a `presentable`
-    // boolean that reflects gpu_surface_->has_surface(). JS uses this to
-    // confirm draws WILL hit the visible swapchain (rather than a silent
-    // offscreen texture — Codex pass-1 finding #3).
+    // The configure result must carry a `presentable` boolean that reflects
+    // gpu_surface_->has_surface(). JS uses this to confirm draws WILL hit the
+    // visible swapchain rather than a silent offscreen texture.
 #if PULP_TEST_HAS_GPU_SURFACE
     pulp::view::ScriptEngine engine;
     pulp::view::View root;
@@ -3452,7 +3415,7 @@ TEST_CASE("WidgetBridge ctor with non-null gpu_surface stores it",
 // `using namespace pulp::view`. Keep the ScriptedUiSession test where the
 // transitive include is already managed.
 
-// pulp #3206 — eval_or_throw must log PULP_EVAL_THROW BEFORE re-throwing.
+// eval_or_throw must log PULP_EVAL_THROW BEFORE re-throwing.
 //
 // load_script wraps each evaluate() in `eval_or_throw` which catches three
 // classes (choc::javascript::Error, std::exception, ...) and re-throws as
