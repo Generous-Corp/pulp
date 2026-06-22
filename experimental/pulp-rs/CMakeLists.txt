@@ -3,10 +3,9 @@
 # binary alongside `pulp-cpp` (the C++ CLI), and `cmake --install`
 # drops both under `${CMAKE_INSTALL_BINDIR}`.
 #
-# Phase 8 binary-swap context (issues #686, #767): the Rust crate's
-# `[[bin]]` is now `pulp`, and the C++ target output is `pulp-cpp`.
-# `cmake --install` drops both under the active prefix so Rust owns the
-# user-facing command while C++ remains available for fallthrough.
+# Binary layout: the Rust crate's `[[bin]]` is `pulp`, and the C++ target
+# output is `pulp-cpp`. `cmake --install` drops both under the active prefix so
+# Rust owns the user-facing command while C++ remains available for fallthrough.
 #
 # Escape hatches (in priority order):
 #
@@ -107,7 +106,6 @@ set(PULP_RUST_CLI_PROFILE "release" CACHE STRING
 # `aarch64-apple-darwin` so Cargo emits Mach-O binaries instead of the
 # host's native ELF/PE. Native builds leave this empty and Cargo picks
 # the host triple automatically.
-# See planning/2026-05-24-linux-hosted-macos-arm64-cross-lane.md.
 set(PULP_RUST_CLI_TARGET "" CACHE STRING
     "Optional Cargo target triple for pulp-rs cross builds")
 
@@ -129,9 +127,8 @@ endif()
 # Cargo state into the source tree (it would otherwise default to
 # `experimental/pulp-rs/target/`).
 set(_pulp_rs_target_dir "${CMAKE_CURRENT_BINARY_DIR}/cargo-target")
-# Phase 8 binary swap (#767 / #686): the Cargo `[[bin]] name` is now
-# `pulp` (was `pulp-rs`). Cargo emits `target/<profile>/pulp[.exe]`,
-# so this matches the new binary basename.
+# Cargo emits `target/<profile>/pulp[.exe]`, matching the user-facing binary
+# basename staged below.
 set(_pulp_rs_bin_name "pulp${CMAKE_EXECUTABLE_SUFFIX}")
 set(_pulp_rs_cargo_bin "${_pulp_rs_target_dir}/${_pulp_rs_target_subdir}/${_pulp_rs_bin_name}")
 set(_pulp_rs_dest_bin   "${CMAKE_BINARY_DIR}/${_pulp_rs_bin_name}")
@@ -179,7 +176,6 @@ endif()
 # (`cmake --build ... --target pulp-cli && cmake --install ...`)
 # never trigger the cargo step, and would otherwise fail the
 # install step trying to copy a file that was never produced.
-# Codex review on PR #778 (CMakeLists:122) flagged this as a P2.
 install(PROGRAMS "${_pulp_rs_dest_bin}"
         DESTINATION "${_pulp_rs_install_bindir}"
         OPTIONAL)

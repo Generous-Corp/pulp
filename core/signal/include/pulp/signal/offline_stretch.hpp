@@ -11,15 +11,15 @@
 /// to an EXACT output length, non-causal (look-ahead) transient handling, and
 /// (gated) verbatim transient relocation.
 ///
-/// Tiering: this orchestration is the v1 BASELINE. The realtime core is
-/// hop-quantized and causal; if measured quality fails the Rubber Band R3 bar
-/// (see the metrics harness), this API can grow a native offline path. The
-/// realtime core's validated numbers are realtime results; offline must prove
-/// its own quality.
+/// Tiering: this orchestration is the v1 BASELINE built on the hop-quantized,
+/// causal realtime core. A native offline-quality path can follow if measured
+/// quality warrants it. The realtime core's validated numbers are realtime
+/// results; offline must prove its own quality.
 ///
 /// ─────────────────────────────────────────────────────────────────────────
-/// Current baseline: tempo stretch, pitch shift, varispeed, and linked resample
-/// routes are implemented over the realtime spectral primitives. The identity
+/// Current status: tempo stretch, pitch shift, varispeed, formant modes,
+/// repitch-linked resampling, independent time+pitch, draft OLA preview, and STN
+/// routing are implemented over the realtime spectral primitives. The identity
 /// route remains exact at `time_ratio == 1` and `pitch_semitones == 0`; offline
 /// refinements such as seam-clean transient relocation remain gated.
 /// ─────────────────────────────────────────────────────────────────────────
@@ -85,7 +85,7 @@ struct OfflineStretchOptions {
     // a separate bug to fix before re-enabling by default.)
     bool route_noise_stn = false;   ///< route noise/residual through NoiseMorpher
     StretchTransientMode transient_mode = StretchTransientMode::phase_reset;
-    int quality = 2;                ///< 0 draft (fast preview) .. 2 best
+    int quality = 2;                ///< <=0 draft preview; >=1 full spectral render
 
     // Range MUST be sized up-front: the underlying
     // RealtimePitchTimeProcessor clamps to [1/max, max] and allocates from these
@@ -264,6 +264,8 @@ public:
     /// MUST equal offline_stretch_output_frames(in_frames, opts.time_ratio).
     /// Deinterleaved float32; `in`/`out` are arrays of `channels()` pointers.
     /// Returns false (with *err set, if provided) on a contract violation.
+    /// process()/prepare() allocate scratch and may still throw std::bad_alloc
+    /// for very long inputs or extreme ratios.
     bool process(const float* const* in, long in_frames,
                  float* const* out, long out_frames,
                  const OfflineStretchOptions& opts,
