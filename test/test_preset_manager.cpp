@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
+#include <choc/text/choc_JSON.h>
 #include "preset_test_sandbox.hpp"
 #include <pulp/runtime/crypto.hpp>
 #include <pulp/state/content_registry.hpp>
@@ -198,6 +199,54 @@ TEST_CASE("PresetManager save and load round-trip", "[state][preset]") {
     REQUIRE(found);
     REQUIRE(store.get_value(1) < -5.0f); // approximately -6
     REQUIRE(store.get_value(2) > 70.0f); // approximately 75
+}
+
+TEST_CASE("PresetManager save is atomic and leaves no temp file behind",
+          "[state][preset][reliability]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-atomic");
+    StateStore store;
+    setup_test_store(store);
+    PresetManager pm(store, "TestCo", "TestPlugin");
+
+    REQUIRE(pm.save("Atomic"));
+
+    const fs::path preset = fs::path(pm.user_presets_dir()) / "Atomic.json";
+    REQUIRE(fs::exists(preset));
+    REQUIRE_FALSE(fs::exists(fs::path(pm.user_presets_dir()) / "Atomic.json.tmp"));
+
+    // The written file is valid, parseable JSON (not a half-written fragment).
+    std::ifstream f(preset);
+    std::string content((std::istreambuf_iterator<char>(f)),
+                        std::istreambuf_iterator<char>());
+    REQUIRE_NOTHROW(choc::json::parse(content));
+}
+
+TEST_CASE("PresetManager escapes metadata so special characters stay valid JSON",
+          "[state][preset][reliability]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-escape");
+    StateStore store;
+    setup_test_store(store);
+
+    // Manufacturer / plugin / preset name carrying quotes and backslashes used
+    // to produce a corrupt, unparseable preset file via raw `<<` interpolation.
+    PresetManager pm(store, R"(Acme "Audio" \ Co)", R"(Plug"in)");
+    REQUIRE(pm.save(R"(My "Best" \ Preset)"));
+
+    const fs::path preset =
+        fs::path(pm.user_presets_dir()) / R"(My "Best" \ Preset.json)";
+    REQUIRE(fs::exists(preset));
+
+    std::ifstream f(preset);
+    std::string content((std::istreambuf_iterator<char>(f)),
+                        std::istreambuf_iterator<char>());
+
+    // The file parses, and the escaped metadata round-trips through a real
+    // JSON parser with the exact original (unescaped) values.
+    auto doc = choc::json::parse(content);
+    REQUIRE(doc.isObject());
+    REQUIRE(std::string(doc["manufacturer"].getString()) == R"(Acme "Audio" \ Co)");
+    REQUIRE(std::string(doc["plugin"].getString()) == R"(Plug"in)");
+    REQUIRE(std::string(doc["name"].getString()) == R"(My "Best" \ Preset)");
 }
 
 TEST_CASE("PresetManager unsaved changes tracking", "[state][preset]") {
