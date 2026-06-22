@@ -32,7 +32,7 @@
     },
     {
       "path": "test/CMakeLists.txt",
-      "max_loc": 6131,
+      "max_loc": 6119,
       "note": "shared test registration hotspot; lowered after comment-hygiene cleanup"
     },
     {
