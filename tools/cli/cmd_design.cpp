@@ -83,9 +83,9 @@ int run_diff(const std::vector<std::string>& rest) {
 } // namespace
 
 int cmd_design(const std::vector<std::string>& args) {
-    // ── Phase 2: `pulp design lint` and `pulp design diff` ─────────────
-    // Both verbs operate on DESIGN.md files and do NOT launch the live
-    // design tool. They short-circuit before the design-tool build path.
+    // `pulp design lint` and `pulp design diff` operate on DESIGN.md
+    // files and do NOT launch the live design tool. They short-circuit
+    // before the design-tool build path.
     if (!args.empty()) {
         if (args[0] == "lint") {
             return run_lint(std::vector<std::string>(args.begin() + 1, args.end()));

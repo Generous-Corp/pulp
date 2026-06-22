@@ -1,17 +1,11 @@
 // cli_sdk.cpp — SDK resolution, project-config, and version-banner
-// helpers for the pulp CLI. Extracted from cli_common.cpp in the
-// 2026-05 Phase 2 (R2-4) refactor.
+// helpers for the pulp CLI.
 //
-// This is the "SDK / Config" + "#2087 newer-SDK-available banner"
-// cluster of cli_common.cpp — SDK cache/checkout resolution, pulp.toml
-// + project-CMake version reads, the newer-SDK banner, CLI/project
-// compatibility enforcement, PR-workflow + user-config accessors, and
-// the pinned-Shipyard-version probe.
-//
-// All public functions stay declared in cli_common.hpp (global scope,
-// matching cli_common.cpp); this TU only relocates their definitions
-// (plus the file-local anonymous-namespace helpers used nowhere else)
-// so SDK/config work no longer recompiles the 2k-line cli_common.cpp.
+// Owns SDK cache/checkout resolution, pulp.toml + project-CMake version
+// reads, the newer-SDK banner, CLI/project compatibility enforcement,
+// PR-workflow + user-config accessors, and the pinned-Shipyard-version
+// probe. Public functions stay declared in cli_common.hpp; this file
+// contains their definitions plus file-local helpers.
 
 #include "cli_common.hpp"
 #include "fetchcontent_cache.hpp"

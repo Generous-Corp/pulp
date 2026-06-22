@@ -1,4 +1,4 @@
-// project_bump.hpp — Release-discovery Slice 7 (#564 / parent #499).
+// project_bump.hpp — project pin/bump pure-logic core.
 //
 // Pure-logic core for `pulp project bump` and `pulp project undo`.
 // The CLI frontend lives in `cmd_project.cpp`; this module is the
@@ -9,7 +9,7 @@
 // Decoupling discipline:
 //   - No `cli_common.hpp` include — unit tests link this TU
 //     standalone alongside projects_registry.cpp / update_check.cpp
-//     (same pattern as Slices 1/2/3/5).
+//     (same pattern as the other CLI pure-logic modules).
 //   - All time enters via caller-supplied ISO timestamps or file
 //     names. Never call `std::chrono::system_clock::now()` inside
 //     this module beyond the `now_iso8601_utc()` helper exposed to
@@ -27,7 +27,7 @@
 //
 // We only rewrite the **first** occurrence of each shape — the
 // canonical scaffold never writes more than one. Multiple pins in
-// the same file produce a warning in the CLI (Slice 7.1 surface).
+// the same file produce a warning in the CLI.
 //
 // Safety rails owned by this module:
 //   - refuse_dynamic_pin() — branch names, SHAs, missing pins.

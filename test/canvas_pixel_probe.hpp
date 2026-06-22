@@ -1,15 +1,11 @@
 // canvas_pixel_probe.hpp — shared raster-pixel probe for the canvas
 // test suites.
 //
-// Created in the 2026-05 fix for pulp #2462. The Skia raster tests in
-// test_canvas_widget.cpp, test_canvas2d_shim.cpp, and
-// test_canvas_widget_shadow.cpp each need to read back a single texel
-// from an SkSurface to assert on what the canvas actually painted.
-// test_canvas_widget.cpp and test_canvas2d_shim.cpp each carried their
-// own identical copy; test_canvas_widget_shadow.cpp (extracted from
-// test_canvas_widget.cpp in the Phase 5 P5-3 split, #2418) referenced
-// `sample_pixel` without a definition and failed to compile under a
-// Skia-enabled build. This header is the single shared definition.
+// The Skia raster tests in test_canvas_widget.cpp,
+// test_canvas2d_shim.cpp, and test_canvas_widget_shadow.cpp each need
+// to read back a single texel from an SkSurface to assert on what the
+// canvas actually painted. Keep the probe shared so Skia-enabled builds
+// compile every canvas pixel assertion against the same helper.
 //
 // Skia-gated: the body only exists when PULP_HAS_SKIA is defined, so a
 // no-Skia build sees an empty header. The call sites are themselves

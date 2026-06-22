@@ -3,7 +3,7 @@
 #
 # Catches the class of failure that landed on 2026-05-26 when an iPad
 # walkthrough discovered that `pulp-view-core` did not actually link
-# clean for iOS even though the Phase iOS-B configure smoke was green:
+# clean for iOS even though the configure smoke was green:
 #
 #   - core/view/CMakeLists.txt did not PUBLIC-link pulp::audio despite
 #     visualizers.cpp transitively including <pulp/audio/audio_thumbnail.hpp>

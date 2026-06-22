@@ -15,7 +15,7 @@ add_executable(pulp-fake-screenshot-tool
 set_target_properties(pulp-fake-screenshot-tool PROPERTIES
     OUTPUT_NAME "pulp-fake-screenshot-tool")
 
-# CLI kit commands: Phase 1 metadata-only package manifest validation.
+# CLI kit commands: metadata-only package manifest validation.
 add_executable(pulp-test-cli-kit-commands
     test_cli_kit_commands.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/kit_commands.cpp

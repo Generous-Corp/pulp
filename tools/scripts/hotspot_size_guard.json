@@ -32,7 +32,7 @@
     },
     {
       "path": "test/CMakeLists.txt",
-      "max_loc": 6142,
+      "max_loc": 6133,
       "note": "shared test registration hotspot; lowered after comment-hygiene cleanup"
     },
     {
@@ -127,7 +127,7 @@
     },
     {
       "path": "tools/cli/cli_common.cpp",
-      "max_loc": 1296,
+      "max_loc": 1291,
       "note": "CLI common cleanup candidate"
     },
     {

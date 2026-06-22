@@ -373,7 +373,8 @@ std::string extract_min_macos_version(const std::string& otool_output) {
     //   minos 13.0
     // We pull the FIRST occurrence — multi-arch slices share the same
     // floor in Pulp's build, so this is enough for the AudioWorkgroup
-    // floor check. The actual lipo-slice-walk lives in Phase 6.
+    // floor check. Full per-architecture lipo walking is a separate
+    // validator concern.
     auto find_keyword = [&](const std::string& keyword) -> std::string {
         auto pos = otool_output.find(keyword);
         if (pos == std::string::npos) return {};

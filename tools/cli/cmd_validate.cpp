@@ -24,10 +24,10 @@ int cmd_validate(const std::vector<std::string>& args) {
     bool screenshot = false;
     bool strict = false;   // #51: skipped-because-missing-tool ⇒ fail
     std::string report_path;
-    // Phase 5 (chainer plan, planning/2026-05-24-…): `--target` selects
-    // the macOS runtime validator(s) to run against a passed bundle.
-    // When set, we bypass the build-dir-walking format flow and run
-    // the targeted validators on the explicit bundle argument(s).
+    // `--target` selects the macOS runtime validator(s) to run against
+    // a passed bundle. When set, we bypass the build-dir-walking format
+    // flow and run the targeted validators on the explicit bundle
+    // argument(s).
     std::string target_name;
     std::vector<std::string> positional;
     for (size_t i = 0; i < args.size(); ++i) {
@@ -63,7 +63,7 @@ int cmd_validate(const std::vector<std::string>& args) {
         }
     }
 
-    // ── --target dispatch (Phase 5 macOS runtime validators) ───────────
+    // ── --target dispatch ─────────────────────────────────────────────
     //
     // When --target is set, we run the requested validator(s) on the
     // bundle path(s) supplied as positional args and exit. We do NOT

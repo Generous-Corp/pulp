@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MIT
 //
 // package_commands_add.cpp — mutating `pulp` package commands.
-// Extracted from package_commands.cpp in the 2026-05 roadmap item
-// P11-2 file-split.
 //
 // This TU holds the sub-commands that mutate the project's lock file,
 // generated CMake, and dependency metadata: cmd_add, cmd_remove, and
@@ -10,8 +8,7 @@
 // target) live in package_commands_search.cpp; the audit lane stays
 // in package_commands.cpp. Shared helpers — including CMake-block
 // generation and the DEPENDENCIES.md / NOTICE.md edits — are reached
-// through the private package_commands_internal.hpp header. Code below
-// is moved byte-identically from the original package_commands.cpp.
+// through the private package_commands_internal.hpp header.
 
 #include "package_commands.hpp"
 #include "package_commands_internal.hpp"

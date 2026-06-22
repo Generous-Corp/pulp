@@ -2,8 +2,7 @@
 //
 // package_commands.cpp — `pulp` package audit lane.
 //
-// Roadmap item P11-2 (2026-05) split the package CLI surface out of
-// this monolith. The sub-command bodies now live in sibling TUs:
+// Package sub-command bodies live in sibling TUs:
 //
 //   package_commands_util.cpp    — shared print/file/path helpers,
 //                                  CMake-block generation, metadata edits

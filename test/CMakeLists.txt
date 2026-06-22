@@ -507,10 +507,8 @@ if(TARGET pulp::inspect)
     catch_discover_tests(pulp-test-cli-inspect-shellout)
 endif()
 
-# P5-4 — `pulp loop` shell-out tests, extracted from test_cli_shellout.cpp
-# to bring the parent TU below the 2k line target. Shares
-# test_cli_shellout_helpers.hpp with the parent and its sibling
-# test_cli_shellout_scan_projects.cpp.
+# `pulp loop` shell-out tests. Shares test_cli_shellout_helpers.hpp
+# with the parent CLI shell-out target and the scan/projects sibling.
 add_executable(pulp-test-cli-shellout-loop test_cli_shellout_loop.cpp)
 target_link_libraries(pulp-test-cli-shellout-loop PRIVATE pulp::platform Catch2::Catch2WithMain)
 if(TARGET pulp-cli)
@@ -518,9 +516,8 @@ if(TARGET pulp-cli)
 endif()
 catch_discover_tests(pulp-test-cli-shellout-loop)
 
-# P5-4 — `pulp scan` + `pulp projects list` shell-out tests, extracted
-# from test_cli_shellout.cpp. Shares the helpers header with its
-# siblings.
+# `pulp scan` + `pulp projects list` shell-out tests. Shares the CLI
+# shell-out helpers with the sibling shell-out targets.
 add_executable(pulp-test-cli-shellout-scan-projects test_cli_shellout_scan_projects.cpp)
 target_link_libraries(pulp-test-cli-shellout-scan-projects PRIVATE pulp::platform Catch2::Catch2WithMain)
 if(TARGET pulp-cli)
@@ -528,10 +525,9 @@ if(TARGET pulp-cli)
 endif()
 catch_discover_tests(pulp-test-cli-shellout-scan-projects)
 
-# P5-4 follow-up — `pulp pr` shell-out tests, extracted from
-# test_cli_shellout.cpp. Two contiguous clusters (pr.workflow validation
-# + Shipyard binary pin handling + native fallback). Shares the helpers
-# header with its siblings.
+# `pulp pr` shell-out tests: pr.workflow validation, Shipyard binary pin
+# handling, and native fallback. Shares the helper header with the
+# sibling shell-out targets.
 add_executable(pulp-test-cli-shellout-pr test_cli_shellout_pr.cpp)
 target_link_libraries(pulp-test-cli-shellout-pr PRIVATE pulp::platform Catch2::Catch2WithMain)
 if(TARGET pulp-cli)
@@ -539,11 +535,9 @@ if(TARGET pulp-cli)
 endif()
 catch_discover_tests(pulp-test-cli-shellout-pr)
 
-# P5-4 follow-up — CLI lifecycle-command shell-out tests, extracted
-# from test_cli_shellout.cpp. Covers pulp doctor / pulp dev /
-# pulp design / pulp sdk / pulp upgrade — the lifecycle / diagnostics
-# surface of the CLI. Brings the parent TU under the < 2,000-line
-# P5-4 target.
+# CLI lifecycle-command shell-out tests: pulp doctor / pulp dev /
+# pulp design / pulp sdk / pulp upgrade. These cover the lifecycle and
+# diagnostics surface of the CLI.
 add_executable(pulp-test-cli-shellout-lifecycle test_cli_shellout_lifecycle.cpp)
 target_link_libraries(pulp-test-cli-shellout-lifecycle PRIVATE pulp::platform Catch2::Catch2WithMain)
 if(TARGET pulp-cli)
@@ -551,9 +545,9 @@ if(TARGET pulp-cli)
 endif()
 catch_discover_tests(pulp-test-cli-shellout-lifecycle)
 
-# Inspector Phase 2 — `pulp tweaks diff` shell-out tests. Drives the
-# built binary against pulp-tweaks.json + design-snapshot fixtures and
-# pins the clean / drifted / orphaned exit-code contract.
+# `pulp tweaks diff` shell-out tests. Drives the built binary against
+# pulp-tweaks.json + design-snapshot fixtures and pins the clean /
+# drifted / orphaned exit-code contract.
 add_executable(pulp-test-cli-tweaks-shellout test_cli_tweaks_shellout.cpp)
 target_link_libraries(pulp-test-cli-tweaks-shellout PRIVATE pulp::platform Catch2::Catch2WithMain)
 if(TARGET pulp-cli)
@@ -610,9 +604,9 @@ target_link_libraries(pulp-test-cli-docs-command PRIVATE
     Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-docs-command)
 
-# Plugin ↔ CLI skew banner helper (#551 Slice 6): shells out to bash
-# with a staged `pulp` shim and asserts the banner copy + once-per-
-# session semantics of `.agents/skills/_common/cli_version_check.sh`.
+# Plugin ↔ CLI skew banner helper (#551): shells out to bash with a
+# staged `pulp` shim and asserts the banner copy + once-per-session
+# semantics of `.agents/skills/_common/cli_version_check.sh`.
 # The test file is POSIX-only (invokes /bin/bash) — on Windows we skip
 # to avoid forcing a bash-for-Windows dependency into CI. The helper
 # itself is plain POSIX shell, so wgpu/macOS don't factor in.
@@ -686,10 +680,10 @@ target_include_directories(pulp-test-cli-json-parser PRIVATE ${CMAKE_SOURCE_DIR}
 target_link_libraries(pulp-test-cli-json-parser PRIVATE Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-json-parser)
 
-# CLI version diagnostics (#499 Slice 1): pure-logic tests for the
-# semver parser, plugin.json scraper, and skew analyzer that sit
-# behind `pulp doctor --versions`. version_diag is deliberately free
-# of cli_common link deps so we can compile it straight into the test.
+# CLI version diagnostics (#499): pure-logic tests for the semver
+# parser, plugin.json scraper, and skew analyzer behind
+# `pulp doctor --versions`. version_diag is deliberately free of
+# cli_common link deps so we can compile it straight into the test.
 add_executable(pulp-test-cli-version-diag
     test_cli_version_diag.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/version_diag.cpp
@@ -718,12 +712,11 @@ target_link_libraries(pulp-test-cli-validator-discovery PRIVATE
     Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-validator-discovery)
 
-# Phase 5 mac runtime validators (chainer plan
-# planning/2026-05-24-linux-macos-chainer-gap-closure-plan.md):
-# hermetic tests for `pulp validate --target {standalone|auv3|macho}`
-# that stub the shell-out and filesystem probes via MacValidatorEnv,
-# so the tests run on any host (including Linux CI legs) without
-# needing real .app / .appex / auval.
+# Mac runtime validator tests for
+# `pulp validate --target {standalone|auv3|macho}`. They stub the
+# shell-out and filesystem probes via MacValidatorEnv, so the tests run
+# on any host (including Linux CI legs) without needing real .app /
+# .appex / auval.
 add_executable(pulp-test-cli-mac-runtime-validators
     test_cli_mac_runtime_validators.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/mac_runtime_validators.cpp
@@ -735,10 +728,10 @@ target_link_libraries(pulp-test-cli-mac-runtime-validators PRIVATE
     Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-mac-runtime-validators)
 
-# CLI projects registry (#499 / #552 Slice 1b): pure-logic tests for
-# the ~/.pulp/projects.json read/write surface and the opt-in
-# parent-directory scan. projects_registry is deliberately free of
-# cli_common link deps for the same reason as version_diag.
+# CLI projects registry (#499 / #552): pure-logic tests for the
+# ~/.pulp/projects.json read/write surface and the opt-in parent-
+# directory scan. projects_registry is deliberately free of cli_common
+# link deps for the same reason as version_diag.
 add_executable(pulp-test-cli-projects-registry
     test_cli_projects_registry.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/projects_registry.cpp
@@ -785,7 +778,6 @@ catch_discover_tests(pulp-test-cli-sdk-tarball-filename)
 # update/suggest/audit/add/remove behavior against staged project files
 # and registry fixtures. Stays off remote fetch / archive extraction; links
 # package_commands_* + package_registry.cpp directly without shelling out.
-# Roadmap item P11-2 split subcommands into _util / _search / _add TUs.
 add_executable(pulp-test-cli-package-commands
     test_cli_package_commands.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/package_commands.cpp
@@ -882,7 +874,7 @@ target_link_libraries(pulp-test-cli-importer-install PRIVATE
     Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-importer-install)
 
-# CLI project bump (#499 Slice 7 / #564): pure-logic tests for the
+# CLI project bump (#499 / #564): pure-logic tests for the
 # CMakeLists pin parser, rewriter, refuse-dynamic-pin gate, semver /
 # downgrade guard, and the undo-batch JSON round-trip. project_bump.cpp
 # is deliberately free of cli_common link deps so the tests link it
@@ -899,7 +891,7 @@ target_link_libraries(pulp-test-cli-project-bump PRIVATE
     Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-project-bump)
 
-# CLI project bump --all (#499 Slice 7 / #564): batch-level
+# CLI project bump --all (#499 / #564): batch-level
 # invariants — partial failure isolation, missing-project reporting,
 # undo round-trip across mixed-status batches, and the --allow-downgrade
 # gate. Links both project_bump.cpp and projects_registry.cpp so the
@@ -958,14 +950,13 @@ target_link_libraries(pulp-test-cli-project-command PRIVATE
     Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-project-command)
 
-# CLI update-check (#499 Slice 2 / #547): pure-logic tests for the
+# CLI update-check (#499 / #547): pure-logic tests for the
 # ~/.pulp/update-cache.json round-trip, is_cache_stale boundary,
 # semver comparison, banner composition, TOML writer, and the
 # Fetcher injection. update_check.cpp is deliberately free of
-# cli_common link deps so the tests compile standalone. The #547
-# PR added this test source but forgot the CMake target — Slice 5
-# (#550) wires it in as part of the mode-enforcement work since
-# the two modules share the cache file + banner hooks.
+# cli_common link deps so the tests compile standalone. Keep this
+# target registered with update_mode because the two modules share the
+# cache file and banner hooks.
 add_executable(pulp-test-cli-update-check
     test_cli_update_check.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/update_check.cpp
@@ -977,7 +968,7 @@ target_link_libraries(pulp-test-cli-update-check PRIVATE
     Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-update-check)
 
-# CLI update-mode (#499 Slice 5 / #550): pure-logic tests for the
+# CLI update-mode (#499 / #550): pure-logic tests for the
 # auto/prompt/manual/off state machine, 24h snooze expiration,
 # pending-upgrade marker JSON round-trip, and Windows tombstone
 # cleanup. Filesystem is mocked via per-test tmp dirs; time enters
@@ -995,7 +986,7 @@ target_link_libraries(pulp-test-cli-update-mode PRIVATE
     Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-update-mode)
 
-# CLI migration index (#499 Slice 3 / #548): pure-logic tests for the
+# CLI migration index (#499 / #548): pure-logic tests for the
 # applies_if expression evaluator, hop filter, text/JSON renderers,
 # and the Python codegen round-trip. The generated translation unit
 # `migration_index.cpp` is deliberately NOT linked into this test —

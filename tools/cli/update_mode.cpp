@@ -1,4 +1,4 @@
-// update_mode.cpp — Release-discovery Slice 5 (#550 / parent #499).
+// update_mode.cpp — update-mode state machine.
 //
 // Implementation notes:
 //   - Keep this translation unit free of `cli_common` link deps so the
@@ -297,7 +297,7 @@ PromptDecision decide_prompt_banner(Mode mode,
         // Already notified for this version on a prior invocation —
         // the user hasn't re-engaged (no upgrade, no mode change).
         // Start a snooze so we stop nagging for 24h without requiring
-        // the user to type anything. The Slice 2 code ALREADY set
+        // the user to type anything. update_check already set
         // banner_shown_for_version the first time; the snooze file is
         // the "soft decline" track on top of that.
         //
@@ -305,14 +305,14 @@ PromptDecision decide_prompt_banner(Mode mode,
         // whole point of "already shown". We just ask the caller to
         // write the snooze so the next invocation is quiet even if
         // a newer release arrives (the snooze carries us through the
-        // re-banner event). Slice 2 tests still pin the "silent second
+        // re-banner event). Tests still pin the "silent second
         // invocation" behavior.
         d.write_snooze = false;  // snooze writes are tied to user action,
                                  // not a passive no-op. See tests.
         return d;
     }
     d.show_banner = true;
-    // Writing the snooze on a first-show would conflict with Slice 2's
+    // Writing the snooze on a first-show would conflict with
     // banner_shown_for_version semantics (users on prompt mode who
     // upgrade within 24h still want the upgrade banner). We only
     // write the snooze when the user explicitly declines via the

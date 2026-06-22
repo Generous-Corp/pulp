@@ -187,12 +187,12 @@ TEST_CASE("pulp dev validates value options before build or watch",
     fs::remove_all(tmp);
 }
 
-// Issue #499 Slice 1: `pulp doctor --versions` is the foundation of
-// the release-discovery UX. Verify the subcommand is wired, always
-// exits 0 (skew findings are advisory), and surfaces the diagnostic
-// header + CLI version line on stdout. This catches the class of
-// silent-failure bug described in #295: an --versions flag that is
-// parsed but routes to a no-op would pass CI green without this test.
+// `pulp doctor --versions` is the foundation of the release-discovery
+// UX. Verify the subcommand is wired, always exits 0 (skew findings
+// are advisory), and surfaces the diagnostic header + CLI version line
+// on stdout. This catches the class of silent-failure bug described in
+// #295: an --versions flag that is parsed but routes to a no-op would
+// pass CI green without this test.
 TEST_CASE("pulp doctor --versions prints diagnostics and exits 0",
           "[cli][shellout][doctor][issue-499]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
@@ -208,9 +208,9 @@ TEST_CASE("pulp doctor --versions prints diagnostics and exits 0",
     REQUIRE(r.stdout_output.find("CLI:") != std::string::npos);
 }
 
-// Tier A Slice 11: `pulp doctor --au-cache` refreshes the macOS AU
-// registrar. We test --dry-run for determinism (running real killall
-// in CI would race with other tests on the same runner).
+// `pulp doctor --au-cache` refreshes the macOS AU registrar. We test
+// --dry-run for determinism because running real killall in CI would
+// race with other tests on the same runner.
 TEST_CASE("pulp doctor --au-cache --dry-run reports the command and exits 0",
           "[cli][shellout][doctor][au-cache]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
@@ -228,10 +228,10 @@ TEST_CASE("pulp doctor --au-cache --dry-run reports the command and exits 0",
 #endif
 }
 
-// Issue #548 Slice 3: `pulp upgrade --notes` prints migration notes
-// for the hop without downloading anything. `--from`/`--to` overrides
-// let us exercise the filter deterministically regardless of the
-// installed CLI version on the test host.
+// `pulp upgrade --notes` prints migration notes for the hop without
+// downloading anything. `--from`/`--to` overrides let us exercise the
+// filter deterministically regardless of the installed CLI version on
+// the test host.
 TEST_CASE("pulp upgrade --notes --from A --to B prints migration header",
           "[cli][shellout][upgrade][issue-548]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
@@ -257,7 +257,7 @@ TEST_CASE("pulp upgrade --notes --json emits stable-shape JSON keys",
                        "--from", "0.23.0", "--to", "0.29.0"}, 15000);
     REQUIRE_FALSE(r.timed_out);
     REQUIRE(r.exit_code == 0);
-    // Slice 4 depends on these keys — they are a stable public surface.
+    // These keys are a stable public surface.
     REQUIRE(r.stdout_output.find("\"from\":")       != std::string::npos);
     REQUIRE(r.stdout_output.find("\"to\":")         != std::string::npos);
     REQUIRE(r.stdout_output.find("\"entries\":")    != std::string::npos);
@@ -463,17 +463,17 @@ TEST_CASE("pulp upgrade --notes with no hop prints the empty-notes line",
     REQUIRE(r.stdout_output.find("No migration notes apply") != std::string::npos);
 }
 
-// Issue #549 Slice 4: the `/upgrade` Claude Code slash command shells out
-// to `pulp upgrade --notes --json` and parses the resulting document.
+// The `/upgrade` Claude Code slash command shells out to
+// `pulp upgrade --notes --json` and parses the resulting document.
 // The slash command hardcodes the JSON key names as part of its parsing
 // step (.claude/commands/upgrade.md) — if the CLI renames any of them
 // without updating the skill, the slash command silently falls back to
 // empty context. Guard the exact keys the slash command reads.
 //
-// Separate from the existing issue-548 JSON test because Slice 4 also
-// cares about (a) the document being parseable even when entries is
-// empty and (b) every key the .claude/commands/upgrade.md parsing step
-// relies on — `summary`, `body`, `applies_if` included.
+// Separate from the general upgrade-notes JSON test because the slash
+// command also needs the document to be parseable when entries is empty,
+// and it relies on every key listed here: `summary`, `body`, and
+// `applies_if` included.
 TEST_CASE("pulp upgrade --notes --json is slash-command-parseable",
           "[cli][shellout][upgrade][issue-549]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }

@@ -1,4 +1,4 @@
-// update_check.hpp — Release-discovery Slice 2 (#547 / parent #499).
+// update_check.hpp — latest-release cache and banner helpers.
 //
 // Pure-logic core for the 24h "is there a newer Pulp CLI release?" cache.
 // Anonymous GitHub Releases API + 24h cache in ~/.pulp/update-cache.json.
@@ -7,7 +7,7 @@
 //
 // This header is deliberately decoupled from cli_common.hpp so the unit
 // tests can link update_check.cpp standalone (same pattern as
-// version_diag — see #499 Slice 1).
+// version_diag).
 //
 // Public surface:
 //   - CacheEntry / parse_cache_json / serialize_cache_json  (JSON I/O)
@@ -214,12 +214,11 @@ struct ResolvedLatest {
 // Read the cache; if missing/empty/stale, query the fetcher and persist
 // the result to `cache_path` (best-effort). Returns the resolved value.
 //
-// This was extracted from cmd_upgrade.cpp's check-only and upgrade paths
-// so they share one source of truth and so the fallback behaviour is
-// directly unit-testable. The on-every-invocation detached refresh in
-// pulp_cli.cpp cannot be relied on for short-lived commands — it gets
-// reaped at process exit before curl returns (#1599) — so the upgrade
-// surfaces refresh synchronously.
+// Shared by cmd_upgrade.cpp's check-only and upgrade paths so fallback
+// behaviour is directly unit-testable. The on-every-invocation detached
+// refresh in pulp_cli.cpp cannot be relied on for short-lived commands
+// — it gets reaped at process exit before curl returns (#1599) — so the
+// upgrade surfaces refresh synchronously.
 ResolvedLatest resolve_latest_with_persist(Fetcher& fetcher,
                                            const fs::path& cache_path,
                                            const std::string& owner_repo,

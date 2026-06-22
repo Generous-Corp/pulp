@@ -1,8 +1,7 @@
 // cmd_config.cpp — `pulp config get/set` thin wrappers
 //
-// Release-discovery Slice 2 (#547 / parent #499). Surfaces the
-// `[update]` and `[pr]` sections of ~/.pulp/config.toml so users can
-// toggle modes without hand-editing TOML:
+// Surfaces the `[update]` and `[pr]` sections of ~/.pulp/config.toml so
+// users can toggle modes without hand-editing TOML:
 //
 //   pulp config get pr.workflow
 //   pulp config set pr.workflow github

@@ -1,8 +1,8 @@
 // version_diag.cpp — Implementation of `pulp doctor --versions`
 //
-// Issue #499 (Slice 1). Pure-logic core + narrow I/O helpers so the
-// analyzer can be exercised from unit tests without a live filesystem
-// or a built binary. Only `render_report` writes to std::cout.
+// Pure-logic core + narrow I/O helpers so the analyzer can be
+// exercised from unit tests without a live filesystem or a built
+// binary. Only `render_report` writes to std::cout.
 
 #include "version_diag.hpp"
 
@@ -195,8 +195,8 @@ Semver read_plugin_min_cli_version(const fs::path& plugin_json_path) {
 
     // Same cheap scan as read_plugin_version — the key is a stable
     // top-level JSON string. Absent field → empty Semver (no skew
-    // check). Added in Slice 6 (#551); older plugin manifests won't
-    // have this field and must silently no-op.
+    // check). Older plugin manifests won't have this field and must
+    // silently no-op.
     static const std::regex mcv_re(
         R"RE("min_cli_version"\s*:\s*"([^"]+)")RE");
     std::smatch m;
@@ -284,11 +284,11 @@ std::vector<SkewFinding> VersionReport::analyze() const {
         }
     }
 
-    // Rule 1b (Slice 6 / #551): Claude plugin's `min_cli_version` is
-    // ahead of the installed CLI. This is the exact mirror of the
-    // project-side cli_min_version rule, but from the plugin's
-    // perspective — the same skew banner the plugin-side skill prints
-    // on first invocation, surfaced via `pulp doctor --versions` too.
+    // Claude plugin's `min_cli_version` is ahead of the installed CLI.
+    // This is the exact mirror of the project-side cli_min_version
+    // rule, but from the plugin's perspective — the same skew banner
+    // the plugin-side skill prints on first invocation, surfaced via
+    // `pulp doctor --versions` too (#551).
     if (cli.comparable && plugin_min_cli.comparable) {
         if (compare_semver(plugin_min_cli, cli) > 0) {
             findings.push_back({
@@ -320,9 +320,9 @@ std::vector<SkewFinding> VersionReport::analyze() const {
         }
     }
 
-    // Rule 3 (Slice 1b / #552): per-project registry entries. Same
-    // semantics as rules 1/2 but each finding names the project so the
-    // user can tell which entry in a multi-project fleet is behind.
+    // Per-project registry entries (#552). Same semantics as rules 1/2
+    // but each finding names the project so the user can tell which
+    // entry in a multi-project fleet is behind.
     // Missing-on-disk entries produce a tidy "run `pulp projects
     // remove`" hint — we never auto-prune (see design doc).
     for (const auto& p : projects) {
@@ -386,11 +386,10 @@ int render_report(const VersionReport& report) {
                                 ? std::string{}
                                 : "   (" + report.plugin_json_path.string() + ")"));
         if (report.plugin_min_cli.comparable) {
-            // Plugin min_cli_version is a Slice 6 (#551) field. Render
-            // it right under the Plugin line so the requirement sits
-            // next to the plugin version it's attached to. Four extra
-            // spaces of indent (instead of the usual two) visually
-            // subordinate it to the Plugin line above.
+            // Render plugin min_cli_version right under the Plugin line
+            // so the requirement sits next to the plugin version it's
+            // attached to. Four extra spaces of indent (instead of the
+            // usual two) visually subordinate it to the Plugin line above.
             std::cout << "    needs CLI >= v"
                       << report.plugin_min_cli.raw << "\n";
         }
@@ -412,10 +411,10 @@ int render_report(const VersionReport& report) {
                             "   (from pulp.toml)");
     }
 
-    // Per-project lines (issue #552 Slice 1b). Sourced from the
-    // registry at ~/.pulp/projects.json plus any ancestor projects
-    // surfaced via --scan-parents. Displayed as a separate block so
-    // the "active project" line above keeps its primacy.
+    // Per-project lines (#552). Sourced from the registry at
+    // ~/.pulp/projects.json plus any ancestor projects surfaced via
+    // --scan-parents. Displayed as a separate block so the "active
+    // project" line above keeps its primacy.
     if (!report.projects.empty()) {
         std::cout << "\n  Projects:\n";
         for (const auto& p : report.projects) {

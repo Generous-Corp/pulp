@@ -11,10 +11,8 @@ install rule omits au_view_controller_mac.mm, downstream
 pulp_add_plugin(FORMATS AUv3 ...) builds on macOS fail at the
 add_library() call with a missing-source error.
 
-This regression is the SDK packaging fix called out in
-planning/2026-05-24-linux-macos-chainer-gap-closure-plan.md
-(Phase 3 / Phase 0 "upstream the SDK packaging fix that installs
-au_view_controller_mac.mm").
+This regression protects the SDK packaging rule that installs
+au_view_controller_mac.mm alongside the other format helper sources.
 
 Inputs (passed via -D):
   PULP_BUILD_DIR — path to a configured Pulp build directory.

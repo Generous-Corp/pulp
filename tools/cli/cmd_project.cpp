@@ -1,9 +1,7 @@
 // cmd_project.cpp — dispatcher for the `pulp project` command family.
 //
-// Roadmap item P11-1: this file was historically a single ~1,047-line
-// translation unit holding the pin/bump, undo, and unpin handlers plus
-// all the shared pin-rewrite helpers. It is now split into focused
-// sibling TUs (see cmd_project_internal.hpp for the map):
+// The `pulp project` implementation is split into focused sibling TUs
+// (see cmd_project_internal.hpp for the private map):
 //
 //   cmd_project.cpp          — this file: `cmd_project` dispatch + `do_unpin`
 //   cmd_project_common.cpp   — shared pin-file / project-root helpers
