@@ -3056,3 +3056,19 @@ tags, regardless of which leg broke. To debug a "release stuck" report: check
 this workflow's latest run + the open `release-health` issue, then the failing
 `sign-and-release.yml`/`release-cli.yml` legs for the newest tag. Discord push is
 wired but OFF unless the `RELEASE_ALERT_DISCORD_WEBHOOK` secret is set.
+
+## Release is built by TWO workflows → publish via the coordinator (immutable releases)
+
+A Pulp release is assembled from two parallel tag-triggered workflows: `Release
+CLI` (release-cli.yml → CLI binaries) and `Sign and Release` (sign-and-release.yml
+→ macOS sign/notarize + appcast.xml). GitHub now makes a PUBLISHED release
+IMMUTABLE, so the leg that published first locked the other out ("Cannot upload
+asset to an immutable release") and releases shipped incomplete. Both legs now
+create the release as a DRAFT on a tag push; `release-publish.yml` (the "Release
+publish coordinator", workflow_run on both) flips it to published EXACTLY ONCE,
+when BOTH legs succeed for the same SHA. Consequences to know: a release stays a
+draft until both legs are green (incomplete releases never publish), and
+release-health.yml treats a stuck draft as unhealthy. When debugging "tag exists
+but no published release", check both legs' runs AND the coordinator. A manual
+release-cli workflow_dispatch backfill still publishes directly (draft only on
+`push`).

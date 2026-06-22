@@ -833,7 +833,15 @@ jobs:
             platform below.
           files: |
             artifacts/**/*
-          draft: false
+          # On a tag PUSH, keep the release a DRAFT so the parallel
+          # `Sign and Release` workflow can still attach its appcast.xml — GitHub
+          # now makes a PUBLISHED release immutable, so whichever workflow
+          # published first locked the other out ("Cannot upload asset to an
+          # immutable release"). The `Release publish coordinator`
+          # (release-publish.yml) flips the draft to published once BOTH legs
+          # succeed. A manual workflow_dispatch backfill (CLI-only, no
+          # sign-and-release run) still publishes directly.
+          draft: ${{ github.event_name == 'push' }}
           prerelease: false
           # Explicitly claim GitHub's "latest release" pointer for normal tag
           # pushes. Manual dispatches are often old-tag backfills, so they must

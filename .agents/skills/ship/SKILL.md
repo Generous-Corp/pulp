@@ -935,3 +935,13 @@ from the tag's source. Two safe options:
 - NDK version (r26+ required for C++20)
 - Java version (17+ required for AGP 8+)
 - Build-tools availability (apksigner, zipalign)
+
+## Release publishing is coordinated across two workflows (immutable releases)
+
+A full Pulp release = CLI binaries (`release-cli.yml`) + macOS sign/notarize &
+Sparkle appcast (`sign-and-release.yml`), built in parallel on a tag. Because
+GitHub published releases are now immutable, both legs create the release as a
+DRAFT and `release-publish.yml` publishes it once BOTH succeed. So a release only
+appears once the macOS sign/notarize leg is green too; a red sign-and-release leg
+leaves the release a draft. See the `ci` skill's coordinator note for the full
+mechanism and debugging steps.
