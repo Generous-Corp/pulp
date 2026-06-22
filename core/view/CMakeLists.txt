@@ -56,10 +56,10 @@ set(PULP_JS_PRELUDES
     # CanvasRenderingContext2D constructor is in scope.
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-canvas-image.js
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-style-decl.js
-    # Per-domain `_applyProperty` handler modules. The former
-    # monolithic per-CSS-property switch is split into layout / paint /
-    # typography / transform / misc handlers; web-compat-style-decl.js's
-    # `_applyProperty` is now a thin dispatcher that calls each in turn.
+    # Per-domain `_applyProperty` handler modules. Layout / paint /
+    # typography / transform / misc handlers stay split by ownership;
+    # web-compat-style-decl.js's `_applyProperty` is a thin dispatcher that
+    # calls each in turn.
     # These are plain function declarations referenced by the dispatcher
     # at call time, so they MUST embed AFTER web-compat-style-decl.js
     # (and before any consumer that triggers a style apply).
@@ -100,14 +100,13 @@ set(PULP_JS_EMBEDDED_SOURCE ${CMAKE_CURRENT_BINARY_DIR}/web_compat_preludes_gen.
 # is a generated file with invalid UTF-8 at chunk boundaries; MSVC
 # then mis-parses the trailing `)__JS__"` delimiter, walks past it
 # into the next R"__JS__()__JS__" header, and reports C2026 ("string
-# too big") on the runaway literal. Used to be a non-issue when the
-# JS preludes were ASCII-only; the css-colors / css-parser / canvas
-# files now contain UTF-8 (em-dashes, smart quotes) that can land on
-# any byte boundary.
+# too big") on the runaway literal. The JS preludes contain UTF-8
+# (em-dashes, smart quotes), so chunk boundaries can land on any byte
+# boundary.
 #
 # The Python implementation (embed_js.py) slices on Python str, which
 # is char-aware, so chunk boundaries always fall between codepoints.
-# Switch to that.
+# Use that implementation for generated prelude sources.
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 # Split the embedded preludes into an extern-linked TU so a
@@ -183,9 +182,8 @@ target_include_directories(pulp-view-script
 set(PULP_JS_ENGINE "auto" CACHE STRING "JS engine backend (auto|quickjs|jsc|v8)")
 set_property(CACHE PULP_JS_ENGINE PROPERTY STRINGS auto quickjs jsc v8)
 # Advanced local-experiment overrides only — normal v8 builds need none (FindV8
-# resolves external/v8-build or a baked $V8_DIR). The former Homebrew-libnode
-# provider search (v8_monolith/node/versioned libnode glob) was removed: when v8
-# is selected, the provider is the pinned sealed libv8, nothing else.
+# resolves external/v8-build or a baked $V8_DIR). When v8 is selected, the
+# provider is the pinned sealed libv8, nothing else.
 set(V8_LIBRARY_PATH "" CACHE FILEPATH "Advanced: full path to a V8 runtime library (local experiments)")
 
 # ── V8 provider-identity reporting (additive) ────────────────────────────────
@@ -646,7 +644,7 @@ if(APPLE)
 endif()
 
 if(WIN32)
-    # Note: popen/pclose defines removed — using pulp::platform::ChildProcess instead
+    # Process spawning routes through pulp::platform::ChildProcess.
 endif()
 
 # Yoga layout engine (MIT)
@@ -714,8 +712,8 @@ if(APPLE)
             platform/mac/accessibility_mac.mm
             platform/mac/appearance_mac.mm
             platform/mac/motion_preferences_mac.mm
-            # #299: host-backend registration APIs. The stub files
-            # compile set_factory/set_screenshot_provider etc.
+            # Host-backend registration APIs. The stub files compile
+            # set_factory/set_screenshot_provider etc.
             # unconditionally; only the create/render impls are
             # gated by `#if !defined(__APPLE__)`. Including them
             # here surfaces the registration API on mac without
@@ -751,8 +749,8 @@ elseif(WIN32)
         platform/win/appearance_win.cpp
         platform/win/motion_preferences_win.cpp
     )
-    # Win/Linux parity (#3329). When Skia is available, add the built-in
-    # Skia raster screenshot backend and the native HWND PluginViewHost.
+    # Win/Linux parity. When Skia is available, add the built-in Skia raster
+    # screenshot backend and the native HWND PluginViewHost.
     # plugin_view_host_stub.cpp stays (it owns the always-compiled
     # set_factory/has_factory registration API + the factory-dispatching
     # create()); the native impl registers ITSELF as the factory via
@@ -790,9 +788,9 @@ elseif(UNIX)
         src/window_host_stub.cpp
         platform/linux/accessibility_linux.cpp
     )
-    # Win/Linux parity (#3329). Same split as the WIN32 branch: when Skia is
-    # available add the built-in Skia raster screenshot backend and the native
-    # X11 PluginViewHost (which registers itself via
+    # Win/Linux parity. Same split as the WIN32 branch: when Skia is available
+    # add the built-in Skia raster screenshot backend and the native X11
+    # PluginViewHost (which registers itself via
     # register_platform_plugin_view_host()). The X11 host links Xlib; missing
     # X11 dev headers degrade to the headless-render-only path.
     if(PULP_HAS_SKIA)
@@ -822,14 +820,10 @@ elseif(UNIX)
 endif()
 
 # Link against render for native GPU bridge (Three.js, WebGPU canvas).
-# Previously visualization_bridge.hpp
-# directly included pulp/render/bench/perf_counters.hpp under
-# PULP_BENCHMARK, which forced this link to go PUBLIC and leaked the
-# render include tree through every view consumer. The header now
-# forward-declares PerfCounters and the dereferencing code lives in
-# visualization_bridge.cpp — so the link stays PRIVATE regardless of
-# PULP_BENCHMARK, and downstream targets that only use view APIs do
-# NOT need to link pulp::render when PULP_BENCHMARK is enabled.
+# visualization_bridge.hpp forward-declares PerfCounters and the dereferencing
+# code lives in visualization_bridge.cpp, so the link stays PRIVATE regardless
+# of PULP_BENCHMARK. Downstream targets that only use view APIs do NOT need to
+# link pulp::render when PULP_BENCHMARK is enabled.
 if(TARGET pulp-render)
     target_link_libraries(pulp-view-core PRIVATE pulp::render)
     target_link_libraries(pulp-view-script PRIVATE pulp::render)

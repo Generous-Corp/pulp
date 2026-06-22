@@ -89,13 +89,12 @@ struct StandaloneConfig {
     std::string audio_scope_trigger = "rising-zero";
     int audio_scope_channel = 0;
 
-    // Item 3.5 (macOS plan) — built-in tempo source. The standalone host has
-    // no DAW providing transport, so it acts as one: it surfaces
-    // `tempo_bpm` / time signature on every ProcessContext block, and
-    // advances `position_beats` from `position_samples` when the transport
-    // is rolling. Plugins that branch on `is_playing` or read
-    // `position_beats` therefore behave the same way in `pulp run` as they
-    // do in a host (item 1.3 wiring) without any per-plugin glue.
+    // Built-in tempo source. The standalone host has no DAW providing
+    // transport, so it acts as one: it surfaces `tempo_bpm` / time signature on
+    // every ProcessContext block, and advances `position_beats` from
+    // `position_samples` when the transport is rolling. Plugins that branch on
+    // `is_playing` or read `position_beats` therefore behave the same way in
+    // `pulp run` as they do in a host without any per-plugin glue.
     double tempo_bpm = 120.0;
     int time_sig_numerator = 4;
     int time_sig_denominator = 4;

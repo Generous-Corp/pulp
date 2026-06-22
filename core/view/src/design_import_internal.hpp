@@ -52,14 +52,13 @@ std::string json_string_literal(const std::string& s);
 // runtime harness (parse_jsx_react) in claude_bundle.cpp.
 std::string v0_html_attr_escape(const std::string& s);
 
-// ── DesignIR JSON split (2026-05-29 frontend-IR refactor, PR-1) ──────────
+// ── DesignIR JSON split boundary ─────────────────────────────────────────
 // These five symbols cross the design_import.cpp / design_ir_json.cpp
-// boundary. The DesignIR JSON serialize/deserialize band moved into
-// design_ir_json.cpp; the asset pipeline and per-source parsers stayed in
-// design_import.cpp. The four parsers below are defined in
-// design_ir_json.cpp (promoted from static to external linkage) and called
-// from design_import.cpp; promote_interactive_frames is the reverse —
-// defined in design_import.cpp and called from the JSON parsers.
+// boundary. DesignIR JSON serialization/deserialization lives in
+// design_ir_json.cpp; the asset pipeline and per-source parsers live in
+// design_import.cpp. The JSON parsers below are defined in design_ir_json.cpp
+// and called from design_import.cpp; promote_interactive_frames is the reverse
+// direction, defined in design_import.cpp and called from the JSON parsers.
 
 // Recursively promotes interactive-frame nodes; defined in design_import.cpp.
 std::size_t promote_interactive_frames(IRNode& root);
