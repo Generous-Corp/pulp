@@ -1,6 +1,6 @@
 //! A real Rust stereo-gain DSP core implementing the Pulp native-component C
 //! ABI, used to prove end-to-end native audio through the C++
-//! NativeCoreProcessor adapter (Phase 2b). TEST FIXTURE ONLY.
+//! NativeCoreProcessor adapter. TEST FIXTURE ONLY.
 //!
 //! Hand-mirrors the `#[repr(C)]` structs it reads in `process()` (audio buses,
 //! the parameter-event view, the process bundle) plus the descriptor/param/

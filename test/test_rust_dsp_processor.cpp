@@ -1,7 +1,7 @@
-// Phase 2b end-to-end proof (opt-in, PULP_BUILD_NATIVE_COMPONENT_RUST_TESTS):
-// a REAL Rust DSP core (a stereo gain) driven through the C++
-// NativeCoreProcessor adapter. 1b proved Rust <-> C ABI; 2a proved the adapter
-// <-> Processor seam with a C++ core; this joins them with real Rust audio.
+// Opt-in Rust DSP proof (PULP_BUILD_NATIVE_COMPONENT_RUST_TESTS): a REAL Rust
+// DSP core (a stereo gain) driven through the C++ NativeCoreProcessor adapter.
+// This joins the Rust <-> C ABI with the adapter <-> Processor seam using real
+// Rust audio.
 
 #include <pulp/format/native_core_processor.hpp>
 

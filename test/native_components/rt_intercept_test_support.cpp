@@ -15,8 +15,8 @@
 // The trap itself allocates nothing, locks nothing, and only writes a fixed
 // message with write(2) before aborting — safe to call from anywhere,
 // including a death-test child. macOS + Linux are the primary enforcement
-// platforms (per the Phase 1 design); both honour a strong global
-// operator-new override and a Rust #[global_allocator] in this executable.
+// platforms; both honour a strong global operator-new override and a Rust
+// #[global_allocator] in this executable.
 
 #include "rt_test_scope.hpp"
 #include "../harness/rt_allocation_probe.hpp"
