@@ -436,6 +436,66 @@ TEST_CASE("PropertiesFile load skips unsupported JSON member types",
     REQUIRE_FALSE(props.contains("ignored_object"));
 }
 
+TEST_CASE("PropertiesFile save is atomic and leaves no temp file behind",
+          "[state][properties][reliability]") {
+    TemporaryFile tmp(".json");
+    const std::string dest = tmp.path_string();
+    const std::string sidecar = dest + ".tmp";
+    std::filesystem::remove(sidecar);
+
+    PropertiesFile props;
+    props.set_string("plugin_name", "PulpGain");
+    props.set_int("version", 1);
+    REQUIRE(props.save(dest));
+
+    // The destination exists and the temp sidecar was renamed away, not leaked.
+    REQUIRE(std::filesystem::exists(dest));
+    REQUIRE_FALSE(std::filesystem::exists(sidecar));
+}
+
+TEST_CASE("PropertiesFile atomic save fully replaces an existing file",
+          "[state][properties][reliability]") {
+    TemporaryFile tmp(".json");
+    const std::string dest = tmp.path_string();
+
+    {
+        PropertiesFile first;
+        first.set_string("only_old_key", "stale");
+        REQUIRE(first.save(dest));
+    }
+
+    // A second save with different keys must replace the file wholesale via the
+    // rename, never merge into or partially overwrite the previous contents.
+    {
+        PropertiesFile second;
+        second.set_string("only_new_key", "fresh");
+        REQUIRE(second.save(dest));
+    }
+
+    PropertiesFile reloaded;
+    REQUIRE(reloaded.load(dest));
+    REQUIRE(reloaded.get_string("only_new_key").value_or("") == "fresh");
+    REQUIRE_FALSE(reloaded.contains("only_old_key"));
+    REQUIRE_FALSE(std::filesystem::exists(dest + ".tmp"));
+}
+
+TEST_CASE("PropertiesFile failed save leaves no temp sidecar",
+          "[state][properties][reliability]") {
+    // Saving onto an existing directory must fail at the rename step, and the
+    // atomic-write path must clean up its temp sidecar rather than leak it.
+    auto dir = std::filesystem::temp_directory_path() /
+               ("pulp_props_atomic_fail_" + std::to_string(std::random_device{}()));
+    std::filesystem::create_directories(dir);
+
+    PropertiesFile props;
+    props.set_string("key", "value");
+    REQUIRE_FALSE(props.save(dir.string()));
+    REQUIRE_FALSE(std::filesystem::exists(dir.string() + ".tmp"));
+
+    std::filesystem::remove_all(dir);
+    std::filesystem::remove(dir.string() + ".tmp");
+}
+
 TEST_CASE("PropertiesFile save without path returns false", "[state][properties]") {
     PropertiesFile props;
     props.set_string("key", "value");
