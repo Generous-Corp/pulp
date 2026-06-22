@@ -1,4 +1,4 @@
-// ModulationMatrix data-model tests (workstream 07 slice 7.1).
+// ModulationMatrix data-model tests.
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/state/modulation_lane.hpp>

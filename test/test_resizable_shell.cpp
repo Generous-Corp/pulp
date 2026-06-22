@@ -1,4 +1,4 @@
-// ResizableShell tests (workstream 07 slice 7.5).
+// ResizableShell tests.
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/view/resizable_shell.hpp>

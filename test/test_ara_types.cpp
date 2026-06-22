@@ -1,4 +1,4 @@
-// Unit tests for the ARA core type layer (workstream 06 slice 6.2).
+// Unit tests for the ARA core type layer.
 // SDK-independent: these compile and run regardless of PULP_HAS_ARA.
 
 #include <catch2/catch_test_macros.hpp>

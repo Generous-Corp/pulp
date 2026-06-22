@@ -1,4 +1,4 @@
-// TableModel tests (workstream 07 slice 7.3 — data/sort layer).
+// TableModel tests (data/sort layer).
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/view/table_model.hpp>

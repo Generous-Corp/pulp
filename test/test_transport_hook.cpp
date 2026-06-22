@@ -1,4 +1,4 @@
-// Processor::on_host_transport_changed tests (workstream 01 slice 1.11).
+// Processor::on_host_transport_changed tests.
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/format/processor.hpp>

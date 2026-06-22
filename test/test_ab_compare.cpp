@@ -1,4 +1,4 @@
-// Unit tests for the A/B compare component (workstream 07 slice 7.2).
+// Unit tests for the A/B compare component.
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/view/ab_compare.hpp>

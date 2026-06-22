@@ -1,7 +1,7 @@
-// Tests for the Pulp → Windows UIA mapping table
-// (workstream 04 slice 4.1a). Pure-constant checks — the actual UIA
-// provider lives in core/view/platform/win/accessibility_win.cpp and
-// is validated per platform by integration tests.
+// Tests for the Pulp → Windows UIA mapping table.
+// Pure-constant checks; the actual UIA provider lives in
+// core/view/platform/win/accessibility_win.cpp and is validated per platform by
+// integration tests.
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -87,7 +87,7 @@ TEST_CASE("mapping tables are constexpr-usable", "[a11y][uia]") {
     SUCCEED("constexpr evaluation passed");
 }
 
-// ── Phase 3: per-widget fragment helpers ─────────────────────────────────
+// ── Per-widget fragment helpers ──────────────────────────────────────────
 // These pure helpers back the COM fragment provider in
 // accessibility_win.cpp (IValueProvider / IRangeValueProvider selection
 // and runtime-id derivation). They compile on every platform so the

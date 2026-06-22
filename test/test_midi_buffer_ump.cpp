@@ -1,5 +1,5 @@
 // Verifies MidiBuffer::attach_ump / ump() sidecar plumbing.
-// Workstream 02 slice 2.6 — format adapters now have a place to deliver
+// Format adapters now have a place to deliver
 // native UMP packets (type-4 channel voice, SysEx, utility, etc.) that
 // don't fit in choc::midi::ShortMessage.
 

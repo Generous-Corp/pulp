@@ -130,7 +130,7 @@ TEST_CASE("LV2 TTL port indices are sequential", "[format][lv2]") {
     REQUIRE_THAT(ttl, ContainsSubstring("lv2:index 5"));
 }
 
-// ── URID feature resolution (workstream 01 slice 1.5) ─────────────────────
+// ── URID feature resolution ───────────────────────────────────────────────
 
 static LV2_URID fake_map(LV2_URID_Map_Handle handle, const char* uri) {
     // Simple table: return stable IDs per URI, starting at 100.
@@ -211,7 +211,7 @@ struct Lv2ProbeCapture {
     std::size_t last_midi_count = 0;
     uint8_t first_status = 0;
     uint8_t first_note = 0;
-    // Phase 3 — true if the LV2 run path set a (non-null) param-events queue on
+    // True if the LV2 run path set a (non-null) param-events queue on
     // the Processor before calling process(), proving the uniform sidecar.
     bool param_events_non_null = false;
     std::size_t param_event_count = 0;
@@ -461,7 +461,7 @@ TEST_CASE("LV2 generic entry wires ports, audio, control values, and MIDI",
     REQUIRE(g_lv2_probe.process_buffer_active_outputs == 1);
     REQUIRE(g_lv2_probe.process_buffer_layouts_match);
     REQUIRE(g_lv2_probe.process_buffer_storage_valid);
-    // Phase 3 — the LV2 run path provides a uniform (non-null) param-events
+    // The LV2 run path provides a uniform (non-null) param-events
     // queue to the Processor, matching VST3/CLAP/AUv3.
     REQUIRE(g_lv2_probe.param_events_non_null);
     REQUIRE(g_lv2_probe.param_event_count == 0);

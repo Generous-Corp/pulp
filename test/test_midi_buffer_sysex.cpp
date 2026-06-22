@@ -1,6 +1,6 @@
 // Verifies MidiBuffer::add_sysex sidecar — the variable-length parallel
 // stream for F0 .. F7 payloads that don't fit in choc::midi::ShortMessage.
-// Workstream 01 — full MIDI vocabulary (sysex).
+// Full MIDI vocabulary (sysex).
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/midi/buffer.hpp>
