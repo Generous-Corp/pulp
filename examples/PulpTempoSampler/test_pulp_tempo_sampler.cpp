@@ -519,6 +519,9 @@ TEST_CASE("empty drop area click triggers browse", "[tempo-sampler]") {
 TEST_CASE("musical typing maps QWERTY keys to slice notes (root-based)", "[tempo-sampler]") {
     SamplerEditorRoot root;
     root.current_root_note = [] { return 60; };  // base 'a' = root note
+    // Musical typing only plays while the keyboard window is shown — simulate the
+    // window being on-screen so this exercises the QWERTY->note MAPPING itself.
+    root.keyboard_window_visible = [] { return true; };
     std::vector<std::pair<int, bool>> notes;
     root.typing.on_note_on = [&](int n, float) { notes.emplace_back(n, true); };
     root.typing.on_note_off = [&](int n) { notes.emplace_back(n, false); };
@@ -717,6 +720,9 @@ TEST_CASE("standalone musical typing: on_global_key plays a slice", "[tempo-samp
     auto* root = dynamic_cast<SamplerEditorRoot*>(editor.get());
     REQUIRE(root != nullptr);
     REQUIRE(root->on_global_key);  // the hook the standalone host fires per key
+    // Typing only plays while the keyboard window is on-screen — simulate it open
+    // (a headless test cannot create the secondary GPU window).
+    root->keyboard_window_visible = [] { return true; };
 
     view::KeyEvent a; a.key = view::KeyCode::a; a.is_down = true;
     REQUIRE(root->on_global_key(a));  // 'a' -> note (slice 0), consumed
@@ -730,6 +736,85 @@ TEST_CASE("standalone musical typing: on_global_key plays a slice", "[tempo-samp
         for (int i = 0; i < 512; ++i) energy += l[static_cast<size_t>(i)] * l[static_cast<size_t>(i)];
     }
     CHECK(energy > 1e-6);  // typing produced audio through the wired editor
+}
+
+// Fix: musical typing only plays while the keyboard window is on-screen. With
+// the keyboard HIDDEN, a typed key must NOT trigger a slice (returns false, no
+// audio); with it SHOWN, the same key plays. Drive the REAL wired editor through
+// on_global_key (the standalone host's per-key hook) and inject the visibility
+// gate (a headless test cannot open the secondary GPU window). The key-UP must
+// always pass through so a note held across a hide is released (no stuck note).
+TEST_CASE("musical typing is gated on the keyboard window being visible",
+          "[tempo-sampler]") {
+    Fixture f;
+    auto loop = percussive_loop(48000, 4);
+    const float* ch[1] = {loop.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+
+    auto editor = f.proc->create_view();
+    auto* root = dynamic_cast<SamplerEditorRoot*>(editor.get());
+    REQUIRE(root != nullptr);
+    REQUIRE(root->on_global_key);
+
+    bool kb_visible = false;
+    root->keyboard_window_visible = [&] { return kb_visible; };
+
+    auto type_a_energy = [&] {
+        view::KeyEvent down; down.key = view::KeyCode::a; down.is_down = true;
+        const bool consumed = root->on_global_key(down);  // note held across the measure
+        std::vector<float> l(512), r(512);
+        process_block(*f.proc, 120.0, false, 0, l, r);
+        wait_for([&] { return f.proc->published_frames() > 0; });
+        double e = 0.0;
+        for (int blk = 0; blk < 8; ++blk) {
+            process_block(*f.proc, 120.0, false, 0, l, r);
+            for (int i = 0; i < 512; ++i) e += l[(size_t)i] * l[(size_t)i];
+        }
+        // Key-UP always passes through (even gated) so a held note releases.
+        view::KeyEvent up; up.key = view::KeyCode::a; up.is_down = false;
+        root->on_global_key(up);
+        return std::make_pair(consumed, e);
+    };
+
+    // Drain anything ringing, then type with the keyboard HIDDEN: silent.
+    { std::vector<float> l(512), r(512);
+      for (int b = 0; b < 80; ++b) process_block(*f.proc, 120.0, false, 0, l, r); }
+    kb_visible = false;
+    auto [hidden_consumed, hidden_e] = type_a_energy();
+    CHECK_FALSE(hidden_consumed);   // key-down not consumed when hidden
+    CHECK(hidden_e < 1e-9);         // no slice played
+
+    // Drain again, then type with the keyboard SHOWN: plays.
+    { std::vector<float> l(512), r(512);
+      for (int b = 0; b < 80; ++b) process_block(*f.proc, 120.0, false, 0, l, r); }
+    kb_visible = true;
+    auto [shown_consumed, shown_e] = type_a_energy();
+    CHECK(shown_consumed);          // key-down consumed when shown
+    CHECK(shown_e > 1e-6);          // slice played
+}
+
+// Fix: ⌘K toggles the keyboard window regardless of its current visibility
+// (hidden -> show, shown -> hide). The gate must NOT suppress ⌘K the way it
+// suppresses plain typing. Intercept on_toggle_keyboard so no window opens.
+TEST_CASE("Cmd+K toggles the keyboard window in both visibility states",
+          "[tempo-sampler]") {
+    Fixture f;
+    auto editor = f.proc->create_view();
+    auto* root = dynamic_cast<SamplerEditorRoot*>(editor.get());
+    REQUIRE(root != nullptr);
+    int toggles = 0;
+    root->on_toggle_keyboard = [&] { ++toggles; };
+
+    view::KeyEvent k; k.key = view::KeyCode::k; k.is_down = true; k.modifiers = view::kModCmd;
+
+    root->keyboard_window_visible = [] { return false; };  // hidden
+    REQUIRE(root->on_global_key(k));   // ⌘K still toggles -> show
+    REQUIRE(toggles == 1);
+
+    root->keyboard_window_visible = [] { return true; };   // shown
+    REQUIRE(root->on_global_key(k));   // ⌘K still toggles -> hide
+    REQUIRE(toggles == 2);
 }
 
 // The SDK MusicalTypingKeyboard primitive (hosted in its own ⌘K window) feeds
@@ -891,5 +976,200 @@ TEST_CASE("settings panel renders un-squished at its preferred height",
     std::ofstream("/tmp/sampler_settings_squished.png", std::ios::binary)
         .write(reinterpret_cast<const char*>(squished.data()),
                static_cast<std::streamsize>(squished.size()));
+}
+
+// ── Single-input keyboard: held-note lighting + visibility gate ───────────────
+// Original spec: the on-screen keyboard is DISPLAY-ONLY for QWERTY; the editor's
+// typing is the single source that BOTH plays slices AND lights the keyboard via
+// set_active_notes. While the keyboard is HIDDEN, typing does nothing (no note,
+// no light). While SHOWN, a typed key is added to the held set and the matching
+// key lights; releasing it removes it and unlights. Drive the REAL wired editor
+// through on_global_key and observe the held set + the injected keyboard's lit
+// keys (a headless test can't open the secondary GPU window).
+namespace {
+// element_value of the (typing-frame) key whose relative semitone == `semitone`.
+bool typing_key_lit(view::MusicalTypingKeyboard& kb, int semitone) {
+    // The SDK paints a momentary key lit only when value > 0.5 (default is 0.5,
+    // i.e. neither lit nor explicitly cleared); apply_held_notes sets 1.0 / 0.0.
+    for (int i = 0; i < kb.element_count(); ++i)
+        if (kb.element_kind(i) == view::DesignFrameElement::Kind::momentary &&
+            kb.element_note(i) == semitone)
+            return kb.element_value(i) > 0.5f;
+    return false;
+}
+}  // namespace
+
+TEST_CASE("single-input: typed key lights the keyboard only while visible",
+          "[tempo-sampler]") {
+    Fixture f;
+    auto loop = percussive_loop(48000, 4);
+    const float* ch[1] = {loop.data()};
+    REQUIRE(f.proc->load_loop(ch, 1, 48000, 48000.0));
+    REQUIRE(wait_for([&] { return f.proc->has_sample(); }));
+
+    auto editor = f.proc->create_view();
+    auto* root = dynamic_cast<SamplerEditorRoot*>(editor.get());
+    REQUIRE(root != nullptr);
+
+    // Inject the SDK keyboard (display-only) so the held-note → set_active_notes
+    // wiring is observable; the live path creates it in toggle_keyboard_window().
+    auto kb = std::make_unique<view::MusicalTypingKeyboard>();
+    kb->set_input_capture(false);
+    const int root_note = static_cast<int>(f.store.get_value(kRootNote));
+    kb->controller().set_base_note(root_note);
+    auto* kb_ptr = kb.get();
+    f.proc->set_keyboard_for_test(std::move(kb));
+
+    bool kb_visible = false;
+    root->keyboard_window_visible = [&] { return kb_visible; };
+    auto type = [&](view::KeyCode k, bool down) {
+        view::KeyEvent e; e.key = k; e.is_down = down; root->on_global_key(e);
+    };
+
+    // HIDDEN: a typed key adds nothing to the held set and lights nothing.
+    kb_visible = false;
+    type(view::KeyCode::a, true);
+    CHECK(f.proc->held_notes_for_test().empty());
+    CHECK_FALSE(typing_key_lit(*kb_ptr, 0));
+    type(view::KeyCode::a, false);  // key-up always passes (no stuck note)
+
+    // SHOWN: 'a' (slice 0 = root) is added and the matching key lights.
+    kb_visible = true;
+    type(view::KeyCode::a, true);
+    REQUIRE(f.proc->held_notes_for_test().size() == 1);
+    CHECK(f.proc->held_notes_for_test()[0] == root_note);
+    CHECK(typing_key_lit(*kb_ptr, 0));         // semitone 0 key lit
+
+    // A second held key ('s' = semitone 2) joins the set and lights live.
+    type(view::KeyCode::s, true);
+    REQUIRE(f.proc->held_notes_for_test().size() == 2);
+    CHECK(typing_key_lit(*kb_ptr, 0));
+    CHECK(typing_key_lit(*kb_ptr, 2));
+
+    // Releasing 'a' removes it and unlights it; 's' stays lit.
+    type(view::KeyCode::a, false);
+    CHECK(f.proc->held_notes_for_test().size() == 1);
+    CHECK_FALSE(typing_key_lit(*kb_ptr, 0));
+    CHECK(typing_key_lit(*kb_ptr, 2));
+
+    type(view::KeyCode::s, false);
+    CHECK(f.proc->held_notes_for_test().empty());
+    CHECK_FALSE(typing_key_lit(*kb_ptr, 2));
+}
+
+// ── Pixel proofs (Fix 2 + Fix 3): the SDK renders each frame faithfully at its
+// exact panel dims, which is the live window's design viewport (the integration
+// sizes the keyboard window to panel_width()×panel_height() and pins the design
+// viewport to the same). So a render at panel dims IS a render at the live
+// viewport, at unit scale — proving these are integration/host concerns, not SDK.
+namespace {
+struct Px { uint8_t r = 0, g = 0, b = 0, a = 0; };
+Px pixel_at(const std::vector<uint8_t>& rgba, uint32_t w, uint32_t h, int x, int y) {
+    if (x < 0 || y < 0 || x >= static_cast<int>(w) || y >= static_cast<int>(h)) return {};
+    const std::size_t i = (static_cast<std::size_t>(y) * w + x) * 4;
+    return {rgba[i], rgba[i + 1], rgba[i + 2], rgba[i + 3]};
+}
+bool is_teal(Px p) {  // accent teal (22,218,194) over any baked button
+    return p.g > 90 && p.b > 90 && p.g > p.r + 40 && p.b > p.r + 25;
+}
+bool is_light(Px p) { return p.r > 175 && p.g > 175 && p.b > 175; }  // white piano key
+// Fraction of teal pixels inside a panel-coord rect (inset to dodge rounded
+// corners). At unit scale, panel coords == pixel coords.
+double teal_fraction(const std::vector<uint8_t>& rgba, uint32_t w, uint32_t h,
+                     float x, float y, float rw, float rh) {
+    const int inset = 7;
+    int n = 0, t = 0;
+    for (int yy = static_cast<int>(y) + inset; yy < static_cast<int>(y + rh) - inset; yy += 2)
+        for (int xx = static_cast<int>(x) + inset; xx < static_cast<int>(x + rw) - inset; xx += 2) {
+            ++n;
+            if (is_teal(pixel_at(rgba, w, h, xx, yy))) ++t;
+        }
+    return n ? static_cast<double>(t) / n : 0.0;
+}
+void write_png(view::View& v, uint32_t w, uint32_t h, const char* path) {
+    auto png = view::render_to_png(v, w, h, 1.0f, view::ScreenshotBackend::skia);
+    std::ofstream(path, std::ios::binary)
+        .write(reinterpret_cast<const char*>(png.data()),
+               static_cast<std::streamsize>(png.size()));
+}
+}  // namespace
+
+// Fix 2: with a non-"off" modulation latched, the teal highlight FULLY covers the
+// modulation key cell (no black inset) when rendered at the keyboard's panel dims
+// — the exact viewport the live window uses. Proven by sampling the lit cell
+// (mostly teal) vs an unlit neighbour (not teal — the highlight doesn't overflow).
+TEST_CASE("Fix 2: modulation-key highlight fully covers its cell at panel viewport",
+          "[tempo-sampler]") {
+    view::MusicalTypingKeyboard kb;
+    const float w = kb.panel_width(), h = kb.panel_height();   // typing: 732×266
+    kb.set_bounds({0, 0, w, h});
+
+    // Latch modulation step 3 (key '6'): mod_3 lights, default mod_0 clears.
+    view::KeyEvent six; six.key = view::KeyCode::num6; six.is_down = true;
+    kb.on_key_event(six);
+
+    uint32_t ow = 0, oh = 0;
+    auto rgba = view::render_to_rgba(kb, static_cast<uint32_t>(w),
+                                     static_cast<uint32_t>(h), 1.0f, &ow, &oh);
+    REQUIRE(!rgba.empty());
+    REQUIRE(ow == static_cast<uint32_t>(w));
+    REQUIRE(oh == static_cast<uint32_t>(h));
+    write_png(kb, static_cast<uint32_t>(w), static_cast<uint32_t>(h),
+              "/tmp/sampler_mtk_mod_highlight.png");
+
+    // mod button rects (panel coords) from build_typing_frame's append_controls:
+    // x = {200,242,284,326,368,410}, y=53, w=36, h=32. mod_3 → x=326 (latched).
+    const double lit = teal_fraction(rgba, ow, oh, 326, 53, 36, 32);
+    const double neighbour = teal_fraction(rgba, ow, oh, 200, 53, 36, 32);  // mod_0, cleared
+    CHECK(lit > 0.6);        // highlight covers the cell — no black inset
+    CHECK(neighbour < 0.2);  // unlit neighbour stays dark — no overflow / mis-scale
+}
+
+// Fix 3: clicking the baked 🎹/⌨ toggle switches the rendered frame AND drives the
+// intrinsic-size callback the integration wires to resize the window (mirrors
+// mtk-demo). Proven by clicking the toggle rects and asserting the callback fires
+// with the new frame's panel dims + the active frame changes; plus a render of the
+// shorter piano frame at its own panel dims shows the full keybed (not clipped).
+TEST_CASE("Fix 3: piano toggle swaps frame + fires the resize callback",
+          "[tempo-sampler]") {
+    using MTK = view::MusicalTypingKeyboard;
+    MTK kb;
+    REQUIRE(kb.mode() == MTK::Mode::typing);
+    kb.set_bounds({0, 0, kb.panel_width(), kb.panel_height()});  // 732×266, unit scale
+
+    float cb_w = 0, cb_h = 0; int fires = 0;
+    kb.on_intrinsic_size_changed = [&](float nw, float nh) { cb_w = nw; cb_h = nh; ++fires; };
+
+    // Baked toggles (append_toggle): piano icon swap at x=24, keyboard icon at
+    // x=62, both y=22 w=36 h=26. Click the piano icon → piano frame (732×176).
+    kb.on_mouse_down({24 + 18, 22 + 13});
+    CHECK(fires == 1);
+    CHECK(cb_w == 732.0f);
+    CHECK(cb_h == 176.0f);                 // shorter piano frame
+    CHECK(kb.mode() == MTK::Mode::piano);
+
+    // Render the piano frame at ITS panel dims (the size the window resizes to):
+    // the full keybed fills — white keys present down the lower band (no clip).
+    kb.set_bounds({0, 0, kb.panel_width(), kb.panel_height()});  // now 732×176
+    uint32_t ow = 0, oh = 0;
+    auto rgba = view::render_to_rgba(kb, 732, 176, 1.0f, &ow, &oh);
+    REQUIRE(!rgba.empty());
+    REQUIRE(oh == 176);
+    write_png(kb, 732, 176, "/tmp/sampler_mtk_piano_frame.png");
+    // White-key centres along the lower keybed (piano keys y≈62..140).
+    int light = 0;
+    for (int x : {44, 76, 141, 269, 365}) if (is_light(pixel_at(rgba, ow, oh, x, 120))) ++light;
+    CHECK(light >= 3);   // the full piano keybed rendered (not truncated typing)
+
+    // Click the keyboard icon → back to the taller typing frame (732×266).
+    kb.on_mouse_down({62 + 18, 22 + 13});
+    CHECK(fires == 2);
+    CHECK(cb_h == 266.0f);
+    CHECK(kb.mode() == MTK::Mode::typing);
+
+    kb.set_bounds({0, 0, 732, 266});
+    write_png(kb, 732, 266, "/tmp/sampler_mtk_typing_frame.png");
+    auto typing = view::render_to_rgba(kb, 732, 266, 1.0f, &ow, &oh);
+    REQUIRE(oh == 266);   // full typing frame, no clipping at its panel dims
 }
 #endif  // __APPLE__

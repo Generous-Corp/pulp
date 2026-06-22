@@ -376,6 +376,13 @@ public:
     // current_root_note to the ROOT param.
     view::MusicalTypingController typing;
     std::function<int()> current_root_note;
+    // True while the SDK MusicalTypingKeyboard's own window is on-screen. The
+    // editor's typing is the SINGLE QWERTY source and only plays slices (and
+    // lights the keyboard) while that window is visible — when the keyboard is
+    // hidden, QWERTY triggers nothing. The keyboard never plays itself
+    // (set_input_capture(false)). create_view() wires this to
+    // `kb_window_ && kb_window_->is_visible()`; tests inject a bool.
+    std::function<bool()> keyboard_window_visible;
     // Toggle the SDK MusicalTypingKeyboard's own secondary GPU window (Cmd-K /
     // Ctrl+K, and the toolbar "Keyboard" button). The keyboard is NOT inline —
     // the processor owns the window + primitive; create_view() wires this to
@@ -437,6 +444,13 @@ private:
         // Don't turn typing into a name field into notes — if a text-input widget
         // owns focus, let it have the keys.
         if (auto* fv = view::View::focused_input_; fv && fv->accepts_text_input())
+            return false;
+        // Musical typing only PLAYS while the keyboard window is on-screen. A
+        // key-DOWN with the keyboard hidden does not trigger a slice (returns
+        // false so the host keeps the key). A key-UP always passes through so a
+        // note that was held when the keyboard was hidden still gets released —
+        // no stuck note. ⌘K above is unaffected: it toggles regardless.
+        if (e.is_down && (!keyboard_window_visible || !keyboard_window_visible()))
             return false;
         if (current_root_note) typing.set_base_note(current_root_note());
         return typing.handle_key(e);  // false for unmapped / modifier chords -> host keeps them
@@ -636,21 +650,88 @@ public:
     void sampler_note_on(int note, float velocity) { ui_note_on(note, velocity); }
     void sampler_note_off(int note) { ui_note_off(note); }
 
+    // ── Single QWERTY/click source for the on-screen keyboard (UI thread) ────
+    // Both the editor's MusicalTypingController (computer-keyboard typing, gated
+    // on the keyboard window being visible) AND clicks on the keyboard's keys
+    // route here. Each call plays/stops the slice via the lock-free UI→audio
+    // queue AND maintains a set of currently-held MIDI notes that is pushed to
+    // the keyboard (set_active_notes) so the matching keys light/unlight live.
+    // The keyboard never plays itself (set_input_capture(false)); this held set
+    // is the single source of truth for what the keyboard shows lit. Host MIDI
+    // arrives on the audio thread and is not reflected here (no UI-thread hook).
+    void keyboard_play_on(int note, float velocity) {
+        ui_note_on(note, velocity);
+        if (std::find(held_notes_ui_.begin(), held_notes_ui_.end(), note) ==
+            held_notes_ui_.end())
+            held_notes_ui_.push_back(note);
+        push_keyboard_lights();
+    }
+    void keyboard_play_off(int note) {
+        ui_note_off(note);
+        held_notes_ui_.erase(
+            std::remove(held_notes_ui_.begin(), held_notes_ui_.end(), note),
+            held_notes_ui_.end());
+        push_keyboard_lights();
+    }
+    /// Push the current held-note set to the on-screen keyboard so it lights the
+    /// matching keys (absolute MIDI). No-op until the keyboard window exists.
+    void push_keyboard_lights() {
+        if (kb_) kb_->set_active_notes(held_notes_ui_);
+    }
+    /// Test-only: the held-note set currently lit on the on-screen keyboard.
+    const std::vector<int>& held_notes_for_test() const { return held_notes_ui_; }
+    /// Test-only: inject the SDK keyboard so the held-note → set_active_notes wiring
+    /// can be exercised headlessly (the live path creates it in toggle_keyboard_window).
+    void set_keyboard_for_test(std::unique_ptr<view::MusicalTypingKeyboard> kb) {
+        kb_ = std::move(kb);
+    }
+
     /// Toggle the MusicalTypingKeyboard's OWN secondary GPU window. Called from
     /// ⌘K and the toolbar "Keyboard" button (UI thread). Lazily creates the
     /// window + primitive on first open; subsequent calls show/hide it. The
     /// keyboard is the faithful Figma-SVG DesignFrameView, so the window MUST be
     /// GPU (use_gpu = true) — a CPU host renders it blank (mirrors mtk-demo).
     void toggle_keyboard_window() {
-        if (kb_window_ && kb_window_->is_visible()) { kb_window_->hide(); return; }
+        if (kb_window_ && kb_window_->is_visible()) {
+            // Hiding: release any keys still held on the keyboard's lit display so
+            // nothing lingers lit when it is shown again. (Typed notes also get a
+            // key-up through the editor; this is the belt-and-suspenders clear.)
+            held_notes_ui_.clear();
+            push_keyboard_lights();
+            kb_window_->hide();
+            return;
+        }
         if (!kb_window_) {
             kb_ = std::make_unique<view::MusicalTypingKeyboard>();
-            // The sampler editor already feeds QWERTY per-window; this keyboard
-            // lives in its OWN window, so it self-plays (input_capture default
-            // true) when focused without double-triggering the editor (whose
-            // global-key hook only fires while ITS window is key).
-            kb_->on_note_on  = [this](int note, float vel) { sampler_note_on(note, vel); };
-            kb_->on_note_off = [this](int note) { sampler_note_off(note); };
+            // Single-input design: the on-screen keyboard is DISPLAY-ONLY for
+            // QWERTY. The app (the editor's MusicalTypingController) is the sole
+            // computer-keyboard source — it plays slices AND lights this keyboard
+            // via set_active_notes. set_input_capture(false) stops the keyboard
+            // from independently capturing/playing keys (no double-trigger) and
+            // drops its key focusability. CLICKS on the keys still play + light;
+            // they flow through the same held-note path the typing source uses, so
+            // the lit set stays the single source of truth.
+            kb_->set_input_capture(false);
+            kb_->on_note_on  = [this](int note, float vel) { keyboard_play_on(note, vel); };
+            kb_->on_note_off = [this](int note) { keyboard_play_off(note); };
+            // ⌘K / ⌘W / Escape while the keyboard window is front HIDE it (the
+            // toggle hides when visible). Without this the chords only reach the
+            // MAIN editor window, so the keyboard could be shown but never hidden
+            // once it became key. on_global_key is the keyboard ROOT's hook: the
+            // mac host fires it for Escape (keyDown) and Cmd-chords
+            // (performKeyEquivalent). The keyboard never sounds a note from a key
+            // (set_input_capture(false) makes on_key_event a no-op), so there is no
+            // risk of a chord playing before we intercept it.
+            kb_->on_global_key = [this](const view::KeyEvent& e) -> bool {
+                if (!e.is_down || e.is_repeat) return false;
+                const uint16_t cmd = view::kModCmd | view::kModCtrl;
+                const bool chord = (e.modifiers & cmd) != 0;
+                const bool hide = (chord && e.key == view::KeyCode::k) ||   // ⌘K
+                                  (chord && e.key == view::KeyCode::w) ||   // ⌘W
+                                  (e.key == view::KeyCode::escape);          // Esc
+                if (hide) { toggle_keyboard_window(); return true; }
+                return false;
+            };
             // 'a' plays slice 0 (note = ROOT). A live listener (create_view) keeps
             // this synced if ROOT changes while the window is open.
             kb_->controller().set_base_note(static_cast<int>(state().get_value(kRootNote)));
@@ -854,6 +935,13 @@ public:
         // Both the "Keyboard" button and ⌘K (on_musical_key) route here: open/close
         // the MusicalTypingKeyboard's own secondary GPU window.
         root->on_toggle_keyboard = [this] { toggle_keyboard_window(); };
+        // Gate the editor's musical typing on the keyboard window being shown:
+        // the editor is the single QWERTY source, so QWERTY only plays slices (and
+        // lights the on-screen keys) while the keyboard is on-screen. Hidden
+        // keyboard -> typing is silent and nothing lights.
+        root->keyboard_window_visible = [this] {
+            return kb_window_ && kb_window_->is_visible();
+        };
 
         // ── Waveform / drop area ── (enlarged now the mockup rows are gone).
         // Shows a "drop a sample" CTA when empty; the waveform + slice regions
@@ -882,11 +970,16 @@ public:
         root->add_child(std::move(wf));
 
         // Musical typing: the SDK MusicalTypingController turns the QWERTY row
-        // into notes; base = ROOT so 'a' plays slice 0, 'w' slice 1, … Notes go
-        // to the same lock-free UI->audio queue as host MIDI and slice clicks.
+        // into notes; base = ROOT so 'a' plays slice 0, 'w' slice 1, … This is the
+        // SINGLE computer-keyboard source (the on-screen keyboard is display-only).
+        // Notes flow through keyboard_play_on/off, which both plays the slice (same
+        // lock-free UI->audio queue as host MIDI / slice clicks) AND lights the
+        // matching keys on the on-screen keyboard via set_active_notes. on_musical_key
+        // gates this on the keyboard window being visible, so typing is silent and
+        // lights nothing when the keyboard is hidden.
         root->current_root_note = [this] { return static_cast<int>(state().get_value(kRootNote)); };
-        root->typing.on_note_on = [this](int note, float vel) { ui_note_on(note, vel); };
-        root->typing.on_note_off = [this](int note) { ui_note_off(note); };
+        root->typing.on_note_on = [this](int note, float vel) { keyboard_play_on(note, vel); };
+        root->typing.on_note_off = [this](int note) { keyboard_play_off(note); };
         // Keep the keyboard-window's controller base note synced to ROOT while it
         // is open, so its 'a' key always plays slice 0 (note = root) like the
         // inline editor typing. toggle_keyboard_window() also sets it on open.
@@ -1467,6 +1560,11 @@ private:
     // window (which holds a View& to kb_) destructs first.
     std::unique_ptr<view::MusicalTypingKeyboard> kb_;
     std::unique_ptr<view::WindowHost> kb_window_;
+    // Currently-held MIDI notes lit on the on-screen keyboard (UI thread only).
+    // Fed by the editor's QWERTY typing and by clicks on the keyboard's keys;
+    // pushed to the keyboard via set_active_notes on every change. Empty → no lit
+    // keys (e.g. while the keyboard is hidden, since typing is gated off then).
+    std::vector<int> held_notes_ui_;
 };
 
 inline std::unique_ptr<format::Processor> create_pulp_tempo_sampler() {
