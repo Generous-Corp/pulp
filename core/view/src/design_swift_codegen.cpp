@@ -1,6 +1,5 @@
 /// @file design_swift_codegen.cpp
-/// Baked SwiftUI code generator (Workstream B1 of
-/// planning/2026-06-02-design-token-export-and-swiftui-path.md).
+/// Baked SwiftUI code generator.
 ///
 /// `generate_pulp_swift` is the fourth DesignIR lowering, alongside the DOM
 /// web-compat (`generate_node`), native-bridge JS (`generate_native_node`),
@@ -9,26 +8,18 @@
 /// then walk the (IRNode, ResolvedNativeNode) tree — but produces declarative
 /// SwiftUI source instead of imperative View-tree construction.
 ///
-/// B1 is an MVP skeleton: frame→VStack/HStack, text→Text, fixed
-/// frame/padding/background modifiers, and knob/slider/toggle bound to the
-/// existing PulpKnob/PulpSlider/PulpToggle controls. Tokens lower to a
+/// The generator lowers frame→VStack/HStack, text→Text,
+/// fixed frame/padding/background modifiers, and knob/slider/toggle bound to
+/// the existing PulpKnob/PulpSlider/PulpToggle controls. Tokens lower to a
 /// code-first PulpTheme with the same base/`.dark` partition algorithm as
 /// `export_css_variables`. Binding resolves a generated key by exact
 /// `PulpParameter.name` match (there is no stable string param key today),
 /// surfacing missing/duplicate rather than silently binding the wrong param.
-///
-/// B2 adds the full visual style set (opacity, corner radius, uniform/per-side
-/// border overlay, box-shadow, linear gradient, transform, mix-blend-mode),
-/// mixed-style text via per-range `text_runs` concatenated as styled `Text`,
-/// and the flex→stack fidelity-warning system: cross-axis alignment mapping,
-/// Spacer-based justify approximation, and `FidelityIssue`s for the
-/// divergences SwiftUI stacks cannot reproduce (flex-wrap, space distribution,
-/// align-stretch, absolute position, grid, skew/matrix transforms).
-///
-/// B3 maps the remaining widgets: meter/xy_pad/waveform/spectrum bind to native
-/// PulpMeter/PulpXYPad/PulpWaveform/PulpSpectrum views and text buttons lower to
-/// a SwiftUI Button. Binding-manifest parity (B4) and grid/assets/host scaffold
-/// (B5) follow.
+/// Visual styling covers opacity, corner radius, uniform/per-side border
+/// overlay, box-shadow, linear gradient, transform, mix-blend-mode, mixed-style
+/// text, and fidelity warnings for divergences SwiftUI stacks cannot reproduce.
+/// Remaining native widgets lower to PulpMeter, PulpXYPad, PulpWaveform,
+/// PulpSpectrum, and SwiftUI Button views.
 
 #include <pulp/view/design_codegen.hpp>
 
@@ -911,7 +902,7 @@ void emit_modifiers(std::ostringstream& out, const SwiftEmitCtx& ctx,
     // `border-width`/`border-color` shorthand when it has no override. Comparing
     // effective values (not just the side overrides among themselves) catches a
     // single side overriding the shorthand — e.g. `border-color:#fff` +
-    // `border-top-color:#f00` (Codex review #2).
+    // `border-top-color:#f00`.
     auto eff_w = [&](const std::optional<float>& side) -> std::optional<float> {
         return side ? side : st.border_width;
     };

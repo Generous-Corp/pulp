@@ -20,8 +20,6 @@
 // The bundled `ReactDOMClient.createRoot(mountEl).render(<App/>)` call
 // in the jsx-transform entry ends up calling @pulp/react's render.
 //
-// Per ChatGPT + Codex consults 2026-05-17 (architecturally correct fix).
-
 import { createRoot as pulpCreateRoot, render as pulpRender, unmount as pulpUnmount } from '@pulp/react';
 
 // Append-only diagnostic ring. Main process reads this after settle.
@@ -33,9 +31,8 @@ globalThis.__pulpShimLogFn__ = __log;
 
 __log('[shim] module loaded; pulpCreateRoot=' + typeof pulpCreateRoot + ' pulpRender=' + typeof pulpRender);
 
-// pulp jsx-instrument-import 2026-05-17 — hook window.addEventListener /
-// removeEventListener at shim-load time so we can audit every install/
-// remove call. Custom-Fader-style JSX (Chainer's knobs use
+// Hook window.addEventListener / removeEventListener at shim-load time so we
+// can audit every install/remove call. Custom-Fader-style JSX (Chainer's knobs use
 // `window.addEventListener('mousemove', ...)` from a useEffect to track
 // drag) needs the listener to STICK across React renders. Diagnostic
 // showed mouseup:15 but mousemove:0 — either the install never fired

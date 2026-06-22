@@ -1,15 +1,13 @@
 // test_cli_tweaks_shellout.cpp — shell-out tests for `pulp tweaks diff`.
 //
 // Per CLAUDE.md: "CLI behavior changes — shell out to the built binary,
-// assert exit code + stderr content." `pulp tweaks diff` (Inspector
-// Phase 2) compares the pulp-tweaks.json sidecar against a design
+// assert exit code + stderr content." `pulp tweaks diff` compares the
+// pulp-tweaks.json sidecar against a design
 // snapshot and reports clean / drifted / orphaned tweaks. These tests
 // drive the real binary with fixture files in a scratch directory and
 // pin the exit-code contract (0 = no drift, 1 = drift, 2 = usage/file
 // error) plus the human + JSON output shapes.
 //
-// Spec: planning/2026-05-18-inspector-direct-manipulation-roadmap.md
-
 #include "test_cli_shellout_helpers.hpp"
 
 using namespace pulp_test_cli;
@@ -216,10 +214,10 @@ TEST_CASE("pulp tweaks diff rejects a non-array property manifest entry",
     fs::remove_all(dir, ec);
 }
 
-// Codex P2 (#2437): a typo'd manifest where an anchor maps to a bare
-// string (instead of a property-path array) must surface a manifest
-// validation error (exit 2), not silently create an empty property
-// set that misreports every tweak under it as `property-not-found`
+// A typo'd manifest where an anchor maps to a bare string (instead of a
+// property-path array) must surface a manifest validation error (exit 2), not
+// silently create an empty property set that misreports every tweak under it as
+// `property-not-found`.
 // drift (exit 1).
 TEST_CASE("pulp tweaks diff rejects a string-valued anchor manifest entry",
           "[cli][shellout][tweaks][phase2][regression][issue-2437]") {

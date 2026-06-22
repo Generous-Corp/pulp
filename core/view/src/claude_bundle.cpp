@@ -1,9 +1,7 @@
-// claude_bundle.cpp — Claude Design bundle import + runtime-import
-// machinery, extracted from design_import.cpp in the 2026-05 Phase 6
-// (A3) refactor.
+// claude_bundle.cpp — Claude Design bundle import + runtime-import machinery.
 //
-// This is the pulp #468 runtime-import subsystem — the largest single
-// cluster in the old design_import.cpp:
+// This is the runtime-import subsystem — the largest single cluster in the old
+// design_import.cpp:
 //
 //   * Claude Design bundle envelope parsing (asset extraction, zip /
 //     base64 payloads).
@@ -47,7 +45,7 @@
 
 namespace pulp::view {
 
-// ── Claude Design bundle envelope (pulp #468) ───────────────────────────
+// ── Claude Design bundle envelope ────────────────────────────────────────
 
 namespace {
 
@@ -340,7 +338,7 @@ std::optional<ClaudeBundle> parse_claude_bundle(const std::string& html) {
     return bundle;
 }
 
-// ── parse_claude_html_with_runtime (pulp #468 harness) ───────────────────
+// ── parse_claude_html_with_runtime harness ───────────────────────────────
 //
 // Boot a headless ScriptEngine + WidgetBridge, build the bundler
 // template into document.body via the import-runtime prelude, evaluate
@@ -361,12 +359,11 @@ void json_children_to_ir(const choc::value::ValueView& children, IRNode& parent)
         auto child_view = children[i];
         if (!child_view.isObject()) continue;
         IRNode child = json_to_ir_node(child_view);
-        // Skip empty text/comment markers entirely.
-        // Codex P2 on PR #731: json_to_ir_node maps DOM "#text" → IR
-        // "text" (line ~294), so filter against the IR vocabulary, not
-        // the wire format. Otherwise empty whitespace text nodes pad
-        // the materialized tree count and inflate the >9 success-floor
-        // check the integration test asserts on.
+        // Skip empty text/comment markers entirely. json_to_ir_node maps DOM
+        // "#text" → IR "text", so filter against the IR vocabulary, not the
+        // wire format. Otherwise empty whitespace text nodes pad the
+        // materialized tree count and inflate the >9 success-floor check the
+        // integration test asserts on.
         if (child.type == "text" && child.text_content.empty()) continue;
         if (child.type == "#error") continue;
         parent.children.push_back(std::move(child));
@@ -528,7 +525,7 @@ size_t count_ir_nodes(const IRNode& n) {
 }
 
 // layout_runtime_snapshot_root_if_requested was extracted verbatim to
-// import_validation_bridge.{hpp,cpp} (#3151). The call site below uses the
+// import_validation_bridge.{hpp,cpp}. The call site below uses the
 // shared definition.
 
 std::string color_to_hex(Color color) {
@@ -1212,8 +1209,8 @@ std::optional<ClaudeBundle> parse_jsx_react(const std::string& bundle_js,
     // hoists). Mount happens against `document.getElementById('root')`
     // — falls back to document.body when running under pulp-screenshot.
     //
-    // pulp jsx-instrument-import experiment (2026-05-17). See
-    // planning/2026-05-17-jsx-instrument-import.md.
+    // JSX runtime-import bundles are wrapped as Claude-style HTML so the
+    // existing runtime snapshot path can evaluate and materialize them.
     if (bundle_js.size() < 100) return std::nullopt;
 
     ClaudeBundleAsset app;
@@ -1325,9 +1322,9 @@ DesignIR parse_claude_html_with_runtime(const std::string& html, ClaudeRuntimeOp
     // `__pulpImportRuntime__`. We don't render anything — the View is a
     // sink for the materialized native widgets.
     //
-    // Honor opts.engine_override when present (Codex P2 on PR #731).
-    // Useful for: deterministic tests, working around QuickJS parser
-    // stack limits on larger Claude bundles by forcing JSC, etc.
+    // Honor opts.engine_override when present. Useful for deterministic tests
+    // and for forcing JSC around QuickJS parser stack limits on larger Claude
+    // bundles.
     try {
         ScriptEngine engine = opts.engine_override.has_value()
             ? ScriptEngine(static_cast<JsEngineType>(*opts.engine_override))
@@ -1347,9 +1344,9 @@ DesignIR parse_claude_html_with_runtime(const std::string& html, ClaudeRuntimeOp
         // WidgetBridge defers the appendChild/insertBefore/etc. wiring
         // (kDomOpsInit) until the first load_script() call. The harness
         // bypasses load_script and goes straight to engine.evaluate(),
-        // so prime it with an empty script to force those bindings on.
-        // (Tracked as a known follow-up: see issue #468 thread re:
-        // duplicated dom-ops sources of truth.)
+        // so prime it with an empty script to force those bindings on. The
+        // DOM-op setup still has two sources of truth: load_script() owns the
+        // bridge binding path, while this import harness owns evaluation.
         try {
             bridge.load_script("");
         } catch (const std::exception& e) {
@@ -1506,12 +1503,11 @@ DesignIR parse_claude_html_with_runtime(const std::string& html, ClaudeRuntimeOp
         // Clear error_out on success.
         if (opts.error_out) opts.error_out->clear();
 
-        // Phase 0a: stamp provenance and assign anchors on the
-        // runtime-walked DOM tree. The runtime walker doesn't have
-        // native IDs (DOM `id` attrs are author-supplied and not
-        // guaranteed unique across re-imports), so content-hash is the
-        // right strategy — matches DEFAULT_ANCHOR_STRATEGY for
-        // claude-design-html. Promotion runs before anchors because
+        // Stamp provenance and assign anchors on the runtime-walked DOM tree.
+        // The runtime walker doesn't have native IDs (DOM `id` attrs are
+        // author-supplied and not guaranteed unique across re-imports), so
+        // content-hash is the right strategy — matches DEFAULT_ANCHOR_STRATEGY
+        // for claude-design-html. Promotion runs before anchors because
         // content-hash anchors include node.type.
         ir.root.provenance = IRProvenance{"claude-design-html", "1", {}};
         ir.root.confidence = IRConfidence::pass;  // walker ran successfully
@@ -1531,13 +1527,12 @@ DesignIR parse_claude_html_with_runtime(const std::string& html, ClaudeRuntimeOp
 
 // ── Runtime-import: evaluate a Claude bundle in the LIVE bridge engine ──
 //
-// Phase 6 of pulp-runtime-import-FINAL-design.md. The offline path
-// (parse_claude_html_with_runtime, above) allocates its own
+// The offline path (parse_claude_html_with_runtime, above) allocates its own
 // ScriptEngine/View/StateStore/WidgetBridge harness, then walks the
-// materialized DOM into a DesignIR. The runtime path is different:
-// the caller's `@pulp/react` reconciler is already mounted on `engine_`,
-// and we want the bundle's React components to render through it
-// instead of into a throwaway sandbox. So we:
+// materialized DOM into a DesignIR. The runtime path is different: the
+// caller's `@pulp/react` reconciler is already mounted on `engine_`, and we
+// want the bundle's React components to render through it instead of into a
+// throwaway sandbox. So we:
 //
 //   1. Install the same set of pre-payload shims (navigator.userAgent,
 //      HTML*Element constructors, document.createElementNS, addEventListener
@@ -1545,8 +1540,8 @@ DesignIR parse_claude_html_with_runtime(const std::string& html, ClaudeRuntimeOp
 //   2. Evaluate the bundle's `text/javascript` asset payloads, BUT
 //      preserve any host-installed `globalThis.React` / `globalThis.ReactDOM`
 //      that the JS-side `installHostReact` + `installReactDOMCapture`
-//      shims placed before this call (codex amendment #2 — the bundle's
-//      React payload must not clobber the reconciler's React).
+//      shims placed before this call so the bundle's React payload does not
+//      clobber the reconciler's React.
 //   3. Re-inject JSON-kind inline scripts (tweak-defaults pattern) and
 //      evaluate text/javascript + text/babel inline scripts in document
 //      order (Babel.transform → eval for JSX).
@@ -1562,17 +1557,12 @@ DesignIR parse_claude_html_with_runtime(const std::string& html, ClaudeRuntimeOp
 //     globalThis.__pulpPayloadErr_<idx>__ / __pulpEvalErr__ slots and the
 //     WidgetBridge's normal error surface, not a DesignIR replacement).
 //
-// Token budget: this duplicates roughly the shim + asset-eval + inline-eval
-// + DOMContentLoaded blocks of parse_claude_html_with_runtime. The
-// codex-anticipated factoring (a shared helper called from both paths) is
-// the natural next step once both functions live side-by-side and a
-// concrete duplication count is visible.
 void WidgetBridge::evaluate_claude_bundle_in_live_engine(const ClaudeBundle& bundle) {
     // The live-engine path differs from the offline harness in three
     // small ways: it uses a different navigator.userAgent, it must
     // preserve any host-installed globalThis.React / ReactDOM around the
-    // bundle's asset eval loop (so the bundle's bundled react.development.js
-    // can't displace the live reconciler's copy — codex amendment #2),
+    // bundle's asset eval loop so the bundle's bundled react.development.js
+    // can't displace the live reconciler's copy,
     // and the autoflushSync ReactDOM.createRoot patch is guarded by an
     // idempotency marker since the same ReactDOM instance may be
     // re-entered on subsequent calls. Everything else (shims, inline-script

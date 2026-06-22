@@ -1,9 +1,7 @@
 // design_ir_json.cpp — DesignIR JSON serialize / deserialize band.
 //
-// Extracted verbatim from design_import.cpp in the 2026-05-29 frontend-IR
-// refactor (PR-1, planning/2026-05-29-frontend-ir-refactor-plan.md). This
-// is a relocation-only split: the JSON helpers, serialize_design_ir, and
-// parse_design_ir_json moved here unchanged. Four helpers
+// Relocation-only split from design_import.cpp: the JSON helpers,
+// serialize_design_ir, and parse_design_ir_json moved here unchanged. Four helpers
 // (parse_ir_node, parse_ir_tokens, make_import_diagnostic,
 // is_asset_reference_key) are promoted from static to external linkage
 // because the asset pipeline / source parsers that remain in
@@ -101,7 +99,7 @@ static const char* interactive_kind_id(InteractiveElementKind k) {
     return "knob";
 }
 
-// ── box-shadow parse / serialize (pulp #41) ─────────────────────────────
+// ── box-shadow parse / serialize ────────────────────────────────────────
 //
 // CSS `box-shadow` is a comma-separated list of layers; each layer is
 // `[inset] <ox> <oy> [<blur> [<spread>]] <color>` with lengths in arbitrary
@@ -569,7 +567,7 @@ void normalize_figma_plugin_binding(IRNode& node) {
     md.serialize(node);
 }
 
-// ── parse_ir_node post-passes (pulp #41 extraction) ─────────────────────
+// ── parse_ir_node post-passes ────────────────────────────────────────────
 // These ran as inline blocks at the tail of parse_ir_node; pulled out into
 // named functions so each rule reads as one testable unit. Behavior is
 // unchanged from the inline versions (the shadow snap now reads the parsed
@@ -753,12 +751,11 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
         if (!node.text_runs.empty()) break;
     }
 
-    // Phase 0a (planning/2026-05-18-inspector-direct-manipulation-roadmap.md):
-    // capture the source-native ID so the `adapter` anchor strategy can use
-    // it as its anchor. Figma + Pencil + Mitosis-style exports all carry an
-    // ID under one of these field names; first non-empty wins. Sources
-    // without native IDs (Stitch HTML, v0 TSX, Claude HTML) leave this
-    // empty and fall through to the content-hash strategy.
+    // Capture the source-native ID so the `adapter` anchor strategy can use it
+    // as its anchor. Figma + Pencil + Mitosis-style exports all carry an ID
+    // under one of these field names; first non-empty wins. Sources without
+    // native IDs (Stitch HTML, v0 TSX, Claude HTML) leave this empty and fall
+    // through to the content-hash strategy.
     for (const char* k : {"id", "nodeId", "node_id", "source_node_id", "sourceNodeId"}) {
         if (!obj.hasObjectMember(k)) continue;
         auto v = obj[k];
@@ -955,7 +952,7 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
     // Top-level `asset_ref` (figma-plugin lane stamps it directly on the node,
     // not under `attributes`). Promote it into node.attributes so the import
     // CLI's asset-resolution pass can resolve it to a file path — this feeds
-    // both the knob sprite-strip skin and the #3191 fader/meter skin sampling.
+    // both the knob sprite-strip skin and fader/meter skin sampling.
     // Don't overwrite an attributes-nested asset_ref if one was already set.
     if (obj.hasObjectMember("asset_ref") && obj["asset_ref"].isString() &&
         node.attributes.find("asset_ref") == node.attributes.end()) {
@@ -965,7 +962,7 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
 
     // SVG path geometry — preserve the path-data string under a canonical key
     // so codegen can lower vector/path/svg_path nodes to a native SvgPathWidget
-    // instead of silently dropping them (the dropped-vector invariant, #3275).
+    // instead of silently dropping them.
     // Multi-spelling so Pencil / Stitch / v0 / Claude / RN SVG exports all
     // survive (the figma lane rasterizes vectors to PNG, so this serves the
     // path-carrying sources). First non-empty wins; an attributes-nested
@@ -1236,7 +1233,7 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
         }
     }
 
-    // Shadow-driven sibling snap (extracted — pulp #41).
+    // Shadow-driven sibling snap.
     snap_absolute_siblings_under_shadow(node);
 
     // ── Connector-line spanning rule ────────────────────────────────────
@@ -1322,7 +1319,7 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
         }
     }
 
-    // Tail post-passes, extracted into named functions (pulp #41).
+    // Tail post-passes, extracted into named functions.
     detect_node_audio_widget(node, explicit_audio_widget);
     parse_shape_stroke_color(node, obj);
     extract_widget_shape_dims(node);
