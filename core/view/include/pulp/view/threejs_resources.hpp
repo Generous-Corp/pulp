@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 //
-// pulp/view/threejs_resources.hpp — iOS-D.3b Slice 2.
+// Bundled Three.js IIFE resource helpers.
 //
 // Returns the bundled `three.iife.js` source on platforms where it is
 // embedded inside the AUv3 `.appex` (currently iOS). The IIFE bundle
@@ -34,7 +34,7 @@ namespace pulp::view {
 //
 // The returned string is the full IIFE wrapper that, when run through
 // JSC `evaluate()`, registers `THREE` on `globalThis`. Callers should
-// then emit the log markers documented in the iOS-D.3b plan:
+// then emit the standard Three.js bundle diagnostics:
 //
 //     PULP_THREEJS: bundle loaded (N bytes)
 //     PULP_THREEJS: globalThis.THREE available

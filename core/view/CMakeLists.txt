@@ -111,7 +111,7 @@ set(PULP_JS_EMBEDDED_SOURCE ${CMAKE_CURRENT_BINARY_DIR}/web_compat_preludes_gen.
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 # Split the embedded preludes into an extern-linked TU so a
-# JS-prelude edit no longer recompiles the 9.7k-line widget_bridge.cpp.
+# JS-prelude edit no longer recompiles the large widget_bridge.cpp.
 #
 # * The DECLARATION header is generated here at *configure* time from the
 #   prelude file list, written only-if-changed. Its content depends only on
@@ -297,9 +297,8 @@ if(PULP_HAS_V8_ACTUAL)
     target_compile_definitions(pulp-view-script PRIVATE PULP_HAS_V8=1)
 
     # Provider identity, consumed by V8Engine::provider_kind()/provider_path()/
-    # expected_runtime_version(). These describe WHERE the V8 runtime came from
-    # (sealed v8-builder seal vs Homebrew libnode vs a self-built monolith),
-    # independent of the runtime version V8 reports at startup.
+    # expected_runtime_version(). These describe the sealed v8-builder artifact
+    # independently of the runtime version V8 reports at startup.
     target_compile_definitions(pulp-view-script PRIVATE
         PULP_V8_PROVIDER_KIND="${PULP_V8_PROVIDER_KIND}"
         PULP_V8_PROVIDER_PATH="${PULP_V8_PROVIDER_PATH}"
@@ -542,7 +541,7 @@ endif()
 # AU/VST3/CLAP plugins.
 # The ObjC runtime loads WebKit on dylib load if any WKWebView references exist,
 # which crashes Logic Pro's sandboxed AUHostingServiceXPC process.
-# ── Linux AT-SPI accessibility (workstream 04, L7) ──────────────────────────
+# ── Linux AT-SPI accessibility ─────────────────────────────────────────────
 #
 # Pulp publishes accessibility info to Linux screen readers (Orca) by
 # implementing the AT-SPI2 *wire protocol* directly over D-Bus
@@ -817,7 +816,7 @@ elseif(UNIX)
             message(STATUS "Pulp: X11 not found — Linux PluginViewHost limited to headless render")
         endif()
     endif()
-    # Linux AT-SPI (workstream 04, L7) needs no link deps: accessibility_linux.cpp
+    # Linux AT-SPI needs no link deps: accessibility_linux.cpp
     # speaks the AT-SPI2 wire protocol directly over pulp::platform::DBus
     # (libdbus-1 dlopen'd). No atk-bridge-2.0 / libatspi at build time.
 endif()

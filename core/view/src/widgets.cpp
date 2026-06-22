@@ -199,7 +199,6 @@ KnobModGeom knob_mod_geom(const Rect& b, size_t ring_count) {
 float knob_value_to_angle(float v) {
     return Knob::start_angle + std::clamp(v, 0.0f, 1.0f) * (Knob::end_angle - Knob::start_angle);
 }
-// Pointer position → normalized value along the 270° dial sweep.
 }  // namespace
 
 void Knob::on_mouse_enter() {
@@ -408,8 +407,7 @@ void Toggle::advance_animations(float dt) {
     hover_opacity_.advance(dt);
 }
 
-// Label moved to core/view/src/widgets/label.cpp
-// in the 2026-05 Phase 2 (R2-6) batch.
+// Label implementation lives in core/view/src/widgets/label.cpp.
 
 // ── Knob ─────────────────────────────────────────────────────────────────────
 
@@ -1712,10 +1710,9 @@ void GroupBox::on_mouse_event(const MouseEvent& event) {
     View::on_mouse_event(event);
 }
 
-// Visualizers (ImageView / Meter / XYPad / WaveformView /
-// SpectrumView / Panel / SpectrogramView / MultiMeter /
-// CorrelationMeter) moved to core/view/src/widgets/visualizers.cpp
-// in the 2026-05 Phase 2 (R2-6) batch.
+// Visualizer implementations (ImageView / Meter / XYPad / WaveformView /
+// SpectrumView / Panel / SpectrogramView / MultiMeter / CorrelationMeter)
+// live in core/view/src/widgets/visualizers.cpp.
 
 // ── WaveformRecorder ─────────────────────────────────────────────────────────
 
