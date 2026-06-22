@@ -1,6 +1,3 @@
-// test_widget_bridge_svg.cpp — extracted from test_widget_bridge.cpp
-// in the 2026-05 Phase 5 (P5-1 follow-up) refactor.
-//
 // SVG widget JS-bridge integration, three coherent compat surfaces:
 //
 //   1. pulp #965 — SvgPathWidget JS bridge integration.
@@ -870,4 +867,3 @@ TEST_CASE("WidgetBridge SvgPath compound multi-subpath parses every segment",
     REQUIRE(moves == 10);
     REQUIRE(lines == 10);
 }
-

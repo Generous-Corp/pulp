@@ -1,6 +1,3 @@
-// test_canvas_cg_paths.cpp — extracted from test_canvas.cpp in the
-// 2026-05 Phase 5 P5-2 follow-up refactor.
-//
 // CoreGraphicsCanvas — Canvas2D path + transform + gradient + blend +
 // save/restore tests. Apple-only TU (`#ifdef __APPLE__`). Covers:
 //
@@ -11,10 +8,9 @@
 //   * pulp #1322 set_blend_mode (BlendMode enum every value round-trip
 //     through to_cg_blend)
 //
-// Companion to test_canvas_cg_gradients.cpp (PR #2247) which covers the
-// other Apple-only CG paths (conic, radial, pattern, line-dash, gradient-
-// anchored text). The previously bundled CG tests stay in test_canvas.cpp
-// for the non-Apple paths.
+// Companion to test_canvas_cg_gradients.cpp, which covers the other
+// Apple-only CG paths (conic, radial, pattern, line-dash, gradient-
+// anchored text). Non-Apple paths stay in test_canvas.cpp.
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>

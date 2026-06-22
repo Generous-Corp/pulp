@@ -1,8 +1,4 @@
-// test_cli_shellout_pr.cpp — extracted from test_cli_shellout.cpp in
-// the 2026-05 Phase 5 P5-4 follow-up refactor.
-//
-// `pulp pr` shell-out tests — 11 TEST_CASEs spread across two contiguous
-// clusters in the parent TU. Covers:
+// `pulp pr` shell-out tests. Covers:
 //
 //   * pr.workflow validation (manual / github / shipyard delegation)
 //   * Shipyard binary pin handling

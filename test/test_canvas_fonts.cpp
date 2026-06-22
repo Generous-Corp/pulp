@@ -1,14 +1,9 @@
-// test_canvas_fonts.cpp — extracted from test_canvas.cpp in the 2026-05
-// Phase 5 (P5-2 first cut) refactor. Covers two font-related test
-// clusters that share Skia font-manager fixtures:
+// Font tests that share Skia font-manager fixtures:
 //
 //   - pulp #932 — bundled-font (Inter-Regular, JetBrainsMono-Regular)
 //     registration with SkFontMgr + bundled_blobs() table.
 //   - pulp #1150 — public `register_font(path)` API + the SkFontMgr
 //     fallback chain through match_bundled_typeface.
-//
-// Test set is byte-equivalent to the in-place section it replaces;
-// only the TU boundary moved.
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
