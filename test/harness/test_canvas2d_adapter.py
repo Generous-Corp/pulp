@@ -1,7 +1,7 @@
 """Tests for the canvas2d catalog harness adapter.
 
-Per CLAUDE.md "tests ship with fixes" — this is the same-PR test surface
-for the canvas2d adapter (#1392, week 1 cut, fourth surface).
+Per CLAUDE.md "tests ship with fixes" - this is the same-PR test surface
+for the canvas2d adapter.
 
 Run via::
 
@@ -82,19 +82,18 @@ class Canvas2dAdapterClassifyTest(unittest.TestCase):
         result = self.adapter.run(e)
         self.assertEqual(result.status, Status.PASS, msg=result.detail)
 
-    # ── Oracle-pinned partial (gotcha) ───────────────────────────────
+    # ── Oracle-supported entries ────────────────────────────────────
 
-    def test_oracle_partial_arc_is_DIVERGE(self):
-        """ctx.arc is pinned at partial in the oracle (gotcha #1: arc-as-path)."""
+    def test_oracle_supported_arc_is_PASS(self):
+        """ctx.arc is supported by the oracle via canvasPathArc."""
         e = CatalogEntry(
             surface="canvas2d",
             name="canvas2d/arc",
-            status="partial",
+            status="supported",
             maps_to="ctx.arc -> path-mode emit as cubic-bezier via canvasMoveTo + canvasCubicTo.",
         )
         result = self.adapter.run(e)
-        self.assertEqual(result.status, Status.DIVERGE, msg=result.detail)
-        self.assertIn("arc-as-path", result.detail)
+        self.assertEqual(result.status, Status.PASS, msg=result.detail)
         self.assertFalse(result.drifts, msg=result.detail)
 
     def test_oracle_supported_radial_is_PASS(self):
@@ -244,9 +243,48 @@ class Canvas2dBridgeAndShimIntrospectionTest(unittest.TestCase):
         """Negative: a clearly-fake bridge fn name must NOT appear."""
         self.assertNotIn("canvasTotallyFakeFn", self.adapter._bridge_fns)
 
+    def test_bridge_source_fallback_handles_legacy_and_split_registration_shapes(self):
+        """The source fallback covers old register_function and split helpers."""
+        adapter = object.__new__(Canvas2dAdapter)
+        adapter._bridge_manifest_text = ""
+        adapter._bridge_text = """
+            register_function("canvasLegacyRect", [](const BridgeArgs&) {});
+            register_bridge_function(api, "canvasSplitRect", [](const BridgeArgs&) {});
+        """
+
+        names = Canvas2dAdapter._extract_bridge_fns(adapter)
+
+        self.assertIn("canvasLegacyRect", names)
+        self.assertIn("canvasSplitRect", names)
+
+    def test_stale_manifest_entry_does_not_mask_missing_source_registration(self):
+        """Source registrations win when source is available."""
+        adapter = object.__new__(Canvas2dAdapter)
+        adapter._bridge_manifest_text = (
+            "canvasManifestOnly\tcanvas2d\tfunction\tcore/view/src/widget_bridge/canvas2d_api.cpp\n"
+        )
+        adapter._bridge_text = 'register_function("canvasRealSource", [](const BridgeArgs&) {});'
+
+        names = Canvas2dAdapter._extract_bridge_fns(adapter)
+
+        self.assertIn("canvasRealSource", names)
+        self.assertNotIn("canvasManifestOnly", names)
+
+    def test_manifest_fallback_is_used_when_source_registrations_are_unavailable(self):
+        """Manifest fallback keeps read-only analysis useful without source text."""
+        adapter = object.__new__(Canvas2dAdapter)
+        adapter._bridge_manifest_text = (
+            "canvasManifestOnly\tcanvas2d\tfunction\tcore/view/src/widget_bridge/canvas2d_api.cpp\n"
+        )
+        adapter._bridge_text = ""
+
+        names = Canvas2dAdapter._extract_bridge_fns(adapter)
+
+        self.assertIn("canvasManifestOnly", names)
+
 
 class VerifierEndToEndTest(unittest.TestCase):
-    """Full pipeline — compat.json -> all 63 canvas2d entries -> coverage report."""
+    """Full pipeline — compat.json -> all 66 canvas2d entries -> coverage report."""
 
     def test_collects_all_canvas2d_entries(self):
         compat = load_compat(REPO_ROOT)
@@ -267,7 +305,7 @@ class VerifierEndToEndTest(unittest.TestCase):
             self.assertIsInstance(r.status, Status)
 
     def test_no_canvas2d_entry_crashes(self):
-        """All 63 catalog entries must classify without exception."""
+        """All 66 catalog entries must classify without exception."""
         compat = load_compat(REPO_ROOT)
         entries = collect_entries(compat, "canvas2d")
         adapter = Canvas2dAdapter(REPO_ROOT)
@@ -276,22 +314,25 @@ class VerifierEndToEndTest(unittest.TestCase):
             self.assertIsInstance(r.status, Status, msg=e.name)
 
     def test_coverage_distribution_is_nonzero(self):
-        """Sanity: with the catalog as-is, we have at least some PASS and
-        some DIVERGE. Otherwise the harness is broken. (NOT-IMPL is no
-        longer required to be > 0 — pulp #1615 closed the last NOT-IMPL
-        canvas2d entries by repinning oracle expectedStatus for `filter`,
-        `direction`, and `getTransform`.)"""
+        """Sanity: current canvas2d is implemented, but many catalog test
+        references are stale enough to demote PASS to SUPPORTED-NO-EVIDENCE."""
         results = run_surface(REPO_ROOT, "canvas2d")
         statuses = [r.status for r in results]
         counts = StatusCounts.from_results(statuses)
         self.assertGreater(counts.pass_, 0, "expected at least 1 PASS")
-        self.assertGreater(counts.diverge, 0, "expected at least 1 DIVERGE")
+        self.assertGreater(
+            counts.supported_no_evidence,
+            0,
+            "expected at least 1 SUPPORTED-NO-EVIDENCE until catalog evidence refs are refreshed",
+        )
 
-    def test_known_gotcha_entries_classified_DIVERGE(self):
-        """The remaining oracle-pinned gotcha entries must always be DIVERGE.
-        Regression guard for the SKILL gotchas catalog. (createRadialGradient
-        was DIVERGE before pulp #1524 wired the two-circle form; it's now
-        PASS — see test_oracle_supported_radial_is_PASS.)"""
+    def test_known_gotcha_entries_supported_but_need_evidence_refresh(self):
+        """Former gotcha entries are now supported in the oracle/catalog.
+
+        The static adapter sees the bridge/shim implementation, then the
+        evidence pass demotes them because their catalog test references point
+        at stale tags.
+        """
         results = run_surface(REPO_ROOT, "canvas2d")
         by_name = {r.entry.name: r for r in results}
         for name in (
@@ -304,30 +345,15 @@ class VerifierEndToEndTest(unittest.TestCase):
                 self.assertIn(name, by_name)
                 self.assertEqual(
                     by_name[name].status,
-                    Status.DIVERGE,
-                    msg=f"{name} must be DIVERGE per oracle gotcha pin: {by_name[name].detail}",
+                    Status.SUPPORTED_NO_EVIDENCE,
+                    msg=f"{name} should be supported but missing valid evidence refs: {by_name[name].detail}",
                 )
 
-    def test_filter_and_direction_classified_DIVERGE(self):
+    def test_filter_and_direction_supported_but_need_evidence_refresh(self):
         """pulp #1520 wired both `filter` and `direction` (JS shim + bridge +
-        Skia / SkShaper). Oracle pins them at `expectedStatus: partial` —
-        full CSS <filter-function-list> and full bidi shaping are still
-        gaps. Adapter classifies oracle-`partial` as DIVERGE. (See
-        pulp #1615 — these used to be NOT-IMPL when the oracle was stale.)
-
-        issue-1434 batch 7: shadowColor / shadowBlur / shadowOffsetX /
-        shadowOffsetY are now PASS — see
-        `test_known_pass_entries_classified_PASS`.
-
-        pulp #1434 bridge-thin gap-fill: createConicGradient is now
-        DIVERGE (CG degraded), miterLimit / imageSmoothingEnabled /
-        imageSmoothingQuality are now PASS — see
-        `test_bridge_thin_gap_fill_entries_classified_PASS`.
-
-        Sub-agent #24 follow-up to #1480: createPattern is now
-        DIVERGE — Skia path renders real tiled fills via
-        SkShader::MakeImage; CG degrades. See
-        `test_bridge_thin_pattern_classified_DIVERGE`."""
+        Skia / SkShaper). The oracle/catalog now mark both supported; the
+        current failure mode is stale catalog evidence tags, not missing bridge
+        support."""
         results = run_surface(REPO_ROOT, "canvas2d")
         by_name = {r.entry.name: r for r in results}
         for name in (
@@ -338,8 +364,8 @@ class VerifierEndToEndTest(unittest.TestCase):
                 self.assertIn(name, by_name)
                 self.assertEqual(
                     by_name[name].status,
-                    Status.DIVERGE,
-                    msg=f"{name} must be DIVERGE per oracle partial pin: {by_name[name].detail}",
+                    Status.SUPPORTED_NO_EVIDENCE,
+                    msg=f"{name} should be supported but missing valid evidence refs: {by_name[name].detail}",
                 )
 
     def test_bridge_thin_gap_fill_entries_classified_PASS(self):
@@ -425,7 +451,7 @@ class VerifierEndToEndTest(unittest.TestCase):
         results = run_surface(REPO_ROOT, "canvas2d")
         payload = render_json({"canvas2d": results}, sha="test")
         self.assertIn("canvas2d", payload["surfaces"])
-        self.assertEqual(payload["surfaces"]["canvas2d"]["total"], 63)
+        self.assertEqual(payload["surfaces"]["canvas2d"]["total"], 66)
         self.assertEqual(
             payload["surfaces"]["canvas2d"]["total"],
             len(payload["surfaces"]["canvas2d"]["results"]),
@@ -453,7 +479,7 @@ class VerifierCliTest(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         payload = json.loads(result.stdout)
-        self.assertEqual(payload["surfaces"]["canvas2d"]["total"], 63)
+        self.assertEqual(payload["surfaces"]["canvas2d"]["total"], 66)
 
 
 if __name__ == "__main__":
