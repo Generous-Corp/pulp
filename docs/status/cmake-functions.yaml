@@ -28,7 +28,11 @@ functions:
       - ${target}_Core
       - ${target}_VST3
       - ${target}_AU
+      - ${target}_AUv3Framework
+      - ${target}_AUv3
+      - ${target}_AUv3Host
       - ${target}_CLAP
+      - ${target}_LV2
       - ${target}_AAX
       - ${target}_Standalone
       - pulp-install-${target}
